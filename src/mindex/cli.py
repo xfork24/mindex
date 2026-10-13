@@ -342,7 +342,7 @@ def experiment_phase(
     queries: Path | None = None,
     split: str = "test",
 ):
-    """smoke → visual → asr → align → analyze → enriched → evaluate/check。"""
+    """smoke → visual → preview → asr → align → analyze(-smoke) → enriched → evaluate/video-evaluate → check。"""
     from filelock import Timeout
 
     from .adapters import ModelError

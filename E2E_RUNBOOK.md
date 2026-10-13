@@ -80,9 +80,14 @@ uv run mindex e2e phase align --run data/e2e/trailer-20261013 \
 
 ## 3. Qwen 分析与完整索引
 
-停止 ASR，启动 `:4040` Qwen3.8:27b，模型应支持图片输入。先用三个片段核对 JSON 与画面依据，再批量分析。已完成分析检查点会复用。
+停止 ASR，启动 `:4040` Qwen3.8:27b，模型应支持图片输入。本地配置 `analyzer.backend: llama_cpp`，须与 WeMM/ASR 相同方式固定部署清单：先 `e2e probe --role analyzer`，再 `e2e pin --role analyzer`（提供 Qwen GGUF 与 mmproj 的实际 SHA256、量化类型），输出到 `data/deployments/analyzer.json`——`config.local.yaml` 已指向该文件，清单缺失时 `analyze` 阶段会明确拒绝执行。先用 `analyze-smoke` 三个片段核对 JSON 与画面依据，再批量分析。已完成分析检查点会复用。
 
 ```bash
+uv run mindex e2e probe --role analyzer --output data/e2e/qwen-probe.json
+uv run mindex e2e pin --role analyzer \
+  --weights-sha256 <Qwen GGUF SHA256> --mmproj-sha256 <mmproj SHA256> \
+  --quantization <实际量化> --output data/deployments/analyzer.json
+uv run mindex e2e phase analyze-smoke --run data/e2e/trailer-20261013
 uv run mindex e2e phase analyze --run data/e2e/trailer-20261013
 ```
 

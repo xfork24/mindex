@@ -4,6 +4,10 @@
 
 用户提供的地址：WeMM `192.168.1.86:4010`，ASR `:4020`，TTS `:4030`，Qwen `:4040/v1`。截至 2026-10-13，四个模型均已部署但未启动，按需单独启动；保存地址不会触发启动或模型调用。TransNetV2 可选服务使用 `:18203`。TTS 地址已作为预留配置保存，不参与视频切片或检索。实际接口仍须符合下文协议。
 
+## 当前部署路径：已有 llama.cpp / GGUF 服务
+
+用户的四个服务地址保持不变，当前 `config.local.yaml` 的嵌入、ASR 与分析（Qwen）三个后端均选择 `llama_cpp`，各自需要 `e2e probe` + `e2e pin` 生成的部署清单（`data/deployments/wemm.json`、`asr.json`、`analyzer.json`；清单缺失或哈希不符时对应阶段拒绝执行）。WeMM 已确认使用 Q8_0 GGUF、BF16 mmproj，需 `--embeddings --pooling last --video-fps 4`。详细启动、哈希固定、原生视频接口验证和单 GPU 切换流程见 [E2E_RUNBOOK.md](E2E_RUNBOOK.md)。下文的自定义 `mindex` 模型服务仍作为可切换的替代后端，按本文档各节部署。
+
 ## WeMM：文字与视频嵌入
 
 把本项目复制到 GPU 机器。在项目目录中执行：
@@ -118,7 +122,4 @@ export MINDEX_TRANSNET_DIR="$PWD/models/TransNetV2/inference"
 3. 用最长默认输入窗口测量 `nvidia-smi` 显存和服务延迟，记录模型加载时间与常驻推理时间。
 4. 执行小批真实视频的完整离线流程，在页面搜索并播放命中片段。
 5. 在同一固定测试集比较 INT8 与 NF4；量化切换必建新索引。没有真实结果前不宣布达到检索质量目标。
-# 已有 llama.cpp / GGUF 服务
-
-用户的四个服务地址保持不变，当前本地配置选择 `llama_cpp` 嵌入和 ASR 后端。WeMM 已确认使用 Q8_0 GGUF、BF16 mmproj，需 `--embeddings --pooling last --video-fps 4`。详细启动、哈希固定、原生视频接口验证和单 GPU 切换流程见 [E2E_RUNBOOK.md](E2E_RUNBOOK.md)。以下自定义服务仍作为可切换的替代后端。
 
