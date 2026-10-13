@@ -53,6 +53,7 @@ class MultimodalEmbedder(Protocol):
     def identity(self) -> dict: ...
     def text(self, texts: list[str], role: str = "document") -> list[list[float]]: ...
     def video(self, path: Path) -> list[float]: ...
+    def image(self, path: Path) -> list[float]: ...
 
 
 class VisualAnalyzer(Protocol):
@@ -148,6 +149,19 @@ class HTTPEmbedder:
                 timeout=self.profile.timeout,
                 headers=self.profile.headers(),
                 files={"file": (path.name, handle, "video/mp4")},
+            )
+        return self._vectors(payload, 1)[0]
+
+    def image(self, path: Path) -> list[float]:
+        if self._identity is None:
+            self.identity()
+        with path.open("rb") as handle:
+            payload = request(
+                "POST",
+                self.profile.base_url.rstrip("/") + "/embed/image",
+                timeout=self.profile.timeout,
+                headers=self.profile.headers(),
+                files={"file": (path.name, handle, "image/png")},
             )
         return self._vectors(payload, 1)[0]
 
@@ -324,9 +338,9 @@ def make_detector(config: Config) -> ShotDetector:
 
 def make_embedder(config: Config) -> MultimodalEmbedder:
     if config.embedding.backend == "llama_cpp":
-        from .llama_cpp import LlamaEmbedder
+        from .image_embedding import LlamaImageEmbedder
 
-        return LlamaEmbedder(config)
+        return LlamaImageEmbedder(config)
     return HTTPEmbedder(config)
 
 

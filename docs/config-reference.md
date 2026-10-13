@@ -82,6 +82,7 @@
 | `weights` | 五键非负 | video/description/style=1，dialogue/lexical=0.5 | 五路权重；某路设 0 即关闭该路 |
 | `lexical_exclude` | list | `[]` | BM25 文档中排除的字段（评测消融用：`description`/`style`/`dialogue`） |
 | `max_upload_mb` | int ≥1 | 100 | 视频查询上传上限 |
+| `max_image_upload_mb` | int 1–100 | 20 | 静态图片查询上传上限（MB） |
 | `max_query_seconds` | float >0 | 30 | 视频查询时长上限 |
 
 ## 常用组合

@@ -12,6 +12,7 @@ dependencies = [
   "httpx>=0.28,<1", "pydantic>=2.10,<3", "PyYAML>=6,<7",
   "chromadb>=1.0,<2", "numpy>=1.26,<3", "jieba>=0.42.1",
   "scenedetect[opencv]>=0.6.6,<0.7", "typer>=0.15,<1", "filelock>=3.16",
+  "Pillow>=11,<13",
 ]
 
 [project.optional-dependencies]

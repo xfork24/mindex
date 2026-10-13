@@ -213,20 +213,26 @@ def activate_index(ctx: typer.Context, index_id: str):
 
 
 @app.command()
-def serve(ctx: typer.Context, host: str = "127.0.0.1", port: int = 8000):
+def serve(ctx: typer.Context, host: str = "127.0.0.1", port: int = 8000, index_id: str | None = None):
     """启动页面和检索 API。"""
     import uvicorn
 
     from .api import create_app
 
-    uvicorn.run(create_app(ctx.obj), host=host, port=port)
+    uvicorn.run(create_app(ctx.obj, index_id=index_id), host=host, port=port)
 
 
 @app.command()
-def evaluate(ctx: typer.Context, queries: Path, split: str = "test", output: Path | None = None):
+def evaluate(
+    ctx: typer.Context,
+    queries: Path,
+    split: str = "test",
+    output: Path | None = None,
+    index_id: str | None = None,
+):
     from .evaluation import evaluate as run_evaluation
 
-    report = run_evaluation(ctx.obj, queries, split, output)
+    report = run_evaluation(ctx.obj, queries, split, output, index_id=index_id)
     print_json({k: {a: b for a, b in v.items() if a != "details"} for k, v in report["profiles"].items()})
 
 
@@ -341,6 +347,8 @@ def experiment_phase(
     python: Path | None = None,
     queries: Path | None = None,
     split: str = "test",
+    index_id: str | None = None,
+    activate: bool = False,
 ):
     """smoke → visual → preview → asr → align → analyze(-smoke) → enriched → evaluate/video-evaluate → check。"""
     from filelock import Timeout
@@ -350,7 +358,16 @@ def experiment_phase(
     from .media import MediaError
 
     try:
-        result = run_phase(ctx.obj, run, phase, python=python, queries=queries, split=split)
+        result = run_phase(
+            ctx.obj,
+            run,
+            phase,
+            python=python,
+            queries=queries,
+            split=split,
+            index_id=index_id,
+            activate=activate,
+        )
     except (ModelError, MediaError, ValueError, OSError, Timeout) as exc:
         print_json({"phase": phase, "ok": False, "error": str(exc), "error_type": type(exc).__name__})
         raise typer.Exit(1) from exc
@@ -365,6 +382,22 @@ def freeze_labels(
     from .e2e import freeze
 
     print_json({"frozen": freeze(run, queries, confirmed_by)})
+
+
+@e2e.command("review")
+def review_labels(ctx: typer.Context, queries: Path, run: Annotated[Path, typer.Option()]):
+    """生成可播放候选和导出标注的本地复核页面；不会自动确认。"""
+    from .label_review import render_review
+
+    print_json({"review_page": str(render_review(ctx.obj, run.resolve(), queries))})
+
+
+@e2e.command("status")
+def experiment_status(ctx: typer.Context, run: Annotated[Path, typer.Option()]):
+    """查看阶段状态和当前分析配置的完成数量，不请求模型。"""
+    from .e2e import progress
+
+    print_json(progress(ctx.obj, run))
 
 
 if __name__ == "__main__":

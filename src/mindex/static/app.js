@@ -2,6 +2,7 @@ const $ = id => document.getElementById(id);
 let mode = 'text';
 let busy = false;
 let previewUrl = null;
+let imagePreviewUrl = null;
 const routeNames = {video:'画面匹配', description:'动作与场景', style:'情绪与镜头', dialogue:'对白语义', lexical:'关键词'};
 
 function element(tag, text, className) {
@@ -28,14 +29,16 @@ async function api(url, options={}) {
 function switchMode(next) {
   if (busy) return;
   mode = next;
-  for (const name of ['text','video']) {
+  for (const name of ['text','image','video']) {
     $(`${name}-tab`).classList.toggle('active',name===mode);
     $(`${name}-tab`).setAttribute('aria-selected',String(name===mode));
     $(`${name}-input`).hidden=name!==mode;
   }
+  if(mode!=='video') $('query-preview').pause();
   notice();
 }
 $('text-tab').onclick=()=>switchMode('text');
+$('image-tab').onclick=()=>switchMode('image');
 $('video-tab').onclick=()=>switchMode('video');
 document.querySelectorAll('[data-query]').forEach(button=>button.onclick=()=>{
   $('query').value=button.dataset.query; $('query').focus();
@@ -48,6 +51,19 @@ $('video-file').onchange=()=>{
     $('file-label').textContent=`${file.name} · ${(file.size/1024/1024).toFixed(1)}MB`;
     previewUrl=URL.createObjectURL(file); $('query-preview').src=previewUrl;
   } else $('file-label').textContent='最长 30 秒 · 最大 100MB';
+};
+$('image-file').onchange=()=>{
+  if(imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
+  imagePreviewUrl=null;
+  const file=$('image-file').files[0];
+  $('image-preview').hidden=!file;
+  if(file){
+    $('image-file-label').textContent=`${file.name} · ${(file.size/1024/1024).toFixed(1)}MB`;
+    imagePreviewUrl=URL.createObjectURL(file);$('image-preview').src=imagePreviewUrl;
+  }else{
+    $('image-file-label').textContent='JPEG、PNG、WebP 静态图片 · 最大 20MB';
+    $('image-preview').removeAttribute('src');
+  }
 };
 
 function filters() {
@@ -107,9 +123,10 @@ function render(data) {
 }
 $('search-form').onsubmit=async event=>{
   event.preventDefault();if(busy)return;
-  const text=$('query').value.trim();const file=$('video-file').files[0];
+  const text=$('query').value.trim();const file=$(mode==='image'?'image-file':'video-file').files[0];
   if (mode==='text'&&!text) {notice('请先描述想找的画面。','error');return;}
   if (mode==='video'&&!file) {notice('请选择一段参考视频。','error');return;}
+  if (mode==='image'&&!file) {notice('请选择一张参考图片。','error');return;}
   busy=true;$('search-button').disabled=true;$('search-button').textContent='正在查找…';
   notice('正在检索素材，请稍候。','info');
   try {
@@ -118,7 +135,7 @@ $('search-form').onsubmit=async event=>{
     if(mode==='text') data=await api('/api/search/text',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,...common})});
     else {
       const form=new FormData();form.append('file',file);form.append('granularity',common.granularity);form.append('limit',common.limit);form.append('filters',JSON.stringify(common.filters));
-      data=await api('/api/search/video',{method:'POST',body:form});
+      data=await api(`/api/search/${mode}`,{method:'POST',body:form});
     }
     render(data);notice();
   } catch(error) {notice(error.message,'error');}

@@ -10,6 +10,7 @@
 - 实验目录：`data/e2e/trailer-20261013/`。`run.json` 是实际阶段状态，不能用本手册描述代替实际结果。
 - `source.json`、`segments.json`、`config.initial.json` 固定输入；每个阶段重新检查原素材、切片哈希、切分配置及整理状态。
 - 20 条中文草稿：`queries.draft.jsonl`，8 dev + 12 test。已根据画面填入暂定目标，全部需人工复核；动态动作不能只看缩略图，相关候选池需补全。对白查询等转写完成后补充，不以字幕推定真值。
+- 2026-10-13 用户提交 `~/Downloads/queries.reviewed.jsonl`，复核人 `xfork24`。已冻结为 `frozen-queries.reviewed.jsonl`，SHA256 `e3bf72a3d3199f99682b5fb5532c1e4c89217c1843bbe8a12cbd2e042ea1fb3f`。后续文字评测使用此文件，不再使用草稿。
 - 12 条视频查询和 5 条无答案诊断分别在 `video-queries.draft.jsonl`、`no-answer.draft.jsonl`。查询视频从不进入素材库。
 
 现有 `config.local.yaml` 已选 `llama_cpp`。部署清单在 `data/deployments/`。可随时改 backend 回到 `mindex` 自定义服务，原有 `/embed/text`、`/embed/video`、`/transcribe` 协议继续支持。
@@ -53,7 +54,7 @@ uv run mindex serve
 
 llama.cpp API 不独立证明文件哈希或启动池化参数：哈希和启动命令由部署者确认，客户端在每次请求前后核对 build、模型元数据、模板、模态等可观察指纹。该信任边界写入空间身份。更换 GGUF、mmproj、运行构建、模板、适配器代码或预处理会要求新的能力门槛和索引；不会混入旧向量。
 
-`visual` 与 `enriched` 建立独立不可变版本，阶段发布后记录 index_id。重跑复用已完成向量；失败可重跑同一阶段。原始 trailer 默认不需要重新分镜。
+`visual` 与 `enriched` 建立独立不可变版本并记录 index_id，默认不改变活动库。明确发布时加 `--activate`。重跑复用已完成向量；失败可重跑同一阶段。原始 trailer 默认不需要重新分镜。新增电影的活动索引已存在时，使用 `mindex serve --port 8001 --index-id TEST_INDEX_ID` 验证测试版本。
 
 ## 2. ASR：原始文本与 CPU 对齐
 
@@ -101,11 +102,15 @@ uv run mindex indexes list
 uv run mindex indexes activate VISUAL_INDEX_ID
 ```
 
-实验 enriched 仍仅索引 moment，保证各路相同候选集；镜头和场景描述仍被分析和保存。库的正式发布可使用原有 `index` 命令选 shot/moment/scene。
+实验 enriched 仍仅索引 moment，保证各路相同候选集；镜头和场景描述仍被分析和保存。Qwen 支持 `e2e probe/pin --role analyzer` 固定 GGUF/mmproj 与运行指纹。本次 kvmem 部署报告 `build_info=b0-unknown` 且未暴露量化，另存用户给出的 `kvmem-v0.16.0-rc3` 启动信息，量化明确记为 `not_exposed`。库的正式发布可使用原有 `index` 命令选 shot/moment/scene。
 
 ## 4. 冻结人工标注与评估
 
 在每条标注复核并补全后，把 `label_status` 改为 `confirmed`，使用真实确认人。确认不会由程序自动完成。
+
+当前已确认的中文集保留全部原查询文字，修订两条查询的相关目标。因此已对保存的真实画面召回排名做回顾计分，结果见 `evaluation-baseline-replayed-reviewed.json`：dev 8 条 Hit@1/5 均为 100%；test 12 条 Hit@1 66.7%、Hit@5 91.7%、MRR@10 0.778、nDCG@10 0.813。该报告明确记录历史推理和新标注的哈希，不代表重新调用模型，也不能替代完整语义索引对比。
+
+也可运行 `mindex e2e review QUERY_FILE --run RUN_DIR` 生成 `label-review.html`，逐条观看、选择相关候选并导出 JSONL，再冻结导出的文件。评测/preview/check 可用 `--index-id` 指定版本；默认使用本实验的 enriched/visual 版本。
 
 ```bash
 uv run mindex e2e freeze data/e2e/trailer-20261013/queries.draft.jsonl \
@@ -121,7 +126,9 @@ uv run mindex e2e phase video-evaluate --run data/e2e/trailer-20261013 \
 
 画面/完整索引分别保存结果，不覆盖对方：报告文件名包含 index_id、split 和阶段。报告包括 Hit@1/5、MRR@10、按相关组计的 nDCG@10、逐查询排名/分路贡献、模型空间、查询 SHA256、索引与整理状态指纹、首请求和后续 P50/P95。无答案诊断记录返回结果，不混入相关性分数，也不要求系统返回空集。
 
-比较 video_only、description_only、fusion、no_dialogue、no_style。去对白和去风格也从 BM25 文档中移除该字段；避免信息通过词法分路泄漏。没有对应向量分路的 profile 会标记 unavailable。视频查询只跑视频分路，避免重复报出相同的“融合效果”。
+比较 video_only、video_asr、description_only、fusion、no_dialogue、no_style。video_asr 同时排除描述与风格的向量和 BM25 文本，用于区分 ASR 与 Qwen 的收益；去对白和去风格也从 BM25 文档中移除该字段。视频/图片查询只跑视频分路，避免重复报出相同的“融合效果”。收益归因、逐查询退步及规模处理成本见 [QWEN_BENEFIT_EVALUATION.md](QWEN_BENEFIT_EVALUATION.md)。
+
+图片工程查询集保存在 `image-queries.draft.jsonl`，12 张来自原片候选的派生帧，覆盖 JPEG/PNG/WebP。切回 WeMM 后先运行 `e2e phase preview --queries data/e2e/trailer-20261013/image-queries.draft.jsonl --run data/e2e/trailer-20261013 --index-id VISUAL_INDEX_ID`。独立图片相关性尚未确认，不自动生成质量分数。图片人工集可使用 `image` 路径、媒体 `sha256` 和 `split: image`，经 freeze 后运行 `e2e phase evaluate --split image`。
 
 只用 dev 调参。trailer 结果属于冒烟，不能证明 Hit@5 ≥85%。正式验收需要多个真实来源、长镜头、无字幕对白、困难负例，以及 20 dev +40 test 人工标注。
 

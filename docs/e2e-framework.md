@@ -34,18 +34,30 @@
 | phase | 需要的服务 | 作用 | 关键产物 |
 |---|---|---|---|
 | `smoke` | WeMM | 六片段能力门槛：维度/范数/有限性/内容敏感性/重复稳定性/身份稳定性 | `smoke.json` + `data/capabilities/<space_id>.json`（llama_cpp 建库前置） |
-| `visual` | WeMM | moment 画面索引并发布（`index --mode visual` 等价） | `visual-latest.json` 记录 index_id |
+| `visual` | WeMM | moment 画面索引；仅加 `--activate` 才发布 | `visual-latest.json` 记录 index_id |
 | `preview` | WeMM | 跑草稿查询只出排名供人工检查，**不计质量分数** | `preview-<index>-<hash>.json` |
 | `asr` | ASR(:4020) | 原始转写（30 秒块），llama_cpp 路径状态 `pending_alignment` | `transcripts/.../raw/` |
 | `align` | 无（CPU） | 独立 venv 强制对齐；`--python .venv-align/bin/python` | `aligned-N.json`，状态 `complete` |
 | `analyze-smoke` | Qwen(:4040) | 只分析 3 个抽样片段，核对 JSON 与画面依据 | 样本分析结果 |
 | `analyze` | Qwen | 全量分析 + 场景组织 | annotations、scene_plans |
-| `enriched` | WeMM | 完整索引并发布（仍仅 moment，保证与 visual 同候选集） | 新 index_id |
+| `enriched` | WeMM | 完整索引；仅加 `--activate` 才发布（仍仅 moment） | 新 index_id |
 | `evaluate` | WeMM | 冻结文字标注评测（`--queries frozen-queries.jsonl --split dev|test`） | `evaluation-<index>-<split>.json` |
 | `video-evaluate` | WeMM | 冻结视频查询评测 | 报告含 index_id/split/phase 文件名 |
-| `check` | 无 | 复查活动索引一致性 | 问题列表 |
+| `check` | 无 | 复查指定/实验索引一致性 | 问题列表 |
+
+默认实验构建不改变素材库活动索引。`preview/evaluate/video-evaluate/check` 优先使用 `--index-id`；未指定时使用本实验最近完成的 enriched 或 visual 索引。这样新增电影并发布新索引后，trailer 对比仍使用冻结的 61 个候选。
+
+可用 `mindex serve --port 8001 --index-id INDEX_ID` 打开独立版本进行浏览器验证，媒体、上下文与查询均绑定同一版本，主库的活动指针保持独立。
 
 ## freeze：人工标注冻结
+
+先生成可播放全部候选的本地复核页：
+
+```bash
+uv run mindex e2e review data/e2e/trailer-20261013/queries.draft.jsonl --run data/e2e/trailer-20261013
+```
+
+复核页只在用户逐条勾选确认并填写确认人后导出标注；程序不会自动确认。
 
 ```bash
 uv run mindex e2e freeze data/e2e/trailer-20261013/queries.draft.jsonl \
@@ -58,7 +70,7 @@ uv run mindex e2e freeze data/e2e/trailer-20261013/queries.draft.jsonl \
 
 ## 评测 profile 与指标
 
-同一冻结候选集上比较五个 profile：`video_only`、`description_only`、`fusion`、`no_dialogue`、`no_style`（后两者同时从 BM25 移除对应字段，防词法泄漏）；没有对应向量分路的 profile 标记 unavailable。指标：
+同一冻结候选集上比较六个 profile：`video_only`、`video_asr`、`description_only`、`fusion`、`no_dialogue`、`no_style`。`video_asr` 同时排除描述/风格的向量和 BM25 字段，后两个消融同时从 BM25 移除对应字段。视频与图片查询只进 `video_only`；图片集用 `image` 路径、媒体 `sha256` 和 `split: image`，冻结后可运行 `phase evaluate --split image`。报告保留候选时间布局与整理状态哈希。指标：
 
 - **Hit@1 / Hit@5**：前 1/5 条是否有相关结果。
 - **MRR@10**：首个相关结果排名倒数。
@@ -70,8 +82,8 @@ uv run mindex e2e freeze data/e2e/trailer-20261013/queries.draft.jsonl \
 
 ## 当前实验进度（截至 2026-10-13）
 
-`run.json`：smoke / visual / preview / asr / align / check 已 complete；**analyze 起仍 pending**（analyzer 部署清单 `data/deployments/analyzer.json` 尚需 `e2e probe --role analyzer` + `pin --role analyzer` 生成，步骤见 [E2E_RUNBOOK.md](../E2E_RUNBOOK.md) 第 3 节）。下一步命令以 runbook 为准。
+`run.json` 是实时状态。已完成真实 WeMM、ASR/CPU 对齐及 Qwen 三片段验证；Qwen 批次分析已启动。新增完整电影已有独立 visual 索引（2,336 个 moment），trailer 实验继续使用独立版本。步骤见 [E2E_RUNBOOK.md](../E2E_RUNBOOK.md)。
 
 ## 工程测试 vs 真实验收
 
-`uv run pytest -q`（35 个测试，真实 FFmpeg/SQLite/Chroma/HTTP，确定性模型 fixture）验证**工程链路**；不证明真实模型中文检索质量、INT8 兼容性或显存峰值。真实验收走本框架并记录到 [VERIFICATION.md](../VERIFICATION.md)。真实模型结果、人工标注、浏览器证据、GPU 数据缺一时，保持待验收状态。
+`uv run pytest -q`（真实 FFmpeg/SQLite/Chroma/HTTP，确定性模型 fixture）验证**工程链路**；不证明真实模型中文检索质量、INT8 兼容性或显存峰值。真实验收走本框架并记录到 [VERIFICATION.md](../VERIFICATION.md)。真实模型结果、人工标注、浏览器证据、GPU 数据缺一时，保持待验收状态。

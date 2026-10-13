@@ -82,9 +82,11 @@ uv run mindex search '雨夜，一个人强忍眼泪，镜头慢慢推近' --gra
 
 索引、素材、处理记录与模型配置；`--health` 额外探测嵌入服务并校验空间身份是否匹配活动索引。
 
-### `mindex serve [--host 127.0.0.1] [--port 8000]`
+### `mindex serve [--host 127.0.0.1] [--port 8000] [--index-id INDEX_ID]`
 
 启动页面与检索 API。`/` 检索页、`/admin` 素材后台、`/docs` OpenAPI。
+
+`--index-id` 将查询、片段媒体和上下文绑定到指定 ready 索引，用于独立版本验证；不会修改活动索引。
 
 ## 索引版本管理
 
@@ -102,7 +104,7 @@ uv run mindex search '雨夜，一个人强忍眼泪，镜头慢慢推近' --gra
 
 ## 评测与联调
 
-### `mindex evaluate QUERIES [--split test] [--split dev|video-test] [--output FILE]`
+### `mindex evaluate QUERIES [--split test] [--split dev|video-test] [--output FILE] [--index-id INDEX_ID]`
 
 评测已冻结标注的查询集。未确认标注（`label_status != confirmed`）会被拒绝。split 对应查询文件中的 `split` 字段：`dev` 调参、`test` 报告、`video-test` 视频查询。
 
@@ -127,8 +129,10 @@ uv run mindex model-check data/clips/ID/moment/SEG.mp4 --text '画面描述' --o
 | `mindex e2e init --source ID --run DIR` | 冻结已有分镜、生成标注草稿与 12 个查询视频；不调用模型 |
 | `mindex e2e probe --output FILE [--role embedding\|asr\|analyzer]` | 只探测已启动服务，保存兼容性报告；无推理 |
 | `mindex e2e pin --weights-sha256 H --mmproj-sha256 H --quantization Q --output FILE [--role ...]` | 固定文件哈希与运行身份，生成部署清单；已存在则拒绝覆盖 |
-| `mindex e2e phase PHASE --run DIR [--python PATH] [--queries FILE] [--split test]` | 执行一个阶段；阶段见下 |
+| `mindex e2e phase PHASE --run DIR [--python PATH] [--queries FILE] [--split test] [--index-id ID] [--activate]` | 执行一个阶段；构建默认不发布，查询默认固定实验版本 |
 | `mindex e2e freeze QUERIES --run DIR --confirmed-by '姓名'` | 人工确认后冻结标注并记录 SHA256 |
+| `mindex e2e review QUERIES --run DIR` | 生成可播放全部候选、选择目标并导出确认标注的本地页面 |
+| `mindex e2e status --run DIR` | 查看阶段状态、当前配置分析完成数量和活动索引，无模型请求 |
 
 phase 取值：`smoke → visual → preview → asr → align → analyze(-smoke) → enriched → evaluate → video-evaluate → check`。其中 `align` 需 `--python`，`preview`/`evaluate`/`video-evaluate` 需 `--queries`。
 

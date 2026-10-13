@@ -110,6 +110,16 @@ class FixtureEmbedder:
         vector[{0: 0, 1: 2, 2: 1}[int(np.argmax(color))]] = 1
         return vector.tolist()
 
+    def image(self, path: Path):
+        from PIL import Image
+
+        self.calls += 1
+        with Image.open(path) as image:
+            color = np.asarray(image.convert("RGB")).mean(axis=(0, 1))
+        vector = np.zeros(8)
+        vector[{0: 0, 1: 2, 2: 1}[int(np.argmax(color))]] = 1
+        return vector.tolist()
+
 
 class FixtureAnalyzer:
     def __init__(self, embedder):

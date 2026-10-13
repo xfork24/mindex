@@ -12,6 +12,7 @@ import jieba
 from .adapters import ModelError, MultimodalEmbedder, make_embedder
 from .config import Config
 from .curation import SOURCE_SQL, Library, source_public
+from .images import image_png
 from .indexing import VectorIndex
 from .media import cut, probe, windows
 from .storage import Store
@@ -100,13 +101,16 @@ def public_segment(segment: dict) -> dict:
 
 
 class SearchEngine:
-    def __init__(self, config: Config, embedder: MultimodalEmbedder | None = None):
+    def __init__(
+        self, config: Config, embedder: MultimodalEmbedder | None = None, *, index_id: str | None = None
+    ):
         self.config = config
         self.store = Store(config.data_dir)
         self.embedder = embedder or make_embedder(config)
+        self.index_id = index_id
 
     def _context(self, granularity: str, filters: Filters):
-        active = self.store.active_index()
+        active = self.store.index_version(self.index_id) if self.index_id else self.store.active_index()
         if active is None:
             raise ValueError("尚未发布索引，请先完成离线处理并执行 index --activate")
         if active["status"] != "ready":
@@ -225,10 +229,29 @@ class SearchEngine:
                 match["route"] = "video"
         return self._result(active, snapshots, {}, limit, started, ranked=fused)
 
+    def image(self, path: Path, granularity="moment", limit=20, filters: Filters | None = None) -> dict:
+        started = perf_counter()
+        png = image_png(path, self.config.video.max_pixels)
+        active, snapshots, vectors = self._context(granularity, filters or Filters())
+        if not snapshots:
+            return self._result(active, snapshots, {}, limit, started)
+        if not hasattr(self.embedder, "image"):
+            raise ModelError("当前嵌入适配器尚不支持图片输入，请切换支持图片的模型服务")
+        with tempfile.TemporaryDirectory(prefix="query-image-", dir=self.store.root) as directory:
+            normalized = Path(directory) / "query.png"
+            normalized.write_bytes(png)
+            embedding = self.embedder.image(normalized)
+        hits = vectors.query(embedding, "video", [s["id"] for s in snapshots], self.config.search.candidates)
+        # Image queries compare only with video vectors, independent of text-fusion weights.
+        ranked = fuse({"video": hits}, {"video": 1}, self.config.search.rrf_k)
+        return self._result(active, snapshots, {}, limit, started, ranked=ranked)
 
-def status(config: Config, *, health=False, embedder: MultimodalEmbedder | None = None) -> dict:
+
+def status(
+    config: Config, *, health=False, embedder: MultimodalEmbedder | None = None, index_id: str | None = None
+) -> dict:
     store = Store(config.data_dir)
-    active = store.active_index()
+    active = store.index_version(index_id) if index_id else store.active_index()
     result = {
         "active_index": active,
         "sources": [

@@ -55,7 +55,9 @@ def metrics(results: list[dict], targets: list[dict]) -> dict:
     }
 
 
-def evaluate(config: Config, path: Path, split: str, output: Path | None = None) -> dict:
+def evaluate(
+    config: Config, path: Path, split: str, output: Path | None = None, *, index_id: str | None = None
+) -> dict:
     entries = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
     entries = [entry for entry in entries if entry.get("split") == split]
     if any(entry.get("label_status", "confirmed") != "confirmed" for entry in entries):
@@ -64,19 +66,25 @@ def evaluate(config: Config, path: Path, split: str, output: Path | None = None)
         raise ValueError("所选分组必须包含已标注的查询，relevant 不能为空")
     profiles = {
         "video_only": {"video": 1},
+        "video_asr": {key: config.search.weights[key] for key in ("video", "dialogue", "lexical")},
         "description_only": {"description": 1},
         "fusion": config.search.weights,
         "no_dialogue": {**config.search.weights, "dialogue": 0},
         "no_style": {**config.search.weights, "style": 0},
     }
     store = Store(config.data_dir)
-    active = store.active_index()
+    active = store.index_version(index_id) if index_id else store.active_index()
     if not active:
         raise ValueError("请先发布待评测索引")
+    snapshots = store.snapshots(active["id"])
+    candidate_layout = sorted(
+        [{key: row[key] for key in ("id", "source_id", "kind", "start", "end")} for row in snapshots],
+        key=lambda row: row["id"],
+    )
     available = {
         "video",
         "lexical",
-        *(view for row in store.snapshots(active["id"]) for view in row["views"]),
+        *(view for row in snapshots for view in row["views"]),
     }
     curation = {
         table: store.rows(f"SELECT * FROM {table} ORDER BY 1")
@@ -90,9 +98,13 @@ def evaluate(config: Config, path: Path, split: str, output: Path | None = None)
             continue
         current = config.model_copy(deep=True)
         current.search.weights = {key: weights.get(key, 0) for key in config.search.weights}
-        if name in {"no_dialogue", "no_style"}:
-            current.search.lexical_exclude = [*config.search.lexical_exclude, name.removeprefix("no_")]
-        engine = SearchEngine(current)
+        excluded = {
+            "video_asr": ["description", "style"],
+            "no_dialogue": ["dialogue"],
+            "no_style": ["style"],
+        }.get(name, [])
+        current.search.lexical_exclude = list(dict.fromkeys([*config.search.lexical_exclude, *excluded]))
+        engine = SearchEngine(current, index_id=active["id"])
         rows = []
         for entry in entries:
             if "text" in entry:
@@ -103,14 +115,18 @@ def evaluate(config: Config, path: Path, split: str, output: Path | None = None)
                 if name != "video_only":
                     continue
                 result = engine.video(path.parent / entry["video"], limit=20)
+            elif "image" in entry:
+                if name != "video_only":
+                    continue
+                result = engine.image(path.parent / entry["image"], limit=20)
             else:
-                raise ValueError("每条评测查询必须有 text 或 video")
+                raise ValueError("每条评测查询必须有 text、video 或 image")
             rows.append(
                 {
                     "id": entry["id"],
                     **(metrics(result["results"], entry["relevant"]) if not entry.get("no_answer") else {}),
                     "diagnostic_no_answer": bool(entry.get("no_answer")),
-                    "modality": "text" if "text" in entry else "video",
+                    "modality": "text" if "text" in entry else "image" if "image" in entry else "video",
                     "index_id": result["index_id"],
                     "eligible_segments": result["eligible_segments"],
                     "elapsed_ms": result["elapsed_ms"],
@@ -119,6 +135,8 @@ def evaluate(config: Config, path: Path, split: str, output: Path | None = None)
             )
         scored = [r for r in rows if not r["diagnostic_no_answer"]]
         reports[name] = {
+            "weights": current.search.weights,
+            "lexical_exclude": current.search.lexical_exclude,
             "queries": len(rows),
             "scored_queries": len(scored),
             **{
@@ -136,7 +154,7 @@ def evaluate(config: Config, path: Path, split: str, output: Path | None = None)
             },
             "details": rows,
         }
-        if store.active_index()["id"] != active["id"] or candidate_id != fingerprint(
+        if (not index_id and store.active_index()["id"] != active["id"]) or candidate_id != fingerprint(
             [active["id"], {table: store.rows(f"SELECT * FROM {table} ORDER BY 1") for table in curation}]
         ):
             raise ValueError("评测过程中索引或整理状态发生变化，拒绝比较不同候选集")
@@ -147,6 +165,9 @@ def evaluate(config: Config, path: Path, split: str, output: Path | None = None)
         "space": active["spec"]["space"],
         "index_id": active["id"],
         "candidate_id": candidate_id,
+        "candidate_layout": candidate_layout,
+        "candidate_layout_hash": fingerprint(candidate_layout),
+        "curation_hash": fingerprint(curation),
         "queries_sha256": content_hash(path),
         "config": config.model_dump(mode="json"),
         "quality_target": {"hit_at_5": 0.85, "minimum_test_queries": 40},

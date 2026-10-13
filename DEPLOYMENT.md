@@ -104,7 +104,7 @@ export MINDEX_TRANSNET_DIR="$PWD/models/TransNetV2/inference"
 }
 ```
 
-`POST /embed/text` 接受 `{"texts":["查询文字"],"role":"query"}`；文档用 `role: document`。`POST /embed/video` 使用 multipart `file`，直接上传文件，不传本机绝对路径。
+`POST /embed/text` 接受 `{"texts":["查询文字"],"role":"query"}`；文档用 `role: document`。`POST /embed/video` 与 `POST /embed/image` 使用 multipart `file`，直接上传文件，不传本机绝对路径。图片使用 WeMM 原生图片输入，输出与文字/视频同一空间的向量。
 
 响应为 `{"vectors":[[...]],"space_id":"..."}`；`space_id` 必须等于 `mindex.config.fingerprint(space)`。客户端校验数量、维度、有限值、非零范数以及服务身份，不接受仅返回任意同维向量的服务。同一个服务身份必须采用固定的模板与预处理。
 

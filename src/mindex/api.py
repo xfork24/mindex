@@ -38,10 +38,14 @@ async def save_upload(upload: UploadFile, path: Path, max_bytes: int):
         await upload.close()
 
 
-def create_app(config: Config | None = None, embedder: MultimodalEmbedder | None = None) -> FastAPI:
+def create_app(
+    config: Config | None = None, embedder: MultimodalEmbedder | None = None, *, index_id: str | None = None
+) -> FastAPI:
     config = config or load_config()
     store = Store(config.data_dir)
     app = FastAPI(title="Mindex 视频素材检索", version="0.1.0")
+    if index_id and store.index_version(index_id)["status"] != "ready":
+        raise ValueError("固定预览只允许就绪索引")
     app.include_router(admin_router(store))
 
     @app.exception_handler(EntityNotFound)
@@ -63,11 +67,29 @@ def create_app(config: Config | None = None, embedder: MultimodalEmbedder | None
 
     @app.get("/api/status")
     def get_status(health: bool = False):
-        return status(config, health=health, embedder=embedder)
+        return status(config, health=health, embedder=embedder, index_id=index_id)
 
     @app.post("/api/search/text")
     def text_search(query: TextSearch):
-        return SearchEngine(config, embedder).text(query)
+        return SearchEngine(config, embedder, index_id=index_id).text(query)
+
+    @app.post("/api/search/image")
+    async def image_search(
+        file: Annotated[UploadFile, File()],
+        granularity: Annotated[Granularity, Form()] = "moment",
+        limit: Annotated[int, Form(ge=1, le=50)] = 20,
+        filters: Annotated[str, Form()] = "{}",
+    ):
+        try:
+            parsed = Filters.model_validate_json(filters)
+        except (ValidationError, json.JSONDecodeError) as exc:
+            raise HTTPException(422, "filters 必须是有效的筛选 JSON") from exc
+        with tempfile.TemporaryDirectory(prefix="query-image-", dir=config.data_dir) as directory:
+            path = Path(directory) / "upload.media"
+            await save_upload(file, path, config.search.max_image_upload_mb * 1024 * 1024)
+            return await run_in_threadpool(
+                SearchEngine(config, embedder, index_id=index_id).image, path, granularity, limit, parsed
+            )
 
     @app.post("/api/search/video")
     async def video_search(
@@ -84,11 +106,11 @@ def create_app(config: Config | None = None, embedder: MultimodalEmbedder | None
             path = Path(directory) / "upload.media"
             await save_upload(file, path, config.search.max_upload_mb * 1024 * 1024)
             return await run_in_threadpool(
-                SearchEngine(config, embedder).video, path, granularity, limit, parsed
+                SearchEngine(config, embedder, index_id=index_id).video, path, granularity, limit, parsed
             )
 
     def get_snapshot(segment_id: str):
-        active = store.active_index()
+        active = store.index_version(index_id) if index_id else store.active_index()
         if active is None:
             raise HTTPException(404, "没有已发布索引")
         row = store.one(
@@ -135,7 +157,7 @@ def create_app(config: Config | None = None, embedder: MultimodalEmbedder | None
 
     @app.api_route("/api/sources/{source_id}/media", methods=["GET", "HEAD"])
     def source_media(source_id: str):
-        active = store.active_index()
+        active = store.index_version(index_id) if index_id else store.active_index()
         snapshots = store.snapshots(active["id"]) if active else []
         selected = next((s for s in snapshots if s["source_id"] == source_id), None)
         if selected is None:

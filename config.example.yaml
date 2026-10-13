@@ -60,4 +60,5 @@ search:
     dialogue: 0.5
     lexical: 0.5
   max_upload_mb: 100
+  max_image_upload_mb: 20
   max_query_seconds: 30

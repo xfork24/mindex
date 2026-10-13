@@ -37,6 +37,7 @@ Mindex 是中文视频片段检索系统：文字找视频优先，支持视频�
 | `admin.py` + `curation.py` | 素材后台 API 与整理数据（显示名/备注/收藏/隐藏），独立于索引 |
 | `adapters.py` | 模型适配层：五个 Protocol 与 `make_*` 工厂（见下） |
 | `llama_cpp.py` | 对用户已有 llama-server 的原生协议适配（`/v1/embeddings` 的 `input_video`、`input_audio`）；部署清单核验 |
+| `images.py` / `image_embedding.py` | 静态图片解码、方向/透明度/像素处理；扩展原生图片嵌入，保持既有文字/视频空间指纹 |
 | `model_server.py` | GPU 侧自定义服务（`mindex-model-server`，角色独立 venv）：WeMMEngine / ASREngine / TransNetEngine |
 | `e2e.py` | `mindex e2e` 分阶段真实验证框架（init/probe/pin/phase/freeze） |
 | `evaluation.py` + `benchmark.py` | 评测（Hit@1/5、MRR@10、nDCG@10）与 `model-check` 单模型联调 |

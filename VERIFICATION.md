@@ -1,6 +1,42 @@
 # 实现验证记录
 
-验证日期：2026-10-13。客户端环境为 macOS / Apple Silicon、Python 3.11.16、uv、FFmpeg/ffprobe。模型服务计划运行在用户的 16GB CUDA GPU 上，未在客户端加载大模型。
+验证日期：2026-10-13。客户端环境为 macOS / Apple Silicon、Python 3.11.16、uv、FFmpeg/ffprobe。GPU 模型运行在用户的远程 16GB CUDA 主机；强制对齐使用本机独立 CPU 环境。
+
+## 真实模型端到端增量验证
+
+本节更新此前“GPU 待验收”的历史状态；实时阶段仍以 `data/e2e/trailer-20261013/run.json` 为准。
+
+| 阶段 | 已观测结果 | 证据 |
+|---|---|---|
+| WeMM 协议 | 首次健康 ok 但嵌入返回 501；加入 `--embeddings --pooling last --video-fps 4` 后成功 | `data/e2e/wemm-text-probe.json`、部署清单 |
+| WeMM 能力 | 六个真实片段均为 4096 维有效单位向量；内容敏感、重复稳定、空间稳定 | `smoke.json`，13.87 秒 |
+| trailer 画面索引 | 61 个 moment /61 个视频向量，索引 `948e6b40442b0230cbc529f4`，检查通过 | `visual-latest.json`，100.14 秒 |
+| 断点/重跑 | 同规格重跑索引不重新推理，版本不变 | `resume-check.json` |
+| 中文相关性 | 用户确认 20 条中文标注（8 dev/12 test）；冻结文件与确认人已保存 | `frozen-queries.reviewed.jsonl` 及对应 manifest |
+| 画面基线质量 | test：Hit@1 66.7%、Hit@5 91.7%、MRR@10 0.778、nDCG@10 0.813；dev：Hit@1/5 100% | `evaluation-baseline-replayed-reviewed.json`；按确认目标回顾计分，单 trailer 冒烟 |
+| 视频预览 | 12 条 self/crop/crosscut/codec 查询均完成，首位均落在派生目标区间 | `video-engineering-check.json`；属于已知时间映射的工程自检 |
+| ASR | Qwen3-ASR Q8_0 处理 4 个真实音频块，原始文本与响应均保留 | `asr-latest.json`，7.50 秒 |
+| CPU 对齐 | 固定 ForcedAligner commit，独立 CPU 环境完成；有效时间范围映射回原片 | `asr-alignment-check.json`，37.28 秒；准确度待人工听辨 |
+| Qwen 视觉 | kvmem 部署的 3 个真实片段通过图片输入与结构化描述检查 | `analyze-smoke-latest.json`，234.87 秒；批量分析运行中 |
+| 新增电影索引 | 2,336 个 moment/向量，4096 维、有限、单位范数、元数据与媒体一致 | `data/e2e/whole-film-index-check.json` |
+
+WeMM 与 ASR 的 GGUF/mmproj SHA256 由用户在部署机计算并固定。Qwen 的两个文件哈希及 `kvmem-v0.16.0-rc3` 启动信息也已保存；服务未暴露 GGUF 量化及真实 build 提交，明确记录为未暴露，不把脚本名 `iq3` 视作量化证明。
+
+真实浏览器已走通中文输入 → 视频排名 → 片段播放（含音频）及详情；“骑自行车的人靠近装着大桶的手推车”第一位是约 68.4–69.2 秒片段。网页也实际上传降码率查询视频并得到结果。上下文请求返回 200/206。结果新增“管理此片段”链接及后台定位；后台首次请求出现 `Failed to fetch`，手动刷新后素材列表恢复，定位流程将在独立测试版本继续验证。
+
+新增指定索引的查询/服务入口和默认不发布的实验构建，允许 trailer 的 visual/enriched 对比与完整电影活动库并存。自动化覆盖固定索引查询、媒体 Range 及活动指针保持独立。最近全量工程检查为 **43 passed**（47.86 秒）；Ruff 检查、sdist/wheel 构建通过。
+
+中文标注已由用户确认，SHA256 为 `e3bf72a3d3199f99682b5fb5532c1e4c89217c1843bbe8a12cbd2e042ea1fb3f`。画面基线使用原有真实预览计分：全部文字完全相同、61 个候选和不可变索引一致，使用修订后的确认目标，未重新请求 WeMM，时延仍是历史调用。最终质量验收仍需对白听辨、GPU 数据和后续融合对比；视频相关性草稿尚未确认。未确认草稿只能生成 preview，不能生成质量分数。
+
+## 图片找视频增量验证
+
+新增图片查询 Protocol、两个模型后端的图片适配、`POST /api/search/image` 和页面“图片找视频”入口。支持 JPEG/PNG/WebP 静态图片；实际解码校验、EXIF 方向、透明背景、像素及上传大小限制在 CPU 执行，查询后清理临时文件。原生 llama.cpp 图片方法单独扩展，原文字/视频适配器文件哈希仍为 `a73d18552c62e5ca764af00182a0b0a72321a4605bc6dd4e1fc934ecfe6d0939`，现有空间与索引不变。
+
+工程测试覆盖三个格式到视频结果、Range 播放、无视文字融合权重的图片画面召回、上传伪装/损坏/空文件/超限拒绝、图片方向与透明度、动画拒绝、原生请求模板、HTTP 模型协议、图片标注哈希冻结和评测入口。新增 ASR 对照测试同时验证被排除的 Qwen 描述/风格不会通过 BM25 泄漏。
+
+真实 Chrome 已显示图片入口，上传 `image-queries/01.jpg` 并显示预览。此时远程仅 Qwen 运行，实际点击搜索后 API 返回 503，页面明确显示 WeMM 服务调用失败并恢复按钮，未返回模拟结果。准备了 12 张原片派生图片，待 Qwen 批处理结束、用户切回 WeMM 后执行真实图片召回；尚不宣称图片质量验收通过。
+
+8000 端口已重新启动加载新 API，保留完整电影活动索引；8001 端口是固定 trailer 画面索引的独立测试服务。Qwen 分析进程未受影响。Qwen 收益与海量视频成本评估细则见 [QWEN_BENEFIT_EVALUATION.md](QWEN_BENEFIT_EVALUATION.md)。
 
 ## Trailer 分镜与素材后台验收
 

@@ -57,6 +57,15 @@ Chroma collection 名为 `idx-<index_id>`，`embedding_function=None`（显式�
 
 ## 常用操作
 
+评测和浏览器验证可固定到一个 ready 版本，避免改变当前活动库：
+
+```bash
+uv run mindex serve --port 8001 --index-id TEST_INDEX_ID
+uv run mindex evaluate eval/queries.jsonl --index-id TEST_INDEX_ID --split test --output data/test-report.json
+```
+
+固定版本仍执行相同的模型空间校验；媒体、缩略图及上下文也取该版本的快照。
+
 ```bash
 uv run mindex index --mode visual --source SOURCE_ID --activate   # 建并发布
 uv run mindex indexes list                                        # 查看版本与活动索引

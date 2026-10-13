@@ -126,6 +126,7 @@ FastAPI 文档：<http://127.0.0.1:8000/docs>。
 | `GET /api/admin/segments/{id}/media` / `thumbnail` | 未嵌入片段的播放/缩略图；媒体支持 Range、HEAD，`download=true` 下载 MP4 |
 | `POST /api/search/text` | JSON：`text`、`granularity`、`limit`、`filters` |
 | `POST /api/search/video` | multipart：`file`、`granularity`、`limit`、JSON 字符串 `filters` |
+| `POST /api/search/image` | multipart 同上；JPEG/PNG/WebP 静态图片，默认最大 20MB |
 | `GET /api/status?health=true` | 索引、处理记录、模型可用性 |
 | `GET /api/segments/{id}` | 当前索引中的片段详情 |
 | `GET /api/media/{id}` | 片段播放，支持 HTTP Range |

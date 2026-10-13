@@ -1,6 +1,6 @@
 # 检索机制详解
 
-检索由 `search.py` 的 `SearchEngine` 实现。在线查询**只调用嵌入服务**（WeMM 文字/视频向量），没有 Qwen 实时描述、没有在线大模型重排。**分数不是匹配概率**——它只是排名依据。
+检索由 `search.py` 的 `SearchEngine` 实现。在线查询**只调用嵌入服务**（WeMM 文字/图片/视频向量），没有 Qwen 实时描述、没有在线大模型重排。**分数不是匹配概率**——它只是排名依据。
 
 ## 文字查询：五路召回 + 加权 RRF
 
@@ -42,6 +42,16 @@ jieba `cut_for_search` 分词（过滤无中文/字母数字的 token），BM25 
 - 多窗口**等权融合**（每窗权重 1/窗口数，窗口数量不影响分数量级），再走同一套 IoU 去重。
 - 查询视频**不入库**，临时文件成功或失败后自动清理。
 
+## 图片查询
+
+页面选择“图片找视频”，或调用 `POST /api/search/image`，multipart 字段与视频查询相同：`file`、`granularity`、`limit`、JSON 字符串 `filters`。
+
+- 支持 JPEG、PNG、WebP 静态图片，默认最大 20MB（`search.max_image_upload_mb`）；依据实际解码内容校验，不依赖扩展名或 MIME。拒绝损坏、动画或超过 4000 万原始像素的图片。
+- 按 EXIF 校正方向，透明背景合成白色，保持比例缩至 `video.max_pixels` 内，编码 RGB PNG 后调用 WeMM 原生图片嵌入。
+- `llama_cpp` 通过 `/v1/embeddings` 的 `image_url` 数据 URL 输入；自定义后端通过 `/embed/image`。图片、文字和视频沿用同一份模型权重与嵌入空间，图片直接比较库中的视频向量，不调用 Qwen 或把图片转换为短视频。
+- 只走画面召回，独立于文字融合权重；沿用来源/标签/时长筛选、隐藏继承、IoU 去重和播放接口。查询图片不入库，成功或失败后清理临时文件。
+- 原有 llama.cpp 文字/视频适配器未改变，新增图片方法单独扩展，因此已有索引与能力门槛继续有效。图片路径仍须完成真实服务能力验证。
+
 ## 粒度与筛选
 
 | 参数 | 取值 | 说明 |
@@ -76,10 +86,13 @@ curl -s http://127.0.0.1:8000/api/search/text -H 'Content-Type: application/json
 # 视频查询
 curl -s http://127.0.0.1:8000/api/search/video -F file=@query.mp4 -F granularity=moment
 
+# 图片查询
+curl -s http://127.0.0.1:8000/api/search/image -F file=@reference.jpg -F granularity=moment
+
 # 状态（含服务健康与空间身份比对）
 curl -s 'http://127.0.0.1:8000/api/status?health=true'
 ```
 
 ## 评测消融
 
-`mindex evaluate` 在同一候选集上比较 profile：`video_only`、`description_only`、`fusion`（配置权重）、`no_dialogue`、`no_style`（同时从 BM25 文档移除该字段，避免词法泄漏）。视频查询只进 `video_only`。指标 Hit@1/5、MRR@10、按相关组计的 nDCG@10，详见 [e2e-framework.md](e2e-framework.md)。
+`mindex evaluate` 在同一候选集上比较 profile：`video_only`、`video_asr`、`description_only`、`fusion`（配置权重）、`no_dialogue`、`no_style`。`video_asr` 排除 description/style 向量及 BM25 字段，另外两个消融同时移除对应 BM25 字段，避免词法泄漏。视频查询只进 `video_only`。报告含候选时间布局与整理状态哈希，便于检查跨索引比较条件。指标 Hit@1/5、MRR@10、按相关组计的 nDCG@10，详见 [e2e-framework.md](e2e-framework.md)。

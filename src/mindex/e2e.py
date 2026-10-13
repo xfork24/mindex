@@ -34,6 +34,33 @@ PHASES = (
 )
 
 
+def progress(config: Config, directory: Path) -> dict:
+    state = json.loads((directory / "run.json").read_text())
+    store = Store(config.data_dir)
+    counts = store.rows(
+        "SELECT s.kind,count(*) AS count FROM annotations a JOIN segments s ON s.id=a.segment_id "
+        "WHERE a.profile=? AND s.source_id=? GROUP BY s.kind",
+        (config.analysis_key, state["source_id"]),
+    )
+    active = store.active_index()
+    return {
+        "source_id": state["source_id"],
+        "phases": {
+            k: {
+                field: v[field]
+                for field in ("status", "started_at", "elapsed_ms", "error", "result_file")
+                if field in v
+            }
+            for k, v in state["phases"].items()
+        },
+        "analysis_key": config.analysis_key,
+        "annotations": counts,
+        "expected_moments": len(json.loads((directory / "segments.json").read_text())),
+        "active_index": active["id"] if active else None,
+        "acceptance": state["acceptance"],
+    }
+
+
 def save(path: Path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(".partial")
@@ -202,21 +229,21 @@ def freeze(directory: Path, path: Path, confirmed_by: str):
     for entry in entries:
         if entry.get("label_status") != "confirmed":
             raise ValueError(f"{entry['id']} 尚未人工确认 label_status=confirmed")
-        if bool(entry.get("text", "").strip()) == bool(entry.get("video")):
-            raise ValueError("每条查询需且只能有一个非空 text/video")
+        if sum(bool(entry.get(key, "").strip()) for key in ("text", "video", "image")) != 1:
+            raise ValueError("每条查询需且只能有一个非空 text/video/image")
         if not entry.get("relevant") and not entry.get("no_answer"):
             raise ValueError("普通查询需相关目标；无答案需 no_answer=true")
-        if entry.get("video"):
-            video = path.parent / entry["video"]
-            if content_hash(video) != entry["sha256"]:
-                raise ValueError("视频查询文件发生变化")
+        for key in ("video", "image"):
+            if entry.get(key) and content_hash(path.parent / entry[key]) != entry["sha256"]:
+                raise ValueError("媒体查询文件发生变化")
     # Keep video paths relative to the input file's directory.
     target = directory / ("frozen-" + path.name.replace(".draft", ""))
     if target.exists():
         raise ValueError("冻结集已存在；修订标注必须创建新实验")
     for entry in entries:
-        if "video" in entry:
-            entry["video"] = str((path.parent / entry["video"]).resolve())
+        for key in ("video", "image"):
+            if key in entry:
+                entry[key] = str((path.parent / entry[key]).resolve())
     target.write_text("\n".join(json.dumps(v, ensure_ascii=False) for v in entries) + "\n")
     save(
         target.with_suffix(".manifest.json"),
@@ -308,6 +335,8 @@ def run_phase(
     python: Path | None = None,
     queries: Path | None = None,
     split: str = "test",
+    index_id: str | None = None,
+    activate: bool = False,
 ) -> dict:
     if phase not in PHASES:
         raise ValueError(f"phase 必须为 {PHASES}")
@@ -316,6 +345,15 @@ def run_phase(
         state_path = directory / "run.json"
         state = json.loads(state_path.read_text())
         store = Store(config.data_dir)
+        selected_index = index_id
+        if selected_index is None:
+            for mode in ("enriched", "visual"):
+                completed = state["phases"].get(mode, {})
+                if completed.get("status") == "complete":
+                    selected_index = json.loads((directory / completed["result_file"]).read_text())[
+                        "index_id"
+                    ]
+                    break
         if state["data_dir"] != str(store.root) or state["layout_key"] != config.layout_key:
             raise ValueError("实验数据目录或切分参数发生变化，请创建新实验")
         if state["curation_hash"] != fingerprint(curation(store)):
@@ -353,7 +391,7 @@ def run_phase(
                         mode="visual" if phase == "visual" else "enriched",
                         source_id=state["source_id"],
                         kinds=("moment",),
-                        activate=True,
+                        activate=activate,
                     )
                 result = {"index_id": index_id, "active": store.active_index()}
             elif phase in {"asr", "align", "analyze-smoke", "analyze"}:
@@ -395,13 +433,17 @@ def run_phase(
                 if queries is None:
                     raise ValueError("preview 需要 --queries 指定文字或视频查询草稿")
                 entries = [json.loads(v) for v in queries.read_text().splitlines() if v.strip()]
-                engine = SearchEngine(config)
+                if selected_index is None:
+                    raise ValueError("请先建立实验索引或指定 --index-id")
+                engine = SearchEngine(config, index_id=selected_index)
                 details = []
                 for entry in entries:
                     if entry.get("text", "").strip():
                         response = engine.text(TextSearch(text=entry["text"], limit=10))
                     elif entry.get("video"):
                         response = engine.video(queries.parent / entry["video"], limit=10)
+                    elif entry.get("image"):
+                        response = engine.image(queries.parent / entry["image"], limit=10)
                     else:
                         raise ValueError("查询草稿中有空查询")
                     details.append({"query": entry, **response})
@@ -411,7 +453,7 @@ def run_phase(
                     "details": details,
                     "note": "仅提供排名供人工检查，未计算质量分数",
                 }
-                active = store.active_index()
+                active = store.index_version(selected_index)
                 save(directory / f"preview-{active['id']}-{content_hash(queries)[:12]}.json", result)
             elif phase in {"evaluate", "video-evaluate"}:
                 from .evaluation import evaluate
@@ -423,17 +465,21 @@ def run_phase(
                     "sha256"
                 ] != content_hash(queries):
                     raise ValueError("标注未冻结或已变化，请先 e2e freeze")
-                active = store.active_index()
+                if selected_index is None:
+                    raise ValueError("请先建立实验索引或指定 --index-id")
+                active = store.index_version(selected_index)
+                selected_split = "video" if phase == "video-evaluate" and split == "test" else split
                 result = evaluate(
                     config,
                     queries,
-                    "video" if phase == "video-evaluate" else split,
-                    directory / f"evaluation-{active['id']}-{split}-{phase}.json",
+                    selected_split,
+                    directory / f"evaluation-{active['id']}-{selected_split}-{phase}.json",
+                    index_id=selected_index,
                 )
             else:
                 from .indexing import check_index
 
-                active = store.active_index()
+                active = store.index_version(selected_index) if selected_index else store.active_index()
                 if not active:
                     raise ValueError("没有已发布索引")
                 issues = check_index(store, active["id"])

@@ -103,6 +103,29 @@ def test_native_embedding_template_media_and_normalization(llama, video_file, tm
     client.require_gate()
 
 
+def test_native_image_uses_vision_content_and_preserves_text_video_space(llama, tmp_path):
+    import io
+
+    from PIL import Image
+
+    config, _props, seen, _reply, _pinned = llama
+    client = adapters.make_embedder(config)
+    previous_space = LlamaEmbedder(config).identity()
+    path = tmp_path / "reference.webp"
+    Image.new("RGB", (1600, 900), "blue").save(path)
+    assert client.image(path) == [1.0] + [0.0] * 7
+    assert client.identity() == previous_space
+    content = seen[-1]["input"][0]["content"]
+    assert content[0] == {"type": "text", "text": PREFIX}
+    assert content[-1] == {"type": "text", "text": SUFFIX}
+    assert content[1]["type"] == "image_url"
+    uri = content[1]["image_url"]["url"]
+    assert uri.startswith("data:image/png;base64,")
+    with Image.open(io.BytesIO(base64.b64decode(uri.split(",", 1)[1]))) as image:
+        assert image.width * image.height <= config.video.max_pixels
+        assert image.mode == "RGB"
+
+
 def test_native_identity_drift_invalid_values_and_missing_vision(llama, monkeypatch):
     config, props, _seen, reply, pinned = llama
     client = LlamaEmbedder(config)
@@ -287,3 +310,16 @@ def test_native_asr_without_audio_requires_no_running_service(config, video_file
     assert (
         pipeline.store.json_value("transcripts", "source_id", source, config.asr_key)["status"] == "no_audio"
     )
+
+
+def test_zero_duration_alignment_tokens_preserve_text_and_observed_bounds():
+    from mindex.align_worker import coalesce_alignment
+
+    rows = [
+        {"start": 0.72, "end": 0.72, "text": "先"},
+        {"start": 0.72, "end": 1.1, "text": "生"},
+        {"start": 1.1, "end": 1.1, "text": "好"},
+    ]
+    assert coalesce_alignment(rows) == [{"start": 0.72, "end": 1.1, "text": "先生好"}]
+    with pytest.raises(ValueError, match="全部对齐项"):
+        coalesce_alignment(rows[:1])

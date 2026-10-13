@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 from conftest import FixtureAnalyzer, FixtureEmbedder
 from fastapi.testclient import TestClient
 
 from mindex.adapters import AdaptiveShotDetector, ModelError
 from mindex.api import create_app
+from mindex.evaluation import evaluate
 from mindex.indexing import IndexBuilder, VectorIndex, check_index
 from mindex.media import command, cut, frame_data, probe, thumbnail, windows
 from mindex.pipeline import Pipeline
@@ -187,6 +190,51 @@ def test_rrf_deduplicates_windows_before_ranking():
     assert result[1]["score"] == pytest.approx(1 / 62)
 
 
+def test_evaluation_isolates_qwen_from_asr_in_vectors_and_lexical(processed, config, monkeypatch, tmp_path):
+    pipeline, embedder, _, source_id, published = processed
+    store = pipeline.store
+    moments = store.segments(source_id, "moment")
+    for segment in moments:
+        value = store.json_value("annotations", "segment_id", segment["id"], config.analysis_key)
+        value["annotation"]["description"] = "建筑"
+        value["annotation"]["emotions"] = ["悲伤"]
+        value["dialogue"] = [{"start": segment["start"], "end": segment["end"], "text": "再见"}]
+        store.put_json("annotations", "segment_id", segment["id"], config.analysis_key, value)
+    version = IndexBuilder(config, embedder).build(kinds=("moment",), activate=False)
+    monkeypatch.setattr("mindex.search.make_embedder", lambda config: embedder)
+    queries = tmp_path / "labels.jsonl"
+    queries.write_text(
+        "\n".join(
+            json.dumps(
+                {
+                    "id": text,
+                    "text": text,
+                    "split": "test",
+                    "label_status": "confirmed",
+                    "relevant": [{"segment_id": moments[0]["id"], "grade": 3}],
+                },
+                ensure_ascii=False,
+            )
+            for text in ("建筑", "悲伤", "再见")
+        )
+    )
+    report = evaluate(config, queries, "test", index_id=version)
+
+    def routes(profile, text):
+        row = next(r for r in report["profiles"][profile]["details"] if r["id"] == text)
+        return {match["route"] for hit in row["results"] for match in hit["matches"]}
+
+    for text in ("建筑", "悲伤"):
+        assert routes("video_asr", text) == {"video", "dialogue"}
+        assert "lexical" in routes("fusion", text)
+    assert routes("video_asr", "再见") == {"video", "dialogue", "lexical"}
+    assert routes("no_dialogue", "再见") == {"video", "description", "style"}
+    assert "lexical" not in routes("no_style", "悲伤")
+    assert {r["id"] for r in report["candidate_layout"]} == {r["id"] for r in moments}
+    assert report["candidate_layout_hash"] and report["curation_hash"]
+    assert store.active_index()["id"] == published
+
+
 def test_uninformative_tied_route_does_not_reorder_matching_routes():
     result = fuse(
         {
@@ -213,3 +261,93 @@ def test_no_index_returns_actionable_message(config):
     assert response.status_code == 422
     assert "index --activate" in response.json()["detail"]
     assert client.get("/api/status").json()["active_index"] is None
+
+
+def test_image_query_retrieves_video_and_cleans_uploads(processed, config, tmp_path, monkeypatch):
+    import io
+
+    from PIL import Image
+
+    pipeline, embedder, _, _, version = processed
+    client = TestClient(create_app(config, embedder, index_id=version))
+    # Image matching is independent of the configured text-fusion route weights.
+    config.search.weights["video"] = 0
+    for image_format in ("JPEG", "PNG", "WEBP"):
+        raw = io.BytesIO()
+        Image.new("RGB", (160, 120), "blue").save(raw, format=image_format)
+        response = client.post(
+            "/api/search/image",
+            files={"file": ("reference.bin", raw.getvalue(), "application/octet-stream")},
+            data={"limit": "10", "granularity": "moment"},
+        )
+        assert response.status_code == 200
+        result = response.json()
+        assert result["index_id"] == version
+        assert result["results"][0]["start"] == pytest.approx(1)
+        assert {m["route"] for hit in result["results"] for m in hit["matches"]} == {"video"}
+        assert (
+            client.get(result["results"][0]["media_url"], headers={"Range": "bytes=0-127"}).status_code == 206
+        )
+    before = embedder.calls
+    picture = tmp_path / "query.png"
+    picture.write_bytes(raw.getvalue())
+    labels = tmp_path / "images.jsonl"
+    labels.write_text(
+        json.dumps(
+            {
+                "id": "fixture-image",
+                "split": "image",
+                "image": picture.name,
+                "label_status": "confirmed",
+                "relevant": [{"segment_id": result["results"][0]["id"], "grade": 3}],
+            }
+        )
+    )
+    monkeypatch.setattr("mindex.search.make_embedder", lambda config: embedder)
+    report = evaluate(config, labels, "image", index_id=version)
+    assert report["profiles"]["video_only"]["hit_at_1"] == 1
+    assert report["profiles"]["video_only"]["details"][0]["modality"] == "image"
+    assert all(p["queries"] == 0 for name, p in report["profiles"].items() if name != "video_only")
+    assert embedder.calls == before + 1
+    before = embedder.calls
+    for body in (
+        b"",
+        b"broken",
+        pipeline.store.resolve_media(pipeline.store.snapshots(version)[0]["path"]).read_bytes(),
+    ):
+        response = client.post("/api/search/image", files={"file": ("fake.jpg", body, "image/jpeg")})
+        assert response.status_code == 422
+    assert embedder.calls == before
+    assert (
+        client.post(
+            "/api/search/image", files={"file": ("x.png", raw.getvalue())}, data={"filters": "bad"}
+        ).status_code
+        == 422
+    )
+    assert (
+        client.post(
+            "/api/search/image", files={"file": ("x.png", raw.getvalue())}, data={"limit": 51}
+        ).status_code
+        == 422
+    )
+    config.search.max_image_upload_mb = 1
+    assert (
+        client.post("/api/search/image", files={"file": ("big.png", b"x" * (1024 * 1024 + 1))}).status_code
+        == 413
+    )
+    assert not list(config.data_dir.glob("query-image-*"))
+    assert pipeline.store.active_index()["id"] == version
+
+
+def test_pinned_preview_index_keeps_published_library(processed, config):
+    pipeline, embedder, _, _, original = processed
+    changed = config.model_copy(deep=True)
+    changed.embedding.quantization = "nf4"
+    published = IndexBuilder(changed, FixtureEmbedder(changed)).build(mode="visual", activate=True)
+    client = TestClient(create_app(config, embedder, index_id=original))
+    result = client.post("/api/search/text", json={"text": "蓝色", "granularity": "shot"})
+    assert result.status_code == 200 and result.json()["index_id"] == original
+    first = result.json()["results"][0]
+    assert client.get(first["media_url"], headers={"Range": "bytes=0-127"}).status_code == 206
+    assert client.get("/api/status").json()["active_index"]["id"] == original
+    assert pipeline.store.active_index()["id"] == published

@@ -163,6 +163,13 @@ class Store:
             row["spec"] = json.loads(row["spec"])
         return row
 
+    def index_version(self, index_id: str) -> dict:
+        row = self.one("SELECT * FROM index_versions WHERE id=?", (index_id,))
+        if row is None:
+            raise ValueError("找不到索引版本")
+        row["spec"] = json.loads(row["spec"])
+        return row
+
     def activate(self, index_id: str):
         with self.connect() as db:
             version = db.execute("SELECT status FROM index_versions WHERE id=?", (index_id,)).fetchone()

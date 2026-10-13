@@ -172,6 +172,24 @@ class WeMMEngine:
                 )
             ]
 
+    def image(self, path: Path) -> list[list[float]]:
+        from .images import image_png
+
+        png = image_png(path, self.config.video.max_pixels)
+        with tempfile.TemporaryDirectory(prefix="wemm-image-") as directory:
+            normalized = Path(directory) / "image.png"
+            normalized.write_bytes(png)
+            with self.lock:
+                return [
+                    self._encode(
+                        {
+                            "type": "image",
+                            "image": str(normalized),
+                            "max_pixels": self.config.video.max_pixels,
+                        }
+                    )
+                ]
+
 
 class ASREngine:
     def __init__(self, config: Config):
@@ -367,6 +385,14 @@ def create_model_app(config: Config, role: str, engine_factory=None) -> FastAPI:
                 path = Path(directory) / "video.media"
                 await save_upload(file, path, 100 * 1024 * 1024)
                 vectors = await run_in_threadpool(engine.video, path)
+                return {"vectors": vectors, "space_id": fingerprint(engine.space)}
+
+        @app.post("/embed/image")
+        async def embed_image(file: Annotated[UploadFile, File()]):
+            with tempfile.TemporaryDirectory(prefix="mindex-image-") as directory:
+                path = Path(directory) / "image.media"
+                await save_upload(file, path, config.search.max_image_upload_mb * 1024 * 1024)
+                vectors = await run_in_threadpool(engine.image, path)
                 return {"vectors": vectors, "space_id": fingerprint(engine.space)}
 
     if role == "asr":

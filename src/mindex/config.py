@@ -112,6 +112,7 @@ class SearchConfig(StrictModel):
         }
     )
     max_upload_mb: int = Field(default=100, ge=1)
+    max_image_upload_mb: int = Field(default=20, ge=1, le=100)
     max_query_seconds: float = Field(default=30, gt=0)
 
     @model_validator(mode="after")

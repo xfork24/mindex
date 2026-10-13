@@ -96,6 +96,9 @@ def test_visual_pipeline_with_model_service_upload_contract(config, video_file, 
             seen.append(path.stat().st_size)
             return [fixture.video(path)]
 
+        def image(self, path):
+            return [fixture.image(path)]
+
     model_app = create_model_app(config, "embedding", engine_factory=Engine)
     with TestClient(model_app) as client:
 
@@ -114,4 +117,10 @@ def test_visual_pipeline_with_model_service_upload_contract(config, video_file, 
         assert len(seen) == 5 and all(size > 0 for size in seen)
         assert not check_index(pipeline.store, version)
         result = SearchEngine(config).text(TextSearch(text="蓝色画面"))
+        assert result["results"][0]["start"] == pytest.approx(1)
+        from PIL import Image
+
+        picture = tmp_path / "blue.png"
+        Image.new("RGB", (160, 120), "blue").save(picture)
+        result = SearchEngine(config).image(picture)
         assert result["results"][0]["start"] == pytest.approx(1)
