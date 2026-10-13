@@ -30,10 +30,58 @@ asr:
   timeout: 300
   api_key_env: MINDEX_MODEL_API_KEY
   enabled: true
-tts:
-  # 预留部署信息，当前视频检索流程不调用 TTS。
-  base_url: http://192.168.1.86:4030
-  model: Qwen3-TTS
+studio:
+  # 创作工作流（文本生成视频）：拆分镜 LLM + TTS + 召回选片 + 渲染合成。
+  max_input_chars: 2000
+  max_shots: 60
+  generator:
+    # 文本拆分镜 LLM，OpenAI 兼容端点（llama-server GGUF）。
+    backend: openai
+    base_url: http://192.168.1.86:4040/v1
+    model: qwen3.8:27b
+    revision: deployed-2026-10-12
+    timeout: 300
+    api_key_env: MINDEX_QWEN_API_KEY
+    max_tokens: 4000
+    split_retries: 2
+  tts:
+    # qwen3-tts 语音合成，OpenAI /audio/speech 风格端点（llama-server GGUF）。
+    backend: openai
+    base_url: http://192.168.1.86:4030/v1
+    model: Qwen3-TTS
+    voice: Cherry
+    response_format: wav
+    speech_path: /audio/speech
+    timeout: 300
+    api_key_env: MINDEX_QWEN_API_KEY
+  recall:
+    # shot 适合含镜头粒度的索引；纯 visual 模式索引可改为 moment。
+    granularity: shot
+    limit: 20
+  selection:
+    atempo_limit: 0.1
+    gap_epsilon: 0.5
+    weights:
+      semantic: 1.0
+      duration: 1.0
+      extension: 0.3
+      repeat: 0.5
+      overlap: 1.0
+  audio:
+    mode: tts_only
+    duck_gain: 0.15
+    loudnorm: "I=-16:TP=-1.5:LRA=11"
+  subtitle:
+    burn: true
+    font_family: Noto Sans CJK SC
+    font_file: null
+    font_size: 7
+  render:
+    width: 1280
+    height: 720
+    fps: 25
+    crf: 20
+    preset: fast
 detector:
   # adaptive works on the local CPU. Use transnet for the supplied GPU service.
   backend: adaptive

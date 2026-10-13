@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import io
+import math
+import struct
+import wave
 from pathlib import Path
 
 import numpy as np
@@ -7,7 +11,7 @@ import pytest
 
 from mindex.config import Config
 from mindex.media import command
-from mindex.types import Annotation
+from mindex.types import Annotation, ShotDraft
 
 
 @pytest.fixture(scope="session")
@@ -135,3 +139,52 @@ class FixtureAnalyzer:
 
     def group_scenes(self, units):
         return [list(range(len(units)))]
+
+
+class FixtureStoryboarder:
+    """Tests only: deterministic sentence-based split, never a real model."""
+
+    def __init__(self, config: Config):
+        self.config = config
+        self.calls = 0
+
+    def split(self, text: str) -> list[ShotDraft]:
+        self.calls += 1
+        parts: list[str] = []
+        current = ""
+        for char in text:
+            current += char
+            if (char in "。！？；\n" and len(current) >= 8) or len(current) >= 40:
+                parts.append(current)
+                current = ""
+        if current.strip():
+            parts.append(current)
+        parts = [part.strip() for part in parts if part.strip()] or [text.strip()]
+        return [
+            ShotDraft(text=part, query=f"{part} 画面", estimated_seconds=round(len(part) / 4, 2))
+            for part in parts
+        ]
+
+
+class FixtureSpeaker:
+    """Tests only: deterministic sine-wave wav bytes, never a real model."""
+
+    def __init__(self, config: Config):
+        self.config = config
+        self.calls = 0
+
+    def speak(self, text: str, voice: str | None = None) -> bytes:
+        self.calls += 1
+        duration = 0.3 + 0.12 * len(text)
+        rate = 16000
+        count = int(rate * duration)
+        buffer = io.BytesIO()
+        with wave.open(buffer, "wb") as handle:
+            handle.setnchannels(1)
+            handle.setsampwidth(2)
+            handle.setframerate(rate)
+            frames = bytearray()
+            for index in range(count):
+                frames += struct.pack("<h", int(12000 * math.sin(2 * math.pi * 440 * index / rate)))
+            handle.writeframes(bytes(frames))
+        return buffer.getvalue()

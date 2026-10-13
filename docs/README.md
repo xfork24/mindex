@@ -13,6 +13,7 @@
 | 换模型 / 回退索引 | [索引版本与空间身份](index-versions.md) | [部署说明](../DEPLOYMENT.md) |
 | 做真实模型端到端验证 | [e2e 实验框架](e2e-framework.md) | [端到端操作手册](../E2E_RUNBOOK.md)、[测试计划](../E2E_TEST_PLAN.md) |
 | 管理素材（改名/收藏/隐藏） | [素材后台指南](admin.md) | — |
+| 从文案生成视频（创作工作台） | [创作工作流](studio.md) | [实施计划](../STUDIO_PLAN.md) |
 | 用哔哩哔哩缓存转 MP4 | [附带工具](tools.md) | [tools/m4s-converter/README.md](../tools/m4s-converter/README.md) |
 | 标注评测查询 | [评测标注说明](../eval/README.md) | [e2e 实验框架](e2e-framework.md) |
 
@@ -26,6 +27,7 @@
 - [index-versions.md](index-versions.md) — 索引版本指纹、发布检查、激活与回退、能力门槛
 - [e2e-framework.md](e2e-framework.md) — probe/pin 信任模型、11 个 phase 状态机、标注冻结、评测 profile
 - [admin.md](admin.md) — 素材后台功能与管理 API
+- [studio.md](studio.md) — 创作工作流：拆分镜/召回/配音/选片/渲染五步状态机、人工编辑、API
 - [tools.md](tools.md) — m4s-converter 等附带工具
 
 ## 根目录文档（任务导向）

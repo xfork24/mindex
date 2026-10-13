@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概览
 
-Mindex：中文视频片段检索（文字找视频优先，支持视频找相似片段）。本机 CPU 只运行切片、SQLite、FastAPI 和页面；大模型以独立 HTTP 服务运行在 GPU 机器上（WeMM 嵌入 `:4010`、ASR `:4020`、Qwen 分析 `:4040/v1`、可选 TransNetV2 `:18203`；TTS `:4030` 仅预留不参与管线）。单 GPU 分阶段互斥执行，**不能假设多个模型服务同时可用**。
+Mindex：中文视频片段检索（文字找视频优先，支持视频找相似片段）+ 创作工作流（文案生成视频，`/studio`）。本机 CPU 只运行切片、SQLite、FastAPI、ffmpeg 渲染和页面；大模型以独立 HTTP 服务运行在 GPU 机器上（WeMM 嵌入 `:4010`、ASR `:4020`、Qwen 分析 `:4040/v1`、qwen3-tts `:4030/v1`、可选 TransNetV2 `:18203`）。单 GPU 分阶段互斥执行，**不能假设多个模型服务同时可用**。
 
 工作语言：文档、CLI 帮助、日志、错误消息均为中文，新代码保持一致。
 
@@ -37,7 +37,11 @@ uv run mindex serve                              # 启动 http://127.0.0.1:8000�
 
 ### 模型适配层（adapters.py）
 
-五个 Protocol：`MultimodalEmbedder`、`VisualAnalyzer`、`Transcriber`、`Aligner`、`ShotDetector`，由 `make_*` 工厂按配置的 backend 构造（`mindex` 自定义服务 / `llama_cpp` / `openai` / 本地 adaptive / 远程 transnet）。替换模型 = 实现协议接入新 backend，不改检索管线。
+七个 Protocol：`MultimodalEmbedder`、`VisualAnalyzer`、`Transcriber`、`Aligner`、`ShotDetector`、`Speaker`（TTS）、`Storyboarder`（拆分镜 LLM），由 `make_*` 工厂按配置的 backend 构造（`mindex` 自定义服务 / `llama_cpp` / `openai` / 本地 adaptive / 远程 transnet）。替换模型 = 实现协议接入新 backend，不改检索管线。
+
+### 创作工作流（studio，`/studio`）
+
+文案 → 成片的五步状态机：`split` 拆分镜 → `recall` 语义召回 → `tts` 配音 → `select` 选片对齐 → `render` 渲染合成。任务即 `data/studio/<job_id>/` 目录（状态即 job.json，不新建 SQLite 表）；全局 `studio.lock` 单步骤互斥；重跑只作废依赖闭包内的下游。召回与配音只依赖拆分镜（可任意先后，适配单 GPU）；选片 = 原片时间区间（可跨连续 shot，同源相邻延长 + atempo ±10% + 冻结帧/裁剪兜底）。分镜与选片支持人工编辑（PATCH 级联作废）。烧录字幕依赖 ffmpeg libass（缺失报错可切软字幕）。模块：`studio.py`（状态机）、`studio_steps.py`（编排）、`studio_select.py`（选片纯算法）、`studio_render.py`（渲染）、`studio_api.py`（路由）。详见 `docs/studio.md`。
 
 ### 核心不变量
 
@@ -49,7 +53,7 @@ uv run mindex serve                              # 启动 http://127.0.0.1:8000�
 
 ### 存储布局（data_dir）
 
-`sources/`（原片，内容哈希去重）、`plans/`（分镜计划，原子写入）、`clips/`、`thumbnails/`、`reports/`、`transcripts/`（30 秒块检查点）、`chroma/`、`context/`（转码缓存）、`metadata.sqlite3`。
+`sources/`（原片，内容哈希去重）、`plans/`（分镜计划，原子写入）、`clips/`、`thumbnails/`、`reports/`、`transcripts/`（30 秒块检查点）、`chroma/`、`context/`（转码缓存）、`studio/`（创作任务目录：storyboard/candidates/audio/timeline/render + job.json 状态机）、`metadata.sqlite3`。
 
 ### 检索（search.py）
 
@@ -57,7 +61,7 @@ uv run mindex serve                              # 启动 http://127.0.0.1:8000�
 
 ### Web/API
 
-`api.py`（检索 API + create_app）、`admin.py`（素材后台 API）、`static/`（原生 HTML/JS，无前端框架）。`/admin` 直接读 SQLite，不依赖活动索引；curation（显示名/备注/收藏/隐藏，`curation.py`）与不可变索引快照分离，hidden 在召回前过滤。
+`api.py`（检索 API + create_app）、`admin.py`（素材后台 API）、`studio_api.py`（创作 API）、`static/`（原生 HTML/JS，无前端框架；三个页面：`/` 检索、`/admin` 素材管理、`/studio` 创作）。`/admin` 直接读 SQLite，不依赖活动索引；curation（显示名/备注/收藏/隐藏，`curation.py`）与不可变索引快照分离，hidden 在召回前过滤。`/studio` 的召回依赖活动索引与嵌入服务（身份校验由 SearchEngine 继承），步骤执行为后台线程 + 前端轮询。
 
 ## 测试约定
 
@@ -67,7 +71,7 @@ uv run mindex serve                              # 启动 http://127.0.0.1:8000�
 
 ## 关键文档
 
-- `docs/` — 系统性参考文档：架构、离线管线、CLI、配置、检索、索引版本、e2e 框架、素材后台、工具（索引见 `docs/README.md`）
+- `docs/` — 系统性参考文档：架构、离线管线、CLI、配置、检索、索引版本、e2e 框架、素材后台、创作工作流、工具（索引见 `docs/README.md`）
 - `PLAN.md` — 设计决策、验收标准（40 条测试集 Hit@5 ≥85%）
 - `FILM_WORKFLOW.md` — 整部电影处理流程（visual 模式只需 WeMM）
 - `DEPLOYMENT.md` — GPU 服务部署、各角色环境、HTTP 服务协议

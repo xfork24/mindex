@@ -65,6 +65,18 @@ class Annotation(BaseModel):
         }
 
 
+class ShotDraft(BaseModel):
+    """拆分镜 LLM 的输出单元；shot id 由代码分配，不信任模型编号。"""
+
+    text: str = Field(min_length=1, max_length=200)
+    query: str = Field(min_length=1, max_length=400)
+    estimated_seconds: float = Field(gt=0, le=60)
+
+
+class StoryboardDraft(BaseModel):
+    shots: list[ShotDraft] = Field(min_length=1)
+
+
 class Filters(BaseModel):
     source_id: str | None = None
     min_duration: float = Field(default=0, ge=0)

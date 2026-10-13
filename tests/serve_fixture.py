@@ -6,7 +6,7 @@ import argparse
 from pathlib import Path
 
 import uvicorn
-from conftest import FixtureAnalyzer, FixtureEmbedder
+from conftest import FixtureAnalyzer, FixtureEmbedder, FixtureSpeaker, FixtureStoryboarder
 
 from mindex.api import create_app
 from mindex.config import Config
@@ -22,6 +22,7 @@ def main():
     args = parser.parse_args()
     config = Config(data_dir=args.data_dir.resolve())
     config.embedding.dimensions = 8
+    config.studio.recall.granularity = "shot"
     config.data_dir.mkdir(parents=True, exist_ok=True)
     video = config.data_dir / "工程测试专用_颜色样本.mp4"
     if not video.exists():
@@ -61,9 +62,19 @@ def main():
         pipeline.prepare(video)
         pipeline.transcribe()
         pipeline.analyze()
-        IndexBuilder(config, embedder).build(activate=True)
+        # shot 供创作召回，moment 供检索页默认粒度。
+        IndexBuilder(config, embedder).build(kinds=("shot", "moment"), activate=True)
     print("TEST ONLY: deterministic color vectors; no real model quality is evaluated.")
-    uvicorn.run(create_app(config, embedder), host="127.0.0.1", port=args.port)
+    uvicorn.run(
+        create_app(
+            config,
+            embedder,
+            storyboarder=FixtureStoryboarder(config),
+            speaker=FixtureSpeaker(config),
+        ),
+        host="127.0.0.1",
+        port=args.port,
+    )
 
 
 if __name__ == "__main__":

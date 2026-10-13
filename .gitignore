@@ -10,4 +10,3 @@ config.local.yaml
 *.egg-info/
 dist/
 .DS_Store
-customvoice.wav

@@ -13,13 +13,14 @@ from filelock import FileLock
 from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
 
-from .adapters import ModelError, MultimodalEmbedder
+from .adapters import ModelError, MultimodalEmbedder, Speaker, Storyboarder
 from .admin import admin_router
 from .config import Config, load_config
 from .curation import EntityNotFound, Library
 from .media import cut
 from .search import SearchEngine, public_segment, status
 from .storage import Store
+from .studio_api import studio_router
 from .types import Filters, Granularity, TextSearch
 
 
@@ -39,7 +40,12 @@ async def save_upload(upload: UploadFile, path: Path, max_bytes: int):
 
 
 def create_app(
-    config: Config | None = None, embedder: MultimodalEmbedder | None = None, *, index_id: str | None = None
+    config: Config | None = None,
+    embedder: MultimodalEmbedder | None = None,
+    *,
+    index_id: str | None = None,
+    storyboarder: Storyboarder | None = None,
+    speaker: Speaker | None = None,
 ) -> FastAPI:
     config = config or load_config()
     store = Store(config.data_dir)
@@ -47,6 +53,7 @@ def create_app(
     if index_id and store.index_version(index_id)["status"] != "ready":
         raise ValueError("固定预览只允许就绪索引")
     app.include_router(admin_router(store))
+    app.include_router(studio_router(config, store, embedder=embedder, storyboarder=storyboarder, speaker=speaker))
 
     @app.exception_handler(EntityNotFound)
     async def entity_not_found(_, exc):
@@ -56,6 +63,11 @@ def create_app(
     @app.get("/admin/", include_in_schema=False)
     def admin_page():
         return FileResponse(Path(__file__).parent / "static" / "admin.html", media_type="text/html")
+
+    @app.get("/studio", include_in_schema=False)
+    @app.get("/studio/", include_in_schema=False)
+    def studio_page():
+        return FileResponse(Path(__file__).parent / "static" / "studio.html", media_type="text/html")
 
     @app.exception_handler(ModelError)
     async def model_error(_, exc):

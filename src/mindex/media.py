@@ -54,6 +54,37 @@ def probe(path: Path) -> dict:
     }
 
 
+def audio_info(path: Path) -> dict:
+    """探测纯音频文件时长；probe() 要求视频轨，不能用于 TTS wav。"""
+    raw = json.loads(
+        command(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-select_streams",
+                "a:0",
+                "-show_entries",
+                "stream=sample_rate,channels,codec_name:format=duration",
+                "-of",
+                "json",
+                str(path),
+            ],
+            timeout=30,
+        )
+    )
+    streams = raw.get("streams") or []
+    duration = float((raw.get("format") or {}).get("duration") or 0)
+    if not streams or not math.isfinite(duration) or duration <= 0:
+        raise MediaError("文件中没有可用的音频轨道或无法确定音频时长")
+    stream = streams[0]
+    return {
+        "duration": duration,
+        "sample_rate": int(stream.get("sample_rate") or 0),
+        "channels": int(stream.get("channels") or 0),
+    }
+
+
 def content_hash(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:

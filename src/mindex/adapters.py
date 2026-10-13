@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
@@ -14,7 +15,7 @@ import numpy as np
 
 from .config import Config, fingerprint
 from .media import frame_data, frame_timestamps, probe
-from .types import Annotation, Utterance
+from .types import Annotation, ShotDraft, StoryboardDraft, Utterance
 
 log = logging.getLogger(__name__)
 
@@ -49,6 +50,26 @@ def request(method: str, url: str, *, timeout: float = 180, attempts: int = 3, *
     raise AssertionError("unreachable")
 
 
+def request_bytes(method: str, url: str, *, timeout: float = 180, attempts: int = 3, **kwargs) -> bytes:
+    """同 request() 的重试语义，但返回原始字节（/audio/speech 等二进制端点）。"""
+    for attempt in range(attempts):
+        try:
+            response = httpx.request(method, url, timeout=timeout, trust_env=False, **kwargs)
+            response.raise_for_status()
+            return response.content
+        except (httpx.TransportError, httpx.HTTPStatusError) as exc:
+            retry = not isinstance(exc, httpx.HTTPStatusError) or exc.response.status_code in {
+                429,
+                502,
+                503,
+                504,
+            }
+            if not retry or attempt == attempts - 1:
+                raise ModelError(f"模型服务调用失败 {url}: {exc}") from exc
+            time.sleep(0.25 * (2**attempt))
+    raise AssertionError("unreachable")
+
+
 class MultimodalEmbedder(Protocol):
     def identity(self) -> dict: ...
     def text(self, texts: list[str], role: str = "document") -> list[list[float]]: ...
@@ -71,6 +92,14 @@ class Aligner(Protocol):
 
 class ShotDetector(Protocol):
     def detect(self, path: Path) -> list[tuple[float, float]]: ...
+
+
+class Speaker(Protocol):
+    def speak(self, text: str, voice: str | None = None) -> bytes: ...
+
+
+class Storyboarder(Protocol):
+    def split(self, text: str) -> list[ShotDraft]: ...
 
 
 class HTTPEmbedder:
@@ -247,6 +276,108 @@ class QwenAnalyzer:
         return groups
 
 
+def decode_audio(payload: bytes) -> bytes:
+    """llama-server 各版本 /audio/speech 返回格式不一：按魔数识别二进制，JSON 则尝试 base64。"""
+    for magic in (b"RIFF", b"ID3", b"OggS", b"fLaC"):
+        if payload.startswith(magic):
+            return payload
+    if payload[:1] == b"\xff":
+        return payload
+    try:
+        document = json.loads(payload)
+    except (ValueError, TypeError):
+        raise ModelError("TTS 服务未返回可识别的音频数据") from None
+    if isinstance(document, dict):
+        for key in ("audio", "data", "content", "b64_json"):
+            value = document.get(key)
+            if isinstance(value, str):
+                try:
+                    return base64.b64decode(value, validate=True)
+                except (ValueError, TypeError):
+                    continue
+    raise ModelError("TTS 服务返回的 JSON 中没有可解码的音频字段")
+
+
+class OpenAISpeaker:
+    def __init__(self, config: Config):
+        self.profile = config.studio.tts
+
+    def speak(self, text: str, voice: str | None = None) -> bytes:
+        payload = request_bytes(
+            "POST",
+            self.profile.base_url.rstrip("/") + self.profile.speech_path,
+            timeout=self.profile.timeout,
+            headers=self.profile.headers(),
+            json={
+                "model": self.profile.model,
+                "input": text,
+                "voice": voice or self.profile.voice,
+                "response_format": self.profile.response_format,
+            },
+        )
+        return decode_audio(payload)
+
+
+class QwenStoryboarder:
+    def __init__(self, config: Config):
+        self.config = config
+        self.profile = config.studio.generator
+
+    def _chat(self, content: list[dict], instructions: str, feedback: str) -> str:
+        payload = request(
+            "POST",
+            self.profile.base_url.rstrip("/") + "/chat/completions",
+            timeout=self.profile.timeout,
+            headers=self.profile.headers(),
+            json={
+                "model": self.profile.model,
+                "temperature": 0,
+                "max_tokens": self.profile.max_tokens,
+                "chat_template_kwargs": {"enable_thinking": False},
+                "messages": [
+                    {"role": "system", "content": instructions},
+                    {"role": "user", "content": content + ([
+                        {"type": "text", "text": feedback}
+                    ] if feedback else [])},
+                ],
+            },
+        )
+        try:
+            choice = payload["choices"][0]
+        except (KeyError, TypeError, IndexError) as exc:
+            raise ModelError("分镜服务返回格式不符合聊天接口约定") from exc
+        if choice.get("finish_reason") == "length":
+            raise ModelError("文本过长导致模型输出截断，请缩短文本后重试")
+        message = choice.get("message") or {}
+        if not isinstance(message.get("content"), str) or not message["content"].strip():
+            raise ModelError("分镜服务返回了空内容")
+        return message["content"]
+
+    def split(self, text: str) -> list[ShotDraft]:
+        instructions = (
+            "你为中文解说类混剪视频拆分分镜。只返回符合下列 JSON Schema 的 JSON 对象，不要解释。\n"
+            "要求：每个分镜 20~70 个汉字（配音约 5~15 秒），按 4 字/秒估算 estimated_seconds；"
+            "text 必须取自原文、保持原句连续、不得改写或遗漏，各分镜 text 按顺序拼接后覆盖全文；"
+            "query 是面向视频检索的画面查询，写成自然中文描述：人物外观、动作、场景、情绪、"
+            "景别与镜头运动关键词，风格与影视素材分析描述一致，不要照抄原文旁白。\n"
+            + json.dumps(StoryboardDraft.model_json_schema(), ensure_ascii=False)
+        )
+        feedback = ""
+        last_error: Exception | None = None
+        for _ in range(self.profile.split_retries + 1):
+            content = self._chat([{"type": "text", "text": text}], instructions, feedback)
+            try:
+                draft = StoryboardDraft.model_validate(parse_json(content))
+                return draft.shots
+            except (ModelError, ValueError) as exc:
+                last_error = exc
+                feedback = (
+                    f"上一次输出未通过校验：{exc}。请严格按 JSON Schema 重新输出完整 JSON，"
+                    "text 必须取自原文。"
+                )
+        raise ModelError(f"分镜输出多次未通过校验：{last_error}")
+
+
 class HTTPTranscriber:
     def __init__(self, config: Config):
         self.profile = config.asr
@@ -358,3 +489,11 @@ def make_analyzer(config: Config) -> VisualAnalyzer:
 
         return PinnedQwenAnalyzer(config)
     return QwenAnalyzer(config)
+
+
+def make_speaker(config: Config) -> Speaker:
+    return OpenAISpeaker(config)
+
+
+def make_storyboarder(config: Config) -> Storyboarder:
+    return QwenStoryboarder(config)
