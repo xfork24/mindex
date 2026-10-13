@@ -1,0 +1,77 @@
+# e2e 实验框架
+
+`mindex e2e`（`e2e.py`）是**分阶段真实验证框架**：单 GPU 串行推进，不启动、不切换、不卸载任何远程模型——模型由部署者手动切换。它的目的：在宣称检索质量之前，把「真实模型、真实素材、人工标注」的证据链固化下来。
+
+当前实验：`data/e2e/trailer-20261013/`（117 秒 trailer，61 shot / 61 moment）。**`run.json` 是实际阶段状态**，任何时候以它为准，不以文档描述为准。
+
+## 信任模型：probe / pin
+
+标准 llama.cpp API 无法证明权重文件哈希或启动参数。框架的做法：
+
+- **`e2e probe --output ... [--role embedding|asr|analyzer]`**：只读探测（`/health`、`/props`、`/v1/models`），无推理；要求单模型 llama-server（拒绝会自动切模型的路由服务），记录可观察运行指纹（build_info、chat_template、modalities、model_id、元数据）→ `runtime_id`。
+- **`e2e pin`**：部署者提供 GGUF 与 mmproj 的**实际文件 SHA256**、实际量化（如 `Q8_0`）→ 生成部署清单 `data/deployments/<role>.json`。清单已存在时拒绝覆盖；更换模型须新清单+新实验。
+- 此后每次推理前后都重核 `runtime_id`；变化即拒绝。**哈希与启动参数（`--pooling last`、`--video-fps 4`）由部署者背书**，这一信任边界写入空间身份。WeMM 须 `--embeddings --pooling last --video-fps 4`。
+
+## init：冻结实验输入
+
+`e2e init --source ID --run DIR` 校验素材切片完整、配置一致、文件哈希匹配后，生成：
+
+| 文件 | 内容 |
+|---|---|
+| `run.json` | 实验状态：source_id、data_dir、layout_key、segments_hash、curation_hash、11 个 phase 状态 |
+| `source.json` / `segments.json` / `config.initial.json` | 冻结的输入快照 |
+| `LABELING.md` | 标注说明 + 全部 moment 的时间清单 |
+| `queries.draft.jsonl` | 20 条文字草稿（前 8 dev 后 12 test），五类均匀分布 |
+| `no-answer.draft.jsonl` | 5 条无答案诊断查询 |
+| `video-queries/` + `video-queries.draft.jsonl` | 12 个查询视频：self(4)/crop(2)/crosscut(2)/codec(4) 变体 |
+
+每次 `phase` 执行前重新校验：数据目录与切分参数未变、整理状态未变（curation_hash）、原素材与全部切片哈希未变。任何漂移 → 要求新建实验。**质量比较需要冻结的相同候选集。**
+
+## 11 个 phase
+
+`run.json` 的 phase 状态机：`pending → running → complete | failed`；重跑把上一次结果移入 `history`，每次尝试的输入输出存 `attempts/`。
+
+| phase | 需要的服务 | 作用 | 关键产物 |
+|---|---|---|---|
+| `smoke` | WeMM | 六片段能力门槛：维度/范数/有限性/内容敏感性/重复稳定性/身份稳定性 | `smoke.json` + `data/capabilities/<space_id>.json`（llama_cpp 建库前置） |
+| `visual` | WeMM | moment 画面索引并发布（`index --mode visual` 等价） | `visual-latest.json` 记录 index_id |
+| `preview` | WeMM | 跑草稿查询只出排名供人工检查，**不计质量分数** | `preview-<index>-<hash>.json` |
+| `asr` | ASR(:4020) | 原始转写（30 秒块），llama_cpp 路径状态 `pending_alignment` | `transcripts/.../raw/` |
+| `align` | 无（CPU） | 独立 venv 强制对齐；`--python .venv-align/bin/python` | `aligned-N.json`，状态 `complete` |
+| `analyze-smoke` | Qwen(:4040) | 只分析 3 个抽样片段，核对 JSON 与画面依据 | 样本分析结果 |
+| `analyze` | Qwen | 全量分析 + 场景组织 | annotations、scene_plans |
+| `enriched` | WeMM | 完整索引并发布（仍仅 moment，保证与 visual 同候选集） | 新 index_id |
+| `evaluate` | WeMM | 冻结文字标注评测（`--queries frozen-queries.jsonl --split dev|test`） | `evaluation-<index>-<split>.json` |
+| `video-evaluate` | WeMM | 冻结视频查询评测 | 报告含 index_id/split/phase 文件名 |
+| `check` | 无 | 复查活动索引一致性 | 问题列表 |
+
+## freeze：人工标注冻结
+
+```bash
+uv run mindex e2e freeze data/e2e/trailer-20261013/queries.draft.jsonl \
+  --run data/e2e/trailer-20261013 --confirmed-by '实际复核人'
+```
+
+要求：每条 `label_status: confirmed`（程序不自动批准）、查询 ID 唯一、text/video 二选一非空、普通查询有相关目标（`no_answer: true` 除外）、视频文件哈希未变。产出 `frozen-queries.jsonl` + 带 SHA256 与确认人的 manifest；**冻结集已存在时修订标注必须新建实验**。`evaluate`/`video-evaluate` 只接受带匹配 manifest 的冻结集。
+
+相关目标支持 `{"segment_id": ..., "grade": 1-3}` 或 `{"source_id", "start", "end", "grade", "min_overlap"(默认0.5)}`；grade 1/2/3 = 部分/主要/完全相关。区间命中要求交集覆盖较短者的 `min_overlap` 比例。
+
+## 评测 profile 与指标
+
+同一冻结候选集上比较五个 profile：`video_only`、`description_only`、`fusion`、`no_dialogue`、`no_style`（后两者同时从 BM25 移除对应字段，防词法泄漏）；没有对应向量分路的 profile 标记 unavailable。指标：
+
+- **Hit@1 / Hit@5**：前 1/5 条是否有相关结果。
+- **MRR@10**：首个相关结果排名倒数。
+- **nDCG@10**：**按相关组计**——同一相关区间的重复窗口最多奖励一次（与逐条候选标注的标准数据集分数不可直接横比）。
+- 延迟：首请求 + 后续 P50/P95。
+- 无答案查询只记录返回结果（误召回诊断），不混入相关性分数，也不要求返回空集。
+
+报告同时记录模型空间、查询 SHA256、索引与整理状态指纹；评测过程中索引或整理状态变化 → 拒绝比较。**只用 dev 调参**；trailer 规模属于冒烟，正式验收需多真实来源 + 20 dev + 40 test 人工标注，Hit@5 ≥85% 是目标而非现状。
+
+## 当前实验进度（截至 2026-10-13）
+
+`run.json`：smoke / visual / preview / asr / align / check 已 complete；**analyze 起仍 pending**（analyzer 部署清单 `data/deployments/analyzer.json` 尚需 `e2e probe --role analyzer` + `pin --role analyzer` 生成，步骤见 [E2E_RUNBOOK.md](../E2E_RUNBOOK.md) 第 3 节）。下一步命令以 runbook 为准。
+
+## 工程测试 vs 真实验收
+
+`uv run pytest -q`（35 个测试，真实 FFmpeg/SQLite/Chroma/HTTP，确定性模型 fixture）验证**工程链路**；不证明真实模型中文检索质量、INT8 兼容性或显存峰值。真实验收走本框架并记录到 [VERIFICATION.md](../VERIFICATION.md)。真实模型结果、人工标注、浏览器证据、GPU 数据缺一时，保持待验收状态。

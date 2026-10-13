@@ -4,6 +4,8 @@
 
 已增加 llama.cpp/GGUF 适配、六片段能力门槛、分阶段实验、原始 ASR 与独立 CPU 对齐、人工标注冻结及消融评测。当前用户部署及真实 trailer 验证请按 [端到端操作手册](E2E_RUNBOOK.md) 执行；测试设计见 [端到端计划](E2E_TEST_PLAN.md)。llama.cpp 后端正式建库前须完成部署清单和 `e2e phase smoke`。
 
+系统性参考文档（架构、管线、CLI、配置、检索、索引、e2e 框架、后台与工具）见 [docs/](docs/README.md)。
+
 ## 本机启动
 
 需要 Python 3.11、uv、FFmpeg 和 ffprobe。本机只运行切片、数据库、API 和页面；模型在 GPU 机器上运行。

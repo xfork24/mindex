@@ -31,7 +31,7 @@ uv run mindex serve                              # 启动 http://127.0.0.1:8000�
 - `pipeline.py` — 各阶段编排（导入去重、分镜、切片、转写、分析）
 - `indexing.py` — 索引构建、发布前检查、`VectorIndex`（Chroma 封装）
 - `cli.py` — Typer 入口（`mindex`）；重模块在命令函数内延迟导入
-- `e2e.py` — `mindex e2e` 分阶段真实验证框架（probe/pin/phase/freeze），阶段：smoke → visual → preview → asr → align → analyze(-smoke) → enriched → evaluate → video-evaluate → check
+- `e2e.py` — `mindex e2e` 分阶段真实验证框架（init/probe/pin/phase/freeze），阶段：smoke → visual → preview → asr → align → analyze(-smoke) → enriched → evaluate → video-evaluate → check
 - `model_server.py` — GPU 侧服务（`mindex-model-server`，角色独立 venv，见 DEPLOYMENT.md）
 - `llama_cpp.py` — 对用户已有 llama-server 的原生协议适配（`/v1/embeddings` input_video）
 
@@ -45,7 +45,7 @@ uv run mindex serve                              # 启动 http://127.0.0.1:8000�
 - **索引不可变**：换模型、量化、维度、预处理或分析配置 → 新建独立索引版本，从不覆盖；发布前 `check`，激活在 SQLite 事务内完成。回退 = 先切回旧模型服务/配置，再 `indexes activate 旧索引ID`。索引冻结描述与对白快照，后续分析更新不影响已发布索引。
 - **切分布局不可变**：detector/video 切分参数变化须使用新 `data_dir`，不覆盖已有布局。
 - **SQLite 是事实来源**：Chroma 只存显式向量（`embedding_function=None`），业务数据通过 segment/representation ID 关联回 SQLite。
-- **对齐环境隔离**：强制对齐用独立 CPU venv `.venv-align`（`deploy/requirements-alignment.txt`），`align_worker.py` 以独立子进程运行，绝不装入应用环境；`mindex align --python .venv-align/bin/python`。
+- **对齐环境隔离**：强制对齐用独立 CPU venv `.venv-align`（`deploy/requirements-alignment.txt`），`align_worker.py` 以独立子进程运行，绝不装入应用环境；`mindex align .venv-align/bin/python`（解释器为位置参数，`--python` 选项属于 `mindex e2e phase align`）。
 
 ### 存储布局（data_dir）
 
@@ -67,6 +67,7 @@ uv run mindex serve                              # 启动 http://127.0.0.1:8000�
 
 ## 关键文档
 
+- `docs/` — 系统性参考文档：架构、离线管线、CLI、配置、检索、索引版本、e2e 框架、素材后台、工具（索引见 `docs/README.md`）
 - `PLAN.md` — 设计决策、验收标准（40 条测试集 Hit@5 ≥85%）
 - `FILM_WORKFLOW.md` — 整部电影处理流程（visual 模式只需 WeMM）
 - `DEPLOYMENT.md` — GPU 服务部署、各角色环境、HTTP 服务协议
