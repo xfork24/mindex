@@ -148,4 +148,21 @@ uv run mindex model-check /路径/六秒以内片段.mp4 --text '画面描述' -
 
 自动化测试使用真实 FFmpeg、PySceneDetect、SQLite、Chroma 和 HTTP API，模型部分使用明确标记的确定性测试适配器。**这些测试验证工程链路，不证明真实模型中文检索质量、INT8 兼容性或 16GB 显存峰值。** 真实 WeMM、ASR 与 TransNetV2 需在用户 GPU 上完成验收，结果记录到 [验证报告](VERIFICATION.md)。
 
+## 附带工具：哔哩哔哩缓存转 MP4
+
+`tools/m4s-converter/`（自包含，不依赖仓库外文件）将哔哩哔哩客户端缓存的 m4s 音视频流无损合并为 MP4——MP4Box 封装、不转码、按番剧/分P自动命名、重跑幂等。唯一外部依赖是系统级 MP4Box（`brew install gpac`）。
+
+```bash
+# 转换默认缓存目录 ~/Movies/bilibili（或设 BILIBILI_CACHE 环境变量）
+~/workspace/mindex/tools/m4s-converter/convert.sh
+
+# 指定缓存目录；额外参数透传给原工具（如 -o 覆盖同名输出）
+convert.sh /path/to/bilibili缓存目录
+convert.sh /path/to/bilibili缓存目录 -o
+```
+
+- 输出：`<缓存目录>/output/<番剧名>-<UP主>/<分P标题>.mp4`；原始 m4s 缓存不修改。
+- `convert.sh` 已自动跳过交互确认、默认关闭弹幕下载（离线可用）；需要弹幕 ass、完整参数与行为细节见 [tools/m4s-converter/README.md](tools/m4s-converter/README.md)。
+- 转出的 MP4 为标准格式，可直接作为 `mindex prepare` 的输入素材。
+
 详细设计见 [PLAN.md](PLAN.md)。
