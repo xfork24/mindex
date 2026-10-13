@@ -1,0 +1,70 @@
+"""Browser verification only; never use these vectors for real retrieval."""
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
+import uvicorn
+from conftest import FixtureAnalyzer, FixtureEmbedder
+
+from mindex.api import create_app
+from mindex.config import Config
+from mindex.indexing import IndexBuilder
+from mindex.media import command
+from mindex.pipeline import Pipeline
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--data-dir", type=Path, required=True)
+    parser.add_argument("--port", type=int, default=8001)
+    args = parser.parse_args()
+    config = Config(data_dir=args.data_dir.resolve())
+    config.embedding.dimensions = 8
+    config.data_dir.mkdir(parents=True, exist_ok=True)
+    video = config.data_dir / "工程测试专用_颜色样本.mp4"
+    if not video.exists():
+        command(
+            [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=red:s=320x240:r=25:d=1",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=blue:s=320x240:r=25:d=1",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=green:s=320x240:r=25:d=8",
+                "-filter_complex",
+                "[0:v][1:v][2:v]concat=n=3:v=1:a=0[v]",
+                "-map",
+                "[v]",
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                str(video),
+            ]
+        )
+    embedder = FixtureEmbedder(config)
+    pipeline = Pipeline(config, analyzer=FixtureAnalyzer(embedder))
+    with pipeline.lock():
+        pipeline.prepare(video)
+        pipeline.transcribe()
+        pipeline.analyze()
+        IndexBuilder(config, embedder).build(activate=True)
+    print("TEST ONLY: deterministic color vectors; no real model quality is evaluated.")
+    uvicorn.run(create_app(config, embedder), host="127.0.0.1", port=args.port)
+
+
+if __name__ == "__main__":
+    main()

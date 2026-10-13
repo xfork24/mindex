@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mindex"
+version = "0.1.0"
+description = "Chinese text-to-video retrieval with versioned multimodal embeddings"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+  "fastapi>=0.115,<1", "uvicorn>=0.34,<1", "python-multipart>=0.0.20",
+  "httpx>=0.28,<1", "pydantic>=2.10,<3", "PyYAML>=6,<7",
+  "chromadb>=1.0,<2", "numpy>=1.26,<3", "jieba>=0.42.1",
+  "scenedetect[opencv]>=0.6.6,<0.7", "typer>=0.15,<1", "filelock>=3.16",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10", "ruff>=0.11"]
+
+[project.scripts]
+mindex = "mindex.cli:app"
+mindex-model-server = "mindex.model_server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mindex"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 110

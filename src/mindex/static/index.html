@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mindex · 视频素材检索</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js?v=20261013-e2e" defer></script>
+</head>
+<body>
+  <header><a class="brand" href="/">m<span>index</span><i></i></a><span class="header-note">视频素材库</span><a class="quiet nav-link" href="/admin">素材管理</a><button id="refresh" class="quiet">刷新状态</button></header>
+  <main>
+    <section class="intro"><span class="eyebrow">从一句描述，找到一个画面</span><h1>让素材回应你的想法。</h1><p>搜索动作、场景、情绪或一句对白，找到值得使用的视频片段。</p></section>
+    <section class="search-panel" aria-label="搜索素材">
+      <div class="tabs" role="tablist" aria-label="查询方式">
+        <button id="text-tab" class="tab active" role="tab" aria-selected="true" aria-controls="text-input">文字找视频</button>
+        <button id="video-tab" class="tab" role="tab" aria-selected="false" aria-controls="video-input">视频找相似片段</button>
+      </div>
+      <form id="search-form">
+        <div id="text-input" role="tabpanel" aria-labelledby="text-tab"><label class="sr-only" for="query">描述想找的画面</label><textarea id="query" rows="3" maxlength="4000" placeholder="例如：雨夜，一个人坐在窗边，强忍眼泪，镜头慢慢推近…"></textarea>
+          <div class="examples"><span>试着描述</span><button type="button" data-query="一个人欲言又止，强忍眼泪的近景">含蓄情绪</button><button type="button" data-query="两个人在夜晚的街道争吵，其中一人转身离开">人物互动</button><button type="button" data-query="从背后拍摄一个人走进空旷房间">镜头角度</button></div>
+        </div>
+        <div id="video-input" role="tabpanel" aria-labelledby="video-tab" hidden><label class="upload" for="video-file"><span class="upload-symbol">↥</span><strong>选择一段参考视频</strong><span id="file-label">最长 30 秒 · 最大 100MB</span><input id="video-file" type="file" accept="video/*"></label><video id="query-preview" controls hidden></video></div>
+        <div class="form-bottom"><label>检索粒度<select id="granularity"><option value="moment">精细片段</option><option value="shot">完整镜头</option><option value="scene">连续场景</option></select></label><label>返回数量<select id="limit"><option>20</option><option>10</option><option>50</option></select></label><button class="submit" id="search-button" type="submit">查找片段 <span>↗</span></button></div>
+        <details class="filters"><summary>筛选素材</summary><div class="filter-grid"><label>来源<select id="source"><option value="">全部素材</option></select></label><label>场景<input id="scene" placeholder="例如：室内、雨夜"></label><label>人物情绪<input id="emotion" placeholder="例如：悲伤、克制"></label><label>景别<input id="shot-size" placeholder="例如：近景、特写"></label><label>最短时长（秒）<input id="min-duration" type="number" min="0" step="0.1"></label><label>最长时长（秒）<input id="max-duration" type="number" min="0.1" step="0.1"></label></div></details>
+      </form>
+    </section>
+    <div id="notice" class="notice" role="status" aria-live="polite"></div>
+    <section class="results-section"><div class="results-heading"><h2>检索结果 <span id="result-count"></span></h2><span id="timing"></span></div><div id="results" class="results"><div class="empty"><span>⌕</span><h3>你要找的画面，从这里开始</h3><p>输入描述，或上传一段参考视频。</p></div></div></section>
+    <details class="library-status"><summary>素材库状态 <span id="library-summary">正在读取…</span></summary><div id="library-detail"></div></details>
+  </main>
+  <footer><span>Mindex / 素材检索工作台</span><span>文字与视频查询 · 本地素材库</span></footer>
+  <dialog id="detail-dialog"><button id="close-dialog" class="quiet close" aria-label="关闭详情">✕</button><div id="detail-content"></div></dialog>
+</body>
+</html>

@@ -1,0 +1,13 @@
+.venv*/
+models/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+data/
+config.local.yaml
+.env
+*.egg-info/
+dist/
+.DS_Store
+customvoice.wav

@@ -1,0 +1,454 @@
+"""Explicit, resumable single-GPU stages. Never starts or switches remote models."""
+
+from __future__ import annotations
+
+import json
+import shutil
+from datetime import UTC, datetime
+from pathlib import Path
+from time import perf_counter
+from uuid import uuid4
+
+import numpy as np
+from filelock import FileLock
+
+from .adapters import ModelError, make_embedder
+from .config import Config, fingerprint
+from .film import source_report
+from .media import atomic_media, content_hash, cut, probe
+from .pipeline import Pipeline
+from .storage import Store
+
+PHASES = (
+    "smoke",
+    "visual",
+    "preview",
+    "asr",
+    "align",
+    "analyze-smoke",
+    "analyze",
+    "enriched",
+    "evaluate",
+    "video-evaluate",
+    "check",
+)
+
+
+def save(path: Path, value):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".partial")
+    temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2))
+    temporary.replace(path)
+
+
+def curation(store: Store):
+    return {
+        name: store.rows(f"SELECT * FROM {name} ORDER BY 1")
+        for name in ("source_curation", "segment_curation")
+    }
+
+
+def initialize(config: Config, source_id: str, directory: Path):
+    directory = directory.resolve()
+    if (directory / "run.json").exists():
+        raise ValueError("实验已存在，请继续 phase；新实验使用新的目录")
+    store = Store(config.data_dir)
+    report = source_report(config, source_id)
+    if not report["prepared"] or not report["configuration_matches"] or report["missing_artifacts"]:
+        raise ValueError("素材未完成切片、配置不符或文件缺失")
+    media = store.resolve_media(report["source_path"])
+    if content_hash(media) != source_id:
+        raise ValueError("原素材 SHA256 不匹配")
+    segments = store.segments(source_id, "moment")
+    manifest_rows = []
+    for segment in segments:
+        clip = store.resolve_media(segment["path"])
+        info = probe(clip)
+        if abs(info["duration"] - (segment["end"] - segment["start"])) > 0.15:
+            raise ValueError(f"切片时长不匹配 {segment['id']}")
+        manifest_rows.append({**segment, "sha256": content_hash(clip), "media": info})
+    if len(manifest_rows) < 6:
+        raise ValueError("六片段真实冒烟至少需要 6 个 moment")
+    save(directory / "source.json", report)
+    save(directory / "segments.json", manifest_rows)
+    save(directory / "config.initial.json", config.model_dump(mode="json"))
+    state = {
+        "schema": 1,
+        "source_id": source_id,
+        "data_dir": str(store.root),
+        "layout_key": config.layout_key,
+        "segments_hash": fingerprint(manifest_rows),
+        "curation_hash": fingerprint(curation(store)),
+        "created_at": datetime.now(UTC).isoformat(),
+        "phases": {phase: {"status": "pending"} for phase in PHASES},
+        "acceptance": "pending-real-models-and-human-labels",
+    }
+    save(directory / "run.json", state)
+    # A review sheet records intervals without pretending model captions are truth.
+    lines = [
+        "# 中文相关性标注草稿",
+        "",
+        "观看分镜后填写 queries.draft.jsonl 的 text、relevant 和 category。",
+        "20 条文字：前 8 条 dev，后 12 条 test。确认后使用 e2e freeze；测试集不用于调参。",
+        "参考时间段或 segment_id，grade 为 1/2/3。不要直接把模型输出当作真值。",
+        "",
+    ]
+    drafts = [
+        {
+            "id": f"text-{i + 1:02}",
+            "split": "dev" if i < 8 else "test",
+            "category": ["scene", "action", "interaction", "camera", "dialogue"][i % 5],
+            "text": "",
+            "granularity": "moment",
+            "relevant": [],
+            "label_status": "draft",
+        }
+        for i in range(20)
+    ]
+    for i, segment in enumerate(segments):
+        lines.append(f"- {i + 1:02} `{segment['id']}`：{segment['start']:.3f}–{segment['end']:.3f}s")
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "LABELING.md").write_text("\n".join(lines))
+    (directory / "queries.draft.jsonl").write_text(
+        "\n".join(json.dumps(v, ensure_ascii=False) for v in drafts) + "\n"
+    )
+    diagnostics = [
+        {
+            "id": f"absent-{i + 1}",
+            "split": "diagnostic",
+            "text": text,
+            "no_answer": True,
+            "relevant": [],
+            "label_status": "draft",
+        }
+        for i, text in enumerate(
+            [
+                "太空中宇航员修理空间站",
+                "雪山顶上滑雪者跃下悬崖",
+                "潜水员在海底抚摸珊瑚",
+                "机器人在工厂焊接汽车",
+                "沙漠里骆驼队穿过沙丘",
+            ]
+        )
+    ]
+    (directory / "no-answer.draft.jsonl").write_text(
+        "\n".join(json.dumps(v, ensure_ascii=False) for v in diagnostics) + "\n"
+    )
+    make_video_queries(store, source_id, segments, directory)
+    return state
+
+
+def make_video_queries(store: Store, source_id: str, segments: list[dict], directory: Path):
+    candidates = [s for s in segments if s["end"] - s["start"] >= 1]
+    chosen = [candidates[int(i)] for i in np.linspace(0, len(candidates) - 2, 4)]
+    entries = []
+    original = store.resolve_media(store.one("SELECT path FROM sources WHERE id=?", (source_id,))["path"])
+    for number in range(12):
+        segment = chosen[number % 4]
+        output = directory / "video-queries" / f"{number + 1:02}.mp4"
+        output.parent.mkdir(parents=True, exist_ok=True)
+        start, end = segment["start"], segment["end"]
+        kind = "self" if number < 4 else "crop" if number < 6 else "crosscut" if number < 8 else "codec"
+        if kind == "self":
+            shutil.copyfile(store.resolve_media(segment["path"]), output)
+        elif kind == "crop":
+            margin = (end - start) * 0.2
+            start, end = start + margin, end - margin
+            cut(original, start, end, output)
+        elif kind == "crosscut":
+            start, end = max(0, end - 0.6), min(probe(original)["duration"], end + 0.6)
+            cut(original, start, end, output)
+        else:
+            atomic_media(
+                [
+                    "-i",
+                    str(store.resolve_media(segment["path"])),
+                    "-vf",
+                    "scale=320:-2",
+                    "-c:v",
+                    "libx264",
+                    "-crf",
+                    "30",
+                    "-c:a",
+                    "aac",
+                ],
+                output,
+            )
+        targets = [
+            {"segment_id": s["id"], "grade": 3 if kind != "crosscut" else 2}
+            for s in segments
+            if min(s["end"], end) - max(s["start"], start) > 0.05
+        ]
+        entries.append(
+            {
+                "id": f"video-{number + 1:02}",
+                "split": "video",
+                "video": str(output.relative_to(directory)),
+                "variant": kind,
+                "relevant": targets,
+                "label_status": "draft",
+                "sha256": content_hash(output),
+            }
+        )
+    (directory / "video-queries.draft.jsonl").write_text(
+        "\n".join(json.dumps(v, ensure_ascii=False) for v in entries) + "\n"
+    )
+
+
+def freeze(directory: Path, path: Path, confirmed_by: str):
+    entries = [json.loads(v) for v in path.read_text().splitlines() if v.strip()]
+    if not confirmed_by.strip() or not entries or len({v["id"] for v in entries}) != len(entries):
+        raise ValueError("需要确认人、唯一查询 ID 和非空查询集")
+    for entry in entries:
+        if entry.get("label_status") != "confirmed":
+            raise ValueError(f"{entry['id']} 尚未人工确认 label_status=confirmed")
+        if bool(entry.get("text", "").strip()) == bool(entry.get("video")):
+            raise ValueError("每条查询需且只能有一个非空 text/video")
+        if not entry.get("relevant") and not entry.get("no_answer"):
+            raise ValueError("普通查询需相关目标；无答案需 no_answer=true")
+        if entry.get("video"):
+            video = path.parent / entry["video"]
+            if content_hash(video) != entry["sha256"]:
+                raise ValueError("视频查询文件发生变化")
+    # Keep video paths relative to the input file's directory.
+    target = directory / ("frozen-" + path.name.replace(".draft", ""))
+    if target.exists():
+        raise ValueError("冻结集已存在；修订标注必须创建新实验")
+    for entry in entries:
+        if "video" in entry:
+            entry["video"] = str((path.parent / entry["video"]).resolve())
+    target.write_text("\n".join(json.dumps(v, ensure_ascii=False) for v in entries) + "\n")
+    save(
+        target.with_suffix(".manifest.json"),
+        {
+            "sha256": content_hash(target),
+            "confirmed_by": confirmed_by,
+            "confirmed_at": datetime.now(UTC).isoformat(),
+            "counts": {
+                split: sum(v["split"] == split for v in entries) for split in {v["split"] for v in entries}
+            },
+        },
+    )
+    return str(target)
+
+
+def smoke(config: Config, directory: Path) -> dict:
+    rows = json.loads((directory / "segments.json").read_text())
+    # Avoid repeated identical files; six diverse scenes are manually reviewed after this structural gate.
+    unique = list({row["sha256"]: row for row in rows}.values())
+    if len(unique) < 6:
+        raise ValueError("至少需要六个不同的实际视频文件")
+    samples = [unique[int(i)] for i in np.linspace(0, len(unique) - 2, 6)]
+    embedder, store = make_embedder(config), Store(config.data_dir)
+    space = embedder.identity()
+    gate = config.data_dir / "capabilities" / (fingerprint(space) + ".json")
+    save(gate, {"passed": False, "space": space, "status": "checking"})
+    texts = [
+        "室外建筑前的人",
+        "房间里交谈的人",
+        "街道上的人群",
+        "一个人骑自行车",
+        "人物面部近景",
+        "画面中的文字",
+    ]
+    text_vectors, video_vectors, timings = [], [], []
+    for row, text in zip(samples, texts):
+        started = perf_counter()
+        text_vectors.append(embedder.text([text], role="query")[0])
+        text_ms = (perf_counter() - started) * 1000
+        started = perf_counter()
+        video_vectors.append(embedder.video(store.resolve_media(row["path"])))
+        timings.append(
+            {"segment_id": row["id"], "text_ms": text_ms, "video_ms": (perf_counter() - started) * 1000}
+        )
+    repeated = embedder.video(store.resolve_media(samples[0]["path"]))
+    repeated_text = embedder.text([texts[0]], role="query")[0]
+    videos, texts_array = np.asarray(video_vectors), np.asarray(text_vectors)
+    similarity = videos @ videos.T
+    off_diagonal = similarity[np.triu_indices(6, 1)]
+    checks = {
+        "finite": bool(np.isfinite(videos).all() and np.isfinite(texts_array).all()),
+        "dimensions": videos.shape == texts_array.shape == (6, config.embedding.dimensions),
+        "unit_norm": bool(
+            np.allclose(np.linalg.norm(videos, axis=1), 1, atol=1e-4)
+            and np.allclose(np.linalg.norm(texts_array, axis=1), 1, atol=1e-4)
+        ),
+        "video_content_changes_vector": bool(np.max(off_diagonal) < 0.99999),
+        "text_content_changes_vector": bool(
+            np.max((texts_array @ texts_array.T)[np.triu_indices(6, 1)]) < 0.99999
+        ),
+        "video_repeat_stable": float(np.dot(repeated, videos[0])) >= 0.999,
+        "text_repeat_stable": float(np.dot(repeated_text, texts_array[0])) >= 0.999,
+        "space_stable": embedder.identity() == space,
+    }
+    report = {
+        "passed": all(checks.values()),
+        "checks": checks,
+        "space": space,
+        "space_id": fingerprint(space),
+        "samples": samples,
+        "measurements": timings,
+        "text_video_cosine": (texts_array @ videos.T).tolist(),
+        "video_pair_cosine": similarity.tolist(),
+        "note": "结构门槛不代表中文检索质量通过；须人工相关性标注和浏览器验收。GPU 峰值由部署机采集。",
+    }
+    save(directory / "smoke.json", report)
+    gate = config.data_dir / "capabilities" / (fingerprint(space) + ".json")
+    save(gate, report)  # A failed rerun explicitly revokes an earlier gate for this identity.
+    if not report["passed"]:
+        raise ModelError("六片段嵌入能力门槛未通过，详见 smoke.json")
+    return report
+
+
+def run_phase(
+    config: Config,
+    directory: Path,
+    phase: str,
+    *,
+    python: Path | None = None,
+    queries: Path | None = None,
+    split: str = "test",
+) -> dict:
+    if phase not in PHASES:
+        raise ValueError(f"phase 必须为 {PHASES}")
+    directory = directory.resolve()
+    with FileLock(str(directory / "run.lock"), timeout=0):
+        state_path = directory / "run.json"
+        state = json.loads(state_path.read_text())
+        store = Store(config.data_dir)
+        if state["data_dir"] != str(store.root) or state["layout_key"] != config.layout_key:
+            raise ValueError("实验数据目录或切分参数发生变化，请创建新实验")
+        if state["curation_hash"] != fingerprint(curation(store)):
+            raise ValueError("整理状态已变化；质量比较需要冻结相同候选集")
+        source = store.one("SELECT path FROM sources WHERE id=?", (state["source_id"],))
+        if not source or content_hash(store.resolve_media(source["path"])) != state["source_id"]:
+            raise ValueError("原素材文件发生变化")
+        rows = json.loads((directory / "segments.json").read_text())
+        if fingerprint(rows) != state["segments_hash"]:
+            raise ValueError("实验切片清单发生变化")
+        for row in rows:
+            if content_hash(store.resolve_media(row["path"])) != row["sha256"]:
+                raise ValueError("切片文件发生变化")
+        previous = state["phases"].get(phase)
+        if previous and previous["status"] != "pending":
+            state.setdefault("history", []).append({"phase": phase, **previous})
+        attempt = uuid4().hex[:12]
+        phase_state = {
+            "attempt": attempt,
+            "status": "running",
+            "started_at": datetime.now(UTC).isoformat(),
+            "config": config.model_dump(mode="json"),
+        }
+        state["phases"][phase] = phase_state
+        save(state_path, state)
+        started = perf_counter()
+        try:
+            if phase == "smoke":
+                result = smoke(config, directory)
+            elif phase in {"visual", "enriched"}:
+                from .indexing import IndexBuilder
+
+                with Pipeline(config).lock():
+                    index_id = IndexBuilder(config).build(
+                        mode="visual" if phase == "visual" else "enriched",
+                        source_id=state["source_id"],
+                        kinds=("moment",),
+                        activate=True,
+                    )
+                result = {"index_id": index_id, "active": store.active_index()}
+            elif phase in {"asr", "align", "analyze-smoke", "analyze"}:
+                pipeline = Pipeline(config)
+                with pipeline.lock():
+                    if phase == "asr":
+                        pipeline.transcribe(state["source_id"])
+                    elif phase == "align":
+                        if python is None:
+                            raise ValueError("align 需要 --python 指定独立 CPU 环境解释器")
+                        pipeline.align(python, state["source_id"])
+                    elif phase == "analyze-smoke":
+                        moments = store.segments(state["source_id"], "moment")
+                        samples = [moments[i] for i in (0, len(moments) // 3, 2 * len(moments) // 3)]
+                        for segment in samples:
+                            pipeline._annotate(segment)
+                    else:
+                        pipeline.analyze(state["source_id"])
+                result = {
+                    "source_id": state["source_id"],
+                    "transcript": store.json_value(
+                        "transcripts", "source_id", state["source_id"], config.asr_key
+                    ),
+                }
+                if phase == "analyze-smoke":
+                    result["samples"] = [
+                        {
+                            "segment": segment,
+                            "analysis": store.json_value(
+                                "annotations", "segment_id", segment["id"], config.analysis_key
+                            ),
+                        }
+                        for segment in samples
+                    ]
+            elif phase == "preview":
+                from .search import SearchEngine
+                from .types import TextSearch
+
+                if queries is None:
+                    raise ValueError("preview 需要 --queries 指定文字或视频查询草稿")
+                entries = [json.loads(v) for v in queries.read_text().splitlines() if v.strip()]
+                engine = SearchEngine(config)
+                details = []
+                for entry in entries:
+                    if entry.get("text", "").strip():
+                        response = engine.text(TextSearch(text=entry["text"], limit=10))
+                    elif entry.get("video"):
+                        response = engine.video(queries.parent / entry["video"], limit=10)
+                    else:
+                        raise ValueError("查询草稿中有空查询")
+                    details.append({"query": entry, **response})
+                result = {
+                    "status": "unreviewed_preview",
+                    "queries_sha256": content_hash(queries),
+                    "details": details,
+                    "note": "仅提供排名供人工检查，未计算质量分数",
+                }
+                active = store.active_index()
+                save(directory / f"preview-{active['id']}-{content_hash(queries)[:12]}.json", result)
+            elif phase in {"evaluate", "video-evaluate"}:
+                from .evaluation import evaluate
+
+                if queries is None:
+                    raise ValueError("需要 --queries 指定已冻结的人工标注")
+                label_manifest = queries.with_suffix(".manifest.json")
+                if not label_manifest.is_file() or json.loads(label_manifest.read_text())[
+                    "sha256"
+                ] != content_hash(queries):
+                    raise ValueError("标注未冻结或已变化，请先 e2e freeze")
+                active = store.active_index()
+                result = evaluate(
+                    config,
+                    queries,
+                    "video" if phase == "video-evaluate" else split,
+                    directory / f"evaluation-{active['id']}-{split}-{phase}.json",
+                )
+            else:
+                from .indexing import check_index
+
+                active = store.active_index()
+                if not active:
+                    raise ValueError("没有已发布索引")
+                issues = check_index(store, active["id"])
+                result = {"index_id": active["id"], "ok": not issues, "issues": issues}
+                if issues:
+                    raise ValueError("索引检查失败")
+            save(directory / f"{phase}-latest.json", result)
+            artifact = f"attempts/{phase}-{attempt}-result.json"
+            save(directory / artifact, result)
+            phase_state.update(status="complete", result_file=artifact)
+        except Exception as exc:
+            phase_state.update(status="failed", error=str(exc), error_type=type(exc).__name__)
+            raise
+        finally:
+            phase_state["elapsed_ms"] = (perf_counter() - started) * 1000
+            save(directory / f"attempts/{phase}-{attempt}.json", phase_state)
+            save(state_path, state)
+        return {"phase": phase, **phase_state}

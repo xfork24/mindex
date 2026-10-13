@@ -1,0 +1,94 @@
+from __future__ import annotations
+
+from typing import Literal
+
+from pydantic import BaseModel, Field, model_validator
+
+Granularity = Literal["shot", "moment", "scene"]
+
+
+class Utterance(BaseModel):
+    start: float = Field(ge=0)
+    end: float = Field(gt=0)
+    text: str
+
+    @model_validator(mode="after")
+    def ordered(self):
+        if self.end <= self.start:
+            raise ValueError("Utterance end must be after start")
+        return self
+
+
+class Annotation(BaseModel):
+    description: str = Field(min_length=1)
+    actions: list[str] = Field(default_factory=list)
+    people: list[str] = Field(default_factory=list)
+    objects: list[str] = Field(default_factory=list)
+    scene: list[str] = Field(default_factory=list)
+    emotions: list[str] = Field(default_factory=list)
+    atmosphere: list[str] = Field(default_factory=list)
+    shot_size: list[str] = Field(default_factory=list)
+    angle: list[str] = Field(default_factory=list)
+    camera_motion: list[str] = Field(default_factory=list)
+    visual_evidence: list[str] = Field(default_factory=list)
+    dialogue_inference: list[str] = Field(default_factory=list)
+    uncertainty: list[str] = Field(default_factory=list)
+
+    def views(self, dialogue: str) -> dict[str, str]:
+        description = "\n".join(
+            filter(
+                None,
+                [
+                    self.description,
+                    "动作：" + "；".join(self.actions) if self.actions else "",
+                    "场景：" + "；".join(self.scene) if self.scene else "",
+                    "人物：" + "；".join(self.people) if self.people else "",
+                    "对象：" + "；".join(self.objects) if self.objects else "",
+                ],
+            )
+        )
+        style = "\n".join(
+            f"{label}：{'；'.join(values)}"
+            for label, values in [
+                ("人物情绪", self.emotions),
+                ("氛围", self.atmosphere),
+                ("景别", self.shot_size),
+                ("角度", self.angle),
+                ("镜头运动", self.camera_motion),
+            ]
+            if values
+        )
+        return {
+            k: v
+            for k, v in {"description": description, "style": style, "dialogue": dialogue}.items()
+            if v.strip()
+        }
+
+
+class Filters(BaseModel):
+    source_id: str | None = None
+    min_duration: float = Field(default=0, ge=0)
+    max_duration: float | None = Field(default=None, gt=0)
+    scene: str | None = None
+    emotion: str | None = None
+    shot_size: str | None = None
+
+    @model_validator(mode="after")
+    def ordered(self):
+        if self.max_duration is not None and self.max_duration < self.min_duration:
+            raise ValueError("max_duration must be >= min_duration")
+        return self
+
+
+class TextSearch(BaseModel):
+    text: str = Field(min_length=1, max_length=4000)
+    granularity: Granularity = "moment"
+    limit: int = Field(default=20, ge=1, le=50)
+    filters: Filters = Field(default_factory=Filters)
+
+    @model_validator(mode="after")
+    def nonblank(self):
+        self.text = self.text.strip()
+        if not self.text:
+            raise ValueError("请输入查询文字")
+        return self

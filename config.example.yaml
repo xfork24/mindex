@@ -1,0 +1,63 @@
+# 2026-10-13：四个模型均已部署、当前未启动；此文件只配置地址，不启动服务。
+data_dir: ./data
+embedding:
+  # mindex = 本项目自定义服务；llama_cpp = 用户现有 llama-server，详见 E2E_RUNBOOK.md。
+  backend: mindex
+  deployment_manifest: null
+  base_url: http://192.168.1.86:4010
+  model: tencent/WeMM-Embedding-9B
+  revision: main
+  quantization: int8
+  dimensions: 4096
+  timeout: 180
+  api_key_env: MINDEX_MODEL_API_KEY
+analyzer:
+  backend: openai
+  deployment_manifest: null
+  base_url: http://192.168.1.86:4040/v1
+  model: qwen3.8:27b
+  revision: deployed-2026-10-12
+  timeout: 180
+  api_key_env: MINDEX_QWEN_API_KEY
+asr:
+  backend: mindex
+  deployment_manifest: null
+  aligner_model: Qwen/Qwen3-ForcedAligner-0.6B
+  aligner_revision: c7cbfc2048c462b0d63a45797104fc9db3ad62b7
+  base_url: http://192.168.1.86:4020
+  model: Qwen/Qwen3-ASR-1.7B
+  revision: main
+  timeout: 300
+  api_key_env: MINDEX_MODEL_API_KEY
+  enabled: true
+tts:
+  # 预留部署信息，当前视频检索流程不调用 TTS。
+  base_url: http://192.168.1.86:4030
+  model: Qwen3-TTS
+detector:
+  # adaptive works on the local CPU. Use transnet for the supplied GPU service.
+  backend: adaptive
+  base_url: http://192.168.1.86:18203
+  api_key_env: MINDEX_MODEL_API_KEY
+  threshold: 0.5
+  adaptive_threshold: 3.0
+  min_content_val: 10.0
+video:
+  short_shot_seconds: 6
+  window_seconds: 4
+  stride_seconds: 3
+  fps: 4
+  max_frames: 24
+  max_pixels: 262144
+  analysis_frames: 12
+search:
+  candidates: 100
+  rrf_k: 60
+  weights:
+    video: 1.0
+    description: 1.0
+    style: 1.0
+    dialogue: 0.5
+    lexical: 0.5
+  max_upload_mb: 100
+  max_query_seconds: 30

@@ -1,0 +1,74 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## 项目概览
+
+Mindex：中文视频片段检索（文字找视频优先，支持视频找相似片段）。本机 CPU 只运行切片、SQLite、FastAPI 和页面；大模型以独立 HTTP 服务运行在 GPU 机器上（WeMM 嵌入 `:4010`、ASR `:4020`、Qwen 分析 `:4040/v1`、可选 TransNetV2 `:18203`；TTS `:4030` 仅预留不参与管线）。单 GPU 分阶段互斥执行，**不能假设多个模型服务同时可用**。
+
+工作语言：文档、CLI 帮助、日志、错误消息均为中文，新代码保持一致。
+
+## 常用命令
+
+```bash
+uv sync --extra dev                              # 安装依赖（Python 3.11 + uv，需 ffmpeg/ffprobe）
+uv run pytest -q                                 # 全部测试
+uv run pytest tests/test_pipeline.py -q          # 单个文件
+uv run pytest tests/test_pipeline.py::test_name  # 单个测试
+uv run ruff check src tests                      # lint（line-length 110，target py311）
+node --check src/mindex/static/app.js            # 静态 JS 语法检查
+uv run mindex serve                              # 启动 http://127.0.0.1:8000（/docs、/admin）
+```
+
+配置从 `config.example.yaml` 复制为 `config.local.yaml`（gitignored）。`--config` 必须放在子命令之前（`uv run mindex --config x.yaml index`），或设 `MINDEX_CONFIG`。配置模型为 strict（`extra="forbid"`），未知键会校验失败。
+
+## 架构
+
+### 离线管线（分阶段、可断点续跑）
+
+`prepare`（=detect+split，纯本地 CPU）→ `transcribe` → `align` → `analyze` → `index --activate`。各阶段有检查点，失败后重跑同一命令即可恢复；`data/pipeline.lock` 文件锁互斥。`ingest` 快捷命令要求全部服务同时可用，单 GPU 场景禁用。
+
+- `pipeline.py` — 各阶段编排（导入去重、分镜、切片、转写、分析）
+- `indexing.py` — 索引构建、发布前检查、`VectorIndex`（Chroma 封装）
+- `cli.py` — Typer 入口（`mindex`）；重模块在命令函数内延迟导入
+- `e2e.py` — `mindex e2e` 分阶段真实验证框架（probe/pin/phase/freeze），阶段：smoke → visual → preview → asr → align → analyze(-smoke) → enriched → evaluate → video-evaluate → check
+- `model_server.py` — GPU 侧服务（`mindex-model-server`，角色独立 venv，见 DEPLOYMENT.md）
+- `llama_cpp.py` — 对用户已有 llama-server 的原生协议适配（`/v1/embeddings` input_video）
+
+### 模型适配层（adapters.py）
+
+五个 Protocol：`MultimodalEmbedder`、`VisualAnalyzer`、`Transcriber`、`Aligner`、`ShotDetector`，由 `make_*` 工厂按配置的 backend 构造（`mindex` 自定义服务 / `llama_cpp` / `openai` / 本地 adaptive / 远程 transnet）。替换模型 = 实现协议接入新 backend，不改检索管线。
+
+### 核心不变量
+
+- **嵌入空间身份**：服务必须在 `/health` 和每次向量响应中携带身份（model/revision/quantization/dims/预处理/implementation 指纹，`config.fingerprint` 计算）；查询身份与活动索引不符返回 503，禁止跨空间比较向量。
+- **索引不可变**：换模型、量化、维度、预处理或分析配置 → 新建独立索引版本，从不覆盖；发布前 `check`，激活在 SQLite 事务内完成。回退 = 先切回旧模型服务/配置，再 `indexes activate 旧索引ID`。索引冻结描述与对白快照，后续分析更新不影响已发布索引。
+- **切分布局不可变**：detector/video 切分参数变化须使用新 `data_dir`，不覆盖已有布局。
+- **SQLite 是事实来源**：Chroma 只存显式向量（`embedding_function=None`），业务数据通过 segment/representation ID 关联回 SQLite。
+- **对齐环境隔离**：强制对齐用独立 CPU venv `.venv-align`（`deploy/requirements-alignment.txt`），`align_worker.py` 以独立子进程运行，绝不装入应用环境；`mindex align --python .venv-align/bin/python`。
+
+### 存储布局（data_dir）
+
+`sources/`（原片，内容哈希去重）、`plans/`（分镜计划，原子写入）、`clips/`、`thumbnails/`、`reports/`、`transcripts/`（30 秒块检查点）、`chroma/`、`context/`（转码缓存）、`metadata.sqlite3`。
+
+### 检索（search.py）
+
+文字查询五路召回：视频、动作场景描述、情绪镜头描述、对白四类向量 + jieba BM25，加权 RRF 融合（默认 video/description/style 1、dialogue/lexical 0.5，k=60），同源 IoU>0.5 去重。视频查询拆 4s/3s 窗口只检索画面表示，不入库、临时文件清理。在线只调用嵌入服务，无 Qwen 实时重排；分数不是概率。
+
+### Web/API
+
+`api.py`（检索 API + create_app）、`admin.py`（素材后台 API）、`static/`（原生 HTML/JS，无前端框架）。`/admin` 直接读 SQLite，不依赖活动索引；curation（显示名/备注/收藏/隐藏，`curation.py`）与不可变索引快照分离，hidden 在召回前过滤。
+
+## 测试约定
+
+- 测试使用真实 FFmpeg、PySceneDetect、SQLite、Chroma 和 HTTP API（集成式，无网络也能跑）；模型用 `conftest.py` 中明确标记的确定性 Fixture 适配器。
+- **不能用模拟向量冒充真实检索结果**；服务未就绪时页面/API 显示明确未就绪状态。
+- 自动化测试只验证工程链路，不证明真实模型中文检索质量；真实验收走 `mindex e2e` 阶段并记录到 VERIFICATION.md。
+
+## 关键文档
+
+- `PLAN.md` — 设计决策、验收标准（40 条测试集 Hit@5 ≥85%）
+- `FILM_WORKFLOW.md` — 整部电影处理流程（visual 模式只需 WeMM）
+- `DEPLOYMENT.md` — GPU 服务部署、各角色环境、HTTP 服务协议
+- `E2E_RUNBOOK.md` / `E2E_TEST_PLAN.md` — 端到端真实验证操作手册
+- `eval/README.md` — 评测查询标注说明

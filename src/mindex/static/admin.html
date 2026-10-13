@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mindex · 素材管理</title><link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/admin.css">
+  <script src="/admin.js?v=20261013-e2e" defer></script>
+</head>
+<body class="admin">
+  <header><a class="brand" href="/">m<span>index</span><i></i></a><span class="header-note">素材管理</span><a class="quiet nav-link" href="/">视频检索 ↗</a><button class="quiet" id="reload">刷新素材</button></header>
+  <main class="admin-main">
+    <section class="admin-intro"><span class="eyebrow">素材 / 镜头 / 精细片段</span><h1>把每个画面，放在手边。</h1><p>按名称找到素材，查看自动分镜，整理值得保留的片段。</p></section>
+    <div id="admin-notice" class="notice" role="status" aria-live="polite"></div>
+    <div class="workspace">
+      <aside class="source-panel" aria-label="素材列表">
+        <form id="source-search"><label for="source-query">查找素材</label><div class="search-row"><input id="source-query" type="search" maxlength="200" placeholder="素材名称或原文件名"><button type="submit" class="quiet">搜索</button></div></form>
+        <div class="source-filters"><label>显示范围<select id="source-visibility"><option value="visible">未隐藏</option><option value="hidden">已隐藏</option><option value="all">全部素材</option></select></label><label class="check"><input id="source-favorite" type="checkbox">仅收藏</label></div>
+        <p id="source-count" class="muted"></p><div id="source-list"></div>
+        <nav class="pager" aria-label="素材分页"><button id="source-prev" class="quiet">上一页</button><span id="source-page"></span><button id="source-next" class="quiet">下一页</button></nav>
+        <p class="sidebar-help">视频通过命令行导入。完成分镜后即可在这里查看，无需先建立向量索引。</p>
+      </aside>
+      <section class="segment-panel" aria-label="素材详情">
+        <div id="no-source" class="empty"><h2>选择一份素材</h2><p>镜头、精细片段和整理记录会显示在这里。</p></div>
+        <div id="source-workspace" hidden>
+          <div id="source-detail"></div>
+          <div class="segment-toolbar"><div class="kind-tabs" role="tablist" aria-label="片段类型"><button id="shots-tab" class="active" role="tab" aria-selected="true">镜头</button><button id="moments-tab" role="tab" aria-selected="false">精细片段</button></div><div class="segment-filters"><label class="check"><input id="segment-favorite" type="checkbox">仅收藏片段</label><label><span class="sr-only">片段显示范围</span><select id="segment-visibility"><option value="visible">未隐藏片段</option><option value="hidden">已隐藏片段</option><option value="all">全部片段</option></select></label></div></div>
+          <div id="parent-filter" class="parent-filter" hidden><span id="parent-label"></span><button id="clear-parent" class="quiet">显示全部片段</button></div>
+          <div class="segment-summary"><span id="segment-count"></span><span>时间为原片位置</span></div>
+          <div id="segment-list" class="segment-grid"></div>
+          <nav class="pager" aria-label="片段分页"><button id="segment-prev" class="quiet">上一页</button><span id="segment-page"></span><button id="segment-next" class="quiet">下一页</button></nav>
+        </div>
+      </section>
+    </div>
+  </main>
+  <dialog id="edit-dialog" aria-labelledby="edit-title"><button id="edit-close" type="button" class="quiet close" aria-label="关闭编辑">✕</button><h2 id="edit-title">整理素材</h2><form id="edit-form"><label for="edit-name">显示名称</label><input id="edit-name" maxlength="200" placeholder="留空恢复默认名称"><label for="edit-notes">备注</label><textarea id="edit-notes" maxlength="4000" rows="5" placeholder="记录用途、亮点或待检查的问题"></textarea><p class="muted">名称与备注用于整理素材，不修改文件或已有向量。</p><p id="edit-error" role="alert"></p><button id="edit-save" class="submit" type="submit">保存修改</button></form></dialog>
+  <dialog id="play-dialog" aria-labelledby="play-title"><button id="play-close" class="quiet close" aria-label="关闭播放">✕</button><h2 id="play-title"></h2><video id="play-video" controls preload="metadata"></video><p id="play-time"></p><a id="play-download" class="quiet nav-link">下载片段 ↧</a></dialog>
+  <footer><span>Mindex / 素材管理</span><span>本地素材库 · 整理记录自动保存</span></footer>
+</body></html>

@@ -1,0 +1,72 @@
+{"id": "text-01-01", "split": "dev", "category": "动作顺序", "text": "一个人推开门，停顿后走进房间", "granularity": "moment", "relevant": []}
+{"id": "text-01-02", "split": "dev", "category": "动作顺序", "text": "一个人把杯子放下，然后转身离开", "granularity": "moment", "relevant": []}
+{"id": "text-01-03", "split": "dev", "category": "动作顺序", "text": "两个人握手后拥抱", "granularity": "moment", "relevant": []}
+{"id": "text-01-04", "split": "dev", "category": "动作顺序", "text": "一个人奔跑时回头看身后", "granularity": "moment", "relevant": []}
+{"id": "text-01-05", "split": "test", "category": "动作顺序", "text": "有人从坐姿突然站起并指向对方", "granularity": "moment", "relevant": []}
+{"id": "text-01-06", "split": "test", "category": "动作顺序", "text": "有人拾起地上的物品，仔细端详", "granularity": "moment", "relevant": []}
+{"id": "text-01-07", "split": "test", "category": "动作顺序", "text": "一个人递出东西，对方犹豫后接过", "granularity": "moment", "relevant": []}
+{"id": "text-01-08", "split": "test", "category": "动作顺序", "text": "有人关上窗户，然后拉上窗帘", "granularity": "moment", "relevant": []}
+{"id": "text-01-09", "split": "test", "category": "动作顺序", "text": "一个人走到桌边坐下并低头", "granularity": "moment", "relevant": []}
+{"id": "text-01-10", "split": "test", "category": "动作顺序", "text": "两人擦肩而过，其中一人停下回头", "granularity": "moment", "relevant": []}
+{"id": "text-02-01", "split": "dev", "category": "多条件场景", "text": "雨夜，一个人独自站在街边", "granularity": "moment", "relevant": []}
+{"id": "text-02-02", "split": "dev", "category": "多条件场景", "text": "白天，两个人坐在餐桌两侧交谈", "granularity": "moment", "relevant": []}
+{"id": "text-02-03", "split": "dev", "category": "多条件场景", "text": "昏暗的室内，一人站着一人坐着", "granularity": "moment", "relevant": []}
+{"id": "text-02-04", "split": "dev", "category": "多条件场景", "text": "车里的人透过车窗看向外面", "granularity": "moment", "relevant": []}
+{"id": "text-02-05", "split": "test", "category": "多条件场景", "text": "楼道里，一个人背对镜头离开", "granularity": "moment", "relevant": []}
+{"id": "text-02-06", "split": "test", "category": "多条件场景", "text": "空旷房间中有人站在窗边", "granularity": "moment", "relevant": []}
+{"id": "text-02-07", "split": "test", "category": "多条件场景", "text": "街道上有人穿过人群奔跑", "granularity": "moment", "relevant": []}
+{"id": "text-02-08", "split": "test", "category": "多条件场景", "text": "夜晚，人物坐在有台灯的桌旁", "granularity": "moment", "relevant": []}
+{"id": "text-02-09", "split": "test", "category": "多条件场景", "text": "户外逆光下，两个人面对面站着", "granularity": "moment", "relevant": []}
+{"id": "text-02-10", "split": "test", "category": "多条件场景", "text": "有人在门口犹豫，迟迟没有进去", "granularity": "moment", "relevant": []}
+{"id": "text-03-01", "split": "dev", "category": "含蓄情绪", "text": "一个人强忍眼泪，努力保持平静", "granularity": "moment", "relevant": []}
+{"id": "text-03-02", "split": "dev", "category": "含蓄情绪", "text": "人物欲言又止，最后低下头", "granularity": "moment", "relevant": []}
+{"id": "text-03-03", "split": "dev", "category": "含蓄情绪", "text": "听到对方的话后，人物露出惊讶神情", "granularity": "moment", "relevant": []}
+{"id": "text-03-04", "split": "test", "category": "含蓄情绪", "text": "有人愤怒地瞪着对方，但没有说话", "granularity": "moment", "relevant": []}
+{"id": "text-03-05", "split": "test", "category": "含蓄情绪", "text": "一个人露出勉强的笑容", "granularity": "moment", "relevant": []}
+{"id": "text-03-06", "split": "test", "category": "含蓄情绪", "text": "人物看起来紧张，反复看向门口", "granularity": "moment", "relevant": []}
+{"id": "text-03-07", "split": "test", "category": "含蓄情绪", "text": "一个人释然地笑了", "granularity": "moment", "relevant": []}
+{"id": "text-03-08", "split": "test", "category": "含蓄情绪", "text": "人物失望地移开视线", "granularity": "moment", "relevant": []}
+{"id": "text-03-09", "split": "test", "category": "含蓄情绪", "text": "两个人相视而笑，气氛轻松", "granularity": "moment", "relevant": []}
+{"id": "text-03-10", "split": "test", "category": "含蓄情绪", "text": "一个人沉默地承受指责", "granularity": "moment", "relevant": []}
+{"id": "text-04-01", "split": "dev", "category": "镜头语言", "text": "近景，一个人眼含泪水", "granularity": "moment", "relevant": []}
+{"id": "text-04-02", "split": "dev", "category": "镜头语言", "text": "从人物背后拍摄他走进房间", "granularity": "moment", "relevant": []}
+{"id": "text-04-03", "split": "dev", "category": "镜头语言", "text": "俯拍人物独自坐着", "granularity": "moment", "relevant": []}
+{"id": "text-04-04", "split": "test", "category": "镜头语言", "text": "镜头慢慢推近一个沉默的人", "granularity": "moment", "relevant": []}
+{"id": "text-04-05", "split": "test", "category": "镜头语言", "text": "低角度拍摄站立的人物", "granularity": "moment", "relevant": []}
+{"id": "text-04-06", "split": "test", "category": "镜头语言", "text": "两人的对话以正反打镜头呈现", "granularity": "moment", "relevant": []}
+{"id": "text-04-07", "split": "test", "category": "镜头语言", "text": "远景中一个人独自走在街道上", "granularity": "moment", "relevant": []}
+{"id": "text-04-08", "split": "test", "category": "镜头语言", "text": "特写人物握紧的手", "granularity": "moment", "relevant": []}
+{"id": "text-04-09", "split": "test", "category": "镜头语言", "text": "镜头跟随一个行走的人", "granularity": "moment", "relevant": []}
+{"id": "text-04-10", "split": "test", "category": "镜头语言", "text": "隔着玻璃拍摄人物的侧脸", "granularity": "moment", "relevant": []}
+{"id": "text-05-01", "split": "dev", "category": "对白原句", "text": "我不想再见到你", "granularity": "moment", "relevant": []}
+{"id": "text-05-02", "split": "dev", "category": "对白原句", "text": "你到底在隐瞒什么", "granularity": "moment", "relevant": []}
+{"id": "text-05-03", "split": "dev", "category": "对白原句", "text": "别担心，我会回来的", "granularity": "moment", "relevant": []}
+{"id": "text-05-04", "split": "test", "category": "对白原句", "text": "我们已经没有时间了", "granularity": "moment", "relevant": []}
+{"id": "text-05-05", "split": "test", "category": "对白原句", "text": "这件事跟你没有关系", "granularity": "moment", "relevant": []}
+{"id": "text-05-06", "split": "test", "category": "对白原句", "text": "你为什么现在才告诉我", "granularity": "moment", "relevant": []}
+{"id": "text-05-07", "split": "test", "category": "对白原句", "text": "对不起，是我错了", "granularity": "moment", "relevant": []}
+{"id": "text-05-08", "split": "test", "category": "对白原句", "text": "我相信你", "granularity": "moment", "relevant": []}
+{"id": "text-05-09", "split": "test", "category": "对白原句", "text": "你先听我把话说完", "granularity": "moment", "relevant": []}
+{"id": "text-05-10", "split": "test", "category": "对白原句", "text": "从今以后，我们各走各的路", "granularity": "moment", "relevant": []}
+{"id": "text-06-01", "split": "dev", "category": "对白含义与易混淆", "text": "有人口头答应，但表情明显不情愿", "granularity": "moment", "relevant": []}
+{"id": "text-06-02", "split": "dev", "category": "对白含义与易混淆", "text": "两人表面客气，气氛却很紧张", "granularity": "moment", "relevant": []}
+{"id": "text-06-03", "split": "dev", "category": "对白含义与易混淆", "text": "一个人告别后独自离开", "granularity": "moment", "relevant": []}
+{"id": "text-06-04", "split": "test", "category": "对白含义与易混淆", "text": "人物解释误会，对方逐渐放松", "granularity": "moment", "relevant": []}
+{"id": "text-06-05", "split": "test", "category": "对白含义与易混淆", "text": "有人向另一个人道歉，得到原谅", "granularity": "moment", "relevant": []}
+{"id": "text-06-06", "split": "test", "category": "对白含义与易混淆", "text": "一个人拒绝别人的请求", "granularity": "moment", "relevant": []}
+{"id": "text-06-07", "split": "test", "category": "对白含义与易混淆", "text": "人物试图安慰正在难过的人", "granularity": "moment", "relevant": []}
+{"id": "text-06-08", "split": "test", "category": "对白含义与易混淆", "text": "同样是微笑，但人物表现出讽刺", "granularity": "moment", "relevant": []}
+{"id": "text-06-09", "split": "test", "category": "对白含义与易混淆", "text": "人物因为好消息而哭泣", "granularity": "moment", "relevant": []}
+{"id": "text-06-10", "split": "test", "category": "对白含义与易混淆", "text": "有人急切地追问事情真相", "granularity": "moment", "relevant": []}
+{"id": "video-01", "split": "video-test", "video": "videos/query-01.mp4", "category": "视频相似检索", "relevant": []}
+{"id": "video-02", "split": "video-test", "video": "videos/query-02.mp4", "category": "视频相似检索", "relevant": []}
+{"id": "video-03", "split": "video-test", "video": "videos/query-03.mp4", "category": "视频相似检索", "relevant": []}
+{"id": "video-04", "split": "video-test", "video": "videos/query-04.mp4", "category": "视频相似检索", "relevant": []}
+{"id": "video-05", "split": "video-test", "video": "videos/query-05.mp4", "category": "视频相似检索", "relevant": []}
+{"id": "video-06", "split": "video-test", "video": "videos/query-06.mp4", "category": "视频相似检索", "relevant": []}
+{"id": "video-07", "split": "video-test", "video": "videos/query-07.mp4", "category": "视频相似检索", "relevant": []}
+{"id": "video-08", "split": "video-test", "video": "videos/query-08.mp4", "category": "视频相似检索", "relevant": []}
+{"id": "video-09", "split": "video-test", "video": "videos/query-09.mp4", "category": "视频相似检索", "relevant": []}
+{"id": "video-10", "split": "video-test", "video": "videos/query-10.mp4", "category": "视频相似检索", "relevant": []}
+{"id": "video-11", "split": "video-test", "video": "videos/query-11.mp4", "category": "视频相似检索", "relevant": []}
+{"id": "video-12", "split": "video-test", "video": "videos/query-12.mp4", "category": "视频相似检索", "relevant": []}

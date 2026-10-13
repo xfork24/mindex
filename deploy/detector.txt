@@ -1,0 +1,2 @@
+# Linux/WSL2 environment; upstream SavedModel weights are installed separately.
+tensorflow[and-cuda]>=2.16
