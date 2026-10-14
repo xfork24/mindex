@@ -84,6 +84,34 @@ uv run mindex --config config.macos-v2.yaml --no-runtime-overrides indexes activ
 - `config.local.yaml` 与 `config.macos-v2.yaml` 的 asr 清单指向新文件；已重启 `mindex serve`。
 - 验证：真实音频经 `LlamaTranscriber.raw` 转写成功，`checked_runtime` schema-2 全链路（deployment_id + 角色校验 + 本地文件哈希）通过。
 
+## 追加：Analyzer 迁移准备（2026-10-14 晚，待远端在线执行）
+
+远端（192.168.1.86:4040）当前不可达，pin 需要活服务探测，故材料就绪、命令待执行：
+
+- 文件（本地 `/Volumes/Storage512G/model/`，exFAT）已流式计算 SHA-256，**与旧 schema-1 analyzer.json 所 pin 完全一致**——10-13 的 Ollama 部署（blob `sha256-9aecf1cd…`）即同一套权重，内容身份连续，仅服务封装变化。
+  - weights `Swift-1.5-Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf`：`9aecf1cd41b2cb2f32a74e0d889e33855ebef43b26f43b43feb5720239e677e5`
+  - mmproj `mmproj-Qwen3.8-27B-BF16.gguf`：`13cb7bebccbd04afc8f4090cb949ecf8937cdf7377c5799b1a0c594e7c0d3e16`
+- 启动参数声明：`data/e2e/analyzer-swift15-launch.json`（ctx 262144）。
+- 信任模式：远端部署 → `operator-attested-sha256`（哈希来自本地同一文件的实测）。
+
+远端在线后依次执行（仓库根目录）：
+
+```bash
+curl -s http://192.168.1.86:4040/health    # 确认在线
+uv run mindex --config config.macos-v2.yaml --no-runtime-overrides e2e probe --role analyzer \
+  --output data/e2e/analyzer-swift15-probe.json
+uv run mindex --config config.macos-v2.yaml --no-runtime-overrides e2e pin --role analyzer \
+  --weights-sha256 9aecf1cd41b2cb2f32a74e0d889e33855ebef43b26f43b43feb5720239e677e5 \
+  --mmproj-sha256 13cb7bebccbd04afc8f4090cb949ecf8937cdf7377c5799b1a0c594e7c0d3e16 \
+  --quantization IQ3_S \
+  --launch-parameters data/e2e/analyzer-swift15-launch.json \
+  --output data/deployments/analyzer-swift15-256k.json
+# 然后把 config.macos-v2.yaml 与 config.local.yaml 的 analyzer.deployment_manifest
+# 指向 ./data/deployments/analyzer-swift15-256k.json（旧 analyzer.json 保留）
+```
+
+注意事项：远端必须是原生 llama-server（暴露 `/props`、七字段 meta 完整、mmproj 实际加载使 `modalities.vision` 为真），Ollama 式封装会被新代码拒绝；`--quantization` 以服务报告的 GGUF ftype 为准（文件名指示 IQ3_S）。
+
 ## 回滚
 
 按 [docs/macos-model-migration.md](docs/macos-model-migration.md) 「回滚」节执行：停止写入 → 恢复备份对应代码/YAML/清单/活动索引 → 旧索引必须配套旧身份实现与旧部署使用。失败目录先重命名保留，不直接删除。

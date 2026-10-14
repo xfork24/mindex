@@ -144,10 +144,17 @@ def _probe(config: Config, role: str) -> dict:
             service.base_url.rstrip("/") + "/chat/completions",
             timeout=min(service.timeout, 60),
             headers=service.headers(),
-            json={"model": service.model, "max_tokens": 8,
+            # 推理模型（如 MiniMax-M3.1）先消耗思考 token，预算太小会导致正文永远为空。
+            json={"model": service.model, "max_tokens": 512,
                   "messages": [{"role": "user", "content": "连接测试，请回复：ok"}], **extra},
         )
-        reply = payload["choices"][0]["message"]["content"]
+        choice = (payload.get("choices") or [{}])[0]
+        message = choice.get("message") or {}
+        reply = message.get("content")
+        if not reply:
+            finish = choice.get("finish_reason")
+            reasoning = len(message.get("reasoning_content") or "")
+            reply = f"（未返回正文；finish_reason={finish}，推理 {reasoning} 字）"
         return {"model": service.model, "reply": str(reply)[:80]}
 
     if role == "embedding":

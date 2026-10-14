@@ -94,6 +94,56 @@ def test_profile_test_connection(config, monkeypatch):
     assert "连接被拒绝" in result["detail"]
 
 
+def test_profile_test_connection_reasoning_model_without_content(config, monkeypatch):
+    """推理模型思考耗尽 token 时 message 无 content 键，应给出可读回执而非裸 KeyError('content')。"""
+    client = client_for(config)
+    profile = client.post(
+        "/api/settings/profiles",
+        json={
+            "role": "analyzer",
+            "provider": "custom",
+            "name": "MiniMax-推理模型测试",
+            "config": {
+                "backend": "openai",
+                "base_url": "https://api.minimax.cn/v1",
+                "model": "MiniMax-M3.1-Flash-Preview",
+            },
+        },
+    ).json()
+    calls = {}
+
+    def reasoning_only(method, url, **kwargs):
+        calls["json"] = kwargs.get("json")
+        return {
+            "choices": [
+                {
+                    "finish_reason": "length",
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "reasoning_content": "We need answer exactly ok likely.",
+                    },
+                }
+            ]
+        }
+
+    monkeypatch.setattr(adapters, "request", reasoning_only)
+    result = client.post(f"/api/settings/profiles/{profile['id']}/test").json()
+    assert result["ok"] is True, result
+    # 探测预算须足够推理模型产出正文（思考先行消耗 token）
+    assert calls["json"]["max_tokens"] >= 64
+    # 缺 content 时呈现可读信息，而不是裸键名 'content'
+    assert "推理" in result["reply"] or "正文" in result["reply"]
+
+    def with_content(method, url, **kwargs):
+        calls["json"] = kwargs.get("json")
+        return {"choices": [{"finish_reason": "stop", "message": {"role": "assistant", "content": "ok"}}]}
+
+    monkeypatch.setattr(adapters, "request", with_content)
+    result = client.post(f"/api/settings/profiles/{profile['id']}/test").json()
+    assert result["ok"] is True and result["reply"] == "ok"
+
+
 def test_business_search_tuning_hot(config):
     client = client_for(config)
     weights = {"video": 2, "description": 1, "style": 1, "dialogue": 0.5, "lexical": 0.5}
