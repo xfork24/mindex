@@ -270,6 +270,7 @@ def smoke(config: Config, directory: Path) -> dict:
 
 def _smoke(config: Config, directory: Path) -> dict:
     from . import compatibility
+    from .deployment import ADAPTER_VERSION
 
     rows = json.loads((directory / "segments.json").read_text())
     unique = list({row["sha256"]: row for row in rows}.values())
@@ -278,7 +279,7 @@ def _smoke(config: Config, directory: Path) -> dict:
     samples = [unique[int(i)] for i in np.linspace(0, len(unique) - 1, 6)]
     embedder, store = make_embedder(config), Store(config.data_dir)
     space = embedder.identity()
-    v2 = space.get("schema") == 2 and space.get("implementation") == "llama-native-wemm-2"
+    v2 = space.get("schema") == 2 and space.get("implementation") == ADAPTER_VERSION
     deployment = embedder._runtime if v2 else None
     baseline = compatibility.load_baseline(config, space, allow_missing=True) if v2 else None
     if v2:

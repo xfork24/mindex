@@ -183,7 +183,10 @@ def complete_validation(
             "video_vectors": report["video_vectors"],
         }
         save(directory / "baseline.json", baseline)
-        (directory / "baseline.sha256").write_text(content_hash(directory / "baseline.json") + "\n")
+        marker = directory / "baseline.sha256"
+        temporary = marker.with_name(marker.name + ".partial")
+        temporary.write_text(content_hash(directory / "baseline.json") + "\n")
+        temporary.replace(marker)
     if baseline is None:
         return {**report, "passed": False, "compatibility": {"status": "structural-smoke-failed"}}
     baseline = load_baseline(config, space)

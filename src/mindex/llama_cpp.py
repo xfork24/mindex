@@ -67,6 +67,8 @@ def inspect_service(service: Service) -> dict:
         or not observable["build_info"]
     ):
         raise ModelError("/props 或 /v1/models 缺少 build_info/model_id，无法固定运行身份")
+    # 七字段强校验对所有探测路径生效（含 schema 1 清单），比旧实现的宽松检查更严：
+    # 元数据稀疏的旧 llama-server 会被拒绝。方向 fail-closed；回滚旧清单须配套恢复旧代码。
     metadata = normalized_metadata(observable["model_meta"])
     capabilities = observable["modalities"]
     if not isinstance(capabilities, dict) or any(type(v) is not bool for v in capabilities.values()):

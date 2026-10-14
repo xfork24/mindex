@@ -108,20 +108,20 @@ def normalized_metadata(meta: dict) -> dict:
     return {field: meta[field] for field in METADATA_FIELDS}
 
 
-def validate_role(service, role: str, report: dict, quantization: str, *, legacy=False):
+def validate_role(service, role: str, report: dict, quantization: str):
     meta, caps = report["metadata"], report["capabilities"]
     if meta["ftype"] != quantization:
         raise ModelError("部署清单量化与 GGUF 元数据不一致")
     if role in {"embedding", "analyzer"} and caps.get("vision") is not True:
         raise ModelError("llama.cpp 未启用视觉投影，无法处理视频/图片")
     if role == "embedding":
-        if caps.get("video") is False or (not legacy and caps.get("video") is not True):
+        if caps.get("video") is not True:
             raise ModelError("llama.cpp 未声明支持视频")
         if service.quantization != quantization:
             raise ModelError("本地 embedding.quantization 与部署清单不同")
         if meta["n_embd"] != service.dimensions:
             raise ModelError("GGUF n_embd 与目标嵌入维度不符；禁止截断或补齐")
-    if role == "asr" and not legacy and caps.get("audio") is not True:
+    if role == "asr" and caps.get("audio") is not True:
         raise ModelError("ASR 服务未启用音频投影")
 
 
@@ -162,6 +162,8 @@ def create_manifest(
     remote = weights_sha256 is not None or mmproj_sha256 is not None
     if local == remote:
         raise ModelError("文件方式与远程 SHA 声明互斥，必须选择一种")
+    if remote and (weights_sha256 is None or mmproj_sha256 is None):
+        raise ModelError("远程声明需要 weights 和 mmproj 两项 SHA256")
     files = {}
     if local:
         if weights_file is None or mmproj_file is None or server_cwd is None:

@@ -439,6 +439,63 @@ def test_remote_trust_is_explicit_and_does_not_read_local_files(native):
     assert checked_runtime(native["config"].embedding, pinned)["file_states"] == {}
 
 
+def test_create_manifest_remote_requires_both_shas_on_library_path(native):
+    """远程声明缺一项 SHA 时，直接调用 create_manifest 也报与 CLI 相同的规则错误。"""
+    report = inspect_service(native["config"].embedding)
+    for kwargs in ({"weights_sha256": "a" * 64}, {"mmproj_sha256": "b" * 64}):
+        with pytest.raises(adapters.ModelError, match="远程声明需要 weights 和 mmproj 两项 SHA256"):
+            deployment.create_manifest(native["config"], "embedding", report, "Q8_0", **kwargs)
+
+
+def test_baseline_marker_is_never_left_partial(native, monkeypatch):
+    """baseline.sha256 写入中途崩溃时，标记要么完整要么缺席，不留下截断内容。"""
+    config = native["config"]
+    client = LlamaEmbedder(config)
+    space = client.identity()
+    samples = []
+    vectors = np.eye(8)[:6].tolist()
+    for number in range(6):
+        path = config.data_dir / f"atomic-{number}.mp4"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(f"TEST-ONLY-atomic-{number}".encode())
+        samples.append(
+            {
+                "id": str(number),
+                "path": path.name,
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                "text": f"原子写入{number}",
+            }
+        )
+    report = {
+        "checks": dict.fromkeys(compatibility.CHECKS, True),
+        "space": space,
+        "space_id": fingerprint(space),
+        "text_vectors": vectors,
+        "video_vectors": vectors,
+    }
+    real_write = Path.write_text
+
+    def crash_half(self, data, *args, **kwargs):
+        if self.name in ("baseline.sha256", "baseline.sha256.partial"):
+            with open(self, "w") as handle:
+                handle.write(str(data)[: len(str(data)) // 2])
+            raise OSError("simulated crash mid-write")
+        return real_write(self, data, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", crash_half)
+    with pytest.raises(OSError, match="simulated crash"):
+        compatibility.complete_validation(
+            config, space, client._runtime, samples, report, vectors, vectors, ["c" * 64] * 6, None
+        )
+    monkeypatch.setattr(Path, "write_text", real_write)
+    marker = compatibility.location(config, space) / "baseline.sha256"
+    if marker.exists():
+        expected = (
+            compatibility.content_hash(compatibility.location(config, space) / "baseline.json") + "\n"
+        )
+        assert marker.read_text() == expected, "标记文件在崩溃后留下截断内容"
+
+
 def test_asr_and_analyzer_schema2_use_current_service_id(native, tmp_path):
     config = native["config"]
     config.asr.backend = config.analyzer.backend = "llama_cpp"
@@ -619,6 +676,44 @@ def test_real_media_smoke_reuses_fixed_baseline_and_rejects_changed_deployment(n
     state = json.loads((directory / "run.json").read_text())
     assert state["phases"]["smoke"]["status"] == "failed"
     assert state["phases"]["smoke"]["error_type"] == "KeyboardInterrupt"
+
+
+def test_smoke_routes_future_adapter_version_through_v2(native, tmp_path, monkeypatch):
+    """ADAPTER_VERSION 升级后 smoke 仍按 v2 路由建基线，不回落到硬编码字面量分支。"""
+    from mindex.media import command
+    from mindex.pipeline import Pipeline
+
+    monkeypatch.setattr(deployment, "ADAPTER_VERSION", "llama-native-wemm-3")
+    native["pin"]()  # 以升级后的协议版本重新固定清单与空间契约
+    config = native["config"]
+    video = tmp_path / "TEST-ONLY-future.mp4"
+    command(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=s=160x120:r=10:d=10",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            str(video),
+        ]
+    )
+    config.video.window_seconds = 2
+    config.video.stride_seconds = 1
+    source = Pipeline(config).prepare(video)
+    directory = tmp_path / "experiment-future"
+    e2e.initialize(config, source, directory)
+    first = e2e.smoke(config, directory)
+    assert first["passed"]
+    baseline_path = compatibility.location(config, first["space"]) / "baseline.json"
+    assert baseline_path.exists()
 
 
 def test_cli_probe_uses_fixed_yaml_with_active_override(native, tmp_path):
