@@ -75,6 +75,15 @@ uv run mindex --config config.macos-v2.yaml --no-runtime-overrides indexes activ
 
 中断后重跑同一 `index` 命令即续建；构建/检查/最终核验失败不会切换活动索引。完成代表性检索验收后才 activate；不要把 trailer 测试索引设为默认素材库。
 
+## 追加：ASR 本地化重 pin（2026-10-14 晚）
+
+前端报「llama.cpp 运行身份发生变化」：`asr.json`（schema 1，10-13 从 `models/` 目录用 `./Qwen3-ASR…` 启动时固定）与旧脚本 `run-local-qwen3-asr.sh` 的相对路径启动（`/props.model_path` 报 `../models/…`）观测不一致。ASR 属计划明确不迁移范围，本次补齐：
+
+- `scripts/run-local-qwen3-asr.sh` 按 `run-local-wemm.sh` 模式重写（按脚本位置解析、绝对路径、`--alias qwen3-asr-macos`，任意目录可启动）。
+- 重新 pin 为 schema 2：`data/deployments/asr-macos-v2.json`（trust `local-sha256`，content_id `582c81555505044dcad93b3c`，deployment_id `aa58fd4b23f0853b8fa347d1`）；旧 `asr.json` 保留。
+- `config.local.yaml` 与 `config.macos-v2.yaml` 的 asr 清单指向新文件；已重启 `mindex serve`。
+- 验证：真实音频经 `LlamaTranscriber.raw` 转写成功，`checked_runtime` schema-2 全链路（deployment_id + 角色校验 + 本地文件哈希）通过。
+
 ## 回滚
 
 按 [docs/macos-model-migration.md](docs/macos-model-migration.md) 「回滚」节执行：停止写入 → 恢复备份对应代码/YAML/清单/活动索引 → 旧索引必须配套旧身份实现与旧部署使用。失败目录先重命名保留，不直接删除。

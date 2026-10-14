@@ -14,7 +14,7 @@ embedding:
 asr:
   backend: llama_cpp
   base_url: http://127.0.0.1:8889
-  deployment_manifest: ./data/deployments/asr.json
+  deployment_manifest: ./data/deployments/asr-macos-v2.json
   aligner_revision: c7cbfc2048c462b0d63a45797104fc9db3ad62b7
 analyzer:
   backend: llama_cpp
