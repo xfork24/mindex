@@ -116,6 +116,8 @@ class SearchEngine:
         if active["status"] != "ready":
             raise ModelError("当前索引未就绪")
         identity = self.embedder.identity()
+        if hasattr(self.embedder, "require_gate"):
+            self.embedder.require_gate()
         if identity != active["spec"]["space"]:
             raise ModelError("当前模型与已发布索引的向量空间不同，请切回对应模型或建立新索引")
         if self.config.video.model_dump() != active["spec"]["preprocessing"]:
@@ -261,6 +263,7 @@ def status(
         "segment_counts": store.rows("SELECT kind,count(*) AS count FROM segments GROUP BY kind"),
         "runs": store.rows("SELECT * FROM runs ORDER BY id DESC LIMIT 15"),
         "detector": config.detector.backend,
+        "runtime_overrides": config.runtime_overrides,
         "embedding": {
             "model": config.embedding.model,
             "dimensions": config.embedding.dimensions,
@@ -270,7 +273,10 @@ def status(
     }
     if health:
         try:
-            identity = (embedder or make_embedder(config)).identity()
+            client = embedder or make_embedder(config)
+            identity = client.identity()
+            if hasattr(client, "require_gate"):
+                client.require_gate()
             result["model_health"] = {
                 "checked": True,
                 "ready": True,

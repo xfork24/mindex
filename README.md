@@ -174,3 +174,7 @@ convert.sh /path/to/bilibili缓存目录 -o
 - 转出的 MP4 为标准格式，可直接作为 `mindex prepare` 的输入素材。
 
 详细设计见 [PLAN.md](PLAN.md)。
+
+## macOS 模型身份迁移
+
+本次 v2 身份重构、部署兼容性门槛和回滚流程见 [macOS 迁移说明](docs/macos-model-migration.md)，实际执行证据见 [迁移记录](REHASH_MIGRATION.md)。迁移命令使用 `--config config.macos-v2.yaml --no-runtime-overrides`；保留旧清单与索引，不自动改写旧向量身份。

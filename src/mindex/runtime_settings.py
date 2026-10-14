@@ -416,6 +416,8 @@ def merge_profile(config: Config, role: str, profile: dict) -> Config:
 
 def apply_overrides(config: Config, store: Store) -> Config:
     """按激活档案与业务键合成生效配置；返回新对象，无覆盖时返回原对象。"""
+    if not config.runtime_overrides:
+        return config
     for role in ROLES:
         profile = _active_profile(store, role)
         if profile is not None:
@@ -449,7 +451,7 @@ def apply_overrides(config: Config, store: Store) -> Config:
 
 def apply_runtime_overrides(config: Config) -> Config:
     """CLI 入口：data_dir 已有元数据库时合并覆盖层，否则原样返回。"""
-    if not (config.data_dir / "metadata.sqlite3").is_file():
+    if not config.runtime_overrides or not (config.data_dir / "metadata.sqlite3").is_file():
         return config
     return apply_overrides(config, Store(config.data_dir))
 

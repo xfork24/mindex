@@ -9,6 +9,7 @@
 | 键 | 类型 | 默认 | 说明 |
 |---|---|---|---|
 | `data_dir` | Path | `data` | 素材库根目录。切分参数变化须换新目录 |
+| `runtime_overrides` | bool | true | false 固定 YAML，CLI 和验收 Web 每次读取都禁用动态覆盖；也可全局传 `--no-runtime-overrides` |
 
 ## `embedding` — WeMM 嵌入服务
 
@@ -21,6 +22,7 @@
 | `revision` | str | `main` | `main` 解析为实际 commit；固定后身份校验更严 |
 | `quantization` | str | `int8` | 须与部署实际一致（llama_cpp 下填实际 GGUF 量化，如 `Q8_0`） |
 | `dimensions` | int ≥1 | 4096 | 嵌入维度 |
+| `numerical_implementation` | str | `llama-cpp-wemm-1` | llama_cpp v2 数值实现版本；兼容失败时显式升级并建立新基线/新索引 |
 | `timeout` | float >0 | 180 | HTTP 超时秒 |
 | `api_key_env` | str | `MINDEX_MODEL_API_KEY` | 从同名环境变量读 Bearer token |
 

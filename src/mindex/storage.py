@@ -124,10 +124,10 @@ class Store:
             ).lastrowid
         try:
             yield
-        except Exception as exc:
+        except (Exception, KeyboardInterrupt) as exc:
             self.execute(
                 "UPDATE runs SET status='failed',message=?,finished_at=CURRENT_TIMESTAMP WHERE id=?",
-                (str(exc)[:2000], run_id),
+                ((str(exc) or type(exc).__name__)[:2000], run_id),
             )
             raise
         else:

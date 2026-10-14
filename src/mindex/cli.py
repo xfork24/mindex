@@ -8,7 +8,7 @@ from typing import Annotated
 
 import typer
 
-from .config import load_config
+from .config import fingerprint, load_config
 
 app = typer.Typer(help="中文视频素材离线处理与检索", no_args_is_help=True)
 indexes = typer.Typer(help="索引版本与回退", no_args_is_help=True)
@@ -27,9 +27,12 @@ def configure(
     ctx: typer.Context,
     config: Annotated[Path | None, typer.Option("--config", "-c")] = None,
     verbose: bool = False,
+    no_runtime_overrides: Annotated[bool, typer.Option("--no-runtime-overrides", help="固定使用 YAML，禁用 CLI 与 Web 动态覆盖")] = False,
 ):
     logging.basicConfig(level=logging.DEBUG if verbose else logging.INFO, format="%(levelname)s %(message)s")
     ctx.obj = load_config(config)
+    if no_runtime_overrides:
+        ctx.obj.runtime_overrides = False
     # 设置页保存的覆盖层对 CLI 同样生效（Web 与 CLI 行为一致）；e2e 验证框架保持 yaml 原值。
     if ctx.invoked_subcommand != "e2e":
         from .runtime_settings import apply_runtime_overrides
@@ -213,6 +216,14 @@ def activate_index(ctx: typer.Context, index_id: str):
         issues = check_index(store, index_id)
         if issues:
             raise typer.BadParameter("索引检查失败：" + "; ".join(issues[:5]))
+        version = store.index_version(index_id)
+        if version["spec"]["space"].get("schema") == 2:
+            from .adapters import make_embedder
+
+            client = make_embedder(ctx.obj)
+            if client.identity() != version["spec"]["space"]:
+                raise typer.BadParameter("当前模型空间与待发布索引不同")
+            client.require_gate()
         store.activate(index_id)
     typer.echo(f"已发布索引 {index_id}；检索模型须使用该版本对应的配置")
 
@@ -305,43 +316,49 @@ def probe_deployment(
 @e2e.command("pin")
 def pin_deployment(
     ctx: typer.Context,
-    weights_sha256: Annotated[str, typer.Option()],
-    mmproj_sha256: Annotated[str, typer.Option()],
     quantization: Annotated[str, typer.Option()],
     output: Annotated[Path, typer.Option()],
     role: ModelRole = ModelRole.embedding,
+    weights_file: Annotated[Path | None, typer.Option(help="本地 GGUF 文件，流式计算 SHA256")] = None,
+    mmproj_file: Annotated[Path | None, typer.Option(help="本地投影文件，流式计算 SHA256")] = None,
+    server_cwd: Annotated[Path | None, typer.Option(help="服务器实际工作目录，本地核验时必填")] = None,
+    weights_sha256: Annotated[str | None, typer.Option(help="远程部署的操作员声明 SHA256")] = None,
+    mmproj_sha256: Annotated[str | None, typer.Option(help="远程部署的操作员声明 SHA256")] = None,
+    launch_parameters: Annotated[Path | None, typer.Option(help="部署者确认的启动参数 JSON 文件")] = None,
 ):
-    """固定已核验的文件哈希和当前运行身份；部署者需保证实际启动参数一致。"""
-    import re
-
+    """创建 schema 2 清单；文件方式与远程 SHA 声明互斥，不覆盖旧清单。"""
+    from .adapters import ModelError
+    from .deployment import create_manifest
     from .e2e import save
     from .llama_cpp import inspect_service
 
     if output.exists():
-        raise typer.BadParameter("清单已存在；更换模型请使用新文件和新实验")
-    if not all(re.fullmatch(r"[0-9a-f]{64}", v) for v in (weights_sha256, mmproj_sha256)):
-        raise typer.BadParameter("请提供 GGUF 与 mmproj 实际文件的 64 位小写 SHA256")
-    if quantization in {"int8", "nf4", "unknown"} or not quantization.strip():
-        raise typer.BadParameter("请填写实际 GGUF 量化，例如 Q8_0")
-    service = getattr(ctx.obj, role.value)
-    report = inspect_service(service)
-    save(
-        output,
-        {
-            "schema": 1,
-            "role": role.value,
-            "model": service.model,
-            "weights_sha256": weights_sha256,
-            "mmproj_sha256": mmproj_sha256,
-            "quantization": quantization,
-            "pooling": "last" if role == ModelRole.embedding else None,
-            "video_fps": float(ctx.obj.video.fps),
-            **report,
-            "attestation": "Operator confirms file hashes, pooling last and server --video-fps. "
-            "The standard API cannot independently verify these launch settings.",
-        },
-    )
-    print_json({"manifest": str(output.resolve()), "runtime_id": report["runtime_id"]})
+        raise typer.BadParameter("清单已存在；更换部署请使用新文件，保留旧清单")
+    try:
+        parameters = json.loads(launch_parameters.read_text()) if launch_parameters else {}
+        if not isinstance(parameters, dict):
+            raise TypeError("启动参数 JSON 必须为对象")
+        # 参数错误应在联网/读取大文件前报告。
+        local = weights_file is not None or mmproj_file is not None
+        remote = weights_sha256 is not None or mmproj_sha256 is not None
+        if local == remote:
+            raise ValueError("文件方式与远程 SHA 声明互斥，必须选择一种")
+        if local and (weights_file is None or mmproj_file is None or server_cwd is None):
+            raise ValueError("本地清单需要 --weights-file、--mmproj-file 和 --server-cwd")
+        if remote and (weights_sha256 is None or mmproj_sha256 is None):
+            raise ValueError("远程声明需要 weights 和 mmproj 两项 SHA256")
+        report = inspect_service(getattr(ctx.obj, role.value))
+        pinned = create_manifest(
+            ctx.obj, role.value, report, quantization, weights_file=weights_file, mmproj_file=mmproj_file,
+            server_cwd=server_cwd, weights_sha256=weights_sha256, mmproj_sha256=mmproj_sha256,
+            launch_parameters=parameters,
+        )
+        save(output, pinned)
+    except (ModelError, ValueError, TypeError, OSError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    print_json({"manifest": str(output.resolve()), "content_id": pinned["file_identity"]["content_id"],
+                "space_id": fingerprint(pinned["space_contract"]) if pinned["space_contract"] else None,
+                "deployment_id": pinned["deployment_id"], "trust": pinned["trust"]["source"]})
 
 
 @e2e.command("phase")

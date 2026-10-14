@@ -10,6 +10,7 @@
 | 跑通离线处理管线 | [离线管线详解](pipeline.md) | [电影处理指南](../FILM_WORKFLOW.md) |
 | 查某个命令怎么用 | [CLI 完全参考](cli-reference.md) | [配置参考](config-reference.md) |
 | 理解检索排名怎么算 | [检索机制详解](search.md) | — |
+| 迁移到 macOS、建立 v2 空间 | [macOS 模型身份迁移](macos-model-migration.md) | [实际迁移记录](../REHASH_MIGRATION.md) |
 | 换模型 / 回退索引 | [索引版本与空间身份](index-versions.md) | [部署说明](../DEPLOYMENT.md) |
 | 做真实模型端到端验证 | [e2e 实验框架](e2e-framework.md) | [端到端操作手册](../E2E_RUNBOOK.md)、[测试计划](../E2E_TEST_PLAN.md) |
 | 管理素材（改名/收藏/隐藏） | [素材后台指南](admin.md) | — |

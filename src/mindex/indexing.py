@@ -176,6 +176,10 @@ class IndexBuilder:
             issues = check_index(self.store, index_id)
             if issues:
                 raise ModelError("索引一致性检查失败：" + "; ".join(issues[:5]))
+            if self.embedder.identity() != identity:
+                raise ModelError("索引完成前模型空间发生变化，拒绝发布")
+            if hasattr(self.embedder, "require_gate"):
+                self.embedder.require_gate()
             self.store.execute("UPDATE index_versions SET status='ready' WHERE id=?", (index_id,))
             if activate:
                 self.store.activate(index_id)

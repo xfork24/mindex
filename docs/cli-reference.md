@@ -129,7 +129,7 @@ uv run mindex model-check data/clips/ID/moment/SEG.mp4 --text '画面描述' --o
 |---|---|
 | `mindex e2e init --source ID --run DIR` | 冻结已有分镜、生成标注草稿与 12 个查询视频；不调用模型 |
 | `mindex e2e probe --output FILE [--role embedding\|asr\|analyzer]` | 只探测已启动服务，保存兼容性报告；无推理 |
-| `mindex e2e pin --weights-sha256 H --mmproj-sha256 H --quantization Q --output FILE [--role ...]` | 固定文件哈希与运行身份，生成部署清单；已存在则拒绝覆盖 |
+| `mindex e2e pin --quantization Q --output FILE [--role ...]` | 生成 schema 2；本地文件参数与远程 SHA 声明互斥，不覆盖旧清单 |
 | `mindex e2e phase PHASE --run DIR [--python PATH] [--queries FILE] [--split test] [--index-id ID] [--activate]` | 执行一个阶段；构建默认不发布，查询默认固定实验版本 |
 | `mindex e2e freeze QUERIES --run DIR --confirmed-by '姓名'` | 人工确认后冻结标注并记录 SHA256 |
 | `mindex e2e review QUERIES --run DIR` | 生成可播放全部候选、选择目标并导出确认标注的本地页面 |
@@ -152,3 +152,7 @@ phase 取值：`smoke → visual → preview → asr → align → analyze(-smok
 | `--host` / `--port` | 监听地址；端口缺省按角色 |
 
 三个角色之间用 GPU 文件锁互斥（`MINDEX_GPU_LOCK` 可改路径，默认 `~/.cache/mindex/gpu.lock`），单 worker。鉴权用 `MINDEX_MODEL_API_KEY` 环境变量。
+
+## schema 2 pin 与迁移
+
+本地使用 `--weights-file FILE --mmproj-file FILE --server-cwd DIR`，流式计算 SHA256 并核对 `/props.model_path`；远程使用 `--weights-sha256 SHA --mmproj-sha256 SHA`，明确标记操作员声明。`--launch-parameters FILE` 记录部署者确认的启动参数 JSON，并参与部署摘要。HTTP API 不能证明实际加载的投影或全部数值配置。未经当前部署 smoke 基线对照不能建索引或检索；详见 [macOS 迁移](macos-model-migration.md)。

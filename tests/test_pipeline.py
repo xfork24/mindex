@@ -351,3 +351,28 @@ def test_pinned_preview_index_keeps_published_library(processed, config):
     assert client.get(first["media_url"], headers={"Range": "bytes=0-127"}).status_code == 206
     assert client.get("/api/status").json()["active_index"]["id"] == original
     assert pipeline.store.active_index()["id"] == published
+
+
+def test_final_identity_drift_cannot_publish_completed_vectors(processed, config):
+    pipeline, _, _, _, old = processed
+    changed = config.model_copy(deep=True)
+    changed.embedding.quantization = "nf4"
+
+    class FinalDrift(FixtureEmbedder):
+        def __init__(self, config):
+            super().__init__(config)
+            self.identities = 0
+
+        def identity(self):
+            self.identities += 1
+            spec = super().identity()
+            if self.identities > 1:
+                spec["revision"] = "changed-before-publish"
+            return spec
+
+    with pytest.raises(ModelError, match="完成前模型空间"):
+        IndexBuilder(changed, FinalDrift(changed)).build(activate=True)
+    assert pipeline.store.active_index()["id"] == old
+    building = pipeline.store.one("SELECT id,status FROM index_versions WHERE status='building'")
+    assert building is not None
+    assert check_index(pipeline.store, building["id"]) == []

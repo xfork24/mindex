@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
+from contextlib import nullcontext
 from datetime import UTC, datetime
 from pathlib import Path
 from time import perf_counter
@@ -260,16 +262,32 @@ def freeze(directory: Path, path: Path, confirmed_by: str):
 
 
 def smoke(config: Config, directory: Path) -> dict:
+    root = config.data_dir / "capabilities"
+    root.mkdir(parents=True, exist_ok=True)
+    with FileLock(str(root / "smoke.lock"), timeout=0):
+        return _smoke(config, directory)
+
+
+def _smoke(config: Config, directory: Path) -> dict:
+    from . import compatibility
+
     rows = json.loads((directory / "segments.json").read_text())
-    # Avoid repeated identical files; six diverse scenes are manually reviewed after this structural gate.
     unique = list({row["sha256"]: row for row in rows}.values())
     if len(unique) < 6:
         raise ValueError("至少需要六个不同的实际视频文件")
-    samples = [unique[int(i)] for i in np.linspace(0, len(unique) - 2, 6)]
+    samples = [unique[int(i)] for i in np.linspace(0, len(unique) - 1, 6)]
     embedder, store = make_embedder(config), Store(config.data_dir)
     space = embedder.identity()
-    gate = config.data_dir / "capabilities" / (fingerprint(space) + ".json")
-    save(gate, {"passed": False, "space": space, "status": "checking"})
+    v2 = space.get("schema") == 2 and space.get("implementation") == "llama-native-wemm-2"
+    deployment = embedder._runtime if v2 else None
+    baseline = compatibility.load_baseline(config, space, allow_missing=True) if v2 else None
+    if v2:
+        compatibility.revoke(config, space, deployment)
+    else:
+        save(
+            config.data_dir / "capabilities" / (fingerprint(space) + ".json"),
+            {"passed": False, "space": space, "status": "checking"},
+        )
     texts = [
         "室外建筑前的人",
         "房间里交谈的人",
@@ -278,18 +296,37 @@ def smoke(config: Config, directory: Path) -> dict:
         "人物面部近景",
         "画面中的文字",
     ]
+    if baseline is not None:
+        samples = baseline["samples"]
+        texts = [sample["text"] for sample in samples]
+    samples = [
+        {**sample, "text": text, "text_sha256": hashlib.sha256(text.encode()).hexdigest()}
+        for sample, text in zip(samples, texts)
+    ]
     text_vectors, video_vectors, timings = [], [], []
-    for row, text in zip(samples, texts):
-        started = perf_counter()
-        text_vectors.append(embedder.text([text], role="query")[0])
-        text_ms = (perf_counter() - started) * 1000
-        started = perf_counter()
-        video_vectors.append(embedder.video(store.resolve_media(row["path"])))
-        timings.append(
-            {"segment_id": row["id"], "text_ms": text_ms, "video_ms": (perf_counter() - started) * 1000}
-        )
-    repeated = embedder.video(store.resolve_media(samples[0]["path"]))
-    repeated_text = embedder.text([texts[0]], role="query")[0]
+    raw_text, raw_video, prepared_hashes = [], [], []
+    with embedder.validating() if v2 else nullcontext():
+        for row in samples:
+            path = store.resolve_media(row["path"])
+            if content_hash(path) != row["sha256"]:
+                raise ModelError("smoke 视频输入发生变化")
+            started = perf_counter()
+            text_vectors.append(embedder.text([row["text"]], role="query")[0])
+            if v2:
+                raw_text.append(embedder.last_raw_vector)
+            text_ms = (perf_counter() - started) * 1000
+            started = perf_counter()
+            video_vectors.append(embedder.video(path))
+            if v2:
+                raw_video.append(embedder.last_raw_vector)
+                prepared_hashes.append(embedder.last_prepared_sha256)
+            timings.append(
+                {"segment_id": row["id"], "text_ms": text_ms, "video_ms": (perf_counter() - started) * 1000}
+            )
+            if content_hash(path) != row["sha256"]:
+                raise ModelError("smoke 视频输入发生变化")
+        repeated = embedder.video(store.resolve_media(samples[0]["path"]))
+        repeated_text = embedder.text([texts[0]], role="query")[0]
     videos, texts_array = np.asarray(video_vectors), np.asarray(text_vectors)
     similarity = videos @ videos.T
     off_diagonal = similarity[np.triu_indices(6, 1)]
@@ -308,6 +345,12 @@ def smoke(config: Config, directory: Path) -> dict:
         "text_repeat_stable": float(np.dot(repeated_text, texts_array[0])) >= 0.999,
         "space_stable": embedder.identity() == space,
     }
+    if v2 and (
+        embedder._runtime["deployment_id"] != deployment["deployment_id"]
+        or embedder._runtime["instance_marker"] != deployment["instance_marker"]
+        or embedder._runtime["file_states"] != deployment["file_states"]
+    ):
+        raise ModelError("smoke 期间部署或本地文件状态发生变化")
     report = {
         "passed": all(checks.values()),
         "checks": checks,
@@ -315,15 +358,22 @@ def smoke(config: Config, directory: Path) -> dict:
         "space_id": fingerprint(space),
         "samples": samples,
         "measurements": timings,
+        "text_vectors": text_vectors,
+        "video_vectors": video_vectors,
         "text_video_cosine": (texts_array @ videos.T).tolist(),
         "video_pair_cosine": similarity.tolist(),
-        "note": "结构门槛不代表中文检索质量通过；须人工相关性标注和浏览器验收。GPU 峰值由部署机采集。",
+        "note": "结构与六样本兼容门槛不代表中文检索质量通过；须人工相关性标注和浏览器验收。",
     }
+    if v2:
+        report = compatibility.complete_validation(
+            config, space, deployment, samples, report, raw_text, raw_video, prepared_hashes, baseline
+        )
+        compatibility.save_validation(config, space, deployment["deployment_id"], report)
+    else:
+        save(config.data_dir / "capabilities" / (fingerprint(space) + ".json"), report)
     save(directory / "smoke.json", report)
-    gate = config.data_dir / "capabilities" / (fingerprint(space) + ".json")
-    save(gate, report)  # A failed rerun explicitly revokes an earlier gate for this identity.
     if not report["passed"]:
-        raise ModelError("六片段嵌入能力门槛未通过，详见 smoke.json")
+        raise ModelError("六片段嵌入能力/兼容性门槛未通过，详见 smoke.json；兼容失败须升级数值实现版本并重建")
     return report
 
 
@@ -490,8 +540,10 @@ def run_phase(
             artifact = f"attempts/{phase}-{attempt}-result.json"
             save(directory / artifact, result)
             phase_state.update(status="complete", result_file=artifact)
-        except Exception as exc:
-            phase_state.update(status="failed", error=str(exc), error_type=type(exc).__name__)
+        except (Exception, KeyboardInterrupt) as exc:
+            phase_state.update(
+                status="failed", error=str(exc) or type(exc).__name__, error_type=type(exc).__name__
+            )
             raise
         finally:
             phase_state["elapsed_ms"] = (perf_counter() - started) * 1000

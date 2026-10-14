@@ -36,7 +36,8 @@ def llama(config, monkeypatch, tmp_path):
         if url.endswith("/props"):
             return props
         if url.endswith("/v1/models"):
-            return {"data": [{"id": "wemm", "meta": {"n_embd": 8}}]}
+            return {"data": [{"id": "wemm", "meta": {"vocab_type": 2, "n_vocab": 100, "n_ctx_train": 32768,
+                                                     "n_embd": 8, "n_params": 1000, "size": 2000, "ftype": "Q8_0"}}]}
         seen.append(kwargs["json"])
         return reply
 

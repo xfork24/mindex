@@ -8,11 +8,13 @@ e2e 命令组**不应用设置页（`/settings`）保存的覆盖层**，始终�
 
 ## 信任模型：probe / pin
 
-标准 llama.cpp API 无法证明权重文件哈希或启动参数。框架的做法：
+`e2e probe` 只读探测 `/health`、`/props`、`/v1/models`，返回原始观测、规范化七项模型元数据、诊断摘要及能力。七项字段仅用于结构校验，不是内容身份；缺失或类型无效拒绝。
 
-- **`e2e probe --output ... [--role embedding|asr|analyzer]`**：只读探测（`/health`、`/props`、`/v1/models`），无推理；要求单模型 llama-server（拒绝会自动切模型的路由服务），记录可观察运行指纹（build_info、chat_template、modalities、model_id、元数据）→ `runtime_id`。
-- **`e2e pin`**：部署者提供 GGUF 与 mmproj 的**实际文件 SHA256**、实际量化（如 `Q8_0`）→ 生成部署清单 `data/deployments/<role>.json`。清单已存在时拒绝覆盖；更换模型须新清单+新实验。
-- 此后每次推理前后都重核 `runtime_id`；变化即拒绝。**哈希与启动参数（`--pooling last`、`--video-fps 4`）由部署者背书**，这一信任边界写入空间身份。WeMM 须 `--embeddings --pooling last --video-fps 4`。
+`e2e pin` 生成 schema 2 清单，本地使用互斥的 `--weights-file`/`--mmproj-file`（并提供 `--server-cwd`），或远程操作员声明 `--weights-sha256`/`--mmproj-sha256`。旧清单拒绝覆盖。文件内容身份、稳定向量契约与部署观测分层保存；schema 1 保持原字段校验，不自动转换。推理使用实时模型 ID，前后核对部署及本地文件状态。
+
+v2 空间使用显式协议版本 `llama-native-wemm-2`，不包含地址、路径、别名、构建或整文件源码哈希。部署变化须重新 pin/smoke；构建、后端或数值配置改变后，使用固定基线逐条验证余弦相似度 ≥0.999。标准 HTTP API 仍无法证明实际加载的投影及全部启动参数，这些由部署者声明；本地 SHA256 只证明本地文件内容。
+
+迁移全部命令显式指定 `--config config.macos-v2.yaml --no-runtime-overrides`，该开关贯穿验收 Web 配置读取。完整步骤和回滚见 [macOS 迁移](macos-model-migration.md)。
 
 ## init：冻结实验输入
 
@@ -35,7 +37,7 @@ e2e 命令组**不应用设置页（`/settings`）保存的覆盖层**，始终�
 
 | phase | 需要的服务 | 作用 | 关键产物 |
 |---|---|---|---|
-| `smoke` | WeMM | 六片段能力门槛：维度/范数/有限性/内容敏感性/重复稳定性/身份稳定性 | `smoke.json` + `data/capabilities/<space_id>.json`（llama_cpp 建库前置） |
+| `smoke` | WeMM | 六片段能力门槛：维度/范数/有限性/内容敏感性/重复稳定性/身份稳定性 | `smoke.json`；v2 固定基线与逐部署记录在 `data/capabilities/v2/<space_id>/`（建库、检索与普通推理前置） |
 | `visual` | WeMM | moment 画面索引；仅加 `--activate` 才发布 | `visual-latest.json` 记录 index_id |
 | `preview` | WeMM | 跑草稿查询只出排名供人工检查，**不计质量分数** | `preview-<index>-<hash>.json` |
 | `asr` | ASR(:4020) | 原始转写（30 秒块），llama_cpp 路径状态 `pending_alignment` | `transcripts/.../raw/` |

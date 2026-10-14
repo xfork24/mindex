@@ -40,6 +40,7 @@ class EmbeddingConfig(Service):
     model: str = "tencent/WeMM-Embedding-9B"
     quantization: str = "int8"
     dimensions: int = Field(default=4096, ge=1)
+    numerical_implementation: str = Field(default="llama-cpp-wemm-1", min_length=1)
 
 
 class AnalyzerConfig(Service):
@@ -221,6 +222,7 @@ class SearchConfig(StrictModel):
 
 class Config(StrictModel):
     data_dir: Path = Path("data")
+    runtime_overrides: bool = True
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
     analyzer: AnalyzerConfig = Field(default_factory=AnalyzerConfig)
     asr: ASRConfig = Field(default_factory=ASRConfig)
