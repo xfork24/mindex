@@ -16,7 +16,11 @@ cp config.example.yaml config.local.yaml
 uv run mindex serve
 ```
 
-打开 <http://127.0.0.1:8000>。没有素材和模型服务时，页面会显示明确的未就绪状态；不会用模拟向量冒充真实检索。配置中的服务地址和模型名可随时修改，API key 通过环境变量读取。
+打开 <http://127.0.0.1:8000>。没有素材和模型服务时，页面会显示明确的未就绪状态；不会用模拟向量冒充真实检索。服务地址、模型与密钥可在[设置页](http://127.0.0.1:8000/settings)配置并热生效（保存即生效，无需重启，Web 与 CLI 共用）；未激活任何档案时使用 `config.local.yaml` 的取值，密钥也可通过环境变量读取。
+
+## 设置页：模型服务与调参
+
+打开 <http://127.0.0.1:8000/settings> 管理五个模型角色（多模态理解 / 文本拆分镜 / 多模态嵌入 / 语音识别 / 语音合成）的配置档案：内置智谱、DeepSeek、阿里百炼、腾讯、MiniMax 线上订阅预设与自建服务模板，支持测试连接、一键激活；音色库支持预定义音色录入与声音克隆（MiniMax 上传样本、阿里 URL 复刻）；检索五路召回权重与 RRF 调参保存即生效。详见 [docs/settings.md](docs/settings.md)。
 
 ## 素材后台管理
 
@@ -110,7 +114,7 @@ uv run mindex indexes activate 旧索引ID
 
 `--config 路径` 必须放在子命令之前，例如 `uv run mindex --config profiles/int8.yaml index`。也可设置 `MINDEX_CONFIG`。模型替换通过 `MultimodalEmbedder`、`VisualAnalyzer`、`Transcriber`、`Aligner` 和 `ShotDetector` 接口适配；其他嵌入服务实现 [部署文档中的协议](DEPLOYMENT.md#服务协议) 即可接入，不必改检索管线。内置 GPU 嵌入运行器针对 WeMM，不声称任意模型都能直接加载。
 
-数据保存在配置的 `data_dir`：原片 `sources/`，分镜计划 `plans/`，切片 `clips/`，缩略图 `thumbnails/`，导出报告 `reports/`，转写检查点 `transcripts/`，元数据 `metadata.sqlite3`，向量 `chroma/`。索引冻结描述与对白快照；更新分析不会修改已发布旧索引的检索文档。
+数据保存在配置的 `data_dir`：原片 `sources/`，分镜计划 `plans/`，切片 `clips/`，缩略图 `thumbnails/`，导出报告 `reports/`，转写检查点 `transcripts/`，上下文缓存 `context/`，创作任务 `studio/`，克隆音色样本 `voices/`，元数据 `metadata.sqlite3`，向量 `chroma/`。索引冻结描述与对白快照；更新分析不会修改已发布旧索引的检索文档。
 
 ## API
 
@@ -128,6 +132,7 @@ FastAPI 文档：<http://127.0.0.1:8000/docs>。
 | `POST /api/search/video` | multipart：`file`、`granularity`、`limit`、JSON 字符串 `filters` |
 | `POST /api/search/image` | multipart 同上；JPEG/PNG/WebP 静态图片，默认最大 20MB |
 | `GET /api/status?health=true` | 索引、处理记录、模型可用性 |
+| `GET /api/settings` | 设置页生效视图：模型档案、预设、嵌入/索引匹配状态、音色库、调参（详见 [docs/settings.md](docs/settings.md)） |
 | `GET /api/segments/{id}` | 当前索引中的片段详情 |
 | `GET /api/media/{id}` | 片段播放，支持 HTTP Range |
 | `GET /api/thumbnails/{id}` | 缩略图 |

@@ -6,6 +6,7 @@
 
 - `--config` / `-c` **必须放在子命令之前**：`uv run mindex --config profiles/int8.yaml index`。也可设环境变量 `MINDEX_CONFIG`（默认读 `config.local.yaml`）。
 - 配置模型 strict（`extra="forbid"`），未知键直接校验失败。
+- `data_dir` 已有元数据库时，CLI 命令会合并设置页（`/settings`）保存的覆盖层——激活的模型档案与检索调参对 CLI 同样生效，与 Web 行为一致；`mindex e2e` 命令组例外，始终使用 yaml 原值（验证框架保持可复现）。
 - `data_dir` 相对路径按**配置文件所在目录**解析；`deployment_manifest` 同理。
 - 离线阶段命令之间以 `data/pipeline.lock` 互斥，并行第二个实例立即失败。
 
@@ -41,7 +42,7 @@ uv run mindex prepare '/路径/电影.mkv' /路径/素材2.mp4
 
 ### `mindex align PYTHON [--source SOURCE_ID]`
 
-用独立 CPU ForcedAligner 环境对齐已缓存的原始 ASR 文本（仅 `asr.backend: llama_cpp` 路径需要）。**`PYTHON` 是位置参数**，指向 `.venv-align/bin/python`：
+用独立 CPU ForcedAligner 环境对齐已缓存的原始 ASR 文本（仅 `asr.backend: llama_cpp` / `openai` 路径需要，二者都只出原始文本）。**`PYTHON` 是位置参数**，指向 `.venv-align/bin/python`：
 
 ```bash
 uv run mindex align .venv-align/bin/python
@@ -84,7 +85,7 @@ uv run mindex search '雨夜，一个人强忍眼泪，镜头慢慢推近' --gra
 
 ### `mindex serve [--host 127.0.0.1] [--port 8000] [--index-id INDEX_ID]`
 
-启动页面与检索 API。`/` 检索页、`/admin` 素材后台、`/docs` OpenAPI。
+启动页面与检索 API。`/` 检索页、`/admin` 素材后台、`/studio` 创作页、`/settings` 设置页、`/docs` OpenAPI。
 
 `--index-id` 将查询、片段媒体和上下文绑定到指定 ready 索引，用于独立版本验证；不会修改活动索引。
 

@@ -1,6 +1,6 @@
 # 离线管线详解
 
-管线是一串**可独立重跑的阶段**：`prepare`（=detect+split，纯本地 CPU）→ `transcribe` → `align`（仅 llama_cpp ASR 后端）→ `analyze` → `index --activate`。各阶段有检查点，失败后重跑同一命令即可恢复；`data/pipeline.lock` 文件锁（timeout=0）保证同一时刻只有一个管线进程。
+管线是一串**可独立重跑的阶段**：`prepare`（=detect+split，纯本地 CPU）→ `transcribe` → `align`（仅 llama_cpp / openai ASR 后端）→ `analyze` → `index --activate`。各阶段有检查点，失败后重跑同一命令即可恢复；`data/pipeline.lock` 文件锁（timeout=0）保证同一时刻只有一个管线进程。
 
 `ingest` 快捷命令把全部阶段连跑，**仅适用于各模型服务可同时访问的环境**——单 GPU 互斥场景禁用，改用分阶段命令。
 
@@ -20,7 +20,7 @@
 所有中间结果都挂在某个指纹键下，配置变了就写新键、不覆盖旧结果：
 
 - **`layout_key`** = `fingerprint(detector 配置 + video 切分配置)`。绑定 sources 与 segments。切分参数变化 → 新 `data_dir`（不是新 layout_key 原地覆盖）。
-- **`asr_key`** = `fingerprint(asr 配置 + 部署清单)`。绑定 transcripts 缓存目录与 SQLite 记录。
+- **`asr_key`** = `fingerprint(asr 配置 + 部署清单)`（部署清单仅 `llama_cpp` 后端附加）。绑定 transcripts 缓存目录与 SQLite 记录。
 - **`analysis_key`** = `fingerprint(分析配置 + analyzer 部署 + asr 配置 + asr_key + layout_key)`。绑定 annotations 与 scene_plans——换分析模型或转写配置都会产生新分析，不复用旧检查点。
 
 `analysis_key` 依赖 `asr_key` 是刻意的：对白变了，给 Qwen 的输入就变了，描述必须重算。
@@ -50,13 +50,13 @@
 
 - 有音轨素材按 30 秒块提取单声道 16kHz WAV 上传 ASR；每块独立保存 `transcripts/<ID>/<asr_key>/<N>.json`，失败重跑只补缺失块，并校验时间戳不越界。
 - `mindex` 自定义 ASR 后端直接得到带时间戳对白，状态 `complete`。
-- `llama_cpp` 后端（`transcribe_raw`）只保存原始文本、语言与原始响应到 `.../raw/<N>.json`，状态置 **`pending_alignment`**——原始文本不伪造成对白。
+- `llama_cpp` 与 `openai` 后端（如百炼 qwen3-asr-flash，chat + `input_audio`）都走 `transcribe_raw`：只保存原始文本与原始响应到 `.../raw/<N>.json`，状态置 **`pending_alignment`**——原始文本不伪造成对白。
 - 无音轨记录 `no_audio`；显式 `asr.enabled: false` 记录 `disabled`（无对白召回，不能用于宣称对白检索达标）。
 - **完整模式下无音轨视频也必须执行 `transcribe`**，把状态记录下来，后续阶段才会放行。
 
-## align：独立 CPU 对齐（仅 llama_cpp 路径）
+## align：独立 CPU 对齐（仅 llama_cpp / openai 路径）
 
-把 `pending_alignment` 的原始文本交给 Qwen3-ForcedAligner 换取时间戳：
+把 `pending_alignment` 的原始文本（`llama_cpp` / `openai` 后端产生）交给 Qwen3-ForcedAligner 换取时间戳：
 
 ```bash
 uv venv .venv-align --python 3.11
@@ -94,7 +94,7 @@ uv run mindex align .venv-align/bin/python --source SOURCE_ID   # 只处理一�
 ```
 prepare（本地 CPU，无需模型）
 → 启动 ASR :4020        → transcribe → 停止
-→ (llama_cpp 路径) CPU align，无 GPU 占用
+→ (llama_cpp / openai 路径) CPU align，无 GPU 占用
 → 启动 Qwen :4040/v1    → analyze → 停止
 → 启动 WeMM :4010       → index --activate → 保持常驻供在线查询
 ```

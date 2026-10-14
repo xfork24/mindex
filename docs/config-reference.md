@@ -35,6 +35,7 @@
 | `model` | str | `qwen3.8:27b` | 部署别名 |
 | `revision` | str | `deployed-2026-10-12` | 由部署者维护；换权重必须更新并重跑分析 |
 | `api_key_env` | str | `MINDEX_QWEN_API_KEY` | Qwen 单独的 key 变量 |
+| `timeout` | float >0 | 180 | HTTP 超时秒 |
 
 ## `asr` — 中文转写
 
@@ -48,6 +49,7 @@
 | `enabled` | bool | true | `false` 时 transcribe 记录 `disabled`，无对白召回 |
 | `aligner_model` | str | `Qwen/Qwen3-ForcedAligner-0.6B` | CPU 对齐模型 |
 | `aligner_revision` | str | 代码默认 `main`；示例配置已固定 commit | 为 `main` 时 `align` 拒绝执行 |
+| `timeout` | float >0 | 300 | HTTP 超时秒 |
 
 ## `tts` — 创作配音（studio.tts）
 
@@ -55,7 +57,42 @@
 |---|---|---|---|
 | `backend` | `openai` \| `minimax` \| `dashscope` | `openai` | `openai` 走 `/audio/speech`（本地 llama-server）；`minimax` 走 t2a_v2；`dashscope` 走阿里原生协议（后两者为线上专用适配器） |
 | `base_url` / `model` / `voice` | str | `http://192.168.1.86:4030/v1` / `Qwen3-TTS` / `Cherry` | `voice` 可被设置页默认音色覆盖 |
-| `response_format` / `speech_path` | str | `wav` / `/audio/speech` | 仅 openai 后端使用 |
+| `response_format` | str | `wav` | 三种后端共用的音频格式 |
+| `speech_path` | str | `/audio/speech` | 仅 openai 后端使用 |
+| `timeout` | float >0 | 300 | HTTP 超时秒 |
+
+## `studio` — 创作工作流
+
+| 键 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `max_input_chars` | int ≥1 | 2000 | 创作文案字数上限 |
+| `max_shots` | int ≥1 | 60 | 单任务分镜数量上限 |
+
+### `studio.generator` — 文本拆分镜 LLM
+
+| 键 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `backend` | `openai` | `openai` | OpenAI 兼容 `/v1/chat/completions` |
+| `llama_template` | bool | `true` | 是否发送 llama-server 专有的 `chat_template_kwargs`；线上厂商档案设 `false` |
+| `base_url` / `model` / `revision` | str | `http://192.168.1.86:4040/v1` / `qwen3.8:27b` / `deployed-2026-10-12` | 本地默认复用理解模型；可切线上文本模型（如 deepseek-chat） |
+| `timeout` / `api_key_env` | | 300 / `MINDEX_QWEN_API_KEY` | |
+| `max_tokens` | int >0 | 4000 | 单次拆分镜输出上限，截断会明确报错 |
+| `split_retries` | int ≥0 | 2 | 分镜校验失败后的带反馈重试次数 |
+
+### `studio.recall` / `studio.selection` / `studio.audio` / `studio.subtitle` / `studio.render`
+
+| 键 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `recall.granularity` | `shot` \| `moment` | `shot` | 召回粒度 |
+| `recall.limit` | int 1–50 | 20 | 每镜召回候选数 |
+| `selection.atempo_limit` | float ≤0.25 | 0.1 | 配音最大加速比 |
+| `selection.gap_epsilon` | float >0 | 0.5 | 同源相邻延长判定容差 |
+| `selection.weights` | 五键 dict | semantic 1 / duration 1 / extension 0.3 / repeat 0.5 / overlap 1 | semantic 与 duration 必须为正 |
+| `audio.mode` | `tts_only` \| `ducking` | `tts_only` | 配音与原声混合策略 |
+| `audio.duck_gain` / `audio.loudnorm` | | 0.15 / `I=-16:TP=-1.5:LRA=11` | ducking 压低增益 / 响度归一参数 |
+| `subtitle.burn` / `subtitle.font_family` / `subtitle.font_file` / `subtitle.font_size` | | true / `Noto Sans CJK SC` / null / 7 | 烧录字幕（依赖 ffmpeg libass） |
+| `render.width` / `render.height` | 偶数 | 1280 / 720 | 成片画布（x264 要求偶数） |
+| `render.fps` / `render.crf` / `render.preset` | | 25 / 20 / `fast` | crf 0–51；preset 限 x264 枚举 |
 
 ## `detector` — 分镜
 

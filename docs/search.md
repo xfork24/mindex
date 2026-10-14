@@ -48,7 +48,7 @@ jieba `cut_for_search` 分词（过滤无中文/字母数字的 token），BM25 
 
 - 支持 JPEG、PNG、WebP 静态图片，默认最大 20MB（`search.max_image_upload_mb`）；依据实际解码内容校验，不依赖扩展名或 MIME。拒绝损坏、动画或超过 4000 万原始像素的图片。
 - 按 EXIF 校正方向，透明背景合成白色，保持比例缩至 `video.max_pixels` 内，编码 RGB PNG 后调用 WeMM 原生图片嵌入。
-- `llama_cpp` 通过 `/v1/embeddings` 的 `image_url` 数据 URL 输入；自定义后端通过 `/embed/image`。图片、文字和视频沿用同一份模型权重与嵌入空间，图片直接比较库中的视频向量，不调用 Qwen 或把图片转换为短视频。
+- `llama_cpp` 与 `tokenhub` 后端通过 `image_url` 数据 URL 输入；自定义后端通过 `/embed/image`。图片、文字和视频沿用同一份模型权重与嵌入空间，图片直接比较库中的视频向量，不调用 Qwen 或把图片转换为短视频。
 - 只走画面召回，独立于文字融合权重；沿用来源/标签/时长筛选、隐藏继承、IoU 去重和播放接口。查询图片不入库，成功或失败后清理临时文件。
 - 原有 llama.cpp 文字/视频适配器未改变，新增图片方法单独扩展，因此已有索引与能力门槛继续有效。图片路径仍须完成真实服务能力验证。
 
