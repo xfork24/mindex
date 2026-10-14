@@ -1,1 +1,1 @@
-/Users/hengliu/workspace/llama.cpp/build/bin/llama-server -m ../models/WeMM-9B-Q8_0.gguf --mmproj ../models/mmproj-WeMM-9B-BF16.gguf --host 127.0.0.1 --port 8888 -ngl 99 --embeddings --pooling last --video-fps 4 --ctx-size 139776
+/Users/hengliu/workspace/llama.cpp/build/bin/llama-server -m ../model/WeMM-9B-Q8_0.gguf --mmproj ../model/mmproj-WeMM-9B-BF16.gguf --host 127.0.0.1 --port 8888 -ngl 99 --embeddings --pooling last --video-fps 4 --ctx-size 139776
