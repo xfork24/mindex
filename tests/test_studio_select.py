@@ -106,9 +106,10 @@ def test_trimmed_when_video_much_longer_than_audio():
     )
     event = events[0]
     assert event.video.alignment == "trimmed"
-    assert event.audio.atempo == pytest.approx(0.9)  # 钳制到 1-0.1
-    assert event.audio.render_duration == pytest.approx(5.0 / 0.9, abs=1e-3)
-    assert event.warning and warnings
+    assert event.audio.atempo == 1.0
+    assert event.audio.render_duration == 5.0
+    assert event.video.end == 5.0
+    assert event.warning is None and warnings == []
 
 
 def test_padded_when_source_too_short():
@@ -183,3 +184,34 @@ def test_subtitle_spans_render_duration():
     assert events[0].subtitle.text == "字幕文本"
     assert events[0].subtitle.start == 0.0
     assert events[0].subtitle.end == events[0].audio.render_duration
+
+
+def test_extended_then_padded_is_a_valid_event():
+    events, warnings = run_select(
+        [{"id": "shot-01", "text": "文本"}],
+        {"shot-01": [candidate("src", 0, 1, 1)]},
+        {"shot-01": 4.0},
+        [(0, 1), (1, 2)],
+    )
+    assert events[0].video.alignment == "extended+padded"
+    assert events[0].video.end == 2
+    assert warnings
+
+
+def test_anchor_clamped_and_manual_eof_rejected():
+    from mindex.studio_select import plan_anchor, plan_explicit
+
+    selection = SelectionConfig()
+    plan = plan_anchor(
+        candidate("src", 0, 99, 1),
+        8,
+        selection,
+        source_duration=lambda _: 2,
+        extend_next=lambda *_: None,
+        extend_prev=lambda *_: None,
+    )
+    assert plan["end"] == 2
+    with pytest.raises(SelectionError):
+        plan_explicit("src", 2, 3, 1, selection, source_duration=2)
+    with pytest.raises(SelectionError):
+        plan_explicit("src", 1, 0.5, 1, selection, source_duration=2)

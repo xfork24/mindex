@@ -70,7 +70,7 @@ class ShotDraft(BaseModel):
 
     text: str = Field(min_length=1, max_length=200)
     query: str = Field(min_length=1, max_length=400)
-    estimated_seconds: float = Field(gt=0, le=60)
+    estimated_seconds: float = Field(gt=0, le=60, allow_inf_nan=False)
 
 
 class StoryboardDraft(BaseModel):

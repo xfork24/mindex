@@ -41,7 +41,7 @@ uv run mindex serve                              # 启动 http://127.0.0.1:8000�
 
 ### 创作工作流（studio，`/studio`）
 
-文案 → 成片的五步状态机：`split` 拆分镜 → `recall` 语义召回 → `tts` 配音 → `select` 选片对齐 → `render` 渲染合成。任务即 `data/studio/<job_id>/` 目录（状态即 job.json，不新建 SQLite 表）；全局 `studio.lock` 单步骤互斥；重跑只作废依赖闭包内的下游。召回与配音只依赖拆分镜（可任意先后，适配单 GPU）；选片 = 原片时间区间（可跨连续 shot，同源相邻延长 + atempo ±10% + 冻结帧/裁剪兜底）。分镜与选片支持人工编辑（PATCH 级联作废）。烧录字幕依赖 ffmpeg libass（缺失报错可切软字幕）。模块：`studio.py`（状态机）、`studio_steps.py`（编排）、`studio_select.py`（选片纯算法）、`studio_render.py`（渲染）、`studio_api.py`（路由）。详见 `docs/studio.md`。
+文案 → 成片的五步状态机：`split` 拆分镜 → `recall` 语义召回 → `tts` 配音 → `select` 选片对齐 → `render` 渲染合成。任务即 `data/studio/<job_id>/` 目录（状态即 job.json，不新建 SQLite 表）；全局 `studio.lock` 单步骤互斥；重跑只作废依赖闭包内的下游。召回与配音只依赖拆分镜（可任意先后，适配单 GPU）；选片 = 原片时间区间（可跨连续 shot，长镜头优先裁剪 + 同源可见相邻延长 + 配音有限加速 + 冻结帧兜底）。分镜与选片支持人工编辑（PATCH 级联作废）。烧录字幕依赖 ffmpeg libass（缺失报错可切软字幕）。检查点按输入指纹与文件哈希复用，支持 resume/force 和指定分镜重做；attempt 产物不可变留档，帧/采样共同时间轴避免漂移。模块：`studio_artifacts.py`（检查点/产物/诊断）、`studio.py`（状态机）、`studio_steps.py`（编排）、`studio_select.py`（选片纯算法）、`studio_render.py`（渲染）、`studio_api.py`（路由）。详见 `docs/studio.md`。
 
 ### 核心不变量
 

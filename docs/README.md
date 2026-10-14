@@ -13,7 +13,7 @@
 | 换模型 / 回退索引 | [索引版本与空间身份](index-versions.md) | [部署说明](../DEPLOYMENT.md) |
 | 做真实模型端到端验证 | [e2e 实验框架](e2e-framework.md) | [端到端操作手册](../E2E_RUNBOOK.md)、[测试计划](../E2E_TEST_PLAN.md) |
 | 管理素材（改名/收藏/隐藏） | [素材后台指南](admin.md) | — |
-| 从文案生成视频（创作工作台） | [创作工作流](studio.md) | [实施计划](../STUDIO_PLAN.md) |
+| 从文案生成视频（创作工作台） | [创作工作流](studio.md) | [修订计划](../STUDIO_REFINEMENT_PLAN.md) / [验收记录](studio-verification.md) |
 | 用哔哩哔哩缓存转 MP4 | [附带工具](tools.md) | [tools/m4s-converter/README.md](../tools/m4s-converter/README.md) |
 | 标注评测查询 | [评测标注说明](../eval/README.md) | [e2e 实验框架](e2e-framework.md) |
 

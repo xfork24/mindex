@@ -20,7 +20,9 @@ def test_fixture_storyboarder_is_deterministic(config):
     drafts = storyboarder.split("夜色沉了下去。远处有火车经过，铁轨在黑暗里发亮。她关上灯。")
     assert 2 <= len(drafts) <= 5
     assert storyboarder.calls == 1
-    assert all(draft.text and draft.query.endswith("画面") and draft.estimated_seconds > 0 for draft in drafts)
+    assert all(
+        draft.text and draft.query.endswith("画面") and draft.estimated_seconds > 0 for draft in drafts
+    )
 
 
 def test_run_split_assigns_ids_and_writes_storyboard(config):
@@ -35,6 +37,23 @@ def test_run_split_assigns_ids_and_writes_storyboard(config):
         f"shot-{index:02d}" for index in range(1, len(storyboard.shots) + 1)
     ]
     assert studio.load_job(config, job_id)["steps"]["split"]["status"] == "complete"
+
+
+def test_prompt_version_invalidates_split_checkpoint(config, monkeypatch):
+    generator = FixtureStoryboarder(config)
+    job_id = studio.create_job(config, "山风吹过山谷。远处的寺庙亮着灯。")["id"]
+    studio_steps.run_step(config, job_id, "split", storyboarder=generator)
+    checkpoints = studio.job_dir(config, job_id) / "checkpoints.json"
+    old_output = json.loads(checkpoints.read_text())["storyboard.json"]["path"]
+    studio_steps.run_step(config, job_id, "split", storyboarder=generator)
+    assert generator.calls == 1
+
+    monkeypatch.setattr(studio, "SPLIT_VERSION", studio.SPLIT_VERSION + 1)
+    assert studio.reconcile(config, job_id)["steps"]["split"]["status"] == "pending"
+    studio_steps.run_step(config, job_id, "split", storyboarder=generator)
+    assert generator.calls == 2
+    assert json.loads(checkpoints.read_text())["storyboard.json"]["path"] != old_output
+    assert (studio.job_dir(config, job_id) / old_output).is_file()
 
 
 def test_run_split_rejects_too_many_shots(config):
@@ -52,9 +71,9 @@ def test_coverage_warning_for_divergent_text(config):
             return [ShotDraft(text="完全无关的替换内容", query="无关查询", estimated_seconds=3.0)]
 
     job_id = studio.create_job(config, "原始的中文文案内容。")["id"]
-    result = studio_steps.run_step(config, job_id, "split", storyboarder=Divergent())
-    assert result["coverage_warning"] is not None
-    assert studio.load_storyboard(config, job_id).coverage_warning == result["coverage_warning"]
+    with pytest.raises(ModelError, match="覆盖原文"):
+        studio_steps.run_step(config, job_id, "split", storyboarder=Divergent())
+    assert studio.load_job(config, job_id)["steps"]["split"]["status"] == "failed"
 
 
 def test_qwen_storyboarder_retries_invalid_output_with_feedback(config, monkeypatch):
@@ -107,3 +126,30 @@ def test_decode_audio_handles_binary_and_json_base64():
         decode_audio(b"plain garbage text")
     with pytest.raises(ModelError):
         decode_audio(json.dumps({"no_field": 1}).encode())
+
+
+@pytest.mark.parametrize(
+    "parts", [["第一句。"], ["第二句。", "第一句。"], ["第一句。", "第一句。", "第二句。"]]
+)
+def test_coverage_detects_omission_order_and_duplication(parts):
+    assert studio_steps.coverage_warning("第一句。第二句。", parts)
+    assert studio_steps.coverage_warning("第一句。\n 第二句。", ["第一句。", "第二句。"]) is None
+
+
+def test_qwen_retries_missing_text(config, monkeypatch):
+    outputs = iter(
+        [
+            {"shots": [{"text": "第一句。", "query": "画面", "estimated_seconds": 1}]},
+            {"shots": [{"text": "第一句。第二句。", "query": "画面", "estimated_seconds": 2}]},
+        ]
+    )
+    calls = []
+
+    def response(*args, **kwargs):
+        calls.append(kwargs["json"])
+        return chat_payload(json.dumps(next(outputs), ensure_ascii=False))
+
+    monkeypatch.setattr("mindex.adapters.request", response)
+    drafts = QwenStoryboarder(config).split("第一句。第二句。")
+    assert len(calls) == 2
+    assert drafts[0].text == "第一句。第二句。"

@@ -82,9 +82,7 @@ def test_step_lifecycle_attempts_and_dependencies(config):
     state = studio.load_job(config, job_id)
     assert state["steps"]["split"]["status"] == "complete"
     assert state["steps"]["split"]["elapsed_ms"] >= 0
-    record = json.loads(
-        (studio.job_dir(config, job_id) / "attempts" / f"split-{attempt}.json").read_text()
-    )
+    record = json.loads((studio.job_dir(config, job_id) / "attempts" / f"split-{attempt}.json").read_text())
     assert record["status"] == "complete" and record["result"]["shots"] == 2
 
 
@@ -127,7 +125,7 @@ def test_storyboard_edit_invalidates_downstream(config):
     state = studio.save_storyboard(config, job_id, storyboard)
     assert state["steps"]["split"]["status"] == "complete"
     assert state["steps"]["recall"]["status"] == "pending"
-    assert state["history"][-1]["reason"] == "storyboard-edited"
+    assert state["history"][-1]["reason"].startswith("storyboard-")
     loaded = studio.load_storyboard(config, job_id)
     assert loaded.shots[0].text == "新文案"
     # 未完成 split 的任务不能编辑分镜
@@ -149,7 +147,9 @@ def test_timeline_edit_requires_select_and_invalidates_render(config):
             studio.TimelineEvent(
                 shot_id="shot-01",
                 order=1,
-                audio=studio.TimelineAudio(file="audio/shot-01.wav", duration=4.0, atempo=1.0, render_duration=4.0),
+                audio=studio.TimelineAudio(
+                    file="audio/shot-01.wav", duration=4.0, atempo=1.0, render_duration=4.0
+                ),
                 video=studio.TimelineVideo(
                     source_id="src",
                     segment_id="seg",
@@ -200,3 +200,62 @@ def test_invalidation_targets_follow_dependency_closure():
     assert studio.invalidation_targets("tts") == ("select", "render")
     assert studio.invalidation_targets("select") == ("render",)
     assert studio.invalidation_targets("render") == ()
+
+
+@pytest.mark.parametrize("shot_id", ["../escape", "../../victim/job", "/tmp/audio", "a/b", "a\\b", "."])
+def test_shot_ids_cannot_be_paths(shot_id):
+    with pytest.raises(ValueError):
+        Shot(id=shot_id, text="文案", query="画面", estimated_seconds=1)
+
+
+@pytest.mark.parametrize("number", [float("inf"), float("-inf"), float("nan")])
+def test_non_finite_configuration_rejected(number):
+    with pytest.raises(ValueError):
+        RenderConfig(fps=number)
+    with pytest.raises(ValueError):
+        SelectionConfig(
+            weights={"semantic": number, "duration": 1, "extension": 0, "repeat": 0, "overlap": 0}
+        )
+
+
+def test_query_only_and_reorder_preserve_tts(config):
+    board = Storyboard(
+        job_id="placeholder",
+        shots=[
+            Shot(id="shot-01", text="第一句。", query="红色", estimated_seconds=1),
+            Shot(id="shot-02", text="第二句。", query="蓝色", estimated_seconds=1),
+        ],
+    )
+    job_id = studio.create_job(config, "第一句。第二句。")["id"]
+    board.job_id = job_id
+    studio.write_storyboard(config, job_id, board)
+    for step in studio.STEPS:
+        complete(config, job_id, step)
+    board.shots[0].query = "更新查询"
+    studio.save_storyboard(config, job_id, board)
+    state = studio.load_job(config, job_id)
+    assert state["steps"]["tts"]["status"] == "complete"
+    assert state["steps"]["recall"]["status"] == "pending"
+    for step in ("recall", "select", "render"):
+        complete(config, job_id, step)
+    board.shots.reverse()
+    studio.save_storyboard(config, job_id, board)
+    state = studio.load_job(config, job_id)
+    assert state["steps"]["recall"]["status"] == state["steps"]["tts"]["status"] == "complete"
+    assert state["steps"]["select"]["status"] == "pending"
+
+
+def test_changed_config_and_legacy_are_invalidated_before_run(config):
+    job_id = studio.create_job(config, "文案。")["id"]
+    for step in studio.STEPS:
+        complete(config, job_id, step)
+    config.studio.tts.model = "another-model"
+    state = studio.reconcile(config, job_id)
+    assert state["steps"]["tts"]["status"] == "pending"
+    assert state["steps"]["recall"]["status"] == "complete"
+    assert state["steps"]["render"]["status"] == "pending"
+    state.pop("artifact_version")
+    studio.save(studio.job_path(config, job_id), state)
+    state = studio.reconcile(config, job_id)
+    assert state["steps"]["split"]["status"] == "complete"
+    assert state["steps"]["recall"]["status"] == "pending"

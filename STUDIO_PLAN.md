@@ -1,5 +1,7 @@
 # 「文本生成视频」创作工作流（studio 子系统）实施计划
 
+> 本文保留初始设计记录。静态审查后的改进计划见 [STUDIO_REFINEMENT_PLAN.md](STUDIO_REFINEMENT_PLAN.md)，当前运行行为与 API 以 [docs/studio.md](docs/studio.md) 为准。
+
 ## Context
 
 mindex 目前只能"找片段"，用户希望新增**文字生成视频**能力：输入一段中文文本，系统自动拆分镜 → TTS 配音 → 从已索引素材库召回视频片段 → 音视频字幕三轨合成一条可播放视频。这是全新子系统（架构级），但必须**完全复用现有项目的技术方案与页面风格**（用户明确要求）：零新增依赖、原生 HTML/JS、沿用 adapters/router/状态机/原子写惯例。

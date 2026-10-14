@@ -18,10 +18,11 @@ from uuid import uuid4
 from filelock import FileLock, Timeout
 from pydantic import Field, model_validator
 
-from .config import Config, StrictModel
+from .config import Config, StrictModel, fingerprint
 from .curation import EntityNotFound
 
 STEPS = ("split", "recall", "tts", "select", "render")
+SPLIT_VERSION = 3
 STEP_LABELS = {
     "split": "文本拆分镜",
     "recall": "语义召回",
@@ -65,7 +66,7 @@ def save_bytes(path: Path, payload: bytes):
 
 
 class Shot(StrictModel):
-    id: str = Field(min_length=1, max_length=40)
+    id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$")
     text: str = Field(min_length=1, max_length=200)
     query: str = Field(min_length=1, max_length=400)
     estimated_seconds: float = Field(gt=0, le=60)
@@ -99,7 +100,17 @@ class TimelineVideo(StrictModel):
     end: float = Field(gt=0)
     score: float = 0.0
     rank: int = 0
-    alignment: Literal["nearest", "extended", "atempo", "extended+atempo", "padded", "trimmed", "manual"]
+    alignment: Literal[
+        "nearest",
+        "extended",
+        "atempo",
+        "extended+atempo",
+        "padded",
+        "trimmed",
+        "extended+padded",
+        "extended+trimmed",
+        "manual",
+    ]
 
     @model_validator(mode="after")
     def ordered(self):
@@ -171,7 +182,10 @@ def studio_root(config: Config) -> Path:
 
 def job_dir(config: Config, job_id: str) -> Path:
     _validate_job_id(job_id)
-    return studio_root(config) / job_id
+    directory = studio_root(config) / job_id
+    if not directory.resolve().is_relative_to(studio_root(config).resolve()):
+        raise EntityNotFound("找不到创作任务")
+    return directory
 
 
 def job_path(config: Config, job_id: str) -> Path:
@@ -310,6 +324,8 @@ def create_job(config: Config, text: str, title: str | None = None, options: dic
         },
         "steps": {step: fresh_step() for step in STEPS},
         "history": [],
+        "execution": {"status": "idle", "current_step": None, "remaining_steps": []},
+        "artifact_version": 1,
     }
     save(job_path(config, job_id), state)
     return state
@@ -319,6 +335,7 @@ def load_job(config: Config, job_id: str) -> dict:
     state = _read_json(job_path(config, job_id), "找不到创作任务")
     if state.get("schema") != 1:
         raise StudioError("任务状态 schema 版本不受支持")
+    state.setdefault("execution", {"status": "idle", "current_step": None, "remaining_steps": []})
     return state
 
 
@@ -359,9 +376,7 @@ def _archive_downstream(state: dict, step: str, reason: str):
     for target in invalidation_targets(step):
         prior = state["steps"][target]
         if prior["status"] != "pending":
-            state["history"].append(
-                {"step": target, "reason": reason, "at": timestamp, "previous": prior}
-            )
+            state["history"].append({"step": target, "reason": reason, "at": timestamp, "previous": prior})
             state["steps"][target] = fresh_step()
 
 
@@ -373,7 +388,7 @@ def check_step(state: dict, step: str):
 
 
 def begin_step(config: Config, job_id: str, step: str) -> dict:
-    state = load_job(config, job_id)
+    state = reconcile(config, job_id)
     check_step(state, step)
     _archive_downstream(state, step, f"rerun-{step}")
     prior = state["steps"][step]
@@ -385,9 +400,14 @@ def begin_step(config: Config, job_id: str, step: str) -> dict:
         "status": "running",
         "attempt": uuid4().hex[:12],
         "started_at": timestamp,
+        "configuration": step_configuration(config, state, step),
     }
     state["updated_at"] = timestamp
     save(job_path(config, job_id), state)
+    save(
+        attempts_dir(config, job_id) / f"{step}-{state['steps'][step]['attempt']}.json",
+        {"step": step, **state["steps"][step]},
+    )
     return state
 
 
@@ -398,7 +418,9 @@ def _finish_step(config: Config, job_id: str, step: str, status: str, **fields):
         raise StudioError(f"步骤 {STEP_LABELS[step]} 不在执行中，无法记录 {status}")
     timestamp = now()
     try:
-        elapsed = (datetime.fromisoformat(timestamp) - datetime.fromisoformat(info["started_at"])).total_seconds()
+        elapsed = (
+            datetime.fromisoformat(timestamp) - datetime.fromisoformat(info["started_at"])
+        ).total_seconds()
     except (TypeError, ValueError):
         elapsed = 0.0
     info.update(status=status, finished_at=timestamp, elapsed_ms=round(elapsed * 1000), **fields)
@@ -414,9 +436,7 @@ def complete_step(config: Config, job_id: str, step: str, result: dict | None = 
 
 
 def fail_step(config: Config, job_id: str, step: str, exc: Exception) -> dict:
-    return _finish_step(
-        config, job_id, step, "failed", error=str(exc)[:2000], error_type=type(exc).__name__
-    )
+    return _finish_step(config, job_id, step, "failed", error=str(exc)[:2000], error_type=type(exc).__name__)
 
 
 def recover_stale(config: Config):
@@ -439,18 +459,11 @@ def recover_stale(config: Config):
             except ValueError:
                 continue
             running = [s for s, v in state.get("steps", {}).items() if v.get("status") == "running"]
-            if not running:
+            if not running and state.get("execution", {}).get("status") != "running":
                 continue
-            timestamp = now()
             for step in running:
-                state["steps"][step].update(
-                    status="failed",
-                    error="服务重启导致步骤中断，请重跑该步骤",
-                    error_type="Interrupted",
-                    finished_at=timestamp,
-                )
-            state["updated_at"] = timestamp
-            save(path, state)
+                fail_step(config, directory.name, step, StudioError("服务重启导致步骤中断，请重跑该步骤"))
+            set_execution(config, directory.name, "failed", None, [])
     finally:
         lock.release()
 
@@ -471,7 +484,23 @@ def save_storyboard(config: Config, job_id: str, storyboard: Storyboard) -> dict
     state = load_job(config, job_id)
     if state["steps"]["split"]["status"] != "complete":
         raise StudioError("请先完成文本拆分镜，再编辑分镜")
-    _archive_downstream(state, "split", "storyboard-edited")
+    prior = load_storyboard(config, job_id) if storyboard_path(config, job_id).is_file() else None
+    old = {s.id: s for s in prior.shots} if prior else {}
+    new = {s.id: s for s in storyboard.shots}
+    structural = old.keys() != new.keys()
+    if structural or any(old[k].query != new[k].query for k in old.keys() & new.keys()):
+        invalidate(state, ("recall", "select", "render"), "storyboard-query-edited")
+    if structural or any(old[k].text != new[k].text for k in old.keys() & new.keys()):
+        invalidate(state, ("tts", "select", "render"), "storyboard-text-edited")
+    if prior and [s.id for s in prior.shots] != [s.id for s in storyboard.shots]:
+        invalidate(state, ("select", "render"), "storyboard-reordered")
+    storyboard.coverage_warning = coverage_warning(state["input_text"], [s.text for s in storyboard.shots])
+    archive_edit(config, job_id, "storyboard", storyboard_path(config, job_id))
+    registry = job_dir(config, job_id) / "checkpoints.json"
+    if registry.is_file():
+        checkpoints = json.loads(registry.read_text())
+        checkpoints.pop("storyboard.json", None)
+        save(registry, checkpoints)
     state["updated_at"] = now()
     write_storyboard(config, job_id, storyboard)
     save(job_path(config, job_id), state)
@@ -492,7 +521,85 @@ def save_timeline(config: Config, job_id: str, timeline: Timeline) -> dict:
     if state["steps"]["select"]["status"] != "complete":
         raise StudioError("请先完成选片对齐，再调整时间线")
     _archive_downstream(state, "select", "timeline-edited")
+    archive_edit(config, job_id, "timeline", timeline_path(config, job_id))
     state["updated_at"] = now()
     write_timeline(config, job_id, timeline)
     save(job_path(config, job_id), state)
+    return state
+
+
+def coverage_warning(original: str, shot_texts: list[str]) -> str | None:
+    def normalize(value):
+        return re.sub(r"\s+", "", value)
+
+    if normalize(original) != normalize("".join(shot_texts)):
+        return "分镜文本未按顺序完整覆盖原文，请核对遗漏、重复或改写内容"
+    return None
+
+
+def invalidate(state: dict, steps, reason: str):
+    for target in steps:
+        if state["steps"][target]["status"] != "pending":
+            state["history"].append(
+                {"step": target, "reason": reason, "at": now(), "previous": state["steps"][target]}
+            )
+            state["steps"][target] = fresh_step()
+
+
+def archive_edit(config, job_id, name, path):
+    if path.is_file():
+        directory = attempts_dir(config, job_id) / f"edit-{name}-{uuid4().hex[:12]}"
+        directory.mkdir(parents=True)
+        shutil.copy2(path, directory / path.name)
+
+
+def set_execution(config, job_id, status, current_step, remaining_steps):
+    state = load_job(config, job_id)
+    error = state.get("execution", {}).get("error")
+    state["execution"] = {"status": status, "current_step": current_step, "remaining_steps": remaining_steps}
+    if status == "failed" and error:
+        state["execution"]["error"] = error
+    state["updated_at"] = now()
+    save(job_path(config, job_id), state)
+    return state
+
+
+def step_configuration(config, state, step):
+    studio = config.studio
+    values = {
+        "split": {"generator": studio.generator.model_dump(), "version": SPLIT_VERSION},
+        "recall": {
+            "recall": studio.recall.model_dump(),
+            "search": config.search.model_dump(),
+            "embedding": config.embedding.model_dump(),
+            "video": config.video.model_dump(),
+            "limit": state["options"]["recall_limit"],
+        },
+        "tts": {"tts": studio.tts.model_dump(), "voice": state["options"]["voice"]},
+        "select": studio.selection.model_dump(),
+        "render": {
+            "render": studio.render.model_dump(),
+            "audio": studio.audio.model_dump(),
+            "subtitle": studio.subtitle.model_dump(),
+        },
+    }
+    return fingerprint(values[step])
+
+
+def reconcile(config, job_id):
+    """仅在持执行锁时迁移旧任务并使变化后的配置失效。"""
+    state = load_job(config, job_id)
+    changed = False
+    if state.get("artifact_version") != 1:
+        invalidate(state, ("recall", "tts", "select", "render"), "legacy-unverified")
+        state["artifact_version"] = 1
+        changed = True
+    for step in STEPS:
+        info = state["steps"][step]
+        if info.get("configuration") and info["configuration"] != step_configuration(config, state, step):
+            invalidate(state, (step, *invalidation_targets(step)), "configuration-changed")
+            changed = True
+    if changed:
+        state["updated_at"] = now()
+        save(job_path(config, job_id), state)
     return state

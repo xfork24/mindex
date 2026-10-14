@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 
 from .config import SelectionConfig
@@ -21,28 +22,40 @@ class SelectionError(ValueError):
 
 
 def _extend_forward(
-    source_id: str, start: float, end: float, want: float, selection: SelectionConfig,
+    source_id: str,
+    start: float,
+    end: float,
+    want: float,
+    selection: SelectionConfig,
     extend_next: Callable[[str, float], dict | None],
 ) -> float:
     while end - start < want - _EPS:
         nxt = extend_next(source_id, end)
         if not nxt or nxt["start"] > end + selection.gap_epsilon:
             break
-        end = min(nxt["end"], start + want)
-        if end <= start + _EPS:
+        new_end = min(nxt["end"], start + want)
+        if new_end <= end + _EPS:
             break
+        end = new_end
     return end
 
 
 def _extend_backward(
-    source_id: str, start: float, end: float, want: float, selection: SelectionConfig,
+    source_id: str,
+    start: float,
+    end: float,
+    want: float,
+    selection: SelectionConfig,
     extend_prev: Callable[[str, float], dict | None],
 ) -> float:
     while end - start < want - _EPS:
         prv = extend_prev(source_id, start)
         if not prv or prv["end"] < start - selection.gap_epsilon:
             break
-        start = max(prv["start"], end - want)
+        new_start = max(prv["start"], end - want)
+        if new_start >= start - _EPS:
+            break
+        start = new_start
         if start <= _EPS:
             break
     return start
@@ -73,31 +86,54 @@ def plan_anchor(
     extend_prev: Callable[[str, float], dict | None],
 ) -> dict | None:
     """单个候选的时长对齐规划：延长 → atempo 钳制 → pad/trim 残差。不可用返回 None。"""
-    if anchor["end"] - anchor["start"] < 0.04:
-        return None  # 退化候选
-    if not source_duration(anchor["source_id"]):
+    duration = source_duration(anchor["source_id"])
+    if not duration or not all(math.isfinite(v) for v in (duration, target, anchor["start"], anchor["end"])):
         return None
-    end = _extend_forward(anchor["source_id"], anchor["start"], anchor["end"], target, selection, extend_next)
-    start = _extend_backward(anchor["source_id"], anchor["start"], end, target, selection, extend_prev)
+    start, end = max(0.0, anchor["start"]), min(duration, anchor["end"])
+    if end - start < 0.04 or target <= 0:
+        return None
+    end = min(duration, _extend_forward(anchor["source_id"], start, end, target, selection, extend_next))
+    start = max(0.0, _extend_backward(anchor["source_id"], start, end, target, selection, extend_prev))
     return _plan_interval(anchor["source_id"], anchor, start, end, target, selection)
 
 
 def plan_explicit(
-    source_id: str, start: float, end: float, target: float, selection: SelectionConfig, *, source_duration: float
+    source_id: str,
+    start: float,
+    end: float,
+    target: float,
+    selection: SelectionConfig,
+    *,
+    source_duration: float,
 ) -> dict:
     """人工指定区间的规划：clamp 到原片范围，同一套 atempo/残差公式。"""
-    start = max(0.0, min(start, source_duration))
-    end = max(start + 0.04, min(end, source_duration))
-    return _plan_interval(source_id, {"source_id": source_id, "start": start, "end": end}, start, end, target, selection)
+    if not all(math.isfinite(v) for v in (start, end, target, source_duration)):
+        raise SelectionError("视频区间和音频时长必须是有限数值")
+    if start < 0 or start >= source_duration or end <= start or target <= 0:
+        raise SelectionError("人工视频区间无有效长度或超出原片范围")
+    requested_end = end
+    end = min(end, source_duration)
+    if end - start < 0.04:
+        raise SelectionError("人工视频区间不足一帧")
+    plan = _plan_interval(
+        source_id, {"source_id": source_id, "start": start, "end": end}, start, end, target, selection
+    )
+    if requested_end > source_duration:
+        plan["warning"] = "人工区间超过原片结尾，已钳制到原片范围"
+    return plan
 
 
-def _plan_interval(source_id: str, anchor: dict, start: float, end: float, target: float, selection: SelectionConfig) -> dict | None:
+def _plan_interval(
+    source_id: str, anchor: dict, start: float, end: float, target: float, selection: SelectionConfig
+) -> dict | None:
     vlen = end - start
     if vlen <= _EPS:
         return None
-    atempo = min(1 + selection.atempo_limit, max(1 - selection.atempo_limit, target / vlen))
+    atempo = min(1 + selection.atempo_limit, max(1.0, target / vlen))
     render_duration = target / atempo
     pad = render_duration - vlen
+    if pad < -_EPS:
+        end = start + render_duration
     return {
         "anchor": anchor,
         "source_id": source_id,
@@ -138,17 +174,23 @@ def select_events(
         best: dict | None = None
         for anchor in candidates[shot["id"]]:
             plan = plan_anchor(
-                anchor, target, selection,
-                source_duration=source_duration, extend_next=extend_next, extend_prev=extend_prev,
+                anchor,
+                target,
+                selection,
+                source_duration=source_duration,
+                extend_next=extend_next,
+                extend_prev=extend_prev,
             )
             if plan is None:
                 continue
-            semantic = 1.0 / anchor["rank"]
+            semantic = 1.0 / max(1, anchor["rank"])
             residual = abs(plan["pad"]) / target
             fit = 1.0 - min(1.0, residual / (2 * selection.atempo_limit))
             extension = max(0.0, plan["vlen"] - (anchor["end"] - anchor["start"])) / target
             repeat = len(usage.get(anchor["source_id"], []))
-            overlap = 1.0 if _overlaps((plan["start"], plan["end"]), usage.get(anchor["source_id"], [])) else 0.0
+            overlap = (
+                1.0 if _overlaps((plan["start"], plan["end"]), usage.get(anchor["source_id"], [])) else 0.0
+            )
             total = (
                 weights["semantic"] * semantic
                 + weights["duration"] * fit
@@ -166,8 +208,13 @@ def select_events(
 
 
 def build_event(
-    shot: dict, order: int, plan: dict, target: float, selection: SelectionConfig,
-    covered_shots: Callable[[str, float, float], list[str]], warnings: list[str],
+    shot: dict,
+    order: int,
+    plan: dict,
+    target: float,
+    selection: SelectionConfig,
+    covered_shots: Callable[[str, float, float], list[str]],
+    warnings: list[str],
     alignment_override: str | None = None,
 ) -> TimelineEvent:
     anchor = plan["anchor"]
@@ -175,9 +222,10 @@ def build_event(
     alignment = alignment_override or _alignment_label(extended, plan["atempo"], plan["pad"])
     warning = (
         f"分镜 {shot['id']} 音视频时长差超过 ±{selection.atempo_limit:.0%}，成片将以冻结末帧或裁剪对齐"
-        if abs(plan["pad"]) > _PAD_WARNING
+        if plan["pad"] > _PAD_WARNING
         else None
     )
+    warning = "；".join(part for part in (plan.get("warning"), warning) if part) or None
     if warning:
         warnings.append(warning)
     return TimelineEvent(
@@ -204,7 +252,8 @@ def studio_video(anchor: dict, best: dict, covered_shots: Callable, alignment: s
         "source_id": anchor["source_id"],
         "source_name": anchor.get("source_name", ""),
         "segment_id": anchor["segment_id"],
-        "segment_ids": covered_shots(anchor["source_id"], best["start"], best["end"]),
+        "segment_ids": covered_shots(anchor["source_id"], best["start"], best["end"])
+        or [anchor["segment_id"]],
         "start": round(best["start"], 3),
         "end": round(best["end"], 3),
         "score": anchor.get("score", 0.0),

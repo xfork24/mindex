@@ -54,7 +54,9 @@ def test_studio_page_served(studio_client):
 def test_create_job_validation_and_listing(studio_client):
     _, client = studio_client
     assert client.post("/api/studio/jobs", json={"text": "   "}).status_code == 422
-    assert client.post("/api/studio/jobs", json={"text": "正常文案。", "options": {"bad": 1}}).status_code == 422
+    assert (
+        client.post("/api/studio/jobs", json={"text": "正常文案。", "options": {"bad": 1}}).status_code == 422
+    )
     job_id = create_job(client, "列表里的任务。")
     listing = client.get("/api/studio/jobs").json()
     assert listing["items"][0]["id"] == job_id
@@ -78,7 +80,7 @@ def test_split_then_recall_flow_with_real_index(studio_client):
     shots = detail["shots"]
     assert all(shot["candidates"]["status"] == "ok" and shot["candidates"]["count"] >= 1 for shot in shots)
     top = shots[0]["candidates"]["top"]
-    assert top["media_url"].startswith("/api/media/")
+    assert top["media_url"].startswith("/api/admin/segments/")
     assert client.get(top["media_url"]).status_code == 200  # 候选预览走真实媒体端点
     assert client.get(top["thumbnail_url"]).status_code == 200
     # 配音 → 每镜精确音频时长可试听
@@ -94,16 +96,17 @@ def test_split_then_recall_flow_with_real_index(studio_client):
     assert detail["job"]["steps"]["select"]["status"] == "complete"
     assert detail["timeline"] and detail["timeline"]["mode"] == "auto"
     assert len(detail["timeline"]["events"]) == len(detail["shots"])
-    assert all(shot["selection"] and shot["selection"]["end"] > shot["selection"]["start"] for shot in detail["shots"])
+    assert all(
+        shot["selection"] and shot["selection"]["end"] > shot["selection"]["start"]
+        for shot in detail["shots"]
+    )
     assert detail["timeline"]["total_seconds"] > 0
 
 
 def test_recall_failure_without_active_index(config, video_file):
     pipeline = Pipeline(config)
     pipeline.prepare(video_file)
-    client = TestClient(
-        create_app(config, FixtureEmbedder(config), storyboarder=FixtureStoryboarder(config))
-    )
+    client = TestClient(create_app(config, FixtureEmbedder(config), storyboarder=FixtureStoryboarder(config)))
     job_id = create_job(client, "没有任何索引的时候召回。")
     client.post(f"/api/studio/jobs/{job_id}/steps/split")
     wait_step(client, job_id, "split")
@@ -160,7 +163,10 @@ def test_patch_storyboard_cascades_and_patch_timeline_reselects(studio_client):
     _, client = studio_client
     job_id = client.post(
         "/api/studio/jobs",
-        json={"text": "红色首先出现在画面里，占据了整个视野。随后蓝色调转过来慢慢铺满屏幕。", "options": {"burn": False}},
+        json={
+            "text": "红色首先出现在画面里，占据了整个视野。随后蓝色调转过来慢慢铺满屏幕。",
+            "options": {"burn": False},
+        },
     ).json()["id"]
     for step in ("split", "recall", "tts", "select"):
         client.post(f"/api/studio/jobs/{job_id}/steps/{step}")
@@ -175,7 +181,10 @@ def test_patch_storyboard_cascades_and_patch_timeline_reselects(studio_client):
     alternative = next(item["segment_id"] for item in pool["results"] if item["segment_id"] != chosen)
     patch = {
         "events": [
-            {"shot_id": event["shot_id"], "video": {"segment_id": alternative if event["order"] == 1 else event["video"]["segment_id"]}}
+            {
+                "shot_id": event["shot_id"],
+                "video": {"segment_id": alternative if event["order"] == 1 else event["video"]["segment_id"]},
+            }
             for event in original
         ]
     }
@@ -190,12 +199,25 @@ def test_patch_storyboard_cascades_and_patch_timeline_reselects(studio_client):
     partial = {"events": patch["events"][:1]}
     assert client.patch(f"/api/studio/jobs/{job_id}/timeline", json=partial).status_code == 422
     # 候选池外的片段 -> 422
-    bogus = {"events": [{"shot_id": event["shot_id"], "video": {"segment_id": "不存在" if event["order"] == 1 else event["video"]["segment_id"]}} for event in updated["events"]]}
+    bogus = {
+        "events": [
+            {
+                "shot_id": event["shot_id"],
+                "video": {"segment_id": "不存在" if event["order"] == 1 else event["video"]["segment_id"]},
+            }
+            for event in updated["events"]
+        ]
+    }
     assert client.patch(f"/api/studio/jobs/{job_id}/timeline", json=bogus).status_code == 422
 
     # 编辑分镜：级联作废 recall 之后的所有步骤
     shots = [
-        {"id": shot["id"], "text": shot["text"], "query": shot["query"], "estimated_seconds": shot["estimated_seconds"]}
+        {
+            "id": shot["id"],
+            "text": shot["text"],
+            "query": shot["query"],
+            "estimated_seconds": shot["estimated_seconds"],
+        }
         for shot in detail["storyboard"]["shots"]
     ]
     shots[0]["text"] = "改写后的红色开场文案。"
@@ -209,3 +231,150 @@ def test_patch_storyboard_cascades_and_patch_timeline_reselects(studio_client):
     # 未完成 split 的新任务不可编辑
     other = create_job(client, "还没拆分镜的任务。")
     assert client.patch(f"/api/studio/jobs/{other}/storyboard", json={"shots": shots}).status_code == 422
+
+
+def test_accepted_state_lock_conflicts_and_release(config):
+    from threading import Event
+
+    from filelock import FileLock
+
+    from mindex import studio
+
+    entered, release = Event(), Event()
+
+    class Slow(FixtureStoryboarder):
+        def split(self, text):
+            entered.set()
+            release.wait(10)
+            return super().split(text)
+
+    client = TestClient(create_app(config, storyboarder=Slow(config)))
+    job_id = create_job(client, "这是用于慢速拆分的文案。")
+    try:
+        response = client.post(f"/api/studio/jobs/{job_id}/steps/split")
+        assert response.status_code == 202
+        assert response.json()["steps"]["split"] == "running"
+        assert response.json()["execution"]["status"] == "running"
+        assert entered.wait(3)
+        assert client.post(f"/api/studio/jobs/{job_id}/steps/split").status_code == 409
+        assert client.delete(f"/api/studio/jobs/{job_id}").status_code == 409
+        assert client.get(f"/api/studio/jobs/{job_id}/archive").status_code == 409
+        assert client.get(f"/api/studio/jobs/{job_id}").json()["job"]["execution"]["status"] == "running"
+    finally:
+        release.set()
+    wait_step(client, job_id, "split")
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline:
+        state = client.get(f"/api/studio/jobs/{job_id}").json()["job"]
+        if state["execution"]["status"] == "complete":
+            break
+        time.sleep(0.01)
+    with FileLock(str(studio.lock_path(config)), timeout=0):
+        pass
+
+
+def test_force_validation_artifact_archive_and_paths(studio_client):
+    import io
+    import zipfile
+
+    _, client = studio_client
+    job_id = create_job(client, "这是第一句配音文本。这是第二句配音文本。")
+    client.post(f"/api/studio/jobs/{job_id}/steps/split")
+    detail = wait_step(client, job_id, "split")
+    shot = detail["storyboard"]["shots"][0]
+    for body in [
+        {"mode": "force", "shot_ids": []},
+        {"mode": "resume", "shot_ids": [shot["id"]]},
+        {"mode": "force", "shot_ids": [shot["id"], shot["id"]]},
+        {"mode": "force", "shot_ids": ["missing"]},
+    ]:
+        assert client.post(f"/api/studio/jobs/{job_id}/steps/tts", json=body).status_code == 422
+    assert (
+        client.post(
+            f"/api/studio/jobs/{job_id}/steps/split", json={"mode": "force", "shot_ids": [shot["id"]]}
+        ).status_code
+        == 422
+    )
+    assert (
+        client.patch(
+            f"/api/studio/jobs/{job_id}/storyboard", json={"shots": [{**shot, "id": "../../escaped"}]}
+        ).status_code
+        == 422
+    )
+    assert (
+        client.get(f"/api/studio/jobs/{job_id}/artifacts/%2e%2e/%2e%2e/metadata.sqlite3").status_code == 404
+    )
+    listing = client.get(f"/api/studio/jobs/{job_id}/artifacts").json()["items"]
+    assert any(item["attempt"] and item["path"].endswith("manifest.json") for item in listing)
+    response = client.get(f"/api/studio/jobs/{job_id}/archive")
+    assert response.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(response.content)) as bundle:
+        assert "job.json" in bundle.namelist()
+        assert "storyboard.json" in bundle.namelist()
+        assert not any(path.startswith("exports/") for path in bundle.namelist())
+
+
+def test_thread_start_failure_is_terminal_and_unlocks(config, monkeypatch):
+    import threading
+
+    from filelock import FileLock
+
+    from mindex import studio
+
+    client = TestClient(create_app(config, storyboarder=FixtureStoryboarder(config)))
+    job_id = create_job(client, "线程启动失败测试。")
+    original = threading.Thread.start
+
+    def start(thread):
+        if thread.name.startswith("studio-"):
+            raise RuntimeError("无法创建工作线程")
+        return original(thread)
+
+    monkeypatch.setattr(threading.Thread, "start", start)
+    with pytest.raises(RuntimeError, match="工作线程"):
+        client.post(f"/api/studio/jobs/{job_id}/steps/split")
+    state = studio.load_job(config, job_id)
+    assert state["steps"]["split"]["status"] == "failed"
+    assert state["execution"]["status"] == "failed"
+    with FileLock(str(studio.lock_path(config)), timeout=0):
+        pass
+
+
+def test_preview_manual_interval_and_hidden_context(studio_client):
+    from mindex import studio_steps
+    from mindex.storage import Store
+
+    config, client = studio_client
+    job_id = create_job(client, "这是需要寻找红色画面的第一句文案。")
+    for step in ("split", "recall", "tts", "select"):
+        assert client.post(f"/api/studio/jobs/{job_id}/steps/{step}").status_code == 202
+        assert wait_step(client, job_id, step)["job"]["steps"][step]["status"] == "complete"
+    detail = client.get(f"/api/studio/jobs/{job_id}").json()
+    preview = client.get(detail["shots"][0]["selection"]["preview_url"])
+    assert preview.status_code == 200 and preview.headers["content-type"] == "video/mp4"
+    store = Store(config.data_dir)
+    source_id = detail["timeline"]["events"][0]["video"]["source_id"]
+    shots = store.rows(
+        "SELECT id,start,end FROM segments WHERE source_id=? AND kind='shot' ORDER BY start", (source_id,)
+    )
+    assert len(shots) >= 3
+    assert client.patch(f"/api/admin/segments/{shots[1]['id']}", json={"hidden": True}).status_code == 200
+    _, extend_next, _, _ = studio_steps._selection_callbacks(store)
+    assert extend_next(source_id, shots[0]["end"]) is None  # 不跨过隐藏邻镜继续找后续镜头
+    shot_id = detail["timeline"]["events"][0]["shot_id"]
+    base = {"source_id": source_id, "start": shots[0]["start"], "end": shots[0]["end"]}
+    response = client.patch(
+        f"/api/studio/jobs/{job_id}/timeline", json={"events": [{"shot_id": shot_id, "video": base}]}
+    )
+    assert response.status_code == 200
+    for video in [
+        {**base, "start": 10, "end": 11},
+        {**base, "end": 0.1, "start": 0.5},
+        {**base, "end": shots[1]["end"]},
+    ]:
+        assert (
+            client.patch(
+                f"/api/studio/jobs/{job_id}/timeline", json={"events": [{"shot_id": shot_id, "video": video}]}
+            ).status_code
+            == 422
+        )

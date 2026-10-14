@@ -7,34 +7,35 @@ run_step 是统一入口：状态迁移全部委托 studio 状态机，
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 
 from . import studio
 from .adapters import ModelError, MultimodalEmbedder, Speaker, Storyboarder, make_storyboarder
-from .config import Config
+from .config import Config, fingerprint
 from .media import MediaError, audio_info
+from .studio_artifacts import ArtifactSession, current, digest, visibility_key
 from .types import ShotDraft, TextSearch
 
-_PUNCTUATION = re.compile(r"[\s，。！？；、：．.,!?;:()（）\[\]【】《》<>“”‘’\"'—…·-]+")
-
-
-def coverage_warning(original: str, shot_texts: list[str]) -> str | None:
-    """软校验：分镜拼接与原文重叠度过低时提示人工核对，不判失败。"""
-
-    def normalize(value: str) -> str:
-        return _PUNCTUATION.sub("", value)
-
-    source, combined = normalize(original), normalize("".join(shot_texts))
-    if not combined:
-        return "分镜为空，请人工核对原文覆盖"
-    ratio = sum(1 for char in combined if char in source) / len(combined)
-    if ratio < 0.6:
-        return f"分镜文本与原文重叠度约 {ratio:.0%}，请人工核对是否遗漏或改写内容"
-    return None
+coverage_warning = studio.coverage_warning
 
 
 def run_split(config: Config, job_id: str, state: dict, storyboarder: Storyboarder) -> dict:
+    session = current.get()
+    split_key = fingerprint(
+        {
+            "text": state["input_text"],
+            "generator": config.studio.generator.model_dump(),
+            "split_version": studio.SPLIT_VERSION,
+        }
+    )
+    cached = session.reuse("storyboard.json", split_key) if session else None
+    if cached:
+        board = studio.load_storyboard(config, job_id)
+        return {
+            "shots": len(board.shots),
+            "coverage_warning": board.coverage_warning,
+            "estimated_seconds": sum(s.estimated_seconds for s in board.shots),
+        }
     drafts: list[ShotDraft] = storyboarder.split(state["input_text"])
     if not drafts:
         raise ModelError("拆分镜结果为空，请检查文案后重试")
@@ -54,7 +55,14 @@ def run_split(config: Config, job_id: str, state: dict, storyboarder: Storyboard
         shots=shots,
         coverage_warning=coverage_warning(state["input_text"], [shot.text for shot in shots]),
     )
-    studio.write_storyboard(config, job_id, storyboard)
+    if storyboard.coverage_warning:
+        raise ModelError(storyboard.coverage_warning)
+    if session:
+        session.json(
+            "storyboard.json", {"schema": 1, **storyboard.model_dump(), "updated_at": studio.now()}, split_key
+        )
+    else:
+        studio.write_storyboard(config, job_id, storyboard)
     return {
         "shots": len(shots),
         "estimated_seconds": round(sum(shot.estimated_seconds for shot in shots), 2),
@@ -76,15 +84,28 @@ def run_recall(config: Config, job_id: str, state: dict, embedder: MultimodalEmb
     limit = state["options"]["recall_limit"]
     directory = studio.candidates_dir(config, job_id)
     empty: list[str] = []
+    session = current.get()
+    visibility = visibility_key(store)
     for shot in storyboard.shots:
         target = directory / f"{shot.id}.json"
-        if target.is_file():
-            cached = json.loads(target.read_text())
-            # 检查点：查询文本与索引未变才可复用
-            if cached.get("query") == shot.query and cached.get("index_id") == active["id"]:
-                if cached.get("status") == "empty":
-                    empty.append(shot.id)
-                continue
+        logical = f"candidates/{shot.id}.json"
+        key = fingerprint(
+            {
+                "query": shot.query,
+                "index_id": active["id"],
+                "limit": limit,
+                "granularity": config.studio.recall.granularity,
+                "search": config.search.model_dump(),
+                "embedding": config.embedding.model_dump(),
+                "visibility": visibility,
+            }
+        )
+        cached_path = session.reuse(logical, key) if session else None
+        if cached_path:
+            cached = json.loads(cached_path.read_text())
+            if cached.get("status") == "empty":
+                empty.append(shot.id)
+            continue
         result = engine.text(
             TextSearch(text=shot.query, granularity=config.studio.recall.granularity, limit=limit)
         )
@@ -99,24 +120,25 @@ def run_recall(config: Config, job_id: str, state: dict, embedder: MultimodalEmb
                 "duration": round(item["end"] - item["start"], 3),
                 "score": item["score"],
                 "rank": rank,
-                "media_url": item["media_url"],
-                "thumbnail_url": item["thumbnail_url"],
+                "media_url": f"/api/admin/segments/{item['id']}/media",
+                "thumbnail_url": f"/api/admin/segments/{item['id']}/thumbnail",
             }
             for rank, item in enumerate(result["results"], 1)
         ]
-        studio.save(
-            target,
-            {
-                "schema": 1,
-                "shot_id": shot.id,
-                "query": shot.query,
-                "index_id": active["id"],
-                "retrieved_at": studio.now(),
-                "status": "ok" if entries else "empty",
-                "results": entries,
-                "elapsed_ms": result["elapsed_ms"],
-            },
-        )
+        document = {
+            "schema": 1,
+            "shot_id": shot.id,
+            "query": shot.query,
+            "index_id": active["id"],
+            "retrieved_at": studio.now(),
+            "status": "ok" if entries else "empty",
+            "results": entries,
+            "elapsed_ms": result["elapsed_ms"],
+        }
+        if session:
+            session.json(logical, document, key)
+        else:
+            studio.save(target, document)
         if not entries:
             empty.append(shot.id)
     return {
@@ -128,44 +150,43 @@ def run_recall(config: Config, job_id: str, state: dict, embedder: MultimodalEmb
 
 
 def run_tts(config: Config, job_id: str, state: dict, speaker: Speaker) -> dict:
-    """逐镜配音：wav 存在且可探测时长即跳过（检查点），孤儿音频清理，audio.json 全量重建。"""
+    """按文本、声音和模型指纹复用配音，历史音频留存，清单只包含当前分镜。"""
     storyboard = studio.load_storyboard(config, job_id)
     directory = studio.audio_dir(config, job_id)
     directory.mkdir(parents=True, exist_ok=True)
-    valid = {shot.id for shot in storyboard.shots}
-    for existing in directory.glob("*.wav"):  # 人工删镜后的残留清理
-        if existing.stem not in valid:
-            existing.unlink()
+    session = current.get()
     voice = state["options"]["voice"]
     manifest = {}
     for shot in storyboard.shots:
-        target = directory / f"{shot.id}.wav"
-        if target.is_file():
+        logical = f"audio/{shot.id}.wav"
+        key = fingerprint({"text": shot.text, "voice": voice, "tts": config.studio.tts.model_dump()})
+        target = session.reuse(logical, key) if session else None
+        if target:
             try:
                 info = audio_info(target)
             except MediaError:
-                target.unlink(missing_ok=True)  # 损坏文件重新生成
-            else:
-                manifest[shot.id] = {
-                    "file": f"audio/{shot.id}.wav",
-                    "duration": round(info["duration"], 3),
-                    "bytes": target.stat().st_size,
-                }
-                continue
-        payload = speaker.speak(shot.text, voice)
-        if not payload:
-            raise ModelError(f"分镜 {shot.id} 配音返回空音频，请检查 TTS 服务")
-        studio.save_bytes(target, payload)
-        info = audio_info(target)
+                target = None
+        if target is None:
+            target = session.target(logical) if session else directory / f"{shot.id}.wav"
+            payload = speaker.speak(shot.text, voice)
+            if not payload:
+                raise ModelError(f"分镜 {shot.id} 配音返回空音频，请检查 TTS 服务")
+            studio.save_bytes(target, payload)
+            info = audio_info(target)
+            if session:
+                session.publish(logical, target, key, duration=info["duration"])
         manifest[shot.id] = {
-            "file": f"audio/{shot.id}.wav",
-            "duration": round(info["duration"], 3),
+            "file": logical,
+            "duration": info["duration"],
             "bytes": target.stat().st_size,
+            "sha256": digest(target),
+            "key": key,
         }
-    studio.save(
-        studio.job_dir(config, job_id) / "audio.json",
-        {"schema": 1, "voice": voice, "shots": manifest},
-    )
+    document = {"schema": 1, "voice": voice, "shots": manifest}
+    if session:
+        session.json("audio.json", document)
+    else:
+        studio.save(studio.job_dir(config, job_id) / "audio.json", document)
     return {
         "shots": len(manifest),
         "total_seconds": round(sum(item["duration"] for item in manifest.values()), 2),
@@ -175,24 +196,40 @@ def run_tts(config: Config, job_id: str, state: dict, speaker: Speaker) -> dict:
 def _selection_callbacks(store):
     """选片所需的原片信息回调：相邻 shot 查询与原片时长（segments_timeline 索引）。"""
 
+    from .curation import Library
+
+    overlays = Library(store).overlays()
+
     def source_duration(source_id: str) -> float | None:
+        if store.one("SELECT id FROM source_curation WHERE id=? AND hidden=1", (source_id,)):
+            return None
         row = store.one("SELECT media FROM sources WHERE id=?", (source_id,))
         return float(json.loads(row["media"])["duration"]) if row else None
 
     def extend_next(source_id: str, end: float) -> dict | None:
         # 结束时间在 end 之后、且与 end 连续（或覆盖 end）的最早 shot
-        return store.one(
+        row = store.one(
             "SELECT id,start,end FROM segments WHERE source_id=? AND kind='shot' AND end > ? + 1e-6 "
             "ORDER BY end ASC LIMIT 1",
             (source_id, end),
         )
+        return (
+            row
+            if row and interval_visible(store, source_id, row["start"], row["end"], overlays=overlays)
+            else None
+        )
 
     def extend_prev(source_id: str, start: float) -> dict | None:
         # 开始时间在 start 之前、且与 start 连续（或覆盖 start）的最晚 shot
-        return store.one(
+        row = store.one(
             "SELECT id,start,end FROM segments WHERE source_id=? AND kind='shot' AND start < ? - 1e-6 "
             "ORDER BY start DESC LIMIT 1",
             (source_id, start),
+        )
+        return (
+            row
+            if row and interval_visible(store, source_id, row["start"], row["end"], overlays=overlays)
+            else None
         )
 
     def covered_shots(source_id: str, start: float, end: float) -> list[str]:
@@ -217,6 +254,15 @@ def load_audio_manifest(config: Config, job_id: str, storyboard) -> dict:
     missing = [shot.id for shot in storyboard.shots if shot.id not in manifest]
     if missing:
         raise studio.StudioError(f"分镜 {'、'.join(missing)} 缺少配音，请重跑生成配音")
+    state = studio.load_job(config, job_id)
+    for shot in storyboard.shots:
+        item = manifest[shot.id]
+        expected = fingerprint(
+            {"text": shot.text, "voice": state["options"]["voice"], "tts": config.studio.tts.model_dump()}
+        )
+        path = studio.audio_dir(config, job_id) / f"{shot.id}.wav"
+        if item.get("key") != expected or not path.is_file() or digest(path) != item.get("sha256"):
+            raise studio.StudioError(f"分镜 {shot.id} 的配音已失效，请重跑生成配音")
     return manifest
 
 
@@ -235,11 +281,19 @@ def run_select(config: Config, job_id: str, state: dict) -> dict:
     if missing_candidates:
         raise studio.StudioError(f"分镜 {'、'.join(missing_candidates)} 缺少召回候选，请重跑语义召回")
 
-    source_duration, extend_next, extend_prev, covered_shots = _selection_callbacks(Store(config.data_dir))
+    store = Store(config.data_dir)
+    from .curation import Library
+
+    overlays = Library(store).overlays()
+    source_duration, extend_next, extend_prev, covered_shots = _selection_callbacks(store)
     candidates = {}
     for shot in storyboard.shots:
         document = json.loads((studio.candidates_dir(config, job_id) / f"{shot.id}.json").read_text())
-        candidates[shot.id] = document.get("results", [])
+        candidates[shot.id] = [
+            item
+            for item in document.get("results", [])
+            if interval_visible(store, item["source_id"], item["start"], item["end"], overlays=overlays)
+        ]
     audio = {shot_id: item["duration"] for shot_id, item in manifest.items()}
     events, warnings = studio_select.select_events(
         [{"id": shot.id, "text": shot.text} for shot in storyboard.shots],
@@ -258,7 +312,23 @@ def run_select(config: Config, job_id: str, state: dict) -> dict:
         burn=state["options"]["burn"],
         events=events,
     )
-    studio.write_timeline(config, job_id, timeline)
+    session = current.get()
+    if session:
+        session.json(
+            "timeline.json",
+            {"schema": 1, **timeline.model_dump(), "updated_at": studio.now()},
+            fingerprint(
+                {
+                    "storyboard": storyboard.model_dump(),
+                    "candidates": candidates,
+                    "audio": manifest,
+                    "selection": config.studio.selection.model_dump(),
+                    "visibility": visibility_key(Store(config.data_dir)),
+                }
+            ),
+        )
+    else:
+        studio.write_timeline(config, job_id, timeline)
     return {
         "events": len(events),
         "total_seconds": round(timeline.total_seconds, 2),
@@ -280,7 +350,7 @@ def apply_timeline_patch(
 
     storyboard = studio.load_storyboard(config, job_id)
     manifest = load_audio_manifest(config, job_id, storyboard)
-    current = studio.load_timeline(config, job_id)
+    current_timeline = studio.load_timeline(config, job_id)
     patch_ids = sorted(patch["shot_id"] for patch in patches)
     if patch_ids != sorted(shot.id for shot in storyboard.shots):
         raise studio.StudioError("换选必须覆盖全部分镜，每个分镜恰好一次")
@@ -294,6 +364,14 @@ def apply_timeline_patch(
         shot_id = patch["shot_id"]
         target = manifest[shot_id]["duration"]
         video = patch.get("video") or {}
+        prior = next(e for e in current_timeline.events if e.shot_id == shot_id)
+        if video.get("segment_id") == prior.video.segment_id:
+            if not interval_visible(
+                Store(config.data_dir), prior.video.source_id, prior.video.start, prior.video.end
+            ):
+                raise studio.StudioError("所选区间包含隐藏素材，请重新选片")
+            events.append(prior.model_copy(update={"order": order}))
+            continue
         if video.get("segment_id"):
             document = json.loads((studio.candidates_dir(config, job_id) / f"{shot_id}.json").read_text())
             anchor = next(
@@ -326,11 +404,15 @@ def apply_timeline_patch(
             plan["anchor"] = {
                 **plan["anchor"],
                 "segment_id": f"{source_id}@{start:.3f}-{end:.3f}",
-                "source_name": "",
+                "source_name": Store(config.data_dir).one(
+                    "SELECT name FROM sources WHERE id=?", (source_id,)
+                )["name"],
                 "score": 0.0,
                 "rank": 0,
             }
             override = "manual"
+        if not interval_visible(Store(config.data_dir), plan["source_id"], plan["start"], plan["end"]):
+            raise studio.StudioError("所选区间包含隐藏素材，请选择其他区间")
         events.append(
             studio_select.build_event(
                 {"id": shot_id, "text": text_by_id[shot_id]},
@@ -346,8 +428,8 @@ def apply_timeline_patch(
     timeline = studio.Timeline(
         job_id=job_id,
         mode="manual",
-        audio_mode=audio_mode or current.audio_mode,
-        burn=current.burn if burn is None else burn,
+        audio_mode=audio_mode or current_timeline.audio_mode,
+        burn=current_timeline.burn if burn is None else burn,
         events=events,
     )
     studio.save_timeline(config, job_id, timeline)  # 保持 select 完成态，仅作废渲染
@@ -374,7 +456,10 @@ def run_render(config: Config, job_id: str, state: dict) -> dict:
             raise studio.StudioError(f"素材 {source_id} 已不在库中，请重跑召回与选片")
         return store.resolve_media(row["path"])
 
-    studio_render.render_timeline(
+    for event in timeline.events:
+        if not interval_visible(store, event.video.source_id, event.video.start, event.video.end):
+            raise studio.StudioError(f"分镜 {event.shot_id} 区间包含隐藏素材，请重新选片")
+    rendered = studio_render.render_timeline(
         config,
         timeline,
         voice_lookup=voice_lookup,
@@ -383,9 +468,11 @@ def run_render(config: Config, job_id: str, state: dict) -> dict:
     )
     return {
         "events": len(timeline.events),
-        "total_seconds": round(timeline.total_seconds, 2),
+        "total_seconds": rendered["total_seconds"],
+        "version": state["steps"]["render"]["attempt"],
         "final": "render/final.mp4",
         "srt": "render/final.srt",
+        "vtt": "render/final.vtt",
     }
 
 
@@ -397,9 +484,16 @@ def run_step(
     storyboarder: Storyboarder | None = None,
     speaker: Speaker | None = None,
     embedder: MultimodalEmbedder | None = None,
+    mode: str = "resume",
+    shot_ids: list[str] | None = None,
+    started: bool = False,
 ) -> dict:
-    state = studio.begin_step(config, job_id, step)
+    state = studio.load_job(config, job_id) if started else studio.begin_step(config, job_id, step)
+    session = None
+    token = None
     try:
+        session = ArtifactSession(config, job_id, step, state, mode=mode, shot_ids=shot_ids)
+        token = current.set(session)
         if step == "split":
             result = run_split(config, job_id, state, storyboarder or make_storyboarder(config))
         elif step == "recall":
@@ -414,8 +508,46 @@ def run_step(
             result = run_render(config, job_id, state)
         else:
             raise studio.StudioError(f"步骤 {studio.STEP_LABELS.get(step, step)} 尚未实现")
+        session.finish()
+        if step == "render":
+            fresh = studio.load_job(config, job_id)
+            fresh["published_render"] = {
+                "version": state["steps"][step]["attempt"],
+                "files": {
+                    k: v["path"]
+                    for k, v in session.outputs.items()
+                    if k in {"render/final.mp4", "render/final.srt", "render/final.vtt"}
+                },
+            }
+            studio.save(studio.job_path(config, job_id), fresh)
+        studio.complete_step(config, job_id, step, result)
+        return result
     except Exception as exc:
-        studio.fail_step(config, job_id, step, exc)
+        try:
+            if session:
+                session.record("error", {"type": type(exc).__name__, "message": str(exc)})
+                session.finish()
+        finally:
+            if studio.load_job(config, job_id)["steps"][step]["status"] == "running":
+                studio.fail_step(config, job_id, step, exc)
         raise
-    studio.complete_step(config, job_id, step, result)
-    return result
+    finally:
+        if token is not None:
+            current.reset(token)
+
+
+def interval_visible(store, source_id, start, end, *, overlays=None):
+    from .curation import Library
+
+    sources, segments = overlays if overlays is not None else Library(store).overlays()
+    if sources.get(source_id, {}).get("hidden"):
+        return False
+    for row in store.rows(
+        "SELECT id,parent_id FROM segments WHERE source_id=? AND start < ? AND end > ?",
+        (source_id, end - 1e-6, start + 1e-6),
+    ):
+        item = segments.get(row["id"], {})
+        parent = segments.get(row["parent_id"], {})
+        if item.get("hidden") or parent.get("hidden"):
+            return False
+    return True

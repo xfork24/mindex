@@ -11,7 +11,7 @@ const STEPS = [
 ];
 const STATUS_LABEL = { pending: '待执行', running: '执行中', complete: '已完成', failed: '失败' };
 
-const state = { jobs: [], currentId: null, detail: null, pollTimer: null, jobToken: 0, editing: false, draft: [] };
+const state = { jobs: [], currentId: null, detail: null, pollTimer: null, jobToken: 0, editing: false, draft: [], timelineEditing: false, timelineDraft: {}, submitting: false };
 
 function $(id) { return document.getElementById(id); }
 
@@ -88,23 +88,31 @@ function renderJobList() {
 }
 
 async function selectJob(id) {
+  state.jobToken++;
+  clearTimeout(state.pollTimer);
+  state.pollTimer = null;
   state.currentId = id;
+  state.detail = null;
   state.editing = false;
+  state.timelineEditing = false;
+  state.timelineDraft = {};
   history.replaceState(null, '', `/studio?job=${id}`);
   renderJobList();
   await refreshJob();
+  await loadArtifacts();
 }
 
 // 轮询层：任一步骤 running 时每 1.5s 拉一次详情，空闲即停。
 
+function busyJob(job) {
+  return state.submitting || job.execution?.status === 'running' || Object.values(job.steps).some((i) => i.status === 'running');
+}
+
 function schedulePoll() {
-  const steps = state.detail ? state.detail.job.steps : {};
-  const running = Object.values(steps).some((info) => info.status === 'running');
-  if (running && !state.pollTimer) state.pollTimer = setInterval(refreshJob, 1500);
-  if (!running && state.pollTimer) {
-    clearInterval(state.pollTimer);
-    state.pollTimer = null;
-    loadJobs();
+  clearTimeout(state.pollTimer);
+  state.pollTimer = null;
+  if (state.detail && busyJob(state.detail.job)) {
+    state.pollTimer = setTimeout(() => { state.pollTimer = null; refreshJob(); }, 1500);
   }
 }
 
@@ -114,8 +122,10 @@ async function refreshJob() {
   try {
     const detail = await api(`/api/studio/jobs/${state.currentId}`);
     if (token !== state.jobToken) return;
+    const wasRunning = state.detail?.job.execution?.status === 'running';
     state.detail = detail;
     renderJob(detail);
+    if (wasRunning && detail.job.execution?.status !== 'running') { loadJobs(); loadArtifacts(); }
   } catch (error) {
     if (token !== state.jobToken) return;
     notice(`读取任务失败：${error.message}`, 'error');
@@ -135,7 +145,7 @@ function renderJob(detail) {
   header.appendChild(element('h2', job.title));
   header.appendChild(element('p', `任务 ${job.id} · 创建于 ${new Date(job.created_at).toLocaleString('zh-CN')}`, 'muted'));
   renderSteps(job);
-  $('run-all').disabled = Object.values(job.steps).some((info) => info.status === 'running');
+  $('run-all').disabled = busyJob(job) || state.editing || state.timelineEditing;
   $('job-meta').textContent = job.config_snapshot
     ? `生成模型 ${job.config_snapshot.generator_model} · 语音 ${job.config_snapshot.tts_model}`
     : '';
@@ -148,7 +158,7 @@ function renderJob(detail) {
 function renderSteps(job) {
   const bar = $('steps-bar');
   bar.replaceChildren();
-  const busy = Object.values(job.steps).some((info) => info.status === 'running');
+  const busy = busyJob(job) || state.editing || state.timelineEditing;
   for (const step of STEPS) {
     const info = job.steps[step.key] || { status: 'pending' };
     const card = element('div', '', `step-node ${info.status}`);
@@ -166,7 +176,12 @@ function renderSteps(job) {
     action.disabled = busy || info.status === 'running' || !readyFor(step.key, job);
     action.title = action.disabled && !busy ? '上游步骤未完成' : step.hint;
     action.addEventListener('click', () => runStep(step.key));
-    card.appendChild(action);
+    if (info.status !== 'complete') card.appendChild(action);
+    const force = element('button', '重新生成', 'quiet');
+    force.type = 'button';
+    force.disabled = action.disabled;
+    force.addEventListener('click', () => runStep(step.key, 'force'));
+    card.appendChild(force);
     bar.appendChild(card);
   }
 }
@@ -176,14 +191,21 @@ function readyFor(step, job) {
   return deps.every((dep) => job.steps[dep] && job.steps[dep].status === 'complete');
 }
 
-async function runStep(step) {
-  notice(`正在提交步骤 ${step}…`);
+async function runStep(step, mode = 'resume', shotId = null) {
+  const id = state.currentId;
+  state.submitting = true;
+  renderJob(state.detail);
+  notice(`正在提交${mode === 'force' ? '重新生成' : '继续执行'} ${step}…`);
   try {
-    await api(`/api/studio/jobs/${state.currentId}/steps/${step}`, { method: 'POST' });
-    notice(`步骤 ${step} 已开始执行。`);
-    await refreshJob();
+    await api(`/api/studio/jobs/${id}/steps/${step}`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode, ...(shotId ? { shot_ids: [shotId] } : {}) }) });
+    if (id === state.currentId) notice(`步骤 ${step} 已提交。`);
   } catch (error) {
-    notice(`无法执行：${error.message}`, 'error');
+    if (id === state.currentId) notice(`无法执行：${error.message}`, 'error');
+  } finally {
+    state.submitting = false;
+    if (id === state.currentId) await refreshJob();
+    await loadJobs();
   }
 }
 
@@ -197,7 +219,12 @@ function renderStoryboard(detail) {
   $('storyboard-warning').textContent = storyboard.coverage_warning || '';
   $('toggle-edit').hidden = state.editing || detail.job.steps.split.status !== 'complete';
   $('save-storyboard').hidden = !state.editing;
+  $('cancel-storyboard').hidden = !state.editing;
+  $('toggle-edit').disabled = busyJob(detail.job) || state.timelineEditing;
+  $('save-storyboard').disabled = busyJob(detail.job);
   const view = $('storyboard-view');
+  if (state.editing && view.dataset.editing === "true") return;
+  view.dataset.editing = String(state.editing);
   view.replaceChildren();
   const shots = state.editing ? state.draft : storyboard.shots;
   shots.forEach((shot, index) => {
@@ -210,7 +237,7 @@ function shotCard(shot, index, detail) {
   const card = element('div', '', 'shot-card');
   const head = element('div', '', 'shot-head');
   head.appendChild(element('strong', `分镜 ${index + 1} · ${shot.id}`));
-  if (detail.shots[index] && detail.shots[index].audio) {
+  if (detail.shots[index]?.audio?.valid) {
     head.appendChild(element('span', `配音 ${formatSeconds(detail.shots[index].audio.duration)}`));
   }
   head.appendChild(element('span', `预估 ${formatSeconds(shot.estimated_seconds)}`));
@@ -255,6 +282,7 @@ function shotActions(index, detail) {
     button.disabled = !enabled;
     button.addEventListener('click', () => {
       action();
+      $('storyboard-view').dataset.editing = "false";
       renderStoryboard(state.detail);
     });
     actions.appendChild(button);
@@ -287,7 +315,6 @@ function insertShot(index) {
 }
 
 async function saveStoryboard() {
-  if (!confirm('保存分镜将作废召回及之后的所有产物，需要重新执行。继续？')) return;
   try {
     const shots = state.draft.map((shot, index) => ({
       id: shot.id,
@@ -302,7 +329,7 @@ async function saveStoryboard() {
       body: JSON.stringify({ shots }),
     });
     state.editing = false;
-    notice('分镜已保存，召回及之后的步骤已重置。');
+    notice('分镜已保存，受影响的步骤已重置。');
     await refreshJob();
   } catch (error) {
     notice(`保存失败：${error.message}`, 'error');
@@ -322,7 +349,7 @@ function renderCandidates(detail) {
     const row = element('div', '', 'candidate-row');
     const head = element('div', '', 'shot-head');
     head.appendChild(element('strong', `分镜 ${shot.id}`));
-    const audioText = shot.audio ? `配音 ${formatSeconds(shot.audio.duration)}` : '配音未生成';
+    const audioText = shot.audio?.valid ? `配音 ${formatSeconds(shot.audio.duration)}` : '配音未生成';
     head.appendChild(element('span', audioText));
     const badge = element('span', shot.candidates ? shot.candidates.status : '未召回', 'badge');
     head.appendChild(badge);
@@ -343,24 +370,21 @@ function renderCandidates(detail) {
       strip.appendChild(element('span', '该分镜没有召回结果，请修改查询后重跑召回。', 'muted'));
     }
     row.appendChild(strip);
-    view.appendChild(row);
-  }
-  // 拉全量候选池补充缩略图条（详情接口只带 top）。
-  if (!state.candidatePools) state.candidatePools = {};
-  for (const shot of detail.shots) {
-    if (!(shot.id in state.candidatePools)) {
-      state.candidatePools[shot.id] = null;
-      api(`/api/studio/jobs/${state.currentId}/artifacts/candidates/${shot.id}.json`)
-        .then((pool) => {
-          state.candidatePools[shot.id] = pool;
-          const index = state.detail.shots.findIndex((item) => item.id === shot.id);
-          if (index >= 0) state.detail.shots[index].candidates.pool = pool.results || [];
-          if (state.detail && !state.pollTimer) renderCandidates(state.detail);
-        })
-        .catch(() => {});
-    } else if (shot.candidates && state.candidatePools[shot.id]) {
-      shot.candidates.pool = state.candidatePools[shot.id].results || [];
+    for (const [step, label] of [['recall', '重新召回'], ['tts', '重新配音'], ['render', '重新渲染']]) {
+      const button = element('button', label, 'quiet');
+      button.type = 'button';
+      button.disabled = busyJob(detail.job) || state.editing || state.timelineEditing || !readyFor(step, detail.job);
+      button.addEventListener('click', () => runStep(step, 'force', shot.id));
+      row.appendChild(button);
     }
+    if (shot.audio?.valid) {
+      const audio = document.createElement('audio');
+      audio.controls = true;
+      audio.preload = 'none';
+      audio.src = shot.audio.url;
+      row.appendChild(audio);
+    }
+    view.appendChild(row);
   }
 }
 
@@ -392,9 +416,13 @@ function playMedia(url, title) {
 
 function renderTimeline(detail) {
   const section = $('timeline-section');
-  const show = detail.timeline && detail.timeline.events.length;
+  const show = detail.timeline && detail.timeline.events.length && detail.job.steps.select.status === 'complete';
   section.hidden = !show;
   if (!show) return;
+  $('save-timeline').disabled = busyJob(detail.job) || detail.job.steps.select.status !== 'complete' || state.editing;
+  $('cancel-timeline').hidden = !state.timelineEditing;
+  if (state.timelineEditing) return;
+  state.timelineDraft = {};
   const view = $('timeline-view');
   view.replaceChildren();
   const alignLabel = {
@@ -418,33 +446,75 @@ function renderTimeline(detail) {
     const label = element('label', '换选画面 ');
     const select = document.createElement('select');
     select.dataset.shotId = event.shot_id;
-    const pool = (state.candidatePools && state.candidatePools[event.shot_id] && state.candidatePools[event.shot_id].results) || [];
-    const options = pool.length ? pool : [{ segment_id: event.video.segment_id, source_name: event.video.source_name, rank: event.video.rank, start: event.video.start, end: event.video.end, duration: event.video.end - event.video.start }];
+    const pool = detail.shots.find((shot) => shot.id === event.shot_id)?.candidates?.pool || [];
+    const options = [...pool];
+    if (!options.some((item) => item.segment_id === event.video.segment_id)) options.unshift({ segment_id: event.video.segment_id, source_name: event.video.source_name, rank: event.video.rank, start: event.video.start, end: event.video.end, duration: event.video.end - event.video.start });
     for (const item of options) {
       const option = document.createElement('option');
       option.value = item.segment_id;
-      option.textContent = `第${item.rank}名 · ${item.source_name || item.source_id} ${formatSeconds(item.duration)}`;
+      option.textContent = `${item.rank > 0 ? `第${item.rank}名` : '人工区间'} · ${item.source_name || item.source_id} ${formatSeconds(item.duration)}`;
       option.selected = item.segment_id === event.video.segment_id;
       select.appendChild(option);
     }
+    const explicit = element('option', '指定原片区间');
+    explicit.value = '__interval__';
+    select.appendChild(explicit);
+    select.disabled = $('save-timeline').disabled;
+    state.timelineDraft[event.shot_id] = { segment_id: event.video.segment_id };
+    const interval = element('div', '', 'line');
+    interval.hidden = true;
+    const fields = {};
+    for (const [name, title, value] of [['source_id', '素材 ID', event.video.source_id], ['start', '开始秒', event.video.start], ['end', '结束秒', event.video.end]]) {
+      const fieldLabel = element('label', title);
+      const input = document.createElement('input');
+      input.type = name === 'source_id' ? 'text' : 'number';
+      input.value = value;
+      if (name !== 'source_id') { input.step = '0.001'; input.min = '0'; }
+      fields[name] = input;
+      input.addEventListener('input', () => {
+        state.timelineEditing = true;
+        state.timelineDraft[event.shot_id] = { source_id: fields.source_id.value, start: Number(fields.start.value), end: Number(fields.end.value) };
+        $('cancel-timeline').hidden = false;
+        $('run-all').disabled = true;
+      });
+      fieldLabel.appendChild(input);
+      interval.appendChild(fieldLabel);
+    }
+    select.addEventListener('change', () => {
+      state.timelineEditing = true;
+      notice('保存换选后需要重新渲染，已有成片会保留为历史版本。');
+      interval.hidden = select.value !== '__interval__';
+      state.timelineDraft[event.shot_id] = interval.hidden ? { segment_id: select.value }
+        : { source_id: fields.source_id.value, start: Number(fields.start.value), end: Number(fields.end.value) };
+      $('cancel-timeline').hidden = false;
+      renderSteps(detail.job);
+      $('run-all').disabled = true;
+    });
     label.appendChild(select);
     pick.appendChild(label);
+    pick.appendChild(interval);
     card.appendChild(pick);
+    const preview = detail.shots.find((shot) => shot.id === event.shot_id)?.selection?.preview_url;
+    if (preview) {
+      const button = element('button', '预览实际选片区间', 'quiet');
+      button.type = 'button';
+      button.addEventListener('click', () => playMedia(preview, `分镜 ${event.shot_id} 实际选片`));
+      card.appendChild(button);
+    }
     view.appendChild(card);
   }
   $('save-timeline').hidden = false;
 }
 
 async function saveTimeline() {
-  if (!confirm('保存换选将作废渲染产物，需要重新渲染。继续？')) return;
-  const selects = $('timeline-view').querySelectorAll('select[data-shot-id]');
-  const events = [...selects].map((select) => ({ shot_id: select.dataset.shotId, video: { segment_id: select.value } }));
+  const events = state.detail.timeline.events.map((event) => ({ shot_id: event.shot_id, video: state.timelineDraft[event.shot_id] }));
   try {
     await api(`/api/studio/jobs/${state.currentId}/timeline`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ events }),
     });
+    state.timelineEditing = false;
     notice('换选已保存，渲染步骤已重置。');
     await refreshJob();
   } catch (error) {
@@ -458,9 +528,20 @@ function renderResult(detail) {
   const section = $('result-section');
   section.hidden = !detail.render || !detail.render.ready;
   if (section.hidden) return;
-  $('final-video').src = detail.render.final_url;
-  $('download-mp4').href = `${detail.render.final_url}?download=true`;
-  $('download-srt').href = `${detail.render.srt_url}?download=true`;
+  const video = $('final-video');
+  if (video.dataset.url !== detail.render.final_url) {
+    video.dataset.url = detail.render.final_url;
+    video.replaceChildren();
+    video.src = detail.render.final_url;
+    if (!detail.render.burn) {
+      const track = document.createElement('track');
+      track.kind = 'subtitles'; track.srclang = 'zh'; track.label = '中文'; track.default = true;
+      track.src = detail.render.vtt_url;
+      video.appendChild(track);
+    }
+  }
+  $('download-mp4').href = `${detail.render.final_url}&download=true`;
+  $('download-srt').href = `${detail.render.srt_url}&download=true`;
 }
 
 // 事件绑定与启动。
@@ -471,10 +552,14 @@ function bindEvents() {
   $('run-all').addEventListener('click', runAll);
   $('toggle-edit').addEventListener('click', () => {
     state.editing = true;
+    notice('保存分镜会重置受影响的步骤；历史产物会保留。');
     state.draft = JSON.parse(JSON.stringify(state.detail.storyboard.shots));
-    renderStoryboard(state.detail);
+    renderJob(state.detail);
   });
   $('save-storyboard').addEventListener('click', saveStoryboard);
+  $('cancel-storyboard').addEventListener('click', () => { state.editing = false; renderJob(state.detail); });
+  $('cancel-timeline').addEventListener('click', () => { state.timelineEditing = false; renderJob(state.detail); });
+  $('reload-artifacts').addEventListener('click', loadArtifacts);
   $('save-timeline').addEventListener('click', saveTimeline);
   $('play-close').addEventListener('click', () => {
     $('play-video').pause();
@@ -503,9 +588,8 @@ async function createJob(event) {
         },
       }),
     });
-    notice('任务已创建，先执行"拆分镜"或点"全自动连跑"。');
+    notice('任务已创建，可分步执行，或继续执行未完成步骤。');
     $('create-text').value = '';
-    state.candidatePools = {};
     await loadJobs();
     await selectJob(job.id);
   } catch (error) {
@@ -516,12 +600,48 @@ async function createJob(event) {
 }
 
 async function runAll() {
+  const id = state.currentId;
+  state.submitting = true;
+  renderJob(state.detail);
   try {
-    await api(`/api/studio/jobs/${state.currentId}/run`, { method: 'POST' });
-    notice('全自动连跑已启动，遇失败会停下。');
-    await refreshJob();
+    await api(`/api/studio/jobs/${id}/run`, { method: 'POST' });
+    if (id === state.currentId) notice('继续执行已启动；切换模型服务后可在失败处续跑。');
   } catch (error) {
-    notice(`无法连跑：${error.message}`, 'error');
+    if (id === state.currentId) notice(`无法继续：${error.message}`, 'error');
+  } finally {
+    state.submitting = false;
+    if (id === state.currentId) await refreshJob();
+    await loadJobs();
+  }
+}
+
+async function loadArtifacts() {
+  const id = state.currentId;
+  if (!id) return;
+  const token = state.artifactToken = (state.artifactToken || 0) + 1;
+  $('download-archive').href = `/api/studio/jobs/${id}/archive`;
+  try {
+    const data = await api(`/api/studio/jobs/${id}/artifacts`);
+    if (state.currentId !== id || state.artifactToken !== token) return;
+    const view = $('artifact-view');
+    view.replaceChildren();
+    const groups = new Map();
+    for (const item of data.items) {
+      const name = item.attempt || '当前产物与任务状态';
+      if (!groups.has(name)) {
+        const group = document.createElement('details');
+        group.appendChild(element('summary', name));
+        groups.set(name, group);
+        view.appendChild(group);
+      }
+      const row = element('div', '', 'line');
+      const link = element('a', item.path, 'quiet nav-link');
+      link.href = `${item.url}?download=true`;
+      row.append(link, element('span', `${(item.bytes / 1024).toFixed(1)} KiB`, 'muted'));
+      groups.get(name).appendChild(row);
+    }
+  } catch (error) {
+    if (id === state.currentId) notice(`读取产物失败：${error.message}`, 'error');
   }
 }
 

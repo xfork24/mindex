@@ -13,14 +13,19 @@ class MediaError(ValueError):
 
 
 def command(args: list[str], *, timeout: float = 600) -> bytes:
+    from .studio_artifacts import record
+
+    record("command", {"args": args, "timeout": timeout})
     try:
         result = subprocess.run(args, check=True, capture_output=True, timeout=timeout)
+        record("command-result", {"returncode": result.returncode, "stderr": result.stderr.decode(errors="replace")})
         return result.stdout
     except FileNotFoundError as exc:
         raise MediaError(f"Missing executable: {args[0]}") from exc
     except subprocess.TimeoutExpired as exc:
         raise MediaError(f"{args[0]} timed out") from exc
     except subprocess.CalledProcessError as exc:
+        record("command-error", {"returncode": exc.returncode, "stderr": exc.stderr.decode(errors="replace")})
         raise MediaError(exc.stderr.decode(errors="replace")[-2000:]) from exc
 
 

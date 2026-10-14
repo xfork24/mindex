@@ -16,7 +16,7 @@ def fingerprint(value: object) -> str:
 
 
 class StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
 
 class Service(StrictModel):
