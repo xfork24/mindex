@@ -161,6 +161,47 @@ def test_business_search_tuning_hot(config):
     assert data["business"]["search"]["rrf_k"] == config.search.rrf_k
 
 
+def test_profile_test_connection_llama_cpp_without_model_field(config, monkeypatch):
+    """schema 2 空间契约没有 model 键，测试连接应回退到配置里的模型名，而不是裸 KeyError('model')。"""
+    client = client_for(config)
+    profile = client.post(
+        "/api/settings/profiles",
+        json={
+            "role": "embedding",
+            "provider": "self",
+            "name": "本地 WeMM",
+            "config": {
+                "backend": "llama_cpp",
+                "base_url": "http://127.0.0.1:8888",
+                "model": "tencent/WeMM-Embedding-9B",
+                "dimensions": 4096,
+                "quantization": "Q8_0",
+            },
+        },
+    ).json()
+
+    class Schema2Embedder:
+        def __init__(self, cfg):
+            self.cfg = cfg
+
+        def identity(self):
+            return {
+                "schema": 2,
+                "content": {"weights_sha256": "a" * 64, "mmproj_sha256": "b" * 64},
+                "dimensions": 4096,
+                "implementation": "llama-native-wemm-2",
+            }
+
+        def text(self, texts, role="document"):
+            return [[0.0] * 4096 for _ in texts]
+
+    monkeypatch.setattr("mindex.settings_api.make_embedder", Schema2Embedder)
+    result = client.post(f"/api/settings/profiles/{profile['id']}/test").json()
+    assert result["ok"] is True
+    assert result["model"] == "tencent/WeMM-Embedding-9B"
+    assert result["dims"] == 4096
+
+
 def test_hot_switch_reaches_search_engine(config, monkeypatch):
     captured = []
 

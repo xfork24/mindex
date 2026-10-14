@@ -161,7 +161,9 @@ def _probe(config: Config, role: str) -> dict:
         embedder = make_embedder(config)
         identity = embedder.identity()
         vector = embedder.text(["连接测试"])[0]
-        return {"model": identity["model"], "dims": len(vector)}
+        # schema 2 的空间契约只有内容摘要、没有 model 键，用配置里的模型名兜底。
+        model = identity.get("model") or config.embedding.model
+        return {"model": model, "dims": len(vector)}
 
     if role == "asr":
         transcriber = make_transcriber(config)
