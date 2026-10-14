@@ -28,6 +28,31 @@ class ModelError(RuntimeError):
 
 # 审计记录里请求/响应体的上限：防止向量数组与 hex 音频把诊断文件撑爆。
 AUDIT_BODY_LIMIT = 8192
+# 上游错误正文进入异常消息的上限：足够放下一条厂商错误说明。
+ERROR_DETAIL_LIMIT = 300
+
+
+def _error_detail(response) -> str:
+    """从 4xx/5xx 响应里取出可读原因。
+
+    httpx 的异常串只有状态码和 URL，而 OpenAI 兼容服务把真实原因放在
+    ``error.message`` 里（限流、参数超限、模型不存在等）。丢掉它会让调用方
+    只能看到无意义的 "400 Bad Request"。
+    """
+    try:
+        payload = response.json()
+    except (ValueError, AttributeError):
+        return (response.text or "").strip()[:ERROR_DETAIL_LIMIT]
+    if isinstance(payload, dict):
+        error = payload.get("error")
+        if isinstance(error, dict) and isinstance(error.get("message"), str):
+            return error["message"].strip()[:ERROR_DETAIL_LIMIT]
+        if isinstance(error, str):
+            return error.strip()[:ERROR_DETAIL_LIMIT]
+        message = payload.get("message") or payload.get("detail")
+        if isinstance(message, str):
+            return message.strip()[:ERROR_DETAIL_LIMIT]
+    return (response.text or "").strip()[:ERROR_DETAIL_LIMIT]
 
 
 def request(method: str, url: str, *, timeout: float = 180, attempts: int = 3, **kwargs) -> dict:
@@ -50,7 +75,12 @@ def request(method: str, url: str, *, timeout: float = 180, attempts: int = 3, *
                 504,
             }
             if not retry or attempt == attempts - 1:
-                raise ModelError(f"模型服务调用失败 {url}: {exc}") from exc
+                detail = (
+                    f"：{_error_detail(exc.response)}"
+                    if isinstance(exc, httpx.HTTPStatusError)
+                    else ""
+                )
+                raise ModelError(f"模型服务调用失败 {url}: {exc}{detail}") from exc
             # Rewind uploads before retrying a request.
             for value in kwargs.get("files", {}).values():
                 handle = value[1] if isinstance(value, tuple) else value
@@ -83,7 +113,12 @@ def request_bytes(method: str, url: str, *, timeout: float = 180, attempts: int 
                 504,
             }
             if not retry or attempt == attempts - 1:
-                raise ModelError(f"模型服务调用失败 {url}: {exc}") from exc
+                detail = (
+                    f"：{_error_detail(exc.response)}"
+                    if isinstance(exc, httpx.HTTPStatusError)
+                    else ""
+                )
+                raise ModelError(f"模型服务调用失败 {url}: {exc}{detail}") from exc
             time.sleep(0.25 * (2**attempt))
     raise AssertionError("unreachable")
 

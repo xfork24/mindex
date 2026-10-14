@@ -254,3 +254,33 @@ def test_settings_page_served(config):
     response = client_for(config).get("/settings")
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
+
+
+def test_profile_test_connection_uses_configured_max_tokens(config, monkeypatch):
+    """测试连接必须用档案配置的 max_tokens；否则参数超限这类错误在测试里看不见。"""
+    sent = []
+
+    def capture(method, url, **kwargs):
+        sent.append(kwargs.get("json", {}))
+        return {"choices": [{"message": {"content": "ok"}}]}
+
+    client = client_for(config)
+    profile = client.post(
+        "/api/settings/profiles",
+        json={
+            "role": "generator",
+            "provider": "minimax",
+            "name": "MiniMax 分镜",
+            "config": {
+                "backend": "openai",
+                "base_url": "https://api.example.com/v1",
+                "model": "M1",
+                "max_tokens": 1048576,
+            },
+        },
+    ).json()
+
+    monkeypatch.setattr(adapters, "request", capture)
+    result = client.post(f"/api/settings/profiles/{profile['id']}/test").json()
+    assert result["ok"] is True
+    assert sent[0]["max_tokens"] == 1048576

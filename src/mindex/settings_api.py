@@ -144,8 +144,10 @@ def _probe(config: Config, role: str) -> dict:
             service.base_url.rstrip("/") + "/chat/completions",
             timeout=min(service.timeout, 60),
             headers=service.headers(),
-            # 推理模型（如 MiniMax-M3.1）先消耗思考 token，预算太小会导致正文永远为空。
-            json={"model": service.model, "max_tokens": 512,
+            # 推理模型（如 MiniMax-M3.1）先消耗思考 token，预算太小会导致正文永远为空；
+            # 但这里必须用档案实际配置的 max_tokens，否则参数超限这类拒绝在测试里看不见。
+            json={"model": service.model,
+                  "max_tokens": getattr(service, "max_tokens", 512),
                   "messages": [{"role": "user", "content": "连接测试，请回复：ok"}], **extra},
         )
         choice = (payload.get("choices") or [{}])[0]

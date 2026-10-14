@@ -245,3 +245,77 @@ def test_request_bytes_audit_truncates_json_body(monkeypatch):
     adapters.request_bytes("POST", "https://tts.example/t2a", timeout=1, json={"a": 1})
     body = recorded[-1][1]["body"]
     assert body is not None and len(body) <= 8192
+
+
+def test_request_error_surfaces_upstream_reason(monkeypatch):
+    """上游 4xx 的错误正文才是可读原因；只抛 httpx 异常串会让页面显示无意义的 '400 Bad Request'。"""
+    from typing import ClassVar
+
+    import httpx
+
+    body = {
+        "type": "error",
+        "error": {
+            "type": "bad_request_error",
+            "message": "invalid params, model[M1] does not support max tokens > 524288 (2013)",
+        },
+    }
+
+    class FakeResponse:
+        status_code = 400
+        text = json.dumps(body)
+        headers: ClassVar[dict] = {"content-type": "application/json"}
+        content = json.dumps(body).encode()
+
+        def json(self):
+            return body
+
+        def raise_for_status(self):
+            error = httpx.HTTPStatusError(
+                "Client error '400 Bad Request' for url 'https://x/v1/chat/completions'",
+                request=httpx.Request("POST", "https://x/v1/chat/completions"),
+                response=httpx.Response(400),
+            )
+            error.response = self  # 真实场景里 exc.response 就是带正文的那个响应
+            raise error
+
+    monkeypatch.setattr(httpx, "request", lambda *a, **kw: FakeResponse())
+    monkeypatch.setattr(adapters, "record", lambda kind, payload: None)
+
+    with pytest.raises(adapters.ModelError) as excinfo:
+        adapters.request("POST", "https://x/v1/chat/completions", json={}, attempts=1)
+    message = str(excinfo.value)
+    assert "does not support max tokens" in message
+    assert "does not support max tokens > 524288" in message
+
+
+def test_request_error_falls_back_to_raw_body(monkeypatch):
+    """非 JSON 错误正文也要带出来，不能只剩状态码。"""
+    from typing import ClassVar
+
+    import httpx
+
+    class FakeResponse:
+        status_code = 400
+        text = "<html>gateway rejected</html>"
+        headers: ClassVar[dict] = {"content-type": "text/html"}
+        content = b"<html>gateway rejected</html>"
+
+        def json(self):
+            raise ValueError("not json")
+
+        def raise_for_status(self):
+            error = httpx.HTTPStatusError(
+                "Client error '400 Bad Request'",
+                request=httpx.Request("POST", "https://x/v1/chat/completions"),
+                response=httpx.Response(400),
+            )
+            error.response = self
+            raise error
+
+    monkeypatch.setattr(httpx, "request", lambda *a, **kw: FakeResponse())
+    monkeypatch.setattr(adapters, "record", lambda kind, payload: None)
+
+    with pytest.raises(adapters.ModelError) as excinfo:
+        adapters.request("POST", "https://x/v1/chat/completions", json={}, attempts=1)
+    assert "gateway rejected" in str(excinfo.value)
