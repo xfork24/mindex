@@ -18,7 +18,9 @@ from .admin import admin_router
 from .config import Config, load_config
 from .curation import EntityNotFound, Library
 from .media import cut
+from .runtime_settings import RuntimeConfig
 from .search import SearchEngine, public_segment, status
+from .settings_api import settings_router
 from .storage import Store
 from .studio_api import studio_router
 from .types import Filters, Granularity, TextSearch
@@ -49,11 +51,13 @@ def create_app(
 ) -> FastAPI:
     config = config or load_config()
     store = Store(config.data_dir)
+    runtime = RuntimeConfig(config, store)  # 设置页保存后经覆盖层热生效，无需重启
     app = FastAPI(title="Mindex 视频素材检索", version="0.1.0")
     if index_id and store.index_version(index_id)["status"] != "ready":
         raise ValueError("固定预览只允许就绪索引")
     app.include_router(admin_router(store))
-    app.include_router(studio_router(config, store, embedder=embedder, storyboarder=storyboarder, speaker=speaker))
+    app.include_router(settings_router(runtime, store))
+    app.include_router(studio_router(runtime, store, embedder=embedder, storyboarder=storyboarder, speaker=speaker))
 
     @app.exception_handler(EntityNotFound)
     async def entity_not_found(_, exc):
@@ -69,6 +73,11 @@ def create_app(
     def studio_page():
         return FileResponse(Path(__file__).parent / "static" / "studio.html", media_type="text/html")
 
+    @app.get("/settings", include_in_schema=False)
+    @app.get("/settings/", include_in_schema=False)
+    def settings_page():
+        return FileResponse(Path(__file__).parent / "static" / "settings.html", media_type="text/html")
+
     @app.exception_handler(ModelError)
     async def model_error(_, exc):
         return JSONResponse(status_code=503, content={"detail": str(exc)})
@@ -79,11 +88,11 @@ def create_app(
 
     @app.get("/api/status")
     def get_status(health: bool = False):
-        return status(config, health=health, embedder=embedder, index_id=index_id)
+        return status(runtime.current(), health=health, embedder=embedder, index_id=index_id)
 
     @app.post("/api/search/text")
     def text_search(query: TextSearch):
-        return SearchEngine(config, embedder, index_id=index_id).text(query)
+        return SearchEngine(runtime.current(), embedder, index_id=index_id).text(query)
 
     @app.post("/api/search/image")
     async def image_search(
@@ -100,7 +109,11 @@ def create_app(
             path = Path(directory) / "upload.media"
             await save_upload(file, path, config.search.max_image_upload_mb * 1024 * 1024)
             return await run_in_threadpool(
-                SearchEngine(config, embedder, index_id=index_id).image, path, granularity, limit, parsed
+                SearchEngine(runtime.current(), embedder, index_id=index_id).image,
+                path,
+                granularity,
+                limit,
+                parsed,
             )
 
     @app.post("/api/search/video")
@@ -118,7 +131,11 @@ def create_app(
             path = Path(directory) / "upload.media"
             await save_upload(file, path, config.search.max_upload_mb * 1024 * 1024)
             return await run_in_threadpool(
-                SearchEngine(config, embedder, index_id=index_id).video, path, granularity, limit, parsed
+                SearchEngine(runtime.current(), embedder, index_id=index_id).video,
+                path,
+                granularity,
+                limit,
+                parsed,
             )
 
     def get_snapshot(segment_id: str):

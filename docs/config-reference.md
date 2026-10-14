@@ -2,6 +2,8 @@
 
 配置从 `config.example.yaml` 复制为 `config.local.yaml`（gitignored），或用 `--config` / `MINDEX_CONFIG` 指定。模型 strict（`extra="forbid"`），未知键校验失败；未写的键用默认值。`data_dir` 与 `deployment_manifest` 的相对路径按**配置文件所在目录**解析。
 
+> **运行时设置**：模型服务连接、音色与检索调参可在 `/settings` 设置页管理（SQLite 覆盖层，保存即热生效，Web 与 CLI 共用），本文档的 yaml 取值是「未激活任何档案时」的基础值。详见 [settings.md](settings.md)。所有服务段共有的可选键 `api_key`（默认空，仅由设置页写入；优先于 `api_key_env`）不参与任何指纹。
+
 ## 顶层
 
 | 键 | 类型 | 默认 | 说明 |
@@ -12,7 +14,7 @@
 
 | 键 | 类型 | 默认 | 说明 |
 |---|---|---|---|
-| `backend` | `mindex` \| `llama_cpp` | `mindex` | `mindex` 用本项目协议（`/embed/text`、`/embed/video`）；`llama_cpp` 用 llama-server `/v1/embeddings` 原生 `input_video` |
+| `backend` | `mindex` \| `llama_cpp` \| `tokenhub` | `mindex` | `mindex` 用本项目协议（`/embed/text`、`/embed/video`）；`llama_cpp` 用 llama-server `/v1/embeddings` 原生 `input_video`；`tokenhub` 用腾讯 TokenHub `/v1/embeddings/multimodal`（WeMM 系线上版，客户端抽帧、身份纯配置构造） |
 | `deployment_manifest` | str \| null | null | llama_cpp 必填：`e2e pin` 生成的部署清单路径 |
 | `base_url` | str | `http://192.168.1.86:4010` | 服务地址 |
 | `model` | str | `tencent/WeMM-Embedding-9B` | 模型名；本地权重路径亦可（服务端会哈希） |
@@ -27,6 +29,7 @@
 | 键 | 类型 | 默认 | 说明 |
 |---|---|---|---|
 | `backend` | `openai` \| `llama_cpp` | `openai` | `openai` 兼容 `/v1/chat/completions`；`llama_cpp` 额外核验部署清单与视觉投影 |
+| `llama_template` | bool | `true` | 是否发送 llama-server 专有的 `chat_template_kwargs`（`enable_thinking:false`）；线上厂商档案须设 `false` |
 | `deployment_manifest` | str \| null | null | llama_cpp 时必填（`data/deployments/analyzer.json`） |
 | `base_url` | str | `http://192.168.1.86:4040/v1` | |
 | `model` | str | `qwen3.8:27b` | 部署别名 |
@@ -37,7 +40,7 @@
 
 | 键 | 类型 | 默认 | 说明 |
 |---|---|---|---|
-| `backend` | `mindex` \| `llama_cpp` | `mindex` | `mindex` 直接返回时间戳；`llama_cpp` 只出原始文本，需再 `align` |
+| `backend` | `mindex` \| `llama_cpp` \| `openai` | `mindex` | `mindex` 直接返回时间戳；`llama_cpp` 与 `openai`（如百炼 qwen3-asr-flash，chat + `input_audio`）只出原始文本，需再 `align` |
 | `deployment_manifest` | str \| null | null | llama_cpp 时必填 |
 | `base_url` | str | `http://192.168.1.86:4020` | |
 | `model` | str | `Qwen/Qwen3-ASR-1.7B` | |
@@ -46,9 +49,13 @@
 | `aligner_model` | str | `Qwen/Qwen3-ForcedAligner-0.6B` | CPU 对齐模型 |
 | `aligner_revision` | str | 代码默认 `main`；示例配置已固定 commit | 为 `main` 时 `align` 拒绝执行 |
 
-## `tts` — 预留
+## `tts` — 创作配音（studio.tts）
 
-`base_url`（默认 `http://192.168.1.86:4030`）与 `model`（`Qwen3-TTS`）仅保存部署地址，**不参与检索管线**。
+| 键 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `backend` | `openai` \| `minimax` \| `dashscope` | `openai` | `openai` 走 `/audio/speech`（本地 llama-server）；`minimax` 走 t2a_v2；`dashscope` 走阿里原生协议（后两者为线上专用适配器） |
+| `base_url` / `model` / `voice` | str | `http://192.168.1.86:4030/v1` / `Qwen3-TTS` / `Cherry` | `voice` 可被设置页默认音色覆盖 |
+| `response_format` / `speech_path` | str | `wav` / `/audio/speech` | 仅 openai 后端使用 |
 
 ## `detector` — 分镜
 

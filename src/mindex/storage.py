@@ -69,6 +69,20 @@ class Store:
                 );
                 CREATE INDEX IF NOT EXISTS representations_version ON representations(index_id);
                 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS model_profiles (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  role TEXT NOT NULL, name TEXT NOT NULL, provider TEXT NOT NULL,
+                  config TEXT NOT NULL, api_key TEXT,
+                  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  UNIQUE(role, name)
+                );
+                CREATE TABLE IF NOT EXISTS voices (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  name TEXT NOT NULL UNIQUE, kind TEXT NOT NULL, provider TEXT NOT NULL,
+                  voice_id TEXT NOT NULL, sample_path TEXT, status TEXT NOT NULL DEFAULT 'ready',
+                  notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
                 CREATE TABLE IF NOT EXISTS runs (
                   id INTEGER PRIMARY KEY AUTOINCREMENT, stage TEXT NOT NULL,
                   source_id TEXT, status TEXT NOT NULL, message TEXT NOT NULL DEFAULT '',

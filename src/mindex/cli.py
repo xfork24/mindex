@@ -30,6 +30,11 @@ def configure(
 ):
     logging.basicConfig(level=logging.DEBUG if verbose else logging.INFO, format="%(levelname)s %(message)s")
     ctx.obj = load_config(config)
+    # 设置页保存的覆盖层对 CLI 同样生效（Web 与 CLI 行为一致）；e2e 验证框架保持 yaml 原值。
+    if ctx.invoked_subcommand != "e2e":
+        from .runtime_settings import apply_runtime_overrides
+
+        ctx.obj = apply_runtime_overrides(ctx.obj)
 
 
 def print_json(value):

@@ -256,7 +256,8 @@ class Pipeline:
         return sources
 
     def transcribe(self, source_id: str | None = None):
-        if self.config.asr.backend == "llama_cpp" and self.config.asr.enabled:
+        # llama_cpp 与 openai（chat+input_audio）两种 ASR 都只出纯文本，统一走 raw+align 流程。
+        if self.config.asr.backend in {"llama_cpp", "openai"} and self.config.asr.enabled:
             return self.transcribe_raw(source_id)
         for source in self.selected_sources(source_id):
             if (
@@ -337,9 +338,10 @@ class Pipeline:
                 )
                 continue
             if not checked:
-                pinned = manifest(self.config.asr, "asr")
-                checked_runtime(self.config.asr, pinned)
                 checked = True
+                if self.config.asr.backend == "llama_cpp":
+                    pinned = manifest(self.config.asr, "asr")
+                    checked_runtime(self.config.asr, pinned)
             with self.store.run("transcribe_raw", source["id"]):
                 cache = self.store.root / "transcripts" / source["id"] / profile / "raw"
                 cache.mkdir(parents=True, exist_ok=True)

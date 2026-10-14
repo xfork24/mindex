@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mindex · 设置</title><link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/settings.css">
+  <script src="/settings.js?v=20261014" defer></script>
+</head>
+<body class="settings">
+  <header><a class="brand" href="/">m<span>index</span><i></i></a><span class="header-note">设置</span><a class="quiet nav-link" href="/">视频检索 ↗</a><a class="quiet nav-link" href="/admin">素材管理 ↗</a><a class="quiet nav-link" href="/studio">创作 ↗</a><button class="quiet" id="reload">刷新设置</button></header>
+  <main>
+    <section class="intro"><span class="eyebrow">模型服务 / 检索调参 / 音色</span><h1>一个页面，管住所有配置。</h1><p>切换线上订阅或自建服务，保存即热生效，无需重启；密钥只保存在本地数据库。</p></section>
+    <div id="notice" class="notice" role="status" aria-live="polite"></div>
+    <div id="index-banner"></div>
+    <section aria-label="模型服务">
+      <div class="section-heading"><h2>模型服务</h2><span>激活的档案立即对检索、分析与创作生效</span></div>
+      <div id="roles" class="role-grid"></div>
+    </section>
+    <section aria-label="检索与创作调参">
+      <div class="section-heading"><h2>检索调参</h2><span>五路召回权重与 RRF 融合参数，保存即热生效</span></div>
+      <form id="search-tuning" class="tuning-panel">
+        <div class="weight-grid" id="weight-grid"></div>
+        <div class="tuning-row">
+          <label>RRF k<input id="rrf-k" type="number" min="1" step="1"></label>
+          <label>候选数<input id="candidates" type="number" min="1" max="1000" step="1"></label>
+        </div>
+        <div class="tuning-actions"><button class="quiet" type="button" id="tuning-reset">恢复默认</button><button class="submit" type="submit" id="tuning-save">保存调参 <span>↗</span></button></div>
+      </form>
+    </section>
+    <section aria-label="音色库">
+      <div class="section-heading"><h2>音色库</h2><span>预定义音色与克隆音色；默认音色用于创作配音</span></div>
+      <div class="tuning-panel">
+        <div class="voice-default-row">
+          <label for="default-voice">默认配音音色</label>
+          <select id="default-voice"></select>
+          <span class="muted" id="voice-backend-hint"></span>
+        </div>
+        <ul id="voice-list" class="voice-list"></ul>
+        <div class="voice-actions">
+          <button class="quiet" type="button" id="voice-register">+ 录入已有音色</button>
+          <button class="submit" type="button" id="voice-clone">克隆我的声音 <span>↗</span></button>
+        </div>
+      </div>
+    </section>
+  </main>
+  <dialog id="profile-dialog" aria-labelledby="profile-title">
+    <button id="profile-close" type="button" class="quiet close" aria-label="关闭编辑">✕</button>
+    <h2 id="profile-title">新建配置档案</h2>
+    <form id="profile-form">
+      <input type="hidden" id="pf-role"><input type="hidden" id="pf-id">
+      <div class="form-grid">
+        <label>厂商模板<select id="pf-provider"></select></label>
+        <label>档案名称<input id="pf-name" maxlength="60" required placeholder="例如：DeepSeek 拆分镜"></label>
+      </div>
+      <div class="form-grid">
+        <label>协议后端<select id="pf-backend"></select></label>
+        <label>Revision<input id="pf-revision" placeholder="main，一般无需修改"></label>
+      </div>
+      <label>Base URL<input id="pf-base-url" required placeholder="https://api.example.com/v1"></label>
+      <label>模型名称<input id="pf-model" required placeholder="以平台模型列表为准"></label>
+      <label>API Key<input id="pf-api-key" type="password" autocomplete="off" placeholder="仅存本地数据库；编辑时留空表示保留"></label>
+      <p class="muted" id="pf-key-hint"></p>
+      <label class="check" id="pf-clear-key-wrap" hidden><input type="checkbox" id="pf-clear-key"> 清除已保存的密钥</label>
+      <label class="check" id="pf-template-wrap" hidden><input type="checkbox" id="pf-llama-template"> llama-server 扩展（chat_template_kwargs，仅本地服务需要）</label>
+      <div class="form-grid" id="pf-extra"></div>
+      <p id="pf-error" role="alert"></p>
+      <button class="submit" type="submit" id="pf-save">保存档案 <span>↗</span></button>
+    </form>
+  </dialog>
+  <dialog id="clone-dialog" aria-labelledby="clone-title">
+    <button id="clone-close" type="button" class="quiet close" aria-label="关闭">✕</button>
+    <h2 id="clone-title">添加音色</h2>
+    <div class="clone-modes" role="tablist" aria-label="添加方式">
+      <button type="button" class="clone-mode active" data-mode="upload" role="tab" aria-selected="true">上传样本克隆</button>
+      <button type="button" class="clone-mode" data-mode="url" role="tab" aria-selected="false">URL 复刻</button>
+      <button type="button" class="clone-mode" data-mode="register" role="tab" aria-selected="false">录入已有</button>
+    </div>
+    <form id="clone-form">
+      <label>音色名称<input id="clone-name" maxlength="60" required placeholder="例如：我的旁白"></label>
+      <div id="clone-upload-field"><label class="upload" for="clone-file"><span class="upload-symbol">↥</span><strong>选择声音样本</strong><span>wav / mp3 / m4a · 10 秒到 5 分钟 · 安静环境单人朗读</span><input id="clone-file" type="file" accept=".wav,.mp3,.m4a,audio/*"></label></div>
+      <div id="clone-url-field" hidden><label>样本公网 URL<input id="clone-url" type="url" placeholder="https://…（wav/mp3/m4a，10~20 秒，需公网可访问）"></label></div>
+      <div id="clone-register-fields" hidden>
+        <label>音色厂商<select id="clone-provider"><option value="self">自建服务</option><option value="openai">OpenAI 协议</option><option value="minimax">MiniMax</option><option value="dashscope">阿里 DashScope</option></select></label>
+        <label>voice_id<input id="clone-voice-id" maxlength="200" placeholder="平台已生成的音色 ID"></label>
+      </div>
+      <label class="check clone-consent" id="clone-consent-wrap"><input type="checkbox" id="clone-consent"> 我确认拥有该声音的合法使用授权</label>
+      <p class="muted" id="clone-mode-note"></p>
+      <p id="clone-error" role="alert"></p>
+      <button class="submit" type="submit" id="clone-save">保存音色 <span>↗</span></button>
+    </form>
+  </dialog>
+  <footer><span>Mindex / 设置</span><span>配置保存即生效 · 密钥仅存本地</span></footer>
+</body>
+</html>

@@ -37,7 +37,7 @@ uv run mindex serve                              # 启动 http://127.0.0.1:8000�
 
 ### 模型适配层（adapters.py）
 
-七个 Protocol：`MultimodalEmbedder`、`VisualAnalyzer`、`Transcriber`、`Aligner`、`ShotDetector`、`Speaker`（TTS）、`Storyboarder`（拆分镜 LLM），由 `make_*` 工厂按配置的 backend 构造（`mindex` 自定义服务 / `llama_cpp` / `openai` / 本地 adaptive / 远程 transnet）。替换模型 = 实现协议接入新 backend，不改检索管线。
+七个 Protocol：`MultimodalEmbedder`、`VisualAnalyzer`、`Transcriber`、`Aligner`、`ShotDetector`、`Speaker`（TTS）、`Storyboarder`（拆分镜 LLM），由 `make_*` 工厂按配置的 backend 构造（`mindex` 自定义服务 / `llama_cpp` / `openai` / 本地 adaptive / 远程 transnet；线上订阅另有 embedding `tokenhub`、asr `openai`（chat+input_audio）、tts `minimax`/`dashscope` 专用适配器）。替换模型 = 实现协议接入新 backend，不改检索管线。
 
 ### 创作工作流（studio，`/studio`）
 
@@ -61,7 +61,11 @@ uv run mindex serve                              # 启动 http://127.0.0.1:8000�
 
 ### Web/API
 
-`api.py`（检索 API + create_app）、`admin.py`（素材后台 API）、`studio_api.py`（创作 API）、`static/`（原生 HTML/JS，无前端框架；三个页面：`/` 检索、`/admin` 素材管理、`/studio` 创作）。`/admin` 直接读 SQLite，不依赖活动索引；curation（显示名/备注/收藏/隐藏，`curation.py`）与不可变索引快照分离，hidden 在召回前过滤。`/studio` 的召回依赖活动索引与嵌入服务（身份校验由 SearchEngine 继承），步骤执行为后台线程 + 前端轮询。
+`api.py`（检索 API + create_app）、`admin.py`（素材后台 API）、`settings_api.py`（设置 API）、`studio_api.py`（创作 API）、`static/`（原生 HTML/JS，无前端框架；四个页面：`/` 检索、`/admin` 素材管理、`/studio` 创作、`/settings` 设置）。`/admin` 直接读 SQLite，不依赖活动索引；curation（显示名/备注/收藏/隐藏，`curation.py`）与不可变索引快照分离，hidden 在召回前过滤。`/studio` 的召回依赖活动索引与嵌入服务（身份校验由 SearchEngine 继承），步骤执行为后台线程 + 前端轮询。
+
+### 设置页与热生效（/settings）
+
+五个模型角色（理解/拆分镜/嵌入/ASR/TTS）的「配置档案」存 SQLite（`runtime_settings.py`：`model_profiles`/`voices` 表 + settings KV 覆盖层），保存即热生效：Web 经 `RuntimeConfig.current()` 每请求/每次任务启动解析，CLI 在 `load_config` 后统一合并（`mindex e2e` 除外）。支持线上厂商订阅（智谱/DeepSeek/阿里/腾讯 TokenHub/MiniMax，预设+自定义+测试连接）与自建服务互切；`voice_clone.py` 提供 MiniMax 上传克隆与阿里 URL 复刻。密钥明文存库但接口只出掩码，`Service.api_key` 带 `exclude=True` 不进任何指纹/快照。切换嵌入档案后身份指纹变化，检索 503 直至 `mindex index --activate` 重建（页面横幅常显匹配状态）。详见 `docs/settings.md`。
 
 ## 测试约定
 

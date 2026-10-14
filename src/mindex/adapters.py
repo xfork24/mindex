@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import math
 import os
 import re
 import time
@@ -25,13 +26,20 @@ class ModelError(RuntimeError):
     pass
 
 
+# 审计记录里请求/响应体的上限：防止向量数组与 hex 音频把诊断文件撑爆。
+AUDIT_BODY_LIMIT = 8192
+
+
 def request(method: str, url: str, *, timeout: float = 180, attempts: int = 3, **kwargs) -> dict:
     for attempt in range(attempts):
         record("model-request", {"method": method, "url": url, "attempt": attempt,
                                  "json": kwargs.get("json")})
         try:
             response = httpx.request(method, url, timeout=timeout, trust_env=False, **kwargs)
-            record("model-response", {"status": response.status_code, "body": response.text})
+            record(
+                "model-response",
+                {"status": response.status_code, "body": response.text[:AUDIT_BODY_LIMIT]},
+            )
             response.raise_for_status()
             return response.json()
         except (httpx.TransportError, httpx.HTTPStatusError) as exc:
@@ -64,7 +72,7 @@ def request_bytes(method: str, url: str, *, timeout: float = 180, attempts: int 
             record("tts-response", {"status": response.status_code,
                                     "content_type": response.headers.get("content-type"),
                                     "bytes": len(response.content),
-                                    "body": response.text if response.headers.get("content-type", "").startswith("application/json") else None})
+                                    "body": response.text[:AUDIT_BODY_LIMIT] if response.headers.get("content-type", "").startswith("application/json") else None})
             response.raise_for_status()
             return response.content
         except (httpx.TransportError, httpx.HTTPStatusError) as exc:
@@ -205,6 +213,72 @@ class HTTPEmbedder:
         return self._vectors(payload, 1)[0]
 
 
+class TokenHubEmbedder:
+    """腾讯 TokenHub 多模态向量（WeMM 系）：文本/图片/视频统一空间。
+
+    端点 /v1/embeddings/multimodal 按输入序列融合为单个向量；视频由客户端按
+    config.video（fps/max_frames）抽帧后以图片序列发送，保证预处理指纹诚实。
+    线上服务无 /health 空间协议，身份纯由配置构造并进入索引指纹。
+    """
+
+    def __init__(self, config: Config):
+        self.config = config
+        self.profile = config.embedding
+
+    def identity(self) -> dict:
+        return {
+            "model": self.profile.model,
+            "revision": self.profile.revision,
+            "quantization": self.profile.quantization,
+            "dimensions": self.profile.dimensions,
+            "normalized": True,
+            "fps": self.config.video.fps,
+            "max_frames": self.config.video.max_frames,
+            "max_pixels": self.config.video.max_pixels,
+            "implementation": "tokenhub-multimodal-1",
+        }
+
+    def _sequence(self, inputs: list[dict]) -> list[float]:
+        payload = request(
+            "POST",
+            self.profile.base_url.rstrip("/") + "/embeddings/multimodal",
+            timeout=self.profile.timeout,
+            headers=self.profile.headers(),
+            json={"model": self.profile.model, "input": inputs},
+        )
+        try:
+            data = payload["data"]
+            if len(data) != 1:
+                raise ValueError(f"期望单个融合向量，实际 {len(data)} 个")
+            vector = np.asarray(data[0]["embedding"], dtype=np.float32)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ModelError("TokenHub 嵌入服务未返回有效的融合向量") from exc
+        if vector.shape != (self.profile.dimensions,) or not np.isfinite(vector).all():
+            raise ModelError(f"TokenHub 向量维度或数值无效，期望 {self.profile.dimensions} 维")
+        norm = float(np.linalg.norm(vector))
+        if not np.isfinite(norm) or norm < 1e-8:
+            raise ModelError("TokenHub 返回零向量或无效范数")
+        return (vector / norm).tolist()
+
+    def text(self, texts: list[str], role: str = "document") -> list[list[float]]:
+        # 多模态端点对输入序列只产出一个融合向量，因此逐条请求。
+        return [self._sequence([{"type": "text", "text": text}]) for text in texts]
+
+    def video(self, path: Path) -> list[float]:
+        duration = probe(path)["duration"]
+        count = max(1, min(self.config.video.max_frames, math.ceil(duration * self.config.video.fps)))
+        inputs = [
+            {"type": "image_url", "image_url": {"url": uri}} for _, uri in frame_data(path, count)
+        ]
+        return self._sequence(inputs)
+
+    def image(self, path: Path) -> list[float]:
+        mime = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
+        encoded = base64.b64encode(path.read_bytes()).decode()
+        uri = f"data:{mime};base64,{encoded}"
+        return self._sequence([{"type": "image_url", "image_url": {"url": uri}}])
+
+
 def parse_json(content: str):
     text = re.sub(r"^```(?:json)?\s*|\s*```$", "", content.strip(), flags=re.IGNORECASE)
     try:
@@ -228,7 +302,8 @@ class QwenAnalyzer:
                 "model": self.profile.model,
                 "temperature": 0,
                 "max_tokens": max_tokens,
-                "chat_template_kwargs": {"enable_thinking": False},
+                # llama-server 专有扩展仅对本地服务发送；线上厂商关闭（llama_template=False）。
+                **({"chat_template_kwargs": {"enable_thinking": False}} if self.profile.llama_template else {}),
                 "messages": [
                     {"role": "system", "content": instructions},
                     {"role": "user", "content": content},
@@ -328,6 +403,71 @@ class OpenAISpeaker:
         return decode_audio(payload)
 
 
+class MiniMaxSpeaker:
+    """MiniMax t2a_v2：JSON 响应 data.audio 为 hex 编码音频；克隆音色直接用自定义 voice_id。"""
+
+    def __init__(self, config: Config):
+        self.profile = config.studio.tts
+
+    def speak(self, text: str, voice: str | None = None) -> bytes:
+        payload = request(
+            "POST",
+            self.profile.base_url.rstrip("/") + "/t2a_v2",
+            timeout=self.profile.timeout,
+            headers=self.profile.headers(),
+            json={
+                "model": self.profile.model,
+                "text": text,
+                "voice_setting": {"voice_id": voice or self.profile.voice},
+                "audio_setting": {"format": self.profile.response_format},
+            },
+        )
+        status = (payload.get("base_resp") or {}).get("status_code", 0)
+        if status != 0:
+            raise ModelError(f"MiniMax TTS 合成失败：{payload.get('base_resp')}")
+        audio = (payload.get("data") or {}).get("audio")
+        if not isinstance(audio, str) or not audio:
+            raise ModelError("MiniMax TTS 未返回音频数据")
+        try:
+            return bytes.fromhex(audio)
+        except ValueError as exc:
+            raise ModelError("MiniMax TTS 音频 hex 解码失败") from exc
+
+
+class DashScopeSpeaker:
+    """阿里百炼原生协议 TTS（qwen-tts 系列，multimodal-generation 端点）。"""
+
+    def __init__(self, config: Config):
+        self.profile = config.studio.tts
+
+    def speak(self, text: str, voice: str | None = None) -> bytes:
+        payload = request(
+            "POST",
+            self.profile.base_url.rstrip("/") + "/api/v1/services/aigc/multimodal-generation/generation",
+            timeout=self.profile.timeout,
+            headers=self.profile.headers(),
+            json={
+                "model": self.profile.model,
+                "input": {
+                    "text": text,
+                    "voice": voice or self.profile.voice,
+                    "format": self.profile.response_format,
+                },
+            },
+        )
+        audio = (payload.get("output") or {}).get("audio") or {}
+        url = audio.get("url")
+        if isinstance(url, str) and url:
+            return request_bytes("GET", url, timeout=self.profile.timeout)
+        data = audio.get("data")
+        if isinstance(data, str) and data:
+            try:
+                return base64.b64decode(data, validate=True)
+            except (ValueError, TypeError) as exc:
+                raise ModelError("DashScope TTS 音频 base64 解码失败") from exc
+        raise ModelError("DashScope TTS 未返回可用的音频 URL 或数据")
+
+
 class QwenStoryboarder:
     def __init__(self, config: Config):
         self.config = config
@@ -343,7 +483,7 @@ class QwenStoryboarder:
                 "model": self.profile.model,
                 "temperature": 0,
                 "max_tokens": self.profile.max_tokens,
-                "chat_template_kwargs": {"enable_thinking": False},
+                **({"chat_template_kwargs": {"enable_thinking": False}} if self.profile.llama_template else {}),
                 "messages": [
                     {"role": "system", "content": instructions},
                     {"role": "user", "content": content + ([
@@ -430,6 +570,50 @@ class HTTPTranscriber:
             raise ModelError("ASR 服务未返回有效的带时间戳文本") from exc
 
 
+class OpenAIChatTranscriber:
+    """OpenAI 兼容 chat + input_audio 的 ASR（如百炼 qwen3-asr-flash）。
+
+    只返回纯文本，与 llama_cpp 后端同样走「transcribe 保存原始文本 → align 补时间戳」流程。
+    """
+
+    def __init__(self, config: Config):
+        self.profile = config.asr
+
+    def raw(self, path: Path) -> dict:
+        audio = base64.b64encode(path.read_bytes()).decode()
+        payload = request(
+            "POST",
+            self.profile.base_url.rstrip("/") + "/chat/completions",
+            timeout=self.profile.timeout,
+            headers=self.profile.headers(),
+            json={
+                "model": self.profile.model,
+                "temperature": 0,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "input_audio",
+                                "input_audio": {"data": f"data:audio/wav;base64,{audio}", "format": "wav"},
+                            }
+                        ],
+                    }
+                ],
+            },
+        )
+        try:
+            content = payload["choices"][0]["message"]["content"]
+            if not isinstance(content, str) or not content.strip():
+                raise ValueError("空文本")
+            return {"text": content.strip(), "language": "", "raw_response": payload}
+        except (KeyError, IndexError, TypeError, ValueError) as exc:
+            raise ModelError("ASR 服务未返回有效文本；无法伪造成带时间戳对白") from exc
+
+    def transcribe(self, path: Path) -> list[Utterance]:
+        raise ModelError("openai 协议 ASR 只返回纯文本；请先 transcribe 保存原文，再执行 align 补时间戳")
+
+
 class AdaptiveShotDetector:
     def __init__(self, config: Config):
         self.config = config
@@ -501,6 +685,8 @@ def make_embedder(config: Config) -> MultimodalEmbedder:
         from .image_embedding import LlamaImageEmbedder
 
         return LlamaImageEmbedder(config)
+    if config.embedding.backend == "tokenhub":
+        return TokenHubEmbedder(config)
     return HTTPEmbedder(config)
 
 
@@ -509,6 +695,8 @@ def make_transcriber(config: Config) -> Transcriber:
         from .llama_cpp import LlamaTranscriber
 
         return LlamaTranscriber(config)
+    if config.asr.backend == "openai":
+        return OpenAIChatTranscriber(config)
     return HTTPTranscriber(config)
 
 
@@ -521,6 +709,10 @@ def make_analyzer(config: Config) -> VisualAnalyzer:
 
 
 def make_speaker(config: Config) -> Speaker:
+    if config.studio.tts.backend == "minimax":
+        return MiniMaxSpeaker(config)
+    if config.studio.tts.backend == "dashscope":
+        return DashScopeSpeaker(config)
     return OpenAISpeaker(config)
 
 

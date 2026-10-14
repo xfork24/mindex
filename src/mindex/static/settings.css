@@ -1,0 +1,58 @@
+/* 设置页叠加样式：与 admin/studio 共用 style.css 基座。 */
+.settings .nav-link{text-decoration:none;text-align:center}
+.settings header #reload{margin-left:auto}
+.section-heading{display:flex;align-items:baseline;gap:14px;margin:40px 0 18px}
+.section-heading h2{font-size:17px;font-weight:550}
+.section-heading span{font-size:12px;color:var(--muted)}
+.role-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:20px}
+.role-card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:20px;min-width:0}
+.role-card header{height:auto;display:block;border:0;padding:0;margin-bottom:10px}
+.role-card h3{font-size:15px;font-weight:600;margin:0 0 4px}
+.role-card .role-desc{font-size:12px;color:var(--muted);line-height:1.7;margin:0}
+.effective{font-size:12px;color:#47765d;background:#f0f4eb;border-radius:8px;padding:10px 12px;margin:0 0 14px;overflow-wrap:anywhere}
+.effective .muted{color:#8b958c}
+.profile-list{list-style:none;margin:0 0 14px;padding:0;display:flex;flex-direction:column;gap:8px}
+.profile-item{border:1px solid #edf0ea;border-radius:10px;padding:11px 13px;display:flex;flex-direction:column;gap:8px}
+.profile-item.is-active{border-color:#9fbd8f;background:#f7faf3}
+.profile-head{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.profile-head strong{font-size:13px;font-weight:600}
+.active-badge{font-size:10px;color:#fff;background:var(--green);border-radius:4px;padding:3px 7px}
+.provider-chip{font-size:10px;color:#60785d;background:#f0f4eb;border-radius:4px;padding:3px 7px}
+.profile-meta{font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+.profile-actions{display:flex;gap:7px;flex-wrap:wrap}
+.profile-actions button{font-size:11px;padding:5px 10px}
+.test-result{font-size:12px;line-height:1.7}
+.test-result.ok{color:#486345}
+.test-result.error{color:#a83e2a}
+.index-banner-error{color:#a83e2a;background:#fcf1e9;border:1px solid #efd4c5;border-radius:9px;padding:14px;font-size:13px;line-height:1.7;margin-top:20px}
+.index-banner-ok{color:#486345;background:#edf3e7;border-radius:9px;padding:14px;font-size:13px;line-height:1.7;margin-top:20px}
+.index-banner-muted{color:var(--muted);background:#f5f7f2;border-radius:9px;padding:14px;font-size:13px;line-height:1.7;margin-top:20px}
+.tuning-panel{background:#fff;border:1px solid var(--line);border-radius:14px;padding:22px}
+.weight-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:16px}
+.weight-grid label,.tuning-row label{display:flex;flex-direction:column;gap:7px;font-size:12px;color:var(--muted)}
+.tuning-row{display:flex;gap:16px;margin-bottom:18px}
+.tuning-row input{width:130px}
+.tuning-actions{display:flex;justify-content:flex-end;gap:12px;border-top:1px solid #edf0ea;padding-top:16px}
+.tuning-actions .submit{min-width:120px}
+dialog .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:14px 0}
+dialog label{display:flex;flex-direction:column;gap:7px;font-size:12px;color:var(--muted);margin:0}
+dialog input,dialog select{width:100%}
+dialog label.check{flex-direction:row;align-items:center;gap:9px}
+#pf-error{color:#a83e2a;font-size:12px;min-height:18px;margin:10px 0}
+#pf-key-hint{margin:6px 0 0}
+.voice-default-row{display:flex;align-items:center;gap:12px;margin-bottom:16px;font-size:13px;flex-wrap:wrap}
+.voice-default-row label{color:var(--muted);font-size:12px}
+.voice-default-row select{min-width:220px}
+.voice-list{list-style:none;margin:0 0 16px;padding:0;display:flex;flex-direction:column;gap:8px}
+.voice-item{border:1px solid #edf0ea;border-radius:10px;padding:11px 13px;display:flex;flex-direction:column;gap:8px}
+.status-badge{font-size:10px;color:#a83e2a;background:#fcf1e9;border-radius:4px;padding:3px 7px}
+.voice-actions{display:flex;justify-content:flex-end;gap:12px;border-top:1px solid #edf0ea;padding-top:16px}
+.voice-actions .submit{min-width:150px}
+.clone-modes{display:flex;gap:18px;border-bottom:1px solid #edf0ea;margin:14px 0 18px}
+.clone-mode{padding:10px 2px;border:0;border-bottom:3px solid transparent;background:transparent;color:var(--muted);font-size:13px}
+.clone-mode.active{border-color:var(--green);color:var(--green);font-weight:600}
+#clone-form label{margin-bottom:12px}
+#clone-error{color:#a83e2a;font-size:12px;min-height:18px;margin:10px 0}
+.clone-consent{margin:6px 0}
+@media(max-width:900px){.role-grid{grid-template-columns:1fr}.weight-grid{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:540px){.weight-grid{grid-template-columns:repeat(2,1fr)}.tuning-row{flex-wrap:wrap}dialog .form-grid{grid-template-columns:1fr}}

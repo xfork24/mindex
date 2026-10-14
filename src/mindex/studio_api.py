@@ -23,6 +23,7 @@ from . import studio, studio_steps
 from .adapters import MultimodalEmbedder, Speaker, Storyboarder
 from .config import Config, StrictModel, fingerprint
 from .curation import EntityNotFound
+from .runtime_settings import RuntimeConfig
 from .storage import Store
 from .studio_artifacts import safe_path
 
@@ -88,7 +89,7 @@ class TimelineBody(StrictModel):
 
 
 def studio_router(
-    config: Config,
+    config: Config | RuntimeConfig,
     store: Store,
     *,
     embedder: MultimodalEmbedder | None = None,
@@ -99,9 +100,15 @@ def studio_router(
     guard = threading.Lock()  # 进程内单执行器；跨进程由 studio.lock 兜底
     executor: dict[str, threading.Thread | None] = {"thread": None}
 
+    base = config if isinstance(config, Config) else config.base  # 路径与渲染参数走基础配置
+
+    def current() -> Config:
+        """传入 RuntimeConfig 时按最新覆盖层解析；覆盖层不触碰路径，路径用法保持稳定。"""
+        return config.current() if isinstance(config, RuntimeConfig) else config
+
     def acquire_lock() -> FileLock:
         try:
-            lock = FileLock(str(studio.lock_path(config)), timeout=0, thread_local=False)
+            lock = FileLock(str(studio.lock_path(base)), timeout=0, thread_local=False)
             lock.acquire()
             return lock
         except Timeout:
@@ -121,8 +128,9 @@ def studio_router(
             if executor["thread"] is not None and executor["thread"].is_alive():
                 raise HTTPException(409, "已有创作步骤在执行，请稍候再试")
             file_lock = acquire_lock()
+            cfg = current()  # 一次任务运行绑定同一份生效配置；运行中改设置下次生效
             try:
-                state = studio.reconcile(config, job_id)
+                state = studio.reconcile(cfg, job_id)
                 if requested_step:
                     studio.check_step(state, requested_step)
                     steps = [requested_step]
@@ -133,11 +141,11 @@ def studio_router(
                 if body.shot_ids is not None:
                     if requested_step not in {"recall", "tts", "render"}:
                         raise HTTPException(422, "只有召回、配音、渲染支持指定分镜")
-                    ids = {s.id for s in studio.load_storyboard(config, job_id).shots}
+                    ids = {s.id for s in studio.load_storyboard(cfg, job_id).shots}
                     if not set(body.shot_ids) <= ids:
                         raise HTTPException(422, "指定分镜不存在于当前任务")
-                studio.begin_step(config, job_id, steps[0])
-                response = studio.set_execution(config, job_id, "running", steps[0], steps[1:])
+                studio.begin_step(cfg, job_id, steps[0])
+                response = studio.set_execution(cfg, job_id, "running", steps[0], steps[1:])
             except Exception:
                 file_lock.release()
                 raise
@@ -147,10 +155,10 @@ def studio_router(
                 try:
                     for index, step in enumerate(steps):
                         if index:
-                            studio.begin_step(config, job_id, step)
-                            studio.set_execution(config, job_id, "running", step, steps[index + 1 :])
+                            studio.begin_step(cfg, job_id, step)
+                            studio.set_execution(cfg, job_id, "running", step, steps[index + 1 :])
                         studio_steps.run_step(
-                            config,
+                            cfg,
                             job_id,
                             step,
                             storyboarder=storyboarder,
@@ -162,12 +170,12 @@ def studio_router(
                         )
                 except Exception as exc:  # noqa: BLE001 — 所有后台失败必须记录终态
                     status = "failed"
-                    fresh = studio.load_job(config, job_id)
+                    fresh = studio.load_job(cfg, job_id)
                     fresh["execution"]["error"] = str(exc)
-                    studio.save(studio.job_path(config, job_id), fresh)
+                    studio.save(studio.job_path(cfg, job_id), fresh)
                 finally:
                     try:
-                        studio.set_execution(config, job_id, status, None, [])
+                        studio.set_execution(cfg, job_id, status, None, [])
                     finally:
                         file_lock.release()
 
@@ -176,8 +184,8 @@ def studio_router(
             try:
                 thread.start()
             except Exception as exc:
-                studio.fail_step(config, job_id, steps[0], exc)
-                studio.set_execution(config, job_id, "failed", None, [])
+                studio.fail_step(cfg, job_id, steps[0], exc)
+                studio.set_execution(cfg, job_id, "failed", None, [])
                 file_lock.release()
                 raise
             return {
@@ -188,7 +196,7 @@ def studio_router(
     def shot_summary(shot: dict) -> dict:
         """聚合单镜的分镜/候选/配音/选片信息，供轮询端点一次带全。"""
         summary = {**shot, "candidates": None, "audio": None, "selection": None}
-        candidate_file = studio.candidates_dir(config, shot["job_id"]) / f"{shot['id']}.json"
+        candidate_file = studio.candidates_dir(base, shot["job_id"]) / f"{shot['id']}.json"
         if candidate_file.is_file():
             document = json.loads(candidate_file.read_text())
             summary["candidates"] = {
@@ -197,16 +205,16 @@ def studio_router(
                 "top": document.get("results")[0] if document.get("results") else None,
                 "pool": document.get("results", []),
             }
-        manifest_file = studio.job_dir(config, shot["job_id"]) / "audio.json"
+        manifest_file = studio.job_dir(base, shot["job_id"]) / "audio.json"
         if manifest_file.is_file():
             manifest = json.loads(manifest_file.read_text()).get("shots", {})
             if shot["id"] in manifest:
                 summary["audio"] = {
                     "duration": manifest[shot["id"]]["duration"],
-                    "valid": studio.load_job(config, shot["job_id"])["steps"]["tts"]["status"] == "complete",
+                    "valid": studio.load_job(base, shot["job_id"])["steps"]["tts"]["status"] == "complete",
                     "url": f"/api/studio/jobs/{shot['job_id']}/audio/{shot['id']}?v={manifest[shot['id']].get('sha256', 'legacy')}",
                 }
-        timeline_file = studio.timeline_path(config, shot["job_id"])
+        timeline_file = studio.timeline_path(base, shot["job_id"])
         if timeline_file.is_file():
             events = json.loads(timeline_file.read_text()).get("events", [])
             summary["selection"] = next(
@@ -227,10 +235,10 @@ def studio_router(
         return summary
 
     def job_detail(job_id: str) -> dict:
-        state = studio.load_job(config, job_id)
+        state = studio.load_job(base, job_id)
         detail = {"job": state, "storyboard": None, "shots": [], "timeline": None, "render": None}
         try:
-            storyboard = studio.load_storyboard(config, job_id)
+            storyboard = studio.load_storyboard(base, job_id)
         except EntityNotFound:
             return detail
         detail["storyboard"] = {
@@ -239,7 +247,7 @@ def studio_router(
         }
         detail["shots"] = [shot_summary({**shot.model_dump(), "job_id": job_id}) for shot in storyboard.shots]
         try:
-            timeline = studio.load_timeline(config, job_id)
+            timeline = studio.load_timeline(base, job_id)
             detail["timeline"] = {
                 "mode": timeline.mode,
                 "audio_mode": timeline.audio_mode,
@@ -249,7 +257,7 @@ def studio_router(
             }
         except EntityNotFound:
             pass
-        final = studio.render_dir(config, job_id) / "final.mp4"
+        final = studio.render_dir(base, job_id) / "final.mp4"
         if final.is_file():
             published = state.get("published_render", {})
             version = published.get("version", "legacy")
@@ -273,7 +281,7 @@ def studio_router(
     @router.post("/jobs", status_code=201)
     def create_job(body: CreateJobBody):
         try:
-            return studio.create_job(config, body.text, body.title, body.options)
+            return studio.create_job(current(), body.text, body.title, body.options)
         except studio.StudioError:
             raise
         except ValueError as exc:
@@ -281,12 +289,12 @@ def studio_router(
 
     @router.get("/jobs")
     def jobs():
-        studio.recover_stale(config)
-        return {"items": studio.list_jobs(config)}
+        studio.recover_stale(base)
+        return {"items": studio.list_jobs(base)}
 
     @router.get("/jobs/{job_id}")
     def get_job(job_id: str):
-        studio.recover_stale(config)
+        studio.recover_stale(base)
         return job_detail(job_id)
 
     @router.post("/jobs/{job_id}/steps/{step}", status_code=202)
@@ -314,16 +322,16 @@ def studio_router(
                         estimated_seconds=item.estimated_seconds,
                     )
                 )
-            if len(shots) > config.studio.max_shots:
-                raise HTTPException(422, f"分镜数量 {len(shots)} 超过上限 {config.studio.max_shots}")
+            if len(shots) > current().studio.max_shots:
+                raise HTTPException(422, f"分镜数量 {len(shots)} 超过上限 {current().studio.max_shots}")
             try:
-                studio.save_storyboard(config, job_id, studio.Storyboard(job_id=job_id, shots=shots))
+                studio.save_storyboard(base, job_id, studio.Storyboard(job_id=job_id, shots=shots))
             except studio.StudioError as exc:
                 raise HTTPException(422, str(exc)) from exc
             if body.title is not None:
-                state = studio.load_job(config, job_id)
+                state = studio.load_job(base, job_id)
                 state["title"] = body.title.strip()[:60] or state["title"]
-                studio.save(studio.job_path(config, job_id), state)
+                studio.save(studio.job_path(base, job_id), state)
         return job_detail(job_id)
 
     @router.patch("/jobs/{job_id}/timeline")
@@ -335,14 +343,14 @@ def studio_router(
             ]
             try:
                 studio_steps.apply_timeline_patch(
-                    config, job_id, patches, audio_mode=body.audio_mode, burn=body.burn
+                    current(), job_id, patches, audio_mode=body.audio_mode, burn=body.burn
                 )
             except studio.StudioError as exc:
                 raise HTTPException(422, str(exc)) from exc
         return job_detail(job_id)
 
     def artifact_response(job_id: str, relative: str, download: bool):
-        directory = studio.job_dir(config, job_id)
+        directory = studio.job_dir(base, job_id)
         target = (directory / relative).resolve()
         if not target.is_relative_to(directory.resolve()) or not target.is_file():
             raise HTTPException(404, "产物文件不存在")
@@ -356,10 +364,10 @@ def studio_router(
         )
 
     def artifact_items(job_id):
-        root = studio.job_dir(config, job_id)
-        state = studio.load_job(config, job_id)
+        root = studio.job_dir(base, job_id)
+        state = studio.load_job(base, job_id)
         try:
-            ids = {s.id for s in studio.load_storyboard(config, job_id).shots}
+            ids = {s.id for s in studio.load_storyboard(base, job_id).shots}
         except EntityNotFound:
             ids = set()
         items = []
@@ -402,10 +410,10 @@ def studio_router(
         from .media import probe
         from .studio_render import cut_shot
 
-        state = studio.load_job(config, job_id)
+        state = studio.load_job(base, job_id)
         if state["steps"]["select"]["status"] != "complete":
             raise HTTPException(422, "请先完成选片对齐")
-        timeline = studio.load_timeline(config, job_id)
+        timeline = studio.load_timeline(base, job_id)
         event = next((e for e in timeline.events if e.shot_id == shot_id), None)
         if event is None:
             raise HTTPException(404, "找不到分镜")
@@ -420,18 +428,18 @@ def studio_router(
         key = fingerprint(
             {
                 "event": event.model_dump(),
-                "render": config.studio.render.model_dump(),
+                "render": base.studio.render.model_dump(),
                 "source_mtime": source.stat().st_mtime_ns,
             }
         )
-        path = safe_path(studio.job_dir(config, job_id), f"previews/{key}.mp4")
+        path = safe_path(studio.job_dir(base, job_id), f"previews/{key}.mp4")
         path.parent.mkdir(parents=True, exist_ok=True)
         try:
             with FileLock(str(path) + ".lock", timeout=0):
                 try:
                     probe(path)
                 except ValueError:
-                    cut_shot(source, event, config.studio.render, path)
+                    cut_shot(source, event, base.studio.render, path)
         except Timeout:
             raise HTTPException(409, "该分镜预览正在生成，请稍候重试") from None
         return FileResponse(path, media_type="video/mp4")
@@ -443,7 +451,7 @@ def studio_router(
     @router.get("/jobs/{job_id}/archive")
     def archive(job_id: str):
         with mutation_lock():
-            root = studio.job_dir(config, job_id)
+            root = studio.job_dir(base, job_id)
             items = artifact_items(job_id)
             version = fingerprint(
                 [{**item, "mtime_ns": safe_path(root, item["path"]).stat().st_mtime_ns} for item in items]
@@ -473,7 +481,7 @@ def studio_router(
     @router.delete("/jobs/{job_id}")
     def remove(job_id: str):
         with mutation_lock():
-            studio.delete_job(config, job_id)
+            studio.delete_job(base, job_id)
         return {"deleted": job_id}
 
     return router

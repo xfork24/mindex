@@ -25,14 +25,16 @@ class Service(StrictModel):
     revision: str = "main"
     timeout: float = Field(default=180, gt=0)
     api_key_env: str = "MINDEX_MODEL_API_KEY"
+    # 明文密钥只存 SQLite 覆盖层；exclude=True 保证指纹、任务快照与序列化永不携带。
+    api_key: str = Field(default="", exclude=True)
 
     def headers(self) -> dict[str, str]:
-        key = os.environ.get(self.api_key_env, "")
+        key = self.api_key or os.environ.get(self.api_key_env, "")
         return {"Authorization": f"Bearer {key}"} if key else {}
 
 
 class EmbeddingConfig(Service):
-    backend: Literal["mindex", "llama_cpp"] = "mindex"
+    backend: Literal["mindex", "llama_cpp", "tokenhub"] = "mindex"
     deployment_manifest: str | None = None
     base_url: str = "http://192.168.1.86:4010"
     model: str = "tencent/WeMM-Embedding-9B"
@@ -42,6 +44,8 @@ class EmbeddingConfig(Service):
 
 class AnalyzerConfig(Service):
     backend: Literal["openai", "llama_cpp"] = "openai"
+    # llama-server 专有的 chat_template_kwargs 扩展只发给本地服务，线上厂商须关闭。
+    llama_template: bool = True
     deployment_manifest: str | None = None
     base_url: str = "http://192.168.1.86:4040/v1"
     model: str = "qwen3.8:27b"
@@ -50,7 +54,7 @@ class AnalyzerConfig(Service):
 
 
 class ASRConfig(Service):
-    backend: Literal["mindex", "llama_cpp"] = "mindex"
+    backend: Literal["mindex", "llama_cpp", "openai"] = "mindex"
     deployment_manifest: str | None = None
     base_url: str = "http://192.168.1.86:4020"
     model: str = "Qwen/Qwen3-ASR-1.7B"
@@ -64,6 +68,7 @@ class GeneratorConfig(Service):
     """文本拆分镜 LLM（llama-server GGUF，OpenAI 兼容端点）。"""
 
     backend: Literal["openai"] = "openai"
+    llama_template: bool = True
     base_url: str = "http://192.168.1.86:4040/v1"
     model: str = "qwen3.8:27b"
     revision: str = "deployed-2026-10-12"
@@ -74,9 +79,9 @@ class GeneratorConfig(Service):
 
 
 class SpeakerConfig(Service):
-    """TTS 语音合成服务（llama-server GGUF，OpenAI /audio/speech 风格端点）。"""
+    """TTS 语音合成服务（llama-server GGUF，OpenAI /audio/speech 风格端点；线上为 minimax/dashscope 专用协议）。"""
 
-    backend: Literal["openai"] = "openai"
+    backend: Literal["openai", "minimax", "dashscope"] = "openai"
     base_url: str = "http://192.168.1.86:4030/v1"
     model: str = "Qwen3-TTS"
     voice: str = "Cherry"
