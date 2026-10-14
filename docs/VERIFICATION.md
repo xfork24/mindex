@@ -132,6 +132,6 @@ uv run python tests/serve_fixture.py --data-dir data/verification/browser-new --
 2. 中文素材上文字找视频的 Hit@5 / nDCG@10，以及融合相对单路的提升。
 3. ASR 时间对齐准确度、真实短镜头分镜召回率与 Qwen 情绪/动作描述质量。
 
-[部署说明](DEPLOYMENT.md) 提供独立环境、服务启动命令、互斥调度及验收步骤。先运行 `mindex model-check` 验证真实文字/视频空间身份与输出，再导入实际素材，按 [评测说明](eval/README.md) 标注并执行固定的 40 条文字测试集。Hit@5 ≥85% 是验收目标，尚无实测分数。
+[部署说明](DEPLOYMENT.md) 提供独立环境、服务启动命令、互斥调度及验收步骤。先运行 `mindex model-check` 验证真实文字/视频空间身份与输出，再导入实际素材，按 [评测说明](../eval/README.md) 标注并执行固定的 40 条文字测试集。Hit@5 ≥85% 是验收目标，尚无实测分数。
 
 内置 WeMM 调用形式与[官方模型卡](https://huggingface.co/tencent/WeMM-Embedding-9B)核对一致；量化运行是否可用仍以目标 GPU 实测为准。ASR 采用[官方 Python 包的时间戳接口](https://github.com/QwenLM/Qwen3-ASR)。

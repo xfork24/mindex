@@ -99,4 +99,4 @@ prepare（本地 CPU，无需模型）
 → 启动 WeMM :4010       → index --activate → 保持常驻供在线查询
 ```
 
-项目模型服务（`mindex-model-server` 三个角色）之间用 GPU 文件锁互斥（`~/.cache/mindex/gpu.lock`）；已有 llama-server/Qwen 服务不受该锁管理，由用户手动切换。详见 [DEPLOYMENT.md](../DEPLOYMENT.md)。
+项目模型服务（`mindex-model-server` 三个角色）之间用 GPU 文件锁互斥（`~/.cache/mindex/gpu.lock`）；已有 llama-server/Qwen 服务不受该锁管理，由用户手动切换。详见 [DEPLOYMENT.md](DEPLOYMENT.md)。

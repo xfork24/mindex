@@ -86,8 +86,8 @@ uv run mindex e2e freeze data/e2e/trailer-20261013/queries.draft.jsonl \
 
 ## 当前实验进度（截至 2026-10-13）
 
-`run.json` 是实时状态。已完成真实 WeMM、ASR/CPU 对齐及 Qwen 三片段验证；Qwen 批次分析已启动。新增完整电影已有独立 visual 索引（2,336 个 moment），trailer 实验继续使用独立版本。步骤见 [E2E_RUNBOOK.md](../E2E_RUNBOOK.md)。
+`run.json` 是实时状态。已完成真实 WeMM、ASR/CPU 对齐及 Qwen 三片段验证；Qwen 批次分析已启动。新增完整电影已有独立 visual 索引（2,336 个 moment），trailer 实验继续使用独立版本。步骤见 [E2E_RUNBOOK.md](E2E_RUNBOOK.md)。
 
 ## 工程测试 vs 真实验收
 
-`uv run pytest -q`（真实 FFmpeg/SQLite/Chroma/HTTP，确定性模型 fixture）验证**工程链路**；不证明真实模型中文检索质量、INT8 兼容性或显存峰值。真实验收走本框架并记录到 [VERIFICATION.md](../VERIFICATION.md)。真实模型结果、人工标注、浏览器证据、GPU 数据缺一时，保持待验收状态。
+`uv run pytest -q`（真实 FFmpeg/SQLite/Chroma/HTTP，确定性模型 fixture）验证**工程链路**；不证明真实模型中文检索质量、INT8 兼容性或显存峰值。真实验收走本框架并记录到 [VERIFICATION.md](VERIFICATION.md)。真实模型结果、人工标注、浏览器证据、GPU 数据缺一时，保持待验收状态。

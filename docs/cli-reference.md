@@ -139,7 +139,7 @@ phase 取值：`smoke → visual → preview → asr → align → analyze(-smok
 
 ## mindex-model-server（GPU 侧）
 
-在角色独立 venv 中运行本项目自定义模型服务（部署见 [DEPLOYMENT.md](../DEPLOYMENT.md)）：
+在角色独立 venv 中运行本项目自定义模型服务（部署见 [DEPLOYMENT.md](DEPLOYMENT.md)）：
 
 ```bash
 .venv-embedding/bin/mindex-model-server --role embedding --config config.local.yaml --host 0.0.0.0

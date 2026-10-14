@@ -1,6 +1,6 @@
 # 本地真实模型端到端验证操作手册
 
-计划见 [E2E_TEST_PLAN.md](E2E_TEST_PLAN.md)。本手册实现串行阶段，不启动或卸载远程模型。CPU 分镜、SQLite、Chroma 和网页运行在本机。每次只在 GPU 机器启动一个模型。TTS 不参与本轮。
+计划见 [E2E_TEST_PLAN.md](../plans/E2E_TEST_PLAN.md)。本手册实现串行阶段，不启动或卸载远程模型。CPU 分镜、SQLite、Chroma 和网页运行在本机。每次只在 GPU 机器启动一个模型。TTS 不参与本轮。
 
 ## 当前实验
 

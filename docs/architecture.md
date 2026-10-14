@@ -136,4 +136,4 @@ data/
 
 - 各阶段机制与检查点：[pipeline.md](pipeline.md)
 - 索引版本与回退：[index-versions.md](index-versions.md)
-- GPU 服务部署与 HTTP 协议：[DEPLOYMENT.md](../DEPLOYMENT.md)
+- GPU 服务部署与 HTTP 协议：[DEPLOYMENT.md](DEPLOYMENT.md)

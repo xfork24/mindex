@@ -2,7 +2,7 @@
 
 更新时间：2026-10-13。第一阶段：中文文字找视频优先，同时支持视频找相似片段；不引入 OmniRetriever，不提供音频查询。本文记录已实现的设计、部署顺序及尚待真实 GPU 和中文素材验证的验收工作。
 
-当前先验收整部电影的 CPU 分镜、实际切片和仅画面索引。WeMM 地址为 `192.168.1.86:4010`，ASR 为 `:4020`；TTS `:4030` 不参与本流程。`index --mode visual` 只需 WeMM，完整的 `enriched` 模式仍分阶段执行 ASR、Qwen 分析、WeMM。具体命令见 [FILM_WORKFLOW.md](FILM_WORKFLOW.md)。
+当前先验收整部电影的 CPU 分镜、实际切片和仅画面索引。WeMM 地址为 `192.168.1.86:4010`，ASR 为 `:4020`；TTS `:4030` 不参与本流程。`index --mode visual` 只需 WeMM，完整的 `enriched` 模式仍分阶段执行 ASR、Qwen 分析、WeMM。具体命令见 [FILM_WORKFLOW.md](../docs/FILM_WORKFLOW.md)。
 
 ## 素材后台增量实现
 

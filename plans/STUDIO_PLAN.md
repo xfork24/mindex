@@ -1,6 +1,6 @@
 # 「文本生成视频」创作工作流（studio 子系统）实施计划
 
-> 本文保留初始设计记录。静态审查后的改进计划见 [STUDIO_REFINEMENT_PLAN.md](STUDIO_REFINEMENT_PLAN.md)，当前运行行为与 API 以 [docs/studio.md](docs/studio.md) 为准。
+> 本文保留初始设计记录。静态审查后的改进计划见 [STUDIO_REFINEMENT_PLAN.md](STUDIO_REFINEMENT_PLAN.md)，当前运行行为与 API 以 [docs/studio.md](../docs/studio.md) 为准。
 
 ## Context
 

@@ -32,7 +32,7 @@ uv run mindex serve                              # 启动 http://127.0.0.1:8000�
 - `indexing.py` — 索引构建、发布前检查、`VectorIndex`（Chroma 封装）
 - `cli.py` — Typer 入口（`mindex`）；重模块在命令函数内延迟导入
 - `e2e.py` — `mindex e2e` 分阶段真实验证框架（init/probe/pin/phase/freeze），阶段：smoke → visual → preview → asr → align → analyze(-smoke) → enriched → evaluate → video-evaluate → check
-- `model_server.py` — GPU 侧服务（`mindex-model-server`，角色独立 venv，见 DEPLOYMENT.md）
+- `model_server.py` — GPU 侧服务（`mindex-model-server`，角色独立 venv，见 `docs/DEPLOYMENT.md`）
 - `llama_cpp.py` — 对用户已有 llama-server 的原生协议适配（`/v1/embeddings` input_video）
 
 ### 模型适配层（adapters.py）
@@ -71,13 +71,14 @@ uv run mindex serve                              # 启动 http://127.0.0.1:8000�
 
 - 测试使用真实 FFmpeg、PySceneDetect、SQLite、Chroma 和 HTTP API（集成式，无网络也能跑）；模型用 `conftest.py` 中明确标记的确定性 Fixture 适配器。
 - **不能用模拟向量冒充真实检索结果**；服务未就绪时页面/API 显示明确未就绪状态。
-- 自动化测试只验证工程链路，不证明真实模型中文检索质量；真实验收走 `mindex e2e` 阶段并记录到 VERIFICATION.md。
+- 自动化测试只验证工程链路，不证明真实模型中文检索质量；真实验收走 `mindex e2e` 阶段并记录到 `docs/VERIFICATION.md`。
 
 ## 关键文档
 
 - `docs/` — 系统性参考文档：架构、离线管线、CLI、配置、检索、索引版本、e2e 框架、素材后台、创作工作流、工具（索引见 `docs/README.md`）
-- `PLAN.md` — 设计决策、验收标准（40 条测试集 Hit@5 ≥85%）
-- `FILM_WORKFLOW.md` — 整部电影处理流程（visual 模式只需 WeMM）
-- `DEPLOYMENT.md` — GPU 服务部署、各角色环境、HTTP 服务协议
-- `E2E_RUNBOOK.md` / `E2E_TEST_PLAN.md` — 端到端真实验证操作手册
+- `plans/` — 计划与设计决策文档（索引见 `plans/`）
+- `plans/PLAN.md` — 设计决策、验收标准（40 条测试集 Hit@5 ≥85%）
+- `docs/FILM_WORKFLOW.md` — 整部电影处理流程（visual 模式只需 WeMM）
+- `docs/DEPLOYMENT.md` — GPU 服务部署、各角色环境、HTTP 服务协议
+- `docs/E2E_RUNBOOK.md` / `plans/E2E_TEST_PLAN.md` — 端到端真实验证操作手册
 - `eval/README.md` — 评测查询标注说明

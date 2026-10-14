@@ -2,7 +2,7 @@
 
 以 **WeMM-Embedding-9B / 4096 维**为默认主模型，优先做好文字找视频，同时支持视频找相似片段。视频画面、中文描述、情绪镜头描述和对白分别索引，再融合排名。没有音频查询或 OmniRetriever 依赖。
 
-已增加 llama.cpp/GGUF 适配、六片段能力门槛、分阶段实验、原始 ASR 与独立 CPU 对齐、人工标注冻结及消融评测。当前用户部署及真实 trailer 验证请按 [端到端操作手册](E2E_RUNBOOK.md) 执行；测试设计见 [端到端计划](E2E_TEST_PLAN.md)。llama.cpp 后端正式建库前须完成部署清单和 `e2e phase smoke`。
+已增加 llama.cpp/GGUF 适配、六片段能力门槛、分阶段实验、原始 ASR 与独立 CPU 对齐、人工标注冻结及消融评测。当前用户部署及真实 trailer 验证请按 [端到端操作手册](docs/E2E_RUNBOOK.md) 执行；测试设计见 [端到端计划](plans/E2E_TEST_PLAN.md)。llama.cpp 后端正式建库前须完成部署清单和 `e2e phase smoke`。
 
 系统性参考文档（架构、管线、CLI、配置、检索、索引、e2e 框架、后台与工具）见 [docs/](docs/README.md)。
 
@@ -32,7 +32,7 @@ uv run mindex serve
 
 ## 先测试整部电影：分镜、切片与画面索引
 
-支持 FFmpeg 可解码的 MP4、MKV 等容器。默认配置已指向 WeMM `http://192.168.1.86:4010`、ASR `:4020`；TTS `:4030` 不参与本工具链。当前步骤只需要在 GPU 上运行 WeMM。完整操作见 [电影处理指南](FILM_WORKFLOW.md)。
+支持 FFmpeg 可解码的 MP4、MKV 等容器。默认配置已指向 WeMM `http://192.168.1.86:4010`、ASR `:4020`；TTS `:4030` 不参与本工具链。当前步骤只需要在 GPU 上运行 WeMM。完整操作见 [电影处理指南](docs/FILM_WORKFLOW.md)。
 
 ```bash
 # 分镜和切片在本地 CPU 执行，不需要启动 GPU 模型。
@@ -54,7 +54,7 @@ uv run mindex serve
 
 ## 单 GPU 完整语义索引
 
-先按 [模型部署说明](DEPLOYMENT.md) 部署服务。模型互斥执行时，**分阶段运行**，不要使用要求各服务均可访问的 `ingest` 快捷命令。
+先按 [模型部署说明](docs/DEPLOYMENT.md) 部署服务。模型互斥执行时，**分阶段运行**，不要使用要求各服务均可访问的 `ingest` 快捷命令。
 
 ```bash
 # 1. 本地 CPU 分镜和切片，不需要大模型。
@@ -112,7 +112,7 @@ uv run mindex indexes activate 新索引ID
 uv run mindex indexes activate 旧索引ID
 ```
 
-`--config 路径` 必须放在子命令之前，例如 `uv run mindex --config profiles/int8.yaml index`。也可设置 `MINDEX_CONFIG`。模型替换通过 `MultimodalEmbedder`、`VisualAnalyzer`、`Transcriber`、`Aligner` 和 `ShotDetector` 接口适配；其他嵌入服务实现 [部署文档中的协议](DEPLOYMENT.md#服务协议) 即可接入，不必改检索管线。内置 GPU 嵌入运行器针对 WeMM，不声称任意模型都能直接加载。
+`--config 路径` 必须放在子命令之前，例如 `uv run mindex --config profiles/int8.yaml index`。也可设置 `MINDEX_CONFIG`。模型替换通过 `MultimodalEmbedder`、`VisualAnalyzer`、`Transcriber`、`Aligner` 和 `ShotDetector` 接口适配；其他嵌入服务实现 [部署文档中的协议](docs/DEPLOYMENT.md#服务协议) 即可接入，不必改检索管线。内置 GPU 嵌入运行器针对 WeMM，不声称任意模型都能直接加载。
 
 数据保存在配置的 `data_dir`：原片 `sources/`，分镜计划 `plans/`，切片 `clips/`，缩略图 `thumbnails/`，导出报告 `reports/`，转写检查点 `transcripts/`，上下文缓存 `context/`，创作任务 `studio/`，克隆音色样本 `voices/`，元数据 `metadata.sqlite3`，向量 `chroma/`。索引冻结描述与对白快照；更新分析不会修改已发布旧索引的检索文档。
 
@@ -154,7 +154,7 @@ uv run mindex model-check /路径/六秒以内片段.mp4 --text '画面描述' -
 
 [评测标注说明](eval/README.md) 提供 60 条文字与 12 条视频查询的模板生成器。目标是固定 40 条文字测试集 Hit@5 ≥85%，融合 nDCG@10 不低于最佳单路。开发集用于采样、量化和融合权重选择，测试集不能调参。
 
-自动化测试使用真实 FFmpeg、PySceneDetect、SQLite、Chroma 和 HTTP API，模型部分使用明确标记的确定性测试适配器。**这些测试验证工程链路，不证明真实模型中文检索质量、INT8 兼容性或 16GB 显存峰值。** 真实 WeMM、ASR 与 TransNetV2 需在用户 GPU 上完成验收，结果记录到 [验证报告](VERIFICATION.md)。
+自动化测试使用真实 FFmpeg、PySceneDetect、SQLite、Chroma 和 HTTP API，模型部分使用明确标记的确定性测试适配器。**这些测试验证工程链路，不证明真实模型中文检索质量、INT8 兼容性或 16GB 显存峰值。** 真实 WeMM、ASR 与 TransNetV2 需在用户 GPU 上完成验收，结果记录到 [验证报告](docs/VERIFICATION.md)。
 
 ## 附带工具：哔哩哔哩缓存转 MP4
 
@@ -173,8 +173,8 @@ convert.sh /path/to/bilibili缓存目录 -o
 - `convert.sh` 已自动跳过交互确认、默认关闭弹幕下载（离线可用）；需要弹幕 ass、完整参数与行为细节见 [tools/m4s-converter/README.md](tools/m4s-converter/README.md)。
 - 转出的 MP4 为标准格式，可直接作为 `mindex prepare` 的输入素材。
 
-详细设计见 [PLAN.md](PLAN.md)。
+详细设计见 [PLAN.md](plans/PLAN.md)。
 
 ## macOS 模型身份迁移
 
-本次 v2 身份重构、部署兼容性门槛和回滚流程见 [macOS 迁移说明](docs/macos-model-migration.md)，实际执行证据见 [迁移记录](REHASH_MIGRATION.md)。迁移命令使用 `--config config.macos-v2.yaml --no-runtime-overrides`；保留旧清单与索引，不自动改写旧向量身份。
+本次 v2 身份重构、部署兼容性门槛和回滚流程见 [macOS 迁移说明](docs/macos-model-migration.md)，实际执行证据见 [迁移记录](docs/REHASH_MIGRATION.md)。迁移命令使用 `--config config.macos-v2.yaml --no-runtime-overrides`；保留旧清单与索引，不自动改写旧向量身份。

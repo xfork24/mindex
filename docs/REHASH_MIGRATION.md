@@ -1,13 +1,13 @@
 # REHASH_MIGRATION：macOS 模型身份迁移实际执行记录
 
-日期：2026-10-14。执行依据：[REHASH_REFINEMENT_PLAN.md](REHASH_REFINEMENT_PLAN.md)；操作手册：[docs/macos-model-migration.md](docs/macos-model-migration.md)。
+日期：2026-10-14。执行依据：[REHASH_REFINEMENT_PLAN.md](../plans/REHASH_REFINEMENT_PLAN.md)；操作手册：[macos-model-migration.md](macos-model-migration.md)。
 
 ## 结论
 
 - 代码重构（三层身份、schema 2 清单、部署兼容门槛、`--no-runtime-overrides`）已完成并通过全量测试；本记录落盘时全部改动已提交。
 - trailer v2 空间验收完成：visual/moment 索引 61 个成员构建成功，文本/图片/视频真实检索验收通过（见下文）。
-- 正片（2336 moment）按计划须以同一 v2 空间重建，尚未执行；命令见文末，由操作员安排时间运行。
-- 旧 schema 1 清单、旧索引与活动索引全部保留；当前活动索引仍为正片旧空间 `8ebf8b8455e2e94d277cf8fa`，未受迁移影响。
+- 正片（2336 moment）**未按原计划重建，改为迁移**：`8ebf8b84` 的向量搬入 v2 空间索引 `0562a2ee9430b8fc10a69f77` 并已激活。依据与实测见「正片：迁移而非重建」。
+- 旧 schema 1 清单与两个旧索引 `948e6b40`（trailer）/`8ebf8b84`（正片）全部保留，可回退。四个索引的向量现已统一源自 10-13 的 CUDA 部署。
 
 ## 身份与信任
 
@@ -41,6 +41,7 @@
 ## Trailer v2 索引与检索验收
 
 - 索引：`506568882ba6c1a8189c93f5`（visual/moment，61 成员，schema 2 空间，未激活）。`mindex check` 成员完整性通过。
+  - 后续修正：此索引最初由 Metal 服务**真实重算**得到。为统一向量来源（见「正片：迁移而非重建」），其 61 条向量已覆盖为 schema 1 索引 `948e6b40` 的 CUDA 原生值；index_id、成员与元数据未变，仅数值替换，覆盖后 `check_index` 通过，与源最大绝对差 7.45e-09（float32 在 1.0 附近的 ULP），57/61 逐位相同。
 - 验收执行（全部 `--config config.macos-v2.yaml --no-runtime-overrides`，真实 WeMM 服务，2026-10-14 晚）：
 
 | 验收 | 方式 | 结果 |
@@ -56,24 +57,56 @@
 
 | 检查 | 结果 |
 |---|---|
-| `uv run pytest -q`（全量） | 224 passed、1 skipped |
-| `uv run pytest tests/test_deployment_v2.py -q` | 61 passed |
+| `uv run pytest -q`（全量） | 229 passed、1 skipped（迁移完成后复跑，2026-10-14 晚，83.3s） |
+| `uv run pytest tests/test_deployment_v2.py -q` | 64 passed |
 | `uv run ruff check src tests` | 通过 |
 | `node --check src/mindex/static/app.js` | 通过 |
 
-## 正片重建（待执行）
+## 正片：迁移而非重建（2026-10-14 晚已执行）
 
-trailer 验收通过后，使用同一 v2 契约重建正片（约 2336 个 moment，按实测速度需十余小时连续占用，注意内存压力）：
+原计划是用同一 v2 契约**重建**正片（2336 moment）。改为**迁移**：新旧 v2 空间指向同一份 GGUF（weights/mmproj 的 SHA-256 相同）且 `video` 预处理逐字段一致，已算好的向量因此可以直接搬进新空间的索引，省掉整轮重算。
 
-```bash
-bash scripts/run-local-wemm.sh > data/e2e/wemm-macos-v2-feature.log 2>&1
-uv run mindex --config config.macos-v2.yaml --no-runtime-overrides index \
-  --mode visual --source 074e8016c9b494027b0f3dfc875b68a735698bdc08170b83e65d616c26b17034 --kind moment
-uv run mindex --config config.macos-v2.yaml --no-runtime-overrides check --index-id 新索引ID
-uv run mindex --config config.macos-v2.yaml --no-runtime-overrides indexes activate 新索引ID
-```
+### 为什么改
 
-中断后重跑同一 `index` 命令即续建；构建/检查/最终核验失败不会切换活动索引。完成代表性检索验收后才 activate；不要把 trailer 测试索引设为默认素材库。
+实测单段嵌入 **16–50 秒（均值约 37 秒）**，2336 段连续重算需约 **24 小时** GPU 占用。而 CUDA 与 Metal 在同一权重、同一预处理下的输出差异是稳定的系统性偏移，不是语义变化，迁移可行。
+
+### 漂移实测
+
+| 样本 | cosine min | cosine mean |
+|---|---|---|
+| trailer 61 段（schema 1 原生 vs Metal 重算） | 0.987172 | 0.994999 |
+| 正片抽样 8 段（Metal 重算 vs 已存 CUDA 向量） | 0.994228 | 0.996463 |
+
+真实正片上的漂移**比 trailer 样本更小**，说明它不随规模放大。漂移量（≈0.005）与 top-5 边界处的余弦间隔（中位数 0.01713）同量级，因此片段间近邻会换人：trailer 上 61 个片段的 top-5 邻接集合有 32/61 完全一致、平均重合 4/5。这是**跨后端迁移的固有代价**，重建则可消除——迁移只是把它固化为索引现状。
+
+### 迁移做法
+
+离线脚本（一次性工具，不入库）按 `mindex index` 的同一公式构造 spec，算出目标 index_id `0562a2ee9430b8fc10a69f77`，再把 `8ebf8b84` 的 2336 条向量逐条 upsert 进新 collection，并复制 `index_members` / `representations`。要点：
+
+- 从 `base_rep_id` 两端同时重算新旧表示 id，不反解旧 id，避免窗口切分错位；
+- 目标 id 与 `mindex index` 真实算出的完全一致 → 迁移等价于提前填好「已有向量集合」，将来真跑一次 `index` 会全部跳过；
+- 快照 manifest 重算不一致即拒绝，防止布局已变却静默迁移；
+- 写入后强制 `check_index`，只新建索引、不改源索引、不自动激活。
+
+结果：`members=2336 complete=2336 reps=2336 chroma=2336`，`check_index` 通过，2336 条中 2221 条逐位相同、其余差 ≤7.45e-09。端到端检索复核通过（`eligible_segments: 2336`，video 路由 cosine 0.44）。
+
+### 统一向量来源
+
+四个索引的向量现已全部源自 10-13 的 CUDA 部署：
+
+| 索引 | 空间 | 片段 | 向量来源 | 状态 |
+|---|---|---|---|---|
+| `948e6b40442b` | schema 1 | 61（trailer） | CUDA 原生 | ready |
+| `8ebf8b8455e2` | schema 1 | 2336（正片） | CUDA 原生 | ready |
+| `506568882ba6` | schema 2 | 61（trailer） | CUDA 原生（由 schema 1 复制） | ready |
+| `0562a2ee9430` | schema 2 | 2336（正片） | CUDA 原生（由 schema 1 复制） | **活动** |
+
+### 代价与回退
+
+- 代价：活动索引的向量由 CUDA 后端产出、由 Metal 服务检索，存在上述近邻抖动；重建可消除。是否可接受需用正式 40 条评测集（`e2e phase evaluate`）判定，本记录尚未补跑。
+- 附带：`50656888` 不再是 Metal 重算版，无法再用于复核漂移幅度。
+- 存储代价：v2 索引的 rep_id 含 index_id，无法与旧索引共用同一份 Chroma 记录，正片向量因此存了两份（约 +49MB）。
+- 回退：两步——`config.local.yaml` 的 `embedding.deployment_manifest` 改回 `./data/deployments/wemm.json`，再 `uv run mindex indexes activate 8ebf8b8455e2e94d277cf8fa`。缺一步则 identity 校验不通过。
 
 ## 追加：ASR 本地化重 pin（2026-10-14 晚）
 
@@ -112,6 +145,12 @@ uv run mindex --config config.macos-v2.yaml --no-runtime-overrides e2e pin --rol
 
 注意事项：远端必须是原生 llama-server（暴露 `/props`、七字段 meta 完整、mmproj 实际加载使 `modalities.vision` 为真），Ollama 式封装会被新代码拒绝；`--quantization` 以服务报告的 GGUF ftype 为准（文件名指示 IQ3_S）。
 
+## 追加：设置页测试连接对 schema 2 的兼容修复（2026-10-14 晚）
+
+切到 schema 2 清单后，设置页「多模态理解」测试连接返回 `✗ 'model'`。根因：`_probe` 对 embedding 角色读 `identity["model"]`，那是 schema 1 空间契约的形状；schema 2 只保留 `content` 摘要与常量版本号，没有 `model` 键，于是抛 `KeyError('model')`，被端点 `except Exception` 兜住，裸异常串被当作错误详情渲染到页面。与之前 `'content'` 一类问题是同一成因：`_probe` 未跟上清单 schema 2。
+
+修复：`identity.get("model") or config.embedding.model`，并补测试覆盖 schema 2 形状。原有 TokenHub 测试走 schema 1 分支、恰好有 `model` 键，掩盖了这个假设。全仓复查 `identity["model"]` 仅此一处。
+
 ## 回滚
 
-按 [docs/macos-model-migration.md](docs/macos-model-migration.md) 「回滚」节执行：停止写入 → 恢复备份对应代码/YAML/清单/活动索引 → 旧索引必须配套旧身份实现与旧部署使用。失败目录先重命名保留，不直接删除。
+按 [macos-model-migration.md](macos-model-migration.md) 「回滚」节执行：停止写入 → 恢复备份对应代码/YAML/清单/活动索引 → 旧索引必须配套旧身份实现与旧部署使用。失败目录先重命名保留，不直接删除。

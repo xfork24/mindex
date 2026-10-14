@@ -108,7 +108,7 @@
 - 全仓库测试 118 通过、1 跳过；最后相关回归 21 通过、1 跳过；Ruff、JS 语法及 diff 检查通过。
 - 浏览器验证创建、执行、改稿、换选、人工区间、预览、重新渲染与软字幕播放。ZIP 生成及完整性通过；浏览器下载完成确认被下载扩展拦截。
 - 烧录字幕因本机 ffmpeg 缺少 libass 尚未验收；真实模型阶段进展见下文。
-- 运行时说明见 [docs/studio.md](docs/studio.md)，详细证据与待验证项目见 [docs/studio-verification.md](docs/studio-verification.md)。
+- 运行时说明见 [docs/studio.md](../docs/studio.md)，详细证据与待验证项目见 [docs/studio-verification.md](../docs/studio-verification.md)。
 
 ## 真实模型阶段记录（2026-10-14）
 

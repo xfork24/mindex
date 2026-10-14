@@ -1,6 +1,6 @@
 # 创作工作流（文本生成视频）
 
-入口 `/studio`，与视频检索和素材管理平级。输入中文文案，经拆分镜、召回、配音、选片和渲染生成成片。最新修订依据为 [STUDIO_REFINEMENT_PLAN.md](../STUDIO_REFINEMENT_PLAN.md)；[STUDIO_PLAN.md](../STUDIO_PLAN.md) 保留最初设计，旧检查点及时间轴约定以本文为准。
+入口 `/studio`，与视频检索和素材管理平级。输入中文文案，经拆分镜、召回、配音、选片和渲染生成成片。最新修订依据为 [STUDIO_REFINEMENT_PLAN.md](../plans/STUDIO_REFINEMENT_PLAN.md)；[STUDIO_PLAN.md](../plans/STUDIO_PLAN.md) 保留最初设计，旧检查点及时间轴约定以本文为准。
 
 ## 分阶段执行
 
