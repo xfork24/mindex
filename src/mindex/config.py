@@ -55,7 +55,7 @@ class AnalyzerConfig(Service):
 
 
 class ASRConfig(Service):
-    backend: Literal["mindex", "llama_cpp", "openai"] = "mindex"
+    backend: Literal["mindex", "llama_cpp", "openai", "minimax"] = "mindex"
     deployment_manifest: str | None = None
     base_url: str = "http://192.168.1.86:4020"
     model: str = "Qwen/Qwen3-ASR-1.7B"

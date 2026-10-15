@@ -1,656 +1,1081 @@
-'use strict';
-
-// 基础层：与 app.js/admin.js 相同的封装与防竞态模式。
-
-const STEPS = [
-  { key: 'split', label: '拆分镜', hint: 'LLM 拆分文案' },
-  { key: 'recall', label: '召回', hint: '语义召回候选画面' },
-  { key: 'tts', label: '配音', hint: '逐镜生成语音' },
-  { key: 'select', label: '选片', hint: '时长对齐选片' },
-  { key: 'render', label: '渲染', hint: '三轨合成成片' },
-];
-const STATUS_LABEL = { pending: '待执行', running: '执行中', complete: '已完成', failed: '失败' };
-
-const state = { jobs: [], currentId: null, detail: null, pollTimer: null, jobToken: 0, editing: false, draft: [], timelineEditing: false, timelineDraft: {}, submitting: false };
-
-function $(id) { return document.getElementById(id); }
-
-function element(tag, text, className) {
-  const node = document.createElement(tag);
-  if (text !== undefined && text !== null) node.textContent = text;
-  if (className) node.className = className;
-  return node;
+"use strict";
+const STAGES = ["recall", "tts", "select", "render"];
+const LABEL = {
+  content: "文本与查询",
+  board: "分镜表",
+  split: "拆分镜",
+  recall: "召回",
+  tts: "配音",
+  select: "选片与对齐",
+  render: "分镜渲染",
+  compose: "成片合成",
+};
+const STATUS = {
+  running: "执行中",
+  partial: "部分完成",
+  failed: "失败",
+  blocked: "阻塞",
+  pending: "等待",
+  complete: "完成",
+  reused: "复用",
+  skipped: "跳过",
+};
+const state = {
+  id: null,
+  data: null,
+  jobs: [],
+  timer: null,
+  token: 0,
+  submitting: false,
+  openCells: new Set(),
+  finalUrl: null,
+};
+const $ = (id) => document.getElementById(id);
+function el(tag, text, cls) {
+  const n = document.createElement(tag);
+  if (text != null) n.textContent = text;
+  if (cls) n.className = cls;
+  return n;
 }
-
-function errorText(detail) {
-  if (typeof detail === 'string') return detail;
-  if (Array.isArray(detail)) {
-    return detail.map((item) => [item.loc ? item.loc.join('.') : '', item.msg].join('：')).join('；');
+function button(text, action, disabled = false) {
+  const n = el("button", text, "quiet");
+  n.type = "button";
+  n.disabled = disabled;
+  n.addEventListener("click", () => {
+    $("dialog-error")?.remove();
+    Promise.resolve().then(action).catch(fail);
+  });
+  return n;
+}
+function link(text, url, download = false) {
+  const n = el("a", text, "quiet nav-link");
+  n.href =
+    url + (download ? `${url.includes("?") ? "&" : "?"}download=true` : "");
+  return n;
+}
+function notice(text, error = false) {
+  $("notice").textContent = text;
+  $("notice").dataset.type = error ? "error" : "info";
+}
+function fail(error) {
+  notice(error.message, true);
+  if ($("work-dialog").open) {
+    $("dialog-error")?.remove();
+    const message = el("p", error.message, "warn-text");
+    message.id = "dialog-error";
+    message.setAttribute("role", "alert");
+    $("dialog-content").prepend(message);
   }
-  return JSON.stringify(detail);
 }
-
-async function api(url, options) {
-  const response = await fetch(url, options);
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(errorText(data.detail ?? response.status));
+async function api(url, method = "GET", body) {
+  const r = await fetch(url, {
+    method,
+    ...(body
+      ? {
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }
+      : {}),
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok)
+    throw new Error(
+      typeof data.detail === "string"
+        ? data.detail
+        : JSON.stringify(data.detail || r.status),
+    );
   return data;
 }
-
-function notice(text, type) {
-  const node = $('notice');
-  node.textContent = text || '';
-  node.dataset.type = type || 'info';
+const base = () => `/api/studio/jobs/${state.id}`;
+const plan = () => state.data.plans[state.data.active_plan];
+const planBase = () => `${base()}/plans/${plan().id}`;
+const ver = (id) => state.data.versions[id];
+const order = () => (plan().board ? ver(plan().board).data.order : []);
+const busy = () =>
+  state.submitting || state.data?.builds.some((b) => b.status === "running");
+const secs = (n) => `${Number(n || 0).toFixed(3)}s`;
+function showDialog(title) {
+  $("dialog-title").textContent = title;
+  const body = $("dialog-content");
+  body.replaceChildren();
+  if (!$("work-dialog").open) $("work-dialog").showModal();
+  return body;
 }
-
-function formatSeconds(value) {
-  return `${Number(value || 0).toFixed(1)}s`;
+function closeDialog() {
+  $("work-dialog")
+    .querySelectorAll("video,audio")
+    .forEach((n) => n.pause());
+  $("work-dialog").close();
 }
-
-// 任务列表层。
-
+function field(label, value, type = "text", choices = null) {
+  const wrap = el("label", label, "form-field");
+  const n = document.createElement(
+    choices ? "select" : type === "textarea" ? "textarea" : "input",
+  );
+  if (choices) {
+    for (const [v, text] of choices) {
+      const o = el("option", text);
+      o.value = v;
+      n.append(o);
+    }
+  } else if (type !== "textarea") n.type = type;
+  n.value = value ?? "";
+  if (type === "number") n.step = "0.001";
+  wrap.append(n);
+  return { wrap, input: n };
+}
+function jsonView(value) {
+  const pre = el("pre", JSON.stringify(value, null, 2), "json-view");
+  return pre;
+}
+function media(tag, url) {
+  const n = document.createElement(tag);
+  n.controls = true;
+  n.preload = "metadata";
+  n.src = url;
+  return n;
+}
 async function loadJobs() {
-  try {
-    const data = await api('/api/studio/jobs');
-    state.jobs = data.items;
-    renderJobList();
-  } catch (error) {
-    notice(`读取任务失败：${error.message}`, 'error');
-  }
-}
-
-function miniSteps(steps) {
-  const wrap = element('span', '', 'mini-steps');
-  for (const step of STEPS) {
-    wrap.appendChild(element('span', '', `mini-dot ${steps[step.key] || 'pending'}`));
-  }
-  return wrap;
-}
-
-function renderJobList() {
-  const list = $('job-list');
+  const data = await api("/api/studio/jobs");
+  state.jobs = data.items;
+  const list = $("job-list");
   list.replaceChildren();
-  if (!state.jobs.length) {
-    list.appendChild(element('p', '还没有创作任务。', 'muted'));
-    return;
-  }
-  for (const job of state.jobs) {
-    const item = element('button', '', `job-item${job.id === state.currentId ? ' active' : ''}`);
-    item.type = 'button';
-    item.appendChild(element('div', job.title, 'job-title'));
-    const sub = element('div', '', 'job-sub');
-    sub.appendChild(element('span', new Date(job.created_at).toLocaleString('zh-CN', { dateStyle: 'short', timeStyle: 'short' })));
-    sub.appendChild(miniSteps(job.steps));
-    item.appendChild(sub);
-    item.addEventListener('click', () => selectJob(job.id));
-    list.appendChild(item);
+  for (const job of data.items) {
+    const b = button(job.title, () => selectJob(job.id));
+    b.className = `job-item${job.id === state.id ? " active" : ""}`;
+    b.append(
+      el("div", new Date(job.created_at).toLocaleString("zh-CN"), "job-sub"),
+    );
+    list.append(b);
   }
 }
-
 async function selectJob(id) {
-  state.jobToken++;
-  clearTimeout(state.pollTimer);
-  state.pollTimer = null;
-  state.currentId = id;
-  state.detail = null;
-  state.editing = false;
-  state.timelineEditing = false;
-  state.timelineDraft = {};
-  history.replaceState(null, '', `/studio?job=${id}`);
-  renderJobList();
-  await refreshJob();
+  state.token++;
+  clearTimeout(state.timer);
+  state.id = id;
+  state.data = null;
+  state.finalUrl = null;
+  state.openCells.clear();
+  history.replaceState(null, "", `/studio?job=${id}`);
+  closeDialog();
+  await refresh();
+  await loadJobs();
   await loadArtifacts();
 }
-
-// 轮询层：任一步骤 running 时每 1.5s 拉一次详情，空闲即停。
-
-function busyJob(job) {
-  return state.submitting || job.execution?.status === 'running' || Object.values(job.steps).some((i) => i.status === 'running');
-}
-
-function schedulePoll() {
-  clearTimeout(state.pollTimer);
-  state.pollTimer = null;
-  if (state.detail && busyJob(state.detail.job)) {
-    state.pollTimer = setTimeout(() => { state.pollTimer = null; refreshJob(); }, 1500);
-  }
-}
-
-async function refreshJob() {
-  if (!state.currentId) return;
-  const token = ++state.jobToken;
-  try {
-    const detail = await api(`/api/studio/jobs/${state.currentId}`);
-    if (token !== state.jobToken) return;
-    const wasRunning = state.detail?.job.execution?.status === 'running';
-    state.detail = detail;
-    renderJob(detail);
-    if (wasRunning && detail.job.execution?.status !== 'running') { loadJobs(); loadArtifacts(); }
-  } catch (error) {
-    if (token !== state.jobToken) return;
-    notice(`读取任务失败：${error.message}`, 'error');
-  } finally {
-    if (token === state.jobToken) schedulePoll();
-  }
-}
-
-// 渲染层。
-
-function renderJob(detail) {
-  const { job } = detail;
-  $('no-job').hidden = true;
-  $('job-workspace').hidden = false;
-  const header = $('job-header');
-  header.replaceChildren();
-  header.appendChild(element('h2', job.title));
-  header.appendChild(element('p', `任务 ${job.id} · 创建于 ${new Date(job.created_at).toLocaleString('zh-CN')}`, 'muted'));
-  renderSteps(job);
-  $('run-all').disabled = busyJob(job) || state.editing || state.timelineEditing;
-  $('job-meta').textContent = job.config_snapshot
-    ? `生成模型 ${job.config_snapshot.generator_model} · 语音 ${job.config_snapshot.tts_model}`
-    : '';
-  renderStoryboard(detail);
-  renderCandidates(detail);
-  renderTimeline(detail);
-  renderResult(detail);
-}
-
-function renderSteps(job) {
-  const bar = $('steps-bar');
-  bar.replaceChildren();
-  const busy = busyJob(job) || state.editing || state.timelineEditing;
-  for (const step of STEPS) {
-    const info = job.steps[step.key] || { status: 'pending' };
-    const card = element('div', '', `step-node ${info.status}`);
-    card.setAttribute('role', 'listitem');
-    const title = element('div', '', 'step-title');
-    title.appendChild(element('span', '', `mini-dot ${info.status}`));
-    title.appendChild(element('span', step.label));
-    card.appendChild(title);
-    card.appendChild(element('span', `${STATUS_LABEL[info.status]}${info.elapsed_ms ? ` · ${(info.elapsed_ms / 1000).toFixed(1)}s` : ''}`, 'step-status'));
-    if (info.status === 'failed' && info.error) {
-      card.appendChild(element('div', info.error, 'step-error'));
-    }
-    const action = element('button', info.status === 'complete' ? '重跑' : '执行', 'quiet');
-    action.type = 'button';
-    action.disabled = busy || info.status === 'running' || !readyFor(step.key, job);
-    action.title = action.disabled && !busy ? '上游步骤未完成' : step.hint;
-    action.addEventListener('click', () => runStep(step.key));
-    if (info.status !== 'complete') card.appendChild(action);
-    const force = element('button', '重新生成', 'quiet');
-    force.type = 'button';
-    force.disabled = action.disabled;
-    force.addEventListener('click', () => runStep(step.key, 'force'));
-    card.appendChild(force);
-    bar.appendChild(card);
-  }
-}
-
-function readyFor(step, job) {
-  const deps = { split: [], recall: ['split'], tts: ['split'], select: ['recall', 'tts'], render: ['select'] }[step] || [];
-  return deps.every((dep) => job.steps[dep] && job.steps[dep].status === 'complete');
-}
-
-async function runStep(step, mode = 'resume', shotId = null) {
-  const id = state.currentId;
-  state.submitting = true;
-  renderJob(state.detail);
-  notice(`正在提交${mode === 'force' ? '重新生成' : '继续执行'} ${step}…`);
-  try {
-    await api(`/api/studio/jobs/${id}/steps/${step}`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mode, ...(shotId ? { shot_ids: [shotId] } : {}) }) });
-    if (id === state.currentId) notice(`步骤 ${step} 已提交。`);
-  } catch (error) {
-    if (id === state.currentId) notice(`无法执行：${error.message}`, 'error');
-  } finally {
-    state.submitting = false;
-    if (id === state.currentId) await refreshJob();
-    await loadJobs();
-  }
-}
-
-// 分镜层：查看与编辑两种模式，编辑时保存前提示级联作废。
-
-function renderStoryboard(detail) {
-  const section = $('storyboard-section');
-  const storyboard = detail.storyboard;
-  section.hidden = !storyboard;
-  if (!storyboard) return;
-  $('storyboard-warning').textContent = storyboard.coverage_warning || '';
-  $('toggle-edit').hidden = state.editing || detail.job.steps.split.status !== 'complete';
-  $('save-storyboard').hidden = !state.editing;
-  $('cancel-storyboard').hidden = !state.editing;
-  $('toggle-edit').disabled = busyJob(detail.job) || state.timelineEditing;
-  $('save-storyboard').disabled = busyJob(detail.job);
-  const view = $('storyboard-view');
-  if (state.editing && view.dataset.editing === "true") return;
-  view.dataset.editing = String(state.editing);
-  view.replaceChildren();
-  const shots = state.editing ? state.draft : storyboard.shots;
-  shots.forEach((shot, index) => {
-    view.appendChild(shotCard(shot, index, detail));
-  });
-  if (!shots.length) view.appendChild(element('p', '没有分镜。', 'muted'));
-}
-
-function shotCard(shot, index, detail) {
-  const card = element('div', '', 'shot-card');
-  const head = element('div', '', 'shot-head');
-  head.appendChild(element('strong', `分镜 ${index + 1} · ${shot.id}`));
-  if (detail.shots[index]?.audio?.valid) {
-    head.appendChild(element('span', `配音 ${formatSeconds(detail.shots[index].audio.duration)}`));
-  }
-  head.appendChild(element('span', `预估 ${formatSeconds(shot.estimated_seconds)}`));
-  card.appendChild(head);
-  const grid = element('div', '', 'shot-grid');
-  const textLabel = element('label', '分镜文本（配音与字幕）');
-  const textInput = document.createElement('textarea');
-  textInput.rows = 2;
-  textInput.maxLength = 200;
-  textInput.value = shot.text;
-  textInput.readOnly = !state.editing;
-  if (state.editing) textInput.addEventListener('input', () => { state.draft[index].text = textInput.value; });
-  textLabel.appendChild(textInput);
-  const queryLabel = element('label', '检索查询（用于召回画面）');
-  const queryInput = document.createElement('textarea');
-  queryInput.rows = 2;
-  queryInput.maxLength = 400;
-  queryInput.value = shot.query;
-  queryInput.readOnly = !state.editing;
-  if (state.editing) queryInput.addEventListener('input', () => { state.draft[index].query = queryInput.value; });
-  queryLabel.appendChild(queryInput);
-  grid.appendChild(textLabel);
-  grid.appendChild(queryLabel);
-  card.appendChild(grid);
-  if (state.editing) card.appendChild(shotActions(index, detail));
-  return card;
-}
-
-function shotActions(index, detail) {
-  const meta = element('div', '', 'shot-meta');
-  const actions = element('div', '', 'shot-actions');
-  const buttons = [
-    ['↑ 上移', () => moveShot(index, -1), index > 0],
-    ['↓ 下移', () => moveShot(index, 1), index < state.draft.length - 1],
-    ['⇤ 合并到上一镜', () => mergeShot(index), index > 0],
-    ['＋ 其后插入', () => insertShot(index), true],
-    ['✕ 删除', () => state.draft.splice(index, 1), state.draft.length > 1],
-  ];
-  for (const [label, action, enabled] of buttons) {
-    const button = element('button', label, 'quiet');
-    button.type = 'button';
-    button.disabled = !enabled;
-    button.addEventListener('click', () => {
-      action();
-      $('storyboard-view').dataset.editing = "false";
-      renderStoryboard(state.detail);
-    });
-    actions.appendChild(button);
-  }
-  meta.appendChild(actions);
-  return meta;
-}
-
-function moveShot(index, delta) {
-  const [shot] = state.draft.splice(index, 1);
-  state.draft.splice(index + delta, 0, shot);
-}
-
-function mergeShot(index) {
-  const previous = state.draft[index - 1];
-  const current = state.draft[index];
-  previous.text += current.text;
-  previous.query = `${previous.query}；${current.query}`;
-  previous.estimated_seconds += current.estimated_seconds;
-  state.draft.splice(index, 1);
-}
-
-function insertShot(index) {
-  state.draft.splice(index + 1, 0, {
-    id: `shot-new-${Math.random().toString(36).slice(2, 6)}`,
-    text: '新分镜文本',
-    query: '新分镜的画面查询',
-    estimated_seconds: 5,
-  });
-}
-
-async function saveStoryboard() {
-  try {
-    const shots = state.draft.map((shot, index) => ({
-      id: shot.id,
-      text: (shot.text || '').trim(),
-      query: (shot.query || '').trim(),
-      estimated_seconds: Number(shot.estimated_seconds) || (shot.text.length / 4).toFixed(1),
-    }));
-    if (shots.some((shot) => !shot.text || !shot.query)) throw new Error('分镜文本与查询不能为空');
-    await api(`/api/studio/jobs/${state.currentId}/storyboard`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ shots }),
-    });
-    state.editing = false;
-    notice('分镜已保存，受影响的步骤已重置。');
-    await refreshJob();
-  } catch (error) {
-    notice(`保存失败：${error.message}`, 'error');
-  }
-}
-
-// 候选层：缩略图条 + 对话框播放（复用媒体端点）。
-
-function renderCandidates(detail) {
-  const section = $('candidates-section');
-  const recallDone = ['complete', 'failed'].includes(detail.job.steps.recall.status);
-  section.hidden = !recallDone || !detail.shots.length;
-  if (section.hidden) return;
-  const view = $('candidates-view');
-  view.replaceChildren();
-  for (const shot of detail.shots) {
-    const row = element('div', '', 'candidate-row');
-    const head = element('div', '', 'shot-head');
-    head.appendChild(element('strong', `分镜 ${shot.id}`));
-    const audioText = shot.audio?.valid ? `配音 ${formatSeconds(shot.audio.duration)}` : '配音未生成';
-    head.appendChild(element('span', audioText));
-    const badge = element('span', shot.candidates ? shot.candidates.status : '未召回', 'badge');
-    head.appendChild(badge);
-    row.appendChild(head);
-    const strip = element('div', '', 'candidate-strip');
-    const timelineEvent = detail.timeline && detail.timeline.events.find((event) => event.shot_id === shot.id);
-    const selectedId = timelineEvent ? timelineEvent.video.segment_id : null;
-    if (shot.candidates && shot.candidates.count) {
-      const pool = shot.candidates.pool || [];
-      const items = pool.length ? pool : [shot.candidates.top];
-      for (const item of items) {
-        strip.appendChild(candidateThumb(item, selectedId));
-      }
-      if (shot.candidates.count > items.length) {
-        strip.appendChild(element('span', `还有 ${shot.candidates.count - items.length} 个候选`, 'muted'));
-      }
-    } else {
-      strip.appendChild(element('span', '该分镜没有召回结果，请修改查询后重跑召回。', 'muted'));
-    }
-    row.appendChild(strip);
-    for (const [step, label] of [['recall', '重新召回'], ['tts', '重新配音'], ['render', '重新渲染']]) {
-      const button = element('button', label, 'quiet');
-      button.type = 'button';
-      button.disabled = busyJob(detail.job) || state.editing || state.timelineEditing || !readyFor(step, detail.job);
-      button.addEventListener('click', () => runStep(step, 'force', shot.id));
-      row.appendChild(button);
-    }
-    if (shot.audio?.valid) {
-      const audio = document.createElement('audio');
-      audio.controls = true;
-      audio.preload = 'none';
-      audio.src = shot.audio.url;
-      row.appendChild(audio);
-    }
-    view.appendChild(row);
-  }
-}
-
-function candidateThumb(item, selectedId) {
-  const button = element('button', '', `candidate-thumb${item.segment_id === selectedId ? ' selected' : ''}`);
-  button.type = 'button';
-  button.title = `${item.source_name || item.source_id} ${item.start.toFixed(1)}–${item.end.toFixed(1)}s · 召回第 ${item.rank} 名`;
-  const image = document.createElement('img');
-  image.src = item.thumbnail_url;
-  image.alt = item.source_name || item.segment_id;
-  image.loading = 'lazy';
-  button.appendChild(image);
-  const meta = element('div', '', 'thumb-meta');
-  meta.appendChild(element('div', `${formatSeconds(item.duration)} · 第${item.rank}名`));
-  meta.appendChild(element('div', item.source_name || '', ''));
-  button.appendChild(meta);
-  button.addEventListener('click', () => playMedia(item.media_url, `${item.source_name || ''} ${item.start.toFixed(1)}–${item.end.toFixed(1)}s`));
-  return button;
-}
-
-function playMedia(url, title) {
-  $('play-title').textContent = title || '';
-  $('play-meta').textContent = '';
-  $('play-video').src = url;
-  $('play-dialog').showModal();
-}
-
-// 选片层：展示事件 + 换选（限候选池）后整体保存。
-
-function renderTimeline(detail) {
-  const section = $('timeline-section');
-  const show = detail.timeline && detail.timeline.events.length && detail.job.steps.select.status === 'complete';
-  section.hidden = !show;
-  if (!show) return;
-  $('save-timeline').disabled = busyJob(detail.job) || detail.job.steps.select.status !== 'complete' || state.editing;
-  $('cancel-timeline').hidden = !state.timelineEditing;
-  if (state.timelineEditing) return;
-  state.timelineDraft = {};
-  const view = $('timeline-view');
-  view.replaceChildren();
-  const alignLabel = {
-    nearest: '直接匹配', extended: '相邻延长', atempo: '微变速', 'extended+atempo': '延长+变速',
-    padded: '冻结帧补齐', 'extended+padded': '延长+冻结帧', trimmed: '裁剪视频', 'extended+trimmed': '延长+裁剪', manual: '人工指定',
-  };
-  for (const event of detail.timeline.events) {
-    const card = element('div', '', 'timeline-event');
-    const head = element('div', '', 'shot-head');
-    head.appendChild(element('strong', `分镜 ${event.shot_id}`));
-    const badgeClass = event.warning ? 'badge warn' : 'badge good';
-    head.appendChild(element('span', alignLabel[event.video.alignment] || event.video.alignment, badgeClass));
-    if (Math.abs(event.audio.atempo - 1) > 0.001) {
-      head.appendChild(element('span', `变速 ${(event.audio.atempo * 100).toFixed(0)}%`, 'badge'));
-    }
-    card.appendChild(head);
-    card.appendChild(element('div', `画面：${event.video.source_name || event.video.source_id} · 原片 ${event.video.start.toFixed(1)}–${event.video.end.toFixed(1)}s（跨 ${event.video.segment_ids.length} 个镜头）`));
-    card.appendChild(element('div', `配音 ${formatSeconds(event.audio.duration)} → 成片时长 ${formatSeconds(event.audio.render_duration)}`));
-    if (event.warning) card.appendChild(element('div', event.warning, 'warn-text'));
-    const pick = element('div', '', 'line');
-    const label = element('label', '换选画面 ');
-    const select = document.createElement('select');
-    select.dataset.shotId = event.shot_id;
-    const pool = detail.shots.find((shot) => shot.id === event.shot_id)?.candidates?.pool || [];
-    const options = [...pool];
-    if (!options.some((item) => item.segment_id === event.video.segment_id)) options.unshift({ segment_id: event.video.segment_id, source_name: event.video.source_name, rank: event.video.rank, start: event.video.start, end: event.video.end, duration: event.video.end - event.video.start });
-    for (const item of options) {
-      const option = document.createElement('option');
-      option.value = item.segment_id;
-      option.textContent = `${item.rank > 0 ? `第${item.rank}名` : '人工区间'} · ${item.source_name || item.source_id} ${formatSeconds(item.duration)}`;
-      option.selected = item.segment_id === event.video.segment_id;
-      select.appendChild(option);
-    }
-    const explicit = element('option', '指定原片区间');
-    explicit.value = '__interval__';
-    select.appendChild(explicit);
-    select.disabled = $('save-timeline').disabled;
-    state.timelineDraft[event.shot_id] = { segment_id: event.video.segment_id };
-    const interval = element('div', '', 'line');
-    interval.hidden = true;
-    const fields = {};
-    for (const [name, title, value] of [['source_id', '素材 ID', event.video.source_id], ['start', '开始秒', event.video.start], ['end', '结束秒', event.video.end]]) {
-      const fieldLabel = element('label', title);
-      const input = document.createElement('input');
-      input.type = name === 'source_id' ? 'text' : 'number';
-      input.value = value;
-      if (name !== 'source_id') { input.step = '0.001'; input.min = '0'; }
-      fields[name] = input;
-      input.addEventListener('input', () => {
-        state.timelineEditing = true;
-        state.timelineDraft[event.shot_id] = { source_id: fields.source_id.value, start: Number(fields.start.value), end: Number(fields.end.value) };
-        $('cancel-timeline').hidden = false;
-        $('run-all').disabled = true;
-      });
-      fieldLabel.appendChild(input);
-      interval.appendChild(fieldLabel);
-    }
-    select.addEventListener('change', () => {
-      state.timelineEditing = true;
-      notice('保存换选后需要重新渲染，已有成片会保留为历史版本。');
-      interval.hidden = select.value !== '__interval__';
-      state.timelineDraft[event.shot_id] = interval.hidden ? { segment_id: select.value }
-        : { source_id: fields.source_id.value, start: Number(fields.start.value), end: Number(fields.end.value) };
-      $('cancel-timeline').hidden = false;
-      renderSteps(detail.job);
-      $('run-all').disabled = true;
-    });
-    label.appendChild(select);
-    pick.appendChild(label);
-    pick.appendChild(interval);
-    card.appendChild(pick);
-    const preview = detail.shots.find((shot) => shot.id === event.shot_id)?.selection?.preview_url;
-    if (preview) {
-      const button = element('button', '预览实际选片区间', 'quiet');
-      button.type = 'button';
-      button.addEventListener('click', () => playMedia(preview, `分镜 ${event.shot_id} 实际选片`));
-      card.appendChild(button);
-    }
-    view.appendChild(card);
-  }
-  $('save-timeline').hidden = false;
-}
-
-async function saveTimeline() {
-  const events = state.detail.timeline.events.map((event) => ({ shot_id: event.shot_id, video: state.timelineDraft[event.shot_id] }));
-  try {
-    await api(`/api/studio/jobs/${state.currentId}/timeline`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ events }),
-    });
-    state.timelineEditing = false;
-    notice('换选已保存，渲染步骤已重置。');
-    await refreshJob();
-  } catch (error) {
-    notice(`保存失败：${error.message}`, 'error');
-  }
-}
-
-// 成片区。
-
-function renderResult(detail) {
-  const section = $('result-section');
-  section.hidden = !detail.render || !detail.render.ready;
-  if (section.hidden) return;
-  const video = $('final-video');
-  if (video.dataset.url !== detail.render.final_url) {
-    video.dataset.url = detail.render.final_url;
-    video.replaceChildren();
-    video.src = detail.render.final_url;
-    if (!detail.render.burn) {
-      const track = document.createElement('track');
-      track.kind = 'subtitles'; track.srclang = 'zh'; track.label = '中文'; track.default = true;
-      track.src = detail.render.vtt_url;
-      video.appendChild(track);
-    }
-  }
-  $('download-mp4').href = `${detail.render.final_url}&download=true`;
-  $('download-srt').href = `${detail.render.srt_url}&download=true`;
-}
-
-// 事件绑定与启动。
-
-function bindEvents() {
-  $('reload').addEventListener('click', loadJobs);
-  $('create-form').addEventListener('submit', createJob);
-  $('run-all').addEventListener('click', runAll);
-  $('toggle-edit').addEventListener('click', () => {
-    state.editing = true;
-    notice('保存分镜会重置受影响的步骤；历史产物会保留。');
-    state.draft = JSON.parse(JSON.stringify(state.detail.storyboard.shots));
-    renderJob(state.detail);
-  });
-  $('save-storyboard').addEventListener('click', saveStoryboard);
-  $('cancel-storyboard').addEventListener('click', () => { state.editing = false; renderJob(state.detail); });
-  $('cancel-timeline').addEventListener('click', () => { state.timelineEditing = false; renderJob(state.detail); });
-  $('reload-artifacts').addEventListener('click', loadArtifacts);
-  $('save-timeline').addEventListener('click', saveTimeline);
-  $('play-close').addEventListener('click', () => {
-    $('play-video').pause();
-    $('play-dialog').close();
-  });
-}
-
-async function createJob(event) {
-  event.preventDefault();
-  const text = $('create-text').value.trim();
-  if (!text) {
-    notice('请输入创作文案。', 'error');
-    return;
-  }
-  $('create-button').disabled = true;
-  try {
-    const job = await api('/api/studio/jobs', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        text,
-        options: {
-          audio_mode: $('create-audio-mode').value,
-          burn: $('create-burn').value === 'true',
-          recall_limit: Number($('create-recall-limit').value),
-        },
-      }),
-    });
-    notice('任务已创建，可分步执行，或继续执行未完成步骤。');
-    $('create-text').value = '';
-    await loadJobs();
-    await selectJob(job.id);
-  } catch (error) {
-    notice(`创建失败：${error.message}`, 'error');
-  } finally {
-    $('create-button').disabled = false;
-  }
-}
-
-async function runAll() {
-  const id = state.currentId;
-  state.submitting = true;
-  renderJob(state.detail);
-  try {
-    await api(`/api/studio/jobs/${id}/run`, { method: 'POST' });
-    if (id === state.currentId) notice('继续执行已启动；切换模型服务后可在失败处续跑。');
-  } catch (error) {
-    if (id === state.currentId) notice(`无法继续：${error.message}`, 'error');
-  } finally {
-    state.submitting = false;
-    if (id === state.currentId) await refreshJob();
-    await loadJobs();
-  }
-}
-
-async function loadArtifacts() {
-  const id = state.currentId;
+async function refresh() {
+  const token = ++state.token,
+    id = state.id;
   if (!id) return;
-  const token = state.artifactToken = (state.artifactToken || 0) + 1;
-  $('download-archive').href = `/api/studio/jobs/${id}/archive`;
-  try {
-    const data = await api(`/api/studio/jobs/${id}/artifacts`);
-    if (state.currentId !== id || state.artifactToken !== token) return;
-    const view = $('artifact-view');
-    view.replaceChildren();
-    const groups = new Map();
-    for (const item of data.items) {
-      const name = item.attempt || '当前产物与任务状态';
-      if (!groups.has(name)) {
-        const group = document.createElement('details');
-        group.appendChild(element('summary', name));
-        groups.set(name, group);
-        view.appendChild(group);
-      }
-      const row = element('div', '', 'line');
-      const link = element('a', item.path, 'quiet nav-link');
-      link.href = `${item.url}?download=true`;
-      row.append(link, element('span', `${(item.bytes / 1024).toFixed(1)} KiB`, 'muted'));
-      groups.get(name).appendChild(row);
-    }
-  } catch (error) {
-    if (id === state.currentId) notice(`读取产物失败：${error.message}`, 'error');
+  const data = await api(`${base()}/workspace`);
+  if (token !== state.token || id !== state.id) return;
+  const wasBusy = state.data?.builds.some((b) => b.status === "running");
+  state.data = data;
+  render();
+  clearTimeout(state.timer);
+  if (busy()) state.timer = setTimeout(() => refresh().catch(fail), 1200);
+  else if (wasBusy) {
+    await loadArtifacts();
+    await loadJobs();
   }
 }
-
-async function boot() {
-  bindEvents();
-  await loadJobs();
-  const params = new URLSearchParams(location.search);
-  const job = params.get('job');
-  if (job && state.jobs.some((item) => item.id === job)) await selectJob(job);
+async function accept(data) {
+  if (data.job.id !== state.id) return;
+  state.data = data;
+  render();
 }
-
-boot();
+function render() {
+  const p = plan(),
+    job = state.data.job,
+    locked = busy();
+  $("no-job").hidden = true;
+  $("job-workspace").hidden = false;
+  const header = $("job-header");
+  header.replaceChildren();
+  const title = field("任务标题", job.title);
+  title.input.maxLength = 60;
+  header.append(
+    title.wrap,
+    button(
+      "保存标题",
+      async () => {
+        await api(`${base()}/title`, "PATCH", {
+          title: title.input.value.trim(),
+        });
+        await refresh();
+        await loadJobs();
+      },
+      locked,
+    ),
+    el("p", `任务 ${job.id}`, "muted"),
+  );
+  const select = $("plan-select");
+  select.replaceChildren();
+  for (const item of Object.values(state.data.plans)) {
+    const o = el("option", item.name);
+    o.value = item.id;
+    o.selected = item.id === p.id;
+    select.append(o);
+  }
+  for (const id of [
+    "plan-select",
+    "new-plan",
+    "copy-plan",
+    "rename-plan",
+    "plan-settings",
+    "run-all",
+    "force-build",
+    "split",
+    "edit-board",
+  ])
+    $(id).disabled = locked;
+  $("split").textContent = p.board ? "重新拆分镜" : "生成分镜";
+  const activeBuild = [...state.data.builds]
+    .reverse()
+    .find((b) => b.plan_id === p.id);
+  $("execution-status").textContent = activeBuild
+    ? `${STATUS[activeBuild.status]} · ${activeBuild.id}`
+    : "尚未构建";
+  $("shot-count").textContent = `${order().length} 镜`;
+  const original = job.input_text.replace(/\s/g, "");
+  const texts = order()
+    .map((sid) => ver(p.shots[sid].content).data.text)
+    .join("")
+    .replace(/\s/g, "");
+  $("storyboard-warning").textContent =
+    p.board && original !== texts ? "分镜未按顺序完整覆盖原文，请核对。" : "";
+  renderMatrix();
+  renderFinal();
+  renderBuilds();
+}
+function dependencyTree(id, seen = new Set()) {
+  const item = ver(id);
+  if (!item) return el("p", `缺失记录 ${id}`, "warn-text");
+  const d = el("details", "", "dependency");
+  d.append(
+    el(
+      "summary",
+      `${LABEL[item.stage]} ${item.shot_id || ""} · ${id.slice(0, 8)}${item.incomplete ? " · 记录不完整" : ""}`,
+    ),
+  );
+  d.append(button("查看节点详情", () => showVersion(id)));
+  if (seen.has(id)) return d;
+  const next = new Set(seen).add(id);
+  for (const [name, dep] of Object.entries(item.inputs))
+    if (dep) {
+      const row = el("div", "", "dependency-edge");
+      row.append(el("span", name, "muted"), dependencyTree(dep, next));
+      d.append(row);
+    }
+  return d;
+}
+function versionFiles(body, item) {
+  for (const [name, metadata] of Object.entries(item.files)) {
+    if (metadata.url) body.append(link(`下载 ${name}`, metadata.url, true));
+  }
+}
+function showVersion(id) {
+  const item = ver(id),
+    body = showDialog(
+      `${LABEL[item.stage]} · ${id.slice(0, 8)} · ${STATUS[item.status]}`,
+    );
+  if (item.incomplete)
+    body.append(
+      el(
+        "p",
+        "历史记录不完整，未知关系未推断。原文件可查看和下载。",
+        "warn-text",
+      ),
+    );
+  if (item.error) body.append(el("p", item.error, "warn-text"));
+  if (item.files.audio?.url) body.append(media("audio", item.files.audio.url));
+  if (item.files.preview?.url || item.files.video?.url)
+    body.append(
+      media("video", item.files.preview?.url || item.files.video.url),
+    );
+  if (item.files.mp4?.url) body.append(media("video", item.files.mp4.url));
+  if (item.stage === "select" && !item.incomplete)
+    body.append(
+      button("预览此版本（画面与配音）", async () => {
+        const r = await api(`${base()}/versions/${id}/preview`);
+        body.append(media("video", r.url));
+      }),
+    );
+  versionFiles(body, item);
+  body.append(
+    el("h3", "实际输入与参数"),
+    jsonView({
+      inputs: item.inputs,
+      parameters: item.parameters,
+      data:
+        item.stage === "compose"
+          ? { ...item.data, graph: undefined, plan: undefined }
+          : item.data,
+    }),
+  );
+  body.append(el("h3", "依赖树"), dependencyTree(id));
+  if (item.stage === "compose" && item.data.plan)
+    body.append(
+      button("复制此成片为新方案", () => createPlan("restore", id), busy()),
+    );
+}
+function renderMatrix() {
+  const body = $("matrix-body");
+  body.replaceChildren();
+  const p = plan();
+  for (const [index, sid] of order().entries()) {
+    const row = el("tr");
+    const head = el("th", `${index + 1} · ${sid}`);
+    head.scope = "row";
+    row.append(head);
+    const shot = ver(p.shots[sid].content).data;
+    const text = el("td");
+    text.append(
+      el("p", shot.text, "cell-summary"),
+      el("p", shot.query, "muted cell-summary"),
+      el("small", `内容 ${p.shots[sid].content.slice(0, 8)}`),
+      button("编辑", () => editBoard(sid), busy()),
+    );
+    text.append(historyCell("content", sid));
+    row.append(text);
+    for (const stage of STAGES) {
+      const cell = el("td"),
+        vid = p.shots[sid][stage],
+        item = ver(vid);
+      cell.append(
+        el(
+          "span",
+          vid ? `选用 ${vid.slice(0, 8)}` : "未选择",
+          `badge${vid ? " good" : ""}`,
+        ),
+      );
+      if (item) {
+        const d = item.data;
+        const summary =
+          stage === "recall"
+            ? `${d.results?.length || 0} 个候选`
+            : stage === "tts"
+              ? secs(d.duration)
+              : stage === "select"
+                ? `${d.event.video.source_name || d.event.video.source_id} ${secs(d.event.video.start)}–${secs(d.event.video.end)}`
+                : `${d.frames || "?"} 帧 · ${d.fps || "?"} fps`;
+        cell.append(
+          el("p", summary, "cell-summary"),
+          button("查看选用版本", () => showVersion(vid)),
+        );
+      }
+      const messages = state.data.conflicts[`${stage}:${sid}`] || [];
+      if (messages.length)
+        cell.append(el("p", messages.join("；"), "warn-text"));
+      const latestBuild = [...state.data.builds]
+        .reverse()
+        .find(
+          (b) =>
+            b.plan_id === p.id &&
+            b.nodes.some((n) => n.stage === stage && n.shot_id === sid),
+        );
+      const node = latestBuild?.nodes.find(
+        (n) => n.stage === stage && n.shot_id === sid,
+      );
+      if (node)
+        cell.append(
+          el(
+            "p",
+            `最近执行：${STATUS[node.status]}${node.error ? ` · ${node.error}` : ""}`,
+            node.status === "failed" || node.status === "blocked"
+              ? "warn-text"
+              : "muted",
+          ),
+        );
+      cell.append(
+        button("执行 / 复用", () => runNode(stage, sid, false), busy()),
+        button("强制重新生成", () => runNode(stage, sid, true), busy()),
+      );
+      if (stage === "select")
+        cell.append(
+          button(
+            "人工选择连续镜头",
+            () => manualRange(sid),
+            busy() || !p.shots[sid].tts,
+          ),
+        );
+      const details = el("details");
+      const key = `${stage}:${sid}`;
+      details.open = state.openCells.has(key);
+      details.append(el("summary", "展开详情与历史版本"));
+      details.addEventListener("toggle", () =>
+        details.open ? state.openCells.add(key) : state.openCells.delete(key),
+      );
+      if (stage === "recall" && item) {
+        const strip = el("div", "", "candidate-strip");
+        for (const c of item.data.results || []) {
+          const b = button(
+            `${c.source_name || c.source_id} ${secs(c.start)}–${secs(c.end)}`,
+            () => play(c.media_url, "召回候选"),
+          );
+          if (c.thumbnail_url) {
+            const img = el("img");
+            img.src = c.thumbnail_url;
+            img.loading = "lazy";
+            img.alt = c.source_name || c.source_id;
+            b.prepend(img);
+          }
+          b.className = "candidate-thumb";
+          strip.append(b);
+        }
+        details.append(strip);
+      }
+      if (stage === "tts" && item?.files.audio)
+        details.append(media("audio", item.files.audio.url));
+      if (stage === "select" && item)
+        details.append(
+          jsonView({
+            anchor: item.data.anchor,
+            range: item.data.range,
+            actual_range: item.data.actual_range,
+            extension: item.data.extension,
+            trim_seconds: item.data.trim_seconds,
+            freeze_seconds: item.data.freeze_seconds,
+            atempo: item.data.atempo,
+          }),
+        );
+      details.append(historyCell(stage, sid));
+      cell.append(details);
+      row.append(cell);
+    }
+    body.append(row);
+  }
+  if (!order().length) {
+    const row = el("tr"),
+      cell = el("td", "先生成分镜，或编辑分镜结构手动添加。");
+    cell.colSpan = 6;
+    row.append(cell);
+    body.append(row);
+  }
+}
+function historyCell(stage, sid) {
+  const box = el("div", "", "version-history");
+  const items = Object.values(state.data.versions)
+    .filter((v) => v.stage === stage && v.shot_id === sid)
+    .reverse();
+  const select = document.createElement("select");
+  select.setAttribute("aria-label", `${sid} ${LABEL[stage]}历史版本`);
+  for (const item of items) {
+    const o = el(
+      "option",
+      `${item.id.slice(0, 8)} · ${STATUS[item.status]} · ${new Date(item.created_at).toLocaleString("zh-CN")}`,
+    );
+    o.value = item.id;
+    select.append(o);
+  }
+  if (!items.length) return el("p", "暂无历史", "muted");
+  const choose = button(
+    "选为构建输入",
+    async () => {
+      await accept(
+        await api(`${planBase()}/select-version`, "POST", {
+          revision: state.data.revision,
+          version_id: select.value,
+          stage,
+          shot_id: sid,
+        }),
+      );
+      notice("选择已保存。兼容性提示已更新；尚未执行构建。");
+    },
+    busy() || ver(select.value).status !== "complete",
+  );
+  select.addEventListener("change", () => {
+    choose.disabled = busy() || ver(select.value).status !== "complete";
+  });
+  box.append(
+    select,
+    button("查看历史版本", () => showVersion(select.value)),
+    choose,
+  );
+  return box;
+}
+function nodeInputs(stage, sid) {
+  const s = plan().shots[sid];
+  if (stage === "split") return {};
+  const inputs = { content: s.content };
+  if (stage === "select") {
+    inputs.tts = s.tts || null;
+    if (!plan().ranges[sid]) inputs.recall = s.recall || null;
+  }
+  if (stage === "render")
+    Object.assign(inputs, { select: s.select || null, tts: s.tts || null });
+  return inputs;
+}
+async function runNode(stage, sid, force) {
+  const body = {
+    stage,
+    shot_id: sid || null,
+    force,
+    revision: state.data.revision,
+    inputs: nodeInputs(stage, sid),
+  };
+  state.submitting = true;
+  render();
+  try {
+    await api(`${planBase()}/nodes`, "POST", body);
+    notice(`${LABEL[stage]}已提交。`);
+  } finally {
+    state.submitting = false;
+    await refresh();
+  }
+}
+function createPlan(mode, finalId = null) {
+  const body = showDialog(mode === "restore" ? "从成片恢复方案" : "构建方案");
+  const f = field(
+    "方案名称",
+    mode === "new" ? "新方案" : `${plan().name} 副本`,
+  );
+  body.append(
+    f.wrap,
+    button("保存方案", async () => {
+      await accept(
+        await api(`${base()}/plans`, "POST", {
+          name: f.input.value,
+          ...(mode === "copy" ? { copy_from: plan().id } : {}),
+          ...(mode === "restore" ? { from_final: finalId } : {}),
+        }),
+      );
+      closeDialog();
+    }),
+  );
+}
+function renamePlan() {
+  const body = showDialog("命名方案"),
+    f = field("方案名称", plan().name);
+  body.append(
+    f.wrap,
+    button("保存", async () => {
+      await accept(
+        await api(planBase(), "PATCH", {
+          revision: state.data.revision,
+          name: f.input.value,
+        }),
+      );
+      closeDialog();
+    }),
+  );
+}
+function editBoard(focusSid) {
+  const body = showDialog("编辑分镜结构与内容");
+  let draft = order().map((sid) => ({
+    ...ver(plan().shots[sid].content).data,
+  }));
+  const list = el("div");
+  function draw() {
+    list.replaceChildren();
+    for (const [i, shot] of draft.entries()) {
+      const card = el("div", "", "shot-card");
+      card.append(el("strong", `${i + 1} · ${shot.id || "新分镜"}`));
+      for (const [key, label] of [
+        ["text", "旁白与字幕"],
+        ["query", "查询"],
+      ]) {
+        const f = field(label, shot[key], "textarea");
+        f.input.maxLength = key === "text" ? 200 : 400;
+        f.input.addEventListener("input", () => {
+          shot[key] = f.input.value;
+        });
+        if (shot.id === focusSid && key === "text")
+          setTimeout(() => f.input.focus(), 0);
+        card.append(f.wrap);
+      }
+      const duration = field("预估秒数", shot.estimated_seconds, "number");
+      duration.input.addEventListener("input", () => {
+        shot.estimated_seconds = Number(duration.input.value);
+      });
+      card.append(duration.wrap);
+      card.append(
+        button(
+          "上移",
+          () => {
+            [draft[i - 1], draft[i]] = [draft[i], draft[i - 1]];
+            draw();
+          },
+          i === 0,
+        ),
+        button(
+          "下移",
+          () => {
+            [draft[i + 1], draft[i]] = [draft[i], draft[i + 1]];
+            draw();
+          },
+          i === draft.length - 1,
+        ),
+        button(
+          "合并到上一镜",
+          () => {
+            draft[i - 1].text += shot.text;
+            draft[i - 1].query += `；${shot.query}`;
+            draft[i - 1].estimated_seconds += shot.estimated_seconds;
+            draft.splice(i, 1);
+            draw();
+          },
+          i === 0,
+        ),
+        button(
+          "删除",
+          () => {
+            draft.splice(i, 1);
+            draw();
+          },
+          draft.length === 1,
+        ),
+      );
+      list.append(card);
+    }
+  }
+  body.append(
+    el(
+      "p",
+      "保存只修改此方案；已选下游版本保留，变化后显示兼容性提示。",
+      "muted",
+    ),
+    list,
+    button("添加分镜", () => {
+      draft.push({
+        id: null,
+        text: "新旁白",
+        query: "新画面",
+        estimated_seconds: 3,
+      });
+      draw();
+    }),
+    button("保存分镜", async () => {
+      await accept(
+        await api(planBase(), "PATCH", {
+          revision: state.data.revision,
+          shots: draft,
+        }),
+      );
+      closeDialog();
+      notice("分镜已保存。");
+    }),
+  );
+  draw();
+}
+function editSettings() {
+  const body = showDialog("方案参数"),
+    fields = {},
+    o = plan().options;
+  const definitions = [
+    ["voice", "声音 ID（当前配音服务）", "text"],
+    ["recall_limit", "召回数量 1–50", "number"],
+    [
+      "audio_mode",
+      "原声混音",
+      "text",
+      [
+        ["tts_only", "仅配音"],
+        ["ducking", "配音与原声"],
+      ],
+    ],
+    ["duck_gain", "原声增益 0–1", "number"],
+    [
+      "burn",
+      "字幕模式",
+      "text",
+      [
+        ["true", "烧录字幕"],
+        ["false", "软字幕"],
+      ],
+    ],
+    ["atempo", "配音速度 0.75–1.25（留空自动）", "number"],
+    [
+      "alignment",
+      "补齐方式",
+      "text",
+      [
+        ["auto", "自动裁剪 / 变速 / 冻结"],
+        ["freeze", "原速配音，裁剪或冻结"],
+        ["strict", "严格时长匹配"],
+      ],
+    ],
+  ];
+  for (const [key, label, type, choices] of definitions) {
+    const f = field(label, o[key], type, choices);
+    fields[key] = f.input;
+    body.append(f.wrap);
+  }
+  body.append(
+    button("保存参数", async () => {
+      const options = { ...o };
+      for (const key of Object.keys(fields)) options[key] = fields[key].value;
+      for (const key of ["recall_limit", "duck_gain"])
+        options[key] = Number(options[key]);
+      options.atempo =
+        fields.atempo.value === "" ? null : Number(fields.atempo.value);
+      options.burn = options.burn === "true";
+      await accept(
+        await api(planBase(), "PATCH", {
+          revision: state.data.revision,
+          options,
+        }),
+      );
+      closeDialog();
+      notice("参数已保存；不会自动执行。");
+    }),
+  );
+}
+async function manualRange(sid) {
+  const p = plan(),
+    selection = ver(p.shots[sid].select)?.data,
+    candidates = ver(p.shots[sid].recall)?.data.results || [];
+  const body = showDialog(`连续镜头选择 · ${sid}`);
+  const initial = p.ranges[sid] || selection?.range || candidates[0] || {};
+  const source = field("素材 ID", initial.source_id || "");
+  const start = field("开始秒", initial.start ?? 0, "number"),
+    end = field("结束秒", initial.end ?? 1, "number");
+  const sources = [
+    ...new Set(
+      candidates
+        .map((c) => c.source_id)
+        .concat(initial.source_id || [])
+        .filter(Boolean),
+    ),
+  ];
+  const sourceChoices = document.createElement("datalist");
+  sourceChoices.id = "source-choices";
+  for (const id of sources) {
+    const option = el("option");
+    option.value = id;
+    sourceChoices.append(option);
+  }
+  source.input.setAttribute("list", sourceChoices.id);
+  const shotsBox = el("div", "", "source-shots"),
+    result = el("div");
+  let checks = [],
+    preview = null;
+  const confirm = button(
+    "确认对齐并保存新选片版本",
+    async () => {
+      await accept(
+        await api(`${planBase()}/range-confirm`, "POST", {
+          ...request(),
+          preview_token: preview.preview_token,
+        }),
+      );
+      closeDialog();
+      notice("人工范围与对齐结果已保存，分镜视频保留原版本。");
+    },
+    true,
+  );
+  function invalidate() {
+    preview = null;
+    confirm.disabled = true;
+    result.replaceChildren();
+  }
+  function request() {
+    return {
+      revision: state.data.revision,
+      shot_id: sid,
+      source_id: source.input.value,
+      start: Number(start.input.value),
+      end: Number(end.input.value),
+      ...(checks.some((c) => c.input.checked)
+        ? {
+            segment_ids: checks
+              .filter((c) => c.input.checked)
+              .map((c) => c.row.id),
+          }
+        : {}),
+    };
+  }
+  for (const f of [source, start, end])
+    f.input.addEventListener("input", invalidate);
+  async function loadShots() {
+    invalidate();
+    const response = await api(
+      `/api/studio/sources/${encodeURIComponent(source.input.value)}/shots`,
+    );
+    checks = [];
+    shotsBox.replaceChildren();
+    for (const row of response.items) {
+      const label = el(
+        "label",
+        "",
+        `source-shot${row.visible ? "" : " hidden-shot"}`,
+      );
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.disabled = !row.visible;
+      input.checked =
+        row.visible &&
+        row.start < Number(end.input.value) &&
+        row.end > Number(start.input.value);
+      const record = { input, row };
+      checks.push(record);
+      input.addEventListener("change", () => {
+        invalidate();
+        const chosen = checks.filter((c) => c.input.checked);
+        if (chosen.length) {
+          start.input.value = chosen[0].row.start;
+          end.input.value = chosen.at(-1).row.end;
+        }
+      });
+      label.append(
+        input,
+        el(
+          "span",
+          `${row.id} · ${secs(row.start)}–${secs(row.end)}${row.visible ? "" : " · 已隐藏"}`,
+        ),
+        button(
+          "预览镜头",
+          () => play(`/api/admin/segments/${row.id}/media`, row.id),
+          !row.visible,
+        ),
+      );
+      shotsBox.append(label);
+    }
+  }
+  body.append(
+    el(
+      "p",
+      "只允许同一素材中的连续镜头。勾选后可微调边界；预览会校验隐藏区间与时间连续性。",
+      "muted",
+    ),
+    source.wrap,
+    sourceChoices,
+    button("加载素材镜头", loadShots),
+    shotsBox,
+    start.wrap,
+    end.wrap,
+    button("预览范围与对齐结果", async () => {
+      preview = await api(`${planBase()}/range-preview`, "POST", request());
+      result.replaceChildren(
+        el(
+          "p",
+          `选定 ${secs(preview.range.start)}–${secs(preview.range.end)}；实际 ${secs(preview.actual_range.start)}–${secs(preview.actual_range.end)}；配音速度 ${preview.atempo.toFixed(3)}×；裁剪 ${secs(preview.trim_seconds)}；冻结 ${secs(preview.freeze_seconds)}`,
+        ),
+        media("video", preview.preview_url),
+      );
+      confirm.disabled = false;
+    }),
+    result,
+    confirm,
+  );
+  if (source.input.value) await loadShots();
+}
+async function preflight(force = false) {
+  const id = state.id,
+    pid = plan().id;
+  const checked = await api(`${planBase()}/preflight?force=${force}`);
+  if (id !== state.id || pid !== plan().id) return;
+  const body = showDialog(
+    force ? "强制重新生成：确认构建" : "构建预检：确认后执行",
+  );
+  const actionLabel = {
+    reuse: "复用",
+    rebuild: "重建",
+    blocked: "阻塞",
+    skip: "无需执行",
+  };
+  for (const node of checked.nodes)
+    body.append(
+      el(
+        "p",
+        `${actionLabel[node.action]} · ${LABEL[node.stage]} ${node.shot_id || ""} · ${node.reason}${node.version ? ` · ${node.version.slice(0, 8)}` : ""}`,
+        node.action === "blocked" ? "warn-text" : "",
+      ),
+    );
+  body.append(
+    el(
+      "p",
+      "独立节点会继续执行；必需依赖未齐时保留已有成片。重试会重新计算复用清单。",
+      "muted",
+    ),
+    button(
+      "确认构建",
+      async () => {
+        await api(`${planBase()}/build`, "POST", {
+          token: checked.token,
+          force,
+        });
+        closeDialog();
+        await refresh();
+      },
+      !plan().board,
+    ),
+  );
+}
+function renderFinal() {
+  const p = plan(),
+    selected = ver(p.final);
+  $("final-hint").textContent = selected
+    ? `当前方案成片 ${selected.id.slice(0, 8)}${selected.incomplete ? " · 记录不完整" : ""}`
+    : "尚未生成此方案的成片";
+  const player = $("final-player"),
+    url = selected?.files.mp4?.url;
+  if (state.finalUrl !== url) {
+    state.finalUrl = url;
+    player.replaceChildren();
+    if (url) {
+      const video = media("video", url);
+      video.id = "final-video";
+      if (selected.files.vtt?.url && !selected.data.burn) {
+        const track = document.createElement("track");
+        Object.assign(track, {
+          kind: "subtitles",
+          srclang: "zh",
+          label: "中文",
+          default: true,
+          src: selected.files.vtt.url,
+        });
+        video.append(track);
+      }
+      player.append(video);
+      versionFiles(player, selected);
+    }
+  }
+  const history = $("final-history");
+  history.replaceChildren();
+  const d = el("details");
+  d.append(el("summary", "历史成片与完整依赖"));
+  for (const item of Object.values(state.data.versions)
+    .filter((v) => v.stage === "compose")
+    .reverse()) {
+    const row = el("div", "", "final-row");
+    row.append(
+      el("span", `${item.id.slice(0, 8)} · ${STATUS[item.status]}`),
+      button("查看与播放", () => showVersion(item.id)),
+    );
+    if (item.status === "complete") {
+      row.append(
+        button(
+          "选为方案成片",
+          async () => {
+            await accept(
+              await api(`${planBase()}/select-version`, "POST", {
+                revision: state.data.revision,
+                version_id: item.id,
+                stage: "compose",
+              }),
+            );
+          },
+          busy(),
+        ),
+      );
+      if (item.data.plan)
+        row.append(
+          button("复制为新方案", () => createPlan("restore", item.id), busy()),
+        );
+      versionFiles(row, item);
+    }
+    d.append(row);
+  }
+  if (selected) d.append(dependencyTree(selected.id));
+  history.append(d);
+}
+function renderBuilds() {
+  const view = $("build-history");
+  view.replaceChildren();
+  for (const b of [...state.data.builds].reverse()) {
+    const d = el("details");
+    d.append(
+      el(
+        "summary",
+        `构建 ${b.id} · ${state.data.plans[b.plan_id]?.name || b.plan_id} · ${STATUS[b.status]}`,
+      ),
+    );
+    for (const node of b.nodes)
+      d.append(
+        el(
+          "p",
+          `${LABEL[node.stage]} ${node.shot_id || ""} · ${STATUS[node.status]}${node.error ? ` · ${node.error}` : ""}`,
+        ),
+      );
+    view.append(d);
+  }
+}
+async function loadArtifacts() {
+  const id = state.id;
+  if (!id) return;
+  const data = await api(`${base()}/artifacts`);
+  if (id !== state.id) return;
+  $("download-archive").href = `${base()}/archive`;
+  const view = $("artifact-view");
+  view.replaceChildren();
+  const groups = new Map();
+  for (const item of data.items) {
+    const groupName = item.path.startsWith("versions/")
+      ? item.path.split("/").slice(0, 2).join("/")
+      : item.attempt || "任务与旧产物";
+    if (!groups.has(groupName)) {
+      const d = el("details");
+      d.append(el("summary", groupName));
+      groups.set(groupName, d);
+      view.append(d);
+    }
+    const row = el("div", "", "artifact-row");
+    row.append(
+      link(item.path, item.url, true),
+      el("small", `${(item.bytes / 1024).toFixed(1)} KiB`),
+    );
+    groups.get(groupName).append(row);
+  }
+}
+function play(url, title) {
+  $("play-title").textContent = title;
+  $("play-video").src = url;
+  $("play-dialog").showModal();
+}
+$("play-close").addEventListener("click", () => {
+  $("play-video").pause();
+  $("play-dialog").close();
+});
+$("dialog-close").addEventListener("click", closeDialog);
+$("work-dialog").addEventListener("close", () =>
+  $("work-dialog")
+    .querySelectorAll("video,audio")
+    .forEach((n) => n.pause()),
+);
+$("play-dialog").addEventListener("close", () => $("play-video").pause());
+$("reload").addEventListener("click", () => loadJobs().catch(fail));
+$("reload-artifacts").addEventListener("click", () =>
+  loadArtifacts().catch(fail),
+);
+$("plan-select").addEventListener("change", () =>
+  api(`${base()}/plans/${$("plan-select").value}/activate`, "POST")
+    .then(accept)
+    .catch(fail),
+);
+$("new-plan").addEventListener("click", () => createPlan("new"));
+$("copy-plan").addEventListener("click", () => createPlan("copy"));
+$("rename-plan").addEventListener("click", renamePlan);
+$("plan-settings").addEventListener("click", editSettings);
+$("edit-board").addEventListener("click", () => editBoard());
+$("split").addEventListener("click", () =>
+  runNode("split", null, true).catch(fail),
+);
+$("run-all").addEventListener("click", () => preflight().catch(fail));
+$("force-build").addEventListener("click", () => preflight(true).catch(fail));
+$("create-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  $("create-button").disabled = true;
+  try {
+    const job = await api("/api/studio/jobs", "POST", {
+      text: $("create-text").value,
+      options: {
+        audio_mode: $("create-audio-mode").value,
+        burn: $("create-burn").value === "true",
+        recall_limit: Number($("create-recall-limit").value),
+      },
+    });
+    await selectJob(job.id);
+    $("create-text").value = "";
+    notice("任务已创建，请先生成分镜。");
+  } catch (error) {
+    fail(error);
+  } finally {
+    $("create-button").disabled = false;
+  }
+});
+async function boot() {
+  await loadJobs();
+  const id = new URLSearchParams(location.search).get("job");
+  if (id && state.jobs.some((j) => j.id === id)) await selectJob(id);
+}
+boot().catch(fail);

@@ -1,112 +1,92 @@
-# 创作工作流（文本生成视频）
+# Studio 分镜与版本工作台
 
-入口 `/studio`，与视频检索和素材管理平级。输入中文文案，经拆分镜、召回、配音、选片和渲染生成成片。最新修订依据为 [STUDIO_REFINEMENT_PLAN.md](../plans/STUDIO_REFINEMENT_PLAN.md)；[STUDIO_PLAN.md](../plans/STUDIO_PLAN.md) 保留最初设计，旧检查点及时间轴约定以本文为准。
+入口 `/studio`。设计依据为 [STUDIO_UI_PLAN.md](../plans/STUDIO_UI_PLAN.md)。保留 Python、文件存储和原生前端；首次进入任务工作台时接入版本模型，原文件和执行历史保留。
 
-## 分阶段执行
+## 工作区
 
-依赖为 `split → recall/tts → select → render`。recall 与 tts 可任意先后；select 需要两者完成；render 只依赖本地文件和 ffmpeg。
+任务标题可以独立保存，不改变方案、分镜或媒体版本。任务包含多个构建方案，可以新建、命名、复制和切换。方案分别保存分镜表、内容版本、阶段选择、人工素材范围及参数，共享任务内的产物历史。重新拆分使用新分镜身份，不影响其他方案。
 
-| 步骤 | 服务 | 产物 |
-|---|---|---|
-| split | 拆分镜 LLM，OpenAI 聊天接口 | storyboard.json |
-| recall | 索引对应的嵌入服务 | candidates/&lt;shot&gt;.json |
-| tts | TTS 服务 | audio/&lt;shot&gt;.wav、audio.json |
-| select | 无 | timeline.json（原片区间及配音变速规划） |
-| render | 无 | 视频、PCM 音轨、实际时间轴、MP4、SRT、WebVTT |
+分镜矩阵的列依次为文本与查询、召回、配音、选片与对齐、分镜渲染。格内显示已选版本、摘要、最近执行结果和兼容性提示，详情展开后可浏览候选、试听、查看历史或选为构建输入。这两个历史操作互相独立；选择版本不会执行模型或渲染。矩阵支持横向滚动，固定分镜标识和表头，也可以整体折叠。下方依次为成片、产物与调试记录。
 
-单 GPU 环境以单步执行为主，切换服务后再执行对应步骤。“继续执行未完成步骤”在遇到失败时停止，已完成的检查点保留，不要求同时启动全部模型。
+## 版本与依赖
 
-步骤状态为 pending/running/complete/failed。任务级 `execution` 记录连跑状态、当前步骤和剩余步骤，避免步骤间空隙停止轮询。API 返回 202 前，首步已落盘为 running。全局 studio.lock 在整个执行过程中持有；编辑、删除、ZIP 导出与执行互斥，冲突返回 409。重启后查询任务会将失去执行锁的残留 running 状态标为 failed，并补齐尝试记录。
+每次实际执行保存独立的不可变版本，包含阶段、分镜身份、成功或失败结果、输入版本、参数快照、文件路径及 SHA-256。成功后更新当前方案的对应选择；失败只新增记录，保留原有选择和全部下游产物。
 
-## 续跑、重新生成与编辑
+兼容性按实际使用的内容和阶段参数检查：查询影响召回，旁白与声音影响配音，选片依赖其实际配音与召回版本，人工素材范围不依赖召回。分镜渲染绑定选片与音频版本、原片文件身份及处理参数。上游变化只展示具体冲突；构建时才决定复用和重建。
 
-- 默认 `resume`：仅复用输入指纹一致、文件哈希一致且有效的检查点。
-- `force`：重新生成整步；recall、tts、render 可通过 `shot_ids` 指定分镜。其他镜头仍按 resume 规则处理，缺失或失效的产物会补齐。
-- 每次执行采用当前进程加载的配置，attempt 留存实际配置。修改 YAML 后需重启服务；配置变化在下次执行前作废受影响步骤。
-- 只改查询：重置 recall/select/render；只改文本：重置 tts/select/render；只换顺序：重置 select/render；增删镜：重置相关分支；仅改标题不影响媒体。
-- 编辑分镜及选片时保留草稿，可取消编辑。保存选片只作废 render，未修改的事件保留现有区间。
+构建依赖为 `内容 → 召回 / 配音 → 选片 → 分镜渲染 → 成片合成`。分镜表另外记录身份、数量和顺序。每个新成片保存实际使用的完整依赖图及方案快照；依赖树可展开、查看节点详情，并可复制为新方案。
 
-自动拆分必须按顺序完整覆盖原文，仅忽略空白差异。遗漏、重复、乱序、改写或数量超限会触发模型修正重试；达到上限后失败。人工改稿允许与原文不同，但会展示差异提示。ID 仅允许字母、数字、下划线和连字符，长度不超过 40；所有产物读写均限制在任务目录内。
+## 构建与人工控制
 
-拆分提示词优先按场景及动作生成 20–60 字分镜，独立短句允许更短；查询只描述核心主体、动作及场景，避免补写拍摄风格或编排多画面。字数和语义要求是模型提示，不能当成硬性校验保证；抽象旁白及人物关系仍需人工审核。提示词版本变化会使旧自动分镜检查点失效。模型返回 finish_reason=length 时失败，诊断保留原始响应，可提高 `studio.generator.max_tokens` 或缩短文案后续跑。
+“构建成片”先显示复用、重建、阻塞和无需执行的清单，确认后执行。预检令牌绑定方案、输入版本与生效参数，提交时变化会要求重新预检。每格也支持单独执行或复用，强制重新生成是单独入口。
 
-## 检查点与历史
+某节点失败后，其他独立镜头及分支继续执行，依赖失败节点的后续节点标为阻塞。必需依赖未齐时不合成新成片，已有成片始终可播放和下载。再次预检续建会复用输入指纹和文件哈希均匹配的成功版本。构建状态为 running/complete/partial/failed，节点另有 reused/blocked/skipped 状态。
 
-```
+人工选片按时间列出同一素材的镜头。允许勾选连续镜头并在其范围内微调边界；跨素材、不连续镜头、素材空隙和隐藏区间均拒绝。预览显示选定范围、实际使用范围、裁剪秒数、配音速度和冻结秒数；确认令牌仍有效时才保存新的选片版本。自动选择同时保存锚点、涉及镜头和向前/向后的扩展量。重新对齐保留人工选择的完整素材范围。
+
+方案参数包括当前配音服务的声音 ID、召回数量、原声混音及增益、字幕模式、配音速度和补齐策略。速度留空时自动选择；冻结策略保持原速配音；严格策略要求范围与配音时长匹配。没有新增跨素材拼接、音色克隆、情感控制、版本删除或自动清理。
+
+仍使用全局 `studio.lock` 串行执行。方案编辑、选择、删除任务、ZIP 导出与执行互斥，冲突返回 409。服务重启后的未完成构建保留历史并标为中断，可重新预检续建。
+
+## 文件与迁移
+
+```text
 data/studio/<job_id>/
-  job.json                       # 步骤、执行状态、创建快照、当前成片版本
-  checkpoints.json               # 输入指纹、不可变路径、哈希及媒体元数据
-  attempts/<step>-<attempt>.json  # 尝试状态及结果
-  attempts/<step>-<attempt>/
-    debug/*.json                 # 实际配置、请求响应、校验及 ffmpeg 诊断
-    manifest.json                # 生成或复用的产物清单
-    ...                          # 此次生成的分镜、候选、音频或渲染文件
-  attempts/edit-*/...             # 人工编辑前的版本
-  storyboard.json / audio.json / timeline.json
-  candidates/*.json / audio/*.wav / render/*
-  previews/*.mp4                 # 最终选片区间的画面预览
-  exports/*.zip                  # 下载包，后续打包不会递归包含这些 ZIP
+  job.json                  # 任务标题、原文及旧流程状态
+  workspace.json            # schema=2：方案指针、版本索引、构建执行与节点结果
+  versions/<version_id>/
+    version.json            # 不可变版本记录
+    debug/*.json            # 请求、响应、ffmpeg 命令及错误诊断
+    ...                     # 此版本的候选、音频、视频或成片
+  migration-v2/             # 迁移前 job/storyboard/timeline/audio/checkpoints 快照
+  attempts/...              # 原执行产物与历史，原样保留
+  previews/...              # 由明确版本/参数生成的预览缓存
+  exports/*.zip             # 导出包不递归包含导出包
 ```
 
-根目录逻辑文件保持兼容，通过原子替换引用当前输出；attempt 内保留历史版本。删镜不会删除历史音频，当前 audio.json 只列出有效分镜。失败尝试中已成功生成的单镜产物也可供下一次续跑复用。
+迁移校验旧 manifest 的文件哈希，导入可验证的召回、配音、分镜视频及历史成片。无法证明输入关系和参数的旧版本标为“记录不完整”，不会按当前分镜猜测旧依赖，也不会自动视为可复用版本。旧成片仍可下载；依赖关系不完整时不能恢复为可验证方案。所有新版本均保存明确依赖。迁移是按任务进行的，打开前不会批量修改现有任务。
 
-TTS 指纹包含文本、声音及服务配置；召回包含查询、步骤开始时固定的索引、检索参数与可见性；渲染包含原片身份及文件信息、实际区间、音频内容、变速和处理参数。文件存在本身不再代表检查点有效。
+认证头、密钥和 URL 中的凭据经过诊断脱敏。原片不复制进任务目录；版本记录素材身份及文件指纹。产物下载 URL 指向确定版本文件，不依靠可变别名或缓存查询参数代表版本。
 
-旧任务仍可读取和下载；第一次执行时，无可信指纹的旧下游产物会标为未验证并要求重建。旧成片保留为历史版本。
+## 媒体与字幕
 
-诊断保存模型请求、原始 JSON 响应、校验反馈、ffmpeg 命令和 stderr；认证头、密钥及 URL 中的凭据不写入快照。原始素材不复制到任务目录，渲染清单记录其身份和路径。任务 ZIP 包含中间产物、历史和调试记录，不包含原始素材、临时文件及导出包本身。
+分镜渲染独立保存确定帧数的视频和处理后的 48kHz PCM 音频。帧数依据实际处理后采样数计算，保证在任意成片位置都能容纳完整配音。合成混选版本时，根据累计帧边界统一计算各镜的采样补齐和字幕时间，避免逐镜浮点累计或独立取整造成漂移。
 
-## 选片与时长对齐
+视频先裁到实际原片范围，再冻结末帧。音频支持变速、响度归一化及原声压低混音。成片发布前检查音视频轨道、字幕模式、时长和完整解码；失败保留已有成片。软字幕同时保存 MP4 mov_text、SRT 和 WebVTT；烧录字幕需要部署环境的 ffmpeg subtitles/libass 和可用中文字体。
 
-候选打分综合语义排名、时长匹配、延长比例、来源重复和同源区间重叠。候选为空时 select 明确失败，不生成占位成片。
+技术对齐不保证叙事、人物或查询质量，仍需人工审阅。确定性测试音频也不代表真实发音质量。
 
-视频足够长时优先裁剪，配音保持原速；不足时向后优先、再向前延长同源连续镜头，然后按 atempo 上限加速配音，最后冻结末帧补齐并给出警告。延长遇到隐藏片段停止，不跨过隐藏内容继续找邻镜；选片、预览和渲染前重新检查所选区间的可见性。
-
-人工可换选候选，或提供 source_id/start/end 指定区间。空区间、倒置区间、片尾起点和非有限数值会被拒绝；超出原片结尾的 end 会钳制并提示。候选媒体预览复用 `/api/admin/segments/{id}/media`，不依赖活动索引。每镜还可预览延长、裁剪或冻结后的实际选片画面。
-
-## 渲染与字幕
-
-渲染先处理配音为 48kHz PCM，根据实际采样数向上计算输出帧数。音轨只补齐至累计帧边界，不裁掉配音；视频先裁到所选原片区间，再冻结末帧，输出确定帧数。所有事件的实际帧数、采样边界、时间范围保存在 `render/timeline.json`。
-
-视频拼接、音轨拼接及字幕共同使用实际时间轴，避免逐镜按浮点秒累计产生漂移。每镜可有不到一帧的补齐。最终合成不以 `-shortest` 隐藏误差，发布前校验轨道、时长和完整解码。
-
-- tts_only：配音 atempo → loudnorm → 48kHz，丢弃原声。
-- ducking：原声压低后与配音混合，背景不足时补齐，关闭 amix 默认归一化；无原声素材退化为纯配音。
-- burn=true：烧录字幕，需要 ffmpeg subtitles/libass；显式字体文件不存在时提前失败。滤镜烟测不等于中文字形及可读性验收，仍需部署环境视觉确认。
-- burn=false：MP4 内嵌 mov_text，同时网页播放器加载 WebVTT。
-- 两种字幕模式均导出 SRT 和 WebVTT。成片通过验证后更新发布版本；失败保留上一版成片。
-
-技术拼接连续不代表叙事自动连贯。首期通过区间预览和人工换选判断人物、场景及动作衔接，不进行自动叙事重排或逐字强制对齐。
-
-## API（/api/studio）
+## API（前缀 `/api/studio`）
 
 | 方法与路径 | 语义 |
 |---|---|
-| POST /jobs | 创建任务，支持 voice/audio_mode/recall_limit/burn |
-| GET /jobs、GET /jobs/{id} | 列表和详情；详情包含完整候选池、执行状态及成片版本 |
-| POST /jobs/{id}/steps/{step} | 可选 body：`{"mode":"resume"}` 或 `{"mode":"force","shot_ids":["shot-01"]}`；202 |
-| POST /jobs/{id}/run | 继续未完成步骤，失败即停止 |
-| PATCH /jobs/{id}/storyboard | 编辑分镜，按实际字段变化作废依赖 |
-| PATCH /jobs/{id}/timeline | 全量覆盖当前分镜，每镜恰好一次；候选 ID 与显式区间二选一 |
-| GET /jobs/{id}/preview/{shot_id} | 实际选片画面预览，支持 Range |
-| GET /jobs/{id}/artifacts | 当前及历史产物列表，含大小、attempt、步骤、下载 URL |
-| GET /jobs/{id}/artifacts/{path}?download=true | 单文件下载，限制在任务目录内 |
-| GET /jobs/{id}/archive | 空闲时生成并下载任务 ZIP，执行中返回 409 |
-| GET /jobs/{id}/audio/{shot_id} | 配音试听，支持 Range |
-| DELETE /jobs/{id} | 删除整个任务及历史产物，执行中返回 409 |
+| POST /jobs | 创建任务，支持标题、原文和默认选项 |
+| GET /jobs | 任务列表 |
+| GET /jobs/{id}/workspace | 版本工作台详情；首次访问进行迁移 |
+| PATCH /jobs/{id}/title | 独立编辑任务标题 |
+| POST /jobs/{id}/plans | 新建、copy_from 复制方案或 from_final 恢复成片方案 |
+| POST /jobs/{id}/plans/{plan}/activate | 切换方案，不执行任何阶段 |
+| PATCH /jobs/{id}/plans/{plan} | 携 revision 保存名称、options 或完整 shots |
+| GET /jobs/{id}/versions?stage=tts&shot_id=... | 查询阶段历史版本 |
+| GET /jobs/{id}/versions/{version} | 版本详情 |
+| GET /jobs/{id}/versions/{version}/dependencies | 明确输入依赖图 |
+| POST /jobs/{id}/plans/{plan}/select-version | revision、stage、shot_id、version_id；仅成功版本可选 |
+| GET /jobs/{id}/plans/{plan}/preflight?force=false | 构建清单与确认 token |
+| POST /jobs/{id}/plans/{plan}/build | 提交 token、force；后台执行，202 |
+| POST /jobs/{id}/plans/{plan}/nodes | revision、stage、shot_id、inputs、force；明确输入版本，202 |
+| GET /sources/{source}/shots | 按时间排列的镜头及可见性 |
+| POST /jobs/{id}/plans/{plan}/range-preview | revision、shot_id、source_id、start、end、segment_ids；返回对齐结果与 preview_token |
+| POST /jobs/{id}/plans/{plan}/range-confirm | 原预览请求及 preview_token；保存新选片版本 |
+| GET /jobs/{id}/versions/{version}/preview | 对确定的选片或分镜视频版本预览 |
+| GET /jobs/{id}/artifacts | 全部产物与诊断文件列表 |
+| GET /jobs/{id}/artifacts/{path}?download=true | 确定路径的播放或下载，支持 Range |
+| GET /jobs/{id}/archive | 空闲时导出任务 ZIP |
+| DELETE /jobs/{id} | 删除整个任务，仍使用现有互斥限制 |
 
-指定分镜仅允许 force 模式的 recall/tts/render；空列表、重复 ID、不存在的 ID 或不适用步骤返回 422。现有无请求体调用按 resume 处理。错误沿用 `{"detail":...}`。
+错误为 `{"detail": ...}`。已有旧任务的阶段 API 保留给尚未接入工作台的调用；迁移后的任务使用方案 API，旧阶段执行及 storyboard/timeline 编辑入口返回 409，防止可变别名覆盖版本工作台。旧任务详情、旧文件下载与历史 URL 仍保留。
 
-## 验证与真实模型接入
+## 验证
 
-`tests/test_studio_*.py` 使用确定性模型 Fixture 和真实 ffmpeg/SQLite/Chroma 验证工程链路。`uv run python tests/serve_fixture.py --data-dir <测试目录>` 可启动专用浏览器验收服务；其颜色向量与正弦波配音不证明真实模型质量。
+`tests/test_studio_workspace.py` 覆盖版本选择、失败保护、混选依赖、方案隔离、续建、连续/隐藏镜头、预览确认、迁移和执行锁；使用真实 ffmpeg、SQLite、Chroma 及确定性模型。非整数帧率测试校验帧数、累计采样边界、字幕、完整解码和依赖文件哈希。浏览器及本轮检查见 [工作台验收记录](studio-workspace-verification.md)；此前真实模型的质量结论见 [历史验收记录](studio-verification.md)。
 
-真实模型按单 GPU 条件依次部署：拆分镜 Qwen → Qwen3-TTS → 索引对应嵌入模型，最后执行本地选片和渲染。各阶段先探测实际模型 ID、端点、响应格式和声音选项。当前默认名称不是部署兼容性的证明；真实中文拆分、发音、召回质量及烧录字形仍需单独验收。
-
-2026-10-14 已完成 Qwen 真实接口、2000 字样本完整覆盖、续跑/force 及截断恢复验证；抽象旁白查询质量尚未全部验收。详细结果及下一阶段任务见 [验收记录](studio-verification.md)。实际活动索引若只包含 moment，应将 `studio.recall.granularity` 设为 `moment`；错误粒度会得到空候选。
-
-CustomVoice / uncle_fu 已完成真实配音、部分失败续跑、逐镜 force、改稿、音频格式与下载验证；五镜测试旁白 53.20 秒，日期数字样本 41.76 秒。发音质量与跨镜音色仍需人工试听。任务声音在创建时固化，更改全局默认不会自动改变已有任务；本次联调已保存快照并迁移测试任务，尚未增加任务声音编辑页面或 API。
-
-WeMM 真实召回及软字幕成片也已完成验证：五镜各 20 个候选，53.20 秒成片，网页预览、人工修改区间、仅重建受影响镜头、单镜强制渲染、字幕播放及 API 下载通过；最新 Studio 回归为 76 通过、1 跳过。自动候选的人物匹配和延长区间有质量问题，素材也自带硬字幕与水印，仍需人工审核；具体证据与后续改进见验收记录和修订计划。新增动态配置功能按用户要求未纳入本轮验收。
-
-新增 476 字潮汕侨批文案复测，使用任务选项 `voice=serena`，人工修整分镜后完成 11 镜、103.36 秒软字幕成片；真实拆分/配音/召回、网页渲染、完整解码及任务 ZIP 通过。自动选片仍出现看手机代替读信、抵达代替相拥等内容偏差。当前 OpenAI TTS 适配器未传递情感指令，不能显式控制“温柔含情”；声音自然度和情感效果仍需试听，不能将选中 Serena 等同于情绪控制验收通过。
+浏览器专用服务可通过 `uv run python tests/serve_fixture.py --data-dir <临时测试目录> --port 8001` 启动，勿将确定性颜色向量用于真实素材索引。

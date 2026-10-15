@@ -4,7 +4,7 @@
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Mindex · 创作</title><link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/studio.css">
-  <script src="/studio.js?v=20261013-refinement" defer></script>
+  <script src="/studio.js?v=20261015-workspace" defer></script>
 </head>
 <body class="studio">
   <header><a class="brand" href="/">m<span>index</span><i></i></a><span class="header-note">创作</span><a class="quiet nav-link" href="/">视频检索 ↗</a><a class="quiet nav-link" href="/admin">素材管理 ↗</a><a class="quiet nav-link" href="/settings">设置 ↗</a><button id="reload" class="quiet">刷新任务</button></header>
@@ -23,18 +23,17 @@
         <div id="no-job" class="empty"><h2>选择一个创作任务</h2><p>在左侧创建新任务，或点击已有任务查看进度、编辑分镜与选片。</p></div>
         <div id="job-workspace" hidden>
           <div id="job-header"></div>
-          <div id="steps-bar" class="steps-bar" role="list"></div>
-          <div class="run-actions"><button id="run-all" class="quiet">继续执行未完成步骤</button><span id="job-meta" class="muted"></span></div>
-          <section id="storyboard-section" hidden><div class="section-head"><h2>分镜</h2><span id="storyboard-warning" class="warn-text"></span><span class="head-actions"><button id="toggle-edit" class="quiet">编辑分镜</button><button id="save-storyboard" class="quiet" hidden>保存分镜</button><button id="cancel-storyboard" class="quiet" hidden>取消编辑</button></span></div><div id="storyboard-view"></div></section>
-          <section id="candidates-section" hidden><div class="section-head"><h2>召回候选</h2><span class="muted">点击缩略图预览；时长徽标为候选时长 / 配音时长</span></div><div id="candidates-view"></div></section>
-          <section id="timeline-section" hidden><div class="section-head"><h2>选片结果</h2><span class="head-actions"><select id="apply-mode" hidden></select><button id="save-timeline" class="quiet" hidden>保存换选</button><button id="cancel-timeline" class="quiet" hidden>取消换选</button></span></div><div id="timeline-view"></div></section>
-          <section id="artifacts-section"><div class="section-head"><h2>产物与调试记录</h2><button id="reload-artifacts" class="quiet">刷新产物</button><a id="download-archive" class="quiet nav-link">下载任务 ZIP ↧</a></div><div id="artifact-view"></div></section>
-          <section id="result-section" hidden><div class="section-head"><h2>成片</h2><span class="head-actions"><a id="download-mp4" class="quiet nav-link">下载成片 ↧</a><a id="download-srt" class="quiet nav-link">下载字幕 ↧</a></span></div><video id="final-video" controls preload="metadata"></video></section>
+          <div class="plan-bar"><label>构建方案 <select id="plan-select"></select></label><button id="new-plan" class="quiet">新建</button><button id="copy-plan" class="quiet">复制</button><button id="rename-plan" class="quiet">命名</button><button id="plan-settings" class="quiet">方案参数</button></div>
+          <div class="run-actions"><button id="run-all" class="submit">构建成片</button><button id="force-build" class="quiet">强制重新生成…</button><button id="split" class="quiet">重新拆分镜</button><span id="execution-status" role="status"></span></div>
+          <details id="storyboard-section" open><summary>分镜工作台 <span id="shot-count" class="muted"></span></summary><div class="section-head"><span id="storyboard-warning" class="warn-text"></span><button id="edit-board" class="quiet">编辑分镜结构</button></div><div class="matrix-scroll"><table class="shot-matrix"><thead><tr><th scope="col">分镜</th><th scope="col">文本与查询</th><th scope="col">召回</th><th scope="col">配音</th><th scope="col">选片与对齐</th><th scope="col">分镜渲染</th></tr></thead><tbody id="matrix-body"></tbody></table></div></details>
+          <section id="result-section"><div class="section-head"><h2>成片</h2><span id="final-hint" class="muted"></span></div><div id="final-player"></div><div id="final-history"></div></section>
+          <details id="artifacts-section"><summary>产物与调试记录</summary><div class="section-head"><button id="reload-artifacts" class="quiet">刷新产物</button><a id="download-archive" class="quiet nav-link">下载任务 ZIP ↧</a></div><div id="build-history"></div><div id="artifact-view"></div></details>
         </div>
       </section>
     </div>
   </main>
-  <dialog id="play-dialog" aria-labelledby="play-title"><button id="play-close" type="button" class="quiet close" aria-label="关闭播放">✕</button><h2 id="play-title"></h2><video id="play-video" controls preload="metadata"></video><p id="play-meta" class="muted"></p></dialog>
+  <dialog id="work-dialog" aria-labelledby="dialog-title"><button id="dialog-close" type="button" class="quiet close" aria-label="关闭">✕</button><h2 id="dialog-title"></h2><div id="dialog-content"></div></dialog>
+  <dialog id="play-dialog" aria-labelledby="play-title"><button id="play-close" type="button" class="quiet close" aria-label="关闭播放">✕</button><h2 id="play-title"></h2><video id="play-video" controls preload="metadata"></video></dialog>
   <footer><span>Mindex / 创作</span><span>本地素材库 · 工作流分步执行</span></footer>
 </body>
 </html>

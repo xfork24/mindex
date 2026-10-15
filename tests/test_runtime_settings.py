@@ -133,7 +133,7 @@ def test_delete_active_profile_rejected(store):
         role="tts",
         provider="minimax",
         name="Minimax TTS",
-        config={"backend": "minimax", "base_url": "https://api.minimaxi.com/v1", "model": "speech-2.8-hd"},
+        config={"backend": "minimax", "base_url": "https://api.minimax.cn/v1", "model": "speech-2.8-hd"},
     )
     activate_profile(store, profile["id"])
     with pytest.raises(ValueError, match="正在使用"):
@@ -247,6 +247,12 @@ def test_provider_presets_validate():
         for role, preset in roles.items():
             assert set(preset["config"]) <= PROFILE_FIELDS[role], f"{role} 预设越界"
             SECTION_TYPES[role].model_validate({**SECTION_TYPES[role]().model_dump(), **preset["config"]})
+
+
+def test_minimax_presets_use_cn_domain():
+    """MiniMax 三个角色预设统一国内站域名；密钥与域名错站只会得到难排查的 4xx。"""
+    for role, preset in PROVIDER_PRESETS["minimax"].items():
+        assert preset["config"]["base_url"] == "https://api.minimax.cn/v1", f"{role} 预设域名未统一"
 
 
 def test_roles_cover_all_sections():

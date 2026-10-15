@@ -1,6 +1,27 @@
 'use strict';
 const $ = id => document.getElementById(id);
-const state = {data: null, tests: {}};
+const state = {data: null, tests: {}, expanded: loadExpanded()};
+
+const EXPANDED_KEY = 'mindex.settings.roles-expanded';
+function loadExpanded() {
+  try { return new Set(JSON.parse(localStorage.getItem(EXPANDED_KEY) || '[]')); }
+  catch { return new Set(); }
+}
+function toggleRole(role) {
+  if (state.expanded.has(role)) state.expanded.delete(role); else state.expanded.add(role);
+  try { localStorage.setItem(EXPANDED_KEY, JSON.stringify([...state.expanded])); } catch {}
+  if (state.data) renderRoles(state.data);
+  syncSectionRows();
+}
+function syncSectionRows() {
+  for (const head of document.querySelectorAll('.role-row-head[data-section]')) {
+    const key = head.dataset.section;
+    const open = state.expanded.has(key);
+    head.closest('.role-row').classList.toggle('is-open', open);
+    head.setAttribute('aria-expanded', String(open));
+    $(`${key}-body`).hidden = !open;
+  }
+}
 let settingsRequest = 0;
 
 const ROLE_ORDER = ['analyzer', 'generator', 'embedding', 'asr', 'tts'];
@@ -15,7 +36,7 @@ const ROLE_BACKENDS = {
   analyzer: ['openai', 'llama_cpp'],
   generator: ['openai'],
   embedding: ['mindex', 'llama_cpp', 'tokenhub'],
-  asr: ['mindex', 'llama_cpp', 'openai'],
+  asr: ['mindex', 'llama_cpp', 'openai', 'minimax'],
   tts: ['openai', 'minimax', 'dashscope'],
 };
 const ROLE_EXTRA = {
@@ -24,7 +45,10 @@ const ROLE_EXTRA = {
     {key: 'quantization', label: '量化标识', type: 'text', placeholder: '线上模型填 cloud'},
   ],
   generator: [{key: 'max_tokens', label: 'max_tokens', type: 'number', min: 100}],
-  tts: [{key: 'response_format', label: '音频格式', type: 'select', options: ['wav', 'mp3']}],
+  tts: [
+    {key: 'response_format', label: '音频格式', type: 'select', options: ['wav', 'mp3']},
+    {key: 'voice', label: '默认音色 ID', type: 'text', placeholder: '如 male-qn-qingse 或克隆音色 ID'},
+  ],
   analyzer: [],
   asr: [],
 };
@@ -97,27 +121,38 @@ function action(text, onClick) {
 }
 
 function renderRole(rolePayload) {
-  const card = node('article', undefined, 'role-card');
-  const head = node('header');
-  head.append(node('h3', rolePayload.label), node('p', ROLE_DESC[rolePayload.role] || '', 'role-desc'));
-  card.append(head);
+  const role = rolePayload.role;
+  const open = state.expanded.has(role);
+
+  const row = node('article', undefined, `role-row${open ? ' is-open' : ''}`);
+  const head = node('button', undefined, 'role-row-head');
+  head.type = 'button';
+  head.setAttribute('aria-expanded', String(open));
+  head.setAttribute('aria-controls', `role-body-${role}`);
+  head.onclick = () => toggleRole(role);
 
   const effective = rolePayload.effective;
   const keyState = effective.api_key.has_key ? `密钥 ${effective.api_key.hint}`
-    : effective.env_key_set ? `密钥（环境变量 ${effective.api_key_env}）` : '未配置密钥';
-  const info = node('div', undefined, 'effective');
-  info.append(node('div', `当前生效：${effective.model} · ${effective.backend} · ${effective.base_url}`));
-  info.append(node('div', `${keyState}${effective.dimensions ? ` · ${effective.dimensions} 维` : ''}`, 'muted'));
-  card.append(info);
+    : effective.env_key_set ? `环境变量密钥` : '未配置密钥';
+  head.append(node('span', '▸', 'chevron'));
+  head.append(node('strong', rolePayload.label, 'role-row-title'));
+  const summary = node('span', undefined, 'role-row-summary');
+  summary.append(node('span', `当前生效：${effective.model} · ${effective.backend} · ${effective.base_url}`, 'role-row-effective'));
+  summary.append(node('span', `${keyState}${effective.dimensions ? ` · ${effective.dimensions} 维` : ''}`, 'role-row-key'));
+  head.append(summary);
+  row.append(head);
 
-  const list = node('ul', undefined, 'profile-list');
+  const body = node('div', undefined, 'role-row-body');
+  body.id = `role-body-${role}`;
+  body.hidden = !open;
+  body.append(node('p', `${ROLE_DESC[role] || ''}（共 ${rolePayload.profiles.length} 个档案）`, 'role-desc'));
+
+  const scroller = node('div', undefined, 'profile-scroller');
   if (!rolePayload.profiles.length) {
-    const empty = node('li', undefined, 'profile-item');
-    empty.append(node('span', '还没有档案；当前直接使用本地配置文件的取值。', 'profile-meta'));
-    list.append(empty);
+    scroller.append(node('div', '还没有档案；当前直接使用本地配置文件的取值。', 'profile-item empty'));
   }
   rolePayload.profiles.forEach(profile => {
-    const item = node('li', undefined, `profile-item ${rolePayload.active_profile_id === profile.id ? 'is-active' : ''}`);
+    const item = node('div', undefined, `profile-item ${rolePayload.active_profile_id === profile.id ? 'is-active' : ''}`);
     const head2 = node('div', undefined, 'profile-head');
     head2.append(node('strong', profile.name));
     if (rolePayload.active_profile_id === profile.id) head2.append(node('span', '使用中', 'active-badge'));
@@ -129,16 +164,21 @@ function renderRole(rolePayload) {
     const bar = node('div', undefined, 'profile-actions');
     if (rolePayload.active_profile_id !== profile.id) bar.append(action('激活', () => activateProfile(profile.id)));
     bar.append(action('测试连接', () => testProfile(profile.id)));
-    bar.append(action('编辑', () => openDialog(rolePayload.role, profile)));
+    bar.append(action('编辑', () => openDialog(role, profile)));
     bar.append(action('删除', () => deleteProfile(profile)));
     item.append(bar);
     const line = testLine(profile.id);
     if (line) item.append(line);
-    list.append(item);
+    scroller.append(item);
   });
-  card.append(list);
-  card.append(action('+ 新建档案', () => openDialog(rolePayload.role, null)));
-  return card;
+  const create = node('button', '+ 新建档案', 'new-profile-card');
+  create.type = 'button';
+  create.onclick = () => openDialog(role, null);
+  scroller.append(create);
+
+  body.append(scroller);
+  row.append(body);
+  return row;
 }
 
 function renderRoles(data) {
@@ -164,6 +204,10 @@ function renderTuning(data) {
   }
   $('rrf-k').value = data.business.search.rrf_k;
   $('candidates').value = data.business.search.candidates;
+  const summary = $('tuning-summary');
+  summary.textContent = `权重 ${['video', 'description', 'style', 'dialogue', 'lexical'].map(k => weights[k]).join('/')}`
+    + ` · RRF k=${data.business.search.rrf_k} · 候选 ${data.business.search.candidates}`;
+  summary.title = '顺序：画面 / 动作场景 / 情绪镜头 / 对白 / 词法 BM25';
 }
 
 // --- 音色库 ---
@@ -171,6 +215,8 @@ const VOICE_PROVIDER_LABELS = {self: '自建服务', openai: 'OpenAI 协议', mi
 
 function renderVoices(data) {
   const voices = data.voices || [];
+  const active = voices.find(voice => voice.voice_id === data.business.default_voice);
+  $('voices-summary').textContent = `${voices.length} 个音色 · 默认：${active ? active.name : '跟随配置文件默认'}`;
   const select = $('default-voice');
   select.replaceChildren();
   const follow = node('option', '跟随配置文件默认');
@@ -492,4 +538,8 @@ $('reload').onclick = () => run(async () => {
   try { await loadSettings(); notify('设置状态已刷新。'); } finally { $('reload').disabled = false; }
 });
 
+for (const head of document.querySelectorAll('.role-row-head[data-section]')) {
+  head.onclick = () => toggleRole(head.dataset.section);
+}
+syncSectionRows();
 run(loadSettings);

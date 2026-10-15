@@ -23,13 +23,14 @@
 | 多模态理解 | GLM-4.5V（OpenAI 兼容） | vision 模型 | Qwen-VL（compatible-mode） | 混元 vision | chat OpenAI 兼容 |
 | 文本拆分镜 | GLM 文本 | **deepseek-chat（性价比首选）** | qwen 文本 | 混元文本 | M 系列 |
 | 多模态嵌入 | — | — | — | **TokenHub**（WeMM 系，`/v1/embeddings/multimodal`） | — |
-| ASR | — | — | qwen3-asr-flash（chat + input_audio） | —（自有签名协议） | — |
+| ASR | — | — | qwen3-asr-flash（chat + input_audio） | —（自有签名协议） | asr-1.0（speech_to_text 专用适配器） |
 | TTS | — | — | DashScope 原生（专用适配器） | —（自有协议） | t2a_v2（专用适配器） |
 
 要点：
 
 - **多模态嵌入的线上选择基本只有腾讯 TokenHub**（`kinfra-vl-embedding-2b/8b`，与本地 WeMM 同系）。适配器在客户端按 `video` 配置抽帧后以图片序列发送，保证预处理指纹诚实；身份纯由配置构造，进入索引空间指纹。
 - **TTS 五家都没有标准 OpenAI `/audio/speech` 端点**，因此写了两个专用适配器：`minimax`（t2a_v2，hex 音频解码）与 `dashscope`（原生协议，音频 URL 二次下载或 base64）。
+- **ASR 线上协议分两类**：OpenAI 兼容 chat + input_audio（阿里）与 MiniMax `speech_to_text`（multipart 表单上传，单文件 ≤500 秒/50MB，管线 30 秒切块远小于上限）；两者都只出纯文本，时间戳由本地对齐补齐。
 - 理解/拆分镜的 OpenAI 兼容端点会自动省略 llama-server 专有的 `chat_template_kwargs`（档案里 `llama_template=false`）；本地服务保持默认 `true` 不变。
 - 预设的模型名是「最佳已知」预填值，会随平台演进漂移——页面所有字段可改，每个档案有「测试连接」按钮（最小真实调用）兜底。
 

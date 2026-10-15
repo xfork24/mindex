@@ -17,7 +17,7 @@ def minimax_profile(client, name="Minimax TTS"):
             "role": "tts",
             "provider": "minimax",
             "name": name,
-            "config": {"backend": "minimax", "base_url": "https://api.minimaxi.com/v1", "model": "speech-2.8-hd"},
+            "config": {"backend": "minimax", "base_url": "https://api.minimax.cn/v1", "model": "speech-2.8-hd"},
             "api_key": "sk-minimax-key-1234",
         },
     ).json()

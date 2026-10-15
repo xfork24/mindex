@@ -11,6 +11,7 @@ from mindex import adapters
 from mindex.adapters import (
     DashScopeSpeaker,
     MiniMaxSpeaker,
+    MiniMaxTranscriber,
     ModelError,
     OpenAIChatTranscriber,
     QwenAnalyzer,
@@ -130,6 +131,39 @@ def test_openai_chat_transcriber_contract(config, monkeypatch, tmp_path):
         OpenAIChatTranscriber(config).raw(audio)
 
 
+def test_minimax_transcriber_contract(config, monkeypatch, tmp_path):
+    """MiniMax speech_to_text：multipart 表单上传；静音空文本合法，缺 text 字段才是错误。"""
+    captured = {}
+
+    def reply(method, url, **kwargs):
+        captured.update(url=url, data=kwargs.get("data"), files=kwargs.get("files"))
+        return {"text": "  雨夜有人在说话。 ", "duration": 3.2, "trace_id": "t-1"}
+
+    monkeypatch.setattr(adapters, "request", reply)
+    config.asr.backend = "minimax"
+    config.asr.base_url = "https://api.minimax.cn/v1"
+    config.asr.model = "asr-1.0"
+    audio = tmp_path / "audio.wav"
+    audio.write_bytes(b"RIFF-fake-wav")
+    result = MiniMaxTranscriber(config).raw(audio)
+    assert result["text"] == "雨夜有人在说话。"
+    assert result["language"] == ""
+    assert captured["url"].endswith("/speech_to_text")
+    assert captured["data"] == {"model": "asr-1.0"}
+    assert captured["files"]["file"][0] == "audio.wav"
+
+    with pytest.raises(ModelError, match="时间戳"):
+        MiniMaxTranscriber(config).transcribe(audio)
+
+    # 官方文档：静音音频可返回空文本，属合法响应而非错误（设置页测试连接依赖此行为）。
+    monkeypatch.setattr(adapters, "request", lambda *a, **kw: {"text": "", "duration": 0.5})
+    assert MiniMaxTranscriber(config).raw(audio)["text"] == ""
+
+    monkeypatch.setattr(adapters, "request", lambda *a, **kw: {"duration": 1.0})
+    with pytest.raises(ModelError, match="MiniMax"):
+        MiniMaxTranscriber(config).raw(audio)
+
+
 def test_minimax_speaker_decodes_hex(config, monkeypatch):
     captured = {}
 
@@ -202,6 +236,8 @@ def test_factories_dispatch_cloud_backends(config):
     assert isinstance(make_embedder(config), TokenHubEmbedder)
     config.asr.backend = "openai"
     assert isinstance(make_transcriber(config), OpenAIChatTranscriber)
+    config.asr.backend = "minimax"
+    assert isinstance(make_transcriber(config), MiniMaxTranscriber)
     config.studio.tts.backend = "minimax"
     assert isinstance(make_speaker(config), MiniMaxSpeaker)
     config.studio.tts.backend = "dashscope"
@@ -216,6 +252,19 @@ def test_pipeline_routes_openai_asr_to_raw_flow(config, monkeypatch):
     from mindex.pipeline import Pipeline
 
     config.asr.backend = "openai"
+    calls = []
+    monkeypatch.setattr(Pipeline, "transcribe_raw", lambda self, source_id: calls.append(source_id))
+    pipeline = Pipeline.__new__(Pipeline)
+    pipeline.config = config
+    pipeline.transcribe("src-1")
+    assert calls == ["src-1"]
+
+
+def test_pipeline_routes_minimax_asr_to_raw_flow(config, monkeypatch):
+    """minimax 与 openai 一样只出纯文本，必须走 transcribe_raw → align 流程。"""
+    from mindex.pipeline import Pipeline
+
+    config.asr.backend = "minimax"
     calls = []
     monkeypatch.setattr(Pipeline, "transcribe_raw", lambda self, source_id: calls.append(source_id))
     pipeline = Pipeline.__new__(Pipeline)

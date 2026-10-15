@@ -22,6 +22,19 @@ TOKENHUB = {
     },
 }
 
+MINIMAX_TTS = {
+    "role": "tts",
+    "provider": "minimax",
+    "name": "MiniMax 语音合成",
+    "config": {
+        "backend": "minimax",
+        "base_url": "https://api.minimax.cn/v1",
+        "model": "speech-2.8-hd",
+        "voice": "male-qn-qingse",
+    },
+    "api_key": "sk-minimax-key",
+}
+
 
 def client_for(config) -> TestClient:
     return TestClient(create_app(config))
@@ -92,6 +105,28 @@ def test_profile_test_connection(config, monkeypatch):
     result = client.post(f"/api/settings/profiles/{profile['id']}/test").json()
     assert result["ok"] is False
     assert "连接被拒绝" in result["detail"]
+
+
+def test_minimax_tts_profile_carries_voice(config, monkeypatch):
+    """TTS 档案必须能携带 voice：云端档案继承本地默认音色 Cherry 会直接 2054 voice id not exist。"""
+    client = client_for(config)
+    created = client.post("/api/settings/profiles", json=MINIMAX_TTS)
+    assert created.status_code == 201, created.text
+    profile = created.json()
+    assert profile["config"]["voice"] == "male-qn-qingse"
+    client.post(f"/api/settings/profiles/{profile['id']}/activate")
+
+    captured = {}
+
+    def reply(method, url, **kwargs):
+        captured.update(url=url, json=kwargs["json"])
+        return {"base_resp": {"status_code": 0}, "data": {"audio": b"RIFF-probe".hex()}}
+
+    monkeypatch.setattr(adapters, "request", reply)
+    result = client.post(f"/api/settings/profiles/{profile['id']}/test").json()
+    assert result["ok"] is True
+    assert captured["url"].endswith("/t2a_v2")
+    assert captured["json"]["voice_setting"] == {"voice_id": "male-qn-qingse"}
 
 
 def test_profile_test_connection_reasoning_model_without_content(config, monkeypatch):

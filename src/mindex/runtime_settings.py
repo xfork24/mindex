@@ -39,7 +39,17 @@ PROFILE_FIELDS = {
     "generator": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "llama_template", "max_tokens"},
     "embedding": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "quantization", "dimensions"},
     "asr": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "enabled"},
-    "tts": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "speech_path", "response_format"},
+    "tts": {
+        "backend",
+        "base_url",
+        "model",
+        "revision",
+        "timeout",
+        "api_key_env",
+        "speech_path",
+        "response_format",
+        "voice",
+    },
 }
 SECTION_TYPES = {
     "analyzer": AnalyzerConfig,
@@ -174,7 +184,7 @@ PROVIDER_PRESETS: dict[str, dict[str, dict]] = {
         "generator": {
             "config": {
                 "backend": "openai",
-                "base_url": "https://api.minimaxi.com/v1",
+                "base_url": "https://api.minimax.cn/v1",
                 "model": "MiniMax-M2",
                 "llama_template": False,
             },
@@ -183,10 +193,19 @@ PROVIDER_PRESETS: dict[str, dict[str, dict]] = {
         "tts": {
             "config": {
                 "backend": "minimax",
-                "base_url": "https://api.minimaxi.com/v1",
+                "base_url": "https://api.minimax.cn/v1",
                 "model": "speech-2.8-hd",
+                "voice": "male-qn-qingse",
             },
-            "note": "t2a_v2 专用适配器；支持上传样本克隆音色",
+            "note": "t2a_v2 专用适配器；预填系统音色，克隆后可换自定义音色 ID",
+        },
+        "asr": {
+            "config": {
+                "backend": "minimax",
+                "base_url": "https://api.minimax.cn/v1",
+                "model": "asr-1.0",
+            },
+            "note": "speech_to_text 专用协议；音频 ≤500 秒/50MB，30 秒切块远小于上限",
         },
     },
 }

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import mimetypes
 import threading
@@ -20,6 +21,7 @@ from filelock import FileLock, Timeout
 from pydantic import Field, model_validator
 
 from . import studio, studio_steps
+from . import studio_workspace as workspace
 from .adapters import MultimodalEmbedder, Speaker, Storyboarder
 from .config import Config, StrictModel, fingerprint
 from .curation import EntityNotFound
@@ -88,6 +90,53 @@ class TimelineBody(StrictModel):
     burn: bool | None = None
 
 
+class TitleBody(StrictModel):
+    title: str = Field(min_length=1, max_length=60)
+
+
+class PlanBody(StrictModel):
+    name: str = Field(min_length=1, max_length=60)
+    copy_from: str | None = None
+    from_final: str | None = None
+
+
+class PlanPatchBody(StrictModel):
+    revision: str
+    name: str | None = Field(default=None, min_length=1, max_length=60)
+    options: workspace.PlanOptions | None = None
+    shots: list[ShotBody] | None = Field(default=None, min_length=1)
+
+
+class VersionChoiceBody(StrictModel):
+    revision: str
+    version_id: str
+    stage: Literal["content", "recall", "tts", "select", "render", "compose"]
+    shot_id: str | None = None
+
+
+class BuildBody(StrictModel):
+    token: str
+    force: bool = False
+
+
+class NodeBody(StrictModel):
+    revision: str
+    inputs: dict[str, str | None]
+    stage: Literal["split", "recall", "tts", "select", "render"]
+    shot_id: str | None = None
+    force: bool = False
+
+
+class RangeBody(StrictModel):
+    revision: str
+    shot_id: str
+    source_id: str
+    start: float = Field(ge=0)
+    end: float = Field(gt=0)
+    segment_ids: list[str] | None = Field(default=None, min_length=1)
+    preview_token: str | None = None
+
+
 def studio_router(
     config: Config | RuntimeConfig,
     store: Store,
@@ -130,6 +179,7 @@ def studio_router(
             file_lock = acquire_lock()
             cfg = current()  # 一次任务运行绑定同一份生效配置；运行中改设置下次生效
             try:
+                reject_legacy_mutation(job_id)
                 state = studio.reconcile(cfg, job_id)
                 if requested_step:
                     studio.check_step(state, requested_step)
@@ -278,6 +328,357 @@ def studio_router(
             }
         return detail
 
+    # Versioned workspace endpoints share the same cross-process execution lock.
+    def reject_legacy_mutation(job_id):
+        if workspace.path(base, job_id).is_file():
+            raise HTTPException(409, "任务已接入版本工作台，请通过方案 API 编辑或执行")
+
+    def read_workspace(job_id):
+        if not workspace.path(base, job_id).is_file():
+            with mutation_lock():
+                return workspace.load(current(), job_id)
+        w = workspace.load(base, job_id)
+        if any(b["status"] == "running" for b in w["builds"]):
+            try:
+                with mutation_lock():
+                    w = workspace.load(base, job_id)
+                    workspace.recover(base, job_id, w)
+            except HTTPException as exc:
+                if exc.status_code != 409:
+                    raise
+        return w
+
+    @router.get("/jobs/{job_id}/workspace")
+    def get_workspace(job_id: str):
+        return workspace.detail(current(), job_id, read_workspace(job_id))
+
+    @router.patch("/jobs/{job_id}/title")
+    def patch_title(job_id: str, body: TitleBody):
+        with mutation_lock():
+            state = studio.load_job(base, job_id)
+            if not body.title.strip():
+                raise studio.StudioError("标题不能为空")
+            state.update(title=body.title.strip(), updated_at=studio.now())
+            studio.save(studio.job_path(base, job_id), state)
+        return state
+
+    @router.post("/jobs/{job_id}/plans", status_code=201)
+    def create_plan(job_id: str, body: PlanBody):
+        import copy
+        from uuid import uuid4
+
+        with mutation_lock():
+            w = workspace.load(current(), job_id)
+            if body.copy_from and body.from_final:
+                raise studio.StudioError("复制方案与恢复成片不能同时指定")
+            if body.from_final:
+                p = workspace.restore(w, body.from_final, body.name)
+            elif body.copy_from:
+                p = copy.deepcopy(workspace.plan(w, body.copy_from))
+                p.update(id=uuid4().hex[:12], name=body.name, created_at=studio.now())
+            else:
+                p = workspace.new_plan(
+                    body.name, copy.deepcopy(workspace.plan(w, w["active_plan"])["options"])
+                )
+            w["plans"][p["id"]] = p
+            w["active_plan"] = p["id"]
+            workspace.persist(base, job_id, w)
+        return workspace.detail(current(), job_id, w)
+
+    @router.post("/jobs/{job_id}/plans/{plan_id}/activate")
+    def activate_plan(job_id: str, plan_id: str):
+        with mutation_lock():
+            w = workspace.load(current(), job_id)
+            workspace.plan(w, plan_id)
+            w["active_plan"] = plan_id
+            workspace.persist(base, job_id, w)
+        return workspace.detail(current(), job_id, w)
+
+    @router.patch("/jobs/{job_id}/plans/{plan_id}")
+    def patch_plan(job_id: str, plan_id: str, body: PlanPatchBody):
+        from uuid import uuid4
+
+        with mutation_lock():
+            w = workspace.load(current(), job_id)
+            p = workspace.plan(w, plan_id)
+            workspace.require_revision(p, body.revision)
+            if body.name is not None:
+                p["name"] = body.name
+            if body.options:
+                p["options"] = body.options.model_dump()
+            if body.shots is not None:
+                shots = [
+                    studio.Shot(**{**s.model_dump(), "id": s.id or f"shot-{uuid4().hex[:10]}"})
+                    for s in body.shots
+                ]
+                workspace.set_board(current(), job_id, w, p, shots)
+            workspace.persist(base, job_id, w)
+        return workspace.detail(current(), job_id, w)
+
+    @router.get("/jobs/{job_id}/versions")
+    def get_versions(job_id: str, stage: str | None = None, shot_id: str | None = None):
+        w = read_workspace(job_id)
+        return {
+            "items": [
+                v
+                for v in workspace.detail(current(), job_id, w)["versions"].values()
+                if (stage is None or v["stage"] == stage) and (shot_id is None or v["shot_id"] == shot_id)
+            ]
+        }
+
+    @router.get("/jobs/{job_id}/versions/{version_id}")
+    def get_version(job_id: str, version_id: str):
+        w = read_workspace(job_id)
+        return workspace.version(workspace.detail(current(), job_id, w), version_id)
+
+    @router.get("/jobs/{job_id}/versions/{version_id}/dependencies")
+    def get_dependencies(job_id: str, version_id: str):
+        w = read_workspace(job_id)
+        result = {}
+
+        def visit(vid):
+            if vid in result:
+                return
+            item = workspace.version(w, vid)
+            result[vid] = item
+            for dep in item["inputs"].values():
+                if dep:
+                    visit(dep)
+
+        visit(version_id)
+        return {"root": version_id, "nodes": result}
+
+    @router.post("/jobs/{job_id}/plans/{plan_id}/select-version")
+    def select_version(job_id: str, plan_id: str, body: VersionChoiceBody):
+        with mutation_lock():
+            w = workspace.load(current(), job_id)
+            p = workspace.plan(w, plan_id)
+            workspace.require_revision(p, body.revision)
+            if not workspace.valid_files(base, job_id, workspace.version(w, body.version_id)):
+                raise studio.StudioError("版本文件缺失或损坏，不能选为构建输入")
+            workspace.choose(w, p, body.stage, body.shot_id, body.version_id)
+            if body.stage == "content":
+                shots = [
+                    studio.Shot.model_validate(workspace.version(w, p["shots"][sid]["content"])["data"])
+                    for sid in workspace.ordered_shots(w, p)
+                ]
+                workspace.set_board(current(), job_id, w, p, shots)
+            workspace.persist(base, job_id, w)
+        return workspace.detail(current(), job_id, w)
+
+    @router.get("/jobs/{job_id}/plans/{plan_id}/preflight")
+    def build_preflight(job_id: str, plan_id: str, force: bool = False):
+        w = read_workspace(job_id)
+        return workspace.preflight(current(), job_id, w, workspace.plan(w, plan_id), force=force)
+
+    def launch_build(job_id, plan_id, *, body=None, node=None):
+        from uuid import uuid4
+
+        with guard:
+            file_lock = acquire_lock()
+            cfg = current()
+            try:
+                w = workspace.load(cfg, job_id)
+                workspace.recover(cfg, job_id, w)
+                p = workspace.plan(w, plan_id)
+                if node:
+                    workspace.require_revision(p, node.revision)
+                    spec = workspace.specification(cfg, job_id, w, p, node.stage, node.shot_id)
+                    if node.inputs != spec["inputs"]:
+                        raise studio.StudioError("输入版本已变化，请刷新后重试")
+                    if node.stage == "split" and node.shot_id is not None:
+                        raise studio.StudioError("拆分镜不能指定单镜")
+                    nodes = [
+                        {
+                            "key": f"{node.stage}:{node.shot_id}" if node.shot_id else node.stage,
+                            "stage": node.stage,
+                            "shot_id": node.shot_id,
+                            "action": "rebuild",
+                        }
+                    ]
+                    force = node.force
+                else:
+                    checked = workspace.preflight(cfg, job_id, w, p, force=body.force)
+                    if body.token != checked["token"]:
+                        raise studio.StudioError("预检已变化，请重新查看构建清单")
+                    if not p["board"]:
+                        raise studio.StudioError("请先生成或编辑分镜")
+                    nodes, force = checked["nodes"], body.force
+                bid = uuid4().hex[:12]
+                build = {
+                    "id": bid,
+                    "plan_id": plan_id,
+                    "status": "running",
+                    "force": force,
+                    "created_at": studio.now(),
+                    "plan_snapshot": copy.deepcopy(p),
+                    "nodes": [{**n, "status": "pending"} for n in nodes],
+                }
+                w["builds"].append(build)
+                workspace.persist(cfg, job_id, w)
+            except Exception:
+                file_lock.release()
+                raise
+
+            def worker():
+                try:
+                    workspace.run_build(
+                        cfg, job_id, bid, speaker=speaker, storyboarder=storyboarder, embedder=embedder
+                    )
+                except Exception as exc:  # noqa: BLE001 — all background errors need terminal state
+                    fresh = workspace.load(cfg, job_id)
+                    record = next(b for b in fresh["builds"] if b["id"] == bid)
+                    record.update(status="failed", error=str(exc), finished_at=studio.now())
+                    workspace.persist(cfg, job_id, fresh)
+                finally:
+                    file_lock.release()
+
+            thread = threading.Thread(target=worker, daemon=True, name=f"studio-build-{job_id}")
+            executor["thread"] = thread
+            try:
+                thread.start()
+            except Exception as exc:
+                build.update(status="failed", error=str(exc), finished_at=studio.now())
+                workspace.persist(cfg, job_id, w)
+                file_lock.release()
+                raise
+            return build
+
+    @router.post("/jobs/{job_id}/plans/{plan_id}/build", status_code=202)
+    def submit_build(job_id: str, plan_id: str, body: BuildBody):
+        return launch_build(job_id, plan_id, body=body)
+
+    @router.post("/jobs/{job_id}/plans/{plan_id}/nodes", status_code=202)
+    def submit_node(job_id: str, plan_id: str, body: NodeBody):
+        return launch_build(job_id, plan_id, node=body)
+
+    @router.get("/sources/{source_id}/shots")
+    def source_shots(source_id: str):
+        return {"items": workspace.source_shots(current(), source_id)}
+
+    def preview_range(job_id, w, p, body):
+        import copy
+
+        draft = copy.deepcopy(p)
+        selected_range = body.model_dump(
+            include={"source_id", "start", "end", "segment_ids"}, exclude_none=True
+        )
+        draft["ranges"][body.shot_id] = selected_range
+        result = workspace.alignment(current(), job_id, w, draft, body.shot_id, selected_range)
+        result["preview_token"] = fingerprint(
+            {
+                "revision": body.revision,
+                "result": result,
+                "selection": workspace.settings(current(), p, "select"),
+                "render": workspace.settings(current(), p, "render"),
+            }
+        )
+        return result
+
+    @router.post("/jobs/{job_id}/plans/{plan_id}/range-preview")
+    def range_preview(job_id: str, plan_id: str, body: RangeBody):
+        w = read_workspace(job_id)
+        p = workspace.plan(w, plan_id)
+        workspace.require_revision(p, body.revision)
+        result = preview_range(job_id, w, p, body)
+        result["preview_url"] = create_event_preview(
+            job_id, result["event"], result["preview_token"], p["options"]
+        )
+        return result
+
+    @router.post("/jobs/{job_id}/plans/{plan_id}/range-confirm")
+    def range_confirm(job_id: str, plan_id: str, body: RangeBody):
+        with mutation_lock():
+            w = workspace.load(current(), job_id)
+            p = workspace.plan(w, plan_id)
+            workspace.require_revision(p, body.revision)
+            result = preview_range(job_id, w, p, body)
+            if body.preview_token != result["preview_token"]:
+                raise studio.StudioError("请先预览并确认当前对齐结果")
+            p["ranges"][body.shot_id] = result["range"]
+            workspace.execute(current(), job_id, w, p, "select", body.shot_id)
+        return workspace.detail(current(), job_id, w)
+
+    def create_event_preview(job_id, data, key, options=None):
+        import math
+        import wave
+        from fractions import Fraction
+
+        from .media import atomic_media, probe
+        from .studio_render import cut_shot, extract_ambient, process_shot_audio
+
+        cfg = current()
+        event = studio.TimelineEvent.model_validate(data)
+        if not studio_steps.interval_visible(
+            store, event.video.source_id, event.video.start, event.video.end
+        ):
+            raise studio.StudioError("所选区间包含隐藏素材")
+        directory = safe_path(studio.job_dir(base, job_id), f"previews/v2-{key}")
+        directory.mkdir(parents=True, exist_ok=True)
+        output = directory / "preview.mp4"
+        with FileLock(str(output) + ".lock", timeout=0):
+            if not output.is_file():
+                row = store.one("SELECT path FROM sources WHERE id=?", (event.video.source_id,))
+                if not row:
+                    raise studio.StudioError("素材不存在")
+                source = store.resolve_media(row["path"])
+                voice = safe_path(studio.job_dir(base, job_id), event.audio.file)
+                ambient = None
+                audio_config = cfg.studio.audio
+                if options:
+                    audio_config = audio_config.model_copy(update={"duck_gain": options["duck_gain"]})
+                    if options["audio_mode"] == "ducking" and probe(source)["audio"]:
+                        ambient = directory / "ambient.wav"
+                        extract_ambient(source, event, audio_config, ambient)
+                process_shot_audio(voice, ambient, event, audio_config, directory / "audio.wav")
+                with wave.open(str(directory / "audio.wav"), "rb") as handle:
+                    samples = handle.getnframes()
+                fps = Fraction(str(cfg.studio.render.fps))
+                frames = math.ceil(Fraction(samples, 48000) * fps)
+                while math.floor(Fraction(frames, 1) / fps * 48000) < samples:
+                    frames += 1
+                cut_shot(source, event, cfg.studio.render, directory / "video.mp4", frames=frames)
+                end_sample = round(Fraction(frames, 1) / fps * 48000)
+                atomic_media(
+                    [
+                        "-i",
+                        str(directory / "video.mp4"),
+                        "-i",
+                        str(directory / "audio.wav"),
+                        "-map",
+                        "0:v:0",
+                        "-map",
+                        "1:a:0",
+                        "-c:v",
+                        "copy",
+                        "-af",
+                        f"apad=whole_len={end_sample},atrim=end_sample={end_sample}",
+                        "-c:a",
+                        "aac",
+                    ],
+                    output,
+                )
+        return f"/api/studio/jobs/{job_id}/artifacts/{output.relative_to(studio.job_dir(base, job_id)).as_posix()}"
+
+    @router.get("/jobs/{job_id}/versions/{version_id}/preview")
+    def version_preview(job_id: str, version_id: str):
+        w = read_workspace(job_id)
+        item = workspace.version(w, version_id)
+        if item["stage"] == "render":
+            if "preview" not in item["files"]:
+                return {"url": f"/api/studio/jobs/{job_id}/artifacts/{item['files']['video']['path']}"}
+            return {"url": f"/api/studio/jobs/{job_id}/artifacts/{item['files']['preview']['path']}"}
+        if item["stage"] != "select" or item["incomplete"]:
+            raise studio.StudioError("此版本不能生成有配音的预览；可从产物查看原文件")
+        key = fingerprint(
+            {
+                "version": version_id,
+                "render": current().studio.render.model_dump(),
+                "audio": current().studio.audio.model_dump(),
+            }
+        )
+        return {"url": create_event_preview(job_id, item["data"]["event"], key)}
+
     @router.post("/jobs", status_code=201)
     def create_job(body: CreateJobBody):
         try:
@@ -308,6 +709,7 @@ def studio_router(
     @router.patch("/jobs/{job_id}/storyboard")
     def patch_storyboard(job_id: str, body: StoryboardBody):
         with mutation_lock():
+            reject_legacy_mutation(job_id)
             shots, seen = [], set()
             for index, item in enumerate(body.shots, 1):
                 shot_id = (item.id or f"shot-{index:02d}").strip()
@@ -337,6 +739,7 @@ def studio_router(
     @router.patch("/jobs/{job_id}/timeline")
     def patch_timeline(job_id: str, body: TimelineBody):
         with mutation_lock():
+            reject_legacy_mutation(job_id)
             patches = [
                 {"shot_id": event.shot_id, "video": event.video.model_dump(exclude_none=True)}
                 for event in body.events

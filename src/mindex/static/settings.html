@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Mindex · 设置</title><link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/settings.css">
-  <script src="/settings.js?v=20261014" defer></script>
+  <link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/settings.css?v=20261015b">
+  <script src="/settings.js?v=20261015b" defer></script>
 </head>
 <body class="settings">
   <header><a class="brand" href="/">m<span>index</span><i></i></a><span class="header-note">设置</span><a class="quiet nav-link" href="/">视频检索 ↗</a><a class="quiet nav-link" href="/admin">素材管理 ↗</a><a class="quiet nav-link" href="/studio">创作 ↗</a><button class="quiet" id="reload">刷新设置</button></header>
@@ -17,28 +17,46 @@
       <div id="roles" class="role-grid"></div>
     </section>
     <section aria-label="检索与创作调参">
-      <div class="section-heading"><h2>检索调参</h2><span>五路召回权重与 RRF 融合参数，保存即热生效</span></div>
-      <form id="search-tuning" class="tuning-panel">
-        <div class="weight-grid" id="weight-grid"></div>
-        <div class="tuning-row">
-          <label>RRF k<input id="rrf-k" type="number" min="1" step="1"></label>
-          <label>候选数<input id="candidates" type="number" min="1" max="1000" step="1"></label>
+      <div class="role-row standalone-row" id="tuning-row">
+        <button type="button" class="role-row-head" data-section="tuning" aria-controls="tuning-body" aria-expanded="false">
+          <span class="chevron">▸</span>
+          <strong class="role-row-title">检索调参</strong>
+          <span class="role-row-summary"><span class="role-row-effective" id="tuning-summary"></span></span>
+        </button>
+        <div class="role-row-body" id="tuning-body" hidden>
+          <p class="role-desc">五路召回权重与 RRF 融合参数，保存即热生效</p>
+          <form id="search-tuning" class="tuning-panel">
+            <div class="weight-grid" id="weight-grid"></div>
+            <div class="tuning-row">
+              <label>RRF k<input id="rrf-k" type="number" min="1" step="1"></label>
+              <label>候选数<input id="candidates" type="number" min="1" max="1000" step="1"></label>
+            </div>
+            <div class="tuning-actions"><button class="quiet" type="button" id="tuning-reset">恢复默认</button><button class="submit" type="submit" id="tuning-save">保存调参 <span>↗</span></button></div>
+          </form>
         </div>
-        <div class="tuning-actions"><button class="quiet" type="button" id="tuning-reset">恢复默认</button><button class="submit" type="submit" id="tuning-save">保存调参 <span>↗</span></button></div>
-      </form>
+      </div>
     </section>
     <section aria-label="音色库">
-      <div class="section-heading"><h2>音色库</h2><span>预定义音色与克隆音色；默认音色用于创作配音</span></div>
-      <div class="tuning-panel">
-        <div class="voice-default-row">
-          <label for="default-voice">默认配音音色</label>
-          <select id="default-voice"></select>
-          <span class="muted" id="voice-backend-hint"></span>
-        </div>
-        <ul id="voice-list" class="voice-list"></ul>
-        <div class="voice-actions">
-          <button class="quiet" type="button" id="voice-register">+ 录入已有音色</button>
-          <button class="submit" type="button" id="voice-clone">克隆我的声音 <span>↗</span></button>
+      <div class="role-row standalone-row" id="voices-row">
+        <button type="button" class="role-row-head" data-section="voices" aria-controls="voices-body" aria-expanded="false">
+          <span class="chevron">▸</span>
+          <strong class="role-row-title">音色库</strong>
+          <span class="role-row-summary"><span class="role-row-effective" id="voices-summary"></span></span>
+        </button>
+        <div class="role-row-body" id="voices-body" hidden>
+          <p class="role-desc">预定义音色与克隆音色；默认音色用于创作配音</p>
+          <div class="tuning-panel">
+            <div class="voice-default-row">
+              <label for="default-voice">默认配音音色</label>
+              <select id="default-voice"></select>
+              <span class="muted" id="voice-backend-hint"></span>
+            </div>
+            <ul id="voice-list" class="voice-list"></ul>
+            <div class="voice-actions">
+              <button class="quiet" type="button" id="voice-register">+ 录入已有音色</button>
+              <button class="submit" type="button" id="voice-clone">克隆我的声音 <span>↗</span></button>
+            </div>
+          </div>
         </div>
       </div>
     </section>
