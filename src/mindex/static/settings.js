@@ -62,6 +62,15 @@ function node(tag, text, className) {
   if (className) n.className = className;
   return n;
 }
+function voiceLabelOf(catalog, voiceId) {
+  for (const group of catalog.groups || []) {
+    const hit = (group.voices || []).find(voice => voice.voice_id === voiceId);
+    if (hit) return hit.label;
+  }
+  const mine = (catalog.library || []).find(voice => voice.voice_id === voiceId);
+  return mine ? `${mine.kind === 'clone' ? '克隆' : '已录入'} · ${mine.name}` : voiceId;
+}
+
 function notify(text = '', error = false) {
   $('notice').textContent = text;
   $('notice').className = `notice ${error ? 'error' : 'info'}`;
@@ -213,26 +222,64 @@ function renderTuning(data) {
 // --- 音色库 ---
 const VOICE_PROVIDER_LABELS = {self: '自建服务', openai: 'OpenAI 协议', minimax: 'MiniMax', dashscope: '阿里'};
 
-function renderVoices(data) {
+function renderVoices(data, catalog = null) {
   const voices = data.voices || [];
   const active = voices.find(voice => voice.voice_id === data.business.default_voice);
-  $('voices-summary').textContent = `${voices.length} 个音色 · 默认：${active ? active.name : '跟随配置文件默认'}`;
+  const defaultLabel = catalog
+    ? (catalog.default_voice && voiceLabelOf(catalog, catalog.default_voice)) || active?.name || '跟随配置文件默认'
+    : active ? active.name : '跟随配置文件默认';
+  $('voices-summary').textContent = `${voices.length} 个音色 · 默认：${defaultLabel === '跟随配置文件默认' ? defaultLabel : defaultLabel}`;
   const select = $('default-voice');
   select.replaceChildren();
   const follow = node('option', '跟随配置文件默认');
   follow.value = '';
   select.append(follow);
-  voices.forEach(voice => {
-    const option = node('option', `${voice.kind === 'clone' ? '克隆' : '预定义'} · ${voice.name}`);
-    option.value = String(voice.id);
-    if (data.business.default_voice === voice.voice_id) option.selected = true;
-    select.append(option);
-  });
-  const backend = data.business.tts_backend;
-  $('voice-backend-hint').textContent =
-    backend === 'minimax' ? '当前 MiniMax 后端：可上传样本克隆'
-    : backend === 'dashscope' ? '当前阿里后端：可用样本 URL 复刻'
-    : '当前本地后端：仅支持录入音色 ID';
+  if (catalog) {
+    for (const group of catalog.groups || []) {
+      if (!group.voices.length) continue;
+      const optgroup = document.createElement('optgroup');
+      optgroup.label = group.label;
+      group.voices.forEach(voice => {
+        const option = node('option', voice.label);
+        option.value = voice.voice_id;
+        if (catalog.default_voice === voice.voice_id) option.selected = true;
+        optgroup.append(option);
+      });
+      select.append(optgroup);
+    }
+    if ((catalog.library || []).length) {
+      const mine = document.createElement('optgroup');
+      mine.label = '我的音色';
+      catalog.library.forEach(voice => {
+        const option = node('option', `${voice.kind === 'clone' ? '克隆' : '已录入'} · ${voice.name}`);
+        option.value = voice.voice_id;
+        if (catalog.default_voice === voice.voice_id) option.selected = true;
+        mine.append(option);
+      });
+      select.append(mine);
+    }
+    if (catalog.default_voice && ![...select.options].some(option => option.selected)) {
+      const fallback = node('option', `${catalog.default_voice}（不在当前目录）`);
+      fallback.value = catalog.default_voice;
+      fallback.selected = true;
+      select.append(fallback);
+    }
+  } else {
+    voices.forEach(voice => {
+      const option = node('option', `${voice.kind === 'clone' ? '克隆' : '预定义'} · ${voice.name}`);
+      option.value = voice.voice_id;
+      if (data.business.default_voice === voice.voice_id) option.selected = true;
+      select.append(option);
+    });
+  }
+  const clone = catalog?.clone;
+  $('voice-backend-hint').textContent = catalog?.error
+    ? `${catalog.error}（下拉为静态目录兜底）`
+    : clone?.supported
+      ? clone.mode === 'url' ? '当前阿里后端：可用样本 URL 复刻'
+        : clone.ref_text ? '当前本地 Qwen3-TTS：可上传样本克隆；服务重启后自动恢复'
+        : '当前 MiniMax 后端：可上传样本克隆'
+      : '当前后端仅支持录入音色 ID';
 
   const list = $('voice-list');
   list.replaceChildren();
@@ -273,9 +320,9 @@ $('default-voice').onchange = () => run(async () => {
   const value = $('default-voice').value;
   await api('/api/settings/business', {
     method: 'PUT', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(value ? {default_voice_id: Number(value)} : {clear_default_voice: true}),
+    body: JSON.stringify(value ? {default_voice: value} : {clear_default_voice: true}),
   });
-  notify(value ? '默认音色已更新。' : '已恢复配置文件默认音色。');
+  notify(value ? '默认音色已更新，新创作任务即生效。' : '已恢复配置文件默认音色。');
   await loadSettings();
 });
 
@@ -291,8 +338,11 @@ function syncCloneMode() {
   $('clone-url-field').hidden = cloneMode !== 'url';
   $('clone-register-fields').hidden = cloneMode !== 'register';
   $('clone-consent-wrap').hidden = cloneMode === 'register';
+  $('clone-reftext-field').hidden = !(cloneMode === 'upload' && state.voiceCatalog?.clone?.ref_text);
   $('clone-mode-note').textContent = {
-    upload: '上传样本到厂商完成克隆并生成预览；需要当前语音合成为 MiniMax 后端。',
+    upload: state.voiceCatalog?.clone?.ref_text
+      ? '样本注册到本地 Qwen3-TTS（3 秒以上清晰人声）；填参考文本可提升克隆效果。服务重启后打开音色库会自动恢复。'
+      : '上传样本到厂商完成克隆并生成预览；需要当前语音合成为 MiniMax 后端。',
     url: '阿里声音复刻要求样本是公网可访问 URL（wav/mp3/m4a，10~20 秒）。',
     register: '直接录入平台已生成的音色 ID，含本地服务（Qwen3-TTS 等）的预定义音色。',
   }[cloneMode];
@@ -304,6 +354,7 @@ function openCloneDialog(mode) {
   $('clone-file').value = '';
   $('clone-url').value = '';
   $('clone-voice-id').value = '';
+  $('clone-reftext').value = '';
   $('clone-consent').checked = false;
   $('clone-error').textContent = '';
   $('clone-dialog').showModal();
@@ -313,7 +364,12 @@ for (const button of document.querySelectorAll('.clone-mode')) {
 }
 $('voice-clone').onclick = () => {
   const backend = state.data?.business?.tts_backend;
-  openCloneDialog(backend === 'dashscope' ? 'url' : backend === 'minimax' ? 'upload' : 'register');
+  const clone = state.voiceCatalog?.clone;
+  openCloneDialog(
+    backend === 'dashscope' ? 'url'
+    : clone?.supported ? 'upload'
+    : 'register',
+  );
 };
 $('voice-register').onclick = () => openCloneDialog('register');
 $('clone-close').onclick = () => $('clone-dialog').close();
@@ -337,6 +393,7 @@ $('clone-form').onsubmit = async event => {
       form.append('consent', $('clone-consent').checked ? 'true' : 'false');
       if (cloneMode === 'upload') {
         if (!$('clone-file').files.length) throw new Error('请选择声音样本文件');
+        form.append('ref_text', $('clone-reftext').value.trim());
         form.append('file', $('clone-file').files[0]);
       } else {
         const url = $('clone-url').value.trim();
@@ -357,13 +414,17 @@ $('clone-form').onsubmit = async event => {
 
 async function loadSettings() {
   const request = ++settingsRequest;
-  const data = await api('/api/settings');
+  const [data, catalog] = await Promise.all([
+    api('/api/settings'),
+    api('/api/settings/voices/catalog').catch(() => null),
+  ]);
   if (request !== settingsRequest) return;
   state.data = data;
+  state.voiceCatalog = catalog;
   renderIndexBanner(data.embedding_status);
   renderRoles(data);
   renderTuning(data);
-  renderVoices(data);
+  renderVoices(data, catalog);
 }
 
 async function activateProfile(profileId) {
@@ -433,6 +494,112 @@ function applyPreset(role, provider) {
   fillExtraFields(role, config);
   const templateWrap = $('pf-template-wrap');
   if (!templateWrap.hidden) $('pf-llama-template').checked = Boolean(config.llama_template);
+  refreshVoiceCandidates();
+}
+for (const id of ['pf-backend', 'pf-base-url', 'pf-model', 'pf-name', 'pf-api-key']) {
+  $(id).addEventListener('change', () => refreshVoiceCandidates());
+}
+
+function ensureVoiceField(tag) {
+  // 返回 {element, previous}：空 select 直接赋 value 会因无匹配选项而丢失，必须先取原值。
+  const current = $('pf-voice');
+  if (!current) return {element: null, previous: ''};
+  const previous = current.value;
+  if (current.tagName.toLowerCase() === tag) return {element: current, previous};
+  const replacement = document.createElement(tag);
+  replacement.id = 'pf-voice';
+  current.replaceWith(replacement);
+  return {element: replacement, previous};
+}
+
+async function refreshVoiceCandidates() {
+  if ($('pf-role').value !== 'tts') return;
+  const body = {};
+  if ($('pf-id').value) body.profile_id = Number($('pf-id').value);
+  else {
+    body.backend = $('pf-backend').value;
+    const base = $('pf-base-url').value.trim();
+    const model = $('pf-model').value.trim();
+    if (base) body.base_url = base;
+    if (model) body.model = model;
+    const name = $('pf-name').value.trim();
+    if (name) body.name = name;
+    if ($('pf-api-key').value) body.api_key = $('pf-api-key').value;
+  }
+  let catalog = null;
+  try {
+    catalog = await api('/api/settings/voices/catalog/preview', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
+    });
+  } catch {
+    catalog = null; // 查询失败时保留自由输入
+  }
+  const kind = catalog?.voice_kind === 'clone' ? 'clone' : 'system';
+  if (kind === 'clone') {
+    const {element: select, previous: previousClone} = ensureVoiceField('select');
+    if (!select) return;
+    select.dataset.voiceKind = 'clone';
+    select.removeAttribute('list');
+    select.removeAttribute('placeholder');
+    select.replaceChildren();
+    if ((catalog?.library || []).length) {
+      for (const item of catalog.library) {
+        const option = node('option', `${item.name}（${item.voice_id}）`);
+        option.value = item.voice_id;
+        select.append(option);
+      }
+      if (![...select.options].some(option => option.value === previousClone)) select.value = '';
+    } else {
+      const empty = node('option', catalog?.hint || '音色库中还没有克隆音色；请先在「音色库」上传样本克隆。');
+      empty.value = '';
+      select.append(empty);
+      select.value = '';
+    }
+    return;
+  }
+  const groups = catalog?.groups || [];
+  if (!groups.length) {
+    // 目录拉取失败且无静态兜底：退回自由输入，保证档案仍可保存
+    const {element: fallback, previous: fallbackValue} = ensureVoiceField('input');
+    if (fallback) {
+      fallback.removeAttribute('list');
+      fallback.value = fallbackValue;
+      fallback.placeholder = '目录暂不可用；可手动输入音色 ID';
+    }
+    return;
+  }
+  const {element: select, previous} = ensureVoiceField('select');
+  if (!select) return;
+  select.removeAttribute('list');
+  select.dataset.voiceKind = 'system';
+  select.replaceChildren();
+  const unselected = node('option', '（跟随配置文件默认）');
+  unselected.value = '';
+  select.append(unselected);
+  for (const group of groups) {
+    if (!group.voices.length) continue;
+    const optgroup = document.createElement('optgroup');
+    optgroup.label = group.label;
+    for (const voice of group.voices) {
+      const option = node('option', voice.label);
+      option.value = voice.voice_id;
+      optgroup.append(option);
+    }
+    select.append(optgroup);
+  }
+  if ((catalog?.library || []).length) {
+    const mine = document.createElement('optgroup');
+    mine.label = '我的音色';
+    for (const item of catalog.library) {
+      const option = node('option', `${item.kind === 'clone' ? '克隆' : '已录入'} · ${item.name}`);
+      option.value = item.voice_id;
+      mine.append(option);
+    }
+    select.append(mine);
+  }
+  select.value = [...select.options].some(option => option.value === previous)
+    ? previous
+    : ''; // 当前值不在目录中时回落到「跟随默认」，避免浏览器静默选中第一项造成误改
 }
 
 function openDialog(role, profile) {
@@ -464,6 +631,7 @@ function openDialog(role, profile) {
     ? `已保存密钥 ${profile.api_key.hint}；留空保留，勾选下方框可清除。` : '保存后密钥只写入本地数据库，不会出现在页面或日志。';
   $('pf-clear-key-wrap').hidden = !(profile && profile.api_key.has_key);
   $('pf-clear-key').checked = false;
+  refreshVoiceCandidates();
   return $('profile-dialog').showModal();
 }
 
@@ -488,6 +656,11 @@ $('profile-form').onsubmit = async event => {
   const apiKey = $('pf-api-key').value;
   $('pf-save').disabled = true;
   $('pf-error').textContent = '';
+  if (role === 'tts' && $('pf-voice')?.dataset?.voiceKind === 'clone' && !$('pf-voice').value) {
+    $('pf-save').disabled = false;
+    $('pf-error').textContent = 'VoiceClone 型模型必须选择音色库中的克隆音色；请先在「音色库」上传样本克隆。';
+    return;
+  }
   try {
     const body = {role, name: $('pf-name').value.trim(), provider: $('pf-provider').value, config};
     if (apiKey !== '') body.api_key = apiKey;

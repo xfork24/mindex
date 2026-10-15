@@ -40,7 +40,21 @@ function action(text,onClick,pressed) {
 function actions(kind,item) {
   const bar=node('div',undefined,'organization-actions');
   bar.append(action('名称 / 备注',()=>edit(kind,item)),action(item.favorite?'★ 已收藏':'☆ 收藏',()=>patch(kind,item.id,{favorite:!item.favorite}),item.favorite),action(item.hidden?'恢复显示':'隐藏',()=>patch(kind,item.id,{hidden:!item.hidden}),item.hidden));
+  if(kind==='source')bar.append(action('删除',()=>deleteSource(item)));
   return bar;
+}
+async function deleteSource(item) {
+  const message=[
+    `删除素材「${item.name}」？此操作不可撤销。`,``,
+    `将物理删除：全部嵌入向量、${item.shot_count} 个镜头 / ${item.moment_count} 个精细片段的切片文件与缩略图、转写、分镜计划、上下文缓存、整理信息（收藏/隐藏/备注）。`,
+    `保留：源视频文件本身（仍留在 data/sources/，可随时重新导入）。`,
+  ].join('\n');
+  if(!confirm(message))return;
+  const summary=await api(`/api/admin/sources/${item.id}`,{method:'DELETE'});
+  state.source=null;state.parent=null;state.focus=null;
+  $('source-workspace').hidden=true;$('no-source').hidden=false;syncUrl();
+  await loadSources();
+  notify(`已删除 ${summary.deleted.segments} 个片段、${summary.deleted.vectors} 条向量、${summary.deleted.files} 个文件；源视频 ${summary.kept.source_file} 已保留。`);
 }
 function renderSource(source) {
   const target=$('source-detail');target.replaceChildren();

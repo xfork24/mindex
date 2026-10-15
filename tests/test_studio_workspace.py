@@ -96,6 +96,7 @@ def test_failed_voice_preserves_every_selected_artifact_and_final(prepared):
 def test_query_text_compatibility_and_plan_structure_isolation(prepared):
     config, embedder = prepared
     jid, w, p = setup_workspace(config)
+    p["options"].update(voice_mode="custom", voice=config.studio.tts.voice)
     w, p = build(config, jid, w, p, embedder)
     config.studio.tts.voice = "另一个全局默认声音"
     config.studio.recall.limit = 7

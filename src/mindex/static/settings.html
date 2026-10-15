@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Mindex · 设置</title><link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/settings.css?v=20261015b">
-  <script src="/settings.js?v=20261015b" defer></script>
+  <link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/settings.css?v=20261016b">
+  <script src="/settings.js?v=20261016f" defer></script>
 </head>
 <body class="settings">
   <header><a class="brand" href="/">m<span>index</span><i></i></a><span class="header-note">设置</span><a class="quiet nav-link" href="/">视频检索 ↗</a><a class="quiet nav-link" href="/admin">素材管理 ↗</a><a class="quiet nav-link" href="/studio">创作 ↗</a><button class="quiet" id="reload">刷新设置</button></header>
@@ -16,8 +16,9 @@
       <div class="section-heading"><h2>模型服务</h2><span>激活的档案立即对检索、分析与创作生效</span></div>
       <div id="roles" class="role-grid"></div>
     </section>
-    <section aria-label="检索与创作调参">
-      <div class="role-row standalone-row" id="tuning-row">
+    <section aria-label="检索设置">
+      <div class="section-heading"><h2>检索设置</h2><span>五路召回与融合参数，调权即影响文字检索排序</span></div>
+      <div class="role-row" id="tuning-row">
         <button type="button" class="role-row-head" data-section="tuning" aria-controls="tuning-body" aria-expanded="false">
           <span class="chevron">▸</span>
           <strong class="role-row-title">检索调参</strong>
@@ -36,8 +37,9 @@
         </div>
       </div>
     </section>
-    <section aria-label="音色库">
-      <div class="role-row standalone-row" id="voices-row">
+    <section aria-label="TTS 设置">
+      <div class="section-heading"><h2>TTS 设置</h2><span>音色库与默认音色，用于创作工作流配音</span></div>
+      <div class="role-row" id="voices-row">
         <button type="button" class="role-row-head" data-section="voices" aria-controls="voices-body" aria-expanded="false">
           <span class="chevron">▸</span>
           <strong class="role-row-title">音色库</strong>
@@ -96,6 +98,7 @@
     <form id="clone-form">
       <label>音色名称<input id="clone-name" maxlength="60" required placeholder="例如：我的旁白"></label>
       <div id="clone-upload-field"><label class="upload" for="clone-file"><span class="upload-symbol">↥</span><strong>选择声音样本</strong><span>wav / mp3 / m4a · 10 秒到 5 分钟 · 安静环境单人朗读</span><input id="clone-file" type="file" accept=".wav,.mp3,.m4a,audio/*"></label></div>
+      <div id="clone-reftext-field" hidden><label>参考文本（本地克隆可选）<input id="clone-reftext" maxlength="400" placeholder="样本朗读的文字内容，可提升克隆效果"></label></div>
       <div id="clone-url-field" hidden><label>样本公网 URL<input id="clone-url" type="url" placeholder="https://…（wav/mp3/m4a，10~20 秒，需公网可访问）"></label></div>
       <div id="clone-register-fields" hidden>
         <label>音色厂商<select id="clone-provider"><option value="self">自建服务</option><option value="openai">OpenAI 协议</option><option value="minimax">MiniMax</option><option value="dashscope">阿里 DashScope</option></select></label>

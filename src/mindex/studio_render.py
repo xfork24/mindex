@@ -160,7 +160,7 @@ def process_shot_audio(voice_source: Path, ambient_source: Path | None, event, a
     """配音 atempo→loudnorm→48k；ducking 模式叠加压低后的原声（duration=first 以配音为准）。"""
     voice = output.with_name(f"{event.shot_id}.voice.wav")
     filters = []
-    if abs(event.audio.atempo - 1) > 1e-3:
+    if event.audio.atempo != 1:
         filters.append(f"atempo={event.audio.atempo:.4f}")
     filters += [f"loudnorm={audio_cfg.loudnorm}", "aresample=48000"]
     atomic_media(

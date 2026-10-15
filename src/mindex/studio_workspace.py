@@ -14,9 +14,10 @@ import shutil
 import wave
 from fractions import Fraction
 from pathlib import Path
+from typing import Literal
 from uuid import uuid4
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from . import studio, studio_select, studio_steps
 from .adapters import make_speaker, make_storyboarder
@@ -24,18 +25,53 @@ from .config import StrictModel, fingerprint
 from .media import atomic_media, audio_info, probe
 from .storage import Store
 from .studio_artifacts import current, digest, safe_path, sanitized, visibility_key
+from .studio_logs import LABELS, ExecutionLog, active_log, diagnostic_event
 
 STAGES = ("recall", "tts", "select", "render")
 
 
 class PlanOptions(StrictModel):
-    voice: str = Field(min_length=1, max_length=100)
+    voice: str | None = Field(default=None, min_length=1, max_length=100)
+    voice_mode: Literal["inherit", "custom"] = "inherit"
     recall_limit: int = Field(default=20, ge=1, le=50)
     audio_mode: str = Field(default="tts_only", pattern="^(tts_only|ducking)$")
     burn: bool = True
     atempo: float | None = Field(default=None, ge=0.75, le=1.25)
     alignment: str = Field(default="auto", pattern="^(auto|freeze|strict)$")
     duck_gain: float = Field(default=0.15, gt=0, le=1)
+
+    @model_validator(mode="before")
+    @classmethod
+    def explicit_voice(cls, value):
+        # Older API callers that explicitly supply a voice still request an override.
+        if isinstance(value, dict) and "voice_mode" not in value and value.get("voice"):
+            return {**value, "voice_mode": "custom"}
+        return value
+
+    @model_validator(mode="after")
+    def validate_voice(self):
+        if self.voice_mode == "custom" and not self.voice:
+            raise ValueError("指定音色模式需要填写音色")
+        if self.voice_mode == "inherit":
+            self.voice = None
+        return self
+
+
+def normalize_voice_options(p):
+    if "voice_mode" not in p["options"]:
+        # Old workspaces copied the default into every plan without recording intent.
+        # Keep the old value for reference, but do not treat it as an explicit override.
+        p.setdefault("legacy_voice", p["options"].get("voice"))
+        p["options"] = {**p["options"], "voice": None, "voice_mode": "inherit"}
+
+
+def effective_voice(config, p):
+    if p["options"].get("voice_mode", "inherit") == "custom":
+        voice = p["options"].get("voice")
+        if not voice:
+            raise studio.StudioError("指定音色模式需要填写音色")
+        return voice
+    return config.studio.tts.voice
 
 
 def root(config, job_id):
@@ -81,8 +117,9 @@ def new_plan(name, options):
         "created_at": studio.now(),
         "board": None,
         "shots": {},
-        "options": options,
+        "options": PlanOptions.model_validate(options).model_dump(),
         "ranges": {},
+        "anchors": {},
         "final": None,
     }
 
@@ -189,13 +226,18 @@ def set_board(config, job_id, w, p, shots, *, origin=None):
     p.update(board=bid, shots=selected)
     # Ranges belonging to removed shots remain in historical plans/versions only.
     p["ranges"] = {sid: value for sid, value in p["ranges"].items() if sid in selected}
+    p["anchors"] = {sid: value for sid, value in p.get("anchors", {}).items() if sid in selected}
 
 
 def load(config, job_id):
     """Call under mutation lock for first migration; subsequent reads do not modify files."""
     studio.load_job(config, job_id)
     if path(config, job_id).is_file():
-        return json.loads(path(config, job_id).read_text())
+        w = json.loads(path(config, job_id).read_text())
+        for p in w["plans"].values():
+            normalize_voice_options(p)
+            p.setdefault("anchors", {})
+        return w
     directory = root(config, job_id)
     snapshot = directory / "migration-v2"
     snapshot.mkdir(exist_ok=True)
@@ -205,7 +247,12 @@ def load(config, job_id):
             shutil.copy2(source, snapshot / name)
     state = studio.load_job(config, job_id)
     p = new_plan(
-        "默认方案", PlanOptions(**state["options"], duck_gain=config.studio.audio.duck_gain).model_dump()
+        "默认方案",
+        PlanOptions(
+            **state["options"],
+            voice_mode=state.get("voice_mode", "inherit"),
+            duck_gain=config.studio.audio.duck_gain,
+        ).model_dump(),
     )
     w = {"schema": 2, "active_plan": p["id"], "plans": {p["id"]: p}, "versions": {}, "builds": []}
     try:
@@ -460,9 +507,10 @@ def settings(config, p, stage):
             "visibility": visibility_key(Store(config.data_dir)),
         }
     if stage == "tts":
+        voice = effective_voice(config, p)
         return {
-            "voice": o["voice"],
-            "tts": sanitized({**config.studio.tts.model_dump(), "voice": o["voice"]}),
+            "voice": voice,
+            "tts": sanitized({**config.studio.tts.model_dump(), "voice": voice}),
         }
     if stage == "select":
         return {
@@ -488,6 +536,10 @@ def settings(config, p, stage):
     }
 
 
+def needs_recall(p, sid):
+    return sid not in p["ranges"] or bool(p["ranges"][sid].get("anchor_ref"))
+
+
 def specification(config, job_id, w, p, stage, sid=None):
     params = settings(config, p, stage)
     if stage == "split":
@@ -510,7 +562,7 @@ def specification(config, job_id, w, p, stage, sid=None):
             payload = {"text": content["text"]}
         elif stage == "select":
             inputs["tts"] = selected.get("tts")
-            if sid not in p["ranges"]:
+            if needs_recall(p, sid):
                 inputs["recall"] = selected.get("recall")
             payload = {
                 "text": content["text"],
@@ -518,6 +570,8 @@ def specification(config, job_id, w, p, stage, sid=None):
                 "recall": inputs.get("recall"),
                 "range": p["ranges"].get(sid),
             }
+            if p.get("anchors", {}).get(sid, {}).get("mode") == "manual":
+                payload["anchor"] = p["anchors"][sid]
         else:
             inputs.update(select=selected.get("select"), tts=selected.get("tts"))
             event = w["versions"].get(inputs["select"], {}).get("data", {}).get("event")
@@ -542,17 +596,38 @@ def conflicts(config, job_id, w, p, stage, sid, vid):
     item = version(w, vid)
     expected = specification(config, job_id, w, p, stage, sid)
     messages = []
+    if stage == "select":
+        from .studio_window import anchor_conflict
+
+        if error := anchor_conflict(w, p, sid):
+            messages.append(error)
+        choice = p.get("anchors", {}).get(sid, {})
+        original = item["data"].get("anchor_ref")
+        if original and choice.get("mode") == "manual" and original["candidate_id"] != choice["candidate_id"]:
+            messages.append(f"参考候选：原版本 {original['candidate_id']}，当前 {choice['candidate_id']}")
     if item["incomplete"]:
         messages.append("历史记录不完整，无法验证依赖与参数")
     if item["signature"] != expected["signature"]:
-        if stage in ("recall", "tts"):
-            messages.append("查询或召回设置已变化" if stage == "recall" else "旁白或声音设置已变化")
+        if stage == "recall":
+            messages.append("查询或召回设置已变化")
+        elif stage == "tts":
+            old_content = w["versions"].get(item["inputs"].get("content"), {}).get("data", {})
+            new_content = version(w, expected["inputs"]["content"])["data"]
+            if "text" in old_content and old_content["text"] != new_content["text"]:
+                messages.append("旁白已变化")
+            before = item["parameters"].get("tts", {})
+            after = expected["parameters"]["tts"]
+            for field, label in (("backend", "配音服务"), ("model", "配音模型"), ("voice", "方案音色")):
+                if before.get(field) != after.get(field):
+                    messages.append(f"{label}已变化：{before.get(field) or '未记录'} → {after.get(field)}")
+            if item["parameters"] != expected["parameters"] and not messages:
+                messages.append("配音服务参数已变化")
         for key, value in expected["inputs"].items():
             if key != "content" and item["inputs"].get(key) != value:
                 messages.append(
                     f"依赖 {key}：原版本 {item['inputs'].get(key) or '缺失'}，当前 {value or '缺失'}"
                 )
-        if item["parameters"] != expected["parameters"]:
+        if stage != "tts" and item["parameters"] != expected["parameters"]:
             messages.append("阶段参数与当前方案不一致")
         if not messages:
             messages.append("实际输入内容或素材文件已变化")
@@ -606,15 +681,22 @@ def preflight(config, job_id, w, p, *, force=False):
             spec = specification(config, job_id, w, draft, stage, sid)
             action = "reuse" if found else "rebuild"
             reason = "匹配成功版本" if found else "缺少匹配的成功版本"
-            if stage == "recall" and spec["parameters"]["index_id"] is None and sid not in p["ranges"]:
+            if stage == "recall" and spec["parameters"]["index_id"] is None and needs_recall(p, sid):
                 action, reason = "blocked", "尚未发布索引"
             # Explicit ranges do not need recall and can be built without an index.
-            if stage == "recall" and sid in p["ranges"] and not found:
+            if stage == "recall" and not needs_recall(p, sid) and not found:
                 action, reason = "skip", "人工选片不依赖召回"
             if stage == "select":
+                from .studio_window import anchor_conflict
+
+                anchor_error = anchor_conflict(w, p, sid)
+                if anchor_error:
+                    action, reason = "blocked", anchor_error
                 if sid in p["ranges"]:
                     try:
                         validate_range(config, p["ranges"][sid])
+                        if p["ranges"][sid].get("anchor_ref"):
+                            alignment(config, job_id, w, p, sid, p["ranges"][sid])
                     except studio.StudioError as exc:
                         action, reason = "blocked", str(exc)
                 else:
@@ -648,7 +730,7 @@ def preflight(config, job_id, w, p, *, force=False):
     for n in nodes:
         sid, stage = n["shot_id"], n["stage"]
         deps = (
-            ([f"tts:{sid}"] + ([] if sid in p["ranges"] else [f"recall:{sid}"]))
+            ([f"tts:{sid}"] + ([f"recall:{sid}"] if needs_recall(p, sid) else []))
             if stage == "select"
             else (
                 [f"select:{sid}", f"tts:{sid}"]
@@ -677,6 +759,8 @@ def choose(w, p, stage, sid, vid):
         if stage == "select":
             if item["data"].get("manual"):
                 p["ranges"][sid] = item["data"]["range"]
+                if item["data"].get("anchor_choice"):
+                    p.setdefault("anchors", {})[sid] = item["data"]["anchor_choice"]
             else:
                 p["ranges"].pop(sid, None)
 
@@ -687,6 +771,8 @@ def restore(w, vid, name):
     if item["stage"] != "compose" or not snapshot:
         raise studio.StudioError("此成片记录不完整，无法还原构建方案；原文件仍可下载")
     p = copy.deepcopy(snapshot)
+    normalize_voice_options(p)
+    p.setdefault("anchors", {})
     p.update(id=uuid4().hex[:12], name=name, created_at=studio.now(), final=vid)
     w["plans"][p["id"]] = p
     w["active_plan"] = p["id"]
@@ -734,6 +820,12 @@ def validate_range(config, selected_range):
 
 
 def alignment(config, job_id, w, p, sid, selected_range=None):
+    from . import studio_window
+
+    if error := studio_window.anchor_conflict(w, p, sid):
+        raise studio.StudioError(error)
+    if selected_range and selected_range.get("anchor_ref"):
+        return studio_window.alignment(config, job_id, w, p, sid, selected_range)
     selected = p["shots"][sid]
     speech = version(w, selected.get("tts"))
     if speech["status"] != "complete":
@@ -762,12 +854,7 @@ def alignment(config, job_id, w, p, sid, selected_range=None):
         )
         plan_data["anchor"] = anchor
     else:
-        recall = version(w, selected.get("recall"))
-        candidates = [
-            c
-            for c in recall["data"].get("results", [])
-            if studio_steps.interval_visible(store, c["source_id"], c["start"], c["end"])
-        ]
+        candidates = studio_window.candidates(config, w, p, sid)
         events, _ = studio_select.select_events(
             [shot],
             {sid: candidates},
@@ -829,6 +916,10 @@ def alignment(config, job_id, w, p, sid, selected_range=None):
         "event": event.model_dump(),
         "range": selected_range,
         "anchor": anchor,
+        "anchor_ref": (
+            {"recall_version": selected.get("recall"), "candidate_id": studio_window.candidate_id(anchor)}
+            if needs_recall(p, sid) else None
+        ),
         "extension": {"before": max(0, anchor["start"] - start), "after": max(0, end - anchor["end"])},
         "actual_range": {"source_id": anchor["source_id"], "start": start, "end": actual_end},
         "trim_seconds": max(0, end - actual_end),
@@ -1008,6 +1099,7 @@ class VersionDiagnostics:
             self.directory / "debug" / f"{self.sequence:04d}-{kind}.json",
             {"at": studio.now(), "data": sanitized(value)},
         )
+        diagnostic_event(kind, value)
 
 
 def execute(config, job_id, w, p, stage, sid=None, *, speaker=None, storyboarder=None, embedder=None):
@@ -1042,7 +1134,7 @@ def execute(config, job_id, w, p, stage, sid=None, *, speaker=None, storyboarder
         elif stage == "tts":
             content = version(w, p["shots"][sid]["content"])["data"]
             target = directory / "audio.wav"
-            payload = (speaker or make_speaker(config)).speak(content["text"], p["options"]["voice"])
+            payload = (speaker or make_speaker(config)).speak(content["text"], spec["parameters"]["voice"])
             if not payload:
                 raise studio.StudioError("配音返回空音频")
             studio.save_bytes(target, payload)
@@ -1113,15 +1205,63 @@ def execute(config, job_id, w, p, stage, sid=None, *, speaker=None, storyboarder
         current.reset(token)
 
 
+def column_nodes(config, job_id, w, p, stage, inputs_by_shot):
+    if stage == "split":
+        if inputs_by_shot:
+            raise studio.StudioError("整份文案拆分不接受逐镜输入")
+        return [{"key": "split", "stage": "split", "shot_id": None, "action": "rebuild"}]
+    ids = ordered_shots(w, p)
+    if not ids or set(inputs_by_shot) != set(ids):
+        raise studio.StudioError("列重生成必须绑定当前方案全部分镜")
+    nodes = []
+    for sid in ids:
+        spec = specification(config, job_id, w, p, stage, sid)
+        if inputs_by_shot[sid] != spec["inputs"]:
+            raise studio.StudioError(f"分镜 {sid} 输入版本已变化，请刷新后重试")
+        reason = None
+        for dependency, vid in spec["inputs"].items():
+            item = w["versions"].get(vid)
+            if not item or item["status"] != "complete" or not valid_files(config, job_id, item):
+                reason = f"依赖 {dependency} 缺失、失败或文件损坏"
+                break
+        if stage == "render" and reason is None:
+            selection = version(w, spec["inputs"]["select"])
+            if selection["inputs"].get("tts") != spec["inputs"]["tts"]:
+                reason = "选片绑定的配音与当前选择不同，请先重新对齐"
+        nodes.append(
+            {
+                "key": f"{stage}:{sid}",
+                "stage": stage,
+                "shot_id": sid,
+                "action": "blocked" if reason else "rebuild",
+                "reason": reason,
+            }
+        )
+    return nodes
+
+
 def run_build(config, job_id, build_id, *, speaker=None, storyboarder=None, embedder=None):
+    log = ExecutionLog(config, job_id, build_id)
+    token = active_log.set(log)
+    try:
+        return _run_build(
+            config, job_id, build_id, log, speaker=speaker, storyboarder=storyboarder, embedder=embedder
+        )
+    finally:
+        active_log.reset(token)
+
+
+def _run_build(config, job_id, build_id, log, *, speaker=None, storyboarder=None, embedder=None):
     w = load(config, job_id)
     build = next(b for b in w["builds"] if b["id"] == build_id)
     p = plan(w, build["plan_id"])
     failed = set()
+    log.emit("开始执行")
     for node in build["nodes"]:
         stage, sid = node["stage"], node["shot_id"]
+        log.stage, log.shot_id = stage, sid
         deps = (
-            ([f"tts:{sid}"] + ([] if sid in p["ranges"] else [f"recall:{sid}"]))
+            ([f"tts:{sid}"] + ([f"recall:{sid}"] if needs_recall(p, sid) else []))
             if stage == "select"
             else (
                 [f"select:{sid}", f"tts:{sid}"]
@@ -1138,6 +1278,7 @@ def run_build(config, job_id, build_id, *, speaker=None, storyboarder=None, embe
         else:
             node.update(status="running", started_at=studio.now())
             persist(config, job_id, w)
+            log.emit(f"开始{LABELS[stage]}")
             try:
                 found = None if build["force"] else match(config, job_id, w, p, stage, sid)
                 if found:
@@ -1174,9 +1315,25 @@ def run_build(config, job_id, build_id, *, speaker=None, storyboarder=None, embe
                 failed.add(node["key"])
         node["finished_at"] = studio.now()
         persist(config, job_id, w)
+        labels = {
+            "complete": "完成",
+            "reused": "复用成功版本",
+            "failed": "失败",
+            "blocked": "阻塞",
+            "skipped": "跳过",
+        }
+        log.emit(
+            f"{LABELS[stage]}：{labels[node['status']]}"
+            + (f" · {node['error']}" if node.get("error") else ""),
+            "error" if node["status"] == "failed" else ("warning" if node["status"] == "blocked" else "info"),
+        )
     successes = any(n["status"] in ("complete", "reused") for n in build["nodes"])
     build.update(
         status=("partial" if successes else "failed") if failed else "complete", finished_at=studio.now()
+    )
+    log.stage = log.shot_id = None
+    log.emit(
+        "执行结束：" + {"complete": "全部完成", "partial": "部分完成", "failed": "失败"}[build["status"]]
     )
     persist(config, job_id, w)
 
@@ -1235,6 +1392,7 @@ def recover(config, job_id, w):
                 if node.get("status") in ("pending", "running"):
                     node.update(status="blocked", error="服务重启中断，请重新预检续建")
             build.update(status="partial", finished_at=studio.now())
+            ExecutionLog(config, job_id, build["id"]).emit("服务中断，请重新提交执行", "error")
             changed = True
     if changed:
         persist(config, job_id, w)
@@ -1245,7 +1403,18 @@ def detail(config, job_id, w):
     result = copy.deepcopy(w)
     result["job"] = studio.load_job(config, job_id)
     result["revision"] = revision(p)
+    result["tts_settings"] = {
+        "backend": config.studio.tts.backend,
+        "model": config.studio.tts.model,
+        "default_voice": config.studio.tts.voice,
+        "voice": effective_voice(config, p),
+        "voice_mode": p["options"].get("voice_mode", "inherit"),
+    }
     result["conflicts"] = {}
+    from .studio_window import anchor_conflict
+
+    result["anchor_conflicts"] = {sid: error for sid in ordered_shots(w, p)
+                                  if (error := anchor_conflict(w, p, sid))}
     for sid in ordered_shots(w, p):
         for stage in STAGES:
             vid = p["shots"][sid].get(stage)

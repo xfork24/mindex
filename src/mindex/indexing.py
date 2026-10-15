@@ -45,6 +45,10 @@ class VectorIndex:
             ],
         )
 
+    def delete(self, identifiers: list[str]) -> None:
+        if identifiers:
+            self.collection.delete(ids=identifiers)
+
     def ids(self) -> set[str]:
         result = set()
         offset = 0

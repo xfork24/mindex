@@ -31,6 +31,25 @@ def admin_router(store: Store) -> APIRouter:
     def patch_source(source_id: str, value: CurationPatch):
         return library.patch("source", source_id, value)
 
+    @router.delete("/sources/{source_id}")
+    def delete_source(source_id: str):
+        from filelock import FileLock
+
+        from .purge import PurgeRefused, purge_source
+
+        lock = FileLock(str(store.root / "pipeline.lock"), timeout=0)
+        if not lock.acquire(blocking=False):
+            raise HTTPException(409, "离线管线正在运行，请等待完成后再删除素材")
+        try:
+            try:
+                return purge_source(store, source_id)
+            except KeyError as exc:
+                raise HTTPException(404, "素材不存在") from exc
+            except PurgeRefused as exc:
+                raise HTTPException(409, str(exc)) from exc
+        finally:
+            lock.release()
+
     @router.get("/sources/{source_id}/segments")
     def segments(
         source_id: str,

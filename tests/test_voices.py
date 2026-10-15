@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from mindex import adapters
 from mindex.api import create_app
+from mindex.storage import Store
 
 
 def minimax_profile(client, name="Minimax TTS"):
@@ -80,7 +81,8 @@ def test_default_voice_provider_must_match_active_backend(config):
     assert client.put("/api/settings/business", json={"clear_default_voice": True}).status_code == 200
 
 
-def test_clone_requires_consent_and_supported_backend(config):
+def test_clone_requires_consent(config):
+    """三种内置后端（本地 qwentts / MiniMax / DashScope）均支持克隆，只剩授权门。"""
     client = TestClient(create_app(config))
     response = client.post(
         "/api/settings/voices/clone",
@@ -89,14 +91,6 @@ def test_clone_requires_consent_and_supported_backend(config):
     )
     assert response.status_code == 422
     assert "授权" in response.json()["detail"]
-
-    # 未激活支持克隆的线上 TTS 时拒绝
-    response = client.post(
-        "/api/settings/voices/clone",
-        data={"name": "我的声音", "consent": "true"},
-        files={"file": ("sample.wav", sample_wav(), "audio/wav")},
-    )
-    assert response.status_code == 422
 
 
 def test_minimax_clone_flow(config, monkeypatch):
@@ -196,3 +190,199 @@ def test_get_settings_includes_voices(config):
     assert data["business"]["default_voice"] is None
     serialized = json.dumps(data, ensure_ascii=False)
     assert "sk-minimax" not in serialized
+
+
+def test_qwentts_register_contract(monkeypatch, tmp_path):
+    from mindex.voice_clone import qwentts_register
+
+    captured = {}
+
+    def reply(method, url, **kwargs):
+        captured.update(method=method, url=url, json=kwargs["json"])
+        return {}
+
+    monkeypatch.setattr(adapters, "request", reply)
+    sample = tmp_path / "s.wav"
+    sample.write_bytes(b"RIFF-x")
+    qwentts_register("http://127.0.0.1:8890/v1", sample, "mindex-clone-9", "参考文本")
+    import base64
+
+    assert captured["method"] == "POST" and captured["url"].endswith("/audio/voices")
+    body = captured["json"]
+    assert body["name"] == "mindex-clone-9"
+    assert body["ref_text"] == "参考文本"
+    assert base64.b64decode(body["wav"]) == b"RIFF-x"
+
+
+def test_clone_local_qwentts_flow(config, monkeypatch):
+    """本地 openai 后端：上传样本注册到 qwentts.cpp + 合成试听 + 落库留样本。"""
+    client = TestClient(create_app(config))
+    registers = []
+
+    def reply(method, url, **kwargs):
+        if url.endswith("/audio/voices") and method == "POST":
+            registers.append(kwargs["json"])
+            return {}
+        raise AssertionError(f"意外请求 {method} {url}")
+
+    monkeypatch.setattr(adapters, "request", reply)
+    monkeypatch.setattr(adapters, "request_bytes", lambda *a, **kw: b"RIFF-preview")
+    response = client.post(
+        "/api/settings/voices/clone",
+        data={"name": "我的旁白", "consent": "true", "ref_text": "这是参考文本"},
+        files={"file": ("sample.wav", sample_wav(), "audio/wav")},
+    )
+    assert response.status_code == 201, response.text
+    voice = response.json()
+    assert voice["provider"] == "self" and voice["kind"] == "clone" and voice["status"] == "ready"
+    assert voice["notes"] == "这是参考文本"
+    assert registers and registers[0]["name"] == voice["voice_id"]
+    store = Store(config.data_dir)
+    assert (store.root / voice["sample_path"]).is_file()
+    preview = store.root / "voices" / f"{voice['id']}-preview.wav"
+    assert preview.is_file()
+
+    # 重启自愈：目录接口对缺失克隆重注册（服务端列表为空时）
+    monkeypatch.setattr(
+        adapters, "request", lambda method, url, **kw: {"voices": []} if url.endswith("/audio/voices") else (_ for _ in ()).throw(AssertionError(url))
+    )
+    catalog = client.get("/api/settings/voices/catalog").json()
+    ids = {v["voice_id"] for g in catalog["groups"] for v in g["voices"]}
+    assert voice["voice_id"] in ids
+
+
+def test_business_default_voice_literal(config, monkeypatch):
+    """默认音色支持 voice_id 字面量：目录内合法，未知/跨厂商拒绝。"""
+    client = TestClient(create_app(config))
+    monkeypatch.setattr(
+        adapters, "request", lambda method, url, **kw: {"voices": ["vivian", "serena"]}
+    )
+    ok = client.put("/api/settings/business", json={"default_voice": "vivian"})
+    assert ok.status_code == 200
+    assert ok.json()["default_voice"] == "vivian"
+
+    unknown = client.put("/api/settings/business", json={"default_voice": "no-such-voice"})
+    assert unknown.status_code == 422
+
+    minimax_voice = client.post(
+        "/api/settings/voices",
+        json={"name": "克隆旁白", "provider": "minimax", "voice_id": "mindex-clone-1", "kind": "clone"},
+    ).json()
+    cross = client.put("/api/settings/business", json={"default_voice": "mindex-clone-1"})
+    assert cross.status_code == 422
+    assert client.delete(f"/api/settings/voices/{minimax_voice['id']}").status_code == 204
+
+
+def test_catalog_route_reports_backend_and_groups(config, monkeypatch):
+    client = TestClient(create_app(config))
+    monkeypatch.setattr(
+        adapters, "request", lambda method, url, **kw: {"voices": ["vivian"]}
+    )
+    catalog = client.get("/api/settings/voices/catalog").json()
+    assert catalog["backend"] == "openai"
+    assert catalog["default_voice"] is None
+    ids = {v["voice_id"] for g in catalog["groups"] for v in g["voices"]}
+    assert {"vivian", "serena"} <= ids  # live + 静态兜底并存
+
+
+def test_catalog_preview_uses_profile_target(config, monkeypatch):
+    """档案表单的音色候选：按被编辑档案（而非当前激活后端）的目标服务查询。"""
+    client = TestClient(create_app(config))
+    profile = minimax_profile(client)  # 未激活：当前后端仍是本地 openai
+    captured = {}
+
+    def reply(method, url, **kwargs):
+        captured.update(url=url, headers=kwargs.get("headers"))
+        return {
+            "base_resp": {"status_code": 0},
+            "system_voice": [{"voice_id": "female-yujie", "voice_name": "御姐", "description": ["成熟女性"]}],
+            "voice_cloning": [],
+            "voice_generation": [],
+        }
+
+    monkeypatch.setattr(adapters, "request", reply)
+    catalog = client.post(
+        "/api/settings/voices/catalog/preview",
+        json={"profile_id": profile["id"]},
+    ).json()
+    assert catalog["backend"] == "minimax"
+    assert captured["url"].endswith("/get_voice")
+    assert "Bearer sk-minimax-key-1234" in captured["headers"]["Authorization"]
+    ids = {v["voice_id"] for g in catalog["groups"] for v in g["voices"]}
+    assert "female-yujie" in ids
+
+
+def test_catalog_preview_inline_local_target(config, monkeypatch):
+    """新建档案（尚未保存）：用表单里的 backend/base_url 查询，供本地服务免密钥场景。"""
+    client = TestClient(create_app(config))
+    captured = {}
+
+    def reply(method, url, **kwargs):
+        captured.update(url=url)
+        return {"voices": ["vivian"]}
+
+    monkeypatch.setattr(adapters, "request", reply)
+    catalog = client.post(
+        "/api/settings/voices/catalog/preview",
+        json={"backend": "openai", "base_url": "http://127.0.0.1:8900/v1", "model": "qwen3-tts-customvoice"},
+    ).json()
+    assert catalog["backend"] == "openai"
+    assert captured["url"] == "http://127.0.0.1:8900/v1/audio/voices"
+    ids = {v["voice_id"] for g in catalog["groups"] for v in g["voices"]}
+    assert "vivian" in ids
+
+
+def test_catalog_preview_voiceclone_profile_drops_system_groups(config, monkeypatch):
+    """VoiceClone 型档案（model/名称含标识）：候选只给音色库克隆音色，不给系统列表。"""
+
+    client = TestClient(create_app(config))
+    profile = client.post(
+        "/api/settings/profiles",
+        json={"role": "tts", "provider": "self", "name": "LocalMac-Qwen3-TTS-VoiceClone",
+              "config": {"backend": "openai", "base_url": "http://127.0.0.1:8890/v1", "model": "Qwen3-TTS-VoiceClone"}},
+    ).json()
+    client.post(
+        "/api/settings/voices",
+        json={"name": "我的旁白", "provider": "self", "voice_id": "mindex-clone-1", "kind": "clone"},
+    )
+    monkeypatch.setattr(adapters, "request", lambda *a, **kw: {"voices": []})
+    catalog = client.post("/api/settings/voices/catalog/preview", json={"profile_id": profile["id"]}).json()
+    assert catalog["voice_kind"] == "clone"
+    assert catalog["groups"] == []
+    library = {v["voice_id"] for v in catalog["library"]}
+    assert "mindex-clone-1" in library
+
+
+def test_catalog_preview_customvoice_local_lists_system(config, monkeypatch):
+    client = TestClient(create_app(config))
+    monkeypatch.setattr(adapters, "request", lambda *a, **kw: {"voices": ["vivian", "uncle_fu"]})
+    catalog = client.post(
+        "/api/settings/voices/catalog/preview",
+        json={"name": "LocalMac-Qwen3-TTS-CustomVoice", "backend": "openai",
+              "base_url": "http://127.0.0.1:8890/v1", "model": "Qwen3-TTS-CustomVoice"},
+    ).json()
+    assert catalog["voice_kind"] == "system"
+    ids = {v["voice_id"] for g in catalog["groups"] for v in g["voices"]}
+    assert {"vivian", "uncle_fu", "serena"} <= ids
+
+
+def test_catalog_preview_minimax_clone_kind_by_name(config, monkeypatch):
+    """MiniMax 两档案 model 相同，靠档案名后缀区分 VoiceClone。"""
+    client = TestClient(create_app(config))
+    profile = client.post(
+        "/api/settings/profiles",
+        json={
+            "role": "tts", "provider": "minimax", "name": "MiniMax-Speech-2.8-HD-VoiceClone",
+            "config": {"backend": "minimax", "base_url": "https://api.minimax.cn/v1", "model": "speech-2.8-hd"},
+            "api_key": "sk-minimax-key-1234",
+        },
+    ).json()
+    monkeypatch.setattr(
+        adapters, "request",
+        lambda *a, **kw: {"base_resp": {"status_code": 0}, "system_voice": [
+            {"voice_id": "female-yujie", "voice_name": "御姐", "description": []}],
+            "voice_cloning": [], "voice_generation": []},
+    )
+    catalog = client.post("/api/settings/voices/catalog/preview", json={"profile_id": profile["id"]}).json()
+    assert catalog["voice_kind"] == "clone"
+    assert catalog["groups"] == []

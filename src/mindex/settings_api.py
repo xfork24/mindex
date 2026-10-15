@@ -21,7 +21,7 @@ from pydantic import Field
 
 from . import adapters
 from .adapters import make_embedder, make_speaker, make_transcriber
-from .config import Config, SearchConfig, StrictModel
+from .config import Config, SearchConfig, SpeakerConfig, StrictModel
 from .runtime_settings import (
     PROFILE_FIELDS,
     PROVIDER_LABELS,
@@ -44,7 +44,8 @@ from .runtime_settings import (
     save_voice,
 )
 from .storage import Store
-from .voice_clone import aliyun_enroll, minimax_clone
+from .voice_clone import aliyun_enroll, minimax_clone, qwentts_register
+from .voices_catalog import fetch_catalog, voice_kind
 
 _SETTING_KEYS = ("override.search", "override.studio.voice")
 _CLONE_SAMPLE_SUFFIXES = {".wav", ".mp3", ".m4a"}
@@ -75,6 +76,7 @@ class SearchTuning(StrictModel):
 class BusinessBody(StrictModel):
     search: SearchTuning | None = None
     default_voice_id: int | None = None
+    default_voice: str | None = None
     clear_default_voice: bool = False
 
 
@@ -354,6 +356,27 @@ def settings_router(runtime: RuntimeConfig, store: Store) -> APIRouter:
                     f"{current.studio.tts.backend} 不匹配，请先激活对应档案",
                 )
             put_setting(store, "override.studio.voice", voice["voice_id"])
+        elif body.default_voice is not None:
+            literal = body.default_voice.strip()
+            if not literal:
+                raise HTTPException(422, "默认音色不能为空；清除请使用 clear_default_voice")
+            row = store.one("SELECT * FROM voices WHERE voice_id=?", (literal,))
+            if row is not None:
+                required_backend = {"minimax": "minimax", "dashscope": "dashscope"}.get(row["provider"])
+                if required_backend and current.studio.tts.backend != required_backend:
+                    raise HTTPException(
+                        422,
+                        f"音色厂商 {row['provider']} 与当前语音合成后端 "
+                        f"{current.studio.tts.backend} 不匹配，请先激活对应档案",
+                    )
+            else:
+                catalog = fetch_catalog(current, store)
+                known = {
+                    voice["voice_id"] for group in catalog["groups"] for voice in group["voices"]
+                } | {voice["voice_id"] for voice in catalog["library"]}
+                if literal not in known:
+                    raise HTTPException(422, f"未知音色 {literal}；不在当前后端目录或音色库中")
+            put_setting(store, "override.studio.voice", literal)
         return get_settings()["business"]
 
     @router.delete("/business", status_code=204)
@@ -361,6 +384,49 @@ def settings_router(runtime: RuntimeConfig, store: Store) -> APIRouter:
         store.execute(
             f"DELETE FROM settings WHERE key IN ({','.join('?' * len(_SETTING_KEYS))})", _SETTING_KEYS
         )
+
+    @router.get("/voices/catalog")
+    def voices_catalog():
+        return fetch_catalog(runtime.current(), store)
+
+    @router.post("/voices/catalog/preview")
+    def voices_catalog_preview(body: dict):
+        """档案表单的音色候选：按被编辑档案（或表单内联值）的目标服务查询，而非当前激活后端。"""
+        profile_id = body.get("profile_id")
+        config = runtime.current()
+        model = name = ""
+        if profile_id is not None:
+            row = store.one("SELECT * FROM model_profiles WHERE id=?", (int(profile_id),))
+            if row is None:
+                raise HTTPException(404, "档案不存在")
+            profile_config = json.loads(row["config"])
+            model = str(profile_config.get("model") or "")
+            name = str(row["name"] or "")
+            config = merge_profile(config, "tts", {**row, "config": profile_config})
+        else:
+            fields = {
+                key: body[key]
+                for key in ("backend", "base_url", "model")
+                if isinstance(body.get(key), str) and body[key].strip()
+            }
+            model = str(fields.get("model") or "")
+            name = str(body["name"]) if isinstance(body.get("name"), str) else ""
+            if not fields:
+                raise HTTPException(422, "请提供 profile_id 或表单连接字段")
+            merged = SpeakerConfig.model_validate({**config.studio.tts.model_dump(), **fields})
+            if isinstance(body.get("api_key"), str) and body["api_key"].strip():
+                merged = merged.model_copy(update={"api_key": body["api_key"].strip()})
+            config = config.model_copy(
+                update={"studio": config.studio.model_copy(update={"tts": merged})}
+            )
+        catalog = fetch_catalog(config, store)
+        kind = voice_kind(model, name)
+        catalog["voice_kind"] = kind
+        if kind == "clone":
+            catalog["groups"] = []  # VoiceClone 型只允许音色库克隆音色，不给系统列表
+            if not catalog["library"]:
+                catalog["hint"] = "音色库中还没有当前厂商的克隆音色；请先在本页「音色库」上传样本克隆。"
+        return catalog
 
     @router.post("/voices", status_code=201)
     def register_voice(body: VoiceBody):
@@ -389,9 +455,10 @@ def settings_router(runtime: RuntimeConfig, store: Store) -> APIRouter:
         name: str = Form(""),
         consent: bool = Form(False),
         audio_url: str = Form(""),
+        ref_text: str = Form(""),
         file: Annotated[UploadFile | None, File()] = None,
     ):
-        """按当前语音合成后端选择克隆方式：MiniMax 上传样本；阿里 DashScope 填公网 URL。"""
+        """按当前语音合成后端选择克隆方式：本地 qwentts / MiniMax 上传样本；阿里填公网 URL。"""
         name = name.strip()
         if not name:
             raise HTTPException(422, "请填写音色名称")
@@ -401,6 +468,41 @@ def settings_router(runtime: RuntimeConfig, store: Store) -> APIRouter:
         slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:24] or "voice"
         directory = store.root / "voices"
         directory.mkdir(parents=True, exist_ok=True)
+
+        if tts.backend == "openai":
+            if file is None:
+                raise HTTPException(422, "本地克隆需要上传声音样本（wav/mp3/m4a，3 秒以上清晰人声）")
+            suffix = Path(file.filename or "").suffix.lower()
+            if suffix not in _CLONE_SAMPLE_SUFFIXES:
+                raise HTTPException(422, "样本格式仅支持 wav/mp3/m4a")
+            sample = directory / f"pending-{secrets.token_hex(4)}{suffix}"
+            sample.write_bytes(await file.read())
+            voice_id = f"mindex-{slug}-{secrets.token_hex(3)}"
+            voice = save_voice(
+                store, name=name, provider="self", voice_id=voice_id,
+                kind="clone", sample_path=str(sample.relative_to(store.root)),
+                status="pending", notes=ref_text.strip()[:400],
+            )
+            try:
+                qwentts_register(tts.base_url, sample, voice_id, ref_text.strip())
+                preview = make_speaker(runtime.current()).speak("你好，这是克隆音色的试听。", voice=voice_id)
+            except Exception as exc:
+                save_voice(
+                    store, name=name, provider="self", voice_id=voice_id,
+                    kind="clone", sample_path=str(sample.relative_to(store.root)),
+                    status="failed", notes=str(exc)[:400], voice_pk=voice["id"],
+                )
+                raise HTTPException(502, f"克隆失败：{exc}") from exc
+            final_sample = directory / f"{voice['id']}{suffix}"
+            sample.replace(final_sample)
+            (directory / f"{voice['id']}-preview.wav").write_bytes(preview)
+            return _with_sample(
+                save_voice(
+                    store, name=name, provider="self", voice_id=voice_id,
+                    kind="clone", sample_path=str(final_sample.relative_to(store.root)),
+                    status="ready", notes=ref_text.strip()[:400], voice_pk=voice["id"],
+                )
+            )
 
         if tts.backend == "minimax":
             if file is None:

@@ -193,3 +193,93 @@ def test_existing_database_migration_preserves_sources(tmp_path):
     source = Library(store).source("old-source")
     assert source["name"] == "旧素材" and not source["hidden"] and not source["favorite"]
     assert source["notes"] == "" and store.active_index() is None
+
+
+def test_delete_source_purges_all_but_source_file(library):
+    """删除素材：向量/库行/派生文件全清，唯独保留源视频；studio 任务引用时拒绝。"""
+    import shutil
+
+    pipeline, source, client = library
+    store = pipeline.store
+    segments = store.rows("SELECT * FROM segments WHERE source_id=?", (source,))
+    assert segments
+
+    index_id = "ix-del-test"
+    store.execute(
+        "INSERT INTO index_versions(id,spec,status) VALUES(?,?,?)", (index_id, "{}", "active")
+    )
+    vector_index = VectorIndex(store.root, index_id, create=True)
+    rep_ids = []
+    for segment in segments:
+        rep_id = f"rep-{segment['id']}"
+        vector_index.upsert(rep_id, [0.1, 0.2, 0.3], segment, "video", "视频")
+        store.execute(
+            "INSERT INTO representations(id,index_id,segment_id,view,document) VALUES(?,?,?,?,?)",
+            (rep_id, index_id, segment["id"], "video", "视频"),
+        )
+        store.execute(
+            "INSERT INTO index_members(index_id,segment_id,snapshot,complete) VALUES(?,?,?,1)",
+            (index_id, segment["id"], "{}"),
+        )
+        rep_ids.append(rep_id)
+
+    store.put_json("transcripts", "source_id", source, "k", {"utterances": []})
+    store.put_json("scene_plans", "source_id", source, "k", {"shots": []})
+    store.put_json("annotations", "segment_id", segments[0]["id"], "k", {"a": 1})
+    store.execute("INSERT INTO source_curation(id,notes) VALUES(?,'x')", (source,))
+    store.execute("INSERT INTO segment_curation(id,notes) VALUES(?,'x')", (segments[0]["id"],))
+    (store.root / "transcripts" / source / "k").mkdir(parents=True, exist_ok=True)
+    (store.root / "transcripts" / source / "k" / "raw").mkdir(parents=True, exist_ok=True)
+    (store.root / "transcripts" / source / "k" / "raw" / "0.json").write_text("{}")
+    (store.root / "plans" / f"{source}.json").write_text("{}")
+    (store.root / "reports" / source).mkdir(parents=True, exist_ok=True)
+    (store.root / "reports" / source / "film.md").write_text("report")
+    context_file = store.root / "context" / f"{segments[0]['id']}.mp4"
+    context_file.parent.mkdir(parents=True, exist_ok=True)
+    context_file.write_bytes(b"context")
+    source_file = store.resolve_media(store.one("SELECT path FROM sources WHERE id=?", (source,))["path"])
+    assert source_file.is_file()
+
+    # studio 任务仍引用该素材 → 拒绝删除
+    job_dir = store.root / "studio" / "20261015-000000-del"
+    job_dir.mkdir(parents=True)
+    (job_dir / "job.json").write_text(json.dumps({"timeline": [{"video": {"source_id": source}}]}))
+    refused = client.delete(f"/api/admin/sources/{source}")
+    assert refused.status_code == 409
+    assert "20261015-000000-del" in refused.json()["detail"]
+    shutil.rmtree(job_dir)
+
+    result = client.delete(f"/api/admin/sources/{source}")
+    assert result.status_code == 200, result.text
+    summary = result.json()
+    assert summary["deleted"]["segments"] == len(segments)
+    assert summary["deleted"]["vectors"] == len(rep_ids)
+    assert summary["kept"]["source_file"] == source_file.name
+
+    for table, field in [
+        ("sources", "id"),
+        ("segments", "source_id"),
+        ("representations", "segment_id"),
+        ("index_members", "segment_id"),
+        ("annotations", "segment_id"),
+        ("segment_curation", "id"),
+        ("source_curation", "id"),
+        ("transcripts", "source_id"),
+        ("scene_plans", "source_id"),
+        ("runs", "source_id"),
+    ]:
+        assert store.one(f"SELECT 1 FROM {table} WHERE {field}=?", (source,)) is None, table
+    assert store.one("SELECT 1 FROM segments WHERE id=?", (segments[0]["id"],)) is None
+    assert vector_index.ids() == set()
+
+    assert source_file.is_file()
+    assert not (store.root / "clips" / source).exists()
+    assert not (store.root / "transcripts" / source).exists()
+    assert not (store.root / "plans" / f"{source}.json").exists()
+    assert not (store.root / "reports" / source).exists()
+    assert not context_file.exists()
+    for segment in segments:
+        assert not (store.root / segment["thumbnail"]).exists()
+
+    assert client.get("/api/admin/sources").json()["total"] == 0
+    assert client.delete(f"/api/admin/sources/{source}").status_code == 404

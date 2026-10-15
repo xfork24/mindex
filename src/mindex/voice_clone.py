@@ -8,11 +8,14 @@
 
 from __future__ import annotations
 
+import base64
 import json
+import tempfile
 from pathlib import Path
 
 from . import adapters
 from .adapters import ModelError
+from .media import extract_audio
 
 SAMPLE_MIME = {".wav": "audio/wav", ".mp3": "audio/mpeg", ".m4a": "audio/mp4"}
 
@@ -57,6 +60,27 @@ def minimax_clone(
         except ValueError as exc:
             raise ModelError("MiniMax 克隆预览音频 hex 解码失败") from exc
     return b""
+
+
+def qwentts_register(base_url: str, sample: Path, name: str, ref_text: str = "") -> None:
+    """向本地 qwentts.cpp tts-server 注册克隆音色（POST /audio/voices）。
+
+    服务端注册表存于进程内存，重启即丢；调用方需持久化样本以便重注册（自愈）。
+    非 wav 样本先转 16k 单声道 wav；ref_text 提供时启用 ICL 克隆（效果更好）。
+    """
+    if sample.suffix.lower() == ".wav":
+        payload = sample.read_bytes()
+    else:
+        with tempfile.TemporaryDirectory(prefix="qwentts-") as directory:
+            converted = Path(directory) / "sample.wav"
+            extract_audio(sample, converted)
+            payload = converted.read_bytes()
+    adapters.request(
+        "POST",
+        base_url.rstrip("/") + "/audio/voices",
+        timeout=600,
+        json={"name": name, "ref_text": ref_text, "wav": base64.b64encode(payload).decode()},
+    )
 
 
 def aliyun_enroll(base_url: str, api_key: str, audio_url: str, prefix: str, target_model: str) -> str:

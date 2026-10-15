@@ -27,10 +27,27 @@ const state = {
   timer: null,
   token: 0,
   submitting: false,
-  openCells: new Set(),
+  expanded: new Map(),
+  drafts: new Map(),
+  windowDrafts: new Map(),
+  matrixRows: new Map(),
+  matrixScope: null,
+  logViews: new Map(),
   finalUrl: null,
 };
 const $ = (id) => document.getElementById(id);
+function shortIds(value) {
+  return String(value ?? "")
+    .replace(/\b([a-f0-9]{8})-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\b/gi, "$1")
+    .replace(/\b(shot-)([a-f0-9]{9,64})\b/gi, (_, prefix, id) => prefix + id.slice(0, 8))
+    .replace(/(?<![a-z0-9_.])(?:[0-9]{32}|[0-9]{64})(?![a-z0-9_])/g, id => id.slice(0, 8))
+    .replace(/(?<![a-z0-9_.])(?=[a-f0-9]{9,64}(?![a-z0-9_]))(?=[a-f0-9]*[a-f])[a-f0-9]{9,64}(?![a-z0-9_])/gi,
+      id => id.slice(0, 8));
+}
+function shortId(value) {
+  const id = String(value ?? "");
+  return /^[a-f0-9]{9,64}$/i.test(id) ? id.slice(0, 8) : shortIds(id);
+}
 function el(tag, text, cls) {
   const n = document.createElement(tag);
   if (text != null) n.textContent = text;
@@ -48,20 +65,20 @@ function button(text, action, disabled = false) {
   return n;
 }
 function link(text, url, download = false) {
-  const n = el("a", text, "quiet nav-link");
+  const n = el("a", shortIds(text), "quiet nav-link");
   n.href =
     url + (download ? `${url.includes("?") ? "&" : "?"}download=true` : "");
   return n;
 }
 function notice(text, error = false) {
-  $("notice").textContent = text;
+  $("notice").textContent = shortIds(text);
   $("notice").dataset.type = error ? "error" : "info";
 }
 function fail(error) {
   notice(error.message, true);
   if ($("work-dialog").open) {
     $("dialog-error")?.remove();
-    const message = el("p", error.message, "warn-text");
+    const message = el("p", shortIds(error.message), "warn-text");
     message.id = "dialog-error";
     message.setAttribute("role", "alert");
     $("dialog-content").prepend(message);
@@ -79,11 +96,11 @@ async function api(url, method = "GET", body) {
   });
   const data = await r.json().catch(() => ({}));
   if (!r.ok)
-    throw new Error(
+    throw new Error(shortIds(
       typeof data.detail === "string"
         ? data.detail
         : JSON.stringify(data.detail || r.status),
-    );
+    ));
   return data;
 }
 const base = () => `/api/studio/jobs/${state.id}`;
@@ -95,7 +112,7 @@ const busy = () =>
   state.submitting || state.data?.builds.some((b) => b.status === "running");
 const secs = (n) => `${Number(n || 0).toFixed(3)}s`;
 function showDialog(title) {
-  $("dialog-title").textContent = title;
+  $("dialog-title").textContent = shortIds(title);
   const body = $("dialog-content");
   body.replaceChildren();
   if (!$("work-dialog").open) $("work-dialog").showModal();
@@ -112,6 +129,7 @@ function field(label, value, type = "text", choices = null) {
   const n = document.createElement(
     choices ? "select" : type === "textarea" ? "textarea" : "input",
   );
+  n.setAttribute("aria-label", label);
   if (choices) {
     for (const [v, text] of choices) {
       const o = el("option", text);
@@ -125,7 +143,7 @@ function field(label, value, type = "text", choices = null) {
   return { wrap, input: n };
 }
 function jsonView(value) {
-  const pre = el("pre", JSON.stringify(value, null, 2), "json-view");
+  const pre = el("pre", shortIds(JSON.stringify(value, null, 2)), "json-view");
   return pre;
 }
 function media(tag, url) {
@@ -155,7 +173,7 @@ async function selectJob(id) {
   state.id = id;
   state.data = null;
   state.finalUrl = null;
-  state.openCells.clear();
+  state.matrixScope = null;
   history.replaceState(null, "", `/studio?job=${id}`);
   closeDialog();
   await refresh();
@@ -171,6 +189,9 @@ async function refresh() {
   const wasBusy = state.data?.builds.some((b) => b.status === "running");
   state.data = data;
   render();
+  await refreshLogs().catch((error) =>
+    notice(`读取工作日志失败：${error.message}`, true),
+  );
   clearTimeout(state.timer);
   if (busy()) state.timer = setTimeout(() => refresh().catch(fail), 1200);
   else if (wasBusy) {
@@ -182,6 +203,9 @@ async function accept(data) {
   if (data.job.id !== state.id) return;
   state.data = data;
   render();
+  await refreshLogs().catch((error) =>
+    notice(`读取工作日志失败：${error.message}`, true),
+  );
 }
 function render() {
   const p = plan(),
@@ -216,25 +240,6 @@ function render() {
     o.selected = item.id === p.id;
     select.append(o);
   }
-  for (const id of [
-    "plan-select",
-    "new-plan",
-    "copy-plan",
-    "rename-plan",
-    "plan-settings",
-    "run-all",
-    "force-build",
-    "split",
-    "edit-board",
-  ])
-    $(id).disabled = locked;
-  $("split").textContent = p.board ? "重新拆分镜" : "生成分镜";
-  const activeBuild = [...state.data.builds]
-    .reverse()
-    .find((b) => b.plan_id === p.id);
-  $("execution-status").textContent = activeBuild
-    ? `${STATUS[activeBuild.status]} · ${activeBuild.id}`
-    : "尚未构建";
   $("shot-count").textContent = `${order().length} 镜`;
   const original = job.input_text.replace(/\s/g, "");
   const texts = order()
@@ -246,6 +251,8 @@ function render() {
   renderMatrix();
   renderFinal();
   renderBuilds();
+  renderLogShell();
+  updateLocks();
 }
 function dependencyTree(id, seen = new Set()) {
   const item = ver(id);
@@ -254,7 +261,7 @@ function dependencyTree(id, seen = new Set()) {
   d.append(
     el(
       "summary",
-      `${LABEL[item.stage]} ${item.shot_id || ""} · ${id.slice(0, 8)}${item.incomplete ? " · 记录不完整" : ""}`,
+      `${LABEL[item.stage]} ${shortId(item.shot_id)} · ${id.slice(0, 8)}${item.incomplete ? " · 记录不完整" : ""}`,
     ),
   );
   d.append(button("查看节点详情", () => showVersion(id)));
@@ -263,7 +270,7 @@ function dependencyTree(id, seen = new Set()) {
   for (const [name, dep] of Object.entries(item.inputs))
     if (dep) {
       const row = el("div", "", "dependency-edge");
-      row.append(el("span", name, "muted"), dependencyTree(dep, next));
+      row.append(el("span", shortId(name), "muted"), dependencyTree(dep, next));
       d.append(row);
     }
   return d;
@@ -286,7 +293,7 @@ function showVersion(id) {
         "warn-text",
       ),
     );
-  if (item.error) body.append(el("p", item.error, "warn-text"));
+  if (item.error) body.append(el("p", shortIds(item.error), "warn-text"));
   if (item.files.audio?.url) body.append(media("audio", item.files.audio.url));
   if (item.files.preview?.url || item.files.video?.url)
     body.append(
@@ -318,147 +325,642 @@ function showVersion(id) {
       button("复制此成片为新方案", () => createPlan("restore", id), busy()),
     );
 }
-function renderMatrix() {
-  const body = $("matrix-body");
-  body.replaceChildren();
-  const p = plan();
-  for (const [index, sid] of order().entries()) {
-    const row = el("tr");
-    const head = el("th", `${index + 1} · ${sid}`);
-    head.scope = "row";
-    row.append(head);
-    const shot = ver(p.shots[sid].content).data;
-    const text = el("td");
-    text.append(
-      el("p", shot.text, "cell-summary"),
-      el("p", shot.query, "muted cell-summary"),
-      el("small", `内容 ${p.shots[sid].content.slice(0, 8)}`),
-      button("编辑", () => editBoard(sid), busy()),
-    );
-    text.append(historyCell("content", sid));
-    row.append(text);
-    for (const stage of STAGES) {
-      const cell = el("td"),
-        vid = p.shots[sid][stage],
-        item = ver(vid);
-      cell.append(
-        el(
-          "span",
-          vid ? `选用 ${vid.slice(0, 8)}` : "未选择",
-          `badge${vid ? " good" : ""}`,
-        ),
-      );
-      if (item) {
-        const d = item.data;
-        const summary =
-          stage === "recall"
-            ? `${d.results?.length || 0} 个候选`
-            : stage === "tts"
-              ? secs(d.duration)
-              : stage === "select"
-                ? `${d.event.video.source_name || d.event.video.source_id} ${secs(d.event.video.start)}–${secs(d.event.video.end)}`
-                : `${d.frames || "?"} 帧 · ${d.fps || "?"} fps`;
-        cell.append(
-          el("p", summary, "cell-summary"),
-          button("查看选用版本", () => showVersion(vid)),
-        );
-      }
-      const messages = state.data.conflicts[`${stage}:${sid}`] || [];
-      if (messages.length)
-        cell.append(el("p", messages.join("；"), "warn-text"));
-      const latestBuild = [...state.data.builds]
-        .reverse()
-        .find(
-          (b) =>
-            b.plan_id === p.id &&
-            b.nodes.some((n) => n.stage === stage && n.shot_id === sid),
-        );
-      const node = latestBuild?.nodes.find(
-        (n) => n.stage === stage && n.shot_id === sid,
-      );
-      if (node)
-        cell.append(
-          el(
-            "p",
-            `最近执行：${STATUS[node.status]}${node.error ? ` · ${node.error}` : ""}`,
-            node.status === "failed" || node.status === "blocked"
-              ? "warn-text"
-              : "muted",
-          ),
-        );
-      cell.append(
-        button("执行 / 复用", () => runNode(stage, sid, false), busy()),
-        button("强制重新生成", () => runNode(stage, sid, true), busy()),
-      );
-      if (stage === "select")
-        cell.append(
-          button(
-            "人工选择连续镜头",
-            () => manualRange(sid),
-            busy() || !p.shots[sid].tts,
-          ),
-        );
-      const details = el("details");
-      const key = `${stage}:${sid}`;
-      details.open = state.openCells.has(key);
-      details.append(el("summary", "展开详情与历史版本"));
-      details.addEventListener("toggle", () =>
-        details.open ? state.openCells.add(key) : state.openCells.delete(key),
-      );
-      if (stage === "recall" && item) {
-        const strip = el("div", "", "candidate-strip");
-        for (const c of item.data.results || []) {
-          const b = button(
-            `${c.source_name || c.source_id} ${secs(c.start)}–${secs(c.end)}`,
-            () => play(c.media_url, "召回候选"),
-          );
-          if (c.thumbnail_url) {
-            const img = el("img");
-            img.src = c.thumbnail_url;
-            img.loading = "lazy";
-            img.alt = c.source_name || c.source_id;
-            b.prepend(img);
-          }
-          b.className = "candidate-thumb";
-          strip.append(b);
-        }
-        details.append(strip);
-      }
-      if (stage === "tts" && item?.files.audio)
-        details.append(media("audio", item.files.audio.url));
-      if (stage === "select" && item)
-        details.append(
-          jsonView({
-            anchor: item.data.anchor,
-            range: item.data.range,
-            actual_range: item.data.actual_range,
-            extension: item.data.extension,
-            trim_seconds: item.data.trim_seconds,
-            freeze_seconds: item.data.freeze_seconds,
-            atempo: item.data.atempo,
-          }),
-        );
-      details.append(historyCell(stage, sid));
-      cell.append(details);
-      row.append(cell);
-    }
-    body.append(row);
+function scopeKey() {
+  return `${state.id}/${plan().id}`;
+}
+function draftKey(sid) {
+  return `${scopeKey()}/${sid}`;
+}
+function expandedRows() {
+  if (!state.expanded.has(scopeKey()))
+    state.expanded.set(scopeKey(), new Map());
+  return state.expanded.get(scopeKey());
+}
+function hasDirtyDraft() {
+  const prefix = `${scopeKey()}/`;
+  return [...state.drafts].some(
+    ([key, draft]) => key.startsWith(prefix) && draft.dirty,
+  );
+}
+function mutationButton(text, action, unavailable = false, allowDirty = false) {
+  const n = button(text, () => {
+    if (busy() || (!allowDirty && hasDirtyDraft())) return;
+    return action();
+  });
+  n.dataset.mutating = "true";
+  n.dataset.unavailable = String(unavailable);
+  n.dataset.allowDirty = String(allowDirty);
+  return n;
+}
+function updateLocks() {
+  if (!state.data) return;
+  const locked = busy(),
+    dirty = hasDirtyDraft();
+  for (const id of [
+    "plan-select",
+    "new-plan",
+    "copy-plan",
+    "rename-plan",
+    "plan-settings",
+    "run-all",
+  ]) {
+    $(id).disabled = locked || (dirty && id !== "plan-select");
+    $(id).title = dirty && id !== "plan-select" ? "请先保存或取消分镜修改" : "";
   }
-  if (!order().length) {
+  document.querySelectorAll(".regenerate-column").forEach((n) => {
+    n.disabled =
+      locked || dirty || (n.dataset.stage !== "split" && !order().length);
+    n.title = dirty
+      ? "请先保存或取消分镜修改"
+      : n.dataset.stage === "split"
+        ? "按原始文案重新生成整份分镜"
+        : "只重新生成本列全部分镜";
+  });
+  $("matrix-body")
+    .querySelectorAll("[data-mutating]")
+    .forEach((n) => {
+      n.disabled =
+        locked ||
+        n.dataset.unavailable === "true" ||
+        (n.dataset.requiresTts && !plan().shots[n.dataset.requiresTts]?.tts) ||
+        (dirty && n.dataset.allowDirty !== "true");
+    });
+  $("matrix-body")
+    .querySelectorAll("[data-shot-input]")
+    .forEach((n) => {
+      n.disabled = locked;
+    });
+}
+function pauseMedia(node) {
+  node.querySelectorAll("audio,video").forEach((n) => n.pause());
+}
+function toggleCell(sid, stage) {
+  const expanded = expandedRows();
+  expanded.get(sid) === stage ? expanded.delete(sid) : expanded.set(sid, stage);
+  renderMatrix();
+}
+function invalidatePanel(sid) {
+  const row = state.matrixRows.get(sid);
+  if (row) row.panelKey = null;
+}
+function latestNode(stage, sid) {
+  const build = [...state.data.builds].reverse().find((b) =>
+    b.plan_id === plan().id &&
+    b.nodes.some((n) => n.stage === stage && n.shot_id === sid),
+  );
+  return build?.nodes.find((n) => n.stage === stage && n.shot_id === sid);
+}
+function selectionWithin(node) {
+  const selection = window.getSelection();
+  return selection && !selection.isCollapsed &&
+    (node.contains(selection.anchorNode) || node.contains(selection.focusNode));
+}
+function executionError(stage, sid) {
+  const node = latestNode(stage, sid);
+  if (node?.status !== "failed") return "";
+  const attempted = ver(node.version),
+    tts = attempted?.parameters.tts,
+    detail = node.error || attempted?.error || "请查看执行日志";
+  const context = stage === "tts" && tts
+    ? `（${tts.model} · 音色 ${tts.voice}）` : "";
+  const advice = stage === "tts" && detail.includes("voice id not exist")
+    ? "；请在“方案参数”选择当前配音服务支持的音色并保存后重试。" : "";
+  const changed = stage === "tts" && tts && state.data.tts_settings &&
+    tts.voice !== state.data.tts_settings.voice;
+  return shortIds(`最近执行失败${context}：${detail}${changed
+    ? `；当前生效音色已变为 ${state.data.tts_settings.voice}，重新执行将使用新音色。`
+    : advice}`);
+}
+function cellSummary(sid, stage) {
+  const selected = plan().shots[sid][stage],
+    item = ver(selected);
+  const cell = el("td"),
+    trigger = el("div", "", "cell-trigger");
+  trigger.setAttribute("role", "button");
+  trigger.tabIndex = 0;
+  trigger.setAttribute("aria-label", `${shortId(sid)} · ${LABEL[stage]}详情`);
+  trigger.setAttribute(
+    "aria-expanded",
+    String(expandedRows().get(sid) === stage),
+  );
+  trigger.setAttribute("aria-controls", `shot-detail-${sid}`);
+  trigger.append(
+    el(
+      "span",
+      selected ? `选用 ${selected.slice(0, 8)}` : "未选择",
+      `badge${selected ? " good" : ""}`,
+    ),
+  );
+  if (item) {
+    const d = item.data;
+    if (stage === "content") {
+      trigger.append(
+        el("span", d.text, "cell-summary"),
+        el("span", d.query, "cell-summary muted"),
+      );
+      if (state.drafts.get(draftKey(sid))?.dirty)
+        trigger.append(el("span", "未保存修改", "badge warn"));
+    } else {
+      const summary =
+        stage === "recall"
+          ? `${d.results?.length || 0} 个候选`
+          : stage === "tts"
+            ? secs(d.duration)
+            : stage === "select"
+              ? `${d.event.video.source_name || shortId(d.event.video.source_id)} ${secs(d.event.video.start)}–${secs(d.event.video.end)}`
+              : `${d.frames || "?"} 帧 · ${d.fps || "?"} fps`;
+      trigger.append(el("span", summary, "cell-summary"));
+    }
+  }
+  const messages = state.data.conflicts[`${stage}:${sid}`] || [];
+  if (messages.length)
+    trigger.append(el("span", shortIds(`选用版本兼容性：${messages.join("；")}`), "cell-summary warn-text"));
+  const node = latestNode(stage, sid);
+  if (node)
+    trigger.append(
+      el("span", `最近执行：${STATUS[node.status]}`, "cell-status"),
+    );
+  const error = executionError(stage, sid);
+  if (error) trigger.append(el("span", error, "cell-summary warn-text"));
+  trigger.append(
+    el(
+      "span",
+      expandedRows().get(sid) === stage ? "收起详情 ▴" : "展开详情 ▾",
+      "cell-expand",
+    ),
+  );
+  cell.addEventListener("click", (event) => {
+    if (event.detail > 1 || selectionWithin(cell)) return;
+    toggleCell(sid, stage);
+  });
+  trigger.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    toggleCell(sid, stage);
+  });
+  cell.append(trigger);
+  return cell;
+}
+function renderMatrix() {
+  const body = $("matrix-body"),
+    scope = scopeKey();
+  if (state.matrixScope !== scope) {
+    pauseMedia(body);
+    body.replaceChildren();
+    state.matrixRows.clear();
+    state.matrixScope = scope;
+  }
+  const ids = order(),
+    wanted = [];
+  for (const [index, sid] of ids.entries()) {
+    let entry = state.matrixRows.get(sid);
+    if (!entry) {
+      const summary = el("tr", "", "shot-summary-row"),
+        detail = el("tr", "", "shot-detail-row"),
+        cell = el("td");
+      cell.colSpan = 6;
+      const panel = el("div", "", "shot-detail-panel");
+      panel.id = `shot-detail-${sid}`;
+      cell.append(panel);
+      detail.append(cell);
+      entry = { summary, detail, panel, panelKey: null };
+      state.matrixRows.set(sid, entry);
+    }
+    const head = el("th", `${index + 1} · ${shortId(sid)}`);
+    head.scope = "row";
+    const summaryKey = JSON.stringify([
+      index, plan().shots[sid],
+      STAGES.map((stage) => [state.data.conflicts[`${stage}:${sid}`], latestNode(stage, sid)]),
+      state.drafts.get(draftKey(sid))?.dirty,
+    ]);
+    if (entry.summaryKey !== summaryKey && !selectionWithin(entry.summary)) {
+      entry.summary.replaceChildren(
+        head,
+        ...["content", ...STAGES].map((stage) => cellSummary(sid, stage)),
+      );
+      entry.summaryKey = summaryKey;
+      entry.summaryPending = false;
+    } else if (entry.summaryKey !== summaryKey) {
+      entry.summaryPending = true;
+    }
+    ["content", ...STAGES].forEach((stage, column) => {
+      const trigger = entry.summary.children[column + 1].firstElementChild;
+      const expanded = expandedRows().get(sid) === stage;
+      trigger.setAttribute("aria-expanded", String(expanded));
+      const hint = expanded ? "收起详情 ▴" : "展开详情 ▾";
+      if (trigger.lastElementChild.textContent !== hint)
+        trigger.lastElementChild.textContent = hint;
+    });
+    wanted.push(entry.summary);
+    const stage = expandedRows().get(sid);
+    if (stage) {
+      const selected = plan().shots[sid][stage];
+      const history = Object.values(state.data.versions)
+        .filter((v) => v.stage === stage && v.shot_id === sid)
+        .map((v) => v.id);
+      const key = JSON.stringify([
+        stage,
+        selected,
+        stage === "content" ? null : plan().options,
+        stage === "content" ? ids : null,
+        stage === "tts" ? state.data.tts_settings : null,
+        stage === "select" ? state.data.revision : null,
+        ["recall", "select"].includes(stage) ? [plan().anchors?.[sid], plan().shots[sid].recall, plan().shots[sid].tts, plan().ranges[sid]] : null,
+      ]);
+      if (entry.panelKey !== key) {
+        pauseMedia(entry.panel);
+        entry.panel.replaceChildren();
+        const heading = el("div", "", "detail-heading");
+        heading.append(
+          el("h3", `分镜 ${index + 1} · ${LABEL[stage]} · ${shortId(sid)}`),
+          button("收起", () => toggleCell(sid, stage)),
+        );
+        entry.panel.append(heading);
+        stage === "content"
+          ? renderShotEditor(entry.panel, sid)
+          : renderStageDetails(entry.panel, sid, stage);
+        entry.panelKey = key;
+        entry.historyKey = null;
+      }
+      entry.panel.querySelector("h3").textContent =
+        `分镜 ${index + 1} · ${LABEL[stage]} · ${shortId(sid)}`;
+      const result = entry.panel.querySelector("[data-node-result]");
+      if (result) {
+        const message = executionError(stage, sid);
+        if (result.textContent !== message) result.textContent = message;
+        result.hidden = !message;
+      }
+      const historyKey = JSON.stringify(history);
+      if (entry.historyKey !== historyKey) {
+        const historyBox = entry.panel.querySelector("[data-row-history]");
+        const preferred = historyBox.querySelector("select")?.value;
+        historyBox.replaceChildren(historyCell(stage, sid, preferred));
+        entry.historyKey = historyKey;
+      }
+      wanted.push(entry.detail);
+    } else if (entry.detail.parentNode) {
+      pauseMedia(entry.detail);
+      entry.detail.remove();
+    }
+  }
+  for (const [sid, entry] of state.matrixRows)
+    if (!ids.includes(sid)) {
+      pauseMedia(entry.detail);
+      entry.summary.remove();
+      entry.detail.remove();
+      state.matrixRows.delete(sid);
+    }
+  if (!ids.length) {
+    body.replaceChildren();
     const row = el("tr"),
-      cell = el("td", "先生成分镜，或编辑分镜结构手动添加。");
+      cell = el("td");
     cell.colSpan = 6;
+    cell.append(
+      el(
+        "p",
+        "使用“文本与查询”列的“全部重新生成”生成分镜，或手动添加第一镜。",
+        "muted",
+      ),
+      mutationButton("添加分镜", () => changeStructure(null, "insert")),
+    );
     row.append(cell);
     body.append(row);
+  } else {
+    for (const child of [...body.children])
+      if (!wanted.includes(child)) child.remove();
+    wanted.forEach((node, index) => {
+      if (body.children[index] !== node)
+        body.insertBefore(node, body.children[index] || null);
+    });
+  }
+  updateLocks();
+}
+document.addEventListener("selectionchange", () => {
+  if (state.data && [...state.matrixRows.values()].some((entry) =>
+    entry.summaryPending && !selectionWithin(entry.summary),
+  )) renderMatrix();
+});
+function renderShotEditor(body, sid) {
+  const original = ver(plan().shots[sid].content).data;
+  let draft = state.drafts.get(draftKey(sid));
+  if (
+    !draft ||
+    (!draft.dirty && draft.baseContent !== plan().shots[sid].content)
+  ) {
+    draft = {
+      baseContent: plan().shots[sid].content,
+      original: { ...original },
+      data: { ...original },
+      dirty: false,
+    };
+    state.drafts.set(draftKey(sid), draft);
+  }
+  const fields = el("div", "", "shot-editor-fields");
+  for (const [name, label, type] of [
+    ["text", "旁白与字幕", "textarea"],
+    ["query", "查询", "textarea"],
+    ["estimated_seconds", "预估秒数", "number"],
+  ]) {
+    const f = field(label, draft.data[name], type);
+    f.input.dataset.shotInput = "true";
+    if (type === "textarea") f.input.maxLength = name === "text" ? 200 : 400;
+    else {
+      f.input.min = "0.001";
+      f.input.max = "60";
+    }
+    f.input.addEventListener("input", () => {
+      draft.data[name] =
+        type === "number" ? Number(f.input.value) : f.input.value;
+      draft.dirty =
+        JSON.stringify(draft.data) !== JSON.stringify(draft.original);
+      const entry = state.matrixRows.get(sid);
+      entry.summary.children[1].replaceWith(cellSummary(sid, "content"));
+      updateLocks();
+    });
+    fields.append(f.wrap);
+  }
+  body.append(fields);
+  const actions = el("div", "", "detail-actions");
+  actions.append(
+    mutationButton("保存此镜", () => saveShot(sid), false, true),
+    mutationButton(
+      "取消修改",
+      () => {
+        state.drafts.delete(draftKey(sid));
+        invalidatePanel(sid);
+        renderMatrix();
+      },
+      false,
+      true,
+    ),
+  );
+  const index = order().indexOf(sid);
+  for (const [op, label, disabled] of [
+    ["up", "上移", index === 0],
+    ["down", "下移", index === order().length - 1],
+    ["merge", "合并到上一镜", index === 0],
+    ["insert", "其后插入", false],
+    ["delete", "删除此镜", order().length === 1],
+  ])
+    actions.append(
+      mutationButton(label, () => changeStructure(sid, op), disabled),
+    );
+  const history = el("div");
+  history.dataset.rowHistory = "content";
+  body.append(actions, history);
+}
+function currentBoard() {
+  return order().map((sid) => ({ ...ver(plan().shots[sid].content).data }));
+}
+async function saveShot(sid) {
+  const key = draftKey(sid),
+    draft = state.drafts.get(key),
+    scope = scopeKey();
+  if (draft.baseContent !== plan().shots[sid].content)
+    throw new Error("此分镜已变化，请取消修改后重新编辑。");
+  const shots = currentBoard();
+  shots[order().indexOf(sid)] = {
+    ...draft.data,
+    text: draft.data.text.trim(),
+    query: draft.data.query.trim(),
+  };
+  const result = await api(planBase(), "PATCH", {
+    revision: state.data.revision,
+    shots,
+  });
+  state.drafts.delete(key);
+  if (scope !== scopeKey()) return;
+  invalidatePanel(sid);
+  await accept(result);
+  notice("当前分镜已保存，其他分镜保持原内容。");
+}
+async function changeStructure(sid, op) {
+  const shots = currentBoard(),
+    oldIds = order(),
+    index = oldIds.indexOf(sid),
+    scope = scopeKey();
+  if (op === "insert")
+    shots.splice(index + 1, 0, {
+      id: null,
+      text: "新旁白",
+      query: "新画面",
+      estimated_seconds: 3,
+    });
+  if (op === "delete") shots.splice(index, 1);
+  if (op === "up" || op === "down") {
+    const target = index + (op === "up" ? -1 : 1);
+    [shots[index], shots[target]] = [shots[target], shots[index]];
+  }
+  if (op === "merge") {
+    shots[index - 1].text += shots[index].text;
+    shots[index - 1].query += `；${shots[index].query}`;
+    shots[index - 1].estimated_seconds += shots[index].estimated_seconds;
+    shots.splice(index, 1);
+  }
+  const result = await api(planBase(), "PATCH", {
+    revision: state.data.revision,
+    shots,
+  });
+  if (scope === scopeKey()) {
+    if (sid) state.drafts.delete(draftKey(sid));
+    if (op === "merge") {
+      state.drafts.delete(draftKey(oldIds[index - 1]));
+      invalidatePanel(oldIds[index - 1]);
+    }
+    if (op === "insert") {
+      const p = result.plans[result.active_plan];
+      const added = Object.keys(p.shots).find((id) => !oldIds.includes(id));
+      expandedRows().set(added, "content");
+    }
+  }
+  if (scope === scopeKey()) await accept(result);
+}
+function renderStageDetails(body, sid, stage) {
+  const vid = plan().shots[sid][stage],
+    item = ver(vid),
+    actions = el("div", "", "detail-actions");
+  actions.append(
+    mutationButton(stage === "select" ? "按当前输入选片 / 复用" : "执行 / 复用", () => runNode(stage, sid, false)),
+    mutationButton(stage === "select" ? "重新生成选片版本" : "强制重新生成", () => runNode(stage, sid, true)),
+  );
+  if (item) actions.append(button("查看完整版本", () => showVersion(vid)));
+  const result = el("p", "", "warn-text");
+  result.dataset.nodeResult = "true";
+  result.setAttribute("role", "status");
+  body.append(actions, result);
+  if (stage === "recall") body.append(el("p",
+    "“执行 / 复用”优先选用输入与设置匹配、文件完好的成功召回版本，没有时才重新检索；“强制重新生成”每次重新检索并新增召回版本。两者只处理召回，不自动配音、选片或渲染。", "muted"));
+  if (stage === "select") body.append(el("p",
+    "拖动窗口后，点击下方“保存当前窗口”保存位置。“按当前输入选片 / 复用”会复用匹配的成功选片，没有时按当前锚点或已保存范围选片；“重新生成选片版本”跳过复用并新增版本。这两个按钮不保存未提交的窗口草稿，也不渲染视频或合成成片。", "muted"));
+  if (stage === "tts") {
+    const current = state.data.tts_settings;
+    body.append(el("p", current
+      ? `${current.voice_mode === "inherit" ? "跟随当前默认音色" : "方案指定音色"}：${current.voice} · 模型 ${current.model}`
+      : `当前方案音色：${plan().options.voice || "跟随当前默认音色"}`, "muted"));
+  }
+  if (!item) body.append(el("p", "此镜尚未选择此阶段的成功版本。", "muted"));
+  else {
+    if (item.incomplete)
+      body.append(
+        el("p", "此历史版本记录不完整，已知文件仍可查看。", "warn-text"),
+      );
+    if (stage === "recall") {
+      body.append(
+        el(
+          "p",
+          `查询：${item.data.query || "未记录"} · ${item.data.results?.length || 0} 个候选`,
+        ),
+      );
+      renderCandidatePicker(body, sid);
+    } else if (stage === "tts") {
+      body.append(
+        el(
+          "p",
+          `已选版本音色：${item.parameters.voice || "历史未记录"} · 时长 ${secs(item.data.duration)}`,
+        ),
+      );
+      if (item.files.audio) body.append(media("audio", item.files.audio.url));
+    } else if (stage === "select") {
+      const d = item.data,
+        range = d.range,
+        actual = d.actual_range || d.event.video;
+      body.append(
+        el(
+          "p",
+          `素材：${d.event.video.source_name || shortId(d.event.video.source_id)}`,
+        ),
+      );
+      if (d.anchor)
+        body.append(
+          el(
+            "p",
+            `产物参考锚点：${secs(d.anchor.start)}–${secs(d.anchor.end)} · 候选第 ${d.anchor.rank || 0} 名`,
+          ),
+        );
+      if (range)
+        body.append(
+          el(
+            "p",
+            `选定范围：${secs(range.start)}–${secs(range.end)}；实际使用：${secs(actual.start)}–${secs(actual.end)}`,
+          ),
+        );
+      body.append(
+        el(
+          "p",
+          `涉及 ${d.event.video.segment_ids.length} 个镜头 · 配音速度 ${(d.atempo || d.event.audio.atempo).toFixed(3)}× · 裁剪 ${secs(d.trim_seconds)} · 冻结 ${secs(d.freeze_seconds)}`,
+        ),
+      );
+      if (d.extension)
+        body.append(
+          el(
+            "p",
+            `向前扩展 ${secs(d.extension.before)}，向后扩展 ${secs(d.extension.after)}`,
+          ),
+        );
+      if (d.event.warning) body.append(el("p", shortIds(d.event.warning), "warn-text"));
+    } else if (stage === "render") {
+      body.append(
+        el("p", `${item.data.frames || "?"} 帧 · ${item.data.fps || "?"} fps`),
+      );
+      if (item.files.preview?.url || item.files.video?.url)
+        body.append(
+          media("video", item.files.preview?.url || item.files.video.url),
+        );
+      if (item.files.audio?.url)
+        body.append(media("audio", item.files.audio.url));
+    }
+  }
+  if (stage === "select") {
+    const host = el("div", "", "manual-range-host");
+    renderCandidatePicker(body, sid);
+    body.append(host);
+    if (!busy()) manualRange(sid, host).catch((error) => {
+      if (host.isConnected) host.replaceChildren(el("p", shortIds(error.message), "warn-text"));
+    });
+    else body.append(button("打开定长窗口", () => manualRange(sid, host)));
+
+  }
+  const history = el("div");
+  history.dataset.rowHistory = stage;
+  body.append(el("h4", "此镜历史版本"), history);
+}
+async function regenerateColumn(stage) {
+  if (busy() || hasDirtyDraft()) return;
+  const inputs_by_shot = {};
+  if (stage !== "split")
+    for (const sid of order()) inputs_by_shot[sid] = nodeInputs(stage, sid);
+  const url = planBase(),
+    body = { revision: state.data.revision, stage, inputs_by_shot };
+  state.submitting = true;
+  render();
+  try {
+    await api(`${url}/regenerate-column`, "POST", body);
+    notice(`${LABEL[stage]}列已提交全部重新生成。`);
+  } finally {
+    state.submitting = false;
+    await refresh();
   }
 }
-function historyCell(stage, sid) {
+function renderLogShell() {
+  const key = scopeKey(),
+    build = [...state.data.builds]
+      .reverse()
+      .find((b) => b.plan_id === plan().id);
+  let view = state.logViews.get(key);
+  if (!view || view.buildId !== build?.id) {
+    view = { buildId: build?.id, seq: 0, lines: [], legacy: false };
+    state.logViews.set(key, view);
+  }
+  const box = $("execution-log");
+  if (box.dataset.scope !== `${key}/${view.buildId || ""}`) {
+    box.dataset.scope = `${key}/${view.buildId || ""}`;
+    box.textContent =
+      view.lines.join("\n") ||
+      (build ? "正在读取执行日志…" : "当前方案暂无执行日志。");
+    box.scrollTop = box.scrollHeight;
+  }
+}
+async function refreshLogs() {
+  if (!state.data) return;
+  const key = scopeKey(),
+    view = state.logViews.get(key),
+    id = state.id;
+  if (!view?.buildId) return;
+  let more = true;
+  while (more) {
+    const response = await api(
+      `/api/studio/jobs/${id}/builds/${view.buildId}/logs?after=${view.seq}`,
+    );
+    if (
+      id !== state.id ||
+      key !== scopeKey() ||
+      state.logViews.get(key) !== view
+    )
+      return;
+    const box = $("execution-log"),
+      follow = box.scrollHeight - box.clientHeight - box.scrollTop < 32;
+    for (const item of response.items)
+      view.lines.push(
+        shortIds(`${new Date(item.at).toLocaleTimeString("zh-CN")}  ${item.shot_id ? `分镜 ${item.shot_id} · ` : ""}${item.stage ? `${LABEL[item.stage]} · ` : ""}${item.message}`),
+      );
+    view.seq = response.next_seq;
+    view.legacy = response.legacy;
+    if (response.items.length || !view.lines.length)
+      box.textContent =
+        view.lines.join("\n") ||
+        (response.legacy ? "此历史执行没有详细工作日志。" : "等待执行日志…");
+    if (follow) box.scrollTop = box.scrollHeight;
+    more = response.has_more;
+  }
+}
+
+function historyCell(stage, sid, preferred = null) {
   const box = el("div", "", "version-history");
   const items = Object.values(state.data.versions)
     .filter((v) => v.stage === stage && v.shot_id === sid)
     .reverse();
   const select = document.createElement("select");
-  select.setAttribute("aria-label", `${sid} ${LABEL[stage]}历史版本`);
+  select.setAttribute("aria-label", `${shortId(sid)} ${LABEL[stage]}历史版本`);
   for (const item of items) {
     const o = el(
       "option",
@@ -468,7 +970,8 @@ function historyCell(stage, sid) {
     select.append(o);
   }
   if (!items.length) return el("p", "暂无历史", "muted");
-  const choose = button(
+  if (items.some((item) => item.id === preferred)) select.value = preferred;
+  const choose = mutationButton(
     "选为构建输入",
     async () => {
       await accept(
@@ -481,10 +984,13 @@ function historyCell(stage, sid) {
       );
       notice("选择已保存。兼容性提示已更新；尚未执行构建。");
     },
-    busy() || ver(select.value).status !== "complete",
+    ver(select.value).status !== "complete",
   );
   select.addEventListener("change", () => {
-    choose.disabled = busy() || ver(select.value).status !== "complete";
+    choose.dataset.unavailable = String(
+      ver(select.value).status !== "complete",
+    );
+    updateLocks();
   });
   box.append(
     select,
@@ -499,7 +1005,7 @@ function nodeInputs(stage, sid) {
   const inputs = { content: s.content };
   if (stage === "select") {
     inputs.tts = s.tts || null;
-    if (!plan().ranges[sid]) inputs.recall = s.recall || null;
+    if (!plan().ranges[sid] || plan().ranges[sid].anchor_ref) inputs.recall = s.recall || null;
   }
   if (stage === "render")
     Object.assign(inputs, { select: s.select || null, tts: s.tts || null });
@@ -559,110 +1065,44 @@ function renamePlan() {
     }),
   );
 }
-function editBoard(focusSid) {
-  const body = showDialog("编辑分镜结构与内容");
-  let draft = order().map((sid) => ({
-    ...ver(plan().shots[sid].content).data,
-  }));
-  const list = el("div");
-  function draw() {
-    list.replaceChildren();
-    for (const [i, shot] of draft.entries()) {
-      const card = el("div", "", "shot-card");
-      card.append(el("strong", `${i + 1} · ${shot.id || "新分镜"}`));
-      for (const [key, label] of [
-        ["text", "旁白与字幕"],
-        ["query", "查询"],
-      ]) {
-        const f = field(label, shot[key], "textarea");
-        f.input.maxLength = key === "text" ? 200 : 400;
-        f.input.addEventListener("input", () => {
-          shot[key] = f.input.value;
-        });
-        if (shot.id === focusSid && key === "text")
-          setTimeout(() => f.input.focus(), 0);
-        card.append(f.wrap);
-      }
-      const duration = field("预估秒数", shot.estimated_seconds, "number");
-      duration.input.addEventListener("input", () => {
-        shot.estimated_seconds = Number(duration.input.value);
-      });
-      card.append(duration.wrap);
-      card.append(
-        button(
-          "上移",
-          () => {
-            [draft[i - 1], draft[i]] = [draft[i], draft[i - 1]];
-            draw();
-          },
-          i === 0,
-        ),
-        button(
-          "下移",
-          () => {
-            [draft[i + 1], draft[i]] = [draft[i], draft[i + 1]];
-            draw();
-          },
-          i === draft.length - 1,
-        ),
-        button(
-          "合并到上一镜",
-          () => {
-            draft[i - 1].text += shot.text;
-            draft[i - 1].query += `；${shot.query}`;
-            draft[i - 1].estimated_seconds += shot.estimated_seconds;
-            draft.splice(i, 1);
-            draw();
-          },
-          i === 0,
-        ),
-        button(
-          "删除",
-          () => {
-            draft.splice(i, 1);
-            draw();
-          },
-          draft.length === 1,
-        ),
-      );
-      list.append(card);
-    }
-  }
-  body.append(
-    el(
-      "p",
-      "保存只修改此方案；已选下游版本保留，变化后显示兼容性提示。",
-      "muted",
-    ),
-    list,
-    button("添加分镜", () => {
-      draft.push({
-        id: null,
-        text: "新旁白",
-        query: "新画面",
-        estimated_seconds: 3,
-      });
-      draw();
-    }),
-    button("保存分镜", async () => {
-      await accept(
-        await api(planBase(), "PATCH", {
-          revision: state.data.revision,
-          shots: draft,
-        }),
-      );
-      closeDialog();
-      notice("分镜已保存。");
-    }),
-  );
-  draw();
+function voiceChoices(catalog, current) {
+  if (!catalog) return null;
+  const choices = [];
+  const seen = new Set();
+  const push = (value, label) => {
+    if (!value || seen.has(value)) return;
+    seen.add(value);
+    choices.push([value, label]);
+  };
+  const known = new Set([
+    ...catalog.groups.flatMap(g => g.voices.map(v => v.voice_id)),
+    ...catalog.library.map(v => v.voice_id),
+  ]);
+  if (current && !known.has(current)) push(current, `${current}（当前，不在目录中）`);
+  for (const group of catalog.groups)
+    for (const voice of group.voices) push(voice.voice_id, `${group.label} · ${voice.label}`);
+  for (const item of catalog.library)
+    push(item.voice_id, `${item.kind === "clone" ? "克隆" : "已录入"} · ${item.name}`);
+  return choices;
 }
-function editSettings() {
+
+async function editSettings() {
+  let catalog = null;
+  try {
+    catalog = await api("/api/settings/voices/catalog");
+  } catch {
+    catalog = null; // 目录不可用时降级为文本输入
+  }
   const body = showDialog("方案参数"),
     fields = {},
     o = plan().options;
+  const defaultVoice = state.data.tts_settings?.default_voice || catalog?.default_voice || "";
   const definitions = [
-    ["voice", "声音 ID（当前配音服务）", "text"],
+    ["voice_mode", "音色方式", "text", [
+      ["inherit", `跟随当前默认音色${defaultVoice ? `（${defaultVoice}）` : ""}`],
+      ["custom", "为本方案指定音色"],
+    ]],
+    ["voice", "指定音色", "text", voiceChoices(catalog, o.voice || defaultVoice)],
     ["recall_limit", "召回数量 1–50", "number"],
     [
       "audio_mode",
@@ -696,9 +1136,77 @@ function editSettings() {
     ],
   ];
   for (const [key, label, type, choices] of definitions) {
-    const f = field(label, o[key], type, choices);
+    const value = key === "voice_mode" ? o.voice_mode || "inherit"
+      : key === "voice" ? o.voice || defaultVoice : o[key];
+    const f = field(label, value, type, choices);
     fields[key] = f.input;
     body.append(f.wrap);
+  }
+  const updateVoiceMode = () => {
+    fields.voice.disabled = fields.voice_mode.value === "inherit";
+  };
+  fields.voice_mode.addEventListener("change", updateVoiceMode);
+  updateVoiceMode();
+  body.append(el("p", "跟随默认时，切换配音服务或默认音色会用于下一次执行；历史配音仍保留实际使用的音色。", "muted"));
+  if (catalog?.clone?.supported && catalog.clone.mode === "upload") {
+    const box = el("div", undefined, "voice-clone-box");
+    box.append(el("p", "克隆新音色：上传 3 秒以上清晰人声样本，成功后自动选用（仍需保存参数）。", "muted"));
+    const name = document.createElement("input");
+    name.placeholder = "音色名称";
+    const file = document.createElement("input");
+    file.type = "file";
+    file.accept = ".wav,.mp3,.m4a,audio/*";
+    const row = el("div", undefined, "voice-clone-row");
+    row.append(name, file);
+    box.append(row);
+    let refText = null;
+    if (catalog.clone.ref_text) {
+      refText = document.createElement("input");
+      refText.placeholder = "参考文本（可选，填样本朗读内容可提升克隆效果）";
+      box.append(refText);
+    }
+    const consent = document.createElement("label");
+    consent.className = "check";
+    const consentBox = document.createElement("input");
+    consentBox.type = "checkbox";
+    consent.append(consentBox, " 我确认拥有该声音的合法使用授权");
+    box.append(consent);
+    const error = el("p", undefined, "dialog-error");
+    box.append(
+      button("克隆音色", async () => {
+        error.textContent = "";
+        if (!name.value.trim() || !file.files.length) {
+          error.textContent = "请填写音色名称并选择样本文件";
+          return;
+        }
+        if (!consentBox.checked) {
+          error.textContent = "请确认声音使用授权";
+          return;
+        }
+        const form = new FormData();
+        form.append("name", name.value.trim());
+        form.append("consent", "true");
+        if (refText) form.append("ref_text", refText.value.trim());
+        form.append("file", file.files[0]);
+        const response = await fetch("/api/settings/voices/clone", { method: "POST", body: form });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          error.textContent = shortIds(typeof data.detail === "string" ? data.detail : "克隆失败");
+          return;
+        }
+        const option = el("option", `克隆 · ${data.name}`);
+        option.value = data.voice_id;
+        fields.voice.append(option);
+        fields.voice.value = data.voice_id;
+        fields.voice_mode.value = "custom";
+        updateVoiceMode();
+        name.value = "";
+        file.value = "";
+        notice(`音色「${data.name}」克隆成功；保存参数后生效。`);
+      }),
+      error,
+    );
+    body.append(box);
   }
   body.append(
     button("保存参数", async () => {
@@ -709,6 +1217,7 @@ function editSettings() {
       options.atempo =
         fields.atempo.value === "" ? null : Number(fields.atempo.value);
       options.burn = options.burn === "true";
+      options.voice = options.voice_mode === "inherit" ? null : fields.voice.value.trim();
       await accept(
         await api(planBase(), "PATCH", {
           revision: state.data.revision,
@@ -720,145 +1229,277 @@ function editSettings() {
     }),
   );
 }
-async function manualRange(sid) {
-  const p = plan(),
-    selection = ver(p.shots[sid].select)?.data,
-    candidates = ver(p.shots[sid].recall)?.data.results || [];
-  const body = showDialog(`连续镜头选择 · ${sid}`);
-  const initial = p.ranges[sid] || selection?.range || candidates[0] || {};
-  const source = field("素材 ID", initial.source_id || "");
-  const start = field("开始秒", initial.start ?? 0, "number"),
-    end = field("结束秒", initial.end ?? 1, "number");
-  const sources = [
-    ...new Set(
-      candidates
-        .map((c) => c.source_id)
-        .concat(initial.source_id || [])
-        .filter(Boolean),
-    ),
-  ];
-  const sourceChoices = document.createElement("datalist");
-  sourceChoices.id = "source-choices";
-  for (const id of sources) {
-    const option = el("option");
-    option.value = id;
-    sourceChoices.append(option);
-  }
-  source.input.setAttribute("list", sourceChoices.id);
-  const shotsBox = el("div", "", "source-shots"),
-    result = el("div");
-  let checks = [],
-    preview = null;
-  const confirm = button(
-    "确认对齐并保存新选片版本",
-    async () => {
-      await accept(
-        await api(`${planBase()}/range-confirm`, "POST", {
-          ...request(),
-          preview_token: preview.preview_token,
-        }),
-      );
-      closeDialog();
-      notice("人工范围与对齐结果已保存，分镜视频保留原版本。");
-    },
-    true,
+function renderCandidatePicker(body, sid) {
+  const recall = plan().shots[sid].recall,
+    item = ver(recall),
+    choice = plan().anchors?.[sid] || { mode: "auto" };
+  const picker = el("div", "", "candidate-picker");
+  picker.append(el("h4", "新选片的参考锚点"));
+  const automatic = mutationButton(
+    choice.mode === "auto" ? "自动选择 · 当前模式" : "恢复自动选择",
+    () => selectAnchor(sid, { mode: "auto" }),
   );
-  function invalidate() {
-    preview = null;
-    confirm.disabled = true;
-    result.replaceChildren();
-  }
-  function request() {
-    return {
-      revision: state.data.revision,
-      shot_id: sid,
-      source_id: source.input.value,
-      start: Number(start.input.value),
-      end: Number(end.input.value),
-      ...(checks.some((c) => c.input.checked)
-        ? {
-            segment_ids: checks
-              .filter((c) => c.input.checked)
-              .map((c) => c.row.id),
-          }
-        : {}),
-    };
-  }
-  for (const f of [source, start, end])
-    f.input.addEventListener("input", invalidate);
-  async function loadShots() {
-    invalidate();
-    const response = await api(
-      `/api/studio/sources/${encodeURIComponent(source.input.value)}/shots`,
-    );
-    checks = [];
-    shotsBox.replaceChildren();
-    for (const row of response.items) {
-      const label = el(
-        "label",
-        "",
-        `source-shot${row.visible ? "" : " hidden-shot"}`,
-      );
-      const input = document.createElement("input");
-      input.type = "checkbox";
-      input.disabled = !row.visible;
-      input.checked =
-        row.visible &&
-        row.start < Number(end.input.value) &&
-        row.end > Number(start.input.value);
-      const record = { input, row };
-      checks.push(record);
-      input.addEventListener("change", () => {
-        invalidate();
-        const chosen = checks.filter((c) => c.input.checked);
-        if (chosen.length) {
-          start.input.value = chosen[0].row.start;
-          end.input.value = chosen.at(-1).row.end;
-        }
-      });
-      label.append(
-        input,
-        el(
-          "span",
-          `${row.id} · ${secs(row.start)}–${secs(row.end)}${row.visible ? "" : " · 已隐藏"}`,
-        ),
-        button(
-          "预览镜头",
-          () => play(`/api/admin/segments/${row.id}/media`, row.id),
-          !row.visible,
-        ),
-      );
-      shotsBox.append(label);
+  automatic.setAttribute("aria-pressed", String(choice.mode === "auto"));
+  picker.append(automatic, el("p", choice.mode === "auto"
+    ? "当前为自动模式，未固定某个候选，不默认选择第一名。打开选片窗口或执行选片时，按语义、实际配音时长和素材延长情况综合评分；窗口中会显示实际参考候选。无成功配音时等待配音完成，已有选片和视频保留原依赖。"
+    : "当前固定使用标记的参考候选。恢复自动选择只保存自动模式并清除此前人工范围，不会立即执行选片；已有选片和视频保留原依赖。", "muted"));
+  if (state.data.anchor_conflicts?.[sid])
+    picker.append(el("p", shortIds(state.data.anchor_conflicts[sid]), "warn-text"));
+  const pool = el("div", "", "detail-candidates");
+  for (const c of item?.data.results || []) {
+    const selected = choice.mode === "manual" && choice.recall_version === recall && choice.candidate_id === (c.id || c.segment_id);
+    const card = el("div", "", `detail-candidate${selected ? " chosen-candidate" : ""}`);
+    if (c.thumbnail_url) {
+      const img = el("img");
+      img.src = c.thumbnail_url;
+      img.alt = c.source_name || shortId(c.source_id);
+      img.loading = "lazy";
+      card.append(img);
     }
+    card.append(el("p", `${c.rank || ""} · ${c.source_name || shortId(c.source_id)} · ${secs(c.start)}–${secs(c.end)}`),
+      button("预览", () => play(c.media_url, "召回候选")));
+    const choose = mutationButton(selected ? "当前参考锚点" : "设为参考锚点", () => selectAnchor(sid, {
+      mode: "manual", recall_version: recall, candidate_id: c.id || c.segment_id,
+    }));
+    choose.setAttribute("aria-pressed", String(selected));
+    card.append(choose);
+    pool.append(card);
   }
-  body.append(
-    el(
-      "p",
-      "只允许同一素材中的连续镜头。勾选后可微调边界；预览会校验隐藏区间与时间连续性。",
-      "muted",
-    ),
-    source.wrap,
-    sourceChoices,
-    button("加载素材镜头", loadShots),
-    shotsBox,
-    start.wrap,
-    end.wrap,
-    button("预览范围与对齐结果", async () => {
-      preview = await api(`${planBase()}/range-preview`, "POST", request());
-      result.replaceChildren(
-        el(
-          "p",
-          `选定 ${secs(preview.range.start)}–${secs(preview.range.end)}；实际 ${secs(preview.actual_range.start)}–${secs(preview.actual_range.end)}；配音速度 ${preview.atempo.toFixed(3)}×；裁剪 ${secs(preview.trim_seconds)}；冻结 ${secs(preview.freeze_seconds)}`,
-        ),
-        media("video", preview.preview_url),
-      );
-      confirm.disabled = false;
-    }),
-    result,
-    confirm,
-  );
-  if (source.input.value) await loadShots();
+  picker.append(pool);
+  body.append(picker);
 }
+async function selectAnchor(sid, choice) {
+  await accept(await api(`${planBase()}/anchor`, "POST", {
+    revision: state.data.revision, shot_id: sid, ...choice,
+  }));
+  notice(choice.mode === "auto"
+    ? "已恢复自动模式，尚未固定候选；打开选片窗口或执行选片时综合评分选择，不默认使用第一名。已有选片和视频保留原版本。"
+    : "参考锚点已保存；执行选片或保存当前窗口后才会产生新选片版本。");
+}
+async function manualRange(sid, host = null) {
+  const scope = scopeKey(), url = planBase(),
+    body = host || showDialog(`定长窗口 · ${sid}`);
+  body.replaceChildren(el("p", "正在加载局部连续视频…", "muted"));
+  const ctx = await api(`${url}/shots/${encodeURIComponent(sid)}/selection-context`);
+  if (scope !== scopeKey() || !body.isConnected) return;
+  body.replaceChildren();
+  if (!ctx.anchor) {
+    body.append(el("p", shortIds(ctx.reason), "muted"));
+    return;
+  }
+  const lo = ctx.context_range.start, hi = ctx.context_range.end,
+    length = ctx.window_duration || 0,
+    key = JSON.stringify([scope, sid, ctx.anchor_ref, ctx.tts_version, ctx.atempo]),
+    saved = state.windowDrafts.get(key),
+    existing = plan().ranges[sid];
+  let draft = saved || {
+    start: existing?.anchor_ref?.candidate_id === ctx.anchor_ref.candidate_id &&
+      existing?.anchor_ref?.recall_version === ctx.anchor_ref.recall_version &&
+      existing?.tts_version === ctx.tts_version && existing?.atempo === ctx.atempo
+      ? existing.start : ctx.initial_start,
+    zoom: 1, preview: null, contextToken: ctx.context_token,
+  };
+  if (draft.contextToken !== ctx.context_token) draft.preview = null;
+  draft.contextToken = ctx.context_token;
+  draft.start = Math.min(ctx.legal_start.max, Math.max(lo, draft.start));
+  state.windowDrafts.set(key, draft);
+  body.append(el("p", `参考候选第 ${ctx.anchor.rank || "?"} 名 · ${secs(ctx.anchor.start)}–${secs(ctx.anchor.end)}；局部上下文 ${secs(lo)}–${secs(hi)}`, "muted"));
+  if (ctx.extension.before || ctx.extension.after)
+    body.append(el("p", `默认范围不足，已补充前 ${ctx.extension.before} 镜、后 ${ctx.extension.after} 镜。`, "muted"));
+  if (!ctx.ready) body.append(el("p", shortIds(ctx.reason), "warn-text"));
+  const video = media("video", ctx.video_url);
+  video.classList.add("window-video");
+  video.muted = true;
+  const readout = el("p", "", "window-readout"),
+    viewport = el("div", "", "window-viewport"),
+    track = el("div", "", "window-track"),
+    strip = el("img", null, "window-thumbnails"),
+    windowBox = el("div", "", "fixed-window"),
+    result = el("div");
+  strip.src = ctx.thumbnails_url;
+  strip.alt = "局部连续视频缩略图时间轴";
+  strip.draggable = false;
+  track.append(strip);
+  for (const row of ctx.shots) {
+    const boundary = el("div", "", "window-boundary");
+    boundary.style.left = `${(row.start - lo) / (hi - lo) * 100}%`;
+    boundary.title = `${shortId(row.id)} · ${secs(row.start)}–${secs(row.end)}`;
+    boundary.append(el("span", secs(row.start)));
+    track.append(boundary);
+  }
+  const anchorMark = el("div", "", "window-anchor");
+  anchorMark.style.left = `${(ctx.anchor.start - lo) / (hi - lo) * 100}%`;
+  anchorMark.style.width = `${(ctx.anchor.end - ctx.anchor.start) / (hi - lo) * 100}%`;
+  anchorMark.title = "参考锚点区间";
+  track.append(anchorMark, windowBox);
+  viewport.append(track);
+  windowBox.tabIndex = ctx.ready ? 0 : -1;
+  windowBox.setAttribute("role", "slider");
+  windowBox.setAttribute("aria-label", "定长选片窗口，左右方向键逐帧移动");
+  windowBox.setAttribute("aria-valuemin", lo);
+  windowBox.setAttribute("aria-valuemax", ctx.legal_start.max);
+  windowBox.setAttribute("aria-disabled", String(!ctx.ready));
+  windowBox.hidden = !ctx.ready;
+  let playbackFrame = null, drag = null, saving = false, previewing = false;
+  const saveStatus = el("p", "", "muted");
+  saveStatus.setAttribute("role", "status");
+  const confirm = mutationButton("保存当前窗口", async () => {
+    if (saving || previewing || !ctx.ready) return;
+    const sent = request();
+    saving = true;
+    update(false);
+    try {
+      saveStatus.textContent = draft.preview ? "正在保存当前窗口…" : "正在校验窗口并准备保存…";
+      const preview = draft.preview || await api(`${url}/range-preview`, "POST", {
+        ...sent, render_preview: false,
+      });
+      if (!isCurrent(sent)) throw new Error("窗口或方案已变化，请重新打开窗口后保存。");
+      draft.preview = preview;
+      saveStatus.textContent = "正在保存当前窗口…";
+      const response = await api(`${url}/range-confirm`, "POST", {
+        ...sent, preview_token: preview.preview_token,
+      });
+      draft.preview = null;
+      if (scope === scopeKey()) await accept(response);
+      if (!host) closeDialog();
+      notice("当前窗口已保存为新选片版本；分镜渲染列仍保留原视频，需要时再渲染。");
+    } catch (error) {
+      draft.preview = null;
+      saveStatus.textContent = shortIds(`保存失败：${error.message}`);
+      throw error;
+    } finally {
+      saving = false;
+      update(false);
+    }
+  }, !ctx.ready);
+  function request() {
+    return { revision: ctx.revision, shot_id: sid, context_token: ctx.context_token,
+      anchor_ref: ctx.anchor_ref, tts_version: ctx.tts_version, start: draft.start };
+  }
+  function isCurrent(sent) {
+    return scope === scopeKey() && body.isConnected && draft.start === sent.start &&
+      state.data.revision === ctx.revision;
+  }
+  function seek() {
+    const position = draft.start - lo;
+    if (video.readyState) video.currentTime = Math.max(0, Math.min(video.duration || hi - lo, position));
+  }
+  function update(seekFrame = true) {
+    windowBox.style.left = `${(draft.start - lo) / (hi - lo) * 100}%`;
+    windowBox.style.width = `${length / (hi - lo) * 100}%`;
+    windowBox.setAttribute("aria-valuenow", draft.start);
+    windowBox.setAttribute("aria-valuetext", `${secs(draft.start)} 至 ${secs(draft.start + length)}，固定 ${secs(length)}`);
+    readout.textContent = ctx.ready
+      ? `开始 ${secs(draft.start)} · 结束 ${secs(draft.start + length)} · 固定时长 ${secs(length)} · 配音速度 ${ctx.atempo.toFixed(4)}×`
+      : length ? `所需固定时长 ${secs(length)} · 连续可用 ${secs(hi - lo)}` : "等待实际配音时长，窗口尚未启用。";
+    confirm.dataset.unavailable = String(!ctx.ready || saving || previewing);
+    confirm.disabled = !ctx.ready || saving || previewing || busy();
+    confirm.textContent = saving ? "正在保存…" : "保存当前窗口";
+    serverPreview.dataset.unavailable = String(!ctx.ready || saving || previewing);
+    serverPreview.disabled = !ctx.ready || saving || previewing || busy();
+    if (seekFrame) seek();
+  }
+  function move(value) {
+    if (!ctx.ready || busy() || saving) return;
+    video.pause();
+    draft.start = Math.min(ctx.legal_start.max, Math.max(lo, value));
+    draft.preview = null;
+    result.replaceChildren();
+    saveStatus.textContent = "窗口位置尚未保存，点击“保存当前窗口”提交。";
+    update();
+  }
+  video.addEventListener("loadedmetadata", () => seek(), { once: true });
+  function enforcePlaybackBounds() {
+    if (video.paused) return false;
+    const start = draft.start - lo, end = start + length;
+    if (!ctx.ready || video.currentTime >= end) {
+      video.pause();
+      if (ctx.ready) video.currentTime = end;
+      return false;
+    }
+    if (video.currentTime < start) video.currentTime = start;
+    return true;
+  }
+  function monitorPlayback() {
+    playbackFrame = null;
+    if (body.isConnected && enforcePlaybackBounds())
+      playbackFrame = requestAnimationFrame(monitorPlayback);
+  }
+  video.addEventListener("play", () => {
+    const start = draft.start - lo, end = start + length;
+    if (video.currentTime < start || video.currentTime >= end) seek();
+    if (playbackFrame !== null) cancelAnimationFrame(playbackFrame);
+    monitorPlayback();
+  });
+  video.addEventListener("pause", () => {
+    if (playbackFrame !== null) cancelAnimationFrame(playbackFrame);
+    playbackFrame = null;
+  });
+  video.addEventListener("timeupdate", enforcePlaybackBounds);
+  video.addEventListener("seeking", enforcePlaybackBounds);
+  track.addEventListener("pointerdown", (e) => {
+    if (!ctx.ready || busy() || e.button !== 0) return;
+    e.preventDefault();
+    const rect = track.getBoundingClientRect(), time = lo + (e.clientX - rect.left) / rect.width * (hi - lo);
+    drag = { pointer: e.pointerId, offset: e.target === windowBox ? time - draft.start : length / 2 };
+    track.setPointerCapture(e.pointerId);
+    windowBox.focus({ preventScroll: true });
+    move(time - drag.offset);
+  });
+  track.addEventListener("pointermove", (e) => {
+    if (!drag || drag.pointer !== e.pointerId) return;
+    const rect = track.getBoundingClientRect();
+    move(lo + (e.clientX - rect.left) / rect.width * (hi - lo) - drag.offset);
+  });
+  const stop = () => { drag = null; };
+  track.addEventListener("pointerup", stop);
+  track.addEventListener("pointercancel", stop);
+  windowBox.addEventListener("keydown", (e) => {
+    if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) {
+      e.preventDefault();
+      move(e.key === "Home" ? lo : e.key === "End" ? ctx.legal_start.max :
+        draft.start + (e.key === "ArrowLeft" ? -1 : 1) * ctx.frame_step * (e.shiftKey ? 10 : 1));
+    }
+  });
+  const zoom = field("时间轴缩放", draft.zoom, "range");
+  zoom.input.min = 1; zoom.input.max = 8; zoom.input.step = 0.25;
+  function setZoom() {
+    draft.zoom = Number(zoom.input.value);
+    track.style.width = `${draft.zoom * 100}%`;
+  }
+  zoom.input.addEventListener("input", setZoom);
+  setZoom();
+  const serverPreview = mutationButton("试听配音与画面", async () => {
+    if (saving || previewing || !ctx.ready) return;
+    const sent = request();
+    previewing = true;
+    update(false);
+    saveStatus.textContent = "正在生成当前窗口的配音与画面预览…";
+    try {
+      const preview = await api(`${url}/range-preview`, "POST", sent);
+      if (!isCurrent(sent)) return;
+      draft.preview = preview;
+      result.replaceChildren(media("video", preview.preview_url));
+      saveStatus.textContent = "预览已生成；点击“保存当前窗口”才会保存选片。";
+    } catch (error) {
+      saveStatus.textContent = shortIds(`预览失败：${error.message}；可重试或点击“保存当前窗口”。`);
+      throw error;
+    } finally {
+      previewing = false;
+      update(false);
+    }
+  }, !ctx.ready);
+  serverPreview.dataset.unavailable = String(!ctx.ready);
+  body.append(video, readout, zoom.wrap, viewport,
+    el("p", "拖动整个窗口或点击时间轴定位；← / → 逐帧，Shift 加速，Home / End 到边界。缩放后可横向滚动。", "muted"),
+    confirm, serverPreview,
+    el("p", "“保存当前窗口”只校验并保存所选位置，不生成视频；“试听配音与画面”生成低清音画预览，相同窗口可复用缓存，正式视频仍在分镜渲染列生成。", "muted"),
+    saveStatus, result);
+  if (draft.preview) result.append(media("video", draft.preview.preview_url));
+  update(false);
+  updateLocks();
+}
+
 async function preflight(force = false) {
   const id = state.id,
     pid = plan().id;
@@ -877,7 +1518,7 @@ async function preflight(force = false) {
     body.append(
       el(
         "p",
-        `${actionLabel[node.action]} · ${LABEL[node.stage]} ${node.shot_id || ""} · ${node.reason}${node.version ? ` · ${node.version.slice(0, 8)}` : ""}`,
+        shortIds(`${actionLabel[node.action]} · ${LABEL[node.stage]} ${node.shot_id || ""} · ${node.reason}${node.version ? ` · ${node.version.slice(0, 8)}` : ""}`),
         node.action === "blocked" ? "warn-text" : "",
       ),
     );
@@ -977,14 +1618,14 @@ function renderBuilds() {
     d.append(
       el(
         "summary",
-        `构建 ${b.id} · ${state.data.plans[b.plan_id]?.name || b.plan_id} · ${STATUS[b.status]}`,
+        `构建 ${shortId(b.id)} · ${state.data.plans[b.plan_id]?.name || shortId(b.plan_id)} · ${STATUS[b.status]}`,
       ),
     );
     for (const node of b.nodes)
       d.append(
         el(
           "p",
-          `${LABEL[node.stage]} ${node.shot_id || ""} · ${STATUS[node.status]}${node.error ? ` · ${node.error}` : ""}`,
+          shortIds(`${LABEL[node.stage]} ${node.shot_id || ""} · ${STATUS[node.status]}${node.error ? ` · ${node.error}` : ""}`),
         ),
       );
     view.append(d);
@@ -1005,7 +1646,7 @@ async function loadArtifacts() {
       : item.attempt || "任务与旧产物";
     if (!groups.has(groupName)) {
       const d = el("details");
-      d.append(el("summary", groupName));
+      d.append(el("summary", shortIds(groupName)));
       groups.set(groupName, d);
       view.append(d);
     }
@@ -1018,7 +1659,7 @@ async function loadArtifacts() {
   }
 }
 function play(url, title) {
-  $("play-title").textContent = title;
+  $("play-title").textContent = shortIds(title);
   $("play-video").src = url;
   $("play-dialog").showModal();
 }
@@ -1046,12 +1687,22 @@ $("new-plan").addEventListener("click", () => createPlan("new"));
 $("copy-plan").addEventListener("click", () => createPlan("copy"));
 $("rename-plan").addEventListener("click", renamePlan);
 $("plan-settings").addEventListener("click", editSettings);
-$("edit-board").addEventListener("click", () => editBoard());
-$("split").addEventListener("click", () =>
-  runNode("split", null, true).catch(fail),
-);
 $("run-all").addEventListener("click", () => preflight().catch(fail));
-$("force-build").addEventListener("click", () => preflight(true).catch(fail));
+document
+  .querySelectorAll(".regenerate-column")
+  .forEach((n) =>
+    n.addEventListener("click", () =>
+      regenerateColumn(n.dataset.stage).catch(fail),
+    ),
+  );
+const matrixResize = new ResizeObserver((entries) => {
+  for (const entry of entries)
+    entry.target.style.setProperty(
+      "--matrix-viewport-width",
+      `${entry.contentRect.width}px`,
+    );
+});
+matrixResize.observe(document.querySelector(".matrix-scroll"));
 $("create-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   $("create-button").disabled = true;

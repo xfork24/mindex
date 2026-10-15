@@ -310,6 +310,7 @@ def create_job(config: Config, text: str, title: str | None = None, options: dic
         "input_text": text,
         "created_at": now(),
         "updated_at": now(),
+        "voice_mode": "custom" if parsed.voice else "inherit",
         "options": {
             "voice": parsed.voice or config.studio.tts.voice,
             "audio_mode": parsed.audio_mode or config.studio.audio.mode,
