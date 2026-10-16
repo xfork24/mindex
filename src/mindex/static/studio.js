@@ -357,6 +357,7 @@ function updateLocks() {
   if (!state.data) return;
   const locked = busy(),
     dirty = hasDirtyDraft();
+  $("collapse-all-rows").disabled = !expandedRows().size;
   for (const id of [
     "plan-select",
     "new-plan",
@@ -398,6 +399,11 @@ function pauseMedia(node) {
 function toggleCell(sid, stage) {
   const expanded = expandedRows();
   expanded.get(sid) === stage ? expanded.delete(sid) : expanded.set(sid, stage);
+  renderMatrix();
+}
+function collapseAllRows() {
+  if (!state.data) return;
+  expandedRows().clear();
   renderMatrix();
 }
 function invalidatePanel(sid) {
@@ -1921,6 +1927,7 @@ $("copy-plan").addEventListener("click", () => createPlan("copy"));
 $("rename-plan").addEventListener("click", renamePlan);
 $("plan-settings").addEventListener("click", editSettings);
 $("run-all").addEventListener("click", () => preflight().catch(fail));
+$("collapse-all-rows").addEventListener("click", collapseAllRows);
 document
   .querySelectorAll(".regenerate-column")
   .forEach((n) =>
