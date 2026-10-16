@@ -5,6 +5,8 @@ import hashlib
 import json
 import math
 import subprocess
+import threading
+from collections import OrderedDict
 from pathlib import Path
 
 
@@ -29,7 +31,39 @@ def command(args: list[str], *, timeout: float = 600) -> bytes:
         raise MediaError(exc.stderr.decode(errors="replace")[-2000:]) from exc
 
 
+_PROBE_CACHE_LIMIT = 32
+_probe_cache: OrderedDict[tuple[str, int, int], dict] = OrderedDict()
+_probe_lock = threading.Lock()
+
+
+def _probe_key(path: Path) -> tuple[str, int, int] | None:
+    """缓存身份沿用库内素材指纹约定（字节 + mtime）；所有媒体写入均为原子替换，mtime 必变。"""
+    try:
+        stat = path.stat()
+    except OSError:
+        return None  # 文件缺失时不缓存，交给 ffprobe 抛出原有 MediaError。
+    return (str(path), stat.st_size, stat.st_mtime_ns)
+
+
 def probe(path: Path) -> dict:
+    """ffprobe 结果的有界缓存：同一（路径、大小、mtime）只探测一次；失败不缓存，返回副本。"""
+    key = _probe_key(path)
+    if key is not None:
+        with _probe_lock:
+            cached = _probe_cache.get(key)
+            if cached is not None:
+                _probe_cache.move_to_end(key)
+                return dict(cached)
+    info = _probe_uncached(path)
+    if key is not None:
+        with _probe_lock:
+            _probe_cache[key] = dict(info)
+            while len(_probe_cache) > _PROBE_CACHE_LIMIT:
+                _probe_cache.popitem(last=False)
+    return info
+
+
+def _probe_uncached(path: Path) -> dict:
     raw = json.loads(
         command(
             ["ffprobe", "-v", "error", "-show_streams", "-show_format", "-of", "json", str(path)], timeout=30

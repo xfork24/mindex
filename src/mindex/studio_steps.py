@@ -551,3 +551,24 @@ def interval_visible(store, source_id, start, end, *, overlays=None):
         if item.get("hidden") or parent.get("hidden"):
             return False
     return True
+
+
+def hidden_intervals(store, source_id, *, overlays=None):
+    """该源内全部不可见区间的列表，判定规则与 interval_visible 逐点一致。
+
+    segment 自身或其 parent 被隐藏即整段不可见；parent 可能属于别的源，隐藏状态
+    取自全库 curation。预查一次供逐行内存比对，避免每个区间都查一次库。
+    """
+    from .curation import Library
+
+    _, segments = overlays if overlays is not None else Library(store).overlays()
+    return [
+        (row["start"], row["end"])
+        for row in store.rows("SELECT id,parent_id,start,end FROM segments WHERE source_id=?", (source_id,))
+        if segments.get(row["id"], {}).get("hidden") or segments.get(row["parent_id"], {}).get("hidden")
+    ]
+
+
+def range_visible(hidden, start, end):
+    """区间是否避开全部不可见区间；容差与 interval_visible 的重叠判定完全一致。"""
+    return not any(low < end - 1e-6 and high > start + 1e-6 for low, high in hidden)

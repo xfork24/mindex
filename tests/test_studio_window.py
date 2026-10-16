@@ -466,3 +466,103 @@ def test_save_without_transcoding_and_cached_low_resolution_preview(refinement, 
     assert replay.json()["preview_token"] != preview.json()["preview_token"]
     assert replay.json()["preview_url"] == preview.json()["preview_url"]
     assert len(cuts) == 1 and len(media_calls) == count
+
+
+def test_range_save_overlays_calls_bounded(refinement, monkeypatch):
+    """保存定长窗口的可见性检查必须是常数级，不随源内镜头数线性放大。"""
+    from mindex import curation, media
+
+    config, jid, w, p, store = refinement
+    template = store.one("SELECT * FROM segments WHERE kind='shot'")
+    with store.connect() as db:
+        # 模拟真实主源的镜头规模；视频仅 10 秒，多出的行会被 context 过滤但逐行参与可见性检查。
+        for i in range(10, 200):
+            row = {**template, "id": f"shot-{i}", "start": i, "end": i + 1, "parent_id": None}
+            db.execute(
+                f"INSERT INTO segments ({','.join(row)}) VALUES ({','.join('?' for _ in row)})",
+                tuple(row.values()),
+            )
+    manual(w, p)
+    speech(config, jid, w, p)
+    ws.persist(config, jid, w)
+
+    ctx = window.context(config, jid, w, p, "a")  # 预热 probe 缓存后再开始计数。
+    body = {
+        "revision": ctx["revision"],
+        "shot_id": "a",
+        "context_token": ctx["context_token"],
+        "anchor_ref": ctx["anchor_ref"],
+        "tts_version": ctx["tts_version"],
+        "start": 2.5,
+    }
+    calls = {"overlays": 0, "ffprobe": 0}
+    original_overlays, original_command = curation.Library.overlays, media.command
+
+    def count_overlays(self):
+        calls["overlays"] += 1
+        return original_overlays(self)
+
+    def count_command(args, **kwargs):
+        if args[0] == "ffprobe":
+            calls["ffprobe"] += 1
+        return original_command(args, **kwargs)
+
+    monkeypatch.setattr(curation.Library, "overlays", count_overlays)
+    monkeypatch.setattr(media, "command", count_command)
+    client = TestClient(create_app(config))
+    url = f"/api/studio/jobs/{jid}/plans/{p['id']}"
+    validated = client.post(f"{url}/range-preview", json={**body, "render_preview": False})
+    assert validated.status_code == 200, validated.text
+    confirmed = client.post(
+        f"{url}/range-confirm", json={**body, "preview_token": validated.json()["preview_token"]}
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    # 修复前 ≈ 2400+（三遍 context × 每遍 2×200 次逐行全表扫描）；修复后 ≈ 18。
+    assert calls["overlays"] <= 40
+    assert calls["ffprobe"] == 0  # probe 缓存命中，保存不再重复探测同一原片。
+
+    source_id = store.one("SELECT id FROM sources")["id"]
+    rows, original_rows = {"n": 0}, Store.rows
+
+    def count_rows(self, sql, args=()):
+        rows["n"] += 1
+        return original_rows(self, sql, args)
+
+    monkeypatch.setattr(Store, "rows", count_rows)
+    assert len(ws.source_shots(config, source_id)) == 200
+    # 可见性必须批量查一次，而不是逐镜头一次区间查询（overlays 2 + 隐藏区间 1 + 镜头 1）。
+    assert rows["n"] <= 4
+
+
+def test_source_shots_visibility_matches_predicate(refinement):
+    """批量可见性必须与逐行 interval_visible 逐点等价，含 parent 隐藏传播与脏 parent_id。"""
+    from mindex import studio_steps
+
+    config, _jid, _w, _p, store = refinement
+    source_id = store.one("SELECT id FROM sources")["id"]
+    store.execute("UPDATE segments SET parent_id='shot-6' WHERE id IN ('shot-7','shot-9')")
+    store.execute("UPDATE segments SET parent_id='missing-parent' WHERE id='shot-8'")
+    for seg_id in ("shot-2", "shot-5", "shot-6"):
+        store.execute("INSERT INTO segment_curation(id,hidden) VALUES(?,1)", (seg_id,))
+    fresh = Store(config.data_dir)
+
+    rows = ws.source_shots(config, source_id)
+    assert [r["visible"] for r in rows] == [
+        studio_steps.interval_visible(fresh, source_id, r["start"], r["end"]) for r in rows
+    ]
+    # 自身隐藏、parent 隐藏传播到子镜头；parent 不存在或为 None 不影响可见性。
+    assert {r["id"]: r["visible"] for r in rows} == {
+        "shot-0": True,
+        "shot-1": True,
+        "shot-2": False,
+        "shot-3": True,
+        "shot-4": True,
+        "shot-5": False,
+        "shot-6": False,
+        "shot-7": False,
+        "shot-8": True,
+        "shot-9": False,
+    }
+    # 整个源被隐藏时全部不可见。
+    store.execute("INSERT INTO source_curation(id,hidden) VALUES(?,1)", (source_id,))
+    assert not any(r["visible"] for r in ws.source_shots(config, source_id))

@@ -24,7 +24,7 @@ from . import studio, studio_steps
 from . import studio_workspace as workspace
 from .adapters import MultimodalEmbedder, Speaker, Storyboarder
 from .config import Config, StrictModel, fingerprint
-from .curation import EntityNotFound
+from .curation import EntityNotFound, Library
 from .runtime_settings import RuntimeConfig
 from .storage import Store
 from .studio_artifacts import safe_path
@@ -730,7 +730,11 @@ def studio_router(
         )
         event = studio.TimelineEvent.model_validate(data)
         if not studio_steps.interval_visible(
-            store, event.video.source_id, event.video.start, event.video.end
+            store,
+            event.video.source_id,
+            event.video.start,
+            event.video.end,
+            overlays=Library(store).overlays(),
         ):
             raise studio.StudioError("所选区间包含隐藏素材")
         directory = safe_path(studio.job_dir(base, job_id), f"previews/quick-v1-{key}")
@@ -959,7 +963,11 @@ def studio_router(
         if event is None:
             raise HTTPException(404, "找不到分镜")
         if not studio_steps.interval_visible(
-            store, event.video.source_id, event.video.start, event.video.end
+            store,
+            event.video.source_id,
+            event.video.start,
+            event.video.end,
+            overlays=Library(store).overlays(),
         ):
             raise HTTPException(422, "所选区间包含隐藏素材，请重新选片")
         row = store.one("SELECT path FROM sources WHERE id=?", (event.video.source_id,))

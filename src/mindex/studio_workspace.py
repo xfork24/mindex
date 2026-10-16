@@ -779,10 +779,22 @@ def restore(w, vid, name):
     return p
 
 
-def source_shots(config, source_id):
+def source_shots(config, source_id, *, overlays=None):
+    """源内全部镜头及可见性；overlays 可由调用方预先取好，避免逐镜头全表扫描。"""
+    from .curation import Library
+
     store = Store(config.data_dir)
+    if overlays is None:
+        overlays = Library(store).overlays()
+    # 可见性一次性预查后逐行内存比对，避免每个镜头一次区间查询。
+    source_hidden = bool(overlays[0].get(source_id, {}).get("hidden"))
+    hidden = studio_steps.hidden_intervals(store, source_id, overlays=overlays)
     return [
-        {**row, "visible": studio_steps.interval_visible(store, source_id, row["start"], row["end"])}
+        {
+            **row,
+            "visible": not source_hidden
+            and studio_steps.range_visible(hidden, row["start"], row["end"]),
+        }
         for row in store.rows(
             "SELECT id,source_id,start,end FROM segments WHERE source_id=? AND kind='shot' ORDER BY start",
             (source_id,),
@@ -790,12 +802,17 @@ def source_shots(config, source_id):
     ]
 
 
-def validate_range(config, selected_range):
+def validate_range(config, selected_range, *, overlays=None):
+    from .curation import Library
+
     source_id = selected_range["source_id"]
     start, end = selected_range["start"], selected_range["end"]
     if not all(math.isfinite(v) for v in (start, end)) or end - start < 0.04:
         raise studio.StudioError("所选区间不足一帧或边界无效")
-    rows = source_shots(config, source_id)
+    store = Store(config.data_dir)
+    if overlays is None:
+        overlays = Library(store).overlays()
+    rows = source_shots(config, source_id, overlays=overlays)
     ids = selected_range.get("segment_ids")
     if ids:
         chosen = [row for row in rows if row["id"] in ids]
@@ -814,7 +831,7 @@ def validate_range(config, selected_range):
         if row["start"] > cursor + 1e-6:
             raise studio.StudioError("区间包含不连续镜头")
         cursor = max(cursor, row["end"])
-    if not studio_steps.interval_visible(Store(config.data_dir), source_id, start, end):
+    if not studio_steps.interval_visible(store, source_id, start, end, overlays=overlays):
         raise studio.StudioError("所选区间包含隐藏素材")
     return {**selected_range, "segment_ids": [r["id"] for r in covered]}
 

@@ -48,6 +48,8 @@ def set_anchor(w, p, sid, choice):
 
 
 def candidates(config, w, p, sid):
+    from .curation import Library
+
     if error := anchor_conflict(w, p, sid):
         raise studio.StudioError(error)
     recall = w["versions"].get(p["shots"][sid].get("recall"))
@@ -59,10 +61,11 @@ def candidates(config, w, p, sid):
     ):
         raise studio.StudioError("缺少属于此分镜的成功召回")
     store = Store(config.data_dir)
+    overlays = Library(store).overlays()
     result = [
         c
         for c in recall["data"].get("results", [])
-        if studio_steps.interval_visible(store, c["source_id"], c["start"], c["end"])
+        if studio_steps.interval_visible(store, c["source_id"], c["start"], c["end"], overlays=overlays)
     ]
     choice = p.get("anchors", {}).get(sid, {"mode": "auto"})
     if choice["mode"] == "manual":
