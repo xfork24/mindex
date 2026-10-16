@@ -4,7 +4,7 @@
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Mindex · 创作</title><link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/studio.css">
-  <script src="/studio.js?v=20261016-fast-save-short-ids" defer></script>
+  <script src="/studio.js?v=20261016-history-tree2" defer></script>
 </head>
 <body class="studio">
   <header><a class="brand" href="/">m<span>index</span><i></i></a><span class="header-note">创作</span><a class="quiet nav-link" href="/">视频检索 ↗</a><a class="quiet nav-link" href="/admin">素材管理 ↗</a><a class="quiet nav-link" href="/settings">设置 ↗</a><button id="reload" class="quiet">刷新任务</button></header>
@@ -26,8 +26,8 @@
           <div class="plan-bar"><label>构建方案 <select id="plan-select"></select></label><button id="new-plan" class="quiet">新建</button><button id="copy-plan" class="quiet">复制</button><button id="rename-plan" class="quiet">命名</button><button id="plan-settings" class="quiet">方案参数</button><button id="run-all" class="quiet">构建成片</button></div>
           <section class="execution-log-section" aria-labelledby="log-heading"><h2 id="log-heading">工作日志</h2><pre id="execution-log" role="log" aria-live="polite" aria-relevant="additions" tabindex="0" contenteditable="false">当前方案暂无执行日志。</pre></section>
           <details id="storyboard-section" open><summary>分镜工作台 <span id="shot-count" class="muted"></span></summary><div class="section-head"><span id="storyboard-warning" class="warn-text"></span></div><div class="matrix-scroll"><table class="shot-matrix"><thead><tr><th scope="col">分镜</th><th scope="col">文本与查询<button class="quiet regenerate-column" data-stage="split" title="按原始文案重新生成整份分镜">全部重新生成</button></th><th scope="col">召回<button class="quiet regenerate-column" data-stage="recall">全部重新生成</button></th><th scope="col">配音<button class="quiet regenerate-column" data-stage="tts">全部重新生成</button></th><th scope="col">选片与对齐<button class="quiet regenerate-column" data-stage="select">全部重新生成</button></th><th scope="col">分镜渲染<button class="quiet regenerate-column" data-stage="render">全部重新生成</button></th></tr></thead><tbody id="matrix-body"></tbody></table></div></details>
-          <section id="result-section"><div class="section-head"><h2>成片</h2><span id="final-hint" class="muted"></span></div><div id="final-player"></div><div id="final-history"></div></section>
-          <details id="artifacts-section"><summary>产物与调试记录</summary><div class="section-head"><button id="reload-artifacts" class="quiet">刷新产物</button><a id="download-archive" class="quiet nav-link">下载任务 ZIP ↧</a></div><div id="build-history"></div><div id="artifact-view"></div></details>
+          <details id="result-section" open><summary>成片</summary><div class="section-head"><h2>当前成片</h2><span id="final-hint" class="muted"></span></div><div id="final-player"></div><div id="final-history"></div></details>
+          <details id="artifacts-section"><summary>产物与调试记录</summary><div class="section-head"><h2>当前产物</h2><span id="current-artifacts-hint" class="muted"></span><button id="reload-artifacts" class="quiet">刷新产物</button><a id="download-archive" class="quiet nav-link">下载任务 ZIP ↧</a></div><div id="current-artifacts"></div><div id="artifact-view"></div><div id="build-history"></div></details>
         </div>
       </section>
     </div>

@@ -251,6 +251,7 @@ function render() {
   renderMatrix();
   renderFinal();
   renderBuilds();
+  renderCurrentArtifacts();
   renderLogShell();
   updateLocks();
 }
@@ -1546,8 +1547,8 @@ function renderFinal() {
   const p = plan(),
     selected = ver(p.final);
   $("final-hint").textContent = selected
-    ? `当前方案成片 ${selected.id.slice(0, 8)}${selected.incomplete ? " · 记录不完整" : ""}`
-    : "尚未生成此方案的成片";
+    ? `版本 ${selected.id.slice(0, 8)}${selected.incomplete ? " · 记录不完整" : ""}`
+    : "尚未生成";
   const player = $("final-player"),
     url = selected?.files.mp4?.url;
   if (state.finalUrl !== url) {
@@ -1631,32 +1632,264 @@ function renderBuilds() {
     view.append(d);
   }
 }
+function currentVersionEntries() {
+  const p = plan();
+  if (!p) return [];
+  const entries = [];
+  if (p.board) entries.push([p.board, LABEL.board]);
+  for (const sid of order()) {
+    const s = p.shots[sid] || {};
+    for (const stage of ["content", "recall", "tts", "select", "render"])
+      if (s[stage]) entries.push([s[stage], `${LABEL[stage]} · ${shortId(sid)}`]);
+  }
+  if (p.final) entries.push([p.final, LABEL.compose]);
+  return entries.filter(([id]) => ver(id));
+}
+function selectedCandidate(sid, recallId) {
+  // “当前选中”：人工固定且锚定在当前召回版本的参考锚点优先，其次当前选片实际使用的锚点。
+  const results = ver(recallId)?.data.results || [];
+  if (!results.length) return null;
+  const pinned = plan().anchors?.[sid];
+  if (pinned?.mode === "manual" && pinned.recall_version === recallId) {
+    const hit = results.find((c) => (c.id || c.segment_id) === pinned.candidate_id);
+    if (hit) return hit;
+  }
+  const anchor = ver(plan().shots[sid]?.select)?.data?.anchor;
+  const used = anchor && results.find((c) => c.segment_id === anchor.segment_id);
+  return used || null;
+}
+function stagePreviewToggle(id, stage, chosen) {
+  // select 无自身媒体，经 /versions/{id}/preview 合成画面与配音；render 直接用版本文件；
+  // recall 预览当前选中的候选分镜原片。
+  let host = null;
+  const node = button(
+    stage === "recall" ? "当前选中分镜预览" : "画面与声音预览",
+    async () => {
+      if (host?.isConnected) {
+        host.hidden = !host.hidden;
+        return;
+      }
+      host = el("div", "", "inline-preview");
+      if (stage === "select") {
+        const r = await api(`${base()}/versions/${id}/preview`);
+        host.append(media("video", r.url), link("下载预览", r.url, true));
+      } else if (stage === "recall") {
+        host.append(
+          el(
+            "p",
+            `候选第 ${chosen.rank || "?"} 名 · ${chosen.source_name || shortId(chosen.source_id)} · ${secs(chosen.start)}–${secs(chosen.end)}`,
+            "muted",
+          ),
+          media("video", chosen.media_url),
+        );
+      } else {
+        const files = ver(id).files;
+        host.append(media("video", files.preview?.url || files.video.url));
+        if (files.audio?.url) host.append(media("audio", files.audio.url));
+      }
+      node.after(host);
+    },
+  );
+  return node;
+}
+function currentArtifactRow(id, label, stage, sid) {
+  const item = ver(id);
+  const row = el("div", "", "artifact-row");
+  row.append(el("span", `${label} · ${shortId(id)}${item.incomplete ? " · 记录不完整" : ""}`));
+  versionFiles(row, item);
+  const files = item.files || {};
+  if (stage === "select" && !item.incomplete) row.append(stagePreviewToggle(id, stage));
+  if (stage === "render" && (files.preview?.url || files.video?.url))
+    row.append(stagePreviewToggle(id, stage));
+  if (stage === "recall" && sid) {
+    const chosen = selectedCandidate(sid, id);
+    if (chosen?.media_url) row.append(stagePreviewToggle(id, stage, chosen));
+  }
+  return row;
+}
+function renderCurrentArtifacts() {
+  const view = $("current-artifacts");
+  view.replaceChildren();
+  const entries = currentVersionEntries();
+  $("current-artifacts-hint").textContent = entries.length
+    ? `当前方案引用 ${entries.length} 个版本`
+    : "当前方案尚无产物";
+  const p = plan();
+  if (p.board && ver(p.board)) {
+    const board = el("details", "", "dependency");
+    board.open = true;
+    board.append(el("summary", `${LABEL.board} · ${shortId(p.board)}`));
+    board.append(currentArtifactRow(p.board, "分镜文件"));
+    const shots = el("details", "", "dependency");
+    shots.open = true;
+    shots.append(el("summary", `分镜列表 · ${order().length} 镜`));
+    order().forEach((sid, index) => {
+      const s = p.shots[sid] || {};
+      const stages = ["content", "recall", "tts", "select", "render"].filter((k) => s[k] && ver(s[k]));
+      if (!stages.length) return;
+      const shot = el("details", "", "dependency-edge");
+      shot.append(el("summary", `镜头 ${index + 1} · ${shortId(sid)} · ${stages.length} 产物`));
+      for (const stage of stages)
+        shot.append(currentArtifactRow(s[stage], LABEL[stage], stage, sid));
+      shots.append(shot);
+    });
+    board.append(shots);
+    view.append(board);
+  }
+  if (p.final && ver(p.final)) view.append(currentArtifactRow(p.final, LABEL.compose));
+}
+const RESIDUAL_LABELS = {
+  previews: "预览缓存",
+  attempts: "旧执行尝试",
+  "migration-v2": "迁移备份",
+  builds: "构建记录",
+};
+function artifactFileRow(item) {
+  const row = el("div", "", "artifact-row");
+  row.append(
+    link(item.path, item.url, true),
+    el("small", `${(item.bytes / 1024).toFixed(1)} KiB`),
+  );
+  return row;
+}
+function historyVersionRow(item, debugFiles) {
+  const row = el("div", "", "artifact-row");
+  const label = el(
+    "span",
+    `${LABEL[item.stage] || item.stage} · ${shortId(item.id)} · ${STATUS[item.status] || item.status}` +
+      `${item.incomplete ? " · 记录不完整" : ""}`,
+  );
+  if (item.error) label.title = shortIds(item.error);
+  row.append(label);
+  versionFiles(row, item);
+  // 失败版本会把 debug 文件记进 files；嵌套调试目录只列尚未出现的文件，避免重复。
+  const covered = new Set(Object.values(item.files || {}).map((f) => f.path));
+  const extra = debugFiles.filter((f) => !covered.has(f.path));
+  if (extra.length) {
+    const d = el("details", "", "dependency-edge");
+    d.append(el("summary", `调试记录 · ${extra.length} 件`));
+    for (const f of extra) d.append(artifactFileRow(f));
+    row.append(d);
+  }
+  return row;
+}
+function renderHistoryArtifacts(items) {
+  const view = $("artifact-view");
+  view.replaceChildren();
+  const current = new Set(currentVersionEntries().map(([vid]) => vid));
+  const history = Object.values(state.data.versions).filter((v) => !current.has(v.id));
+  const debugOf = new Map();
+  const currentDebug = new Map();
+  const residual = new Map();
+  const residualGroup = (name) => {
+    if (!residual.has(name)) residual.set(name, []);
+    return residual.get(name);
+  };
+  for (const item of items) {
+    const versionId = item.path.match(/^versions\/([0-9a-f]+)\//)?.[1];
+    if (versionId) {
+      if (item.path.includes("/debug/")) {
+        const bucket = current.has(versionId) ? currentDebug : debugOf;
+        if (!bucket.has(versionId)) bucket.set(versionId, []);
+        bucket.get(versionId).push(item);
+      } else if (!state.data.versions[versionId]) {
+        residualGroup("未登记的版本文件").push(item);
+      }
+      continue;
+    }
+    const top = item.path.includes("/") ? item.path.split("/")[0] : "任务文件";
+    residualGroup(RESIDUAL_LABELS[top] || top).push(item);
+  }
+  const archive = el("details", "", "dependency");
+  archive.open = true;
+  archive.append(
+    el("summary", `历史产物与调试记录 · ${history.length} 个版本 · ${items.length} 件文件`),
+  );
+  const rank = { content: 0, recall: 1, tts: 2, select: 3, render: 4 };
+  const byShot = new Map();
+  for (const v of history)
+    if (v.shot_id && v.stage in rank) {
+      if (!byShot.has(v.shot_id)) byShot.set(v.shot_id, []);
+      byShot.get(v.shot_id).push(v);
+    }
+  const boardOrder = order();
+  const shotIds = [
+    ...boardOrder.filter((sid) => byShot.has(sid)),
+    ...[...byShot.keys()].filter((sid) => !boardOrder.includes(sid)),
+  ];
+  if (shotIds.length) {
+    const list = el("details", "", "dependency-edge");
+    list.open = true;
+    list.append(el("summary", `分镜列表 · ${shotIds.length} 镜`));
+    shotIds.forEach((sid) => {
+      const versions = byShot.get(sid);
+      const shot = el("details", "", "dependency-edge");
+      const index = boardOrder.indexOf(sid);
+      let prefix = index >= 0 ? `镜头 ${index + 1} · ` : "";
+      if (index < 0) {
+        // 已不在当前分镜表中的历史镜头，用其文本片段帮助识别。
+        const content = versions.find((v) => v.stage === "content");
+        const text = (content?.data?.text || "").replace(/\s+/g, "");
+        prefix += text ? `「${text.slice(0, 12)}${text.length > 12 ? "…" : ""}」 · ` : "";
+      }
+      shot.append(
+        el("summary", `${prefix}${shortId(sid)} · ${versions.length} 个历史版本`),
+      );
+      versions
+        .sort(
+          (a, b) => rank[a.stage] - rank[b.stage] || b.created_at.localeCompare(a.created_at),
+        )
+        .forEach((v) => shot.append(historyVersionRow(v, debugOf.get(v.id) || [])));
+      list.append(shot);
+    });
+    archive.append(list);
+  }
+  for (const [stage, label] of [
+    ["split", "拆分镜版本"],
+    ["board", "分镜表版本"],
+    ["compose", "成片版本"],
+  ]) {
+    const versions = history
+      .filter((v) => v.stage === stage)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at));
+    if (!versions.length) continue;
+    const group = el("details", "", "dependency-edge");
+    group.append(el("summary", `${label} · ${versions.length} 个`));
+    for (const v of versions) group.append(historyVersionRow(v, debugOf.get(v.id) || []));
+    archive.append(group);
+  }
+  if (currentDebug.size) {
+    const group = el("details", "", "dependency-edge");
+    group.append(el("summary", `当前版本的调试记录 · ${currentDebug.size} 个版本`));
+    for (const [vid, files] of currentDebug) {
+      const v = state.data.versions[vid];
+      const d = el("details", "", "dependency-edge");
+      d.append(
+        el(
+          "summary",
+          `${LABEL[v.stage] || v.stage}${v.shot_id ? ` · ${shortId(v.shot_id)}` : ""} · ${shortId(vid)}`,
+        ),
+      );
+      for (const f of files) d.append(artifactFileRow(f));
+      group.append(d);
+    }
+    archive.append(group);
+  }
+  for (const [name, files] of residual) {
+    const group = el("details", "", "dependency-edge");
+    group.append(el("summary", `${name} · ${files.length} 件`));
+    for (const f of files) group.append(artifactFileRow(f));
+    archive.append(group);
+  }
+  view.append(archive);
+}
 async function loadArtifacts() {
   const id = state.id;
   if (!id) return;
   const data = await api(`${base()}/artifacts`);
   if (id !== state.id) return;
   $("download-archive").href = `${base()}/archive`;
-  const view = $("artifact-view");
-  view.replaceChildren();
-  const groups = new Map();
-  for (const item of data.items) {
-    const groupName = item.path.startsWith("versions/")
-      ? item.path.split("/").slice(0, 2).join("/")
-      : item.attempt || "任务与旧产物";
-    if (!groups.has(groupName)) {
-      const d = el("details");
-      d.append(el("summary", shortIds(groupName)));
-      groups.set(groupName, d);
-      view.append(d);
-    }
-    const row = el("div", "", "artifact-row");
-    row.append(
-      link(item.path, item.url, true),
-      el("small", `${(item.bytes / 1024).toFixed(1)} KiB`),
-    );
-    groups.get(groupName).append(row);
-  }
+  renderHistoryArtifacts(data.items);
 }
 function play(url, title) {
   $("play-title").textContent = shortIds(title);
