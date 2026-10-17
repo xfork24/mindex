@@ -54,7 +54,10 @@ class PersonConfig(Service):
     fps: float = Field(default=5, gt=0, le=5)
     face_threshold: float = Field(default=0.55, gt=0, lt=1)
     face_margin: float = Field(default=0.1, gt=0, lt=1)
+    # 视频帧的人脸质量门槛：低质量帧不接受自动确认。
     min_face_quality: float = Field(default=0.6, ge=0, le=1)
+    # 参考图的质量门槛，默认 0 = 所有可用参考图都参与匹配。
+    min_reference_quality: float = Field(default=0.0, ge=0, le=1)
     body_threshold: float = Field(default=0.8, gt=0, lt=1)
 
 

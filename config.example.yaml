@@ -119,7 +119,10 @@ person:
   fps: 5
   face_threshold: 0.55
   face_margin: 0.1
+  # 帧人脸质量门槛：低于此值的视频帧不接受自动确认。
   min_face_quality: 0.6
+  # 参考图质量门槛：低于此值的参考图不参与匹配；0 = 全部参与。
+  min_reference_quality: 0
   body_threshold: 0.8
   # 首次启动后将 /health 的 space 完整复制到此处，以固定模型文件摘要及预处理。
   expected_space: null

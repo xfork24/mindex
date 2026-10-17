@@ -12,6 +12,7 @@ import json
 import math
 import re
 import uuid
+from contextlib import nullcontext
 from typing import Literal
 
 from PIL import Image, ImageOps
@@ -24,7 +25,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS person_entities(id TEXT PRIMARY KEY, kind TEXT NOT NULL, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS person_sources(source_id TEXT PRIMARY KEY REFERENCES sources(id), work_id TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS person_references(id TEXT PRIMARY KEY, actor_id TEXT NOT NULL, stage_id TEXT,
- path TEXT NOT NULL, digest TEXT NOT NULL, data TEXT NOT NULL);
+ path TEXT NOT NULL, digest TEXT NOT NULL, data TEXT NOT NULL, role_id TEXT);
 CREATE TABLE IF NOT EXISTS person_imports(id TEXT PRIMARY KEY, data TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'draft');
 CREATE TABLE IF NOT EXISTS person_features(id TEXT PRIMARY KEY, source_id TEXT, space TEXT NOT NULL,
  kind TEXT NOT NULL, data TEXT NOT NULL);
@@ -46,10 +47,15 @@ CREATE TABLE IF NOT EXISTS search_releases(id TEXT PRIMARY KEY, content_id TEXT 
 
 def init_person_schema(db):
     db.executescript(SCHEMA)
+    # Serialize schema inspection and migration so concurrent workers cannot both add the column.
+    db.execute("BEGIN IMMEDIATE")
+    columns = {row["name"] for row in db.execute("PRAGMA table_info(person_references)")}
+    if "role_id" not in columns:
+        db.execute("ALTER TABLE person_references ADD COLUMN role_id TEXT")
+    db.execute("CREATE INDEX IF NOT EXISTS person_references_role ON person_references(role_id)")
     # Keep the retired SQL columns for old databases/checkpoints only. They are
     # never accepted as configuration or exposed as person identities again.
     marker = "migration.person-roles-v2"
-    db.execute("BEGIN IMMEDIATE")
     if db.execute("SELECT 1 FROM settings WHERE key=?", (marker,)).fetchone():
         return
     entries = {
@@ -206,7 +212,7 @@ class Persons:
         for actor in value.actor_ids:
             self.entity(actor, "actor")
 
-    def save(self, value: Entity, identifier=None):
+    def validate_update(self, value: Entity, identifier=None):
         if identifier:
             old = self.entity(identifier)
             if old["kind"] != value.kind:
@@ -234,6 +240,9 @@ class Persons:
                     ):
                         raise ValueError("该作品下仍有已接受的出镜证据；请先重新核对或删除")
         self.validate_entity(value)
+
+    def save(self, value: Entity, identifier=None):
+        self.validate_update(value, identifier)
         identifier = identifier or uid()
         self.store.execute(
             "INSERT OR REPLACE INTO person_entities VALUES(?,?,?)",
@@ -283,29 +292,52 @@ class Persons:
         path.write_bytes(content)
         return {"path": relative, "digest": digest, "width": image.width, "height": image.height}
 
-    def add_reference(self, actor_id, raw, provenance=None):
-        self.entity(actor_id, "actor")
+    def pairing_actor(self, actor_id, role_id, actor_ids=None):
+        """A reference face belongs to one actor, even when its role has several performers."""
+        if not role_id:
+            self.entity(actor_id, "actor")
+            return actor_id
+        if actor_ids is None:
+            actor_ids = self.entity(role_id, "role")["actor_ids"]
+        if not actor_id and len(actor_ids) > 1:
+            raise ValueError("角色有多名出演演员，请指定参考图中的演员")
+        actor_id = actor_id or (actor_ids[0] if actor_ids else None)
+        if actor_id not in actor_ids:
+            raise ValueError("角色参考图必须归属该角色的一名出演演员")
+        return actor_id
+
+    def add_reference(self, actor_id, raw, provenance=None, role_id=None):
+        actor_id = self.pairing_actor(actor_id, role_id)
         item = self.image(raw)
-        existing = self.store.one(
-            "SELECT id FROM person_references WHERE actor_id=? AND digest=? ORDER BY rowid LIMIT 1",
-            (actor_id, item["digest"]),
-        )
-        identifier = existing["id"] if existing else fingerprint([actor_id, item["digest"]])
-        self.store.execute(
-            "INSERT OR IGNORE INTO person_references VALUES(?,?,?,?,?,?)",
-            (identifier, actor_id, None, item["path"], item["digest"], dumps(provenance or {})),
-        )
+        with self.store.connect() as db:
+            if not db.in_transaction:
+                db.execute("BEGIN IMMEDIATE")
+            existing = db.execute(
+                "SELECT id FROM person_references WHERE actor_id=? AND role_id IS ? AND digest=? "
+                "ORDER BY rowid LIMIT 1",
+                (actor_id, role_id, item["digest"]),
+            ).fetchone()
+            # Pairings can move; IDs must not collide when the original pairing is recreated.
+            identifier = existing["id"] if existing else uid()
+            if not existing:
+                db.execute(
+                    "INSERT INTO person_references(id,actor_id,role_id,path,digest,data) VALUES(?,?,?,?,?,?)",
+                    (identifier, actor_id, role_id, item["path"], item["digest"], dumps(provenance or {})),
+                )
         return self.reference(identifier)
 
     def reference(self, identifier):
         row = self.store.one("SELECT * FROM person_references WHERE id=?", (identifier,))
         if not row:
             raise ValueError("找不到参考图")
-        return {
+        value = {
             **{k: v for k, v in row.items() if k != "stage_id"},
             "data": json.loads(row["data"]),
             "url": "/api/persons/references/" + identifier + "/image",
         }
+        if row["role_id"]:
+            value["actor_ids"] = [row["actor_id"]]
+        return value
 
     def references(self):
         return [
@@ -313,31 +345,39 @@ class Persons:
             for r in self.store.rows("SELECT id FROM person_references ORDER BY rowid")
         ]
 
-    def update_reference(self, identifier, actor_id, entity=None):
-        """Save reference pairing and the selected actor's metadata atomically."""
+    def update_reference(self, identifier, actor_id=None, entity=None, role_id=None):
+        """Save reference pairing and the selected identity's metadata atomically."""
         reference = self.reference(identifier)
-        self.entity(actor_id, "actor")
         if entity is not None:
-            if entity.kind != "actor":
-                raise ValueError("参考图必须配对演员")
-            self.validate_entity(entity)
+            if entity.kind != ("role" if role_id else "actor"):
+                raise ValueError("角色参考图必须配对角色" if role_id else "参考图必须配对演员")
+            self.validate_update(entity, role_id or actor_id)
+        actor_ids = entity.actor_ids if role_id and entity is not None else None
+        if role_id == reference["role_id"] and actor_id is None:
+            # Editing metadata must not silently relabel the face to a different performer.
+            actor_id = reference["actor_id"]
+        actor_id = self.pairing_actor(actor_id, role_id, actor_ids)
         with self.store.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             if not db.execute("SELECT 1 FROM person_references WHERE id=?", (identifier,)).fetchone():
                 raise ValueError("找不到参考图")
             if entity is not None:
                 db.execute(
-                    "UPDATE person_entities SET data=? WHERE id=?", (entity.model_dump_json(), actor_id)
+                    "UPDATE person_entities SET data=? WHERE id=?",
+                    (entity.model_dump_json(), role_id or actor_id),
                 )
             duplicate = db.execute(
-                "SELECT id FROM person_references WHERE actor_id=? AND digest=? AND id<>? LIMIT 1",
-                (actor_id, reference["digest"], identifier),
+                "SELECT id FROM person_references WHERE actor_id=? AND role_id IS ? AND digest=? "
+                "AND id<>? LIMIT 1",
+                (actor_id, role_id, reference["digest"], identifier),
             ).fetchone()
             if duplicate:
                 db.execute("DELETE FROM person_references WHERE id=?", (identifier,))
                 identifier = duplicate["id"]
             else:
-                db.execute("UPDATE person_references SET actor_id=? WHERE id=?", (actor_id, identifier))
+                db.execute(
+                    "UPDATE person_references SET actor_id=?,role_id=? WHERE id=?", (actor_id, role_id, identifier)
+                )
         return self.reference(identifier)
 
     def create_import(self, images):
@@ -396,6 +436,9 @@ class Persons:
             class TransactionStore:
                 root = self.store.root
                 resolve_media = self.store.resolve_media
+
+                def connect(_):
+                    return nullcontext(db)
 
                 def rows(_, sql, args=()):
                     return [dict(row) for row in db.execute(sql, args).fetchall()]
@@ -589,23 +632,58 @@ class Persons:
             "rejected": sum(r["id"] not in marks.values() for r in rows),
         }
 
+    # 分镜级状态先按分镜聚合一次再过滤：逐行 EXISTS 会在上万条证据上重复求值。
+    SHOT_STATES = (
+        "(SELECT e.shot_id, e.source_id, SUM(status='accepted') AS accepted, "
+        "SUM(status='candidate') AS candidate, SUM(status='rejected') AS rejected "
+        "FROM person_evidence e JOIN segments s ON s.id=e.shot_id AND s.source_id=e.source_id "
+        "GROUP BY e.shot_id, e.source_id)"
+    )
+
+    def review_summary(self):
+        """每个素材的分镜级状态计数；分类规则与审核列表完全一致。"""
+        rows = self.store.rows(
+            "SELECT source_id, CASE WHEN accepted>0 THEN 'accepted' WHEN candidate>0 THEN 'candidate' "
+            "ELSE 'rejected' END AS bucket, COUNT(*) AS shots FROM "
+            + self.SHOT_STATES
+            + " GROUP BY source_id, bucket"
+        )
+        summary: dict[str, dict[str, int]] = {}
+        for row in rows:
+            summary.setdefault(row["source_id"], {"accepted": 0, "candidate": 0, "rejected": 0})[
+                row["bucket"]
+            ] = row["shots"]
+        return summary
+
     def review_shots(self, source_id=None, status=None, *, limit=50, offset=0, shot_id=None):
-        """按分镜分组返回证据；状态过滤只决定出现哪些分镜，卡内始终携带完整证据。"""
+        """按分镜分组返回证据。
+
+        状态按分镜归类而不是逐帧：任一帧被确认，整个分镜就算已接受；只有完全没有
+        已确认帧的分镜才仍算待确认。自动接受不代表已经完成人工审核。
+        卡内始终携带该分镜的全部证据与逐帧计数。
+        """
         clauses, args = [], []
-        for key, value in [("e.source_id", source_id), ("e.status", status), ("e.shot_id", shot_id)]:
+        for key, value in [("k.source_id", source_id), ("k.shot_id", shot_id)]:
             if value:
                 clauses.append(key + "=?")
                 args.append(value)
+        if status == "accepted":
+            clauses.append("k.accepted>0")
+        elif status == "candidate":
+            # 没有任何已确认帧、且确实还有候选帧，才算待确认。
+            clauses.append("k.accepted=0 AND k.candidate>0")
+        elif status == "rejected":
+            clauses.append("k.accepted=0 AND k.candidate=0 AND k.rejected>0")
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
         total = self.store.one(
-            "SELECT count(*) AS n FROM (SELECT DISTINCT e.shot_id FROM person_evidence e" + where + ")",
+            "SELECT count(*) AS n FROM " + self.SHOT_STATES + " k" + where,
             args,
         )["n"]
         shots = self.store.rows(
             "SELECT s.id AS shot_id,s.source_id,s.start,s.end FROM segments s "
-            "JOIN person_evidence e ON e.shot_id=s.id AND e.source_id=s.source_id"
+            "JOIN " + self.SHOT_STATES + " k ON k.shot_id=s.id AND k.source_id=s.source_id"
             + where
-            + " GROUP BY s.id ORDER BY s.source_id,s.start LIMIT ? OFFSET ?",
+            + " ORDER BY s.source_id,s.start LIMIT ? OFFSET ?",
             [*args, limit, offset],
         )
         items = []

@@ -41,7 +41,15 @@ const ROLE_BACKENDS = {
   tts: ['openai', 'minimax', 'dashscope'],
 };
 const ROLE_EXTRA = {
-  person: [{key:'expected_space',label:'固定模型身份（粘贴 health.space JSON）',type:'json'},{key:'fps',label:'每秒最多分析帧数（≤5）',type:'number',min:0.1},{key:'face_threshold',label:'人脸阈值',type:'number',min:0.01},{key:'face_margin',label:'不同人物分数差',type:'number',min:0.01}],
+  person: [
+    {key: 'expected_space', label: '固定模型身份（粘贴 health.space JSON）', type: 'json'},
+    {key: 'fps', label: '每秒最多分析帧数（≤5）', type: 'number', min: 0.1, max: 5},
+    {key: 'face_threshold', label: '人脸阈值', type: 'number', min: 0.01},
+    {key: 'face_margin', label: '不同人物分数差', type: 'number', min: 0.01},
+    {key: 'min_face_quality', label: '帧人脸质量门槛（低于此值不自动确认）', type: 'number', min: 0, max: 1},
+    {key: 'min_reference_quality', label: '参考图质量门槛（0=全部参与匹配）', type: 'number', min: 0, max: 1},
+    {key: 'body_threshold', label: '人体外观相似阈值', type: 'number', min: 0.01},
+  ],
   embedding: [
     {key: 'dimensions', label: '向量维度', type: 'number', min: 1},
     {key: 'quantization', label: '量化标识', type: 'text', placeholder: '线上模型填 cloud'},
@@ -486,6 +494,7 @@ function fillExtraFields(role, values = {}) {
       input = node('input');
       input.type = field.type === 'json' ? 'text' : field.type;
       if (field.min !== undefined) input.min = field.min;
+      if (field.max !== undefined) input.max = field.max;
       if (field.type === 'number') input.step = 'any';
       if (field.placeholder) input.placeholder = field.placeholder;
     }

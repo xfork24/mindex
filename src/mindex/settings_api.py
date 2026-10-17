@@ -94,7 +94,10 @@ def _effective(section, role: str) -> dict:
         "env_key_set": bool(os.environ.get(dump.get("api_key_env", ""), "")),
     }
     extras = {
-        "person": ("expected_space", "fps", "face_threshold", "face_margin", "min_face_quality", "body_threshold"),
+        "person": (
+            "expected_space", "fps", "face_threshold", "face_margin", "min_face_quality",
+            "min_reference_quality", "body_threshold",
+        ),
         "embedding": ("dimensions", "quantization"),
         "asr": ("enabled",),
         "tts": ("voice", "response_format"),

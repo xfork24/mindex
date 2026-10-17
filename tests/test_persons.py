@@ -4,6 +4,9 @@ import base64
 import io
 import itertools
 import json
+import shutil
+import subprocess
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -11,9 +14,24 @@ from PIL import Image
 
 from mindex.adapters import ModelError
 from mindex.api import create_app
-from mindex.config import Config
-from mindex.person_processing import PersonOptions, PersonProcessor, ShotTracker, attribute_frames, face_match
-from mindex.persons import CastConfirm, Entity, Persons, Review, overlaps_for, resolve_names
+from mindex.config import Config, fingerprint
+from mindex.person_processing import (
+    PersonOptions,
+    PersonProcessor,
+    ShotTracker,
+    attribute_frames,
+    face_match,
+    reference_subject,
+)
+from mindex.persons import (
+    CastConfirm,
+    Entity,
+    Persons,
+    Review,
+    init_person_schema,
+    overlaps_for,
+    resolve_names,
+)
 from mindex.storage import Store, dumps
 from mindex.types import TextSearch
 
@@ -307,6 +325,351 @@ def test_reference_pair_and_actor_metadata_saved_together(catalogue, config):
     assert 'id="entity-dialog"' in page and 'id="reference-form"' not in page
 
 
+def test_role_reference_is_stored_separately_and_drives_face_matching(catalogue, config):
+    p, work, actor = catalogue
+    role = p.save(Entity(kind="role", name="老年叶淑柔", work_ids=[work], actor_ids=[actor["id"]]))
+    paired = p.add_reference(actor["id"], photo(), role_id=role["id"])
+    assert paired["role_id"] == role["id"] and paired["actor_ids"] == [actor["id"]]
+    assert "stage_id" not in paired
+    # 角色照片与演员照片是两条独立配对：同一字节各自去重，互不覆盖。
+    assert p.add_reference(actor["id"], photo(), role_id=role["id"])["id"] == paired["id"]
+    actor_pair = p.add_reference(actor["id"], photo())
+    assert actor_pair["id"] != paired["id"] and actor_pair["role_id"] is None
+    with pytest.raises(ValueError, match="出演演员"):
+        outsider = p.save(Entity(kind="actor", name="演员丙"))
+        p.add_reference(outsider["id"], photo("gold"), role_id=role["id"])
+    # 演员没有任何演员级照片时，角色照片同样驱动人脸匹配。
+    client = TestClient(create_app(config))
+    assert client.delete(f"/api/persons/references/{actor_pair['id']}").status_code == 200
+    report = PersonProcessor(config, FakeClient(), Tracker).run("source", PersonOptions())
+    assert report["reference_errors"] == []
+    evidence = [e for e in p.evidence() if e["actor_id"] == actor["id"]]
+    assert evidence and evidence[0]["role_id"] == role["id"]
+
+
+def test_role_reference_api_upload_reassign_and_remove(catalogue, config):
+    p, work, actor = catalogue
+    role = p.save(Entity(kind="role", name="叶淑柔", work_ids=[work], actor_ids=[actor["id"]]))
+    other_role = p.save(
+        Entity(kind="role", name="少女叶淑柔", work_ids=[work], actor_ids=[actor["id"]])
+    )
+    client = TestClient(create_app(config))
+    created = client.post(
+        "/api/persons/references",
+        files={"file": ("role.png", photo("green"), "image/png")},
+        data={"role_id": role["id"]},
+    )
+    assert created.status_code == 201, created.text
+    payload = created.json()
+    assert payload["role_id"] == role["id"] and payload["actor_id"] == actor["id"]
+    assert "stage_id" not in payload
+    path = "/api/persons/references/" + payload["id"]
+    moved = client.put(path, json={"role_id": other_role["id"]})
+    assert moved.status_code == 200 and moved.json()["role_id"] == other_role["id"]
+    mismatch = client.put(
+        path, json={"role_id": other_role["id"], "entity": {"kind": "actor", "name": "不应写入"}}
+    )
+    assert mismatch.status_code == 422
+    renamed = client.put(
+        path,
+        json={
+            "role_id": other_role["id"],
+            "entity": {
+                "kind": "role",
+                "name": "少女叶淑柔",
+                "work_ids": [work],
+                "actor_ids": [actor["id"]],
+            },
+        },
+    )
+    assert renamed.status_code == 200
+    assert p.entity(other_role["id"])["name"] == "少女叶淑柔"
+    assert p.entity(actor["id"])["name"] == "演员甲"
+    assert client.put(path, json={}).status_code == 422
+    assert client.put(path, json={"actor_id": actor["id"], "role_id": other_role["id"]}).status_code == 200
+    assert client.put(path, json={"role_id": "missing"}).status_code == 422
+    assert (
+        client.post(
+            "/api/persons/references",
+            files={"file": ("x.png", photo("teal"), "image/png")},
+        ).status_code
+        == 422
+    )
+    assert client.get(moved.json()["url"]).status_code == 200
+    assert client.delete(path).status_code == 200
+    assert p.references() == []
+
+
+def test_role_reference_keeps_the_face_actor_and_competes_with_other_performers(catalogue, config):
+    p, work, actor = catalogue
+    other = p.save(Entity(kind="actor", name="演员乙"))
+    role = p.save(Entity(kind="role", name="叶淑柔", work_ids=[work], actor_ids=[actor["id"], other["id"]]))
+    client = TestClient(create_app(config))
+    url = "/api/persons/references"
+    ambiguous = client.post(url, files={"file": ("face.png", photo())}, data={"role_id": role["id"]})
+    assert ambiguous.status_code == 422
+    created = client.post(
+        url, files={"file": ("face.png", photo())}, data={"role_id": role["id"], "actor_id": actor["id"]}
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["actor_ids"] == [actor["id"]]
+    PersonProcessor(config, FakeClient(), Tracker).run("source", PersonOptions())
+    assert {e["actor_id"] for e in p.evidence()} == {actor["id"]}
+    refs = [dict(obs(), actor_id=a, role_id=role["id"]) for a in role["actor_ids"]]
+    assert face_match(obs(), refs, config.person)[2] is False
+    # Updating role membership cannot transfer an existing face to a different performer.
+    p.save(Entity(kind="role", name=role["name"], work_ids=[work], actor_ids=[other["id"]]), role["id"])
+    report = PersonProcessor(config, FakeClient(), Tracker).run("source", PersonOptions())
+    assert report["reference_errors"] == [
+        {"reference_id": created.json()["id"], "error": "参考图演员已不属于该角色，请重新配对"}
+    ]
+    assert all(e["actor_id"] is None for e in p.evidence())
+
+
+def test_role_reference_edit_validates_final_membership_and_protects_accepted_evidence(catalogue, config):
+    p, work, actor = catalogue
+    other = p.save(Entity(kind="actor", name="演员乙"))
+    sequel = p.save(Entity(kind="work", name="续作"))
+    role = p.save(Entity(kind="role", name="叶淑柔", work_ids=[work], actor_ids=[actor["id"]]))
+    ref = p.add_reference(actor["id"], photo(), role_id=role["id"])
+    p.store.execute(
+        "INSERT INTO person_evidence VALUES(?,?,?,?,?,?,?,?,?,?)",
+        ("accepted", "source", "shot0", actor["id"], role["id"], None, 0, 1, "accepted", "{}"),
+    )
+    client = TestClient(create_app(config))
+    path = "/api/persons/references/" + ref["id"]
+    entity = {"kind": "role", "name": "新角色名", "work_ids": [sequel["id"]], "actor_ids": [other["id"]]}
+    body = {"role_id": role["id"], "actor_id": other["id"], "entity": entity}
+    assert client.put(path, json=body).status_code == 422
+    assert p.entity(role["id"]) == role
+    assert p.reference(ref["id"])["actor_id"] == actor["id"]
+    entity["work_ids"] = [work]
+    # Removing the reference actor without re-pairing must fail atomically.
+    assert client.put(path, json={"role_id": role["id"], "entity": entity}).status_code == 422
+    assert p.entity(role["id"]) == role
+    # The newly selected performer is validated against the submitted membership, not the old one.
+    response = client.put(path, json=body)
+    assert response.status_code == 200, response.text
+    assert response.json()["actor_id"] == other["id"]
+    assert p.entity(role["id"])["actor_ids"] == [other["id"]]
+
+
+@pytest.mark.parametrize("role_scoped", [False, True])
+def test_reference_can_be_recreated_after_reassignment(catalogue, role_scoped):
+    p, work, actor = catalogue
+    other = p.save(Entity(kind="actor", name="演员乙"))
+    role_id = None
+    if role_scoped:
+        role_id = p.save(
+            Entity(kind="role", name="叶淑柔", work_ids=[work], actor_ids=[actor["id"], other["id"]])
+        )["id"]
+    ref = p.add_reference(actor["id"], photo(), role_id=role_id)
+    moved = p.update_reference(ref["id"], other["id"], role_id=role_id)
+    recreated = p.add_reference(actor["id"], photo(), role_id=role_id)
+    assert recreated["id"] != moved["id"]
+    assert recreated["actor_id"] == actor["id"]
+    assert p.add_reference(actor["id"], photo(), role_id=role_id)["id"] == recreated["id"]
+
+
+def test_catalogue_page_has_filters_and_no_work_card(config):
+    page = TestClient(create_app(config)).get("/persons").text
+    for element in ('id="filter-work"', 'id="filter-actor"', 'id="filter-role"'):
+        assert element in page
+    assert '<option value="work">' not in page
+    assert 'id="entity-dialog"' in page and 'id="reference-form"' not in page
+
+
+def test_persons_ui_regressions():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("人物页面交互回归检查需要 Node.js")
+    result = subprocess.run(
+        [node, "tests/persons_ui.cjs"],
+        cwd=Path(__file__).resolve().parents[1],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_frame_capture_targets_a_role_with_a_drawn_box(catalogue, config, monkeypatch):
+    """从原片选取参考：截图始终配给角色，可带手动画框（框选错误身份）。"""
+    p, work, actor = catalogue
+    role = p.save(Entity(kind="role", name="叶淑柔", work_ids=[work], actor_ids=[actor["id"]]))
+    monkeypatch.setattr("mindex.person_api.command", lambda args: photo("orange", (320, 240)))
+    client = TestClient(create_app(config))
+    created = client.post(
+        "/api/persons/references/from-source",
+        json={
+            "source_id": "source",
+            "timestamp": 1.5,
+            "actor_id": actor["id"],
+            "role_id": role["id"],
+            "bbox": [10, 20, 110, 140],
+        },
+    )
+    assert created.status_code == 201, created.text
+    stored = p.references()[-1]
+    assert stored["role_id"] == role["id"] and stored["actor_id"] == actor["id"]
+    assert stored["data"]["bbox"] == [10, 20, 110, 140]
+    with Image.open(p.store.resolve_media(stored["path"])) as cropped:
+        assert cropped.size == (100, 120)  # 框选区域外的画面不会进参考图
+    assert [r["id"] for r in p.references() if r["role_id"] == role["id"]] == [stored["id"]]
+    # 角色没有演员时无法配对，演员不属于该角色同样拒绝。
+    orphan = p.save(Entity(kind="role", name="无主角色", work_ids=[work]))
+    assert (
+        client.post(
+            "/api/persons/references/from-source",
+            json={"source_id": "source", "timestamp": 0, "role_id": orphan["id"]},
+        ).status_code
+        == 422
+    )
+    foreign = p.save(Entity(kind="work", name="其他作品"))
+    foreign_role = p.save(Entity(kind="role", name="外片角色", work_ids=[foreign["id"]], actor_ids=[actor["id"]]))
+    monkeypatch.setattr("mindex.person_api.command", lambda args: pytest.fail("无效配对不应调用 ffmpeg"))
+    assert client.post(
+        "/api/persons/references/from-source",
+        json={"source_id": "source", "timestamp": 0, "role_id": foreign_role["id"]},
+    ).status_code == 422
+
+
+def test_listing_reports_pending_review_per_shot(catalogue, config):
+    """处理与发布面板按分镜显示待核对量，不能把逐帧行数当工作量。"""
+    p, work, actor = catalogue
+    other = p.save(Entity(kind="actor", name="演员乙"))
+    p.add_reference(actor["id"], photo())
+    p.add_reference(other["id"], photo("blue"))
+    p.save(Entity(kind="role", name="叶淑柔", work_ids=[work], actor_ids=[actor["id"]]))
+    PersonProcessor(config, FakeClient(), Tracker).run("source", PersonOptions())
+    client = TestClient(create_app(config))
+    review = client.get("/api/persons").json()["review_shots"]["source"]
+    assert set(review) == {"accepted", "candidate", "rejected"}
+    assert review["candidate"] == 3 and review["accepted"] == 0 and review["rejected"] == 0
+    rows = p.store.one(
+        "SELECT COUNT(*) c FROM person_evidence WHERE source_id=? AND status='candidate'", ("source",)
+    )["c"]
+    assert rows >= review["candidate"]
+
+
+def test_reference_quality_threshold_default_zero_matches_everything(catalogue, config):
+    """min_reference_quality 默认 0：低质量参考图也参与匹配；帧质量门槛保持独立。"""
+    p, _work, actor = catalogue
+    ref = p.add_reference(actor["id"], photo())
+    client = FakeClient()
+    space = client.identity()
+    # 预置低质量（0.07）参考特征缓存，处理器不会再调模型。
+    key = fingerprint(["reference-v1", ref["digest"], space])
+    p.store.execute(
+        "INSERT OR REPLACE INTO person_features VALUES(?,?,?,?,?)",
+        (
+            key,
+            None,
+            dumps(space),
+            "reference",
+            dumps({"space": space, "observations": [dict(obs(), face_quality=0.07)]}),
+        ),
+    )
+    report = PersonProcessor(config, client, Tracker).run("source", PersonOptions())
+    assert report["reference_errors"] == []
+    attributed = [e for e in p.evidence() if e["actor_id"] == actor["id"]]
+    assert attributed, "默认门槛 0 时低质量参考图也应当参与匹配"
+
+    # 门槛抬高到 0.5：该参考图被挡下并显式报错，不再归到任何演员。
+    config.person = config.person.model_copy(update={"min_reference_quality": 0.5})
+    report = PersonProcessor(config, client, Tracker).run("source", PersonOptions())
+    assert len(report["reference_errors"]) == 1
+    assert report["reference_errors"][0]["reference_id"] == ref["id"]
+    assert "清晰度 0.07" in report["reference_errors"][0]["error"]
+    assert not [e for e in p.evidence() if e["actor_id"] == actor["id"]]
+
+    # 帧侧门槛不受影响：模糊帧依旧不做自动确认；默认门槛下低质量参考图仍可命中。
+    refs = [dict(obs(), face_quality=0.07, actor_id=actor["id"])]
+    assert face_match(dict(obs(), face_quality=0.1), refs, config.person)[2] is False
+    assert face_match(obs(), refs, config.person.model_copy(update={"min_reference_quality": 0.0}))[0] == actor["id"]
+
+
+def test_reference_subject_accepts_edge_bodies_but_rejects_groups_and_background_faces():
+    """人体检测把边缘路人/肩膀也算一项；参考图只认清晰人脸主体。"""
+    face = {"face_feature": [1.0], "face_bbox": [60, 40, 140, 120], "face_quality": 0.9}
+    body = {"body_bbox": [40, 20, 160, 230], "body_feature": [0.5]}
+
+    def with_body(**extra):
+        return {"body_bbox": None, "face_bbox": None, "face_feature": None, "face_quality": 0.0, **extra}
+
+    # 单人像 + 右上角一块无人脸的肩膀：应当可用。
+    shoulder = with_body(body_bbox=[103, 0, 164, 116])
+    assert reference_subject([{**face, **body}, shoulder]) is not None
+    # 背景远处的人体：同样只算一张清晰人脸，可用。
+    distant = with_body(body_bbox=[38, 355, 95, 455])
+    assert reference_subject([{**face, **body}, distant]) is not None
+    # 无人脸检测时也要能拿到人脸。
+    assert reference_subject([with_body(face_feature=[1.0], face_bbox=[60, 40, 140, 120])]) is not None
+    # 群照：两张清晰人脸依旧拒绝。
+    other = with_body(face_feature=[0.9], face_bbox=[300, 40, 380, 120], body_bbox=[280, 20, 400, 230])
+    assert reference_subject([{**face, **body}, other]) is None
+    # 主体背对镜头：唯一的人脸属于背景那个更小的人体，应拒绝而不是认错人。
+    turned = with_body(body_bbox=[200, 20, 380, 230])
+    assert reference_subject([{**face, **body}, turned]) is None
+    # 没有清晰人脸：拒绝。
+    assert reference_subject([body, shoulder]) is None
+    assert reference_subject([]) is None
+
+
+def test_task_report_counts_shots_not_frame_rows(catalogue, config):
+    """人工确认以分镜为单位：报告必须报分镜数，逐帧观测行数会放大两个数量级。"""
+    p, _work, actor = catalogue
+    other = p.save(Entity(kind="actor", name="演员乙"))
+    # 两张参考图同一张脸：margin 归零，所有观测都只能落成待确认。
+    p.add_reference(actor["id"], photo())
+    p.add_reference(other["id"], photo("blue"))
+    report = PersonProcessor(config, FakeClient(), Tracker).run("source", PersonOptions())
+    rows = p.store.one(
+        "SELECT COUNT(*) c FROM person_evidence WHERE source_id=? AND status='candidate'", ("source",)
+    )["c"]
+    shots = p.store.one(
+        "SELECT COUNT(DISTINCT shot_id) c FROM person_evidence WHERE source_id=? AND status='candidate'",
+        ("source",),
+    )["c"]
+    assert report["candidate_shots"] == shots == 3
+    assert report["accepted_shots"] == 0
+    assert report["candidates"] == rows >= report["candidate_shots"]
+    # 「已确认优先于待确认」的归类规则本身由 review_shots/review_summary 覆盖：
+    # test_review_shot_status_is_classified_per_shot_not_per_frame 里的 shot0 同时有已接受与候选帧。
+
+
+def test_task_report_shot_counts_include_preserved_human_review(catalogue, config):
+    from mindex.persons import ShotReview
+
+    p, _work, actor = catalogue
+    p.add_reference(actor["id"], photo())
+    processor = PersonProcessor(config, FakeClient(), Tracker)
+    processor.run("source", PersonOptions())
+    p.shot_review(ShotReview(source_id="source", shot_id="shot0", selections=[{"actor_id": actor["id"]}]))
+    report = processor.run("source", PersonOptions(start=0, end=1))
+    assert report["accepted_shots"] == 1
+    assert report["candidate_shots"] == 0
+    assert p.review_shots(shot_id="shot0")["items"][0]["counts"]["accepted"] == 1
+
+
+def test_old_reference_table_gains_role_id_column_without_losing_rows(config):
+    """旧库的 person_references 没有 role_id：首次启动必须能补列，且不丢任何配对。"""
+    store = Store(config.data_dir)
+    actor = Persons(store).save(Entity(kind="actor", name="演员甲"))
+    kept = Persons(store).add_reference(actor["id"], photo())
+    with store.connect() as db:
+        db.execute("DROP INDEX IF EXISTS person_references_role")
+        db.execute("ALTER TABLE person_references DROP COLUMN role_id")
+    with store.connect() as db:
+        init_person_schema(db)  # 旧库首次启动：补列 + 建索引
+        init_person_schema(db)  # 迁移必须幂等
+        assert "role_id" in {row["name"] for row in db.execute("PRAGMA table_info(person_references)")}
+        assert "person_references_role" in {row["name"] for row in db.execute("PRAGMA index_list(person_references)")}
+        assert [r["id"] for r in db.execute("SELECT id FROM person_references")] == [kept["id"]]
+    assert Persons(store).reference(kept["id"])["role_id"] is None
+
+
 def test_legacy_stage_migrates_to_role_without_losing_references_or_published_history(catalogue, config):
     p, work, actor = catalogue
     role = p.save(Entity(kind="role", name="叶淑柔", work_ids=[work], actor_ids=[actor["id"]]))
@@ -384,7 +747,7 @@ def test_name_resolution_alias_ambiguity_longest_and_intersection(catalogue):
     )
     assert ids == [actor["id"]] and rest == "哭泣"
     assert resolve_names(TextSearch(text="Alice"), p.entities())[0] == [actor["id"]]
-    role = p.save(Entity(kind="role", name="叶淑柔", work_ids=[work], actor_ids=[actor["id"]]))
+    p.save(Entity(kind="role", name="叶淑柔", work_ids=[work], actor_ids=[actor["id"]]))
     aged = p.save(Entity(kind="role", name="老年叶淑柔", work_ids=[work], actor_ids=[actor["id"]]))
     assert resolve_names(TextSearch(text="老年叶淑柔"), p.entities())[0] == [aged["id"]]
     segment = {"source_id": "source", "start": 0, "end": 5}
@@ -1009,11 +1372,58 @@ def test_review_shots_listing_groups_by_shot_filters_and_pages(catalogue):
     assert len(item["evidence"]) == 3
     assert all("body_feature" not in r["data"] for r in item["evidence"])
     assert item["image_url"] == "/api/persons/evidence/e0/image"
-    # 状态过滤只决定出现哪些分镜，卡内仍是完整证据。
-    pending = p.review_shots(status="candidate")
-    assert [i["shot_id"] for i in pending["items"]] == ["shot0"]
-    assert len(pending["items"][0]["evidence"]) == 3
+    # 分镜级状态：shot0 有一帧被确认就整体算已接受，不再算待确认。
+    assert [i["shot_id"] for i in p.review_shots(status="accepted")["items"]] == ["shot0", "shot1"]
+    assert p.review_shots(status="candidate")["items"] == []
+    assert p.review_shots(status="candidate")["total"] == 0
+    # 卡内始终是该分镜的完整证据，逐帧计数不被状态过滤裁剪。
+    shot0 = next(i for i in p.review_shots(status="accepted")["items"] if i["shot_id"] == "shot0")
+    assert shot0["counts"]["accepted"] == 1
     assert p.review_shots(source_id="source", limit=1, offset=1)["items"][0]["shot_id"] == "shot1"
+
+
+def test_review_shot_status_is_classified_per_shot_not_per_frame(catalogue):
+    """任一帧已确认 → 分镜已接受；无已确认帧但有候选 → 待确认；整镜无人 → 已排除。"""
+    p, work, a = catalogue
+    rows = [
+        ("shot0", "accepted", 0.0),  # 已确认一帧即可整镜算已接受
+        ("shot0", "candidate", 0.2),
+        ("shot1", "candidate", 1.0),  # 无任何已确认帧 → 待确认
+        ("shot1", "candidate", 1.2),
+        ("shot2", "rejected", 2.0),  # 整镜被排除
+    ]
+    for n, (shot_id, status, start) in enumerate(rows):
+        p.store.execute(
+            "INSERT INTO person_evidence VALUES(?,?,?,?,?,?,?,?,?,?)",
+            (
+                f"r{n}",
+                "source",
+                shot_id,
+                a["id"],
+                None,
+                None,
+                start,
+                start + 0.2,
+                status,
+                dumps({"work_id": work}),
+            ),
+        )
+    ids = lambda status: [i["shot_id"] for i in p.review_shots(status=status)["items"]]
+    assert ids("accepted") == ["shot0"]
+    assert ids("candidate") == ["shot1"]
+    assert ids("rejected") == ["shot2"]
+    assert p.review_shots()["total"] == 3
+    # 已接受的镜头仍要能整镜核对结清，卡内证据不因状态过滤而缺失。
+    assert len(p.review_shots(status="accepted")["items"][0]["evidence"]) == 2
+    # 处理面板显示的待核对量必须与审核列表同一套分类，否则会误导工作量。
+    assert p.review_summary() == {"source": {"accepted": 1, "candidate": 1, "rejected": 1}}
+    # Replaced segment layouts can leave evidence for shots that are no longer reviewable.
+    p.store.execute(
+        "INSERT INTO person_evidence VALUES(?,?,?,?,?,?,?,?,?,?)",
+        ("stale", "source", "removed-shot", a["id"], None, None, 10, 11, "candidate", "{}"),
+    )
+    assert p.review_shots()["total"] == 3
+    assert p.review_summary() == {"source": {"accepted": 1, "candidate": 1, "rejected": 1}}
 
 
 def test_task_delete_only_failed_or_interrupted(catalogue, config, monkeypatch):

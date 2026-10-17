@@ -108,6 +108,19 @@ def test_profile_fields_whitelist(store):
         save_profile(store, role="asr", provider="custom", name="x", config={"aligner_model": "other"})
     with pytest.raises(ValueError):
         save_profile(store, role="embedding", provider="custom", name="x", config={"dimensions": -1})
+    # 人物匹配阈值全部走档案：含新增的参考图质量门槛。
+    profile = save_profile(
+        store,
+        role="person",
+        provider="self",
+        name="宽松参考图",
+        config={"min_reference_quality": 0, "min_face_quality": 0.4, "body_threshold": 0.7},
+    )
+    assert profile["config"]["min_reference_quality"] == 0
+    with pytest.raises(ValueError, match="min_reference_quality"):
+        save_profile(
+            store, role="person", provider="self", name="越界", config={"min_reference_quality": 1.5}
+        )
 
 
 def test_apply_overrides_replaces_section_and_keeps_base(store, config):

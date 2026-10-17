@@ -101,6 +101,34 @@ class PersonClient:
         return {"space": space, "frames": frames}
 
 
+def _inside_ratio(face_box, body_box):
+    """人脸框落在人体框内的面积比例。"""
+    ix1, iy1 = max(face_box[0], body_box[0]), max(face_box[1], body_box[1])
+    ix2, iy2 = min(face_box[2], body_box[2]), min(face_box[3], body_box[3])
+    if ix2 <= ix1 or iy2 <= iy1:
+        return 0.0
+    area = max(1.0, (face_box[2] - face_box[0]) * (face_box[3] - face_box[1]))
+    return (ix2 - ix1) * (iy2 - iy1) / area
+
+
+def reference_subject(detections):
+    """挑出参考图里的人脸主体，不合格返回 None。
+
+    模型按人体输出观测，画面边缘的路人、别人的肩膀都会单独成项；直接要求
+    “整张图只有一条观测”会把单主角照误杀。这里只数清晰人脸：全图必须恰好一张，
+    且它要落在最大人体的框内——这样主体背对镜头时不会把背景人脸当成主体。
+    群照（多张清晰人脸）依旧拒绝。
+    """
+    faces = [d for d in detections if d.get("face_feature") and d.get("face_bbox")]
+    if len(faces) != 1:
+        return None
+    bodies = [d["body_bbox"] for d in detections if d.get("body_bbox")]
+    if not bodies:
+        return faces[0]
+    main = max(bodies, key=lambda b: (b[2] - b[0]) * (b[3] - b[1]))
+    return faces[0] if _inside_ratio(faces[0]["face_bbox"], main) >= 0.6 else None
+
+
 def cosine(a, b):
     if a is None or b is None:
         return -1.0
@@ -118,7 +146,7 @@ def face_match(observation, references, config):
     quality = observation.get("face_quality", 0)
     for reference in references:
         score = cosine(observation.get("face_feature"), reference.get("face_feature"))
-        if reference.get("face_quality", 0) >= config.min_face_quality:
+        if reference.get("face_quality", 0) >= config.min_reference_quality:
             scores[reference["actor_id"]].append(score)
     ranked = sorted(((max(v), actor) for actor, v in scores.items()), reverse=True)
     if not ranked:
@@ -326,9 +354,16 @@ class PersonProcessor:
             if s["end"] > options.start and s["start"] < (options.end or duration)
         ]
         space = self.client.identity()
+        roles = self.catalogue.entities("role")
+        role_actors = {r["id"]: r["actor_ids"] for r in roles}
         references = []
         reference_errors = []
         for ref in self.catalogue.references():
+            if ref["role_id"] and ref["actor_id"] not in role_actors.get(ref["role_id"], []):
+                reference_errors.append(
+                    {"reference_id": ref["id"], "error": "参考图演员已不属于该角色，请重新配对"}
+                )
+                continue
             key = fingerprint(["reference-v1", ref["digest"], space])
             extracted = self.feature(key)
             if extracted is None:
@@ -336,13 +371,26 @@ class PersonProcessor:
                 self.validate_space(extracted, space)
                 self.cache(key, None, space, "reference", extracted)
             detections = extracted["observations"]
-            if len(detections) != 1 or not detections[0].get("face_feature"):
+            subject = reference_subject(detections)
+            if subject is None:
                 reference_errors.append(
-                    {"reference_id": ref["id"], "error": "需要仅包含一个清晰人物的参考照片"}
+                    {"reference_id": ref["id"], "error": "参考照片需要恰好一张清晰人脸，且属于画面主体"}
                 )
                 continue
-            references.append({**detections[0], "actor_id": ref["actor_id"]})
-        roles = self.catalogue.entities("role")
+            quality = subject.get("face_quality", 0)
+            if quality < float(self.config.person.min_reference_quality):
+                # 质量门槛可配（默认 0）；被挡下的参考图要显式报出来，不能悄悄不参与。
+                reference_errors.append(
+                    {
+                        "reference_id": ref["id"],
+                        "error": (
+                            f"参考照片人脸清晰度 {quality:.2f} 低于门槛 "
+                            f"{float(self.config.person.min_reference_quality):.2f}，未参与匹配"
+                        ),
+                    }
+                )
+                continue
+            references.append({**subject, "actor_id": ref["actor_id"], "role_id": ref["role_id"]})
         report = {
             "source_id": source_id,
             "space": space,
@@ -354,6 +402,7 @@ class PersonProcessor:
             "reference_errors": reference_errors,
         }
         # Only user-confirmed, role-scoped appearances can suggest identities across shots.
+        accepted_shots, candidate_shots = set(), set()
         body_samples = []
         for e in self.catalogue.evidence():
             d = e["data"]
@@ -531,11 +580,25 @@ class PersonProcessor:
                 )
             report["accepted"] += sum(e["status"] == "accepted" for e in evidence)
             report["candidates"] += sum(e["status"] == "candidate" for e in evidence)
+            # Count persisted evidence, including authoritative human reviews and earlier partial runs.
+            statuses = {
+                r["status"]
+                for r in self.store.rows(
+                    "SELECT DISTINCT status FROM person_evidence WHERE source_id=? AND shot_id=?",
+                    (source_id, shot["id"]),
+                )
+            }
+            if "accepted" in statuses:
+                accepted_shots.add(shot["id"])
+            elif "candidate" in statuses:
+                candidate_shots.add(shot["id"])
             if progress:
                 progress({"stage": "matching", "completed_shots": position + 1, "total_shots": len(shots)})
         if self.client.identity() != space:
             raise ModelError("处理期间人物特征空间变化，拒绝发布；缓存仍按空间隔离")
         report["elapsed_seconds"] = round(time.perf_counter() - started, 3)
+        report["accepted_shots"] = len(accepted_shots)
+        report["candidate_shots"] = len(candidate_shots - accepted_shots)
         report["release"] = self.catalogue.publish() if options.publish else None
         report["verification"] = "engineering_only_pending_human_review"
         return report

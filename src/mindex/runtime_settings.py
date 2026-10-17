@@ -37,7 +37,10 @@ ROLE_LABELS = {
 
 # 各角色允许 profile 覆盖的字段；未列字段永远承袭 yaml 原值。
 PROFILE_FIELDS = {
-    "person": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "expected_space", "fps", "face_threshold", "face_margin", "min_face_quality", "body_threshold"},
+    "person": {
+        "backend", "base_url", "model", "revision", "timeout", "api_key_env", "expected_space",
+        "fps", "face_threshold", "face_margin", "min_face_quality", "min_reference_quality", "body_threshold",
+    },
     "analyzer": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "llama_template"},
     "generator": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "llama_template", "max_tokens"},
     "embedding": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "quantization", "dimensions"},

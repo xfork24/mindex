@@ -9,7 +9,7 @@ from typing import Annotated
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from filelock import FileLock
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from .adapters import request
 from .config import StrictModel
@@ -24,12 +24,20 @@ class WorkAssignment(StrictModel):
 
 
 class ReferencePair(StrictModel):
-    actor_id: str
+    actor_id: str | None = None
+    role_id: str | None = None
     entity: Entity | None = None
+
+    @model_validator(mode="after")
+    def target_present(self):
+        if not self.actor_id and not self.role_id:
+            raise ValueError("参考图必须指定演员或角色")
+        return self
 
 
 class SourceReference(StrictModel):
-    actor_id: str
+    actor_id: str | None = None
+    role_id: str | None = None
     source_id: str
     timestamp: float = Field(ge=0)
     bbox: list[float] | None = Field(default=None, min_length=4, max_length=4)
@@ -106,10 +114,12 @@ def person_router(runtime, store):
     @router.get("")
     def listing():
         sources = [{**s, "work_id": catalogue.work_for(s["id"])} for s in store.sources()]
+        # 待核对数量以分镜为单位，且与审核列表同一套分类规则。
         return {
             "entities": catalogue.entities(),
             "references": catalogue.references(),
             "sources": [{"id": s["id"], "name": s["name"], "work_id": s["work_id"]} for s in sources],
+            "review_shots": catalogue.review_summary(),
             "coverage": [
                 {**r, "data": json.loads(r["data"])} for r in store.rows("SELECT * FROM person_coverage")
             ],
@@ -137,18 +147,19 @@ def person_router(runtime, store):
     @router.post("/references", status_code=201)
     async def upload_reference(
         file: Annotated[UploadFile, File()],
-        actor_id: Annotated[str, Form()],
+        actor_id: Annotated[str | None, Form()] = None,
+        role_id: Annotated[str | None, Form()] = None,
     ):
         from .uploads import save_upload
 
         with tempfile.TemporaryDirectory(dir=store.root) as directory:
             path = Path(directory) / "image"
             await save_upload(file, path, 20 * 1024 * 1024)
-            return catalogue.add_reference(actor_id, path.read_bytes())
+            return catalogue.add_reference(actor_id, path.read_bytes(), role_id=role_id)
 
     @router.put("/references/{identifier}")
     def reassign_reference(identifier: str, body: ReferencePair):
-        return catalogue.update_reference(identifier, body.actor_id, body.entity)
+        return catalogue.update_reference(identifier, body.actor_id, body.entity, body.role_id)
 
     @router.delete("/references/{identifier}")
     def remove_reference(identifier: str):
@@ -171,6 +182,9 @@ def person_router(runtime, store):
         source = store.one("SELECT * FROM sources WHERE id=?", (body.source_id,))
         if not source or body.timestamp >= json.loads(source["media"])["duration"]:
             raise ValueError("素材或截图时间无效")
+        actor_id = catalogue.pairing_actor(body.actor_id, body.role_id)
+        if body.role_id and catalogue.work_for(body.source_id) not in catalogue.entity(body.role_id)["work_ids"]:
+            raise ValueError("截图角色不属于素材的作品")
         raw = command(
             [
                 "ffmpeg",
@@ -200,9 +214,10 @@ def person_router(runtime, store):
                 image.crop(checked_box(body.bbox, *image.size)).save(buffer, format="PNG")
                 raw = buffer.getvalue()
         return catalogue.add_reference(
-            body.actor_id,
+            actor_id,
             raw,
             {"source_id": body.source_id, "timestamp": body.timestamp, "bbox": body.bbox},
+            role_id=body.role_id,
         )
 
     @router.post("/imports", status_code=201)
