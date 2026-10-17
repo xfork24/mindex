@@ -24,21 +24,7 @@ from .settings_api import settings_router
 from .storage import Store
 from .studio_api import studio_router
 from .types import Filters, Granularity, TextSearch
-
-
-async def save_upload(upload: UploadFile, path: Path, max_bytes: int):
-    try:
-        size = 0
-        with path.open("wb") as handle:
-            while chunk := await upload.read(1024 * 1024):
-                size += len(chunk)
-                if size > max_bytes:
-                    raise HTTPException(413, "上传文件过大")
-                handle.write(chunk)
-        if not size:
-            raise HTTPException(422, "上传文件为空")
-    finally:
-        await upload.close()
+from .uploads import save_upload  # 兼容既有 from .api import save_upload 延迟导入
 
 
 def create_app(
@@ -55,6 +41,11 @@ def create_app(
     app = FastAPI(title="Mindex 视频素材检索", version="0.1.0")
     if index_id and store.index_version(index_id)["status"] != "ready":
         raise ValueError("固定预览只允许就绪索引")
+    from .dialogue_tasks import dialogue_router
+    from .person_api import person_router
+
+    app.include_router(person_router(runtime, store))
+    app.include_router(dialogue_router(runtime, store, embedder))
     app.include_router(admin_router(store))
     app.include_router(settings_router(runtime, store))
     app.include_router(studio_router(runtime, store, embedder=embedder, storyboarder=storyboarder, speaker=speaker))
@@ -62,6 +53,10 @@ def create_app(
     @app.exception_handler(EntityNotFound)
     async def entity_not_found(_, exc):
         return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+    @app.get("/persons", include_in_schema=False)
+    def persons_page():
+        return FileResponse(Path(__file__).parent / "static" / "persons.html", media_type="text/html")
 
     @app.get("/admin", include_in_schema=False)
     @app.get("/admin/", include_in_schema=False)

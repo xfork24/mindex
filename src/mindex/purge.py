@@ -108,14 +108,22 @@ def purge_source(store: Store, source_id: str) -> dict:
             db.execute(f"DELETE FROM segment_curation WHERE id IN ({placeholders})", segment_ids)
             db.execute("DELETE FROM segments WHERE source_id=?", (source_id,))
         db.execute("DELETE FROM transcripts WHERE source_id=?", (source_id,))
+        db.execute("DELETE FROM channel_data WHERE source_id=?", (source_id,))
+        db.execute("DELETE FROM dialogue_tasks WHERE source_id=?", (source_id,))
         db.execute("DELETE FROM scene_plans WHERE source_id=?", (source_id,))
         db.execute("DELETE FROM source_curation WHERE id=?", (source_id,))
         db.execute("DELETE FROM runs WHERE source_id=?", (source_id,))
+        from .persons import purge_person_source
+
+        purge_person_source(db, source_id)
         db.execute("DELETE FROM sources WHERE id=?", (source_id,))
 
     files = 0
     files += _remove_tree(store.root / "clips" / source_id)
     files += _remove_tree(store.root / "transcripts" / source_id)
+    files += _remove_tree(store.root / "dialogue" / source_id)
+    files += _remove_tree(store.root / "subtitles" / source_id)
+    files += _remove_tree(store.root / "persons" / "frames" / source_id)
     files += _remove_tree(store.root / "reports" / source_id)
     files += _remove_file(store.root / "plans" / f"{source_id}.json")
     for segment in segments:

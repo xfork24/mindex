@@ -18,6 +18,7 @@ app.add_typer(e2e, name="e2e")
 
 
 class IndexMode(str, Enum):
+    auto = "auto"
     visual = "visual"
     enriched = "enriched"
 
@@ -96,12 +97,30 @@ def export_source(ctx: typer.Context, source: str, output: Path | None = None):
 
 @app.command()
 def transcribe(ctx: typer.Context, source: str | None = None):
-    """批量转写；完成后可停止 ASR 服务并切换 Qwen。"""
+    """批量转写；MiniMax 直接保存词级时间戳，旧纯文本可手动 align。"""
     from .pipeline import Pipeline
 
     pipeline = Pipeline(ctx.obj)
     with pipeline.lock():
         pipeline.transcribe(source)
+
+
+@app.command("enrich-dialogue")
+def enrich_dialogue(
+    ctx: typer.Context,
+    source: Annotated[str | None, typer.Argument()] = None,
+    subtitle_stream: Annotated[int | None, typer.Option(min=0)] = None,
+    no_publish: Annotated[bool, typer.Option("--no-publish")] = False,
+    workers: Annotated[int, typer.Option(min=1, max=8)] = 2,
+):
+    """字幕优先补充对白，断点续跑；默认检查并自动发布，无 LLM 分析。"""
+    from .dialogue_tasks import execute_dialogue
+    from .pipeline import Pipeline
+
+    with Pipeline(ctx.obj).lock():
+        print_json(execute_dialogue(ctx.obj, source, subtitle_stream=subtitle_stream,
+                                   publish=not no_publish, workers=workers,
+                                   progress=lambda value: typer.echo(json.dumps(value, ensure_ascii=False))))
 
 
 @app.command()
@@ -128,7 +147,8 @@ def analyze(ctx: typer.Context, source: str | None = None):
 def build_index(
     ctx: typer.Context,
     activate: bool = False,
-    mode: IndexMode = IndexMode.enriched,
+    mode: IndexMode = IndexMode.auto,
+    channel: Annotated[list[str] | None, typer.Option(help="可重复指定 visual/dialogue/analysis")] = None,
     source: str | None = None,
     kind: Annotated[
         list[str] | None, typer.Option(help="可重复指定 shot/moment/scene；visual 默认 moment")
@@ -141,14 +161,14 @@ def build_index(
     with Pipeline(ctx.obj).lock():
         typer.echo(
             IndexBuilder(ctx.obj).build(
-                activate=activate, mode=mode.value, source_id=source, kinds=tuple(kind) if kind else None
+                activate=activate, mode=mode.value, source_id=source, kinds=tuple(kind) if kind else None, channels=channel
             )
         )
 
 
 @app.command()
 def ingest(ctx: typer.Context, videos: list[Path], activate: bool = False):
-    """执行全部阶段；仅适用于服务可同时访问或已配置外部切换的环境。"""
+    """导入、补充对白并建库；不触发 LLM 分析。"""
     from .indexing import IndexBuilder
     from .pipeline import Pipeline
 
@@ -156,17 +176,17 @@ def ingest(ctx: typer.Context, videos: list[Path], activate: bool = False):
     with pipeline.lock():
         for path in videos:
             pipeline.prepare(path)
-        pipeline.transcribe()
-        pipeline.analyze()
+        pipeline.enrich_dialogue()
         typer.echo(IndexBuilder(ctx.obj).build(activate=activate))
 
 
 @app.command()
-def search(ctx: typer.Context, text: str, granularity: str = "moment", limit: int = 20):
+def search(ctx: typer.Context, text: str, granularity: str = "moment", limit: int = 20,
+           channel: Annotated[list[str] | None, typer.Option()] = None):
     from .search import SearchEngine
     from .types import TextSearch
 
-    print_json(SearchEngine(ctx.obj).text(TextSearch(text=text, granularity=granularity, limit=limit)))
+    print_json(SearchEngine(ctx.obj).text(TextSearch(text=text, granularity=granularity, limit=limit, channels=channel)))
 
 
 @app.command()
@@ -420,6 +440,110 @@ def experiment_status(ctx: typer.Context, run: Annotated[Path, typer.Option()]):
     from .e2e import progress
 
     print_json(progress(ctx.obj, run))
+
+
+
+
+persons_cli = typer.Typer(help="人物库、人物任务与独立检索发布", no_args_is_help=True)
+app.add_typer(persons_cli, name="persons")
+
+
+@persons_cli.command('list')
+def persons_list(ctx: typer.Context):
+    from .persons import Persons
+    from .storage import Store
+    catalogue = Persons(Store(ctx.obj.data_dir))
+    print_json({'entities': catalogue.entities(), 'references': catalogue.references()})
+
+
+@persons_cli.command('save')
+def persons_save(ctx: typer.Context, file: Path, identifier: str | None = None):
+    """从实体 JSON 新建或修改演员、作品、角色或阶段。"""
+    from .persons import Entity, Persons
+    from .storage import Store
+    print_json(Persons(Store(ctx.obj.data_dir)).save(Entity.model_validate_json(file.read_text()), identifier))
+
+
+@persons_cli.command('reference')
+def persons_reference(ctx: typer.Context, actor: str, images: list[Path], stage: str | None = None):
+    from .persons import Persons
+    from .storage import Store
+    catalogue = Persons(Store(ctx.obj.data_dir))
+    print_json([catalogue.add_reference(actor, p.read_bytes(), stage) for p in images])
+
+
+@persons_cli.command('process')
+def persons_process(ctx: typer.Context, source: str, start: float = 0, end: float | None = None,
+                    publish: bool = False, retry: str | None = None):
+    """持久化任务并启动独立工作进程，立即返回任务 ID。"""
+    import subprocess
+    import sys
+
+    from filelock import FileLock
+
+    from .person_processing import PersonOptions
+    from .persons import uid
+    from .storage import Store, dumps
+    store = Store(ctx.obj.data_dir)
+    options = PersonOptions(start=start, end=end, publish=publish)
+    if not store.one('SELECT id FROM sources WHERE id=?', (source,)):
+        raise typer.BadParameter('找不到素材')
+    with FileLock(str(store.root / 'pipeline.lock'), timeout=0):
+        identifier = retry or uid()
+        if retry:
+            row = store.one('SELECT * FROM person_tasks WHERE id=?', (retry,))
+            if not row or row['status'] not in {'failed', 'interrupted'} or row['source_id'] != source:
+                raise typer.BadParameter('重试任务必须失败/中断且归属该素材')
+            store.execute("UPDATE person_tasks SET status='queued',error=NULL,result=NULL WHERE id=?", (retry,))
+        else:
+            store.execute('INSERT INTO person_tasks(id,source_id,status,config,options) VALUES(?,?,?,?,?)',
+                (identifier, source, 'queued', ctx.obj.model_dump_json(), dumps(options.model_dump())))
+    log_path = store.root / 'persons' / 'task-logs' / (identifier + '.log')
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with log_path.open('ab') as handle:
+            subprocess.Popen([sys.executable, '-m', 'mindex.person_worker', str(store.root), identifier],
+                             stdin=subprocess.DEVNULL, stdout=handle, stderr=handle, start_new_session=True)
+    except OSError as exc:
+        store.execute("UPDATE person_tasks SET status='failed',error=? WHERE id=?", (str(exc), identifier))
+        raise
+    print_json({'task_id': identifier, 'status': 'queued', 'log': str(log_path)})
+
+
+@persons_cli.command('status')
+def persons_status(ctx: typer.Context, task: str):
+    from .person_processing import PersonTasks
+    from .storage import Store
+    manager = PersonTasks.__new__(PersonTasks)
+    manager.store = Store(ctx.obj.data_dir)
+    print_json(manager.get(task))
+
+
+@persons_cli.command('publish')
+def persons_publish(ctx: typer.Context, content: str | None = None):
+    from filelock import FileLock
+
+    from .persons import Persons
+    from .storage import Store
+    store = Store(ctx.obj.data_dir)
+    with FileLock(str(store.root / 'pipeline.lock'), timeout=0):
+        print_json(Persons(store).publish(content))
+
+
+@persons_cli.command('review')
+def persons_review(ctx: typer.Context, file: Path):
+    """从 JSON 确认分镜出镜人物（source_id、shot_id、selections）。"""
+    from .persons import Persons, ShotReview
+    from .storage import Store
+    print_json(Persons(Store(ctx.obj.data_dir)).shot_review(ShotReview.model_validate_json(file.read_text())))
+
+
+@persons_cli.command('activate')
+def persons_activate(ctx: typer.Context, release: str):
+    from .storage import Store
+    store = Store(ctx.obj.data_dir)
+    store.activate_release(release)
+    print_json({'release_id': release})
 
 
 if __name__ == "__main__":

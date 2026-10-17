@@ -110,3 +110,16 @@ search:
   max_upload_mb: 100
   max_image_upload_mb: 20
   max_query_seconds: 30
+
+# 独立人物服务；不改变内容分镜或 WeMM 空间。
+person:
+  base_url: http://127.0.0.1:4050
+  model: cheetah_l
+  model_root: ~/.insightface
+  fps: 5
+  face_threshold: 0.55
+  face_margin: 0.1
+  min_face_quality: 0.6
+  body_threshold: 0.8
+  # 首次启动后将 /health 的 space 完整复制到此处，以固定模型文件摘要及预处理。
+  expected_space: null

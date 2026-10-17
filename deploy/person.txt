@@ -1,0 +1,5 @@
+# Isolated model environment, pinned SDK source with PersonAnalysis / V2 manifests.
+insightface @ git+https://github.com/deepinsight/insightface.git@81929474ec02e54e3655f6841bced800009c592d#subdirectory=python-package
+onnxruntime==1.23.2
+av>=14,<17
+opencv-python>=4.10,<5

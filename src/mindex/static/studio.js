@@ -34,6 +34,9 @@ const state = {
   matrixScope: null,
   logViews: new Map(),
   finalUrl: null,
+  persons: null, // 懒加载的人物身份（演员/角色/阶段；作品不参与选择）
+  sources: null, // 懒加载的素材列表
+  inputs: null, // 查询文件 media_id → 产物条目索引
 };
 const $ = (id) => document.getElementById(id);
 function shortIds(value) {
@@ -174,11 +177,44 @@ async function selectJob(id) {
   state.data = null;
   state.finalUrl = null;
   state.matrixScope = null;
+  state.persons = state.sources = state.inputs = null;
   history.replaceState(null, "", `/studio?job=${id}`);
   closeDialog();
   await refresh();
   await loadJobs();
   await loadArtifacts();
+  loadRecallOptions().catch((error) => notice(`召回选项读取失败：${error.message}`, true));
+}
+async function loadRecallOptions() {
+  const id = state.id;
+  const [persons, status] = await Promise.all([
+    api("/api/persons"),
+    api("/api/status"),
+  ]);
+  if (id !== state.id) return;
+  if (persons?.entities) state.persons = persons.entities.filter((e) => e.kind !== "work");
+  if (status?.sources) state.sources = status.sources;
+  for (const entry of state.matrixRows.values()) entry.panelKey = null;
+  renderMatrix();
+}
+function personName(id) {
+  return state.persons?.find((p) => p.id === id)?.name || shortId(id);
+}
+function sourceName(id) {
+  return state.sources?.find((s) => s.id === id)?.name || shortId(id);
+}
+async function inputUrl(mediaId) {
+  const id = state.id;
+  if (!state.inputs) {
+    const data = await api(`${base()}/artifacts`);
+    if (id !== state.id) return null;
+    state.inputs = new Map(
+      data.items
+        .filter((item) => item.path.startsWith("inputs/"))
+        .map((item) => [item.path.slice("inputs/".length).split(".")[0], item]),
+    );
+  }
+  return state.inputs.get(mediaId)?.url || null;
 }
 async function refresh() {
   const token = ++state.token,
@@ -470,7 +506,7 @@ function cellSummary(sid, stage) {
     } else {
       const summary =
         stage === "recall"
-          ? `${d.results?.length || 0} 个候选`
+          ? `${RECALL_MODE_LABEL[d.mode || "text"]} · ${d.results?.length || 0} 个候选`
           : stage === "tts"
             ? secs(d.duration)
             : stage === "select"
@@ -647,8 +683,211 @@ document.addEventListener("selectionchange", () => {
     entry.summaryPending && !selectionWithin(entry.summary),
   )) renderMatrix();
 });
+const RECALL_MODES = [
+  ["text", "文字 + 人物"],
+  ["image", "图片找视频"],
+  ["video", "视频找相似"],
+];
+const RECALL_MODE_LABEL = { text: "文字", image: "图片找视频", video: "视频找相似" };
+function recallEditable(value) {
+  // 键序与 ShotRecall 模型字段一致，保证 JSON.stringify 的 dirty 判定稳定。
+  const v = value || {};
+  return {
+    mode: v.mode || "text",
+    person_ids: [...(v.person_ids || [])],
+    person_mode: v.person_mode || "auto",
+    person_relation: v.person_relation || "all",
+    filters: {
+      source_id: v.filters?.source_id ?? null,
+      min_duration: v.filters?.min_duration ?? 0,
+      max_duration: v.filters?.max_duration ?? null,
+      scene: v.filters?.scene ?? null,
+      emotion: v.filters?.emotion ?? null,
+      shot_size: v.filters?.shot_size ?? null,
+    },
+    media_id: v.media_id ?? null,
+    media_kind: v.media_kind ?? null,
+  };
+}
+function recallIsDefault(r) {
+  return (
+    r.mode === "text" &&
+    !r.person_ids.length &&
+    r.person_mode === "auto" &&
+    r.person_relation === "all" &&
+    !r.filters.source_id &&
+    !r.filters.min_duration &&
+    !r.filters.max_duration &&
+    !r.filters.scene &&
+    !r.filters.emotion &&
+    !r.filters.shot_size &&
+    !r.media_id &&
+    !r.media_kind
+  );
+}
+function queryPreviewNode(url, kind) {
+  if (kind === "image") {
+    const n = el("img");
+    n.src = url;
+    n.loading = "lazy";
+    n.alt = "查询图片预览";
+    return n;
+  }
+  return media("video", url);
+}
+function renderRecallEditor(body, sid, draft) {
+  const section = el("div", "", "recall-editor");
+  const commit = (next) => {
+    // 全默认等价于未设置：写回 null 以保持与旧 content 完全一致的 dirty 判定与签名。
+    draft.data.recall = recallIsDefault(next) ? null : next;
+    draft.dirty =
+      JSON.stringify(draft.data) !== JSON.stringify(draft.original);
+    const entry = state.matrixRows.get(sid);
+    entry?.summary.children[1]?.replaceWith(cellSummary(sid, "content"));
+    updateLocks();
+  };
+  const draw = () => {
+    section.replaceChildren(el("h4", "召回设置"));
+    const value = draft.data.recall ? recallEditable(draft.data.recall) : null;
+    const mode = value?.mode || "text";
+    const modeField = field("召回方式", mode, "text", RECALL_MODES);
+    modeField.input.addEventListener("change", () => {
+      const next = recallEditable(draft.data.recall);
+      next.mode = modeField.input.value;
+      if (next.mode !== "text") {
+        next.person_ids = [];
+        next.person_mode = "auto";
+        next.person_relation = "all";
+        next.media_kind = next.mode;
+        next.media_id = null;
+      } else {
+        next.media_id = null;
+        next.media_kind = null;
+      }
+      commit(next);
+      draw();
+    });
+    section.append(modeField.wrap);
+    if (mode === "text") {
+      const personWrap = el("label", "人物（可多选）", "form-field");
+      const personSelect = document.createElement("select");
+      personSelect.multiple = true;
+      personSelect.setAttribute("aria-label", "人物（可多选）");
+      const chosen = new Set(value?.person_ids || []);
+      for (const p of state.persons || []) {
+        const o = el(
+          "option",
+          `${p.name} · ${p.kind === "actor" ? "演员" : p.kind === "role" ? "角色" : "阶段"} · ${p.id.slice(0, 8)}`,
+        );
+        o.value = p.id;
+        o.selected = chosen.has(p.id);
+        personSelect.append(o);
+      }
+      personSelect.addEventListener("change", () => {
+        const next = recallEditable(draft.data.recall);
+        next.person_ids = [...personSelect.selectedOptions].map((o) => o.value);
+        commit(next);
+      });
+      personWrap.append(personSelect);
+      section.append(personWrap);
+      for (const [key, label, choices] of [
+        ["person_mode", "人物检索方式", [
+          ["auto", "自动识别姓名 · 默认出镜"],
+          ["onscreen", "人物出镜"],
+          ["mentioned", "对白提及"],
+        ]],
+        ["person_relation", "多人物关系", [
+          ["all", "同时出镜 / 全部提及"],
+          ["any", "任一人物"],
+        ]],
+      ]) {
+        const f = field(label, value?.[key] || (key === "person_mode" ? "auto" : "all"), "text", choices);
+        f.input.addEventListener("change", () => {
+          const next = recallEditable(draft.data.recall);
+          next[key] = f.input.value;
+          commit(next);
+        });
+        section.append(f.wrap);
+      }
+    } else {
+      const uploadWrap = el(
+        "label",
+        mode === "image"
+          ? "查询图片（JPEG、PNG、WebP 静态图片 · 最大 20MB）"
+          : "查询视频（最长 30 秒 · 最大 100MB）",
+        "form-field",
+      );
+      const fileInput = document.createElement("input");
+      fileInput.type = "file";
+      fileInput.accept = mode === "image" ? "image/jpeg,image/png,image/webp" : "video/*";
+      uploadWrap.append(fileInput);
+      section.append(uploadWrap, button("上传查询文件", async () => {
+        const scope = scopeKey();
+        const file = fileInput.files[0];
+        if (!file) throw new Error("请先选择查询文件。");
+        const form = new FormData();
+        form.append("file", file);
+        form.append("kind", mode);
+        const r = await fetch(`${planBase()}/query-media`, { method: "POST", body: form });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok)
+          throw new Error(shortIds(
+            typeof data.detail === "string"
+              ? data.detail
+              : JSON.stringify(data.detail || r.status),
+          ));
+        if (scope !== scopeKey() || state.drafts.get(draftKey(sid)) !== draft || draft.data.recall?.mode !== mode) return;
+        const next = recallEditable(draft.data.recall);
+        next.media_id = data.media_id;
+        next.media_kind = data.kind;
+        state.inputs = null; // 新文件入列，待重取索引
+        draft.mediaPreview = { media_id: data.media_id, url: data.preview_url, kind: data.kind };
+        commit(next);
+        draw();
+        notice("查询文件已上传；保存分镜后生效。");
+      }));
+      if (value?.media_id) {
+        const host = el("div", "", "query-preview-host");
+        section.append(host);
+        if (draft.mediaPreview?.media_id === value.media_id) {
+          host.append(queryPreviewNode(draft.mediaPreview.url, draft.mediaPreview.kind));
+        } else {
+          host.append(el("p", "正在定位查询文件…", "muted"));
+          inputUrl(value.media_id).then((url) => {
+            if (!url || !host.isConnected) return;
+            host.replaceChildren(queryPreviewNode(url, value.media_kind || mode));
+          });
+        }
+      }
+    }
+    const sourceChoices = [
+      ["", "全部素材"],
+      ...(state.sources || []).map((s) => [s.id, s.name]),
+    ];
+    const sourceField = field("素材范围", value?.filters?.source_id || "", "text", sourceChoices);
+    sourceField.input.addEventListener("change", () => {
+      const next = recallEditable(draft.data.recall);
+      next.filters.source_id = sourceField.input.value || null;
+      commit(next);
+    });
+    section.append(sourceField.wrap);
+    section.append(
+      el(
+        "p",
+        mode === "text"
+          ? "人物与素材筛选仅约束此镜召回。"
+          : "图片/视频查询按画面相似度召回，不支持人物筛选；上传后保存分镜生效。",
+        "muted",
+      ),
+    );
+  };
+  draw();
+  body.append(section);
+}
 function renderShotEditor(body, sid) {
-  const original = ver(plan().shots[sid].content).data;
+  const content = ver(plan().shots[sid].content).data;
+  const recall = recallEditable(content.recall);
+  const original = { ...content, recall: recallIsDefault(recall) ? null : recall };
   let draft = state.drafts.get(draftKey(sid));
   if (
     !draft ||
@@ -687,6 +926,7 @@ function renderShotEditor(body, sid) {
     fields.append(f.wrap);
   }
   body.append(fields);
+  renderRecallEditor(body, sid, draft);
   const actions = el("div", "", "detail-actions");
   actions.append(
     mutationButton("保存此镜", () => saveShot(sid), false, true),
@@ -762,6 +1002,9 @@ async function changeStructure(sid, op) {
     shots[index - 1].text += shots[index].text;
     shots[index - 1].query += `；${shots[index].query}`;
     shots[index - 1].estimated_seconds += shots[index].estimated_seconds;
+    // 保留上一镜召回设置；上一镜为默认文字召回时继承被合并镜的设置。
+    if (recallIsDefault(recallEditable(shots[index - 1].recall)) && shots[index].recall)
+      shots[index - 1].recall = shots[index].recall;
     shots.splice(index, 1);
   }
   const result = await api(planBase(), "PATCH", {
@@ -812,12 +1055,39 @@ function renderStageDetails(body, sid, stage) {
         el("p", "此历史版本记录不完整，已知文件仍可查看。", "warn-text"),
       );
     if (stage === "recall") {
+      const recall = item.data.recall,
+        meta = item.data.meta || {};
       body.append(
         el(
           "p",
-          `查询：${item.data.query || "未记录"} · ${item.data.results?.length || 0} 个候选`,
+          `方式：${RECALL_MODE_LABEL[item.data.mode || "text"]} · 查询：${item.data.query || "未记录"} · ${item.data.results?.length || 0} 个候选`,
         ),
       );
+      if (recall?.person_ids?.length)
+        body.append(
+          el(
+            "p",
+            `人物：${recall.person_ids.map(personName).join("、")}（${recall.person_mode === "onscreen" ? "出镜" : recall.person_mode === "mentioned" ? "提及" : "自动"} / ${recall.person_relation === "any" ? "任一" : "同时"}）`,
+          ),
+        );
+      if (recall?.filters?.source_id)
+        body.append(el("p", `素材限定：${sourceName(recall.filters.source_id)}`));
+      if (meta.person_coverage_missing?.length)
+        body.append(
+          el(
+            "p",
+            `人物覆盖缺失：${meta.person_coverage_missing.map(sourceName).join("、")}，出镜筛选可能遗漏。`,
+            "warn-text",
+          ),
+        );
+      if (recall?.media_id) {
+        const host = el("div", "", "query-preview-host");
+        body.append(host);
+        inputUrl(recall.media_id).then((url) => {
+          if (!url || !host.isConnected) return;
+          host.replaceChildren(queryPreviewNode(url, recall.media_kind || "image"));
+        });
+      }
       renderCandidatePicker(body, sid);
     } else if (stage === "tts") {
       body.append(
@@ -1262,6 +1532,25 @@ function renderCandidatePicker(body, sid) {
       img.alt = c.source_name || shortId(c.source_id);
       img.loading = "lazy";
       card.append(img);
+    }
+    // 人物出镜证据（最多 3 条）：点击跳人物库分镜审核。
+    for (const evidence of (c.person_evidence || []).slice(0, 3)) {
+      const chip = el(
+        "a",
+        `${evidence.actor_name || "未知演员"}${evidence.role_name ? ` / ${evidence.role_name}` : ""}`,
+        "evidence-chip",
+      );
+      chip.href = `/persons?evidence=${evidence.id}`;
+      chip.target = "_blank";
+      chip.rel = "noopener";
+      if (evidence.image_url) {
+        const shot = el("img");
+        shot.src = evidence.image_url;
+        shot.alt = "人物出镜证据";
+        shot.loading = "lazy";
+        chip.prepend(shot);
+      }
+      card.append(chip);
     }
     card.append(el("p", `${c.rank || ""} · ${c.source_name || shortId(c.source_id)} · ${secs(c.start)}–${secs(c.end)}`),
       button("预览", () => play(c.media_url, "召回候选")));

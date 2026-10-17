@@ -19,13 +19,15 @@ from .config import (
     Config,
     EmbeddingConfig,
     GeneratorConfig,
+    PersonConfig,
     SearchConfig,
     SpeakerConfig,
 )
 from .storage import Store
 
-ROLES = ("analyzer", "generator", "embedding", "asr", "tts")
+ROLES = ("analyzer", "generator", "embedding", "asr", "tts", "person")
 ROLE_LABELS = {
+    "person": "人物识别",
     "analyzer": "多模态理解",
     "generator": "文本拆分镜",
     "embedding": "多模态嵌入",
@@ -35,6 +37,7 @@ ROLE_LABELS = {
 
 # 各角色允许 profile 覆盖的字段；未列字段永远承袭 yaml 原值。
 PROFILE_FIELDS = {
+    "person": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "expected_space", "fps", "face_threshold", "face_margin", "min_face_quality", "body_threshold"},
     "analyzer": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "llama_template"},
     "generator": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "llama_template", "max_tokens"},
     "embedding": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "quantization", "dimensions"},
@@ -52,6 +55,7 @@ PROFILE_FIELDS = {
     },
 }
 SECTION_TYPES = {
+    "person": PersonConfig,
     "analyzer": AnalyzerConfig,
     "generator": GeneratorConfig,
     "embedding": EmbeddingConfig,
@@ -448,7 +452,7 @@ def apply_overrides(config: Config, store: Store) -> Config:
             partial = json.loads(raw_search)
         except json.JSONDecodeError as exc:
             raise ValueError("override.search 不是有效 JSON") from exc
-        allowed = {"weights", "rrf_k", "candidates"}
+        allowed = {"weights", "channel_weights", "rrf_k", "candidates"}
         unknown = set(partial) - allowed
         if unknown:
             raise ValueError(f"检索调参不支持字段 {sorted(unknown)}；仅允许 {sorted(allowed)}")

@@ -124,9 +124,125 @@ class Library:
         missing_count = sum(
             not (self.store.root / s[field]).is_file() for s in missing for field in ("path", "thumbnail")
         )
+        from .config import fingerprint
+        from .dialogue import current_dialogue, relative_dialogue, subtitle_tracks
+        from .media import MediaError
+        from .search import channel_coverage
+
+        channel = self.store.one(
+            "SELECT * FROM channel_data WHERE source_id=? AND channel='dialogue'", (identifier,)
+        )
+        dialogue = json.loads(channel["data"]) if channel else {}
+        if not channel:
+            dialogue = current_dialogue(self.store, identifier) or {}
+            if not dialogue:
+                legacy = self.store.one(
+                    "SELECT data FROM transcripts WHERE source_id=? ORDER BY rowid DESC LIMIT 1",
+                    (identifier,),
+                )
+                dialogue = json.loads(legacy["data"]) if legacy else {}
+        if channel and channel["status"] == "processing":
+            from math import ceil
+
+            checkpoints = self.store.root / "dialogue" / identifier / channel["profile"]
+            dialogue["completed_chunks"] = sum(p.stem.isdigit() for p in checkpoints.glob("*.json"))
+            dialogue["total_chunks"] = ceil(json.loads(row["media"])["duration"] / 30)
+        tracks = dialogue.get("subtitle_tracks")
+        if tracks is None:
+            try:
+                tracks = subtitle_tracks(self.store.resolve_media(row["path"]))
+            except (MediaError, FileNotFoundError):
+                tracks = []
+        annotations = self.store.one(
+            "SELECT COUNT(DISTINCT a.segment_id) AS n FROM annotations a JOIN segments s ON s.id=a.segment_id WHERE s.source_id=?",
+            (identifier,),
+        )["n"]
+        channel_states = {
+            "visual": {
+                "status": "complete" if row["prepared"] and not missing_count else "partial",
+                "processed_segments": len(missing),
+            },
+            "dialogue": {
+                key: dialogue.get(key)
+                for key in (
+                    "status",
+                    "source",
+                    "selected_track",
+                    "fallback_reason",
+                    "error",
+                    "completed_chunks",
+                    "total_chunks",
+                    "content_version",
+                    "model_identity",
+                    "input_fingerprint",
+                )
+            },
+            "analysis": {
+                "status": "complete"
+                if annotations == len(missing) and annotations
+                else "partial"
+                if annotations
+                else "not_processed",
+                "processed_segments": annotations,
+            },
+        }
+        channel_states["dialogue"]["status"] = channel_states["dialogue"]["status"] or "not_processed"
+        ready_dialogue = current_dialogue(self.store, identifier)
+        channel_states["dialogue"]["content_segments"] = (
+            sum(
+                bool(relative_dialogue(ready_dialogue, segment["start"], segment["end"]))
+                for segment in self.store.segments(identifier, "moment")
+            )
+            if ready_dialogue
+            else 0
+        )
+        channel_states["visual"].update(
+            input_fingerprint=fingerprint([row["id"], row["layout_key"]]),
+            content_version=fingerprint([row["id"], row["layout_key"], sorted(s["path"] for s in missing)]),
+            model_identity={"processor": "ffmpeg", "layout_key": row["layout_key"]},
+        )
+        analysis_rows = self.store.rows(
+            "SELECT a.segment_id,a.profile,a.data FROM annotations a JOIN segments s ON s.id=a.segment_id "
+            "WHERE s.source_id=? ORDER BY a.rowid DESC",
+            (identifier,),
+        )
+        latest = {}
+        for record in analysis_rows:
+            latest.setdefault(record["segment_id"], record)
+        identities = {}
+        for record in latest.values():
+            value = json.loads(record["data"])
+            model = value.get("model_identity", {"profile": record["profile"]})
+            identities[fingerprint(model)] = model
+        channel_states["analysis"].update(
+            content_version=fingerprint(latest) if latest else None,
+            input_fingerprint=fingerprint(sorted({r["profile"] for r in latest.values()}))
+            if latest
+            else None,
+            model_identity=list(identities.values()) or None,
+        )
+        for name, stages in (("visual", ("detect", "prepare")), ("analysis", ("analyze",))):
+            marks = ",".join("?" for _ in stages)
+            run = self.store.one(
+                f"SELECT status,message FROM runs WHERE source_id=? AND stage IN ({marks}) ORDER BY id DESC LIMIT 1",
+                (identifier, *stages),
+            )
+            if run:
+                channel_states[name]["processing_status"] = run["status"]
+                channel_states[name]["error"] = run["message"] if run["status"] == "failed" else None
+        task = self.store.one(
+            "SELECT * FROM dialogue_tasks WHERE source_id=? ORDER BY created_at DESC,rowid DESC LIMIT 1",
+            (identifier,),
+        )
+        from .dialogue_tasks import task_public
+
         return {
             **source_public(row),
             "missing_artifacts": missing_count,
+            "channels": channel_states,
+            "published_channels": channel_coverage(self.store, source_id=identifier),
+            "subtitle_tracks": tracks,
+            "dialogue_task": task_public(task) if task else None,
             "runs": self.store.rows(
                 "SELECT * FROM runs WHERE source_id=? ORDER BY id DESC LIMIT 5", (identifier,)
             ),

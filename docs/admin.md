@@ -8,6 +8,8 @@
 - 查看镜头与精细片段：点击镜头查看其子片段，片段可返回并定位父镜头；显示时间顺序位置。
 - 播放、下载 MP4（`download=true` 时按显示名+时间命名）；缩略图。
 - 编辑显示名称、备注、收藏、隐藏；按可见性（visible/hidden/all）与收藏筛选。
+- 镜头与精细片段的操作依次为“详情、备注、收藏、隐藏”。详情独立显示 ASR、字幕轨道、LLM 和人物处理信息；人物小节列出已处理/未处理的原片区间、已接受/待确认/已驳回证据数及关联人物。覆盖分为未处理、部分处理、处理完成；有覆盖但未识别出人物仍属于处理完成。
+- 详情只读取已有数据及可缓存的字幕文本，无需在线模型或已发布索引，不启动 ASR、LLM 或人物推理。
 
 ## 整理语义
 
@@ -30,6 +32,7 @@
 | `PATCH /sources/{id}` | 修改整理字段 |
 | `GET /sources/{id}/segments?kind=shot\|moment&parent_id=&visibility=&favorite_only=&page=&page_size=` | 片段列表；`parent_id` 仅用于 shot→moment |
 | `GET /segments/{id}` | 片段详情：归属、时间位置、父子、隐藏继承 |
+| `GET /segments/{id}/details` | ASR、字幕轨道、LLM 与人物处理覆盖/证据统计，按当前片段时间范围裁切 |
 | `PATCH /segments/{id}` | 修改整理字段 |
 | `GET /segments/{id}/media[?download=true]` | 未嵌入片段的播放/下载，支持 Range/HEAD |
 | `GET /segments/{id}/thumbnail` | 缩略图 |

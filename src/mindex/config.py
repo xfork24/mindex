@@ -43,6 +43,21 @@ class EmbeddingConfig(Service):
     numerical_implementation: str = Field(default="llama-cpp-wemm-1", min_length=1)
 
 
+class PersonConfig(Service):
+    backend: Literal["mindex"] = "mindex"
+    base_url: str = "http://127.0.0.1:4050"
+    model: Literal["cheetah_l"] = "cheetah_l"
+    revision: str = "manifest-v2"
+    timeout: float = 600
+    model_root: str = "~/.insightface"
+    expected_space: dict | None = None
+    fps: float = Field(default=5, gt=0, le=5)
+    face_threshold: float = Field(default=0.55, gt=0, lt=1)
+    face_margin: float = Field(default=0.1, gt=0, lt=1)
+    min_face_quality: float = Field(default=0.6, ge=0, le=1)
+    body_threshold: float = Field(default=0.8, gt=0, lt=1)
+
+
 class AnalyzerConfig(Service):
     backend: Literal["openai", "llama_cpp"] = "openai"
     # llama-server 专有的 chat_template_kwargs 扩展只发给本地服务，线上厂商须关闭。
@@ -196,6 +211,9 @@ class VideoConfig(StrictModel):
 
 
 class SearchConfig(StrictModel):
+    channel_weights: dict[str, float] = Field(
+        default_factory=lambda: {"visual": 1, "dialogue": 1, "analysis": 1}
+    )
     lexical_exclude: list[Literal["description", "style", "dialogue"]] = Field(default_factory=list)
     candidates: int = Field(default=100, ge=1, le=1000)
     rrf_k: int = Field(default=60, ge=1)
@@ -214,6 +232,10 @@ class SearchConfig(StrictModel):
 
     @model_validator(mode="after")
     def valid_weights(self):
+        if set(self.channel_weights) != {"visual", "dialogue", "analysis"} or any(
+            value < 0 for value in self.channel_weights.values()
+        ):
+            raise ValueError("Provide non-negative channel weights for visual/dialogue/analysis")
         allowed = {"video", "description", "style", "dialogue", "lexical"}
         if set(self.weights) != allowed or any(v < 0 for v in self.weights.values()):
             raise ValueError("Provide non-negative weights for video/description/style/dialogue/lexical")
@@ -225,6 +247,7 @@ class Config(StrictModel):
     runtime_overrides: bool = True
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
     analyzer: AnalyzerConfig = Field(default_factory=AnalyzerConfig)
+    person: PersonConfig = Field(default_factory=PersonConfig)
     asr: ASRConfig = Field(default_factory=ASRConfig)
     studio: StudioConfig = Field(default_factory=StudioConfig)
     detector: DetectorConfig = Field(default_factory=DetectorConfig)
@@ -244,8 +267,6 @@ class Config(StrictModel):
                 "prompt": 1,
                 "model": self.analyzer.model_dump(exclude={"timeout", "api_key_env"}),
                 "deployment": self.analyzer_deployment,
-                "asr": self.asr.model_dump(exclude={"timeout", "api_key_env"}),
-                "asr_key": self.asr_key,
                 "layout": self.layout_key,
             }
         )

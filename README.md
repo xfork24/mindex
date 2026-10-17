@@ -20,7 +20,7 @@ uv run mindex serve
 
 ## 设置页：模型服务与调参
 
-打开 <http://127.0.0.1:8000/settings> 管理五个模型角色（多模态理解 / 文本拆分镜 / 多模态嵌入 / 语音识别 / 语音合成）的配置档案：内置智谱、DeepSeek、阿里百炼、腾讯、MiniMax 线上订阅预设与自建服务模板，支持测试连接、一键激活；音色库支持预定义音色录入与声音克隆（MiniMax 上传样本、阿里 URL 复刻）；检索五路召回权重与 RRF 调参保存即生效。详见 [docs/settings.md](docs/settings.md)。
+打开 <http://127.0.0.1:8000/settings> 管理五个模型角色（多模态理解 / 文本拆分镜 / 多模态嵌入 / 语音识别 / 语音合成）的配置档案：内置智谱、DeepSeek、阿里百炼、腾讯、MiniMax 线上订阅预设与自建服务模板，支持测试连接、一键激活；音色库支持预定义音色录入与声音克隆（MiniMax 上传样本、阿里 URL 复刻）；新版三渠道权重、旧版五路权重与 RRF 调参保存即生效。详见 [docs/settings.md](docs/settings.md)。
 
 ## 素材后台管理
 
@@ -50,34 +50,31 @@ uv run mindex serve
 
 也可分开执行 `detect '/路径/电影.mkv'`、`split SOURCE_ID`，在扫描完成后先检查切点。检测计划先写入 `plans/`；切片或建索引中断后重跑对应命令，复用已有结果。`export` 输出 JSON/CSV 清单和可本地打开的分页视频检查页。
 
-`visual` 默认只索引 `moment`，不会把尚未分析的占位说明嵌入或添加虚构标签；文字直接匹配 WeMM 视频向量，页面标记该模式。需要镜头索引可加 `--kind shot`，两种都要则重复指定 `--kind moment --kind shot`。`--source` 建立只包含该电影的独立索引，发布后活动库只显示这份索引；省略它会包含所有已完成切片的来源。
+`visual` 默认只索引 `moment`，不会把尚未分析的占位说明嵌入或添加虚构标签；文字直接匹配 WeMM 视频向量，页面标记该模式。需要镜头索引可加 `--kind shot`，两种都要则重复指定 `--kind moment --kind shot`。新版 `--source` 只更新该素材，同时保留活动索引中的其他素材和渠道。
 
-## 单 GPU 完整语义索引
+## 独立渠道与对白补充
 
-先按 [模型部署说明](docs/DEPLOYMENT.md) 部署服务。模型互斥执行时，**分阶段运行**，不要使用要求各服务均可访问的 `ingest` 快捷命令。
+画面、对白和 LLM 分析独立处理。默认 `index --mode auto` 使用已完成的渠道，不要求 ASR 或分析全部完成，不自动触发 LLM。对白优先完整文本字幕，无可用字幕时回退已启用的 ASR；MiniMax 直接使用服务的词级时间戳。
 
 ```bash
-# 1. 本地 CPU 分镜和切片，不需要大模型。
-# 如果选择 TransNetV2，先启动 detector 服务，并设置 detector.backend: transnet。
-uv run mindex prepare /绝对路径/素材1.mp4 /绝对路径/素材2.mp4
+# 先完成分镜、切片。
+uv run mindex prepare /绝对路径/素材.mp4
 
-# 2. 在 GPU 机器停止其他模型，启动 ASR 服务。
-uv run mindex transcribe
+# 先处理全部对白，不启动嵌入；可按分块断点续跑。
+uv run mindex enrich-dialogue --no-publish
 
-# 3. 停止 ASR 服务，启动已有 qwen3.8:27b。
-uv run mindex analyze
-
-# 4. 停止 Qwen，启动 WeMM 服务；建索引并发布。
-uv run mindex index --activate
+# 部署好 WeMM 后建库，复用兼容的旧视频向量，检查通过后发布。
+uv run mindex index --mode auto --activate
 uv run mindex check
-
-# 5. 保持 WeMM 常驻，启动网页。
 uv run mindex serve
+
+# WeMM 已常驻时，也可一条命令补充单个素材并自动发布。
+uv run mindex enrich-dialogue SOURCE_ID
 ```
 
-默认 `index --mode enriched` 建立包含描述、对白及场景的完整索引；省略 `--mode` 等效。阶段失败后重跑相同命令即可。素材内容哈希、片段 ID、分析配置和索引版本用于断点恢复。30 秒转写块、逐片段分析和逐表示索引均有检查点。`analyze --source ID` / `transcribe --source ID` 可只处理一个素材。完整模式下，无音轨视频仍须执行 `transcribe`，记录无音轨状态。
+素材管理页同样支持补充对白、字幕轨道选择、进度恢复与失败重试，并分别显示处理完成和已进入检索的覆盖。`--subtitle-stream` 使用 ffprobe 的全局轨道编号。字幕与 ASR 采用不同指纹；更换 ASR 配置不会使已提取字幕失效。
 
-若暂时不部署 ASR，可以显式设置 `asr.enabled: false`，再运行 `transcribe`。该索引会记录 `disabled`，没有对白召回；开启 ASR 后需重跑转写、分析和建索引。此模式不能用于宣称对白检索效果已经达标。
+`analyze` 保留为可选分析入口，允许没有对白；`index --mode enriched` 保留旧版完整索引兼容入口。新增对白不要求重新分析。新版增量建库保留活动版本其他素材和渠道，失败继续提供旧索引。完整行为、任务 API、降级检索与评测见 [三渠道改造说明](docs/recall-enhancement.md)。
 
 分镜默认是本地 `AdaptiveDetector`，逐帧检测、最短镜头 1 帧。它是可运行的启动配置，**不是 TransNetV2 已验证的替代品**。正式素材可选择 TransNetV2；两者都需要人工抽检。切分参数变化请使用新的 `data_dir`，保留原素材布局和旧索引。
 
@@ -87,7 +84,7 @@ uv run mindex serve
 - 默认片段：不超过 6 秒的镜头整体保留；长镜头采用 4 秒窗口、3 秒步长，并补齐结尾。
 - Qwen 分析有序采样帧和对白，组织最长 45 秒的连续场景。仅镜头与窗口自动切分；首版没有额外的动作起止定位模型。
 - 每个镜头、片段和场景均实际保存 H.264/AAC MP4 与缩略图。长镜头、场景在嵌入时继续拆成短窗口。
-- 文字查询分别召回画面、动作场景描述、情绪镜头描述、对白与 BM25，使用加权 RRF 排名。
+- 新版文字查询分别召回画面、对白和分析；对白与分析内部融合语义向量和 BM25，再按默认 1:1:1 加权 RRF 排名。旧版索引保留原排名配置。
 - 视频查询最长 30 秒、100MB，按窗口做画面检索，临时文件自动清理，查询视频不入库。
 - 在线查询只调用 WeMM，无 Qwen 实时描述或在线大模型重排。分数不是匹配概率。
 
@@ -143,6 +140,8 @@ FastAPI 文档：<http://127.0.0.1:8000/docs>。
 
 ## 测试与真实质量评测
 
+完整回归包含人物跟踪与原片采样，先安装人物和开发依赖：`uv sync --extra person --extra dev`。
+
 ```bash
 uv run pytest -q
 uv run ruff check src tests
@@ -178,3 +177,5 @@ convert.sh /path/to/bilibili缓存目录 -o
 ## macOS 模型身份迁移
 
 本次 v2 身份重构、部署兼容性门槛和回滚流程见 [macOS 迁移说明](docs/macos-model-migration.md)，实际执行证据见 [迁移记录](docs/REHASH_MIGRATION.md)。迁移命令使用 `--config config.macos-v2.yaml --no-runtime-overrides`；保留旧清单与索引，不自动改写旧向量身份。
+
+人物库、人物出镜检索与镜头详情见 [使用与部署说明](docs/persons.md)，实施计划见 [PERSON_RECO_PLAN.md](plans/PERSON_RECO_PLAN.md)。

@@ -2,7 +2,11 @@
 
 检索由 `search.py` 的 `SearchEngine` 实现。在线查询**只调用嵌入服务**（WeMM 文字/图片/视频向量），没有 Qwen 实时描述、没有在线大模型重排。**分数不是匹配概率**——它只是排名依据。
 
-## 文字查询：五路召回 + 加权 RRF
+## 新版文字查询
+
+format 2 使用画面、对白、分析三个渠道；对白和分析各自等权融合语义向量与 BM25，再按默认 1:1:1 加权 RRF。API 可指定 `channels`，关闭渠道同时排除其词法正文；嵌入不可用且有文本渠道时明确返回 BM25 降级结果。结果带命中文本、原片证据时间与两层排名。详见 [三渠道说明](recall-enhancement.md)。
+
+## 旧版文字查询：五路召回 + 加权 RRF
 
 `POST /api/search/text`（JSON：`text`、`granularity`、`limit`、`filters`）或 `mindex search`。流程：
 

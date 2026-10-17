@@ -68,6 +68,18 @@ class Store:
                   view TEXT NOT NULL, document TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS representations_version ON representations(index_id);
+                CREATE TABLE IF NOT EXISTS channel_data (
+                  source_id TEXT NOT NULL, channel TEXT NOT NULL, profile TEXT NOT NULL,
+                  status TEXT NOT NULL, data TEXT NOT NULL,
+                  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  PRIMARY KEY(source_id,channel)
+                );
+                CREATE TABLE IF NOT EXISTS dialogue_tasks (
+                  id TEXT PRIMARY KEY, source_id TEXT, status TEXT NOT NULL,
+                  config TEXT NOT NULL, options TEXT NOT NULL, progress TEXT NOT NULL DEFAULT '{}',
+                  error TEXT, result TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
                 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS model_profiles (
                   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -89,6 +101,13 @@ class Store:
                   started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, finished_at TEXT
                 );
             """)
+            from .persons import init_person_schema
+
+            init_person_schema(db)
+            columns = {row[1] for row in db.execute("PRAGMA table_info(representations)")}
+            if "cache_key" not in columns:
+                db.execute("ALTER TABLE representations ADD COLUMN cache_key TEXT")
+            db.execute("CREATE INDEX IF NOT EXISTS representations_cache ON representations(cache_key)")
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -171,7 +190,10 @@ class Store:
 
     def active_index(self) -> dict | None:
         row = self.one(
-            "SELECT i.* FROM index_versions i JOIN settings s ON s.value=i.id WHERE s.key='active'"
+            "SELECT i.*,r.id AS search_release_id,r.person_id AS person_version FROM index_versions i "
+            "JOIN settings s ON s.value=i.id AND s.key='active' "
+            "LEFT JOIN settings a ON a.key='active.release' "
+            "LEFT JOIN search_releases r ON r.id=a.value AND r.content_id=i.id"
         )
         if row:
             row["spec"] = json.loads(row["spec"])
@@ -195,6 +217,31 @@ class Store:
             if pending:
                 raise ValueError("Index has unfinished segments")
             db.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('active',?)", (index_id,))
+            release = db.execute(
+                "SELECT id FROM search_releases WHERE content_id=? ORDER BY rowid DESC LIMIT 1", (index_id,)
+            ).fetchone()
+            if release:
+                db.execute("INSERT OR REPLACE INTO settings VALUES('active.release',?)", (release['id'],))
+            else:
+                current = db.execute(
+                    "SELECT r.person_id FROM search_releases r JOIN settings s ON s.value=r.id WHERE s.key='active.release'"
+                ).fetchone()
+                from .config import fingerprint
+                person_id = current['person_id'] if current else None
+                release_id = fingerprint([index_id, person_id])
+                db.execute("INSERT OR IGNORE INTO search_releases(id,content_id,person_id) VALUES(?,?,?)",
+                           (release_id, index_id, person_id))
+                db.execute("INSERT OR REPLACE INTO settings VALUES('active.release',?)", (release_id,))
+
+    def activate_release(self, release_id: str):
+        with self.connect() as db:
+            row = db.execute("SELECT r.*,i.status FROM search_releases r JOIN index_versions i ON i.id=r.content_id WHERE r.id=?", (release_id,)).fetchone()
+            if not row or row['status'] != 'ready':
+                raise ValueError("检索组合不存在或内容索引未就绪")
+            if db.execute("SELECT 1 FROM index_members WHERE index_id=? AND complete=0", (row['content_id'],)).fetchone():
+                raise ValueError("内容索引有未完成片段")
+            db.execute("INSERT OR REPLACE INTO settings VALUES('active',?)", (row['content_id'],))
+            db.execute("INSERT OR REPLACE INTO settings VALUES('active.release',?)", (release_id,))
 
     def snapshots(self, index_id: str) -> list[dict]:
         rows = self.rows("SELECT snapshot FROM index_members WHERE index_id=? AND complete=1", (index_id,))

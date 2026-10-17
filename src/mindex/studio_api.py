@@ -9,26 +9,31 @@ from __future__ import annotations
 import copy
 import json
 import mimetypes
+import tempfile
 import threading
 import zipfile
 from contextlib import contextmanager
-from typing import Literal
+from pathlib import Path
+from typing import Annotated, Literal
 from urllib.parse import quote
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from filelock import FileLock, Timeout
 from pydantic import Field, model_validator
+from starlette.concurrency import run_in_threadpool
 
 from . import studio, studio_steps
 from . import studio_workspace as workspace
 from .adapters import MultimodalEmbedder, Speaker, Storyboarder
 from .config import Config, StrictModel, fingerprint
 from .curation import EntityNotFound, Library
+from .images import image_png
 from .runtime_settings import RuntimeConfig
 from .storage import Store
-from .studio_artifacts import safe_path
+from .studio_artifacts import digest, safe_path
 from .studio_logs import ExecutionLog, read_events
+from .uploads import save_upload
 
 
 class CreateJobBody(StrictModel):
@@ -42,6 +47,27 @@ class ShotBody(StrictModel):
     text: str = Field(min_length=1, max_length=200)
     query: str = Field(min_length=1, max_length=400)
     estimated_seconds: float = Field(gt=0, le=60)
+    recall: studio.ShotRecall | None = None  # 与 Shot 严格同步（StrictModel extra=forbid）
+
+
+def validate_recall_references(config, store: Store, job_id, shots):
+    """PATCH 级校验：人物必须已登记且非作品；查询文件必须已存在于 inputs/（执行前另有 digest 复验）。"""
+    from .persons import Persons
+
+    catalogue = Persons(store)
+    inputs = studio.job_dir(config, job_id) / "inputs"
+    for shot in shots:
+        recall = shot.recall
+        if not recall:
+            continue
+        for identifier in recall.person_ids:
+            entity = catalogue.entity(identifier)
+            if entity["kind"] == "work":
+                raise studio.StudioError("人物召回不能选择作品，请选择演员或角色")
+        if recall.mode in {"image", "video"} and not any(
+            path.is_file() and path.suffix != ".partial" for path in inputs.glob(recall.media_id + ".*")
+        ):
+            raise studio.StudioError("查询文件缺失，请先上传查询图片或视频")
 
 
 class StoryboardBody(StrictModel):
@@ -442,9 +468,77 @@ def studio_router(
                     studio.Shot(**{**s.model_dump(), "id": s.id or f"shot-{uuid4().hex[:10]}"})
                     for s in body.shots
                 ]
+                validate_recall_references(base, store, job_id, shots)
                 workspace.set_board(current(), job_id, w, p, shots)
             workspace.persist(base, job_id, w)
         return workspace.detail(current(), job_id, w)
+
+    @router.post("/jobs/{job_id}/plans/{plan_id}/query-media", status_code=201)
+    async def upload_query_media(
+        job_id: str,
+        plan_id: str,
+        file: Annotated[UploadFile, File()],
+        kind: Annotated[str, Form()],
+    ):
+        """分镜查询文件：内容寻址去重落盘 inputs/，校验与检索页上传一致。"""
+        from .media import probe
+
+        if kind not in {"image", "video"}:
+            raise HTTPException(422, "查询文件类型只支持 image 或 video")
+        config = current()
+        # Streaming must not hold a blocking threading.Lock on the event loop.
+        # Verify and commit together in a worker, under the normal mutation lock.
+        with tempfile.TemporaryDirectory(prefix="studio-upload-") as directory:
+            suffix = Path(file.filename or "").suffix.lower()
+            allowed = (
+                {".png", ".jpg", ".jpeg", ".webp"}
+                if kind == "image"
+                else {".mp4", ".mov", ".mkv", ".webm", ".avi"}
+            )
+            if suffix not in allowed:
+                suffix = ".png" if kind == "image" else ".mp4"
+            staged = Path(directory) / ("query" + suffix)
+            limit = (
+                (config.search.max_image_upload_mb if kind == "image" else config.search.max_upload_mb)
+                * 1024
+                * 1024
+            )
+            await save_upload(file, staged, limit)
+
+            def commit():
+                with mutation_lock():
+                    w = workspace.load(config, job_id)
+                    workspace.plan(w, plan_id)
+                    try:
+                        if kind == "image":
+                            image_png(staged, config.video.max_pixels)
+                        else:
+                            info = probe(staged)
+                            if info["duration"] > config.search.max_query_seconds + 0.05:
+                                raise ValueError(f"查询视频不能超过 {config.search.max_query_seconds:g} 秒")
+                    except HTTPException:
+                        raise
+                    except Exception as exc:
+                        raise HTTPException(422, f"查询文件无法解码：{exc}") from exc
+                    media_id = digest(staged)
+                    inputs = studio.job_dir(config, job_id) / "inputs"
+                    inputs.mkdir(parents=True, exist_ok=True)
+                    existing = next(
+                        (p for p in inputs.glob(media_id + ".*") if p.is_file() and p.suffix != ".partial"),
+                        None,
+                    )
+                    target = existing or inputs / f"{media_id}{suffix}"
+                    if not target.exists() or digest(target) != media_id:
+                        studio.save_bytes(target, staged.read_bytes())
+                    return {
+                        "media_id": media_id,
+                        "kind": kind,
+                        "bytes": target.stat().st_size,
+                        "name": file.filename,
+                        "preview_url": f"/api/studio/jobs/{job_id}/artifacts/inputs/{target.name}",
+                    }
+
+            return await run_in_threadpool(commit)
 
     @router.get("/jobs/{job_id}/versions")
     def get_versions(job_id: str, stage: str | None = None, shot_id: str | None = None):

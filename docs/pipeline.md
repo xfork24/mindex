@@ -1,8 +1,8 @@
 # 离线管线详解
 
-管线是一串**可独立重跑的阶段**：`prepare`（=detect+split，纯本地 CPU）→ `transcribe` → `align`（仅 llama_cpp / openai ASR 后端）→ `analyze` → `index --activate`。各阶段有检查点，失败后重跑同一命令即可恢复；`data/pipeline.lock` 文件锁（timeout=0）保证同一时刻只有一个管线进程。
+默认流程为 `prepare` → `enrich-dialogue --no-publish` → `index --mode auto --activate`。三个渠道独立，分析可选且不强制依赖对白。对白优先字幕，MiniMax 直接保存词级时间戳，旧纯文本 ASR 仍可手动 `align`。管线文件锁与网页后台任务共用。
 
-`ingest` 快捷命令把全部阶段连跑，**仅适用于各模型服务可同时访问的环境**——单 GPU 互斥场景禁用，改用分阶段命令。
+新版流程、指纹、缓存和任务接口见 [三渠道改造说明](recall-enhancement.md)。下方的完整分析与场景组织流程属于显式 `analyze` / `enriched` 兼容入口。
 
 ## 阶段总览
 
@@ -21,9 +21,9 @@
 
 - **`layout_key`** = `fingerprint(detector 配置 + video 切分配置)`。绑定 sources 与 segments。切分参数变化 → 新 `data_dir`（不是新 layout_key 原地覆盖）。
 - **`asr_key`** = `fingerprint(asr 配置 + 部署清单)`（部署清单仅 `llama_cpp` 后端附加）。绑定 transcripts 缓存目录与 SQLite 记录。
-- **`analysis_key`** = `fingerprint(分析配置 + analyzer 部署 + asr 配置 + asr_key + layout_key)`。绑定 annotations 与 scene_plans——换分析模型或转写配置都会产生新分析，不复用旧检查点。
+- **`analysis_key`** = `fingerprint(分析配置 + analyzer 部署 + layout_key)`。显式分析再按实际使用的对白内容版本细分检查点；无对白也可分析。
 
-`analysis_key` 依赖 `asr_key` 是刻意的：对白变了，给 Qwen 的输入就变了，描述必须重算。
+分析记录保存实际对白输入版本；更换 ASR 配置而没有改变已完成对白内容，不会强制重跑分析。
 
 ## detect：先保存计划，再谈编码
 
@@ -52,7 +52,7 @@
 - `mindex` 自定义 ASR 后端直接得到带时间戳对白，状态 `complete`。
 - `llama_cpp` 与 `openai` 后端（如百炼 qwen3-asr-flash，chat + `input_audio`）都走 `transcribe_raw`：只保存原始文本与原始响应到 `.../raw/<N>.json`，状态置 **`pending_alignment`**——原始文本不伪造成对白。
 - 无音轨记录 `no_audio`；显式 `asr.enabled: false` 记录 `disabled`（无对白召回，不能用于宣称对白检索达标）。
-- **完整模式下无音轨视频也必须执行 `transcribe`**，把状态记录下来，后续阶段才会放行。
+- 无音轨素材记录空内容状态；新版建库和可选分析不依赖转写阶段放行。
 
 ## align：独立 CPU 对齐（仅 llama_cpp / openai 路径）
 
@@ -85,7 +85,7 @@ uv run mindex align .venv-align/bin/python --source SOURCE_ID   # 只处理一�
 ## index：两种模式
 
 - `--mode visual`：不要求转写与分析，默认只索引 moment 的**原生视频向量**；未分析字段留空，不嵌入占位说明。可选 `--source` 与 `--kind shot/moment`（不支持 scene）。
-- `--mode enriched`（默认）：要求全部素材完成 transcribe+analyze；索引视频、动作场景描述、情绪镜头描述、对白四类表示（空文本不生成向量），可选粒度过滤。
+- `--mode enriched`（显式兼容模式）：要求全部素材完成 transcribe+analyze；索引视频、动作场景描述、情绪镜头描述、对白四类表示（空文本不生成向量），可选粒度过滤。
 
 长镜头与场景在嵌入时再拆成 ≤6 秒窗口。构建/检查/发布机制见 [index-versions.md](index-versions.md)。
 

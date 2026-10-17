@@ -594,10 +594,12 @@ def test_fixed_yaml_persists_through_cli_and_runtime_web(config, tmp_path, monke
     assert RuntimeConfig(config, store).current().embedding.model == "dynamic-model"
 
 
-def test_index_and_search_require_gate_even_without_inference(native, monkeypatch):
+def test_index_and_search_require_gate_even_without_inference(native, video_file):
     config = native["config"]
     space = LlamaEmbedder(config).identity()
-    monkeypatch.setattr("mindex.pipeline.Pipeline.visual_snapshots", lambda *_: [{"id": "test"}])
+    from mindex.pipeline import Pipeline
+
+    Pipeline(config).prepare(video_file)
     with pytest.raises(adapters.ModelError, match="兼容性门槛"):
         IndexBuilder(config).build(mode="visual")
     store = Store(config.data_dir)

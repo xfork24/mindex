@@ -76,6 +76,15 @@ def evaluate(
     active = store.index_version(index_id) if index_id else store.active_index()
     if not active:
         raise ValueError("请先发布待评测索引")
+    native = active["spec"].get("format", 1) >= 2
+    if native:
+        profiles = {
+            "video_only": {"visual": 1}, "dialogue_only": {"dialogue": 1},
+            "analysis_only": {"analysis": 1}, "video_asr": {"visual": 1, "dialogue": 1},
+            "fusion": config.search.channel_weights,
+            "no_dialogue": {**config.search.channel_weights, "dialogue": 0},
+            "no_analysis": {**config.search.channel_weights, "analysis": 0},
+        }
     snapshots = store.snapshots(active["id"])
     candidate_layout = sorted(
         [{key: row[key] for key in ("id", "source_id", "kind", "start", "end")} for row in snapshots],
@@ -86,6 +95,9 @@ def evaluate(
         "lexical",
         *(view for row in snapshots for view in row["views"]),
     }
+    if native:
+        available_views = {v for row in snapshots for v in row.get("indexed_views", [])}
+        available = {"visual" if v == "video" else v for v in available_views}
     curation = {
         table: store.rows(f"SELECT * FROM {table} ORDER BY 1")
         for table in ("source_curation", "segment_curation")
@@ -97,7 +109,10 @@ def evaluate(
             reports[name] = {"queries": 0, "status": "unavailable_views", "details": []}
             continue
         current = config.model_copy(deep=True)
-        current.search.weights = {key: weights.get(key, 0) for key in config.search.weights}
+        if native:
+            current.search.channel_weights = {key: weights.get(key, 0) for key in config.search.channel_weights}
+        else:
+            current.search.weights = {key: weights.get(key, 0) for key in config.search.weights}
         excluded = {
             "video_asr": ["description", "style"],
             "no_dialogue": ["dialogue"],
@@ -135,7 +150,7 @@ def evaluate(
             )
         scored = [r for r in rows if not r["diagnostic_no_answer"]]
         reports[name] = {
-            "weights": current.search.weights,
+            "weights": current.search.channel_weights if native else current.search.weights,
             "lexical_exclude": current.search.lexical_exclude,
             "queries": len(rows),
             "scored_queries": len(scored),

@@ -20,6 +20,7 @@ from pydantic import Field, model_validator
 
 from .config import Config, StrictModel, fingerprint
 from .curation import EntityNotFound
+from .types import Filters
 
 STEPS = ("split", "recall", "tts", "select", "render")
 SPLIT_VERSION = 3
@@ -65,11 +66,36 @@ def save_bytes(path: Path, payload: bytes):
 # ---------------------------------------------------------------- 数据模型
 
 
+class ShotRecall(StrictModel):
+    """分镜级召回设置：复用检索页四类召回能力（文字+人物 / 图片找视频 / 视频找相似）。"""
+
+    mode: Literal["text", "image", "video"] = "text"
+    person_ids: list[str] = Field(default_factory=list, max_length=30)
+    person_mode: Literal["auto", "onscreen", "mentioned"] = "auto"
+    person_relation: Literal["all", "any"] = "all"
+    filters: Filters = Field(default_factory=Filters)
+    media_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")  # 查询文件 sha256
+    media_kind: Literal["image", "video"] | None = None
+
+    @model_validator(mode="after")
+    def consistent(self):
+        if self.mode == "text":
+            if self.media_id is not None or self.media_kind is not None:
+                raise ValueError("文字召回不能携带查询文件")
+        else:
+            if not self.media_id or self.media_kind != self.mode:
+                raise ValueError("图片/视频召回必须携带对应类型的查询文件")
+            if self.person_ids or self.person_mode != "auto" or self.person_relation != "all":
+                raise ValueError("图片/视频召回不支持人物设置")
+        return self
+
+
 class Shot(StrictModel):
     id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$")
     text: str = Field(min_length=1, max_length=200)
     query: str = Field(min_length=1, max_length=400)
     estimated_seconds: float = Field(gt=0, le=60)
+    recall: ShotRecall | None = None  # 缺省 = 文字召回（旧 content 无此键）
 
 
 class Storyboard(StrictModel):

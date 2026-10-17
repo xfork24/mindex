@@ -256,7 +256,7 @@ def test_minimax_presets_use_cn_domain():
 
 
 def test_roles_cover_all_sections():
-    assert set(ROLES) == {"analyzer", "generator", "embedding", "asr", "tts"}
+    assert set(ROLES) == {"analyzer", "generator", "embedding", "asr", "tts", "person"}
 
 
 def test_voices_table_roundtrip(store):

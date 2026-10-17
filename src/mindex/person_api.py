@@ -1,0 +1,375 @@
+from __future__ import annotations
+
+import base64
+import json
+import tempfile
+from pathlib import Path
+from typing import Annotated
+
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
+from filelock import FileLock
+from pydantic import Field
+
+from .adapters import request
+from .config import StrictModel
+from .media import command
+from .person_processing import PersonOptions, PersonTasks
+from .persons import CastConfirm, CastEntry, Entity, Persons, ShotReview, checked_box
+from .storage import dumps
+
+
+class WorkAssignment(StrictModel):
+    work_id: str
+
+
+class ReferencePair(StrictModel):
+    actor_id: str
+    stage_id: str | None = None
+
+
+class SourceReference(ReferencePair):
+    source_id: str
+    timestamp: float = Field(ge=0)
+    bbox: list[float] | None = Field(default=None, min_length=4, max_length=4)
+
+
+class Publish(StrictModel):
+    content_id: str | None = None
+
+
+def parse_cast(config, draft):
+    """LLM proposes original-pixel coordinates only; never writes catalogue identities."""
+    service = config.analyzer
+    content = [
+        {
+            "type": "text",
+            "text": '拆分演员表截图。只输出 JSON {"entries":[{"image_id":"...","actor_name":"演员名",'
+            '"foreign_name":"外文名或空串","role_name":"角色名或空串",'
+            '"bbox":[x1,y1,x2,y2],"single_person":false}],"warnings":[]}。'
+            "bbox 必须是原图像素坐标，不可按固定列数假定布局。每个主要演员条目一行。"
+            "忽略导航小头像、同条目的重复头像、代表作影片与代表作中的角色。"
+            "不明确或多人合照 bbox=null 并写入 warnings。不猜测缺失角色名。"
+            "同一人物的不同时期（如老年叶淑柔）直接作为角色名输出：role_name=老年叶淑柔。"
+            "所有 single_person 必须 false，由用户审核照片。",
+        }
+    ]
+    for image in draft["images"]:
+        content.append(
+            {"type": "text", "text": f"image_id={image['id']}; 原图 {image['width']}×{image['height']}"}
+        )
+        content.append(
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64," + image["base64"]}}
+        )
+    extra = {"chat_template_kwargs": {"enable_thinking": False}} if service.llama_template else {}
+    data = request(
+        "POST",
+        service.base_url.rstrip("/") + "/chat/completions",
+        timeout=service.timeout,
+        headers=service.headers(),
+        json={
+            "model": service.model,
+            "messages": [{"role": "user", "content": content}],
+            "max_tokens": 8000,
+            **extra,
+        },
+    )
+    text = data["choices"][0]["message"]["content"].strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1].rsplit("```", 1)[0]
+    parsed = json.loads(text)
+    entries, warnings = [], [str(w) for w in parsed.get("warnings", [])]
+    images = {im["id"]: im for im in draft["images"]}
+    if not isinstance(parsed.get("entries"), list) or len(parsed["entries"]) > 200:
+        raise ValueError("演员表候选条目格式无效")
+    for raw in parsed["entries"]:
+        try:
+            entry = CastEntry.model_validate(raw)
+            if entry.image_id not in images:
+                raise ValueError("模型返回未知原图 ID")
+            image = images[entry.image_id]
+            if entry.bbox is not None:
+                checked_box(entry.bbox, image["width"], image["height"])
+            entry.single_person = False
+            entry.actor_id = entry.role_id = None
+            entries.append(entry.model_dump())
+        except ValueError as exc:
+            warnings.append("有条目需要手动录入：" + str(exc))
+    return {"entries": entries, "warnings": warnings}
+
+
+def person_router(runtime, store):
+    router = APIRouter(prefix="/api/persons", tags=["人物库"])
+    catalogue, tasks = Persons(store), PersonTasks(runtime, store)
+
+    @router.get("")
+    def listing():
+        sources = [{**s, "work_id": catalogue.work_for(s["id"])} for s in store.sources()]
+        return {
+            "entities": catalogue.entities(),
+            "references": catalogue.references(),
+            "sources": [{"id": s["id"], "name": s["name"], "work_id": s["work_id"]} for s in sources],
+            "coverage": [
+                {**r, "data": json.loads(r["data"])} for r in store.rows("SELECT * FROM person_coverage")
+            ],
+            "tasks": [
+                tasks.get(r["id"])
+                for r in store.rows("SELECT id FROM person_tasks ORDER BY rowid DESC LIMIT 30")
+            ],
+            "releases": store.rows("SELECT * FROM search_releases ORDER BY rowid DESC LIMIT 30"),
+        }
+
+    @router.post("/entities", status_code=201)
+    def create(value: Entity):
+        return catalogue.save(value)
+
+    @router.put("/entities/{identifier}")
+    def update(identifier: str, value: Entity):
+        return catalogue.save(value, identifier)
+
+    @router.put("/sources/{source_id}/work")
+    def assign(source_id: str, body: WorkAssignment):
+        with FileLock(str(store.root / "pipeline.lock"), timeout=0):
+            catalogue.assign_work(source_id, body.work_id)
+        return {"work_id": body.work_id}
+
+    @router.post("/references", status_code=201)
+    async def upload_reference(
+        file: Annotated[UploadFile, File()],
+        actor_id: Annotated[str, Form()],
+        stage_id: Annotated[str | None, Form()] = None,
+    ):
+        from .uploads import save_upload
+
+        with tempfile.TemporaryDirectory(dir=store.root) as directory:
+            path = Path(directory) / "image"
+            await save_upload(file, path, 20 * 1024 * 1024)
+            return catalogue.add_reference(actor_id, path.read_bytes(), stage_id or None)
+
+    @router.put("/references/{identifier}")
+    def reassign_reference(identifier: str, body: ReferencePair):
+        ref = catalogue.reference(identifier)
+        replacement = catalogue.add_reference(
+            body.actor_id, store.resolve_media(ref["path"]).read_bytes(), body.stage_id, ref["data"]
+        )
+        if replacement["id"] != identifier:
+            store.execute("DELETE FROM person_references WHERE id=?", (identifier,))
+        return replacement
+
+    @router.delete("/references/{identifier}")
+    def remove_reference(identifier: str):
+        catalogue.reference(identifier)
+        store.execute("DELETE FROM person_references WHERE id=?", (identifier,))
+        return {"removed": identifier}
+
+    def media(path):
+        try:
+            return FileResponse(store.resolve_media(path), media_type="image/png")
+        except FileNotFoundError as exc:
+            raise HTTPException(404, "图片缺失") from exc
+
+    @router.get("/references/{identifier}/image")
+    def reference_image(identifier: str):
+        return media(catalogue.reference(identifier)["path"])
+
+    @router.post("/references/from-source", status_code=201)
+    def from_source(body: SourceReference):
+        source = store.one("SELECT * FROM sources WHERE id=?", (body.source_id,))
+        if not source or body.timestamp >= json.loads(source["media"])["duration"]:
+            raise ValueError("素材或截图时间无效")
+        raw = command(
+            [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-ss",
+                str(body.timestamp),
+                "-i",
+                str(store.resolve_media(source["path"])),
+                "-frames:v",
+                "1",
+                "-f",
+                "image2pipe",
+                "-vcodec",
+                "png",
+                "-",
+            ]
+        )
+        if body.bbox:
+            import io
+
+            from PIL import Image
+
+            with Image.open(io.BytesIO(raw)) as image:
+                buffer = io.BytesIO()
+                image.crop(checked_box(body.bbox, *image.size)).save(buffer, format="PNG")
+                raw = buffer.getvalue()
+        return catalogue.add_reference(
+            body.actor_id,
+            raw,
+            body.stage_id,
+            {"source_id": body.source_id, "timestamp": body.timestamp, "bbox": body.bbox},
+        )
+
+    @router.post("/imports", status_code=201)
+    async def upload_import(files: Annotated[list[UploadFile], File()]):
+        from .uploads import save_upload
+
+        if not 1 <= len(files) <= 12:
+            raise ValueError("一次上传 1–12 张截图")
+        images = []
+        with tempfile.TemporaryDirectory(dir=store.root) as directory:
+            for i, upload in enumerate(files):
+                path = Path(directory) / str(i)
+                await save_upload(upload, path, 20 * 1024 * 1024)
+                images.append(path.read_bytes())
+        return catalogue.create_import(images)
+
+    @router.get("/imports/{identifier}")
+    def get_import(identifier: str):
+        return catalogue.get_import(identifier)
+
+    @router.post("/imports/{identifier}/parse")
+    def parse(identifier: str):
+        draft = catalogue.get_import(identifier)
+        if draft["status"] != "draft":
+            raise ValueError("只能解析尚未确认的草稿")
+        try:
+            input_draft = {
+                **draft,
+                "images": [
+                    {**im, "base64": base64.b64encode(store.resolve_media(im["path"]).read_bytes()).decode()}
+                    for im in draft["images"]
+                ],
+            }
+            parsed = parse_cast(runtime.current(), input_draft)
+        except Exception as exc:  # noqa: BLE001 — keep the manual workflow available on any parser failure
+            parsed = {
+                "entries": draft["entries"],
+                "warnings": ["自动解析失败，请手动框选和录入：" + str(exc)[:500]],
+            }
+        draft.update(parsed)
+        store.execute("UPDATE person_imports SET data=? WHERE id=?", (dumps(draft), identifier))
+        return catalogue.get_import(identifier)
+
+    @router.put("/imports/{identifier}")
+    def save_draft(identifier: str, body: CastConfirm):
+        draft = catalogue.get_import(identifier)
+        if draft["status"] != "draft":
+            raise ValueError("演员表已确认")
+        draft["entries"] = [e.model_dump() for e in body.entries]
+        draft["work_id"] = body.work_id
+        store.execute("UPDATE person_imports SET data=? WHERE id=?", (dumps(draft), identifier))
+        return catalogue.get_import(identifier)
+
+    @router.post("/imports/{identifier}/confirm")
+    def confirm(identifier: str, body: CastConfirm):
+        return catalogue.confirm_import(identifier, body)
+
+    @router.get("/imports/{identifier}/images/{image_id}")
+    def import_image(identifier: str, image_id: str):
+        image = next((im for im in catalogue.get_import(identifier)["images"] if im["id"] == image_id), None)
+        if not image:
+            raise HTTPException(404, "找不到原图")
+        return media(image["path"])
+
+    @router.post("/sources/{source_id}/process", status_code=202)
+    def process(source_id: str, options: PersonOptions):
+        return tasks.start(source_id, options)
+
+    @router.get("/tasks/{identifier}")
+    def get_task(identifier: str):
+        return tasks.get(identifier)
+
+    @router.post("/tasks/{identifier}/retry", status_code=202)
+    def retry(identifier: str):
+        return tasks.retry(identifier)
+
+    @router.delete("/tasks/{identifier}")
+    def delete_task(identifier: str):
+        return tasks.delete(identifier)
+
+    @router.get("/evidence")
+    def evidence(
+        source_id: str | None = None,
+        status: str | None = None,
+        offset: int = Query(default=0, ge=0),
+        limit: int = Query(default=200, ge=1, le=200),
+    ):
+        clauses, args = [], []
+        for key, value in [("source_id", source_id), ("status", status)]:
+            if value:
+                clauses.append(key + "=?")
+                args.append(value)
+        where = " WHERE " + " AND ".join(clauses) if clauses else ""
+        total = store.one("SELECT count(*) AS n FROM person_evidence" + where, args)["n"]
+        return {
+            "items": catalogue.evidence(source_id, status, limit=limit, offset=offset, public=True),
+            "total": total,
+            "offset": offset,
+            "limit": limit,
+        }
+
+    @router.get("/evidence/{identifier}")
+    def one_evidence(identifier: str):
+        row = store.one("SELECT * FROM person_evidence WHERE id=?", (identifier,))
+        if not row:
+            raise HTTPException(404, "找不到出镜证据")
+        row["data"] = {k: v for k, v in json.loads(row["data"]).items() if k not in {"body_feature", "space"}}
+        return {**row, "image_url": "/api/persons/evidence/" + identifier + "/image"}
+
+    @router.get("/evidence/{identifier}/image")
+    def evidence_image(identifier: str):
+        row = store.one("SELECT data FROM person_evidence WHERE id=?", (identifier,))
+        if row:
+            data = json.loads(row["data"])
+        else:
+            data = next(
+                (
+                    e["data"]
+                    for r in store.rows("SELECT data FROM person_versions")
+                    for e in json.loads(r["data"])["evidence"]
+                    if e["id"] == identifier
+                ),
+                {},
+            )
+        if not data.get("image_path"):
+            raise HTTPException(404, "证据截图缺失")
+        return media(data["image_path"])
+
+    @router.get("/review/shots")
+    def review_shots(
+        source_id: str | None = None,
+        status: str | None = None,
+        offset: int = Query(default=0, ge=0),
+        limit: int = Query(default=50, ge=1, le=200),
+    ):
+        return catalogue.review_shots(source_id, status, limit=limit, offset=offset)
+
+    @router.get("/review/shots/{shot_id}")
+    def one_review_shot(shot_id: str, source_id: str | None = None):
+        result = catalogue.review_shots(source_id, shot_id=shot_id, limit=1)
+        if not result["items"]:
+            raise HTTPException(404, "找不到人物出镜审核分镜")
+        return result["items"][0]
+
+    @router.post("/review/shot")
+    def review_shot(body: ShotReview):
+        return catalogue.shot_review(body)
+
+    @router.post("/publish")
+    def publish(body: Publish):
+        with FileLock(str(store.root / "pipeline.lock"), timeout=0):
+            return catalogue.publish(body.content_id)
+
+    @router.post("/releases/{identifier}/activate")
+    def activate_release(identifier: str):
+        row = store.one("SELECT * FROM search_releases WHERE id=?", (identifier,))
+        if not row:
+            raise ValueError("找不到检索发布记录")
+        with FileLock(str(store.root / "pipeline.lock"), timeout=0):
+            store.activate_release(identifier)
+        return row
+
+    return router

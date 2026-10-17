@@ -650,32 +650,39 @@ class OpenAIChatTranscriber:
 
 
 class MiniMaxTranscriber:
-    """MiniMax speech_to_text：multipart 表单上传，JSON 响应只含纯文本。
-
-    与 openai 协议 ASR 同样走「transcribe 保存原始文本 → align 补时间戳」流程。
-    官方文档明确静音音频可返回空文本，属合法响应而非错误，设置页测试连接依赖此行为。
-    """
+    """MiniMax word timestamps; raw() remains available for legacy manual alignment."""
 
     def __init__(self, config: Config):
         self.profile = config.asr
 
-    def raw(self, path: Path) -> dict:
+    def raw(self, path: Path, *, timestamps: bool = False) -> dict:
+        data = {"model": self.profile.model}
+        if timestamps:
+            data.update(response_format="verbose_json", timestamp_level="word")
         with path.open("rb") as handle:
             payload = request(
                 "POST",
                 self.profile.base_url.rstrip("/") + "/speech_to_text",
                 timeout=self.profile.timeout,
                 headers=self.profile.headers(),
-                data={"model": self.profile.model},
+                data=data,
                 files={"file": (path.name, handle, "audio/wav")},
             )
+        if timestamps:
+            # Persist the complete upstream response before parsing/validating it.
+            return {"raw_response": payload}
+        if payload.get("base_resp", {}).get("status_code", 0) != 0:
+            raise ModelError(f"MiniMax ASR 失败：{payload['base_resp']}")
         text = payload.get("text")
         if not isinstance(text, str):
             raise ModelError("MiniMax ASR 服务未返回有效文本；无法伪造成带时间戳对白")
-        return {"text": text.strip(), "language": "", "raw_response": payload}
+        return {"text": text.strip(), "language": payload.get("language", ""), "raw_response": payload}
 
     def transcribe(self, path: Path) -> list[Utterance]:
-        raise ModelError("minimax 协议 ASR 只返回纯文本；请先 transcribe 保存原文，再执行 align 补时间戳")
+        from .dialogue import parse_minimax_words
+
+        response = self.raw(path, timestamps=True)
+        return [Utterance.model_validate(word) for word in parse_minimax_words(response["raw_response"])]
 
 
 class AdaptiveShotDetector:

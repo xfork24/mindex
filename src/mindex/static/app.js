@@ -3,7 +3,9 @@ let mode = 'text';
 let busy = false;
 let previewUrl = null;
 let imagePreviewUrl = null;
-const routeNames = {video:'画面匹配', description:'动作与场景', style:'情绪与镜头', dialogue:'对白语义', lexical:'关键词'};
+let registeredPeople = [];
+const routeNames = {visual:'视频画面', analysis:'LLM 分析', video:'画面匹配', description:'动作与场景', style:'情绪与镜头', dialogue:'对白语义', lexical:'关键词',person:'人物出镜'};
+const personKinds = {actor:'演员', role:'角色', stage:'阶段'};
 
 function element(tag, text, className) {
   const node = document.createElement(tag);
@@ -34,6 +36,8 @@ function switchMode(next) {
     $(`${name}-tab`).setAttribute('aria-selected',String(name===mode));
     $(`${name}-input`).hidden=name!==mode;
   }
+  $('person-controls').hidden=mode!=='text';
+  $('person-hint').hidden=mode!=='text';
   if(mode!=='video') $('query-preview').pause();
   notice();
 }
@@ -79,12 +83,26 @@ function details(result) {
   target.append(element('h3',result.display_name || result.source_name));
   if(result.display_name) target.append(element('p',result.source_name));
   const video=element('video');video.src=result.media_url;video.controls=true;video.preload='metadata';
-  target.append(video,element('p',`${clock(result.start)} — ${clock(result.end)}`),element('p',result.annotation.description));
+  target.append(video,element('p',`${clock(result.start)} — ${clock(result.end)}`),element('p',result.annotation_status==='not_analyzed'?'尚未进行 LLM 分析':result.annotation.description));
   for (const [title,items] of [['动作',result.annotation.actions],['画面依据',result.annotation.visual_evidence],['对白推断',result.annotation.dialogue_inference],['不确定信息',result.annotation.uncertainty]]) {
     if (items.length) target.append(element('p',`${title}：${items.join('；')}`));
   }
   if (result.dialogue.length) target.append(element('pre',result.dialogue.map(u=>`${clock(result.start+u.start)} ${u.text}`).join('\n')));
   target.append(element('p',`排序分数 ${result.score.toFixed(5)} · ${result.matches.map(m=>`${routeNames[m.route]||m.route}第 ${m.rank} 位`).join('；')}`));
+  for (const match of result.matches || []) {
+    if (match.matched_text) target.append(element('p', `${routeNames[match.channel] || match.channel}：${match.matched_text}`));
+    for (const evidence of match.evidence || []) {
+      if (evidence.text) target.append(element('p', `${clock(evidence.start)} — ${clock(evidence.end)}：${evidence.text}`));
+    }
+  }
+  for(const evidence of result.person_evidence || []){
+    const section=element('section');
+    section.append(element('p',`${evidence.actor_name || '未知演员'}${evidence.role_name?' · '+evidence.role_name:''} · ${clock(evidence.start)} — ${clock(evidence.end)} · ${{face:'人脸匹配',track:'连续跟踪',manual:'人工确认'}[evidence.data.evidence_type] || evidence.data.evidence_type}`));
+    if(evidence.image_url){const img=element('img');img.src=evidence.image_url;img.alt='人物出镜证据';img.style.maxWidth='300px';img.loading='lazy';section.append(img);}
+    const locate=element('button','定位出镜时间');locate.onclick=()=>{video.currentTime=Math.max(0,evidence.start-result.start);};
+    const correct=element('a','核对 / 纠错 ↗');correct.href='/persons?evidence='+evidence.id;correct.target='_blank';correct.rel='noopener';
+    section.append(locate,correct);target.append(section);
+  }
   target.append(managementLink(result));
   $('detail-dialog').showModal();
 }
@@ -112,19 +130,24 @@ function render(data) {
     const body=element('div',undefined,'card-body');
     const title=element('div',undefined,'card-title');title.append(element('strong',result.source_name),element('span',`${(result.end-result.start).toFixed(1)}s`));
     const tags=element('div',undefined,'tags');
+    const channels = new Set((result.matches || []).map(match => match.channel || (match.route==='video'?'visual':null)).filter(Boolean));
+    for(const e of (result.person_evidence||[]).slice(0,3))tags.append(element('span',e.actor_name+(e.role_name?' / '+e.role_name:''),'tag'));
+    channels.forEach(channel => tags.append(element('span',routeNames[channel] || channel,'tag')));
     [...result.annotation.scene,...result.annotation.emotions,...result.annotation.shot_size].slice(0,5).forEach(tag=>tags.append(element('span',tag,'tag')));
     const actions=element('div',undefined,'card-actions');
     const detail=element('button','查看详情');detail.type='button';detail.onclick=()=>details(result);
     const context=element('a','播放上下文 ↗');context.href=result.context_url;context.target='_blank';context.rel='noopener';
     actions.append(detail,context,managementLink(result),element('span',`#${index+1} · ${result.score.toFixed(4)}`,'score'));
-    body.append(title,element('p',result.display_name || result.annotation.description,'card-description'),tags,actions);
+    const evidenceText = (result.matches || []).find(match => match.matched_text)?.matched_text;
+    const description = result.display_name || evidenceText || (result.annotation_status==='not_analyzed'?'尚未进行 LLM 分析':result.annotation.description);
+    body.append(title,element('p',description,'card-description'),tags,actions);
     card.append(video,body);$('results').append(card);
   });
 }
 $('search-form').onsubmit=async event=>{
   event.preventDefault();if(busy)return;
   const text=$('query').value.trim();const file=$(mode==='image'?'image-file':'video-file').files[0];
-  if (mode==='text'&&!text) {notice('请先描述想找的画面。','error');return;}
+  if (mode==='text'&&!text&&!$('person-select').selectedOptions.length) {notice('请先描述想找的画面。','error');return;}
   if (mode==='video'&&!file) {notice('请选择一段参考视频。','error');return;}
   if (mode==='image'&&!file) {notice('请选择一张参考图片。','error');return;}
   busy=true;$('search-button').disabled=true;$('search-button').textContent='正在查找…';
@@ -132,12 +155,16 @@ $('search-form').onsubmit=async event=>{
   try {
     let data;
     const common={granularity:$('granularity').value,limit:Number($('limit').value),filters:filters()};
-    if(mode==='text') data=await api('/api/search/text',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,...common})});
+    if(mode==='text') data=await api('/api/search/text',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,...common,person_ids:Array.from($('person-select').selectedOptions).map(o=>o.value),person_mode:$('person-mode').value,person_relation:$('person-relation').value})});
     else {
       const form=new FormData();form.append('file',file);form.append('granularity',common.granularity);form.append('limit',common.limit);form.append('filters',JSON.stringify(common.filters));
       data=await api(`/api/search/${mode}`,{method:'POST',body:form});
     }
-    render(data);notice();
+    render(data);
+    if(data.recognized_people?.length)$('person-hint').textContent='已识别：'+data.recognized_people.map(p=>`${personKinds[p.kind]||''} ${p.name}`.trim()).join('、')+' · '+(data.person_mode==='mentioned'?'对白提及':'要求出镜证据');
+    const warnings=[...(data.warnings||[])];
+    if(data.person_coverage_missing?.length)warnings.push(`${data.person_coverage_missing.length} 份素材的人物覆盖缺失；仅返回已发布的出镜证据。`);
+    notice(warnings.join('；'), warnings.length?'info':'');
   } catch(error) {notice(error.message,'error');}
   finally {busy=false;$('search-button').disabled=false;$('search-button').textContent='查找片段 ↗';}
 };
@@ -145,6 +172,11 @@ async function refresh() {
   $('refresh').disabled=true;
   try {
     const data=await api('/api/status?health=true');
+    const catalogue=await api('/api/persons');
+    const chosen=new Set(Array.from($('person-select').selectedOptions).map(o=>o.value));
+    registeredPeople=catalogue.entities.filter(e=>e.kind!=='work');
+    $('person-select').replaceChildren();
+    for(const p of registeredPeople){const option=element('option',`${p.name} · ${p.kind==='actor'?'演员':p.kind==='role'?'角色':'阶段'} · ${p.id.slice(0,8)}`);option.value=p.id;option.selected=chosen.has(p.id);$('person-select').append(option);}
     const current=$('source').value;$('source').replaceChildren(element('option','全部素材'));
     $('source').firstChild.value='';
     data.sources.forEach(source=>{const option=element('option',source.name);option.value=source.id;$('source').append(option);});$('source').value=current;
@@ -162,3 +194,9 @@ async function refresh() {
 }
 $('refresh').onclick=refresh;
 refresh();
+
+$('query').addEventListener('input',()=>{
+  const text=$('query').value;
+  const names=registeredPeople.filter(p=>[p.name,...p.aliases].some(name=>text.toLocaleLowerCase().includes(name.toLocaleLowerCase())));
+  $('person-hint').textContent=names.length?'姓名提示：'+names.map(p=>`${personKinds[p.kind]||p.kind} ${p.name} · ${p.id.slice(0,8)}`).join('、')+'；演员与角色是不同身份，同名请在列表中选定。':'登记姓名默认只检索有出镜证据的片段。';
+});

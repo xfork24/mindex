@@ -1,8 +1,7 @@
 'use strict';
 const $ = id => document.getElementById(id);
-const state = {data: null, tests: {}, expanded: loadExpanded()};
-
 const EXPANDED_KEY = 'mindex.settings.roles-expanded';
+const state = {data: null, tests: {}, expanded: loadExpanded()};
 function loadExpanded() {
   try { return new Set(JSON.parse(localStorage.getItem(EXPANDED_KEY) || '[]')); }
   catch { return new Set(); }
@@ -24,15 +23,17 @@ function syncSectionRows() {
 }
 let settingsRequest = 0;
 
-const ROLE_ORDER = ['analyzer', 'generator', 'embedding', 'asr', 'tts'];
+const ROLE_ORDER = ['analyzer', 'generator', 'embedding', 'asr', 'tts', 'person'];
 const ROLE_DESC = {
+  person: '独立人脸和人体特征服务；按已有分镜处理，已发布人物检索不依赖服务在线',
   analyzer: '视觉帧分析（动作、情绪、场景描述），需要多模态视觉模型',
   generator: '创作文案拆分镜，纯文本任务，可选高性价比文本模型',
   embedding: '文本 / 图片 / 视频统一向量空间；切换模型后需重建索引',
-  asr: '语音转文字；线上模型只出纯文本，时间戳由本地 CPU 对齐补齐',
+  asr: '语音转文字；MiniMax 直接使用服务词级时间戳，旧纯文本流程可手动对齐',
   tts: '创作配音；支持预定义音色与克隆音色',
 };
 const ROLE_BACKENDS = {
+  person: ['mindex'],
   analyzer: ['openai', 'llama_cpp'],
   generator: ['openai'],
   embedding: ['mindex', 'llama_cpp', 'tokenhub'],
@@ -40,6 +41,7 @@ const ROLE_BACKENDS = {
   tts: ['openai', 'minimax', 'dashscope'],
 };
 const ROLE_EXTRA = {
+  person: [{key:'expected_space',label:'固定模型身份（粘贴 health.space JSON）',type:'json'},{key:'fps',label:'每秒最多分析帧数（≤5）',type:'number',min:0.1},{key:'face_threshold',label:'人脸阈值',type:'number',min:0.01},{key:'face_margin',label:'不同人物分数差',type:'number',min:0.01}],
   embedding: [
     {key: 'dimensions', label: '向量维度', type: 'number', min: 1},
     {key: 'quantization', label: '量化标识', type: 'text', placeholder: '线上模型填 cloud'},
@@ -100,7 +102,7 @@ function renderIndexBanner(status) {
     banner.append(node('div', `当前嵌入身份与已激活索引一致（${status.active_index_id.slice(0, 10)}…），检索可用。`, 'index-banner-ok'));
   } else {
     const box = node('div', undefined, 'index-banner-error');
-    box.append(node('div', '当前嵌入身份与已激活索引不一致，文字/图片/视频检索将返回未就绪。'));
+    box.append(node('div', '当前嵌入服务未就绪或与活动索引不匹配；新版文字检索可使用已有词法索引降级，图片/视频检索需恢复对应模型。'));
     box.append(node('div', `已激活索引：${status.active_index_id}。请运行 mindex index --activate 用当前嵌入重建并发布新索引，或在切换前回到原模型配置。${status.error ? `（身份探测失败：${status.error}）` : ''}`));
     banner.append(box);
   }
@@ -211,12 +213,19 @@ function renderTuning(data) {
     wrap.append(input);
     grid.append(wrap);
   }
+  for (const [key, label] of Object.entries({visual:'视频画面', dialogue:'对白文本', analysis:'LLM 分析'})) {
+    const wrap = node('label'); wrap.append(node('span', label));
+    const input = node('input'); input.id = `channel-weight-${key}`;
+    input.type = 'number'; input.min = '0'; input.step = '0.1';
+    input.value = data.business.search.channel_weights[key];
+    wrap.append(input); grid.append(wrap);
+  }
   $('rrf-k').value = data.business.search.rrf_k;
   $('candidates').value = data.business.search.candidates;
   const summary = $('tuning-summary');
-  summary.textContent = `权重 ${['video', 'description', 'style', 'dialogue', 'lexical'].map(k => weights[k]).join('/')}`
+  summary.textContent = `三渠道 ${['visual', 'dialogue', 'analysis'].map(k => data.business.search.channel_weights[k]).join('/')} · 旧版 ${['video', 'description', 'style', 'dialogue', 'lexical'].map(k => weights[k]).join('/')}`
     + ` · RRF k=${data.business.search.rrf_k} · 候选 ${data.business.search.candidates}`;
-  summary.title = '顺序：画面 / 动作场景 / 情绪镜头 / 对白 / 词法 BM25';
+  summary.title = '新版：画面 / 对白 / 分析；旧版：画面 / 动作场景 / 情绪镜头 / 对白 / 词法 BM25';
 }
 
 // --- 音色库 ---
@@ -414,17 +423,19 @@ $('clone-form').onsubmit = async event => {
 
 async function loadSettings() {
   const request = ++settingsRequest;
-  const [data, catalog] = await Promise.all([
-    api('/api/settings'),
-    api('/api/settings/voices/catalog').catch(() => null),
-  ]);
+  const data = await api('/api/settings');
   if (request !== settingsRequest) return;
   state.data = data;
-  state.voiceCatalog = catalog;
   renderIndexBanner(data.embedding_status);
   renderRoles(data);
   renderTuning(data);
-  renderVoices(data, catalog);
+  renderVoices(data, state.voiceCatalog);
+  // An unavailable TTS catalog must not block model settings or recall tuning.
+  api('/api/settings/voices/catalog').then(catalog => {
+    if (request !== settingsRequest) return;
+    state.voiceCatalog = catalog;
+    renderVoices(data, catalog);
+  }).catch(() => {});
 }
 
 async function activateProfile(profileId) {
@@ -473,12 +484,13 @@ function fillExtraFields(role, values = {}) {
       });
     } else {
       input = node('input');
-      input.type = field.type;
+      input.type = field.type === 'json' ? 'text' : field.type;
       if (field.min !== undefined) input.min = field.min;
+      if (field.type === 'number') input.step = 'any';
       if (field.placeholder) input.placeholder = field.placeholder;
     }
     input.id = `pf-${field.key}`;
-    if (values[field.key] !== undefined && values[field.key] !== null) input.value = values[field.key];
+    if (values[field.key] !== undefined && values[field.key] !== null) input.value = field.type === 'json' ? JSON.stringify(values[field.key]) : values[field.key];
     label.append(input);
     wrap.append(label);
   });
@@ -652,6 +664,10 @@ $('profile-form').onsubmit = async event => {
     if (!input) return;
     const value = input.value.trim();
     if (value !== '') config[field.key] = field.type === 'number' ? Number(value) : value;
+    if (field.type === 'json') {
+      if (value === '') config[field.key] = null;
+      else { try { config[field.key] = JSON.parse(value); } catch { config[field.key] = value; } }
+    }
   });
   const apiKey = $('pf-api-key').value;
   $('pf-save').disabled = true;
@@ -690,10 +706,16 @@ $('search-tuning').onsubmit = async event => {
       if (!Number.isFinite(value) || value < 0) throw new Error(`${WEIGHT_LABELS[key]} 权重须为非负数字`);
       weights[key] = value;
     }
+    const channel_weights = {};
+    for (const key of ['visual', 'dialogue', 'analysis']) {
+      const value = Number($(`channel-weight-${key}`).value);
+      if (!Number.isFinite(value) || value < 0) throw new Error('渠道权重须为非负数字');
+      channel_weights[key] = value;
+    }
     await api('/api/settings/business', {
       method: 'PUT',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({search: {weights, rrf_k: Number($('rrf-k').value), candidates: Number($('candidates').value)}}),
+      body: JSON.stringify({search: {weights, channel_weights, rrf_k: Number($('rrf-k').value), candidates: Number($('candidates').value)}}),
     });
     notify('检索调参已保存，立即生效。');
     await loadSettings();

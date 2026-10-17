@@ -43,7 +43,7 @@ def client_for(config) -> TestClient:
 def test_get_settings_snapshot(config):
     data = client_for(config).get("/api/settings").json()
     roles = {role["role"]: role for role in data["roles"]}
-    assert set(roles) == {"analyzer", "generator", "embedding", "asr", "tts"}
+    assert set(roles) == {"analyzer", "generator", "embedding", "asr", "tts", "person"}
     assert roles["embedding"]["effective"]["backend"] == "mindex"
     assert roles["embedding"]["active_profile_id"] is None
     assert roles["analyzer"]["label"] == "多模态理解"
@@ -68,7 +68,12 @@ def test_profile_crud_activate_and_delete_guard(config):
     # PUT 不带 api_key 表示保留
     updated = client.put(
         f"/api/settings/profiles/{profile['id']}",
-        json={"role": "embedding", "provider": "tencent", "name": "腾讯TokenHub", "config": TOKENHUB["config"]},
+        json={
+            "role": "embedding",
+            "provider": "tencent",
+            "name": "腾讯TokenHub",
+            "config": TOKENHUB["config"],
+        },
     )
     assert updated.status_code == 200
     assert updated.json()["api_key"]["has_key"] is True
@@ -277,7 +282,9 @@ def test_studio_job_snapshots_active_generator(config):
         },
     ).json()
     client.post(f"/api/settings/profiles/{profile['id']}/activate")
-    created = client.post("/api/studio/jobs", json={"text": "夜色渐深，城市灯火依次亮起，镜头缓缓推近一扇亮着灯的窗。"})
+    created = client.post(
+        "/api/studio/jobs", json={"text": "夜色渐深，城市灯火依次亮起，镜头缓缓推近一扇亮着灯的窗。"}
+    )
     assert created.status_code == 201
     state = created.json()
     assert state["config_snapshot"]["generator_model"] == "deepseek-chat"
@@ -319,3 +326,25 @@ def test_profile_test_connection_uses_configured_max_tokens(config, monkeypatch)
     result = client.post(f"/api/settings/profiles/{profile['id']}/test").json()
     assert result["ok"] is True
     assert sent[0]["max_tokens"] == 1048576
+
+
+def test_channel_weights_share_runtime_with_cli_and_keep_legacy_weights(config):
+    from mindex.runtime_settings import apply_runtime_overrides
+
+    client = client_for(config)
+    weights = {"visual": 1, "dialogue": 2, "analysis": 0}
+    assert (
+        client.put("/api/settings/business", json={"search": {"channel_weights": weights}}).status_code == 200
+    )
+    current = apply_runtime_overrides(config)
+    assert current.search.channel_weights == weights
+    assert current.search.weights == config.search.weights
+    snapshot = client.get("/api/settings").json()["business"]["search"]
+    assert snapshot["channel_weights"] == weights
+    assert (
+        client.put(
+            "/api/settings/business",
+            json={"search": {"channel_weights": {"visual": -1, "dialogue": 1, "analysis": 1}}},
+        ).status_code
+        == 422
+    )

@@ -17,9 +17,11 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8,<10", "ruff>=0.11"]
+person = ["supervision>=0.27,<0.28", "av>=14,<17"]
 
 [project.scripts]
 mindex = "mindex.cli:app"
+mindex-person-server = "mindex.person_server:main"
 mindex-model-server = "mindex.model_server:main"
 
 [tool.hatch.build.targets.wheel]

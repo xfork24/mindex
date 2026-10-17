@@ -37,9 +37,32 @@ class Pipeline:
     ):
         self.config = config
         self.store = Store(config.data_dir)
-        self.detector = detector or make_detector(config)
-        self.analyzer = analyzer or make_analyzer(config)
-        self.transcriber = transcriber or make_transcriber(config)
+        self._detector = detector
+        self._analyzer = analyzer
+        self._transcriber = transcriber
+
+    @property
+    def detector(self):
+        if self._detector is None:
+            self._detector = make_detector(self.config)
+        return self._detector
+
+    @property
+    def analyzer(self):
+        if self._analyzer is None:
+            self._analyzer = make_analyzer(self.config)
+        return self._analyzer
+
+    @property
+    def transcriber(self):
+        if self._transcriber is None:
+            self._transcriber = make_transcriber(self.config)
+        return self._transcriber
+
+    def enrich_dialogue(self, source_id=None, **options):
+        from .dialogue import DialogueProcessor
+
+        return DialogueProcessor(self.config, transcriber=self._transcriber).process(source_id, **options)
 
     def lock(self):
         return FileLock(str(self.store.root / "pipeline.lock"), timeout=0)
@@ -256,8 +279,9 @@ class Pipeline:
         return sources
 
     def transcribe(self, source_id: str | None = None):
-        # llama_cpp、openai（chat+input_audio）与 minimax（speech_to_text）都只出纯文本，统一走 raw+align 流程。
-        if self.config.asr.backend in {"llama_cpp", "openai", "minimax"} and self.config.asr.enabled:
+        if self.config.asr.backend == "minimax" and self.config.asr.enabled:
+            return self.enrich_dialogue(source_id)
+        if self.config.asr.backend in {"llama_cpp", "openai"} and self.config.asr.enabled:
             return self.transcribe_raw(source_id)
         for source in self.selected_sources(source_id):
             if (
@@ -445,19 +469,36 @@ class Pipeline:
                 )
 
     def _dialogue(self, source_id: str, start: float, end: float) -> list[dict]:
+        from .dialogue import current_dialogue, relative_dialogue
+
+        current = current_dialogue(self.store, source_id)
+        if current is not None:
+            return relative_dialogue(current, start, end)
         transcript = self.store.json_value("transcripts", "source_id", source_id, self.config.asr_key)
         if transcript is None:
-            raise ValueError("请先执行 transcribe；无音轨素材也需记录该阶段完成")
+            return []
         if transcript["status"] not in {"complete", "disabled", "no_audio"}:
-            raise ValueError("对白尚未完成时间对齐，请先执行 align")
+            return []
         return [
             {"start": max(start, u["start"]) - start, "end": min(end, u["end"]) - start, "text": u["text"]}
             for u in transcript["utterances"]
             if u["start"] < end and u["end"] > start
         ]
 
+    def annotation_profile(self, source_id):
+        from .dialogue import current_dialogue
+
+        transcript = current_dialogue(self.store, source_id)
+        version = transcript.get("content_version") if transcript and transcript.get("utterances") else None
+        return fingerprint([self.config.analysis_key, version]) if version else self.config.analysis_key
+
     def _annotate(self, segment: dict):
-        profile = self.config.analysis_key
+        from .dialogue import current_dialogue
+
+        transcript = current_dialogue(self.store, segment["source_id"])
+        input_version = transcript.get("content_version") if transcript else None
+        base_profile = self.config.analysis_key
+        profile = self.annotation_profile(segment["source_id"])
         if self.store.json_value("annotations", "segment_id", segment["id"], profile) is not None:
             return
         same = self.store.one(
@@ -470,18 +511,28 @@ class Pipeline:
             return
         dialogue = self._dialogue(segment["source_id"], segment["start"], segment["end"])
         annotation = self.analyzer.analyze(self.store.resolve_media(segment["path"]), dialogue)
-        if self.config.analysis_key != profile:
-            raise ValueError("分析过程中模型或部署清单发生变化，拒绝保存描述")
+        if self.config.analysis_key != base_profile:
+            raise ValueError("分析过程中模型身份发生变化")
         self.store.put_json(
             "annotations",
             "segment_id",
             segment["id"],
             profile,
-            {"annotation": annotation.model_dump(), "dialogue": dialogue},
+            {
+                "annotation": annotation.model_dump(),
+                "dialogue": dialogue,
+                "dialogue_input_version": input_version,
+                "model_identity": self.config.analyzer.model_dump(),
+                "input_fingerprint": fingerprint(
+                    [segment["source_id"], segment["start"], segment["end"], profile]
+                ),
+                "content_version": fingerprint(annotation.model_dump()),
+            },
         )
 
     def analyze(self, source_id: str | None = None):
         for source in self.selected_sources(source_id):
+            profile = self.annotation_profile(source["id"])
             with self.store.run("analyze", source["id"]):
                 base = [s for s in self.store.segments(source["id"]) if s["kind"] != "scene"]
                 for segment in base:
@@ -493,9 +544,7 @@ class Pipeline:
                         segment["end"],
                     )
                     self._annotate(segment)
-                plan = self.store.json_value(
-                    "scene_plans", "source_id", source["id"], self.config.analysis_key
-                )
+                plan = self.store.json_value("scene_plans", "source_id", source["id"], profile)
                 if plan is None:
                     # Turn overlapping moments into contiguous units, while retaining
                     # their descriptions and original boundaries for semantic grouping.
@@ -504,7 +553,7 @@ class Pipeline:
                     for index, segment in enumerate(moments):
                         end = moments[index + 1]["start"] if index + 1 < len(moments) else segment["end"]
                         annotation = self.store.json_value(
-                            "annotations", "segment_id", segment["id"], self.config.analysis_key
+                            "annotations", "segment_id", segment["id"], profile
                         )
                         units.append(
                             {
@@ -527,35 +576,23 @@ class Pipeline:
                             batch = []
                         batch.append(unit)
                     plan.extend(grouped(batch))
-                    self.store.put_json(
-                        "scene_plans", "source_id", source["id"], self.config.analysis_key, plan
-                    )
+                    self.store.put_json("scene_plans", "source_id", source["id"], profile, plan)
                 for start, end in plan:
-                    scene = self._segment(
-                        source, "scene", start, end, self.config.analysis_key, None, "semantic_grouping"
-                    )
+                    scene = self._segment(source, "scene", start, end, profile, None, "semantic_grouping")
                     self._annotate(scene)
 
     def snapshots(self, source_id: str | None = None) -> list[dict]:
         result = []
         for source in self.selected_sources(source_id):
-            if (
-                self.store.json_value("scene_plans", "source_id", source["id"], self.config.analysis_key)
-                is None
-            ):
+            profile = self.annotation_profile(source["id"])
+            if self.store.json_value("scene_plans", "source_id", source["id"], profile) is None:
                 raise ValueError(f"{source['name']} 尚未完成当前配置的分析阶段")
             transcript = self.store.json_value("transcripts", "source_id", source["id"], self.config.asr_key)
-            scenes = [
-                s
-                for s in self.store.segments(source["id"], "scene")
-                if s["generation"] == self.config.analysis_key
-            ]
+            scenes = [s for s in self.store.segments(source["id"], "scene") if s["generation"] == profile]
             for segment in self.store.segments(source["id"]):
-                if segment["kind"] == "scene" and segment["generation"] != self.config.analysis_key:
+                if segment["kind"] == "scene" and segment["generation"] != profile:
                     continue
-                value = self.store.json_value(
-                    "annotations", "segment_id", segment["id"], self.config.analysis_key
-                )
+                value = self.store.json_value("annotations", "segment_id", segment["id"], profile)
                 if value is None:
                     raise ValueError(f"片段 {segment['id']} 尚未分析")
                 annotation = Annotation.model_validate(value["annotation"])
@@ -569,7 +606,7 @@ class Pipeline:
                         "source_duration": json.loads(source["media"])["duration"],
                         "annotation": annotation.model_dump(),
                         "dialogue": value["dialogue"],
-                        "transcript_status": transcript["status"],
+                        "transcript_status": transcript["status"] if transcript else "not_processed",
                         "scene_ids": scene_ids,
                         "views": annotation.views(dialogue),
                     }

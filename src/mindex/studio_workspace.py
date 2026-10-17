@@ -498,8 +498,13 @@ def settings(config, p, stage):
         }
     if stage == "recall":
         active = Store(config.data_dir).active_index()
+        # Text recall is implicitly affected by the active person release; cover it in the key.
+        from .persons import Persons
+
+        person_release = Persons(Store(config.data_dir)).published(active["id"])[0] if active else None
         return {
             "index_id": active["id"] if active else None,
+            "person_release": person_release["id"] if person_release else None,
             "limit": o["recall_limit"],
             "recall": {**config.studio.recall.model_dump(), "limit": o["recall_limit"]},
             "search": config.search.model_dump(),
@@ -540,6 +545,40 @@ def needs_recall(p, sid):
     return sid not in p["ranges"] or bool(p["ranges"][sid].get("anchor_ref"))
 
 
+def recall_signature(recall):
+    """规范化分镜召回设置；全默认返回 None，payload 与旧版逐字节一致以复用历史版本。"""
+    if not recall:
+        return None
+    value = studio.ShotRecall.model_validate(recall) if isinstance(recall, dict) else recall
+    filters = {k: v for k, v in value.filters.model_dump().items() if v not in (None, 0)}
+    signature = {
+        "mode": value.mode,
+        "person_ids": sorted(value.person_ids),
+        "person_mode": value.person_mode,
+        "person_relation": value.person_relation,
+        "filters": filters,
+    }
+    if value.media_id:
+        signature["media"] = {"id": value.media_id, "kind": value.media_kind}
+    if (
+        value.mode == "text"
+        and not value.person_ids
+        and value.person_mode == "auto"
+        and value.person_relation == "all"
+        and not filters
+    ):
+        return None
+    return signature
+
+
+def query_media(config, job_id, recall):
+    """按内容寻址定位查询文件并复验 sha256；防止 inputs 被清理或篡改后用错文件。"""
+    for path in sorted((root(config, job_id) / "inputs").glob(recall.media_id + ".*")):
+        if path.suffix != ".partial" and digest(path) == recall.media_id:
+            return path
+    raise studio.StudioError("查询文件缺失或已损坏，请重新上传")
+
+
 def specification(config, job_id, w, p, stage, sid=None):
     params = settings(config, p, stage)
     if stage == "split":
@@ -558,6 +597,9 @@ def specification(config, job_id, w, p, stage, sid=None):
         inputs = {"content": selected["content"]}
         if stage == "recall":
             payload = {"query": content["query"]}
+            recall = recall_signature(content.get("recall"))
+            if recall is not None:
+                payload["recall"] = recall
         elif stage == "tts":
             payload = {"text": content["text"]}
         elif stage == "select":
@@ -609,7 +651,7 @@ def conflicts(config, job_id, w, p, stage, sid, vid):
         messages.append("历史记录不完整，无法验证依赖与参数")
     if item["signature"] != expected["signature"]:
         if stage == "recall":
-            messages.append("查询或召回设置已变化")
+            messages.append("查询、召回方式或召回设置已变化")
         elif stage == "tts":
             old_content = w["versions"].get(item["inputs"].get("content"), {}).get("data", {})
             new_content = version(w, expected["inputs"]["content"])["data"]
@@ -1158,17 +1200,52 @@ def execute(config, job_id, w, p, stage, sid=None, *, speaker=None, storyboarder
             data, files = audio_info(target), {"audio": file_info(config, job_id, target)}
         elif stage == "recall":
             from .search import SearchEngine
-            from .types import TextSearch
+            from .types import Filters, TextSearch
 
             params = spec["parameters"]
             if not params["index_id"]:
                 raise studio.StudioError("尚未发布索引")
             content = version(w, p["shots"][sid]["content"])["data"]
-            result = SearchEngine(config, embedder, index_id=params["index_id"]).text(
-                TextSearch(
-                    text=content["query"], granularity=config.studio.recall.granularity, limit=params["limit"]
-                )
+            recall = (
+                studio.ShotRecall.model_validate(content["recall"]) if content.get("recall") else None
             )
+            engine = SearchEngine(
+                config, embedder, index_id=params["index_id"], release_id=params["person_release"]
+            )
+            mode = recall.mode if recall else "text"
+            meta = {}
+            if mode == "text":
+                result = engine.text(
+                    TextSearch(
+                        text=content["query"],
+                        granularity=config.studio.recall.granularity,
+                        limit=params["limit"],
+                        person_ids=recall.person_ids if recall else [],
+                        person_mode=recall.person_mode if recall else "auto",
+                        person_relation=recall.person_relation if recall else "all",
+                        filters=recall.filters if recall else Filters(),
+                    )
+                )
+                meta = {
+                    key: result[key]
+                    for key in (
+                        "person_mode",
+                        "person_ids",
+                        "recognized_people",
+                        "person_coverage_missing",
+                        "person_version",
+                        "score_type",
+                    )
+                    if key in result
+                }
+            else:
+                search = engine.image if mode == "image" else engine.video
+                result = search(
+                    query_media(config, job_id, recall),
+                    granularity=config.studio.recall.granularity,
+                    limit=params["limit"],
+                    filters=recall.filters,
+                )
             entries = [
                 {
                     **item,
@@ -1179,7 +1256,14 @@ def execute(config, job_id, w, p, stage, sid=None, *, speaker=None, storyboarder
                 }
                 for rank, item in enumerate(result["results"], 1)
             ]
-            data = {"query": content["query"], "results": entries, "elapsed_ms": result["elapsed_ms"]}
+            data = {
+                "query": content["query"],
+                "mode": mode,
+                "recall": recall.model_dump() if recall else None,
+                "meta": meta,
+                "results": entries,
+                "elapsed_ms": result["elapsed_ms"],
+            }
             target = directory / "candidates.json"
             studio.save(target, data)
             files = {"candidates": file_info(config, job_id, target)}

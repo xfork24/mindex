@@ -27,19 +27,29 @@ def admin_router(store: Store) -> APIRouter:
     def source(source_id: str):
         return library.source(source_id)
 
+    @router.api_route("/sources/{source_id}/media", methods=["GET", "HEAD"])
+    def source_media(source_id: str):
+        row = library.source_row(source_id)
+        try:
+            return FileResponse(store.resolve_media(row['path']))
+        except FileNotFoundError as exc:
+            raise HTTPException(404, "原片文件缺失") from exc
+
     @router.patch("/sources/{source_id}")
     def patch_source(source_id: str, value: CurationPatch):
         return library.patch("source", source_id, value)
 
     @router.delete("/sources/{source_id}")
     def delete_source(source_id: str):
-        from filelock import FileLock
+        from filelock import FileLock, Timeout
 
         from .purge import PurgeRefused, purge_source
 
         lock = FileLock(str(store.root / "pipeline.lock"), timeout=0)
-        if not lock.acquire(blocking=False):
-            raise HTTPException(409, "离线管线正在运行，请等待完成后再删除素材")
+        try:
+            lock.acquire(blocking=False)
+        except Timeout as exc:
+            raise HTTPException(409, "离线管线正在运行，请等待完成后再删除素材") from exc
         try:
             try:
                 return purge_source(store, source_id)
@@ -65,6 +75,11 @@ def admin_router(store: Store) -> APIRouter:
     @router.get("/segments/{segment_id}")
     def segment(segment_id: str):
         return segment_public(library.segment_row(segment_id))
+
+    @router.get("/segments/{segment_id}/details")
+    def details(segment_id: str):
+        from .segment_details import segment_details
+        return segment_details(store, segment_id)
 
     @router.patch("/segments/{segment_id}")
     def patch_segment(segment_id: str, value: CurationPatch):

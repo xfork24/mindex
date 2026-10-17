@@ -36,6 +36,10 @@ uv run mindex prepare '/路径/电影.mkv' /路径/素材2.mp4
 
 导出 `manifest.json`、`shots.csv`、`segments.csv`、`review.html`（浏览器直接打开的分页检查页，48 单元/页）。默认 `data/reports/SOURCE_ID/`。CSV 路径相对 `data_dir`；review.html 使用相对媒体路径，移动报告需保留相对布局。
 
+### `mindex enrich-dialogue [SOURCE] [--subtitle-stream INDEX] [--no-publish] [--workers 2]`
+
+字幕优先补充对白；省略 SOURCE 则批量处理。默认断点续跑并自动发布；`--no-publish` 仅生成对白数据。MiniMax 保存服务词级时间戳，不调用本地 ForcedAligner。默认不触发 LLM 分析。Web 与 CLI 共用生效配置和管线锁。详见 [三渠道改造说明](recall-enhancement.md)。
+
 ### `mindex transcribe [--source SOURCE_ID]`
 
 批量转写（30 秒块检查点）。省略 `--source` 处理全部素材。无音轨素材记录 `no_audio`；`asr.enabled: false` 记录 `disabled`。完成后可停止 ASR 服务。
@@ -54,24 +58,25 @@ uv run mindex align .venv-align/bin/python
 
 分析镜头和精细片段，组织连续场景；失败后可重跑，已完成片段的检查点复用。
 
-### `mindex index [--activate] [--mode visual|enriched] [--source SOURCE_ID] [--kind KIND...]`
+### `mindex index [--activate] [--mode auto|visual|enriched] [--channel CHANNEL...] [--source SOURCE_ID] [--kind KIND...]`
 
 建立或继续新索引，输出索引 ID。
 
 | 参数 | 默认 | 说明 |
 |---|---|---|
 | `--activate` | 关 | 全部检查通过后设为活动索引 |
-| `--mode` | `enriched` | `visual` 只索引画面向量（默认 moment），`enriched` 完整四类表示 |
-| `--source` | 全部 | 只选该素材，建立只含它的独立索引 |
-| `--kind` | visual→moment；enriched→全部 | 可重复指定 `shot`/`moment`/`scene`；visual 不支持 scene |
+| `--mode` | `auto` | `auto` 使用已完成渠道；`visual` 更新画面；`enriched` 保留旧版完整索引入口 |
+| `--source` | 全部 | 更新该素材；新版保留活动索引中的其他素材和渠道 |
+| `--channel` | 全部可用渠道 | 可重复指定 `visual` / `dialogue` / `analysis`；未选渠道保留 |
+| `--kind` | 新版沿用活动粒度，首次 moment；enriched→全部 | 可重复指定 `shot`/`moment`/`scene`；visual 不支持 scene |
 
 ### `mindex ingest VIDEOS... [--activate]`
 
-执行全部阶段（prepare→transcribe→analyze→index）。**仅适用于服务可同时访问的环境**，单 GPU 互斥场景禁用。
+执行默认阶段（prepare→enrich-dialogue→auto index），不触发 LLM 分析。**仅适用于服务可同时访问的环境**，单 GPU 互斥场景禁用。
 
 ## 检索与状态
 
-### `mindex search TEXT [--granularity moment|shot|scene] [--limit 20]`
+### `mindex search TEXT [--granularity moment|shot|scene] [--limit 20] [--channel CHANNEL...]`
 
 文字检索，输出 JSON 结果（limit 1–50）。机制见 [search.md](search.md)。
 

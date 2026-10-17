@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Mindex · 素材管理</title><link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/admin.css">
-  <script src="/admin.js?v=20261015-delete" defer></script>
+  <link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/admin.css?v=20261017-review">
+  <script src="/admin.js?v=20261017-review" defer></script>
 </head>
 <body class="admin">
-  <header><a class="brand" href="/">m<span>index</span><i></i></a><span class="header-note">素材管理</span><a class="quiet nav-link" href="/">视频检索 ↗</a><a class="quiet nav-link" href="/studio">创作 ↗</a><a class="quiet nav-link" href="/settings">设置 ↗</a><button class="quiet" id="reload">刷新素材</button></header>
+  <header><a class="brand" href="/">m<span>index</span><i></i></a><span class="header-note">素材管理</span><a class="quiet nav-link" href="/">视频检索 ↗</a><a class="quiet nav-link" href="/studio">创作 ↗</a><a class="quiet nav-link" href="/settings">设置 ↗</a><button class="quiet" id="reload">刷新素材</button><a class="quiet nav-link" href="/persons">人物库</a></header>
   <main class="admin-main">
     <section class="admin-intro"><span class="eyebrow">素材 / 镜头 / 精细片段</span><h1>把每个画面，放在手边。</h1><p>按名称找到素材，查看自动分镜，整理值得保留的片段。</p></section>
     <div id="admin-notice" class="notice" role="status" aria-live="polite"></div>
@@ -35,4 +35,5 @@
   <dialog id="edit-dialog" aria-labelledby="edit-title"><button id="edit-close" type="button" class="quiet close" aria-label="关闭编辑">✕</button><h2 id="edit-title">整理素材</h2><form id="edit-form"><label for="edit-name">显示名称</label><input id="edit-name" maxlength="200" placeholder="留空恢复默认名称"><label for="edit-notes">备注</label><textarea id="edit-notes" maxlength="4000" rows="5" placeholder="记录用途、亮点或待检查的问题"></textarea><p class="muted">名称与备注用于整理素材，不修改文件或已有向量。</p><p id="edit-error" role="alert"></p><button id="edit-save" class="submit" type="submit">保存修改</button></form></dialog>
   <dialog id="play-dialog" aria-labelledby="play-title"><button id="play-close" class="quiet close" aria-label="关闭播放">✕</button><h2 id="play-title"></h2><video id="play-video" controls preload="metadata"></video><p id="play-time"></p><a id="play-download" class="quiet nav-link">下载片段 ↧</a></dialog>
   <footer><span>Mindex / 素材管理</span><span>本地素材库 · 整理记录自动保存</span></footer>
+<dialog id="analysis-dialog" aria-labelledby="analysis-title"><button id="analysis-close" type="button" class="quiet close" aria-label="关闭镜头详情">✕</button><h2 id="analysis-title">镜头详情</h2><div id="analysis-content" aria-live="polite"></div></dialog>
 </body></html>

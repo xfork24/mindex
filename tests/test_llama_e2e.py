@@ -257,14 +257,13 @@ def test_experiment_freeze_gate_failure_and_resume(config, video_file, tmp_path,
         e2e.run_phase(config, directory, "smoke")
 
 
-def test_pending_alignment_blocks_annotation_and_lexical_ablation(config, video_file):
+def test_pending_alignment_is_optional_and_lexical_ablation(config, video_file):
     pipeline = Pipeline(config)
     source = pipeline.prepare(video_file)
     pipeline.store.put_json(
         "transcripts", "source_id", source, config.asr_key, {"status": "pending_alignment", "utterances": []}
     )
-    with pytest.raises(ValueError, match="时间对齐"):
-        pipeline._dialogue(source, 0, 1)
+    assert pipeline._dialogue(source, 0, 1) == []
     snapshots = [{"id": "x", "views": {"description": "室内", "dialogue": "香蕉", "style": "近景"}}]
     assert lexical_search("香蕉", snapshots, 10)
     assert not lexical_search("香蕉", snapshots, 10, exclude=["dialogue"])

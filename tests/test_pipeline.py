@@ -25,7 +25,7 @@ def processed(config, video_file):
         source_id = pipeline.prepare(video_file)
         pipeline.transcribe()
         pipeline.analyze()
-        version = IndexBuilder(config, embedder).build(activate=True)
+        version = IndexBuilder(config, embedder).build(mode="enriched", activate=True)
     return pipeline, embedder, analyzer, source_id, version
 
 
@@ -95,7 +95,7 @@ def test_resume_search_api_and_range_playback(processed, config, video_file):
     pipeline.analyze()
     assert analyzer.calls == calls
     embedding_calls = embedder.calls
-    assert IndexBuilder(config, embedder).build(activate=True) == version
+    assert IndexBuilder(config, embedder).build(mode="enriched", activate=True) == version
     assert embedder.calls == embedding_calls
     assert not check_index(store, version)
 
@@ -152,7 +152,7 @@ def test_version_isolation_reindex_and_rollback(processed, config):
     next_embedder = FixtureEmbedder(changed)
     with pytest.raises(ModelError, match="向量空间不同"):
         SearchEngine(changed, next_embedder).text(TextSearch(text="红色"))
-    new = IndexBuilder(changed, next_embedder).build(activate=False)
+    new = IndexBuilder(changed, next_embedder).build(mode="enriched", activate=False)
     assert new != old
     assert pipeline.store.active_index()["id"] == old
     assert VectorIndex(config.data_dir, old).ids() == original_ids
@@ -175,11 +175,11 @@ def test_interrupted_index_resumes_without_publishing_partial(processed, config)
             raise ModelError("temporary outage")
 
     with pytest.raises(ModelError, match="temporary outage"):
-        IndexBuilder(changed, FailingEmbedder(changed)).build(activate=True)
+        IndexBuilder(changed, FailingEmbedder(changed)).build(mode="enriched", activate=True)
     assert pipeline.store.active_index()["id"] == old
     building = pipeline.store.one("SELECT id FROM index_versions WHERE status='building'")["id"]
     assert check_index(pipeline.store, building)
-    recovered = IndexBuilder(changed, FixtureEmbedder(changed)).build(activate=True)
+    recovered = IndexBuilder(changed, FixtureEmbedder(changed)).build(mode="enriched", activate=True)
     assert recovered == building
     assert not check_index(pipeline.store, recovered)
 
@@ -200,7 +200,7 @@ def test_evaluation_isolates_qwen_from_asr_in_vectors_and_lexical(processed, con
         value["annotation"]["emotions"] = ["悲伤"]
         value["dialogue"] = [{"start": segment["start"], "end": segment["end"], "text": "再见"}]
         store.put_json("annotations", "segment_id", segment["id"], config.analysis_key, value)
-    version = IndexBuilder(config, embedder).build(kinds=("moment",), activate=False)
+    version = IndexBuilder(config, embedder).build(mode="enriched", kinds=("moment",), activate=False)
     monkeypatch.setattr("mindex.search.make_embedder", lambda config: embedder)
     queries = tmp_path / "labels.jsonl"
     queries.write_text(
@@ -371,7 +371,7 @@ def test_final_identity_drift_cannot_publish_completed_vectors(processed, config
             return spec
 
     with pytest.raises(ModelError, match="完成前模型空间"):
-        IndexBuilder(changed, FinalDrift(changed)).build(activate=True)
+        IndexBuilder(changed, FinalDrift(changed)).build(mode="enriched", activate=True)
     assert pipeline.store.active_index()["id"] == old
     building = pipeline.store.one("SELECT id,status FROM index_versions WHERE status='building'")
     assert building is not None

@@ -45,6 +45,10 @@ class VectorIndex:
             ],
         )
 
+    def vector(self, identifier: str) -> list[float] | None:
+        raw = self.collection.get(ids=[identifier], include=["embeddings"])
+        return raw["embeddings"][0].tolist() if raw["ids"] else None
+
     def delete(self, identifiers: list[str]) -> None:
         if identifiers:
             self.collection.delete(ids=identifiers)
@@ -90,9 +94,26 @@ class IndexBuilder:
     def __init__(self, config: Config, embedder: MultimodalEmbedder | None = None):
         self.config = config
         self.store = Store(config.data_dir)
-        self.embedder = embedder or make_embedder(config)
+        self._embedder = embedder
 
-    def build(
+    @property
+    def embedder(self):
+        if self._embedder is None:
+            self._embedder = make_embedder(self.config)
+        return self._embedder
+
+    def build(self, *, activate=False, mode="auto", source_id=None, kinds=None, channels=None):
+        if mode == "enriched":
+            if channels is not None:
+                raise ValueError("enriched 兼容模式不支持 channels，请使用 auto")
+            return self._legacy_build(activate=activate, mode=mode, source_id=source_id, kinds=kinds)
+        from .channel_index import build_channels
+
+        return build_channels(
+            self, activate=activate, mode=mode, source_id=source_id, kinds=kinds, channels=channels
+        )
+
+    def _legacy_build(
         self,
         *,
         activate: bool = False,
@@ -235,7 +256,19 @@ def check_index(store: Store, index_id: str) -> list[str]:
                 (index_id, member["segment_id"]),
             )
         }
-        if views != {"video", *snapshot["views"]}:
+        if "representation_ids" in snapshot:
+            manifest_ids = {fingerprint([index_id, rep]) for rep in snapshot["representation_ids"]}
+            stored_ids = {
+                r["id"]
+                for r in store.rows(
+                    "SELECT id FROM representations WHERE index_id=? AND segment_id=?",
+                    (index_id, member["segment_id"]),
+                )
+            }
+            if manifest_ids != stored_ids:
+                issues.append(f"片段表示清单不一致：{member['segment_id']}")
+        expected_views = set(snapshot.get("indexed_views", {"video", *snapshot["views"]}))
+        if not expected_views or views != expected_views:
             issues.append(f"片段表示缺失：{member['segment_id']}")
     if not members:
         issues.append("索引没有片段")

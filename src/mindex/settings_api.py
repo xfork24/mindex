@@ -68,6 +68,7 @@ class VoiceBody(StrictModel):
 
 
 class SearchTuning(StrictModel):
+    channel_weights: dict[str, float] | None = None
     weights: dict[str, float] | None = None
     rrf_k: int | None = Field(default=None, ge=1)
     candidates: int | None = Field(default=None, ge=1, le=1000)
@@ -93,6 +94,7 @@ def _effective(section, role: str) -> dict:
         "env_key_set": bool(os.environ.get(dump.get("api_key_env", ""), "")),
     }
     extras = {
+        "person": ("expected_space", "fps", "face_threshold", "face_margin", "min_face_quality", "body_threshold"),
         "embedding": ("dimensions", "quantization"),
         "asr": ("enabled",),
         "tts": ("voice", "response_format"),
@@ -134,6 +136,9 @@ def _silence_wav(path: Path, seconds: float = 0.5) -> None:
 
 def _probe(config: Config, role: str) -> dict:
     """对单个角色做一次最小真实调用，返回可呈现的探测结果。"""
+    if role == "person":
+        from .person_processing import PersonClient
+        return {"ready": True, "space": PersonClient(config).identity()}
     if role in {"analyzer", "generator"}:
         service = config.analyzer if role == "analyzer" else config.studio.generator
         extra = (
@@ -248,6 +253,7 @@ def settings_router(runtime: RuntimeConfig, store: Store) -> APIRouter:
             "business": {
                 "search": {
                     "weights": current.search.weights,
+                    "channel_weights": current.search.channel_weights,
                     "rrf_k": current.search.rrf_k,
                     "candidates": current.search.candidates,
                 },
@@ -336,6 +342,7 @@ def settings_router(runtime: RuntimeConfig, store: Store) -> APIRouter:
                     json.dumps(
                         {
                             "weights": merged.weights,
+                            "channel_weights": merged.channel_weights,
                             "rrf_k": merged.rrf_k,
                             "candidates": merged.candidates,
                         },

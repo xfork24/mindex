@@ -260,13 +260,13 @@ def test_pipeline_routes_openai_asr_to_raw_flow(config, monkeypatch):
     assert calls == ["src-1"]
 
 
-def test_pipeline_routes_minimax_asr_to_raw_flow(config, monkeypatch):
-    """minimax 与 openai 一样只出纯文本，必须走 transcribe_raw → align 流程。"""
+def test_pipeline_routes_minimax_asr_to_timestamp_flow(config, monkeypatch):
+    """MiniMax 使用服务词级时间戳，不进入本地对齐流程。"""
     from mindex.pipeline import Pipeline
 
     config.asr.backend = "minimax"
     calls = []
-    monkeypatch.setattr(Pipeline, "transcribe_raw", lambda self, source_id: calls.append(source_id))
+    monkeypatch.setattr(Pipeline, "enrich_dialogue", lambda self, source_id: calls.append(source_id))
     pipeline = Pipeline.__new__(Pipeline)
     pipeline.config = config
     pipeline.transcribe("src-1")

@@ -93,14 +93,18 @@ class Filters(BaseModel):
 
 
 class TextSearch(BaseModel):
-    text: str = Field(min_length=1, max_length=4000)
+    person_ids: list[str] = Field(default_factory=list, max_length=30)
+    person_mode: Literal["auto", "onscreen", "mentioned"] = "auto"
+    person_relation: Literal["all", "any"] = "all"
+    text: str = Field(default="", max_length=4000)
     granularity: Granularity = "moment"
     limit: int = Field(default=20, ge=1, le=50)
     filters: Filters = Field(default_factory=Filters)
+    channels: list[Literal["visual", "dialogue", "analysis"]] | None = Field(default=None, min_length=1)
 
     @model_validator(mode="after")
     def nonblank(self):
         self.text = self.text.strip()
-        if not self.text:
-            raise ValueError("请输入查询文字")
+        if not self.text and not self.person_ids:
+            raise ValueError("请输入查询文字或选择人物")
         return self
