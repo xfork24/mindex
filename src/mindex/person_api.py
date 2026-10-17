@@ -25,10 +25,11 @@ class WorkAssignment(StrictModel):
 
 class ReferencePair(StrictModel):
     actor_id: str
-    stage_id: str | None = None
+    entity: Entity | None = None
 
 
-class SourceReference(ReferencePair):
+class SourceReference(StrictModel):
+    actor_id: str
     source_id: str
     timestamp: float = Field(ge=0)
     bbox: list[float] | None = Field(default=None, min_length=4, max_length=4)
@@ -137,24 +138,17 @@ def person_router(runtime, store):
     async def upload_reference(
         file: Annotated[UploadFile, File()],
         actor_id: Annotated[str, Form()],
-        stage_id: Annotated[str | None, Form()] = None,
     ):
         from .uploads import save_upload
 
         with tempfile.TemporaryDirectory(dir=store.root) as directory:
             path = Path(directory) / "image"
             await save_upload(file, path, 20 * 1024 * 1024)
-            return catalogue.add_reference(actor_id, path.read_bytes(), stage_id or None)
+            return catalogue.add_reference(actor_id, path.read_bytes())
 
     @router.put("/references/{identifier}")
     def reassign_reference(identifier: str, body: ReferencePair):
-        ref = catalogue.reference(identifier)
-        replacement = catalogue.add_reference(
-            body.actor_id, store.resolve_media(ref["path"]).read_bytes(), body.stage_id, ref["data"]
-        )
-        if replacement["id"] != identifier:
-            store.execute("DELETE FROM person_references WHERE id=?", (identifier,))
-        return replacement
+        return catalogue.update_reference(identifier, body.actor_id, body.entity)
 
     @router.delete("/references/{identifier}")
     def remove_reference(identifier: str):
@@ -208,7 +202,6 @@ def person_router(runtime, store):
         return catalogue.add_reference(
             body.actor_id,
             raw,
-            body.stage_id,
             {"source_id": body.source_id, "timestamp": body.timestamp, "bbox": body.bbox},
         )
 
@@ -317,7 +310,10 @@ def person_router(runtime, store):
         if not row:
             raise HTTPException(404, "找不到出镜证据")
         row["data"] = {k: v for k, v in json.loads(row["data"]).items() if k not in {"body_feature", "space"}}
-        return {**row, "image_url": "/api/persons/evidence/" + identifier + "/image"}
+        return {
+            **{k: v for k, v in row.items() if k != "stage_id"},
+            "image_url": "/api/persons/evidence/" + identifier + "/image",
+        }
 
     @router.get("/evidence/{identifier}/image")
     def evidence_image(identifier: str):

@@ -1,7 +1,7 @@
 'use strict';
 const $=id=>document.getElementById(id);
-const state={entities:[],references:[],sources:[],editing:null,draft:null,entry:0,image:null,review:null,evidenceOffset:0};
-const labels={actor:'演员',work:'作品',role:'角色',stage:'阶段'};
+const state={entities:[],references:[],sources:[],editing:null,editReference:null,draft:null,entry:0,image:null,review:null,evidenceOffset:0};
+const labels={actor:'演员',work:'作品',role:'角色'};
 function node(tag,text,cls){const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;}
 function notice(text,error=false){$('notice').textContent=text;$('notice').className=`notice ${error?'error':'info'}`;}
 async function api(url,opts={}){const r=await fetch(url,opts);const d=await r.json();if(!r.ok)throw Error(typeof d.detail==='string'?d.detail:JSON.stringify(d.detail||d));return d;}
@@ -12,22 +12,65 @@ function options(select,items,empty=true){const value=select.value;select.replac
 function entities(kind){return state.entities.filter(e=>e.kind===kind);}
 function name(id){return state.entities.find(e=>e.id===id)?.name||'未指定';}
 function selected(id){return Array.from($(id).selectedOptions).map(o=>o.value).filter(Boolean);}
-function entityFields(){const k=$('entity-kind').value;$('work-field').hidden=k!=='role';$('role-field').hidden=k!=='stage';$('actors-field').hidden=!['role','stage'].includes(k);document.querySelectorAll('.stage-field').forEach(n=>n.hidden=k!=='stage');}
+function entityFields(){const kind=$('entity-kind').value;$('work-field').hidden=kind!=='role';$('actors-field').hidden=kind!=='role';$('entity-files-field').hidden=kind!=='actor';}
 $('entity-kind').onchange=entityFields;
-function resetEntity(){state.editing=null;$('entity-form').reset();$('entity-save').textContent='新建';entityFields();}
-$('entity-reset').onclick=resetEntity;
-function editEntity(e){state.editing=e.id;$('entity-kind').value=e.kind;$('entity-name').value=e.name;$('entity-aliases').value=e.aliases.join('，');for(const o of $('entity-work').options)o.selected=(e.work_ids||[]).includes(o.value);$('entity-role').value=e.role_id||'';for(const o of $('entity-actors').options)o.selected=e.actor_ids.includes(o.value);for(const f of ['age','styling','costume'])$(`entity-${f}`).value=e[f]||'';$('entity-save').textContent='保存修改';entityFields();$('entity-form').scrollIntoView({block:'center'});}
-$('entity-form').onsubmit=e=>{e.preventDefault();run(async()=>{const kind=$('entity-kind').value;const body={kind,name:$('entity-name').value,aliases:$('entity-aliases').value.split(/[,，]/).map(s=>s.trim()).filter(Boolean),actor_ids:selected('entity-actors'),work_ids:kind==='role'?selected('entity-work'):[],role_id:kind==='stage'?$('entity-role').value:null};for(const f of ['age','styling','costume'])body[f]=$(`entity-${f}`).value;await api('/api/persons/entities'+(state.editing?'/'+state.editing:''),json(state.editing?'PUT':'POST',body));resetEntity();await refresh();notice('已保存人物关系；重新发布后用于检索。');});};
-function fillSelectors(){for(const id of ['reference-actor','capture-actor','entity-actors'])options($(id),entities('actor'));for(const id of ['entity-work','import-work'])options($(id),entities('work'));for(const id of ['entity-role'])options($(id),entities('role'));for(const id of ['reference-stage','capture-stage'])options($(id),entities('stage'));for(const id of ['capture-source','process-source','review-source'])options($(id),state.sources);}
-async function refresh(){const data=await api('/api/persons');Object.assign(state,{entities:data.entities,references:data.references,sources:data.sources});fillSelectors();$('entity-list').replaceChildren();for(const e of state.entities){const c=node('article',undefined,'person-card');c.append(node('h3',`${labels[e.kind]} · ${e.name}`),node('p',e.aliases.join(' / ')));if(e.kind==='role'&&e.work_ids?.length)c.append(node('p','作品：'+e.work_ids.map(name).join('、')));if(e.role_id)c.append(node('p','角色：'+name(e.role_id)));if(e.actor_ids.length)c.append(node('p','演员：'+e.actor_ids.map(name).join('、')));if(e.kind==='stage')c.append(node('p',[e.age,e.styling,e.costume].filter(Boolean).join(' · ')));c.append(button('修改',async()=>editEntity(e)));$('entity-list').append(c);}
-$('references').replaceChildren();for(const ref of data.references){const c=node('article',undefined,'person-card');const img=node('img');img.src=ref.url;img.alt=name(ref.actor_id)+' 参考图';const actor=node('select');actor.setAttribute('aria-label','配对演员');options(actor,entities('actor'),false);actor.value=ref.actor_id;const stage=node('select');stage.setAttribute('aria-label','配对阶段');options(stage,entities('stage'));stage.value=ref.stage_id||'';c.append(img,node('p',`${name(ref.actor_id)} · ${name(ref.stage_id)}`),actor,stage,button('修改配对',async()=>{await api('/api/persons/references/'+ref.id,json('PUT',{actor_id:actor.value,stage_id:stage.value||null}));await refresh();}),button('移除参考',async()=>{await api('/api/persons/references/'+ref.id,{method:'DELETE'});await refresh();}));$('references').append(c);}
+function fillEntity(e){$('entity-kind').value=e?.kind||'actor';$('entity-name').value=e?.name||'';$('entity-aliases').value=(e?.aliases||[]).join('，');for(const o of $('entity-work').options)o.selected=(e?.work_ids||[]).includes(o.value);for(const o of $('entity-actors').options)o.selected=(e?.actor_ids||[]).includes(o.value);entityFields();}
+function editEntity(e=null,reference=null){
+  state.editing=e?.id||null;state.editReference=reference?.id||null;
+  $('entity-form').reset();$('entity-error').textContent='';fillEntity(e);
+  $('entity-kind').disabled=!!e;$('pair-field').hidden=!reference;
+  options($('reference-actor'),entities('actor'),false);if(reference)$('reference-actor').value=reference.actor_id;
+  const photo=reference||state.references.find(r=>r.actor_id===e?.id);
+  $('entity-photo').hidden=!photo;if(photo)$('entity-photo').src=photo.url;else $('entity-photo').removeAttribute('src');
+  $('entity-title').textContent=e?'修改配对与人物信息':'新建人物或作品';$('entity-save').textContent=e?'保存修改':'新建';
+  $('entity-dialog').showModal();
+}
+$('entity-new').onclick=()=>editEntity();
+$('entity-reset').onclick=$('entity-close').onclick=()=>$('entity-dialog').close();
+$('reference-actor').onchange=()=>{const e=state.entities.find(e=>e.id===$('reference-actor').value);state.editing=e.id;fillEntity(e);};
+async function appendReferences(actorId,files){for(const file of files){const form=new FormData();form.append('file',file);form.append('actor_id',actorId);await api('/api/persons/references',{method:'POST',body:form});}}
+$('entity-form').onsubmit=async event=>{
+  event.preventDefault();$('entity-save').disabled=true;$('entity-error').textContent='';
+  try{
+    const kind=$('entity-kind').value,body={kind,name:$('entity-name').value,aliases:$('entity-aliases').value.split(/[,，]/).map(s=>s.trim()).filter(Boolean),actor_ids:kind==='role'?selected('entity-actors'):[],work_ids:kind==='role'?selected('entity-work'):[]};
+    let actorId=state.editing;
+    if(state.editReference){const reference=await api('/api/persons/references/'+state.editReference,json('PUT',{actor_id:actorId,entity:body}));actorId=reference.actor_id;}
+    else{const entity=await api('/api/persons/entities'+(state.editing?'/'+state.editing:''),json(state.editing?'PUT':'POST',body));actorId=entity.id;state.editing=entity.id;}
+    if(kind==='actor')await appendReferences(actorId,$('entity-files').files);
+    $('entity-dialog').close();await refresh();notice('人物信息与参考图已保存；重新发布后用于检索。');
+  }catch(error){$('entity-error').textContent=error.message;}finally{$('entity-save').disabled=false;}
+};
+function fillSelectors(){for(const id of ['capture-actor','entity-actors'])options($(id),entities('actor'));for(const id of ['entity-work','import-work'])options($(id),entities('work'));for(const id of ['capture-source','process-source','review-source'])options($(id),state.sources);}
+function renderCatalogue(){
+  $('entity-list').replaceChildren();
+  for(const e of state.entities){
+    const card=node('article',undefined,'person-card');card.append(node('h3',`${labels[e.kind]} · ${e.name}`),node('p',e.aliases.join(' / ')));
+    if(e.kind==='role'){card.append(node('p','作品：'+e.work_ids.map(name).join('、')),node('p','演员：'+e.actor_ids.map(name).join('、')));}
+    const refs=state.references.filter(r=>e.kind==='actor'?r.actor_id===e.id:e.kind==='role'&&e.actor_ids.includes(r.actor_id));
+    const photos=node('div',undefined,'person-photos');
+    for(const ref of refs){
+      const figure=node('figure'),img=node('img');img.src=ref.url;img.alt=name(ref.actor_id)+' 参考图';img.loading='lazy';figure.append(img);
+      if(e.kind==='actor')figure.append(button('修改配对',async()=>editEntity(e,ref)),button('移除参考',async()=>{await api('/api/persons/references/'+ref.id,{method:'DELETE'});await refresh();}));
+      else figure.append(node('figcaption',name(ref.actor_id)));
+      photos.append(figure);
+    }
+    if(refs.length)card.append(photos);else if(e.kind!=='work')card.append(node('p','暂无参考图','muted'));
+    if(e.kind!=='actor'||!refs.length)card.append(button('修改配对',async()=>editEntity(e)));
+    if(e.kind==='actor'){
+      const form=node('form',undefined,'reference-upload'),label=node('label','追加参考图（可多选）'),files=node('input');files.type='file';files.accept='image/*';files.multiple=true;files.required=true;label.append(files);
+      const submit=node('button','追加参考图');submit.type='submit';form.append(label,submit);
+      form.onsubmit=event=>{event.preventDefault();run(async()=>{submit.disabled=true;try{await appendReferences(e.id,files.files);await refresh();notice('照片已追加；再次处理可复用已有视频特征。');}finally{submit.disabled=false;}});};card.append(form);
+    }
+    $('entity-list').append(card);
+  }
+}
+async function refresh(){const data=await api('/api/persons');Object.assign(state,{entities:data.entities,references:data.references,sources:data.sources});fillSelectors();renderCatalogue();
 $('source-works').replaceChildren();for(const s of state.sources){const row=node('div',undefined,'source-work');const work=node('select');work.setAttribute('aria-label',s.name+' 所属作品');options(work,entities('work'),false);work.value=s.work_id;const coverage=data.coverage.filter(c=>c.source_id===s.id);const intervals=coverage.map(c=>`${c.data.start.toFixed(1)}–${c.data.end.toFixed(1)}`).slice(0,6);row.append(node('strong',s.name),work,button('关联作品',async()=>{await api(`/api/persons/sources/${s.id}/work`,json('PUT',{work_id:work.value}));await refresh();notice('作品关系已变更，请重新配对并发布人物证据。');}),node('span',coverage.length?`已处理 ${coverage.length} 个镜头区间：${intervals.join('、')}${coverage.length>6?'…':''}`:'人物覆盖缺失','coverage'));$('source-works').append(row);}
 $('tasks').replaceChildren();for(const task of data.tasks){const row=node('div',undefined,'person-card');row.append(node('p',`${state.sources.find(s=>s.id===task.source_id)?.name||task.source_id} ${task.id.slice(0,8)} · ${task.status} · ${task.progress.completed_shots||0}/${task.progress.total_shots||'?'}`));if(task.error)row.append(node('p',task.error));if(task.result)row.append(node('p',`耗时 ${task.result.elapsed_seconds}s · 自动接受 ${task.result.accepted} · 待确认 ${task.result.candidates} · 复用 ${task.result.reused_shots} 镜头`));if(task.result?.reference_errors?.length)row.append(node('p',task.result.reference_errors.map(e=>`${e.reference_id.slice(0,8)}：${e.error}`).join('；')));if(['failed','interrupted'].includes(task.status))row.append(button('重试',async()=>{await api('/api/persons/tasks/'+task.id+'/retry',{method:'POST'});await refresh();}),button('删除失败任务',async()=>{await api('/api/persons/tasks/'+task.id,{method:'DELETE'});await refresh();notice('任务记录已删除；镜头检查点和人物证据保留。');}));$('tasks').append(row);}
 $('releases').replaceChildren();for(const r of data.releases){const row=node('p',`${r.created_at} · 内容 ${r.content_id.slice(0,8)} · 人物 ${r.person_id?.slice(0,8)||'未发布'} `);row.append(button('恢复此组合',async()=>{await api(`/api/persons/releases/${r.id}/activate`,{method:'POST'});notice('已恢复检索组合。');}));$('releases').append(row);}entityFields();}
-$('reference-form').onsubmit=e=>{e.preventDefault();run(async()=>{for(const file of $('reference-files').files){const form=new FormData();form.append('file',file);form.append('actor_id',$('reference-actor').value);if($('reference-stage').value)form.append('stage_id',$('reference-stage').value);await api('/api/persons/references',{method:'POST',body:form});}await refresh();notice('照片已追加；再次处理可复用已有视频特征。');});};
 $('capture-preview').onclick=()=>run(async()=>{const v=$('capture-video'),timestamp=Number($('capture-time').value);if(!$('capture-source').value)throw Error('请先选择素材');v.hidden=false;v.src=`/api/admin/sources/${$('capture-source').value}/media`;v.onloadedmetadata=()=>v.currentTime=timestamp;});
 $('capture-video').ontimeupdate=()=>$('capture-time').value=$('capture-video').currentTime.toFixed(3);
-$('capture-form').onsubmit=e=>{e.preventDefault();run(async()=>{await api('/api/persons/references/from-source',json('POST',{source_id:$('capture-source').value,timestamp:Number($('capture-time').value),actor_id:$('capture-actor').value,stage_id:$('capture-stage').value||null}));await refresh();notice('参考截图已保存。');});};
+$('capture-form').onsubmit=e=>{e.preventDefault();run(async()=>{await api('/api/persons/references/from-source',json('POST',{source_id:$('capture-source').value,timestamp:Number($('capture-time').value),actor_id:$('capture-actor').value}));await refresh();notice('参考截图已保存。');});};
 for(const tab of document.querySelectorAll('[data-pane]'))tab.onclick=()=>{document.querySelectorAll('.pane').forEach(n=>n.hidden=n.id!==tab.dataset.pane);document.querySelectorAll('[data-pane]').forEach(n=>n.classList.toggle('active',n===tab));};
 $('process-form').onsubmit=e=>{e.preventDefault();run(async()=>{const task=await api(`/api/persons/sources/${$('process-source').value}/process`,json('POST',{start:Number($('process-start').value),end:$('process-end').value?Number($('process-end').value):null,publish:false}));notice('已启动人物任务：'+task.id);await refresh();});};
 $('publish').onclick=()=>run(async()=>{const r=await api('/api/persons/publish',json('POST',{}));await refresh();notice('已发布人物版本：'+r.person_version);});

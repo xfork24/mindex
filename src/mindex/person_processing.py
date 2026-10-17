@@ -174,7 +174,6 @@ def attribute_frames(
     shot,
     work_id,
     roles,
-    stages,
     tracker_factory=ShotTracker,
     body_samples=(),
     manual_anchors=None,
@@ -206,22 +205,22 @@ def attribute_frames(
             if ambiguous or not reliable:
                 anchors.pop(track, None)
             actor, score, accepted = face_match(observation, references, config)
-            kind, status, stage_id, role_id = "face", "candidate", None, None
+            kind, status, role_id = "face", "candidate", None
             identifier = fingerprint([shot["cache_id"], t, index])
             reviewed = manual_anchors.get(identifier)
             if reviewed:
-                actor, role_id, stage_id = reviewed["actor_id"], reviewed["role_id"], reviewed["stage_id"]
+                actor, role_id = reviewed["actor_id"], reviewed["role_id"]
                 kind, status = "manual", reviewed["status"]
                 anchors.pop(track, None)
             elif accepted:
                 status = "accepted"
                 if not ambiguous and observation.get("body_bbox") and observation.get("body_feature"):
-                    anchors[track] = (actor, None, None)
+                    anchors[track] = (actor, None)
             elif observation.get("face_feature") is not None:
                 # Conflicting/uncertain visible face always blocks identity inheritance.
                 anchors.pop(track, None)
             elif track in anchors and reliable and not ambiguous:
-                actor, role_id, stage_id = anchors[track]
+                actor, role_id = anchors[track]
                 score, kind, status = 1.0, "track", "accepted"
             else:
                 # Body samples never seed anchors. Cross-shot matches remain candidates.
@@ -235,9 +234,8 @@ def attribute_frames(
                 )
                 if scores and scores[0][0] >= config.body_threshold:
                     score, sample = scores[0]
-                    actor, stage_id, role_id, kind = (
+                    actor, role_id, kind = (
                         sample["actor_id"],
-                        sample["stage_id"],
                         sample["role_id"],
                         "body_candidate",
                     )
@@ -245,7 +243,7 @@ def attribute_frames(
                 # Keep unknown observations reviewable too.
                 kind = "unknown"
             if status == "accepted" and kind == "face":
-                # Face identity alone cannot distinguish multiple roles or appearance stages.
+                # Face identity alone cannot distinguish multiple roles.
                 possible = [r for r in roles if work_id in r.get("work_ids", []) and actor in r["actor_ids"]]
                 role_id = possible[0]["id"] if len(possible) == 1 else None
             if (
@@ -254,7 +252,7 @@ def attribute_frames(
                 and not ambiguous
                 and observation.get("body_bbox")
             ):
-                anchors[track] = (actor, role_id, stage_id)
+                anchors[track] = (actor, role_id)
             next_t = frames[fidx + 1]["timestamp"] if fidx + 1 < len(frames) else shot["end"]
             end = min(shot["end"], next_t, t + 1 / config.fps)
             if end <= t:
@@ -266,7 +264,6 @@ def attribute_frames(
                     "shot_id": shot["id"],
                     "actor_id": actor,
                     "role_id": role_id,
-                    "stage_id": stage_id,
                     "start": t,
                     "end": end,
                     "status": status,
@@ -344,8 +341,8 @@ class PersonProcessor:
                     {"reference_id": ref["id"], "error": "需要仅包含一个清晰人物的参考照片"}
                 )
                 continue
-            references.append({**detections[0], "actor_id": ref["actor_id"], "stage_id": ref["stage_id"]})
-        roles, stages = self.catalogue.entities("role"), self.catalogue.entities("stage")
+            references.append({**detections[0], "actor_id": ref["actor_id"]})
+        roles = self.catalogue.entities("role")
         report = {
             "source_id": source_id,
             "space": space,
@@ -356,7 +353,7 @@ class PersonProcessor:
             "candidates": 0,
             "reference_errors": reference_errors,
         }
-        # Only user-confirmed, stage-scoped appearances can suggest identities across shots.
+        # Only user-confirmed, role-scoped appearances can suggest identities across shots.
         body_samples = []
         for e in self.catalogue.evidence():
             d = e["data"]
@@ -365,7 +362,7 @@ class PersonProcessor:
                 and d.get("work_id") == work_id
                 and e["status"] == "accepted"
                 and d.get("reviewed")
-                and e["stage_id"]
+                and e["role_id"]
                 and d.get("body_feature")
             ):
                 body_samples.append(
@@ -374,7 +371,6 @@ class PersonProcessor:
                         "work_id": d["work_id"],
                         "actor_id": e["actor_id"],
                         "role_id": e["role_id"],
-                        "stage_id": e["stage_id"],
                     }
                 )
         for position, shot in enumerate(shots):
@@ -444,19 +440,16 @@ class PersonProcessor:
                 "SELECT * FROM person_evidence WHERE source_id=? AND shot_id=?", (source_id, shot["id"])
             ):
                 if json.loads(row["data"]).get("reviewed") and json.loads(row["data"]).get("cache_id") == key:
-                    manual_anchors[row["id"]] = {
-                        k: row[k] for k in ("actor_id", "role_id", "stage_id", "status")
-                    }
+                    manual_anchors[row["id"]] = {k: row[k] for k in ("actor_id", "role_id", "status")}
             match_key = fingerprint(
                 [
                     key,
                     references,
                     roles,
-                    stages,
                     body_samples,
                     manual_anchors,
                     self.config.person.model_dump(),
-                    "rules-v2",
+                    "rules-v3-no-person-stages",
                 ]
             )
             evidence = self.feature(match_key)
@@ -468,7 +461,6 @@ class PersonProcessor:
                     {**shot, "cache_id": key, "space": space},
                     work_id,
                     roles,
-                    stages,
                     self.tracker_factory,
                     body_samples,
                     manual_anchors,
@@ -504,7 +496,7 @@ class PersonProcessor:
                     if old and json.loads(old["data"]).get("reviewed"):
                         continue
                     db.execute(
-                        "INSERT OR REPLACE INTO person_evidence VALUES(?,?,?,?,?,?,?,?,?,?)",
+                        "INSERT OR REPLACE INTO person_evidence(id,source_id,shot_id,actor_id,role_id,start,end,status,data) VALUES(?,?,?,?,?,?,?,?,?)",
                         tuple(
                             e[k]
                             for k in (
@@ -513,7 +505,6 @@ class PersonProcessor:
                                 "shot_id",
                                 "actor_id",
                                 "role_id",
-                                "stage_id",
                                 "start",
                                 "end",
                                 "status",

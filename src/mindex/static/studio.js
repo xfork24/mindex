@@ -34,7 +34,7 @@ const state = {
   matrixScope: null,
   logViews: new Map(),
   finalUrl: null,
-  persons: null, // 懒加载的人物身份（演员/角色/阶段；作品不参与选择）
+  persons: null, // 懒加载的人物身份（演员/角色；作品不参与选择）
   sources: null, // 懒加载的素材列表
   inputs: null, // 查询文件 media_id → 产物条目索引
 };
@@ -192,7 +192,7 @@ async function loadRecallOptions() {
     api("/api/status"),
   ]);
   if (id !== state.id) return;
-  if (persons?.entities) state.persons = persons.entities.filter((e) => e.kind !== "work");
+  if (persons?.entities) state.persons = persons.entities.filter((e) => ["actor", "role"].includes(e.kind));
   if (status?.sources) state.sources = status.sources;
   for (const entry of state.matrixRows.values()) entry.panelKey = null;
   renderMatrix();
@@ -777,7 +777,7 @@ function renderRecallEditor(body, sid, draft) {
       for (const p of state.persons || []) {
         const o = el(
           "option",
-          `${p.name} · ${p.kind === "actor" ? "演员" : p.kind === "role" ? "角色" : "阶段"} · ${p.id.slice(0, 8)}`,
+          `${p.name} · ${p.kind === "actor" ? "演员" : "角色"} · ${p.id.slice(0, 8)}`,
         );
         o.value = p.id;
         o.selected = chosen.has(p.id);

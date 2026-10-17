@@ -5,7 +5,7 @@ let previewUrl = null;
 let imagePreviewUrl = null;
 let registeredPeople = [];
 const routeNames = {visual:'视频画面', analysis:'LLM 分析', video:'画面匹配', description:'动作与场景', style:'情绪与镜头', dialogue:'对白语义', lexical:'关键词',person:'人物出镜'};
-const personKinds = {actor:'演员', role:'角色', stage:'阶段'};
+const personKinds = {actor:'演员', role:'角色'};
 
 function element(tag, text, className) {
   const node = document.createElement(tag);
@@ -174,9 +174,9 @@ async function refresh() {
     const data=await api('/api/status?health=true');
     const catalogue=await api('/api/persons');
     const chosen=new Set(Array.from($('person-select').selectedOptions).map(o=>o.value));
-    registeredPeople=catalogue.entities.filter(e=>e.kind!=='work');
+    registeredPeople=catalogue.entities.filter(e=>['actor','role'].includes(e.kind));
     $('person-select').replaceChildren();
-    for(const p of registeredPeople){const option=element('option',`${p.name} · ${p.kind==='actor'?'演员':p.kind==='role'?'角色':'阶段'} · ${p.id.slice(0,8)}`);option.value=p.id;option.selected=chosen.has(p.id);$('person-select').append(option);}
+    for(const p of registeredPeople){const option=element('option',`${p.name} · ${p.kind==='actor'?'演员':'角色'} · ${p.id.slice(0,8)}`);option.value=p.id;option.selected=chosen.has(p.id);$('person-select').append(option);}
     const current=$('source').value;$('source').replaceChildren(element('option','全部素材'));
     $('source').firstChild.value='';
     data.sources.forEach(source=>{const option=element('option',source.name);option.value=source.id;$('source').append(option);});$('source').value=current;

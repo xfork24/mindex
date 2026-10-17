@@ -1,7 +1,7 @@
 """Person catalogue, reviewable evidence and immutable retrieval releases.
 
-Names never establish identity. Actor, work-scoped role and appearance stage have
-separate IDs; only accepted evidence is eligible for onscreen retrieval.
+Names never establish identity. Actors and work-scoped roles have separate IDs;
+only accepted evidence is eligible for onscreen retrieval.
 """
 
 from __future__ import annotations
@@ -46,20 +46,40 @@ CREATE TABLE IF NOT EXISTS search_releases(id TEXT PRIMARY KEY, content_id TEXT 
 
 def init_person_schema(db):
     db.executescript(SCHEMA)
+    # Keep the retired SQL columns for old databases/checkpoints only. They are
+    # never accepted as configuration or exposed as person identities again.
+    marker = "migration.person-roles-v2"
+    db.execute("BEGIN IMMEDIATE")
+    if db.execute("SELECT 1 FROM settings WHERE key=?", (marker,)).fetchone():
+        return
+    entries = {
+        r["id"]: {"id": r["id"], **json.loads(r["data"])} for r in db.execute("SELECT * FROM person_entities")
+    }
+    for identifier, entry in entries.items():
+        value = normalize_entity(entry, entries)
+        db.execute(
+            "UPDATE person_entities SET kind=?,data=? WHERE id=?",
+            (
+                value["kind"],
+                dumps({k: v for k, v in value.items() if k != "id"}),
+                identifier,
+            ),
+        )
+    db.execute(
+        "UPDATE person_evidence SET role_id=COALESCE(stage_id,role_id),stage_id=NULL WHERE stage_id IS NOT NULL"
+    )
+    db.execute("UPDATE person_references SET stage_id=NULL WHERE stage_id IS NOT NULL")
+    db.execute("INSERT INTO settings(key,value) VALUES(?, 'complete')", (marker,))
 
 
 class Entity(StrictModel):
     """演员与作品角色是不同身份：演员跨作品共用；角色可归属一部或多部作品（跨电影角色）。"""
 
-    kind: Literal["actor", "work", "role", "stage"]
+    kind: Literal["actor", "work", "role"]
     name: str = Field(min_length=1, max_length=200)
     aliases: list[str] = Field(default_factory=list, max_length=100)
     work_ids: list[str] = Field(default_factory=list, max_length=50)
-    role_id: str | None = None
     actor_ids: list[str] = Field(default_factory=list)
-    age: str = ""
-    styling: str = ""
-    costume: str = ""
 
     @model_validator(mode="after")
     def clean(self):
@@ -73,8 +93,6 @@ class Entity(StrictModel):
                 raise ValueError("角色至少归属一部作品；跨电影角色可关联多部作品")
         else:
             self.work_ids = []
-        if self.kind == "stage" and not self.role_id:
-            raise ValueError("阶段必须归属角色")
         return self
 
 
@@ -111,13 +129,12 @@ class Review(StrictModel):
 
     actor_id: str | None = None
     role_id: str | None = None
-    stage_id: str | None = None
     accept: bool = True
     reason: str = Field(min_length=1, max_length=1000)
 
 
 class ShotSelection(StrictModel):
-    """勾选一个出镜身份：演员 + 该作品中的可选角色；阶段不参与审核。"""
+    """勾选一个出镜身份：演员 + 该作品中的可选角色。"""
 
     actor_id: str
     role_id: str | None = None
@@ -145,8 +162,18 @@ def checked_box(box, width, height):
     return result
 
 
-def normalize_entity(entry):
-    """Read-side migration: older rows stored a single role work_id."""
+def normalize_entity(entry, lookup=None):
+    """Normalize legacy rows and immutable snapshots without dropping identities."""
+    entry = dict(entry)
+    if entry.get("kind") == "stage":
+        parent = (lookup or {}).get(entry.get("role_id"), {})
+        entry.update(
+            kind="role",
+            work_ids=parent.get("work_ids", [parent["work_id"]] if parent.get("work_id") else []),
+            actor_ids=entry.get("actor_ids") or parent.get("actor_ids", []),
+        )
+    for key in ("role_id", "age", "styling", "costume"):
+        entry.pop(key, None)
     if entry.get("kind") == "role" and "work_ids" not in entry:
         entry["work_ids"] = [entry["work_id"]] if entry.get("work_id") else []
         entry.pop("work_id", None)
@@ -176,10 +203,6 @@ class Persons:
         if value.kind == "role":
             for work in value.work_ids:
                 self.entity(work, "work")
-        if value.kind == "stage":
-            role = self.entity(value.role_id, "role")
-            if set(value.actor_ids) - set(role["actor_ids"]):
-                raise ValueError("阶段演员必须属于所属角色的演员表")
         for actor in value.actor_ids:
             self.entity(actor, "actor")
 
@@ -188,8 +211,6 @@ class Persons:
             old = self.entity(identifier)
             if old["kind"] != value.kind:
                 raise ValueError("不能变更实体类型")
-            if old.get("role_id") != value.role_id:
-                raise ValueError("阶段的所属角色不可迁移；请新建身份并重新配对")
             if value.kind == "role":
                 removed = set(old.get("work_ids", [])) - set(value.work_ids)
                 if removed:
@@ -212,9 +233,6 @@ class Persons:
                         (identifier, *sources),
                     ):
                         raise ValueError("该作品下仍有已接受的出镜证据；请先重新核对或删除")
-                for stage in self.entities("stage"):
-                    if stage["role_id"] == identifier and set(stage["actor_ids"]) - set(value.actor_ids):
-                        raise ValueError("请先修改角色阶段的演员关系")
         self.validate_entity(value)
         identifier = identifier or uid()
         self.store.execute(
@@ -265,18 +283,17 @@ class Persons:
         path.write_bytes(content)
         return {"path": relative, "digest": digest, "width": image.width, "height": image.height}
 
-    def add_reference(self, actor_id, raw, stage_id=None, provenance=None):
+    def add_reference(self, actor_id, raw, provenance=None):
         self.entity(actor_id, "actor")
-        if stage_id:
-            stage = self.entity(stage_id, "stage")
-            role = self.entity(stage["role_id"], "role")
-            if actor_id not in (stage["actor_ids"] or role["actor_ids"]):
-                raise ValueError("参考图演员不属于该角色阶段")
         item = self.image(raw)
-        identifier = fingerprint([actor_id, stage_id, item["digest"]])
+        existing = self.store.one(
+            "SELECT id FROM person_references WHERE actor_id=? AND digest=? ORDER BY rowid LIMIT 1",
+            (actor_id, item["digest"]),
+        )
+        identifier = existing["id"] if existing else fingerprint([actor_id, item["digest"]])
         self.store.execute(
             "INSERT OR IGNORE INTO person_references VALUES(?,?,?,?,?,?)",
-            (identifier, actor_id, stage_id, item["path"], item["digest"], dumps(provenance or {})),
+            (identifier, actor_id, None, item["path"], item["digest"], dumps(provenance or {})),
         )
         return self.reference(identifier)
 
@@ -285,7 +302,7 @@ class Persons:
         if not row:
             raise ValueError("找不到参考图")
         return {
-            **row,
+            **{k: v for k, v in row.items() if k != "stage_id"},
             "data": json.loads(row["data"]),
             "url": "/api/persons/references/" + identifier + "/image",
         }
@@ -295,6 +312,33 @@ class Persons:
             self.reference(r["id"])
             for r in self.store.rows("SELECT id FROM person_references ORDER BY rowid")
         ]
+
+    def update_reference(self, identifier, actor_id, entity=None):
+        """Save reference pairing and the selected actor's metadata atomically."""
+        reference = self.reference(identifier)
+        self.entity(actor_id, "actor")
+        if entity is not None:
+            if entity.kind != "actor":
+                raise ValueError("参考图必须配对演员")
+            self.validate_entity(entity)
+        with self.store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if not db.execute("SELECT 1 FROM person_references WHERE id=?", (identifier,)).fetchone():
+                raise ValueError("找不到参考图")
+            if entity is not None:
+                db.execute(
+                    "UPDATE person_entities SET data=? WHERE id=?", (entity.model_dump_json(), actor_id)
+                )
+            duplicate = db.execute(
+                "SELECT id FROM person_references WHERE actor_id=? AND digest=? AND id<>? LIMIT 1",
+                (actor_id, reference["digest"], identifier),
+            ).fetchone()
+            if duplicate:
+                db.execute("DELETE FROM person_references WHERE id=?", (identifier,))
+                identifier = duplicate["id"]
+            else:
+                db.execute("UPDATE person_references SET actor_id=? WHERE id=?", (actor_id, identifier))
+        return self.reference(identifier)
 
     def create_import(self, images):
         identifier = uid()
@@ -420,7 +464,6 @@ class Persons:
                     tx.add_reference(
                         actor_id,
                         crop,
-                        None,
                         {"import_id": identifier, "image_id": entry.image_id, "bbox": entry.bbox},
                     )
                     if crop
@@ -462,12 +505,6 @@ class Persons:
                     or actor_id not in role["actor_ids"]
                 ):
                     raise ValueError("演员与作品角色关系不符")
-            if body.stage_id:
-                stage = self.entity(body.stage_id, "stage")
-                if stage["role_id"] != body.role_id or (
-                    stage["actor_ids"] and actor_id not in stage["actor_ids"]
-                ):
-                    raise ValueError("阶段与演员角色关系不符")
         data = json.loads(row["data"]) | {
             "evidence_type": "manual",
             "confirmation": body.reason,
@@ -475,8 +512,8 @@ class Persons:
         }
         status = "accepted" if body.accept else "rejected"
         self.store.execute(
-            "UPDATE person_evidence SET actor_id=?,role_id=?,stage_id=?,status=?,data=? WHERE id=?",
-            (actor_id, body.role_id, body.stage_id, status, dumps(data), evidence_id),
+            "UPDATE person_evidence SET actor_id=?,role_id=?,status=?,data=? WHERE id=?",
+            (actor_id, body.role_id, status, dumps(data), evidence_id),
         )
         return {"id": evidence_id, "status": status}
 
@@ -607,7 +644,7 @@ class Persons:
                 args.append(value)
         return [
             {
-                **r,
+                **{k: v for k, v in r.items() if k != "stage_id"},
                 "data": {
                     k: v
                     for k, v in json.loads(r["data"]).items()
@@ -685,10 +722,15 @@ class Persons:
             if release and release["person_id"]
             else None
         )
-        return (release, json.loads(row["data"]) if row else {"entities": [], "evidence": [], "coverage": []})
+        value = json.loads(row["data"]) if row else {"entities": [], "evidence": [], "coverage": []}
+        lookup = {e["id"]: e for e in value["entities"]}
+        value["entities"] = [normalize_entity(e, lookup) for e in value["entities"]]
+        for evidence in value["evidence"]:
+            evidence["role_id"] = evidence.pop("stage_id", None) or evidence["role_id"]
+        return release, value
 
 
-KIND_LABELS = {"actor": "演员", "work": "作品", "role": "角色", "stage": "阶段"}
+KIND_LABELS = {"actor": "演员", "work": "作品", "role": "角色"}
 
 
 def _occurrences(name, text):
@@ -800,8 +842,7 @@ def overlaps_for(segment, evidence, identifiers, relation):
             e
             for e in evidence
             if any(
-                i in (e["actor_id"], e["role_id"], e["stage_id"])
-                for i in (group if isinstance(group, list) else [group])
+                i in (e["actor_id"], e["role_id"]) for i in (group if isinstance(group, list) else [group])
             )
             and e["source_id"] == segment["source_id"]
             and e["start"] < segment["end"]

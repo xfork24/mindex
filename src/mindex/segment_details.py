@@ -41,12 +41,11 @@ def person_section(store, segment):
     entities = {r["id"]: json.loads(r["data"]) for r in store.rows("SELECT id,data FROM person_entities")}
     people = {}
     for row in store.rows(
-        "SELECT status,actor_id,role_id,stage_id FROM person_evidence "
-        "WHERE source_id=? AND start<? AND end>?",
+        "SELECT status,actor_id,role_id FROM person_evidence WHERE source_id=? AND start<? AND end>?",
         (segment["source_id"], end, start),
     ):
         counts[row["status"]] += 1
-        for field in ("actor_id", "role_id", "stage_id"):
+        for field in ("actor_id", "role_id"):
             identifier = row[field]
             if identifier in entities:
                 entity = entities[identifier]

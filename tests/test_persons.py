@@ -44,25 +44,14 @@ def catalogue(config):
     return persons, work, actor
 
 
-def test_actor_work_role_stage_many_to_many_no_same_name_merge(catalogue):
+def test_actor_work_role_many_to_many_and_retired_identity_rejected(catalogue):
     p, work, a = catalogue
     other = p.save(Entity(kind="actor", name="演员甲"))
     role = p.save(Entity(kind="role", name="叶淑柔", work_ids=[work], actor_ids=[a["id"], other["id"]]))
-    stage = p.save(
-        Entity(
-            kind="stage",
-            name="老年叶淑柔",
-            role_id=role["id"],
-            actor_ids=[other["id"]],
-            age="老年",
-            costume="灰色外套",
-            styling="白发",
-        )
-    )
+    with pytest.raises(ValueError):
+        Entity(kind="stage", name="老年叶淑柔", role_id=role["id"])
     assert len(p.entities("actor")) == 2
-    assert p.add_reference(other["id"], photo(), stage["id"])["stage_id"] == stage["id"]
-    with pytest.raises(ValueError, match="不属于"):
-        p.add_reference(a["id"], photo(), stage["id"])
+    assert "stage_id" not in p.add_reference(other["id"], photo())
     one = p.add_reference(a["id"], photo())
     assert p.add_reference(a["id"], photo())["id"] == one["id"]
     p.add_reference(a["id"], photo("blue"))
@@ -122,7 +111,6 @@ def test_cross_film_role_multiple_works_import_merge_and_review(catalogue, confi
         shot,
         sequel["id"],
         [{"id": role["id"], "work_ids": [work, sequel["id"]], "actor_ids": [a["id"]]}],
-        [],
         Tracker,
     )
     assert rows[0]["role_id"] == role["id"]
@@ -271,6 +259,111 @@ def test_import_api_failure_draft_and_reference_repair(catalogue, config, monkey
     assert client.get("/persons").status_code == 200
 
 
+def test_reference_pair_and_actor_metadata_saved_together(catalogue, config):
+    p, _work, actor = catalogue
+    reference = p.add_reference(actor["id"], photo())
+    other = p.save(Entity(kind="actor", name="演员乙"))
+    client = TestClient(create_app(config))
+    path = "/api/persons/references/" + reference["id"]
+    response = client.put(
+        path,
+        json={
+            "actor_id": other["id"],
+            "entity": {
+                "kind": "actor",
+                "name": "演员乙改名",
+                "aliases": ["小乙"],
+            },
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["actor_id"] == other["id"]
+    assert p.entity(other["id"])["name"] == "演员乙改名"
+    assert p.entity(other["id"])["aliases"] == ["小乙"]
+    assert p.entity(actor["id"])["name"] == "演员甲"
+    assert client.get(response.json()["url"]).status_code == 200
+    assert "stage_id" not in response.json()
+    failed = client.put(
+        path, json={"actor_id": actor["id"], "entity": {"kind": "work", "name": "不合法配对"}}
+    )
+    assert failed.status_code == 422
+    assert p.reference(reference["id"])["actor_id"] == other["id"]
+    assert p.entity(actor["id"])["name"] == "演员甲"
+    assert client.put(path, json={"actor_id": actor["id"], "stage_id": "retired"}).status_code == 422
+    assert (
+        client.post(
+            "/api/persons/references/from-source",
+            json={
+                "actor_id": actor["id"],
+                "source_id": "source",
+                "timestamp": 0,
+                "stage_id": "retired",
+            },
+        ).status_code
+        == 422
+    )
+    page = client.get("/persons").text
+    assert "角色阶段" not in page and "capture-stage" not in page and "reference-stage" not in page
+    assert 'id="entity-dialog"' in page and 'id="reference-form"' not in page
+
+
+def test_legacy_stage_migrates_to_role_without_losing_references_or_published_history(catalogue, config):
+    p, work, actor = catalogue
+    role = p.save(Entity(kind="role", name="叶淑柔", work_ids=[work], actor_ids=[actor["id"]]))
+    legacy = {
+        "kind": "stage",
+        "name": "老年叶淑柔",
+        "aliases": ["老叶"],
+        "role_id": role["id"],
+        "actor_ids": [actor["id"]],
+        "age": "老年",
+        "styling": "白发",
+        "costume": "灰衣",
+    }
+    p.store.execute("INSERT INTO person_entities VALUES(?, 'stage', ?)", ("old-stage", dumps(legacy)))
+    reference = p.add_reference(actor["id"], photo())
+    p.store.execute("UPDATE person_references SET stage_id='old-stage' WHERE id=?", (reference["id"],))
+    p.store.execute(
+        "INSERT INTO person_evidence VALUES(?,?,?,?,?,?,?,?,?,?)",
+        (
+            "old-evidence",
+            "source",
+            "shot0",
+            actor["id"],
+            role["id"],
+            "old-stage",
+            0,
+            1,
+            "accepted",
+            dumps({"reviewed": True}),
+        ),
+    )
+    content = publish_content(p, config)
+    release = p.publish()
+    frozen = p.store.one("SELECT data FROM person_versions WHERE id=?", (release["person_version"],))["data"]
+    p.store.execute("DELETE FROM settings WHERE key='migration.person-roles-v2'")
+    migrated = Persons(Store(config.data_dir))
+    aged = migrated.entity("old-stage")
+    assert aged["kind"] == "role" and aged["work_ids"] == [work] and aged["name"] == "老年叶淑柔"
+    assert aged["actor_ids"] == [actor["id"]] and "age" not in aged and "role_id" not in aged
+    assert migrated.reference(reference["id"])["actor_id"] == actor["id"]
+    assert migrated.add_reference(actor["id"], photo())["id"] == reference["id"]
+    evidence = migrated.evidence()[0]
+    assert evidence["role_id"] == "old-stage" and evidence["data"]["reviewed"]
+    assert "stage_id" not in evidence
+    _, published = migrated.published(content)
+    assert next(e for e in published["entities"] if e["id"] == "old-stage")["kind"] == "role"
+    assert published["evidence"][0]["role_id"] == "old-stage" and "stage_id" not in published["evidence"][0]
+    assert (
+        migrated.store.one("SELECT data FROM person_versions WHERE id=?", (release["person_version"],))[
+            "data"
+        ]
+        == frozen
+    )
+    assert Persons(Store(config.data_dir)).entity("old-stage") == aged
+    assert resolve_names(TextSearch(text="老年叶淑柔"), migrated.entities())[0] == ["old-stage"]
+
+
 def test_import_confirm_requires_work_and_clear_rejection_message(catalogue):
     p, _work, _a = catalogue
     draft = p.create_import([photo("silver")])
@@ -292,8 +385,8 @@ def test_name_resolution_alias_ambiguity_longest_and_intersection(catalogue):
     assert ids == [actor["id"]] and rest == "哭泣"
     assert resolve_names(TextSearch(text="Alice"), p.entities())[0] == [actor["id"]]
     role = p.save(Entity(kind="role", name="叶淑柔", work_ids=[work], actor_ids=[actor["id"]]))
-    stage = p.save(Entity(kind="stage", name="老年叶淑柔", role_id=role["id"]))
-    assert resolve_names(TextSearch(text="老年叶淑柔"), p.entities())[0] == [stage["id"]]
+    aged = p.save(Entity(kind="role", name="老年叶淑柔", work_ids=[work], actor_ids=[actor["id"]]))
+    assert resolve_names(TextSearch(text="老年叶淑柔"), p.entities())[0] == [aged["id"]]
     segment = {"source_id": "source", "start": 0, "end": 5}
     evidence = [
         {
@@ -301,7 +394,6 @@ def test_name_resolution_alias_ambiguity_longest_and_intersection(catalogue):
             "source_id": "source",
             "actor_id": actor["id"],
             "role_id": None,
-            "stage_id": None,
             "start": 0,
             "end": 2,
         },
@@ -310,7 +402,6 @@ def test_name_resolution_alias_ambiguity_longest_and_intersection(catalogue):
             "source_id": "source",
             "actor_id": other["id"],
             "role_id": None,
-            "stage_id": None,
             "start": 2,
             "end": 4,
         },
@@ -381,20 +472,17 @@ def test_anchor_back_view_crossing_gaps_cuts_and_body_candidate(catalogue, confi
         {"timestamp": 0.8, "observations": []},
         {"timestamp": 1, "observations": [obs(False)]},
     ]
-    rows = attribute_frames(frames, refs, config.person, shot, work, [], [], Tracker)
+    rows = attribute_frames(frames, refs, config.person, shot, work, [], Tracker)
     assert [r["data"]["evidence_type"] for r in rows[:2]] == ["face", "track"]
     assert all(r["status"] == "candidate" for r in rows[2:])
     assert rows[0]["end"] == 0.2
-    samples = [
-        {"work_id": work, "feature": [1, 0], "actor_id": actor["id"], "role_id": "r", "stage_id": "stage"}
-    ]
+    samples = [{"work_id": work, "feature": [1, 0], "actor_id": actor["id"], "role_id": "r"}]
     rows = attribute_frames(
         [{"timestamp": 0, "observations": [obs(False)]}],
         refs,
         config.person,
         shot,
         work,
-        [],
         [],
         Tracker,
         samples,
@@ -408,7 +496,6 @@ def test_anchor_back_view_crossing_gaps_cuts_and_body_candidate(catalogue, confi
             config.person,
             shot,
             "other-work",
-            [],
             [],
             Tracker,
             samples,
@@ -571,7 +658,9 @@ def test_mentioned_role_variants_union_and_latin_name_boundaries(catalogue, conf
     latin = p.save(Entity(kind="actor", name="Ann"))
     base = p.save(Entity(kind="role", name="叶淑柔", work_ids=[work], actor_ids=[actor["id"]]))
     aged = p.save(Entity(kind="role", name="老年叶淑柔", work_ids=[work], actor_ids=[actor["id"]]))
-    publish_content(p, config, dialogues={"shot0": "Anna walked", "shot1": "Ann walked", "shot2": "老年叶淑柔说话"})
+    publish_content(
+        p, config, dialogues={"shot0": "Anna walked", "shot1": "Ann walked", "shot2": "老年叶淑柔说话"}
+    )
 
     class Offline:
         def identity(self):
@@ -583,7 +672,11 @@ def test_mentioned_role_variants_union_and_latin_name_boundaries(catalogue, conf
     assert [hit["id"] for hit in result["results"]] == ["shot1"]
     result = engine.text(TextSearch(text="叶淑柔", person_mode="mentioned", granularity="shot"))
     assert result["eligible_segments"] == 1
-    result = engine.text(TextSearch(person_ids=[base["id"], aged["id"], latin["id"]], person_mode="mentioned", granularity="shot"))
+    result = engine.text(
+        TextSearch(
+            person_ids=[base["id"], aged["id"], latin["id"]], person_mode="mentioned", granularity="shot"
+        )
+    )
     assert result["eligible_segments"] == 0
 
 
@@ -772,19 +865,17 @@ def test_manual_anchor_only_extends_reliable_track_and_rejection_stops_it(catalo
         fingerprint(["cache", 0, 0]): {
             "actor_id": actor["id"],
             "role_id": "role",
-            "stage_id": "stage",
             "status": "accepted",
         },
         fingerprint(["cache", 0.4, 0]): {
             "actor_id": actor["id"],
             "role_id": None,
-            "stage_id": None,
             "status": "rejected",
         },
     }
-    rows = attribute_frames(frames, [], config.person, shot, work, [], [], Tracker, manual_anchors=manual)
+    rows = attribute_frames(frames, [], config.person, shot, work, [], Tracker, manual_anchors=manual)
     assert rows[0]["data"]["evidence_type"] == "manual"
-    assert rows[1]["status"] == "accepted" and rows[1]["stage_id"] == "stage"
+    assert rows[1]["status"] == "accepted" and rows[1]["role_id"] == "role"
     assert rows[2]["status"] == "rejected"
     assert rows[3]["status"] == "candidate"
 

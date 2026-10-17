@@ -458,18 +458,18 @@ def persons_list(ctx: typer.Context):
 
 @persons_cli.command('save')
 def persons_save(ctx: typer.Context, file: Path, identifier: str | None = None):
-    """从实体 JSON 新建或修改演员、作品、角色或阶段。"""
+    """从实体 JSON 新建或修改演员、作品或角色。"""
     from .persons import Entity, Persons
     from .storage import Store
     print_json(Persons(Store(ctx.obj.data_dir)).save(Entity.model_validate_json(file.read_text()), identifier))
 
 
 @persons_cli.command('reference')
-def persons_reference(ctx: typer.Context, actor: str, images: list[Path], stage: str | None = None):
+def persons_reference(ctx: typer.Context, actor: str, images: list[Path]):
     from .persons import Persons
     from .storage import Store
     catalogue = Persons(Store(ctx.obj.data_dir))
-    print_json([catalogue.add_reference(actor, p.read_bytes(), stage) for p in images])
+    print_json([catalogue.add_reference(actor, p.read_bytes()) for p in images])
 
 
 @persons_cli.command('process')

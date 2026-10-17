@@ -223,7 +223,7 @@ class SearchEngine:
                     enriched = []
                     for item in evidence:
                         enriched.append({**item, 'data': {k:v for k,v in item['data'].items() if k not in {'body_feature','space'}}, 'actor_name': names.get(item['actor_id']),
-                            'role_name': names.get(item['role_id']), 'stage_name': names.get(item['stage_id']),
+                            'role_name': names.get(item['role_id']),
                             'image_url': '/api/persons/evidence/' + item['id'] + '/image' if item['data'].get('image_path') else None,
                             'start': max(item['start'], segment['start']),
                             'end': min(item['end'], segment['end'])})
