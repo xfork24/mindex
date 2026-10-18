@@ -1,5 +1,47 @@
 "use strict";
 const STAGES = ["recall", "tts", "select", "render"];
+// 多选框顶部的“全部选择”占位值，不是一个真实人物 ID。
+const ALL_VALUE = "__all__";
+function allOptionOf(select) { return [...select.options].find((o) => o.value === ALL_VALUE); }
+function itemOptionsOf(select) { return [...select.options].filter((o) => o.value !== ALL_VALUE); }
+function syncAllOf(select) {
+  const all = allOptionOf(select);
+  if (!all) return;
+  const items = itemOptionsOf(select);
+  all.selected = items.length > 0 && items.every((o) => o.selected);
+  select.dataset.allSelected = all.selected ? "1" : "0";
+}
+function applyAllOf(select, on) { for (const o of itemOptionsOf(select)) o.selected = on; syncAllOf(select); }
+// change 事件分不清是点了“全部选择”还是普通项，用上一次的全选状态判断意图。
+function toggleAllOf(select) {
+  const all = allOptionOf(select);
+  if (all && all.selected !== (select.dataset.allSelected === "1")) applyAllOf(select, all.selected);
+  else syncAllOf(select);
+}
+function pickedIds(select) { return [...select.selectedOptions].map((o) => o.value).filter((v) => v !== ALL_VALUE); }
+function fillAllSelect(select, entries, chosen) {
+  select.replaceChildren();
+  const all = el("option", "全部选择");
+  all.value = ALL_VALUE;
+  select.append(all);
+  for (const entry of MindexMultiSearch.sort(entries)) {
+    const o = el("option", `${entry.name} · ${entry.id.slice(0, 8)}`);
+    o.value = entry.id;
+    o.selected = chosen.has(entry.id);
+    select.append(o);
+  }
+  MindexMultiSearch.attach(select);
+  MindexMultiSearch.refilter(select);
+  syncAllOf(select);
+}
+function multiField(label) {
+  const wrap = el("label", label, "form-field");
+  const select = document.createElement("select");
+  select.multiple = true;
+  select.setAttribute("aria-label", label);
+  wrap.append(select);
+  return { wrap, select };
+}
 const LABEL = {
   content: "文本与查询",
   board: "分镜表",
@@ -769,30 +811,32 @@ function renderRecallEditor(body, sid, draft) {
     });
     section.append(modeField.wrap);
     if (mode === "text") {
-      const personWrap = el("label", "人物（可多选）", "form-field");
-      const personSelect = document.createElement("select");
-      personSelect.multiple = true;
-      personSelect.setAttribute("aria-label", "人物（可多选）");
+      // 与检索页一致：演员和角色两级，角色按已选演员过滤；后端仍只收 person_ids。
       const chosen = new Set(value?.person_ids || []);
-      for (const p of state.persons || []) {
-        const o = el(
-          "option",
-          `${p.name} · ${p.kind === "actor" ? "演员" : "角色"} · ${p.id.slice(0, 8)}`,
-        );
-        o.value = p.id;
-        o.selected = chosen.has(p.id);
-        personSelect.append(o);
-      }
-      personSelect.addEventListener("change", () => {
+      const persons = state.persons || [];
+      const actorField = multiField("演员（可多选）");
+      const roleField = multiField("角色（可多选）");
+      const commitPersons = () => {
         const next = recallEditable(draft.data.recall);
-        next.person_ids = [...personSelect.selectedOptions].map((o) => o.value);
+        next.person_ids = [...new Set([...pickedIds(actorField.select), ...pickedIds(roleField.select)])];
         commit(next);
-      });
-      personWrap.append(personSelect);
-      section.append(personWrap);
+      };
+      const roleEntries = () => {
+        const actors = new Set(pickedIds(actorField.select));
+        return persons.filter((p) => p.kind === "role" && (!actors.size || (p.actor_ids || []).some((id) => actors.has(id))));
+      };
+      const fillRoles = () => {
+        fillAllSelect(roleField.select, roleEntries(), new Set(pickedIds(roleField.select)));
+        commitPersons();
+      };
+      fillAllSelect(actorField.select, persons.filter((p) => p.kind === "actor"), chosen);
+      fillAllSelect(roleField.select, roleEntries(), chosen);
+      actorField.select.addEventListener("change", () => { toggleAllOf(actorField.select); fillRoles(); });
+      roleField.select.addEventListener("change", () => { toggleAllOf(roleField.select); commitPersons(); });
+      section.append(actorField.wrap, roleField.wrap);
       for (const [key, label, choices] of [
         ["person_mode", "人物检索方式", [
-          ["auto", "自动识别姓名 · 默认出镜"],
+          ["auto", "人物出镜 / 对白提及"],
           ["onscreen", "人物出镜"],
           ["mentioned", "对白提及"],
         ]],

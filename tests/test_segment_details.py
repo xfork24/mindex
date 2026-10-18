@@ -153,12 +153,14 @@ def test_person_details_merge_clip_coverage_count_evidence_without_publication(c
             "INSERT INTO person_coverage VALUES(?,?,?)", (source, key, dumps({"start": start, "end": end}))
         )
     actor = Persons(store).save(Entity(kind="actor", name="测试演员"))
-    for key, start, end, status in [
-        ("accepted", 0.8, 1.2, "accepted"),
-        ("candidate", 1.5, 1.7, "candidate"),
-        ("rejected", 1.8, 2.2, "rejected"),
-        ("before", 0, 1, "accepted"),
-        ("after", 2, 3, "candidate"),
+    bystander = Persons(store).save(Entity(kind="actor", name="低分候选演员"))
+    for key, start, end, status, who in [
+        ("accepted", 0.8, 1.2, "accepted", actor["id"]),
+        ("candidate", 1.5, 1.7, "candidate", actor["id"]),
+        ("rejected", 1.8, 2.2, "rejected", actor["id"]),
+        ("before", 0, 1, "accepted", actor["id"]),
+        ("after", 2, 3, "candidate", actor["id"]),
+        ("bystander", 1.5, 1.7, "candidate", bystander["id"]),
     ]:
         store.execute(
             "INSERT INTO person_evidence VALUES(?,?,?,?,?,?,?,?,?,?)",
@@ -166,7 +168,7 @@ def test_person_details_merge_clip_coverage_count_evidence_without_publication(c
                 key,
                 source,
                 shot["id"],
-                actor["id"],
+                who,
                 None,
                 None,
                 start,
@@ -179,8 +181,10 @@ def test_person_details_merge_clip_coverage_count_evidence_without_publication(c
     assert person["status"] == "partial"
     assert person["covered"] == [{"start": 1, "end": 1.4}, {"start": 1.6, "end": 2}]
     assert person["uncovered"] == [{"start": 1.4, "end": 1.6}]
-    assert person["counts"] == {"accepted": 1, "candidate": 1, "rejected": 1}
-    assert person["people"][0]["name"] == "测试演员" and person["people"][0]["kind_label"] == "演员"
+    # 计数按分镜内去重人物：测试演员已有 accepted 行，不再计入待确认；只有低分候选的
+    # bystander 计入待确认；已接受的证据才进入关联人物（与发布快照口径一致）。
+    assert person["counts"] == {"accepted": 1, "candidate": 1, "rejected": 0}
+    assert [p["name"] for p in person["people"]] == ["测试演员"]
     store.execute(
         "INSERT INTO person_coverage VALUES(?,?,?)", (source, "bridge", dumps({"start": 1.4, "end": 1.6}))
     )

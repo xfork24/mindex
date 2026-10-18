@@ -23,12 +23,12 @@ from .storage import Store, dumps
 
 class PersonOptions(StrictModel):
     start: float = Field(default=0, ge=0)
-    end: float | None = Field(default=None, gt=0)
+    end: float | None = Field(default=0, ge=0, description="终点原片秒；0 或 null 表示至片尾")
     publish: bool = False
 
     @model_validator(mode="after")
     def ordered(self):
-        if self.end is not None and self.end <= self.start:
+        if self.end not in (None, 0) and self.end <= self.start:
             raise ValueError("结束时间必须大于开始时间")
         return self
 
@@ -80,7 +80,7 @@ class PersonClient:
             if len(response.get("observations", [])) != len(batch):
                 raise ModelError("人物服务返回的帧数不一致")
             if space is not None and space != response["space"]:
-                raise ModelError("镜头处理期间模型空间发生变化")
+                raise ModelError("分镜处理期间模型空间发生变化")
             space = response["space"]
             for (timestamp, raw), observations in zip(batch, response["observations"]):
                 frames.append(
@@ -127,6 +127,49 @@ def reference_subject(detections):
         return faces[0]
     main = max(bodies, key=lambda b: (b[2] - b[0]) * (b[3] - b[1]))
     return faces[0] if _inside_ratio(faces[0]["face_bbox"], main) >= 0.6 else None
+
+
+def reference_check(detections, min_quality):
+    """参考图预检共用判定：返回 (人脸主体, 不合格原因)。
+
+    处理任务预检与添加时的同步质检共用同一判定与文案；主体为 None 表示
+    没有恰好一张属于画面主体的人脸，质量低于门槛时主体仍返回供调用方取用。
+    """
+    subject = reference_subject(detections)
+    if subject is None:
+        return None, "参考照片需要恰好一张清晰人脸，且属于画面主体"
+    quality = subject.get("face_quality", 0)
+    if quality < float(min_quality):
+        # 质量门槛可配（默认 0）；被挡下的参考图要显式报出来，不能悄悄不参与。
+        return subject, (
+            f"参考照片人脸清晰度 {quality:.2f} 低于门槛 {float(min_quality):.2f}，未参与匹配"
+        )
+    return subject, None
+
+
+def ensure_reference_quality(store, config, client, item, space=None):
+    """添加参考图前的同步质检：不合格抛 ValueError，服务不可用抛 ModelError。
+
+    item 为 Persons.image() 的 {path, digest, ...}。检测结果（含被拒图片）按
+    reference-v1 键缓存到 person_features，处理任务预检直接复用不重复调服务。
+    返回服务空间，供同一请求处理多张图时省去重复 /health。
+    """
+    space = space or client.identity()
+    key = fingerprint(["reference-v1", item["digest"], space])
+    row = store.one("SELECT data FROM person_features WHERE id=?", (key,))
+    extracted = json.loads(row["data"]) if row else None
+    if extracted is None:
+        extracted = client.image(store.resolve_media(item["path"]))
+        if extracted.get("space") != space:
+            raise ModelError("特征提取响应空间与任务固定空间不符")
+        store.execute(
+            "INSERT OR REPLACE INTO person_features VALUES(?,?,?,?,?)",
+            (key, None, dumps(space), "reference", dumps(extracted)),
+        )
+    _, reason = reference_check(extracted["observations"], config.person.min_reference_quality)
+    if reason is not None:
+        raise ValueError(reason)
+    return space
 
 
 def cosine(a, b):
@@ -355,13 +398,22 @@ class PersonProcessor:
         ]
         space = self.client.identity()
         roles = self.catalogue.entities("role")
+        entity_names = {e["id"]: e["name"] for e in self.catalogue.entities()}
         role_actors = {r["id"]: r["actor_ids"] for r in roles}
         references = []
         reference_errors = []
         for ref in self.catalogue.references():
+            # 任务日志冻结当时的配对名称；后续改名、移除参考图不会丢失问题所属身份。
+            identity = {
+                "reference_id": ref["id"],
+                "actor_id": ref["actor_id"],
+                "role_id": ref["role_id"],
+                "actor_name": entity_names.get(ref["actor_id"], "未登记演员"),
+                "role_name": entity_names.get(ref["role_id"]) if ref["role_id"] else None,
+            }
             if ref["role_id"] and ref["actor_id"] not in role_actors.get(ref["role_id"], []):
                 reference_errors.append(
-                    {"reference_id": ref["id"], "error": "参考图演员已不属于该角色，请重新配对"}
+                    {**identity, "error": "参考图演员已不属于该角色，请重新配对"}
                 )
                 continue
             key = fingerprint(["reference-v1", ref["digest"], space])
@@ -371,24 +423,9 @@ class PersonProcessor:
                 self.validate_space(extracted, space)
                 self.cache(key, None, space, "reference", extracted)
             detections = extracted["observations"]
-            subject = reference_subject(detections)
-            if subject is None:
-                reference_errors.append(
-                    {"reference_id": ref["id"], "error": "参考照片需要恰好一张清晰人脸，且属于画面主体"}
-                )
-                continue
-            quality = subject.get("face_quality", 0)
-            if quality < float(self.config.person.min_reference_quality):
-                # 质量门槛可配（默认 0）；被挡下的参考图要显式报出来，不能悄悄不参与。
-                reference_errors.append(
-                    {
-                        "reference_id": ref["id"],
-                        "error": (
-                            f"参考照片人脸清晰度 {quality:.2f} 低于门槛 "
-                            f"{float(self.config.person.min_reference_quality):.2f}，未参与匹配"
-                        ),
-                    }
-                )
+            subject, reason = reference_check(detections, self.config.person.min_reference_quality)
+            if reason is not None:
+                reference_errors.append({**identity, "error": reason})
                 continue
             references.append({**subject, "actor_id": ref["actor_id"], "role_id": ref["role_id"]})
         report = {
@@ -609,7 +646,7 @@ class PersonProcessor:
 
     def validate_frames(self, frames, shot):
         if not frames:
-            raise ModelError("镜头未返回任何实际帧，不能记为已覆盖")
+            raise ModelError("分镜未返回任何实际帧，不能记为已覆盖")
         previous = -math.inf
         for f in frames:
             t = f["timestamp"]
@@ -636,7 +673,7 @@ class PersonTasks:
         try:
             with self.lock():
                 store.execute(
-                    "UPDATE person_tasks SET status='interrupted',error='进程中断；重试将继续镜头检查点' WHERE status IN ('queued','running')"
+                    "UPDATE person_tasks SET status='interrupted',error='进程中断；重试将继续分镜检查点' WHERE status IN ('queued','running')"
                 )
         except Timeout:
             pass

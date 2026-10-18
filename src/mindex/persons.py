@@ -13,6 +13,7 @@ import math
 import re
 import uuid
 from contextlib import nullcontext
+from datetime import UTC, datetime
 from typing import Literal
 
 from PIL import Image, ImageOps
@@ -34,6 +35,7 @@ CREATE TABLE IF NOT EXISTS person_evidence(id TEXT PRIMARY KEY, source_id TEXT N
  shot_id TEXT NOT NULL, actor_id TEXT, role_id TEXT, stage_id TEXT, start REAL NOT NULL, end REAL NOT NULL,
  status TEXT NOT NULL, data TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS person_evidence_source ON person_evidence(source_id,status,start,end);
+CREATE INDEX IF NOT EXISTS person_evidence_shot ON person_evidence(source_id,shot_id);
 CREATE TABLE IF NOT EXISTS person_coverage(source_id TEXT NOT NULL, cache_id TEXT PRIMARY KEY, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS person_tasks(id TEXT PRIMARY KEY, source_id TEXT NOT NULL, status TEXT NOT NULL,
  config TEXT NOT NULL, options TEXT NOT NULL, progress TEXT NOT NULL DEFAULT '{}', error TEXT, result TEXT,
@@ -186,6 +188,18 @@ def normalize_entity(entry, lookup=None):
     return entry
 
 
+class PersonHasLinkedShots(ValueError):
+    def __init__(self, result):
+        self.linked_shots = result
+        examples = "；".join(
+            f"{s['source_name']} {s['start']:.3f}–{s['end']:.3f} 秒（分镜 {s['shot_id']}）"
+            for s in result["items"][:5]
+        )
+        super().__init__(
+            f"该身份仍有关联出镜证据：{result['total']} 个未排除分镜；请先核对。{examples}"
+        )
+
+
 class Persons:
     def __init__(self, store: Store):
         self.store = store
@@ -250,6 +264,86 @@ class Persons:
         )
         return self.entity(identifier)
 
+    def delete_release(self, identifier):
+        """删除一条已发布的检索组合；正在生效的组合受保护，须先恢复到其他组合。
+        只删组合行；其人物快照若已无其他组合引用则一并清理，避免留下孤儿快照。"""
+        row = self.store.one("SELECT * FROM search_releases WHERE id=?", (identifier,))
+        if not row:
+            raise ValueError("找不到检索发布记录")
+        active = self.store.one("SELECT value FROM settings WHERE key='active.release'")
+        if active and active["value"] == identifier:
+            raise ValueError("这是当前生效的检索组合；请先恢复到其他组合再删除")
+        with self.store.connect() as db:
+            db.execute("DELETE FROM search_releases WHERE id=?", (identifier,))
+            if row["person_id"] and not db.execute(
+                "SELECT 1 FROM search_releases WHERE person_id=?", (row["person_id"],)
+            ).fetchone():
+                db.execute("DELETE FROM person_versions WHERE id=?", (row["person_id"],))
+        return {"deleted": identifier}
+
+    def linked_shots(self, identifier, *, limit=50, offset=0, db=None):
+        """已接受分镜仅检查确认身份；待确认分镜检查候选身份，已排除不拦截。"""
+        entity = self.entity(identifier)
+        if entity["kind"] == "work":
+            raise ValueError("作品暂不支持在页面删除")
+        column = f"{entity['kind']}_id"
+        identity = f"e.{column}"
+        if entity["kind"] == "role":
+            # 与审核筛选一致：演员级证据只在本作品角色唯一时归到该角色。
+            identity = (
+                "COALESCE(e.role_id,(SELECT CASE WHEN COUNT(*)=1 THEN MIN(role.id) END "
+                "FROM person_entities role JOIN person_sources ps ON ps.source_id=e.source_id "
+                "WHERE role.kind='role' AND EXISTS (SELECT 1 FROM json_each(role.data,'$.actor_ids') "
+                "WHERE value=e.actor_id) AND EXISTS (SELECT 1 FROM json_each(role.data,'$.work_ids') "
+                "WHERE value=ps.work_id)))"
+            )
+        query = (
+            "FROM person_evidence e JOIN segments s ON s.id=e.shot_id AND s.source_id=e.source_id "
+            "JOIN sources src ON src.id=s.source_id "
+            f"WHERE {identity}=? AND s.kind='shot' AND (e.status='accepted' OR "
+            "(e.status='candidate' AND NOT EXISTS (SELECT 1 FROM person_evidence confirmed "
+            "WHERE confirmed.source_id=e.source_id AND confirmed.shot_id=e.shot_id "
+            "AND confirmed.status='accepted'))) "
+            "GROUP BY s.id,s.source_id"
+        )
+        with nullcontext(db) if db is not None else self.store.connect() as connection:
+            total = connection.execute(
+                "SELECT COUNT(*) AS n FROM (SELECT s.id " + query + ")", (identifier,),
+            ).fetchone()["n"]
+            items = [
+                dict(row) for row in connection.execute(
+                    "SELECT s.id AS shot_id,s.source_id,src.name AS source_name,s.start,s.end,"
+                    "SUM(e.status='accepted') AS accepted,SUM(e.status='candidate') AS candidate "
+                    + query + " ORDER BY s.source_id,s.start,s.id LIMIT ? OFFSET ?",
+                    (identifier, limit, offset),
+                )
+            ]
+        return {"entity": entity, "items": items, "total": total, "limit": limit, "offset": offset}
+
+    def delete_entity(self, identifier):
+        """未排除的关联分镜阻碍删除；参考图随身份删除，审核留档及已发布快照不变。"""
+        entity = self.entity(identifier)
+        if entity["kind"] == "work":
+            raise ValueError("作品暂不支持在页面删除")
+        column = f"{entity['kind']}_id"
+        with self.store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            linked = self.linked_shots(identifier, db=db)
+            if linked["total"]:
+                raise PersonHasLinkedShots(linked)
+            if entity["kind"] == "actor":
+                for row in db.execute("SELECT * FROM person_entities WHERE kind='role'").fetchall():
+                    role = normalize_entity({"id": row["id"], **json.loads(row["data"])})
+                    if identifier not in role["actor_ids"]:
+                        continue
+                    value = Entity.model_validate({k: v for k, v in role.items() if k != "id"}).model_copy(
+                        update={"actor_ids": [a for a in role["actor_ids"] if a != identifier]}
+                    )
+                    db.execute("UPDATE person_entities SET data=? WHERE id=?", (value.model_dump_json(), role["id"]))
+            removed = db.execute(f"DELETE FROM person_references WHERE {column}=?", (identifier,)).rowcount
+            db.execute("DELETE FROM person_entities WHERE id=?", (identifier,))
+        return {"deleted": identifier, "removed_references": removed}
+
     def work_for(self, source_id):
         source = self.store.one("SELECT * FROM sources WHERE id=?", (source_id,))
         if not source:
@@ -306,9 +400,18 @@ class Persons:
             raise ValueError("角色参考图必须归属该角色的一名出演演员")
         return actor_id
 
-    def add_reference(self, actor_id, raw, provenance=None, role_id=None):
+    def add_reference(self, actor_id, raw, provenance=None, role_id=None, checker=None):
         actor_id = self.pairing_actor(actor_id, role_id)
         item = self.image(raw)
+        if checker is not None:
+            # 重传已入库的旧图是无操作：跳过质检，不烧 GPU，也不用新策略拒绝历史参考。
+            existing = self.store.one(
+                "SELECT id FROM person_references WHERE actor_id=? AND role_id IS ? AND digest=? "
+                "ORDER BY rowid LIMIT 1",
+                (actor_id, role_id, item["digest"]),
+            )
+            if not existing:
+                checker(item)
         with self.store.connect() as db:
             if not db.in_transaction:
                 db.execute("BEGIN IMMEDIATE")
@@ -390,6 +493,73 @@ class Persons:
         self.store.execute("INSERT INTO person_imports(id,data) VALUES(?,?)", (identifier, dumps(value)))
         return self.get_import(identifier)
 
+    def append_images(self, identifier, raws):
+        """向未确认草稿追加截图；与草稿内容相同的图跳过并记警告。"""
+        draft = self.get_import(identifier)
+        if draft["status"] != "draft":
+            raise ValueError("演员表已确认，不能追加截图")
+        known = {im["digest"] for im in draft["images"]}
+        for raw in raws:
+            item = self.image(raw, "imports")
+            if item["digest"] in known:
+                draft["warnings"] = [
+                    *draft.get("warnings", []),
+                    "追加的截图与草稿中已有图片内容相同，已忽略。",
+                ]
+                continue
+            known.add(item["digest"])
+            draft["images"].append({"id": uid(), **item})
+        self.store.execute("UPDATE person_imports SET data=? WHERE id=?", (dumps(draft), identifier))
+        return self.get_import(identifier)
+
+    def delete_import_image(self, identifier, image_id):
+        """删除一张历史演员表图片（草稿与已确认均可）：从草稿数据移除该图及其条目；
+        图片删空后整行删除；已确认导入建立的实体与参考图不受影响。内容寻址文件
+        仍被其他草稿引用时保留。"""
+        draft = self.get_import(identifier)
+        image = next((im for im in draft["images"] if im["id"] == image_id), None)
+        if not image:
+            raise ValueError("找不到原图")
+        remaining = [im for im in draft["images"] if im["id"] != image_id]
+        if remaining:
+            draft["images"] = remaining
+            draft["entries"] = [e for e in draft.get("entries", []) if e["image_id"] != image_id]
+            self.store.execute("UPDATE person_imports SET data=? WHERE id=?", (dumps(draft), identifier))
+        else:
+            self.store.execute("DELETE FROM person_imports WHERE id=?", (identifier,))
+        still_used = any(
+            im.get("digest") == image["digest"]
+            for row in self.store.rows("SELECT data FROM person_imports")
+            for im in json.loads(row["data"]).get("images", [])
+        )
+        if not still_used:
+            (self.store.root / image["path"]).unlink(missing_ok=True)
+        return {"deleted": image_id, "remaining_images": len(remaining)}
+
+    def list_imports(self):
+        """历史演员表导入（含已确认），供导入页默认列出全部 cast 图片。"""
+        items = []
+        for row in self.store.rows("SELECT * FROM person_imports ORDER BY rowid DESC"):
+            value = json.loads(row["data"])
+            items.append(
+                {
+                    "id": row["id"],
+                    "status": row["status"],
+                    "work_id": value.get("work_id"),
+                    "entry_count": len(value.get("entries", [])),
+                    "images": [
+                        {
+                            "id": image["id"],
+                            "width": image.get("width"),
+                            "height": image.get("height"),
+                            "url": f"/api/persons/imports/{row['id']}/images/{image['id']}",
+                        }
+                        for image in value.get("images", [])
+                    ],
+                }
+            )
+        return items
+
     def get_import(self, identifier):
         row = self.store.one("SELECT * FROM person_imports WHERE id=?", (identifier,))
         if not row:
@@ -399,7 +569,7 @@ class Persons:
             image["url"] = f"/api/persons/imports/{identifier}/images/{image['id']}"
         return {**value, "id": identifier, "status": row["status"]}
 
-    def confirm_import(self, identifier, body: CastConfirm):
+    def confirm_import(self, identifier, body: CastConfirm, checker=None):
         draft = self.get_import(identifier)
         if draft["status"] != "draft":
             raise ValueError("演员表已确认；请在人物库追加或修改参考图")
@@ -407,23 +577,60 @@ class Persons:
             raise ValueError("请选择导入作品")
         self.entity(body.work_id, "work")
         images = {x["id"]: x for x in draft["images"]}
+        # 批内去重：演员名+角色名相同且未显式关联现有身份的条目视为重复，
+        # 只保留首个含照片框的，其余静默跳过并在结果中汇总。
+        kept, groups, order = [], {}, []
+        for entry in body.entries:
+            if entry.actor_id or entry.role_id:
+                kept.append(entry)
+                continue
+            key = (entry.actor_name, entry.role_name)
+            if key not in groups:
+                groups[key] = [entry]
+                order.append(key)
+                kept.append(entry)
+            else:
+                groups[key].append(entry)
+        skipped_duplicates = []
+        for key in order:
+            members = groups[key]
+            if len(members) < 2:
+                continue
+            chosen = next((e for e in members if e.bbox is not None), members[0])
+            kept[kept.index(members[0])] = chosen
+            skipped_duplicates.extend(
+                {"actor_name": e.actor_name, "role_name": e.role_name} for e in members if e is not chosen
+            )
         # Validate and crop every entry before committing catalogue changes.
         crops = []
-        for entry in body.entries:
+        for index, entry in enumerate(kept):
             if entry.image_id not in images:
                 raise ValueError("原图不属于此草稿")
-            if entry.bbox is not None and not entry.single_person:
-                raise ValueError("请确认照片框仅包含一个人物")
             with Image.open(self.store.resolve_media(images[entry.image_id]["path"])) as image:
                 box = checked_box(entry.bbox, *image.size) if entry.bbox is not None else None
                 buffer = io.BytesIO()
                 if box:
                     image.crop(box).save(buffer, format="PNG")
-                crops.append(buffer.getvalue() if box else None)
+                raw = buffer.getvalue() if box else None
+                crops.append(raw)
             if entry.actor_id:
                 self.entity(entry.actor_id, "actor")
             if entry.role_id:
                 self.entity(entry.role_id, "role")
+            if checker is not None and raw:
+                # 入库前逐条目质检（事务外）：任一不合格整批拒绝并点名条目；服务不可用同样整批拒绝。
+                item = self.image(raw)
+                if not entry.actor_id or not self.store.one(
+                    "SELECT id FROM person_references WHERE actor_id=? AND role_id IS NULL AND digest=? "
+                    "ORDER BY rowid LIMIT 1",
+                    (entry.actor_id, item["digest"]),
+                ):
+                    try:
+                        checker(item)
+                    except ValueError as exc:
+                        raise ValueError(
+                            f"条目 {index + 1}（{entry.actor_name or '未命名'}）：{exc}"
+                        ) from exc
         # One SQLite transaction including references; nested calls use the same connection.
         with self.store.connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -452,7 +659,8 @@ class Persons:
 
             tx = Persons(TransactionStore())
             confirmed = []
-            for entry, crop in zip(body.entries, crops):
+            ignored_existing = 0
+            for entry, crop in zip(kept, crops):
                 # Import is the primary creation path: reuse exact-name identities, create missing ones.
                 actor_id = entry.actor_id
                 if not actor_id:
@@ -503,15 +711,22 @@ class Persons:
                             kind="role", name=entry.role_name, work_ids=[body.work_id], actor_ids=[actor_id]
                         )
                     )["id"]
-                reference = (
-                    tx.add_reference(
+                reference = None
+                if crop:
+                    # 与 add_reference 同口径（演员级参考图，role_id 为 NULL）：按内容寻址 digest 判断是否已存在。
+                    digest = tx.image(crop)["digest"]
+                    exists = db.execute(
+                        "SELECT id FROM person_references WHERE actor_id=? AND role_id IS NULL AND digest=? "
+                        "ORDER BY rowid LIMIT 1",
+                        (actor_id, digest),
+                    ).fetchone()
+                    if exists:
+                        ignored_existing += 1
+                    reference = tx.add_reference(
                         actor_id,
                         crop,
                         {"import_id": identifier, "image_id": entry.image_id, "bbox": entry.bbox},
                     )
-                    if crop
-                    else None
-                )
                 confirmed.append(
                     {
                         "actor_id": actor_id,
@@ -523,12 +738,16 @@ class Persons:
                 "UPDATE person_imports SET status='confirmed',data=? WHERE id=? AND status='draft'",
                 (
                     dumps(
-                        {**draft, "confirmed": confirmed, "entries": [e.model_dump() for e in body.entries]}
+                        {**draft, "confirmed": confirmed, "entries": [e.model_dump() for e in kept]}
                     ),
                     identifier,
                 ),
             )
-        return confirmed
+        return {
+            "confirmed": confirmed,
+            "skipped_duplicates": skipped_duplicates,
+            "ignored_existing": ignored_existing,
+        }
 
     def review(self, evidence_id, body: Review):
         """Correct one cached observation without expanding its temporal interval.
@@ -579,7 +798,8 @@ class Persons:
             "SELECT * FROM person_evidence WHERE source_id=? AND shot_id=? ORDER BY start,id",
             (body.source_id, body.shot_id),
         )
-        images = [json.loads(r["data"]).get("image_path") for r in rows]
+        decoded_rows = [{**r, "data": json.loads(r["data"])} for r in rows]
+        images = [r["data"].get("image_path") for r in decoded_rows]
         fallback = next((p for p in images if p), shot["thumbnail"])
         marks = {
             (s.actor_id, s.role_id): fingerprint(
@@ -588,9 +808,22 @@ class Persons:
             for s in body.selections
         }
         accepted = list(marks.values())
+        reviewed_at = datetime.now(UTC).isoformat()
         with self.store.connect() as db:
+            if not rows and not body.selections:
+                # 无检测结果的已处理分镜也能排除，并在重跑时保留人工结论。
+                db.execute(
+                    "INSERT INTO person_evidence VALUES(?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        fingerprint(["shot-review-empty-v1", body.source_id, body.shot_id]),
+                        body.source_id, body.shot_id, None, None, None,
+                        shot["start"], shot["end"], "rejected",
+                        dumps({"evidence_type": "manual", "confirmation": "shot_review", "reviewed": True}),
+                    ),
+                )
             for (actor_id, role_id), identifier in marks.items():
                 image = next((p for r, p in zip(rows, images) if r["actor_id"] == actor_id and p), fallback)
+                original_score = self.original_score(decoded_rows, actor_id, role_id)
                 db.execute(
                     "INSERT OR REPLACE INTO person_evidence VALUES(?,?,?,?,?,?,?,?,?,?)",
                     (
@@ -610,6 +843,8 @@ class Persons:
                                 "reviewed": True,
                                 "work_id": work_id,
                                 "score": 1.0,
+                                "original_score": original_score,
+                                "reviewed_at": reviewed_at,
                                 "image_path": image,
                             }
                         ),
@@ -632,18 +867,70 @@ class Persons:
             "rejected": sum(r["id"] not in marks.values() for r in rows),
         }
 
+    @staticmethod
+    def evidence_score(value):
+        return value if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) else None
+
+    @classmethod
+    def original_score(cls, rows, actor_id, role_id):
+        """取该身份原始匹配最高分；整镜人工记录的固定 1.0 不属于原始分数。"""
+        exact, actor_only = [], []
+        for row in rows:
+            if row["actor_id"] != actor_id:
+                continue
+            data = row["data"]
+            synthetic = data.get("evidence_type") == "manual" and data.get("confirmation") == "shot_review"
+            score = cls.evidence_score(data.get("original_score") if synthetic else data.get("score"))
+            if score is None:
+                continue
+            if role_id is None or row["role_id"] == role_id:
+                exact.append(score)
+            elif row["role_id"] is None:
+                actor_only.append(score)
+        return max(exact) if exact else max(actor_only, default=None)
+
+    @classmethod
+    def confirmed_scores(cls, people, rows):
+        """补充每位确认人物的分数与来源；旧人工记录从保留的原始帧恢复分数。"""
+        result = []
+        inferred = {p["actor_id"] for p in people if p["role_id"] is not None} - {
+            p["actor_id"] for p in people if p["role_id"] is None
+        }
+        for person in people:
+            matching = [r for r in rows if r["status"] == "accepted" and r["actor_id"] == person["actor_id"]
+                        and (r["role_id"] == person["role_id"]
+                             or (r["role_id"] is None and r["actor_id"] in inferred))]
+            manual_rows = [r for r in matching if r["data"].get("evidence_type") == "manual"]
+            if manual_rows:
+                recorded = [cls.evidence_score(r["data"].get("original_score")) for r in manual_rows
+                            if "original_score" in r["data"]]
+                original = max((s for s in recorded if s is not None), default=None) if recorded else cls.original_score(
+                    rows, person["actor_id"], person["role_id"],
+                )
+                score = original
+            else:
+                original = None
+                score = max((s for r in matching if (s := cls.evidence_score(r["data"].get("score"))) is not None), default=None)
+            result.append({**person, "score": score, "original_score": original, "manual": bool(manual_rows)})
+        return result
+
     # 分镜级状态先按分镜聚合一次再过滤：逐行 EXISTS 会在上万条证据上重复求值。
     SHOT_STATES = (
         "(SELECT e.shot_id, e.source_id, SUM(status='accepted') AS accepted, "
         "SUM(status='candidate') AS candidate, SUM(status='rejected') AS rejected "
         "FROM person_evidence e JOIN segments s ON s.id=e.shot_id AND s.source_id=e.source_id "
-        "GROUP BY e.shot_id, e.source_id)"
+        "WHERE s.kind='shot' GROUP BY e.shot_id, e.source_id "
+        "UNION ALL SELECT DISTINCT s.id, s.source_id, 0, 0, 0 FROM person_coverage c "
+        "JOIN segments s ON s.id=json_extract(c.data,'$.shot_id') AND s.source_id=c.source_id "
+        "WHERE s.kind='shot' AND NOT EXISTS (SELECT 1 FROM person_evidence e "
+        "WHERE e.shot_id=s.id AND e.source_id=s.source_id))"
     )
 
     def review_summary(self):
         """每个素材的分镜级状态计数；分类规则与审核列表完全一致。"""
         rows = self.store.rows(
-            "SELECT source_id, CASE WHEN accepted>0 THEN 'accepted' WHEN candidate>0 THEN 'candidate' "
+            "SELECT source_id, CASE WHEN accepted>0 THEN 'accepted' "
+            "WHEN candidate>0 OR rejected=0 THEN 'candidate' "
             "ELSE 'rejected' END AS bucket, COUNT(*) AS shots FROM "
             + self.SHOT_STATES
             + " GROUP BY source_id, bucket"
@@ -655,12 +942,17 @@ class Persons:
             ] = row["shots"]
         return summary
 
-    def review_shots(self, source_id=None, status=None, *, limit=50, offset=0, shot_id=None):
+    def review_shots(
+        self, source_id=None, status=None, *, limit=50, offset=0, shot_id=None,
+        actor_id=None, role_id=None, no_candidate=False, compact=False,
+    ):
         """按分镜分组返回证据。
 
         状态按分镜归类而不是逐帧：任一帧被确认，整个分镜就算已接受；只有完全没有
         已确认帧的分镜才仍算待确认。自动接受不代表已经完成人工审核。
-        卡内始终携带该分镜的全部证据与逐帧计数。
+        待确认分镜取全镜最高分候选归类；已接受分镜按全部已接受身份筛选，允许多分类命中。
+        待确认与已接受的分类、计数与过滤均在分页之前完成，卡内证据不受身份过滤影响。
+        已排除分镜不再按身份分类，忽略演员-角色和无候选筛选；历史证据保留供复核。
         """
         clauses, args = [], []
         for key, value in [("k.source_id", source_id), ("k.shot_id", shot_id)]:
@@ -670,49 +962,128 @@ class Persons:
         if status == "accepted":
             clauses.append("k.accepted>0")
         elif status == "candidate":
-            # 没有任何已确认帧、且确实还有候选帧，才算待确认。
-            clauses.append("k.accepted=0 AND k.candidate>0")
+            # 已处理但无检测结果的分镜也需要人工确认。
+            clauses.append("k.accepted=0 AND (k.candidate>0 OR k.rejected=0)")
         elif status == "rejected":
             clauses.append("k.accepted=0 AND k.candidate=0 AND k.rejected>0")
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-        total = self.store.one(
-            "SELECT count(*) AS n FROM " + self.SHOT_STATES + " k" + where,
-            args,
-        )["n"]
+        query = (
+            "WITH scoped AS (SELECT s.id AS shot_id,s.source_id,s.start,s.end,"
+            "k.accepted,k.candidate,k.rejected FROM segments s JOIN " + self.SHOT_STATES
+            + " k ON k.shot_id=s.id AND k.source_id=s.source_id" + where + "), "
+        )
+        if status == "rejected":
+            # 已人工排除的分镜只按素材、状态分页，无需再依赖身份表进行排名或归类。
+            query += (
+                "classified AS (SELECT s.*,NULL AS actor_id,NULL AS role_id,NULL AS score FROM scoped s) "
+            )
+            filters = []
+        else:
+            # 同分时优先当前已接受身份，再取最近的人工结论，最后以帧时间和 ID 保持稳定。
+            query += (
+                "ranked AS (SELECT e.source_id,e.shot_id,e.actor_id,e.role_id,"
+                "CASE WHEN json_type(e.data,'$.score') IN ('integer','real') "
+                "THEN json_extract(e.data,'$.score') ELSE 0 END AS score,"
+                "ROW_NUMBER() OVER (PARTITION BY e.source_id,e.shot_id ORDER BY "
+                "CASE WHEN json_type(e.data,'$.score') IN ('integer','real') "
+                "THEN json_extract(e.data,'$.score') ELSE 0 END DESC,"
+                "(e.status='accepted') DESC,COALESCE(json_extract(e.data,'$.reviewed_at'),'') DESC,"
+                "e.start,e.id) AS rank "
+                "FROM person_evidence e JOIN scoped s ON s.shot_id=e.shot_id AND s.source_id=e.source_id "
+                "JOIN person_entities a ON a.id=e.actor_id AND a.kind='actor'), "
+                "classified AS (SELECT s.*,r.actor_id,COALESCE(r.role_id,"
+                "(SELECT CASE WHEN COUNT(*)=1 THEN MIN(role.id) END FROM person_entities role "
+                "JOIN person_sources ps ON ps.source_id=s.source_id "
+                "WHERE role.kind='role' AND EXISTS (SELECT 1 FROM json_each(role.data,'$.actor_ids') "
+                "WHERE value=r.actor_id) AND EXISTS (SELECT 1 FROM json_each(role.data,'$.work_ids') "
+                "WHERE value=ps.work_id))) AS role_id,r.score FROM scoped s "
+                "LEFT JOIN ranked r ON r.source_id=s.source_id AND r.shot_id=s.shot_id AND r.rank=1), "
+                "confirmed AS (SELECT DISTINCT e.source_id,e.shot_id,e.actor_id,COALESCE(e.role_id,"
+                "(SELECT CASE WHEN COUNT(*)=1 THEN MIN(role.id) END FROM person_entities role "
+                "JOIN person_sources ps ON ps.source_id=e.source_id "
+                "WHERE role.kind='role' AND EXISTS (SELECT 1 FROM json_each(role.data,'$.actor_ids') "
+                "WHERE value=e.actor_id) AND EXISTS (SELECT 1 FROM json_each(role.data,'$.work_ids') "
+                "WHERE value=ps.work_id))) AS role_id FROM person_evidence e "
+                "JOIN scoped s ON s.source_id=e.source_id AND s.shot_id=e.shot_id "
+                "JOIN person_entities a ON a.id=e.actor_id AND a.kind='actor' WHERE e.status='accepted'), "
+                "memberships AS (SELECT * FROM confirmed UNION ALL "
+                "SELECT source_id,shot_id,actor_id,role_id FROM classified "
+                "WHERE accepted=0 AND (candidate>0 OR rejected=0) UNION ALL "
+                "SELECT s.source_id,s.shot_id,NULL,NULL FROM classified s WHERE s.accepted>0 "
+                "AND NOT EXISTS (SELECT 1 FROM confirmed c WHERE c.source_id=s.source_id AND c.shot_id=s.shot_id)) "
+            )
+            filters = self.store.rows(
+                query + "SELECT actor_id,role_id,COUNT(*) AS count FROM memberships GROUP BY actor_id,role_id",
+                args,
+            )
+        scope_total = self.store.one(query + "SELECT COUNT(*) AS n FROM classified", args)["n"]
+        pair_where, pair_args = "", list(args)
+        membership_match = "m.source_id=s.source_id AND m.shot_id=s.shot_id"
+        if status == "rejected":
+            total = scope_total
+        elif no_candidate:
+            pair_where = " WHERE EXISTS (SELECT 1 FROM memberships m WHERE " + membership_match + " AND m.actor_id IS NULL)"
+            total = sum(f["count"] for f in filters if f["actor_id"] is None)
+        elif actor_id:
+            pair_where = " WHERE EXISTS (SELECT 1 FROM memberships m WHERE " + membership_match + " AND m.actor_id=? AND m.role_id IS ?)"
+            pair_args.extend([actor_id, role_id])
+            total = sum(
+                f["count"] for f in filters if f["actor_id"] == actor_id and f["role_id"] == role_id
+            )
+        else:
+            total = scope_total
+        confirmed_people = ("'[]'" if status == "rejected" else
+            "(SELECT json_group_array(json_object('actor_id',actor_id,'role_id',role_id)) "
+            "FROM (SELECT actor_id,role_id FROM confirmed c "
+            "WHERE c.source_id=s.source_id AND c.shot_id=s.shot_id ORDER BY actor_id,role_id))")
         shots = self.store.rows(
-            "SELECT s.id AS shot_id,s.source_id,s.start,s.end FROM segments s "
-            "JOIN " + self.SHOT_STATES + " k ON k.shot_id=s.id AND k.source_id=s.source_id"
-            + where
-            + " ORDER BY s.source_id,s.start LIMIT ? OFFSET ?",
-            [*args, limit, offset],
+            query + "SELECT s.*," + confirmed_people + " AS confirmed_people FROM classified s" + pair_where
+            + " ORDER BY s.source_id,s.start,s.shot_id LIMIT ? OFFSET ?",
+            [*pair_args, limit, offset],
         )
         items = []
         for shot in shots:
-            rows = [
-                {
-                    **r,
-                    "data": {
-                        k: v for k, v in json.loads(r["data"]).items() if k not in {"body_feature", "space"}
-                    },
-                    "image_url": f"/api/persons/evidence/{r['id']}/image",
-                }
-                for r in self.store.rows(
-                    "SELECT * FROM person_evidence WHERE source_id=? AND shot_id=? ORDER BY start,id",
-                    (shot["source_id"], shot["shot_id"]),
-                )
-            ]
+            evidence_sql = (
+                "SELECT id,actor_id,role_id,status,json_object("
+                "'score',json_extract(data,'$.score'),'original_score',json_extract(data,'$.original_score'),"
+                "'evidence_type',json_extract(data,'$.evidence_type'),'confirmation',json_extract(data,'$.confirmation')) "
+                "AS data,json_type(data,'$.original_score') IS NOT NULL AS original_recorded "
+                "FROM person_evidence WHERE source_id=? AND shot_id=? ORDER BY start,id" if compact else
+                "SELECT * FROM person_evidence WHERE source_id=? AND shot_id=? ORDER BY start,id"
+            )
+            raw_rows = []
+            for row in self.store.rows(evidence_sql, (shot["source_id"], shot["shot_id"])):
+                data = {k: v for k, v in json.loads(row["data"]).items() if k not in {"body_feature", "space"}}
+                if compact and not row["original_recorded"]:
+                    data.pop("original_score", None)
+                raw_rows.append({**row, "data": data})
+            people = self.confirmed_scores(json.loads(shot["confirmed_people"]), raw_rows)
+            if compact:
+                unique = {}
+                for row in raw_rows:
+                    key = (row["actor_id"], row["role_id"], row["status"])
+                    unique.setdefault(key, {k: row[k] for k in ("id", "actor_id", "role_id", "status")})
+                rows = list(unique.values())
+            else:
+                rows = [{**r, "image_url": f"/api/persons/evidence/{r['id']}/image"} for r in raw_rows]
             items.append(
                 {
-                    **shot,
+                    **{k: shot[k] for k in ("shot_id", "source_id", "start", "end")},
+                    "candidate": {
+                        "actor_id": shot["actor_id"], "role_id": shot["role_id"], "score": shot["score"],
+                    } if shot["actor_id"] else None,
+                    "confirmed_people": people,
                     "counts": {
-                        key: sum(r["status"] == key for r in rows)
+                        key: shot[key]
                         for key in ("accepted", "candidate", "rejected")
                     },
-                    "image_url": next((r["image_url"] for r in rows if r["data"].get("image_path")), None),
+                    "image_url": next(
+                        (r["image_url"] for r in rows if r.get("data", {}).get("image_path")), None,
+                    ),
                     "evidence": rows,
                 }
             )
-        return {"items": items, "total": total}
+        return {"items": items, "total": total, "scope_total": scope_total, "filters": filters}
 
     def evidence(self, source_id=None, status=None, *, limit=None, offset=0, public=False):
         clauses, args = [], []

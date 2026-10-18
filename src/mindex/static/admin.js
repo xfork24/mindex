@@ -160,6 +160,7 @@ run(async()=>{
 let dialoguePoll = null;
 const channelNames = {visual:'视频画面', dialogue:'对白文本', analysis:'LLM 分析'};
 const channelStatus = {complete:'处理完成', partial:'部分完成', empty:'空内容', no_audio:'无音轨', disabled:'未启用', processing:'处理中', failed:'失败', not_processed:'未处理', pending_alignment:'待手动对齐'};
+const NO_SUBTITLE_TRACK_MESSAGE = '当前视频没有字幕轨道，无法补充对白。请导入带字幕的原片，或用 mindex transcribe 先做语音转写。';
 function renderDialogue(source, target) {
   clearTimeout(dialoguePoll);
   const panel = node('section', undefined, 'dialogue-panel');
@@ -181,7 +182,8 @@ function renderDialogue(source, target) {
   const label = node('label', '字幕轨道 ');
   const select = node('select'); select.setAttribute('aria-label', '对白字幕轨道');
   const auto = node('option', '自动选择完整文本字幕'); auto.value = ''; select.append(auto);
-  for (const track of source.subtitle_tracks || []) {
+  const tracks = source.subtitle_tracks || [];
+  for (const track of tracks) {
     const option = node('option', `${track.index} · ${track.language} · ${track.codec}${track.forced?' · forced':''}${track.default?' · 默认':''}${track.title?' · '+track.title:''}`);
     option.value = track.index; select.append(option);
   }
@@ -189,24 +191,30 @@ function renderDialogue(source, target) {
   label.append(select); panel.append(label);
   const task = source.dialogue_task;
   const busy = task && ['queued', 'running'].includes(task.status);
+  // 面板内联错误行：与任务失败原因同位，本次操作的提示直接写在这里，不往顶部横幅发。
+  const errorLine = node('p', task?.error || '', 'source-warning');
+  errorLine.hidden = !errorLine.textContent;
+  const fail = text => { errorLine.textContent = text; errorLine.hidden = false; };
   const publishLabel = node('label', ' 完成后自动发布 ');
   const publish = node('input'); publish.type = 'checkbox'; publish.checked = true; publishLabel.append(publish); panel.append(publishLabel);
   const start = action('补充对白', async () => {
+    // 先确认字幕轨道存在，再决定是否提交任务：没有轨道就直接报错，不去连接 ASR 服务。
+    if (!tracks.length) return fail(NO_SUBTITLE_TRACK_MESSAGE);
     const options = {subtitle_stream:select.value === '' ? null : Number(select.value), publish:publish.checked};
     await api(`/api/admin/sources/${source.id}/dialogue`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(options)});
     await refreshDialogue(source.id);
   });
   start.disabled = Boolean(busy); panel.append(start);
-  if (task) {
-    const progress = task.progress || {};
-    panel.append(node('p', `任务：${task.status} · ${task.status === 'complete' ? '处理完成' : progress.stage === 'embedding' ? '正在嵌入与发布' : `${progress.completed_chunks || 0}/${progress.total_chunks || '?'} 分块`}`));
-    if (task.error) panel.append(node('p', task.error, 'source-warning'));
-    if (['failed','interrupted'].includes(task.status)) panel.append(action('重试未完成部分', async () => {
-      await api(`/api/admin/dialogue-tasks/${task.id}/retry`, {method:'POST'}); await refreshDialogue(source.id);
-    }));
-    if (task.result?.index_id) panel.append(node('p', `已发布索引 ${task.result.index_id}`));
-    if (busy) dialoguePoll = setTimeout(() => run(() => refreshDialogue(source.id)), 2500);
-  }
+  const progress = task?.progress || {};
+  if (task) panel.append(node('p', `任务：${task.status} · ${task.status === 'complete' ? '处理完成' : progress.stage === 'embedding' ? '正在嵌入与发布' : `${progress.completed_chunks || 0}/${progress.total_chunks || '?'} 分块`}`));
+  panel.append(errorLine);
+  if (task && ['failed','interrupted'].includes(task.status)) panel.append(action('重试未完成部分', async () => {
+    // 与「补充对白」一致：先确认字幕轨道存在，再决定是否重新排队。
+    if (!tracks.length) return fail(NO_SUBTITLE_TRACK_MESSAGE);
+    await api(`/api/admin/dialogue-tasks/${task.id}/retry`, {method:'POST'}); await refreshDialogue(source.id);
+  }));
+  if (task?.result?.index_id) panel.append(node('p', `已发布索引 ${task.result.index_id}`));
+  if (busy) dialoguePoll = setTimeout(() => run(() => refreshDialogue(source.id)), 2500);
   panel.append(node('p', '本操作仅补充对白，不触发 LLM 分析；人物名字表示对白提及。', 'muted'));
   target.append(panel);
 }
@@ -257,7 +265,7 @@ async function showAnalysis(item) {
       if(ranges)person.append(node('p',`${label}区间：${ranges}`));
     }
     const counts=data.person.counts;
-    person.append(node('p',`已接受 ${counts.accepted} · 待确认 ${counts.candidate} · 已驳回 ${counts.rejected}`));
+    person.append(node('p',`已接受 ${counts.accepted} · 待确认 ${counts.candidate} · 已驳回 ${counts.rejected}（按分镜人物计）`));
     if(data.person.people.length)person.append(node('p',`证据关联人物：${data.person.people.map(p=>`${p.name}（${p.kind_label}）`).join('、')}`));
     target.append(person);
   }catch(error){if(request===analysisRequest)target.replaceChildren(node('p',error.message,'error'));}

@@ -1,0 +1,42 @@
+// 共享的多选框搜索组件：作品/演员/角色多选框上方挂一个实时过滤输入框。
+// 用法（各页 fill 函数内）：
+//   MindexMultiSearch.sort(entries)        —— 渲染前按中文字典序排序
+//   MindexMultiSearch.attach(select)       —— 首次挂搜索框（幂等）
+//   MindexMultiSearch.refilter(select)     —— 重填选项后重放当前过滤
+(function () {
+  'use strict';
+  var ALL_VALUE = '__all__';
+  function matches(option, query) {
+    return option.value === ALL_VALUE || !query || option.textContent.toLowerCase().includes(query);
+  }
+  var api = {
+    sort: function (entries) {
+      return entries.slice().sort(function (a, b) {
+        return (a.name || '').localeCompare(b.name || '', 'zh') || (a.id || '').localeCompare(b.id || '');
+      });
+    },
+    attach: function (select) {
+      if (!select || !select.multiple || select.dataset.searchable) return;
+      select.dataset.searchable = '1';
+      var input = document.createElement('input');
+      input.type = 'search';
+      input.className = 'multi-search';
+      input.placeholder = '搜索过滤…';
+      input.setAttribute('aria-label', '搜索过滤列表');
+      input.addEventListener('input', function () {
+        var query = input.value.trim().toLowerCase();
+        select.dataset.query = query;
+        for (var i = 0; i < select.options.length; i++)
+          select.options[i].hidden = !matches(select.options[i], query);
+      });
+      select.parentNode.insertBefore(input, select);
+    },
+    refilter: function (select) {
+      if (!select || !select.multiple || !select.dataset.searchable) return;
+      var query = (select.dataset.query || '').toLowerCase();
+      for (var j = 0; j < select.options.length; j++)
+        select.options[j].hidden = !matches(select.options[j], query);
+    },
+  };
+  window.MindexMultiSearch = api;
+})();

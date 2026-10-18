@@ -33,6 +33,8 @@ const ctx = {
 const requests = [], frames = new Map();
 let currentCtx = ctx, scope = "job/p", pendingPreview = null, previewFailure = false, frameID = 0;
 const sandbox = {
+  // multiselect.js 未在 vm 中加载；给出与真实组件同接口的桩。
+  MindexMultiSearch: {sort: entries => entries.slice().sort((a, b) => String(a.name).localeCompare(String(b.name), 'zh')), attach() {}, refilter() {}},
   console, Node, Math, JSON, Number, String, Map, Promise, Error,
   state: { windowDrafts: new Map(), data: { revision: "r1" } },
   scopeKey: () => scope, planBase: () => "/plan", plan: () => ({ ranges: {} }),

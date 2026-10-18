@@ -466,10 +466,20 @@ def persons_save(ctx: typer.Context, file: Path, identifier: str | None = None):
 
 @persons_cli.command('reference')
 def persons_reference(ctx: typer.Context, actor: str, images: list[Path]):
+    """添加演员参考图；入库前与页面同口径质检（人物服务不可用即拒绝）。"""
+    from .person_processing import PersonClient, ensure_reference_quality
     from .persons import Persons
     from .storage import Store
-    catalogue = Persons(Store(ctx.obj.data_dir))
-    print_json([catalogue.add_reference(actor, p.read_bytes()) for p in images])
+    config = ctx.obj
+    store = Store(config.data_dir)
+    catalogue = Persons(store)
+    client, space = PersonClient(config), None
+
+    def check(item):
+        nonlocal space
+        space = ensure_reference_quality(store, config, client, item, space=space)
+
+    print_json([catalogue.add_reference(actor, p.read_bytes(), checker=check) for p in images])
 
 
 @persons_cli.command('process')

@@ -37,24 +37,36 @@ def person_section(store, segment):
     if cursor < end - 1e-6:
         uncovered.append({"start": cursor, "end": end})
     status = "not_processed" if not covered else "partial" if uncovered else "processed"
-    counts = dict.fromkeys(("accepted", "candidate", "rejected"), 0)
+    # 人物识别按分镜落证据：计数与关联人物都以整个分镜为口径，
+    # 不随精细片段裁剪，也不数帧——同一个人物多帧只算一个人。
+    shot = (
+        segment
+        if segment["kind"] == "shot"
+        else store.one("SELECT * FROM segments WHERE id=? AND kind='shot'", (segment["parent_id"],))
+        or segment
+    )
     entities = {r["id"]: json.loads(r["data"]) for r in store.rows("SELECT id,data FROM person_entities")}
-    people = {}
+    identities = {"accepted": set(), "candidate": set(), "rejected": set()}
     for row in store.rows(
-        "SELECT status,actor_id,role_id FROM person_evidence WHERE source_id=? AND start<? AND end>?",
-        (segment["source_id"], end, start),
+        "SELECT status,actor_id,role_id FROM person_evidence WHERE source_id=? AND shot_id=?",
+        (segment["source_id"], shot["id"]),
     ):
-        counts[row["status"]] += 1
-        for field in ("actor_id", "role_id"):
-            identifier = row[field]
-            if identifier in entities:
-                entity = entities[identifier]
-                people[identifier] = {
-                    "id": identifier,
-                    "name": entity["name"],
-                    "kind": entity["kind"],
-                    "kind_label": KIND_LABELS[entity["kind"]],
-                }
+        identities[row["status"]] |= {row["actor_id"], row["role_id"]} & entities.keys()
+    # 已接受的人物不再重复计入待确认/已驳回；候选与驳回只统计仍需处理的人物。
+    counts = {
+        "accepted": len(identities["accepted"]),
+        "candidate": len(identities["candidate"] - identities["accepted"]),
+        "rejected": len(identities["rejected"] - identities["accepted"]),
+    }
+    people = {
+        identifier: {
+            "id": identifier,
+            "name": entities[identifier]["name"],
+            "kind": entities[identifier]["kind"],
+            "kind_label": KIND_LABELS[entities[identifier]["kind"]],
+        }
+        for identifier in identities["accepted"]
+    }
     return {
         "status": status,
         "message": {"not_processed": "人物未处理", "partial": "人物部分处理", "processed": "人物处理完成"}[

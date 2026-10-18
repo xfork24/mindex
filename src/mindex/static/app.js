@@ -47,28 +47,58 @@ $('video-tab').onclick=()=>switchMode('video');
 document.querySelectorAll('[data-query]').forEach(button=>button.onclick=()=>{
   $('query').value=button.dataset.query; $('query').focus();
 });
-$('video-file').onchange=()=>{
-  if (previewUrl) URL.revokeObjectURL(previewUrl);
-  const file=$('video-file').files[0];
-  $('query-preview').hidden=!file;
-  if (file) {
+function showVideo(file){
+  if(previewUrl)URL.revokeObjectURL(previewUrl);
+  const preview=$('query-preview');
+  preview.hidden=!file;
+  if(file){
     $('file-label').textContent=`${file.name} · ${(file.size/1024/1024).toFixed(1)}MB`;
-    previewUrl=URL.createObjectURL(file); $('query-preview').src=previewUrl;
-  } else $('file-label').textContent='最长 30 秒 · 最大 100MB';
-};
-$('image-file').onchange=()=>{
-  if(imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
+    previewUrl=URL.createObjectURL(file);preview.src=previewUrl;
+  }else{
+    $('file-label').textContent='最长 30 秒 · 最大 100MB';preview.removeAttribute('src');
+  }
+}
+function showImage(file){
+  if(imagePreviewUrl)URL.revokeObjectURL(imagePreviewUrl);
   imagePreviewUrl=null;
-  const file=$('image-file').files[0];
-  $('image-preview').hidden=!file;
+  const preview=$('image-preview');
+  preview.hidden=!file;
   if(file){
     $('image-file-label').textContent=`${file.name} · ${(file.size/1024/1024).toFixed(1)}MB`;
-    imagePreviewUrl=URL.createObjectURL(file);$('image-preview').src=imagePreviewUrl;
+    imagePreviewUrl=URL.createObjectURL(file);preview.src=imagePreviewUrl;
   }else{
-    $('image-file-label').textContent='JPEG、PNG、WebP 静态图片 · 最大 20MB';
-    $('image-preview').removeAttribute('src');
+    $('image-file-label').textContent='JPEG、PNG、WebP 静态图片 · 最大 20MB';preview.removeAttribute('src');
   }
-};
+}
+// 拖放的文件不属于 input.files，优先写回 input，让预览与提交共用同一条路径。
+const droppedFile={image:null,video:null};
+function currentFile(mode){return $(mode==='image'?'image-file':'video-file').files[0]||droppedFile[mode]||null;}
+function acceptsType(file,accept){
+  return accept.split(',').map(rule=>rule.trim()).filter(Boolean).some(rule=>
+    rule.endsWith('/*')?file.type.startsWith(rule.slice(0,-1)):file.type===rule);
+}
+function bindDrop(panelId,inputId,labelId,kind,show){
+  const panel=$(panelId),input=$(inputId),label=$(labelId),accept=input.getAttribute('accept')||'';
+  input.onchange=()=>{droppedFile[kind]=null;show(input.files[0]||null);};
+  const highlight=()=>label.classList.add('dragging');
+  const unhighlight=()=>label.classList.remove('dragging');
+  panel.addEventListener('dragover',event=>{event.preventDefault();highlight();});
+  panel.addEventListener('dragenter',event=>{event.preventDefault();highlight();});
+  // 在子元素之间移动也会冒泡 dragleave，用 relatedTarget 判断是否真的离开了面板。
+  panel.addEventListener('dragleave',event=>{if(!panel.contains(event.relatedTarget))unhighlight();});
+  panel.addEventListener('drop',event=>{
+    event.preventDefault();unhighlight();
+    const file=event.dataTransfer?.files?.[0];
+    if(!file){notice('没有读到拖入的文件，请重试或点击选择。','error');return;}
+    if(!acceptsType(file,accept)){notice(`请拖入${kind==='image'?'图片':'视频'}文件，当前支持：${accept}。`,'error');return;}
+    const transfer=new DataTransfer();transfer.items.add(file);
+    try{input.files=transfer.files;}catch(e){droppedFile[kind]=file;}
+    show(file);
+    if(!input.files.length&&!droppedFile[kind])notice('当前浏览器不支持拖放上传，请点击选择文件。','error');
+  });
+}
+bindDrop('image-input','image-file','image-drop','image',showImage);
+bindDrop('video-input','video-file','video-drop','video',showVideo);
 
 function filters() {
   const values={source_id:$('source').value,scene:$('scene').value.trim(),emotion:$('emotion').value.trim(),shot_size:$('shot-size').value.trim()};
@@ -131,7 +161,13 @@ function render(data) {
     const title=element('div',undefined,'card-title');title.append(element('strong',result.source_name),element('span',`${(result.end-result.start).toFixed(1)}s`));
     const tags=element('div',undefined,'tags');
     const channels = new Set((result.matches || []).map(match => match.channel || (match.route==='video'?'visual':null)).filter(Boolean));
-    for(const e of (result.person_evidence||[]).slice(0,3))tags.append(element('span',e.actor_name+(e.role_name?' / '+e.role_name:''),'tag'));
+    // 同一个人物会在多个采样帧上留下出镜证据，标签按「演员 / 角色」去重后再展示。
+    const personTags=[];
+    for(const e of result.person_evidence||[]){
+      const name=`${e.actor_name||'未知演员'}${e.role_name?' / '+e.role_name:''}`;
+      if(!personTags.includes(name))personTags.push(name);
+    }
+    for(const name of personTags.slice(0,3))tags.append(element('span',name,'tag'));
     channels.forEach(channel => tags.append(element('span',routeNames[channel] || channel,'tag')));
     [...result.annotation.scene,...result.annotation.emotions,...result.annotation.shot_size].slice(0,5).forEach(tag=>tags.append(element('span',tag,'tag')));
     const actions=element('div',undefined,'card-actions');
@@ -146,8 +182,8 @@ function render(data) {
 }
 $('search-form').onsubmit=async event=>{
   event.preventDefault();if(busy)return;
-  const text=$('query').value.trim();const file=$(mode==='image'?'image-file':'video-file').files[0];
-  if (mode==='text'&&!text&&!$('person-select').selectedOptions.length) {notice('请先描述想找的画面。','error');return;}
+  const text=$('query').value.trim();const file=currentFile(mode);
+  if (mode==='text'&&!text&&!selectedValues('actor-select').length&&!selectedValues('role-select').length) {notice('请先描述想找的画面。','error');return;}
   if (mode==='video'&&!file) {notice('请选择一段参考视频。','error');return;}
   if (mode==='image'&&!file) {notice('请选择一张参考图片。','error');return;}
   busy=true;$('search-button').disabled=true;$('search-button').textContent='正在查找…';
@@ -155,7 +191,7 @@ $('search-form').onsubmit=async event=>{
   try {
     let data;
     const common={granularity:$('granularity').value,limit:Number($('limit').value),filters:filters()};
-    if(mode==='text') data=await api('/api/search/text',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,...common,person_ids:Array.from($('person-select').selectedOptions).map(o=>o.value),person_mode:$('person-mode').value,person_relation:$('person-relation').value})});
+    if(mode==='text') data=await api('/api/search/text',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,...common,person_ids:[...new Set([...selectedValues('actor-select'),...selectedValues('role-select')])],person_mode:$('person-mode').value,person_relation:$('person-relation').value})});
     else {
       const form=new FormData();form.append('file',file);form.append('granularity',common.granularity);form.append('limit',common.limit);form.append('filters',JSON.stringify(common.filters));
       data=await api(`/api/search/${mode}`,{method:'POST',body:form});
@@ -168,15 +204,43 @@ $('search-form').onsubmit=async event=>{
   } catch(error) {notice(error.message,'error');}
   finally {busy=false;$('search-button').disabled=false;$('search-button').textContent='查找片段 ↗';}
 };
+// 多选框顶部的“全部选择”：选中它等同全选，手动取消任意一项时它同步取消。
+const ALL_VALUE='__all__';
+function allOption(select){return select.querySelector(`option[value="${ALL_VALUE}"]`);}
+function itemOptions(select){return Array.from(select.options).filter(o=>o.value!==ALL_VALUE);}
+function syncAll(select){
+  const all=allOption(select);if(!all)return;
+  const items=itemOptions(select);
+  all.selected=items.length>0&&items.every(o=>o.selected);
+  select.dataset.allSelected=all.selected?'1':'0';
+}
+function applyAll(select,on){for(const o of itemOptions(select))o.selected=on;syncAll(select);}
+// change 时无法区分是点了“全部选择”还是普通项，用上一次的全选状态判断意图。
+function toggleAll(select){const all=allOption(select);if(all&&all.selected!==(select.dataset.allSelected==='1'))applyAll(select,all.selected);else syncAll(select);}
+function bindAllToggle(id,after){$(id).addEventListener('change',()=>{toggleAll($(id));if(after)after();});}
+function selectedValues(id) { return Array.from($(id).selectedOptions).map(o=>o.value).filter(v=>v!==ALL_VALUE); }
+function fillOptions(id, entries) {
+  const chosen=new Set(selectedValues(id));
+  const select=$(id);select.replaceChildren();
+  const all=element('option','全部选择');all.value=ALL_VALUE;select.append(all);
+  for(const entry of MindexMultiSearch.sort(entries)){const option=element('option',`${entry.name} · ${entry.id.slice(0,8)}`);option.value=entry.id;option.selected=chosen.has(entry.id);select.append(option);}
+  MindexMultiSearch.attach(select);
+  MindexMultiSearch.refilter(select);
+  syncAll(select);
+}
+function fillRoleOptions() {
+  const actors=new Set(selectedValues('actor-select'));
+  const roles=registeredPeople.filter(e=>e.kind==='role'&&(actors.size===0||(e.actor_ids||[]).some(id=>actors.has(id))));
+  fillOptions('role-select',roles);
+}
 async function refresh() {
   $('refresh').disabled=true;
   try {
     const data=await api('/api/status?health=true');
     const catalogue=await api('/api/persons');
-    const chosen=new Set(Array.from($('person-select').selectedOptions).map(o=>o.value));
     registeredPeople=catalogue.entities.filter(e=>['actor','role'].includes(e.kind));
-    $('person-select').replaceChildren();
-    for(const p of registeredPeople){const option=element('option',`${p.name} · ${p.kind==='actor'?'演员':'角色'} · ${p.id.slice(0,8)}`);option.value=p.id;option.selected=chosen.has(p.id);$('person-select').append(option);}
+    fillOptions('actor-select',registeredPeople.filter(e=>e.kind==='actor'));
+    fillRoleOptions();
     const current=$('source').value;$('source').replaceChildren(element('option','全部素材'));
     $('source').firstChild.value='';
     data.sources.forEach(source=>{const option=element('option',source.name);option.value=source.id;$('source').append(option);});$('source').value=current;
@@ -193,6 +257,8 @@ async function refresh() {
   finally {$('refresh').disabled=false;}
 }
 $('refresh').onclick=refresh;
+bindAllToggle('actor-select',fillRoleOptions);
+bindAllToggle('role-select');
 refresh();
 
 $('query').addEventListener('input',()=>{
