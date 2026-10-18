@@ -510,6 +510,30 @@ def test_asr_and_analyzer_schema2_use_current_service_id(native, tmp_path):
     native["chat"] = '{"answer": "测试"}'
     assert PinnedQwenAnalyzer(config)._chat([], "测试") == {"answer": "测试"}
     assert native["posts"][-1]["model"] == "current-analyzer"
+    assert native["posts"][-1]["max_tokens"] == 12768
+
+
+def test_pinned_analyzer_validates_fields_with_configured_retries(native, monkeypatch):
+    config = native["config"]
+    config.analyzer.backend = "llama_cpp"
+    config.analyzer.response_retries = 1
+    native["models"]["data"][0]["id"] = "current-analyzer"
+    native["pin"]("analyzer")
+    native["chat"] = '{"description":"夜景","scene":"滨水区"}'
+    delays = []
+
+    def retry(delay):
+        delays.append(delay)
+        native["chat"] = '{"description":"夜景","scene":["滨水区"]}'
+
+    monkeypatch.setattr(adapters.time, "sleep", retry)
+    monkeypatch.setattr(adapters, "frame_data", lambda *args: [(0, "data:image/jpeg;base64,TEST")])
+    analyzer = PinnedQwenAnalyzer(config)
+    original = analyzer.profile
+    assert analyzer.analyze(None, []).scene == ["滨水区"]
+    assert delays == [1] and analyzer.profile is original
+    assert [post["model"] for post in native["posts"]] == ["current-analyzer"] * 2
+    assert [post["max_tokens"] for post in native["posts"]] == [12768, 25536]
 
 
 def test_pin_cli_local_remote_and_mutual_exclusion(native, tmp_path):

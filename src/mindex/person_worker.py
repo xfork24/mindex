@@ -25,7 +25,7 @@ def main():
     config.person.api_key = runtime.current().person.api_key
     manager = PersonTasks.__new__(PersonTasks)
     manager.runtime, manager.store, manager.threads = runtime, store, {}
-    lock = manager.lock()
+    lock = manager.lock(row["source_id"])
     try:
         lock.acquire()
     except Timeout as exc:

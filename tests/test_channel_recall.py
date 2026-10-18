@@ -164,6 +164,80 @@ def test_incremental_legacy_reuse_other_sources_curation_failure_and_rollback(co
     assert SearchEngine(config, embedder).text(TextSearch(text="红色"))["index_id"] == old
 
 
+def test_visual_failure_resumes_completed_vectors_without_publishing_partial(config, video_file):
+    pipeline = Pipeline(config)
+    sid = pipeline.prepare(video_file)
+    moments = pipeline.store.segments(sid, "moment")
+
+    class FailingVideo(CountingEmbedder):
+        def video(self, path):
+            if self.video_calls == 2:
+                raise ModelError("Failed to load image or audio file")
+            return super().video(path)
+
+    with pytest.raises(ModelError, match="Failed to load"):
+        IndexBuilder(config, FailingVideo(config)).build(
+            source_id=sid, channels=["visual"], activate=True
+        )
+    assert pipeline.store.active_index() is None
+    building = pipeline.store.one("SELECT id FROM index_versions WHERE status='building'")["id"]
+    complete = pipeline.store.one(
+        "SELECT COUNT(*) AS n FROM index_members WHERE index_id=? AND complete=1", (building,)
+    )["n"]
+    assert complete == 2
+    vectors = VectorIndex(config.data_dir, building)
+    saved = {identifier: vectors.vector(identifier) for identifier in vectors.ids()}
+    assert len(saved) == 2
+    recovered_embedder = CountingEmbedder(config)
+    recovered = IndexBuilder(config, recovered_embedder).build(
+        source_id=sid, channels=["visual"], activate=True
+    )
+    assert recovered == building
+    assert recovered_embedder.video_calls == len(moments) - 2
+    assert all(vectors.vector(identifier) == value for identifier, value in saved.items())
+    assert not check_index(pipeline.store, recovered)
+    assert pipeline.store.active_index()["id"] == recovered
+    report = json.loads(
+        pipeline.store.one("SELECT value FROM settings WHERE key=?", ("index_report." + recovered,))["value"]
+    )
+    assert report["resumed_vectors"] == 2
+
+
+def test_embedding_progress_counts_segments_after_all_windows_and_ready_index(config, video_file):
+    from mindex.media import probe
+
+    pipeline = Pipeline(config)
+    sid = pipeline.prepare(video_file)
+    total = len(pipeline.store.segments(sid, "shot"))
+    events = []
+
+    class ObservedEmbedder(CountingEmbedder):
+        def video(self, path):
+            before = sum(probe(config.data_dir / s["path"])["duration"] > config.video.short_shot_seconds
+                         for s in pipeline.store.segments(sid, "shot"))
+            assert before  # fixture contains a long shot with multiple embedding windows
+            latest = events[-1]
+            assert latest["stage"] == "embedding"
+            assert latest["completed"] < latest["total"]
+            return super().video(path)
+
+    embedder = ObservedEmbedder(config)
+    builder = IndexBuilder(config, embedder)
+    version = builder.build(source_id=sid, kinds=["shot"], channels=["visual"], progress=events.append)
+    embedding_events = [e for e in events if e["stage"] == "embedding"]
+    assert [e["completed"] for e in embedding_events] == list(range(total + 1))
+    assert all(e["total"] == total for e in events)
+    assert embedder.video_calls > total  # windows are not misreported as extra completed segments
+    assert [e["stage"] for e in events[-2:]] == ["index_check", "indexed"]
+    events.clear()
+    calls = embedder.calls
+    assert builder.build(source_id=sid, kinds=["shot"], channels=["visual"],
+                         activate=True, progress=events.append) == version
+    assert embedder.calls == calls
+    assert [e["stage"] for e in events] == ["index_check", "publish", "published"]
+    assert all(e["completed"] == e["total"] == total for e in events)
+
+
 def test_lexical_degradation_and_channel_exclusion(config, video_file):
     pipeline = Pipeline(config)
     sid = pipeline.prepare(video_file)

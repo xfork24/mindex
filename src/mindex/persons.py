@@ -1200,6 +1200,26 @@ def _fuzzy_union(pairs, base):
     )
 
 
+_DOCUMENT = r"(?:记录|档案|资料|信件|书信|日记|传记|报道|报告|照片|画像)"
+_REFERENCE = re.compile(r"(?:关于|有关)[^，,。.;；！？!?：:\n]{1,40}?" + _DOCUMENT)
+_POSSESSIVE_DOCUMENT = re.compile(r"的(?:相关)?" + _DOCUMENT)
+AUTO_PERSON_QUERY_VERSION = "document-reference-v1"
+
+
+def has_document_reference(text):
+    """Whether auto name interpretation can differ from the legacy co-appearance rule."""
+    return bool(_REFERENCE.search(text) or _POSSESSIVE_DOCUMENT.search(text))
+
+
+def _document_reference(text, start, end):
+    # Only clear documentary references are relaxed. Separate visible occurrences of
+    # the same person, coordinated subjects and explicit selections remain strict.
+    return bool(
+        _POSSESSIVE_DOCUMENT.match(text, end)
+        or any(m.start() <= start and end <= m.end() for m in _REFERENCE.finditer(text))
+    )
+
+
 def resolve_names(query, entities):
     """Resolve typed names to identities; returns (ids, recognized, remaining, variant_groups).
 
@@ -1210,6 +1230,7 @@ def resolve_names(query, entities):
 
     lookup = {e["id"]: e for e in entities}
     explicit = list(dict.fromkeys(query.person_ids))
+    selected_ids = set(explicit)
     for identifier in explicit:
         if identifier not in lookup or lookup[identifier]["kind"] == "work":
             raise ValueError("请选择已发布人物版本中的演员或角色")
@@ -1245,6 +1266,7 @@ def resolve_names(query, entities):
         groups.setdefault((a, b), []).append((identifier, name))
     recognized = []
     variant_groups = []
+    onscreen_spans = []
     for (a, b), group in sorted(groups.items()):
         options = list(dict.fromkeys(i for i, _ in group))
         selected = [i for i in options if i in explicit]
@@ -1263,8 +1285,13 @@ def resolve_names(query, entities):
                 )
             )
         members = selected or options
+        reference = (
+            query.person_mode == "auto"
+            and not selected_ids.intersection(members)
+            and _document_reference(query.text, a, b)
+        )
         for identifier in members:
-            if identifier not in explicit:
+            if not reference and identifier not in explicit:
                 explicit.append(identifier)
             recognized.append(
                 {
@@ -1272,11 +1299,14 @@ def resolve_names(query, entities):
                     "name": lookup[identifier]["name"],
                     "kind": lookup[identifier]["kind"],
                     "span": [a, b],
+                    **({"usage": "reference"} if reference else {}),
                 }
             )
-        variant_groups.append(members)
+        if not reference:
+            variant_groups.append(members)
+            onscreen_spans.append((a, b))
     remaining = query.text
-    for a, b in sorted(groups, reverse=True):
+    for a, b in sorted(onscreen_spans, reverse=True):
         remaining = remaining[:a] + " " + remaining[b:]
     from_text = {i for g in variant_groups for i in g}
     singletons = [[i] for i in explicit if i not in from_text]

@@ -6,6 +6,7 @@ import json
 from contextvars import ContextVar
 
 from . import studio
+from .i18n import add_message_metadata, message_metadata
 from .studio_artifacts import safe_path
 
 active_log: ContextVar[ExecutionLog | None] = ContextVar("studio_execution_log", default=None)
@@ -39,7 +40,7 @@ def read_events(config, job_id, build_id, after=0, limit=500):
                 if len(items) == limit:
                     more = True
                     break
-                items.append(event)
+                items.append(add_message_metadata(event))
     return {
         "items": items,
         "next_seq": items[-1]["seq"] if items else after,
@@ -70,6 +71,7 @@ class ExecutionLog:
             "shot_id": self.shot_id,
             "level": level,
             "message": str(message)[:2000],
+            **message_metadata(str(message)[:2000]),
         }
         with self.path.open("a") as stream:
             stream.write(json.dumps(event, ensure_ascii=False) + "\n")

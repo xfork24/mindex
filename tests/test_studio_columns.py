@@ -158,4 +158,7 @@ def test_log_partial_append_and_legacy_record(config):
     assert read_events(config, jid, "new")["next_seq"] == 1
     event = {"seq": 2, "at": studio.now(), "stage": "tts", "shot_id": "a", "level": "info", "message": "完成"}
     path.write_text(first + json.dumps(event) + "\n")
-    assert read_events(config, jid, "new", after=1)["items"] == [event]
+    items = read_events(config, jid, "new", after=1)["items"]
+    assert len(items) == 1
+    assert {key: items[0][key] for key in event} == event
+    assert items[0]["message_key"] and items[0]["message_params"] == {}

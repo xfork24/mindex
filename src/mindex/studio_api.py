@@ -402,7 +402,7 @@ def studio_router(
 
     @router.get("/jobs/{job_id}/workspace")
     def get_workspace(job_id: str):
-        return workspace.detail(current(), job_id, read_workspace(job_id))
+        return workspace.detail(current(), job_id, read_workspace(job_id), store=store)
 
     @router.patch("/jobs/{job_id}/title")
     def patch_title(job_id: str, body: TitleBody):

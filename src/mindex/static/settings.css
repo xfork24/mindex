@@ -65,4 +65,4 @@ dialog label.check{flex-direction:row;align-items:center;gap:9px}
 #clone-error{color:#a83e2a;font-size:12px;min-height:18px;margin:10px 0}
 .clone-consent{margin:6px 0}
 @media(max-width:900px){.profile-scroller{flex-wrap:wrap}.profile-item{flex:1 1 260px}.new-profile-card{flex:1 1 160px}.weight-grid{grid-template-columns:repeat(3,1fr)}}
-@media(max-width:540px){.weight-grid{grid-template-columns:repeat(2,1fr)}.tuning-row{flex-wrap:wrap}dialog .form-grid{grid-template-columns:1fr}}
+@media(max-width:540px){.settings header{height:auto;min-height:70px;flex-wrap:wrap;gap:12px;padding-top:14px;padding-bottom:14px}.weight-grid{grid-template-columns:repeat(2,1fr)}.tuning-row{flex-wrap:wrap}dialog .form-grid{grid-template-columns:1fr}}

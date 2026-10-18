@@ -2,16 +2,45 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 
 from .curation import CurationPatch, Library, Visibility, segment_public
 from .storage import Store
 
 
-def admin_router(store: Store) -> APIRouter:
+def admin_router(store: Store, runtime=None) -> APIRouter:
     router = APIRouter(prefix="/api/admin", tags=["素材管理"])
     library = Library(store)
+
+    @router.post("/sources/upload", status_code=201)
+    async def upload_source(file: UploadFile):
+        import tempfile
+        from pathlib import Path
+
+        from starlette.concurrency import run_in_threadpool
+
+        from .media import MediaError
+        from .pipeline import Pipeline
+        from .uploads import save_upload
+
+        config = runtime.current().model_copy(deep=True)
+        name = (file.filename or "video.mp4").replace("\\", "/").rsplit("/", 1)[-1]
+        if name in {"", ".", ".."}:
+            await file.close()
+            raise HTTPException(422, "无效的文件名")
+        directory = store.root / "sources" / ".uploads"
+        directory.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(dir=directory, suffix=Path(name).suffix, delete=False) as handle:
+            path = Path(handle.name)
+        try:
+            await save_upload(file, path, config.source_upload_max_bytes)
+            try:
+                return await run_in_threadpool(Pipeline(config).register, path, original_name=name, move=True)
+            except (MediaError, ValueError) as exc:
+                raise HTTPException(422, str(exc)) from exc
+        finally:
+            path.unlink(missing_ok=True)
 
     @router.get("/sources")
     def sources(
@@ -25,7 +54,8 @@ def admin_router(store: Store) -> APIRouter:
 
     @router.get("/sources/{source_id}")
     def source(source_id: str):
-        return library.source(source_id)
+        config = runtime.current() if runtime else None
+        return {**library.source(source_id), "enforce_gpu_lock": config.enforce_gpu_lock if config else False}
 
     @router.api_route("/sources/{source_id}/media", methods=["GET", "HEAD"])
     def source_media(source_id: str):
@@ -41,18 +71,22 @@ def admin_router(store: Store) -> APIRouter:
 
     @router.delete("/sources/{source_id}")
     def delete_source(source_id: str):
-        from filelock import FileLock, Timeout
+        from filelock import Timeout
 
+        from .config import Config
+        from .processing_lock import ProcessingLock, index_write_lock
         from .purge import PurgeRefused, purge_source
 
-        lock = FileLock(str(store.root / "pipeline.lock"), timeout=0)
+        config = runtime.current() if runtime else Config(data_dir=store.root)
+        lock = ProcessingLock(config, source_id=source_id, deleting=True)
         try:
             lock.acquire(blocking=False)
         except Timeout as exc:
-            raise HTTPException(409, "离线管线正在运行，请等待完成后再删除素材") from exc
+            raise HTTPException(409, "GPU 独占锁或该素材正在处理，请完成后再删除") from exc
         try:
             try:
-                return purge_source(store, source_id)
+                with index_write_lock(store.root):
+                    return purge_source(store, source_id)
             except KeyError as exc:
                 raise HTTPException(404, "素材不存在") from exc
             except PurgeRefused as exc:

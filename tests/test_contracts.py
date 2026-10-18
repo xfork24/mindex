@@ -42,8 +42,11 @@ def test_json_fences_and_invalid_scene_grouping(config, monkeypatch):
     with pytest.raises(ModelError):
         parse_json("not json")
     analyzer = QwenAnalyzer(config)
-    monkeypatch.setattr(analyzer, "_chat", lambda *a, **kw: {"groups": [[0, 0]]})
-    with pytest.raises(ModelError):
+    config.analyzer.response_retries = 0
+    monkeypatch.setattr(
+        adapters, "request", lambda *a, **kw: {"choices": [{"message": {"content": '{"groups":[[0,0]]}'}}]},
+    )
+    with pytest.raises(ModelError, match="重试已耗尽.*连续、完整且无重复"):
         analyzer.group_scenes([{"start": 0, "end": 1}])
 
 

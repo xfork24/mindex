@@ -159,7 +159,7 @@ def reusable_vectors(builder, identity):
     return cache
 
 
-def build_channels(builder, *, activate=False, mode="auto", source_id=None, kinds=None, channels=None):
+def build_channels(builder, *, activate=False, mode="auto", source_id=None, kinds=None, channels=None, progress=None):
     started = perf_counter()
     if mode not in {"auto", "visual"}:
         raise ValueError("索引模式必须是 auto、visual 或 enriched")
@@ -232,19 +232,45 @@ def build_channels(builder, *, activate=False, mode="auto", source_id=None, kind
         "manifest": fingerprint(snapshots),
     }
     index_id = fingerprint(spec)
+    selected_views = {"video" if c == "visual" else c for c in selected}
+    targets = {
+        s["id"]: {fingerprint([index_id, r[0]]) for r in representations(builder, s) if r[1] in selected_views}
+        for s in snapshots
+        if source_id is None or s["source_id"] == source_id
+    }
+    targets = {sid: ids for sid, ids in targets.items() if ids}
+    completed = set()
+
+    def notify(stage):
+        if progress:
+            progress({
+                "stage": stage, "completed": len(completed), "total": len(targets),
+                "unit": "segments", "index_id": index_id,
+            })
+
     existing_version = store.one("SELECT status FROM index_versions WHERE id=?", (index_id,))
     if existing_version and existing_version["status"] == "ready":
+        completed.update(targets)
+        notify("index_check")
         issues = check_index(store, index_id)
         if issues:
             raise ModelError("索引一致性检查失败：" + "; ".join(issues[:5]))
         if activate:
+            notify("publish")
             store.activate(index_id)
+        notify("published" if activate else "indexed")
         return index_id
     store.execute(
         "INSERT OR IGNORE INTO index_versions(id,spec,status) VALUES(?,?,'building')", (index_id, dumps(spec))
     )
     vectors = VectorIndex(store.root, index_id, create=True)
     existing = vectors.ids()
+    # Count durable vectors and metadata, including checkpoints from an earlier
+    # attempt. Other sources retained in the incremental index are not this task.
+    recorded = {r["id"] for r in store.rows("SELECT id FROM representations WHERE index_id=?", (index_id,))}
+    durable = existing & recorded
+    completed.update(sid for sid, ids in targets.items() if ids <= durable)
+    notify("embedding")
     cache = reusable_vectors(builder, identity)
     opened = {index_id: vectors}
     reused = embedded = resumed = 0
@@ -304,6 +330,10 @@ def build_channels(builder, *, activate=False, mode="auto", source_id=None, kind
             store.execute(
                 "UPDATE index_members SET complete=1 WHERE index_id=? AND segment_id=?", (index_id, s["id"])
             )
+            if s["id"] in targets and s["id"] not in completed:
+                completed.add(s["id"])
+                notify("embedding")
+        notify("index_check")
         issues = check_index(store, index_id)
         if issues:
             raise ModelError("索引一致性检查失败：" + "; ".join(issues[:5]))
@@ -326,5 +356,7 @@ def build_channels(builder, *, activate=False, mode="auto", source_id=None, kind
             ("index_report." + index_id, dumps(report)),
         )
         if activate:
+            notify("publish")
             store.activate(index_id)
+        notify("published" if activate else "indexed")
     return index_id

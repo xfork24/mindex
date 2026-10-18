@@ -98,8 +98,8 @@ def test_detail_missing_outputs_no_models_and_button_order(config, video_file):
     assert client.get("/api/admin/segments/missing/details").status_code == 404
     script = client.get("/admin.js").text
     assert (
-        script.index("action('详情'")
-        < script.index("action('备注'")
+        script.index('action(MindexI18n.msg("ui.4f55ee1e687f")')
+        < script.index('action(MindexI18n.msg("ui.e0361480e3a5")')
         < script.index("action(item.favorite")
         < script.index("action(item.hidden")
     )

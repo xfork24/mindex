@@ -1115,6 +1115,30 @@ def test_role_suffix_fuzzy_recall_variants_union_not_ambiguity(catalogue):
         resolve_names(TextSearch(text="叶淑柔"), p.entities())
 
 
+@pytest.mark.parametrize("reference", [
+    "档案中关于阿公郑木生的记录", "郑木生的照片", "有关郑木生的资料",
+])
+def test_auto_names_distinguish_document_references(catalogue, reference):
+    p, work, actor = catalogue
+    subject = p.save(Entity(kind="role", name="晓伟", work_ids=[work], actor_ids=[actor["id"]]))
+    elder = p.save(Entity(kind="role", name="郑木生", work_ids=[work], actor_ids=[actor["id"]]))
+    text = f"晓伟凝视着{reference}，神色凝重"
+    ids, recognized, rest, groups = resolve_names(TextSearch(text=text), p.entities())
+    assert ids == [subject["id"]] and groups == [[subject["id"]]]
+    assert rest == f"凝视着{reference}，神色凝重"
+    assert next(r for r in recognized if r["id"] == elder["id"])["usage"] == "reference"
+    for query in [TextSearch(text=text, person_mode="onscreen"), TextSearch(text=text, person_ids=[elder["id"]])]:
+        assert set(resolve_names(query, p.entities())[0]) == {subject["id"], elder["id"]}
+    # The same name can be a reference once and an onscreen subject elsewhere.
+    both = TextSearch(text=text + "，郑木生站在一旁")
+    assert set(resolve_names(both, p.entities())[0]) == {subject["id"], elder["id"]}
+    coordinated = TextSearch(text="晓伟和郑木生凝视着档案，神色凝重")
+    assert set(resolve_names(coordinated, p.entities())[0]) == {subject["id"], elder["id"]}
+    reference_only = TextSearch(text=reference)
+    assert resolve_names(reference_only, p.entities())[0] == []
+    assert resolve_names(reference_only, p.entities())[2] == reference
+
+
 def obs(face=True, box=None):
     return {
         "body_bbox": box or [0, 0, 100, 120],
@@ -1403,6 +1427,48 @@ def test_mentioned_role_variants_union_and_latin_name_boundaries(catalogue, conf
     assert result["eligible_segments"] == 0
 
 
+def test_auto_document_query_reaches_embedding_with_subject_evidence(catalogue, config, monkeypatch):
+    from mindex.indexing import VectorIndex
+    from mindex.search import SearchEngine
+
+    p, work, actor = catalogue
+    subject = p.save(Entity(kind="role", name="晓伟", work_ids=[work], actor_ids=[actor["id"]]))
+    elder = p.save(Entity(kind="role", name="郑木生", work_ids=[work], actor_ids=[actor["id"]]))
+    publish_content(p, config)
+    for n, role in enumerate([subject, elder]):
+        p.store.execute(
+            "INSERT INTO person_evidence VALUES(?,?,?,?,?,?,?,?,?,?)",
+            (f"ev{n}", "source", f"shot{n}", actor["id"], role["id"], None, n, n + 1, "accepted", dumps({})),
+        )
+    p.publish()
+    calls = []
+
+    class Embedder:
+        def identity(self):
+            return {"model": "fixture"}
+
+        def text(self, texts, role="query"):
+            calls.append(texts)
+            return [[1, 0]]
+
+    def query_vectors(self, vector, view, ids, count):
+        assert ids == ["shot0"]
+        return [{"id": i, "distance": 0.1} for i in ids]
+
+    monkeypatch.setattr(VectorIndex, "query", query_vectors)
+    engine = SearchEngine(config, Embedder())
+    text = "晓伟凝视着档案中关于阿公郑木生的记录，神色凝重"
+    result = engine.text(TextSearch(text=text, granularity="shot"))
+    assert calls == [["凝视着档案中关于阿公郑木生的记录，神色凝重"]]
+    assert [r["id"] for r in result["results"]] == ["shot0"]
+    assert result["person_ids"] == [subject["id"]]
+    assert [r["id"] for r in result["recognized_people"]] == [subject["id"]]
+    assert [r["id"] for r in result["referenced_people"]] == [elder["id"]]
+    strict = engine.text(TextSearch(text=text, granularity="shot", person_mode="onscreen"))
+    assert strict["eligible_segments"] == 0 and strict["results"] == []
+    assert len(calls) == 1
+
+
 def test_strict_no_dialogue_leak_pretruncate_filter_offline_name_and_rollback(catalogue, config, monkeypatch):
     from mindex.curation import CurationPatch, Library
     from mindex.indexing import VectorIndex
@@ -1575,6 +1641,7 @@ def test_partial_coverage_is_reported_and_review_roles_are_work_scoped(catalogue
 
 
 def test_tasks_return_ids_retry_and_restart_checkpoints(catalogue, config, monkeypatch):
+    config.enforce_gpu_lock = True
     from filelock import FileLock
 
     from mindex.person_processing import PersonTasks
@@ -2198,7 +2265,9 @@ def test_reference_face_error_records_actor_role_names_at_processing_time(catalo
     p.store.execute("DELETE FROM person_references WHERE id=?", (reference["id"],))
     p.save(Entity(kind="actor", name="后来改名"), actor["id"])
     task = TestClient(create_app(config)).get("/api/persons/tasks/reference-error-log").json()
-    assert task["result"]["reference_errors"] == report["reference_errors"]
+    logged = task["result"]["reference_errors"]
+    assert [{k: v for k, v in item.items() if k != "error_message"} for item in logged] == report["reference_errors"]
+    assert logged[0]["error_message"]["message_key"].startswith("ui.")
 
 
 @pytest.mark.parametrize("status", ["accepted", "candidate"])

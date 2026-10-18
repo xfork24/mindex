@@ -89,6 +89,7 @@ const reviewResponse = url => {
     })};
 };
 const sandbox = {
+  MindexI18n: require('./i18n_adapter.cjs'),
   // multiselect.js 未在 vm 中加载；给出与真实组件同接口的桩。
   MindexMultiSearch: {sort: entries => entries.slice().sort((a, b) => String(a.name).localeCompare(String(b.name), 'zh')), attach() {}, refilter() {}},
   console, URLSearchParams, FormData, location: {search: ''}, setInterval() {},

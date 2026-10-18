@@ -102,16 +102,20 @@ class IndexBuilder:
             self._embedder = make_embedder(self.config)
         return self._embedder
 
-    def build(self, *, activate=False, mode="auto", source_id=None, kinds=None, channels=None):
-        if mode == "enriched":
-            if channels is not None:
-                raise ValueError("enriched 兼容模式不支持 channels，请使用 auto")
-            return self._legacy_build(activate=activate, mode=mode, source_id=source_id, kinds=kinds)
-        from .channel_index import build_channels
+    def build(self, *, activate=False, mode="auto", source_id=None, kinds=None, channels=None, progress=None):
+        from .processing_lock import index_write_lock
 
-        return build_channels(
-            self, activate=activate, mode=mode, source_id=source_id, kinds=kinds, channels=channels
-        )
+        with index_write_lock(self.store.root):
+            if mode == "enriched":
+                if channels is not None:
+                    raise ValueError("enriched 兼容模式不支持 channels，请使用 auto")
+                return self._legacy_build(activate=activate, mode=mode, source_id=source_id, kinds=kinds)
+            from .channel_index import build_channels
+
+            return build_channels(
+                self, activate=activate, mode=mode, source_id=source_id, kinds=kinds, channels=channels,
+                progress=progress,
+            )
 
     def _legacy_build(
         self,

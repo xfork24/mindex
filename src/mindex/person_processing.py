@@ -12,16 +12,18 @@ from collections import defaultdict
 import httpx
 import numpy as np
 from fastapi import HTTPException
-from filelock import FileLock, Timeout
+from filelock import Timeout
 from pydantic import Field, model_validator
 
 from .adapters import ModelError
-from .config import Config, StrictModel, fingerprint
+from .config import StrictModel, fingerprint
 from .persons import Persons, uid
+from .processing_lock import ProcessingLock, recover_tasks
 from .storage import Store, dumps
 
 
 class PersonOptions(StrictModel):
+    work_id: str | None = None
     start: float = Field(default=0, ge=0)
     end: float | None = Field(default=0, ge=0, description="终点原片秒；0 或 null 表示至片尾")
     publish: bool = False
@@ -384,6 +386,8 @@ class PersonProcessor:
     def run(self, source_id, options: PersonOptions, progress=None):
         started = time.perf_counter()
         work_id = self.catalogue.work_for(source_id)
+        if options.work_id and options.work_id != work_id:
+            raise ValueError("关联作品已改变，请重新配置人物任务")
         source = self.store.one("SELECT * FROM sources WHERE id=?", (source_id,))
         shots = self.store.segments(source_id, "shot")
         if not shots:
@@ -636,7 +640,12 @@ class PersonProcessor:
         report["elapsed_seconds"] = round(time.perf_counter() - started, 3)
         report["accepted_shots"] = len(accepted_shots)
         report["candidate_shots"] = len(candidate_shots - accepted_shots)
-        report["release"] = self.catalogue.publish() if options.publish else None
+        report["release"] = None
+        if options.publish:
+            from .source_tasks import publication_attempt
+            report["publication"] = publication_attempt(self.config, source_id, "persons", progress=progress)
+            if report["publication"]["status"] == "complete":
+                report["release"] = report["publication"]
         report["verification"] = "engineering_only_pending_human_review"
         return report
 
@@ -670,23 +679,17 @@ class PersonProcessor:
 class PersonTasks:
     def __init__(self, runtime, store):
         self.runtime, self.store, self.threads = runtime, store, {}
-        try:
-            with self.lock():
-                store.execute(
-                    "UPDATE person_tasks SET status='interrupted',error='进程中断；重试将继续分镜检查点' WHERE status IN ('queued','running')"
-                )
-        except Timeout:
-            pass
+        recover_tasks(store, "person_tasks")
 
-    def lock(self):
-        return FileLock(str(self.store.root / "pipeline.lock"), timeout=0, thread_local=False)
+    def lock(self, source_id):
+        return ProcessingLock(self.runtime.current(), source_id=source_id, work="persons")
 
     def get(self, identifier):
         row = self.store.one("SELECT * FROM person_tasks WHERE id=?", (identifier,))
         if not row:
             raise HTTPException(404, "找不到人物任务")
         return {
-            k: json.loads(v) if k in {"options", "progress", "result"} and v else v
+            k: json.loads(v) if k in {"options", "progress", "result", "publication"} and v else v
             for k, v in row.items()
             if k != "config"
         }
@@ -700,14 +703,18 @@ class PersonTasks:
         row = self.store.one("SELECT * FROM person_tasks WHERE id=?", (identifier,))
         if not row:
             raise HTTPException(404, "找不到人物任务")
-        if row["status"] not in {"failed", "interrupted"}:
+        if row["status"] not in {"failed", "interrupted"} and json.loads(row["publication"] or "{}").get("status") != "failed":
             raise HTTPException(409, "仅失败或中断任务可以重试")
         return self.launch(
             row["source_id"],
             PersonOptions.model_validate_json(row["options"]),
             identifier,
-            Config.model_validate_json(row["config"]),
+            self.restore(row["config"]),
         )
+
+    def restore(self, raw):
+        from .source_tasks import restore_config
+        return restore_config(raw, self.runtime, self.store)
 
     def delete(self, identifier):
         row = self.store.one("SELECT status FROM person_tasks WHERE id=?", (identifier,))
@@ -719,24 +726,36 @@ class PersonTasks:
         return {"removed": identifier}
 
     def launch(self, source_id, options, identifier=None, config=None):
-        lock = self.lock()
+        lock = self.lock(source_id)
         try:
             lock.acquire()
         except Timeout as exc:
-            raise HTTPException(409, "管线正在运行，请稍后启动人物任务") from exc
+            raise HTTPException(409, "GPU 独占锁或该素材人物任务正在运行，请稍后启动") from exc
         try:
             config = config or self.runtime.current().model_copy(deep=True)
+            from .source_tasks import freeze_config, person_setup
+            source = self.store.one("SELECT prepared FROM sources WHERE id=?", (source_id,))
+            if not source or not source["prepared"]:
+                raise HTTPException(409, "请先完成分镜处理")
+            # 新工作台选择作品时做资料预检；兼容既有 CLI/API 的区间任务。
+            prior = self.store.one("SELECT result FROM person_tasks WHERE id=?", (identifier,)) if identifier else None
+            publish_only = bool(prior and prior["result"] and options.publish)
+            if options.work_id and not publish_only:
+                setup = person_setup(self.store, source_id, options.work_id)
+                if not setup["ready"]:
+                    raise HTTPException(409, "；".join(setup["missing"]))
+                if not identifier:
+                    Persons(self.store).assign_work(source_id, options.work_id)
             identifier = identifier or uid()
             if self.store.one("SELECT id FROM person_tasks WHERE id=?", (identifier,)):
-                # Credentials are kept outside serialized snapshots; use current profile/environment key.
-                config.person.api_key = self.runtime.current().person.api_key
+                # 重试沿用冻结配置，凭据由档案引用或环境恢复。
                 self.store.execute(
-                    "UPDATE person_tasks SET status='queued',error=NULL,result=NULL WHERE id=?", (identifier,)
+                    "UPDATE person_tasks SET status='queued',error=NULL WHERE id=?", (identifier,)
                 )
             else:
                 self.store.execute(
                     "INSERT INTO person_tasks(id,source_id,status,config,options) VALUES(?,?,?,?,?)",
-                    (identifier, source_id, "queued", config.model_dump_json(), options.model_dump_json()),
+                    (identifier, source_id, "queued", freeze_config(config, self.store), options.model_dump_json()),
                 )
             thread = threading.Thread(
                 target=self.run, args=(identifier, config, source_id, options, lock), daemon=True
@@ -761,7 +780,22 @@ class PersonTasks:
                     (dumps(value), identifier),
                 )
 
-            result = PersonProcessor(config).run(source_id, options, progress)
+            from .source_tasks import publication_attempt
+            row = self.store.one("SELECT result FROM person_tasks WHERE id=?", (identifier,))
+            result = json.loads(row["result"]) if row["result"] and options.publish else PersonProcessor(config).run(
+                source_id, options.model_copy(update={"publish": False}), progress)
+            self.store.execute("UPDATE person_tasks SET result=? WHERE id=?", (dumps(result), identifier))
+            if options.publish:
+                progress({"stage": "publish", "message": "人物处理完成，正在更新检索"})
+                publication = publication_attempt(
+                    config, source_id, "persons", save=lambda value: self.store.execute(
+                        "UPDATE person_tasks SET publication=? WHERE id=?", (dumps(value), identifier)),
+                    progress=progress,
+                )
+                result["release"] = publication if publication["status"] == "complete" else None
+            else:
+                self.store.execute("UPDATE person_tasks SET publication=? WHERE id=?",
+                                   (dumps({"status": "not_requested"}), identifier))
             self.store.execute(
                 "UPDATE person_tasks SET status='complete',result=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
                 (dumps(result), identifier),

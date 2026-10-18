@@ -12,6 +12,7 @@ import math
 import re
 import shutil
 import wave
+from dataclasses import dataclass, field
 from fractions import Fraction
 from pathlib import Path
 from typing import Literal
@@ -489,7 +490,31 @@ def ordered_shots(w, p):
     return version(w, p["board"])["data"]["order"]
 
 
-def settings(config, p, stage):
+@dataclass
+class DetailContext:
+    """Reuse reads within one detail response; never cache across edits or requests."""
+
+    store: Store | None = None
+    settings: dict = field(default_factory=dict)
+    conflicts: dict = field(default_factory=dict)
+
+    def database(self, config):
+        if self.store is None:
+            self.store = Store(config.data_dir)
+        return self.store
+
+
+def settings(config, p, stage, *, context=None):
+    if context is not None:
+        if stage not in context.settings:
+            context.settings[stage] = _settings(
+                config, p, stage, store=context.database(config) if stage == "recall" else None,
+            )
+        return context.settings[stage]
+    return _settings(config, p, stage)
+
+
+def _settings(config, p, stage, *, store=None):
     o = p["options"]
     if stage == "split":
         return {
@@ -497,19 +522,17 @@ def settings(config, p, stage):
             "split_version": studio.SPLIT_VERSION,
         }
     if stage == "recall":
-        active = Store(config.data_dir).active_index()
+        store = store or Store(config.data_dir)
+        active = store.active_index()
         # Text recall is implicitly affected by the active person release; cover it in the key.
-        from .persons import Persons
-
-        person_release = Persons(Store(config.data_dir)).published(active["id"])[0] if active else None
         return {
             "index_id": active["id"] if active else None,
-            "person_release": person_release["id"] if person_release else None,
+            "person_release": active.get("search_release_id") if active else None,
             "limit": o["recall_limit"],
             "recall": {**config.studio.recall.model_dump(), "limit": o["recall_limit"]},
             "search": config.search.model_dump(),
             "embedding": sanitized(config.embedding.model_dump()),
-            "visibility": visibility_key(Store(config.data_dir)),
+            "visibility": visibility_key(store),
         }
     if stage == "tts":
         voice = effective_voice(config, p)
@@ -579,8 +602,8 @@ def query_media(config, job_id, recall):
     raise studio.StudioError("查询文件缺失或已损坏，请重新上传")
 
 
-def specification(config, job_id, w, p, stage, sid=None):
-    params = settings(config, p, stage)
+def specification(config, job_id, w, p, stage, sid=None, *, context=None):
+    params = settings(config, p, stage, context=context)
     if stage == "split":
         payload = {"text": studio.load_job(config, job_id)["input_text"]}
         inputs = {}
@@ -600,6 +623,15 @@ def specification(config, job_id, w, p, stage, sid=None):
             recall = recall_signature(content.get("recall"))
             if recall is not None:
                 payload["recall"] = recall
+            from .persons import AUTO_PERSON_QUERY_VERSION, has_document_reference
+
+            value = content.get("recall") or {}
+            if (
+                value.get("mode", "text") == "text"
+                and value.get("person_mode", "auto") == "auto"
+                and has_document_reference(content["query"])
+            ):
+                payload["auto_person_query_version"] = AUTO_PERSON_QUERY_VERSION
         elif stage == "tts":
             payload = {"text": content["text"]}
         elif stage == "select":
@@ -619,11 +651,12 @@ def specification(config, job_id, w, p, stage, sid=None):
             event = w["versions"].get(inputs["select"], {}).get("data", {}).get("event")
             source = None
             if event:
-                row = Store(config.data_dir).one(
+                store = context.database(config) if context is not None else Store(config.data_dir)
+                row = store.one(
                     "SELECT path FROM sources WHERE id=?", (event["video"]["source_id"],)
                 )
                 if row:
-                    media = Store(config.data_dir).resolve_media(row["path"])
+                    media = store.resolve_media(row["path"])
                     if media.is_file():
                         source = {"bytes": media.stat().st_size, "mtime_ns": media.stat().st_mtime_ns}
             payload = {"select": inputs["select"], "tts": inputs["tts"], "source": source}
@@ -634,9 +667,12 @@ def specification(config, job_id, w, p, stage, sid=None):
     }
 
 
-def conflicts(config, job_id, w, p, stage, sid, vid):
+def conflicts(config, job_id, w, p, stage, sid, vid, *, context=None):
+    key = (stage, sid, vid)
+    if context is not None and key in context.conflicts:
+        return context.conflicts[key]
     item = version(w, vid)
-    expected = specification(config, job_id, w, p, stage, sid)
+    expected = specification(config, job_id, w, p, stage, sid, context=context)
     messages = []
     if stage == "select":
         from .studio_window import anchor_conflict
@@ -676,9 +712,11 @@ def conflicts(config, job_id, w, p, stage, sid, vid):
     for dependency in ("recall", "tts", "select"):
         dep_id = expected["inputs"].get(dependency)
         if dep_id and dep_id in w["versions"]:
-            upstream = conflicts(config, job_id, w, p, dependency, sid, dep_id)
+            upstream = conflicts(config, job_id, w, p, dependency, sid, dep_id, context=context)
             if upstream:
                 messages.append(f"上游 {dependency} 不兼容：{'；'.join(upstream)}")
+    if context is not None:
+        context.conflicts[key] = messages
     return messages
 
 
@@ -1232,6 +1270,7 @@ def execute(config, job_id, w, p, stage, sid=None, *, speaker=None, storyboarder
                         "person_mode",
                         "person_ids",
                         "recognized_people",
+                        "referenced_people",
                         "person_coverage_missing",
                         "person_version",
                         "score_type",
@@ -1499,8 +1538,9 @@ def recover(config, job_id, w):
         persist(config, job_id, w)
 
 
-def detail(config, job_id, w):
+def detail(config, job_id, w, *, store=None):
     p = plan(w, w["active_plan"])
+    context = DetailContext(store=store)
     result = copy.deepcopy(w)
     result["job"] = studio.load_job(config, job_id)
     result["revision"] = revision(p)
@@ -1520,7 +1560,9 @@ def detail(config, job_id, w):
         for stage in STAGES:
             vid = p["shots"][sid].get(stage)
             if vid:
-                result["conflicts"][f"{stage}:{sid}"] = conflicts(config, job_id, w, p, stage, sid, vid)
+                result["conflicts"][f"{stage}:{sid}"] = conflicts(
+                    config, job_id, w, p, stage, sid, vid, context=context,
+                )
     for item in result["versions"].values():
         for metadata in item["files"].values():
             from urllib.parse import quote

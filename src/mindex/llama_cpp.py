@@ -23,7 +23,7 @@ from .deployment import (
     space_contract,
     validate_role,
 )
-from .media import atomic_media, content_hash, probe
+from .media import MediaError, atomic_media, content_hash, probe
 
 ADAPTER_VERSION = deployment.ADAPTER_VERSION
 
@@ -171,29 +171,45 @@ def prepare_video(path: Path, output: Path, config: Config):
     ratio = min(1, math.sqrt(video.max_pixels / (info["width"] * info["height"])))
     width = max(2, int(info["width"] * ratio) // 2 * 2)
     height = max(2, int(info["height"] * ratio) // 2 * 2)
-    # Start at zero so even a sub-frame-duration clip produces at least one frame.
-    atomic_media(
-        [
-            "-i",
-            str(path),
-            "-map",
-            "0:v:0",
-            "-an",
-            "-vf",
-            f"fps=fps={rate}:start_time=0,scale={width}:{height}",
-            "-frames:v",
-            str(video.max_frames),
-            "-c:v",
-            "libx264",
-            "-crf",
-            "18",
-            "-pix_fmt",
-            "yuv420p",
-            "-movflags",
-            "+faststart",
-        ],
-        output,
-    )
+    fps_filter = f"fps=fps={rate}:start_time=0"
+    filters = [fps_filter]
+    # The default EOF rounding can discard every frame of a very short clip.
+    # Retry only invalid samples; using eof_action=pass for all clips would also
+    # add a last frame to some valid clips and change their existing embeddings.
+    if info["duration"] * rate < 1:
+        filters.append(fps_filter + ":eof_action=pass")
+    for sampling in filters:
+        atomic_media(
+            [
+                "-i",
+                str(path),
+                "-map",
+                "0:v:0",
+                "-an",
+                "-vf",
+                f"{sampling},scale={width}:{height}",
+                "-frames:v",
+                str(video.max_frames),
+                "-c:v",
+                "libx264",
+                "-crf",
+                "18",
+                "-pix_fmt",
+                "yuv420p",
+                "-movflags",
+                "+faststart",
+            ],
+            output,
+        )
+        try:
+            probe(output)
+            return
+        except MediaError as exc:
+            output.unlink(missing_ok=True)
+            failure = exc
+    raise ModelError(
+        f"视频嵌入预处理失败：{path.name}（{info['duration']:.3f} 秒），{failure}"
+    ) from failure
 
 
 class LlamaEmbedder(HTTPEmbedder):

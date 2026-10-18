@@ -54,7 +54,35 @@ ASR 验收后应固定 `asr.revision` 为实际权重 commit。现有 OpenAI 兼
 
 ## TransNetV2：可选的神经网络分镜服务
 
-本地默认 AdaptiveDetector 已可使用；需要 TransNetV2 时：
+### 本地 macOS / Apple Silicon
+
+已有脚本式服务使用相同启动方式。独立 `.venv-detector` 环境安装 TensorFlow 2.18.1，默认 CPU 模式，不持有 GPU 角色锁，可与现有 llama.cpp 服务共存。无需安装 CUDA 或 tensorflow-metal。
+
+```bash
+./scripts/setup-transnet-service.sh  # 首次安装，下载/校验上游代码及完整 SavedModel，并验证推理
+./scripts/run-transnet-service.sh    # 前台运行，Ctrl+C 停止
+curl http://127.0.0.1:18203/health
+```
+
+模型保存到 `models/TransNetV2/inference`，上游固定版本 `85cef72af9a916bdfd7cc94a670c9cdfbf12d1ed`；安装脚本从 Git LFS 媒体端下载真实权重，校验 SHA256 与大小，重复执行复用已校验权重。安装清单为 `models/TransNetV2/mindex-install.json`。依赖见 `deploy/detector-local.txt`，不会把 TensorFlow 装入应用、人物或 ASR 环境。
+
+客户端 `config.local.yaml` 使用：
+
+```yaml
+detector:
+  backend: transnet
+  base_url: http://127.0.0.1:18203
+```
+
+Web 已运行时需在当前任务结束后重启，以加载 YAML。新素材登记时冻结分镜配置，已有素材及任务继续保留原切分方式；重试旧任务不会切换检测器。需要用 TransNetV2 重切已登记的 Adaptive 素材时，应在新的 `data_dir` 导入，以保留原布局和索引。
+
+启动参数通过环境变量调整：`MINDEX_CONFIG`、`MINDEX_TRANSNET_HOST`（默认 127.0.0.1）、`MINDEX_TRANSNET_PORT`（默认 18203）、`MINDEX_TRANSNET_DIR`、`MINDEX_TRANSNET_DEVICE`（默认 cpu，auto 可使用环境中可见的 GPU）、`TF_NUM_INTRAOP_THREADS`（默认 4）、`TF_NUM_INTEROP_THREADS`（默认 2）。GPU/auto 模式仍遵守 GPU 角色锁。HTTP 认证沿用 `MINDEX_MODEL_API_KEY`。
+
+2026-10-18 本机验证：Apple Silicon、TensorFlow 2.18.1、FFmpeg 9.0.2，真实上游权重处理 6 秒 / 150 帧红→蓝→绿测试视频，返回 `cut_frames: [49,99]`；HTTP 客户端映射为 `[0,1.96]`、`[1.96,3.96]`、`[3.96,6]`，隔离 `prepare` 生成三个镜头和三个精细片段。约 1.8 秒完成 HTTP 检测。接口及帧数边界测试通过 15 项；测试视频仅验证工程链路和明显转场，正式素材仍需抽检。FFmpeg 9 使用 `-fps_mode passthrough` 保留每帧，不使用已删除的 `-vsync`。
+
+### Linux / CUDA
+
+需要 GPU 部署时使用原有独立环境：
 
 ```bash
 uv venv --python 3.11 .venv-detector
@@ -74,7 +102,7 @@ export MINDEX_TRANSNET_DIR="$PWD/models/TransNetV2/inference"
 
 ## 单 GPU 调度与访问配置
 
-所有本项目模型服务使用同一个进程间 GPU 文件锁，默认 `~/.cache/mindex/gpu.lock`，同时启动第二个角色会失败。自定义 `MINDEX_GPU_LOCK` 时，各角色必须使用同一路径；服务运行单 worker。
+使用 GPU 的本项目模型服务共享进程间 GPU 文件锁，默认 `~/.cache/mindex/gpu.lock`，同时启动第二个角色会失败。CPU 模式 TransNetV2 不占用此锁。自定义 `MINDEX_GPU_LOCK` 时，各 GPU 角色必须使用同一路径；服务运行单 worker。
 
 **现有 Qwen 服务不受该锁管理。** 请手动停止它并确认显存释放后，再运行 ASR、TransNetV2 或 WeMM；切回 Qwen 前先停止其他角色。项目不会擅自停止已有服务。
 

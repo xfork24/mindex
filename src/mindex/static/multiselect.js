@@ -21,13 +21,13 @@
       var input = document.createElement('input');
       input.type = 'search';
       input.className = 'multi-search';
-      input.placeholder = '搜索过滤…';
-      input.setAttribute('aria-label', '搜索过滤列表');
+      MindexI18n.setAttr(input, "placeholder", MindexI18n.msg("ui.73702e17a417"));
+      MindexI18n.setAttr(input, 'aria-label', MindexI18n.msg("ui.78c0a3251da4"));
       input.addEventListener('input', function () {
         var query = input.value.trim().toLowerCase();
         select.dataset.query = query;
         for (var i = 0; i < select.options.length; i++)
-          select.options[i].hidden = !matches(select.options[i], query);
+        select.options[i].hidden = !matches(select.options[i], query);
       });
       select.parentNode.insertBefore(input, select);
     },
@@ -35,8 +35,8 @@
       if (!select || !select.multiple || !select.dataset.searchable) return;
       var query = (select.dataset.query || '').toLowerCase();
       for (var j = 0; j < select.options.length; j++)
-        select.options[j].hidden = !matches(select.options[j], query);
-    },
+      select.options[j].hidden = !matches(select.options[j], query);
+    }
   };
   window.MindexMultiSearch = api;
 })();

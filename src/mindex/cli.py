@@ -46,6 +46,16 @@ def print_json(value):
 
 
 @app.command()
+def register(ctx: typer.Context, videos: list[Path]):
+    """只验证、去重并登记原片，不启动分镜或模型处理。"""
+    from .pipeline import Pipeline
+
+    pipeline = Pipeline(ctx.obj)
+    for path in videos:
+        print_json(pipeline.register(path))
+
+
+@app.command()
 def prepare(ctx: typer.Context, videos: list[Path]):
     """导入原视频、检测镜头并实际切片。"""
     from .pipeline import Pipeline
@@ -72,7 +82,7 @@ def split(ctx: typer.Context, source: str):
     from .pipeline import Pipeline
 
     pipeline = Pipeline(ctx.obj)
-    with pipeline.lock():
+    with pipeline.lock(source, "shots"):
         pipeline.split(source)
     typer.echo(source)
 
@@ -101,7 +111,7 @@ def transcribe(ctx: typer.Context, source: str | None = None):
     from .pipeline import Pipeline
 
     pipeline = Pipeline(ctx.obj)
-    with pipeline.lock():
+    with pipeline.lock(source, "dialogue"):
         pipeline.transcribe(source)
 
 
@@ -110,6 +120,7 @@ def enrich_dialogue(
     ctx: typer.Context,
     source: Annotated[str | None, typer.Argument()] = None,
     subtitle_stream: Annotated[int | None, typer.Option(min=0)] = None,
+    method: Annotated[str, typer.Option(help="对白方式：auto、subtitle、asr")] = "auto",
     no_publish: Annotated[bool, typer.Option("--no-publish")] = False,
     workers: Annotated[int, typer.Option(min=1, max=8)] = 2,
 ):
@@ -117,8 +128,8 @@ def enrich_dialogue(
     from .dialogue_tasks import execute_dialogue
     from .pipeline import Pipeline
 
-    with Pipeline(ctx.obj).lock():
-        print_json(execute_dialogue(ctx.obj, source, subtitle_stream=subtitle_stream,
+    with Pipeline(ctx.obj).lock(source, "dialogue"):
+        print_json(execute_dialogue(ctx.obj, source, method=method, subtitle_stream=subtitle_stream,
                                    publish=not no_publish, workers=workers,
                                    progress=lambda value: typer.echo(json.dumps(value, ensure_ascii=False))))
 
@@ -129,7 +140,7 @@ def align(ctx: typer.Context, python: Path, source: str | None = None):
     from .pipeline import Pipeline
 
     pipeline = Pipeline(ctx.obj)
-    with pipeline.lock():
+    with pipeline.lock(source, "dialogue"):
         pipeline.align(python, source)
 
 
@@ -139,7 +150,7 @@ def analyze(ctx: typer.Context, source: str | None = None):
     from .pipeline import Pipeline
 
     pipeline = Pipeline(ctx.obj)
-    with pipeline.lock():
+    with pipeline.lock(source, "analysis"):
         pipeline.analyze(source)
 
 
@@ -158,7 +169,7 @@ def build_index(
     from .indexing import IndexBuilder
     from .pipeline import Pipeline
 
-    with Pipeline(ctx.obj).lock():
+    with Pipeline(ctx.obj).lock(source, "publish"):
         typer.echo(
             IndexBuilder(ctx.obj).build(
                 activate=activate, mode=mode.value, source_id=source, kinds=tuple(kind) if kind else None, channels=channel
@@ -489,16 +500,15 @@ def persons_process(ctx: typer.Context, source: str, start: float = 0, end: floa
     import subprocess
     import sys
 
-    from filelock import FileLock
-
     from .person_processing import PersonOptions
     from .persons import uid
+    from .processing_lock import ProcessingLock
     from .storage import Store, dumps
     store = Store(ctx.obj.data_dir)
     options = PersonOptions(start=start, end=end, publish=publish)
     if not store.one('SELECT id FROM sources WHERE id=?', (source,)):
         raise typer.BadParameter('找不到素材')
-    with FileLock(str(store.root / 'pipeline.lock'), timeout=0):
+    with ProcessingLock(ctx.obj, source_id=source, work="persons"):
         identifier = retry or uid()
         if retry:
             row = store.one('SELECT * FROM person_tasks WHERE id=?', (retry,))
@@ -531,12 +541,11 @@ def persons_status(ctx: typer.Context, task: str):
 
 @persons_cli.command('publish')
 def persons_publish(ctx: typer.Context, content: str | None = None):
-    from filelock import FileLock
-
     from .persons import Persons
+    from .processing_lock import ProcessingLock, index_write_lock
     from .storage import Store
     store = Store(ctx.obj.data_dir)
-    with FileLock(str(store.root / 'pipeline.lock'), timeout=0):
+    with ProcessingLock(ctx.obj), index_write_lock(store.root):
         print_json(Persons(store).publish(content))
 
 

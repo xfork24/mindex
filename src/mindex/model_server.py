@@ -1,4 +1,4 @@
-"""Optional GPU services. Heavy model packages live in separate role-specific environments."""
+"""可选模型服务：重依赖位于独立环境，TransNetV2 支持本地 CPU。"""
 
 from __future__ import annotations
 
@@ -19,9 +19,9 @@ from filelock import FileLock
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
-from .api import save_upload
 from .config import Config, fingerprint, load_config
 from .media import content_hash, probe
+from .uploads import save_upload
 
 
 class TextBatch(BaseModel):
@@ -232,22 +232,38 @@ class TransNetEngine:
         # Use upstream inference and weights, not an unverified third-party conversion.
         directory = Path(os.environ.get("MINDEX_TRANSNET_DIR", "models/TransNetV2/inference")).resolve()
         if not (directory / "transnetv2.py").is_file():
-            raise ValueError("MINDEX_TRANSNET_DIR must point to upstream TransNetV2/inference")
+            raise ValueError("缺少 TransNetV2 上游代码，请先执行 ./scripts/setup-transnet-service.sh")
         import tensorflow as tf
 
-        for gpu in tf.config.list_physical_devices("GPU"):
+        device = os.environ.get("MINDEX_TRANSNET_DEVICE", "auto")
+        if device not in {"auto", "cpu"}:
+            raise ValueError("MINDEX_TRANSNET_DEVICE 必须是 cpu 或 auto")
+        if device == "cpu":
+            tf.config.set_visible_devices([], "GPU")
+        for gpu in tf.config.get_visible_devices("GPU"):
             tf.config.experimental.set_memory_growth(gpu, True)
+        weights = directory / "transnetv2-weights"
+        for name in ("saved_model.pb", "variables/variables.index", "variables/variables.data-00000-of-00001"):
+            path = weights / name
+            if not path.is_file() or path.stat().st_size < 1024:
+                raise ValueError("TransNetV2 权重缺失或仍为 Git LFS 指针，请执行 ./scripts/setup-transnet-service.sh")
         sys.path.insert(0, str(directory))
         from transnetv2 import TransNetV2
 
         self.model = TransNetV2(model_dir=str(directory / "transnetv2-weights"))
         self.lock = threading.Lock()
+        self.metadata = {
+            "model": "TransNetV2", "tensorflow": tf.__version__,
+            "device": "gpu" if tf.config.get_visible_devices("GPU") else "cpu",
+            "weights_sha256": content_hash(weights / "variables/variables.data-00000-of-00001"),
+        }
 
     def detect(self, path: Path, threshold: float) -> dict:
         # Upstream predict_video materializes all frames. Stream low-resolution frames
         # through bounded 100-frame windows instead, preserving every original frame.
         import subprocess
 
+        probe(path)
         process = subprocess.Popen(
             [
                 "ffmpeg",
@@ -260,8 +276,8 @@ class TransNetEngine:
                 "0:v:0",
                 "-vf",
                 "scale=48:27",
-                "-vsync",
-                "0",
+                "-fps_mode",
+                "passthrough",
                 "-f",
                 "rawvideo",
                 "-pix_fmt",
@@ -334,7 +350,10 @@ def create_model_app(config: Config, role: str, engine_factory=None) -> FastAPI:
         lock_path = Path(os.environ.get("MINDEX_GPU_LOCK", str(Path.home() / ".cache/mindex/gpu.lock")))
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         gpu_lock = FileLock(str(lock_path), timeout=0)
-        with gpu_lock:
+        from contextlib import nullcontext
+        # 本地 CPU 分镜服务不持有 GPU 角色锁，可与已有 llama.cpp 服务共存。
+        lease = nullcontext() if role == "detector" and os.environ.get("MINDEX_TRANSNET_DEVICE") == "cpu" else gpu_lock
+        with lease:
             factory = (
                 engine_factory
                 or {
@@ -354,6 +373,8 @@ def create_model_app(config: Config, role: str, engine_factory=None) -> FastAPI:
         result = {"ready": engine is not None, "role": role}
         if role == "embedding" and engine is not None:
             result["space"] = engine.space
+        if role == "detector" and engine is not None:
+            result.update(getattr(engine, "metadata", {}))
         return result
 
     @app.exception_handler(ValueError)
@@ -412,7 +433,7 @@ def create_model_app(config: Config, role: str, engine_factory=None) -> FastAPI:
         ):
             with tempfile.TemporaryDirectory(prefix="mindex-detect-") as directory:
                 path = Path(directory) / "video.media"
-                await save_upload(file, path, 20 * 1024 * 1024 * 1024)
+                await save_upload(file, path, config.source_upload_max_bytes)
                 return await run_in_threadpool(engine.detect, path, threshold)
 
     return app

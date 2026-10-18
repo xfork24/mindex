@@ -207,9 +207,13 @@ class SearchEngine:
         entities = list({e['id']: e for e in [*published['entities'], *catalogue.entities()]}.values())
         ids, recognized, remaining, variant_groups = resolve_names(query, entities)
         mode = 'onscreen' if query.person_mode == 'auto' and ids else query.person_mode
-        meta = {'person_mode': mode, 'person_ids': ids, 'recognized_people': recognized,
+        meta = {'person_mode': mode, 'person_ids': ids,
+                'recognized_people': [p for p in recognized if p.get('usage') != 'reference'],
                 'release_id': release['id'] if release else None,
                 'person_version': release['person_id'] if release else None}
+        references = [p for p in recognized if p.get('usage') == 'reference']
+        if references:
+            meta['referenced_people'] = references
         if mode == 'onscreen' and not ids:
             raise ValueError('人物出镜模式需要选择人物或输入已登记姓名')
         if mode == 'onscreen':

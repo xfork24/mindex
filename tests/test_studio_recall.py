@@ -144,6 +144,23 @@ def test_default_recall_keeps_legacy_signature_and_reuse(prepared):
     assert actions["recall:a"] == "reuse" and actions["recall:b"] == "reuse"
 
 
+def test_document_auto_recall_invalidates_legacy_cache_only(prepared, monkeypatch):
+    config, _embedder = prepared
+    jid, w, p = setup_workspace(config)
+    content = ws.version(w, p["shots"]["a"]["content"])["data"]
+    content["query"] = "晓伟凝视着档案中关于阿公郑木生的记录，神色凝重"
+    from mindex import persons
+
+    current = ws.specification(config, jid, w, p, "recall", "a")["signature"]
+    monkeypatch.setattr(persons, "has_document_reference", lambda _: False)
+    legacy = ws.specification(config, jid, w, p, "recall", "a")["signature"]
+    assert current != legacy
+    content["recall"] = ShotRecall(person_mode="onscreen").model_dump()
+    strict = ws.specification(config, jid, w, p, "recall", "a")["signature"]
+    monkeypatch.setattr(persons, "has_document_reference", lambda _: True)
+    assert ws.specification(config, jid, w, p, "recall", "a")["signature"] == strict
+
+
 def test_recall_signature_invalidation_matrix(prepared):
     config, embedder = prepared
     jid, w, p = setup_workspace(config)

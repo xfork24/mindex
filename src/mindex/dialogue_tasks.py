@@ -7,14 +7,16 @@ import logging
 import threading
 import uuid
 from time import perf_counter
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException
-from filelock import FileLock, Timeout
+from filelock import Timeout
 from pydantic import Field
 
 from .config import Config, StrictModel
 from .dialogue import atomic_json
 from .pipeline import Pipeline
+from .processing_lock import ProcessingLock, recover_tasks
 from .runtime_settings import RuntimeConfig
 from .storage import Store, dumps
 
@@ -22,6 +24,7 @@ log = logging.getLogger(__name__)
 
 
 class DialogueOptions(StrictModel):
+    method: Literal["auto", "subtitle", "asr"] = "auto"
     subtitle_stream: int | None = Field(default=None, ge=0)
     publish: bool = True
     workers: int = Field(default=2, ge=1, le=8)
@@ -32,8 +35,8 @@ def task_public(row):
         raise ValueError("找不到对白任务")
     return {
         key: json.loads(row[key])
-        if row[key] is not None and key in {"options", "progress", "result"}
-        else row[key]
+        if row.get(key) is not None and key in {"options", "progress", "result", "publication"}
+        else row.get(key)
         for key in (
             "id",
             "source_id",
@@ -42,6 +45,7 @@ def task_public(row):
             "progress",
             "error",
             "result",
+            "publication",
             "created_at",
             "updated_at",
         )
@@ -49,12 +53,13 @@ def task_public(row):
 
 
 def execute_dialogue(
-    config, source_id=None, *, subtitle_stream=None, publish=True, workers=2, progress=None, embedder=None
+    config, source_id=None, *, method="auto", subtitle_stream=None, publish=True, workers=2,
+    progress=None, embedder=None
 ):
     started = perf_counter()
     pipeline = Pipeline(config)
     result = pipeline.enrich_dialogue(
-        source_id, subtitle_stream=subtitle_stream, workers=workers, progress=progress
+        source_id, method=method, subtitle_stream=subtitle_stream, workers=workers, progress=progress
     )
     summaries = [
         {
@@ -76,13 +81,11 @@ def execute_dialogue(
     if publish:
         if progress:
             progress({"stage": "embedding", "message": "对白处理完成，正在嵌入并检查新索引"})
-        from .indexing import IndexBuilder
-
-        # Auto first-time builds also include visual; incremental jobs only update dialogue.
-        channels = ["dialogue"] if pipeline.store.active_index() else None
-        result["index_id"] = IndexBuilder(config, embedder).build(
-            activate=True, source_id=source_id, channels=channels
+        from .source_tasks import publication_attempt
+        result["publication"] = publication_attempt(
+            config, source_id, "dialogue", embedder=embedder, progress=progress
         )
+        result["index_id"] = result["publication"].get("index_id")
     result["elapsed_seconds"] = round(perf_counter() - started, 3)
     atomic_json(config.data_dir / "verification" / "recall" / "dialogue-latest.json", result)
     return result
@@ -93,18 +96,10 @@ class DialogueTasks:
         self.runtime, self.store = runtime, store
         self.threads = {}
         self.embedder = embedder
-        # Do not resubmit remote ASR after a restart. A live process owns this same lock.
-        lock = self.lock()
-        try:
-            with lock:
-                store.execute(
-                    "UPDATE dialogue_tasks SET status='interrupted',error='进程已中断；请重试以继续检查点',updated_at=CURRENT_TIMESTAMP WHERE status IN ('queued','running')"
-                )
-        except Timeout:
-            pass
+        recover_tasks(store, "dialogue_tasks")
 
-    def lock(self):
-        return FileLock(str(self.store.root / "pipeline.lock"), timeout=0, thread_local=False)
+    def lock(self, source_id):
+        return ProcessingLock(self.runtime.current(), source_id=source_id, work="dialogue")
 
     def get(self, task_id):
         row = self.store.one("SELECT * FROM dialogue_tasks WHERE id=?", (task_id,))
@@ -113,17 +108,18 @@ class DialogueTasks:
         return task_public(row)
 
     def start(self, source_id, options: DialogueOptions):
-        lock = self.lock()
+        lock = self.lock(source_id)
         try:
             lock.acquire()
         except Timeout as exc:
-            raise HTTPException(409, "管线正在运行，请等待完成后再启动对白任务") from exc
+            raise HTTPException(409, "GPU 独占锁或该素材对白任务正在运行，请稍后启动") from exc
         try:
             if not self.store.one("SELECT 1 FROM sources WHERE id=?", (source_id,)):
                 raise HTTPException(404, "找不到素材")
             config = self.runtime.current().model_copy(deep=True)
             task_id = uuid.uuid4().hex
-            snapshot = config.model_dump(mode="json")
+            snapshot = config.model_dump()
+            snapshot["data_dir"] = str(config.data_dir)
             # Freeze service settings and retain a reference to credentials, never serialize keys.
             snapshot["_credential_profiles"] = {
                 role: self.store.one("SELECT value FROM settings WHERE key=?", ("active.profile." + role,))
@@ -140,20 +136,26 @@ class DialogueTasks:
             raise
 
     def retry(self, task_id):
-        lock = self.lock()
+        row = self.store.one("SELECT * FROM dialogue_tasks WHERE id=?", (task_id,))
+        if row is None:
+            raise HTTPException(404, "找不到对白任务")
+        lock = self.lock(row["source_id"])
         try:
             lock.acquire()
         except Timeout as exc:
-            raise HTTPException(409, "管线正在运行，请稍后重试") from exc
+            raise HTTPException(409, "GPU 独占锁或该素材对白任务正在运行，请稍后重试") from exc
         try:
             row = self.store.one("SELECT * FROM dialogue_tasks WHERE id=?", (task_id,))
             if row is None:
                 raise HTTPException(404, "找不到对白任务")
-            if row["status"] not in {"failed", "interrupted"}:
+            publication = json.loads(row["publication"] or "{}")
+            if row["status"] not in {"failed", "interrupted"} and publication.get("status") != "failed":
                 raise HTTPException(409, "只有失败或中断的任务可以重试")
             snapshot = json.loads(row["config"])
             profiles = snapshot.pop("_credential_profiles", {})
             config = Config.model_validate(snapshot)
+            from .source_tasks import preserve_numbers
+            preserve_numbers(config, snapshot)
             for role, reference in profiles.items():
                 if reference:
                     profile = self.store.one(
@@ -162,7 +164,7 @@ class DialogueTasks:
                     if profile:
                         getattr(config, role).api_key = profile["api_key"] or ""
             self.store.execute(
-                "UPDATE dialogue_tasks SET status='queued',error=NULL,result=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                "UPDATE dialogue_tasks SET status='queued',error=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?",
                 (task_id,),
             )
             self._launch(task_id, config, lock)
@@ -192,13 +194,25 @@ class DialogueTasks:
                     (dumps(value), task_id),
                 )
 
-            result = execute_dialogue(
-                config,
-                row["source_id"],
-                **json.loads(row["options"]),
-                progress=progress,
-                embedder=self.embedder,
+            options = json.loads(row["options"])
+            publish = options.pop("publish", True)
+            result = json.loads(row["result"]) if row["result"] and publish else execute_dialogue(
+                config, row["source_id"], **options, publish=False, progress=progress, embedder=self.embedder,
             )
+            self.store.execute("UPDATE dialogue_tasks SET result=? WHERE id=?", (dumps(result), task_id))
+            if publish:
+                from .source_tasks import publication_attempt
+                progress({"stage": "publish", "message": "对白处理完成，正在更新检索"})
+                publication = publication_attempt(
+                    config, row["source_id"], "dialogue", embedder=self.embedder,
+                    save=lambda value: self.store.execute(
+                        "UPDATE dialogue_tasks SET publication=? WHERE id=?", (dumps(value), task_id)),
+                    progress=progress,
+                )
+                result["index_id"] = publication.get("index_id")
+            else:
+                self.store.execute("UPDATE dialogue_tasks SET publication=? WHERE id=?",
+                                   (dumps({"status": "not_requested"}), task_id))
             self.store.execute(
                 "UPDATE dialogue_tasks SET status='complete',result=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
                 (dumps(result), task_id),

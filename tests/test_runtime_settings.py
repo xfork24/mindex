@@ -123,6 +123,30 @@ def test_profile_fields_whitelist(store):
         )
 
 
+def test_analyzer_retry_profile_changes_do_not_invalidate_analysis_cache(store, config):
+    profile = save_profile(
+        store, role="analyzer", provider="minimax", name="分析自动重试",
+        config={"response_retries": 10, "initial_output_tokens": 8000, "max_output_tokens": 32768, "thinking_mode": "low"}
+    )
+    activate_profile(store, profile["id"])
+    current = RuntimeConfig(config, store).current()
+    assert current.analyzer.response_retries == 10
+    assert current.analyzer.initial_output_tokens == 8000
+    assert current.analyzer.max_output_tokens == 32768
+    assert current.analyzer.thinking_mode == "low"
+    assert current.analysis_key == config.analysis_key
+    assert config.analyzer.response_retries == 5
+    assert config.analyzer.initial_output_tokens == 12768
+    assert config.analyzer.max_output_tokens == 131072
+    for invalid in (-1, 21):
+        with pytest.raises(ValueError):
+            save_profile(store, role="analyzer", provider="minimax", name="越界", config={"response_retries": invalid})
+    for invalid in (63, 131073):
+        with pytest.raises(ValueError):
+            save_profile(store, role="analyzer", provider="minimax", name="越界",
+                         config={"initial_output_tokens": invalid})
+
+
 def test_apply_overrides_replaces_section_and_keeps_base(store, config):
     before = config.embedding.model_dump()
     profile = _tokenhub_profile(store, api_key="key12345678")

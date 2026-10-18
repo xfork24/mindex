@@ -10,6 +10,7 @@
 |---|---|---|---|
 | `data_dir` | Path | `data` | 素材库根目录。切分参数变化须换新目录 |
 | `runtime_overrides` | bool | true | false 固定 YAML，CLI 和验收 Web 每次读取都禁用动态覆盖；也可全局传 `--no-runtime-overrides` |
+| `enforce_gpu_lock` | bool | false | 强加 GPU 锁；开启后处理任务互斥、处理期间素材删除返回 409。关闭时允许不同素材/不同类型并行，同类重复任务和删除正在处理素材仍受保护；设置页可热更新 |
 
 ## `embedding` — WeMM 嵌入服务
 
@@ -38,6 +39,10 @@
 | `revision` | str | `deployed-2026-10-12` | 由部署者维护；换权重必须更新并重跑分析 |
 | `api_key_env` | str | `MINDEX_QWEN_API_KEY` | Qwen 单独的 key 变量 |
 | `timeout` | float >0 | 180 | HTTP 超时秒 |
+| `response_retries` | int 0–20 | 5 | 无效 JSON、字段类型/必填校验失败、无效场景分组、空正文、聊天格式错误或 HTTP 500 的额外重试次数；各类无效响应共用次数，默认共 6 次，间隔 1、2、4、8、8 秒；不改变已有分析检查点身份 |
+| `initial_output_tokens` | int 64–131072 | 12768 | 分镜分析、场景分组及场景分析的首次输出预算，含推理 token；不超过 `max_output_tokens`，无效响应重试时逐次翻倍。不改变已有分析检查点身份 |
+| `max_output_tokens` | int 64–131072 | 131072 | 重试的输出预算上限，含模型推理 token；按厂商支持范围设置。不改变已有分析检查点身份 |
+| `thinking_mode` | `auto` \| `low` \| `provider` | `auto` | 按已知厂商参数优先关闭思考；GLM-5.3 / MiniMax-M3.1 强制思考模型使用 `reasoning_effort:low`。`provider` 保持厂商默认；自定义地址不猜测参数。不改变历史检查点身份 |
 
 ## `asr` — 中文转写
 
@@ -150,3 +155,7 @@
 | `MINDEX_QWEN_API_KEY` | Qwen 服务 token |
 | `MINDEX_GPU_LOCK` | GPU 文件锁路径（各角色须一致） |
 | `MINDEX_TRANSNET_DIR` | 服务端 TransNetV2 `inference` 目录 |
+
+## 素材上传限额
+
+顶层 `source_upload_max_bytes` 默认 `21474836480`（20 GiB，每文件），适用于 `/api/admin/sources/upload`。独立于 `search.max_upload_mb` 的检索查询视频限额。

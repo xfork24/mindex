@@ -1,274 +1,334 @@
-const $ = id => document.getElementById(id);
-const state = {source:null,sourcePage:1,sourceTotal:0,segmentPage:1,segmentTotal:0,kind:'shot',parent:null,editing:null,focus:null};
+const $ = (id) => document.getElementById(id);
+const state = { source: null, sourcePage: 1, sourceTotal: 0, segmentPage: 1, segmentTotal: 0, kind: 'shot', parent: null, editing: null, focus: null };
 let sourceRequest = 0;
 let segmentRequest = 0;
 let selectionRequest = 0;
 
-function node(tag,text,className) {
-  const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(className)n.className=className;return n;
+function node(tag, text, className) {
+  const n = document.createElement(tag);if (text !== undefined) MindexI18n.setText(n, text);if (className) n.className = className;return n;
 }
-function notify(text='',error=false) {$('admin-notice').textContent=text;$('admin-notice').className=`notice ${error?'error':'info'}`;}
+function notify(text = '', error = false) {MindexI18n.setText($('admin-notice'), error ? MindexI18n.system(text) : text);$('admin-notice').className = `notice ${error ? 'error' : 'info'}`;}
 function time(value) {
-  const hours=Math.floor(value/3600),minutes=Math.floor(value%3600/60),seconds=(value%60).toFixed(2).padStart(5,'0');
-  return `${hours?`${hours}:`:''}${String(minutes).padStart(2,'0')}:${seconds}`;
+  const hours = Math.floor(value / 3600),minutes = Math.floor(value % 3600 / 60),seconds = (value % 60).toFixed(2).padStart(5, '0');
+  return `${hours ? `${hours}:` : ''}${String(minutes).padStart(2, '0')}:${seconds}`;
 }
-function errorText(detail) {return Array.isArray(detail)?detail.map(e=>e.msg).join('；'):typeof detail==='string'?detail:JSON.stringify(detail);}
-async function api(url,options={}) {const r=await fetch(url,options);const data=await r.json();if(!r.ok)throw new Error(errorText(data.detail||data));return data;}
-function params(values) {return new URLSearchParams(Object.entries(values).filter(([,v])=>v!==null&&v!==undefined));}
-function pager(prefix,page,total) {$(`${prefix}-page`).textContent=`${page} / ${Math.max(1,Math.ceil(total/48))}`;$(`${prefix}-prev`).disabled=page<=1;$(`${prefix}-next`).disabled=page*48>=total;}
-function pauseList() {$('segment-list').querySelectorAll('video').forEach(v=>v.pause());}
+function errorText(detail) {return Array.isArray(detail) ? detail.map((e) => e.msg).join('；') : typeof detail === 'string' ? detail : JSON.stringify(detail);}
+async function api(url, options = {}) {const r = await fetch(url, options);const data = await r.json();if (!r.ok) throw new Error(MindexI18n.system(data.detail || data));return data;}
+function params(values) {return new URLSearchParams(Object.entries(values).filter(([, v]) => v !== null && v !== undefined));}
+function pager(prefix, page, total) {MindexI18n.setText($(`${prefix}-page`), `${page} / ${Math.max(1, Math.ceil(total / 48))}`);$(`${prefix}-prev`).disabled = page <= 1;$(`${prefix}-next`).disabled = page * 48 >= total;}
+function pauseList() {$('segment-list').querySelectorAll('video').forEach((v) => v.pause());}
 
 async function loadSources() {
-  const request=++sourceRequest;
-  const data=await api(`/api/admin/sources?${params({q:$('source-query').value.trim(),visibility:$('source-visibility').value,favorite_only:$('source-favorite').checked,page:state.sourcePage})}`);
-  if(request!==sourceRequest)return;
-  if(state.sourcePage>1&&!data.items.length){state.sourcePage--;return loadSources();}
-  state.sourceTotal=data.total;$('source-count').textContent=`${data.total} 份素材`;$('source-list').replaceChildren();
-  data.items.forEach(source=>{
-    const b=node('button',undefined,`source-item ${state.source?.id===source.id?'selected':''}`);b.type='button';b.setAttribute('aria-pressed',String(state.source?.id===source.id));
-    b.append(node('strong',`${source.favorite?'★ ':''}${source.name}`),node('small',`${source.shot_count} 镜头 · ${source.moment_count} 精细片段 · ${time(source.media.duration)}`),node('small',`${source.hidden?'已隐藏 · ':''}${source.prepared?'切片完成':'待完成切片'} · ${source.id.slice(0,8)}`));
-    b.onclick=()=>run(()=>selectSource(source.id));$('source-list').append(b);
+  const request = ++sourceRequest;
+  const data = await api(`/api/admin/sources?${params({ q: $('source-query').value.trim(), visibility: $('source-visibility').value, favorite_only: $('source-favorite').checked, page: state.sourcePage })}`);
+  if (request !== sourceRequest) return;
+  if (state.sourcePage > 1 && !data.items.length) {state.sourcePage--;return loadSources();}
+  state.sourceTotal = data.total;MindexI18n.setText($('source-count'), MindexI18n.msg("ui.42d218e9f146", { p0: data.total }));$('source-list').replaceChildren();
+  data.items.forEach((source) => {
+    const b = node('button', undefined, `source-item ${state.source?.id === source.id ? 'selected' : ''}`);b.type = 'button';b.setAttribute('aria-pressed', String(state.source?.id === source.id));
+    b.append(node('strong', `${source.favorite ? '★ ' : ''}${source.name}`), node('small', MindexI18n.msg("ui.b53548f018e9", { p0: source.shot_count, p1: source.moment_count, p2: time(source.media.duration) })), node('small', `${source.hidden ? MindexI18n.msg("ui.c4a3685c02e7") : ''}${source.prepared ? MindexI18n.msg("ui.8be4f689a4da") : MindexI18n.msg("ui.db386b30e280")} · ${source.id.slice(0, 8)}`));
+    b.onclick = () => run(() => selectSource(source.id));$('source-list').append(b);
   });
-  if(!data.items.length){const empty=node('div',undefined,'empty');empty.append(node('p','没有符合条件的素材。'),node('p','可调整筛选，或通过 mindex prepare 导入视频。'));$('source-list').append(empty);}
-  pager('source',state.sourcePage,data.total);
+  if (!data.items.length) {const empty = node('div', undefined, 'empty');empty.append(node('p', MindexI18n.msg("ui.67a30427bf95")), node('p', MindexI18n.msg("ui.884adf6787b5")));$('source-list').append(empty);}
+  pager('source', state.sourcePage, data.total);
 }
 
-function action(text,onClick,pressed) {
-  const b=node('button',text,'quiet');b.type='button';if(pressed!==undefined)b.setAttribute('aria-pressed',String(pressed));
-  b.onclick=()=>run(async()=>{b.disabled=true;try{await onClick();}finally{b.disabled=false;}});return b;
+function action(text, onClick, pressed) {
+  const b = node('button', text, 'quiet');b.type = 'button';if (pressed !== undefined) b.setAttribute('aria-pressed', String(pressed));
+  b.onclick = () => run(async () => {b.disabled = true;try {await onClick();} finally {b.disabled = false;}});return b;
 }
-function actions(kind,item) {
-  const bar=node('div',undefined,'organization-actions');
-  if(kind==='segment')bar.append(action('详情',()=>showAnalysis(item)));
-  bar.append(action('备注',()=>edit(kind,item)),action(item.favorite?'★ 已收藏':'☆ 收藏',()=>patch(kind,item.id,{favorite:!item.favorite}),item.favorite),action(item.hidden?'恢复显示':'隐藏',()=>patch(kind,item.id,{hidden:!item.hidden}),item.hidden));
-  if(kind==='source')bar.append(action('删除',()=>deleteSource(item)));
+function actions(kind, item) {
+  const bar = node('div', undefined, 'organization-actions');
+  if (kind === 'segment') bar.append(action(MindexI18n.msg("ui.4f55ee1e687f"), () => showAnalysis(item)));
+  bar.append(action(MindexI18n.msg("ui.e0361480e3a5"), () => edit(kind, item)), action(item.favorite ? MindexI18n.msg("ui.f9492c56041d") : MindexI18n.msg("ui.c028b230faad"), () => patch(kind, item.id, { favorite: !item.favorite }), item.favorite), action(item.hidden ? MindexI18n.msg("ui.0a14044d1cbd") : MindexI18n.msg("ui.bb0e7e01aa8d"), () => patch(kind, item.id, { hidden: !item.hidden }), item.hidden));
+  if (kind === 'source') bar.append(action(MindexI18n.msg("ui.3755f56f2f83"), () => deleteSource(item)));
   return bar;
 }
 async function deleteSource(item) {
-  const message=[
-    `删除素材「${item.name}」？此操作不可撤销。`,``,
-    `将物理删除：全部嵌入向量、${item.shot_count} 个镜头 / ${item.moment_count} 个精细片段的切片文件与缩略图、转写、分镜计划、上下文缓存、整理信息（收藏/隐藏/备注）。`,
-    `保留：源视频文件本身（仍留在 data/sources/，可随时重新导入）。`,
-  ].join('\n');
-  if(!confirm(message))return;
-  const summary=await api(`/api/admin/sources/${item.id}`,{method:'DELETE'});
-  state.source=null;state.parent=null;state.focus=null;
-  $('source-workspace').hidden=true;$('no-source').hidden=false;syncUrl();
+  const message = [MindexI18n.msg("ui.9dff42a2b590", { p0:
+    item.name }), ``, MindexI18n.msg("ui.78bbf6595f53", { p0:
+    item.shot_count, p1: item.moment_count }), MindexI18n.msg("ui.8d221c85535e", {})].
+
+  join('\n');
+  if (!confirm(MindexI18n.render(message))) return;
+  const summary = await api(`/api/admin/sources/${item.id}`, { method: 'DELETE' });
+  clearTimeout(workPoll);state.source = null;state.parent = null;state.focus = null;
+  $('source-workspace').hidden = true;$('no-source').hidden = false;syncUrl();
   await loadSources();
-  notify(`已删除 ${summary.deleted.segments} 个片段、${summary.deleted.vectors} 条向量、${summary.deleted.files} 个文件；源视频 ${summary.kept.source_file} 已保留。`);
+  notify(MindexI18n.msg("ui.e3bba6911f26", { p0: summary.deleted.segments, p1: summary.deleted.vectors, p2: summary.deleted.files, p3: summary.kept.source_file }));
 }
 function renderSource(source) {
-  const target=$('source-detail');target.replaceChildren();
-  const heading=node('div',undefined,'source-heading');heading.append(node('h2',source.name));
-  if(source.hidden)heading.append(node('span','已隐藏','hidden-badge'));
-  target.append(heading,node('p',`原文件：${source.original_name} · ${source.id.slice(0,8)}`,'source-meta'),node('p',`${time(source.media.duration)} · ${source.media.width} × ${source.media.height} · ${source.media.fps.toFixed(2)} fps · ${source.shot_count} 镜头 / ${source.moment_count} 精细片段`,'source-meta'),node('p',source.prepared?'切片完成 · 可直接浏览和整理':'切片尚未完成 · 可查看已生成片段','source-meta'));
-  if(source.missing_artifacts)target.append(node('p',`缺失 ${source.missing_artifacts} 个媒体文件，请通过 split 命令修复。`,'source-warning'));
-  if(source.notes)target.append(node('p',source.notes,'source-notes'));
-  target.append(actions('source',source));
-  renderDialogue(source, target);
-  if(source.hidden)target.append(node('p','此素材及其所有片段已退出检索。恢复素材后，片段自身的隐藏设置仍会保留。','muted'));
+  const target = $('source-detail');target.replaceChildren();
+  const heading = node('div', undefined, 'source-heading');heading.append(node('h2', source.name));
+  if (source.hidden) heading.append(node('span', MindexI18n.msg("ui.5fce4fb22d1d"), 'hidden-badge'));
+  target.append(heading, node('p', MindexI18n.msg("ui.b1a5c99af4bf", { p0: source.original_name, p1: source.id.slice(0, 8) }), 'source-meta'), node('p', MindexI18n.msg("ui.9df908393a6a", { p0: time(source.media.duration), p1: source.media.width, p2: source.media.height, p3: source.media.fps.toFixed(2), p4: source.shot_count, p5: source.moment_count }), 'source-meta'), node('p', source.prepared ? MindexI18n.msg("ui.db093aeb92d3") : MindexI18n.msg("ui.be2019fc93ba"), 'source-meta'));
+  if (source.missing_artifacts) target.append(node('p', MindexI18n.msg("ui.95c85cb38091", { p0: source.missing_artifacts }), 'source-warning'));
+  if (source.notes) target.append(node('p', source.notes, 'source-notes'));
+  target.append(actions('source', source));
+  renderWork(source, target);
+  if (source.hidden) target.append(node('p', MindexI18n.msg("ui.5968052b59f1"), 'muted'));
 }
 
 async function selectSource(id) {
-  const request=++selectionRequest;++segmentRequest;
-  $('source-workspace').setAttribute('aria-busy','true');
+  const request = ++selectionRequest;++segmentRequest;
+  $('source-workspace').setAttribute('aria-busy', 'true');
   try {
-    const source=await api(`/api/admin/sources/${id}`);if(request!==selectionRequest)return;
-    state.source=source;state.parent=null;state.segmentPage=1;state.focus=null;
-    if(source.hidden)$('segment-visibility').value='all';else $('segment-visibility').value='visible';
-    $('no-source').hidden=true;$('source-workspace').hidden=false;renderSource(source);syncUrl();
-    await Promise.all([loadSources(),loadSegments()]);
-  } finally {if(request===selectionRequest)$('source-workspace').removeAttribute('aria-busy');}
+    const source = await api(`/api/admin/sources/${id}`);if (request !== selectionRequest) return;
+    state.source = source;state.parent = null;state.segmentPage = 1;state.focus = null;
+    if (source.hidden) $('segment-visibility').value = 'all';else $('segment-visibility').value = 'visible';
+    $('no-source').hidden = true;$('source-workspace').hidden = false;renderSource(source);syncUrl();
+    await Promise.all([loadSources(), loadSegments()]);
+  } finally {if (request === selectionRequest) $('source-workspace').removeAttribute('aria-busy');}
 }
-function syncUrl() {history.replaceState(null,'',`/admin?${params({source:state.source?.id,kind:state.kind,parent:state.parent?.id,segment:state.focus})}`);}
+function syncUrl() {history.replaceState(null, '', `/admin?${params({ source: state.source?.id, kind: state.kind, parent: state.parent?.id, segment: state.focus })}`);}
 function syncTabs() {
-  for(const [id,kind] of [['shots-tab','shot'],['moments-tab','moment']]){$(id).classList.toggle('active',state.kind===kind);$(id).setAttribute('aria-selected',String(state.kind===kind));}
-  $('parent-filter').hidden=!state.parent;if(state.parent)$('parent-label').textContent=`来自：${state.parent.name}`;
+  for (const [id, kind] of [['shots-tab', 'shot'], ['moments-tab', 'moment']]) {$(id).classList.toggle('active', state.kind === kind);$(id).setAttribute('aria-selected', String(state.kind === kind));}
+  $('parent-filter').hidden = !state.parent;if (state.parent) MindexI18n.setText($('parent-label'), MindexI18n.msg("ui.6688020c0556", { p0: state.parent.name }));
 }
 async function loadSegments() {
-  if(!state.source)return;const request=++segmentRequest;syncTabs();syncUrl();
-  const data=await api(`/api/admin/sources/${state.source.id}/segments?${params({kind:state.kind,parent_id:state.parent?.id,visibility:$('segment-visibility').value,favorite_only:$('segment-favorite').checked,page:state.segmentPage})}`);
-  if(request!==segmentRequest)return;
-  if(state.segmentPage>1&&!data.items.length){state.segmentPage--;return loadSegments();}
-  state.segmentTotal=data.total;$('segment-count').textContent=`${data.total} 个${state.kind==='shot'?'镜头':'精细片段'}`;
+  if (!state.source) return;const request = ++segmentRequest;syncTabs();syncUrl();
+  const data = await api(`/api/admin/sources/${state.source.id}/segments?${params({ kind: state.kind, parent_id: state.parent?.id, visibility: $('segment-visibility').value, favorite_only: $('segment-favorite').checked, page: state.segmentPage })}`);
+  if (request !== segmentRequest) return;
+  if (state.segmentPage > 1 && !data.items.length) {state.segmentPage--;return loadSegments();}
+  state.segmentTotal = data.total;MindexI18n.setText($('segment-count'), MindexI18n.msg("ui.f6141ac5b67e", { p0: data.total, p1: state.kind === 'shot' ? MindexI18n.msg("ui.c7d1925fd5af") : MindexI18n.msg("ui.5aca155225fc") }));
   pauseList();$('segment-list').replaceChildren();
-  data.items.forEach(item=>{
-    const card=node('article',undefined,`segment-card ${item.effective_hidden?'is-hidden':''} ${state.focus===item.id?'is-focused':''}`);card.dataset.segmentId=item.id;
-    const poster=node('button',undefined,'poster-button');poster.type='button';poster.setAttribute('aria-label',`播放 ${item.name}`);
-    const image=node('img');image.src=item.thumbnail_url;image.alt=item.name;image.loading='lazy';
-    poster.append(image,node('span','▶','play-symbol'));poster.onclick=()=>play(item);
-    const body=node('div',undefined,'segment-body');body.append(node('h3',item.name),node('p',`${time(item.start)} — ${time(item.end)} · ${item.duration.toFixed(2)} 秒`,'segment-time'));
-    if(item.effective_hidden)body.append(node('span',item.inherited_hidden?'随上级隐藏':'已隐藏','hidden-badge'));
-    if(item.notes)body.append(node('p',item.notes,'segment-note'));
-    body.append(actions('segment',item));
-    if(item.inherited_hidden)body.append(node('p','需先恢复素材或父镜头才能重新参与检索。','muted'));
-    const links=node('div',undefined,'relationship');
-    if(item.kind==='shot')links.append(action(`查看 ${item.child_count} 个精细片段 →`,async()=>{state.kind='moment';state.parent=item;state.segmentPage=1;await loadSegments();}));
-    else if(item.parent_id)links.append(action('返回父镜头 ↗',async()=>{const parent=await api(`/api/admin/segments/${item.parent_id}`);state.kind='shot';state.parent=null;state.focus=parent.id;state.segmentPage=Math.floor((parent.position-1)/48)+1;$('segment-visibility').value='all';$('segment-favorite').checked=false;await loadSegments();$('segment-list').querySelector('.is-focused')?.scrollIntoView({block:'center',behavior:'smooth'});}));
-    const download=node('a','下载 ↧');download.href=`${item.media_url}?download=true`;links.append(download);body.append(links);card.append(poster,body);$('segment-list').append(card);
+  data.items.forEach((item) => {
+    const card = node('article', undefined, `segment-card ${item.effective_hidden ? 'is-hidden' : ''} ${state.focus === item.id ? 'is-focused' : ''}`);card.dataset.segmentId = item.id;
+    const poster = node('button', undefined, 'poster-button');poster.type = 'button';MindexI18n.setAttr(poster, 'aria-label', MindexI18n.msg("ui.c61073cbe212", { p0: item.name }));
+    const image = node('img');image.src = item.thumbnail_url;MindexI18n.setAttr(image, "alt", item.name);image.loading = 'lazy';
+    poster.append(image, node('span', '▶', 'play-symbol'));poster.onclick = () => play(item);
+    const body = node('div', undefined, 'segment-body');body.append(node('h3', item.name), node('p', MindexI18n.msg("ui.a8e728244086", { p0: time(item.start), p1: time(item.end), p2: item.duration.toFixed(2) }), 'segment-time'));
+    if (item.effective_hidden) body.append(node('span', item.inherited_hidden ? MindexI18n.msg("ui.9cfcc90a06a1") : MindexI18n.msg("ui.5fce4fb22d1d"), 'hidden-badge'));
+    if (item.notes) body.append(node('p', item.notes, 'segment-note'));
+    body.append(actions('segment', item));
+    if (item.inherited_hidden) body.append(node('p', MindexI18n.msg("ui.58926140f603"), 'muted'));
+    const links = node('div', undefined, 'relationship');
+    if (item.kind === 'shot') links.append(action(MindexI18n.msg("ui.8427ef7b1fc2", { p0: item.child_count }), async () => {state.kind = 'moment';state.parent = item;state.segmentPage = 1;await loadSegments();}));else
+    if (item.parent_id) links.append(action(MindexI18n.msg("ui.f982f961d8a1"), async () => {const parent = await api(`/api/admin/segments/${item.parent_id}`);state.kind = 'shot';state.parent = null;state.focus = parent.id;state.segmentPage = Math.floor((parent.position - 1) / 48) + 1;$('segment-visibility').value = 'all';$('segment-favorite').checked = false;await loadSegments();$('segment-list').querySelector('.is-focused')?.scrollIntoView({ block: 'center', behavior: 'smooth' });}));
+    const download = node('a', MindexI18n.msg("ui.f68895f93388"));download.href = `${item.media_url}?download=true`;links.append(download);body.append(links);card.append(poster, body);$('segment-list').append(card);
   });
-  if(!data.items.length){const empty=node('div',undefined,'empty');empty.append(node('h3','没有符合条件的片段'),node('p','尝试切换显示范围、取消收藏筛选，或等待命令行完成切片。'));$('segment-list').append(empty);}
-  pager('segment',state.segmentPage,data.total);
+  if (!data.items.length) {const empty = node('div', undefined, 'empty');empty.append(node('h3', MindexI18n.msg("ui.dd8121f6916e")), node('p', MindexI18n.msg("ui.c6c1305ed0ef")));$('segment-list').append(empty);}
+  pager('segment', state.segmentPage, data.total);
 }
 
-function edit(kind,item) {state.editing={kind,id:item.id};$('edit-title').textContent=kind==='source'?'整理素材':'整理片段';$('edit-name').value=item.custom_name||'';$('edit-notes').value=item.notes||'';$('edit-error').textContent='';$('edit-dialog').showModal();$('edit-name').focus();}
-async function patch(kind,id,changes) {
-  const sourceId=state.source?.id;
-  await api(`/api/admin/${kind==='source'?'sources':'segments'}/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(changes)});
-  if(state.source?.id!==sourceId)return;
-  state.source=await api(`/api/admin/sources/${sourceId}`);renderSource(state.source);
-  await Promise.all([loadSources(),loadSegments()]);notify('修改已保存。');
+function edit(kind, item) {state.editing = { kind, id: item.id };MindexI18n.setText($('edit-title'), kind === 'source' ? MindexI18n.msg("ui.33f127b82e7d") : MindexI18n.msg("ui.9f0fe854bb6c"));$('edit-name').value = item.custom_name || '';$('edit-notes').value = item.notes || '';MindexI18n.setText($('edit-error'), '');$('edit-dialog').showModal();$('edit-name').focus();}
+async function patch(kind, id, changes) {
+  const sourceId = state.source?.id;
+  await api(`/api/admin/${kind === 'source' ? 'sources' : 'segments'}/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(changes) });
+  if (state.source?.id !== sourceId) return;
+  state.source = await api(`/api/admin/sources/${sourceId}`);renderSource(state.source);
+  await Promise.all([loadSources(), loadSegments()]);notify(MindexI18n.msg("ui.963001b5d8c2"));
 }
-$('edit-form').onsubmit=async event=>{
-  event.preventDefault();const editing=state.editing;if(!editing)return;$('edit-save').disabled=true;$('edit-error').textContent='';
-  try {await patch(editing.kind,editing.id,{display_name:$('edit-name').value.trim()||null,notes:$('edit-notes').value});$('edit-dialog').close();}
-  catch(e){$('edit-error').textContent=e.message;}finally{$('edit-save').disabled=false;}
+$('edit-form').onsubmit = async (event) => {
+  event.preventDefault();const editing = state.editing;if (!editing) return;$('edit-save').disabled = true;MindexI18n.setText($('edit-error'), '');
+  try {await patch(editing.kind, editing.id, { display_name: $('edit-name').value.trim() || null, notes: $('edit-notes').value });$('edit-dialog').close();}
+  catch (e) {MindexI18n.setText($('edit-error'), e.message);} finally {$('edit-save').disabled = false;}
 };
-$('edit-close').onclick=()=>$('edit-dialog').close();
-function play(item) {$('play-title').textContent=item.name;$('play-video').src=item.media_url;$('play-video').poster=item.thumbnail_url;$('play-time').textContent=`原片 ${time(item.start)} — ${time(item.end)} · ${item.source_name}`;$('play-download').href=`${item.media_url}?download=true`;if(!$('play-dialog').open)$('play-dialog').showModal();}
-$('play-close').onclick=()=>$('play-dialog').close();
-$('play-dialog').addEventListener('close',()=>{$('play-video').pause();$('play-video').removeAttribute('src');$('play-video').load();});
-async function run(task) {try{await task();}catch(e){notify(e.message,true);}}
-function sourceFiltersChanged(){state.sourcePage=1;return loadSources();}
-function segmentFiltersChanged(){state.segmentPage=1;return loadSegments();}
-$('source-search').onsubmit=e=>{e.preventDefault();run(sourceFiltersChanged);};
-for(const id of ['source-visibility','source-favorite'])$(id).onchange=()=>run(sourceFiltersChanged);
-for(const id of ['segment-visibility','segment-favorite'])$(id).onchange=()=>run(segmentFiltersChanged);
-$('source-prev').onclick=()=>run(async()=>{state.sourcePage--;await loadSources();});$('source-next').onclick=()=>run(async()=>{state.sourcePage++;await loadSources();});
-$('segment-prev').onclick=()=>run(async()=>{state.segmentPage--;await loadSegments();});$('segment-next').onclick=()=>run(async()=>{state.segmentPage++;await loadSegments();});
-for(const [id,kind] of [['shots-tab','shot'],['moments-tab','moment']])$(id).onclick=()=>run(async()=>{state.kind=kind;state.parent=null;state.segmentPage=1;await loadSegments();});
-$('clear-parent').onclick=()=>run(async()=>{state.parent=null;state.segmentPage=1;await loadSegments();});
-$('reload').onclick=()=>run(async()=>{$('reload').disabled=true;try{if(state.source)await selectSource(state.source.id);else await loadSources();notify('素材状态已刷新。');}finally{$('reload').disabled=false;}});
-run(async()=>{
-  await loadSources();const query=new URLSearchParams(location.search);
-  if(query.get('kind')==='moment')state.kind='moment';const id=query.get('source');
-  if(id){
-    await selectSource(id);const parent=query.get('parent'),segment=query.get('segment');
-    if(segment){
-      const item=await api(`/api/admin/segments/${segment}`);
-      if(item.source_id!==id||!['shot','moment'].includes(item.kind))throw new Error('片段不属于当前素材');
-      state.kind=item.kind;state.parent=null;state.focus=item.id;state.segmentPage=Math.floor((item.position-1)/48)+1;
-      $('segment-visibility').value='all';$('segment-favorite').checked=false;await loadSegments();
-      $('segment-list').querySelector('.is-focused')?.scrollIntoView({block:'center',behavior:'smooth'});
-    }else if(parent){
-      const item=await api(`/api/admin/segments/${parent}`);if(item.source_id!==id||item.kind!=='shot')throw new Error('父镜头不属于当前素材');
-      state.kind='moment';state.parent=item;await loadSegments();
+$('edit-close').onclick = () => $('edit-dialog').close();
+function play(item) {MindexI18n.setText($('play-title'), item.name);$('play-video').src = item.media_url;$('play-video').poster = item.thumbnail_url;MindexI18n.setText($('play-time'), MindexI18n.msg("ui.0159b6eb9834", { p0: time(item.start), p1: time(item.end), p2: item.source_name }));$('play-download').href = `${item.media_url}?download=true`;if (!$('play-dialog').open) $('play-dialog').showModal();}
+$('play-close').onclick = () => $('play-dialog').close();
+$('play-dialog').addEventListener('close', () => {$('play-video').pause();$('play-video').removeAttribute('src');$('play-video').load();});
+async function run(task) {try {await task();} catch (e) {notify(e.message, true);}}
+function sourceFiltersChanged() {state.sourcePage = 1;return loadSources();}
+function segmentFiltersChanged() {state.segmentPage = 1;return loadSegments();}
+$('source-search').onsubmit = (e) => {e.preventDefault();run(sourceFiltersChanged);};
+for (const id of ['source-visibility', 'source-favorite']) $(id).onchange = () => run(sourceFiltersChanged);
+for (const id of ['segment-visibility', 'segment-favorite']) $(id).onchange = () => run(segmentFiltersChanged);
+$('source-prev').onclick = () => run(async () => {state.sourcePage--;await loadSources();});$('source-next').onclick = () => run(async () => {state.sourcePage++;await loadSources();});
+$('segment-prev').onclick = () => run(async () => {state.segmentPage--;await loadSegments();});$('segment-next').onclick = () => run(async () => {state.segmentPage++;await loadSegments();});
+for (const [id, kind] of [['shots-tab', 'shot'], ['moments-tab', 'moment']]) $(id).onclick = () => run(async () => {state.kind = kind;state.parent = null;state.segmentPage = 1;await loadSegments();});
+$('clear-parent').onclick = () => run(async () => {state.parent = null;state.segmentPage = 1;await loadSegments();});
+$('reload').onclick = () => run(async () => {$('reload').disabled = true;try {if (state.source) await selectSource(state.source.id);else await loadSources();notify(MindexI18n.msg("ui.88e448fddfc8"));} finally {$('reload').disabled = false;}});
+run(async () => {
+  await loadSources();const query = new URLSearchParams(location.search);
+  if (query.get('kind') === 'moment') state.kind = 'moment';const id = query.get('source');
+  if (id) {
+    await selectSource(id);const parent = query.get('parent'),segment = query.get('segment');
+    if (segment) {
+      const item = await api(`/api/admin/segments/${segment}`);
+      if (item.source_id !== id || !['shot', 'moment'].includes(item.kind)) throw new Error(MindexI18n.msg("ui.1f054c110e3f"));
+      state.kind = item.kind;state.parent = null;state.focus = item.id;state.segmentPage = Math.floor((item.position - 1) / 48) + 1;
+      $('segment-visibility').value = 'all';$('segment-favorite').checked = false;await loadSegments();
+      $('segment-list').querySelector('.is-focused')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    } else if (parent) {
+      const item = await api(`/api/admin/segments/${parent}`);if (item.source_id !== id || item.kind !== 'shot') throw new Error(MindexI18n.msg("ui.ea6b2bd87cda"));
+      state.kind = 'moment';state.parent = item;await loadSegments();
     }
   }
 });
 
-let dialoguePoll = null;
-const channelNames = {visual:'视频画面', dialogue:'对白文本', analysis:'LLM 分析'};
-const channelStatus = {complete:'处理完成', partial:'部分完成', empty:'空内容', no_audio:'无音轨', disabled:'未启用', processing:'处理中', failed:'失败', not_processed:'未处理', pending_alignment:'待手动对齐'};
-const NO_SUBTITLE_TRACK_MESSAGE = '当前视频没有字幕轨道，无法补充对白。请导入带字幕的原片，或用 mindex transcribe 先做语音转写。';
-function renderDialogue(source, target) {
-  clearTimeout(dialoguePoll);
-  const panel = node('section', undefined, 'dialogue-panel');
-  panel.append(node('h3', '处理与检索状态'));
-  const statusLines = node('div', undefined, 'channel-status-lines');
-  panel.append(statusLines);
-  for (const [channel, label] of Object.entries(channelNames)) {
-    const processed = source.channels?.[channel] || {};
-    const coverage = source.published_channels?.[channel] || {};
-    const total = channel === 'dialogue' ? processed.content_segments || 0 : coverage.total_segments || 0;
-    const unit = channel === 'dialogue' ? '个有对白片段' : '个片段';
-    statusLines.append(node('p', `${label}：${channelStatus[processed.status] || processed.status || '未处理'} · 已进入检索 ${coverage.indexed_segments || 0}/${total} ${unit}`));
-    if (processed.error && channel !== 'dialogue') panel.append(node('p', processed.error, 'source-warning'));
+let workPoll = null;
+const workPreferences = new Map();
+const workNames = { shots: MindexI18n.msg("ui.6a4811595787"), dialogue: MindexI18n.msg("ui.d2126f3ca6e8"), analysis: MindexI18n.msg("ui.5484a583c2c9"), persons: MindexI18n.msg("ui.0c0ae35b2935") };
+const workStatus = { complete: MindexI18n.msg("ui.9e593295eddf"), partial: MindexI18n.msg("ui.53951802211e"), empty: MindexI18n.msg("ui.b5a5666d7068"), no_audio: MindexI18n.msg("ui.dde19df44760"), disabled: MindexI18n.msg("ui.8bb38ef00ccc"), not_processed: MindexI18n.msg("ui.59a9eb4e6574"), failed: MindexI18n.msg("ui.3e3c8068bb0e"), processing: MindexI18n.msg("ui.fcb979ef0b91"), pending_alignment: MindexI18n.msg("ui.db56f1b7b2c7") };
+const taskStatus = { queued: MindexI18n.msg("ui.4dcbbcfa6154"), running: MindexI18n.msg("ui.594249700590"), complete: MindexI18n.msg("ui.33246f6a5e5b"), failed: MindexI18n.msg("ui.3e3c8068bb0e"), interrupted: MindexI18n.msg("ui.8dd5ad764e4b") };
+const stages = { detect: MindexI18n.msg("ui.91642f5bbeab"), split: MindexI18n.msg("ui.717b1c7595ac"), repair: MindexI18n.msg("ui.58723ed9df0b"), subtitle: MindexI18n.msg("ui.1721b0103d0d"), asr: MindexI18n.msg("ui.65aa0b969118"), analyze: MindexI18n.msg("ui.b6582c9a3f55"), scene_grouping: MindexI18n.msg("ui.cd2b1a5f7983"), scenes: MindexI18n.msg("ui.008acfbd3a5f"), matching: MindexI18n.msg("ui.525d34888b72"), extracting: MindexI18n.msg("ui.7d76ffac1b58"), publish: MindexI18n.msg("ui.77e695de5cac"), embedding: MindexI18n.msg("ui.c56c156ecf6c"), index_check: MindexI18n.msg("ui.7e5154331f03"), published: MindexI18n.msg("ui.fb01358330b1"), indexed: MindexI18n.msg("ui.efc142bf91f3") };
+function preferences(id) {if (!workPreferences.has(id)) workPreferences.set(id, { publish: { shots: true, dialogue: true, analysis: true, persons: true }, method: 'auto', track: '' });return workPreferences.get(id);}
+function post(url, value) {return api(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) });}
+function renderWork(source, target) {
+  clearTimeout(workPoll);workPoll = null;
+  const panel = node('section', undefined, 'work-panel');panel.append(node('h3', MindexI18n.msg("ui.c057f7d9d46e")));
+  const grid = node('div', undefined, 'work-grid');panel.append(grid);target.append(panel);
+  const prefs = preferences(source.id),busy = Object.values(source.work || {}).some((w) => [w.task, w.publish_task].some((t) => t && ['queued', 'running'].includes(t.status)));
+  for (const [name, label] of Object.entries(workNames)) {
+    const work = source.work?.[name] || {},result = work.result || {},card = node('section', undefined, 'work-card');card.dataset.work = name;
+    const workBusy = [work.task, work.publish_task].some((t) => t && ['queued', 'running'].includes(t.status)),blocked = workBusy || source.enforce_gpu_lock && busy;
+    const heading = node('div', undefined, 'work-heading');heading.append(node('h4', label), node('span', workStatus[work.status] || MindexI18n.msg("ui.59a9eb4e6574"), 'work-status'));card.append(heading);
+    let summary = '';
+    if (name === 'shots') summary = MindexI18n.msg("ui.234493832eb5", { p0: result.shots || 0, p1: result.moments || 0, p2: result.missing_artifacts || 0 });
+    if (name === 'dialogue') {
+      const origin = { subtitle: MindexI18n.msg("ui.334873389d17"), asr: 'ASR', legacy_asr: MindexI18n.msg("ui.b0610c376d05") }[result.source] || MindexI18n.msg("ui.a0ca6153f62e");
+      const model = result.source === 'subtitle' && result.selected_track ? MindexI18n.msg("ui.886331068288", { p0: result.selected_track.index, p1: result.selected_track.language }) : result.model_identity?.model || '';
+      summary = MindexI18n.msg("ui.bbb5bbc8c300", { p0: origin, p1: model ? ' · ' + model : '', p2: result.utterances || 0, p3: result.content_segments || 0 });
+    }
+    if (name === 'analysis') summary = MindexI18n.msg("ui.d57be30db383", { p0: result.analyzed || 0, p1: result.total || 0, p2: result.scenes || 0 });
+    if (name === 'persons') summary = MindexI18n.msg("ui.1e1649402d6a", { p0: result.covered_shots || 0, p1: result.total_shots || 0, p2: result.people || 0, p3: result.accepted || 0, p4: result.candidate || 0, p5: result.rejected || 0 });
+    card.append(node('p', summary, 'work-summary'));const search = work.search || {};
+    card.append(node('p', MindexI18n.msg("ui.13e6dc8c4328", { p0: search.current ? MindexI18n.msg("ui.112f98675ee2") : search.indexed_segments ? MindexI18n.msg("ui.53122735b7e9") : MindexI18n.msg("ui.30e81c8167e5"), p1: search.indexed_segments || 0, p2: search.expected_segments || 0, p3: name === 'persons' ? MindexI18n.msg("ui.313083c877dc") : MindexI18n.msg("ui.32145468cf4f") }), 'muted'));
+    if (MindexI18n.system(result.fallback_reason)) card.append(node('p', MindexI18n.system(result.fallback_reason), 'muted'));
+    if (name === 'dialogue') {
+      const methodLabel = node('label', MindexI18n.msg("ui.faaa367f81c6")),method = node('select');MindexI18n.setAttr(method, 'aria-label', MindexI18n.msg("ui.0883552d2a0f"));
+      for (const [v, t] of [['auto', MindexI18n.msg("ui.4d56c25d87cf")], ['subtitle', MindexI18n.msg("ui.93dc9c700cf9")], ['asr', 'ASR']]) {const o = node('option', t);o.value = v;method.append(o);}
+      method.value = prefs.method;methodLabel.append(method);card.append(methodLabel);
+      const trackLabel = node('label', MindexI18n.msg("ui.541d33dd3e02")),track = node('select');MindexI18n.setAttr(track, 'aria-label', MindexI18n.msg("ui.6918e72a515e"));const empty = node('option', MindexI18n.msg("ui.6fddde6cab67"));empty.value = '';track.append(empty);
+      for (const t of source.subtitle_tracks || []) if (t.text) {const o = node('option', `${t.index} · ${t.language} · ${t.codec}${t.title ? ' · ' + t.title : ''}`);o.value = t.index;track.append(o);}
+      track.value = prefs.track;trackLabel.hidden = prefs.method !== 'subtitle';trackLabel.append(track);card.append(trackLabel);
+      method.onchange = () => {prefs.method = method.value;trackLabel.hidden = method.value !== 'subtitle';};track.onchange = () => {prefs.track = track.value;};
+    }
+    const checkLabel = node('label', undefined, 'check'),check = node('input');check.type = 'checkbox';check.checked = prefs.publish[name];check.onchange = () => {prefs.publish[name] = check.checked;};checkLabel.append(check, MindexI18n.textNode(MindexI18n.msg("ui.036fd74aa103")));card.append(checkLabel);
+    const errors = node('p', '', 'source-warning');errors.setAttribute('role', 'alert');
+    const perform = (fn) => async () => {MindexI18n.setText(errors, '');try {await fn();} catch (e) {MindexI18n.setText(errors, e.message);}};
+    const controls = node('div', undefined, 'work-controls');
+    const start = action(name === 'persons' ? MindexI18n.msg("ui.123bbda48a5d") : work.status === 'not_processed' ? MindexI18n.msg("ui.ab2f669c1a01") : name === 'shots' ? MindexI18n.msg("ui.705c3cbac14d") : MindexI18n.msg("ui.941fe1a3c3c2"), perform(async () => {
+      if (name === 'persons') return openPerson(source.id, prefs.publish[name]);
+      const options = { publish: prefs.publish[name] };
+      if (name === 'dialogue') {options.method = prefs.method;if (prefs.method === 'subtitle') {if (!prefs.track) throw Error(MindexI18n.msg("ui.e5e99ffa838b"));options.subtitle_stream = Number(prefs.track);}}
+      await post(`/api/admin/sources/${source.id}/${name}`, options);await refreshWork(source.id);
+    }));start.disabled = blocked || !work.can_start;controls.append(start);
+    const update = action(MindexI18n.msg("ui.0cb51b994992"), perform(async () => {await post(`/api/admin/sources/${source.id}/publish`, { work: name });await refreshWork(source.id);}));update.disabled = blocked || !work.can_publish;controls.append(update);
+    if (['shots', 'dialogue', 'analysis'].includes(name) && source.shot_count) controls.append(action(MindexI18n.msg("ui.0ef38438801b"), async () => {state.kind = 'shot';state.parent = null;state.segmentPage = 1;await loadSegments();$('segment-list').scrollIntoView({ block: 'start', behavior: 'smooth' });if (name !== 'shots') notify(MindexI18n.msg("ui.1844d03ed5e7"));}));
+    if (name === 'persons') {const link = node('a', MindexI18n.msg("ui.8face9a73c34"), 'quiet nav-link');link.href = `/persons?source=${encodeURIComponent(source.id)}#review`;controls.append(link);card.append(node('p', MindexI18n.msg("ui.4e65b9bde907"), 'muted'));}
+    card.append(controls);
+    for (const [type, task] of [['process', work.task], ['publish', work.publish_task]]) if (task) {
+      const progress = task.progress || {},done = progress.completed ?? progress.completed_shots ?? progress.completed_chunks,total = progress.total ?? progress.total_shots ?? progress.total_chunks;
+      const counted = Number.isFinite(total) && total > 0,stage = stages[progress.stage] || (progress.message ? MindexI18n.system(progress) : null) || MindexI18n.msg("ui.fcb979ef0b91");
+      card.append(node('p', `${type === 'publish' ? MindexI18n.msg("ui.b6ff86ac1506") : MindexI18n.msg("ui.dbad5e876f4f")}：${taskStatus[task.status] || task.status}${task.status === 'running' || counted ? ' · ' + stage + (counted ? ` ${done || 0}/${total}${progress.unit === 'segments' ? MindexI18n.msg("ui.c49a95f6ee75") : ''}` : '') : ''}`, 'muted work-task-progress'));
+      if (counted && progress.unit === 'segments') {
+        const bar = node('progress');bar.max = total;bar.value = done || 0;bar.className = 'work-progress';MindexI18n.setAttr(bar, 'aria-label', label + MindexI18n.msg("ui.5ddad219dcea"));card.append(bar);
+      }
+      if (MindexI18n.system(task.error)) card.append(node('p', MindexI18n.system(task.error), 'source-warning'));
+      if (['failed', 'interrupted'].includes(task.status)) {
+        const endpoint = type === 'publish' || ['shots', 'analysis'].includes(name) ? '/api/admin/source-tasks' : name === 'dialogue' ? '/api/admin/dialogue-tasks' : '/api/persons/tasks';
+        const retry = action(type === 'publish' ? MindexI18n.msg("ui.914e1182b421") : MindexI18n.msg("ui.23e1269c0ea7"), perform(async () => {await post(`${endpoint}/${task.id}/retry`, {});await refreshWork(source.id);}));retry.disabled = blocked;card.append(retry);
+      }
+    }
+    if (work.publication?.status === 'failed') card.append(node('p', MindexI18n.msg("ui.4b12665479da", { p0: MindexI18n.system(work.publication.error) }), 'source-warning'));
+    if (MindexI18n.system(work.start_reason)) card.append(node('p', MindexI18n.system(work.start_reason), 'muted'));
+    if (name === 'persons' && work.setup?.missing?.length) {card.append(node('p', work.setup.missing.map(MindexI18n.system).join('；'), 'muted'));const link = node('a', MindexI18n.msg("ui.8af96795e1d4"));link.href = '/persons';card.append(link);}
+    card.append(errors);grid.append(card);
   }
-  const data = source.channels?.dialogue || {};
-  if (data.source) statusLines.append(node('p', `对白来源：${{subtitle:'字幕', asr:'ASR', legacy_asr:'历史 ASR'}[data.source] || data.source}`));
-  if (data.fallback_reason) panel.append(node('p', data.fallback_reason, 'muted'));
-  if (data.error) panel.append(node('p', data.error, 'source-warning'));
-  const label = node('label', '字幕轨道 ');
-  const select = node('select'); select.setAttribute('aria-label', '对白字幕轨道');
-  const auto = node('option', '自动选择完整文本字幕'); auto.value = ''; select.append(auto);
-  const tracks = source.subtitle_tracks || [];
-  for (const track of tracks) {
-    const option = node('option', `${track.index} · ${track.language} · ${track.codec}${track.forced?' · forced':''}${track.default?' · 默认':''}${track.title?' · '+track.title:''}`);
-    option.value = track.index; select.append(option);
-  }
-  if (data.selected_track) select.value = String(data.selected_track.index);
-  label.append(select); panel.append(label);
-  const task = source.dialogue_task;
-  const busy = task && ['queued', 'running'].includes(task.status);
-  // 面板内联错误行：与任务失败原因同位，本次操作的提示直接写在这里，不往顶部横幅发。
-  const errorLine = node('p', task?.error || '', 'source-warning');
-  errorLine.hidden = !errorLine.textContent;
-  const fail = text => { errorLine.textContent = text; errorLine.hidden = false; };
-  const publishLabel = node('label', ' 完成后自动发布 ');
-  const publish = node('input'); publish.type = 'checkbox'; publish.checked = true; publishLabel.append(publish); panel.append(publishLabel);
-  const start = action('补充对白', async () => {
-    // 先确认字幕轨道存在，再决定是否提交任务：没有轨道就直接报错，不去连接 ASR 服务。
-    if (!tracks.length) return fail(NO_SUBTITLE_TRACK_MESSAGE);
-    const options = {subtitle_stream:select.value === '' ? null : Number(select.value), publish:publish.checked};
-    await api(`/api/admin/sources/${source.id}/dialogue`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(options)});
-    await refreshDialogue(source.id);
-  });
-  start.disabled = Boolean(busy); panel.append(start);
-  const progress = task?.progress || {};
-  if (task) panel.append(node('p', `任务：${task.status} · ${task.status === 'complete' ? '处理完成' : progress.stage === 'embedding' ? '正在嵌入与发布' : `${progress.completed_chunks || 0}/${progress.total_chunks || '?'} 分块`}`));
-  panel.append(errorLine);
-  if (task && ['failed','interrupted'].includes(task.status)) panel.append(action('重试未完成部分', async () => {
-    // 与「补充对白」一致：先确认字幕轨道存在，再决定是否重新排队。
-    if (!tracks.length) return fail(NO_SUBTITLE_TRACK_MESSAGE);
-    await api(`/api/admin/dialogue-tasks/${task.id}/retry`, {method:'POST'}); await refreshDialogue(source.id);
-  }));
-  if (task?.result?.index_id) panel.append(node('p', `已发布索引 ${task.result.index_id}`));
-  if (busy) dialoguePoll = setTimeout(() => run(() => refreshDialogue(source.id)), 2500);
-  panel.append(node('p', '本操作仅补充对白，不触发 LLM 分析；人物名字表示对白提及。', 'muted'));
-  target.append(panel);
+  if (busy) workPoll = setTimeout(() => run(() => refreshWork(source.id)), 2000);
 }
-async function refreshDialogue(sourceId) {
-  const source = await api(`/api/admin/sources/${sourceId}`);
-  if (state.source?.id !== sourceId) return;
-  state.source = source; renderSource(source);
+async function refreshWork(sourceId) {
+  const source = await api(`/api/admin/sources/${sourceId}`);if (state.source?.id !== sourceId) return;
+  const changed = source.shot_count !== state.source.shot_count || source.moment_count !== state.source.moment_count;
+  state.source = source;renderSource(source);if (changed) await Promise.all([loadSources(), loadSegments()]);
+}
+let personContext = null,personSetupRequest = 0;
+async function openPerson(sourceId, publish) {
+  personContext = { sourceId, publish };MindexI18n.setText($('person-error'), '');$('person-start').disabled = true;
+  $('person-setup').replaceChildren(node('p', MindexI18n.msg("ui.de365dab6e9d")));$('person-work').replaceChildren();$('person-dialog').showModal();
+  const data = await api(`/api/admin/sources/${sourceId}/person-setup`),empty = node('option', MindexI18n.msg("ui.c1e638f8326c"));empty.value = '';$('person-work').append(empty);
+  for (const w of data.works) {const option = node('option', w.name);option.value = w.id;$('person-work').append(option);}
+  $('person-work').value = data.work_id || '';renderPersonSetup(data);
+}
+function renderPersonSetup(data) {
+  const target = $('person-setup');target.replaceChildren(node('p', MindexI18n.msg("ui.fae274c098c2", { p0: data.roles, p1: data.actors })));
+  for (const text of data.missing) target.append(node('p', MindexI18n.system(text), 'source-warning'));
+  const link = node('a', MindexI18n.msg("ui.30af02a77651"));link.href = '/persons';link.target = '_blank';link.rel = 'noopener';target.append(link);
+  target.append(action(MindexI18n.msg("ui.f8306f242d0f"), loadPersonSetup));$('person-start').disabled = !data.ready;
+}
+async function loadPersonSetup() {
+  const context = personContext,request = ++personSetupRequest;$('person-start').disabled = true;
+  const data = await api(`/api/admin/sources/${context.sourceId}/person-setup?${params({ work_id: $('person-work').value || null })}`);
+  if (request === personSetupRequest && context === personContext) renderPersonSetup(data);
+}
+$('person-work').onchange = () => run(loadPersonSetup);
+$('person-start').onclick = async () => {const context = personContext;$('person-start').disabled = true;MindexI18n.setText($('person-error'), '');try {
+    await post(`/api/persons/sources/${context.sourceId}/process`, { work_id: $('person-work').value, start: 0, end: 0, publish: context.publish });$('person-dialog').close();await refreshWork(context.sourceId);
+    // A short task can finish while source_work is assembling its snapshot.
+    if (!workPoll) workPoll = setTimeout(() => {workPoll = null;run(() => refreshWork(context.sourceId));}, 500);
+  } catch (e) {MindexI18n.setText($('person-error'), e.message);$('person-start').disabled = false;}};
+$('person-close').onclick = () => $('person-dialog').close();
+const uploadQueue = [];let uploading = false;
+$('add-source').onclick = () => $('upload-dialog').showModal();$('upload-close').onclick = () => $('upload-dialog').close();
+function enqueueUploads(files) {
+  for (const file of files) {const row = node('section', undefined, 'upload-row'),text = node('p', MindexI18n.msg("ui.89f295632114", { p0: file.name })),progress = node('progress');progress.max = 100;progress.value = 0;MindexI18n.setAttr(progress, 'aria-label', file.name + MindexI18n.msg("ui.33d774c4d765"));row.append(text, progress);$('upload-results').append(row);uploadQueue.push({ file, row, text, progress });}
+  processUploads();
+}
+$('upload-files').onchange = (event) => {enqueueUploads(event.target.files);event.target.value = '';};
+for (const event of ['dragenter', 'dragover']) $('upload-drop').addEventListener(event, (e) => {e.preventDefault();$('upload-drop').classList.add('dragging');});
+$('upload-drop').addEventListener('dragleave', () => $('upload-drop').classList.remove('dragging'));
+$('upload-drop').addEventListener('drop', (e) => {e.preventDefault();$('upload-drop').classList.remove('dragging');enqueueUploads(e.dataTransfer.files);});
+function uploadOne(item) {return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest(),form = new FormData();form.append('file', item.file);xhr.open('POST', '/api/admin/sources/upload');
+    xhr.upload.onprogress = (event) => {if (event.lengthComputable) {item.progress.value = Math.round(event.loaded / event.total * 100);MindexI18n.setText(item.text, `${item.file.name} · ${item.progress.value === 100 ? MindexI18n.msg("ui.3f7ffbaff114") : item.progress.value + '%'}`);}};
+    xhr.onload = () => {let data;try {data = JSON.parse(xhr.responseText);} catch {reject(Error(MindexI18n.msg("ui.8f0490c7377a")));return;}if (xhr.status >= 200 && xhr.status < 300) resolve(data);else reject(Error(MindexI18n.system(data.detail || data)));};
+    xhr.onerror = () => reject(Error(MindexI18n.msg("ui.c41417a8d5c1")));xhr.onabort = () => reject(Error(MindexI18n.msg("ui.85ac88b57c72")));xhr.send(form);
+  });}
+async function processUploads() {
+  if (uploading) return;uploading = true;
+  try {while (uploadQueue.length) {const item = uploadQueue.shift();try {
+        const data = await uploadOne(item);item.progress.value = 100;MindexI18n.setText(item.text, `${item.file.name} · ${data.duplicate ? MindexI18n.msg("ui.a01610e03608") : MindexI18n.msg("ui.3d5e6fbea765")}`);
+        item.row.append(action(MindexI18n.msg("ui.f4efeeaf3d65"), async () => {$('upload-dialog').close();await selectSource(data.source_id);}));await loadSources();await selectSource(data.source_id);
+      } catch (e) {MindexI18n.setText(item.text, MindexI18n.msg("ui.b6917a629c7d", { p0: item.file.name, p1: e.message }));item.text.className = 'source-warning';}}} finally {uploading = false;}
 }
 
-let analysisRequest=0;
+let analysisRequest = 0;
 async function showAnalysis(item) {
-  const request=++analysisRequest;
-  $('analysis-title').textContent=`${item.name} · ${time(item.start)} — ${time(item.end)}`;
-  const target=$('analysis-content');target.replaceChildren(node('p','正在读取分析结果…'));
-  if(!$('analysis-dialog').open)$('analysis-dialog').showModal();
+  const request = ++analysisRequest;
+  MindexI18n.setText($('analysis-title'), `${item.name} · ${time(item.start)} — ${time(item.end)}`);
+  const target = $('analysis-content');target.replaceChildren(node('p', MindexI18n.msg("ui.919609d4ae0e")));
+  if (!$('analysis-dialog').open) $('analysis-dialog').showModal();
   try {
-    const data=await api(`/api/admin/segments/${item.id}/details`);
-    if(request!==analysisRequest)return;
+    const data = await api(`/api/admin/segments/${item.id}/details`);
+    if (request !== analysisRequest) return;
     target.replaceChildren();
     function utterances(section, rows) {
-      for(const u of rows||[])section.append(node('p',`${time(u.evidence_start ?? item.start+u.start)} — ${time(u.evidence_end ?? item.start+u.end)}　${u.text}`,'analysis-utterance'));
+      for (const u of rows || []) section.append(node('p', `${time(u.evidence_start ?? item.start + u.start)} — ${time(u.evidence_end ?? item.start + u.end)}　${u.text}`, 'analysis-utterance'));
     }
-    const asr=node('section',undefined,'analysis-section');asr.append(node('h3','ASR 分析结果'),node('p',data.asr.message));
-    if(data.asr.error)asr.append(node('p',data.asr.error,'error'));
-    utterances(asr,data.asr.utterances);target.append(asr);
-    const subtitles=node('section',undefined,'analysis-section');subtitles.append(node('h3','字幕轨道结果'));
-    if(!data.subtitles.tracks.length)subtitles.append(node('p',data.subtitles.message));
-    if(data.subtitles.error)subtitles.append(node('p',data.subtitles.error,'error'));
-    for(const track of data.subtitles.tracks){
-      subtitles.append(node('h4',`轨道 ${track.index} · ${track.language} · ${track.codec}${track.title?' · '+track.title:''}`),node('p',track.message));
-      if(track.error)subtitles.append(node('p',track.error,'error'));
-      utterances(subtitles,track.utterances);
+    const asr = node('section', undefined, 'analysis-section');asr.append(node('h3', MindexI18n.msg("ui.4d3975e9b6bc")), node('p', MindexI18n.system(data.asr)));
+    if (MindexI18n.system(data.asr.error)) asr.append(node('p', MindexI18n.system(data.asr.error), 'error'));
+    utterances(asr, data.asr.utterances);target.append(asr);
+    const subtitles = node('section', undefined, 'analysis-section');subtitles.append(node('h3', MindexI18n.msg("ui.0446ed2748cc")));
+    if (!data.subtitles.tracks.length) subtitles.append(node('p', MindexI18n.system(data.subtitles)));
+    if (MindexI18n.system(data.subtitles.error)) subtitles.append(node('p', MindexI18n.system(data.subtitles.error), 'error'));
+    for (const track of data.subtitles.tracks) {
+      subtitles.append(node('h4', MindexI18n.msg("ui.35dcc5bcc916", { p0: track.index, p1: track.language, p2: track.codec, p3: track.title ? ' · ' + track.title : '' })), node('p', MindexI18n.system(track)));
+      if (MindexI18n.system(track.error)) subtitles.append(node('p', MindexI18n.system(track.error), 'error'));
+      utterances(subtitles, track.utterances);
     }
     target.append(subtitles);
-    const llm=node('section',undefined,'analysis-section');llm.append(node('h3','LLM 分析结果'));
-    if(data.llm.annotation){
-      const labels={description:'描述',actions:'动作',people:'人物',objects:'对象',scene:'场景',emotions:'情绪',atmosphere:'氛围',shot_size:'景别',angle:'角度',camera_motion:'镜头运动',visual_evidence:'画面依据',dialogue_inference:'对白推断',uncertainty:'不确定信息'};
-      for(const [key,value] of Object.entries(data.llm.annotation)){
-        const text=Array.isArray(value)?value.join('；'):String(value ?? '');
-        if(text)llm.append(node('p',`${labels[key]||key}：${text}`));
+    const llm = node('section', undefined, 'analysis-section');llm.append(node('h3', MindexI18n.msg("ui.e5c008e6f34f")));
+    if (data.llm.annotation) {
+      const labels = { description: MindexI18n.msg("ui.412f54dc38e6"), actions: MindexI18n.msg("ui.d9d9827827e1"), people: MindexI18n.msg("ui.b755b68373c8"), objects: MindexI18n.msg("ui.539cb3b0a662"), scene: MindexI18n.msg("ui.625b392c7b8a"), emotions: MindexI18n.msg("ui.6e8e0c3eeeac"), atmosphere: MindexI18n.msg("ui.6b8f229d5eb9"), shot_size: MindexI18n.msg("ui.6867f7b4537a"), angle: MindexI18n.msg("ui.96ba4a436593"), camera_motion: MindexI18n.msg("ui.0118461d56e8"), visual_evidence: MindexI18n.msg("ui.cf5030475efb"), dialogue_inference: MindexI18n.msg("ui.cf335345e962"), uncertainty: MindexI18n.msg("ui.43f1d3835b20") };
+      for (const [key, value] of Object.entries(data.llm.annotation)) {
+        const text = Array.isArray(value) ? value.join('；') : String(value ?? '');
+        if (text) llm.append(node('p', `${labels[key] || key}：${text}`));
       }
-    }else llm.append(node('p',data.llm.message));
+    } else llm.append(node('p', MindexI18n.system(data.llm)));
     target.append(llm);
-    const person=node('section',undefined,'analysis-section');
-    person.append(node('h3','人物处理'),node('p',data.person.message));
-    for(const [key,label] of [['covered','已处理'],['uncovered','未处理']]){
-      const ranges=data.person[key].map(r=>`${time(r.start)} — ${time(r.end)}`).join('、');
-      if(ranges)person.append(node('p',`${label}区间：${ranges}`));
+    const person = node('section', undefined, 'analysis-section');
+    person.append(node('h3', MindexI18n.msg("ui.0c0ae35b2935")), node('p', MindexI18n.system(data.person)));
+    for (const [key, label] of [['covered', MindexI18n.msg("ui.219bde30cdf8")], ['uncovered', MindexI18n.msg("ui.453d58eaeb0c")]]) {
+      const ranges = data.person[key].map((r) => `${time(r.start)} — ${time(r.end)}`).join('、');
+      if (ranges) person.append(node('p', MindexI18n.msg("ui.163081b53c04", { p0: label, p1: ranges })));
     }
-    const counts=data.person.counts;
-    person.append(node('p',`已接受 ${counts.accepted} · 待确认 ${counts.candidate} · 已驳回 ${counts.rejected}（按分镜人物计）`));
-    if(data.person.people.length)person.append(node('p',`证据关联人物：${data.person.people.map(p=>`${p.name}（${p.kind_label}）`).join('、')}`));
+    const counts = data.person.counts;
+    person.append(node('p', MindexI18n.msg("ui.473f201e0754", { p0: counts.accepted, p1: counts.candidate, p2: counts.rejected })));
+    if (data.person.people.length) person.append(node('p', MindexI18n.msg("ui.beb1316d172c", { p0: data.person.people.map((p) => `${p.name}（${p.kind_label}）`).join('、') })));
     target.append(person);
-  }catch(error){if(request===analysisRequest)target.replaceChildren(node('p',error.message,'error'));}
+  } catch (error) {if (request === analysisRequest) target.replaceChildren(node('p', error.message, 'error'));}
 }
-$('analysis-close').onclick=()=>$('analysis-dialog').close();
-$('analysis-dialog').addEventListener('close',()=>{analysisRequest++;});
+$('analysis-close').onclick = () => $('analysis-dialog').close();
+$('analysis-dialog').addEventListener('close', () => {analysisRequest++;});

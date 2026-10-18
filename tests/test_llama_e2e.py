@@ -9,11 +9,11 @@ import numpy as np
 import pytest
 from typer.testing import CliRunner
 
-from mindex import adapters, e2e
+from mindex import adapters, e2e, llama_cpp
 from mindex.cli import app
 from mindex.config import fingerprint
 from mindex.llama_cpp import PREFIX, SUFFIX, LlamaEmbedder, LlamaTranscriber, inspect_service
-from mindex.media import command, content_hash, cut, probe
+from mindex.media import MediaError, atomic_media, command, content_hash, cut, frame_timestamps, probe
 from mindex.pipeline import Pipeline
 from mindex.search import lexical_search
 
@@ -102,6 +102,85 @@ def test_native_embedding_template_media_and_normalization(llama, video_file, tm
         config.data_dir / "capabilities" / (fingerprint(space) + ".json"), {"passed": True, "space": space}
     )
     client.require_gate()
+
+
+@pytest.mark.parametrize("duration", [0.02, 0.06, 0.08, 0.10, 0.12, 0.14, 0.16, 0.625, 1.06, 6])
+def test_native_video_short_samples_and_existing_payloads(llama, tmp_path, duration):
+    config, _props, seen, _reply, _pinned = llama
+    source = tmp_path / "short.mp4"
+    atomic_media(
+        [
+            "-f", "lavfi", "-i", f"testsrc2=s=160x120:r=50:d={duration}",
+            "-f", "lavfi", "-i", f"sine=frequency=400:duration={duration}",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest",
+        ],
+        source,
+    )
+    # Freeze the successful v1 samples byte for byte, including EOF rounding.
+    previous = tmp_path / "previous.mp4"
+    atomic_media(
+        [
+            "-i", str(source), "-map", "0:v:0", "-an", "-vf",
+            "fps=fps=4.0:start_time=0,scale=160:120",
+            "-frames:v", "24", "-c:v", "libx264", "-crf", "18",
+            "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+        ],
+        previous,
+    )
+    client = LlamaEmbedder(config)
+    client.video(source)
+    payload = seen[-1]["input"][0]["content"][1]["input_video"]
+    uploaded = tmp_path / "uploaded.mp4"
+    uploaded.write_bytes(base64.b64decode(payload["data"]))
+    info = probe(uploaded)
+    timestamps = frame_timestamps(uploaded)
+    assert 1 <= len(timestamps) <= config.video.max_frames
+    assert timestamps[0] == 0
+    assert info["fps"] <= config.video.fps
+    assert not info["audio"]
+    assert info["width"] * info["height"] <= config.video.max_pixels
+    if duration < 0.125:
+        with pytest.raises(MediaError, match="视频轨道"):
+            probe(previous)
+        assert len(timestamps) == 1
+    else:
+        assert content_hash(uploaded) == content_hash(previous)
+
+
+@pytest.mark.parametrize("max_frames", [1, 8])
+def test_native_video_respects_reduced_frame_and_pixel_limits(config, tmp_path, max_frames):
+    config.video.max_frames = max_frames
+    config.video.max_pixels = 8192
+    source = tmp_path / "input.mp4"
+    atomic_media(
+        ["-f", "lavfi", "-i", "testsrc2=s=160x120:r=50:d=6", "-c:v", "libx264"], source
+    )
+    output = tmp_path / "sample.mp4"
+    llama_cpp.prepare_video(source, output, config)
+    assert len(frame_timestamps(output)) == max_frames
+    info = probe(output)
+    assert info["width"] * info["height"] <= config.video.max_pixels
+    assert info["width"] % 2 == info["height"] % 2 == 0
+
+
+def test_native_video_rejects_empty_preprocessing_before_http(llama, tmp_path, monkeypatch):
+    config, _props, seen, _reply, _pinned = llama
+    source = tmp_path / "input.mp4"
+    atomic_media(
+        ["-f", "lavfi", "-i", "testsrc2=s=160x120:r=50:d=0.08", "-c:v", "libx264"], source
+    )
+    attempts = []
+
+    def empty_sample(args, output):
+        attempts.append(output)
+        atomic_media(["-i", str(source), "-an", "-frames:v", "0", "-c:v", "libx264"], output)
+
+    monkeypatch.setattr(llama_cpp, "atomic_media", empty_sample)
+    with pytest.raises(adapters.ModelError, match=r"input.mp4（0.080 秒）.*视频轨道"):
+        LlamaEmbedder(config).video(source)
+    assert len(attempts) == 2
+    assert all(not path.exists() for path in attempts)
+    assert seen == []
 
 
 def test_native_image_uses_vision_content_and_preserves_text_video_space(llama, tmp_path):

@@ -8,14 +8,14 @@ from typing import Annotated
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
-from filelock import FileLock
 from pydantic import Field, model_validator
 
-from .adapters import request
+from .adapters import analysis_options, request
 from .config import StrictModel
 from .media import command
 from .person_processing import PersonClient, PersonOptions, PersonTasks, ensure_reference_quality
 from .persons import CastConfirm, CastEntry, Entity, PersonHasLinkedShots, Persons, ShotReview, checked_box
+from .processing_lock import ProcessingLock, index_write_lock
 from .storage import dumps
 
 
@@ -73,7 +73,7 @@ def parse_cast(config, image):
             "image_url": {"url": "data:image/png;base64," + base64.b64encode(image["raw"]).decode()},
         },
     ]
-    extra = {"chat_template_kwargs": {"enable_thinking": False}} if service.llama_template else {}
+    extra = analysis_options(service)
     data = request(
         "POST",
         service.base_url.rstrip("/") + "/chat/completions",
@@ -174,7 +174,7 @@ def person_router(runtime, store):
 
     @router.put("/sources/{source_id}/work")
     def assign(source_id: str, body: WorkAssignment):
-        with FileLock(str(store.root / "pipeline.lock"), timeout=0):
+        with ProcessingLock(runtime.current(), source_id=source_id, work="persons"):
             catalogue.assign_work(source_id, body.work_id)
         return {"work_id": body.work_id}
 
@@ -443,7 +443,7 @@ def person_router(runtime, store):
 
     @router.post("/publish")
     def publish(body: Publish):
-        with FileLock(str(store.root / "pipeline.lock"), timeout=0):
+        with ProcessingLock(runtime.current()), index_write_lock(store.root):
             return catalogue.publish(body.content_id)
 
     @router.post("/releases/{identifier}/activate")
@@ -451,13 +451,13 @@ def person_router(runtime, store):
         row = store.one("SELECT * FROM search_releases WHERE id=?", (identifier,))
         if not row:
             raise ValueError("找不到检索发布记录")
-        with FileLock(str(store.root / "pipeline.lock"), timeout=0):
+        with ProcessingLock(runtime.current()), index_write_lock(store.root):
             store.activate_release(identifier)
         return row
 
     @router.delete("/releases/{identifier}")
     def delete_release(identifier: str):
-        with FileLock(str(store.root / "pipeline.lock"), timeout=0):
+        with ProcessingLock(runtime.current()), index_write_lock(store.root):
             return catalogue.delete_release(identifier)
 
     return router

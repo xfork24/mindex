@@ -1,14 +1,14 @@
 'use strict';
-const $ = id => document.getElementById(id);
+const $ = (id) => document.getElementById(id);
 const EXPANDED_KEY = 'mindex.settings.roles-expanded';
-const state = {data: null, tests: {}, expanded: loadExpanded()};
+const state = { data: null, tests: {}, expanded: loadExpanded() };
 function loadExpanded() {
-  try { return new Set(JSON.parse(localStorage.getItem(EXPANDED_KEY) || '[]')); }
-  catch { return new Set(); }
+  try {return new Set(JSON.parse(localStorage.getItem(EXPANDED_KEY) || '[]'));}
+  catch {return new Set();}
 }
 function toggleRole(role) {
-  if (state.expanded.has(role)) state.expanded.delete(role); else state.expanded.add(role);
-  try { localStorage.setItem(EXPANDED_KEY, JSON.stringify([...state.expanded])); } catch {}
+  if (state.expanded.has(role)) state.expanded.delete(role);else state.expanded.add(role);
+  try {localStorage.setItem(EXPANDED_KEY, JSON.stringify([...state.expanded]));} catch {}
   if (state.data) renderRoles(state.data);
   syncSectionRows();
 }
@@ -25,12 +25,12 @@ let settingsRequest = 0;
 
 const ROLE_ORDER = ['analyzer', 'generator', 'embedding', 'asr', 'tts', 'person'];
 const ROLE_DESC = {
-  person: '独立人脸和人体特征服务；按已有分镜处理，已发布人物检索不依赖服务在线',
-  analyzer: '视觉帧分析（动作、情绪、场景描述），需要多模态视觉模型',
-  generator: '创作文案拆分镜，纯文本任务，可选高性价比文本模型',
-  embedding: '文本 / 图片 / 视频统一向量空间；切换模型后需重建索引',
-  asr: '语音转文字；MiniMax 直接使用服务词级时间戳，旧纯文本流程可手动对齐',
-  tts: '创作配音；支持预定义音色与克隆音色',
+  person: MindexI18n.msg("ui.907c176fe85a"),
+  analyzer: MindexI18n.msg("ui.85feed61e44f"),
+  generator: MindexI18n.msg("ui.09b768c5ad0a"),
+  embedding: MindexI18n.msg("ui.bd997040b2e2"),
+  asr: MindexI18n.msg("ui.b74f293dd13e"),
+  tts: MindexI18n.msg("ui.35cda4046011")
 };
 const ROLE_BACKENDS = {
   person: ['mindex'],
@@ -38,80 +38,85 @@ const ROLE_BACKENDS = {
   generator: ['openai'],
   embedding: ['mindex', 'llama_cpp', 'tokenhub'],
   asr: ['mindex', 'llama_cpp', 'openai', 'minimax'],
-  tts: ['openai', 'minimax', 'dashscope'],
+  tts: ['openai', 'minimax', 'dashscope']
 };
 const ROLE_EXTRA = {
   person: [
-    {key: 'expected_space', label: '固定模型身份（粘贴 health.space JSON）', type: 'json'},
-    {key: 'fps', label: '每秒最多分析帧数（≤5）', type: 'number', min: 0.1, max: 5},
-    {key: 'face_threshold', label: '人脸阈值', type: 'number', min: 0.01},
-    {key: 'face_margin', label: '不同人物分数差', type: 'number', min: 0.01},
-    {key: 'min_face_quality', label: '帧人脸质量门槛（低于此值不自动确认）', type: 'number', min: 0, max: 1},
-    {key: 'min_reference_quality', label: '参考图质量门槛（0=全部参与匹配）', type: 'number', min: 0, max: 1},
-    {key: 'body_threshold', label: '人体外观相似阈值', type: 'number', min: 0.01},
-  ],
+  { key: 'expected_space', label: MindexI18n.msg("ui.7f5c519b5795"), type: 'json' },
+  { key: 'fps', label: MindexI18n.msg("ui.958085c940ec"), type: 'number', min: 0.1, max: 5 },
+  { key: 'face_threshold', label: MindexI18n.msg("ui.c7501d1b57d8"), type: 'number', min: 0.01 },
+  { key: 'face_margin', label: MindexI18n.msg("ui.400a124b6162"), type: 'number', min: 0.01 },
+  { key: 'min_face_quality', label: MindexI18n.msg("ui.9ced26663827"), type: 'number', min: 0, max: 1 },
+  { key: 'min_reference_quality', label: MindexI18n.msg("ui.8ea4592494d3"), type: 'number', min: 0, max: 1 },
+  { key: 'body_threshold', label: MindexI18n.msg("ui.83b62368c610"), type: 'number', min: 0.01 }],
+
   embedding: [
-    {key: 'dimensions', label: '向量维度', type: 'number', min: 1},
-    {key: 'quantization', label: '量化标识', type: 'text', placeholder: '线上模型填 cloud'},
-  ],
-  generator: [{key: 'max_tokens', label: 'max_tokens', type: 'number', min: 100}],
+  { key: 'dimensions', label: MindexI18n.msg("ui.9733d2a5ddb4"), type: 'number', min: 1 },
+  { key: 'quantization', label: MindexI18n.msg("ui.eb2b7bc048c6"), type: 'text', placeholder: MindexI18n.msg("ui.8814a2ac40dc") }],
+
+  generator: [{ key: 'max_tokens', label: 'max_tokens', type: 'number', min: 100 }],
   tts: [
-    {key: 'response_format', label: '音频格式', type: 'select', options: ['wav', 'mp3']},
-    {key: 'voice', label: '默认音色 ID', type: 'text', placeholder: '如 male-qn-qingse 或克隆音色 ID'},
-  ],
-  analyzer: [],
-  asr: [],
+  { key: 'response_format', label: MindexI18n.msg("ui.df5363469d15"), type: 'select', options: ['wav', 'mp3'] },
+  { key: 'voice', label: MindexI18n.msg("ui.9bbd54bf4bf3"), type: 'text', placeholder: MindexI18n.msg("ui.c5186b8d1b79") }],
+
+  analyzer: [
+  { key: 'thinking_mode', label: MindexI18n.msg("ui.69805dd4c1c2"), type: 'select', options: ['auto', 'low', 'provider'] },
+  { key: 'response_retries', label: MindexI18n.msg("ui.2b4e456f4b30"), type: 'number', min: 0, max: 20 },
+  { key: 'initial_output_tokens', label: MindexI18n.msg("ui.377c6dff15af"), type: 'number', min: 64, max: 131072 },
+  { key: 'max_output_tokens', label: MindexI18n.msg("ui.ee7fe23f341f"), type: 'number', min: 64, max: 131072 }],
+
+  asr: []
 };
 const WEIGHT_LABELS = {
-  video: '画面向量', description: '动作场景', style: '情绪镜头', dialogue: '对白', lexical: '词法 BM25',
+  video: MindexI18n.msg("ui.1a6981c253a3"), description: MindexI18n.msg("ui.522d79717392"), style: MindexI18n.msg("ui.5e46e0ea4cd0"), dialogue: MindexI18n.msg("ui.56073ee07b2d"), lexical: MindexI18n.msg("ui.7fe742805071")
 };
 
 function node(tag, text, className) {
   const n = document.createElement(tag);
-  if (text !== undefined) n.textContent = text;
+  if (text !== undefined) MindexI18n.setText(n, text);
   if (className) n.className = className;
   return n;
 }
 function voiceLabelOf(catalog, voiceId) {
   for (const group of catalog.groups || []) {
-    const hit = (group.voices || []).find(voice => voice.voice_id === voiceId);
-    if (hit) return hit.label;
+    const hit = (group.voices || []).find((voice) => voice.voice_id === voiceId);
+    if (hit) return MindexI18n.voice(hit);
   }
-  const mine = (catalog.library || []).find(voice => voice.voice_id === voiceId);
-  return mine ? `${mine.kind === 'clone' ? '克隆' : '已录入'} · ${mine.name}` : voiceId;
+  const mine = (catalog.library || []).find((voice) => voice.voice_id === voiceId);
+  return mine ? `${mine.kind === 'clone' ? MindexI18n.msg("ui.6e60458a4727") : MindexI18n.msg("ui.4512b3b0e457")} · ${mine.name}` : voiceId;
 }
 
 function notify(text = '', error = false) {
-  $('notice').textContent = text;
+  MindexI18n.setText($('notice'), error ? MindexI18n.system(text) : text);
   $('notice').className = `notice ${error ? 'error' : 'info'}`;
 }
 function errorText(detail) {
-  return Array.isArray(detail) ? detail.map(e => e.msg).join('；')
-    : typeof detail === 'string' ? detail : JSON.stringify(detail);
+  return Array.isArray(detail) ? detail.map((e) => e.msg).join('；') :
+  typeof detail === 'string' ? detail : JSON.stringify(detail);
 }
 async function api(url, options = {}) {
   const response = await fetch(url, options);
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(errorText(data.detail ?? response.status));
+  if (!response.ok) throw new Error(MindexI18n.system(data));
   return data;
 }
 async function run(task) {
-  try { await task(); } catch (e) { notify(e.message, true); }
+  try {await task();} catch (e) {notify(e.message, true);}
 }
 
 function renderIndexBanner(status) {
   const banner = $('index-banner');
   banner.replaceChildren();
   if (status.active_index_id === null) {
-    banner.append(node('div', '尚未发布向量索引；检索功能暂不可用。可先在命令行执行 mindex index --activate。', 'index-banner-muted'));
+    banner.append(node('div', MindexI18n.msg("ui.3b88b478e401"), 'index-banner-muted'));
     return;
   }
   if (status.matches_index) {
-    banner.append(node('div', `当前嵌入身份与已激活索引一致（${status.active_index_id.slice(0, 10)}…），检索可用。`, 'index-banner-ok'));
+    banner.append(node('div', MindexI18n.msg("ui.a6ed61231fea", { p0: status.active_index_id.slice(0, 10) }), 'index-banner-ok'));
   } else {
     const box = node('div', undefined, 'index-banner-error');
-    box.append(node('div', '当前嵌入服务未就绪或与活动索引不匹配；新版文字检索可使用已有词法索引降级，图片/视频检索需恢复对应模型。'));
-    box.append(node('div', `已激活索引：${status.active_index_id}。请运行 mindex index --activate 用当前嵌入重建并发布新索引，或在切换前回到原模型配置。${status.error ? `（身份探测失败：${status.error}）` : ''}`));
+    box.append(node('div', MindexI18n.msg("ui.5f0c8163f905")));
+    box.append(node('div', MindexI18n.msg("ui.e07d9aa4781f", { p0: status.active_index_id, p1: status.error ? MindexI18n.msg("ui.a2387d1945f7", { p0: MindexI18n.system(status.error) }) : '' })));
     banner.append(box);
   }
 }
@@ -121,13 +126,13 @@ function testLine(profileId) {
   const result = state.tests[profileId];
   const line = node('div', undefined, `test-result ${result.ok ? 'ok' : 'error'}`);
   if (result.ok) {
-    const bits = [`✓ 连接正常 · ${result.latency_ms}ms`];
-    if (result.dims) bits.push(`${result.dims} 维`);
+    const bits = [MindexI18n.msg("ui.79ccfbf3ca48", { p0: result.latency_ms })];
+    if (result.dims) bits.push(MindexI18n.msg("ui.b38853581295", { p0: result.dims }));
     if (result.reply) bits.push(`「${result.reply}」`);
-    if (result.bytes) bits.push(`${result.bytes} 字节音频`);
-    line.textContent = bits.join(' · ');
+    if (result.bytes) bits.push(MindexI18n.msg("ui.4dd220045314", { p0: result.bytes }));
+    MindexI18n.setText(line, bits.join(' · '));
   } else {
-    line.textContent = `✗ ${result.detail}`;
+    MindexI18n.setText(line, `✗ ${MindexI18n.system(result.detail)}`);
   }
   return line;
 }
@@ -135,7 +140,7 @@ function testLine(profileId) {
 function action(text, onClick) {
   const button = node('button', text, 'quiet');
   button.type = 'button';
-  button.onclick = () => run(async () => { button.disabled = true; try { await onClick(); } finally { button.disabled = false; } });
+  button.onclick = () => run(async () => {button.disabled = true;try {await onClick();} finally {button.disabled = false;}});
   return button;
 }
 
@@ -151,46 +156,46 @@ function renderRole(rolePayload) {
   head.onclick = () => toggleRole(role);
 
   const effective = rolePayload.effective;
-  const keyState = effective.api_key.has_key ? `密钥 ${effective.api_key.hint}`
-    : effective.env_key_set ? `环境变量密钥` : '未配置密钥';
+  const keyState = effective.api_key.has_key ? MindexI18n.msg("ui.bc24ebb490a2", { p0: effective.api_key.hint }) :
+  effective.env_key_set ? MindexI18n.msg("ui.aa7487d83f4a", {}) : MindexI18n.msg("ui.a3e7368ec053");
   head.append(node('span', '▸', 'chevron'));
-  head.append(node('strong', rolePayload.label, 'role-row-title'));
+  head.append(node('strong', MindexI18n.builtin(rolePayload.label), 'role-row-title'));
   const summary = node('span', undefined, 'role-row-summary');
-  summary.append(node('span', `当前生效：${effective.model} · ${effective.backend} · ${effective.base_url}`, 'role-row-effective'));
-  summary.append(node('span', `${keyState}${effective.dimensions ? ` · ${effective.dimensions} 维` : ''}`, 'role-row-key'));
+  summary.append(node('span', MindexI18n.msg("ui.61236d70e259", { p0: effective.model, p1: effective.backend, p2: effective.base_url }), 'role-row-effective'));
+  summary.append(node('span', `${keyState}${effective.dimensions ? MindexI18n.msg("ui.d5b0619c7e95", { p0: effective.dimensions }) : ''}`, 'role-row-key'));
   head.append(summary);
   row.append(head);
 
   const body = node('div', undefined, 'role-row-body');
   body.id = `role-body-${role}`;
   body.hidden = !open;
-  body.append(node('p', `${ROLE_DESC[role] || ''}（共 ${rolePayload.profiles.length} 个档案）`, 'role-desc'));
+  body.append(node('p', MindexI18n.msg("ui.e20aa0fa9eb2", { p0: ROLE_DESC[role] || '', p1: rolePayload.profiles.length }), 'role-desc'));
 
   const scroller = node('div', undefined, 'profile-scroller');
   if (!rolePayload.profiles.length) {
-    scroller.append(node('div', '还没有档案；当前直接使用本地配置文件的取值。', 'profile-item empty'));
+    scroller.append(node('div', MindexI18n.msg("ui.cdbe79925ca7"), 'profile-item empty'));
   }
-  rolePayload.profiles.forEach(profile => {
+  rolePayload.profiles.forEach((profile) => {
     const item = node('div', undefined, `profile-item ${rolePayload.active_profile_id === profile.id ? 'is-active' : ''}`);
     const head2 = node('div', undefined, 'profile-head');
     head2.append(node('strong', profile.name));
-    if (rolePayload.active_profile_id === profile.id) head2.append(node('span', '使用中', 'active-badge'));
+    if (rolePayload.active_profile_id === profile.id) head2.append(node('span', MindexI18n.msg("ui.e6aa2cbd7b42"), 'active-badge'));
     head2.append(node('span', profile.provider, 'provider-chip'));
     item.append(head2);
     item.append(node('div', `${profile.config.model || ''} · ${profile.config.backend || ''} · ${profile.config.base_url || ''}`, 'profile-meta'));
-    const keyHint = profile.api_key.has_key ? `密钥 ${profile.api_key.hint}` : '无密钥';
+    const keyHint = profile.api_key.has_key ? MindexI18n.msg("ui.bc24ebb490a2", { p0: profile.api_key.hint }) : MindexI18n.msg("ui.e80f2d522dd3");
     item.append(node('div', keyHint, 'profile-meta'));
     const bar = node('div', undefined, 'profile-actions');
-    if (rolePayload.active_profile_id !== profile.id) bar.append(action('激活', () => activateProfile(profile.id)));
-    bar.append(action('测试连接', () => testProfile(profile.id)));
-    bar.append(action('编辑', () => openDialog(role, profile)));
-    bar.append(action('删除', () => deleteProfile(profile)));
+    if (rolePayload.active_profile_id !== profile.id) bar.append(action(MindexI18n.msg("ui.4c25820818d6"), () => activateProfile(profile.id)));
+    bar.append(action(MindexI18n.msg("ui.10b7d8ecccef"), () => testProfile(profile.id)));
+    bar.append(action(MindexI18n.msg("ui.a7f814c0a40d"), () => openDialog(role, profile)));
+    bar.append(action(MindexI18n.msg("ui.3755f56f2f83"), () => deleteProfile(profile)));
     item.append(bar);
     const line = testLine(profile.id);
     if (line) item.append(line);
     scroller.append(item);
   });
-  const create = node('button', '+ 新建档案', 'new-profile-card');
+  const create = node('button', MindexI18n.msg("ui.b60dbc5381cd"), 'new-profile-card');
   create.type = 'button';
   create.onclick = () => openDialog(role, null);
   scroller.append(create);
@@ -201,8 +206,8 @@ function renderRole(rolePayload) {
 }
 
 function renderRoles(data) {
-  const byRole = Object.fromEntries(data.roles.map(r => [r.role, r]));
-  $('roles').replaceChildren(...ROLE_ORDER.map(role => renderRole(byRole[role])));
+  const byRole = Object.fromEntries(data.roles.map((r) => [r.role, r]));
+  $('roles').replaceChildren(...ROLE_ORDER.map((role) => renderRole(byRole[role])));
 }
 
 function renderTuning(data) {
@@ -221,43 +226,43 @@ function renderTuning(data) {
     wrap.append(input);
     grid.append(wrap);
   }
-  for (const [key, label] of Object.entries({visual:'视频画面', dialogue:'对白文本', analysis:'LLM 分析'})) {
-    const wrap = node('label'); wrap.append(node('span', label));
-    const input = node('input'); input.id = `channel-weight-${key}`;
-    input.type = 'number'; input.min = '0'; input.step = '0.1';
+  for (const [key, label] of Object.entries({ visual: MindexI18n.msg("ui.fe84e2eb06a1"), dialogue: MindexI18n.msg("ui.19a061a8abf3"), analysis: MindexI18n.msg("ui.5484a583c2c9") })) {
+    const wrap = node('label');wrap.append(node('span', label));
+    const input = node('input');input.id = `channel-weight-${key}`;
+    input.type = 'number';input.min = '0';input.step = '0.1';
     input.value = data.business.search.channel_weights[key];
-    wrap.append(input); grid.append(wrap);
+    wrap.append(input);grid.append(wrap);
   }
   $('rrf-k').value = data.business.search.rrf_k;
   $('candidates').value = data.business.search.candidates;
   const summary = $('tuning-summary');
-  summary.textContent = `三渠道 ${['visual', 'dialogue', 'analysis'].map(k => data.business.search.channel_weights[k]).join('/')} · 旧版 ${['video', 'description', 'style', 'dialogue', 'lexical'].map(k => weights[k]).join('/')}`
-    + ` · RRF k=${data.business.search.rrf_k} · 候选 ${data.business.search.candidates}`;
-  summary.title = '新版：画面 / 对白 / 分析；旧版：画面 / 动作场景 / 情绪镜头 / 对白 / 词法 BM25';
+  MindexI18n.setText(summary, MindexI18n.msg("ui.3329e060c3ae", { p0: ['visual', 'dialogue', 'analysis'].map((k) => data.business.search.channel_weights[k]).join('/'), p1: ['video', 'description', 'style', 'dialogue', 'lexical'].map((k) => weights[k]).join('/') }) + MindexI18n.msg("ui.5035217a37ce", { p0:
+    data.business.search.rrf_k, p1: data.business.search.candidates }));
+  MindexI18n.setAttr(summary, "title", MindexI18n.msg("ui.278a6e38a880"));
 }
 
 // --- 音色库 ---
-const VOICE_PROVIDER_LABELS = {self: '自建服务', openai: 'OpenAI 协议', minimax: 'MiniMax', dashscope: '阿里'};
+const VOICE_PROVIDER_LABELS = { self: MindexI18n.msg("ui.d4d31613eca7"), openai: MindexI18n.msg("ui.54928be09e5b"), minimax: 'MiniMax', dashscope: MindexI18n.msg("ui.6590ec95970e") };
 
 function renderVoices(data, catalog = null) {
   const voices = data.voices || [];
-  const active = voices.find(voice => voice.voice_id === data.business.default_voice);
-  const defaultLabel = catalog
-    ? (catalog.default_voice && voiceLabelOf(catalog, catalog.default_voice)) || active?.name || '跟随配置文件默认'
-    : active ? active.name : '跟随配置文件默认';
-  $('voices-summary').textContent = `${voices.length} 个音色 · 默认：${defaultLabel === '跟随配置文件默认' ? defaultLabel : defaultLabel}`;
+  const active = voices.find((voice) => voice.voice_id === data.business.default_voice);
+  const defaultLabel = catalog ?
+  catalog.default_voice && voiceLabelOf(catalog, catalog.default_voice) || active?.name || MindexI18n.msg("ui.6f5ec3201394") :
+  active ? active.name : MindexI18n.msg("ui.6f5ec3201394");
+  MindexI18n.setText($('voices-summary'), MindexI18n.msg("ui.d23f60530e93", { p0: voices.length, p1: defaultLabel === MindexI18n.msg("ui.6f5ec3201394") ? defaultLabel : defaultLabel }));
   const select = $('default-voice');
   select.replaceChildren();
-  const follow = node('option', '跟随配置文件默认');
+  const follow = node('option', MindexI18n.msg("ui.6f5ec3201394"));
   follow.value = '';
   select.append(follow);
   if (catalog) {
     for (const group of catalog.groups || []) {
       if (!group.voices.length) continue;
       const optgroup = document.createElement('optgroup');
-      optgroup.label = group.label;
-      group.voices.forEach(voice => {
-        const option = node('option', voice.label);
+      MindexI18n.setAttr(optgroup, "label", MindexI18n.builtin(group.label));
+      group.voices.forEach((voice) => {
+        const option = node('option', MindexI18n.voice(voice));
         option.value = voice.voice_id;
         if (catalog.default_voice === voice.voice_id) option.selected = true;
         optgroup.append(option);
@@ -266,54 +271,54 @@ function renderVoices(data, catalog = null) {
     }
     if ((catalog.library || []).length) {
       const mine = document.createElement('optgroup');
-      mine.label = '我的音色';
-      catalog.library.forEach(voice => {
-        const option = node('option', `${voice.kind === 'clone' ? '克隆' : '已录入'} · ${voice.name}`);
+      MindexI18n.setAttr(mine, "label", MindexI18n.msg("ui.6ec5494286de"));
+      catalog.library.forEach((voice) => {
+        const option = node('option', `${voice.kind === 'clone' ? MindexI18n.msg("ui.6e60458a4727") : MindexI18n.msg("ui.4512b3b0e457")} · ${voice.name}`);
         option.value = voice.voice_id;
         if (catalog.default_voice === voice.voice_id) option.selected = true;
         mine.append(option);
       });
       select.append(mine);
     }
-    if (catalog.default_voice && ![...select.options].some(option => option.selected)) {
-      const fallback = node('option', `${catalog.default_voice}（不在当前目录）`);
+    if (catalog.default_voice && ![...select.options].some((option) => option.selected)) {
+      const fallback = node('option', MindexI18n.msg("ui.b5acf285f054", { p0: catalog.default_voice }));
       fallback.value = catalog.default_voice;
       fallback.selected = true;
       select.append(fallback);
     }
   } else {
-    voices.forEach(voice => {
-      const option = node('option', `${voice.kind === 'clone' ? '克隆' : '预定义'} · ${voice.name}`);
+    voices.forEach((voice) => {
+      const option = node('option', `${voice.kind === 'clone' ? MindexI18n.msg("ui.6e60458a4727") : MindexI18n.msg("ui.d2712c1576ab")} · ${voice.name}`);
       option.value = voice.voice_id;
       if (data.business.default_voice === voice.voice_id) option.selected = true;
       select.append(option);
     });
   }
   const clone = catalog?.clone;
-  $('voice-backend-hint').textContent = catalog?.error
-    ? `${catalog.error}（下拉为静态目录兜底）`
-    : clone?.supported
-      ? clone.mode === 'url' ? '当前阿里后端：可用样本 URL 复刻'
-        : clone.ref_text ? '当前本地 Qwen3-TTS：可上传样本克隆；服务重启后自动恢复'
-        : '当前 MiniMax 后端：可上传样本克隆'
-      : '当前后端仅支持录入音色 ID';
+  MindexI18n.setText($('voice-backend-hint'), catalog?.error ? MindexI18n.msg("ui.63a91778c733", { p0: MindexI18n.system(
+      catalog.error) }) :
+  clone?.supported ?
+  clone.mode === 'url' ? MindexI18n.msg("ui.5683b124d6bc") :
+  clone.ref_text ? MindexI18n.msg("ui.b80eab631353") : MindexI18n.msg("ui.ddaaa717a93d") : MindexI18n.msg("ui.681eeab7e0e2"));
+
+
 
   const list = $('voice-list');
   list.replaceChildren();
-  if (!voices.length) list.append(node('li', '还没有音色；录入已有音色 ID，或激活 MiniMax / 阿里档案后克隆。', 'muted'));
-  voices.forEach(voice => {
+  if (!voices.length) list.append(node('li', MindexI18n.msg("ui.f15b2e0489b0"), 'muted'));
+  voices.forEach((voice) => {
     const item = node('li', undefined, 'voice-item');
     const head = node('div', undefined, 'profile-head');
     head.append(node('strong', voice.name));
-    if (data.business.default_voice === voice.voice_id) head.append(node('span', '默认', 'active-badge'));
-    head.append(node('span', `${voice.kind === 'clone' ? '克隆' : '预定义'} · ${VOICE_PROVIDER_LABELS[voice.provider] || voice.provider}`, 'provider-chip'));
-    if (voice.status !== 'ready') head.append(node('span', voice.status === 'failed' ? '失败' : '进行中', 'status-badge'));
+    if (data.business.default_voice === voice.voice_id) head.append(node('span', MindexI18n.msg("ui.c8d09cf955f5"), 'active-badge'));
+    head.append(node('span', `${voice.kind === 'clone' ? MindexI18n.msg("ui.6e60458a4727") : MindexI18n.msg("ui.d2712c1576ab")} · ${VOICE_PROVIDER_LABELS[voice.provider] || voice.provider}`, 'provider-chip'));
+    if (voice.status !== 'ready') head.append(node('span', voice.status === 'failed' ? MindexI18n.msg("ui.3e3c8068bb0e") : MindexI18n.msg("ui.6f1972e48ec8"), 'status-badge'));
     item.append(head);
-    item.append(node('div', `${voice.voice_id}${voice.sample_present ? ' · 已存样本' : ''}`, 'profile-meta'));
+    item.append(node('div', `${voice.voice_id}${voice.sample_present ? MindexI18n.msg("ui.efd2726aaa62") : ''}`, 'profile-meta'));
     if (voice.status === 'failed' && voice.notes) item.append(node('div', voice.notes, 'test-result error'));
     const bar = node('div', undefined, 'profile-actions');
-    if (data.business.default_voice !== voice.voice_id) bar.append(action('设为默认', () => setDefaultVoice(voice.id)));
-    bar.append(action('删除', () => deleteVoice(voice)));
+    if (data.business.default_voice !== voice.voice_id) bar.append(action(MindexI18n.msg("ui.536a009a9b59"), () => setDefaultVoice(voice.id)));
+    bar.append(action(MindexI18n.msg("ui.3755f56f2f83"), () => deleteVoice(voice)));
     item.append(bar);
     list.append(item);
   });
@@ -321,25 +326,25 @@ function renderVoices(data, catalog = null) {
 
 async function setDefaultVoice(voiceId) {
   await api('/api/settings/business', {
-    method: 'PUT', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({default_voice_id: voiceId}),
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ default_voice_id: voiceId })
   });
-  notify('默认音色已更新，新创作任务即生效。');
+  notify(MindexI18n.msg("ui.4d29ec2245b6"));
   await loadSettings();
 }
 async function deleteVoice(voice) {
-  if (!confirm(`删除音色「${voice.name}」？`)) return;
-  await api(`/api/settings/voices/${voice.id}`, {method: 'DELETE'});
-  notify('音色已删除。');
+  if (!confirm(MindexI18n.render(MindexI18n.msg("ui.7d16a0d1b523", { p0: voice.name })))) return;
+  await api(`/api/settings/voices/${voice.id}`, { method: 'DELETE' });
+  notify(MindexI18n.msg("ui.11141858d215"));
   await loadSettings();
 }
 $('default-voice').onchange = () => run(async () => {
   const value = $('default-voice').value;
   await api('/api/settings/business', {
-    method: 'PUT', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(value ? {default_voice: value} : {clear_default_voice: true}),
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(value ? { default_voice: value } : { clear_default_voice: true })
   });
-  notify(value ? '默认音色已更新，新创作任务即生效。' : '已恢复配置文件默认音色。');
+  notify(value ? MindexI18n.msg("ui.4d29ec2245b6") : MindexI18n.msg("ui.9f1bb76e83c6"));
   await loadSettings();
 });
 
@@ -356,13 +361,13 @@ function syncCloneMode() {
   $('clone-register-fields').hidden = cloneMode !== 'register';
   $('clone-consent-wrap').hidden = cloneMode === 'register';
   $('clone-reftext-field').hidden = !(cloneMode === 'upload' && state.voiceCatalog?.clone?.ref_text);
-  $('clone-mode-note').textContent = {
-    upload: state.voiceCatalog?.clone?.ref_text
-      ? '样本注册到本地 Qwen3-TTS（3 秒以上清晰人声）；填参考文本可提升克隆效果。服务重启后打开音色库会自动恢复。'
-      : '上传样本到厂商完成克隆并生成预览；需要当前语音合成为 MiniMax 后端。',
-    url: '阿里声音复刻要求样本是公网可访问 URL（wav/mp3/m4a，10~20 秒）。',
-    register: '直接录入平台已生成的音色 ID，含本地服务（Qwen3-TTS 等）的预定义音色。',
-  }[cloneMode];
+  MindexI18n.setText($('clone-mode-note'), {
+    upload: state.voiceCatalog?.clone?.ref_text ? MindexI18n.msg("ui.3291a06d1151") : MindexI18n.msg("ui.c61d27fab089"),
+
+
+    url: MindexI18n.msg("ui.65b47afd67f5"),
+    register: MindexI18n.msg("ui.3011807ab73f")
+  }[cloneMode]);
 }
 function openCloneDialog(mode) {
   cloneMode = mode;
@@ -373,57 +378,57 @@ function openCloneDialog(mode) {
   $('clone-voice-id').value = '';
   $('clone-reftext').value = '';
   $('clone-consent').checked = false;
-  $('clone-error').textContent = '';
+  MindexI18n.setText($('clone-error'), '');
   $('clone-dialog').showModal();
 }
 for (const button of document.querySelectorAll('.clone-mode')) {
-  button.onclick = () => { cloneMode = button.dataset.mode; syncCloneMode(); };
+  button.onclick = () => {cloneMode = button.dataset.mode;syncCloneMode();};
 }
 $('voice-clone').onclick = () => {
   const backend = state.data?.business?.tts_backend;
   const clone = state.voiceCatalog?.clone;
   openCloneDialog(
-    backend === 'dashscope' ? 'url'
-    : clone?.supported ? 'upload'
-    : 'register',
+    backend === 'dashscope' ? 'url' :
+    clone?.supported ? 'upload' :
+    'register'
   );
 };
 $('voice-register').onclick = () => openCloneDialog('register');
 $('clone-close').onclick = () => $('clone-dialog').close();
-$('clone-form').onsubmit = async event => {
+$('clone-form').onsubmit = async (event) => {
   event.preventDefault();
   const name = $('clone-name').value.trim();
-  $('clone-error').textContent = '';
+  MindexI18n.setText($('clone-error'), '');
   $('clone-save').disabled = true;
   try {
     if (cloneMode === 'register') {
       await api('/api/settings/voices', {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name, provider: $('clone-provider').value,
-          voice_id: $('clone-voice-id').value.trim(), kind: 'preset',
-        }),
+          voice_id: $('clone-voice-id').value.trim(), kind: 'preset'
+        })
       });
     } else {
       const form = new FormData();
       form.append('name', name);
       form.append('consent', $('clone-consent').checked ? 'true' : 'false');
       if (cloneMode === 'upload') {
-        if (!$('clone-file').files.length) throw new Error('请选择声音样本文件');
+        if (!$('clone-file').files.length) throw new Error(MindexI18n.msg("ui.78ad35fdb232"));
         form.append('ref_text', $('clone-reftext').value.trim());
         form.append('file', $('clone-file').files[0]);
       } else {
         const url = $('clone-url').value.trim();
-        if (!url) throw new Error('请填写样本公网 URL');
+        if (!url) throw new Error(MindexI18n.msg("ui.6bbfc9aa3613"));
         form.append('audio_url', url);
       }
-      await api('/api/settings/voices/clone', {method: 'POST', body: form});
+      await api('/api/settings/voices/clone', { method: 'POST', body: form });
     }
     $('clone-dialog').close();
-    notify('音色已保存。');
+    notify(MindexI18n.msg("ui.ef6533b58426"));
     await loadSettings();
   } catch (e) {
-    $('clone-error').textContent = e.message;
+    MindexI18n.setText($('clone-error'), e.message);
   } finally {
     $('clone-save').disabled = false;
   }
@@ -434,12 +439,13 @@ async function loadSettings() {
   const data = await api('/api/settings');
   if (request !== settingsRequest) return;
   state.data = data;
+  $('enforce-gpu-lock').checked = data.business.enforce_gpu_lock === true;
   renderIndexBanner(data.embedding_status);
   renderRoles(data);
   renderTuning(data);
   renderVoices(data, state.voiceCatalog);
   // An unavailable TTS catalog must not block model settings or recall tuning.
-  api('/api/settings/voices/catalog').then(catalog => {
+  api('/api/settings/voices/catalog').then((catalog) => {
     if (request !== settingsRequest) return;
     state.voiceCatalog = catalog;
     renderVoices(data, catalog);
@@ -447,29 +453,29 @@ async function loadSettings() {
 }
 
 async function activateProfile(profileId) {
-  const result = await api(`/api/settings/profiles/${profileId}/activate`, {method: 'POST'});
-  if (result.index_warning) notify(result.index_warning.message, true);
-  else notify(`已激活「${result.name}」，立即生效。`);
+  const result = await api(`/api/settings/profiles/${profileId}/activate`, { method: 'POST' });
+  if (result.index_warning) notify(MindexI18n.system(result.index_warning), true);else
+  notify(MindexI18n.msg("ui.3222aa90a764", { p0: result.name }));
   await loadSettings();
 }
 
 async function testProfile(profileId) {
-  state.tests[profileId] = {ok: true, latency_ms: '…'};
-  const result = await api(`/api/settings/profiles/${profileId}/test`, {method: 'POST'});
+  state.tests[profileId] = { ok: true, latency_ms: '…' };
+  const result = await api(`/api/settings/profiles/${profileId}/test`, { method: 'POST' });
   state.tests[profileId] = result;
   await loadSettings();
 }
 
 async function deleteProfile(profile) {
-  if (!confirm(`删除档案「${profile.name}」？此操作不可恢复。`)) return;
-  await api(`/api/settings/profiles/${profile.id}`, {method: 'DELETE'});
-  notify('档案已删除。');
+  if (!confirm(MindexI18n.render(MindexI18n.msg("ui.c07e9d3fe6f2", { p0: profile.name })))) return;
+  await api(`/api/settings/profiles/${profile.id}`, { method: 'DELETE' });
+  notify(MindexI18n.msg("ui.71b63fe4dc89"));
   await loadSettings();
 }
 
 function fillBackendOptions(role, selected) {
   const select = $('pf-backend');
-  select.replaceChildren(...ROLE_BACKENDS[role].map(value => {
+  select.replaceChildren(...ROLE_BACKENDS[role].map((value) => {
     const option = node('option', value);
     option.value = value;
     return option;
@@ -479,13 +485,13 @@ function fillBackendOptions(role, selected) {
 function fillExtraFields(role, values = {}) {
   const wrap = $('pf-extra');
   wrap.replaceChildren();
-  ROLE_EXTRA[role].forEach(field => {
+  ROLE_EXTRA[role].forEach((field) => {
     const label = node('label');
     label.append(node('span', field.label));
     let input;
     if (field.type === 'select') {
       input = node('select');
-      field.options.forEach(value => {
+      field.options.forEach((value) => {
         const option = node('option', value);
         option.value = value;
         input.append(option);
@@ -496,7 +502,7 @@ function fillExtraFields(role, values = {}) {
       if (field.min !== undefined) input.min = field.min;
       if (field.max !== undefined) input.max = field.max;
       if (field.type === 'number') input.step = 'any';
-      if (field.placeholder) input.placeholder = field.placeholder;
+      if (field.placeholder) MindexI18n.setAttr(input, "placeholder", field.placeholder);
     }
     input.id = `pf-${field.key}`;
     if (values[field.key] !== undefined && values[field.key] !== null) input.value = field.type === 'json' ? JSON.stringify(values[field.key]) : values[field.key];
@@ -524,20 +530,20 @@ for (const id of ['pf-backend', 'pf-base-url', 'pf-model', 'pf-name', 'pf-api-ke
 function ensureVoiceField(tag) {
   // 返回 {element, previous}：空 select 直接赋 value 会因无匹配选项而丢失，必须先取原值。
   const current = $('pf-voice');
-  if (!current) return {element: null, previous: ''};
+  if (!current) return { element: null, previous: '' };
   const previous = current.value;
-  if (current.tagName.toLowerCase() === tag) return {element: current, previous};
+  if (current.tagName.toLowerCase() === tag) return { element: current, previous };
   const replacement = document.createElement(tag);
   replacement.id = 'pf-voice';
   current.replaceWith(replacement);
-  return {element: replacement, previous};
+  return { element: replacement, previous };
 }
 
 async function refreshVoiceCandidates() {
   if ($('pf-role').value !== 'tts') return;
   const body = {};
-  if ($('pf-id').value) body.profile_id = Number($('pf-id').value);
-  else {
+  if ($('pf-id').value) body.profile_id = Number($('pf-id').value);else
+  {
     body.backend = $('pf-backend').value;
     const base = $('pf-base-url').value.trim();
     const model = $('pf-model').value.trim();
@@ -550,14 +556,14 @@ async function refreshVoiceCandidates() {
   let catalog = null;
   try {
     catalog = await api('/api/settings/voices/catalog/preview', {
-      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
     });
   } catch {
     catalog = null; // 查询失败时保留自由输入
   }
   const kind = catalog?.voice_kind === 'clone' ? 'clone' : 'system';
   if (kind === 'clone') {
-    const {element: select, previous: previousClone} = ensureVoiceField('select');
+    const { element: select, previous: previousClone } = ensureVoiceField('select');
     if (!select) return;
     select.dataset.voiceKind = 'clone';
     select.removeAttribute('list');
@@ -569,9 +575,9 @@ async function refreshVoiceCandidates() {
         option.value = item.voice_id;
         select.append(option);
       }
-      if (![...select.options].some(option => option.value === previousClone)) select.value = '';
+      if (![...select.options].some((option) => option.value === previousClone)) select.value = '';
     } else {
-      const empty = node('option', catalog?.hint || '音色库中还没有克隆音色；请先在「音色库」上传样本克隆。');
+      const empty = node('option', catalog?.hint || MindexI18n.msg("ui.ecd04f151041"));
       empty.value = '';
       select.append(empty);
       select.value = '';
@@ -581,28 +587,28 @@ async function refreshVoiceCandidates() {
   const groups = catalog?.groups || [];
   if (!groups.length) {
     // 目录拉取失败且无静态兜底：退回自由输入，保证档案仍可保存
-    const {element: fallback, previous: fallbackValue} = ensureVoiceField('input');
+    const { element: fallback, previous: fallbackValue } = ensureVoiceField('input');
     if (fallback) {
       fallback.removeAttribute('list');
       fallback.value = fallbackValue;
-      fallback.placeholder = '目录暂不可用；可手动输入音色 ID';
+      MindexI18n.setAttr(fallback, "placeholder", MindexI18n.msg("ui.5de84896cf73"));
     }
     return;
   }
-  const {element: select, previous} = ensureVoiceField('select');
+  const { element: select, previous } = ensureVoiceField('select');
   if (!select) return;
   select.removeAttribute('list');
   select.dataset.voiceKind = 'system';
   select.replaceChildren();
-  const unselected = node('option', '（跟随配置文件默认）');
+  const unselected = node('option', MindexI18n.msg("ui.60399713b37d"));
   unselected.value = '';
   select.append(unselected);
   for (const group of groups) {
     if (!group.voices.length) continue;
     const optgroup = document.createElement('optgroup');
-    optgroup.label = group.label;
+    MindexI18n.setAttr(optgroup, "label", MindexI18n.builtin(group.label));
     for (const voice of group.voices) {
-      const option = node('option', voice.label);
+      const option = node('option', MindexI18n.voice(voice));
       option.value = voice.voice_id;
       optgroup.append(option);
     }
@@ -610,29 +616,29 @@ async function refreshVoiceCandidates() {
   }
   if ((catalog?.library || []).length) {
     const mine = document.createElement('optgroup');
-    mine.label = '我的音色';
+    MindexI18n.setAttr(mine, "label", MindexI18n.msg("ui.6ec5494286de"));
     for (const item of catalog.library) {
-      const option = node('option', `${item.kind === 'clone' ? '克隆' : '已录入'} · ${item.name}`);
+      const option = node('option', `${item.kind === 'clone' ? MindexI18n.msg("ui.6e60458a4727") : MindexI18n.msg("ui.4512b3b0e457")} · ${item.name}`);
       option.value = item.voice_id;
       mine.append(option);
     }
     select.append(mine);
   }
-  select.value = [...select.options].some(option => option.value === previous)
-    ? previous
-    : ''; // 当前值不在目录中时回落到「跟随默认」，避免浏览器静默选中第一项造成误改
+  select.value = [...select.options].some((option) => option.value === previous) ?
+  previous :
+  ''; // 当前值不在目录中时回落到「跟随默认」，避免浏览器静默选中第一项造成误改
 }
 
 function openDialog(role, profile) {
   const data = state.data;
   $('pf-role').value = role;
   $('pf-id').value = profile ? profile.id : '';
-  $('profile-title').textContent = `${(data.roles.find(r => r.role === role) || {}).label || role} · ${profile ? '编辑档案' : '新建档案'}`;
-  $('pf-error').textContent = '';
+  MindexI18n.setText($('profile-title'), `${MindexI18n.builtin((data.roles.find((r) => r.role === role) || {}).label) || role} · ${profile ? MindexI18n.msg("ui.8c59a69b6752") : MindexI18n.msg("ui.88b10e4a74d9")}`);
+  MindexI18n.setText($('pf-error'), '');
   $('pf-api-key').value = '';
   const providerSelect = $('pf-provider');
   providerSelect.replaceChildren(...Object.entries(data.providers).map(([value, label]) => {
-    const option = node('option', label);
+    const option = node('option', MindexI18n.builtin(label));
     option.value = value;
     return option;
   }));
@@ -648,98 +654,111 @@ function openDialog(role, profile) {
   const useTemplate = role === 'analyzer' || role === 'generator';
   $('pf-template-wrap').hidden = !useTemplate;
   if (useTemplate) $('pf-llama-template').checked = profile ? config.llama_template !== false : true;
-  $('pf-key-hint').textContent = profile && profile.api_key.has_key
-    ? `已保存密钥 ${profile.api_key.hint}；留空保留，勾选下方框可清除。` : '保存后密钥只写入本地数据库，不会出现在页面或日志。';
+  MindexI18n.setText($('pf-key-hint'), profile && profile.api_key.has_key ? MindexI18n.msg("ui.d1b7dd066ef7", { p0:
+    profile.api_key.hint }) : MindexI18n.msg("ui.4f0df10ff5f1"));
   $('pf-clear-key-wrap').hidden = !(profile && profile.api_key.has_key);
   $('pf-clear-key').checked = false;
   refreshVoiceCandidates();
   return $('profile-dialog').showModal();
 }
 
-$('profile-form').onsubmit = async event => {
+$('profile-form').onsubmit = async (event) => {
   event.preventDefault();
   const role = $('pf-role').value;
   const profileId = $('pf-id').value;
   const config = {
     backend: $('pf-backend').value,
     base_url: $('pf-base-url').value.trim(),
-    model: $('pf-model').value.trim(),
+    model: $('pf-model').value.trim()
   };
   const revision = $('pf-revision').value.trim();
   if (revision && revision !== 'main') config.revision = revision;
   if (role === 'analyzer' || role === 'generator') config.llama_template = $('pf-llama-template').checked;
-  ROLE_EXTRA[role].forEach(field => {
+  ROLE_EXTRA[role].forEach((field) => {
     const input = $(`pf-${field.key}`);
     if (!input) return;
     const value = input.value.trim();
     if (value !== '') config[field.key] = field.type === 'number' ? Number(value) : value;
     if (field.type === 'json') {
-      if (value === '') config[field.key] = null;
-      else { try { config[field.key] = JSON.parse(value); } catch { config[field.key] = value; } }
+      if (value === '') config[field.key] = null;else
+      {try {config[field.key] = JSON.parse(value);} catch {config[field.key] = value;}}
     }
   });
   const apiKey = $('pf-api-key').value;
   $('pf-save').disabled = true;
-  $('pf-error').textContent = '';
+  MindexI18n.setText($('pf-error'), '');
   if (role === 'tts' && $('pf-voice')?.dataset?.voiceKind === 'clone' && !$('pf-voice').value) {
     $('pf-save').disabled = false;
-    $('pf-error').textContent = 'VoiceClone 型模型必须选择音色库中的克隆音色；请先在「音色库」上传样本克隆。';
+    MindexI18n.setText($('pf-error'), MindexI18n.msg("ui.9cef851d2fdf"));
     return;
   }
   try {
-    const body = {role, name: $('pf-name').value.trim(), provider: $('pf-provider').value, config};
+    const body = { role, name: $('pf-name').value.trim(), provider: $('pf-provider').value, config };
     if (apiKey !== '') body.api_key = apiKey;
     if (profileId && $('pf-clear-key')?.checked) body.api_key = '__clear__';
     await api(profileId ? `/api/settings/profiles/${profileId}` : '/api/settings/profiles', {
       method: profileId ? 'PUT' : 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(body),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
     });
     $('profile-dialog').close();
-    notify('档案已保存。');
+    notify(MindexI18n.msg("ui.4e5bda7d504f"));
     await loadSettings();
   } catch (e) {
-    $('pf-error').textContent = e.message;
+    MindexI18n.setText($('pf-error'), e.message);
   } finally {
     $('pf-save').disabled = false;
   }
 };
 $('profile-close').onclick = () => $('profile-dialog').close();
 
-$('search-tuning').onsubmit = async event => {
+$('search-tuning').onsubmit = async (event) => {
   event.preventDefault();
   try {
     const weights = {};
     for (const key of Object.keys(WEIGHT_LABELS)) {
       const value = Number($(`weight-${key}`).value);
-      if (!Number.isFinite(value) || value < 0) throw new Error(`${WEIGHT_LABELS[key]} 权重须为非负数字`);
+      if (!Number.isFinite(value) || value < 0) throw new Error(MindexI18n.msg("ui.e834ef69f5b6", { p0: WEIGHT_LABELS[key] }));
       weights[key] = value;
     }
     const channel_weights = {};
     for (const key of ['visual', 'dialogue', 'analysis']) {
       const value = Number($(`channel-weight-${key}`).value);
-      if (!Number.isFinite(value) || value < 0) throw new Error('渠道权重须为非负数字');
+      if (!Number.isFinite(value) || value < 0) throw new Error(MindexI18n.msg("ui.5dffe4819a2e"));
       channel_weights[key] = value;
     }
     await api('/api/settings/business', {
       method: 'PUT',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({search: {weights, channel_weights, rrf_k: Number($('rrf-k').value), candidates: Number($('candidates').value)}}),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ search: { weights, channel_weights, rrf_k: Number($('rrf-k').value), candidates: Number($('candidates').value) } })
     });
-    notify('检索调参已保存，立即生效。');
+    notify(MindexI18n.msg("ui.df0f016c336e"));
     await loadSettings();
   } catch (e) {
     notify(e.message, true);
   }
 };
+$('processing-settings').onsubmit = async (event) => {
+  event.preventDefault();
+  $('processing-save').disabled = true;
+  try {
+    await api('/api/settings/business', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enforce_gpu_lock: $('enforce-gpu-lock').checked })
+    });
+    notify(MindexI18n.msg("ui.7a13ca5bd7fc"));
+    await loadSettings();
+  } catch (e) {notify(e.message, true);} finally
+  {$('processing-save').disabled = false;}
+};
 $('tuning-reset').onclick = () => run(async () => {
-  await api('/api/settings/business', {method: 'DELETE'});
-  notify('已恢复配置文件默认值。');
+  await api('/api/settings/business', { method: 'DELETE' });
+  notify(MindexI18n.msg("ui.3cefe3ad3a1c"));
   await loadSettings();
 });
 $('reload').onclick = () => run(async () => {
   $('reload').disabled = true;
-  try { await loadSettings(); notify('设置状态已刷新。'); } finally { $('reload').disabled = false; }
+  try {await loadSettings();notify(MindexI18n.msg("ui.7109661933dc"));} finally {$('reload').disabled = false;}
 });
 
 for (const head of document.querySelectorAll('.role-row-head[data-section]')) {

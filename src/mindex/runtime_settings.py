@@ -41,7 +41,10 @@ PROFILE_FIELDS = {
         "backend", "base_url", "model", "revision", "timeout", "api_key_env", "expected_space",
         "fps", "face_threshold", "face_margin", "min_face_quality", "min_reference_quality", "body_threshold",
     },
-    "analyzer": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "llama_template"},
+    "analyzer": {
+        "backend", "base_url", "model", "revision", "timeout", "api_key_env", "llama_template",
+        "response_retries", "initial_output_tokens", "max_output_tokens", "thinking_mode",
+    },
     "generator": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "llama_template", "max_tokens"},
     "embedding": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "quantization", "dimensions"},
     "asr": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "enabled"},
@@ -462,6 +465,13 @@ def apply_overrides(config: Config, store: Store) -> Config:
         config = config.model_copy(
             update={"search": SearchConfig.model_validate({**config.search.model_dump(), **partial})}
         )
+
+    gpu_lock = get_setting(store, "override.enforce_gpu_lock")
+    if gpu_lock is not None:
+        value = json.loads(gpu_lock)
+        if not isinstance(value, bool):
+            raise ValueError("enforce_gpu_lock 必须是布尔值")
+        config = config.model_copy(update={"enforce_gpu_lock": value})
 
     voice = get_setting(store, "override.studio.voice")
     if voice:

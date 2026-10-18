@@ -236,7 +236,7 @@ class Library:
         )
         from .dialogue_tasks import task_public
 
-        return {
+        result = {
             **source_public(row),
             "missing_artifacts": missing_count,
             "channels": channel_states,
@@ -247,6 +247,9 @@ class Library:
                 "SELECT * FROM runs WHERE source_id=? ORDER BY id DESC LIMIT 5", (identifier,)
             ),
         }
+        from .source_work import source_work
+        result["work"] = source_work(self.store, result)
+        return result
 
     def list_sources(self, q: str, visibility: Visibility, favorite_only: bool, page: int, page_size: int):
         clauses, args = [], []

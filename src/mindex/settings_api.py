@@ -47,7 +47,7 @@ from .storage import Store
 from .voice_clone import aliyun_enroll, minimax_clone, qwentts_register
 from .voices_catalog import fetch_catalog, voice_kind
 
-_SETTING_KEYS = ("override.search", "override.studio.voice")
+_SETTING_KEYS = ("override.search", "override.studio.voice", "override.enforce_gpu_lock")
 _CLONE_SAMPLE_SUFFIXES = {".wav", ".mp3", ".m4a"}
 
 
@@ -75,6 +75,7 @@ class SearchTuning(StrictModel):
 
 
 class BusinessBody(StrictModel):
+    enforce_gpu_lock: bool | None = Field(default=None, strict=True)
     search: SearchTuning | None = None
     default_voice_id: int | None = None
     default_voice: str | None = None
@@ -94,6 +95,7 @@ def _effective(section, role: str) -> dict:
         "env_key_set": bool(os.environ.get(dump.get("api_key_env", ""), "")),
     }
     extras = {
+        "analyzer": ("response_retries", "initial_output_tokens", "max_output_tokens", "thinking_mode"),
         "person": (
             "expected_space", "fps", "face_threshold", "face_margin", "min_face_quality",
             "min_reference_quality", "body_threshold",
@@ -145,6 +147,8 @@ def _probe(config: Config, role: str) -> dict:
     if role in {"analyzer", "generator"}:
         service = config.analyzer if role == "analyzer" else config.studio.generator
         extra = (
+            adapters.analysis_options(service)
+            if role == "analyzer" else
             {"chat_template_kwargs": {"enable_thinking": False}}
             if getattr(service, "llama_template", False)
             else {}
@@ -254,6 +258,7 @@ def settings_router(runtime: RuntimeConfig, store: Store) -> APIRouter:
             "embedding_status": embedding_status,
             "voices": voices,
             "business": {
+                "enforce_gpu_lock": current.enforce_gpu_lock,
                 "search": {
                     "weights": current.search.weights,
                     "channel_weights": current.search.channel_weights,
@@ -335,6 +340,8 @@ def settings_router(runtime: RuntimeConfig, store: Store) -> APIRouter:
     @router.put("/business")
     def put_business(body: BusinessBody):
         current = runtime.current()
+        if body.enforce_gpu_lock is not None:
+            put_setting(store, "override.enforce_gpu_lock", json.dumps(body.enforce_gpu_lock))
         if body.search is not None:
             partial = {k: v for k, v in body.search.model_dump(exclude_none=True).items() if v is not None}
             if partial:

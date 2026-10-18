@@ -70,6 +70,10 @@ class AnalyzerConfig(Service):
     model: str = "qwen3.8:27b"
     revision: str = "deployed-2026-10-12"
     api_key_env: str = "MINDEX_QWEN_API_KEY"
+    response_retries: int = Field(default=5, ge=0, le=20)
+    initial_output_tokens: int = Field(default=12768, ge=64, le=131072)
+    max_output_tokens: int = Field(default=131072, ge=64, le=131072)
+    thinking_mode: Literal["auto", "low", "provider"] = "auto"
 
 
 class ASRConfig(Service):
@@ -247,7 +251,9 @@ class SearchConfig(StrictModel):
 
 class Config(StrictModel):
     data_dir: Path = Path("data")
+    source_upload_max_bytes: int = Field(default=20 * 1024**3, ge=1)
     runtime_overrides: bool = True
+    enforce_gpu_lock: bool = False
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
     analyzer: AnalyzerConfig = Field(default_factory=AnalyzerConfig)
     person: PersonConfig = Field(default_factory=PersonConfig)
@@ -268,7 +274,9 @@ class Config(StrictModel):
         return fingerprint(
             {
                 "prompt": 1,
-                "model": self.analyzer.model_dump(exclude={"timeout", "api_key_env"}),
+                "model": self.analyzer.model_dump(
+                    exclude={"timeout", "api_key_env", "response_retries", "initial_output_tokens", "max_output_tokens", "thinking_mode"}
+                ),
                 "deployment": self.analyzer_deployment,
                 "layout": self.layout_key,
             }

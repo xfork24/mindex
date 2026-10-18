@@ -64,8 +64,10 @@ class Pipeline:
 
         return DialogueProcessor(self.config, transcriber=self._transcriber).process(source_id, **options)
 
-    def lock(self):
-        return FileLock(str(self.store.root / "pipeline.lock"), timeout=0)
+    def lock(self, source_id=None, work=None):
+        from .processing_lock import ProcessingLock
+
+        return ProcessingLock(self.config, source_id=source_id, work=work)
 
     def _segment(
         self,
@@ -124,42 +126,76 @@ class Pipeline:
         self.split(identifier)
         return identifier
 
-    def detect(self, path: Path) -> str:
-        """Persist a complete cut plan before any expensive clip encoding."""
+    def register(self, path: Path, *, original_name: str | None = None, move=False) -> dict:
+        """只验证、去重和原子登记原片；调用方不需要启动任何模型。"""
         path = path.resolve()
+        if not path.is_file() or not path.stat().st_size:
+            raise ValueError("上传文件为空或不存在")
         log.info("Probe and hash source: %s", path)
         info = probe(path)
         identifier = content_hash(path)
         existing = self.store.one("SELECT * FROM sources WHERE id=?", (identifier,))
-        if existing and existing["layout_key"] != self.config.layout_key:
-            raise ValueError("该素材已使用另一套切分参数导入；请用新的 data_dir 保留旧切分和索引")
-        destination = self.store.root / "sources" / (identifier + path.suffix.lower())
+        name = (original_name or path.name).replace("\\", "/").rsplit("/", 1)[-1]
+        if name in {"", ".", ".."}:
+            raise ValueError("无效的文件名")
+        destination = self.store.root / (existing["path"] if existing else f"sources/{identifier}/{name}")
         destination.parent.mkdir(parents=True, exist_ok=True)
-        if not destination.exists():
-            log.info("Copy source to %s", destination)
-            partial = destination.with_suffix(destination.suffix + ".partial")
-            shutil.copyfile(path, partial)
-            partial.replace(destination)
-        self.store.execute(
-            "INSERT OR IGNORE INTO sources(id,name,path,media,layout_key) VALUES(?,?,?,?,?)",
-            (
-                identifier,
-                path.name,
-                str(destination.relative_to(self.store.root)),
-                dumps(info),
-                self.config.layout_key,
-            ),
-        )
+        # Registration has its own short lease; uploads need not wait for a running model.
+        with FileLock(str(self.store.root / "sources" / ".register.lock")):
+            existing = self.store.one("SELECT * FROM sources WHERE id=?", (identifier,))
+            if existing:
+                destination = self.store.root / existing["path"]
+            created = not destination.exists()
+            partial = None
+            try:
+                if created:
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    if move:
+                        path.replace(destination)
+                    else:
+                        with tempfile.NamedTemporaryFile(dir=destination.parent, delete=False) as handle:
+                            partial = Path(handle.name)
+                        shutil.copyfile(path, partial)
+                        partial.replace(destination)
+                self.store.execute(
+                    "INSERT OR IGNORE INTO sources(id,name,path,media,layout_key,layout_config) VALUES(?,?,?,?,?,?)",
+                    (identifier, name, str(destination.relative_to(self.store.root)), dumps(info),
+                     self.config.layout_key, dumps({"detector": self.config.detector.model_dump(),
+                                                   "video": self.config.video.model_dump()})),
+                )
+            except BaseException:
+                if created:
+                    destination.unlink(missing_ok=True)
+                raise
+            finally:
+                if partial:
+                    partial.unlink(missing_ok=True)
+        return {"source_id": identifier, "duplicate": bool(existing)}
+
+    def detect(self, path: Path) -> str:
+        """Persist a complete cut plan before any expensive clip encoding."""
+        identifier = self.register(path)["source_id"]
+        self.detect_source(identifier)
+        return identifier
+
+    def detect_source(self, identifier: str, progress=None):
         source = self.store.one("SELECT * FROM sources WHERE id=?", (identifier,))
-        assert source
+        if not source:
+            raise ValueError("找不到素材")
+        if source["prepared"]:
+            return
+        if source["layout_key"] != self.config.layout_key:
+            raise ValueError("素材切分配置不符，请使用原配置或新的 data_dir")
+        destination = self.store.resolve_media(source["path"])
+        info = json.loads(source["media"])
         plan_path = self.store.root / "plans" / f"{identifier}.json"
         plan_path.parent.mkdir(parents=True, exist_ok=True)
         with self.store.run("detect", identifier):
             if not plan_path.exists():
-                # Upgrade already prepared libraries without scanning the film again.
-                shots = self.store.segments(identifier, "shot") if source["prepared"] else []
-                log.info("Detect shots: %s (%.1f minutes)", path.name, info["duration"] / 60)
-                ranges = [(s["start"], s["end"]) for s in shots] or self.detector.detect(destination)
+                if progress:
+                    progress({"stage": "detect", "message": "正在检测分镜"})
+                log.info("Detect shots: %s (%.1f minutes)", source["name"], info["duration"] / 60)
+                ranges = self.detector.detect(destination)
                 self._validate_ranges(ranges, info["duration"])
                 plan = {
                     "source_id": identifier,
@@ -201,13 +237,13 @@ class Pipeline:
         self._validate_ranges(ranges, json.loads(source["media"])["duration"])
         return ranges
 
-    def split(self, source_id: str):
+    def split(self, source_id: str, progress=None):
         source = self.store.one("SELECT * FROM sources WHERE id=?", (source_id,))
         if source is None:
             raise ValueError("找不到素材 ID，请先执行 detect")
-        if source["layout_key"] != self.config.layout_key:
+        if not source["prepared"] and source["layout_key"] != self.config.layout_key:
             raise ValueError("素材切分配置不符，请使用原配置或新的 data_dir")
-        ranges = self._read_plan(source)
+        ranges = self._read_plan(source) if not source["prepared"] else []
         with self.store.run("prepare", source_id):
             if not source["prepared"]:
                 for number, (start, end) in enumerate(ranges, 1):
@@ -231,10 +267,13 @@ class Pipeline:
                             shot["id"],
                             "whole_shot" if len(pieces) == 1 else "sliding_window",
                         )
+                    if progress:
+                        progress({"stage": "split", "completed": number, "total": len(ranges)})
                 self.store.execute("UPDATE sources SET prepared=1 WHERE id=?", (source_id,))
             else:
                 # Resume also repairs missing physical artifacts without redetecting shots.
-                for segment in self.store.segments(source_id):
+                segments = self.store.segments(source_id)
+                for number, segment in enumerate(segments, 1):
                     self._segment(
                         source,
                         segment["kind"],
@@ -244,6 +283,8 @@ class Pipeline:
                         segment["parent_id"],
                         segment["reason"],
                     )
+                    if progress:
+                        progress({"stage": "repair", "completed": number, "total": len(segments)})
 
     def visual_snapshots(self, source_id: str | None = None, kinds=("moment",)) -> list[dict]:
         """Native video embeddings need neither ASR nor generated descriptions."""
@@ -530,12 +571,14 @@ class Pipeline:
             },
         )
 
-    def analyze(self, source_id: str | None = None):
+    def analyze(self, source_id: str | None = None, progress=None):
+        from .dialogue import atomic_json
+
         for source in self.selected_sources(source_id):
             profile = self.annotation_profile(source["id"])
             with self.store.run("analyze", source["id"]):
                 base = [s for s in self.store.segments(source["id"]) if s["kind"] != "scene"]
-                for segment in base:
+                for number, segment in enumerate(base, 1):
                     log.info(
                         "Analyze %s %s %.2f–%.2f",
                         source["name"],
@@ -544,6 +587,8 @@ class Pipeline:
                         segment["end"],
                     )
                     self._annotate(segment)
+                    if progress:
+                        progress({"stage": "analyze", "completed": number, "total": len(base)})
                 plan = self.store.json_value("scene_plans", "source_id", source["id"], profile)
                 if plan is None:
                     # Turn overlapping moments into contiguous units, while retaining
@@ -560,26 +605,48 @@ class Pipeline:
                                 "start": segment["start"],
                                 "end": end,
                                 "description": annotation["annotation"]["description"],
+                                "scene": annotation["annotation"].get("scene", []),
                             }
                         )
                     plan, batch = [], []
+                    grouped_units = 0
 
-                    def grouped(current):
+                    def grouped(current, total_units, checkpoint_root):
+                        nonlocal grouped_units
                         if not current:
                             return []
-                        groups = self.analyzer.group_scenes(current)
+                        if progress:
+                            progress({
+                                "stage": "scene_grouping", "completed": grouped_units, "total": total_units,
+                                "message": f"正在组织场景 {current[0]['start']:.2f}–{current[-1]['end']:.2f} 秒",
+                            })
+                        checkpoint = checkpoint_root / (fingerprint(current) + ".json")
+                        if checkpoint.is_file():
+                            groups = json.loads(checkpoint.read_text())
+                        else:
+                            groups = self.analyzer.group_scenes(current)
+                            atomic_json(checkpoint, groups)
+                        grouped_units += len(current)
+                        if progress:
+                            progress({"stage": "scene_grouping", "completed": grouped_units, "total": total_units})
                         return [[current[group[0]]["start"], current[group[-1]]["end"]] for group in groups]
 
+                    checkpoint_root = self.store.root / "analysis" / source["id"] / profile
                     for unit in units:
-                        if batch and unit["end"] - batch[0]["start"] > 45:
-                            plan.extend(grouped(batch))
+                        if batch and (unit["end"] - batch[0]["start"] > 45 or len(batch) >= 32):
+                            plan.extend(grouped(batch, len(units), checkpoint_root))
                             batch = []
                         batch.append(unit)
-                    plan.extend(grouped(batch))
+                    plan.extend(grouped(batch, len(units), checkpoint_root))
                     self.store.put_json("scene_plans", "source_id", source["id"], profile, plan)
-                for start, end in plan:
+                for scene_number, (start, end) in enumerate(plan, 1):
+                    if progress:
+                        progress({"stage": "scenes", "completed": scene_number - 1, "total": len(plan),
+                                  "message": "正在生成场景分析"})
                     scene = self._segment(source, "scene", start, end, profile, None, "semantic_grouping")
                     self._annotate(scene)
+                    if progress:
+                        progress({"stage": "scenes", "completed": scene_number, "total": len(plan)})
 
     def snapshots(self, source_id: str | None = None) -> list[dict]:
         result = []

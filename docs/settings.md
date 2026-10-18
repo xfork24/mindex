@@ -36,6 +36,8 @@
 
 ## 热生效机制
 
+“处理设置 → 强加 GPU 锁”默认关闭。保存后影响后续任务启动、重试和素材删除，Web 与 CLI 共用 `enforce_gpu_lock` 覆盖层。开启恢复全局处理互斥；关闭允许不同素材、不同类型并行，同类重复启动与正在处理素材的删除保护仍保留。运行中的任务继续持有启动时取得的锁，改为关闭不会强制释放正在使用的独占锁。
+
 - CLI：`mindex` 每条命令在 `load_config` 后应用覆盖层（`runtime_settings.apply_runtime_overrides`）；`mindex e2e` 除外（验证框架保持 yaml 原值可复现）。
 - Web：`create_app` 持有 `RuntimeConfig`，检索/状态路由每请求解析 `current()`；创作任务在 launch 时解析一次（一次任务运行绑定同一配置，改配置下次生效，studio 的 reconcile 指纹机制会级联作废受影响步骤）。
 - 覆盖层无长驻缓存：每次打开页面看到的即是当前生效版本。

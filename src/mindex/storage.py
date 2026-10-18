@@ -80,6 +80,13 @@ class Store:
                   error TEXT, result TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
+                CREATE TABLE IF NOT EXISTS source_tasks (
+                  id TEXT PRIMARY KEY, source_id TEXT NOT NULL, work TEXT NOT NULL, status TEXT NOT NULL,
+                  config TEXT NOT NULL, options TEXT NOT NULL, progress TEXT NOT NULL DEFAULT '{}',
+                  error TEXT, result TEXT, publication TEXT,
+                  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
                 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS model_profiles (
                   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -104,6 +111,10 @@ class Store:
             from .persons import init_person_schema
 
             init_person_schema(db)
+            for table, column in (("sources", "layout_config"), ("dialogue_tasks", "publication"),
+                                  ("person_tasks", "publication")):
+                if column not in {r[1] for r in db.execute(f"PRAGMA table_info({table})")}:
+                    db.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT")
             columns = {row[1] for row in db.execute("PRAGMA table_info(representations)")}
             if "cache_key" not in columns:
                 db.execute("ALTER TABLE representations ADD COLUMN cache_key TEXT")

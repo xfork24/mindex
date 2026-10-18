@@ -186,7 +186,7 @@ def test_existing_database_migration_preserves_sources(tmp_path):
             "CREATE TABLE sources(id TEXT PRIMARY KEY, name TEXT NOT NULL,path TEXT NOT NULL,media TEXT NOT NULL,layout_key TEXT NOT NULL,prepared INTEGER NOT NULL DEFAULT 0)"
         )
         db.execute(
-            "INSERT INTO sources VALUES(?,?,?,?,?,?)",
+            "INSERT INTO sources(id,name,path,media,layout_key,prepared) VALUES(?,?,?,?,?,?)",
             ("old-source", "旧素材", "sources/old.mp4", json.dumps({"duration": 1}), "old-layout", 0),
         )
     store = Store(root)

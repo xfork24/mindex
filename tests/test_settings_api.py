@@ -47,6 +47,7 @@ def test_get_settings_snapshot(config):
     assert roles["embedding"]["effective"]["backend"] == "mindex"
     assert roles["embedding"]["active_profile_id"] is None
     assert roles["analyzer"]["label"] == "多模态理解"
+    assert roles["analyzer"]["effective"]["thinking_mode"] == "auto"
     assert "presets" in data
     assert "self" in data["presets"] and "tencent" in data["presets"]
     assert "embedding" in data["presets"]["tencent"]

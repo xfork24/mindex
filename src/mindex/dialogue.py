@@ -191,6 +191,10 @@ def current_dialogue(store: Store, source_id: str) -> dict | None:
     )
     if row and row["status"] in READY:
         return json.loads(row["data"])
+    if row:
+        previous = json.loads(row["data"]).get("previous_complete")
+        if previous:
+            return previous
     # Read old aligned transcripts independently of the currently configured ASR.
     for row in store.rows(
         "SELECT data,profile FROM transcripts WHERE source_id=? ORDER BY rowid DESC", (source_id,)
@@ -233,6 +237,10 @@ class DialogueProcessor:
         self.config, self.store, self.transcriber = config, Store(config.data_dir), transcriber
 
     def save(self, source_id, profile, data):
+        if data["status"] not in READY:
+            previous = current_dialogue(self.store, source_id)
+            if previous:
+                data = {**data, "previous_complete": previous}
         data = {
             **data,
             "input_fingerprint": profile,
@@ -244,7 +252,10 @@ class DialogueProcessor:
         )
         return data
 
-    def process(self, source_id=None, *, subtitle_stream=None, start=0, end=None, progress=None, workers=1):
+    def process(self, source_id=None, *, method="auto", subtitle_stream=None, start=0, end=None,
+                progress=None, workers=1):
+        if method not in {"auto", "subtitle", "asr"}:
+            raise ValueError("对白方式必须是 auto、subtitle 或 asr")
         started = perf_counter()
         sources = [s for s in self.store.sources() if source_id is None or s["id"] == source_id]
         if not sources:
@@ -252,34 +263,43 @@ class DialogueProcessor:
         results = []
         for source in sources:
             with self.store.run("dialogue", source["id"]):
-                results.append(self._source(source, subtitle_stream, start, end, progress, workers))
+                results.append(self._source(source, subtitle_stream, start, end, progress, workers, method))
         return {"sources": results, "elapsed_seconds": round(perf_counter() - started, 3)}
 
-    def _source(self, source, stream, start, end, progress, workers):
+    def _source(self, source, stream, start, end, progress, workers, method):
         sid = source["id"]
         path = self.store.resolve_media(source["path"])
         info = probe(path)
-        tracks = subtitle_tracks(path)  # Old imports did not store subtitle metadata.
-        selected = choose_subtitle(tracks, stream)
+        tracks = subtitle_tracks(path) if method != "asr" else []
+        selected = choose_subtitle(tracks, stream) if method != "asr" else None
+        manual_subtitle = method == "subtitle"
+        if manual_subtitle and stream is None:
+            raise ValueError("手动字幕方式必须选择文本字幕轨道")
+        if manual_subtitle and (not selected or not selected["text"]):
+            raise ValueError("请选择存在的文本字幕轨道；手动字幕方式不使用 ASR")
         common = {"subtitle_tracks": tracks, "selected_track": selected}
         reason = "没有可用的完整文本字幕（forced/位图字幕不自动选用；烧录字幕不做 OCR）"
         if selected and selected["text"]:
+            if progress:
+                progress({"stage": "subtitle", "message": "正在提取文本字幕"})
             profile = fingerprint(["subtitle-srt-v1", sid, selected])
             previous = self.store.one(
                 "SELECT * FROM channel_data WHERE source_id=? AND channel='dialogue'", (sid,)
             )
-            if previous and previous["profile"] == profile and previous["status"] in READY:
+            if previous and previous["profile"] == profile and previous["status"] in READY and (
+                manual_subtitle or json.loads(previous["data"]).get("utterances")
+            ):
                 return {"source_id": sid, **json.loads(previous["data"]), "reused": True}
             try:
                 utterances = extract_subtitles(path, selected, info["duration"])
-                if utterances:
+                if utterances or manual_subtitle:
                     data = self.save(
                         sid,
                         profile,
                         {
                             **common,
                             "source": "subtitle",
-                            "status": "complete",
+                            "status": "complete" if utterances else "empty",
                             "utterances": utterances,
                             "words": [],
                             "language": selected["language"],
@@ -290,6 +310,8 @@ class DialogueProcessor:
                     return {"source_id": sid, **data}
                 reason = "所选文本字幕提取结果为空"
             except MediaError as exc:
+                if manual_subtitle:
+                    raise
                 reason = "字幕提取失败：" + str(exc)
         elif selected:
             reason = "指定字幕为位图字幕，无法提取文本"
@@ -298,7 +320,7 @@ class DialogueProcessor:
             exclude={"timeout", "api_key_env", "aligner_model", "aligner_revision", "deployment_manifest"}
         )
         profile = fingerprint(["asr-words-context1-v1", sid, model])
-        common.update(source="asr", fallback_reason=reason, model_identity=model)
+        common.update(source="asr", fallback_reason=reason if method != "asr" else None, model_identity=model)
         old = self.store.one("SELECT * FROM channel_data WHERE source_id=? AND channel='dialogue'", (sid,))
         if old and old["profile"] == profile and old["status"] in READY:
             return {"source_id": sid, **json.loads(old["data"]), "reused": True}

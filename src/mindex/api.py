@@ -39,14 +39,34 @@ def create_app(
     store = Store(config.data_dir)
     runtime = RuntimeConfig(config, store)  # 设置页保存后经覆盖层热生效，无需重启
     app = FastAPI(title="Mindex 视频素材检索", version="0.1.0")
+
+    @app.middleware("http")
+    async def localized_messages(request, call_next):
+        # Additive metadata on JSON API responses; HTTP status and diagnostics stay intact.
+        response = await call_next(request)
+        if not request.url.path.startswith("/api/") or "application/json" not in response.headers.get("content-type", ""):
+            return response
+        from .i18n import add_message_metadata
+
+        payload = b"".join([chunk async for chunk in response.body_iterator])
+        try:
+            data = add_message_metadata(json.loads(payload))
+        except (ValueError, UnicodeDecodeError):
+            from starlette.responses import Response
+            return Response(payload, status_code=response.status_code, headers=dict(response.headers))
+        headers = {key: value for key, value in response.headers.items() if key != "content-length"}
+        return JSONResponse(data, status_code=response.status_code, headers=headers, background=response.background)
+
     if index_id and store.index_version(index_id)["status"] != "ready":
         raise ValueError("固定预览只允许就绪索引")
     from .dialogue_tasks import dialogue_router
     from .person_api import person_router
+    from .source_tasks import source_tasks_router
 
     app.include_router(person_router(runtime, store))
     app.include_router(dialogue_router(runtime, store, embedder))
-    app.include_router(admin_router(store))
+    app.include_router(source_tasks_router(runtime, store, embedder))
+    app.include_router(admin_router(store, runtime))
     app.include_router(settings_router(runtime, store))
     app.include_router(studio_router(runtime, store, embedder=embedder, storyboarder=storyboarder, speaker=speaker))
 

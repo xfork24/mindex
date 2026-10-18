@@ -161,3 +161,9 @@ phase 取值：`smoke → visual → preview → asr → align → analyze(-smok
 ## schema 2 pin 与迁移
 
 本地使用 `--weights-file FILE --mmproj-file FILE --server-cwd DIR`，流式计算 SHA256 并核对 `/props.model_path`；远程使用 `--weights-sha256 SHA --mmproj-sha256 SHA`，明确标记操作员声明。`--launch-parameters FILE` 记录部署者确认的启动参数 JSON，并参与部署摘要。HTTP API 不能证明实际加载的投影或全部数值配置。未经当前部署 smoke 基线对照不能建索引或检索；详见 [macOS 迁移](macos-model-migration.md)。
+
+## 原片只登记与对白方式
+
+`mindex register 视频...` 验证媒体、按内容去重并原子登记到当前素材库，不启动分镜检测或模型。返回 `source_id` 与 `duplicate`。
+
+`mindex enrich-dialogue SOURCE --method auto|subtitle|asr [--subtitle-stream INDEX] [--no-publish]` 分别指定自动字幕优先、严格文本字幕轨道或直接 ASR。严格字幕需要选轨，失败不回退；默认 auto 兼容已有调用。处理成功而发布失败时返回独立 `publication` 错误，处理结果保留。
