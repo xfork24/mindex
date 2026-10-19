@@ -38,7 +38,7 @@ class PlanOptions(StrictModel):
     recall_limit: int = Field(default=20, ge=1, le=50)
     audio_mode: str = Field(default="tts_only", pattern="^(tts_only|ducking)$")
     burn: bool = True
-    atempo: float | None = Field(default=None, ge=0.75, le=1.25)
+    atempo: float | None = Field(default=1.0, ge=0.75, le=1.25)
     alignment: str = Field(default="auto", pattern="^(auto|freeze|strict)$")
     duck_gain: float = Field(default=0.15, gt=0, le=1)
 
@@ -629,6 +629,11 @@ def specification(config, job_id, w, p, stage, sid=None, *, context=None):
         inputs = {"content": selected["content"]}
         if stage == "recall":
             payload = {"query": content["query"]}
+            # 分镜级覆盖仅在实际设置时进签名，保证未覆盖分镜与历史版本签名逐字节一致。
+            if content.get("granularity"):
+                payload["granularity"] = content["granularity"]
+            if content.get("recall_limit"):
+                payload["limit"] = content["recall_limit"]
             # 只在有限制时加键，保证不限任务的签名与历史版本逐字节一致。
             if scope := studio.material_scope(studio.load_job(config, job_id)):
                 params = {**params, "sources": sorted(scope)}
@@ -1279,14 +1284,17 @@ def execute(config, job_id, w, p, stage, sid=None, *, speaker=None, storyboarder
             )
             mode = recall.mode if recall else "text"
             meta = {}
+            # 分镜级覆盖优先，未设置时跟随方案数量与服务配置粒度。
+            limit = content.get("recall_limit") or params["limit"]
+            granularity = content.get("granularity") or config.studio.recall.granularity
             # 任务素材范围是硬上限，回显的 recall 仍是用户原始设置。
             scope = studio.material_scope(studio.load_job(config, job_id))
             if mode == "text":
                 result = engine.text(
                     TextSearch(
                         text=content["query"],
-                        granularity=config.studio.recall.granularity,
-                        limit=params["limit"],
+                        granularity=granularity,
+                        limit=limit,
                         person_ids=recall.person_ids if recall else [],
                         person_mode=recall.person_mode if recall else "auto",
                         person_relation=recall.person_relation if recall else "all",
@@ -1310,8 +1318,8 @@ def execute(config, job_id, w, p, stage, sid=None, *, speaker=None, storyboarder
                 search = engine.image if mode == "image" else engine.video
                 result = search(
                     query_media(config, job_id, recall),
-                    granularity=config.studio.recall.granularity,
-                    limit=params["limit"],
+                    granularity=granularity,
+                    limit=limit,
                     filters=studio.scoped_filters(recall.filters, scope),
                 )
             entries = [
@@ -1581,6 +1589,8 @@ def detail(config, job_id, w, *, store=None):
         "voice_mode": p["options"].get("voice_mode", "inherit"),
     }
     result["conflicts"] = {}
+    # 分镜编辑器「跟随方案」粒度默认值展示；数量默认直接读方案 recall_limit。
+    result["recall_granularity"] = config.studio.recall.granularity
     from .studio_window import anchor_conflict
 
     result["anchor_conflicts"] = {sid: error for sid in ordered_shots(w, p)

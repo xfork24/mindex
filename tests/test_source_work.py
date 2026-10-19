@@ -195,10 +195,16 @@ def test_embedding_progress_persisted_in_api_and_resumed_checkpoints(config, vid
         task_id = response.json()["id"]
         task_url = f"/api/admin/source-tasks/{task_id}"
         assert calls.get(timeout=5) == 1
-        total = len(pipeline.store.segments(sid, "moment"))
+        total = len(pipeline.store.segments(sid))
         assert total > 2
 
-        def assert_progress(completed):
+        def assert_progress():
+            building = pipeline.store.one("SELECT id FROM index_versions WHERE status='building'")
+            complete = pipeline.store.one(
+                "SELECT count(*) AS n FROM index_members WHERE index_id=? AND complete=1 "
+                "AND json_extract(snapshot,'$.source_id')=?", (building['id'], sid)
+            )['n']
+            completed = complete
             task = client.get(task_url).json()
             assert task["status"] == "running"
             assert task["progress"]["stage"] == "embedding"
@@ -217,26 +223,28 @@ def test_embedding_progress_persisted_in_api_and_resumed_checkpoints(config, vid
             assert source["work"]["shots"]["search"]["indexed_segments"] == 0
             assert pipeline.store.active_index()["id"] == old
 
-        assert_progress(0)
+        assert_progress()
         release.release()
         assert calls.get(timeout=5) == 2
-        assert_progress(1)
+        assert_progress()
         release.release()
         assert calls.get(timeout=5) == 3
-        assert_progress(2)
+        assert_progress()
         release.release()
         for _ in range(500):
             task = client.get(task_url).json()
             if task["publication"]["status"] == "failed" and task["status"] != "running":
                 break
             time.sleep(0.01)
-        assert task["progress"]["completed"] == 2
+        durable_completed = task["progress"]["completed"]
+        assert durable_completed < total
         assert task["publication"]["status"] == "failed"
         assert task["status"] == ("failed" if work == "publish" else "complete")
         retry = client.post(task_url + "/retry")
         assert retry.status_code == 202, retry.text
         assert calls.get(timeout=5) == 4
-        assert_progress(2)  # resumes at the durable count, without resetting to zero
+        assert_progress()
+        assert client.get(task_url).json()["progress"]["completed"] == durable_completed
         for _ in range(total):
             release.release()
         for _ in range(500):

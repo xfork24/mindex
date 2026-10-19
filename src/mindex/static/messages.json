@@ -1,9 +1,24 @@
 {
-  "ui.anchor_selected": {"zh": "已选择", "en": "Selected"},
-  "ui.anchor_automatic": {"zh": "自动选择", "en": "Auto selected"},
-  "ui.execute_column_submitted": {"zh": "已提交{p0}列执行/复用", "en": "Run / reuse submitted for {p0}"},
-  "ui.expand_all_rows": {"zh": "展开所有行", "en": "Expand all rows"},
-  "ui.execute_all_reuse": {"zh": "全部执行/复用", "en": "Run / reuse all"},
+  "ui.anchor_selected": {
+    "zh": "已选择",
+    "en": "Selected"
+  },
+  "ui.anchor_automatic": {
+    "zh": "自动选择",
+    "en": "Auto selected"
+  },
+  "ui.execute_column_submitted": {
+    "zh": "已提交{p0}列执行/复用",
+    "en": "Run / reuse submitted for {p0}"
+  },
+  "ui.expand_all_rows": {
+    "zh": "展开所有行",
+    "en": "Expand all rows"
+  },
+  "ui.execute_all_reuse": {
+    "zh": "全部执行/复用",
+    "en": "Run / reuse all"
+  },
   "ui.acfbb1e1a397": {
     "zh": "Mindex · 视频检索",
     "en": "Mindex · Video search"
@@ -1099,38 +1114,6 @@
   "ui.7407393d52c7": {
     "zh": "创作文案",
     "en": "Creative script"
-  },
-  "ui.378a54082ab0": {
-    "zh": "高级选项",
-    "en": "Advanced options"
-  },
-  "ui.d19e8611d29b": {
-    "zh": "音轨",
-    "en": "Audio track"
-  },
-  "ui.1801c99c1d7d": {
-    "zh": "仅配音（丢弃原声）",
-    "en": "Narration only (discard original audio)"
-  },
-  "ui.b49af7ac7ca1": {
-    "zh": "配音 + 原声氛围",
-    "en": "Narration + Original ambience"
-  },
-  "ui.aaa5f2e9f006": {
-    "zh": "字幕",
-    "en": "Subtitles"
-  },
-  "ui.3f4dbcbdf0ab": {
-    "zh": "烧录进画面",
-    "en": "Burn into video"
-  },
-  "ui.ea2d04f98746": {
-    "zh": "软字幕轨道",
-    "en": "Soft subtitle track"
-  },
-  "ui.88af53b5b584": {
-    "zh": "召回数量",
-    "en": "Retrieval limit"
   },
   "ui.cf42fd678f46": {
     "zh": "创建任务",
@@ -2269,8 +2252,8 @@
     "en": "The relationship between the works has changed, please re-pair and post the character evidence."
   },
   "ui.306128b77e2f": {
-    "zh": "已处理 {p0} 个分镜区间：{p1}{p2}",
-    "en": "{p0} storyboard intervals processed: {p1}{p2}"
+    "zh": "已处理 {p0} 个分镜区间",
+    "en": "Processed {p0} shot intervals"
   },
   "ui.e9eb38d595ce": {
     "zh": "人物覆盖缺失",
@@ -3525,11 +3508,11 @@
     "en": "Soft subtitles"
   },
   "ui.8a1c10056984": {
-    "zh": "配音速度 0.75–1.25（留空自动）",
-    "en": "Dub speed 0.75–1.25 (leave blank for automatic)"
+    "zh": "配音速度 0.75–1.25",
+    "en": "Narration speed 0.75–1.25"
   },
   "ui.91e681dfd6f2": {
-    "zh": "补齐方式",
+    "zh": "画面与配音时长对齐",
     "en": "Duration alignment"
   },
   "ui.3a5dfc431b89": {
@@ -3537,8 +3520,8 @@
     "en": "Auto crop/variable speed/freeze"
   },
   "ui.e1137203359d": {
-    "zh": "原速配音，裁剪或冻结",
-    "en": "Dubbing at full speed, cropped or frozen"
+    "zh": "不自动变速，裁剪或冻结",
+    "en": "No automatic speed adjustment; trim or freeze"
   },
   "ui.d79a48ac1479": {
     "zh": "严格时长匹配",
@@ -7195,5 +7178,49 @@
   "ui.0a9eab1a4d36": {
     "zh": "不限（全部素材）",
     "en": "Unrestricted (all media)"
+  },
+  "ui.2920edc15f73": {
+    "zh": "跟随方案（{p0}）",
+    "en": "Follow plan ({p0})"
+  },
+  "ui.ecc8f054fe1a": {
+    "zh": "仅作用于本分镜的召回，默认跟随方案参数。",
+    "en": "Applies to this shot's recall only; defaults follow plan settings."
+  },
+  "ui.24fc33ac59f6": {
+    "zh": "召回覆盖：{p0}",
+    "en": "Recall override: {p0}"
+  },
+  "ui.adf1951c424c": {
+    "zh": "返回 {p0}",
+    "en": "Top {p0}"
+  },
+  "ui.voice_catalog_unavailable": {
+    "zh": "音色列表加载失败，请稍后重试或到设置页面检查配音服务。",
+    "en": "Could not load voices. Retry or check the TTS service in Settings."
+  },
+  "ui.original_gain_help": {
+    "zh": "仅在“配音与原声”模式且素材有音轨时生效，控制素材原声音量；0.15 表示原声振幅的 15%，不改变配音音量。",
+    "en": "Applies when mixing narration with source audio and the source has an audio track. 0.15 means 15% of the source amplitude; narration volume is unchanged."
+  },
+  "ui.narration_speed_help": {
+    "zh": "默认 1（原速）；大于 1 加快，小于 1 放慢，保持音高。对齐环节使用配音时长 ÷ 速度确定画面时长，成片渲染时应用该速度。",
+    "en": "Defaults to 1 (original speed). Above 1 speeds up, below 1 slows down, preserving pitch. Alignment uses narration duration divided by speed to determine footage duration; rendering applies the speed."
+  },
+  "ui.cloned_voice_select": {
+    "zh": "克隆音色",
+    "en": "Cloned voice"
+  },
+  "ui.voice_unavailable": {
+    "zh": "当前历史音色（不在克隆列表中）：{p0}",
+    "en": "Current historical voice (not in the clone list): {p0}"
+  },
+  "ui.preset_voice_select": {
+    "zh": "预制音色",
+    "en": "Preset voice"
+  },
+  "ui.no_cloned_voice": {
+    "zh": "不使用克隆音色",
+    "en": "Do not use a cloned voice"
   }
 }

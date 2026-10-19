@@ -30,11 +30,16 @@
 .crop-preview{max-height:120px;max-width:180px;object-fit:contain}
 .coordinates{display:grid;grid-template-columns:repeat(4,1fr);gap:5px}
 #capture-video,#review-video{max-width:100%;max-height:360px;display:block;margin:16px 0}
+#capture-form{display:grid;grid-template-columns:minmax(120px,1.3fr) 104px minmax(100px,1fr) minmax(140px,1fr) max-content max-content;gap:12px;align-items:end;overflow-x:auto;padding-bottom:4px}
+#capture-form>label{max-width:none;min-width:0}
+#capture-form>button{white-space:nowrap}
+#capture-time{width:104px}
 #capture-shot{margin-top:16px}
 #capture-canvas{max-width:100%;border:1px solid #ccc;cursor:crosshair;touch-action:none}
 #review-dialog{max-width:850px;width:calc(100% - 24px)}
 #review-image{width:100%;max-height:400px;object-fit:contain}
 .source-work{padding:10px 0;border-bottom:1px solid #ddd;display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+.source-work-actions{display:inline-flex;align-items:center;gap:12px;flex-shrink:0;white-space:nowrap}
 .coverage{color:#75513c;font-size:13px}
 @media(max-width:800px){#import-entries{grid-template-columns:1fr}
 }
@@ -110,8 +115,22 @@
 .confirmed-people li{margin:6px 0;line-height:1.6}
 
 #releases>div{margin:12px 0}
-#import-tools>label{margin:12px 0}
-#import-id{width:100%}
+/* 演员表导入入口：左半=上传截图表单+恢复草稿（标签/输入/按钮同一行），右半=历史演员表图片，
+   右侧标题与左侧“一张或多张截图”顶部对齐；style.css 的 label:has(>input:not(...)) 特异性 (0,2,2)，需 #cast 前缀才能横排。 */
+.cast-entry-row{display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap;margin:12px 0 14px}
+.cast-left{flex:1 1 45%;min-width:280px;display:flex;flex-direction:column;gap:12px}
+.cast-left #import-form{margin:0}
+#cast .cast-entry-row .restore-field{display:flex;flex-direction:row;align-items:center;gap:8px;min-width:0;margin:0;font-size:12px;color:var(--muted,#5a6b55)}
+.cast-entry-row .restore-field input{flex:1 1 120px;min-width:0;width:auto}
+.cast-entry-row .restore-field button{flex:0 0 auto}
+.cast-history{flex:1 1 45%;min-width:280px}
+.cast-history>p{margin:0 0 6px;font-size:12px}
+#import-gallery{margin:0}
+/* 导入作品下拉与新建作品名同一行，仅占左侧一半宽度（与左列对齐）；窄屏单列时放开。 */
+.work-row{display:flex;gap:16px;flex-wrap:wrap;margin:12px 0;max-width:calc(50% - 12px)}
+#cast .work-row label{display:flex;flex-direction:row;align-items:center;gap:8px;flex:1 1 180px;min-width:0;margin:0;font-size:12px;color:var(--muted,#5a6b55)}
+.work-row label select,.work-row label input{flex:1 1 0;min-width:0}
+@media(max-width:640px){.work-row{max-width:none}}
 .gallery-delete{--control-size:20px;min-height:20px}
 .gallery-cell{height:auto;min-height:0}
 .coordinates{grid-template-columns:repeat(2,minmax(0,1fr))}

@@ -4,15 +4,12 @@ from __future__ import annotations
 
 import json
 import logging
-import tempfile
-from pathlib import Path
 from time import perf_counter
 
 from .adapters import ModelError
 from .config import fingerprint
 from .dialogue import CHANNELS, current_dialogue, relative_dialogue
 from .indexing import VectorIndex, check_index
-from .media import cut
 from .storage import dumps
 from .types import Annotation
 
@@ -123,8 +120,6 @@ def representation_key(builder, identity, segment, view, document, bounds):
         a, b = bounds if bounds is not None else (0, segment["end"] - segment["start"])
         media = [
             segment["source_id"],
-            round(segment["start"], 6),
-            round(segment["end"], 6),
             round(segment["start"] + a, 6),
             round(segment["start"] + b, 6),
         ]
@@ -150,13 +145,13 @@ def reusable_vectors(builder, identity):
         for r in records:
             if r["cache_key"]:
                 cache.setdefault(r["cache_key"], (row["id"], r["id"]))
-        if spec.get("format", 1) == 1:
-            for segment in store.snapshots(row["id"]):
-                for rep, view, document, bounds in builder._representations(segment):
-                    rep_id = fingerprint([row["id"], rep])
-                    if rep_id in record_ids:
-                        key = representation_key(builder, identity, segment, view, document, bounds)
-                        cache.setdefault(key, (row["id"], rep_id))
+        # Reconstruct interval keys for legacy and format 2 indexes.
+        for segment in store.snapshots(row["id"]):
+            for rep, view, document, bounds in builder._representations(segment):
+                rep_id = fingerprint([row["id"], rep])
+                if rep_id in record_ids:
+                    key = representation_key(builder, identity, segment, view, document, bounds)
+                    cache.setdefault(key, (row["id"], rep_id))
     return cache
 
 
@@ -175,9 +170,7 @@ def build_channels(builder, *, activate=False, mode="auto", source_id=None, kind
     previous = store.active_index()
     old = {s["id"]: normalize_snapshot(s) for s in store.snapshots(previous["id"])} if previous else {}
     if kinds is None:
-        kinds = tuple(
-            sorted({s["kind"] for s in old.values() if source_id is None or s["source_id"] == source_id})
-        ) or ("moment",)
+        kinds = ("moment", "shot") if mode == "visual" else ("moment", "shot", "scene")
     fresh = snapshots_for(builder, source_id, kinds)
     # Preserve other sources and channels, even when building one source/channel only.
     merged = dict(old)
@@ -218,6 +211,14 @@ def build_channels(builder, *, activate=False, mode="auto", source_id=None, kind
         raise ValueError("没有可建索引的已完成渠道数据")
     for s in snapshots:
         s["representation_ids"] = [r[0] for r in representations(builder, s)]
+    # Validate physical dependencies before creating a candidate or invoking a model.
+    from .shot_media import ShotMedia
+    media = ShotMedia(store, cache_probes=False)
+    for s in snapshots:
+        try:
+            media.references(s["source_id"], s["start"], s["end"])
+        except (ValueError, OSError) as exc:
+            raise ModelError(f"素材 {s['source_id']} ({s['source_name']}) 媒体缺失：{exc}") from exc
     identity = builder.embedder.identity()
     if hasattr(builder.embedder, "require_gate"):
         builder.embedder.require_gate()
@@ -306,16 +307,11 @@ def build_channels(builder, *, activate=False, mode="auto", source_id=None, kind
                         reused += 1
                     else:
                         if view == "video":
-                            path = store.resolve_media(s["path"])
-                            if bounds is None:
+                            a, b = bounds or (0, s["end"] - s["start"])
+                            with media.inference_video(
+                                s["source_id"], s["start"] + a, s["start"] + b
+                            ) as path:
                                 vector = builder.embedder.video(path)
-                            else:
-                                with tempfile.TemporaryDirectory(
-                                    prefix="embed-", dir=store.root
-                                ) as directory:
-                                    path_out = Path(directory) / "window.mp4"
-                                    cut(path, *bounds, path_out)
-                                    vector = builder.embedder.video(path_out)
                         else:
                             vector = builder.embedder.text([document])[0]
                         embedded += 1

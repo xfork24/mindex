@@ -52,6 +52,12 @@ const LABEL = {
   render: MindexI18n.msg("ui.d458415b7971"),
   compose: MindexI18n.msg("ui.47badcfc4cad")
 };
+// 与检索页（index.html）一致的检索粒度选项文案。
+const GRANULARITY_LABEL = {
+  moment: MindexI18n.msg("ui.5aca155225fc"),
+  shot: MindexI18n.msg("ui.5d649f75d54a"),
+  scene: MindexI18n.msg("ui.337ba7da75d2")
+};
 const STATUS = {
   running: MindexI18n.msg("ui.1f425b6bf0a4"),
   partial: MindexI18n.msg("ui.53951802211e"),
@@ -280,21 +286,15 @@ function personName(id) {
 function sourceName(id) {
   return state.sources?.find((s) => s.id === id)?.name || shortId(id);
 }
-// 任务元信息只读：把创建任务时用的参数原样摊开，便于复盘和确认可用素材。
+// 任务元信息只读：只摊开创建后不可变的输入（文案、素材范围）；
+// 音轨/字幕/召回数量属于方案参数，可在方案参数里动态调整，不在此重复展示。
 function renderJobMeta() {
-  const job = state.data.job, o = job.options || {}, body = $("job-meta-body");
-  const audioModes = {
-    tts_only: MindexI18n.msg("ui.1801c99c1d7d"),
-    ducking: MindexI18n.msg("ui.b49af7ac7ca1")
-  };
+  const job = state.data.job, body = $("job-meta-body");
   const rows = [
     // 文案保留非空行，素材列表独占整行并逐项展示。
     ["ui.7407393d52c7", (job.input_text || "").split(/\r?\n/).filter((line) => line.trim()).join("\n"), true],
     ["ui.84e3802f60a7", MindexI18n.date(job.created_at)],
-    ["ui.f711792f098b", (job.source_ids?.length ? job.source_ids : (state.sources || []).map((s) => s.id)).map(sourceName).join("\n") || MindexI18n.msg("ui.0a9eab1a4d36"), true],
-    ["ui.d19e8611d29b", audioModes[o.audio_mode] || o.audio_mode],
-    ["ui.aaa5f2e9f006", o.burn ? MindexI18n.msg("ui.3f4dbcbdf0ab") : MindexI18n.msg("ui.ea2d04f98746")],
-    ["ui.88af53b5b584", o.recall_limit]
+    ["ui.f711792f098b", (job.source_ids?.length ? job.source_ids : (state.sources || []).map((s) => s.id)).map(sourceName).join("\n") || MindexI18n.msg("ui.0a9eab1a4d36"), true]
   ];
   body.replaceChildren();
   for (const [label, value, wide] of rows) {
@@ -607,6 +607,15 @@ function cellSummary(sid, stage) {
       trigger.append(
         el("span", d.text, "cell-summary"),
         el("span", d.query, "cell-summary muted")
+      );
+      // 分镜级召回覆盖（粒度/数量）在格内摘要可见，便于发现被钉住的分镜。
+      const overrides = [
+        d.granularity && GRANULARITY_LABEL[d.granularity],
+        d.recall_limit && MindexI18n.msg("ui.adf1951c424c", { p0: d.recall_limit })
+      ].filter(Boolean);
+      if (overrides.length)
+      trigger.append(
+        el("span", MindexI18n.msg("ui.24fc33ac59f6", { p0: overrides.join(" · ") }), "cell-summary muted")
       );
       if (state.drafts.get(draftKey(sid))?.dirty)
       trigger.append(el("span", MindexI18n.msg("ui.70ac7eb1c08c"), "badge warn"));
@@ -1081,7 +1090,37 @@ function renderShotEditor(body, sid) {
     });
     fields.append(f.wrap);
   }
-  body.append(fields);
+  // 检索粒度/返回数量与检索页同款选项；默认「跟随方案」，选定后仅覆盖本分镜的召回。
+  const markDirty = () => {
+    draft.dirty = JSON.stringify(draft.data) !== JSON.stringify(draft.original);
+    const entry = state.matrixRows.get(sid);
+    entry.summary.children[1].replaceWith(cellSummary(sid, "content"));
+    updateLocks();
+  };
+  const planGranularity =
+    GRANULARITY_LABEL[state.data.recall_granularity] || state.data.recall_granularity || "—";
+  const overrides = el("div", "", "shot-editor-fields");
+  for (const [name, label, choices] of [
+  ["granularity", MindexI18n.msg("ui.770c916c8efa"), [
+  ["", MindexI18n.msg("ui.2920edc15f73", { p0: planGranularity })],
+  ...Object.entries(GRANULARITY_LABEL)]],
+
+  ["recall_limit", MindexI18n.msg("ui.63a1fd1a6eab"), [
+  ["", MindexI18n.msg("ui.2920edc15f73", { p0: plan().options.recall_limit })],
+  ["20", "20"], ["10", "10"], ["50", "50"]]]])
+  {
+    const f = field(label, draft.data[name] ?? "", "text", choices);
+    f.input.dataset.shotInput = "true";
+    f.input.addEventListener("change", () => {
+      // 选回「跟随方案」时删键而非置 null，保证 dirty 判定与旧 content 一致。
+      if (f.input.value === "") delete draft.data[name];
+      else draft.data[name] = name === "recall_limit" ? Number(f.input.value) : f.input.value;
+      markDirty();
+    });
+    overrides.append(f.wrap);
+  }
+  overrides.append(el("p", MindexI18n.msg("ui.ecc8f054fe1a"), "muted"));
+  body.append(fields, overrides);
   renderRecallEditor(body, sid, draft);
   const actions = el("div", "", "detail-actions");
   actions.append(
@@ -1506,25 +1545,30 @@ function renamePlan() {
     })
   );
 }
-function voiceChoices(catalog, current) {
-  if (!catalog) return null;
-  const choices = [];
-  const seen = new Set();
-  const push = (value, label) => {
-    if (!value || seen.has(value)) return;
-    seen.add(value);
-    choices.push([value, label]);
+function voiceChoices(catalog, current, defaultVoice) {
+  const clones = (catalog.library || []).filter((item) => item.kind === "clone");
+  const cloneIds = new Set(clones.map((item) => item.voice_id));
+  const preset = [["", MindexI18n.msg("ui.28223da9fbc7", {
+    p0: defaultVoice ? `（${defaultVoice}）` : ""
+  })]];
+  const seen = new Set([""]);
+  for (const group of catalog.groups || []) {
+    for (const voice of group.voices || []) {
+      if (!voice.voice_id || cloneIds.has(voice.voice_id) || seen.has(voice.voice_id)) continue;
+      seen.add(voice.voice_id);
+      preset.push([voice.voice_id, MindexI18n.voice(voice)]);
+    }
+  }
+  if (current && !cloneIds.has(current) && !seen.has(current)) {
+    preset.push([current, current]);
+  }
+  return {
+    preset,
+    clones: [["", MindexI18n.msg("ui.no_cloned_voice")],
+      ...clones.map((item) => [item.voice_id, item.name || item.voice_id])],
+    presetValue: cloneIds.has(current) ? "" : current || "",
+    cloneValue: cloneIds.has(current) ? current : ""
   };
-  const known = new Set([
-  ...catalog.groups.flatMap((g) => g.voices.map((v) => v.voice_id)),
-  ...catalog.library.map((v) => v.voice_id)]
-  );
-  if (current && !known.has(current)) push(current, MindexI18n.msg("ui.4819f1bac31a", { p0: current }));
-  for (const group of catalog.groups)
-  for (const voice of group.voices) push(voice.voice_id, `${MindexI18n.builtin(group.label)} · ${MindexI18n.voice(voice)}`);
-  for (const item of catalog.library)
-  push(item.voice_id, `${item.kind === "clone" ? MindexI18n.msg("ui.6e60458a4727") : MindexI18n.msg("ui.4512b3b0e457")} · ${item.name}`);
-  return choices;
 }
 
 async function editSettings() {
@@ -1532,18 +1576,17 @@ async function editSettings() {
   try {
     catalog = await api("/api/settings/voices/catalog");
   } catch {
-    catalog = null; // 目录不可用时降级为文本输入
+    notice(MindexI18n.msg("ui.voice_catalog_unavailable"));
+    return;
   }
   const body = showDialog(MindexI18n.msg("ui.b876f5881f16")),
     fields = {},
     o = plan().options;
   const defaultVoice = state.data.tts_settings?.default_voice || catalog?.default_voice || "";
+  const voices = voiceChoices(catalog, o.voice_mode === "custom" ? o.voice : "", defaultVoice);
   const definitions = [
-  ["voice_mode", MindexI18n.msg("ui.301d4d5a24ef"), "text", [
-  ["inherit", MindexI18n.msg("ui.28223da9fbc7", { p0: defaultVoice ? `（${defaultVoice}）` : "" })],
-  ["custom", MindexI18n.msg("ui.f0899e6a1685")]]],
-
-  ["voice", MindexI18n.msg("ui.4d5b0b9ed4bd"), "text", voiceChoices(catalog, o.voice || defaultVoice)],
+  ["preset_voice", MindexI18n.msg("ui.preset_voice_select"), "text", voices.preset],
+  ["clone_voice", MindexI18n.msg("ui.cloned_voice_select"), "text", voices.clones],
   ["recall_limit", MindexI18n.msg("ui.4f891e5b3cf5"), "number"],
   [
   "audio_mode", MindexI18n.msg("ui.b47469b59094"),
@@ -1564,101 +1607,41 @@ async function editSettings() {
   ["false", MindexI18n.msg("ui.2cf51a1af708")]]],
 
 
-  ["atempo", MindexI18n.msg("ui.8a1c10056984"), "number"],
-  [
-  "alignment", MindexI18n.msg("ui.91e681dfd6f2"),
-
-  "text",
-  [
-  ["auto", MindexI18n.msg("ui.3a5dfc431b89")],
-  ["freeze", MindexI18n.msg("ui.e1137203359d")],
-  ["strict", MindexI18n.msg("ui.d79a48ac1479")]]]];
-
-
+  ["atempo", MindexI18n.msg("ui.8a1c10056984"), "number"]];
 
   for (const [key, label, type, choices] of definitions) {
-    const value = key === "voice_mode" ? o.voice_mode || "inherit" :
-    key === "voice" ? o.voice || defaultVoice : o[key];
+    const value = key === "preset_voice" ? voices.presetValue :
+    key === "clone_voice" ? voices.cloneValue :
+    key === "atempo" ? o.atempo ?? 1 : o[key];
     const f = field(label, value, type, choices);
     fields[key] = f.input;
     body.append(f.wrap);
+    const helpKey = {
+      duck_gain: "ui.original_gain_help",
+      atempo: "ui.narration_speed_help"
+    }[key];
+    if (helpKey) body.append(el("p", MindexI18n.msg(helpKey), "muted"));
   }
-  const updateVoiceMode = () => {
-    fields.voice.disabled = fields.voice_mode.value === "inherit";
+  const updatePresetVoice = () => {
+    fields.preset_voice.disabled = Boolean(fields.clone_voice.value);
   };
-  fields.voice_mode.addEventListener("change", updateVoiceMode);
-  updateVoiceMode();
-  body.append(el("p", MindexI18n.msg("ui.3ae0d387c4c2"), "muted"));
-  if (catalog?.clone?.supported && catalog.clone.mode === "upload") {
-    const box = el("div", undefined, "voice-clone-box");
-    box.append(el("p", MindexI18n.msg("ui.1cf2530bc2aa"), "muted"));
-    const name = document.createElement("input");
-    MindexI18n.setAttr(name, "placeholder", MindexI18n.msg("ui.ba037516abcf"));
-    const file = document.createElement("input");
-    file.type = "file";
-    file.accept = ".wav,.mp3,.m4a,audio/*";
-    const row = el("div", undefined, "voice-clone-row");
-    row.append(name, file);
-    box.append(row);
-    let refText = null;
-    if (catalog.clone.ref_text) {
-      refText = document.createElement("input");
-      MindexI18n.setAttr(refText, "placeholder", MindexI18n.msg("ui.326a027039db"));
-      box.append(refText);
-    }
-    const consent = document.createElement("label");
-    consent.className = "check";
-    const consentBox = document.createElement("input");
-    consentBox.type = "checkbox";
-    consent.append(consentBox, MindexI18n.msg("ui.343ed6c33dbf"));
-    box.append(consent);
-    const error = el("p", undefined, "dialog-error");
-    box.append(
-      button(MindexI18n.msg("ui.81a3c25a3221"), async () => {
-        MindexI18n.setText(error, "");
-        if (!name.value.trim() || !file.files.length) {
-          MindexI18n.setText(error, MindexI18n.msg("ui.41d899ab4e51"));
-          return;
-        }
-        if (!consentBox.checked) {
-          MindexI18n.setText(error, MindexI18n.msg("ui.9a3ba17e62b1"));
-          return;
-        }
-        const form = new FormData();
-        form.append("name", name.value.trim());
-        form.append("consent", "true");
-        if (refText) form.append("ref_text", refText.value.trim());
-        form.append("file", file.files[0]);
-        const response = await fetch("/api/settings/voices/clone", { method: "POST", body: form });
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) {
-          MindexI18n.setText(error, MindexI18n.system(data));
-          return;
-        }
-        const option = el("option", MindexI18n.msg("ui.ae48f78f11ac", { p0: data.name }));
-        option.value = data.voice_id;
-        fields.voice.append(option);
-        fields.voice.value = data.voice_id;
-        fields.voice_mode.value = "custom";
-        updateVoiceMode();
-        name.value = "";
-        file.value = "";
-        notice(MindexI18n.msg("ui.e7018a4b2e89", { p0: data.name }));
-      }),
-      error
-    );
-    body.append(box);
-  }
+  fields.clone_voice.addEventListener("change", updatePresetVoice);
+  updatePresetVoice();
+  fields.atempo.min = "0.75";
+  fields.atempo.max = "1.25";
   body.append(
     button(MindexI18n.msg("ui.3fab71cb32ac"), async () => {
       const options = { ...o };
-      for (const key of Object.keys(fields)) options[key] = fields[key].value;
+      for (const key of Object.keys(fields)) {
+        if (key !== "preset_voice" && key !== "clone_voice") options[key] = fields[key].value;
+      }
       for (const key of ["recall_limit", "duck_gain"])
       options[key] = Number(options[key]);
       options.atempo =
-      fields.atempo.value === "" ? null : Number(fields.atempo.value);
+      fields.atempo.value === "" ? 1 : Number(fields.atempo.value);
       options.burn = options.burn === "true";
-      options.voice = options.voice_mode === "inherit" ? null : fields.voice.value.trim();
+      options.voice = fields.clone_voice.value || fields.preset_voice.value || null;
+      options.voice_mode = options.voice ? "custom" : "inherit";
       await accept(
         await api(planBase(), "PATCH", {
           revision: state.data.revision,
@@ -2436,9 +2419,7 @@ $("create-form").addEventListener("submit", async (event) => {
     const job = await api("/api/studio/jobs", "POST", {
       text: $("create-text").value,
       options: {
-        audio_mode: $("create-audio-mode").value,
-        burn: $("create-burn").value === "true",
-        recall_limit: Number($("create-recall-limit").value),
+        // 音轨/字幕/召回数量不再在创建时设置：默认值生效，之后在方案参数里调整。
         // 全选时 scope 为 null：不限素材，后续新增素材自动可用。
         ...(scope ? { source_ids: scope } : {})
       }

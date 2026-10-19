@@ -136,6 +136,7 @@ summary{cursor:pointer}
 .shot-editor-fields .form-field{margin:0;flex:1 1 200px;min-width:0}
 .shot-editor-fields .form-field:last-child{flex:0 1 140px;min-width:0}
 .shot-editor-fields textarea{min-height:116px;resize:both}
+.shot-editor-fields p.muted{flex:1 1 100%;margin:0}
 .shot-detail-panel .version-history select{max-width:min(420px,100%)}
 .shot-detail-panel .version-history{gap:8px;align-items:center}
 .shot-matrix .version-history button{margin:0}

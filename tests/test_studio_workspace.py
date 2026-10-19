@@ -248,6 +248,50 @@ def wait_build(client, jid):
     raise AssertionError("build timeout")
 
 
+def test_plan_options_patch_applies_to_task_recall(prepared):
+    """方案参数 PATCH 后直接作用于本任务：旧召回版本标记不一致，重跑按新召回数量执行。"""
+    config, embedder = prepared
+    client = TestClient(
+        create_app(config, embedder, speaker=FixtureSpeaker(config), storyboarder=FixtureStoryboarder(config))
+    )
+    jid = client.post("/api/studio/jobs", json={"text": "红色开场。", "options": {"burn": False}}).json()[
+        "id"
+    ]
+    base = f"/api/studio/jobs/{jid}"
+    data = client.get(f"{base}/workspace").json()
+    pid = data["active_plan"]
+    assert (
+        client.post(
+            f"{base}/plans/{pid}/nodes",
+            json={"revision": data["revision"], "inputs": {}, "stage": "split", "force": True},
+        ).status_code
+        == 202
+    )
+    data = wait_build(client, jid)
+    checked = client.get(f"{base}/plans/{pid}/preflight").json()
+    assert client.post(f"{base}/plans/{pid}/build", json={"token": checked["token"]}).status_code == 202
+    data = wait_build(client, jid)
+    sid = next(iter(data["plans"][pid]["shots"]))
+    version = data["plans"][pid]["shots"][sid]["recall"]
+    assert data["versions"][version]["parameters"]["limit"] == 20
+    patched = client.patch(
+        f"{base}/plans/{pid}",
+        json={
+            "revision": data["revision"],
+            "options": {**data["plans"][pid]["options"], "recall_limit": 5},
+        },
+    )
+    assert patched.status_code == 200, patched.text
+    detail = patched.json()
+    assert detail["plans"][pid]["options"]["recall_limit"] == 5
+    assert detail["conflicts"][f"recall:{sid}"], "旧召回版本应标记与当前方案参数不一致"
+    checked = client.get(f"{base}/plans/{pid}/preflight").json()
+    assert client.post(f"{base}/plans/{pid}/build", json={"token": checked["token"]}).status_code == 202
+    data = wait_build(client, jid)
+    version = data["plans"][pid]["shots"][sid]["recall"]
+    assert data["versions"][version]["parameters"]["limit"] == 5
+
+
 def test_workspace_api_title_plans_preview_confirmation_and_stale_binding(prepared):
     config, embedder = prepared
     client = TestClient(

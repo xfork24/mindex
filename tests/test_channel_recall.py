@@ -127,7 +127,7 @@ def test_incremental_legacy_reuse_other_sources_curation_failure_and_rollback(co
     new = builder.build(source_id=sid, channels=["dialogue"], activate=True)
     source = Library(pipeline.store).source(sid)
     assert source["channels"]["dialogue"]["content_segments"] == 1
-    assert source["published_channels"]["dialogue"]["indexed_segments"] == 1
+    assert source["published_channels"]["dialogue"]["indexed_segments"] == 2
     assert embedder.video_calls == calls
     assert {s["source_id"] for s in pipeline.store.snapshots(new)} == {sid, sid2}
     assert VectorIndex(config.data_dir, old).ids() == ids
@@ -135,7 +135,7 @@ def test_incremental_legacy_reuse_other_sources_curation_failure_and_rollback(co
     report = json.loads(
         pipeline.store.one("SELECT value FROM settings WHERE key=?", ("index_report." + new,))["value"]
     )
-    assert report["reused_vectors"] == len(ids)
+    assert report["reused_vectors"] == len(ids) + 1  # identical dialogue is shared across kinds
     assert report["rollback_index"] == old
     hidden = SearchEngine(config, embedder).text(TextSearch(text="红色"))
     assert all(s["source_id"] != sid2 for s in hidden["results"])
@@ -177,7 +177,7 @@ def test_visual_failure_resumes_completed_vectors_without_publishing_partial(con
 
     with pytest.raises(ModelError, match="Failed to load"):
         IndexBuilder(config, FailingVideo(config)).build(
-            source_id=sid, channels=["visual"], activate=True
+            source_id=sid, kinds=["moment"], channels=["visual"], activate=True
         )
     assert pipeline.store.active_index() is None
     building = pipeline.store.one("SELECT id FROM index_versions WHERE status='building'")["id"]
@@ -190,7 +190,7 @@ def test_visual_failure_resumes_completed_vectors_without_publishing_partial(con
     assert len(saved) == 2
     recovered_embedder = CountingEmbedder(config)
     recovered = IndexBuilder(config, recovered_embedder).build(
-        source_id=sid, channels=["visual"], activate=True
+        source_id=sid, kinds=["moment"], channels=["visual"], activate=True
     )
     assert recovered == building
     assert recovered_embedder.video_calls == len(moments) - 2
@@ -343,3 +343,40 @@ def test_native_evaluation_excludes_disabled_channel_lexical_text(config, video_
         for m in hit["matches"]
         for r in m["rank_details"]
     )
+
+
+def test_default_upgrade_all_granularities_without_media_cache(config, video_file, monkeypatch):
+    from mindex.media import probe
+    from mindex.source_tasks import publish_work
+
+    pipeline = Pipeline(config)
+    sid = pipeline.prepare(video_file)
+    pipeline._analyzer = __import__('conftest').FixtureAnalyzer(FixtureEmbedder(config))
+    pipeline.analyze(sid)
+    embedder = CountingEmbedder(config)
+    builder = IndexBuilder(config, embedder)
+    old = builder.build(kinds=['moment'], activate=True)
+    add_dialogue(config, sid)
+    before = {p.relative_to(config.data_dir) for p in config.data_dir.rglob('*')
+              if p.is_file() and (p.suffix in {'.mp4', '.jpg', '.png'} or 'cache' in p.parts)}
+    paths = []
+    original = embedder.video
+
+    def observe(path):
+        paths.append(path)
+        assert probe(path)['duration'] <= config.video.short_shot_seconds + .1
+        return original(path)
+
+    monkeypatch.setattr(embedder, 'video', observe)
+    new = publish_work(config, sid, 'analysis', embedder)['index_id']
+    snapshots = pipeline.store.snapshots(new)
+    assert {s['kind'] for s in snapshots} == {'moment', 'shot', 'scene'}
+    assert any('dialogue' in s['indexed_views'] for s in snapshots if s['kind'] == 'shot')
+    assert pipeline.store.one('SELECT status FROM index_versions WHERE id=?', (old,))['status'] == 'ready'
+    after = {p.relative_to(config.data_dir) for p in config.data_dir.rglob('*')
+             if p.is_file() and (p.suffix in {'.mp4', '.jpg', '.png'} or 'cache' in p.parts)}
+    assert before == after
+    assert all(not p.exists() for p in paths if p.name == 'window.mp4')
+    calls = embedder.calls
+    assert builder.build(activate=True) == new
+    assert embedder.calls == calls

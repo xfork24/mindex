@@ -22,7 +22,8 @@ def test_studio_config_defaults_and_validation(config):
     assert config.studio.selection.atempo_limit == 0.1
     assert set(config.studio.selection.weights) == {"semantic", "duration", "extension", "repeat", "overlap"}
     assert config.studio.audio.mode == "tts_only"
-    assert config.studio.subtitle.burn is True
+    # 创建默认软字幕轨道；烧录可在方案参数里开启。
+    assert config.studio.subtitle.burn is False
     assert config.studio.tts.speech_path == "/audio/speech"
     assert len(config.studio_key) == 24
     with pytest.raises(ValueError):
@@ -43,7 +44,7 @@ def test_create_job_validates_input_and_persists(config):
         "voice": config.studio.tts.voice,
         "audio_mode": "tts_only",
         "recall_limit": 20,
-        "burn": True,
+        "burn": False,
     }
     assert (config.data_dir / "studio" / job_id / "job.json").is_file()
     assert studio.load_job(config, job_id)["id"] == job_id

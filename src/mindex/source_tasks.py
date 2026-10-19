@@ -85,11 +85,10 @@ def publish_work(config, source_id, work, embedder=None, *, progress=None):
         with index_write_lock(pipeline.store.root):
             result = Persons(pipeline.store).publish(source_id=source_id, progress=progress)
         return result
-    channel = {"shots": "visual", "dialogue": "dialogue", "analysis": "analysis"}[work]
     index_id = IndexBuilder(config, embedder).build(
         activate=True,
         source_id=source_id,
-        channels=[channel] if pipeline.store.active_index() else None,
+        channels=None,
         progress=progress,
     )
     return {"index_id": index_id}

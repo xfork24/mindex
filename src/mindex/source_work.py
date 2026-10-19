@@ -79,7 +79,7 @@ def source_work(store, source):
         if active
         else []
     )
-    kinds = sorted({s["kind"] for s in published}) or ["moment"]
+    kinds = ("moment", "shot", "scene")
     fresh = snapshots_for(SimpleNamespace(store=store), sid, kinds)
     old = {s["id"]: s for s in published}
     work = {

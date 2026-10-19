@@ -32,9 +32,7 @@ def test_publish_work_reports_scope_counts_for_every_channel(config, video_file,
     assert events[0]["stage"] == "index_wait" and "total" not in events[0]
     assert events[-1]["stage"] == "published"
     assert all(event["phase"] == "publish" for event in events)
-    channel = {"shots": "visual", "dialogue": "dialogue", "analysis": "analysis"}[work]
-    expected = sum("video" in s["indexed_views"] if channel == "visual" else bool(s["views"].get(channel))
-                   for s in snapshots_for(pipeline, sid, ["moment"]))
+    expected = len(snapshots_for(pipeline, sid, ["moment", "shot", "scene"]))
     counted = [e for e in events if "total" in e]
     assert counted and all(e["total"] == expected and e["unit"] == "segments" for e in counted)
     assert counted[-1]["completed"] == expected

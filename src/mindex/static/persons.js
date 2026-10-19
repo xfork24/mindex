@@ -239,7 +239,23 @@ function renderTasks(data) {
   if (tasks.length > 3) $('tasks').append(node('p', MindexI18n.msg("ui.63c47287a832", { p0: tasks.length - 3 }), 'muted'));
 }
 async function refresh() {const data = await api('/api/persons');Object.assign(state, { entities: data.entities, references: data.references, sources: data.sources });fillSelectors();renderCatalogue();loadImportGallery();
-  $('source-works').replaceChildren();for (const s of state.sources) {const row = node('div', undefined, 'source-work');const work = node('select');MindexI18n.setAttr(work, 'aria-label', s.name + MindexI18n.msg("ui.5a48edc9a5b1"));options(work, entities('work'), false);work.value = s.work_id;const coverage = data.coverage.filter((c) => c.source_id === s.id);const intervals = coverage.map((c) => `${c.data.start.toFixed(1)}–${c.data.end.toFixed(1)}`).slice(0, 6);row.append(node('strong', s.name), work, button(MindexI18n.msg("ui.86e2bd39e95b"), async () => {await api(`/api/persons/sources/${s.id}/work`, json('PUT', { work_id: work.value }));await refresh();notice(MindexI18n.msg("ui.4418a968b969"));}), node('span', coverage.length ? MindexI18n.msg("ui.306128b77e2f", { p0: coverage.length, p1: intervals.join('、'), p2: coverage.length > 6 ? '…' : '' }) : MindexI18n.msg("ui.e9eb38d595ce"), 'coverage'));$('source-works').append(row);}
+  $('source-works').replaceChildren();
+  for (const source of state.sources) {
+    const row = node('div', undefined, 'source-work');
+    const work = node('select');
+    MindexI18n.setAttr(work, 'aria-label', source.name + MindexI18n.msg("ui.5a48edc9a5b1"));
+    options(work, entities('work'), false);
+    work.value = source.work_id;
+    const count = data.coverage.filter((item) => item.source_id === source.id).length;
+    const actions = node('div', undefined, 'source-work-actions');
+    actions.append(button(MindexI18n.msg("ui.86e2bd39e95b"), async () => {
+      await api(`/api/persons/sources/${source.id}/work`, json('PUT', { work_id: work.value }));
+      await refresh();
+      notice(MindexI18n.msg("ui.4418a968b969"));
+    }), node('span', MindexI18n.msg("ui.306128b77e2f", { p0: count }), 'coverage'));
+    row.append(node('strong', source.name), work, actions);
+    $('source-works').append(row);
+  }
   renderTasks(data);
   $('releases').replaceChildren();for (const r of data.releases) {const row = node('p', MindexI18n.msg("ui.edd719772ace", { p0: r.created_at, p1: r.content_id.slice(0, 8), p2: r.person_id?.slice(0, 8) || MindexI18n.msg("ui.5a65ae692a28") }));row.append(button(MindexI18n.msg("ui.9abe6a920d15"), async () => {await api(`/api/persons/releases/${r.id}/activate`, { method: 'POST' });notice(MindexI18n.msg("ui.ce106faa390a"));}), deleteReleaseButton(r));$('releases').append(row);}entityFields();}
 // 从原片选取参考：演员与角色同时指定，截图始终配给角色；框选坐标是原图像素。

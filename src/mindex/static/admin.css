@@ -58,7 +58,7 @@
 .admin #edit-form .submit{align-self:flex-end;margin:0}
 .admin #edit-error{font-size:12px;color:#a83e2a;margin:0}
 .admin #play-title{margin-right:40px}
-.admin #play-download{display:inline-block;font-size:12px}
+.admin #play-download{display:inline-flex;align-items:center;justify-content:center;min-height:36px;padding:8px 16px;font-size:14px;line-height:1.4;text-align:center}
 .admin .empty{padding:35px 15px}
 .admin .empty p{line-height:1.9}
 .admin #source-workspace[aria-busy=true]{opacity:.55}
@@ -131,9 +131,18 @@
 .work-card{padding:14px}
 }
 
-.subtitle-upload input[type=file]{display:block;max-width:100%;width:100%;margin-top:8px}
-.subtitle-upload label{min-width:0}
-.subtitle-upload p{overflow-wrap:anywhere}
+/* 对白处理控件行：标签与下拉/文件选择同一行左对齐；窄屏时在字段间换行。 */
+.dialogue-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:12px 0}
+.dialogue-row label{display:flex;flex-direction:row;align-items:center;gap:8px;min-width:0;margin:0;font-size:12px;color:var(--muted)}
+.dialogue-row .method-field{flex:0 1 auto}
+.dialogue-row .track-field{flex:1.2 1 150px;min-width:150px}
+.dialogue-row .track-field select{flex:1 1 0;min-width:0}
+.dialogue-row .upload-field{flex:1 1 180px;min-width:170px}
+/* style.css 的 label:has(>input:not(...)) 特异性为 (0,2,2)，需更高特异性才能横排。 */
+.work-card .dialogue-row .upload-field{flex-direction:row}
+.dialogue-row .upload-field input[type=file]{flex:1 1 0;min-width:0}
+.dialogue-row p{flex:1 1 100%;margin:0;overflow-wrap:anywhere}
+.dialogue-row[hidden],.dialogue-row [hidden]{display:none}
 
 .source-panel{display:flex;flex-direction:column;top:0;height:var(--source-panel-height,calc(100dvh - 255px));max-height:100dvh}
 .source-panel>form,.source-panel>.source-filters,.source-panel>.muted,.source-panel>.pager,.source-panel>.sidebar-help{flex-shrink:0}

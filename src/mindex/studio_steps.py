@@ -82,20 +82,22 @@ def run_recall(config: Config, job_id: str, state: dict, embedder: MultimodalEmb
     if active is None:
         raise studio.StudioError("尚未发布索引，请先完成离线处理并执行 index --activate")
     engine = SearchEngine(config, embedder, index_id=active["id"])
-    limit = state["options"]["recall_limit"]
     directory = studio.candidates_dir(config, job_id)
     empty: list[str] = []
     session = current.get()
     visibility = visibility_key(store)
     scope = studio.material_scope(state)
     for shot in storyboard.shots:
+        # 分镜级覆盖优先，未设置时跟随方案数量与服务配置粒度。
+        limit = shot.recall_limit or state["options"]["recall_limit"]
+        granularity = shot.granularity or config.studio.recall.granularity
         target = directory / f"{shot.id}.json"
         logical = f"candidates/{shot.id}.json"
         signature = {
             "query": shot.query,
             "index_id": active["id"],
             "limit": limit,
-            "granularity": config.studio.recall.granularity,
+            "granularity": granularity,
             "search": config.search.model_dump(),
             "embedding": config.embedding.model_dump(),
             "visibility": visibility,
@@ -113,7 +115,7 @@ def run_recall(config: Config, job_id: str, state: dict, embedder: MultimodalEmb
         result = engine.text(
             TextSearch(
                 text=shot.query,
-                granularity=config.studio.recall.granularity,
+                granularity=granularity,
                 limit=limit,
                 filters=studio.scoped_filters(Filters(), scope),
             )

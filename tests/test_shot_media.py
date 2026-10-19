@@ -235,3 +235,35 @@ def test_prune_verified_entities_preserves_shots_and_recovers(library):
     assert protected_digest(library) == before
     assert prune(config, migration['report'], apply=True)['deleted_files'] == 0
     assert materialize_all(config)['restored'] == ['clips/old.mp4']
+
+
+def test_inference_interval_cleanup_on_failure(config, video_file):
+    import pytest
+
+    from mindex.pipeline import Pipeline
+    from mindex.shot_media import ShotMedia
+
+    pipeline = Pipeline(config)
+    sid = pipeline.prepare(video_file)
+    media = ShotMedia(pipeline.store, cache_probes=False)
+    with pytest.raises(RuntimeError, match='inference failed'), media.inference_video(sid, .5, 2.5) as path:
+        assert path.is_file()
+        raise RuntimeError('inference failed')
+    assert not path.exists()
+
+
+def test_inference_with_audio_shots(config, video_file, tmp_path):
+    from mindex.media import command, probe
+    from mindex.pipeline import Pipeline
+    from mindex.shot_media import ShotMedia
+
+    video = tmp_path / 'audio.mp4'
+    command(['ffmpeg', '-v', 'error', '-y', '-i', str(video_file), '-f', 'lavfi',
+             '-i', 'sine=frequency=440:duration=10', '-c:v', 'copy', '-c:a', 'aac', str(video)])
+    pipeline = Pipeline(config)
+    sid = pipeline.prepare(video)
+    with ShotMedia(pipeline.store, cache_probes=False).inference_video(sid, .5, 2.5) as path:
+        info = probe(path)
+        assert abs(info['duration'] - 2) < .1
+        assert not info['audio']
+    assert not path.exists()

@@ -180,6 +180,45 @@ def test_default_recall_keeps_legacy_signature_and_reuse(prepared):
     assert actions["recall:a"] == "reuse" and actions["recall:b"] == "reuse"
 
 
+@pytest.fixture
+def moment_ready(config, video_file):
+    """shot + moment 两种粒度都入库，验证分镜级粒度覆盖真实生效。"""
+    config.studio.render.width = 160
+    config.studio.render.height = 120
+    config.studio.render.preset = "ultrafast"
+    config.studio.render.fps = 29.97
+    Pipeline(config).prepare(video_file)
+    embedder = FixtureEmbedder(config)
+    IndexBuilder(config, embedder).build(mode="visual", kinds=("shot", "moment"), activate=True)
+    return config, embedder
+
+
+def test_shot_level_granularity_and_limit_override(moment_ready):
+    """分镜级粒度/返回数量只覆盖当前分镜：进签名、生效于执行，未设置分镜保持跟随方案。"""
+    config, embedder = moment_ready
+    jid, w, p = setup_workspace(config)
+    w, p = build(config, jid, w, p, embedder)
+    # 未覆盖时分镜粒度为空，签名与旧 content 逐字节一致，全部复用。
+    assert all(node["action"] == "reuse" for node in ws.preflight(config, jid, w, p)["nodes"])
+    assert shot_list(w, p)[0].granularity is None and shot_list(w, p)[0].recall_limit is None
+
+    shots = shot_list(w, p)
+    shots[0].granularity = "moment"
+    shots[0].recall_limit = 1
+    ws.set_board(config, jid, w, p, shots)
+    ws.persist(config, jid, w)
+    actions = {node["key"]: node["action"] for node in ws.preflight(config, jid, w, p)["nodes"]}
+    assert actions["recall:a"] == "rebuild" and actions["recall:b"] == "reuse"
+
+    w, p = build(config, jid, w, p, embedder)
+    overridden = ws.version(w, p["shots"]["a"]["recall"])["data"]
+    followed = ws.version(w, p["shots"]["b"]["recall"])["data"]
+    # 覆盖分镜：moment 粒度且只取 1 条；未覆盖分镜：跟随服务配置 shot 粒度。
+    assert len(overridden["results"]) == 1
+    assert all(item["kind"] == "moment" for item in overridden["results"])
+    assert followed["results"] and all(item["kind"] == "shot" for item in followed["results"])
+
+
 def recall_sources(config, jid, w, p, sid="a"):
     data = ws.version(w, p["shots"][sid]["recall"])["data"]
     return {item["source_id"] for item in data["results"]}

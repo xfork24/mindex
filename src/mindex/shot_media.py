@@ -5,7 +5,9 @@ import hashlib
 import json
 import math
 import os
+import tempfile
 import time
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -34,10 +36,26 @@ class ShotReference:
 
 
 class ShotMedia:
-    def __init__(self, store):
+    def __init__(self, store, *, cache_probes=True):
         self.store = store
+        self.cache_probes = cache_probes
+        self._probes = {}
+        self._sources = {}
+        self._shots = {}
+
+    def _path(self, relative):
+        if self.cache_probes:
+            return self.store.resolve_media(relative)
+        path = (self.store.root / relative).resolve()
+        if not path.is_relative_to(self.store.root) or not path.is_file():
+            raise FileNotFoundError(relative)
+        return path
 
     def _info(self, path):
+        if not self.cache_probes:
+            if path not in self._probes:
+                self._probes[path] = probe(path)
+            return self._probes[path]
         stat = path.stat()
         identity = [str(path), stat.st_size, stat.st_mtime_ns]
         key = hashlib.sha256(json.dumps(identity).encode()).hexdigest()
@@ -59,7 +77,11 @@ class ShotMedia:
             return info
 
     def references(self, source_id: str, start: float = 0, end: float | None = None):
-        source = self.store.one('SELECT * FROM sources WHERE id=?', (source_id,))
+        if not self.cache_probes and source_id in self._sources:
+            source = self._sources[source_id]
+        else:
+            source = self.store.one('SELECT * FROM sources WHERE id=?', (source_id,))
+            self._sources[source_id] = source
         if source is None:
             raise MediaError('Unknown source')
         duration = float(json.loads(source['media'])['duration'])
@@ -67,13 +89,15 @@ class ShotMedia:
         if not all(math.isfinite(v) for v in (start, end)) or not 0 <= start < end <= duration + EPSILON:
             raise MediaError('Invalid source interval')
         cursor, result = start, []
-        for shot in self.store.segments(source_id, 'shot'):
+        if self.cache_probes or source_id not in self._shots:
+            self._shots[source_id] = self.store.segments(source_id, 'shot')
+        for shot in self._shots[source_id]:
             a, b = max(start, shot['start']), min(end, shot['end'])
             if b <= a:
                 continue
             if abs(a - cursor) > EPSILON:
                 raise MediaError('Shot coverage has a gap or overlap')
-            path = self.store.resolve_media(shot['path'])
+            path = self._path(shot['path'])
             info = self._info(path)
             if info['duration'] + 1 / info['fps'] + EPSILON < b - shot['start']:
                 raise MediaError(f"Shot media is truncated: {shot['id']} ({shot['path']}), "
@@ -88,8 +112,8 @@ class ShotMedia:
     def identity(self, source_id, start=0, end=None):
         refs = self.references(source_id, start, end)
         return {"version": VERSION, "refs": [asdict(r) for r in refs],
-                "files": [[r.path, self.store.resolve_media(r.path).stat().st_size,
-                           self.store.resolve_media(r.path).stat().st_mtime_ns] for r in refs]}
+                "files": [[r.path, self._path(r.path).stat().st_size,
+                           self._path(r.path).stat().st_mtime_ns] for r in refs]}
 
     def playlist(self, source_id, start=0, end=None, prefix="/api/shots"):
         refs = self.references(source_id, start, end)
@@ -98,7 +122,7 @@ class ShotMedia:
                           for r in refs]}
 
     def file_revision(self, relative):
-        path = self.store.resolve_media(relative)
+        path = self._path(relative)
         stat = path.stat()
         return hashlib.sha256(f'{relative}:{stat.st_size}:{stat.st_mtime_ns}'.encode()).hexdigest()[:20]
 
@@ -124,10 +148,10 @@ class ShotMedia:
         duration = json.loads(source['media'])['duration']
         if timestamp == duration:
             ref = self.references(source_id)[-1]
-            local = frame_timestamps(self.store.resolve_media(ref.path))[-1]
+            local = frame_timestamps(self._path(ref.path))[-1]
         else:
             ref = self.references(source_id, timestamp, min(duration, timestamp + EPSILON))[0]
-            timestamps = frame_timestamps(self.store.resolve_media(ref.path))
+            timestamps = frame_timestamps(self._path(ref.path))
             local = timestamps[max(0, bisect_right(timestamps, ref.start + EPSILON) - 1)]
         return ref, local
 
@@ -136,7 +160,7 @@ class ShotMedia:
 
         ref, local = self._frame_reference(source_id, timestamp)
         raw = command(['ffmpeg', '-v', 'error', '-ss', str(local), '-i',
-                       str(self.store.resolve_media(ref.path)), '-frames:v', '1',
+                       str(self._path(ref.path)), '-frames:v', '1',
                        '-f', 'image2pipe', '-vcodec', 'png', 'pipe:1'])
         if not raw:
             raise MediaError('Shot frame decode failed')
@@ -144,16 +168,16 @@ class ShotMedia:
 
     def frame(self, source_id: str, timestamp: float, output: Path):
         ref, local = self._frame_reference(source_id, timestamp)
-        atomic_media(['-ss', str(local), '-i', str(self.store.resolve_media(ref.path)),
+        atomic_media(['-ss', str(local), '-i', str(self._path(ref.path)),
                       '-frames:v', '1'], output)
 
-    def _inputs(self, refs, *, audio_only=False):
+    def _inputs(self, refs, *, audio_only=False, video_only=False):
         args, filters, labels = [], [], []
-        include_audio = audio_only or any(self._info(self.store.resolve_media(r.path))["audio"] for r in refs)
-        first = self._info(self.store.resolve_media(refs[0].path))
+        include_audio = not video_only and (audio_only or any(self._info(self._path(r.path))["audio"] for r in refs))
+        first = self._info(self._path(refs[0].path))
         width, height = first['width'] // 2 * 2, first['height'] // 2 * 2
         for i, ref in enumerate(refs):
-            path = self.store.resolve_media(ref.path)
+            path = self._path(ref.path)
             duration = ref.end - ref.start
             args += ['-ss', str(ref.start), '-t', str(duration), '-i', str(path)]
             if not audio_only:
@@ -179,16 +203,32 @@ class ShotMedia:
         atomic_media(self._inputs(refs, audio_only=True) +
                      ['-map', '[a]', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le'], output)
 
+    @contextmanager
+    def inference_video(self, source_id, start, end):
+        """Read existing shots, rendering only into a disposable inference directory."""
+        refs = self.references(source_id, start, end)
+        if len(refs) == 1:
+            ref = refs[0]
+            shot = self.store.one('SELECT start,end FROM segments WHERE id=?', (ref.shot_id,))
+            if ref.start == 0 and abs(ref.end - (shot['end'] - shot['start'])) <= EPSILON:
+                yield self._path(ref.path)
+                return
+        with tempfile.TemporaryDirectory(prefix='mindex-embed-') as directory:
+            output = Path(directory) / 'window.mp4'
+            atomic_media(self._inputs(refs, video_only=True) + ['-map', '[v]', '-an', '-c:v', 'libx264',
+                         '-preset', 'fast', '-crf', '20', '-movflags', '+faststart'], output)
+            yield output
+
     def materialize(self, source_id: str, start=0, end=None) -> Path:
         refs = self.references(source_id, start, end)
         if len(refs) == 1:
             ref = refs[0]
             shot = self.store.one('SELECT start,end FROM segments WHERE id=?', (ref.shot_id,))
             if ref.start == 0 and abs(ref.end - (shot['end'] - shot['start'])) <= EPSILON:
-                return self.store.resolve_media(ref.path)
+                return self._path(ref.path)
         identity = [VERSION, [asdict(r) for r in refs]]
         for ref in refs:
-            stat = self.store.resolve_media(ref.path).stat()
+            stat = self._path(ref.path).stat()
             identity.append([stat.st_size, stat.st_mtime_ns])
         key = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
         output = self.store.root / 'cache' / 'shot-media' / f'{key}.mp4'
@@ -196,7 +236,7 @@ class ShotMedia:
         with FileLock(str(output) + '.lock'):
             if not output.exists():
                 atomic_media(self._inputs(refs) + ['-map', '[v]'] +
-                             (['-map', '[a]'] if any(self._info(self.store.resolve_media(r.path))['audio'] for r in refs) else []) +
+                             (['-map', '[a]'] if any(self._info(self._path(r.path))['audio'] for r in refs) else []) +
                              ['-c:v', 'libx264',
                              '-preset', 'fast', '-crf', '20', '-c:a', 'aac', '-movflags', '+faststart'], output)
             stat = output.stat()
@@ -236,7 +276,7 @@ class ShotMedia:
             raise MediaError('Frame count must be positive')
         candidates = []
         for ref in self.references(source_id, start, end):
-            for timestamp in frame_timestamps(self.store.resolve_media(ref.path)):
+            for timestamp in frame_timestamps(self._path(ref.path)):
                 if ref.start <= timestamp < ref.end:
                     candidates.append((ref, timestamp))
         if not candidates:
@@ -246,7 +286,7 @@ class ShotMedia:
         for i in range(count):
             ref, timestamp = candidates[round(i * (len(candidates) - 1) / max(1, count - 1))]
             raw = command(['ffmpeg', '-v', 'error', '-ss', str(timestamp), '-i',
-                           str(self.store.resolve_media(ref.path)), '-frames:v', '1',
+                           str(self._path(ref.path)), '-frames:v', '1',
                            '-vf', 'scale=768:-2', '-f', 'image2pipe', '-vcodec', 'mjpeg', 'pipe:1'])
             if not raw:
                 raise MediaError('Shot frame decode failed')

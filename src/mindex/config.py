@@ -150,7 +150,8 @@ class StudioAudioConfig(StrictModel):
 
 
 class SubtitleConfig(StrictModel):
-    burn: bool = True
+    # 创建任务不再提供字幕选项；默认软字幕轨道（烧录依赖 libass，可在方案参数开启）。
+    burn: bool = False
     font_family: str = "Noto Sans CJK SC"
     font_file: str | None = None
     font_size: int = Field(default=7, ge=1, le=100)

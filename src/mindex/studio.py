@@ -20,7 +20,7 @@ from pydantic import Field, model_validator
 
 from .config import Config, StrictModel, fingerprint
 from .curation import EntityNotFound
-from .types import Filters
+from .types import Filters, Granularity
 
 STEPS = ("split", "recall", "tts", "select", "render")
 SPLIT_VERSION = 5
@@ -96,6 +96,9 @@ class Shot(StrictModel):
     query: str = Field(min_length=1, max_length=400)
     estimated_seconds: float = Field(gt=0, le=60)
     recall: ShotRecall | None = None  # 缺省 = 文字召回（旧 content 无此键）
+    # 分镜级召回覆盖：None = 跟随方案（粒度取服务配置，数量取方案 recall_limit）。
+    granularity: Granularity | None = None
+    recall_limit: int | None = Field(default=None, ge=1, le=50)
 
 
 class Storyboard(StrictModel):

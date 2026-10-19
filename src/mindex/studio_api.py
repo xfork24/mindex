@@ -49,6 +49,8 @@ class ShotBody(StrictModel):
     query: str = Field(min_length=1, max_length=400)
     estimated_seconds: float = Field(gt=0, le=60)
     recall: studio.ShotRecall | None = None  # 与 Shot 严格同步（StrictModel extra=forbid）
+    granularity: studio.Granularity | None = None
+    recall_limit: int | None = Field(default=None, ge=1, le=50)
 
 
 def validate_recall_references(config, store: Store, job_id, shots):

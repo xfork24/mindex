@@ -162,7 +162,7 @@ def build_index(
     channel: Annotated[list[str] | None, typer.Option(help="可重复指定 visual/dialogue/analysis")] = None,
     source: str | None = None,
     kind: Annotated[
-        list[str] | None, typer.Option(help="可重复指定 shot/moment/scene；visual 默认 moment")
+        list[str] | None, typer.Option(help="可重复指定 shot/moment/scene；默认 moment/shot/scene；visual 默认 moment/shot")
     ] = None,
 ):
     """建立或继续新索引，--activate 在检查通过后发布。"""

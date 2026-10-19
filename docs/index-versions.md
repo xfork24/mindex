@@ -78,3 +78,15 @@ uv run mindex check --index-id 新索引ID                            # 复查
 uv run mindex indexes activate 新索引ID                            # 发布
 uv run mindex indexes activate 旧索引ID                            # 回退（先切回旧模型配置）
 ```
+
+## 默认发布粒度与临时推理媒体
+
+`mindex index` 默认同步已有的 moment、shot、scene 及其有效画面、对白、描述；
+旧 moment-only 索引再次发布也会补齐。`--kind` 可重复指定，显式限制本次更新粒度。
+`--mode visual` 默认 moment、shot，不生成场景。单素材更新保留其他素材和未选择的渠道。
+分镜任务完成后发布已有 moment、shot；分析完成后发布已有 scene，并同步该素材所有可用渠道。
+发布不会运行 ASR、场景生成或媒体修复。
+
+索引推理直接读取已有完整镜头；子区间、跨镜头场景与长镜头窗口按绝对时间从镜头读取，
+仅在系统临时目录裁剪或拼接，成功及异常均清理。依赖检查只读取文件，不生成缩略图、
+持久视频或探测缓存。缺失镜头时报素材 ID，检查通过后才允许激活，旧版本保留用于回退。

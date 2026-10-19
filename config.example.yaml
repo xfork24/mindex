@@ -84,7 +84,7 @@ studio:
     duck_gain: 0.15
     loudnorm: "I=-16:TP=-1.5:LRA=11"
   subtitle:
-    burn: true
+    burn: false
     font_family: Noto Sans CJK SC
     font_file: null
     font_size: 7

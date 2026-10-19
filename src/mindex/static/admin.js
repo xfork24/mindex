@@ -234,18 +234,27 @@ function renderWork(source, target) {
     card.append(node('p', MindexI18n.msg("ui.13e6dc8c4328", { p0: search.current ? MindexI18n.msg("ui.112f98675ee2") : search.indexed_segments ? MindexI18n.msg("ui.53122735b7e9") : MindexI18n.msg("ui.30e81c8167e5"), p1: search.indexed_segments || 0, p2: search.expected_segments || 0, p3: name === 'persons' ? MindexI18n.msg("ui.313083c877dc") : MindexI18n.msg("ui.32145468cf4f") }), 'muted'));
     if (MindexI18n.system(result.fallback_reason)) card.append(node('p', MindexI18n.system(result.fallback_reason), 'muted'));
     if (name === 'dialogue') {
-      const methodLabel = node('label', MindexI18n.msg("ui.faaa367f81c6")),method = node('select');MindexI18n.setAttr(method, 'aria-label', MindexI18n.msg("ui.0883552d2a0f"));
+      // 处理方式：标签与下拉同一行左对齐（style.css 的 label:has(>select) 默认竖排，行内覆盖为横排）。
+      const methodRow = node('div', undefined, 'dialogue-row');
+      const methodLabel = node('label', MindexI18n.msg("ui.faaa367f81c6"), 'method-field'),method = node('select');MindexI18n.setAttr(method, 'aria-label', MindexI18n.msg("ui.0883552d2a0f"));
       for (const [v, t] of [['auto', MindexI18n.msg("ui.4d56c25d87cf")], ['subtitle', MindexI18n.msg("ui.93dc9c700cf9")], ['asr', 'ASR']]) {const o = node('option', t);o.value = v;method.append(o);}
-      method.value = prefs.method;methodLabel.append(method);card.append(methodLabel);
-      const trackLabel = node('label', MindexI18n.msg("ui.541d33dd3e02")),track = node('select');MindexI18n.setAttr(track, 'aria-label', MindexI18n.msg("ui.6918e72a515e"));const empty = node('option', MindexI18n.msg("ui.6fddde6cab67"));empty.value = '';track.append(empty);
+      method.value = prefs.method;methodLabel.append(method);methodRow.append(methodLabel);card.append(methodRow);
+      // 文本字幕与上传控件同一行；上传仅在未选定字幕（占位项）时出现，选定轨道或已上传文件后收起。
+      const subtitleRow = node('div', undefined, 'dialogue-row');
+      const trackLabel = node('label', MindexI18n.msg("ui.541d33dd3e02"), 'track-field'),track = node('select');MindexI18n.setAttr(track, 'aria-label', MindexI18n.msg("ui.6918e72a515e"));const empty = node('option', MindexI18n.msg("ui.6fddde6cab67"));empty.value = '';track.append(empty);
       for (const t of source.subtitle_tracks || []) if (t.text) {const o = node('option', `${t.index} · ${t.language} · ${t.codec}${t.title ? ' · ' + t.title : ''}`);o.value = t.index;track.append(o);}
       for (const file of source.subtitle_files || []) {const o = node('option', MindexI18n.msg("ui.383ed05f1663", { name: file.name, count: file.utterances }));o.value = `file:${file.id}`;track.append(o);}
-      track.value = prefs.track;trackLabel.hidden = prefs.method !== 'subtitle';trackLabel.append(track);card.append(trackLabel);
-      const uploadBox = node('div', undefined, 'subtitle-upload'),uploadLabel = node('label', MindexI18n.msg("ui.3a3ecaeab3dd")),upload = node('input');
+      track.value = prefs.track;trackLabel.append(track);subtitleRow.append(trackLabel);
+      const uploadLabel = node('label', MindexI18n.msg("ui.3a3ecaeab3dd"), 'upload-field'),upload = node('input');
       upload.type = 'file';upload.accept = '.srt,.ass,.ssa,.vtt,.sub,.smi,.sami';upload.disabled = blocked || prefs.uploadingSubtitle;
-      MindexI18n.setAttr(upload, 'aria-label', MindexI18n.msg("ui.3a3ecaeab3dd"));uploadLabel.append(upload);
+      MindexI18n.setAttr(upload, 'aria-label', MindexI18n.msg("ui.3a3ecaeab3dd"));uploadLabel.append(upload);subtitleRow.append(uploadLabel);
       const uploadStatus = node('p', prefs.uploadingSubtitle ? MindexI18n.msg("ui.1e7bdf1f5af6") : MindexI18n.msg("ui.48eb829eca06"), 'muted');uploadStatus.setAttribute('role', 'status');
-      uploadBox.append(uploadLabel, uploadStatus);uploadBox.hidden = prefs.method !== 'subtitle';card.append(uploadBox);
+      subtitleRow.append(uploadStatus);card.append(subtitleRow);
+      const syncDialogueRows = () => {
+        subtitleRow.hidden = method.value !== 'subtitle';
+        uploadLabel.hidden = uploadStatus.hidden = !!track.value;
+      };
+      syncDialogueRows();
       upload.onchange = async () => {
         const file = upload.files[0];if (!file) return;
         prefs.uploadingSubtitle = true;upload.disabled = true;start.disabled = true;MindexI18n.setText(uploadStatus, MindexI18n.msg("ui.1e7bdf1f5af6"));
@@ -257,7 +266,7 @@ function renderWork(source, target) {
         } catch (e) {MindexI18n.setText(uploadStatus, e.message);uploadStatus.className = 'source-warning';}
         finally {prefs.uploadingSubtitle = false;upload.disabled = blocked;start.disabled = blocked || !work.can_start;upload.value = '';}
       };
-      method.onchange = () => {prefs.method = method.value;trackLabel.hidden = uploadBox.hidden = method.value !== 'subtitle';};track.onchange = () => {prefs.track = track.value;};
+      method.onchange = () => {prefs.method = method.value;syncDialogueRows();};track.onchange = () => {prefs.track = track.value;syncDialogueRows();};
     }
     const checkLabel = node('label', undefined, 'check'),check = node('input');check.type = 'checkbox';check.checked = prefs.publish[name];check.onchange = () => {prefs.publish[name] = check.checked;};checkLabel.append(check, MindexI18n.textNode(MindexI18n.msg("ui.036fd74aa103")));card.append(checkLabel);
     const errors = node('p', '', 'source-warning');errors.setAttribute('role', 'alert');

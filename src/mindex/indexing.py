@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-import tempfile
 from pathlib import Path
 
 import chromadb
@@ -10,7 +9,7 @@ from chromadb.config import Settings
 
 from .adapters import ModelError, MultimodalEmbedder, make_embedder
 from .config import Config, fingerprint
-from .media import cut, windows
+from .media import windows
 from .pipeline import Pipeline
 from .storage import Store, dumps
 
@@ -137,7 +136,7 @@ class IndexBuilder:
         if mode == "visual":
             if kinds and "scene" in kinds:
                 raise ValueError("visual 模式不生成语义场景，请选择 shot 或 moment")
-            snapshots = pipeline.visual_snapshots(source_id, kinds or ("moment",))
+            snapshots = pipeline.visual_snapshots(source_id, kinds or ("moment", "shot"))
         else:
             snapshots = pipeline.snapshots(source_id)
             if kinds:
@@ -183,16 +182,13 @@ class IndexBuilder:
                     rep_id = fingerprint([index_id, rep_id])
                     if rep_id not in existing:
                         if view == "video":
-                            path = self.store.resolve_media(segment["path"])
-                            if bounds is None:
+                            from .shot_media import ShotMedia
+
+                            a, b = bounds or (0, segment["end"] - segment["start"])
+                            with ShotMedia(self.store, cache_probes=False).inference_video(
+                                segment["source_id"], segment["start"] + a, segment["start"] + b
+                            ) as path:
                                 vector = self.embedder.video(path)
-                            else:
-                                with tempfile.TemporaryDirectory(
-                                    prefix="embed-", dir=self.store.root
-                                ) as directory:
-                                    window = Path(directory) / "window.mp4"
-                                    cut(path, *bounds, window)
-                                    vector = self.embedder.video(window)
                         else:
                             vector = self.embedder.text([document])[0]
                         vectors.upsert(rep_id, vector, segment, view, document)
@@ -248,27 +244,24 @@ def check_index(store: Store, index_id: str) -> list[str]:
     if expected != actual:
         issues.append(f"向量与元数据不一致：缺少 {len(expected - actual)}，多出 {len(actual - expected)}")
     members = store.rows("SELECT * FROM index_members WHERE index_id=?", (index_id,))
+    from .shot_media import ShotMedia
+    media = ShotMedia(store, cache_probes=False)
     for member in members:
         if not member["complete"]:
             issues.append(f"片段未完成：{member['segment_id']}")
         snapshot = json.loads(member["snapshot"])
-        # A reference is the media dependency; resolving it would materialize every
-        # missing legacy entity during an otherwise read-only index check.
+        # Validate references against physical shots without materializing media.
         reference = store.one('SELECT * FROM media_references WHERE path=?', (snapshot['path'],))
-        fields = ("thumbnail",) if reference else ("path", "thumbnail")
-        for field in fields:
-            try:
-                store.resolve_media(snapshot[field])
-            except FileNotFoundError:
-                issues.append(f"文件缺失：{snapshot[field]}")
+        thumbnail = (store.root / snapshot["thumbnail"]).resolve()
+        if not thumbnail.is_relative_to(store.root) or not thumbnail.is_file():
+            issues.append(f"文件缺失：{snapshot['thumbnail']}")
         if reference and (reference['source_id'] != snapshot['source_id'] or
                           abs(reference['start'] - snapshot['start']) > 1e-6 or
                           abs(reference['end'] - snapshot['end']) > 1e-6):
             issues.append(f"媒体引用区间不一致：{member['segment_id']}")
-        from .shot_media import ShotMedia
         from .subtitle_archive import load_archive
         try:
-            ShotMedia(store).references(snapshot["source_id"], snapshot["start"], snapshot["end"])
+            media.references(snapshot["source_id"], snapshot["start"], snapshot["end"])
             load_archive(store, snapshot["source_id"])
         except (ValueError, OSError) as exc:
             issues.append(f"Shot/subtitle dependency failure: {exc}")
