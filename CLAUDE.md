@@ -18,6 +18,7 @@ uv run pytest tests/test_pipeline.py::test_name  # 单个测试
 uv run ruff check src tests                      # lint（line-length 110，target py311）
 node --check src/mindex/static/app.js            # 静态 JS 语法检查
 uv run mindex serve                              # 启动 http://127.0.0.1:8000（/docs、/admin）
+uv run mindex clean [--apply]                    # 磁盘清理：默认预览，--apply 才删（docs/cleanup.md）
 ```
 
 配置从 `config.example.yaml` 复制为 `config.local.yaml`（gitignored）。`--config` 必须放在子命令之前（`uv run mindex --config x.yaml index`），或设 `MINDEX_CONFIG`。配置模型为 strict（`extra="forbid"`），未知键会校验失败。
@@ -55,7 +56,7 @@ uv run mindex serve                              # 启动 http://127.0.0.1:8000�
 
 ### 存储布局（data_dir）
 
-`sources/`（原片，内容哈希去重）、`plans/`（分镜计划，原子写入）、`clips/`、`thumbnails/`、`reports/`、`transcripts/`（30 秒块检查点）、`chroma/`、`context/`（转码缓存）、`studio/`（创作任务目录：storyboard/candidates/audio/timeline/render + job.json 状态机）、`metadata.sqlite3`。
+`sources/`（原片，内容哈希去重）、`plans/`（分镜计划，原子写入）、`clips/`、`thumbnails/`、`reports/`、`transcripts/`（30 秒块检查点）、`chroma/`、`context/`（转码缓存）、`studio/`（创作任务目录：storyboard/candidates/audio/timeline/render + job.json 状态机）、`metadata.sqlite3`。各目录的清理分级与保留策略见 `docs/cleanup.md`（`mindex clean`：A 级每次删、B 级按 `clean` 配置过期删、C 级只报告）。
 
 ### 检索（search.py）
 

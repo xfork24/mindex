@@ -108,6 +108,23 @@ uv run mindex search '雨夜，一个人强忍眼泪，镜头慢慢推近' --gra
 
 检查通过后在 SQLite 事务内发布。回退 = 先切回旧模型服务/配置，再激活旧索引。
 
+## 磁盘清理
+
+### `mindex clean [--apply]`
+
+扫描可安全回收的磁盘数据；**默认预览**，加 `--apply` 才真正删除。分级判定、保留策略与 C 级待调整清单详见 [cleanup.md](cleanup.md)；过期阈值在配置 `clean` 节调整（[config-reference.md](config-reference.md)）。
+
+- **A 级（每次都删）**：崩溃残留临时目录、`.DS_Store`、上传暂存残留、孤儿文件（切片/缩略图/转码缓存/人物图/声音样本/未注册原片）
+- **B 级（策略过期）**：非活动索引版本（保留活动 + 最近 `clean.index_keep_versions` 个 ready + 全部 building）、旧指纹检查点、context/studio/reports/字幕缓存、runs 旧记录
+- **C 级（只报告不删）**：persons/frames、model-cache、一次性验证产物、数据库备份、VACUUM 建议——出现在输出 `notes` 中
+
+apply 分两段持锁：先独占 `pipeline.lock` + `index-write.lock`（管线与索引类，与素材删除同序），释放后再取 `studio.lock`（创作类，拿不到则该三类标记 skipped 而非失败）。管线/索引锁被占时以中文提示退出码 1。大规模清理前建议停 serve。
+
+```bash
+uv run mindex clean                       # 预览各类别可回收项与字节数
+uv run mindex clean --apply               # 实际删除
+```
+
 ## 评测与联调
 
 ### `mindex evaluate QUERIES [--split test] [--split dev|video-test] [--output FILE] [--index-id INDEX_ID]`
