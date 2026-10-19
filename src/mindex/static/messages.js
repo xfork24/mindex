@@ -1,4 +1,3 @@
-/* Authored UI dictionary. No user content or runtime translation service. */
 window.MindexMessages = {
   "ui.acfbb1e1a397": {
     "zh": "Mindex · 视频检索",
@@ -553,7 +552,7 @@ window.MindexMessages = {
     "en": "Characters (multiple)"
   },
   "ui.c5b573027af5": {
-    "zh": "从原片选取参考",
+    "zh": "从素材选取参考",
     "en": "Capture a reference from the original"
   },
   "ui.75e00c77cbfc": {
@@ -561,7 +560,7 @@ window.MindexMessages = {
     "en": "Media"
   },
   "ui.35b941202087": {
-    "zh": "原片时间（秒）",
+    "zh": "素材时间（秒）",
     "en": "Original time (s)"
   },
   "ui.5fdb8b2c027a": {
@@ -7155,5 +7154,9 @@ window.MindexMessages = {
   "ui.c1b8365074c7": {
     "zh": "可多选；不选时搜索全部素材。",
     "en": "Select multiple sources, or leave empty to search all media."
+  },
+  "ui.44a52eb27973": {
+    "zh": "待分析 {count} 个片段",
+    "en": "{count} clips pending analysis"
   }
 };

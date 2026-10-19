@@ -19,6 +19,15 @@ class Store:
         with self.connect() as db:
             db.executescript("""
                 PRAGMA journal_mode=WAL;
+                CREATE TABLE IF NOT EXISTS clip_migration_files (
+                  path TEXT PRIMARY KEY, source_id TEXT NOT NULL, version TEXT NOT NULL,
+                  status TEXT NOT NULL, dependency_digest TEXT,
+                  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE IF NOT EXISTS media_references (
+                  path TEXT PRIMARY KEY, source_id TEXT NOT NULL, start REAL NOT NULL,
+                  end REAL NOT NULL, version TEXT NOT NULL, refs TEXT NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS sources (
                   id TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL,
                   media TEXT NOT NULL, layout_key TEXT NOT NULL, prepared INTEGER NOT NULL DEFAULT 0
@@ -112,7 +121,7 @@ class Store:
 
             init_person_schema(db)
             for table, column in (("sources", "layout_config"), ("dialogue_tasks", "publication"),
-                                  ("person_tasks", "publication")):
+                                  ("person_tasks", "publication"), ("clip_migration_files", "dependency_digest")):
                 if column not in {r[1] for r in db.execute(f"PRAGMA table_info({table})")}:
                     db.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT")
             columns = {row[1] for row in db.execute("PRAGMA table_info(representations)")}
@@ -258,8 +267,45 @@ class Store:
         rows = self.rows("SELECT snapshot FROM index_members WHERE index_id=? AND complete=1", (index_id,))
         return [json.loads(row["snapshot"]) for row in rows]
 
+    def media_available(self, relative: str) -> bool:
+        path = (self.root / relative).resolve()
+        if not path.is_relative_to(self.root):
+            return False
+        if path.is_file():
+            return True
+        reference = self.one("SELECT source_id,start,end FROM media_references WHERE path=?", (relative,))
+        if reference is None:
+            reference = self.one("SELECT source_id,start,end FROM segments WHERE path=? "
+                                 "AND kind IN ('moment','scene')", (relative,))
+        if reference:
+            from .shot_media import ShotMedia
+            try:
+                ShotMedia(self).references(reference['source_id'], reference['start'], reference['end'])
+                return True
+            except (ValueError, OSError):
+                pass
+        return False
+
     def resolve_media(self, relative: str) -> Path:
         path = (self.root / relative).resolve()
-        if not path.is_relative_to(self.root) or not path.is_file():
+        if not path.is_relative_to(self.root):
+            raise FileNotFoundError(relative)
+        reference = self.one("SELECT * FROM media_references WHERE path=?", (relative,))
+        if reference and reference['version'] == 'shot-boundary-v1':
+            from .shot_media import ShotMedia
+            return ShotMedia(self).materialize(reference['source_id'], reference['start'], reference['end'])
+        if not path.is_file():
+            if reference is None:
+                reference = self.one("SELECT source_id,start,end FROM segments WHERE path=? "
+                                     "AND kind IN ('moment','scene')", (relative,))
+            if reference is None:
+                for row in self.rows("SELECT snapshot FROM index_members"):
+                    snapshot = json.loads(row["snapshot"])
+                    if snapshot.get("path") == relative and snapshot.get("kind") in {"moment", "scene"}:
+                        reference = snapshot
+                        break
+            if reference:
+                from .shot_media import ShotMedia
+                return ShotMedia(self).materialize(reference['source_id'], reference['start'], reference['end'])
             raise FileNotFoundError(relative)
         return path

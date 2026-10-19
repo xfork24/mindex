@@ -35,7 +35,7 @@ def configure(
     if no_runtime_overrides:
         ctx.obj.runtime_overrides = False
     # 设置页保存的覆盖层对 CLI 同样生效（Web 与 CLI 行为一致）；e2e 验证框架保持 yaml 原值。
-    if ctx.invoked_subcommand != "e2e":
+    if ctx.invoked_subcommand not in {"e2e", "clips"}:
         from .runtime_settings import apply_runtime_overrides
 
         ctx.obj = apply_runtime_overrides(ctx.obj)
@@ -578,6 +578,58 @@ def persons_activate(ctx: typer.Context, release: str):
     store = Store(ctx.obj.data_dir)
     store.activate_release(release)
     print_json({'release_id': release})
+
+
+
+
+clips = typer.Typer(help="Shot 媒体引用迁移与实体恢复", no_args_is_help=True)
+app.add_typer(clips, name="clips")
+
+
+@clips.command("migrate")
+def clips_migrate(ctx: typer.Context, source: str | None = None, apply: bool = False, verify: bool = False):
+    """默认只读盘点；--apply 备份并登记引用；--verify 验证媒体，均不删除实体。"""
+    from .clips import migrate
+
+    print_json(migrate(ctx.obj, source, apply=apply, verify=verify))
+
+
+@clips.command("materialize")
+def clips_materialize(ctx: typer.Context, all: Annotated[bool, typer.Option("--all")] = False):
+    """仅从 shot 恢复旧路径下的实体。"""
+    if not all:
+        raise typer.BadParameter("请指定 --all")
+    from .clips import materialize_all
+
+    print_json(materialize_all(ctx.obj))
+
+
+@clips.command("verify-archives")
+def clips_verify_archives(ctx: typer.Context, source: str | None = None):
+    """显式校验归档原片 SHA256；业务索引检查不执行此操作。"""
+    from .clips import verify_archives
+
+    print_json(verify_archives(ctx.obj, source))
+
+
+@clips.command("repair-boundaries")
+def clips_repair_boundaries(ctx: typer.Context, source: str | None = None,
+                           audit_file: Path | None = None, apply: bool = False):
+    """显式原片诊断/修复分镜切点；旧媒体保留，默认只读预览。"""
+    from .shot_repair import apply as repair
+    from .shot_repair import audit
+    from .storage import Store
+
+    report = json.loads(audit_file.read_text()) if audit_file else audit(Store(ctx.obj.data_dir), source)
+    print_json(repair(ctx.obj, report) if apply else report)
+
+
+@clips.command("prune")
+def clips_prune(ctx: typer.Context, migration_report: Path, apply: bool = False):
+    """预览已验证旧切片；验收后 --apply 物理删除，保留原片和 shot。"""
+    from .clips import prune
+
+    print_json(prune(ctx.obj, migration_report, apply=apply))
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 from fractions import Fraction
 
@@ -9,7 +10,7 @@ from filelock import FileLock
 
 from . import studio, studio_select, studio_steps
 from .config import fingerprint
-from .media import atomic_media, probe
+from .media import atomic_media
 from .storage import Store
 from .studio_artifacts import visibility_key
 
@@ -175,10 +176,9 @@ def context(config, job_id, w, p, sid):
         source = store.one("SELECT * FROM sources WHERE id=?", (anchor["source_id"],))
         if not source:
             raise studio.StudioError("候选素材不存在")
-        media = store.resolve_media(source["path"])
-        if not media.is_file():
-            raise studio.StudioError("候选原片文件缺失")
-        info = probe(media)
+        from .shot_media import ShotMedia
+        service = ShotMedia(store)
+        info = json.loads(source["media"])
         timeline = [
             {**r, "end": min(r["end"], info["duration"])}
             for r in ws.source_shots(config, anchor["source_id"])
@@ -191,9 +191,7 @@ def context(config, job_id, w, p, sid):
         ref = {"recall_version": p["shots"][sid]["recall"], "candidate_id": candidate_id(anchor)}
         identity = {
             "source_id": source["id"],
-            "path": str(media),
-            "bytes": media.stat().st_size,
-            "mtime_ns": media.stat().st_mtime_ns,
+            "media": service.identity(source["id"], lo, hi),
             "layout_key": source["layout_key"],
             "visibility": visibility_key(store),
             "start": lo,
@@ -230,7 +228,8 @@ def resources(config, job_id, ctx):
     directory = ws.root(config, job_id) / "previews" / f"context-{ctx['resource_key']}"
     directory.mkdir(parents=True, exist_ok=True)
     lo, hi = ctx["context_range"]["start"], ctx["context_range"]["end"]
-    source = ctx["source_identity"]["path"]
+    from .shot_media import ShotMedia
+    source = str(ShotMedia(Store(config.data_dir)).materialize(ctx["source_id"], lo, hi))
     output = directory / "context.mp4"
     count = min(80, max(5, math.ceil((hi - lo) / 2)))
     with FileLock(str(directory / "resources.lock"), timeout=0):
@@ -238,7 +237,7 @@ def resources(config, job_id, ctx):
             atomic_media(
                 [
                     "-ss",
-                    str(lo),
+                    "0",
                     "-i",
                     source,
                     "-t",
@@ -264,7 +263,7 @@ def resources(config, job_id, ctx):
             atomic_media(
                 [
                     "-ss",
-                    str(lo),
+                    "0",
                     "-i",
                     source,
                     "-t",

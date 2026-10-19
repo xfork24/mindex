@@ -30,6 +30,7 @@ from .config import Config, StrictModel, fingerprint
 from .curation import EntityNotFound, Library
 from .images import image_png
 from .runtime_settings import RuntimeConfig
+from .shot_media import ShotMedia
 from .storage import Store
 from .studio_artifacts import digest, safe_path
 from .studio_logs import ExecutionLog, read_events
@@ -839,8 +840,11 @@ def studio_router(
                 row = store.one("SELECT path FROM sources WHERE id=?", (event.video.source_id,))
                 if not row:
                     raise studio.StudioError("素材不存在")
-                source = store.resolve_media(row["path"])
-                preview_source, preview_event = source, event.model_copy(deep=True)
+                source = ShotMedia(store).materialize(event.video.source_id, event.video.start, event.video.end)
+                local_event = event.model_copy(deep=True)
+                local_event.video.end -= local_event.video.start
+                local_event.video.start = 0
+                preview_source, preview_event = source, local_event.model_copy(deep=True)
                 if window_range and window_range.get("resource_key"):
                     cached = safe_path(
                         studio.job_dir(base, job_id),
@@ -848,6 +852,7 @@ def studio_router(
                     )
                     if cached.is_file():
                         preview_source = cached
+                        preview_event = event.model_copy(deep=True)
                         offset = window_range["context_range"]["start"]
                         preview_event.video.start -= offset
                         preview_event.video.end -= offset
@@ -858,7 +863,10 @@ def studio_router(
                     audio_config = audio_config.model_copy(update={"duck_gain": options["duck_gain"]})
                     if options["audio_mode"] == "ducking" and probe(source)["audio"]:
                         ambient = directory / "ambient.wav"
-                        extract_ambient(source, event, audio_config, ambient)
+                        raw_ambient = directory / "shot-audio.wav"
+                        ShotMedia(store).audio(event.video.source_id, raw_ambient, event.video.start,
+                                               event.video.end - event.video.start)
+                        extract_ambient(raw_ambient, local_event, audio_config, ambient)
                 process_shot_audio(voice, ambient, event, audio_config, directory / "audio.wav")
                 with wave.open(str(directory / "audio.wav"), "rb") as handle:
                     samples = handle.getnframes()
@@ -1067,7 +1075,10 @@ def studio_router(
         row = store.one("SELECT path FROM sources WHERE id=?", (event.video.source_id,))
         if row is None:
             raise HTTPException(404, "原片不存在")
-        source = store.resolve_media(row["path"])
+        source = ShotMedia(store).materialize(event.video.source_id, event.video.start, event.video.end)
+        local_event = event.model_copy(deep=True)
+        local_event.video.end -= local_event.video.start
+        local_event.video.start = 0
         key = fingerprint(
             {
                 "event": event.model_dump(),
@@ -1082,7 +1093,7 @@ def studio_router(
                 try:
                     probe(path)
                 except ValueError:
-                    cut_shot(source, event, base.studio.render, path)
+                    cut_shot(source, local_event, base.studio.render, path)
         except Timeout:
             raise HTTPException(409, "该分镜预览正在生成，请稍候重试") from None
         return FileResponse(path, media_type="video/mp4")

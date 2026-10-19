@@ -17,7 +17,7 @@ from time import perf_counter
 
 from .adapters import ModelError, make_transcriber
 from .config import Config, fingerprint
-from .media import MediaError, command, extract_audio, probe
+from .media import MediaError, command
 from .storage import Store, dumps
 
 CHANNELS = ("visual", "dialogue", "analysis")
@@ -299,9 +299,12 @@ class DialogueProcessor:
             if progress:
                 progress({"stage": "subtitle", "completed": 1, "total": 1, "unit": "files"})
             return {"source_id": sid, **data}
-        path = self.store.resolve_media(source["path"])
-        info = probe(path)
-        tracks = subtitle_tracks(path) if method != "asr" else []
+        from .shot_media import ShotMedia
+        from .subtitle_archive import load_archive
+
+        info = json.loads(source["media"])
+        archive = load_archive(self.store, sid) if method != "asr" else None
+        tracks = archive["tracks"] if archive else []
         selected = choose_subtitle(tracks, stream) if method != "asr" else None
         manual_subtitle = method == "subtitle"
         if manual_subtitle and stream is None:
@@ -325,7 +328,7 @@ class DialogueProcessor:
                     progress({"stage": "subtitle", "completed": 1, "total": 1, "unit": "tracks"})
                 return {"source_id": sid, **json.loads(previous["data"]), "reused": True}
             try:
-                utterances = extract_subtitles(path, selected, info["duration"])
+                utterances = archive["utterances"][str(selected["index"])]
                 if utterances or manual_subtitle:
                     data = self.save(
                         sid,
@@ -394,7 +397,7 @@ class DialogueProcessor:
                     self.transcriber = make_transcriber(self.config)
                 with tempfile.TemporaryDirectory(prefix="dialogue-", dir=self.store.root) as directory:
                     audio = Path(directory) / "audio.wav"
-                    extract_audio(path, audio, a, b - a)
+                    ShotMedia(self.store).audio(sid, audio, a, b - a)
                     if self.config.asr.backend == "minimax":
                         raw = self.transcriber.raw(audio, timestamps=True)
                         atomic_json(cache / f"raw-{number}.json", {**raw, "offset": a, "duration": b - a})

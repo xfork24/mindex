@@ -252,11 +252,26 @@ def check_index(store: Store, index_id: str) -> list[str]:
         if not member["complete"]:
             issues.append(f"片段未完成：{member['segment_id']}")
         snapshot = json.loads(member["snapshot"])
-        for field in ("path", "thumbnail", "source_path"):
+        # A reference is the media dependency; resolving it would materialize every
+        # missing legacy entity during an otherwise read-only index check.
+        reference = store.one('SELECT * FROM media_references WHERE path=?', (snapshot['path'],))
+        fields = ("thumbnail",) if reference else ("path", "thumbnail")
+        for field in fields:
             try:
                 store.resolve_media(snapshot[field])
             except FileNotFoundError:
                 issues.append(f"文件缺失：{snapshot[field]}")
+        if reference and (reference['source_id'] != snapshot['source_id'] or
+                          abs(reference['start'] - snapshot['start']) > 1e-6 or
+                          abs(reference['end'] - snapshot['end']) > 1e-6):
+            issues.append(f"媒体引用区间不一致：{member['segment_id']}")
+        from .shot_media import ShotMedia
+        from .subtitle_archive import load_archive
+        try:
+            ShotMedia(store).references(snapshot["source_id"], snapshot["start"], snapshot["end"])
+            load_archive(store, snapshot["source_id"])
+        except (ValueError, OSError) as exc:
+            issues.append(f"Shot/subtitle dependency failure: {exc}")
         views = {
             r["view"]
             for r in store.rows(

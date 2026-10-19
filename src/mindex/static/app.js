@@ -125,7 +125,7 @@ function details(result) {
   const target = $('detail-content');target.replaceChildren();
   target.append(element('h3', result.display_name || result.source_name));
   if (result.display_name) target.append(element('p', result.source_name));
-  const video = element('video');video.src = result.media_url;video.controls = true;video.preload = 'metadata';
+  const video = element('video');queueMicrotask(() => ShotPlayer.attach(video, `/api/playlists/${result.id}`));video.controls = true;video.preload = 'metadata';
   target.append(video, element('p', `${clock(result.start)} — ${clock(result.end)}`), element('p', result.annotation_status === 'not_analyzed' ? MindexI18n.msg("ui.fec3adb80692") : result.annotation.description));
   for (const [title, items] of [[MindexI18n.msg("ui.d9d9827827e1"), result.annotation.actions], [MindexI18n.msg("ui.cf5030475efb"), result.annotation.visual_evidence], [MindexI18n.msg("ui.cf335345e962"), result.annotation.dialogue_inference], [MindexI18n.msg("ui.43f1d3835b20"), result.annotation.uncertainty]]) {
     if (items.length) target.append(element('p', `${title}：${items.join('；')}`));
@@ -148,7 +148,7 @@ function details(result) {
     const row = element('div', undefined, 'person-evidence-row');
     if (evidence.image_url) {const img = element('img');img.src = evidence.image_url;MindexI18n.setAttr(img, "alt", MindexI18n.msg("ui.2032116e6bcc", { p0: name }));img.loading = 'lazy';row.append(img);}
     const actions = element('div', undefined, 'person-evidence-actions');
-    const locate = element('button', MindexI18n.msg("ui.51d89eeafe25"), 'quiet');locate.type = 'button';locate.onclick = () => {video.currentTime = Math.max(0, evidence.start - result.start);};
+    const locate = element('button', MindexI18n.msg("ui.51d89eeafe25"), 'quiet');locate.type = 'button';locate.onclick = () => {video.shotPlayer?.seek(Math.max(0, evidence.start - result.start));};
     const correct = correctionLink(result, evidence);
     actions.append(locate, correct);row.append(actions);section.append(row);target.append(section);
   }
@@ -177,6 +177,7 @@ $('close-dialog').onclick = () => {$('detail-content').querySelector('video')?.p
 $('detail-dialog').addEventListener('close', () => {$('detail-content').querySelector('video')?.pause();});
 
 function render(data) {
+  $('results').querySelectorAll('video').forEach(video => video.pause());
   $('results').replaceChildren();
   MindexI18n.setText($('result-count'), MindexI18n.msg("ui.411bdad5dc98", { p0: data.results.length }));
   MindexI18n.setText($('timing'), MindexI18n.msg("ui.7e3c096d9f68", { p0: (data.elapsed_ms / 1000).toFixed(2) }));
@@ -187,7 +188,10 @@ function render(data) {
   }
   data.results.forEach((result, index) => {
     const card = element('article', undefined, 'card');
-    const video = element('video');video.src = result.media_url;video.poster = result.thumbnail_url;video.controls = true;video.preload = 'none';
+    const video = element('video');queueMicrotask(() => ShotPlayer.attach(video, `/api/playlists/${result.id}`));video.poster = result.thumbnail_url;video.controls = true;video.preload = 'none';
+    const preview = element('div', undefined, 'card-preview');
+    const score = element('span', `#${index + 1} · ${result.score.toFixed(4)}`, 'card-score');
+    score.title = result.score.toFixed(5);preview.append(video, score);
     const body = element('div', undefined, 'card-body');
     const title = element('div', undefined, 'card-title');title.append(element('strong', result.source_name), element('span', `${(result.end - result.start).toFixed(1)}s`));
     const tags = element('div', undefined, 'tags');
@@ -203,14 +207,14 @@ function render(data) {
     [...result.annotation.scene, ...result.annotation.emotions, ...result.annotation.shot_size].slice(0, 5).forEach((tag) => tags.append(element('span', tag, 'tag')));
     const actions = element('div', undefined, 'card-actions');
     const detail = element('button', MindexI18n.msg("ui.faea8c1db9cc"));detail.type = 'button';detail.onclick = () => details(result);
-    actions.append(detail, managementLink(result), correctionLink(result), element('span', `#${index + 1} · ${result.score.toFixed(4)}`, 'score'));
+    actions.append(detail, managementLink(result), correctionLink(result));
     const evidenceText = (result.matches || []).find((match) => match.matched_text)?.matched_text;
     const description = result.display_name || evidenceText || (result.annotation_status === 'not_analyzed' ? '' : result.annotation.description);
     body.append(title);
     if (description) body.append(element('p', description, 'card-description'));
     if (tags.childElementCount) body.append(tags);
     body.append(actions);
-    card.append(video, body);$('results').append(card);
+    card.append(preview, body);$('results').append(card);
   });
 }
 $('search-form').onsubmit = async (event) => {

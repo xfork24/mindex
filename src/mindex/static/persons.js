@@ -255,7 +255,7 @@ $('capture-actor').onchange = fillCaptureRoles;
 $('capture-source').onchange = () => {fillCaptureRoles();resetCapture();const v = $('capture-video');v.pause();v.onloadedmetadata = v.onloadeddata = v.onseeked = null;v.removeAttribute('src');v.load();v.hidden = true;};
 $('capture-role').onchange = () => {const role = state.entities.find((e) => e.id === $('capture-role').value);if (role?.actor_ids.length === 1) $('capture-actor').value = role.actor_ids[0];};
 function drawCapture() {
-  const canvas = $('capture-canvas'),ctx = canvas.getContext('2d'),v = $('capture-video');
+  const canvas = $('capture-canvas'),ctx = canvas.getContext('2d'),v = $('capture-video').shotPlayer?.current || $('capture-video');
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
   if (capture.box) {const [x1, y1, x2, y2] = capture.box;ctx.strokeStyle = '#ff5035';ctx.lineWidth = Math.max(2, canvas.width / 350);ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);}
@@ -263,16 +263,18 @@ function drawCapture() {
 function resetCapture() {capture.box = null;capture.ready = false;captureDrag = null;$('capture-canvas').hidden = true;}
 $('capture-time').oninput = resetCapture;
 $('capture-preview').onclick = () => run(async () => {
-  const v = $('capture-video'),canvas = $('capture-canvas'),timestamp = Number($('capture-time').value);
+  const original = $('capture-video'),canvas = $('capture-canvas'),timestamp = Number($('capture-time').value);
   if (!$('capture-source').value) throw Error(MindexI18n.msg("ui.c4b67e4559fe"));
-  const grab = () => {if (!v.videoWidth || v.readyState < 2) return;resetCapture();$('capture-time').value = v.currentTime.toFixed(3);if (!v.paused) return;canvas.width = v.videoWidth;canvas.height = v.videoHeight;canvas.hidden = false;drawCapture();capture.ready = true;};
-  resetCapture();v.pause();v.hidden = false;v.onseeked = grab;v.onloadeddata = grab;
-  v.onloadedmetadata = () => {if (Math.abs(v.currentTime - timestamp) > 0.001) v.currentTime = timestamp;else grab();};
-  v.src = `/api/admin/sources/${$('capture-source').value}/media`;
-  v.load(); // preload=none 时只赋 src 不会真的加载，必须显式 load
+  resetCapture();original.hidden = false;
+  const player = ShotPlayer.attach(original, `/api/admin/sources/${$('capture-source').value}/playlist`);
+  await player.ready;
+  const grab = () => {const v = player.current;if(!v.videoWidth || v.readyState < 2 || v.seeking || !v.paused) return;
+    resetCapture();$('capture-time').value = player.time.toFixed(3);canvas.width = v.videoWidth;canvas.height = v.videoHeight;
+    canvas.hidden = false;drawCapture();capture.ready = true;};
+  for(const v of player.videos) {v.onseeked = grab;v.onloadeddata = grab;v.onplay = resetCapture;
+    v.ontimeupdate = () => {if(v !== player.current) return;$('capture-time').value = player.time.toFixed(3);if(!v.paused) resetCapture();};}
+  await player.seek(timestamp);grab();
 });
-$('capture-video').onplay = resetCapture;
-$('capture-video').ontimeupdate = () => {const v = $('capture-video');$('capture-time').value = v.currentTime.toFixed(3);if (!v.paused) resetCapture();};
 let captureDrag = null;
 function capturePoint(e) {const c = $('capture-canvas'),r = c.getBoundingClientRect();return [Math.max(0, Math.min(c.width, (e.clientX - r.left) * c.width / r.width)), Math.max(0, Math.min(c.height, (e.clientY - r.top) * c.height / r.height))];}
 $('capture-canvas').onpointerdown = (e) => {if (!capture.ready) return;captureDrag = capturePoint(e);$('capture-canvas').setPointerCapture(e.pointerId);};

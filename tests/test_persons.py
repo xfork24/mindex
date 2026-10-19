@@ -44,7 +44,8 @@ def photo(color="red", size=(100, 120)):
 
 
 @pytest.fixture
-def catalogue(config):
+def catalogue(config, monkeypatch):
+    monkeypatch.setattr("mindex.shot_media.probe", lambda _: {"duration": 1, "fps": 25, "width": 100, "height": 120, "audio": False})
     store = Store(config.data_dir)
     path = store.root / "source.mp4"
     path.write_bytes(b"fixture only")
@@ -756,7 +757,7 @@ def test_frame_capture_targets_a_role_with_a_drawn_box(catalogue, config, monkey
     """从原片选取参考：截图始终配给角色，可带手动画框（框选错误身份）。"""
     p, work, actor = catalogue
     role = p.save(Entity(kind="role", name="叶淑柔", work_ids=[work], actor_ids=[actor["id"]]))
-    monkeypatch.setattr("mindex.person_api.command", lambda args: photo("orange", (320, 240)))
+    monkeypatch.setattr("mindex.shot_media.ShotMedia.frame_bytes", lambda *args: photo("orange", (320, 240)))
     monkeypatch.setattr("mindex.person_api.reference_checker", reference_checker_stub(FakeClient(), config))
     client = TestClient(create_app(config))
     created = client.post(
@@ -787,7 +788,7 @@ def test_frame_capture_targets_a_role_with_a_drawn_box(catalogue, config, monkey
     )
     foreign = p.save(Entity(kind="work", name="其他作品"))
     foreign_role = p.save(Entity(kind="role", name="外片角色", work_ids=[foreign["id"]], actor_ids=[actor["id"]]))
-    monkeypatch.setattr("mindex.person_api.command", lambda args: pytest.fail("无效配对不应调用 ffmpeg"))
+    monkeypatch.setattr("mindex.shot_media.ShotMedia.frame_bytes", lambda *args: pytest.fail("无效配对不应调用 ffmpeg"))
     assert client.post(
         "/api/persons/references/from-source",
         json={"source_id": "source", "timestamp": 0, "role_id": foreign_role["id"]},
@@ -918,7 +919,7 @@ def test_from_source_capture_validated_before_insert(catalogue, config, monkeypa
     """原片截图入库前同步质检：不合格 422，服务不可用 503，均不入库。"""
     p, work, actor = catalogue
     role = p.save(Entity(kind="role", name="叶淑柔", work_ids=[work], actor_ids=[actor["id"]]))
-    monkeypatch.setattr("mindex.person_api.command", lambda args: photo("orange", (320, 240)))
+    monkeypatch.setattr("mindex.shot_media.ShotMedia.frame_bytes", lambda *args: photo("orange", (320, 240)))
     stub = ReferenceClient(observations=[obs(), obs(box=[10, 0, 110, 120])])
     monkeypatch.setattr("mindex.person_api.reference_checker", reference_checker_stub(stub, config))
     client = TestClient(create_app(config))

@@ -259,6 +259,8 @@ def render_timeline(
     voice_lookup: Callable[[str], Path],
     source_lookup: Callable[[str], Path],
     workdir: Path,
+    interval_lookup: Callable | None = None,
+    audio_lookup: Callable | None = None,
 ) -> dict:
     render, audio_cfg = config.studio.render, config.studio.audio
     session = current.get()
@@ -284,15 +286,32 @@ def render_timeline(
     total_frames, total_samples = 0, 0
     source_keys = {}
     for event in timeline.events:
-        source, voice = source_lookup(event.video.source_id), voice_lookup(event.shot_id)
+        absolute_start, absolute_end = event.video.start, event.video.end
+        voice = voice_lookup(event.shot_id)
+        if interval_lookup is not None:
+            source = interval_lookup(event.video.source_id, absolute_start, absolute_end)
+            event = event.model_copy(deep=True)
+            event.video.start, event.video.end = 0, absolute_end - absolute_start
+        else:
+            source = source_lookup(event.video.source_id)
         if source not in source_keys:
             source_keys[source] = {
                 "id": event.video.source_id,
+                "media_version": "shot-media-v1" if interval_lookup is not None else "legacy",
                 "bytes": source.stat().st_size,
                 "mtime_ns": source.stat().st_mtime_ns,
             }
         source_key = source_keys[source]
         ambient = None
+
+        def render_ambient(path, source=source, event=event, start=absolute_start, end=absolute_end):
+            if audio_lookup is not None:
+                raw = path.with_name(path.stem + '.raw.wav')
+                audio_lookup(event.video.source_id, start, end, raw)
+                extract_ambient(raw, event, audio_cfg, path)
+            else:
+                extract_ambient(source, event, audio_cfg, path)
+
         if timeline.audio_mode == "ducking" and probe(source)["audio"]:
             key = fingerprint(
                 {
@@ -306,7 +325,7 @@ def render_timeline(
             ambient = produce(
                 f"orig/{event.shot_id}.wav",
                 key,
-                lambda path, source=source, event=event: extract_ambient(source, event, audio_cfg, path),
+                render_ambient,
             )
         voice_key = fingerprint(
             {
@@ -383,8 +402,8 @@ def render_timeline(
                 "voice_samples": samples,
                 "source_id": event.video.source_id,
                 "source_path": str(source),
-                "source_start": event.video.start,
-                "source_end": event.video.end,
+                "source_start": absolute_start,
+                "source_end": absolute_end,
             }
         )
         total_frames += frames

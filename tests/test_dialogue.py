@@ -217,11 +217,9 @@ def test_minimax_rate_limit_rewinds_upload_and_requests_words(config, tmp_path, 
     assert result[0].start == 0.1
 
 
-@pytest.mark.parametrize("fallback", ["empty_subtitle", "extraction_failure", "bitmap"])
+@pytest.mark.parametrize("fallback", ["empty_subtitle", "bitmap"])
 def test_subtitle_fallback_and_silent_audio_are_explicit(config, tmp_path, monkeypatch, fallback):
     import json
-
-    from mindex.media import MediaError
 
     video = tmp_path / "silent.mp4"
     command(
@@ -258,14 +256,8 @@ def test_subtitle_fallback_and_silent_audio_are_explicit(config, tmp_path, monke
         "default": True,
         "forced": False,
     }
-    monkeypatch.setattr("mindex.dialogue.subtitle_tracks", lambda _: [track])
-
-    def extract(*args):
-        if fallback == "extraction_failure":
-            raise MediaError("TEST extraction failed")
-        return []
-
-    monkeypatch.setattr("mindex.dialogue.extract_subtitles", extract)
+    monkeypatch.setattr("mindex.subtitle_archive.load_archive", lambda *_: {
+        "tracks": [track], "utterances": {"2": []}, "files": {}})
 
     class Silence:
         calls = 0

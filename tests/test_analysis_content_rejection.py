@@ -118,7 +118,7 @@ def test_all_rejected_scene_or_group_still_completes_and_reuses(config, video_fi
     class Analyzer:
         def analyze(self, path, dialogue):
             calls.append(path)
-            segment = pipeline.store.one("SELECT kind FROM segments WHERE path=?", (str(path.relative_to(pipeline.store.root)),))
+            segment = next(s for s in pipeline.store.segments() if pipeline.store.resolve_media(s["path"]) == path)
             if reject_stage == "all" or reject_stage == "scene" and segment["kind"] == "scene":
                 raise AnalysisContentRejected(REASON)
             return Annotation(description="工程测试画面")

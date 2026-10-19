@@ -419,3 +419,19 @@ def test_final_identity_drift_cannot_publish_completed_vectors(processed, config
     building = pipeline.store.one("SELECT id,status FROM index_versions WHERE status='building'")
     assert building is not None
     assert check_index(pipeline.store, building["id"]) == []
+
+
+def test_check_validates_shot_references_without_materializing(processed, monkeypatch):
+    from mindex.shot_media import ShotMedia
+
+    pipeline, _, _, _, version = processed
+    snapshot = next(s for s in pipeline.store.snapshots(version)
+                    if pipeline.store.one('SELECT path FROM media_references WHERE path=?', (s['path'],)))
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError('Index check must not materialize legacy media')
+
+    monkeypatch.setattr(ShotMedia, 'materialize', forbidden)
+    assert check_index(pipeline.store, version) == []
+    pipeline.store.execute('UPDATE media_references SET start=start+0.1 WHERE path=?', (snapshot['path'],))
+    assert any('媒体引用区间不一致' in issue for issue in check_index(pipeline.store, version))

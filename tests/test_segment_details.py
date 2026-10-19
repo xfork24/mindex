@@ -54,23 +54,18 @@ def test_detail_independent_asr_subtitle_and_llm_with_time_clipping(config, vide
             ).model_dump()
         },
     )
-    calls = []
-    monkeypatch.setattr(
-        "mindex.segment_details.subtitle_tracks",
-        lambda path: [
+    from mindex.subtitle_archive import archive_path
+    archive_path(store, source).write_text(dumps({
+        "version": 1, "files": {},
+        "tracks": [
             {"index": 2, "codec": "subrip", "text": True, "language": "zho", "title": "中文"},
             {"index": 3, "codec": "hdmv_pgs_subtitle", "text": False, "language": "eng", "title": "English"},
         ],
-    )
-
-    def extract(path, track, duration):
-        calls.append(track["index"])
-        return [
+        "utterances": {"2": [
             {"start": 0, "end": 1, "text": "字幕前镜头"},
             {"start": 1.2, "end": 2.2, "text": "字幕本镜头"},
-        ]
-
-    monkeypatch.setattr("mindex.segment_details.extract_subtitles", extract)
+        ]},
+    }))
     client = TestClient(create_app(config))
     endpoint = f"/api/admin/segments/{shot['id']}/details"
     data = client.get(endpoint).json()
@@ -81,7 +76,7 @@ def test_detail_independent_asr_subtitle_and_llm_with_time_clipping(config, vide
     assert data["subtitles"]["tracks"][0]["utterances"][0]["evidence_end"] == 2
     assert data["subtitles"]["tracks"][1]["message"] == "位图字幕，无法提取文本"
     assert data["llm"]["annotation"]["actions"] == ["走路"]
-    assert client.get(endpoint).status_code == 200 and calls == [2]
+    assert client.get(endpoint).status_code == 200
     assert store.active_index() is None
     assert client.get("/api/admin/sources/" + source + "/media").status_code == 200
 
@@ -133,7 +128,7 @@ def test_missing_source_media_preserves_stored_llm_and_asr(config, video_file):
     data = response.json()
     assert data["asr"]["utterances"][0]["text"] == "已保存对白"
     assert data["llm"]["annotation"]["description"] == "已有结果"
-    assert data["subtitles"]["status"] == "failed"
+    assert data["subtitles"]["status"] == "no_tracks"
 
 
 def test_person_details_merge_clip_coverage_count_evidence_without_publication(config, video_file):

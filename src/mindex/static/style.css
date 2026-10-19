@@ -297,3 +297,21 @@ textarea{resize:both;min-width:min(140px,100%);max-width:100%}
 @media(max-width:540px){#person-controls label:has(.multi-select),#person-controls label:not(:has(.multi-select)){width:100%}#capture-form>label,#process-form>label,#capture-form>label:has(input[type=number]),#process-form>label:has(input[type=number]){flex-basis:100%}}
 
 .language-switch .quiet{width:32px;height:32px;min-height:32px;padding:4px;border-radius:7px}.language-switch svg{display:block;flex-shrink:0}
+
+/* Shared shot player: direct preview playback and a single aligned control row. */
+.shot-player-media{position:relative;background:#15231e;overflow:hidden}
+.shot-player-media video{display:block;width:100%;cursor:pointer}
+.shot-player-media .shot-play-overlay{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);display:flex;align-items:center;justify-content:center;width:46px;height:46px;min-height:46px;padding:0 0 0 3px;border:1px solid #ffffff70;border-radius:50%;background:#11281f99;color:white;font-size:20px;cursor:pointer}
+.shot-player-controls{display:flex;align-items:center;gap:4px;padding:5px 6px;min-width:0;background:#f7f9f5}
+.shot-player-controls button,.shot-player-controls select{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;width:auto;height:28px;min-height:28px;margin:0;padding:0 7px;font-size:11px;line-height:1;--control-size:28px}
+.shot-player-controls select{padding-right:22px;background-position:calc(100% - 12px) 12px,calc(100% - 8px) 12px}
+.shot-player-controls input[type=range]{flex:1 1 60px;min-width:32px;width:0;height:28px;min-height:28px;margin:0;padding:0}
+.card-preview{position:relative}
+.card-score{position:absolute;top:9px;left:9px;z-index:1;pointer-events:none;padding:3px 7px;border:1px solid #ffffff38;border-radius:5px;background:#172b23b8;color:white;font:11px/1.4 ui-monospace,monospace;backdrop-filter:blur(4px)}
+.card-body{padding:9px 12px}
+.card-title{margin-bottom:5px}
+.card-description{-webkit-line-clamp:1;margin-bottom:5px}
+.card-body .tags{max-height:23px;overflow:hidden;flex-wrap:nowrap}
+.card-body .tag{white-space:nowrap;padding:3px 6px}
+.card-body .card-actions{flex-wrap:nowrap;gap:6px;margin-top:5px;padding-top:4px}
+.card-actions a,.card-actions button{display:inline-flex;align-items:center;justify-content:center;height:28px;min-height:28px;line-height:1;white-space:nowrap;margin:0;padding:0 2px}

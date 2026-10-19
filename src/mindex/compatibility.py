@@ -152,7 +152,8 @@ def complete_validation(
     if baseline is None and checks_passed:
         fixed_samples = []
         for number, (sample, prepared) in enumerate(zip(samples, prepared_hashes), 1):
-            source = config.data_dir / sample["path"]
+            from .storage import Store
+            source = Store(config.data_dir).resolve_media(sample["path"])
             verified_file(source, sample["sha256"])
             target = directory / "samples" / f"{number:02}.mp4"
             target.parent.mkdir(parents=True, exist_ok=True)

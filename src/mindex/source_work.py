@@ -34,25 +34,39 @@ def source_work(store, source):
     sid = source["id"]
     segments = store.segments(sid)
     shots = [s for s in segments if s["kind"] == "shot"]
+    segment_ids = {s["id"] for s in segments}
+    scene_plan = store.one(
+        "SELECT profile,data FROM scene_plans WHERE source_id=? ORDER BY rowid DESC LIMIT 1", (sid,)
+    )
+    # 场景按需生成媒体；已经排好的场景即使尚未落入 segments 也属于待分析工作。
+    planned_ids = set()
+    if scene_plan:
+        plan = json.loads(scene_plan["data"])
+        if isinstance(plan, list):
+            planned_ids = {
+                fingerprint([sid, "scene", round(start, 6), round(end, 6), scene_plan["profile"]])
+                for start, end in plan
+            }
+    expected_ids = segment_ids | planned_ids
     annotations = {
         r["segment_id"]
         for r in store.rows(
             "SELECT DISTINCT a.segment_id FROM annotations a JOIN segments s ON s.id=a.segment_id WHERE s.source_id=?",
             (sid,),
         )
-    }
+    } & expected_ids
     skipped = {r["segment_id"] for r in store.rows(
         "SELECT a.segment_id FROM annotations a JOIN segments s ON s.id=a.segment_id "
         "WHERE s.source_id=? AND json_extract(a.data,'$.status')='skipped' "
         "AND a.rowid=(SELECT MAX(b.rowid) FROM annotations b WHERE b.segment_id=a.segment_id)", (sid,)
-    )}
+    )} & annotations
     dialogue = current_dialogue(store, sid) or {}
     latest_dialogue = store.one(
         "SELECT data FROM channel_data WHERE source_id=? AND channel='dialogue'", (sid,)
     )
     if not dialogue and latest_dialogue:
         dialogue = json.loads(latest_dialogue["data"])
-    has_scene_plan = bool(store.one("SELECT 1 FROM scene_plans WHERE source_id=? LIMIT 1", (sid,)))
+    pending = len(expected_ids - annotations)
     catalogue = Persons(store)
     coverage = store.rows("SELECT * FROM person_coverage WHERE source_id=?", (sid,))
     covered = covered_shots(shots, coverage)
@@ -94,15 +108,16 @@ def source_work(store, source):
         },
         "analysis": {
             "status": "complete"
-            if segments and len(annotations) == len(segments) and has_scene_plan
+            if segments and not pending and scene_plan
             else "partial"
             if annotations
             else "not_processed",
             "result": {
                 "analyzed": len(annotations - skipped),
                 "skipped": len(skipped),
-                "total": len(segments),
-                "scenes": sum(s["kind"] == "scene" for s in segments),
+                "pending": pending,
+                "total": len(expected_ids),
+                "scenes": sum(s["kind"] == "scene" for s in segments) + len(planned_ids - segment_ids),
             },
         },
         "persons": {

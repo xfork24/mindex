@@ -13,6 +13,7 @@ from . import studio
 from .adapters import ModelError, MultimodalEmbedder, Speaker, Storyboarder, make_storyboarder
 from .config import Config, fingerprint
 from .media import MediaError, audio_info
+from .shot_media import ShotMedia
 from .studio_artifacts import ArtifactSession, current, digest, visibility_key
 from .types import ShotDraft, TextSearch
 
@@ -454,7 +455,7 @@ def run_render(config: Config, job_id: str, state: dict) -> dict:
         row = store.one("SELECT path FROM sources WHERE id=?", (source_id,))
         if not row:
             raise studio.StudioError(f"素材 {source_id} 已不在库中，请重跑召回与选片")
-        return store.resolve_media(row["path"])
+        return ShotMedia(store).materialize(source_id)
 
     for event in timeline.events:
         if not interval_visible(store, event.video.source_id, event.video.start, event.video.end):
@@ -465,6 +466,8 @@ def run_render(config: Config, job_id: str, state: dict) -> dict:
         voice_lookup=voice_lookup,
         source_lookup=source_lookup,
         workdir=studio.render_dir(config, job_id),
+        interval_lookup=ShotMedia(store).materialize,
+        audio_lookup=lambda sid, start, end, output: ShotMedia(store).audio(sid, output, start, end - start),
     )
     return {
         "events": len(timeline.events),

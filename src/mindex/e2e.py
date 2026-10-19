@@ -85,9 +85,10 @@ def initialize(config: Config, source_id: str, directory: Path):
     report = source_report(config, source_id)
     if not report["prepared"] or not report["configuration_matches"] or report["missing_artifacts"]:
         raise ValueError("素材未完成切片、配置不符或文件缺失")
-    media = store.resolve_media(report["source_path"])
-    if content_hash(media) != source_id:
-        raise ValueError("原素材 SHA256 不匹配")
+    from .shot_media import ShotMedia
+    from .subtitle_archive import load_archive
+    ShotMedia(store).references(source_id)
+    load_archive(store, source_id)
     segments = store.segments(source_id, "moment")
     manifest_rows = []
     for segment in segments:
@@ -171,7 +172,8 @@ def make_video_queries(store: Store, source_id: str, segments: list[dict], direc
     candidates = [s for s in segments if s["end"] - s["start"] >= 1]
     chosen = [candidates[int(i)] for i in np.linspace(0, len(candidates) - 2, 4)]
     entries = []
-    original = store.resolve_media(store.one("SELECT path FROM sources WHERE id=?", (source_id,))["path"])
+    from .shot_media import ShotMedia
+    original = ShotMedia(store).materialize(source_id)
     for number in range(12):
         segment = chosen[number % 4]
         output = directory / "video-queries" / f"{number + 1:02}.mp4"
@@ -410,8 +412,12 @@ def run_phase(
         if state["curation_hash"] != fingerprint(curation(store)):
             raise ValueError("整理状态已变化；质量比较需要冻结相同候选集")
         source = store.one("SELECT path FROM sources WHERE id=?", (state["source_id"],))
-        if not source or content_hash(store.resolve_media(source["path"])) != state["source_id"]:
-            raise ValueError("原素材文件发生变化")
+        if not source:
+            raise ValueError("素材登记不存在")
+        from .shot_media import ShotMedia
+        from .subtitle_archive import load_archive
+        ShotMedia(store).references(state["source_id"])
+        load_archive(store, state["source_id"])
         rows = json.loads((directory / "segments.json").read_text())
         if fingerprint(rows) != state["segments_hash"]:
             raise ValueError("实验切片清单发生变化")

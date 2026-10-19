@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import logging
 import math
-import os
 import shutil
 import tempfile
 from pathlib import Path
@@ -20,7 +19,8 @@ from .adapters import (
     make_transcriber,
 )
 from .config import Config, fingerprint
-from .media import content_hash, cut, extract_audio, probe, thumbnail, windows
+from .media import content_hash, cut, probe, thumbnail, windows
+from .shot_media import ShotMedia
 from .storage import Store, dumps
 from .types import Annotation
 
@@ -79,29 +79,27 @@ class Pipeline:
         generation: str,
         parent: str | None,
         reason: str,
+        *,
+        segment_id: str | None = None,
     ) -> dict:
-        identifier = fingerprint([source["id"], kind, round(start, 6), round(end, 6), generation])
-        relative = f"clips/{source['id']}/{kind}/{identifier}.mp4"
+        existing = self.store.one("SELECT * FROM segments WHERE id=?", (segment_id,)) if segment_id else self.store.one(
+            "SELECT * FROM segments WHERE source_id=? AND kind=? AND generation=? "
+            "AND ABS(start-?)<0.000001 AND ABS(end-?)<0.000001 AND parent_id IS ?",
+            (source["id"], kind, generation, start, end, parent))
+        identifier = existing["id"] if existing else segment_id or fingerprint(
+            [source["id"], kind, round(start, 6), round(end, 6), generation])
+        relative = existing["path"] if existing else f"clips/{source['id']}/{kind}/{identifier}.mp4"
         image = f"thumbnails/{identifier}.jpg"
         output = self.store.root / relative
-        same_shot = self.store.one("SELECT * FROM segments WHERE id=?", (parent,)) if parent else None
-        if (
-            not output.exists()
-            and same_shot
-            and same_shot["start"] == start
-            and same_shot["end"] == end
-            and (self.store.root / same_shot["path"]).is_file()
-        ):
-            # A short shot and its whole-shot moment contain identical media.
-            output.parent.mkdir(parents=True, exist_ok=True)
-            original = self.store.resolve_media(same_shot["path"])
-            try:
-                os.link(original, output)
-            except OSError:
-                shutil.copyfile(original, output)
+        if kind == "shot":
+            if not output.exists():
+                cut(self.store.resolve_media(source["path"]), start, end, output)
+            thumbnail(output, self.store.root / image)
         else:
-            cut(self.store.resolve_media(source["path"]), start, end, output)
-        thumbnail(self.store.root / relative, self.store.root / image)
+            service = ShotMedia(self.store)
+            service.register(relative, source["id"], start, end)
+            if not (self.store.root / image).exists():
+                service.frame(source["id"], (start + end) / 2, self.store.root / image)
         segment = {
             "id": identifier,
             "source_id": source["id"],
@@ -245,6 +243,8 @@ class Pipeline:
         if not source["prepared"] and source["layout_key"] != self.config.layout_key:
             raise ValueError("素材切分配置不符，请使用原配置或新的 data_dir")
         ranges = self._read_plan(source) if not source["prepared"] else []
+        from .subtitle_archive import archive_subtitles
+        archive_subtitles(self.store, source)
         with self.store.run("prepare", source_id):
             if not source["prepared"]:
                 if progress:
@@ -275,7 +275,7 @@ class Pipeline:
                 self.store.execute("UPDATE sources SET prepared=1 WHERE id=?", (source_id,))
             else:
                 # Resume also repairs missing physical artifacts without redetecting shots.
-                segments = self.store.segments(source_id)
+                segments = sorted(self.store.segments(source_id), key=lambda s: (s["kind"] != "shot", s["start"]))
                 if progress:
                     progress({"stage": "repair", "completed": 0, "total": len(segments), "unit": "segments"})
                 for number, segment in enumerate(segments, 1):
@@ -287,6 +287,7 @@ class Pipeline:
                         segment["generation"],
                         segment["parent_id"],
                         segment["reason"],
+                        segment_id=segment["id"],
                     )
                     if progress:
                         progress({"stage": "repair", "completed": number, "total": len(segments), "unit": "segments"})
@@ -353,8 +354,7 @@ class Pipeline:
                         else:
                             with tempfile.TemporaryDirectory(prefix="asr-", dir=self.store.root) as directory:
                                 audio = Path(directory) / "audio.wav"
-                                extract_audio(
-                                    self.store.resolve_media(source["path"]), audio, start, duration
+                                ShotMedia(self.store).audio(source["id"], audio, start, duration
                                 )
                                 results = self.transcriber.transcribe(audio)
                             chunk = []
@@ -422,7 +422,7 @@ class Pipeline:
                     duration = min(30, info["duration"] - start)
                     with tempfile.TemporaryDirectory(prefix="asr-", dir=self.store.root) as directory:
                         audio = Path(directory) / "audio.wav"
-                        extract_audio(self.store.resolve_media(source["path"]), audio, start, duration)
+                        ShotMedia(self.store).audio(source["id"], audio, start, duration)
                         result = self.transcriber.raw(audio)
                     if self.config.asr_key != profile:
                         raise ValueError("转写过程中部署清单发生变化")
@@ -462,8 +462,7 @@ class Pipeline:
                     if not target.exists():
                         with tempfile.TemporaryDirectory(prefix="align-", dir=self.store.root) as directory:
                             audio = Path(directory) / "audio.wav"
-                            extract_audio(
-                                self.store.resolve_media(source["path"]), audio, raw["start"], raw["duration"]
+                            ShotMedia(self.store).audio(source["id"], audio, raw["start"], raw["duration"]
                             )
                             command(
                                 [

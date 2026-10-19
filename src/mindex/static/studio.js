@@ -191,7 +191,8 @@ function media(tag, url) {
   const n = document.createElement(tag);
   n.controls = true;
   n.preload = "metadata";
-  n.src = url;
+  const playlist = tag === "video" ? ShotPlayer.playlistURL(url) : null;
+  if(playlist) queueMicrotask(() => ShotPlayer.attach(n, playlist));else n.src = url;
   return n;
 }
 async function loadJobs() {
@@ -2276,7 +2277,8 @@ async function loadArtifacts() {
 }
 function play(url, title) {
   MindexI18n.setText($("play-title"), shortIds(title));
-  $("play-video").src = url;
+  const playlist = ShotPlayer.playlistURL(url);
+  if(playlist) ShotPlayer.attach($("play-video"), playlist);else $("play-video").src = url;
   $("play-dialog").showModal();
 }
 $("play-close").addEventListener("click", () => {

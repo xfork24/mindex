@@ -123,7 +123,7 @@ async function loadSegments() {
     const links = node('div', undefined, 'relationship');
     if (item.kind === 'shot') links.append(action(MindexI18n.msg("ui.8427ef7b1fc2", { p0: item.child_count }), async () => {state.kind = 'moment';state.parent = item;state.segmentPage = 1;await loadSegments();}));else
     if (item.parent_id) links.append(action(MindexI18n.msg("ui.f982f961d8a1"), async () => {const parent = await api(`/api/admin/segments/${item.parent_id}`);state.kind = 'shot';state.parent = null;state.focus = parent.id;state.segmentPage = Math.floor((parent.position - 1) / 48) + 1;$('segment-visibility').value = 'all';$('segment-favorite').checked = false;await loadSegments();$('segment-list').querySelector('.is-focused')?.scrollIntoView({ block: 'center', behavior: 'smooth' });}));
-    const download = node('a', MindexI18n.msg("ui.f68895f93388"));download.href = `${item.media_url}?download=true`;links.append(download);body.append(links);card.append(poster, body);$('segment-list').append(card);
+    const download = node('a', MindexI18n.msg("ui.f68895f93388"));download.href = `${item.media_url}?download=true&v=${item.media_revision}`;links.append(download);body.append(links);card.append(poster, body);$('segment-list').append(card);
   });
   if (!data.items.length) {const empty = node('div', undefined, 'empty');empty.append(node('h3', MindexI18n.msg("ui.dd8121f6916e")), node('p', MindexI18n.msg("ui.c6c1305ed0ef")));$('segment-list').append(empty);}
   pager('segment', state.segmentPage, data.total);
@@ -143,7 +143,7 @@ $('edit-form').onsubmit = async (event) => {
   catch (e) {MindexI18n.setText($('edit-error'), e.message);} finally {$('edit-save').disabled = false;}
 };
 $('edit-close').onclick = () => $('edit-dialog').close();
-function play(item) {MindexI18n.setText($('play-title'), item.name);$('play-video').src = item.media_url;$('play-video').poster = item.thumbnail_url;MindexI18n.setText($('play-time'), MindexI18n.msg("ui.0159b6eb9834", { p0: time(item.start), p1: time(item.end), p2: item.source_name }));$('play-download').href = `${item.media_url}?download=true`;if (!$('play-dialog').open) $('play-dialog').showModal();}
+function play(item) {MindexI18n.setText($('play-title'), item.name);ShotPlayer.attach($('play-video'), `/api/admin/segments/${item.id}/playlist`);$('play-video').poster = item.thumbnail_url;MindexI18n.setText($('play-time'), MindexI18n.msg("ui.0159b6eb9834", { p0: time(item.start), p1: time(item.end), p2: item.source_name }));$('play-download').href = `${item.media_url}?download=true&v=${item.media_revision}`;if (!$('play-dialog').open) $('play-dialog').showModal();}
 $('play-close').onclick = () => $('play-dialog').close();
 $('play-dialog').addEventListener('close', () => {$('play-video').pause();$('play-video').removeAttribute('src');$('play-video').load();});
 async function run(task) {try {await task();} catch (e) {notify(e.message, true);}}
@@ -199,6 +199,15 @@ function appendWorkProgress(card, label, type, status, progress = {}) {
     MindexI18n.setAttr(bar, 'aria-label', label + MindexI18n.msg(type === 'publish' ? "ui.5ddad219dcea" : "ui.d03d35a85128"));card.append(bar);
   }
 }
+function analysisSummary(result, progress = {}) {
+  // 旧后端仅计入已生成场景；利用已保存的场景进度补齐尚未生成的数量。
+  const extraScenes = result.pending == null && progress.stage === 'scenes' ? Math.max(0, (progress.total || 0) - (result.scenes || 0)) : 0;
+  const total = (result.total || 0) + extraScenes,scenes = (result.scenes || 0) + extraScenes;
+  const pending = result.pending ?? Math.max(0, total - (result.analyzed || 0) - (result.skipped || 0));
+  return MindexI18n.msg("ui.d57be30db383", {p0: result.analyzed || 0, p1: total, p2: scenes})
+    + (result.skipped ? ' · ' + MindexI18n.msg("ui.82896d0a6ff4", {count: result.skipped}) : '')
+    + (pending ? ' · ' + MindexI18n.msg("ui.44a52eb27973", {count: pending}) : '');
+}
 function renderWork(source, target) {
   clearTimeout(workPoll);workPoll = null;
   const panel = node('section', undefined, 'work-panel');panel.append(node('h3', MindexI18n.msg("ui.c057f7d9d46e")));
@@ -219,7 +228,7 @@ function renderWork(source, target) {
       const model = result.subtitle_file?.name || (result.source === 'subtitle' && result.selected_track ? MindexI18n.msg("ui.886331068288", { p0: result.selected_track.index, p1: result.selected_track.language }) : result.model_identity?.model || '');
       summary = MindexI18n.msg("ui.bbb5bbc8c300", { p0: origin, p1: model ? ' · ' + model : '', p2: result.utterances || 0, p3: result.content_segments || 0 });
     }
-    if (name === 'analysis') summary = MindexI18n.msg("ui.d57be30db383", { p0: result.analyzed || 0, p1: result.total || 0, p2: result.scenes || 0 }) + (result.skipped ? ' · ' + MindexI18n.msg("ui.82896d0a6ff4", {count: result.skipped}) : '');
+    if (name === 'analysis') summary = analysisSummary(result, work.task?.progress?.processing_progress || work.task?.progress);
     if (name === 'persons') summary = MindexI18n.msg("ui.1e1649402d6a", { p0: result.covered_shots || 0, p1: result.total_shots || 0, p2: result.people || 0, p3: result.accepted || 0, p4: result.candidate || 0, p5: result.rejected || 0 });
     card.append(node('p', summary, 'work-summary'));const search = work.search || {};
     card.append(node('p', MindexI18n.msg("ui.13e6dc8c4328", { p0: search.current ? MindexI18n.msg("ui.112f98675ee2") : search.indexed_segments ? MindexI18n.msg("ui.53122735b7e9") : MindexI18n.msg("ui.30e81c8167e5"), p1: search.indexed_segments || 0, p2: search.expected_segments || 0, p3: name === 'persons' ? MindexI18n.msg("ui.313083c877dc") : MindexI18n.msg("ui.32145468cf4f") }), 'muted'));

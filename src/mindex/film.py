@@ -39,7 +39,7 @@ def source_report(config: Config, source_id: str) -> dict:
         {"id": segment["id"], "field": field, "path": segment[field]}
         for segment in segments
         for field in ("path", "thumbnail")
-        if not (store.root / segment[field]).is_file()
+        if not store.media_available(segment[field])
     ]
     return {
         "source_id": source_id,
@@ -98,7 +98,7 @@ def export_source(config: Config, source_id: str, output: Path | None = None) ->
             )
 
     def url(relative):
-        return html.escape(quote(os.path.relpath(store.root / relative, output), safe="/"), quote=True)
+        return html.escape(quote(os.path.relpath(store.resolve_media(relative), output), safe="/"), quote=True)
 
     cards = []
     for s in segments:

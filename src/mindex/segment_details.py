@@ -4,11 +4,8 @@ from __future__ import annotations
 
 import json
 
-from filelock import FileLock
-
-from .config import fingerprint
 from .curation import Library, segment_public
-from .dialogue import atomic_json, extract_subtitles, relative_dialogue, subtitle_tracks
+from .dialogue import relative_dialogue
 from .media import MediaError
 
 
@@ -122,34 +119,11 @@ def segment_details(store, segment_id):
             }.get(asr_result["status"], "ASR 未处理")
     subtitle_result = {"status": "complete", "tracks": [], "message": "字幕轨道结果"}
     try:
-        path = store.resolve_media(source["path"])
-        # Subtitle metadata/text cache belongs to source bytes, not embedding versions.
-        stat = path.stat()
-        key = fingerprint(["segment-subtitles-v1", source["id"], stat.st_size, stat.st_mtime_ns])
-        cache_path = store.root / "subtitles" / source["id"] / (key + ".json")
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
-        with FileLock(str(cache_path) + ".lock", timeout=180):
-            if cache_path.exists():
-                cached = json.loads(cache_path.read_text())
-            else:
-                tracks = subtitle_tracks(path)
-                cached = []
-                for track in tracks:
-                    item = {
-                        **track,
-                        "utterances": [],
-                        "status": "bitmap" if not track["text"] else "complete",
-                    }
-                    if track["text"]:
-                        try:
-                            item["utterances"] = extract_subtitles(
-                                path, track, json.loads(source["media"])["duration"]
-                            )
-                        except MediaError as exc:
-                            item.update(status="failed", error=str(exc))
-                    cached.append(item)
-                if not any(t["status"] == "failed" for t in cached):
-                    atomic_json(cache_path, cached)
+        from .subtitle_archive import load_archive
+        archive = load_archive(store, source["id"])
+        cached = [{**track, "utterances": archive["utterances"].get(str(track["index"]), []),
+                   "status": "complete" if track["text"] else "bitmap"}
+                  for track in archive["tracks"]]
         for track in cached:
             rows = relative_dialogue(track, start, end)
             message = (

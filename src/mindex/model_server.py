@@ -290,6 +290,8 @@ class TransNetEngine:
         frame_bytes = 48 * 27 * 3
         pending = np.empty((0, 27, 48, 3), dtype=np.uint8)
         predictions = []
+        frame_changes = []
+        previous_frame = None
         first = True
         try:
             with self.lock:
@@ -300,6 +302,12 @@ class TransNetEngine:
                     if len(raw) % frame_bytes:
                         raise RuntimeError("Incomplete decoded frame")
                     frames = np.frombuffer(raw, dtype=np.uint8).reshape((-1, 27, 48, 3))
+                    # changes[n] measures the boundary BEFORE decoded frame n.
+                    # TransNet transition peaks can mark the outgoing frame.
+                    decoded = frames.astype(np.float32)
+                    prior = np.concatenate([decoded[:1] if previous_frame is None else previous_frame[None], decoded[:-1]])
+                    frame_changes.extend(np.mean((decoded - prior) ** 2, axis=(1, 2, 3)).tolist())
+                    previous_frame = decoded[-1]
                     if first:
                         pending = np.repeat(frames[:1], 25, axis=0)
                         first = False
@@ -330,9 +338,19 @@ class TransNetEngine:
             elif interval:
                 midpoint = (interval[0] + interval[-1]) // 2
                 if 0 < midpoint < len(predictions):
-                    cuts.append(midpoint)
+                    cuts.append(refine_cut_frame(midpoint, frame_changes))
                 interval = []
-        return {"model": "TransNetV2", "frame_count": len(predictions), "cut_frames": cuts}
+        return {"model": "TransNetV2", "frame_count": len(predictions), "cut_frames": sorted(set(cuts))}
+
+
+def refine_cut_frame(midpoint: int, changes: list[float]) -> int:
+    """Snap a confident nearby hard cut to its incoming frame; keep soft cuts."""
+    candidates = range(max(1, midpoint - 2), min(len(changes), midpoint + 3))
+    best = max(candidates, key=lambda frame: changes[frame])
+    background = [changes[frame] for frame in candidates if frame != best]
+    if changes[best] >= 500 and changes[best] >= 3 * max(1, float(np.median(background))):
+        return best
+    return midpoint
 
 
 def create_model_app(config: Config, role: str, engine_factory=None) -> FastAPI:

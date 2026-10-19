@@ -86,7 +86,11 @@ def refinement(config, video_file, tmp_path):
     with store.connect() as db:
         db.execute("DELETE FROM segments")
         for i in range(10):
-            row = {**template, "id": f"shot-{i}", "start": i, "end": i + 1, "parent_id": None}
+            from mindex.media import cut
+            clip = store.root / f"fixture-shot-{i}.mp4"
+            cut(source_file, i, i + 1, clip)
+            row = {**template, "id": f"shot-{i}", "start": i, "end": i + 1, "parent_id": None,
+                   "path": clip.name}
             db.execute(
                 f"INSERT INTO segments ({','.join(row)}) VALUES ({','.join('?' for _ in row)})",
                 tuple(row.values()),

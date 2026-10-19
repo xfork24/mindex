@@ -24,6 +24,7 @@ from . import studio, studio_select, studio_steps
 from .adapters import make_speaker, make_storyboarder
 from .config import StrictModel, fingerprint
 from .media import atomic_media, audio_info, probe
+from .shot_media import ShotMedia
 from .storage import Store
 from .studio_artifacts import current, digest, safe_path, sanitized, visibility_key
 from .studio_logs import LABELS, ExecutionLog, active_log, diagnostic_event
@@ -610,6 +611,8 @@ def query_media(config, job_id, recall):
 
 def specification(config, job_id, w, p, stage, sid=None, *, context=None):
     params = settings(config, p, stage, context=context)
+    if stage == "render":
+        params = {**params, "media_version": "shot-media-v1"}
     if stage == "split":
         payload = {"text": studio.load_job(config, job_id)["input_text"]}
         inputs = {}
@@ -662,9 +665,8 @@ def specification(config, job_id, w, p, stage, sid=None, *, context=None):
                     "SELECT path FROM sources WHERE id=?", (event["video"]["source_id"],)
                 )
                 if row:
-                    media = store.resolve_media(row["path"])
-                    if media.is_file():
-                        source = {"bytes": media.stat().st_size, "mtime_ns": media.stat().st_mtime_ns}
+                    source = ShotMedia(store).identity(event["video"]["source_id"],
+                                                       event["video"]["start"], event["video"]["end"])
             payload = {"select": inputs["select"], "tts": inputs["tts"], "source": source}
     return {
         "inputs": inputs,
@@ -1042,13 +1044,18 @@ def render_node(config, job_id, w, p, sid, directory):
     event = studio.TimelineEvent.model_validate(selection["data"]["event"])
     validate_range(config, selection["data"]["range"])
     store = Store(config.data_dir)
-    row = store.one("SELECT path FROM sources WHERE id=?", (event.video.source_id,))
-    source = store.resolve_media(row["path"])
+    absolute_event = event.model_copy(deep=True)
+    source = ShotMedia(store).materialize(event.video.source_id, event.video.start, event.video.end)
+    event.video.end -= event.video.start
+    event.video.start = 0
     cfg = config.studio.audio.model_copy(update={"duck_gain": p["options"]["duck_gain"]})
     ambient = None
     if p["options"]["audio_mode"] == "ducking" and probe(source)["audio"]:
         ambient = directory / "ambient.wav"
-        extract_ambient(source, event, cfg, ambient)
+        raw_ambient = directory / "shot-audio.wav"
+        ShotMedia(store).audio(absolute_event.video.source_id, raw_ambient, absolute_event.video.start,
+                               absolute_event.video.end - absolute_event.video.start)
+        extract_ambient(raw_ambient, event, cfg, ambient)
     processed = directory / "processed.wav"
     process_shot_audio(file_path(config, job_id, speech, "audio"), ambient, event, cfg, processed)
     with wave.open(str(processed), "rb") as audio:
@@ -1082,7 +1089,7 @@ def render_node(config, job_id, w, p, sid, directory):
         ],
         preview,
     )
-    return {"event": event.model_dump(), "frames": frames, "samples": samples, "fps": str(fps)}, {
+    return {"event": absolute_event.model_dump(), "frames": frames, "samples": samples, "fps": str(fps)}, {
         "video": file_info(config, job_id, clip),
         "audio": file_info(config, job_id, processed),
         "preview": file_info(config, job_id, preview),

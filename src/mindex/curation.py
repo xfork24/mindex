@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import Literal
 
@@ -96,6 +97,8 @@ def segment_public(row: dict) -> dict:
         "effective_hidden": bool(row["effective_hidden"]),
         "inherited_hidden": bool(row["inherited_hidden"]),
         "media_url": f"/api/admin/segments/{row['id']}/media",
+        "media_revision": hashlib.sha256(
+            f"{row['path']}:{row['start']}:{row['end']}".encode()).hexdigest()[:20],
         "thumbnail_url": f"/api/admin/segments/{row['id']}/thumbnail",
         **organization(row),
     }
@@ -122,10 +125,10 @@ class Library:
         # Bounded artifact checks support a real status even before an index exists.
         missing = self.store.rows("SELECT path,thumbnail FROM segments WHERE source_id=?", (identifier,))
         missing_count = sum(
-            not (self.store.root / s[field]).is_file() for s in missing for field in ("path", "thumbnail")
+            not self.store.media_available(s[field]) for s in missing for field in ("path", "thumbnail")
         )
         from .config import fingerprint
-        from .dialogue import current_dialogue, relative_dialogue, subtitle_tracks
+        from .dialogue import current_dialogue, relative_dialogue
         from .media import MediaError
         from .search import channel_coverage
 
@@ -150,7 +153,8 @@ class Library:
         tracks = dialogue.get("subtitle_tracks")
         if tracks is None:
             try:
-                tracks = subtitle_tracks(self.store.resolve_media(row["path"]))
+                from .subtitle_archive import load_archive
+                tracks = load_archive(self.store, identifier)["tracks"]
             except (MediaError, FileNotFoundError):
                 tracks = []
         annotations = self.store.one(

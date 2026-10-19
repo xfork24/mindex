@@ -583,7 +583,7 @@ class PersonProcessor:
         for position, shot in enumerate(shots):
             key = fingerprint(
                 [
-                    "shot-features-v1",
+                    "shot-features-shot-media-v1",
                     source_id,
                     source["layout_key"],
                     shot["id"],
@@ -606,13 +606,15 @@ class PersonProcessor:
                         }
                     )
                 extracted = self.client.video(
-                    self.store.resolve_media(source["path"]),
-                    shot["start"],
-                    shot["end"],
+                    self.store.resolve_media(shot["path"]),
+                    0,
+                    shot["end"] - shot["start"],
                     float(self.config.person.fps),
                 )
                 self.validate_space(extracted, space)
                 frames = extracted["frames"]
+                for frame in frames:
+                    frame["timestamp"] += shot["start"]
                 self.validate_frames(frames, shot)
                 for frame in frames:
                     if frame.get("image_base64"):

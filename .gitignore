@@ -10,6 +10,7 @@ config.local.yaml
 .env
 *.egg-info/
 dist/
+artifacts/
 .DS_Store
 
 # 计划执行台账（本地暂存）

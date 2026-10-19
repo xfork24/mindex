@@ -3,9 +3,9 @@ from __future__ import annotations
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse
 
 from .curation import CurationPatch, Library, Visibility, segment_public
+from .shot_media import file_response as FileResponse
 from .storage import Store
 
 
@@ -59,11 +59,25 @@ def admin_router(store: Store, runtime=None) -> APIRouter:
 
     @router.api_route("/sources/{source_id}/media", methods=["GET", "HEAD"])
     def source_media(source_id: str):
-        row = library.source_row(source_id)
+        library.source_row(source_id)
         try:
-            return FileResponse(store.resolve_media(row['path']))
+            from .shot_media import ShotMedia
+            return FileResponse(ShotMedia(store).materialize(source_id), media_type="video/mp4")
         except FileNotFoundError as exc:
             raise HTTPException(404, "原片文件缺失") from exc
+
+    @router.get("/sources/{source_id}/playlist")
+    def source_playlist(source_id: str):
+        from .shot_media import ShotMedia
+        library.source_row(source_id)
+        return ShotMedia(store).playlist(source_id, prefix="/api/admin/shots")
+
+    @router.api_route("/shots/{shot_id}/media", methods=["GET", "HEAD"])
+    def shot_media(shot_id: str):
+        shot = store.one("SELECT * FROM segments WHERE id=? AND kind='shot'", (shot_id,))
+        if not shot:
+            raise HTTPException(404, "找不到镜头")
+        return FileResponse(store.resolve_media(shot['path']), media_type="video/mp4")
 
     @router.patch("/sources/{source_id}")
     def patch_source(source_id: str, value: CurationPatch):
@@ -133,6 +147,12 @@ def admin_router(store: Store, runtime=None) -> APIRouter:
         return FileResponse(
             path, media_type="video/mp4" if field == "path" else "image/jpeg", filename=filename
         )
+
+    @router.get("/segments/{segment_id}/playlist")
+    def segment_playlist(segment_id: str):
+        from .shot_media import ShotMedia
+        row = library.segment_row(segment_id)
+        return ShotMedia(store).playlist(row['source_id'], row['start'], row['end'], prefix="/api/admin/shots")
 
     @router.api_route("/segments/{segment_id}/media", methods=["GET", "HEAD"])
     def media(segment_id: str, download: bool = False):

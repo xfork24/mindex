@@ -29,6 +29,38 @@ def finished(manager, task):
     pytest.fail("后台任务未完成")
 
 
+def test_analysis_summary_counts_planned_scenes_before_media_and_annotations_exist(config, video_file):
+    pipeline = Pipeline(config, analyzer=FixtureAnalyzer(FixtureEmbedder(config)))
+    sid = pipeline.prepare(video_file)
+    base = pipeline.store.segments(sid)
+    for segment in base:
+        pipeline._annotate(segment)
+    profile = pipeline.annotation_profile(sid)
+    pipeline.store.put_json("annotations", "segment_id", base[0]["id"], profile,
+                            {"status": "skipped", "reason": "fixture rejection", "dialogue": []})
+    plan = [[0, 5], [5, 10]]
+    pipeline.store.put_json("scene_plans", "source_id", sid, profile, plan)
+    client = TestClient(create_app(config))
+
+    def summary(pending):
+        work = client.get(f"/api/admin/sources/{sid}").json()["work"]["analysis"]
+        result = work["result"]
+        assert work["status"] == ("partial" if pending else "complete")
+        assert result["scenes"] == 2 and result["total"] == len(base) + 2
+        assert result["pending"] == pending and result["skipped"] == 1
+        assert result["analyzed"] + result["skipped"] + result["pending"] == result["total"]
+
+    # All existing segments have results, but the saved plan still has work.
+    summary(2)
+    source = pipeline.store.one("SELECT * FROM sources WHERE id=?", (sid,))
+    for number, (start, end) in enumerate(plan):
+        scene = pipeline._segment(source, "scene", start, end, profile, None, "semantic_grouping")
+        # Creating the scene's media must not change totals or mark it analyzed.
+        summary(2 - number)
+        pipeline._annotate(scene)
+        summary(1 - number)
+
+
 def test_upload_register_duplicate_invalid_limit_and_interruption(config, video_file, monkeypatch):
     client = TestClient(create_app(config))
     monkeypatch.setattr("mindex.pipeline.make_detector", lambda *_: pytest.fail("登记不启动分镜检测"))
@@ -97,7 +129,7 @@ def test_pipeline_tasks_frozen_layout_prerequisites_resume_and_publish_only(conf
         == original_layout
     )
     ids = [s["id"] for s in pipeline.store.segments(sid)]
-    clip = pipeline.store.root / pipeline.store.segments(sid)[0]["path"]
+    clip = pipeline.store.root / pipeline.store.segments(sid, "shot")[0]["path"]
     clip.unlink()
     assert finished(manager, manager.start(sid, "shots", WorkOptions(publish=False)))["status"] == "complete"
     assert clip.is_file() and [s["id"] for s in pipeline.store.segments(sid)] == ids
@@ -485,15 +517,15 @@ def test_dialogue_manual_methods_and_prior_success_survives_failure(config, vide
     sid = pipeline.prepare(video_file)
     processor = DialogueProcessor(config)
     track = {"index": 1, "text": True, "codec": "subrip", "language": "zho", "forced": False, "default": True}
-    monkeypatch.setattr("mindex.dialogue.subtitle_tracks", lambda _: [track])
-    monkeypatch.setattr("mindex.dialogue.extract_subtitles", lambda *_: [])
+    monkeypatch.setattr("mindex.subtitle_archive.load_archive", lambda *_: {
+        "tracks": [track], "utterances": {"1": []}, "files": {}})
     result = processor.process(sid, method="subtitle", subtitle_stream=1)["sources"][0]
     assert result["status"] == "empty" and result["source"] == "subtitle" and not result["fallback_reason"]
     with pytest.raises(ValueError, match="必须选择"):
         processor.process(sid, method="subtitle")
     with pytest.raises(ValueError, match="不存在"):
         processor.process(sid, method="subtitle", subtitle_stream=9)
-    monkeypatch.setattr("mindex.dialogue.subtitle_tracks", lambda _: pytest.fail("手动 ASR 跳过字幕"))
+    monkeypatch.setattr("mindex.subtitle_archive.load_archive", lambda *_: pytest.fail("手动 ASR 跳过字幕"))
     result = processor.process(sid, method="asr")["sources"][0]
     assert result["status"] == "no_audio" and result["source"] == "asr" and result["fallback_reason"] is None
     prior = {
@@ -571,14 +603,14 @@ def test_strict_subtitle_failure_never_asr_and_empty_auto_fallback(config, video
     sid = Pipeline(config).prepare(video_file)
     processor = DialogueProcessor(config)
     track = {"index": 1, "text": True, "codec": "subrip", "language": "zho", "forced": False, "default": True}
-    monkeypatch.setattr("mindex.dialogue.subtitle_tracks", lambda _: [track])
     monkeypatch.setattr(
-        "mindex.dialogue.extract_subtitles", lambda *_: (_ for _ in ()).throw(MediaError("failed"))
+        "mindex.subtitle_archive.load_archive", lambda *_: (_ for _ in ()).throw(MediaError("failed"))
     )
     with pytest.raises(MediaError):
         processor.process(sid, method="subtitle", subtitle_stream=1)
     assert not processor.store.one("SELECT 1 FROM channel_data")
-    monkeypatch.setattr("mindex.dialogue.extract_subtitles", lambda *_: [])
+    monkeypatch.setattr("mindex.subtitle_archive.load_archive", lambda *_: {
+        "tracks": [track], "utterances": {"1": []}, "files": {}})
     assert processor.process(sid, method="subtitle", subtitle_stream=1)["sources"][0]["status"] == "empty"
     # 空字幕之前手动提取成功，自动方式仍应回退，而不是复用为空的字幕。
     result = processor.process(sid, method="auto")["sources"][0]

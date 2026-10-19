@@ -12,7 +12,6 @@ from pydantic import Field, model_validator
 
 from .adapters import analysis_options, request
 from .config import StrictModel
-from .media import command
 from .person_processing import PersonClient, PersonOptions, PersonTasks, ensure_reference_quality
 from .persons import CastConfirm, CastEntry, Entity, PersonHasLinkedShots, Persons, ShotReview, checked_box
 from .processing_lock import ProcessingLock, index_write_lock
@@ -221,25 +220,8 @@ def person_router(runtime, store):
         actor_id = catalogue.pairing_actor(body.actor_id, body.role_id)
         if body.role_id and catalogue.work_for(body.source_id) not in catalogue.entity(body.role_id)["work_ids"]:
             raise ValueError("截图角色不属于素材的作品")
-        raw = command(
-            [
-                "ffmpeg",
-                "-hide_banner",
-                "-loglevel",
-                "error",
-                "-ss",
-                str(body.timestamp),
-                "-i",
-                str(store.resolve_media(source["path"])),
-                "-frames:v",
-                "1",
-                "-f",
-                "image2pipe",
-                "-vcodec",
-                "png",
-                "-",
-            ]
-        )
+        from .shot_media import ShotMedia
+        raw = ShotMedia(store).frame_bytes(body.source_id, body.timestamp)
         if body.bbox:
             import io
 

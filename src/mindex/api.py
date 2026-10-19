@@ -1,15 +1,13 @@
 from __future__ import annotations
 
 import json
-import mimetypes
 import tempfile
 from pathlib import Path
 from typing import Annotated
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from filelock import FileLock
 from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
 
@@ -17,10 +15,10 @@ from .adapters import ModelError, MultimodalEmbedder, Speaker, Storyboarder
 from .admin import admin_router
 from .config import Config, load_config
 from .curation import EntityNotFound, Library
-from .media import cut
 from .runtime_settings import RuntimeConfig
 from .search import SearchEngine, public_segment, status
 from .settings_api import settings_router
+from .shot_media import file_response as FileResponse
 from .storage import Store
 from .studio_api import studio_router
 from .types import Filters, Granularity, TextSearch
@@ -187,17 +185,10 @@ def create_app(
     @app.api_route("/api/context/{segment_id}", methods=["GET", "HEAD"])
     def get_context(segment_id: str):
         segment = get_snapshot(segment_id)
-        relative = f"context/{segment_id}.mp4"
-        destination = store.root / relative
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        with FileLock(str(destination) + ".lock", timeout=120):
-            cut(
-                store.resolve_media(segment["source_path"]),
-                max(0, segment["start"] - 3),
-                min(segment["source_duration"], segment["end"] + 3),
-                destination,
-            )
-        return media_response(relative, "video/mp4")
+        from .shot_media import ShotMedia
+        path = ShotMedia(store).materialize(segment["source_id"], max(0, segment["start"] - 3),
+                                           min(segment["source_duration"], segment["end"] + 3))
+        return FileResponse(path, media_type="video/mp4")
 
     @app.api_route("/api/sources/{source_id}/media", methods=["GET", "HEAD"])
     def source_media(source_id: str):
@@ -206,8 +197,31 @@ def create_app(
         selected = next((s for s in snapshots if s["source_id"] == source_id), None)
         if selected is None:
             raise HTTPException(404, "找不到已发布的素材")
-        media_type = mimetypes.guess_type(selected["source_path"])[0] or "application/octet-stream"
-        return media_response(selected["source_path"], media_type)
+        from .shot_media import ShotMedia
+        return FileResponse(ShotMedia(store).materialize(source_id), media_type="video/mp4")
+
+    @app.get("/api/sources/{source_id}/playlist")
+    def source_playlist(source_id: str):
+        from .shot_media import ShotMedia
+        active = store.index_version(index_id) if index_id else store.active_index()
+        if not active or not any(s['source_id'] == source_id for s in store.snapshots(active['id'])):
+            raise HTTPException(404, "找不到已发布的素材")
+        return ShotMedia(store).playlist(source_id)
+
+    @app.get("/api/playlists/{segment_id}")
+    def segment_playlist(segment_id: str):
+        from .shot_media import ShotMedia
+        segment = get_snapshot(segment_id)
+        return ShotMedia(store).playlist(segment["source_id"], segment["start"], segment["end"])
+
+    @app.api_route("/api/shots/{shot_id}/media", methods=["GET", "HEAD"])
+    def shot_media(shot_id: str):
+        shot = store.one("SELECT * FROM segments WHERE id=? AND kind='shot'", (shot_id,))
+        active = store.index_version(index_id) if index_id else store.active_index()
+        if not shot or not active or not any(s['source_id'] == shot['source_id'] for s in store.snapshots(active['id'])):
+            raise HTTPException(404, "找不到已发布镜头")
+        return media_response(shot['path'], "video/mp4")
+
 
     app.mount("/", StaticFiles(directory=Path(__file__).parent / "static", html=True), name="web")
     return app
