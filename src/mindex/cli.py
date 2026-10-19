@@ -260,6 +260,21 @@ def activate_index(ctx: typer.Context, index_id: str):
 
 
 @app.command()
+def clean(
+    ctx: typer.Context,
+    apply: Annotated[bool, typer.Option("--apply", help="实际删除；缺省仅预览可回收内容")] = False,
+):
+    """扫描可安全回收的磁盘数据；默认预览，加 --apply 才真正删除。"""
+    from .clean import CleanBusy, clean_library
+
+    try:
+        print_json(clean_library(ctx.obj, apply=apply))
+    except CleanBusy as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(1) from None
+
+
+@app.command()
 def serve(ctx: typer.Context, host: str = "127.0.0.1", port: int = 8000, index_id: str | None = None):
     """启动页面和检索 API。"""
     import uvicorn
