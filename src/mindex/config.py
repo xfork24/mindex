@@ -249,6 +249,30 @@ class SearchConfig(StrictModel):
         return self
 
 
+class CleanConfig(StrictModel):
+    """磁盘清理策略（mindex clean）；天数为 mtime 年龄，详见 docs/cleanup.md。"""
+
+    # 除活动版本外额外保留的最近 ready 索引版本数（向量复用与回退来源）
+    index_keep_versions: int = Field(default=2, ge=1)
+    # 未注册上传文件的宽限小时数（防正在进行的上传）
+    temp_grace_hours: int = Field(default=24, ge=1)
+    # 旧配置指纹的检查点保留天数：转写 / 分析 / 对白
+    transcripts_max_age_days: int = Field(default=30, ge=1)
+    analysis_max_age_days: int = Field(default=30, ge=1)
+    dialogue_max_age_days: int = Field(default=30, ge=1)
+    # 可按需重建的缓存：在线转码 / studio 预览
+    context_max_age_days: int = Field(default=14, ge=1)
+    studio_preview_max_age_days: int = Field(default=14, ge=1)
+    # studio 旧 attempt 目录（未被检查点或当前 attempt 引用）与导出 zip
+    studio_attempt_max_age_days: int = Field(default=30, ge=1)
+    studio_export_max_age_days: int = Field(default=60, ge=1)
+    # reports 导出产物 / 字幕解析缓存（不含 uploads 用户原件）
+    reports_max_age_days: int = Field(default=60, ge=1)
+    subtitles_max_age_days: int = Field(default=30, ge=1)
+    # runs 审计表已完成记录（running 一律保留）
+    runs_max_age_days: int = Field(default=90, ge=1)
+
+
 class Config(StrictModel):
     data_dir: Path = Path("data")
     source_upload_max_bytes: int = Field(default=20 * 1024**3, ge=1)
@@ -262,6 +286,7 @@ class Config(StrictModel):
     detector: DetectorConfig = Field(default_factory=DetectorConfig)
     video: VideoConfig = Field(default_factory=VideoConfig)
     search: SearchConfig = Field(default_factory=SearchConfig)
+    clean: CleanConfig = Field(default_factory=CleanConfig)
 
     @property
     def layout_key(self) -> str:

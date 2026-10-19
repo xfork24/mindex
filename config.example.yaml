@@ -138,3 +138,25 @@ person:
   body_threshold: 0.8
   # 首次启动后将 /health 的 space 完整复制到此处，以固定模型文件摘要及预处理。
   expected_space: null
+
+# 磁盘清理（mindex clean）；分级与判定详见 docs/cleanup.md。所有天数为 mtime 年龄。
+clean:
+  # 除活动版本外额外保留的最近 ready 索引版本数（向量复用与回退来源）。
+  index_keep_versions: 2
+  # 未注册上传文件 / 空上传目录的宽限小时数，防正在进行的上传。
+  temp_grace_hours: 24
+  # 旧配置指纹检查点：转写 / 分析 / 对白（换配置后永不命中的目录）。
+  transcripts_max_age_days: 30
+  analysis_max_age_days: 30
+  dialogue_max_age_days: 30
+  # 可按需重建的缓存：在线播放转码 / studio 分镜预览。
+  context_max_age_days: 14
+  studio_preview_max_age_days: 14
+  # studio 旧 attempt 目录（未被检查点或当前 attempt 引用）与导出 zip。
+  studio_attempt_max_age_days: 30
+  studio_export_max_age_days: 60
+  # reports 导出产物 / 字幕解析缓存（不含 uploads 用户原件）。
+  reports_max_age_days: 60
+  subtitles_max_age_days: 30
+  # runs 审计表已完成记录（running 一律保留）。
+  runs_max_age_days: 90

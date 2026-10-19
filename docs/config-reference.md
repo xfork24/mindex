@@ -136,6 +136,25 @@
 | `max_image_upload_mb` | int 1–100 | 20 | 静态图片查询上传上限（MB） |
 | `max_query_seconds` | float >0 | 30 | 视频查询时长上限 |
 
+## `clean` — 磁盘清理（`mindex clean`）
+
+所有天数为 mtime 年龄；分级判定与锁行为详见 [cleanup.md](cleanup.md)。默认预览，`--apply` 才执行删除。
+
+| 键 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `index_keep_versions` | int ≥1 | 2 | 除活动版本外额外保留的最近 ready 索引版本数（向量复用与回退来源）；building 一律保留 |
+| `temp_grace_hours` | int ≥1 | 24 | 未注册上传文件 / 空上传目录的宽限小时数，防正在进行的上传 |
+| `transcripts_max_age_days` | int ≥1 | 30 | 旧 `asr_key` 转写块检查点保留天数（换配置后永不命中） |
+| `analysis_max_age_days` | int ≥1 | 30 | 旧分析 profile 的场景分组检查点保留天数 |
+| `dialogue_max_age_days` | int ≥1 | 30 | 旧对白 profile 的 30 秒块检查点保留天数（按 `channel_data` 现行 profile 判定） |
+| `context_max_age_days` | int ≥1 | 14 | 在线播放转码缓存 `context/*.mp4` 保留天数，可按需重建 |
+| `studio_preview_max_age_days` | int ≥1 | 14 | studio 分镜预览保留天数，可按需重建 |
+| `studio_attempt_max_age_days` | int ≥1 | 30 | 未被检查点或当前 attempt 引用的旧 attempt 目录保留天数 |
+| `studio_export_max_age_days` | int ≥1 | 60 | studio 导出 zip 保留天数，可重新打包 |
+| `reports_max_age_days` | int ≥1 | 60 | `reports/` 导出产物保留天数 |
+| `subtitles_max_age_days` | int ≥1 | 30 | 字幕轨道解析缓存保留天数（不含 `uploads/` 用户原件） |
+| `runs_max_age_days` | int ≥1 | 90 | `runs` 审计表已完成记录保留天数（running 一律保留） |
+
 ## 常用组合
 
 **整部电影画面索引（只有 WeMM）**：默认 adaptive detector + `embedding` 指向 WeMM，`index --mode visual --source ID --activate`。
