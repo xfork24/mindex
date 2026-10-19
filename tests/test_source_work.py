@@ -195,7 +195,7 @@ def test_embedding_progress_persisted_in_api_and_resumed_checkpoints(config, vid
         task_id = response.json()["id"]
         task_url = f"/api/admin/source-tasks/{task_id}"
         assert calls.get(timeout=5) == 1
-        total = len(pipeline.store.segments(sid))
+        total = len(pipeline.store.segments(sid, "moment"))
         assert total > 2
 
         def assert_progress():

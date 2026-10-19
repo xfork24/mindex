@@ -131,27 +131,25 @@ def source_work(store, source):
         },
     }
     for name, channel in (("shots", "visual"), ("dialogue", "dialogue"), ("analysis", "analysis")):
-        expected = [s for s in fresh if channel in s["channel_versions"]]
-        current = bool(active and expected) and all(
-            s["id"] in old and old[s["id"]]["channel_versions"].get(channel) == s["channel_versions"][channel]
-            for s in expected
-        )
-        # 旧索引没有版本字段时，按冻结片段和文本验证覆盖，不修改历史快照。
-        if published and all(not s["channel_versions"] for s in published):
-            current = bool(expected) and all(
-                s["id"] in old
-                and (
-                    channel == "visual"
-                    or s["views"].get(channel, "") == old[s["id"]]["views"].get(channel, "")
-                )
+        for field, selected_kinds in (("search", {"moment"}), ("extra_search", {"shot", "scene"})):
+            expected = [s for s in fresh if s["kind"] in selected_kinds and channel in s["channel_versions"]]
+            current = bool(active and expected) and all(
+                s["id"] in old and old[s["id"]]["channel_versions"].get(channel) == s["channel_versions"][channel]
                 for s in expected
             )
-        work[name]["search"] = {
-            **source["published_channels"][channel],
-            "current": current,
-            "expected_segments": sum(channel == "visual" or bool(s["views"].get(channel)) for s in expected),
-            "index_id": active["id"] if active else None,
-        }
+            if published and all(not s["channel_versions"] for s in published):
+                current = bool(expected) and all(
+                    s["id"] in old and (channel == "visual" or
+                    s["views"].get(channel, "") == old[s["id"]]["views"].get(channel, ""))
+                    for s in expected
+                )
+            view = "video" if channel == "visual" else channel
+            work[name][field] = {
+                "current": current,
+                "indexed_segments": sum(s["kind"] in selected_kinds and view in s["indexed_views"] for s in published),
+                "expected_segments": sum(channel == "visual" or bool(s["views"].get(channel)) for s in expected),
+                "index_id": active["id"] if active else None,
+            }
     release, person_snapshot = catalogue.published(active["id"]) if active else (None, {})
     evidence = store.rows(
         "SELECT * FROM person_evidence WHERE source_id=? AND status='accepted' ORDER BY id", (sid,)
@@ -192,13 +190,20 @@ def source_work(store, source):
         publication_task = (
             store.one(
                 "SELECT * FROM source_tasks WHERE source_id=? AND work='publish' "
-                "AND json_extract(options,'$.work')=? ORDER BY rowid DESC LIMIT 1",
+                "AND json_extract(options,'$.work')=? "
+                "AND COALESCE(json_extract(options,'$.scope'),'moment')='moment' ORDER BY rowid DESC LIMIT 1",
                 (sid, name),
             )
             if has_source_tasks
             else None
         )
         value["publish_task"] = public_task(publication_task) if publication_task else None
+        extra_task = store.one(
+            "SELECT * FROM source_tasks WHERE source_id=? AND work='publish' "
+            "AND json_extract(options,'$.work')=? AND json_extract(options,'$.scope')='extra' "
+            "ORDER BY rowid DESC LIMIT 1", (sid, name)
+        ) if has_source_tasks else None
+        value["extra_publish_task"] = public_task(extra_task) if extra_task else None
         latest = sorted(
             [t for t in (value["task"], value["publish_task"]) if t],
             key=lambda t: (t["updated_at"], t["created_at"]),
@@ -207,5 +212,7 @@ def source_work(store, source):
         ready = name in {"shots", "dialogue"} or bool(source["prepared"])
         value["can_start"] = ready
         value["start_reason"] = None if ready else "请先完成分镜处理"
+        value["can_publish_extra"] = (name in {"shots", "analysis"} and bool(source["prepared"])
+                                      and value.get("extra_search", {}).get("expected_segments", 0) > 0)
         value["can_publish"] = bool(source["prepared"]) and value["status"] in READY | {"partial"}
     return work

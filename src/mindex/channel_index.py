@@ -238,7 +238,7 @@ def build_channels(builder, *, activate=False, mode="auto", source_id=None, kind
     targets = {
         s["id"]: {fingerprint([index_id, r[0]]) for r in representations(builder, s) if r[1] in selected_views}
         for s in snapshots
-        if source_id is None or s["source_id"] == source_id
+        if (source_id is None or s["source_id"] == source_id) and s["kind"] in kinds
     }
     targets = {sid: ids for sid, ids in targets.items() if ids}
     completed = set()

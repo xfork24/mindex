@@ -192,11 +192,11 @@ function appendWorkProgress(card, label, type, status, progress = {}) {
   const suffix = ({segments: MindexI18n.msg("ui.c49a95f6ee75"), shots: MindexI18n.msg("ui.9e9583a0c459"), chunks: MindexI18n.msg("ui.c56653feeffb"), scenes: MindexI18n.msg("ui.7b10ba4607b6"), files: MindexI18n.msg("ui.6f34f0eb1b3c"), tracks: MindexI18n.msg("ui.84c9b78d91a5")})[unit] || '';
   const completed = counted ? Math.min(total, Math.max(0, Number.isFinite(done) ? done : 0)) : 0;
   const skipped = progress.skipped ? ' · ' + MindexI18n.msg("ui.82896d0a6ff4", {count: progress.skipped}) : '';
-  const line = node('p', `${type === 'publish' ? MindexI18n.msg("ui.b6ff86ac1506") : MindexI18n.msg("ui.dbad5e876f4f")}：${taskStatus[status] || status}${active || counted ? ' · ' + stage + (counted ? ` ${completed}/${total}${suffix}` : '') : ''}${skipped}`, 'muted work-task-progress');line.dataset.phase = type;card.append(line);
+  const line = node('p', `${type === 'extra' ? MindexI18n.msg("ui.update_extra_search") : type === 'publish' ? MindexI18n.msg("ui.b6ff86ac1506") : MindexI18n.msg("ui.dbad5e876f4f")}：${taskStatus[status] || status}${active || counted ? ' · ' + stage + (counted ? ` ${completed}/${total}${suffix}` : '') : ''}${skipped}`, 'muted work-task-progress');line.dataset.phase = type;card.append(line);
   if (counted || active) {
     const bar = node('progress');bar.className = 'work-progress';bar.dataset.phase = type;
     if (counted) {bar.max = total;bar.value = completed;}
-    MindexI18n.setAttr(bar, 'aria-label', label + MindexI18n.msg(type === 'publish' ? "ui.5ddad219dcea" : "ui.d03d35a85128"));card.append(bar);
+    MindexI18n.setAttr(bar, 'aria-label', label + MindexI18n.msg(type !== 'process' ? "ui.5ddad219dcea" : "ui.d03d35a85128"));card.append(bar);
   }
 }
 function analysisSummary(result, progress = {}) {
@@ -212,14 +212,14 @@ function renderWork(source, target) {
   clearTimeout(workPoll);workPoll = null;
   const panel = node('section', undefined, 'work-panel');panel.append(node('h3', MindexI18n.msg("ui.c057f7d9d46e")));
   const grid = node('div', undefined, 'work-grid');panel.append(grid);target.append(panel);
-  const prefs = preferences(source.id),busy = Object.values(source.work || {}).some((w) => [w.task, w.publish_task].some((t) => t && ['queued', 'running'].includes(t.status)));
+  const prefs = preferences(source.id),busy = Object.values(source.work || {}).some((w) => [w.task, w.publish_task, w.extra_publish_task].some((t) => t && ['queued', 'running'].includes(t.status)));
   if (!prefs.subtitleInitialized && source.subtitle_files?.length) {
     const selected = source.dialogue_task?.options.subtitle_file || source.channels?.dialogue?.subtitle_file?.id || source.subtitle_files.at(-1).id;
     prefs.track = `file:${selected}`;prefs.method = 'subtitle';prefs.subtitleInitialized = true;
   }
   for (const [name, label] of Object.entries(workNames)) {
     const work = source.work?.[name] || {},result = work.result || {},card = node('section', undefined, 'work-card');card.dataset.work = name;
-    const workBusy = [work.task, work.publish_task].some((t) => t && ['queued', 'running'].includes(t.status)),blocked = workBusy || source.enforce_gpu_lock && busy;
+    const workBusy = [work.task, work.publish_task, work.extra_publish_task].some((t) => t && ['queued', 'running'].includes(t.status)),blocked = workBusy || source.enforce_gpu_lock && busy;
     const heading = node('div', undefined, 'work-heading');heading.append(node('h4', label), node('span', workStatus[work.status] || MindexI18n.msg("ui.59a9eb4e6574"), 'work-status'));card.append(heading);
     let summary = '';
     if (name === 'shots') summary = MindexI18n.msg("ui.234493832eb5", { p0: result.shots || 0, p1: result.moments || 0, p2: result.missing_artifacts || 0 });
@@ -231,7 +231,7 @@ function renderWork(source, target) {
     if (name === 'analysis') summary = analysisSummary(result, work.task?.progress?.processing_progress || work.task?.progress);
     if (name === 'persons') summary = MindexI18n.msg("ui.1e1649402d6a", { p0: result.covered_shots || 0, p1: result.total_shots || 0, p2: result.people || 0, p3: result.accepted || 0, p4: result.candidate || 0, p5: result.rejected || 0 });
     card.append(node('p', summary, 'work-summary'));const search = work.search || {};
-    card.append(node('p', MindexI18n.msg("ui.13e6dc8c4328", { p0: search.current ? MindexI18n.msg("ui.112f98675ee2") : search.indexed_segments ? MindexI18n.msg("ui.53122735b7e9") : MindexI18n.msg("ui.30e81c8167e5"), p1: search.indexed_segments || 0, p2: search.expected_segments || 0, p3: name === 'persons' ? MindexI18n.msg("ui.313083c877dc") : MindexI18n.msg("ui.32145468cf4f") }), 'muted'));
+    card.append(node('p', MindexI18n.msg(name === 'persons' ? "ui.13e6dc8c4328" : "ui.moment_search_coverage", { p0: search.current ? MindexI18n.msg("ui.112f98675ee2") : search.indexed_segments ? MindexI18n.msg("ui.53122735b7e9") : MindexI18n.msg("ui.30e81c8167e5"), p1: search.indexed_segments || 0, p2: search.expected_segments || 0, p3: name === 'persons' ? MindexI18n.msg("ui.313083c877dc") : MindexI18n.msg("ui.32145468cf4f") }), 'muted'));
     if (MindexI18n.system(result.fallback_reason)) card.append(node('p', MindexI18n.system(result.fallback_reason), 'muted'));
     if (name === 'dialogue') {
       // 处理方式：标签与下拉同一行左对齐（style.css 的 label:has(>select) 默认竖排，行内覆盖为横排）。
@@ -278,12 +278,19 @@ function renderWork(source, target) {
       if (name === 'dialogue') {if (prefs.uploadingSubtitle) throw Error(MindexI18n.msg("ui.49476949fc90"));options.method = prefs.method;if (prefs.method === 'subtitle') {if (!prefs.track) throw Error(MindexI18n.msg("ui.ed4caa4cf3b3"));if (prefs.track.startsWith('file:')) options.subtitle_file = prefs.track.slice(5);else options.subtitle_stream = Number(prefs.track);}}
       await post(`/api/admin/sources/${source.id}/${name}`, options);await refreshWork(source.id);
     }));start.disabled = blocked || !work.can_start || name === 'dialogue' && prefs.uploadingSubtitle;controls.append(start);
-    const update = action(MindexI18n.msg("ui.0cb51b994992"), perform(async () => {await post(`/api/admin/sources/${source.id}/publish`, { work: name });await refreshWork(source.id);}));update.disabled = blocked || !work.can_publish;controls.append(update);
+    const update = action(MindexI18n.msg(['shots', 'analysis'].includes(name) ? "ui.update_moment_embedding" : name === 'dialogue' ? "ui.update_dialogue_embedding" : "ui.0cb51b994992"), perform(async () => {await post(`/api/admin/sources/${source.id}/publish`, { work: name, scope: 'moment' });await refreshWork(source.id);}));update.disabled = blocked || !work.can_publish;controls.append(update);
+    if (['shots', 'analysis'].includes(name)) {
+      const extra = action(MindexI18n.msg("ui.update_extra_search"), perform(async () => {
+        await post(`/api/admin/sources/${source.id}/publish`, { work: name, scope: 'extra' });await refreshWork(source.id);
+      }));extra.disabled = blocked || !work.can_publish_extra;controls.append(extra);
+      const coverage = work.extra_search || {};
+      card.append(node('p', MindexI18n.msg("ui.extra_search_coverage", {done: coverage.indexed_segments || 0, total: coverage.expected_segments || 0}), 'muted'));
+    }
     if (['shots', 'dialogue', 'analysis'].includes(name) && source.shot_count) controls.append(action(MindexI18n.msg("ui.0ef38438801b"), async () => {state.kind = 'shot';state.parent = null;state.segmentPage = 1;await loadSegments();$('segment-list').scrollIntoView({ block: 'start', behavior: 'smooth' });if (name !== 'shots') notify(MindexI18n.msg("ui.1844d03ed5e7"));}));
     if (name === 'persons') {const link = node('a', MindexI18n.msg("ui.8face9a73c34"), 'quiet nav-link');link.href = `/persons?source=${encodeURIComponent(source.id)}#review`;controls.append(link);card.append(node('p', MindexI18n.msg("ui.4e65b9bde907"), 'muted'));}
     card.append(controls);
-    for (const [type, task] of [['process', work.task], ['publish', work.publish_task]]) if (task) {
-      const progress = task.progress || {},publishing = type === 'publish' || progress.phase === 'publish' || publicationStages.has(progress.stage);
+    for (const [type, task] of [['process', work.task], ['publish', work.publish_task], ['extra', work.extra_publish_task]]) if (task) {
+      const progress = task.progress || {},publishing = type !== 'process' || progress.phase === 'publish' || publicationStages.has(progress.stage);
       if (type === 'process' && publishing) {
         if (progress.processing_progress) appendWorkProgress(card, label, 'process', 'complete', progress.processing_progress);
         else appendWorkProgress(card, label, 'process', 'complete', {});
@@ -294,12 +301,12 @@ function renderWork(source, target) {
           appendWorkProgress(card, label, 'publish', publicationStatus === 'complete' ? 'complete' : publicationStatus === 'failed' ? 'failed' : task.status, progress);
         }
       } else {
-        appendWorkProgress(card, label, type, task.status, progress);
+        appendWorkProgress(card, type === 'extra' ? MindexI18n.msg("ui.update_extra_search") : label, type, task.status, progress);
       }
       if (MindexI18n.system(task.error)) card.append(node('p', MindexI18n.system(task.error), 'source-warning'));
       if (['failed', 'interrupted'].includes(task.status)) {
-        const endpoint = type === 'publish' || ['shots', 'analysis'].includes(name) ? '/api/admin/source-tasks' : name === 'dialogue' ? '/api/admin/dialogue-tasks' : '/api/persons/tasks';
-        const retry = action(type === 'publish' ? MindexI18n.msg("ui.914e1182b421") : MindexI18n.msg("ui.23e1269c0ea7"), perform(async () => {await post(`${endpoint}/${task.id}/retry`, {});await refreshWork(source.id);}));retry.disabled = blocked;card.append(retry);
+        const endpoint = type !== 'process' || ['shots', 'analysis'].includes(name) ? '/api/admin/source-tasks' : name === 'dialogue' ? '/api/admin/dialogue-tasks' : '/api/persons/tasks';
+        const retry = action(type !== 'process' ? MindexI18n.msg("ui.914e1182b421") : MindexI18n.msg("ui.23e1269c0ea7"), perform(async () => {await post(`${endpoint}/${task.id}/retry`, {});await refreshWork(source.id);}));retry.disabled = blocked;card.append(retry);
       }
     }
     if (work.publication?.status === 'failed') card.append(node('p', MindexI18n.msg("ui.4b12665479da", { p0: MindexI18n.system(work.publication.error) }), 'source-warning'));

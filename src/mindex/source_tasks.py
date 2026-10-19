@@ -25,6 +25,7 @@ class WorkOptions(StrictModel):
 
 class PublishOptions(StrictModel):
     work: Work
+    scope: Literal["moment", "extra"] = "moment"
 
 
 def freeze_config(config, store):
@@ -65,7 +66,7 @@ def preserve_numbers(model, snapshot):
             setattr(model, key, value)
 
 
-def publish_work(config, source_id, work, embedder=None, *, progress=None):
+def publish_work(config, source_id, work, embedder=None, *, progress=None, scope="moment"):
     from .indexing import IndexBuilder
     from .persons import Persons
 
@@ -88,13 +89,14 @@ def publish_work(config, source_id, work, embedder=None, *, progress=None):
     index_id = IndexBuilder(config, embedder).build(
         activate=True,
         source_id=source_id,
+        kinds=("shot", "scene") if scope == "extra" else ("moment",),
         channels=None,
         progress=progress,
     )
     return {"index_id": index_id}
 
 
-def publication_attempt(config, source_id, work, *, embedder=None, save=None, progress=None):
+def publication_attempt(config, source_id, work, *, embedder=None, save=None, progress=None, scope="moment"):
     """发布失败不改变处理完成；运行标记在网络调用前落库。"""
     value = {"status": "running", "error": None}
     latest_progress = None
@@ -112,7 +114,7 @@ def publication_attempt(config, source_id, work, *, embedder=None, save=None, pr
     try:
         notify({"stage": "index_wait"})
         value = {"status": "complete", "error": None, **publish_work(
-            config, source_id, work, embedder, progress=notify
+            config, source_id, work, embedder, progress=notify, scope=scope
         )}
     except Exception as exc:  # noqa: BLE001 — 发布错误独立持久化，不丢失处理结果
         value = {"status": "failed", "error": str(exc)[:2000]}
@@ -205,7 +207,10 @@ class SourceTasks:
             if work == "publish":
                 from .curation import Library
 
-                if not Library(self.store).source(source_id)["work"][options.work]["can_publish"]:
+                info = Library(self.store).source(source_id)["work"][options.work]
+                if options.scope == "extra" and options.work not in {"shots", "analysis"}:
+                    raise HTTPException(422, "额外检索仅支持分镜和 LLM 分析")
+                if not info["can_publish_extra" if options.scope == "extra" else "can_publish"]:
                     raise HTTPException(409, "该工作尚无可更新检索的处理结果")
             config = self.runtime.current().model_copy(deep=True)
             if work == "shots" and not source["prepared"] and source["layout_config"]:
@@ -291,6 +296,7 @@ class SourceTasks:
                     config,
                     row["source_id"],
                     options["work"],
+                    scope=options.get("scope", "moment"),
                     embedder=self.embedder,
                     save=lambda v: save("publication", v),
                     progress=lambda v: save("progress", v),

@@ -84,7 +84,9 @@ uv run mindex indexes activate 旧索引ID                            # 回退�
 `mindex index` 默认同步已有的 moment、shot、scene 及其有效画面、对白、描述；
 旧 moment-only 索引再次发布也会补齐。`--kind` 可重复指定，显式限制本次更新粒度。
 `--mode visual` 默认 moment、shot，不生成场景。单素材更新保留其他素材和未选择的渠道。
-分镜任务完成后发布已有 moment、shot；分析完成后发布已有 scene，并同步该素材所有可用渠道。
+工作台分镜与 LLM 分析卡片的“更新moment嵌入”及任务完成后的自动发布只更新 moment。
+“更新shot/scene嵌入”单独更新已有 shot、scene，不重复运行 LLM 分析。两组覆盖数与发布任务独立显示。
+CLI `mindex index` 仍默认覆盖全部已有粒度。
 发布不会运行 ASR、场景生成或媒体修复。
 
 索引推理直接读取已有完整镜头；子区间、跨镜头场景与长镜头窗口按绝对时间从镜头读取，

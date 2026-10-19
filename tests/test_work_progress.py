@@ -32,7 +32,7 @@ def test_publish_work_reports_scope_counts_for_every_channel(config, video_file,
     assert events[0]["stage"] == "index_wait" and "total" not in events[0]
     assert events[-1]["stage"] == "published"
     assert all(event["phase"] == "publish" for event in events)
-    expected = len(snapshots_for(pipeline, sid, ["moment", "shot", "scene"]))
+    expected = len(snapshots_for(pipeline, sid, ["moment"]))
     counted = [e for e in events if "total" in e]
     assert counted and all(e["total"] == expected and e["unit"] == "segments" for e in counted)
     assert counted[-1]["completed"] == expected
@@ -125,3 +125,41 @@ def test_pipeline_reports_before_first_analysis_and_each_stage(config, video_fil
     assert {e["stage"] for e in events} == {"analyze", "scene_grouping", "scenes"}
     assert all(e["unit"] == ("scenes" if e["stage"] == "scenes" else "segments") for e in events)
     assert events[-1]["completed"] == events[-1]["total"]
+
+
+def test_moment_and_extra_publication_are_independent(config, video_file):
+    from mindex.curation import Library
+    from mindex.runtime_settings import RuntimeConfig
+    from mindex.source_tasks import PublishOptions, SourceTasks
+
+    embedder = FixtureEmbedder(config)
+    pipeline = Pipeline(config, analyzer=FixtureAnalyzer(embedder))
+    sid = pipeline.prepare(video_file)
+    pipeline.analyze(sid)
+    moment = publish_work(config, sid, 'analysis', embedder)['index_id']
+    assert {s['kind'] for s in pipeline.store.snapshots(moment)} == {'moment'}
+    work = Library(pipeline.store).source(sid)['work']
+    assert work['shots']['search']['current']
+    assert work['analysis']['search']['current']
+    assert work['shots']['extra_search']['indexed_segments'] == 0
+    assert work['analysis']['can_publish_extra']
+    events = []
+    extra = publish_work(config, sid, 'analysis', embedder, scope='extra', progress=events.append)['index_id']
+    snapshots = pipeline.store.snapshots(extra)
+    assert {s['kind'] for s in snapshots} == {'moment', 'shot', 'scene'}
+    assert all('analysis' in s['indexed_views'] for s in snapshots)
+    expected = len([s for s in snapshots if s['kind'] != 'moment'])
+    assert all(e['total'] == expected for e in events if 'total' in e)
+    work = Library(pipeline.store).source(sid)['work']
+    assert work['analysis']['extra_search']['current']
+    assert work['analysis']['extra_search']['indexed_segments'] == expected
+    again = publish_work(config, sid, 'shots', embedder)['index_id']
+    assert {s['id'] for s in pipeline.store.snapshots(again)} == {s['id'] for s in snapshots}
+    manager = SourceTasks(RuntimeConfig(config, pipeline.store), pipeline.store, embedder)
+    # Capture queued options without launching a thread: the scope is durable for retry.
+    manager.launch = lambda *args: args[-1].release()
+    task = manager.start(sid, 'publish', PublishOptions(work='analysis', scope='extra'))
+    work = Library(pipeline.store).source(sid)['work']['analysis']
+    assert work['extra_publish_task']['id'] == task['id']
+    assert work['extra_publish_task']['options']['scope'] == 'extra'
+    assert work['publish_task'] is None

@@ -368,7 +368,7 @@ def test_default_upgrade_all_granularities_without_media_cache(config, video_fil
         return original(path)
 
     monkeypatch.setattr(embedder, 'video', observe)
-    new = publish_work(config, sid, 'analysis', embedder)['index_id']
+    new = publish_work(config, sid, 'analysis', embedder, scope='extra')['index_id']
     snapshots = pipeline.store.snapshots(new)
     assert {s['kind'] for s in snapshots} == {'moment', 'shot', 'scene'}
     assert any('dialogue' in s['indexed_views'] for s in snapshots if s['kind'] == 'shot')
@@ -378,5 +378,5 @@ def test_default_upgrade_all_granularities_without_media_cache(config, video_fil
     assert before == after
     assert all(not p.exists() for p in paths if p.name == 'window.mp4')
     calls = embedder.calls
-    assert builder.build(activate=True) == new
+    assert publish_work(config, sid, 'analysis', embedder, scope='extra')['index_id'] == new
     assert embedder.calls == calls

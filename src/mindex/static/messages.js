@@ -7222,5 +7222,25 @@ window.MindexMessages = {
   "ui.no_cloned_voice": {
     "zh": "不使用克隆音色",
     "en": "Do not use a cloned voice"
+  },
+  "ui.update_extra_search": {
+    "zh": "更新shot/scene嵌入",
+    "en": "Update shot/scene embeddings"
+  },
+  "ui.extra_search_coverage": {
+    "zh": "额外检索（shot / scene）：{done}/{total} 段",
+    "en": "Extra search (shot / scene): {done}/{total} segments"
+  },
+  "ui.moment_search_coverage": {
+    "zh": "检索（moment）：{p0} · {p1}/{p2} {p3}",
+    "en": "Search (moment): {p0} · {p1}/{p2} {p3}"
+  },
+  "ui.update_moment_embedding": {
+    "zh": "更新moment嵌入",
+    "en": "Update moment embeddings"
+  },
+  "ui.update_dialogue_embedding": {
+    "zh": "更新dialog嵌入",
+    "en": "Update dialog embeddings"
   }
 };
