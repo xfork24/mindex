@@ -23,7 +23,7 @@ from .curation import EntityNotFound
 from .types import Filters
 
 STEPS = ("split", "recall", "tts", "select", "render")
-SPLIT_VERSION = 3
+SPLIT_VERSION = 5
 STEP_LABELS = {
     "split": "文本拆分镜",
     "recall": "语义召回",
@@ -197,6 +197,18 @@ class JobOptions(StrictModel):
     audio_mode: Literal["tts_only", "ducking"] | None = None
     recall_limit: int | None = Field(default=None, ge=1, le=50)
     burn: bool | None = None
+    source_ids: list[str] | None = Field(default=None, max_length=200)
+
+    @model_validator(mode="after")
+    def known_sources(self):
+        # None = 不限（全选）；空列表没有合理语义，直接拒绝而不是当成全库。
+        if self.source_ids is None:
+            return self
+        if not self.source_ids:
+            raise ValueError("请至少选择一个素材")
+        if any(not value for value in self.source_ids):
+            raise ValueError("素材 ID 不能为空")
+        return self
 
 
 # ---------------------------------------------------------------- 路径与目录
@@ -312,6 +324,29 @@ def _summary(state: dict) -> dict:
     }
 
 
+def material_scope(state: dict) -> set[str] | None:
+    """任务允许使用的素材集合；None 表示不限（全选）。创建后只读，不随方案变化。"""
+    ids = state.get("source_ids")
+    return set(ids) if ids else None
+
+
+def scoped_filters(filters: Filters, scope: set[str] | None) -> Filters:
+    """任务范围是召回的硬上限：分镜限定素材时取交集，未限定时直接用任务范围。
+
+    空交集说明分镜选中的素材全部被排除在任务范围之外，直接报错而不是退化成「不限」——
+    Filters 的空选择表示全库，静默放宽会让任务范围失效。
+    """
+    if not scope:
+        return filters
+    picked = filters.selected_sources()
+    if picked and not picked & scope:
+        raise StudioError("分镜素材范围与本任务允许的素材范围没有交集，请调整分镜的素材范围")
+    values = filters.model_dump()
+    values["source_id"] = None
+    values["source_ids"] = sorted(picked & scope) if picked else sorted(scope)
+    return Filters.model_validate(values)
+
+
 def create_job(config: Config, text: str, title: str | None = None, options: dict | None = None) -> dict:
     text = (text or "").strip()
     if not text:
@@ -324,7 +359,12 @@ def create_job(config: Config, text: str, title: str | None = None, options: dic
         raise StudioError(f"任务选项无效：{exc}") from exc
     from .storage import Store
 
-    active = Store(config.data_dir).active_index()
+    store = Store(config.data_dir)
+    known = store.source_ids() if parsed.source_ids else set()
+    unknown = [value for value in parsed.source_ids or [] if value not in known]
+    if unknown:
+        raise StudioError(f"素材不存在：{'、'.join(unknown[:3])}")
+    active = store.active_index()
     job_id = f"{datetime.now():%Y%m%d-%H%M%S}-{uuid4().hex[:6]}"
     directory = job_dir(config, job_id)
     if directory.exists():
@@ -337,6 +377,8 @@ def create_job(config: Config, text: str, title: str | None = None, options: dic
         "created_at": now(),
         "updated_at": now(),
         "voice_mode": "custom" if parsed.voice else "inherit",
+        # 素材范围是任务级只读约束，刻意不放进 options：方案参数对话框不该改它。
+        "source_ids": sorted(set(parsed.source_ids)) if parsed.source_ids else None,
         "options": {
             "voice": parsed.voice or config.studio.tts.voice,
             "audio_mode": parsed.audio_mode or config.studio.audio.mode,
@@ -363,6 +405,7 @@ def load_job(config: Config, job_id: str) -> dict:
     if state.get("schema") != 1:
         raise StudioError("任务状态 schema 版本不受支持")
     state.setdefault("execution", {"status": "idle", "current_step": None, "remaining_steps": []})
+    state.setdefault("source_ids", None)  # 老任务没有素材范围，即不限
     return state
 
 
@@ -593,15 +636,19 @@ def set_execution(config, job_id, status, current_step, remaining_steps):
 
 def step_configuration(config, state, step):
     studio = config.studio
+    recall = {
+        "recall": studio.recall.model_dump(),
+        "search": config.search.model_dump(),
+        "embedding": config.embedding.model_dump(),
+        "video": config.video.model_dump(),
+        "limit": state["options"]["recall_limit"],
+    }
+    # 只在有限制时加键，保证不限任务的指纹与历史检查点逐字节一致。
+    if scope := material_scope(state):
+        recall["sources"] = sorted(scope)
     values = {
         "split": {"generator": studio.generator.model_dump(), "version": SPLIT_VERSION},
-        "recall": {
-            "recall": studio.recall.model_dump(),
-            "search": config.search.model_dump(),
-            "embedding": config.embedding.model_dump(),
-            "video": config.video.model_dump(),
-            "limit": state["options"]["recall_limit"],
-        },
+        "recall": recall,
         "tts": {"tts": studio.tts.model_dump(), "voice": state["options"]["voice"]},
         "select": studio.selection.model_dump(),
         "render": {

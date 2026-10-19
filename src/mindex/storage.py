@@ -177,6 +177,10 @@ class Store:
     def sources(self) -> list[dict]:
         return self.rows("SELECT * FROM sources ORDER BY name,id")
 
+    def source_ids(self) -> set[str]:
+        """素材 id 全集；创建创作任务时校验所选素材确实存在。"""
+        return {row["id"] for row in self.rows("SELECT id FROM sources")}
+
     def segments(self, source_id: str | None = None, kind: str | None = None) -> list[dict]:
         clauses, args = [], []
         for key, value in [("source_id", source_id), ("kind", kind)]:

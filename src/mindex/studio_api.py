@@ -52,11 +52,12 @@ class ShotBody(StrictModel):
 
 
 def validate_recall_references(config, store: Store, job_id, shots):
-    """PATCH 级校验：人物必须已登记且非作品；查询文件必须已存在于 inputs/（执行前另有 digest 复验）。"""
+    """PATCH 级校验：人物必须已登记且非作品；查询文件必须已存在于 inputs/（执行前另有 digest 复验）；素材不得越出任务范围。"""
     from .persons import Persons
 
     catalogue = Persons(store)
     inputs = studio.job_dir(config, job_id) / "inputs"
+    scope = studio.material_scope(studio.load_job(config, job_id))
     for shot in shots:
         recall = shot.recall
         if not recall:
@@ -65,6 +66,11 @@ def validate_recall_references(config, store: Store, job_id, shots):
             entity = catalogue.entity(identifier)
             if entity["kind"] == "work":
                 raise studio.StudioError("人物召回不能选择作品，请选择演员或角色")
+        outside = recall.filters.selected_sources() - scope if scope else set()
+        if outside:
+            raise studio.StudioError(
+                f"素材超出本任务允许的素材范围：{'、'.join(sorted(outside)[:3])}"
+            )
         if recall.mode in {"image", "video"} and not any(
             path.is_file() and path.suffix != ".partial" for path in inputs.glob(recall.media_id + ".*")
         ):
@@ -156,6 +162,7 @@ class NodeBody(StrictModel):
 
 
 class ColumnBody(StrictModel):
+    force: bool = True
     revision: str
     stage: Literal["split", "recall", "tts", "select", "render"]
     inputs_by_shot: dict[str, dict[str, str | None]]
@@ -610,7 +617,7 @@ def studio_router(
                 if column:
                     workspace.require_revision(p, column.revision)
                     nodes = workspace.column_nodes(cfg, job_id, w, p, column.stage, column.inputs_by_shot)
-                    force = True
+                    force = column.force
                 elif node:
                     workspace.require_revision(p, node.revision)
                     spec = workspace.specification(cfg, job_id, w, p, node.stage, node.shot_id)
@@ -685,9 +692,13 @@ def studio_router(
     def submit_node(job_id: str, plan_id: str, body: NodeBody):
         return launch_build(job_id, plan_id, node=body)
 
+    @router.post("/jobs/{job_id}/plans/{plan_id}/execute-column", status_code=202)
+    def execute_column(job_id: str, plan_id: str, body: ColumnBody):
+        return launch_build(job_id, plan_id, column=body.model_copy(update={"force": False}))
+
     @router.post("/jobs/{job_id}/plans/{plan_id}/regenerate-column", status_code=202)
     def regenerate_column(job_id: str, plan_id: str, body: ColumnBody):
-        return launch_build(job_id, plan_id, column=body)
+        return launch_build(job_id, plan_id, column=body.model_copy(update={"force": True}))
 
     @router.get("/jobs/{job_id}/builds/{build_id}/logs")
     def build_logs(job_id: str, build_id: str, after: int = Query(default=0, ge=0)):
@@ -719,6 +730,22 @@ def studio_router(
                 studio_window.candidates(current(), w, p, body.shot_id)
             workspace.persist(base, job_id, w)
         return workspace.detail(current(), job_id, w)
+
+    @router.get("/jobs/{job_id}/plans/{plan_id}/shots/{shot_id}/selection-anchor")
+    def selection_anchor(job_id: str, plan_id: str, shot_id: str):
+        from . import studio_window
+
+        cfg = current()
+        w = read_workspace(job_id)
+        p = workspace.plan(w, plan_id)
+        if shot_id not in p["shots"]:
+            raise studio.StudioError("分镜不存在于当前方案")
+        speech = w["versions"].get(p["shots"][shot_id].get("tts"), {})
+        target = speech.get("data", {}).get("duration") if speech.get("status") == "complete" else None
+        anchor = studio_window.resolve_anchor(cfg, w, p, shot_id, target)
+        if anchor is None:
+            anchor = studio_window.candidates(cfg, w, p, shot_id)[0]
+        return {"candidate_id": studio_window.candidate_id(anchor)}
 
     @router.get("/jobs/{job_id}/plans/{plan_id}/shots/{shot_id}/selection-context")
     def selection_context(job_id: str, plan_id: str, shot_id: str):

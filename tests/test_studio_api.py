@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from mindex.api import create_app
 from mindex.indexing import IndexBuilder
 from mindex.pipeline import Pipeline
+from mindex.storage import Store
 
 
 @pytest.fixture
@@ -62,6 +63,36 @@ def test_create_job_validation_and_listing(studio_client):
     assert listing["items"][0]["id"] == job_id
     assert listing["items"][0]["current_step"] == "split"
     assert client.get("/api/studio/jobs/missing").status_code == 404
+
+
+def test_create_job_material_scope(studio_client):
+    config, client = studio_client
+    (source_id,) = [row["id"] for row in Store(config.data_dir).sources()]
+    scoped = client.post(
+        "/api/studio/jobs",
+        json={"text": "限定素材。", "options": {"source_ids": [source_id]}},
+    )
+    assert scoped.status_code == 201
+    assert scoped.json()["source_ids"] == [source_id]
+    assert client.get(f"/api/studio/jobs/{scoped.json()['id']}").json()["job"]["source_ids"] == [
+        source_id
+    ]
+    # 不传即不限，老任务继续读得到 source_ids=None。
+    assert client.get(f"/api/studio/jobs/{create_job(client, '不限素材。')}").json()["job"][
+        "source_ids"
+    ] is None
+    assert (
+        client.post(
+            "/api/studio/jobs", json={"text": "全不选。", "options": {"source_ids": []}}
+        ).status_code
+        == 422
+    )
+    assert (
+        client.post(
+            "/api/studio/jobs", json={"text": "不存在的素材。", "options": {"source_ids": ["缺失"]}}
+        ).status_code
+        == 422
+    )
 
 
 def test_split_then_recall_flow_with_real_index(studio_client):

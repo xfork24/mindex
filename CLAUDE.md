@@ -46,7 +46,7 @@ uv run mindex clean [--apply]                    # 磁盘清理：默认预览�
 
 ### 核心不变量
 
-新版版本工作台支持逐镜 `ShotRecall`（文字/人物、素材过滤、图片、视频）。查询媒体位于任务 `inputs/<sha256>.<suffix>`，执行前校验摘要；召回签名绑定内容索引与人物发布组合。后台镜头详情独立读取 ASR、字幕、LLM、人物覆盖和证据，不触发推理。人物依赖可用 `uv sync --extra person --extra dev` 安装，确定性跨服务端到端覆盖见 `tests/test_recall_e2e.py`。
+新版版本工作台支持逐镜 `ShotRecall`（文字/人物、素材过滤、图片、视频）。创建任务时可限定可用素材（`job.json` 的 `source_ids`，全选=不限，创建后只读、不进方案参数）；逐镜素材范围只能在其内二次选择，两者取交集，空交集报错不退化为全库。查询媒体位于任务 `inputs/<sha256>.<suffix>`，执行前校验摘要；召回签名绑定内容索引与人物发布组合。后台镜头详情独立读取 ASR、字幕、LLM、人物覆盖和证据，不触发推理。人物依赖可用 `uv sync --extra person --extra dev` 安装，确定性跨服务端到端覆盖见 `tests/test_recall_e2e.py`。
 
 - **嵌入空间身份**：服务必须在 `/health` 和每次向量响应中携带身份（model/revision/quantization/dims/预处理/implementation 指纹，`config.fingerprint` 计算）；查询身份与活动索引不符返回 503，禁止跨空间比较向量。
 - **索引不可变**：换模型、量化、维度、预处理或分析配置 → 新建独立索引版本，从不覆盖；发布前 `check`，激活在 SQLite 事务内完成。回退 = 先切回旧模型服务/配置，再 `indexes activate 旧索引ID`。索引冻结描述与对白快照，后续分析更新不影响已发布索引。

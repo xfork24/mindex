@@ -216,7 +216,7 @@ async function selectJob(id, { reloadJobs = true } = {}) {
   state.data = null;
   state.finalUrl = null;
   state.matrixScope = null;
-  state.persons = state.sources = state.inputs = null;
+  state.persons = state.inputs = null;
   history.replaceState(null, "", `/studio?job=${id}`);
   closeDialog();
   await refresh();
@@ -227,21 +227,83 @@ async function selectJob(id, { reloadJobs = true } = {}) {
 }
 async function loadRecallOptions() {
   const id = state.id;
-  const [persons, status] = await Promise.all([
-  api("/api/persons"),
-  api("/api/status")]
-  );
+  const persons = await api("/api/persons");
   if (id !== state.id) return;
-  if (persons?.entities) state.persons = persons.entities.filter((e) => ["actor", "role"].includes(e.kind));
-  if (status?.sources) state.sources = status.sources;
+  if (persons?.entities) {
+    state.persons = persons.entities.filter((e) => ["actor", "role"].includes(e.kind));
+    state.personSources = persons.sources || [];
+  }
+  await loadSources();
+  if (id !== state.id) return;
   for (const entry of state.matrixRows.values()) entry.panelKey = null;
   renderMatrix();
+}
+// 素材是库级列表，创建表单也要用，所以跨任务保留，不随 selectJob 清空。
+async function loadSources() {
+  const status = await api("/api/status");
+  if (status?.sources) {
+    state.sources = status.sources;
+    fillCreateSources();
+    // 素材名要靠这份列表，元信息面板可能早于它渲染，到货后补一次。
+    if (state.data) renderJobMeta();
+  }
+  return state.sources;
+}
+function fillCreateSources() {
+  const select = $("create-sources");
+  if (!select) return;
+  const sources = state.sources || [];
+  fillAllSelect(select, sources, new Set(sources.map((s) => s.id)));
+  select.disabled = sources.length === 0;
+  $("create-sources-empty").hidden = sources.length > 0;
+}
+// 创建时选中的素材；全选等价于「不限」，因此不传 source_ids。
+function createSourceScope() {
+  const select = $("create-sources");
+  const sources = state.sources || [];
+  if (!sources.length) return null;
+  const picked = pickedIds(select);
+  return picked.length === sources.length ? null : picked;
+}
+// 任务级素材范围：null 表示不限。逐镜编辑器只能在这个范围内二次选择。
+function jobScope() {
+  const ids = state.data?.job?.source_ids;
+  return ids?.length ? new Set(ids) : null;
+}
+function scopedSourceEntries() {
+  const scope = jobScope();
+  return (state.sources || []).filter((s) => !scope || scope.has(s.id));
 }
 function personName(id) {
   return state.persons?.find((p) => p.id === id)?.name || shortId(id);
 }
 function sourceName(id) {
   return state.sources?.find((s) => s.id === id)?.name || shortId(id);
+}
+// 任务元信息只读：把创建任务时用的参数原样摊开，便于复盘和确认可用素材。
+function renderJobMeta() {
+  const job = state.data.job, o = job.options || {}, body = $("job-meta-body");
+  const audioModes = {
+    tts_only: MindexI18n.msg("ui.1801c99c1d7d"),
+    ducking: MindexI18n.msg("ui.b49af7ac7ca1")
+  };
+  const rows = [
+    // 文案保留非空行，素材列表独占整行并逐项展示。
+    ["ui.7407393d52c7", (job.input_text || "").split(/\r?\n/).filter((line) => line.trim()).join("\n"), true],
+    ["ui.84e3802f60a7", MindexI18n.date(job.created_at)],
+    ["ui.f711792f098b", (job.source_ids?.length ? job.source_ids : (state.sources || []).map((s) => s.id)).map(sourceName).join("\n") || MindexI18n.msg("ui.0a9eab1a4d36"), true],
+    ["ui.d19e8611d29b", audioModes[o.audio_mode] || o.audio_mode],
+    ["ui.aaa5f2e9f006", o.burn ? MindexI18n.msg("ui.3f4dbcbdf0ab") : MindexI18n.msg("ui.ea2d04f98746")],
+    ["ui.88af53b5b584", o.recall_limit]
+  ];
+  body.replaceChildren();
+  for (const [label, value, wide] of rows) {
+    const row = el("div", undefined, wide ? "job-meta-row wide" : "job-meta-row"),
+      term = el("dt", MindexI18n.msg(label)),
+      detail = el("dd", value == null ? "—" : String(value));
+    row.append(term, detail);
+    body.append(row);
+  }
 }
 async function inputUrl(mediaId) {
   const id = state.id;
@@ -309,6 +371,7 @@ function render() {
     el("p", MindexI18n.msg("ui.1c83d271dc5a", { p0: job.id }), "muted")
   );
   const select = $("plan-select");
+  renderJobMeta();
   select.replaceChildren();
   for (const item of Object.values(state.data.plans)) {
     const o = el("option", item.name);
@@ -433,7 +496,9 @@ function updateLocks() {
   if (!state.data) return;
   const locked = busy(),
     dirty = hasDirtyDraft();
-  $("collapse-all-rows").disabled = !expandedRows().size;
+  const collapse = $("collapse-all-rows");
+  collapse.disabled = !order().length;
+  MindexI18n.setText(collapse, MindexI18n.msg(expandedRows().size ? "ui.57f2d43c7d09" : "ui.expand_all_rows"));
   for (const id of [
   "plan-select",
   "new-plan",
@@ -445,7 +510,7 @@ function updateLocks() {
     $(id).disabled = locked || dirty && id !== "plan-select";
     MindexI18n.setAttr($(id), "title", dirty && id !== "plan-select" ? MindexI18n.msg("ui.9f185b0cc351") : "");
   }
-  document.querySelectorAll(".regenerate-column").forEach((n) => {
+  document.querySelectorAll(".regenerate-column, .execute-column").forEach((n) => {
     n.disabled =
     locked || dirty || n.dataset.stage !== "split" && !order().length;
     MindexI18n.setAttr(n, "title", dirty ? MindexI18n.msg("ui.9f185b0cc351") :
@@ -479,7 +544,9 @@ function toggleCell(sid, stage) {
 }
 function collapseAllRows() {
   if (!state.data) return;
-  expandedRows().clear();
+  const expanded = expandedRows();
+  if (expanded.size) expanded.clear();
+  else for (const sid of order()) expanded.set(sid, "content");
   renderMatrix();
 }
 function invalidatePanel(sid) {
@@ -777,6 +844,16 @@ function queryPreviewNode(url, kind) {
   }
   return media("video", url);
 }
+function scopedRecallPersons(value) {
+  const selected = value?.filters?.source_ids?.length ? value.filters.source_ids :
+    value?.filters?.source_id ? [value.filters.source_id] : scopedSourceEntries().map((s) => s.id);
+  const sources = new Set(selected);
+  const works = new Set((state.personSources || []).filter((s) => sources.has(s.id)).map((s) => s.work_id));
+  const roles = (state.persons || []).filter((p) => p.kind === "role" &&
+    (p.work_ids || []).some((id) => works.has(id)));
+  const actors = new Set(roles.flatMap((p) => p.actor_ids || []));
+  return [...(state.persons || []).filter((p) => p.kind === "actor" && actors.has(p.id)), ...roles];
+}
 function renderRecallEditor(body, sid, draft) {
   const section = el("div", "", "recall-editor");
   const commit = (next) => {
@@ -813,7 +890,7 @@ function renderRecallEditor(body, sid, draft) {
     if (mode === "text") {
       // 与检索页一致：演员和角色两级，角色按已选演员过滤；后端仍只收 person_ids。
       const chosen = new Set(value?.person_ids || []);
-      const persons = state.persons || [];
+      const persons = scopedRecallPersons(value);
       const actorField = multiField(MindexI18n.msg("ui.acc714bb0167"));
       const roleField = multiField(MindexI18n.msg("ui.224f21d3016f"));
       const commitPersons = () => {
@@ -906,15 +983,24 @@ function renderRecallEditor(body, sid, draft) {
     }
     const sourceField = multiField(MindexI18n.msg("ui.df2bc29adabb"));
     sourceField.select.dataset.recallFilter = "source_ids";
+    // 只列任务范围内的素材；越界的旧值（历史数据或手改 API）一并裁掉。
+    const entries = scopedSourceEntries();
+    const scope = jobScope();
     const sources = value?.filters?.source_ids?.length ? value.filters.source_ids : value?.filters?.source_id ? [value.filters.source_id] : [];
-    fillAllSelect(sourceField.select, state.sources || [], new Set(sources));
+    const chosen = new Set((sources.length ? sources : entries.map((entry) => entry.id)).filter((id) => !scope || scope.has(id)));
+    fillAllSelect(sourceField.select, entries, chosen);
     sourceField.wrap.append(el("span", MindexI18n.msg("ui.c1b8365074c7"), "muted"));
     sourceField.select.addEventListener("change", () => {
       toggleAllOf(sourceField.select);
+      const picked = pickedIds(sourceField.select);
       const next = recallEditable(draft.data.recall);
       next.filters.source_id = null;
-      next.filters.source_ids = pickedIds(sourceField.select);
+      // 全选 = 不写筛选，签名保持默认，历史召回版本继续复用。
+      next.filters.source_ids = picked.length === entries.length ? [] : picked;
+      const allowed = new Set(scopedRecallPersons(next).map((p) => p.id));
+      next.person_ids = next.person_ids.filter((id) => allowed.has(id));
       commit(next);
+      draw();
     });
     const filters = el("div", "", "recall-filters");
     filters.append(sourceField.wrap);
@@ -1141,8 +1227,11 @@ function renderStageDetails(body, sid, stage) {
         )
       );
       const sources = recall?.filters?.source_ids?.length ? recall.filters.source_ids : recall?.filters?.source_id ? [recall.filters.source_id] : [];
+      const jobMaterials = jobScope();
       if (sources.length)
       body.append(el("p", MindexI18n.msg("ui.81f420e6a6d2", { p0: sources.map(sourceName).join("、") })));
+      else if (jobMaterials)
+      body.append(el("p", MindexI18n.msg("ui.9213d98274d9", { n: jobMaterials.size }), "muted"));
       for (const [key, label] of [["scene", "ui.625b392c7b8a"], ["emotion", "ui.61fe61644a75"], ["shot_size", "ui.6867f7b4537a"], ["min_duration", "ui.26b6f15b345b"], ["max_duration", "ui.2de8ce6144b7"]]) {
         if (recall?.filters?.[key]) body.append(el("p", `${MindexI18n.msg(label)}：${recall.filters[key]}`));
       }
@@ -1236,18 +1325,18 @@ function renderStageDetails(body, sid, stage) {
   history.dataset.rowHistory = stage;
   body.append(el("h4", MindexI18n.msg("ui.a3bc41e89f3b")), history);
 }
-async function regenerateColumn(stage) {
+async function regenerateColumn(stage, force = true) {
   if (busy() || hasDirtyDraft()) return;
   const inputs_by_shot = {};
   if (stage !== "split")
   for (const sid of order()) inputs_by_shot[sid] = nodeInputs(stage, sid);
   const url = planBase(),
-    body = { revision: state.data.revision, stage, inputs_by_shot };
+    body = { revision: state.data.revision, stage, inputs_by_shot, force };
   state.submitting = true;
   render();
   try {
-    await api(`${url}/regenerate-column`, "POST", body);
-    notice(MindexI18n.msg("ui.92157547f1b7", { p0: LABEL[stage] }));
+    await api(`${url}/${force ? "regenerate-column" : "execute-column"}`, "POST", body);
+    notice(MindexI18n.msg(force ? "ui.92157547f1b7" : "ui.execute_column_submitted", { p0: LABEL[stage] }));
   } finally {
     state.submitting = false;
     await refresh();
@@ -1610,6 +1699,8 @@ function renderCandidatePicker(body, sid) {
       preview.append(img);
     }
     preview.append(el("span", String(c.rank || index + 1), "candidate-rank"));
+    if (selected) preview.append(el("span", MindexI18n.msg("ui.anchor_selected"), "candidate-selection"));
+    card.dataset.candidateId = c.id || c.segment_id;
     card.append(preview);
     // 每个演员—角色组合只显示一次，优先保留带匹配参考图的最高分证据。
     const identities = new Map();
@@ -1652,6 +1743,19 @@ function renderCandidatePicker(body, sid) {
   }
   picker.append(pool);
   body.append(picker);
+  if (choice.mode === "auto") {
+    const scope = scopeKey();
+    api(`${planBase()}/shots/${encodeURIComponent(sid)}/selection-anchor`).then((result) => {
+      if (!picker.isConnected || scope !== scopeKey() || plan().shots[sid].recall !== recall ||
+          (plan().anchors?.[sid]?.mode || "auto") !== "auto") return;
+      for (const card of pool.children) {
+        if (card.dataset.candidateId === result.candidate_id)
+          card.querySelector(".candidate-image").append(el("span", MindexI18n.msg("ui.anchor_automatic"), "candidate-selection"));
+      }
+    }).catch((error) => {
+      if (picker.isConnected) picker.append(el("p", shortIds(error.message), "warn-text"));
+    });
+  }
 }
 async function selectAnchor(sid, choice) {
   await accept(await api(`${planBase()}/anchor`, "POST", {
@@ -2308,10 +2412,10 @@ $("plan-settings").addEventListener("click", editSettings);
 $("run-all").addEventListener("click", () => preflight().catch(fail));
 $("collapse-all-rows").addEventListener("click", collapseAllRows);
 document.
-querySelectorAll(".regenerate-column").
+querySelectorAll(".regenerate-column, .execute-column").
 forEach((n) =>
 n.addEventListener("click", () =>
-regenerateColumn(n.dataset.stage).catch(fail)
+regenerateColumn(n.dataset.stage, !n.classList.contains("execute-column")).catch(fail)
 )
 );
 const matrixResize = new ResizeObserver((entries) => {
@@ -2326,12 +2430,17 @@ $("create-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   $("create-button").disabled = true;
   try {
+    const scope = createSourceScope();
+    if (scope && !scope.length)
+      throw new Error(MindexI18n.msg("ui.0fb24191cd2c"));
     const job = await api("/api/studio/jobs", "POST", {
       text: $("create-text").value,
       options: {
         audio_mode: $("create-audio-mode").value,
         burn: $("create-burn").value === "true",
-        recall_limit: Number($("create-recall-limit").value)
+        recall_limit: Number($("create-recall-limit").value),
+        // 全选时 scope 为 null：不限素材，后续新增素材自动可用。
+        ...(scope ? { source_ids: scope } : {})
       }
     });
     await selectJob(job.id);
@@ -2345,6 +2454,8 @@ $("create-form").addEventListener("submit", async (event) => {
 });
 async function boot() {
   const id = new URLSearchParams(location.search).get("job");
+  // 创建表单在选任务之前就要列出素材；和任务列表一样不阻塞工作台首屏。
+  loadSources().catch(() => {});
   await Promise.all([
     loadJobs(),
     id ? selectJob(id, { reloadJobs: false }) : Promise.resolve()

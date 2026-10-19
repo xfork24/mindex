@@ -15,7 +15,7 @@ from .config import Config, fingerprint
 from .media import MediaError, audio_info
 from .shot_media import ShotMedia
 from .studio_artifacts import ArtifactSession, current, digest, visibility_key
-from .types import ShotDraft, TextSearch
+from .types import Filters, ShotDraft, TextSearch
 
 coverage_warning = studio.coverage_warning
 
@@ -87,20 +87,23 @@ def run_recall(config: Config, job_id: str, state: dict, embedder: MultimodalEmb
     empty: list[str] = []
     session = current.get()
     visibility = visibility_key(store)
+    scope = studio.material_scope(state)
     for shot in storyboard.shots:
         target = directory / f"{shot.id}.json"
         logical = f"candidates/{shot.id}.json"
-        key = fingerprint(
-            {
-                "query": shot.query,
-                "index_id": active["id"],
-                "limit": limit,
-                "granularity": config.studio.recall.granularity,
-                "search": config.search.model_dump(),
-                "embedding": config.embedding.model_dump(),
-                "visibility": visibility,
-            }
-        )
+        signature = {
+            "query": shot.query,
+            "index_id": active["id"],
+            "limit": limit,
+            "granularity": config.studio.recall.granularity,
+            "search": config.search.model_dump(),
+            "embedding": config.embedding.model_dump(),
+            "visibility": visibility,
+        }
+        # 只在有限制时加键，保证不限任务的检查点与历史产物逐字节一致。
+        if scope:
+            signature["sources"] = sorted(scope)
+        key = fingerprint(signature)
         cached_path = session.reuse(logical, key) if session else None
         if cached_path:
             cached = json.loads(cached_path.read_text())
@@ -108,7 +111,12 @@ def run_recall(config: Config, job_id: str, state: dict, embedder: MultimodalEmb
                 empty.append(shot.id)
             continue
         result = engine.text(
-            TextSearch(text=shot.query, granularity=config.studio.recall.granularity, limit=limit)
+            TextSearch(
+                text=shot.query,
+                granularity=config.studio.recall.granularity,
+                limit=limit,
+                filters=studio.scoped_filters(Filters(), scope),
+            )
         )
         entries = [
             {

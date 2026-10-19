@@ -162,3 +162,21 @@ def test_log_partial_append_and_legacy_record(config):
     assert len(items) == 1
     assert {key: items[0][key] for key in event} == event
     assert items[0]["message_key"] and items[0]["message_params"] == {}
+
+
+def test_execute_column_reuses_successes_and_runs_missing_cells(config):
+    jid, w, p = setup_workspace(config)
+    speaker = FixtureSpeaker(config)
+    old = ws.execute(config, jid, w, p, "tts", "a", speaker=speaker)
+    client = TestClient(create_app(config, speaker=speaker))
+    response = client.post(
+        f"/api/studio/jobs/{jid}/plans/{p['id']}/execute-column",
+        json=request_body(config, jid, w, p, "tts"),
+    )
+    assert response.status_code == 202, response.text
+    done = wait_build(client, jid)
+    build = done["builds"][-1]
+    assert build["force"] is False
+    assert [n["status"] for n in build["nodes"]] == ["reused", "complete"]
+    assert done["plans"][p["id"]]["shots"]["a"]["tts"] == old
+    assert speaker.calls == 2

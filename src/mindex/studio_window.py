@@ -98,7 +98,7 @@ def resolve_anchor(config, w, p, sid, target):
 
 
 def neighborhood(rows, anchor, length):
-    """Count neighbours outside the entire anchor group; never cross a gap or hidden shot."""
+    """Grow context to twice the voice duration, balancing the original side durations."""
     start, end = anchor["start"], anchor["end"]
     indices = [i for i, r in enumerate(rows) if r["start"] < end - 1e-6 and r["end"] > start + 1e-6]
     if not indices:
@@ -129,16 +129,27 @@ def neighborhood(rows, anchor, length):
         if can_next():
             hi += 1
     default = {"start": rows[lo]["start"], "end": rows[hi]["end"]}
+    anchor_start, anchor_end = rows[indices[0]]["start"], rows[indices[-1]]["end"]
+    before = anchor_start - default["start"]
+    after = default["end"] - anchor_end
     extra_before = extra_after = 0
-    while length and rows[hi]["end"] - rows[lo]["start"] < length - 1e-9:
-        if can_next():
-            hi += 1
-            extra_after += 1
-        elif can_prev():
+    while length and rows[hi]["end"] - rows[lo]["start"] < 2 * length - 1e-9:
+        prev, nxt = can_prev(), can_next()
+        if not prev and not nxt:
+            break
+        # Balance growth in seconds relative to each side's original duration.
+        # A blocked side hands its remaining share to the other side.
+        grow_before = prev and (
+            not nxt
+            or (anchor_start - rows[lo]["start"]) / before
+            <= (rows[hi]["end"] - anchor_end) / after
+        )
+        if grow_before:
             lo -= 1
             extra_before += 1
         else:
-            break
+            hi += 1
+            extra_after += 1
     return rows[lo : hi + 1], default, {"before": extra_before, "after": extra_after}
 
 

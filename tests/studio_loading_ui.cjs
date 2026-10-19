@@ -18,6 +18,7 @@ const sandbox = {
   async refresh() { calls.push("workspace"); },
   async loadArtifacts() { calls.push("artifacts"); return artifactsResponse; },
   async loadRecallOptions() { calls.push("options"); },
+  async loadSources() { calls.push("sources"); },
 };
 vm.createContext(sandbox);
 vm.runInContext(source.slice(source.indexOf("async function loadJobs("), source.indexOf("async function loadRecallOptions(")), sandbox);
@@ -25,7 +26,7 @@ vm.runInContext(source.slice(source.indexOf("async function boot("), source.inde
 (async () => {
   const boot = sandbox.boot();
   await new Promise(resolve => setImmediate(resolve));
-  assert.deepEqual(calls, ["/api/studio/jobs", "workspace", "artifacts", "options"]);
+  assert.deepEqual(calls, ["sources", "/api/studio/jobs", "workspace", "artifacts", "options"]);
   assert.equal(sandbox.state.id, "selected");
   releaseList({items: [{id: "selected", title: "Selected", created_at: "2026-10-18"}]});
   await boot; // Artifacts remain pending and cannot block the main workspace.

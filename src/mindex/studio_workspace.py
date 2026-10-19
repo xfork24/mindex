@@ -629,6 +629,9 @@ def specification(config, job_id, w, p, stage, sid=None, *, context=None):
         inputs = {"content": selected["content"]}
         if stage == "recall":
             payload = {"query": content["query"]}
+            # 只在有限制时加键，保证不限任务的签名与历史版本逐字节一致。
+            if scope := studio.material_scope(studio.load_job(config, job_id)):
+                params = {**params, "sources": sorted(scope)}
             recall = recall_signature(content.get("recall"))
             if recall is not None:
                 payload["recall"] = recall
@@ -652,6 +655,7 @@ def specification(config, job_id, w, p, stage, sid=None, *, context=None):
                 "tts": inputs["tts"],
                 "recall": inputs.get("recall"),
                 "range": p["ranges"].get(sid),
+                "default_window_version": 2,
             }
             if p.get("anchors", {}).get(sid, {}).get("mode") == "manual":
                 payload["anchor"] = p["anchors"][sid]
@@ -931,6 +935,16 @@ def alignment(config, job_id, w, p, sid, selected_range=None):
         raise studio.StudioError(error)
     if selected_range and selected_range.get("anchor_ref"):
         return studio_window.alignment(config, job_id, w, p, sid, selected_range)
+    if selected_range is None:
+        ctx = studio_window.context(config, job_id, w, p, sid)
+        if ctx["ready"]:
+            default, _ = studio_window.selected_range(
+                config, job_id, w, p, sid, ctx["context_token"], ctx["initial_start"],
+                ref=ctx["anchor_ref"], tts_version=ctx["tts_version"], _context=ctx,
+            )
+            data = studio_window.alignment(config, job_id, w, p, sid, default, _context=ctx)
+            data["manual"] = False
+            return data
     selected = p["shots"][sid]
     speech = version(w, selected.get("tts"))
     if speech["status"] != "complete":
@@ -1265,6 +1279,8 @@ def execute(config, job_id, w, p, stage, sid=None, *, speaker=None, storyboarder
             )
             mode = recall.mode if recall else "text"
             meta = {}
+            # 任务素材范围是硬上限，回显的 recall 仍是用户原始设置。
+            scope = studio.material_scope(studio.load_job(config, job_id))
             if mode == "text":
                 result = engine.text(
                     TextSearch(
@@ -1274,7 +1290,7 @@ def execute(config, job_id, w, p, stage, sid=None, *, speaker=None, storyboarder
                         person_ids=recall.person_ids if recall else [],
                         person_mode=recall.person_mode if recall else "auto",
                         person_relation=recall.person_relation if recall else "all",
-                        filters=recall.filters if recall else Filters(),
+                        filters=studio.scoped_filters(recall.filters if recall else Filters(), scope),
                     )
                 )
                 meta = {
@@ -1296,7 +1312,7 @@ def execute(config, job_id, w, p, stage, sid=None, *, speaker=None, storyboarder
                     query_media(config, job_id, recall),
                     granularity=config.studio.recall.granularity,
                     limit=params["limit"],
-                    filters=recall.filters,
+                    filters=studio.scoped_filters(recall.filters, scope),
                 )
             entries = [
                 {

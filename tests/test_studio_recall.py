@@ -15,6 +15,7 @@ from mindex import studio
 from mindex import studio_workspace as ws
 from mindex.api import create_app
 from mindex.indexing import IndexBuilder
+from mindex.media import cut
 from mindex.pipeline import Pipeline
 from mindex.storage import Store
 from mindex.studio import Shot, ShotRecall
@@ -94,8 +95,32 @@ def prepared(config, video_file):
     return config, embedder
 
 
+@pytest.fixture
+def two_sources(config, video_file, tmp_path):
+    """两个素材（第二个由第一个裁出 1~3 秒），用于验证任务级素材范围。"""
+    config.studio.render.width = 160
+    config.studio.render.height = 120
+    config.studio.render.preset = "ultrafast"
+    config.studio.render.fps = 29.97
+    pipeline = Pipeline(config)
+    first = pipeline.prepare(video_file)
+    second_video = tmp_path / "second.mp4"
+    cut(video_file, 1, 3, second_video)
+    second = pipeline.prepare(second_video)
+    embedder = FixtureEmbedder(config)
+    IndexBuilder(config, embedder).build(mode="visual", kinds=("shot",), activate=True)
+    return config, embedder, first, second
+
+
 def setup_workspace(config):
-    job_id = studio.create_job(config, "红色开场。蓝色结尾。", options={"burn": False})["id"]
+    return setup_workspace_with(config, None)
+
+
+def setup_workspace_with(config, source_ids):
+    options = {"burn": False}
+    if source_ids is not None:
+        options["source_ids"] = source_ids
+    job_id = studio.create_job(config, "红色开场。蓝色结尾。", options=options)["id"]
     w = ws.load(config, job_id)
     p = ws.plan(w, w["active_plan"])
     ws.set_board(
@@ -153,6 +178,74 @@ def test_default_recall_keeps_legacy_signature_and_reuse(prepared):
     set_recall(config, jid, w, p, 0, ShotRecall())
     actions = {node["key"]: node["action"] for node in ws.preflight(config, jid, w, p)["nodes"]}
     assert actions["recall:a"] == "reuse" and actions["recall:b"] == "reuse"
+
+
+def recall_sources(config, jid, w, p, sid="a"):
+    data = ws.version(w, p["shots"][sid]["recall"])["data"]
+    return {item["source_id"] for item in data["results"]}
+
+
+# ---------------------------------------------------------------- 任务级素材范围
+
+
+def test_job_scope_limits_recall_to_chosen_sources(two_sources):
+    config, embedder, _first, second = two_sources
+    jid, w, p = setup_workspace_with(config, [second])
+    assert studio.load_job(config, jid)["source_ids"] == [second]
+    w, p = build(config, jid, w, p, embedder)
+    assert recall_sources(config, jid, w, p) == {second}
+    assert recall_sources(config, jid, w, p, "b") == {second}
+
+
+def test_job_scope_absent_means_every_source(two_sources):
+    config, embedder, first, second = two_sources
+    jid, w, p = setup_workspace_with(config, None)
+    assert studio.load_job(config, jid)["source_ids"] is None
+    w, p = build(config, jid, w, p, embedder)
+    assert recall_sources(config, jid, w, p) == {first, second}
+
+
+def test_job_scope_clamps_shot_scope_by_intersection(two_sources):
+    """分镜只能在本任务范围内二次选择；越界项被裁掉而不是放行。"""
+    config, embedder, first, second = two_sources
+    jid, w, p = setup_workspace_with(config, [second])
+    set_recall(config, jid, w, p, 0, ShotRecall(filters={"source_ids": [first, second]}))
+    w, p = build(config, jid, w, p, embedder)
+    assert recall_sources(config, jid, w, p) == {second}
+
+    set_recall(config, jid, w, p, 0, ShotRecall(filters={"source_ids": [first]}))
+    fresh = ws.load(config, jid)
+    with pytest.raises(studio.StudioError, match="没有交集"):
+        ws.execute(config, jid, fresh, ws.plan(fresh, p["id"]), "recall", "a", embedder=embedder)
+
+
+def test_job_scope_signature_is_stable_when_unlimited(prepared):
+    """不限任务不得因为新增字段改变签名，否则历史召回版本全部失效。"""
+    config, _embedder = prepared
+    jid, w, p = setup_workspace(config)
+    assert "sources" not in ws.specification(config, jid, w, p, "recall", "a")["parameters"]
+
+
+def test_job_scope_rejects_empty_and_unknown_sources(prepared):
+    config, _embedder = prepared
+    (source_id,) = [row["id"] for row in Store(config.data_dir).sources()]
+    with pytest.raises(studio.StudioError, match="至少选择一个素材"):
+        studio.create_job(config, "红色开场。", options={"source_ids": []})
+    with pytest.raises(studio.StudioError, match="素材不存在"):
+        studio.create_job(config, "红色开场。", options={"source_ids": ["不存在"]})
+    job = studio.create_job(config, "红色开场。", options={"source_ids": [source_id]})
+    assert job["source_ids"] == [source_id]
+
+
+def test_scoped_filters_intersects_without_scope():
+    assert studio.scoped_filters(Filters(), None).selected_sources() == set()
+    inside = studio.scoped_filters(Filters(source_ids=["a"]), {"a"})
+    assert inside.selected_sources() == {"a"}
+    assert studio.scoped_filters(Filters(source_id="a"), {"a"}).selected_sources() == {"a"}
+    assert studio.scoped_filters(Filters(source_ids=["a", "b"]), {"a"}).selected_sources() == {"a"}
+    assert studio.scoped_filters(Filters(), {"a", "b"}).selected_sources() == {"a", "b"}
+    with pytest.raises(studio.StudioError, match="没有交集"):
+        studio.scoped_filters(Filters(source_ids=["b"]), {"a"})
 
 
 def test_document_auto_recall_invalidates_legacy_cache_only(prepared, monkeypatch):

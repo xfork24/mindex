@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import io
 import wave
+from itertools import pairwise
 
 import numpy as np
 import pytest
@@ -27,8 +28,8 @@ def rows(count=10):
     [
         (2, 3, 1, list(range(5)), (0, 0)),
         (2.2, 4.7, 1, list(range(7)), (0, 0)),
-        (2, 3, 8, list(range(8)), (0, 3)),
-        (8, 9, 7, list(range(3, 10)), (3, 0)),
+        (2, 3, 4, list(range(8)), (0, 3)),
+        (8, 9, 3.5, list(range(3, 10)), (3, 0)),
         (0, 1, 1, list(range(3)), (0, 0)),
         (9, 10, 1, [7, 8, 9], (0, 0)),
     ],
@@ -37,6 +38,24 @@ def test_default_neighborhood_anchor_group_and_minimal_extension(start, end, len
     result, _, extension = window.neighborhood(rows(), {"start": start, "end": end}, length)
     assert [int(r["id"]) for r in result] == expected
     assert (extension["before"], extension["after"]) == extra
+
+
+@pytest.mark.parametrize("scale", [1, 2])
+def test_context_growth_balances_side_durations(scale):
+    # The preceding shots are twice as long: extending each side by one shot
+    # preserves the original 2:1 duration ratio.
+    bounds = [0, 2, 4, 6, 8, 9, 10, 11, 12, 13]
+    timeline = [
+        {"id": str(i), "start": a * scale, "end": b * scale, "visible": True}
+        for i, (a, b) in enumerate(pairwise(bounds))
+    ]
+    result, default, extension = window.neighborhood(
+        timeline, {"start": 8 * scale, "end": 9 * scale}, 5 * scale
+    )
+    assert default == {"start": 4 * scale, "end": 11 * scale}
+    assert result[0]["start"] == 2 * scale
+    assert result[-1]["end"] == 12 * scale
+    assert extension == {"before": 1, "after": 1}
 
 
 def test_hidden_shots_and_gaps_stop_extension():
@@ -570,3 +589,37 @@ def test_source_shots_visibility_matches_predicate(refinement):
     # 整个源被隐藏时全部不可见。
     store.execute("INSERT INTO source_curation(id,hidden) VALUES(?,1)", (source_id,))
     assert not any(r["visible"] for r in ws.source_shots(config, source_id))
+
+
+def test_default_selection_moves_back_to_fit_and_renders(refinement):
+    config, jid, w, p, _ = refinement
+    pool = ws.version(w, p["shots"]["a"]["recall"])["data"]["results"]
+    pool.append({**pool[-1], "id": "shot-9", "segment_id": "shot-9", "start": 9, "end": 10})
+    manual(w, p, candidate="shot-9")
+    p["options"]["atempo"] = 0.5
+    speech(config, jid, w, p)
+    ctx = window.context(config, jid, w, p, "a")
+    assert ctx["initial_start"] < ctx["anchor"]["start"]
+    vid = ws.execute(config, jid, w, p, "select", "a")
+    data = ws.version(w, vid)["data"]
+    assert data["actual_range"]["start"] == pytest.approx(ctx["initial_start"])
+    assert data["actual_range"]["end"] == pytest.approx(ctx["context_range"]["end"])
+    assert data["freeze_seconds"] == 0
+    ws.execute(config, jid, w, p, "render", "a")
+
+
+def test_selection_anchor_matches_automatic_scoring_and_manual_choice(refinement):
+    config, jid, w, p, _ = refinement
+    speech(config, jid, w, p)
+    pool = ws.version(w, p["shots"]["a"]["recall"])["data"]["results"]
+    pool[0]["rank"] = 50
+    pool[1]["rank"] = 1
+    ws.persist(config, jid, w)
+    client = TestClient(create_app(config))
+    url = f"/api/studio/jobs/{jid}/plans/{p['id']}/shots/a/selection-anchor"
+    response = client.get(url)
+    assert response.status_code == 200, response.text
+    assert response.json()["candidate_id"] == window.context(config, jid, w, p, "a")["anchor_ref"]["candidate_id"]
+    manual(w, p, candidate="shot-2")
+    ws.persist(config, jid, w)
+    assert client.get(url).json()["candidate_id"] == "shot-2"

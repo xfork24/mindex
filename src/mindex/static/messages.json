@@ -1,4 +1,9 @@
 {
+  "ui.anchor_selected": {"zh": "已选择", "en": "Selected"},
+  "ui.anchor_automatic": {"zh": "自动选择", "en": "Auto selected"},
+  "ui.execute_column_submitted": {"zh": "已提交{p0}列执行/复用", "en": "Run / reuse submitted for {p0}"},
+  "ui.expand_all_rows": {"zh": "展开所有行", "en": "Expand all rows"},
+  "ui.execute_all_reuse": {"zh": "全部执行/复用", "en": "Run / reuse all"},
   "ui.acfbb1e1a397": {
     "zh": "Mindex · 视频检索",
     "en": "Mindex · Video search"
@@ -1188,7 +1193,7 @@
     "en": "Collapse all rows"
   },
   "ui.5727d4463f7c": {
-    "zh": "文本与查询",
+    "zh": "文案与查询",
     "en": "Text and query"
   },
   "ui.2d41d4534686": {
@@ -7158,5 +7163,37 @@
   "ui.44a52eb27973": {
     "zh": "待分析 {count} 个片段",
     "en": "{count} clips pending analysis"
+  },
+  "ui.f711792f098b": {
+    "zh": "可用素材",
+    "en": "Media library"
+  },
+  "ui.833c18d4bee3": {
+    "zh": "本任务的召回只在这里列出的素材中进行；逐镜的素材范围只能在其中二次选择",
+    "en": "Recall for this job stays within the media listed here; each shot may narrow it further."
+  },
+  "ui.8c638554b6f7": {
+    "zh": "素材库为空，暂无可用素材",
+    "en": "The media library is empty, no media available"
+  },
+  "ui.0fb24191cd2c": {
+    "zh": "请至少选择一个素材",
+    "en": "Select at least one media source"
+  },
+  "ui.9213d98274d9": {
+    "zh": "任务素材范围（{n} 个）",
+    "en": "Job media scope ({n})"
+  },
+  "ui.15dcece34f96": {
+    "zh": "任务元信息",
+    "en": "Job details"
+  },
+  "ui.84e3802f60a7": {
+    "zh": "创建时间",
+    "en": "Created at"
+  },
+  "ui.0a9eab1a4d36": {
+    "zh": "不限（全部素材）",
+    "en": "Unrestricted (all media)"
   }
 }

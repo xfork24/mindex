@@ -116,6 +116,36 @@ def test_qwen_storyboarder_rejects_empty_content(config, monkeypatch):
         QwenStoryboarder(config).split("任意文本。")
 
 
+def test_split_prompt_preserves_narration_and_requires_chinese_keywords(config, monkeypatch):
+    """旁白保留原语言，检索词统一为基于该分镜的少量中文词汇。"""
+    systems = []
+    draft = {
+        "shots": [
+            {
+                "text": "The wind crossed the valley.",
+                "query": "山风 山谷",
+                "estimated_seconds": 5.0,
+            }
+        ]
+    }
+
+    def fake_request(method, url, **kwargs):
+        systems.append(kwargs["json"]["messages"][0]["content"])
+        return chat_payload(json.dumps(draft))
+
+    monkeypatch.setattr("mindex.adapters.request", fake_request)
+    drafts = QwenStoryboarder(config).split("The wind crossed the valley.")
+    assert drafts[0].text == "The wind crossed the valley."
+    system = systems[0]
+    assert "与原文相同的语言" in system
+    assert "query 必须使用中文，与原文语言无关" in system
+    assert "2–5 个中文词汇，以空格分隔" in system
+    assert "樟宜机场 旅行 室内" in system
+    assert drafts[0].query == "山风 山谷"
+    assert "自然中文描述" not in system
+    assert "中文解说类" not in system
+
+
 def test_decode_audio_handles_binary_and_json_base64():
     assert decode_audio(b"RIFFxxxx") == b"RIFFxxxx"
     assert decode_audio(b"ID3tag") == b"ID3tag"
