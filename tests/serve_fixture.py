@@ -8,6 +8,7 @@ from pathlib import Path
 import uvicorn
 from conftest import FixtureAnalyzer, FixtureEmbedder, FixtureSpeaker, FixtureStoryboarder
 
+from mindex import settings_api
 from mindex.api import create_app
 from mindex.config import Config
 from mindex.indexing import IndexBuilder
@@ -57,6 +58,8 @@ def main():
             ]
         )
     embedder = FixtureEmbedder(config)
+    # Settings identity probes must use the fixture too, never a configured model service.
+    settings_api.make_embedder = lambda _: embedder
     pipeline = Pipeline(config, analyzer=FixtureAnalyzer(embedder))
     with pipeline.lock():
         pipeline.prepare(video)

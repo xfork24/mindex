@@ -41,6 +41,11 @@ def source_work(store, source):
             (sid,),
         )
     }
+    skipped = {r["segment_id"] for r in store.rows(
+        "SELECT a.segment_id FROM annotations a JOIN segments s ON s.id=a.segment_id "
+        "WHERE s.source_id=? AND json_extract(a.data,'$.status')='skipped' "
+        "AND a.rowid=(SELECT MAX(b.rowid) FROM annotations b WHERE b.segment_id=a.segment_id)", (sid,)
+    )}
     dialogue = current_dialogue(store, sid) or {}
     latest_dialogue = store.one(
         "SELECT data FROM channel_data WHERE source_id=? AND channel='dialogue'", (sid,)
@@ -82,7 +87,7 @@ def source_work(store, source):
                 **source["channels"]["dialogue"],
                 **{
                     k: dialogue.get(k)
-                    for k in ("source", "selected_track", "model_identity", "fallback_reason")
+                    for k in ("source", "selected_track", "subtitle_file", "model_identity", "fallback_reason")
                 },
                 "utterances": len(dialogue.get("utterances", [])),
             },
@@ -94,7 +99,8 @@ def source_work(store, source):
             if annotations
             else "not_processed",
             "result": {
-                "analyzed": len(annotations),
+                "analyzed": len(annotations - skipped),
+                "skipped": len(skipped),
                 "total": len(segments),
                 "scenes": sum(s["kind"] == "scene" for s in segments),
             },

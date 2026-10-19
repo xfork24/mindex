@@ -573,7 +573,13 @@ def recall_signature(recall):
     if not recall:
         return None
     value = studio.ShotRecall.model_validate(recall) if isinstance(recall, dict) else recall
-    filters = {k: v for k, v in value.filters.model_dump().items() if v not in (None, 0)}
+    filters = {k: v for k, v in value.filters.model_dump().items() if k != "source_ids" and v not in (None, 0)}
+    sources = sorted(value.filters.selected_sources())
+    if len(sources) == 1:
+        filters["source_id"] = sources[0]
+    elif sources:
+        filters.pop("source_id", None)
+        filters["source_ids"] = sources
     signature = {
         "mode": value.mode,
         "person_ids": sorted(value.person_ids),
@@ -1568,4 +1574,15 @@ def detail(config, job_id, w, *, store=None):
             from urllib.parse import quote
 
             metadata["url"] = f"/api/studio/jobs/{job_id}/artifacts/{quote(metadata['path'], safe='/')}"
+    # Old recall artifacts gain matched-reference display metadata without rewriting versions.
+    references = None
+    for item in result["versions"].values():
+        if item["stage"] != "recall":
+            continue
+        for candidate in item.get("data", {}).get("results", []):
+            for evidence in candidate.get("person_evidence", []):
+                if references is None:
+                    from .person_processing import EvidenceReferences
+                    references = EvidenceReferences(config, store or Store(config.data_dir))
+                evidence["reference_url"] = references.url(evidence)
     return result

@@ -50,12 +50,13 @@ def snapshots_for(builder, source_id, kinds):
                 (segment["id"],),
             )
             value = json.loads(row["data"]) if row else None
+            skipped = bool(value and value.get("status") == "skipped")
             annotation = (
                 Annotation.model_validate(value["annotation"])
-                if value
+                if value and not skipped
                 else Annotation(description="尚未进行语义描述，仅索引视频画面")
             )
-            analysis = "\n".join(annotation.views("").values()) if value else ""
+            analysis = "\n".join(annotation.views("").values()) if value and not skipped else ""
             dialogue = relative_dialogue(transcript, segment["start"], segment["end"]) if transcript else []
             # Old annotations can contain dialogue unavailable in the transcripts table.
             if not transcript and value:
@@ -90,7 +91,7 @@ def snapshots_for(builder, source_id, kinds):
                 }
             if value:
                 metadata["analysis"] = {
-                    "status": "complete",
+                    "status": "skipped" if skipped else "complete",
                     "content_version": versions["analysis"],
                     "input_fingerprint": value.get("input_fingerprint", row["profile"]),
                     "model_identity": value.get("model_identity", {"profile": row["profile"]}),
@@ -102,8 +103,8 @@ def snapshots_for(builder, source_id, kinds):
                     "source_name": source["name"],
                     "source_path": source["path"],
                     "source_duration": json.loads(source["media"])["duration"],
-                    "annotation": annotation.model_dump(),
-                    "annotation_status": "complete" if value else "not_analyzed",
+                    "annotation": None if skipped else annotation.model_dump(),
+                    "annotation_status": "skipped" if skipped else "complete" if value else "not_analyzed",
                     "dialogue": dialogue,
                     "transcript_status": transcript["status"] if transcript else "not_processed",
                     "dialogue_source": transcript.get("source") if transcript else None,

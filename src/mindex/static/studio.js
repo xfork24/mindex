@@ -738,6 +738,7 @@ function recallEditable(value) {
     person_relation: v.person_relation || "all",
     filters: {
       source_id: v.filters?.source_id ?? null,
+      source_ids: [...(v.filters?.source_ids || [])],
       min_duration: v.filters?.min_duration ?? 0,
       max_duration: v.filters?.max_duration ?? null,
       scene: v.filters?.scene ?? null,
@@ -755,6 +756,7 @@ function recallIsDefault(r) {
     r.person_mode === "auto" &&
     r.person_relation === "all" &&
     !r.filters.source_id &&
+    !r.filters.source_ids.length &&
     !r.filters.min_duration &&
     !r.filters.max_duration &&
     !r.filters.scene &&
@@ -856,13 +858,13 @@ function renderRecallEditor(body, sid, draft) {
         mode === "image" ? MindexI18n.msg("ui.22ddb980ec95") : MindexI18n.msg("ui.f753a4b59e3f"),
 
 
-        "form-field"
+        "form-field recall-file-field"
       );
       const fileInput = document.createElement("input");
       fileInput.type = "file";
       fileInput.accept = mode === "image" ? "image/jpeg,image/png,image/webp" : "video/*";
       uploadWrap.append(fileInput);
-      section.append(uploadWrap, button(MindexI18n.msg("ui.6c130ff2346d"), async () => {
+      const uploadButton = button(MindexI18n.msg("ui.6c130ff2346d"), async () => {
         const scope = scopeKey();
         const file = fileInput.files[0];
         if (!file) throw new Error(MindexI18n.msg("ui.7bcc55e19443"));
@@ -882,7 +884,11 @@ function renderRecallEditor(body, sid, draft) {
         commit(next);
         draw();
         notice(MindexI18n.msg("ui.c539109f0cf6"));
-      }));
+      });
+      uploadButton.classList.add("recall-upload-button");
+      const uploadRow = el("div", "", "recall-upload-row");
+      uploadRow.append(uploadWrap, uploadButton);
+      section.append(uploadRow);
       if (value?.media_id) {
         const host = el("div", "", "query-preview-host");
         section.append(host);
@@ -897,17 +903,43 @@ function renderRecallEditor(body, sid, draft) {
         }
       }
     }
-    const sourceChoices = [
-    ["", MindexI18n.msg("ui.e9fd88c43bd7")],
-    ...(state.sources || []).map((s) => [s.id, s.name])];
-
-    const sourceField = field(MindexI18n.msg("ui.df2bc29adabb"), value?.filters?.source_id || "", "text", sourceChoices);
-    sourceField.input.addEventListener("change", () => {
+    const sourceField = multiField(MindexI18n.msg("ui.df2bc29adabb"));
+    sourceField.select.dataset.recallFilter = "source_ids";
+    const sources = value?.filters?.source_ids?.length ? value.filters.source_ids : value?.filters?.source_id ? [value.filters.source_id] : [];
+    fillAllSelect(sourceField.select, state.sources || [], new Set(sources));
+    sourceField.wrap.append(el("span", MindexI18n.msg("ui.c1b8365074c7"), "muted"));
+    sourceField.select.addEventListener("change", () => {
+      toggleAllOf(sourceField.select);
       const next = recallEditable(draft.data.recall);
-      next.filters.source_id = sourceField.input.value || null;
+      next.filters.source_id = null;
+      next.filters.source_ids = pickedIds(sourceField.select);
       commit(next);
     });
-    section.append(sourceField.wrap);
+    const filters = el("div", "", "recall-filters");
+    filters.append(sourceField.wrap);
+    for (const [key, label, placeholder, type] of [
+      ["scene", "ui.625b392c7b8a", "ui.722889427cbf", "text"],
+      ["emotion", "ui.61fe61644a75", "ui.d637fe8494d8", "text"],
+      ["shot_size", "ui.6867f7b4537a", "ui.79b85267c636", "text"],
+      ["min_duration", "ui.26b6f15b345b", null, "number"],
+      ["max_duration", "ui.2de8ce6144b7", null, "number"]
+    ]) {
+      const f = field(MindexI18n.msg(label), value?.filters?.[key] ?? "", type);
+      f.input.dataset.recallFilter = key;
+      if (placeholder) MindexI18n.setAttr(f.input, "placeholder", MindexI18n.msg(placeholder));
+      if (type === "number") {
+        f.input.min = key === "min_duration" ? "0" : "0.1";
+        f.input.step = "0.1";
+      }
+      f.input.addEventListener("input", () => {
+        const next = recallEditable(draft.data.recall);
+        const raw = f.input.value.trim();
+        next.filters[key] = type === "number" ? (raw === "" ? (key === "min_duration" ? 0 : null) : Number(raw)) : raw || null;
+        commit(next);
+      });
+      filters.append(f.wrap);
+    }
+    section.append(filters);
     section.append(
       el(
         "p",
@@ -1107,8 +1139,12 @@ function renderStageDetails(body, sid, stage) {
             recall.person_ids.map(personName).join("、"), p1: recall.person_mode === "onscreen" ? MindexI18n.msg("ui.0b697429bd52") : recall.person_mode === "mentioned" ? MindexI18n.msg("ui.9f7ab435be94") : MindexI18n.msg("ui.4afad877551a"), p2: recall.person_relation === "any" ? MindexI18n.msg("ui.31af9a60c654") : MindexI18n.msg("ui.3bd33bf40e37") })
         )
       );
-      if (recall?.filters?.source_id)
-      body.append(el("p", MindexI18n.msg("ui.81f420e6a6d2", { p0: sourceName(recall.filters.source_id) })));
+      const sources = recall?.filters?.source_ids?.length ? recall.filters.source_ids : recall?.filters?.source_id ? [recall.filters.source_id] : [];
+      if (sources.length)
+      body.append(el("p", MindexI18n.msg("ui.81f420e6a6d2", { p0: sources.map(sourceName).join("、") })));
+      for (const [key, label] of [["scene", "ui.625b392c7b8a"], ["emotion", "ui.61fe61644a75"], ["shot_size", "ui.6867f7b4537a"], ["min_duration", "ui.26b6f15b345b"], ["max_duration", "ui.2de8ce6144b7"]]) {
+        if (recall?.filters?.[key]) body.append(el("p", `${MindexI18n.msg(label)}：${recall.filters[key]}`));
+      }
       if (meta.referenced_people?.length)
       body.append(el("p", MindexI18n.msg("ui.b607edb41246", { p0: [...new Set(meta.referenced_people.map(p => p.name))].join('、') }), "muted"));
       if (meta.person_coverage_missing?.length)
@@ -1188,7 +1224,6 @@ function renderStageDetails(body, sid, stage) {
   }
   if (stage === "select") {
     const host = el("div", "", "manual-range-host");
-    renderCandidatePicker(body, sid);
     body.append(host);
     if (!busy()) manualRange(sid, host).catch((error) => {
       if (host.isConnected) host.replaceChildren(el("p", shortIds(error.message), "warn-text"));
@@ -1562,18 +1597,30 @@ function renderCandidatePicker(body, sid) {
   if (state.data.anchor_conflicts?.[sid])
   picker.append(el("p", shortIds(state.data.anchor_conflicts[sid]), "warn-text"));
   const pool = el("div", "", "detail-candidates");
-  for (const c of item?.data.results || []) {
+  for (const [index, c] of (item?.data.results || []).entries()) {
     const selected = choice.mode === "manual" && choice.recall_version === recall && choice.candidate_id === (c.id || c.segment_id);
     const card = el("div", "", `detail-candidate${selected ? " chosen-candidate" : ""}`);
+    const preview = el("div", "", "candidate-image");
     if (c.thumbnail_url) {
       const img = el("img");
       img.src = c.thumbnail_url;
       MindexI18n.setAttr(img, "alt", c.source_name || shortId(c.source_id));
       img.loading = "lazy";
-      card.append(img);
+      preview.append(img);
     }
-    // 人物出镜证据（最多 3 条）：点击跳人物库分镜审核。
-    for (const evidence of (c.person_evidence || []).slice(0, 3)) {
+    preview.append(el("span", String(c.rank || index + 1), "candidate-rank"));
+    card.append(preview);
+    // 每个演员—角色组合只显示一次，优先保留带匹配参考图的最高分证据。
+    const identities = new Map();
+    const score = (e) => e.data?.original_score ?? e.data?.score ?? 0;
+    for (const evidence of c.person_evidence || []) {
+      const key = JSON.stringify([evidence.actor_id ?? evidence.actor_name ?? null, evidence.role_id ?? evidence.role_name ?? null]);
+      const previous = identities.get(key);
+      const hasReference = Boolean(evidence.reference_url), previousHasReference = Boolean(previous?.reference_url);
+      if (!previous || hasReference && !previousHasReference ||
+      hasReference === previousHasReference && score(evidence) > score(previous)) identities.set(key, evidence);
+    }
+    for (const evidence of identities.values()) {
       const chip = el(
         "a",
         `${evidence.actor_name || MindexI18n.msg("ui.1b37b5539364")}${evidence.role_name ? ` / ${evidence.role_name}` : ""}`,
@@ -1582,16 +1629,18 @@ function renderCandidatePicker(body, sid) {
       chip.href = `/persons?evidence=${evidence.id}`;
       chip.target = "_blank";
       chip.rel = "noopener";
-      if (evidence.image_url) {
-        const shot = el("img");
-        shot.src = evidence.image_url;
-        MindexI18n.setAttr(shot, "alt", MindexI18n.msg("ui.f9e9c0c6b621"));
-        shot.loading = "lazy";
-        chip.prepend(shot);
+      if (evidence.reference_url) {
+        const reference = el("img");
+        reference.src = evidence.reference_url;
+        MindexI18n.setAttr(reference, "alt", MindexI18n.msg("ui.5ad7ccccc4d1", { p0: evidence.role_name || evidence.actor_name || "" }));
+        reference.loading = "lazy";
+        reference.addEventListener("error", () => reference.remove(), { once: true });
+        chip.prepend(reference);
       }
       card.append(chip);
     }
-    card.append(el("p", `${c.rank || ""} · ${c.source_name || shortId(c.source_id)} · ${secs(c.start)}–${secs(c.end)}`),
+    card.append(el("p", c.source_name || shortId(c.source_id), "candidate-source"),
+    el("p", `${secs(c.start)}–${secs(c.end)}`, "candidate-time"),
     button(MindexI18n.msg("ui.de61aa8e1cbc"), () => play(c.media_url, MindexI18n.msg("ui.212e53d576f5"))));
     const choose = mutationButton(selected ? MindexI18n.msg("ui.fca821feca6c") : MindexI18n.msg("ui.218dbf597c7c"), () => selectAnchor(sid, {
       mode: "manual", recall_version: recall, candidate_id: c.id || c.segment_id

@@ -79,6 +79,7 @@ class StoryboardDraft(BaseModel):
 
 class Filters(BaseModel):
     source_id: str | None = None
+    source_ids: list[str] = Field(default_factory=list)
     min_duration: float = Field(default=0, ge=0)
     max_duration: float | None = Field(default=None, gt=0)
     scene: str | None = None
@@ -90,6 +91,10 @@ class Filters(BaseModel):
         if self.max_duration is not None and self.max_duration < self.min_duration:
             raise ValueError("max_duration must be >= min_duration")
         return self
+
+    def selected_sources(self) -> set[str]:
+        """Multi-source selection takes precedence; an empty selection retains legacy behavior."""
+        return set(self.source_ids) or ({self.source_id} if self.source_id else set())
 
 
 class TextSearch(BaseModel):

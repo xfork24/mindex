@@ -30,6 +30,32 @@ class ModelError(RuntimeError):
     pass
 
 
+class AnalysisContentRejected(ModelError):
+    """分析服务明确拒绝当前内容；不重试或改写输入。"""
+
+
+def analysis_content_rejection(response) -> str | None:
+    """只识别明确的内容安全错误，不把普通 4xx 当成可跳过内容。"""
+    if response.status_code not in {400, 403, 422}:
+        return None
+    try:
+        payload = response.json()
+    except (ValueError, AttributeError):
+        payload = {}
+    error = payload.get("error", {}) if isinstance(payload, dict) else {}
+    codes = {str(error.get(key, "")).lower() for key in ("code", "type")} if isinstance(error, dict) else set()
+    detail = _error_detail(response)
+    explicit = re.search(
+        r"不安全或敏感内容|内容安全审核未通过|内容审核不通过|违反.{0,12}内容.{0,8}(?:政策|策略)|"
+        r"content[_ ](?:filter|policy[_ ]violation)|responsibleaipolicyviolation|"
+        r"(?:unsafe|sensitive) content|content.{0,30}(?:blocked|rejected).{0,30}(?:safety|policy)",
+        detail, re.IGNORECASE,
+    )
+    if codes & {"1301", "content_filter", "content_policy_violation", "responsibleaipolicyviolation"} or explicit:
+        return detail or "模型内容安全策略拒绝此片段"
+    return None
+
+
 class InvalidAnalysisResponse(ModelError):
     """A model response that can be retried without changing the input."""
 
@@ -417,6 +443,10 @@ class QwenAnalyzer:
             # HTTP 200 can itself contain truncated/non-JSON content. Network
             # retries and permanent HTTP errors keep their existing behavior.
             if not isinstance(exc, InvalidAnalysisResponse):
+                if isinstance(exc.__cause__, httpx.HTTPStatusError):
+                    reason = analysis_content_rejection(exc.__cause__.response)
+                    if reason:
+                        raise AnalysisContentRejected(reason) from exc
                 if isinstance(exc.__cause__, json.JSONDecodeError):
                     raise InvalidAnalysisResponse("分析服务响应不是有效 JSON") from exc
                 if isinstance(exc.__cause__, httpx.HTTPStatusError) and exc.__cause__.response.status_code == 500:
@@ -458,6 +488,8 @@ class QwenAnalyzer:
             choice = payload["choices"][0]
             message = choice["message"]
             text = message.get("content")
+            if choice.get("finish_reason") in {"content_filter", "sensitive"} or message.get("refusal"):
+                raise AnalysisContentRejected("模型内容安全策略拒绝此片段")
             if choice.get("finish_reason") == "length":
                 raise TruncatedAnalysisResponse(
                     "分析服务输出预算耗尽（finish_reason=length，"
@@ -530,38 +562,78 @@ class QwenAnalyzer:
         return self._chat(content, instructions, validate=self._validate_annotation)
 
     def group_scenes(self, units: list[dict]) -> list[list[int]]:
+        if not units:
+            return []
         compact = [
-            {"start": round(unit["start"], 3), "end": round(unit["end"], 3),
-             "description": unit["description"][:160],
+            {"index": index, "start": round(unit["start"], 3), "end": round(unit["end"], 3),
+             **({"description": unit["description"][:160]} if "description" in unit else {}),
              **({"scene": unit["scene"][:3]} if unit.get("scene") else {})}
-            if "description" in unit else unit
-            for unit in units
+            for index, unit in enumerate(units)
         ]
         content = [{"type": "text", "text": json.dumps(compact, ensure_ascii=False, separators=(",", ":"))}]
+        example = {"scene_starts": [0, 2] if len(units) > 2 else [0]}
         return self._chat(
             content,
             (
                 "将连续影视片段按场景、对白和事件组织成连续场景。"
-                '输出只能是一个 JSON 对象，唯一字段为 groups，例如 {"groups":[[0,1],[2,3]]}。'
+                "只选择场景边界，由程序展开为完整分组。"
+                '输出只能是一个 JSON 对象，唯一字段为 scene_starts，表示每个场景的起始片段 index。'
+                f"本批共有 {len(units)} 个片段，index 为 0 到 {len(units) - 1}；"
+                f"格式示例：{json.dumps(example, separators=(',', ':'))}。示例仅说明格式。"
                 "从 { 开始到 } 结束，禁止代码块、分组说明、理由、标题、总结、"
                 "逐片段复述、方案比较及 JSON 之外的任何文字，不增加其他字段。"
-                "groups 为非空整数数组的数组，索引对应输入列表位置，从0开始。"
-                "按顺序恰好包含每个索引一次，不能跳过、重排或重复。"
+                "scene_starts 必须是非空整数数组，首项为0，其余为新场景起始片段的 index，"
+                "严格递增、无重复，必须在本批索引范围内。无需逐项列出场景内的片段。"
+                "每个场景从起始 index 延续到下一个起始 index 的前一项；"
+                f"最后一个场景自动延续到片段 {len(units) - 1}。索引不是时间戳。"
                 "目标10到30秒是偏好而非最低时长；场景改变、短转场或结尾允许不足10秒，"
                 "不要为凑时长合并无关场景。每组最长45秒。"
-                "输入时间戳为原视频秒数；组时长=最后end-最先start。仅返回最终索引分组。"
+                "输入时间戳为原视频秒数；组时长=最后end-最先start。仅返回最终场景起始索引。"
             ),
             validate=lambda result: self._validate_scene_groups(result, units),
         )
 
     @staticmethod
     def _validate_scene_groups(result, units: list[dict]) -> list[list[int]]:
-        groups = result.get("groups") if isinstance(result, dict) else None
+        # Ask the model only for boundaries. Expanding them locally guarantees
+        # coverage, even when it does not enumerate the last few input clips.
+        if isinstance(result, dict) and "scene_starts" in result:
+            starts = result["scene_starts"]
+            if set(result) != {"scene_starts"}:
+                raise InvalidAnalysisStructure("场景边界响应只能包含 scene_starts 字段")
+            if not isinstance(starts, list) or not starts or any(type(i) is not int for i in starts):
+                raise InvalidAnalysisStructure("scene_starts 必须是非空整数数组，索引必须为整数")
+            if starts[0] != 0:
+                raise InvalidAnalysisStructure("scene_starts 首项必须为0，以覆盖开头片段")
+            if any(i < 0 or i >= len(units) for i in starts):
+                raise InvalidAnalysisStructure(f"scene_starts 索引必须在0到{len(units) - 1}之间")
+            if any(left >= right for left, right in pairwise(starts)):
+                raise InvalidAnalysisStructure("scene_starts 必须严格递增且无重复")
+            groups = [list(range(start, end)) for start, end in pairwise([*starts, len(units)])]
+        else:
+            # Keep accepting the earlier wire format, but never guess how to
+            # repair missing/reordered indices and alter a semantic boundary.
+            groups = result.get("groups") if isinstance(result, dict) else None
         if not isinstance(groups, list) or any(not isinstance(g, list) or not g for g in groups):
             raise InvalidAnalysisStructure("无效场景分组：groups 必须是非空整数数组的数组")
         flat = [i for group in groups for i in group]
-        if any(type(i) is not int for i in flat) or flat != list(range(len(units))):
-            raise InvalidAnalysisStructure("场景分组必须连续、完整且无重复，索引必须为整数")
+        if any(type(i) is not int for i in flat):
+            raise InvalidAnalysisStructure("场景分组索引必须为整数")
+        if flat != list(range(len(units))):
+            seen = set(flat)
+            missing = [i for i in range(len(units)) if i not in seen]
+            duplicates = sorted(i for i in seen if flat.count(i) > 1)
+            outside = sorted(i for i in seen if i < 0 or i >= len(units))
+            mismatch = next(
+                (index for index, actual in enumerate(flat) if actual != index),
+                min(len(flat), len(units)),
+            )
+            raise InvalidAnalysisStructure(
+                "场景分组必须连续、完整且无重复；"
+                f"期望按顺序覆盖0到{len(units) - 1}，缺失索引={missing}，"
+                f"重复索引={duplicates}，越界索引={outside}，首个不匹配位置={mismatch}；"
+                "请改用 scene_starts 返回场景起始索引"
+            )
         if any(units[g[-1]]["end"] - units[g[0]]["start"] > 45.001 for g in groups):
             raise InvalidAnalysisStructure("场景分组超过45秒")
         return groups

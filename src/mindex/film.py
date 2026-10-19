@@ -13,6 +13,7 @@ from urllib.parse import quote
 
 from .config import Config
 from .media import windows
+from .review_style import review_style
 from .storage import Store, dumps
 
 
@@ -111,17 +112,14 @@ def export_source(config: Config, source_id: str, output: Path | None = None) ->
     page = (
         """<!doctype html><html lang="zh-CN"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1"><title>分镜检查</title>
-<style>body{font:16px system-ui;background:#f4f6f2;color:#183b2f;margin:24px}
-main{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
-article{background:white;border-radius:12px;padding:16px}video{width:100%;max-height:240px;background:#111}
-p{overflow-wrap:anywhere}button{padding:10px;margin:8px 8px 16px 0}article[hidden]{display:none}</style>
+<style>__STYLE__</style>
 <h1>"""
         + title
         + f"""</h1><p>计划 {report["planned_shots"]} 个镜头 · {report["planned_moments"]} 个精细片段
  · 已落盘 {len(segments)} 个单元。时间为原片秒数；此页用于人工检查切点，不包含模型描述。</p>
 <nav><button data-filter="shot">镜头</button><button data-filter="moment">精细片段</button>
 <button data-filter="scene">场景</button><button data-filter="all">全部</button></nav>
-<div><button id="previous">上一页</button><span id="page"></span><button id="next">下一页</button></div>
+<div class="pagination"><button id="previous">上一页</button><span id="page"></span><button id="next">下一页</button></div>
 <main></main><template id="cards">"""
         + "".join(cards)
         + """</template>
@@ -135,7 +133,7 @@ document.querySelectorAll('[data-filter]').forEach(b=>b.onclick=()=>filter(b.dat
 document.querySelector('#previous').onclick=()=>{page--;render()};document.querySelector('#next').onclick=()=>{page++;render()};
 filter('shot');</script></html>"""
     )
-    (output / "review.html").write_text(page, encoding="utf-8")
+    (output / "review.html").write_text(page.replace("__STYLE__", review_style()), encoding="utf-8")
     return {
         "output": str(output),
         "review": str(output / "review.html"),

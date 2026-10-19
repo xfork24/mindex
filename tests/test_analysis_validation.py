@@ -152,9 +152,10 @@ def test_pipeline_stores_only_valid_annotations_and_reuses_checkpoints(config, v
     def reply(*args, **kwargs):
         nonlocal annotation_attempts
         bodies.append(kwargs["json"])
-        if "唯一字段为 groups" in kwargs["json"]["messages"][0]["content"]:
+        if "唯一字段为 scene_starts" in kwargs["json"]["messages"][0]["content"]:
             units = json.loads(kwargs["json"]["messages"][1]["content"][0]["text"])
-            return chat_response({"groups": [list(range(len(units)))]})
+            assert [unit["index"] for unit in units] == list(range(len(units)))
+            return chat_response({"scene_starts": [0]})
         annotation_attempts += 1
         scene = "夜景" if annotation_attempts % 2 else ["夜景"]
         return chat_response({"description": "城市灯光倒映水面。", "scene": scene})
@@ -175,3 +176,94 @@ def test_pipeline_stores_only_valid_annotations_and_reuses_checkpoints(config, v
     completed_requests = len(bodies)
     pipeline.analyze(source_id)
     assert len(bodies) == completed_requests
+
+
+def test_scene_boundaries_cover_chinatown_dense_batch_through_final_clip(config, monkeypatch):
+    # Chinatown has 32 units in its first batch. The earlier model response
+    # stopped at index 27; boundaries must still include the final four units.
+    starts = [0, 2, 7, 10, 15, 18, 20, 22, 24, 26]
+    bodies = []
+
+    def reply(*args, **kwargs):
+        bodies.append(kwargs["json"])
+        return chat_response({"scene_starts": starts})
+
+    monkeypatch.setattr(adapters, "request", reply)
+    units = [{"start": i * 0.85, "end": (i + 1) * 0.85, "description": "市场摊位"} for i in range(32)]
+    groups = QwenAnalyzer(config).group_scenes(units)
+    assert [index for group in groups for index in group] == list(range(32))
+    assert [group[0] for group in groups] == starts
+    assert groups[-1] == [26, 27, 28, 29, 30, 31]
+    sent = json.loads(bodies[0]["messages"][1]["content"][0]["text"])
+    assert [unit["index"] for unit in sent] == list(range(32))
+    assert "本批共有 32 个片段，index 为 0 到 31" in bodies[0]["messages"][0]["content"]
+    assert len(bodies) == 1
+
+
+@pytest.mark.parametrize("invalid,reason", [
+    ({"scene_starts": None}, "非空整数数组"),
+    ({"scene_starts": []}, "非空整数数组"),
+    ({"scene_starts": ["0", 1]}, "索引必须为整数"),
+    ({"scene_starts": [False, 1]}, "索引必须为整数"),
+    ({"scene_starts": [0, 1.0]}, "索引必须为整数"),
+    ({"scene_starts": [1]}, "首项必须为0"),
+    ({"scene_starts": [0, -1]}, "0到2之间"),
+    ({"scene_starts": [0, 3]}, "0到2之间"),
+    ({"scene_starts": [0, 1, 1]}, "严格递增且无重复"),
+    ({"scene_starts": [0, 2, 1]}, "严格递增且无重复"),
+    ({"scene_starts": [0], "groups": [[0, 1, 2]]}, "只能包含 scene_starts"),
+    ({"scene_starts": [0]}, "超过45秒"),
+])
+def test_invalid_scene_boundaries_retry_with_specific_feedback(config, monkeypatch, invalid, reason):
+    config.analyzer.response_retries = 1
+    responses = iter([chat_response(invalid), chat_response({"scene_starts": [0, 1, 2]})])
+    bodies, delays = [], []
+
+    def reply(*args, **kwargs):
+        bodies.append(kwargs["json"])
+        return next(responses)
+
+    monkeypatch.setattr(adapters, "request", reply)
+    monkeypatch.setattr(adapters.time, "sleep", delays.append)
+    units = [{"start": i * 20, "end": (i + 1) * 20} for i in range(3)]
+    assert QwenAnalyzer(config).group_scenes(units) == [[0], [1], [2]]
+    assert delays == [1] and len(bodies) == 2
+    assert reason in bodies[1]["messages"][0]["content"]
+    assert bodies[0]["messages"][1] == bodies[1]["messages"][1]
+
+
+def test_legacy_scene_grouping_reports_missing_chinatown_tail(config, monkeypatch):
+    config.analyzer.response_retries = 1
+    responses = iter([
+        chat_response({"groups": [[0, 1], list(range(2, 28))]}),
+        chat_response({"scene_starts": [0, 2, 28]}),
+    ])
+    bodies = []
+
+    def reply(*args, **kwargs):
+        bodies.append(kwargs["json"])
+        return next(responses)
+
+    monkeypatch.setattr(adapters, "request", reply)
+    monkeypatch.setattr(adapters.time, "sleep", lambda _: None)
+    units = [{"start": i, "end": i + 1} for i in range(32)]
+    groups = QwenAnalyzer(config).group_scenes(units)
+    assert groups[-1] == [28, 29, 30, 31]
+    prompt = bodies[1]["messages"][0]["content"]
+    assert "缺失索引=[28, 29, 30, 31]" in prompt
+    assert "重复索引=[]，越界索引=[]" in prompt
+    assert "首个不匹配位置=28" in prompt
+
+
+def test_legacy_reordered_scene_groups_report_first_mismatch():
+    units = [{"start": i, "end": i + 1} for i in range(3)]
+    with pytest.raises(ModelError, match="首个不匹配位置=1"):
+        QwenAnalyzer._validate_scene_groups({"groups": [[0, 2], [1]]}, units)
+
+
+def test_empty_scene_grouping_does_not_call_model(config, monkeypatch):
+    def unexpected(*args, **kwargs):
+        pytest.fail("空输入不应调用模型")
+
+    monkeypatch.setattr(adapters, "request", unexpected)
+    assert QwenAnalyzer(config).group_scenes([]) == []

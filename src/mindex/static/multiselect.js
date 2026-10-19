@@ -1,4 +1,4 @@
-// 共享的多选框搜索组件：作品/演员/角色多选框上方挂一个实时过滤输入框。
+// 共享人物多选组件：一个边框内包含过滤输入和可调高度的列表。
 // 用法（各页 fill 函数内）：
 //   MindexMultiSearch.sort(entries)        —— 渲染前按中文字典序排序
 //   MindexMultiSearch.attach(select)       —— 首次挂搜索框（幂等）
@@ -6,6 +6,7 @@
 (function () {
   'use strict';
   var ALL_VALUE = '__all__';
+  var serial = 0;
   function matches(option, query) {
     return option.value === ALL_VALUE || !query || option.textContent.toLowerCase().includes(query);
   }
@@ -18,6 +19,13 @@
     attach: function (select) {
       if (!select || !select.multiple || select.dataset.searchable) return;
       select.dataset.searchable = '1';
+      if (!select.id) select.id = 'multi-select-' + (++serial);
+      var label = select.closest('label');
+      if (label) label.htmlFor = select.id;
+      var control = document.createElement('div');
+      control.className = 'multi-select';
+      var list = document.createElement('div');
+      list.className = 'multi-list';
       var input = document.createElement('input');
       input.type = 'search';
       input.className = 'multi-search';
@@ -29,13 +37,15 @@
         for (var i = 0; i < select.options.length; i++)
         select.options[i].hidden = !matches(select.options[i], query);
       });
-      select.parentNode.insertBefore(input, select);
+      select.parentNode.insertBefore(control, select);
+      control.append(input, list);
+      list.append(select);
     },
     refilter: function (select) {
       if (!select || !select.multiple || !select.dataset.searchable) return;
       var query = (select.dataset.query || '').toLowerCase();
       for (var j = 0; j < select.options.length; j++)
-      select.options[j].hidden = !matches(select.options[j], query);
+      {select.options[j].hidden = !matches(select.options[j], query);select.options[j].title = select.options[j].textContent;}
     }
   };
   window.MindexMultiSearch = api;

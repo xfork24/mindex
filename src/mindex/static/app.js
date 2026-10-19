@@ -36,8 +36,7 @@ function switchMode(next) {
     $(`${name}-tab`).setAttribute('aria-selected', String(name === mode));
     $(`${name}-input`).hidden = name !== mode;
   }
-  $('person-controls').hidden = mode !== 'text';
-  $('person-hint').hidden = mode !== 'text';
+  $('person-filters').hidden = mode !== 'text';
   if (mode !== 'video') $('query-preview').pause();
   notice();
 }
@@ -101,7 +100,9 @@ bindDrop('image-input', 'image-file', 'image-drop', 'image', showImage);
 bindDrop('video-input', 'video-file', 'video-drop', 'video', showVideo);
 
 function filters() {
-  const values = { source_id: $('source').value, scene: $('scene').value.trim(), emotion: $('emotion').value.trim(), shot_size: $('shot-size').value.trim() };
+  const values = { scene: $('scene').value.trim(), emotion: $('emotion').value.trim(), shot_size: $('shot-size').value.trim() };
+  const sources = selectedValues('source');
+  if (sources.length) values.source_ids = sources;
   for (const [key, id] of [['min_duration', 'min-duration'], ['max_duration', 'max-duration']]) {
     if ($(id).value !== '') values[key] = Number($(id).value);
   }
@@ -269,10 +270,10 @@ function fillRoleOptions() {
   fillOptions('role-select', roles);
 }
 $('filter-reset').onclick = () => {
-  for (const [id, value] of Object.entries({ 'person-mode': 'auto', 'person-relation': 'all', granularity: 'moment', limit: '20', source: '', scene: '', emotion: '', 'shot-size': '', 'min-duration': '', 'max-duration': '' })) $(id).value = value;
-  for (const id of ['actor-select', 'role-select']) {
+  for (const [id, value] of Object.entries({ 'person-mode': 'auto', 'person-relation': 'all', granularity: 'moment', limit: '20', scene: '', emotion: '', 'shot-size': '', 'min-duration': '', 'max-duration': '' })) $(id).value = value;
+  for (const id of ['actor-select', 'role-select', 'source']) {
     applyAll($(id), false);
-    const search = $(id).parentNode.querySelector('.multi-search');
+    const search = $(id).closest('.multi-select').querySelector('.multi-search');
     if (search) search.value = '';
     $(id).dataset.query = '';
     MindexMultiSearch.refilter($(id));
@@ -288,9 +289,7 @@ async function refresh() {
     registeredPeople = catalogue.entities.filter((e) => ['actor', 'role'].includes(e.kind));
     fillOptions('actor-select', registeredPeople.filter((e) => e.kind === 'actor'));
     fillRoleOptions();
-    const current = $('source').value;$('source').replaceChildren(element('option', MindexI18n.msg("ui.e9fd88c43bd7")));
-    $('source').firstChild.value = '';
-    data.sources.forEach((source) => {const option = element('option', source.name);option.value = source.id;$('source').append(option);});$('source').value = current;
+    fillOptions('source', data.sources);
     const count = data.segment_counts.find((item) => item.kind === 'moment')?.count || 0;
     MindexI18n.setText($('library-summary'), MindexI18n.msg("ui.7859fa5eb7a3", { p0: data.sources.length, p1: count }));
     const target = $('library-detail');target.replaceChildren();
@@ -306,6 +305,7 @@ async function refresh() {
 $('refresh').onclick = refresh;
 bindAllToggle('actor-select', fillRoleOptions);
 bindAllToggle('role-select');
+bindAllToggle('source');
 refresh();
 
 $('query').addEventListener('input', () => {

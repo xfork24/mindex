@@ -63,6 +63,7 @@ jieba `cut_for_search` 分词（过滤无中文/字母数字的 token），BM25 
 | `granularity` | `moment`（默认）/ `shot` / `scene` | 精细片段 / 完整镜头 / 语义场景 |
 | `limit` | 1–50，默认 20 | |
 | `filters.source_id` | str | 只在某素材内检索 |
+| `filters.source_ids` | list[str] | 多选素材范围，任一所选素材可命中；非空时优先于 `source_id`，空列表回退单素材字段；均未指定时检索全部素材 |
 | `filters.min_duration` / `max_duration` | float 秒 | 闭区间 |
 | `filters.scene` / `emotion` / `shot_size` | str | 标签**不区分大小写的子串匹配**，多字段取交集；visual 模式下分析字段为空，标签筛选自然无结果 |
 

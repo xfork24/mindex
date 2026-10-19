@@ -46,6 +46,7 @@ STAGE_MESSAGES = {
     "asr": "ASR 转写", "analyze": "片段分析", "scene_grouping": "场景分组", "scenes": "场景分析",
     "matching": "人物匹配", "extracting": "提取人物特征", "publish": "发布检索",
     "embedding": "嵌入片段", "index_check": "检查索引", "published": "检索已更新", "indexed": "索引已完成",
+    "index_wait": "等待检索更新", "index_prepare": "准备检索数据", "person_index": "更新人物检索",
 }
 
 def add_message_metadata(value):

@@ -137,6 +137,7 @@ class SearchEngine:
         snapshots = []
         library = Library(self.store)
         sources, segments = library.overlays()
+        selected_sources = filters.selected_sources()
         for segment in self.store.snapshots(active["id"]):
             segment = library.decorate(segment, sources, segments)
             if segment["effective_hidden"]:
@@ -144,7 +145,7 @@ class SearchEngine:
             if segment["kind"] != granularity:
                 continue
             duration = segment["end"] - segment["start"]
-            if filters.source_id and segment["source_id"] != filters.source_id:
+            if (filters.source_id or filters.source_ids) and segment["source_id"] not in selected_sources:
                 continue
             if duration < filters.min_duration or (
                 filters.max_duration is not None and duration > filters.max_duration
@@ -217,7 +218,9 @@ class SearchEngine:
         if mode == 'onscreen' and not ids:
             raise ValueError('人物出镜模式需要选择人物或输入已登记姓名')
         if mode == 'onscreen':
+            from .person_processing import EvidenceReferences
             from .persons import coverage_missing
+            reference_images = EvidenceReferences(self.config, self.store)
             meta['person_coverage_missing'] = coverage_missing(snapshots, published['coverage'])
             eligible = []
             names = {e['id']: e['name'] for e in entities}
@@ -229,6 +232,7 @@ class SearchEngine:
                         enriched.append({**item, 'data': {k:v for k,v in item['data'].items() if k not in {'body_feature','space'}}, 'actor_name': names.get(item['actor_id']),
                             'role_name': names.get(item['role_id']),
                             'image_url': '/api/persons/evidence/' + item['id'] + '/image' if item['data'].get('image_path') else None,
+                            'reference_url': reference_images.url(item),
                             'start': max(item['start'], segment['start']),
                             'end': min(item['end'], segment['end'])})
                     eligible.append({**segment, 'person_evidence': enriched})

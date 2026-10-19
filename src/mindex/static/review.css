@@ -1,0 +1,27 @@
+/* Portable review pages reuse the application's controls without a network dependency. */
+body{max-width:1200px;margin:auto;padding:32px 24px;font-size:14px;line-height:1.7}
+body>h1{font-size:30px;line-height:1.4;margin:0 0 16px}
+body>label{max-width:600px;margin:16px 0}
+section{background:white;border:1px solid var(--line);padding:24px;margin:24px 0;border-radius:14px;min-width:0}
+section>h2{margin:0 0 16px}
+section>.query{width:100%;margin-bottom:16px}
+section>label{margin:12px 0}
+main,.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(260px,100%),1fr));gap:16px;max-width:none;margin:0;padding:0}
+article{padding:16px;border:1px solid var(--line);border-radius:12px;background:white;min-width:0}
+article>h3{font-size:14px;line-height:1.6;margin:0 0 12px}
+article img{display:block;width:100%;aspect-ratio:16/9;object-fit:contain;background:#15231e;border-radius:8px}
+article video{display:block;width:100%;max-height:240px;background:#15231e;border-radius:8px}
+article button{margin:12px 0}
+article label{flex-wrap:wrap;margin-top:12px}
+article select{width:64px}
+small{display:block;color:var(--muted);font-size:12px;overflow-wrap:anywhere}
+nav,.pagination{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:16px 0}
+summary{padding:8px 0;margin:8px 0}
+button{background:var(--green);border-color:var(--green);color:white}
+button:disabled{opacity:.55}
+#export{--control-size:40px;margin:16px 0}
+#player-title{font-size:16px;font-weight:600;margin:0 40px 16px 0}
+#player-video{width:100%;max-height:50dvh}
+#player>#close-player{width:auto;padding:0 12px;position:static;display:flex;margin:0 0 16px auto}
+#notice{overflow-wrap:anywhere}
+@media(max-width:540px){body{padding:24px 16px}body>h1{font-size:24px}section,article{padding:16px}}

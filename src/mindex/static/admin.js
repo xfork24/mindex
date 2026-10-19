@@ -18,6 +18,24 @@ function params(values) {return new URLSearchParams(Object.entries(values).filte
 function pager(prefix, page, total) {MindexI18n.setText($(`${prefix}-page`), `${page} / ${Math.max(1, Math.ceil(total / 48))}`);$(`${prefix}-prev`).disabled = page <= 1;$(`${prefix}-next`).disabled = page * 48 >= total;}
 function pauseList() {$('segment-list').querySelectorAll('video').forEach((v) => v.pause());}
 
+const sourcePanel = document.querySelector('.source-panel');
+function sizeSourcePanel() {
+  if (matchMedia('(max-width:750px)').matches) {sourcePanel.style.removeProperty('--source-panel-height');return;}
+  const top = Math.max(0, sourcePanel.getBoundingClientRect().top);
+  sourcePanel.style.setProperty('--source-panel-height', `${Math.max(0, innerHeight - top)}px`);
+}
+let sourcePanelFrame = null;
+function scheduleSourcePanelSize() {
+  if (sourcePanelFrame !== null) return;
+  sourcePanelFrame = requestAnimationFrame(() => {sourcePanelFrame = null;sizeSourcePanel();});
+}
+addEventListener('resize', scheduleSourcePanelSize);
+addEventListener('scroll', scheduleSourcePanelSize, {passive:true});
+new ResizeObserver(scheduleSourcePanelSize).observe(document.querySelector('.admin-intro'));
+new ResizeObserver(scheduleSourcePanelSize).observe(document.querySelector('header'));
+new ResizeObserver(scheduleSourcePanelSize).observe($('admin-notice'));
+scheduleSourcePanelSize();
+
 async function loadSources() {
   const request = ++sourceRequest;
   const data = await api(`/api/admin/sources?${params({ q: $('source-query').value.trim(), visibility: $('source-visibility').value, favorite_only: $('source-favorite').checked, page: state.sourcePage })}`);
@@ -163,13 +181,33 @@ const workNames = { shots: MindexI18n.msg("ui.6a4811595787"), dialogue: MindexI1
 const workStatus = { complete: MindexI18n.msg("ui.9e593295eddf"), partial: MindexI18n.msg("ui.53951802211e"), empty: MindexI18n.msg("ui.b5a5666d7068"), no_audio: MindexI18n.msg("ui.dde19df44760"), disabled: MindexI18n.msg("ui.8bb38ef00ccc"), not_processed: MindexI18n.msg("ui.59a9eb4e6574"), failed: MindexI18n.msg("ui.3e3c8068bb0e"), processing: MindexI18n.msg("ui.fcb979ef0b91"), pending_alignment: MindexI18n.msg("ui.db56f1b7b2c7") };
 const taskStatus = { queued: MindexI18n.msg("ui.4dcbbcfa6154"), running: MindexI18n.msg("ui.594249700590"), complete: MindexI18n.msg("ui.33246f6a5e5b"), failed: MindexI18n.msg("ui.3e3c8068bb0e"), interrupted: MindexI18n.msg("ui.8dd5ad764e4b") };
 const stages = { detect: MindexI18n.msg("ui.91642f5bbeab"), split: MindexI18n.msg("ui.717b1c7595ac"), repair: MindexI18n.msg("ui.58723ed9df0b"), subtitle: MindexI18n.msg("ui.1721b0103d0d"), asr: MindexI18n.msg("ui.65aa0b969118"), analyze: MindexI18n.msg("ui.b6582c9a3f55"), scene_grouping: MindexI18n.msg("ui.cd2b1a5f7983"), scenes: MindexI18n.msg("ui.008acfbd3a5f"), matching: MindexI18n.msg("ui.525d34888b72"), extracting: MindexI18n.msg("ui.7d76ffac1b58"), publish: MindexI18n.msg("ui.77e695de5cac"), embedding: MindexI18n.msg("ui.c56c156ecf6c"), index_check: MindexI18n.msg("ui.7e5154331f03"), published: MindexI18n.msg("ui.fb01358330b1"), indexed: MindexI18n.msg("ui.efc142bf91f3") };
-function preferences(id) {if (!workPreferences.has(id)) workPreferences.set(id, { publish: { shots: true, dialogue: true, analysis: true, persons: true }, method: 'auto', track: '' });return workPreferences.get(id);}
+function preferences(id) {if (!workPreferences.has(id)) workPreferences.set(id, { publish: { shots: true, dialogue: true, analysis: true, persons: true }, method: 'auto', track: '', subtitleInitialized: false, uploadingSubtitle: false });return workPreferences.get(id);}
 function post(url, value) {return api(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) });}
+const publicationStages = new Set(['index_wait', 'index_prepare', 'embedding', 'index_check', 'publish', 'published', 'indexed', 'person_index']);
+function appendWorkProgress(card, label, type, status, progress = {}) {
+  const done = progress.completed ?? progress.completed_shots ?? progress.completed_chunks,total = progress.total ?? progress.total_shots ?? progress.total_chunks;
+  const counted = Number.isFinite(total) && total > 0,active = ['queued', 'running'].includes(status);
+  const stage = ({index_wait: MindexI18n.msg("ui.20c78c01be0e"), index_prepare: MindexI18n.msg("ui.256396003e59"), person_index: MindexI18n.msg("ui.a8dca9128fbb")})[progress.stage] || stages[progress.stage] || (progress.message ? MindexI18n.system(progress) : null) || MindexI18n.msg("ui.fcb979ef0b91");
+  const unit = progress.unit || (progress.total_shots != null ? 'shots' : progress.total_chunks != null ? 'chunks' : progress.stage === 'scenes' ? 'scenes' : ['analyze', 'scene_grouping', 'repair'].includes(progress.stage) ? 'segments' : progress.stage === 'split' ? 'shots' : null);
+  const suffix = ({segments: MindexI18n.msg("ui.c49a95f6ee75"), shots: MindexI18n.msg("ui.9e9583a0c459"), chunks: MindexI18n.msg("ui.c56653feeffb"), scenes: MindexI18n.msg("ui.7b10ba4607b6"), files: MindexI18n.msg("ui.6f34f0eb1b3c"), tracks: MindexI18n.msg("ui.84c9b78d91a5")})[unit] || '';
+  const completed = counted ? Math.min(total, Math.max(0, Number.isFinite(done) ? done : 0)) : 0;
+  const skipped = progress.skipped ? ' · ' + MindexI18n.msg("ui.82896d0a6ff4", {count: progress.skipped}) : '';
+  const line = node('p', `${type === 'publish' ? MindexI18n.msg("ui.b6ff86ac1506") : MindexI18n.msg("ui.dbad5e876f4f")}：${taskStatus[status] || status}${active || counted ? ' · ' + stage + (counted ? ` ${completed}/${total}${suffix}` : '') : ''}${skipped}`, 'muted work-task-progress');line.dataset.phase = type;card.append(line);
+  if (counted || active) {
+    const bar = node('progress');bar.className = 'work-progress';bar.dataset.phase = type;
+    if (counted) {bar.max = total;bar.value = completed;}
+    MindexI18n.setAttr(bar, 'aria-label', label + MindexI18n.msg(type === 'publish' ? "ui.5ddad219dcea" : "ui.d03d35a85128"));card.append(bar);
+  }
+}
 function renderWork(source, target) {
   clearTimeout(workPoll);workPoll = null;
   const panel = node('section', undefined, 'work-panel');panel.append(node('h3', MindexI18n.msg("ui.c057f7d9d46e")));
   const grid = node('div', undefined, 'work-grid');panel.append(grid);target.append(panel);
   const prefs = preferences(source.id),busy = Object.values(source.work || {}).some((w) => [w.task, w.publish_task].some((t) => t && ['queued', 'running'].includes(t.status)));
+  if (!prefs.subtitleInitialized && source.subtitle_files?.length) {
+    const selected = source.dialogue_task?.options.subtitle_file || source.channels?.dialogue?.subtitle_file?.id || source.subtitle_files.at(-1).id;
+    prefs.track = `file:${selected}`;prefs.method = 'subtitle';prefs.subtitleInitialized = true;
+  }
   for (const [name, label] of Object.entries(workNames)) {
     const work = source.work?.[name] || {},result = work.result || {},card = node('section', undefined, 'work-card');card.dataset.work = name;
     const workBusy = [work.task, work.publish_task].some((t) => t && ['queued', 'running'].includes(t.status)),blocked = workBusy || source.enforce_gpu_lock && busy;
@@ -178,10 +216,10 @@ function renderWork(source, target) {
     if (name === 'shots') summary = MindexI18n.msg("ui.234493832eb5", { p0: result.shots || 0, p1: result.moments || 0, p2: result.missing_artifacts || 0 });
     if (name === 'dialogue') {
       const origin = { subtitle: MindexI18n.msg("ui.334873389d17"), asr: 'ASR', legacy_asr: MindexI18n.msg("ui.b0610c376d05") }[result.source] || MindexI18n.msg("ui.a0ca6153f62e");
-      const model = result.source === 'subtitle' && result.selected_track ? MindexI18n.msg("ui.886331068288", { p0: result.selected_track.index, p1: result.selected_track.language }) : result.model_identity?.model || '';
+      const model = result.subtitle_file?.name || (result.source === 'subtitle' && result.selected_track ? MindexI18n.msg("ui.886331068288", { p0: result.selected_track.index, p1: result.selected_track.language }) : result.model_identity?.model || '');
       summary = MindexI18n.msg("ui.bbb5bbc8c300", { p0: origin, p1: model ? ' · ' + model : '', p2: result.utterances || 0, p3: result.content_segments || 0 });
     }
-    if (name === 'analysis') summary = MindexI18n.msg("ui.d57be30db383", { p0: result.analyzed || 0, p1: result.total || 0, p2: result.scenes || 0 });
+    if (name === 'analysis') summary = MindexI18n.msg("ui.d57be30db383", { p0: result.analyzed || 0, p1: result.total || 0, p2: result.scenes || 0 }) + (result.skipped ? ' · ' + MindexI18n.msg("ui.82896d0a6ff4", {count: result.skipped}) : '');
     if (name === 'persons') summary = MindexI18n.msg("ui.1e1649402d6a", { p0: result.covered_shots || 0, p1: result.total_shots || 0, p2: result.people || 0, p3: result.accepted || 0, p4: result.candidate || 0, p5: result.rejected || 0 });
     card.append(node('p', summary, 'work-summary'));const search = work.search || {};
     card.append(node('p', MindexI18n.msg("ui.13e6dc8c4328", { p0: search.current ? MindexI18n.msg("ui.112f98675ee2") : search.indexed_segments ? MindexI18n.msg("ui.53122735b7e9") : MindexI18n.msg("ui.30e81c8167e5"), p1: search.indexed_segments || 0, p2: search.expected_segments || 0, p3: name === 'persons' ? MindexI18n.msg("ui.313083c877dc") : MindexI18n.msg("ui.32145468cf4f") }), 'muted'));
@@ -192,29 +230,53 @@ function renderWork(source, target) {
       method.value = prefs.method;methodLabel.append(method);card.append(methodLabel);
       const trackLabel = node('label', MindexI18n.msg("ui.541d33dd3e02")),track = node('select');MindexI18n.setAttr(track, 'aria-label', MindexI18n.msg("ui.6918e72a515e"));const empty = node('option', MindexI18n.msg("ui.6fddde6cab67"));empty.value = '';track.append(empty);
       for (const t of source.subtitle_tracks || []) if (t.text) {const o = node('option', `${t.index} · ${t.language} · ${t.codec}${t.title ? ' · ' + t.title : ''}`);o.value = t.index;track.append(o);}
+      for (const file of source.subtitle_files || []) {const o = node('option', MindexI18n.msg("ui.383ed05f1663", { name: file.name, count: file.utterances }));o.value = `file:${file.id}`;track.append(o);}
       track.value = prefs.track;trackLabel.hidden = prefs.method !== 'subtitle';trackLabel.append(track);card.append(trackLabel);
-      method.onchange = () => {prefs.method = method.value;trackLabel.hidden = method.value !== 'subtitle';};track.onchange = () => {prefs.track = track.value;};
+      const uploadBox = node('div', undefined, 'subtitle-upload'),uploadLabel = node('label', MindexI18n.msg("ui.3a3ecaeab3dd")),upload = node('input');
+      upload.type = 'file';upload.accept = '.srt,.ass,.ssa,.vtt,.sub,.smi,.sami';upload.disabled = blocked || prefs.uploadingSubtitle;
+      MindexI18n.setAttr(upload, 'aria-label', MindexI18n.msg("ui.3a3ecaeab3dd"));uploadLabel.append(upload);
+      const uploadStatus = node('p', prefs.uploadingSubtitle ? MindexI18n.msg("ui.1e7bdf1f5af6") : MindexI18n.msg("ui.48eb829eca06"), 'muted');uploadStatus.setAttribute('role', 'status');
+      uploadBox.append(uploadLabel, uploadStatus);uploadBox.hidden = prefs.method !== 'subtitle';card.append(uploadBox);
+      upload.onchange = async () => {
+        const file = upload.files[0];if (!file) return;
+        prefs.uploadingSubtitle = true;upload.disabled = true;start.disabled = true;MindexI18n.setText(uploadStatus, MindexI18n.msg("ui.1e7bdf1f5af6"));
+        try {
+          const body = new FormData();body.append('file', file);
+          const saved = await api(`/api/admin/sources/${source.id}/subtitles`, { method: 'POST', body });
+          prefs.track = `file:${saved.id}`;prefs.method = 'subtitle';prefs.subtitleInitialized = true;
+          prefs.uploadingSubtitle = false;await refreshWork(source.id);
+        } catch (e) {MindexI18n.setText(uploadStatus, e.message);uploadStatus.className = 'source-warning';}
+        finally {prefs.uploadingSubtitle = false;upload.disabled = blocked;start.disabled = blocked || !work.can_start;upload.value = '';}
+      };
+      method.onchange = () => {prefs.method = method.value;trackLabel.hidden = uploadBox.hidden = method.value !== 'subtitle';};track.onchange = () => {prefs.track = track.value;};
     }
     const checkLabel = node('label', undefined, 'check'),check = node('input');check.type = 'checkbox';check.checked = prefs.publish[name];check.onchange = () => {prefs.publish[name] = check.checked;};checkLabel.append(check, MindexI18n.textNode(MindexI18n.msg("ui.036fd74aa103")));card.append(checkLabel);
     const errors = node('p', '', 'source-warning');errors.setAttribute('role', 'alert');
     const perform = (fn) => async () => {MindexI18n.setText(errors, '');try {await fn();} catch (e) {MindexI18n.setText(errors, e.message);}};
     const controls = node('div', undefined, 'work-controls');
-    const start = action(name === 'persons' ? MindexI18n.msg("ui.123bbda48a5d") : work.status === 'not_processed' ? MindexI18n.msg("ui.ab2f669c1a01") : name === 'shots' ? MindexI18n.msg("ui.705c3cbac14d") : MindexI18n.msg("ui.941fe1a3c3c2"), perform(async () => {
+    const start = action(name === 'persons' ? MindexI18n.msg("ui.123bbda48a5d") : work.status === 'not_processed' ? MindexI18n.msg("ui.ab2f669c1a01") : name === 'shots' ? MindexI18n.msg("ui.705c3cbac14d") : name === 'analysis' ? MindexI18n.msg("ui.b3d17c0db3dd") : MindexI18n.msg("ui.941fe1a3c3c2"), perform(async () => {
       if (name === 'persons') return openPerson(source.id, prefs.publish[name]);
       const options = { publish: prefs.publish[name] };
-      if (name === 'dialogue') {options.method = prefs.method;if (prefs.method === 'subtitle') {if (!prefs.track) throw Error(MindexI18n.msg("ui.e5e99ffa838b"));options.subtitle_stream = Number(prefs.track);}}
+      if (name === 'dialogue') {if (prefs.uploadingSubtitle) throw Error(MindexI18n.msg("ui.49476949fc90"));options.method = prefs.method;if (prefs.method === 'subtitle') {if (!prefs.track) throw Error(MindexI18n.msg("ui.ed4caa4cf3b3"));if (prefs.track.startsWith('file:')) options.subtitle_file = prefs.track.slice(5);else options.subtitle_stream = Number(prefs.track);}}
       await post(`/api/admin/sources/${source.id}/${name}`, options);await refreshWork(source.id);
-    }));start.disabled = blocked || !work.can_start;controls.append(start);
+    }));start.disabled = blocked || !work.can_start || name === 'dialogue' && prefs.uploadingSubtitle;controls.append(start);
     const update = action(MindexI18n.msg("ui.0cb51b994992"), perform(async () => {await post(`/api/admin/sources/${source.id}/publish`, { work: name });await refreshWork(source.id);}));update.disabled = blocked || !work.can_publish;controls.append(update);
     if (['shots', 'dialogue', 'analysis'].includes(name) && source.shot_count) controls.append(action(MindexI18n.msg("ui.0ef38438801b"), async () => {state.kind = 'shot';state.parent = null;state.segmentPage = 1;await loadSegments();$('segment-list').scrollIntoView({ block: 'start', behavior: 'smooth' });if (name !== 'shots') notify(MindexI18n.msg("ui.1844d03ed5e7"));}));
     if (name === 'persons') {const link = node('a', MindexI18n.msg("ui.8face9a73c34"), 'quiet nav-link');link.href = `/persons?source=${encodeURIComponent(source.id)}#review`;controls.append(link);card.append(node('p', MindexI18n.msg("ui.4e65b9bde907"), 'muted'));}
     card.append(controls);
     for (const [type, task] of [['process', work.task], ['publish', work.publish_task]]) if (task) {
-      const progress = task.progress || {},done = progress.completed ?? progress.completed_shots ?? progress.completed_chunks,total = progress.total ?? progress.total_shots ?? progress.total_chunks;
-      const counted = Number.isFinite(total) && total > 0,stage = stages[progress.stage] || (progress.message ? MindexI18n.system(progress) : null) || MindexI18n.msg("ui.fcb979ef0b91");
-      card.append(node('p', `${type === 'publish' ? MindexI18n.msg("ui.b6ff86ac1506") : MindexI18n.msg("ui.dbad5e876f4f")}：${taskStatus[task.status] || task.status}${task.status === 'running' || counted ? ' · ' + stage + (counted ? ` ${done || 0}/${total}${progress.unit === 'segments' ? MindexI18n.msg("ui.c49a95f6ee75") : ''}` : '') : ''}`, 'muted work-task-progress'));
-      if (counted && progress.unit === 'segments') {
-        const bar = node('progress');bar.max = total;bar.value = done || 0;bar.className = 'work-progress';MindexI18n.setAttr(bar, 'aria-label', label + MindexI18n.msg("ui.5ddad219dcea"));card.append(bar);
+      const progress = task.progress || {},publishing = type === 'publish' || progress.phase === 'publish' || publicationStages.has(progress.stage);
+      if (type === 'process' && publishing) {
+        if (progress.processing_progress) appendWorkProgress(card, label, 'process', 'complete', progress.processing_progress);
+        else appendWorkProgress(card, label, 'process', 'complete', {});
+        // A newer independent update has its own row; avoid repeating an older
+        // automatic update from this processing job.
+        if (!work.publish_task || work.publish_task.created_at < task.created_at) {
+          const publicationStatus = task.publication?.status;
+          appendWorkProgress(card, label, 'publish', publicationStatus === 'complete' ? 'complete' : publicationStatus === 'failed' ? 'failed' : task.status, progress);
+        }
+      } else {
+        appendWorkProgress(card, label, type, task.status, progress);
       }
       if (MindexI18n.system(task.error)) card.append(node('p', MindexI18n.system(task.error), 'source-warning'));
       if (['failed', 'interrupted'].includes(task.status)) {
@@ -316,7 +378,7 @@ async function showAnalysis(item) {
         const text = Array.isArray(value) ? value.join('；') : String(value ?? '');
         if (text) llm.append(node('p', `${labels[key] || key}：${text}`));
       }
-    } else llm.append(node('p', MindexI18n.system(data.llm)));
+    } else {llm.append(node('p', MindexI18n.system(data.llm)));if (data.llm.reason) llm.append(node('p', data.llm.reason, 'muted'));}
     target.append(llm);
     const person = node('section', undefined, 'analysis-section');
     person.append(node('h3', MindexI18n.msg("ui.0c0ae35b2935")), node('p', MindexI18n.system(data.person)));

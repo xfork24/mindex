@@ -168,6 +168,7 @@ class Library:
                     "status",
                     "source",
                     "selected_track",
+                    "subtitle_file",
                     "fallback_reason",
                     "error",
                     "completed_chunks",
@@ -235,6 +236,7 @@ class Library:
             (identifier,),
         )
         from .dialogue_tasks import task_public
+        from .subtitle_uploads import uploaded_subtitles
 
         result = {
             **source_public(row),
@@ -242,6 +244,7 @@ class Library:
             "channels": channel_states,
             "published_channels": channel_coverage(self.store, source_id=identifier),
             "subtitle_tracks": tracks,
+            "subtitle_files": uploaded_subtitles(self.store, identifier),
             "dialogue_task": task_public(task) if task else None,
             "runs": self.store.rows(
                 "SELECT * FROM runs WHERE source_id=? ORDER BY id DESC LIMIT 5", (identifier,)

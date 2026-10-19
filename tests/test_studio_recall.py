@@ -68,6 +68,17 @@ def test_shot_recall_optional_for_legacy_content():
     assert shot.recall.person_ids == ["a"] and shot.recall.filters.source_id == "s"
 
 
+def test_source_selection_signatures_preserve_legacy_and_ignore_order():
+    assert ws.recall_signature(ShotRecall()) is None
+    legacy = ws.recall_signature(ShotRecall(filters={"source_id": "a"}))
+    assert legacy == ws.recall_signature(ShotRecall(filters={"source_ids": ["a", "a"]}))
+    multi = ws.recall_signature(ShotRecall(filters={"source_ids": ["b", "a"]}))
+    assert multi == ws.recall_signature(ShotRecall(filters={"source_ids": ["a", "b", "a"]}))
+    assert multi != legacy
+    assert multi == ws.recall_signature(ShotRecall(filters={"source_id": "c", "source_ids": ["a", "b"]}))
+    assert legacy == ws.recall_signature(ShotRecall(filters={"source_id": "a", "source_ids": []}))
+
+
 # ---------------------------------------------------------------- 工作台召回执行与指纹
 
 
@@ -387,6 +398,48 @@ def test_person_recall_filters_by_published_evidence(prepared):
     assert data["results"] and {item["segment_id"] for item in data["results"]} == {evidence_shot}
     assert data["meta"]["person_version"]
 
+
+def test_recall_reference_images_are_added_to_legacy_details_without_rewriting(prepared):
+    from mindex.persons import Entity, Persons
+    from mindex.storage import dumps
+
+    config, embedder = prepared
+    jid, w, p = setup_workspace(config)
+    store = Store(config.data_dir)
+    catalogue = Persons(store)
+    source = store.sources()[0]["id"]
+    actor = catalogue.save(Entity(kind="actor", name="参考演员"))
+    role = catalogue.save(
+        Entity(kind="role", name="参考角色", work_ids=[catalogue.work_for(source)], actor_ids=[actor["id"]])
+    )
+    reference = catalogue.add_reference(actor["id"], red_image(), role_id=role["id"])
+    shot = store.segments(source, "shot")[0]
+    store.execute(
+        "INSERT INTO person_evidence VALUES(?,?,?,?,?,?,?,?,?,?)",
+        (
+            "reference-evidence",
+            source,
+            shot["id"],
+            actor["id"],
+            role["id"],
+            None,
+            shot["start"],
+            shot["end"],
+            "accepted",
+            dumps({"reference_id": reference["id"], "score": 0.9, "image_path": shot["thumbnail"]}),
+        ),
+    )
+    catalogue.publish()
+    set_recall(config, jid, w, p, 0, ShotRecall(person_ids=[actor["id"]], person_mode="onscreen"))
+    vid = ws.execute(config, jid, w, p, "recall", "a", embedder=embedder)
+    w = ws.load(config, jid)
+    evidence = ws.version(w, vid)["data"]["results"][0]["person_evidence"][0]
+    assert evidence.pop("reference_url") == reference["url"]
+    detail = ws.detail(config, jid, w)
+    shown = detail["versions"][vid]["data"]["results"][0]["person_evidence"][0]
+    assert shown["reference_url"] == reference["url"]
+    assert "reference_url" not in evidence
+    assert shown["image_url"] != shown["reference_url"]
 
 def test_workspace_recall_pins_active_person_release_and_reuses_after_rollback(prepared):
     from mindex.persons import Entity, Persons, ShotReview

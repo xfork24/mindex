@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import json
 import logging
+import tempfile
 import threading
 import uuid
+from pathlib import Path
 from time import perf_counter
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile
 from filelock import Timeout
-from pydantic import Field
+from pydantic import Field, model_validator
+from starlette.concurrency import run_in_threadpool
 
 from .config import Config, StrictModel
 from .dialogue import atomic_json
@@ -19,6 +22,7 @@ from .pipeline import Pipeline
 from .processing_lock import ProcessingLock, recover_tasks
 from .runtime_settings import RuntimeConfig
 from .storage import Store, dumps
+from .task_progress import save_task_progress
 
 log = logging.getLogger(__name__)
 
@@ -26,8 +30,15 @@ log = logging.getLogger(__name__)
 class DialogueOptions(StrictModel):
     method: Literal["auto", "subtitle", "asr"] = "auto"
     subtitle_stream: int | None = Field(default=None, ge=0)
+    subtitle_file: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
     publish: bool = True
     workers: int = Field(default=2, ge=1, le=8)
+
+    @model_validator(mode="after")
+    def valid_subtitle_source(self):
+        if self.subtitle_file and (self.method != "subtitle" or self.subtitle_stream is not None):
+            raise ValueError("上传字幕必须使用字幕方式，且不能同时选择内嵌字幕轨道")
+        return self
 
 
 def task_public(row):
@@ -53,13 +64,14 @@ def task_public(row):
 
 
 def execute_dialogue(
-    config, source_id=None, *, method="auto", subtitle_stream=None, publish=True, workers=2,
+    config, source_id=None, *, method="auto", subtitle_stream=None, subtitle_file=None, publish=True, workers=2,
     progress=None, embedder=None
 ):
     started = perf_counter()
     pipeline = Pipeline(config)
     result = pipeline.enrich_dialogue(
-        source_id, method=method, subtitle_stream=subtitle_stream, workers=workers, progress=progress
+        source_id, method=method, subtitle_stream=subtitle_stream, subtitle_file=subtitle_file,
+        workers=workers, progress=progress
     )
     summaries = [
         {
@@ -116,6 +128,13 @@ class DialogueTasks:
         try:
             if not self.store.one("SELECT 1 FROM sources WHERE id=?", (source_id,)):
                 raise HTTPException(404, "找不到素材")
+            if options.subtitle_file:
+                from .subtitle_uploads import resolve_subtitle
+
+                try:
+                    resolve_subtitle(self.store, source_id, options.subtitle_file)
+                except ValueError as exc:
+                    raise HTTPException(422, str(exc)) from exc
             config = self.runtime.current().model_copy(deep=True)
             task_id = uuid.uuid4().hex
             snapshot = config.model_dump()
@@ -189,10 +208,7 @@ class DialogueTasks:
             )
 
             def progress(value):
-                self.store.execute(
-                    "UPDATE dialogue_tasks SET progress=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                    (dumps(value), task_id),
-                )
+                save_task_progress(self.store, "dialogue_tasks", task_id, value)
 
             options = json.loads(row["options"])
             publish = options.pop("publish", True)
@@ -202,7 +218,7 @@ class DialogueTasks:
             self.store.execute("UPDATE dialogue_tasks SET result=? WHERE id=?", (dumps(result), task_id))
             if publish:
                 from .source_tasks import publication_attempt
-                progress({"stage": "publish", "message": "对白处理完成，正在更新检索"})
+                progress({"stage": "publish", "phase": "publish", "message": "对白处理完成，正在更新检索"})
                 publication = publication_attempt(
                     config, row["source_id"], "dialogue", embedder=self.embedder,
                     save=lambda value: self.store.execute(
@@ -231,6 +247,37 @@ class DialogueTasks:
 def dialogue_router(runtime, store, embedder=None):
     router = APIRouter(prefix="/api/admin", tags=["对白任务"])
     manager = DialogueTasks(runtime, store, embedder)
+
+    @router.post("/sources/{source_id}/subtitles", status_code=201)
+    async def upload_subtitle(source_id: str, file: UploadFile):
+        from .subtitle_uploads import SUBTITLE_EXTENSIONS, SUBTITLE_MAX_BYTES, register_subtitle
+        from .uploads import save_upload
+
+        name = (file.filename or "").replace("\\", "/").rsplit("/", 1)[-1]
+        try:
+            if not store.one("SELECT 1 FROM sources WHERE id=?", (source_id,)):
+                raise HTTPException(404, "找不到素材")
+            if Path(name).suffix.lower() not in SUBTITLE_EXTENSIONS:
+                raise HTTPException(422, "不支持的字幕文件格式，支持 SRT、ASS、SSA、VTT、SUB、SMI、SAMI")
+            lock = manager.lock(source_id)
+            try:
+                lock.acquire()
+            except Timeout as exc:
+                raise HTTPException(409, "该素材正在处理对白，请稍后上传字幕") from exc
+            try:
+                directory = store.root / "subtitles" / ".uploads"
+                directory.mkdir(parents=True, exist_ok=True)
+                with tempfile.TemporaryDirectory(dir=directory) as temporary:
+                    path = Path(temporary) / ("upload" + Path(name).suffix.lower())
+                    await save_upload(file, path, SUBTITLE_MAX_BYTES)
+                    try:
+                        return await run_in_threadpool(register_subtitle, store, source_id, path, name)
+                    except ValueError as exc:
+                        raise HTTPException(422, str(exc)) from exc
+            finally:
+                lock.release()
+        finally:
+            await file.close()
 
     @router.post("/sources/{source_id}/dialogue", status_code=202)
     def start(source_id: str, options: DialogueOptions | None = None):

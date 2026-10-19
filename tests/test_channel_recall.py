@@ -226,7 +226,7 @@ def test_embedding_progress_counts_segments_after_all_windows_and_ready_index(co
     version = builder.build(source_id=sid, kinds=["shot"], channels=["visual"], progress=events.append)
     embedding_events = [e for e in events if e["stage"] == "embedding"]
     assert [e["completed"] for e in embedding_events] == list(range(total + 1))
-    assert all(e["total"] == total for e in events)
+    assert all(e["total"] == total for e in events if "total" in e)
     assert embedder.video_calls > total  # windows are not misreported as extra completed segments
     assert [e["stage"] for e in events[-2:]] == ["index_check", "indexed"]
     events.clear()
@@ -234,8 +234,8 @@ def test_embedding_progress_counts_segments_after_all_windows_and_ready_index(co
     assert builder.build(source_id=sid, kinds=["shot"], channels=["visual"],
                          activate=True, progress=events.append) == version
     assert embedder.calls == calls
-    assert [e["stage"] for e in events] == ["index_check", "publish", "published"]
-    assert all(e["completed"] == e["total"] == total for e in events)
+    assert [e["stage"] for e in events] == ["index_wait", "index_prepare", "index_check", "publish", "published"]
+    assert all(e["completed"] == e["total"] == total for e in events if "total" in e)
 
 
 def test_lexical_degradation_and_channel_exclusion(config, video_file):

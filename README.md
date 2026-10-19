@@ -138,7 +138,7 @@ FastAPI 文档：<http://127.0.0.1:8000/docs>。
 | `GET /api/context/{id}` | 前后 3 秒上下文，按需转码为浏览器可播放的 MP4 并缓存 |
 | `GET /api/sources/{id}/media` | 原素材文件，播放能力取决于浏览器对原格式的支持 |
 
-`granularity` 为 `moment`（默认）、`shot` 或 `scene`；`limit` 为 1–50。`filters` 支持 `source_id`、`min_duration`、`max_duration`、`scene`、`emotion` 和 `shot_size`。标签筛选为不区分大小写的子串匹配，多个字段取交集。
+`granularity` 为 `moment`（默认）、`shot` 或 `scene`；`limit` 为 1–50。`filters` 支持 `source_ids`（多素材列表）、`source_id`（兼容单素材）、`min_duration`、`max_duration`、`scene`、`emotion` 和 `shot_size`。非空 `source_ids` 优先，空列表沿用 `source_id`，两者均未指定时搜索全部素材。标签筛选为不区分大小写的子串匹配，多个字段取交集。
 
 ## 测试与真实质量评测
 

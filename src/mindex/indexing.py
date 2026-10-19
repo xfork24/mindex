@@ -105,7 +105,11 @@ class IndexBuilder:
     def build(self, *, activate=False, mode="auto", source_id=None, kinds=None, channels=None, progress=None):
         from .processing_lock import index_write_lock
 
+        if progress:
+            progress({"stage": "index_wait", "phase": "publish"})
         with index_write_lock(self.store.root):
+            if progress:
+                progress({"stage": "index_prepare", "phase": "publish"})
             if mode == "enriched":
                 if channels is not None:
                     raise ValueError("enriched 兼容模式不支持 channels，请使用 auto")

@@ -20,6 +20,7 @@ from .config import StrictModel, fingerprint
 from .persons import Persons, uid
 from .processing_lock import ProcessingLock, recover_tasks
 from .storage import Store, dumps
+from .task_progress import save_task_progress
 
 
 class PersonOptions(StrictModel):
@@ -204,6 +205,114 @@ def face_match(observation, references, config):
     return actor, score, accepted
 
 
+def matched_reference(observation, references, config, actor_id, role_id=None):
+    """Return the actual winning reference, without borrowing a different role's photo."""
+    if observation.get("face_feature") is None or actor_id is None:
+        return None
+    scored = [
+        (cosine(observation["face_feature"], r.get("face_feature")), r)
+        for r in references
+        if r.get("actor_id") == actor_id and r.get("face_quality", 0) >= config.min_reference_quality
+    ]
+    if not scored:
+        return None
+    score = max(s for s, _ in scored)
+    winners = [r for s, r in scored if s == score and r.get("role_id") in (None, role_id)]
+    return min(winners, key=lambda r: (r.get("role_id") != role_id, r.get("id", "")), default=None)
+
+
+class EvidenceReferences:
+    """Resolve matched photos from provenance or cached features; never call a model."""
+
+    def __init__(self, config, store):
+        self.config, self.store = config, store
+        self.catalogue = Persons(store)
+        self.references = {r["id"]: r for r in self.catalogue.references()}
+        self.features, self.spaces, self.shots = {}, {}, {}
+
+    def feature(self, key):
+        if key not in self.features:
+            row = self.store.one("SELECT data FROM person_features WHERE id=?", (key,))
+            self.features[key] = json.loads(row["data"]) if row else None
+        return self.features[key]
+
+    def candidates(self, space):
+        key = dumps(space)
+        if key not in self.spaces:
+            references = []
+            for r in self.references.values():
+                cached = self.feature(fingerprint(["reference-v1", r["digest"], space]))
+                subject = reference_subject(cached["observations"]) if cached else None
+                if subject:
+                    references.append(
+                        {**subject, "id": r["id"], "actor_id": r["actor_id"], "role_id": r["role_id"]}
+                    )
+            self.spaces[key] = references
+        return self.spaces[key]
+
+    def reference_id(self, evidence):
+        data = evidence.get("data") or {}
+        recorded = data.get("reference_id")
+        if recorded:
+            return recorded
+        if (
+            data.get("confirmation") == "shot_review"
+            and data.get("evidence_type") == "manual"
+            and not data.get("cache_id")
+        ):
+            key = (evidence["source_id"], evidence["shot_id"])
+            if key not in self.shots:
+                self.shots[key] = [
+                    {**r, "data": json.loads(r["data"])}
+                    for r in self.store.rows(
+                        "SELECT * FROM person_evidence WHERE source_id=? AND shot_id=?", key
+                    )
+                ]
+            rows = [
+                r
+                for r in self.shots[key]
+                if r["actor_id"] == evidence["actor_id"]
+                and r["role_id"] in (None, evidence["role_id"])
+                and (r["data"].get("confirmation") != "shot_review" or r["data"].get("cache_id"))
+            ]
+            for row in sorted(rows, key=lambda r: -(Persons.evidence_score(r["data"].get("score")) or 0)):
+                resolved = self.reference_id({**row, "role_id": evidence["role_id"]})
+                if resolved:
+                    return resolved
+            return None
+        cached = self.feature(data.get("cache_id")) if data.get("cache_id") else None
+        if not cached or data.get("evidence_type") not in {"face", "manual"}:
+            return None
+        for frame in cached.get("frames", []):
+            for index, observation in enumerate(frame["observations"]):
+                if fingerprint([data["cache_id"], frame["timestamp"], index]) != evidence["id"]:
+                    continue
+                ref = matched_reference(
+                    observation,
+                    self.candidates(data.get("space") or cached.get("space", {})),
+                    self.config.person,
+                    evidence["actor_id"],
+                    evidence["role_id"],
+                )
+                score = Persons.evidence_score(data.get("original_score", data.get("score")))
+                if ref and (score is None or not math.isclose(
+                    cosine(observation.get("face_feature"), ref.get("face_feature")), score, abs_tol=1e-6
+                )):
+                    return None
+                return ref["id"] if ref else None
+        return None
+
+    def url(self, evidence):
+        identifier = self.reference_id(evidence)
+        ref = self.references.get(identifier)
+        if (
+            not ref
+            or ref["actor_id"] != evidence["actor_id"]
+            or ref["role_id"] not in (None, evidence["role_id"])
+        ):
+            return None
+        return ref["url"]
+
 def iou(a, b):
     x1, y1 = max(a[0], b[0]), max(a[1], b[1])
     x2, y2 = min(a[2], b[2]), min(a[3], b[3])
@@ -278,22 +387,24 @@ def attribute_frames(
             if ambiguous or not reliable:
                 anchors.pop(track, None)
             actor, score, accepted = face_match(observation, references, config)
+            reference_id = None
             kind, status, role_id = "face", "candidate", None
             identifier = fingerprint([shot["cache_id"], t, index])
             reviewed = manual_anchors.get(identifier)
             if reviewed:
                 actor, role_id = reviewed["actor_id"], reviewed["role_id"]
                 kind, status = "manual", reviewed["status"]
+                reference_id = reviewed.get("reference_id")
                 anchors.pop(track, None)
             elif accepted:
                 status = "accepted"
                 if not ambiguous and observation.get("body_bbox") and observation.get("body_feature"):
-                    anchors[track] = (actor, None)
+                    anchors[track] = (actor, None, None)
             elif observation.get("face_feature") is not None:
                 # Conflicting/uncertain visible face always blocks identity inheritance.
                 anchors.pop(track, None)
             elif track in anchors and reliable and not ambiguous:
-                actor, role_id = anchors[track]
+                actor, role_id, reference_id = anchors[track]
                 score, kind, status = 1.0, "track", "accepted"
             else:
                 # Body samples never seed anchors. Cross-shot matches remain candidates.
@@ -319,13 +430,16 @@ def attribute_frames(
                 # Face identity alone cannot distinguish multiple roles.
                 possible = [r for r in roles if work_id in r.get("work_ids", []) and actor in r["actor_ids"]]
                 role_id = possible[0]["id"] if len(possible) == 1 else None
+            if kind == "face":
+                reference = matched_reference(observation, references, config, actor, role_id)
+                reference_id = reference.get("id") if reference else None
             if (
                 status == "accepted"
                 and kind in {"face", "manual"}
                 and not ambiguous
                 and observation.get("body_bbox")
             ):
-                anchors[track] = (actor, role_id)
+                anchors[track] = (actor, role_id, reference_id)
             next_t = frames[fidx + 1]["timestamp"] if fidx + 1 < len(frames) else shot["end"]
             end = min(shot["end"], next_t, t + 1 / config.fps)
             if end <= t:
@@ -358,6 +472,7 @@ def attribute_frames(
                         "space": shot["space"],
                         "body_feature": observation.get("body_feature"),
                         "ambiguous": ambiguous,
+                        "reference_id": reference_id,
                     },
                 }
             )
@@ -400,6 +515,8 @@ class PersonProcessor:
             for s in shots
             if s["end"] > options.start and s["start"] < (options.end or duration)
         ]
+        if progress:
+            progress({"stage": "extracting", "completed_shots": 0, "total_shots": len(shots), "unit": "shots"})
         space = self.client.identity()
         roles = self.catalogue.entities("role")
         entity_names = {e["id"]: e["name"] for e in self.catalogue.entities()}
@@ -431,7 +548,7 @@ class PersonProcessor:
             if reason is not None:
                 reference_errors.append({**identity, "error": reason})
                 continue
-            references.append({**subject, "actor_id": ref["actor_id"], "role_id": ref["role_id"]})
+            references.append({**subject, "id": ref["id"], "actor_id": ref["actor_id"], "role_id": ref["role_id"]})
         report = {
             "source_id": source_id,
             "space": space,
@@ -484,6 +601,7 @@ class PersonProcessor:
                             "stage": "extracting",
                             "completed_shots": position,
                             "total_shots": len(shots),
+                            "unit": "shots",
                             "shot_id": shot["id"],
                         }
                     )
@@ -529,8 +647,12 @@ class PersonProcessor:
             for row in self.store.rows(
                 "SELECT * FROM person_evidence WHERE source_id=? AND shot_id=?", (source_id, shot["id"])
             ):
-                if json.loads(row["data"]).get("reviewed") and json.loads(row["data"]).get("cache_id") == key:
-                    manual_anchors[row["id"]] = {k: row[k] for k in ("actor_id", "role_id", "status")}
+                data = json.loads(row["data"])
+                if data.get("reviewed") and data.get("cache_id") == key:
+                    manual_anchors[row["id"]] = {
+                        **{k: row[k] for k in ("actor_id", "role_id", "status")},
+                        "reference_id": data.get("reference_id"),
+                    }
             match_key = fingerprint(
                 [
                     key,
@@ -634,7 +756,8 @@ class PersonProcessor:
             elif "candidate" in statuses:
                 candidate_shots.add(shot["id"])
             if progress:
-                progress({"stage": "matching", "completed_shots": position + 1, "total_shots": len(shots)})
+                progress({"stage": "matching", "completed_shots": position + 1,
+                          "total_shots": len(shots), "unit": "shots"})
         if self.client.identity() != space:
             raise ModelError("处理期间人物特征空间变化，拒绝发布；缓存仍按空间隔离")
         report["elapsed_seconds"] = round(time.perf_counter() - started, 3)
@@ -775,10 +898,7 @@ class PersonTasks:
             )
 
             def progress(value):
-                self.store.execute(
-                    "UPDATE person_tasks SET progress=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                    (dumps(value), identifier),
-                )
+                save_task_progress(self.store, "person_tasks", identifier, value)
 
             from .source_tasks import publication_attempt
             row = self.store.one("SELECT result FROM person_tasks WHERE id=?", (identifier,))
@@ -786,7 +906,7 @@ class PersonTasks:
                 source_id, options.model_copy(update={"publish": False}), progress)
             self.store.execute("UPDATE person_tasks SET result=? WHERE id=?", (dumps(result), identifier))
             if options.publish:
-                progress({"stage": "publish", "message": "人物处理完成，正在更新检索"})
+                progress({"stage": "publish", "phase": "publish", "message": "人物处理完成，正在更新检索"})
                 publication = publication_attempt(
                     config, source_id, "persons", save=lambda value: self.store.execute(
                         "UPDATE person_tasks SET publication=? WHERE id=?", (dumps(value), identifier)),

@@ -9,6 +9,7 @@ from urllib.parse import quote
 
 from .config import Config
 from .e2e import save
+from .review_style import review_style
 from .storage import Store
 
 
@@ -32,13 +33,13 @@ def render_review(config: Config, run: Path, queries: Path) -> Path:
     data = json.dumps({"entries": entries, "segments": cards}, ensure_ascii=False).replace("<", "\\u003c")
     target = run / "label-review.html"
     template = """<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>中文查询相关性复核</title>
-<style>body{max-width:1200px;margin:32px auto;padding:16px;font:16px/1.6 system-ui;color:#183e32;background:#f5f6f2}input,button,select{font:inherit;padding:7px}input[type=text]{width:65%}section{background:white;padding:20px;margin:24px 0;border-radius:12px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px}video{width:100%;aspect-ratio:16/9;background:#222}article{padding:8px;border:1px solid #ddd}small{display:block;color:#637168}button{background:#205b48;color:white;border:0;border-radius:6px}summary{cursor:pointer}label{display:block}</style>
+<meta name="viewport" content="width=device-width, initial-scale=1"><style>__STYLE__</style>
 <h1>中文查询相关性复核</h1><p>逐条观看并补全相关片段，修改查询或相关度，再勾选“已复核”。候选共 __COUNT__ 个精细片段。
 此页不使用模型描述作为真值，也不计算检索质量。对白查询需结合原声核对。</p>
 <label>复核人 <input id="reviewer" type="text" placeholder="请填写实际复核人"></label>
 <p>相关度：1 部分相关、2 主要相关、3 完全相关。初选来自草稿，仍需人工检查全部相关目标。</p>
 <div id="queries"></div><button id="export">下载已确认标注</button><p id="notice" role="status"></p>
-<dialog id="player"><button id="close-player">关闭播放</button><p id="player-title"></p><video id="player-video" controls style="max-width:80vw;width:720px"></video></dialog>
+<dialog id="player"><button id="close-player">关闭播放</button><p id="player-title"></p><video id="player-video" controls></video></dialog>
 <script>
 const data=__DATA__;
 const box=document.getElementById('queries');
@@ -85,7 +86,11 @@ document.getElementById('export').onclick=()=>{
  }catch(e){document.getElementById('notice').textContent=e.message;}
 };
 </script></html>"""
-    target.write_text(template.replace("__DATA__", data).replace("__COUNT__", str(len(cards))))
+    target.write_text(
+        template.replace("__STYLE__", review_style())
+        .replace("__DATA__", data)
+        .replace("__COUNT__", str(len(cards)))
+    )
     save(
         run / "label-review-info.json",
         {

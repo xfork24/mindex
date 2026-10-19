@@ -283,7 +283,9 @@ def test_analysis_prompts_request_only_compact_required_json(config, monkeypatch
     assert "即使只有一项也必须写成数组" in analysis_prompt
     assert 'scene 正确为 ["夜间城市滨水区"]' in analysis_prompt
     assert "每个元素都是字符串" in analysis_prompt
-    assert "唯一字段为 groups" in grouping_prompt and "分组说明" in grouping_prompt
+    assert "唯一字段为 scene_starts" in grouping_prompt and "分组说明" in grouping_prompt
+    assert "本批共有 2 个片段，index 为 0 到 1" in grouping_prompt
+    assert "最后一个场景自动延续到片段 1" in grouping_prompt
     assert "偏好而非最低时长" in grouping_prompt
     assert all("JSON 之外的任何文字" in b["messages"][0]["content"] for b in bodies)
 
@@ -347,6 +349,7 @@ def test_scene_grouping_compacts_historical_descriptions(config, monkeypatch):
     assert QwenAnalyzer(config).group_scenes(units) == [[0]]
     sent = json.loads(captured[0]["messages"][1]["content"][0]["text"])[0]
     assert len(sent["description"]) == 160
+    assert sent["index"] == 0
     assert sent["start"] == 0.123 and sent["scene"] == ["机场", "花园"]
     assert "unused" not in sent and len(units[0]["description"]) == 2000
 

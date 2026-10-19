@@ -39,14 +39,14 @@ const video = process.env.MINDEX_GPU_LOCK_TEST_VIDEO || '/tmp/mindex-gpu-lock-ui
     await page.waitForFunction(() => document.querySelector('[data-work=analysis] .work-task-progress')?.textContent.includes('运行中'));
     assert.equal(await analysis.getByRole('button', {name: '开始处理', exact: true}).isDisabled(), true);
     assert.equal(await page.locator('[data-work=dialogue]').getByRole('button', {name: '开始处理', exact: true}).isDisabled(), false);
-    assert.equal(await page.locator('[data-work=shots]').getByRole('button', {name: '检查与修复', exact: true}).isDisabled(), false);
+    assert.equal(await page.locator('[data-work=shots]').getByRole('button', {name: '拆分镜', exact: true}).isDisabled(), false);
     const dialogue = await page.request.post(`${base}/api/admin/sources/${sid}/dialogue`, {data: {publish: false}});
     assert.equal(dialogue.status(), 202, await dialogue.text());
     await page.screenshot({path: '/tmp/mindex-gpu-lock-desktop.png', fullPage: true});
     await page.request.put(base + '/api/settings/business', {data: {enforce_gpu_lock: true}});
     await page.reload();
     await page.locator('[data-work=analysis] .work-task-progress').waitFor();
-    assert.equal(await page.locator('[data-work=shots]').getByRole('button', {name: '检查与修复', exact: true}).isDisabled(), true);
+    assert.equal(await page.locator('[data-work=shots]').getByRole('button', {name: '拆分镜', exact: true}).isDisabled(), true);
     await page.setViewportSize({width: 390, height: 844});
     await page.goto(base + '/settings');
     await page.waitForFunction(() => document.querySelector('#enforce-gpu-lock').checked);

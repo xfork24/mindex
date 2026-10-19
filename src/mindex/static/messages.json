@@ -95,6 +95,10 @@
     "zh": "也可以把视频直接拖到这里",
     "en": "Or drag a video here"
   },
+  "ui.9f5242332fcc": {
+    "zh": "筛选人物",
+    "en": "Filter people"
+  },
   "ui.acc714bb0167": {
     "zh": "演员（可多选）",
     "en": "Actors (multiple)"
@@ -1872,8 +1876,12 @@
     "en": "Start processing"
   },
   "ui.705c3cbac14d": {
-    "zh": "检查与修复",
-    "en": "Check and repair"
+    "zh": "拆分镜",
+    "en": "Split shots"
+  },
+  "ui.b3d17c0db3dd": {
+    "zh": "分析场景",
+    "en": "Analyze scenes"
   },
   "ui.941fe1a3c3c2": {
     "zh": "补充处理",
@@ -7026,5 +7034,125 @@
   "ui.b607edb41246": {
     "zh": "仅作为描述提及：{p0}",
     "en": "Referenced in the description: {p0}"
+  },
+  "ui.3a3ecaeab3dd": {
+    "zh": "上传字幕文件",
+    "en": "Upload subtitle file"
+  },
+  "ui.48eb829eca06": {
+    "zh": "支持 SRT、ASS、SSA、VTT、SUB、SMI、SAMI；选择文件后自动上传。",
+    "en": "Supports SRT, ASS, SSA, VTT, SUB, SMI and SAMI; uploads when selected."
+  },
+  "ui.1e7bdf1f5af6": {
+    "zh": "正在上传字幕文件…",
+    "en": "Uploading subtitle file…"
+  },
+  "ui.383ed05f1663": {
+    "zh": "上传字幕：{name}（{count} 条）",
+    "en": "Uploaded subtitle: {name} ({count} cues)"
+  },
+  "ui.49476949fc90": {
+    "zh": "请先完成字幕文件上传。",
+    "en": "Wait for the subtitle upload to finish."
+  },
+  "ui.ed4caa4cf3b3": {
+    "zh": "请选择字幕轨道或上传字幕文件。",
+    "en": "Select a subtitle track or upload a subtitle file."
+  },
+  "ui.f4ece3f6b344": {
+    "zh": "正在解析上传字幕文件",
+    "en": "Parsing uploaded subtitle file"
+  },
+  "ui.a3216c96246f": {
+    "zh": "不支持的字幕文件格式，支持 SRT、ASS、SSA、VTT、SUB、SMI、SAMI",
+    "en": "Unsupported subtitle format; supported: SRT, ASS, SSA, VTT, SUB, SMI, SAMI"
+  },
+  "ui.c71fb62b2068": {
+    "zh": "字幕文件格式无效或不受支持，请检查字幕内容与扩展名",
+    "en": "Invalid or unsupported subtitle file; check its content and extension"
+  },
+  "ui.0827a077e743": {
+    "zh": "字幕文件没有有效对白或时间戳超出素材范围",
+    "en": "No valid dialogue in the subtitle file, or timestamps are outside the video"
+  },
+  "ui.6b9b2f97e0ce": {
+    "zh": "该素材正在处理对白，请稍后上传字幕",
+    "en": "Dialogue processing is active for this source; upload subtitles later"
+  },
+  "ui.444e6c2aafdf": {
+    "zh": "找不到该素材上传的字幕文件，请重新上传",
+    "en": "Uploaded subtitle file was not found for this source; upload it again"
+  },
+  "ui.560e68a961e0": {
+    "zh": "无效的字幕文件标识",
+    "en": "Invalid subtitle file ID"
+  },
+  "ui.5031f4c4249b": {
+    "zh": "字幕文件内容已变化，请重新上传",
+    "en": "The subtitle file has changed; upload it again"
+  },
+  "ui.ed32e6c2e448": {
+    "zh": "上传字幕必须使用字幕方式，且不能同时选择内嵌字幕轨道",
+    "en": "Uploaded subtitles require subtitle mode and cannot be combined with an embedded track"
+  },
+  "ui.095cbb574f43": {
+    "zh": "上传字幕必须指定素材、使用字幕方式，且不能同时选择内嵌字幕轨道",
+    "en": "Uploaded subtitles require a source and subtitle mode, and cannot be combined with an embedded track"
+  },
+  "ui.5f0dd8c4f369": {
+    "zh": "无法识别字幕编码，请使用 UTF-8、UTF-16、GB18030 或 Big5 文本字幕",
+    "en": "Unknown subtitle encoding; use UTF-8, UTF-16, GB18030 or Big5 text subtitles"
+  },
+  "ui.a4b9327fc50a": {
+    "zh": "无效的字幕文件格式",
+    "en": "Invalid subtitle file format"
+  },
+  "ui.20c78c01be0e": {
+    "zh": "等待检索更新",
+    "en": "Waiting to update search"
+  },
+  "ui.256396003e59": {
+    "zh": "准备检索数据",
+    "en": "Preparing search data"
+  },
+  "ui.a8dca9128fbb": {
+    "zh": "更新人物检索",
+    "en": "Updating person search"
+  },
+  "ui.9e9583a0c459": {
+    "zh": " 个镜头",
+    "en": " shots"
+  },
+  "ui.c56653feeffb": {
+    "zh": " 个音频块",
+    "en": " audio chunks"
+  },
+  "ui.7b10ba4607b6": {
+    "zh": " 个场景",
+    "en": " scenes"
+  },
+  "ui.6f34f0eb1b3c": {
+    "zh": " 个字幕文件",
+    "en": " subtitle files"
+  },
+  "ui.84c9b78d91a5": {
+    "zh": " 条字幕轨道",
+    "en": " subtitle tracks"
+  },
+  "ui.d03d35a85128": {
+    "zh": "处理任务进度",
+    "en": " processing progress"
+  },
+  "ui.82896d0a6ff4": {
+    "zh": "已跳过 {count} 个敏感片段",
+    "en": "Skipped {count} sensitive clips"
+  },
+  "ui.2ae55109b8d2": {
+    "zh": "模型内容安全策略拒绝，已跳过此片段",
+    "en": "Skipped this clip because the model rejected its content"
+  },
+  "ui.c1b8365074c7": {
+    "zh": "可多选；不选时搜索全部素材。",
+    "en": "Select multiple sources, or leave empty to search all media."
   }
 }

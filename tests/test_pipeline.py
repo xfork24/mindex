@@ -37,6 +37,49 @@ def test_detector_preserves_one_second_shots(config, video_file):
     assert ranges[-1][1] == pytest.approx(10, abs=0.05)
 
 
+def test_multi_source_filters_in_text_image_and_video_search(processed, config, video_file, tmp_path):
+    import io
+
+    from PIL import Image
+
+    pipeline, embedder, _analyzer, first, _version = processed
+    second_video = tmp_path / "second.mp4"
+    cut(video_file, 1, 3, second_video)
+    second = pipeline.prepare(second_video)
+    pipeline.transcribe()
+    pipeline.analyze()
+    IndexBuilder(config, embedder).build(mode="enriched", kinds=("shot",), activate=True)
+    client = TestClient(create_app(config, embedder))
+    image = io.BytesIO()
+    Image.new("RGB", (32, 32), (255, 0, 0)).save(image, format="PNG")
+
+    def search(mode, filters):
+        common = {"granularity": "shot", "filters": filters, "limit": 50}
+        if mode == "text":
+            response = client.post("/api/search/text", json={"text": "红蓝绿画面", **common})
+        else:
+            payload = image.getvalue() if mode == "image" else video_file.read_bytes()
+            response = client.post(
+                f"/api/search/{mode}",
+                data={**common, "filters": json.dumps(filters)},
+                files={"file": ("query.png" if mode == "image" else "query.mp4", payload)},
+            )
+        assert response.status_code == 200, response.text
+        return response.json()["results"]
+
+    for mode in ("text", "image", "video"):
+        assert {r["source_id"] for r in search(mode, {"source_ids": [first, second]})} == {first, second}
+        assert {r["source_id"] for r in search(mode, {"source_ids": [second, "missing"]})} == {second}
+        assert search(mode, {"source_ids": ["missing"]}) == []
+        assert {r["source_id"] for r in search(mode, {"source_ids": []})} == {first, second}
+        assert {r["source_id"] for r in search(mode, {"source_id": first})} == {first}
+        assert search(mode, {"source_ids": [first, second], "scene": "不存在的场景"}) == []
+        selected = search(
+            mode, {"source_ids": [second], "scene": "室内", "emotion": "平静", "shot_size": "近景"}
+        )
+        assert selected and {r["source_id"] for r in selected} == {second}
+
+
 def test_windows_cover_tail_and_do_not_cross_bounds():
     pieces = windows(2, 10)
     assert pieces == [(2, 6), (5, 9), (6, 10)]

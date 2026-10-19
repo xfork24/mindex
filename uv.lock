@@ -1085,6 +1085,7 @@ name = "mindex"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "charset-normalizer" },
     { name = "chromadb" },
     { name = "fastapi" },
     { name = "filelock" },
@@ -1114,6 +1115,7 @@ person = [
 [package.metadata]
 requires-dist = [
     { name = "av", marker = "extra == 'person'", specifier = ">=14,<17" },
+    { name = "charset-normalizer", specifier = ">=3,<4" },
     { name = "chromadb", specifier = ">=1.0,<2" },
     { name = "fastapi", specifier = ">=0.115,<1" },
     { name = "filelock", specifier = ">=3.16" },

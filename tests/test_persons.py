@@ -522,7 +522,82 @@ def test_role_reference_is_stored_separately_and_drives_face_matching(catalogue,
     assert report["reference_errors"] == []
     evidence = [e for e in p.evidence() if e["actor_id"] == actor["id"]]
     assert evidence and evidence[0]["role_id"] == role["id"]
+    assert evidence[0]["data"]["reference_id"] == paired["id"]
 
+
+def test_matched_reference_provenance_and_legacy_cache_recovery(catalogue, config):
+    from mindex.person_processing import EvidenceReferences, matched_reference
+
+    p, work, actor = catalogue
+    role = p.save(Entity(kind="role", name="匹配角色", work_ids=[work], actor_ids=[actor["id"]]))
+    other_role = p.save(Entity(kind="role", name="其他角色", work_ids=[work], actor_ids=[actor["id"]]))
+    reference = p.add_reference(actor["id"], photo(), role_id=role["id"])
+    other = p.add_reference(actor["id"], photo("blue"), role_id=other_role["id"])
+    refs = [
+        {**obs(), "id": reference["id"], "actor_id": actor["id"], "role_id": role["id"]},
+        {
+            **obs(),
+            "face_feature": [0, 1],
+            "id": other["id"],
+            "actor_id": actor["id"],
+            "role_id": other_role["id"],
+        },
+    ]
+    assert matched_reference(obs(), refs, config.person, actor["id"], role["id"])["id"] == reference["id"]
+    assert matched_reference(obs(), refs, config.person, actor["id"], other_role["id"]) is None
+    space = {"model": "fixture"}
+    frames = [{"timestamp": 0, "observations": [obs()]}, {"timestamp": 0.2, "observations": [obs(False)]}]
+    shot = {"id": "shot0", "source_id": "source", "cache_id": "cached-shot", "end": 1, "space": space}
+    rows = attribute_frames(frames, refs, config.person, shot, work, [role], Tracker)
+    assert [r["data"]["reference_id"] for r in rows] == [reference["id"], reference["id"]]
+    for key, kind, data in [
+        ("cached-shot", "shot", {"space": space, "frames": frames}),
+        (fingerprint(["reference-v1", reference["digest"], space]), "reference", {"observations": [obs()]}),
+        (
+            fingerprint(["reference-v1", other["digest"], space]),
+            "reference",
+            {"observations": [{**obs(), "face_feature": [0, 1]}]},
+        ),
+    ]:
+        p.store.execute(
+            "INSERT INTO person_features VALUES(?,?,?,?,?)", (key, None, dumps(space), kind, dumps(data))
+        )
+    resolver = EvidenceReferences(config, p.store)
+    assert resolver.url(rows[0]) == reference["url"]
+    legacy = {
+        **rows[0],
+        "data": {k: v for k, v in rows[0]["data"].items() if k not in {"reference_id", "space"}},
+    }
+    assert resolver.url(legacy) == reference["url"]
+    assert resolver.url({**legacy, "data": {**legacy["data"], "score": .5}}) is None
+    assert resolver.url({**rows[0], "role_id": other_role["id"]}) is None
+    assert resolver.url({**rows[0], "data": {"image_path": "screenshot.png"}}) is None
+    p.store.execute(
+        "INSERT INTO person_evidence VALUES(?,?,?,?,?,?,?,?,?,?)",
+        (
+            legacy["id"],
+            "source",
+            "shot0",
+            actor["id"],
+            role["id"],
+            None,
+            0,
+            0.2,
+            "accepted",
+            dumps(legacy["data"]),
+        ),
+    )
+    from mindex.persons import ShotReview
+
+    reviewed = p.shot_review(
+        ShotReview(
+            source_id="source", shot_id="shot0", selections=[{"actor_id": actor["id"], "role_id": role["id"]}]
+        )
+    )
+    manual = next(e for e in p.evidence() if e["id"] in reviewed["accepted"])
+    assert EvidenceReferences(config, p.store).url(manual) == reference["url"]
+    p.store.execute("DELETE FROM person_references WHERE id=?", (reference["id"],))
+    assert EvidenceReferences(config, p.store).url(rows[0]) is None
 
 def test_role_reference_api_upload_reassign_and_remove(catalogue, config, monkeypatch):
     p, work, actor = catalogue

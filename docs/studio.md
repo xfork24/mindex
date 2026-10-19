@@ -130,3 +130,5 @@ data/studio/<job_id>/
 候选锚点与定长窗口依据 [细化计划](../plans/STUDIO_REFINEMENT_UI_PLAN.md)；测试与浏览器结果见 [定长窗口验收记录](studio-refinement-verification.md)。
 
 浏览器专用服务可通过 `uv run python tests/serve_fixture.py --data-dir <临时测试目录> --port 8001` 启动，勿将确定性颜色向量用于真实素材索引。
+
+逐镜文本编辑器的召回设置支持素材范围多选、场景、人物情绪、景别和最短／最长时长；这些素材筛选也适用于图片及视频召回。素材列表带搜索过滤和右下角高度拖拽；不选素材时搜索全部库。旧的单素材设置继续读取，保存新的多选时写入 `filters.source_ids`。素材顺序和重复项不影响召回版本复用，单项多选与旧单素材配置保持相同签名。

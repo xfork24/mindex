@@ -69,7 +69,8 @@ def choose_subtitle(tracks: list[dict], stream: int | None = None) -> dict | Non
     return min(candidates, key=priority, default=None)
 
 
-def extract_subtitles(path: Path, track: dict, duration: float) -> list[dict]:
+def extract_subtitles(path: Path, track: dict, duration: float, *, input_format: str | None = None,
+                      subtitle_fps: float | None = None) -> list[dict]:
     # ffmpeg preserves source timestamps when no seek is applied. SRT conversion
     # removes ASS drawing/style sections; clean residual HTML and override tags.
     raw = command(
@@ -78,6 +79,10 @@ def extract_subtitles(path: Path, track: dict, duration: float) -> list[dict]:
             "-hide_banner",
             "-loglevel",
             "error",
+            "-protocol_whitelist",
+            "file,pipe",
+            *(["-f", input_format] if input_format else []),
+            *(["-subfps", str(subtitle_fps)] if input_format == "microdvd" and subtitle_fps else []),
             "-i",
             str(path),
             "-map",
@@ -252,10 +257,12 @@ class DialogueProcessor:
         )
         return data
 
-    def process(self, source_id=None, *, method="auto", subtitle_stream=None, start=0, end=None,
+    def process(self, source_id=None, *, method="auto", subtitle_stream=None, subtitle_file=None, start=0, end=None,
                 progress=None, workers=1):
         if method not in {"auto", "subtitle", "asr"}:
             raise ValueError("对白方式必须是 auto、subtitle 或 asr")
+        if subtitle_file and (method != "subtitle" or subtitle_stream is not None or source_id is None):
+            raise ValueError("上传字幕必须指定素材、使用字幕方式，且不能同时选择内嵌字幕轨道")
         started = perf_counter()
         sources = [s for s in self.store.sources() if source_id is None or s["id"] == source_id]
         if not sources:
@@ -263,11 +270,35 @@ class DialogueProcessor:
         results = []
         for source in sources:
             with self.store.run("dialogue", source["id"]):
-                results.append(self._source(source, subtitle_stream, start, end, progress, workers, method))
+                results.append(self._source(source, subtitle_stream, start, end, progress, workers, method,
+                                            subtitle_file))
         return {"sources": results, "elapsed_seconds": round(perf_counter() - started, 3)}
 
-    def _source(self, source, stream, start, end, progress, workers, method):
+    def _source(self, source, stream, start, end, progress, workers, method, subtitle_file=None):
         sid = source["id"]
+        if subtitle_file:
+            from .subtitle_uploads import parse_subtitle_file, resolve_subtitle
+
+            path, metadata = resolve_subtitle(self.store, sid, subtitle_file)
+            profile = fingerprint(["uploaded-subtitle-v1", sid, subtitle_file])
+            previous = self.store.one("SELECT * FROM channel_data WHERE source_id=? AND channel='dialogue'", (sid,))
+            if previous and previous["profile"] == profile and previous["status"] in READY:
+                if progress:
+                    progress({"stage": "subtitle", "completed": 1, "total": 1, "unit": "files"})
+                return {"source_id": sid, **json.loads(previous["data"]), "reused": True}
+            if progress:
+                progress({"stage": "subtitle", "completed": 0, "total": 1, "unit": "files",
+                          "message": "正在解析上传字幕文件"})
+            media = json.loads(source["media"])
+            rows = parse_subtitle_file(path, "." + metadata["format"], media["duration"], fps=media["fps"])
+            data = self.save(sid, profile, {
+                "source": "subtitle", "subtitle_file": metadata, "selected_track": None,
+                "status": "complete", "utterances": rows, "words": [], "language": "und",
+                "model_identity": {"extractor": "ffmpeg-srt-v1"}, "fallback_reason": None,
+            })
+            if progress:
+                progress({"stage": "subtitle", "completed": 1, "total": 1, "unit": "files"})
+            return {"source_id": sid, **data}
         path = self.store.resolve_media(source["path"])
         info = probe(path)
         tracks = subtitle_tracks(path) if method != "asr" else []
@@ -281,7 +312,8 @@ class DialogueProcessor:
         reason = "没有可用的完整文本字幕（forced/位图字幕不自动选用；烧录字幕不做 OCR）"
         if selected and selected["text"]:
             if progress:
-                progress({"stage": "subtitle", "message": "正在提取文本字幕"})
+                progress({"stage": "subtitle", "completed": 0, "total": 1, "unit": "tracks",
+                          "message": "正在提取文本字幕"})
             profile = fingerprint(["subtitle-srt-v1", sid, selected])
             previous = self.store.one(
                 "SELECT * FROM channel_data WHERE source_id=? AND channel='dialogue'", (sid,)
@@ -289,6 +321,8 @@ class DialogueProcessor:
             if previous and previous["profile"] == profile and previous["status"] in READY and (
                 manual_subtitle or json.loads(previous["data"]).get("utterances")
             ):
+                if progress:
+                    progress({"stage": "subtitle", "completed": 1, "total": 1, "unit": "tracks"})
                 return {"source_id": sid, **json.loads(previous["data"]), "reused": True}
             try:
                 utterances = extract_subtitles(path, selected, info["duration"])
@@ -307,6 +341,8 @@ class DialogueProcessor:
                             "fallback_reason": None,
                         },
                     )
+                    if progress:
+                        progress({"stage": "subtitle", "completed": 1, "total": 1, "unit": "tracks"})
                     return {"source_id": sid, **data}
                 reason = "所选文本字幕提取结果为空"
             except MediaError as exc:
@@ -323,6 +359,10 @@ class DialogueProcessor:
         common.update(source="asr", fallback_reason=reason if method != "asr" else None, model_identity=model)
         old = self.store.one("SELECT * FROM channel_data WHERE source_id=? AND channel='dialogue'", (sid,))
         if old and old["profile"] == profile and old["status"] in READY:
+            if progress:
+                previous = json.loads(old["data"])
+                progress({"stage": "asr", "completed_chunks": previous.get("completed_chunks", 0),
+                          "total_chunks": previous.get("total_chunks", 0), "unit": "chunks"})
             return {"source_id": sid, **json.loads(old["data"]), "reused": True}
         if not info["audio"] or not self.config.asr.enabled:
             data = self.save(
@@ -386,6 +426,9 @@ class DialogueProcessor:
             for n in range(total)
             if min((n + 1) * 30, info["duration"]) > start and (end is None or n * 30 < end)
         ]
+        if progress:
+            progress({"stage": "asr", "completed_chunks": sum((cache / f"{n}.json").exists() for n in range(total)),
+                      "total_chunks": total, "unit": "chunks"})
         if self.transcriber is None and any(not (cache / f"{n}.json").exists() for n in selected):
             self.transcriber = make_transcriber(self.config)
         try:
@@ -402,6 +445,7 @@ class DialogueProcessor:
                                     "total_chunks": total,
                                     "processed_until": core_end,
                                     "stage": "asr",
+                                    "unit": "chunks",
                                 }
                             )
             words, completed = [], 0

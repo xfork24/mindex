@@ -10,6 +10,7 @@ from test_persons import FakeClient, Tracker
 
 from mindex import person_api, person_processing
 from mindex import pipeline as pipeline_module
+from mindex.adapters import AnalysisContentRejected
 from mindex.api import create_app
 from mindex.config import Config
 from mindex.media import command
@@ -24,6 +25,7 @@ def main():
     parser.add_argument("--analysis-delay", type=float, default=0)
     parser.add_argument("--runtime-settings", action="store_true")
     parser.add_argument("--progress-fixture", action="store_true")
+    parser.add_argument("--reject-blue-analysis", action="store_true", help="工程测试：模拟蓝色分镜内容拒绝")
     args = parser.parse_args()
     config = Config(data_dir=args.data_dir.resolve(), runtime_overrides=args.runtime_settings)
     config.embedding.dimensions = 8
@@ -47,7 +49,10 @@ def main():
     class SlowAnalyzer(FixtureAnalyzer):
         def analyze(self, path, dialogue):
             time.sleep(args.analysis_delay)
-            return super().analyze(path, dialogue)
+            result = super().analyze(path, dialogue)
+            if args.reject_blue_analysis and result.description.startswith("蓝"):
+                raise AnalysisContentRejected("工程测试：系统检测到输入或生成内容可能包含不安全或敏感内容")
+            return result
 
     pipeline_module.make_analyzer = lambda _: SlowAnalyzer(embedder)
     person_processing.PersonProcessor = lambda cfg: PersonProcessor(cfg, FakeClient(), Tracker)

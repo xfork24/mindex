@@ -173,6 +173,12 @@ def test_embedding_progress_persisted_in_api_and_resumed_checkpoints(config, vid
             assert task["progress"]["completed"] == completed
             assert task["progress"]["total"] == total  # excludes the retained other source
             assert task["progress"]["unit"] == "segments"
+            assert task["progress"]["phase"] == "publish"
+            assert task["publication"]["progress"]["completed"] == completed
+            if work == "shots":
+                processing = task["progress"]["processing_progress"]
+                assert processing["phase"] == "process" and processing["stage"] == "split"
+                assert processing["completed"] == processing["total"]
             source = client.get(f"/api/admin/sources/{sid}").json()
             key = "publish_task" if work == "publish" else "task"
             assert source["work"]["shots"][key]["progress"] == task["progress"]
@@ -210,6 +216,8 @@ def test_embedding_progress_persisted_in_api_and_resumed_checkpoints(config, vid
         assert task["publication"]["status"] == "complete"
         assert task["progress"]["stage"] == "published"
         assert task["progress"]["completed"] == task["progress"]["total"] == total
+        if work == "shots":
+            assert task["progress"]["processing_progress"]["stage"] == "split"
     finally:
         for _ in range(50):
             release.release()

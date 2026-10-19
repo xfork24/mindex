@@ -166,6 +166,15 @@ def segment_details(store, segment_id):
             subtitle_result.update(status="no_tracks", message="无字幕轨道")
     except (MediaError, OSError) as exc:
         subtitle_result.update(status="failed", message="字幕轨道读取失败", error=str(exc))
+    if dialogue.get("source") == "subtitle" and dialogue.get("subtitle_file"):
+        rows = relative_dialogue(dialogue, start, end)
+        subtitle_result["tracks"].append({
+            "index": "file", "title": dialogue["subtitle_file"]["name"],
+            "language": dialogue.get("language", "und"), "codec": dialogue["subtitle_file"]["format"],
+            "status": "complete", "utterances": rows,
+            "message": "字幕轨道结果" if rows else "此镜头无字幕",
+        })
+        subtitle_result.update(status="complete", message="字幕轨道结果")
     row = store.one("SELECT * FROM annotations WHERE segment_id=? ORDER BY rowid DESC LIMIT 1", (segment_id,))
     llm = (
         {
@@ -177,6 +186,8 @@ def segment_details(store, segment_id):
         if row
         else {"status": "not_processed", "message": "LLM 未处理"}
     )
+    if llm["status"] == "skipped":
+        llm["message"] = "模型内容安全策略拒绝，已跳过此片段"
     return {
         "segment": segment_public(segment),
         "asr": asr_result,

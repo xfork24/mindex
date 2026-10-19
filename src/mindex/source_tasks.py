@@ -14,6 +14,7 @@ from .config import Config, StrictModel
 from .pipeline import Pipeline
 from .processing_lock import ProcessingLock, recover_tasks
 from .storage import dumps
+from .task_progress import save_task_progress
 
 Work = Literal["shots", "dialogue", "analysis", "persons"]
 
@@ -79,10 +80,10 @@ def publish_work(config, source_id, work, embedder=None, *, progress=None):
         if progress:
             progress({"stage": "publish", "message": "正在发布人物检索"})
         from .processing_lock import index_write_lock
-        with index_write_lock(pipeline.store.root):
-            result = Persons(pipeline.store).publish()
         if progress:
-            progress({"stage": "published"})
+            progress({"stage": "index_wait"})
+        with index_write_lock(pipeline.store.root):
+            result = Persons(pipeline.store).publish(source_id=source_id, progress=progress)
         return result
     channel = {"shots": "visual", "dialogue": "dialogue", "analysis": "analysis"}[work]
     index_id = IndexBuilder(config, embedder).build(
@@ -97,14 +98,27 @@ def publish_work(config, source_id, work, embedder=None, *, progress=None):
 def publication_attempt(config, source_id, work, *, embedder=None, save=None, progress=None):
     """发布失败不改变处理完成；运行标记在网络调用前落库。"""
     value = {"status": "running", "error": None}
+    latest_progress = None
+
+    def notify(current):
+        nonlocal latest_progress
+        latest_progress = {**current, "phase": "publish"}
+        if progress:
+            progress(latest_progress)
+        if save:
+            save({"status": "running", "error": None, "progress": latest_progress})
+
     if save:
         save(value)
     try:
+        notify({"stage": "index_wait"})
         value = {"status": "complete", "error": None, **publish_work(
-            config, source_id, work, embedder, progress=progress
+            config, source_id, work, embedder, progress=notify
         )}
     except Exception as exc:  # noqa: BLE001 — 发布错误独立持久化，不丢失处理结果
         value = {"status": "failed", "error": str(exc)[:2000]}
+    if latest_progress:
+        value["progress"] = latest_progress
     if save:
         save(value)
     return value
@@ -263,6 +277,8 @@ class SourceTasks:
             )
 
             def save(field, value):
+                if field == "progress":
+                    return save_task_progress(self.store, "source_tasks", task_id, value)
                 self.store.execute(
                     f"UPDATE source_tasks SET {field}=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
                     (dumps(value), task_id),
@@ -293,7 +309,7 @@ class SourceTasks:
                     result = {"processing_status": "complete"}
                     save("result", result)
                 if options["publish"]:
-                    save("progress", {"stage": "publish", "message": "处理完成，正在更新检索"})
+                    save("progress", {"stage": "publish", "phase": "publish", "message": "处理完成，正在更新检索"})
                     publication_attempt(
                         config,
                         row["source_id"],

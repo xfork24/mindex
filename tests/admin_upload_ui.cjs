@@ -27,7 +27,7 @@ const fixture=process.env.MINDEX_UPLOAD_TEST_VIDEO||'/tmp/mindex-upload-verifica
     await page.waitForFunction(()=>document.querySelector('[data-work=shots] .muted').textContent.includes('已更新'));
     await dialogue.getByLabel('对白处理方式').selectOption('subtitle');
     await dialogue.getByRole('button',{name:'开始处理',exact:true}).click();
-    await dialogue.getByText('请选择文本字幕轨道。',{exact:true}).waitFor();
+    await dialogue.getByText('请选择字幕轨道或上传字幕文件。',{exact:true}).waitFor();
     await dialogue.getByLabel('对白处理方式').selectOption('asr');
     await dialogue.getByRole('button',{name:'开始处理',exact:true}).click();
     await dialogue.locator('.work-status').filter({hasText:'无音轨'}).waitFor();

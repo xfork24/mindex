@@ -1110,7 +1110,7 @@ class Persons:
             )
         ]
 
-    def publish(self, content_id=None):
+    def publish(self, content_id=None, *, source_id=None, progress=None):
         active = self.store.active_index()
         content_id = content_id or (active["id"] if active else None)
         if not content_id:
@@ -1118,6 +1118,15 @@ class Persons:
         content = self.store.index_version(content_id)
         if content["status"] != "ready":
             raise ValueError("内容索引尚未就绪")
+        count = self.store.one(
+            "SELECT COUNT(DISTINCT shot_id) AS n FROM ("
+            "SELECT json_extract(data,'$.shot_id') AS shot_id,source_id FROM person_coverage UNION ALL "
+            "SELECT shot_id,source_id FROM person_evidence WHERE status='accepted') "
+            + ("WHERE source_id=?" if source_id else ""),
+            (source_id,) if source_id else (),
+        )["n"]
+        if progress:
+            progress({"stage": "person_index", "completed": 0, "total": count, "unit": "shots"})
         # A consistent catalogue/evidence/coverage snapshot, without model calls.
         with self.store.connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -1150,6 +1159,8 @@ class Persons:
                 raise ValueError("内容索引仍有未完成片段")
             db.execute("INSERT OR REPLACE INTO settings VALUES('active',?)", (content_id,))
             db.execute("INSERT OR REPLACE INTO settings VALUES('active.release',?)", (release,))
+        if progress:
+            progress({"stage": "published", "completed": count, "total": count, "unit": "shots"})
         return {"release_id": release, "content_id": content_id, "person_version": version}
 
     def published(self, content_id, *, pinned=False, release_id=None):

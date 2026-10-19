@@ -11,6 +11,7 @@ from pathlib import Path
 from filelock import FileLock
 
 from .adapters import (
+    AnalysisContentRejected,
     ShotDetector,
     Transcriber,
     VisualAnalyzer,
@@ -246,6 +247,8 @@ class Pipeline:
         ranges = self._read_plan(source) if not source["prepared"] else []
         with self.store.run("prepare", source_id):
             if not source["prepared"]:
+                if progress:
+                    progress({"stage": "split", "completed": 0, "total": len(ranges), "unit": "shots"})
                 for number, (start, end) in enumerate(ranges, 1):
                     log.info("Split %s shot %d/%d %.3f–%.3f", source["name"], number, len(ranges), start, end)
                     shot = self._segment(
@@ -268,11 +271,13 @@ class Pipeline:
                             "whole_shot" if len(pieces) == 1 else "sliding_window",
                         )
                     if progress:
-                        progress({"stage": "split", "completed": number, "total": len(ranges)})
+                        progress({"stage": "split", "completed": number, "total": len(ranges), "unit": "shots"})
                 self.store.execute("UPDATE sources SET prepared=1 WHERE id=?", (source_id,))
             else:
                 # Resume also repairs missing physical artifacts without redetecting shots.
                 segments = self.store.segments(source_id)
+                if progress:
+                    progress({"stage": "repair", "completed": 0, "total": len(segments), "unit": "segments"})
                 for number, segment in enumerate(segments, 1):
                     self._segment(
                         source,
@@ -284,7 +289,7 @@ class Pipeline:
                         segment["reason"],
                     )
                     if progress:
-                        progress({"stage": "repair", "completed": number, "total": len(segments)})
+                        progress({"stage": "repair", "completed": number, "total": len(segments), "unit": "segments"})
 
     def visual_snapshots(self, source_id: str | None = None, kinds=("moment",)) -> list[dict]:
         """Native video embeddings need neither ASR nor generated descriptions."""
@@ -540,18 +545,28 @@ class Pipeline:
         input_version = transcript.get("content_version") if transcript else None
         base_profile = self.config.analysis_key
         profile = self.annotation_profile(segment["source_id"])
-        if self.store.json_value("annotations", "segment_id", segment["id"], profile) is not None:
-            return
+        saved = self.store.json_value("annotations", "segment_id", segment["id"], profile)
+        if saved is not None:
+            return saved
         same = self.store.one(
             "SELECT a.data FROM annotations a JOIN segments s ON s.id=a.segment_id "
-            "WHERE a.profile=? AND s.source_id=? AND s.start=? AND s.end=? LIMIT 1",
-            (profile, segment["source_id"], segment["start"], segment["end"]),
+            "WHERE a.profile=? AND s.source_id=? AND ((s.start=? AND s.end=?) OR "
+            "(json_extract(a.data,'$.status')='skipped' AND s.start<=? AND s.end>=?)) LIMIT 1",
+            (profile, segment["source_id"], segment["start"], segment["end"], segment["start"], segment["end"]),
         )
         if same:
-            self.store.put_json("annotations", "segment_id", segment["id"], profile, json.loads(same["data"]))
-            return
+            saved = json.loads(same["data"])
+            self.store.put_json("annotations", "segment_id", segment["id"], profile, saved)
+            return saved
         dialogue = self._dialogue(segment["source_id"], segment["start"], segment["end"])
-        annotation = self.analyzer.analyze(self.store.resolve_media(segment["path"]), dialogue)
+        try:
+            annotation = self.analyzer.analyze(self.store.resolve_media(segment["path"]), dialogue)
+            output = {"annotation": annotation.model_dump(), "content_version": fingerprint(annotation.model_dump())}
+        except AnalysisContentRejected as exc:
+            log.warning("LLM 跳过敏感片段 %s %s %.3f–%.3f：%s", segment["source_id"],
+                        segment["kind"], segment["start"], segment["end"], exc)
+            output = {"status": "skipped", "reason": str(exc), "message": "模型内容安全策略拒绝，已跳过此片段"}
+            output["content_version"] = fingerprint(output)
         if self.config.analysis_key != base_profile:
             raise ValueError("分析过程中模型身份发生变化")
         self.store.put_json(
@@ -560,25 +575,33 @@ class Pipeline:
             segment["id"],
             profile,
             {
-                "annotation": annotation.model_dump(),
+                **output,
                 "dialogue": dialogue,
                 "dialogue_input_version": input_version,
                 "model_identity": self.config.analyzer.model_dump(),
                 "input_fingerprint": fingerprint(
                     [segment["source_id"], segment["start"], segment["end"], profile]
                 ),
-                "content_version": fingerprint(annotation.model_dump()),
             },
         )
+        return output
 
     def analyze(self, source_id: str | None = None, progress=None):
         from .dialogue import atomic_json
 
         for source in self.selected_sources(source_id):
             profile = self.annotation_profile(source["id"])
+            counts = {"skipped": 0}
+
+            def notify(value, counts=counts):
+                if progress:
+                    progress({**value, **counts})
+
             with self.store.run("analyze", source["id"]):
                 base = [s for s in self.store.segments(source["id"]) if s["kind"] != "scene"]
                 for number, segment in enumerate(base, 1):
+                    if progress:
+                        notify({"stage": "analyze", "completed": number - 1, "total": len(base), "unit": "segments"})
                     log.info(
                         "Analyze %s %s %.2f–%.2f",
                         source["name"],
@@ -586,17 +609,24 @@ class Pipeline:
                         segment["start"],
                         segment["end"],
                     )
-                    self._annotate(segment)
+                    saved = self._annotate(segment)
+                    counts["skipped"] += saved.get("status") == "skipped"
                     if progress:
-                        progress({"stage": "analyze", "completed": number, "total": len(base)})
+                        notify({"stage": "analyze", "completed": number, "total": len(base), "unit": "segments"})
                 plan = self.store.json_value("scene_plans", "source_id", source["id"], profile)
                 if plan is None:
                     # Turn overlapping moments into contiguous units, while retaining
                     # their descriptions and original boundaries for semantic grouping.
                     moments = [s for s in base if s["kind"] == "moment"]
+                    rejected = [s for s in base if self.store.json_value(
+                        "annotations", "segment_id", s["id"], profile
+                    ).get("status") == "skipped"]
                     units = []
                     for index, segment in enumerate(moments):
                         end = moments[index + 1]["start"] if index + 1 < len(moments) else segment["end"]
+                        # 场景不能重新包含已被拒绝的画面；保留原时间轴缺口。
+                        if any(s["start"] < segment["end"] and s["end"] > segment["start"] for s in rejected):
+                            continue
                         annotation = self.store.json_value(
                             "annotations", "segment_id", segment["id"], profile
                         )
@@ -611,42 +641,54 @@ class Pipeline:
                     plan, batch = [], []
                     grouped_units = 0
 
-                    def grouped(current, total_units, checkpoint_root):
+                    def grouped(current, total_units, checkpoint_root, sid=source["id"]):
                         nonlocal grouped_units
                         if not current:
                             return []
                         if progress:
-                            progress({
+                            notify({
                                 "stage": "scene_grouping", "completed": grouped_units, "total": total_units,
+                                "unit": "segments",
                                 "message": f"正在组织场景 {current[0]['start']:.2f}–{current[-1]['end']:.2f} 秒",
                             })
                         checkpoint = checkpoint_root / (fingerprint(current) + ".json")
                         if checkpoint.is_file():
                             groups = json.loads(checkpoint.read_text())
                         else:
-                            groups = self.analyzer.group_scenes(current)
+                            try:
+                                groups = self.analyzer.group_scenes(current)
+                            except AnalysisContentRejected as exc:
+                                log.warning("LLM 跳过敏感场景分组 %s %.3f–%.3f：%s", sid,
+                                            current[0]["start"], current[-1]["end"], exc)
+                                groups = []
                             atomic_json(checkpoint, groups)
                         grouped_units += len(current)
                         if progress:
-                            progress({"stage": "scene_grouping", "completed": grouped_units, "total": total_units})
+                            notify({"stage": "scene_grouping", "completed": grouped_units,
+                                      "total": total_units, "unit": "segments"})
                         return [[current[group[0]]["start"], current[group[-1]]["end"]] for group in groups]
 
                     checkpoint_root = self.store.root / "analysis" / source["id"] / profile
                     for unit in units:
-                        if batch and (unit["end"] - batch[0]["start"] > 45 or len(batch) >= 32):
+                        if batch and (unit["end"] - batch[0]["start"] > 45 or len(batch) >= 32
+                                      or unit["start"] > batch[-1]["end"] + 1e-6):
                             plan.extend(grouped(batch, len(units), checkpoint_root))
                             batch = []
                         batch.append(unit)
                     plan.extend(grouped(batch, len(units), checkpoint_root))
                     self.store.put_json("scene_plans", "source_id", source["id"], profile, plan)
+                if not plan and progress:
+                    notify({"stage": "scenes", "completed": 0, "total": 0, "unit": "scenes"})
                 for scene_number, (start, end) in enumerate(plan, 1):
                     if progress:
-                        progress({"stage": "scenes", "completed": scene_number - 1, "total": len(plan),
+                        notify({"stage": "scenes", "completed": scene_number - 1, "total": len(plan),
+                                  "unit": "scenes",
                                   "message": "正在生成场景分析"})
                     scene = self._segment(source, "scene", start, end, profile, None, "semantic_grouping")
-                    self._annotate(scene)
+                    saved = self._annotate(scene)
+                    counts["skipped"] += saved.get("status") == "skipped"
                     if progress:
-                        progress({"stage": "scenes", "completed": scene_number, "total": len(plan)})
+                        notify({"stage": "scenes", "completed": scene_number, "total": len(plan), "unit": "scenes"})
 
     def snapshots(self, source_id: str | None = None) -> list[dict]:
         result = []
@@ -662,6 +704,8 @@ class Pipeline:
                 value = self.store.json_value("annotations", "segment_id", segment["id"], profile)
                 if value is None:
                     raise ValueError(f"片段 {segment['id']} 尚未分析")
+                if value.get("status") == "skipped":
+                    continue
                 annotation = Annotation.model_validate(value["annotation"])
                 dialogue = "".join(u["text"] for u in value["dialogue"])
                 scene_ids = [s["id"] for s in scenes if s["start"] <= segment["start"] < s["end"]]
