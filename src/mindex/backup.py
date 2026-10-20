@@ -84,6 +84,8 @@ def files_under(root):
 
 def excluded(relative):
     path = Path(relative)
+    if path.name == '.DS_Store':
+        return 'macOS Finder 目录显示元数据'
     if set(path.parts) & EXCLUDED_DIRS:
         return '向量内部文件、模型目录或锁目录（向量经 API 单独导出）'
     if path.name.startswith('metadata.sqlite3') and path.name in {
@@ -513,6 +515,8 @@ def build_bundle(config, output, *, selected, include_secrets, config_path):
         'files': [],
     }
     for path in files_under(output):
+        if path.name == '.DS_Store':
+            continue
         relative = path.relative_to(output).as_posix()
         manifest['files'].append({'path': relative, 'bytes': path.stat().st_size, 'sha256': digest(path),
                                   'sources': sorted(owners.get(relative.removeprefix('data/'), set()) & chosen)})
@@ -548,8 +552,9 @@ def _inspect_bundle(bundle):
     if not {'data/metadata.sqlite3', 'config/base.yaml'} <= listed:
         raise ValueError('备份缺少数据库或基础配置')
     actual = {p.relative_to(bundle).as_posix() for p in files_under(bundle)} - {'manifest.json'}
-    if actual != listed:
-        raise ValueError('备份含未登记文件')
+    unregistered = sorted(path for path in actual - listed if PurePosixPath(path).name != '.DS_Store')
+    if unregistered:
+        raise ValueError('备份含未登记文件：' + '、'.join(unregistered))
     indexes = {r['id'] for r in store_at(bundle / 'data').rows('SELECT id FROM index_versions')}
     if {item['index_id'] for item in manifest['collections']} != indexes:
         raise ValueError('向量集合与数据库的索引版本不一致')

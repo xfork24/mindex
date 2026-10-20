@@ -717,3 +717,30 @@ def test_merge_still_rejects_embedding_and_index_contract_changes(field, value):
     spec = {'space': {'model': 'WeMM'}, 'format': 2, 'preprocessing': {'fps': 4}, 'mode': 'auto'}
     with pytest.raises(ValueError, match=f'活动索引不兼容：{field}'):
         check_compatible({'spec': spec}, {'spec': {**spec, field: value}}, None, None)
+
+
+def test_finder_metadata_is_ignored_without_weakening_backup_validation(library, tmp_path):
+    config = library[0]
+    (config.data_dir / '.DS_Store').write_bytes(b'Finder metadata')
+    bundle = tmp_path / 'finder-backup'
+    exported = export(library, bundle)
+    assert not (bundle / 'data/.DS_Store').exists()
+    assert any(item['path'] == '.DS_Store' for item in exported['excluded'])
+    for relative in ('.DS_Store', 'data/.DS_Store', 'vectors/.DS_Store'):
+        (bundle / relative).write_bytes(b'Added by Finder after export')
+    assert inspect_bundle(bundle)['sources'] == exported['sources']
+    extra = bundle / 'data/unregistered.txt'
+    extra.write_text('Unregistered business data must still be rejected')
+    with pytest.raises(ValueError, match='备份含未登记文件：data/unregistered.txt'):
+        inspect_bundle(bundle)
+    extra.unlink()
+    metadata = bundle / '.DS_Store'
+    metadata.unlink()
+    metadata.symlink_to(config.data_dir / '.DS_Store')
+    with pytest.raises(ValueError, match='符号链接'):
+        inspect_bundle(bundle)
+    metadata.unlink()
+    with (bundle / 'data/metadata.sqlite3').open('ab') as stream:
+        stream.write(b'corrupted')
+    with pytest.raises(ValueError, match='校验失败'):
+        inspect_bundle(bundle)
