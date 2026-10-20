@@ -472,9 +472,10 @@ def status(
     return result
 
 
-def channel_coverage(store, active=None, source_id=None):
+def channel_coverage(store, active=None, source_id=None, snapshots=None):
     active = active or store.active_index()
-    snapshots = store.snapshots(active["id"]) if active else []
+    if snapshots is None:
+        snapshots = store.snapshots(active["id"], source_id) if active else []
     snapshots = [s for s in snapshots if source_id is None or s["source_id"] == source_id]
     totals = {"visual": 0, "dialogue": 0, "analysis": 0}
     for s in snapshots:

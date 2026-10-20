@@ -120,15 +120,44 @@ class Library:
             raise EntityNotFound("找不到片段")
         return row
 
-    def source(self, identifier: str) -> dict:
+    def source(self, identifier: str, *, detail="full") -> dict:
         row = self.source_row(identifier)
+        if detail == "summary":
+            return source_public(row)
         # Bounded artifact checks support a real status even before an index exists.
-        missing = self.store.rows("SELECT path,thumbnail FROM segments WHERE source_id=?", (identifier,))
-        missing_count = sum(
-            not self.store.media_available(s[field]) for s in missing for field in ("path", "thumbnail")
-        )
+        from .shot_media import ShotMedia
+        segments = self.store.segments(identifier)
+        missing = segments
+        media = ShotMedia(self.store, reuse_checks=True)
+        media._sources[identifier] = row
+        media._shots[identifier] = [s for s in segments if s['kind'] == 'shot']
+        for shot in media._shots[identifier]:
+            path = (self.store.root / shot['path']).resolve()
+            if path.is_relative_to(self.store.root) and path.is_file():
+                media._paths[shot['path']] = path
+        references = {r['path']: r for r in self.store.rows(
+            "SELECT path,source_id,start,end FROM media_references WHERE source_id=?", (identifier,))}
+        references.update({s['path']: references.get(s['path'], s) for s in segments
+                           if s['kind'] in ('moment', 'scene')})
+        def available(relative):
+            if relative in media._paths:
+                return True
+            path = (self.store.root / relative).resolve()
+            if not path.is_relative_to(self.store.root):
+                return False
+            if path.is_file():
+                return True
+            ref = references.get(relative)
+            if ref:
+                try:
+                    media.references(ref['source_id'], ref['start'], ref['end'])
+                    return True
+                except (ValueError, OSError):
+                    pass
+            return False
+        missing_count = sum(not available(s[field]) for s in missing for field in ('path', 'thumbnail'))
         from .config import fingerprint
-        from .dialogue import current_dialogue, relative_dialogue
+        from .dialogue import current_dialogue, indexed_dialogue, relative_dialogue
         from .media import MediaError
         from .search import channel_coverage
 
@@ -192,7 +221,7 @@ class Library:
             },
         }
         channel_states["dialogue"]["status"] = channel_states["dialogue"]["status"] or "not_processed"
-        ready_dialogue = current_dialogue(self.store, identifier)
+        ready_dialogue = indexed_dialogue(current_dialogue(self.store, identifier))
         channel_states["dialogue"]["content_segments"] = (
             sum(
                 bool(relative_dialogue(ready_dialogue, segment["start"], segment["end"]))
@@ -242,11 +271,13 @@ class Library:
         from .dialogue_tasks import task_public
         from .subtitle_uploads import uploaded_subtitles
 
+        active = self.store.active_index()
+        published = self.store.snapshots(active["id"], identifier) if active else []
         result = {
             **source_public(row),
             "missing_artifacts": missing_count,
             "channels": channel_states,
-            "published_channels": channel_coverage(self.store, source_id=identifier),
+            "published_channels": channel_coverage(self.store, source_id=identifier, snapshots=published),
             "subtitle_tracks": tracks,
             "subtitle_files": uploaded_subtitles(self.store, identifier),
             "dialogue_task": task_public(task) if task else None,
@@ -255,7 +286,8 @@ class Library:
             ),
         }
         from .source_work import source_work
-        result["work"] = source_work(self.store, result)
+        result["work"] = source_work(self.store, result, segments=segments, analysis_rows=analysis_rows,
+                                     active=active, published=published)
         return result
 
     def list_sources(self, q: str, visibility: Visibility, favorite_only: bool, page: int, page_size: int):

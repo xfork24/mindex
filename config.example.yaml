@@ -152,8 +152,9 @@ clean:
   transcripts_max_age_days: 30
   analysis_max_age_days: 30
   dialogue_max_age_days: 30
-  # 可按需重建的缓存：在线播放转码 / studio 分镜预览。
+  # 可按需重建的缓存：在线播放转码 / shot 媒体合成 / studio 分镜预览。
   context_max_age_days: 14
+  shot_media_max_age_days: 7
   studio_preview_max_age_days: 14
   # studio 旧 attempt 目录（未被检查点或当前 attempt 引用）与导出 zip。
   studio_attempt_max_age_days: 30

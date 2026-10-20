@@ -133,6 +133,45 @@ def test_context_expiry_threshold(tmp_path):
     assert fresh.exists()
 
 
+def test_shot_media_cache_expiry(tmp_path):
+    """cache/shot-media：过期合成媒体连同其锁文件与过期探测缓存一起删，未过期保留。"""
+    config_path = make_config(tmp_path)
+    root = tmp_path / "data"
+    Store(root)
+    stale = age(write(root / "cache" / "shot-media" / "abc.mp4"), 40)
+    stale_lock = age(write(root / "cache" / "shot-media" / "abc.mp4.lock"), 40)
+    stale_probe = age(write(root / "cache" / "shot-media" / "probes" / "h1.json"), 40)
+    fresh = write(root / "cache" / "shot-media" / "def.mp4")
+
+    report = report_of(invoke(config_path, "--apply"))
+    names = categories(report)
+
+    assert names["shot_media_cache"]["level"] == "B"
+    assert names["shot_media_cache"]["item_count"] == 2
+    assert not stale.exists() and not stale_lock.exists() and not stale_probe.exists()
+    assert fresh.exists()
+
+
+def test_shot_media_cache_keeps_locked_files(tmp_path):
+    """缓存租约（播放/渲染持有 .lock）期间不删对应合成文件。"""
+    from filelock import FileLock
+
+    config_path = make_config(tmp_path)
+    root = tmp_path / "data"
+    Store(root)
+    serving = age(write(root / "cache" / "shot-media" / "live.mp4"), 40)
+    lock_file = age(write(root / "cache" / "shot-media" / "live.mp4.lock"), 40)
+    deletable = age(write(root / "cache" / "shot-media" / "idle.mp4"), 40)
+    with FileLock(str(lock_file), thread_local=False):
+        report = report_of(invoke(config_path, "--apply"))
+
+    names = categories(report)["shot_media_cache"]
+    assert serving.exists() and lock_file.exists()
+    assert not deletable.exists()
+    assert names["item_count"] == 1 and names["kept"] == {"locked": 1}
+
+
+
 # ---------------------------------------------------------------- 孤儿判定
 
 

@@ -38,6 +38,7 @@ runs 行的 bytes 无法精确统计，诚实输出 0 并在 policy 说明。
 | `analysis_checkpoints` | `analysis/<源>/<profile>/` | 当前 annotation_profile（分析配置 + 对白内容版本）永不删；旧 profile 超期删（重生成 = LLM 重算，最贵） |
 | `dialogue_checkpoints` | `dialogue/<源>/<profile>/` | 保留集 = `channel_data` 现行 dialogue profile（processing 行天然保护进行中任务） |
 | `context_cache` | `context/*.mp4` | mtime 超 `context_max_age_days`（默认 14 天）；写入中（锁被持）跳过 |
+| `shot_media_cache` | `cache/shot-media/**`（含 probes/） | mtime 超 `shot_media_max_age_days`（默认 7 天）；按内容指纹可由现行 shot 重新合成；读取中的（播放/渲染缓存租约锁被持）跳过；媒体文件的 `.lock` 随文件同批删 |
 | `studio_previews` | `studio/<任务>/previews/` | mtime 超期；预览按请求指纹命名可重生成 |
 | `studio_attempts` | `studio/<任务>/attempts/` | **checkpoints.json 引用的与各步骤当前 attempt 一律保留**，其余树 mtime 超 `studio_attempt_max_age_days` 删（含 edit-* 编辑归档与同名结果 json）；execution/step running 的任务整体跳过 |
 | `studio_exports` | `studio/<任务>/exports/*.zip` | mtime 超 `studio_export_max_age_days`；页面可重新打包 |

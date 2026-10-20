@@ -3,6 +3,9 @@ const state = { source: null, sourcePage: 1, sourceTotal: 0, segmentPage: 1, seg
 let sourceRequest = 0;
 let segmentRequest = 0;
 let selectionRequest = 0;
+let selectionController = null;
+let segmentController = null;
+let workRequest = 0;
 
 function node(tag, text, className) {
   const n = document.createElement(tag);if (text !== undefined) MindexI18n.setText(n, text);if (className) n.className = className;return n;
@@ -70,7 +73,7 @@ async function deleteSource(item) {
   join('\n');
   if (!confirm(MindexI18n.render(message))) return;
   const summary = await api(`/api/admin/sources/${item.id}`, { method: 'DELETE' });
-  clearTimeout(workPoll);state.source = null;state.parent = null;state.focus = null;
+  clearTimeout(workPoll);++selectionRequest;++segmentRequest;++workRequest;selectionController?.abort();segmentController?.abort();state.source = null;state.parent = null;state.focus = null;
   $('source-workspace').hidden = true;$('no-source').hidden = false;syncUrl();
   await loadSources();
   notify(MindexI18n.msg("ui.e3bba6911f26", { p0: summary.deleted.segments, p1: summary.deleted.vectors, p2: summary.deleted.files, p3: summary.kept.source_file }));
@@ -88,15 +91,29 @@ function renderSource(source) {
 }
 
 async function selectSource(id) {
-  const request = ++selectionRequest;++segmentRequest;
+  const request = ++selectionRequest;++segmentRequest;++workRequest;
+  clearTimeout(workPoll);workPoll = null;
+  selectionController?.abort();segmentController?.abort();
+  selectionController = new AbortController();
+  const signal = selectionController.signal;
+  state.source = {id};state.parent = null;state.segmentPage = 1;state.focus = null;
+  $('segment-visibility').value = 'visible';pauseList();$('segment-list').replaceChildren();
+  $('source-detail').replaceChildren(node('p', MindexI18n.msg("ui.de365dab6e9d")));
+  $('no-source').hidden = true;$('source-workspace').hidden = false;syncUrl();
   $('source-workspace').setAttribute('aria-busy', 'true');
+  void refreshWork(id, request);
   try {
-    const source = await api(`/api/admin/sources/${id}`);if (request !== selectionRequest) return;
-    state.source = source;state.parent = null;state.segmentPage = 1;state.focus = null;
-    if (source.hidden) $('segment-visibility').value = 'all';else $('segment-visibility').value = 'visible';
-    $('no-source').hidden = true;$('source-workspace').hidden = false;renderSource(source);syncUrl();
-    await Promise.all([loadSources(), loadSegments()]);
-  } finally {if (request === selectionRequest) $('source-workspace').removeAttribute('aria-busy');}
+    await Promise.all([
+      api(`/api/admin/sources/${id}?detail=summary`, {signal}).then(async (source) => {
+        if (request !== selectionRequest) return;
+        if (!state.source.work) {state.source = {...source, statusError: state.source.statusError};renderSource(state.source);}
+        if (source.hidden && $('segment-visibility').value !== 'all') {
+          $('segment-visibility').value = 'all';await loadSegments();
+        }
+      }), loadSegments(), loadSources()
+    ]);
+  } catch (e) {if (e.name !== 'AbortError' && request === selectionRequest) throw e;}
+  finally {if (request === selectionRequest) $('source-workspace').removeAttribute('aria-busy');}
 }
 function syncUrl() {history.replaceState(null, '', `/admin?${params({ source: state.source?.id, kind: state.kind, parent: state.parent?.id, segment: state.focus })}`);}
 function syncTabs() {
@@ -105,7 +122,9 @@ function syncTabs() {
 }
 async function loadSegments() {
   if (!state.source) return;const request = ++segmentRequest;syncTabs();syncUrl();
-  const data = await api(`/api/admin/sources/${state.source.id}/segments?${params({ kind: state.kind, parent_id: state.parent?.id, visibility: $('segment-visibility').value, favorite_only: $('segment-favorite').checked, page: state.segmentPage })}`);
+  segmentController?.abort();segmentController = new AbortController();
+  const data = await api(`/api/admin/sources/${state.source.id}/segments?${params({ kind: state.kind, parent_id: state.parent?.id, visibility: $('segment-visibility').value, favorite_only: $('segment-favorite').checked, page: state.segmentPage })}`, {signal: segmentController.signal}).catch((e) => {if (e.name !== 'AbortError') throw e;return null;});
+  if (!data) return;
   if (request !== segmentRequest) return;
   if (state.segmentPage > 1 && !data.items.length) {state.segmentPage--;return loadSegments();}
   state.segmentTotal = data.total;MindexI18n.setText($('segment-count'), MindexI18n.msg("ui.f6141ac5b67e", { p0: data.total, p1: state.kind === 'shot' ? MindexI18n.msg("ui.c7d1925fd5af") : MindexI18n.msg("ui.5aca155225fc") }));
@@ -131,10 +150,11 @@ async function loadSegments() {
 
 function edit(kind, item) {state.editing = { kind, id: item.id };MindexI18n.setText($('edit-title'), kind === 'source' ? MindexI18n.msg("ui.33f127b82e7d") : MindexI18n.msg("ui.9f0fe854bb6c"));$('edit-name').value = item.custom_name || '';$('edit-notes').value = item.notes || '';MindexI18n.setText($('edit-error'), '');$('edit-dialog').showModal();$('edit-name').focus();}
 async function patch(kind, id, changes) {
-  const sourceId = state.source?.id;
+  const sourceId = state.source?.id, selection = selectionRequest;
   await api(`/api/admin/${kind === 'source' ? 'sources' : 'segments'}/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(changes) });
-  if (state.source?.id !== sourceId) return;
-  state.source = await api(`/api/admin/sources/${sourceId}`);renderSource(state.source);
+  if (state.source?.id !== sourceId || selection !== selectionRequest) return;
+  await refreshWork(sourceId, selection);
+  if (state.source?.id !== sourceId || selection !== selectionRequest) return;
   await Promise.all([loadSources(), loadSegments()]);notify(MindexI18n.msg("ui.963001b5d8c2"));
 }
 $('edit-form').onsubmit = async (event) => {
@@ -146,7 +166,7 @@ $('edit-close').onclick = () => $('edit-dialog').close();
 function play(item) {MindexI18n.setText($('play-title'), item.name);ShotPlayer.attach($('play-video'), `/api/admin/segments/${item.id}/playlist`);$('play-video').poster = item.thumbnail_url;MindexI18n.setText($('play-time'), MindexI18n.msg("ui.0159b6eb9834", { p0: time(item.start), p1: time(item.end), p2: item.source_name }));$('play-download').href = `${item.media_url}?download=true&v=${item.media_revision}`;if (!$('play-dialog').open) $('play-dialog').showModal();}
 $('play-close').onclick = () => $('play-dialog').close();
 $('play-dialog').addEventListener('close', () => {$('play-video').pause();$('play-video').removeAttribute('src');$('play-video').load();});
-async function run(task) {try {await task();} catch (e) {notify(e.message, true);}}
+async function run(task) {try {await task();} catch (e) {if (e.name !== 'AbortError') notify(e.message, true);}}
 function sourceFiltersChanged() {state.sourcePage = 1;return loadSources();}
 function segmentFiltersChanged() {state.segmentPage = 1;return loadSegments();}
 $('source-search').onsubmit = (e) => {e.preventDefault();run(sourceFiltersChanged);};
@@ -212,6 +232,16 @@ function renderWork(source, target) {
   clearTimeout(workPoll);workPoll = null;
   const panel = node('section', undefined, 'work-panel');panel.append(node('h3', MindexI18n.msg("ui.c057f7d9d46e")));
   const grid = node('div', undefined, 'work-grid');panel.append(grid);target.append(panel);
+  if (!source.work) {
+    for (const [name, label] of Object.entries(workNames)) {
+      const card = node('section', undefined, 'work-card');card.dataset.work = name;
+      const start = node('button', MindexI18n.msg("ui.ab2f669c1a01"), 'quiet');start.type = 'button';start.disabled = true;
+      card.append(node('h4', label), start);grid.append(card);
+    }
+    panel.append(node('p', source.statusError || MindexI18n.msg("ui.de365dab6e9d"), source.statusError ? 'source-warning' : 'muted'));
+    if (source.statusError) panel.append(action(MindexI18n.msg("ui.914e1182b421"), () => refreshWork(source.id)));
+    return;
+  }
   const prefs = preferences(source.id),busy = Object.values(source.work || {}).some((w) => [w.task, w.publish_task, w.extra_publish_task].some((t) => t && ['queued', 'running'].includes(t.status)));
   if (!prefs.subtitleInitialized && source.subtitle_files?.length) {
     const selected = source.dialogue_task?.options.subtitle_file || source.channels?.dialogue?.subtitle_file?.id || source.subtitle_files.at(-1).id;
@@ -272,7 +302,7 @@ function renderWork(source, target) {
     const errors = node('p', '', 'source-warning');errors.setAttribute('role', 'alert');
     const perform = (fn) => async () => {MindexI18n.setText(errors, '');try {await fn();} catch (e) {MindexI18n.setText(errors, e.message);}};
     const controls = node('div', undefined, 'work-controls');
-    const start = action(name === 'persons' ? MindexI18n.msg("ui.123bbda48a5d") : work.status === 'not_processed' ? MindexI18n.msg("ui.ab2f669c1a01") : name === 'shots' ? MindexI18n.msg("ui.705c3cbac14d") : name === 'analysis' ? MindexI18n.msg("ui.b3d17c0db3dd") : MindexI18n.msg("ui.941fe1a3c3c2"), perform(async () => {
+    const start = action(name === 'persons' ? MindexI18n.msg("ui.123bbda48a5d") : name === 'dialogue' ? MindexI18n.msg("ui.941fe1a3c3c2") : work.status === 'not_processed' ? MindexI18n.msg("ui.ab2f669c1a01") : name === 'shots' ? MindexI18n.msg("ui.705c3cbac14d") : name === 'analysis' ? MindexI18n.msg("ui.b3d17c0db3dd") : MindexI18n.msg("ui.941fe1a3c3c2"), perform(async () => {
       if (name === 'persons') return openPerson(source.id, prefs.publish[name]);
       const options = { publish: prefs.publish[name] };
       if (name === 'dialogue') {if (prefs.uploadingSubtitle) throw Error(MindexI18n.msg("ui.49476949fc90"));options.method = prefs.method;if (prefs.method === 'subtitle') {if (!prefs.track) throw Error(MindexI18n.msg("ui.ed4caa4cf3b3"));if (prefs.track.startsWith('file:')) options.subtitle_file = prefs.track.slice(5);else options.subtitle_stream = Number(prefs.track);}}
@@ -316,10 +346,18 @@ function renderWork(source, target) {
   }
   if (busy) workPoll = setTimeout(() => run(() => refreshWork(source.id)), 2000);
 }
-async function refreshWork(sourceId) {
-  const source = await api(`/api/admin/sources/${sourceId}`);if (state.source?.id !== sourceId) return;
-  const changed = source.shot_count !== state.source.shot_count || source.moment_count !== state.source.moment_count;
-  state.source = source;renderSource(source);if (changed) await Promise.all([loadSources(), loadSegments()]);
+async function refreshWork(sourceId, selection = selectionRequest) {
+  const request = ++workRequest;
+  try {
+    const source = await api(`/api/admin/sources/${sourceId}`, {signal: selectionController?.signal});
+    if (selection !== selectionRequest || request !== workRequest || state.source?.id !== sourceId) return;
+    const changed = state.source.work && (source.shot_count !== state.source.shot_count || source.moment_count !== state.source.moment_count);
+    state.source = source;renderSource(source);if (changed) await Promise.all([loadSources(), loadSegments()]);
+  } catch (e) {
+    if (e.name === 'AbortError' || selection !== selectionRequest || request !== workRequest || state.source?.id !== sourceId) return;
+    state.source = {...state.source, work: null, statusError: e.message};
+    if (state.source.media) renderSource(state.source);
+  }
 }
 let personContext = null,personSetupRequest = 0;
 async function openPerson(sourceId, publish) {

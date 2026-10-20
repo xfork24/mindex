@@ -27,12 +27,25 @@ def covered_shots(shots, rows):
     return count
 
 
-def source_work(store, source):
+def same_json(left, right):
+    """Compare canonical JSON content without serializing large evidence payloads."""
+    if type(left) is not type(right):
+        return False
+    if isinstance(left, dict):
+        return left.keys() == right.keys() and all(same_json(v, right[k]) for k, v in left.items())
+    if isinstance(left, list):
+        return len(left) == len(right) and all(same_json(a, b) for a, b in zip(left, right))
+    if isinstance(left, float):
+        return repr(left) == repr(right)
+    return left == right
+
+
+def source_work(store, source, *, segments=None, analysis_rows=None, active=None, published=None):
     from .channel_index import normalize_snapshot, snapshots_for
     from .persons import Persons
 
     sid = source["id"]
-    segments = store.segments(sid)
+    segments = segments if segments is not None else store.segments(sid)
     shots = [s for s in segments if s["kind"] == "shot"]
     segment_ids = {s["id"] for s in segments}
     scene_plan = store.one(
@@ -73,14 +86,15 @@ def source_work(store, source):
     counts = catalogue.review_summary().get(sid, {"accepted": 0, "candidate": 0, "rejected": 0})
     linked = store.rows("SELECT DISTINCT actor_id,role_id FROM person_evidence WHERE source_id=?", (sid,))
     people = {r[k] for r in linked for k in ("actor_id", "role_id") if r[k]}
-    active = store.active_index()
-    published = (
-        [normalize_snapshot(s) for s in store.snapshots(active["id"]) if s["source_id"] == sid]
+    active = active or store.active_index()
+    published = [normalize_snapshot(s) for s in published] if published is not None else (
+        [normalize_snapshot(s) for s in store.snapshots(active["id"], sid) if s["source_id"] == sid]
         if active
         else []
     )
     kinds = ("moment", "shot", "scene")
-    fresh = snapshots_for(SimpleNamespace(store=store), sid, kinds)
+    fresh = snapshots_for(SimpleNamespace(store=store), sid, kinds, status_only=True,
+                          segments=segments, analysis_rows=analysis_rows)
     old = {s["id"]: s for s in published}
     work = {
         "shots": {
@@ -150,7 +164,7 @@ def source_work(store, source):
                 "expected_segments": sum(channel == "visual" or bool(s["views"].get(channel)) for s in expected),
                 "index_id": active["id"] if active else None,
             }
-    release, person_snapshot = catalogue.published(active["id"]) if active else (None, {})
+    release, person_snapshot = catalogue.published(active["id"], source_id=sid) if active else (None, {})
     evidence = store.rows(
         "SELECT * FROM person_evidence WHERE source_id=? AND status='accepted' ORDER BY id", (sid,)
     )
@@ -161,11 +175,11 @@ def source_work(store, source):
     published_coverage = [e for e in person_snapshot.get("coverage", []) if e["source_id"] == sid]
     work["persons"]["search"] = {
         "current": bool(release)
-        and fingerprint(evidence) == fingerprint(published_evidence)
-        and fingerprint(
-            sorted([{**c, "data": json.loads(c["data"])} for c in coverage], key=lambda c: c["cache_id"])
-        )
-        == fingerprint(sorted(published_coverage, key=lambda c: c["cache_id"])),
+        and same_json(evidence, published_evidence)
+        and same_json(
+            sorted([{**c, "data": json.loads(c["data"])} for c in coverage], key=lambda c: c["cache_id"]),
+            sorted(published_coverage, key=lambda c: c["cache_id"]),
+        ),
         "indexed_segments": covered_shots(shots, published_coverage),
         "expected_segments": len(shots),
         "release_id": release["id"] if release else None,

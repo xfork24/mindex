@@ -145,7 +145,9 @@ header{height:auto;min-height:86px;display:flex;align-items:center;flex-wrap:wra
 
 header .language-switch{margin-left:auto;display:flex;align-items:center;gap:5px;white-space:nowrap}
 
-.language-switch button[aria-pressed="true"]{background:var(--green);color:white;border-color:var(--green)}
+.language-switch [data-language][aria-current="true"]{color:#fff;font-weight:700}
+.language-switch [data-language]{color:var(--muted)}
+.language-switch .language-divider{color:var(--muted)}
 
 header #refresh,header #reload{margin-left:0}
 
@@ -296,7 +298,14 @@ textarea{resize:both;min-width:min(140px,100%);max-width:100%}
 #entity-filters>label{flex:1 1 240px;max-width:none}
 @media(max-width:540px){#person-controls label:has(.multi-select),#person-controls label:not(:has(.multi-select)){width:100%}#capture-form>label,#process-form>label,#capture-form>label:has(input[type=number]),#process-form>label:has(input[type=number]){flex-basis:100%}}
 
-.language-switch .quiet{width:32px;height:32px;min-height:32px;padding:4px;border-radius:7px}.language-switch svg{display:block;flex-shrink:0}
+button.language-switch{position:relative;isolation:isolate;overflow:hidden;width:80px;height:32px;min-height:32px;padding:0;border-radius:7px;background:#fff}
+button.language-switch::before{content:"";position:absolute;inset:0;z-index:-1;background:var(--green);pointer-events:none;clip-path:polygon(0 0,58% 0,42% 100%,0 100%)}
+button.language-switch:has([data-language="en"][aria-current="true"])::before{clip-path:polygon(58% 0,100% 0,100% 100%,42% 100%)}
+button.language-switch [data-language]{position:absolute;top:0;bottom:0;display:flex;align-items:center;justify-content:center;width:40%}
+button.language-switch [data-language="zh"]{left:0}
+button.language-switch [data-language="en"]{right:0}
+button.language-switch .language-divider{position:absolute;inset:0;font-size:0;pointer-events:none}
+button.language-switch .language-divider::after{content:"";position:absolute;inset:0;background:var(--line);clip-path:polygon(57.3% 0,58.7% 0,42.7% 100%,41.3% 100%)}
 
 /* Shared shot player: direct preview playback and a single aligned control row. */
 .shot-player-media{position:relative;background:#15231e;overflow:hidden}
@@ -315,3 +324,8 @@ textarea{resize:both;min-width:min(140px,100%);max-width:100%}
 .card-body .tag{white-space:nowrap;padding:3px 6px}
 .card-body .card-actions{flex-wrap:nowrap;gap:6px;margin-top:5px;padding-top:4px}
 .card-actions a,.card-actions button{display:inline-flex;align-items:center;justify-content:center;height:28px;min-height:28px;line-height:1;white-space:nowrap;margin:0;padding:0 2px}
+
+/* Stack person search options beside the actor and role lists. */
+#person-controls .person-search-options{display:flex;flex-direction:column;gap:16px;width:230px;max-width:100%;align-self:flex-start}
+#person-controls .person-search-options label{width:100%}
+@media(max-width:540px){#person-controls .person-search-options{width:100%}}

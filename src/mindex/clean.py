@@ -638,6 +638,51 @@ def context_cache(scan: Scan) -> CleanAction | None:
     )
 
 
+def shot_media_cache(scan: Scan) -> CleanAction | None:
+    from filelock import FileLock, Timeout
+
+    directory = scan.store.root / "cache" / "shot-media"
+    if not directory.is_dir():
+        return None
+    days = scan.config.clean.shot_media_max_age_days
+    items: list[CleanItem] = []
+    pairs: list[tuple[Path, Path | None]] = []
+    kept = 0
+    for path in sorted(directory.rglob("*")):
+        if not path.is_file() or path.name.startswith(".") or path.name.endswith(".lock"):
+            continue  # 锁文件随对应媒体同批处理
+        if not scan.expired(path, days):
+            continue
+        lock_file = path.with_name(path.name + ".lock")
+        if lock_file.is_file():
+            try:
+                with FileLock(str(lock_file), timeout=0):
+                    pass
+            except Timeout:
+                kept += 1  # 播放/渲染持有缓存租约，跳过
+                continue
+        pairs.append((path, lock_file if lock_file.is_file() else None))
+        items.append(CleanItem(path.relative_to(scan.store.root).as_posix(), path.stat().st_size))
+
+    def execute() -> dict:
+        deleted = 0
+        for path, lock_file in pairs:
+            path.unlink(missing_ok=True)
+            if lock_file is not None:
+                lock_file.unlink(missing_ok=True)
+            deleted += 1
+        return {"deleted": deleted}
+
+    if not items:
+        return None
+    return CleanAction(
+        category="shot_media_cache", level="B", stage="pipeline",
+        description="超过生命期的 shot 媒体合成与探测缓存（cache/shot-media）",
+        policy=f"mtime 早于 {days} 天；按内容指纹可由现行 shot 重新合成；读取中的（缓存租约锁被持）跳过",
+        items=items, kept={"locked": kept}, execute=execute,
+    )
+
+
 def reports_exports(scan: Scan) -> CleanAction | None:
     directory = scan.store.root / "reports"
     if not directory.is_dir():
@@ -749,6 +794,7 @@ RULES: list[Callable[[Scan], CleanAction | None]] = [
     analysis_checkpoints,
     dialogue_checkpoints,
     context_cache,
+    shot_media_cache,
     reports_exports,
     subtitle_cache,
     runs_history,

@@ -32,7 +32,12 @@ def retained_versions(store, keep_recent: int) -> dict:
 
 
 def delete_index_version(store, index_id: str) -> dict:
-    """删除单个非活动索引版本；集合缺失时容错跳过（与 purge 同先例）。"""
+    """删除单个非活动索引版本；集合缺失时容错跳过（与 purge 同先例）。
+
+    调用方（clean 执行器）持有 index_write_lock，与索引构建互斥：并发写同一
+    chroma 目录会用各自内存态覆盖 HNSW 落盘文件，制造「元数据有、HNSW 无」的
+    孤儿向量（复用时 chroma 报 Error finding id）。
+    """
     import chromadb
     from chromadb.config import Settings
 

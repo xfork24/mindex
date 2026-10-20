@@ -40,6 +40,15 @@ Chroma collection 名为 `idx-<index_id>`，`embedding_function=None`（显式�
 
 **回退 = 先切回旧模型服务/配置，再 `indexes activate 旧索引ID`。** 只激活旧索引而查询端还用新模型会被空间身份校验拒绝（503）。
 
+## chroma HNSW 落盘阈值与向量孤儿自愈
+
+chroma 的元数据段每笔提交，HNSW 向量段仅在累计 `sync_threshold`（默认 1000）个元素时才把 id_map 与索引写入磁盘。构建收尾不冲阈值时，尾部向量只存在于内存与 WAL；进程重启或跨进程访问后可能变成「元数据有、HNSW 无」的孤儿，向量复用时 chroma 报 `Error executing plan: Internal error: Error finding id`（上游 chroma-core/chroma#6975）。两层防护：
+
+- `VectorIndex.flush()`：每次构建收尾幂等重写既有向量冲过阈值，保证新版本完整落盘；
+- `VectorIndex.vector()`：复用读取遇孤儿 id 时降级为 None，由上层重新嵌入写入新版本（不吞其他错误）。
+
+`check_index` 只对账 chroma 元数据段与 representations 表，看不见 HNSW 段内部状态，孤儿不会阻断发布，只能靠上述机制兜底。
+
 ## 空间身份与跨空间禁令
 
 - 自定义 `mindex` 嵌入服务在 `/health` 返回 space，客户端逐字段核对（model/dims/quantization/normalized/fps/max_frames/max_pixels/revision/implementation），每次向量响应带 `space_id`（= `fingerprint(space)`），不一致即拒绝。

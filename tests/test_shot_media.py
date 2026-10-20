@@ -267,3 +267,26 @@ def test_inference_with_audio_shots(config, video_file, tmp_path):
         assert abs(info['duration'] - 2) < .1
         assert not info['audio']
     assert not path.exists()
+
+
+def test_request_local_dependency_checks_reuse_queries_and_probes(library, monkeypatch):
+    from mindex import shot_media
+
+    probes, queries = [], []
+    original_probe, original_rows = shot_media.probe, library.rows
+
+    def probe(path):
+        probes.append(path)
+        return original_probe(path)
+
+    def rows(sql, args=()):
+        queries.append(sql)
+        return original_rows(sql, args)
+
+    monkeypatch.setattr(shot_media, 'probe', probe)
+    monkeypatch.setattr(library, 'rows', rows)
+    media = ShotMedia(library, cache_probes=False, reuse_checks=True)
+    for _ in range(100):
+        media.references('s', 0, 0.5)
+    assert len(probes) == 1
+    assert len(queries) == 2

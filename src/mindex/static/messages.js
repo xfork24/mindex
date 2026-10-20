@@ -1856,8 +1856,8 @@ window.MindexMessages = {
     "en": "Update search when complete"
   },
   "ui.123bbda48a5d": {
-    "zh": "配置并处理",
-    "en": "Configure and process"
+    "zh": "配置人物",
+    "en": "Configure people"
   },
   "ui.ab2f669c1a01": {
     "zh": "开始处理",
@@ -1872,8 +1872,8 @@ window.MindexMessages = {
     "en": "Analyze scenes"
   },
   "ui.941fe1a3c3c2": {
-    "zh": "补充处理",
-    "en": "Process remaining"
+    "zh": "分析对白",
+    "en": "Analyze dialogue"
   },
   "ui.e5e99ffa838b": {
     "zh": "请选择文本字幕轨道。",

@@ -263,8 +263,9 @@ class CleanConfig(StrictModel):
     transcripts_max_age_days: int = Field(default=30, ge=1)
     analysis_max_age_days: int = Field(default=30, ge=1)
     dialogue_max_age_days: int = Field(default=30, ge=1)
-    # 可按需重建的缓存：在线转码 / studio 预览
+    # 可按需重建的缓存：在线转码 / shot 媒体合成 / studio 预览
     context_max_age_days: int = Field(default=14, ge=1)
+    shot_media_max_age_days: int = Field(default=7, ge=1)
     studio_preview_max_age_days: int = Field(default=14, ge=1)
     # studio 旧 attempt 目录（未被检查点或当前 attempt 引用）与导出 zip
     studio_attempt_max_age_days: int = Field(default=30, ge=1)

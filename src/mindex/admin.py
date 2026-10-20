@@ -53,9 +53,9 @@ def admin_router(store: Store, runtime=None) -> APIRouter:
         return library.list_sources(q, visibility, favorite_only, page, page_size)
 
     @router.get("/sources/{source_id}")
-    def source(source_id: str):
+    def source(source_id: str, detail: Literal["full", "summary"] = "full"):
         config = runtime.current() if runtime else None
-        return {**library.source(source_id), "enforce_gpu_lock": config.enforce_gpu_lock if config else False}
+        return {**library.source(source_id, detail=detail), "enforce_gpu_lock": config.enforce_gpu_lock if config else False}
 
     @router.api_route("/sources/{source_id}/media", methods=["GET", "HEAD"])
     def source_media(source_id: str):

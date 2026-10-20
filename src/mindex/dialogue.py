@@ -215,9 +215,29 @@ def current_dialogue(store: Store, source_id: str) -> dict | None:
     return None
 
 
+def indexed_dialogue(data):
+    """Request-local interval lookup; retain overlapping utterances and input order."""
+    if not data:
+        return data
+    from bisect import bisect_left, bisect_right
+    utterances = data.get('utterances', [])
+    ordered = sorted(enumerate(utterances), key=lambda pair: pair[1]['start'])
+    starts, ends = [], []
+    maximum = float('-inf')
+    for _, utterance in ordered:
+        starts.append(utterance['start'])
+        maximum = max(maximum, utterance['end'])
+        ends.append(maximum)
+    def lookup(start, end):
+        selected = ordered[bisect_right(ends, start):bisect_left(starts, end)]
+        return [u for _, u in sorted(selected)]
+    return {**data, '_interval_lookup': lookup}
+
+
 def relative_dialogue(data: dict, start: float, end: float) -> list[dict]:
     result = []
-    for u in data.get("utterances", []):
+    utterances = data["_interval_lookup"](start, end) if "_interval_lookup" in data else data.get("utterances", [])
+    for u in utterances:
         if u["start"] >= end or u["end"] <= start:
             continue
         words = [w for w in u.get("words", []) if w["start"] < end and w["end"] > start]

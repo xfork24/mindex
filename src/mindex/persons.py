@@ -1183,7 +1183,7 @@ class Persons:
             progress({"stage": "published", "completed": count, "total": count, "unit": "shots"})
         return {"release_id": release, "content_id": content_id, "person_version": version}
 
-    def published(self, content_id, *, pinned=False, release_id=None):
+    def published(self, content_id, *, pinned=False, release_id=None, source_id=None):
         if release_id:
             release = self.store.one(
                 "SELECT * FROM search_releases WHERE id=? AND content_id=?", (release_id, content_id)
@@ -1198,6 +1198,12 @@ class Persons:
                 (content_id,),
             )
         row = (
+            self.store.one(
+                "SELECT json_object('entities',json('[]'),'evidence',"
+                "(SELECT json_group_array(json(value)) FROM json_each(data,'$.evidence') WHERE json_extract(value,'$.source_id')=?),"
+                "'coverage',(SELECT json_group_array(json(value)) FROM json_each(data,'$.coverage') WHERE json_extract(value,'$.source_id')=?)) AS data "
+                "FROM person_versions WHERE id=?", (source_id, source_id, release['person_id']))
+            if source_id and release and release['person_id'] else
             self.store.one("SELECT data FROM person_versions WHERE id=?", (release["person_id"],))
             if release and release["person_id"]
             else None

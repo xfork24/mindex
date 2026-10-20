@@ -106,7 +106,7 @@
     visit(document.documentElement);
     document.querySelectorAll('.language-switch').forEach(node => bind(node, 'language.switch', {}, 'aria-label'));
     document.querySelectorAll('[data-language]').forEach(button => {
-      button.setAttribute('aria-pressed', String(button.dataset.language === language));
+      button.setAttribute('aria-current', String(button.dataset.language === language));
     });
     for (const [node, top, left] of scroll) {node.scrollTop = top;node.scrollLeft = left;}
     if (window.scrollX !== position[0] || window.scrollY !== position[1]) window.scrollTo(...position);
@@ -127,7 +127,7 @@
     for (const attribute of ['placeholder', 'aria-label', 'alt', 'title', 'data-query']) {
       document.querySelectorAll(`[data-i18n-${attribute}]`).forEach(node => bind(node, node.getAttribute(`data-i18n-${attribute}`), {}, attribute));
     }
-    document.querySelectorAll('[data-language]').forEach(button => button.addEventListener('click', () => setLanguage(button.dataset.language)));
+    document.querySelectorAll('[data-language-toggle]').forEach(button => button.addEventListener('click', () => setLanguage(language === 'zh' ? 'en' : 'zh')));
     update();
   }
   window.addEventListener('storage', event => {

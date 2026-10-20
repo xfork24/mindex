@@ -36,19 +36,27 @@ class ShotReference:
 
 
 class ShotMedia:
-    def __init__(self, store, *, cache_probes=True):
+    def __init__(self, store, *, cache_probes=True, reuse_checks=False):
         self.store = store
         self.cache_probes = cache_probes
+        self.reuse_checks = reuse_checks
         self._probes = {}
         self._sources = {}
         self._shots = {}
+        self._paths = {}
+        self._shot_ends = {}
 
     def _path(self, relative):
-        if self.cache_probes:
-            return self.store.resolve_media(relative)
+        if self.reuse_checks and relative in self._paths:
+            return self._paths[relative]
+        if self.cache_probes and not self.reuse_checks:
+            path = self.store.resolve_media(relative)
+            self._paths[relative] = path
+            return path
         path = (self.store.root / relative).resolve()
         if not path.is_relative_to(self.store.root) or not path.is_file():
             raise FileNotFoundError(relative)
+        self._paths[relative] = path
         return path
 
     def _info(self, path):
@@ -56,17 +64,30 @@ class ShotMedia:
             if path not in self._probes:
                 self._probes[path] = probe(path)
             return self._probes[path]
+        if self.reuse_checks and path in self._probes:
+            return self._probes[path]
         stat = path.stat()
         identity = [str(path), stat.st_size, stat.st_mtime_ns]
         key = hashlib.sha256(json.dumps(identity).encode()).hexdigest()
         directory = self.store.root / 'cache' / 'shot-media' / 'probes'
         directory.mkdir(parents=True, exist_ok=True)
         cached = directory / f'{key}.json'
+        # Cache files are atomically replaced. A request-local reader can use an
+        # existing entry without acquiring thousands of filesystem locks.
+        if self.reuse_checks:
+            try:
+                value = json.loads(cached.read_text())
+                if value['identity'] == identity:
+                    self._probes[path] = value['media']
+                    return value['media']
+            except (ValueError, KeyError, OSError):
+                pass
         with FileLock(str(cached) + '.lock'):
             if cached.exists():
                 try:
                     value = json.loads(cached.read_text())
                     if value['identity'] == identity:
+                        self._probes[path] = value['media']
                         return value['media']
                 except (ValueError, KeyError, OSError):
                     pass
@@ -74,10 +95,11 @@ class ShotMedia:
             partial = cached.with_suffix('.partial')
             partial.write_text(json.dumps({'identity': identity, 'media': info}))
             partial.replace(cached)
+            self._probes[path] = info
             return info
 
     def references(self, source_id: str, start: float = 0, end: float | None = None):
-        if not self.cache_probes and source_id in self._sources:
+        if (self.reuse_checks or not self.cache_probes) and source_id in self._sources:
             source = self._sources[source_id]
         else:
             source = self.store.one('SELECT * FROM sources WHERE id=?', (source_id,))
@@ -89,9 +111,22 @@ class ShotMedia:
         if not all(math.isfinite(v) for v in (start, end)) or not 0 <= start < end <= duration + EPSILON:
             raise MediaError('Invalid source interval')
         cursor, result = start, []
-        if self.cache_probes or source_id not in self._shots:
+        if (self.cache_probes and not self.reuse_checks) or source_id not in self._shots:
+            self._shot_ends.pop(source_id, None)
             self._shots[source_id] = self.store.segments(source_id, 'shot')
-        for shot in self._shots[source_id]:
+        from bisect import bisect_right
+        shots = self._shots[source_id]
+        if source_id not in self._shot_ends:
+            maximum = float('-inf')
+            ends = []
+            for shot in shots:
+                maximum = max(maximum, shot['end'])
+                ends.append(maximum)
+            self._shot_ends[source_id] = ends
+        first = bisect_right(self._shot_ends[source_id], start)
+        for shot in shots[first:]:
+            if shot['start'] >= end:
+                break
             a, b = max(start, shot['start']), min(end, shot['end'])
             if b <= a:
                 continue

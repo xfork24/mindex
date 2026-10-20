@@ -15,6 +15,9 @@ from .storage import Store, dumps
 
 log = logging.getLogger(__name__)
 
+# chroma HNSW 段的默认落盘阈值：累计这么多元素才把 id_map 与索引写盘。
+CHROMA_HNSW_SYNC_THRESHOLD = 1000
+
 
 class VectorIndex:
     def __init__(self, root: Path, index_id: str, create=False):
@@ -45,8 +48,47 @@ class VectorIndex:
         )
 
     def vector(self, identifier: str) -> list[float] | None:
-        raw = self.collection.get(ids=[identifier], include=["embeddings"])
+        try:
+            raw = self.collection.get(ids=[identifier], include=["embeddings"])
+        except Exception as exc:  # 仅降级「元数据有、HNSW 无」的库内不一致，其余照常抛出
+            if "Error finding id" not in str(exc):
+                raise
+            log.warning("向量 %s 在 HNSW 段缺失（元数据仍在）：视为不可复用，将重新嵌入", identifier)
+            return None
         return raw["embeddings"][0].tolist() if raw["ids"] else None
+
+    def flush(self) -> None:
+        """幂等重写既有向量，冲过 chroma HNSW 落盘阈值，确保内存态全部写盘。
+
+        chroma 元数据段每笔提交，HNSW 段仅在累计 sync_threshold（默认 1000）个
+        元素时才持久化 id_map 与索引；构建收尾不冲阈值时尾部向量只留在内存与
+        WAL，重启或跨进程访问后可能丢失（复用时报 Error finding id）。
+        重写内容与既有记录一致，不改变集合可见状态。
+        """
+        if self.collection.count() == 0:
+            return
+        try:
+            batch = self.collection.get(
+                limit=CHROMA_HNSW_SYNC_THRESHOLD,
+                include=["embeddings", "documents", "metadatas"],
+            )
+        except Exception as exc:  # noqa: BLE001 — 落盘尽力而为，缺 id 由 vector() 自愈兜底
+            log.warning("索引落盘预读失败，跳过强制持久化：%s", exc)
+            return
+        ids = list(batch["ids"])
+        embeddings = list(batch["embeddings"]) if batch["embeddings"] is not None else []
+        if not ids or len(embeddings) != len(ids):
+            return
+        documents = list(batch["documents"]) if batch["documents"] is not None else [None] * len(ids)
+        metadatas = list(batch["metadatas"]) if batch["metadatas"] is not None else [None] * len(ids)
+        rounds = -(-CHROMA_HNSW_SYNC_THRESHOLD // len(ids))
+        for _ in range(rounds):
+            self.collection.upsert(
+                ids=ids,
+                embeddings=[embedding.tolist() for embedding in embeddings],
+                documents=documents,
+                metadatas=metadatas,
+            )
 
     def delete(self, identifiers: list[str]) -> None:
         if identifiers:
@@ -202,6 +244,8 @@ class IndexBuilder:
                     "UPDATE index_members SET complete=1 WHERE index_id=? AND segment_id=?",
                     (index_id, segment["id"]),
                 )
+            # 冲过 chroma HNSW 落盘阈值，避免尾部向量只存于内存与 WAL（详见 VectorIndex.flush）。
+            vectors.flush()
             issues = check_index(self.store, index_id)
             if issues:
                 raise ModelError("索引一致性检查失败：" + "; ".join(issues[:5]))

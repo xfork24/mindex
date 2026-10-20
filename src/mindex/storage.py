@@ -267,8 +267,10 @@ class Store:
             db.execute("INSERT OR REPLACE INTO settings VALUES('active',?)", (row['content_id'],))
             db.execute("INSERT OR REPLACE INTO settings VALUES('active.release',?)", (release_id,))
 
-    def snapshots(self, index_id: str) -> list[dict]:
-        rows = self.rows("SELECT snapshot FROM index_members WHERE index_id=? AND complete=1", (index_id,))
+    def snapshots(self, index_id: str, source_id: str | None = None) -> list[dict]:
+        rows = self.rows("SELECT snapshot FROM index_members WHERE index_id=? AND complete=1"
+                         + (" AND json_extract(snapshot,'$.source_id')=?" if source_id else ""),
+                         (index_id, source_id) if source_id else (index_id,))
         return [json.loads(row["snapshot"]) for row in rows]
 
     def media_available(self, relative: str) -> bool:

@@ -148,6 +148,7 @@
 | `analysis_max_age_days` | int ≥1 | 30 | 旧分析 profile 的场景分组检查点保留天数 |
 | `dialogue_max_age_days` | int ≥1 | 30 | 旧对白 profile 的 30 秒块检查点保留天数（按 `channel_data` 现行 profile 判定） |
 | `context_max_age_days` | int ≥1 | 14 | 在线播放转码缓存 `context/*.mp4` 保留天数，可按需重建 |
+| `shot_media_max_age_days` | int ≥1 | 7 | shot 媒体合成与探测缓存 `cache/shot-media/` 保留天数，按内容指纹可重新合成；读取中（缓存租约锁被持）跳过 |
 | `studio_preview_max_age_days` | int ≥1 | 14 | studio 分镜预览保留天数，可按需重建 |
 | `studio_attempt_max_age_days` | int ≥1 | 30 | 未被检查点或当前 attempt 引用的旧 attempt 目录保留天数 |
 | `studio_export_max_age_days` | int ≥1 | 60 | studio 导出 zip 保留天数，可重新打包 |

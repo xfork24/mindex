@@ -8,7 +8,7 @@ from time import perf_counter
 
 from .adapters import ModelError
 from .config import fingerprint
-from .dialogue import CHANNELS, current_dialogue, relative_dialogue
+from .dialogue import CHANNELS, current_dialogue, indexed_dialogue, relative_dialogue
 from .indexing import VectorIndex, check_index
 from .storage import dumps
 from .types import Annotation
@@ -32,20 +32,23 @@ def normalize_snapshot(snapshot):
     return s
 
 
-def snapshots_for(builder, source_id, kinds):
+def snapshots_for(builder, source_id, kinds, *, status_only=False, segments=None, analysis_rows=None):
     store, result = builder.store, []
     sources = [s for s in store.sources() if source_id is None or s["id"] == source_id]
     if source_id and not sources:
         raise ValueError("找不到素材 ID")
     for source in sources:
-        transcript = current_dialogue(store, source["id"])
-        for segment in store.segments(source["id"]):
+        transcript = indexed_dialogue(current_dialogue(store, source["id"]))
+        latest = {}
+        records = analysis_rows if analysis_rows is not None else store.rows(
+            "SELECT a.segment_id,a.data,a.profile FROM annotations a JOIN segments s ON s.id=a.segment_id "
+            "WHERE s.source_id=? ORDER BY a.rowid DESC", (source['id'],))
+        for record in records:
+            latest.setdefault(record['segment_id'], record)
+        for segment in segments if segments is not None else store.segments(source["id"]):
             if segment["kind"] not in kinds:
                 continue
-            row = store.one(
-                "SELECT data,profile FROM annotations WHERE segment_id=? ORDER BY rowid DESC LIMIT 1",
-                (segment["id"],),
-            )
+            row = latest.get(segment["id"])
             value = json.loads(row["data"]) if row else None
             skipped = bool(value and value.get("status") == "skipped")
             annotation = (
@@ -67,6 +70,10 @@ def snapshots_for(builder, source_id, kinds):
                 versions["dialogue"] = transcript["content_version"]
             elif dialogue:
                 versions["dialogue"] = fingerprint(dialogue)
+            if status_only:
+                result.append({"id": segment['id'], "kind": segment['kind'],
+                               "views": views, "channel_versions": versions})
+                continue
             metadata = {
                 "visual": {
                     "status": "complete",
@@ -330,6 +337,8 @@ def build_channels(builder, *, activate=False, mode="auto", source_id=None, kind
             if s["id"] in targets and s["id"] not in completed:
                 completed.add(s["id"])
                 notify("embedding")
+        # 冲过 chroma HNSW 落盘阈值，避免尾部向量只存于内存与 WAL（详见 VectorIndex.flush）。
+        vectors.flush()
         notify("index_check")
         issues = check_index(store, index_id)
         if issues:
