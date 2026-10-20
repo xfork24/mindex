@@ -415,9 +415,7 @@ def apply_timeline_patch(
             plan["anchor"] = {
                 **plan["anchor"],
                 "segment_id": f"{source_id}@{start:.3f}-{end:.3f}",
-                "source_name": Store(config.data_dir).one(
-                    "SELECT name FROM sources WHERE id=?", (source_id,)
-                )["name"],
+                "source_name": Store(config.data_dir).source_names()[source_id],
                 "score": 0.0,
                 "rank": 0,
             }

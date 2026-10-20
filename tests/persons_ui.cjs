@@ -165,6 +165,7 @@ function find(root, predicate) {
   assert.ok(get('notice').textContent.includes('bad.png：参考照片需要恰好一张清晰人脸，且属于画面主体'));
 
   get('capture-source').value = 'source';
+  get('capture-source').onchange();
   get('capture-actor').value = other.id;
   sandbox.fillCaptureRoles();
   get('capture-role').value = role.id;
@@ -215,6 +216,102 @@ function find(root, predicate) {
   allOf(roleActors).selected = true;
   roleActors.onchange();
   assert.deepEqual(picked(roleActors).map(o => o.value), [actor.id, other.id], '编辑对话框的全选同样生效');
+
+  // 作品 → 演员 → 角色：过滤多选框的选项，并丢弃不再有效的选择。
+  const originalEntities = vm.runInContext('state.entities.slice()', sandbox);
+  const extraEntities = [
+    {id: 'work2', kind: 'work', name: '另一作品'},
+    {id: 'empty-work', kind: 'work', name: '空作品'},
+    {id: 'c', kind: 'actor', name: '丙'},
+    {id: 'unlinked', kind: 'actor', name: '未关联演员'},
+    {id: 'role2', kind: 'role', name: '另一角色', work_ids: ['work2'], actor_ids: ['b', 'c']},
+    {id: 'solo', kind: 'role', name: '单人角色', work_ids: ['work'], actor_ids: ['a']},
+  ];
+  sandbox.extraEntities = extraEntities.map(e => ({aliases: [], ...e}));
+  vm.runInContext('state.entities.push(...extraEntities);fillFilters()', sandbox);
+  const values = id => get(id).options.filter(o => o.value !== '__all__').map(o => o.value).sort();
+  const choose = (id, ids) => {
+    for (const o of get(id).options) o.selected = ids.includes(o.value);
+    get(id).onchange();
+  };
+  const originalSources = vm.runInContext('state.sources.slice()', sandbox);
+  sandbox.captureSources = [
+    {id: 'source2', name: '另一素材', work_id: 'work2'},
+    {id: 'empty-source', name: '空素材', work_id: 'empty-work'},
+  ];
+  vm.runInContext('state.sources.push(...captureSources);fillSelectors()', sandbox);
+  const captureValues = id => values(id).filter(Boolean);
+  const chooseCapture = (id, value) => {get(id).value = value;get(id).onchange();};
+  chooseCapture('capture-source', 'source');
+  assert.deepEqual(captureValues('capture-actor'), ['a', 'b'], '参考截图的演员按素材作品过滤');
+  chooseCapture('capture-actor', 'a');
+  assert.deepEqual(captureValues('capture-role'), ['role', 'solo'], '参考截图角色按作品和演员过滤');
+  chooseCapture('capture-role', 'solo');
+  chooseCapture('capture-source', 'source2');
+  assert.deepEqual(captureValues('capture-actor'), ['b', 'c']);
+  assert.equal(get('capture-actor').value, '', '切换素材清除无效演员');
+  assert.equal(get('capture-role').value, '', '切换素材清除无效角色');
+  assert.deepEqual(captureValues('capture-role'), ['role2']);
+  chooseCapture('capture-actor', 'b');
+  chooseCapture('capture-role', 'role2');
+  vm.runInContext('fillSelectors()', sandbox);
+  assert.equal(get('capture-actor').value, 'b', '刷新保留有效演员');
+  assert.equal(get('capture-role').value, 'role2', '刷新保留有效角色');
+  chooseCapture('capture-source', 'source');
+  assert.equal(get('capture-actor').value, 'b', '跨作品演员仍有效时保留');
+  assert.deepEqual(captureValues('capture-role'), ['role'], '跨作品演员不会带出其他作品角色');
+  chooseCapture('capture-actor', '');
+  chooseCapture('capture-role', 'solo');
+  assert.equal(get('capture-actor').value, 'a', '选择单演员角色自动填充演员');
+  assert.deepEqual(captureValues('capture-role'), ['role', 'solo'], '自动填充后同步过滤角色');
+  chooseCapture('capture-source', 'empty-source');
+  assert.deepEqual(captureValues('capture-actor'), [], '无角色素材不显示其他作品演员');
+  assert.deepEqual(captureValues('capture-role'), []);
+  chooseCapture('capture-source', '');
+  assert.deepEqual(captureValues('capture-actor'), [], '未选素材时等待上游选择');
+  assert.deepEqual(captureValues('capture-role'), []);
+  sandbox.originalSources = originalSources;
+  vm.runInContext('state.sources=originalSources;fillSelectors()', sandbox);
+
+  choose('filter-work', ['work']);
+  assert.deepEqual(values('filter-actor'), ['a', 'b'], '作品限制演员选项');
+  assert.deepEqual(values('filter-role'), ['orphan', 'role', 'solo'], '作品限制角色选项，含未配对角色');
+  choose('filter-actor', ['b']);
+  assert.deepEqual(values('filter-role'), ['role'], '演员进一步限制当前作品的角色');
+  choose('filter-role', ['role']);
+  choose('filter-work', ['work2']);
+  assert.deepEqual(values('filter-actor'), ['b', 'c']);
+  assert.deepEqual(picked(get('filter-actor')).map(o => o.value), ['b'], '保留仍有效的演员选择');
+  assert.deepEqual(values('filter-role'), ['role2']);
+  assert.equal(picked(get('filter-role')).length, 0, '清理失效的角色选择');
+  choose('filter-actor', ['c']);
+  choose('filter-work', ['work']);
+  assert.equal(picked(get('filter-actor')).length, 0, '清理失效的演员选择');
+  assert.deepEqual(values('filter-role'), ['orphan', 'role', 'solo']);
+  choose('filter-work', ['work', 'work2']);
+  assert.deepEqual(values('filter-actor'), ['a', 'b', 'c'], '作品多选取演员并集');
+  choose('filter-actor', ['a', 'c']);
+  assert.deepEqual(values('filter-role'), ['role', 'role2', 'solo'], '演员多选取角色并集');
+  vm.runInContext('fillSelectors();renderCatalogue()', sandbox);
+  assert.deepEqual(picked(get('filter-work')).map(o => o.value).sort(), ['work', 'work2'], '刷新保留多个作品选择');
+  assert.deepEqual(picked(get('filter-actor')).map(o => o.value).sort(), ['a', 'c'], '刷新保留多个有效演员选择');
+  choose('filter-work', ['work']);
+  choose('filter-actor', ['b']);
+  allOf(get('filter-role')).selected = true;
+  get('filter-role').onchange();
+  assert.deepEqual(picked(get('filter-role')).map(o => o.value), ['role'], '全选仅选择联动后的角色选项');
+  choose('filter-work', ['empty-work']);
+  assert.deepEqual(values('filter-actor'), [], '空作品不显示其他作品的演员');
+  assert.deepEqual(values('filter-role'), [], '空作品不显示其他作品的角色');
+  assert.equal(allOf(get('filter-actor')).selected, false, '空列表不能显示为全选');
+  get('filter-reset').onclick();
+  assert.ok(values('filter-actor').includes('unlinked'), '清除筛选恢复所有演员');
+  assert.ok(values('filter-role').includes('role2'), '清除筛选恢复所有角色');
+  choose('filter-actor', ['c']);
+  assert.deepEqual(values('filter-role'), ['role2'], '未选作品时按演员筛选全库角色');
+  get('filter-reset').onclick();
+  sandbox.originalEntities = originalEntities;
+  vm.runInContext('state.entities=originalEntities;fillSelectors();renderCatalogue()', sandbox);
 
   // 审核按演员-角色筛选，并跨 50 条显示页、200 条读取页全选。
   for (const value of ['candidate', 'accepted', 'rejected']) {

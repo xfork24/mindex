@@ -131,7 +131,9 @@ def person_router(runtime, store):
 
     @router.get("")
     def listing():
-        sources = [{**s, "work_id": catalogue.work_for(s["id"])} for s in store.sources()]
+        names = store.source_names()
+        sources = [{**s, "name": names[s["id"]], "work_id": catalogue.work_for(s["id"])}
+                   for s in store.sources()]
         # 待核对数量以分镜为单位，且与审核列表同一套分类规则。
         return {
             "entities": catalogue.entities(),

@@ -2792,3 +2792,78 @@ def test_repeat_completed_person_task_reuses_extraction_and_matching(catalogue, 
     assert result['reused_shots'] == 3 and result['extracted_shots'] == 0
     assert (client.videos, client.images) == before
     assert p.store.rows("SELECT id FROM person_features WHERE kind='matching' ORDER BY id") == matches
+
+
+def test_source_display_name_follows_curation_without_changing_work_identity(catalogue, config):
+    p, work, actor = catalogue
+    client = TestClient(create_app(config))
+    from mindex.curation import CurationPatch, Library
+
+    library = Library(p.store)
+    for name in ["新的素材名", "再次改名", None]:
+        library.patch("source", "source", CurationPatch(display_name=name))
+        expected = name or "影片"
+        response = client.get("/api/persons")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["sources"] == [{"id": "source", "name": expected, "work_id": work}]
+        assert next(e for e in data["entities"] if e["id"] == work)["name"] == expected
+        assert p.entity(work)["name"] == expected
+        assert p.work_for("source") == work
+        assert p.store.sources()[0]["name"] == "影片"
+
+    p.save(Entity(kind="work", name="独立作品名"), work)
+    library.patch("source", "source", CurationPatch(display_name="又一个素材名"))
+    assert p.entity(work)["name"] == "独立作品名"
+    assert next(e for e in p.entities() if e["id"] == work)["name"] == "独立作品名"
+
+
+def test_linked_shots_use_current_source_display_name(catalogue):
+    p, work, actor = catalogue
+    from mindex.curation import CurationPatch, Library
+
+    p.store.execute(
+        "INSERT INTO person_evidence(id,source_id,shot_id,actor_id,start,end,status,data) VALUES(?,?,?,?,?,?,?,?)",
+        ("rename-evidence", "source", "shot0", actor["id"], 0, 1, "candidate", "{}"),
+    )
+    Library(p.store).patch("source", "source", CurationPatch(display_name="关联分镜新名"))
+    linked = p.linked_shots(actor["id"])
+    assert linked["total"] == 1
+    assert linked["items"][0]["source_name"] == "关联分镜新名"
+
+
+def test_reassign_work_removes_only_unused_default_work(catalogue):
+    p, work, actor = catalogue
+    replacement = p.save(Entity(kind="work", name="独立作品"))
+    p.assign_work("source", replacement["id"])
+    assert p.work_for("source") == replacement["id"]
+    assert not p.store.one("SELECT id FROM person_entities WHERE id=?", (work,))
+
+
+@pytest.mark.parametrize("protected", ["name", "role", "import", "shared"])
+def test_reassign_work_preserves_referenced_or_custom_work(catalogue, protected):
+    p, work, actor = catalogue
+    if protected == "name":
+        p.save(Entity(kind="work", name="自定义作品"), work)
+    elif protected == "role":
+        p.save(Entity(kind="role", name="角色", work_ids=[work], actor_ids=[actor["id"]]))
+    elif protected == "import":
+        p.store.execute("INSERT INTO person_imports(id,data) VALUES(?,?)", ("cast", dumps({"work_id": work})))
+    else:
+        p.store.execute(
+            "INSERT INTO sources(id,name,path,media,layout_key) "
+            "SELECT 'another-source',name,path,media,layout_key FROM sources WHERE id='source'"
+        )
+        p.store.execute("INSERT INTO person_sources VALUES(?,?)", ("another-source", work))
+    replacement = p.save(Entity(kind="work", name="独立作品"))
+    p.assign_work("source", replacement["id"])
+    assert p.entity(work)["id"] == work
+
+
+def test_purge_removes_unused_default_work(catalogue):
+    from mindex.persons import purge_person_source
+
+    p, work, actor = catalogue
+    with p.store.connect() as db:
+        purge_person_source(db, "source")
+    assert not p.store.one("SELECT id FROM person_entities WHERE id=?", (work,))

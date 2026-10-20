@@ -43,7 +43,7 @@ def source_report(config: Config, source_id: str) -> dict:
     ]
     return {
         "source_id": source_id,
-        "name": source["name"],
+        "name": store.source_names()[source_id],
         "media": media,
         "source_path": source["path"],
         "layout_key": source["layout_key"],

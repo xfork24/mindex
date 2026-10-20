@@ -221,11 +221,30 @@ class Persons:
         row = self.store.one("SELECT * FROM person_entities WHERE id=?", (identifier,))
         if not row or (kind and row["kind"] != kind):
             raise ValueError("找不到对应人物、作品或角色")
-        return normalize_entity({"id": row["id"], **json.loads(row["data"])})
+        return self._display_entity(row, self._default_work_names() if row["kind"] == "work" else {})
+
+    def _default_work_names(self):
+        return {
+            fingerprint(["work", s["id"]]): (s["name"], s["display_name"] or s["name"])
+            for s in self.store.rows(
+                "SELECT s.id,s.name,c.display_name FROM sources s "
+                "LEFT JOIN source_curation c ON c.id=s.id"
+            )
+        }
+
+    @staticmethod
+    def _display_entity(row, work_names):
+        entity = normalize_entity({"id": row["id"], **json.loads(row["data"])})
+        default = work_names.get(entity["id"]) if entity["kind"] == "work" else None
+        # Only automatically named works follow their source; explicit work names stay independent.
+        if default and entity["name"] == default[0]:
+            entity["name"] = default[1]
+        return entity
 
     def entities(self, kind=None):
+        work_names = self._default_work_names() if kind in (None, "work") else {}
         return [
-            normalize_entity({"id": r["id"], **json.loads(r["data"])})
+            self._display_entity(r, work_names)
             for r in self.store.rows(
                 "SELECT * FROM person_entities" + (" WHERE kind=?" if kind else "") + " ORDER BY rowid",
                 (kind,) if kind else (),
@@ -313,6 +332,7 @@ class Persons:
         query = (
             "FROM person_evidence e JOIN segments s ON s.id=e.shot_id AND s.source_id=e.source_id "
             "JOIN sources src ON src.id=s.source_id "
+            "LEFT JOIN source_curation sc ON sc.id=src.id "
             f"WHERE {identity}=? AND s.kind='shot' AND (e.status='accepted' OR "
             "(e.status='candidate' AND NOT EXISTS (SELECT 1 FROM person_evidence confirmed "
             "WHERE confirmed.source_id=e.source_id AND confirmed.shot_id=e.shot_id "
@@ -325,7 +345,7 @@ class Persons:
             ).fetchone()["n"]
             items = [
                 dict(row) for row in connection.execute(
-                    "SELECT s.id AS shot_id,s.source_id,src.name AS source_name,s.start,s.end,"
+                    "SELECT s.id AS shot_id,s.source_id,COALESCE(sc.display_name,src.name) AS source_name,s.start,s.end,"
                     "SUM(e.status='accepted') AS accepted,SUM(e.status='candidate') AS candidate "
                     + query + " ORDER BY s.source_id,s.start,s.id LIMIT ? OFFSET ?",
                     (identifier, limit, offset),
@@ -383,6 +403,7 @@ class Persons:
             db.execute("UPDATE person_sources SET work_id=? WHERE source_id=?", (work_id, source_id))
             db.execute("DELETE FROM person_coverage WHERE source_id=?", (source_id,))
             db.execute("DELETE FROM person_evidence WHERE source_id=?", (source_id,))
+            prune_default_work(db, source_id)
 
     def image(self, raw, namespace="references", *, max_edge=0, image_format="PNG", jpeg_quality=85):
         content, width, height = encode_frame(raw, max_edge=max_edge, image_format=image_format,
@@ -1380,10 +1401,35 @@ def overlaps_for(segment, evidence, identifiers, relation):
     return []
 
 
+def prune_default_work(db, source_id):
+    """Remove an unused automatic work, preserving explicitly named works and cast imports."""
+    work_id = fingerprint(["work", source_id])
+    source = db.execute("SELECT name FROM sources WHERE id=?", (source_id,)).fetchone()
+    work = db.execute("SELECT data FROM person_entities WHERE id=? AND kind='work'", (work_id,)).fetchone()
+    if not source or not work:
+        return
+    value = json.loads(work["data"])
+    if value.get("name") != source["name"] or value.get("aliases"):
+        return
+    if db.execute("SELECT 1 FROM person_sources WHERE work_id=?", (work_id,)).fetchone():
+        return
+    if db.execute(
+        "SELECT 1 FROM person_entities, json_each(person_entities.data,'$.work_ids') "
+        "WHERE person_entities.kind='role' AND json_each.value=?", (work_id,),
+    ).fetchone():
+        return
+    if db.execute(
+        "SELECT 1 FROM person_imports WHERE json_extract(data,'$.work_id')=?", (work_id,),
+    ).fetchone():
+        return
+    db.execute("DELETE FROM person_entities WHERE id=?", (work_id,))
+
+
 def purge_person_source(db, source_id):
     """Deletion creates sanitized replacement versions; surviving versions stay immutable."""
     for table in ("person_features", "person_evidence", "person_coverage", "person_tasks", "person_sources"):
         db.execute(f"DELETE FROM {table} WHERE source_id=?", (source_id,))
+    prune_default_work(db, source_id)
     for row in db.execute("SELECT * FROM person_versions").fetchall():
         value = json.loads(row["data"])
         if not any(e["source_id"] == source_id for e in value["evidence"] + value["coverage"]):

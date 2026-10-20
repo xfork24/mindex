@@ -177,6 +177,16 @@ class Store:
     def sources(self) -> list[dict]:
         return self.rows("SELECT * FROM sources ORDER BY name,id")
 
+    def source_names(self) -> dict[str, str]:
+        """Current display names; raw source rows remain immutable processing inputs."""
+        return {
+            row["id"]: row["display_name"] or row["name"]
+            for row in self.rows(
+                "SELECT s.id,s.name,c.display_name FROM sources s "
+                "LEFT JOIN source_curation c ON c.id=s.id"
+            )
+        }
+
     def source_ids(self) -> set[str]:
         """素材 id 全集；创建创作任务时校验所选素材确实存在。"""
         return {row["id"] for row in self.rows("SELECT id FROM sources")}

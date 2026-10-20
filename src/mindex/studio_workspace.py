@@ -969,9 +969,7 @@ def alignment(config, job_id, w, p, sid, selected_range=None):
             **selected_range,
             "segment_id": selected_range["segment_ids"][0],
             "rank": 0,
-            "source_name": store.one("SELECT name FROM sources WHERE id=?", (selected_range["source_id"],))[
-                "name"
-            ],
+            "source_name": store.source_names()[selected_range["source_id"]],
         }
         plan_data = studio_select.plan_explicit(
             anchor["source_id"],

@@ -4,6 +4,9 @@ let busy = false;
 let previewUrl = null;
 let imagePreviewUrl = null;
 let registeredPeople = [];
+let registeredSources = [];
+// Keep the explicit material scope separate from options narrowed by person filters.
+let sourceScope = null;
 const routeNames = { visual: MindexI18n.msg("ui.fe84e2eb06a1"), analysis: MindexI18n.msg("ui.5484a583c2c9"), video: MindexI18n.msg("ui.83b37291f23c"), description: MindexI18n.msg("ui.7c0f30403c16"), style: MindexI18n.msg("ui.bd17acd89736"), dialogue: MindexI18n.msg("ui.7d722c18e001"), lexical: MindexI18n.msg("ui.cc1b21e80080"), person: MindexI18n.msg("ui.bc9173082f3e") };
 const personKinds = { actor: MindexI18n.msg("ui.5fdb8b2c027a"), role: MindexI18n.msg("ui.6b26695e4dce") };
 
@@ -37,6 +40,7 @@ function switchMode(next) {
     $(`${name}-input`).hidden = name !== mode;
   }
   $('person-filters').hidden = mode !== 'text';
+  fillSearchFilters();
   if (mode !== 'video') $('query-preview').pause();
   notice();
 }
@@ -258,13 +262,18 @@ function syncAll(select) {
 }
 function applyAll(select, on) {for (const o of itemOptions(select)) o.selected = on;syncAll(select);}
 // change 时无法区分是点了“全部选择”还是普通项，用上一次的全选状态判断意图。
-function toggleAll(select) {const all = allOption(select);if (all && all.selected !== (select.dataset.allSelected === '1')) applyAll(select, all.selected);else syncAll(select);}
+function toggleAll(select) {
+  const all = allOption(select), wasAll = select.dataset.allSelected === '1';
+  if (all?.selected && !wasAll) applyAll(select, true);
+  else if (all && !all.selected && wasAll && itemOptions(select).every((o) => o.selected)) applyAll(select, false);
+  else syncAll(select);
+}
 function bindAllToggle(id, after) {$(id).addEventListener('change', () => {toggleAll($(id));if (after) after();});}
 function selectedValues(id) {return Array.from($(id).selectedOptions).map((o) => o.value).filter((v) => v !== ALL_VALUE);}
 function fillOptions(id, entries) {
   const select = $(id);
-  const selectAll = id === 'source' && (!select.dataset.initialized || select.dataset.allSelected === '1');
-  const chosen = new Set(selectAll ? entries.map((entry) => entry.id) : selectedValues(id));
+  const selectAll = id === 'source' && sourceScope === null;
+  const chosen = new Set(selectAll ? entries.map((entry) => entry.id) : id === 'source' ? sourceScope : selectedValues(id));
   select.dataset.initialized = '1';select.replaceChildren();
   const all = element('option', MindexI18n.msg("ui.3e26ad9407ad"));all.value = ALL_VALUE;select.append(all);
   for (const entry of MindexMultiSearch.sort(entries)) {const option = element('option', `${entry.name} · ${entry.id.slice(0, 8)}`);option.value = entry.id;option.selected = chosen.has(entry.id);select.append(option);}
@@ -272,12 +281,41 @@ function fillOptions(id, entries) {
   MindexMultiSearch.refilter(select);
   syncAll(select);
 }
-function fillRoleOptions() {
+function searchFilterEntries(id, useRoles = true) {
   const actors = new Set(selectedValues('actor-select'));
-  const roles = registeredPeople.filter((e) => e.kind === 'role' && (actors.size === 0 || (e.actor_ids || []).some((id) => actors.has(id))));
-  fillOptions('role-select', roles);
+  const roles = new Set(useRoles ? selectedValues('role-select') : []);
+  const sources = new Set(sourceScope || []);
+  const scoped = sourceScope !== null;
+  const works = new Set(registeredSources.filter((s) => sources.has(s.id)).map((s) => s.work_id));
+  const matches = registeredPeople.filter((e) => e.kind === 'role' &&
+    (id === 'source' || !scoped || (e.work_ids || []).some((w) => works.has(w))) &&
+    (id === 'actor-select' || !actors.size || (e.actor_ids || []).some((a) => actors.has(a))) &&
+    (id === 'role-select' || !roles.size || roles.has(e.id)));
+  if (id === 'role-select') return matches;
+  if (id === 'actor-select') {
+    const ids = new Set(matches.flatMap((r) => r.actor_ids || []));
+    return registeredPeople.filter((e) => e.kind === 'actor' && (!scoped && !roles.size || ids.has(e.id)));
+  }
+  if (mode !== 'text' || !actors.size && !roles.size) return registeredSources;
+  const ids = new Set(matches.flatMap((r) => r.work_ids || []));
+  return registeredSources.filter((s) => ids.has(s.work_id));
+}
+function fillSearchFilters(changed = 'source') {
+  // First remove selections invalidated by the changed control, then update the other facets.
+  if (changed === 'source') {
+    fillOptions('actor-select', searchFilterEntries('actor-select', false));
+    fillOptions('role-select', searchFilterEntries('role-select'));
+  } else if (changed === 'actor-select') {
+    fillOptions('role-select', searchFilterEntries('role-select'));
+  } else {
+    fillOptions('actor-select', searchFilterEntries('actor-select'));
+  }
+  fillOptions('source', searchFilterEntries('source'));
+  fillOptions('actor-select', searchFilterEntries('actor-select'));
+  fillOptions('role-select', searchFilterEntries('role-select'));
 }
 $('filter-reset').onclick = () => {
+  sourceScope = null;
   for (const [id, value] of Object.entries({ 'person-mode': 'auto', 'person-relation': 'all', granularity: 'moment', limit: '20', scene: '', emotion: '', 'shot-size': '', 'min-duration': '', 'max-duration': '' })) $(id).value = value;
   for (const id of ['actor-select', 'role-select', 'source']) {
     applyAll($(id), id === 'source');
@@ -286,7 +324,9 @@ $('filter-reset').onclick = () => {
     $(id).dataset.query = '';
     MindexMultiSearch.refilter($(id));
   }
-  fillRoleOptions();
+  fillOptions('source', registeredSources);
+  applyAll($('source'), true);
+  fillSearchFilters();
   MindexI18n.setText($('person-hint'), MindexI18n.msg("ui.adb050b9cc83"));
 };
 async function refresh() {
@@ -295,9 +335,14 @@ async function refresh() {
     const data = await api('/api/status?health=true');
     const catalogue = await api('/api/persons');
     registeredPeople = catalogue.entities.filter((e) => ['actor', 'role'].includes(e.kind));
-    fillOptions('actor-select', registeredPeople.filter((e) => e.kind === 'actor'));
-    fillRoleOptions();
-    fillOptions('source', data.sources);
+    const works = new Map(catalogue.sources.map((s) => [s.id, s.work_id]));
+    registeredSources = data.sources.map((s) => ({ ...s, work_id: works.get(s.id) }));
+    if (sourceScope !== null) {
+      sourceScope = sourceScope.filter((id) => registeredSources.some((s) => s.id === id));
+      if (!sourceScope.length) sourceScope = null;
+    }
+    fillOptions('source', registeredSources);
+    fillSearchFilters();
     const count = data.segment_counts.find((item) => item.kind === 'moment')?.count || 0;
     MindexI18n.setText($('library-summary'), MindexI18n.msg("ui.7859fa5eb7a3", { p0: data.sources.length, p1: count }));
     const target = $('library-detail');target.replaceChildren();
@@ -311,9 +356,10 @@ async function refresh() {
   {$('refresh').disabled = false;}
 }
 $('refresh').onclick = refresh;
-bindAllToggle('actor-select', fillRoleOptions);
-bindAllToggle('role-select');
-bindAllToggle('source');
+for (const id of ['actor-select', 'role-select', 'source']) bindAllToggle(id, () => {
+  if (id === 'source') {const ids = selectedValues(id);sourceScope = ids.length ? ids : null;}
+  fillSearchFilters(id);
+});
 refresh();
 
 $('query').addEventListener('input', () => {

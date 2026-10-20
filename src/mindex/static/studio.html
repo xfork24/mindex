@@ -3,9 +3,11 @@
 <head>
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title data-i18n="[[0,&quot;ui.74b7ad79367e&quot;]]">Mindex · 创作</title><link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/style.css?v=20261019-search-cards"><link rel="stylesheet" href="/studio.css?v=20261020-create-dots">
-  <script src="/messages.js?v=20261020-build-step-bold" defer></script><script src="/i18n.js?v=20261018-i18n" defer></script><script src="/multiselect.js?v=20261019-ui-layout" defer></script><script src="/studio.js?v=20261020-default-clone" defer></script>
+  <link rel="stylesheet" href="/style.css?v=20261019-search-cards"><link rel="stylesheet" href="/studio.css?v=20261020-sidebar-collapse">
+  <script src="/messages.js?v=20261020-sidebar-collapse" defer></script><script src="/i18n.js?v=20261018-i18n" defer></script><script src="/multiselect.js?v=20261019-ui-layout" defer></script><script src="/studio.js?v=20261020-stable-source-selection" defer></script>
 <script src="/shot-player.js?v=20261019-shot-media-6"></script>
+  <link rel="stylesheet" href="/sidebar.css?v=20261020-collapse">
+  <script src="/sidebar.js?v=20261020-collapse" defer></script>
 </head>
 <body class="studio">
   <header><a class="brand" href="/">m<span>index</span><i></i></a><nav class="page-nav" aria-label="页面导航 / Main navigation"><a class="quiet nav-link" href="/" data-i18n="[[0,&quot;ui.c9b1e68e3537&quot;]]">视频检索</a><a class="quiet nav-link" href="/studio" aria-current="page" data-i18n="[[0,&quot;ui.b6fc3cef0bd0&quot;]]">创作</a><a class="quiet nav-link" href="/admin" data-i18n="[[0,&quot;ui.f517302fec0d&quot;]]">素材管理</a><a class="quiet nav-link" href="/persons" data-i18n="[[0,&quot;ui.0973ef28d791&quot;]]">人物库</a><a class="quiet nav-link" href="/settings" data-i18n="[[0,&quot;ui.7debf9cb0372&quot;]]">设置</a></nav><button id="reload" class="quiet" data-i18n="[[0,&quot;ui.040f050b56e5&quot;]]">刷新任务</button><button type="button" class="quiet language-switch" data-language-toggle aria-label="中文 / English"><span data-language="zh" lang="zh-CN">文</span><span class="language-divider" aria-hidden="true">/</span><span data-language="en" lang="en">En</span></button></header>
@@ -13,7 +15,8 @@
     <section class="studio-intro"><span class="eyebrow" data-i18n="[[0,&quot;ui.a89476443984&quot;]]">文案 · 分镜 · 配音 · 混剪</span><h1 data-i18n="[[0,&quot;ui.8c66fab876f3&quot;]]">从一段文字，到一条成片。</h1><p data-i18n="[[0,&quot;ui.fae955fec0db&quot;]]">把文案拆成分镜，逐镜配音并从素材库召回画面，自动合成为带字幕的视频。每一步可单独执行、重试和人工调整。</p></section>
     <div id="notice" class="notice" role="status" aria-live="polite"></div>
     <div class="workspace">
-      <aside class="job-panel" aria-label="创作任务" data-i18n-aria-label="ui.e8c80f52ae86">
+      <button type="button" class="sidebar-toggle" data-sidebar-toggle="studio" aria-controls="job-panel" aria-expanded="true" aria-label="收起左侧面板" title="收起左侧面板"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg></button>
+      <aside id="job-panel" class="job-panel" aria-label="创作任务" data-i18n-aria-label="ui.e8c80f52ae86">
         <form id="create-form"><label for="create-text" data-i18n="[[0,&quot;ui.7407393d52c7&quot;]]">创作文案</label><textarea id="create-text" rows="5" maxlength="2000" placeholder="输入一段解说文案，例如：山风吹过山谷，远处的寺庙亮着灯。有人推门进来，抖落一身雪……" data-i18n-placeholder="ui.7c4abdb9c5e2"></textarea>
           <label class="form-field" data-i18n="[[0,&quot;ui.f711792f098b&quot;],[2,&quot;ui.833c18d4bee3&quot;],[3,&quot;ui.8c638554b6f7&quot;]]">可用素材<select id="create-sources" multiple></select><span class="muted">本任务的召回只在这里列出的素材中进行；逐镜的素材范围只能在其中二次选择</span><span class="muted" id="create-sources-empty" hidden>素材库为空，暂无可用素材</span></label>
           <button class="submit" id="create-button" type="submit" data-i18n="[[0,&quot;ui.cf42fd678f46&quot;]]">创建任务 <span>↗</span></button></form>

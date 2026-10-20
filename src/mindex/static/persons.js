@@ -55,14 +55,28 @@ $('entity-form').onsubmit = async (event) => {
 const FILTERS = [['work', 'filter-work', 'work'], ['actor', 'filter-actor', 'actor'], ['role', 'filter-role', 'role']];
 function readFilters() {for (const [key, id] of FILTERS) state.filters[key] = selected(id);}
 // 多选框不能用 options()：它只恢复单个 value，重建列表时必须自己记住已选项。
-function fillFilters() {for (const [key, id, kind] of FILTERS) {const sel = $(id),keep = new Set(selected(id));options(sel, entities(kind), false);for (const o of sel.options) if (o.value !== ALL_VALUE) o.selected = keep.has(o.value);syncAll(sel);}}
-for (const [, id] of FILTERS) $(id).onchange = () => {toggleAll($(id));renderCatalogue();};
+function fillFilters() {
+  function fill(id, items) {
+    const sel = $(id), keep = new Set(selected(id));
+    options(sel, items, false);
+    for (const o of itemOptions(sel)) o.selected = keep.has(o.value);
+    syncAll(sel);
+  }
+  fill('filter-work', entities('work'));
+  const works = selected('filter-work');
+  const roles = entities('role').filter((r) => !works.length || (r.work_ids || []).some((id) => works.includes(id)));
+  const actorIds = new Set(roles.flatMap((r) => r.actor_ids));
+  fill('filter-actor', entities('actor').filter((a) => !works.length || actorIds.has(a.id)));
+  const actors = selected('filter-actor');
+  fill('filter-role', roles.filter((r) => !actors.length || r.actor_ids.some((id) => actors.includes(id))));
+}
+for (const [, id] of FILTERS) $(id).onchange = () => {toggleAll($(id));fillFilters();renderCatalogue();};
 for (const id of ['entity-work', 'entity-actors']) $(id).onchange = () => toggleAll($(id));
-$('filter-reset').onclick = () => {for (const [, id] of FILTERS) applyAll($(id), false);state.filters = { work: [], actor: [], role: [] };renderCatalogue();};
+$('filter-reset').onclick = () => {for (const [, id] of FILTERS) applyAll($(id), false);state.filters = { work: [], actor: [], role: [] };fillFilters();renderCatalogue();};
 function matchRole(r) {const f = state.filters;return (!f.work.length || (r.work_ids || []).some((id) => f.work.includes(id))) && (!f.actor.length || r.actor_ids.some((id) => f.actor.includes(id))) && (!f.role.length || f.role.includes(r.id));}
 function rolesOf(actor) {return entities('role').filter((r) => r.actor_ids.includes(actor.id) && matchRole(r));}
 function actorVisible(actor) {const f = state.filters;if (f.actor.length && !f.actor.includes(actor.id)) return false;return f.role.length || f.work.length ? rolesOf(actor).length > 0 : true;}
-function fillSelectors() {for (const id of ['capture-actor', 'entity-actors']) options($(id), entities('actor'));for (const id of ['entity-work', 'import-work']) options($(id), entities('work'));for (const id of ['capture-source', 'process-source', 'review-source']) options($(id), state.sources);fillFilters();fillCaptureRoles();}
+function fillSelectors() {options($('entity-actors'), entities('actor'));for (const id of ['entity-work', 'import-work']) options($(id), entities('work'));for (const id of ['capture-source', 'process-source', 'review-source']) options($(id), state.sources);fillFilters();fillCaptureRoles();}
 // 每张参考图一张卡；extra 挂在「移除参考」右侧（实体的删除按钮放第一张参考图那行）。
 // 卡片左上角显示编号前 8 位，与处理任务日志「参考图 xxxxxxxx」的指向一致；悬停可看完整编号。
 function referenceCard(entity, ref, extra) {const figure = node('figure'),img = node('img'),badge = node('span', ref.id.slice(0, 8), 'reference-id');MindexI18n.setAttr(badge, "title", ref.id);img.src = ref.url;MindexI18n.setAttr(img, "alt", MindexI18n.msg("ui.5ad7ccccc4d1", { p0: entity.name }));img.loading = 'lazy';figure.append(img, badge, button(MindexI18n.msg("ui.c9c77517fe85"), async () => editEntity(entity, ref)), button(MindexI18n.msg("ui.639db0ef1050"), async () => {await api('/api/persons/references/' + ref.id, { method: 'DELETE' });await refresh();notice(MindexI18n.msg("ui.da60641f3eea"));}), ...(extra ? [extra] : []));return figure;}
@@ -261,15 +275,18 @@ async function refresh() {const data = await api('/api/persons');Object.assign(s
 // 从原片选取参考：演员与角色同时指定，截图始终配给角色；框选坐标是原图像素。
 const capture = { box: null, ready: false };
 function fillCaptureRoles() {
-  const actorId = $('capture-actor').value,work = state.sources.find((s) => s.id === $('capture-source').value)?.work_id;
-  const keep = $('capture-role').value;
-  const roles = entities('role').filter((r) => (!actorId || r.actor_ids.includes(actorId)) && (!work || (r.work_ids || []).includes(work)));
+  const work = state.sources.find((s) => s.id === $('capture-source').value)?.work_id;
+  const workRoles = entities('role').filter((r) => work && (r.work_ids || []).includes(work));
+  const actorIds = new Set(workRoles.flatMap((r) => r.actor_ids));
+  options($('capture-actor'), entities('actor').filter((a) => actorIds.has(a.id)));
+  const actorId = $('capture-actor').value, keep = $('capture-role').value;
+  const roles = workRoles.filter((r) => !actorId || r.actor_ids.includes(actorId));
   options($('capture-role'), roles.map((r) => ({ id: r.id, name: `${r.name} · ${r.work_ids.map(name).join('、')}` })), false);
   $('capture-role').value = roles.some((r) => r.id === keep) ? keep : '';
 }
 $('capture-actor').onchange = fillCaptureRoles;
 $('capture-source').onchange = () => {fillCaptureRoles();resetCapture();const v = $('capture-video');v.pause();v.onloadedmetadata = v.onloadeddata = v.onseeked = null;v.removeAttribute('src');v.load();v.hidden = true;};
-$('capture-role').onchange = () => {const role = state.entities.find((e) => e.id === $('capture-role').value);if (role?.actor_ids.length === 1) $('capture-actor').value = role.actor_ids[0];};
+$('capture-role').onchange = () => {const role = state.entities.find((e) => e.id === $('capture-role').value);if (role?.actor_ids.length === 1) {$('capture-actor').value = role.actor_ids[0];fillCaptureRoles();}};
 function drawCapture() {
   const canvas = $('capture-canvas'),ctx = canvas.getContext('2d'),v = $('capture-video').shotPlayer?.current || $('capture-video');
   ctx.clearRect(0, 0, canvas.width, canvas.height);

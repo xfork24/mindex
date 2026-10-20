@@ -7422,5 +7422,13 @@
   "ui.search_analysis_skipped": {
     "zh": "该片段的 LLM 分析已略过",
     "en": "LLM analysis was skipped for this segment"
+  },
+  "ui.sidebar_expand": {
+    "zh": "展开左侧面板",
+    "en": "Expand sidebar"
+  },
+  "ui.sidebar_collapse": {
+    "zh": "收起左侧面板",
+    "en": "Collapse sidebar"
   }
 }

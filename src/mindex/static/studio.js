@@ -14,9 +14,10 @@ function syncAllOf(select) {
 function applyAllOf(select, on) {for (const o of itemOptionsOf(select)) o.selected = on;syncAllOf(select);}
 // change 事件分不清是点了“全部选择”还是普通项，用上一次的全选状态判断意图。
 function toggleAllOf(select) {
-  const all = allOptionOf(select);
-  if (all && all.selected !== (select.dataset.allSelected === "1")) applyAllOf(select, all.selected);else
-  syncAllOf(select);
+  const all = allOptionOf(select), wasAll = select.dataset.allSelected === "1";
+  if (all?.selected && !wasAll) applyAllOf(select, true);
+  else if (all && !all.selected && wasAll && itemOptionsOf(select).every((o) => o.selected)) applyAllOf(select, false);
+  else syncAllOf(select);
 }
 function pickedIds(select) {return [...select.selectedOptions].map((o) => o.value).filter((v) => v !== ALL_VALUE);}
 function fillAllSelect(select, entries, chosen) {
@@ -287,8 +288,8 @@ function scopedSourceEntries() {
 function personName(id) {
   return state.persons?.find((p) => p.id === id)?.name || shortId(id);
 }
-function sourceName(id) {
-  return state.sources?.find((s) => s.id === id)?.name || shortId(id);
+function sourceName(id, fallback) {
+  return state.sources?.find((s) => s.id === id)?.name || fallback || shortId(id);
 }
 // 任务元信息只读：只摊开创建后不可变的输入（文案、素材范围）；
 // 音轨/字幕/召回数量属于方案参数，可在方案参数里动态调整，不在此重复展示。
@@ -652,7 +653,7 @@ function cellSummary(sid, stage) {
       stage === "tts" ?
       secs(d.duration) :
       stage === "select" ?
-      `${d.event.video.source_name || shortId(d.event.video.source_id)} ${secs(d.event.video.start)}–${secs(d.event.video.end)}` : MindexI18n.msg("ui.a8e554e0bc5a", { p0:
+      `${sourceName(d.event.video.source_id, d.event.video.source_name)} ${secs(d.event.video.start)}–${secs(d.event.video.end)}` : MindexI18n.msg("ui.a8e554e0bc5a", { p0:
         d.frames || "?", p1: d.fps || "?" });
       trigger.append(el("span", summary, "cell-summary"));
     }
@@ -922,10 +923,11 @@ function renderRecallEditor(body, sid, draft, overrides) {
       draw();
     });
     section.append(modeField.wrap);
+    let refreshPersons = () => {};
     if (mode === "text") {
       // 与检索页一致：演员和角色两级，角色按已选演员过滤；后端仍只收 person_ids。
       const chosen = new Set(value?.person_ids || []);
-      const persons = scopedRecallPersons(value);
+      let persons = scopedRecallPersons(value);
       const actorField = multiField(MindexI18n.msg("ui.acc714bb0167"));
       const roleField = multiField(MindexI18n.msg("ui.224f21d3016f"));
       const commitPersons = () => {
@@ -940,6 +942,12 @@ function renderRecallEditor(body, sid, draft, overrides) {
       const fillRoles = () => {
         fillAllSelect(roleField.select, roleEntries(), new Set(pickedIds(roleField.select)));
         commitPersons();
+      };
+      refreshPersons = (next) => {
+        persons = scopedRecallPersons(next);
+        const selected = new Set(next.person_ids);
+        fillAllSelect(actorField.select, persons.filter((p) => p.kind === "actor"), selected);
+        fillAllSelect(roleField.select, roleEntries(), selected);
       };
       fillAllSelect(actorField.select, persons.filter((p) => p.kind === "actor"), chosen);
       fillAllSelect(roleField.select, roleEntries(), chosen);
@@ -1036,8 +1044,11 @@ function renderRecallEditor(body, sid, draft, overrides) {
       next.filters.source_ids = picked.length === entries.length ? [] : picked;
       const allowed = new Set(scopedRecallPersons(next).map((p) => p.id));
       next.person_ids = next.person_ids.filter((id) => allowed.has(id));
+      // Keep the active material control (focus, search, scroll and resized height) intact.
+      // No selection means the full task scope, matching the saved default semantics.
+      if (!picked.length) applyAllOf(sourceField.select, true);
+      refreshPersons(next);
       commit(next);
-      draw();
     });
     const filters = el("div", "", "recall-filters");
     filters.append(sourceField.wrap);
@@ -1328,7 +1339,7 @@ function renderStageDetails(body, sid, stage) {
       body.append(
         el(
           "p", MindexI18n.msg("ui.5e5e44f7ea35", { p0:
-            d.event.video.source_name || shortId(d.event.video.source_id) })
+            sourceName(d.event.video.source_id, d.event.video.source_name) })
         )
       );
       if (d.anchor)
@@ -1702,7 +1713,7 @@ function renderCandidatePicker(body, sid) {
     if (c.thumbnail_url) {
       const img = el("img");
       img.src = c.thumbnail_url;
-      MindexI18n.setAttr(img, "alt", c.source_name || shortId(c.source_id));
+      MindexI18n.setAttr(img, "alt", sourceName(c.source_id, c.source_name));
       img.loading = "lazy";
       preview.append(img);
     }
@@ -1739,7 +1750,7 @@ function renderCandidatePicker(body, sid) {
       }
       card.append(chip);
     }
-    card.append(el("p", c.source_name || shortId(c.source_id), "candidate-source"),
+    card.append(el("p", sourceName(c.source_id, c.source_name), "candidate-source"),
     el("p", `${secs(c.start)}–${secs(c.end)}`, "candidate-time"),
     button(MindexI18n.msg("ui.de61aa8e1cbc"), () => play(c.media_url, MindexI18n.msg("ui.212e53d576f5"))));
     const choose = mutationButton(selected ? MindexI18n.msg("ui.fca821feca6c") : MindexI18n.msg("ui.218dbf597c7c"), () => selectAnchor(sid, {
@@ -2188,7 +2199,7 @@ function stagePreviewToggle(id, stage, chosen) {
         host.append(
           el(
             "p", MindexI18n.msg("ui.c2fcd4e57b8b", { p0:
-              chosen.rank || "?", p1: chosen.source_name || shortId(chosen.source_id), p2: secs(chosen.start), p3: secs(chosen.end) }),
+              chosen.rank || "?", p1: sourceName(chosen.source_id, chosen.source_name), p2: secs(chosen.start), p3: secs(chosen.end) }),
             "muted"
           ),
           media("video", chosen.media_url)

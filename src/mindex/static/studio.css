@@ -4,7 +4,7 @@
 .studio-intro p{font-size:13px;color:var(--muted);margin:0 0 22px}
 .studio .notice{margin:0 0 18px}
 .studio .notice:empty{display:none}
-.workspace{display:grid;grid-template-columns:280px minmax(0,1fr);gap:24px;align-items:start}
+.workspace{display:grid;--sidebar-width:280px;grid-template-columns:var(--sidebar-width) minmax(0,1fr);gap:24px;align-items:start}
 .job-panel{background:#fff;border:1px solid var(--line);border-radius:14px;padding:20px;position:sticky;top:20px;max-height:calc(100vh - 40px);overflow:auto}
 .job-panel label{font-size:12px;color:var(--muted)}
 .job-panel textarea{width:100%;margin:8px 0 10px}
