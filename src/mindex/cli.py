@@ -2,15 +2,18 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from enum import Enum
 from pathlib import Path
 from typing import Annotated
 
 import typer
 
+from .backup_cli import app as backup_app
 from .config import fingerprint, load_config
 
 app = typer.Typer(help="中文视频素材离线处理与检索", no_args_is_help=True)
+app.add_typer(backup_app, name="backup")
 indexes = typer.Typer(help="索引版本与回退", no_args_is_help=True)
 app.add_typer(indexes, name="indexes")
 e2e = typer.Typer(help="单 GPU 分阶段真实验证；不会启动或切换远程模型", no_args_is_help=True)
@@ -27,15 +30,25 @@ class IndexMode(str, Enum):
 def configure(
     ctx: typer.Context,
     config: Annotated[Path | None, typer.Option("--config", "-c")] = None,
+    data_dir: Annotated[Path | None, typer.Option("--data-dir", help="指定数据目录（备份恢复位置）")] = None,
     verbose: bool = False,
     no_runtime_overrides: Annotated[bool, typer.Option("--no-runtime-overrides", help="固定使用 YAML，禁用 CLI 与 Web 动态覆盖")] = False,
 ):
     logging.basicConfig(level=logging.DEBUG if verbose else logging.INFO, format="%(levelname)s %(message)s")
-    ctx.obj = load_config(config)
+    selected_config = Path(config or os.environ.get('MINDEX_CONFIG', 'config.local.yaml')).resolve()
+    ctx.meta['config_path'] = selected_config
+    if ctx.invoked_subcommand == 'backup' and not selected_config.exists():
+        from .config import Config
+
+        ctx.obj = Config(data_dir=selected_config.parent / 'data')
+    else:
+        ctx.obj = load_config(config)
+    if data_dir is not None:
+        ctx.obj.data_dir = data_dir.resolve()
     if no_runtime_overrides:
         ctx.obj.runtime_overrides = False
     # 设置页保存的覆盖层对 CLI 同样生效（Web 与 CLI 行为一致）；e2e 验证框架保持 yaml 原值。
-    if ctx.invoked_subcommand not in {"e2e", "clips"}:
+    if ctx.invoked_subcommand not in {"e2e", "clips", "backup"}:
         from .runtime_settings import apply_runtime_overrides
 
         ctx.obj = apply_runtime_overrides(ctx.obj)

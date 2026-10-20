@@ -5,10 +5,32 @@
 ## 全局规则
 
 - `--config` / `-c` **必须放在子命令之前**：`uv run mindex --config profiles/int8.yaml index`。也可设环境变量 `MINDEX_CONFIG`（默认读 `config.local.yaml`）。
+- 全局 `--data-dir DIR` 显式指定数据目录，按当前工作目录解析；`backup import --data-dir DIR` 也支持在子命令后指定恢复位置。
 - 配置模型 strict（`extra="forbid"`），未知键直接校验失败。
-- `data_dir` 已有元数据库时，CLI 命令会合并设置页（`/settings`）保存的覆盖层——激活的模型档案与检索调参对 CLI 同样生效，与 Web 行为一致；`mindex e2e` 命令组例外，始终使用 yaml 原值（验证框架保持可复现）。
+- `data_dir` 已有元数据库时，CLI 命令会合并设置页（`/settings`）保存的覆盖层——激活的模型档案与检索调参对 CLI 同样生效，与 Web 行为一致；`mindex e2e`、`mindex clips`、`mindex backup` 命令组例外，使用 YAML 原值。备份会分别携带基础 YAML 与数据库覆盖层。
 - `data_dir` 相对路径按**配置文件所在目录**解析；`deployment_manifest` 同理。
 - 离线阶段命令之间以 `data/pipeline.lock` 互斥，并行第二个实例立即失败。
+
+## 数据备份与迁移
+
+操作前停止 Web 和全部后台写入任务。导入导出均不调用模型，不重新计算向量。详见 [备份与全新 clone 恢复流程](backup.md)。
+
+```bash
+uv run mindex backup list --json
+uv run mindex backup export /backup/mindex --all
+uv run mindex backup export /backup/selected --source ID1 --source ID2 --dry-run
+uv run mindex backup export /backup/private --all --include-secrets
+uv run mindex backup inspect /backup/mindex --json
+uv run mindex backup import /backup/mindex --all --data-dir /new/data --dry-run
+uv run mindex backup import /backup/mindex --all --data-dir /new/data
+uv run mindex backup import /backup/selected --source ID1 --skip-existing
+uv run mindex backup import /backup/mindex --all --restore-config --dry-run
+uv run mindex backup recover --data-dir /new/data --json
+```
+
+省略素材选择时，交互终端提供搜索及多选；非交互环境必须指定 `--all` 或重复使用 `--source`。导出目录必须不存在。默认移除已存密钥；`--include-secrets` 显式包含设置页密钥，始终不读取环境变量里的密钥。`inspect` 核对版本、文件大小、校验和、素材、向量及配置依赖。
+
+空库自动恢复配置与活动检索组合，允许目标配置文件尚不存在。已有库默认保留配置，仅 `--restore-config` 恢复备份配置并输出脱敏差异。重复素材默认报错，`--skip-existing` 保留目标及其全部衍生数据。活动索引兼容时使用已有向量创建联合索引，不兼容或共享对象冲突则整个导入失败。`--dry-run` 构建并校验临时结果，返回依赖、版本映射及配置处理结果，不切换目标数据或配置；`--json` 结果写入标准输出，进度写入标准错误。
 
 ## 离线处理
 

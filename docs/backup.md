@@ -1,0 +1,102 @@
+# 数据备份与迁移
+
+`mindex backup` 用于完整备份、选择素材迁移、空库恢复及已有库合并。迁移直接保存和恢复既有向量，不调用嵌入、转写、人物识别或分析模型。
+
+## 操作前
+
+停止 Web、CLI 处理管线、创作任务以及全部后台写入进程，再开始导出或导入。迁移会依次取得管线独占锁、素材生命周期锁、原片登记锁、索引锁和创作锁，锁被占用立即失败。锁不能替代停机：设置修改等短事务没有持有整个服务生命周期的锁。
+
+导出目录必须不存在，也不能位于数据目录内。导入需要足够空间同时存放暂存结果、原库和备份；合并会重建目标库副本。备份目录和恢复目录不能互相包含。数据目录、备份文件中的符号链接均被拒绝；请先把需要携带的文件整理成普通文件。
+
+## 导出与检查
+
+```bash
+uv run mindex backup list
+uv run mindex backup export /backup/mindex-20261020 --all --dry-run
+uv run mindex backup export /backup/mindex-20261020 --all
+uv run mindex backup inspect /backup/mindex-20261020 --json
+
+# 重复 --source 选择多个素材
+uv run mindex backup export /backup/selected --source ID1 --source ID2
+
+# 显式包含设置页保存在 SQLite 中的密钥
+uv run mindex backup export /backup/private --all --include-secrets
+```
+
+不传 `--all` 或 `--source` 时，交互终端可以按素材名称/ID 搜索，输入逗号分隔的序号切换多选，输入 `/完成` 确定。脚本环境必须显式指定素材范围。`--all` 与 `--source` 互斥。
+
+默认移除已存密钥，也会重写历史 SQLite 快照、任务配置和已知凭据字段，执行 VACUUM 清除数据库旧页中的密钥。`--include-secrets` 的备份包含明文凭据，请按含密钥文件保管。两种模式都不读取环境变量中的密钥；报告列出配置中使用的环境变量名。
+
+`--dry-run` 会实际构建并检查临时快照，显示所选素材、向量、依赖、排除项和版本映射，完成后删除临时结果，不创建目标备份或切换目标库。它需要与实际操作相近的时间和暂存空间。`--json` 的结果写到标准输出，中文进度写到标准错误。
+
+## 空库恢复
+
+默认从目标配置的 `data_dir` 恢复。全局 `--config` 继续放在命令组之前；`--data-dir` 可以放在全局位置，也可以放在 `backup import` 后，后者优先。指定的数据目录按当前工作目录解析。
+
+```bash
+uv run mindex --config /new/config.local.yaml backup import /backup/mindex-20261020 \
+  --data-dir /new/data --all --dry-run
+uv run mindex --config /new/config.local.yaml backup import /backup/mindex-20261020 \
+  --data-dir /new/data --all
+```
+
+`backup` 允许目标配置文件尚不存在。空库自动恢复基础 YAML、SQLite 运行时覆盖层、模型档案、音色、历史索引及活动检索组合。基础配置在数据目录外保存，`data_dir` 改为目标绝对路径；受管的字体、部署清单和任务路径会重定位。基础 YAML 和覆盖层分别保存，备份命令不会预先把覆盖层混进 YAML。
+
+完整恢复保留版本 ID。选择导出或选择导入会重新生成索引成员清单、索引 ID 和人物发布组合，并输出旧新映射；任务引用同步更新。没有索引的素材仍然没有索引，导入不会自动推理。
+
+## 已有库合并
+
+```bash
+uv run mindex --config target.yaml backup import /backup/selected --all --dry-run
+uv run mindex --config target.yaml backup import /backup/selected --all --skip-existing
+
+# 显式替换目标系统配置；建议先查看脱敏差异
+uv run mindex --config target.yaml backup import /backup/selected --all --restore-config --dry-run
+uv run mindex --config target.yaml backup import /backup/selected --all --restore-config
+```
+
+默认保留目标的基础 YAML、运行时覆盖和活动模型档案。`--restore-config` 恢复备份配置并在切换前输出脱敏差异。模型档案和音色会导入为可选条目，本地整数 ID 与任务凭据引用重新映射；同名但不同配置的条目会加上确定性的“导入”后缀。
+
+重复素材默认使导入失败。`--skip-existing` 保留目标素材及其全部衍生数据，裁掉备份中这些素材的成员、向量、人物证据和相关任务，无法覆盖替换。共享人物实体、历史对象或同路径文件只有内容一致才复用，内容冲突则整次导入失败。
+
+两端都有活动索引时，模型空间、索引格式、预处理、模式和适用分析规格必须兼容；系统使用既有向量创建联合索引并激活。人物组合只合并两端已经发布的证据，不发布尚未发布的人工修改。没有活动索引的一端仅贡献数据及历史版本。报告中的 `searchable_sources` 是最终实际可检索的素材范围。
+
+创作任务只在全部素材依赖都可确定、且都被选中时携带。素材范围不明或依赖不完整的任务会出现在排除报告中。历史索引、媒体引用和任务检查点一并保存；迁移时仍为 `queued` / `running` 的任务改为 `interrupted`，之后可以手动重试。
+
+## 目录格式与校验
+
+```text
+manifest.json                 # 格式版本、来源、素材、依赖、排除项、映射和 SHA256
+config/base.yaml              # 基础 YAML（不混入数据库覆盖层）
+data/metadata.sqlite3         # SQLite backup API 一致快照
+data/sources/…                # 原片及业务文件，保留原有相对布局
+data/config-dependencies/…    # 字体、部署清单等
+vectors/INDEX_ID/000000.json  # API 分批导出的显式向量、文档、元数据
+```
+
+全量备份保留历史文件和普通缓存；模型权重、可下载模型缓存、锁文件、未完成临时文件和 Chroma 内部索引文件列入排除清单。部分备份只携带选定素材的依赖、全局人物目录/参考图、音色及系统配置；未知归属的历史缓存会排除。
+
+导入先核对格式版本、文件大小、SHA256、路径边界、素材/向量清单和媒体依赖，再在目标目录同一文件系统的暂存区合并。向量经 Chroma API 重建，并在另一个进程检查外键、历史成员、表示、向量及媒体引用。所有数据库连接和向量子进程退出后，才持久化并切换数据与配置。任何预检或暂存校验失败都不会发布暂存结果。
+
+`inspect` 会读取并核验整个备份，包含大文件的 SHA256，耗时取决于备份大小。SHA256 用于发现损坏，不是来源认证；请使用可信来源的备份。
+
+## 切换中断后的恢复
+
+切换前会在数据目录的父目录写入 `.<数据目录名>.migration.json`，保留旧目录及旧配置。遇到未完成日志，新的导入会拒绝继续。停止写入任务后，使用原来的配置路径和恢复路径执行：
+
+```bash
+uv run mindex --config /new/config.local.yaml --data-dir /new/data backup recover --json
+```
+
+尚未提交的切换回滚到旧数据和旧配置；已经提交但未完成清理的操作仅清理旧副本。不要在恢复前手动删除操作日志或旧目录。正常成功会清理日志、旧库和暂存副本。
+
+## 全新 clone 恢复流程
+
+1. clone 项目并进入项目目录，安装 Python 3.11–3.13、uv、ffmpeg/ffprobe 等系统依赖。
+2. 执行 `uv sync`；如需人物处理，执行 `uv sync --extra person`。
+3. 不启动 Web 或后台任务，运行 `uv run mindex backup inspect /backup/mindex --json`。
+4. 执行 `uv run mindex backup import /backup/mindex --all --dry-run`，确认报告后去掉 `--dry-run`。默认生成 `data/` 和 `config.local.yaml`。
+5. 按报告补充模型权重、本地模型目录和密钥；检查恢复的服务端点，异机部署时按实际环境调整。历史部署验证记录保留，但新部署仍需按原有工程门槛重新验证，不会因恢复自动获得验证通过状态。
+6. 运行 `uv run mindex check`（存在活动索引时），启动相应模型服务后执行 `uv run mindex status --health` 验证查询模型空间，最后执行 `uv run mindex serve` 并检查检索与媒体播放。
+
+操作系统依赖、模型权重、GPU 环境和模型服务进程不属于备份。仅恢复数据与既有向量不需要启动模型服务；真实检索时仍需提供匹配索引空间的查询嵌入服务。

@@ -361,6 +361,7 @@ UI 回归另需 Node.js 与 Playwright，参见[验证记录](docs/VERIFICATION.
 | 管理人物并按出镜查找片段 | [人物库与证据审核](docs/persons.md) |
 | 从文案制作视频、调整方案 | [Studio 工作台](docs/studio.md) |
 | 配置服务、音色和检索参数 | [设置页](docs/settings.md) · [配置参考](docs/config-reference.md) |
+| 备份素材、迁移合并或在新机器恢复 | [数据备份与迁移](docs/backup.md) |
 | 查看命令、模块和数据流 | [CLI 参考](docs/cli-reference.md) · [架构](docs/architecture.md) |
 | 评测模型或切换索引版本 | [端到端验证](docs/E2E_RUNBOOK.md) · [索引版本与回退](docs/index-versions.md) |
 
