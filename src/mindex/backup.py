@@ -721,15 +721,10 @@ def union_index(stage, originals):
 
 
 def check_compatible(first, second, first_store, second_store):
-    for key in ('space', 'format', 'preprocessing', 'mode', 'analysis_key'):
+    # 合并既有向量只约束嵌入空间及索引结构；分析/ASR 等来源配置保留作历史记录。
+    for key in ('space', 'format', 'preprocessing', 'mode'):
         if first['spec'].get(key) != second['spec'].get(key):
             raise ValueError(f'活动索引不兼容：{key}')
-    analyses = []
-    for version, store in ((first, first_store), (second, second_store)):
-        analyses.append({dumps(s.get('channel_metadata', {}).get('analysis', {}).get('model_identity'))
-                         for s in store.snapshots(version['id']) if 'analysis' in s.get('indexed_views', [])})
-    if all(analyses) and analyses[0] != analyses[1]:
-        raise ValueError('活动索引不兼容：适用分析规格')
 
 
 def _fsync_directory(path):

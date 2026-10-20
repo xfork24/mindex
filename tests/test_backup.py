@@ -690,3 +690,30 @@ def test_partial_roundtrip_preserves_compatibility_evidence_bytes(library, tmp_p
     (directory / 'samples/0.mp4').unlink()
     with pytest.raises(ModelError, match='无法核验本地文件'):
         export(library, tmp_path / 'missing-proof', sources=[sources[0]])
+
+
+@pytest.mark.parametrize('mode', ['auto', 'enriched'])
+def test_merge_ignores_analysis_and_other_model_contracts(tmp_path, mode):
+    from types import SimpleNamespace
+
+    from mindex.backup import check_compatible
+
+    def unexpected_snapshot_read(_):
+        raise AssertionError('合并兼容性不能读取分析/ASR 来源配置')
+
+    store = SimpleNamespace(root=tmp_path, snapshots=unexpected_snapshot_read)
+    spec = {'space': {'model': 'WeMM', 'weights_sha256': 'same'}, 'format': 2,
+            'mode': mode, 'preprocessing': {'fps': 4}}
+    first = {'id': 'target', 'spec': {**spec, 'analysis_key': 'old-analysis-profile'}}
+    second = {'id': 'incoming', 'spec': {**spec, 'analysis_key': 'another-analysis-profile'}}
+    check_compatible(first, second, store, store)
+
+
+@pytest.mark.parametrize('field,value', [('space', {'model': 'different-WeMM'}), ('format', 1),
+                                        ('preprocessing', {'fps': 8}), ('mode', 'visual')])
+def test_merge_still_rejects_embedding_and_index_contract_changes(field, value):
+    from mindex.backup import check_compatible
+
+    spec = {'space': {'model': 'WeMM'}, 'format': 2, 'preprocessing': {'fps': 4}, 'mode': 'auto'}
+    with pytest.raises(ValueError, match=f'活动索引不兼容：{field}'):
+        check_compatible({'spec': spec}, {'spec': {**spec, field: value}}, None, None)
