@@ -260,8 +260,10 @@ function toggleAll(select) {const all = allOption(select);if (all && all.selecte
 function bindAllToggle(id, after) {$(id).addEventListener('change', () => {toggleAll($(id));if (after) after();});}
 function selectedValues(id) {return Array.from($(id).selectedOptions).map((o) => o.value).filter((v) => v !== ALL_VALUE);}
 function fillOptions(id, entries) {
-  const chosen = new Set(selectedValues(id));
-  const select = $(id);select.replaceChildren();
+  const select = $(id);
+  const selectAll = id === 'source' && (!select.dataset.initialized || select.dataset.allSelected === '1');
+  const chosen = new Set(selectAll ? entries.map((entry) => entry.id) : selectedValues(id));
+  select.dataset.initialized = '1';select.replaceChildren();
   const all = element('option', MindexI18n.msg("ui.3e26ad9407ad"));all.value = ALL_VALUE;select.append(all);
   for (const entry of MindexMultiSearch.sort(entries)) {const option = element('option', `${entry.name} · ${entry.id.slice(0, 8)}`);option.value = entry.id;option.selected = chosen.has(entry.id);select.append(option);}
   MindexMultiSearch.attach(select);
@@ -276,7 +278,7 @@ function fillRoleOptions() {
 $('filter-reset').onclick = () => {
   for (const [id, value] of Object.entries({ 'person-mode': 'auto', 'person-relation': 'all', granularity: 'moment', limit: '20', scene: '', emotion: '', 'shot-size': '', 'min-duration': '', 'max-duration': '' })) $(id).value = value;
   for (const id of ['actor-select', 'role-select', 'source']) {
-    applyAll($(id), false);
+    applyAll($(id), id === 'source');
     const search = $(id).closest('.multi-select').querySelector('.multi-search');
     if (search) search.value = '';
     $(id).dataset.query = '';

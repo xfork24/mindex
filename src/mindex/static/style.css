@@ -112,7 +112,6 @@ footer{flex-direction:column}
 
 #person-controls label:has(.multi-select){width:260px;max-width:100%}
 #person-controls label:not(:has(.multi-select)){width:230px;max-width:100%}
-#person-controls label:has(#person-relation){width:220px}
 
 #search-form .filter-grid{align-items:end}
 

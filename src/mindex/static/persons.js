@@ -23,14 +23,14 @@ function selected(id) {return Array.from($(id).selectedOptions).map((o) => o.val
 function entityFields() {const kind = $('entity-kind').value;$('work-field').hidden = kind !== 'role';$('actors-field').hidden = kind !== 'role';$('entity-files-field').hidden = kind !== 'actor';}
 $('entity-kind').onchange = entityFields;
 function fillEntity(e) {$('entity-kind').value = e?.kind || 'actor';$('entity-name').value = e?.name || '';$('entity-aliases').value = (e?.aliases || []).join('，');for (const o of $('entity-work').options) o.selected = (e?.work_ids || []).includes(o.value);for (const o of $('entity-actors').options) o.selected = (e?.actor_ids || []).includes(o.value);syncAll($('entity-work'));syncAll($('entity-actors'));entityFields();}
-function editEntity(e = null, reference = null) {
+function editEntity(e = null, reference = null, defaults = null) {
   state.editing = e?.id || null;state.editReference = reference?.id || null;state.editRole = reference?.role_id || null;
-  $('entity-form').reset();MindexI18n.setText($('entity-error'), '');fillEntity(e);
-  $('entity-kind').disabled = !!e || !!state.editRole;$('pair-field').hidden = !reference;
+  $('entity-form').reset();MindexI18n.setText($('entity-error'), '');fillEntity(e || defaults);
+  $('entity-kind').disabled = true;$('pair-field').hidden = !reference;
   options($('reference-actor'), entities('actor'), false);if (reference) $('reference-actor').value = reference.actor_id;
   const photo = reference || state.references.find((r) => r.role_id === e?.id) || state.references.find((r) => !r.role_id && r.actor_id === e?.id);
   $('entity-photo').hidden = !photo;if (photo) $('entity-photo').src = photo.url;else $('entity-photo').removeAttribute('src');
-  MindexI18n.setText($('entity-title'), e ? MindexI18n.msg("ui.c7ba8202fb72") : MindexI18n.msg("ui.4941181d36f0"));MindexI18n.setText($('entity-save'), e ? MindexI18n.msg("ui.60b4ae9082a3") : MindexI18n.msg("ui.0cda8d1c7182"));
+  MindexI18n.setText($('entity-title'), e ? MindexI18n.msg("ui.c7ba8202fb72") : MindexI18n.msg(defaults?.kind === 'role' ? "ui.new_role" : "ui.4941181d36f0"));MindexI18n.setText($('entity-save'), e ? MindexI18n.msg("ui.60b4ae9082a3") : MindexI18n.msg("ui.0cda8d1c7182"));
   $('entity-dialog').showModal();
 }
 $('entity-new').onclick = () => editEntity();
@@ -136,14 +136,14 @@ function actorCard(actor) {
   // 手风琴：展开当前演员时收起其他演员的展开行；再点已展开的则全部收起。
   const toggle = () => {open ? state.expanded.clear() : state.expanded = new Set([actor.id]);renderCatalogue();};
   card.onclick = (e) => {if (e.target.closest('button,input,select,textarea,label,a,form')) return;toggle();};
-  card.onkeydown = (e) => {if (e.key === 'Enter' || e.key === ' ') {e.preventDefault();toggle();}};
+  card.onkeydown = (e) => {if (e.target !== card && e.target.closest('button,input,select,textarea,label,a,form')) return;if (e.key === 'Enter' || e.key === ' ') {e.preventDefault();toggle();}};
   const title = node('h3', undefined, 'actor-name');title.append(node('span', actor.name));
   if (actor.aliases.length) {const foreign = node('span', actor.aliases.join(' / '), 'foreign-name');title.append(foreign);}
   const refs = state.references.filter((r) => !r.role_id && r.actor_id === actor.id),photos = node('div', undefined, 'person-photos');
   refs.forEach((ref, i) => photos.append(referenceCard(actor, ref, i === 0 ? deleteEntityButton(actor) : null)));
   card.append(title, node('p', MindexI18n.msg("ui.714823abf3d2", { p0: roles.length }), 'muted role-count'), refs.length ? photos : node('p', MindexI18n.msg("ui.d3cf742cfdbd"), 'muted'));
   if (!refs.length) card.append(button(MindexI18n.msg("ui.c9c77517fe85"), async () => editEntity(actor)), deleteEntityButton(actor));
-  card.append(linkedShotsButton(actor), uploadForm(actor, actor.id));
+  card.append(linkedShotsButton(actor), button(MindexI18n.msg("ui.new_role"), () => editEntity(null, null, { kind: 'role', actor_ids: [actor.id] })), uploadForm(actor, actor.id));
   return card;
 }
 // 展开行：占据网格整行，列出该演员的全部角色（宽卡片）。
@@ -277,18 +277,23 @@ function drawCapture() {
   if (capture.box) {const [x1, y1, x2, y2] = capture.box;ctx.strokeStyle = '#ff5035';ctx.lineWidth = Math.max(2, canvas.width / 350);ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);}
 }
 function resetCapture() {capture.box = null;capture.ready = false;captureDrag = null;$('capture-canvas').hidden = true;}
+function validCaptureTime(value) {
+  return (Math.round((Number(value) + Number.EPSILON) * 100) / 100).toFixed(2);
+}
 $('capture-time').oninput = resetCapture;
+$('capture-time').onchange = () => {$('capture-time').value = validCaptureTime($('capture-time').value);resetCapture();};
 $('capture-preview').onclick = () => run(async () => {
-  const original = $('capture-video'),canvas = $('capture-canvas'),timestamp = Number($('capture-time').value);
+  const original = $('capture-video'),canvas = $('capture-canvas'),timestamp = Number(validCaptureTime($('capture-time').value));
+  $('capture-time').value = validCaptureTime(timestamp);
   if (!$('capture-source').value) throw Error(MindexI18n.msg("ui.c4b67e4559fe"));
   resetCapture();original.hidden = false;
   const player = ShotPlayer.attach(original, `/api/admin/sources/${$('capture-source').value}/playlist`);
   await player.ready;
   const grab = () => {const v = player.current;if(!v.videoWidth || v.readyState < 2 || v.seeking || !v.paused) return;
-    resetCapture();$('capture-time').value = player.time.toFixed(3);canvas.width = v.videoWidth;canvas.height = v.videoHeight;
+    resetCapture();$('capture-time').value = validCaptureTime(player.time);canvas.width = v.videoWidth;canvas.height = v.videoHeight;
     canvas.hidden = false;drawCapture();capture.ready = true;};
   for(const v of player.videos) {v.onseeked = grab;v.onloadeddata = grab;v.onplay = resetCapture;
-    v.ontimeupdate = () => {if(v !== player.current) return;$('capture-time').value = player.time.toFixed(3);if(!v.paused) resetCapture();};}
+    v.ontimeupdate = () => {if(v !== player.current) return;$('capture-time').value = validCaptureTime(player.time);if(!v.paused) resetCapture();};}
   await player.seek(timestamp);grab();
 });
 let captureDrag = null;
@@ -297,13 +302,16 @@ $('capture-canvas').onpointerdown = (e) => {if (!capture.ready) return;captureDr
 $('capture-canvas').onpointermove = (e) => {if (!captureDrag) return;const [x, y] = capturePoint(e);capture.box = [Math.min(x, captureDrag[0]), Math.min(y, captureDrag[1]), Math.max(x, captureDrag[0]), Math.max(y, captureDrag[1])].map(Math.round);drawCapture();};
 $('capture-canvas').onpointerup = (e) => {if (!captureDrag) return;$('capture-canvas').onpointermove(e);captureDrag = null;};
 $('capture-canvas').onpointercancel = () => captureDrag = null;
-$('capture-form').onsubmit = (e) => {e.preventDefault();run(async () => {
+$('capture-form').onsubmit = async (e) => {e.preventDefault();
+  const error = $('capture-error');error.hidden = true;MindexI18n.setText(error, '');
+  try {
     const roleId = $('capture-role').value;
     if (!roleId) throw Error(MindexI18n.msg("ui.0778e4f6efa2"));
     if (capture.box && (capture.box[2] - capture.box[0] < 8 || capture.box[3] - capture.box[1] < 8)) throw Error(MindexI18n.msg("ui.aeff122f41a5"));
     await api('/api/persons/references/from-source', json('POST', { source_id: $('capture-source').value, timestamp: Number($('capture-time').value), actor_id: $('capture-actor').value || null, role_id: roleId, bbox: capture.box }));
     resetCapture();await refresh();notice(MindexI18n.msg("ui.862a7467ad7c"));
-  });};
+  } catch (e) {MindexI18n.setText(error, MindexI18n.system(e.message));error.hidden = false;}
+};
 for (const tab of document.querySelectorAll('[data-pane]')) tab.onclick = () => {document.querySelectorAll('.pane').forEach((n) => n.hidden = n.id !== tab.dataset.pane);document.querySelectorAll('[data-pane]').forEach((n) => n.classList.toggle('active', n === tab));};
 $('process-form').onsubmit = (e) => {e.preventDefault();run(async () => {if (!$('process-source').value) throw Error(MindexI18n.msg("ui.f3b909f8529a"));const task = await api(`/api/persons/sources/${$('process-source').value}/process`, json('POST', { start: Number($('process-start').value), end: Number($('process-end').value || 0), publish: false }));notice(MindexI18n.msg("ui.c2d8790c0fdb") + task.id);await refresh();});};
 $('publish').onclick = () => run(async () => {const r = await api('/api/persons/publish', json('POST', {}));await refresh();notice(MindexI18n.msg("ui.719463074ede") + r.person_version);});
@@ -606,7 +614,9 @@ function openReview(shot, linkedEntity = null) {
   if (shot.image_url) $('review-image').src = shot.image_url;
   MindexI18n.setText($('review-description'), MindexI18n.msg("ui.71f93b0b04cb", { p0: shot.start.toFixed(3), p1: shot.end.toFixed(3) }));
   fillReviewChoices([shot]);
-  const video = $('review-video');video.hidden = false;video.src = `/api/admin/segments/${shot.shot_id}/media`;video.onloadedmetadata = () => video.currentTime = 0;
+  const video = $('review-video');video.pause();video.hidden = false;video.preload = 'auto';
+  video.onloadedmetadata = () => video.currentTime = 0;
+  video.src = `/api/admin/segments/${shot.shot_id}/media`;video.load();
   $('review-dialog').showModal();
 }
 function openBatchReview(shots) {

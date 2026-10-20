@@ -852,6 +852,11 @@ def choose(w, p, stage, sid, vid):
     else:
         if sid not in p["shots"]:
             raise studio.StudioError("当前方案没有此分镜")
+        if stage == "recall" and p["shots"][sid].get("recall") not in (None, vid):
+            # A new candidate pool starts a new automatic selection, bound to
+            # this recall rather than a previous anchor or explicit window.
+            p.setdefault("anchors", {})[sid] = {"mode": "auto"}
+            p["ranges"].pop(sid, None)
         p["shots"][sid][stage] = vid
         if stage == "select":
             if item["data"].get("manual"):

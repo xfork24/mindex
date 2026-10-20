@@ -129,6 +129,7 @@ function testLine(profileId) {
     const bits = [MindexI18n.msg("ui.79ccfbf3ca48", { p0: result.latency_ms })];
     if (result.dims) bits.push(MindexI18n.msg("ui.b38853581295", { p0: result.dims }));
     if (result.reply) bits.push(`「${result.reply}」`);
+    if (result.voice) bits.push(result.voice);
     if (result.bytes) bits.push(MindexI18n.msg("ui.4dd220045314", { p0: result.bytes }));
     MindexI18n.setText(line, bits.join(' · '));
   } else {

@@ -33,6 +33,7 @@
 #capture-form{display:grid;grid-template-columns:minmax(120px,1.3fr) 104px minmax(100px,1fr) minmax(140px,1fr) max-content max-content;gap:12px;align-items:end;overflow-x:auto;padding-bottom:4px}
 #capture-form>label{max-width:none;min-width:0}
 #capture-form>button{white-space:nowrap}
+#capture-error{grid-column:1/-1;margin:0;color:#a52b20;overflow-wrap:anywhere}
 #capture-time{width:104px}
 #capture-shot{margin-top:16px}
 #capture-canvas{max-width:100%;border:1px solid #ccc;cursor:crosshair;touch-action:none}

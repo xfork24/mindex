@@ -863,7 +863,7 @@ function scopedRecallPersons(value) {
   const actors = new Set(roles.flatMap((p) => p.actor_ids || []));
   return [...(state.persons || []).filter((p) => p.kind === "actor" && actors.has(p.id)), ...roles];
 }
-function renderRecallEditor(body, sid, draft) {
+function renderRecallEditor(body, sid, draft, overrides) {
   const section = el("div", "", "recall-editor");
   const commit = (next) => {
     // 全默认等价于未设置：写回 null 以保持与旧 content 完全一致的 dirty 判定与签名。
@@ -920,6 +920,8 @@ function renderRecallEditor(body, sid, draft) {
       actorField.select.addEventListener("change", () => {toggleAllOf(actorField.select);fillRoles();});
       roleField.select.addEventListener("change", () => {toggleAllOf(roleField.select);commitPersons();});
       section.append(actorField.wrap, roleField.wrap);
+      const personOptions = el("div", "", "recall-person-options");
+      section.append(personOptions);
       for (const [key, label, choices] of [
       ["person_mode", MindexI18n.msg("ui.06cf3151c450"), [
       ["auto", MindexI18n.msg("ui.be93a225bcfb")],
@@ -937,7 +939,7 @@ function renderRecallEditor(body, sid, draft) {
           next[key] = f.input.value;
           commit(next);
         });
-        section.append(f.wrap);
+        personOptions.append(f.wrap);
       }
     } else {
       const uploadWrap = el(
@@ -1035,16 +1037,8 @@ function renderRecallEditor(body, sid, draft) {
       });
       filters.append(f.wrap);
     }
-    section.append(filters);
-    section.append(
-      el(
-        "p",
-        mode === "text" ? MindexI18n.msg("ui.beb454185f50") : MindexI18n.msg("ui.105e58965eba"),
-
-
-        "muted"
-      )
-    );
+    section.append(filters, overrides);
+    if (mode !== "text") section.append(el("p", MindexI18n.msg("ui.105e58965eba"), "muted"));
   };
   draw();
   body.append(section);
@@ -1099,7 +1093,7 @@ function renderShotEditor(body, sid) {
   };
   const planGranularity =
     GRANULARITY_LABEL[state.data.recall_granularity] || state.data.recall_granularity || "—";
-  const overrides = el("div", "", "shot-editor-fields");
+  const overrides = el("div", "", "recall-return-options");
   for (const [name, label, choices] of [
   ["granularity", MindexI18n.msg("ui.770c916c8efa"), [
   ["", MindexI18n.msg("ui.2920edc15f73", { p0: planGranularity })],
@@ -1119,9 +1113,8 @@ function renderShotEditor(body, sid) {
     });
     overrides.append(f.wrap);
   }
-  overrides.append(el("p", MindexI18n.msg("ui.ecc8f054fe1a"), "muted"));
-  body.append(fields, overrides);
-  renderRecallEditor(body, sid, draft);
+  body.append(fields);
+  renderRecallEditor(body, sid, draft, overrides);
   const actions = el("div", "", "detail-actions");
   actions.append(
     mutationButton(MindexI18n.msg("ui.761f731d682b"), () => saveShot(sid), false, true),
@@ -1149,7 +1142,8 @@ function renderShotEditor(body, sid) {
   );
   const history = el("div");
   history.dataset.rowHistory = "content";
-  body.append(actions, history);
+  overrides.append(actions);
+  body.append(history);
 }
 function currentBoard() {
   return order().map((sid) => ({ ...ver(plan().shots[sid].content).data }));

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from fastapi.testclient import TestClient
 
 from mindex import adapters
@@ -125,6 +126,8 @@ def test_minimax_tts_profile_carries_voice(config, monkeypatch):
     captured = {}
 
     def reply(method, url, **kwargs):
+        if url.endswith('/get_voice'):
+            return {"system_voice": [{"voice_id": "male-qn-qingse", "voice_name": "Test"}]}
         captured.update(url=url, json=kwargs["json"])
         return {"base_resp": {"status_code": 0}, "data": {"audio": b"RIFF-probe".hex()}}
 
@@ -349,3 +352,58 @@ def test_channel_weights_share_runtime_with_cli_and_keep_legacy_weights(config):
         ).status_code
         == 422
     )
+
+
+def test_local_voiceclone_probe_reports_missing_voice_without_synthesis(config, monkeypatch):
+    client = client_for(config)
+    profile = client.post('/api/settings/profiles', json={
+        'role': 'tts', 'provider': 'self', 'name': 'LocalMac-Qwen3-TTS-VoiceClone',
+        'config': {'backend': 'openai', 'base_url': 'http://localhost:8890/v1',
+                   'model': 'Qwen3-TTS-VoiceClone', 'voice': 'foreign-provider-voice'},
+    }).json()
+    calls = []
+    def request(method, url, **kwargs):
+        calls.append(url)
+        return {'voices': []}
+    monkeypatch.setattr(adapters, 'request', request)
+    monkeypatch.setattr(adapters, 'request_bytes', lambda *a, **kw: pytest.fail('missing clone must not synthesize'))
+    result = client.post(f"/api/settings/profiles/{profile['id']}/test").json()
+    assert result['ok'] is True and result['ready'] is False
+    assert '服务连接正常' in result['reply'] and '未执行合成测试' in result['reply']
+    assert calls == ['http://localhost:8890/v1/audio/voices']
+
+
+@pytest.mark.parametrize(('model', 'configured_voice'), [
+    ('Qwen3-TTS-VoiceClone', 'my-clone'),
+    ('Qwen3-TTS-VoiceClone', 'Chinese (Mandarin)_News_Anchor'),
+    ('Qwen3-TTS-CustomVoice', 'Chinese (Mandarin)_News_Anchor'),
+])
+def test_local_voiceclone_probe_synthesizes_registered_voice(config, monkeypatch, model, configured_voice):
+    client = client_for(config)
+    profile = client.post('/api/settings/profiles', json={
+        'role': 'tts', 'provider': 'self', 'name': 'LocalMac-Qwen3-TTS-VoiceClone',
+        'config': {'backend': 'openai', 'base_url': 'http://localhost:8890/v1',
+                   'model': model, 'voice': configured_voice},
+    }).json()
+    monkeypatch.setattr(adapters, 'request', lambda *a, **kw: {'voices': ['my-clone']})
+    captured = []
+    def speech(method, url, **kwargs):
+        captured.append(kwargs['json'])
+        return b'RIFF-probe'
+    monkeypatch.setattr(adapters, 'request_bytes', speech)
+    result = client.post(f"/api/settings/profiles/{profile['id']}/test").json()
+    assert result['ok'] is True and result['bytes'] > 0
+    assert captured[0]['voice'] == 'my-clone'
+
+
+def test_local_voiceclone_probe_still_fails_if_service_unreachable(config, monkeypatch):
+    client = client_for(config)
+    profile = client.post('/api/settings/profiles', json={
+        'role': 'tts', 'provider': 'self', 'name': 'LocalMac-Qwen3-TTS-VoiceClone',
+        'config': {'backend': 'openai', 'model': 'Qwen3-TTS-VoiceClone'},
+    }).json()
+    def offline(*a, **kw):
+        raise adapters.ModelError('connection refused')
+    monkeypatch.setattr(adapters, 'request', offline)
+    result = client.post(f"/api/settings/profiles/{profile['id']}/test").json()
+    assert result['ok'] is False and 'connection refused' in result['detail']

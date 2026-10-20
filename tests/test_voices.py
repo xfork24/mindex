@@ -211,7 +211,8 @@ def test_qwentts_register_contract(monkeypatch, tmp_path):
     body = captured["json"]
     assert body["name"] == "mindex-clone-9"
     assert body["ref_text"] == "参考文本"
-    assert base64.b64decode(body["wav"]) == b"RIFF-x"
+    assert "wav" not in body
+    assert base64.b64decode(body["wav_b64"]) == b"RIFF-x"
 
 
 def test_clone_local_qwentts_flow(config, monkeypatch):
@@ -237,6 +238,9 @@ def test_clone_local_qwentts_flow(config, monkeypatch):
     assert voice["provider"] == "self" and voice["kind"] == "clone" and voice["status"] == "ready"
     assert voice["notes"] == "这是参考文本"
     assert registers and registers[0]["name"] == voice["voice_id"]
+    import base64
+
+    assert base64.b64decode(registers[0]["wav_b64"]) == sample_wav()
     store = Store(config.data_dir)
     assert (store.root / voice["sample_path"]).is_file()
     preview = store.root / "voices" / f"{voice['id']}-preview.wav"

@@ -162,7 +162,7 @@ def speech(config, jid, w, p, sid="a"):
     return ws.execute(config, jid, w, p, "tts", sid, speaker=FixtureSpeaker(config))
 
 
-def test_nonfirst_anchor_no_voice_isolation_and_recall_conflict(refinement):
+def test_new_recall_resets_anchor_and_selection_dependency(refinement):
     config, jid, w, p, _ = refinement
     other = copy.deepcopy(p)
     other["id"] = "other"
@@ -179,14 +179,23 @@ def test_nonfirst_anchor_no_voice_isolation_and_recall_conflict(refinement):
     manual(w, p, candidate="shot-2")
     assert p["shots"]["a"] == old
     assert ws.conflicts(config, jid, w, p, "select", "a", selected)
-    new_recall = ws.add_version(config, jid, w, "recall", "a", data={"results": []})
+    previous_recall = p["shots"]["a"]["recall"]
+    pool = copy.deepcopy(ws.version(w, previous_recall)["data"]["results"])
+    p["ranges"]["a"] = {"anchor_ref": {"recall_version": previous_recall}}
+    previous_other = copy.deepcopy(p["shots"]["b"])
+    ws.choose(w, p, "recall", "a", previous_recall)
+    assert p["anchors"]["a"]["mode"] == "manual"
+    assert "a" in p["ranges"]
+    new_recall = ws.add_version(config, jid, w, "recall", "a", data={"results": pool})
     ws.choose(w, p, "recall", "a", new_recall)
-    error = window.anchor_conflict(w, p, "a")
-    assert new_recall in error and p["anchors"]["a"]["recall_version"] in error
-    with pytest.raises(studio.StudioError, match="召回版本"):
-        ws.alignment(config, jid, w, p, "a")
-    window.set_anchor(w, p, "a", {"mode": "auto"})
+    assert p["anchors"]["a"] == {"mode": "auto"}
+    assert "a" not in p["ranges"]
     assert not window.anchor_conflict(w, p, "a")
+    assert p["shots"]["b"] == previous_other
+    assert ws.specification(config, jid, w, p, "select", "a")["inputs"]["recall"] == new_recall
+    new_selection = ws.execute(config, jid, w, p, "select", "a")
+    assert ws.version(w, new_selection)["inputs"]["recall"] == new_recall
+    assert ws.version(w, new_selection)["data"]["anchor_ref"]["recall_version"] == new_recall
 
 
 def test_automatic_mode_uses_existing_scoring(refinement):

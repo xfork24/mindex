@@ -79,7 +79,7 @@ def qwentts_register(base_url: str, sample: Path, name: str, ref_text: str = "")
         "POST",
         base_url.rstrip("/") + "/audio/voices",
         timeout=600,
-        json={"name": name, "ref_text": ref_text, "wav": base64.b64encode(payload).decode()},
+        json={"name": name, "ref_text": ref_text, "wav_b64": base64.b64encode(payload).decode()},
     )
 
 

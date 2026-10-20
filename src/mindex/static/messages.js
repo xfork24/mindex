@@ -552,8 +552,8 @@ window.MindexMessages = {
     "en": "Process and publish"
   },
   "ui.4941181d36f0": {
-    "zh": "新建演员或角色",
-    "en": "New actor or character"
+    "zh": "新建演员",
+    "en": "New actor"
   },
   "ui.35ef78c259d1": {
     "zh": "只显示演员卡片；点击演员卡片整行展开该演员的全部角色（再点收起）。演员与角色的参考图各自独立配对，可分别追加与移除；已接受分镜确认了该身份，或待确认分镜涉及该身份时不可删除，点击“关联分镜”逐一核对；参考图随身份删除。",
@@ -3260,32 +3260,32 @@ window.MindexMessages = {
     "en": "new screen"
   },
   "ui.5d9c0feb3855": {
-    "zh": "按当前输入选片 / 复用",
-    "en": "Select / Reuse current inputs"
+    "zh": "执行/复用",
+    "en": "Run / Reuse"
   },
   "ui.fb03cbd3e2da": {
-    "zh": "执行 / 复用",
+    "zh": "执行/复用",
     "en": "Run / Reuse"
   },
   "ui.2c2583899752": {
-    "zh": "重新生成选片版本",
-    "en": "Regenerate selection"
+    "zh": "强制重新生成",
+    "en": "Force regenerate"
   },
   "ui.c6a70df5d5ee": {
     "zh": "强制重新生成",
     "en": "Force regenerate"
   },
   "ui.ae6c80665732": {
-    "zh": "查看完整版本",
-    "en": "View complete version"
+    "zh": "查看版本信息",
+    "en": "View version information"
   },
   "ui.796ebaa8b64a": {
-    "zh": "“执行 / 复用”优先选用输入与设置匹配、文件完好的成功召回版本，没有时才重新检索；“强制重新生成”每次重新检索并新增召回版本。两者只处理召回，不自动配音、选片或渲染。",
+    "zh": "“执行/复用”优先选用输入与设置匹配、文件完好的成功召回版本，没有时才重新检索；“强制重新生成”每次重新检索并新增召回版本。两者只处理召回，不自动配音、选片或渲染。",
     "en": "\"Execute/Reuse\" gives priority to successfully recalled versions that match the input and settings and have intact files, and retrieve only when there are none; \"Force Regenerate\" retrieval and add a new recalled version each time. Both only handle recall and do not automatically dub, select, or render."
   },
   "ui.6ad63039cb96": {
-    "zh": "拖动窗口后，点击下方“保存当前窗口”保存位置。“按当前输入选片 / 复用”会复用匹配的成功选片，没有时按当前锚点或已保存范围选片；“重新生成选片版本”跳过复用并新增版本。这两个按钮不保存未提交的窗口草稿，也不渲染视频或合成成片。",
-    "en": "After dragging, use “Save current window” to save its position. “Select / Reuse current inputs” reuses a matching successful selection or selects footage using the current anchor or saved range. “Regenerate selection” creates a new version. These actions leave the unsaved window draft alone; rendering and composition are separate steps."
+    "zh": "拖动窗口后，点击下方“保存当前窗口”保存位置。“执行/复用”会复用匹配的成功选片，没有时按当前锚点或已保存范围选片；“强制重新生成”跳过复用并新增版本。这两个按钮不保存未提交的窗口草稿，也不渲染视频或合成成片。",
+    "en": "After dragging, use “Save current window” to save its position. “Run / Reuse” reuses a matching successful selection or selects footage using the current anchor or saved range. “Force regenerate” creates a new version. These actions leave the unsaved window draft alone; rendering and composition are separate steps."
   },
   "ui.905f065f533b": {
     "zh": "{p0}：{p1} · 模型 {p2}",
@@ -7242,5 +7242,9 @@ window.MindexMessages = {
   "ui.update_dialogue_embedding": {
     "zh": "更新dialog嵌入",
     "en": "Update dialog embeddings"
+  },
+  "ui.new_role": {
+    "zh": "新建角色",
+    "en": "New character"
   }
 };

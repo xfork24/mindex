@@ -139,7 +139,7 @@ def _silence_wav(path: Path, seconds: float = 0.5) -> None:
         handle.writeframes(b"\x00\x00" * int(16000 * seconds))
 
 
-def _probe(config: Config, role: str) -> dict:
+def _probe(config: Config, role: str, *, store: Store | None = None, profile_name: str = "") -> dict:
     """对单个角色做一次最小真实调用，返回可呈现的探测结果。"""
     if role == "person":
         from .person_processing import PersonClient
@@ -193,9 +193,40 @@ def _probe(config: Config, role: str) -> dict:
                 text = ""
         return {"model": config.asr.model, "reply": text[:80] or "（静音样本，无识别结果属正常）"}
 
+    tts = config.studio.tts
+    voice = tts.voice
+    kind = voice_kind(tts.model, profile_name)
+    candidates = None
+    if tts.backend == "openai" and "qwen3" in tts.model.lower():
+        from .voices_catalog import _heal_local_clones, _live_voices
+
+        candidates, error = _live_voices(tts)
+        if error:
+            raise adapters.ModelError(error)
+        if store is not None and kind == "clone":
+            candidates.extend(_heal_local_clones(store, tts, candidates))
+    elif tts.backend == "minimax" and store is not None:
+        catalog = fetch_catalog(config, store)
+        if catalog["error"]:
+            raise adapters.ModelError(catalog["error"])
+        entries = catalog["library"] if kind == "clone" else [
+            entry for group in catalog["groups"] for entry in group["voices"]
+        ]
+        candidates = [entry["voice_id"] for entry in entries]
+    if candidates is not None:
+        known = {candidate.lower(): candidate for candidate in candidates}
+        if not candidates:
+            return {
+                "model": tts.model,
+                "ready": False,
+                "reply": "服务连接正常；目标模型暂无可用音色，未执行合成测试。"
+                + ("请先添加对应服务的克隆音色。" if kind == "clone" else ""),
+            }
+        # Probe the target model's catalog, never an unrelated provider's voice.
+        voice = known.get(voice.lower(), candidates[0])
     speaker = make_speaker(config)
-    audio_bytes = speaker.speak("测试")
-    return {"model": config.studio.tts.model, "bytes": len(audio_bytes)}
+    audio_bytes = speaker.speak("测试", voice=voice)
+    return {"model": tts.model, "voice": voice, "ready": True, "bytes": len(audio_bytes)}
 
 
 def settings_router(runtime: RuntimeConfig, store: Store) -> APIRouter:
@@ -328,7 +359,7 @@ def settings_router(runtime: RuntimeConfig, store: Store) -> APIRouter:
         started = time.monotonic()
         try:
             config = merge_profile(runtime.base, profile["role"], profile)
-            detail = _probe(config, profile["role"])
+            detail = _probe(config, profile["role"], store=store, profile_name=profile["name"])
             return {"ok": True, "latency_ms": round((time.monotonic() - started) * 1000), **detail}
         except Exception as exc:  # noqa: BLE001 — 测试结果要回报给页面而不是 500
             return {

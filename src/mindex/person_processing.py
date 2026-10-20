@@ -37,6 +37,8 @@ class PersonOptions(StrictModel):
 
 
 class PersonClient:
+    reference_preprocessing = "padding-fallback-v1"
+
     def __init__(self, config):
         self.config = config.person
 
@@ -65,7 +67,30 @@ class PersonClient:
 
     def image(self, path):
         with path.open("rb") as handle:
-            return self.request("POST", "/extract/image", files={"file": (path.name, handle, "image/png")})
+            result = self.request("POST", "/extract/image", files={"file": (path.name, handle, "image/png")})
+        # Tight head crops can lose face alignment/embeddings even when the face
+        # is clear. Retry with neutral padding, without changing the stored image.
+        observations = result["observations"]
+        if not any(d.get("face_feature") and d.get("face_bbox") for d in observations):
+            import io
+
+            from PIL import Image, ImageOps
+
+            with Image.open(path) as image:
+                border = max(1, round(max(image.size) * 0.1))
+                padded = ImageOps.expand(image.convert("RGB"), border=border, fill=(128, 128, 128))
+                buffer = io.BytesIO()
+                padded.save(buffer, format="PNG")
+            retry = self.request("POST", "/extract/image", files={"file": ("padded.png", buffer.getvalue(), "image/png")})
+            if retry.get("space") != result.get("space"):
+                raise ModelError("特征提取响应空间与任务固定空间不符")
+            # Keep all detections so group photos remain subject to the same gate.
+            for detection in retry["observations"]:
+                for key in ("body_bbox", "face_bbox"):
+                    if detection.get(key):
+                        detection[key] = [v - border for v in detection[key]]
+            result = retry
+        return {**result, "reference_preprocessing": self.reference_preprocessing}
 
     def video(self, path, start, end, fps):
         from .person_frames import sample_frames
@@ -150,6 +175,13 @@ def reference_check(detections, min_quality):
     return subject, None
 
 
+def stale_reference_features(client, extracted):
+    preprocessing = getattr(client, "reference_preprocessing", None)
+    return bool(extracted is not None and preprocessing
+                and extracted.get("reference_preprocessing") != preprocessing
+                and reference_subject(extracted["observations"]) is None)
+
+
 def ensure_reference_quality(store, config, client, item, space=None):
     """添加参考图前的同步质检：不合格抛 ValueError，服务不可用抛 ModelError。
 
@@ -161,7 +193,7 @@ def ensure_reference_quality(store, config, client, item, space=None):
     key = fingerprint(["reference-v1", item["digest"], space])
     row = store.one("SELECT data FROM person_features WHERE id=?", (key,))
     extracted = json.loads(row["data"]) if row else None
-    if extracted is None:
+    if extracted is None or stale_reference_features(client, extracted):
         extracted = client.image(store.resolve_media(item["path"]))
         if extracted.get("space") != space:
             raise ModelError("特征提取响应空间与任务固定空间不符")
@@ -539,7 +571,7 @@ class PersonProcessor:
                 continue
             key = fingerprint(["reference-v1", ref["digest"], space])
             extracted = self.feature(key)
-            if extracted is None:
+            if extracted is None or stale_reference_features(self.client, extracted):
                 extracted = self.client.image(self.store.resolve_media(ref["path"]))
                 self.validate_space(extracted, space)
                 self.cache(key, None, space, "reference", extracted)

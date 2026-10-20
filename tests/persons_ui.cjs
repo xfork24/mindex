@@ -171,19 +171,20 @@ function find(root, predicate) {
   get('capture-role').onchange();
   assert.equal(get('capture-actor').value, other.id, 'selecting a role must not replace the chosen performer');
 
-  get('capture-time').value = '1';
+  get('capture-time').value = '1.235';
   await get('capture-preview').onclick();
   const video = get('capture-video');
-  video.currentTime = 1.75;
+  assert.equal(video.currentTime, 1.24, 'preview seeks to the nearest valid hundredth');
+  video.currentTime = 1.756;
   video.onseeked();
-  assert.equal(Number(get('capture-time').value), 1.75, 'paused seeking updates the saved timestamp');
+  assert.equal(Number(get('capture-time').value), 1.76, 'paused seeking rounds to the valid input step');
   assert.equal(get('capture-canvas').hidden, false);
   get('capture-canvas').onpointerdown({clientX: 10, clientY: 20, pointerId: 1});
   get('capture-canvas').onpointerup({clientX: 100, clientY: 140});
   get('capture-form').onsubmit(event);
   await flush();
   const captured = JSON.parse(requests.find(r => r.url.endsWith('/references/from-source')).body);
-  assert.equal(captured.timestamp, 1.75);
+  assert.equal(captured.timestamp, 1.76);
   assert.deepEqual(captured.bbox, [10, 20, 100, 140]);
   assert.equal(captured.actor_id, other.id);
 
