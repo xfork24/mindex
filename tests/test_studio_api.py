@@ -183,9 +183,19 @@ def test_run_all_rejects_when_complete_and_artifacts_download(studio_client):
 
 
 def test_delete_job(studio_client):
-    _, client = studio_client
+    config, client = studio_client
     job_id = create_job(client, "待删除的任务。")
+    from mindex import studio
+
+    directory = studio.job_dir(config, job_id)
+    for relative in ["versions/example/render.mp4", "previews/quick/example.wav", "inputs/reference.png"]:
+        target = directory / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"test artifact")
+    other_id = create_job(client, "保留的任务。")
     assert client.delete(f"/api/studio/jobs/{job_id}").status_code == 200
+    assert not directory.exists()
+    assert studio.job_dir(config, other_id).is_dir()
     assert client.get(f"/api/studio/jobs/{job_id}").status_code == 404
     assert client.delete(f"/api/studio/jobs/{job_id}").status_code == 404
 

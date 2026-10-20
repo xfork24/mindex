@@ -25,7 +25,7 @@ from starlette.concurrency import run_in_threadpool
 
 from . import studio, studio_steps
 from . import studio_workspace as workspace
-from .adapters import MultimodalEmbedder, Speaker, Storyboarder
+from .adapters import MultimodalEmbedder, Speaker, Storyboarder, make_storyboarder
 from .config import Config, StrictModel, fingerprint
 from .curation import EntityNotFound, Library
 from .images import image_png
@@ -640,8 +640,6 @@ def studio_router(
                     checked = workspace.preflight(cfg, job_id, w, p, force=body.force)
                     if body.token != checked["token"]:
                         raise studio.StudioError("预检已变化，请重新查看构建清单")
-                    if not p["board"]:
-                        raise studio.StudioError("请先生成或编辑分镜")
                     nodes, force = checked["nodes"], body.force
                 bid = uuid4().hex[:12]
                 build = {
@@ -650,6 +648,7 @@ def studio_router(
                     "status": "running",
                     "force": force,
                     "created_at": studio.now(),
+                    "auto_split": not p["board"] and not node and not column,
                     "plan_snapshot": copy.deepcopy(p),
                     "nodes": [{**n, "status": "pending"} for n in nodes],
                 }
@@ -955,7 +954,11 @@ def studio_router(
     @router.post("/jobs", status_code=201)
     def create_job(body: CreateJobBody):
         try:
-            return studio.create_job(current(), body.text, body.title, body.options)
+            cfg = current()
+            return studio.create_job(
+                cfg, body.text, body.title, body.options,
+                title_generator=lambda text: (storyboarder or make_storyboarder(cfg)).title(text),
+            )
         except studio.StudioError:
             raise
         except ValueError as exc:

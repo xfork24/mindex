@@ -148,6 +148,9 @@ class FixtureStoryboarder:
         self.config = config
         self.calls = 0
 
+    def title(self, text: str) -> str:
+        return "测试创作标题"
+
     def split(self, text: str) -> list[ShotDraft]:
         self.calls += 1
         parts: list[str] = []

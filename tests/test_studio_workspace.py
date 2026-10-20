@@ -589,3 +589,27 @@ def test_mixed_render_picture_audio_and_subtitle_match_bound_versions(prepared, 
     ws.set_board(config, jid, w, p, board)
     checked = ws.preflight(config, jid, w, p)
     assert next(n for n in checked["nodes"] if n["key"] == "compose")["action"] == "reuse"
+
+
+def test_build_without_storyboard_runs_full_pipeline(prepared):
+    config, embedder = prepared
+    client = TestClient(
+        create_app(config, embedder, speaker=FixtureSpeaker(config), storyboarder=FixtureStoryboarder(config))
+    )
+    jid = client.post("/api/studio/jobs", json={"text": "红色开场。蓝色结尾。", "options": {"burn": False}}).json()["id"]
+    base = f"/api/studio/jobs/{jid}"
+    data = client.get(f"{base}/workspace").json()
+    pid = data["active_plan"]
+    assert not data["plans"][pid]["board"]
+    checked = client.get(f"{base}/plans/{pid}/preflight").json()
+    assert checked["nodes"][0]["stage"] == "split"
+    assert all(n["action"] != "blocked" for n in checked["nodes"])
+    response = client.post(f"{base}/plans/{pid}/build", json={"token": checked["token"]})
+    assert response.status_code == 202, response.text
+    data = wait_build(client, jid)
+    build = data["builds"][-1]
+    assert build["status"] == "complete", build
+    stages = [n["stage"] for n in build["nodes"]]
+    assert list(dict.fromkeys(stages)) == ["split", "recall", "tts", "select", "render", "compose"]
+    assert all(n["status"] in ("complete", "reused") for n in build["nodes"])
+    assert data["plans"][pid]["final"]

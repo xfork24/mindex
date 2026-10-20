@@ -350,7 +350,8 @@ def scoped_filters(filters: Filters, scope: set[str] | None) -> Filters:
     return Filters.model_validate(values)
 
 
-def create_job(config: Config, text: str, title: str | None = None, options: dict | None = None) -> dict:
+def create_job(config: Config, text: str, title: str | None = None, options: dict | None = None,
+               *, title_generator=None) -> dict:
     text = (text or "").strip()
     if not text:
         raise StudioError("请输入创作文案")
@@ -368,6 +369,8 @@ def create_job(config: Config, text: str, title: str | None = None, options: dic
     if unknown:
         raise StudioError(f"素材不存在：{'、'.join(unknown[:3])}")
     active = store.active_index()
+    if not (title or "").strip() and title_generator is not None:
+        title = title_generator(text)
     job_id = f"{datetime.now():%Y%m%d-%H%M%S}-{uuid4().hex[:6]}"
     directory = job_dir(config, job_id)
     if directory.exists():

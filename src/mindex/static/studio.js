@@ -75,6 +75,8 @@ const state = {
   timer: null,
   token: 0,
   submitting: false,
+  titleEditing: false,
+  titleDraft: null,
   expanded: new Map(),
   drafts: new Map(),
   windowDrafts: new Map(),
@@ -219,6 +221,8 @@ async function selectJob(id, { reloadJobs = true } = {}) {
   state.token++;
   clearTimeout(state.timer);
   state.id = id;
+  state.titleEditing = false;
+  state.titleDraft = null;
   state.data = null;
   state.finalUrl = null;
   state.matrixScope = null;
@@ -354,21 +358,42 @@ function render() {
   const header = $("job-header");
   header.replaceChildren();
   const title = field(MindexI18n.msg("ui.6eae640bc412"), job.title);
+  title.wrap.replaceChildren(title.input);
+  title.input.id = "job-title";
   title.input.maxLength = 60;
+  title.input.disabled = locked || !state.titleEditing;
+  title.input.value = state.titleDraft ?? job.title;
+  title.input.addEventListener("input", () => { state.titleDraft = title.input.value; });
   header.append(
     title.wrap,
-    button(MindexI18n.msg("ui.fe0e9e6e4fad"),
+    button(MindexI18n.msg(state.titleEditing ? "ui.fe0e9e6e4fad" : "ui.edit_job_title"),
 
     async () => {
-      await api(`${base()}/title`, "PATCH", {
-        title: title.input.value.trim()
-      });
-      await refresh();
-      await loadJobs();
+      if (!state.titleEditing) {
+        state.titleEditing = true;
+        state.titleDraft = job.title;
+        render();
+        $("job-title")?.focus();
+        return;
+      }
+      const id = state.id, save = header.querySelector("button");
+      save.disabled = title.input.disabled = true;
+      try {
+        await api(`${base()}/title`, "PATCH", { title: title.input.value.trim() });
+        if (state.id === id) {
+          state.titleEditing = false;
+          state.titleDraft = null;
+          await refresh();
+        }
+        await loadJobs();
+      } finally {
+        if (state.id === id && state.titleEditing) {
+          save.disabled = title.input.disabled = busy();
+        }
+      }
     },
     locked
-    ),
-    el("p", MindexI18n.msg("ui.1c83d271dc5a", { p0: job.id }), "muted")
+    )
   );
   const select = $("plan-select");
   renderJobMeta();
@@ -503,12 +528,13 @@ function updateLocks() {
   "plan-select",
   "new-plan",
   "copy-plan",
+  "delete-job",
   "rename-plan",
   "plan-settings",
   "run-all"])
   {
-    $(id).disabled = locked || dirty && id !== "plan-select";
-    MindexI18n.setAttr($(id), "title", dirty && id !== "plan-select" ? MindexI18n.msg("ui.9f185b0cc351") : "");
+    $(id).disabled = locked || dirty && !["plan-select", "delete-job"].includes(id);
+    MindexI18n.setAttr($(id), "title", dirty && !["plan-select", "delete-job"].includes(id) ? MindexI18n.msg("ui.9f185b0cc351") : "");
   }
   document.querySelectorAll(".regenerate-column, .execute-column").forEach((n) => {
     n.disabled =
@@ -1561,7 +1587,7 @@ function voiceChoices(catalog, current, defaultVoice) {
     clones: [["", MindexI18n.msg("ui.no_cloned_voice")],
       ...clones.map((item) => [item.voice_id, item.name || item.voice_id])],
     presetValue: cloneIds.has(current) ? "" : current || "",
-    cloneValue: cloneIds.has(current) ? current : ""
+    cloneValue: cloneIds.has(current || defaultVoice) ? current || defaultVoice : ""
   };
 }
 
@@ -1616,6 +1642,9 @@ async function editSettings() {
     }[key];
     if (helpKey) body.append(el("p", MindexI18n.msg(helpKey), "muted"));
   }
+  let voiceChanged = false;
+  fields.preset_voice.addEventListener("change", () => { voiceChanged = true; });
+  fields.clone_voice.addEventListener("change", () => { voiceChanged = true; });
   const updatePresetVoice = () => {
     fields.preset_voice.disabled = Boolean(fields.clone_voice.value);
   };
@@ -1634,8 +1663,10 @@ async function editSettings() {
       options.atempo =
       fields.atempo.value === "" ? 1 : Number(fields.atempo.value);
       options.burn = options.burn === "true";
-      options.voice = fields.clone_voice.value || fields.preset_voice.value || null;
-      options.voice_mode = options.voice ? "custom" : "inherit";
+      if (voiceChanged) {
+        options.voice = fields.clone_voice.value || fields.preset_voice.value || null;
+        options.voice_mode = options.voice ? "custom" : "inherit";
+      }
       await accept(
         await api(planBase(), "PATCH", {
           revision: state.data.revision,
@@ -1974,13 +2005,29 @@ async function preflight(force = false) {
   const body = showDialog(
     force ? MindexI18n.msg("ui.cae32e3f53cc") : MindexI18n.msg("ui.68d9d6d0c6f8")
   );
+  if (!plan().board) {
+    const explanation = el("p");
+    explanation.style.whiteSpace = "pre-line";
+    explanation.append(
+      el("span", MindexI18n.msg("ui.auto_split_build_intro"), "warn-text"),
+      document.createTextNode("\n\n")
+    );
+    for (let i = 0; i < 6; i++) {
+      if (i) explanation.append(document.createTextNode("\n"));
+      explanation.append(
+        el("strong", MindexI18n.msg(`ui.auto_split_step_${i}_label`)),
+        el("span", MindexI18n.msg(`ui.auto_split_step_${i}_description`))
+      );
+    }
+    body.append(explanation);
+  }
   const actionLabel = {
     reuse: MindexI18n.msg("ui.68f7d028b705"),
     rebuild: MindexI18n.msg("ui.f05cd1f881c7"),
     blocked: MindexI18n.msg("ui.a00db105bd49"),
     skip: MindexI18n.msg("ui.af2604e64b4c")
   };
-  for (const node of checked.nodes)
+  for (const node of plan().board ? checked.nodes : [])
   body.append(
     el(
       "p",
@@ -2003,8 +2050,7 @@ async function preflight(force = false) {
       });
       closeDialog();
       await refresh();
-    },
-    !plan().board
+    }
     )
   );
 }
@@ -2384,6 +2430,41 @@ catch(fail)
 );
 $("new-plan").addEventListener("click", () => createPlan("new"));
 $("copy-plan").addEventListener("click", () => createPlan("copy"));
+$("delete-job").addEventListener("click", async () => {
+  if (!state.data || busy()) return;
+  const id = state.id;
+  if (!window.confirm(MindexI18n.render(MindexI18n.msg("ui.delete_job_confirm", { p0: state.data.job.title })))) return;
+  state.submitting = true;
+  updateLocks();
+  try {
+    await api(`/api/studio/jobs/${encodeURIComponent(id)}`, "DELETE");
+    if (state.id === id) {
+      state.token++;
+      clearTimeout(state.timer);
+      state.id = state.data = state.finalUrl = state.matrixScope = null;
+      state.drafts.clear();
+      state.windowDrafts.clear();
+      state.matrixRows.clear();
+      $("matrix-body").replaceChildren();
+      $("final-player").replaceChildren();
+      closeDialog();
+      $("play-video").pause();
+      $("play-video").removeAttribute("src");
+      $("play-video").load();
+      $("play-dialog").close();
+      $("job-workspace").hidden = true;
+      $("no-job").hidden = false;
+      history.replaceState(null, "", "/studio");
+    }
+    await loadJobs();
+    notice(MindexI18n.msg("ui.job_deleted"));
+  } catch (error) {
+    fail(error);
+  } finally {
+    state.submitting = false;
+    if (state.data) updateLocks();
+  }
+});
 $("rename-plan").addEventListener("click", renamePlan);
 $("plan-settings").addEventListener("click", editSettings);
 $("run-all").addEventListener("click", () => preflight().catch(fail));
@@ -2406,6 +2487,13 @@ matrixResize.observe(document.querySelector(".matrix-scroll"));
 $("create-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   $("create-button").disabled = true;
+  $("create-status").hidden = false;
+  let dotCount = 1;
+  $("create-dots").textContent = ".";
+  const dotsTimer = setInterval(() => {
+    dotCount = dotCount % 3 + 1;
+    $("create-dots").textContent = ".".repeat(dotCount);
+  }, 500);
   try {
     const scope = createSourceScope();
     if (scope && !scope.length)
@@ -2425,6 +2513,8 @@ $("create-form").addEventListener("submit", async (event) => {
     fail(error);
   } finally {
     $("create-button").disabled = false;
+    clearInterval(dotsTimer);
+    $("create-status").hidden = true;
   }
 });
 async function boot() {

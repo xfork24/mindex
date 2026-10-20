@@ -1,4 +1,72 @@
 {
+  "ui.auto_split_build_intro": {
+    "zh": "当前尚未拆分镜。确认执行构建后，将依次自动执行：拆分镜、分镜召回、配音、选片并对齐、分镜渲染，最后合成为成片。",
+    "en": "No storyboard yet. Confirm to automatically split shots, retrieve footage, generate narration, select and align clips, render shots, and compose the final video in order."
+  },
+  "ui.auto_split_step_0_label": {
+    "zh": "拆分镜",
+    "en": "Split shots"
+  },
+  "ui.auto_split_step_0_description": {
+    "zh": "：自动将输入的文案进行文案分镜拆分",
+    "en": ": Automatically divide the input script into shots"
+  },
+  "ui.auto_split_step_1_label": {
+    "zh": "分镜召回",
+    "en": "Retrieve footage"
+  },
+  "ui.auto_split_step_1_description": {
+    "zh": "：在已有素材中为每个文案分镜召回相关素材",
+    "en": ": Find relevant footage for each script shot in the existing library"
+  },
+  "ui.auto_split_step_2_label": {
+    "zh": "配音",
+    "en": "Narration"
+  },
+  "ui.auto_split_step_2_description": {
+    "zh": "：为文案分镜配音",
+    "en": ": Generate narration for each script shot"
+  },
+  "ui.auto_split_step_3_label": {
+    "zh": "选片与对齐",
+    "en": "Selection and alignment"
+  },
+  "ui.auto_split_step_3_description": {
+    "zh": "：将视频轨道与音频轨道对齐",
+    "en": ": Align the video and audio tracks"
+  },
+  "ui.auto_split_step_4_label": {
+    "zh": "分镜渲染",
+    "en": "Shot rendering"
+  },
+  "ui.auto_split_step_4_description": {
+    "zh": "：渲染每个分镜",
+    "en": ": Render each shot"
+  },
+  "ui.auto_split_step_5_label": {
+    "zh": "成片合成",
+    "en": "Final composition"
+  },
+  "ui.auto_split_step_5_description": {
+    "zh": "：全部分镜就绪后合成成片",
+    "en": ": Compose the final video once all shots are ready"
+  },
+  "ui.edit_job_title": {
+    "zh": "编辑标题",
+    "en": "Edit title"
+  },
+  "ui.delete_job": {
+    "zh": "删除任务",
+    "en": "Delete task"
+  },
+  "ui.delete_job_confirm": {
+    "zh": "确定删除任务“{p0}”吗？这将永久删除该任务及所有构建文件（包括全部方案、版本、配音、预览和成片），清理对应磁盘文件，且无法恢复。",
+    "en": "Delete task “{p0}”? This permanently deletes the task and all its build files, including every plan, version, voiceover, preview and final video. This cannot be undone."
+  },
+  "ui.job_deleted": {
+    "zh": "任务及全部构建文件已删除",
+    "en": "Task and all build files deleted"
+  },
   "ui.anchor_selected": {
     "zh": "已选择",
     "en": "Selected"
@@ -1119,9 +1187,9 @@
     "zh": "创建任务",
     "en": "Create task"
   },
-  "ui.8614da6024ac": {
-    "zh": "提示：烧录字幕需要 ffmpeg 带 libass；素材库需已有就绪索引。",
-    "en": "Burned subtitles require ffmpeg with libass; the library needs a ready index."
+  "ui.creating_task": {
+    "zh": "正在创建任务",
+    "en": "Creating task"
   },
   "ui.ea0444c7adfd": {
     "zh": "选择一个创作任务",

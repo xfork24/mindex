@@ -767,8 +767,8 @@ def preflight(config, job_id, w, p, *, force=False):
                 "key": "split",
                 "stage": "split",
                 "shot_id": None,
-                "action": "blocked",
-                "reason": "请先生成或编辑分镜",
+                "action": "rebuild",
+                "reason": "自动拆分镜后依次执行召回、配音、选片对齐、分镜渲染和成片合成",
             }
         )
     for stage in STAGES:
@@ -817,7 +817,7 @@ def preflight(config, job_id, w, p, *, force=False):
             "key": "compose",
             "stage": "compose",
             "shot_id": None,
-            "action": "reuse" if found else ("blocked" if not p["board"] else "rebuild"),
+            "action": "reuse" if found else "rebuild",
             "version": found,
             "reason": "全部分镜就绪后合成",
         }
@@ -1495,6 +1495,13 @@ def _run_build(config, job_id, build_id, log, *, speaker=None, storyboarder=None
                 if attempted:
                     node["version"] = attempted
                 failed.add(node["key"])
+        if build.get("auto_split") and stage == "split":
+            if node["status"] in ("complete", "reused"):
+                checked = preflight(config, job_id, w, p, force=build["force"])
+                build["nodes"][1:] = [{**n, "status": "pending"} for n in checked["nodes"]]
+            else:
+                for pending in build["nodes"][1:]:
+                    pending.update(action="blocked", reason="拆分镜失败")
         node["finished_at"] = studio.now()
         persist(config, job_id, w)
         labels = {
