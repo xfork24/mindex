@@ -73,6 +73,16 @@ def walk(value, transform):
     return transform(value)
 
 
+def json_container(value):
+    """自由文本可能以括号开头；只把有效 JSON 对象或数组视为结构化数据。"""
+    if not isinstance(value, str) or not value.lstrip().startswith(('{', '[')):
+        return None
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return None
+
+
 def raw_representation_ids(member, spec):
     if 'representation_ids' in member:
         return member['representation_ids']
@@ -307,8 +317,9 @@ def merge_database(target, incoming, *, restore_config):
             keys = [r['name'] for r in info if r['pk']]
             for row in src.rows(f'SELECT * FROM {table}'):
                 for column, value in row.items():
-                    if isinstance(value, str) and value.startswith(('{', '[')):
-                        row[column] = dumps(remap_local_refs(json.loads(value), remaps))
+                    parsed = json_container(value)
+                    if parsed is not None:
+                        row[column] = dumps(remap_local_refs(parsed, remaps))
                 if table == 'settings':
                     if row['key'] in {'active', 'active.release'}:
                         continue

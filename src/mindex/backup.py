@@ -23,6 +23,7 @@ from .backup_db import (
     TABLES,
     filter_database,
     interrupt_tasks,
+    json_container,
     merge_database,
     redact,
     remap_local_refs,
@@ -146,8 +147,12 @@ def vector_worker(action, root, bundle, **options):
     return response['result']
 
 
-def source_list(root):
-    return store_at(root).rows('SELECT id,name,path,prepared FROM sources ORDER BY name,id')
+def source_list(root, *, original_names=False):
+    name = 's.name' if original_names else "COALESCE(NULLIF(c.display_name,''),s.name)"
+    return store_at(root).rows(
+        f'SELECT s.id,{name} AS name,s.path,s.prepared FROM sources s '
+        'LEFT JOIN source_curation c ON c.id=s.id ORDER BY name,s.id'
+    )
 
 
 def selection(available, all_sources, sources):
@@ -238,8 +243,10 @@ def file_owners(root, all_sources):
     return owners
 
 
-def referenced_files(root, database):
+def referenced_files(root, database, *, available_files=None):
     result = set()
+    available = (set(available_files) if available_files is not None else
+                 {path.relative_to(root).as_posix() for path in files_under(root)})
     store = store_at(database.parent)
     for table in sorted(TABLES):
         for row in store.rows(f'SELECT * FROM {table}'):
@@ -258,10 +265,11 @@ def referenced_files(root, database):
                         if not path.is_relative_to(root):
                             continue
                         item = path.relative_to(root).as_posix()
-                    if ('/' in item or Path(item).suffix) and not item.startswith(('http:', 'https:')):
-                        candidate = safe_path(root, item)
-                        if candidate.is_file():
-                            result.add(item)
+                    # 描述/日志也可能包含斜杠、小数点；仅对实际文件清单中的路径做检查。
+                    # 必需媒体的缺失与越界由 validate_media 单独严格校验。
+                    if item in available:
+                        safe_path(root, item)
+                        result.add(item)
     return result
 
 
@@ -305,8 +313,9 @@ def _saved_secrets(root):
             if table == 'settings' and row['key'].lower().split('.')[-1] in SECRET_FIELDS and row['value']:
                 result.add(row['value'])
             for value in row.values():
-                if isinstance(value, str) and value.startswith(('{', '[')):
-                    visit(json.loads(value))
+                parsed = json_container(value)
+                if parsed is not None:
+                    visit(parsed)
     return sorted(result, key=len, reverse=True)
 
 
@@ -416,7 +425,7 @@ def build_bundle(config, output, *, selected, include_secrets, config_path):
             configs.append(json.loads(path.read_text()))
     deps, missing, env = _config_dependencies(configs, config_path.parent, payload)
     owners = file_owners(root, known)
-    references = referenced_files(root, payload / 'metadata.sqlite3')
+    references = referenced_files(root, payload / 'metadata.sqlite3', available_files=owners)
     exclusions = []
     global_dirs = ('persons/references/', 'persons/imports/', 'voices/', 'config-dependencies/')
     for origin in files_under(root):
@@ -519,10 +528,18 @@ def _inspect_bundle(bundle):
         safe_path(bundle / 'data', relative)
         if 'data/' + relative not in listed:
             raise ValueError('备份缺少配置依赖')
-    if source_list(bundle / 'data') != manifest['sources']:
+    current_sources = {row['id']: row for row in source_list(bundle / 'data')}
+    original_sources = {row['id']: row for row in source_list(bundle / 'data', original_names=True)}
+    # v1 早期备份的清单使用原始文件名；不改变其数据库中的人工命名。
+    recorded_sources = manifest['sources']
+    if (len(recorded_sources) != len(current_sources)
+            or len({row['id'] for row in recorded_sources}) != len(recorded_sources)
+            or any(row not in (current_sources.get(row['id']), original_sources.get(row['id']))
+                   for row in recorded_sources)):
         raise ValueError('备份素材清单与数据库不一致')
     validate_database(bundle / 'data')
     validate_media(bundle / 'data')
+    manifest['sources'] = list(current_sources.values())
     return manifest
 
 

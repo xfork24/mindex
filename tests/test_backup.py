@@ -14,15 +14,19 @@ from PIL import Image
 from typer.testing import CliRunner
 
 from mindex.backup import (
+    _saved_secrets,
     export_backup,
     import_backup,
+    inspect_bundle,
     journal_path,
     recover_import,
+    source_list,
     vector_worker,
 )
-from mindex.backup_db import store_at
+from mindex.backup_db import merge_database, store_at
 from mindex.cli import app
 from mindex.config import Config, fingerprint
+from mindex.curation import CurationPatch
 from mindex.processing_lock import SharedFileLock
 from mindex.storage import Store, dumps
 
@@ -479,3 +483,97 @@ def test_interactive_search_and_multiselect(monkeypatch):
     answers = iter(['甲', '1', '乙', '1', '/完成'])
     monkeypatch.setattr('typer.prompt', lambda *a, **k: next(answers))
     assert choose([{'id': 'a', 'name': '甲'}, {'id': 'b', 'name': '乙'}], False, None) == ['a', 'b']
+
+
+@pytest.mark.parametrize('custom_name', ['最新素材名', None, ''])
+def test_backup_list_uses_live_curated_name(tmp_path, custom_name):
+    root = tmp_path / 'data'
+    store = Store(root)
+    store.execute('INSERT INTO sources(id,name,path,media,layout_key) VALUES(?,?,?,?,?)',
+                  ('source', '原始素材名.mp4', 'sources/source/video.mp4', '{}', 'layout'))
+    store.execute('INSERT INTO source_curation(id,display_name) VALUES(?,?)', ('source', custom_name))
+    expected = custom_name or '原始素材名.mp4'
+    assert source_list(root)[0]['name'] == expected
+    runner = CliRunner()
+    args = ['--config', str(tmp_path / 'config.yaml'), '--data-dir', str(root), 'backup', 'list']
+    result = runner.invoke(app, [*args, '--json'])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)['sources'][0]['name'] == expected
+    result = runner.invoke(app, args)
+    assert result.exit_code == 0, result.output
+    assert expected in result.output
+    if custom_name:
+        assert '原始素材名.mp4' not in result.output
+    # 再次改名应立即生效；源文件名和媒体路径仍保留原值。
+    renamed = CurationPatch(display_name=' 再次改名 ').display_name
+    store.execute('UPDATE source_curation SET display_name=? WHERE id=?', (renamed, 'source'))
+    assert source_list(root)[0]['name'] == '再次改名'
+    assert store.sources()[0]['name'] == '原始素材名.mp4'
+    assert source_list(root)[0]['path'] == 'sources/source/video.mp4'
+
+
+def test_backup_curated_names_roundtrip_and_legacy_manifest(library, tmp_path):
+    config, sources, _, _ = library
+    store_at(config.data_dir).execute('INSERT INTO source_curation(id,display_name) VALUES(?,?)',
+                                     (sources[0], '改名后的素材'))
+    bundle = tmp_path / 'backup'
+    result = export(library, bundle)
+    assert {s['id']: s['name'] for s in result['sources']}[sources[0]] == '改名后的素材'
+    manifest = inspect_bundle(bundle)
+    assert {s['id']: s['name'] for s in manifest['sources']}[sources[0]] == '改名后的素材'
+    # 升级前导出的 v1 清单仍能检查和导入，并保留 SQLite 中的最新人工命名。
+    manifest['sources'] = source_list(bundle / 'data', original_names=True)
+    (bundle / 'manifest.json').write_text(dumps(manifest))
+    inspected = inspect_bundle(bundle)
+    assert {s['id']: s['name'] for s in inspected['sources']}[sources[0]] == '改名后的素材'
+    target = tmp_path / 'restored'
+    restored = restore(bundle, target)
+    assert {s['id']: s['name'] for s in restored['sources']}[sources[0]] == '改名后的素材'
+    assert {s['id']: s['name'] for s in source_list(target)}[sources[0]] == '改名后的素材'
+
+
+def test_plain_bracket_text_survives_secret_scan_and_merge(tmp_path):
+    root = tmp_path / 'origin'
+    store = Store(root)
+    store.execute('INSERT INTO sources(id,name,path,media,layout_key) VALUES(?,?,?,?,?)',
+                  ('source', '[高清] 原片.mp4', 'sources/source/video.mp4', '{}', 'layout'))
+    store.execute('INSERT INTO source_curation(id,display_name,notes) VALUES(?,?,?)',
+                  ('source', '[新版] 素材名', '{这是普通备注，不是 JSON}'))
+    store.execute('INSERT INTO runs(stage,source_id,status,message) VALUES(?,?,?,?)',
+                  ('test', 'source', 'complete', '[INFO] 普通任务日志'))
+    store.execute('INSERT INTO source_tasks(id,source_id,work,status,config,options,error) VALUES(?,?,?,?,?,?,?)',
+                  ('task', 'source', 'analysis', 'failed', '{}', '{}', '[Errno 2] 找不到文件'))
+    store.execute('INSERT INTO model_profiles(role,name,provider,config,api_key) VALUES(?,?,?,?,?)',
+                  ('embedding', '档案', 'custom', ' \n {"api_key":"nested-saved-key"}', 'saved-key'))
+    assert set(_saved_secrets(root)) == {'saved-key', 'nested-saved-key'}
+    target = tmp_path / 'target'
+    Store(target)
+    merge_database(target, root, restore_config=False)
+    restored = store_at(target)
+    assert restored.sources()[0]['name'] == '[高清] 原片.mp4'
+    assert restored.one('SELECT notes FROM source_curation')['notes'] == '{这是普通备注，不是 JSON}'
+    assert restored.one('SELECT message FROM runs')['message'] == '[INFO] 普通任务日志'
+    assert restored.one('SELECT error FROM source_tasks')['error'] == '[Errno 2] 找不到文件'
+
+
+def test_selected_export_preserves_plain_bracket_text(library, tmp_path):
+    config, sources, _, _ = library
+    store = store_at(config.data_dir)
+    store.execute('INSERT INTO runs(stage,source_id,status,message) VALUES(?,?,?,?)',
+                  ('test', sources[0], 'complete', '[INFO] 普通任务日志'))
+    store.execute('INSERT INTO source_tasks(id,source_id,work,status,config,options,error) VALUES(?,?,?,?,?,?,?)',
+                  ('task', sources[0], 'analysis', 'failed', '{}', '{}', '[Errno 2] 找不到文件'))
+    description = '这是一段很长的镜头分析描述。' * 100 + '0.7秒处有人影入画，画面呈红色/蓝色。'
+    segment = store.segments(sources[0])[0]
+    store.execute('INSERT INTO annotations(segment_id,profile,data) VALUES(?,?,?)',
+                  (segment['id'], 'test', dumps({'annotation': {'description': description}})))
+    bundle = tmp_path / 'backup'
+    export(library, bundle, sources=[sources[0]], dry_run=True)
+    assert not bundle.exists()
+    export(library, bundle, sources=[sources[0]])
+    target = tmp_path / 'restored'
+    restore(bundle, target)
+    assert store_at(target).one('SELECT message FROM runs')['message'] == '[INFO] 普通任务日志'
+    assert store_at(target).one('SELECT error FROM source_tasks')['error'] == '[Errno 2] 找不到文件'
+    assert json.loads(store_at(target).one('SELECT data FROM annotations')['data'])[
+        'annotation']['description'] == description

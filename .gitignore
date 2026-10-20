@@ -12,6 +12,8 @@ config.local.yaml
 dist/
 artifacts/
 .DS_Store
+.data.migration.lock
+.python-version
 
 # 计划执行台账（本地暂存）
 .superpowers/
