@@ -744,3 +744,53 @@ def test_finder_metadata_is_ignored_without_weakening_backup_validation(library,
         stream.write(b'corrupted')
     with pytest.raises(ValueError, match='校验失败'):
         inspect_bundle(bundle)
+
+
+@pytest.mark.parametrize('text', ['123456789012345678e12345', '1e3', '1.00', 'null', 'true'])
+@pytest.mark.parametrize('include_secrets', [False, True])
+def test_rewrite_preserves_sql_scalar_text_and_relocates_json(tmp_path, text, include_secrets):
+    from mindex.backup_db import rewrite_database
+
+    store = Store(tmp_path / 'data')
+    store.execute('INSERT INTO sources(id,name,path,media,layout_key) VALUES(?,?,?,?,?)',
+                  (text, text, '/old/video.mp4', dumps({'source_id': text, 'path': '/old/video.mp4',
+                                                    'api_key': 'saved-secret'}), 'layout'))
+    store.execute('INSERT INTO settings VALUES(?,?)', ('literal.identifier', text))
+    store.execute('INSERT INTO settings VALUES(?,?)', ('override.path', dumps('/old/font.ttf')))
+    rewrite_database(store.path, lambda value: value.replace('/old/', '/new/'), secrets=include_secrets)
+    source = store.sources()[0]
+    assert source['id'] == text
+    assert source['name'] == text
+    assert source['path'] == '/new/video.mp4'
+    media = json.loads(store.one('SELECT media FROM sources')['media'])
+    assert media['source_id'] == text
+    assert media['path'] == '/new/video.mp4'
+    assert media['api_key'] == ('saved-secret' if include_secrets else '')
+    assert store.one("SELECT value FROM settings WHERE key='literal.identifier'")['value'] == text
+    assert json.loads(store.one("SELECT value FROM settings WHERE key='override.path'")['value']) == '/new/font.ttf'
+
+
+def test_shared_scalar_text_is_not_compared_as_json_numbers():
+    from mindex.backup_db import same_value
+
+    assert not same_value('1e3', '1000')
+    assert not same_value('1e999', '2e999')
+    assert not same_value('1.00', '1.0')
+    assert same_value('{"a":1,"b":2}', '{ "b": 2, "a": 1 }')
+
+
+@pytest.mark.parametrize('old', ['123456789012345678901234', '123456789012345678e12345'])
+def test_rewrite_remaps_numeric_looking_text_ids_and_setting_references(tmp_path, old):
+    from mindex.backup_db import rewrite_database
+
+    store = Store(tmp_path / 'data')
+    new = 'abcdef0123456789abcdef01'
+    store.execute('INSERT INTO sources(id,name,path,media,layout_key) VALUES(?,?,?,?,?)',
+                  (old, '素材', 'video.mp4', dumps({'source_id': old}), 'layout'))
+    store.execute('INSERT INTO settings VALUES(?,?)', ('raw.reference', old))
+    store.execute('INSERT INTO settings VALUES(?,?)', ('json.reference', dumps(old)))
+    rewrite_database(store.path, lambda value: {old: new}.get(value, value), secrets=True)
+    assert store.sources()[0]['id'] == new
+    assert json.loads(store.one('SELECT media FROM sources')['media'])['source_id'] == new
+    assert store.one("SELECT value FROM settings WHERE key='raw.reference'")['value'] == new
+    assert json.loads(store.one("SELECT value FROM settings WHERE key='json.reference'")['value']) == new

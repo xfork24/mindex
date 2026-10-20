@@ -127,9 +127,15 @@ def rewrite_database(path, transform, *, secrets=False):
                         continue
                     if not isinstance(value, str):
                         continue
-                    try:
-                        parsed = json.loads(value)
-                    except (ValueError, TypeError):
+                    # SQL 文本 ID 可能恰好是合法 JSON 数字（如 1e999）。
+                    # 仅解析容器，以及 settings.value 明确编码的 JSON 字符串。
+                    parsed = json_container(value)
+                    if parsed is None and table == 'settings' and key == 'value' and value.lstrip().startswith('"'):
+                        try:
+                            parsed = json.loads(value)
+                        except ValueError:
+                            pass
+                    if parsed is None:
                         updated = transform(value)
                     else:
                         parsed = parsed if secrets else redact(parsed)
@@ -410,10 +416,9 @@ def same_value(first, second):
     if first == second:
         return True
     if isinstance(first, str) and isinstance(second, str):
-        try:
-            return json.loads(first) == json.loads(second)
-        except ValueError:
-            pass
+        left, right = json_container(first), json_container(second)
+        if left is not None and right is not None:
+            return left == right
     return False
 
 
