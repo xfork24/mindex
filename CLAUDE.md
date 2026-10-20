@@ -85,3 +85,8 @@ uv run mindex clean [--apply]                    # 磁盘清理：默认预览�
 - `docs/DEPLOYMENT.md` — GPU 服务部署、各角色环境、HTTP 服务协议
 - `docs/E2E_RUNBOOK.md` / `plans/E2E_TEST_PLAN.md` — 端到端真实验证操作手册
 - `eval/README.md` — 评测查询标注说明
+
+
+人物图片布局：`data/persons/references/`、`imports/` 保存原尺寸 PNG；`frames/<source_id>/`
+保存内容寻址的展示 JPEG。旧库用 `mindex persons migrate-frames --apply` 迁移，不需重新索引。
+冗余帧由 `clean` 的 `person_frames` 规则按确认镜头/身份保留策略清理。

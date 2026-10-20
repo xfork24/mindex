@@ -619,7 +619,9 @@ class PersonProcessor:
                 for frame in frames:
                     if frame.get("image_base64"):
                         item = self.catalogue.image(
-                            base64.b64decode(frame.pop("image_base64"), validate=True), "frames/" + source_id
+                            base64.b64decode(frame.pop("image_base64"), validate=True), "frames/" + source_id,
+                            max_edge=self.config.person.frames_max_edge, image_format="JPEG",
+                            jpeg_quality=self.config.person.frames_jpeg_quality,
                         )
                         frame["image_path"] = item["path"]
                 # Detection cache is independent of reference labels, alongside feature cache.
@@ -662,7 +664,7 @@ class PersonProcessor:
                     roles,
                     body_samples,
                     manual_anchors,
-                    self.config.person.model_dump(),
+                    self.config.person.model_dump(exclude={"frames_max_edge", "frames_jpeg_quality"}),
                     "rules-v3-no-person-stages",
                 ]
             )
@@ -706,6 +708,11 @@ class PersonProcessor:
                     if not json.loads(old["data"]).get("reviewed"):
                         db.execute("DELETE FROM person_evidence WHERE id=?", (old["id"],))
                 for e in evidence:
+                    # Reused matching caches may still contain paths retired by frame migration.
+                    # Keep model results/cache identities intact and persist a usable display fallback.
+                    image_path = e["data"].get("image_path")
+                    if image_path and not (self.store.root / image_path).is_file():
+                        e = {**e, "data": {**e["data"], "image_path": shot["thumbnail"]}}
                     old = db.execute("SELECT data FROM person_evidence WHERE id=?", (e["id"],)).fetchone()
                     if old and json.loads(old["data"]).get("reviewed"):
                         continue

@@ -204,7 +204,7 @@ def person_router(runtime, store):
 
     def media(path):
         try:
-            return FileResponse(store.resolve_media(path), media_type="image/png")
+            return FileResponse(store.resolve_media(path))
         except FileNotFoundError as exc:
             raise HTTPException(404, "图片缺失") from exc
 
@@ -379,22 +379,39 @@ def person_router(runtime, store):
 
     @router.get("/evidence/{identifier}/image")
     def evidence_image(identifier: str):
-        row = store.one("SELECT data FROM person_evidence WHERE id=?", (identifier,))
+        row = store.one("SELECT * FROM person_evidence WHERE id=?", (identifier,))
+        candidates = []
         if row:
-            data = json.loads(row["data"])
-        else:
-            data = next(
-                (
-                    e["data"]
-                    for r in store.rows("SELECT data FROM person_versions")
-                    for e in json.loads(r["data"])["evidence"]
-                    if e["id"] == identifier
-                ),
-                {},
-            )
-        if not data.get("image_path"):
-            raise HTTPException(404, "证据截图缺失")
-        return media(data["image_path"])
+            candidates.append({**row, "data": json.loads(row["data"])})
+            path = candidates[0]["data"].get("image_path")
+            if path:
+                try:
+                    return media(path)
+                except HTTPException as exc:
+                    if exc.status_code != 404:
+                        raise
+        # Old releases are immutable; use current evidence first, then their original image/shot.
+        for version in store.rows("SELECT data FROM person_versions ORDER BY created_at DESC,id"):
+            candidates.extend(e for e in json.loads(version["data"]).get("evidence", [])
+                              if e["id"] == identifier)
+        for evidence in candidates:
+            path = evidence.get("data", {}).get("image_path")
+            if path:
+                try:
+                    return media(path)
+                except HTTPException as exc:
+                    if exc.status_code != 404:
+                        raise
+        for evidence in candidates:
+            shot = store.one("SELECT thumbnail FROM segments WHERE id=? AND source_id=?",
+                             (evidence.get("shot_id"), evidence.get("source_id")))
+            if shot and shot["thumbnail"]:
+                try:
+                    return media(shot["thumbnail"])
+                except HTTPException as exc:
+                    if exc.status_code != 404:
+                        raise
+        raise HTTPException(404, "证据截图缺失")
 
     @router.get("/review/shots")
     def review_shots(

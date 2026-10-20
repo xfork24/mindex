@@ -178,3 +178,14 @@
 ## 素材上传限额
 
 顶层 `source_upload_max_bytes` 默认 `21474836480`（20 GiB，每文件），适用于 `/api/admin/sources/upload`。独立于 `search.max_upload_mb` 的检索查询视频限额。
+
+
+## person 展示帧
+
+| 配置 | 默认值 | 含义 |
+|---|---|---|
+| `frames_max_edge` | 640 | 展示图长边上限，整数 ≥0，0 保持原尺寸 |
+| `frames_jpeg_quality` | 85 | JPEG 质量，整数 1–100 |
+
+仅影响新展示图和显式 `persons migrate-frames --apply`，不改变模型空间、特征缓存或匹配缓存。
+原尺寸模型输入不受影响，references/imports 仍存 PNG。详见 [人物库](persons.md)。

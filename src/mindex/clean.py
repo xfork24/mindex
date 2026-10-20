@@ -30,11 +30,10 @@ CRASH_TEMP_PREFIXES = (
 
 # C 级子树：clean 只在 notes 中报告大小，绝不进入任何删除候选。
 PROTECTED_SUBTREES = (
-    "persons/frames", "model-cache", "studio-verification", "e2e", "verification", "chroma",
+    "model-cache", "studio-verification", "e2e", "verification", "chroma",
 )
 
 PROTECTED_NOTES = (
-    ("persons/frames", "人物处理中间帧（C 级待调整）：证据图仍引用，先调整人物侧保留策略再清理"),
     ("model-cache", "强制对齐模型缓存（C 级待调整）：删除后下次 align 重新下载"),
     ("studio-verification", "一次性人工验证产物（C 级待调整）：归档或删除请人工决定"),
     ("e2e", "e2e 验证产物（C 级待调整）：请人工决定"),
@@ -389,6 +388,36 @@ def _orphan_action(scan: Scan, category: str, description: str, root_name: str,
     )
 
 
+def person_frames(scan: Scan) -> CleanAction | None:
+    from .persons import retained_frame_paths
+
+    def collect():
+        retained = set().union(*retained_frame_paths(scan.store).values(), set())
+        return [CleanItem(path.relative_to(scan.store.root).as_posix(), path.stat().st_size)
+                for path in _iter_files(scan.store.root / "persons/frames")
+                if path.name != ".DS_Store" and path.relative_to(scan.store.root).as_posix() not in retained]
+
+    items = collect()
+    if not items:
+        return None
+
+    def execute():
+        # The scan precedes lock acquisition. Recompute under the exclusive lock.
+        current = {item.path for item in collect()}
+        deleted = 0
+        for item in items:
+            if item.path in current:
+                path = scan.store.root / item.path
+                path.unlink(missing_ok=True)
+                _prune_empty_parents(path, scan.store.root / "persons/frames")
+                deleted += 1
+        return {"deleted": deleted}
+
+    return CleanAction(category="person_frames", level="A", stage="pipeline",
+                       description="人物冗余展示帧", policy="已确认镜头每身份保留一帧；未确认镜头全部保留；"
+                       "旧库先运行 persons migrate-frames 获得压缩收益", items=items, execute=execute)
+
+
 def orphan_person_png(scan: Scan) -> CleanAction | None:
     digests = {row["digest"] for row in scan.store.rows("SELECT digest FROM person_references")}
     for row in scan.store.rows("SELECT data FROM person_imports"):
@@ -713,6 +742,7 @@ RULES: list[Callable[[Scan], CleanAction | None]] = [
     orphan_thumbnails,
     orphan_context,
     orphan_person_png,
+    person_frames,
     orphan_voices,
     orphan_sources,
     transcript_checkpoints,

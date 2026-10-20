@@ -51,6 +51,8 @@ class PersonConfig(Service):
     timeout: float = 600
     model_root: str = "~/.insightface"
     expected_space: dict | None = None
+    frames_max_edge: int = Field(default=640, ge=0)
+    frames_jpeg_quality: int = Field(default=85, ge=1, le=100)
     fps: float = Field(default=5, gt=0, le=5)
     face_threshold: float = Field(default=0.55, gt=0, lt=1)
     face_margin: float = Field(default=0.1, gt=0, lt=1)

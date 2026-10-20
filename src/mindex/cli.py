@@ -632,5 +632,19 @@ def clips_prune(ctx: typer.Context, migration_report: Path, apply: bool = False)
     print_json(prune(ctx.obj, migration_report, apply=apply))
 
 
+@persons_cli.command('migrate-frames')
+def persons_migrate_frames(ctx: typer.Context, apply: bool = False, source: str | None = None):
+    """压缩人物展示帧并清理冗余帧；默认只预览，无需重新索引。"""
+    from .persons import migrate_frames
+    try:
+        report = migrate_frames(ctx.obj, source_id=source, apply=apply)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    print_json(report)
+    if any(row["error"] for row in report["sources"]):
+        raise typer.Exit(1)
+
+
 if __name__ == "__main__":
     app()

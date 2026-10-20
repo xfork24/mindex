@@ -24,6 +24,7 @@ runs 行的 bytes 无法精确统计，诚实输出 0 并在 policy 说明。
 | `uploads_residue` | `sources/.uploads`、`subtitles/.uploads` | 上传中断残留；宽限 `temp_grace_hours` 内视为进行中保留 |
 | `orphan_clips` / `orphan_thumbnails` | clips、thumbnails 下无引用文件 | 引用集 = segments 行 + **保留索引版本**快照（与 check_index 同口径）；孤儿判定不会误删旧版本快照引用的文件 |
 | `orphan_context` | `context/*.mp4` 无对应 segment 行 | 文件名即 segment id；下次访问秒级重转码 |
+| `person_frames` | 人物冗余展示帧 | 已确认镜头每个演员/角色保留真实分最高的 accepted 帧；未确认镜头保留全部证据帧；持锁后重算引用；旧库先执行 `persons migrate-frames` 压缩 |
 | `orphan_person_png` | references/imports 下无引用 PNG | `person_references.digest` ∪ `person_imports.images[].digest` 引用计数（与删除接口同口径） |
 | `orphan_voices` | voices 下无 `voices.sample_path` 引用的文件 | 含 `pending-*` 失败残留与试听文件（可再生） |
 | `orphan_sources` | sources 根下未注册文件 | 不在 sources 表且超宽限期；已注册原片永不触碰 |
@@ -50,7 +51,6 @@ runs 行的 bytes 无法精确统计，诚实输出 0 并在 policy 说明。
 
 | 路径 | 说明 |
 |---|---|
-| `persons/frames/` | 人物处理中间帧（实测单源可达 12G）。证据图 API 仍引用，删除即 404；应先调整人物处理侧的帧保留策略，再纳入清理 |
 | `model-cache/` | 强制对齐 HF 模型缓存（1.7G），删除后下次 align 重新下载 |
 | `studio-verification/`、`e2e/`、`verification/` | 一次性人工验证产物，归档或删除请人工决定 |
 | `metadata.sqlite3.bak-*` | 人工数据库备份，确认无需回退后手动删除 |

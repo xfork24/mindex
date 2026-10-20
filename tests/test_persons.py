@@ -2570,3 +2570,203 @@ def test_manual_score_uses_actor_only_fallback_but_not_other_roles(catalogue):
     ))
     details={v['role_id']:v for v in p.review_shots(status='accepted')['items'][0]['confirmed_people']}
     assert details[roles[2]['id']]['score']==0.7 and not details[roles[2]['id']]['manual']
+
+
+def frame_evidence(p, actor, identifier, path, *, shot="shot0", status="accepted", score=0.7,
+                   kind="face", original=None, role=None):
+    data = {"image_path": path, "score": score, "evidence_type": kind}
+    if original is not None:
+        data.update(confirmation="shot_review", original_score=original)
+    p.store.execute("INSERT INTO person_evidence VALUES(?,?,?,?,?,?,?,?,?,?)",
+                    (identifier, "source", shot, actor["id"], role, None, 0, 1, status, dumps(data)))
+
+
+def test_frame_encoding_and_cache_config(catalogue, config):
+    p, _, _ = catalogue
+    raw = photo(size=(1280, 720))
+    item = p.image(raw, "frames/source", max_edge=640, image_format="JPEG")
+    assert (item["width"], item["height"]) == (640, 360)
+    assert item["path"].endswith(".jpg")
+    assert item == p.image(raw, "frames/source", max_edge=640, image_format="JPEG")
+    assert p.image(raw)["width"] == 1280
+    assert p.image(raw)["path"].endswith(".png")
+    assert p.image(raw, "frames/source", max_edge=0, image_format="JPEG")["width"] == 1280
+    original = config.person.model_dump(exclude={"frames_max_edge", "frames_jpeg_quality"})
+    config.person.frames_max_edge = 320
+    assert config.person.model_dump(exclude={"frames_max_edge", "frames_jpeg_quality"}) == original
+
+
+def test_frame_retention_real_scores_and_pending(catalogue):
+    from mindex.persons import retained_frame_paths
+    p, _, actor = catalogue
+    for identifier, score, kind, original in (("face", .6, "face", None), ("manual", 1, "manual", .5),
+                                               ("track", 1, "track", None)):
+        frame_evidence(p, actor, identifier, identifier + ".png", score=score, kind=kind, original=original)
+    frame_evidence(p, actor, "pending", "pending.png", shot="shot1", status="candidate")
+    frame_evidence(p, actor, "rejected", "rejected.png", shot="shot1", status="rejected")
+    frame_evidence(p, actor, "track-only", "track-only.png", shot="shot2", kind="track")
+    assert retained_frame_paths(p.store) == {"source": {"face.png", "pending.png", "rejected.png", "track-only.png"}}
+    rows = [{**r, "data": json.loads(r["data"])} for r in p.store.rows(
+        "SELECT * FROM person_evidence WHERE shot_id='shot0'")]
+    assert p.original_score(rows, actor["id"], None) == .6
+    assert p.review_shots(shot_id="shot0")["items"][0]["image_url"].endswith("/face/image")
+
+
+def test_migrate_frames_preview_apply_resume_and_vectors(catalogue, config):
+    from mindex.persons import migrate_frames
+    p, _, actor = catalogue
+    first = p.image(photo(size=(1280, 720)), "frames/source")["path"]
+    discarded = p.image(photo("blue"), "frames/source")["path"]
+    frame_evidence(p, actor, "best", first)
+    frame_evidence(p, actor, "other", discarded, status="candidate")
+    frame_evidence(p, actor, "shared", first, status="rejected")
+    vectors = {"frames": [{"image_path": first, "observations": [{"face_feature": [1, 0, .5]}]}]}
+    p.store.execute("INSERT INTO person_features VALUES(?,?,?,?,?)", ("cache", "source", "space", "shot", dumps(vectors)))
+    version = {"evidence": [{"id": "best", "source_id": "source", "shot_id": "shot0", "data": {"image_path": first}}]}
+    p.store.execute("INSERT INTO person_versions(id,data) VALUES(?,?)", ("published", dumps(version)))
+    before = {str(f): f.read_bytes() for f in (p.store.root / "persons/frames").rglob("*") if f.is_file()}
+    preview = migrate_frames(config)
+    assert preview["total"]["reencoded"] == 1
+    assert preview["total"]["rewritten_evidence"] == 2
+    assert all(Path(f).read_bytes() == raw for f, raw in before.items())
+    assert len(list((p.store.root / "persons/frames/source").iterdir())) == 2
+    result = migrate_frames(config, apply=True)
+    assert result["sources"][0]["error"] is None
+    assert result["total"]["deleted_bytes"] == preview["total"]["deleted_bytes"]
+    updated = json.loads(p.store.one("SELECT data FROM person_features WHERE id='cache'")["data"])
+    new = updated["frames"][0]["image_path"]
+    assert new.endswith(".jpg") and (p.store.root / new).is_file()
+    assert updated["frames"][0]["observations"] == vectors["frames"][0]["observations"]
+    assert json.loads(p.store.one("SELECT data FROM person_versions WHERE id='published'")["data"]) == version
+    assert not (p.store.root / first).exists()
+    again = migrate_frames(config, apply=True)
+    assert again["total"]["reencoded"] == again["total"]["deleted_files"] == 0
+    (p.store.root / first).write_bytes(photo())
+    assert migrate_frames(config, apply=True)["total"]["deleted_files"] == 1
+
+
+def test_migrate_missing_frame_never_deletes_source(catalogue, config):
+    from mindex.persons import migrate_frames
+    p, _, actor = catalogue
+    other = p.image(photo(), "frames/source")["path"]
+    frame_evidence(p, actor, "missing", "persons/frames/source/missing.png")
+    result = migrate_frames(config, apply=True)
+    assert result["sources"][0]["error"]
+    assert (p.store.root / other).is_file()
+
+
+def test_frame_api_current_snapshot_thumbnail_and_mime(catalogue, config):
+    p, _, actor = catalogue
+    thumb = p.image(photo(), "frames/source", image_format="JPEG")["path"]
+    p.store.execute("UPDATE segments SET thumbnail=? WHERE id='shot0'", (thumb,))
+    frame_evidence(p, actor, "missing", "persons/frames/source/missing.png")
+    client = TestClient(create_app(config))
+    response = client.get("/api/persons/evidence/missing/image")
+    assert response.status_code == 200 and response.headers["content-type"] == "image/jpeg"
+    snapshot = {"evidence": [{"id": "historic", "source_id": "source", "shot_id": "shot0",
+                              "data": {"image_path": "missing.png"}}]}
+    p.store.execute("INSERT INTO person_versions(id,data) VALUES(?,?)", ("historic", dumps(snapshot)))
+    assert client.get("/api/persons/evidence/historic/image").status_code == 200
+    (p.store.root / thumb).unlink()
+    assert client.get("/api/persons/evidence/historic/image").status_code == 404
+
+
+def test_frame_clean_rechecks_references_after_scan(catalogue, config):
+    from datetime import UTC, datetime
+
+    from mindex.clean import Scan, person_frames
+    p, _, actor = catalogue
+    retained = p.image(photo(), "frames/source")["path"]
+    new_reference = p.image(photo("blue"), "frames/source")["path"]
+    orphan = p.image(photo("green"), "frames/source")["path"]
+    frame_evidence(p, actor, "best", retained)
+    action = person_frames(Scan(config, p.store, datetime.now(UTC)))
+    frame_evidence(p, actor, "new", new_reference, shot="shot1", status="candidate")
+    assert action.execute()["deleted"] == 1
+    assert (p.store.root / new_reference).exists()
+    assert not (p.store.root / orphan).exists()
+
+
+def test_migrate_frames_respects_pipeline_lock(catalogue, config):
+    from mindex.persons import migrate_frames
+    from mindex.processing_lock import SharedFileLock
+    p, _, _ = catalogue
+    with SharedFileLock(p.store.root / "pipeline.lock"), pytest.raises(ValueError, match="离线处理任务"):
+        migrate_frames(config, apply=True)
+
+
+def test_frame_review_prefers_existing_actor_frame(catalogue):
+    from mindex.persons import existing_frame
+    p, _, actor = catalogue
+    image = p.image(photo(), "frames/source")["path"]
+    frame_evidence(p, actor, "missing-best", "missing.png", score=.9)
+    frame_evidence(p, actor, "existing", image, score=.7)
+    rows = [{**r, "data": json.loads(r["data"])} for r in p.store.rows("SELECT * FROM person_evidence")]
+    assert existing_frame(p.store, rows, "thumbnail.jpg") == image
+    (p.store.root / image).unlink()
+    assert existing_frame(p.store, rows, "thumbnail.jpg") == "thumbnail.jpg"
+
+
+def test_frame_api_uses_snapshot_when_current_image_missing(catalogue, config):
+    p, _, actor = catalogue
+    path = p.image(photo(), "frames/source")["path"]
+    frame_evidence(p, actor, "fallback", "missing.png")
+    version = {"evidence": [{"id": "fallback", "source_id": "source", "shot_id": "shot0",
+                             "data": {"image_path": path}}]}
+    p.store.execute("INSERT INTO person_versions(id,data) VALUES(?,?)", ("fallback", dumps(version)))
+    response = TestClient(create_app(config)).get("/api/persons/evidence/fallback/image")
+    assert response.status_code == 200 and response.content == (p.store.root / path).read_bytes()
+
+
+def test_frame_retention_identity_union_and_empty_image(catalogue):
+    from mindex.persons import retained_frame_paths
+    p, _, actor = catalogue
+    second = p.save(Entity(kind="actor", name="演员乙"))
+    frame_evidence(p, actor, "first", "shared.png")
+    frame_evidence(p, second, "second", "shared.png")
+    frame_evidence(p, actor, "role", "role.png", role="separate-role")
+    frame_evidence(p, actor, "no-image", None, score=.99)
+    frame_evidence(p, actor, "candidate", "candidate.png", status="candidate")
+    assert retained_frame_paths(p.store, "source") == {"source": {"shared.png", "role.png"}}
+
+
+def test_scoped_frame_migration_preserves_cross_source_reference(catalogue, config):
+    from mindex.persons import migrate_frames
+    p, _, actor = catalogue
+    path = p.image(photo(), "frames/source")["path"]
+    frame_evidence(p, actor, "external-owner", path)
+    p.store.execute("UPDATE person_evidence SET source_id='other-source' WHERE id='external-owner'")
+    result = migrate_frames(config, source_id="source", apply=True)
+    assert result["sources"][0]["error"] is None
+    assert (p.store.root / path).exists()
+
+
+def test_frame_cache_reuse_after_missing_images_needs_no_model_extraction(catalogue, config):
+    p, _, actor = catalogue
+    p.add_reference(actor["id"], photo())
+    thumbnail = p.image(photo("blue"))["path"]
+    p.store.execute("UPDATE segments SET thumbnail=?", (thumbnail,))
+    client = FakeClient()
+    processor = PersonProcessor(config, client, Tracker)
+    processor.run("source", PersonOptions())
+    original_calls = (client.images, client.videos)
+    features = p.store.rows("SELECT id,data FROM person_features WHERE kind='shot' ORDER BY id")
+    for path in (p.store.root / "persons/frames/source").iterdir():
+        path.unlink()
+    report = processor.run("source", PersonOptions())
+    assert report["reused_shots"] == 3 and report["extracted_shots"] == 0
+    assert (client.images, client.videos) == original_calls
+    assert p.store.rows("SELECT id,data FROM person_features WHERE kind='shot' ORDER BY id") == features
+    assert all(e["data"]["image_path"] == thumbnail for e in p.evidence())
+
+
+def test_frame_migration_lock_blocks_review(catalogue, config):
+    from mindex.processing_lock import SharedFileLock
+    p, _, actor = catalogue
+    client = TestClient(create_app(config))
+    with SharedFileLock(p.store.root / "pipeline.lock", exclusive=True):
+        response = client.post("/api/persons/review/shot", json={
+            "source_id": "source", "shot_id": "shot0", "selections": [{"actor_id": actor["id"]}],
+        })
+    assert response.status_code == 422 and "迁移或清理" in response.text
+    assert p.store.rows("SELECT id FROM person_evidence") == []

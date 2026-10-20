@@ -12,7 +12,7 @@ import json
 import math
 import re
 import uuid
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -200,6 +200,19 @@ class PersonHasLinkedShots(ValueError):
         )
 
 
+@contextmanager
+def frame_review_lock(store):
+    from filelock import Timeout
+
+    from .processing_lock import SharedFileLock
+
+    try:
+        with SharedFileLock(store.root / "pipeline.lock"):
+            yield
+    except Timeout:
+        raise ValueError("人物帧正在迁移或清理，请稍后重试审核") from None
+
+
 class Persons:
     def __init__(self, store: Store):
         self.store = store
@@ -371,20 +384,16 @@ class Persons:
             db.execute("DELETE FROM person_coverage WHERE source_id=?", (source_id,))
             db.execute("DELETE FROM person_evidence WHERE source_id=?", (source_id,))
 
-    def image(self, raw, namespace="references"):
-        with Image.open(io.BytesIO(raw)) as original:
-            if original.width * original.height > 40_000_000:
-                raise ValueError("图片尺寸过大")
-            image = ImageOps.exif_transpose(original).convert("RGB")
-            buffer = io.BytesIO()
-            image.save(buffer, format="PNG")
-        content = buffer.getvalue()
+    def image(self, raw, namespace="references", *, max_edge=0, image_format="PNG", jpeg_quality=85):
+        content, width, height = encode_frame(raw, max_edge=max_edge, image_format=image_format,
+                                             jpeg_quality=jpeg_quality)
         digest = hashlib.sha256(content).hexdigest()
-        relative = f"persons/{namespace}/{digest}.png"
+        extension = "jpg" if image_format == "JPEG" else "png"
+        relative = f"persons/{namespace}/{digest}.{extension}"
         path = self.store.root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(content)
-        return {"path": relative, "digest": digest, "width": image.width, "height": image.height}
+        return {"path": relative, "digest": digest, "width": width, "height": height}
 
     def pairing_actor(self, actor_id, role_id, actor_ids=None):
         """A reference face belongs to one actor, even when its role has several performers."""
@@ -750,6 +759,10 @@ class Persons:
         }
 
     def review(self, evidence_id, body: Review):
+        with frame_review_lock(self.store):
+            return self._review(evidence_id, body)
+
+    def _review(self, evidence_id, body: Review):
         """Correct one cached observation without expanding its temporal interval.
 
         The public review UI/API uses shot_review; keep this operation internal.
@@ -780,6 +793,10 @@ class Persons:
         return {"id": evidence_id, "status": status}
 
     def shot_review(self, body: ShotReview):
+        with frame_review_lock(self.store):
+            return self._shot_review(body)
+
+    def _shot_review(self, body: ShotReview):
         """分镜级审核：勾选人物各生成一条覆盖整镜的 manual 证据，其余证据行驳回留档。"""
         shot = self.store.one(
             "SELECT * FROM segments WHERE id=? AND source_id=? AND kind='shot'",
@@ -799,8 +816,7 @@ class Persons:
             (body.source_id, body.shot_id),
         )
         decoded_rows = [{**r, "data": json.loads(r["data"])} for r in rows]
-        images = [r["data"].get("image_path") for r in decoded_rows]
-        fallback = next((p for p in images if p), shot["thumbnail"])
+        fallback = existing_frame(self.store, decoded_rows, shot["thumbnail"])
         marks = {
             (s.actor_id, s.role_id): fingerprint(
                 ["shot-review-v1", body.source_id, body.shot_id, s.actor_id, s.role_id]
@@ -822,7 +838,7 @@ class Persons:
                     ),
                 )
             for (actor_id, role_id), identifier in marks.items():
-                image = next((p for r, p in zip(rows, images) if r["actor_id"] == actor_id and p), fallback)
+                image = existing_frame(self.store, [r for r in decoded_rows if r["actor_id"] == actor_id], fallback)
                 original_score = self.original_score(decoded_rows, actor_id, role_id)
                 db.execute(
                     "INSERT OR REPLACE INTO person_evidence VALUES(?,?,?,?,?,?,?,?,?,?)",
@@ -879,6 +895,8 @@ class Persons:
             if row["actor_id"] != actor_id:
                 continue
             data = row["data"]
+            if data.get("evidence_type") == "track":
+                continue  # inherited 1.0 must not become the next manual confirmation's original_score
             synthetic = data.get("evidence_type") == "manual" and data.get("confirmation") == "shot_review"
             score = cls.evidence_score(data.get("original_score") if synthetic else data.get("score"))
             if score is None:
@@ -1046,7 +1064,8 @@ class Persons:
             evidence_sql = (
                 "SELECT id,actor_id,role_id,status,json_object("
                 "'score',json_extract(data,'$.score'),'original_score',json_extract(data,'$.original_score'),"
-                "'evidence_type',json_extract(data,'$.evidence_type'),'confirmation',json_extract(data,'$.confirmation')) "
+                "'evidence_type',json_extract(data,'$.evidence_type'),'confirmation',json_extract(data,'$.confirmation'),"
+                "'image_path',json_extract(data,'$.image_path')) "
                 "AS data,json_type(data,'$.original_score') IS NOT NULL AS original_recorded "
                 "FROM person_evidence WHERE source_id=? AND shot_id=? ORDER BY start,id" if compact else
                 "SELECT * FROM person_evidence WHERE source_id=? AND shot_id=? ORDER BY start,id"
@@ -1078,7 +1097,8 @@ class Persons:
                         for key in ("accepted", "candidate", "rejected")
                     },
                     "image_url": next(
-                        (r["image_url"] for r in rows if r.get("data", {}).get("image_path")), None,
+                        (f"/api/persons/evidence/{r['id']}/image" for r in sorted(raw_rows, key=frame_rank)
+                         if r.get("data", {}).get("image_path")), None,
                     ),
                     "evidence": rows,
                 }
@@ -1396,3 +1416,152 @@ def coverage_missing(snapshots, coverage):
         if end < s["end"] - 1e-6:
             missing.add(s["source_id"])
     return sorted(missing)
+
+
+def frame_rank(row):
+    """Stable display ordering; inherited track confidence is not a face score."""
+    data = row["data"]
+    synthetic = data.get("evidence_type") == "manual" and data.get("confirmation") == "shot_review"
+    score = Persons.evidence_score(data.get("original_score") if synthetic else data.get("score"))
+    return (row.get("status") != "accepted", data.get("evidence_type") == "track",
+            score is None, -(score or 0), row["id"])
+
+
+def existing_frame(store, rows, fallback):
+    for row in sorted(rows, key=frame_rank):
+        path = row["data"].get("image_path")
+        if path and (store.root / path).is_file():
+            return path
+    return fallback
+
+
+def retained_frame_paths(store, source_id=None):
+    groups, result = {}, {}
+    for row in store.rows("SELECT * FROM person_evidence" + (" WHERE source_id=?" if source_id else ""),
+                          (source_id,) if source_id else ()):
+        row["data"] = json.loads(row["data"])
+        groups.setdefault((row["source_id"], row["shot_id"]), []).append(row)
+    for (source, _), rows in groups.items():
+        paths = result.setdefault(source, set())
+        if not any(r["status"] == "accepted" for r in rows):
+            paths.update(r["data"]["image_path"] for r in rows if r["data"].get("image_path"))
+            continue
+        identities = set()
+        for row in sorted(rows, key=frame_rank):
+            identity = (row["actor_id"], row["role_id"])
+            path = row["data"].get("image_path")
+            if row["status"] == "accepted" and path and identity not in identities:
+                paths.add(path)
+                identities.add(identity)
+    return result
+
+
+def migrate_frames(config, *, source_id=None, apply=False):
+    """Migrate display assets only. Feature vectors, cache IDs and releases stay intact."""
+    from filelock import Timeout
+
+    from .processing_lock import SharedFileLock, index_write_lock
+
+    store = Store(config.data_dir)
+    guard = SharedFileLock(store.root / "pipeline.lock", exclusive=True)
+    write = index_write_lock(store.root)
+    write.timeout = 10
+    try:
+        with guard, write, store.run("persons-migrate-frames") if apply else nullcontext():
+            return _migrate_frames(config, store, source_id, apply)
+    except Timeout:
+        raise ValueError("有离线处理任务或索引发布正在运行，请稍后重试") from None
+
+
+def _migrate_frames(config, store, source_id, apply):
+    retained = retained_frame_paths(store)
+    base = store.root / "persons/frames"
+    sources = set(retained)
+    if base.is_dir():
+        sources.update(p.name for p in base.iterdir() if p.is_dir())
+    if source_id:
+        sources = {source_id}
+    reports = []
+    for source in sorted(sources):
+        report = {"source_id": source, "kept_frames": 0, "reencoded": 0, "unchanged": 0,
+                      "deleted_files": 0, "deleted_bytes": 0, "rewritten_evidence": 0, "rewritten_features": 0, "error": None}
+        reports.append(report)
+        try:
+            directory = (base / source).resolve()
+            if not directory.is_relative_to(base.resolve()) or directory == base.resolve():
+                raise ValueError("非法 source_id")
+            # Defensive protection for imported/cross-source references during a scoped migration.
+            prefix = f"persons/frames/{source}/"
+            mapping = {}
+            keep = {path for owner, paths in retained.items() if owner != source
+                    for path in paths if path.startswith(prefix)}
+            for relative in sorted(retained.get(source, set())):
+                path = (store.root / relative).resolve()
+                if not path.is_relative_to(directory):
+                    continue  # thumbnails and external namespaces are never migrated or deleted
+                with Image.open(path) as image:
+                    unchanged = (image.format == "JPEG" and path.suffix == ".jpg" and
+                                 (not config.person.frames_max_edge or max(image.size) <= config.person.frames_max_edge))
+                if unchanged:
+                    target = relative
+                    report["unchanged"] += 1
+                else:
+                    # Preview encodes in memory only; no directories/files/DB writes.
+                    if apply:
+                        target = Persons(store).image(path.read_bytes(), "frames/" + source,
+                            max_edge=config.person.frames_max_edge, image_format="JPEG",
+                            jpeg_quality=config.person.frames_jpeg_quality)["path"]
+                    else:
+                        content, _, _ = encode_frame(path.read_bytes(), max_edge=config.person.frames_max_edge,
+                                                     image_format="JPEG", jpeg_quality=config.person.frames_jpeg_quality)
+                        target = f"persons/frames/{source}/{hashlib.sha256(content).hexdigest()}.jpg"
+                    report["reencoded"] += 1
+                mapping[relative] = target
+                keep.add(target)
+            report["kept_frames"] = len(keep)
+            # All references to a converted image follow it, including shared rejected rows.
+            with store.connect() as db:
+                if apply:
+                    db.execute("BEGIN IMMEDIATE")
+                for table, kind, counter in (("person_evidence", "", "rewritten_evidence"),
+                                             ("person_features", " AND kind='shot'", "rewritten_features")):
+                    for row in db.execute(f"SELECT id,data FROM {table} WHERE source_id=?{kind}", (source,)).fetchall():
+                        data = json.loads(row["data"])
+                        frames = [data] if table == "person_evidence" else data.get("frames", [])
+                        changed = False
+                        for frame in frames:
+                            old = frame.get("image_path")
+                            if old in mapping and mapping[old] != old:
+                                frame["image_path"] = mapping[old]
+                                changed = True
+                        if changed:
+                            report[counter] += 1
+                            if apply:
+                                db.execute(f"UPDATE {table} SET data=? WHERE id=?", (dumps(data), row["id"]))
+            # Only after commit; a failed/missing retained image aborts deletion for this source.
+            from .clean import _iter_files, _prune_empty_parents
+            for path in _iter_files(directory):
+                if path.relative_to(store.root).as_posix() not in keep:
+                    report["deleted_files"] += 1
+                    report["deleted_bytes"] += path.stat().st_size
+                    if apply:
+                        path.unlink()
+                        _prune_empty_parents(path, base)
+        except Exception as exc:  # noqa: BLE001 — isolate sources, never delete after a failed conversion
+            report["error"] = str(exc)
+    totals = {key: sum(r[key] for r in reports) for key in
+              ("kept_frames", "reencoded", "unchanged", "deleted_files", "deleted_bytes",
+               "rewritten_evidence", "rewritten_features")}
+    return {"applied": apply, "sources": reports, "total": totals}
+
+
+def encode_frame(raw, *, max_edge=0, image_format="PNG", jpeg_quality=85):
+    with Image.open(io.BytesIO(raw)) as original:
+        if original.width * original.height > 40_000_000:
+            raise ValueError("图片尺寸过大")
+        image = ImageOps.exif_transpose(original).convert("RGB")
+        if max_edge and max(image.size) > max_edge:
+            image = ImageOps.contain(image, (max_edge, max_edge))
+        buffer = io.BytesIO()
+        image.save(buffer, format=image_format, **({"quality": jpeg_quality} if image_format == "JPEG" else {}))
+    return buffer.getvalue(), image.width, image.height
