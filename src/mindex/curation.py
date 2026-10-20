@@ -33,9 +33,11 @@ class CurationPatch(BaseModel):
 SOURCE_SQL = """
 SELECT s.*, c.display_name AS custom_name, COALESCE(c.notes,'') AS notes,
        COALESCE(c.favorite,0) AS favorite, COALESCE(c.hidden,0) AS hidden, c.updated_at,
-       COALESCE(n.shot_count,0) AS shot_count, COALESCE(n.moment_count,0) AS moment_count
+       COALESCE(n.shot_count,0) AS shot_count, COALESCE(n.moment_count,0) AS moment_count,
+       COALESCE(n.scene_count,0) AS scene_count
 FROM sources s LEFT JOIN source_curation c ON c.id=s.id
-LEFT JOIN (SELECT source_id, SUM(kind='shot') AS shot_count, SUM(kind='moment') AS moment_count
+LEFT JOIN (SELECT source_id, SUM(kind='shot') AS shot_count, SUM(kind='moment') AS moment_count,
+                  SUM(kind='scene') AS scene_count
            FROM segments GROUP BY source_id) n ON n.source_id=s.id
 """
 
@@ -74,6 +76,7 @@ def source_public(row: dict) -> dict:
         "prepared": bool(row["prepared"]),
         "shot_count": row["shot_count"],
         "moment_count": row["moment_count"],
+        "scene_count": row["scene_count"],
         **organization(row),
     }
 
@@ -276,6 +279,7 @@ class Library:
         result = {
             **source_public(row),
             "missing_artifacts": missing_count,
+            "completed_shots": sum(available(s["path"]) and available(s["thumbnail"]) for s in media._shots[identifier]),
             "channels": channel_states,
             "published_channels": channel_coverage(self.store, source_id=identifier, snapshots=published),
             "subtitle_tracks": tracks,

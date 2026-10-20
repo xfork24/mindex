@@ -2770,3 +2770,25 @@ def test_frame_migration_lock_blocks_review(catalogue, config):
         })
     assert response.status_code == 422 and "迁移或清理" in response.text
     assert p.store.rows("SELECT id FROM person_evidence") == []
+
+
+def test_repeat_completed_person_task_reuses_extraction_and_matching(catalogue, config, monkeypatch):
+    p, _work, actor = catalogue
+    p.add_reference(actor['id'], photo())
+    client = FakeClient()
+    processor = PersonProcessor(config, client, Tracker)
+    first = processor.run('source', PersonOptions())
+    assert first['extracted_shots'] == 3
+    before = (client.videos, client.images)
+    matches = p.store.rows("SELECT id FROM person_features WHERE kind='matching' ORDER BY id")
+
+    def unexpected(*args, **kwargs):
+        pytest.fail('unchanged completed person tasks must reuse extraction and matching')
+
+    monkeypatch.setattr(client, 'video', unexpected)
+    monkeypatch.setattr(client, 'image', unexpected)
+    monkeypatch.setattr('mindex.person_processing.attribute_frames', unexpected)
+    result = processor.run('source', PersonOptions())
+    assert result['reused_shots'] == 3 and result['extracted_shots'] == 0
+    assert (client.videos, client.images) == before
+    assert p.store.rows("SELECT id FROM person_features WHERE kind='matching' ORDER BY id") == matches

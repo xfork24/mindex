@@ -47,7 +47,7 @@ async function loadSources() {
   state.sourceTotal = data.total;MindexI18n.setText($('source-count'), MindexI18n.msg("ui.42d218e9f146", { p0: data.total }));$('source-list').replaceChildren();
   data.items.forEach((source) => {
     const b = node('button', undefined, `source-item ${state.source?.id === source.id ? 'selected' : ''}`);b.type = 'button';b.setAttribute('aria-pressed', String(state.source?.id === source.id));
-    b.append(node('strong', `${source.favorite ? '★ ' : ''}${source.name}`), node('small', MindexI18n.msg("ui.b53548f018e9", { p0: source.shot_count, p1: source.moment_count, p2: time(source.media.duration) })), node('small', `${source.hidden ? MindexI18n.msg("ui.c4a3685c02e7") : ''}${source.prepared ? MindexI18n.msg("ui.8be4f689a4da") : MindexI18n.msg("ui.db386b30e280")} · ${source.id.slice(0, 8)}`));
+    b.append(node('strong', `${source.favorite ? '★ ' : ''}${source.name}`), node('small', MindexI18n.msg("ui.b53548f018e9", { p0: source.shot_count, p1: source.moment_count, p3: source.scene_count ?? 0 })), node('small', `${time(source.media.duration)} · ${source.hidden ? MindexI18n.msg("ui.c4a3685c02e7") : ''}${source.prepared ? MindexI18n.msg("ui.8be4f689a4da") : MindexI18n.msg("ui.db386b30e280")} · ${source.id.slice(0, 8)}`));
     b.onclick = () => run(() => selectSource(source.id));$('source-list').append(b);
   });
   if (!data.items.length) {const empty = node('div', undefined, 'empty');empty.append(node('p', MindexI18n.msg("ui.67a30427bf95")), node('p', MindexI18n.msg("ui.884adf6787b5")));$('source-list').append(empty);}
@@ -98,7 +98,7 @@ async function selectSource(id) {
   const signal = selectionController.signal;
   state.source = {id};state.parent = null;state.segmentPage = 1;state.focus = null;
   $('segment-visibility').value = 'visible';pauseList();$('segment-list').replaceChildren();
-  $('source-detail').replaceChildren(node('p', MindexI18n.msg("ui.de365dab6e9d")));
+  $('source-detail').replaceChildren();renderWork(state.source, $('source-detail'));
   $('no-source').hidden = true;$('source-workspace').hidden = false;syncUrl();
   $('source-workspace').setAttribute('aria-busy', 'true');
   void refreshWork(id, request);
@@ -176,7 +176,7 @@ $('source-prev').onclick = () => run(async () => {state.sourcePage--;await loadS
 $('segment-prev').onclick = () => run(async () => {state.segmentPage--;await loadSegments();});$('segment-next').onclick = () => run(async () => {state.segmentPage++;await loadSegments();});
 for (const [id, kind] of [['shots-tab', 'shot'], ['moments-tab', 'moment']]) $(id).onclick = () => run(async () => {state.kind = kind;state.parent = null;state.segmentPage = 1;await loadSegments();});
 $('clear-parent').onclick = () => run(async () => {state.parent = null;state.segmentPage = 1;await loadSegments();});
-$('reload').onclick = () => run(async () => {$('reload').disabled = true;try {if (state.source) await selectSource(state.source.id);else await loadSources();notify(MindexI18n.msg("ui.88e448fddfc8"));} finally {$('reload').disabled = false;}});
+$('reload').onclick = () => run(async () => {$('reload').disabled = true;workLog.snapshots = new Map();workPreferences.forEach(prefs => {prefs.errors = {};});try {if (state.source) await selectSource(state.source.id);else await loadSources();notify(MindexI18n.msg("ui.88e448fddfc8"));} finally {$('reload').disabled = false;}});
 run(async () => {
   await loadSources();const query = new URLSearchParams(location.search);
   if (query.get('kind') === 'moment') state.kind = 'moment';const id = query.get('source');
@@ -201,23 +201,97 @@ const workNames = { shots: MindexI18n.msg("ui.6a4811595787"), dialogue: MindexI1
 const workStatus = { complete: MindexI18n.msg("ui.9e593295eddf"), partial: MindexI18n.msg("ui.53951802211e"), empty: MindexI18n.msg("ui.b5a5666d7068"), no_audio: MindexI18n.msg("ui.dde19df44760"), disabled: MindexI18n.msg("ui.8bb38ef00ccc"), not_processed: MindexI18n.msg("ui.59a9eb4e6574"), failed: MindexI18n.msg("ui.3e3c8068bb0e"), processing: MindexI18n.msg("ui.fcb979ef0b91"), pending_alignment: MindexI18n.msg("ui.db56f1b7b2c7") };
 const taskStatus = { queued: MindexI18n.msg("ui.4dcbbcfa6154"), running: MindexI18n.msg("ui.594249700590"), complete: MindexI18n.msg("ui.33246f6a5e5b"), failed: MindexI18n.msg("ui.3e3c8068bb0e"), interrupted: MindexI18n.msg("ui.8dd5ad764e4b") };
 const stages = { detect: MindexI18n.msg("ui.91642f5bbeab"), split: MindexI18n.msg("ui.717b1c7595ac"), repair: MindexI18n.msg("ui.58723ed9df0b"), subtitle: MindexI18n.msg("ui.1721b0103d0d"), asr: MindexI18n.msg("ui.65aa0b969118"), analyze: MindexI18n.msg("ui.b6582c9a3f55"), scene_grouping: MindexI18n.msg("ui.cd2b1a5f7983"), scenes: MindexI18n.msg("ui.008acfbd3a5f"), matching: MindexI18n.msg("ui.525d34888b72"), extracting: MindexI18n.msg("ui.7d76ffac1b58"), publish: MindexI18n.msg("ui.77e695de5cac"), embedding: MindexI18n.msg("ui.c56c156ecf6c"), index_check: MindexI18n.msg("ui.7e5154331f03"), published: MindexI18n.msg("ui.fb01358330b1"), indexed: MindexI18n.msg("ui.efc142bf91f3") };
-function preferences(id) {if (!workPreferences.has(id)) workPreferences.set(id, { publish: { shots: true, dialogue: true, analysis: true, persons: true }, method: 'auto', track: '', subtitleInitialized: false, uploadingSubtitle: false });return workPreferences.get(id);}
+function preferences(id) {if (!workPreferences.has(id)) workPreferences.set(id, { publish: { shots: true, dialogue: true, analysis: true, persons: true }, errors: {}, method: 'auto', track: '', subtitleInitialized: false, uploadingSubtitle: false });return workPreferences.get(id);}
 function post(url, value) {return api(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) });}
 const publicationStages = new Set(['index_wait', 'index_prepare', 'embedding', 'index_check', 'publish', 'published', 'indexed', 'person_index']);
-function appendWorkProgress(card, label, type, status, progress = {}) {
-  const done = progress.completed ?? progress.completed_shots ?? progress.completed_chunks,total = progress.total ?? progress.total_shots ?? progress.total_chunks;
-  const counted = Number.isFinite(total) && total > 0,active = ['queued', 'running'].includes(status);
-  const stage = ({index_wait: MindexI18n.msg("ui.20c78c01be0e"), index_prepare: MindexI18n.msg("ui.256396003e59"), person_index: MindexI18n.msg("ui.a8dca9128fbb")})[progress.stage] || stages[progress.stage] || (progress.message ? MindexI18n.system(progress) : null) || MindexI18n.msg("ui.fcb979ef0b91");
-  const unit = progress.unit || (progress.total_shots != null ? 'shots' : progress.total_chunks != null ? 'chunks' : progress.stage === 'scenes' ? 'scenes' : ['analyze', 'scene_grouping', 'repair'].includes(progress.stage) ? 'segments' : progress.stage === 'split' ? 'shots' : null);
-  const suffix = ({segments: MindexI18n.msg("ui.c49a95f6ee75"), shots: MindexI18n.msg("ui.9e9583a0c459"), chunks: MindexI18n.msg("ui.c56653feeffb"), scenes: MindexI18n.msg("ui.7b10ba4607b6"), files: MindexI18n.msg("ui.6f34f0eb1b3c"), tracks: MindexI18n.msg("ui.84c9b78d91a5")})[unit] || '';
-  const completed = counted ? Math.min(total, Math.max(0, Number.isFinite(done) ? done : 0)) : 0;
-  const skipped = progress.skipped ? ' · ' + MindexI18n.msg("ui.82896d0a6ff4", {count: progress.skipped}) : '';
-  const line = node('p', `${type === 'extra' ? MindexI18n.msg("ui.update_extra_search") : type === 'publish' ? MindexI18n.msg("ui.b6ff86ac1506") : MindexI18n.msg("ui.dbad5e876f4f")}：${taskStatus[status] || status}${active || counted ? ' · ' + stage + (counted ? ` ${completed}/${total}${suffix}` : '') : ''}${skipped}`, 'muted work-task-progress');line.dataset.phase = type;card.append(line);
-  if (counted || active) {
-    const bar = node('progress');bar.className = 'work-progress';bar.dataset.phase = type;
-    if (counted) {bar.max = total;bar.value = completed;}
-    MindexI18n.setAttr(bar, 'aria-label', label + MindexI18n.msg(type !== 'process' ? "ui.5ddad219dcea" : "ui.d03d35a85128"));card.append(bar);
+function analysisCoverageText(result = {}, task) {
+  let text = MindexI18n.msg('ui.work_analysis_coverage', {done: result.analyzed || 0, total: result.total || 0});
+  const reasons = result.skipped_reasons || [];
+  for (const item of reasons) text += '，' + MindexI18n.msg('ui.analysis_skipped_reason', {count: item.count, reason: MindexI18n.system(item.reason_message) || item.reason || MindexI18n.msg('ui.analysis_reason_unknown')});
+  const unclassified = Math.max(0, (result.skipped || 0) - reasons.reduce((sum, item) => sum + item.count, 0));
+  if (unclassified) text += '，' + MindexI18n.msg('ui.analysis_skipped_reason', {count: unclassified, reason: MindexI18n.msg('ui.analysis_reason_unknown')});
+  const pending = result.pending ?? Math.max(0, (result.total || 0) - (result.analyzed || 0) - (result.skipped || 0));
+  if (pending) text += '，' + (['failed', 'interrupted'].includes(task?.status) && MindexI18n.system(task.error)
+    ? MindexI18n.msg('ui.analysis_unfinished_reason', {count: pending, reason: MindexI18n.system(task.error)})
+    : MindexI18n.msg('ui.analysis_pending_count', {count: pending}));
+  return text;
+}
+// Persistent subtask coverage survives reloads and new execution records.
+function workProgressRows(name, work) {
+  const result = work.result || {}, search = work.search || {};
+  const task = work.task, progress = task?.progress || {};
+  const publishing = progress.phase === 'publish' || publicationStages.has(progress.stage);
+  const processing = publishing ? progress.processing_progress || {} : progress;
+  let total = name === 'shots' ? result.shots || 0 : name === 'analysis' ? result.total || 0 : name === 'persons' ? result.total_shots || 0 : result.utterances || 0;
+  let done = name === 'shots' ? (result.completed_shots ?? (work.status === 'complete' ? total : 0)) : name === 'analysis' ? (result.analyzed || 0) + (result.skipped || 0) : name === 'persons' ? result.covered_shots || 0 : ['complete', 'no_audio', 'empty'].includes(work.status) ? total : 0;
+  const running = task && ['queued', 'running'].includes(task.status) && !publishing;
+  if (running && work.status !== 'complete' && name !== 'analysis') {
+    const liveTotal = processing.total ?? processing.total_shots ?? processing.total_chunks;
+    const liveDone = processing.completed ?? processing.completed_shots ?? processing.completed_chunks;
+    if (Number.isFinite(liveTotal) && liveTotal > 0) {total = liveTotal;done = Math.max(done, liveDone || 0);}
   }
+  const rows = [{task, progress: processing, type: 'process', key: `ui.work_${name}_coverage`, done, total, complete: ['complete', 'no_audio', 'empty'].includes(work.status), running}];
+  for (const [type, coverage, independent] of [['publish', search, work.publish_task], ['extra', work.extra_search || {}, work.extra_publish_task]]) {
+    if (type === 'extra' && !['shots', 'analysis'].includes(name)) continue;
+    const automatic = type === 'publish' && publishing ? task : null;
+    const latest = automatic && ['queued', 'running'].includes(automatic.status) ? automatic : independent && (!automatic || independent.created_at >= automatic.created_at) ? independent : automatic;
+    const active = latest && ['queued', 'running'].includes(latest.status);
+    let count = coverage.embedded_segments ?? coverage.indexed_segments ?? 0, expected = coverage.expected_segments || 0;
+    // Execution progress is already cumulative; reuse it within the same subtask.
+    if (active && !coverage.current && latest.progress?.total === expected) count = Math.max(count, latest.progress.completed || 0);
+    rows.push({coverage, task: latest, progress: latest?.progress || {}, type, key: type === 'extra' ? 'ui.work_extra_coverage' : name === 'persons' ? 'ui.work_person_index_coverage' : name === 'dialogue' ? 'ui.work_dialogue_index_coverage' : 'ui.work_moment_coverage', done: count, total: expected, complete: coverage.current, running: active});
+  }
+  if (name === 'analysis') rows[0].text = analysisCoverageText(result, task);
+  for (const row of rows) {
+    const notes = [];
+    if (row.type !== 'process') {
+      for (const reason of row.coverage?.pending_reasons || []) notes.push(MindexI18n.msg(`ui.coverage_${reason.code}`, {count: reason.count}));
+      if (row.coverage?.unpublished_segments) notes.push(MindexI18n.msg('ui.coverage_unpublished', {count: row.coverage.unpublished_segments}));
+      if (name === 'persons' && row.done < row.total) notes.push(MindexI18n.msg(result.covered_shots ? 'ui.coverage_person_unpublished' : 'ui.coverage_person_unprocessed', {count: row.total - row.done}));
+      if (!row.total) notes.push(MindexI18n.msg(work.status === 'no_audio' ? 'ui.coverage_no_audio' : work.status === 'disabled' ? 'ui.coverage_disabled' : ['empty', 'complete'].includes(work.status) ? 'ui.coverage_no_content' : 'ui.coverage_no_results'));
+    } else if (name !== 'analysis') {
+      if (name === 'shots' && result.missing_artifacts) notes.push(MindexI18n.msg('ui.coverage_missing_files', {count: result.missing_artifacts}));
+      else if (name === 'persons' && row.done < row.total) notes.push(MindexI18n.msg('ui.coverage_person_unprocessed', {count: row.total - row.done}));
+      else if (work.status === 'not_processed') notes.push(MindexI18n.msg('ui.coverage_not_started'));
+      else if (work.status === 'no_audio') notes.push(MindexI18n.msg('ui.coverage_no_audio'));
+      else if (work.status === 'disabled') notes.push(MindexI18n.msg('ui.coverage_disabled'));
+      else if (work.status === 'empty') notes.push(MindexI18n.msg('ui.coverage_no_content'));
+    }
+    if (name === 'persons' && work.status !== 'complete') notes.push(...(work.setup?.missing || []).map(MindexI18n.system));
+    if (notes.length) row.text = (row.text || MindexI18n.msg(row.key, {done: Math.min(row.done, row.total), total: row.total})) + '，' + notes.join('；');
+  }
+  return rows;
+}
+function workLog(row) {
+  if (row.localError) return {message: row.localError, error: true};
+  const task = row.task, progress = row.progress || {};
+  if (!task) return null;
+  const publishing = task.progress?.phase === 'publish' || publicationStages.has(task.progress?.stage);
+  const active = !(row.type === 'process' && publishing) && ['queued', 'running'].includes(task.status);
+  const publication = row.type !== 'process' ? task.publication : null;
+  const lastLine = value => typeof value === 'string' ? value.split(/\r?\n/).filter(line => line.trim()).at(-1) || '' : value;
+  const error = !active && ((row.type !== 'process' || !publishing) && MindexI18n.system(lastLine(task.error)) || publication?.status === 'failed' && MindexI18n.system(lastLine(publication.error)));
+  const status = row.type === 'process' && publishing ? 'complete' : publication?.status === 'failed' ? 'failed' : task.status;
+  const message = error || (active && task.status === 'queued' ? taskStatus.queued : (progress.latest_log ? MindexI18n.system(progress.latest_log) : '') || (progress.message || progress.message_key ? MindexI18n.system(progress) : '') || stages[progress.stage] || taskStatus[status]);
+  // Persisted task output is a baseline, not a new log for this page session.
+  // Only a subsequent message/status change makes this row's log visible.
+  const snapshots = workLog.snapshots ||= new Map();
+  const key = `${task.id}:${row.type}`;
+  const signature = JSON.stringify([status, message, !!error]);
+  if (!snapshots.has(key)) {snapshots.set(key, {signature, visible: false});return null;}
+  const previous = snapshots.get(key);
+  if (previous.signature !== signature) snapshots.set(key, {signature, visible: true});
+  return snapshots.get(key).visible ? {message, error: !!error} : null;
+}
+function appendWorkProgress(card, label, row) {
+  const done = Math.min(row.total, Math.max(0, row.done));
+  const line = node('p', row.text || MindexI18n.msg(row.key, {done, total: row.total}), 'muted work-task-progress');line.dataset.phase = row.type;card.append(line);
+  const bar = node('progress');bar.className = 'work-progress';bar.dataset.phase = row.type;
+  bar.max = row.total || 1;bar.value = row.total ? done : row.complete ? 1 : 0;
+  MindexI18n.setAttr(bar, 'aria-label', label + (row.text || MindexI18n.msg(row.key, {done, total: row.total})));card.append(bar);
+  const log = workLog(row);
+  const logLine = node('p', log?.message || '', `work-latest-log ${log?.error ? 'source-warning' : 'muted'}`);
+  logLine.dataset.phase = row.type;logLine.setAttribute('role', 'status');card.append(logLine);
 }
 function analysisSummary(result, progress = {}) {
   // 旧后端仅计入已生成场景；利用已保存的场景进度补齐尚未生成的数量。
@@ -233,13 +307,15 @@ function renderWork(source, target) {
   const panel = node('section', undefined, 'work-panel');panel.append(node('h3', MindexI18n.msg("ui.c057f7d9d46e")));
   const grid = node('div', undefined, 'work-grid');panel.append(grid);target.append(panel);
   if (!source.work) {
+    panel.setAttribute('aria-busy', String(!source.statusError));
+    const status = node('p', source.statusError || MindexI18n.msg('ui.work_loading'), source.statusError ? 'source-warning' : 'muted');
+    status.setAttribute('role', 'status');panel.insertBefore(status, grid);
     for (const [name, label] of Object.entries(workNames)) {
       const card = node('section', undefined, 'work-card');card.dataset.work = name;
       const start = node('button', MindexI18n.msg("ui.ab2f669c1a01"), 'quiet');start.type = 'button';start.disabled = true;
       card.append(node('h4', label), start);grid.append(card);
     }
-    panel.append(node('p', source.statusError || MindexI18n.msg("ui.de365dab6e9d"), source.statusError ? 'source-warning' : 'muted'));
-    if (source.statusError) panel.append(action(MindexI18n.msg("ui.914e1182b421"), () => refreshWork(source.id)));
+    if (source.statusError) panel.append(action(MindexI18n.msg("ui.e2d53a6d3a6a"), () => refreshWork(source.id)));
     return;
   }
   const prefs = preferences(source.id),busy = Object.values(source.work || {}).some((w) => [w.task, w.publish_task, w.extra_publish_task].some((t) => t && ['queued', 'running'].includes(t.status)));
@@ -249,7 +325,7 @@ function renderWork(source, target) {
   }
   for (const [name, label] of Object.entries(workNames)) {
     const work = source.work?.[name] || {},result = work.result || {},card = node('section', undefined, 'work-card');card.dataset.work = name;
-    const workBusy = [work.task, work.publish_task, work.extra_publish_task].some((t) => t && ['queued', 'running'].includes(t.status)),blocked = workBusy || source.enforce_gpu_lock && busy;
+    const processBusy = work.task && ['queued', 'running'].includes(work.task.status),blocked = source.enforce_gpu_lock && busy;
     const heading = node('div', undefined, 'work-heading');heading.append(node('h4', label), node('span', workStatus[work.status] || MindexI18n.msg("ui.59a9eb4e6574"), 'work-status'));card.append(heading);
     let summary = '';
     if (name === 'shots') summary = MindexI18n.msg("ui.234493832eb5", { p0: result.shots || 0, p1: result.moments || 0, p2: result.missing_artifacts || 0 });
@@ -260,7 +336,10 @@ function renderWork(source, target) {
     }
     if (name === 'analysis') summary = analysisSummary(result, work.task?.progress?.processing_progress || work.task?.progress);
     if (name === 'persons') summary = MindexI18n.msg("ui.1e1649402d6a", { p0: result.covered_shots || 0, p1: result.total_shots || 0, p2: result.people || 0, p3: result.accepted || 0, p4: result.candidate || 0, p5: result.rejected || 0 });
-    card.append(node('p', summary, 'work-summary'));const search = work.search || {};
+    const rows = workProgressRows(name, work);
+    for (const row of rows) row.localError = prefs.errors?.[`${name}:${row.type}`];
+    card.append(node('p', rows.flatMap(row => row.type === 'extra' && work.extra_search?.by_kind ? Object.entries(work.extra_search.by_kind).map(([kind, counts]) => MindexI18n.msg(`ui.work_${kind}_index_coverage`, {done: counts.embedded_segments ?? counts.indexed_segments, total: counts.expected_segments})) : [row.text || MindexI18n.msg(row.key, {done: Math.min(row.done, row.total), total: row.total})]).join('，'), 'work-summary'));
+    card.append(node('p', summary, 'muted'));const search = work.search || {};
     card.append(node('p', MindexI18n.msg(name === 'persons' ? "ui.13e6dc8c4328" : "ui.moment_search_coverage", { p0: search.current ? MindexI18n.msg("ui.112f98675ee2") : search.indexed_segments ? MindexI18n.msg("ui.53122735b7e9") : MindexI18n.msg("ui.30e81c8167e5"), p1: search.indexed_segments || 0, p2: search.expected_segments || 0, p3: name === 'persons' ? MindexI18n.msg("ui.313083c877dc") : MindexI18n.msg("ui.32145468cf4f") }), 'muted'));
     if (MindexI18n.system(result.fallback_reason)) card.append(node('p', MindexI18n.system(result.fallback_reason), 'muted'));
     if (name === 'dialogue') {
@@ -294,55 +373,40 @@ function renderWork(source, target) {
           prefs.track = `file:${saved.id}`;prefs.method = 'subtitle';prefs.subtitleInitialized = true;
           prefs.uploadingSubtitle = false;await refreshWork(source.id);
         } catch (e) {MindexI18n.setText(uploadStatus, e.message);uploadStatus.className = 'source-warning';}
-        finally {prefs.uploadingSubtitle = false;upload.disabled = blocked;start.disabled = blocked || !work.can_start;upload.value = '';}
+        finally {prefs.uploadingSubtitle = false;upload.disabled = blocked;start.disabled = blocked || processBusy || !work.can_start;upload.value = '';}
       };
       method.onchange = () => {prefs.method = method.value;syncDialogueRows();};track.onchange = () => {prefs.track = track.value;syncDialogueRows();};
     }
     const checkLabel = node('label', undefined, 'check'),check = node('input');check.type = 'checkbox';check.checked = prefs.publish[name];check.onchange = () => {prefs.publish[name] = check.checked;};checkLabel.append(check, MindexI18n.textNode(MindexI18n.msg("ui.036fd74aa103")));card.append(checkLabel);
-    const errors = node('p', '', 'source-warning');errors.setAttribute('role', 'alert');
-    const perform = (fn) => async () => {MindexI18n.setText(errors, '');try {await fn();} catch (e) {MindexI18n.setText(errors, e.message);}};
+    const perform = (type, fn) => async () => {const key = `${name}:${type}`;delete prefs.errors[key];try {await fn();} catch (e) {prefs.errors[key] = e.message;renderSource(state.source);}};
     const controls = node('div', undefined, 'work-controls');
-    const start = action(name === 'persons' ? MindexI18n.msg("ui.123bbda48a5d") : name === 'dialogue' ? MindexI18n.msg("ui.941fe1a3c3c2") : work.status === 'not_processed' ? MindexI18n.msg("ui.ab2f669c1a01") : name === 'shots' ? MindexI18n.msg("ui.705c3cbac14d") : name === 'analysis' ? MindexI18n.msg("ui.b3d17c0db3dd") : MindexI18n.msg("ui.941fe1a3c3c2"), perform(async () => {
+    const start = action(name === 'persons' ? MindexI18n.msg("ui.123bbda48a5d") : name === 'dialogue' ? MindexI18n.msg("ui.941fe1a3c3c2") : work.status === 'not_processed' ? MindexI18n.msg("ui.ab2f669c1a01") : name === 'shots' ? MindexI18n.msg("ui.705c3cbac14d") : name === 'analysis' ? MindexI18n.msg("ui.b3d17c0db3dd") : MindexI18n.msg("ui.941fe1a3c3c2"), perform('process', async () => {
       if (name === 'persons') return openPerson(source.id, prefs.publish[name]);
       const options = { publish: prefs.publish[name] };
       if (name === 'dialogue') {if (prefs.uploadingSubtitle) throw Error(MindexI18n.msg("ui.49476949fc90"));options.method = prefs.method;if (prefs.method === 'subtitle') {if (!prefs.track) throw Error(MindexI18n.msg("ui.ed4caa4cf3b3"));if (prefs.track.startsWith('file:')) options.subtitle_file = prefs.track.slice(5);else options.subtitle_stream = Number(prefs.track);}}
       await post(`/api/admin/sources/${source.id}/${name}`, options);await refreshWork(source.id);
-    }));start.disabled = blocked || !work.can_start || name === 'dialogue' && prefs.uploadingSubtitle;controls.append(start);
-    const update = action(MindexI18n.msg(['shots', 'analysis'].includes(name) ? "ui.update_moment_embedding" : name === 'dialogue' ? "ui.update_dialogue_embedding" : "ui.0cb51b994992"), perform(async () => {await post(`/api/admin/sources/${source.id}/publish`, { work: name, scope: 'moment' });await refreshWork(source.id);}));update.disabled = blocked || !work.can_publish;controls.append(update);
+    }));start.disabled = blocked || processBusy || !work.can_start || name === 'dialogue' && prefs.uploadingSubtitle;controls.append(start);
+    const update = action(MindexI18n.msg(['shots', 'analysis'].includes(name) ? "ui.update_moment_embedding" : name === 'dialogue' ? "ui.update_dialogue_embedding" : "ui.0cb51b994992"), perform('publish', async () => {await post(`/api/admin/sources/${source.id}/publish`, { work: name, scope: 'moment' });await refreshWork(source.id);}));update.disabled = blocked || rows[1].running || !work.can_publish;controls.append(update);
     if (['shots', 'analysis'].includes(name)) {
-      const extra = action(MindexI18n.msg("ui.update_extra_search"), perform(async () => {
+      const extra = action(MindexI18n.msg("ui.update_extra_search"), perform('extra', async () => {
         await post(`/api/admin/sources/${source.id}/publish`, { work: name, scope: 'extra' });await refreshWork(source.id);
-      }));extra.disabled = blocked || !work.can_publish_extra;controls.append(extra);
+      }));extra.disabled = blocked || rows[2].running || !work.can_publish_extra;controls.append(extra);
       const coverage = work.extra_search || {};
       card.append(node('p', MindexI18n.msg("ui.extra_search_coverage", {done: coverage.indexed_segments || 0, total: coverage.expected_segments || 0}), 'muted'));
     }
     if (['shots', 'dialogue', 'analysis'].includes(name) && source.shot_count) controls.append(action(MindexI18n.msg("ui.0ef38438801b"), async () => {state.kind = 'shot';state.parent = null;state.segmentPage = 1;await loadSegments();$('segment-list').scrollIntoView({ block: 'start', behavior: 'smooth' });if (name !== 'shots') notify(MindexI18n.msg("ui.1844d03ed5e7"));}));
     if (name === 'persons') {const link = node('a', MindexI18n.msg("ui.8face9a73c34"), 'quiet nav-link');link.href = `/persons?source=${encodeURIComponent(source.id)}#review`;controls.append(link);card.append(node('p', MindexI18n.msg("ui.4e65b9bde907"), 'muted'));}
     card.append(controls);
-    for (const [type, task] of [['process', work.task], ['publish', work.publish_task], ['extra', work.extra_publish_task]]) if (task) {
-      const progress = task.progress || {},publishing = type !== 'process' || progress.phase === 'publish' || publicationStages.has(progress.stage);
-      if (type === 'process' && publishing) {
-        if (progress.processing_progress) appendWorkProgress(card, label, 'process', 'complete', progress.processing_progress);
-        else appendWorkProgress(card, label, 'process', 'complete', {});
-        // A newer independent update has its own row; avoid repeating an older
-        // automatic update from this processing job.
-        if (!work.publish_task || work.publish_task.created_at < task.created_at) {
-          const publicationStatus = task.publication?.status;
-          appendWorkProgress(card, label, 'publish', publicationStatus === 'complete' ? 'complete' : publicationStatus === 'failed' ? 'failed' : task.status, progress);
-        }
-      } else {
-        appendWorkProgress(card, type === 'extra' ? MindexI18n.msg("ui.update_extra_search") : label, type, task.status, progress);
-      }
-      if (MindexI18n.system(task.error)) card.append(node('p', MindexI18n.system(task.error), 'source-warning'));
+    for (const row of rows) appendWorkProgress(card, label, row);
+    for (const {type, task} of rows) if (type === 'process' && task) {
       if (['failed', 'interrupted'].includes(task.status)) {
-        const endpoint = type !== 'process' || ['shots', 'analysis'].includes(name) ? '/api/admin/source-tasks' : name === 'dialogue' ? '/api/admin/dialogue-tasks' : '/api/persons/tasks';
-        const retry = action(type !== 'process' ? MindexI18n.msg("ui.914e1182b421") : MindexI18n.msg("ui.23e1269c0ea7"), perform(async () => {await post(`${endpoint}/${task.id}/retry`, {});await refreshWork(source.id);}));retry.disabled = blocked;card.append(retry);
+        const endpoint = ['shots', 'analysis'].includes(name) ? '/api/admin/source-tasks' : name === 'dialogue' ? '/api/admin/dialogue-tasks' : '/api/persons/tasks';
+        const retry = action(MindexI18n.msg("ui.23e1269c0ea7"), perform('process', async () => {await post(`${endpoint}/${task.id}/retry`, {});await refreshWork(source.id);}));retry.disabled = blocked || processBusy;card.append(retry);
       }
     }
-    if (work.publication?.status === 'failed') card.append(node('p', MindexI18n.msg("ui.4b12665479da", { p0: MindexI18n.system(work.publication.error) }), 'source-warning'));
     if (MindexI18n.system(work.start_reason)) card.append(node('p', MindexI18n.system(work.start_reason), 'muted'));
     if (name === 'persons' && work.setup?.missing?.length) {card.append(node('p', work.setup.missing.map(MindexI18n.system).join('；'), 'muted'));const link = node('a', MindexI18n.msg("ui.8af96795e1d4"));link.href = '/persons';card.append(link);}
-    card.append(errors);grid.append(card);
+    grid.append(card);
   }
   if (busy) workPoll = setTimeout(() => run(() => refreshWork(source.id)), 2000);
 }
@@ -351,12 +415,13 @@ async function refreshWork(sourceId, selection = selectionRequest) {
   try {
     const source = await api(`/api/admin/sources/${sourceId}`, {signal: selectionController?.signal});
     if (selection !== selectionRequest || request !== workRequest || state.source?.id !== sourceId) return;
-    const changed = state.source.work && (source.shot_count !== state.source.shot_count || source.moment_count !== state.source.moment_count);
+    const changed = state.source.work && (source.shot_count !== state.source.shot_count || source.moment_count !== state.source.moment_count || source.scene_count !== state.source.scene_count);
     state.source = source;renderSource(source);if (changed) await Promise.all([loadSources(), loadSegments()]);
   } catch (e) {
     if (e.name === 'AbortError' || selection !== selectionRequest || request !== workRequest || state.source?.id !== sourceId) return;
     state.source = {...state.source, work: null, statusError: e.message};
     if (state.source.media) renderSource(state.source);
+    else {$('source-detail').replaceChildren();renderWork(state.source, $('source-detail'));}
   }
 }
 let personContext = null,personSetupRequest = 0;

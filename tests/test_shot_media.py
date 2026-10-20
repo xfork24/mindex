@@ -290,3 +290,24 @@ def test_request_local_dependency_checks_reuse_queries_and_probes(library, monke
         media.references('s', 0, 0.5)
     assert len(probes) == 1
     assert len(queries) == 2
+
+
+def test_float_boundary_tail_is_not_a_concat_input(library):
+    service = ShotMedia(library)
+    refs = service.references('s', .5, 1 + 1.4210854715202004e-14)
+    assert len(refs) == 1
+    assert refs[0].shot_id == '0'
+    # The same tolerance also applies at the beginning of an interval.
+    refs = service.references('s', 1 - 1.4210854715202004e-14, 1.5)
+    assert len(refs) == 1
+    assert refs[0].shot_id == '1'
+    assert len(service.references('s', 1, 1.0000005)) == 1
+
+
+def test_ffmpeg_times_use_decimal_not_scientific_notation(library):
+    service = ShotMedia(library)
+    refs = service.references('s', 1 + 1.4210854715202004e-14, 1.0000005)
+    args = service._inputs(refs, video_only=True)
+    assert args[args.index('-ss') + 1] == '0.000000000'
+    assert args[args.index('-t') + 1] == '0.000000500'
+    assert 'trim=duration=0.000000500' in args[args.index('-filter_complex') + 1]

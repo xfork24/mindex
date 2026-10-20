@@ -130,6 +130,11 @@ class ShotMedia:
             a, b = max(start, shot['start']), min(end, shot['end'])
             if b <= a:
                 continue
+            # Boundary rounding can leave a sub-microsecond tail in an adjacent
+            # shot. Keep genuinely tiny frame lookups, but omit such tails from
+            # longer intervals so FFmpeg never receives a phantom input.
+            if b - a < EPSILON and end - start > EPSILON:
+                continue
             if abs(a - cursor) > EPSILON:
                 raise MediaError('Shot coverage has a gap or overlap')
             path = self._path(shot['path'])
@@ -213,8 +218,8 @@ class ShotMedia:
         width, height = first['width'] // 2 * 2, first['height'] // 2 * 2
         for i, ref in enumerate(refs):
             path = self._path(ref.path)
-            duration = ref.end - ref.start
-            args += ['-ss', str(ref.start), '-t', str(duration), '-i', str(path)]
+            duration = f'{ref.end - ref.start:.9f}'
+            args += ['-ss', f'{ref.start:.9f}', '-t', duration, '-i', str(path)]
             if not audio_only:
                 filters.append(f'[{i}:v]trim=duration={duration},setpts=PTS-STARTPTS,'
                                f'scale={width}:{height}:force_original_aspect_ratio=decrease,'

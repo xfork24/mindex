@@ -14,13 +14,13 @@ from .config import Config, StrictModel
 from .pipeline import Pipeline
 from .processing_lock import ProcessingLock, recover_tasks
 from .storage import dumps
-from .task_progress import save_task_progress
+from .task_progress import reset_task_attempt, save_task_progress, task_logs
 
 Work = Literal["shots", "dialogue", "analysis", "persons"]
 
 
 class WorkOptions(StrictModel):
-    publish: bool = True
+    publish: bool = False
 
 
 class PublishOptions(StrictModel):
@@ -73,11 +73,13 @@ def publish_work(config, source_id, work, embedder=None, *, progress=None, scope
     pipeline = Pipeline(config)
     if work == "persons":
         active = pipeline.store.active_index()
-        if not active or not pipeline.store.one(
+        if not active:
+            raise ValueError("请先发布内容索引；请单独执行该素材的嵌入更新")
+        if not pipeline.store.one(
             "SELECT 1 FROM index_members WHERE index_id=? AND json_extract(snapshot,'$.source_id')=? LIMIT 1",
             (active["id"], source_id),
         ):
-            IndexBuilder(config, embedder).build(activate=True, source_id=source_id, progress=progress)
+            raise ValueError("该素材尚未发布内容索引；请单独执行该素材的嵌入更新")
         if progress:
             progress({"stage": "publish", "message": "正在发布人物检索"})
         from .processing_lock import index_write_lock
@@ -90,7 +92,7 @@ def publish_work(config, source_id, work, embedder=None, *, progress=None, scope
         activate=True,
         source_id=source_id,
         kinds=("shot", "scene") if scope == "extra" else ("moment",),
-        channels=None,
+        channels=[{"shots": "visual", "analysis": "analysis", "dialogue": "dialogue"}[work]],
         progress=progress,
     )
     return {"index_id": index_id}
@@ -179,8 +181,12 @@ class SourceTasks:
         self.threads = {}
         recover_tasks(store, "source_tasks")
 
-    def lock(self, source_id, work):
-        return ProcessingLock(self.runtime.current(), source_id=source_id, work=work)
+    def lock(self, source_id, work, options=None):
+        from .processing_lock import PublicationLock, task_lock_work
+
+        values = options.model_dump() if options is not None and hasattr(options, "model_dump") else options
+        kind = PublicationLock if work == 'publish' else ProcessingLock
+        return kind(self.runtime.current(), source_id=source_id, work=task_lock_work(work, values))
 
     def get(self, task_id):
         row = self.store.one("SELECT * FROM source_tasks WHERE id=?", (task_id,))
@@ -197,7 +203,7 @@ class SourceTasks:
         return source
 
     def start(self, source_id, work, options):
-        lock = self.lock(source_id, work)
+        lock = self.lock(source_id, work, options)
         try:
             lock.acquire()
         except Timeout as exc:
@@ -245,7 +251,7 @@ class SourceTasks:
         row = self.store.one("SELECT * FROM source_tasks WHERE id=?", (task_id,))
         if not row:
             raise HTTPException(404, "找不到素材任务")
-        lock = self.lock(row["source_id"], row["work"])
+        lock = self.lock(row["source_id"], row["work"], json.loads(row["options"]))
         try:
             lock.acquire()
         except Timeout as exc:
@@ -258,10 +264,7 @@ class SourceTasks:
             if row["status"] not in {"failed", "interrupted"} and publication.get("status") != "failed":
                 raise HTTPException(409, "仅失败、中断或检索更新失败的任务可以重试")
             config = restore_config(row["config"], self.runtime, self.store)
-            self.store.execute(
-                "UPDATE source_tasks SET status='queued',error=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                (task_id,),
-            )
+            reset_task_attempt(self.store, "source_tasks", task_id)
             self.launch(task_id, config, lock)
             return self.get(task_id)
         except BaseException:
@@ -273,9 +276,12 @@ class SourceTasks:
         self.threads[task_id] = thread
         thread.start()
 
+    @task_logs("source_tasks")
     def run(self, task_id, config, lock):
         try:
             row = self.store.one("SELECT * FROM source_tasks WHERE id=?", (task_id,))
+            if row['work'] == 'publish':
+                lock.admit()
             self.store.execute(
                 "UPDATE source_tasks SET status='running',updated_at=CURRENT_TIMESTAMP WHERE id=?", (task_id,)
             )
@@ -314,15 +320,9 @@ class SourceTasks:
                     result = {"processing_status": "complete"}
                     save("result", result)
                 if options["publish"]:
-                    save("progress", {"stage": "publish", "phase": "publish", "message": "处理完成，正在更新检索"})
-                    publication_attempt(
-                        config,
-                        row["source_id"],
-                        row["work"],
-                        embedder=self.embedder,
-                        save=lambda v: save("publication", v),
-                        progress=lambda v: save("progress", v),
-                    )
+                    save('publication', enqueue_publications(
+                        self.runtime, self.store, row['source_id'], row['work'], self.embedder,
+                    ))
                 else:
                     save("publication", {"status": "not_requested"})
             self.store.execute(
@@ -337,6 +337,32 @@ class SourceTasks:
         finally:
             lock.release()
             self.threads.pop(task_id, None)
+
+
+def enqueue_publications(runtime, store, source_id, work, embedder=None):
+    """Automatic chaining creates the same independent tasks as manual clicks."""
+    from .curation import Library
+
+    manager = SourceTasks(runtime, store, embedder)
+    info = Library(store).source(source_id)['work'][work]
+    tasks = []
+    for scope in ('moment', 'extra') if work in {'shots', 'analysis'} else ('moment',):
+        field = 'search' if scope == 'moment' else 'extra_search'
+        if work != 'persons' and not info.get(field, {}).get('expected_segments'):
+            continue
+        # Attach to a live execution rather than creating a duplicate subtask.
+        existing = store.one(
+            "SELECT * FROM source_tasks WHERE source_id=? AND work='publish' "
+            "AND json_extract(options,'$.work')=? "
+            "AND COALESCE(json_extract(options,'$.scope'),'moment')=? "
+            "AND status IN ('queued','running') ORDER BY rowid DESC LIMIT 1",
+            (source_id, work, scope),
+        )
+        task = public_task(existing) if existing else manager.start(
+            source_id, 'publish', PublishOptions(work=work, scope=scope),
+        )
+        tasks.append(task['id'])
+    return {'status': 'queued' if tasks else 'complete', 'task_ids': tasks}
 
 
 def source_tasks_router(runtime, store, embedder=None):

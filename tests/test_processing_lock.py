@@ -119,3 +119,79 @@ def test_gpu_lock_business_setting_roundtrip_reset_and_validation(config):
     client.put("/api/settings/business", json={"enforce_gpu_lock": True})
     assert client.delete("/api/settings/business").status_code == 204
     assert client.get("/api/settings").json()["business"]["enforce_gpu_lock"] is False
+
+
+@pytest.mark.parametrize('enforced', [False, True])
+def test_all_four_processing_groups_across_sources_follow_gpu_setting(config, monkeypatch, enforced):
+    """Hold real task workers concurrently, rather than just probing lock files."""
+    import json
+    from types import SimpleNamespace
+
+    from test_source_work import finished
+
+    from mindex.person_processing import PersonOptions, PersonTasks
+    from mindex.storage import Store
+
+    config.enforce_gpu_lock = enforced
+    store = Store(config.data_dir)
+    for sid in ('source-a', 'source-b'):
+        store.execute('INSERT INTO sources(id,name,path,media,layout_key,prepared) VALUES(?,?,?,?,?,1)',
+                      (sid, sid, sid + '.mp4', json.dumps({'duration':10}), config.layout_key))
+    runtime = RuntimeConfig(config, store)
+    sources = SourceTasks(runtime, store)
+    dialogue = DialogueTasks(runtime, store)
+    persons = PersonTasks(runtime, store)
+    release, all_entered = threading.Event(), threading.Event()
+    entered, guard = set(), threading.Lock()
+    expected = 1 if enforced else 8
+
+    def wait(sid, work):
+        with guard:
+            entered.add((sid, work))
+            if len(entered) == expected:
+                all_entered.set()
+        assert release.wait(10)
+
+    monkeypatch.setattr(Pipeline, 'detect_source', lambda self, sid, progress: wait(sid, 'shots'))
+    monkeypatch.setattr(Pipeline, 'split', lambda *args: None)
+    monkeypatch.setattr(Pipeline, 'analyze', lambda self, sid, progress: wait(sid, 'analysis'))
+    monkeypatch.setattr('mindex.dialogue_tasks.execute_dialogue',
+                        lambda cfg, sid, **kw: wait(sid, 'dialogue') or {'index_id':None})
+    monkeypatch.setattr('mindex.person_processing.PersonProcessor',
+                        lambda cfg: SimpleNamespace(run=lambda sid, opts, progress: wait(sid, 'persons') or {}))
+    jobs = []
+
+    def start(sid, work):
+        if work in ('shots','analysis'):
+            return sources, sources.start(sid, work, WorkOptions(publish=False))
+        if work == 'dialogue':
+            return dialogue, dialogue.start(sid, DialogueOptions(publish=False))
+        return persons, persons.start(sid, PersonOptions(publish=False))
+
+    try:
+        jobs.append(start('source-a', 'shots'))
+        for sid in ('source-a', 'source-b'):
+            for work in ('shots','analysis','dialogue','persons'):
+                if (sid,work) == ('source-a','shots'):
+                    continue
+                if enforced:
+                    with pytest.raises(Exception) as exc:
+                        start(sid, work)
+                    assert exc.value.status_code == 409
+                else:
+                    jobs.append(start(sid, work))
+        assert all_entered.wait(3), entered
+        assert len(entered) == expected
+        assert all(manager.get(task['id'])['status'] == 'running' for manager,task in jobs)
+        # Duplicate execution of the same source and work stays guarded.
+        with pytest.raises(Exception) as exc:
+            start('source-a', 'shots')
+        assert exc.value.status_code == 409
+        SourceTasks(runtime, store)
+        DialogueTasks(runtime, store)
+        PersonTasks(runtime, store)
+        assert all(manager.get(task['id'])['status'] == 'running' for manager,task in jobs)
+    finally:
+        release.set()
+        for manager,task in jobs:
+            assert finished(manager, task)['status'] == 'complete'

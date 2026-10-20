@@ -1552,8 +1552,8 @@
     "en": "{p0} media items"
   },
   "ui.b53548f018e9": {
-    "zh": "{p0} 镜头 · {p1} 精细片段 · {p2}",
-    "en": "{p0} shots · {p1} moments · {p2}"
+    "zh": "{p0} 镜头 · {p1} 精细片段 · {p3} 场景",
+    "en": "{p0} shots · {p1} moments · {p3} scenes"
   },
   "ui.c4a3685c02e7": {
     "zh": "已隐藏 · ",
@@ -7292,12 +7292,12 @@
     "en": "Do not use a cloned voice"
   },
   "ui.update_extra_search": {
-    "zh": "更新shot/scene嵌入",
+    "zh": "更新shot/scene场景嵌入",
     "en": "Update shot/scene embeddings"
   },
   "ui.extra_search_coverage": {
-    "zh": "额外检索（shot / scene）：{done}/{total} 段",
-    "en": "Extra search (shot / scene): {done}/{total} segments"
+    "zh": "shot/scene场景嵌入（已发布）：{done}/{total}个片段",
+    "en": "Published shot/scene embeddings: {done}/{total} segments"
   },
   "ui.moment_search_coverage": {
     "zh": "检索（moment）：{p0} · {p1}/{p2} {p3}",
@@ -7314,5 +7314,113 @@
   "ui.new_role": {
     "zh": "新建角色",
     "en": "New character"
+  },
+  "ui.work_shots_coverage": {
+    "zh": "已拆分{done}/{total}个分镜",
+    "en": "Split {done}/{total} shots"
+  },
+  "ui.work_analysis_coverage": {
+    "zh": "已分析{done}/{total}个片段",
+    "en": "Analyzed {done}/{total} segments"
+  },
+  "ui.work_dialogue_coverage": {
+    "zh": "已处理{done}/{total}条对白",
+    "en": "Processed {done}/{total} utterances"
+  },
+  "ui.work_persons_coverage": {
+    "zh": "已匹配{done}/{total}个镜头",
+    "en": "Matched {done}/{total} shots"
+  },
+  "ui.work_moment_coverage": {
+    "zh": "moment嵌入已更新{done}/{total}个精细片段",
+    "en": "Moment embeddings updated for {done}/{total} segments"
+  },
+  "ui.work_extra_coverage": {
+    "zh": "shot/scene场景嵌入已更新{done}/{total}个片段",
+    "en": "shot/scene embeddings updated for {done}/{total} segments"
+  },
+  "ui.work_dialogue_index_coverage": {
+    "zh": "对白嵌入已更新{done}/{total}个片段",
+    "en": "Dialogue embeddings updated for {done}/{total} segments"
+  },
+  "ui.work_person_index_coverage": {
+    "zh": "人物检索已更新{done}/{total}个镜头",
+    "en": "Person search updated for {done}/{total} shots"
+  },
+  "ui.work_shot_index_coverage": {
+    "zh": "已嵌入{done}/{total}个镜头",
+    "en": "Embedded {done}/{total} shots"
+  },
+  "ui.work_scene_index_coverage": {
+    "zh": "已嵌入{done}/{total}个场景",
+    "en": "Embedded {done}/{total} scenes"
+  },
+  "ui.analysis_skipped_reason": {
+    "zh": "{count}个片段已略过：{reason}",
+    "en": "{count} segments skipped: {reason}"
+  },
+  "ui.analysis_reason_unknown": {
+    "zh": "历史记录未保存原因",
+    "en": "No reason saved in the historical record"
+  },
+  "ui.analysis_unfinished_reason": {
+    "zh": "{count}个片段尚未完成，本次任务未完成原因：{reason}",
+    "en": "{count} segments remain unfinished; task did not finish: {reason}"
+  },
+  "ui.analysis_pending_count": {
+    "zh": "{count}个片段尚未分析",
+    "en": "{count} segments not yet analyzed"
+  },
+  "ui.coverage_inputs_changed": {
+    "zh": "{count}个片段的输入已变化，待增量更新（复用其余已完成结果）",
+    "en": "{count} segments have changed bounds or content; their old embeddings need updating"
+  },
+  "ui.coverage_not_embedded": {
+    "zh": "{count}个片段待补齐当前输入对应的嵌入",
+    "en": "{count} segments have no complete embeddings for the current inputs"
+  },
+  "ui.coverage_unpublished": {
+    "zh": "{count}个片段已有可复用嵌入，尚未发布到当前检索索引",
+    "en": "{count} segments have reusable embeddings awaiting publication to the active search index"
+  },
+  "ui.coverage_person_unpublished": {
+    "zh": "仍有{count}个镜头尚未发布当前人物处理结果",
+    "en": "Current person results for {count} shots are not yet published"
+  },
+  "ui.coverage_person_unprocessed": {
+    "zh": "{count}个镜头尚未完成人物处理",
+    "en": "Person processing is incomplete for {count} shots"
+  },
+  "ui.coverage_no_audio": {
+    "zh": "素材无音轨，无需处理对白或生成对白嵌入",
+    "en": "No audio track; dialogue processing and embeddings are not required"
+  },
+  "ui.coverage_disabled": {
+    "zh": "对白处理已禁用",
+    "en": "Dialogue processing is disabled"
+  },
+  "ui.coverage_no_content": {
+    "zh": "当前无有效文本，无需生成文本嵌入",
+    "en": "No usable text is available for text embeddings"
+  },
+  "ui.coverage_no_results": {
+    "zh": "前置处理尚无结果，暂无可嵌入片段",
+    "en": "No upstream processing results are available for embedding"
+  },
+  "ui.coverage_missing_files": {
+    "zh": "缺少{count}个媒体或缩略图文件，需修复",
+    "en": "{count} media or thumbnail files are missing and require repair"
+  },
+  "ui.coverage_not_started": {
+    "zh": "尚未执行该处理任务",
+    "en": "This processing task has not been run"
+  },
+  "ui.work_loading": {
+    "zh": "素材处理工作台加载中…",
+    "en": "Loading material processing workbench…"
+  },
+  "ui.search_analysis_skipped": {
+    "zh": "该片段的 LLM 分析已略过",
+    "en": "LLM analysis was skipped for this segment"
   }
 }

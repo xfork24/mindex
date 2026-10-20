@@ -56,10 +56,16 @@ def source_work(store, source, *, segments=None, analysis_rows=None, active=None
     if scene_plan:
         plan = json.loads(scene_plan["data"])
         if isinstance(plan, list):
-            planned_ids = {
-                fingerprint([sid, "scene", round(start, 6), round(end, 6), scene_plan["profile"]])
-                for start, end in plan
-            }
+            scenes = [s for s in segments if s["kind"] == "scene"
+                      and s["generation"] == scene_plan["profile"] and s.get("parent_id") is None]
+            for start, end in plan:
+                # Match Pipeline._segment's existing-record lookup. Historical IDs
+                # need not equal the ID a current fingerprint would generate.
+                existing = next((s for s in scenes if abs(s["start"] - start) < 1e-6
+                                 and abs(s["end"] - end) < 1e-6), None)
+                planned_ids.add(existing["id"] if existing else fingerprint(
+                    [sid, "scene", round(start, 6), round(end, 6), scene_plan["profile"]]
+                ))
     expected_ids = segment_ids | planned_ids
     annotations = {
         r["segment_id"]
@@ -68,11 +74,17 @@ def source_work(store, source, *, segments=None, analysis_rows=None, active=None
             (sid,),
         )
     } & expected_ids
-    skipped = {r["segment_id"] for r in store.rows(
-        "SELECT a.segment_id FROM annotations a JOIN segments s ON s.id=a.segment_id "
+    skipped_rows = store.rows(
+        "SELECT a.segment_id,a.data FROM annotations a JOIN segments s ON s.id=a.segment_id "
         "WHERE s.source_id=? AND json_extract(a.data,'$.status')='skipped' "
         "AND a.rowid=(SELECT MAX(b.rowid) FROM annotations b WHERE b.segment_id=a.segment_id)", (sid,)
-    )} & annotations
+    )
+    skipped = {r["segment_id"] for r in skipped_rows} & annotations
+    skipped_reasons = defaultdict(int)
+    for row in skipped_rows:
+        if row["segment_id"] in skipped:
+            value = json.loads(row["data"])
+            skipped_reasons[value.get("reason") or value.get("message") or ""] += 1
     dialogue = current_dialogue(store, sid) or {}
     latest_dialogue = store.one(
         "SELECT data FROM channel_data WHERE source_id=? AND channel='dialogue'", (sid,)
@@ -95,7 +107,6 @@ def source_work(store, source, *, segments=None, analysis_rows=None, active=None
     kinds = ("moment", "shot", "scene")
     fresh = snapshots_for(SimpleNamespace(store=store), sid, kinds, status_only=True,
                           segments=segments, analysis_rows=analysis_rows)
-    old = {s["id"]: s for s in published}
     work = {
         "shots": {
             "status": "complete"
@@ -105,6 +116,7 @@ def source_work(store, source, *, segments=None, analysis_rows=None, active=None
             else "not_processed",
             "result": {
                 "shots": len(shots),
+                "completed_shots": source.get("completed_shots", len(shots) if not source["missing_artifacts"] else 0),
                 "moments": source["moment_count"],
                 "missing_artifacts": source["missing_artifacts"],
             },
@@ -129,6 +141,7 @@ def source_work(store, source, *, segments=None, analysis_rows=None, active=None
             "result": {
                 "analyzed": len(annotations - skipped),
                 "skipped": len(skipped),
+                "skipped_reasons": [{"reason": reason, "count": count} for reason, count in sorted(skipped_reasons.items())],
                 "pending": pending,
                 "total": len(expected_ids),
                 "scenes": sum(s["kind"] == "scene" for s in segments) + len(planned_ids - segment_ids),
@@ -144,26 +157,9 @@ def source_work(store, source, *, segments=None, analysis_rows=None, active=None
             "setup": person_setup(store, sid),
         },
     }
-    for name, channel in (("shots", "visual"), ("dialogue", "dialogue"), ("analysis", "analysis")):
-        for field, selected_kinds in (("search", {"moment"}), ("extra_search", {"shot", "scene"})):
-            expected = [s for s in fresh if s["kind"] in selected_kinds and channel in s["channel_versions"]]
-            current = bool(active and expected) and all(
-                s["id"] in old and old[s["id"]]["channel_versions"].get(channel) == s["channel_versions"][channel]
-                for s in expected
-            )
-            if published and all(not s["channel_versions"] for s in published):
-                current = bool(expected) and all(
-                    s["id"] in old and (channel == "visual" or
-                    s["views"].get(channel, "") == old[s["id"]]["views"].get(channel, ""))
-                    for s in expected
-                )
-            view = "video" if channel == "visual" else channel
-            work[name][field] = {
-                "current": current,
-                "indexed_segments": sum(s["kind"] in selected_kinds and view in s["indexed_views"] for s in published),
-                "expected_segments": sum(channel == "visual" or bool(s["views"].get(channel)) for s in expected),
-                "index_id": active["id"] if active else None,
-            }
+    from .embedding_coverage import embedding_coverage
+    for name, coverage_fields in embedding_coverage(store, sid, active, fresh, segments, published).items():
+        work[name].update(coverage_fields)
     release, person_snapshot = catalogue.published(active["id"], source_id=sid) if active else (None, {})
     evidence = store.rows(
         "SELECT * FROM person_evidence WHERE source_id=? AND status='accepted' ORDER BY id", (sid,)
@@ -174,7 +170,7 @@ def source_work(store, source, *, segments=None, analysis_rows=None, active=None
     published_evidence = [e for e in person_snapshot.get("evidence", []) if e["source_id"] == sid]
     published_coverage = [e for e in person_snapshot.get("coverage", []) if e["source_id"] == sid]
     work["persons"]["search"] = {
-        "current": bool(release)
+        "current": bool(release) and bool(shots) and covered_shots(shots, published_coverage) == len(shots)
         and same_json(evidence, published_evidence)
         and same_json(
             sorted([{**c, "data": json.loads(c["data"])} for c in coverage], key=lambda c: c["cache_id"]),

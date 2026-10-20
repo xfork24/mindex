@@ -20,7 +20,7 @@ from .config import StrictModel, fingerprint
 from .persons import Persons, uid
 from .processing_lock import ProcessingLock, recover_tasks
 from .storage import Store, dumps
-from .task_progress import save_task_progress
+from .task_progress import reset_task_attempt, save_task_progress, task_logs
 
 
 class PersonOptions(StrictModel):
@@ -913,9 +913,7 @@ class PersonTasks:
             identifier = identifier or uid()
             if self.store.one("SELECT id FROM person_tasks WHERE id=?", (identifier,)):
                 # 重试沿用冻结配置，凭据由档案引用或环境恢复。
-                self.store.execute(
-                    "UPDATE person_tasks SET status='queued',error=NULL WHERE id=?", (identifier,)
-                )
+                reset_task_attempt(self.store, "person_tasks", identifier)
             else:
                 self.store.execute(
                     "INSERT INTO person_tasks(id,source_id,status,config,options) VALUES(?,?,?,?,?)",
@@ -931,6 +929,7 @@ class PersonTasks:
             lock.release()
             raise
 
+    @task_logs("person_tasks")
     def run(self, identifier, config, source_id, options, lock):
         try:
             self.store.execute(
@@ -941,19 +940,15 @@ class PersonTasks:
             def progress(value):
                 save_task_progress(self.store, "person_tasks", identifier, value)
 
-            from .source_tasks import publication_attempt
             row = self.store.one("SELECT result FROM person_tasks WHERE id=?", (identifier,))
             result = json.loads(row["result"]) if row["result"] and options.publish else PersonProcessor(config).run(
                 source_id, options.model_copy(update={"publish": False}), progress)
             self.store.execute("UPDATE person_tasks SET result=? WHERE id=?", (dumps(result), identifier))
             if options.publish:
-                progress({"stage": "publish", "phase": "publish", "message": "人物处理完成，正在更新检索"})
-                publication = publication_attempt(
-                    config, source_id, "persons", save=lambda value: self.store.execute(
-                        "UPDATE person_tasks SET publication=? WHERE id=?", (dumps(value), identifier)),
-                    progress=progress,
-                )
-                result["release"] = publication if publication["status"] == "complete" else None
+                from .source_tasks import enqueue_publications
+
+                publication = enqueue_publications(self.runtime, self.store, source_id, 'persons')
+                self.store.execute('UPDATE person_tasks SET publication=? WHERE id=?', (dumps(publication), identifier))
             else:
                 self.store.execute("UPDATE person_tasks SET publication=? WHERE id=?",
                                    (dumps({"status": "not_requested"}), identifier))

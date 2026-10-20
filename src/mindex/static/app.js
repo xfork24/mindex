@@ -122,12 +122,13 @@ function bestPersonEvidence(evidence) {
 }
 
 function details(result) {
+  const annotation = result.annotation || {};
   const target = $('detail-content');target.replaceChildren();
   target.append(element('h3', result.display_name || result.source_name));
   if (result.display_name) target.append(element('p', result.source_name));
   const video = element('video');queueMicrotask(() => ShotPlayer.attach(video, `/api/playlists/${result.id}`));video.controls = true;video.preload = 'metadata';
-  target.append(video, element('p', `${clock(result.start)} — ${clock(result.end)}`), element('p', result.annotation_status === 'not_analyzed' ? MindexI18n.msg("ui.fec3adb80692") : result.annotation.description));
-  for (const [title, items] of [[MindexI18n.msg("ui.d9d9827827e1"), result.annotation.actions], [MindexI18n.msg("ui.cf5030475efb"), result.annotation.visual_evidence], [MindexI18n.msg("ui.cf335345e962"), result.annotation.dialogue_inference], [MindexI18n.msg("ui.43f1d3835b20"), result.annotation.uncertainty]]) {
+  target.append(video, element('p', `${clock(result.start)} — ${clock(result.end)}`), element('p', annotation.description || MindexI18n.msg(result.annotation_status === 'skipped' ? 'ui.search_analysis_skipped' : 'ui.fec3adb80692')));
+  for (const [title, items] of [[MindexI18n.msg("ui.d9d9827827e1"), (annotation.actions || [])], [MindexI18n.msg("ui.cf5030475efb"), (annotation.visual_evidence || [])], [MindexI18n.msg("ui.cf335345e962"), (annotation.dialogue_inference || [])], [MindexI18n.msg("ui.43f1d3835b20"), (annotation.uncertainty || [])]]) {
     if (items.length) target.append(element('p', `${title}：${items.join('；')}`));
   }
   if (result.dialogue.length) target.append(element('pre', result.dialogue.map((u) => `${clock(result.start + u.start)} ${u.text}`).join('\n')));
@@ -187,6 +188,7 @@ function render(data) {
     $('results').append(empty);return;
   }
   data.results.forEach((result, index) => {
+    const annotation = result.annotation || {};
     const card = element('article', undefined, 'card');
     const video = element('video');queueMicrotask(() => ShotPlayer.attach(video, `/api/playlists/${result.id}`));video.poster = result.thumbnail_url;video.controls = true;video.preload = 'none';
     const preview = element('div', undefined, 'card-preview');
@@ -204,12 +206,12 @@ function render(data) {
     }
     for (const name of personTags.slice(0, 3)) tags.append(element('span', name, 'tag'));
     channels.forEach((channel) => tags.append(element('span', routeNames[channel] || channel, 'tag')));
-    [...result.annotation.scene, ...result.annotation.emotions, ...result.annotation.shot_size].slice(0, 5).forEach((tag) => tags.append(element('span', tag, 'tag')));
+    [...(annotation.scene || []), ...(annotation.emotions || []), ...(annotation.shot_size || [])].slice(0, 5).forEach((tag) => tags.append(element('span', tag, 'tag')));
     const actions = element('div', undefined, 'card-actions');
     const detail = element('button', MindexI18n.msg("ui.faea8c1db9cc"));detail.type = 'button';detail.onclick = () => details(result);
     actions.append(detail, managementLink(result), correctionLink(result));
     const evidenceText = (result.matches || []).find((match) => match.matched_text)?.matched_text;
-    const description = result.display_name || evidenceText || (result.annotation_status === 'not_analyzed' ? '' : result.annotation.description);
+    const description = result.display_name || evidenceText || (result.annotation_status === 'not_analyzed' ? '' : annotation.description || '');
     body.append(title);
     if (description) body.append(element('p', description, 'card-description'));
     if (tags.childElementCount) body.append(tags);

@@ -380,3 +380,22 @@ def test_default_upgrade_all_granularities_without_media_cache(config, video_fil
     calls = embedder.calls
     assert publish_work(config, sid, 'analysis', embedder, scope='extra')['index_id'] == new
     assert embedder.calls == calls
+
+
+def test_skipped_null_annotation_remains_searchable_and_filters_safely(config, video_file):
+    from mindex.types import Filters
+
+    pipeline = Pipeline(config)
+    sid = pipeline.prepare(video_file)
+    segment = pipeline.store.segments(sid, 'moment')[0]
+    pipeline.store.put_json('annotations', 'segment_id', segment['id'], 'skip-profile',
+                            {'status':'skipped','reason':'模型拒绝','dialogue':[]})
+    embedder = FixtureEmbedder(config)
+    IndexBuilder(config, embedder).build(source_id=sid, channels=['visual'], activate=True)
+    engine = SearchEngine(config, embedder)
+    _, segments, _ = engine._context('moment', Filters(), text=True)
+    skipped = next(s for s in segments if s['id'] == segment['id'])
+    assert skipped['annotation'] is None and skipped['annotation_status'] == 'skipped'
+    for field in ('scene', 'emotion', 'shot_size'):
+        _, filtered, _ = engine._context('moment', Filters(**{field:'室内'}), text=True)
+        assert segment['id'] not in {s['id'] for s in filtered}

@@ -151,9 +151,9 @@ class SearchEngine:
                 filters.max_duration is not None and duration > filters.max_duration
             ):
                 continue
-            annotation = segment["annotation"]
+            annotation = segment.get("annotation") or {}
             if any(
-                value and not any(value.casefold() in item.casefold() for item in annotation[field])
+                value and not any(value.casefold() in item.casefold() for item in annotation.get(field) or [])
                 for field, value in [
                     ("scene", filters.scene),
                     ("emotions", filters.emotion),

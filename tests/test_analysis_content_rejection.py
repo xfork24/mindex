@@ -98,6 +98,8 @@ def test_task_continues_after_rejection_and_publishes_without_rejected_text(conf
     assert "已跳过" in detail["message"]
     work = client.get(f"/api/admin/sources/{sid}").json()["work"]["analysis"]
     assert work["status"] == "complete" and work["result"]["skipped"] == 2
+    assert [(r["reason"], r["count"]) for r in work["result"]["skipped_reasons"]] == [(REASON, 2)]
+    assert work["result"]["analyzed"] + work["result"]["skipped"] == work["result"]["total"]
     assert work["result"]["analyzed"] + 2 == work["result"]["total"]
     snapshots = snapshots_for(pipeline, sid, ["shot", "moment"])
     for s in snapshots:

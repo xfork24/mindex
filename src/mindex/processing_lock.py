@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import fcntl
 import hashlib
+import json
+import time
 from pathlib import Path
 
 from filelock import FileLock, Timeout
@@ -84,22 +86,56 @@ class ProcessingLock:
         self.release()
 
 
+class PublicationLock(ProcessingLock):
+    """Own a queued subtask independently while waiting for GPU admission."""
+
+    def __init__(self, config, *, source_id, work):
+        path = scope_path(config.data_dir, source_id, work)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self.locks = [SharedFileLock(config.data_dir / 'locks' / 'library.lock'),
+                      SharedFileLock(scope_path(config.data_dir, source_id, 'source')),
+                      FileLock(str(path), timeout=0, thread_local=False)]
+        self.pipeline = SharedFileLock(config.data_dir / 'pipeline.lock', exclusive=config.enforce_gpu_lock)
+
+    def admit(self):
+        while True:
+            try:
+                self.pipeline.acquire()
+                return
+            except Timeout:
+                time.sleep(.1)
+
+    def release(self):
+        self.pipeline.release()
+        super().release()
+
+
 def recover_tasks(store, table):
     """A live task owns its work lock even when GPU exclusivity is disabled."""
-    try:
-        with SharedFileLock(store.root / "pipeline.lock"):
-            _recover_tasks(store, table)
-    except Timeout:
-        pass
+    _recover_tasks(store, table)
+
+
+def task_lock_work(work, options=None):
+    if work == 'publish' and options:
+        return f"publish.{options['work']}.{options.get('scope', 'moment')}"
+    return work
 
 
 def _recover_tasks(store, table):
     for row in store.rows(f"SELECT * FROM {table} WHERE status IN ('queued','running')"):
         work = row["work"] if table == "source_tasks" else {"dialogue_tasks": "dialogue", "person_tasks": "persons"}[table]
-        path = scope_path(store.root, row["source_id"], work)
+        scoped = task_lock_work(work, json.loads(row['options']) if work == 'publish' else None)
+        path = scope_path(store.root, row["source_id"], scoped)
         path.parent.mkdir(parents=True, exist_ok=True)
         try:
-            with FileLock(str(path), timeout=0):
+            # Also respect the old publication lock while a pre-upgrade worker
+            # is still alive. New workers own only their individual subtask.
+            from contextlib import ExitStack
+
+            with ExitStack() as locks:
+                locks.enter_context(FileLock(str(path), timeout=0))
+                if scoped != work:
+                    locks.enter_context(FileLock(str(scope_path(store.root, row['source_id'], work)), timeout=0))
                 store.execute(
                     f"UPDATE {table} SET status='interrupted',error='进程已中断；请重试继续检查点',"
                     "updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('queued','running')",

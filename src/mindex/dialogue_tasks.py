@@ -22,7 +22,7 @@ from .pipeline import Pipeline
 from .processing_lock import ProcessingLock, recover_tasks
 from .runtime_settings import RuntimeConfig
 from .storage import Store, dumps
-from .task_progress import save_task_progress
+from .task_progress import reset_task_attempt, save_task_progress, task_logs
 
 log = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ class DialogueOptions(StrictModel):
     method: Literal["auto", "subtitle", "asr"] = "auto"
     subtitle_stream: int | None = Field(default=None, ge=0)
     subtitle_file: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
-    publish: bool = True
+    publish: bool = False
     workers: int = Field(default=2, ge=1, le=8)
 
     @model_validator(mode="after")
@@ -182,10 +182,7 @@ class DialogueTasks:
                     )
                     if profile:
                         getattr(config, role).api_key = profile["api_key"] or ""
-            self.store.execute(
-                "UPDATE dialogue_tasks SET status='queued',error=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                (task_id,),
-            )
+            reset_task_attempt(self.store, "dialogue_tasks", task_id)
             self._launch(task_id, config, lock)
             return self.get(task_id)
         except BaseException:
@@ -199,6 +196,7 @@ class DialogueTasks:
         self.threads[task_id] = thread
         thread.start()
 
+    @task_logs("dialogue_tasks")
     def _run(self, task_id, config, lock):
         try:
             row = self.store.one("SELECT * FROM dialogue_tasks WHERE id=?", (task_id,))
@@ -217,15 +215,10 @@ class DialogueTasks:
             )
             self.store.execute("UPDATE dialogue_tasks SET result=? WHERE id=?", (dumps(result), task_id))
             if publish:
-                from .source_tasks import publication_attempt
-                progress({"stage": "publish", "phase": "publish", "message": "对白处理完成，正在更新检索"})
-                publication = publication_attempt(
-                    config, row["source_id"], "dialogue", embedder=self.embedder,
-                    save=lambda value: self.store.execute(
-                        "UPDATE dialogue_tasks SET publication=? WHERE id=?", (dumps(value), task_id)),
-                    progress=progress,
-                )
-                result["index_id"] = publication.get("index_id")
+                from .source_tasks import enqueue_publications
+
+                publication = enqueue_publications(self.runtime, self.store, row['source_id'], 'dialogue', self.embedder)
+                self.store.execute('UPDATE dialogue_tasks SET publication=? WHERE id=?', (dumps(publication), task_id))
             else:
                 self.store.execute("UPDATE dialogue_tasks SET publication=? WHERE id=?",
                                    (dumps({"status": "not_requested"}), task_id))

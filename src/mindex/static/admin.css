@@ -159,3 +159,5 @@
 .work-status{white-space:normal}
 .segment-summary{flex-wrap:wrap;gap:8px}
 .source-heading{align-items:center}
+
+.work-latest-log{min-height:1.5em;line-height:1.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin:-6px 0 14px;font-size:12px}

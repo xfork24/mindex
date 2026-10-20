@@ -85,6 +85,15 @@ def test_uploaded_subtitle_applies_only_on_start_and_locates_dialogue(
     assert pipeline.enrich_dialogue(sid, method="subtitle", subtitle_file=uploaded["id"])["sources"][0]["reused"]
 
 
+def wait_publication(client, task_id):
+    for _ in range(1000):
+        task = client.get(f'/api/admin/source-tasks/{task_id}').json()
+        if task['status'] in ('complete','failed'):
+            return task
+        time.sleep(.01)
+    pytest.fail('embedding subtask did not finish')
+
+
 def test_subtitle_upload_errors_do_not_replace_dialogue_and_are_cleaned(config, video_file, monkeypatch):
     pipeline = Pipeline(config)
     sid = pipeline.prepare(video_file)
@@ -159,13 +168,16 @@ def test_subtitle_publish_retry_reuses_saved_dialogue(config, video_file, monkey
     options = {"method": "subtitle", "subtitle_file": uploaded["id"], "publish": True}
     task_id = client.post(f"/api/admin/sources/{sid}/dialogue", json=options).json()["id"]
     task = wait_task(client, task_id)
-    assert task["status"] == "complete" and task["publication"]["status"] == "failed"
+    assert task["status"] == "complete" and task["publication"]["status"] == "queued"
+    child_id = task["publication"]["task_ids"][0]
+    assert wait_publication(client, child_id)["status"] == "failed"
     version = current_dialogue(pipeline.store, sid)["content_version"]
     embedder.fail = False
     monkeypatch.setattr("mindex.subtitle_uploads.parse_subtitle_file", lambda *_args, **_kw: pytest.fail("发布重试不解析字幕"))
-    assert client.post(f"/api/admin/dialogue-tasks/{task_id}/retry").status_code == 202
-    task = wait_task(client, task_id)
-    assert task["status"] == "complete" and task["publication"]["status"] == "complete", task
+    assert client.post(f"/api/admin/source-tasks/{child_id}/retry").status_code == 202
+    child = wait_publication(client, child_id)
+    assert child["status"] == "complete", child
+    assert wait_task(client, task_id)["status"] == "complete"
     assert current_dialogue(pipeline.store, sid)["content_version"] == version
     snapshot = next(s for s in pipeline.store.snapshots(pipeline.store.active_index()["id"])
                     if s["views"].get("dialogue"))
@@ -180,3 +192,28 @@ def test_frame_based_subtitle_uses_source_fps_when_file_omits_it(tmp_path):
     path.write_text("{6}{42}按帧字幕\n", encoding="utf-8")
     rows = parse_subtitle_file(path, ".sub", 2, fps=30)
     assert rows[0]["start"] == pytest.approx(0.2) and rows[0]["end"] == pytest.approx(1.4)
+
+
+def test_repeat_completed_dialogue_task_reuses_parsing_and_embeddings(config, video_file, monkeypatch):
+    pipeline = Pipeline(config)
+    sid = pipeline.prepare(video_file)
+    embedder = FixtureEmbedder(config)
+    client = TestClient(create_app(config, embedder))
+    uploaded = client.post(f'/api/admin/sources/{sid}/subtitles', files={'file': ('repeat.srt', SRT)}).json()
+    options = {'method': 'subtitle', 'subtitle_file': uploaded['id'], 'publish': True}
+    first = wait_task(client, client.post(f'/api/admin/sources/{sid}/dialogue', json=options).json()['id'])
+    assert first['status'] == 'complete' and first['publication']['status'] == 'queued'
+    assert wait_publication(client, first['publication']['task_ids'][0])['status'] == 'complete'
+    version = current_dialogue(pipeline.store, sid)['content_version']
+
+    def unexpected(*args, **kwargs):
+        pytest.fail('unchanged completed dialogue must reuse parsing and embeddings')
+
+    monkeypatch.setattr('mindex.subtitle_uploads.parse_subtitle_file', unexpected)
+    for method in ('text', 'video', 'image'):
+        monkeypatch.setattr(embedder, method, unexpected)
+    second = wait_task(client, client.post(f'/api/admin/sources/{sid}/dialogue', json=options).json()['id'])
+    assert second['id'] != first['id']
+    assert second['status'] == 'complete' and second['publication']['status'] == 'queued'
+    assert wait_publication(client, second['publication']['task_ids'][0])['status'] == 'complete'
+    assert current_dialogue(pipeline.store, sid)['content_version'] == version

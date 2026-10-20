@@ -120,7 +120,7 @@ def test_no_publish_cli_only_acquires_dialogue_data(config, video_file, monkeypa
     assert pipeline.store.one("SELECT status FROM channel_data")["status"] == "no_audio"
 
 
-def test_web_dialogue_job_automatically_publishes_checked_incremental_index(config, video_file):
+def test_web_dialogue_job_skips_automatic_embedding_when_no_audio(config, video_file):
     from mindex.indexing import IndexBuilder, check_index
 
     pipeline = Pipeline(config)
@@ -137,8 +137,8 @@ def test_web_dialogue_job_automatically_publishes_checked_incremental_index(conf
     )
     task = client.get(f"/api/admin/dialogue-tasks/{task_id}").json()
     assert task["status"] == "complete", task.get("error")
-    assert task["result"]["index_id"] == pipeline.store.active_index()["id"]
-    assert task["result"]["index_id"] != old
-    assert not check_index(pipeline.store, task["result"]["index_id"])
+    assert task["result"]["index_id"] is None
+    assert task["publication"] == {"status":"complete", "task_ids":[]}
+    assert pipeline.store.active_index()["id"] == old
     assert not check_index(pipeline.store, old)
     assert embedder.calls == calls  # no audio and no changed media require zero new inference

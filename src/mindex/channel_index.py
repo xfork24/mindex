@@ -283,17 +283,10 @@ def build_channels(builder, *, activate=False, mode="auto", source_id=None, kind
     cache = reusable_vectors(builder, identity)
     opened = {index_id: vectors}
     reused = embedded = resumed = 0
+    task_reused = task_embedded = 0
     coverage = {c: 0 for c in CHANNELS}
     with store.run("index"):
-        for position, s in enumerate(snapshots):
-            if position % 100 == 0:
-                log.info(
-                    "Index channels %d/%d · reused %d · embedded %d",
-                    position,
-                    len(snapshots),
-                    reused,
-                    embedded,
-                )
+        for s in snapshots:
             store.execute(
                 "INSERT OR IGNORE INTO index_members(index_id,segment_id,snapshot) VALUES(?,?,?)",
                 (index_id, s["id"], dumps(s)),
@@ -301,6 +294,7 @@ def build_channels(builder, *, activate=False, mode="auto", source_id=None, kind
             for local_id, view, document, bounds in representations(builder, s):
                 rep_id = fingerprint([index_id, local_id])
                 key = representation_key(builder, identity, s, view, document, bounds)
+                target_rep = rep_id in targets.get(s["id"], set())
                 if rep_id in existing:
                     resumed += 1
                 else:
@@ -312,7 +306,12 @@ def build_channels(builder, *, activate=False, mode="auto", source_id=None, kind
                         vector = opened[version].vector(identifier)
                     if vector is not None:
                         reused += 1
+                        task_reused += int(target_rep)
                     else:
+                        if not target_rep:
+                            raise ModelError(
+                                f"保留索引中的 {view} 向量缺失（{s['id']}）；请单独更新对应子任务"
+                            )
                         if view == "video":
                             a, b = bounds or (0, s["end"] - s["start"])
                             with media.inference_video(
@@ -322,6 +321,7 @@ def build_channels(builder, *, activate=False, mode="auto", source_id=None, kind
                         else:
                             vector = builder.embedder.text([document])[0]
                         embedded += 1
+                        task_embedded += 1
                     vectors.upsert(rep_id, vector, s, view, document)
                     existing.add(rep_id)
                     cache[key] = (index_id, rep_id)
@@ -337,6 +337,11 @@ def build_channels(builder, *, activate=False, mode="auto", source_id=None, kind
             if s["id"] in targets and s["id"] not in completed:
                 completed.add(s["id"])
                 notify("embedding")
+                log.info(
+                    "Embedding %s [%s] %d/%d · reused %d · embedded %d",
+                    ",".join(sorted(selected)), ",".join(sorted(kinds)),
+                    len(completed), len(targets), task_reused, task_embedded,
+                )
         # 冲过 chroma HNSW 落盘阈值，避免尾部向量只存于内存与 WAL（详见 VectorIndex.flush）。
         vectors.flush()
         notify("index_check")
