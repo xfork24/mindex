@@ -13,6 +13,7 @@ from conftest import FixtureEmbedder
 from PIL import Image
 from typer.testing import CliRunner
 
+from mindex.adapters import ModelError
 from mindex.backup import (
     _saved_secrets,
     export_backup,
@@ -577,3 +578,115 @@ def test_selected_export_preserves_plain_bracket_text(library, tmp_path):
     assert store_at(target).one('SELECT error FROM source_tasks')['error'] == '[Errno 2] 找不到文件'
     assert json.loads(store_at(target).one('SELECT data FROM annotations')['data'])[
         'annotation']['description'] == description
+
+
+def test_partial_backup_excludes_unrelated_cast_and_reference_files(library, tmp_path):
+    from mindex.backup_db import filter_database
+
+    root = library[0].data_dir
+    store = store_at(root)
+    for name in ('wanted-work', 'other-work'):
+        store.execute('INSERT INTO person_entities VALUES(?,?,?)',
+                      (name, 'work', dumps({'kind': 'work', 'name': name})))
+    for source, work in zip(library[1], ('wanted-work', 'other-work')):
+        store.execute('INSERT INTO person_sources VALUES(?,?)', (source, work))
+    store.execute('INSERT INTO person_entities VALUES(?,?,?)',
+                  ('other-actor', 'actor', dumps({'kind': 'actor', 'name': '其他演员'})))
+    store.execute('INSERT INTO person_entities VALUES(?,?,?)',
+                  ('other-role', 'role', dumps({'kind': 'role', 'name': '其他角色',
+                                              'work_ids': ['other-work'], 'actor_ids': ['other-actor']})))
+    image = root / 'persons/references/unrelated.jpg'
+    image.parent.mkdir(parents=True)
+    Image.new('RGB', (20, 20)).save(image)
+    store.execute('INSERT INTO person_references(id,actor_id,path,digest,data,role_id) VALUES(?,?,?,?,?,?)',
+                  ('reference', 'other-actor', str(image.relative_to(root)), 'digest', '{}', 'other-role'))
+    store.execute('INSERT INTO person_imports(id,data,status) VALUES(?,?,?)',
+                  ('import', dumps({'work_id': 'other-work', 'images': [{'path': str(image.relative_to(root))}]}), 'draft'))
+    entities = [{'id': r['id'], **json.loads(r['data'])} for r in store.rows('SELECT * FROM person_entities')]
+    history = {'format': 1, 'entities': entities, 'evidence': [], 'coverage': []}
+    person = fingerprint(history)
+    store.execute('INSERT INTO person_versions(id,data) VALUES(?,?)', (person, dumps(history)))
+    release = fingerprint([library[2], person])
+    store.execute('INSERT INTO search_releases(id,content_id,person_id) VALUES(?,?,?)', (release, library[2], person))
+    store.activate_release(release)
+    bundle = tmp_path / 'partial-cast'
+    export(library, bundle, sources=[library[1][0]])
+    kept = store_at(bundle / 'data')
+    assert [r['id'] for r in kept.rows('SELECT id FROM person_entities')] == ['wanted-work']
+    assert not kept.rows('SELECT * FROM person_references')
+    assert not kept.rows('SELECT * FROM person_imports')
+    version = json.loads(kept.rows('SELECT data FROM person_versions')[0]['data'])
+    assert [item['id'] for item in version['entities']] == ['wanted-work']
+    assert not (bundle / 'data/persons/references/unrelated.jpg').exists()
+    # 源数据库始终保持完整，重复裁剪也不会把全局演员表带回来。
+    assert len(store.rows('SELECT * FROM person_entities')) == 4
+    filter_database(kept.path, {library[1][0]})
+    assert len(kept.rows('SELECT * FROM person_entities')) == 1
+    full = tmp_path / 'full-cast'
+    export(library, full)
+    target = tmp_path / 'cast-target'
+    restore(full, target, sources=[library[1][0]])
+    assert [r['id'] for r in store_at(target).rows('SELECT id FROM person_entities')] == ['wanted-work']
+    assert not (target / 'persons/references/unrelated.jpg').exists()
+
+
+def test_partial_backup_keeps_associated_cast_without_person_evidence(library, tmp_path):
+    root = library[0].data_dir
+    store = store_at(root)
+    store.execute('INSERT INTO person_sources VALUES(?,?)', (library[1][0], 'work'))
+    for identifier, kind, extra in [('work', 'work', {}), ('actor', 'actor', {}),
+                                    ('role', 'role', {'work_ids': ['work'], 'actor_ids': ['actor']})]:
+        store.execute('INSERT INTO person_entities VALUES(?,?,?)',
+                      (identifier, kind, dumps({'kind': kind, 'name': identifier, **extra})))
+    bundle = tmp_path / 'associated-cast'
+    export(library, bundle, sources=[library[1][0]])
+    assert {r['id'] for r in store_at(bundle / 'data').rows('SELECT id FROM person_entities')} == {'work', 'actor', 'role'}
+
+
+def test_partial_roundtrip_preserves_compatibility_evidence_bytes(library, tmp_path, video_file):
+    import hashlib
+
+    from mindex.compatibility import load_baseline
+
+    config, sources, index = library[:3]
+    root = config.data_dir
+    space = {'schema': 2, 'dimensions': 8, 'video': {'version': 1}, 'numerical_implementation': 'fixture'}
+    spec = json.loads(store_at(root).one('SELECT spec FROM index_versions WHERE id=?', (index,))['spec'])
+    spec['space'] = space
+    store_at(root).execute('UPDATE index_versions SET spec=? WHERE id=?', (dumps(spec), index))
+    directory = root / 'capabilities/v2' / fingerprint(space)
+    directory.mkdir(parents=True)
+    samples = []
+    for number in range(6):
+        path = directory / 'samples' / f'{number}.mp4'
+        path.parent.mkdir(exist_ok=True)
+        shutil.copy2(video_file, path)
+        text = f'sample {number}'
+        samples.append({'text': text, 'text_sha256': hashlib.sha256(text.encode()).hexdigest(),
+                        'path': str(path.relative_to(root)), 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()})
+    deployment = {'server_path': str(root / 'models/weights.gguf')}
+    baseline = {'schema': 2, 'space': space, 'space_id': fingerprint(space), 'deployment': deployment,
+                'deployment_id': fingerprint(deployment), 'preprocessing': space['video'], 'samples': samples,
+                'inputs_id': fingerprint(samples), 'raw_text_vectors': [[1., 0., 0., 0., 0., 0., 0., 0.]] * 6,
+                'raw_video_vectors': [[1., 0., 0., 0., 0., 0., 0., 0.]] * 6}
+    gate = directory / 'deployments' / (fingerprint(deployment) + '.json')
+    gate.parent.mkdir()
+    gate_bytes = dumps({'schema': 2, 'passed': False, 'deployment': deployment}).encode()
+    gate.write_bytes(gate_bytes)
+    gate.with_suffix('.sha256').write_text(hashlib.sha256(gate_bytes).hexdigest() + '\n')
+    original = dumps(baseline).encode()
+    (directory / 'baseline.json').write_bytes(original)
+    (directory / 'baseline.sha256').write_text(hashlib.sha256(original).hexdigest() + '\n')
+    load_baseline(config, space)
+    bundle = tmp_path / 'compatibility-backup'
+    export(library, bundle, sources=[sources[0]])
+    target = tmp_path / 'different-root'
+    restore(bundle, target)
+    restored = load_baseline(Config(data_dir=target), space)
+    assert restored == baseline
+    assert (target / gate.relative_to(root)).read_bytes() == gate_bytes
+    assert (target / gate.with_suffix('.sha256').relative_to(root)).read_bytes() == gate.with_suffix('.sha256').read_bytes()
+    assert (target / directory.relative_to(root) / 'baseline.json').read_bytes() == original
+    (directory / 'samples/0.mp4').unlink()
+    with pytest.raises(ModelError, match='无法核验本地文件'):
+        export(library, tmp_path / 'missing-proof', sources=[sources[0]])

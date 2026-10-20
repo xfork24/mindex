@@ -7430,5 +7430,9 @@ window.MindexMessages = {
   "ui.sidebar_collapse": {
     "zh": "收起左侧面板",
     "en": "Collapse sidebar"
+  },
+  "ui.search_source_required": {
+    "zh": "请至少选择一个素材",
+    "en": "Select at least one source"
   }
 };

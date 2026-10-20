@@ -394,6 +394,39 @@ def _config_dependencies(config, base_dir, payload):
     return paths, missing, sorted(env)
 
 
+def compatibility_files(root, database):
+    """已建索引所依赖的固定输入与验证证据；不调用模型或生成通过状态。"""
+    from .compatibility import load_baseline, location
+    from .deployment import verified_file
+
+    required, seen = set(), set()
+    for row in store_at(database.parent).rows('SELECT spec FROM index_versions'):
+        space = json.loads(row['spec']).get('space', {})
+        space_id = fingerprint(space)
+        if space.get('schema') != 2 or space_id in seen:
+            continue
+        seen.add(space_id)
+        config = Config(data_dir=root)
+        baseline = load_baseline(config, space)
+        directory = location(config, space)
+        paths = [directory / 'baseline.json', directory / 'baseline.sha256']
+        paths.extend(safe_path(root, sample['path']) for sample in baseline['samples'])
+        for gate in (directory / 'deployments').glob('*.json'):
+            marker = gate.with_suffix('.sha256')
+            verified_file(gate, marker.read_text().strip())
+            paths.extend((gate, marker))
+        for path in paths:
+            relative = path.relative_to(root).as_posix()
+            safe_path(root, relative)
+            required.add(relative)
+    return required
+
+
+def immutable_evidence(relative):
+    # 清单描述模型服务器上的路径；不能当作客户端数据路径重定位。
+    return relative.startswith(('capabilities/v2/', 'config-dependencies/', 'deployments/'))
+
+
 def build_bundle(config, output, *, selected, include_secrets, config_path):
     root = config.data_dir.resolve()
     payload = output / 'data'
@@ -426,13 +459,16 @@ def build_bundle(config, output, *, selected, include_secrets, config_path):
     deps, missing, env = _config_dependencies(configs, config_path.parent, payload)
     owners = file_owners(root, known)
     references = referenced_files(root, payload / 'metadata.sqlite3', available_files=owners)
+    technical = compatibility_files(root, payload / 'metadata.sqlite3')
     exclusions = []
-    global_dirs = ('persons/references/', 'persons/imports/', 'voices/', 'config-dependencies/')
+    global_dirs = ('voices/', 'config-dependencies/')
     for origin in files_under(root):
         relative = origin.relative_to(root).as_posix()
         reason = excluded(relative)
         assigned = owners.get(relative, set())
-        if selected is not None and not reason:
+        if relative in technical:
+            reason = None
+        elif selected is not None and not reason:
             if relative.startswith('studio/'):
                 parts = Path(relative).parts
                 if len(parts) < 3 or parts[1] not in jobs:
@@ -443,6 +479,17 @@ def build_bundle(config, output, *, selected, include_secrets, config_path):
                 reason = '部分备份不包含归属未知的历史文件或缓存'
         if reason:
             exclusions.append({'path': relative, 'reason': reason})
+            continue
+        if relative in technical or immutable_evidence(relative):
+            destination = payload / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            # 证据摘要和部署 ID 绑定原始字节，禁止重写已验证内容。
+            if origin.suffix == '.json' and not include_secrets:
+                text = origin.read_text()
+                value = json.loads(text)
+                if redact(value) != value or any(secret in text for secret in secrets):
+                    raise ValueError(f'兼容性证据含凭据，不能脱敏后沿用验证：{relative}')
+            shutil.copy2(origin, destination)
             continue
         _copy_payload_file(origin, payload / relative, transform=transform, include_secrets=include_secrets,
                            secrets=secrets, selected=selected)
@@ -610,17 +657,18 @@ def _filter_payload(bundle, incoming, selected, manifest):
     owners = {f['path'].removeprefix('data/'): set(f['sources']) for f in manifest['files']
               if f['path'].startswith('data/')}
     references = referenced_files(bundle / 'data', incoming / 'metadata.sqlite3')
+    technical = compatibility_files(bundle / 'data', incoming / 'metadata.sqlite3')
     for item in manifest['files']:
         if not item['path'].startswith('data/') or item['path'] == 'data/metadata.sqlite3':
             continue
         relative = item['path'].removeprefix('data/')
         assigned = owners.get(relative, set())
-        if selected is not None:
+        if selected is not None and relative not in technical:
             if relative.startswith('studio/'):
                 if Path(relative).parts[1] not in jobs:
                     continue
             elif assigned - kept or not (assigned or relative in references or relative.startswith(
-                ('persons/references/', 'persons/imports/', 'voices/', 'config-dependencies/')
+                ('voices/', 'config-dependencies/')
             )):
                 continue
         target = safe_path(incoming, relative)
@@ -843,7 +891,7 @@ def import_backup(config, bundle, *, all_sources=False, sources=None, skip_exist
         relocate = _relocator(manifest['origin']['data_dir'], root, manifest['path_map'], ids)
         rewrite_database(incoming / 'metadata.sqlite3', relocate, secrets=True)
         for path in files_under(incoming):
-            if path.suffix in {'.json', '.yaml', '.yml'}:
+            if path.suffix in {'.json', '.yaml', '.yml'} and not immutable_evidence(path.relative_to(incoming).as_posix()):
                 _copy_payload_file(path, path, transform=relocate, include_secrets=True, secrets=[], selected=selected)
         base = yaml.safe_load((bundle / 'config/base.yaml').read_text()) or {}
         base = walk(base, relocate)
@@ -901,7 +949,7 @@ def import_backup(config, bundle, *, all_sources=False, sources=None, skip_exist
                     relative = path.relative_to(incoming).as_posix()
                     if relative.startswith('metadata.sqlite3'):
                         continue
-                    if path.suffix in {'.json', '.yaml', '.yml'}:
+                    if path.suffix in {'.json', '.yaml', '.yml'} and not immutable_evidence(relative):
                         value = (json.loads(path.read_text()) if path.suffix == '.json'
                                  else yaml.safe_load(path.read_text()))
                         remapped = remap_local_refs(value, report['integer_id_maps'])

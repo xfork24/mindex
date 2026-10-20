@@ -147,6 +147,67 @@ def rewrite_database(path, transform, *, secrets=False):
         db.execute('VACUUM')
 
 
+def person_dependency_ids(entities, works, evidence):
+    """作品演员表与所选证据的闭包；共享角色的其他作品不扩展其整份演员表。"""
+    by_id = {item['id']: item for item in entities}
+    kept = set(works)
+    for item in entities:
+        if item.get('kind') in {'role', 'stage'} and set(item.get('work_ids', [])) & works:
+            kept.add(item['id'])
+    for item in evidence:
+        kept.update(item.get(key) for key in ('actor_id', 'role_id', 'stage_id') if item.get(key))
+    pending = list(kept)
+    while pending:
+        item = by_id.get(pending.pop(), {})
+        dependencies = [*item.get('actor_ids', []), *item.get('work_ids', [])]
+        if item.get('actor_id'):
+            dependencies.append(item['actor_id'])
+        for identifier in dependencies:
+            if identifier not in kept:
+                kept.add(identifier)
+                pending.append(identifier)
+    return kept
+
+
+def prune_person_catalogue(db):
+    works = {r['work_id'] for r in db.execute('SELECT work_id FROM person_sources') if r['work_id']}
+    entities = [{'id': r['id'], 'kind': r['kind'], **json.loads(r['data'])}
+                for r in db.execute('SELECT * FROM person_entities')]
+    evidence = [dict(r) for r in db.execute('SELECT * FROM person_evidence')]
+    versions = []
+    for row in db.execute('SELECT * FROM person_versions').fetchall():
+        value = json.loads(row['data'])
+        evidence.extend(value.get('evidence', []))
+        ids = person_dependency_ids(value.get('entities', []), works, value.get('evidence', []))
+        value['entities'] = [item for item in value.get('entities', []) if item['id'] in ids]
+        versions.append((row, value))
+    kept = person_dependency_ids(entities, works, evidence)
+    for row, value in versions:
+        kept.update(item['id'] for item in value['entities'])
+        db.execute('UPDATE person_versions SET data=? WHERE id=?', (dumps(value), row['id']))
+    for item in entities:
+        if item['id'] not in kept:
+            db.execute('DELETE FROM person_entities WHERE id=?', (item['id'],))
+    imports, digests = set(), set()
+    for row in db.execute('SELECT * FROM person_references').fetchall():
+        role = row['role_id'] or row['stage_id']
+        if row['actor_id'] not in kept or (role and role not in kept):
+            db.execute('DELETE FROM person_references WHERE id=?', (row['id'],))
+        else:
+            digests.add(row['digest'])
+            provenance = json.loads(row['data'])
+            if provenance.get('import_id'):
+                imports.add(provenance['import_id'])
+    for row in db.execute('SELECT * FROM person_imports').fetchall():
+        value = json.loads(row['data'])
+        if value.get('work_id') not in works and row['id'] not in imports:
+            db.execute('DELETE FROM person_imports WHERE id=?', (row['id'],))
+    for row in db.execute('SELECT * FROM person_features WHERE source_id IS NULL').fetchall():
+        keys = {fingerprint(['reference-v1', digest, json.loads(row['space'])]) for digest in digests}
+        if row['kind'] != 'reference' or row['id'] not in keys:
+            db.execute('DELETE FROM person_features WHERE id=?', (row['id'],))
+
+
 def filter_database(path, selected: set[str] | None):
     """返回旧→新版本/表示映射；None 表示保留完整库。"""
     maps = {'indexes': {}, 'representations': {}, 'persons': {}, 'releases': {}}
@@ -205,6 +266,10 @@ def filter_database(path, selected: set[str] | None):
             value = json.loads(row['data'])
             for key in ('evidence', 'coverage'):
                 value[key] = [item for item in value.get(key, []) if item.get('source_id') in selected]
+            db.execute('UPDATE person_versions SET data=? WHERE id=?', (dumps(value), row['id']))
+        prune_person_catalogue(db)
+        for row in db.execute('SELECT * FROM person_versions').fetchall():
+            value = json.loads(row['data'])
             new = fingerprint(value)
             maps['persons'][row['id']] = new
             db.execute('DELETE FROM person_versions WHERE id=?', (row['id'],))

@@ -225,6 +225,7 @@ function render(data) {
 }
 $('search-form').onsubmit = async (event) => {
   event.preventDefault();if (busy) return;
+  if (!selectedValues('source').length) {notice(MindexI18n.msg("ui.search_source_required"), 'error');return;}
   const text = $('query').value.trim();const file = currentFile(mode);
   if (mode === 'text' && !text && !selectedValues('actor-select').length && !selectedValues('role-select').length) {notice(MindexI18n.msg("ui.c7e6fe9d1b56"), 'error');return;}
   if (mode === 'video' && !file) {notice(MindexI18n.msg("ui.41885fd88fc0"), 'error');return;}
@@ -339,7 +340,6 @@ async function refresh() {
     registeredSources = data.sources.map((s) => ({ ...s, work_id: works.get(s.id) }));
     if (sourceScope !== null) {
       sourceScope = sourceScope.filter((id) => registeredSources.some((s) => s.id === id));
-      if (!sourceScope.length) sourceScope = null;
     }
     fillOptions('source', registeredSources);
     fillSearchFilters();
@@ -357,7 +357,7 @@ async function refresh() {
 }
 $('refresh').onclick = refresh;
 for (const id of ['actor-select', 'role-select', 'source']) bindAllToggle(id, () => {
-  if (id === 'source') {const ids = selectedValues(id);sourceScope = ids.length ? ids : null;}
+  if (id === 'source') {const ids = selectedValues(id);sourceScope = ids;}
   fillSearchFilters(id);
 });
 refresh();

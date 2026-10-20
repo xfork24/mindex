@@ -103,3 +103,29 @@ context.mode = 'image';
 context.fillSearchFilters();
 assert.deepEqual(values('source'), ['empty', 's1', 's1b', 's2'], 'hidden person controls do not narrow image/video materials');
 console.log('Search cascading filter checks passed');
+
+reset();
+choose('source', []);
+assert.deepEqual(picked('source'), [], 'deselecting all sources must retain an explicit empty scope');
+vm.runInContext("fillSearchFilters()", context);
+assert.deepEqual(picked('source'), [], 'rerender must not silently select all sources');
+reset();
+choose('source', ['empty']);
+choose('source', []);
+assert.deepEqual(picked('source'), [], 'the final selected source can be deselected');
+reset();
+assert.equal(picked('source').length, 4);
+
+// Explicitly empty UI selection must never issue an unrestricted API search.
+const notices = [];
+context.busy = false;
+context.notice = (message, kind) => notices.push({message, kind});
+vm.runInContext(code.slice(code.indexOf("$('search-form').onsubmit ="), code.indexOf('// 多选框顶部')), context);
+choose('source', []);
+(async () => {
+  let prevented = false;
+  await get('search-form').onsubmit({preventDefault() {prevented = true;}});
+  assert.equal(prevented, true);
+  assert.equal(notices.at(-1).message, 'ui.search_source_required');
+  assert.equal(notices.at(-1).kind, 'error');
+})().catch(error => {console.error(error);process.exitCode = 1;});
