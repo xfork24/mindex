@@ -97,6 +97,24 @@ def raw_representation_ids(member, spec):
     ]
 
 
+def representation_manifest(member, spec, index_id, representations, *, allow_legacy_representations=False):
+    """为修复过时间边界的旧版快照保存显式表示谱系，不推测原始窗口。"""
+    canonical = {fingerprint([index_id, base]): base for base in raw_representation_ids(member, spec)}
+    missing = [row for row in representations if row['id'] not in canonical]
+    if not missing:
+        return member, {row['id']: canonical[row['id']] for row in representations}
+    if not allow_legacy_representations or spec.get('format', 1) != 1 or 'representation_ids' in member:
+        raise ValueError(f'表示不在成员清单中：{missing[0]["id"]}')
+    for row in representations:
+        if (row['view'] != 'video' and
+                member.get('views', {}).get(row['view']) != row['document']):
+            raise ValueError(f'表示与历史成员渠道不一致：{row["id"]}')
+    # 不能直接把旧表示 ID 当作 base：随后全库重映射也会替换这些字符串。
+    bases = {row['id']: fingerprint(['legacy-representation-v1', index_id, row['id']])
+             for row in sorted(representations, key=lambda row: row['id'])}
+    return {**member, 'representation_ids': list(bases.values())}, bases
+
+
 def redact(value):
     if isinstance(value, dict):
         return {
@@ -214,7 +232,7 @@ def prune_person_catalogue(db):
             db.execute('DELETE FROM person_features WHERE id=?', (row['id'],))
 
 
-def filter_database(path, selected: set[str] | None):
+def filter_database(path, selected: set[str] | None, *, allow_legacy_representations=False):
     """返回旧→新版本/表示映射；None 表示保留完整库。"""
     maps = {'indexes': {}, 'representations': {}, 'persons': {}, 'releases': {}}
     if selected is None:
@@ -251,20 +269,26 @@ def filter_database(path, selected: set[str] | None):
                 db.execute('DELETE FROM index_versions WHERE id=?', (old,))
                 continue
             spec = json.loads(version['spec'])
-            spec['manifest'] = fingerprint([json.loads(m['snapshot']) for m in members])
+            prepared = []
+            by_segment = {}
+            for rep in db.execute('SELECT * FROM representations WHERE index_id=? ORDER BY id', (old,)):
+                by_segment.setdefault(rep['segment_id'], []).append(rep)
+            for member in members:
+                reps = by_segment.get(member['segment_id'], [])
+                value, bases = representation_manifest(json.loads(member['snapshot']), spec, old, reps,
+                                                       allow_legacy_representations=allow_legacy_representations)
+                db.execute('UPDATE index_members SET snapshot=? WHERE index_id=? AND segment_id=?',
+                           (dumps(value), old, member['segment_id']))
+                prepared.append((reps, bases, value))
+            spec['manifest'] = fingerprint([value for _, _, value in prepared])
             # 即使某个历史版本本来只含所选素材，也建立迁移版本，保留清晰的旧新映射。
             spec['migration'] = {'origin': old, 'sources': sorted(selected)}
             new = fingerprint(spec)
             maps['indexes'][old] = new
             db.execute('UPDATE index_versions SET id=?,spec=? WHERE id=?', (new, dumps(spec), old))
-            for member in members:
-                bases = raw_representation_ids(json.loads(member['snapshot']), spec)
-                candidates = {fingerprint([old, base]): fingerprint([new, base]) for base in bases}
-                for rep in db.execute('SELECT * FROM representations WHERE index_id=? AND segment_id=?',
-                                      (old, member['segment_id'])).fetchall():
-                    rid = candidates.get(rep['id'])
-                    if rid is None:
-                        raise ValueError(f'表示不在成员清单中：{rep["id"]}')
+            for reps, bases, _ in prepared:
+                for rep in reps:
+                    rid = fingerprint([new, bases[rep['id']]])
                     maps['representations'][rep['id']] = rid
                     db.execute('UPDATE representations SET id=?,index_id=? WHERE id=?', (rid, new, rep['id']))
             db.execute('UPDATE index_members SET index_id=? WHERE index_id=?', (new, old))

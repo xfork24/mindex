@@ -148,7 +148,9 @@ def test_full_restore_relocated_and_cross_process_vectors(library, tmp_path):
     assert proc.returncode == 0, proc.stderr
     assert len(json.loads(proc.stdout.replace("'", '"'))[0]) == 2
     restored_config = yaml.safe_load((target.parent / 'data.yaml').read_text())
-    assert restored_config['data_dir'] == str(target)
+    assert restored_config['data_dir'] == 'data'
+    from mindex.config import load_config
+    assert load_config(target.parent / 'data.yaml').data_dir == target
 
 
 @pytest.mark.parametrize('at_export', [True, False])
@@ -433,8 +435,18 @@ def test_base_config_assets_and_runtime_overrides_are_separate(library, tmp_path
     target = tmp_path / 'new' / 'data'
     restore(bundle, target)
     restored = yaml.safe_load((target.parent / 'data.yaml').read_text())
-    assert Path(restored['embedding']['deployment_manifest']).is_file()
-    assert Path(restored['studio']['subtitle']['font_file']).read_bytes() == b'test-font'
+    assert not Path(restored['embedding']['deployment_manifest']).is_absolute()
+    assert not Path(restored['studio']['subtitle']['font_file']).is_absolute()
+    loaded = load_config(target.parent / 'data.yaml')
+    assert Path(loaded.embedding.deployment_manifest).is_file()
+    assert Path(loaded.studio.subtitle.font_file).read_bytes() == b'test-font'
+    moved = tmp_path / 'moved-project'
+    target.parent.rename(moved)
+    loaded = load_config(moved / 'data.yaml')
+    assert loaded.data_dir == moved / 'data'
+    assert Path(loaded.embedding.deployment_manifest).is_file()
+    assert Path(loaded.studio.subtitle.font_file).read_bytes() == b'test-font'
+    target = moved / 'data'
     assert 'enforce_gpu_lock' not in restored
     assert store_at(target).one("SELECT value FROM settings WHERE key='override.enforce_gpu_lock'")['value'] == 'true'
 
@@ -794,3 +806,121 @@ def test_rewrite_remaps_numeric_looking_text_ids_and_setting_references(tmp_path
     assert json.loads(store.one('SELECT media FROM sources')['media'])['source_id'] == new
     assert store.one("SELECT value FROM settings WHERE key='raw.reference'")['value'] == new
     assert json.loads(store.one("SELECT value FROM settings WHERE key='json.reference'")['value']) == new
+
+
+def add_repaired_legacy_index(root, *, repaired=True):
+    store = store_at(root)
+    previous = store.active_index()
+    snapshots = store.snapshots(previous['id'])
+    for member in snapshots:
+        member.pop('representation_ids', None)
+    spec = {**previous['spec'], 'format': 1, 'mode': 'visual', 'manifest': fingerprint(snapshots)}
+    index = fingerprint(spec)
+    store.execute('INSERT INTO index_versions(id,spec,status) VALUES(?,?,?)', (index, dumps(spec), 'ready'))
+    rows = []
+    for member in snapshots:
+        duration = member['end'] - member['start']
+        from mindex.media import windows
+
+        preprocessing = spec['preprocessing']
+        pieces = ([(0, duration)] if duration <= preprocessing['short_shot_seconds'] else
+                  windows(0, duration, preprocessing['window_seconds'], preprocessing['stride_seconds']))
+        # 模拟旧切片修复：调整历史时间边界，保留已有向量和表示 ID。
+        snapshot = {**member, 'end': member['end'] - .1} if repaired else member
+        store.execute('INSERT INTO index_members VALUES(?,?,?,1)', (index, member['id'], dumps(snapshot)))
+        for start, end in pieces:
+            base = fingerprint([member['id'], 'video', start, end])
+            rid = fingerprint([index, base])
+            store.execute('INSERT INTO representations VALUES(?,?,?,?,?,?)', (rid, index, member['id'], 'video', '', None))
+            rows.append({'id': rid, 'embedding': [1., 0., 0., 0., 0., 0., 0., 0.], 'document': 'video',
+                         'metadata': {'source_id': member['source_id'], 'segment_id': member['id'],
+                                      'granularity': member['kind'], 'view': 'video'}})
+    batches = root.parent / (root.name + '-legacy')
+    batches.mkdir()
+    (batches / 'batch.json').write_text(dumps(rows))
+    vector_worker('load', root, batches, collections=[{'index_id': index, 'batches': ['batch.json']}],
+                  index_map={index: index}, rep_map={})
+    store.activate(index)
+    return index
+
+
+def test_legacy_compatibility_is_explicit_single_source_and_restorable(library, tmp_path, video_file):
+    config, sources, _, config_path = library
+    legacy = add_repaired_legacy_index(config.data_dir)
+    before = store_at(config.data_dir).rows('SELECT * FROM index_members WHERE index_id=?', (legacy,))
+    with pytest.raises(ValueError, match='表示不在成员清单中'):
+        export(library, tmp_path / 'strict', sources=[sources[0]])
+    with pytest.raises(ValueError, match='仅允许显式选择单个'):
+        export(library, tmp_path / 'all', allow_legacy_representations=True)
+    with pytest.raises(ValueError, match='仅允许显式选择单个'):
+        export(library, tmp_path / 'multiple', sources=sources, allow_legacy_representations=True)
+    bundle = tmp_path / 'legacy-backup'
+    result = CliRunner().invoke(app, ['--config', str(config_path), 'backup', 'export', str(bundle),
+                                     '--source', sources[0], '--allow-legacy-representations', '--json'])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)['legacy_representation_sources'] == [sources[0]]
+    with pytest.raises(ValueError, match='表示不在成员清单中'):
+        export(library, tmp_path / 'other-source-still-strict', sources=[sources[1]])
+    target = tmp_path / 'legacy-target'
+    restore(bundle, target)
+    active = store_at(target).active_index()
+    assert active['id'] != legacy
+    assert len(store_at(target).snapshots(active['id'])) == 1
+    assert store_at(config.data_dir).rows('SELECT * FROM index_members WHERE index_id=?', (legacy,)) == before
+    vector_worker('verify', target, target)
+    merge_target = tmp_path / 'merge-target'
+    seed(merge_target, video_file, names=('c',))
+    add_repaired_legacy_index(merge_target, repaired=False)
+    restore(bundle, merge_target)
+    merged = store_at(merge_target)
+    members = merged.snapshots(merged.active_index()['id'])
+    assert {m['source_id'] for m in members} == {sources[0], fingerprint('c')}
+    assert 'representation_ids' in next(m for m in members if m['source_id'] == sources[0])
+    vector_worker('verify', merge_target, merge_target)
+
+
+def test_explicit_representation_manifest_mismatch_is_still_rejected():
+    from mindex.backup_db import representation_manifest
+
+    member = {'id': 'segment', 'representation_ids': ['expected'], 'views': {}}
+    with pytest.raises(ValueError, match='表示不在成员清单中'):
+        representation_manifest(member, {'format': 1}, 'index', [{'id': 'unexpected'}],
+                                allow_legacy_representations=True)
+    with pytest.raises(ValueError, match='表示不在成员清单中'):
+        representation_manifest({**member}, {'format': 2}, 'index', [{'id': 'unexpected'}],
+                                allow_legacy_representations=True)
+
+
+def test_backup_keeps_vectors_of_incomplete_historical_index_members(library, tmp_path):
+    config, sources, index, _ = library
+    store = store_at(config.data_dir)
+    store.execute("DELETE FROM settings WHERE key IN ('active','active.release')")
+    store.execute("UPDATE index_versions SET status='building' WHERE id=?", (index,))
+    store.execute('UPDATE index_members SET complete=0 WHERE index_id=?', (index,))
+    bundle = tmp_path / 'incomplete'
+    export(library, bundle, sources=[sources[0]])
+    target = tmp_path / 'incomplete-target'
+    restore(bundle, target)
+    restored = store_at(target)
+    assert restored.active_index() is None
+    assert restored.rows('SELECT complete FROM index_members') == [{'complete': 0}]
+    assert restored.rows('SELECT status FROM index_versions') == [{'status': 'building'}]
+    assert len(restored.rows('SELECT id FROM representations')) == 1
+    vector_worker('verify', target, target)
+
+
+
+def test_portable_base_config_preserves_external_paths(tmp_path):
+    from mindex.backup import _portable_base_config
+
+    project = tmp_path / 'project'
+    external = tmp_path / 'external'
+    base = {'data_dir': str(external), 'embedding': {'deployment_manifest': str(external / 'pin.json')}}
+    assert _portable_base_config(base, external, project / 'config.local.yaml') == base
+    local = project / 'data'
+    base = {'data_dir': str(local), 'embedding': {'deployment_manifest': str(local / 'pin.json')},
+            'studio': {'subtitle': {'font_file': str(tmp_path / 'external-font.ttf')}}}
+    result = _portable_base_config(base, local, project / 'config.local.yaml')
+    assert result['data_dir'] == 'data'
+    assert result['embedding']['deployment_manifest'] == 'data/pin.json'
+    assert result['studio']['subtitle']['font_file'] == base['studio']['subtitle']['font_file']

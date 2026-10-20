@@ -321,7 +321,8 @@ def _saved_secrets(root):
     return sorted(result, key=len, reverse=True)
 
 
-def _copy_payload_file(origin, destination, *, transform, include_secrets, secrets, selected):
+def _copy_payload_file(origin, destination, *, transform, include_secrets, secrets, selected,
+                       allow_legacy_representations=False):
     destination.parent.mkdir(parents=True, exist_ok=True)
     with origin.open('rb') as stream:
         sqlite = stream.read(16) == b'SQLite format 3\x00'
@@ -332,7 +333,7 @@ def _copy_payload_file(origin, destination, *, transform, include_secrets, secre
             snapshot(origin.resolve(), working, allow_legacy=True)
             Store(working.parent)
             snapshot(working, destination)
-        maps = filter_database(destination, selected)
+        maps = filter_database(destination, selected, allow_legacy_representations=allow_legacy_representations)
         ids = {k: v for mapping in maps.values() for k, v in mapping.items()}
         rewrite_database(destination, lambda s: transform(ids.get(s, s)), secrets=include_secrets)
         return
@@ -429,7 +430,7 @@ def immutable_evidence(relative):
     return relative.startswith(('capabilities/v2/', 'config-dependencies/', 'deployments/'))
 
 
-def build_bundle(config, output, *, selected, include_secrets, config_path):
+def build_bundle(config, output, *, selected, include_secrets, config_path, allow_legacy_representations=False):
     root = config.data_dir.resolve()
     payload = output / 'data'
     payload.mkdir(parents=True)
@@ -437,7 +438,8 @@ def build_bundle(config, output, *, selected, include_secrets, config_path):
     chosen = {s['id'] for s in known} if selected is None else selected
     jobs, omitted = job_selection(root, selected, {s['id'] for s in known})
     snapshot(store_at(root).path, payload / 'metadata.sqlite3')
-    maps = filter_database(payload / 'metadata.sqlite3', selected)
+    maps = filter_database(payload / 'metadata.sqlite3', selected,
+                           allow_legacy_representations=allow_legacy_representations)
     ids = {k: v for mapping in maps.values() for k, v in mapping.items()}
     transform = lambda value: ids.get(value, value) if isinstance(value, str) else value
     secrets = _saved_secrets(root)
@@ -494,7 +496,8 @@ def build_bundle(config, output, *, selected, include_secrets, config_path):
             shutil.copy2(origin, destination)
             continue
         _copy_payload_file(origin, payload / relative, transform=transform, include_secrets=include_secrets,
-                           secrets=secrets, selected=selected)
+                           secrets=secrets, selected=selected,
+                           allow_legacy_representations=allow_legacy_representations)
     (output / 'config').mkdir()
     (output / 'config/base.yaml').write_text(yaml.safe_dump(base, allow_unicode=True), encoding='utf-8')
     validate_database(payload)
@@ -508,6 +511,7 @@ def build_bundle(config, output, *, selected, include_secrets, config_path):
     manifest = {
         'format': 'mindex-backup', 'version': FORMAT_VERSION, 'created_at': datetime.now(UTC).isoformat(),
         'full': selected is None, 'includes_secrets': include_secrets,
+        'legacy_representation_sources': sorted(selected) if allow_legacy_representations else [],
         'origin': {'data_dir': str(root), 'config': str(config_path)},
         'sources': [s for s in known if s['id'] in chosen], 'collections': collections,
         'id_maps': maps, 'path_map': deps, 'jobs': jobs, 'excluded_jobs': omitted,
@@ -600,6 +604,7 @@ def summary(manifest):
         'version', 'full', 'includes_secrets', 'sources', 'collections', 'id_maps', 'jobs', 'excluded_jobs',
         'required_environment', 'missing_dependencies',
     )} | {'files': len(manifest['files']), 'bytes': sum(f['bytes'] for f in manifest['files']),
+         'legacy_representation_sources': manifest.get('legacy_representation_sources', []),
          'excluded': manifest['excluded'], 'configuration': '基础 YAML 与 SQLite 运行时覆盖层分别保存'}
 
 
@@ -613,7 +618,7 @@ def _combined_maps(original, current, selected):
 
 
 def export_backup(config, destination, *, all_sources=False, sources=None, include_secrets=False,
-                  dry_run=False, config_path=None, progress=None):
+                  dry_run=False, config_path=None, progress=None, allow_legacy_representations=False):
     root, destination = config.data_dir.resolve(), destination.absolute()
     if destination.exists() or destination.is_symlink():
         raise ValueError('导出目标必须不存在')
@@ -621,6 +626,8 @@ def export_backup(config, destination, *, all_sources=False, sources=None, inclu
         raise ValueError('不能备份到数据目录内部')
     config_path = (config_path or Path('config.local.yaml')).resolve()
     selected = selection(source_list(root), all_sources, sources)
+    if allow_legacy_representations and (selected is None or len(selected) != 1):
+        raise ValueError('--allow-legacy-representations 仅允许显式选择单个临时素材')
     destination.parent.mkdir(parents=True, exist_ok=True)
     with offline(root), tempfile.TemporaryDirectory(prefix='.mindex-export-', dir=destination.parent) as temporary:
         if progress:
@@ -628,7 +635,7 @@ def export_backup(config, destination, *, all_sources=False, sources=None, inclu
         staging = Path(temporary) / 'bundle'
         staging.mkdir()
         manifest = build_bundle(config, staging, selected=selected, include_secrets=include_secrets,
-                                config_path=config_path)
+                                config_path=config_path, allow_legacy_representations=allow_legacy_representations)
         inspect_bundle(staging)
         if not dry_run:
             # 再检查一次，避免构建期间意外覆盖他人创建的目录。
@@ -652,6 +659,27 @@ def _relocator(origin, target, path_map, ids):
             return str(target) + value[len(origin):]
         return value
     return transform
+
+
+def _portable_base_config(base, root, config_path):
+    """项目内客户端路径相对配置文件保存，外置数据目录保留绝对路径。"""
+    parent = config_path.parent
+
+    def visit(value):
+        if isinstance(value, dict):
+            result = {}
+            for key, item in value.items():
+                if key in {'data_dir', 'deployment_manifest', 'font_file'} and isinstance(item, str):
+                    path = Path(item)
+                    if path.is_absolute() and path.is_relative_to(root) and path.is_relative_to(parent):
+                        item = path.relative_to(parent).as_posix()
+                result[key] = visit(item)
+            return result
+        if isinstance(value, list):
+            return [visit(item) for item in value]
+        return value
+
+    return visit(base)
 
 
 def _filter_payload(bundle, incoming, selected, manifest):
@@ -897,6 +925,7 @@ def import_backup(config, bundle, *, all_sources=False, sources=None, skip_exist
         base = walk(base, relocate)
         base['data_dir'] = str(root)
         Config.model_validate(base)
+        base = _portable_base_config(base, root, config_path)
         config_text = yaml.safe_dump(base, allow_unicode=True) if write_config else None
         current_base = yaml.safe_load(config_path.read_text()) if config_path.is_file() else {}
         # 差异仅输出字段名和脱敏值，--json 不暴露现有密钥。

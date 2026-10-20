@@ -28,7 +28,10 @@ def run(request):
             if not identifier or any(character not in '0123456789abcdef' for character in identifier):
                 raise ValueError('索引 ID 不是有效的内容指纹')
             old = request['original_indexes'].get(identifier, identifier)
-            reps = store.rows('SELECT id FROM representations WHERE index_id=? ORDER BY id', (identifier,))
+            reps = store.rows('SELECT * FROM representations WHERE index_id=? ORDER BY id', (identifier,))
+            by_id = {row['id']: row for row in reps}
+            snapshots = {row['segment_id']: json.loads(row['snapshot']) for row in store.rows(
+                'SELECT segment_id,snapshot FROM index_members WHERE index_id=?', (identifier,))}
             originals = request['original_representations']
             wanted = {originals.get(r['id'], r['id']): r['id'] for r in reps}
             if not wanted:
@@ -46,6 +49,15 @@ def run(request):
                 batch = vectors.collection.get(ids=ids, include=['embeddings', 'documents', 'metadatas'])
                 if set(batch['ids']) != set(ids) or batch['embeddings'] is None:
                     raise ValueError(f'索引 {old} 向量读取不完整')
+                for rid, metadata, document in zip(batch['ids'], batch['metadatas'], batch['documents'], strict=True):
+                    rep = by_id[wanted[rid]]
+                    member = snapshots[rep['segment_id']]
+                    expected = {'source_id': member['source_id'], 'segment_id': member['id'],
+                                'granularity': member['kind'], 'view': rep['view']}
+                    if not metadata or any(metadata.get(key) != value for key, value in expected.items()):
+                        raise ValueError(f'向量元数据归属不一致：{rid}')
+                    if document != (rep['document'] or rep['view']):
+                        raise ValueError(f'向量文档与表示不一致：{rid}')
                 rows = [
                     {'id': wanted[rid], 'embedding': vector.tolist(), 'document': document, 'metadata': metadata}
                     for rid, vector, document, metadata in zip(

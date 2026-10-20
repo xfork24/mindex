@@ -25,6 +25,7 @@ def output(value, structured):
         ('searchable_sources', '可检索素材'), ('required_environment', '需补充的环境变量'),
         ('missing_dependencies', '需补充的部署依赖'), ('skipped_sources', '已跳过素材'),
         ('excluded_jobs', '排除的创作任务'), ('id_maps', '版本映射'),
+        ('legacy_representation_sources', '本次允许旧表示兼容的素材'),
         ('integer_id_maps', '本地整数 ID 映射'), ('config_diff', '配置差异'), ('result', '处理结果'),
     ):
         if key in value:
@@ -112,6 +113,8 @@ def export(
     all_sources: Annotated[bool, typer.Option('--all', help='备份整个库')] = False,
     sources: Annotated[list[str] | None, typer.Option('--source', help='素材 ID，可重复指定')] = None,
     include_secrets: Annotated[bool, typer.Option('--include-secrets', help='包含设置页保存的密钥')] = False,
+    allow_legacy_representations: Annotated[bool, typer.Option('--allow-legacy-representations',
+        help='仅单素材临时兼容 v2 迁移遗留表示；默认严格检查')] = False,
     dry_run: Annotated[bool, typer.Option('--dry-run', help='验证并预演，不生成目标备份')] = False,
     structured: Annotated[bool, typer.Option('--json', help='输出 JSON')] = False,
 ):
@@ -122,6 +125,7 @@ def export(
         picked = choose(source_list(ctx.obj.data_dir), all_sources, sources)
         return export_backup(ctx.obj, directory, all_sources=all_sources, sources=picked,
                              include_secrets=include_secrets, dry_run=dry_run,
+                             allow_legacy_representations=allow_legacy_representations,
                              config_path=ctx.meta['config_path'], progress=lambda message: typer.echo(message, err=True))
     call(structured, run)
 

@@ -360,4 +360,6 @@ def load_config(path: str | Path | None = None) -> Config:
     for service in (config.embedding, config.asr, config.analyzer):
         if service.deployment_manifest:
             service.deployment_manifest = str((base / service.deployment_manifest).resolve())
+    if config.studio.subtitle.font_file:
+        config.studio.subtitle.font_file = str((base / Path(config.studio.subtitle.font_file).expanduser()).resolve())
     return config
