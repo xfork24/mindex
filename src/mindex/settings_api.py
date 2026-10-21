@@ -242,25 +242,10 @@ def settings_router(runtime: RuntimeConfig, store: Store) -> APIRouter:
             ),
         }
 
-    @router.get("")
-    def get_settings():
+    @router.get("/embedding-status")
+    def get_embedding_status():
+        """独立执行可能读取大模型文件、访问远端的身份校验，不阻塞配置展示。"""
         current = runtime.current()
-        by_role: dict[str, list[dict]] = {role: [] for role in ROLES}
-        for profile in list_profiles(store):
-            by_role[profile["role"]].append(profile)
-        roles_payload = []
-        for role in ROLES:
-            pointer = get_setting(store, f"active.profile.{role}")
-            roles_payload.append(
-                {
-                    "role": role,
-                    "label": ROLE_LABELS[role],
-                    "active_profile_id": int(pointer) if pointer else None,
-                    "effective": _effective(_section(current, role), role),
-                    "profiles": by_role[role],
-                }
-            )
-
         active = store.active_index()
         if active is None:
             embedding_status = {"active_index_id": None, "matches_index": None, "identity": None}
@@ -279,6 +264,29 @@ def settings_router(runtime: RuntimeConfig, store: Store) -> APIRouter:
                     "identity": None,
                     "error": str(exc)[:300],
                 }
+
+        return embedding_status
+
+    @router.get("")
+    def get_settings(probe_embedding: bool = True):
+        current = runtime.current()
+        by_role: dict[str, list[dict]] = {role: [] for role in ROLES}
+        for profile in list_profiles(store):
+            by_role[profile["role"]].append(profile)
+        roles_payload = []
+        for role in ROLES:
+            pointer = get_setting(store, f"active.profile.{role}")
+            roles_payload.append(
+                {
+                    "role": role,
+                    "label": ROLE_LABELS[role],
+                    "active_profile_id": int(pointer) if pointer else None,
+                    "effective": _effective(_section(current, role), role),
+                    "profiles": by_role[role],
+                }
+            )
+
+        embedding_status = get_embedding_status() if probe_embedding else None
 
         voices = [_with_sample(voice) for voice in list_voices(store)]
 

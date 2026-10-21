@@ -437,11 +437,19 @@ $('clone-form').onsubmit = async (event) => {
 
 async function loadSettings() {
   const request = ++settingsRequest;
-  const data = await api('/api/settings');
+  const data = await api('/api/settings?probe_embedding=false');
   if (request !== settingsRequest) return;
   state.data = data;
   $('enforce-gpu-lock').checked = data.business.enforce_gpu_lock === true;
-  renderIndexBanner(data.embedding_status);
+  $('index-banner').replaceChildren();
+  api('/api/settings/embedding-status').then((status) => {
+    if (request !== settingsRequest) return;
+    state.data.embedding_status = status;
+    renderIndexBanner(status);
+  }).catch((error) => {
+    if (request !== settingsRequest) return;
+    $('index-banner').append(node('div', error.message, 'index-banner-error'));
+  });
   renderRoles(data);
   renderTuning(data);
   renderVoices(data, state.voiceCatalog);

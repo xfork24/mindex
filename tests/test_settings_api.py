@@ -407,3 +407,43 @@ def test_local_voiceclone_probe_still_fails_if_service_unreachable(config, monke
     monkeypatch.setattr(adapters, 'request', offline)
     result = client.post(f"/api/settings/profiles/{profile['id']}/test").json()
     assert result['ok'] is False and 'connection refused' in result['detail']
+
+
+def test_settings_can_skip_expensive_identity_probe(config, monkeypatch):
+    monkeypatch.setattr(
+        "mindex.storage.Store.active_index",
+        lambda self: {"id": "test-index", "spec": {"space": {"model": "test"}}},
+    )
+    calls = []
+
+    class Embedder:
+        def identity(self):
+            calls.append(True)
+            return {"model": "test"}
+
+    monkeypatch.setattr("mindex.settings_api.make_embedder", lambda current: Embedder())
+    client = client_for(config)
+    snapshot = client.get("/api/settings?probe_embedding=false")
+    assert snapshot.status_code == 200
+    assert snapshot.json()["roles"]
+    assert snapshot.json()["embedding_status"] is None
+    assert calls == []
+    status = client.get("/api/settings/embedding-status").json()
+    assert status["matches_index"] is True
+    assert calls == [True]
+    assert client.get("/api/settings").json()["embedding_status"] == status
+
+
+def test_embedding_status_probe_failure(config, monkeypatch):
+    monkeypatch.setattr(
+        "mindex.storage.Store.active_index",
+        lambda self: {"id": "test-index", "spec": {"space": {}}},
+    )
+
+    def unavailable(current):
+        raise RuntimeError("service unavailable")
+
+    monkeypatch.setattr("mindex.settings_api.make_embedder", unavailable)
+    result = client_for(config).get("/api/settings/embedding-status").json()
+    assert result["matches_index"] is False
+    assert result["error"] == "service unavailable"
