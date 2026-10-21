@@ -53,6 +53,7 @@ class PersonConfig(Service):
     expected_space: dict | None = None
     frames_max_edge: int = Field(default=640, ge=0)
     frames_jpeg_quality: int = Field(default=85, ge=1, le=100)
+    frame_interval: int = Field(default=15, ge=1, strict=True)
     fps: float = Field(default=5, gt=0, le=5)
     face_threshold: float = Field(default=0.55, gt=0, lt=1)
     face_margin: float = Field(default=0.1, gt=0, lt=1)

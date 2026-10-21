@@ -43,7 +43,7 @@ const ROLE_BACKENDS = {
 const ROLE_EXTRA = {
   person: [
   { key: 'expected_space', label: MindexI18n.msg("ui.7f5c519b5795"), type: 'json' },
-  { key: 'fps', label: MindexI18n.msg("ui.958085c940ec"), type: 'number', min: 0.1, max: 5 },
+  { key: 'frame_interval', label: '间隔帧数', type: 'number', min: 1, step: 1 },
   { key: 'face_threshold', label: MindexI18n.msg("ui.c7501d1b57d8"), type: 'number', min: 0.01 },
   { key: 'face_margin', label: MindexI18n.msg("ui.400a124b6162"), type: 'number', min: 0.01 },
   { key: 'min_face_quality', label: MindexI18n.msg("ui.9ced26663827"), type: 'number', min: 0, max: 1 },
@@ -510,7 +510,7 @@ function fillExtraFields(role, values = {}) {
       input.type = field.type === 'json' ? 'text' : field.type;
       if (field.min !== undefined) input.min = field.min;
       if (field.max !== undefined) input.max = field.max;
-      if (field.type === 'number') input.step = 'any';
+      if (field.type === 'number') input.step = field.step || 'any';
       if (field.placeholder) MindexI18n.setAttr(input, "placeholder", field.placeholder);
     }
     input.id = `pf-${field.key}`;

@@ -128,7 +128,8 @@ person:
   base_url: http://127.0.0.1:4050
   model: cheetah_l
   model_root: ~/.insightface
-  fps: 5
+  frame_interval: 15
+  fps: 5  # 兼容旧配置，不参与人物抽帧
   # 仅用于展示帧，不参与特征/匹配缓存身份；0 = 不缩放。
   frames_max_edge: 640
   frames_jpeg_quality: 85

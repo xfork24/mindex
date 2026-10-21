@@ -190,3 +190,5 @@
 
 仅影响新展示图和显式 `persons migrate-frames --apply`，不改变模型空间、特征缓存或匹配缓存。
 原尺寸模型输入不受影响，references/imports 仍存 PNG。详见 [人物库](persons.md)。
+
+人物配置 `person.frame_interval`（设置页“间隔帧数”）：整数且 ≥1，默认 15。每个分镜从首个有效帧开始每隔该帧数抽取，保留实际 PTS；1 表示逐帧。旧 `person.fps` 仅兼容旧配置，不叠加抽帧限制。

@@ -39,7 +39,7 @@ ROLE_LABELS = {
 PROFILE_FIELDS = {
     "person": {
         "backend", "base_url", "model", "revision", "timeout", "api_key_env", "expected_space",
-        "fps", "face_threshold", "face_margin", "min_face_quality", "min_reference_quality", "body_threshold",
+        "fps", "frame_interval", "face_threshold", "face_margin", "min_face_quality", "min_reference_quality", "body_threshold",
     },
     "analyzer": {
         "backend", "base_url", "model", "revision", "timeout", "api_key_env", "llama_template",

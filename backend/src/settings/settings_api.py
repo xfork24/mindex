@@ -97,7 +97,7 @@ def _effective(section, role: str) -> dict:
     extras = {
         "analyzer": ("response_retries", "initial_output_tokens", "max_output_tokens", "thinking_mode"),
         "person": (
-            "expected_space", "fps", "face_threshold", "face_margin", "min_face_quality",
+            "expected_space", "fps", "frame_interval", "face_threshold", "face_margin", "min_face_quality",
             "min_reference_quality", "body_threshold",
         ),
         "embedding": ("dimensions", "quantization"),

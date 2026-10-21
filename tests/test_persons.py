@@ -682,7 +682,7 @@ def test_role_reference_keeps_the_face_actor_and_competes_with_other_performers(
             "error": "参考图演员已不属于该角色，请重新配对",
         }
     ]
-    assert all(e["actor_id"] is None for e in p.evidence())
+    assert all(e["actor_id"] == actor["id"] for e in p.evidence())
 
 
 def test_role_reference_edit_validates_final_membership_and_protects_accepted_evidence(catalogue, config):
@@ -837,7 +837,7 @@ def test_reference_quality_threshold_default_zero_matches_everything(catalogue, 
     attributed = [e for e in p.evidence() if e["actor_id"] == actor["id"]]
     assert attributed, "默认门槛 0 时低质量参考图也应当参与匹配"
 
-    # 门槛抬高到 0.5：该参考图被挡下并显式报错，不再归到任何演员。
+    # 门槛抬高到 0.5：参考图显式报错，已有自动确认仍然保留。
     config.person = config.person.model_copy(update={"min_reference_quality": 0.5})
     report = PersonProcessor(config, client, Tracker).run("source", PersonOptions())
     assert len(report["reference_errors"]) == 1
@@ -845,7 +845,7 @@ def test_reference_quality_threshold_default_zero_matches_everything(catalogue, 
     assert report["reference_errors"][0]["actor_name"] == actor["name"]
     assert report["reference_errors"][0]["role_name"] == role["name"]
     assert "清晰度 0.07" in report["reference_errors"][0]["error"]
-    assert not [e for e in p.evidence() if e["actor_id"] == actor["id"]]
+    assert all(e["status"] == "accepted" for e in p.evidence() if e["actor_id"] == actor["id"])
 
     # 帧侧门槛不受影响：模糊帧依旧不做自动确认；默认门槛下低质量参考图仍可命中。
     refs = [dict(obs(), face_quality=0.07, actor_id=actor["id"], role_id=role["id"])]
@@ -1675,8 +1675,10 @@ def test_local_sampling_retains_real_pts_short_shots_and_batched_contract(config
     from mindex.persons.person_processing import PersonClient
 
     frames = list(sample_frames(video_file, 0, 1, 5))
-    assert frames and len(frames) <= 5 and frames[0][0] == 0
-    assert all(b[0] - a[0] >= 0.2 - 1e-8 for a, b in itertools.pairwise(frames))
+    assert frames and frames[0][0] == 0
+    assert [t for t, _ in frames] == [t for t, _ in sample_frames(video_file, 0, 1, 1)][::5]
+    assert len(list(sample_frames(video_file, 0, 1, 10000))) == 1
+    assert [t for t, _ in sample_frames(video_file, 1, 2, 5)] == [t for t, _ in sample_frames(video_file, 1, 2, 1)][::5]
     assert len(list(sample_frames(video_file, 1, 1.02, 5))) == 1
     client = PersonClient(config)
     batches = []
@@ -1690,11 +1692,11 @@ def test_local_sampling_retains_real_pts_short_shots_and_batched_contract(config
     monkeypatch.setattr(client, "request", request)
     result = client.video(video_file, 0, 4, 5)
     assert [f["timestamp"] for f in result["frames"]] == [t for t, _ in sample_frames(video_file, 0, 4, 5)]
-    assert len(batches) == 2
-    all_frames = list(sample_frames(video_file, 0, 1))
+    assert len(batches) == (len(result["frames"]) + 15) // 16
+    all_frames = list(sample_frames(video_file, 0, 1, 1))
     assert len(all_frames) > len(frames)
     assert all(b[0] > a[0] for a, b in itertools.pairwise(all_frames))
-    result = client.video(video_file, 0, 1, None)
+    result = client.video(video_file, 0, 1, 1)
     assert [f["timestamp"] for f in result["frames"]] == [t for t, _ in all_frames]
 
 
@@ -1957,7 +1959,7 @@ def test_review_shot_status_is_classified_per_shot_not_per_frame(catalogue):
                 start,
                 start + 0.2,
                 status,
-                dumps({"work_id": work}),
+                dumps({"work_id": work, **({"confirmation": "shot_review", "shot_excluded": True} if status == "rejected" else {})}),
             ),
         )
     ids = lambda status: [i["shot_id"] for i in p.review_shots(status=status)["items"]]
@@ -2994,8 +2996,8 @@ def test_processing_uses_only_work_role_references_and_roles_compete(catalogue, 
     report = processor.run("source", PersonOptions())
     assert report["reused_shots"] == 3 and first["extracted_shots"] == 3 and client.videos == 3
     assert client.images == 2
-    assert all(e["status"] == "candidate" and e["role_id"] for e in p.evidence())
-    assert p.review_shots(status="accepted")["total"] == 0
+    assert all(e["status"] == "accepted" and e["role_id"] == role["id"] for e in p.evidence())
+    assert p.review_shots(status="accepted")["total"] == 3
 
 
 def test_new_release_actor_queries_use_snapshot_roles_and_keep_multi_person_semantics(catalogue, config):
@@ -3029,3 +3031,56 @@ def test_new_release_actor_queries_use_snapshot_roles_and_keep_multi_person_sema
     assert shots([role["id"], second["id"]], "any") == ["shot0"]
     assert shots([actor["id"]]) == []
     assert p.store.one("SELECT data FROM person_versions WHERE id=?", (release["person_version"],))["data"] == snapshot
+
+
+def test_frame_interval_cache_and_review_preservation(catalogue, config):
+    p, work, actor = catalogue
+    role = p.save(Entity(kind="role", name="间隔测试", work_ids=[work], actor_ids=[actor["id"]]))
+    p.add_reference(actor["id"], photo(), role_id=role["id"])
+
+    class IntervalClient(FakeClient):
+        def __init__(self):
+            super().__init__()
+            self.intervals = []
+
+        def video(self, path, start, end, frame_interval):
+            self.intervals.append(frame_interval)
+            return super().video(path, start, end, frame_interval)
+
+    client = IntervalClient()
+    processor = PersonProcessor(config, client, Tracker)
+    processor.run("source", PersonOptions())
+    original = {e["id"]: e for e in p.evidence()}
+    rejected = next(iter(original))
+    p.review(rejected, Review(accept=False, reason="排除"))
+    processor.run("source", PersonOptions())
+    assert client.intervals == [15] * 3
+    config.person.frame_interval = 1
+    processor.run("source", PersonOptions())
+    assert client.intervals == [15] * 3 + [1] * 3
+    for identifier in original:
+        row = p.store.one("SELECT * FROM person_evidence WHERE id=?", (identifier,))
+        assert row["status"] == ("rejected" if identifier == rejected else "accepted")
+        if identifier != rejected:
+            assert not json.loads(row["data"]).get("reviewed")
+
+
+def test_interval_changes_preserve_confirmed_and_excluded_shots(catalogue, config):
+    from mindex.persons.persons import ShotReview
+
+    p, work, actor = catalogue
+    role = p.save(Entity(kind="role", name="审核保留", work_ids=[work], actor_ids=[actor["id"]]))
+    p.add_reference(actor["id"], photo(), role_id=role["id"])
+    processor = PersonProcessor(config, FakeClient(), Tracker)
+    processor.run("source", PersonOptions())
+    p.shot_review(ShotReview(source_id="source", shot_id="shot0"))
+    p.shot_review(ShotReview(source_id="source", shot_id="shot1", selections=[
+        {"actor_id": actor["id"], "role_id": role["id"]},
+    ]))
+    for interval in (5, 1, 15):
+        config.person.frame_interval = interval
+        report = processor.run("source", PersonOptions())
+        assert report["accepted_shots"] == 2 and report["candidate_shots"] == 0
+        assert p.review_summary()["source"] == {"accepted": 2, "candidate": 0, "rejected": 1}
+        assert [s["shot_id"] for s in p.review_shots(status="rejected")["items"]] == ["shot0"]
+        assert p.review_shots(status="accepted", limit=1)["total"] == 2

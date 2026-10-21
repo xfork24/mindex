@@ -447,3 +447,23 @@ def test_embedding_status_probe_failure(config, monkeypatch):
     result = client_for(config).get("/api/settings/embedding-status").json()
     assert result["matches_index"] is False
     assert result["error"] == "service unavailable"
+
+
+def test_person_interval_profile_save_validation_and_frozen_config(config):
+    from mindex.admin.source_tasks import freeze_config
+    from mindex.settings.runtime_settings import RuntimeConfig
+    from mindex.shared.storage import Store
+
+    client = client_for(config)
+    body = {"role": "person", "provider": "self", "name": "间隔", "config": {"frame_interval": 7}}
+    saved = client.post("/api/settings/profiles", json=body)
+    assert saved.status_code == 201, saved.text
+    assert saved.json()["config"]["frame_interval"] == 7
+    assert client.post(f"/api/settings/profiles/{saved.json()['id']}/activate").status_code == 200
+    store = Store(config.data_dir)
+    current = RuntimeConfig(config, store).current()
+    frozen = json.loads(freeze_config(current, store))
+    assert frozen["person"]["frame_interval"] == 7
+    for invalid in (0, -2, 1.5):
+        body["config"]["frame_interval"] = invalid
+        assert client.post("/api/settings/profiles", json=body).status_code == 422

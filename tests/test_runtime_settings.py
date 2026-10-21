@@ -304,3 +304,16 @@ def test_voices_table_roundtrip(store):
     )
     rows = store.rows("SELECT name,kind,provider,voice_id,status FROM voices")
     assert rows == [{"name": "旁白A", "kind": "clone", "provider": "minimax", "voice_id": "narrator-a", "status": "ready"}]
+
+
+def test_person_frame_interval_validation_and_profile_snapshot(store):
+    from pydantic import ValidationError
+
+    from mindex.shared.config import PersonConfig
+
+    assert PersonConfig().frame_interval == 15
+    for value in (0, -1, 1.5, 5.0, True):
+        with pytest.raises(ValidationError):
+            PersonConfig(frame_interval=value)
+    assert PersonConfig(frame_interval=1).model_dump()["frame_interval"] == 1
+    assert "frame_interval" in PROFILE_FIELDS["person"]

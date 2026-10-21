@@ -82,3 +82,5 @@
 | PUT/DELETE | `/api/settings/business` | 检索调参与默认音色 / 恢复默认 |
 | POST/DELETE | `/api/settings/voices[/{id}]` | 录入/删除音色 |
 | POST | `/api/settings/voices/clone` | 克隆（multipart 上传样本 或 URL 复刻；须 consent） |
+
+人物配置 `person.frame_interval`（设置页“间隔帧数”）：整数且 ≥1，默认 15。每个分镜从首个有效帧开始每隔该帧数抽取，保留实际 PTS；1 表示逐帧。旧 `person.fps` 仅兼容旧配置，不叠加抽帧限制。

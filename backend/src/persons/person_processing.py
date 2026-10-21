@@ -93,7 +93,7 @@ class PersonClient:
             result = retry
         return {**result, "reference_preprocessing": self.reference_preprocessing}
 
-    def video(self, path, start, end, fps):
+    def video(self, path, start, end, frame_interval):
         from mindex.persons.person_frames import sample_frames
 
         frames, batch = [], []
@@ -121,7 +121,7 @@ class PersonClient:
                 )
             batch.clear()
 
-        for timestamp, raw in sample_frames(path, start, end, fps):
+        for timestamp, raw in sample_frames(path, start, end, frame_interval):
             batch.append((timestamp, raw))
             if len(batch) == 16:
                 flush()
@@ -622,14 +622,14 @@ class PersonProcessor:
         for position, shot in enumerate(shots):
             key = fingerprint(
                 [
-                    "shot-features-all-frames-v2",
+                    "shot-features-frame-interval-v3",
                     source_id,
                     source["layout_key"],
                     shot["id"],
                     shot["start"],
                     shot["end"],
                     space,
-                    "all-decoded-frames",
+                    self.config.person.frame_interval,
                 ]
             )
             extracted = self.feature(key)
@@ -648,7 +648,7 @@ class PersonProcessor:
                     self.store.resolve_media(shot["path"]),
                     0,
                     shot["end"] - shot["start"],
-                    None,
+                    self.config.person.frame_interval,
                 )
                 self.validate_space(extracted, space)
                 frames = extracted["frames"]
@@ -728,30 +728,22 @@ class PersonProcessor:
                 )
                 self.cache(match_key, source_id, space, "matching", evidence)
             with self.store.connect() as db:
-                # A whole-shot human review remains authoritative across reference/model-space changes.
-                shot_reviewed = db.execute(
+                # Whole-shot exclusions remain authoritative on reruns.
+                excluded = db.execute(
                     "SELECT 1 FROM person_evidence e WHERE source_id=? AND shot_id=? AND ("
-                    "(status='accepted' AND json_extract(data,'$.confirmation')='shot_review' AND "
-                    + self.catalogue.VALID_ROLE + ") OR (" + self.catalogue.SHOT_EXCLUSION + ")) LIMIT 1",
+                    + self.catalogue.SHOT_EXCLUSION + ") LIMIT 1",
                     (source_id, shot["id"]),
                 ).fetchone() is not None
-                if shot_reviewed:
-                    evidence = [
-                        {
-                            **e,
-                            "status": "rejected",
-                            "data": {**e["data"], "reviewed": True, "confirmation": "shot_review"},
-                        }
-                        for e in evidence
-                    ]
-                # Old partial/range or space runs cannot leave stale automatic identities in this interval.
+                if excluded:
+                    evidence = []
+                # Replace stale candidates, retaining all accepted/rejected evidence.
                 for old in db.execute(
-                    "SELECT id,data,actor_id,role_id FROM person_evidence WHERE source_id=? AND shot_id=? AND start>=? AND start<?",
+                    "SELECT id,data,actor_id,role_id,status FROM person_evidence WHERE source_id=? AND shot_id=? AND start>=? AND start<?",
                     (source_id, shot["id"], shot["start"], shot["end"]),
                 ).fetchall():
                     if old["actor_id"] and not old["role_id"]:
                         continue  # Keep historical actor-only manual rejections.
-                    elif not json.loads(old["data"]).get("reviewed"):
+                    elif old["status"] == "candidate" and not json.loads(old["data"]).get("reviewed"):
                         db.execute("DELETE FROM person_evidence WHERE id=?", (old["id"],))
                 for e in evidence:
                     # Reused matching caches may still contain paths retired by frame migration.
@@ -759,8 +751,18 @@ class PersonProcessor:
                     image_path = e["data"].get("image_path")
                     if image_path and not (self.store.root / image_path).is_file():
                         e = {**e, "data": {**e["data"], "image_path": shot["thumbnail"]}}
-                    old = db.execute("SELECT data FROM person_evidence WHERE id=?", (e["id"],)).fetchone()
-                    if old and json.loads(old["data"]).get("reviewed"):
+                    old = db.execute("SELECT * FROM person_evidence WHERE id=?", (e["id"],)).fetchone()
+                    if old and old["status"] in {"accepted", "rejected"}:
+                        old_data = json.loads(old["data"])
+                        e = {
+                            **e,
+                            **{k: old[k] for k in ("actor_id", "role_id", "status", "start", "end")},
+                            "data": {
+                                **old_data,
+                                "image_path": e["data"].get("image_path", old_data.get("image_path")),
+                            },
+                        }
+                    elif old and json.loads(old["data"]).get("reviewed"):
                         continue
                     db.execute(
                         "INSERT OR REPLACE INTO person_evidence(id,source_id,shot_id,actor_id,role_id,start,end,status,data) VALUES(?,?,?,?,?,?,?,?,?)",
@@ -791,13 +793,20 @@ class PersonProcessor:
                                 "end": shot["end"],
                                 "space": space,
                                 "frames": len(extracted["frames"]),
+                                "frame_interval": self.config.person.frame_interval,
+                                "sampling_rule": "frame-interval-v3",
                                 "match_key": match_key,
                             }
                         ),
                     ),
                 )
-            report["accepted"] += sum(e["status"] == "accepted" for e in evidence)
-            report["candidates"] += sum(e["status"] == "candidate" for e in evidence)
+            persisted = self.store.one(
+                "SELECT SUM(status='accepted') AS accepted, SUM(status='candidate') AS candidates "
+                "FROM person_evidence WHERE source_id=? AND shot_id=?",
+                (source_id, shot["id"]),
+            )
+            report["accepted"] += persisted["accepted"] or 0
+            report["candidates"] += persisted["candidates"] or 0
             # Count persisted evidence, including authoritative human reviews and earlier partial runs.
             state = self.store.one(
                 "SELECT * FROM " + self.catalogue.SHOT_STATES + " WHERE source_id=? AND shot_id=?",
