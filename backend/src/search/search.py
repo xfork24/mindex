@@ -222,6 +222,16 @@ class SearchEngine:
             from mindex.persons.persons import coverage_missing
             reference_images = EvidenceReferences(self.config, self.store)
             meta['person_coverage_missing'] = coverage_missing(snapshots, published['coverage'])
+            if published.get('format', 1) >= 2:
+                # Actor searches expand through the immutable release cast, not live edits.
+                cast_roles = {}
+                for entity in published['entities']:
+                    if entity.get('kind') == 'role':
+                        for actor in entity.get('actor_ids', []):
+                            cast_roles.setdefault(actor, []).append(entity['id'])
+                variant_groups = [list(dict.fromkeys(
+                    role for identifier in group for role in cast_roles.get(identifier, [identifier])
+                )) for group in variant_groups]
             eligible = []
             names = {e['id']: e['name'] for e in entities}
             for segment in snapshots:

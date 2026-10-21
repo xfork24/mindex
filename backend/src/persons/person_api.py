@@ -396,8 +396,9 @@ def person_router(runtime, store):
             if value:
                 clauses.append(key + "=?")
                 args.append(value)
-        where = " WHERE " + " AND ".join(clauses) if clauses else ""
-        total = store.one("SELECT count(*) AS n FROM person_evidence" + where, args)["n"]
+        clauses.append(catalogue.VALID_ROLE)
+        where = " WHERE " + " AND ".join(clauses)
+        total = store.one("SELECT count(*) AS n FROM person_evidence e" + where, args)["n"]
         return {
             "items": catalogue.evidence(source_id, status, limit=limit, offset=offset, public=True),
             "total": total,
@@ -407,7 +408,7 @@ def person_router(runtime, store):
 
     @router.get("/evidence/{identifier}")
     def one_evidence(identifier: str):
-        row = store.one("SELECT * FROM person_evidence WHERE id=?", (identifier,))
+        row = store.one("SELECT * FROM person_evidence e WHERE id=? AND " + catalogue.VALID_ROLE, (identifier,))
         if not row:
             raise HTTPException(404, "找不到出镜证据")
         row["data"] = {k: v for k, v in json.loads(row["data"]).items() if k not in {"body_feature", "space"}}

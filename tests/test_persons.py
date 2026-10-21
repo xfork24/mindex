@@ -106,7 +106,7 @@ def test_entity_delete_guards_and_pairing_cleanup(catalogue, config):
     store = p.store
     store.execute(
         "INSERT INTO person_evidence VALUES(?,?,?,?,?,?,?,?,?,?)",
-        ("ev1", "source", "shot0", actor["id"], None, None, 0, 1, "accepted", "{}"),
+        ("ev1", "source", "shot0", actor["id"], role["id"], None, 0, 1, "accepted", "{}"),
     )
     assert client.delete(f"/api/persons/entities/{actor['id']}").status_code == 422
     assert "出镜证据" in client.delete(f"/api/persons/entities/{actor['id']}").json()["detail"]["message"]
@@ -183,7 +183,7 @@ def test_cross_film_role_multiple_works_import_merge_and_review(catalogue, confi
         p.review("ev2", Review(actor_id=a["id"], role_id=role["id"], reason="续作同角色"))["status"]
         == "accepted"
     )
-    refs = [{**obs(), "actor_id": a["id"]}]
+    refs = [{**obs(), "actor_id": a["id"], "role_id": role["id"]}]
     shot = {"id": "s", "source_id": "sequel", "cache_id": "c", "start": 0, "end": 1, "space": {"model": "f"}}
     rows = attribute_frames(
         [{"timestamp": 0, "observations": [obs()]}],
@@ -671,7 +671,7 @@ def test_role_reference_keeps_the_face_actor_and_competes_with_other_performers(
     PersonProcessor(config, FakeClient(), Tracker).run("source", PersonOptions())
     assert {e["actor_id"] for e in p.evidence()} == {actor["id"]}
     refs = [dict(obs(), actor_id=a, role_id=role["id"]) for a in role["actor_ids"]]
-    assert face_match(obs(), refs, config.person)[2] is False
+    assert face_match(obs(), refs, config.person) == (role["id"], 1.0, True)
     # Updating role membership cannot transfer an existing face to a different performer.
     p.save(Entity(kind="role", name=role["name"], work_ids=[work], actor_ids=[other["id"]]), role["id"])
     report = PersonProcessor(config, FakeClient(), Tracker).run("source", PersonOptions())
@@ -815,8 +815,9 @@ def test_listing_reports_pending_review_per_shot(catalogue, config):
 
 def test_reference_quality_threshold_default_zero_matches_everything(catalogue, config):
     """min_reference_quality 默认 0：低质量参考图也参与匹配；帧质量门槛保持独立。"""
-    p, _work, actor = catalogue
-    ref = p.add_reference(actor["id"], photo())
+    p, work, actor = catalogue
+    role = p.save(Entity(kind="role", name="测试角色", work_ids=[work], actor_ids=[actor["id"]]))
+    ref = p.add_reference(actor["id"], photo(), role_id=role["id"])
     client = FakeClient()
     space = client.identity()
     # 预置低质量（0.07）参考特征缓存，处理器不会再调模型。
@@ -842,14 +843,14 @@ def test_reference_quality_threshold_default_zero_matches_everything(catalogue, 
     assert len(report["reference_errors"]) == 1
     assert report["reference_errors"][0]["reference_id"] == ref["id"]
     assert report["reference_errors"][0]["actor_name"] == actor["name"]
-    assert report["reference_errors"][0]["role_name"] is None
+    assert report["reference_errors"][0]["role_name"] == role["name"]
     assert "清晰度 0.07" in report["reference_errors"][0]["error"]
     assert not [e for e in p.evidence() if e["actor_id"] == actor["id"]]
 
     # 帧侧门槛不受影响：模糊帧依旧不做自动确认；默认门槛下低质量参考图仍可命中。
-    refs = [dict(obs(), face_quality=0.07, actor_id=actor["id"])]
+    refs = [dict(obs(), face_quality=0.07, actor_id=actor["id"], role_id=role["id"])]
     assert face_match(dict(obs(), face_quality=0.1), refs, config.person)[2] is False
-    assert face_match(obs(), refs, config.person.model_copy(update={"min_reference_quality": 0.0}))[0] == actor["id"]
+    assert face_match(obs(), refs, config.person.model_copy(update={"min_reference_quality": 0.0}))[0] == role["id"]
 
 
 def test_reference_upload_quality_gate_rejects_and_caches(catalogue, config, monkeypatch):
@@ -1036,11 +1037,12 @@ def test_task_report_counts_shots_not_frame_rows(catalogue, config):
 def test_task_report_shot_counts_include_preserved_human_review(catalogue, config):
     from mindex.persons.persons import ShotReview
 
-    p, _work, actor = catalogue
-    p.add_reference(actor["id"], photo())
+    p, work, actor = catalogue
+    role = p.save(Entity(kind="role", name="测试角色", work_ids=[work], actor_ids=[actor["id"]]))
+    p.add_reference(actor["id"], photo(), role_id=role["id"])
     processor = PersonProcessor(config, FakeClient(), Tracker)
     processor.run("source", PersonOptions())
-    p.shot_review(ShotReview(source_id="source", shot_id="shot0", selections=[{"actor_id": actor["id"]}]))
+    p.shot_review(ShotReview(source_id="source", shot_id="shot0", selections=[{"actor_id": actor["id"], "role_id": role["id"]}]))
     report = processor.run("source", PersonOptions(start=0, end=1))
     assert report["accepted_shots"] == 1
     assert report["candidate_shots"] == 0
@@ -1236,7 +1238,7 @@ class Tracker:
 
 def test_anchor_back_view_crossing_gaps_cuts_and_body_candidate(catalogue, config):
     _p, work, actor = catalogue
-    refs = [{**obs(), "actor_id": actor["id"]}]
+    refs = [{**obs(), "actor_id": actor["id"], "role_id": "r"}]
     shot = {
         "id": "s",
         "source_id": "source",
@@ -1283,9 +1285,9 @@ def test_anchor_back_view_crossing_gaps_cuts_and_body_candidate(catalogue, confi
         )[0]["actor_id"]
         is None
     )
-    # Score gap compares distinct people, never two references of the same actor.
+    # Score gap compares distinct roles, never two references of the same role.
     assert face_match(obs(), refs * 3, config.person)[2]
-    assert not face_match(obs(), refs + [dict(refs[0], actor_id="other")], config.person)[2]
+    assert not face_match(obs(), refs + [dict(refs[0], role_id="other")], config.person)[2]
     assert not face_match(dict(obs(), face_quality=0.1), refs, config.person)[2]
 
 
@@ -1368,8 +1370,9 @@ def reference_checker_stub(client, config):
 
 
 def test_checkpoint_append_rename_no_video_reinference_space_isolation(catalogue, config):
-    p, _work, actor = catalogue
-    p.add_reference(actor["id"], photo())
+    p, work, actor = catalogue
+    role = p.save(Entity(kind="role", name="测试角色", work_ids=[work], actor_ids=[actor["id"]]))
+    p.add_reference(actor["id"], photo(), role_id=role["id"])
     client = FakeClient()
     processor = PersonProcessor(config, client, Tracker)
     client.fail_at = 2
@@ -1381,7 +1384,7 @@ def test_checkpoint_append_rename_no_video_reinference_space_isolation(catalogue
     assert report["reused_shots"] == 1 and report["extracted_shots"] == 2
     assert client.images == 1
     videos = client.videos
-    p.add_reference(actor["id"], photo("green"))
+    p.add_reference(actor["id"], photo("green"), role_id=role["id"])
     report = processor.run("source", PersonOptions())
     assert report["reused_shots"] == 3 and client.videos == videos and client.images == 2
     p.save(Entity(kind="actor", name="新名字"), actor["id"])
@@ -1550,12 +1553,13 @@ def test_strict_no_dialogue_leak_pretruncate_filter_offline_name_and_rollback(ca
     from mindex.processing.indexing import VectorIndex
     from mindex.search.search import SearchEngine
 
-    p, _work, actor = catalogue
+    p, work, actor = catalogue
+    role = p.save(Entity(kind="role", name="测试角色", work_ids=[work], actor_ids=[actor["id"]]))
     version = publish_content(p, config)
     engine = SearchEngine(config)
     # Registered name with no published person processing must never degrade to mention mode.
     assert engine.text(TextSearch(text="演员甲", granularity="shot"))["results"] == []
-    p.add_reference(actor["id"], photo())
+    p.add_reference(actor["id"], photo(), role_id=role["id"])
     PersonProcessor(config, FakeClient(), Tracker).run("source", PersonOptions())
     rows = p.evidence()
     for r in rows[1:]:
@@ -1617,14 +1621,15 @@ def test_strict_no_dialogue_leak_pretruncate_filter_offline_name_and_rollback(ca
 
 
 def test_release_delete_rejects_active_and_cleans_snapshot(catalogue, config):
-    p, _work, actor = catalogue
+    p, work, actor = catalogue
+    role = p.save(Entity(kind="role", name="测试角色", work_ids=[work], actor_ids=[actor["id"]]))
     client = TestClient(create_app(config))
     publish_content(p, config, "content1")
     first = p.publish()
     # 新增一条已接受证据 → 人物快照改变 → 第二条组合使用新的快照。
     p.store.execute(
         "INSERT INTO person_evidence VALUES(?,?,?,?,?,?,?,?,?,?)",
-        ("ev-extra", "source", "shot0", actor["id"], None, None, 0, 1, "accepted", dumps({})),
+        ("ev-extra", "source", "shot0", actor["id"], role["id"], None, 0, 1, "accepted", dumps({})),
     )
     publish_content(p, config, "content2")
     second = p.publish()
@@ -1728,8 +1733,9 @@ def test_tasks_return_ids_retry_and_restart_checkpoints(catalogue, config, monke
     from mindex.persons.person_processing import PersonTasks
     from mindex.settings.runtime_settings import RuntimeConfig
 
-    p, _work, actor = catalogue
-    p.add_reference(actor["id"], photo())
+    p, work, actor = catalogue
+    role = p.save(Entity(kind="role", name="测试角色", work_ids=[work], actor_ids=[actor["id"]]))
+    p.add_reference(actor["id"], photo(), role_id=role["id"])
     processor = PersonProcessor(config, FakeClient(), Tracker)
     monkeypatch.setattr("mindex.persons.person_processing.PersonProcessor", lambda cfg: processor)
     manager = PersonTasks(RuntimeConfig(config, p.store), p.store)
@@ -1787,8 +1793,9 @@ def test_manual_anchor_only_extends_reliable_track_and_rejection_stops_it(catalo
 def test_person_selection_without_text_and_evidence_paging(catalogue, config):
     from mindex.search.search import SearchEngine
 
-    p, _work, actor = catalogue
-    p.add_reference(actor["id"], photo())
+    p, work, actor = catalogue
+    role = p.save(Entity(kind="role", name="测试角色", work_ids=[work], actor_ids=[actor["id"]]))
+    p.add_reference(actor["id"], photo(), role_id=role["id"])
     PersonProcessor(config, FakeClient(), Tracker).run("source", PersonOptions())
     publish_content(p, config)
     p.publish()
@@ -1810,6 +1817,7 @@ def test_shot_review_marks_persons_and_rejects_unmarked_rows(catalogue):
 
     p, work, a = catalogue
     other = p.save(Entity(kind="actor", name="演员乙"))
+    other_role = p.save(Entity(kind="role", name="另一角色", work_ids=[work], actor_ids=[other["id"]]))
     role = p.save(Entity(kind="role", name="叶淑柔", work_ids=[work], actor_ids=[a["id"]]))
     auto = {
         "auto-accept": ("shot0", a["id"], None, 0.0, 0.2, "accepted"),
@@ -1837,7 +1845,7 @@ def test_shot_review_marks_persons_and_rejects_unmarked_rows(catalogue):
         ShotReview(
             source_id="source",
             shot_id="shot0",
-            selections=[{"actor_id": a["id"], "role_id": role["id"]}, {"actor_id": other["id"]}],
+            selections=[{"actor_id": a["id"], "role_id": role["id"]}, {"actor_id": other["id"], "role_id": other_role["id"]}],
         )
     )
     assert result["shot_id"] == "shot0" and len(result["accepted"]) == 2
@@ -1857,7 +1865,7 @@ def test_shot_review_marks_persons_and_rejects_unmarked_rows(catalogue):
     )
     assert p.store.one("SELECT status FROM person_evidence WHERE id='next-shot'")["status"] == "accepted"
     # 幂等重审：减少勾选后旧 manual 行随之驳回，不产生重复。
-    p.shot_review(ShotReview(source_id="source", shot_id="shot0", selections=[{"actor_id": other["id"]}]))
+    p.shot_review(ShotReview(source_id="source", shot_id="shot0", selections=[{"actor_id": other["id"], "role_id": other_role["id"]}]))
     rows = {r["id"]: r for r in p.evidence("source") if r["shot_id"] == "shot0"}
     manual = [
         r for r in rows.values() if r["data"].get("evidence_type") == "manual" and r["status"] == "accepted"
@@ -1882,7 +1890,9 @@ def test_shot_review_marks_persons_and_rejects_unmarked_rows(catalogue):
 
 def test_review_shots_listing_groups_by_shot_filters_and_pages(catalogue):
     p, work, a = catalogue
+    role = p.save(Entity(kind="role", name="测试角色", work_ids=[work], actor_ids=[a["id"]]))
     other = p.save(Entity(kind="actor", name="演员乙"))
+    other_role = p.save(Entity(kind="role", name="另一角色", work_ids=[work], actor_ids=[other["id"]]))
     auto = [
         ("shot0", a["id"], 0.0, 0.2, "accepted"),
         ("shot0", None, 0.2, 0.4, "candidate"),
@@ -1897,7 +1907,7 @@ def test_review_shots_listing_groups_by_shot_filters_and_pages(catalogue):
                 "source",
                 shot_id,
                 actor_id,
-                None,
+                (role["id"] if actor_id == a["id"] else other_role["id"] if actor_id else None),
                 None,
                 start,
                 end,
@@ -1909,8 +1919,8 @@ def test_review_shots_listing_groups_by_shot_filters_and_pages(catalogue):
     assert data["total"] == 2
     item = data["items"][0]
     assert (item["shot_id"], item["start"], item["end"]) == ("shot0", 0.0, 1.0)
-    assert item["counts"] == {"accepted": 1, "candidate": 2, "rejected": 0}
-    assert len(item["evidence"]) == 3
+    assert item["counts"] == {"accepted": 1, "candidate": 1, "rejected": 0}
+    assert len(item["evidence"]) == 2
     assert all("body_feature" not in r["data"] for r in item["evidence"])
     assert item["image_url"] == "/api/persons/evidence/e0/image"
     # 分镜级状态：shot0 有一帧被确认就整体算已接受，不再算待确认。
@@ -1926,6 +1936,7 @@ def test_review_shots_listing_groups_by_shot_filters_and_pages(catalogue):
 def test_review_shot_status_is_classified_per_shot_not_per_frame(catalogue):
     """任一帧已确认 → 分镜已接受；无已确认帧但有候选 → 待确认；整镜无人 → 已排除。"""
     p, work, a = catalogue
+    role = p.save(Entity(kind="role", name="测试角色", work_ids=[work], actor_ids=[a["id"]]))
     rows = [
         ("shot0", "accepted", 0.0),  # 已确认一帧即可整镜算已接受
         ("shot0", "candidate", 0.2),
@@ -1941,7 +1952,7 @@ def test_review_shot_status_is_classified_per_shot_not_per_frame(catalogue):
                 "source",
                 shot_id,
                 a["id"],
-                None,
+                role["id"],
                 None,
                 start,
                 start + 0.2,
@@ -1957,7 +1968,7 @@ def test_review_shot_status_is_classified_per_shot_not_per_frame(catalogue):
     # 已接受的镜头仍要能整镜核对结清，卡内证据不因状态过滤而缺失。
     assert len(p.review_shots(status="accepted")["items"][0]["evidence"]) == 2
     recognized = p.review_shots(status="accepted")["items"][0]["recognized_people"]
-    assert recognized == [{"actor_id": a["id"], "role_id": None, "score": None, "observations": 2}]
+    assert recognized == [{"actor_id": a["id"], "role_id": role["id"], "score": None, "observations": 2}]
     assert p.review_shots(status="accepted", compact=True)["items"][0]["recognized_people"] == recognized
     # 处理面板显示的待核对量必须与审核列表同一套分类，否则会误导工作量。
     assert p.review_summary() == {"source": {"accepted": 1, "candidate": 1, "rejected": 1}}
@@ -2090,9 +2101,10 @@ def test_cli_shot_review_and_single_shot_lookup(catalogue, config, tmp_path):
     from mindex.cli import app
 
     _p, _work, actor = catalogue
+    role = _p.save(Entity(kind="role", name="测试角色", work_ids=[_work], actor_ids=[actor["id"]]))
     file = tmp_path / "review.json"
     file.write_text(
-        dumps({"source_id": "source", "shot_id": "shot0", "selections": [{"actor_id": actor["id"]}]})
+        dumps({"source_id": "source", "shot_id": "shot0", "selections": [{"actor_id": actor["id"], "role_id": role["id"]}]})
     )
     cfg = tmp_path / "config.yaml"
     cfg.write_text(yaml.safe_dump(config.model_dump(mode="json")))
@@ -2173,7 +2185,7 @@ def test_review_pair_filter_uses_highest_score_before_pagination(catalogue, conf
         "/api/persons/review/shots",
         params={**params, "actor_id": other["id"], "role_id": other_role["id"]},
     ).json()["items"][0]
-    assert len(both["evidence"]) == 3  # 分类过滤不截断卡内其他身份的证据。
+    assert len(both["evidence"]) == 2  # 分类过滤不截断卡内其他身份的证据。
     assert all("body_feature" not in e["data"] and "space" not in e["data"] for e in both["evidence"])
     none = client.get("/api/persons/review/shots", params={**params, "no_candidate": True}).json()
     assert none["total"] == 1 and none["items"][0]["shot_id"] == "shot2"
@@ -2182,14 +2194,14 @@ def test_review_pair_filter_uses_highest_score_before_pagination(catalogue, conf
     assert all(set(e) == {"id", "actor_id", "role_id", "status"} for e in compact["items"][0]["evidence"])
 
 
-def test_review_filter_distinguishes_roles_and_only_infers_unique_role(catalogue):
+def test_review_filter_distinguishes_roles_without_actor_inference(catalogue):
     p, work, actor = catalogue
     first = p.save(Entity(kind="role", name="角色一", work_ids=[work], actor_ids=[actor["id"]]))
     p.store.execute(
         "INSERT INTO person_evidence VALUES(?,?,?,?,?,?,?,?,?,?)",
         ("actor-only", "source", "shot0", actor["id"], None, None, 0, 0.5, "candidate", '{"score":0.9}'),
     )
-    assert p.review_shots(actor_id=actor["id"], role_id=first["id"])["total"] == 1
+    assert p.review_shots(actor_id=actor["id"], role_id=first["id"])["total"] == 0
     second = p.save(Entity(kind="role", name="角色二", work_ids=[work], actor_ids=[actor["id"]]))
     for n, role in enumerate([first, second], 1):
         p.store.execute(
@@ -2197,7 +2209,8 @@ def test_review_filter_distinguishes_roles_and_only_infers_unique_role(catalogue
             (f"pair{n}", "source", f"shot{n}", actor["id"], role["id"], None, n, n + 0.5,
              "candidate", '{"score":0.9}'),
         )
-    assert p.review_shots(actor_id=actor["id"])["items"][0]["shot_id"] == "shot0"
+    assert p.review_shots(actor_id=actor["id"])["total"] == 0
+    assert p.review_shots(no_candidate=True)["items"][0]["shot_id"] == "shot0"
     for n, role in enumerate([first, second], 1):
         result = p.review_shots(actor_id=actor["id"], role_id=role["id"])
         assert result["total"] == 1 and result["items"][0]["shot_id"] == f"shot{n}"
@@ -2214,7 +2227,8 @@ def test_review_manual_identity_is_filterable_and_supersedes_old_review(catalogu
         ("unknown", "source", "shot0", None, None, None, 0, 0.5, "candidate", '{"score":0.99}'),
     )
     assert p.review_shots(no_candidate=True)["total"] == 1
-    body = ShotReview(source_id="source", shot_id="shot0", selections=[{"actor_id": actor["id"]}])
+    first_role = p.save(Entity(kind="role", name="初始角色", work_ids=[work], actor_ids=[actor["id"]]))
+    body = ShotReview(source_id="source", shot_id="shot0", selections=[{"actor_id": actor["id"], "role_id": first_role["id"]}])
     p.shot_review(body)
     body = ShotReview(
         source_id="source", shot_id="shot0", selections=[{"actor_id": other["id"], "role_id": role["id"]}],
@@ -2257,7 +2271,7 @@ def test_rejected_review_ignores_identity_filters_and_keeps_pagination(catalogue
     p, work, actor = catalogue
     role = p.save(Entity(kind="role", name="已排除角色", work_ids=[work], actor_ids=[actor["id"]]))
     for n, selections in enumerate([
-        [{"actor_id": actor["id"], "role_id": role["id"]}], [{"actor_id": actor["id"]}], [],
+        [{"actor_id": actor["id"], "role_id": role["id"]}], [{"actor_id": actor["id"], "role_id": role["id"]}], [],
     ]):
         p.shot_review(ShotReview(source_id="source", shot_id=f"shot{n}", selections=selections))
         p.shot_review(ShotReview(source_id="source", shot_id=f"shot{n}", selections=[]))
@@ -2361,11 +2375,12 @@ def test_identity_linked_shots_include_non_top_evidence_and_block_deletion(catal
 
     p, work, actor = catalogue
     other = p.save(Entity(kind="actor", name="最高分演员"))
+    other_role = p.save(Entity(kind="role", name="另一角色", work_ids=[work], actor_ids=[other["id"]]))
     role = p.save(Entity(kind="role", name="较低分角色", work_ids=[work], actor_ids=[actor["id"]]))
     ref = p.add_reference(actor["id"], photo(), role_id=role["id"])
     identifier = actor["id"] if kind == "actor" else role["id"]
     for key, shot, who, role_id, state, score in [
-        ("top", "shot0", other["id"], None, status, 0.9),
+        ("top", "shot0", other["id"], other_role["id"], status, 0.9),
         ("lower", "shot0", actor["id"], role["id"], status, 0.4),
         ("lower-again", "shot0", actor["id"], role["id"], status, 0.3),
         ("excluded", "shot1", actor["id"], role["id"], "rejected", 0.8),
@@ -2390,7 +2405,7 @@ def test_identity_linked_shots_include_non_top_evidence_and_block_deletion(catal
     assert "0.000–1.000" in blocked.json()["detail"]["message"]
     assert p.reference(ref["id"]) and actor["id"] in p.entity(role["id"])["actor_ids"]
     # 核对整镜仅保留最高分演员后，较低分身份不再阻碍删除；留档与过期布局不拦截。
-    p.shot_review(ShotReview(source_id="source", shot_id="shot0", selections=[{"actor_id": other["id"]}]))
+    p.shot_review(ShotReview(source_id="source", shot_id="shot0", selections=[{"actor_id": other["id"], "role_id": other_role["id"]}]))
     assert client.get(url + "/linked-shots").json()["total"] == 0
     before = p.evidence()
     removed = client.delete(url)
@@ -2403,10 +2418,11 @@ def test_identity_linked_shots_include_non_top_evidence_and_block_deletion(catal
 
 def test_linked_shots_paginates_all_associations(catalogue, config):
     p, _work, actor = catalogue
+    role = p.save(Entity(kind="role", name="测试角色", work_ids=[_work], actor_ids=[actor["id"]]))
     for n in range(3):
         p.store.execute(
             "INSERT INTO person_evidence VALUES(?,?,?,?,?,?,?,?,?,?)",
-            (f"linked{n}", "source", f"shot{n}", actor["id"], None, None, n, n + 0.5, "accepted", "{}"),
+            (f"linked{n}", "source", f"shot{n}", actor["id"], role["id"], None, n, n + 0.5, "accepted", "{}"),
         )
     response = TestClient(create_app(config)).get(
         f"/api/persons/entities/{actor['id']}/linked-shots", params={"limit": 1, "offset": 1},
@@ -2501,7 +2517,7 @@ def test_role_delete_guard_uses_whole_shot_state(catalogue, config, target_state
 
 
 @pytest.mark.parametrize('status,blocked', [('candidate', True), ('accepted', True), ('rejected', False)])
-def test_role_delete_includes_unique_actor_role_inference(catalogue, config, status, blocked):
+def test_role_delete_ignores_actor_only_evidence(catalogue, config, status, blocked):
     p, work, actor = catalogue
     role = p.save(Entity(kind='role', name='唯一角色', work_ids=[work], actor_ids=[actor['id']]))
     p.store.execute(
@@ -2510,8 +2526,8 @@ def test_role_delete_includes_unique_actor_role_inference(catalogue, config, sta
     )
     client = TestClient(create_app(config))
     url = f"/api/persons/entities/{role['id']}"
-    assert client.get(url+'/linked-shots').json()['total'] == int(blocked)
-    assert client.delete(url).status_code == (422 if blocked else 200)
+    assert client.get(url+'/linked-shots').json()['total'] == 0
+    assert client.delete(url).status_code == 200
 
 
 def test_confirmed_person_scores_preserve_manual_original_and_support_legacy(catalogue, config):
@@ -2519,6 +2535,7 @@ def test_confirmed_person_scores_preserve_manual_original_and_support_legacy(cat
 
     p, work, actor = catalogue
     other = p.save(Entity(kind='actor', name='无原始候选演员'))
+    other_role = p.save(Entity(kind="role", name="另一角色", work_ids=[work], actor_ids=[other["id"]]))
     role = p.save(Entity(kind='role', name='确认角色', work_ids=[work], actor_ids=[actor['id']]))
     for identifier, score, status, character in [
         ('accepted-frame', 0.4, 'accepted', role['id']),
@@ -2533,7 +2550,7 @@ def test_confirmed_person_scores_preserve_manual_original_and_support_legacy(cat
     assert before == [{'actor_id': actor['id'], 'role_id': role['id'], 'score': 0.4,
                        'original_score': None, 'manual': False}]
     body = ShotReview(source_id='source', shot_id='shot0', selections=[
-        {'actor_id': actor['id'], 'role_id': role['id']}, {'actor_id': other['id']},
+        {'actor_id': actor['id'], 'role_id': role['id']}, {'actor_id': other['id'], 'role_id': other_role['id']},
     ])
     p.shot_review(body)
     manual = next(e for e in p.evidence() if e['actor_id']==actor['id'] and e['status']=='accepted')
@@ -2557,7 +2574,7 @@ def test_confirmed_person_scores_preserve_manual_original_and_support_legacy(cat
     assert people(False)[actor['id']]['original_score'] == 0.6
 
 
-def test_manual_score_uses_actor_only_fallback_but_not_other_roles(catalogue):
+def test_manual_score_ignores_actor_only_and_other_roles(catalogue):
     from mindex.persons.persons import ShotReview
 
     p, work, actor = catalogue
@@ -2571,7 +2588,7 @@ def test_manual_score_uses_actor_only_fallback_but_not_other_roles(catalogue):
         'actor_id':actor['id'],'role_id':roles[1]['id'],
     }]))
     person=p.review_shots(status='accepted')['items'][0]['confirmed_people'][0]
-    assert person['manual'] and person['original_score']==0.42
+    assert person['manual'] and person['original_score'] is None
     # 仅确认演员与确认角色是两个不同身份，人工标记不能串到同演员另一角色。
     p.store.execute('INSERT INTO person_evidence VALUES(?,?,?,?,?,?,?,?,?,?)',(
         'auto-other-role','source','shot0',actor['id'],roles[2]['id'],None,0,1,'accepted','{"score":0.7}',
@@ -2606,17 +2623,18 @@ def test_frame_encoding_and_cache_config(catalogue, config):
 
 def test_frame_retention_real_scores_and_pending(catalogue):
     from mindex.persons.persons import retained_frame_paths
-    p, _, actor = catalogue
+    p, work, actor = catalogue
+    role = p.save(Entity(kind="role", name="测试角色", work_ids=[work], actor_ids=[actor["id"]]))
     for identifier, score, kind, original in (("face", .6, "face", None), ("manual", 1, "manual", .5),
                                                ("track", 1, "track", None)):
-        frame_evidence(p, actor, identifier, identifier + ".png", score=score, kind=kind, original=original)
+        frame_evidence(p, actor, identifier, identifier + ".png", score=score, kind=kind, original=original, role=role["id"])
     frame_evidence(p, actor, "pending", "pending.png", shot="shot1", status="candidate")
     frame_evidence(p, actor, "rejected", "rejected.png", shot="shot1", status="rejected")
     frame_evidence(p, actor, "track-only", "track-only.png", shot="shot2", kind="track")
     assert retained_frame_paths(p.store) == {"source": {"face.png", "pending.png", "rejected.png", "track-only.png"}}
     rows = [{**r, "data": json.loads(r["data"])} for r in p.store.rows(
         "SELECT * FROM person_evidence WHERE shot_id='shot0'")]
-    assert p.original_score(rows, actor["id"], None) == .6
+    assert p.original_score(rows, actor["id"], role["id"]) == .6
     assert p.review_shots(shot_id="shot0")["items"][0]["image_url"].endswith("/face/image")
 
 
@@ -2834,6 +2852,10 @@ def test_linked_shots_use_current_source_display_name(catalogue):
         "INSERT INTO person_evidence(id,source_id,shot_id,actor_id,start,end,status,data) VALUES(?,?,?,?,?,?,?,?)",
         ("rename-evidence", "source", "shot0", actor["id"], 0, 1, "candidate", "{}"),
     )
+    role = p.save(Entity(kind="role", name="测试角色", work_ids=[work], actor_ids=[actor["id"]]))
+    p.store.execute(
+        "UPDATE person_evidence SET role_id=? WHERE id='rename-evidence'", (role["id"],),
+    )
     Library(p.store).patch("source", "source", CurationPatch(display_name="关联分镜新名"))
     linked = p.linked_shots(actor["id"])
     assert linked["total"] == 1
@@ -2875,3 +2897,135 @@ def test_purge_removes_unused_default_work(catalogue):
     with p.store.connect() as db:
         purge_person_source(db, "source")
     assert not p.store.one("SELECT id FROM person_entities WHERE id=?", (work,))
+
+
+def test_role_only_migration_deletes_actor_evidence_and_preserves_pairs_exclusions_and_releases(catalogue):
+    from mindex.persons.persons import migrate_actor_only_evidence
+
+    p, work, actor = catalogue
+    role = p.save(Entity(kind="role", name="保留角色", work_ids=[work], actor_ids=[actor["id"]]))
+    records = [
+        ("old-auto", "shot0", None, "accepted", {}),
+        ("old-manual", "shot0", None, "accepted", {"reviewed": True, "confirmation": "shot_review"}),
+        ("old-candidate", "shot0", None, "candidate", {}),
+        ("old-unselected", "shot0", None, "rejected", {"reviewed": True, "confirmation": "shot_review"}),
+        ("excluded", "shot1", None, "rejected", {"reviewed": True, "confirmation": "shot_review"}),
+        ("pair-auto", "shot2", role["id"], "accepted", {"score": .8}),
+        ("pair-manual", "shot2", role["id"], "accepted", {"reviewed": True, "confirmation": "shot_review"}),
+        ("pair-rejected", "shot2", role["id"], "rejected", {"reviewed": True}),
+    ]
+    for identifier, shot, character, status, data in records:
+        p.store.execute("INSERT INTO person_evidence VALUES(?,?,?,?,?,?,?,?,?,?)", (
+            identifier, "source", shot, actor["id"], character, None, 0, 1, status, dumps(data),
+        ))
+    before = {r["id"]: r for r in p.store.rows("SELECT * FROM person_evidence")}
+    snapshot = dumps({"format": 1, "entities": p.entities(), "evidence": p.evidence(), "coverage": []})
+    p.store.execute("INSERT INTO person_versions(id,data) VALUES('legacy-release',?)", (snapshot,))
+    with p.store.connect() as db:
+        db.execute("DELETE FROM settings WHERE key='migration.person-role-only-v3'")
+        migrate_actor_only_evidence(db)
+        migrate_actor_only_evidence(db)
+    after = {r["id"]: r for r in p.store.rows("SELECT * FROM person_evidence")}
+    assert after == {key: before[key] for key in ["old-unselected", "excluded", "pair-auto", "pair-manual", "pair-rejected"]}
+    assert p.store.one("SELECT data FROM person_versions WHERE id='legacy-release'")["data"] == snapshot
+    assert p.review_summary() == {"source": {"accepted": 1, "candidate": 1, "rejected": 1}}
+    unknown = p.review_shots(status="candidate", no_candidate=True)["items"]
+    assert [s["shot_id"] for s in unknown] == ["shot0"] and unknown[0]["evidence"] == []
+
+
+def test_review_all_endpoints_exclude_foreign_invalid_and_actor_only_evidence(catalogue, config):
+    from mindex.persons.persons import ShotReview
+
+    p, work, actor = catalogue
+    role = p.save(Entity(kind="role", name="当前角色", work_ids=[work], actor_ids=[actor["id"]]))
+    outsider = p.save(Entity(kind="actor", name="外片演员"))
+    foreign = p.save(Entity(kind="work", name="外片"))
+    foreign_role = p.save(Entity(kind="role", name="外片角色", work_ids=[foreign["id"]], actor_ids=[outsider["id"]]))
+    for key, who, character, score in [
+        ("local", actor["id"], role["id"], .4),
+        ("foreign", outsider["id"], foreign_role["id"], .99),
+        ("mismatch", outsider["id"], role["id"], .98),
+        ("actor-only", actor["id"], None, .97),
+    ]:
+        p.store.execute("INSERT INTO person_evidence VALUES(?,?,?,?,?,?,?,?,?,?)", (
+            key, "source", "shot0", who, character, None, 0, 1, "accepted", dumps({"score": score}),
+        ))
+    client = TestClient(create_app(config))
+    for compact in [False, True]:
+        result = client.get('/api/persons/review/shots', params={"source_id": "source", "compact": compact}).json()
+        shot = result["items"][0]
+        assert shot["candidate"] == {"actor_id": actor["id"], "role_id": role["id"], "score": .4}
+        assert [r["id"] for r in shot["evidence"]] == ["local"]
+        assert shot["counts"] == {"accepted": 1, "candidate": 0, "rejected": 0}
+        assert [(r["actor_id"], r["role_id"]) for r in shot["recognized_people"]] == [(actor["id"], role["id"])]
+        assert result["filters"] == [{"actor_id": actor["id"], "role_id": role["id"], "count": 1}]
+    listing = client.get('/api/persons/evidence').json()
+    assert listing["total"] == 1 and [r["id"] for r in listing["items"]] == ["local"]
+    for identifier in ["foreign", "mismatch", "actor-only"]:
+        assert client.get('/api/persons/evidence/' + identifier).status_code == 404
+    for selection in [{"actor_id": actor["id"]}, {"actor_id": outsider["id"], "role_id": foreign_role["id"]},
+                      {"actor_id": outsider["id"], "role_id": role["id"]}]:
+        response = client.post('/api/persons/review/shot', json={"source_id": "source", "shot_id": "shot0", "selections": [selection]})
+        assert response.status_code == 422
+    p.shot_review(ShotReview(source_id="source", shot_id="shot0", selections=[]))
+    assert p.review_shots(status="rejected")["total"] == 1
+
+
+def test_processing_uses_only_work_role_references_and_roles_compete(catalogue, config):
+    from mindex.admin.source_tasks import person_setup
+
+    p, work, actor = catalogue
+    role = p.save(Entity(kind="role", name="本片角色", work_ids=[work], actor_ids=[actor["id"]]))
+    foreign = p.save(Entity(kind="work", name="另一片"))
+    other_role = p.save(Entity(kind="role", name="外片同演员", work_ids=[foreign["id"]], actor_ids=[actor["id"]]))
+    p.add_reference(actor["id"], photo("blue"))
+    p.add_reference(actor["id"], photo("green"), role_id=other_role["id"])
+    assert not person_setup(p.store, "source")["ready"]
+    local = p.add_reference(actor["id"], photo(), role_id=role["id"])
+    assert person_setup(p.store, "source")["ready"]
+    client = FakeClient()
+    processor = PersonProcessor(config, client, Tracker)
+    first = processor.run("source", PersonOptions())
+    assert client.images == 1
+    assert {e["role_id"] for e in p.evidence()} == {role["id"]}
+    assert {e["data"]["reference_id"] for e in p.evidence()} == {local["id"]}
+    second = p.save(Entity(kind="role", name="本片另一角色", work_ids=[work], actor_ids=[actor["id"]]))
+    p.add_reference(actor["id"], photo("yellow"), role_id=second["id"])
+    report = processor.run("source", PersonOptions())
+    assert report["reused_shots"] == 3 and first["extracted_shots"] == 3 and client.videos == 3
+    assert client.images == 2
+    assert all(e["status"] == "candidate" and e["role_id"] for e in p.evidence())
+    assert p.review_shots(status="accepted")["total"] == 0
+
+
+def test_new_release_actor_queries_use_snapshot_roles_and_keep_multi_person_semantics(catalogue, config):
+    from mindex.search.search import SearchEngine
+
+    p, work, actor = catalogue
+    other = p.save(Entity(kind="actor", name="替演演员"))
+    role = p.save(Entity(kind="role", name="同一角色", work_ids=[work], actor_ids=[actor["id"], other["id"]]))
+    second = p.save(Entity(kind="role", name="另一个角色", work_ids=[work], actor_ids=[other["id"]]))
+    for key, character, start, end in [("first", role["id"], 0, .6), ("second", second["id"], .4, 1)]:
+        p.store.execute("INSERT INTO person_evidence VALUES(?,?,?,?,?,?,?,?,?,?)", (
+            key, "source", "shot0", other["id"], character, None, start, end, "accepted", '{}',
+        ))
+    p.store.execute("INSERT INTO person_evidence VALUES(?,?,?,?,?,?,?,?,?,?)", (
+        "legacy", "source", "shot1", actor["id"], None, None, 1, 2, "accepted", '{}',
+    ))
+    publish_content(p, config)
+    release = p.publish()
+    snapshot = p.store.one("SELECT data FROM person_versions WHERE id=?", (release["person_version"],))["data"]
+    assert {e["id"] for e in json.loads(snapshot)["evidence"]} == {"first", "second"}
+    p.save(Entity(kind="role", name=role["name"], work_ids=[work], actor_ids=[other["id"]]), role["id"])
+    engine = SearchEngine(config)
+    def shots(identifiers, relation="all"):
+        return [r["id"] for r in engine.text(TextSearch(person_ids=identifiers, person_relation=relation, granularity="shot"))["results"]]
+    assert shots([actor["id"]]) == ["shot0"]  # The winning photo belongs to the other performer.
+    assert shots([actor["id"], second["id"]]) == ["shot0"]
+    p.store.execute("UPDATE person_evidence SET start=.7 WHERE id='second'")
+    assert shots([actor["id"], second["id"]]) == ["shot0"]  # Draft changes cannot alter the release.
+    p.publish()
+    assert shots([role["id"], second["id"]], "all") == []
+    assert shots([role["id"], second["id"]], "any") == ["shot0"]
+    assert shots([actor["id"]]) == []
+    assert p.store.one("SELECT data FROM person_versions WHERE id=?", (release["person_version"],))["data"] == snapshot

@@ -159,11 +159,11 @@ def person_setup(store, source_id, work_id=None):
                 missing.append(f"角色「{role['name']}」的演员资料缺失")
             elif not any(
                 r["actor_id"] == actor
-                and r.get("role_id") in (None, role["id"])
+                and r.get("role_id") == role["id"]
                 and (store.root / r["path"]).is_file()
                 for r in references
             ):
-                missing.append(f"角色「{role['name']}」的演员缺少参考图")
+                missing.append(f"角色「{role['name']}」的演员缺少角色参考图")
     return {
         "work_id": work_id,
         "works": works,

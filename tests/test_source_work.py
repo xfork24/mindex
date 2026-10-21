@@ -503,8 +503,8 @@ def test_full_source_flow_incremental_publish_retrieval_and_details(
     catalogue = Persons(pipeline.store)
     work = catalogue.save(Entity(kind="work", name="工程作品"))
     actor = catalogue.save(Entity(kind="actor", name="工程演员"))
-    catalogue.save(Entity(kind="role", name="工程角色", actor_ids=[actor["id"]], work_ids=[work["id"]]))
-    catalogue.add_reference(actor["id"], photo())
+    role = catalogue.save(Entity(kind="role", name="工程角色", actor_ids=[actor["id"]], work_ids=[work["id"]]))
+    catalogue.add_reference(actor["id"], photo(), role_id=role["id"])
     assert client.get(f"/api/admin/sources/{sid}/person-setup?work_id={work['id']}").json()["ready"]
     monkeypatch.setattr(
         "mindex.persons.person_processing.PersonProcessor", lambda cfg: PersonProcessor(cfg, FakeClient(), Tracker)
@@ -606,8 +606,8 @@ def test_person_first_publish_and_publication_failure_retry(config, video_file, 
     catalogue = Persons(pipeline.store)
     work_id = catalogue.work_for(sid)
     actor = catalogue.save(Entity(kind="actor", name="工程人物"))
-    catalogue.save(Entity(kind="role", name="工程角色", work_ids=[work_id], actor_ids=[actor["id"]]))
-    catalogue.add_reference(actor["id"], photo())
+    role = catalogue.save(Entity(kind="role", name="工程角色", work_ids=[work_id], actor_ids=[actor["id"]]))
+    catalogue.add_reference(actor["id"], photo(), role_id=role["id"])
     monkeypatch.setattr(
         "mindex.persons.person_processing.PersonProcessor", lambda cfg: PersonProcessor(cfg, FakeClient(), Tracker)
     )

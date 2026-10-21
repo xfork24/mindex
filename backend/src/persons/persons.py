@@ -37,6 +37,8 @@ CREATE TABLE IF NOT EXISTS person_evidence(id TEXT PRIMARY KEY, source_id TEXT N
 CREATE INDEX IF NOT EXISTS person_evidence_source ON person_evidence(source_id,status,start,end);
 CREATE INDEX IF NOT EXISTS person_evidence_shot ON person_evidence(source_id,shot_id);
 CREATE TABLE IF NOT EXISTS person_coverage(source_id TEXT NOT NULL, cache_id TEXT PRIMARY KEY, data TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS person_coverage_shot
+ ON person_coverage(source_id,json_extract(data,'$.shot_id'));
 CREATE TABLE IF NOT EXISTS person_tasks(id TEXT PRIMARY KEY, source_id TEXT NOT NULL, status TEXT NOT NULL,
  config TEXT NOT NULL, options TEXT NOT NULL, progress TEXT NOT NULL DEFAULT '{}', error TEXT, result TEXT,
  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
@@ -59,6 +61,7 @@ def init_person_schema(db):
     # never accepted as configuration or exposed as person identities again.
     marker = "migration.person-roles-v2"
     if db.execute("SELECT 1 FROM settings WHERE key=?", (marker,)).fetchone():
+        migrate_actor_only_evidence(db)
         return
     entries = {
         r["id"]: {"id": r["id"], **json.loads(r["data"])} for r in db.execute("SELECT * FROM person_entities")
@@ -77,6 +80,34 @@ def init_person_schema(db):
         "UPDATE person_evidence SET role_id=COALESCE(stage_id,role_id),stage_id=NULL WHERE stage_id IS NOT NULL"
     )
     db.execute("UPDATE person_references SET stage_id=NULL WHERE stage_id IS NOT NULL")
+    db.execute("INSERT INTO settings(key,value) VALUES(?, 'complete')", (marker,))
+    migrate_actor_only_evidence(db)
+
+
+def migrate_actor_only_evidence(db):
+    """One-time cleanup; retain every role pair, human rejection and published snapshot."""
+    marker = "migration.person-role-only-v3"
+    if db.execute("SELECT 1 FROM settings WHERE key=?", (marker,)).fetchone():
+        return
+    predicate = (
+        "actor_id IS NOT NULL AND role_id IS NULL AND NOT (status='rejected' AND "
+        "(COALESCE(json_extract(data,'$.reviewed'),0)=1 "
+        "OR COALESCE(json_extract(data,'$.confirmation'),'')='shot_review'))"
+    )
+    # Deleted-only shots must remain reviewable under No candidates.
+    for row in db.execute(
+        "SELECT source_id,shot_id,MIN(start) AS start,MAX(end) AS end, "
+        "MAX(status='accepted' AND COALESCE(json_extract(data,'$.confirmation'),'')='shot_review') "
+        "AS removed_confirmation FROM person_evidence WHERE "
+        + predicate + " GROUP BY source_id,shot_id"
+    ).fetchall():
+        key = fingerprint([marker, row["source_id"], row["shot_id"]])
+        db.execute("INSERT OR IGNORE INTO person_coverage VALUES(?,?,?)", (
+            row["source_id"], key, dumps({"shot_id": row["shot_id"], "start": row["start"],
+                                        "end": row["end"], "migration": marker,
+                                        "removed_confirmation": bool(row["removed_confirmation"])}),
+        ))
+    db.execute("DELETE FROM person_evidence WHERE " + predicate)
     db.execute("INSERT INTO settings(key,value) VALUES(?, 'complete')", (marker,))
 
 
@@ -142,7 +173,7 @@ class Review(StrictModel):
 
 
 class ShotSelection(StrictModel):
-    """勾选一个出镜身份：演员 + 该作品中的可选角色。"""
+    """勾选一个出镜身份：演员 + 该作品中的角色。"""
 
     actor_id: str
     role_id: str | None = None
@@ -320,23 +351,17 @@ class Persons:
             raise ValueError("作品暂不支持在页面删除")
         column = f"{entity['kind']}_id"
         identity = f"e.{column}"
-        if entity["kind"] == "role":
-            # 与审核筛选一致：演员级证据只在本作品角色唯一时归到该角色。
-            identity = (
-                "COALESCE(e.role_id,(SELECT CASE WHEN COUNT(*)=1 THEN MIN(role.id) END "
-                "FROM person_entities role JOIN person_sources ps ON ps.source_id=e.source_id "
-                "WHERE role.kind='role' AND EXISTS (SELECT 1 FROM json_each(role.data,'$.actor_ids') "
-                "WHERE value=e.actor_id) AND EXISTS (SELECT 1 FROM json_each(role.data,'$.work_ids') "
-                "WHERE value=ps.work_id)))"
-            )
+        confirmed_role = self.VALID_ROLE
+        for field in ("source_id", "actor_id", "role_id"):
+            confirmed_role = confirmed_role.replace(f"e.{field}", f"confirmed.{field}")
         query = (
             "FROM person_evidence e JOIN segments s ON s.id=e.shot_id AND s.source_id=e.source_id "
             "JOIN sources src ON src.id=s.source_id "
             "LEFT JOIN source_curation sc ON sc.id=src.id "
-            f"WHERE {identity}=? AND s.kind='shot' AND (e.status='accepted' OR "
+            f"WHERE {identity}=? AND s.kind='shot' AND " + self.VALID_ROLE + " AND (e.status='accepted' OR "
             "(e.status='candidate' AND NOT EXISTS (SELECT 1 FROM person_evidence confirmed "
             "WHERE confirmed.source_id=e.source_id AND confirmed.shot_id=e.shot_id "
-            "AND confirmed.status='accepted'))) "
+            "AND confirmed.status='accepted' AND " + confirmed_role + "))) "
             "GROUP BY s.id,s.source_id"
         )
         with nullcontext(db) if db is not None else self.store.connect() as connection:
@@ -794,13 +819,14 @@ class Persons:
         actor_id = body.actor_id or row["actor_id"]
         if body.accept:
             self.entity(actor_id, "actor")
-            if body.role_id:
-                role = self.entity(body.role_id, "role")
-                if (
-                    self.work_for(row["source_id"]) not in role["work_ids"]
-                    or actor_id not in role["actor_ids"]
-                ):
-                    raise ValueError("演员与作品角色关系不符")
+            if not body.role_id:
+                raise ValueError("出镜审核必须指定角色")
+            role = self.entity(body.role_id, "role")
+            if (
+                self.work_for(row["source_id"]) not in role["work_ids"]
+                or actor_id not in role["actor_ids"]
+            ):
+                raise ValueError("演员与作品角色关系不符")
         data = json.loads(row["data"]) | {
             "evidence_type": "manual",
             "confirmation": body.reason,
@@ -828,10 +854,11 @@ class Persons:
         work_id = self.work_for(body.source_id)
         for selection in body.selections:
             self.entity(selection.actor_id, "actor")
-            if selection.role_id:
-                role = self.entity(selection.role_id, "role")
-                if work_id not in role["work_ids"] or selection.actor_id not in role["actor_ids"]:
-                    raise ValueError("演员与作品角色关系不符")
+            if not selection.role_id:
+                raise ValueError("出镜审核必须指定角色")
+            role = self.entity(selection.role_id, "role")
+            if work_id not in role["work_ids"] or selection.actor_id not in role["actor_ids"]:
+                raise ValueError("演员与作品角色关系不符")
         rows = self.store.rows(
             "SELECT * FROM person_evidence WHERE source_id=? AND shot_id=? ORDER BY start,id",
             (body.source_id, body.shot_id),
@@ -894,7 +921,7 @@ class Persons:
                 db.execute(
                     "UPDATE person_evidence SET status='rejected',data=? WHERE id=?",
                     (
-                        dumps(json.loads(row["data"]) | {"reviewed": True, "confirmation": "shot_review"}),
+                        dumps(json.loads(row["data"]) | {"reviewed": True, "confirmation": "shot_review", "shot_excluded": not body.selections}),
                         row["id"],
                     ),
                 )
@@ -911,7 +938,7 @@ class Persons:
     @classmethod
     def original_score(cls, rows, actor_id, role_id):
         """取该身份原始匹配最高分；整镜人工记录的固定 1.0 不属于原始分数。"""
-        exact, actor_only = [], []
+        exact = []
         for row in rows:
             if row["actor_id"] != actor_id:
                 continue
@@ -922,23 +949,17 @@ class Persons:
             score = cls.evidence_score(data.get("original_score") if synthetic else data.get("score"))
             if score is None:
                 continue
-            if role_id is None or row["role_id"] == role_id:
+            if role_id and row["role_id"] == role_id:
                 exact.append(score)
-            elif row["role_id"] is None:
-                actor_only.append(score)
-        return max(exact) if exact else max(actor_only, default=None)
+        return max(exact, default=None)
 
     @classmethod
     def confirmed_scores(cls, people, rows):
         """补充每位确认人物的分数与来源；旧人工记录从保留的原始帧恢复分数。"""
         result = []
-        inferred = {p["actor_id"] for p in people if p["role_id"] is not None} - {
-            p["actor_id"] for p in people if p["role_id"] is None
-        }
         for person in people:
             matching = [r for r in rows if r["status"] == "accepted" and r["actor_id"] == person["actor_id"]
-                        and (r["role_id"] == person["role_id"]
-                             or (r["role_id"] is None and r["actor_id"] in inferred))]
+                        and r["role_id"] == person["role_id"]]
             manual_rows = [r for r in matching if r["data"].get("evidence_type") == "manual"]
             if manual_rows:
                 recorded = [cls.evidence_score(r["data"].get("original_score")) for r in manual_rows
@@ -953,13 +974,48 @@ class Persons:
             result.append({**person, "score": score, "original_score": original, "manual": bool(manual_rows)})
         return result
 
+    VALID_ROLE = (
+        "EXISTS (SELECT 1 FROM person_entities role JOIN person_sources ps ON ps.source_id=e.source_id "
+        "JOIN person_entities actor ON actor.id=e.actor_id AND actor.kind='actor' "
+        "WHERE role.id=e.role_id AND role.kind='role' "
+        "AND EXISTS (SELECT 1 FROM json_each(role.data,'$.work_ids') WHERE value=ps.work_id) "
+        "AND EXISTS (SELECT 1 FROM json_each(role.data,'$.actor_ids') WHERE value=e.actor_id))"
+    )
+
+    SHOT_EXCLUSION = (
+        "e.status='rejected' AND json_extract(e.data,'$.confirmation')='shot_review' "
+        "AND NOT EXISTS (SELECT 1 FROM person_evidence mark WHERE mark.source_id=e.source_id "
+        "AND mark.shot_id=e.shot_id AND mark.status='accepted' "
+        "AND json_extract(mark.data,'$.confirmation')='shot_review') "
+        "AND (json_extract(e.data,'$.shot_excluded')=1 OR NOT EXISTS ("
+        "SELECT 1 FROM person_coverage removed WHERE removed.source_id=e.source_id "
+        "AND json_extract(removed.data,'$.shot_id')=e.shot_id "
+        "AND json_extract(removed.data,'$.removed_confirmation')=1))"
+    )
+
     # 分镜级状态先按分镜聚合一次再过滤：逐行 EXISTS 会在上万条证据上重复求值。
     SHOT_STATES = (
-        "(SELECT e.shot_id, e.source_id, SUM(status='accepted') AS accepted, "
-        "SUM(status='candidate') AS candidate, SUM(status='rejected') AS rejected "
+        "(WITH valid_pairs AS (SELECT DISTINCT ps.source_id,role.id AS role_id,performer.value AS actor_id "
+        "FROM person_sources ps JOIN person_entities role ON role.kind='role' "
+        "AND EXISTS (SELECT 1 FROM json_each(role.data,'$.work_ids') WHERE value=ps.work_id) "
+        "JOIN json_each(role.data,'$.actor_ids') performer "
+        "JOIN person_entities actor ON actor.id=performer.value AND actor.kind='actor') "
+        "SELECT e.shot_id,e.source_id, SUM(e.status='accepted' AND pair.role_id IS NOT NULL) AS accepted, "
+        "SUM(e.status='candidate' AND pair.role_id IS NOT NULL) AS candidate, "
+        "SUM(CASE WHEN e.status='rejected' AND (pair.role_id IS NOT NULL OR "
+        "(json_extract(e.data,'$.confirmation')='shot_review' AND marks.shot_id IS NULL "
+        "AND (json_extract(e.data,'$.shot_excluded')=1 OR removed.shot_id IS NULL))) "
+        "THEN 1 ELSE 0 END) AS rejected "
         "FROM person_evidence e JOIN segments s ON s.id=e.shot_id AND s.source_id=e.source_id "
-        "WHERE s.kind='shot' GROUP BY e.shot_id, e.source_id "
-        "UNION ALL SELECT DISTINCT s.id, s.source_id, 0, 0, 0 FROM person_coverage c "
+        "LEFT JOIN valid_pairs pair ON pair.source_id=e.source_id AND pair.role_id=e.role_id AND pair.actor_id=e.actor_id "
+        "LEFT JOIN (SELECT source_id,shot_id FROM person_evidence WHERE status='accepted' "
+        "AND json_extract(data,'$.confirmation')='shot_review' GROUP BY source_id,shot_id) marks "
+        "ON marks.source_id=e.source_id AND marks.shot_id=e.shot_id "
+        "LEFT JOIN (SELECT source_id,json_extract(data,'$.shot_id') AS shot_id FROM person_coverage "
+        "WHERE json_extract(data,'$.removed_confirmation')=1 GROUP BY source_id,shot_id) removed "
+        "ON removed.source_id=e.source_id AND removed.shot_id=e.shot_id "
+        "WHERE s.kind='shot' GROUP BY e.shot_id,e.source_id "
+        "UNION ALL SELECT DISTINCT s.id,s.source_id,0,0,0 FROM person_coverage c "
         "JOIN segments s ON s.id=json_extract(c.data,'$.shot_id') AND s.source_id=c.source_id "
         "WHERE s.kind='shot' AND NOT EXISTS (SELECT 1 FROM person_evidence e "
         "WHERE e.shot_id=s.id AND e.source_id=s.source_id))"
@@ -1029,22 +1085,12 @@ class Persons:
                 "(e.status='accepted') DESC,COALESCE(json_extract(e.data,'$.reviewed_at'),'') DESC,"
                 "e.start,e.id) AS rank "
                 "FROM person_evidence e JOIN scoped s ON s.shot_id=e.shot_id AND s.source_id=e.source_id "
-                "JOIN person_entities a ON a.id=e.actor_id AND a.kind='actor'), "
-                "classified AS (SELECT s.*,r.actor_id,COALESCE(r.role_id,"
-                "(SELECT CASE WHEN COUNT(*)=1 THEN MIN(role.id) END FROM person_entities role "
-                "JOIN person_sources ps ON ps.source_id=s.source_id "
-                "WHERE role.kind='role' AND EXISTS (SELECT 1 FROM json_each(role.data,'$.actor_ids') "
-                "WHERE value=r.actor_id) AND EXISTS (SELECT 1 FROM json_each(role.data,'$.work_ids') "
-                "WHERE value=ps.work_id))) AS role_id,r.score FROM scoped s "
+                "JOIN person_entities a ON a.id=e.actor_id AND a.kind='actor' WHERE " + self.VALID_ROLE + "), "
+                "classified AS (SELECT s.*,r.actor_id,r.role_id,r.score FROM scoped s "
                 "LEFT JOIN ranked r ON r.source_id=s.source_id AND r.shot_id=s.shot_id AND r.rank=1), "
-                "confirmed AS (SELECT DISTINCT e.source_id,e.shot_id,e.actor_id,COALESCE(e.role_id,"
-                "(SELECT CASE WHEN COUNT(*)=1 THEN MIN(role.id) END FROM person_entities role "
-                "JOIN person_sources ps ON ps.source_id=e.source_id "
-                "WHERE role.kind='role' AND EXISTS (SELECT 1 FROM json_each(role.data,'$.actor_ids') "
-                "WHERE value=e.actor_id) AND EXISTS (SELECT 1 FROM json_each(role.data,'$.work_ids') "
-                "WHERE value=ps.work_id))) AS role_id FROM person_evidence e "
+                "confirmed AS (SELECT DISTINCT e.source_id,e.shot_id,e.actor_id,e.role_id FROM person_evidence e "
                 "JOIN scoped s ON s.source_id=e.source_id AND s.shot_id=e.shot_id "
-                "JOIN person_entities a ON a.id=e.actor_id AND a.kind='actor' WHERE e.status='accepted'), "
+                "WHERE e.status='accepted' AND " + self.VALID_ROLE + "), "
                 "memberships AS (SELECT * FROM confirmed UNION ALL "
                 "SELECT source_id,shot_id,actor_id,role_id FROM classified "
                 "WHERE accepted=0 AND (candidate>0 OR rejected=0) UNION ALL "
@@ -1088,8 +1134,8 @@ class Persons:
                 "'evidence_type',json_extract(data,'$.evidence_type'),'confirmation',json_extract(data,'$.confirmation'),"
                 "'image_path',json_extract(data,'$.image_path')) "
                 "AS data,json_type(data,'$.original_score') IS NOT NULL AS original_recorded "
-                "FROM person_evidence WHERE source_id=? AND shot_id=? ORDER BY start,id" if compact else
-                "SELECT * FROM person_evidence WHERE source_id=? AND shot_id=? ORDER BY start,id"
+                "FROM person_evidence e WHERE source_id=? AND shot_id=? AND " + self.VALID_ROLE + " ORDER BY start,id" if compact else
+                "SELECT * FROM person_evidence e WHERE source_id=? AND shot_id=? AND " + self.VALID_ROLE + " ORDER BY start,id"
             )
             raw_rows = []
             for row in self.store.rows(evidence_sql, (shot["source_id"], shot["shot_id"])):
@@ -1138,7 +1184,7 @@ class Persons:
         return {"items": items, "total": total, "scope_total": scope_total, "filters": filters}
 
     def evidence(self, source_id=None, status=None, *, limit=None, offset=0, public=False):
-        clauses, args = [], []
+        clauses, args = ([self.VALID_ROLE] if public else []), []
         for key, value in [("source_id", source_id), ("status", status)]:
             if value:
                 clauses.append(key + "=?")
@@ -1154,7 +1200,7 @@ class Persons:
                 "image_url": f"/api/persons/evidence/{r['id']}/image",
             }
             for r in self.store.rows(
-                "SELECT * FROM person_evidence"
+                "SELECT * FROM person_evidence e"
                 + (" WHERE " + " AND ".join(clauses) if clauses else "")
                 + " ORDER BY source_id,start,id"
                 + (" LIMIT ? OFFSET ?" if limit is not None else ""),
@@ -1191,13 +1237,13 @@ class Persons:
             ]
             evidence = [
                 {**dict(r), "data": json.loads(r["data"])}
-                for r in db.execute("SELECT * FROM person_evidence WHERE status='accepted' ORDER BY id")
+                for r in db.execute("SELECT * FROM person_evidence e WHERE status='accepted' AND " + self.VALID_ROLE + " ORDER BY id")
             ]
             coverage = [
                 dict(r) | {"data": json.loads(r["data"])}
                 for r in db.execute("SELECT * FROM person_coverage ORDER BY cache_id")
             ]
-            value = {"format": 1, "entities": entities, "evidence": evidence, "coverage": coverage}
+            value = {"format": 2, "entities": entities, "evidence": evidence, "coverage": coverage}
             version = fingerprint(value)
             db.execute("INSERT OR IGNORE INTO person_versions(id,data) VALUES(?,?)", (version, dumps(value)))
             release = fingerprint([content_id, version])

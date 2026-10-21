@@ -521,8 +521,8 @@
     "en": "Configure person processing"
   },
   "ui.3c1a12da9279": {
-    "zh": "覆盖整部素材。选择关联作品，并检查演员、角色与参考图。",
-    "en": "Processes the entire video. Select a work and check actors, characters and reference images."
+    "zh": "覆盖整部素材。选择关联作品，并检查角色与角色参考图。",
+    "en": "Processes the entire video. Select a work and check its characters and character reference images."
   },
   "ui.86e2bd39e95b": {
     "zh": "关联作品",
@@ -797,8 +797,8 @@
     "en": "Review selected (0)"
   },
   "ui.8edf5722a3e3": {
-    "zh": "待确认按最高分演员-角色候选归类；已接受按全部确认人物筛选；没有身份候选的分镜归入“无候选”。全选包含当前筛选的所有页。",
-    "en": "Pending shots are grouped by the highest-scoring actor/character candidate; accepted shots by all confirmed people. Shots without identity candidates appear under “No candidates”. Selection includes all filtered pages."
+    "zh": "审核仅显示当前作品的有效演员-角色配对。待确认按最高分角色候选归类；已接受按全部确认角色筛选；未识别角色的分镜归入“无候选”。全选包含当前筛选的所有页。",
+    "en": "Review shows valid actor/character pairs from the current work only. Pending shots use the highest-scoring character candidate; accepted shots use all confirmed characters. Unidentified shots appear under “No candidates”. Selection includes all filtered pages."
   },
   "ui.caee96480a63": {
     "zh": "发布与回退",
@@ -857,8 +857,8 @@
     "en": "Review people in shot"
   },
   "ui.b0db87cad7db": {
-    "zh": "保存勾选人物",
-    "en": "Save selected people"
+    "zh": "保存勾选角色",
+    "en": "Save selected characters"
   },
   "ui.5a1bd7ee03fc": {
     "zh": "排除此分镜人物证据",
@@ -7439,5 +7439,7 @@
   "ui.search_source_required": {
     "zh": "请至少选择一个素材",
     "en": "Select at least one source"
-  }
+  },
+  "ui.role_review_required": {"zh": "出镜审核必须指定角色", "en": "Select a character for appearance review."},
+  "ui.role_reference_missing": {"zh": "角色「{p0}」的演员缺少角色参考图", "en": "An actor for character “{p0}” is missing a character reference image."}
 }

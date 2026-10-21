@@ -225,17 +225,17 @@ def face_match(observation, references, config):
     quality = observation.get("face_quality", 0)
     for reference in references:
         score = cosine(observation.get("face_feature"), reference.get("face_feature"))
-        if reference.get("face_quality", 0) >= config.min_reference_quality:
-            scores[reference["actor_id"]].append(score)
-    ranked = sorted(((max(v), actor) for actor, v in scores.items()), reverse=True)
+        if reference.get("role_id") and reference.get("face_quality", 0) >= config.min_reference_quality:
+            scores[reference["role_id"]].append(score)
+    ranked = sorted(((max(v), role) for role, v in scores.items()), reverse=True)
     if not ranked:
         return None, 0, False
-    score, actor = ranked[0]
+    score, role = ranked[0]
     margin = score - (ranked[1][0] if len(ranked) > 1 else -1)
     accepted = (
         quality >= config.min_face_quality and score >= config.face_threshold and margin >= config.face_margin
     )
-    return actor, score, accepted
+    return role, score, accepted
 
 
 def matched_reference(observation, references, config, actor_id, role_id=None):
@@ -250,7 +250,7 @@ def matched_reference(observation, references, config, actor_id, role_id=None):
     if not scored:
         return None
     score = max(s for s, _ in scored)
-    winners = [r for s, r in scored if s == score and r.get("role_id") in (None, role_id)]
+    winners = [r for s, r in scored if s == score and r.get("role_id") == role_id]
     return min(winners, key=lambda r: (r.get("role_id") != role_id, r.get("id", "")), default=None)
 
 
@@ -318,7 +318,8 @@ class EvidenceReferences:
             return None
         for frame in cached.get("frames", []):
             for index, observation in enumerate(frame["observations"]):
-                if fingerprint([data["cache_id"], frame["timestamp"], index]) != evidence["id"]:
+                if evidence["id"] not in {fingerprint([data["cache_id"], frame["timestamp"], index]),
+                                          fingerprint(["role-evidence-v1", data["cache_id"], frame["timestamp"], index])}:
                     continue
                 ref = matched_reference(
                     observation,
@@ -419,11 +420,18 @@ def attribute_frames(
             reliable = old is not None and t - old["t"] <= 1.5 / config.fps and iou(old["box"], box) > 0.2
             if ambiguous or not reliable:
                 anchors.pop(track, None)
-            actor, score, accepted = face_match(observation, references, config)
-            reference_id = None
-            kind, status, role_id = "face", "candidate", None
-            identifier = fingerprint([shot["cache_id"], t, index])
-            reviewed = manual_anchors.get(identifier)
+            role_id, score, accepted = face_match(observation, references, config)
+            winning = [r for r in references if r.get("role_id") == role_id
+                       and r.get("face_quality", 0) >= config.min_reference_quality] if role_id else []
+            winner = max(winning, key=lambda r: cosine(observation.get("face_feature"), r.get("face_feature")), default=None)
+            actor = winner["actor_id"] if winner else None
+            reference_id = winner.get("id") if winner else None
+            kind, status = "face", "candidate"
+            legacy_id = fingerprint([shot["cache_id"], t, index])
+            identifier = fingerprint(["role-evidence-v1", shot["cache_id"], t, index])
+            reviewed = manual_anchors.get(identifier) or manual_anchors.get(legacy_id)
+            if legacy_id in manual_anchors:
+                identifier = legacy_id
             if reviewed:
                 actor, role_id = reviewed["actor_id"], reviewed["role_id"]
                 kind, status = "manual", reviewed["status"]
@@ -459,10 +467,6 @@ def attribute_frames(
             if actor is None:
                 # Keep unknown observations reviewable too.
                 kind = "unknown"
-            if status == "accepted" and kind == "face":
-                # Face identity alone cannot distinguish multiple roles.
-                possible = [r for r in roles if work_id in r.get("work_ids", []) and actor in r["actor_ids"]]
-                role_id = possible[0]["id"] if len(possible) == 1 else None
             if kind == "face":
                 reference = matched_reference(observation, references, config, actor, role_id)
                 reference_id = reference.get("id") if reference else None
@@ -551,12 +555,14 @@ class PersonProcessor:
         if progress:
             progress({"stage": "extracting", "completed_shots": 0, "total_shots": len(shots), "unit": "shots"})
         space = self.client.identity()
-        roles = self.catalogue.entities("role")
+        roles = [r for r in self.catalogue.entities("role") if work_id in r["work_ids"]]
         entity_names = {e["id"]: e["name"] for e in self.catalogue.entities()}
         role_actors = {r["id"]: r["actor_ids"] for r in roles}
         references = []
         reference_errors = []
         for ref in self.catalogue.references():
+            if ref["role_id"] not in role_actors:
+                continue
             # 任务日志冻结当时的配对名称；后续改名、移除参考图不会丢失问题所属身份。
             identity = {
                 "reference_id": ref["id"],
@@ -602,7 +608,7 @@ class PersonProcessor:
                 and d.get("work_id") == work_id
                 and e["status"] == "accepted"
                 and d.get("reviewed")
-                and e["role_id"]
+                and e["actor_id"] in role_actors.get(e["role_id"], [])
                 and d.get("body_feature")
             ):
                 body_samples.append(
@@ -685,7 +691,8 @@ class PersonProcessor:
                 "SELECT * FROM person_evidence WHERE source_id=? AND shot_id=?", (source_id, shot["id"])
             ):
                 data = json.loads(row["data"])
-                if data.get("reviewed") and data.get("cache_id") == key:
+                if (data.get("reviewed") and data.get("cache_id") == key
+                    and row["actor_id"] in role_actors.get(row["role_id"], [])):
                     manual_anchors[row["id"]] = {
                         **{k: row[k] for k in ("actor_id", "role_id", "status")},
                         "reference_id": data.get("reference_id"),
@@ -698,7 +705,7 @@ class PersonProcessor:
                     body_samples,
                     manual_anchors,
                     self.config.person.model_dump(exclude={"frames_max_edge", "frames_jpeg_quality"}),
-                    "rules-v3-no-person-stages",
+                    "rules-v4-role-only",
                 ]
             )
             evidence = self.feature(match_key)
@@ -722,13 +729,12 @@ class PersonProcessor:
                 self.cache(match_key, source_id, space, "matching", evidence)
             with self.store.connect() as db:
                 # A whole-shot human review remains authoritative across reference/model-space changes.
-                shot_reviewed = any(
-                    json.loads(r["data"]).get("confirmation") == "shot_review"
-                    for r in db.execute(
-                        "SELECT data FROM person_evidence WHERE source_id=? AND shot_id=?",
-                        (source_id, shot["id"]),
-                    ).fetchall()
-                )
+                shot_reviewed = db.execute(
+                    "SELECT 1 FROM person_evidence e WHERE source_id=? AND shot_id=? AND ("
+                    "(status='accepted' AND json_extract(data,'$.confirmation')='shot_review' AND "
+                    + self.catalogue.VALID_ROLE + ") OR (" + self.catalogue.SHOT_EXCLUSION + ")) LIMIT 1",
+                    (source_id, shot["id"]),
+                ).fetchone() is not None
                 if shot_reviewed:
                     evidence = [
                         {
@@ -740,10 +746,12 @@ class PersonProcessor:
                     ]
                 # Old partial/range or space runs cannot leave stale automatic identities in this interval.
                 for old in db.execute(
-                    "SELECT id,data FROM person_evidence WHERE source_id=? AND shot_id=? AND start>=? AND start<?",
+                    "SELECT id,data,actor_id,role_id FROM person_evidence WHERE source_id=? AND shot_id=? AND start>=? AND start<?",
                     (source_id, shot["id"], shot["start"], shot["end"]),
                 ).fetchall():
-                    if not json.loads(old["data"]).get("reviewed"):
+                    if old["actor_id"] and not old["role_id"]:
+                        continue  # Keep historical actor-only manual rejections.
+                    elif not json.loads(old["data"]).get("reviewed"):
                         db.execute("DELETE FROM person_evidence WHERE id=?", (old["id"],))
                 for e in evidence:
                     # Reused matching caches may still contain paths retired by frame migration.
@@ -791,16 +799,13 @@ class PersonProcessor:
             report["accepted"] += sum(e["status"] == "accepted" for e in evidence)
             report["candidates"] += sum(e["status"] == "candidate" for e in evidence)
             # Count persisted evidence, including authoritative human reviews and earlier partial runs.
-            statuses = {
-                r["status"]
-                for r in self.store.rows(
-                    "SELECT DISTINCT status FROM person_evidence WHERE source_id=? AND shot_id=?",
-                    (source_id, shot["id"]),
-                )
-            }
-            if "accepted" in statuses:
+            state = self.store.one(
+                "SELECT * FROM " + self.catalogue.SHOT_STATES + " WHERE source_id=? AND shot_id=?",
+                (source_id, shot["id"]),
+            )
+            if state and state["accepted"]:
                 accepted_shots.add(shot["id"])
-            elif "candidate" in statuses:
+            elif state and (state["candidate"] or not state["rejected"]):
                 candidate_shots.add(shot["id"])
             if progress:
                 progress({"stage": "matching", "completed_shots": position + 1,

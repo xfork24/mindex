@@ -472,5 +472,21 @@ function find(root, predicate) {
   assert.ok(get('linked-summary').textContent.includes('可以删除该身份'));
   assert.equal(get('linked-list').children.length, 0);
 
+  // 核对入口始终只列当前作品角色，不补全库演员，也不把演员确认回显成角色确认。
+  sandbox.foreignReviewEntities = [
+    {id: 'outsider', kind: 'actor', name: '外片演员', aliases: []},
+    {id: 'foreign-role', kind: 'role', name: '外片角色', aliases: [], actor_ids: ['outsider'], work_ids: ['foreign-work']},
+  ];
+  vm.runInContext('state.entities.push(...foreignReviewEntities);state.sources.push({id:"foreign-source",work_id:"foreign-work"})', sandbox);
+  const legacyShot = {...makeShot('legacy', 'a', 'accepted'), evidence: [{actor_id: 'a', role_id: null, status: 'accepted'}]};
+  sandbox.fillReviewChoices([legacyShot]);
+  const localChoices = get('review-choices').querySelectorAll('input');
+  assert.deepEqual(localChoices.map(c => JSON.parse(c.value)).sort(), [['a', 'role'], ['a', 'solo'], ['b', 'role']].sort());
+  assert.ok(localChoices.every(c => !c.checked), '仅演员旧确认不能自动勾选角色');
+  sandbox.fillReviewChoices([sharedShot]);
+  assert.ok(get('review-choices').querySelectorAll('input').every(c => c.checked === (JSON.parse(c.value)[1] === 'role')), '有效配对精确回显');
+  sandbox.fillReviewChoices([sharedShot, {...sharedShot, source_id: 'foreign-source'}]);
+  assert.equal(get('review-choices').querySelectorAll('input').length, 0, '跨作品批量不显示不适用于所有分镜的角色');
+
   console.log('persons UI regression checks passed');
 })().catch(error => {console.error(error); process.exitCode = 1;});

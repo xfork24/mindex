@@ -533,7 +533,10 @@ function fillReviewFilters(filters, scopeTotal) {
   const select = $('review-pair'),keep = select.value;
   const pairs = filters.filter((f) => f.actor_id).map((f) => ({ ...f, key: pairKey(f.actor_id, f.role_id), label: reviewPairLabel(f.actor_id, f.role_id) }));
   if (keep && keep !== '__none__' && !pairs.some((p) => p.key === keep)) {
-    const [actor_id, role_id] = JSON.parse(keep);pairs.push({ key: keep, label: reviewPairLabel(actor_id, role_id), count: 0 });
+    const [actor_id, role_id] = JSON.parse(keep);
+    const workId = state.sources.find((s) => s.id === $('review-source').value)?.work_id;
+    const role = entities('role').find((r) => r.id === role_id && r.actor_ids.includes(actor_id) && (!workId || r.work_ids.includes(workId)));
+    if (role) pairs.push({ key: keep, label: reviewPairLabel(actor_id, role_id), count: 0 });
   }
   pairs.sort((a, b) => a.label.localeCompare(b.label, 'zh') || a.key.localeCompare(b.key));
   select.replaceChildren();
@@ -621,23 +624,21 @@ $('review-source').onchange = $('review-status').onchange = () => resetEvidence(
 $('review-pair').onchange = () => resetEvidence();
 $('evidence-prev').onclick = () => {state.evidenceOffset = Math.max(0, state.evidenceOffset - reviewPageSize);return run(loadEvidence);};
 $('evidence-next').onclick = () => {state.evidenceOffset += reviewPageSize;return run(loadEvidence);};
-// 勾选单元是「角色 · 演员」身份：角色在前；未参加任何角色的演员单列演员名。
-// 批量模式对全部所选分镜取并集构建选项；预勾选只取所有分镜都已接受的身份交集。
+// 勾选单元仅包含所选分镜共同作品中的有效「角色 · 演员」配对。
+// 批量选项必须适用于每个所选分镜；预勾选取已接受身份交集。
 function fillReviewChoices(shots) {
   const works = new Set(shots.map((s) => state.sources.find((x) => x.id === s.source_id)?.work_id));
-  const roleList = entities('role').filter((r) => (r.work_ids || []).some((w) => works.has(w)));
+  const roleList = entities('role').filter((r) => [...works].every((w) => (r.work_ids || []).includes(w)));
   const suggested = new Set(shots.flatMap((s) => s.evidence.filter((e) => e.actor_id).map((e) => e.actor_id)));
   const pairs = [];
-  for (const role of roleList) for (const actorId of role.actor_ids) pairs.push({ actor_id: actorId, role_id: role.id, label: `${role.name} · ${name(actorId)}` });
-  const cast = new Set(pairs.map((p) => p.actor_id));
-  for (const actor of entities('actor')) if (!cast.has(actor.id)) pairs.push({ actor_id: actor.id, role_id: null, label: actor.name });
+  for (const role of roleList) for (const actorId of role.actor_ids.filter((id) => entities('actor').some((a) => a.id === id))) pairs.push({ actor_id: actorId, role_id: role.id, label: `${role.name} · ${name(actorId)}` });
   pairs.sort((a, b) => Number(suggested.has(b.actor_id)) - Number(suggested.has(a.actor_id)) || a.label.localeCompare(b.label, 'zh'));
   const marks = shots.map((s) => new Set(s.evidence.filter((e) => e.status === 'accepted').map((e) => pairKey(e.actor_id, e.role_id))));
   const choices = $('review-choices');choices.replaceChildren();
   for (const pair of pairs) {
     const check = node('input');check.type = 'checkbox';check.value = pairKey(pair.actor_id, pair.role_id);
-    // 已接受证据精确匹配；自动接受的行常无角色，回退到该演员在本作品的唯一身份。
-    check.checked = marks.every((m) => m.has(check.value) || m.has(pairKey(pair.actor_id, null)) && pairs.filter((p) => p.actor_id === pair.actor_id).length === 1);
+    // 已接受证据精确匹配角色和演员。
+    check.checked = marks.every((m) => m.has(check.value));
     const confirmed = shots.length === 1 ? shots[0].confirmed_people?.find((p) => p.actor_id === pair.actor_id && p.role_id === pair.role_id) : null;
     const label = node('label', pair.label + (confirmed ? ' · ' + confirmedPersonDetails(confirmed) : ''));label.prepend(check);choices.append(label);
   }
