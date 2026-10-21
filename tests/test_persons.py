@@ -1686,6 +1686,11 @@ def test_local_sampling_retains_real_pts_short_shots_and_batched_contract(config
     result = client.video(video_file, 0, 4, 5)
     assert [f["timestamp"] for f in result["frames"]] == [t for t, _ in sample_frames(video_file, 0, 4, 5)]
     assert len(batches) == 2
+    all_frames = list(sample_frames(video_file, 0, 1))
+    assert len(all_frames) > len(frames)
+    assert all(b[0] > a[0] for a, b in itertools.pairwise(all_frames))
+    result = client.video(video_file, 0, 1, None)
+    assert [f["timestamp"] for f in result["frames"]] == [t for t, _ in all_frames]
 
 
 def test_partial_coverage_is_reported_and_review_roles_are_work_scoped(catalogue):
@@ -1951,6 +1956,9 @@ def test_review_shot_status_is_classified_per_shot_not_per_frame(catalogue):
     assert p.review_shots()["total"] == 3
     # 已接受的镜头仍要能整镜核对结清，卡内证据不因状态过滤而缺失。
     assert len(p.review_shots(status="accepted")["items"][0]["evidence"]) == 2
+    recognized = p.review_shots(status="accepted")["items"][0]["recognized_people"]
+    assert recognized == [{"actor_id": a["id"], "role_id": None, "score": None, "observations": 2}]
+    assert p.review_shots(status="accepted", compact=True)["items"][0]["recognized_people"] == recognized
     # 处理面板显示的待核对量必须与审核列表同一套分类，否则会误导工作量。
     assert p.review_summary() == {"source": {"accepted": 1, "candidate": 1, "rejected": 1}}
     # Replaced segment layouts can leave evidence for shots that are no longer reviewable.

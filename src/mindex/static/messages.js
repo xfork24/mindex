@@ -1,4 +1,7 @@
 window.MindexMessages = {
+  "ui.recognized_people": {"zh": "识别人物汇总（含所有帧候选）", "en": "Recognized people (candidates from all frames)"},
+  "ui.recognized_person": {"zh": "{p0} · {p1} · {p2} 条识别证据", "en": "{p0} · {p1} · {p2} observations"},
+
   "ui.work_cache_refresh": {"zh": "刷新缓存", "en": "Refresh cache"},
   "ui.work_cache_refreshing": {"zh": "正在重新计算…", "en": "Recalculating…"},
   "ui.auto_split_build_intro": {
@@ -2586,7 +2589,7 @@ window.MindexMessages = {
     "en": "Characters not yet confirmed"
   },
   "ui.7842fdd83262": {
-    "zh": "本分镜仍有 {p0} 帧未判定；核对整个分镜会一次性结清整段。",
+    "zh": "本分镜仍有 {p0} 条识别证据待核对；上方汇总所有帧识别到的人物，核对整个分镜可确认整段出镜名单。",
     "en": "This storyboard still has {p0} frames undecided; checking the entire storyboard will clear the entire segment at once."
   },
   "ui.193cbffaacf3": {

@@ -8,6 +8,7 @@ import math
 import threading
 import time
 from collections import defaultdict
+from itertools import pairwise
 
 import httpx
 import numpy as np
@@ -615,14 +616,14 @@ class PersonProcessor:
         for position, shot in enumerate(shots):
             key = fingerprint(
                 [
-                    "shot-features-shot-media-v1",
+                    "shot-features-all-frames-v2",
                     source_id,
                     source["layout_key"],
                     shot["id"],
                     shot["start"],
                     shot["end"],
                     space,
-                    float(self.config.person.fps),
+                    "all-decoded-frames",
                 ]
             )
             extracted = self.feature(key)
@@ -641,7 +642,7 @@ class PersonProcessor:
                     self.store.resolve_media(shot["path"]),
                     0,
                     shot["end"] - shot["start"],
-                    float(self.config.person.fps),
+                    None,
                 )
                 self.validate_space(extracted, space)
                 frames = extracted["frames"]
@@ -702,10 +703,15 @@ class PersonProcessor:
             )
             evidence = self.feature(match_key)
             if evidence is None:
+                timestamps = [f["timestamp"] for f in extracted["frames"]]
+                intervals = [b - a for a, b in pairwise(timestamps) if b > a]
+                matching_config = self.config.person.model_copy(update={
+                    "fps": 1 / float(np.median(intervals)) if intervals else self.config.person.fps,
+                })
                 evidence = attribute_frames(
                     extracted["frames"],
                     references,
-                    self.config.person,
+                    matching_config,
                     {**shot, "cache_id": key, "space": space},
                     work_id,
                     roles,
@@ -825,8 +831,6 @@ class PersonProcessor:
             t = f["timestamp"]
             if not math.isfinite(t) or not (shot["start"] <= t < shot["end"]) or t <= previous:
                 raise ModelError("人物服务返回无效或不递增的原片时间戳")
-            if previous != -math.inf and t - previous < 1 / self.config.person.fps - 1e-6:
-                raise ModelError("人物服务返回的采样率超过任务上限")
             previous = t
             for o in f["observations"]:
                 box = o.get("body_bbox") or o.get("face_bbox")

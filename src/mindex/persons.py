@@ -1098,6 +1098,16 @@ class Persons:
                     data.pop("original_score", None)
                 raw_rows.append({**row, "data": data})
             people = self.confirmed_scores(json.loads(shot["confirmed_people"]), raw_rows)
+            recognized = {}
+            for row in raw_rows:
+                if not row["actor_id"] or row["data"].get("evidence_type") == "manual":
+                    continue
+                key = (row["actor_id"], row["role_id"])
+                person = recognized.setdefault(key, {"actor_id": key[0], "role_id": key[1], "score": None, "observations": 0})
+                person["observations"] += 1
+                score = self.evidence_score(row["data"].get("score"))
+                if score is not None:
+                    person["score"] = max(person["score"] if person["score"] is not None else score, score)
             if compact:
                 unique = {}
                 for row in raw_rows:
@@ -1113,6 +1123,7 @@ class Persons:
                         "actor_id": shot["actor_id"], "role_id": shot["role_id"], "score": shot["score"],
                     } if shot["actor_id"] else None,
                     "confirmed_people": people,
+                    "recognized_people": list(recognized.values()),
                     "counts": {
                         key: shot[key]
                         for key in ("accepted", "candidate", "rejected")

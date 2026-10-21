@@ -559,6 +559,12 @@ async function loadEvidence() {
     const accepted = (shot.confirmed_people || []).map(confirmedPersonLabel);
     const acceptedList = node('ul', undefined, 'confirmed-people');
     for (const label of accepted) acceptedList.append(node('li', label));
+    if (shot.recognized_people?.length) {
+      card.append(node('p', MindexI18n.msg("ui.recognized_people"), 'muted'));
+      const recognized = node('ul');
+      for (const person of shot.recognized_people) recognized.append(node('li', MindexI18n.msg("ui.recognized_person", { p0: reviewPairLabel(person.actor_id, person.role_id), p1: person.score == null ? MindexI18n.msg("ui.f1b46a8c5d6c") : person.score.toFixed(3), p2: person.observations })));
+      card.append(recognized);
+    }
     const candidate = shot.candidate;
     const category = candidate ? MindexI18n.msg("ui.02f9173c8968", { p0: reviewPairLabel(candidate.actor_id, candidate.role_id), p1: candidate.score.toFixed(3) }) : MindexI18n.msg("ui.763e86d17996");
     card.append(...[node('h3', MindexI18n.msg("ui.9c272a93fabb", { p0: shot.start.toFixed(2), p1: shot.end.toFixed(2) })), node('p', state.sources.find((s) => s.id === shot.source_id)?.name || shot.source_id), rejected || shot.counts.accepted ? null : node('p', category, 'muted'), node('p', MindexI18n.msg("ui.bf08ee968d7b", { p0: shot.counts.accepted, p1: shot.counts.candidate, p2: shot.counts.rejected })), accepted.length ? acceptedList : node('p', rejected ? MindexI18n.msg("ui.a5ee4cf7a077") : MindexI18n.msg("ui.8f9733e48602")), shot.counts.candidate ? node('p', MindexI18n.msg("ui.7842fdd83262", { p0: shot.counts.candidate }), 'muted') : null, button(MindexI18n.msg("ui.193cbffaacf3"), async () => openReview(shot))].filter(Boolean));

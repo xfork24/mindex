@@ -9,7 +9,7 @@ from PIL import Image
 from .adapters import ModelError
 
 
-def sample_frames(path, start, end, fps):
+def sample_frames(path, start, end, fps=None):
     try:
         import av
     except ImportError as exc:
@@ -32,6 +32,6 @@ def sample_frames(path, start, end, fps):
             buffer = io.BytesIO()
             Image.fromarray(frame.to_ndarray(format="rgb24")).save(buffer, format="JPEG", quality=90)
             yield timestamp, buffer.getvalue()
-            next_time = timestamp + 1 / fps
+            next_time = timestamp + 1 / fps if fps else timestamp
     if not found:
         raise ModelError("此区间没有可解码的实际帧")
