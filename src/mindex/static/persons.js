@@ -293,7 +293,12 @@ function drawCapture() {
   ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
   if (capture.box) {const [x1, y1, x2, y2] = capture.box;ctx.strokeStyle = '#ff5035';ctx.lineWidth = Math.max(2, canvas.width / 350);ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);}
 }
-function resetCapture() {capture.box = null;capture.ready = false;captureDrag = null;$('capture-canvas').hidden = true;}
+function resetCapture() {
+  // 保留预览区域高度，避免隐藏截图、重新加载视频时页面收缩导致视口跳动。
+  const shot = $('capture-shot');
+  shot.style.minHeight = `${shot.getBoundingClientRect().height}px`;
+  capture.box = null;capture.ready = false;captureDrag = null;$('capture-canvas').hidden = true;
+}
 function validCaptureTime(value) {
   return (Math.round((Number(value) + Number.EPSILON) * 100) / 100).toFixed(2);
 }

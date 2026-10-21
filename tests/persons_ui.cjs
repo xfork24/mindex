@@ -5,7 +5,7 @@ const vm = require('node:vm');
 class Element {
   constructor(tag = 'div') {
     Object.assign(this, {tagName: tag, children: [], textContent: '', _value: '', hidden: false,
-      selected: false, files: [], dataset: {}, paused: true, currentTime: 0, readyState: 4,
+      selected: false, files: [], dataset: {}, style: {}, paused: true, currentTime: 0, readyState: 4,
       videoWidth: 320, videoHeight: 240, classList: {toggle() {}}});
   }
   get options() { return this.children; }
@@ -248,6 +248,7 @@ function find(root, predicate) {
   assert.deepEqual(captureValues('capture-role'), ['role', 'solo'], '参考截图角色按作品和演员过滤');
   chooseCapture('capture-role', 'solo');
   chooseCapture('capture-source', 'source2');
+  assert.equal(get('capture-shot').style.minHeight, '240px', '刷新预览时保留区域高度，避免页面收缩滚动');
   assert.deepEqual(captureValues('capture-actor'), ['b', 'c']);
   assert.equal(get('capture-actor').value, '', '切换素材清除无效演员');
   assert.equal(get('capture-role').value, '', '切换素材清除无效角色');
