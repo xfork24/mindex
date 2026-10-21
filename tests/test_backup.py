@@ -4,6 +4,7 @@ import errno
 import json
 import shutil
 import sqlite3
+import struct
 import subprocess
 import sys
 from pathlib import Path
@@ -18,6 +19,7 @@ from mindex.adapters import ModelError
 from mindex.backup import (
     _saved_secrets,
     export_backup,
+    finder_metadata,
     import_backup,
     inspect_bundle,
     journal_path,
@@ -773,12 +775,28 @@ def test_finder_metadata_is_ignored_without_weakening_backup_validation(library,
     assert any(item['path'] == '.DS_Store' for item in exported['excluded'])
     for relative in ('.DS_Store', 'data/.DS_Store', 'vectors/.DS_Store'):
         (bundle / relative).write_bytes(b'Added by Finder after export')
+    apple_double = struct.pack('>II16sHIII', 0x00051607, 0x00020000, b'Mac OS X        ', 1, 9, 38, 4) + b'meta'
+    for relative in ('._manifest.json', 'data/._metadata.sqlite3', '._vectors'):
+        (bundle / relative).write_bytes(apple_double)
     assert inspect_bundle(bundle)['sources'] == exported['sources']
+    fake = bundle / '._manifest.json'
+    fake.write_bytes(b'Not AppleDouble')
+    with pytest.raises(ValueError, match='未登记文件：._manifest.json'):
+        inspect_bundle(bundle)
+    fake.write_bytes(apple_double)
     extra = bundle / 'data/unregistered.txt'
     extra.write_text('Unregistered business data must still be rejected')
     with pytest.raises(ValueError, match='备份含未登记文件：data/unregistered.txt'):
         inspect_bundle(bundle)
     extra.unlink()
+    extras = [bundle / f'extra-{i:02d}.txt' for i in range(12)]
+    for path in extras:
+        path.write_text('unregistered')
+    with pytest.raises(ValueError, match='另有 2 个，共 12 个') as error:
+        inspect_bundle(bundle)
+    assert 'extra-10.txt' not in str(error.value)
+    for path in extras:
+        path.unlink()
     metadata = bundle / '.DS_Store'
     metadata.unlink()
     metadata.symlink_to(config.data_dir / '.DS_Store')
@@ -789,6 +807,14 @@ def test_finder_metadata_is_ignored_without_weakening_backup_validation(library,
         stream.write(b'corrupted')
     with pytest.raises(ValueError, match='校验失败'):
         inspect_bundle(bundle)
+
+
+@pytest.mark.parametrize('content', [b'', b'fake', struct.pack('>II16sH', 0x00051607, 0x00020000, b' '*16, 1)])
+def test_invalid_apple_double_is_not_ignored(tmp_path, content):
+    (tmp_path / 'file').write_text('payload')
+    sidecar = tmp_path / '._file'
+    sidecar.write_bytes(content)
+    assert not finder_metadata(sidecar)
 
 
 @pytest.mark.parametrize('text', ['123456789012345678e12345', '1e3', '1.00', 'null', 'true'])

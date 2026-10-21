@@ -8,6 +8,7 @@ import json
 import os
 import shutil
 import sqlite3
+import struct
 import subprocess
 import sys
 import tempfile
@@ -102,6 +103,27 @@ def files_under(root):
                 raise ValueError(f'数据目录包含非普通文件：{path.relative_to(root)}')
             files.append(path)
     return sorted(files)
+
+
+def finder_metadata(path):
+    """只忽略 Finder 文件及格式合法、有对应主文件的 AppleDouble 旁路文件。"""
+    if path.name == '.DS_Store':
+        return True
+    if not path.name.startswith('._') or not path.with_name(path.name[2:]).exists():
+        return False
+    with path.open('rb') as stream:
+        header = stream.read(26)
+        if len(header) != 26:
+            return False
+        magic, version, _, count = struct.unpack('>II16sH', header)
+        size = path.stat().st_size
+        if magic != 0x00051607 or version != 0x00020000 or 26 + count * 12 > size:
+            return False
+        for _ in range(count):
+            _, offset, length = struct.unpack('>III', stream.read(12))
+            if offset < 26 + count * 12 or offset + length > size:
+                return False
+    return True
 
 
 def excluded(relative):
@@ -490,7 +512,7 @@ def build_bundle(config, output, *, selected, include_secrets, config_path, allo
     global_dirs = ('voices/', 'config-dependencies/')
     for origin in files_under(root):
         relative = origin.relative_to(root).as_posix()
-        reason = excluded(relative)
+        reason = ('macOS AppleDouble 文件元数据' if finder_metadata(origin) else excluded(relative))
         assigned = owners.get(relative, set())
         if relative in technical:
             reason = None
@@ -541,7 +563,7 @@ def build_bundle(config, output, *, selected, include_secrets, config_path, allo
         'files': [],
     }
     for path in files_under(output):
-        if path.name == '.DS_Store':
+        if finder_metadata(path):
             continue
         relative = path.relative_to(output).as_posix()
         manifest['files'].append({'path': relative, 'bytes': path.stat().st_size, 'sha256': digest(path),
@@ -578,9 +600,11 @@ def _inspect_bundle(bundle):
     if not {'data/metadata.sqlite3', 'config/base.yaml'} <= listed:
         raise ValueError('备份缺少数据库或基础配置')
     actual = {p.relative_to(bundle).as_posix() for p in files_under(bundle)} - {'manifest.json'}
-    unregistered = sorted(path for path in actual - listed if PurePosixPath(path).name != '.DS_Store')
+    unregistered = sorted(path for path in actual - listed if not finder_metadata(bundle / path))
     if unregistered:
-        raise ValueError('备份含未登记文件：' + '、'.join(unregistered))
+        preview = '、'.join(unregistered[:10])
+        remaining = f'（另有 {len(unregistered) - 10} 个，共 {len(unregistered)} 个）' if len(unregistered) > 10 else ''
+        raise ValueError('备份含未登记文件：' + preview + remaining)
     indexes = {r['id'] for r in store_at(bundle / 'data').rows('SELECT id FROM index_versions')}
     if {item['index_id'] for item in manifest['collections']} != indexes:
         raise ValueError('向量集合与数据库的索引版本不一致')
