@@ -20,7 +20,7 @@ Chrome 实际检查了素材选择、镜头操作顺序、详情弹窗。弹窗�
 
 ## 工具检查
 
-- `ruff check src/mindex tests/test_persons.py tests/test_segment_details.py`。
+- `ruff check backend/src tests/test_persons.py tests/test_segment_details.py`。
 - 新增 Python 模块格式检查与 `compileall`。
 - `node --check` 检查人物页、搜索页、素材管理页和设置页脚本。
 - `bash -n` 检查独立人物服务部署脚本。
@@ -60,7 +60,7 @@ Chrome 实际检查了素材选择、镜头操作顺序、详情弹窗。弹窗�
 ## 最终完整回归记录
 
 - 2026-10-17（第二轮调整后最终记录）：`uv run pytest -q` → 345 passed（含 `tests/test_persons.py` 20 项、`tests/test_segment_details.py` 3 项），耗时 4:30。
-- `uv run ruff check src tests` 通过；`node --check` 检查 persons.js / app.js / admin.js 通过。
+- `uv run ruff check backend/src tests` 通过；`node --check` 检查 persons.js / app.js / admin.js 通过。
 - 首次完整回归曾发现旧格式索引模型门槛检查回归，已修复并复测通过（见上文）。
 
 ## 2026-10-17 第二轮调整：导入优先与模糊召回
@@ -104,6 +104,6 @@ Chrome 实际检查了素材选择、镜头操作顺序、详情弹窗。弹窗�
 - 重新读取当前工作区，保留工作台文字/图片/视频召回配置、上传接口与人物发布组合固定等中断期间的改动。
 - `.venv/bin/pytest -q tests/test_persons.py tests/test_segment_details.py tests/test_studio_recall.py tests/test_recall_e2e.py` → **45 passed**，42.16 秒。包含真实 FFmpeg、HTTP 人物桩服务、持久任务、严格出镜与对白提及反例，以及工作台媒体召回流程；模型推理为确定性测试桩，不衡量人物准确率。
 - Chrome 再次确认镜头按钮为“详情、备注、收藏、隐藏”，详情同时呈现独立 ASR、真实字幕轨道与已有 LLM 记录；截图已更新到 `/tmp/mindex-person-ui/details-verified.png`。验收素材仍为隔离测试素材。
-- `.venv/bin/ruff check src tests`、五个页面脚本的 `node --check`、部署脚本 `bash -n`、`git diff --check` 均通过。
+- `.venv/bin/ruff check backend/src tests`、五个页面脚本的 `node --check`、部署脚本 `bash -n`、`git diff --check` 均通过。
 - `uv build --wheel --out-dir /tmp/mindex-person-final-latest-build` 成功；检查 wheel 包含人物模块、详情模块、上传模块及人物页静态资源。
 - 当前完整回归：`.venv/bin/pytest -q` → **368 passed**，311.23 秒；仅有 Starlette TestClient 上游弃用提示。日志：`/tmp/mindex-person-final-latest.log`。`uv lock --check` 通过。

@@ -6,14 +6,14 @@ import pytest
 from conftest import FixtureAnalyzer, FixtureEmbedder
 from filelock import Timeout
 
-from mindex.channel_index import normalize_snapshot
-from mindex.dialogue_tasks import DialogueOptions
-from mindex.indexing import IndexBuilder
-from mindex.person_processing import PersonOptions
-from mindex.pipeline import Pipeline
-from mindex.processing_lock import recover_tasks
-from mindex.runtime_settings import RuntimeConfig
-from mindex.source_tasks import PublishOptions, SourceTasks, WorkOptions, publish_work
+from mindex.admin.dialogue_tasks import DialogueOptions
+from mindex.admin.source_tasks import PublishOptions, SourceTasks, WorkOptions, publish_work
+from mindex.persons.person_processing import PersonOptions
+from mindex.processing.channel_index import normalize_snapshot
+from mindex.processing.indexing import IndexBuilder
+from mindex.processing.pipeline import Pipeline
+from mindex.settings.runtime_settings import RuntimeConfig
+from mindex.shared.processing_lock import recover_tasks
 
 
 def test_processing_defaults_never_chain_embeddings():
@@ -118,7 +118,7 @@ def test_automatic_embedding_uses_separate_child_tasks_and_logs(config, video_fi
         assert release.wait(10)
         return {'index_id':scope}
 
-    monkeypatch.setattr('mindex.source_tasks.publish_work', publish)
+    monkeypatch.setattr('mindex.admin.source_tasks.publish_work', publish)
     manager = SourceTasks(RuntimeConfig(config, pipeline.store), pipeline.store)
     try:
         parent = finished(manager, manager.start(sid, 'shots', WorkOptions(publish=True)))

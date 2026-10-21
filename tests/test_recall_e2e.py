@@ -16,10 +16,10 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from mindex.api import create_app
-from mindex.indexing import IndexBuilder
-from mindex.media import command
-from mindex.person_server import create_person_app
-from mindex.pipeline import Pipeline
+from mindex.persons.person_server import create_person_app
+from mindex.processing.indexing import IndexBuilder
+from mindex.processing.pipeline import Pipeline
+from mindex.shared.media import command
 
 
 class ColorPersonEngine:
@@ -77,11 +77,11 @@ def test_subtitle_person_task_publish_strict_mentions_and_studio_media(
     )
     config.studio.recall.granularity = "shot"
     monkeypatch.setattr(
-        "mindex.pipeline.make_analyzer",
+        "mindex.processing.pipeline.make_analyzer",
         lambda *_: (_ for _ in ()).throw(AssertionError("LLM must stay offline")),
     )
     monkeypatch.setattr(
-        "mindex.dialogue.make_transcriber",
+        "mindex.processing.dialogue.make_transcriber",
         lambda *_: (_ for _ in ()).throw(AssertionError("Subtitles must bypass ASR")),
     )
     monkeypatch.setenv("MINDEX_GPU_LOCK", str(tmp_path / "fixture-gpu.lock"))

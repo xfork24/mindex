@@ -17,13 +17,13 @@ mindex 目前只能"找片段"，用户希望新增**文字生成视频**能力�
 
 ## 核心架构
 
-### 工作流状态机（沿用 e2e.py run.json 模式）
+### 工作流状态机（沿用 diagnostics/e2e.py run.json 模式）
 
 - 任务 = `data/studio/<job_id>/` 目录，`job.json` 记录 5 步状态（pending/running/complete/failed）+ 尝试历史 + 配置快照
-- 每次执行留档 `attempts/<step>-<attempt>.json`（同 e2e.py:498）；原子写 `.partial` + `replace()`（e2e.py:64-68）
-- 全局 `data/studio/studio.lock` FileLock(timeout=0)（同 pipeline.py:44-45），同时只允许一个步骤执行，冲突返回 409
+- 每次执行留档 `attempts/<step>-<attempt>.json`（同 diagnostics/e2e.py:498）；原子写 `.partial` + `replace()`（diagnostics/e2e.py:64-68）
+- 全局 `data/studio/studio.lock` FileLock(timeout=0)（同 processing/pipeline.py:44-45），同时只允许一个步骤执行，冲突返回 409
 - 步骤依赖：split 无依赖；recall、tts 依赖 split；select 依赖 recall+tts；render 依赖 select
-- **不新建 SQLite 表**；可选 `Store.run()`（storage.py:105-122）记录运行历史
+- **不新建 SQLite 表**；可选 `Store.run()`（shared/storage.py:105-122）记录运行历史
 - 后台执行：endpoint 同步抢锁 → 标 running → `threading.Thread(daemon=True)` 执行 → finally 释放并落盘终态；启动恢复扫描（锁空闲但状态 running → 标 failed"服务重启导致步骤中断"）
 
 ### 任务目录布局
@@ -46,17 +46,17 @@ data/studio/<job_id>/
 
 ## 文件级改动
 
-### 新增后端模块（src/mindex/ 平铺，不建子包）
+### 新增后端模块（backend/src/ 平铺，不建子包）
 
 | 文件 | 职责 | 行数估 |
 |---|---|---|
-| `studio.py` | pydantic 数据模型（Storyboard/Shot/Timeline/TimelineEvent）+ job.json 状态机 + 锁 + invalidation 级联 + 恢复扫描 | ~380 |
-| `studio_steps.py` | 五步编排 `run_split/run_recall/run_tts/run_select/run_render` + 统一 `execute_step` 包装（attempt/状态迁移/异常记录） | ~300 |
-| `studio_select.py` | 选片与时长对齐**纯算法**（候选打分、相邻延长、atempo 钳制、惩罚项），无 I/O 副作用便于单测 | ~180 |
-| `studio_render.py` | ffmpeg 命令构造（切割/concat/音频/字幕烧录）、SRT 生成、CJK 字体预检 | ~230 |
-| `studio_api.py` | `studio_router(config, store)` 全部端点 + 后台线程执行器 | ~340 |
+| `studio/studio.py` | pydantic 数据模型（Storyboard/Shot/Timeline/TimelineEvent）+ job.json 状态机 + 锁 + invalidation 级联 + 恢复扫描 | ~380 |
+| `studio/studio_steps.py` | 五步编排 `run_split/run_recall/run_tts/run_select/run_render` + 统一 `execute_step` 包装（attempt/状态迁移/异常记录） | ~300 |
+| `studio/studio_select.py` | 选片与时长对齐**纯算法**（候选打分、相邻延长、atempo 钳制、惩罚项），无 I/O 副作用便于单测 | ~180 |
+| `studio/studio_render.py` | ffmpeg 命令构造（切割/concat/音频/字幕烧录）、SRT 生成、CJK 字体预检 | ~230 |
+| `studio/studio_api.py` | `studio_router(config, store)` 全部端点 + 后台线程执行器 | ~340 |
 
-### 新增前端（static/，复用 style.css 骨架）
+### 新增前端（frontend/src/studio/，复用 style.css 骨架）
 
 | 文件 | 职责 |
 |---|---|
@@ -68,9 +68,9 @@ data/studio/<job_id>/
 
 | 文件 | 改动 |
 |---|---|
-| `adapters.py` | ① 新增 `request_bytes()`（同 request() 重试语义但返回二进制，adapters.py:26-49 不适用 /audio/speech 二进制响应）；② `Speaker` Protocol + `OpenAISpeaker`（POST `{base_url}{speech_path}`，body `{model, input, voice, response_format:"wav"}`，按 Content-Type 自适应二进制/JSON-base64）+ `make_speaker()`；③ `Storyboarder` Protocol + `QwenStoryboarder`（**照抄 QwenAnalyzer._chat 模式** adapters.py:177-247：httpx 手写请求 + `chat_template_kwargs enable_thinking False` + schema 内嵌 prompt + parse_json + pydantic 校验 + 失败附错误重试）+ `make_storyboarder()` |
-| `config.py` | **删除占位 TTSConfig（63-67 行，无代码引用）**；新增 `StudioConfig` 树挂到 `Config.studio`；注意 config.local.yaml 中旧 `tts:` 节需删除（strict forbid 会校验失败） |
-| `media.py` | 新增 `audio_info(path)`（ffprobe `-select_streams a:0`，probe() 要求视频轨不能用于 wav） |
+| `models/adapters.py` | ① 新增 `request_bytes()`（同 request() 重试语义但返回二进制，models/adapters.py:26-49 不适用 /audio/speech 二进制响应）；② `Speaker` Protocol + `OpenAISpeaker`（POST `{base_url}{speech_path}`，body `{model, input, voice, response_format:"wav"}`，按 Content-Type 自适应二进制/JSON-base64）+ `make_speaker()`；③ `Storyboarder` Protocol + `QwenStoryboarder`（**照抄 QwenAnalyzer._chat 模式** models/adapters.py:177-247：httpx 手写请求 + `chat_template_kwargs enable_thinking False` + schema 内嵌 prompt + parse_json + pydantic 校验 + 失败附错误重试）+ `make_storyboarder()` |
+| `shared/config.py` | **删除占位 TTSConfig（63-67 行，无代码引用）**；新增 `StudioConfig` 树挂到 `Config.studio`；注意 config.local.yaml 中旧 `tts:` 节需删除（strict forbid 会校验失败） |
+| `shared/media.py` | 新增 `audio_info(path)`（ffprobe `-select_streams a:0`，probe() 要求视频轨不能用于 wav） |
 | `api.py` | `include_router(studio_router(config, store))`（49 行旁）；`GET /studio` FileResponse（照 55-58 行 /admin 模式）；`create_app` 增加可选 `storyboarder`/`speaker` 注入参数（同 `embedder` 模式，供测试） |
 | `config.example.yaml` | 删 `tts:` 节（33-36 行），加 `studio:` 节 |
 | `index.html` / `admin.html` | header 加 `/studio` 入口链接（照现有 nav-link 惯例） |
@@ -104,7 +104,7 @@ data/studio/<job_id>/
 
 ### recall（召回）
 - 步骤开始解析一次活动索引 id，此后固定 `SearchEngine(config, index_id=该id)` 避免中途换索引
-- 逐镜 `engine.text(TextSearch(text=query, granularity="shot", limit=20))`——身份校验/hidden 过滤全部由 SearchEngine 继承（search.py:112-150）
+- 逐镜 `engine.text(TextSearch(text=query, granularity="shot", limit=20))`——身份校验/hidden 过滤全部由 SearchEngine 继承（search/search.py:112-150）
 - 检查点：`candidates/<shot_id>.json` 存在且 query/index_id 匹配则跳过
 - 空候选镜写 `status:"empty"`，步骤 complete 但显式列出空镜；select 遇空镜失败并报"分镜 shot-03 无召回候选，请修改查询后重跑召回，或编辑分镜"
 
@@ -147,13 +147,13 @@ data/studio/<job_id>/
 | POST /jobs/{id}/run | 全自动连跑（遇失败停），202 |
 | PATCH /jobs/{id}/storyboard | 编辑分镜（增删改合并前端组装数组），级联作废 |
 | PATCH /jobs/{id}/timeline | 换选/微调（须覆盖全部 shot 恰好一次），仅作废 render |
-| GET /jobs/{id}/artifacts/{path}?download=true | 产物下载；resolve 后 `is_relative_to(job_dir)` 防穿越（照 admin.py:54-67 download 模式） |
+| GET /jobs/{id}/artifacts/{path}?download=true | 产物下载；resolve 后 `is_relative_to(job_dir)` 防穿越（照 admin/admin.py:54-67 download 模式） |
 | GET /jobs/{id}/audio/{shot_id} | 试听 wav（FileResponse 支持 Range） |
 | DELETE /jobs/{id} | 删除任务（运行中 409） |
 
 候选视频预览**不设新端点**：candidates 带 `media_url=/api/media/{segment_id}` 直接复用现有端点（api.py:135-141）。错误 envelope 沿用 `{"detail":…}`，异常处理器复用 api.py:51-66。
 
-## 配置节（config.py StudioConfig，extra=forbid）
+## 配置节（shared/config.py StudioConfig，extra=forbid）
 
 ```yaml
 studio:
@@ -172,7 +172,7 @@ studio:
   render:    {width: 1280, height: 720, fps: 25, crf: 20, preset: fast}
 ```
 
-generator/tts 继承 Service 基类（config.py:22-31）；校验：宽高正偶数、atempo_limit ∈ (0,0.25]、weights 非负。job.json 快照含 generator/tts 指纹（`fingerprint(model_dump(exclude={timeout,api_key_env}))`）+ 创建时 index_id（仅供追溯）。
+generator/tts 继承 Service 基类（shared/config.py:22-31）；校验：宽高正偶数、atempo_limit ∈ (0,0.25]、weights 非负。job.json 快照含 generator/tts 指纹（`fingerprint(model_dump(exclude={timeout,api_key_env}))`）+ 创建时 index_id（仅供追溯）。
 
 ## 测试计划（原则：真实 ffmpeg/SQLite/Chroma + conftest 确定性 Fixture）
 
@@ -193,10 +193,10 @@ library fixture 复用 test_admin.py 模式（Pipeline.prepare + IndexBuilder.bu
 
 | 阶段 | 内容 | 验收 |
 |---|---|---|
-| PR1 基础层 | StudioConfig（删 TTSConfig）、adapters 三件（request_bytes/Speaker/Storyboarder）、media.audio_info、studio.py 状态机、conftest Fixture | pytest 全绿、ruff 无告警、strict 校验通过 |
+| PR1 基础层 | StudioConfig（删 TTSConfig）、adapters 三件（request_bytes/Speaker/Storyboarder）、media.audio_info、studio/studio.py 状态机、conftest Fixture | pytest 全绿、ruff 无告警、strict 校验通过 |
 | PR2 split+recall+API 骨架 | studio_steps（split/recall）、studio_api、api.py 挂载 | curl/docs 走通 split/recall（Fixture 注入）；断点续跑与空候选标记 |
-| PR3 tts+select | tts 步骤、studio_select.py、select 步骤 | 纯算法单测全过；链路产出合法 timeline.json |
-| PR4 render | studio_render.py、SRT、字体预检 | 真实 ffmpeg 渲染 final.mp4/srt，断言通过 |
+| PR3 tts+select | tts 步骤、studio/studio_select.py、select 步骤 | 纯算法单测全过；链路产出合法 timeline.json |
+| PR4 render | studio/studio_render.py、SRT、字体预检 | 真实 ffmpeg 渲染 final.mp4/srt，断言通过 |
 | PR5 前端+编辑闭环 | studio.html/js/css、PATCH 两端点、入口链接、docs | 浏览器手工验收全流程（创建→连跑→编辑→换选→渲染→下载）；node --check |
 | PR6 可选打磨 | CLI 薄封装、Store.run 记录、DELETE | CLI 冒烟；/api/status 可见 studio-* 运行记录 |
 
@@ -212,7 +212,7 @@ library fixture 复用 test_admin.py 模式（Pipeline.prepare + IndexBuilder.bu
 
 ## 验证方式
 
-1. `uv run pytest -q` 全绿 + `uv run ruff check src tests` 无告警 + `node --check src/mindex/static/studio.js`
+1. `uv run pytest -q` 全绿 + `uv run ruff check backend/src tests` 无告警 + `node --check frontend/src/studio/studio.js`
 2. PR1-4 阶段用 curl / OpenAPI docs（uv run mindex serve → /docs）逐步验收：创建任务 → run-step split/recall/tts/select/render → GET job 状态 → artifacts 下载
 3. PR5 浏览器手工验收：/studio 创建任务 → 全自动连跑 → 编辑分镜（看到级联作废提示）→ 重跑 → 换选候选 → 渲染 → 播放/下载 final.mp4 + final.srt
 4. 真实模型验收（GPU 服务就绪时）：qwen3:27b 拆分镜 + qwen3-tts 配音走真机，确认 OpenAISpeaker 对实际响应格式的兼容性，回填默认配置

@@ -6,12 +6,12 @@ import threading
 import pytest
 from conftest import FixtureAnalyzer, FixtureEmbedder
 
-from mindex.channel_index import snapshots_for
-from mindex.indexing import IndexBuilder
-from mindex.pipeline import Pipeline
-from mindex.processing_lock import index_write_lock
-from mindex.source_tasks import publication_attempt, publish_work
-from mindex.task_progress import save_task_progress
+from mindex.admin.source_tasks import publication_attempt, publish_work
+from mindex.processing.channel_index import snapshots_for
+from mindex.processing.indexing import IndexBuilder
+from mindex.processing.pipeline import Pipeline
+from mindex.shared.processing_lock import index_write_lock
+from mindex.shared.task_progress import save_task_progress
 
 
 @pytest.mark.parametrize("work", ["shots", "dialogue", "analysis"])
@@ -66,7 +66,7 @@ def test_index_lock_wait_is_reported_before_build_starts(config, video_file):
 
 
 def test_person_publish_counts_unique_source_shots(config, video_file):
-    from mindex.persons import Persons
+    from mindex.persons.persons import Persons
 
     pipeline = Pipeline(config)
     sid = pipeline.prepare(video_file)
@@ -95,7 +95,7 @@ def test_person_publish_counts_unique_source_shots(config, video_file):
 
 @pytest.mark.parametrize("table", ["source_tasks", "dialogue_tasks", "person_tasks"])
 def test_processing_progress_survives_publication_updates_and_retry(config, table):
-    from mindex.storage import Store
+    from mindex.shared.storage import Store
 
     store = Store(config.data_dir)
     if table == "source_tasks":
@@ -132,9 +132,9 @@ def test_pipeline_reports_before_first_analysis_and_each_stage(config, video_fil
 
 
 def test_moment_and_extra_publication_are_independent(config, video_file):
-    from mindex.curation import Library
-    from mindex.runtime_settings import RuntimeConfig
-    from mindex.source_tasks import PublishOptions, SourceTasks
+    from mindex.admin.curation import Library
+    from mindex.admin.source_tasks import PublishOptions, SourceTasks
+    from mindex.settings.runtime_settings import RuntimeConfig
 
     embedder = FixtureEmbedder(config)
     pipeline = Pipeline(config, analyzer=FixtureAnalyzer(embedder))
@@ -182,7 +182,7 @@ def test_moment_and_extra_publication_are_independent(config, video_file):
 
 
 def test_completed_processing_and_both_embedding_scopes_reuse_results(config, video_file, monkeypatch):
-    from mindex.curation import Library
+    from mindex.admin.curation import Library
 
     embedder = FixtureEmbedder(config)
     analyzer = FixtureAnalyzer(embedder)
@@ -219,7 +219,7 @@ def test_completed_processing_and_both_embedding_scopes_reuse_results(config, vi
 
 
 def test_extra_embedding_progress_survives_unpublished_index(config, video_file):
-    from mindex.curation import Library
+    from mindex.admin.curation import Library
 
     embedder = FixtureEmbedder(config)
     pipeline = Pipeline(config, analyzer=FixtureAnalyzer(embedder))
@@ -246,8 +246,8 @@ def test_extra_embedding_progress_survives_unpublished_index(config, video_file)
 
 
 def test_empty_person_release_is_not_full_shot_coverage(config, video_file):
-    from mindex.curation import Library
-    from mindex.persons import Persons
+    from mindex.admin.curation import Library
+    from mindex.persons.persons import Persons
 
     pipeline = Pipeline(config)
     sid = pipeline.prepare(video_file)
@@ -261,10 +261,10 @@ def test_empty_person_release_is_not_full_shot_coverage(config, video_file):
 
 @pytest.mark.parametrize('kind', ['shots', 'dialogue', 'persons'])
 def test_retry_clears_only_attempt_diagnostics_and_preserves_result(config, video_file, monkeypatch, kind):
-    from mindex.dialogue_tasks import DialogueOptions, DialogueTasks
-    from mindex.person_processing import PersonOptions, PersonTasks
-    from mindex.runtime_settings import RuntimeConfig
-    from mindex.source_tasks import SourceTasks, WorkOptions
+    from mindex.admin.dialogue_tasks import DialogueOptions, DialogueTasks
+    from mindex.admin.source_tasks import SourceTasks, WorkOptions
+    from mindex.persons.person_processing import PersonOptions, PersonTasks
+    from mindex.settings.runtime_settings import RuntimeConfig
 
     class IdleThread:
         def __init__(self, *args, **kwargs):
@@ -299,8 +299,8 @@ def test_latest_worker_log_is_one_line_thread_scoped_and_phase_scoped(config):
     import logging
     from types import SimpleNamespace
 
-    from mindex.storage import Store
-    from mindex.task_progress import task_logs
+    from mindex.shared.storage import Store
+    from mindex.shared.task_progress import task_logs
 
     store = Store(config.data_dir)
     store.execute("INSERT INTO source_tasks(id,source_id,work,status,config,options) VALUES('log','s','shots','running','{}','{}')")
@@ -333,7 +333,7 @@ def test_latest_worker_log_is_one_line_thread_scoped_and_phase_scoped(config):
 
 
 def test_visual_coverage_checks_vector_inputs_instead_of_stale_version_tags(config, video_file):
-    from mindex.curation import Library
+    from mindex.admin.curation import Library
 
     pipeline = Pipeline(config)
     sid = pipeline.prepare(video_file)
@@ -356,8 +356,8 @@ def test_visual_coverage_checks_vector_inputs_instead_of_stale_version_tags(conf
 
 @pytest.mark.parametrize('table', ['source_tasks', 'dialogue_tasks', 'person_tasks'])
 def test_retry_clears_logs_without_losing_completed_processing_stage(config, table):
-    from mindex.storage import Store
-    from mindex.task_progress import reset_task_attempt
+    from mindex.shared.storage import Store
+    from mindex.shared.task_progress import reset_task_attempt
 
     store = Store(config.data_dir)
     columns = 'id,source_id,status,config,options' + (',work' if table == 'source_tasks' else '')

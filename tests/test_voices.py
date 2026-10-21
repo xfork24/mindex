@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import json
 
+from conftest import FixtureStoryboarder
 from fastapi.testclient import TestClient
 
-from mindex import adapters
 from mindex.api import create_app
-from mindex.storage import Store
+from mindex.models import adapters
+from mindex.shared.storage import Store
 
 
 def minimax_profile(client, name="Minimax TTS"):
@@ -38,7 +39,7 @@ def sample_wav() -> bytes:
 
 
 def test_register_and_default_voice_flow(config):
-    client = TestClient(create_app(config))
+    client = TestClient(create_app(config, storyboarder=FixtureStoryboarder(config)))
     created = client.post(
         "/api/settings/voices",
         json={"name": "本地男声", "provider": "self", "voice_id": "Cherry", "kind": "preset"},
@@ -193,7 +194,7 @@ def test_get_settings_includes_voices(config):
 
 
 def test_qwentts_register_contract(monkeypatch, tmp_path):
-    from mindex.voice_clone import qwentts_register
+    from mindex.settings.voice_clone import qwentts_register
 
     captured = {}
 

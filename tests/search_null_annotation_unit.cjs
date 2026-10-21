@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const source = fs.readFileSync('src/mindex/static/app.js','utf8');
+const source = fs.readFileSync('frontend/src/search/app.js','utf8');
 class Node {
   constructor(tag,text) {this.tag=tag;this.text=text;this.children=[];}
   append(...nodes) {this.children.push(...nodes);}

@@ -8,11 +8,11 @@ from pathlib import Path
 
 from fastapi import HTTPException
 
-from mindex.config import load_config
-from mindex.curation import Library
-from mindex.runtime_settings import RuntimeConfig
-from mindex.source_tasks import PublishOptions, SourceTasks
-from mindex.storage import Store
+from mindex.shared.config import load_config
+from mindex.admin.curation import Library
+from mindex.settings.runtime_settings import RuntimeConfig
+from mindex.admin.source_tasks import PublishOptions, SourceTasks
+from mindex.shared.storage import Store
 
 
 def retryable(error):

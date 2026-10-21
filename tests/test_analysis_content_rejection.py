@@ -6,15 +6,15 @@ import pytest
 from conftest import FixtureAnalyzer, FixtureEmbedder
 from fastapi.testclient import TestClient
 
-from mindex import adapters
-from mindex.adapters import AnalysisContentRejected, ModelError, QwenAnalyzer
+from mindex.admin.source_tasks import SourceTasks, WorkOptions
 from mindex.api import create_app
-from mindex.channel_index import snapshots_for
-from mindex.indexing import IndexBuilder, check_index
-from mindex.pipeline import Pipeline
-from mindex.runtime_settings import RuntimeConfig
-from mindex.source_tasks import SourceTasks, WorkOptions
-from mindex.types import Annotation
+from mindex.models import adapters
+from mindex.models.adapters import AnalysisContentRejected, ModelError, QwenAnalyzer
+from mindex.processing.channel_index import snapshots_for
+from mindex.processing.indexing import IndexBuilder, check_index
+from mindex.processing.pipeline import Pipeline
+from mindex.settings.runtime_settings import RuntimeConfig
+from mindex.shared.types import Annotation
 
 REASON = "系统检测到输入或生成内容可能包含不安全或敏感内容，请您避免输入易产生敏感内容的提示语，感谢您的配合。"
 
@@ -78,7 +78,7 @@ def test_task_continues_after_rejection_and_publishes_without_rejected_text(conf
             assert all(u["end"] <= rejected["start"] or u["start"] >= rejected["end"] for u in units)
             return super().group_scenes(units)
 
-    monkeypatch.setattr("mindex.pipeline.make_analyzer", lambda _: Analyzer(embedder))
+    monkeypatch.setattr("mindex.processing.pipeline.make_analyzer", lambda _: Analyzer(embedder))
     manager = SourceTasks(RuntimeConfig(config, pipeline.store), pipeline.store, embedder)
     task = finished(manager, manager.start(sid, "analysis", WorkOptions()))
     assert task["status"] == "complete" and task["publication"]["status"] == "complete", task

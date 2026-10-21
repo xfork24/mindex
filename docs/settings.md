@@ -2,7 +2,7 @@
 
 `/settings`（顶部导航「设置」进入）把模型服务连接、音色库与检索调参集中在一个页面，**保存即热生效，无需重启**：配置档案存 SQLite（`model_profiles` / `voices` 表 + `settings` KV），Web API 与 CLI 命令统一经覆盖层合成「生效配置」。
 
-相关模块：`runtime_settings.py`（档案/覆盖层/预设）、`settings_api.py`（API）、`voice_clone.py`（厂商克隆客户端）、`static/settings.*`（页面）。
+相关模块：`settings/runtime_settings.py`（档案/覆盖层/预设）、`settings/settings_api.py`（API）、`settings/voice_clone.py`（厂商克隆客户端）、`frontend/src/settings/settings.*`（页面）。
 
 ## 五个模型角色
 
@@ -54,7 +54,7 @@
 ## 音色库与声音克隆
 
 - 音色分**预定义**（厂商/本地服务自带，直接录入 voice_id）与**克隆**（上传样本生成）。
-- **音色目录**（`GET /api/settings/voices/catalog`，`voices_catalog.py`）：按当前 TTS 后端聚合可选音色——本地 Qwen3-TTS 为静态 CustomVoice 九音色表 + qwentts `GET /audio/voices` 动态合并；MiniMax 经 `POST /get_voice`（voice_type=all）实时查询全量系统/复刻/生成音色，按 voice_id 前缀分组。设置页默认音色下拉与创作页「方案参数」的音色下拉均由此驱动，支持 voice_id 字面量设默认（`PUT business` 的 `default_voice` 字段，目录/音色库内校验）。
+- **音色目录**（`GET /api/settings/voices/catalog`，`settings/voices_catalog.py`）：按当前 TTS 后端聚合可选音色——本地 Qwen3-TTS 为静态 CustomVoice 九音色表 + qwentts `GET /audio/voices` 动态合并；MiniMax 经 `POST /get_voice`（voice_type=all）实时查询全量系统/复刻/生成音色，按 voice_id 前缀分组。设置页默认音色下拉与创作页「方案参数」的音色下拉均由此驱动，支持 voice_id 字面量设默认（`PUT business` 的 `default_voice` 字段，目录/音色库内校验）。
 - **本地 Qwen3-TTS 克隆**（qwentts.cpp tts-server）：上传样本 + 可选参考文本 → `POST /audio/voices` 注册，试听音频回存；注册表存于服务进程内存，**服务重启后丢失**——mindex 持久化样本于 `data/voices/`（ref_text 存 `voices.notes`），目录加载时自动重注册自愈；任务执行途中若服务重启会报 unknown voice，重开设置页/方案参数即恢复。
 - **MiniMax**：页面直接上传样本（wav/mp3/m4a，10 秒~5 分钟）→ `/files/upload` + `/voice_clone` → 自定义 voice_id 即可用于 t2a_v2；样本与预览音频存 `data/voices/`。有资料称快速复刻音色 7 天未使用可能被回收，页面有提示。
 - **阿里 DashScope**：复刻 API 要求**公网可访问的样本 URL**（不支持本地直传），页面提供「URL 复刻」模式；也可在百炼控制台复刻后用「录入已有」登记 voice_id。复刻音色与合成模型绑定。

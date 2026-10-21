@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
-const source = fs.readFileSync("src/mindex/static/studio.js", "utf8");
+const source = fs.readFileSync("frontend/src/studio/studio.js", "utf8");
 const calls = [];
 let releaseList, releaseArtifacts;
 const listResponse = new Promise(resolve => { releaseList = resolve; });

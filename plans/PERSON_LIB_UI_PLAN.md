@@ -5,24 +5,24 @@
 当前演员表导入按「一次展示一张原图」设计：图片切换靠 `import-image` 下拉，条目列在右侧单列，每条目带「已确认照片框仅一个人物」复选框（前后端双重门禁）。用户实际要传整部戏的 cast 截图（一次多张，或分多次各一张），期望：自动拆分覆盖每一张图、条目统一列在图片下方（每行两个）、去掉单人确认复选框、保存/确认始终作用于全部图片、重复条目静默跳过并汇总提示、页面默认列出所有历史 cast 图片。
 
 关键现状（探索结论）：
-- 草稿模型已支持多图：`person_imports.data` 的 `images[]` + 条目 `image_id`（persons.py `create_import`/`get_import`）；已有多图草稿实例。
-- `POST /imports/{id}/parse` 把全部图塞进**一次** LLM 调用（person_api.py:50-107 `parse_cast`）：原子失败、模型常只返回首图条目——这是「只拆当前那张」观感的根源。
-- `single_person` 门禁共 4 处：前端复选框 persons.js:200、拖框重置 :206、客户端校验 :197、后端 confirm 校验 persons.py:415-416；LLM 被强制写 false（person_api.py:63,102）。
-- 已有可复用的去重：`add_reference`（persons.py:315-327）按 `(actor_id, role_id, digest)` 内容寻址复用参考图；同名演员/同作品同名角色在 confirm 时自动复用实体。
+- 草稿模型已支持多图：`person_imports.data` 的 `images[]` + 条目 `image_id`（persons/persons.py `create_import`/`get_import`）；已有多图草稿实例。
+- `POST /imports/{id}/parse` 把全部图塞进**一次** LLM 调用（persons/person_api.py:50-107 `parse_cast`）：原子失败、模型常只返回首图条目——这是「只拆当前那张」观感的根源。
+- `single_person` 门禁共 4 处：前端复选框 persons.js:200、拖框重置 :206、客户端校验 :197、后端 confirm 校验 persons/persons.py:415-416；LLM 被强制写 false（persons/person_api.py:63,102）。
+- 已有可复用的去重：`add_reference`（persons/persons.py:315-327）按 `(actor_id, role_id, digest)` 内容寻址复用参考图；同名演员/同作品同名角色在 confirm 时自动复用实体。
 - 历史图片无需新存储：每张图已有 URL 路由 `GET /imports/{id}/images/{image_id}`。
 
 已与用户确认的决策：历史图片全部列出（含已确认）；自动拆分一次点按逐张执行、显示每张进度/失败、可单张重试；重复条目静默跳过 + 汇总提示。
 
 ## 改动
 
-### 1. 后端 `src/mindex/person_api.py`
+### 1. 后端 `backend/src/persons/person_api.py`
 
 - **parse 逐张化**：`parse_cast(config, image, draft_meta)` 改为单图函数（提示词去掉 single_person 相关句）；`POST /imports/{id}/parse` 接受可选 body `{image_ids: [...]}`，默认 = 该草稿全部图。服务端逐张调用、逐张聚合：目标图的**现有条目被替换**（重新拆分覆盖该图条目），单张失败只记 warning 不影响其他图。每图结果写入草稿新字段 `parse_state: {image_id: {"status": "parsed"|"failed", "error"?: str}}`。
 - **追加图片**：`POST /imports/{id}/images`（multipart `files`，1–12 张，仅 draft 状态）。复用 `save_upload` + `Persons.image(raw,"imports")` 内容寻址；digest 已在草稿中的图跳过并记 warning（「第 N 张已存在，忽略」），返回更新后的草稿。
 - **历史列表**：`GET /imports` → `[{id, status, work_id, entry_count, images:[{id,url,width,height}]}]`，按 rowid 倒序（表无时间列）。URL 复用现有图片路由。
 - upload_import / parse 保留原有错误兜底（LLM 挂了不阻塞手工流程）。
 
-### 2. 后端 `src/mindex/persons.py`
+### 2. 后端 `backend/src/persons/persons.py`
 
 - `confirm_import`：
   - 删除 :415-416 的 single_person 门禁（字段保留在 `CastEntry` 中不启用，避免旧草稿 StrictModel 校验失败——零兼容风险）。
@@ -31,7 +31,7 @@
   - 返回体扩为 `{confirmed, skipped_duplicates: [{actor_name, role_name}], ignored_existing: N}`。
 - 新增 `append_images(identifier, raws)` 供上面的追加端点调用（digest 去重逻辑在此）。
 
-### 3. 前端 `src/mindex/static/persons.html`
+### 3. 前端 `frontend/src/persons/persons.html`
 
 `#cast` 面板重构为：
 ```
@@ -46,7 +46,7 @@
 ```
 删除 `import-image` 下拉和 `.import-layout` 两栏结构。
 
-### 4. 前端 `src/mindex/static/persons.js`
+### 4. 前端 `frontend/src/persons/persons.js`
 
 - `displayDraft`：渲染所有原图（每图 canvas，`loadImage`→`loadImages` 多图 Image 缓存）；条目区移到图下方；`legacy` 剥离列表加 `single_person`；`status==='confirmed'` 时禁用 parse/add/save/confirm（只读查看）。
 - `renderEntries`：删复选框；每条目卡加小型「所属原图」select（`newEntry` 默认第一张）；「选择照片框」按钮改为滚动到该条目所属 canvas 并高亮。
@@ -56,7 +56,7 @@
 - **确认**：读响应的 `skipped_duplicates`/`ignored_existing`，notice 汇总「导入 N 条 · 跳过 M 条重复（演员/角色）· K 条已存在忽略」。
 - **历史列表**：`refresh()` 时并行 `GET /imports`，渲染缩略图网格；点击 `displayDraft`。
 
-### 5. `src/mindex/static/persons.css`
+### 5. `frontend/src/persons/persons.css`
 
 - `#import-entries{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}`，<800px 单列；`#import-originals` 块纵向堆叠，canvas `max-width:100%`；`#import-gallery` 缩略图 flex 网格（约 96px 高，object-fit:cover，状态角标）；删除 `.import-layout`。
 - persons.html 引用版本号 persons.js/css 升 `?v=20261017-multicast`。

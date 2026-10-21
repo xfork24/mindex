@@ -2,8 +2,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const tick = () => new Promise(resolve => setImmediate(resolve));
-const search = fs.readFileSync('src/mindex/static/app.js', 'utf8');
-const people = fs.readFileSync('src/mindex/static/persons.js', 'utf8');
+const search = fs.readFileSync('frontend/src/search/app.js', 'utf8');
+const people = fs.readFileSync('frontend/src/persons/persons.js', 'utf8');
 (async () => {
   let statusResolve, filtersResolve, populated = false;
   const requests = [];

@@ -1,5 +1,5 @@
 // Chinese renderer for the existing small DOM controller adapters.
-const catalog = require('../src/mindex/static/messages.json');
+const catalog = require('../frontend/src/shared/messages.json');
 function msg(key, params = {}) {
   const template = catalog[key]?.zh ?? key;
   return template.replace(/\{(\w+)\}/g, (_, name) => params[name] ?? `{${name}}`);

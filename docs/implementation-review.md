@@ -39,8 +39,8 @@
 
 - `uv run pytest -q`：368 passed，322.79 秒；仅有 Starlette TestClient 的上游弃用提示。
 - 定向回归：创作召回/镜头详情 15 passed；人物与跨服务端到端 30 passed。
-- `uv run ruff check src tests`：通过。
-- `node --check` 检查 `src/mindex/static/*.js` 全部通过。
+- `uv run ruff check backend/src tests`：通过。
+- `node --check` 检查 `frontend/src/*/*.js` 全部通过。
 - `bash -n` 检查人物服务安装/启动脚本：通过。
 - `uv lock --check`、`git diff --check`：通过。
 - `uv build --wheel`：成功；产物保存在隔离验收目录，包含人物、独立渠道和创作页新增模块及静态资源。

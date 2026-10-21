@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import json
 
-from mindex import studio
-from mindex.studio_artifacts import ArtifactSession, current, safe_path
+from mindex.studio import studio
+from mindex.studio.studio_artifacts import ArtifactSession, current, safe_path
 
 
 def test_diagnostics_redact_credentials_and_keep_raw_model_response(config, monkeypatch):
-    from mindex.adapters import request
+    from mindex.models.adapters import request
 
     job_id = studio.create_job(config, "测试文案。")["id"]
     state = studio.begin_step(config, job_id, "split")
@@ -23,7 +23,7 @@ def test_diagnostics_redact_credentials_and_keep_raw_model_response(config, monk
         def json(self):
             return {"choices": []}
 
-    monkeypatch.setattr("mindex.adapters.httpx.request", lambda *args, **kwargs: Response())
+    monkeypatch.setattr("mindex.models.adapters.httpx.request", lambda *args, **kwargs: Response())
     token = current.set(session)
     try:
         request(

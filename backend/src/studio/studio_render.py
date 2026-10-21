@@ -1,0 +1,503 @@
+"""渲染合成：逐镜统一切割 → concat 视频轨 → 逐镜音频处理 → 三轨合成。
+
+所有 ffmpeg 输出走 media.atomic_media（.partial 原子替换）；
+逐镜 clip 与音频是检查点，失败重跑只补缺；concat 与合成阶段幂等重执行。
+"""
+
+from __future__ import annotations
+
+import math
+import re
+import wave
+from collections.abc import Callable
+from fractions import Fraction
+from pathlib import Path
+
+from mindex.shared.config import Config, SubtitleConfig, fingerprint, portable_parameters
+from mindex.shared.media import MediaError, atomic_media, command, probe
+from mindex.studio.studio import Timeline, save, save_bytes
+from mindex.studio.studio_artifacts import current, digest
+
+
+def has_subtitles_filter() -> bool:
+    output = command(["ffmpeg", "-hide_banner", "-filters"], timeout=30).decode(errors="replace")
+    return re.search(r"\bsubtitles\b", output) is not None
+
+
+def _escape_filter_path(path: Path) -> str:
+    return str(path).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+
+
+def subtitle_filter(srt_path: Path, subtitle: SubtitleConfig) -> str:
+    parts = f"subtitles={_escape_filter_path(srt_path)}"
+    if subtitle.font_file:
+        parts += f":fontsdir={_escape_filter_path(Path(subtitle.font_file).parent)}"
+    style = f"FontName={subtitle.font_family},FontSize={subtitle.font_size}"
+    return f"{parts}:force_style='{style}'"
+
+
+def check_font(srt_path: Path, subtitle: SubtitleConfig):
+    """烧录前环境烟测：滤镜存在性 + 1 帧渲染，尽早失败并给出精确提示。"""
+    if subtitle.font_file and not Path(subtitle.font_file).is_file():
+        raise MediaError(f"字幕字体文件不存在：{subtitle.font_file}")
+    if not has_subtitles_filter():
+        raise MediaError(
+            "当前 ffmpeg 未编译 subtitles 滤镜（缺少 libass），无法烧录字幕；"
+            "请创建任务时选择软字幕（burn=false），或安装带 libass 的 ffmpeg"
+        )
+    try:
+        command(
+            [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=black:s=320x240:d=0.2",
+                "-vf",
+                subtitle_filter(srt_path, subtitle),
+                "-frames:v",
+                "1",
+                "-f",
+                "null",
+                "-",
+            ],
+            timeout=30,
+        )
+    except MediaError as exc:
+        raise MediaError(
+            f"缺少可用的 CJK 字体或字幕滤镜不可用，请安装 fonts-noto-cjk "
+            f"或配置 studio.subtitle.font_file：{exc}"
+        ) from exc
+
+
+def _srt_time(seconds: float) -> str:
+    milliseconds = max(0, round(seconds * 1000))
+    hours, milliseconds = divmod(milliseconds, 3600000)
+    minutes, milliseconds = divmod(milliseconds, 60000)
+    secs, milliseconds = divmod(milliseconds, 1000)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d},{milliseconds:03d}"
+
+
+def build_srt(timeline: Timeline, boundaries: list[dict] | None = None) -> str:
+    lines: list[str] = []
+    offset = 0.0
+    for index, event in enumerate(timeline.events):
+        start, end = offset + event.subtitle.start, offset + event.subtitle.end
+        if boundaries is not None:
+            start, end = boundaries[index]["start"], boundaries[index]["end"]
+        lines += [
+            str(event.order),
+            f"{_srt_time(start)} --> {_srt_time(end)}",
+            event.subtitle.text,
+            "",
+        ]
+        offset += event.audio.render_duration
+    return "\n".join(lines)
+
+
+def _concat_list(paths: list[Path], listing: Path):
+    # concat demuxer 文件名用单引号包裹，内部单引号转义为 '\''
+    quote = "'"
+    escaped = quote + "\\" + quote + quote
+    entries = [f"file '{str(path.absolute()).replace(quote, escaped)}'" for path in paths]
+    listing.write_text("\n".join(entries) + "\n")
+
+
+def concat_media(paths: list[Path], output: Path, *, timeout: float = 600):
+    listing = output.parent / f"{output.stem}.txt"
+    _concat_list(paths, listing)
+    atomic_media(["-f", "concat", "-safe", "0", "-i", str(listing), "-c", "copy"], output, timeout=timeout)
+
+
+def cut_shot(source: Path, event, render, output: Path, *, frames: int | None = None):
+    """先裁所选区间，再补末帧，输出确定帧数。"""
+    fps = Fraction(str(render.fps))
+    frames = frames or math.ceil(event.audio.render_duration * fps)
+    duration = float(frames / fps)
+    filters = [
+        f"trim=duration={event.video.end - event.video.start:.9f}",
+        "setpts=PTS-STARTPTS",
+        f"fps={fps.numerator}/{fps.denominator}",
+        f"scale={render.width}:{render.height}:force_original_aspect_ratio=decrease",
+        f"pad={render.width}:{render.height}:(ow-iw)/2:(oh-ih)/2",
+        "setsar=1",
+        f"tpad=stop_mode=clone:stop_duration={duration + 1:.9f}",
+    ]
+    atomic_media(
+        [
+            "-ss",
+            str(event.video.start),
+            "-i",
+            str(source),
+            "-map",
+            "0:v:0",
+            "-an",
+            "-vf",
+            ",".join(filters),
+            "-frames:v",
+            str(frames),
+            "-c:v",
+            "libx264",
+            "-preset",
+            render.preset,
+            "-crf",
+            str(render.crf),
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "+faststart",
+        ],
+        output,
+        timeout=max(600, duration * 10),
+    )
+
+
+def process_shot_audio(voice_source: Path, ambient_source: Path | None, event, audio_cfg, output: Path):
+    """配音 atempo→loudnorm→48k；ducking 模式叠加压低后的原声（duration=first 以配音为准）。"""
+    voice = output.with_name(f"{event.shot_id}.voice.wav")
+    filters = []
+    if event.audio.atempo != 1:
+        filters.append(f"atempo={event.audio.atempo:.4f}")
+    filters += [f"loudnorm={audio_cfg.loudnorm}", "aresample=48000"]
+    atomic_media(
+        ["-i", str(voice_source), "-af", ",".join(filters), "-ac", "2", "-c:a", "pcm_s16le"],
+        voice,
+    )
+    if ambient_source is None:
+        voice.replace(output)
+        return
+    atomic_media(
+        [
+            "-i",
+            str(voice),
+            "-i",
+            str(ambient_source),
+            "-filter_complex",
+            (
+                f"[1:a]volume={audio_cfg.duck_gain},apad[bg];"
+                "[0:a][bg]amix=inputs=2:duration=first:dropout_transition=0:normalize=0"
+            ),
+            "-ac",
+            "2",
+            "-c:a",
+            "pcm_s16le",
+        ],
+        output,
+    )
+
+
+def extract_ambient(source: Path, event, audio_cfg, output: Path):
+    atomic_media(
+        [
+            "-ss",
+            str(event.video.start),
+            "-i",
+            str(source),
+            "-t",
+            str(event.video.end - event.video.start),
+            "-vn",
+            "-af",
+            f"loudnorm={audio_cfg.loudnorm},aresample=48000",
+            "-ac",
+            "2",
+            "-c:a",
+            "pcm_s16le",
+        ],
+        output,
+    )
+
+
+def mux(video: Path, audio_track: Path, srt: Path, output: Path, config: Config, *, burn: bool):
+    render, subtitle = config.studio.render, config.studio.subtitle
+    args = ["-i", str(video), "-i", str(audio_track)]
+    if burn:
+        args += [
+            "-map",
+            "0:v:0",
+            "-map",
+            "1:a:0",
+            "-vf",
+            subtitle_filter(srt, subtitle),
+            "-c:v",
+            "libx264",
+            "-preset",
+            render.preset,
+            "-crf",
+            str(render.crf),
+            "-pix_fmt",
+            "yuv420p",
+        ]
+    else:
+        args += [
+            "-i",
+            str(srt),
+            "-map",
+            "0:v:0",
+            "-map",
+            "1:a:0",
+            "-map",
+            "2:s:0",
+            "-c:v",
+            "copy",
+            "-c:s",
+            "mov_text",
+            "-metadata:s:s:0",
+            "language=chi",
+        ]
+    args += ["-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart"]
+    atomic_media(args, output, timeout=max(600, probe(video)["duration"] * 10))
+
+
+def render_timeline(
+    config: Config,
+    timeline: Timeline,
+    *,
+    voice_lookup: Callable[[str], Path],
+    source_lookup: Callable[[str], Path],
+    workdir: Path,
+    interval_lookup: Callable | None = None,
+    audio_lookup: Callable | None = None,
+) -> dict:
+    render, audio_cfg = config.studio.render, config.studio.audio
+    session = current.get()
+    workdir.mkdir(parents=True, exist_ok=True)
+    fps = Fraction(str(render.fps))
+    if timeline.burn:
+        smoke = session.target("render/font-check.srt") if session else workdir / "font-check.srt"
+        save_bytes(smoke, "1\n00:00:00,000 --> 00:00:00,200\n中文字幕字体检查\n".encode())
+        check_font(smoke, config.studio.subtitle)
+
+    def produce(relative, key, function):
+        logical = f"render/{relative}"
+        path = session.reuse(logical, key) if session else None
+        if path is None:
+            path = session.target(logical) if session else workdir / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            function(path)
+            if session:
+                session.publish(logical, path, key)
+        return path
+
+    clips, tracks, boundaries = [], [], []
+    total_frames, total_samples = 0, 0
+    source_keys = {}
+    for event in timeline.events:
+        absolute_start, absolute_end = event.video.start, event.video.end
+        voice = voice_lookup(event.shot_id)
+        if interval_lookup is not None:
+            source = interval_lookup(event.video.source_id, absolute_start, absolute_end)
+            event = event.model_copy(deep=True)
+            event.video.start, event.video.end = 0, absolute_end - absolute_start
+        else:
+            source = source_lookup(event.video.source_id)
+        if source not in source_keys:
+            source_keys[source] = {
+                "id": event.video.source_id,
+                "media_version": "shot-media-v1" if interval_lookup is not None else "legacy",
+                "bytes": source.stat().st_size,
+                "mtime_ns": source.stat().st_mtime_ns,
+            }
+        source_key = source_keys[source]
+        ambient = None
+
+        def render_ambient(path, source=source, event=event, start=absolute_start, end=absolute_end):
+            if audio_lookup is not None:
+                raw = path.with_name(path.stem + '.raw.wav')
+                audio_lookup(event.video.source_id, start, end, raw)
+                extract_ambient(raw, event, audio_cfg, path)
+            else:
+                extract_ambient(source, event, audio_cfg, path)
+
+        if timeline.audio_mode == "ducking" and probe(source)["audio"]:
+            key = fingerprint(
+                {
+                    "source": source_key,
+                    "start": event.video.start,
+                    "end": event.video.end,
+                    "audio": audio_cfg.model_dump(),
+                    "version": 2,
+                }
+            )
+            ambient = produce(
+                f"orig/{event.shot_id}.wav",
+                key,
+                render_ambient,
+            )
+        voice_key = fingerprint(
+            {
+                "voice": digest(voice),
+                "atempo": event.audio.atempo,
+                "mode": timeline.audio_mode,
+                "ambient": digest(ambient) if ambient else None,
+                "audio": audio_cfg.model_dump(),
+                "version": 2,
+            }
+        )
+        processed = produce(
+            f"voice/{event.shot_id}.wav",
+            voice_key,
+            lambda path, voice=voice, ambient=ambient, event=event: process_shot_audio(
+                voice, ambient, event, audio_cfg, path
+            ),
+        )
+        with wave.open(str(processed), "rb") as handle:
+            samples = handle.getnframes()
+            if handle.getframerate() != 48000 or samples <= 0:
+                raise MediaError("处理后配音必须为有效的 48kHz PCM")
+        frames = math.ceil(Fraction(samples, 48000) * fps)
+        end_sample = round(Fraction(total_frames + frames, 1) / fps * 48000)
+        if end_sample - total_samples < samples:
+            frames += 1
+            end_sample = round(Fraction(total_frames + frames, 1) / fps * 48000)
+        padded_samples = end_sample - total_samples
+        track_key = fingerprint({"voice": digest(processed), "samples": padded_samples, "version": 2})
+        track = produce(
+            f"audio/{event.shot_id}.wav",
+            track_key,
+            lambda path, processed=processed, padded_samples=padded_samples: atomic_media(
+                [
+                    "-i",
+                    str(processed),
+                    "-af",
+                    f"apad=whole_len={padded_samples},atrim=end_sample={padded_samples},asetpts=PTS-STARTPTS",
+                    "-c:a",
+                    "pcm_s16le",
+                    "-ar",
+                    "48000",
+                    "-ac",
+                    "2",
+                ],
+                path,
+            ),
+        )
+        video_key = fingerprint(
+            {
+                "source": source_key,
+                "start": event.video.start,
+                "end": event.video.end,
+                "frames": frames,
+                "render": render.model_dump(),
+                "version": 2,
+            }
+        )
+        clip = produce(
+            f"clips/{event.shot_id}.mp4",
+            video_key,
+            lambda path, source=source, event=event, frames=frames: cut_shot(
+                source, event, render, path, frames=frames
+            ),
+        )
+        boundaries.append(
+            {
+                "shot_id": event.shot_id,
+                "start": float(total_frames / fps),
+                "end": float((total_frames + frames) / fps),
+                "frames": frames,
+                "start_sample": total_samples,
+                "end_sample": end_sample,
+                "voice_samples": samples,
+                "source_id": event.video.source_id,
+                "source_path": str(source),
+                "source_start": absolute_start,
+                "source_end": absolute_end,
+            }
+        )
+        total_frames += frames
+        total_samples = end_sample
+        clips.append(clip)
+        tracks.append(track)
+    duration = float(total_frames / fps)
+    listing = {
+        "fps": str(fps),
+        "sample_rate": 48000,
+        "total_frames": total_frames,
+        "total_samples": total_samples,
+        "total_seconds": duration,
+        "events": boundaries,
+    }
+    if session:
+        session.json("render/timeline.json", listing)
+    else:
+        save(workdir / "timeline.json", listing)
+    video_track = produce(
+        "video.mp4",
+        fingerprint([digest(p) for p in clips]),
+        lambda path: concat_media(clips, path, timeout=max(600, duration * 10)),
+    )
+    audio_track = produce(
+        "audio_track.wav",
+        fingerprint([digest(p) for p in tracks]),
+        lambda path: concat_media(tracks, path, timeout=max(600, duration * 10)),
+    )
+    content = build_srt(timeline, boundaries)
+    srt = session.target("render/final.srt") if session else workdir / "final.srt"
+    save_bytes(srt, content.encode("utf-8"))
+    vtt_content = "WEBVTT\n\n" + re.sub(r"(\d{2}:\d{2}:\d{2}),(\d{3})", r"\1.\2", content)
+    vtt = session.target("render/final.vtt") if session else workdir / "final.vtt"
+    save_bytes(vtt, vtt_content.encode("utf-8"))
+    if timeline.burn:
+        check_font(srt, config.studio.subtitle)
+    final = session.target("render/final.mp4") if session else workdir / "final.next.mp4"
+    mux(video_track, audio_track, srt, final, config, burn=timeline.burn)
+    validate_final(final, duration, timeline.burn, render.fps)
+    if session:
+        for logical, path in (
+            ("render/final.mp4", final),
+            ("render/final.srt", srt),
+            ("render/final.vtt", vtt),
+        ):
+            session.publish(
+                logical,
+                path,
+                fingerprint(
+                    {
+                        "timeline": listing,
+                        "subtitle": portable_parameters(config, config.studio.subtitle.model_dump()),
+                        "burn": timeline.burn,
+                        "sha256": digest(path),
+                    }
+                ),
+            )
+    else:
+        final.replace(workdir / "final.mp4")
+        final = workdir / "final.mp4"
+    return {"final": final, "srt": srt, "vtt": vtt, "events": len(timeline.events), "total_seconds": duration}
+
+
+def validate_final(path: Path, duration: float, burn: bool, fps: float):
+    import json
+
+    raw = json.loads(command(["ffprobe", "-v", "error", "-show_streams", "-of", "json", str(path)]))
+    streams = raw.get("streams", [])
+    video = next((s for s in streams if s["codec_type"] == "video"), None)
+    audio = next((s for s in streams if s["codec_type"] == "audio"), None)
+    if video is None or audio is None:
+        raise MediaError("成片缺少视频或配音轨道")
+    if not burn and not any(s["codec_type"] == "subtitle" for s in streams):
+        raise MediaError("成片缺少软字幕轨道")
+    if abs(float(video["duration"]) - duration) > 1 / fps + 0.002:
+        raise MediaError("成片视频时长与渲染清单不一致")
+    if abs(float(audio["duration"]) - duration) > 0.05:
+        raise MediaError("成片配音时长与渲染清单不一致")
+    command(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-xerror",
+            "-i",
+            str(path),
+            "-map",
+            "0:v:0",
+            "-map",
+            "0:a:0",
+            "-f",
+            "null",
+            "-",
+        ],
+        timeout=max(600, duration * 10),
+    )

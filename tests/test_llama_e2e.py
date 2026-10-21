@@ -9,13 +9,14 @@ import numpy as np
 import pytest
 from typer.testing import CliRunner
 
-from mindex import adapters, e2e, llama_cpp
 from mindex.cli import app
-from mindex.config import fingerprint
-from mindex.llama_cpp import PREFIX, SUFFIX, LlamaEmbedder, LlamaTranscriber, inspect_service
-from mindex.media import MediaError, atomic_media, command, content_hash, cut, frame_timestamps, probe
-from mindex.pipeline import Pipeline
-from mindex.search import lexical_search
+from mindex.diagnostics import e2e
+from mindex.models import adapters, llama_cpp
+from mindex.models.llama_cpp import PREFIX, SUFFIX, LlamaEmbedder, LlamaTranscriber, inspect_service
+from mindex.processing.pipeline import Pipeline
+from mindex.search.search import lexical_search
+from mindex.shared.config import fingerprint
+from mindex.shared.media import MediaError, atomic_media, command, content_hash, cut, frame_timestamps, probe
 
 
 @pytest.fixture
@@ -363,16 +364,16 @@ def test_probe_cli_reports_failure_without_traceback(tmp_path, monkeypatch):
 def test_alignment_worker_isolated_from_package_types_module():
     import sys
 
-    import mindex.align_worker
+    import mindex.processing.align_worker
 
-    help_text = command([sys.executable, "-I", mindex.align_worker.__file__, "--help"]).decode()
+    help_text = command([sys.executable, "-I", mindex.processing.align_worker.__file__, "--help"]).decode()
     assert "--cache-dir" in help_text
 
 
 def test_loading_full_default_yaml_preserves_existing_layout(tmp_path):
     import yaml
 
-    from mindex.config import Config, load_config
+    from mindex.shared.config import Config, load_config
 
     minimal = tmp_path / "minimal.yaml"
     full = tmp_path / "full.yaml"
@@ -392,7 +393,7 @@ def test_native_asr_without_audio_requires_no_running_service(config, video_file
 
 
 def test_zero_duration_alignment_tokens_preserve_text_and_observed_bounds():
-    from mindex.align_worker import coalesce_alignment
+    from mindex.processing.align_worker import coalesce_alignment
 
     rows = [
         {"start": 0.72, "end": 0.72, "text": "先"},

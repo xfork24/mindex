@@ -15,8 +15,9 @@ from conftest import FixtureEmbedder
 from PIL import Image
 from typer.testing import CliRunner
 
-from mindex.adapters import ModelError
-from mindex.backup import (
+from mindex.admin.curation import CurationPatch
+from mindex.cli import app
+from mindex.maintenance.backup import (
     _saved_secrets,
     export_backup,
     finder_metadata,
@@ -28,12 +29,11 @@ from mindex.backup import (
     temporary_directory,
     vector_worker,
 )
-from mindex.backup_db import merge_database, store_at
-from mindex.cli import app
-from mindex.config import Config, fingerprint
-from mindex.curation import CurationPatch
-from mindex.processing_lock import SharedFileLock
-from mindex.storage import Store, dumps
+from mindex.maintenance.backup_db import merge_database, store_at
+from mindex.models.adapters import ModelError
+from mindex.shared.config import Config, fingerprint
+from mindex.shared.processing_lock import SharedFileLock
+from mindex.shared.storage import Store, dumps
 
 
 def test_temporary_cleanup_retries_directory_recreated_by_finder(tmp_path, monkeypatch):
@@ -47,7 +47,7 @@ def test_temporary_cleanup_retries_directory_recreated_by_finder(tmp_path, monke
             raise OSError(errno.ENOTEMPTY, 'Directory not empty', 'cache')
         remove(path)
 
-    monkeypatch.setattr('mindex.backup.shutil.rmtree', race)
+    monkeypatch.setattr('mindex.maintenance.backup.shutil.rmtree', race)
     with temporary_directory(dir=tmp_path) as directory:
         (Path(directory) / 'payload').write_text('data')
     assert len(calls) == 2
@@ -58,7 +58,7 @@ def test_temporary_cleanup_preserves_original_error(tmp_path, monkeypatch):
     def fail(path):
         raise OSError(errno.ENOTEMPTY, 'Directory not empty', 'cache')
 
-    monkeypatch.setattr('mindex.backup.shutil.rmtree', fail)
+    monkeypatch.setattr('mindex.maintenance.backup.shutil.rmtree', fail)
     with (
         pytest.warns(RuntimeWarning, match='临时目录清理失败'),
         pytest.raises(ValueError, match='原始导出错误'),
@@ -144,9 +144,9 @@ import json, sys
 from pathlib import Path
 sys.path.insert(0, sys.argv[2])
 from conftest import FixtureEmbedder
-from mindex.config import Config
-from mindex.search import SearchEngine
-from mindex.types import TextSearch
+from mindex.shared.config import Config
+from mindex.search.search import SearchEngine
+from mindex.shared.types import TextSearch
 config = Config(data_dir=Path(sys.argv[1]))
 config.embedding.dimensions = 8
 print(json.dumps(SearchEngine(config, FixtureEmbedder(config)).text(
@@ -175,7 +175,7 @@ def test_full_restore_relocated_and_cross_process_vectors(library, tmp_path):
     assert store_at(target).one("SELECT value FROM settings WHERE key='search.limit'")['value'] == '12'
     assert (target / history.name).read_text() == history.read_text()
     assert search_results(target) == before
-    script = ('from pathlib import Path; from mindex.indexing import VectorIndex; '
+    script = ('from pathlib import Path; from mindex.processing.indexing import VectorIndex; '
               'import sys; v=VectorIndex(Path(sys.argv[1]),sys.argv[2]); '
               'print(v.collection.query(query_embeddings=[[1.,0.,0.,0.,0.,0.,0.,0.]],n_results=2)["ids"])')
     proc = subprocess.run([sys.executable, '-c', script, str(target), index], capture_output=True,
@@ -184,7 +184,7 @@ def test_full_restore_relocated_and_cross_process_vectors(library, tmp_path):
     assert len(json.loads(proc.stdout.replace("'", '"'))[0]) == 2
     restored_config = yaml.safe_load((target.parent / 'data.yaml').read_text())
     assert restored_config['data_dir'] == 'data'
-    from mindex.config import load_config
+    from mindex.shared.config import load_config
     assert load_config(target.parent / 'data.yaml').data_dir == target
 
 
@@ -258,7 +258,7 @@ def test_secret_redaction_including_snapshot_pages(library, tmp_path, monkeypatc
                   ('task', sources[0], 'analysis', 'running', dumps({'api_key': secret}), '{}'))
     monkeypatch.setenv('MINDEX_MODEL_API_KEY', 'environment-secret-must-never-export')
     # 旧数据库备份也不得绕过脱敏。
-    from mindex.backup_db import snapshot
+    from mindex.maintenance.backup_db import snapshot
     snapshot(store.path, config.data_dir / 'old.sqlite3')
     history = sqlite3.connect(config.data_dir / 'old.sqlite3')
     history.execute('PRAGMA journal_mode=WAL')
@@ -304,7 +304,7 @@ def test_dry_run_and_cli_noninteractive(library, tmp_path, verification):
 
 
 def test_basic_cli_roundtrip_and_verification_is_explicit(library, tmp_path, monkeypatch):
-    from mindex import backup
+    from mindex.maintenance import backup
 
     requests = []
     worker = backup.vector_worker
@@ -343,7 +343,7 @@ def test_basic_cli_roundtrip_and_verification_is_explicit(library, tmp_path, mon
 
 
 def test_basic_skips_checksums_but_full_still_detects_same_size_corruption(library, tmp_path, monkeypatch):
-    from mindex import backup
+    from mindex.maintenance import backup
 
     bundle = tmp_path / 'backup'
     export(library, bundle)
@@ -357,8 +357,9 @@ def test_basic_skips_checksums_but_full_still_detects_same_size_corruption(libra
 
 
 def test_basic_vector_verification_uses_counts_without_readback_or_media(library, monkeypatch):
-    from mindex import backup_vectors, indexing
-    from mindex.shot_media import ShotMedia
+    from mindex.maintenance import backup_vectors
+    from mindex.processing import indexing
+    from mindex.shared.shot_media import ShotMedia
 
     def forbidden(*args, **kwargs):
         pytest.fail('基础校验不应逐项读取向量或探测媒体')
@@ -498,7 +499,7 @@ def test_profile_voice_audit_and_credential_reference_remapping(library, tmp_pat
 
 
 def publish_person(root, evidence_id):
-    from mindex.persons import Persons
+    from mindex.persons.persons import Persons
 
     store = store_at(root)
     source = store.sources()[0]
@@ -568,7 +569,7 @@ def test_base_config_assets_and_runtime_overrides_are_separate(library, tmp_path
                                                           'deployment_manifest': 'deployment.json'},
             'studio': {'subtitle': {'font_file': 'font.ttf'}}}
     config_path.write_text(yaml.safe_dump(base))
-    from mindex.config import load_config
+    from mindex.shared.config import load_config
     config = load_config(config_path)
     store_at(config.data_dir).execute('INSERT INTO settings VALUES(?,?)', ('override.enforce_gpu_lock', 'true'))
     bundle = tmp_path / 'backup'
@@ -601,8 +602,8 @@ def test_crash_after_data_switch_recovers_in_another_process(library, tmp_path, 
     script = '''
 import os, sys
 from pathlib import Path
-from mindex.backup import import_backup
-from mindex.config import Config
+from mindex.maintenance.backup import import_backup
+from mindex.shared.config import Config
 rename = Path.rename
 def crash(self, destination):
     result = rename(self, destination)
@@ -630,7 +631,7 @@ import_backup(Config(data_dir=Path(sys.argv[2])), Path(sys.argv[1]), all_sources
 
 
 def test_interactive_search_and_multiselect(monkeypatch):
-    from mindex.backup_cli import choose
+    from mindex.maintenance.backup_cli import choose
 
     monkeypatch.setattr(sys.stdin, 'isatty', lambda: True)
     monkeypatch.setattr(sys.stdout, 'isatty', lambda: True)
@@ -734,7 +735,7 @@ def test_selected_export_preserves_plain_bracket_text(library, tmp_path):
 
 
 def test_partial_backup_excludes_unrelated_cast_and_reference_files(library, tmp_path):
-    from mindex.backup_db import filter_database
+    from mindex.maintenance.backup_db import filter_database
 
     root = library[0].data_dir
     store = store_at(root)
@@ -799,7 +800,7 @@ def test_partial_backup_keeps_associated_cast_without_person_evidence(library, t
 def test_partial_roundtrip_preserves_compatibility_evidence_bytes(library, tmp_path, video_file):
     import hashlib
 
-    from mindex.compatibility import load_baseline
+    from mindex.shared.compatibility import load_baseline
 
     config, sources, index = library[:3]
     root = config.data_dir
@@ -858,7 +859,7 @@ def test_partial_roundtrip_preserves_compatibility_evidence_bytes(library, tmp_p
 def test_merge_ignores_analysis_and_other_model_contracts(tmp_path, mode):
     from types import SimpleNamespace
 
-    from mindex.backup import check_compatible
+    from mindex.maintenance.backup import check_compatible
 
     def unexpected_snapshot_read(_):
         raise AssertionError('合并兼容性不能读取分析/ASR 来源配置')
@@ -874,7 +875,7 @@ def test_merge_ignores_analysis_and_other_model_contracts(tmp_path, mode):
 @pytest.mark.parametrize('field,value', [('space', {'model': 'different-WeMM'}), ('format', 1),
                                         ('preprocessing', {'fps': 8}), ('mode', 'visual')])
 def test_merge_still_rejects_embedding_and_index_contract_changes(field, value):
-    from mindex.backup import check_compatible
+    from mindex.maintenance.backup import check_compatible
 
     spec = {'space': {'model': 'WeMM'}, 'format': 2, 'preprocessing': {'fps': 4}, 'mode': 'auto'}
     with pytest.raises(ValueError, match=f'活动索引不兼容：{field}'):
@@ -933,7 +934,7 @@ def test_invalid_apple_double_is_not_ignored(tmp_path, content):
 
 
 def test_job_and_owner_scans_skip_binary_apple_double(library):
-    from mindex.backup import file_owners, job_selection, source_list
+    from mindex.maintenance.backup import file_owners, job_selection, source_list
 
     root, sources = library[0].data_dir, library[1]
     job = root / 'studio' / 'fixture-job'
@@ -954,7 +955,7 @@ def test_job_and_owner_scans_skip_binary_apple_double(library):
 @pytest.mark.parametrize('text', ['123456789012345678e12345', '1e3', '1.00', 'null', 'true'])
 @pytest.mark.parametrize('include_secrets', [False, True])
 def test_rewrite_preserves_sql_scalar_text_and_relocates_json(tmp_path, text, include_secrets):
-    from mindex.backup_db import rewrite_database
+    from mindex.maintenance.backup_db import rewrite_database
 
     store = Store(tmp_path / 'data')
     store.execute('INSERT INTO sources(id,name,path,media,layout_key) VALUES(?,?,?,?,?)',
@@ -976,7 +977,7 @@ def test_rewrite_preserves_sql_scalar_text_and_relocates_json(tmp_path, text, in
 
 
 def test_shared_scalar_text_is_not_compared_as_json_numbers():
-    from mindex.backup_db import same_value
+    from mindex.maintenance.backup_db import same_value
 
     assert not same_value('1e3', '1000')
     assert not same_value('1e999', '2e999')
@@ -986,7 +987,7 @@ def test_shared_scalar_text_is_not_compared_as_json_numbers():
 
 @pytest.mark.parametrize('old', ['123456789012345678901234', '123456789012345678e12345'])
 def test_rewrite_remaps_numeric_looking_text_ids_and_setting_references(tmp_path, old):
-    from mindex.backup_db import rewrite_database
+    from mindex.maintenance.backup_db import rewrite_database
 
     store = Store(tmp_path / 'data')
     new = 'abcdef0123456789abcdef01'
@@ -1013,7 +1014,7 @@ def add_repaired_legacy_index(root, *, repaired=True):
     rows = []
     for member in snapshots:
         duration = member['end'] - member['start']
-        from mindex.media import windows
+        from mindex.shared.media import windows
 
         preprocessing = spec['preprocessing']
         pieces = ([(0, duration)] if duration <= preprocessing['short_shot_seconds'] else
@@ -1073,7 +1074,7 @@ def test_legacy_compatibility_is_explicit_single_source_and_restorable(library, 
 
 
 def test_explicit_representation_manifest_mismatch_is_still_rejected():
-    from mindex.backup_db import representation_manifest
+    from mindex.maintenance.backup_db import representation_manifest
 
     member = {'id': 'segment', 'representation_ids': ['expected'], 'views': {}}
     with pytest.raises(ValueError, match='表示不在成员清单中'):
@@ -1104,7 +1105,7 @@ def test_backup_keeps_vectors_of_incomplete_historical_index_members(library, tm
 
 
 def test_portable_base_config_preserves_external_paths(tmp_path):
-    from mindex.backup import _portable_base_config
+    from mindex.maintenance.backup import _portable_base_config
 
     project = tmp_path / 'project'
     external = tmp_path / 'external'

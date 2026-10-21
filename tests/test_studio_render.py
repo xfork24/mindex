@@ -6,9 +6,9 @@ import wave
 
 import pytest
 
-from mindex import studio, studio_render, studio_steps
-from mindex.media import MediaError, audio_info, command, probe
-from mindex.pipeline import Pipeline
+from mindex.processing.pipeline import Pipeline
+from mindex.shared.media import MediaError, audio_info, command, probe
+from mindex.studio import studio, studio_render, studio_steps
 
 
 @pytest.fixture
@@ -119,7 +119,7 @@ def test_render_soft_subtitle_outputs_video_srt_and_audio(config, video_file):
 def probe_streams(path):
     import json as json_module
 
-    from mindex.media import command
+    from mindex.shared.media import command
 
     return json_module.loads(
         command(["ffprobe", "-v", "error", "-show_streams", "-of", "json", str(path)], timeout=30)

@@ -25,40 +25,84 @@ Mindex 是中文视频片段检索系统：文字找视频优先，支持视频�
 
 ## 模块职责
 
-全部源码在 `src/mindex/`，约 9000 行。
+前后端分别放在仓库根目录的 `frontend/` 与 `backend/`，两侧按页面功能划分模块：
+
+```text
+mindex/
+├── frontend/src/
+│   ├── search/       # 视频检索 HTML/JS
+│   ├── admin/        # 素材管理 HTML/JS/CSS
+│   ├── persons/      # 人物库 HTML/JS/CSS
+│   ├── studio/       # 创作 HTML/JS/CSS
+│   ├── settings/     # 设置 HTML/JS/CSS
+│   └── shared/       # 公共样式、国际化、播放器、侧栏、多选组件
+└── backend/src/
+    ├── api.py / cli.py / __init__.py  # 应用装配、命令入口、包信息
+    ├── search/       # 视频检索、检索/媒体 API
+    ├── admin/        # 素材管理、素材/对白任务、详情
+    ├── persons/      # 人物库、扫描 worker、人物服务
+    ├── studio/       # 创作状态机、工作台与各步骤
+    ├── settings/     # 运行时设置、音色库、声音克隆
+    ├── processing/   # 管线、索引、对白、字幕、镜头修复、对齐 worker
+    ├── models/       # 模型适配、部署核验、模型服务
+    ├── shared/       # 配置、类型、存储、媒体、锁、进度、国际化
+    ├── maintenance/  # 清理、备份、切片迁移与恢复
+    └── diagnostics/  # e2e、评测、benchmark、报告与检查页
+```
+
+源码直接位于 `backend/src/`，没有额外的 `mindex/` 目录；Python 的 `mindex` 命名空间由 `pyproject.toml` 的目录映射提供。各包保留原模块文件名，例如创作 API 从 `mindex.studio_api` 迁移到
+`mindex.studio.studio_api`。仓库统一使用新导入路径，不提供旧模块兼容层。
+`__init__.py` 不自动加载业务模块，保持 CLI 延迟加载与服务环境隔离。
+
+页面路径 `/`、`/admin`、`/persons`、`/studio`、`/settings` 与 `/api/*` 接口不变。
+静态资源由 `/assets/<功能模块>/<文件名>` 提供，源码位于 `frontend/src/<功能模块>/`。
+`shared/web_assets.py` 统一定位资源：源码运行时读取仓库的 `frontend/src/`；
+wheel 安装后读取随包的 `mindex/web/`。Setuptools 通过包目录映射将后端源码安装为 `mindex`，将前端资源打入 wheel 的 `mindex/web/`，
+源码发布包也保留 `frontend/src/`。导出检查页和后端国际化使用同一份共享资源。
+前端保持原生 HTML/JS/CSS，无需额外 Node 构建或单独启动前端服务器。
+
+旧检出目录迁移后，主环境运行 `uv sync --extra dev` 刷新可编辑安装；
+已有独立服务环境可运行 `uv pip install --python .venv-person/bin/python --no-deps -e .`
+（检测环境对应 `.venv-detector/bin/python`）。这只更新项目路径，不要求重装模型依赖。
+
+`cli.py` 保留 Typer 命令入口，重模块在命令函数内延迟导入；`--config` 必须放在子命令之前。
+模型独立服务入口为 `mindex.models.model_server`，人物服务入口为
+`mindex.persons.person_server`；`processing/align_worker.py` 保持独立子进程运行。
+
+下表 Python 模块路径相对于 `backend/src/`。
 
 | 模块 | 职责 |
 |---|---|
 | `cli.py` | Typer CLI 入口（`mindex`）；重模块在命令函数内延迟导入，`--config` 必须放在子命令之前 |
-| `pipeline.py` | 各阶段编排：导入去重、分镜、切片、转写、对齐、分析；`pipeline.lock` 文件锁 |
-| `indexing.py` | `IndexBuilder`（建索引、发布前检查）与 `VectorIndex`（Chroma 封装） |
-| `search.py` | `SearchEngine`：五路召回、RRF 融合、去重；`status()` |
-| `api.py` | FastAPI `create_app`：检索 API、媒体/上下文播放、静态页面 |
-| `admin.py` + `curation.py` | 素材后台 API 与整理数据（显示名/备注/收藏/隐藏），独立于索引 |
-| `runtime_settings.py` | 设置页数据层：模型配置档案（model_profiles）、音色库（voices）、业务覆盖键（settings KV）与 `apply_overrides` 热生效覆盖层 |
-| `settings_api.py` | `/api/settings/*` 路由：档案 CRUD/激活/测试连接、业务调参、音色与克隆 |
-| `voice_clone.py` | 厂商声音克隆客户端：MiniMax 上传克隆、阿里 DashScope URL 复刻 |
-| `studio.py` | 创作任务状态机与 job.json 持久化（五步：split/recall/tts/select/render） |
-| `studio_api.py` | `/api/studio/*` 路由：任务创建、轮询、后台线程执行、产物下载 |
-| `studio_steps.py` / `studio_select.py` / `studio_render.py` | 创作各步骤编排、选片纯算法、ffmpeg 渲染合成 |
-| `studio_artifacts.py` | 创作检查点/产物/诊断记录（attempt 不可变留档） |
-| `adapters.py` | 模型适配层：七个 Protocol 与 `make_*` 工厂（见下） |
-| `llama_cpp.py` | 对用户已有 llama-server 的原生协议适配（`/v1/embeddings` 的 `input_video`、`input_audio`）；部署清单核验 |
-| `images.py` / `image_embedding.py` | 静态图片解码、方向/透明度/像素处理；扩展原生图片嵌入，保持既有文字/视频空间指纹 |
-| `model_server.py` | GPU 侧自定义服务（`mindex-model-server`，角色独立 venv）：WeMMEngine / ASREngine / TransNetEngine |
-| `e2e.py` | `mindex e2e` 分阶段真实验证框架（init/probe/pin/phase/freeze） |
-| `evaluation.py` + `benchmark.py` | 评测（Hit@1/5、MRR@10、nDCG@10）与 `model-check` 单模型联调 |
-| `film.py` | `inspect` 进度报告与 `export`（JSON/CSV/分页检查页） |
-| `media.py` | FFmpeg/ffprobe 封装：探测、精确切片、缩略图、抽帧、帧时间戳 |
-| `storage.py` | SQLite `Store`：建表、JSON 检查点、runs 记录、活动索引切换 |
-| `align_worker.py` | 强制对齐独立子进程 worker（不导入 mindex/chromadb/GPU 运行时） |
-| `analyzers.py` | `PinnedQwenAnalyzer`：把分析检查点绑定到实际 GGUF 部署 |
-| `types.py` | Pydantic 模型：Granularity、Filters、TextSearch、Annotation、Utterance |
-| `static/` | 原生 HTML/JS/CSS，无前端框架（检索页 + 后台页 + 创作页 + 设置页） |
+| `processing/pipeline.py` | 各阶段编排：导入去重、分镜、切片、转写、对齐、分析；`pipeline.lock` 文件锁 |
+| `processing/indexing.py` | `IndexBuilder`（建索引、发布前检查）与 `VectorIndex`（Chroma 封装） |
+| `search/search.py` | `SearchEngine`：五路召回、RRF 融合、去重；`status()` |
+| `api.py` + `search/api.py` | FastAPI 应用装配、页面注册；检索 API、媒体/上下文播放 |
+| `admin/admin.py` + `admin/curation.py` | 素材后台 API 与整理数据（显示名/备注/收藏/隐藏），独立于索引 |
+| `settings/runtime_settings.py` | 设置页数据层：模型配置档案（model_profiles）、音色库（voices）、业务覆盖键（settings KV）与 `apply_overrides` 热生效覆盖层 |
+| `settings/settings_api.py` | `/api/settings/*` 路由：档案 CRUD/激活/测试连接、业务调参、音色与克隆 |
+| `settings/voice_clone.py` | 厂商声音克隆客户端：MiniMax 上传克隆、阿里 DashScope URL 复刻 |
+| `studio/studio.py` | 创作任务状态机与 job.json 持久化（五步：split/recall/tts/select/render） |
+| `studio/studio_api.py` | `/api/studio/*` 路由：任务创建、轮询、后台线程执行、产物下载 |
+| `studio/studio_steps.py` / `studio/studio_select.py` / `studio/studio_render.py` | 创作各步骤编排、选片纯算法、ffmpeg 渲染合成 |
+| `studio/studio_artifacts.py` | 创作检查点/产物/诊断记录（attempt 不可变留档） |
+| `models/adapters.py` | 模型适配层：七个 Protocol 与 `make_*` 工厂（见下） |
+| `models/llama_cpp.py` | 对用户已有 llama-server 的原生协议适配（`/v1/embeddings` 的 `input_video`、`input_audio`）；部署清单核验 |
+| `shared/images.py` / `models/image_embedding.py` | 静态图片解码、方向/透明度/像素处理；扩展原生图片嵌入，保持既有文字/视频空间指纹 |
+| `models/model_server.py` | GPU 侧自定义服务（`mindex-model-server`，角色独立 venv）：WeMMEngine / ASREngine / TransNetEngine |
+| `diagnostics/e2e.py` | `mindex e2e` 分阶段真实验证框架（init/probe/pin/phase/freeze） |
+| `diagnostics/evaluation.py` + `diagnostics/benchmark.py` | 评测（Hit@1/5、MRR@10、nDCG@10）与 `model-check` 单模型联调 |
+| `diagnostics/film.py` | `inspect` 进度报告与 `export`（JSON/CSV/分页检查页） |
+| `shared/media.py` | FFmpeg/ffprobe 封装：探测、精确切片、缩略图、抽帧、帧时间戳 |
+| `shared/storage.py` | SQLite `Store`：建表、JSON 检查点、runs 记录、活动索引切换 |
+| `processing/align_worker.py` | 强制对齐独立子进程 worker（不导入 mindex/chromadb/GPU 运行时） |
+| `models/analyzers.py` | `PinnedQwenAnalyzer`：把分析检查点绑定到实际 GGUF 部署 |
+| `shared/types.py` | Pydantic 模型：Granularity、Filters、TextSearch、Annotation、Utterance |
+| `frontend/src/` | 原生 HTML/JS/CSS，按五个页面划分模块；公共组件位于 `frontend/src/shared/` |
 
 ## 模型适配层
 
-七个 `Protocol`（`adapters.py`）：`MultimodalEmbedder`、`VisualAnalyzer`、`Transcriber`、`Aligner`、`ShotDetector`、`Speaker`（TTS）、`Storyboarder`（拆分镜 LLM）。替换模型 = 实现协议接入新 backend，不改检索管线。
+七个 `Protocol`（`models/adapters.py`）：`MultimodalEmbedder`、`VisualAnalyzer`、`Transcriber`、`Aligner`、`ShotDetector`、`Speaker`（TTS）、`Storyboarder`（拆分镜 LLM）。替换模型 = 实现协议接入新 backend，不改检索管线。
 
 | 工厂 | backend 值 | 实现 |
 |---|---|---|
@@ -124,7 +168,7 @@ data/
 2. **索引不可变**：换模型、量化、维度、预处理或分析配置 → 新建独立索引版本，从不覆盖；发布前 `check`，激活在 SQLite 事务内完成。索引冻结描述与对白快照，后续分析更新不影响已发布索引。
 3. **切分布局不可变**：detector/video 切分参数变化须使用新 `data_dir`，不覆盖已有布局（`layout_key` 校验）。
 4. **SQLite 是事实来源**：Chroma 只存显式向量，可通过表示 ID 完全重建对账。
-5. **对齐环境隔离**：强制对齐用独立 CPU venv `.venv-align`，`align_worker.py` 以独立子进程运行，绝不装入应用环境。
+5. **对齐环境隔离**：强制对齐用独立 CPU venv `.venv-align`，`processing/align_worker.py` 以独立子进程运行，绝不装入应用环境。
 
 ## 在线服务
 

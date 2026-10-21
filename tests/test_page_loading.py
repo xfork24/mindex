@@ -5,8 +5,8 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from mindex.api import create_app
-from mindex.persons import Entity, Persons
-from mindex.storage import Store, dumps
+from mindex.persons.persons import Entity, Persons
+from mindex.shared.storage import Store, dumps
 
 
 def test_search_filters_are_lightweight_and_respect_relationships(config, monkeypatch):
@@ -58,7 +58,7 @@ def test_cast_gallery_thumbnail_cached_and_original_preserved(config, monkeypatc
         assert client.get(url).content == (store.root / image['path']).read_bytes()
         def unexpected(*args, **kwargs):
             raise AssertionError('Cached thumbnail decoded again')
-        monkeypatch.setattr('mindex.person_thumbnails.Image.open', unexpected)
+        monkeypatch.setattr('mindex.persons.person_thumbnails.Image.open', unexpected)
         assert client.get(url + '?thumbnail=true').content == preview.content
         client.delete(url)
         assert client.get(url + '?thumbnail=true').status_code in (404, 422)
@@ -69,7 +69,7 @@ def test_summary_status_omits_expensive_coverage(config, monkeypatch):
     def unexpected(*args, **kwargs):
         raise AssertionError('Full index coverage requested for summary')
     monkeypatch.setattr(Store, 'active_index', lambda self: {'id': 'active', 'spec': {}})
-    monkeypatch.setattr('mindex.search.channel_coverage', unexpected)
+    monkeypatch.setattr('mindex.search.search.channel_coverage', unexpected)
     monkeypatch.setattr(Persons, 'published', unexpected)
     with TestClient(app) as client:
         result = client.get('/api/status?summary=true')

@@ -9,13 +9,13 @@ import pytest
 from conftest import FixtureEmbedder, FixtureSpeaker, FixtureStoryboarder
 from fastapi.testclient import TestClient
 
-from mindex import studio
-from mindex import studio_workspace as ws
 from mindex.api import create_app
-from mindex.indexing import IndexBuilder
-from mindex.media import command
-from mindex.pipeline import Pipeline
-from mindex.storage import Store
+from mindex.processing.indexing import IndexBuilder
+from mindex.processing.pipeline import Pipeline
+from mindex.shared.media import command
+from mindex.shared.storage import Store
+from mindex.studio import studio
+from mindex.studio import studio_workspace as ws
 
 
 @pytest.fixture
@@ -389,7 +389,7 @@ def test_migration_snapshots_and_unknown_dependencies_are_honest(config):
 
 
 def test_legacy_render_versions_are_imported_without_inventing_edges(prepared):
-    from mindex import studio_steps
+    from mindex.studio import studio_steps
 
     config, embedder = prepared
     jid = studio.create_job(config, "历史红色文案。", options={"burn": False})["id"]

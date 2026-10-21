@@ -10,7 +10,7 @@
 | `tests/test_studio_workspace.py` | 11 passed，包含软字幕和烧录字幕两个混选媒体用例 |
 | 收尾：中断恢复、默认参数隔离、部分失败续建、API 预览与下载 | 针对修改分别回归通过 |
 | 本次 Python 文件 Ruff | 通过 |
-| `node --check src/mindex/static/studio.js` | 通过 |
+| `node --check frontend/src/studio/studio.js` | 通过 |
 | 本次受控文件 `git diff --check` | 通过 |
 
 新增测试使用确定性拆分、颜色向量与正弦波语音，以及真实 ffmpeg、SQLite、Chroma。覆盖：

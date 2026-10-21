@@ -3,9 +3,9 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from mindex.api import create_app
-from mindex.pipeline import Pipeline
-from mindex.storage import dumps
-from mindex.types import Annotation
+from mindex.processing.pipeline import Pipeline
+from mindex.shared.storage import dumps
+from mindex.shared.types import Annotation
 
 
 def test_detail_independent_asr_subtitle_and_llm_with_time_clipping(config, video_file, monkeypatch):
@@ -54,7 +54,7 @@ def test_detail_independent_asr_subtitle_and_llm_with_time_clipping(config, vide
             ).model_dump()
         },
     )
-    from mindex.subtitle_archive import archive_path
+    from mindex.processing.subtitle_archive import archive_path
     archive_path(store, source).write_text(dumps({
         "version": 1, "files": {},
         "tracks": [
@@ -91,7 +91,7 @@ def test_detail_missing_outputs_no_models_and_button_order(config, video_file):
     assert data["subtitles"]["message"] == "无字幕轨道"
     assert data["llm"]["message"] == "LLM 未处理"
     assert client.get("/api/admin/segments/missing/details").status_code == 404
-    script = client.get("/admin.js").text
+    script = client.get("/assets/admin/admin.js").text
     assert (
         script.index('action(MindexI18n.msg("ui.4f55ee1e687f")')
         < script.index('action(MindexI18n.msg("ui.e0361480e3a5")')
@@ -132,7 +132,7 @@ def test_missing_source_media_preserves_stored_llm_and_asr(config, video_file):
 
 
 def test_person_details_merge_clip_coverage_count_evidence_without_publication(config, video_file):
-    from mindex.persons import Entity, Persons
+    from mindex.persons.persons import Entity, Persons
 
     pipeline = Pipeline(config)
     source = pipeline.prepare(video_file)

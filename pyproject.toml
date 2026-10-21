@@ -1,6 +1,6 @@
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "mindex"
@@ -22,15 +22,45 @@ person = ["supervision>=0.27,<0.28", "av>=14,<17"]
 
 [project.scripts]
 mindex = "mindex.cli:app"
-mindex-person-server = "mindex.person_server:main"
-mindex-model-server = "mindex.model_server:main"
+mindex-person-server = "mindex.persons.person_server:main"
+mindex-model-server = "mindex.models.model_server:main"
 
-[tool.hatch.build.targets.wheel]
-packages = ["src/mindex"]
+[tool.setuptools]
+packages = [
+  "mindex",
+  "mindex.admin",
+  "mindex.diagnostics",
+  "mindex.maintenance",
+  "mindex.models",
+  "mindex.persons",
+  "mindex.processing",
+  "mindex.search",
+  "mindex.settings",
+  "mindex.shared",
+  "mindex.studio",
+  "mindex.web",
+  "mindex.web.admin",
+  "mindex.web.persons",
+  "mindex.web.search",
+  "mindex.web.settings",
+  "mindex.web.shared",
+  "mindex.web.studio",
+]
+
+[tool.setuptools.package-dir]
+"mindex" = "backend/src"
+"mindex.web" = "frontend/src"
+
+[tool.setuptools.package-data]
+"mindex.web" = ["*/*.html", "*/*.js", "*/*.css", "*/*.json", "*/*.svg"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
 [tool.ruff]
+src = ["backend/src"]
 target-version = "py311"
 line-length = 110
+
+[tool.ruff.lint.isort]
+known-first-party = ["mindex"]

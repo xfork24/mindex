@@ -8,12 +8,12 @@ from pathlib import Path
 import uvicorn
 from conftest import FixtureAnalyzer, FixtureEmbedder, FixtureSpeaker, FixtureStoryboarder
 
-from mindex import settings_api
 from mindex.api import create_app
-from mindex.config import Config
-from mindex.indexing import IndexBuilder
-from mindex.media import command
-from mindex.pipeline import Pipeline
+from mindex.processing.indexing import IndexBuilder
+from mindex.processing.pipeline import Pipeline
+from mindex.settings import settings_api
+from mindex.shared.config import Config
+from mindex.shared.media import command
 
 
 def main():

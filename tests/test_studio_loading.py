@@ -10,11 +10,11 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from mindex import studio
-from mindex import studio_workspace as ws
 from mindex.api import create_app
-from mindex.persons import Persons
-from mindex.storage import Store
+from mindex.persons.persons import Persons
+from mindex.shared.storage import Store
+from mindex.studio import studio
+from mindex.studio import studio_workspace as ws
 
 
 def indexed_store(config):

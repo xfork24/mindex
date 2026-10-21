@@ -45,7 +45,7 @@
 ```bash
 uv run pytest tests/test_persons.py tests/test_clean.py -q
 uv run pytest -q
-uv run ruff check src tests
+uv run ruff check backend/src tests
 uv run mindex persons migrate-frames
 uv run mindex persons migrate-frames --apply
 ```
@@ -56,7 +56,7 @@ uv run mindex persons migrate-frames --apply
 ### 本次验证结果
 
 - 人物与 clean 回归 110 项通过，另补的审核互斥用例通过；新增原尺寸 JPEG 与卡片排序断言通过。
-- `ruff check src tests`、`git diff --check` 通过。
+- `ruff check backend/src tests`、`git diff --check` 通过。
 - 全量回归 644 passed / 3 failed；三个失败均已在独立的原始 HEAD 副本复现：
   `test_admin::test_live_curation_filters_text_video_without_mutating_index`（display_name）、
   `test_film::test_visual_index_does_not_require_asr_or_analysis`（向量数 10 vs 5）、

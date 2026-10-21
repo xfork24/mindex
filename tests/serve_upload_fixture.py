@@ -8,13 +8,13 @@ import uvicorn
 from conftest import FixtureAnalyzer, FixtureEmbedder
 from test_persons import FakeClient, Tracker
 
-from mindex import person_api, person_processing
-from mindex import pipeline as pipeline_module
-from mindex.adapters import AnalysisContentRejected
 from mindex.api import create_app
-from mindex.config import Config
-from mindex.media import command
-from mindex.person_processing import PersonProcessor
+from mindex.models.adapters import AnalysisContentRejected
+from mindex.persons import person_api, person_processing
+from mindex.persons.person_processing import PersonProcessor
+from mindex.processing import pipeline as pipeline_module
+from mindex.shared.config import Config
+from mindex.shared.media import command
 
 
 def main():

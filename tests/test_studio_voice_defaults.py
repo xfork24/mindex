@@ -8,11 +8,11 @@ from conftest import FixtureSpeaker
 from fastapi.testclient import TestClient
 from test_studio_workspace import setup_workspace, wait_build
 
-from mindex import studio
-from mindex import studio_workspace as ws
 from mindex.api import create_app
-from mindex.runtime_settings import activate_profile, save_profile
-from mindex.storage import Store
+from mindex.settings.runtime_settings import activate_profile, save_profile
+from mindex.shared.storage import Store
+from mindex.studio import studio
+from mindex.studio import studio_workspace as ws
 
 
 def test_new_and_legacy_plans_inherit_without_changing_history(config):

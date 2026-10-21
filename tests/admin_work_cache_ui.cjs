@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const code = fs.readFileSync('src/mindex/static/admin.js', 'utf8');
+const code = fs.readFileSync('frontend/src/admin/admin.js', 'utf8');
 let resolve, reject, calls = 0, renders = 0;
 const prefs = {};
 const context = vm.createContext({

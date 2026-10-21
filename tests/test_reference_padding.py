@@ -3,9 +3,9 @@ import io
 import pytest
 from PIL import Image
 
-from mindex.config import fingerprint
-from mindex.person_processing import PersonClient, ensure_reference_quality, reference_check
-from mindex.storage import Store, dumps
+from mindex.persons.person_processing import PersonClient, ensure_reference_quality, reference_check
+from mindex.shared.config import fingerprint
+from mindex.shared.storage import Store, dumps
 
 
 def face():

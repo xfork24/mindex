@@ -340,8 +340,8 @@ curl -X POST http://127.0.0.1:8000/api/search/text \
 ```bash
 uv sync --extra person --extra dev
 uv run pytest -q
-uv run ruff check src tests
-node --check src/mindex/static/app.js
+uv run ruff check backend/src tests
+node --check frontend/src/search/app.js
 ```
 
 UI 回归另需 Node.js 与 Playwright，参见[验证记录](docs/VERIFICATION.md)。自动化测试使用真实媒体处理、数据库与 HTTP 链路，模型部分使用明确标记的确定性测试适配器；它们验证工程行为，不证明真实模型的检索或人物识别准确率。
@@ -376,3 +376,11 @@ UI 回归另需 Node.js 与 Playwright，参见[验证记录](docs/VERIFICATION.
 [开始使用](#快速开始) · [阅读文档](docs/README.md) · [反馈问题](https://github.com/xfork24/mindex/issues)
 
 </div>
+
+### 源码导航
+
+前端位于 `frontend/src/`，后端 Python 包位于 `backend/src/`，两侧均按
+`search/`、`admin/`、`persons/`、`studio/`、`settings/` 页面功能组织。
+前端公共资源集中在 `frontend/src/shared/`；后端共享管线、模型、基础设施、维护和诊断模块独立分包。
+现有 `uv run mindex serve` 命令同时提供页面和 API，无需单独构建前端。
+完整目录、资源打包与导入约定见 [架构文档](docs/architecture.md#模块职责)。

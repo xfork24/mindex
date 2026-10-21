@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from mindex.runtime_settings import (
+from mindex.settings.runtime_settings import (
     CLEAR_KEY,
     PROFILE_FIELDS,
     PROVIDER_PRESETS,
@@ -20,7 +20,7 @@ from mindex.runtime_settings import (
     mask_key,
     save_profile,
 )
-from mindex.storage import Store
+from mindex.shared.storage import Store
 
 
 @pytest.fixture
@@ -278,7 +278,7 @@ def test_fingerprints_exclude_api_key(config):
 
 def test_provider_presets_validate():
     """预设里的 config 必须能通过对应配置段的 pydantic 校验，防止手滑。"""
-    from mindex.runtime_settings import SECTION_TYPES
+    from mindex.settings.runtime_settings import SECTION_TYPES
 
     for roles in PROVIDER_PRESETS.values():
         for role, preset in roles.items():

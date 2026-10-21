@@ -1,7 +1,7 @@
 from test_studio_workspace import setup_workspace
 
-from mindex import studio_workspace as ws
-from mindex.config import portable_parameters
+from mindex.shared.config import portable_parameters
+from mindex.studio import studio_workspace as ws
 
 
 def test_historical_absolute_manifest_reuses_version_after_move(config):

@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const code = fs.readFileSync('src/mindex/static/admin.js','utf8');
+const code = fs.readFileSync('frontend/src/admin/admin.js','utf8');
 function node(tag,text,cls) {
   return {tag,text,cls,children:[],open:false,isConnected:true,
     append(...items){this.children.push(...items);},addEventListener(){},setAttribute(){},

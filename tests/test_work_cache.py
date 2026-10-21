@@ -3,12 +3,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from mindex.work_cache import WorkCache
+from mindex.shared.work_cache import WorkCache
 
 
 @pytest.fixture
 def cache(tmp_path, monkeypatch):
-    import mindex.work_cache as module
+    import mindex.shared.work_cache as module
 
     monkeypatch.setattr(module, 'source_public', lambda row: dict(row))
     progress = {'completed': 1}
@@ -82,9 +82,9 @@ def test_admin_cache_routes(cache, monkeypatch):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
-    import mindex.work_cache as module
-    from mindex import admin
-    from mindex.admin import admin_router
+    import mindex.shared.work_cache as module
+    from mindex.admin import admin
+    from mindex.admin.admin import admin_router
 
     work_cache, library, _, _ = cache
     monkeypatch.setattr(admin, 'Library', lambda store: library)

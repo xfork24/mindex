@@ -2,9 +2,9 @@ import json
 
 import pytest
 
-from mindex.media import MediaError, command, probe
-from mindex.shot_media import ShotMedia
-from mindex.storage import Store
+from mindex.shared.media import MediaError, command, probe
+from mindex.shared.shot_media import ShotMedia
+from mindex.shared.storage import Store
 
 
 @pytest.fixture
@@ -48,9 +48,9 @@ def test_missing_and_gapped_shots_fail(library):
 
 
 def test_migration_preview_backup_and_recovery(library):
-    from mindex.clips import materialize_all, migrate
-    from mindex.config import Config
-    from mindex.subtitle_archive import archive_path
+    from mindex.maintenance.clips import materialize_all, migrate
+    from mindex.processing.subtitle_archive import archive_path
+    from mindex.shared.config import Config
 
     # Explicitly archive a source without reading a nonexistent original.
     manifest = archive_path(library, 's')
@@ -96,9 +96,10 @@ def test_audio_mix_frames_and_cache_lock(library, tmp_path):
 def test_business_modules_do_not_resolve_source_path():
     from pathlib import Path
 
-    modules = ['api', 'admin', 'person_api', 'person_processing', 'dialogue', 'segment_details',
-               'studio_workspace', 'studio_window', 'studio_steps', 'studio_api']
-    root = Path(__file__).resolve().parents[1] / 'src' / 'mindex'
+    modules = ['api', 'admin/admin', 'persons/person_api', 'persons/person_processing',
+               'processing/dialogue', 'admin/segment_details', 'studio/studio_workspace',
+               'studio/studio_window', 'studio/studio_steps', 'studio/studio_api']
+    root = Path(__file__).resolve().parents[1] / 'backend' / 'src'
     for name in modules:
         source = (root / f'{name}.py').read_text()
         assert 'resolve_media(source["path"])' not in source, name
@@ -106,8 +107,8 @@ def test_business_modules_do_not_resolve_source_path():
 
 
 def test_text_subtitle_archive_survives_source_removal(config, video_file, tmp_path):
-    from mindex.pipeline import Pipeline
-    from mindex.subtitle_archive import load_archive
+    from mindex.processing.pipeline import Pipeline
+    from mindex.processing.subtitle_archive import load_archive
 
     subtitle = tmp_path / 'captions.srt'
     subtitle.write_text('1\n00:00:00,200 --> 00:00:00,800\nhello\n')
@@ -131,7 +132,7 @@ def test_http_playlist_range_and_head_without_original(library):
     from fastapi.testclient import TestClient
 
     from mindex.api import create_app
-    from mindex.config import Config
+    from mindex.shared.config import Config
 
     library.execute('INSERT INTO segments VALUES(?,?,?,?,?,?,?,?,?,?)',
                     ('moment', 's', 'moment', .5, 1.5, 'clips/missing.mp4', '', 'v', None, 'test'))
@@ -148,9 +149,9 @@ def test_http_playlist_range_and_head_without_original(library):
 
 
 def test_migration_verification_retains_all_existing_media(library):
-    from mindex.clips import migrate
-    from mindex.config import Config
-    from mindex.subtitle_archive import archive_path
+    from mindex.maintenance.clips import migrate
+    from mindex.processing.subtitle_archive import archive_path
+    from mindex.shared.config import Config
 
     manifest = archive_path(library, 's')
     manifest.parent.mkdir(parents=True)
@@ -179,7 +180,7 @@ def test_concurrent_generation_is_atomic(library):
 
 
 def test_playlist_revision_changes_when_shot_is_replaced(library):
-    from mindex.shot_media import file_response
+    from mindex.shared.shot_media import file_response
 
     service = ShotMedia(library)
     old = service.playlist('s')['items'][0]['url']
@@ -195,9 +196,9 @@ def test_playlist_revision_changes_when_shot_is_replaced(library):
 
 
 def test_prune_verified_entities_preserves_shots_and_recovers(library):
-    from mindex.clips import materialize_all, migrate, protected_digest, prune
-    from mindex.config import Config
-    from mindex.subtitle_archive import archive_path
+    from mindex.maintenance.clips import materialize_all, migrate, protected_digest, prune
+    from mindex.processing.subtitle_archive import archive_path
+    from mindex.shared.config import Config
 
     config = Config(data_dir=library.root)
     archive = archive_path(library, 's')
@@ -240,8 +241,8 @@ def test_prune_verified_entities_preserves_shots_and_recovers(library):
 def test_inference_interval_cleanup_on_failure(config, video_file):
     import pytest
 
-    from mindex.pipeline import Pipeline
-    from mindex.shot_media import ShotMedia
+    from mindex.processing.pipeline import Pipeline
+    from mindex.shared.shot_media import ShotMedia
 
     pipeline = Pipeline(config)
     sid = pipeline.prepare(video_file)
@@ -253,9 +254,9 @@ def test_inference_interval_cleanup_on_failure(config, video_file):
 
 
 def test_inference_with_audio_shots(config, video_file, tmp_path):
-    from mindex.media import command, probe
-    from mindex.pipeline import Pipeline
-    from mindex.shot_media import ShotMedia
+    from mindex.processing.pipeline import Pipeline
+    from mindex.shared.media import command, probe
+    from mindex.shared.shot_media import ShotMedia
 
     video = tmp_path / 'audio.mp4'
     command(['ffmpeg', '-v', 'error', '-y', '-i', str(video_file), '-f', 'lavfi',
@@ -270,7 +271,7 @@ def test_inference_with_audio_shots(config, video_file, tmp_path):
 
 
 def test_request_local_dependency_checks_reuse_queries_and_probes(library, monkeypatch):
-    from mindex import shot_media
+    from mindex.shared import shot_media
 
     probes, queries = [], []
     original_probe, original_rows = shot_media.probe, library.rows

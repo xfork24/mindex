@@ -9,9 +9,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from mindex.config import Config
-from mindex.media import command
-from mindex.types import Annotation, ShotDraft
+from mindex.shared.config import Config
+from mindex.shared.media import command
+from mindex.shared.types import Annotation, ShotDraft
 
 
 @pytest.fixture(scope="session")

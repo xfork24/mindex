@@ -21,7 +21,7 @@ const context = vm.createContext({
   MindexMultiSearch: {sort: x => x, attach() {}, refilter() {}},
   RECALL_MODES: [],
 });
-const code = fs.readFileSync('src/mindex/static/studio.js', 'utf8');
+const code = fs.readFileSync('frontend/src/studio/studio.js', 'utf8');
 vm.runInContext(code.slice(code.indexOf('const ALL_VALUE'), code.indexOf('const LABEL')), context);
 vm.runInContext(code.slice(code.indexOf('function jobScope('), code.indexOf('function personName(')), context);
 vm.runInContext(code.slice(code.indexOf('function recallEditable('), code.indexOf('function renderShotEditor(')), context);

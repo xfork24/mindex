@@ -30,7 +30,7 @@ data/ 已 33G：无淘汰机制的缓存、换配置后永远不再命中的检�
 | `chroma/` | 1.2G | 18 索引版本，active 1 个 | B | 保留 active+最近 2 ready+全部 building |
 | `studio/<job>/` | 3.7G | 任务目录 | 分层 B | previews/旧 attempt/旧 zip 过期删；任务本体 C（已有 DELETE 接口）；一任务 315 attempt 目录 1.4G 是重灾区 |
 | `persons/frames/` | **12G** | 人物中间帧 | **C 待调整** | 删则证据图 404，先调整生成策略 |
-| `persons/references|imports/` | 20M | 用户上传图 | C；孤儿→A | 引用计数范式 persons.py:530 |
+| `persons/references|imports/` | 20M | 用户上传图 | C；孤儿→A | 引用计数范式 persons/persons.py:530 |
 | `voices/` | 小 | 克隆样本 | B | 无行孤儿+`pending-*`+试听残留删 |
 | `model-cache/` | 1.7G | 对齐模型缓存 | **C 待调整** | 删需重下 1.7G |
 | `capabilities/`、`deployments/`、`plans/` | <10M | 基线/清单/计划 | C | 事实来源或极小 |
@@ -51,7 +51,7 @@ data/ 已 33G：无淘汰机制的缓存、换配置后永远不再命中的检�
 
 ## 二、实现设计
 
-### 新模块 `src/mindex/clean.py`（≤750 行，超限先拆 `clean_studio.py` 再拆 `clean_index.py`）
+### 新模块 `backend/src/maintenance/clean.py`（≤750 行，超限先拆 `maintenance/clean_studio.py` 再拆 `maintenance/clean_index.py`）
 
 ```python
 @dataclass(frozen=True) class CleanItem: path: str; bytes: int; detail: dict
@@ -67,7 +67,7 @@ def clean_library(config, *, apply: bool, now=None) -> dict
 
 - **扫描段（无锁）**：逐规则扫描，绝不删除；SQLite 走 WAL 快照
 - **执行段（仅 apply）**：两段持锁（见锁方案），逐类调 `execute`；单类异常不断全局，记入该类 `error`
-- 整体包 `with store.run("clean")` 留 runs 审计（storage.py:149-166）
+- 整体包 `with store.run("clean")` 留 runs 审计（shared/storage.py:149-166）
 - 输出 JSON：`{applied, scanned_at, categories:[{category,level,description,policy,item_count,bytes,items(截20),kept,error,skipped}], notes:[C级待调整+字节数], total}`；bytes 无法精确的类别（索引版本、runs）诚实输出 0 并在 policy 注明
 
 ### A 级（每次删）
@@ -79,14 +79,14 @@ def clean_library(config, *, apply: bool, now=None) -> dict
   keep_ids = {active} ∪ 最近 index_keep_versions 个 ready ∪ 全部非 ready(building)
   referenced = segments(path,thumbnail) ∪ keep_ids 各版本 index_members.snapshot 的 path/thumbnail
   ```
-  `store.snapshots(vid)` 与 check_index（indexing.py:254-259）同口径只取 complete=1。孤儿 = 盘上存在 ∉ referenced；context 按 stem ∉ segments.id。删后自底向上 rmdir 空父目录
-- **A5 orphan_person_png**：references/imports 下 stem ∉ (person_references.digest ∪ person_imports.images[].digest)，复刻 persons.py:530 引用计数
+  `store.snapshots(vid)` 与 check_index（processing/indexing.py:254-259）同口径只取 complete=1。孤儿 = 盘上存在 ∉ referenced；context 按 stem ∉ segments.id。删后自底向上 rmdir 空父目录
+- **A5 orphan_person_png**：references/imports 下 stem ∉ (person_references.digest ∪ person_imports.images[].digest)，复刻 persons/persons.py:530 引用计数
 - **A6 orphan_voices**：voices/ 下文件 ∉ voices.sample_path（preview/pending 残留自然命中）
 - **A7 orphan_sources**：sources 根常规文件 ∉ sources.path 且 mtime 超宽限
 
 ### B 级（策略过期；统一 `_tree_mtime`/`_expired` helper，阈值全来自 CleanConfig）
-- **B1 index_versions**：候选 = ready ∧ 非 active ∧ created_at 排名 > keep_recent（keep_ids 计算与 A4 共用 `clean_index.retained_versions`，单一实现防口径漂移）。执行（持 index_write_lock）：①`PersistentClient(root/"chroma").delete_collection("idx-"+id)`（不存在则容错，purge.py:96 先例）②单版本单事务：`DELETE FROM representations WHERE index_id=?` / `index_members` / `index_versions` / `settings WHERE key='index_report.'||id`（channel_index.py:355）/ `search_releases WHERE content_id=?`（连带 person_versions 无引用则删，范式 persons.py:276-281）。building 一律保留
-- **B2/B3/B4 检查点**：transcripts 按 `profile != config.asr_key`；analysis 按 `profile != Pipeline(config).annotation_profile(sid)`（pipeline.py:534-539）；dialogue 按 profile ∉ `SELECT profile FROM channel_data WHERE source_id=? AND channel='dialogue'`（processing 行天然保护进行中）。均要求树 mtime 超期
+- **B1 index_versions**：候选 = ready ∧ 非 active ∧ created_at 排名 > keep_recent（keep_ids 计算与 A4 共用 `clean_index.retained_versions`，单一实现防口径漂移）。执行（持 index_write_lock）：①`PersistentClient(root/"chroma").delete_collection("idx-"+id)`（不存在则容错，maintenance/purge.py:96 先例）②单版本单事务：`DELETE FROM representations WHERE index_id=?` / `index_members` / `index_versions` / `settings WHERE key='index_report.'||id`（processing/channel_index.py:355）/ `search_releases WHERE content_id=?`（连带 person_versions 无引用则删，范式 persons/persons.py:276-281）。building 一律保留
+- **B2/B3/B4 检查点**：transcripts 按 `profile != config.asr_key`；analysis 按 `profile != Pipeline(config).annotation_profile(sid)`（processing/pipeline.py:534-539）；dialogue 按 profile ∉ `SELECT profile FROM channel_data WHERE source_id=? AND channel='dialogue'`（processing 行天然保护进行中）。均要求树 mtime 超期
 - **B5 context_cache**：mtime > context_max_age_days；顺带删同名 `.lock`（可非阻塞获取时）
 - **B6 studio_previews**：`previews/**` 文件级 mtime 过期
 - **B7 studio_attempts**：跳过 execution/steps running 的任务（recover_stale 语义）；keep = checkpoints.json 各项 path 的 attempt 目录 ∪ 各 step 当前 attempt 目录；其余树 mtime 超期删（checkpoints.json 损坏按空注册表处理，仅剩 step 最新保护）
@@ -94,7 +94,7 @@ def clean_library(config, *, apply: bool, now=None) -> dict
 - **B9 reports**、**B10 subtitle_cache**（严格排除 uploads/ 子目录）：mtime 过期
 - **B11 runs_history**：`DELETE FROM runs WHERE status IN('complete','failed') AND finished_at IS NOT NULL AND finished_at < ?`（UTC）；running 一律不动
 
-### 锁方案（已对照 processing_lock.py / admin.py:80-89 核实）
+### 锁方案（已对照 shared/processing_lock.py / admin/admin.py:80-89 核实）
 ```
 段一: SharedFileLock(pipeline.lock, exclusive=True) 非阻塞   ← enforce_gpu_lock=False 时管线锁本为共享，
        ↓                                                       唯有直接独占才能与所有 ProcessingLock 用户互斥
@@ -108,8 +108,8 @@ def clean_library(config, *, apply: bool, now=None) -> dict
 - 锁失败中文文案：管线→`有离线处理任务正在运行，无法安全清理；请等待管线空闲后重试`（Exit 1）；index-write→`索引正在构建或发布，请稍后重试`；studio→类别 skipped
 - serve 不持这些锁：context/previews/subtitles 靠 mtime 宽限（≥14 天 vs 秒级生成）；文档建议大规模清理前停 serve
 
-### CleanConfig（config.py 新增，StrictModel）
-字段（默认值）：`index_keep_versions:2`、`temp_grace_hours:24`、`transcripts_max_age_days:30`、`analysis_max_age_days:30`、`dialogue_max_age_days:30`、`context_max_age_days:14`、`studio_preview_max_age_days:14`、`studio_attempt_max_age_days:30`、`studio_export_max_age_days:60`、`reports_max_age_days:60`、`subtitles_max_age_days:30`、`runs_max_age_days:90`。`Config` 加 `clean: CleanConfig = Field(default_factory=CleanConfig)`（config.py:252-264 区域）。同步 `config.example.yaml`。不进 runtime 热覆盖（本地运维参数，runtime_settings.py:4-7 白名单原则）
+### CleanConfig（shared/config.py 新增，StrictModel）
+字段（默认值）：`index_keep_versions:2`、`temp_grace_hours:24`、`transcripts_max_age_days:30`、`analysis_max_age_days:30`、`dialogue_max_age_days:30`、`context_max_age_days:14`、`studio_preview_max_age_days:14`、`studio_attempt_max_age_days:30`、`studio_export_max_age_days:60`、`reports_max_age_days:60`、`subtitles_max_age_days:30`、`runs_max_age_days:90`。`Config` 加 `clean: CleanConfig = Field(default_factory=CleanConfig)`（shared/config.py:252-264 区域）。同步 `config.example.yaml`。不进 runtime 热覆盖（本地运维参数，settings/runtime_settings.py:4-7 白名单原则）
 
 ### CLI（cli.py，indexes 命令区后）
 ```python
@@ -143,14 +143,14 @@ def clean(ctx: typer.Context, apply: Annotated[bool, typer.Option("--apply", hel
 ## 五、实现顺序（5 个独立可绿的提交）
 
 1. CleanConfig + config.example.yaml + config-reference（纯增量）
-2. clean.py 框架 + A 级 + CLI + 测试 1/2/9/11/12
+2. maintenance/clean.py 框架 + A 级 + CLI + 测试 1/2/9/11/12
 3. B 级文件类（B2-B10）+ 测试 3/7/8/13
-4. clean_index.py（retained_versions/delete_index_version）+ B1/B11 + 测试 4/5/10
+4. maintenance/clean_index.py（retained_versions/delete_index_version）+ B1/B11 + 测试 4/5/10
 5. docs/cleanup.md + 其余文档
 
 ## 六、验证
 
-- `uv run pytest tests/test_clean.py -q` 全绿；`uv run pytest -q` 全量回归；`uv run ruff check src tests`
+- `uv run pytest tests/test_clean.py -q` 全绿；`uv run pytest -q` 全量回归；`uv run ruff check backend/src tests`
 - 真实 data 预览跑一遍（不带 --apply）：核对 categories 与实际磁盘对账（预计可报收 ~1G 索引版本 + studio 旧 attempt 1G+ + 零散项），确认 persons/frames 等只出现在 notes
 - 抽查预览列出的孤儿文件确实无引用后再人工 `--apply` 一次
 

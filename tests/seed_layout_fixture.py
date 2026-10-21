@@ -9,11 +9,11 @@ from pathlib import Path
 
 from PIL import Image
 
-from mindex.config import Config
-from mindex.film import export_source
-from mindex.label_review import render_review
-from mindex.persons import CastEntry, Entity, Persons
-from mindex.storage import Store, dumps
+from mindex.diagnostics.film import export_source
+from mindex.diagnostics.label_review import render_review
+from mindex.persons.persons import CastEntry, Entity, Persons
+from mindex.shared.config import Config
+from mindex.shared.storage import Store, dumps
 
 
 def seed(root: Path):

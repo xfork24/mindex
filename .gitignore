@@ -1,5 +1,5 @@
 .venv*/
-models/
+/models/
 __pycache__/
 *.pyc
 .pytest_cache/
@@ -17,3 +17,5 @@ artifacts/
 
 # 计划执行台账（本地暂存）
 .superpowers/
+
+/build/

@@ -7,11 +7,11 @@ from conftest import FixtureSpeaker, FixtureStoryboarder
 from fastapi.testclient import TestClient
 from test_studio_workspace import setup_workspace, wait_build
 
-from mindex import studio
-from mindex import studio_workspace as ws
 from mindex.api import create_app
-from mindex.studio_artifacts import record
-from mindex.studio_logs import ExecutionLog, log_path, read_events
+from mindex.studio import studio
+from mindex.studio import studio_workspace as ws
+from mindex.studio.studio_artifacts import record
+from mindex.studio.studio_logs import ExecutionLog, log_path, read_events
 
 
 def request_body(config, jid, w, p, stage):

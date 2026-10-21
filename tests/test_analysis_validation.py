@@ -6,9 +6,9 @@ import json
 
 import pytest
 
-from mindex import adapters
-from mindex.adapters import ModelError, QwenAnalyzer
-from mindex.pipeline import Pipeline
+from mindex.models import adapters
+from mindex.models.adapters import ModelError, QwenAnalyzer
+from mindex.processing.pipeline import Pipeline
 
 
 def chat_response(result):
@@ -79,7 +79,7 @@ def test_annotation_validation_exhausts_configured_retries(config, monkeypatch, 
     monkeypatch.setattr(adapters, "request", reply)
     monkeypatch.setattr(adapters, "frame_data", lambda *args: [])
     monkeypatch.setattr(adapters.time, "sleep", delays.append)
-    with caplog.at_level("WARNING", logger="mindex.adapters"), pytest.raises(
+    with caplog.at_level("WARNING", logger="mindex.models.adapters"), pytest.raises(
         ModelError, match=rf"连续 {retries + 1} 次无效.*重试已耗尽.*scene: Input should be a valid list",
     ):
         QwenAnalyzer(config).analyze(None, [])

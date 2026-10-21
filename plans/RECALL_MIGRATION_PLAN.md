@@ -10,21 +10,21 @@
 
 已确认范围：**仅新版工作台**（studio_workspace 主路径）；**UI 素材筛选只暴露素材下拉**（服务端传完整 Filters 模型）；人物仅在文字模式下可用（与检索页一致）。
 
-## A. 数据模型（studio.py）
+## A. 数据模型（studio/studio.py）
 
-新增 `ShotRecall(StrictModel)`（紧邻 `Shot`，studio.py:68）：
+新增 `ShotRecall(StrictModel)`（紧邻 `Shot`，studio/studio.py:68）：
 
 ```python
 mode: Literal["text","image","video"] = "text"
 person_ids: list[str] ≤30 / person_mode: auto|onscreen|mentioned / person_relation: all|any
-filters: Filters（from types.py；UI 只填 source_id）
+filters: Filters（from shared/types.py；UI 只填 source_id）
 media_id: str | None  # 查询文件 sha256（内容寻址）
 media_kind: image|video | None
 # 校验：text 不许带 media；image/video 必须带对应类型 media 且不许带人物设置
 ```
 
 - `Shot.recall: ShotRecall | None = None`（向后兼容：旧 content 无此键）
-- `ShotBody`（studio_api.py:40-44）同步加 `recall` 字段（StrictModel extra=forbid，不同步则前端 422）
+- `ShotBody`（studio/studio_api.py:40-44）同步加 `recall` 字段（StrictModel extra=forbid，不同步则前端 422）
 - `patch_plan` 内校验：person_ids 逐个 `Persons(store).entity()` 存在且非 work；image/video 时 `inputs/<media_id>.*` 文件必须存在
 - merge 语义（studio.js）：合并保留上一镜 recall；上一镜为默认文字且无 recall 时继承下一镜设置
 
@@ -33,10 +33,10 @@ media_kind: image|video | None
 - 存储：`data/studio/<job_id>/inputs/<sha256><suffix>`，`.partial` 后 `replace` 原子写（复用 studio.save_bytes 模式）；内容寻址去重；rglob 自动纳入产物列表与 ZIP
 - 端点：`POST /api/studio/jobs/{job_id}/plans/{plan_id}/query-media`（multipart file + kind），`mutation_lock()` 下写入。校验与检索页一致：图片 ≤20MB + `images.image_png` 可解码校验（422）；视频 ≤100MB + `media.probe` ≤30s（422）；同步工作放 `run_in_threadpool`
 - 返回 `{media_id, kind, bytes, name, preview_url}`；preview 复用现有产物路由 `/jobs/{id}/artifacts/inputs/<file>`（支持 Range，零新代码）
-- 公共上传 helper：新建 `src/mindex/uploads.py` 抽取 `api.py:29-41 save_upload`（避免 api↔studio_api 循环导入），api.py 改导入，行为不变
+- 公共上传 helper：新建 `backend/src/shared/uploads.py` 抽取 `api.py:29-41 save_upload`（避免 api↔studio_api 循环导入），api.py 改导入，行为不变
 - 执行前兜底：按 digest 找文件并复验 sha256（复用 studio_artifacts.digest），失败抛 `StudioError("查询文件缺失或已损坏，请重新上传")`
 
-## C. 执行与指纹（studio_workspace.py）
+## C. 执行与指纹（studio/studio_workspace.py）
 
 1. **`settings()` recall 分支**（:499-508）增加 `"person_release"`：`Persons(Store(...)).published(active["id"])[0]["id"] if active else None`——修复既有缺口（text 查询隐式受人物发布影响但签名未覆盖）。代价：部署后既有 recall 版本一次性重建（纯检索开销），docs/studio.md 注明
 2. **`specification()` recall payload**（:559-560）：`payload = {"query": ...}`；新 helper `recall_signature(content.get("recall"))` 规范化后非默认时加 `payload["recall"]`。规范化：person_ids 排序；filters 只留非默认键；media 引用 `{id, kind}`。**全默认判定必须严谨**（text + 无 person_ids + auto + all + filters 全空 → None，payload 与旧版逐字节一致，旧版本保持可复用）；注意 `person_mode != "auto"` 即使无 ids 也非默认
@@ -51,7 +51,7 @@ media_kind: image|video | None
 - `renderCandidatePicker`（:1239-1277）：候选卡片加 person_evidence 展示（actor_name(/role_name) chip + 证据截图 img 懒加载 ≤3 条，点击开 `/persons?evidence=<id>`，参照 app.js:97-133）
 - `cellSummary` 加方式前缀；studio.html 升级 `?v=` 版本串；studio.css 加 `.recall-editor`/`.evidence-chip`；不引入前端框架，复用 `el()/field()/button()`
 
-## E. 需求 B：segment_details.py 人物小节
+## E. 需求 B：admin/segment_details.py 人物小节
 
 新增 `person_section(store, segment)`（纯读 SQL）：
 
@@ -64,14 +64,14 @@ media_kind: image|video | None
 
 | 步骤 | 文件 | 验证 |
 |---|---|---|
-| 1 | studio.py（ShotRecall + Shot.recall） | `pytest tests/test_studio_api.py -q` |
-| 2 | uploads.py（新）+ api.py（改导入） | `pytest tests/test_pipeline.py -q` |
-| 3 | studio_workspace.py（settings/specification/execute/conflicts） | 新测试（先写） |
-| 4 | studio_api.py（ShotBody.recall + query-media + PATCH 校验） | 新测试 |
+| 1 | studio/studio.py（ShotRecall + Shot.recall） | `pytest tests/test_studio_api.py -q` |
+| 2 | shared/uploads.py（新）+ api.py（改导入） | `pytest tests/test_pipeline.py -q` |
+| 3 | studio/studio_workspace.py（settings/specification/execute/conflicts） | 新测试（先写） |
+| 4 | studio/studio_api.py（ShotBody.recall + query-media + PATCH 校验） | 新测试 |
 | 5 | tests/test_studio_recall.py（新）：向后兼容（无 recall = 旧签名复用）、四类模式、指纹失效矩阵（换人/换素材/换图→rebuild，改回→reuse，person_ids 重排不失效）、上传端点（去重/422/413/引用缺失）、仅人物名不调 embedder | `pytest tests/test_studio_recall.py -q` |
 | 6 | studio.js / studio.css / studio.html（D 节） | `node --check` + serve_fixture 浏览器走查 |
-| 7 | segment_details.py + admin.js + tests/test_segment_details.py（三态覆盖/子区间数值/证据计数/无索引 200） | `pytest tests/test_segment_details.py -q` |
-| 8 | docs/studio.md、docs/admin.md、CLAUDE.md | `uv run pytest -q` 全量 + `uv run ruff check src tests` |
+| 7 | admin/segment_details.py + admin.js + tests/test_segment_details.py（三态覆盖/子区间数值/证据计数/无索引 200） | `pytest tests/test_segment_details.py -q` |
+| 8 | docs/studio.md、docs/admin.md、CLAUDE.md | `uv run pytest -q` 全量 + `uv run ruff check backend/src tests` |
 
 测试基建：`tests/test_studio_workspace.py` 的 prepared fixture（FixtureEmbedder 已实现 image/video，颜色向量）+ `tests/test_persons.py` 的 publish_content/catalogue SQL 模式。
 

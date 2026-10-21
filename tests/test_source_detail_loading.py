@@ -3,13 +3,13 @@ from types import SimpleNamespace
 from conftest import FixtureAnalyzer, FixtureEmbedder
 from fastapi.testclient import TestClient
 
+from mindex.admin.curation import Library
+from mindex.admin.source_work import same_json
 from mindex.api import create_app
-from mindex.channel_index import snapshots_for
-from mindex.curation import Library
-from mindex.dialogue import indexed_dialogue, relative_dialogue
-from mindex.pipeline import Pipeline
-from mindex.shot_media import ShotMedia
-from mindex.source_work import same_json
+from mindex.processing.channel_index import snapshots_for
+from mindex.processing.dialogue import indexed_dialogue, relative_dialogue
+from mindex.processing.pipeline import Pipeline
+from mindex.shared.shot_media import ShotMedia
 
 
 def test_summary_skips_processing_status(config, video_file, monkeypatch):

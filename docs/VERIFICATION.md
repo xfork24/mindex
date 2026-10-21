@@ -83,7 +83,7 @@ WeMM 与 ASR 的 GGUF/mmproj SHA256 由用户在部署机计算并固定。Qwen 
 | `uv run pytest -q` | **16 passed**，21.40 秒；有一项上游 Starlette TestClient 的弃用警告 |
 | `uv run ruff check .` | 通过 |
 | `uv run ruff format --check .` | 24 个 Python 文件格式通过 |
-| `node --check src/mindex/static/app.js` | 通过 |
+| `node --check frontend/src/search/app.js` | 通过 |
 | `uv build` | sdist 与 wheel 构建成功；确认 wheel 包含 HTML、CSS、JS 和 favicon |
 
 自动化测试使用真实 FFmpeg、PySceneDetect、SQLite、Chroma 和 FastAPI。模型部分采用确定性测试适配器；测试向量为 8 维，**仅用于工程测试**，实际默认配置始终是 WeMM / 4096 维。

@@ -7,12 +7,12 @@ from conftest import FixtureEmbedder
 from fastapi.testclient import TestClient
 from filelock import FileLock, Timeout
 
+from mindex.admin.dialogue_tasks import DialogueOptions, DialogueTasks
+from mindex.admin.source_tasks import SourceTasks, WorkOptions
 from mindex.api import create_app
-from mindex.dialogue_tasks import DialogueOptions, DialogueTasks
-from mindex.pipeline import Pipeline
-from mindex.processing_lock import ProcessingLock
-from mindex.runtime_settings import RuntimeConfig, apply_runtime_overrides, put_setting
-from mindex.source_tasks import SourceTasks, WorkOptions
+from mindex.processing.pipeline import Pipeline
+from mindex.settings.runtime_settings import RuntimeConfig, apply_runtime_overrides, put_setting
+from mindex.shared.processing_lock import ProcessingLock
 
 
 def test_shared_processing_locks_and_source_protection(config):
@@ -35,15 +35,15 @@ def test_shared_processing_locks_and_source_protection(config):
 
 
 def test_shared_lock_is_visible_to_cli_process(config):
-    from mindex.storage import Store
+    from mindex.shared.storage import Store
 
     Store(config.data_dir)
     command = [sys.executable, "-c", """
 import sys
 from pathlib import Path
 from filelock import Timeout
-from mindex.config import Config
-from mindex.processing_lock import ProcessingLock
+from mindex.shared.config import Config
+from mindex.shared.processing_lock import ProcessingLock
 try:
     with ProcessingLock(Config(data_dir=Path(sys.argv[1]), enforce_gpu_lock=True)):
         sys.exit(2)
@@ -78,7 +78,7 @@ def test_running_analysis_allows_other_work_and_other_source_deletion(config, vi
         assert release.wait(10)
 
     monkeypatch.setattr(Pipeline, "analyze", analyze)
-    monkeypatch.setattr("mindex.dialogue_tasks.execute_dialogue", lambda *a, **kw: {"index_id": None})
+    monkeypatch.setattr("mindex.admin.dialogue_tasks.execute_dialogue", lambda *a, **kw: {"index_id": None})
     task = analysis.start(sid, "analysis", WorkOptions(publish=False))
     try:
         assert entered.wait(2)
@@ -129,8 +129,8 @@ def test_all_four_processing_groups_across_sources_follow_gpu_setting(config, mo
 
     from test_source_work import finished
 
-    from mindex.person_processing import PersonOptions, PersonTasks
-    from mindex.storage import Store
+    from mindex.persons.person_processing import PersonOptions, PersonTasks
+    from mindex.shared.storage import Store
 
     config.enforce_gpu_lock = enforced
     store = Store(config.data_dir)
@@ -155,9 +155,9 @@ def test_all_four_processing_groups_across_sources_follow_gpu_setting(config, mo
     monkeypatch.setattr(Pipeline, 'detect_source', lambda self, sid, progress: wait(sid, 'shots'))
     monkeypatch.setattr(Pipeline, 'split', lambda *args: None)
     monkeypatch.setattr(Pipeline, 'analyze', lambda self, sid, progress: wait(sid, 'analysis'))
-    monkeypatch.setattr('mindex.dialogue_tasks.execute_dialogue',
+    monkeypatch.setattr('mindex.admin.dialogue_tasks.execute_dialogue',
                         lambda cfg, sid, **kw: wait(sid, 'dialogue') or {'index_id':None})
-    monkeypatch.setattr('mindex.person_processing.PersonProcessor',
+    monkeypatch.setattr('mindex.persons.person_processing.PersonProcessor',
                         lambda cfg: SimpleNamespace(run=lambda sid, opts, progress: wait(sid, 'persons') or {}))
     jobs = []
 

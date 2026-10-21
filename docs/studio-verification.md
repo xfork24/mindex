@@ -19,8 +19,8 @@
 |---|---|
 | 全仓库 `uv run pytest -q` | 118 passed、1 skipped |
 | 最后媒体/API/产物相关回归 | 21 passed、1 skipped |
-| `uv run ruff check src tests` | 通过 |
-| `node --check src/mindex/static/studio.js` | 通过 |
+| `uv run ruff check backend/src tests` | 通过 |
+| `node --check frontend/src/studio/studio.js` | 通过 |
 | `git diff --check` | 通过 |
 
 回归覆盖修改文案后的真实音频变化、指定分镜强制重做、部分失败续跑、损坏文件、60 镜及 29.97fps 时间轴、实际冻结帧颜色、换选后画面变化、合成失败保留成片、路径越界、后台锁释放、线程启动失败、配置及旧任务迁移、隐藏邻镜、区间预览、ZIP 完整性及诊断凭据排除。

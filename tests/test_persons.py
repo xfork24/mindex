@@ -12,10 +12,9 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from mindex.adapters import ModelError
 from mindex.api import create_app
-from mindex.config import Config, fingerprint
-from mindex.person_processing import (
+from mindex.models.adapters import ModelError
+from mindex.persons.person_processing import (
     PersonOptions,
     PersonProcessor,
     ShotTracker,
@@ -24,7 +23,7 @@ from mindex.person_processing import (
     face_match,
     reference_subject,
 )
-from mindex.persons import (
+from mindex.persons.persons import (
     CastConfirm,
     Entity,
     Persons,
@@ -33,8 +32,9 @@ from mindex.persons import (
     overlaps_for,
     resolve_names,
 )
-from mindex.storage import Store, dumps
-from mindex.types import TextSearch
+from mindex.shared.config import Config, fingerprint
+from mindex.shared.storage import Store, dumps
+from mindex.shared.types import TextSearch
 
 
 def photo(color="red", size=(100, 120)):
@@ -45,7 +45,7 @@ def photo(color="red", size=(100, 120)):
 
 @pytest.fixture
 def catalogue(config, monkeypatch):
-    monkeypatch.setattr("mindex.shot_media.probe", lambda _: {"duration": 1, "fps": 25, "width": 100, "height": 120, "audio": False})
+    monkeypatch.setattr("mindex.shared.shot_media.probe", lambda _: {"duration": 1, "fps": 25, "width": 100, "height": 120, "audio": False})
     store = Store(config.data_dir)
     path = store.root / "source.mp4"
     path.write_bytes(b"fixture only")
@@ -340,7 +340,7 @@ def test_cast_original_coordinates_eight_entries_manual_pairing_transaction(cata
 
 def test_import_api_failure_draft_and_reference_repair(catalogue, config, monkeypatch):
     p, _work, actor = catalogue
-    monkeypatch.setattr("mindex.person_api.reference_checker", reference_checker_stub(FakeClient(), config))
+    monkeypatch.setattr("mindex.persons.person_api.reference_checker", reference_checker_stub(FakeClient(), config))
     client = TestClient(create_app(config))
     response = client.post("/api/persons/imports", files=[("files", ("cast.png", photo(), "image/png"))])
     assert response.status_code == 201
@@ -349,7 +349,7 @@ def test_import_api_failure_draft_and_reference_repair(catalogue, config, monkey
     def offline(*args):
         raise ModelError("offline")
 
-    monkeypatch.setattr("mindex.person_api.parse_cast", offline)
+    monkeypatch.setattr("mindex.persons.person_api.parse_cast", offline)
     parsed = client.post(f"/api/persons/imports/{draft['id']}/parse").json()
     assert parsed["status"] == "draft" and parsed["warnings"] and parsed["entries"] == []
     assert len(p.entities("actor")) == 1
@@ -408,7 +408,7 @@ def test_import_multi_image_append_list_and_per_image_parse(catalogue, config, m
             }
         raise ModelError("boom")
 
-    monkeypatch.setattr("mindex.person_api.parse_cast", fake_parse)
+    monkeypatch.setattr("mindex.persons.person_api.parse_cast", fake_parse)
     first = client.post(
         f"/api/persons/imports/{created['id']}/parse", json={"image_ids": [appended["images"][0]["id"]]}
     ).json()
@@ -527,7 +527,7 @@ def test_role_reference_is_stored_separately_and_drives_face_matching(catalogue,
 
 
 def test_matched_reference_provenance_and_legacy_cache_recovery(catalogue, config):
-    from mindex.person_processing import EvidenceReferences, matched_reference
+    from mindex.persons.person_processing import EvidenceReferences, matched_reference
 
     p, work, actor = catalogue
     role = p.save(Entity(kind="role", name="匹配角色", work_ids=[work], actor_ids=[actor["id"]]))
@@ -588,7 +588,7 @@ def test_matched_reference_provenance_and_legacy_cache_recovery(catalogue, confi
             dumps(legacy["data"]),
         ),
     )
-    from mindex.persons import ShotReview
+    from mindex.persons.persons import ShotReview
 
     reviewed = p.shot_review(
         ShotReview(
@@ -606,7 +606,7 @@ def test_role_reference_api_upload_reassign_and_remove(catalogue, config, monkey
     other_role = p.save(
         Entity(kind="role", name="少女叶淑柔", work_ids=[work], actor_ids=[actor["id"]])
     )
-    monkeypatch.setattr("mindex.person_api.reference_checker", reference_checker_stub(FakeClient(), config))
+    monkeypatch.setattr("mindex.persons.person_api.reference_checker", reference_checker_stub(FakeClient(), config))
     client = TestClient(create_app(config))
     created = client.post(
         "/api/persons/references",
@@ -658,7 +658,7 @@ def test_role_reference_keeps_the_face_actor_and_competes_with_other_performers(
     p, work, actor = catalogue
     other = p.save(Entity(kind="actor", name="演员乙"))
     role = p.save(Entity(kind="role", name="叶淑柔", work_ids=[work], actor_ids=[actor["id"], other["id"]]))
-    monkeypatch.setattr("mindex.person_api.reference_checker", reference_checker_stub(FakeClient(), config))
+    monkeypatch.setattr("mindex.persons.person_api.reference_checker", reference_checker_stub(FakeClient(), config))
     client = TestClient(create_app(config))
     url = "/api/persons/references"
     ambiguous = client.post(url, files={"file": ("face.png", photo())}, data={"role_id": role["id"]})
@@ -757,8 +757,8 @@ def test_frame_capture_targets_a_role_with_a_drawn_box(catalogue, config, monkey
     """从原片选取参考：截图始终配给角色，可带手动画框（框选错误身份）。"""
     p, work, actor = catalogue
     role = p.save(Entity(kind="role", name="叶淑柔", work_ids=[work], actor_ids=[actor["id"]]))
-    monkeypatch.setattr("mindex.shot_media.ShotMedia.frame_bytes", lambda *args: photo("orange", (320, 240)))
-    monkeypatch.setattr("mindex.person_api.reference_checker", reference_checker_stub(FakeClient(), config))
+    monkeypatch.setattr("mindex.shared.shot_media.ShotMedia.frame_bytes", lambda *args: photo("orange", (320, 240)))
+    monkeypatch.setattr("mindex.persons.person_api.reference_checker", reference_checker_stub(FakeClient(), config))
     client = TestClient(create_app(config))
     created = client.post(
         "/api/persons/references/from-source",
@@ -788,7 +788,7 @@ def test_frame_capture_targets_a_role_with_a_drawn_box(catalogue, config, monkey
     )
     foreign = p.save(Entity(kind="work", name="其他作品"))
     foreign_role = p.save(Entity(kind="role", name="外片角色", work_ids=[foreign["id"]], actor_ids=[actor["id"]]))
-    monkeypatch.setattr("mindex.shot_media.ShotMedia.frame_bytes", lambda *args: pytest.fail("无效配对不应调用 ffmpeg"))
+    monkeypatch.setattr("mindex.shared.shot_media.ShotMedia.frame_bytes", lambda *args: pytest.fail("无效配对不应调用 ffmpeg"))
     assert client.post(
         "/api/persons/references/from-source",
         json={"source_id": "source", "timestamp": 0, "role_id": foreign_role["id"]},
@@ -856,7 +856,7 @@ def test_reference_upload_quality_gate_rejects_and_caches(catalogue, config, mon
     """添加参考图即质检：不合格拒绝入库且不写 person_references，检测（含被拒图）缓存复用。"""
     p, _work, actor = catalogue
     stub = ReferenceClient(observations=[obs(), obs(box=[10, 0, 110, 120])])
-    monkeypatch.setattr("mindex.person_api.reference_checker", reference_checker_stub(stub, config))
+    monkeypatch.setattr("mindex.persons.person_api.reference_checker", reference_checker_stub(stub, config))
     client = TestClient(create_app(config))
     group = {"file": ("group.png", photo(), "image/png")}
     rejected = client.post("/api/persons/references", data={"actor_id": actor["id"]}, files=group)
@@ -902,7 +902,7 @@ def test_reference_upload_service_unavailable_rejects_with_503(catalogue, config
     """人物服务不可用时拒绝添加参考图（强约束），不入库。"""
     p, _work, actor = catalogue
     monkeypatch.setattr(
-        "mindex.person_api.reference_checker", reference_checker_stub(ReferenceClient(ready=False), config)
+        "mindex.persons.person_api.reference_checker", reference_checker_stub(ReferenceClient(ready=False), config)
     )
     client = TestClient(create_app(config))
     response = client.post(
@@ -919,9 +919,9 @@ def test_from_source_capture_validated_before_insert(catalogue, config, monkeypa
     """原片截图入库前同步质检：不合格 422，服务不可用 503，均不入库。"""
     p, work, actor = catalogue
     role = p.save(Entity(kind="role", name="叶淑柔", work_ids=[work], actor_ids=[actor["id"]]))
-    monkeypatch.setattr("mindex.shot_media.ShotMedia.frame_bytes", lambda *args: photo("orange", (320, 240)))
+    monkeypatch.setattr("mindex.shared.shot_media.ShotMedia.frame_bytes", lambda *args: photo("orange", (320, 240)))
     stub = ReferenceClient(observations=[obs(), obs(box=[10, 0, 110, 120])])
-    monkeypatch.setattr("mindex.person_api.reference_checker", reference_checker_stub(stub, config))
+    monkeypatch.setattr("mindex.persons.person_api.reference_checker", reference_checker_stub(stub, config))
     client = TestClient(create_app(config))
     body = {
         "source_id": "source",
@@ -963,7 +963,7 @@ def test_import_confirm_validates_crops_and_stays_transactional(catalogue, confi
         },
     ]
     stub = reference_checker_stub(SequenceClient([[obs()], [obs(), obs(box=[10, 0, 110, 120])]]), config)
-    monkeypatch.setattr("mindex.person_api.reference_checker", stub)
+    monkeypatch.setattr("mindex.persons.person_api.reference_checker", stub)
     client = TestClient(create_app(config))
     rejected = client.post(
         f"/api/persons/imports/{draft['id']}/confirm", json={"work_id": work, "entries": entries}
@@ -975,7 +975,7 @@ def test_import_confirm_validates_crops_and_stays_transactional(catalogue, confi
     assert p.references() == [] and len(p.entities("actor")) == 1 and p.entities("role") == []
     # 服务不可用同样整批拒绝（503），草稿保持未确认。
     monkeypatch.setattr(
-        "mindex.person_api.reference_checker", reference_checker_stub(ReferenceClient(ready=False), config)
+        "mindex.persons.person_api.reference_checker", reference_checker_stub(ReferenceClient(ready=False), config)
     )
     offline = client.post(
         f"/api/persons/imports/{draft['id']}/confirm", json={"work_id": work, "entries": entries}
@@ -1034,7 +1034,7 @@ def test_task_report_counts_shots_not_frame_rows(catalogue, config):
 
 
 def test_task_report_shot_counts_include_preserved_human_review(catalogue, config):
-    from mindex.persons import ShotReview
+    from mindex.persons.persons import ShotReview
 
     p, _work, actor = catalogue
     p.add_reference(actor["id"], photo())
@@ -1407,7 +1407,7 @@ def test_checkpoint_append_rename_no_video_reinference_space_isolation(catalogue
 def test_service_contract_gpu_lock_auth_and_upload(config, monkeypatch, tmp_path):
     from filelock import FileLock, Timeout
 
-    from mindex.person_server import create_person_app
+    from mindex.persons.person_server import create_person_app
 
     monkeypatch.setenv("MINDEX_GPU_LOCK", str(tmp_path / "gpu.lock"))
     monkeypatch.setenv("MINDEX_MODEL_API_KEY", "test-secret")
@@ -1443,8 +1443,8 @@ def test_service_contract_gpu_lock_auth_and_upload(config, monkeypatch, tmp_path
 
 
 def publish_content(p, config, identifier="content1", dialogues=None):
-    from mindex.indexing import VectorIndex
-    from mindex.types import Annotation
+    from mindex.processing.indexing import VectorIndex
+    from mindex.shared.types import Annotation
 
     spec = {
         "format": 2,
@@ -1475,7 +1475,7 @@ def publish_content(p, config, identifier="content1", dialogues=None):
 
 
 def test_mentioned_role_variants_union_and_latin_name_boundaries(catalogue, config):
-    from mindex.search import SearchEngine
+    from mindex.search.search import SearchEngine
 
     p, work, actor = catalogue
     latin = p.save(Entity(kind="actor", name="Ann"))
@@ -1504,8 +1504,8 @@ def test_mentioned_role_variants_union_and_latin_name_boundaries(catalogue, conf
 
 
 def test_auto_document_query_reaches_embedding_with_subject_evidence(catalogue, config, monkeypatch):
-    from mindex.indexing import VectorIndex
-    from mindex.search import SearchEngine
+    from mindex.processing.indexing import VectorIndex
+    from mindex.search.search import SearchEngine
 
     p, work, actor = catalogue
     subject = p.save(Entity(kind="role", name="晓伟", work_ids=[work], actor_ids=[actor["id"]]))
@@ -1546,9 +1546,9 @@ def test_auto_document_query_reaches_embedding_with_subject_evidence(catalogue, 
 
 
 def test_strict_no_dialogue_leak_pretruncate_filter_offline_name_and_rollback(catalogue, config, monkeypatch):
-    from mindex.curation import CurationPatch, Library
-    from mindex.indexing import VectorIndex
-    from mindex.search import SearchEngine
+    from mindex.admin.curation import CurationPatch, Library
+    from mindex.processing.indexing import VectorIndex
+    from mindex.search.search import SearchEngine
 
     p, _work, actor = catalogue
     version = publish_content(p, config)
@@ -1650,7 +1650,7 @@ def test_release_delete_rejects_active_and_cleans_snapshot(catalogue, config):
 
 
 def test_purge_keeps_global_references_and_removes_all_source_evidence(catalogue, config):
-    from mindex.purge import purge_source
+    from mindex.maintenance.purge import purge_source
 
     p, _work, actor = catalogue
     p.add_reference(actor["id"], photo())
@@ -1666,8 +1666,8 @@ def test_purge_keeps_global_references_and_removes_all_source_evidence(catalogue
 
 
 def test_local_sampling_retains_real_pts_short_shots_and_batched_contract(config, video_file, monkeypatch):
-    from mindex.person_frames import sample_frames
-    from mindex.person_processing import PersonClient
+    from mindex.persons.person_frames import sample_frames
+    from mindex.persons.person_processing import PersonClient
 
     frames = list(sample_frames(video_file, 0, 1, 5))
     assert frames and len(frames) <= 5 and frames[0][0] == 0
@@ -1694,7 +1694,7 @@ def test_local_sampling_retains_real_pts_short_shots_and_batched_contract(config
 
 
 def test_partial_coverage_is_reported_and_review_roles_are_work_scoped(catalogue):
-    from mindex.persons import coverage_missing
+    from mindex.persons.persons import coverage_missing
 
     p, work, actor = catalogue
     snapshots = [{"source_id": "source", "start": 0, "end": 100}]
@@ -1725,13 +1725,13 @@ def test_tasks_return_ids_retry_and_restart_checkpoints(catalogue, config, monke
     config.enforce_gpu_lock = True
     from filelock import FileLock
 
-    from mindex.person_processing import PersonTasks
-    from mindex.runtime_settings import RuntimeConfig
+    from mindex.persons.person_processing import PersonTasks
+    from mindex.settings.runtime_settings import RuntimeConfig
 
     p, _work, actor = catalogue
     p.add_reference(actor["id"], photo())
     processor = PersonProcessor(config, FakeClient(), Tracker)
-    monkeypatch.setattr("mindex.person_processing.PersonProcessor", lambda cfg: processor)
+    monkeypatch.setattr("mindex.persons.person_processing.PersonProcessor", lambda cfg: processor)
     manager = PersonTasks(RuntimeConfig(config, p.store), p.store)
     task = manager.start("source", PersonOptions())
     assert task["id"]
@@ -1755,7 +1755,7 @@ def test_tasks_return_ids_retry_and_restart_checkpoints(catalogue, config, monke
 
 
 def test_manual_anchor_only_extends_reliable_track_and_rejection_stops_it(catalogue, config):
-    from mindex.config import fingerprint
+    from mindex.shared.config import fingerprint
 
     _p, work, actor = catalogue
     shot = {"id": "s", "source_id": "source", "cache_id": "cache", "end": 1, "space": {}}
@@ -1785,7 +1785,7 @@ def test_manual_anchor_only_extends_reliable_track_and_rejection_stops_it(catalo
 
 
 def test_person_selection_without_text_and_evidence_paging(catalogue, config):
-    from mindex.search import SearchEngine
+    from mindex.search.search import SearchEngine
 
     p, _work, actor = catalogue
     p.add_reference(actor["id"], photo())
@@ -1806,7 +1806,7 @@ def test_person_selection_without_text_and_evidence_paging(catalogue, config):
 
 
 def test_shot_review_marks_persons_and_rejects_unmarked_rows(catalogue):
-    from mindex.persons import ShotReview
+    from mindex.persons.persons import ShotReview
 
     p, work, a = catalogue
     other = p.save(Entity(kind="actor", name="演员乙"))
@@ -1971,13 +1971,13 @@ def test_review_shot_status_is_classified_per_shot_not_per_frame(catalogue):
 
 
 def test_task_delete_only_failed_or_interrupted(catalogue, config, monkeypatch):
-    from mindex.person_processing import PersonTasks
-    from mindex.runtime_settings import RuntimeConfig
+    from mindex.persons.person_processing import PersonTasks
+    from mindex.settings.runtime_settings import RuntimeConfig
 
     p, _work, actor = catalogue
     p.add_reference(actor["id"], photo())
     processor = PersonProcessor(config, FakeClient(), Tracker)
-    monkeypatch.setattr("mindex.person_processing.PersonProcessor", lambda cfg: processor)
+    monkeypatch.setattr("mindex.persons.person_processing.PersonProcessor", lambda cfg: processor)
     manager = PersonTasks(RuntimeConfig(config, p.store), p.store)
     task = manager.start("source", PersonOptions())
     thread = manager.threads.get(task["id"])
@@ -2037,7 +2037,7 @@ def test_task_config_roundtrip_keeps_shot_checkpoint_key(catalogue, config):
 
 
 def test_shot_review_survives_feature_space_changes(catalogue, config):
-    from mindex.persons import ShotReview
+    from mindex.persons.persons import ShotReview
 
     p, _work, actor = catalogue
     p.add_reference(actor["id"], photo())
@@ -2108,7 +2108,7 @@ def test_cli_shot_review_and_single_shot_lookup(catalogue, config, tmp_path):
 
 
 def test_cast_parser_keeps_valid_candidates_and_requires_user_crop_confirmation(config, monkeypatch):
-    from mindex.person_api import parse_cast
+    from mindex.persons.person_api import parse_cast
 
     entries = [
         {
@@ -2126,7 +2126,7 @@ def test_cast_parser_keeps_valid_candidates_and_requires_user_crop_confirmation(
         assert "stage_name" not in kwargs["json"]["messages"][0]["content"][0]["text"]
         return {"choices": [{"message": {"content": dumps({"entries": entries, "warnings": []})}}]}
 
-    monkeypatch.setattr("mindex.person_api.request", complete)
+    monkeypatch.setattr("mindex.persons.person_api.request", complete)
     result = parse_cast(config, {"id": "landscape", "width": 850, "height": 260, "raw": b""})
     assert len(result["entries"]) == 8
     assert result["entries"][0]["role_name"] == "老年叶淑柔"
@@ -2204,7 +2204,7 @@ def test_review_filter_distinguishes_roles_and_only_infers_unique_role(catalogue
 
 
 def test_review_manual_identity_is_filterable_and_supersedes_old_review(catalogue):
-    from mindex.persons import ShotReview
+    from mindex.persons.persons import ShotReview
 
     p, work, actor = catalogue
     other = p.save(Entity(kind="actor", name="人工纠正演员"))
@@ -2231,7 +2231,7 @@ def test_review_manual_identity_is_filterable_and_supersedes_old_review(catalogu
 
 
 def test_review_no_candidate_includes_processed_empty_shots_only(catalogue):
-    from mindex.persons import ShotReview
+    from mindex.persons.persons import ShotReview
 
     p, _work, _actor = catalogue
     for cache in ["empty-cache", "same-shot-other-run"]:
@@ -2252,7 +2252,7 @@ def test_review_no_candidate_includes_processed_empty_shots_only(catalogue):
 
 
 def test_rejected_review_ignores_identity_filters_and_keeps_pagination(catalogue, config):
-    from mindex.persons import ShotReview
+    from mindex.persons.persons import ShotReview
 
     p, work, actor = catalogue
     role = p.save(Entity(kind="role", name="已排除角色", work_ids=[work], actor_ids=[actor["id"]]))
@@ -2275,7 +2275,7 @@ def test_rejected_review_ignores_identity_filters_and_keeps_pagination(catalogue
 
 @pytest.mark.parametrize("kind", ["actor", "role"])
 def test_manual_rejected_shots_do_not_block_identity_deletion(catalogue, config, kind):
-    from mindex.persons import ShotReview
+    from mindex.persons.persons import ShotReview
 
     p, work, actor = catalogue
     role = p.save(Entity(kind="role", name="待删角色", work_ids=[work], actor_ids=[actor["id"]]))
@@ -2298,7 +2298,7 @@ def test_manual_rejected_shots_do_not_block_identity_deletion(catalogue, config,
 
 
 def test_person_process_end_zero_runs_from_start_to_movie_end(catalogue, config, monkeypatch):
-    from mindex.person_processing import PersonTasks
+    from mindex.persons.person_processing import PersonTasks
 
     p, _work, actor = catalogue
     p.add_reference(actor["id"], photo())
@@ -2357,7 +2357,7 @@ def test_reference_face_error_records_actor_role_names_at_processing_time(catalo
 @pytest.mark.parametrize("status", ["accepted", "candidate"])
 @pytest.mark.parametrize("kind", ["actor", "role"])
 def test_identity_linked_shots_include_non_top_evidence_and_block_deletion(catalogue, config, status, kind):
-    from mindex.persons import ShotReview
+    from mindex.persons.persons import ShotReview
 
     p, work, actor = catalogue
     other = p.save(Entity(kind="actor", name="最高分演员"))
@@ -2515,7 +2515,7 @@ def test_role_delete_includes_unique_actor_role_inference(catalogue, config, sta
 
 
 def test_confirmed_person_scores_preserve_manual_original_and_support_legacy(catalogue, config):
-    from mindex.persons import ShotReview
+    from mindex.persons.persons import ShotReview
 
     p, work, actor = catalogue
     other = p.save(Entity(kind='actor', name='无原始候选演员'))
@@ -2558,7 +2558,7 @@ def test_confirmed_person_scores_preserve_manual_original_and_support_legacy(cat
 
 
 def test_manual_score_uses_actor_only_fallback_but_not_other_roles(catalogue):
-    from mindex.persons import ShotReview
+    from mindex.persons.persons import ShotReview
 
     p, work, actor = catalogue
     roles = [p.save(Entity(kind='role',name=f'角色{n}',work_ids=[work],actor_ids=[actor['id']])) for n in range(3)]
@@ -2605,7 +2605,7 @@ def test_frame_encoding_and_cache_config(catalogue, config):
 
 
 def test_frame_retention_real_scores_and_pending(catalogue):
-    from mindex.persons import retained_frame_paths
+    from mindex.persons.persons import retained_frame_paths
     p, _, actor = catalogue
     for identifier, score, kind, original in (("face", .6, "face", None), ("manual", 1, "manual", .5),
                                                ("track", 1, "track", None)):
@@ -2621,7 +2621,7 @@ def test_frame_retention_real_scores_and_pending(catalogue):
 
 
 def test_migrate_frames_preview_apply_resume_and_vectors(catalogue, config):
-    from mindex.persons import migrate_frames
+    from mindex.persons.persons import migrate_frames
     p, _, actor = catalogue
     first = p.image(photo(size=(1280, 720)), "frames/source")["path"]
     discarded = p.image(photo("blue"), "frames/source")["path"]
@@ -2654,7 +2654,7 @@ def test_migrate_frames_preview_apply_resume_and_vectors(catalogue, config):
 
 
 def test_migrate_missing_frame_never_deletes_source(catalogue, config):
-    from mindex.persons import migrate_frames
+    from mindex.persons.persons import migrate_frames
     p, _, actor = catalogue
     other = p.image(photo(), "frames/source")["path"]
     frame_evidence(p, actor, "missing", "persons/frames/source/missing.png")
@@ -2682,7 +2682,7 @@ def test_frame_api_current_snapshot_thumbnail_and_mime(catalogue, config):
 def test_frame_clean_rechecks_references_after_scan(catalogue, config):
     from datetime import UTC, datetime
 
-    from mindex.clean import Scan, person_frames
+    from mindex.maintenance.clean import Scan, person_frames
     p, _, actor = catalogue
     retained = p.image(photo(), "frames/source")["path"]
     new_reference = p.image(photo("blue"), "frames/source")["path"]
@@ -2696,15 +2696,15 @@ def test_frame_clean_rechecks_references_after_scan(catalogue, config):
 
 
 def test_migrate_frames_respects_pipeline_lock(catalogue, config):
-    from mindex.persons import migrate_frames
-    from mindex.processing_lock import SharedFileLock
+    from mindex.persons.persons import migrate_frames
+    from mindex.shared.processing_lock import SharedFileLock
     p, _, _ = catalogue
     with SharedFileLock(p.store.root / "pipeline.lock"), pytest.raises(ValueError, match="离线处理任务"):
         migrate_frames(config, apply=True)
 
 
 def test_frame_review_prefers_existing_actor_frame(catalogue):
-    from mindex.persons import existing_frame
+    from mindex.persons.persons import existing_frame
     p, _, actor = catalogue
     image = p.image(photo(), "frames/source")["path"]
     frame_evidence(p, actor, "missing-best", "missing.png", score=.9)
@@ -2727,7 +2727,7 @@ def test_frame_api_uses_snapshot_when_current_image_missing(catalogue, config):
 
 
 def test_frame_retention_identity_union_and_empty_image(catalogue):
-    from mindex.persons import retained_frame_paths
+    from mindex.persons.persons import retained_frame_paths
     p, _, actor = catalogue
     second = p.save(Entity(kind="actor", name="演员乙"))
     frame_evidence(p, actor, "first", "shared.png")
@@ -2739,7 +2739,7 @@ def test_frame_retention_identity_union_and_empty_image(catalogue):
 
 
 def test_scoped_frame_migration_preserves_cross_source_reference(catalogue, config):
-    from mindex.persons import migrate_frames
+    from mindex.persons.persons import migrate_frames
     p, _, actor = catalogue
     path = p.image(photo(), "frames/source")["path"]
     frame_evidence(p, actor, "external-owner", path)
@@ -2769,7 +2769,7 @@ def test_frame_cache_reuse_after_missing_images_needs_no_model_extraction(catalo
 
 
 def test_frame_migration_lock_blocks_review(catalogue, config):
-    from mindex.processing_lock import SharedFileLock
+    from mindex.shared.processing_lock import SharedFileLock
     p, _, actor = catalogue
     client = TestClient(create_app(config))
     with SharedFileLock(p.store.root / "pipeline.lock", exclusive=True):
@@ -2795,7 +2795,7 @@ def test_repeat_completed_person_task_reuses_extraction_and_matching(catalogue, 
 
     monkeypatch.setattr(client, 'video', unexpected)
     monkeypatch.setattr(client, 'image', unexpected)
-    monkeypatch.setattr('mindex.person_processing.attribute_frames', unexpected)
+    monkeypatch.setattr('mindex.persons.person_processing.attribute_frames', unexpected)
     result = processor.run('source', PersonOptions())
     assert result['reused_shots'] == 3 and result['extracted_shots'] == 0
     assert (client.videos, client.images) == before
@@ -2805,7 +2805,7 @@ def test_repeat_completed_person_task_reuses_extraction_and_matching(catalogue, 
 def test_source_display_name_follows_curation_without_changing_work_identity(catalogue, config):
     p, work, actor = catalogue
     client = TestClient(create_app(config))
-    from mindex.curation import CurationPatch, Library
+    from mindex.admin.curation import CurationPatch, Library
 
     library = Library(p.store)
     for name in ["新的素材名", "再次改名", None]:
@@ -2828,7 +2828,7 @@ def test_source_display_name_follows_curation_without_changing_work_identity(cat
 
 def test_linked_shots_use_current_source_display_name(catalogue):
     p, work, actor = catalogue
-    from mindex.curation import CurationPatch, Library
+    from mindex.admin.curation import CurationPatch, Library
 
     p.store.execute(
         "INSERT INTO person_evidence(id,source_id,shot_id,actor_id,start,end,status,data) VALUES(?,?,?,?,?,?,?,?)",
@@ -2869,7 +2869,7 @@ def test_reassign_work_preserves_referenced_or_custom_work(catalogue, protected)
 
 
 def test_purge_removes_unused_default_work(catalogue):
-    from mindex.persons import purge_person_source
+    from mindex.persons.persons import purge_person_source
 
     p, work, actor = catalogue
     with p.store.connect() as db:

@@ -10,14 +10,14 @@ from conftest import FixtureAnalyzer, FixtureEmbedder
 from fastapi import UploadFile
 from fastapi.testclient import TestClient
 
+from mindex.admin.dialogue_tasks import DialogueOptions, DialogueTasks
+from mindex.admin.source_tasks import PublishOptions, SourceTasks, WorkOptions
 from mindex.api import create_app
-from mindex.dialogue import DialogueProcessor, current_dialogue
-from mindex.dialogue_tasks import DialogueOptions, DialogueTasks
-from mindex.indexing import IndexBuilder, check_index
-from mindex.pipeline import Pipeline
-from mindex.runtime_settings import RuntimeConfig
-from mindex.source_tasks import PublishOptions, SourceTasks, WorkOptions
-from mindex.storage import Store
+from mindex.processing.dialogue import DialogueProcessor, current_dialogue
+from mindex.processing.indexing import IndexBuilder, check_index
+from mindex.processing.pipeline import Pipeline
+from mindex.settings.runtime_settings import RuntimeConfig
+from mindex.shared.storage import Store
 
 
 def finished(manager, task):
@@ -78,7 +78,7 @@ def test_analysis_summary_counts_planned_scenes_before_media_and_annotations_exi
 
 def test_upload_register_duplicate_invalid_limit_and_interruption(config, video_file, monkeypatch):
     client = TestClient(create_app(config))
-    monkeypatch.setattr("mindex.pipeline.make_detector", lambda *_: pytest.fail("登记不启动分镜检测"))
+    monkeypatch.setattr("mindex.processing.pipeline.make_detector", lambda *_: pytest.fail("登记不启动分镜检测"))
     raw = video_file.read_bytes()
     response = client.post("/api/admin/sources/upload", files={"file": ("../中文原片.mp4", raw)})
     assert response.status_code == 201, response.text
@@ -114,7 +114,7 @@ def test_upload_register_duplicate_invalid_limit_and_interruption(config, video_
         raise RuntimeError("client disconnected")
 
     monkeypatch.setattr(UploadFile, "read", interrupted)
-    from mindex.admin import admin_router
+    from mindex.admin.admin import admin_router
 
     store = Store(config.data_dir)
     router = next(
@@ -149,14 +149,14 @@ def test_pipeline_tasks_frozen_layout_prerequisites_resume_and_publish_only(conf
     assert finished(manager, manager.start(sid, "shots", WorkOptions(publish=False)))["status"] == "complete"
     assert clip.is_file() and [s["id"] for s in pipeline.store.segments(sid)] == ids
     fail = [True]
-    real_publish = __import__("mindex.source_tasks", fromlist=["publish_work"]).publish_work
+    real_publish = __import__("mindex.admin.source_tasks", fromlist=["publish_work"]).publish_work
 
     def publish(*args, **kwargs):
         if fail[0]:
             raise RuntimeError("embedding unavailable")
         return real_publish(*args, **kwargs)
 
-    monkeypatch.setattr("mindex.source_tasks.publish_work", publish)
+    monkeypatch.setattr("mindex.admin.source_tasks.publish_work", publish)
     task = finished(manager, manager.start(sid, "shots", WorkOptions(publish=True)))
     assert task["status"] == "complete" and task["publication"]["status"] == "queued"
     assert task["result"]["processing_status"] == "complete"
@@ -181,8 +181,8 @@ def test_pipeline_tasks_frozen_layout_prerequisites_resume_and_publish_only(conf
 def test_embedding_progress_persisted_in_api_and_resumed_checkpoints(config, video_file, tmp_path, work):
     from queue import Queue
 
-    from mindex.adapters import ModelError
-    from mindex.media import cut
+    from mindex.models.adapters import ModelError
+    from mindex.shared.media import cut
 
     pipeline = Pipeline(config)
     other = tmp_path / "other.mp4"
@@ -320,7 +320,7 @@ def test_analysis_task_recovers_invalid_response_without_losing_checkpoints(conf
     import json
     from types import SimpleNamespace
 
-    from mindex import adapters
+    from mindex.models import adapters
 
     config.analyzer.model = "MiniMax-test"
     config.analyzer.llama_template = False
@@ -362,7 +362,7 @@ def test_scene_grouping_failure_is_reported_after_segments_complete_and_retry_sk
     import json
     from types import SimpleNamespace
 
-    from mindex import adapters
+    from mindex.models import adapters
 
     config.analyzer.response_retries = 1
     config.analyzer.model = "GLM-test"
@@ -410,7 +410,7 @@ def test_scene_grouping_failure_is_reported_after_segments_complete_and_retry_sk
 def test_legacy_analysis_snapshot_uses_new_defaults_and_preserves_frozen_cap(config, frozen_cap, expected_cap):
     import json
 
-    from mindex.source_tasks import freeze_config, restore_config
+    from mindex.admin.source_tasks import freeze_config, restore_config
 
     store = Store(config.data_dir)
     runtime = RuntimeConfig(config, store)
@@ -426,7 +426,7 @@ def test_legacy_analysis_snapshot_uses_new_defaults_and_preserves_frozen_cap(con
 
 
 def test_scene_grouping_retry_reuses_successful_batch_and_limits_dense_input(config, video_file):
-    from mindex.types import Annotation
+    from mindex.shared.types import Annotation
 
     pipeline = Pipeline(config)
     sid = pipeline.prepare(video_file)
@@ -473,12 +473,12 @@ def test_full_source_flow_incremental_publish_retrieval_and_details(
 ):
     from test_persons import FakeClient, Tracker, photo
 
-    from mindex.media import command
-    from mindex.person_processing import PersonOptions, PersonProcessor, PersonTasks
-    from mindex.persons import Entity, Persons
+    from mindex.persons.person_processing import PersonOptions, PersonProcessor, PersonTasks
+    from mindex.persons.persons import Entity, Persons
+    from mindex.shared.media import command
 
     embedder = FixtureEmbedder(config)
-    monkeypatch.setattr("mindex.pipeline.make_analyzer", lambda _: FixtureAnalyzer(embedder))
+    monkeypatch.setattr("mindex.processing.pipeline.make_analyzer", lambda _: FixtureAnalyzer(embedder))
     client = TestClient(create_app(config, embedder))
     pipeline = Pipeline(config)
     runtime = RuntimeConfig(config, pipeline.store)
@@ -507,7 +507,7 @@ def test_full_source_flow_incremental_publish_retrieval_and_details(
     catalogue.add_reference(actor["id"], photo())
     assert client.get(f"/api/admin/sources/{sid}/person-setup?work_id={work['id']}").json()["ready"]
     monkeypatch.setattr(
-        "mindex.person_processing.PersonProcessor", lambda cfg: PersonProcessor(cfg, FakeClient(), Tracker)
+        "mindex.persons.person_processing.PersonProcessor", lambda cfg: PersonProcessor(cfg, FakeClient(), Tracker)
     )
     pm = PersonTasks(runtime, pipeline.store)
     assert (
@@ -547,7 +547,7 @@ def test_dialogue_manual_methods_and_prior_success_survives_failure(config, vide
     sid = pipeline.prepare(video_file)
     processor = DialogueProcessor(config)
     track = {"index": 1, "text": True, "codec": "subrip", "language": "zho", "forced": False, "default": True}
-    monkeypatch.setattr("mindex.subtitle_archive.load_archive", lambda *_: {
+    monkeypatch.setattr("mindex.processing.subtitle_archive.load_archive", lambda *_: {
         "tracks": [track], "utterances": {"1": []}, "files": {}})
     result = processor.process(sid, method="subtitle", subtitle_stream=1)["sources"][0]
     assert result["status"] == "empty" and result["source"] == "subtitle" and not result["fallback_reason"]
@@ -555,7 +555,7 @@ def test_dialogue_manual_methods_and_prior_success_survives_failure(config, vide
         processor.process(sid, method="subtitle")
     with pytest.raises(ValueError, match="不存在"):
         processor.process(sid, method="subtitle", subtitle_stream=9)
-    monkeypatch.setattr("mindex.subtitle_archive.load_archive", lambda *_: pytest.fail("手动 ASR 跳过字幕"))
+    monkeypatch.setattr("mindex.processing.subtitle_archive.load_archive", lambda *_: pytest.fail("手动 ASR 跳过字幕"))
     result = processor.process(sid, method="asr")["sources"][0]
     assert result["status"] == "no_audio" and result["source"] == "asr" and result["fallback_reason"] is None
     prior = {
@@ -579,15 +579,15 @@ def test_dialogue_publication_failure_retry_without_processing(config, video_fil
                          'utterances':[{'start':0,'end':1,'text':'已处理的对白'}]})),
     )
     manager = DialogueTasks(RuntimeConfig(config, pipeline.store), pipeline.store, FixtureEmbedder(config))
-    monkeypatch.setattr('mindex.dialogue_tasks.execute_dialogue', lambda *a, **kw: {'index_id':None})
-    monkeypatch.setattr('mindex.source_tasks.publish_work', lambda *a, **kw: (_ for _ in ()).throw(RuntimeError('offline')))
+    monkeypatch.setattr('mindex.admin.dialogue_tasks.execute_dialogue', lambda *a, **kw: {'index_id':None})
+    monkeypatch.setattr('mindex.admin.source_tasks.publish_work', lambda *a, **kw: (_ for _ in ()).throw(RuntimeError('offline')))
     task = finished(manager, manager.start(sid, DialogueOptions(publish=True)))
     assert task['status'] == 'complete' and task['publication']['status'] == 'queued'
     publications = SourceTasks(manager.runtime, pipeline.store, FixtureEmbedder(config))
     child = finished(publications, publications.get(task['publication']['task_ids'][0]))
     assert child['status'] == 'failed'
-    monkeypatch.setattr('mindex.dialogue_tasks.execute_dialogue', lambda *a, **kw: pytest.fail('不重复对白处理'))
-    monkeypatch.setattr('mindex.source_tasks.publish_work', lambda *a, **kw: {'index_id':'retry-only-publish'})
+    monkeypatch.setattr('mindex.admin.dialogue_tasks.execute_dialogue', lambda *a, **kw: pytest.fail('不重复对白处理'))
+    monkeypatch.setattr('mindex.admin.source_tasks.publish_work', lambda *a, **kw: {'index_id':'retry-only-publish'})
     result = finished(publications, publications.retry(child['id']))
     assert result['status'] == 'complete' and result['result']['index_id'] == 'retry-only-publish'
     assert manager.get(task['id'])['status'] == 'complete'
@@ -596,9 +596,9 @@ def test_dialogue_publication_failure_retry_without_processing(config, video_fil
 def test_person_first_publish_and_publication_failure_retry(config, video_file, monkeypatch):
     from test_persons import FakeClient, Tracker, photo
 
-    from mindex.person_processing import PersonOptions, PersonProcessor, PersonTasks
-    from mindex.persons import Entity, Persons
-    from mindex.source_tasks import publish_work
+    from mindex.admin.source_tasks import publish_work
+    from mindex.persons.person_processing import PersonOptions, PersonProcessor, PersonTasks
+    from mindex.persons.persons import Entity, Persons
 
     pipeline = Pipeline(config)
     sid = pipeline.prepare(video_file)
@@ -609,7 +609,7 @@ def test_person_first_publish_and_publication_failure_retry(config, video_file, 
     catalogue.save(Entity(kind="role", name="工程角色", work_ids=[work_id], actor_ids=[actor["id"]]))
     catalogue.add_reference(actor["id"], photo())
     monkeypatch.setattr(
-        "mindex.person_processing.PersonProcessor", lambda cfg: PersonProcessor(cfg, FakeClient(), Tracker)
+        "mindex.persons.person_processing.PersonProcessor", lambda cfg: PersonProcessor(cfg, FakeClient(), Tracker)
     )
     manager = PersonTasks(RuntimeConfig(config, pipeline.store), pipeline.store)
     real_publish = publish_work
@@ -620,14 +620,14 @@ def test_person_first_publish_and_publication_failure_retry(config, video_file, 
             raise RuntimeError("publication unavailable")
         return real_publish(config, source_id, work, embedder, **kwargs)
 
-    monkeypatch.setattr("mindex.source_tasks.publish_work", publish)
+    monkeypatch.setattr("mindex.admin.source_tasks.publish_work", publish)
     task = finished(manager, manager.start(sid, PersonOptions(work_id=work_id, publish=True)))
     assert task['status'] == 'complete' and task['publication']['status'] == 'queued'
     publications = SourceTasks(manager.runtime, pipeline.store, embedder)
     child = finished(publications, publications.get(task['publication']['task_ids'][0]))
     assert child['status'] == 'failed'
     assert pipeline.store.active_index() is None
-    monkeypatch.setattr('mindex.person_processing.PersonProcessor', lambda *_: pytest.fail('仅发布，不重复人物识别'))
+    monkeypatch.setattr('mindex.persons.person_processing.PersonProcessor', lambda *_: pytest.fail('仅发布，不重复人物识别'))
     pipeline.store.execute('DELETE FROM person_references')
     fail[0] = False
     missing = finished(publications, publications.retry(child['id']))
@@ -640,18 +640,18 @@ def test_person_first_publish_and_publication_failure_retry(config, video_file, 
 
 
 def test_strict_subtitle_failure_never_asr_and_empty_auto_fallback(config, video_file, monkeypatch):
-    from mindex.media import MediaError
+    from mindex.shared.media import MediaError
 
     sid = Pipeline(config).prepare(video_file)
     processor = DialogueProcessor(config)
     track = {"index": 1, "text": True, "codec": "subrip", "language": "zho", "forced": False, "default": True}
     monkeypatch.setattr(
-        "mindex.subtitle_archive.load_archive", lambda *_: (_ for _ in ()).throw(MediaError("failed"))
+        "mindex.processing.subtitle_archive.load_archive", lambda *_: (_ for _ in ()).throw(MediaError("failed"))
     )
     with pytest.raises(MediaError):
         processor.process(sid, method="subtitle", subtitle_stream=1)
     assert not processor.store.one("SELECT 1 FROM channel_data")
-    monkeypatch.setattr("mindex.subtitle_archive.load_archive", lambda *_: {
+    monkeypatch.setattr("mindex.processing.subtitle_archive.load_archive", lambda *_: {
         "tracks": [track], "utterances": {"1": []}, "files": {}})
     assert processor.process(sid, method="subtitle", subtitle_stream=1)["sources"][0]["status"] == "empty"
     # 空字幕之前手动提取成功，自动方式仍应回退，而不是复用为空的字幕。
@@ -660,7 +660,7 @@ def test_strict_subtitle_failure_never_asr_and_empty_auto_fallback(config, video
 
 
 def test_result_and_recent_failure_are_independent(config, video_file):
-    from mindex.curation import Library
+    from mindex.admin.curation import Library
 
     pipeline = Pipeline(config)
     sid = pipeline.prepare(video_file)

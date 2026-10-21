@@ -4,9 +4,9 @@ import json
 
 from conftest import FixtureAnalyzer, FixtureEmbedder
 
-from mindex.film import export_source
-from mindex.label_review import render_review
-from mindex.pipeline import Pipeline
+from mindex.diagnostics.film import export_source
+from mindex.diagnostics.label_review import render_review
+from mindex.processing.pipeline import Pipeline
 
 
 def test_both_review_exports_are_portable(config, video_file, tmp_path):

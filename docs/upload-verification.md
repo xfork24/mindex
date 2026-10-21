@@ -46,8 +46,8 @@
 uv run pytest tests/test_source_work.py tests/test_admin.py tests/test_dialogue.py \
   tests/test_dialogue_tasks.py tests/test_persons.py tests/test_pipeline.py \
   tests/test_segment_details.py tests/test_channel_recall.py -q
-uv run ruff check src tests
-node --check src/mindex/static/admin.js
+uv run ruff check backend/src tests
+node --check frontend/src/admin/admin.js
 ```
 
 浏览器验收使用独立临时目录；每次运行使用一个新的目录，避免先前结果影响新素材断言。安装 Playwright 并准备 Chromium 后：

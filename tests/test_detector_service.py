@@ -7,10 +7,10 @@ import pytest
 from fastapi.testclient import TestClient
 from filelock import FileLock
 
-from mindex import adapters
-from mindex.adapters import HTTPShotDetector
-from mindex.media import command, frame_timestamps
-from mindex.model_server import TransNetEngine, create_model_app
+from mindex.models import adapters
+from mindex.models.adapters import HTTPShotDetector
+from mindex.models.model_server import TransNetEngine, create_model_app
+from mindex.shared.media import command, frame_timestamps
 
 
 @pytest.mark.parametrize("frames", [1, 49, 50, 51, 75, 99, 100, 101, 150])
@@ -106,8 +106,8 @@ def test_local_cpu_service_auth_upload_and_client(config, video_file, monkeypatc
 
 
 def test_hard_cut_starts_on_incoming_frame(tmp_path):
-    from mindex.media import cut
-    from mindex.model_server import refine_cut_frame
+    from mindex.models.model_server import refine_cut_frame
+    from mindex.shared.media import cut
 
     assert refine_cut_frame(24, [0.] * 25 + [9000.] + [0.] * 10) == 25
     assert refine_cut_frame(24, [0.] * 36) == 24

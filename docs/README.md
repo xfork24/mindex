@@ -23,7 +23,9 @@
 
 ## 文档一览
 
-- [architecture.md](architecture.md) — 模块职责、离线/在线数据流、存储布局、SQLite 表、五条核心不变量
+- [source-layout-verification.md](source-layout-verification.md) — 前后端目录重组、打包与验证范围，含既有失败和未完成检查
+
+- [architecture.md](architecture.md) — 按页面划分的源码目录、模块职责、离线/在线数据流、存储布局、SQLite 表、五条核心不变量
 - [pipeline.md](pipeline.md) — detect/split/transcribe/align/analyze/index 各阶段机制、检查点与断点续跑、指纹键
 - [cli-reference.md](cli-reference.md) — `mindex` 与 `mindex-model-server` 全部命令、参数、默认值、示例
 - [config-reference.md](config-reference.md) — 全部配置键、类型、默认值、影响与常用组合

@@ -6,15 +6,15 @@ import pytest
 from conftest import FixtureEmbedder
 from fastapi.testclient import TestClient
 
-from mindex import adapters
-from mindex.adapters import HTTPEmbedder, ModelError, QwenAnalyzer, parse_json
-from mindex.config import fingerprint
-from mindex.evaluation import metrics
-from mindex.indexing import IndexBuilder, check_index
-from mindex.model_server import create_model_app
-from mindex.pipeline import Pipeline
-from mindex.search import SearchEngine
-from mindex.types import TextSearch
+from mindex.diagnostics.evaluation import metrics
+from mindex.models import adapters
+from mindex.models.adapters import HTTPEmbedder, ModelError, QwenAnalyzer, parse_json
+from mindex.models.model_server import create_model_app
+from mindex.processing.indexing import IndexBuilder, check_index
+from mindex.processing.pipeline import Pipeline
+from mindex.search.search import SearchEngine
+from mindex.shared.config import fingerprint
+from mindex.shared.types import TextSearch
 
 
 def test_embedding_identity_and_output_validation(config, monkeypatch):

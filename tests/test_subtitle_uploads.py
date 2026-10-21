@@ -6,11 +6,11 @@ import pytest
 from conftest import FixtureEmbedder
 from fastapi.testclient import TestClient
 
-from mindex.adapters import ModelError
 from mindex.api import create_app
-from mindex.dialogue import current_dialogue, relative_dialogue
-from mindex.pipeline import Pipeline
-from mindex.processing_lock import ProcessingLock
+from mindex.models.adapters import ModelError
+from mindex.processing.dialogue import current_dialogue, relative_dialogue
+from mindex.processing.pipeline import Pipeline
+from mindex.shared.processing_lock import ProcessingLock
 
 SRT = "1\n00:00:00,200 --> 00:00:01,400\n<i>你好</i>，牛车水！\n第二行\n\n"
 ASS = """[Script Info]
@@ -53,7 +53,7 @@ def test_uploaded_subtitle_applies_only_on_start_and_locates_dialogue(
 ):
     pipeline = Pipeline(config)
     sid = pipeline.prepare(video_file)
-    monkeypatch.setattr("mindex.dialogue.make_transcriber", lambda *_: pytest.fail("文件字幕不调用 ASR"))
+    monkeypatch.setattr("mindex.processing.dialogue.make_transcriber", lambda *_: pytest.fail("文件字幕不调用 ASR"))
     client = TestClient(create_app(config, FixtureEmbedder(config)))
     endpoint = f"/api/admin/sources/{sid}/subtitles"
     response = client.post(endpoint, files={"file": (name, payload, "text/plain")})
@@ -108,7 +108,7 @@ def test_subtitle_upload_errors_do_not_replace_dialogue_and_are_cleaned(config, 
         response = client.post(endpoint, files={"file": (name, payload)})
         assert response.status_code == status, response.text
         assert current_dialogue(pipeline.store, sid) is None
-    monkeypatch.setattr("mindex.subtitle_uploads.SUBTITLE_MAX_BYTES", 4)
+    monkeypatch.setattr("mindex.processing.subtitle_uploads.SUBTITLE_MAX_BYTES", 4)
     assert client.post(endpoint, files={"file": ("big.srt", SRT.encode())}).status_code == 413
     assert not list((config.data_dir / "subtitles" / ".uploads").iterdir())
     assert client.post("/api/admin/sources/missing/subtitles", files={"file": ("test.srt", SRT)}).status_code == 404
@@ -173,7 +173,7 @@ def test_subtitle_publish_retry_reuses_saved_dialogue(config, video_file, monkey
     assert wait_publication(client, child_id)["status"] == "failed"
     version = current_dialogue(pipeline.store, sid)["content_version"]
     embedder.fail = False
-    monkeypatch.setattr("mindex.subtitle_uploads.parse_subtitle_file", lambda *_args, **_kw: pytest.fail("发布重试不解析字幕"))
+    monkeypatch.setattr("mindex.processing.subtitle_uploads.parse_subtitle_file", lambda *_args, **_kw: pytest.fail("发布重试不解析字幕"))
     assert client.post(f"/api/admin/source-tasks/{child_id}/retry").status_code == 202
     child = wait_publication(client, child_id)
     assert child["status"] == "complete", child
@@ -186,7 +186,7 @@ def test_subtitle_publish_retry_reuses_saved_dialogue(config, video_file, monkey
 
 
 def test_frame_based_subtitle_uses_source_fps_when_file_omits_it(tmp_path):
-    from mindex.subtitle_uploads import parse_subtitle_file
+    from mindex.processing.subtitle_uploads import parse_subtitle_file
 
     path = tmp_path / "frames.sub"
     path.write_text("{6}{42}按帧字幕\n", encoding="utf-8")
@@ -209,7 +209,7 @@ def test_repeat_completed_dialogue_task_reuses_parsing_and_embeddings(config, vi
     def unexpected(*args, **kwargs):
         pytest.fail('unchanged completed dialogue must reuse parsing and embeddings')
 
-    monkeypatch.setattr('mindex.subtitle_uploads.parse_subtitle_file', unexpected)
+    monkeypatch.setattr('mindex.processing.subtitle_uploads.parse_subtitle_file', unexpected)
     for method in ('text', 'video', 'image'):
         monkeypatch.setattr(embedder, method, unexpected)
     second = wait_task(client, client.post(f'/api/admin/sources/{sid}/dialogue', json=options).json()['id'])

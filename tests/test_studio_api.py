@@ -7,9 +7,9 @@ from conftest import FixtureEmbedder, FixtureSpeaker, FixtureStoryboarder
 from fastapi.testclient import TestClient
 
 from mindex.api import create_app
-from mindex.indexing import IndexBuilder
-from mindex.pipeline import Pipeline
-from mindex.storage import Store
+from mindex.processing.indexing import IndexBuilder
+from mindex.processing.pipeline import Pipeline
+from mindex.shared.storage import Store
 
 
 @pytest.fixture
@@ -185,7 +185,7 @@ def test_run_all_rejects_when_complete_and_artifacts_download(studio_client):
 def test_delete_job(studio_client):
     config, client = studio_client
     job_id = create_job(client, "待删除的任务。")
-    from mindex import studio
+    from mindex.studio import studio
 
     directory = studio.job_dir(config, job_id)
     for relative in ["versions/example/render.mp4", "previews/quick/example.wav", "inputs/reference.png"]:
@@ -279,7 +279,7 @@ def test_accepted_state_lock_conflicts_and_release(config):
 
     from filelock import FileLock
 
-    from mindex import studio
+    from mindex.studio import studio
 
     entered, release = Event(), Event()
 
@@ -360,7 +360,7 @@ def test_thread_start_failure_is_terminal_and_unlocks(config, monkeypatch):
 
     from filelock import FileLock
 
-    from mindex import studio
+    from mindex.studio import studio
 
     client = TestClient(create_app(config, storyboarder=FixtureStoryboarder(config)))
     job_id = create_job(client, "线程启动失败测试。")
@@ -382,8 +382,8 @@ def test_thread_start_failure_is_terminal_and_unlocks(config, monkeypatch):
 
 
 def test_preview_manual_interval_and_hidden_context(studio_client):
-    from mindex import studio_steps
-    from mindex.storage import Store
+    from mindex.shared.storage import Store
+    from mindex.studio import studio_steps
 
     config, client = studio_client
     job_id = create_job(client, "这是需要寻找红色画面的第一句文案。")

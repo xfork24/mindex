@@ -6,14 +6,14 @@ import pytest
 from conftest import FixtureAnalyzer, FixtureEmbedder
 from fastapi.testclient import TestClient
 
-from mindex.adapters import AdaptiveShotDetector, ModelError
 from mindex.api import create_app
-from mindex.evaluation import evaluate
-from mindex.indexing import IndexBuilder, VectorIndex, check_index
-from mindex.media import command, cut, frame_data, probe, thumbnail, windows
-from mindex.pipeline import Pipeline
-from mindex.search import SearchEngine, fuse
-from mindex.types import Filters, TextSearch
+from mindex.diagnostics.evaluation import evaluate
+from mindex.models.adapters import AdaptiveShotDetector, ModelError
+from mindex.processing.indexing import IndexBuilder, VectorIndex, check_index
+from mindex.processing.pipeline import Pipeline
+from mindex.search.search import SearchEngine, fuse
+from mindex.shared.media import command, cut, frame_data, probe, thumbnail, windows
+from mindex.shared.types import Filters, TextSearch
 
 
 @pytest.fixture
@@ -152,7 +152,7 @@ def test_resume_search_api_and_range_playback(processed, config, video_file):
 
     client = TestClient(create_app(config, embedder))
     assert client.get("/").status_code == 200
-    assert client.get("/app.js").status_code == 200
+    assert client.get("/assets/search/app.js").status_code == 200
     response = client.post("/api/search/text", json={"text": "蓝色画面"})
     assert response.status_code == 200
     top = response.json()["results"][0]
@@ -244,7 +244,7 @@ def test_evaluation_isolates_qwen_from_asr_in_vectors_and_lexical(processed, con
         value["dialogue"] = [{"start": segment["start"], "end": segment["end"], "text": "再见"}]
         store.put_json("annotations", "segment_id", segment["id"], config.analysis_key, value)
     version = IndexBuilder(config, embedder).build(mode="enriched", kinds=("moment",), activate=False)
-    monkeypatch.setattr("mindex.search.make_embedder", lambda config: embedder)
+    monkeypatch.setattr("mindex.search.search.make_embedder", lambda config: embedder)
     queries = tmp_path / "labels.jsonl"
     queries.write_text(
         "\n".join(
@@ -346,7 +346,7 @@ def test_image_query_retrieves_video_and_cleans_uploads(processed, config, tmp_p
             }
         )
     )
-    monkeypatch.setattr("mindex.search.make_embedder", lambda config: embedder)
+    monkeypatch.setattr("mindex.search.search.make_embedder", lambda config: embedder)
     report = evaluate(config, labels, "image", index_id=version)
     assert report["profiles"]["video_only"]["hit_at_1"] == 1
     assert report["profiles"]["video_only"]["details"][0]["modality"] == "image"
@@ -422,7 +422,7 @@ def test_final_identity_drift_cannot_publish_completed_vectors(processed, config
 
 
 def test_check_validates_shot_references_without_materializing(processed, monkeypatch):
-    from mindex.shot_media import ShotMedia
+    from mindex.shared.shot_media import ShotMedia
 
     pipeline, _, _, _, version = processed
     snapshot = next(s for s in pipeline.store.snapshots(version)

@@ -4,10 +4,10 @@ import shutil
 import numpy as np
 import pytest
 
-from mindex.media import command, cut
-from mindex.shot_media import ShotMedia
-from mindex.shot_repair import adjusted, apply, audit, inspect_boundary
-from mindex.storage import Store
+from mindex.processing.shot_repair import adjusted, apply, audit, inspect_boundary
+from mindex.shared.media import command, cut
+from mindex.shared.shot_media import ShotMedia
+from mindex.shared.storage import Store
 
 
 def first_rgb(path):
@@ -41,7 +41,7 @@ def test_repair_keeps_ids_files_evidence_and_redirects_legacy(config, video_file
     plan = audit(store, workers=1)
     assert plan['sources'][0]['boundaries'][0]['new'] == 1
     assert first_rgb(store.root / 'b.mp4')[0] > 200
-    from mindex import shot_repair
+    from mindex.processing import shot_repair
     commit_plan = shot_repair._commit_plan
     def interrupt(*args):
         raise RuntimeError('interrupted after metadata commit')
@@ -69,8 +69,8 @@ def test_repair_keeps_ids_files_evidence_and_redirects_legacy(config, video_file
     repeated = audit(store)
     assert repeated['sources'][0]['already_corrected']
     assert apply(config, repeated)['no_changes']
-    from mindex.pipeline import Pipeline
-    from mindex.subtitle_archive import archive_path
+    from mindex.processing.pipeline import Pipeline
+    from mindex.processing.subtitle_archive import archive_path
     manifest = archive_path(store, 's')
     manifest.parent.mkdir(parents=True)
     manifest.write_text(json.dumps({'version': 1, 'tracks': [], 'utterances': {}, 'files': {}}))
@@ -78,7 +78,7 @@ def test_repair_keeps_ids_files_evidence_and_redirects_legacy(config, video_file
     for row in store.segments():
         store.execute('UPDATE segments SET thumbnail=? WHERE id=?', ('thumbnail.jpg', row['id']))
     (store.root / 'thumbnail.jpg').write_bytes(b'preexisting')
-    import mindex.pipeline as pipeline_module
+    import mindex.processing.pipeline as pipeline_module
     monkeypatch.setattr(pipeline_module, 'thumbnail', lambda *args: None)
     Pipeline(config).split('s')
     assert {row['id'] for row in store.segments()} == {'a', 'b', 'm'}
@@ -102,7 +102,7 @@ def test_edge_adjustment_preserves_interior_absolute_times():
 
 
 def test_vfr_exclusive_boundary_holds_last_frame_without_relaxing_tolerance(tmp_path):
-    from mindex.shot_repair import ensure_duration
+    from mindex.processing.shot_repair import ensure_duration
 
     path = tmp_path / 'staged.mp4'
     command(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'color=blue:s=64x64:r=24',

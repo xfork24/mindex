@@ -10,13 +10,13 @@ import pytest
 from conftest import FixtureSpeaker
 from fastapi.testclient import TestClient
 
-from mindex import studio
-from mindex import studio_window as window
-from mindex import studio_workspace as ws
 from mindex.api import create_app
-from mindex.media import command, probe
-from mindex.pipeline import Pipeline
-from mindex.storage import Store
+from mindex.processing.pipeline import Pipeline
+from mindex.shared.media import command, probe
+from mindex.shared.storage import Store
+from mindex.studio import studio
+from mindex.studio import studio_window as window
+from mindex.studio import studio_workspace as ws
 
 
 def rows(count=10):
@@ -105,7 +105,7 @@ def refinement(config, video_file, tmp_path):
     with store.connect() as db:
         db.execute("DELETE FROM segments")
         for i in range(10):
-            from mindex.media import cut
+            from mindex.shared.media import cut
             clip = store.root / f"fixture-shot-{i}.mp4"
             cut(source_file, i, i + 1, clip)
             row = {**template, "id": f"shot-{i}", "start": i, "end": i + 1, "parent_id": None,
@@ -423,7 +423,8 @@ def test_legacy_manual_requires_explicit_candidate_and_anchor_api_revision(refin
 
 
 def test_save_without_transcoding_and_cached_low_resolution_preview(refinement, monkeypatch):
-    from mindex import media, studio_render
+    from mindex.shared import media
+    from mindex.studio import studio_render
 
     config, jid, w, p, _ = refinement
     config.studio.render.width = 1920
@@ -502,7 +503,8 @@ def test_save_without_transcoding_and_cached_low_resolution_preview(refinement, 
 
 def test_range_save_overlays_calls_bounded(refinement, monkeypatch):
     """保存定长窗口的可见性检查必须是常数级，不随源内镜头数线性放大。"""
-    from mindex import curation, media
+    from mindex.admin import curation
+    from mindex.shared import media
 
     config, jid, w, p, store = refinement
     template = store.one("SELECT * FROM segments WHERE kind='shot'")
@@ -568,7 +570,7 @@ def test_range_save_overlays_calls_bounded(refinement, monkeypatch):
 
 def test_source_shots_visibility_matches_predicate(refinement):
     """批量可见性必须与逐行 interval_visible 逐点等价，含 parent 隐藏传播与脏 parent_id。"""
-    from mindex import studio_steps
+    from mindex.studio import studio_steps
 
     config, _jid, _w, _p, store = refinement
     source_id = store.one("SELECT id FROM sources")["id"]

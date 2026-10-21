@@ -20,7 +20,7 @@
 | 收尾 `tests/test_studio_window.py`、`tests/test_studio_window_ui.py` | 14 passed |
 | 收尾期间 `tests/test_studio_render.py` | 9 passed，覆盖音频处理改动与既有渲染行为 |
 | 修改的 Python 文件 Ruff | 通过 |
-| `node --check src/mindex/static/studio.js` | 通过 |
+| `node --check frontend/src/studio/studio.js` | 通过 |
 | `git diff --check` | 通过 |
 
 新增测试覆盖：

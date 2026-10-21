@@ -7,8 +7,8 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from mindex import adapters
 from mindex.api import create_app
+from mindex.models import adapters
 
 TOKENHUB = {
     "role": "embedding",
@@ -239,7 +239,7 @@ def test_profile_test_connection_llama_cpp_without_model_field(config, monkeypat
         def text(self, texts, role="document"):
             return [[0.0] * 4096 for _ in texts]
 
-    monkeypatch.setattr("mindex.settings_api.make_embedder", Schema2Embedder)
+    monkeypatch.setattr("mindex.settings.settings_api.make_embedder", Schema2Embedder)
     result = client.post(f"/api/settings/profiles/{profile['id']}/test").json()
     assert result["ok"] is True
     assert result["model"] == "tencent/WeMM-Embedding-9B"
@@ -257,7 +257,7 @@ def test_hot_switch_reaches_search_engine(config, monkeypatch):
         def identity(self):
             return {"model": self.cfg.embedding.model, "implementation": "probe"}
 
-    monkeypatch.setattr("mindex.search.make_embedder", Probe)
+    monkeypatch.setattr("mindex.search.search.make_embedder", Probe)
     client = client_for(config)
     client.get("/api/status", params={"health": True})
     assert captured[-1].embedding.backend == "mindex"
@@ -333,7 +333,7 @@ def test_profile_test_connection_uses_configured_max_tokens(config, monkeypatch)
 
 
 def test_channel_weights_share_runtime_with_cli_and_keep_legacy_weights(config):
-    from mindex.runtime_settings import apply_runtime_overrides
+    from mindex.settings.runtime_settings import apply_runtime_overrides
 
     client = client_for(config)
     weights = {"visual": 1, "dialogue": 2, "analysis": 0}
@@ -411,7 +411,7 @@ def test_local_voiceclone_probe_still_fails_if_service_unreachable(config, monke
 
 def test_settings_can_skip_expensive_identity_probe(config, monkeypatch):
     monkeypatch.setattr(
-        "mindex.storage.Store.active_index",
+        "mindex.shared.storage.Store.active_index",
         lambda self: {"id": "test-index", "spec": {"space": {"model": "test"}}},
     )
     calls = []
@@ -421,7 +421,7 @@ def test_settings_can_skip_expensive_identity_probe(config, monkeypatch):
             calls.append(True)
             return {"model": "test"}
 
-    monkeypatch.setattr("mindex.settings_api.make_embedder", lambda current: Embedder())
+    monkeypatch.setattr("mindex.settings.settings_api.make_embedder", lambda current: Embedder())
     client = client_for(config)
     snapshot = client.get("/api/settings?probe_embedding=false")
     assert snapshot.status_code == 200
@@ -436,14 +436,14 @@ def test_settings_can_skip_expensive_identity_probe(config, monkeypatch):
 
 def test_embedding_status_probe_failure(config, monkeypatch):
     monkeypatch.setattr(
-        "mindex.storage.Store.active_index",
+        "mindex.shared.storage.Store.active_index",
         lambda self: {"id": "test-index", "spec": {"space": {}}},
     )
 
     def unavailable(current):
         raise RuntimeError("service unavailable")
 
-    monkeypatch.setattr("mindex.settings_api.make_embedder", unavailable)
+    monkeypatch.setattr("mindex.settings.settings_api.make_embedder", unavailable)
     result = client_for(config).get("/api/settings/embedding-status").json()
     assert result["matches_index"] is False
     assert result["error"] == "service unavailable"

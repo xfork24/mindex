@@ -8,15 +8,15 @@ from conftest import FixtureEmbedder
 from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
-from mindex import media
 from mindex.api import create_app
 from mindex.cli import app
-from mindex.film import export_source, source_report
-from mindex.indexing import IndexBuilder, VectorIndex, check_index
-from mindex.media import command, probe
-from mindex.pipeline import Pipeline
-from mindex.search import SearchEngine
-from mindex.types import TextSearch
+from mindex.diagnostics.film import export_source, source_report
+from mindex.processing.indexing import IndexBuilder, VectorIndex, check_index
+from mindex.processing.pipeline import Pipeline
+from mindex.search.search import SearchEngine
+from mindex.shared import media
+from mindex.shared.media import command, probe
+from mindex.shared.types import TextSearch
 
 
 class NoModels:

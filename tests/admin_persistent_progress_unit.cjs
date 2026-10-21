@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const source = fs.readFileSync('src/mindex/static/admin.js', 'utf8');
+const source = fs.readFileSync('frontend/src/admin/admin.js', 'utf8');
 const context = vm.createContext({MindexI18n:{msg:(key,args={})=>JSON.stringify({key,...args}),system:value=>value?.message || value || ''},publicationStages: new Set(['embedding', 'publish'])});
 vm.runInContext(source.slice(source.indexOf('function workProgressRows('), source.indexOf('function appendWorkProgress(')), context);
 const rows = work => context.workProgressRows('shots', work);

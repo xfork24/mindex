@@ -12,17 +12,30 @@ import pytest
 from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
-from mindex import adapters, compatibility, deployment, e2e
-from mindex.analyzers import PinnedQwenAnalyzer
 from mindex.api import create_app
 from mindex.cli import app
-from mindex.config import fingerprint, load_config
-from mindex.indexing import IndexBuilder
-from mindex.llama_cpp import LlamaEmbedder, LlamaTranscriber, checked_runtime, inspect_service, manifest
-from mindex.runtime_settings import RuntimeConfig, activate_profile, apply_runtime_overrides, save_profile
-from mindex.search import SearchEngine
-from mindex.storage import Store
-from mindex.types import TextSearch
+from mindex.diagnostics import e2e
+from mindex.models import adapters, deployment
+from mindex.models.analyzers import PinnedQwenAnalyzer
+from mindex.models.llama_cpp import (
+    LlamaEmbedder,
+    LlamaTranscriber,
+    checked_runtime,
+    inspect_service,
+    manifest,
+)
+from mindex.processing.indexing import IndexBuilder
+from mindex.search.search import SearchEngine
+from mindex.settings.runtime_settings import (
+    RuntimeConfig,
+    activate_profile,
+    apply_runtime_overrides,
+    save_profile,
+)
+from mindex.shared import compatibility
+from mindex.shared.config import fingerprint, load_config
+from mindex.shared.storage import Store
+from mindex.shared.types import TextSearch
 
 
 @pytest.fixture
@@ -595,10 +608,10 @@ def test_fixed_yaml_persists_through_cli_and_runtime_web(config, tmp_path, monke
     path.write_text(yaml.safe_dump(config.model_dump(mode="json")))
     observed = []
     monkeypatch.setattr(
-        "mindex.indexing.IndexBuilder.build",
+        "mindex.processing.indexing.IndexBuilder.build",
         lambda self, **kwargs: observed.append(self.config.embedding.model) or "test-index",
     )
-    monkeypatch.setattr("mindex.api.status", lambda cfg, **kwargs: {"model": cfg.embedding.model})
+    monkeypatch.setattr("mindex.search.api.status", lambda cfg, **kwargs: {"model": cfg.embedding.model})
     monkeypatch.setattr(
         "uvicorn.run",
         lambda web, **kwargs: observed.append(TestClient(web).get("/api/status").json()["model"]),
@@ -621,7 +634,7 @@ def test_fixed_yaml_persists_through_cli_and_runtime_web(config, tmp_path, monke
 def test_index_and_search_require_gate_even_without_inference(native, video_file):
     config = native["config"]
     space = LlamaEmbedder(config).identity()
-    from mindex.pipeline import Pipeline
+    from mindex.processing.pipeline import Pipeline
 
     Pipeline(config).prepare(video_file)
     with pytest.raises(adapters.ModelError, match="兼容性门槛"):
@@ -637,8 +650,8 @@ def test_index_and_search_require_gate_even_without_inference(native, video_file
 
 
 def test_real_media_smoke_reuses_fixed_baseline_and_rejects_changed_deployment(native, tmp_path, monkeypatch):
-    from mindex.media import command
-    from mindex.pipeline import Pipeline
+    from mindex.processing.pipeline import Pipeline
+    from mindex.shared.media import command
 
     config = native["config"]
     # 真实 FFmpeg 切片，模型响应仍为明确的测试向量。
@@ -706,8 +719,8 @@ def test_real_media_smoke_reuses_fixed_baseline_and_rejects_changed_deployment(n
 
 def test_smoke_routes_future_adapter_version_through_v2(native, tmp_path, monkeypatch):
     """ADAPTER_VERSION 升级后 smoke 仍按 v2 路由建基线，不回落到硬编码字面量分支。"""
-    from mindex.media import command
-    from mindex.pipeline import Pipeline
+    from mindex.processing.pipeline import Pipeline
+    from mindex.shared.media import command
 
     monkeypatch.setattr(deployment, "ADAPTER_VERSION", "llama-native-wemm-3")
     native["pin"]()  # 以升级后的协议版本重新固定清单与空间契约

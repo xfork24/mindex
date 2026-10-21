@@ -6,9 +6,9 @@ import json
 import pytest
 from conftest import FixtureStoryboarder
 
-from mindex import studio, studio_steps
-from mindex.adapters import ModelError, QwenStoryboarder, decode_audio
-from mindex.types import ShotDraft
+from mindex.models.adapters import ModelError, QwenStoryboarder, decode_audio
+from mindex.shared.types import ShotDraft
+from mindex.studio import studio, studio_steps
 
 
 def chat_payload(content: str, finish_reason: str = "stop") -> dict:
@@ -88,7 +88,7 @@ def test_qwen_storyboarder_retries_invalid_output_with_feedback(config, monkeypa
         messages.append(kwargs["json"]["messages"])
         return next(responses)
 
-    monkeypatch.setattr("mindex.adapters.request", fake_request)
+    monkeypatch.setattr("mindex.models.adapters.request", fake_request)
     drafts = QwenStoryboarder(config).split("山风掠过山谷。")
     assert len(messages) == 2
     feedback = [part["text"] for part in messages[1][-1]["content"] if isinstance(part, dict)]
@@ -97,21 +97,21 @@ def test_qwen_storyboarder_retries_invalid_output_with_feedback(config, monkeypa
 
 
 def test_qwen_storyboarder_fails_after_exhausted_retries(config, monkeypatch):
-    monkeypatch.setattr("mindex.adapters.request", lambda *args, **kwargs: chat_payload("坏输出"))
+    monkeypatch.setattr("mindex.models.adapters.request", lambda *args, **kwargs: chat_payload("坏输出"))
     with pytest.raises(ModelError, match="未通过校验"):
         QwenStoryboarder(config).split("任意文本。")
 
 
 def test_qwen_storyboarder_rejects_truncated_output(config, monkeypatch):
     monkeypatch.setattr(
-        "mindex.adapters.request", lambda *args, **kwargs: chat_payload("{", finish_reason="length")
+        "mindex.models.adapters.request", lambda *args, **kwargs: chat_payload("{", finish_reason="length")
     )
     with pytest.raises(ModelError, match="截断"):
         QwenStoryboarder(config).split("任意文本。")
 
 
 def test_qwen_storyboarder_rejects_empty_content(config, monkeypatch):
-    monkeypatch.setattr("mindex.adapters.request", lambda *args, **kwargs: chat_payload("  "))
+    monkeypatch.setattr("mindex.models.adapters.request", lambda *args, **kwargs: chat_payload("  "))
     with pytest.raises(ModelError, match="空内容"):
         QwenStoryboarder(config).split("任意文本。")
 
@@ -133,7 +133,7 @@ def test_split_prompt_preserves_narration_and_requires_chinese_keywords(config, 
         systems.append(kwargs["json"]["messages"][0]["content"])
         return chat_payload(json.dumps(draft))
 
-    monkeypatch.setattr("mindex.adapters.request", fake_request)
+    monkeypatch.setattr("mindex.models.adapters.request", fake_request)
     drafts = QwenStoryboarder(config).split("The wind crossed the valley.")
     assert drafts[0].text == "The wind crossed the valley."
     system = systems[0]
@@ -179,7 +179,7 @@ def test_qwen_retries_missing_text(config, monkeypatch):
         calls.append(kwargs["json"])
         return chat_payload(json.dumps(next(outputs), ensure_ascii=False))
 
-    monkeypatch.setattr("mindex.adapters.request", response)
+    monkeypatch.setattr("mindex.models.adapters.request", response)
     drafts = QwenStoryboarder(config).split("第一句。第二句。")
     assert len(calls) == 2
     assert drafts[0].text == "第一句。第二句。"

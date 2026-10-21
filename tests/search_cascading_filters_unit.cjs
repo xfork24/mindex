@@ -31,7 +31,7 @@ const context = vm.createContext({
   MindexI18n: {msg: k => k, setText() {}},
   MindexMultiSearch: {sort: e => e, attach() {}, refilter() {}},
 });
-const code = fs.readFileSync('src/mindex/static/app.js', 'utf8');
+const code = fs.readFileSync('frontend/src/search/app.js', 'utf8');
 vm.runInContext(code.slice(code.indexOf("const ALL_VALUE ="), code.indexOf('async function refresh()')), context);
 vm.runInContext(code.slice(code.indexOf("for (const id of ['actor-select', 'role-select', 'source']) bindAllToggle"), code.indexOf('\nrefresh();')), context);
 const values = id => get(id).options.filter(o => o.value !== '__all__').map(o => o.value).sort();

@@ -4,16 +4,16 @@ import json
 import pytest
 from conftest import FixtureEmbedder
 
-from mindex.adapters import ModelError
-from mindex.channel_index import snapshots_for
-from mindex.config import fingerprint
-from mindex.curation import Library
-from mindex.dialogue import DialogueProcessor
-from mindex.indexing import IndexBuilder, VectorIndex, check_index
-from mindex.media import command
-from mindex.pipeline import Pipeline
-from mindex.search import SearchEngine
-from mindex.types import Annotation, TextSearch
+from mindex.admin.curation import Library
+from mindex.models.adapters import ModelError
+from mindex.processing.channel_index import snapshots_for
+from mindex.processing.dialogue import DialogueProcessor
+from mindex.processing.indexing import IndexBuilder, VectorIndex, check_index
+from mindex.processing.pipeline import Pipeline
+from mindex.search.search import SearchEngine
+from mindex.shared.config import fingerprint
+from mindex.shared.media import command
+from mindex.shared.types import Annotation, TextSearch
 
 
 class CountingEmbedder(FixtureEmbedder):
@@ -70,8 +70,8 @@ def test_any_channel_combination_and_partial_analysis(config, video_file, monkey
     add_dialogue(config, sid)
     segment = pipeline.store.segments(sid, "moment")[0]
     add_analysis(pipeline.store, segment)
-    monkeypatch.setattr("mindex.pipeline.make_analyzer", lambda *_: pytest.fail("must not initialize LLM"))
-    monkeypatch.setattr("mindex.pipeline.make_transcriber", lambda *_: pytest.fail("must not initialize ASR"))
+    monkeypatch.setattr("mindex.processing.pipeline.make_analyzer", lambda *_: pytest.fail("must not initialize LLM"))
+    monkeypatch.setattr("mindex.processing.pipeline.make_transcriber", lambda *_: pytest.fail("must not initialize ASR"))
     embedder = CountingEmbedder(config)
     version = IndexBuilder(config, embedder).build(activate=True, channels=channels)
     snapshots = pipeline.store.snapshots(version)
@@ -204,7 +204,7 @@ def test_visual_failure_resumes_completed_vectors_without_publishing_partial(con
 
 
 def test_embedding_progress_counts_segments_after_all_windows_and_ready_index(config, video_file):
-    from mindex.media import probe
+    from mindex.shared.media import probe
 
     pipeline = Pipeline(config)
     sid = pipeline.prepare(video_file)
@@ -291,7 +291,7 @@ def test_empty_dialogue_creates_no_vector_and_llm_accepts_optional_dialogue(conf
 
 
 def test_native_evaluation_excludes_disabled_channel_lexical_text(config, video_file, monkeypatch, tmp_path):
-    from mindex.evaluation import evaluate
+    from mindex.diagnostics.evaluation import evaluate
 
     pipeline = Pipeline(config)
     sid = pipeline.prepare(video_file)
@@ -300,7 +300,7 @@ def test_native_evaluation_excludes_disabled_channel_lexical_text(config, video_
     add_analysis(pipeline.store, segment)
     embedder = CountingEmbedder(config)
     version = IndexBuilder(config, embedder).build(activate=True)
-    monkeypatch.setattr("mindex.search.make_embedder", lambda _: embedder)
+    monkeypatch.setattr("mindex.search.search.make_embedder", lambda _: embedder)
     labels = tmp_path / "labels.jsonl"
     labels.write_text(
         json.dumps(
@@ -346,8 +346,8 @@ def test_native_evaluation_excludes_disabled_channel_lexical_text(config, video_
 
 
 def test_default_upgrade_all_granularities_without_media_cache(config, video_file, monkeypatch):
-    from mindex.media import probe
-    from mindex.source_tasks import publish_work
+    from mindex.admin.source_tasks import publish_work
+    from mindex.shared.media import probe
 
     pipeline = Pipeline(config)
     sid = pipeline.prepare(video_file)
@@ -383,7 +383,7 @@ def test_default_upgrade_all_granularities_without_media_cache(config, video_fil
 
 
 def test_skipped_null_annotation_remains_searchable_and_filters_safely(config, video_file):
-    from mindex.types import Filters
+    from mindex.shared.types import Filters
 
     pipeline = Pipeline(config)
     sid = pipeline.prepare(video_file)

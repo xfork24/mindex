@@ -1,0 +1,10 @@
+include README.md CLAUDE.md config.example.yaml requirements.txt uv.lock
+recursive-include backend/src *.py
+recursive-include frontend/src *.html *.js *.css *.json *.svg
+recursive-include tests *.py *.cjs
+recursive-include scripts *.py *.sh
+recursive-include deploy *.txt
+recursive-include docs *.md *.png *.svg
+recursive-include plans *.md
+recursive-include eval *.py *.md *.jsonl
+recursive-include tools *.sh *.md m4s-converter

@@ -6,14 +6,14 @@ import pytest
 from conftest import FixtureEmbedder
 from fastapi.testclient import TestClient
 
+from mindex.admin.curation import CurationPatch, Library
 from mindex.api import create_app
-from mindex.curation import CurationPatch, Library
-from mindex.indexing import IndexBuilder, VectorIndex
-from mindex.media import cut
-from mindex.pipeline import Pipeline
-from mindex.search import SearchEngine
-from mindex.storage import Store
-from mindex.types import TextSearch
+from mindex.processing.indexing import IndexBuilder, VectorIndex
+from mindex.processing.pipeline import Pipeline
+from mindex.search.search import SearchEngine
+from mindex.shared.media import cut
+from mindex.shared.storage import Store
+from mindex.shared.types import TextSearch
 
 
 @pytest.fixture
@@ -27,7 +27,7 @@ def library(config, video_file):
 def test_unindexed_admin_browse_media_relationship_and_paging(library):
     pipeline, source, client = library
     assert pipeline.store.active_index() is None
-    for url in ["/admin", "/admin/", "/admin.js", "/admin.css"]:
+    for url in ["/admin", "/admin/", "/assets/admin/admin.js", "/assets/admin/admin.css"]:
         assert client.get(url).status_code == 200
     result = client.get("/api/admin/sources", params={"q": "测试"}).json()
     assert result["total"] == 1

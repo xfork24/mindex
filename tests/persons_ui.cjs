@@ -128,7 +128,7 @@ const sandbox = {
   },
 };
 vm.createContext(sandbox);
-vm.runInContext(fs.readFileSync('src/mindex/static/persons.js', 'utf8'), sandbox);
+vm.runInContext(fs.readFileSync('frontend/src/persons/persons.js', 'utf8'), sandbox);
 const flush = () => new Promise(resolve => setImmediate(resolve));
 const event = {preventDefault() {}, stopPropagation() {}};
 function find(root, predicate) {

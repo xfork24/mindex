@@ -7,9 +7,9 @@ from pathlib import Path
 import pytest
 from conftest import FixtureSpeaker, FixtureStoryboarder
 
-from mindex import studio, studio_steps
-from mindex.adapters import ModelError
-from mindex.media import audio_info
+from mindex.models.adapters import ModelError
+from mindex.shared.media import audio_info
+from mindex.studio import studio, studio_steps
 
 
 def test_fixture_speaker_wav_is_probeable(config):

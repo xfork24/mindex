@@ -1,7 +1,8 @@
 from fastapi.testclient import TestClient
 
-from mindex import adapters, studio
 from mindex.api import create_app
+from mindex.models import adapters
+from mindex.studio import studio
 
 
 def test_create_generates_title_with_configured_generator(config, monkeypatch):

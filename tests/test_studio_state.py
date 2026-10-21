@@ -5,10 +5,10 @@ import json
 import pytest
 from filelock import FileLock
 
-from mindex import studio
-from mindex.config import RenderConfig, SelectionConfig
-from mindex.curation import EntityNotFound
-from mindex.studio import Shot, Storyboard
+from mindex.admin.curation import EntityNotFound
+from mindex.shared.config import RenderConfig, SelectionConfig
+from mindex.studio import studio
+from mindex.studio.studio import Shot, Storyboard
 
 
 def complete(config, job_id, step, result=None):

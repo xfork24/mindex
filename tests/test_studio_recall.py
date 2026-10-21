@@ -7,19 +7,19 @@ import io
 
 import numpy as np
 import pytest
-from conftest import FixtureEmbedder, FixtureSpeaker
+from conftest import FixtureEmbedder, FixtureSpeaker, FixtureStoryboarder
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from mindex import studio
-from mindex import studio_workspace as ws
 from mindex.api import create_app
-from mindex.indexing import IndexBuilder
-from mindex.media import cut
-from mindex.pipeline import Pipeline
-from mindex.storage import Store
-from mindex.studio import Shot, ShotRecall
-from mindex.types import Filters
+from mindex.processing.indexing import IndexBuilder
+from mindex.processing.pipeline import Pipeline
+from mindex.shared.media import cut
+from mindex.shared.storage import Store
+from mindex.shared.types import Filters
+from mindex.studio import studio
+from mindex.studio import studio_workspace as ws
+from mindex.studio.studio import Shot, ShotRecall
 
 
 def test_shot_recall_mode_media_and_person_constraints():
@@ -292,7 +292,7 @@ def test_document_auto_recall_invalidates_legacy_cache_only(prepared, monkeypatc
     jid, w, p = setup_workspace(config)
     content = ws.version(w, p["shots"]["a"]["content"])["data"]
     content["query"] = "晓伟凝视着档案中关于阿公郑木生的记录，神色凝重"
-    from mindex import persons
+    from mindex.persons import persons
 
     current = ws.specification(config, jid, w, p, "recall", "a")["signature"]
     monkeypatch.setattr(persons, "has_document_reference", lambda _: False)
@@ -383,7 +383,8 @@ def studio_client(config, video_file):
     Pipeline(config).prepare(video_file)
     embedder = FixtureEmbedder(config)
     IndexBuilder(config, embedder).build(mode="visual", kinds=("shot",), activate=True)
-    client = TestClient(create_app(config, embedder))
+    # 上传场景不依赖远程标题模型，避免测试意外等待网络服务。
+    client = TestClient(create_app(config, embedder, storyboarder=FixtureStoryboarder(config)))
     return config, client
 
 
@@ -500,7 +501,7 @@ def test_patch_recall_validation(studio_client):
 
 def test_person_recall_filters_by_published_evidence(prepared):
     """人物出镜召回由已发布证据约束候选：查询文本命中的镜头无证据时不可入选。"""
-    from mindex.persons import Entity, Persons, ShotReview
+    from mindex.persons.persons import Entity, Persons, ShotReview
 
     config, embedder = prepared
     jid, w, p = setup_workspace(config)
@@ -532,8 +533,8 @@ def test_person_recall_filters_by_published_evidence(prepared):
 
 
 def test_recall_reference_images_are_added_to_legacy_details_without_rewriting(prepared):
-    from mindex.persons import Entity, Persons
-    from mindex.storage import dumps
+    from mindex.persons.persons import Entity, Persons
+    from mindex.shared.storage import dumps
 
     config, embedder = prepared
     jid, w, p = setup_workspace(config)
@@ -574,7 +575,7 @@ def test_recall_reference_images_are_added_to_legacy_details_without_rewriting(p
     assert shown["image_url"] != shown["reference_url"]
 
 def test_workspace_recall_pins_active_person_release_and_reuses_after_rollback(prepared):
-    from mindex.persons import Entity, Persons, ShotReview
+    from mindex.persons.persons import Entity, Persons, ShotReview
 
     config, _embedder = prepared
     jid, w, p = setup_workspace(config)
@@ -623,7 +624,7 @@ def test_concurrent_query_uploads_do_not_block_event_loop(studio_client, monkeyp
     config, client = studio_client
     jid = create_studio_job(client)
     pid = ws.load(config, jid)["active_plan"]
-    from mindex import studio_api
+    from mindex.studio import studio_api
 
     decode = studio_api.image_png
 

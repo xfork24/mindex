@@ -8,8 +8,8 @@ import json
 import httpx
 import pytest
 
-from mindex import adapters
-from mindex.adapters import (
+from mindex.models import adapters
+from mindex.models.adapters import (
     DashScopeSpeaker,
     MiniMaxSpeaker,
     MiniMaxTranscriber,
@@ -382,7 +382,7 @@ def test_analyzer_logs_full_invalid_response_even_on_final_attempt(config, monke
     config.analyzer.response_retries = 0
     config.analyzer.api_key = "request-secret"
     monkeypatch.setattr(adapters, "request", lambda *a, **kw: payload)
-    with caplog.at_level("WARNING", logger="mindex.adapters"), pytest.raises(ModelError, match="自动重试已耗尽"):
+    with caplog.at_level("WARNING", logger="mindex.models.adapters"), pytest.raises(ModelError, match="自动重试已耗尽"):
         QwenAnalyzer(config)._chat([], "request-instructions")
     assert len(caplog.records) == 1
     message = caplog.records[0].getMessage()
@@ -444,7 +444,7 @@ def test_analyzer_retry_policy_preserves_existing_analysis_key(config):
     old_config = config.analyzer.model_dump(
         exclude={"timeout", "api_key_env", "response_retries", "initial_output_tokens", "max_output_tokens", "thinking_mode"}
     )
-    from mindex.config import fingerprint
+    from mindex.shared.config import fingerprint
 
     assert original == fingerprint({
         "prompt": 1, "model": old_config, "deployment": config.analyzer_deployment, "layout": config.layout_key,
@@ -505,13 +505,13 @@ def test_factories_dispatch_cloud_backends(config):
     config.studio.tts.backend = "dashscope"
     assert isinstance(make_speaker(config), DashScopeSpeaker)
     config.studio.tts.backend = "openai"
-    from mindex.adapters import OpenAISpeaker
+    from mindex.models.adapters import OpenAISpeaker
 
     assert isinstance(make_speaker(config), OpenAISpeaker)
 
 
 def test_pipeline_routes_openai_asr_to_raw_flow(config, monkeypatch):
-    from mindex.pipeline import Pipeline
+    from mindex.processing.pipeline import Pipeline
 
     config.asr.backend = "openai"
     calls = []
@@ -524,7 +524,7 @@ def test_pipeline_routes_openai_asr_to_raw_flow(config, monkeypatch):
 
 def test_pipeline_routes_minimax_asr_to_timestamp_flow(config, monkeypatch):
     """MiniMax 使用服务词级时间戳，不进入本地对齐流程。"""
-    from mindex.pipeline import Pipeline
+    from mindex.processing.pipeline import Pipeline
 
     config.asr.backend = "minimax"
     calls = []

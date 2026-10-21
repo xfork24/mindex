@@ -16,7 +16,7 @@ class Element {
 }
 const playlist = {duration: 2, items: [{url: '/a', start: .5, end: 1.5, offset: 0}, {url: '/b', start: 2, end: 3, offset: 1}]};
 const context = {window: {}, document: {createElement: tag => new Element(tag)}, fetch: async () => ({ok: true, json: async () => playlist})};
-vm.createContext(context);vm.runInContext(fs.readFileSync('src/mindex/static/shot-player.js', 'utf8'), context);
+vm.createContext(context);vm.runInContext(fs.readFileSync('frontend/src/shared/shot-player.js', 'utf8'), context);
 (async () => {
   const Player = context.window.ShotPlayer;
   const first = new Element('video');const player = Player.attach(first, '/playlist');await player.ready;

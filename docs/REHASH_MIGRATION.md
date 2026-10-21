@@ -59,8 +59,8 @@
 |---|---|
 | `uv run pytest -q`（全量） | 229 passed、1 skipped（迁移完成后复跑，2026-10-14 晚，83.3s） |
 | `uv run pytest tests/test_deployment_v2.py -q` | 64 passed |
-| `uv run ruff check src tests` | 通过 |
-| `node --check src/mindex/static/app.js` | 通过 |
+| `uv run ruff check backend/src tests` | 通过 |
+| `node --check frontend/src/search/app.js` | 通过 |
 
 ## 正片：迁移而非重建（2026-10-14 晚已执行）
 

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from mindex import adapters
-from mindex.runtime_settings import save_voice
-from mindex.storage import Store
-from mindex.voices_catalog import QWEN3_TTS_CUSTOMVOICE, fetch_catalog
+from mindex.models import adapters
+from mindex.settings.runtime_settings import save_voice
+from mindex.settings.voices_catalog import QWEN3_TTS_CUSTOMVOICE, fetch_catalog
+from mindex.shared.storage import Store
 
 
 def test_static_qwen_table_complete():

@@ -7,7 +7,7 @@
 关键现状（探索结论）：
 - 演员卡 `actorCard`（persons.js:81-93）：`button.person-toggle` 标题（`▸ 名字 · N 个角色`）+ 角色以 `div.role-grid`（112px 迷你格）嵌在**卡片内部**展开；点击整目录全量重渲染（`renderCatalogue`）。
 - 创作页参考模式（studio.js:587-720）：`tr 配对行 + tr 详情行`，详情行单 `td colspan`，`.shot-detail-panel{position:sticky;left:0;width:var(--matrix-viewport-width)}`，仅展开时插入 DOM；CSS Grid 场景等价物是 `grid-column:1/-1` 的兄弟行。
-- 实体删除后端**没有**（person_api.py 路由表无 DELETE /entities）；唯一守卫先例：`validate_update`（persons.py:220-241）拒绝删除仍有已接受出镜证据的作品关联；参考图删除是裸 `DELETE FROM person_references`。
+- 实体删除后端**没有**（persons/person_api.py 路由表无 DELETE /entities）；唯一守卫先例：`validate_update`（persons/persons.py:220-241）拒绝删除仍有已接受出镜证据的作品关联；参考图删除是裸 `DELETE FROM person_references`。
 - 多选框清单（全部 `name · shortid` 标签、rowid 序、无搜索）：index `actor-select/role-select`（app.js fillOptions:222）；persons `filter-work/actor/role`、`entity-work/entity-actors`（persons.js options():18）；studio 召回演员/角色（studio.js fillAllSelect:22）。各页面 JS 独立、无共享脚本；`全部选择` 逻辑已三处重复。
 - 演员别名即外文名（导入时 foreign_name 存为 alias）。
 
@@ -26,7 +26,7 @@
 - 标题：`<h3>{actor.name}</h3>`，有别名时同行追加 `<span class="foreign">{aliases.join(' / ')}</span>`（外文名/别名）。
 - 第二行：`<p class="muted">{roles.length} 个角色</p>`（`roles=rolesOf(actor)`，过滤感知，与展开行内容一致）。
 
-### 3. 演员删除（persons.js + person_api.py + persons.py）
+### 3. 演员删除（persons.js + persons/person_api.py + persons/persons.py）
 
 - 后端 `Persons.delete_entity(identifier)` + `DELETE /api/persons/entities/{identifier}`：
   - 仅 actor/role（work 返回「作品暂不支持删除」）。
@@ -36,7 +36,7 @@
 - 前端：演员卡与角色卡各加小号「删除」按钮（红字 quiet 风格，stopPropagation）；成功后 `refresh()` + notice；失败显示后端中文错误（run() 已有 notice）。
 - 测试（tests/test_persons.py 新增）：空演员删除成功；有参考图 422；有 accepted 证据 422；带配对的演员删除后角色 `actor_ids` 清理；角色删除守卫两条。
 
-### 4. 可搜索多选框（新共享脚本 static/multiselect.js + 各页接入）
+### 4. 可搜索多选框（新共享脚本 frontend/src/shared/multiselect.js + 各页接入）
 
 - 新文件 `multiselect.js`，index/persons/studio 三页 `<script defer>` 引入（放在各页主脚本之前；加 `?v=20261018-multisearch`）：
   - `MindexMultiSearch.sort(entries)`：`a.name.localeCompare(b.name,'zh') || a.id.localeCompare(b.id)`。
