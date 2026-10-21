@@ -87,7 +87,7 @@ const personDraft = {data: {recall: {person_ids: ['a1', 'r1']}}, original: {reca
 context.renderRecallEditor(personBody, 'people', personDraft, new Node('div'));
 const sourceControl = find(personBody, n => n.dataset.recallFilter === 'source_ids');
 function selects(root) {return [root, ...root.children.flatMap(selects)].filter(n => n.tag === 'select');}
-const actorControl = selects(personBody)[0], roleControl = selects(personBody)[1];
+const [actorControl, roleControl] = selects(personBody).filter(n => n !== sourceControl);
 for (const option of sourceControl.options) option.selected = option.value === 's2';
 sourceControl.events.change();
 assert.deepEqual(Array.from(context.itemOptionsOf(actorControl), o => o.value), ['a2']);

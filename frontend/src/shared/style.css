@@ -96,22 +96,8 @@ footer{flex-direction:column}
 
 .tabs{overflow-x:auto}
 .tab{flex-shrink:0}
-.material-filters{display:grid;grid-template-columns:minmax(0,320px) minmax(0,1fr);gap:16px;margin-top:16px;align-items:start}
-.material-filter-fields{margin-top:0;grid-template-columns:repeat(2,minmax(0,1fr))}
-.material-filters .muted{font-size:12px;line-height:18px}
-@media(max-width:800px){.material-filters{grid-template-columns:minmax(0,260px) minmax(0,1fr)}}
-@media(max-width:540px){.material-filters,.material-filter-fields{grid-template-columns:minmax(0,1fr)}}
-
 /* 多选框搜索框：作品/演员/角色多选实时过滤 */
 .multi-search{width:100%;margin:0 0 6px}
-
-/* 人物筛选下拉：按内容宽度紧凑排列，放不下时整项换行，不用固定栅格留空 */
-#person-controls{display:flex;flex-wrap:wrap;gap:16px 20px;align-items:flex-start}
-
-#person-controls label{flex:0 1 auto;min-width:0}
-
-#person-controls label:has(.multi-select){width:260px;max-width:100%}
-#person-controls label:not(:has(.multi-select)){width:230px;max-width:100%}
 
 #search-form .filter-grid{align-items:end}
 
@@ -119,7 +105,6 @@ footer{flex-direction:column}
 
 #search-form>.form-bottom{margin-top:18px}
 
-#search-form>.filters>summary{font-size:14px}
 
 .person-evidence{margin:18px 0}
 
@@ -324,7 +309,16 @@ button.language-switch .language-divider::after{content:"";position:absolute;ins
 .card-body .card-actions{flex-wrap:nowrap;gap:6px;margin-top:5px;padding-top:4px}
 .card-actions a,.card-actions button{display:inline-flex;align-items:center;justify-content:center;height:28px;min-height:28px;line-height:1;white-space:nowrap;margin:0;padding:0 2px}
 
-/* Stack person search options beside the actor and role lists. */
-#person-controls .person-search-options{display:flex;flex-direction:column;gap:16px;width:230px;max-width:100%;align-self:flex-start}
-#person-controls .person-search-options label{width:100%}
-@media(max-width:540px){#person-controls .person-search-options{width:100%}}
+/* 检索筛选：素材与人物同排，检索参数独立一排，操作按钮置底。 */
+.search-scope-row,.search-filter-row{display:grid;gap:12px;min-width:0;margin-top:18px}
+.search-scope-row{grid-template-columns:repeat(4,minmax(0,1fr));align-items:start}
+.search-scope-row .material-filters,#person-filters,#person-controls{display:contents}
+.search-scope-row label,#person-controls label:has(.multi-select),#person-controls label:not(:has(.multi-select)){width:100%;min-width:0;max-width:100%;margin:0}
+.search-scope-row .muted{font-size:12px;line-height:18px}
+#person-controls .person-search-options{display:flex;flex-direction:column;gap:12px;min-width:0}
+.search-scope-row:has(#person-filters[hidden]){grid-template-columns:minmax(0,1fr)}
+.search-filter-row{grid-template-columns:repeat(5,minmax(0,1fr));align-items:end}
+.search-filter-row label{margin:0}
+.search-scope-row select,.search-filter-row input,.search-filter-row select{width:100%;min-width:0}
+@media(max-width:800px){.search-scope-row,.search-filter-row{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:540px){.search-scope-row,.search-filter-row{grid-template-columns:minmax(0,1fr)}}

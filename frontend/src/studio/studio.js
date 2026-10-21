@@ -936,7 +936,10 @@ function renderRecallEditor(body, sid, draft, overrides) {
       commit(next);
       draw();
     });
-    section.append(modeField.wrap);
+    const primaryOptions = el("div", "", "recall-primary-options");
+    primaryOptions.append(modeField.wrap, overrides);
+    section.append(primaryOptions);
+    const personOptions = el("div", "", "recall-person-options");
     let refreshPersons = () => {};
     if (mode === "text") {
       // 与检索页一致：演员和角色两级，角色按已选演员过滤；后端仍只收 person_ids。
@@ -967,9 +970,7 @@ function renderRecallEditor(body, sid, draft, overrides) {
       fillAllSelect(roleField.select, roleEntries(), chosen);
       actorField.select.addEventListener("change", () => {toggleAllOf(actorField.select);fillRoles();});
       roleField.select.addEventListener("change", () => {toggleAllOf(roleField.select);commitPersons();});
-      section.append(actorField.wrap, roleField.wrap);
-      const personOptions = el("div", "", "recall-person-options");
-      section.append(personOptions);
+      personOptions.append(actorField.wrap, roleField.wrap);
       for (const [key, label, choices] of [
       ["person_mode", MindexI18n.msg("ui.06cf3151c450"), [
       ["auto", MindexI18n.msg("ui.be93a225bcfb")],
@@ -1064,8 +1065,10 @@ function renderRecallEditor(body, sid, draft, overrides) {
       refreshPersons(next);
       commit(next);
     });
+    const scopeOptions = el("div", "", "recall-scope-options");
+    scopeOptions.append(sourceField.wrap, personOptions);
+    section.append(scopeOptions);
     const filters = el("div", "", "recall-filters");
-    filters.append(sourceField.wrap);
     for (const [key, label, placeholder, type] of [
       ["scene", "ui.625b392c7b8a", "ui.722889427cbf", "text"],
       ["emotion", "ui.61fe61644a75", "ui.d637fe8494d8", "text"],
@@ -1088,7 +1091,7 @@ function renderRecallEditor(body, sid, draft, overrides) {
       });
       filters.append(f.wrap);
     }
-    section.append(filters, overrides);
+    section.append(filters);
     if (mode !== "text") section.append(el("p", MindexI18n.msg("ui.105e58965eba"), "muted"));
   };
   draw();
@@ -1193,8 +1196,7 @@ function renderShotEditor(body, sid) {
   );
   const history = el("div");
   history.dataset.rowHistory = "content";
-  overrides.append(actions);
-  body.append(history);
+  body.append(actions, history);
 }
 function currentBoard() {
   return order().map((sid) => ({ ...ver(plan().shots[sid].content).data }));

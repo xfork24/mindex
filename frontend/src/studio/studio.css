@@ -214,22 +214,17 @@ summary{cursor:pointer}
 
 .recall-editor h4{flex-basis:100%;margin:0}
 
-.recall-editor>.form-field{margin:0;flex:0 1 240px}
-.recall-person-options{display:flex;flex-direction:column;gap:12px;flex:0 1 240px;min-width:0;max-width:100%;align-self:flex-start}
-.recall-return-options{display:flex;flex-wrap:wrap;gap:12px;flex-basis:100%;min-width:0;max-width:100%;align-items:end}
-.recall-return-options>.form-field{flex:0 1 240px}
-.recall-return-options>.detail-actions{flex:1 1 0;min-width:0;margin:0;align-items:center}
-.recall-person-options>.form-field,.recall-return-options>.form-field{margin:0;width:100%;min-width:0}
-.recall-person-options select,.recall-return-options select{width:100%;min-width:0}
-.recall-filters{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;flex-basis:100%;align-items:end}
-.recall-filters>.form-field{margin:0}
-.recall-filters>.form-field:has(.multi-select){grid-row:span 3;align-self:start}
+.recall-primary-options,.recall-scope-options,.recall-filters{display:grid;gap:12px;flex-basis:100%;min-width:0;align-items:start}
+.recall-primary-options{grid-template-columns:repeat(3,minmax(0,1fr));align-items:end}
+.recall-scope-options,.recall-filters{grid-template-columns:repeat(5,minmax(0,1fr))}
+.recall-person-options,.recall-return-options{display:contents}
+.recall-primary-options .form-field,.recall-scope-options .form-field,.recall-filters>.form-field{margin:0;width:100%;min-width:0}
+.recall-primary-options select,.recall-scope-options select{width:100%;min-width:0}
 .recall-upload-row{display:flex;flex-wrap:wrap;align-items:end;gap:8px;flex:1 1 100%;min-width:0}
 .recall-upload-row>.form-field{margin:0;flex:1 1 260px;max-width:600px}
 .recall-upload-row .recall-upload-button{--control-size:40px;height:40px;min-height:40px;flex:0 0 auto}
-@media(max-width:800px){.recall-filters{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:540px){.recall-filters{grid-template-columns:minmax(0,1fr)}
-.recall-filters>.form-field:has(.multi-select){grid-row:auto}
+@media(max-width:800px){.recall-scope-options,.recall-filters{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:540px){.recall-primary-options,.recall-scope-options,.recall-filters{grid-template-columns:minmax(0,1fr)}
 .recall-upload-row>.form-field{flex-basis:100%}}
 
 .recall-editor .muted{flex-basis:100%;margin:0}

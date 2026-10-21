@@ -1,15 +1,40 @@
 # CLI 完全参考
 
-安装后有两个入口：`mindex`（本机客户端）和 `mindex-model-server`（GPU 侧服务，见文末）。所有命令的中文帮助可用 `--help` 查看。
+安装后有三个入口：`mindex`（本机工作台 CLI）、`mindex-model-server`（嵌入/ASR/分镜检测服务）和 `mindex-person-server`（人物服务）。模型服务运行在独立环境中。
+
+## 在终端查看完整帮助
+
+`mindex` 的根命令、命令组及每个叶子命令均支持 `-h` 和 `--help`。帮助包含用途、前置条件、默认行为、参数、输出、注意事项和示例，不加载配置、不访问素材库，也不要求启动模型。即使显式指定的配置不存在或 YAML 损坏，仍可查看子命令帮助。帮助保留 Rich 彩色边框与表格式选单，长中文参数在表格内自动折行，完整展示说明。
+
+```bash
+uv run mindex -h
+uv run mindex clean --help
+uv run mindex indexes -h
+uv run mindex persons process -h
+uv run mindex clips migrate --help
+uv run mindex backup import --help
+uv run mindex e2e phase -h
+```
+
+命令组不带子命令会显示选单（退出码 2）；显式请求帮助退出码为 0。CLI 中实际注册的命令及其帮助是参数清单的依据，本文补充使用流程。
+
+| 命令组 | 子命令 |
+| --- | --- |
+| `indexes` | `list`、`activate` |
+| `persons` | `list`、`save`、`reference`、`process`、`status`、`publish`、`review`、`activate`、`migrate-frames` |
+| `clips` | `migrate`、`materialize`、`verify-archives`、`repair-boundaries`、`prune` |
+| `backup` | `list`、`inspect`、`export`、`import`、`recover` |
+| `e2e` | `init`、`probe`、`pin`、`phase`、`freeze`、`review`、`status` |
 
 ## 全局规则
 
 - `--config` / `-c` **必须放在子命令之前**：`uv run mindex --config profiles/int8.yaml index`。也可设环境变量 `MINDEX_CONFIG`（默认读 `config.local.yaml`）。
 - 全局 `--data-dir DIR` 显式指定数据目录，按当前工作目录解析；`backup import --data-dir DIR` 也支持在子命令后指定恢复位置。
+- `--verbose` 启用 DEBUG 日志，默认 INFO；`--no-runtime-overrides` 禁止合并设置页覆盖层，固定使用 YAML。
 - 配置模型 strict（`extra="forbid"`），未知键直接校验失败。
 - `data_dir` 已有元数据库时，CLI 命令会合并设置页（`/settings`）保存的覆盖层——激活的模型档案与检索调参对 CLI 同样生效，与 Web 行为一致；`mindex e2e`、`mindex clips`、`mindex backup` 命令组例外，使用 YAML 原值。备份会分别携带基础 YAML 与数据库覆盖层。
 - `data_dir` 相对路径按**配置文件所在目录**解析；`deployment_manifest` 同理。
-- 离线阶段命令之间以 `data/pipeline.lock` 互斥，并行第二个实例立即失败。
+- 离线任务使用管线与素材/工作类型锁；全库维护需要独占锁。同素材同类任务或独占维护冲突时会拒绝并行，不能假设所有任务都允许并发。
 
 ## 数据备份与迁移
 
@@ -36,7 +61,7 @@ uv run mindex backup recover --data-dir /new/data --json
 
 ### `mindex prepare VIDEOS...`
 
-导入原视频、检测镜头并实际切片（= `detect` + `split`，纯本地 CPU，不需要模型服务）。可一次传多个文件。每个素材返回内容 SHA256 作为 SOURCE_ID。
+导入原视频、检测镜头并实际切片（= `detect` + `split`；默认 adaptive 为本地 CPU，配置 transnet 时需要对应检测服务）。可一次传多个文件。每个素材返回内容 SHA256 作为 SOURCE_ID。
 
 ```bash
 uv run mindex prepare '/路径/电影.mkv' /路径/素材2.mp4
@@ -44,7 +69,7 @@ uv run mindex prepare '/路径/电影.mkv' /路径/素材2.mp4
 
 ### `mindex detect VIDEO`
 
-只扫描并保存分镜计划到 `plans/SOURCE_ID.json`，不切片、不调用嵌入模型。最后一行输出 SOURCE_ID。计划原子写入，后续编码中断不需要重扫。
+只扫描并保存分镜计划到 `plans/SOURCE_ID.json`，不切片、不调用嵌入模型。默认 adaptive 在本地检测，transnet 需对应检测服务。最后一行输出 SOURCE_ID。计划原子写入，后续编码中断不需要重扫。
 
 ### `mindex split SOURCE_ID`
 
@@ -68,7 +93,7 @@ uv run mindex prepare '/路径/电影.mkv' /路径/素材2.mp4
 
 ### `mindex align PYTHON [--source SOURCE_ID]`
 
-用独立 CPU ForcedAligner 环境对齐已缓存的原始 ASR 文本（仅 `asr.backend: llama_cpp` / `openai` 路径需要，二者都只出原始文本）。**`PYTHON` 是位置参数**，指向 `.venv-align/bin/python`：
+用独立 CPU ForcedAligner 环境对齐已缓存的原始 ASR 文本（用于 `asr.backend: llama_cpp` / `openai` 等纯文本路径；MiniMax 自带时间戳不需要此步）。**`PYTHON` 是位置参数**，指向 `.venv-align/bin/python`：
 
 ```bash
 uv run mindex align .venv-align/bin/python
@@ -90,11 +115,11 @@ uv run mindex align .venv-align/bin/python
 | `--mode` | `auto` | `auto` 使用已完成渠道；`visual` 更新画面；`enriched` 保留旧版完整索引入口 |
 | `--source` | 全部 | 更新该素材；新版保留活动索引中的其他素材和渠道 |
 | `--channel` | 全部可用渠道 | 可重复指定 `visual` / `dialogue` / `analysis`；未选渠道保留 |
-| `--kind` | 新版沿用活动粒度，首次 moment；enriched→全部 | 可重复指定 `shot`/`moment`/`scene`；visual 不支持 scene |
+| `--kind` | auto/enriched→moment、shot、scene；visual→moment、shot | 可重复指定 `shot`/`moment`/`scene`；visual 不支持 scene |
 
 ### `mindex ingest VIDEOS... [--activate]`
 
-执行默认阶段（prepare→enrich-dialogue→auto index），不触发 LLM 分析。**仅适用于服务可同时访问的环境**，单 GPU 互斥场景禁用。
+执行默认阶段（prepare→enrich-dialogue→auto index），不触发 LLM 分析。对白处理面向库内素材，不仅限本次输入。**仅适用于服务可同时访问的环境**，单 GPU 互斥场景禁用。
 
 ## 检索与状态
 
@@ -112,7 +137,7 @@ uv run mindex search '雨夜，一个人强忍眼泪，镜头慢慢推近' --gra
 
 ### `mindex serve [--host 127.0.0.1] [--port 8000] [--index-id INDEX_ID]`
 
-启动页面与检索 API。`/` 检索页、`/admin` 素材后台、`/studio` 创作页、`/settings` 设置页、`/docs` OpenAPI。
+启动页面与检索 API。`/` 检索页、`/admin` 素材后台、`/persons` 人物库、`/studio` 创作页、`/settings` 设置页、`/docs` OpenAPI。
 
 `--index-id` 将查询、片段媒体和上下文绑定到指定 ready 索引，用于独立版本验证；不会修改活动索引。
 
@@ -136,11 +161,11 @@ uv run mindex search '雨夜，一个人强忍眼泪，镜头慢慢推近' --gra
 
 扫描可安全回收的磁盘数据；**默认预览**，加 `--apply` 才真正删除。分级判定、保留策略与 C 级待调整清单详见 [cleanup.md](cleanup.md)；过期阈值在配置 `clean` 节调整（[config-reference.md](config-reference.md)）。
 
-- **A 级（每次都删）**：崩溃残留临时目录、`.DS_Store`、上传暂存残留、孤儿文件（切片/缩略图/转码缓存/人物图/声音样本/未注册原片）
-- **B 级（策略过期）**：非活动索引版本（保留活动 + 最近 `clean.index_keep_versions` 个 ready + 全部 building）、旧指纹检查点、context/studio/reports/字幕缓存、runs 旧记录
-- **C 级（只报告不删）**：persons/frames、model-cache、一次性验证产物、数据库备份、VACUUM 建议——出现在输出 `notes` 中
+- **A 级（每次都删）**：崩溃残留临时目录、`.DS_Store`、上传暂存残留、孤儿文件（切片/缩略图/转码缓存/人物图/声音样本/未注册原片），以及 `persons/frames` 冗余展示帧（已确认镜头每身份保留一帧，未确认镜头全部保留）；部分上传/原片残留受 `clean.temp_grace_hours` 宽限期保护
+- **B 级（策略过期）**：非活动索引版本（保留活动 + 最近 `clean.index_keep_versions` 个非活动 ready + 全部非 ready）、旧指纹检查点、context/shot_media/studio/reports/字幕缓存、runs 旧记录
+- **C 级（只报告不删）**：model-cache、一次性验证产物、数据库备份、VACUUM 建议——出现在输出 `notes` 中
 
-apply 分两段持锁：先独占 `pipeline.lock` + `index-write.lock`（管线与索引类，与素材删除同序），释放后再取 `studio.lock`（创作类，拿不到则该三类标记 skipped 而非失败）。管线/索引锁被占时以中文提示退出码 1。大规模清理前建议停 serve。
+apply 分两段持锁：先独占 `pipeline.lock` + `index-write.lock`（管线与索引类，与素材删除同序），释放后再取 `studio.lock`（创作类，拿不到则该三类标记 skipped 而非失败）。管线/索引锁被占时以中文提示退出码 1。大规模清理前建议停 serve。输出 JSON 的 `categories` 包含各类别 `error`/`skipped`，应逐项检查；单类别错误记录在报告中，不一定使整体退出码为 1。CLI 只提供 `--apply`，无按类别删除或命令行过期天数选项；保留策略在 YAML 的 `clean` 节配置。
 
 ```bash
 uv run mindex clean                       # 预览各类别可回收项与字节数
@@ -149,9 +174,9 @@ uv run mindex clean --apply               # 实际删除
 
 ## 评测与联调
 
-### `mindex evaluate QUERIES [--split test] [--split dev|video-test] [--output FILE] [--index-id INDEX_ID]`
+### `mindex evaluate QUERIES [--split test] [--split dev|video] [--output FILE] [--index-id INDEX_ID]`
 
-评测已冻结标注的查询集。未确认标注（`label_status != confirmed`）会被拒绝。split 对应查询文件中的 `split` 字段：`dev` 调参、`test` 报告、`video-test` 视频查询。
+评测已冻结标注的查询集。未确认标注（`label_status != confirmed`）会被拒绝。split 对应查询文件中的 `split` 字段：`dev` 调参、`test` 报告、`video` 视频查询（分组名由查询文件决定）。
 
 ```bash
 uv run mindex evaluate eval/queries.jsonl --split dev --output data/eval-dev.json
@@ -159,7 +184,7 @@ uv run mindex evaluate eval/queries.jsonl --split dev --output data/eval-dev.jso
 
 ### `mindex model-check VIDEO [--text '描述'] [--repeats 3] [--output FILE]`
 
-验证真实文字/视频嵌入：维度、范数、余弦、耗时重复稳定性，抓取服务 `/metrics` 显存（如有）。要求视频 ≤6 秒。
+验证真实文字/视频嵌入：维度、范数、余弦、耗时重复稳定性，抓取服务 `/metrics` 显存（如有）。要求视频不超过 `video.short_shot_seconds`（默认 6 秒）。
 
 ```bash
 uv run mindex model-check data/clips/ID/moment/SEG.mp4 --text '画面描述' --output data/model-check.json
@@ -179,7 +204,51 @@ uv run mindex model-check data/clips/ID/moment/SEG.mp4 --text '画面描述' --o
 | `mindex e2e review QUERIES --run DIR` | 生成可播放全部候选、选择目标并导出确认标注的本地页面 |
 | `mindex e2e status --run DIR` | 查看阶段状态、当前配置分析完成数量和活动索引，无模型请求 |
 
-phase 取值：`smoke → visual → preview → asr → align → analyze(-smoke) → enriched → evaluate → video-evaluate → check`。其中 `align` 需 `--python`，`preview`/`evaluate`/`video-evaluate` 需 `--queries`。
+phase 取值：`smoke → visual → preview → asr → align → analyze(-smoke) → enriched → evaluate → video-evaluate → check`。其中 `align` 需 `--python`，`preview`/`evaluate`/`video-evaluate` 需 `--queries`；`video-evaluate` 的默认 `test` 分组会映射为 `video`。
+
+## 人物库与人物发布
+
+人物命令使用的身份、参考图和任务均保存在当前数据目录。人物处理服务需单独安装与启动，见 [人物库指南](persons.md)。
+
+| 命令 | 参数与行为 |
+| --- | --- |
+| `persons list` | 输出实体与参考图 JSON，无模型请求 |
+| `persons save FILE [--identifier ID]` | 从实体 JSON 新建；指定 ID 则修改 |
+| `persons reference ACTOR IMAGES...` | 为演员 ID 添加一张或多张参考图，人物服务质检失败会拒绝 |
+| `persons process SOURCE [--start SEC] [--end SEC] [--publish] [--retry TASK]` | 后台扫描，立即返回任务 ID 和日志路径；默认开始 0 秒、至片尾，不发布 |
+| `persons status TASK` | 查询任务状态、结果、错误；TASK 不是素材 ID |
+| `persons review FILE` | 写入镜头人工出镜确认，不自动发布 |
+| `persons publish [--content INDEX_ID]` | 将已接受证据冻结为人物快照并发布检索组合，默认绑定活动内容索引 |
+| `persons activate RELEASE` | 激活已有检索组合，同时切换内容索引与人物快照 |
+| `persons migrate-frames [--source ID] [--apply]` | 迁移压缩展示帧、清理冗余，默认预览；无需重新索引 |
+
+实体 JSON 至少包含 `kind`（`actor`/`work`/`role`）和 `name`，可包含 `aliases`、`work_ids`、`actor_ids`。角色需至少一个 `work_id`。例如：
+
+```json
+{"kind":"actor","name":"示例演员","aliases":[]}
+```
+
+镜头审核 JSON 示例：
+
+```json
+{"source_id":"SOURCE_ID","shot_id":"SHOT_ID","selections":[{"actor_id":"ACTOR_ID","role_id":null}]}
+```
+
+`process --retry TASK` 只接受同素材的 failed/interrupted 任务。`activate` 的参数是检索组合 ID，不是单独的人物版本 ID；切换后仍需匹配的嵌入配置才能执行向量查询。
+
+## 旧切片迁移与镜头维护
+
+本命令组使用 YAML 原值，不合并设置页覆盖层。详见 [架构与媒体服务](architecture.md)。
+
+| 命令 | 行为 |
+| --- | --- |
+| `clips migrate [--source ID] [--apply] [--verify]` | 默认盘点；apply 备份并登记引用，verify 需配合 apply 验证媒体；不删除旧实体 |
+| `clips materialize --all` | 必须显式指定 all，直接从 shot 恢复旧路径实体，无预览开关 |
+| `clips verify-archives [--source ID]` | 完整校验归档原片 SHA256，不等同于普通 check |
+| `clips repair-boundaries [--source ID] [--audit-file FILE] [--apply]` | 默认生成切点审计报告；可读取已有 JSON，apply 才修复，旧媒体保留 |
+| `clips prune MIGRATION_REPORT [--apply]` | 根据已验证的迁移报告预览旧实体删除；验收后再 apply，保留原片和 shot |
+
+省略 `--source` 时面向全部素材。通用磁盘回收使用 `mindex clean`，而非 `clips prune`。
 
 ## mindex-model-server（GPU 侧）
 
