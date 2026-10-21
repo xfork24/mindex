@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse
 from pydantic import Field, model_validator
 
 from .adapters import analysis_options, request
-from .config import StrictModel
+from .config import StrictModel, fingerprint
 from .person_processing import PersonClient, PersonOptions, PersonTasks, ensure_reference_quality
 from .persons import CastConfirm, CastEntry, Entity, PersonHasLinkedShots, Persons, ShotReview, checked_box
 from .processing_lock import ProcessingLock, index_write_lock
@@ -130,7 +130,7 @@ def person_router(runtime, store):
     catalogue, tasks = Persons(store), PersonTasks(runtime, store)
 
     @router.get("")
-    def listing():
+    def listing(compact: bool = False):
         names = store.source_names()
         sources = [{**s, "name": names[s["id"]], "work_id": catalogue.work_for(s["id"])}
                    for s in store.sources()]
@@ -139,8 +139,8 @@ def person_router(runtime, store):
             "entities": catalogue.entities(),
             "references": catalogue.references(),
             "sources": [{"id": s["id"], "name": s["name"], "work_id": s["work_id"]} for s in sources],
-            "review_shots": catalogue.review_summary(),
-            "coverage": [
+            "review_shots": catalogue.review_summary() if not compact else {},
+            "coverage": store.rows("SELECT source_id FROM person_coverage") if compact else [
                 {**r, "data": json.loads(r["data"])} for r in store.rows("SELECT * FROM person_coverage")
             ],
             "tasks": [
@@ -148,6 +148,23 @@ def person_router(runtime, store):
                 for r in store.rows("SELECT id FROM person_tasks ORDER BY rowid DESC LIMIT 30")
             ],
             "releases": store.rows("SELECT * FROM search_releases ORDER BY rowid DESC LIMIT 30"),
+        }
+
+    @router.get("/filters")
+    def filters():
+        # Search selectors need identity relationships, not evidence, task logs,
+        # reference images or frame coverage payloads.
+        sources = store.rows(
+            "SELECT s.id,COALESCE(c.display_name,s.name) AS name,p.work_id FROM sources s "
+            "LEFT JOIN source_curation c ON c.id=s.id "
+            "LEFT JOIN person_sources p ON p.source_id=s.id "
+            "WHERE COALESCE(c.hidden,0)=0 ORDER BY s.name,s.id"
+        )
+        for source in sources:
+            source["work_id"] = source["work_id"] or fingerprint(["work", source["id"]])
+        return {
+            "entities": catalogue.entities("actor") + catalogue.entities("role"),
+            "sources": sources,
         }
 
     @router.post("/entities", status_code=201)
@@ -325,10 +342,17 @@ def person_router(runtime, store):
         return catalogue.confirm_import(identifier, body, checker=reference_checker(runtime, store))
 
     @router.get("/imports/{identifier}/images/{image_id}")
-    def import_image(identifier: str, image_id: str):
+    def import_image(identifier: str, image_id: str, thumbnail: bool = False):
         image = next((im for im in catalogue.get_import(identifier)["images"] if im["id"] == image_id), None)
         if not image:
             raise HTTPException(404, "找不到原图")
+        if thumbnail:
+            from .person_thumbnails import import_thumbnail
+            try:
+                path = import_thumbnail(store, image)
+            except FileNotFoundError as exc:
+                raise HTTPException(404, "图片缺失") from exc
+            return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
         return media(image["path"])
 
     @router.post("/sources/{source_id}/process", status_code=202)

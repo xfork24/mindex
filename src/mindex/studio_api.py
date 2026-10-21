@@ -411,8 +411,8 @@ def studio_router(
         return w
 
     @router.get("/jobs/{job_id}/workspace")
-    def get_workspace(job_id: str):
-        return workspace.detail(current(), job_id, read_workspace(job_id), store=store)
+    def get_workspace(job_id: str, compact: bool = False):
+        return workspace.detail(current(), job_id, read_workspace(job_id), store=store, compact=compact)
 
     @router.patch("/jobs/{job_id}/title")
     def patch_title(job_id: str, body: TitleBody):

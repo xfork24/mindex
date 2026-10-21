@@ -230,41 +230,49 @@ async function selectJob(id, { reloadJobs = true } = {}) {
   state.persons = state.inputs = null;
   history.replaceState(null, "", `/studio?job=${id}`);
   closeDialog();
+  loadRecallOptions().catch((error) => notice(MindexI18n.msg("ui.867f562167d6", { p0: error.message }), true));
   await refresh();
   if (id !== state.id) return;
   if (reloadJobs) loadJobs().catch(fail);
   loadArtifacts().catch(fail);
-  loadRecallOptions().catch((error) => notice(MindexI18n.msg("ui.867f562167d6", { p0: error.message }), true));
+}
+let recallCatalogue = null, recallCatalogueTime = 0, recallCatalogueRequest = null;
+async function loadCatalogue() {
+  if (recallCatalogue && Date.now() - recallCatalogueTime < 15000) return recallCatalogue;
+  if (!recallCatalogueRequest) {
+    recallCatalogueRequest = api("/api/persons/filters").then((data) => {
+      recallCatalogue = data;recallCatalogueTime = Date.now();return data;
+    }).finally(() => {recallCatalogueRequest = null;});
+  }
+  return recallCatalogueRequest;
 }
 async function loadRecallOptions() {
   const id = state.id;
-  const persons = await api("/api/persons");
+  const persons = await loadCatalogue();
   if (id !== state.id) return;
-  if (persons?.entities) {
-    state.persons = persons.entities.filter((e) => ["actor", "role"].includes(e.kind));
-    state.personSources = persons.sources || [];
-  }
-  await loadSources();
-  if (id !== state.id) return;
+  state.persons = persons.entities;
+  state.personSources = persons.sources;
+  applySources(persons.sources);
   for (const entry of state.matrixRows.values()) entry.panelKey = null;
-  renderMatrix();
+  if (state.data) renderMatrix();
 }
-// 素材是库级列表，创建表单也要用，所以跨任务保留，不随 selectJob 清空。
+// Shared by the creation form and per-shot recall editors.
+function applySources(sources) {
+  state.sources = sources;
+  fillCreateSources();
+  if (state.data) renderJobMeta();
+}
 async function loadSources() {
-  const status = await api("/api/status");
-  if (status?.sources) {
-    state.sources = status.sources;
-    fillCreateSources();
-    // 素材名要靠这份列表，元信息面板可能早于它渲染，到货后补一次。
-    if (state.data) renderJobMeta();
-  }
+  const catalogue = await loadCatalogue();
+  applySources(catalogue.sources);
   return state.sources;
 }
 function fillCreateSources() {
   const select = $("create-sources");
   if (!select) return;
   const sources = state.sources || [];
-  fillAllSelect(select, sources, new Set(sources.map((s) => s.id)));
+  const chosen = select.options.length ? new Set(pickedIds(select)) : new Set(sources.map((s) => s.id));
+  fillAllSelect(select, sources, chosen);
   select.disabled = sources.length === 0;
   $("create-sources-empty").hidden = sources.length > 0;
 }
@@ -327,12 +335,12 @@ async function refresh() {
   const token = ++state.token,
     id = state.id;
   if (!id) return;
-  const data = await api(`${base()}/workspace`);
+  const data = await api(`${base()}/workspace?compact=true`);
   if (token !== state.token || id !== state.id) return;
   const wasBusy = state.data?.builds.some((b) => b.status === "running");
   state.data = data;
   render();
-  await refreshLogs().catch((error) =>
+  void refreshLogs().catch((error) =>
   notice(MindexI18n.msg("ui.5c458a043061", { p0: error.message }), true)
   );
   clearTimeout(state.timer);
@@ -346,7 +354,7 @@ async function accept(data) {
   if (data.job.id !== state.id) return;
   state.data = data;
   render();
-  await refreshLogs().catch((error) =>
+  void refreshLogs().catch((error) =>
   notice(MindexI18n.msg("ui.5c458a043061", { p0: error.message }), true)
   );
 }
@@ -446,7 +454,13 @@ function versionFiles(body, item) {
     if (metadata.url) body.append(link(MindexI18n.msg("ui.1a179261cfb7", { p0: name }), metadata.url, true));
   }
 }
-function showVersion(id) {
+async function showVersion(id) {
+  const jobId = state.id;
+  if (ver(id)?.compact) {
+    const full = await api(`${base()}/versions/${id}`);
+    if (state.id !== jobId || !state.data?.versions[id]) return;
+    state.data.versions[id] = full;
+  }
   const item = ver(id),
     body = showDialog(
       `${LABEL[item.stage]} · ${id.slice(0, 8)} · ${STATUS[item.status]}`

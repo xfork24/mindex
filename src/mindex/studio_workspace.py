@@ -1585,10 +1585,25 @@ def recover(config, job_id, w):
         persist(config, job_id, w)
 
 
-def detail(config, job_id, w, *, store=None):
+def compact_version(item):
+    """Keep editor/preview fields; diagnostics remain available on the version API."""
+    data = item.get("data", {})
+    def candidate(value):
+        return {k: v for k, v in value.items() if k not in {"annotation", "matches", "channel_metadata"}}
+    if item["stage"] == "compose":
+        data = {k: v for k, v in data.items() if k != "graph"}
+    elif item["stage"] == "recall":
+        data = {**data, "results": [candidate(c) for c in data.get("results", [])]}
+    elif item["stage"] == "select" and data.get("anchor"):
+        data = {**data, "anchor": candidate(data["anchor"])}
+    return {**item, "data": data, "compact": True}
+
+
+def detail(config, job_id, w, *, store=None, compact=False):
     p = plan(w, w["active_plan"])
     context = DetailContext(store=store)
-    result = copy.deepcopy(w)
+    view = {**w, "versions": {k: compact_version(v) for k, v in w["versions"].items()}} if compact else w
+    result = copy.deepcopy(view)
     result["job"] = studio.load_job(config, job_id)
     result["revision"] = revision(p)
     result["tts_settings"] = {

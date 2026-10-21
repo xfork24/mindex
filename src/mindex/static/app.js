@@ -333,16 +333,16 @@ $('filter-reset').onclick = () => {
 async function refresh() {
   $('refresh').disabled = true;
   try {
-    const data = await api('/api/status?health=true');
-    const catalogue = await api('/api/persons');
-    registeredPeople = catalogue.entities.filter((e) => ['actor', 'role'].includes(e.kind));
-    const works = new Map(catalogue.sources.map((s) => [s.id, s.work_id]));
-    registeredSources = data.sources.map((s) => ({ ...s, work_id: works.get(s.id) }));
-    if (sourceScope !== null) {
-      sourceScope = sourceScope.filter((id) => registeredSources.some((s) => s.id === id));
-    }
-    fillOptions('source', registeredSources);
-    fillSearchFilters();
+    const filtersReady = api('/api/persons/filters').then((catalogue) => {
+      registeredPeople = catalogue.entities;
+      registeredSources = catalogue.sources;
+      if (sourceScope !== null) {
+        sourceScope = sourceScope.filter((id) => registeredSources.some((s) => s.id === id));
+      }
+      fillOptions('source', registeredSources);
+      fillSearchFilters();
+    });
+    const [data] = await Promise.all([api('/api/status?health=true&summary=true'), filtersReady]);
     const count = data.segment_counts.find((item) => item.kind === 'moment')?.count || 0;
     MindexI18n.setText($('library-summary'), MindexI18n.msg("ui.7859fa5eb7a3", { p0: data.sources.length, p1: count }));
     const target = $('library-detail');target.replaceChildren();

@@ -100,8 +100,8 @@ def create_app(
         return JSONResponse(status_code=422, content={"detail": str(exc)})
 
     @app.get("/api/status")
-    def get_status(health: bool = False):
-        return status(runtime.current(), health=health, embedder=embedder, index_id=index_id)
+    def get_status(health: bool = False, summary: bool = False):
+        return status(runtime.current(), health=health, summary=summary, embedder=embedder, index_id=index_id)
 
     @app.post("/api/search/text")
     def text_search(query: TextSearch):

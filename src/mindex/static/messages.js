@@ -1,4 +1,6 @@
 window.MindexMessages = {
+  "ui.work_cache_refresh": {"zh": "刷新缓存", "en": "Refresh cache"},
+  "ui.work_cache_refreshing": {"zh": "正在重新计算…", "en": "Recalculating…"},
   "ui.auto_split_build_intro": {
     "zh": "当前尚未拆分镜。确认执行构建后，将依次自动执行：拆分镜、分镜召回、配音、选片并对齐、分镜渲染，最后合成为成片。",
     "en": "No storyboard yet. Confirm to automatically split shots, retrieve footage, generate narration, select and align clips, render shots, and compose the final video in order."

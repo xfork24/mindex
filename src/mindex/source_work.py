@@ -180,6 +180,12 @@ def source_work(store, source, *, segments=None, analysis_rows=None, active=None
         "expected_segments": len(shots),
         "release_id": release["id"] if release else None,
     }
+    return attach_tasks(store, source, work)
+
+
+def attach_tasks(store, source, work):
+    """Read persisted task progress without recomputing coverage."""
+    sid = source["id"]
     # 只读验收也支持尚未运行新版本迁移的旧库。
     has_source_tasks = bool(
         store.one("SELECT 1 FROM sqlite_master WHERE type='table' AND name='source_tasks'")

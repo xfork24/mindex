@@ -12,6 +12,8 @@ from .storage import Store
 def admin_router(store: Store, runtime=None) -> APIRouter:
     router = APIRouter(prefix="/api/admin", tags=["素材管理"])
     library = Library(store)
+    from .work_cache import WorkCache
+    work_cache = WorkCache(library)
 
     @router.post("/sources/upload", status_code=201)
     async def upload_source(file: UploadFile):
@@ -53,9 +55,16 @@ def admin_router(store: Store, runtime=None) -> APIRouter:
         return library.list_sources(q, visibility, favorite_only, page, page_size)
 
     @router.get("/sources/{source_id}")
-    def source(source_id: str, detail: Literal["full", "summary"] = "full"):
+    def source(source_id: str, detail: Literal["full", "summary", "work"] = "full"):
         config = runtime.current() if runtime else None
-        return {**library.source(source_id, detail=detail), "enforce_gpu_lock": config.enforce_gpu_lock if config else False}
+        value = work_cache.get(source_id) if detail == "work" else library.source(source_id, detail=detail)
+        return {**value, "enforce_gpu_lock": config.enforce_gpu_lock if config else False}
+
+    @router.post("/sources/{source_id}/work-cache/refresh")
+    def refresh_work_cache(source_id: str):
+        config = runtime.current() if runtime else None
+        return {**work_cache.refresh(source_id), "work_refreshing": False,
+                "enforce_gpu_lock": config.enforce_gpu_lock if config else False}
 
     @router.api_route("/sources/{source_id}/media", methods=["GET", "HEAD"])
     def source_media(source_id: str):

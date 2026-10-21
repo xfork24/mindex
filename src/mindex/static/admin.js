@@ -80,6 +80,7 @@ async function deleteSource(item) {
 }
 function renderSource(source) {
   const target = $('source-detail');target.replaceChildren();
+  if (!source.media) {renderWork(source, target);return;}
   const heading = node('div', undefined, 'source-heading');heading.append(node('h2', source.name));
   if (source.hidden) heading.append(node('span', MindexI18n.msg("ui.5fce4fb22d1d"), 'hidden-badge'));
   target.append(heading, node('p', MindexI18n.msg("ui.b1a5c99af4bf", { p0: source.original_name, p1: source.id.slice(0, 8) }), 'source-meta'), node('p', MindexI18n.msg("ui.9df908393a6a", { p0: time(source.media.duration), p1: source.media.width, p2: source.media.height, p3: source.media.fps.toFixed(2), p4: source.shot_count, p5: source.moment_count }), 'source-meta'), node('p', source.prepared ? MindexI18n.msg("ui.db093aeb92d3") : MindexI18n.msg("ui.be2019fc93ba"), 'source-meta'));
@@ -101,7 +102,7 @@ async function selectSource(id) {
   $('source-detail').replaceChildren();renderWork(state.source, $('source-detail'));
   $('no-source').hidden = true;$('source-workspace').hidden = false;syncUrl();
   $('source-workspace').setAttribute('aria-busy', 'true');
-  void refreshWork(id, request);
+  if (preferences(id).workExpanded) void refreshWork(id, request);
   try {
     await Promise.all([
       api(`/api/admin/sources/${id}?detail=summary`, {signal}).then(async (source) => {
@@ -304,8 +305,23 @@ function analysisSummary(result, progress = {}) {
 }
 function renderWork(source, target) {
   clearTimeout(workPoll);workPoll = null;
-  const panel = node('section', undefined, 'work-panel');panel.append(node('h3', MindexI18n.msg("ui.c057f7d9d46e")));
-  const grid = node('div', undefined, 'work-grid');panel.append(grid);target.append(panel);
+  const panel = node('details', undefined, 'work-panel');
+  const toolbar = node('summary', undefined, 'work-toolbar');toolbar.append(node('h3', MindexI18n.msg("ui.c057f7d9d46e")));
+  const cachePrefs = preferences(source.id);
+  const refreshCache = action(MindexI18n.msg(cachePrefs.refreshingCache ? 'ui.work_cache_refreshing' : 'ui.work_cache_refresh'), () => run(() => refreshWorkCache(source.id)));
+  refreshCache.disabled = !!cachePrefs.refreshingCache;
+  refreshCache.addEventListener('click', (event) => {event.preventDefault();event.stopPropagation();});
+  toolbar.append(refreshCache);panel.append(toolbar);target.append(panel);
+  panel.open = !!cachePrefs.workExpanded;
+  panel.ontoggle = () => {
+    if (!panel.isConnected || state.source?.id !== source.id || cachePrefs.workExpanded === panel.open) return;
+    cachePrefs.workExpanded = panel.open;
+    if (panel.open) {renderSource(state.source);void refreshWork(source.id);}
+    else {clearTimeout(workPoll);workPoll = null;++workRequest;}
+  };
+  if (!panel.open) return;
+  if (cachePrefs.cacheError) panel.append(node('p', cachePrefs.cacheError, 'source-warning'));
+  const grid = node('div', undefined, 'work-grid');panel.append(grid);
   if (!source.work) {
     panel.setAttribute('aria-busy', String(!source.statusError));
     const status = node('p', source.statusError || MindexI18n.msg('ui.work_loading'), source.statusError ? 'source-warning' : 'muted');
@@ -408,12 +424,28 @@ function renderWork(source, target) {
     if (name === 'persons' && work.setup?.missing?.length) {card.append(node('p', work.setup.missing.map(MindexI18n.system).join('；'), 'muted'));const link = node('a', MindexI18n.msg("ui.8af96795e1d4"));link.href = '/persons';card.append(link);}
     grid.append(card);
   }
-  if (busy) workPoll = setTimeout(() => run(() => refreshWork(source.id)), 2000);
+  if (!cachePrefs.refreshingCache && (busy || source.work_refreshing)) workPoll = setTimeout(() => run(() => refreshWork(source.id)), 2000);
+}
+async function refreshWorkCache(sourceId) {
+  const selection = selectionRequest, prefs = preferences(sourceId);
+  if (prefs.refreshingCache) return;
+  prefs.refreshingCache = true;delete prefs.cacheError;
+  ++workRequest;renderSource(state.source);
+  try {
+    const source = await post(`/api/admin/sources/${sourceId}/work-cache/refresh`, {});
+    if (selection !== selectionRequest || state.source?.id !== sourceId) return;
+    ++workRequest;state.source = source;
+    await Promise.all([loadSources(), loadSegments()]);
+  } catch (e) {prefs.cacheError = e.message;}
+  finally {
+    prefs.refreshingCache = false;
+    if (selection === selectionRequest && state.source?.id === sourceId) renderSource(state.source);
+  }
 }
 async function refreshWork(sourceId, selection = selectionRequest) {
   const request = ++workRequest;
   try {
-    const source = await api(`/api/admin/sources/${sourceId}`, {signal: selectionController?.signal});
+    const source = await api(`/api/admin/sources/${sourceId}?detail=work`, {signal: selectionController?.signal});
     if (selection !== selectionRequest || request !== workRequest || state.source?.id !== sourceId) return;
     const changed = state.source.work && (source.shot_count !== state.source.shot_count || source.moment_count !== state.source.moment_count || source.scene_count !== state.source.scene_count);
     state.source = source;renderSource(source);if (changed) await Promise.all([loadSources(), loadSegments()]);

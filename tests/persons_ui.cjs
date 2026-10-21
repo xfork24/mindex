@@ -124,7 +124,7 @@ const sandbox = {
       }
       return {ok: true, json: async () => result};
     }
-    return {ok: true, json: async () => url === '/api/persons' ? data : {}};
+    return {ok: true, json: async () => url === '/api/persons?compact=true' ? data : url === '/api/persons/imports' ? [] : {}};
   },
 };
 vm.createContext(sandbox);

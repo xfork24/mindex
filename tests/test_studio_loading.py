@@ -1,15 +1,18 @@
 """Workspace reads avoid loading person evidence and reuse only request-local state."""
 
 import copy
+import json
 import shutil
 import subprocess
 from collections import Counter
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
 from mindex import studio
 from mindex import studio_workspace as ws
+from mindex.api import create_app
 from mindex.persons import Persons
 from mindex.storage import Store
 
@@ -95,3 +98,32 @@ def test_studio_loads_direct_links_without_waiting_for_job_list():
         capture_output=True, text=True, timeout=30, check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_compact_workspace_keeps_editor_fields_and_lazy_full_version(config):
+    jid = studio.create_job(config, 'A short story.')['id']
+    w = ws.load(config, jid)
+    candidate = {'id': 'candidate', 'source_id': 'source', 'start': 1, 'end': 2,
+                 'rank': 1, 'media_url': '/media', 'thumbnail_url': '/thumb',
+                 'annotation': {'description': 'x' * 50000}, 'channel_metadata': {'large': 'x' * 50000},
+                 'matches': [{'large': 'x' * 50000}]}
+    rid = ws.add_version(config, jid, w, 'recall', 'shot', data={'results': [candidate]})
+    sid = ws.add_version(config, jid, w, 'select', 'shot', data={'anchor': candidate})
+    cid = ws.add_version(config, jid, w, 'compose', data={'graph': 'x' * 500000, 'plan': {'id': 'restorable'}})
+    ws.persist(config, jid, w)
+    original = copy.deepcopy(w)
+    small = ws.detail(config, jid, w, compact=True)
+    assert w == original
+    assert len(json.dumps(small)) < len(json.dumps(w)) / 10
+    assert small['versions'][rid]['data']['results'][0]['media_url'] == '/media'
+    assert small['versions'][sid]['data']['anchor']['start'] == 1
+    assert small['versions'][cid]['data']['plan'] == {'id': 'restorable'}
+    assert 'graph' not in small['versions'][cid]['data']
+    with TestClient(create_app(config)) as client:
+        result = client.get(f'/api/studio/jobs/{jid}/workspace?compact=true')
+        assert result.status_code == 200
+        assert result.json()['versions'][rid]['compact']
+        full = client.get(f'/api/studio/jobs/{jid}/versions/{rid}').json()
+        assert full['data']['results'][0]['annotation'] == candidate['annotation']
+        full_workspace = client.get(f'/api/studio/jobs/{jid}/workspace').json()
+        assert full_workspace['versions'][cid]['data']['graph'] == 'x' * 500000

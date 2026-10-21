@@ -431,7 +431,8 @@ class SearchEngine:
 
 
 def status(
-    config: Config, *, health=False, embedder: MultimodalEmbedder | None = None, index_id: str | None = None
+    config: Config, *, health=False, summary=False,
+    embedder: MultimodalEmbedder | None = None, index_id: str | None = None
 ) -> dict:
     store = Store(config.data_dir)
     active = store.index_version(index_id) if index_id else store.active_index()
@@ -451,9 +452,9 @@ def status(
             "quantization": config.embedding.quantization,
         },
         "model_health": {"checked": False},
-        "channel_coverage": channel_coverage(store, active),
+        "channel_coverage": channel_coverage(store, active) if not summary else {},
         "person_coverage": __import__('mindex.persons', fromlist=['Persons']).Persons(store).published(
-            active['id'], pinned=index_id is not None)[1]['coverage'] if active else [],
+            active['id'], pinned=index_id is not None)[1]['coverage'] if active and not summary else [],
     }
     if health:
         try:

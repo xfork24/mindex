@@ -252,7 +252,7 @@ function renderTasks(data) {
   }
   if (tasks.length > 3) $('tasks').append(node('p', MindexI18n.msg("ui.63c47287a832", { p0: tasks.length - 3 }), 'muted'));
 }
-async function refresh() {const data = await api('/api/persons');Object.assign(state, { entities: data.entities, references: data.references, sources: data.sources });fillSelectors();renderCatalogue();loadImportGallery();
+async function refresh() {void loadImportGallery().catch((e) => notice(e.message, true));const data = await api('/api/persons?compact=true');Object.assign(state, { entities: data.entities, references: data.references, sources: data.sources });fillSelectors();renderCatalogue();
   $('source-works').replaceChildren();
   for (const source of state.sources) {
     const row = node('div', undefined, 'source-work');
@@ -456,15 +456,21 @@ function renderEntries() {
   draw();
 }
 // 历史演员表图片：默认列出全部草稿与已确认导入，点击加载对应草稿，✕ 删除单张。
+let importGalleryRequest = 0, importGallerySignature = null;
 async function loadImportGallery() {
+  const request = ++importGalleryRequest;
   const items = await api('/api/persons/imports');
+  if (request !== importGalleryRequest) return;
+  const signature = JSON.stringify([items, state.draft?.id]);
+  if (signature === importGallerySignature) return;
+  importGallerySignature = signature;
   const host = $('import-gallery');host.replaceChildren();
   if (!Array.isArray(items) || !items.length) {host.append(node('p', MindexI18n.msg("ui.d120414a3b2e"), 'muted'));return;}
   for (const item of items) for (const im of item.images) {
     const wrap = node('div', undefined, 'gallery-item' + (state.draft?.id === item.id ? ' current' : ''));
     const cell = node('button', undefined, 'gallery-cell');cell.type = 'button';
     MindexI18n.setAttr(cell, "title", MindexI18n.msg("ui.1ea3357023d9", { p0: item.id.slice(0, 8), p1: item.status === 'confirmed' ? MindexI18n.msg("ui.5c5b7cfb1208") : MindexI18n.msg("ui.0f436818c0b4"), p2: item.entry_count }));
-    const img = node('img');img.src = im.url;MindexI18n.setAttr(img, "alt", cell.title);img.loading = 'lazy';
+    const img = node('img');img.loading = 'eager';img.decoding = 'async';img.src = im.url + '?thumbnail=true';MindexI18n.setAttr(img, "alt", cell.title);
     cell.append(img, node('span', item.status === 'confirmed' ? MindexI18n.msg("ui.5c5b7cfb1208") : MindexI18n.msg("ui.0f436818c0b4"), 'gallery-tag'));
     cell.onclick = () => run(async () => displayDraft(await api('/api/persons/imports/' + item.id)));
     const del = node('button', '✕', 'gallery-delete');del.type = 'button';MindexI18n.setAttr(del, "title", MindexI18n.msg("ui.fa2e9372bc2e"));

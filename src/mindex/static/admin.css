@@ -161,3 +161,12 @@
 .source-heading{align-items:center}
 
 .work-latest-log{min-height:1.5em;line-height:1.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin:-6px 0 14px;font-size:12px}
+
+.work-toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+.work-toolbar h3{margin:0}
+
+.work-panel>summary.work-toolbar{cursor:pointer;list-style:none}
+.work-panel>summary.work-toolbar::-webkit-details-marker{display:none}
+.work-panel>summary.work-toolbar::before{content:'▸';font-size:18px}
+.work-panel[open]>summary.work-toolbar::before{transform:rotate(90deg)}
+.work-panel:not([open])>summary.work-toolbar{margin-bottom:0}
