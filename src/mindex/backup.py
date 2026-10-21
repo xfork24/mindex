@@ -237,6 +237,8 @@ def job_selection(root, selected, known):
         refs = set(state.get('source_ids') or [])
         historical = set()
         for artifact in path.parent.rglob('*.json'):
+            if finder_metadata(artifact):
+                continue
             text = artifact.read_text()
             refs.update(s for s in known if s in text)
             refs.update(s for token, s in tokens.items() if token in text)
@@ -261,6 +263,8 @@ def file_owners(root, all_sources):
             if row['source_id']:
                 tokens[row['id']] = {row['source_id']}
     for path in files_under(root):
+        if finder_metadata(path):
+            continue
         relative = path.relative_to(root).as_posix()
         assigned = set()
         for part in Path(relative).parts:
@@ -459,6 +463,8 @@ def compatibility_files(root, database):
         paths = [directory / 'baseline.json', directory / 'baseline.sha256']
         paths.extend(safe_path(root, sample['path']) for sample in baseline['samples'])
         for gate in (directory / 'deployments').glob('*.json'):
+            if finder_metadata(gate):
+                continue
             marker = gate.with_suffix('.sha256')
             verified_file(gate, marker.read_text().strip())
             paths.extend((gate, marker))
@@ -965,6 +971,8 @@ def import_backup(config, bundle, *, all_sources=False, sources=None, skip_exist
         relocate = _relocator(manifest['origin']['data_dir'], root, manifest['path_map'], ids)
         rewrite_database(incoming / 'metadata.sqlite3', relocate, secrets=True)
         for path in files_under(incoming):
+            if finder_metadata(path):
+                continue
             if path.suffix in {'.json', '.yaml', '.yml'} and not immutable_evidence(path.relative_to(incoming).as_posix()):
                 _copy_payload_file(path, path, transform=relocate, include_secrets=True, secrets=[], selected=selected)
         base = yaml.safe_load((bundle / 'config/base.yaml').read_text()) or {}
@@ -1021,6 +1029,8 @@ def import_backup(config, bundle, *, all_sources=False, sources=None, skip_exist
                               index_map={c['index_id']: c['index_id'] for c in collections}, rep_map={})
                 report['integer_id_maps'] = merge_database(stage, incoming, restore_config=write_config)
                 for path in files_under(incoming):
+                    if finder_metadata(path):
+                        continue
                     relative = path.relative_to(incoming).as_posix()
                     if relative.startswith('metadata.sqlite3'):
                         continue

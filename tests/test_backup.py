@@ -721,12 +721,20 @@ def test_partial_roundtrip_preserves_compatibility_evidence_bytes(library, tmp_p
     gate_bytes = dumps({'schema': 2, 'passed': False, 'deployment': deployment}).encode()
     gate.write_bytes(gate_bytes)
     gate.with_suffix('.sha256').write_text(hashlib.sha256(gate_bytes).hexdigest() + '\n')
+    # 外置盘上的 AppleDouble JSON 和摘要文件是二进制，不能按业务文本读取。
+    sidecar = struct.pack('>II16sHIII', 0x00051607, 0x00020000, b'Mac OS X        ', 1, 9, 38, 1) + b'\xb0'
+    for path in (gate, gate.with_suffix('.sha256')):
+        path.with_name('._' + path.name).write_bytes(sidecar)
     original = dumps(baseline).encode()
     (directory / 'baseline.json').write_bytes(original)
     (directory / 'baseline.sha256').write_text(hashlib.sha256(original).hexdigest() + '\n')
     load_baseline(config, space)
     bundle = tmp_path / 'compatibility-backup'
     export(library, bundle, sources=[sources[0]])
+    for path in (gate, gate.with_suffix('.sha256')):
+        exported = bundle / 'data' / path.relative_to(root)
+        assert not exported.with_name('._' + path.name).exists()
+        exported.with_name('._' + path.name).write_bytes(sidecar)
     target = tmp_path / 'different-root'
     restore(bundle, target)
     restored = load_baseline(Config(data_dir=target), space)
@@ -734,6 +742,7 @@ def test_partial_roundtrip_preserves_compatibility_evidence_bytes(library, tmp_p
     assert (target / gate.relative_to(root)).read_bytes() == gate_bytes
     assert (target / gate.with_suffix('.sha256').relative_to(root)).read_bytes() == gate.with_suffix('.sha256').read_bytes()
     assert (target / directory.relative_to(root) / 'baseline.json').read_bytes() == original
+    assert not list(target.rglob('._*'))
     (directory / 'samples/0.mp4').unlink()
     with pytest.raises(ModelError, match='无法核验本地文件'):
         export(library, tmp_path / 'missing-proof', sources=[sources[0]])
@@ -815,6 +824,25 @@ def test_invalid_apple_double_is_not_ignored(tmp_path, content):
     sidecar = tmp_path / '._file'
     sidecar.write_bytes(content)
     assert not finder_metadata(sidecar)
+
+
+def test_job_and_owner_scans_skip_binary_apple_double(library):
+    from mindex.backup import file_owners, job_selection, source_list
+
+    root, sources = library[0].data_dir, library[1]
+    job = root / 'studio' / 'fixture-job'
+    job.mkdir(parents=True)
+    (job / 'job.json').write_text(dumps({'source_ids': [sources[0]]}))
+    artifact = job / 'artifact.json'
+    artifact.write_text(dumps({'source_id': sources[0]}))
+    metadata = artifact.with_name('._' + artifact.name)
+    metadata.write_bytes(struct.pack('>II16sHIII', 0x00051607, 0x00020000, b' '*16, 1, 9, 38, 1) + b'\xb0')
+    jobs, omitted = job_selection(root, {sources[0]}, set(sources))
+    assert jobs == {'fixture-job': [sources[0]]}
+    assert omitted == []
+    owners = file_owners(root, source_list(root))
+    assert metadata.relative_to(root).as_posix() not in owners
+    assert owners[artifact.relative_to(root).as_posix()] == {sources[0]}
 
 
 @pytest.mark.parametrize('text', ['123456789012345678e12345', '1e3', '1.00', 'null', 'true'])
