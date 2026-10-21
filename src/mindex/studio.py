@@ -18,7 +18,7 @@ from uuid import uuid4
 from filelock import FileLock, Timeout
 from pydantic import Field, model_validator
 
-from .config import Config, StrictModel, fingerprint
+from .config import Config, StrictModel, fingerprint, portable_parameters
 from .curation import EntityNotFound
 from .types import Filters, Granularity
 
@@ -645,7 +645,7 @@ def step_configuration(config, state, step):
     recall = {
         "recall": studio.recall.model_dump(),
         "search": config.search.model_dump(),
-        "embedding": config.embedding.model_dump(),
+        "embedding": portable_parameters(config, config.embedding.model_dump()),
         "video": config.video.model_dump(),
         "limit": state["options"]["recall_limit"],
     }
@@ -653,14 +653,14 @@ def step_configuration(config, state, step):
     if scope := material_scope(state):
         recall["sources"] = sorted(scope)
     values = {
-        "split": {"generator": studio.generator.model_dump(), "version": SPLIT_VERSION},
+        "split": {"generator": portable_parameters(config, studio.generator.model_dump()), "version": SPLIT_VERSION},
         "recall": recall,
-        "tts": {"tts": studio.tts.model_dump(), "voice": state["options"]["voice"]},
+        "tts": {"tts": portable_parameters(config, studio.tts.model_dump()), "voice": state["options"]["voice"]},
         "select": studio.selection.model_dump(),
         "render": {
             "render": studio.render.model_dump(),
             "audio": studio.audio.model_dump(),
-            "subtitle": studio.subtitle.model_dump(),
+            "subtitle": portable_parameters(config, studio.subtitle.model_dump()),
         },
     }
     return fingerprint(values[step])

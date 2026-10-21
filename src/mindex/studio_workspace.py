@@ -22,7 +22,7 @@ from pydantic import Field, model_validator
 
 from . import studio, studio_select, studio_steps
 from .adapters import make_speaker, make_storyboarder
-from .config import StrictModel, fingerprint
+from .config import StrictModel, fingerprint, portable_parameters
 from .media import atomic_media, audio_info, probe
 from .shot_media import ShotMedia
 from .storage import Store
@@ -508,11 +508,11 @@ class DetailContext:
 def settings(config, p, stage, *, context=None):
     if context is not None:
         if stage not in context.settings:
-            context.settings[stage] = _settings(
+            context.settings[stage] = portable_parameters(config, _settings(
                 config, p, stage, store=context.database(config) if stage == "recall" else None,
-            )
+            ))
         return context.settings[stage]
-    return _settings(config, p, stage)
+    return portable_parameters(config, _settings(config, p, stage))
 
 
 def _settings(config, p, stage, *, store=None):
@@ -609,7 +609,7 @@ def query_media(config, job_id, recall):
     raise studio.StudioError("查询文件缺失或已损坏，请重新上传")
 
 
-def specification(config, job_id, w, p, stage, sid=None, *, context=None):
+def specification(config, job_id, w, p, stage, sid=None, *, context=None, parameters=None):
     params = settings(config, p, stage, context=context)
     if stage == "render":
         params = {**params, "media_version": "shot-media-v1"}
@@ -677,11 +677,25 @@ def specification(config, job_id, w, p, stage, sid=None, *, context=None):
                     source = ShotMedia(store).identity(event["video"]["source_id"],
                                                        event["video"]["start"], event["video"]["end"])
             payload = {"select": inputs["select"], "tts": inputs["tts"], "source": source}
+    if parameters is not None:
+        params = parameters
     return {
         "inputs": inputs,
         "parameters": params,
         "signature": fingerprint({"stage": stage, "payload": payload, "parameters": params}),
     }
+
+
+def signature_matches(config, job_id, w, p, stage, sid, item, expected, *, context=None):
+    if item["signature"] == expected["signature"]:
+        return True
+    if portable_parameters(config, item["parameters"], expected["parameters"]) != expected["parameters"]:
+        return False
+    # Reconstruct the current payload with the historical path spelling. This
+    # verifies the original hash without rewriting immutable version records.
+    legacy = specification(config, job_id, w, p, stage, sid, context=context,
+                           parameters=item["parameters"])
+    return item["signature"] == legacy["signature"]
 
 
 def conflicts(config, job_id, w, p, stage, sid, vid, *, context=None):
@@ -702,7 +716,7 @@ def conflicts(config, job_id, w, p, stage, sid, vid, *, context=None):
             messages.append(f"参考候选：原版本 {original['candidate_id']}，当前 {choice['candidate_id']}")
     if item["incomplete"]:
         messages.append("历史记录不完整，无法验证依赖与参数")
-    if item["signature"] != expected["signature"]:
+    if not signature_matches(config, job_id, w, p, stage, sid, item, expected, context=context):
         if stage == "recall":
             messages.append("查询、召回方式或召回设置已变化")
         elif stage == "tts":
@@ -722,7 +736,7 @@ def conflicts(config, job_id, w, p, stage, sid, vid, *, context=None):
                 messages.append(
                     f"依赖 {key}：原版本 {item['inputs'].get(key) or '缺失'}，当前 {value or '缺失'}"
                 )
-        if stage != "tts" and item["parameters"] != expected["parameters"]:
+        if stage != "tts" and portable_parameters(config, item["parameters"], expected["parameters"]) != expected["parameters"]:
             messages.append("阶段参数与当前方案不一致")
         if not messages:
             messages.append("实际输入内容或素材文件已变化")
@@ -750,7 +764,7 @@ def match(config, job_id, w, p, stage, sid=None, *, verify=True):
             item["stage"] == stage
             and item["shot_id"] == sid
             and item["status"] == "complete"
-            and item["signature"] == spec["signature"]
+            and signature_matches(config, job_id, w, p, stage, sid, item, spec)
             and not item["incomplete"]
             and (not verify or valid_files(config, job_id, item))
         ):

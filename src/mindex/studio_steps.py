@@ -11,7 +11,7 @@ from pathlib import Path
 
 from . import studio
 from .adapters import ModelError, MultimodalEmbedder, Speaker, Storyboarder, make_storyboarder
-from .config import Config, fingerprint
+from .config import Config, fingerprint, portable_parameters
 from .media import MediaError, audio_info
 from .shot_media import ShotMedia
 from .studio_artifacts import ArtifactSession, current, digest, visibility_key
@@ -25,7 +25,7 @@ def run_split(config: Config, job_id: str, state: dict, storyboarder: Storyboard
     split_key = fingerprint(
         {
             "text": state["input_text"],
-            "generator": config.studio.generator.model_dump(),
+            "generator": portable_parameters(config, config.studio.generator.model_dump()),
             "split_version": studio.SPLIT_VERSION,
         }
     )
@@ -99,7 +99,7 @@ def run_recall(config: Config, job_id: str, state: dict, embedder: MultimodalEmb
             "limit": limit,
             "granularity": granularity,
             "search": config.search.model_dump(),
-            "embedding": config.embedding.model_dump(),
+            "embedding": portable_parameters(config, config.embedding.model_dump()),
             "visibility": visibility,
         }
         # 只在有限制时加键，保证不限任务的检查点与历史产物逐字节一致。
@@ -170,7 +170,7 @@ def run_tts(config: Config, job_id: str, state: dict, speaker: Speaker) -> dict:
     manifest = {}
     for shot in storyboard.shots:
         logical = f"audio/{shot.id}.wav"
-        key = fingerprint({"text": shot.text, "voice": voice, "tts": config.studio.tts.model_dump()})
+        key = fingerprint({"text": shot.text, "voice": voice, "tts": portable_parameters(config, config.studio.tts.model_dump())})
         target = session.reuse(logical, key) if session else None
         if target:
             try:
@@ -269,7 +269,7 @@ def load_audio_manifest(config: Config, job_id: str, storyboard) -> dict:
     for shot in storyboard.shots:
         item = manifest[shot.id]
         expected = fingerprint(
-            {"text": shot.text, "voice": state["options"]["voice"], "tts": config.studio.tts.model_dump()}
+            {"text": shot.text, "voice": state["options"]["voice"], "tts": portable_parameters(config, config.studio.tts.model_dump())}
         )
         path = studio.audio_dir(config, job_id) / f"{shot.id}.wav"
         if item.get("key") != expected or not path.is_file() or digest(path) != item.get("sha256"):

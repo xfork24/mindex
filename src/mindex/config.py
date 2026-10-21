@@ -363,3 +363,30 @@ def load_config(path: str | Path | None = None) -> Config:
     if config.studio.subtitle.font_file:
         config.studio.subtitle.font_file = str((base / Path(config.studio.subtitle.font_file).expanduser()).resolve())
     return config
+
+
+def portable_parameters(config, value, reference=None):
+    """Store local dependencies relative to the project, including pre-move snapshots."""
+    if isinstance(value, dict):
+        result = {}
+        for key, item in value.items():
+            current = reference.get(key) if isinstance(reference, dict) else None
+            if key in {"deployment_manifest", "font_file"} and item:
+                path = Path(item)
+                if path.is_absolute():
+                    # A historical project root may no longer exist. Only accept the
+                    # complete current relative path as a suffix, never just a basename.
+                    if (
+                        current
+                        and not Path(current).is_absolute()
+                        and ".." not in Path(current).parts
+                        and path.as_posix().endswith("/" + current)
+                    ):
+                        item = current
+                    else:
+                        item = Path(os.path.relpath(path, config.data_dir.parent)).as_posix()
+                result[key] = item
+            else:
+                result[key] = portable_parameters(config, item, current)
+        return result
+    return value

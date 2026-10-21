@@ -12,7 +12,7 @@ from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
 from . import studio
-from .config import fingerprint
+from .config import fingerprint, portable_parameters
 
 current: ContextVar[ArtifactSession | None] = ContextVar("studio_artifacts", default=None)
 
@@ -69,10 +69,10 @@ class ArtifactSession:
         self.record(
             "config",
             {
-                "studio": config.studio.model_dump(),
+                "studio": portable_parameters(config, config.studio.model_dump()),
                 "search": config.search.model_dump(),
                 "video": config.video.model_dump(),
-                "embedding": config.embedding.model_dump(),
+                "embedding": portable_parameters(config, config.embedding.model_dump()),
                 "options": state["options"],
                 "mode": mode,
                 "shot_ids": shot_ids,

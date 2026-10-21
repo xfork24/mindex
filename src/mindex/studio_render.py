@@ -13,7 +13,7 @@ from collections.abc import Callable
 from fractions import Fraction
 from pathlib import Path
 
-from .config import Config, SubtitleConfig, fingerprint
+from .config import Config, SubtitleConfig, fingerprint, portable_parameters
 from .media import MediaError, atomic_media, command, probe
 from .studio import Timeline, save, save_bytes
 from .studio_artifacts import current, digest
@@ -456,7 +456,7 @@ def render_timeline(
                 fingerprint(
                     {
                         "timeline": listing,
-                        "subtitle": config.studio.subtitle.model_dump(),
+                        "subtitle": portable_parameters(config, config.studio.subtitle.model_dump()),
                         "burn": timeline.burn,
                         "sha256": digest(path),
                     }
