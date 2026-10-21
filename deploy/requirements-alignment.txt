@@ -1,4 +1,0 @@
-# Isolated CPU environment; never install in the application environment.
-qwen-asr>=0.0.6
-huggingface-hub>=0.36
-torch>=2.8

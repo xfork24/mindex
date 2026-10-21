@@ -25,6 +25,9 @@
 
 # 透传原生参数（例如 -o 覆盖同名输出文件）
 ./convert.sh /Users/hengliu/Movies/bilibili -o
+
+# 保留中间文件（默认合成后自动清理 *-video.mp4 / *-audio.mp3）
+./convert.sh --keep-intermediates /Users/hengliu/Movies/bilibili
 ```
 
 `convert.sh` 已自动处理：
@@ -32,11 +35,14 @@
 - 跳过启动时的免责声明确认和结束时的"按任意键退出"（非交互、可脚本化）
 - 默认附加 `-a` 关闭弹幕下载（离线可用；见下文"弹幕字幕"）
 - 工作目录切到缓存目录，日志固定写入 `<缓存目录>/m4s.log`
+- 合成流程正常结束后自动清理中间文件（`*-video.mp4` / `*-audio.mp3`，成品保留在 `output/`；`--keep-intermediates` 可保留）
+- 过滤二进制首次运行时的 `logPath m4s.log stat err` 启动提示（检查尚不存在的日志文件所致，无实际影响）
+- `-h` / `--help` 显示包装层用法（含 `--keep-intermediates`）与原生参数
 
 ## 工作原理
 
 1. 递归扫描缓存目录中的 `.m4s` 文件，读取同目录隐藏文件 `.playurl`（DASH 流信息）区分视频流与音频流
-2. 剥离 m4s 文件头的 9 个 `'0'` 填充字节，生成中间文件 `*-video.mp4` / `*-audio.mp3`（留在原缓存子目录，可安全删除）
+2. 剥离 m4s 文件头的 9 个 `'0'` 填充字节，生成中间文件 `*-video.mp4` / `*-audio.mp3`（`convert.sh` 在合成流程正常结束后自动删除它们；直接运行二进制则留在原缓存子目录，可安全删除）
 3. 解析 `videoInfo.json` 获取标题，调用 MP4Box 将音视频无损封装为 mp4
 
 输出布局（原始 m4s 缓存不被修改）：
@@ -82,6 +88,21 @@
 ```bash
 uv run mindex --config config.local.yaml prepare <output 下的 mp4>
 ```
+
+## 故障排查
+
+**MP4Box 报 `Library not loaded: /opt/homebrew/opt/ffmpeg/lib/libavdevice.63.dylib`**（m4s 剥头成功、合成失败）：gpac formula 硬链接普通 `ffmpeg` formula 的库；本机若只装了 `ffmpeg-full`（无普通 `ffmpeg`），`libgpac` 的绝对路径引用会落空。修复——把引用重指到 ffmpeg-full（soname 一致）并重签名：
+
+```bash
+DYLIB=/opt/homebrew/Cellar/gpac/*/lib/libgpac.*.dylib
+for lib in libavdevice.63 libavfilter.12 libswscale.10 libavformat.63 libavcodec.63 libavutil.61; do
+  install_name_tool -change "/opt/homebrew/opt/ffmpeg/lib/$lib.dylib" \
+    "/opt/homebrew/opt/ffmpeg-full/lib/$lib.dylib" $DYLIB
+done
+codesign -f -s - $DYLIB && MP4Box -version
+```
+
+注意：`brew upgrade/reinstall gpac` 会还原为官方 bottle，需重跑上述补丁；或改为卸载 `ffmpeg-full`、安装普通 `brew install ffmpeg` 后 `brew reinstall gpac`（brew 原生方案，二者不可共存）。
 
 ## 维护约定
 
