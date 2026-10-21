@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+本文件为 Claude Code 提供项目技术导航。修改前先阅读 [AGENT.md](AGENT.md) 的通用协作约定；安装与用户操作见 [README.md](README.md)。历史验证记录不代表本次检查结果。
 
 ## 项目概览
 
@@ -11,7 +11,7 @@ Mindex：中文视频片段检索（文字找视频优先，支持视频/图片�
 ## 常用命令
 
 ```bash
-uv sync --extra dev                              # 安装依赖（Python 3.11 + uv，需 ffmpeg/ffprobe；UI 回归另需 node）
+uv sync --extra dev                              # 安装依赖（Python 3.11–3.13 + uv，需 ffmpeg/ffprobe；UI 回归另需 node）
 uv sync --extra dev --extra person               # 追加人物检测/特征依赖（supervision、av）
 uv run pytest -q                                 # 全部测试
 uv run pytest tests/test_pipeline.py -q          # 单个文件
@@ -37,7 +37,7 @@ uv run mindex clean [--apply]                    # 磁盘清理：默认预览�
 - `maintenance/clips.py` — `mindex clips migrate/materialize/verify-archives/repair-boundaries/prune`：旧切片物理迁移与恢复，默认只读，`--apply` 才动文件
 - `processing/subtitle_uploads.py` / `processing/subtitle_archive.py` — 外部字幕上传（不可变登记，对白任务启动才应用）与归档校验（SHA256）
 - `processing/indexing.py` — 索引构建、发布前检查、`VectorIndex`（Chroma 封装）
-- `cli.py` — Typer 入口（`mindex`，子命令组 `indexes`/`e2e`/`persons`/`clips`）；重模块在命令函数内延迟导入
+- `cli.py` — Typer 入口（`mindex`，子命令组 `indexes`/`e2e`/`persons`/`clips`/`backup`）；重模块在命令函数内延迟导入
 - `diagnostics/e2e.py` — `mindex e2e` 分阶段真实验证框架（init/probe/pin/phase/freeze），阶段：smoke → visual → preview → asr → align → analyze(-smoke) → enriched → evaluate → video-evaluate → check
 - `models/model_server.py` — GPU 侧服务（`mindex-model-server`，角色独立 venv，见 `docs/DEPLOYMENT.md`）
 - `models/llama_cpp.py` — 对用户已有 llama-server 的原生协议适配（`/v1/embeddings` input_video）
@@ -64,7 +64,7 @@ uv run mindex clean [--apply]                    # 磁盘清理：默认预览�
 - **索引不可变**：换模型、量化、维度、预处理或分析配置 → 新建独立索引版本，从不覆盖；发布前 `check`，激活在 SQLite 事务内完成。回退 = 先切回旧模型服务/配置，再 `indexes activate 旧索引ID`。索引冻结描述与对白快照，后续分析更新不影响已发布索引。
 - **切分布局不可变**：detector/video 切分参数变化须使用新 `data_dir`，不覆盖已有布局。
 - **SQLite 是事实来源**：Chroma 只存显式向量（`embedding_function=None`），业务数据通过 segment/representation ID 关联回 SQLite。
-- **对齐环境隔离**：强制对齐用独立 CPU venv `.venv-align`（`deploy/requirements-alignment.txt`），`processing/align_worker.py` 以独立子进程运行，绝不装入应用环境；`mindex align .venv-align/bin/python`（解释器为位置参数，`--python` 选项属于 `mindex e2e phase align`）。
+- **对齐环境隔离**：强制对齐用独立 CPU venv `.venv-align`（依赖安装在该独立环境中，仓库已不提供对齐依赖清单），`processing/align_worker.py` 以独立子进程运行，绝不装入应用环境；`mindex align .venv-align/bin/python`（解释器为位置参数，`--python` 选项属于 `mindex e2e phase align`）。
 
 ### 存储布局（data_dir）
 
@@ -72,7 +72,7 @@ uv run mindex clean [--apply]                    # 磁盘清理：默认预览�
 
 ### 检索（search/search.py）
 
-文字查询多路召回：视频、动作场景描述、情绪镜头描述、对白四类向量 + jieba BM25，加权 RRF 融合（默认 video/description/style 1、dialogue/lexical 0.5，k=60），同源 IoU>0.5 去重；三渠道权重可在设置页调参热生效。视频查询拆 4s/3s 窗口只检索画面表示，不入库、临时文件清理。在线只调用嵌入服务，无 Qwen 实时重排；分数不是概率。
+新版索引文字查询按 `visual`、`dialogue`、`analysis` 三渠道召回：对白与分析内部先融合语义向量和 BM25，再按 `search.channel_weights`（默认 1:1:1）做 RRF，最后同源 IoU 去重。旧格式索引仍保留 video/description/style/dialogue 向量与 lexical 的融合路径（`search.weights`），不要混淆两组配置。新版文本查询在嵌入不可用或空间不匹配时，可在有可用文本渠道的条件下显式降级 BM25，并返回 `degraded`/`warnings`；禁止绕过空间校验比较向量。图片与视频查询只检索画面表示；视频拆 4s/3s 窗口，不入库、清理临时文件。在线无 LLM 实时重排，分数不是概率。
 
 ### Web/API
 
@@ -82,7 +82,14 @@ uv run mindex clean [--apply]                    # 磁盘清理：默认预览�
 
 ### 设置页与热生效（/settings）
 
-五个模型角色（理解/拆分镜/嵌入/ASR/TTS）的「配置档案」存 SQLite（`settings/runtime_settings.py`：`model_profiles`/`voices` 表 + settings KV 覆盖层），保存即热生效：Web 经 `RuntimeConfig.current()` 每请求/每次任务启动解析，CLI 在 `load_config` 后统一合并（`mindex e2e` 除外，可用 `--no-runtime-overrides` 冻结）。支持线上厂商订阅（智谱/DeepSeek/阿里/腾讯 TokenHub/MiniMax，预设+自定义+测试连接）与自建服务互切；`settings/voice_clone.py` 提供 MiniMax 上传克隆与阿里 URL 复刻。密钥明文存库但接口只出掩码，`Service.api_key` 带 `exclude=True` 不进任何指纹/快照。切换嵌入档案后身份指纹变化，检索 503 直至 `mindex index --activate` 重建（页面横幅常显匹配状态）。详见 `docs/settings.md`。
+六个模型角色（理解/拆分镜/嵌入/ASR/TTS/人物识别）的「配置档案」存 SQLite（`settings/runtime_settings.py`：`model_profiles`/`voices` 表 + settings KV 覆盖层），保存即热生效：Web 经 `RuntimeConfig.current()` 每请求/每次任务启动解析，CLI 在 `load_config` 后统一合并（`mindex e2e` 除外，可用 `--no-runtime-overrides` 冻结）。支持线上厂商订阅（智谱/DeepSeek/阿里/腾讯 TokenHub/MiniMax，预设+自定义+测试连接）与自建服务互切；`settings/voice_clone.py` 提供 MiniMax 上传克隆与阿里 URL 复刻。密钥明文存库但接口只出掩码，`Service.api_key` 带 `exclude=True` 不进任何指纹/快照。切换嵌入档案后身份指纹变化，检索 503 直至 `mindex index --activate` 重建（页面横幅常显匹配状态）。详见 `docs/settings.md`。
+
+### 独立服务与数据维护
+
+- 人物服务：`scripts/setup-person-service.sh` 安装 `.venv-person`，`scripts/run-person-service.sh` 启动；依赖在 `deploy/person.txt`。主环境的 `--extra person` 不等于已安装人物推理服务。
+- 本地 TransNetV2：`scripts/setup-transnet-service.sh` 安装 `.venv-detector` 并核验权重，`scripts/run-transnet-service.sh` 启动；依赖在 `deploy/detector-local.txt`。安装脚本会下载依赖或权重。
+- 备份：`maintenance/backup_cli.py` 注册 CLI，`backup.py` 编排，`backup_db.py`/`backup_vectors.py` 处理数据。使用 `mindex backup export/inspect/import/recover`，不要直接复制运行中的 SQLite/Chroma 作为一致备份。导入前停写并预览，保留迁移日志供中断恢复，详见 [数据备份与迁移](docs/backup.md)。
+- 目录迁移后运行 `uv sync --extra dev` 刷新主环境；独立服务环境可用 `uv pip install --python .venv-person/bin/python --no-deps -e .` 刷新项目映射，检测环境同理。
 
 ## 测试约定
 

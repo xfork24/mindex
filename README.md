@@ -334,6 +334,25 @@ curl -X POST http://127.0.0.1:8000/api/search/text \
 
 `granularity` 支持 `moment`（精细片段）、`shot`（镜头）、`scene`（已分析的连续场景）；所选粒度需要已建库。返回数量为 1–50。详细筛选与排名语义见[检索指南](docs/search.md)。
 
+### 源码与协作
+
+```text
+backend/src/      Python 后端；安装后的导入命名空间为 mindex
+frontend/src/     原生 HTML / CSS / JavaScript；shared/ 为公共资源
+scripts/          模型服务安装、启动及维护脚本
+deploy/           人物与本地分镜检测服务的独立环境依赖
+tests/            Python 测试、Node 断言与浏览器回归
+docs/             使用指南、架构与验证记录
+```
+
+前后端均按 `search`、`admin`、`persons`、`studio`、`settings` 功能组织。
+`uv run mindex serve` 同时提供页面和 API，无需单独构建前端。静态资源通过
+`/assets/<功能模块>/<文件名>` 提供，打包后随 `mindex.web` 安装。
+旧检出目录更新后，执行 `uv sync --extra dev` 刷新可编辑安装。
+完整目录与打包映射见[架构文档](docs/architecture.md#模块职责)。
+
+代理协作约定见 [AGENT.md](AGENT.md)，Claude Code 技术导航见 [CLAUDE.md](CLAUDE.md)。
+
 <details>
 <summary><strong>开发检查与真实模型评测</strong></summary>
 
@@ -344,7 +363,7 @@ uv run ruff check backend/src tests
 node --check frontend/src/search/app.js
 ```
 
-UI 回归另需 Node.js 与 Playwright，参见[验证记录](docs/VERIFICATION.md)。自动化测试使用真实媒体处理、数据库与 HTTP 链路，模型部分使用明确标记的确定性测试适配器；它们验证工程行为，不证明真实模型的检索或人物识别准确率。
+UI 回归另需 Node.js、Playwright 及其浏览器；可用 `MINDEX_PLAYWRIGHT_MODULE` 指定模块路径。目录重组的验证范围与已知失败见[目录重组验证记录](docs/source-layout-verification.md)，其他历史记录见[验证记录](docs/VERIFICATION.md)。自动化测试使用真实媒体处理、数据库与 HTTP 链路，模型部分使用明确标记的确定性测试适配器；它们验证工程行为，不证明真实模型的检索或人物识别准确率。
 
 真实质量评测需要人工标注查询并固定模型、预处理与索引版本。流程见[端到端操作手册](docs/E2E_RUNBOOK.md)、[e2e 框架](docs/e2e-framework.md)及[评测标注说明](eval/README.md)。检索分数是排序依据，不是匹配概率。
 
@@ -376,11 +395,3 @@ UI 回归另需 Node.js 与 Playwright，参见[验证记录](docs/VERIFICATION.
 [开始使用](#快速开始) · [阅读文档](docs/README.md) · [反馈问题](https://github.com/xfork24/mindex/issues)
 
 </div>
-
-### 源码导航
-
-前端位于 `frontend/src/`，后端 Python 包位于 `backend/src/`，两侧均按
-`search/`、`admin/`、`persons/`、`studio/`、`settings/` 页面功能组织。
-前端公共资源集中在 `frontend/src/shared/`；后端共享管线、模型、基础设施、维护和诊断模块独立分包。
-现有 `uv run mindex serve` 命令同时提供页面和 API，无需单独构建前端。
-完整目录、资源打包与导入约定见 [架构文档](docs/architecture.md#模块职责)。
