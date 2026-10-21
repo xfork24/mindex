@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
@@ -10,6 +11,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import warnings
 from contextlib import ExitStack, contextmanager
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
@@ -41,6 +43,26 @@ FORMAT_VERSION = 1
 EXCLUDED_DIRS = {'chroma', 'locks', 'models', 'model-cache', '.cache', '__pycache__'}
 MODEL_SUFFIXES = {'.gguf', '.safetensors', '.onnx', '.pt', '.pth'}
 TEXT_SUFFIXES = {'.json', '.yaml', '.yml', '.txt', '.log', '.jsonl'}
+
+
+@contextmanager
+def temporary_directory(**kwargs):
+    """Finder 等进程可能在删除期间重建目录项；清理不能遮住真正的迁移错误。"""
+    path = tempfile.mkdtemp(**kwargs)
+    try:
+        yield path
+    finally:
+        for attempt in range(3):
+            try:
+                shutil.rmtree(path)
+                break
+            except FileNotFoundError:
+                break
+            except OSError as exc:
+                if exc.errno == errno.ENOTEMPTY and attempt < 2:
+                    continue
+                warnings.warn(f'临时目录清理失败，请手动清理 {path}：{exc}', RuntimeWarning, stacklevel=2)
+                break
 
 
 def digest(path):
@@ -133,7 +155,7 @@ def offline(root):
 def vector_worker(action, root, bundle, **options):
     request = {'action': action, 'root': str(root), 'bundle': str(bundle), **options}
     # 子进程退出后才能移动目录；不触碰 Chroma 的私有 shutdown API。
-    with tempfile.TemporaryDirectory(prefix='mindex-vector-') as temporary:
+    with temporary_directory(prefix='mindex-vector-') as temporary:
         path = Path(temporary) / 'request.json'
         path.write_text(dumps(request), encoding='utf-8')
         result = subprocess.run(
@@ -328,7 +350,7 @@ def _copy_payload_file(origin, destination, *, transform, include_secrets, secre
         sqlite = stream.read(16) == b'SQLite format 3\x00'
     if sqlite:
         # 历史 SQLite 文件可以早于当前 schema；仅升级隔离副本，不写回历史原件。
-        with tempfile.TemporaryDirectory(prefix='.mindex-history-', dir=destination.parent) as temporary:
+        with temporary_directory(prefix='.mindex-history-', dir=destination.parent) as temporary:
             working = Path(temporary) / 'metadata.sqlite3'
             snapshot(origin.resolve(), working, allow_legacy=True)
             Store(working.parent)
@@ -629,7 +651,7 @@ def export_backup(config, destination, *, all_sources=False, sources=None, inclu
     if allow_legacy_representations and (selected is None or len(selected) != 1):
         raise ValueError('--allow-legacy-representations 仅允许显式选择单个临时素材')
     destination.parent.mkdir(parents=True, exist_ok=True)
-    with offline(root), tempfile.TemporaryDirectory(prefix='.mindex-export-', dir=destination.parent) as temporary:
+    with offline(root), temporary_directory(prefix='.mindex-export-', dir=destination.parent) as temporary:
         if progress:
             progress('正在创建 SQLite 一致快照、计算素材依赖并导出向量…')
         staging = Path(temporary) / 'bundle'
@@ -900,7 +922,7 @@ def import_backup(config, bundle, *, all_sources=False, sources=None, skip_exist
     selected = selection(manifest['sources'], all_sources, sources)
     if journal_path(root).exists():
         raise ValueError('发现中断迁移；请先运行 backup recover（使用相同的 --data-dir 和 --config）')
-    with offline(root), tempfile.TemporaryDirectory(prefix=f'.{root.name}.migration-work-', dir=root.parent) as tmp:
+    with offline(root), temporary_directory(prefix=f'.{root.name}.migration-work-', dir=root.parent) as tmp:
         work = Path(tmp)
         incoming, stage = work / 'incoming', root.parent / f'.{root.name}.migration-stage-{uuid4().hex}'
         incoming.mkdir()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import json
 import shutil
 import sqlite3
@@ -22,6 +23,7 @@ from mindex.backup import (
     journal_path,
     recover_import,
     source_list,
+    temporary_directory,
     vector_worker,
 )
 from mindex.backup_db import merge_database, store_at
@@ -30,6 +32,37 @@ from mindex.config import Config, fingerprint
 from mindex.curation import CurationPatch
 from mindex.processing_lock import SharedFileLock
 from mindex.storage import Store, dumps
+
+
+def test_temporary_cleanup_retries_directory_recreated_by_finder(tmp_path, monkeypatch):
+    remove = shutil.rmtree
+    calls = []
+
+    def race(path):
+        calls.append(path)
+        if len(calls) == 1:
+            (Path(path) / '.DS_Store').write_bytes(b'finder')
+            raise OSError(errno.ENOTEMPTY, 'Directory not empty', 'cache')
+        remove(path)
+
+    monkeypatch.setattr('mindex.backup.shutil.rmtree', race)
+    with temporary_directory(dir=tmp_path) as directory:
+        (Path(directory) / 'payload').write_text('data')
+    assert len(calls) == 2
+    assert not Path(directory).exists()
+
+
+def test_temporary_cleanup_preserves_original_error(tmp_path, monkeypatch):
+    def fail(path):
+        raise OSError(errno.ENOTEMPTY, 'Directory not empty', 'cache')
+
+    monkeypatch.setattr('mindex.backup.shutil.rmtree', fail)
+    with (
+        pytest.warns(RuntimeWarning, match='临时目录清理失败'),
+        pytest.raises(ValueError, match='原始导出错误'),
+        temporary_directory(dir=tmp_path),
+    ):
+        raise ValueError('原始导出错误')
 
 
 def seed(root, video, names=('a', 'b'), *, space='test'):
