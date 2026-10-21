@@ -3084,3 +3084,24 @@ def test_interval_changes_preserve_confirmed_and_excluded_shots(catalogue, confi
         assert p.review_summary()["source"] == {"accepted": 2, "candidate": 0, "rejected": 1}
         assert [s["shot_id"] for s in p.review_shots(status="rejected")["items"]] == ["shot0"]
         assert p.review_shots(status="accepted", limit=1)["total"] == 2
+
+
+def test_review_without_person_evidence_uses_shot_thumbnail(catalogue, config):
+    p, *_ = catalogue
+    thumbnail = photo()
+    (p.store.root / "shot-preview.jpg").write_bytes(thumbnail)
+    p.store.execute("UPDATE segments SET thumbnail='shot-preview.jpg' WHERE id='shot0'")
+    p.store.execute("INSERT INTO person_coverage VALUES(?,?,?)", (
+        "source", "empty-shot", dumps({"shot_id": "shot0", "start": 0, "end": 1}),
+    ))
+    client = TestClient(create_app(config))
+    for compact in (False, True):
+        result = client.get('/api/persons/review/shots', params={"compact": compact, "status": "candidate"})
+        assert result.status_code == 200
+        shot = result.json()["items"][0]
+        assert shot["candidate"] is None and shot["evidence"] == []
+        assert shot["image_url"] == '/api/admin/segments/shot0/thumbnail'
+        assert client.get(shot["image_url"]).content == thumbnail
+    detail = client.get('/api/persons/review/shots/shot0', params={"source_id": "source"})
+    assert detail.status_code == 200
+    assert detail.json()["image_url"] == '/api/admin/segments/shot0/thumbnail'

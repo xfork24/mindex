@@ -1176,7 +1176,8 @@ class Persons:
                     },
                     "image_url": next(
                         (f"/api/persons/evidence/{r['id']}/image" for r in sorted(raw_rows, key=frame_rank)
-                         if r.get("data", {}).get("image_path")), None,
+                         if r.get("data", {}).get("image_path")),
+                        f"/api/admin/segments/{shot['shot_id']}/thumbnail",
                     ),
                     "evidence": rows,
                 }
