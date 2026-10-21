@@ -29,6 +29,30 @@ uv run mindex backup export /backup/private --all --include-secrets
 
 `--dry-run` 会实际构建并检查临时快照，显示所选素材、向量、依赖、排除项和版本映射，完成后删除临时结果，不创建目标备份或切换目标库。它需要与实际操作相近的时间和暂存空间。`--json` 的结果写到标准输出，中文进度写到标准错误。
 
+## 基础校验模式
+
+导入、导出默认使用 `--verification full`。明确了解备份来源、信任其完整性的用户，可以主动选择 `--verification basic` 缩短时间：
+
+```bash
+mindex backup export /backup/selected --source ID --verification basic
+mindex --config config.local.yaml backup import /backup/selected --all --skip-existing --verification basic
+```
+
+| 检查 | full（默认） | basic |
+| --- | --- | --- |
+| 格式、路径边界、符号链接、文件存在及大小 | 保留 | 保留 |
+| SQLite | 完整性及依赖检查 | quick_check、外键及必要依赖检查 |
+| 导出 SHA256 清单 | 生成并复算 | 生成一次，省去复算；仍可随后用 `backup inspect` 完整检查 |
+| 导入全文件 SHA256 复算 | 保留 | 省略 |
+| 向量读取、装载时缺失及重复 ID 检查 | 保留 | 保留 |
+| 导入最终逐向量数值、文档、归属复核 | 保留 | 仅核对各集合数量 |
+| 导入逐历史索引分镜媒体探测 | 保留 | 省略；媒体路径及文件存在性仍检查 |
+| 重复素材、共享对象冲突、WeMM 空间兼容性 | 保留 | 保留 |
+
+基础模式无法发现某些大小未变的文件损坏、向量内容或语义错误。它不会去掉历史索引或素材数据，不调用模型，也不会绕过离线锁、暂存和原子切换。模型兼容性证据仍校验，不伪造 pin/smoke 状态。输出及 JSON 会注明本次 `verification` 和 `skipped_checks`；导出清单另记录 `export_verification`，导入不会自动继承基础模式。
+
+两种模式均可配合 `--dry-run`。基础模式仍需复制文件、重写数据库、通过 Chroma API 读取/建立集合并持久化；大型备份依然可能耗时。该参数只影响新启动的命令，无法改变已经运行的导入。
+
 ## 空库恢复
 
 默认从目标配置的 `data_dir` 恢复。全局 `--config` 继续放在命令组之前；`--data-dir` 可以放在全局位置，也可以放在 `backup import` 后，后者优先。指定的数据目录按当前工作目录解析。

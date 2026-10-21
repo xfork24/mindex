@@ -206,25 +206,27 @@ def test_selected_sources_leave_no_rows_or_files(library, tmp_path, at_export):
     assert sources[1].encode() not in store.path.read_bytes()
 
 
-def test_compatible_merge_and_skip_existing(library, tmp_path, video_file):
+@pytest.mark.parametrize('verification', ['full', 'basic'])
+def test_compatible_merge_and_skip_existing(library, tmp_path, video_file, verification):
     bundle = tmp_path / 'backup'
     export(library, bundle)
     target = tmp_path / 'target'
     _, target_ids, old = seed(target, video_file, names=('c',))
-    result = restore(bundle, target)
+    result = restore(bundle, target, verification=verification)
     assert result['config_action'] == '保留目标配置'
     assert result['searchable_sources'] == sorted([*library[1], *target_ids])
     assert old != result['active_index']
     before = store_at(target).rows('SELECT * FROM source_curation')
     # 重复全部跳过后，不能重新带入原素材的历史成员。
-    skipped = restore(bundle, target, skip_existing=True)
+    skipped = restore(bundle, target, skip_existing=True, verification=verification)
     assert skipped['skipped_sources'] == sorted(library[1])
     assert store_at(target).rows('SELECT * FROM source_curation') == before
     assert {r['source_id'] for r in search_results(target)} == set(library[1]) | set(target_ids)
 
 
+@pytest.mark.parametrize('verification', ['full', 'basic'])
 @pytest.mark.parametrize('problem', ['space', 'duplicate', 'shared'])
-def test_conflict_leaves_target_unchanged(library, tmp_path, video_file, problem):
+def test_conflict_leaves_target_unchanged(library, tmp_path, video_file, problem, verification):
     bundle = tmp_path / 'backup'
     if problem == 'shared':
         store_at(library[0].data_dir).execute('INSERT INTO person_entities VALUES(?,?,?)',
@@ -239,7 +241,7 @@ def test_conflict_leaves_target_unchanged(library, tmp_path, video_file, problem
     before = store_at(target).rows('SELECT * FROM sources')
     active = store_at(target).active_index()
     with pytest.raises(ValueError, match={'space': '不兼容', 'duplicate': '素材已存在', 'shared': '内容冲突'}[problem]):
-        restore(bundle, target)
+        restore(bundle, target, verification=verification)
     assert store_at(target).rows('SELECT * FROM sources') == before
     assert store_at(target).active_index() == active
     assert not journal_path(target).exists()
@@ -282,13 +284,15 @@ def test_secret_redaction_including_snapshot_pages(library, tmp_path, monkeypatc
     assert task['status'] == 'interrupted'
 
 
-def test_dry_run_and_cli_noninteractive(library, tmp_path):
+@pytest.mark.parametrize('verification', ['full', 'basic'])
+def test_dry_run_and_cli_noninteractive(library, tmp_path, verification):
     bundle = tmp_path / 'backup'
-    export(library, bundle, dry_run=True)
+    export(library, bundle, dry_run=True, verification=verification)
     assert not bundle.exists()
     export(library, bundle)
     target = tmp_path / 'target'
-    restore(bundle, target, dry_run=True)
+    result = restore(bundle, target, dry_run=True, verification=verification)
+    assert result['verification'] == verification
     assert not target.exists()
     runner = CliRunner()
     result = runner.invoke(app, ['--config', str(library[3]), 'backup', 'export', str(tmp_path / 'other'), '--json'])
@@ -299,8 +303,110 @@ def test_dry_run_and_cli_noninteractive(library, tmp_path):
     assert json.loads(result.output)['version'] == 1
 
 
+def test_basic_cli_roundtrip_and_verification_is_explicit(library, tmp_path, monkeypatch):
+    from mindex import backup
+
+    requests = []
+    worker = backup.vector_worker
+
+    def record(action, root, bundle, **options):
+        requests.append((action, options))
+        return worker(action, root, bundle, **options)
+
+    monkeypatch.setattr(backup, 'vector_worker', record)
+    runner = CliRunner()
+    bundle = tmp_path / 'basic-backup'
+    result = runner.invoke(app, ['--config', str(library[3]), 'backup', 'export', str(bundle),
+                                 '--all', '--verification', 'basic', '--json'])
+    assert result.exit_code == 0, result.output
+    assert '"verification": "basic"' in result.output
+    # 基础导出仍生成完整标准清单，可由默认完整模式复核。
+    assert inspect_bundle(bundle)['export_verification'] == 'basic'
+    target = tmp_path / 'basic-target'
+    inspections = []
+    inspect = backup.inspect_bundle
+
+    def counted_inspect(path, **kwargs):
+        inspections.append(kwargs)
+        return inspect(path, **kwargs)
+
+    monkeypatch.setattr(backup, 'inspect_bundle', counted_inspect)
+    result = runner.invoke(app, ['--config', str(tmp_path / 'absent.yaml'), 'backup', 'import', str(bundle),
+                                 '--all', '--data-dir', str(target), '--verification', 'basic', '--json'])
+    assert result.exit_code == 0, result.output
+    assert '"verification": "basic"' in result.output
+    assert inspections == [{'verification': 'basic'}]
+    assert any(action == 'verify' and options.get('verification') == 'basic' for action, options in requests)
+    assert len(search_results(target)) == 2
+    assert runner.invoke(app, ['--config', str(library[3]), 'backup', 'export', 'unused',
+                               '--all', '--verification', 'none']).exit_code != 0
+
+
+def test_basic_skips_checksums_but_full_still_detects_same_size_corruption(library, tmp_path, monkeypatch):
+    from mindex import backup
+
+    bundle = tmp_path / 'backup'
+    export(library, bundle)
+    path = bundle / 'data/plans' / (library[1][0] + '.json')
+    data = path.read_text()
+    path.write_text(data.replace(library[1][0], '0' * len(library[1][0])))
+    with pytest.raises(ValueError, match='校验失败'):
+        inspect_bundle(bundle)
+    monkeypatch.setattr(backup, 'digest', lambda path: pytest.fail('基础预检不应重新计算文件 SHA256'))
+    inspect_bundle(bundle, verification='basic')
+
+
+def test_basic_vector_verification_uses_counts_without_readback_or_media(library, monkeypatch):
+    from mindex import backup_vectors, indexing
+    from mindex.shot_media import ShotMedia
+
+    def forbidden(*args, **kwargs):
+        pytest.fail('基础校验不应逐项读取向量或探测媒体')
+
+    monkeypatch.setattr(indexing.VectorIndex, 'ids', forbidden)
+    monkeypatch.setattr(indexing, 'check_index', forbidden)
+    monkeypatch.setattr(ShotMedia, 'references', forbidden)
+    root = library[0].data_dir
+    assert backup_vectors.run({'action': 'verify', 'root': str(root), 'bundle': str(root),
+                               'verification': 'basic'}) == {'ok': True}
+    # 数量不一致仍拒绝。
+    store_at(root).execute('DELETE FROM representations WHERE id=(SELECT id FROM representations LIMIT 1)')
+    with pytest.raises(ValueError, match='向量数量'):
+        backup_vectors.run({'action': 'verify', 'root': str(root), 'bundle': str(root), 'verification': 'basic'})
+
+
+def test_basic_import_rejects_missing_vector_payload_before_switch(library, tmp_path):
+    bundle = tmp_path / 'backup'
+    export(library, bundle, verification='basic')
+    manifest_path = bundle / 'manifest.json'
+    manifest = json.loads(manifest_path.read_text())
+    name = manifest['collections'][0]['batches'][0]
+    batch = bundle / name
+    rows = json.loads(batch.read_text())
+    batch.write_text(dumps(rows[1:]))
+    next(item for item in manifest['files'] if item['path'] == name)['bytes'] = batch.stat().st_size
+    manifest_path.write_text(dumps(manifest))
+    target = tmp_path / 'target'
+    with pytest.raises(ValueError, match='向量不完整'):
+        restore(bundle, target, verification='basic')
+    assert not target.exists()
+
+
+@pytest.mark.parametrize('verification', ['full', 'basic'])
+def test_export_still_rejects_required_vector_missing_from_chroma(library, tmp_path, verification):
+    store = store_at(library[0].data_dir)
+    rep = store.one('SELECT * FROM representations LIMIT 1')
+    store.execute('INSERT INTO representations VALUES(?,?,?,?,?,?)',
+                  (fingerprint('missing-vector'), rep['index_id'], rep['segment_id'], 'video', 'video', None))
+    bundle = tmp_path / 'missing-vector-backup'
+    with pytest.raises(ValueError, match='缺少必需向量|向量读取不完整'):
+        export(library, bundle, verification=verification)
+    assert not bundle.exists()
+
+
+@pytest.mark.parametrize('verification', ['full', 'basic'])
 @pytest.mark.parametrize('attack', ['corrupt', 'traversal', 'symlink', 'missing_vectors'])
-def test_invalid_bundle_fails_without_target(library, tmp_path, attack):
+def test_invalid_bundle_fails_without_target(library, tmp_path, attack, verification):
     bundle = tmp_path / 'backup'
     export(library, bundle)
     path = bundle / 'manifest.json'
@@ -315,7 +421,7 @@ def test_invalid_bundle_fails_without_target(library, tmp_path, attack):
     else:
         (bundle / manifest['collections'][0]['batches'][0]).unlink()
     with pytest.raises(ValueError):
-        restore(bundle, tmp_path / 'target')
+        restore(bundle, tmp_path / 'target', verification=verification)
     assert not (tmp_path / 'target').exists()
 
 

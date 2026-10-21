@@ -46,6 +46,19 @@ MODEL_SUFFIXES = {'.gguf', '.safetensors', '.onnx', '.pt', '.pth'}
 TEXT_SUFFIXES = {'.json', '.yaml', '.yml', '.txt', '.log', '.jsonl'}
 
 
+def verification_mode(value):
+    if value not in {'full', 'basic'}:
+        raise ValueError('校验模式必须为 full 或 basic')
+    return value
+
+
+def verification_report(value, *, exporting=False):
+    skipped = ['全文件 SHA256 复算']
+    skipped += (['向量文档和元数据归属复核', '向量批次重复解析'] if exporting else
+                ['向量逐项数值、文档和归属复核', '逐历史索引分镜媒体探测'])
+    return {'verification': value, 'skipped_checks': skipped if value == 'basic' else []}
+
+
 @contextmanager
 def temporary_directory(**kwargs):
     """Finder 等进程可能在删除期间重建目录项；清理不能遮住真正的迁移错误。"""
@@ -340,7 +353,7 @@ def validate_media(root):
         paths.append(row['sample_path'])
     for row in store.rows('SELECT refs FROM media_references'):
         paths.extend(item['path'] for item in json.loads(row['refs']))
-    for relative in paths:
+    for relative in dict.fromkeys(paths):
         if not safe_path(root, relative).is_file():
             raise ValueError(f'必需媒体文件缺失：{relative}')
 
@@ -480,7 +493,8 @@ def immutable_evidence(relative):
     return relative.startswith(('capabilities/v2/', 'config-dependencies/', 'deployments/'))
 
 
-def build_bundle(config, output, *, selected, include_secrets, config_path, allow_legacy_representations=False):
+def build_bundle(config, output, *, selected, include_secrets, config_path, allow_legacy_representations=False,
+                 verification='full'):
     root = config.data_dir.resolve()
     payload = output / 'data'
     payload.mkdir(parents=True)
@@ -550,17 +564,19 @@ def build_bundle(config, output, *, selected, include_secrets, config_path, allo
                            allow_legacy_representations=allow_legacy_representations)
     (output / 'config').mkdir()
     (output / 'config/base.yaml').write_text(yaml.safe_dump(base, allow_unicode=True), encoding='utf-8')
-    validate_database(payload)
+    validate_database(payload, basic=verification == 'basic')
     validate_media(payload)
     collections = vector_worker(
         'dump', payload, output, origin=str(root),
         full=selected is None,
         original_indexes={v: k for k, v in maps['indexes'].items()},
         original_representations={v: k for k, v in maps['representations'].items()},
+        verification=verification,
     )
     manifest = {
         'format': 'mindex-backup', 'version': FORMAT_VERSION, 'created_at': datetime.now(UTC).isoformat(),
         'full': selected is None, 'includes_secrets': include_secrets,
+        'export_verification': verification,
         'legacy_representation_sources': sorted(selected) if allow_legacy_representations else [],
         'origin': {'data_dir': str(root), 'config': str(config_path)},
         'sources': [s for s in known if s['id'] in chosen], 'collections': collections,
@@ -578,16 +594,17 @@ def build_bundle(config, output, *, selected, include_secrets, config_path, allo
     return manifest
 
 
-def inspect_bundle(bundle):
+def inspect_bundle(bundle, *, verification='full'):
+    verification_mode(verification)
     try:
-        return _inspect_bundle(bundle)
+        return _inspect_bundle(bundle, verification=verification)
     except json.JSONDecodeError as exc:
         raise ValueError(f'备份 JSON 无效：{exc}') from exc
     except (KeyError, TypeError, AttributeError, IndexError, sqlite3.DatabaseError) as exc:
         raise ValueError(f'备份结构或数据库无效：{exc}') from exc
 
 
-def _inspect_bundle(bundle):
+def _inspect_bundle(bundle, *, verification='full'):
     bundle = bundle.resolve()
     manifest = json.loads(safe_path(bundle, 'manifest.json').read_text())
     if (not isinstance(manifest, dict) or manifest.get('format') != 'mindex-backup'
@@ -601,7 +618,8 @@ def _inspect_bundle(bundle):
         if item['path'] in listed:
             raise ValueError(f'清单包含重复路径：{item["path"]}')
         listed.add(item['path'])
-        if not path.is_file() or path.stat().st_size != item['bytes'] or digest(path) != item['sha256']:
+        if (not path.is_file() or path.stat().st_size != item['bytes']
+                or verification == 'full' and digest(path) != item['sha256']):
             raise ValueError(f'备份文件缺失或校验失败：{item["path"]}')
     if not {'data/metadata.sqlite3', 'config/base.yaml'} <= listed:
         raise ValueError('备份缺少数据库或基础配置')
@@ -619,6 +637,12 @@ def _inspect_bundle(bundle):
     for collection in manifest['collections']:
         if any(name not in listed for name in collection['batches']):
             raise ValueError('备份缺少向量批次')
+        if verification == 'basic':
+            count = store_at(bundle / 'data').one(
+                'SELECT count(*) AS n FROM representations WHERE index_id=?', (collection['index_id'],))['n']
+            if collection['count'] != count:
+                raise ValueError('向量清单数量与数据库不一致')
+            continue
         identifiers = set()
         count = 0
         for name in collection['batches']:
@@ -645,7 +669,7 @@ def _inspect_bundle(bundle):
             or any(row not in (current_sources.get(row['id']), original_sources.get(row['id']))
                    for row in recorded_sources)):
         raise ValueError('备份素材清单与数据库不一致')
-    validate_database(bundle / 'data')
+    validate_database(bundle / 'data', basic=verification == 'basic')
     validate_media(bundle / 'data')
     manifest['sources'] = list(current_sources.values())
     return manifest
@@ -670,7 +694,9 @@ def _combined_maps(original, current, selected):
 
 
 def export_backup(config, destination, *, all_sources=False, sources=None, include_secrets=False,
-                  dry_run=False, config_path=None, progress=None, allow_legacy_representations=False):
+                  dry_run=False, config_path=None, progress=None, allow_legacy_representations=False,
+                  verification='full'):
+    verification_mode(verification)
     root, destination = config.data_dir.resolve(), destination.absolute()
     if destination.exists() or destination.is_symlink():
         raise ValueError('导出目标必须不存在')
@@ -683,12 +709,15 @@ def export_backup(config, destination, *, all_sources=False, sources=None, inclu
     destination.parent.mkdir(parents=True, exist_ok=True)
     with offline(root), temporary_directory(prefix='.mindex-export-', dir=destination.parent) as temporary:
         if progress:
+            if verification == 'basic':
+                progress('基础校验模式：省去 SHA256 复算、向量归属复核和批次重复解析。')
             progress('正在创建 SQLite 一致快照、计算素材依赖并导出向量…')
         staging = Path(temporary) / 'bundle'
         staging.mkdir()
         manifest = build_bundle(config, staging, selected=selected, include_secrets=include_secrets,
-                                config_path=config_path, allow_legacy_representations=allow_legacy_representations)
-        inspect_bundle(staging)
+                                config_path=config_path, allow_legacy_representations=allow_legacy_representations,
+                                verification=verification)
+        inspect_bundle(staging, verification=verification)
         if not dry_run:
             # 再检查一次，避免构建期间意外覆盖他人创建的目录。
             if destination.exists():
@@ -696,7 +725,8 @@ def export_backup(config, destination, *, all_sources=False, sources=None, inclu
             _sync_tree(staging)
             staging.rename(destination)
             _fsync_directory(destination.parent)
-        return summary(manifest) | {'ok': True, 'dry_run': dry_run, 'destination': str(destination)}
+        return summary(manifest) | {'ok': True, 'dry_run': dry_run, 'destination': str(destination),
+                                    **verification_report(verification, exporting=True)}
 
 
 def _relocator(origin, target, path_map, ids):
@@ -939,7 +969,8 @@ def _switch(stage, root, config_path, config_text, *, work=None):
 
 
 def import_backup(config, bundle, *, all_sources=False, sources=None, skip_existing=False,
-                  restore_config=False, dry_run=False, config_path=None, progress=None):
+                  restore_config=False, dry_run=False, config_path=None, progress=None, verification='full'):
+    verification_mode(verification)
     bundle, root = bundle.resolve(), config.data_dir.resolve()
     config_path = (config_path or Path('config.local.yaml')).resolve()
     if bundle.is_relative_to(root) or root.is_relative_to(bundle):
@@ -947,8 +978,9 @@ def import_backup(config, bundle, *, all_sources=False, sources=None, skip_exist
     if config_path.is_relative_to(root):
         raise ValueError('基础配置必须放在数据目录外')
     if progress:
-        progress('正在校验备份格式、校验和及媒体依赖…')
-    manifest = inspect_bundle(bundle)
+        progress('基础校验模式：信任备份内容；省去 SHA256 复算、逐向量复核和分镜探测。'
+                 if verification == 'basic' else '正在校验备份格式、校验和及媒体依赖…')
+    manifest = inspect_bundle(bundle, verification=verification)
     selected = selection(manifest['sources'], all_sources, sources)
     if journal_path(root).exists():
         raise ValueError('发现中断迁移；请先运行 backup recover（使用相同的 --data-dir 和 --config）')
@@ -985,6 +1017,7 @@ def import_backup(config, bundle, *, all_sources=False, sources=None, skip_exist
         # 差异仅输出字段名和脱敏值，--json 不暴露现有密钥。
         config_diff = {'before': redact(current_base), 'after': redact(base)} if write_config else {}
         report = {'ok': True, 'dry_run': dry_run, 'sources': source_list(incoming),
+                  **verification_report(verification),
                   'skipped_sources': sorted(duplicates), 'excluded_jobs': omitted,
                   'config_action': '恢复备份配置' if write_config else '保留目标配置',
                   'config_diff': config_diff, 'id_maps': _combined_maps(manifest['id_maps'], maps, selected),
@@ -1024,7 +1057,8 @@ def import_backup(config, bundle, *, all_sources=False, sources=None, skip_exist
                 target_vectors = work / 'target-vectors'
                 target_vectors.mkdir()
                 collections = vector_worker('dump', stage, target_vectors, origin=str(root),
-                                            original_indexes={}, original_representations={}, full=True)
+                                            original_indexes={}, original_representations={}, full=True,
+                                            verification=verification)
                 vector_worker('load', stage, target_vectors, collections=collections,
                               index_map={c['index_id']: c['index_id'] for c in collections}, rep_map={})
                 report['integer_id_maps'] = merge_database(stage, incoming, restore_config=write_config)
@@ -1078,11 +1112,12 @@ def import_backup(config, bundle, *, all_sources=False, sources=None, skip_exist
                         return [interrupted(v) for v in item]
                     return item
                 path.write_text(dumps(interrupted(value)), encoding='utf-8')
-            validate_database(stage)
+            validate_database(stage, basic=verification == 'basic')
             validate_media(stage)
             if progress:
-                progress('正在核对外键、历史成员、表示、向量数量与媒体引用…')
-            vector_worker('verify', stage, stage)
+                progress('正在基础核对数据库依赖、文件和向量数量（不探测媒体）…' if verification == 'basic'
+                         else '正在核对外键、历史成员、表示、向量数量与媒体引用…')
+            vector_worker('verify', stage, stage, verification=verification)
             report['searchable_sources'] = sorted({s['source_id'] for s in store_at(stage).snapshots(
                 report['active_index'])}) if report['active_index'] else []
             if not dry_run:

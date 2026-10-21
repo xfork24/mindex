@@ -20,6 +20,7 @@ def run(request):
     root, bundle = Path(request['root']), Path(request['bundle'])
     store = store_at(root)
     action = request['action']
+    basic = request.get('verification', 'full') == 'basic'
     if action == 'dump':
         origin = Path(request['origin'])
         collections = []
@@ -28,28 +29,33 @@ def run(request):
             if not identifier or any(character not in '0123456789abcdef' for character in identifier):
                 raise ValueError('索引 ID 不是有效的内容指纹')
             old = request['original_indexes'].get(identifier, identifier)
-            reps = store.rows('SELECT * FROM representations WHERE index_id=? ORDER BY id', (identifier,))
-            by_id = {row['id']: row for row in reps}
-            snapshots = {row['segment_id']: json.loads(row['snapshot']) for row in store.rows(
-                'SELECT segment_id,snapshot FROM index_members WHERE index_id=?', (identifier,))}
+            columns = 'id' if basic else '*'
+            reps = store.rows(f'SELECT {columns} FROM representations WHERE index_id=? ORDER BY id', (identifier,))
+            by_id = {row['id']: row for row in reps} if not basic else {}
+            snapshots = ({row['segment_id']: json.loads(row['snapshot']) for row in store.rows(
+                'SELECT segment_id,snapshot FROM index_members WHERE index_id=?', (identifier,))} if not basic else {})
             originals = request['original_representations']
             wanted = {originals.get(r['id'], r['id']): r['id'] for r in reps}
             if not wanted:
                 collections.append({'index_id': identifier, 'count': 0, 'batches': []})
                 continue
             vectors = VectorIndex(origin, old)
-            available = vectors.ids()
-            if set(wanted) - available:
-                raise ValueError(f'索引 {old} 缺少必需向量：{len(set(wanted) - available)}')
-            if request.get('full') and set(wanted) != available:
-                raise ValueError(f'索引 {old} 含未登记的向量')
+            if not basic:
+                available = vectors.ids()
+                if set(wanted) - available:
+                    raise ValueError(f'索引 {old} 缺少必需向量：{len(set(wanted) - available)}')
+                if request.get('full') and set(wanted) != available:
+                    raise ValueError(f'索引 {old} 含未登记的向量')
             files = []
+            wanted_ids = list(wanted)
             for offset in range(0, len(wanted), BATCH_SIZE):
-                ids = list(wanted)[offset:offset + BATCH_SIZE]
+                ids = wanted_ids[offset:offset + BATCH_SIZE]
                 batch = vectors.collection.get(ids=ids, include=['embeddings', 'documents', 'metadatas'])
                 if set(batch['ids']) != set(ids) or batch['embeddings'] is None:
                     raise ValueError(f'索引 {old} 向量读取不完整')
                 for rid, metadata, document in zip(batch['ids'], batch['metadatas'], batch['documents'], strict=True):
+                    if basic:
+                        continue
                     rep = by_id[wanted[rid]]
                     member = snapshots[rep['segment_id']]
                     expected = {'source_id': member['source_id'], 'segment_id': member['id'],
@@ -136,6 +142,12 @@ def run(request):
     if action == 'verify':
         for version in store.rows('SELECT id,status,spec FROM index_versions'):
             vectors = VectorIndex(root, version['id'])
+            if basic:
+                expected = store.one('SELECT count(*) AS n FROM representations WHERE index_id=?',
+                                     (version['id'],))['n']
+                if vectors.collection.count() != expected:
+                    raise ValueError(f'索引 {version["id"]} 的向量数量和表示不一致')
+                continue
             wanted = {r['id'] for r in store.rows(
                 'SELECT id FROM representations WHERE index_id=?', (version['id'],)
             )}

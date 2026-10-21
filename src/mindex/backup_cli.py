@@ -5,12 +5,18 @@ from __future__ import annotations
 import json
 import sqlite3
 import sys
+from enum import StrEnum
 from pathlib import Path
 from typing import Annotated
 
 import typer
 
 app = typer.Typer(help='离线数据备份与迁移（请先停止 Web 和全部后台写入任务）', no_args_is_help=True)
+
+
+class Verification(StrEnum):
+    full = 'full'
+    basic = 'basic'
 
 
 def output(value, structured):
@@ -27,6 +33,7 @@ def output(value, structured):
         ('excluded_jobs', '排除的创作任务'), ('id_maps', '版本映射'),
         ('legacy_representation_sources', '本次允许旧表示兼容的素材'),
         ('integer_id_maps', '本地整数 ID 映射'), ('config_diff', '配置差异'), ('result', '处理结果'),
+        ('verification', '校验模式'), ('skipped_checks', '省略的复核'),
     ):
         if key in value:
             typer.echo(f'{label}：{json.dumps(value[key], ensure_ascii=False)}')
@@ -116,6 +123,8 @@ def export(
     allow_legacy_representations: Annotated[bool, typer.Option('--allow-legacy-representations',
         help='仅单素材临时兼容 v2 迁移遗留表示；默认严格检查')] = False,
     dry_run: Annotated[bool, typer.Option('--dry-run', help='验证并预演，不生成目标备份')] = False,
+    verification: Annotated[Verification, typer.Option('--verification',
+        help='full 完整校验；basic 仅基础校验，供信任备份内容的用户主动选择')] = Verification.full,
     structured: Annotated[bool, typer.Option('--json', help='输出 JSON')] = False,
 ):
     """导出一致快照；默认排除密钥，不读取环境变量中的密钥。"""
@@ -126,6 +135,7 @@ def export(
         return export_backup(ctx.obj, directory, all_sources=all_sources, sources=picked,
                              include_secrets=include_secrets, dry_run=dry_run,
                              allow_legacy_representations=allow_legacy_representations,
+                             verification=verification.value,
                              config_path=ctx.meta['config_path'], progress=lambda message: typer.echo(message, err=True))
     call(structured, run)
 
@@ -138,17 +148,21 @@ def import_(
     data_dir: Annotated[Path | None, typer.Option('--data-dir', help='目标数据目录')] = None,
     skip_existing: Annotated[bool, typer.Option('--skip-existing', help='保留重复素材及其全部衍生数据')] = False,
     restore_config: Annotated[bool, typer.Option('--restore-config', help='显式恢复已有库的系统配置')] = False,
-    dry_run: Annotated[bool, typer.Option('--dry-run', help='验证完整结果，不切换目标库')] = False,
+    dry_run: Annotated[bool, typer.Option('--dry-run', help='按所选模式验证，不切换目标库')] = False,
+    verification: Annotated[Verification, typer.Option('--verification',
+        help='full 完整校验；basic 省去全文件哈希复算、逐向量复核及分镜探测')] = Verification.full,
     structured: Annotated[bool, typer.Option('--json', help='输出 JSON')] = False,
 ):
     """空库恢复或已有库合并；所有向量直接复用，不调用模型。"""
     from .backup import import_backup, inspect_bundle
 
     def run():
-        picked = choose(inspect_bundle(directory)['sources'], all_sources, sources)
+        picked = (sources if verification == Verification.basic and (all_sources or sources)
+                  else choose(inspect_bundle(directory, verification=verification.value)['sources'], all_sources, sources))
         config = ctx.obj.model_copy(update={'data_dir': data_dir.resolve()}) if data_dir else ctx.obj
         return import_backup(config, directory, all_sources=all_sources, sources=picked,
                              skip_existing=skip_existing, restore_config=restore_config, dry_run=dry_run,
+                             verification=verification.value,
                              config_path=ctx.meta['config_path'], progress=lambda message: typer.echo(message, err=True))
     call(structured, run)
 

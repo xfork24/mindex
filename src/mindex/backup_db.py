@@ -332,11 +332,12 @@ def interrupt_tasks(path):
         db.execute("UPDATE runs SET status='interrupted' WHERE status IN ('queued','running')")
 
 
-def validate_database(root):
+def validate_database(root, *, basic=False):
     store = store_at(root)
     with store.connect() as db:
         schema(db)
-        if db.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
+        check = 'quick_check' if basic else 'integrity_check'
+        if db.execute(f'PRAGMA {check}').fetchone()[0] != 'ok':
             raise ValueError('SQLite 完整性检查失败')
         if db.execute('PRAGMA foreign_key_check').fetchall():
             raise ValueError('SQLite 外键检查失败')
@@ -347,7 +348,12 @@ def validate_database(root):
                 '(SELECT 1 FROM sources s WHERE s.id=t.source_id)'
             ).fetchone():
                 raise ValueError(f'{table} 存在缺失的素材依赖')
-        for row in db.execute('SELECT segment_id,snapshot FROM index_members'):
+        if basic and db.execute(
+            "SELECT 1 FROM index_members m WHERE json_extract(snapshot,'$.id') IS NOT segment_id "
+            "OR NOT EXISTS (SELECT 1 FROM sources s WHERE s.id=json_extract(m.snapshot,'$.source_id')) LIMIT 1"
+        ).fetchone():
+            raise ValueError('历史索引成员的身份或素材依赖不一致')
+        for row in (() if basic else db.execute('SELECT segment_id,snapshot FROM index_members')):
             member = json.loads(row['snapshot'])
             if (member['id'] != row['segment_id'] or not db.execute(
                 'SELECT 1 FROM sources WHERE id=?', (member['source_id'],)
