@@ -57,6 +57,27 @@ class VectorIndex:
             return None
         return raw["embeddings"][0].tolist() if raw["ids"] else None
 
+    def vectors(self, identifiers: list[str]) -> dict[str, list[float]]:
+        """Read reusable vectors together; isolate damaged legacy entries on failure."""
+        try:
+            raw = self.collection.get(ids=list(dict.fromkeys(identifiers)), include=["embeddings"])
+        except Exception as exc:
+            if "Error finding id" not in str(exc):
+                raise
+            return {identifier: vector for identifier in identifiers
+                    if (vector := self.vector(identifier)) is not None}
+        return {identifier: vector.tolist() for identifier, vector in zip(raw["ids"], raw["embeddings"])}
+
+    def upsert_many(self, entries):
+        self.collection.upsert(
+            ids=[entry[0] for entry in entries],
+            embeddings=[entry[1] for entry in entries],
+            documents=[entry[4] or entry[3] for entry in entries],
+            metadatas=[{"segment_id": s["id"], "source_id": s["source_id"],
+                        "granularity": s["kind"], "view": view}
+                       for _, _, s, view, _ in entries],
+        )
+
     def flush(self) -> None:
         """幂等重写既有向量，冲过 chroma HNSW 落盘阈值，确保内存态全部写盘。
 

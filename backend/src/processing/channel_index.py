@@ -148,11 +148,13 @@ def reusable_vectors(builder, identity):
         if spec["space"] != identity or spec["preprocessing"] != builder.config.video.model_dump():
             continue
         records = store.rows("SELECT * FROM representations WHERE index_id=?", (row["id"],))
-        record_ids = {r["id"] for r in records}
+        record_ids = {r["id"] for r in records if not r["cache_key"]}
         for r in records:
             if r["cache_key"]:
                 cache.setdefault(r["cache_key"], (row["id"], r["id"]))
         # Reconstruct interval keys for legacy and format 2 indexes.
+        if not record_ids:
+            continue
         for segment in store.snapshots(row["id"]):
             for rep, view, document, bounds in builder._representations(segment):
                 rep_id = fingerprint([row["id"], rep])
@@ -286,6 +288,36 @@ def build_channels(builder, *, activate=False, mode="auto", source_id=None, kind
     task_reused = task_embedded = 0
     coverage = {c: 0 for c in CHANNELS}
     with store.run("index"):
+        # Copy checkpoints in batches before invoking the model. A new immutable
+        # index still needs the vectors, but reuse requires no media/model work.
+        from collections import defaultdict
+
+        copies = defaultdict(list)
+        for s in snapshots:
+            for local_id, view, document, bounds in representations(builder, s):
+                rep_id = fingerprint([index_id, local_id])
+                key = representation_key(builder, identity, s, view, document, bounds)
+                if rep_id not in existing and key in cache:
+                    version, identifier = cache[key]
+                    copies[version].append((identifier, rep_id, s, view, document))
+        copied = set()
+        for version, entries in copies.items():
+            if version not in opened:
+                opened[version] = VectorIndex(store.root, version)
+            for offset in range(0, len(entries), 256):
+                batch = entries[offset:offset + 256]
+                saved = opened[version].vectors([entry[0] for entry in batch])
+                writes = [(rep_id, saved[identifier], s, view, document)
+                          for identifier, rep_id, s, view, document in batch if identifier in saved]
+                if writes:
+                    vectors.upsert_many(writes)
+                    copied.update(entry[0] for entry in writes)
+        existing.update(copied)
+        # Finish and report reusable segments first, even if missing segments
+        # occur earlier in the source's ID ordering.
+        snapshots.sort(key=lambda s: not all(
+            fingerprint([index_id, r[0]]) in existing for r in representations(builder, s)
+        ))
         for s in snapshots:
             store.execute(
                 "INSERT OR IGNORE INTO index_members(index_id,segment_id,snapshot) VALUES(?,?,?)",
@@ -296,7 +328,11 @@ def build_channels(builder, *, activate=False, mode="auto", source_id=None, kind
                 key = representation_key(builder, identity, s, view, document, bounds)
                 target_rep = rep_id in targets.get(s["id"], set())
                 if rep_id in existing:
-                    resumed += 1
+                    if rep_id in copied:
+                        reused += 1
+                        task_reused += int(target_rep)
+                    else:
+                        resumed += 1
                 else:
                     vector = None
                     if key in cache:
