@@ -37,7 +37,7 @@ uv run mindex clean [--apply]                    # 磁盘清理：默认预览�
 - `maintenance/clips.py` — `mindex clips migrate/materialize/verify-archives/repair-boundaries/prune`：旧切片物理迁移与恢复，默认只读，`--apply` 才动文件
 - `processing/subtitle_uploads.py` / `processing/subtitle_archive.py` — 外部字幕上传（不可变登记，对白任务启动才应用）与归档校验（SHA256）
 - `processing/indexing.py` — 索引构建、发布前检查、`VectorIndex`（Chroma 封装）
-- `cli.py` — Typer 入口（`mindex`，子命令组 `indexes`/`e2e`/`persons`/`clips`/`backup`）；重模块在命令函数内延迟导入
+- `cli.py` — Typer 入口（`mindex`）：全局选项、核心命令与 `indexes` 组，并注册子命令组 `e2e`（`cli_e2e.py`）、`persons`（`cli_persons.py`）、`clips`（`cli_clips.py`）、`backup`（`maintenance/backup_cli.py`）；`cli_common.py` 放共用输出函数；重模块在命令函数内延迟导入
 - `diagnostics/e2e.py` — `mindex e2e` 分阶段真实验证框架（init/probe/pin/phase/freeze），阶段：smoke → visual → preview → asr → align → analyze(-smoke) → enriched → evaluate → video-evaluate → check
 - `models/model_server.py` — GPU 侧服务（`mindex-model-server`，角色独立 venv，见 `docs/DEPLOYMENT.md`）
 - `models/llama_cpp.py` — 对用户已有 llama-server 的原生协议适配（`/v1/embeddings` input_video）

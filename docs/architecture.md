@@ -44,7 +44,7 @@ mindex/
 │   ├── settings/     # 设置 HTML/JS/CSS
 │   └── shared/       # 公共样式、国际化、播放器、侧栏、多选组件
 └── backend/src/
-    ├── api.py / cli.py / __init__.py  # 应用装配、命令入口、包信息
+    ├── api.py / cli.py / cli_*.py / __init__.py  # 应用装配、命令入口及 e2e/persons/clips 命令组、包信息
     ├── search/       # 视频检索、检索/媒体 API
     ├── admin/        # 素材管理、素材/对白任务、详情
     ├── persons/      # 人物库、扫描 worker、人物服务
@@ -80,7 +80,8 @@ wheel 安装后读取随包的 `mindex/web/`。Setuptools 通过包目录映射�
 
 | 模块 | 职责 |
 |---|---|
-| `cli.py` | Typer CLI 入口（`mindex`）；重模块在命令函数内延迟导入，`--config` 必须放在子命令之前 |
+| `cli.py` | Typer CLI 入口（`mindex`）：全局选项、核心命令、`indexes` 组；重模块在命令函数内延迟导入，`--config` 必须放在子命令之前 |
+| `cli_e2e.py` / `cli_persons.py` / `cli_clips.py` / `cli_common.py` | `e2e`、`persons`、`clips` 命令组，以及共用的 JSON 输出函数 |
 | `processing/pipeline.py` | 各阶段编排：导入去重、分镜、切片、转写、对齐、分析；`pipeline.lock` 文件锁 |
 | `processing/indexing.py` | `IndexBuilder`（建索引、发布前检查）与 `VectorIndex`（Chroma 封装） |
 | `search/search.py` | `SearchEngine`：新版三渠道召回与旧版五路召回、RRF 融合、去重、BM25 降级；`status()` |
