@@ -78,7 +78,7 @@ uv run mindex clean [--apply]                    # 磁盘清理：默认预览�
 
 `api.py`（应用装配 + create_app）、`search/api.py`（检索与媒体 API）、`admin/admin.py`（素材后台 API）、`settings/settings_api.py`（设置 API）、`studio/studio_api.py`（创作 API）、`persons/person_api.py`（人物 API）、`frontend/src/`（原生 HTML/JS，无前端框架；五个页面：`/` 检索、`/admin` 素材处理工作台、`/studio` 创作、`/settings` 设置、`/persons` 人物库）。`/admin` 直接读 SQLite，不依赖活动索引，支持分步启动分镜/转写/分析/人物处理（`admin/source_tasks.py`/`admin/dialogue_tasks.py` 后台任务，`shared/task_progress.py` 持久化进度，`shared/processing_lock.py` GPU 互斥）；curation（显示名/备注/收藏/隐藏，`admin/curation.py`）与不可变索引快照分离，hidden 在召回前过滤。`/studio` 的召回依赖活动索引与嵌入服务（身份校验由 SearchEngine 继承），步骤执行为后台线程 + 前端轮询。
 
-**i18n**：文案目录 `frontend/src/shared/messages.json`（约 1800 键，中文原文为唯一源），键为 `ui.` 前缀（语义名或中文原文 sha1 前 12 位）；浏览器侧镜像 `messages.js` 必须与 json 同步（`tests/test_i18n.py` 校验）。`frontend/src/shared/i18n.js` 负责语言切换，不重建 DOM、保留未提交输入（`tests/i18n_ui.cjs` 回归）。后端 `shared/i18n.py` 把中文消息反向映射为稳定 `message_key`/`message_params`（未匹配回落 `system.diagnostic`），供前端按键展示译文。
+**i18n**：文案目录 `frontend/src/shared/messages.json`（约 1800 键，中文原文为唯一源），键为 `ui.` 前缀（语义名或中文原文 sha1 前 12 位）；浏览器侧镜像 `messages.js` 由 `python scripts/build-messages.py` 从 json 生成，不要手工编辑（`tests/test_i18n.py` 用 `--check` 校验）。`frontend/src/shared/i18n.js` 负责语言切换，不重建 DOM、保留未提交输入（`tests/i18n_ui.cjs` 回归）。后端 `shared/i18n.py` 把中文消息反向映射为稳定 `message_key`/`message_params`（未匹配回落 `system.diagnostic`），供前端按键展示译文。
 
 ### 设置页与热生效（/settings）
 

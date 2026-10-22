@@ -1,6 +1,8 @@
 """UI dictionary, additive API metadata and preserved content contracts."""
 import json
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -14,6 +16,10 @@ STATIC = Path(__file__).resolve().parents[1] / "frontend/src"
 def test_dictionary_and_bindings():
     catalog = json.loads((STATIC / "shared/messages.json").read_text())
     assert json.loads((STATIC / "shared/messages.js").read_text().split("window.MindexMessages = ", 1)[1].rstrip(";\n")) == catalog
+    # messages.js 必须由 scripts/build-messages.py 从 messages.json 生成，逐字节一致。
+    script = Path(__file__).resolve().parents[1] / "scripts/build-messages.py"
+    checked = subprocess.run([sys.executable, str(script), "--check"], check=False, capture_output=True, text=True)
+    assert checked.returncode == 0, checked.stderr
     for key, item in catalog.items():
         assert set(item) == {"zh", "en"}, key
         assert item["zh"] and item["en"], key
