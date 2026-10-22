@@ -17,7 +17,8 @@ from filelock import Timeout
 from pydantic import Field, model_validator
 
 from mindex.models.adapters import ModelError
-from mindex.persons.persons import Persons, uid
+from mindex.persons.person_models import uid
+from mindex.persons.persons import Persons
 from mindex.shared.config import StrictModel, fingerprint
 from mindex.shared.processing_lock import ProcessingLock, recover_tasks
 from mindex.shared.storage import Store, dumps

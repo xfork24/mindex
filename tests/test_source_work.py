@@ -473,8 +473,9 @@ def test_full_source_flow_incremental_publish_retrieval_and_details(
 ):
     from test_persons import FakeClient, Tracker, photo
 
+    from mindex.persons.person_models import Entity
     from mindex.persons.person_processing import PersonOptions, PersonProcessor, PersonTasks
-    from mindex.persons.persons import Entity, Persons
+    from mindex.persons.persons import Persons
     from mindex.shared.media import command
 
     embedder = FixtureEmbedder(config)
@@ -597,8 +598,9 @@ def test_person_first_publish_and_publication_failure_retry(config, video_file, 
     from test_persons import FakeClient, Tracker, photo
 
     from mindex.admin.source_tasks import publish_work
+    from mindex.persons.person_models import Entity
     from mindex.persons.person_processing import PersonOptions, PersonProcessor, PersonTasks
-    from mindex.persons.persons import Entity, Persons
+    from mindex.persons.persons import Persons
 
     pipeline = Pipeline(config)
     sid = pipeline.prepare(video_file)

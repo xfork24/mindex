@@ -292,15 +292,15 @@ def test_document_auto_recall_invalidates_legacy_cache_only(prepared, monkeypatc
     jid, w, p = setup_workspace(config)
     content = ws.version(w, p["shots"]["a"]["content"])["data"]
     content["query"] = "晓伟凝视着档案中关于阿公郑木生的记录，神色凝重"
-    from mindex.persons import persons
+    from mindex.persons import person_names
 
     current = ws.specification(config, jid, w, p, "recall", "a")["signature"]
-    monkeypatch.setattr(persons, "has_document_reference", lambda _: False)
+    monkeypatch.setattr(person_names, "has_document_reference", lambda _: False)
     legacy = ws.specification(config, jid, w, p, "recall", "a")["signature"]
     assert current != legacy
     content["recall"] = ShotRecall(person_mode="onscreen").model_dump()
     strict = ws.specification(config, jid, w, p, "recall", "a")["signature"]
-    monkeypatch.setattr(persons, "has_document_reference", lambda _: True)
+    monkeypatch.setattr(person_names, "has_document_reference", lambda _: True)
     assert ws.specification(config, jid, w, p, "recall", "a")["signature"] == strict
 
 
@@ -501,7 +501,8 @@ def test_patch_recall_validation(studio_client):
 
 def test_person_recall_filters_by_published_evidence(prepared):
     """人物出镜召回由已发布证据约束候选：查询文本命中的镜头无证据时不可入选。"""
-    from mindex.persons.persons import Entity, Persons, ShotReview
+    from mindex.persons.person_models import Entity, ShotReview
+    from mindex.persons.persons import Persons
 
     config, embedder = prepared
     jid, w, p = setup_workspace(config)
@@ -540,7 +541,8 @@ def test_person_recall_filters_by_published_evidence(prepared):
 
 
 def test_recall_reference_images_are_added_to_legacy_details_without_rewriting(prepared):
-    from mindex.persons.persons import Entity, Persons
+    from mindex.persons.person_models import Entity
+    from mindex.persons.persons import Persons
     from mindex.shared.storage import dumps
 
     config, embedder = prepared
@@ -582,7 +584,8 @@ def test_recall_reference_images_are_added_to_legacy_details_without_rewriting(p
     assert shown["image_url"] != shown["reference_url"]
 
 def test_workspace_recall_pins_active_person_release_and_reuses_after_rollback(prepared):
-    from mindex.persons.persons import Entity, Persons, ShotReview
+    from mindex.persons.person_models import Entity, ShotReview
+    from mindex.persons.persons import Persons
 
     config, _embedder = prepared
     jid, w, p = setup_workspace(config)

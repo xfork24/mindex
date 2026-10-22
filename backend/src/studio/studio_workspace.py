@@ -641,7 +641,7 @@ def specification(config, job_id, w, p, stage, sid=None, *, context=None, parame
             recall = recall_signature(content.get("recall"))
             if recall is not None:
                 payload["recall"] = recall
-            from mindex.persons.persons import AUTO_PERSON_QUERY_VERSION, has_document_reference
+            from mindex.persons.person_names import AUTO_PERSON_QUERY_VERSION, has_document_reference
 
             value = content.get("recall") or {}
             if (

@@ -14,21 +14,21 @@ from pydantic import Field, model_validator
 
 from mindex.models.adapters import request
 from mindex.models.qwen import analysis_options
+from mindex.persons.person_models import (
+    CastConfirm,
+    CastEntry,
+    Entity,
+    PersonHasLinkedShots,
+    ShotReview,
+    checked_box,
+)
 from mindex.persons.person_processing import (
     PersonClient,
     PersonOptions,
     PersonTasks,
     ensure_reference_quality,
 )
-from mindex.persons.persons import (
-    CastConfirm,
-    CastEntry,
-    Entity,
-    PersonHasLinkedShots,
-    Persons,
-    ShotReview,
-    checked_box,
-)
+from mindex.persons.persons import Persons
 from mindex.shared.config import StrictModel, fingerprint
 from mindex.shared.processing_lock import ProcessingLock
 from mindex.shared.storage import dumps

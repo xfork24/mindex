@@ -195,7 +195,8 @@ class SearchEngine:
         }
 
     def text(self, query: TextSearch) -> dict:
-        from mindex.persons.persons import Persons, overlaps_for, resolve_names
+        from mindex.persons.person_names import overlaps_for, resolve_names
+        from mindex.persons.persons import Persons
 
         started = perf_counter()
         catalogue = Persons(self.store)
@@ -218,8 +219,8 @@ class SearchEngine:
         if mode == 'onscreen' and not ids:
             raise ValueError('人物出镜模式需要选择人物或输入已登记姓名')
         if mode == 'onscreen':
+            from mindex.persons.person_names import coverage_missing
             from mindex.persons.person_processing import EvidenceReferences
-            from mindex.persons.persons import coverage_missing
             reference_images = EvidenceReferences(self.config, self.store)
             meta['person_coverage_missing'] = coverage_missing(snapshots, published['coverage'])
             if published.get('format', 1) >= 2:
@@ -264,7 +265,7 @@ class SearchEngine:
             query = query.model_copy(update={'text': remaining})
         elif mode == 'mentioned':
             # Mention mode is literal dialogue evidence, with no visual/analysis bypass.
-            from mindex.persons.persons import _occurrences
+            from mindex.persons.person_names import _occurrences
 
             names = {e['id']: [e['name'], *e.get('aliases', [])] for e in entities}
             if ids:

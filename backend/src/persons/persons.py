@@ -10,133 +10,24 @@ import hashlib
 import io
 import json
 import math
-import re
-import uuid
-from contextlib import contextmanager, nullcontext
+from contextlib import nullcontext
 from datetime import UTC, datetime
-from typing import Literal
 
 from PIL import Image, ImageOps
-from pydantic import Field, model_validator
 
-from mindex.shared.config import StrictModel, fingerprint
+from mindex.persons.person_models import (
+    CastConfirm,
+    Entity,
+    PersonHasLinkedShots,
+    Review,
+    ShotReview,
+    checked_box,
+    frame_review_lock,
+    uid,
+)
+from mindex.shared.config import fingerprint
 from mindex.shared.person_schema import normalize_entity
 from mindex.shared.storage import Store, dumps
-
-
-class Entity(StrictModel):
-    """演员与作品角色是不同身份：演员跨作品共用；角色可归属一部或多部作品（跨电影角色）。"""
-
-    kind: Literal["actor", "work", "role"]
-    name: str = Field(min_length=1, max_length=200)
-    aliases: list[str] = Field(default_factory=list, max_length=100)
-    work_ids: list[str] = Field(default_factory=list, max_length=50)
-    actor_ids: list[str] = Field(default_factory=list)
-
-    @model_validator(mode="after")
-    def clean(self):
-        self.name = self.name.strip()
-        self.aliases = list(dict.fromkeys(x.strip() for x in self.aliases if x.strip()))
-        if not self.name:
-            raise ValueError("姓名不能为空")
-        if self.kind == "role":
-            self.work_ids = list(dict.fromkeys(self.work_ids))
-            if not self.work_ids:
-                raise ValueError("角色至少归属一部作品；跨电影角色可关联多部作品")
-        else:
-            self.work_ids = []
-        return self
-
-
-class CastEntry(StrictModel):
-    """Cast rows carry identity only; staged characters are roles named like 老年叶淑柔."""
-
-    image_id: str
-    actor_name: str = Field(default="", max_length=200)
-    foreign_name: str = ""
-    role_name: str = ""
-    actor_id: str | None = None
-    role_id: str | None = None
-    bbox: list[float] | None = Field(default=None, min_length=4, max_length=4)
-    # User must explicitly approve a single-person crop. Group photos are never accepted by guessing.
-    single_person: bool = False
-
-    @model_validator(mode="after")
-    def identity_present(self):
-        self.actor_name = self.actor_name.strip()
-        self.foreign_name = self.foreign_name.strip()
-        self.role_name = self.role_name.strip()
-        if not self.actor_name and not self.actor_id:
-            raise ValueError("请填写演员名或关联已有演员")
-        return self
-
-
-class CastConfirm(StrictModel):
-    work_id: str
-    entries: list[CastEntry]
-
-
-class Review(StrictModel):
-    """Internal per-observation correction used by cache validation and integrations."""
-
-    actor_id: str | None = None
-    role_id: str | None = None
-    accept: bool = True
-    reason: str = Field(min_length=1, max_length=1000)
-
-
-class ShotSelection(StrictModel):
-    """勾选一个出镜身份：演员 + 该作品中的角色。"""
-
-    actor_id: str
-    role_id: str | None = None
-
-
-class ShotReview(StrictModel):
-    source_id: str
-    shot_id: str
-    selections: list[ShotSelection] = Field(default_factory=list, max_length=50)
-
-
-def uid():
-    return uuid.uuid4().hex
-
-
-def checked_box(box, width, height):
-    if len(box) != 4:
-        raise ValueError("照片区域必须有四个原图坐标")
-    x1, y1, x2, y2 = box
-    if not all(math.isfinite(x) for x in box) or not (0 <= x1 < x2 <= width and 0 <= y1 < y2 <= height):
-        raise ValueError("照片区域超出原图或坐标无效")
-    result = tuple(round(x) for x in box)
-    if result[2] <= result[0] or result[3] <= result[1]:
-        raise ValueError("照片区域太小")
-    return result
-
-
-class PersonHasLinkedShots(ValueError):
-    def __init__(self, result):
-        self.linked_shots = result
-        examples = "；".join(
-            f"{s['source_name']} {s['start']:.3f}–{s['end']:.3f} 秒（分镜 {s['shot_id']}）"
-            for s in result["items"][:5]
-        )
-        super().__init__(
-            f"该身份仍有关联出镜证据：{result['total']} 个未排除分镜；请先核对。{examples}"
-        )
-
-
-@contextmanager
-def frame_review_lock(store):
-    from filelock import Timeout
-
-    from mindex.shared.processing_lock import SharedFileLock
-
-    try:
-        with SharedFileLock(store.root / "pipeline.lock"):
-            yield
-    except Timeout:
-        raise ValueError("人物帧正在迁移或清理，请稍后重试审核") from None
 
 
 class Persons:
@@ -1197,170 +1088,6 @@ class Persons:
         return release, value
 
 
-KIND_LABELS = {"actor": "演员", "work": "作品", "role": "角色"}
-
-
-def _occurrences(name, text):
-    # Avoid matching Ann inside Anna; Chinese registered names may form phrases.
-    pattern = re.escape(name)
-    if re.fullmatch(r"[\w\s.-]+", name, flags=re.ASCII):
-        pattern = r"(?<!\w)" + pattern + r"(?!\w)"
-    return list(re.finditer(pattern, text, flags=re.IGNORECASE))
-
-
-def _fuzzy_union(pairs, base):
-    """Distinct full role names sharing a typed suffix form a union; duplicate names stay ambiguous."""
-    names = [name.casefold() for _, name in pairs]
-    return (
-        len(names) > 1
-        and len(set(names)) == len(names)
-        and all(name.endswith(base.casefold()) for name in names)
-    )
-
-
-_DOCUMENT = r"(?:记录|档案|资料|信件|书信|日记|传记|报道|报告|照片|画像)"
-_REFERENCE = re.compile(r"(?:关于|有关)[^，,。.;；！？!?：:\n]{1,40}?" + _DOCUMENT)
-_POSSESSIVE_DOCUMENT = re.compile(r"的(?:相关)?" + _DOCUMENT)
-AUTO_PERSON_QUERY_VERSION = "document-reference-v1"
-
-
-def has_document_reference(text):
-    """Whether auto name interpretation can differ from the legacy co-appearance rule."""
-    return bool(_REFERENCE.search(text) or _POSSESSIVE_DOCUMENT.search(text))
-
-
-def _document_reference(text, start, end):
-    # Only clear documentary references are relaxed. Separate visible occurrences of
-    # the same person, coordinated subjects and explicit selections remain strict.
-    return bool(
-        _POSSESSIVE_DOCUMENT.match(text, end)
-        or any(m.start() <= start and end <= m.end() for m in _REFERENCE.finditer(text))
-    )
-
-
-def resolve_names(query, entities):
-    """Resolve typed names to identities; returns (ids, recognized, remaining, variant_groups).
-
-    Roles also match by significant suffix so 叶淑柔 recalls a role named 老年叶淑柔;
-    such variants form one union group (any member counts), never an ambiguity error.
-    Explicit person_ids selections stay precise singletons.
-    """
-
-    lookup = {e["id"]: e for e in entities}
-    explicit = list(dict.fromkeys(query.person_ids))
-    selected_ids = set(explicit)
-    for identifier in explicit:
-        if identifier not in lookup or lookup[identifier]["kind"] == "work":
-            raise ValueError("请选择已发布人物版本中的演员或角色")
-    matches = []
-    for e in entities:
-        if e["kind"] == "work":
-            continue
-        for name in [e["name"], *e.get("aliases", [])]:
-            for m in _occurrences(name, query.text):
-                matches.append((m.start(), m.end(), e["id"], name))
-    # Suffix recall: a role whose full name is absent can still match its base name.
-    for e in entities:
-        if e["kind"] != "role":
-            continue
-        for name in [e["name"], *e.get("aliases", [])]:
-            if _occurrences(name, query.text):
-                continue
-            shortest = max(2, (len(name) + 1) // 2)
-            for length in range(len(name) - 1, shortest - 1, -1):
-                found = _occurrences(name[-length:], query.text)
-                if found:
-                    m = found[0]
-                    matches.append((m.start(), m.end(), e["id"], name[-length:]))
-                    break
-    # Longest registered name wins over contained names (老年叶淑柔 vs 叶淑柔).
-    matches = [
-        m
-        for m in matches
-        if not any(a <= m[0] and b >= m[1] and b - a > m[1] - m[0] for a, b, _, _ in matches)
-    ]
-    groups = {}
-    for a, b, identifier, name in matches:
-        groups.setdefault((a, b), []).append((identifier, name))
-    recognized = []
-    variant_groups = []
-    onscreen_spans = []
-    for (a, b), group in sorted(groups.items()):
-        options = list(dict.fromkeys(i for i, _ in group))
-        selected = [i for i in options if i in explicit]
-        union = (
-            len(options) > 1
-            and all(lookup[i]["kind"] == "role" for i in options)
-            and _fuzzy_union([(i, lookup[i]["name"]) for i in options], query.text[a:b])
-            and not selected
-        )
-        if len(options) > 1 and len(selected) != 1 and not union:
-            raise ValueError(
-                "姓名有歧义，请选择具体身份（演员与角色是不同身份）："
-                + "、".join(
-                    f"{KIND_LABELS.get(lookup[i]['kind'], lookup[i]['kind'])} {lookup[i]['name']} ({i})"
-                    for i in options
-                )
-            )
-        members = selected or options
-        reference = (
-            query.person_mode == "auto"
-            and not selected_ids.intersection(members)
-            and _document_reference(query.text, a, b)
-        )
-        for identifier in members:
-            if not reference and identifier not in explicit:
-                explicit.append(identifier)
-            recognized.append(
-                {
-                    "id": identifier,
-                    "name": lookup[identifier]["name"],
-                    "kind": lookup[identifier]["kind"],
-                    "span": [a, b],
-                    **({"usage": "reference"} if reference else {}),
-                }
-            )
-        if not reference:
-            variant_groups.append(members)
-            onscreen_spans.append((a, b))
-    remaining = query.text
-    for a, b in sorted(onscreen_spans, reverse=True):
-        remaining = remaining[:a] + " " + remaining[b:]
-    from_text = {i for g in variant_groups for i in g}
-    singletons = [[i] for i in explicit if i not in from_text]
-    return explicit, recognized, remaining.strip(" ，,。的与和及、"), [*singletons, *variant_groups]
-
-
-def overlaps_for(segment, evidence, identifiers, relation):
-    """identifiers are ids or variant groups (lists of ids); any member hits its group."""
-
-    groups = [
-        [
-            e
-            for e in evidence
-            if any(
-                i in (e["actor_id"], e["role_id"]) for i in (group if isinstance(group, list) else [group])
-            )
-            and e["source_id"] == segment["source_id"]
-            and e["start"] < segment["end"]
-            and e["end"] > segment["start"]
-        ]
-        for group in identifiers
-    ]
-    if not groups:
-        return []
-    if relation == "any":
-        return list({e["id"]: e for g in groups for e in g}.values())
-    if any(not g for g in groups):
-        return []
-    # Endpoint sweep: every group (selected identity or fuzzy variant union) overlaps at one instant.
-    points = sorted({max(segment["start"], e["start"]) for g in groups for e in g})
-    for t in points:
-        if all(any(e["start"] <= t < min(e["end"], segment["end"]) for e in g) for g in groups):
-            return list({e["id"]: e for g in groups for e in g}.values())
-    return []
-
-
 def prune_default_work(db, source_id):
     """Remove an unused automatic work, preserving explicitly named works and cast imports."""
     work_id = fingerprint(["work", source_id])
@@ -1409,25 +1136,6 @@ def purge_person_source(db, source_id):
             )
             db.execute("DELETE FROM search_releases WHERE id=?", (release["id"],))
         db.execute("DELETE FROM person_versions WHERE id=?", (row["id"],))
-
-
-def coverage_missing(snapshots, coverage):
-    """A partially processed film still reports missing coverage outside processed intervals."""
-    by_source = {}
-    for c in coverage:
-        by_source.setdefault(c["source_id"], []).append((c["data"]["start"], c["data"]["end"]))
-    missing = set()
-    for s in snapshots:
-        end = s["start"]
-        for a, b in sorted(by_source.get(s["source_id"], [])):
-            if a > end + 1e-6:
-                break
-            end = max(end, b)
-            if end >= s["end"] - 1e-6:
-                break
-        if end < s["end"] - 1e-6:
-            missing.add(s["source_id"])
-    return sorted(missing)
 
 
 def frame_rank(row):

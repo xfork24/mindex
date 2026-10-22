@@ -14,6 +14,8 @@ from PIL import Image
 
 from mindex.api import create_app
 from mindex.models.adapters import ModelError
+from mindex.persons.person_models import CastConfirm, Entity, Review
+from mindex.persons.person_names import overlaps_for, resolve_names
 from mindex.persons.person_processing import (
     PersonOptions,
     PersonProcessor,
@@ -23,14 +25,7 @@ from mindex.persons.person_processing import (
     face_match,
     reference_subject,
 )
-from mindex.persons.persons import (
-    CastConfirm,
-    Entity,
-    Persons,
-    Review,
-    overlaps_for,
-    resolve_names,
-)
+from mindex.persons.persons import Persons
 from mindex.shared.config import Config, fingerprint
 from mindex.shared.person_schema import init_person_schema
 from mindex.shared.storage import Store, dumps
@@ -588,7 +583,7 @@ def test_matched_reference_provenance_and_legacy_cache_recovery(catalogue, confi
             dumps(legacy["data"]),
         ),
     )
-    from mindex.persons.persons import ShotReview
+    from mindex.persons.person_models import ShotReview
 
     reviewed = p.shot_review(
         ShotReview(
@@ -1035,7 +1030,7 @@ def test_task_report_counts_shots_not_frame_rows(catalogue, config):
 
 
 def test_task_report_shot_counts_include_preserved_human_review(catalogue, config):
-    from mindex.persons.persons import ShotReview
+    from mindex.persons.person_models import ShotReview
 
     p, work, actor = catalogue
     role = p.save(Entity(kind="role", name="测试角色", work_ids=[work], actor_ids=[actor["id"]]))
@@ -1735,7 +1730,7 @@ def test_local_sampling_retains_real_pts_short_shots_and_batched_contract(config
 
 
 def test_partial_coverage_is_reported_and_review_roles_are_work_scoped(catalogue):
-    from mindex.persons.persons import coverage_missing
+    from mindex.persons.person_names import coverage_missing
 
     p, work, actor = catalogue
     snapshots = [{"source_id": "source", "start": 0, "end": 100}]
@@ -1849,7 +1844,7 @@ def test_person_selection_without_text_and_evidence_paging(catalogue, config):
 
 
 def test_shot_review_marks_persons_and_rejects_unmarked_rows(catalogue):
-    from mindex.persons.persons import ShotReview
+    from mindex.persons.person_models import ShotReview
 
     p, work, a = catalogue
     other = p.save(Entity(kind="actor", name="演员乙"))
@@ -2084,7 +2079,7 @@ def test_task_config_roundtrip_keeps_shot_checkpoint_key(catalogue, config):
 
 
 def test_shot_review_survives_feature_space_changes(catalogue, config):
-    from mindex.persons.persons import ShotReview
+    from mindex.persons.person_models import ShotReview
 
     p, _work, actor = catalogue
     p.add_reference(actor["id"], photo())
@@ -2253,7 +2248,7 @@ def test_review_filter_distinguishes_roles_without_actor_inference(catalogue):
 
 
 def test_review_manual_identity_is_filterable_and_supersedes_old_review(catalogue):
-    from mindex.persons.persons import ShotReview
+    from mindex.persons.person_models import ShotReview
 
     p, work, actor = catalogue
     other = p.save(Entity(kind="actor", name="人工纠正演员"))
@@ -2281,7 +2276,7 @@ def test_review_manual_identity_is_filterable_and_supersedes_old_review(catalogu
 
 
 def test_review_no_candidate_includes_processed_empty_shots_only(catalogue):
-    from mindex.persons.persons import ShotReview
+    from mindex.persons.person_models import ShotReview
 
     p, _work, _actor = catalogue
     for cache in ["empty-cache", "same-shot-other-run"]:
@@ -2302,7 +2297,7 @@ def test_review_no_candidate_includes_processed_empty_shots_only(catalogue):
 
 
 def test_rejected_review_ignores_identity_filters_and_keeps_pagination(catalogue, config):
-    from mindex.persons.persons import ShotReview
+    from mindex.persons.person_models import ShotReview
 
     p, work, actor = catalogue
     role = p.save(Entity(kind="role", name="已排除角色", work_ids=[work], actor_ids=[actor["id"]]))
@@ -2325,7 +2320,7 @@ def test_rejected_review_ignores_identity_filters_and_keeps_pagination(catalogue
 
 @pytest.mark.parametrize("kind", ["actor", "role"])
 def test_manual_rejected_shots_do_not_block_identity_deletion(catalogue, config, kind):
-    from mindex.persons.persons import ShotReview
+    from mindex.persons.person_models import ShotReview
 
     p, work, actor = catalogue
     role = p.save(Entity(kind="role", name="待删角色", work_ids=[work], actor_ids=[actor["id"]]))
@@ -2407,7 +2402,7 @@ def test_reference_face_error_records_actor_role_names_at_processing_time(catalo
 @pytest.mark.parametrize("status", ["accepted", "candidate"])
 @pytest.mark.parametrize("kind", ["actor", "role"])
 def test_identity_linked_shots_include_non_top_evidence_and_block_deletion(catalogue, config, status, kind):
-    from mindex.persons.persons import ShotReview
+    from mindex.persons.person_models import ShotReview
 
     p, work, actor = catalogue
     other = p.save(Entity(kind="actor", name="最高分演员"))
@@ -2567,7 +2562,7 @@ def test_role_delete_ignores_actor_only_evidence(catalogue, config, status, bloc
 
 
 def test_confirmed_person_scores_preserve_manual_original_and_support_legacy(catalogue, config):
-    from mindex.persons.persons import ShotReview
+    from mindex.persons.person_models import ShotReview
 
     p, work, actor = catalogue
     other = p.save(Entity(kind='actor', name='无原始候选演员'))
@@ -2611,7 +2606,7 @@ def test_confirmed_person_scores_preserve_manual_original_and_support_legacy(cat
 
 
 def test_manual_score_ignores_actor_only_and_other_roles(catalogue):
-    from mindex.persons.persons import ShotReview
+    from mindex.persons.person_models import ShotReview
 
     p, work, actor = catalogue
     roles = [p.save(Entity(kind='role',name=f'角色{n}',work_ids=[work],actor_ids=[actor['id']])) for n in range(3)]
@@ -2970,7 +2965,7 @@ def test_role_only_migration_deletes_actor_evidence_and_preserves_pairs_exclusio
 
 
 def test_review_all_endpoints_exclude_foreign_invalid_and_actor_only_evidence(catalogue, config):
-    from mindex.persons.persons import ShotReview
+    from mindex.persons.person_models import ShotReview
 
     p, work, actor = catalogue
     role = p.save(Entity(kind="role", name="当前角色", work_ids=[work], actor_ids=[actor["id"]]))
@@ -3100,7 +3095,7 @@ def test_frame_interval_cache_and_review_preservation(catalogue, config):
 
 
 def test_interval_changes_preserve_confirmed_and_excluded_shots(catalogue, config):
-    from mindex.persons.persons import ShotReview
+    from mindex.persons.person_models import ShotReview
 
     p, work, actor = catalogue
     role = p.save(Entity(kind="role", name="审核保留", work_ids=[work], actor_ids=[actor["id"]]))

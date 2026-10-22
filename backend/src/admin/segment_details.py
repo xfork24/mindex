@@ -11,7 +11,7 @@ from mindex.shared.media import MediaError
 
 def person_section(store, segment):
     """Read processing coverage and overlapping evidence independently of publications."""
-    from mindex.persons.persons import KIND_LABELS
+    from mindex.persons.person_names import KIND_LABELS
 
     start, end = segment["start"], segment["end"]
     intervals = []

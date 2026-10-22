@@ -53,7 +53,8 @@ def persons_save(
     \b
       mindex persons save /路径/actor.json
     """
-    from mindex.persons.persons import Entity, Persons
+    from mindex.persons.person_models import Entity
+    from mindex.persons.persons import Persons
     from mindex.shared.storage import Store
 
     print_json(
@@ -115,8 +116,8 @@ def persons_process(
     import subprocess
     import sys
 
+    from mindex.persons.person_models import uid
     from mindex.persons.person_processing import PersonOptions
-    from mindex.persons.persons import uid
     from mindex.shared.processing_lock import ProcessingLock
     from mindex.shared.storage import Store, dumps
 
@@ -216,7 +217,8 @@ def persons_review(
     \b
       mindex persons review /路径/review.json
     """
-    from mindex.persons.persons import Persons, ShotReview
+    from mindex.persons.person_models import ShotReview
+    from mindex.persons.persons import Persons
     from mindex.shared.storage import Store
 
     print_json(Persons(Store(ctx.obj.data_dir)).shot_review(ShotReview.model_validate_json(file.read_text())))

@@ -114,6 +114,7 @@ wheel 安装后读取随包的 `mindex/web/`。Setuptools 通过包目录映射�
 | `processing/dialogue.py` / `processing/subtitle_uploads.py` / `processing/subtitle_archive.py` | 对白处理（字幕优先、ASR）、外部字幕上传登记、字幕归档与 SHA256 校验 |
 | `processing/shot_repair.py` | 显式、先备份的镜头边界修复，不删除已有媒体 |
 | `persons/persons.py` / `persons/person_api.py` | 人物库与发布模型；`/api/persons/*` 路由与页面 |
+| `persons/person_models.py` / `persons/person_names.py` | 人物请求/实体模型与小型校验；名称解析、文档提及识别与出镜区间查询辅助 |
 | `persons/person_processing.py` / `persons/person_worker.py` / `persons/person_frames.py` / `persons/person_thumbnails.py` | 人物扫描管线与后台 worker、展示帧布局、缩略图 |
 | `persons/person_server.py` | GPU 侧人物检测/特征服务（`mindex-person-server`） |
 | `studio/studio_workspace.py` / `studio/studio_window.py` / `studio/studio_logs.py` | 方案、构建与版本工作台，定长选片窗口，只追加的执行事件日志 |

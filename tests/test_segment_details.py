@@ -132,7 +132,8 @@ def test_missing_source_media_preserves_stored_llm_and_asr(config, video_file):
 
 
 def test_person_details_merge_clip_coverage_count_evidence_without_publication(config, video_file):
-    from mindex.persons.persons import Entity, Persons
+    from mindex.persons.person_models import Entity
+    from mindex.persons.persons import Persons
 
     pipeline = Pipeline(config)
     source = pipeline.prepare(video_file)

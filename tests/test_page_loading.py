@@ -5,7 +5,8 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from mindex.api import create_app
-from mindex.persons.persons import Entity, Persons
+from mindex.persons.person_models import Entity
+from mindex.persons.persons import Persons
 from mindex.shared.storage import Store, dumps
 
 
