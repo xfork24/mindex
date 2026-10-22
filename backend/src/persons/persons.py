@@ -330,13 +330,14 @@ class Persons:
     def delete_release(self, identifier):
         """删除一条已发布的检索组合；正在生效的组合受保护，须先恢复到其他组合。
         只删组合行；其人物快照若已无其他组合引用则一并清理，避免留下孤儿快照。"""
-        row = self.store.one("SELECT * FROM search_releases WHERE id=?", (identifier,))
-        if not row:
-            raise ValueError("找不到检索发布记录")
-        active = self.store.one("SELECT value FROM settings WHERE key='active.release'")
-        if active and active["value"] == identifier:
-            raise ValueError("这是当前生效的检索组合；请先恢复到其他组合再删除")
         with self.store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT * FROM search_releases WHERE id=?", (identifier,)).fetchone()
+            if not row:
+                raise ValueError("找不到检索发布记录")
+            active = db.execute("SELECT value FROM settings WHERE key='active.release'").fetchone()
+            if active and active["value"] == identifier:
+                raise ValueError("这是当前生效的检索组合；请先恢复到其他组合再删除")
             db.execute("DELETE FROM search_releases WHERE id=?", (identifier,))
             if row["person_id"] and not db.execute(
                 "SELECT 1 FROM search_releases WHERE person_id=?", (row["person_id"],)
@@ -1210,6 +1211,7 @@ class Persons:
         ]
 
     def publish(self, content_id=None, *, source_id=None, progress=None):
+        requested_content_id = content_id
         active = self.store.active_index()
         content_id = content_id or (active["id"] if active else None)
         if not content_id:
@@ -1229,6 +1231,11 @@ class Persons:
         # A consistent catalogue/evidence/coverage snapshot, without model calls.
         with self.store.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            if requested_content_id is None:
+                current = db.execute("SELECT value FROM settings WHERE key='active'").fetchone()
+                if not current:
+                    raise ValueError("请先发布内容索引")
+                content_id = current['value']
             ready = db.execute("SELECT status FROM index_versions WHERE id=?", (content_id,)).fetchone()
             if not ready or ready["status"] != "ready":
                 raise ValueError("内容索引尚未就绪")

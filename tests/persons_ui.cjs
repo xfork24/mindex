@@ -488,5 +488,19 @@ function find(root, predicate) {
   sandbox.fillReviewChoices([sharedShot, {...sharedShot, source_id: 'foreign-source'}]);
   assert.equal(get('review-choices').querySelectorAll('input').length, 0, '跨作品批量不显示不适用于所有分镜的角色');
 
+  // 发布操作在原地显示进行中、成功和错误，且结束后恢复按钮。
+  const releaseButton = get('publish');
+  let completeRelease;
+  const pendingRelease = sandbox.releaseAction(releaseButton, () => new Promise(resolve => {completeRelease = resolve;}), '发布成功');
+  assert.equal(releaseButton.disabled, true);
+  assert.ok(get('release-notice').textContent);
+  completeRelease();await pendingRelease;
+  assert.equal(releaseButton.disabled, false);
+  assert.equal(get('release-notice').textContent, '发布成功');
+  await sandbox.releaseAction(releaseButton, async () => {throw Error('当前组合不能删除');}, '不应成功');
+  assert.equal(get('release-notice').textContent, '当前组合不能删除');
+  assert.equal(get('release-notice').className, 'notice error');
+  assert.equal(releaseButton.disabled, false);
+
   console.log('persons UI regression checks passed');
 })().catch(error => {console.error(error); process.exitCode = 1;});

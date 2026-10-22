@@ -82,11 +82,7 @@ def publish_work(config, source_id, work, embedder=None, *, progress=None, scope
             raise ValueError("该素材尚未发布内容索引；请单独执行该素材的嵌入更新")
         if progress:
             progress({"stage": "publish", "message": "正在发布人物检索"})
-        from mindex.shared.processing_lock import index_write_lock
-        if progress:
-            progress({"stage": "index_wait"})
-        with index_write_lock(pipeline.store.root):
-            result = Persons(pipeline.store).publish(source_id=source_id, progress=progress)
+        result = Persons(pipeline.store).publish(source_id=source_id, progress=progress)
         return result
     index_id = IndexBuilder(config, embedder).build(
         activate=True,

@@ -3,11 +3,13 @@ from __future__ import annotations
 import base64
 import json
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
+from filelock import Timeout
 from pydantic import Field, model_validator
 
 from mindex.models.adapters import analysis_options, request
@@ -27,7 +29,7 @@ from mindex.persons.persons import (
     checked_box,
 )
 from mindex.shared.config import StrictModel, fingerprint
-from mindex.shared.processing_lock import ProcessingLock, index_write_lock
+from mindex.shared.processing_lock import ProcessingLock
 from mindex.shared.storage import dumps
 
 
@@ -480,9 +482,17 @@ def person_router(runtime, store):
     def review_shot(body: ShotReview):
         return catalogue.shot_review(body)
 
+    @contextmanager
+    def release_write():
+        try:
+            with ProcessingLock(runtime.current()):
+                yield
+        except Timeout as exc:
+            raise HTTPException(409, "处理锁被占用，请稍后重试人物发布操作") from exc
+
     @router.post("/publish")
     def publish(body: Publish):
-        with ProcessingLock(runtime.current()), index_write_lock(store.root):
+        with release_write():
             return catalogue.publish(body.content_id)
 
     @router.post("/releases/{identifier}/activate")
@@ -490,13 +500,13 @@ def person_router(runtime, store):
         row = store.one("SELECT * FROM search_releases WHERE id=?", (identifier,))
         if not row:
             raise ValueError("找不到检索发布记录")
-        with ProcessingLock(runtime.current()), index_write_lock(store.root):
+        with release_write():
             store.activate_release(identifier)
         return row
 
     @router.delete("/releases/{identifier}")
     def delete_release(identifier: str):
-        with ProcessingLock(runtime.current()), index_write_lock(store.root):
+        with release_write():
             return catalogue.delete_release(identifier)
 
     return router

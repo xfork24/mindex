@@ -1,4 +1,8 @@
 window.MindexMessages = {
+  "ui.person_release_locked": {"zh": "处理锁被占用，请稍后重试人物发布操作", "en": "A processing lock is held. Retry the person release operation later."},
+  "ui.person_release_busy": {"zh": "正在处理人物发布操作…", "en": "Processing person release…"},
+  "ui.person_release_complete": {"zh": "人物证据已发布；内容未变化时复用已有发布记录。", "en": "Person evidence published. Unchanged content reuses the existing release."},
+
   "ui.recognized_people": {"zh": "识别人物汇总（含所有帧候选）", "en": "Recognized people (candidates from all frames)"},
   "ui.recognized_person": {"zh": "{p0} · {p1} · {p2} 条识别证据", "en": "{p0} · {p1} · {p2} observations"},
 

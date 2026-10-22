@@ -242,6 +242,7 @@ class Store:
 
     def activate(self, index_id: str):
         with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
             version = db.execute("SELECT status FROM index_versions WHERE id=?", (index_id,)).fetchone()
             if not version or version["status"] != "ready":
                 raise ValueError("Only a ready index can be activated")
@@ -269,6 +270,7 @@ class Store:
 
     def activate_release(self, release_id: str):
         with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
             row = db.execute("SELECT r.*,i.status FROM search_releases r JOIN index_versions i ON i.id=r.content_id WHERE r.id=?", (release_id,)).fetchone()
             if not row or row['status'] != 'ready':
                 raise ValueError("检索组合不存在或内容索引未就绪")

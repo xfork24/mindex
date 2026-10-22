@@ -1620,6 +1620,40 @@ def test_strict_no_dialogue_leak_pretruncate_filter_offline_name_and_rollback(ca
     assert p.store.active_index()["id"] == version
 
 
+def test_person_release_operations_ignore_content_index_lock(catalogue, config):
+    from mindex.shared.processing_lock import ProcessingLock, index_write_lock
+    from mindex.admin.source_tasks import publish_work
+
+    p, _work, _actor = catalogue
+    config.enforce_gpu_lock = False
+    publish_content(p, config, 'first-content')
+    first = p.publish()
+    assert p.publish()['release_id'] == first['release_id']
+    publish_content(p, config, 'second-content')
+    second = p.publish()
+    client = TestClient(create_app(config))
+    with ProcessingLock(config), index_write_lock(p.store.root):
+        assert client.post('/api/persons/publish', json={}).status_code == 200
+        assert publish_work(config, 'source', 'persons')['release_id'] == second['release_id']
+        assert client.post(f"/api/persons/releases/{first['release_id']}/activate").status_code == 200
+        assert client.delete(f"/api/persons/releases/{second['release_id']}").status_code == 200
+
+
+def test_person_publish_binds_active_content_at_transaction_start(catalogue, config):
+    p, _work, _actor = catalogue
+    publish_content(p, config, 'old-content')
+    publish_content(p, config, 'new-content')
+    p.store.activate('old-content')
+
+    def progress(value):
+        if value['stage'] == 'person_index':
+            p.store.activate('new-content')
+
+    result = p.publish(progress=progress)
+    assert result['content_id'] == 'new-content'
+    assert p.store.active_index()['id'] == 'new-content'
+
+
 def test_release_delete_rejects_active_and_cleans_snapshot(catalogue, config):
     p, work, actor = catalogue
     role = p.save(Entity(kind="role", name="测试角色", work_ids=[work], actor_ids=[actor["id"]]))
