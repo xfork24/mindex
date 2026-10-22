@@ -57,6 +57,6 @@ uv run pytest -q                                    # 完整回归，约 20 分�
 
 UI 回归使用 Node.js 与 Playwright，可通过 `MINDEX_PLAYWRIGHT_MODULE` 指定模块路径。模型测试使用明确标记的确定性适配器；工程测试通过不代表真实模型质量，真实验收使用 `mindex e2e` 并记录模型与索引版本。
 
-已知历史失败与检查范围见 [目录重组验证记录](docs/history/source-layout-verification.md)。遇到失败应说明是否与本次修改相关，不为得到全绿结果随意跳过或修改测试。
+完整 `pytest` 目前应全部通过（2026-10-22：966 项）；历史验证范围见 [目录重组验证记录](docs/history/source-layout-verification.md)。遇到失败应说明是否与本次修改相关，不为得到全绿结果随意跳过或修改测试。
 
 交付时简述改动、实际运行的验证与尚未验证的范围。行为、配置或命令变化时同步相关文档。

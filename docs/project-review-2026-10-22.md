@@ -87,6 +87,54 @@
 | 打包 | `MANIFEST.in` 加入 `AGENT.md` |
 | README | 快速开始前移到功能实景之前；增加安全提示与常见问题；快速开始改用 `uv sync`；整理"源码与协作"段落 |
 
-## 未处理
+## 处理结果
 
-第 1–7 项与第 8 项的 `pyproject.toml` 改动需要产品或所有者决策，或改动面较大，本次只记录。10 项失败的测试没有改动。
+以下是对上面各条发现的后续处理，提交都在分支 `hackathon-261022`。完整 `uv run pytest -q`：966 项全部通过（19 分钟）；`ruff check backend/src tests` 通过；文档链接检查、`build-messages.py --check` 通过。
+
+| # | 发现 | 结果 |
+|---|---|---|
+| 1 | Web/API 无认证 | **已处理（可选）。** 设置 `MINDEX_WEB_TOKEN` 后启用：`/login` 登录设置 HttpOnly、SameSite=Strict 的 Cookie（内容是令牌的 HMAC），`/logout` 登出，脚本用 `Authorization: Bearer`。未设置时行为与以前完全一致。监听非回环地址且无令牌时，`serve` 只输出警告，**不拒绝启动**，因为拒绝启动会改变现有的 `--host 0.0.0.0` 用法，需要所有者确认。实现在 `shared/web_auth.py`，测试 `tests/test_web_auth.py` |
+| 2 | 测试不全绿、无 CI | **测试已处理，CI 按决定未建。** 10 项失败全部修好，没有使用 `xfail`，原因见下。统一的本地检查命令写进了 `AGENT.md`，链接检查脚本提交为 `scripts/check-doc-links.py` |
+| 3 | `requirements.txt` 含本机路径 | **已处理，但保留文件。** 只移除了 `-e file:///Users/...` 那一行，其余 104 行依赖保留，`MANIFEST.in` 继续打包它 |
+| 4 | 包依赖成环 | **下层已处理，上层未处理。** `shared` 不再导入任何其他包，`models` 只依赖 `shared`，`processing` 只依赖 `models`、`shared`，`tests/test_import_boundaries.py` 用 AST 约束这个方向（含函数内的延迟导入）。`admin`、`persons`、`maintenance`、`studio`、`search`、`settings` 之间的互相引用仍在，例如 `admin` ↔ `persons`、`persons` ↔ `maintenance` |
+| 5 | 超大文件 | **部分处理，见下表** |
+| 6 | `messages.js` 手工镜像 | **已处理。** `scripts/build-messages.py` 由 `messages.json` 生成，`--check` 校验，`tests/test_i18n.py` 调用它 |
+| 7 | 仓库卫生 | **文档部分已处理。** 19 份验证记录移到 `docs/history/` 并同步全部链接。`plans/` 的几份文件**不是重复**：`PERSON_LIB_UI_PLAN` 与 `_v2` 是两轮不同的人物页改造，`PERSON_REFACTOR_PLAN` 与 `PERSON_PROCESS_REFACTOR_PLAN` 分别是展示帧存储和仅角色出镜，所以没有合并，新增 `plans/README.md` 按主题索引。**按决定未处理：** LICENSE、`m4s-converter` 二进制 |
+| 8 | 打包与工具配置 | **大部分已处理。** `description` 已更新；`[tool.ruff.lint]` 有了显式的 `select` 和 `ignore`；`MANIFEST.in` 补了 `AGENT.md`。`packages` **没有**改成 `find`：`mindex` 映射到 `backend/src`、`mindex.web` 映射到 `frontend/src`，`find` 无法发现这种目录名与包名不一致的布局。改为 `tests/test_packaging.py`，校验每个子目录都在 `packages` 里，防止漏打包 |
+| 9 | 模块命名重复包名 | 按原结论不处理 |
+| 10 | 异常处理 | 无问题 |
+
+### 超大文件（发现 5）
+
+| 文件 | 处理前 | 处理后 | 说明 |
+|---|---|---|---|
+| `models/adapters.py` | 1,060 | 核心 257 行 | 拆出 `embedders`、`qwen`、`speech`、`storyboard`、`transcribers`、`detectors`；工厂延迟导入后端，不留转发层 |
+| `cli.py` | 1,360 | 717 | 拆出 `cli_e2e`、`cli_persons`、`cli_clips`、`cli_common`；53 个命令的 `--help` 输出与拆分前逐字一致 |
+| `maintenance/backup.py` | 1,130 | 676 | 拆出 `backup_files.py` |
+| `studio/studio_api.py` | 1,173 | 886 | 拆出 `studio_models.py`（请求体）和 `studio_files.py`（产物路由） |
+| `persons/persons.py` | 1,684 | 1,287 | 拆出 `person_models.py`、`person_names.py`、`shared/person_schema.py` |
+| `studio/studio_workspace.py` | 1,660 | 1,661 | **未拆** |
+| `frontend/src/studio/studio.js` | 2,559 | 2,559 | **未拆** |
+| `Persons` 类（在 `persons.py` 内） | 1,056 | 1,056 | **未拆** |
+
+未拆的三处原因：
+- `studio_workspace.py` 是以模块为单位被 `ws.xxx` 调用的函数集合，studio 的各个模块和测试里有大量 `ws.execute`、`ws.specification` 和对它们的 monkeypatch。拆开后每个调用点和补丁目标都要改，而项目约定不保留转发层。
+- `studio.js` 是靠全局作用域共享状态的单个脚本，5 个 `.cjs` 测试按路径读取并执行它。本机没有安装 Playwright，无法做浏览器回归，拆分后的界面行为无法验证。
+- `Persons` 类的方法与模块级的帧辅助函数互相调用（`existing_frame`、`encode_frame`、`prune_default_work`），拆开会形成导入环，需要先把类按职责分成几个混入类，这是更大的设计改动。
+
+### 10 项失败测试的原因
+
+10 项都是测试没有跟上当前的产品行为，没有发现产品缺陷，因此只改了测试：
+
+- 出镜审核和发布要求证据带角色，且角色属于该素材的作品（提交 fd4ea33）：`test_studio_recall` 两项、`test_backup`、`test_recall_e2e` 补建角色。
+- 处理与发布是独立的后台任务：`test_analysis_content_rejection`、`test_recall_e2e` 改为等待发布任务完成。
+- `visual` 默认索引 moment 和 shot，索引按活动快照增量合并：`test_film`、`test_channel_recall`（分析发布不带入对白）、`test_pipeline`（换模型空间需要所有渠道一起重建）。
+- 搜索默认粒度是 moment，而测试按快照顺序（由 ID 哈希决定）选了 shot：`test_admin`。
+- 创建任务会调用标题生成模型，测试没有注入替身而访问了外部服务：`test_settings_api`、`test_recall_e2e`。
+
+### 仍待决定
+
+1. 非回环地址无令牌时，`serve` 是否应拒绝启动（现状是只警告）。
+2. 网页里的对白发布只覆盖 moment，镜头粒度的对白需要命令行 `mindex index --kind shot --channel dialogue`（`test_recall_e2e` 里就是这样做的）。这是否符合预期，需要产品确认。
+3. `admin`、`persons`、`maintenance` 等上层包之间的循环依赖，以及上面三处未拆的大文件。
+4. LICENSE、`m4s-converter` 二进制、CI：按决定未做。

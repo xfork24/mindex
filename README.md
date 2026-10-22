@@ -374,7 +374,7 @@ uv run ruff check backend/src tests
 node --check frontend/src/search/app.js
 ```
 
-UI 回归另需 Node.js、Playwright 及其浏览器；可用 `MINDEX_PLAYWRIGHT_MODULE` 指定模块路径。完整 `pytest` 目前并非全绿：其中 7 项既有失败记录在[目录重组验证记录](docs/history/source-layout-verification.md)，另有 3 项人物相关失败见[项目审查](docs/project-review-2026-10-22.md)；其他历史记录见[验证记录](docs/VERIFICATION.md)。自动化测试使用真实媒体处理、数据库与 HTTP 链路，模型部分使用明确标记的确定性测试适配器；它们验证工程行为，不证明真实模型的检索或人物识别准确率。
+UI 回归另需 Node.js、Playwright 及其浏览器；可用 `MINDEX_PLAYWRIGHT_MODULE` 指定模块路径。完整 `pytest` 在 2026-10-22 的运行结果为 966 项全部通过；历史失败的复现情况见[目录重组验证记录](docs/history/source-layout-verification.md)和[项目审查](docs/project-review-2026-10-22.md)。自动化测试使用真实媒体处理、数据库与 HTTP 链路，模型部分使用明确标记的确定性测试适配器；它们验证工程行为，不证明真实模型的检索或人物识别准确率。
 
 真实质量评测需要人工标注查询并固定模型、预处理与索引版本。流程见[端到端操作手册](docs/E2E_RUNBOOK.md)、[e2e 框架](docs/e2e-framework.md)及[评测标注说明](eval/README.md)。检索分数是排序依据，不是匹配概率。
 
