@@ -6,15 +6,12 @@ import hashlib
 import json
 import os
 import shutil
-from contextvars import ContextVar
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
 from mindex.shared.config import fingerprint, portable_parameters
 from mindex.studio import studio
-
-current: ContextVar[ArtifactSession | None] = ContextVar("studio_artifacts", default=None)
 
 
 def digest(path: Path) -> str:
@@ -44,12 +41,6 @@ def sanitized(value):
         url = urlsplit(value)
         return urlunsplit((url.scheme, url.netloc.rsplit("@", 1)[-1], url.path, "", ""))
     return value
-
-
-def record(kind: str, value):
-    session = current.get()
-    if session:
-        session.record(kind, value)
 
 
 class ArtifactSession:

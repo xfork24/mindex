@@ -12,6 +12,7 @@ import numpy as np
 from mindex.models.adapters import ModelError
 from mindex.models.deployment import verified_file
 from mindex.shared.config import Config, fingerprint
+from mindex.shared.jsonio import save
 from mindex.shared.media import content_hash
 
 THRESHOLD = 0.999
@@ -106,8 +107,6 @@ def load_baseline(config: Config, space: dict, *, allow_missing=False) -> dict |
 
 
 def save_validation(config: Config, space: dict, deployment_id: str, report: dict):
-    from mindex.diagnostics.e2e import save
-
     path = validation_path(config, space, deployment_id)
     save(path, report)
     marker = path.with_suffix(".sha256")
@@ -143,7 +142,6 @@ def complete_validation(
     prepared_hashes: list,
     baseline: dict | None,
 ) -> dict:
-    from mindex.diagnostics.e2e import save
 
     directory = location(config, space)
     text = _vectors(raw_text, space["dimensions"])

@@ -460,8 +460,8 @@ def _config_dependencies(config, base_dir, payload):
 
 def compatibility_files(root, database):
     """已建索引所依赖的固定输入与验证证据；不调用模型或生成通过状态。"""
+    from mindex.models.compatibility import load_baseline, location
     from mindex.models.deployment import verified_file
-    from mindex.shared.compatibility import load_baseline, location
 
     required, seen = set(), set()
     for row in store_at(database.parent).rows('SELECT spec FROM index_versions'):

@@ -18,6 +18,7 @@ from mindex.diagnostics.film import source_report
 from mindex.models.adapters import ModelError, make_embedder
 from mindex.processing.pipeline import Pipeline
 from mindex.shared.config import Config, fingerprint
+from mindex.shared.jsonio import save
 from mindex.shared.media import atomic_media, content_hash, cut, probe
 from mindex.shared.storage import Store
 
@@ -61,13 +62,6 @@ def progress(config: Config, directory: Path) -> dict:
         "active_index": active["id"] if active else None,
         "acceptance": state["acceptance"],
     }
-
-
-def save(path: Path, value):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(".partial")
-    temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2))
-    temporary.replace(path)
 
 
 def curation(store: Store):
@@ -271,8 +265,8 @@ def smoke(config: Config, directory: Path) -> dict:
 
 
 def _smoke(config: Config, directory: Path) -> dict:
+    from mindex.models import compatibility
     from mindex.models.deployment import ADAPTER_VERSION
-    from mindex.shared import compatibility
 
     rows = json.loads((directory / "segments.json").read_text())
     unique = list({row["sha256"]: row for row in rows}.values())

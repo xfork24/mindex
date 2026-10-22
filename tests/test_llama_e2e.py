@@ -16,6 +16,7 @@ from mindex.models.llama_cpp import PREFIX, SUFFIX, LlamaEmbedder, LlamaTranscri
 from mindex.processing.pipeline import Pipeline
 from mindex.search.search import lexical_search
 from mindex.shared.config import fingerprint
+from mindex.shared.jsonio import save
 from mindex.shared.media import MediaError, atomic_media, command, content_hash, cut, frame_timestamps, probe
 
 
@@ -99,7 +100,7 @@ def test_native_embedding_template_media_and_normalization(llama, video_file, tm
     with pytest.raises(adapters.ModelError, match="六片段"):
         client.require_gate()
     space = client.identity()
-    e2e.save(
+    save(
         config.data_dir / "capabilities" / (fingerprint(space) + ".json"), {"passed": True, "space": space}
     )
     client.require_gate()

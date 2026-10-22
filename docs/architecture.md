@@ -116,8 +116,12 @@ wheel 安装后读取随包的 `mindex/web/`。Setuptools 通过包目录映射�
 | `studio/studio_workspace.py` / `studio/studio_window.py` / `studio/studio_logs.py` | 方案、构建与版本工作台，定长选片窗口，只追加的执行事件日志 |
 | `settings/voices_catalog.py` | TTS 音色目录：按当前合成后端聚合系统音色、本地音色库与克隆能力 |
 | `shared/shot_media.py` | 统一镜头媒体服务：时间基准转换、截图/抽帧、跨镜重建；业务读取不直读历史切片路径 |
-| `shared/processing_lock.py` / `shared/task_progress.py` / `shared/work_cache.py` | 处理锁（含 GPU 互斥）、任务进度持久化、素材工作台缓存 |
-| `shared/compatibility.py` / `shared/uploads.py` / `shared/review_style.py` / `shared/web_assets.py` | 按部署绑定的嵌入兼容性门槛（六文本六视频基线）、流式上传落盘与限额、导出复核页内嵌样式、静态资源定位 |
+| `shared/processing_lock.py` / `shared/task_progress.py` | 处理锁（含 GPU 互斥）、任务进度持久化 |
+| `admin/work_cache.py` | 素材工作台摘要缓存：先返回上次结果，后台刷新昂贵的覆盖统计 |
+| `shared/trace.py` | 调用诊断记录槽：模型适配与 ffmpeg 调用写入，Studio 执行步骤时接管；无会话时不记录 |
+| `shared/person_schema.py` | 人物库 SQLite 表结构、迁移与实体规范化，供 `Store` 初始化使用 |
+| `models/compatibility.py` | 按部署绑定的嵌入兼容性门槛（六文本六视频基线） |
+| `shared/uploads.py` / `shared/review_style.py` / `shared/web_assets.py` / `shared/jsonio.py` | 流式上传落盘与限额、导出复核页内嵌样式、静态资源定位、JSON 原子写入 |
 | `shared/web_auth.py` | 可选访问令牌认证（`MINDEX_WEB_TOKEN`）：`/login`、`/logout`、Cookie 与 Bearer；未设置时不安装 |
 | `shared/i18n.py` | 把中文消息映射为稳定 `message_key`，供前端展示译文 |
 | `maintenance/clean.py` / `clean_index.py` / `clean_studio.py` / `purge.py` | 磁盘清理（分级规则）、索引与 Studio 清理规则、素材物理删除（保留源视频） |

@@ -13,9 +13,10 @@ from mindex.models.adapters import ModelError, MultimodalEmbedder, Speaker, Stor
 from mindex.shared.config import Config, fingerprint, portable_parameters
 from mindex.shared.media import MediaError, audio_info
 from mindex.shared.shot_media import ShotMedia
+from mindex.shared.trace import current
 from mindex.shared.types import Filters, ShotDraft, TextSearch
 from mindex.studio import studio
-from mindex.studio.studio_artifacts import ArtifactSession, current, digest, visibility_key
+from mindex.studio.studio_artifacts import ArtifactSession, digest, visibility_key
 
 coverage_warning = studio.coverage_warning
 

@@ -15,8 +15,9 @@ from pathlib import Path
 
 from mindex.shared.config import Config, SubtitleConfig, fingerprint, portable_parameters
 from mindex.shared.media import MediaError, atomic_media, command, probe
+from mindex.shared.trace import current
 from mindex.studio.studio import Timeline, save, save_bytes
-from mindex.studio.studio_artifacts import current, digest
+from mindex.studio.studio_artifacts import digest
 
 
 def has_subtitles_filter() -> bool:

@@ -19,6 +19,7 @@ from filelock import FileLock, Timeout
 from pydantic import Field, model_validator
 
 from mindex.admin.curation import EntityNotFound
+from mindex.models.adapters import coverage_warning
 from mindex.shared.config import Config, StrictModel, fingerprint, portable_parameters
 from mindex.shared.types import Filters, Granularity
 
@@ -602,15 +603,6 @@ def save_timeline(config: Config, job_id: str, timeline: Timeline) -> dict:
     write_timeline(config, job_id, timeline)
     save(job_path(config, job_id), state)
     return state
-
-
-def coverage_warning(original: str, shot_texts: list[str]) -> str | None:
-    def normalize(value):
-        return re.sub(r"\s+", "", value)
-
-    if normalize(original) != normalize("".join(shot_texts)):
-        return "分镜文本未按顺序完整覆盖原文，请核对遗漏、重复或改写内容"
-    return None
 
 
 def invalidate(state: dict, steps, reason: str):

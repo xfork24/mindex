@@ -321,7 +321,7 @@ class LlamaEmbedder(HTTPEmbedder):
 
     def _require_gate(self, space: dict, report: dict):
         if space.get("schema") == 2:
-            from mindex.shared.compatibility import require_gate
+            from mindex.models.compatibility import require_gate
 
             require_gate(self.config, space, report)
             return

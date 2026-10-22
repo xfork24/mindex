@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import json
 
+from mindex.shared.trace import current
 from mindex.studio import studio
-from mindex.studio.studio_artifacts import ArtifactSession, current, safe_path
+from mindex.studio.studio_artifacts import ArtifactSession, safe_path
 
 
 def test_diagnostics_redact_credentials_and_keep_raw_model_response(config, monkeypatch):

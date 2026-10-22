@@ -7,8 +7,8 @@ import os
 from pathlib import Path
 from urllib.parse import quote
 
-from mindex.diagnostics.e2e import save
 from mindex.shared.config import Config
+from mindex.shared.jsonio import save
 from mindex.shared.review_style import review_style
 from mindex.shared.storage import Store
 

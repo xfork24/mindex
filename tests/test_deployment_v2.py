@@ -15,7 +15,7 @@ from typer.testing import CliRunner
 from mindex.api import create_app
 from mindex.cli import app
 from mindex.diagnostics import e2e
-from mindex.models import adapters, deployment
+from mindex.models import adapters, compatibility, deployment
 from mindex.models.analyzers import PinnedQwenAnalyzer
 from mindex.models.llama_cpp import (
     LlamaEmbedder,
@@ -32,8 +32,8 @@ from mindex.settings.runtime_settings import (
     apply_runtime_overrides,
     save_profile,
 )
-from mindex.shared import compatibility
 from mindex.shared.config import fingerprint, load_config
+from mindex.shared.jsonio import save
 from mindex.shared.storage import Store
 from mindex.shared.types import TextSearch
 
@@ -119,7 +119,7 @@ def native(config, tmp_path, monkeypatch):
         )
         value = deployment.create_manifest(config, role, report, "Q8_0", **kwargs, launch_parameters=launch)
         target = path if role == "embedding" else tmp_path / (role + ".json")
-        e2e.save(target, value)
+        save(target, value)
         service.deployment_manifest = str(target)
         return value
 
@@ -194,7 +194,7 @@ def test_space_excludes_paths_aliases_addresses_build_and_ctx(native, tmp_path):
         mmproj_file=native["mmproj"],
         server_cwd=tmp_path,
     )
-    e2e.save(Path(config.embedding.deployment_manifest), pinned)
+    save(Path(config.embedding.deployment_manifest), pinned)
     assert LlamaEmbedder(config).identity() == space
     assert pinned["deployment_id"] != native["pinned"]["deployment_id"]
     assert all(k not in space for k in ("base_url", "model", "runtime_id", "adapter_sha256", "model_path"))
@@ -266,7 +266,7 @@ def test_schema1_original_manifest_and_runtime_checks(native):
         "video_fps": 4.0,
         **report,
     }
-    e2e.save(Path(config.embedding.deployment_manifest), pinned)
+    save(Path(config.embedding.deployment_manifest), pinned)
     assert manifest(config.embedding, "embedding")["schema"] == 1
     assert checked_runtime(config.embedding, pinned)["model_id"] == "live-model"
     native["props"]["model_path"] = "other.gguf"
@@ -310,7 +310,7 @@ def test_drift_during_request_rejects_result(native, field):
             p = Path(native["config"].embedding.deployment_manifest)
             value = json.loads(p.read_text())
             value["trust"]["attestation"] = "changed"
-            e2e.save(p, value)
+            save(p, value)
 
     native["on_inference"] = drift
     with LlamaEmbedder(native["config"]).validating() as client, pytest.raises(adapters.ModelError):
@@ -415,10 +415,10 @@ def test_corrupt_or_missing_baseline_and_validation_fail_closed(native, broken):
         path.write_text("not-json")
     elif broken == "validation_vectors":
         gate["raw_video_vectors"][0] = [float("nan")] * 8
-        e2e.save(path, gate)
+        save(path, gate)
     else:
         gate["compatibility"]["threshold"] = 0.9
-        e2e.save(path, gate)
+        save(path, gate)
     with pytest.raises(adapters.ModelError, match="兼容性门槛"):
         client.require_gate()
     if broken.startswith("baseline") or broken == "marker_missing":

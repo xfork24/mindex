@@ -117,7 +117,7 @@ class Store:
                   started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, finished_at TEXT
                 );
             """)
-            from mindex.persons.persons import init_person_schema
+            from mindex.shared.person_schema import init_person_schema
 
             init_person_schema(db)
             for table, column in (("sources", "layout_config"), ("dialogue_tasks", "publication"),

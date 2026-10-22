@@ -9,14 +9,14 @@ import threading
 from collections import OrderedDict
 from pathlib import Path
 
+from mindex.shared.trace import record
+
 
 class MediaError(ValueError):
     pass
 
 
 def command(args: list[str], *, timeout: float = 600) -> bytes:
-    from mindex.studio.studio_artifacts import record
-
     record("command", {"args": args, "timeout": timeout})
     try:
         result = subprocess.run(args, check=True, capture_output=True, timeout=timeout)

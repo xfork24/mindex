@@ -15,7 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from time import perf_counter
 
-from mindex.models.adapters import ModelError, make_transcriber
+from mindex.models.adapters import make_transcriber, parse_minimax_words
 from mindex.shared.config import Config, fingerprint
 from mindex.shared.media import MediaError, command
 from mindex.shared.storage import Store, dumps
@@ -118,49 +118,6 @@ def extract_subtitles(path: Path, track: dict, duration: float, *, input_format:
                 }
             )
     return sorted(utterances, key=lambda u: (u["start"], u["end"]))
-
-
-def parse_minimax_words(payload: dict, duration: float | None = None) -> list[dict]:
-    if not isinstance(payload, dict) or not isinstance(payload.get("text"), str):
-        raise ModelError("MiniMax ASR 缺少 text 字段")
-    if payload.get("base_resp", {}).get("status_code", 0):
-        raise ModelError(f"MiniMax ASR 失败：{payload['base_resp']}")
-    values = payload.get("words")
-    if values is None:
-        values = payload.get("segments", [])
-    if not isinstance(values, list):
-        raise ModelError("MiniMax ASR 时间戳格式无效")
-    words = []
-    previous = -1.0
-    for value in values:
-        if not isinstance(value, dict):
-            raise ModelError("MiniMax ASR 时间戳格式无效")
-        text = value.get("word", value.get("text", ""))
-        if not isinstance(text, str):
-            raise ModelError("MiniMax ASR 词文本无效")
-        if not text.strip():
-            continue
-        try:
-            start, end = float(value["start"]), float(value["end"])
-        except (KeyError, ValueError, TypeError) as exc:
-            raise ModelError("非空对白缺少有效时间戳") from exc
-        if (
-            not all(math.isfinite(v) for v in (start, end))
-            or start < 0
-            or end <= start
-            or start < previous
-            or (duration is not None and end > duration + 0.2)
-        ):
-            raise ModelError("MiniMax ASR 时间戳无效或超出音频区间")
-        previous = start
-        word = {"start": start, "end": min(end, duration) if duration is not None else end, "text": text}
-        for field in ("speaker", "speaker_id"):
-            if field in value:
-                word["speaker_id"] = value[field]
-        words.append(word)
-    if payload["text"].strip() and not words:
-        raise ModelError("非空对白缺少有效词级时间戳，拒绝伪造定位")
-    return words
 
 
 def coalesce_words(words: list[dict]) -> list[dict]:

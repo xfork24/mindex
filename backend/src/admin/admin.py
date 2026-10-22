@@ -12,7 +12,7 @@ from mindex.shared.storage import Store
 def admin_router(store: Store, runtime=None) -> APIRouter:
     router = APIRouter(prefix="/api/admin", tags=["素材管理"])
     library = Library(store)
-    from mindex.shared.work_cache import WorkCache
+    from mindex.admin.work_cache import WorkCache
     work_cache = WorkCache(library)
 
     @router.post("/sources/upload", status_code=201)

@@ -763,8 +763,8 @@ def probe_deployment(
     \b
       mindex e2e probe --role embedding --output /路径/probe.json
     """
-    from mindex.diagnostics.e2e import save
     from mindex.models.llama_cpp import ModelError, inspect_service
+    from mindex.shared.jsonio import save
 
     service = getattr(ctx.obj, role.value)
     try:
@@ -820,10 +820,10 @@ def pin_deployment(
     \b
       mindex e2e pin --quantization Q8_0 --weights-file /模型/model.gguf --mmproj-file /模型/mmproj.gguf --server-cwd /服务目录 --output /路径/deployment.json
     """
-    from mindex.diagnostics.e2e import save
     from mindex.models.adapters import ModelError
     from mindex.models.deployment import create_manifest
     from mindex.models.llama_cpp import inspect_service
+    from mindex.shared.jsonio import save
 
     if output.exists():
         raise typer.BadParameter("清单已存在；更换部署请使用新文件，保留旧清单")

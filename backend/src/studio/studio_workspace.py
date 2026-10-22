@@ -25,8 +25,9 @@ from mindex.shared.config import StrictModel, fingerprint, portable_parameters
 from mindex.shared.media import atomic_media, audio_info, probe
 from mindex.shared.shot_media import ShotMedia
 from mindex.shared.storage import Store
+from mindex.shared.trace import current
 from mindex.studio import studio, studio_select, studio_steps
-from mindex.studio.studio_artifacts import current, digest, safe_path, sanitized, visibility_key
+from mindex.studio.studio_artifacts import digest, safe_path, sanitized, visibility_key
 from mindex.studio.studio_logs import LABELS, ExecutionLog, active_log, diagnostic_event
 
 STAGES = ("recall", "tts", "select", "render")

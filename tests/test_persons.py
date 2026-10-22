@@ -28,11 +28,11 @@ from mindex.persons.persons import (
     Entity,
     Persons,
     Review,
-    init_person_schema,
     overlaps_for,
     resolve_names,
 )
 from mindex.shared.config import Config, fingerprint
+from mindex.shared.person_schema import init_person_schema
 from mindex.shared.storage import Store, dumps
 from mindex.shared.types import TextSearch
 
@@ -2936,7 +2936,7 @@ def test_purge_removes_unused_default_work(catalogue):
 
 
 def test_role_only_migration_deletes_actor_evidence_and_preserves_pairs_exclusions_and_releases(catalogue):
-    from mindex.persons.persons import migrate_actor_only_evidence
+    from mindex.shared.person_schema import migrate_actor_only_evidence
 
     p, work, actor = catalogue
     role = p.save(Entity(kind="role", name="保留角色", work_ids=[work], actor_ids=[actor["id"]]))

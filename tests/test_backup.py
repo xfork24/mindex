@@ -806,7 +806,7 @@ def test_partial_backup_keeps_associated_cast_without_person_evidence(library, t
 def test_partial_roundtrip_preserves_compatibility_evidence_bytes(library, tmp_path, video_file):
     import hashlib
 
-    from mindex.shared.compatibility import load_baseline
+    from mindex.models.compatibility import load_baseline
 
     config, sources, index = library[:3]
     root = config.data_dir

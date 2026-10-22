@@ -1,13 +1,12 @@
 import pytest
 
-from mindex.models.adapters import ModelError
+from mindex.models.adapters import ModelError, parse_minimax_words
 from mindex.processing.dialogue import (
     DialogueProcessor,
     choose_subtitle,
     coalesce_words,
     current_dialogue,
     extract_subtitles,
-    parse_minimax_words,
     relative_dialogue,
     subtitle_tracks,
 )

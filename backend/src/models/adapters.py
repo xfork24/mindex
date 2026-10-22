@@ -20,8 +20,8 @@ from pydantic import ValidationError
 
 from mindex.shared.config import Config, fingerprint
 from mindex.shared.media import frame_data, frame_timestamps, probe
+from mindex.shared.trace import record
 from mindex.shared.types import Annotation, ShotDraft, StoryboardDraft, Utterance
-from mindex.studio.studio_artifacts import record
 
 log = logging.getLogger(__name__)
 
@@ -356,6 +356,58 @@ class TokenHubEmbedder:
         encoded = base64.b64encode(path.read_bytes()).decode()
         uri = f"data:{mime};base64,{encoded}"
         return self._sequence([{"type": "image_url", "image_url": {"url": uri}}])
+
+
+def coverage_warning(original: str, shot_texts: list[str]) -> str | None:
+    def normalize(value):
+        return re.sub(r"\s+", "", value)
+
+    if normalize(original) != normalize("".join(shot_texts)):
+        return "分镜文本未按顺序完整覆盖原文，请核对遗漏、重复或改写内容"
+    return None
+
+
+def parse_minimax_words(payload: dict, duration: float | None = None) -> list[dict]:
+    if not isinstance(payload, dict) or not isinstance(payload.get("text"), str):
+        raise ModelError("MiniMax ASR 缺少 text 字段")
+    if payload.get("base_resp", {}).get("status_code", 0):
+        raise ModelError(f"MiniMax ASR 失败：{payload['base_resp']}")
+    values = payload.get("words")
+    if values is None:
+        values = payload.get("segments", [])
+    if not isinstance(values, list):
+        raise ModelError("MiniMax ASR 时间戳格式无效")
+    words = []
+    previous = -1.0
+    for value in values:
+        if not isinstance(value, dict):
+            raise ModelError("MiniMax ASR 时间戳格式无效")
+        text = value.get("word", value.get("text", ""))
+        if not isinstance(text, str):
+            raise ModelError("MiniMax ASR 词文本无效")
+        if not text.strip():
+            continue
+        try:
+            start, end = float(value["start"]), float(value["end"])
+        except (KeyError, ValueError, TypeError) as exc:
+            raise ModelError("非空对白缺少有效时间戳") from exc
+        if (
+            not all(math.isfinite(v) for v in (start, end))
+            or start < 0
+            or end <= start
+            or start < previous
+            or (duration is not None and end > duration + 0.2)
+        ):
+            raise ModelError("MiniMax ASR 时间戳无效或超出音频区间")
+        previous = start
+        word = {"start": start, "end": min(end, duration) if duration is not None else end, "text": text}
+        for field in ("speaker", "speaker_id"):
+            if field in value:
+                word["speaker_id"] = value[field]
+        words.append(word)
+    if payload["text"].strip() and not words:
+        raise ModelError("非空对白缺少有效词级时间戳，拒绝伪造定位")
+    return words
 
 
 def parse_json(content: str):
@@ -831,8 +883,6 @@ class QwenStoryboarder:
             content = self._chat([{"type": "text", "text": text}], instructions, feedback)
             try:
                 draft = StoryboardDraft.model_validate(parse_json(content))
-                from mindex.studio.studio import coverage_warning
-
                 error = coverage_warning(text, [shot.text for shot in draft.shots])
                 if len(draft.shots) > self.config.studio.max_shots:
                     raise ModelError(f"分镜数量超过上限 {self.config.studio.max_shots}")
@@ -946,8 +996,6 @@ class MiniMaxTranscriber:
         return {"text": text.strip(), "language": payload.get("language", ""), "raw_response": payload}
 
     def transcribe(self, path: Path) -> list[Utterance]:
-        from mindex.processing.dialogue import parse_minimax_words
-
         response = self.raw(path, timestamps=True)
         return [Utterance.model_validate(word) for word in parse_minimax_words(response["raw_response"])]
 

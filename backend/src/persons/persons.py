@@ -20,95 +20,8 @@ from PIL import Image, ImageOps
 from pydantic import Field, model_validator
 
 from mindex.shared.config import StrictModel, fingerprint
+from mindex.shared.person_schema import normalize_entity
 from mindex.shared.storage import Store, dumps
-
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS person_entities(id TEXT PRIMARY KEY, kind TEXT NOT NULL, data TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS person_sources(source_id TEXT PRIMARY KEY REFERENCES sources(id), work_id TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS person_references(id TEXT PRIMARY KEY, actor_id TEXT NOT NULL, stage_id TEXT,
- path TEXT NOT NULL, digest TEXT NOT NULL, data TEXT NOT NULL, role_id TEXT);
-CREATE TABLE IF NOT EXISTS person_imports(id TEXT PRIMARY KEY, data TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'draft');
-CREATE TABLE IF NOT EXISTS person_features(id TEXT PRIMARY KEY, source_id TEXT, space TEXT NOT NULL,
- kind TEXT NOT NULL, data TEXT NOT NULL);
-CREATE INDEX IF NOT EXISTS person_features_source ON person_features(source_id,kind,space);
-CREATE TABLE IF NOT EXISTS person_evidence(id TEXT PRIMARY KEY, source_id TEXT NOT NULL,
- shot_id TEXT NOT NULL, actor_id TEXT, role_id TEXT, stage_id TEXT, start REAL NOT NULL, end REAL NOT NULL,
- status TEXT NOT NULL, data TEXT NOT NULL);
-CREATE INDEX IF NOT EXISTS person_evidence_source ON person_evidence(source_id,status,start,end);
-CREATE INDEX IF NOT EXISTS person_evidence_shot ON person_evidence(source_id,shot_id);
-CREATE TABLE IF NOT EXISTS person_coverage(source_id TEXT NOT NULL, cache_id TEXT PRIMARY KEY, data TEXT NOT NULL);
-CREATE INDEX IF NOT EXISTS person_coverage_shot
- ON person_coverage(source_id,json_extract(data,'$.shot_id'));
-CREATE TABLE IF NOT EXISTS person_tasks(id TEXT PRIMARY KEY, source_id TEXT NOT NULL, status TEXT NOT NULL,
- config TEXT NOT NULL, options TEXT NOT NULL, progress TEXT NOT NULL DEFAULT '{}', error TEXT, result TEXT,
- created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
-CREATE TABLE IF NOT EXISTS person_versions(id TEXT PRIMARY KEY, data TEXT NOT NULL,
- created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
-CREATE TABLE IF NOT EXISTS search_releases(id TEXT PRIMARY KEY, content_id TEXT NOT NULL,
- person_id TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
-"""
-
-
-def init_person_schema(db):
-    db.executescript(SCHEMA)
-    # Serialize schema inspection and migration so concurrent workers cannot both add the column.
-    db.execute("BEGIN IMMEDIATE")
-    columns = {row["name"] for row in db.execute("PRAGMA table_info(person_references)")}
-    if "role_id" not in columns:
-        db.execute("ALTER TABLE person_references ADD COLUMN role_id TEXT")
-    db.execute("CREATE INDEX IF NOT EXISTS person_references_role ON person_references(role_id)")
-    # Keep the retired SQL columns for old databases/checkpoints only. They are
-    # never accepted as configuration or exposed as person identities again.
-    marker = "migration.person-roles-v2"
-    if db.execute("SELECT 1 FROM settings WHERE key=?", (marker,)).fetchone():
-        migrate_actor_only_evidence(db)
-        return
-    entries = {
-        r["id"]: {"id": r["id"], **json.loads(r["data"])} for r in db.execute("SELECT * FROM person_entities")
-    }
-    for identifier, entry in entries.items():
-        value = normalize_entity(entry, entries)
-        db.execute(
-            "UPDATE person_entities SET kind=?,data=? WHERE id=?",
-            (
-                value["kind"],
-                dumps({k: v for k, v in value.items() if k != "id"}),
-                identifier,
-            ),
-        )
-    db.execute(
-        "UPDATE person_evidence SET role_id=COALESCE(stage_id,role_id),stage_id=NULL WHERE stage_id IS NOT NULL"
-    )
-    db.execute("UPDATE person_references SET stage_id=NULL WHERE stage_id IS NOT NULL")
-    db.execute("INSERT INTO settings(key,value) VALUES(?, 'complete')", (marker,))
-    migrate_actor_only_evidence(db)
-
-
-def migrate_actor_only_evidence(db):
-    """One-time cleanup; retain every role pair, human rejection and published snapshot."""
-    marker = "migration.person-role-only-v3"
-    if db.execute("SELECT 1 FROM settings WHERE key=?", (marker,)).fetchone():
-        return
-    predicate = (
-        "actor_id IS NOT NULL AND role_id IS NULL AND NOT (status='rejected' AND "
-        "(COALESCE(json_extract(data,'$.reviewed'),0)=1 "
-        "OR COALESCE(json_extract(data,'$.confirmation'),'')='shot_review'))"
-    )
-    # Deleted-only shots must remain reviewable under No candidates.
-    for row in db.execute(
-        "SELECT source_id,shot_id,MIN(start) AS start,MAX(end) AS end, "
-        "MAX(status='accepted' AND COALESCE(json_extract(data,'$.confirmation'),'')='shot_review') "
-        "AS removed_confirmation FROM person_evidence WHERE "
-        + predicate + " GROUP BY source_id,shot_id"
-    ).fetchall():
-        key = fingerprint([marker, row["source_id"], row["shot_id"]])
-        db.execute("INSERT OR IGNORE INTO person_coverage VALUES(?,?,?)", (
-            row["source_id"], key, dumps({"shot_id": row["shot_id"], "start": row["start"],
-                                        "end": row["end"], "migration": marker,
-                                        "removed_confirmation": bool(row["removed_confirmation"])}),
-        ))
-    db.execute("DELETE FROM person_evidence WHERE " + predicate)
-    db.execute("INSERT INTO settings(key,value) VALUES(?, 'complete')", (marker,))
 
 
 class Entity(StrictModel):
@@ -199,24 +112,6 @@ def checked_box(box, width, height):
     if result[2] <= result[0] or result[3] <= result[1]:
         raise ValueError("照片区域太小")
     return result
-
-
-def normalize_entity(entry, lookup=None):
-    """Normalize legacy rows and immutable snapshots without dropping identities."""
-    entry = dict(entry)
-    if entry.get("kind") == "stage":
-        parent = (lookup or {}).get(entry.get("role_id"), {})
-        entry.update(
-            kind="role",
-            work_ids=parent.get("work_ids", [parent["work_id"]] if parent.get("work_id") else []),
-            actor_ids=entry.get("actor_ids") or parent.get("actor_ids", []),
-        )
-    for key in ("role_id", "age", "styling", "costume"):
-        entry.pop(key, None)
-    if entry.get("kind") == "role" and "work_ids" not in entry:
-        entry["work_ids"] = [entry["work_id"]] if entry.get("work_id") else []
-        entry.pop("work_id", None)
-    return entry
 
 
 class PersonHasLinkedShots(ValueError):
