@@ -332,6 +332,51 @@ def test_latest_worker_log_is_one_line_thread_scoped_and_phase_scoped(config):
     assert root.handlers == handlers
 
 
+@pytest.mark.parametrize('scope', ['moment', 'extra'])
+def test_analysis_coverage_uses_published_vectors_despite_metadata_changes(config, video_file, scope):
+    from mindex.admin.curation import Library
+
+    embedder = FixtureEmbedder(config)
+    pipeline = Pipeline(config, analyzer=FixtureAnalyzer(embedder))
+    sid = pipeline.prepare(video_file)
+    pipeline.analyze(sid)
+    index = publish_work(config, sid, 'analysis', embedder, scope=scope)['index_id']
+    field = 'search' if scope == 'moment' else 'extra_search'
+    snapshots = pipeline.store.snapshots(index, sid)
+    for snapshot in snapshots:
+        row = pipeline.store.one('SELECT rowid,data FROM annotations WHERE segment_id=? ORDER BY rowid DESC LIMIT 1',
+                                 (snapshot['id'],))
+        data = json.loads(row['data'])
+        data['model_identity'] = {'model': 'changed-provenance'}
+        data['dialogue_input_version'] = 'changed-input-version'
+        data['input_fingerprint'] = 'changed-input-fingerprint'
+        pipeline.store.execute('UPDATE annotations SET data=? WHERE rowid=?', (json.dumps(data), row['rowid']))
+    coverage = Library(pipeline.store).source(sid)['work']['analysis'][field]
+    assert coverage['expected_segments'] > 0
+    assert coverage['current']
+    assert coverage['indexed_segments'] == coverage['embedded_segments'] == coverage['expected_segments']
+    assert coverage['unpublished_segments'] == 0
+
+    # Actual text changes require a new vector, even if its metadata was unchanged.
+    row = pipeline.store.one('SELECT rowid,data FROM annotations WHERE segment_id=? ORDER BY rowid DESC LIMIT 1',
+                             (snapshots[0]['id'],))
+    data = json.loads(row['data'])
+    data['annotation']['description'] = '全新的分析文本，需要更新检索向量'
+    pipeline.store.execute('UPDATE annotations SET data=? WHERE rowid=?', (json.dumps(data), row['rowid']))
+    coverage = Library(pipeline.store).source(sid)['work']['analysis'][field]
+    assert not coverage['current']
+    assert coverage['embedded_segments'] == coverage['expected_segments'] - 1
+    assert coverage['pending_reasons'] == [{'code': 'inputs_changed', 'count': 1}]
+
+    # Building reusable vectors elsewhere does not publish them into the active index.
+    IndexBuilder(config, embedder).build(source_id=sid, kinds=('moment',) if scope == 'moment' else ('shot', 'scene'),
+                                         channels=['analysis'], activate=False)
+    coverage = Library(pipeline.store).source(sid)['work']['analysis'][field]
+    assert not coverage['current']
+    assert coverage['embedded_segments'] == coverage['expected_segments']
+    assert coverage['unpublished_segments'] == 1
+
+
 def test_visual_coverage_checks_vector_inputs_instead_of_stale_version_tags(config, video_file):
     from mindex.admin.curation import Library
 

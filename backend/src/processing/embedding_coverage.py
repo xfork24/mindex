@@ -54,13 +54,13 @@ def embedding_coverage(store, source_id, active, fresh, segments, published):
                     or (not saved['channel_versions'] and
                         (channel == 'visual' or saved['views'].get(channel) == candidate['views'].get(channel)))
                 )
-                indexed = bool(saved and view in saved['indexed_views']) and (
-                    (bool(keys) and keys <= published_keys[(sid, view)])
-                    if channel == 'visual' else version_matches
+                indexed = bool(saved and view in saved['indexed_views']) and bool(
+                    keys and keys <= published_keys[(sid, view)]
                 )
                 # Legacy indexes do not always have cache keys; preserve their
                 # published coverage, but never treat changed inputs as reusable.
-                if saved and not saved['channel_versions'] and version_matches and view in saved['indexed_views']:
+                if (saved and not saved['channel_versions'] and version_matches
+                        and view in saved['indexed_views'] and not published_keys[(sid, view)]):
                     indexed = True
                 embedded = indexed or bool(keys and keys <= cached)
                 counts = by_kind[candidate['kind']]

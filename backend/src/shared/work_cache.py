@@ -19,7 +19,7 @@ _executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="work-summary")
 class WorkCache:
     # Periodically recheck artifacts changed outside SQLite as well.
     max_age = 60
-    version = 2
+    version = 3
 
     def __init__(self, library):
         self.library = library
