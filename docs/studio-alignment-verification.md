@@ -1,5 +1,7 @@
 # 连续 UI 调整最终验收
 
+> 本文引用的 `artifacts/` 是验证时生成的本地目录，已被 `.gitignore` 排除，不在仓库中；相关路径仅作记录，不是可点击链接。
+
 日期：2026-10-19。已完成 [计划](../plans/UI_ELEM_LAYOUT_PLAN.md) 及后续补充要求；“删除刷新素材”已由后续“恢复”要求取代。
 
 ## 要求与实现对应
@@ -26,22 +28,22 @@
 
 本次重新运行，全部通过：
 
-- 全页面浏览器检查：**1,458** 个视口／状态／语言组合，**87,579** 个实际控件，0 布局违规、0 页面脚本错误。包含五页、动态编辑器、弹窗、长内容、空数据、受控加载／错误分支及两种生成复核页。[逐项覆盖清单](ui-layout-final-coverage.md) / [完整记录](../artifacts/ui-layout/final/coverage.json) / [日志](../artifacts/ui-layout/final/browser.log)。
-- 顶部导航与刷新：**60** 个布局及成功、失败、重试操作。[记录](../artifacts/header-navigation/coverage.json) / [日志](../artifacts/header-navigation/browser.log)。
-- 素材多选、召回筛选与媒体控件：**72** 个布局及实际保存／取消／上传。[记录](../artifacts/recall-filters/coverage.json) / [本次日志](../artifacts/recall-filters/final-browser.log)。
-- 召回标记、排名及两行元数据：**12** 个布局及锚点选择／播放。[记录](../artifacts/candidate-identities/coverage.json) / [本次日志](../artifacts/candidate-identities/final-browser.log)。
-- 分镜底部、历史控件及选片精简：**60** 个布局和真实窗口保存／历史选择／召回预览。[记录](../artifacts/studio-alignment/final-coverage.json) / [日志](../artifacts/studio-alignment/browser.log)。
-- Python：**147 项通过**，覆盖国际化、分镜列、加载、窗口、召回、人物、检索管线及导出布局，仅现有 Starlette 弃用提示。[日志](../artifacts/header-navigation/pytest.log)。
-- 现有 `i18n_ui.cjs`、`studio_window_ui.cjs` 和 `studio_loading_ui.cjs` 通过；包括草稿、过期响应、重试、受限播放及直接进入任务。[国际化日志](../artifacts/header-navigation/i18n.log)。
+- 全页面浏览器检查：**1,458** 个视口／状态／语言组合，**87,579** 个实际控件，0 布局违规、0 页面脚本错误。包含五页、动态编辑器、弹窗、长内容、空数据、受控加载／错误分支及两种生成复核页。[逐项覆盖清单](ui-layout-final-coverage.md) / 完整记录（`artifacts/ui-layout/final/coverage.json`） / 日志（`artifacts/ui-layout/final/browser.log`）。
+- 顶部导航与刷新：**60** 个布局及成功、失败、重试操作。记录（`artifacts/header-navigation/coverage.json`） / 日志（`artifacts/header-navigation/browser.log`）。
+- 素材多选、召回筛选与媒体控件：**72** 个布局及实际保存／取消／上传。记录（`artifacts/recall-filters/coverage.json`） / 本次日志（`artifacts/recall-filters/final-browser.log`）。
+- 召回标记、排名及两行元数据：**12** 个布局及锚点选择／播放。记录（`artifacts/candidate-identities/coverage.json`） / 本次日志（`artifacts/candidate-identities/final-browser.log`）。
+- 分镜底部、历史控件及选片精简：**60** 个布局和真实窗口保存／历史选择／召回预览。记录（`artifacts/studio-alignment/final-coverage.json`） / 日志（`artifacts/studio-alignment/browser.log`）。
+- Python：**147 项通过**，覆盖国际化、分镜列、加载、窗口、召回、人物、检索管线及导出布局，仅现有 Starlette 弃用提示。日志（`artifacts/header-navigation/pytest.log`）。
+- 现有 `i18n_ui.cjs`、`studio_window_ui.cjs` 和 `studio_loading_ui.cjs` 通过；包括草稿、过期响应、重试、受限播放及直接进入任务。国际化日志（`artifacts/header-navigation/i18n.log`）。
 - 受影响 JavaScript 语法与 diff 空白检查通过。
 
 测试由浏览器真实点击触发 API，验证响应状态及页面更新。模型服务使用确定性替身；没有操作工作区真实素材、任务或外部付费模型。测试脚本中提示框 ID、历史按钮名称及等待异步媒体重建的问题已修正，最后完整运行全部通过。
 
 ## 截图及范围限制
 
-人工检查了桌面导航、素材与设置窄屏、候选参考图／排名、选片历史行和导出复核页。代表性对照：[素材页头前后](../artifacts/header-navigation/admin-comparison.png)、[创作页头前后](../artifacts/header-navigation/studio-comparison.png)。对照基线来自早先 UI 验收，没有为每个新增动态分支制作修改前截图。
+人工检查了桌面导航、素材与设置窄屏、候选参考图／排名、选片历史行和导出复核页。代表性对照：素材页头前后（`artifacts/header-navigation/admin-comparison.png`）、创作页头前后（`artifacts/header-navigation/studio-comparison.png`）。对照基线来自早先 UI 验收，没有为每个新增动态分支制作修改前截图。
 
-最终截图：[素材 320px](../artifacts/header-navigation/admin-en-320.png)、[召回候选 320px](../artifacts/candidate-identities/recall-zh-320.png)、[选片桌面](../artifacts/studio-alignment/select-1440.png)、[选片 320px](../artifacts/studio-alignment/select-320.png)。其余截图在对应 artifacts 目录。
+最终截图：素材 320px（`artifacts/header-navigation/admin-en-320.png`）、召回候选 320px（`artifacts/candidate-identities/recall-zh-320.png`）、选片桌面（`artifacts/studio-alignment/select-1440.png`）、选片 320px（`artifacts/studio-alignment/select-320.png`）。其余截图在对应 artifacts 目录。
 
 以上是 Chromium 响应式视口验收，屏宽为 1440、1000、800、540、390、320px；应用中英文，导出页按现有中文。没有验证 Safari、Firefox 或手机触屏原生 resize。并非每个错误／加载／空数据状态都交叉六屏宽和两语言；实际覆盖以 JSON 为准。外部模型真实生成、厂商连接和真实音色克隆没有发起调用。人物审核保存／发布由既有测试覆盖，本轮全页面浏览器主要验证打开、选择和取消；历史成片恢复验证弹窗打开和取消。保留表格／时间轴内部滚动与原有摘要截断，可展开完整内容。
 

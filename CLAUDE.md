@@ -87,7 +87,7 @@ uv run mindex clean [--apply]                    # 磁盘清理：默认预览�
 ### 独立服务与数据维护
 
 - 人物服务：`scripts/setup-person-service.sh` 安装 `.venv-person`，`scripts/run-person-service.sh` 启动；依赖在 `deploy/person.txt`。主环境的 `--extra person` 不等于已安装人物推理服务。
-- 本地 TransNetV2：`scripts/setup-transnet-service.sh` 安装 `.venv-detector` 并核验权重，`scripts/run-transnet-service.sh` 启动；依赖在 `deploy/detector-local.txt`。安装脚本会下载依赖或权重。
+- 本地 TransNetV2：`scripts/setup-transnet-service.sh` 安装 `.venv-detector` 并核验权重，`scripts/run-transnet.sh` 启动；依赖在 `deploy/detector-local.txt`。安装脚本会下载依赖或权重。
 - 备份：`maintenance/backup_cli.py` 注册 CLI，`backup.py` 编排，`backup_db.py`/`backup_vectors.py` 处理数据。使用 `mindex backup export/inspect/import/recover`，不要直接复制运行中的 SQLite/Chroma 作为一致备份。导入前停写并预览，保留迁移日志供中断恢复，详见 [数据备份与迁移](docs/backup.md)。
 - 目录迁移后运行 `uv sync --extra dev` 刷新主环境；独立服务环境可用 `uv pip install --python .venv-person/bin/python --no-deps -e .` 刷新项目映射，检测环境同理。
 

@@ -28,5 +28,5 @@ single, _ = engine.model.predict_raw(np.zeros((1, 100, 27, 48, 3), dtype=np.uint
 if tuple(single.shape) != (1, 100, 1) or not np.isfinite(np.asarray(single)).all():
     raise RuntimeError("TransNetV2 权重推理验证失败")
 print("TransNetV2 安装与推理验证通过：", engine.metadata)
-print("启动服务：./scripts/run-transnet-service.sh")
+print("启动服务：./scripts/run-transnet.sh")
 PY

@@ -53,7 +53,7 @@ uv run mindex backup import /backup/mindex --all --restore-config --dry-run
 uv run mindex backup recover --data-dir /new/data --json
 ```
 
-省略素材选择时，交互终端提供搜索及多选；非交互环境必须指定 `--all` 或重复使用 `--source`。导出目录必须不存在。默认移除已存密钥；`--include-secrets` 显式包含设置页密钥，始终不读取环境变量里的密钥。`inspect` 核对版本、文件大小、校验和、素材、向量及配置依赖。
+省略素材选择时，交互终端提供搜索及多选；非交互环境必须指定 `--all` 或重复使用 `--source`。导出目录必须不存在。`--verification full|basic`（导出与导入通用）选择校验强度，默认 `full`，`basic` 缩短时间但无法发现大小未变的文件损坏，见 [备份文档](backup.md)。`backup export --source ID --allow-legacy-representations` 仅用于单个已确认的旧版 format=1 临时素材，不能用于全库或多素材导出。默认移除已存密钥；`--include-secrets` 显式包含设置页密钥，始终不读取环境变量里的密钥。`inspect` 核对版本、文件大小、校验和、素材、向量及配置依赖。
 
 空库自动恢复配置与活动检索组合，允许目标配置文件尚不存在。已有库默认保留配置，仅 `--restore-config` 恢复备份配置并输出脱敏差异。重复素材默认报错，`--skip-existing` 保留目标及其全部衍生数据。活动索引兼容时使用已有向量创建联合索引，不兼容或共享对象冲突则整个导入失败。`--dry-run` 构建并校验临时结果，返回依赖、版本映射及配置处理结果，不切换目标数据或配置；`--json` 结果写入标准输出，进度写入标准错误。
 

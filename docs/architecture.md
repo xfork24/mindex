@@ -5,23 +5,30 @@ Mindex 是中文视频片段检索系统：文字找视频优先，支持视频�
 ## 总体数据流
 
 ```
-离线（分阶段、可断点续跑，pipeline.lock 互斥）
+离线（分阶段、可断点续跑；pipeline.lock 与 locks/ 下的处理锁互斥）
 
   原视频 ──prepare(=detect+split，纯本地 CPU)──┐
                                               ├─→ clips/ + thumbnails/ + plans/
-  原视频 ──transcribe──→ transcripts/（30 秒块检查点）
+  原视频 ──transcribe / enrich-dialogue──→ transcripts/（30 秒块检查点）、字幕轨道
                 └─(llama_cpp / openai 后端)→ 原始文本 ──align(独立 CPU venv)→ 时间戳对白
   片段+对白 ──analyze(Qwen)──→ annotations + scene_plans + scene 片段
-  片段+描述+对白 ──index(WeMM)──→ chroma/ 向量 + index_members 快照
+  片段 ──persons process(人物服务)──→ persons/ 特征与证据 ──人工审核──→ 发布人物证据
+  画面 / 对白 / 分析 ──index(WeMM)──→ chroma/ 向量 + index_members 快照（按渠道增量、可复用兼容向量）
                                         │
                                    check 通过 → activate（SQLite 事务）
 
 在线（只调用嵌入服务，无 Qwen 实时重排）
 
   文字查询 ──WeMM 文字向量──┐
-                            ├─→ 四路向量召回 + jieba BM25 → 加权 RRF → IoU 去重 → 结果
-  视频查询 ──4s/3s 窗口──→ 仅视频表示召回 → 窗口等权融合 ──────────────┘
+    新版索引（format 2）：画面 / 对白 / 分析三渠道，对白与分析各自融合向量与 BM25
+                            ├─→ 渠道权重 RRF → 同源 IoU 去重 → 结果（可叠加人物筛选）
+    旧版索引（format 1）：四路向量召回 + jieba BM25 → 五路加权 RRF
+  图片 / 视频查询 ──（视频按 4s/3s 窗口）──→ 仅画面表示召回 ────────────┘
+
+创作（/studio）：文案 ─拆分镜→ 逐镜召回（上面的检索）与 TTS 配音 ─选片对齐→ FFmpeg 渲染 → 成片与产物
 ```
+
+三渠道的细节见 [recall-enhancement.md](recall-enhancement.md)，旧版五路召回见 [search.md](search.md)。
 
 ## 模块职责
 
@@ -76,7 +83,7 @@ wheel 安装后读取随包的 `mindex/web/`。Setuptools 通过包目录映射�
 | `cli.py` | Typer CLI 入口（`mindex`）；重模块在命令函数内延迟导入，`--config` 必须放在子命令之前 |
 | `processing/pipeline.py` | 各阶段编排：导入去重、分镜、切片、转写、对齐、分析；`pipeline.lock` 文件锁 |
 | `processing/indexing.py` | `IndexBuilder`（建索引、发布前检查）与 `VectorIndex`（Chroma 封装） |
-| `search/search.py` | `SearchEngine`：五路召回、RRF 融合、去重；`status()` |
+| `search/search.py` | `SearchEngine`：新版三渠道召回与旧版五路召回、RRF 融合、去重、BM25 降级；`status()` |
 | `api.py` + `search/api.py` | FastAPI 应用装配、页面注册；检索 API、媒体/上下文播放 |
 | `admin/admin.py` + `admin/curation.py` | 素材后台 API 与整理数据（显示名/备注/收藏/隐藏），独立于索引 |
 | `settings/runtime_settings.py` | 设置页数据层：模型配置档案（model_profiles）、音色库（voices）、业务覆盖键（settings KV）与 `apply_overrides` 热生效覆盖层 |
@@ -98,6 +105,24 @@ wheel 安装后读取随包的 `mindex/web/`。Setuptools 通过包目录映射�
 | `processing/align_worker.py` | 强制对齐独立子进程 worker（不导入 mindex/chromadb/GPU 运行时） |
 | `models/analyzers.py` | `PinnedQwenAnalyzer`：把分析检查点绑定到实际 GGUF 部署 |
 | `shared/types.py` | Pydantic 模型：Granularity、Filters、TextSearch、Annotation、Utterance |
+| `admin/source_tasks.py` / `admin/dialogue_tasks.py` / `admin/source_work.py` | 素材分步后台任务与对白任务；读取分镜、对白、分析、人物四项工作的真实结果 |
+| `admin/segment_details.py` | 镜头详情：只读汇集对白、字幕、分析与人物覆盖，不触发推理 |
+| `processing/channel_index.py` / `processing/embedding_coverage.py` | 三渠道增量索引构建、嵌入覆盖率统计 |
+| `processing/dialogue.py` / `processing/subtitle_uploads.py` / `processing/subtitle_archive.py` | 对白处理（字幕优先、ASR）、外部字幕上传登记、字幕归档与 SHA256 校验 |
+| `processing/shot_repair.py` | 显式、先备份的镜头边界修复，不删除已有媒体 |
+| `persons/persons.py` / `persons/person_api.py` | 人物库与发布模型；`/api/persons/*` 路由与页面 |
+| `persons/person_processing.py` / `persons/person_worker.py` / `persons/person_frames.py` / `persons/person_thumbnails.py` | 人物扫描管线与后台 worker、展示帧布局、缩略图 |
+| `persons/person_server.py` | GPU 侧人物检测/特征服务（`mindex-person-server`） |
+| `studio/studio_workspace.py` / `studio/studio_window.py` / `studio/studio_logs.py` | 方案、构建与版本工作台，定长选片窗口，只追加的执行事件日志 |
+| `settings/voices_catalog.py` | TTS 音色目录：按当前合成后端聚合系统音色、本地音色库与克隆能力 |
+| `shared/shot_media.py` | 统一镜头媒体服务：时间基准转换、截图/抽帧、跨镜重建；业务读取不直读历史切片路径 |
+| `shared/processing_lock.py` / `shared/task_progress.py` / `shared/work_cache.py` | 处理锁（含 GPU 互斥）、任务进度持久化、素材工作台缓存 |
+| `shared/compatibility.py` / `shared/uploads.py` / `shared/review_style.py` / `shared/web_assets.py` | 按部署绑定的嵌入兼容性门槛（六文本六视频基线）、流式上传落盘与限额、导出复核页内嵌样式、静态资源定位 |
+| `shared/i18n.py` | 把中文消息映射为稳定 `message_key`，供前端展示译文 |
+| `maintenance/clean.py` / `clean_index.py` / `clean_studio.py` / `purge.py` | 磁盘清理（分级规则）、索引与 Studio 清理规则、素材物理删除（保留源视频） |
+| `maintenance/backup.py` / `backup_cli.py` / `backup_db.py` / `backup_vectors.py` | 离线备份与迁移：编排、CLI 注册、SQLite 与向量处理 |
+| `maintenance/clips.py` | 旧切片迁移、物化、归档校验与边界修复 |
+| `diagnostics/label_review.py` | 离线相关性复核页；确认仍由人工完成 |
 | `frontend/src/` | 原生 HTML/JS/CSS，按五个页面划分模块；公共组件位于 `frontend/src/shared/` |
 
 ## 模型适配层
@@ -138,7 +163,13 @@ data/
 ├── e2e/              # 分阶段实验目录（见 e2e-framework.md）
 ├── model-cache/      # 对齐 worker 的 HF 权重缓存
 ├── studio/           # 创作任务目录（storyboard/candidates/audio/timeline/render + job.json）
+├── persons/          # 人物参考图（references/）、导入图（imports/）、展示帧（frames/<source_id>/）
+├── subtitles/        # 字幕轨道解析缓存与外部字幕上传（<source_id>/uploads/）
+├── locks/            # 素材库与按素材/工作类型的处理锁
+├── cache/            # 可重建缓存：admin-work/、shot-media/
+├── verification/     # 运行时验证产物（如对白召回最新结果）
 ├── voices/           # 克隆音色样本与预览音频（设置页）
+├── pipeline.lock     # 全局管线文件锁
 └── metadata.sqlite3  # 事实来源
 ```
 
@@ -156,6 +187,12 @@ data/
 | `index_members` | 索引成员：片段的不可变快照与完成状态 |
 | `representations` | 表示 ID → 索引/片段/类型（video/description/style/dialogue）/文本 |
 | `runs` | 各阶段处理记录（时间、状态、错误） |
+| `channel_data` | 按素材 + 渠道（visual/dialogue/analysis）+ profile 保存的三渠道处理结果 |
+| `source_tasks` / `dialogue_tasks` | 素材工作台的分步后台任务与对白任务：配置快照、进度、结果、发布信息 |
+| `search_releases` | 已发布检索组合：内容索引 ID + 人物发布 ID |
+| `media_references` / `clip_migration_files` | shot 媒体对旧切片文件的引用，以及旧切片迁移的文件登记 |
+| `person_entities` / `person_references` / `person_imports` | 演员、角色、作品等实体（按 kind 区分），参考图，演员表导入草稿 |
+| `person_sources` / `person_tasks` / `person_features` / `person_evidence` / `person_coverage` / `person_versions` | 人物处理：素材与作品的关联、处理任务、特征缓存、出镜证据与审核、覆盖统计、人物发布版本 |
 | `settings` | KV：`active` 活动索引指针、`active.profile.<role>` 档案激活指针、`override.search` / `override.studio.voice` 业务覆盖键 |
 | `model_profiles` | 设置页的模型服务配置档案（角色/名称/厂商/连接配置 JSON/密钥，UNIQUE(role,name)） |
 | `voices` | 音色库：预定义与克隆音色（厂商 voice_id、样本路径、状态） |

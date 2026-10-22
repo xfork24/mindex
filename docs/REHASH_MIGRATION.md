@@ -2,6 +2,8 @@
 
 日期：2026-10-14。执行依据：[REHASH_REFINEMENT_PLAN.md](../plans/REHASH_REFINEMENT_PLAN.md)；操作手册：[macos-model-migration.md](macos-model-migration.md)。
 
+> 本文是 2026-10-14 的历史记录，保留当时的名称。其中的 `scripts/run-local-wemm.sh`、`scripts/run-local-qwen3-asr.sh` 现名 `scripts/run-wemm.sh`、`scripts/run-qwen3-asr.sh`；`config.macos-v2.yaml` 是操作员本地文件，不在仓库中。
+
 ## 结论
 
 - 代码重构（三层身份、schema 2 清单、部署兼容门槛、`--no-runtime-overrides`）已完成并通过全量测试；本记录落盘时全部改动已提交。

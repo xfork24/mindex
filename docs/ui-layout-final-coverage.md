@@ -1,8 +1,10 @@
 # 最终全页面覆盖记录
 
+> 本文引用的 `artifacts/` 是验证时生成的本地目录，已被 `.gitignore` 排除，不在仓库中；相关路径仅作记录，不是可点击链接。
+
 日期：2026-10-19。记录来自本次实际浏览器测量，不推断未出现的状态组合。
 
-报告见 [最终验收](studio-alignment-verification.md)，控件与坐标见 [JSON](../artifacts/ui-layout/final/coverage.json)。
+报告见 [最终验收](studio-alignment-verification.md)，控件与坐标见 JSON（`artifacts/ui-layout/final/coverage.json`）。
 
 | 页面／界面状态／控件组 | 语言 | 屏宽 px | 案例 | 测量控件 | 结果 |
 |---|---|---|---|---|---|

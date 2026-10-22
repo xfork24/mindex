@@ -13,7 +13,7 @@
 ![FastAPI](https://img.shields.io/badge/API-FastAPI-365c49?style=flat-square)
 ![SQLite + Chroma](https://img.shields.io/badge/Storage-SQLite%20%2B%20Chroma-365c49?style=flat-square)
 
-[功能概览](#功能概览) · [功能实景](#功能实景) · [快速开始](#快速开始) · [工作原理](#工作原理) · [文档](#文档)
+[功能概览](#功能概览) · [快速开始](#快速开始) · [功能实景](#功能实景) · [工作原理](#工作原理) · [文档](#文档)
 
 </div>
 
@@ -35,6 +35,96 @@ Mindex 将海量视频的管理、理解、检索与再创作连接在同一个�
 | **✍️ AI 视频创作** | 从文案自动生成分镜，逐镜召回素材与配音，选择候选、调整音画对齐，渲染带字幕的成片。 |
 | **🧩 构建与产物管理** | 多方案创作、逐节点重做、历史版本复用、完整依赖树，以及分镜、音频、字幕、成片的统一留档。 |
 | **⚙️ 模型与声音配置** | 六类模型角色独立配置，连接自建或线上服务；调整检索权重、管理音色与声音克隆。 |
+
+## 快速开始
+
+### 1. 启动本地工作台
+
+需要 **Python 3.11–3.13、uv、FFmpeg 与 ffprobe**。本地应用负责媒体处理、数据库、API 和页面；模型服务另行配置。
+
+```bash
+git clone https://github.com/xfork24/mindex.git
+cd mindex
+
+uv sync                      # 开发或运行测试时改用 uv sync --extra dev
+cp config.example.yaml config.local.yaml
+uv run mindex serve
+```
+
+打开 **<http://127.0.0.1:8000>**。
+
+| 页面 | 地址 | 用途 |
+| :--- | :--- | :--- |
+| 视频检索 | `/` | 文字、图片、视频查询 |
+| 素材管理 | `/admin` | 上传、处理、整理素材 |
+| 人物库 | `/persons` | 身份、参考图、出镜审核与发布 |
+| 创作 | `/studio` | 文案、分镜、配音与成片 |
+| 设置 | `/settings` | 模型档案、音色、检索参数 |
+| API 文档 | `/docs` | FastAPI 交互式接口文档 |
+
+> **安全提示：** Web 与 API 没有登录认证，设置页还可以修改模型服务地址和密钥。`serve` 默认只监听 `127.0.0.1`；使用 `--host 0.0.0.0` 会向整个网络开放全部读写功能，只应在可信网络中使用，或放在带认证的反向代理之后。
+>
+> `config.example.yaml` 中的局域网地址仅是部署示例。首次使用请修改 `config.local.yaml`，或在设置页配置并激活自己的模型服务。没有素材、索引或可用模型时，页面会显示真实的未就绪状态。
+
+### 2. 导入素材，先跑通画面检索
+
+最短路径只需要**嵌入服务**，无需先运行 ASR、LLM 分析或 TTS。默认主模型配置为 **WeMM-Embedding-9B / 4096 维**；部署方式见[模型部署指南](docs/DEPLOYMENT.md)。
+
+```bash
+# 本地 CPU：导入、检测镜头、生成片段。支持 FFmpeg 可解码的 MP4、MKV 等。
+uv run mindex prepare '/绝对路径/素材.mp4'
+
+# 记下上一条命令输出的 SOURCE_ID；确认嵌入服务就绪后执行。
+uv run mindex index --mode visual --source SOURCE_ID --kind moment --kind shot --activate
+uv run mindex check
+
+# 用一句描述找片段。
+uv run mindex search '一个人在雨夜街道上奔跑'
+```
+
+也可以全程使用素材管理页：**添加新素材 → 分镜处理 → 更新嵌入 / 检索 → 视频检索**。示例显式包含 `moment` 与 `shot`，方便同时用于精细片段检索和 Studio 默认的镜头召回。
+
+默认分镜使用本地 AdaptiveDetector，也可配置 TransNetV2；两者均需抽检。默认保留不超过 6 秒的短镜头，长镜头按 4 秒窗口、3 秒步长生成精细片段。详细步骤见[电影处理指南](docs/FILM_WORKFLOW.md)。
+
+### 3. 按需补全对白、分析和人物
+
+画面、对白与分析是独立渠道，可以先用、再补全；补充对白不会自动触发 LLM 分析。
+
+```bash
+# 优先提取可用文本字幕，否则使用已配置的 ASR；此步暂不发布索引。
+uv run mindex enrich-dialogue SOURCE_ID --no-publish
+
+# 可选：配置并启动视觉理解服务后，生成动作、场景、情绪等分析。
+uv run mindex analyze --source SOURCE_ID
+
+# 嵌入服务就绪后，发布已完成的渠道，复用兼容的已有向量。
+uv run mindex index --mode auto --source SOURCE_ID --activate
+uv run mindex check
+```
+
+素材管理页还支持指定对白处理方式、选择字幕轨道和上传外部字幕。人物功能需要 `uv sync --extra person --extra dev`、独立人物服务和参考图；按**登记 / 导入 → 处理 → 审核 → 发布**的顺序操作，见[人物库指南](docs/persons.md)。
+
+### 4. 用素材库创作新视频
+
+在 `/studio` 输入文案并限定可用素材，创建任务后拆分镜，逐镜召回画面与生成旁白，再选片、预览并构建成片。可导出 **MP4、SRT、WebVTT、时间轴 JSON**，也可打包下载任务产物。
+
+| 环节 | 所需能力 |
+| :--- | :--- |
+| 拆分镜 | 文本 LLM |
+| 画面语义召回 | 活动内容索引 + 匹配的嵌入服务 |
+| 配音 | TTS + 可用音色 |
+| 选片、渲染、合成 | 本地 FFmpeg；烧录字幕另需 libass 与可用字体 |
+
+召回与配音可以分阶段执行，适合单 GPU 轮换模型服务。Studio 从已有素材中选片与合成，选片的叙事效果仍需人工审阅。完整操作见[Studio 指南](docs/studio.md)。
+
+### 常见问题
+
+| 现象 | 原因与处理 |
+| :--- | :--- |
+| 页面或接口显示"未就绪" | 还没有素材、活动索引或可用的模型服务。按上文第 2 步导入并发布索引，再运行 `uv run mindex status --health` 查看缺少什么。 |
+| 检索返回 503 | 当前嵌入配置与活动索引的模型空间不一致，系统拒绝跨空间比较向量。恢复原模型服务和配置，或新建索引并激活，见[索引版本](docs/index-versions.md)。 |
+| 同时运行多个任务被拒绝 | 处理任务按素材与类型互斥，GPU 模型按阶段轮换。等待当前任务结束，或在设置页关闭 GPU 互斥后再并行。 |
+| 烧录字幕失败 | FFmpeg 缺少 libass 或可用字体。安装后重试，或改用软字幕轨道。 |
 
 ## 功能实景
 
@@ -165,85 +255,6 @@ Mindex 将海量视频的管理、理解、检索与再创作连接在同一个�
 
 完整用法见[素材管理](docs/admin.md)、[人物库](docs/persons.md)、[Studio](docs/studio.md)和[设置](docs/settings.md)。
 
-## 快速开始
-
-### 1. 启动本地工作台
-
-需要 **Python 3.11–3.13、uv、FFmpeg 与 ffprobe**。本地应用负责媒体处理、数据库、API 和页面；模型服务另行配置。
-
-```bash
-git clone https://github.com/xfork24/mindex.git
-cd mindex
-
-uv sync --extra dev
-cp config.example.yaml config.local.yaml
-uv run mindex serve
-```
-
-打开 **<http://127.0.0.1:8000>**。
-
-| 页面 | 地址 | 用途 |
-| :--- | :--- | :--- |
-| 视频检索 | `/` | 文字、图片、视频查询 |
-| 素材管理 | `/admin` | 上传、处理、整理素材 |
-| 人物库 | `/persons` | 身份、参考图、出镜审核与发布 |
-| 创作 | `/studio` | 文案、分镜、配音与成片 |
-| 设置 | `/settings` | 模型档案、音色、检索参数 |
-| API 文档 | `/docs` | FastAPI 交互式接口文档 |
-
-> `config.example.yaml` 中的局域网地址仅是部署示例。首次使用请修改 `config.local.yaml`，或在设置页配置并激活自己的模型服务。没有素材、索引或可用模型时，页面会显示真实的未就绪状态。
-
-### 2. 导入素材，先跑通画面检索
-
-最短路径只需要**嵌入服务**，无需先运行 ASR、LLM 分析或 TTS。默认主模型配置为 **WeMM-Embedding-9B / 4096 维**；部署方式见[模型部署指南](docs/DEPLOYMENT.md)。
-
-```bash
-# 本地 CPU：导入、检测镜头、生成片段。支持 FFmpeg 可解码的 MP4、MKV 等。
-uv run mindex prepare '/绝对路径/素材.mp4'
-
-# 记下上一条命令输出的 SOURCE_ID；确认嵌入服务就绪后执行。
-uv run mindex index --mode visual --source SOURCE_ID --kind moment --kind shot --activate
-uv run mindex check
-
-# 用一句描述找片段。
-uv run mindex search '一个人在雨夜街道上奔跑'
-```
-
-也可以全程使用素材管理页：**添加新素材 → 分镜处理 → 更新嵌入 / 检索 → 视频检索**。示例显式包含 `moment` 与 `shot`，方便同时用于精细片段检索和 Studio 默认的镜头召回。
-
-默认分镜使用本地 AdaptiveDetector，也可配置 TransNetV2；两者均需抽检。默认保留不超过 6 秒的短镜头，长镜头按 4 秒窗口、3 秒步长生成精细片段。详细步骤见[电影处理指南](docs/FILM_WORKFLOW.md)。
-
-### 3. 按需补全对白、分析和人物
-
-画面、对白与分析是独立渠道，可以先用、再补全；补充对白不会自动触发 LLM 分析。
-
-```bash
-# 优先提取可用文本字幕，否则使用已配置的 ASR；此步暂不发布索引。
-uv run mindex enrich-dialogue SOURCE_ID --no-publish
-
-# 可选：配置并启动视觉理解服务后，生成动作、场景、情绪等分析。
-uv run mindex analyze SOURCE_ID
-
-# 嵌入服务就绪后，发布已完成的渠道，复用兼容的已有向量。
-uv run mindex index --mode auto --source SOURCE_ID --activate
-uv run mindex check
-```
-
-素材管理页还支持指定对白处理方式、选择字幕轨道和上传外部字幕。人物功能需要 `uv sync --extra person --extra dev`、独立人物服务和参考图；按**登记 / 导入 → 处理 → 审核 → 发布**的顺序操作，见[人物库指南](docs/persons.md)。
-
-### 4. 用素材库创作新视频
-
-在 `/studio` 输入文案并限定可用素材，创建任务后拆分镜，逐镜召回画面与生成旁白，再选片、预览并构建成片。可导出 **MP4、SRT、WebVTT、时间轴 JSON**，也可打包下载任务产物。
-
-| 环节 | 所需能力 |
-| :--- | :--- |
-| 拆分镜 | 文本 LLM |
-| 画面语义召回 | 活动内容索引 + 匹配的嵌入服务 |
-| 配音 | TTS + 可用音色 |
-| 选片、渲染、合成 | 本地 FFmpeg；烧录字幕另需 libass 与可用字体 |
-
-召回与配音可以分阶段执行，适合单 GPU 轮换模型服务。Studio 从已有素材中选片与合成，选片的叙事效果仍需人工审阅。完整操作见[Studio 指南](docs/studio.md)。
-
 ## 工作原理
 
 ```mermaid
@@ -346,10 +357,10 @@ docs/             使用指南、架构与验证记录
 ```
 
 前后端均按 `search`、`admin`、`persons`、`studio`、`settings` 功能组织。
-`uv run mindex serve` 同时提供页面和 API，无需单独构建前端。静态资源通过
-`/assets/<功能模块>/<文件名>` 提供，打包后随 `mindex.web` 安装。
-旧检出目录更新后，执行 `uv sync --extra dev` 刷新可编辑安装。
-完整目录与打包映射见[架构文档](docs/architecture.md#模块职责)。
+
+- `uv run mindex serve` 同时提供页面和 API，无需构建前端。静态资源经 `/assets/<功能模块>/<文件名>` 提供，打包后随 `mindex.web` 安装。
+- 从旧目录结构的检出更新后，执行 `uv sync --extra dev` 刷新可编辑安装。
+- 完整目录、模块职责与打包映射见[架构文档](docs/architecture.md#模块职责)。
 
 代理协作约定见 [AGENT.md](AGENT.md)，Claude Code 技术导航见 [CLAUDE.md](CLAUDE.md)。
 
@@ -363,7 +374,7 @@ uv run ruff check backend/src tests
 node --check frontend/src/search/app.js
 ```
 
-UI 回归另需 Node.js、Playwright 及其浏览器；可用 `MINDEX_PLAYWRIGHT_MODULE` 指定模块路径。目录重组的验证范围与已知失败见[目录重组验证记录](docs/source-layout-verification.md)，其他历史记录见[验证记录](docs/VERIFICATION.md)。自动化测试使用真实媒体处理、数据库与 HTTP 链路，模型部分使用明确标记的确定性测试适配器；它们验证工程行为，不证明真实模型的检索或人物识别准确率。
+UI 回归另需 Node.js、Playwright 及其浏览器；可用 `MINDEX_PLAYWRIGHT_MODULE` 指定模块路径。完整 `pytest` 目前并非全绿：其中 7 项既有失败记录在[目录重组验证记录](docs/source-layout-verification.md)，另有 3 项人物相关失败见[项目审查](docs/project-review-2026-10-22.md)；其他历史记录见[验证记录](docs/VERIFICATION.md)。自动化测试使用真实媒体处理、数据库与 HTTP 链路，模型部分使用明确标记的确定性测试适配器；它们验证工程行为，不证明真实模型的检索或人物识别准确率。
 
 真实质量评测需要人工标注查询并固定模型、预处理与索引版本。流程见[端到端操作手册](docs/E2E_RUNBOOK.md)、[e2e 框架](docs/e2e-framework.md)及[评测标注说明](eval/README.md)。检索分数是排序依据，不是匹配概率。
 

@@ -1,5 +1,7 @@
 # 全页面 UI 布局修正与验收
 
+> 本文引用的 `artifacts/` 是验证时生成的本地目录，已被 `.gitignore` 排除，不在仓库中；相关路径仅作记录，不是可点击链接。
+
 日期：2026-10-19。计划见 [UI_ELEM_LAYOUT_PLAN.md](../plans/UI_ELEM_LAYOUT_PLAN.md)。已合并实施期间新增的双向文本框拖拽、组合人物筛选和 SVG 语言图标要求。素材刷新按后续要求恢复；以下统计保留原验收历史。全部连续调整的最终状态、1,458 项全页面复测和专项验证见 [最终验收](studio-alignment-verification.md)。保留工作区原有修改，没有提交代码。
 
 后续召回筛选、多选素材范围及图片／视频控件对齐已实施，见 [recall-filters-verification.md](recall-filters-verification.md)。该轮按新增功能要求扩展可选 `filters.source_ids`，保持原单素材字段兼容；对应验证独立记录，不计入下方原验收统计。
@@ -22,7 +24,7 @@
 
 静态资源版本统一更新为 `20261019-ui-layout`（受影响的 CSS、multiselect.js、app.js、admin.js）。表格摘要、媒体卡片和整块可点击列表保持内容驱动高度；普通长按钮在窄屏可自动增高，避免强制 32px 导致文字遮挡。
 
-后续调整：移除创作和设置页刷新按钮的 `margin-left:auto` 覆盖，使用共享的左侧排列规则；这两页 CSS 缓存版本更新为 `20261019-refresh-left`。单独提取实际页头 HTML 和样式在 Chromium 检查中文六种屏宽，共 12 个布局：按钮左边距为 0、同排导航间距偏差不超过 1px、换行后靠左、按钮高度 32px，页头无横向溢出。人工检查桌面及 320px 截图；本次未重复整页功能回归。记录见 [refresh-left-check.json](../artifacts/ui-layout/after/refresh-left-check.json)，截图见 `artifacts/ui-layout/after/*-refresh-left-*.png`。
+后续调整：移除创作和设置页刷新按钮的 `margin-left:auto` 覆盖，使用共享的左侧排列规则；这两页 CSS 缓存版本更新为 `20261019-refresh-left`。单独提取实际页头 HTML 和样式在 Chromium 检查中文六种屏宽，共 12 个布局：按钮左边距为 0、同排导航间距偏差不超过 1px、换行后靠左、按钮高度 32px，页头无横向溢出。人工检查桌面及 320px 截图；本次未重复整页功能回归。记录见 refresh-left-check.json（`artifacts/ui-layout/after/refresh-left-check.json`），截图见 `artifacts/ui-layout/after/*-refresh-left-*.png`。
 
 最新要求已恢复素材管理顶部“刷新素材”及原刷新事件。选片与对齐阶段移除重复候选选择区，召回阶段仍显示候选；分镜摘要同行底部及历史版本控件行统一对齐。验证记录见 [studio-alignment-verification.md](studio-alignment-verification.md)。上表的删除按钮项为先前验收记录，当前状态以此次恢复为准。
 
@@ -30,7 +32,7 @@
 
 Chromium 共检查 **1,458 个页面／状态／语言／屏宽案例、85,938 次实际控件测量、125 个控件组**。五个应用页面使用中文和英文；两个导出页使用现有中文。屏宽均为 1440、1000、800、540、390、320px。计算样式检查覆盖尺寸、字体、边框、圆角、padding、resize、位置、禁用状态、同排偏差、页面／弹窗溢出、关闭按钮与标题重叠以及按钮文字遮挡。最终记录中布局违规与浏览器脚本错误均为 0。
 
-逐组记录见 [ui-layout-coverage.md](ui-layout-coverage.md)，全部案例摘要见 [coverage.csv](../artifacts/ui-layout/after/coverage.csv)，每个控件的测量明细见 [coverage.json](../artifacts/ui-layout/after/coverage.json)。测量数量包括相同控件在不同语言和屏宽下的重复测量，不是独立控件数量。
+逐组记录见 [ui-layout-coverage.md](ui-layout-coverage.md)，全部案例摘要见 coverage.csv（`artifacts/ui-layout/after/coverage.csv`），每个控件的测量明细见 coverage.json（`artifacts/ui-layout/after/coverage.json`）。测量数量包括相同控件在不同语言和屏宽下的重复测量，不是独立控件数量。
 
 正常、空数据、长文本和大量内容进入真实页面。检索加载和 503 错误通过延迟实际 fetch 返回触发；模型档案列表、已存密钥提示、连接失败和音色目录降级采用确定性接口响应，仍由原页面渲染和原事件触发。处理运行、等待、失败和进度状态另由现有浏览器回归检查覆盖。以上是按界面登记的实际案例，不声称覆盖每个界面所有状态的完整组合。
 
@@ -50,11 +52,11 @@ Chromium 共检查 **1,458 个页面／状态／语言／屏宽案例、85,938 �
 - `admin_skip_scroll_ui.cjs`：拒绝后继续处理、原因显示、列表独立滚动、滚动边界与窗口变化通过。
 - Ruff、Python format、受影响 JavaScript 语法和 diff 空白检查通过。
 
-日志均存放在 [artifacts/ui-layout](../artifacts/ui-layout)。测试使用 `/tmp/mindex-ui-layout-*` 隔离目录、色块视频、测试向量、测试配音和人物检测实现；没有操作真实任务或调用付费模型。补充修正测试服务器的设置身份探测，令后续验收也只使用工程嵌入实现。
+日志均存放在 artifacts/ui-layout（`artifacts/ui-layout`）。测试使用 `/tmp/mindex-ui-layout-*` 隔离目录、色块视频、测试向量、测试配音和人物检测实现；没有操作真实任务或调用付费模型。补充修正测试服务器的设置身份探测，令后续验收也只使用工程嵌入实现。
 
 ## 视觉检查及限制
 
-人工检查代表截图：检索桌面、素材 320px、人物导入长页面、模型参数 320px、创作表格及成片 320px、两个复核页面及播放弹窗。前后对照见 [检索控件对照](../artifacts/ui-layout/comparison-1.png) 和 [素材窄屏对照](../artifacts/ui-layout/comparison-2.png)。原始前后截图分别在 `artifacts/ui-layout/before/` 与 `after/`；基线只有常用静态页面，没有为所有动态分支制作修改前截图。对照中的人物数量来自新增隔离数据，不能用于证明筛选行为改变。
+人工检查代表截图：检索桌面、素材 320px、人物导入长页面、模型参数 320px、创作表格及成片 320px、两个复核页面及播放弹窗。前后对照见 检索控件对照（`artifacts/ui-layout/comparison-1.png`） 和 素材窄屏对照（`artifacts/ui-layout/comparison-2.png`）。原始前后截图分别在 `artifacts/ui-layout/before/` 与 `after/`；基线只有常用静态页面，没有为所有动态分支制作修改前截图。对照中的人物数量来自新增隔离数据，不能用于证明筛选行为改变。
 
 未完成的验证明确如下：
 

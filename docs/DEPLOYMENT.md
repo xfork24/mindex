@@ -60,7 +60,7 @@ ASR 验收后应固定 `asr.revision` 为实际权重 commit。现有 OpenAI 兼
 
 ```bash
 ./scripts/setup-transnet-service.sh  # 首次安装，下载/校验上游代码及完整 SavedModel，并验证推理
-./scripts/run-transnet-service.sh    # 前台运行，Ctrl+C 停止
+./scripts/run-transnet.sh            # 前台运行，Ctrl+C 停止
 curl http://127.0.0.1:18203/health
 ```
 

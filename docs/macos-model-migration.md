@@ -1,6 +1,6 @@
 # macOS 模型身份迁移
 
-执行依据为根目录 `REHASH_REFINEMENT_PLAN.md`，本次实际状态见 `REHASH_MIGRATION.md`。迁移允许重建，旧清单、旧向量与活动索引保持保留，trailer 验收通过后才能重建正片并发布。ASR、Analyzer 只适配公共接口和 schema 2，不要求同时启动；TTS 不参与本次重构。
+执行依据为 [plans/REHASH_REFINEMENT_PLAN.md](../plans/REHASH_REFINEMENT_PLAN.md)，本次实际状态见 [REHASH_MIGRATION.md](REHASH_MIGRATION.md)。迁移允许重建，旧清单、旧向量与活动索引保持保留，trailer 验收通过后才能重建正片并发布。ASR、Analyzer 只适配公共接口和 schema 2，不要求同时启动；TTS 不参与本次重构。
 
 ## 身份与信任
 
@@ -16,14 +16,14 @@ schema 2 区分三层：weights/mmproj 的 SHA256 内容身份；决定索引兼
 
 先盘点访问同一 `data_dir` 的 Web、CLI 和后台任务，包括 18302 验收端口，正常停止写入。保存代码版本/未提交差异、原始 YAML、SQLite 动态配置选择、部署清单、活动索引和成员清单。备份须检查 metadata/Chroma 数据库完整性、集合成员、媒体文件和原素材 SHA256，不依赖 Chroma 固定目录 UUID。macOS APFS 可用 `cp -cRp` 创建独立写时复制备份，不能用硬链接备份可变数据库。
 
-迁移配置为 `config.macos-v2.yaml`。所有迁移命令使用相同 YAML 和全局 `--no-runtime-overrides`；`runtime_overrides: false` 也可写入 YAML，Web 的 `RuntimeConfig.current()` 持续遵守，设置页激活的档案不会改变验收配置。默认 CLI/Web 动态设置行为保持不变，e2e 仍默认使用 YAML。
+迁移配置 `config.macos-v2.yaml` 是操作员本地文件，不随仓库提供；可由 `config.example.yaml` 复制后按 macOS 本机服务地址和部署清单编写。所有迁移命令使用相同 YAML 和全局 `--no-runtime-overrides`；`runtime_overrides: false` 也可写入 YAML，Web 的 `RuntimeConfig.current()` 持续遵守，设置页激活的档案不会改变验收配置。默认 CLI/Web 动态设置行为保持不变，e2e 仍默认使用 YAML。
 
 ## WeMM 容量验收
 
-`scripts/run-local-wemm.sh` 按脚本位置解析绝对模型路径，可从任意目录调用。默认 ctx=32768、单 slot、f16 K/V cache，关闭额外的 prompt RAM cache（`--cache-ram 0`）。`MINDEX_LLAMA_SERVER`、`MINDEX_WEMM_PORT` 可指定本机二进制和端口。
+`scripts/run-wemm.sh` 按脚本位置解析绝对模型路径，可从任意目录调用。默认 ctx=32768、单 slot、f16 K/V cache，关闭额外的 prompt RAM cache（`--cache-ram 0`）。`MINDEX_LLAMA_SERVER`、`MINDEX_WEMM_PORT` 可指定本机二进制和端口。
 
 ```bash
-bash scripts/run-local-wemm.sh > data/e2e/wemm-macos-32768.log 2>&1
+bash scripts/run-wemm.sh > data/e2e/wemm-macos-32768.log 2>&1
 ```
 
 记录 `/props` 与 `/v1/models`、启动日志的模型/投影/KV/计算缓冲占用、最长支持输入（默认 6 秒、24 帧、262144 像素上限）的实际推理耗时、进程峰值内存、系统内存压力与 swap。若 32768 内存不足，正常停止服务后用 `MINDEX_WEMM_CTX_SIZE=16384` 重启，使用新命名清单和配置重新做容量与兼容验证。16384 仍无法容纳最长输入则停止迁移；不能截断视频或偷偷修改预处理。

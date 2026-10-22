@@ -1621,8 +1621,8 @@ def test_strict_no_dialogue_leak_pretruncate_filter_offline_name_and_rollback(ca
 
 
 def test_person_release_operations_ignore_content_index_lock(catalogue, config):
-    from mindex.shared.processing_lock import ProcessingLock, index_write_lock
     from mindex.admin.source_tasks import publish_work
+    from mindex.shared.processing_lock import ProcessingLock, index_write_lock
 
     p, _work, _actor = catalogue
     config.enforce_gpu_lock = False
@@ -2857,7 +2857,7 @@ def test_repeat_completed_person_task_reuses_extraction_and_matching(catalogue, 
 
 
 def test_source_display_name_follows_curation_without_changing_work_identity(catalogue, config):
-    p, work, actor = catalogue
+    p, work, _actor = catalogue
     client = TestClient(create_app(config))
     from mindex.admin.curation import CurationPatch, Library
 
@@ -2899,7 +2899,7 @@ def test_linked_shots_use_current_source_display_name(catalogue):
 
 
 def test_reassign_work_removes_only_unused_default_work(catalogue):
-    p, work, actor = catalogue
+    p, work, _actor = catalogue
     replacement = p.save(Entity(kind="work", name="独立作品"))
     p.assign_work("source", replacement["id"])
     assert p.work_for("source") == replacement["id"]
@@ -2929,7 +2929,7 @@ def test_reassign_work_preserves_referenced_or_custom_work(catalogue, protected)
 def test_purge_removes_unused_default_work(catalogue):
     from mindex.persons.persons import purge_person_source
 
-    p, work, actor = catalogue
+    p, work, _actor = catalogue
     with p.store.connect() as db:
         purge_person_source(db, "source")
     assert not p.store.one("SELECT id FROM person_entities WHERE id=?", (work,))

@@ -1,5 +1,7 @@
 # 召回筛选和素材多选验收
 
+> 本文引用的 `artifacts/` 是验证时生成的本地目录，已被 `.gitignore` 排除，不在仓库中；相关路径仅作记录，不是可点击链接。
+
 日期：2026-10-19。
 
 ## 修改
@@ -19,7 +21,7 @@
 - 原国际化浏览器回归通过：五页、动态编辑器、输入／文件／焦点／播放节点保留、延迟响应、持久化及跨标签页同步。
 - 人工检查检索图片窄屏、分镜文字桌面和视频召回桌面截图。Ruff、JavaScript 语法及受影响文件 diff 空白检查通过。
 
-计算样式记录及截图见 [artifacts/recall-filters](../artifacts/recall-filters/coverage.json)，测试日志保存在同目录。隔离库位于 `/tmp/mindex-recall-filters-20261019` 和 `/tmp/mindex-recall-i18n-20261019`；测试仅使用确定性颜色向量和本地模型替身，没有操作实际素材或外部模型。
+计算样式记录及截图见 artifacts/recall-filters（`artifacts/recall-filters/coverage.json`），测试日志保存在同目录。隔离库位于 `/tmp/mindex-recall-filters-20261019` 和 `/tmp/mindex-recall-i18n-20261019`；测试仅使用确定性颜色向量和本地模型替身，没有操作实际素材或外部模型。
 
 ## 限制及复现
 

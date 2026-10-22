@@ -130,7 +130,8 @@
 |---|---|---|---|
 | `candidates` | int 1–1000 | 100 | 每路召回候选数 |
 | `rrf_k` | int ≥1 | 60 | RRF 常数 |
-| `weights` | 五键非负 | video/description/style=1，dialogue/lexical=0.5 | 五路权重；某路设 0 即关闭该路 |
+| `channel_weights` | 三键非负：`visual`/`dialogue`/`analysis` | 均为 1 | 新版（format 2）索引的三渠道 RRF 权重，必须同时给出三个键；见 [三渠道说明](recall-enhancement.md) |
+| `weights` | 五键非负 | video/description/style=1，dialogue/lexical=0.5 | 旧版（format 1）索引的五路权重；某路设 0 即关闭该路。与 `channel_weights` 互不影响 |
 | `lexical_exclude` | list | `[]` | BM25 文档中排除的字段（评测消融用：`description`/`style`/`dialogue`） |
 | `max_upload_mb` | int ≥1 | 100 | 视频查询上传上限 |
 | `max_image_upload_mb` | int 1–100 | 20 | 静态图片查询上传上限（MB） |
@@ -180,6 +181,27 @@
 
 顶层 `source_upload_max_bytes` 默认 `21474836480`（20 GiB，每文件），适用于 `/api/admin/sources/upload`。独立于 `search.max_upload_mb` 的检索查询视频限额。
 
+
+## `person` — 人物服务
+
+独立人物检测/特征服务的客户端配置，不改变内容分镜或 WeMM 嵌入空间。安装和启动见 [人物库](persons.md)。
+
+| 键 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `backend` | `mindex` | `mindex` | 目前仅支持自带人物服务 |
+| `base_url` | URL | `http://127.0.0.1:4050` | 人物服务地址 |
+| `model` | `cheetah_l` | `cheetah_l` | 人物模型 |
+| `revision` | str | `manifest-v2` | 模型清单版本 |
+| `timeout` | float >0 | 600 | 请求超时（秒） |
+| `model_root` | str | `~/.insightface` | 服务端模型文件根目录 |
+| `expected_space` | object 或 null | null | 把服务 `/health` 返回的 `space` 完整复制到此处，可固定模型文件摘要与预处理；不一致时拒绝处理 |
+| `frame_interval` | int ≥1 | 15 | 每个分镜每隔多少帧抽取一帧，见下文 |
+| `fps` | float 0–5 | 5 | 兼容旧配置，不参与抽帧 |
+| `face_threshold` | float 0–1（开区间） | 0.55 | 人脸匹配分数门槛 |
+| `face_margin` | float 0–1（开区间） | 0.1 | 最佳与次佳候选的最小分差 |
+| `min_face_quality` | float 0–1 | 0.6 | 视频帧人脸质量门槛，低于此值不接受自动确认 |
+| `min_reference_quality` | float 0–1 | 0 | 参考图质量门槛，低于此值不参与匹配；0 表示全部参与 |
+| `body_threshold` | float 0–1（开区间） | 0.8 | 人体匹配分数门槛 |
 
 ## person 展示帧
 

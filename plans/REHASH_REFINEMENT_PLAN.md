@@ -93,4 +93,4 @@
 
 交付修订代码、测试、新旧清单与配置说明、迁移记录，并更新运行文档。
 
-**计划文件：**项目根目录 `REHASH_REFINEMENT_PLAN.md`。实施状态见 [REHASH_MIGRATION.md](../docs/REHASH_MIGRATION.md)：代码与协议测试已完成，trailer v2 验收完成，正片重建待操作员执行。
+**计划文件：**`plans/REHASH_REFINEMENT_PLAN.md`（原位于项目根目录）。实施状态见 [REHASH_MIGRATION.md](../docs/REHASH_MIGRATION.md)：代码与协议测试已完成，trailer v2 验收完成，正片重建待操作员执行。

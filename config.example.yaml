@@ -1,11 +1,13 @@
-# 2026-10-13：四个模型均已部署、当前未启动；此文件只配置地址，不启动服务。
+# 配置模板：复制为 config.local.yaml 后修改。此文件只配置服务地址，不启动任何模型服务。
+# 下列 192.168.1.86 等局域网地址仅为示例，请替换为自己的部署，或在设置页配置并激活模型档案。
+# 完整键说明见 docs/config-reference.md；未知键会使配置校验失败。
 data_dir: ./data
 # 关闭时允许不同素材/不同类型处理并行；开启时沿用全局管线互斥。
 enforce_gpu_lock: false
 # 素材上传每文件 20 GiB，独立于 search.max_upload_mb（检索查询视频）。
 source_upload_max_bytes: 21474836480
 embedding:
-  # mindex = 本项目自定义服务；llama_cpp = 用户现有 llama-server，详见 E2E_RUNBOOK.md。
+  # mindex = 本项目自定义服务；llama_cpp = 用户现有 llama-server，详见 docs/E2E_RUNBOOK.md。
   backend: mindex
   deployment_manifest: null
   base_url: http://192.168.1.86:4010
@@ -111,8 +113,14 @@ video:
   max_pixels: 262144
   analysis_frames: 12
 search:
+  # 新版（format 2）索引的三渠道 RRF 权重；必须同时给出三个键。
+  channel_weights:
+    visual: 1.0
+    dialogue: 1.0
+    analysis: 1.0
   candidates: 100
   rrf_k: 60
+  # 旧版（format 1）索引的五路权重，与 channel_weights 互不影响。
   weights:
     video: 1.0
     description: 1.0

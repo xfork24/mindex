@@ -9,7 +9,8 @@
 | 了解整体架构与数据流 | [架构与模块详解](architecture.md) | [索引版本与空间身份](index-versions.md) |
 | 跑通离线处理管线 | [离线管线详解](pipeline.md) | [电影处理指南](FILM_WORKFLOW.md) |
 | 查某个命令怎么用 | [CLI 完全参考](cli-reference.md) | [配置参考](config-reference.md) |
-| 理解检索排名怎么算 | [检索机制详解](search.md) | — |
+| 理解检索排名怎么算 | [检索机制详解](search.md) | [三渠道独立处理与召回](recall-enhancement.md) |
+| 管理演员、角色，按出镜查找片段 | [人物库与证据审核](persons.md) | [人物配置](config-reference.md#person--人物服务) |
 | 迁移到 macOS、建立 v2 空间 | [macOS 模型身份迁移](macos-model-migration.md) | [实际迁移记录](REHASH_MIGRATION.md) |
 | 换模型 / 回退索引 | [索引版本与空间身份](index-versions.md) | [部署说明](DEPLOYMENT.md) |
 | 做真实模型端到端验证 | [e2e 实验框架](e2e-framework.md) | [端到端操作手册](E2E_RUNBOOK.md)、[测试计划](../plans/E2E_TEST_PLAN.md) |
@@ -23,13 +24,13 @@
 
 ## 文档一览
 
-- [source-layout-verification.md](source-layout-verification.md) — 前后端目录重组、打包与验证范围，含既有失败和未完成检查
-
 - [architecture.md](architecture.md) — 按页面划分的源码目录、模块职责、离线/在线数据流、存储布局、SQLite 表、五条核心不变量
 - [pipeline.md](pipeline.md) — detect/split/transcribe/align/analyze/index 各阶段机制、检查点与断点续跑、指纹键
 - [cli-reference.md](cli-reference.md) — `mindex` 与 `mindex-model-server` 全部命令、参数、默认值、示例
 - [config-reference.md](config-reference.md) — 全部配置键、类型、默认值、影响与常用组合
-- [search.md](search.md) — 五路召回、加权 RRF、视频查询窗口化、筛选器、分数语义
+- [search.md](search.md) — 三渠道召回（新版）与五路召回（旧版）、加权 RRF、视频查询窗口化、筛选器、分数语义
+- [recall-enhancement.md](recall-enhancement.md) — 画面、对白、分析三渠道的独立处理、增量发布与召回
+- [persons.md](persons.md) — 人物库、参考图、出镜审核、发布与人物检索、镜头详情
 - [index-versions.md](index-versions.md) — 索引版本指纹、发布检查、激活与回退、能力门槛
 - [e2e-framework.md](e2e-framework.md) — probe/pin 信任模型、11 个 phase 状态机、标注冻结、评测 profile
 - [admin.md](admin.md) — 素材后台功能与管理 API
@@ -38,6 +39,23 @@
 - [tools.md](tools.md) — m4s-converter 等附带工具
 - [cleanup.md](cleanup.md) — 磁盘清理：三级分类（每次删/策略过期/只报告）、保留规则、锁与并发
 - [backup.md](backup.md) — 离线备份、部分迁移、已有库合并、切换中断恢复和全新 clone 恢复流程
+
+## 验证与审计记录
+
+带日期的历史档案，记录当时的验证范围与结果，不代表当前代码的测试结论。引用的 `artifacts/` 为本地产物，不在仓库中。
+
+| 文档 | 内容 |
+|---|---|
+| [project-review-2026-10-22.md](project-review-2026-10-22.md) | 项目架构与规范审查：发现、建议与本次已修正项 |
+| [source-layout-verification.md](source-layout-verification.md) | 前后端目录重组、打包与验证范围，含既有失败和未完成检查 |
+| [implementation-review.md](implementation-review.md) | 三份计划的实现审查与端到端验收 |
+| [recall-enhancement-verification.md](recall-enhancement-verification.md) | 三渠道改造验证 |
+| [persons-verification.md](persons-verification.md) / [person-reference-recall-verification.md](person-reference-recall-verification.md) | 人物召回、镜头详情、对白提及人物召回修复 |
+| [studio-workspace-verification.md](studio-workspace-verification.md) / [studio-refinement-verification.md](studio-refinement-verification.md) / [studio-row-ui-verification.md](studio-row-ui-verification.md) / [studio-loading-verification.md](studio-loading-verification.md) / [studio-alignment-verification.md](studio-alignment-verification.md) | Studio 工作台、候选与定长窗口、逐镜行、加载优化、对齐 UI 的验收 |
+| [candidate-identities-verification.md](candidate-identities-verification.md) / [recall-filters-verification.md](recall-filters-verification.md) | 召回人物标记与排名、召回筛选与素材多选 |
+| [ui-layout-verification.md](ui-layout-verification.md) / [ui-layout-coverage.md](ui-layout-coverage.md) / [ui-layout-final-coverage.md](ui-layout-final-coverage.md) | 全页面 UI 布局修正与覆盖记录 |
+| [upload-verification.md](upload-verification.md) / [source-detail-loading.md](source-detail-loading.md) / [source-work-audit-2026-10-20.md](source-work-audit-2026-10-20.md) | 素材上传、详情加载、素材工作台全量检查 |
+| [wemm-short-clip-verification.md](wemm-short-clip-verification.md) | WeMM 极短分镜采样修复 |
 
 ## 任务导向文档
 
