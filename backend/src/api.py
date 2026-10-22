@@ -16,6 +16,7 @@ from mindex.shared.config import Config, load_config
 from mindex.shared.shot_media import file_response as FileResponse
 from mindex.shared.storage import Store
 from mindex.shared.web_assets import frontend_root
+from mindex.shared.web_auth import install_web_auth
 from mindex.studio.studio_api import studio_router
 
 
@@ -26,6 +27,7 @@ def create_app(
     index_id: str | None = None,
     storyboarder: Storyboarder | None = None,
     speaker: Speaker | None = None,
+    web_token: str | None = None,
 ) -> FastAPI:
     config = config or load_config()
     store = Store(config.data_dir)
@@ -89,5 +91,8 @@ def create_app(
         return JSONResponse(status_code=422, content={"detail": str(exc)})
 
     app.include_router(search_router(config, runtime, store, embedder, index_id=index_id))
+
+    # 设置 MINDEX_WEB_TOKEN（或传入 web_token）后才启用访问令牌；未设置时行为不变。
+    install_web_auth(app, web_token)
 
     return app

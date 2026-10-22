@@ -118,6 +118,7 @@ wheel 安装后读取随包的 `mindex/web/`。Setuptools 通过包目录映射�
 | `shared/shot_media.py` | 统一镜头媒体服务：时间基准转换、截图/抽帧、跨镜重建；业务读取不直读历史切片路径 |
 | `shared/processing_lock.py` / `shared/task_progress.py` / `shared/work_cache.py` | 处理锁（含 GPU 互斥）、任务进度持久化、素材工作台缓存 |
 | `shared/compatibility.py` / `shared/uploads.py` / `shared/review_style.py` / `shared/web_assets.py` | 按部署绑定的嵌入兼容性门槛（六文本六视频基线）、流式上传落盘与限额、导出复核页内嵌样式、静态资源定位 |
+| `shared/web_auth.py` | 可选访问令牌认证（`MINDEX_WEB_TOKEN`）：`/login`、`/logout`、Cookie 与 Bearer；未设置时不安装 |
 | `shared/i18n.py` | 把中文消息映射为稳定 `message_key`，供前端展示译文 |
 | `maintenance/clean.py` / `clean_index.py` / `clean_studio.py` / `purge.py` | 磁盘清理（分级规则）、索引与 Studio 清理规则、素材物理删除（保留源视频） |
 | `maintenance/backup.py` / `backup_cli.py` / `backup_db.py` / `backup_vectors.py` | 离线备份与迁移：编排、CLI 注册、SQLite 与向量处理 |

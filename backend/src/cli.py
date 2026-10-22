@@ -646,10 +646,18 @@ def serve(
     \b
       mindex serve --host 127.0.0.1 --port 8000
     """
+    import os
+
     import uvicorn
 
     from mindex.api import create_app
 
+    if host not in {"127.0.0.1", "localhost", "::1"} and not os.environ.get("MINDEX_WEB_TOKEN"):
+        typer.secho(
+            f"警告：监听 {host} 且未设置 MINDEX_WEB_TOKEN，网络中的任何人都可读写全部功能。",
+            fg=typer.colors.YELLOW,
+            err=True,
+        )
     uvicorn.run(create_app(ctx.obj, index_id=index_id), host=host, port=port)
 
 

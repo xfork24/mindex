@@ -7445,5 +7445,11 @@
     "en": "Select at least one source"
   },
   "ui.role_review_required": {"zh": "出镜审核必须指定角色", "en": "Select a character for appearance review."},
-  "ui.role_reference_missing": {"zh": "角色「{p0}」的演员缺少角色参考图", "en": "An actor for character “{p0}” is missing a character reference image."}
+  "ui.role_reference_missing": {"zh": "角色「{p0}」的演员缺少角色参考图", "en": "An actor for character “{p0}” is missing a character reference image."},
+  "ui.login_title": {"zh": "Mindex · 登录", "en": "Mindex · Sign in"},
+  "ui.login_heading": {"zh": "需要访问令牌", "en": "Access token required"},
+  "ui.login_hint": {"zh": "请输入启动服务时设置的 MINDEX_WEB_TOKEN。", "en": "Enter the MINDEX_WEB_TOKEN set when the server was started."},
+  "ui.login_label": {"zh": "访问令牌", "en": "Access token"},
+  "ui.login_submit": {"zh": "登录", "en": "Sign in"},
+  "ui.login_error": {"zh": "令牌不正确，请重试。", "en": "The token is incorrect. Try again."}
 }

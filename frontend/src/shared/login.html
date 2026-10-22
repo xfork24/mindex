@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title data-i18n='[[0,"ui.login_title"]]'>Mindex · 登录</title><link rel="icon" href="/assets/shared/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/assets/shared/style.css">
+  <script src="/assets/shared/messages.js" defer></script><script src="/assets/shared/i18n.js" defer></script><script src="/assets/shared/login.js" defer></script>
+</head>
+<body>
+  <header><a class="brand" href="/">m<span>index</span><i></i></a></header>
+  <main>
+    <section class="intro"><h1 data-i18n='[[0,"ui.login_heading"]]'>需要访问令牌</h1><p data-i18n='[[0,"ui.login_hint"]]'>请输入启动服务时设置的 MINDEX_WEB_TOKEN。</p></section>
+    <form method="post" action="/login" class="panel" style="max-width:28rem">
+      <input type="hidden" name="next" id="login-next" value="/">
+      <label><span data-i18n='[[0,"ui.login_label"]]'>访问令牌</span>
+        <input type="password" name="token" autocomplete="current-password" autofocus required></label>
+      <p id="login-error" role="alert" hidden data-i18n='[[0,"ui.login_error"]]'>令牌不正确，请重试。</p>
+      <button type="submit" data-i18n='[[0,"ui.login_submit"]]'>登录</button>
+    </form>
+  </main>
+</body>
+</html>

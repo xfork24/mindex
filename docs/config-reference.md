@@ -174,6 +174,7 @@
 | `MINDEX_CONFIG` | 默认配置文件路径 |
 | `MINDEX_MODEL_API_KEY` | 模型服务 Bearer token（embedding/asr/detector 共用默认） |
 | `MINDEX_QWEN_API_KEY` | Qwen 服务 token |
+| `MINDEX_WEB_TOKEN` | 设置后 `mindex serve` 的页面和 API 需要访问令牌，见 [CLI 参考](cli-reference.md#mindex-serve---host-127001---port-8000---index-id-index_id) |
 | `MINDEX_GPU_LOCK` | GPU 文件锁路径（各角色须一致） |
 | `MINDEX_TRANSNET_DIR` | 服务端 TransNetV2 `inference` 目录 |
 

@@ -141,6 +141,8 @@ uv run mindex search '雨夜，一个人强忍眼泪，镜头慢慢推近' --gra
 
 `--index-id` 将查询、片段媒体和上下文绑定到指定 ready 索引，用于独立版本验证；不会修改活动索引。
 
+**访问令牌（可选）。** 设置环境变量 `MINDEX_WEB_TOKEN` 后，页面和 API 都需要令牌：浏览器访问 `/login` 提交令牌，服务器设置 HttpOnly、SameSite=Strict 的 Cookie（内容是令牌的 HMAC，不是令牌本身），`/logout` 清除登录；脚本使用 `Authorization: Bearer <令牌>`。未登录的页面请求跳转到 `/login`，API 返回 401。`/assets/shared/` 下的公共样式、脚本和文案字典不需要令牌。未设置该变量时不启用认证，行为不变。令牌通过环境变量传入，不放进 YAML 或命令行参数。监听非回环地址且未设置令牌时，`serve` 会在启动时输出警告，但不拒绝启动。
+
 ## 索引版本管理
 
 ### `mindex check [--index-id ID]`
