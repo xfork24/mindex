@@ -82,7 +82,9 @@ def test_visual_index_does_not_require_asr_or_analysis(config, video_file):
     builder = IndexBuilder(config, embedder)
     version = builder.build(mode="visual", source_id=source, activate=True)
     assert not check_index(pipeline.store, version)
-    assert len(VectorIndex(config.data_dir, version).ids()) == 5
+    # visual 默认索引 moment 与 shot：5 个片段 + 2 个短镜头 + 长镜头 3 个窗口 = 10 条表示，
+    # 但相同时间区间的向量只请求一次，嵌入调用仍是 5 次。
+    assert len(VectorIndex(config.data_dir, version).ids()) == 10
     assert embedder.calls == 5
     assert builder.build(mode="visual", source_id=source) == version
     assert embedder.calls == 5
@@ -96,10 +98,12 @@ def test_visual_index_does_not_require_asr_or_analysis(config, video_file):
     assert {m["route"] for m in result["results"][0]["matches"]} == {"video"}
     response = TestClient(create_app(config, embedder)).post("/api/search/text", json={"text": "蓝色"})
     assert response.status_code == 200 and response.json()["results"][0]["start"] == pytest.approx(1)
+    # 新版索引按已发布快照增量合并：活动索引已覆盖全部镜头，只重建 shot 不产生新版本，也不丢弃 moment。
     shots_version = builder.build(mode="visual", source_id=source, kinds=("shot",))
-    assert shots_version != version
+    assert shots_version == version
     assert not check_index(pipeline.store, shots_version)
     assert pipeline.store.active_index()["id"] == version
+    assert {s["kind"] for s in pipeline.store.snapshots(version)} == {"moment", "shot"}
     with pytest.raises(ValueError, match="不生成语义场景"):
         builder.build(mode="visual", kinds=("scene",))
 

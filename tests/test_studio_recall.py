@@ -511,8 +511,15 @@ def test_person_recall_filters_by_published_evidence(prepared):
     evidence_shot = shots[-1]["id"]  # 绿色镜头：与查询“红色”文本不相干
     catalogue = Persons(store)
     actor = catalogue.save(Entity(kind="actor", name="演员甲"))
+    role = catalogue.save(
+        Entity(kind="role", name="角色甲", work_ids=[catalogue.work_for(source_id)], actor_ids=[actor["id"]])
+    )
     catalogue.shot_review(
-        ShotReview(source_id=source_id, shot_id=evidence_shot, selections=[{"actor_id": actor["id"]}])
+        ShotReview(
+            source_id=source_id,
+            shot_id=evidence_shot,
+            selections=[{"actor_id": actor["id"], "role_id": role["id"]}],
+        )
     )
     catalogue.publish()
 
@@ -584,7 +591,14 @@ def test_workspace_recall_pins_active_person_release_and_reuses_after_rollback(p
     shot = store.segments(source, "shot")[0]["id"]
     catalogue = Persons(store)
     actor = catalogue.save(Entity(kind="actor", name="演员甲"))
-    catalogue.shot_review(ShotReview(source_id=source, shot_id=shot, selections=[{"actor_id": actor["id"]}]))
+    role = catalogue.save(
+        Entity(kind="role", name="角色甲", work_ids=[catalogue.work_for(source)], actor_ids=[actor["id"]])
+    )
+    catalogue.shot_review(
+        ShotReview(
+            source_id=source, shot_id=shot, selections=[{"actor_id": actor["id"], "role_id": role["id"]}]
+        )
+    )
     first = catalogue.publish()
     shots = shot_list(w, p)
     shots[0].query = "演员甲"

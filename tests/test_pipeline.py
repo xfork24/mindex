@@ -386,7 +386,8 @@ def test_pinned_preview_index_keeps_published_library(processed, config):
     pipeline, embedder, _, _, original = processed
     changed = config.model_copy(deep=True)
     changed.embedding.quantization = "nf4"
-    published = IndexBuilder(changed, FixtureEmbedder(changed)).build(mode="visual", activate=True)
+    # 新模型空间不能沿用旧空间保留的渠道向量，必须所有渠道一起重新嵌入后发布。
+    published = IndexBuilder(changed, FixtureEmbedder(changed)).build(mode="auto", activate=True)
     client = TestClient(create_app(config, embedder, index_id=original))
     result = client.post("/api/search/text", json={"text": "蓝色", "granularity": "shot"})
     assert result.status_code == 200 and result.json()["index_id"] == original

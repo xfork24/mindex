@@ -11,7 +11,7 @@ from typing import ClassVar
 
 import numpy as np
 import uvicorn
-from conftest import FixtureEmbedder
+from conftest import FixtureEmbedder, FixtureStoryboarder
 from fastapi.testclient import TestClient
 from PIL import Image
 
@@ -104,7 +104,7 @@ def test_subtitle_person_task_publish_strict_mentions_and_studio_media(
             source = pipeline.prepare(source_file)
             embedder = FixtureEmbedder(config)
             IndexBuilder(config, embedder).build(activate=True, kinds=("shot",))
-            with TestClient(create_app(config, embedder)) as client:
+            with TestClient(create_app(config, embedder, storyboarder=FixtureStoryboarder(config))) as client:
                 dialogue = client.post(f"/api/admin/sources/{source}/dialogue", json={"publish": True})
                 assert dialogue.status_code == 202
 
@@ -122,16 +122,36 @@ def test_subtitle_person_task_publish_strict_mentions_and_studio_media(
 
                 task = complete(f"/api/admin/dialogue-tasks/{dialogue.json()['id']}")
                 assert task["result"]["sources"][0]["source"] == "subtitle"
+                # 对白发布同样是独立的后台任务，需等待其完成才能按提及检索。
+                for publish_id in task["publication"]["task_ids"]:
+                    published = complete(f"/api/admin/source-tasks/{publish_id}")
+                    assert published["result"]["status"] == "complete", published
+                # 网页的对白发布只更新 moment；镜头粒度的对白用命令行显式建库：
+                # mindex index --kind shot --channel dialogue
+                IndexBuilder(config, embedder).build(
+                    activate=True, source_id=source, kinds=("shot",), channels=["dialogue"]
+                )
                 actor_response = client.post(
                     "/api/persons/entities", json={"kind": "actor", "name": "验收演员甲"}
                 )
                 assert actor_response.status_code == 201
                 actor = actor_response.json()["id"]
+                # 出镜证据必须绑定该素材作品中的角色，参考图也要带角色。
+                from mindex.persons.persons import Persons
+                from mindex.shared.storage import Store
+
+                work = Persons(Store(config.data_dir)).work_for(source)
+                role_response = client.post(
+                    "/api/persons/entities",
+                    json={"kind": "role", "name": "验收角色甲", "work_ids": [work], "actor_ids": [actor]},
+                )
+                assert role_response.status_code == 201, role_response.text
+                role = role_response.json()["id"]
                 buffer = io.BytesIO()
                 Image.new("RGB", (100, 100), "red").save(buffer, format="PNG")
                 reference = client.post(
                     "/api/persons/references",
-                    data={"actor_id": actor},
+                    data={"actor_id": actor, "role_id": role},
                     files={"file": ("red.png", buffer.getvalue())},
                 )
                 assert reference.status_code == 201, reference.text
@@ -139,6 +159,11 @@ def test_subtitle_person_task_publish_strict_mentions_and_studio_media(
                 assert started.status_code == 202, started.text
                 task = complete(f"/api/persons/tasks/{started.json()['id']}")
                 assert task["result"]["accepted"] > 0 and task["result"]["candidates"] > 0
+                # 发布是独立的后台任务：等待其完成后，已发布证据才可检索。
+                assert task["publication"]["status"] == "queued"
+                for publish_id in task["publication"]["task_ids"]:
+                    published = complete(f"/api/admin/source-tasks/{publish_id}")
+                    assert published["result"]["status"] == "complete", published
                 strict = client.post(
                     "/api/search/text", json={"text": "验收演员甲", "granularity": "shot"}
                 ).json()

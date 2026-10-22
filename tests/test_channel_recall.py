@@ -371,7 +371,9 @@ def test_default_upgrade_all_granularities_without_media_cache(config, video_fil
     new = publish_work(config, sid, 'analysis', embedder, scope='extra')['index_id']
     snapshots = pipeline.store.snapshots(new)
     assert {s['kind'] for s in snapshots} == {'moment', 'shot', 'scene'}
-    assert any('dialogue' in s['indexed_views'] for s in snapshots if s['kind'] == 'shot')
+    # 每个工作只发布自己的渠道：分析发布不会带入对白，对白需单独发布。
+    assert any('analysis' in s['indexed_views'] for s in snapshots if s['kind'] == 'shot')
+    assert not any('dialogue' in s['indexed_views'] for s in snapshots if s['kind'] == 'shot')
     assert pipeline.store.one('SELECT status FROM index_versions WHERE id=?', (old,))['status'] == 'ready'
     after = {p.relative_to(config.data_dir) for p in config.data_dir.rglob('*')
              if p.is_file() and (p.suffix in {'.mp4', '.jpg', '.png'} or 'cache' in p.parts)}
@@ -380,6 +382,8 @@ def test_default_upgrade_all_granularities_without_media_cache(config, video_fil
     calls = embedder.calls
     assert publish_work(config, sid, 'analysis', embedder, scope='extra')['index_id'] == new
     assert embedder.calls == calls
+    dialogue = publish_work(config, sid, 'dialogue', embedder, scope='extra')['index_id']
+    assert any('dialogue' in s['indexed_views'] for s in pipeline.store.snapshots(dialogue) if s['kind'] == 'shot')
 
 
 def test_skipped_null_annotation_remains_searchable_and_filters_safely(config, video_file):

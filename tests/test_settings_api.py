@@ -270,7 +270,10 @@ def test_hot_switch_reaches_search_engine(config, monkeypatch):
 
 
 def test_studio_job_snapshots_active_generator(config):
-    client = client_for(config)
+    # 创建任务会生成标题；注入确定性替身，避免测试访问线上 deepseek 服务。
+    from conftest import FixtureStoryboarder
+
+    client = TestClient(create_app(config, storyboarder=FixtureStoryboarder(config)))
     profile = client.post(
         "/api/settings/profiles",
         json={

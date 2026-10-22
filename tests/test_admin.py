@@ -144,7 +144,8 @@ def test_live_curation_filters_text_video_without_mutating_index(library, config
     original_spec = pipeline.store.active_index()["spec"]
     original_ids = VectorIndex(config.data_dir, version).ids()
     shots = pipeline.store.segments(source, "shot")
-    red = next(s for s in original_snapshots if s["start"] == 0)
+    # 文字查询默认检索 moment；快照顺序由 ID 哈希决定，必须显式限定粒度。
+    red = next(s for s in original_snapshots if s["start"] == 0 and s["kind"] == "moment")
     manager = Library(pipeline.store)
     manager.patch("source", source, CurationPatch(display_name="新素材名"))
     manager.patch(

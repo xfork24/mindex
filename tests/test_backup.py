@@ -504,11 +504,17 @@ def publish_person(root, evidence_id):
     store = store_at(root)
     source = store.sources()[0]
     segment = store.segments(source['id'])[0]
+    persons = Persons(store)
+    # 发布只接受角色属于该素材作品、且与演员配对的出镜证据。
     store.execute('INSERT INTO person_entities VALUES(?,?,?)', ('actor', 'actor', dumps({'name': '演员'})))
-    store.execute('INSERT INTO person_evidence(id,source_id,shot_id,actor_id,start,end,status,data) '
-                  'VALUES(?,?,?,?,?,?,?,?)',
-                  (evidence_id, source['id'], segment['id'], 'actor', 0, 1, 'accepted', '{}'))
-    Persons(store).publish()
+    role_id = f'role-{evidence_id}'  # 作品不同则角色内容不同，同 ID 会被合并检查拒绝
+    store.execute('INSERT INTO person_entities VALUES(?,?,?)',
+                  (role_id, 'role', dumps({'name': '角色', 'work_ids': [persons.work_for(source['id'])],
+                                          'actor_ids': ['actor']})))
+    store.execute('INSERT INTO person_evidence(id,source_id,shot_id,actor_id,role_id,start,end,status,data) '
+                  'VALUES(?,?,?,?,?,?,?,?,?)',
+                  (evidence_id, source['id'], segment['id'], 'actor', role_id, 0, 1, 'accepted', '{}'))
+    persons.publish()
     return store, source, segment
 
 

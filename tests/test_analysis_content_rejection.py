@@ -80,9 +80,14 @@ def test_task_continues_after_rejection_and_publishes_without_rejected_text(conf
 
     monkeypatch.setattr("mindex.processing.pipeline.make_analyzer", lambda _: Analyzer(embedder))
     manager = SourceTasks(RuntimeConfig(config, pipeline.store), pipeline.store, embedder)
-    task = finished(manager, manager.start(sid, "analysis", WorkOptions()))
-    assert task["status"] == "complete" and task["publication"]["status"] == "complete", task
-    assert task["progress"]["processing_progress"]["skipped"] == 2  # shot + same-boundary moment
+    task = finished(manager, manager.start(sid, "analysis", WorkOptions(publish=True)))
+    # 处理与发布是独立任务：处理完成后排队发布，发布任务各自完成。
+    assert task["status"] == "complete" and task["publication"]["status"] == "queued", task
+    assert task["publication"]["task_ids"]
+    for task_id in task["publication"]["task_ids"]:
+        published = finished(manager, {"id": task_id})
+        assert published["status"] == "complete" and published["result"]["status"] == "complete", published
+    assert task["progress"]["skipped"] == 2  # shot + same-boundary moment
     assert len(groups) == 2  # no scene joins across the skipped interval
     profile = pipeline.annotation_profile(sid)
     saved = pipeline.store.json_value("annotations", "segment_id", rejected["id"], profile)
