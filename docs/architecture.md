@@ -91,7 +91,8 @@ wheel 安装后读取随包的 `mindex/web/`。Setuptools 通过包目录映射�
 | `settings/settings_api.py` | `/api/settings/*` 路由：档案 CRUD/激活/测试连接、业务调参、音色与克隆 |
 | `settings/voice_clone.py` | 厂商声音克隆客户端：MiniMax 上传克隆、阿里 DashScope URL 复刻 |
 | `studio/studio.py` | 创作任务状态机与 job.json 持久化（五步：split/recall/tts/select/render） |
-| `studio/studio_api.py` | `/api/studio/*` 路由：任务创建、轮询、后台线程执行、产物下载 |
+| `studio/studio_api.py` | `/api/studio/*` 路由：任务创建、轮询、后台线程执行 |
+| `studio/studio_models.py` / `studio/studio_files.py` | 创作 API 的请求体模型与召回引用校验；产物下载、分镜预览、打包与任务删除路由 |
 | `studio/studio_steps.py` / `studio/studio_select.py` / `studio/studio_render.py` | 创作各步骤编排、选片纯算法、ffmpeg 渲染合成 |
 | `studio/studio_artifacts.py` | 创作检查点/产物/诊断记录（attempt 不可变留档） |
 | `models/adapters.py` | 模型适配层公共部分：`ModelError` 等错误类型、带重试的 `request`、七个 Protocol 与 `make_*` 工厂（见下）；工厂调用时才导入后端 |
@@ -127,7 +128,7 @@ wheel 安装后读取随包的 `mindex/web/`。Setuptools 通过包目录映射�
 | `shared/web_auth.py` | 可选访问令牌认证（`MINDEX_WEB_TOKEN`）：`/login`、`/logout`、Cookie 与 Bearer；未设置时不安装 |
 | `shared/i18n.py` | 把中文消息映射为稳定 `message_key`，供前端展示译文 |
 | `maintenance/clean.py` / `clean_index.py` / `clean_studio.py` / `purge.py` | 磁盘清理（分级规则）、索引与 Studio 清理规则、素材物理删除（保留源视频） |
-| `maintenance/backup.py` / `backup_cli.py` / `backup_db.py` / `backup_vectors.py` | 离线备份与迁移：编排、CLI 注册、SQLite 与向量处理 |
+| `maintenance/backup.py` / `backup_files.py` / `backup_cli.py` / `backup_db.py` / `backup_vectors.py` | 离线备份与迁移：导出导入编排、文件与校验辅助、CLI 注册、SQLite 与向量处理 |
 | `maintenance/clips.py` | 旧切片迁移、物化、归档校验与边界修复 |
 | `diagnostics/label_review.py` | 离线相关性复核页；确认仍由人工完成 |
 | `frontend/src/` | 原生 HTML/JS/CSS，按五个页面划分模块；公共组件位于 `frontend/src/shared/` |

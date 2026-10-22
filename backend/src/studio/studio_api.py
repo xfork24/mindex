@@ -8,25 +8,21 @@ from __future__ import annotations
 
 import copy
 import json
-import mimetypes
 import tempfile
 import threading
-import zipfile
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated
 from urllib.parse import quote
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse
 from filelock import FileLock, Timeout
-from pydantic import Field, model_validator
 from starlette.concurrency import run_in_threadpool
 
 from mindex.admin.curation import EntityNotFound, Library
 from mindex.models.adapters import MultimodalEmbedder, Speaker, Storyboarder, make_storyboarder
 from mindex.settings.runtime_settings import RuntimeConfig
-from mindex.shared.config import Config, StrictModel, fingerprint
+from mindex.shared.config import Config, fingerprint
 from mindex.shared.images import image_png
 from mindex.shared.shot_media import ShotMedia
 from mindex.shared.storage import Store
@@ -34,169 +30,25 @@ from mindex.shared.uploads import save_upload
 from mindex.studio import studio, studio_steps
 from mindex.studio import studio_workspace as workspace
 from mindex.studio.studio_artifacts import digest, safe_path
+from mindex.studio.studio_files import file_routes
 from mindex.studio.studio_logs import ExecutionLog, read_events
-
-
-class CreateJobBody(StrictModel):
-    text: str
-    title: str | None = Field(default=None, max_length=60)
-    options: dict | None = None
-
-
-class ShotBody(StrictModel):
-    id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$")
-    text: str = Field(min_length=1, max_length=200)
-    query: str = Field(min_length=1, max_length=400)
-    estimated_seconds: float = Field(gt=0, le=60)
-    recall: studio.ShotRecall | None = None  # 与 Shot 严格同步（StrictModel extra=forbid）
-    granularity: studio.Granularity | None = None
-    recall_limit: int | None = Field(default=None, ge=1, le=50)
-
-
-def validate_recall_references(config, store: Store, job_id, shots):
-    """PATCH 级校验：人物必须已登记且非作品；查询文件必须已存在于 inputs/（执行前另有 digest 复验）；素材不得越出任务范围。"""
-    from mindex.persons.persons import Persons
-
-    catalogue = Persons(store)
-    inputs = studio.job_dir(config, job_id) / "inputs"
-    scope = studio.material_scope(studio.load_job(config, job_id))
-    for shot in shots:
-        recall = shot.recall
-        if not recall:
-            continue
-        for identifier in recall.person_ids:
-            entity = catalogue.entity(identifier)
-            if entity["kind"] == "work":
-                raise studio.StudioError("人物召回不能选择作品，请选择演员或角色")
-        outside = recall.filters.selected_sources() - scope if scope else set()
-        if outside:
-            raise studio.StudioError(
-                f"素材超出本任务允许的素材范围：{'、'.join(sorted(outside)[:3])}"
-            )
-        if recall.mode in {"image", "video"} and not any(
-            path.is_file() and path.suffix != ".partial" for path in inputs.glob(recall.media_id + ".*")
-        ):
-            raise studio.StudioError("查询文件缺失，请先上传查询图片或视频")
-
-
-class StoryboardBody(StrictModel):
-    title: str | None = Field(default=None, max_length=60)
-    shots: list[ShotBody] = Field(min_length=1)
-
-
-class ManualVideoBody(StrictModel):
-    segment_id: str | None = None
-    source_id: str | None = None
-    start: float | None = Field(default=None, ge=0)
-    end: float | None = Field(default=None, gt=0)
-
-    @model_validator(mode="after")
-    def one_choice(self):
-        explicit = any(value is not None for value in (self.source_id, self.start, self.end))
-        if self.segment_id and explicit:
-            raise ValueError("候选片段和人工区间不能同时提供")
-        if not self.segment_id and not all(
-            value is not None for value in (self.source_id, self.start, self.end)
-        ):
-            raise ValueError("请选择候选片段，或提供完整人工区间")
-        return self
-
-
-class RunStepBody(StrictModel):
-    mode: Literal["resume", "force"] = "resume"
-    shot_ids: list[str] | None = Field(default=None, min_length=1)
-
-    @model_validator(mode="after")
-    def unique_shots(self):
-        if self.shot_ids is not None and (
-            self.mode != "force" or len(self.shot_ids) != len(set(self.shot_ids))
-        ):
-            raise ValueError("指定分镜必须使用 force 模式，且分镜不能重复")
-        return self
-
-
-class EventBody(StrictModel):
-    shot_id: str
-    video: ManualVideoBody
-
-
-class TimelineBody(StrictModel):
-    events: list[EventBody] = Field(min_length=1)
-    audio_mode: Literal["tts_only", "ducking"] | None = None
-    burn: bool | None = None
-
-
-class TitleBody(StrictModel):
-    title: str = Field(min_length=1, max_length=60)
-
-
-class PlanBody(StrictModel):
-    name: str = Field(min_length=1, max_length=60)
-    copy_from: str | None = None
-    from_final: str | None = None
-
-
-class PlanPatchBody(StrictModel):
-    revision: str
-    name: str | None = Field(default=None, min_length=1, max_length=60)
-    options: workspace.PlanOptions | None = None
-    shots: list[ShotBody] | None = Field(default=None, min_length=1)
-
-
-class VersionChoiceBody(StrictModel):
-    revision: str
-    version_id: str
-    stage: Literal["content", "recall", "tts", "select", "render", "compose"]
-    shot_id: str | None = None
-
-
-class BuildBody(StrictModel):
-    token: str
-    force: bool = False
-
-
-class NodeBody(StrictModel):
-    revision: str
-    inputs: dict[str, str | None]
-    stage: Literal["split", "recall", "tts", "select", "render"]
-    shot_id: str | None = None
-    force: bool = False
-
-
-class ColumnBody(StrictModel):
-    force: bool = True
-    revision: str
-    stage: Literal["split", "recall", "tts", "select", "render"]
-    inputs_by_shot: dict[str, dict[str, str | None]]
-
-
-class RangeBody(StrictModel):
-    revision: str
-    shot_id: str
-    source_id: str
-    start: float = Field(ge=0)
-    end: float = Field(gt=0)
-    segment_ids: list[str] | None = Field(default=None, min_length=1)
-    preview_token: str | None = None
-
-
-class AnchorBody(StrictModel):
-    revision: str
-    shot_id: str
-    mode: Literal["auto", "manual"]
-    recall_version: str | None = None
-    candidate_id: str | None = None
-
-
-class WindowBody(StrictModel):
-    revision: str
-    shot_id: str
-    context_token: str
-    anchor_ref: dict[str, str]
-    tts_version: str
-    start: float = Field(ge=0, allow_inf_nan=False)
-    preview_token: str | None = None
-    render_preview: bool = True
+from mindex.studio.studio_models import (
+    AnchorBody,
+    BuildBody,
+    ColumnBody,
+    CreateJobBody,
+    NodeBody,
+    PlanBody,
+    PlanPatchBody,
+    RangeBody,
+    RunStepBody,
+    StoryboardBody,
+    TimelineBody,
+    TitleBody,
+    VersionChoiceBody,
+    WindowBody,
+    validate_recall_references,
+)
 
 
 def studio_router(
@@ -1028,146 +880,7 @@ def studio_router(
                 raise HTTPException(422, str(exc)) from exc
         return job_detail(job_id)
 
-    def artifact_response(job_id: str, relative: str, download: bool):
-        directory = studio.job_dir(base, job_id)
-        target = (directory / relative).resolve()
-        if not target.is_relative_to(directory.resolve()) or not target.is_file():
-            raise HTTPException(404, "产物文件不存在")
-        media_type = (
-            "text/vtt"
-            if target.suffix == ".vtt"
-            else mimetypes.guess_type(target.name)[0] or "application/octet-stream"
-        )
-        return FileResponse(
-            target, media_type=media_type, filename=f"{job_id}_{target.name}" if download else None
-        )
 
-    def artifact_items(job_id):
-        root = studio.job_dir(base, job_id)
-        state = studio.load_job(base, job_id)
-        try:
-            ids = {s.id for s in studio.load_storyboard(base, job_id).shots}
-        except EntityNotFound:
-            ids = set()
-        items = []
-        for path in sorted(root.rglob("*")):
-            relative = path.relative_to(root).as_posix()
-            if (
-                not path.is_file()
-                or ".partial" in path.name
-                or path.suffix == ".lock"
-                or relative.startswith("exports/")
-            ):
-                continue
-            safe_path(root, relative)
-            parts = relative.split("/")
-            attempt = parts[1].removesuffix(".json") if len(parts) > 1 and parts[0] == "attempts" else None
-            active = attempt is None
-            if parts[0] in {"audio", "candidates"}:
-                step = "tts" if parts[0] == "audio" else "recall"
-                active = path.stem in ids and state["steps"][step]["status"] == "complete"
-            elif parts[0] == "render":
-                active = state["steps"]["render"]["status"] == "complete" and bool(
-                    state.get("published_render")
-                )
-            elif relative == "timeline.json":
-                active = state["steps"]["select"]["status"] == "complete"
-            items.append(
-                {
-                    "path": relative,
-                    "bytes": path.stat().st_size,
-                    "attempt": attempt,
-                    "step": attempt.split("-")[0] if attempt else None,
-                    "current": active,
-                    "url": f"/api/studio/jobs/{job_id}/artifacts/{quote(relative, safe='/')}",
-                }
-            )
-        return items
-
-    @router.api_route("/jobs/{job_id}/preview/{shot_id}", methods=["GET", "HEAD"])
-    def preview(job_id: str, shot_id: str):
-        from mindex.shared.media import probe
-        from mindex.studio.studio_render import cut_shot
-
-        state = studio.load_job(base, job_id)
-        if state["steps"]["select"]["status"] != "complete":
-            raise HTTPException(422, "请先完成选片对齐")
-        timeline = studio.load_timeline(base, job_id)
-        event = next((e for e in timeline.events if e.shot_id == shot_id), None)
-        if event is None:
-            raise HTTPException(404, "找不到分镜")
-        if not studio_steps.interval_visible(
-            store,
-            event.video.source_id,
-            event.video.start,
-            event.video.end,
-            overlays=Library(store).overlays(),
-        ):
-            raise HTTPException(422, "所选区间包含隐藏素材，请重新选片")
-        row = store.one("SELECT path FROM sources WHERE id=?", (event.video.source_id,))
-        if row is None:
-            raise HTTPException(404, "原片不存在")
-        source = ShotMedia(store).materialize(event.video.source_id, event.video.start, event.video.end)
-        local_event = event.model_copy(deep=True)
-        local_event.video.end -= local_event.video.start
-        local_event.video.start = 0
-        key = fingerprint(
-            {
-                "event": event.model_dump(),
-                "render": base.studio.render.model_dump(),
-                "source_mtime": source.stat().st_mtime_ns,
-            }
-        )
-        path = safe_path(studio.job_dir(base, job_id), f"previews/{key}.mp4")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            with FileLock(str(path) + ".lock", timeout=0):
-                try:
-                    probe(path)
-                except ValueError:
-                    cut_shot(source, local_event, base.studio.render, path)
-        except Timeout:
-            raise HTTPException(409, "该分镜预览正在生成，请稍候重试") from None
-        return FileResponse(path, media_type="video/mp4")
-
-    @router.get("/jobs/{job_id}/artifacts")
-    def artifact_list(job_id: str):
-        return {"items": artifact_items(job_id)}
-
-    @router.get("/jobs/{job_id}/archive")
-    def archive(job_id: str):
-        with mutation_lock():
-            root = studio.job_dir(base, job_id)
-            items = artifact_items(job_id)
-            version = fingerprint(
-                [{**item, "mtime_ns": safe_path(root, item["path"]).stat().st_mtime_ns} for item in items]
-            )
-            path = safe_path(root, f"exports/{version}.zip")
-            if path.is_file():
-                return FileResponse(path, media_type="application/zip", filename=f"{job_id}.zip")
-            path.parent.mkdir(parents=True, exist_ok=True)
-            partial = path.with_suffix(".partial")
-            try:
-                with zipfile.ZipFile(partial, "w", compression=zipfile.ZIP_STORED) as bundle:
-                    for item in items:
-                        bundle.write(safe_path(root, item["path"]), item["path"])
-                partial.replace(path)
-            finally:
-                partial.unlink(missing_ok=True)
-        return FileResponse(path, media_type="application/zip", filename=f"{job_id}.zip")
-
-    @router.get("/jobs/{job_id}/artifacts/{relative:path}")
-    def artifact(job_id: str, relative: str, download: bool = False):
-        return artifact_response(job_id, relative, download)
-
-    @router.api_route("/jobs/{job_id}/audio/{shot_id}", methods=["GET", "HEAD"])
-    def audio(job_id: str, shot_id: str):
-        return artifact_response(job_id, f"audio/{shot_id}.wav", False)
-
-    @router.delete("/jobs/{job_id}")
-    def remove(job_id: str):
-        with mutation_lock():
-            studio.delete_job(base, job_id)
-        return {"deleted": job_id}
+    file_routes(router, base, store, mutation_lock)
 
     return router
