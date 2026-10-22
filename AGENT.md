@@ -30,16 +30,17 @@
 
 ## 开发与验证
 
-要求 Python 3.11–3.13、uv、ffmpeg/ffprobe。常用命令：
+要求 Python 3.11–3.13、uv、ffmpeg/ffprobe。仓库没有 CI，提交前在本地运行下面的统一检查：
 
 ```bash
 uv sync --extra dev
+uv run ruff check backend/src tests                 # 代码规范（规则集见 pyproject.toml）
+python scripts/check-doc-links.py                   # Markdown 相对链接与锚点
+python scripts/build-messages.py --check            # messages.js 与 messages.json 一致
+for f in frontend/src/*/*.js; do node --check "$f"; done   # 前端 JS 语法
 uv run mindex --help
-uv run pytest tests/test_pipeline.py -q
-uv run ruff check backend/src tests
-node --check frontend/src/search/app.js
-# 按改动范围需要时执行完整回归
-uv run pytest -q
+uv run pytest tests/test_pipeline.py -q             # 按改动范围选择测试
+uv run pytest -q                                    # 完整回归，约 20 分钟
 ```
 
 人物相关主环境依赖使用 `uv sync --extra dev --extra person`；推理服务安装与启动见 CLAUDE.md。`--config` 放在子命令前，也可使用 `MINDEX_CONFIG`。配置拒绝未知键。
