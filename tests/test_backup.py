@@ -18,18 +18,20 @@ from typer.testing import CliRunner
 from mindex.admin.curation import CurationPatch
 from mindex.cli import app
 from mindex.maintenance.backup import (
-    _saved_secrets,
     export_backup,
-    finder_metadata,
     import_backup,
     inspect_bundle,
     journal_path,
     recover_import,
+)
+from mindex.maintenance.backup_db import merge_database, store_at
+from mindex.maintenance.backup_files import (
+    _saved_secrets,
+    finder_metadata,
     source_list,
     temporary_directory,
     vector_worker,
 )
-from mindex.maintenance.backup_db import merge_database, store_at
 from mindex.models.adapters import ModelError
 from mindex.shared.config import Config, fingerprint
 from mindex.shared.processing_lock import SharedFileLock
@@ -940,7 +942,7 @@ def test_invalid_apple_double_is_not_ignored(tmp_path, content):
 
 
 def test_job_and_owner_scans_skip_binary_apple_double(library):
-    from mindex.maintenance.backup import file_owners, job_selection, source_list
+    from mindex.maintenance.backup_files import file_owners, job_selection, source_list
 
     root, sources = library[0].data_dir, library[1]
     job = root / 'studio' / 'fixture-job'

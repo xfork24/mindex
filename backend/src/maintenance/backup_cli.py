@@ -133,7 +133,7 @@ def list_sources(
     \b
       mindex backup list --json
     """
-    from mindex.maintenance.backup import source_list
+    from mindex.maintenance.backup_files import source_list
 
     call(structured, lambda: {"sources": source_list(ctx.obj.data_dir)})
 
@@ -203,7 +203,8 @@ def export(
     \b
       mindex backup export /备份/mindex --all --dry-run
     """
-    from mindex.maintenance.backup import export_backup, source_list
+    from mindex.maintenance.backup import export_backup
+    from mindex.maintenance.backup_files import source_list
 
     def run():
         picked = choose(source_list(ctx.obj.data_dir), all_sources, sources)
