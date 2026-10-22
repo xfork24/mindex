@@ -87,6 +87,8 @@ function voiceLabelOf(catalog, voiceId) {
 }
 
 function notify(text = '', error = false) {
+  if (globalThis.MindexFeedback) return globalThis.MindexFeedback.show('notice', error ? MindexI18n.system(text) : text, error ? 'error' : 'info');
+
   MindexI18n.setText($('notice'), error ? MindexI18n.system(text) : text);
   $('notice').className = `notice ${error ? 'error' : 'info'}`;
 }

@@ -125,18 +125,21 @@ function link(text, url, download = false) {
   return n;
 }
 function notice(text, error = false) {
+  if (globalThis.MindexFeedback) return globalThis.MindexFeedback.show('notice', shortIds(error ? MindexI18n.system(text) : text), error ? 'error' : 'info');
+
   MindexI18n.setText($("notice"), shortIds(error ? MindexI18n.system(text) : text));
   $("notice").dataset.type = error ? "error" : "info";
 }
 function fail(error) {
-  notice(error.message, true);
   if ($("work-dialog").open) {
     $("dialog-error")?.remove();
     const message = el("p", shortIds(error.message), "warn-text");
     message.id = "dialog-error";
     message.setAttribute("role", "alert");
     $("dialog-content").prepend(message);
+    return;
   }
+  notice(error.message, true);
 }
 async function api(url, method = "GET", body) {
   const r = await fetch(url, {

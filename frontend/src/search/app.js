@@ -16,7 +16,9 @@ function element(tag, text, className) {
   if (className) node.className = className;
   return node;
 }
-function notice(text = '', type = '') {MindexI18n.setText($('notice'), type === 'error' ? MindexI18n.system(text) : text);$('notice').className = `notice ${type}`;}
+function notice(text = '', type = '') {
+  if (globalThis.MindexFeedback) return globalThis.MindexFeedback.show('notice', type === 'error' ? MindexI18n.system(text) : text, type);
+  MindexI18n.setText($('notice'), type === 'error' ? MindexI18n.system(text) : text);$('notice').className = `notice ${type}`;}
 function clock(seconds) {
   const minutes = Math.floor(seconds / 60);
   return `${String(minutes).padStart(2, '0')}:${(seconds % 60).toFixed(1).padStart(4, '0')}`;

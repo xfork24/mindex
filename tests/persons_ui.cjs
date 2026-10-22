@@ -489,6 +489,7 @@ function find(root, predicate) {
   assert.equal(get('review-choices').querySelectorAll('input').length, 0, '跨作品批量不显示不适用于所有分镜的角色');
 
   // 发布操作在原地显示进行中、成功和错误，且结束后恢复按钮。
+  const topNoticeBeforeRelease = get('notice').textContent;
   const releaseButton = get('publish');
   let completeRelease;
   const pendingRelease = sandbox.releaseAction(releaseButton, () => new Promise(resolve => {completeRelease = resolve;}), '发布成功');
@@ -500,6 +501,7 @@ function find(root, predicate) {
   await sandbox.releaseAction(releaseButton, async () => {throw Error('当前组合不能删除');}, '不应成功');
   assert.equal(get('release-notice').textContent, '当前组合不能删除');
   assert.equal(get('release-notice').className, 'notice error');
+  assert.equal(get('notice').textContent, topNoticeBeforeRelease, 'release feedback must not duplicate into the page notice');
   assert.equal(releaseButton.disabled, false);
 
   console.log('persons UI regression checks passed');

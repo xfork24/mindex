@@ -18,6 +18,11 @@ def test_page_bundle_assets(config, page):
         assert "text/html" in response.headers["content-type"]
         assets = re.findall(r'(?:src|href)="(/assets/[^\"]+)"', response.text)
         assert assets
+        feedback = '/assets/shared/feedback.js?v=20261022-local-feedback'
+        assert feedback in assets
+        assert response.text.index(feedback) < response.text.index('/assets/' + (
+            'search/app.js' if page in {'/', '/index.html'} else page.strip('/').split('.')[0] + '/' + page.strip('/').split('.')[0] + '.js'
+        ))
         for asset in assets:
             resource = client.get(asset)
             assert resource.status_code == 200, asset

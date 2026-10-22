@@ -10,7 +10,9 @@ let workRequest = 0;
 function node(tag, text, className) {
   const n = document.createElement(tag);if (text !== undefined) MindexI18n.setText(n, text);if (className) n.className = className;return n;
 }
-function notify(text = '', error = false) {MindexI18n.setText($('admin-notice'), error ? MindexI18n.system(text) : text);$('admin-notice').className = `notice ${error ? 'error' : 'info'}`;}
+function notify(text = '', error = false) {
+  if (globalThis.MindexFeedback) return globalThis.MindexFeedback.show('admin-notice', error ? MindexI18n.system(text) : text, error ? 'error' : 'info');
+  MindexI18n.setText($('admin-notice'), error ? MindexI18n.system(text) : text);$('admin-notice').className = `notice ${error ? 'error' : 'info'}`;}
 function time(value) {
   const hours = Math.floor(value / 3600),minutes = Math.floor(value % 3600 / 60),seconds = (value % 60).toFixed(2).padStart(5, '0');
   return `${hours ? `${hours}:` : ''}${String(minutes).padStart(2, '0')}:${seconds}`;

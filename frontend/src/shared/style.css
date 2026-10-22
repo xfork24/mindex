@@ -322,3 +322,7 @@ button.language-switch .language-divider::after{content:"";position:absolute;ins
 .search-scope-row select,.search-filter-row input,.search-filter-row select{width:100%;min-width:0}
 @media(max-width:800px){.search-scope-row,.search-filter-row{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:540px){.search-scope-row,.search-filter-row{grid-template-columns:minmax(0,1fr)}}
+
+/* Transient operation feedback stays on one line in its local region. */
+.notice.local-feedback{grid-column:1/-1;min-width:0;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:8px;padding:6px 10px;line-height:1.5}
+.notice.local-feedback[hidden]{display:none}

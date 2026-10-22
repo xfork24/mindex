@@ -2,7 +2,9 @@
 const $ = (id) => document.getElementById(id);
 const state = { entities: [], references: [], sources: [], editing: null, editReference: null, editRole: null, filters: { work: [], actor: [], role: [] }, expanded: new Set(), draft: null, entry: 0, image: null, reviewShots: [], reviewPicked: new Map(), evidenceOffset: 0, evidenceTotal: 0, reviewVersion: 0, evidenceRequest: 0, reviewSelecting: false, linkedEntity: null, linkedOffset: 0, linkedTotal: 0, linkedReviewEntity: null };
 function node(tag, text, cls) {const n = document.createElement(tag);if (text !== undefined) MindexI18n.setText(n, text);if (cls) n.className = cls;return n;}
-function notice(text, error = false) {MindexI18n.setText($('notice'), error ? MindexI18n.system(text) : text);$('notice').className = `notice ${error ? 'error' : 'info'}`;}
+function notice(text, error = false) {
+  if (globalThis.MindexFeedback) return globalThis.MindexFeedback.show('notice', error ? MindexI18n.system(text) : text, error ? 'error' : 'info');
+  MindexI18n.setText($('notice'), error ? MindexI18n.system(text) : text);$('notice').className = `notice ${error ? 'error' : 'info'}`;}
 async function api(url, opts = {}) {const r = await fetch(url, opts);const d = await r.json();if (!r.ok) {const error = Error(MindexI18n.system(d));error.detail = d.detail;error.status = r.status;throw error;}return d;}
 const json = (method, data) => ({ method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
 async function run(fn) {try {await fn();} catch (e) {notice(e.message, true);}}
@@ -110,7 +112,7 @@ function deleteEntityButton(entity) {
         await api('/api/persons/entities/' + entity.id, { method: 'DELETE' });
         await refresh();notice(MindexI18n.msg("ui.5846995a6311", { p0: entity.name }));
       } catch (error) {
-        if (error.detail?.linked_shots) {await openLinkedShots(entity, error.detail.linked_shots);notice(error.message, true);} else
+        if (error.detail?.linked_shots) {await openLinkedShots(entity, error.detail.linked_shots);} else
         throw error;
       } finally {b.disabled = false;}
     });};
@@ -213,8 +215,8 @@ async function releaseAction(control, action, message) {
   control.disabled = true;
   const show = (text, error = false) => {MindexI18n.setText(status, text);status.className = `notice ${error ? 'error' : 'info'}`;};
   show(MindexI18n.msg('ui.person_release_busy'));
-  try {await action();show(message);notice(message);}
-  catch (error) {show(MindexI18n.system(error.message), true);notice(error.message, true);}
+  try {await action();show(message);}
+  catch (error) {show(MindexI18n.system(error.message), true);}
   finally {control.disabled = false;}
 }
 function referenceErrorLabel(error) {
