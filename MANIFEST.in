@@ -1,4 +1,4 @@
-include README.md AGENT.md CLAUDE.md config.example.yaml requirements.txt uv.lock
+include README.md AGENT.md CLAUDE.md config.example.yaml uv.lock
 recursive-include backend/src *.py
 recursive-include frontend/src *.html *.js *.css *.json *.svg
 recursive-include tests *.py *.cjs
