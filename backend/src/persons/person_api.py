@@ -12,7 +12,8 @@ from fastapi.responses import FileResponse
 from filelock import Timeout
 from pydantic import Field, model_validator
 
-from mindex.models.adapters import analysis_options, request
+from mindex.models.adapters import request
+from mindex.models.qwen import analysis_options
 from mindex.persons.person_processing import (
     PersonClient,
     PersonOptions,

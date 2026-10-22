@@ -8,8 +8,10 @@ from fastapi.testclient import TestClient
 
 from mindex.diagnostics.evaluation import metrics
 from mindex.models import adapters
-from mindex.models.adapters import HTTPEmbedder, ModelError, QwenAnalyzer, parse_json
+from mindex.models.adapters import ModelError, parse_json
+from mindex.models.embedders import HTTPEmbedder
 from mindex.models.model_server import create_model_app
+from mindex.models.qwen import QwenAnalyzer
 from mindex.processing.indexing import IndexBuilder, check_index
 from mindex.processing.pipeline import Pipeline
 from mindex.search.search import SearchEngine

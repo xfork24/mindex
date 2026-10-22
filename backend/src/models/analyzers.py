@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from mindex.models.adapters import ModelError, QwenAnalyzer
+from mindex.models.adapters import ModelError
 from mindex.models.llama_cpp import check_after, checked_runtime, manifest
+from mindex.models.qwen import QwenAnalyzer
 
 
 class PinnedQwenAnalyzer(QwenAnalyzer):

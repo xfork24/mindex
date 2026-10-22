@@ -93,7 +93,8 @@ wheel 安装后读取随包的 `mindex/web/`。Setuptools 通过包目录映射�
 | `studio/studio_api.py` | `/api/studio/*` 路由：任务创建、轮询、后台线程执行、产物下载 |
 | `studio/studio_steps.py` / `studio/studio_select.py` / `studio/studio_render.py` | 创作各步骤编排、选片纯算法、ffmpeg 渲染合成 |
 | `studio/studio_artifacts.py` | 创作检查点/产物/诊断记录（attempt 不可变留档） |
-| `models/adapters.py` | 模型适配层：七个 Protocol 与 `make_*` 工厂（见下） |
+| `models/adapters.py` | 模型适配层公共部分：`ModelError` 等错误类型、带重试的 `request`、七个 Protocol 与 `make_*` 工厂（见下）；工厂调用时才导入后端 |
+| `models/embedders.py` / `models/qwen.py` / `models/speech.py` / `models/storyboard.py` / `models/transcribers.py` / `models/detectors.py` | 各角色的后端实现：嵌入、Qwen 分析、TTS、拆分镜（含原文覆盖校验）、转写（含 MiniMax 词级时间戳解析）、分镜检测 |
 | `models/llama_cpp.py` | 对用户已有 llama-server 的原生协议适配（`/v1/embeddings` 的 `input_video`、`input_audio`）；部署清单核验 |
 | `shared/images.py` / `models/image_embedding.py` | 静态图片解码、方向/透明度/像素处理；扩展原生图片嵌入，保持既有文字/视频空间指纹 |
 | `models/model_server.py` | GPU 侧自定义服务（`mindex-model-server`，角色独立 venv）：WeMMEngine / ASREngine / TransNetEngine |
@@ -132,7 +133,7 @@ wheel 安装后读取随包的 `mindex/web/`。Setuptools 通过包目录映射�
 
 ## 模型适配层
 
-七个 `Protocol`（`models/adapters.py`）：`MultimodalEmbedder`、`VisualAnalyzer`、`Transcriber`、`Aligner`、`ShotDetector`、`Speaker`（TTS）、`Storyboarder`（拆分镜 LLM）。替换模型 = 实现协议接入新 backend，不改检索管线。
+七个 `Protocol` 与 `make_*` 工厂在 `models/adapters.py`，后端实现分在同目录的 `embedders`、`qwen`、`speech`、`storyboard`、`transcribers`、`detectors` 模块：`MultimodalEmbedder`、`VisualAnalyzer`、`Transcriber`、`Aligner`、`ShotDetector`、`Speaker`（TTS）、`Storyboarder`（拆分镜 LLM）。替换模型 = 实现协议接入新 backend，不改检索管线。
 
 | 工厂 | backend 值 | 实现 |
 |---|---|---|

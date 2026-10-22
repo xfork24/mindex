@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from filelock import FileLock
 
 from mindex.models import adapters
-from mindex.models.adapters import HTTPShotDetector
+from mindex.models.detectors import HTTPShotDetector
 from mindex.models.model_server import TransNetEngine, create_model_app
 from mindex.shared.media import command, frame_timestamps
 

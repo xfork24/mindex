@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from mindex.models import adapters, deployment
-from mindex.models.adapters import HTTPEmbedder, ModelError
+from mindex.models.adapters import ModelError
 from mindex.models.deployment import (
     PREFIX,
     SUFFIX,
@@ -22,6 +22,7 @@ from mindex.models.deployment import (
     space_contract,
     validate_role,
 )
+from mindex.models.embedders import HTTPEmbedder
 from mindex.shared.config import Config, Service, fingerprint
 from mindex.shared.media import MediaError, atomic_media, content_hash, probe
 

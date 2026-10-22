@@ -320,7 +320,7 @@ def test_analysis_task_recovers_invalid_response_without_losing_checkpoints(conf
     import json
     from types import SimpleNamespace
 
-    from mindex.models import adapters
+    from mindex.models import adapters, qwen
 
     config.analyzer.model = "MiniMax-test"
     config.analyzer.llama_template = False
@@ -341,8 +341,8 @@ def test_analysis_task_recovers_invalid_response_without_losing_checkpoints(conf
         return {"choices": [{"message": {"content": text}}]}
 
     monkeypatch.setattr(adapters, "request", wire)
-    monkeypatch.setattr(adapters, "frame_data", lambda path, count: [(0, "data:image/jpeg;base64," + path.stem)])
-    monkeypatch.setattr(adapters, "time", SimpleNamespace(sleep=delays.append))
+    monkeypatch.setattr(qwen, "frame_data", lambda path, count: [(0, "data:image/jpeg;base64," + path.stem)])
+    monkeypatch.setattr(qwen, "time", SimpleNamespace(sleep=delays.append))
     checkpoint = pipeline.store.segments(sid, "moment")[0]
     pipeline._annotate(checkpoint)
     manager = SourceTasks(RuntimeConfig(config, pipeline.store), pipeline.store)
@@ -362,7 +362,7 @@ def test_scene_grouping_failure_is_reported_after_segments_complete_and_retry_sk
     import json
     from types import SimpleNamespace
 
-    from mindex.models import adapters
+    from mindex.models import adapters, qwen
 
     config.analyzer.response_retries = 1
     config.analyzer.model = "GLM-test"
@@ -388,8 +388,8 @@ def test_scene_grouping_failure_is_reported_after_segments_complete_and_retry_sk
         return {"choices": [{"finish_reason": "stop", "message": {"content": text}}]}
 
     monkeypatch.setattr(adapters, "request", wire)
-    monkeypatch.setattr(adapters, "frame_data", lambda *a: [(0, "data:image/jpeg;base64,TEST")])
-    monkeypatch.setattr(adapters, "time", SimpleNamespace(sleep=lambda _: None))
+    monkeypatch.setattr(qwen, "frame_data", lambda *a: [(0, "data:image/jpeg;base64,TEST")])
+    monkeypatch.setattr(qwen, "time", SimpleNamespace(sleep=lambda _: None))
     manager = SourceTasks(RuntimeConfig(config, pipeline.store), pipeline.store)
     task = finished(manager, manager.start(sid, "analysis", WorkOptions(publish=False)))
     assert task["status"] == "failed"

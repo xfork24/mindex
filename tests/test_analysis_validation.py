@@ -6,8 +6,9 @@ import json
 
 import pytest
 
-from mindex.models import adapters
-from mindex.models.adapters import ModelError, QwenAnalyzer
+from mindex.models import adapters, qwen
+from mindex.models.adapters import ModelError
+from mindex.models.qwen import QwenAnalyzer
 from mindex.processing.pipeline import Pipeline
 
 
@@ -47,9 +48,9 @@ def test_annotation_validation_failure_retries_with_field_feedback(config, monke
         return [(0, "data:image/jpeg;base64,TEST")]
 
     monkeypatch.setattr(adapters, "request", reply)
-    monkeypatch.setattr(adapters, "frame_data", frames)
+    monkeypatch.setattr(qwen, "frame_data", frames)
     monkeypatch.setattr(adapters.time, "sleep", delays.append)
-    monkeypatch.setattr(adapters, "record", lambda kind, data: records.append((kind, data)))
+    monkeypatch.setattr(qwen, "record", lambda kind, data: records.append((kind, data)))
     dialogue = [{"start": 0, "end": 1, "text": "看看这里。"}]
     result = QwenAnalyzer(config).analyze(None, dialogue)
     assert result.description == valid["description"] and result.scene == valid["scene"]
@@ -77,7 +78,7 @@ def test_annotation_validation_exhausts_configured_retries(config, monkeypatch, 
         return invalid
 
     monkeypatch.setattr(adapters, "request", reply)
-    monkeypatch.setattr(adapters, "frame_data", lambda *args: [])
+    monkeypatch.setattr(qwen, "frame_data", lambda *args: [])
     monkeypatch.setattr(adapters.time, "sleep", delays.append)
     with caplog.at_level("WARNING", logger="mindex.models.adapters"), pytest.raises(
         ModelError, match=rf"连续 {retries + 1} 次无效.*重试已耗尽.*scene: Input should be a valid list",
@@ -105,7 +106,7 @@ def test_syntax_and_field_errors_share_one_retry_budget(config, monkeypatch):
         return next(responses)
 
     monkeypatch.setattr(adapters, "request", reply)
-    monkeypatch.setattr(adapters, "frame_data", lambda *args: [])
+    monkeypatch.setattr(qwen, "frame_data", lambda *args: [])
     monkeypatch.setattr(adapters.time, "sleep", delays.append)
     with pytest.raises(ModelError, match="连续 3 次无效.*scene"):
         QwenAnalyzer(config).analyze(None, [])
@@ -161,7 +162,7 @@ def test_pipeline_stores_only_valid_annotations_and_reuses_checkpoints(config, v
         return chat_response({"description": "城市灯光倒映水面。", "scene": scene})
 
     monkeypatch.setattr(adapters, "request", reply)
-    monkeypatch.setattr(adapters, "frame_data", lambda *args: [(0, "data:image/jpeg;base64,TEST")])
+    monkeypatch.setattr(qwen, "frame_data", lambda *args: [(0, "data:image/jpeg;base64,TEST")])
     monkeypatch.setattr(adapters.time, "sleep", delays.append)
     pipeline = Pipeline(config, analyzer=QwenAnalyzer(config))
     source_id = pipeline.prepare(video_file)

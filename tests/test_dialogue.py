@@ -1,6 +1,7 @@
 import pytest
 
-from mindex.models.adapters import ModelError, parse_minimax_words
+from mindex.models.adapters import ModelError
+from mindex.models.transcribers import parse_minimax_words
 from mindex.processing.dialogue import (
     DialogueProcessor,
     choose_subtitle,
@@ -188,7 +189,7 @@ def test_no_audio_does_not_initialize_models(config, video_file, monkeypatch):
 def test_minimax_rate_limit_rewinds_upload_and_requests_words(config, tmp_path, monkeypatch):
     import httpx
 
-    from mindex.models import adapters
+    from mindex.models import adapters, transcribers
 
     audio = tmp_path / "audio.wav"
     audio.write_bytes(b"RIFF-test-audio")
@@ -211,7 +212,7 @@ def test_minimax_rate_limit_rewinds_upload_and_requests_words(config, tmp_path, 
 
     monkeypatch.setattr(httpx, "request", response)
     monkeypatch.setattr(adapters.time, "sleep", lambda _: None)
-    result = adapters.MiniMaxTranscriber(config).transcribe(audio)
+    result = transcribers.MiniMaxTranscriber(config).transcribe(audio)
     assert attempts == [0, 0]
     assert result[0].start == 0.1
 

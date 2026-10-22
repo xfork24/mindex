@@ -8,20 +8,13 @@ import json
 import httpx
 import pytest
 
-from mindex.models import adapters
-from mindex.models.adapters import (
-    DashScopeSpeaker,
-    MiniMaxSpeaker,
-    MiniMaxTranscriber,
-    ModelError,
-    OpenAIChatTranscriber,
-    QwenAnalyzer,
-    QwenStoryboarder,
-    TokenHubEmbedder,
-    make_embedder,
-    make_speaker,
-    make_transcriber,
-)
+from mindex.models import adapters, embedders, qwen
+from mindex.models.adapters import ModelError, make_embedder, make_speaker, make_transcriber
+from mindex.models.embedders import TokenHubEmbedder
+from mindex.models.qwen import QwenAnalyzer
+from mindex.models.speech import DashScopeSpeaker, MiniMaxSpeaker
+from mindex.models.storyboard import QwenStoryboarder
+from mindex.models.transcribers import MiniMaxTranscriber, OpenAIChatTranscriber
 
 
 def test_tokenhub_identity_is_pure_config(config, monkeypatch):
@@ -77,8 +70,8 @@ def test_tokenhub_video_samples_frames_by_config(config, monkeypatch, tmp_path):
         requests.append(kwargs["json"])
         return {"data": [{"embedding": [1.0] * config.embedding.dimensions}]}
 
-    monkeypatch.setattr(adapters, "frame_data", fake_frames)
-    monkeypatch.setattr(adapters, "probe", lambda path: {"duration": 10.0})
+    monkeypatch.setattr(embedders, "frame_data", fake_frames)
+    monkeypatch.setattr(embedders, "probe", lambda path: {"duration": 10.0})
     monkeypatch.setattr(adapters, "request", reply)
     clip = tmp_path / "clip.mp4"
     clip.write_bytes(b"fake")
@@ -252,7 +245,7 @@ def test_analyzer_retries_invalid_json_empty_and_malformed_responses(config, mon
 
     monkeypatch.setattr(adapters, "request", reply)
     monkeypatch.setattr(adapters.time, "sleep", delays.append)
-    monkeypatch.setattr(adapters, "frame_data", lambda *a: [(0, "data:image/jpeg;base64,TEST")])
+    monkeypatch.setattr(qwen, "frame_data", lambda *a: [(0, "data:image/jpeg;base64,TEST")])
     result = QwenAnalyzer(config).analyze(None, [])
     assert result.description == "机场大厅"
     assert len(calls) == 5
@@ -271,7 +264,7 @@ def test_analysis_prompts_request_only_compact_required_json(config, monkeypatch
         return {"choices": [{"finish_reason": "stop", "message": {"content": text}}]}
 
     monkeypatch.setattr(adapters, "request", reply)
-    monkeypatch.setattr(adapters, "frame_data", lambda *a: [(0, "data:image/jpeg;base64,TEST")])
+    monkeypatch.setattr(qwen, "frame_data", lambda *a: [(0, "data:image/jpeg;base64,TEST")])
     analyzer = QwenAnalyzer(config)
     result = analyzer.analyze(None, [])
     assert result.actions == ["拍照"] and result.uncertainty == []
@@ -328,12 +321,12 @@ def test_glm_visual_analysis_uses_low_without_text_only_json_parameter(config, m
         return {"choices": [{"message": {"content": '{"description":"机场"}'}}]}
 
     monkeypatch.setattr(adapters, "request", reply)
-    monkeypatch.setattr(adapters, "frame_data", lambda *a: [(0, "data:image/jpeg;base64,TEST")])
+    monkeypatch.setattr(qwen, "frame_data", lambda *a: [(0, "data:image/jpeg;base64,TEST")])
     assert QwenAnalyzer(config).analyze(None, []).description == "机场"
     assert captured[0]["reasoning_effort"] == "low"
     assert "thinking" not in captured[0] and "response_format" not in captured[0]
     config.analyzer.thinking_mode = "provider"
-    assert "reasoning_effort" not in adapters.analysis_options(config.analyzer)
+    assert "reasoning_effort" not in qwen.analysis_options(config.analyzer)
 
 
 def test_scene_grouping_compacts_historical_descriptions(config, monkeypatch):
@@ -382,7 +375,7 @@ def test_analyzer_logs_full_invalid_response_even_on_final_attempt(config, monke
     config.analyzer.response_retries = 0
     config.analyzer.api_key = "request-secret"
     monkeypatch.setattr(adapters, "request", lambda *a, **kw: payload)
-    with caplog.at_level("WARNING", logger="mindex.models.adapters"), pytest.raises(ModelError, match="自动重试已耗尽"):
+    with caplog.at_level("WARNING", logger="mindex.models.qwen"), pytest.raises(ModelError, match="自动重试已耗尽"):
         QwenAnalyzer(config)._chat([], "request-instructions")
     assert len(caplog.records) == 1
     message = caplog.records[0].getMessage()
@@ -505,7 +498,7 @@ def test_factories_dispatch_cloud_backends(config):
     config.studio.tts.backend = "dashscope"
     assert isinstance(make_speaker(config), DashScopeSpeaker)
     config.studio.tts.backend = "openai"
-    from mindex.models.adapters import OpenAISpeaker
+    from mindex.models.speech import OpenAISpeaker
 
     assert isinstance(make_speaker(config), OpenAISpeaker)
 

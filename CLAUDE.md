@@ -42,7 +42,7 @@ uv run mindex clean [--apply]                    # 磁盘清理：默认预览�
 - `models/model_server.py` — GPU 侧服务（`mindex-model-server`，角色独立 venv，见 `docs/DEPLOYMENT.md`）
 - `models/llama_cpp.py` — 对用户已有 llama-server 的原生协议适配（`/v1/embeddings` input_video）
 
-### 模型适配层（models/adapters.py）
+### 模型适配层（models/adapters.py 与各后端模块）
 
 七个 Protocol：`MultimodalEmbedder`、`VisualAnalyzer`、`Transcriber`、`Aligner`、`ShotDetector`、`Speaker`（TTS）、`Storyboarder`（拆分镜 LLM），由 `make_*` 工厂按配置的 backend 构造（`mindex` 自定义服务 / `llama_cpp` / `openai` / 本地 adaptive / 远程 transnet；线上订阅另有 embedding `tokenhub`、asr `openai`（chat+input_audio）、tts `minimax`/`dashscope` 专用适配器）。替换模型 = 实现协议接入新 backend，不改检索管线。
 

@@ -16,7 +16,7 @@
 - API 装配在 `backend/src/api.py`；CLI 入口在 `backend/src/cli.py`，重依赖保留在命令函数内延迟导入。
 - 静态资源统一通过 `shared/web_assets.py` 定位；同时考虑源码目录与 wheel 中的 `mindex.web`，打包规则在 `pyproject.toml`、`MANIFEST.in`。
 - UI 文案只改 `frontend/src/shared/messages.json`，然后运行 `python scripts/build-messages.py` 生成 `messages.js`（`--check` 仅校验）。保留语言切换前的输入和页面状态。
-- 新模型通过 `models/adapters.py` 的协议与工厂接入；模型依赖使用独立环境，不混入应用环境。单 GPU 按阶段轮换服务，不假设全部服务同时在线。
+- 新模型通过 `models/adapters.py` 的协议与 `make_*` 工厂接入，具体后端各在一个模块（`embedders`、`qwen`、`speech`、`storyboard`、`transcribers`、`detectors`）；模型依赖使用独立环境，不混入应用环境。单 GPU 按阶段轮换服务，不假设全部服务同时在线。
 
 ## 必须保持的行为
 

@@ -9,7 +9,8 @@ from fastapi.testclient import TestClient
 from mindex.admin.source_tasks import SourceTasks, WorkOptions
 from mindex.api import create_app
 from mindex.models import adapters
-from mindex.models.adapters import AnalysisContentRejected, ModelError, QwenAnalyzer
+from mindex.models.adapters import AnalysisContentRejected, ModelError
+from mindex.models.qwen import QwenAnalyzer
 from mindex.processing.channel_index import snapshots_for
 from mindex.processing.indexing import IndexBuilder, check_index
 from mindex.processing.pipeline import Pipeline

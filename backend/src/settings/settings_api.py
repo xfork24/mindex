@@ -21,6 +21,7 @@ from pydantic import Field
 
 from mindex.models import adapters
 from mindex.models.adapters import make_embedder, make_speaker, make_transcriber
+from mindex.models.qwen import analysis_options
 from mindex.settings.runtime_settings import (
     PROFILE_FIELDS,
     PROVIDER_LABELS,
@@ -147,7 +148,7 @@ def _probe(config: Config, role: str, *, store: Store | None = None, profile_nam
     if role in {"analyzer", "generator"}:
         service = config.analyzer if role == "analyzer" else config.studio.generator
         extra = (
-            adapters.analysis_options(service)
+            analysis_options(service)
             if role == "analyzer" else
             {"chat_template_kwargs": {"enable_thinking": False}}
             if getattr(service, "llama_template", False)

@@ -8,7 +8,8 @@ from fastapi.testclient import TestClient
 
 from mindex.api import create_app
 from mindex.diagnostics.evaluation import evaluate
-from mindex.models.adapters import AdaptiveShotDetector, ModelError
+from mindex.models.adapters import ModelError
+from mindex.models.detectors import AdaptiveShotDetector
 from mindex.processing.indexing import IndexBuilder, VectorIndex, check_index
 from mindex.processing.pipeline import Pipeline
 from mindex.search.search import SearchEngine, fuse

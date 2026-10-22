@@ -19,7 +19,7 @@ from filelock import FileLock, Timeout
 from pydantic import Field, model_validator
 
 from mindex.admin.curation import EntityNotFound
-from mindex.models.adapters import coverage_warning
+from mindex.models.storyboard import coverage_warning
 from mindex.shared.config import Config, StrictModel, fingerprint, portable_parameters
 from mindex.shared.types import Filters, Granularity
 

@@ -15,7 +15,8 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from time import perf_counter
 
-from mindex.models.adapters import make_transcriber, parse_minimax_words
+from mindex.models.adapters import make_transcriber
+from mindex.models.transcribers import parse_minimax_words
 from mindex.shared.config import Config, fingerprint
 from mindex.shared.media import MediaError, command
 from mindex.shared.storage import Store, dumps

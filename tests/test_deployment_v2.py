@@ -15,7 +15,7 @@ from typer.testing import CliRunner
 from mindex.api import create_app
 from mindex.cli import app
 from mindex.diagnostics import e2e
-from mindex.models import adapters, compatibility, deployment
+from mindex.models import adapters, compatibility, deployment, qwen
 from mindex.models.analyzers import PinnedQwenAnalyzer
 from mindex.models.llama_cpp import (
     LlamaEmbedder,
@@ -540,7 +540,7 @@ def test_pinned_analyzer_validates_fields_with_configured_retries(native, monkey
         native["chat"] = '{"description":"夜景","scene":["滨水区"]}'
 
     monkeypatch.setattr(adapters.time, "sleep", retry)
-    monkeypatch.setattr(adapters, "frame_data", lambda *args: [(0, "data:image/jpeg;base64,TEST")])
+    monkeypatch.setattr(qwen, "frame_data", lambda *args: [(0, "data:image/jpeg;base64,TEST")])
     analyzer = PinnedQwenAnalyzer(config)
     original = analyzer.profile
     assert analyzer.analyze(None, []).scene == ["滨水区"]

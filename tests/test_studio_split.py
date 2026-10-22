@@ -6,7 +6,9 @@ import json
 import pytest
 from conftest import FixtureStoryboarder
 
-from mindex.models.adapters import ModelError, QwenStoryboarder, decode_audio
+from mindex.models.adapters import ModelError
+from mindex.models.speech import decode_audio
+from mindex.models.storyboard import QwenStoryboarder
 from mindex.shared.types import ShotDraft
 from mindex.studio import studio, studio_steps
 
