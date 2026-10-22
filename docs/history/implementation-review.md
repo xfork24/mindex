@@ -1,6 +1,6 @@
 # 三份计划实现审查与端到端验收
 
-日期：2026-10-17。范围：[人物库计划](../plans/PERSON_RECO_PLAN.md)、[独立渠道计划](../plans/RECALL_ENHANCEMENT_PLAN.md)、[创作页召回迁移计划](../plans/RECALL_MIGRATION_PLAN.md)。
+日期：2026-10-17。范围：[人物库计划](../../plans/PERSON_RECO_PLAN.md)、[独立渠道计划](../../plans/RECALL_ENHANCEMENT_PLAN.md)、[创作页召回迁移计划](../../plans/RECALL_MIGRATION_PLAN.md)。
 
 ## 本轮发现并修复
 

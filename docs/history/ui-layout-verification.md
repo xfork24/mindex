@@ -2,7 +2,7 @@
 
 > 本文引用的 `artifacts/` 是验证时生成的本地目录，已被 `.gitignore` 排除，不在仓库中；相关路径仅作记录，不是可点击链接。
 
-日期：2026-10-19。计划见 [UI_ELEM_LAYOUT_PLAN.md](../plans/UI_ELEM_LAYOUT_PLAN.md)。已合并实施期间新增的双向文本框拖拽、组合人物筛选和 SVG 语言图标要求。素材刷新按后续要求恢复；以下统计保留原验收历史。全部连续调整的最终状态、1,458 项全页面复测和专项验证见 [最终验收](studio-alignment-verification.md)。保留工作区原有修改，没有提交代码。
+日期：2026-10-19。计划见 [UI_ELEM_LAYOUT_PLAN.md](../../plans/UI_ELEM_LAYOUT_PLAN.md)。已合并实施期间新增的双向文本框拖拽、组合人物筛选和 SVG 语言图标要求。素材刷新按后续要求恢复；以下统计保留原验收历史。全部连续调整的最终状态、1,458 项全页面复测和专项验证见 [最终验收](studio-alignment-verification.md)。保留工作区原有修改，没有提交代码。
 
 后续召回筛选、多选素材范围及图片／视频控件对齐已实施，见 [recall-filters-verification.md](recall-filters-verification.md)。该轮按新增功能要求扩展可选 `filters.source_ids`，保持原单素材字段兼容；对应验证独立记录，不计入下方原验收统计。
 

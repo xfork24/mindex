@@ -1,6 +1,6 @@
 # Mindex 文档中心
 
-本目录收录项目的全部文档，讲清**机制与用法**。同一目录内既有机制文档（架构、管线、检索），也有按步骤执行的操作手册，两者互补、互相链接。设计决策与计划类文档放在 [`plans/`](../plans)。
+本目录收录项目的全部文档，讲清**机制与用法**。同一目录内既有机制文档（架构、管线、检索），也有按步骤执行的操作手册，两者互补、互相链接。设计决策与计划类文档放在 [`plans/`](../plans/README.md)，带日期的验证与审计记录放在 [`history/`](history/)。
 
 ## 按需求导航
 
@@ -42,20 +42,20 @@
 
 ## 验证与审计记录
 
-带日期的历史档案，记录当时的验证范围与结果，不代表当前代码的测试结论。引用的 `artifacts/` 为本地产物，不在仓库中。
+带日期的历史档案，位于 [`docs/history/`](history/)，记录当时的验证范围与结果，不代表当前代码的测试结论。引用的 `artifacts/` 为本地产物，不在仓库中。
 
 | 文档 | 内容 |
 |---|---|
 | [project-review-2026-10-22.md](project-review-2026-10-22.md) | 项目架构与规范审查：发现、建议与本次已修正项 |
-| [source-layout-verification.md](source-layout-verification.md) | 前后端目录重组、打包与验证范围，含既有失败和未完成检查 |
-| [implementation-review.md](implementation-review.md) | 三份计划的实现审查与端到端验收 |
-| [recall-enhancement-verification.md](recall-enhancement-verification.md) | 三渠道改造验证 |
-| [persons-verification.md](persons-verification.md) / [person-reference-recall-verification.md](person-reference-recall-verification.md) | 人物召回、镜头详情、对白提及人物召回修复 |
-| [studio-workspace-verification.md](studio-workspace-verification.md) / [studio-refinement-verification.md](studio-refinement-verification.md) / [studio-row-ui-verification.md](studio-row-ui-verification.md) / [studio-loading-verification.md](studio-loading-verification.md) / [studio-alignment-verification.md](studio-alignment-verification.md) | Studio 工作台、候选与定长窗口、逐镜行、加载优化、对齐 UI 的验收 |
-| [candidate-identities-verification.md](candidate-identities-verification.md) / [recall-filters-verification.md](recall-filters-verification.md) | 召回人物标记与排名、召回筛选与素材多选 |
-| [ui-layout-verification.md](ui-layout-verification.md) / [ui-layout-coverage.md](ui-layout-coverage.md) / [ui-layout-final-coverage.md](ui-layout-final-coverage.md) | 全页面 UI 布局修正与覆盖记录 |
-| [upload-verification.md](upload-verification.md) / [source-detail-loading.md](source-detail-loading.md) / [source-work-audit-2026-10-20.md](source-work-audit-2026-10-20.md) | 素材上传、详情加载、素材工作台全量检查 |
-| [wemm-short-clip-verification.md](wemm-short-clip-verification.md) | WeMM 极短分镜采样修复 |
+| [source-layout-verification.md](history/source-layout-verification.md) | 前后端目录重组、打包与验证范围，含既有失败和未完成检查 |
+| [implementation-review.md](history/implementation-review.md) | 三份计划的实现审查与端到端验收 |
+| [recall-enhancement-verification.md](history/recall-enhancement-verification.md) | 三渠道改造验证 |
+| [persons-verification.md](history/persons-verification.md) / [person-reference-recall-verification.md](history/person-reference-recall-verification.md) | 人物召回、镜头详情、对白提及人物召回修复 |
+| [studio-workspace-verification.md](history/studio-workspace-verification.md) / [studio-refinement-verification.md](history/studio-refinement-verification.md) / [studio-row-ui-verification.md](history/studio-row-ui-verification.md) / [studio-loading-verification.md](history/studio-loading-verification.md) / [studio-alignment-verification.md](history/studio-alignment-verification.md) | Studio 工作台、候选与定长窗口、逐镜行、加载优化、对齐 UI 的验收 |
+| [candidate-identities-verification.md](history/candidate-identities-verification.md) / [recall-filters-verification.md](history/recall-filters-verification.md) | 召回人物标记与排名、召回筛选与素材多选 |
+| [ui-layout-verification.md](history/ui-layout-verification.md) / [ui-layout-coverage.md](history/ui-layout-coverage.md) / [ui-layout-final-coverage.md](history/ui-layout-final-coverage.md) | 全页面 UI 布局修正与覆盖记录 |
+| [upload-verification.md](history/upload-verification.md) / [source-detail-loading.md](history/source-detail-loading.md) / [source-work-audit-2026-10-20.md](history/source-work-audit-2026-10-20.md) | 素材上传、详情加载、素材工作台全量检查 |
+| [wemm-short-clip-verification.md](history/wemm-short-clip-verification.md) | WeMM 极短分镜采样修复 |
 
 ## 任务导向文档
 
@@ -72,7 +72,7 @@
 | [studio-verification.md](studio-verification.md) | 创作工作流验收记录 |
 | [eval/README.md](../eval/README.md) | 评测查询标注说明与模板生成器 |
 
-计划与设计决策文档在 [`plans/`](../plans)：
+计划与设计决策文档在 [`plans/`](../plans/README.md)（含按主题分类的索引）：
 
 | 文档 | 用途 |
 |---|---|

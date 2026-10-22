@@ -127,11 +127,11 @@ data/studio/<job_id>/
 
 ## 验证
 
-`tests/test_studio_workspace.py` 覆盖版本选择、失败保护、混选依赖、方案隔离、续建、连续/隐藏镜头、预览确认、迁移和执行锁；使用真实 ffmpeg、SQLite、Chroma 及确定性模型。非整数帧率测试校验帧数、累计采样边界、字幕、完整解码和依赖文件哈希。浏览器及本轮检查见 [工作台验收记录](studio-workspace-verification.md)；此前真实模型的质量结论见 [历史验收记录](studio-verification.md)。
+`tests/test_studio_workspace.py` 覆盖版本选择、失败保护、混选依赖、方案隔离、续建、连续/隐藏镜头、预览确认、迁移和执行锁；使用真实 ffmpeg、SQLite、Chroma 及确定性模型。非整数帧率测试校验帧数、累计采样边界、字幕、完整解码和依赖文件哈希。浏览器及本轮检查见 [工作台验收记录](history/studio-workspace-verification.md)；此前真实模型的质量结论见 [历史验收记录](studio-verification.md)。
 
-本轮行详情与执行日志改造见 [行详情验收记录](studio-row-ui-verification.md)。
+本轮行详情与执行日志改造见 [行详情验收记录](history/studio-row-ui-verification.md)。
 
-候选锚点与定长窗口依据 [细化计划](../plans/STUDIO_REFINEMENT_UI_PLAN.md)；测试与浏览器结果见 [定长窗口验收记录](studio-refinement-verification.md)。
+候选锚点与定长窗口依据 [细化计划](../plans/STUDIO_REFINEMENT_UI_PLAN.md)；测试与浏览器结果见 [定长窗口验收记录](history/studio-refinement-verification.md)。
 
 浏览器专用服务可通过 `uv run python tests/serve_fixture.py --data-dir <临时测试目录> --port 8001` 启动，勿将确定性颜色向量用于真实素材索引。
 

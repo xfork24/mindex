@@ -1,6 +1,6 @@
 # 召回候选与定长窗口验收
 
-日期：2026-10-16。依据 [STUDIO_REFINEMENT_UI_PLAN.md](../plans/STUDIO_REFINEMENT_UI_PLAN.md)。保留进入工作区前的设置、音色、工作台行详情等修改；未提交、回滚或清理历史产物。
+日期：2026-10-16。依据 [STUDIO_REFINEMENT_UI_PLAN.md](../../plans/STUDIO_REFINEMENT_UI_PLAN.md)。保留进入工作区前的设置、音色、工作台行详情等修改；未提交、回滚或清理历史产物。
 
 ## 初次实现与数据流（后续修正见末节）
 

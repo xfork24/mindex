@@ -130,4 +130,4 @@
 | `persons-empty-accepted` | en / zh | 1440, 1000, 800, 540, 390, 320 | 12 | 384 | 通过 |
 | `persons-empty-rejected` | en / zh | 1440, 1000, 800, 540, 390, 320 | 12 | 372 | 通过 |
 
-以上记录涵盖打开的真实界面，不代表每个界面都执行过全部数据和服务状态的笛卡尔组合。补充说明及未验证状态见 `docs/ui-layout-verification.md`。
+以上记录涵盖打开的真实界面，不代表每个界面都执行过全部数据和服务状态的笛卡尔组合。补充说明及未验证状态见 `docs/history/ui-layout-verification.md`。

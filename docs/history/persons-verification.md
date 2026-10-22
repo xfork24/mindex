@@ -1,6 +1,6 @@
 # 人物召回与镜头详情工程验证
 
-日期：2026-10-17。对应 [实施计划](../plans/PERSON_RECO_PLAN.md) 与 [使用/部署说明](persons.md)。
+日期：2026-10-17。对应 [实施计划](../../plans/PERSON_RECO_PLAN.md) 与 [使用/部署说明](../persons.md)。
 
 ## 已验证
 

@@ -27,7 +27,7 @@
 
 **2. 完整测试不是全绿，且没有 CI。**
 本次完整运行 `uv run pytest -q`：953 项中 **943 通过、10 失败**（耗时 22 分钟）。
-- 7 项与 `docs/source-layout-verification.md` 记录的既有失败一致，该文档称它们在重构前就能复现。本次在 `HEAD` 上单独复现了 `test_admin.py::test_live_curation_filters_text_video_without_mutating_index`：首条搜索结果的 `display_name` 为 `None`，与断言不符。
+- 7 项与 `docs/history/source-layout-verification.md` 记录的既有失败一致，该文档称它们在重构前就能复现。本次在 `HEAD` 上单独复现了 `test_admin.py::test_live_curation_filters_text_video_without_mutating_index`：首条搜索结果的 `display_name` 为 `None`，与断言不符。
 - 另有 3 项**未记录**的失败，单独重跑仍然失败，不是并发波动：`test_backup.py::test_person_union_uses_published_evidence_only`、`test_studio_recall.py::test_person_recall_filters_by_published_evidence`、`test_studio_recall.py::test_workspace_recall_pins_active_person_release_and_reuses_after_rollback`。后两项抛出 `ValueError: 出镜审核必须指定角色`。该校验由提交 fd4ea33（"scope person appearances and review to work roles"）加入，测试没有同步。备份那一项得到空集合，原因未查。
 
 仓库没有 `.github/` 或其他 CI 配置，`ruff` 之前也不通过（见末尾）。失败长期留存，会让新失败难以分辨。
