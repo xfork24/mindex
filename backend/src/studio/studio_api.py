@@ -272,7 +272,8 @@ def studio_router(
             state = studio.load_job(base, job_id)
             if not body.title.strip():
                 raise studio.StudioError("标题不能为空")
-            state.update(title=body.title.strip(), updated_at=studio.now())
+            # 用户手动命名即视为最终标题，关闭待生成态，后台线程不再覆盖。
+            state.update(title=body.title.strip(), title_pending=False, updated_at=studio.now())
             studio.save(studio.job_path(base, job_id), state)
         return state
 
@@ -803,14 +804,45 @@ def studio_router(
                 )
             }
 
+    def generate_title_async(job_id: str, text: str):
+        """后台补全标题：失败不影响任务，占位标题继续可用。
+
+        仅用进程内 ``guard`` 串行化（标题生成只发生在创建任务的 Web 进程），
+        不持有跨进程文件锁，避免阻塞步骤执行或让紧随其后的运行请求误报 409。
+        """
+
+        def worker():
+            cfg = current()
+            try:
+                title = (storyboarder or make_storyboarder(cfg)).title(text)
+            except Exception:
+                title = None
+            try:
+                with guard:  # 与 patch_title/其它 job.json 写入串行，避免丢更新
+                    state = studio.load_job(base, job_id)
+                    if not state.get("title_pending"):
+                        return  # 用户已手动改名，尊重用户输入
+                    if title and title.strip():
+                        state["title"] = title.strip()[:60]
+                    state["title_pending"] = False
+                    state["updated_at"] = studio.now()
+                    studio.save(studio.job_path(base, job_id), state)
+            except Exception:
+                return  # 任务可能已被删除；占位标题仍然有效
+
+        threading.Thread(target=worker, daemon=True, name=f"studio-title-{job_id}").start()
+
     @router.post("/jobs", status_code=201)
     def create_job(body: CreateJobBody):
         try:
             cfg = current()
-            return studio.create_job(
-                cfg, body.text, body.title, body.options,
-                title_generator=lambda text: (storyboarder or make_storyboarder(cfg)).title(text),
+            # 标题生成改为后台执行：创建立即返回占位标题，避免阻塞 LLM 往返。
+            state = studio.create_job(
+                cfg, body.text, body.title, body.options, store=store, defer_title=True,
             )
+            if state.get("title_pending"):
+                generate_title_async(state["id"], state["input_text"])
+            return state
         except studio.StudioError:
             raise
         except ValueError as exc:
@@ -818,8 +850,8 @@ def studio_router(
 
     @router.get("/jobs")
     def jobs():
-        studio.recover_stale(base)
-        return {"items": studio.list_jobs(base)}
+        # 恢复与列举合并为一次目录扫描，避免 recover_stale + list_jobs 两次全量读 job.json。
+        return {"items": studio.list_jobs(base, recover=True)}
 
     @router.get("/jobs/{job_id}")
     def get_job(job_id: str):

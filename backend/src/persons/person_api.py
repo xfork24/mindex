@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, Response, UploadFile
 from fastapi.responses import FileResponse
 from filelock import Timeout
 from pydantic import Field, model_validator
@@ -29,6 +29,8 @@ from mindex.persons.person_processing import (
     ensure_reference_quality,
 )
 from mindex.persons.persons import Persons
+from mindex.persons.profiling import note as profiling_note
+from mindex.persons.profiling import profiled, stage
 from mindex.shared.config import StrictModel, fingerprint
 from mindex.shared.processing_lock import ProcessingLock
 from mindex.shared.storage import dumps
@@ -237,9 +239,9 @@ def person_router(runtime, store):
         store.execute("DELETE FROM person_references WHERE id=?", (identifier,))
         return {"removed": identifier}
 
-    def media(path):
+    def media(path, headers=None):
         try:
-            return FileResponse(store.resolve_media(path))
+            return FileResponse(store.resolve_media(path), headers=headers)
         except FileNotFoundError as exc:
             raise HTTPException(404, "图片缺失") from exc
 
@@ -422,38 +424,70 @@ def person_router(runtime, store):
 
     @router.get("/evidence/{identifier}/image")
     def evidence_image(identifier: str):
-        row = store.one("SELECT * FROM person_evidence WHERE id=?", (identifier,))
+        with profiled("evidence_image") as profile:
+            result = _evidence_image(identifier)
+            if profile:
+                profile.apply(result)
+            return result
+
+    # 同一证据 id 的截图在复核后可能换帧，所以只缓存很短时间，既省掉翻页回看时的重复请求，又不会长时间显示旧图。
+    EVIDENCE_IMAGE_HEADERS = {"Cache-Control": "private, max-age=300"}
+
+    def evidence_media(path):
+        """证据截图都落在 persons/ 下，不会是需要现场重建的 moment/scene 媒体引用。
+
+        文件不在磁盘时 store.resolve_media 会继续扫描整张 index_members（十万行 JSON，约 3 秒）
+        才抛 FileNotFoundError；这里先确认文件存在，缺失就直接按 404 处理。
+        """
+        if str(path).startswith("persons/"):
+            resolved = (store.root / path).resolve()
+            if resolved.is_relative_to(store.root) and not resolved.is_file():
+                raise HTTPException(404, "图片缺失")
+        return media(path, EVIDENCE_IMAGE_HEADERS)
+
+    def _evidence_image(identifier: str):
+        with stage("row_lookup"):
+            row = store.one("SELECT * FROM person_evidence WHERE id=?", (identifier,))
         candidates = []
         if row:
             candidates.append({**row, "data": json.loads(row["data"])})
             path = candidates[0]["data"].get("image_path")
             if path:
                 try:
-                    return media(path)
+                    with stage("file_response"):
+                        result = evidence_media(path)
+                    profiling_note("branch", "current_path")
+                    return result
                 except HTTPException as exc:
                     if exc.status_code != 404:
                         raise
         # Old releases are immutable; use current evidence first, then their original image/shot.
-        for version in store.rows("SELECT data FROM person_versions ORDER BY created_at DESC,id"):
-            candidates.extend(e for e in json.loads(version["data"]).get("evidence", [])
-                              if e["id"] == identifier)
-        for evidence in candidates:
-            path = evidence.get("data", {}).get("image_path")
-            if path:
-                try:
-                    return media(path)
-                except HTTPException as exc:
-                    if exc.status_code != 404:
-                        raise
-        for evidence in candidates:
-            shot = store.one("SELECT thumbnail FROM segments WHERE id=? AND source_id=?",
-                             (evidence.get("shot_id"), evidence.get("source_id")))
-            if shot and shot["thumbnail"]:
-                try:
-                    return media(shot["thumbnail"])
-                except HTTPException as exc:
-                    if exc.status_code != 404:
-                        raise
+        # 历史版本按新到旧惰性遍历：每个版本的“证据 id -> 截图路径”索引只解析一次并缓存。
+        with stage("versions_scan"):
+            for evidence in catalogue.version_evidence(identifier):
+                candidates.append(evidence)
+                path = evidence["data"].get("image_path")
+                if path:
+                    try:
+                        result = evidence_media(path)
+                        profiling_note("branch", "version_path")
+                        return result
+                    except HTTPException as exc:
+                        if exc.status_code != 404:
+                            raise
+        with stage("thumbnail_fallback"):
+            for evidence in candidates:
+                shot = store.one("SELECT thumbnail FROM segments WHERE id=? AND source_id=?",
+                                 (evidence.get("shot_id"), evidence.get("source_id")))
+                if shot and shot["thumbnail"]:
+                    try:
+                        result = media(shot["thumbnail"], EVIDENCE_IMAGE_HEADERS)
+                        profiling_note("branch", "shot_thumbnail")
+                        return result
+                    except HTTPException as exc:
+                        if exc.status_code != 404:
+                            raise
+        profiling_note("branch", "missing")
         raise HTTPException(404, "证据截图缺失")
 
     @router.get("/review/shots")
@@ -466,15 +500,18 @@ def person_router(runtime, store):
         compact: bool = False,
         offset: int = Query(default=0, ge=0),
         limit: int = Query(default=50, ge=1, le=200),
+        response: Response = None,
     ):
-        return catalogue.review_shots(
-            source_id, status, limit=limit, offset=offset,
-            actor_id=actor_id, role_id=role_id, no_candidate=no_candidate, compact=compact,
-        )
+        with profiled("review_shots", response):
+            return catalogue.review_shots(
+                source_id, status, limit=limit, offset=offset,
+                actor_id=actor_id, role_id=role_id, no_candidate=no_candidate, compact=compact,
+            )
 
     @router.get("/review/shots/{shot_id}")
-    def one_review_shot(shot_id: str, source_id: str | None = None):
-        result = catalogue.review_shots(source_id, shot_id=shot_id, limit=1)
+    def one_review_shot(shot_id: str, source_id: str | None = None, response: Response = None):
+        with profiled("one_review_shot", response):
+            result = catalogue.review_shots(source_id, shot_id=shot_id, limit=1)
         if not result["items"]:
             raise HTTPException(404, "找不到人物出镜审核分镜")
         return result["items"][0]

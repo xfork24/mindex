@@ -24,6 +24,12 @@ CREATE TABLE IF NOT EXISTS person_evidence(id TEXT PRIMARY KEY, source_id TEXT N
  status TEXT NOT NULL, data TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS person_evidence_source ON person_evidence(source_id,status,start,end);
 CREATE INDEX IF NOT EXISTS person_evidence_shot ON person_evidence(source_id,shot_id);
+-- 出镜审核列表只需要证据行的少数 JSON 字段。data 平均近 7 KB（含 body_feature），读它会触发溢出页 I/O，
+-- 这个覆盖索引让审核列表的状态聚合与排名完全不读 data 列。
+CREATE INDEX IF NOT EXISTS person_evidence_review ON person_evidence(
+ source_id,shot_id,status,actor_id,role_id,start,id,
+ json_extract(data,'$.confirmation'),json_extract(data,'$.shot_excluded'),
+ json_type(data,'$.score'),json_extract(data,'$.score'),json_extract(data,'$.reviewed_at'));
 CREATE TABLE IF NOT EXISTS person_coverage(source_id TEXT NOT NULL, cache_id TEXT PRIMARY KEY, data TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS person_coverage_shot
  ON person_coverage(source_id,json_extract(data,'$.shot_id'));

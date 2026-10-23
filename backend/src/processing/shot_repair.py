@@ -12,7 +12,7 @@ import numpy as np
 
 from mindex.models.model_server import refine_cut_frame
 from mindex.shared.media import MediaError, atomic_media, command, probe
-from mindex.shared.storage import Store
+from mindex.shared.storage import Store, bump_snapshot_revision
 
 VERSION = 'shot-boundary-v1'
 
@@ -205,6 +205,8 @@ def apply(config, report, *, progress=None, video_encoder="libx264"):
                         db.execute('UPDATE index_members SET snapshot=? WHERE rowid=?',
                                    (json.dumps(segment, ensure_ascii=False, sort_keys=True), row['rowid']))
                         snapshots_changed += 1
+                if snapshots_changed:
+                    bump_snapshot_revision(db)
                 service = ShotMedia(store)
                 for path, (a, b) in paths.items():
                     # References must see this same transaction's corrected shots.

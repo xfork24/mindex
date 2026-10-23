@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import json
 import logging
+import sqlite3
+import threading
+from collections import OrderedDict
 from pathlib import Path
 
 import chromadb
@@ -18,12 +21,39 @@ log = logging.getLogger(__name__)
 # chroma HNSW 段的默认落盘阈值：累计这么多元素才把 id_map 与索引写盘。
 CHROMA_HNSW_SYNC_THRESHOLD = 1000
 
+# 检索的「无过滤多取 + 内存后过滤」参数：首次取 max(count*10, 1000) 条，不够按 3 倍放大，
+# 超过上限仍不够则回退到 chroma where 过滤（极小的 eligible 子集才会触发）。
+POSTFILTER_OVERFETCH = 10
+POSTFILTER_MIN_CANDIDATES = 1000
+POSTFILTER_GROWTH = 3
+POSTFILTER_MAX_CANDIDATES = 20000
+# 无过滤查询只取距离（约比同时取元数据快 5 倍），向量 id → (segment_id, view) 走进程内映射。
+REPRESENTATION_MAP_ENTRIES = 2
+_REPRESENTATION_MAPS: OrderedDict = OrderedDict()
+_REPRESENTATION_LOCK = threading.Lock()
+RAW_MEMO_ENTRIES = 8
+
+
+def retain_representation_maps(root: Path, keep: set[str]) -> int:
+    """淘汰该数据目录下不在 keep 里的向量映射缓存。返回淘汰条数。
+
+    只影响本模块的映射缓存；Chroma 自身已加载的 HNSW 在 1.5.x 本地实现里无法由进程内释放。
+    """
+    resolved = str(Path(root).resolve())
+    with _REPRESENTATION_LOCK:
+        stale = [key for key in _REPRESENTATION_MAPS if key[0] == resolved and key[1] not in keep]
+        for key in stale:
+            del _REPRESENTATION_MAPS[key]
+    return len(stale)
+
 
 class VectorIndex:
     def __init__(self, root: Path, index_id: str, create=False):
         self.client = chromadb.PersistentClient(
             path=str(root / "chroma"), settings=Settings(anonymized_telemetry=False)
         )
+        self.root, self.index_id = Path(root), index_id
+        self._raw_memo: OrderedDict = OrderedDict()
         name = "idx-" + index_id
         if create:
             self.collection = self.client.get_or_create_collection(
@@ -126,25 +156,122 @@ class VectorIndex:
             offset += 1000
 
     def query(self, vector: list[float], view: str, eligible: list[str], count: int) -> list[dict]:
-        if not eligible or self.collection.count() == 0:
+        total = self.collection.count() if eligible else 0
+        if total == 0:
             return []
+        # Chroma 的元数据 where 过滤要扫 sqlite（线上 1.2 万向量约 1.5 秒/次），而无过滤的
+        # HNSW 查询只要毫秒级。先无过滤多取候选再在内存里按 view/eligible 过滤；
+        # 取不够就放大候选数，放大到上限仍不够再回退到原来的 where 过滤。
+        hits = self._query_postfiltered(vector, view, set(eligible), count, total)
+        if hits is None:
+            hits = self._query_filtered(vector, view, eligible, count, total)
+        return self._best_per_segment(hits, count)
+
+    def _representation_map(self) -> dict[str, tuple[str, str]]:
+        """向量 id → (segment_id, view)。representations 行按内容寻址、写入后不可变，可进程内缓存。
+
+        读不到（例如没有元数据库的独立向量集合）时返回空映射，调用方改用 chroma 自带的元数据。
+        """
+        key = (str(self.root.resolve()), self.index_id)
+        with _REPRESENTATION_LOCK:
+            cached = _REPRESENTATION_MAPS.get(key)
+            if cached is not None:
+                _REPRESENTATION_MAPS.move_to_end(key)
+                return cached
+        mapping: dict[str, tuple[str, str]] = {}
+        database = self.root / "metadata.sqlite3"
+        if database.is_file():
+            try:
+                with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as db:
+                    mapping = {
+                        row[0]: (row[1], row[2])
+                        for row in db.execute(
+                            "SELECT id,segment_id,view FROM representations WHERE index_id=?", (self.index_id,)
+                        )
+                    }
+            except sqlite3.Error as exc:
+                log.warning("读取向量映射失败，改用 chroma 元数据：%s", exc)
+        if mapping:
+            with _REPRESENTATION_LOCK:
+                _REPRESENTATION_MAPS[key] = mapping
+                _REPRESENTATION_MAPS.move_to_end(key)
+                while len(_REPRESENTATION_MAPS) > REPRESENTATION_MAP_ENTRIES:
+                    _REPRESENTATION_MAPS.popitem(last=False)
+        return mapping
+
+    def _candidates(self, vector, size: int, mapping: dict) -> tuple[list[str], list[float], dict]:
+        """无过滤的最近邻候选 (ids, distances, id→(segment_id, view))。
+
+        同一向量同一大小的结果在本实例内复用：文字检索的三个渠道共用一个查询向量，各自放大候选数时
+        会反复请求相同的大小。
+        """
+        key = (tuple(vector), size, bool(mapping))
+        if key in self._raw_memo:
+            self._raw_memo.move_to_end(key)
+            return self._raw_memo[key]
+        raw = self.collection.query(
+            query_embeddings=[vector], n_results=size,
+            include=["distances"] if mapping else ["metadatas", "distances"],
+        )
+        ids, distances = raw["ids"][0], raw["distances"][0]
+        if mapping:
+            lookup = {i: mapping[i] for i in ids if i in mapping}
+            missing = [i for i in ids if i not in lookup]
+            for offset in range(0, len(missing), 1000):  # 映射缺项（索引在映射缓存后被追加）逐批补取
+                got = self.collection.get(ids=missing[offset : offset + 1000], include=["metadatas"])
+                lookup.update(
+                    (i, (m["segment_id"], m.get("view"))) for i, m in zip(got["ids"], got["metadatas"])
+                )
+        else:
+            lookup = {i: (m["segment_id"], m.get("view")) for i, m in zip(ids, raw["metadatas"][0])}
+        value = (ids, distances, lookup)
+        self._raw_memo[key] = value
+        while len(self._raw_memo) > RAW_MEMO_ENTRIES:
+            self._raw_memo.popitem(last=False)
+        return value
+
+    def _query_postfiltered(self, vector, view, allowed: set[str], count: int, total: int) -> list[dict] | None:
+        size = min(total, max(count * POSTFILTER_OVERFETCH, POSTFILTER_MIN_CANDIDATES))
+        mapping = self._representation_map()
+        while size <= POSTFILTER_MAX_CANDIDATES:
+            try:
+                ids, distances, lookup = self._candidates(vector, size, mapping)
+            except Exception as exc:  # noqa: BLE001 — 任何后过滤路径失败都交给原过滤路径处理/报错
+                log.warning("无过滤向量查询失败，回退到 where 过滤：%s", exc)
+                return None
+            hits = []
+            for identifier, distance in zip(ids, distances):
+                segment_id, found_view = lookup.get(identifier, (None, None))
+                if found_view == view and segment_id in allowed:
+                    hits.append({"id": segment_id, "distance": distance})
+            exhausted = size >= total or len(ids) < size
+            if exhausted or len({hit["id"] for hit in hits}) >= count:
+                return hits
+            size = min(size * POSTFILTER_GROWTH, total)
+        return None
+
+    def _query_filtered(self, vector, view, eligible: list[str], count: int, total: int) -> list[dict]:
         # Chunk eligibility lists to bound SQLite/Chroma filter size, then globally rank.
         hits = []
         for offset in range(0, len(eligible), 500):
             where = {"$and": [{"view": view}, {"segment_id": {"$in": eligible[offset : offset + 500]}}]}
-            size = min(count, self.collection.count())
+            size = min(count, total)
             while True:
                 raw = self.collection.query(
                     query_embeddings=[vector], n_results=size, where=where, include=["metadatas", "distances"]
                 )
                 unique = {m["segment_id"] for m in raw["metadatas"][0]}
-                if len(unique) >= count or len(raw["ids"][0]) < size or size == self.collection.count():
+                if len(unique) >= count or len(raw["ids"][0]) < size or size == total:
                     break
-                size = min(size * 2, self.collection.count())
+                size = min(size * 2, total)
             hits.extend(
                 {"id": metadata["segment_id"], "distance": distance}
                 for metadata, distance in zip(raw["metadatas"][0], raw["distances"][0])
             )
+        return hits
+
+    @staticmethod
+    def _best_per_segment(hits: list[dict], count: int) -> list[dict]:
         # Many windows from one segment only contribute once to a route.
         best = {}
         for hit in sorted(hits, key=lambda v: (v["distance"], v["id"])):

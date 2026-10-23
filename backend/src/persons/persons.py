@@ -10,8 +10,10 @@ import hashlib
 import io
 import json
 import math
+from collections import OrderedDict
 from contextlib import nullcontext
 from datetime import UTC, datetime
+from threading import Lock
 
 from PIL import Image, ImageOps
 
@@ -25,9 +27,36 @@ from mindex.persons.person_models import (
     frame_review_lock,
     uid,
 )
+from mindex.persons.profiling import stage
 from mindex.shared.config import fingerprint
 from mindex.shared.person_schema import normalize_entity
 from mindex.shared.storage import Store, dumps
+
+# 检索热路径的已发布人物数据缓存：只保留最近使用的少数版本。
+PUBLISHED_CACHE_ENTRIES = 2
+_ENTITY_CACHE: OrderedDict = OrderedDict()
+_EVIDENCE_CACHE: OrderedDict = OrderedDict()
+# 历史版本的“证据 id -> 截图路径”小索引（每版本约几 MB 以内）；版本不可变，所以多留一些。
+VERSION_IMAGE_CACHE_ENTRIES = 32
+_VERSION_IMAGE_CACHE: OrderedDict = OrderedDict()
+_CACHE_LOCK = Lock()
+
+
+def _cache_get(cache: OrderedDict, key):
+    with _CACHE_LOCK:
+        if key in cache:
+            cache.move_to_end(key)
+            return cache[key]
+    return None
+
+
+def _cache_put(cache: OrderedDict, key, value, limit=PUBLISHED_CACHE_ENTRIES):
+    with _CACHE_LOCK:
+        cache[key] = value
+        cache.move_to_end(key)
+        while len(cache) > limit:
+            cache.popitem(last=False)
+    return value
 
 
 class Persons:
@@ -808,15 +837,78 @@ class Persons:
         "WHERE e.shot_id=s.id AND e.source_id=s.source_id))"
     )
 
+    # 审核列表与汇总专用。与 SHOT_STATES 语义相同，区别是先把证据行用到的 JSON 字段投影成 ev
+    # （走 person_evidence_review 覆盖索引，不读 data 溢出页），聚合与排名都只读 ev。
+    # SHOT_STATES 保持原样：流水线按单个分镜调用它，不能被物化成全表扫描。
+    @staticmethod
+    def _rows(db, sql, args=()):
+        return [dict(row) for row in db.execute(sql, args).fetchall()]
+
+    def _build_review_tables(self, db, source_id=None, shot_id=None):
+        """在当前连接里建两张临时表，供审核列表的多条语句共用：
+
+        review_ev      证据行及其用到的 JSON 字段（经 person_evidence_review 覆盖索引读取，不碰 data 溢出页）。
+        review_states  分镜级 accepted/candidate/rejected 计数，语义与 SHOT_STATES 相同。
+
+        分镜状态只取决于该分镜自己的证据行，所以素材/分镜过滤直接下推到 review_ev。
+        临时表只存在于本连接，不写主库；SHOT_STATES 保持原样，流水线按单个分镜调用它。
+        """
+        conditions, args = [], []
+        for column, value in (("source_id", source_id), ("shot_id", shot_id)):
+            if value:
+                conditions.append(column + "=?")
+                args.append(value)
+        ev_where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
+        coverage_where = "".join(
+            " AND " + column + "=?" for column, value in (("s.source_id", source_id), ("s.id", shot_id)) if value
+        )
+        coverage_args = list(args)
+        db.execute(
+            "CREATE TEMP TABLE review_ev AS SELECT id,source_id,shot_id,actor_id,role_id,status,start,"
+            "json_extract(data,'$.confirmation') AS confirmation,json_extract(data,'$.shot_excluded') AS excluded,"
+            "json_type(data,'$.score') AS score_type,json_extract(data,'$.score') AS score_value,"
+            "json_extract(data,'$.reviewed_at') AS reviewed_at FROM person_evidence" + ev_where, args,
+        )
+        db.execute("CREATE INDEX temp.review_ev_shot ON review_ev(source_id,shot_id)")
+        db.execute(
+            "CREATE TEMP TABLE review_states AS WITH "
+            "valid_pairs AS (SELECT DISTINCT ps.source_id,role.id AS role_id,performer.value AS actor_id "
+            "FROM person_sources ps JOIN person_entities role ON role.kind='role' "
+            "AND EXISTS (SELECT 1 FROM json_each(role.data,'$.work_ids') WHERE value=ps.work_id) "
+            "JOIN json_each(role.data,'$.actor_ids') performer "
+            "JOIN person_entities actor ON actor.id=performer.value AND actor.kind='actor'), "
+            "marks AS (SELECT source_id,shot_id FROM review_ev WHERE status='accepted' "
+            "AND confirmation='shot_review' GROUP BY source_id,shot_id), "
+            "removed AS (SELECT source_id,json_extract(data,'$.shot_id') AS shot_id FROM person_coverage "
+            "WHERE json_extract(data,'$.removed_confirmation')=1 GROUP BY source_id,shot_id) "
+            "SELECT e.shot_id AS shot_id,e.source_id AS source_id, "
+            "SUM(e.status='accepted' AND pair.role_id IS NOT NULL) AS accepted, "
+            "SUM(e.status='candidate' AND pair.role_id IS NOT NULL) AS candidate, "
+            "SUM(CASE WHEN e.status='rejected' AND e.confirmation='shot_review' AND marks.shot_id IS NULL "
+            "AND (e.excluded=1 OR removed.shot_id IS NULL) THEN 1 ELSE 0 END) AS rejected "
+            "FROM review_ev e JOIN segments s ON s.id=e.shot_id AND s.source_id=e.source_id "
+            "LEFT JOIN valid_pairs pair ON pair.source_id=e.source_id AND pair.role_id=e.role_id AND pair.actor_id=e.actor_id "
+            "LEFT JOIN marks ON marks.source_id=e.source_id AND marks.shot_id=e.shot_id "
+            "LEFT JOIN removed ON removed.source_id=e.source_id AND removed.shot_id=e.shot_id "
+            "WHERE s.kind='shot' GROUP BY e.shot_id,e.source_id "
+            "UNION ALL SELECT DISTINCT s.id,s.source_id,0,0,0 FROM person_coverage c "
+            "JOIN segments s ON s.id=json_extract(c.data,'$.shot_id') AND s.source_id=c.source_id "
+            "WHERE s.kind='shot' AND NOT EXISTS (SELECT 1 FROM person_evidence e "
+            "WHERE e.shot_id=s.id AND e.source_id=s.source_id)" + coverage_where, coverage_args,
+        )
+        db.execute("CREATE INDEX temp.review_states_shot ON review_states(source_id,shot_id)")
+
     def review_summary(self):
         """每个素材的分镜级状态计数；分类规则与审核列表完全一致。"""
-        rows = self.store.rows(
-            "SELECT source_id, CASE WHEN accepted>0 THEN 'accepted' "
-            "WHEN candidate>0 OR rejected=0 THEN 'candidate' "
-            "ELSE 'rejected' END AS bucket, COUNT(*) AS shots FROM "
-            + self.SHOT_STATES
-            + " GROUP BY source_id, bucket"
-        )
+        with self.store.connect() as db:
+            self._build_review_tables(db)
+            rows = self._rows(
+                db,
+                "SELECT source_id, CASE WHEN accepted>0 THEN 'accepted' "
+                "WHEN candidate>0 OR rejected=0 THEN 'candidate' "
+                "ELSE 'rejected' END AS bucket, COUNT(*) AS shots FROM review_states"
+                " GROUP BY source_id, bucket",
+            )
         summary: dict[str, dict[str, int]] = {}
         for row in rows:
             summary.setdefault(row["source_id"], {"accepted": 0, "candidate": 0, "rejected": 0})[
@@ -826,6 +918,19 @@ class Persons:
 
     def review_shots(
         self, source_id=None, status=None, *, limit=50, offset=0, shot_id=None,
+        actor_id=None, role_id=None, no_candidate=False, compact=False,
+    ):
+        """按分镜分组返回证据；规则见 _review_shots。临时表在本连接内建一次，三条聚合语句与逐镜证据查询共用。"""
+        with self.store.connect() as db:
+            with stage("states_build"):
+                self._build_review_tables(db, source_id, shot_id)
+            return self._review_shots(
+                db, source_id, status, limit=limit, offset=offset, shot_id=shot_id,
+                actor_id=actor_id, role_id=role_id, no_candidate=no_candidate, compact=compact,
+            )
+
+    def _review_shots(
+        self, db, source_id=None, status=None, *, limit=50, offset=0, shot_id=None,
         actor_id=None, role_id=None, no_candidate=False, compact=False,
     ):
         """按分镜分组返回证据。
@@ -851,8 +956,8 @@ class Persons:
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
         query = (
             "WITH scoped AS (SELECT s.id AS shot_id,s.source_id,s.start,s.end,"
-            "k.accepted,k.candidate,k.rejected FROM segments s JOIN " + self.SHOT_STATES
-            + " k ON k.shot_id=s.id AND k.source_id=s.source_id" + where + "), "
+            "k.accepted,k.candidate,k.rejected FROM segments s JOIN review_states k "
+            "ON k.shot_id=s.id AND k.source_id=s.source_id" + where + "), "
         )
         if status == "rejected":
             # 已人工排除的分镜只按素材、状态分页，无需再依赖身份表进行排名或归类。
@@ -864,14 +969,12 @@ class Persons:
             # 同分时优先当前已接受身份，再取最近的人工结论，最后以帧时间和 ID 保持稳定。
             query += (
                 "ranked AS (SELECT e.source_id,e.shot_id,e.actor_id,e.role_id,"
-                "CASE WHEN json_type(e.data,'$.score') IN ('integer','real') "
-                "THEN json_extract(e.data,'$.score') ELSE 0 END AS score,"
+                "CASE WHEN e.score_type IN ('integer','real') THEN e.score_value ELSE 0 END AS score,"
                 "ROW_NUMBER() OVER (PARTITION BY e.source_id,e.shot_id ORDER BY "
-                "CASE WHEN json_type(e.data,'$.score') IN ('integer','real') "
-                "THEN json_extract(e.data,'$.score') ELSE 0 END DESC,"
-                "(e.status='accepted') DESC,COALESCE(json_extract(e.data,'$.reviewed_at'),'') DESC,"
+                "CASE WHEN e.score_type IN ('integer','real') THEN e.score_value ELSE 0 END DESC,"
+                "(e.status='accepted') DESC,COALESCE(e.reviewed_at,'') DESC,"
                 "e.start,e.id) AS rank "
-                "FROM person_evidence e JOIN scoped s ON s.shot_id=e.shot_id AND s.source_id=e.source_id "
+                "FROM review_ev e JOIN scoped s ON s.shot_id=e.shot_id AND s.source_id=e.source_id "
                 "JOIN person_entities a ON a.id=e.actor_id AND a.kind='actor' WHERE " + self.VALID_ROLE + "), "
                 "classified AS (SELECT s.*,r.actor_id,r.role_id,r.score FROM scoped s "
                 "LEFT JOIN ranked r ON r.source_id=s.source_id AND r.shot_id=s.shot_id AND r.rank=1), "
@@ -884,11 +987,15 @@ class Persons:
                 "SELECT s.source_id,s.shot_id,NULL,NULL FROM classified s WHERE s.accepted>0 "
                 "AND NOT EXISTS (SELECT 1 FROM confirmed c WHERE c.source_id=s.source_id AND c.shot_id=s.shot_id)) "
             )
-            filters = self.store.rows(
-                query + "SELECT actor_id,role_id,COUNT(*) AS count FROM memberships GROUP BY actor_id,role_id",
-                args,
-            )
-        scope_total = self.store.one(query + "SELECT COUNT(*) AS n FROM classified", args)["n"]
+            with stage("filters_sql"):
+                filters = self._rows(
+                    db, query + "SELECT actor_id,role_id,COUNT(*) AS count FROM memberships "
+                    "GROUP BY actor_id,role_id ORDER BY actor_id,role_id",
+                    args,
+                )
+        with stage("scope_total_sql"):
+            # classified 对 scoped 的每个分镜恰好产出一行（rank=1 左连接），直接数 scoped 即可，省掉排名。
+            scope_total = db.execute(query + "SELECT COUNT(*) AS n FROM scoped", args).fetchone()["n"]
         pair_where, pair_args = "", list(args)
         membership_match = "m.source_id=s.source_id AND m.shot_id=s.shot_id"
         if status == "rejected":
@@ -908,11 +1015,12 @@ class Persons:
             "(SELECT json_group_array(json_object('actor_id',actor_id,'role_id',role_id)) "
             "FROM (SELECT actor_id,role_id FROM confirmed c "
             "WHERE c.source_id=s.source_id AND c.shot_id=s.shot_id ORDER BY actor_id,role_id))")
-        shots = self.store.rows(
-            query + "SELECT s.*," + confirmed_people + " AS confirmed_people FROM classified s" + pair_where
-            + " ORDER BY s.source_id,s.start,s.shot_id LIMIT ? OFFSET ?",
-            [*pair_args, limit, offset],
-        )
+        with stage("page_sql"):
+            shots = self._rows(
+                db, query + "SELECT s.*," + confirmed_people + " AS confirmed_people FROM classified s" + pair_where
+                + " ORDER BY s.source_id,s.start,s.shot_id LIMIT ? OFFSET ?",
+                [*pair_args, limit, offset],
+            )
         items = []
         for shot in shots:
             evidence_sql = (
@@ -925,11 +1033,14 @@ class Persons:
                 "SELECT * FROM person_evidence e WHERE source_id=? AND shot_id=? AND " + self.VALID_ROLE + " ORDER BY start,id"
             )
             raw_rows = []
-            for row in self.store.rows(evidence_sql, (shot["source_id"], shot["shot_id"])):
-                data = {k: v for k, v in json.loads(row["data"]).items() if k not in {"body_feature", "space"}}
-                if compact and not row["original_recorded"]:
-                    data.pop("original_score", None)
-                raw_rows.append({**row, "data": data})
+            with stage("evidence_sql"):
+                fetched = self._rows(db, evidence_sql, (shot["source_id"], shot["shot_id"]))
+            with stage("json_decode"):
+                for row in fetched:
+                    data = {k: v for k, v in json.loads(row["data"]).items() if k not in {"body_feature", "space"}}
+                    if compact and not row["original_recorded"]:
+                        data.pop("original_score", None)
+                    raw_rows.append({**row, "data": data})
             people = self.confirmed_scores(json.loads(shot["confirmed_people"]), raw_rows)
             recognized = {}
             for row in raw_rows:
@@ -1055,20 +1166,116 @@ class Persons:
             progress({"stage": "published", "completed": count, "total": count, "unit": "shots"})
         return {"release_id": release, "content_id": content_id, "person_version": version}
 
-    def published(self, content_id, *, pinned=False, release_id=None, source_id=None):
+    def release_for(self, content_id, *, pinned=False, release_id=None):
         if release_id:
-            release = self.store.one(
+            return self.store.one(
                 "SELECT * FROM search_releases WHERE id=? AND content_id=?", (release_id, content_id)
             )
-        elif pinned:
-            release = self.store.one(
+        if pinned:
+            return self.store.one(
                 "SELECT * FROM search_releases WHERE content_id=? ORDER BY rowid DESC LIMIT 1", (content_id,)
             )
-        else:
-            release = self.store.one(
-                "SELECT r.* FROM search_releases r JOIN settings s ON s.value=r.id WHERE s.key='active.release' AND r.content_id=?",
-                (content_id,),
-            )
+        return self.store.one(
+            "SELECT r.* FROM search_releases r JOIN settings s ON s.value=r.id WHERE s.key='active.release' AND r.content_id=?",
+            (content_id,),
+        )
+
+    def retain_published(self, keep_person_ids: set) -> int:
+        """淘汰缓存中不在 keep_person_ids 里的已发布人物版本（实体与证据索引）。返回淘汰条数。"""
+        path = str(self.store.path)
+        removed = 0
+        with _CACHE_LOCK:
+            for cache in (_ENTITY_CACHE, _EVIDENCE_CACHE):
+                stale = [key for key in cache if key[0] == path and key[1] not in keep_person_ids]
+                for key in stale:
+                    del cache[key]
+                removed += len(stale)
+        return removed
+
+    def _version_key(self, person_id):
+        """person_versions 行按内容寻址、写入后不可变；长度进键，防同 id 被离线迁移改写后读到旧缓存。"""
+        row = self.store.one("SELECT length(CAST(data AS BLOB)) AS n FROM person_versions WHERE id=?", (person_id,))
+        return (str(self.store.path), person_id, row["n"]) if row else None
+
+    def _version_image_index(self, version_id):
+        """某个历史版本里 证据 id -> [{shot_id, source_id, data:{image_path}}]。
+
+        版本行写入后不可变，所以每个版本只解析一次并缓存；解析交给 SQLite 的 json_each，
+        不把几十 MB 的 JSON 读进 Python。键沿用 _version_key（含长度）。
+        """
+        key = self._version_key(version_id)
+        if key is None:
+            return {}
+        cached = _cache_get(_VERSION_IMAGE_CACHE, key)
+        if cached is not None:
+            return cached
+        index: dict = {}
+        for row in self.store.rows(
+            "SELECT json_extract(e.value,'$.id') AS id,json_extract(e.value,'$.shot_id') AS shot_id,"
+            "json_extract(e.value,'$.source_id') AS source_id,json_extract(e.value,'$.data.image_path') AS image_path "
+            "FROM person_versions v,json_each(v.data,'$.evidence') e WHERE v.id=?", (version_id,),
+        ):
+            index.setdefault(row["id"], []).append({
+                "shot_id": row["shot_id"], "source_id": row["source_id"], "data": {"image_path": row["image_path"]},
+            })
+        return _cache_put(_VERSION_IMAGE_CACHE, key, index, VERSION_IMAGE_CACHE_ENTRIES)
+
+    def version_evidence(self, evidence_id):
+        """按版本从新到旧，惰性产出历史发布版本里同 id 的证据（找到可用截图即可停止遍历）。"""
+        for version in self.store.rows("SELECT id FROM person_versions ORDER BY created_at DESC,id"):
+            yield from self._version_image_index(version["id"]).get(evidence_id, [])
+
+    def published_entities(self, release):
+        """检索热路径：只取已发布版本的实体（几 KB），不解析数十 MB 的证据；结果进程内缓存、只读。"""
+        person_id = release["person_id"] if release else None
+        key = self._version_key(person_id) if person_id else None
+        if key is None:
+            return {"entities": []}
+        cached = _cache_get(_ENTITY_CACHE, key)
+        if cached is not None:
+            return cached
+        row = self.store.one(
+            "SELECT json_extract(data,'$.entities') AS entities, json_extract(data,'$.format') AS format "
+            "FROM person_versions WHERE id=?", (person_id,))
+        entities = json.loads(row["entities"] or "[]")
+        lookup = {e["id"]: e for e in entities}
+        value = {"entities": [normalize_entity(e, lookup) for e in entities]}
+        if row["format"] is not None:
+            value["format"] = row["format"]
+        return _cache_put(_ENTITY_CACHE, key, value)
+
+    def published_evidence(self, release):
+        """出镜检索才需要的证据与覆盖区间；缓存、只读。
+
+        与 published() 的区别：剔除检索输出本来就会丢弃的 body_feature（约占 58%），并让重复的
+        space 共用同一对象，所以常驻内存只有原始 JSON 解析结果的一小部分。
+        """
+        person_id = release["person_id"] if release else None
+        key = self._version_key(person_id) if person_id else None
+        if key is None:
+            return {"evidence": [], "coverage": []}
+        cached = _cache_get(_EVIDENCE_CACHE, key)
+        if cached is not None:
+            return cached
+        row = self.store.one("SELECT data FROM person_versions WHERE id=?", (person_id,))
+        data = json.loads(row["data"])
+        spaces = {}
+        for evidence in data["evidence"]:
+            evidence["role_id"] = evidence.pop("stage_id", None) or evidence["role_id"]
+            detail = evidence.get("data")
+            if isinstance(detail, dict):
+                detail.pop("body_feature", None)
+                if detail.get("space") is not None:
+                    detail["space"] = spaces.setdefault(dumps(detail["space"]), detail["space"])
+        from mindex.persons.person_names import EvidenceIndex
+
+        return _cache_put(_EVIDENCE_CACHE, key, {
+            "evidence": data["evidence"], "coverage": data["coverage"],
+            "evidence_index": EvidenceIndex(data["evidence"]),  # 区间索引随版本缓存，查询时不再逐条扫描
+        })
+
+    def published(self, content_id, *, pinned=False, release_id=None, source_id=None):
+        release = self.release_for(content_id, pinned=pinned, release_id=release_id)
         row = (
             self.store.one(
                 "SELECT json_object('entities',json('[]'),'evidence',"

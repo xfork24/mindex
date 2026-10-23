@@ -155,3 +155,11 @@ def visibility_key(store) -> str:
             "segments": store.rows("SELECT id,hidden FROM segment_curation ORDER BY id"),
         }
     )
+
+
+def visibility_key_cached(store, ttl: float = 1.0) -> str:
+    """``visibility_key`` 的短 TTL 缓存版本：两次全表扫描在只读展示热路径上去重。"""
+    cached = getattr(store, "_hot_cached", None)
+    if cached is None:
+        return visibility_key(store)
+    return cached("visibility_key", ttl, lambda: visibility_key(store))

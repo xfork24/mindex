@@ -499,6 +499,9 @@ class DetailContext:
     store: Store | None = None
     settings: dict = field(default_factory=dict)
     conflicts: dict = field(default_factory=dict)
+    # 只读展示（detail）允许用 Store 的短 TTL 缓存读 active_index / visibility_key；
+    # 构建/签名路径不走这里（另建 Store 实例），不受缓存影响。
+    display: bool = False
 
     def database(self, config):
         if self.store is None:
@@ -510,13 +513,15 @@ def settings(config, p, stage, *, context=None):
     if context is not None:
         if stage not in context.settings:
             context.settings[stage] = portable_parameters(config, _settings(
-                config, p, stage, store=context.database(config) if stage == "recall" else None,
+                config, p, stage,
+                store=context.database(config) if stage == "recall" else None,
+                display=context.display,
             ))
         return context.settings[stage]
     return portable_parameters(config, _settings(config, p, stage))
 
 
-def _settings(config, p, stage, *, store=None):
+def _settings(config, p, stage, *, store=None, display=False):
     o = p["options"]
     if stage == "split":
         return {
@@ -525,7 +530,14 @@ def _settings(config, p, stage, *, store=None):
         }
     if stage == "recall":
         store = store or Store(config.data_dir)
-        active = store.active_index()
+        # 展示路径用短 TTL 缓存减少重复整表扫描；构建路径（display=False）始终读新值。
+        if display:
+            from mindex.studio.studio_artifacts import visibility_key_cached
+            active = store.active_index_cached()
+            visibility = visibility_key_cached(store)
+        else:
+            active = store.active_index()
+            visibility = visibility_key(store)
         # Text recall is implicitly affected by the active person release; cover it in the key.
         return {
             "index_id": active["id"] if active else None,
@@ -534,7 +546,7 @@ def _settings(config, p, stage, *, store=None):
             "recall": {**config.studio.recall.model_dump(), "limit": o["recall_limit"]},
             "search": config.search.model_dump(),
             "embedding": sanitized(config.embedding.model_dump()),
-            "visibility": visibility_key(store),
+            "visibility": visibility,
         }
     if stage == "tts":
         voice = effective_voice(config, p)
@@ -1616,9 +1628,51 @@ def compact_version(item):
 
 def detail(config, job_id, w, *, store=None, compact=False):
     p = plan(w, w["active_plan"])
-    context = DetailContext(store=store)
-    view = {**w, "versions": {k: compact_version(v) for k, v in w["versions"].items()}} if compact else w
-    result = copy.deepcopy(view)
+    context = DetailContext(store=store, display=True)
+    from urllib.parse import quote
+
+    references = None
+
+    def display_version(item):
+        """Return a view copy with display-only fields injected.
+
+        ``w`` is re-read from disk every request and discarded afterwards, so the
+        originals are never shared across requests. We still copy just the two
+        nested structures we mutate here — per-file ``url`` and recall evidence
+        ``reference_url`` — instead of deep-copying the whole workspace, which was
+        the dominant cost of this response.
+        """
+        nonlocal references
+        files = {}
+        for name, metadata in item["files"].items():
+            url = f"/api/studio/jobs/{job_id}/artifacts/{quote(metadata['path'], safe='/')}"
+            files[name] = {**metadata, "url": url}
+        copy_item = {**item, "files": files}
+        if item["stage"] == "recall" and item.get("data", {}).get("results"):
+            results = []
+            for candidate in item["data"]["results"]:
+                evidence_list = candidate.get("person_evidence")
+                if not evidence_list:
+                    results.append(candidate)
+                    continue
+                if references is None:
+                    from mindex.persons.person_processing import EvidenceReferences
+                    references = EvidenceReferences(config, store or Store(config.data_dir))
+                results.append({
+                    **candidate,
+                    "person_evidence": [
+                        {**evidence, "reference_url": references.url(evidence)}
+                        for evidence in evidence_list
+                    ],
+                })
+            copy_item = {**copy_item, "data": {**item["data"], "results": results}}
+        return copy_item
+
+    versions = {
+        k: display_version(compact_version(v) if compact else v)
+        for k, v in w["versions"].items()
+    }
+    result = {**w, "versions": versions}
     result["job"] = studio.load_job(config, job_id)
     result["revision"] = revision(p)
     result["tts_settings"] = {
@@ -1642,20 +1696,4 @@ def detail(config, job_id, w, *, store=None, compact=False):
                 result["conflicts"][f"{stage}:{sid}"] = conflicts(
                     config, job_id, w, p, stage, sid, vid, context=context,
                 )
-    for item in result["versions"].values():
-        for metadata in item["files"].values():
-            from urllib.parse import quote
-
-            metadata["url"] = f"/api/studio/jobs/{job_id}/artifacts/{quote(metadata['path'], safe='/')}"
-    # Old recall artifacts gain matched-reference display metadata without rewriting versions.
-    references = None
-    for item in result["versions"].values():
-        if item["stage"] != "recall":
-            continue
-        for candidate in item.get("data", {}).get("results", []):
-            for evidence in candidate.get("person_evidence", []):
-                if references is None:
-                    from mindex.persons.person_processing import EvidenceReferences
-                    references = EvidenceReferences(config, store or Store(config.data_dir))
-                evidence["reference_url"] = references.url(evidence)
     return result

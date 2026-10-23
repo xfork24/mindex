@@ -2,9 +2,24 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
+import uuid
+from collections import OrderedDict
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+
+# 检索热路径的整索引快照缓存（活动索引 + 一个固定预览索引足够）。
+SNAPSHOT_CACHE_ENTRIES = 2
+# 原地改写或删除 index_members 的维护操作用它显式使缓存失效。
+SNAPSHOT_REVISION_KEY = "snapshots.rev"
+_SNAPSHOT_CACHE: OrderedDict = OrderedDict()
+_SNAPSHOT_LOCK = threading.Lock()
+
+
+def bump_snapshot_revision(db) -> None:
+    """在改写/删除 index_members 的同一事务里调用，使各进程的快照缓存失效。"""
+    db.execute("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)", (SNAPSHOT_REVISION_KEY, uuid.uuid4().hex))
 
 
 def dumps(value: object) -> str:
@@ -128,6 +143,27 @@ class Store:
             if "cache_key" not in columns:
                 db.execute("ALTER TABLE representations ADD COLUMN cache_key TEXT")
             db.execute("CREATE INDEX IF NOT EXISTS representations_cache ON representations(cache_key)")
+        # 创作详情热路径的短 TTL 缓存：同一轮 UI 交互里反复读 active_index / visibility_key
+        # 会重复开关 sqlite 连接。缓存只影响冲突展示，构建仍在锁内用新读校验签名。
+        self._hot_cache: dict[str, tuple[float, object]] = {}
+        self._hot_cache_lock = threading.Lock()
+
+    def _hot_cached(self, key: str, ttl: float, producer):
+        import time
+
+        with self._hot_cache_lock:
+            entry = self._hot_cache.get(key)
+            now = time.monotonic()
+            if entry is not None and now - entry[0] < ttl:
+                return entry[1]
+        value = producer()
+        with self._hot_cache_lock:
+            self._hot_cache[key] = (time.monotonic(), value)
+        return value
+
+    def active_index_cached(self, ttl: float = 1.0) -> dict | None:
+        """``active_index`` 的短 TTL 缓存版本，供只读展示的热路径使用。"""
+        return self._hot_cached("active_index", ttl, self.active_index)
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -284,6 +320,46 @@ class Store:
                          + (" AND json_extract(snapshot,'$.source_id')=?" if source_id else ""),
                          (index_id, source_id) if source_id else (index_id,))
         return [json.loads(row["snapshot"]) for row in rows]
+
+    def snapshot_signature(self, index_id: str) -> tuple:
+        """索引快照是否变化的廉价签名：增删行、完成状态、内容长度或显式修订号任一变化都会改变它。"""
+        row = self.one(
+            "SELECT count(*) AS n, COALESCE(sum(complete),0) AS c, COALESCE(sum(length(snapshot)),0) AS l, "
+            "(SELECT value FROM settings WHERE key=?) AS r FROM index_members WHERE index_id=?",
+            (SNAPSHOT_REVISION_KEY, index_id),
+        )
+        return (row["n"], row["c"], row["l"], row["r"])
+
+    def retain_snapshots(self, keep: set[str]) -> int:
+        """淘汰本库快照缓存中不在 keep 里的索引版本（活动指针移走后，旧版本不会再被默认路径用到）。返回淘汰条数。"""
+        path = str(self.path)
+        with _SNAPSHOT_LOCK:
+            stale = [key for key in _SNAPSHOT_CACHE if key[0] == path and key[1] not in keep]
+            for key in stale:
+                del _SNAPSHOT_CACHE[key]
+        return len(stale)
+
+    def snapshots_shared(self, index_id: str) -> list[dict]:
+        """进程内共享的整索引快照，供只读的检索热路径使用；调用方不得修改返回的列表及其中的字典。
+
+        签名先于加载取得：加载期间若有写入，缓存里是较新数据却挂着旧签名，下次比对不一致会重新加载。
+        """
+        signature = self.snapshot_signature(index_id)
+        key = (str(self.path), index_id)
+        with _SNAPSHOT_LOCK:
+            cached = _SNAPSHOT_CACHE.get(key)
+            if cached is not None and cached[0] == signature:
+                _SNAPSHOT_CACHE.move_to_end(key)
+                return cached[1]
+        loaded = self.snapshots(index_id)
+        with _SNAPSHOT_LOCK:
+            _SNAPSHOT_CACHE[key] = (signature, loaded)
+            _SNAPSHOT_CACHE.move_to_end(key)
+            # 容量按数据目录计：同一数据目录最多保留最近使用的 SNAPSHOT_CACHE_ENTRIES 个版本。
+            siblings = [k for k in _SNAPSHOT_CACHE if k[0] == key[0]]
+            for stale in siblings[: max(0, len(siblings) - SNAPSHOT_CACHE_ENTRIES)]:
+                del _SNAPSHOT_CACHE[stale]
+        return loaded
 
     def media_available(self, relative: str) -> bool:
         path = (self.root / relative).resolve()

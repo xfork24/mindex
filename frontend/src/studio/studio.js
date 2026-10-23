@@ -220,6 +220,18 @@ async function loadJobs() {
     );
     list.append(b);
   }
+  // 标题后台生成：有待生成任务时轻量轮询刷新，完成后自动替换占位标题。
+  const pending = data.items.some((job) => job.title_pending);
+  clearTimeout(state.titlePollTimer);
+  if (pending) {
+    state.titlePollTimer = setTimeout(() => {
+      loadJobs().catch(() => {});
+      // 当前打开的任务若正在等待标题，刷新其头部展示。
+      if (state.id && state.jobs?.find((j) => j.id === state.id && j.title_pending)) {
+        refresh().catch(() => {});
+      }
+    }, 1500);
+  }
 }
 async function selectJob(id, { reloadJobs = true } = {}) {
   state.token++;

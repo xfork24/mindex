@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
@@ -9,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from mindex.admin.admin import admin_router
 from mindex.admin.curation import EntityNotFound
 from mindex.models.adapters import ModelError, MultimodalEmbedder, Speaker, Storyboarder
+from mindex.persons import profiling
 from mindex.search.api import search_router
 from mindex.settings.runtime_settings import RuntimeConfig
 from mindex.settings.settings_api import settings_router
@@ -42,6 +44,7 @@ def create_app(
             return response
         from mindex.shared.i18n import add_message_metadata
 
+        rewrite_started = time.perf_counter()
         payload = b"".join([chunk async for chunk in response.body_iterator])
         try:
             data = add_message_metadata(json.loads(payload))
@@ -49,7 +52,13 @@ def create_app(
             from starlette.responses import Response
             return Response(payload, status_code=response.status_code, headers=dict(response.headers))
         headers = {key: value for key, value in response.headers.items() if key != "content-length"}
-        return JSONResponse(data, status_code=response.status_code, headers=headers, background=response.background)
+        result = JSONResponse(data, status_code=response.status_code, headers=headers, background=response.background)
+        if profiling.enabled() and request.url.path.startswith("/api/persons/"):
+            # 仅在人物库性能分析开关打开时追加：中间件整包解析并重写 JSON 的耗时与体积。
+            timing = f'middleware;dur={(time.perf_counter() - rewrite_started) * 1000:.2f};desc="bytes={len(payload)}"'
+            existing = result.headers.get("server-timing")
+            result.headers["Server-Timing"] = f"{existing}, {timing}" if existing else timing
+        return result
 
     if index_id and store.index_version(index_id)["status"] != "ready":
         raise ValueError("固定预览只允许就绪索引")

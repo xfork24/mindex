@@ -321,6 +321,7 @@ def _summary(state: dict) -> dict:
     return {
         "id": state["id"],
         "title": state["title"],
+        "title_pending": state.get("title_pending", False),
         "created_at": state["created_at"],
         "updated_at": state["updated_at"],
         "steps": steps,
@@ -352,7 +353,13 @@ def scoped_filters(filters: Filters, scope: set[str] | None) -> Filters:
 
 
 def create_job(config: Config, text: str, title: str | None = None, options: dict | None = None,
-               *, title_generator=None) -> dict:
+               *, store=None, defer_title: bool = False) -> dict:
+    """创建创作任务。
+
+    标题生成是一次阻塞的 LLM 往返，会显著拖慢创建的感知延迟。调用方传入
+    ``defer_title=True`` 时，这里只写占位标题并标记 ``title_pending``，由上层在后台
+    线程里补全真实标题；不需要延迟（如 CLI、测试）时留空即用占位标题。
+    """
     text = (text or "").strip()
     if not text:
         raise StudioError("请输入创作文案")
@@ -362,16 +369,17 @@ def create_job(config: Config, text: str, title: str | None = None, options: dic
         parsed = JobOptions.model_validate(options or {})
     except ValueError as exc:
         raise StudioError(f"任务选项无效：{exc}") from exc
-    from mindex.shared.storage import Store
+    if store is None:
+        from mindex.shared.storage import Store
 
-    store = Store(config.data_dir)
+        store = Store(config.data_dir)
     known = store.source_ids() if parsed.source_ids else set()
     unknown = [value for value in parsed.source_ids or [] if value not in known]
     if unknown:
         raise StudioError(f"素材不存在：{'、'.join(unknown[:3])}")
     active = store.active_index()
-    if not (title or "").strip() and title_generator is not None:
-        title = title_generator(text)
+    # 未指定标题且请求延迟生成时，占位标题先行，真实标题由后台补全。
+    title_pending = not (title or "").strip() and defer_title
     job_id = f"{datetime.now():%Y%m%d-%H%M%S}-{uuid4().hex[:6]}"
     directory = job_dir(config, job_id)
     if directory.exists():
@@ -380,6 +388,7 @@ def create_job(config: Config, text: str, title: str | None = None, options: dic
         "schema": 1,
         "id": job_id,
         "title": (title or text[:20]).strip()[:60] or "未命名创作",
+        "title_pending": title_pending,
         "input_text": text,
         "created_at": now(),
         "updated_at": now(),
@@ -413,23 +422,49 @@ def load_job(config: Config, job_id: str) -> dict:
         raise StudioError("任务状态 schema 版本不受支持")
     state.setdefault("execution", {"status": "idle", "current_step": None, "remaining_steps": []})
     state.setdefault("source_ids", None)  # 老任务没有素材范围，即不限
+    state.setdefault("title_pending", False)  # 老任务标题早已确定，不处于待生成态
     return state
 
 
-def list_jobs(config: Config) -> list[dict]:
+def list_jobs(config: Config, *, recover: bool = False) -> list[dict]:
+    """列出任务摘要。
+
+    ``recover=True`` 时顺带做崩溃恢复：以前这是 ``recover_stale`` 独立再扫一遍任务
+    目录（读完每个 job.json 后 ``list_jobs`` 又全量读一次），现在合并成一次扫描。
+    只有拿到空闲锁时才会改写被中断的 running 状态，语义与原先一致。
+    """
     root = studio_root(config)
     if not root.is_dir():
         return []
-    summaries = []
-    for directory in root.iterdir():
-        if not directory.is_dir():
-            continue
+    lock = None
+    if recover:
+        lock = FileLock(str(lock_path(config)), timeout=0)
         try:
-            state = load_job(config, directory.name)
-        except (EntityNotFound, StudioError, ValueError):
-            continue
-        summaries.append(_summary(state))
-    return sorted(summaries, key=lambda item: item["created_at"], reverse=True)
+            lock.acquire()
+        except Timeout:
+            lock = None  # 有步骤在执行，不动状态；仍照常列出任务
+    try:
+        summaries = []
+        for directory in root.iterdir():
+            if not directory.is_dir():
+                continue
+            try:
+                state = load_job(config, directory.name)
+            except (EntityNotFound, StudioError, ValueError):
+                continue
+            if lock is not None:
+                running = [s for s, v in state.get("steps", {}).items() if v.get("status") == "running"]
+                if running or state.get("execution", {}).get("status") == "running":
+                    for step in running:
+                        fail_step(config, directory.name, step,
+                                  StudioError("服务重启导致步骤中断，请重跑该步骤"))
+                    set_execution(config, directory.name, "failed", None, [])
+                    state = load_job(config, directory.name)  # 恢复后重读，摘要反映新状态
+            summaries.append(_summary(state))
+        return sorted(summaries, key=lambda item: item["created_at"], reverse=True)
+    finally:
+        if lock is not None:
+            lock.release()
 
 
 def delete_job(config: Config, job_id: str):

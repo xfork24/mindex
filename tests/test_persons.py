@@ -1843,6 +1843,27 @@ def test_person_selection_without_text_and_evidence_paging(catalogue, config):
     assert client.get("/api/persons/evidence/" + first["items"][0]["id"]).status_code == 200
 
 
+def test_onscreen_search_resolves_reference_urls_only_for_returned_results(catalogue, config, monkeypatch):
+    """reference_url 要读特征缓存、较贵：只为最终返回的 limit 条结果计算，而不是全部候选。"""
+    from mindex.persons.person_processing import EvidenceReferences
+    from mindex.search.search import SearchEngine
+
+    p, work, actor = catalogue
+    role = p.save(Entity(kind="role", name="测试角色", work_ids=[work], actor_ids=[actor["id"]]))
+    p.add_reference(actor["id"], photo(), role_id=role["id"])
+    PersonProcessor(config, FakeClient(), Tracker).run("source", PersonOptions())
+    publish_content(p, config)
+    p.publish()
+    calls = []
+    original = EvidenceReferences.url
+    monkeypatch.setattr(EvidenceReferences, "url", lambda self, evidence: calls.append(evidence["id"]) or original(self, evidence))
+    result = SearchEngine(config).text(TextSearch(person_ids=[actor["id"]], granularity="shot", limit=1))
+    assert len(result["results"]) == 1 and result["eligible_segments"] == 3
+    returned = {item["id"] for item in result["results"][0]["person_evidence"]}
+    assert returned and set(calls) == returned  # 只解析了返回结果里的证据
+    assert all("reference_url" in item for item in result["results"][0]["person_evidence"])
+
+
 def test_shot_review_marks_persons_and_rejects_unmarked_rows(catalogue):
     from mindex.persons.person_models import ShotReview
 

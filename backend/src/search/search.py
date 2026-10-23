@@ -3,7 +3,9 @@ from __future__ import annotations
 import math
 import re
 import tempfile
-from collections import Counter, defaultdict
+import threading
+from collections import Counter, OrderedDict, defaultdict
+from functools import lru_cache
 from pathlib import Path
 from time import perf_counter
 
@@ -12,7 +14,7 @@ import jieba
 from mindex.admin.curation import SOURCE_SQL, Library, source_public
 from mindex.models.adapters import ModelError, MultimodalEmbedder, make_embedder
 from mindex.processing.indexing import VectorIndex
-from mindex.shared.config import Config
+from mindex.shared.config import Config, fingerprint
 from mindex.shared.images import image_png
 from mindex.shared.media import cut, probe, windows
 from mindex.shared.storage import Store
@@ -20,24 +22,40 @@ from mindex.shared.types import Filters, TextSearch
 
 jieba.setLogLevel(30)
 
+# 文档词频缓存条目上限：三个渠道 × 数千片段，每条是一篇文档的 Counter。
+DOCUMENT_TERMS_CACHE_SIZE = 50000
+# 查询向量缓存条目上限（每条 4096 维 float，约 100 KB）。
+QUERY_VECTOR_CACHE_SIZE = 128
+_QUERY_VECTORS: OrderedDict = OrderedDict()
+_QUERY_VECTOR_LOCK = threading.Lock()
+
 
 def tokens(text: str) -> list[str]:
     return [t.lower() for t in jieba.cut_for_search(text) if re.search(r"[\w\u4e00-\u9fff]", t)]
 
 
+@lru_cache(maxsize=DOCUMENT_TERMS_CACHE_SIZE)
+def document_terms(text: str) -> tuple[Counter, int]:
+    """文档的词频与总词数。按文本内容缓存，文本变了自然是新键；返回值只读，调用方不得修改。"""
+    terms = Counter(tokens(text))
+    return terms, sum(terms.values())
+
+
 def lexical_search(text: str, snapshots: list[dict], count: int, exclude=()) -> list[dict]:
     terms = Counter(tokens(text))
-    documents = [
-        Counter(tokens("\n".join(v for k, v in s["views"].items() if k not in exclude))) for s in snapshots
+    parsed = [
+        document_terms("\n".join(v for k, v in s["views"].items() if k not in exclude)) for s in snapshots
     ]
-    lengths = [sum(doc.values()) for doc in documents]
+    documents = [document for document, _ in parsed]
+    lengths = [length for _, length in parsed]
     mean_length = sum(lengths) / max(1, len(lengths)) or 1
-    frequency = Counter(term for document in documents for term in document)
+    # 只需查询词的文档频率；等价于对全部词建 Counter，但不必遍历每篇文档的全部词。
+    frequency = {term: sum(1 for document in documents if document.get(term)) for term in terms}
     results = []
     for segment, document, length in zip(snapshots, documents, lengths):
         score = 0.0
         for term in terms:
-            tf = document[term]
+            tf = document.get(term, 0)
             if not tf:
                 continue
             idf = math.log(1 + (len(documents) - frequency[term] + 0.5) / (frequency[term] + 0.5))
@@ -118,13 +136,38 @@ class SearchEngine:
         return self._embedder
 
     def _validate_space(self, active):
+        self._space_id = None
         identity = self.embedder.identity()
         if hasattr(self.embedder, "require_gate"):
             self.embedder.require_gate()
+        self._space_id = fingerprint(identity)
         if identity != active["spec"]["space"]:
             raise ModelError("当前模型与已发布索引的向量空间不同，请切回对应模型或建立新索引")
         if self.config.video.model_dump() != active["spec"]["preprocessing"]:
             raise ModelError("视频预处理配置与索引不一致，请使用对应配置")
+
+    def _query_vector(self, text: str) -> list[float]:
+        """查询文字的嵌入向量，按「向量空间 + 文字」缓存。
+
+        只在 _validate_space 已通过（部署身份与兼容性门槛刚核验）之后调用；空间标识进入缓存键，
+        所以换模型/部署后不会命中旧向量。命中时省掉一次 HTTP 推理及其前后两轮部署核验。
+        """
+        space_id = getattr(self, "_space_id", None)
+        if space_id is None:
+            return self.embedder.text([text], role="query")[0]
+        key = (space_id, text)
+        with _QUERY_VECTOR_LOCK:
+            cached = _QUERY_VECTORS.get(key)
+            if cached is not None:
+                _QUERY_VECTORS.move_to_end(key)
+                return list(cached)
+        vector = self.embedder.text([text], role="query")[0]
+        with _QUERY_VECTOR_LOCK:
+            _QUERY_VECTORS[key] = tuple(vector)
+            _QUERY_VECTORS.move_to_end(key)
+            while len(_QUERY_VECTORS) > QUERY_VECTOR_CACHE_SIZE:
+                _QUERY_VECTORS.popitem(last=False)
+        return vector
 
     def _context(self, granularity: str, filters: Filters, *, text=False, person=False):
         active = self.store.index_version(self.index_id) if self.index_id else self.store.active_index()
@@ -138,7 +181,7 @@ class SearchEngine:
         library = Library(self.store)
         sources, segments = library.overlays()
         selected_sources = filters.selected_sources()
-        for segment in self.store.snapshots(active["id"]):
+        for segment in self.store.snapshots_shared(active["id"]):
             segment = library.decorate(segment, sources, segments)
             if segment["effective_hidden"]:
                 continue
@@ -204,7 +247,9 @@ class SearchEngine:
         active, snapshots, vectors = self._context(
             query.granularity, query.filters, text=True,
             person=bool(preliminary_ids and query.person_mode != 'mentioned'))
-        release, published = catalogue.published(active['id'], pinned=self.index_id is not None, release_id=self.release_id or active.get('search_release_id'))
+        release = catalogue.release_for(active['id'], pinned=self.index_id is not None, release_id=self.release_id or active.get('search_release_id'))
+        # 只取实体（几 KB）；数十 MB 的证据与覆盖区间只在出镜检索时才加载。
+        published = catalogue.published_entities(release)
         # Newly registered names are also strict even before the first person publication.
         entities = list({e['id']: e for e in [*published['entities'], *catalogue.entities()]}.values())
         ids, recognized, remaining, variant_groups = resolve_names(query, entities)
@@ -221,6 +266,7 @@ class SearchEngine:
         if mode == 'onscreen':
             from mindex.persons.person_names import coverage_missing
             from mindex.persons.person_processing import EvidenceReferences
+            published = {**published, **catalogue.published_evidence(release)}
             reference_images = EvidenceReferences(self.config, self.store)
             meta['person_coverage_missing'] = coverage_missing(snapshots, published['coverage'])
             if published.get('format', 1) >= 2:
@@ -235,19 +281,29 @@ class SearchEngine:
                 )) for group in variant_groups]
             eligible = []
             names = {e['id']: e['name'] for e in entities}
+            # reference_url 要读特征缓存、较贵，只为最终返回的少数结果计算（见 finish_references）。
+            originals = {}
+            index = published.get('evidence_index') or published['evidence']
             for segment in snapshots:
-                evidence = overlaps_for(segment, published['evidence'], variant_groups, query.person_relation)
+                evidence = overlaps_for(segment, index, variant_groups, query.person_relation)
                 if evidence:
                     enriched = []
                     for item in evidence:
+                        originals[(segment['id'], item['id'])] = item
                         enriched.append({**item, 'data': {k:v for k,v in item['data'].items() if k not in {'body_feature','space'}}, 'actor_name': names.get(item['actor_id']),
                             'role_name': names.get(item['role_id']),
                             'image_url': '/api/persons/evidence/' + item['id'] + '/image' if item['data'].get('image_path') else None,
-                            'reference_url': reference_images.url(item),
+                            'reference_url': None,
                             'start': max(item['start'], segment['start']),
                             'end': min(item['end'], segment['end'])})
                     eligible.append({**segment, 'person_evidence': enriched})
             snapshots = eligible
+
+            def finish_references(result):
+                for hit in result['results']:
+                    for item in hit.get('person_evidence', []):
+                        item['reference_url'] = reference_images.url(originals[(hit['id'], item['id'])])
+                return result
             if not remaining:
                 def score(segment):
                     intervals = sorted((e['start'], e['end']) for e in segment['person_evidence'])
@@ -259,7 +315,7 @@ class SearchEngine:
                     return total + quality * 0.001
                 ranked = [{'id': s['id'], 'score': score(s), 'matches': [{'route': 'person', 'rank': i+1}]}
                           for i, s in enumerate(sorted(snapshots, key=lambda s: (-score(s), s['id'])))]
-                result = self._result(active, snapshots, {}, query.limit, started, ranked=ranked)
+                result = finish_references(self._result(active, snapshots, {}, query.limit, started, ranked=ranked))
                 result['score_type'] = 'person_coverage_quality'
                 return {**result, **meta}
             query = query.model_copy(update={'text': remaining})
@@ -276,6 +332,8 @@ class SearchEngine:
                 snapshots = [s for s in snapshots if mentions(s)]
             query = query.model_copy(update={'channels': ['dialogue'], 'text': query.text or ' '.join(names[i][0] for i in ids)})
         result = self._text_query(query, active, snapshots, vectors, started)
+        if mode == 'onscreen':
+            finish_references(result)
         return {**result, **meta}
 
     def _text_query(self, query, active, snapshots, vectors, started):
@@ -284,7 +342,7 @@ class SearchEngine:
         if active["spec"].get("format", 1) >= 2:
             return self._channel_text(query, active, snapshots, vectors, started)
         self._validate_space(active)
-        vector = self.embedder.text([query.text], role="query")[0]
+        vector = self._query_vector(query.text)
         ids = [s["id"] for s in snapshots]
         count = self.config.search.candidates
         available = {"video", *(view for s in snapshots for view in s["views"])}
@@ -332,7 +390,7 @@ class SearchEngine:
         vector, warning = None, None
         try:
             self._validate_space(active)
-            vector = self.embedder.text([query.text], role="query")[0]
+            vector = self._query_vector(query.text)
         except ModelError as exc:
             warning = str(exc)
             if not lexical:

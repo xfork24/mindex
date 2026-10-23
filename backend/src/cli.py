@@ -653,7 +653,11 @@ def serve(
             fg=typer.colors.YELLOW,
             err=True,
         )
-    uvicorn.run(create_app(ctx.obj, index_id=index_id), host=host, port=port)
+    from mindex.search.warmup import warm_up_in_background
+
+    app = create_app(ctx.obj, index_id=index_id)
+    warm_up_in_background(ctx.obj, index_id)  # 后台线程，不阻塞监听；失败只记日志
+    uvicorn.run(app, host=host, port=port)
 
 
 @app.command()

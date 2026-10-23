@@ -13,7 +13,7 @@ import logging
 from pathlib import Path
 
 from mindex.processing.indexing import VectorIndex
-from mindex.shared.storage import Store
+from mindex.shared.storage import Store, bump_snapshot_revision
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +104,7 @@ def purge_source(store: Store, source_id: str) -> dict:
         if segment_ids:
             db.execute(f"DELETE FROM representations WHERE segment_id IN ({placeholders})", segment_ids)
             db.execute(f"DELETE FROM index_members WHERE segment_id IN ({placeholders})", segment_ids)
+            bump_snapshot_revision(db)
             db.execute(f"DELETE FROM annotations WHERE segment_id IN ({placeholders})", segment_ids)
             db.execute(f"DELETE FROM segment_curation WHERE id IN ({placeholders})", segment_ids)
             db.execute("DELETE FROM segments WHERE source_id=?", (source_id,))
