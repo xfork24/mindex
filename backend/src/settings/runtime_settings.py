@@ -25,10 +25,11 @@ from mindex.shared.config import (
 )
 from mindex.shared.storage import Store
 
-ROLES = ("analyzer", "generator", "embedding", "asr", "tts", "person")
+ROLES = ("analyzer", "writer", "generator", "embedding", "asr", "tts", "person")
 ROLE_LABELS = {
     "person": "人物识别",
     "analyzer": "多模态理解",
+    "writer": "文案创作",
     "generator": "文本拆分镜",
     "embedding": "多模态嵌入",
     "asr": "语音识别",
@@ -46,6 +47,7 @@ PROFILE_FIELDS = {
         "response_retries", "initial_output_tokens", "max_output_tokens", "thinking_mode",
     },
     "generator": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "llama_template", "max_tokens"},
+    "writer": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "llama_template", "max_tokens"},
     "embedding": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "quantization", "dimensions"},
     "asr": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "enabled"},
     "tts": {
@@ -64,11 +66,12 @@ SECTION_TYPES = {
     "person": PersonConfig,
     "analyzer": AnalyzerConfig,
     "generator": GeneratorConfig,
+    "writer": GeneratorConfig,
     "embedding": EmbeddingConfig,
     "asr": ASRConfig,
     "tts": SpeakerConfig,
 }
-_STUDIO_ROLES = {"generator", "tts"}
+_STUDIO_ROLES = {"generator", "writer", "tts"}
 
 PROVIDERS = ("custom", "self", "zhipu", "deepseek", "aliyun", "tencent", "minimax")
 PROVIDER_LABELS = {
@@ -219,6 +222,14 @@ PROVIDER_PRESETS: dict[str, dict[str, dict]] = {
         },
     },
 }
+
+# 文案创作与拆分镜同为文本聊天模型：各厂商的文案预设直接复制拆分镜预设。
+for _roles in PROVIDER_PRESETS.values():
+    if "generator" in _roles and "writer" not in _roles:
+        _roles["writer"] = {
+            "config": dict(_roles["generator"]["config"]),
+            "note": _roles["generator"]["note"].replace("纯文本拆分镜的性价比之选", "文本模型，性价比之选"),
+        }
 
 # 显式清除已存密钥的哨兵值（空字符串视为未填、保留原值）。
 CLEAR_KEY = "__clear__"
@@ -417,6 +428,8 @@ def activate_profile(store: Store, profile_id: int) -> dict:
 def _section(config: Config, role: str):
     if role == "generator":
         return config.studio.generator
+    if role == "writer":
+        return config.studio.writer
     if role == "tts":
         return config.studio.tts
     return getattr(config, role)
@@ -485,11 +498,42 @@ def apply_overrides(config: Config, store: Store) -> Config:
     return config
 
 
+WRITER_MIGRATION_KEY = "migration.writer_profile"
+
+
+def ensure_writer_profile(store: Store) -> dict | None:
+    """一次性迁移：新增「文案创作」角色时，把激活的「文本拆分镜」档案复制一份并激活。
+
+    只在从未迁移过、且还没有任何文案创作档案时执行；完成后写标记，之后用户删除或
+    改动文案档案都不会被重新覆盖。没有激活的拆分镜档案时，文案配置沿用 yaml
+    （未配置 studio.writer 时即复制 studio.generator）。
+    """
+    if get_setting(store, WRITER_MIGRATION_KEY):
+        return None
+    created = None
+    source = _active_profile(store, "generator")
+    if source is not None and not list_profiles(store, "writer"):
+        profile = save_profile(
+            store,
+            role="writer",
+            name=source["name"],
+            provider=source["provider"],
+            config={k: v for k, v in source["config"].items() if k in PROFILE_FIELDS["writer"]},
+            api_key=source.get("api_key") or None,
+        )
+        activate_profile(store, profile["id"])
+        created = profile
+    put_setting(store, WRITER_MIGRATION_KEY, "1")
+    return created
+
+
 def apply_runtime_overrides(config: Config) -> Config:
     """CLI 入口：data_dir 已有元数据库时合并覆盖层，否则原样返回。"""
     if not config.runtime_overrides or not (config.data_dir / "metadata.sqlite3").is_file():
         return config
-    return apply_overrides(config, Store(config.data_dir))
+    store = Store(config.data_dir)
+    ensure_writer_profile(store)
+    return apply_overrides(config, store)
 
 
 class RuntimeConfig:
@@ -498,6 +542,8 @@ class RuntimeConfig:
     def __init__(self, base: Config, store: Store):
         self.base = base
         self.store = store
+        if base.runtime_overrides:
+            ensure_writer_profile(store)
 
     def current(self) -> Config:
         return apply_overrides(self.base, self.store)

@@ -182,12 +182,23 @@ class StudioConfig(StrictModel):
     max_input_chars: int = Field(default=2000, ge=1)
     max_shots: int = Field(default=60, ge=1)
     generator: GeneratorConfig = Field(default_factory=GeneratorConfig)
+    # 文案创作 LLM：按视频大纲写旁白正文。与拆分镜同为 OpenAI 兼容聊天服务，
+    # yaml 未单独配置时复制 generator，保证升级后无需改配置即可使用。
+    writer: GeneratorConfig = Field(default_factory=GeneratorConfig)
     tts: SpeakerConfig = Field(default_factory=SpeakerConfig)
     recall: StudioRecallConfig = Field(default_factory=StudioRecallConfig)
     selection: SelectionConfig = Field(default_factory=SelectionConfig)
     audio: StudioAudioConfig = Field(default_factory=StudioAudioConfig)
     subtitle: SubtitleConfig = Field(default_factory=SubtitleConfig)
     render: RenderConfig = Field(default_factory=RenderConfig)
+
+    @model_validator(mode="before")
+    @classmethod
+    def writer_defaults_to_generator(cls, value):
+        if isinstance(value, dict) and "writer" not in value and "generator" in value:
+            generator = value["generator"]
+            value = {**value, "writer": generator.model_dump() if isinstance(generator, BaseModel) else generator}
+        return value
 
 
 class DetectorConfig(StrictModel):
@@ -334,6 +345,7 @@ class Config(StrictModel):
             {
                 "schema": 1,
                 "generator": self.studio.generator.model_dump(exclude={"timeout", "api_key_env"}),
+                "writer": self.studio.writer.model_dump(exclude={"timeout", "api_key_env"}),
                 "tts": self.studio.tts.model_dump(exclude={"timeout", "api_key_env"}),
                 "selection": self.studio.selection.model_dump(),
                 "audio": self.studio.audio.model_dump(),

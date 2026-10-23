@@ -32,7 +32,10 @@ def test_create_generates_title_with_configured_generator(config, monkeypatch):
     # 创建立即返回占位标题并标记待生成，真实标题由后台线程补全。
     assert response.json()["title_pending"] is True
     job_id = response.json()["id"]
-    assert _await_title(config, job_id)["title"] == "阿嬷的牵挂"
+    settled = _await_title(config, job_id)
+    assert settled["title"] == "阿嬷的牵挂"
+    # 标题基于视频大纲生成；此时任务里没有文案。
+    assert settled["outline"] == "阿嬷把对家人的牵挂写进一封封信。" and "input_text" not in settled
     # 后台线程确实调用了配置的生成服务。
     _method, url, kwargs = next(r for r in requests if r[0] == "POST")
     assert url == config.studio.generator.base_url.rstrip("/") + "/chat/completions"

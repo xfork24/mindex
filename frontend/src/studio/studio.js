@@ -44,6 +44,7 @@ function multiField(label) {
   return { wrap, select };
 }
 const LABEL = {
+  script: MindexI18n.msg("ui.script_generate"),
   content: MindexI18n.msg("ui.5727d4463f7c"),
   board: MindexI18n.msg("ui.4d7765b7c123"),
   split: MindexI18n.msg("ui.e08119699ac5"),
@@ -261,6 +262,18 @@ async function loadCatalogue() {
   }
   return recallCatalogueRequest;
 }
+// 音色目录需要实时查询 TTS 服务，开销大；短 TTL 缓存 + 合并在途请求，避免每次开“方案参数”都阻塞一次往返。
+let voiceCatalogue = null, voiceCatalogueTime = 0, voiceCatalogueRequest = null;
+function loadVoiceCatalogue({ fresh = false } = {}) {
+  if (!fresh && voiceCatalogue && Date.now() - voiceCatalogueTime < 30000)
+    return Promise.resolve(voiceCatalogue);
+  if (!voiceCatalogueRequest) {
+    voiceCatalogueRequest = api("/api/settings/voices/catalog").then((data) => {
+      voiceCatalogue = data;voiceCatalogueTime = Date.now();return data;
+    }).finally(() => {voiceCatalogueRequest = null;});
+  }
+  return voiceCatalogueRequest;
+}
 async function loadRecallOptions() {
   const id = state.id;
   const persons = await loadCatalogue();
@@ -318,9 +331,12 @@ function sourceName(id, fallback) {
 // 音轨/字幕/召回数量属于方案参数，可在方案参数里动态调整，不在此重复展示。
 function renderJobMeta() {
   const job = state.data.job, body = $("job-meta-body");
+  // 新任务只有视频大纲，文案在方案里创作；老任务的 input_text 就是创建时填写的文案。
+  const legacyText = !job.outline && job.input_text;
   const rows = [
-    // 文案保留非空行，素材列表独占整行并逐项展示。
-    ["ui.7407393d52c7", (job.input_text || "").split(/\r?\n/).filter((line) => line.trim()).join("\n"), true],
+    // 大纲/文案保留非空行，素材列表独占整行并逐项展示。
+    [legacyText ? "ui.7407393d52c7" : "ui.job_outline_label",
+    (job.outline || job.input_text || "").split(/\r?\n/).filter((line) => line.trim()).join("\n"), true],
     ["ui.84e3802f60a7", MindexI18n.date(job.created_at)],
     ["ui.f711792f098b", (job.source_ids?.length ? job.source_ids : (state.sources || []).map((s) => s.id)).map(sourceName).join("\n") || MindexI18n.msg("ui.0a9eab1a4d36"), true]
   ];
@@ -332,6 +348,83 @@ function renderJobMeta() {
     row.append(term, detail);
     body.append(row);
   }
+}
+// 文案创作：文案是方案级的版本化阶段。文本框里的修改只有保存或重新生成时才形成新版本，
+// 未保存的内容按方案暂存，切换方案再回来仍在。
+const scriptDrafts = new Map();
+const SCRIPT_ORIGIN = {
+  generated: "ui.script_origin_generated",
+  manual: "ui.script_origin_manual",
+  legacy: "ui.script_origin_legacy"
+};
+function scriptText() {
+  return ver(plan().script)?.data.text ?? null;
+}
+function scriptRunning() {
+  return state.data.builds.some((b) =>
+  b.status === "running" && b.plan_id === plan().id &&
+  b.nodes.some((n) => n.stage === "script" && ["pending", "running"].includes(n.status))
+  );
+}
+function scriptDirty() {
+  if (!state.data) return false;
+  const area = $("script-text");
+  if (area.dataset.scope !== scopeKey()) return false;
+  return area.value.trim() !== (scriptText() ?? "").trim();
+}
+// 只更新状态文字与按钮可用性，不重建文本框，避免打断输入和光标。
+function syncScriptControls() {
+  const p = plan(), job = state.data.job, area = $("script-text"),
+    item = ver(p.script), locked = busy(), dirty = scriptDirty();
+  area.disabled = locked;
+  const status = $("script-state");
+  if (scriptRunning()) MindexI18n.setText(status, MindexI18n.msg("ui.script_state_generating"));else
+  if (!item) MindexI18n.setText(status, MindexI18n.msg(dirty ? "ui.script_state_empty_dirty" : "ui.script_state_empty"));else
+  MindexI18n.setText(status, MindexI18n.msg(dirty ? "ui.script_state_ready_dirty" : "ui.script_state_ready", {
+    p0: MindexI18n.msg(SCRIPT_ORIGIN[item.data.origin] || SCRIPT_ORIGIN.generated), p1: shortId(item.id) }));
+  const generate = $("script-generate");
+  MindexI18n.setText(generate, MindexI18n.msg(item ? "ui.script_regenerate" : "ui.script_generate"));
+  generate.disabled = locked || !(job.outline || "").trim();
+  MindexI18n.setAttr(generate, "title", (job.outline || "").trim() ? "" : MindexI18n.msg("ui.script_no_outline"));
+  $("script-save").disabled = locked || !dirty || !area.value.trim();
+  MindexI18n.setText($("script-counter"), MindexI18n.msg("ui.script_counter", { p0: area.value.trim().length }));
+}
+function renderScript() {
+  const p = plan(), job = state.data.job, area = $("script-text"), scope = scopeKey(), base = p.script || "";
+  // 方案或文案版本变化（含生成、保存、切换方案）时重置文本框；同一版本内保留未保存的输入。
+  if (area.dataset.scope !== scope || area.dataset.base !== base) {
+    const draft = scriptDrafts.get(scope);
+    area.dataset.scope = scope;
+    area.dataset.base = base;
+    area.value = draft && draft.base === base ? draft.value : scriptText() ?? "";
+  }
+  const outline = $("script-outline");
+  outline.hidden = !job.outline;
+  if (job.outline) MindexI18n.setText(outline, MindexI18n.msg("ui.script_outline_line", { p0: job.outline }));
+  $("script-stale").hidden = !state.data.script_stale;
+  // 最近一次生成失败时在这里直接说明原因；之后有了更新的文案版本（重新生成成功或手动保存）就不再显示。
+  const failed = latestNode("script", null), current = ver(p.script);
+  const error = failed?.status === "failed" && !(current && current.created_at > (failed.finished_at || "")) ?
+  shortIds(MindexI18n.system(failed.error || "")) : "";
+  $("script-error").hidden = !error;
+  if (error) MindexI18n.setText($("script-error"), MindexI18n.msg("ui.script_failed", { p0: error }));
+  syncScriptControls();
+}
+async function generateScript() {
+  if (busy()) return;
+  const hadScript = Boolean(plan().script), dirty = scriptDirty();
+  // 重新生成会丢弃文本框里未保存的修改；已有分镜会因此过期，先说清楚再执行。
+  const warning = dirty ? "ui.script_discard_confirm" : hadScript && plan().board ? "ui.script_regenerate_confirm" : null;
+  if (warning && !window.confirm(MindexI18n.render(MindexI18n.msg(warning)))) return;
+  scriptDrafts.delete(scopeKey());
+  await runNode("script", null, true);
+}
+async function saveScript() {
+  const text = $("script-text").value.trim();
+  if (busy() || !text || !scriptDirty()) return;
+  await accept(await api(planBase(), "PATCH", { revision: state.data.revision, script: text }));
+  scriptDrafts.delete(scopeKey());
+  notice(MindexI18n.msg("ui.script_saved"));
 }
 async function inputUrl(mediaId) {
   const id = state.id;
@@ -429,13 +522,16 @@ function render() {
     select.append(o);
   }
   MindexI18n.setText($("shot-count"), MindexI18n.msg("ui.afd372b9b45d", { p0: order().length }));
-  const original = job.input_text.replace(/\s/g, "");
+  // 分镜应完整覆盖当前方案的文案；文案变化后分镜过期，单独提示而不是误报"未完整覆盖"。
+  const original = (scriptText() ?? job.input_text ?? "").replace(/\s/g, "");
   const texts = order().
   map((sid) => ver(p.shots[sid].content).data.text).
   join("").
   replace(/\s/g, "");
   MindexI18n.setText($("storyboard-warning"),
+  p.board && state.data.script_stale ? MindexI18n.msg("ui.script_stale_board") :
   p.board && original !== texts ? MindexI18n.msg("ui.34f1df936c8a") : "");
+  renderScript();
   renderMatrix();
   renderFinal();
   renderBuilds();
@@ -533,7 +629,8 @@ function expandedRows() {
 }
 function hasDirtyDraft() {
   const prefix = `${scopeKey()}/`;
-  return [...state.drafts].some(
+  // 文案框里未保存的修改同样阻止构建：否则构建用的是已保存版本，与屏幕上看到的不一致。
+  return scriptDirty() || [...state.drafts].some(
     ([key, draft]) => key.startsWith(prefix) && draft.dirty
   );
 }
@@ -551,6 +648,7 @@ function updateLocks() {
   if (!state.data) return;
   const locked = busy(),
     dirty = hasDirtyDraft();
+  syncScriptControls();
   const collapse = $("collapse-all-rows");
   collapse.disabled = !order().length;
   MindexI18n.setText(collapse, MindexI18n.msg(expandedRows().size ? "ui.57f2d43c7d09" : "ui.expand_all_rows"));
@@ -1542,8 +1640,9 @@ function historyCell(stage, sid, preferred = null) {
   return box;
 }
 function nodeInputs(stage, sid) {
+  if (stage === "script") return {};
+  if (stage === "split") return { script: plan().script || null };
   const s = plan().shots[sid];
-  if (stage === "split") return {};
   const inputs = { content: s.content };
   if (stage === "select") {
     inputs.tts = s.tts || null;
@@ -1634,21 +1733,14 @@ function voiceChoices(catalog, current, defaultVoice) {
 }
 
 async function editSettings() {
-  let catalog = null;
-  try {
-    catalog = await api("/api/settings/voices/catalog");
-  } catch {
-    notice(MindexI18n.msg("ui.voice_catalog_unavailable"));
-    return;
-  }
+  // 立即开对话框：先用占位音色项渲染，再异步拉目录回填，避免被 TTS 服务往返阻塞。
+  const loadingLabel = MindexI18n.msg("ui.fcabadb2a772");
   const body = showDialog(MindexI18n.msg("ui.b876f5881f16")),
     fields = {},
     o = plan().options;
-  const defaultVoice = state.data.tts_settings?.default_voice || catalog?.default_voice || "";
-  const voices = voiceChoices(catalog, o.voice_mode === "custom" ? o.voice : "", defaultVoice);
   const definitions = [
-  ["preset_voice", MindexI18n.msg("ui.preset_voice_select"), "text", voices.preset],
-  ["clone_voice", MindexI18n.msg("ui.cloned_voice_select"), "text", voices.clones],
+  ["preset_voice", MindexI18n.msg("ui.preset_voice_select"), "text", [["", loadingLabel]]],
+  ["clone_voice", MindexI18n.msg("ui.cloned_voice_select"), "text", [["", loadingLabel]]],
   ["recall_limit", MindexI18n.msg("ui.4f891e5b3cf5"), "number"],
   [
   "audio_mode", MindexI18n.msg("ui.b47469b59094"),
@@ -1672,8 +1764,7 @@ async function editSettings() {
   ["atempo", MindexI18n.msg("ui.8a1c10056984"), "number"]];
 
   for (const [key, label, type, choices] of definitions) {
-    const value = key === "preset_voice" ? voices.presetValue :
-    key === "clone_voice" ? voices.cloneValue :
+    const value = key === "preset_voice" || key === "clone_voice" ? "" :
     key === "atempo" ? o.atempo ?? 1 : o[key];
     const f = field(label, value, type, choices);
     fields[key] = f.input;
@@ -1684,6 +1775,9 @@ async function editSettings() {
     }[key];
     if (helpKey) body.append(el("p", MindexI18n.msg(helpKey), "muted"));
   }
+  // 音色目录尚未就绪：先禁用音色相关控件与保存，待目录到达再回填与放开。
+  fields.preset_voice.disabled = true;
+  fields.clone_voice.disabled = true;
   let voiceChanged = false;
   fields.preset_voice.addEventListener("change", () => { voiceChanged = true; });
   fields.clone_voice.addEventListener("change", () => { voiceChanged = true; });
@@ -1691,11 +1785,9 @@ async function editSettings() {
     fields.preset_voice.disabled = Boolean(fields.clone_voice.value);
   };
   fields.clone_voice.addEventListener("change", updatePresetVoice);
-  updatePresetVoice();
   fields.atempo.min = "0.75";
   fields.atempo.max = "1.25";
-  body.append(
-    button(MindexI18n.msg("ui.3fab71cb32ac"), async () => {
+  const save = button(MindexI18n.msg("ui.3fab71cb32ac"), async () => {
       const options = { ...o };
       for (const key of Object.keys(fields)) {
         if (key !== "preset_voice" && key !== "clone_voice") options[key] = fields[key].value;
@@ -1717,8 +1809,35 @@ async function editSettings() {
       );
       closeDialog();
       notice(MindexI18n.msg("ui.1e3dd518b146"));
-    })
-  );
+    });
+  save.disabled = true;
+  body.append(save);
+  // 异步回填音色下拉：对话框已可见，TTS 服务往返不再阻塞打开动作。
+  const dialogBody = body;
+  loadVoiceCatalogue().then((catalog) => {
+    if ($("dialog-content") !== dialogBody || !$("work-dialog").open) return;
+    const defaultVoice = state.data.tts_settings?.default_voice || catalog?.default_voice || "";
+    const voices = voiceChoices(catalog, o.voice_mode === "custom" ? o.voice : "", defaultVoice);
+    fillSelect(fields.preset_voice, voices.preset, voices.presetValue);
+    fillSelect(fields.clone_voice, voices.clones, voices.cloneValue);
+    fields.clone_voice.disabled = false;
+    updatePresetVoice();
+    save.disabled = false;
+    if (catalog?.error) notice(catalog.error);
+  }).catch(() => {
+    if ($("dialog-content") !== dialogBody) return;
+    notice(MindexI18n.msg("ui.voice_catalog_unavailable"));
+    closeDialog();
+  });
+}
+function fillSelect(select, choices, value) {
+  select.replaceChildren();
+  for (const [v, text] of choices) {
+    const o = el("option", text);
+    o.value = v;
+    select.append(o);
+  }
+  select.value = MindexI18n.render(value ?? "");
 }
 function renderCandidatePicker(body, sid) {
   const recall = plan().shots[sid].recall,
@@ -2048,19 +2167,21 @@ async function preflight(force = false) {
     force ? MindexI18n.msg("ui.cae32e3f53cc") : MindexI18n.msg("ui.68d9d6d0c6f8")
   );
   if (!plan().board) {
-    const explanation = el("p");
+    // 还没有文案时，整体构建从"生成文案"开始；已有文案则直接复用，不重写。
+    const needsScript = !plan().script, explanation = el("p");
     explanation.style.whiteSpace = "pre-line";
     explanation.append(
-      el("span", MindexI18n.msg("ui.auto_split_build_intro"), "warn-text"),
+      el("span", MindexI18n.msg(needsScript ? "ui.auto_script_build_intro" : "ui.auto_split_build_intro"), "warn-text"),
       document.createTextNode("\n\n")
     );
-    for (let i = 0; i < 6; i++) {
+    const steps = [
+      ...(needsScript ? [["ui.auto_script_step_label", "ui.auto_script_step_description"]] : []),
+      ...[0, 1, 2, 3, 4, 5].map((i) => [`ui.auto_split_step_${i}_label`, `ui.auto_split_step_${i}_description`])
+    ];
+    steps.forEach(([label, description], i) => {
       if (i) explanation.append(document.createTextNode("\n"));
-      explanation.append(
-        el("strong", MindexI18n.msg(`ui.auto_split_step_${i}_label`)),
-        el("span", MindexI18n.msg(`ui.auto_split_step_${i}_description`))
-      );
-    }
+      explanation.append(el("strong", MindexI18n.msg(label)), el("span", MindexI18n.msg(description)));
+    });
     body.append(explanation);
   }
   const actionLabel = {
@@ -2559,6 +2680,13 @@ $("create-form").addEventListener("submit", async (event) => {
     $("create-status").hidden = true;
   }
 });
+$("script-text").addEventListener("input", () => {
+  if (!state.data) return;
+  scriptDrafts.set(scopeKey(), { base: plan().script || "", value: $("script-text").value });
+  updateLocks();
+});
+$("script-generate").addEventListener("click", () => generateScript().catch(fail));
+$("script-save").addEventListener("click", () => saveScript().catch(fail));
 async function boot() {
   const id = new URLSearchParams(location.search).get("job");
   // 创建表单在选任务之前就要列出素材；和任务列表一样不阻塞工作台首屏。

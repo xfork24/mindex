@@ -20,6 +20,11 @@ from mindex.shared.storage import Store
 
 logger = logging.getLogger(__name__)
 
+# 音色目录是交互式调用（打开“方案参数”/设置页就触发），不能沿用合成用的 300s 超时与 3 次重试，
+# 否则 TTS 服务不可达时对话框会挂起数分钟。这里封顶为快速失败的交互超时与单次尝试。
+CATALOG_TIMEOUT = 8.0
+CATALOG_ATTEMPTS = 1
+
 # Qwen3-TTS CustomVoice 内置音色（服务端 /audio/voices 返回小写 id；描述来自官方音色表）。
 QWEN3_TTS_CUSTOMVOICE: list[dict] = [
     {"voice_id": "vivian", "name": "Vivian", "description": "明快、略带锋芒的年轻女声", "language": "中文"},
@@ -52,7 +57,10 @@ def _label_for(voice_id: str) -> str:
 
 def _live_voices(tts) -> tuple[list[str], str | None]:
     try:
-        payload = adapters.request("GET", tts.base_url.rstrip("/") + "/audio/voices", timeout=tts.timeout)
+        payload = adapters.request(
+            "GET", tts.base_url.rstrip("/") + "/audio/voices",
+            timeout=min(tts.timeout, CATALOG_TIMEOUT), attempts=CATALOG_ATTEMPTS,
+        )
     except Exception as exc:  # noqa: BLE001 — 目录拉取失败必须降级而不是 500
         return [], f"音色列表拉取失败：{str(exc)[:200]}"
     voices = payload.get("voices") if isinstance(payload, dict) else None
@@ -90,7 +98,8 @@ def _heal_local_clones(store: Store, tts, live: list[str]) -> list[str]:
 def _minimax_groups(tts) -> tuple[list[dict], list[dict], str | None]:
     try:
         payload = adapters.request(
-            "POST", tts.base_url.rstrip("/") + "/get_voice", timeout=tts.timeout,
+            "POST", tts.base_url.rstrip("/") + "/get_voice",
+            timeout=min(tts.timeout, CATALOG_TIMEOUT), attempts=CATALOG_ATTEMPTS,
             headers=tts.headers(), json={"voice_type": "all"},
         )
     except Exception as exc:  # noqa: BLE001

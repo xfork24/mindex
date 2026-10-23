@@ -25,7 +25,7 @@ def run_split(config: Config, job_id: str, state: dict, storyboarder: Storyboard
     session = current.get()
     split_key = fingerprint(
         {
-            "text": state["input_text"],
+            "text": studio.legacy_text(state),
             "generator": portable_parameters(config, config.studio.generator.model_dump()),
             "split_version": studio.SPLIT_VERSION,
         }
@@ -38,7 +38,7 @@ def run_split(config: Config, job_id: str, state: dict, storyboarder: Storyboard
             "coverage_warning": board.coverage_warning,
             "estimated_seconds": sum(s.estimated_seconds for s in board.shots),
         }
-    drafts: list[ShotDraft] = storyboarder.split(state["input_text"])
+    drafts: list[ShotDraft] = storyboarder.split(studio.legacy_text(state))
     if not drafts:
         raise ModelError("拆分镜结果为空，请检查文案后重试")
     if len(drafts) > config.studio.max_shots:
@@ -55,7 +55,7 @@ def run_split(config: Config, job_id: str, state: dict, storyboarder: Storyboard
     storyboard = studio.Storyboard(
         job_id=job_id,
         shots=shots,
-        coverage_warning=coverage_warning(state["input_text"], [shot.text for shot in shots]),
+        coverage_warning=coverage_warning(studio.legacy_text(state), [shot.text for shot in shots]),
     )
     if storyboard.coverage_warning:
         raise ModelError(storyboard.coverage_warning)

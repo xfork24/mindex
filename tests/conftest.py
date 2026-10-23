@@ -141,6 +141,55 @@ class FixtureAnalyzer:
         return [list(range(len(units)))]
 
 
+class FixtureWriter:
+    """Tests only: deterministic writer, never a real model.
+
+    By default the outline itself is the script, so existing tests that post a narration
+    as the outline keep their storyboard text. ``vary=True`` appends a version marker so
+    regeneration produces a different script each call.
+    """
+
+    def __init__(self, config: Config, *, vary: bool = False):
+        self.config = config
+        self.vary = vary
+        self.calls = 0
+        self.outlines: list[str] = []
+
+    def write(self, outline: str) -> str:
+        self.calls += 1
+        self.outlines.append(outline)
+        text = outline.strip()
+        return f"{text}第{self.calls}版。" if self.vary else text
+
+
+@pytest.fixture(autouse=True)
+def fixture_writer(monkeypatch):
+    """Studio builds now start with script writing; never reach a real writer in tests."""
+    from mindex.models import adapters
+
+    monkeypatch.setattr(adapters, "make_writer", lambda config: FixtureWriter(config))
+
+
+def convert_to_legacy(config: Config, job_id: str) -> dict:
+    """Rewrite a freshly created job into the old shape: the text is the script (``input_text``).
+
+    Jobs created before script writing exist on disk in this shape and keep working through
+    the step state machine and the workspace migration; tests for those paths build them here.
+    """
+    from mindex.studio import studio
+
+    state = studio.load_job(config, job_id)
+    state["input_text"] = state.pop("outline")
+    studio.save(studio.job_path(config, job_id), state)
+    return state
+
+
+def legacy_job(config: Config, text: str, **kwargs) -> dict:
+    from mindex.studio import studio
+
+    return convert_to_legacy(config, studio.create_job(config, text, **kwargs)["id"])
+
+
 class FixtureStoryboarder:
     """Tests only: deterministic sentence-based split, never a real model."""
 

@@ -105,6 +105,7 @@ def _effective(section, role: str) -> dict:
         "asr": ("enabled",),
         "tts": ("voice", "response_format"),
         "generator": ("max_tokens",),
+        "writer": ("max_tokens",),
     }
     for key in extras.get(role, ()):
         info[key] = dump.get(key)
@@ -145,8 +146,12 @@ def _probe(config: Config, role: str, *, store: Store | None = None, profile_nam
     if role == "person":
         from mindex.persons.person_processing import PersonClient
         return {"ready": True, "space": PersonClient(config).identity()}
-    if role in {"analyzer", "generator"}:
-        service = config.analyzer if role == "analyzer" else config.studio.generator
+    if role in {"analyzer", "generator", "writer"}:
+        service = (
+            config.analyzer if role == "analyzer"
+            else config.studio.writer if role == "writer"
+            else config.studio.generator
+        )
         extra = (
             analysis_options(service)
             if role == "analyzer" else

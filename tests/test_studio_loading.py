@@ -8,6 +8,7 @@ from collections import Counter
 from pathlib import Path
 
 import pytest
+from conftest import legacy_job
 from fastapi.testclient import TestClient
 
 from mindex.api import create_app
@@ -44,7 +45,7 @@ def test_recall_settings_use_release_identity_without_loading_snapshot(config, m
 
 def test_detail_reuses_database_settings_and_dependency_checks_per_request(config, monkeypatch):
     store = indexed_store(config)
-    job_id = studio.create_job(config, "旁白")['id']
+    job_id = legacy_job(config, "旁白")['id']
     w = ws.load(config, job_id)
     p = ws.plan(w, w["active_plan"])
     ws.set_board(config, job_id, w, p, [
@@ -95,6 +96,15 @@ def test_detail_reuses_database_settings_and_dependency_checks_per_request(confi
 def test_studio_loads_direct_links_without_waiting_for_job_list():
     result = subprocess.run(
         ["node", "tests/studio_loading_ui.cjs"], cwd=Path(__file__).resolve().parents[1],
+        capture_output=True, text=True, timeout=30, check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="Node is needed for UI controller checks")
+def test_plan_settings_voice_catalogue_caches_and_dedups():
+    result = subprocess.run(
+        ["node", "tests/studio_voice_catalogue_unit.cjs"], cwd=Path(__file__).resolve().parents[1],
         capture_output=True, text=True, timeout=30, check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr

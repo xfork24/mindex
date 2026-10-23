@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import time
 
 import pytest
@@ -10,6 +11,7 @@ from mindex.api import create_app
 from mindex.processing.indexing import IndexBuilder
 from mindex.processing.pipeline import Pipeline
 from mindex.shared.storage import Store
+from mindex.studio import studio
 
 
 @pytest.fixture
@@ -26,6 +28,7 @@ def studio_client(config, video_file):
             speaker=FixtureSpeaker(config),
         )
     )
+    client.config = config
     return config, client
 
 
@@ -44,6 +47,21 @@ def create_job(client: TestClient, text: str) -> str:
     response = client.post("/api/studio/jobs", json={"text": text})
     assert response.status_code == 201
     return response.json()["id"]
+
+
+def make_legacy(client: TestClient, job_id: str) -> str:
+    """把新建任务改成老任务形态（文本即文案 input_text，没有大纲），覆盖旧分步接口。"""
+    path = studio.job_path(client.config, job_id)
+    state = json.loads(path.read_text(encoding="utf-8"))
+    state["input_text"] = state.pop("outline")
+    studio.save(path, state)
+    return job_id
+
+
+def create_legacy_job(client: TestClient, text: str, **body) -> str:
+    response = client.post("/api/studio/jobs", json={"text": text, **body})
+    assert response.status_code == 201
+    return make_legacy(client, response.json()["id"])
 
 
 def test_studio_page_served(studio_client):
@@ -97,7 +115,7 @@ def test_create_job_material_scope(studio_client):
 
 def test_split_then_recall_flow_with_real_index(studio_client):
     _, client = studio_client
-    job_id = create_job(client, "红色首先出现。随后蓝色的天空调转。绿色在结尾蔓延开来。")
+    job_id = create_legacy_job(client, "红色首先出现。随后蓝色的天空调转。绿色在结尾蔓延开来。")
     assert client.post(f"/api/studio/jobs/{job_id}/steps/select").status_code == 422  # 依赖未完成
     assert client.post(f"/api/studio/jobs/{job_id}/steps/unknown").status_code == 422
     assert client.post(f"/api/studio/jobs/{job_id}/steps/split").status_code == 202
@@ -138,7 +156,8 @@ def test_recall_failure_without_active_index(config, video_file):
     pipeline = Pipeline(config)
     pipeline.prepare(video_file)
     client = TestClient(create_app(config, FixtureEmbedder(config), storyboarder=FixtureStoryboarder(config)))
-    job_id = create_job(client, "没有任何索引的时候召回。")
+    client.config = config
+    job_id = create_legacy_job(client, "没有任何索引的时候召回。")
     client.post(f"/api/studio/jobs/{job_id}/steps/split")
     wait_step(client, job_id, "split")
     client.post(f"/api/studio/jobs/{job_id}/steps/recall")
@@ -150,8 +169,7 @@ def test_recall_failure_without_active_index(config, video_file):
 def test_run_all_rejects_when_complete_and_artifacts_download(studio_client):
     _, client = studio_client
     # burn=false 走软字幕路径：烧录依赖 libass，CI/开发机 ffmpeg 未必编译
-    created = client.post("/api/studio/jobs", json={"text": "下载产物的任务。", "options": {"burn": False}})
-    job_id = created.json()["id"]
+    job_id = create_legacy_job(client, "下载产物的任务。", options={"burn": False})
     client.post(f"/api/studio/jobs/{job_id}/steps/split")
     wait_step(client, job_id, "split")
     response = client.get(f"/api/studio/jobs/{job_id}/artifacts/storyboard.json?download=true")
@@ -202,13 +220,11 @@ def test_delete_job(studio_client):
 
 def test_patch_storyboard_cascades_and_patch_timeline_reselects(studio_client):
     _, client = studio_client
-    job_id = client.post(
-        "/api/studio/jobs",
-        json={
-            "text": "红色首先出现在画面里，占据了整个视野。随后蓝色调转过来慢慢铺满屏幕。",
-            "options": {"burn": False},
-        },
-    ).json()["id"]
+    job_id = create_legacy_job(
+        client,
+        "红色首先出现在画面里，占据了整个视野。随后蓝色调转过来慢慢铺满屏幕。",
+        options={"burn": False},
+    )
     for step in ("split", "recall", "tts", "select"):
         client.post(f"/api/studio/jobs/{job_id}/steps/{step}")
         wait_step(client, job_id, step)
@@ -269,8 +285,8 @@ def test_patch_storyboard_cascades_and_patch_timeline_reselects(studio_client):
     assert state["title"] == "改标题"
     assert state["steps"]["split"]["status"] == "complete"
     assert all(state["steps"][step]["status"] == "pending" for step in ("recall", "tts", "select", "render"))
-    # 未完成 split 的新任务不可编辑
-    other = create_job(client, "还没拆分镜的任务。")
+    # 未完成 split 的任务不可编辑
+    other = create_legacy_job(client, "还没拆分镜的任务。")
     assert client.patch(f"/api/studio/jobs/{other}/storyboard", json={"shots": shots}).status_code == 422
 
 
@@ -290,7 +306,8 @@ def test_accepted_state_lock_conflicts_and_release(config):
             return super().split(text)
 
     client = TestClient(create_app(config, storyboarder=Slow(config)))
-    job_id = create_job(client, "这是用于慢速拆分的文案。")
+    client.config = config
+    job_id = create_legacy_job(client, "这是用于慢速拆分的文案。")
     try:
         response = client.post(f"/api/studio/jobs/{job_id}/steps/split")
         assert response.status_code == 202
@@ -319,7 +336,7 @@ def test_force_validation_artifact_archive_and_paths(studio_client):
     import zipfile
 
     _, client = studio_client
-    job_id = create_job(client, "这是第一句配音文本。这是第二句配音文本。")
+    job_id = create_legacy_job(client, "这是第一句配音文本。这是第二句配音文本。")
     client.post(f"/api/studio/jobs/{job_id}/steps/split")
     detail = wait_step(client, job_id, "split")
     shot = detail["storyboard"]["shots"][0]
@@ -363,7 +380,8 @@ def test_thread_start_failure_is_terminal_and_unlocks(config, monkeypatch):
     from mindex.studio import studio
 
     client = TestClient(create_app(config, storyboarder=FixtureStoryboarder(config)))
-    job_id = create_job(client, "线程启动失败测试。")
+    client.config = config
+    job_id = create_legacy_job(client, "线程启动失败测试。")
     original = threading.Thread.start
 
     def start(thread):
@@ -386,7 +404,7 @@ def test_preview_manual_interval_and_hidden_context(studio_client):
     from mindex.studio import studio_steps
 
     config, client = studio_client
-    job_id = create_job(client, "这是需要寻找红色画面的第一句文案。")
+    job_id = create_legacy_job(client, "这是需要寻找红色画面的第一句文案。")
     for step in ("split", "recall", "tts", "select"):
         assert client.post(f"/api/studio/jobs/{job_id}/steps/{step}").status_code == 202
         assert wait_step(client, job_id, step)["job"]["steps"][step]["status"] == "complete"

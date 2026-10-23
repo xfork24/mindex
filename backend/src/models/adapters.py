@@ -191,6 +191,10 @@ class Storyboarder(Protocol):
     def split(self, text: str) -> list[ShotDraft]: ...
 
 
+class Writer(Protocol):
+    def write(self, outline: str) -> str: ...
+
+
 def parse_json(content: str):
     text = re.sub(r"^```(?:json)?\s*|\s*```$", "", content.strip(), flags=re.IGNORECASE)
     try:
@@ -255,3 +259,9 @@ def make_storyboarder(config: Config) -> Storyboarder:
     from mindex.models.storyboard import QwenStoryboarder
 
     return QwenStoryboarder(config)
+
+
+def make_writer(config: Config) -> Writer:
+    from mindex.models.writer import QwenWriter
+
+    return QwenWriter(config)

@@ -2,13 +2,16 @@
 
 `/settings`（顶部导航「设置」进入）把模型服务连接、音色库与检索调参集中在一个页面，**保存即热生效，无需重启**：配置档案存 SQLite（`model_profiles` / `voices` 表 + `settings` KV），Web API 与 CLI 命令统一经覆盖层合成「生效配置」。
 
+文案创作档案在升级后第一次启动时自动从当前激活的“文本拆分镜”档案复制（含厂商与密钥）并激活，只做一次；之后可单独修改或删除，不会被再次覆盖。没有激活的拆分镜档案时，`studio.writer` 在 yaml 里省略即复制 `studio.generator`。
+
 相关模块：`settings/runtime_settings.py`（档案/覆盖层/预设）、`settings/settings_api.py`（API）、`settings/voice_clone.py`（厂商克隆客户端）、`frontend/src/settings/settings.*`（页面）。
 
-## 五个模型角色
+## 六个模型角色
 
 | 角色 | 配置段 | 说明 |
 |---|---|---|
 | 多模态理解 | `analyzer` | 视觉帧分析（动作/情绪/场景），需要视觉模型 |
+| 文案创作 | `studio.writer` | 创作任务内按视频大纲写旁白文案，纯文本任务；配置字段与文本拆分镜相同，可共用同一个模型 |
 | 文本拆分镜 | `studio.generator` | 创作文案拆分镜，纯文本任务，可选高性价比文本模型（本地默认复用理解模型） |
 | 多模态嵌入 | `embedding` | 文本/图片/视频统一向量空间，**切换后需重建索引** |
 | 语音识别 | `asr` | 线上模型只出纯文本，时间戳仍由本地 CPU ForcedAligner 补齐 |
@@ -21,7 +24,7 @@
 | 角色 | 智谱 | DeepSeek | 阿里百炼 | 腾讯 | MiniMax |
 |---|---|---|---|---|---|
 | 多模态理解 | GLM-4.5V（OpenAI 兼容） | vision 模型 | Qwen-VL（compatible-mode） | 混元 vision | chat OpenAI 兼容 |
-| 文本拆分镜 | GLM 文本 | **deepseek-chat（性价比首选）** | qwen 文本 | 混元文本 | M 系列 |
+| 文案创作 / 文本拆分镜 | GLM 文本 | **deepseek-chat（性价比首选）** | qwen 文本 | 混元文本 | M 系列 |
 | 多模态嵌入 | — | — | — | **TokenHub**（WeMM 系，`/v1/embeddings/multimodal`） | — |
 | ASR | — | — | qwen3-asr-flash（chat + input_audio） | —（自有签名协议） | asr-1.0（speech_to_text 专用适配器） |
 | TTS | — | — | DashScope 原生（专用适配器） | —（自有协议） | t2a_v2（专用适配器） |
@@ -31,7 +34,7 @@
 - **多模态嵌入的线上选择基本只有腾讯 TokenHub**（`kinfra-vl-embedding-2b/8b`，与本地 WeMM 同系）。适配器在客户端按 `video` 配置抽帧后以图片序列发送，保证预处理指纹诚实；身份纯由配置构造，进入索引空间指纹。
 - **TTS 五家都没有标准 OpenAI `/audio/speech` 端点**，因此写了两个专用适配器：`minimax`（t2a_v2，hex 音频解码）与 `dashscope`（原生协议，音频 URL 二次下载或 base64）。
 - **ASR 线上协议分两类**：OpenAI 兼容 chat + input_audio（阿里）与 MiniMax `speech_to_text`（multipart 表单上传，单文件 ≤500 秒/50MB，管线 30 秒切块远小于上限）；两者都只出纯文本，时间戳由本地对齐补齐。
-- 理解/拆分镜的 OpenAI 兼容端点会自动省略 llama-server 专有的 `chat_template_kwargs`（档案里 `llama_template=false`）；本地服务保持默认 `true` 不变。
+- 理解/文案创作/拆分镜的 OpenAI 兼容端点会自动省略 llama-server 专有的 `chat_template_kwargs`（档案里 `llama_template=false`）；本地服务保持默认 `true` 不变。
 - 预设的模型名是「最佳已知」预填值，会随平台演进漂移——页面所有字段可改，每个档案有「测试连接」按钮（最小真实调用）兜底。
 
 ## 热生效机制

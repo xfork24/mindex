@@ -20,7 +20,7 @@ from filelock import FileLock, Timeout
 from starlette.concurrency import run_in_threadpool
 
 from mindex.admin.curation import EntityNotFound, Library
-from mindex.models.adapters import MultimodalEmbedder, Speaker, Storyboarder, make_storyboarder
+from mindex.models.adapters import MultimodalEmbedder, Speaker, Storyboarder, Writer, make_storyboarder
 from mindex.settings.runtime_settings import RuntimeConfig
 from mindex.shared.config import Config, fingerprint
 from mindex.shared.images import image_png
@@ -58,6 +58,7 @@ def studio_router(
     embedder: MultimodalEmbedder | None = None,
     storyboarder: Storyboarder | None = None,
     speaker: Speaker | None = None,
+    writer: Writer | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api/studio", tags=["创作"])
     guard = threading.Lock()  # 进程内单执行器；跨进程由 studio.lock 兜底
@@ -95,6 +96,7 @@ def studio_router(
             try:
                 reject_legacy_mutation(job_id)
                 state = studio.reconcile(cfg, job_id)
+                studio.legacy_text(state)  # 新任务没有外部文案，只能走版本工作台
                 if requested_step:
                     studio.check_step(state, requested_step)
                     steps = [requested_step]
@@ -292,14 +294,17 @@ def studio_router(
                 p = copy.deepcopy(workspace.plan(w, body.copy_from))
                 p.update(id=uuid4().hex[:12], name=body.name, created_at=studio.now())
             else:
+                active = workspace.plan(w, w["active_plan"])
                 p = workspace.new_plan(
                     body.name,
                     {
-                        **copy.deepcopy(workspace.plan(w, w["active_plan"])["options"]),
+                        **copy.deepcopy(active["options"]),
                         "voice_mode": "inherit",
                         "voice": None,
                     },
                 )
+                # 新方案从当前文案出发重新拆分镜；文案不必重写。
+                p["script"] = active.get("script")
             w["plans"][p["id"]] = p
             w["active_plan"] = p["id"]
             workspace.persist(base, job_id, w)
@@ -326,6 +331,8 @@ def studio_router(
                 p["name"] = body.name
             if body.options:
                 p["options"] = body.options.model_dump()
+            if body.script is not None:
+                workspace.add_script(current(), job_id, w, p, body.script, "manual")
             if body.shots is not None:
                 shots = [
                     studio.Shot(**{**s.model_dump(), "id": s.id or f"shot-{uuid4().hex[:10]}"})
@@ -478,8 +485,10 @@ def studio_router(
                     spec = workspace.specification(cfg, job_id, w, p, node.stage, node.shot_id)
                     if node.inputs != spec["inputs"]:
                         raise studio.StudioError("输入版本已变化，请刷新后重试")
-                    if node.stage == "split" and node.shot_id is not None:
-                        raise studio.StudioError("拆分镜不能指定单镜")
+                    if node.stage in ("script", "split") and node.shot_id is not None:
+                        raise studio.StudioError("生成文案和拆分镜不能指定单镜")
+                    if node.stage == "split" and not p.get("script"):
+                        raise studio.StudioError("请先生成文案，再拆分镜")
                     nodes = [
                         {
                             "key": f"{node.stage}:{node.shot_id}" if node.shot_id else node.stage,
@@ -501,7 +510,9 @@ def studio_router(
                     "status": "running",
                     "force": force,
                     "created_at": studio.now(),
-                    "auto_split": not p["board"] and not node and not column,
+                    # 整体构建以文案或拆分镜开头时，拆分完成后按新分镜展开后续节点。
+                    "auto_split": not node and not column
+                    and any(n["stage"] in ("script", "split") for n in nodes),
                     "plan_snapshot": copy.deepcopy(p),
                     "nodes": [{**n, "status": "pending"} for n in nodes],
                 }
@@ -515,7 +526,8 @@ def studio_router(
             def worker():
                 try:
                     workspace.run_build(
-                        cfg, job_id, bid, speaker=speaker, storyboarder=storyboarder, embedder=embedder
+                        cfg, job_id, bid, speaker=speaker, storyboarder=storyboarder, embedder=embedder,
+                        writer=writer,
                     )
                 except Exception as exc:  # noqa: BLE001 — all background errors need terminal state
                     fresh = workspace.load(cfg, job_id)
@@ -814,7 +826,7 @@ def studio_router(
         def worker():
             cfg = current()
             try:
-                title = (storyboarder or make_storyboarder(cfg)).title(text)
+                title = (storyboarder or make_storyboarder(cfg)).title(text)  # text 为视频大纲
             except Exception:
                 title = None
             try:
@@ -841,7 +853,7 @@ def studio_router(
                 cfg, body.text, body.title, body.options, store=store, defer_title=True,
             )
             if state.get("title_pending"):
-                generate_title_async(state["id"], state["input_text"])
+                generate_title_async(state["id"], state["outline"])
             return state
         except studio.StudioError:
             raise

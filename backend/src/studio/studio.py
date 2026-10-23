@@ -354,7 +354,7 @@ def scoped_filters(filters: Filters, scope: set[str] | None) -> Filters:
 
 def create_job(config: Config, text: str, title: str | None = None, options: dict | None = None,
                *, store=None, defer_title: bool = False) -> dict:
-    """创建创作任务。
+    """创建创作任务。``text`` 是视频大纲，文案在任务内由文案创作模型生成。
 
     标题生成是一次阻塞的 LLM 往返，会显著拖慢创建的感知延迟。调用方传入
     ``defer_title=True`` 时，这里只写占位标题并标记 ``title_pending``，由上层在后台
@@ -362,9 +362,9 @@ def create_job(config: Config, text: str, title: str | None = None, options: dic
     """
     text = (text or "").strip()
     if not text:
-        raise StudioError("请输入创作文案")
+        raise StudioError("请输入创作视频大纲")
     if len(text) > config.studio.max_input_chars:
-        raise StudioError(f"文案超过 {config.studio.max_input_chars} 字上限，请精简后再试")
+        raise StudioError(f"大纲超过 {config.studio.max_input_chars} 字上限，请精简后再试")
     try:
         parsed = JobOptions.model_validate(options or {})
     except ValueError as exc:
@@ -389,7 +389,8 @@ def create_job(config: Config, text: str, title: str | None = None, options: dic
         "id": job_id,
         "title": (title or text[:20]).strip()[:60] or "未命名创作",
         "title_pending": title_pending,
-        "input_text": text,
+        # 新任务只保存大纲；旧任务的 input_text 即文案，迁移为方案的 legacy 文案版本。
+        "outline": text,
         "created_at": now(),
         "updated_at": now(),
         "voice_mode": "custom" if parsed.voice else "inherit",
@@ -404,6 +405,7 @@ def create_job(config: Config, text: str, title: str | None = None, options: dic
         "config_snapshot": {
             "studio_key": config.studio_key,
             "generator_model": config.studio.generator.model,
+            "writer_model": config.studio.writer.model,
             "tts_model": config.studio.tts.model,
             "index_id": active["id"] if active else None,
         },
@@ -423,6 +425,7 @@ def load_job(config: Config, job_id: str) -> dict:
     state.setdefault("execution", {"status": "idle", "current_step": None, "remaining_steps": []})
     state.setdefault("source_ids", None)  # 老任务没有素材范围，即不限
     state.setdefault("title_pending", False)  # 老任务标题早已确定，不处于待生成态
+    state.setdefault("outline", "")  # 老任务没有大纲，input_text 本身就是文案
     return state
 
 
@@ -472,6 +475,14 @@ def delete_job(config: Config, job_id: str):
     if not directory.is_dir():
         raise EntityNotFound("找不到创作任务")
     shutil.rmtree(directory)
+
+
+def legacy_text(state: dict) -> str:
+    """旧版分步接口只认任务创建时传入的文案；新任务的文案在版本工作台的方案里。"""
+    text = state.get("input_text")
+    if not text:
+        raise StudioError("该任务的文案在构建方案中创作，请在版本工作台生成文案后构建")
+    return text
 
 
 # ---------------------------------------------------------------- 步骤状态机
@@ -606,7 +617,7 @@ def save_storyboard(config: Config, job_id: str, storyboard: Storyboard) -> dict
         invalidate(state, ("tts", "select", "render"), "storyboard-text-edited")
     if prior and [s.id for s in prior.shots] != [s.id for s in storyboard.shots]:
         invalidate(state, ("select", "render"), "storyboard-reordered")
-    storyboard.coverage_warning = coverage_warning(state["input_text"], [s.text for s in storyboard.shots])
+    storyboard.coverage_warning = coverage_warning(legacy_text(state), [s.text for s in storyboard.shots])
     archive_edit(config, job_id, "storyboard", storyboard_path(config, job_id))
     registry = job_dir(config, job_id) / "checkpoints.json"
     if registry.is_file():

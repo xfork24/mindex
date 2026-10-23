@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 
 from mindex.admin.admin import admin_router
 from mindex.admin.curation import EntityNotFound
-from mindex.models.adapters import ModelError, MultimodalEmbedder, Speaker, Storyboarder
+from mindex.models.adapters import ModelError, MultimodalEmbedder, Speaker, Storyboarder, Writer
 from mindex.persons import profiling
 from mindex.search.api import search_router
 from mindex.settings.runtime_settings import RuntimeConfig
@@ -29,6 +29,7 @@ def create_app(
     index_id: str | None = None,
     storyboarder: Storyboarder | None = None,
     speaker: Speaker | None = None,
+    writer: Writer | None = None,
     web_token: str | None = None,
 ) -> FastAPI:
     config = config or load_config()
@@ -71,7 +72,9 @@ def create_app(
     app.include_router(source_tasks_router(runtime, store, embedder))
     app.include_router(admin_router(store, runtime))
     app.include_router(settings_router(runtime, store))
-    app.include_router(studio_router(runtime, store, embedder=embedder, storyboarder=storyboarder, speaker=speaker))
+    app.include_router(studio_router(
+        runtime, store, embedder=embedder, storyboarder=storyboarder, speaker=speaker, writer=writer
+    ))
 
     @app.exception_handler(EntityNotFound)
     async def entity_not_found(_, exc):

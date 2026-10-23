@@ -13,7 +13,7 @@ from mindex.studio import studio_workspace as workspace
 
 
 class CreateJobBody(StrictModel):
-    text: str
+    text: str  # 视频大纲；文案在任务内由文案创作模型生成
     title: str | None = Field(default=None, max_length=60)
     options: dict | None = None
 
@@ -116,12 +116,13 @@ class PlanPatchBody(StrictModel):
     name: str | None = Field(default=None, min_length=1, max_length=60)
     options: workspace.PlanOptions | None = None
     shots: list[ShotBody] | None = Field(default=None, min_length=1)
+    script: str | None = Field(default=None, max_length=20000)  # 手动编辑的文案；字数上限按配置校验
 
 
 class VersionChoiceBody(StrictModel):
     revision: str
     version_id: str
-    stage: Literal["content", "recall", "tts", "select", "render", "compose"]
+    stage: Literal["script", "content", "recall", "tts", "select", "render", "compose"]
     shot_id: str | None = None
 
 
@@ -133,7 +134,7 @@ class BuildBody(StrictModel):
 class NodeBody(StrictModel):
     revision: str
     inputs: dict[str, str | None]
-    stage: Literal["split", "recall", "tts", "select", "render"]
+    stage: Literal["script", "split", "recall", "tts", "select", "render"]
     shot_id: str | None = None
     force: bool = False
 

@@ -293,7 +293,63 @@ def test_minimax_presets_use_cn_domain():
 
 
 def test_roles_cover_all_sections():
-    assert set(ROLES) == {"analyzer", "generator", "embedding", "asr", "tts", "person"}
+    assert set(ROLES) == {"analyzer", "writer", "generator", "embedding", "asr", "tts", "person"}
+
+
+def test_writer_config_defaults_to_generator():
+    """yaml 只配了 generator 时，文案创作沿用同一服务；显式配置时各自独立。"""
+    from mindex.shared.config import Config
+
+    copied = Config.model_validate({"studio": {"generator": {"base_url": "http://g/v1", "model": "gen-a"}}})
+    assert copied.studio.writer.model_dump() == copied.studio.generator.model_dump()
+    separate = Config.model_validate({"studio": {
+        "generator": {"base_url": "http://g/v1", "model": "gen-a"},
+        "writer": {"base_url": "http://w/v1", "model": "write-b"},
+    }})
+    assert separate.studio.writer.model == "write-b"
+    assert separate.studio.generator.model == "gen-a"
+    assert separate.studio_key != copied.studio_key
+
+
+def test_writer_profile_migration_copies_active_generator_once(store, config):
+    from mindex.settings.runtime_settings import ensure_writer_profile, get_setting
+
+    generator = save_profile(
+        store,
+        role="generator",
+        provider="deepseek",
+        name="deepseek-chat",
+        config={"backend": "openai", "base_url": "https://api.deepseek.com/v1",
+                "model": "deepseek-chat", "llama_template": False, "max_tokens": 6000},
+        api_key="sk-writer-copy-1234",
+    )
+    activate_profile(store, generator["id"])
+    created = ensure_writer_profile(store)
+    assert created["role"] == "writer" and created["name"] == "deepseek-chat"
+    assert created["provider"] == "deepseek"
+    assert created["api_key"]["hint"] == "…1234"
+    assert get_setting(store, "active.profile.writer") == str(created["id"])
+    current = apply_overrides(config, store)
+    assert current.studio.writer.model == "deepseek-chat"
+    assert current.studio.writer.max_tokens == 6000
+    assert current.studio.writer.api_key == "sk-writer-copy-1234"
+    # 幂等：第二次不再复制；用户删掉文案档案后也不会被重新创建。
+    assert ensure_writer_profile(store) is None
+    assert len(list_profiles(store, "writer")) == 1
+    store.execute("DELETE FROM settings WHERE key='active.profile.writer'")
+    delete_profile(store, created["id"])
+    assert ensure_writer_profile(store) is None
+    assert list_profiles(store, "writer") == []
+
+
+def test_writer_profile_migration_without_generator_profile(store, config):
+    from mindex.settings.runtime_settings import ensure_writer_profile
+
+    assert ensure_writer_profile(store) is None
+    assert list_profiles(store, "writer") == []
+    # 没有档案时文案创作沿用 yaml（即复制自 generator）。
+    current = RuntimeConfig(config, store).current()
+    assert current.studio.writer.model == config.studio.writer.model
 
 
 def test_voices_table_roundtrip(store):

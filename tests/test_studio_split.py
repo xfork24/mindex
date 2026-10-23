@@ -4,7 +4,7 @@ import base64
 import json
 
 import pytest
-from conftest import FixtureStoryboarder
+from conftest import FixtureStoryboarder, legacy_job
 
 from mindex.models.adapters import ModelError
 from mindex.models.speech import decode_audio
@@ -29,7 +29,7 @@ def test_fixture_storyboarder_is_deterministic(config):
 
 def test_run_split_assigns_ids_and_writes_storyboard(config):
     text = "山风吹过山谷。远处的寺庙亮着灯。有人推门进来，抖落一身雪。"
-    job_id = studio.create_job(config, text)["id"]
+    job_id = legacy_job(config, text)["id"]
     result = studio_steps.run_step(config, job_id, "split", storyboarder=FixtureStoryboarder(config))
     assert result["shots"] >= 2
     assert result["coverage_warning"] is None
@@ -43,7 +43,7 @@ def test_run_split_assigns_ids_and_writes_storyboard(config):
 
 def test_prompt_version_invalidates_split_checkpoint(config, monkeypatch):
     generator = FixtureStoryboarder(config)
-    job_id = studio.create_job(config, "山风吹过山谷。远处的寺庙亮着灯。")["id"]
+    job_id = legacy_job(config, "山风吹过山谷。远处的寺庙亮着灯。")["id"]
     studio_steps.run_step(config, job_id, "split", storyboarder=generator)
     checkpoints = studio.job_dir(config, job_id) / "checkpoints.json"
     old_output = json.loads(checkpoints.read_text())["storyboard.json"]["path"]
@@ -60,7 +60,7 @@ def test_prompt_version_invalidates_split_checkpoint(config, monkeypatch):
 
 def test_run_split_rejects_too_many_shots(config):
     config.studio.max_shots = 2
-    job_id = studio.create_job(config, "第一句很长的结束。第二句也很长的结束。第三句依旧很长的结束。")["id"]
+    job_id = legacy_job(config, "第一句很长的结束。第二句也很长的结束。第三句依旧很长的结束。")["id"]
     with pytest.raises(ModelError, match="上限"):
         studio_steps.run_step(config, job_id, "split", storyboarder=FixtureStoryboarder(config))
     info = studio.load_job(config, job_id)["steps"]["split"]
@@ -72,7 +72,7 @@ def test_coverage_warning_for_divergent_text(config):
         def split(self, text: str) -> list[ShotDraft]:
             return [ShotDraft(text="完全无关的替换内容", query="无关查询", estimated_seconds=3.0)]
 
-    job_id = studio.create_job(config, "原始的中文文案内容。")["id"]
+    job_id = legacy_job(config, "原始的中文文案内容。")["id"]
     with pytest.raises(ModelError, match="覆盖原文"):
         studio_steps.run_step(config, job_id, "split", storyboarder=Divergent())
     assert studio.load_job(config, job_id)["steps"]["split"]["status"] == "failed"

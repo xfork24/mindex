@@ -293,6 +293,37 @@ def test_request_local_dependency_checks_reuse_queries_and_probes(library, monke
     assert len(queries) == 2
 
 
+def test_prewarm_probes_all_shots_without_reprobing(library, monkeypatch):
+    from mindex.shared import shot_media
+
+    probes = []
+    original = shot_media.probe
+
+    def probe(path):
+        probes.append(str(path))
+        return original(path)
+
+    monkeypatch.setattr(shot_media, 'probe', probe)
+    media = ShotMedia(library, cache_probes=False, reuse_checks=True)
+    # Prewarm the whole 0–2s span; both shot files must be probed exactly once.
+    media.prewarm([('s', 0, 2)])
+    assert sorted(probes) == sorted(str(library.root / f'{i}.mp4') for i in (0, 1))
+    # Subsequent reference resolution for the same shots reuses the warmed cache.
+    probes.clear()
+    media.references('s', 0, 2)
+    assert probes == []
+
+
+def test_prewarm_skips_single_file_and_tolerates_missing_media(library):
+    media = ShotMedia(library, cache_probes=False, reuse_checks=True)
+    # A single-shot interval short-circuits (nothing to parallelise) and stays correct.
+    media.prewarm([('s', 0, 0.5)])
+    assert media.references('s', 0, 0.5)[0].shot_id == '0'
+    # An unknown source is ignored rather than raising during best-effort warming.
+    media.prewarm([('missing', 0, 1), ('s', 0, 2)])
+    assert len(media.references('s', 0, 2)) == 2
+
+
 def test_float_boundary_tail_is_not_a_concat_input(library):
     service = ShotMedia(library)
     refs = service.references('s', .5, 1 + 1.4210854715202004e-14)

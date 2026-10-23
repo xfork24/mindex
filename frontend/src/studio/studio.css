@@ -77,7 +77,11 @@
 .job-meta-row dd{margin:0;overflow-wrap:anywhere;white-space:pre-wrap}
 .job-meta-row.wide{grid-column:1/-1;padding-bottom:10px}
 .job-meta-row.wide dd{line-height:21px;color:#3b5145}
-#storyboard-section>summary,#result-section>summary,#artifacts-section>summary{font-size:16px;font-weight:600;cursor:pointer;padding:14px 0}
+#script-section>summary,#storyboard-section>summary,#result-section>summary,#artifacts-section>summary{font-size:16px;font-weight:600;cursor:pointer;padding:14px 0}
+.script-panel{display:flex;flex-direction:column;gap:10px;margin-bottom:14px}
+.script-panel p{margin:0;font-size:12px;line-height:1.7;overflow-wrap:anywhere;white-space:pre-line}
+.script-panel textarea{min-height:150px;font-size:13px}
+.script-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .matrix-scroll{overflow:auto;max-height:72vh;border:1px solid var(--line);border-radius:10px;background:white}
 .shot-matrix{border-collapse:separate;border-spacing:0;min-width:1300px;table-layout:fixed;width:100%;font-size:12px}
 .shot-matrix th,.shot-matrix td{padding:12px;border-bottom:1px solid var(--line);border-right:1px solid var(--line);vertical-align:top;width:220px;overflow-wrap:anywhere}

@@ -60,7 +60,7 @@ def add_message_metadata(value):
         return [add_message_metadata(item) for item in value]
     if not isinstance(value, dict):
         return value
-    content_fields = {"annotation", "annotations", "input_text", "text", "query", "notes", "name", "message_key", "message_params"}
+    content_fields = {"annotation", "annotations", "input_text", "outline", "script", "text", "query", "notes", "name", "message_key", "message_params"}
     result = {
         key: item if key.endswith("_message") or key in content_fields else add_message_metadata(item)
         for key, item in value.items()

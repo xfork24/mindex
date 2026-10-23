@@ -7,6 +7,7 @@ import math
 import os
 import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -154,6 +155,39 @@ class ShotMedia:
         return {"version": VERSION, "refs": [asdict(r) for r in refs],
                 "files": [[r.path, self._path(r.path).stat().st_size,
                            self._path(r.path).stat().st_mtime_ns] for r in refs]}
+
+    def prewarm(self, intervals, *, workers=8):
+        """Probe all shot files for the given ``(source_id, start, end)`` intervals in
+        parallel, populating the shared probe cache. Read-only callers (workspace
+        display) otherwise pay one serial ``ffprobe`` per shot file on a cold cache,
+        which dominates the first open of a job. Shot paths are gathered straight from
+        the segment index so collection never probes; failures are ignored here and the
+        normal serial path re-raises them with full context when actually needed."""
+        pending = {}
+        for source_id, start, end in intervals:
+            try:
+                shots = self._shots.get(source_id)
+                if shots is None:
+                    shots = self.store.segments(source_id, 'shot')
+                    self._shots[source_id] = shots
+                for shot in shots:
+                    if shot['start'] >= end or shot['end'] <= start:
+                        continue
+                    path = self._path(shot['path'])
+                    if path not in self._probes:
+                        pending[str(path)] = shot['path']
+            except (MediaError, FileNotFoundError, OSError, ValueError):
+                continue
+        relatives = list(pending.values())
+        if len(relatives) < 2:
+            return
+        def warm(relative):
+            try:
+                self._info(self._path(relative))
+            except (MediaError, FileNotFoundError, OSError, ValueError):
+                pass
+        with ThreadPoolExecutor(max_workers=min(workers, len(relatives))) as pool:
+            list(pool.map(warm, relatives))
 
     def playlist(self, source_id, start=0, end=None, prefix="/api/shots"):
         refs = self.references(source_id, start, end)

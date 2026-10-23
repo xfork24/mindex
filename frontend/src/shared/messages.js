@@ -17,8 +17,8 @@ window.MindexMessages = {
     "en": "Split shots"
   },
   "ui.auto_split_step_0_description": {
-    "zh": "：自动将输入的文案进行文案分镜拆分",
-    "en": ": Automatically divide the input script into shots"
+    "zh": "：自动将文案拆分为分镜",
+    "en": ": Automatically divide the script into shots"
   },
   "ui.auto_split_step_1_label": {
     "zh": "分镜召回",
@@ -3137,8 +3137,8 @@ window.MindexMessages = {
     "en": "Copy this into a new project"
   },
   "ui.9f185b0cc351": {
-    "zh": "请先保存或取消分镜修改",
-    "en": "Please save or cancel storyboard modifications first"
+    "zh": "请先保存或取消未保存的修改",
+    "en": "Please save or discard unsaved changes first"
   },
   "ui.319e0a3a0458": {
     "zh": "只重新生成本列全部分镜",
@@ -3961,8 +3961,8 @@ window.MindexMessages = {
     "en": "{p0} · {p1} items"
   },
   "ui.34fa75919260": {
-    "zh": "任务已创建，请先生成分镜。",
-    "en": "The task has been created, please create a scene."
+    "zh": "任务已创建，请先生成文案。",
+    "en": "The task has been created. Generate the script first."
   },
   "ui.73702e17a417": {
     "zh": "搜索过滤…",
@@ -7451,5 +7451,64 @@ window.MindexMessages = {
   "ui.login_hint": {"zh": "请输入启动服务时设置的 MINDEX_WEB_TOKEN。", "en": "Enter the MINDEX_WEB_TOKEN set when the server was started."},
   "ui.login_label": {"zh": "访问令牌", "en": "Access token"},
   "ui.login_submit": {"zh": "登录", "en": "Sign in"},
-  "ui.login_error": {"zh": "令牌不正确，请重试。", "en": "The token is incorrect. Try again."}
+  "ui.login_error": {"zh": "令牌不正确，请重试。", "en": "The token is incorrect. Try again."},
+  "ui.writer_role_description": {"zh": "按视频大纲创作解说文案，纯文本任务，可与文本拆分镜使用同一模型", "en": "Writes narration from the video outline. Text-only; it can share a model with the storyboard splitter."},
+  "ui.writer_role_label": {"zh": "文案创作", "en": "Script writing"},
+  "ui.writer_preset_note": {"zh": "文本模型，性价比之选", "en": "Cost-effective text model"},
+  "ui.writer_empty_content": {"zh": "文案服务返回了空内容", "en": "The script service returned empty content"},
+  "ui.writer_bad_format": {"zh": "文案服务返回格式不符合聊天接口约定", "en": "The script service response does not follow the chat API format"},
+  "ui.writer_truncated": {"zh": "模型输出达到 max_tokens 上限并被截断，请提高 studio.writer.max_tokens 或缩短文本后重试", "en": "The model output hit max_tokens and was truncated. Increase studio.writer.max_tokens or shorten the text, then retry."},
+  "ui.writer_retries_exhausted": {"zh": "文案输出多次未通过校验：{p0}", "en": "The script output failed validation repeatedly: {p0}"},
+  "ui.writer_too_long": {"zh": "文案超过 {p0} 字上限", "en": "The script exceeds the {p0}-character limit"},
+  "ui.writer_empty_outline": {"zh": "视频大纲为空，无法生成文案", "en": "The video outline is empty, so no script can be generated"},
+  "ui.create_video_label": {"zh": "创作视频", "en": "Create a video"},
+  "ui.create_video_placeholder": {"zh": "输入你想要创作的视频大纲，例如：生成一个新加坡旅游介绍视频，300字左右，按顺序讲星耀樟宜、植物园、牛车水中国美食、滨海湾公园的白天和夜景，最后总结一下。英文", "en": "Describe the video you want, for example: Create a Singapore travel introduction of about 300 words. Cover Jewel Changi Airport, the Botanic Gardens, Chinatown food, and Gardens by the Bay by day and at night, in that order, then sum up. In English"},
+  "ui.job_outline_label": {"zh": "视频大纲", "en": "Video outline"},
+  "ui.script_section_title": {"zh": "文案创作", "en": "Script writing"},
+  "ui.script_stale_warning": {"zh": "文案已变化，现有分镜还是按旧文案拆出的。构建成片时会重新拆分镜。", "en": "The script has changed, but the current storyboard was split from the old one. Building the video will split it again."},
+  "ui.script_stale_board": {"zh": "文案已变化，分镜已过期，构建成片时会重新拆分。", "en": "The script has changed and the storyboard is out of date. It will be split again when you build."},
+  "ui.script_placeholder": {"zh": "文案待创作。点击“生成文案”，或直接在这里输入后保存。", "en": "No script yet. Click “Generate script”, or type one here and save it."},
+  "ui.script_aria_label": {"zh": "文案", "en": "Script"},
+  "ui.script_generate": {"zh": "生成文案", "en": "Generate script"},
+  "ui.script_regenerate": {"zh": "重新生成文案", "en": "Regenerate script"},
+  "ui.script_save": {"zh": "保存文案", "en": "Save script"},
+  "ui.script_no_outline": {"zh": "任务没有视频大纲，无法生成文案", "en": "This task has no video outline, so no script can be generated"},
+  "ui.script_state_generating": {"zh": "生成中…", "en": "Generating…"},
+  "ui.script_state_empty": {"zh": "文案待创作", "en": "Script not written yet"},
+  "ui.script_state_empty_dirty": {"zh": "文案待创作 · 有未保存的内容", "en": "Script not written yet · unsaved text"},
+  "ui.script_state_ready": {"zh": "{p0} · 版本 {p1}", "en": "{p0} · version {p1}"},
+  "ui.script_state_ready_dirty": {"zh": "{p0} · 版本 {p1} · 有未保存的修改", "en": "{p0} · version {p1} · unsaved changes"},
+  "ui.script_origin_generated": {"zh": "模型生成", "en": "Generated"},
+  "ui.script_origin_manual": {"zh": "手动编辑", "en": "Edited manually"},
+  "ui.script_origin_legacy": {"zh": "创建时填写", "en": "Entered at creation"},
+  "ui.script_outline_line": {"zh": "视频大纲：{p0}", "en": "Video outline: {p0}"},
+  "ui.script_counter": {"zh": "{p0} 字", "en": "{p0} characters"},
+  "ui.script_discard_confirm": {"zh": "文本框里有未保存的修改，重新生成会丢弃它们。继续吗？", "en": "The text box has unsaved changes, and regenerating discards them. Continue?"},
+  "ui.script_regenerate_confirm": {"zh": "重新生成会产生新的文案版本，现有分镜将过期，构建成片时会按新文案重新拆分。继续吗？", "en": "Regenerating creates a new script version. The current storyboard becomes out of date and will be split again when you build. Continue?"},
+  "ui.script_saved": {"zh": "文案已保存。", "en": "Script saved."},
+  "ui.auto_script_build_intro": {"zh": "当前尚未创作文案。确认执行构建后，将依次自动执行：生成文案、拆分镜、分镜召回、配音、选片并对齐、分镜渲染，最后合成为成片。", "en": "No script yet. Confirm to automatically write the script, split shots, retrieve footage, generate narration, select and align clips, render shots, and compose the final video in order."},
+  "ui.auto_script_step_label": {"zh": "生成文案", "en": "Write script"},
+  "ui.auto_script_step_description": {"zh": "：根据视频大纲生成可直接配音的解说文案", "en": ": Write narration ready for voiceover from the video outline"},
+  "ui.studio_outline_required": {"zh": "请输入创作视频大纲", "en": "Please enter a video outline"},
+  "ui.studio_outline_too_long": {"zh": "大纲超过 {p0} 字上限，请精简后再试", "en": "The outline exceeds the {p0}-character limit. Shorten it and try again."},
+  "ui.studio_script_required": {"zh": "文案不能为空", "en": "The script cannot be empty"},
+  "ui.studio_script_split_first": {"zh": "请先生成文案，再拆分镜", "en": "Generate the script before splitting shots"},
+  "ui.studio_script_no_single_shot": {"zh": "生成文案和拆分镜不能指定单镜", "en": "Writing the script and splitting shots cannot target a single shot"},
+  "ui.studio_legacy_steps_unavailable": {"zh": "该任务的文案在构建方案中创作，请在版本工作台生成文案后构建", "en": "This task's script is written inside a build plan. Generate it in the version workspace, then build."},
+  "ui.studio_reason_write_script": {"zh": "根据视频大纲生成文案", "en": "Write the script from the video outline"},
+  "ui.studio_reason_no_outline": {"zh": "任务没有视频大纲，请手动编写文案", "en": "This task has no video outline. Write the script by hand."},
+  "ui.studio_reason_resplit": {"zh": "文案已变化，重新拆分镜后依次执行召回、配音、选片对齐、分镜渲染和成片合成", "en": "The script has changed. Split shots again, then run retrieval, narration, selection and alignment, shot rendering and composition."},
+  "ui.studio_reason_script_failed": {"zh": "生成文案失败", "en": "Writing the script failed"},
+  "ui.studio_log_script_start": {"zh": "开始生成文案", "en": "Starting Generate script"},
+  "ui.studio_log_script_0": {"zh": "生成文案：完成", "en": "Generate script: Complete"},
+  "ui.studio_log_script_0_detail": {"zh": "生成文案：完成 · {diagnostic}", "en": "Generate script: Complete · {diagnostic}"},
+  "ui.studio_log_script_1": {"zh": "生成文案：复用成功版本", "en": "Generate script: Reused successful version"},
+  "ui.studio_log_script_1_detail": {"zh": "生成文案：复用成功版本 · {diagnostic}", "en": "Generate script: Reused successful version · {diagnostic}"},
+  "ui.studio_log_script_2": {"zh": "生成文案：失败", "en": "Generate script: Failed"},
+  "ui.studio_log_script_2_detail": {"zh": "生成文案：失败 · {diagnostic}", "en": "Generate script: Failed · {diagnostic}"},
+  "ui.studio_log_script_3": {"zh": "生成文案：阻塞", "en": "Generate script: Blocked"},
+  "ui.studio_log_script_3_detail": {"zh": "生成文案：阻塞 · {diagnostic}", "en": "Generate script: Blocked · {diagnostic}"},
+  "ui.studio_log_script_4": {"zh": "生成文案：跳过", "en": "Generate script: Skipped"},
+  "ui.studio_log_script_4_detail": {"zh": "生成文案：跳过 · {diagnostic}", "en": "Generate script: Skipped · {diagnostic}"},
+  "ui.script_failed": {"zh": "文案生成失败：{p0}", "en": "Writing the script failed: {p0}"}
 };

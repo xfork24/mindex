@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from conftest import legacy_job
 from filelock import FileLock
 
 from mindex.admin.curation import EntityNotFound
@@ -37,7 +38,8 @@ def test_studio_config_defaults_and_validation(config):
 def test_create_job_validates_input_and_persists(config):
     state = studio.create_job(config, "  夜色沉了下去。远处有火车经过。  ")
     job_id = state["id"]
-    assert state["input_text"] == "夜色沉了下去。远处有火车经过。"
+    # 新任务只保存视频大纲；文案在构建方案里创作。
+    assert state["outline"] == "夜色沉了下去。远处有火车经过。" and "input_text" not in state
     assert state["title"].startswith("夜色沉了下去")
     assert state["steps"]["split"]["status"] == "pending"
     assert state["options"] == {
@@ -70,7 +72,7 @@ def test_create_job_options_override_defaults(config):
 
 
 def test_step_lifecycle_attempts_and_dependencies(config):
-    job_id = studio.create_job(config, "山风吹过山谷。")["id"]
+    job_id = legacy_job(config, "山风吹过山谷。")["id"]
     state = studio.begin_step(config, job_id, "split")
     assert state["steps"]["split"]["status"] == "running"
     attempt = state["steps"]["split"]["attempt"]
@@ -88,7 +90,7 @@ def test_step_lifecycle_attempts_and_dependencies(config):
 
 
 def test_fail_step_records_error_and_allows_retry(config):
-    job_id = studio.create_job(config, "示例文案。")["id"]
+    job_id = legacy_job(config, "示例文案。")["id"]
     studio.begin_step(config, job_id, "split")
     studio.fail_step(config, job_id, "split", RuntimeError("模型超时"))
     info = studio.load_job(config, job_id)["steps"]["split"]
@@ -102,7 +104,7 @@ def test_fail_step_records_error_and_allows_retry(config):
 
 
 def test_rerun_invalidates_only_dependency_downstream(config):
-    job_id = studio.create_job(config, "分镜一。分镜二。")["id"]
+    job_id = legacy_job(config, "分镜一。分镜二。")["id"]
     for step in studio.STEPS:
         complete(config, job_id, step)
     state = studio.begin_step(config, job_id, "recall")
@@ -116,7 +118,7 @@ def test_rerun_invalidates_only_dependency_downstream(config):
 
 
 def test_storyboard_edit_invalidates_downstream(config):
-    job_id = studio.create_job(config, "原本文案。")["id"]
+    job_id = legacy_job(config, "原本文案。")["id"]
     complete(config, job_id, "split", {"shots": 1})
     complete(config, job_id, "recall", {"empty": []})
     storyboard = Storyboard(
@@ -130,7 +132,7 @@ def test_storyboard_edit_invalidates_downstream(config):
     loaded = studio.load_storyboard(config, job_id)
     assert loaded.shots[0].text == "新文案"
     # 未完成 split 的任务不能编辑分镜
-    other = studio.create_job(config, "另一个任务。")["id"]
+    other = legacy_job(config, "另一个任务。")["id"]
     with pytest.raises(studio.StudioError, match="先完成文本拆分镜"):
         studio.save_storyboard(config, other, storyboard)
     with pytest.raises(EntityNotFound):
@@ -138,7 +140,7 @@ def test_storyboard_edit_invalidates_downstream(config):
 
 
 def test_timeline_edit_requires_select_and_invalidates_render(config):
-    job_id = studio.create_job(config, "时间线任务。")["id"]
+    job_id = legacy_job(config, "时间线任务。")["id"]
     timeline = studio.Timeline(
         job_id=job_id,
         mode="manual",
@@ -175,12 +177,12 @@ def test_timeline_edit_requires_select_and_invalidates_render(config):
 
 
 def test_recover_stale_marks_interrupted_steps(config):
-    job_id = studio.create_job(config, "恢复检测。")["id"]
+    job_id = legacy_job(config, "恢复检测。")["id"]
     studio.begin_step(config, job_id, "split")
     studio.recover_stale(config)
     info = studio.load_job(config, job_id)["steps"]["split"]
     assert info["status"] == "failed" and "中断" in info["error"]
-    held = studio.create_job(config, "执行中的任务。")["id"]
+    held = legacy_job(config, "执行中的任务。")["id"]
     studio.begin_step(config, held, "split")
     with FileLock(str(studio.lock_path(config)), timeout=0):
         studio.recover_stale(config)
@@ -188,7 +190,7 @@ def test_recover_stale_marks_interrupted_steps(config):
 
 
 def test_delete_job_removes_directory(config):
-    job_id = studio.create_job(config, "待删除。")["id"]
+    job_id = legacy_job(config, "待删除。")["id"]
     studio.delete_job(config, job_id)
     assert not studio.job_dir(config, job_id).exists()
     with pytest.raises(EntityNotFound):
@@ -227,7 +229,7 @@ def test_query_only_and_reorder_preserve_tts(config):
             Shot(id="shot-02", text="第二句。", query="蓝色", estimated_seconds=1),
         ],
     )
-    job_id = studio.create_job(config, "第一句。第二句。")["id"]
+    job_id = legacy_job(config, "第一句。第二句。")["id"]
     board.job_id = job_id
     studio.write_storyboard(config, job_id, board)
     for step in studio.STEPS:
@@ -247,7 +249,7 @@ def test_query_only_and_reorder_preserve_tts(config):
 
 
 def test_changed_config_and_legacy_are_invalidated_before_run(config):
-    job_id = studio.create_job(config, "文案。")["id"]
+    job_id = legacy_job(config, "文案。")["id"]
     for step in studio.STEPS:
         complete(config, job_id, step)
     config.studio.tts.model = "another-model"

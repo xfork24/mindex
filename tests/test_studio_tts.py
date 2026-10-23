@@ -5,7 +5,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from conftest import FixtureSpeaker, FixtureStoryboarder
+from conftest import FixtureSpeaker, FixtureStoryboarder, legacy_job
 
 from mindex.models.adapters import ModelError
 from mindex.shared.media import audio_info
@@ -26,7 +26,7 @@ def test_fixture_speaker_wav_is_probeable(config):
 
 
 def prepare_job(config, text):
-    job_id = studio.create_job(config, text)["id"]
+    job_id = legacy_job(config, text)["id"]
     studio_steps.run_step(config, job_id, "split", storyboarder=FixtureStoryboarder(config))
     return job_id
 

@@ -6,7 +6,7 @@ import time
 import wave
 
 import pytest
-from conftest import FixtureEmbedder, FixtureSpeaker, FixtureStoryboarder
+from conftest import FixtureEmbedder, FixtureSpeaker, FixtureStoryboarder, convert_to_legacy, legacy_job
 from fastapi.testclient import TestClient
 
 from mindex.api import create_app
@@ -30,8 +30,18 @@ def prepared(config, video_file):
     return config, embedder
 
 
+def split_node(data, pid, force=True):
+    """The split node's inputs are the plan's current script version."""
+    return {
+        "revision": data["revision"],
+        "inputs": {"script": data["plans"][pid]["script"]},
+        "stage": "split",
+        "force": force,
+    }
+
+
 def setup_workspace(config):
-    job_id = studio.create_job(config, "红色开场。蓝色结尾。", options={"burn": False})["id"]
+    job_id = legacy_job(config, "红色开场。蓝色结尾。", options={"burn": False})["id"]
     w = ws.load(config, job_id)
     p = ws.plan(w, w["active_plan"])
     ws.set_board(
@@ -44,6 +54,7 @@ def setup_workspace(config):
             studio.Shot(id="b", text="蓝色结尾。", query="蓝色", estimated_seconds=1),
         ],
     )
+    p["board_script"] = p["script"]  # 分镜由当前文案拆出：不是过期状态
     ws.persist(config, job_id, w)
     return job_id, w, p
 
@@ -254,16 +265,17 @@ def test_plan_options_patch_applies_to_task_recall(prepared):
     client = TestClient(
         create_app(config, embedder, speaker=FixtureSpeaker(config), storyboarder=FixtureStoryboarder(config))
     )
-    jid = client.post("/api/studio/jobs", json={"text": "红色开场。", "options": {"burn": False}}).json()[
-        "id"
-    ]
+    jid = convert_to_legacy(
+        config,
+        client.post("/api/studio/jobs", json={"text": "红色开场。", "options": {"burn": False}}).json()["id"],
+    )["id"]
     base = f"/api/studio/jobs/{jid}"
     data = client.get(f"{base}/workspace").json()
     pid = data["active_plan"]
     assert (
         client.post(
             f"{base}/plans/{pid}/nodes",
-            json={"revision": data["revision"], "inputs": {}, "stage": "split", "force": True},
+            json=split_node(data, pid),
         ).status_code
         == 202
     )
@@ -297,16 +309,17 @@ def test_workspace_api_title_plans_preview_confirmation_and_stale_binding(prepar
     client = TestClient(
         create_app(config, embedder, speaker=FixtureSpeaker(config), storyboarder=FixtureStoryboarder(config))
     )
-    jid = client.post("/api/studio/jobs", json={"text": "红色开场。", "options": {"burn": False}}).json()[
-        "id"
-    ]
+    jid = convert_to_legacy(
+        config,
+        client.post("/api/studio/jobs", json={"text": "红色开场。", "options": {"burn": False}}).json()["id"],
+    )["id"]
     base = f"/api/studio/jobs/{jid}"
     data = client.get(f"{base}/workspace").json()
     pid = data["active_plan"]
     assert (
         client.post(
             f"{base}/plans/{pid}/nodes",
-            json={"revision": data["revision"], "inputs": {}, "stage": "split", "force": True},
+            json=split_node(data, pid),
         ).status_code
         == 202
     )
@@ -368,7 +381,7 @@ def test_workspace_api_title_plans_preview_confirmation_and_stale_binding(prepar
 
 
 def test_migration_snapshots_and_unknown_dependencies_are_honest(config):
-    jid = studio.create_job(config, "历史文案。")["id"]
+    jid = legacy_job(config, "历史文案。")["id"]
     studio.write_storyboard(
         config,
         jid,
@@ -392,7 +405,7 @@ def test_legacy_render_versions_are_imported_without_inventing_edges(prepared):
     from mindex.studio import studio_steps
 
     config, embedder = prepared
-    jid = studio.create_job(config, "历史红色文案。", options={"burn": False})["id"]
+    jid = legacy_job(config, "历史红色文案。", options={"burn": False})["id"]
     for step in studio.STEPS:
         studio_steps.run_step(
             config,
@@ -432,11 +445,13 @@ def test_api_execution_lock_and_recovery(config):
             return super().split(text)
 
     client = TestClient(create_app(config, storyboarder=Slow(config)))
-    jid = client.post("/api/studio/jobs", json={"text": "服务中断测试文案。"}).json()["id"]
+    jid = convert_to_legacy(
+        config, client.post("/api/studio/jobs", json={"text": "服务中断测试文案。"}).json()["id"]
+    )["id"]
     base = f"/api/studio/jobs/{jid}"
     data = client.get(f"{base}/workspace").json()
     pid = data["active_plan"]
-    body = {"stage": "split", "revision": data["revision"], "inputs": {}, "force": True}
+    body = split_node(data, pid)
     try:
         assert client.post(f"{base}/plans/{pid}/nodes", json=body).status_code == 202
         assert entered.wait(3)
@@ -591,18 +606,24 @@ def test_mixed_render_picture_audio_and_subtitle_match_bound_versions(prepared, 
     assert next(n for n in checked["nodes"] if n["key"] == "compose")["action"] == "reuse"
 
 
-def test_build_without_storyboard_runs_full_pipeline(prepared):
+@pytest.mark.parametrize("legacy", [False, True])
+def test_build_without_storyboard_runs_full_pipeline(prepared, legacy):
+    """新任务从生成文案开始；老任务已有文案（input_text 迁移而来），直接从拆分镜开始。"""
     config, embedder = prepared
     client = TestClient(
         create_app(config, embedder, speaker=FixtureSpeaker(config), storyboarder=FixtureStoryboarder(config))
     )
     jid = client.post("/api/studio/jobs", json={"text": "红色开场。蓝色结尾。", "options": {"burn": False}}).json()["id"]
+    if legacy:
+        convert_to_legacy(config, jid)
     base = f"/api/studio/jobs/{jid}"
     data = client.get(f"{base}/workspace").json()
     pid = data["active_plan"]
     assert not data["plans"][pid]["board"]
+    assert bool(data["plans"][pid]["script"]) is legacy
     checked = client.get(f"{base}/plans/{pid}/preflight").json()
-    assert checked["nodes"][0]["stage"] == "split"
+    first = "split" if legacy else "script"
+    assert checked["nodes"][0]["stage"] == first
     assert all(n["action"] != "blocked" for n in checked["nodes"])
     response = client.post(f"{base}/plans/{pid}/build", json={"token": checked["token"]})
     assert response.status_code == 202, response.text
@@ -610,6 +631,7 @@ def test_build_without_storyboard_runs_full_pipeline(prepared):
     build = data["builds"][-1]
     assert build["status"] == "complete", build
     stages = [n["stage"] for n in build["nodes"]]
-    assert list(dict.fromkeys(stages)) == ["split", "recall", "tts", "select", "render", "compose"]
+    expected = ["split", "recall", "tts", "select", "render", "compose"]
+    assert list(dict.fromkeys(stages)) == (expected if legacy else ["script", *expected])
     assert all(n["status"] in ("complete", "reused") for n in build["nodes"])
     assert data["plans"][pid]["final"]

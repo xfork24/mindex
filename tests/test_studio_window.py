@@ -7,7 +7,7 @@ from itertools import pairwise
 
 import numpy as np
 import pytest
-from conftest import FixtureSpeaker
+from conftest import FixtureSpeaker, legacy_job
 from fastapi.testclient import TestClient
 
 from mindex.api import create_app
@@ -114,7 +114,7 @@ def refinement(config, video_file, tmp_path):
                 f"INSERT INTO segments ({','.join(row)}) VALUES ({','.join('?' for _ in row)})",
                 tuple(row.values()),
             )
-    jid = studio.create_job(config, "红色开场。蓝色结尾。", options={"burn": False})["id"]
+    jid = legacy_job(config, "红色开场。蓝色结尾。", options={"burn": False})["id"]
     w = ws.load(config, jid)
     p = ws.plan(w, w["active_plan"])
     ws.set_board(

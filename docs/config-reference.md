@@ -72,7 +72,7 @@
 
 | 键 | 类型 | 默认 | 说明 |
 |---|---|---|---|
-| `max_input_chars` | int ≥1 | 2000 | 创作文案字数上限 |
+| `max_input_chars` | int ≥1 | 2000 | 视频大纲和文案的字数上限 |
 | `max_shots` | int ≥1 | 60 | 单任务分镜数量上限 |
 
 ### `studio.generator` — 文本拆分镜 LLM
@@ -85,6 +85,10 @@
 | `timeout` / `api_key_env` | | 300 / `MINDEX_QWEN_API_KEY` | |
 | `max_tokens` | int >0 | 4000 | 单次拆分镜输出上限，截断会明确报错 |
 | `split_retries` | int ≥0 | 2 | 分镜校验失败后的带反馈重试次数 |
+
+### `studio.writer` — 文案创作 LLM
+
+按视频大纲写旁白正文。字段与 `studio.generator` 完全相同（`GeneratorConfig`）；yaml 省略本段时复制 `studio.generator`，升级后无需改配置。其中 `split_retries` 在这里表示输出为空或超过 `max_input_chars` 时的带反馈重试次数，`max_tokens` 截断会明确报错。文案采样温度固定为 0.7（拆分镜为 0），提示词版本号（`WRITER_PROMPT_VERSION`）和本段配置都进入文案阶段的版本签名。
 
 ### `studio.recall` / `studio.selection` / `studio.audio` / `studio.subtitle` / `studio.render`
 

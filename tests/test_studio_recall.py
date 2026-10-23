@@ -7,7 +7,7 @@ import io
 
 import numpy as np
 import pytest
-from conftest import FixtureEmbedder, FixtureSpeaker, FixtureStoryboarder
+from conftest import FixtureEmbedder, FixtureSpeaker, FixtureStoryboarder, legacy_job
 from fastapi.testclient import TestClient
 from PIL import Image
 
@@ -120,7 +120,7 @@ def setup_workspace_with(config, source_ids):
     options = {"burn": False}
     if source_ids is not None:
         options["source_ids"] = source_ids
-    job_id = studio.create_job(config, "红色开场。蓝色结尾。", options=options)["id"]
+    job_id = legacy_job(config, "红色开场。蓝色结尾。", options=options)["id"]
     w = ws.load(config, job_id)
     p = ws.plan(w, w["active_plan"])
     ws.set_board(
@@ -133,6 +133,7 @@ def setup_workspace_with(config, source_ids):
             Shot(id="b", text="蓝色结尾。", query="蓝色", estimated_seconds=1),
         ],
     )
+    p["board_script"] = p["script"]  # 分镜由当前文案拆出：不是过期状态
     ws.persist(config, job_id, w)
     return job_id, w, p
 

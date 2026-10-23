@@ -20,7 +20,9 @@ from uuid import uuid4
 
 from pydantic import Field, model_validator
 
+from mindex.models import adapters
 from mindex.models.adapters import make_speaker, make_storyboarder
+from mindex.models.writer import WRITER_PROMPT_VERSION
 from mindex.shared.config import StrictModel, fingerprint, portable_parameters
 from mindex.shared.media import atomic_media, audio_info, probe
 from mindex.shared.shot_media import ShotMedia
@@ -31,6 +33,8 @@ from mindex.studio.studio_artifacts import digest, safe_path, sanitized, visibil
 from mindex.studio.studio_logs import LABELS, ExecutionLog, active_log, diagnostic_event
 
 STAGES = ("recall", "tts", "select", "render")
+# 方案级前置阶段：文案（script）→ 拆分镜（split）；二者都不属于单个分镜。
+SCRIPT_ORIGINS = ("generated", "manual", "legacy")
 
 
 class PlanOptions(StrictModel):
@@ -124,7 +128,79 @@ def new_plan(name, options):
         "ranges": {},
         "anchors": {},
         "final": None,
+        # 当前文案版本，以及当前分镜由哪个文案版本拆出；两者不同即分镜已过期。
+        "script": None,
+        "board_script": None,
     }
+
+
+def script_text(w, p):
+    vid = p.get("script")
+    return version(w, vid)["data"]["text"] if vid else None
+
+
+def script_stale(p):
+    """分镜是从别的文案拆出来的：保留产物，但提示并在构建时重新拆分镜。"""
+    return bool(p.get("board")) and p.get("board_script") != p.get("script")
+
+
+def add_script(config, job_id, w, p, text, origin):
+    text = (text or "").strip()
+    if not text:
+        raise studio.StudioError("文案不能为空")
+    if len(text) > config.studio.max_input_chars:
+        raise studio.StudioError(f"文案超过 {config.studio.max_input_chars} 字上限，请精简后再试")
+    if p.get("script") and script_text(w, p) == text:
+        return p["script"]
+    p["script"] = add_version(config, job_id, w, "script", data={"text": text, "origin": origin})
+    return p["script"]
+
+
+def _legacy_script(config, job_id, w):
+    """旧任务的 input_text 就是文案：确定性地导入为一个 legacy 文案版本。
+
+    版本号由任务与原文派生，只读请求在内存里得到同一份迁移结果（方案 revision 稳定）；
+    version.json 是不可变文件，内容确定，缺失时补写不会与并发读冲突。workspace.json
+    只在后续持锁修改时随 persist 落盘。
+    """
+    state = studio.load_job(config, job_id)
+    text = (state.get("input_text") or "").strip()
+    if not text:
+        return None
+    import hashlib
+
+    vid = hashlib.sha256(f"legacy-script:{job_id}:{text}".encode()).hexdigest()[:32]
+    if vid not in w["versions"]:
+        item = {
+            "id": vid,
+            "stage": "script",
+            "shot_id": None,
+            "created_at": state["created_at"],
+            "status": "complete",
+            "inputs": {},
+            "parameters": {},
+            "signature": None,
+            "data": {"text": text, "origin": "legacy"},
+            "files": {},
+            "error": None,
+            "incomplete": False,
+        }
+        target = root(config, job_id) / "versions" / vid / "version.json"
+        if not target.exists():
+            studio.save(target, item)
+        w["versions"][vid] = item
+    return vid
+
+
+def normalize_script(config, job_id, w):
+    """方案缺少文案字段时迁移：旧任务导入 legacy 文案，且视为当前分镜的来源。"""
+    pending = [p for p in w["plans"].values() if "script" not in p]
+    if not pending:
+        return
+    legacy = _legacy_script(config, job_id, w)
+    for p in pending:
+        p["script"] = legacy
+        p["board_script"] = legacy if p.get("board") else None
 
 
 def add_version(
@@ -240,6 +316,7 @@ def load(config, job_id):
         for p in w["plans"].values():
             normalize_voice_options(p)
             p.setdefault("anchors", {})
+        normalize_script(config, job_id, w)
         return w
     directory = root(config, job_id)
     snapshot = directory / "migration-v2"
@@ -258,11 +335,13 @@ def load(config, job_id):
         ).model_dump(),
     )
     w = {"schema": 2, "active_plan": p["id"], "plans": {p["id"]: p}, "versions": {}, "builds": []}
+    del p["script"], p["board_script"]  # 由 normalize_script 统一迁移
     try:
         board = studio.load_storyboard(config, job_id)
         set_board(config, job_id, w, p, board.shots)
     except studio.EntityNotFound:
         pass
+    normalize_script(config, job_id, w)
     # Each verified legacy file is preserved as a version. Missing provenance stays explicit;
     # matching today's content to an old execution is never assumed.
     imported = {}
@@ -502,11 +581,22 @@ class DetailContext:
     # 只读展示（detail）允许用 Store 的短 TTL 缓存读 active_index / visibility_key；
     # 构建/签名路径不走这里（另建 Store 实例），不受缓存影响。
     display: bool = False
+    _media: object = None
 
     def database(self, config):
         if self.store is None:
             self.store = Store(config.data_dir)
         return self.store
+
+    def media(self, config):
+        """Shared ``ShotMedia`` for one detail response. ``reuse_checks`` keeps probe
+        results in memory across shots and reads the persisted probe cache without a
+        per-file lock, so a job's shots that share source media are probed once."""
+        if self._media is None:
+            from mindex.shared.shot_media import ShotMedia
+
+            self._media = ShotMedia(self.database(config), reuse_checks=True)
+        return self._media
 
 
 def settings(config, p, stage, *, context=None):
@@ -523,6 +613,11 @@ def settings(config, p, stage, *, context=None):
 
 def _settings(config, p, stage, *, store=None, display=False):
     o = p["options"]
+    if stage == "script":
+        return {
+            "writer": sanitized(config.studio.writer.model_dump()),
+            "prompt_version": WRITER_PROMPT_VERSION,
+        }
     if stage == "split":
         return {
             "generator": sanitized(config.studio.generator.model_dump()),
@@ -626,9 +721,12 @@ def specification(config, job_id, w, p, stage, sid=None, *, context=None, parame
     params = settings(config, p, stage, context=context)
     if stage == "render":
         params = {**params, "media_version": "shot-media-v1"}
-    if stage == "split":
-        payload = {"text": studio.load_job(config, job_id)["input_text"]}
+    if stage == "script":
+        payload = {"outline": studio.load_job(config, job_id)["outline"]}
         inputs = {}
+    elif stage == "split":
+        payload = {"text": script_text(w, p)}
+        inputs = {"script": p.get("script")}
     elif stage == "compose":
         inputs = {"board": p["board"], **{sid: p["shots"][sid].get("render") for sid in ordered_shots(w, p)}}
         # Query/estimate-only board edits do not change an already rendered film.
@@ -687,8 +785,9 @@ def specification(config, job_id, w, p, stage, sid=None, *, context=None, parame
                     "SELECT path FROM sources WHERE id=?", (event["video"]["source_id"],)
                 )
                 if row:
-                    source = ShotMedia(store).identity(event["video"]["source_id"],
-                                                       event["video"]["start"], event["video"]["end"])
+                    shot_media = context.media(config) if context is not None else ShotMedia(store)
+                    source = shot_media.identity(event["video"]["source_id"],
+                                                 event["video"]["start"], event["video"]["end"])
             payload = {"select": inputs["select"], "tts": inputs["tts"], "source": source}
     if parameters is not None:
         params = parameters
@@ -765,8 +864,9 @@ def conflicts(config, job_id, w, p, stage, sid, vid, *, context=None):
 
 
 def match(config, job_id, w, p, stage, sid=None, *, verify=True):
-    if stage == "split":
-        return None  # Re-splitting is an explicit structural operation, never a pointer switch.
+    if stage in ("script", "split"):
+        # Writing and re-splitting are explicit plan-level operations, never a pointer switch.
+        return None
     spec = specification(config, job_id, w, p, stage, sid)
     selected = p.get("final") if stage == "compose" else p["shots"].get(sid, {}).get(stage)
     items = list(reversed(list(w["versions"].values())))
@@ -785,20 +885,50 @@ def match(config, job_id, w, p, stage, sid=None, *, verify=True):
     return None
 
 
+def node_dependencies(w, p, stage, sid, *, resplit=False):
+    if stage == "split":
+        return ["script"] if not p.get("script") else []
+    if stage == "select":
+        return [f"tts:{sid}"] + ([f"recall:{sid}"] if needs_recall(p, sid) else [])
+    if stage == "render":
+        return [f"select:{sid}", f"tts:{sid}"]
+    if stage == "compose":
+        return ["split"] if resplit else [f"render:{s}" for s in ordered_shots(w, p)]
+    return []
+
+
 def preflight(config, job_id, w, p, *, force=False):
     draft = copy.deepcopy(p)
     nodes = []
-    if not p["board"]:
+    # 已有文案时直接复用，绝不在构建中悄悄重写；只在缺少文案时先生成。
+    if not p.get("script"):
+        outline = studio.load_job(config, job_id).get("outline", "").strip()
+        nodes.append(
+            {
+                "key": "script",
+                "stage": "script",
+                "shot_id": None,
+                "action": "rebuild" if outline else "blocked",
+                "reason": "根据视频大纲生成文案" if outline else "任务没有视频大纲，请手动编写文案",
+            }
+        )
+    if not p.get("script") or not p["board"] or script_stale(p):
         nodes.append(
             {
                 "key": "split",
                 "stage": "split",
                 "shot_id": None,
                 "action": "rebuild",
-                "reason": "自动拆分镜后依次执行召回、配音、选片对齐、分镜渲染和成片合成",
+                "reason": (
+                    "文案已变化，重新拆分镜后依次执行召回、配音、选片对齐、分镜渲染和成片合成"
+                    if script_stale(p)
+                    else "自动拆分镜后依次执行召回、配音、选片对齐、分镜渲染和成片合成"
+                ),
             }
         )
-    for stage in STAGES:
+    resplit = any(n["stage"] == "split" for n in nodes)
+    # 待重新拆分时旧分镜的逐镜节点没有意义：拆分完成后由执行器按新分镜重新预检。
+    for stage in () if resplit else STAGES:
         for sid in ordered_shots(w, p):
             key = f"{stage}:{sid}"
             found = None if force else match(config, job_id, w, draft, stage, sid)
@@ -838,7 +968,7 @@ def preflight(config, job_id, w, p, *, force=False):
                 }
             )
             draft["shots"][sid][stage] = found or f"@{key}"
-    found = None if force or not p["board"] else match(config, job_id, w, draft, "compose")
+    found = None if force or not p["board"] or resplit else match(config, job_id, w, draft, "compose")
     nodes.append(
         {
             "key": "compose",
@@ -853,15 +983,7 @@ def preflight(config, job_id, w, p, *, force=False):
     blocked = {n["key"] for n in nodes if n["action"] == "blocked"}
     for n in nodes:
         sid, stage = n["shot_id"], n["stage"]
-        deps = (
-            ([f"tts:{sid}"] + ([f"recall:{sid}"] if needs_recall(p, sid) else []))
-            if stage == "select"
-            else (
-                [f"select:{sid}", f"tts:{sid}"]
-                if stage == "render"
-                else ([f"render:{s}" for s in ordered_shots(w, p)] if stage == "compose" else [])
-            )
-        )
+        deps = node_dependencies(w, p, stage, sid, resplit=resplit)
         if any(d in blocked for d in deps):
             n.update(action="blocked", reason="必需依赖阻塞")
             blocked.add(n["key"])
@@ -876,6 +998,8 @@ def choose(w, p, stage, sid, vid):
         raise studio.StudioError("只能选用属于此阶段和分镜的成功版本")
     if stage == "compose":
         p["final"] = vid
+    elif stage == "script":
+        p["script"] = vid
     else:
         if sid not in p["shots"]:
             raise studio.StudioError("当前方案没有此分镜")
@@ -902,6 +1026,11 @@ def restore(w, vid, name):
     p = copy.deepcopy(snapshot)
     normalize_voice_options(p)
     p.setdefault("anchors", {})
+    if "script" not in p:  # 文案阶段之前的成片快照：分镜来自旧任务原文
+        legacy = next((v["id"] for v in w["versions"].values()
+                       if v["stage"] == "script" and v["data"].get("origin") == "legacy"), None)
+        p["script"] = legacy
+        p["board_script"] = legacy if p.get("board") else None
     p.update(id=uuid4().hex[:12], name=name, created_at=studio.now(), final=vid)
     w["plans"][p["id"]] = p
     w["active_plan"] = p["id"]
@@ -1261,7 +1390,8 @@ class VersionDiagnostics:
         diagnostic_event(kind, value)
 
 
-def execute(config, job_id, w, p, stage, sid=None, *, speaker=None, storyboarder=None, embedder=None):
+def execute(config, job_id, w, p, stage, sid=None, *, speaker=None, storyboarder=None, embedder=None,
+            writer=None):
     if stage == "select" and sid in p["ranges"]:
         p["ranges"][sid] = validate_range(config, p["ranges"][sid])
     spec = specification(config, job_id, w, p, stage, sid)
@@ -1273,8 +1403,20 @@ def execute(config, job_id, w, p, stage, sid=None, *, speaker=None, storyboarder
     token = current.set(diagnostics)
     try:
         data, files = {}, {}
-        if stage == "split":
-            text = studio.load_job(config, job_id)["input_text"]
+        if stage == "script":
+            outline = studio.load_job(config, job_id)["outline"]
+            if not outline.strip():
+                raise studio.StudioError("任务没有视频大纲，请手动编写文案")
+            text = (writer or adapters.make_writer(config)).write(outline)
+            if not text.strip():
+                raise studio.StudioError("文案服务返回了空内容")
+            if len(text) > config.studio.max_input_chars:
+                raise studio.StudioError(f"文案超过 {config.studio.max_input_chars} 字上限，请精简后再试")
+            data = {"text": text.strip(), "origin": "generated"}
+        elif stage == "split":
+            text = script_text(w, p)
+            if not text:
+                raise studio.StudioError("请先生成文案，再拆分镜")
             drafts = (storyboarder or make_storyboarder(config)).split(text)
             if studio.coverage_warning(text, [s.text for s in drafts]):
                 raise studio.StudioError("自动分镜未完整覆盖原文")
@@ -1289,6 +1431,7 @@ def execute(config, job_id, w, p, stage, sid=None, *, speaker=None, storyboarder
                 for d in drafts
             ]
             set_board(config, job_id, w, p, shots, origin=vid)
+            p["board_script"] = p["script"]
             data = {"board": p["board"]}
         elif stage == "tts":
             content = version(w, p["shots"][sid]["content"])["data"]
@@ -1416,6 +1559,8 @@ def column_nodes(config, job_id, w, p, stage, inputs_by_shot):
     if stage == "split":
         if inputs_by_shot:
             raise studio.StudioError("整份文案拆分不接受逐镜输入")
+        if not p.get("script"):
+            raise studio.StudioError("请先生成文案，再拆分镜")
         return [{"key": "split", "stage": "split", "shot_id": None, "action": "rebuild"}]
     ids = ordered_shots(w, p)
     if not ids or set(inputs_by_shot) != set(ids):
@@ -1447,18 +1592,20 @@ def column_nodes(config, job_id, w, p, stage, inputs_by_shot):
     return nodes
 
 
-def run_build(config, job_id, build_id, *, speaker=None, storyboarder=None, embedder=None):
+def run_build(config, job_id, build_id, *, speaker=None, storyboarder=None, embedder=None, writer=None):
     log = ExecutionLog(config, job_id, build_id)
     token = active_log.set(log)
     try:
         return _run_build(
-            config, job_id, build_id, log, speaker=speaker, storyboarder=storyboarder, embedder=embedder
+            config, job_id, build_id, log, speaker=speaker, storyboarder=storyboarder, embedder=embedder,
+            writer=writer,
         )
     finally:
         active_log.reset(token)
 
 
-def _run_build(config, job_id, build_id, log, *, speaker=None, storyboarder=None, embedder=None):
+def _run_build(config, job_id, build_id, log, *, speaker=None, storyboarder=None, embedder=None,
+               writer=None):
     w = load(config, job_id)
     build = next(b for b in w["builds"] if b["id"] == build_id)
     p = plan(w, build["plan_id"])
@@ -1467,15 +1614,7 @@ def _run_build(config, job_id, build_id, log, *, speaker=None, storyboarder=None
     for node in build["nodes"]:
         stage, sid = node["stage"], node["shot_id"]
         log.stage, log.shot_id = stage, sid
-        deps = (
-            ([f"tts:{sid}"] + ([f"recall:{sid}"] if needs_recall(p, sid) else []))
-            if stage == "select"
-            else (
-                [f"select:{sid}", f"tts:{sid}"]
-                if stage == "render"
-                else ([f"render:{s}" for s in ordered_shots(w, p)] if stage == "compose" else [])
-            )
-        )
+        deps = node_dependencies(w, p, stage, sid) if stage != "split" else []
         if node["action"] == "skip":
             node["status"] = "skipped"
         elif node["action"] == "blocked" or any(dep in failed for dep in deps):
@@ -1502,6 +1641,7 @@ def _run_build(config, job_id, build_id, log, *, speaker=None, storyboarder=None
                         speaker=speaker,
                         storyboarder=storyboarder,
                         embedder=embedder,
+                        writer=writer,
                     )
                     node.update(status="complete", version=vid)
             except Exception as exc:  # noqa: BLE001 — failed nodes must not stop independent nodes
@@ -1520,13 +1660,17 @@ def _run_build(config, job_id, build_id, log, *, speaker=None, storyboarder=None
                 if attempted:
                     node["version"] = attempted
                 failed.add(node["key"])
-        if build.get("auto_split") and stage == "split":
-            if node["status"] in ("complete", "reused"):
+        if build.get("auto_split") and stage in ("script", "split"):
+            position = build["nodes"].index(node)
+            if node["status"] not in ("complete", "reused"):
+                for pending in build["nodes"][position + 1:]:
+                    pending.update(action="blocked", reason="生成文案失败" if stage == "script" else "拆分镜失败")
+            elif stage == "split":
+                # 分镜刚落定：按新分镜重新预检，替换其后全部节点（之前的节点保持原记录）。
                 checked = preflight(config, job_id, w, p, force=build["force"])
-                build["nodes"][1:] = [{**n, "status": "pending"} for n in checked["nodes"]]
-            else:
-                for pending in build["nodes"][1:]:
-                    pending.update(action="blocked", reason="拆分镜失败")
+                build["nodes"][position + 1:] = [
+                    {**n, "status": "pending"} for n in checked["nodes"] if n["stage"] not in ("script", "split")
+                ]
         node["finished_at"] = studio.now()
         persist(config, job_id, w)
         labels = {
@@ -1675,6 +1819,7 @@ def detail(config, job_id, w, *, store=None, compact=False):
     result = {**w, "versions": versions}
     result["job"] = studio.load_job(config, job_id)
     result["revision"] = revision(p)
+    result["script_stale"] = script_stale(p)
     result["tts_settings"] = {
         "backend": config.studio.tts.backend,
         "model": config.studio.tts.model,
@@ -1689,6 +1834,22 @@ def detail(config, job_id, w, *, store=None, compact=False):
 
     result["anchor_conflicts"] = {sid: error for sid in ordered_shots(w, p)
                                   if (error := anchor_conflict(w, p, sid))}
+    # Conflict detection reconstructs each shot's select-stage signature, which probes
+    # the underlying shot media. On a cold probe cache this is the dominant cost of a
+    # job's first open, so warm every referenced interval concurrently up front. The
+    # serial loop below then reuses these results via the shared ShotMedia instance.
+    if context.display:
+        intervals = []
+        for sid in ordered_shots(w, p):
+            vid = p["shots"][sid].get("select")
+            video = w["versions"].get(vid, {}).get("data", {}).get("event", {}).get("video") if vid else None
+            if video:
+                intervals.append((video["source_id"], video["start"], video["end"]))
+        if len(intervals) > 1:
+            try:
+                context.media(config).prewarm(intervals)
+            except Exception:
+                pass
     for sid in ordered_shots(w, p):
         for stage in STAGES:
             vid = p["shots"][sid].get(stage)

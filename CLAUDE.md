@@ -56,6 +56,8 @@ uv run mindex clean [--apply]                    # 磁盘清理：默认预览�
 
 文案 → 成片的五步状态机：`split` 拆分镜 → `recall` 语义召回 → `tts` 配音 → `select` 选片对齐 → `render` 渲染合成。任务即 `data/studio/<job_id>/` 目录（状态即 job.json，不新建 SQLite 表）；全局 `studio.lock` 单步骤互斥；重跑只作废依赖闭包内的下游。召回与配音只依赖拆分镜（可任意先后，适配单 GPU）；选片 = 原片时间区间（可跨连续 shot，长镜头优先裁剪 + 同源可见相邻延长 + 配音有限加速 + 冻结帧兜底）。分镜与选片支持人工编辑（PATCH 级联作废）。烧录字幕依赖 ffmpeg libass（缺失报错可切软字幕）。检查点按输入指纹与文件哈希复用，支持 resume/force 和指定分镜重做；attempt 产物不可变留档，帧/采样共同时间轴避免漂移。模块：`studio/studio_artifacts.py`（检查点/产物/诊断）、`studio/studio.py`（状态机）、`studio/studio_steps.py`（编排）、`studio/studio_select.py`（选片纯算法）、`studio/studio_render.py`（渲染）、`studio/studio_api.py`（路由）。详见 `docs/studio.md`。
 
+**文案创作（`script` 阶段）**：新任务只保存视频大纲（`job.json` 的 `outline`，无 `input_text`）；文案是版本工作台里方案级的版本化阶段 `script`（`studio_workspace.py`），由 `writer` 模型角色（`studio.writer`，缺省复制 `studio.generator`；`models/writer.py` 的 `QwenWriter`，温度 0.7，改提示词须递增 `WRITER_PROMPT_VERSION`）按大纲生成，可手动保存（`origin=manual`）。构建顺序为 script → split → recall/tts → select → render → compose：split 版本的 `inputs` 记录所用 `script` 版本，依赖树因此追溯到文案；方案的 `board_script != script` 即分镜过期（`script_stale`），预检把 split 列为重建；已有文案时构建直接复用，不重新生成。老任务的 `input_text` 在 `workspace.load()` 里确定性迁移为 `origin=legacy` 的已完成文案版本，行为不变。旧 `/steps`、`/run` 与 `studio_steps` 只服务老任务（`studio.legacy_text`），新任务返回 422。测试里用 `conftest.legacy_job` / `convert_to_legacy` 构造老任务形态。
+
 ### 核心不变量
 
 新版版本工作台支持逐镜 `ShotRecall`（文字/人物、素材过滤、图片、视频）。创建任务时可限定可用素材（`job.json` 的 `source_ids`，全选=不限，创建后只读、不进方案参数）；逐镜素材范围只能在其内二次选择，两者取交集，空交集报错不退化为全库。查询媒体位于任务 `inputs/<sha256>.<suffix>`，执行前校验摘要；召回签名绑定内容索引与人物发布组合。后台镜头详情独立读取 ASR、字幕、LLM、人物覆盖和证据，不触发推理。
@@ -82,7 +84,7 @@ uv run mindex clean [--apply]                    # 磁盘清理：默认预览�
 
 ### 设置页与热生效（/settings）
 
-六个模型角色（理解/拆分镜/嵌入/ASR/TTS/人物识别）的「配置档案」存 SQLite（`settings/runtime_settings.py`：`model_profiles`/`voices` 表 + settings KV 覆盖层），保存即热生效：Web 经 `RuntimeConfig.current()` 每请求/每次任务启动解析，CLI 在 `load_config` 后统一合并（`mindex e2e` 除外，可用 `--no-runtime-overrides` 冻结）。支持线上厂商订阅（智谱/DeepSeek/阿里/腾讯 TokenHub/MiniMax，预设+自定义+测试连接）与自建服务互切；`settings/voice_clone.py` 提供 MiniMax 上传克隆与阿里 URL 复刻。密钥明文存库但接口只出掩码，`Service.api_key` 带 `exclude=True` 不进任何指纹/快照。切换嵌入档案后身份指纹变化，检索 503 直至 `mindex index --activate` 重建（页面横幅常显匹配状态）。详见 `docs/settings.md`。
+七个模型角色（理解/文案创作/拆分镜/嵌入/ASR/TTS/人物识别）的「配置档案」存 SQLite（`settings/runtime_settings.py`：`model_profiles`/`voices` 表 + settings KV 覆盖层），保存即热生效：Web 经 `RuntimeConfig.current()` 每请求/每次任务启动解析，CLI 在 `load_config` 后统一合并（`mindex e2e` 除外，可用 `--no-runtime-overrides` 冻结）。支持线上厂商订阅（智谱/DeepSeek/阿里/腾讯 TokenHub/MiniMax，预设+自定义+测试连接）与自建服务互切；`settings/voice_clone.py` 提供 MiniMax 上传克隆与阿里 URL 复刻。密钥明文存库但接口只出掩码，`Service.api_key` 带 `exclude=True` 不进任何指纹/快照。切换嵌入档案后身份指纹变化，检索 503 直至 `mindex index --activate` 重建（页面横幅常显匹配状态）。详见 `docs/settings.md`。
 
 ### 独立服务与数据维护
 

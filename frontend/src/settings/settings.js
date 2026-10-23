@@ -23,10 +23,11 @@ function syncSectionRows() {
 }
 let settingsRequest = 0;
 
-const ROLE_ORDER = ['analyzer', 'generator', 'embedding', 'asr', 'tts', 'person'];
+const ROLE_ORDER = ['analyzer', 'writer', 'generator', 'embedding', 'asr', 'tts', 'person'];
 const ROLE_DESC = {
   person: MindexI18n.msg("ui.907c176fe85a"),
   analyzer: MindexI18n.msg("ui.85feed61e44f"),
+  writer: MindexI18n.msg("ui.writer_role_description"),
   generator: MindexI18n.msg("ui.09b768c5ad0a"),
   embedding: MindexI18n.msg("ui.bd997040b2e2"),
   asr: MindexI18n.msg("ui.b74f293dd13e"),
@@ -35,6 +36,7 @@ const ROLE_DESC = {
 const ROLE_BACKENDS = {
   person: ['mindex'],
   analyzer: ['openai', 'llama_cpp'],
+  writer: ['openai'],
   generator: ['openai'],
   embedding: ['mindex', 'llama_cpp', 'tokenhub'],
   asr: ['mindex', 'llama_cpp', 'openai', 'minimax'],
@@ -54,6 +56,7 @@ const ROLE_EXTRA = {
   { key: 'dimensions', label: MindexI18n.msg("ui.9733d2a5ddb4"), type: 'number', min: 1 },
   { key: 'quantization', label: MindexI18n.msg("ui.eb2b7bc048c6"), type: 'text', placeholder: MindexI18n.msg("ui.8814a2ac40dc") }],
 
+  writer: [{ key: 'max_tokens', label: 'max_tokens', type: 'number', min: 100 }],
   generator: [{ key: 'max_tokens', label: 'max_tokens', type: 'number', min: 100 }],
   tts: [
   { key: 'response_format', label: MindexI18n.msg("ui.df5363469d15"), type: 'select', options: ['wav', 'mp3'] },
@@ -662,7 +665,7 @@ function openDialog(role, profile) {
   $('pf-model').value = config.model || '';
   $('pf-revision').value = config.revision || '';
   fillExtraFields(role, config);
-  const useTemplate = role === 'analyzer' || role === 'generator';
+  const useTemplate = role === 'analyzer' || role === 'generator' || role === 'writer';
   $('pf-template-wrap').hidden = !useTemplate;
   if (useTemplate) $('pf-llama-template').checked = profile ? config.llama_template !== false : true;
   MindexI18n.setText($('pf-key-hint'), profile && profile.api_key.has_key ? MindexI18n.msg("ui.d1b7dd066ef7", { p0:
@@ -684,7 +687,7 @@ $('profile-form').onsubmit = async (event) => {
   };
   const revision = $('pf-revision').value.trim();
   if (revision && revision !== 'main') config.revision = revision;
-  if (role === 'analyzer' || role === 'generator') config.llama_template = $('pf-llama-template').checked;
+  if (role === 'analyzer' || role === 'generator' || role === 'writer') config.llama_template = $('pf-llama-template').checked;
   ROLE_EXTRA[role].forEach((field) => {
     const input = $(`pf-${field.key}`);
     if (!input) return;

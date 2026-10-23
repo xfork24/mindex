@@ -11,6 +11,7 @@ from mindex.studio.studio_artifacts import safe_path
 
 active_log: ContextVar[ExecutionLog | None] = ContextVar("studio_execution_log", default=None)
 LABELS = {
+    "script": "生成文案",
     "split": "拆分镜",
     "recall": "召回",
     "tts": "配音",

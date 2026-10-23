@@ -44,7 +44,10 @@ def client_for(config) -> TestClient:
 def test_get_settings_snapshot(config):
     data = client_for(config).get("/api/settings").json()
     roles = {role["role"]: role for role in data["roles"]}
-    assert set(roles) == {"analyzer", "generator", "embedding", "asr", "tts", "person"}
+    assert set(roles) == {"analyzer", "writer", "generator", "embedding", "asr", "tts", "person"}
+    assert roles["writer"]["label"] == "文案创作"
+    assert roles["writer"]["effective"]["max_tokens"] == config.studio.writer.max_tokens
+    assert data["presets"]["deepseek"]["writer"]["config"] == data["presets"]["deepseek"]["generator"]["config"]
     assert roles["embedding"]["effective"]["backend"] == "mindex"
     assert roles["embedding"]["active_profile_id"] is None
     assert roles["analyzer"]["label"] == "多模态理解"
@@ -470,3 +473,32 @@ def test_person_interval_profile_save_validation_and_frozen_config(config):
     for invalid in (0, -2, 1.5):
         body["config"]["frame_interval"] = invalid
         assert client.post("/api/settings/profiles", json=body).status_code == 422
+
+
+def test_writer_profile_test_connection_uses_writer_service(config, monkeypatch):
+    client = client_for(config)
+    created = client.post("/api/settings/profiles", json={
+        "role": "writer",
+        "provider": "deepseek",
+        "name": "写作模型",
+        "config": {"backend": "openai", "base_url": "https://api.deepseek.com/v1",
+                   "model": "deepseek-writer", "llama_template": False, "max_tokens": 1234},
+    })
+    assert created.status_code == 201, created.text
+    profile = created.json()
+    captured = {}
+
+    def reply(method, url, **kwargs):
+        captured.update(url=url, json=kwargs["json"])
+        return {"choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]}
+
+    monkeypatch.setattr(adapters, "request", reply)
+    result = client.post(f"/api/settings/profiles/{profile['id']}/test").json()
+    assert result["ok"] is True, result
+    assert captured["url"] == "https://api.deepseek.com/v1/chat/completions"
+    assert captured["json"]["model"] == "deepseek-writer"
+    assert captured["json"]["max_tokens"] == 1234
+    assert client.post(f"/api/settings/profiles/{profile['id']}/activate").status_code == 200
+    roles = {r["role"]: r for r in client.get("/api/settings?probe_embedding=false").json()["roles"]}
+    assert roles["writer"]["effective"]["model"] == "deepseek-writer"
+    assert roles["generator"]["effective"]["model"] == config.studio.generator.model
