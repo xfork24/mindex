@@ -148,6 +148,35 @@ def test_split_prompt_preserves_narration_and_requires_chinese_keywords(config, 
     assert "中文解说类" not in system
 
 
+def test_split_prompt_requires_one_shot_per_visual_image(config, monkeypatch):
+    """每个与上下文不同的意象都独立成镜：提示词写明粒度规则、上限和示例，细拆的结果能通过覆盖校验。"""
+    from mindex.models.storyboard import SPLIT_EXAMPLE_INPUT, SPLIT_EXAMPLE_SHOTS, split_instructions
+
+    config.studio.max_shots = 12
+    systems = []
+
+    def fake_request(method, url, **kwargs):
+        systems.append(kwargs["json"]["messages"][0]["content"])
+        return chat_payload(json.dumps({"shots": SPLIT_EXAMPLE_SHOTS}))
+
+    monkeypatch.setattr("mindex.models.adapters.request", fake_request)
+    drafts = QwenStoryboarder(config).split(SPLIT_EXAMPLE_INPUT)
+    system = systems[0]
+    assert system == split_instructions(12)
+    # 粒度规则：意象为单位、并列列举要切开、不单独留连接词、修饰成分不拆、末句总结单独成镜。
+    for rule in ("按“画面意象”拆", "必须另起一个分镜", "必须在意象之间切开", "不要让 and、to 之类的零碎词单独成镜",
+                 "同一个意象的修饰成分不要拆开", "总结、号召或感叹句", "分镜很短是正常的，不设最低字数"):
+        assert rule in system
+    assert "分镜数量不超过 12" in system
+    # 旧的“每镜 20~60 个字、5~15 秒”粗粒度约束已移除。
+    assert "20~60" not in system and "5~15 秒" not in system
+    # 用户给出的句子被拆成机场、绿地、美食、夜景和总结五个独立分镜，且逐字覆盖原文。
+    assert SPLIT_EXAMPLE_INPUT in system
+    assert [d.text for d in drafts] == [shot["text"] for shot in SPLIT_EXAMPLE_SHOTS]
+    assert len(drafts) == 5 and len({d.query for d in drafts}) == 5
+    assert studio_steps.coverage_warning(SPLIT_EXAMPLE_INPUT, [d.text for d in drafts]) is None
+
+
 def test_decode_audio_handles_binary_and_json_base64():
     assert decode_audio(b"RIFFxxxx") == b"RIFFxxxx"
     assert decode_audio(b"ID3tag") == b"ID3tag"

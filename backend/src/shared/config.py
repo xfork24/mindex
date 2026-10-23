@@ -180,7 +180,7 @@ class StudioConfig(StrictModel):
     """创作（文本生成视频）工作流配置；任务级 options 可覆盖部分默认值。"""
 
     max_input_chars: int = Field(default=2000, ge=1)
-    max_shots: int = Field(default=60, ge=1)
+    max_shots: int = Field(default=1024, ge=1)
     generator: GeneratorConfig = Field(default_factory=GeneratorConfig)
     # 文案创作 LLM：按视频大纲写旁白正文。与拆分镜同为 OpenAI 兼容聊天服务，
     # yaml 未单独配置时复制 generator，保证升级后无需改配置即可使用。

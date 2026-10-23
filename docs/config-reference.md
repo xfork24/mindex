@@ -73,7 +73,7 @@
 | 键 | 类型 | 默认 | 说明 |
 |---|---|---|---|
 | `max_input_chars` | int ≥1 | 2000 | 视频大纲和文案的字数上限 |
-| `max_shots` | int ≥1 | 60 | 单任务分镜数量上限 |
+| `max_shots` | int ≥1 | 1024 | 单任务分镜数量上限；拆分镜按意象拆细，条数会明显多于按场景拆分 |
 
 ### `studio.generator` — 文本拆分镜 LLM
 
@@ -83,7 +83,7 @@
 | `llama_template` | bool | `true` | 是否发送 llama-server 专有的 `chat_template_kwargs`；线上厂商档案设 `false` |
 | `base_url` / `model` / `revision` | str | `http://192.168.1.86:4040/v1` / `qwen3.8:27b` / `deployed-2026-10-12` | 本地默认复用理解模型；可切线上文本模型（如 deepseek-chat） |
 | `timeout` / `api_key_env` | | 300 / `MINDEX_QWEN_API_KEY` | |
-| `max_tokens` | int >0 | 4000 | 单次拆分镜输出上限，截断会明确报错 |
+| `max_tokens` | int >0 | 4000 | 单次请求允许模型输出的最大 token 数（原样作为 chat/completions 的 `max_tokens` 发送），截断会明确报错；设置页里激活的“文本拆分镜”档案会覆盖这个值。分镜按意象拆细后输出更长，文案较长时请调高 |
 | `split_retries` | int ≥0 | 2 | 分镜校验失败后的带反馈重试次数 |
 
 ### `studio.writer` — 文案创作 LLM

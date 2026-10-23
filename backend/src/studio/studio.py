@@ -24,7 +24,7 @@ from mindex.shared.config import Config, StrictModel, fingerprint, portable_para
 from mindex.shared.types import Filters, Granularity
 
 STEPS = ("split", "recall", "tts", "select", "render")
-SPLIT_VERSION = 5
+SPLIT_VERSION = 6  # 6: 拆分镜提示词改为按画面意象拆细
 STEP_LABELS = {
     "split": "文本拆分镜",
     "recall": "语义召回",

@@ -47,7 +47,7 @@ asr:
 studio:
   # 创作工作流（文本生成视频）：拆分镜 LLM + TTS + 召回选片 + 渲染合成。
   max_input_chars: 2000
-  max_shots: 60
+  max_shots: 1024
   generator:
     # 文本拆分镜 LLM，OpenAI 兼容端点（llama-server GGUF）。
     backend: openai
