@@ -86,7 +86,7 @@ def build_bundle(config, output, *, selected, include_secrets, config_path, allo
     for path in (root / 'studio').glob('*/job.json'):
         if path.parent.name in jobs:
             configs.append(json.loads(path.read_text()))
-    deps, missing, env = _config_dependencies(configs, config_path.parent, payload)
+    deps, missing, env = _config_dependencies(configs, config_path.parent, payload, data_root=root)
     owners = file_owners(root, known)
     references = referenced_files(root, payload / 'metadata.sqlite3', available_files=owners)
     technical = compatibility_files(root, payload / 'metadata.sqlite3')

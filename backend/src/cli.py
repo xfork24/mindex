@@ -12,7 +12,7 @@ from typer import rich_utils
 from typer.core import TyperGroup
 
 from mindex.cli_clips import app as clips_app
-from mindex.cli_common import print_json
+from mindex.cli_common import SortedGroup, print_json
 from mindex.cli_e2e import app as e2e_app
 from mindex.cli_persons import app as persons_app
 from mindex.maintenance.backup_cli import app as backup_app
@@ -32,7 +32,7 @@ class WrappingOptionHighlighter(rich_utils.OptionHighlighter):
 rich_utils.highlighter = WrappingOptionHighlighter()
 
 
-class HelpAwareGroup(TyperGroup):
+class HelpAwareGroup(SortedGroup):
     """Parse descendant help before Click invokes the configuration callback."""
 
     def resolve_command(self, ctx, args):
@@ -76,6 +76,7 @@ app = typer.Typer(
 )
 app.add_typer(backup_app, name="backup")
 indexes = typer.Typer(
+    cls=HelpAwareGroup,
     help="管理内容索引版本：list 查看版本，activate 检查后发布或回退。\n\n"
     "新建索引用 mindex index，一致性检查用 mindex check。回退前恢复对应模型与配置。\n\n"
     "示例：mindex indexes list；mindex indexes activate INDEX_ID。",

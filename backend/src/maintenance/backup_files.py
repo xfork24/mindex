@@ -418,7 +418,32 @@ def _copy_payload_file(origin, destination, *, transform, include_secrets, secre
         shutil.copy2(origin, destination)
 
 
-def _config_dependencies(config, base_dir, payload):
+def _resolve_dependency(item, base_dir, data_root):
+    """定位配置依赖文件，容忍数据目录移动/改名后残留的失效绝对路径。
+
+    依次尝试：(1) 原值（相对 base_dir 解析或本身绝对）；(2) 若原值包含
+    config-dependencies/<digest>/<name> 片段，则在当前 data_root 下按该片段定位；
+    (3) 把原值当作相对 data_root.parent 的路径解析。全部失败才返回 None。
+    """
+    expanded = Path(item).expanduser()
+    primary = (base_dir / expanded).resolve()
+    if primary.is_file():
+        return primary
+    posix = expanded.as_posix()
+    marker = 'config-dependencies/'
+    if data_root is not None and marker in posix:
+        suffix = posix[posix.index(marker):]
+        candidate = (data_root / suffix).resolve()
+        if candidate.is_file():
+            return candidate
+    if data_root is not None and not expanded.is_absolute():
+        candidate = (data_root.parent / expanded).resolve()
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _config_dependencies(config, base_dir, payload, data_root=None):
     paths, missing, env = {}, [], set()
 
     def visit(value):
@@ -429,10 +454,13 @@ def _config_dependencies(config, base_dir, payload):
                 elif key == 'model_root' and item:
                     missing.append({'path': item, 'reason': '模型目录需在目标机器补充'})
                 elif key in {'deployment_manifest', 'font_file'} and item:
-                    original = Path(item).expanduser()
-                    original = (base_dir / original).resolve()
-                    if not original.is_file():
-                        raise ValueError(f'配置依赖文件缺失：{original}')
+                    original = _resolve_dependency(item, base_dir, data_root)
+                    if original is None:
+                        attempted = (base_dir / Path(item).expanduser()).resolve()
+                        raise ValueError(
+                            f'配置依赖文件缺失：{attempted}'
+                            f'（也未能在数据目录 {data_root} 内按 config-dependencies 片段定位 {item}）'
+                        )
                     relative = f'config-dependencies/{digest(original)[:24]}/{original.name}'
                     destination = payload / relative
                     destination.parent.mkdir(parents=True, exist_ok=True)

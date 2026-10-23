@@ -403,3 +403,79 @@ def portable_parameters(config, value, reference=None):
                 result[key] = portable_parameters(config, item, current)
         return result
     return value
+
+
+# 需要在 data_dir 移动/改名后仍然可用的路径字段。data_dir 本身与指向
+# 数据目录内部的依赖文件（部署清单、字幕字体）都相对 data_dir.parent 存储；
+# 指向数据目录之外的路径（如 person.model_root、外部清单）保持绝对，由目标机器补齐。
+PORTABLE_PATH_KEYS = frozenset({"data_dir", "deployment_manifest", "font_file"})
+
+
+def _relativize_one(data_dir: Path, item: str, current=None):
+    """把单个绝对路径相对化到 data_dir.parent；外部路径保持绝对。
+
+    与 portable_parameters 一致，优先沿用历史相对拼写（current），以免数据目录
+    改名后快照指纹变化。只有同时位于 data_dir.parent 之内的绝对路径才被相对化。
+    """
+    base = data_dir.parent
+    path = Path(item).expanduser()
+    if not path.is_absolute():
+        # 已经是相对路径，原样保留（可能是旧数据或已迁移数据）。
+        return item
+    # 历史项目根可能已不存在：只接受完整当前相对后缀，绝不只按文件名匹配。
+    if (
+        current
+        and not Path(current).is_absolute()
+        and ".." not in Path(current).parts
+        and path.as_posix().endswith("/" + current)
+    ):
+        return current
+    try:
+        if path.is_relative_to(base):
+            return path.relative_to(base).as_posix()
+    except AttributeError:  # pragma: no cover - Python < 3.9 兼容
+        pass
+    # 位于数据目录之外：无法相对表达，保留绝对路径。
+    return item
+
+
+def relativize_config_paths(data_dir, value, reference=None):
+    """递归把配置快照里的可移植路径字段相对化到 data_dir.parent。
+
+    覆盖 data_dir / deployment_manifest / font_file；data_dir 外的路径保持绝对。
+    reference 提供历史相对拼写以保持指纹稳定（见 _relativize_one）。
+    """
+    data_dir = Path(data_dir)
+    if isinstance(value, dict):
+        result = {}
+        for key, item in value.items():
+            current = reference.get(key) if isinstance(reference, dict) else None
+            if key in PORTABLE_PATH_KEYS and isinstance(item, str) and item:
+                result[key] = _relativize_one(data_dir, item, current)
+            else:
+                result[key] = relativize_config_paths(data_dir, item, current)
+        return result
+    if isinstance(value, list):
+        return [relativize_config_paths(data_dir, item) for item in value]
+    return value
+
+
+def absolutize_config_paths(data_dir, value):
+    """relativize_config_paths 的逆操作：把相对的可移植路径按当前 data_dir 还原为绝对。
+
+    只有相对值会被重定位到 data_dir.parent 下；已是绝对的路径原样保留
+    （例如 data_dir 外的 model_root 或外部清单）。"""
+    data_dir = Path(data_dir)
+    base = data_dir.parent
+    if isinstance(value, dict):
+        result = {}
+        for key, item in value.items():
+            if key in PORTABLE_PATH_KEYS and isinstance(item, str) and item:
+                path = Path(item).expanduser()
+                result[key] = item if path.is_absolute() else str((base / path).resolve())
+            else:
+                result[key] = absolutize_config_paths(data_dir, item)
+        return result
+    if isinstance(value, list):
+        return [absolutize_config_paths(data_dir, item) for item in value]
+    return value

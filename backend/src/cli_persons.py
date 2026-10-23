@@ -7,9 +7,10 @@ from typing import Annotated
 
 import typer
 
-from mindex.cli_common import print_json
+from mindex.cli_common import SortedGroup, print_json
 
 app = typer.Typer(
+    cls=SortedGroup,
     help="管理演员、作品、角色、参考图和人物检索发布。\n\n"
     "流程：save 登记实体 → reference 添加参考图 → process 扫描 → status 查看任务 → "
     "review 审核 → publish 发布；activate 回退已有检索组合。migrate-frames 迁移旧展示帧。\n\n"

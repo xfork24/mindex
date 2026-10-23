@@ -8,9 +8,10 @@ from typing import Annotated
 
 import typer
 
-from mindex.cli_common import print_json
+from mindex.cli_common import SortedGroup, print_json
 
 app = typer.Typer(
+    cls=SortedGroup,
     help="维护旧切片与 shot 媒体引用，使用 YAML 原配置。\n\n"
     "migrate 盘点/迁移，verify-archives 校验归档原片，repair-boundaries 诊断/修复切点；"
     "验收迁移后 prune 删除旧实体，materialize --all 从 shot 恢复实体。\n\n"

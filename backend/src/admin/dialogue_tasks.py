@@ -19,7 +19,7 @@ from starlette.concurrency import run_in_threadpool
 from mindex.processing.dialogue import atomic_json
 from mindex.processing.pipeline import Pipeline
 from mindex.settings.runtime_settings import RuntimeConfig
-from mindex.shared.config import Config, StrictModel
+from mindex.shared.config import Config, StrictModel, absolutize_config_paths, relativize_config_paths
 from mindex.shared.processing_lock import ProcessingLock, recover_tasks
 from mindex.shared.storage import Store, dumps
 from mindex.shared.task_progress import reset_task_attempt, save_task_progress, task_logs
@@ -139,6 +139,9 @@ class DialogueTasks:
             task_id = uuid.uuid4().hex
             snapshot = config.model_dump()
             snapshot["data_dir"] = str(config.data_dir)
+            # 数据目录内部的路径相对 data_dir.parent 存储（移动/改名后仍可解析）；
+            # 外部路径保持绝对，由 retry 回读时按当前 data_dir 还原。
+            snapshot = relativize_config_paths(config.data_dir, snapshot)
             # Freeze service settings and retain a reference to credentials, never serialize keys.
             snapshot["_credential_profiles"] = {
                 role: self.store.one("SELECT value FROM settings WHERE key=?", ("active.profile." + role,))
@@ -172,6 +175,9 @@ class DialogueTasks:
                 raise HTTPException(409, "只有失败或中断的任务可以重试")
             snapshot = json.loads(row["config"])
             profiles = snapshot.pop("_credential_profiles", {})
+            # 可移植路径按当前 data_dir 还原为绝对路径（镜像 load_config），
+            # 使数据目录移动/改名后的历史任务仍能解析 data_dir / 部署清单 / 字幕字体。
+            snapshot = absolutize_config_paths(self.runtime.base.data_dir, snapshot)
             config = Config.model_validate(snapshot)
             from mindex.admin.source_tasks import preserve_numbers
             preserve_numbers(config, snapshot)

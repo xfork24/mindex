@@ -11,7 +11,10 @@ from typing import Annotated
 
 import typer
 
+from mindex.cli_common import SortedGroup
+
 app = typer.Typer(
+    cls=SortedGroup,
     help="离线数据备份与迁移；先停止 Web 和全部后台写入任务。\n\n"
     "list 查看素材，export 导出一致快照，inspect 校验备份，import 恢复或合并，recover 恢复中断切换。"
     "全部复用既有向量，不调用模型；使用 YAML 原配置，基础配置与数据库覆盖层分别保存。\n\n"

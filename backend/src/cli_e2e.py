@@ -9,10 +9,11 @@ from typing import Annotated
 
 import typer
 
-from mindex.cli_common import print_json
+from mindex.cli_common import SortedGroup, print_json
 from mindex.shared.config import fingerprint
 
 app = typer.Typer(
+    cls=SortedGroup,
     help="单 GPU 分阶段真实验证；不会启动或切换远程模型。\n\n"
     "流程：init 初始化 → probe 探测 → pin 固定部署 → phase 分阶段验证；"
     "review 人工复核查询后 freeze 冻结标注，再 evaluate。status 查看进度。\n\n"
