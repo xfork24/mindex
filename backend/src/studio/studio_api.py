@@ -451,6 +451,14 @@ def studio_router(
             workspace.require_revision(p, body.revision)
             if not workspace.valid_files(base, job_id, workspace.version(w, body.version_id)):
                 raise studio.StudioError("版本文件缺失或损坏，不能选为构建输入")
+            if body.stage == "script":
+                # 切换文案版本：同时把分镜工作台还原为依赖此版本的最后一次构建结果。
+                chosen = workspace.version(w, body.version_id)
+                if chosen["status"] != "complete" or chosen["stage"] != "script" or chosen["shot_id"] is not None:
+                    raise studio.StudioError("只能选用属于此阶段和分镜的成功版本")
+                workspace.restore_script_board(w, p, body.version_id)
+                workspace.persist(base, job_id, w)
+                return workspace.detail(current(), job_id, w)
             workspace.choose(w, p, body.stage, body.shot_id, body.version_id)
             if body.stage == "content":
                 shots = [

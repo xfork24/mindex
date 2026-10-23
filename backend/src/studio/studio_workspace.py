@@ -992,6 +992,61 @@ def preflight(config, job_id, w, p, *, force=False):
     return result
 
 
+BOARD_FIELDS = ("board", "board_script", "shots", "ranges", "anchors")
+
+
+def board_snapshot(p):
+    """本次构建完成后的分镜工作台状态：供日后切回对应文案版本时整体还原。
+
+    只有分镜确实从当前文案版本拆出（``board_script == script``）才记录分镜内容；
+    否则（例如本次只重新生成了文案、尚未拆分镜）记录为空工作台。
+    """
+    derived = bool(p.get("board")) and p.get("board_script") == p.get("script")
+    return {
+        "script": p.get("script"),
+        "board": p.get("board") if derived else None,
+        "board_script": p.get("board_script") if derived else None,
+        "shots": copy.deepcopy(p.get("shots", {})) if derived else {},
+        "ranges": copy.deepcopy(p.get("ranges", {})) if derived else {},
+        "anchors": copy.deepcopy(p.get("anchors", {})) if derived else {},
+    }
+
+
+def empty_board(p):
+    """清空分镜工作台：没有依赖此文案版本的构建时，分镜与其选用全部归零。"""
+    p["board"] = None
+    p["board_script"] = None
+    p["shots"] = {}
+    p["ranges"] = {}
+    p["anchors"] = {}
+
+
+def restore_script_board(w, p, vid):
+    """切换当前文案版本，并把分镜工作台还原为依赖此版本的最后一次构建结果。
+
+    没有任何从此文案版本拆出分镜的构建时，分镜工作台整体清空（该版本文案还没有处理）。
+    构建结果快照只保留分镜选用，对应的产物版本仍在 ``w["versions"]`` 中，可照常查看与切换。
+    """
+    version(w, vid)  # 校验版本存在
+    p["script"] = vid
+    snapshot = next(
+        (
+            b["board_result"]
+            for b in reversed(w["builds"])
+            if b["plan_id"] == p["id"]
+            and b.get("board_result", {}).get("script") == vid
+            and b.get("board_result", {}).get("board")
+        ),
+        None,
+    )
+    if snapshot is None:
+        empty_board(p)
+        return
+    for key in BOARD_FIELDS:
+        p[key] = copy.deepcopy(snapshot.get(key))
+    p.setdefault("anchors", {})
+
+
 def choose(w, p, stage, sid, vid):
     item = version(w, vid)
     if item["status"] != "complete" or item["stage"] != stage or item["shot_id"] != sid:
@@ -999,6 +1054,11 @@ def choose(w, p, stage, sid, vid):
     if stage == "compose":
         p["final"] = vid
     elif stage == "script":
+        # 选用新的文案版本：若现有分镜不是从它拆出的，分镜工作台立即清空
+        # （该版本文案尚未处理）。整体构建会紧接着重新拆分镜；切回旧版本由
+        # restore_script_board 还原其最后一次构建结果。
+        if p.get("board_script") != vid:
+            empty_board(p)
         p["script"] = vid
     else:
         if sid not in p["shots"]:
@@ -1689,6 +1749,8 @@ def _run_build(config, job_id, build_id, log, *, speaker=None, storyboarder=None
     build.update(
         status=("partial" if successes else "failed") if failed else "complete", finished_at=studio.now()
     )
+    # 记录本次构建完成后的分镜工作台状态，便于日后切回此文案版本时还原分镜选用。
+    build["board_result"] = board_snapshot(p)
     log.stage = log.shot_id = None
     log.emit(
         "执行结束：" + {"complete": "全部完成", "partial": "部分完成", "failed": "失败"}[build["status"]]

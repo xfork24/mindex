@@ -360,11 +360,9 @@ const SCRIPT_ORIGIN = {
 function scriptText() {
   return ver(plan().script)?.data.text ?? null;
 }
-function scriptRunning() {
-  return state.data.builds.some((b) =>
-  b.status === "running" && b.plan_id === plan().id &&
-  b.nodes.some((n) => n.stage === "script" && ["pending", "running"].includes(n.status))
-  );
+// 统计单词数：按空白切分非空词元；中文等无空格文本整体计为一词。
+function wordCount(text) {
+  return (text || "").trim().split(/\s+/).filter(Boolean).length;
 }
 function scriptDirty() {
   if (!state.data) return false;
@@ -374,20 +372,13 @@ function scriptDirty() {
 }
 // 只更新状态文字与按钮可用性，不重建文本框，避免打断输入和光标。
 function syncScriptControls() {
-  const p = plan(), job = state.data.job, area = $("script-text"),
-    item = ver(p.script), locked = busy(), dirty = scriptDirty();
+  const p = plan(), job = state.data.job, area = $("script-text"), item = ver(p.script), locked = busy();
   area.disabled = locked;
-  const status = $("script-state");
-  if (scriptRunning()) MindexI18n.setText(status, MindexI18n.msg("ui.script_state_generating"));else
-  if (!item) MindexI18n.setText(status, MindexI18n.msg(dirty ? "ui.script_state_empty_dirty" : "ui.script_state_empty"));else
-  MindexI18n.setText(status, MindexI18n.msg(dirty ? "ui.script_state_ready_dirty" : "ui.script_state_ready", {
-    p0: MindexI18n.msg(SCRIPT_ORIGIN[item.data.origin] || SCRIPT_ORIGIN.generated), p1: shortId(item.id) }));
   const generate = $("script-generate");
   MindexI18n.setText(generate, MindexI18n.msg(item ? "ui.script_regenerate" : "ui.script_generate"));
   generate.disabled = locked || !(job.outline || "").trim();
   MindexI18n.setAttr(generate, "title", (job.outline || "").trim() ? "" : MindexI18n.msg("ui.script_no_outline"));
-  $("script-save").disabled = locked || !dirty || !area.value.trim();
-  MindexI18n.setText($("script-counter"), MindexI18n.msg("ui.script_counter", { p0: area.value.trim().length }));
+  MindexI18n.setText($("script-counter"), MindexI18n.msg("ui.script_counter", { p0: wordCount(area.value) }));
 }
 function renderScript() {
   const p = plan(), job = state.data.job, area = $("script-text"), scope = scopeKey(), base = p.script || "";
@@ -402,18 +393,73 @@ function renderScript() {
   outline.hidden = !job.outline;
   if (job.outline) MindexI18n.setText(outline, MindexI18n.msg("ui.script_outline_line", { p0: job.outline }));
   $("script-stale").hidden = !state.data.script_stale;
-  // 最近一次生成失败时在这里直接说明原因；之后有了更新的文案版本（重新生成成功或手动保存）就不再显示。
+  // 最近一次生成失败时在这里直接说明原因；之后有了更新的文案版本（重新生成成功或手动输入）就不再显示。
   const failed = latestNode("script", null), current = ver(p.script);
   const error = failed?.status === "failed" && !(current && current.created_at > (failed.finished_at || "")) ?
   shortIds(MindexI18n.system(failed.error || "")) : "";
   $("script-error").hidden = !error;
   if (error) MindexI18n.setText($("script-error"), MindexI18n.msg("ui.script_failed", { p0: error }));
+  renderScriptHistory();
   syncScriptControls();
+}
+// 文案历史版本：与分镜工作台每个步骤一致，可查看并切换历史版本。切换后分镜工作台会同步到
+// 依赖此文案版本的最后一次构建结果（没有构建则清空）。
+function renderScriptHistory() {
+  const box = $("script-history"),
+    items = Object.values(state.data.versions).
+    filter((v) => v.stage === "script" && v.shot_id === null).
+    reverse();
+  const key = JSON.stringify([items.map((v) => v.id), plan().script, busy()]);
+  if (box.dataset.key === key && !selectionWithin(box)) return;
+  box.dataset.key = key;
+  const prevScript = box.dataset.script,
+    current = plan().script || "";
+  // 下拉默认跟随当前文案版本；只有当前版本没变时，才保留用户手动浏览的选择。
+  const preferred = current && current !== prevScript ? current : box.querySelector("select")?.value;
+  box.dataset.script = current;
+  box.replaceChildren();
+  if (!items.length) {
+    box.append(el("p", MindexI18n.msg("ui.script_history_empty"), "muted"));
+    return;
+  }
+  const select = document.createElement("select");
+  MindexI18n.setAttr(select, "aria-label", MindexI18n.msg("ui.script_history_aria"));
+  for (const item of items) {
+    const o = el(
+      "option",
+      `${item.id.slice(0, 8)} · ${MindexI18n.msg(SCRIPT_ORIGIN[item.data.origin] || SCRIPT_ORIGIN.generated)} · ${MindexI18n.date(new Date(item.created_at), false)}`
+    );
+    o.value = item.id;
+    select.append(o);
+  }
+  select.value = items.some((item) => item.id === preferred) ? preferred : (current || items[0].id);
+  const choose = mutationButton(MindexI18n.msg("ui.1dd40d446b45"), async () => {
+    await accept(
+      await api(`${planBase()}/select-version`, "POST", {
+        revision: state.data.revision,
+        version_id: select.value,
+        stage: "script",
+        shot_id: null
+      })
+    );
+    notice(MindexI18n.msg("ui.script_history_switched"));
+  });
+  const syncChoose = () => {
+    choose.dataset.unavailable = String(select.value === plan().script);
+    choose.disabled = busy() || hasDirtyDraft() || select.value === plan().script;
+  };
+  select.addEventListener("change", syncChoose);
+  box.append(
+    select,
+    button(MindexI18n.msg("ui.753c35ac28e9"), () => showVersion(select.value)),
+    choose
+  );
+  syncChoose();
 }
 async function generateScript() {
   if (busy()) return;
   const hadScript = Boolean(plan().script), dirty = scriptDirty();
-  // 重新生成会丢弃文本框里未保存的修改；已有分镜会因此过期，先说清楚再执行。
+  // 重新生成会丢弃文本框里未保存的修改，并清空分镜工作台（新文案尚未处理），先说清楚再执行。
   const warning = dirty ? "ui.script_discard_confirm" : hadScript && plan().board ? "ui.script_regenerate_confirm" : null;
   if (warning && !window.confirm(MindexI18n.render(MindexI18n.msg(warning)))) return;
   scriptDrafts.delete(scopeKey());
@@ -2685,8 +2731,12 @@ $("script-text").addEventListener("input", () => {
   scriptDrafts.set(scopeKey(), { base: plan().script || "", value: $("script-text").value });
   updateLocks();
 });
+// 手动编辑的文案在失焦时自动保存为新版本：不再需要“保存文案”按钮。
+$("script-text").addEventListener("blur", () => {
+  if (!state.data || busy() || !scriptDirty()) return;
+  saveScript().catch(fail);
+});
 $("script-generate").addEventListener("click", () => generateScript().catch(fail));
-$("script-save").addEventListener("click", () => saveScript().catch(fail));
 async function boot() {
   const id = new URLSearchParams(location.search).get("job");
   // 创建表单在选任务之前就要列出素材；和任务列表一样不阻塞工作台首屏。

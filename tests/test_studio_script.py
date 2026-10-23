@@ -207,13 +207,92 @@ def test_script_change_marks_storyboard_stale_and_rebuild_resplits(env):
     split = data["versions"][next(iter(split_ids))]
     assert split["stage"] == "split" and split["inputs"] == {"script": plan["script"]}
 
-    # 选回旧文案版本同样让分镜过期。
+    # 选回旧文案版本：分镜工作台同步还原为依赖该版本的最后一次构建结果，不再过期。
     response = client.post(
         f"/api/studio/jobs/{jid}/plans/{pid}/select-version",
         json={"revision": data["revision"], "version_id": old_script, "stage": "script"},
     )
     assert response.status_code == 200, response.text
-    assert response.json()["script_stale"] is True
+    restored = response.json()
+    assert restored["script_stale"] is False
+    assert restored["plans"][pid]["script"] == old_script
+    assert restored["plans"][pid]["board"] == old_board
+    assert restored["plans"][pid]["board_script"] == old_script
+
+
+def test_regenerate_switches_version_and_clears_storyboard(env):
+    _, client, _ = env
+    jid, pid = new_job(client)
+    data = build_all(client, jid, pid)
+    plan = data["plans"][pid]
+    old_script, old_board = plan["script"], plan["board"]
+    assert old_board and plan["shots"]
+
+    # 重新生成文案（单独执行 script 节点）：自动切到新版本，分镜工作台立即清空。
+    data = run_node(client, jid, pid, "script")
+    plan = data["plans"][pid]
+    new_script = plan["script"]
+    assert new_script != old_script
+    assert plan["board"] is None and plan["shots"] == {}
+    assert plan["ranges"] == {} and plan["anchors"] == {}
+    # 清空后不再提示“过期”，而是干净的空工作台。
+    assert data["script_stale"] is False
+
+    # 切回旧文案版本：分镜工作台恢复为它的最后一次构建结果。
+    data = workspace(client, jid)
+    response = client.post(
+        f"/api/studio/jobs/{jid}/plans/{pid}/select-version",
+        json={"revision": data["revision"], "version_id": old_script, "stage": "script"},
+    )
+    assert response.status_code == 200, response.text
+    restored = response.json()["plans"][pid]
+    assert restored["script"] == old_script
+    assert restored["board"] == old_board and restored["board_script"] == old_script
+
+    # 再切回新文案版本：它从未拆过分镜，工作台再次清空。
+    data = workspace(client, jid)
+    response = client.post(
+        f"/api/studio/jobs/{jid}/plans/{pid}/select-version",
+        json={"revision": data["revision"], "version_id": new_script, "stage": "script"},
+    )
+    assert response.status_code == 200, response.text
+    again = response.json()["plans"][pid]
+    assert again["script"] == new_script and again["board"] is None and again["shots"] == {}
+
+
+def test_switch_to_unbuilt_script_version_clears_storyboard(env):
+    _, client, _ = env
+    jid, pid = new_job(client)
+    # 先完整构建一次，得到一个带分镜的文案版本。
+    data = build_all(client, jid, pid)
+    built_script = data["plans"][pid]["script"]
+    assert data["plans"][pid]["board"]
+    # 手动改写出一个从未参与构建的新文案版本。
+    data = patch_script(client, jid, pid, "红色开场。蓝色结尾。绿色收尾。").json()
+    unbuilt_script = data["plans"][pid]["script"]
+    assert unbuilt_script != built_script
+
+    # 切到从未构建的版本：分镜工作台整体清空。
+    response = client.post(
+        f"/api/studio/jobs/{jid}/plans/{pid}/select-version",
+        json={"revision": data["revision"], "version_id": unbuilt_script, "stage": "script"},
+    )
+    assert response.status_code == 200, response.text
+    plan = response.json()["plans"][pid]
+    assert plan["script"] == unbuilt_script
+    assert plan["board"] is None and plan["shots"] == {}
+    assert plan["ranges"] == {} and plan["anchors"] == {}
+
+    # 切回已构建的版本：分镜工作台恢复为那次构建的结果。
+    data = workspace(client, jid)
+    response = client.post(
+        f"/api/studio/jobs/{jid}/plans/{pid}/select-version",
+        json={"revision": data["revision"], "version_id": built_script, "stage": "script"},
+    )
+    assert response.status_code == 200, response.text
+    restored = response.json()
+    assert restored["script_stale"] is False
+    assert restored["plans"][pid]["board"] and restored["plans"][pid]["board_script"] == built_script
 
 
 def test_script_failure_blocks_the_rest_of_the_build(config, video_file):
