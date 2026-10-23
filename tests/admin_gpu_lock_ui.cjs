@@ -11,16 +11,14 @@ const video = process.env.MINDEX_GPU_LOCK_TEST_VIDEO || '/tmp/mindex-gpu-lock-ui
     const page = await browser.newPage({viewport: {width: 1440, height: 1000}});
     page.on('pageerror', e => errors.push(e.message));
     await page.goto(base + '/settings');
-    const lock = page.getByLabel('强加 GPU 锁', {exact: true});
+    const lock = page.locator('#enforce-gpu-lock');
     await page.waitForFunction(() => document.querySelector('#roles')?.children.length);
     assert.equal(await lock.isChecked(), false);
     await lock.check();
-    await page.getByRole('button', {name: '保存处理设置'}).click();
     await page.waitForFunction(() => document.querySelector('#notice').textContent.includes('处理设置已保存'));
     await page.reload();
     await page.waitForFunction(() => document.querySelector('#enforce-gpu-lock').checked);
     await lock.uncheck();
-    await page.getByRole('button', {name: '保存处理设置'}).click();
     await page.waitForFunction(() => document.querySelector('#notice').textContent.includes('处理设置已保存'));
     assert.equal((await (await page.request.get(base + '/api/settings')).json()).business.enforce_gpu_lock, false);
     const uploaded = await page.request.post(base + '/api/admin/sources/upload', {

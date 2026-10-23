@@ -752,18 +752,18 @@ $('search-tuning').onsubmit = async (event) => {
     notify(e.message, true);
   }
 };
-$('processing-settings').onsubmit = async (event) => {
-  event.preventDefault();
-  $('processing-save').disabled = true;
+$('enforce-gpu-lock').onchange = async (event) => {
+  const box = event.currentTarget;
+  box.disabled = true;
   try {
     await api('/api/settings/business', {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ enforce_gpu_lock: $('enforce-gpu-lock').checked })
+      body: JSON.stringify({ enforce_gpu_lock: box.checked })
     });
     notify(MindexI18n.msg("ui.7a13ca5bd7fc"));
     await loadSettings();
   } catch (e) {notify(e.message, true);} finally
-  {$('processing-save').disabled = false;}
+  {box.disabled = false;}
 };
 $('tuning-reset').onclick = () => run(async () => {
   await api('/api/settings/business', { method: 'DELETE' });
