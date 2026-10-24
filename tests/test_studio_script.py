@@ -297,7 +297,7 @@ def test_switch_to_unbuilt_script_version_clears_storyboard(env):
 
 def test_script_failure_blocks_the_rest_of_the_build(config, video_file):
     class Failing:
-        def write(self, outline):
+        def write(self, outline, materials=None):
             raise ModelError("文案服务不可用")
 
     Pipeline(config).prepare(video_file)

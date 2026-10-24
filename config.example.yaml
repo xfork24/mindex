@@ -48,6 +48,9 @@ studio:
   # 创作工作流（文本生成视频）：拆分镜 LLM + TTS + 召回选片 + 渲染合成。
   max_input_chars: 2000
   max_shots: 1024
+  # 可用素材摘要总字符预算（0–100000，默认 12000，0 表示关闭）：
+  # 文案创作与拆分镜参考当前任务素材的画面分析摘要，使文案与召回词贴近素材实际画面。
+  material_digest_chars: 12000
   generator:
     # 文本拆分镜 LLM，OpenAI 兼容端点（llama-server GGUF）。
     backend: openai

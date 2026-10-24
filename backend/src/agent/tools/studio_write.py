@@ -4,7 +4,8 @@
 若确认期间工作台被改动（例如用户在页面上编辑），服务端拒绝并返回可恢复错误，助手需重新读取后再试。
 
 ``edit_shots`` 的合并规则与创作页一致（studio.js changeStructure）：旁白直接拼接、查询以「；」连接、
-预计时长相加；保留前一镜的召回设置，前一镜为默认文字召回时继承被合并镜的设置。
+预计时长相加；保留前一镜的召回设置，前一镜为默认文字召回时继承被合并镜的设置；画面意象跳过空值后以「；」连接，
+截到 120 字。
 """
 
 from __future__ import annotations
@@ -225,6 +226,7 @@ async def edit_script(args: EditScript, ctx: ToolContext) -> ToolOutput:
 
 # ------------------------------------------------------------ 分镜
 class ShotFields(StrictModel):
+    visual: str | None = Field(default=None, description="画面意象：一句中文，不超过 120 字；空字符串表示清空")
     text: str | None = Field(default=None, min_length=1, max_length=200, description="旁白（配音与字幕）")
     query: str | None = Field(default=None, min_length=1, max_length=400, description="召回查询，2–5 个中文词")
     estimated_seconds: float | None = Field(default=None, gt=0, le=60)
@@ -262,6 +264,26 @@ def recall_is_default(recall: dict | None) -> bool:
     )
 
 
+LABELS = {"visual": "画面意象", "text": "旁白", "query": "查询", "estimated_seconds": "时长"}
+
+
+def set_visual(shot: dict, value: str | None) -> None:
+    """写入去除首尾空白后的 visual；空值删除该键（与 Shot 的空 visual 不落键一致）。"""
+    visual = (value or "").strip()
+    if visual:
+        shot["visual"] = visual
+    else:
+        shot.pop("visual", None)
+
+
+def join_visual(a: str | None, b: str | None) -> str | None:
+    """与 studio.js 的 joinVisual 一致：跳过空值、以「；」拼接、按字符截到 VISUAL_LIMIT；全空返回 None。"""
+    from mindex.studio.studio import VISUAL_LIMIT
+
+    parts = [v.strip() for v in (a, b) if v and v.strip()]
+    return "；".join(parts)[:VISUAL_LIMIT] or None
+
+
 def merge_into(previous: dict, current: dict) -> None:
     """与 studio.js 的 merge 逐字段一致。"""
     previous["text"] += current["text"]
@@ -269,6 +291,7 @@ def merge_into(previous: dict, current: dict) -> None:
     previous["estimated_seconds"] += current["estimated_seconds"]
     if recall_is_default(previous.get("recall")) and current.get("recall"):
         previous["recall"] = current["recall"]
+    set_visual(previous, join_visual(previous.get("visual"), current.get("visual")))
 
 
 def plan_shots(view: PlanView, operations: list[ShotOperation]) -> tuple[list[dict], list[dict]]:
@@ -304,7 +327,14 @@ def plan_shots(view: PlanView, operations: list[ShotOperation]) -> tuple[list[di
                 raise ToolError("update 需要 fields", code="invalid_operation")
             shot = shots[position(sid)]
             for key, value in values.items():
-                changes.append({"label": f"修改 {labels[sid]} 的{ {'text': '旁白', 'query': '查询', 'estimated_seconds': '时长'}[key]}",
+                if key == "visual":
+                    before = shot.get("visual")
+                    set_visual(shot, value)
+                    after = shot.get("visual")
+                    changes.append({"label": f"{'清空' if after is None else '修改'} {labels[sid]} 的{LABELS[key]}",
+                                    "before": before, "after": after})
+                    continue
+                changes.append({"label": f"修改 {labels[sid]} 的{LABELS[key]}",
                                 "before": shot[key], "after": value})
                 shot[key] = value
         elif op.op == "insert":
@@ -312,6 +342,7 @@ def plan_shots(view: PlanView, operations: list[ShotOperation]) -> tuple[list[di
             if not values.get("text") or not values.get("query"):
                 raise ToolError("insert 需要 fields.text 与 fields.query", code="invalid_operation")
             values.setdefault("estimated_seconds", max(1.0, round(len(values["text"]) / 4, 2)))
+            set_visual(values, values.get("visual"))
             index = position(find(op.after)) + 1 if op.after else 0
             shots.insert(index, values)
             changes.append({"label": f"在第 {index + 1} 位插入新分镜", "after": values["text"]})
@@ -356,14 +387,20 @@ def plan_shots(view: PlanView, operations: list[ShotOperation]) -> tuple[list[di
                 shot = {k: v for k, v in original.items() if k != "id"} if number else dict(original)
                 shot.update(text=part["text"], query=part.get("query") or original["query"],
                             estimated_seconds=part.get("estimated_seconds") or max(1.0, round(len(part["text"]) / 4, 2)))
+                if "visual" in part:  # 未提供 visual 的段继承原镜（已随 original 复制）
+                    set_visual(shot, part["visual"])
                 new.append(shot)
             shots[index:index + 1] = new
             changes.append({"label": f"拆分 {labels[sid]}", "before": original["text"],
                             "after": " | ".join(p["text"] for p in new)})
     if not shots:
         raise ToolError("操作后没有任何分镜；至少保留一个分镜", code="invalid_operation")
+    from mindex.studio.studio import visual_error
     from mindex.studio.studio_models import ShotBody
 
+    problem = visual_error(shots)
+    if problem:
+        raise ToolError(problem, code="invalid_shot")
     for number, shot in enumerate(shots, 1):
         try:
             ShotBody.model_validate(shot)
@@ -498,7 +535,7 @@ def specs() -> list[ToolSpec]:
                  EditScript, "write", edit_script, preview_edit_script),
         ToolSpec("edit_shots", "studio",
                  "批量修改分镜结构：update/insert/delete/move/merge/split。合并规则与创作页一致（旁白拼接、查询以「；」连接、"
-                 "时长相加）。只能合并相邻分镜。未改动分镜保留产物，只有受影响分镜需要重建。",
+                 "时长相加、画面意象以「；」连接并截到 120 字）。只能合并相邻分镜。未改动分镜保留产物，只有受影响分镜需要重建。",
                  EditShots, "write", edit_shots, preview_edit_shots),
         ToolSpec("select_version", "studio", "选用某个历史版本作为当前方案的产物（文案、分镜内容、召回、配音、选片、渲染或成片）。",
                  SelectVersion, "write", select_version, preview_select_version),

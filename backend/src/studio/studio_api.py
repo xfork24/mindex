@@ -20,7 +20,14 @@ from filelock import FileLock, Timeout
 from starlette.concurrency import run_in_threadpool
 
 from mindex.admin.curation import EntityNotFound, Library
-from mindex.models.adapters import MultimodalEmbedder, Speaker, Storyboarder, Writer, make_storyboarder
+from mindex.models.adapters import (
+    ModelError,
+    MultimodalEmbedder,
+    Speaker,
+    Storyboarder,
+    Writer,
+    make_storyboarder,
+)
 from mindex.settings.runtime_settings import RuntimeConfig
 from mindex.shared.config import Config, fingerprint
 from mindex.shared.images import image_png
@@ -29,6 +36,7 @@ from mindex.shared.storage import Store
 from mindex.shared.uploads import save_upload
 from mindex.studio import studio, studio_steps
 from mindex.studio import studio_workspace as workspace
+from mindex.studio.material_digest import build_digest, merged_vocabulary, safe_digest
 from mindex.studio.studio_artifacts import digest, safe_path
 from mindex.studio.studio_files import file_routes
 from mindex.studio.studio_logs import ExecutionLog, read_events
@@ -40,6 +48,7 @@ from mindex.studio.studio_models import (
     NodeBody,
     PlanBody,
     PlanPatchBody,
+    QuerySuggestionBody,
     RangeBody,
     RunStepBody,
     StoryboardBody,
@@ -268,6 +277,58 @@ def studio_router(
     def get_workspace(job_id: str, compact: bool = False):
         return workspace.detail(current(), job_id, read_workspace(job_id), store=store, compact=compact)
 
+    @router.get("/jobs/{job_id}/material-digest")
+    def get_material_digest(job_id: str):
+        """任务元信息中的可用素材摘要预览：只读、不加锁，不改动任务、方案、版本与签名。"""
+        state = studio.load_job(base, job_id)  # 不存在 → EntityNotFound → 404"找不到创作任务"
+        return build_digest(current(), store, state).public()
+
+    @router.post("/jobs/{job_id}/plans/{plan_id}/shots/{shot_id}/query-suggestion")
+    def query_suggestion(job_id: str, plan_id: str, shot_id: str, body: QuerySuggestionBody):
+        """按画面意象重写召回词，只返回建议：不加锁、不 persist，不改动分镜、版本与签名。
+
+        不使用 read_workspace()：它在任务未迁移或有运行中的构建时会加锁并写盘。
+        """
+        cfg = current()
+        studio.load_job(base, job_id)  # 不存在 → EntityNotFound → 404"找不到创作任务"
+        if not workspace.path(base, job_id).is_file():
+            raise EntityNotFound("找不到构建方案")  # 未接入版本工作台的任务没有方案
+        w = workspace.load(base, job_id)  # 已迁移任务只读加载，规范化只发生在内存中
+        p = w["plans"].get(plan_id)
+        if p is None:
+            raise EntityNotFound("找不到构建方案")
+        order = workspace.ordered_shots(w, p)
+        if shot_id not in p["shots"] or shot_id not in order:
+            raise EntityNotFound("找不到分镜")
+
+        def content(sid):
+            vid = p["shots"].get(sid, {}).get("content")
+            return w["versions"].get(vid, {}).get("data", {}) if vid else {}
+
+        current_shot = content(shot_id)
+        raw = body.visual if body.visual is not None else current_shot.get("visual")
+        visual = studio.normalize_visual(raw)
+        if not visual:
+            raise studio.StudioError("请先填写画面意象，再重写召回词")
+        if len(visual) > studio.VISUAL_LIMIT:
+            raise studio.StudioError(
+                f"画面意象超过 {studio.VISUAL_LIMIT} 字上限（当前 {len(visual)} 字）"
+            )
+        index = order.index(shot_id)
+        previous = content(order[index - 1]).get("text", "") if index > 0 else ""
+        following = content(order[index + 1]).get("text", "") if index + 1 < len(order) else ""
+        vocabulary = merged_vocabulary(safe_digest(cfg, job_id, store=store))
+        try:
+            query = (storyboarder or make_storyboarder(cfg)).suggest_query(
+                current_shot.get("text", ""), visual, (previous, following), vocabulary
+            )
+        except ModelError as exc:
+            raise ModelError(f"召回词重写失败：{exc}") from exc
+        query = " ".join(str(query or "").split())
+        if not query:
+            raise ModelError("召回词重写失败：服务返回了空召回词")
+        return {"query": query}
+
     @router.patch("/jobs/{job_id}/title")
     def patch_title(job_id: str, body: TitleBody):
         with mutation_lock():
@@ -324,6 +385,9 @@ def studio_router(
         from uuid import uuid4
 
         with mutation_lock():
+            # 先校验画面意象长度：超长时整份请求拒绝，不写入任何版本、不 persist。
+            if body.shots is not None and (error := studio.visual_error(body.shots)):
+                raise studio.StudioError(error)
             w = workspace.load(current(), job_id)
             p = workspace.plan(w, plan_id)
             workspace.require_revision(p, body.revision)
@@ -890,6 +954,8 @@ def studio_router(
     def patch_storyboard(job_id: str, body: StoryboardBody):
         with mutation_lock():
             reject_legacy_mutation(job_id)
+            if error := studio.visual_error(body.shots):
+                raise HTTPException(422, error)
             shots, seen = [], set()
             for index, item in enumerate(body.shots, 1):
                 shot_id = (item.id or f"shot-{index:02d}").strip()
@@ -902,6 +968,7 @@ def studio_router(
                         text=item.text.strip(),
                         query=item.query.strip(),
                         estimated_seconds=item.estimated_seconds,
+                        visual=item.visual,
                     )
                 )
             if len(shots) > current().studio.max_shots:

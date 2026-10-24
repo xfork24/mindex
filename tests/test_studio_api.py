@@ -300,10 +300,10 @@ def test_accepted_state_lock_conflicts_and_release(config):
     entered, release = Event(), Event()
 
     class Slow(FixtureStoryboarder):
-        def split(self, text):
+        def split(self, text, vocabulary=None):
             entered.set()
             release.wait(10)
-            return super().split(text)
+            return super().split(text, vocabulary)
 
     client = TestClient(create_app(config, storyboarder=Slow(config)))
     client.config = config

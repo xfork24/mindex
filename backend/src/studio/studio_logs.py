@@ -88,6 +88,8 @@ def diagnostic_event(kind, value):
         log.emit(f"模型服务响应：HTTP {value.get('status', '未知')}")
     elif kind == "split-validation":
         log.emit("分镜校验未通过，正在修正", "warning")
+    elif kind == "material-digest-error":
+        log.emit("素材摘要生成失败，已按无摘要继续", "warning")
     elif kind == "command":
         executable = value.get("args", [""])[0]
         log.emit("正在处理音视频（ffmpeg）" if str(executable).endswith("ffmpeg") else "正在检查媒体信息")

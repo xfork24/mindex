@@ -29,6 +29,7 @@ from mindex.shared.shot_media import ShotMedia
 from mindex.shared.storage import Store
 from mindex.shared.trace import current
 from mindex.studio import studio, studio_select, studio_steps
+from mindex.studio.material_digest import merged_vocabulary, safe_digest
 from mindex.studio.studio_artifacts import digest, safe_path, sanitized, visibility_key
 from mindex.studio.studio_logs import LABELS, ExecutionLog, active_log, diagnostic_event
 
@@ -1467,17 +1468,33 @@ def execute(config, job_id, w, p, stage, sid=None, *, speaker=None, storyboarder
             outline = studio.load_job(config, job_id)["outline"]
             if not outline.strip():
                 raise studio.StudioError("任务没有视频大纲，请手动编写文案")
-            text = (writer or adapters.make_writer(config)).write(outline)
+            # 素材摘要只是参考资料：生成失败时按空摘要继续（需求 4.13），只记一条中文诊断。
+            digest = safe_digest(
+                config,
+                job_id,
+                on_error=lambda message: diagnostics.record("material-digest-error", {"message": message}),
+            )
+            text = (writer or adapters.make_writer(config)).write(outline, materials=digest)
             if not text.strip():
                 raise studio.StudioError("文案服务返回了空内容")
             if len(text) > config.studio.max_input_chars:
                 raise studio.StudioError(f"文案超过 {config.studio.max_input_chars} 字上限，请精简后再试")
             data = {"text": text.strip(), "origin": "generated"}
+            if not digest.empty:
+                # 只有实际参考了非空摘要才记录全文与统计（需求 4.10、4.11）。
+                diagnostics.record("material-digest", {"text": digest.text, **digest.stats()})
+                data["materials"] = digest.stats()
         elif stage == "split":
             text = script_text(w, p)
             if not text:
                 raise studio.StudioError("请先生成文案，再拆分镜")
-            drafts = (storyboarder or make_storyboarder(config)).split(text)
+            # 拆分镜同样参照素材摘要的画面词表；摘要出错或为空时不传词表，不影响拆分。
+            vocabulary = merged_vocabulary(safe_digest(
+                config,
+                job_id,
+                on_error=lambda message: diagnostics.record("material-digest-error", {"message": message}),
+            ))
+            drafts = (storyboarder or make_storyboarder(config)).split(text, vocabulary=vocabulary)
             if studio.coverage_warning(text, [s.text for s in drafts]):
                 raise studio.StudioError("自动分镜未完整覆盖原文")
             # New identities avoid aliasing an old shot after a structural re-split.
@@ -1487,8 +1504,9 @@ def execute(config, job_id, w, p, stage, sid=None, *, speaker=None, storyboarder
                     text=d.text,
                     query=d.query,
                     estimated_seconds=d.estimated_seconds,
+                    visual=studio.clipped_visual(index, d.visual),
                 )
-                for d in drafts
+                for index, d in enumerate(drafts, 1)
             ]
             set_board(config, job_id, w, p, shots, origin=vid)
             p["board_script"] = p["script"]

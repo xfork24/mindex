@@ -6,12 +6,16 @@ import pytest
 from agent_helpers import new_session, result_text, results, send, wait_idle, wait_pending
 from conftest import legacy_job
 from fastapi.testclient import TestClient
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from mindex.agent.llm.scripted import ScriptedLlm, call, say
-from mindex.agent.tools.studio_write import merge_into
+from mindex.agent.tools.common import PlanView, board_text
+from mindex.agent.tools.studio_write import ShotFields, ShotOperation, merge_into, plan_shots
 from mindex.api import create_app
 from mindex.studio import studio
 from mindex.studio import studio_workspace as ws
+from mindex.studio.studio import VISUAL_LIMIT
 
 SHOTS = ["shot-a1daad59aa", "shot-925281d5bb", "shot-77f0c3e1cc"]
 RECALL = {"mode": "text", "person_ids": [], "person_mode": "auto", "person_relation": "all",
@@ -66,6 +70,31 @@ def test_merge_matches_frontend_rules():
     kept = {"text": "甲", "query": "甲", "estimated_seconds": 1, "recall": RECALL}
     merge_into(kept, {"text": "乙", "query": "乙", "estimated_seconds": 1, "recall": {**RECALL, "person_ids": ["x"]}})
     assert kept["recall"] == RECALL
+
+
+VISUAL_TEXT = st.text(alphabet=st.sampled_from(list("画面意象夜市ab 　\t\n；😀👨\u200d")), max_size=80)
+VISUAL_VALUE = st.one_of(st.none(), st.text(alphabet=" \t\n　", max_size=4), VISUAL_TEXT)
+
+
+# Feature: studio-material-consistency, Property 20: 合并 visual 的拼接与截断
+@settings(max_examples=100, deadline=None)
+@given(visuals=st.lists(VISUAL_VALUE, min_size=2, max_size=5))
+def test_merge_visual_join_and_clip(visuals):
+    """**Validates: Requirements 8.6, 8.9**"""
+    def shot(visual):
+        data = {"text": "甲", "query": "甲", "estimated_seconds": 1, "recall": None}
+        if visual is not None:
+            data["visual"] = visual
+        return data
+
+    merged = shot(visuals[0])
+    for visual in visuals[1:]:
+        merge_into(merged, shot(visual))
+    expected = "；".join(v.strip() for v in visuals if v and v.strip())[:VISUAL_LIMIT]
+    if expected:
+        assert merged["visual"] == expected
+    else:
+        assert "visual" not in merged
 
 
 def test_merge_with_approval(agent):
@@ -220,3 +249,108 @@ def test_ambiguous_and_non_adjacent_merge_errors(agent):
     codes = [r["error"]["code"] for r in results(events)]
     assert codes == ["not_adjacent", "missing_shot"]  # 预览阶段即失败，不会请求确认
     assert not any(e["type"] == "plugin:mindex/approval-asked" for e in events)
+
+
+# ------------------------------------------------------------ 画面意象 visual（需求 8.9–8.11）
+def test_update_sets_and_clears_visual(agent):
+    client, llm, job = agent
+    set_op = {"operations": [{"op": "update", "shot": "#2", "fields": {"visual": "  湖边安静的村落  "}}]}
+    clear_op = {"operations": [{"op": "update", "shot": "#2", "fields": {"visual": ""}}]}
+    llm.extend([call("edit_shots", job_id=job, **set_op)], [say("已设置")],
+               [call("edit_shots", job_id=job, **clear_op)], [say("已清空")])
+    sid = new_session(client)
+    send(client, sid, "设置第二镜画面意象")
+    pending = wait_pending(client, sid, "approval")
+    change = pending["preview"]["changes"][0]
+    assert change["before"] is None and change["after"] == "湖边安静的村落"
+    client.post(f"/api/agent/sessions/{sid}/approvals/{pending['requestId']}",
+                json={"outcome": "allowed-once", "grant": True})
+    events = wait_idle(client, sid)
+    assert not results(events)[0]["message"].get("isError"), result_text(results(events)[0])
+    after = workspace(client, job)
+    assert content(after, SHOTS[1])["visual"] == "湖边安静的村落"
+    assert "visual" not in content(after, SHOTS[0])
+
+    send(client, sid, "清空第二镜画面意象")
+    events = wait_idle(client, sid)
+    assert not results(events)[0]["message"].get("isError"), result_text(results(events)[0])
+    cleared = workspace(client, job)
+    assert "visual" not in content(cleared, SHOTS[1])
+    assert content(cleared, SHOTS[1])["query"] == "蓝色" and order(cleared) == SHOTS
+
+
+def test_split_inherits_visual(agent):
+    client, _llm, job = agent
+    ws_data = workspace(client, job)
+    shots = PlanView(ws_data).shots()
+    shots[0]["visual"] = "红色幕布拉开"
+    pid = ws_data["active_plan"]
+    saved = client.patch(f"/api/studio/jobs/{job}/plans/{pid}",
+                         json={"revision": ws_data["revision"], "shots": shots})
+    assert saved.status_code == 200, saved.text
+    view = PlanView(workspace(client, job))
+    split = ShotOperation(op="split", shot="#1", parts=[
+        ShotFields(text="红色"), ShotFields(text="开场。", visual="舞台中央的红色灯光")])
+    planned, _, _ = plan_shots(view, [split])
+    assert planned[0]["visual"] == "红色幕布拉开"            # 未提供 visual 的段继承原镜
+    assert planned[1]["visual"] == "舞台中央的红色灯光"
+    assert planned[0]["id"] == SHOTS[0] and "id" not in planned[1]
+    cleared = ShotOperation(op="split", shot="#1", parts=[ShotFields(text="红色", visual=" "), ShotFields(text="开场。")])
+    planned, _, _ = plan_shots(view, [cleared])
+    assert "visual" not in planned[0] and planned[1]["visual"] == "红色幕布拉开"
+
+
+def test_overlong_visual_is_rejected_without_patch(agent):
+    client, llm, job = agent
+    before = workspace(client, job)
+    too_long = "夜" * (VISUAL_LIMIT + 1)
+    op = {"operations": [{"op": "update", "shot": "#1", "fields": {"visual": too_long}}]}
+    llm.extend([call("edit_shots", job_id=job, **op)], [say("画面意象太长")])
+    sid = new_session(client)
+    send(client, sid, "设置很长的画面意象")
+    events = wait_idle(client, sid)
+    result = results(events)[0]
+    assert result["error"]["code"] == "invalid_shot" and result["message"]["isError"]
+    assert "120" in result_text(result) and "第 1 个分镜" in result_text(result)
+    assert not any(e["type"] == "plugin:mindex/approval-asked" for e in events)
+    assert not any(e["type"] == "plugin:mindex/mutation" for e in events)
+    after = workspace(client, job)
+    assert after["revision"] == before["revision"]
+    assert after["plans"][after["active_plan"]]["shots"] == before["plans"][before["active_plan"]]["shots"]
+    # 恰好 120 字可通过预览。
+    view = PlanView(after)
+    exact = ShotOperation(op="update", shot="#1", fields=ShotFields(visual="夜" * VISUAL_LIMIT))
+    assert plan_shots(view, [exact])[0][0]["visual"] == "夜" * VISUAL_LIMIT
+
+
+def test_merged_visual_cut_on_whitespace_is_stripped():
+    """120 字截断恰好落在空白上时，存储值去掉尾部空白（与 Shot 的 visual 规范化一致）。"""
+    first = {"text": "甲", "query": "甲", "estimated_seconds": 1, "recall": None, "visual": "甲" * 119}
+    merge_into(first, {"text": "乙", "query": "乙", "estimated_seconds": 1, "recall": None, "visual": "乙乙"})
+    # "甲"*119 + "；" 正好 120 字，"；" 不是空白，保留。
+    assert first["visual"] == "甲" * 119 + "；"
+    spaced = {"text": "甲", "query": "甲", "estimated_seconds": 1, "recall": None, "visual": "甲" * 118 + " 丙"}
+    merge_into(spaced, {"text": "乙", "query": "乙", "estimated_seconds": 1, "recall": None, "visual": "乙"})
+    # 中间的空白不受影响：拼接为 "甲"*118 + " 丙；乙"，截到 120 字是 "甲"*118 + " 丙"。
+    assert spaced["visual"] == "甲" * 118 + " 丙"
+    edge = {"text": "甲", "query": "甲", "estimated_seconds": 1, "recall": None, "visual": "甲" * 119 + " 丁"}
+    merge_into(edge, {"text": "乙", "query": "乙", "estimated_seconds": 1, "recall": None, "visual": "乙"})
+    # 截到 120 字为 "甲"*119 + " "，尾部空白被去掉。
+    assert edge["visual"] == "甲" * 119
+    assert edge["visual"] == studio.Shot(id="shot-x", text="甲", query="甲", estimated_seconds=1,
+                                         visual="甲" * 119 + " ").visual
+
+
+def test_shot_rows_include_visual(agent):
+    client, _llm, job = agent
+    ws_data = workspace(client, job)
+    shots = PlanView(ws_data).shots()
+    shots[1]["visual"] = "蓝色海面"
+    saved = client.patch(f"/api/studio/jobs/{job}/plans/{ws_data['active_plan']}",
+                         json={"revision": ws_data["revision"], "shots": shots})
+    assert saved.status_code == 200, saved.text
+    view = PlanView(workspace(client, job))
+    rows = view.shot_rows()
+    assert [row["visual"] for row in rows] == [None, "蓝色海面", None]
+    text = board_text(view, rows)
+    assert text.count("画面意象：") == 1 and "  画面意象：蓝色海面" in text

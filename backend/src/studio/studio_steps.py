@@ -49,6 +49,7 @@ def run_split(config: Config, job_id: str, state: dict, storyboarder: Storyboard
             text=draft.text.strip(),
             query=draft.query.strip(),
             estimated_seconds=draft.estimated_seconds,
+            visual=studio.clipped_visual(index, draft.visual),
         )
         for index, draft in enumerate(drafts, 1)
     ]

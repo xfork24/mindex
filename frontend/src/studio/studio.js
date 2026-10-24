@@ -88,7 +88,8 @@ const state = {
   finalUrl: null,
   persons: null, // 懒加载的人物身份（演员/角色；作品不参与选择）
   sources: null, // 懒加载的素材列表
-  inputs: null // 查询文件 media_id → 产物条目索引
+  inputs: null, // 查询文件 media_id → 产物条目索引
+  materialDigest: null // 当前任务的素材摘要缓存 {jobId, status, data, open, request}
 };
 const $ = (id) => document.getElementById(id);
 function shortIds(value) {
@@ -243,7 +244,7 @@ async function selectJob(id, { reloadJobs = true } = {}) {
   state.data = null;
   state.finalUrl = null;
   state.matrixScope = null;
-  state.persons = state.inputs = null;
+  state.persons = state.inputs = state.materialDigest = null; // 素材摘要在 renderJobMeta 中按任务重新获取
   history.replaceState(null, "", `/studio?job=${id}`);
   closeDialog();
   loadRecallOptions().catch((error) => notice(MindexI18n.msg("ui.867f562167d6", { p0: error.message }), true));
@@ -348,6 +349,53 @@ function renderJobMeta() {
     row.append(term, detail);
     body.append(row);
   }
+  body.append(materialDigestNode(state.materialDigest?.jobId === job.id ? state.materialDigest : null));
+  if (state.materialDigest?.jobId !== job.id) void loadMaterialDigest(job.id);
+}
+// 可用素材摘要：只读预览，按任务缓存；切换任务或构建结束刷新工作台时重新获取。
+// 接口返回的为空原因是固定的中文取值，界面按条目翻译，不直接显示原文。
+const DIGEST_EMPTY_REASON = {
+  "预算为 0": "ui.material_digest_empty_budget",
+  "无生效索引": "ui.material_digest_empty_index",
+  "无已分析镜头": "ui.material_digest_empty_segments"
+};
+function loadMaterialDigest(jobId, { fresh = false } = {}) {
+  const cached = state.materialDigest;
+  if (!fresh && cached?.jobId === jobId) return cached.request;
+  const entry = { jobId, status: "loading", data: null, open: cached?.jobId === jobId && cached.open };
+  entry.request = api(`/api/studio/jobs/${jobId}/material-digest`).then(
+    (data) => {entry.status = "ok";entry.data = data;},
+    () => {entry.status = "error";}
+  ).then(() => {
+    if (state.materialDigest === entry && state.id === jobId && state.data) renderJobMeta();
+  });
+  state.materialDigest = entry;
+  return entry.request;
+}
+// entry 为 null 或 loading 时显示加载中；成功时 summary 显示计数（为空时显示原因），展开显示正文。
+function materialDigestNode(entry) {
+  const box = document.createElement("details");
+  box.className = "material-digest";
+  box.open = Boolean(entry?.open);
+  box.addEventListener("toggle", () => {if (entry) entry.open = box.open;});
+  const summary = el("summary", MindexI18n.msg("ui.material_digest_title"));
+  const status = el("span", undefined, "material-digest-status");
+  summary.append(" · ", status);
+  box.append(summary);
+  if (!entry || entry.status === "loading") {
+    MindexI18n.setText(status, MindexI18n.msg("ui.material_digest_loading"));
+  } else if (entry.status === "error") {
+    status.classList.add("warn-text");
+    MindexI18n.setText(status, MindexI18n.msg("ui.material_digest_failed"));
+  } else if (entry.data.empty_reason || !entry.data.text) {
+    const key = DIGEST_EMPTY_REASON[entry.data.empty_reason];
+    MindexI18n.setText(status, key ? MindexI18n.msg(key) : String(entry.data.empty_reason || "—"));
+  } else {
+    const stats = entry.data.stats || {};
+    MindexI18n.setText(status, MindexI18n.msg("ui.material_digest_counts", { p0: stats.sources ?? 0, p1: stats.segments ?? 0 }));
+    box.append(el("pre", entry.data.text, "material-digest-text"));
+  }
+  return box;
 }
 // 文案创作：文案是方案级的版本化阶段。文本框里的修改只有保存或重新生成时才形成新版本，
 // 未保存的内容按方案暂存，切换方案再回来仍在。
@@ -380,6 +428,18 @@ function syncScriptControls() {
   MindexI18n.setAttr(generate, "title", (job.outline || "").trim() ? "" : MindexI18n.msg("ui.script_no_outline"));
   MindexI18n.setText($("script-counter"), MindexI18n.msg("ui.script_counter", { p0: wordCount(area.value) }));
 }
+// 文案区"参考了 N 个素材、M 个镜头描述"：只在所显示文案版本带 data.materials 时显示（需求 4.12）。
+function renderScriptMaterials(item) {
+  const note = $("script-materials");
+  if (!note) return;
+  const materials = item?.data?.materials;
+  note.hidden = !materials;
+  if (materials) {
+    MindexI18n.setText(note, MindexI18n.msg("ui.script_materials_note", {
+      p0: materials.sources ?? 0, p1: materials.segments ?? 0,
+    }));
+  }
+}
 function renderScript() {
   const p = plan(), job = state.data.job, area = $("script-text"), scope = scopeKey(), base = p.script || "";
   // 方案或文案版本变化（含生成、保存、切换方案）时重置文本框；同一版本内保留未保存的输入。
@@ -399,6 +459,7 @@ function renderScript() {
   shortIds(MindexI18n.system(failed.error || "")) : "";
   $("script-error").hidden = !error;
   if (error) MindexI18n.setText($("script-error"), MindexI18n.msg("ui.script_failed", { p0: error }));
+  renderScriptMaterials(current);
   renderScriptHistory();
   syncScriptControls();
 }
@@ -500,6 +561,7 @@ async function refresh() {
   clearTimeout(state.timer);
   if (busy()) state.timer = setTimeout(() => refresh().catch(fail), 1200);else
   if (wasBusy) {
+    void loadMaterialDigest(id, { fresh: true });
     await loadArtifacts();
     await loadJobs();
   }
@@ -824,10 +886,13 @@ function cellSummary(sid, stage) {
   if (item) {
     const d = item.data;
     if (stage === "content") {
+      trigger.append(el("span", d.text, "cell-summary"));
+      // 画面意象非空时完整显示；为空时不显示该行，也不放占位文字。
+      if (typeof d.visual === "string" && d.visual.trim())
       trigger.append(
-        el("span", d.text, "cell-summary"),
-        el("span", d.query, "cell-summary muted")
+        el("span", MindexI18n.msg("ui.visual_summary", { p0: d.visual }), "cell-summary visual-summary")
       );
+      trigger.append(el("span", d.query, "cell-summary muted"));
       // 分镜级召回覆盖（粒度/数量）在格内摘要可见，便于发现被钉住的分镜。
       const overrides = [
         d.granularity && GRANULARITY_LABEL[d.granularity],
@@ -1325,19 +1390,27 @@ function renderShotEditor(body, sid) {
     state.drafts.set(draftKey(sid), draft);
   }
   const fields = el("div", "", "shot-editor-fields");
+  const inputs = {};
   for (const [name, label, type] of [
+  ["visual", MindexI18n.msg("ui.visual_label"), "textarea"],
   ["text", MindexI18n.msg("ui.58c9fb9115f5"), "textarea"],
   ["query", MindexI18n.msg("ui.711363c42474"), "textarea"],
   ["estimated_seconds", MindexI18n.msg("ui.9e54a98e61db"), "number"]])
   {
     const f = field(label, draft.data[name], type);
     f.input.dataset.shotInput = "true";
+    f.input.dataset.shotField = name;
+    inputs[name] = f.input;
+    // visual 不设 maxLength：浏览器按 UTF-16 计数，与服务端按码点计的 120 字上限不一致，超长交给服务端 422。
+    if (name === "visual") f.input.placeholder = MindexI18n.msg("ui.visual_placeholder");else
     if (type === "textarea") f.input.maxLength = name === "text" ? 200 : 400;else
     {
       f.input.min = "0.001";
       f.input.max = "60";
     }
     f.input.addEventListener("input", () => {
+      // visual 为空白时删键而非存空串，保证老分镜（无 visual 键）的 dirty 判定与已存内容一致。
+      if (name === "visual" && !f.input.value.trim()) delete draft.data.visual;else
       draft.data[name] =
       type === "number" ? Number(f.input.value) : f.input.value;
       draft.dirty =
@@ -1377,6 +1450,22 @@ function renderShotEditor(body, sid) {
     });
     overrides.append(f.wrap);
   }
+  // 按画面意象重写召回词：只读请求（不加锁、不落盘），因此用普通按钮，不受构建/未保存锁影响；
+  // 建议结果只写入草稿，需「保存此镜」后才生效。
+  const rewrite = el("div", "", "visual-rewrite");
+  const rewriteStatus = el("p", "", "warn-text visual-rewrite-status");
+  rewriteStatus.setAttribute("role", "status");
+  rewriteStatus.hidden = true;
+  const rewriteButton = button(MindexI18n.msg("ui.visual_rewrite_query"), () =>
+  rewriteQuery(sid, draft, {
+    button: rewriteButton,
+    status: rewriteStatus,
+    queryInput: inputs.query,
+    markDirty
+  }));
+  rewriteButton.dataset.rewriteQuery = "true";
+  rewrite.append(rewriteButton, rewriteStatus);
+  fields.append(rewrite);
   body.append(fields);
   renderRecallEditor(body, sid, draft, overrides);
   const actions = el("div", "", "detail-actions");
@@ -1408,6 +1497,41 @@ function renderShotEditor(body, sid) {
   history.dataset.rowHistory = "content";
   body.append(actions, history);
 }
+// 合并分镜的画面意象：跳过空值，按顺序用「；」拼接，按 Unicode 码点截断到 120 字（与服务端 len 一致）；全空返回空串。
+function joinVisual(...values) {
+  const joined = values.
+  map((v) => typeof v === "string" ? v.trim() : "").
+  filter(Boolean).
+  join("；");
+  return Array.from(joined).slice(0, 120).join("");
+}
+// 按画面意象重写召回词：以草稿中当前 visual 请求建议，成功后只替换草稿的 query 并标记未保存；
+// 失败时在编辑器状态区显示中文错误，草稿与未保存标记保持不变。请求期间禁用按钮，结束后恢复。
+async function rewriteQuery(sid, draft, ui) {
+  if (ui.button.disabled) return;
+  ui.button.disabled = true;
+  MindexI18n.setText(ui.button, MindexI18n.msg("ui.visual_rewrite_busy"));
+  ui.status.hidden = true;
+  MindexI18n.setText(ui.status, "");
+  try {
+    const result = await api(`${planBase()}/shots/${sid}/query-suggestion`, "POST", {
+      visual: draft.data.visual ?? ""
+    });
+    draft.data.query = result.query;
+    if (ui.queryInput) ui.queryInput.value = result.query;
+    ui.markDirty();
+  } catch (error) {
+    // 服务端错误已由 api() 译为当前语言；fetch 本身失败（网络错误）时补上「召回词重写失败」前缀。
+    const message = error?.name === "TypeError" ?
+    MindexI18n.msg("ui.visual_rewrite_failed", { p0: error.message }) :
+    error?.message || MindexI18n.msg("ui.visual_rewrite_failed", { p0: "" });
+    MindexI18n.setText(ui.status, shortIds(message));
+    ui.status.hidden = false;
+  } finally {
+    ui.button.disabled = false;
+    MindexI18n.setText(ui.button, MindexI18n.msg("ui.visual_rewrite_query"));
+  }
+}
 function currentBoard() {
   return order().map((sid) => ({ ...ver(plan().shots[sid].content).data }));
 }
@@ -1418,11 +1542,16 @@ async function saveShot(sid) {
   if (draft.baseContent !== plan().shots[sid].content)
   throw new Error(MindexI18n.msg("ui.9af274c47a7b"));
   const shots = currentBoard();
-  shots[order().indexOf(sid)] = {
+  const edited = {
     ...draft.data,
     text: draft.data.text.trim(),
     query: draft.data.query.trim()
   };
+  // 其他镜由 currentBoard() 带上已存 visual；当前镜去首尾空白，空值删键。
+  const visual = (edited.visual ?? "").trim();
+  if (visual) edited.visual = visual;else
+  delete edited.visual;
+  shots[order().indexOf(sid)] = edited;
   const result = await api(planBase(), "PATCH", {
     revision: state.data.revision,
     shots
@@ -1454,6 +1583,9 @@ async function changeStructure(sid, op) {
     shots[index - 1].text += shots[index].text;
     shots[index - 1].query += `；${shots[index].query}`;
     shots[index - 1].estimated_seconds += shots[index].estimated_seconds;
+    const visual = joinVisual(shots[index - 1].visual, shots[index].visual);
+    if (visual) shots[index - 1].visual = visual;else
+    delete shots[index - 1].visual;
     // 保留上一镜召回设置；上一镜为默认文字召回时继承被合并镜的设置。
     if (recallIsDefault(recallEditable(shots[index - 1].recall)) && shots[index].recall)
     shots[index - 1].recall = shots[index].recall;

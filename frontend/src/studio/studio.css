@@ -274,3 +274,6 @@ summary{cursor:pointer}
 .candidate-selection{position:absolute;top:6px;right:6px;padding:2px 6px;border-radius:4px;background:#007f78;color:white;font-size:11px;line-height:18px}
 
 #create-status{margin:10px 0 14px;color:#b3402a;font-size:12px}
+.material-digest{grid-column:1/-1;padding:6px 0;font-size:12px;line-height:18px}
+.material-digest>summary{cursor:pointer;color:var(--muted)}
+.material-digest-text{margin:6px 0 0;max-height:320px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;background:#f6f8f7;border:1px solid var(--line);border-radius:4px;padding:8px}

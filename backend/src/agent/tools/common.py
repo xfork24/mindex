@@ -89,6 +89,7 @@ class PlanView:
                 "index": index,
                 "short_id": short(sid),
                 "shot_id": sid,
+                "visual": content.get("visual") or None,
                 "text": content["text"],
                 "query": content["query"],
                 "estimated_seconds": content["estimated_seconds"],
@@ -126,4 +127,6 @@ def board_text(view: PlanView, rows: list[dict] | None = None, limit: int = 60) 
             f"{row['index']} | {row['short_id']} | {row['shot_id']} | {clip(row['text'], limit)} | "
             f"{clip(row['query'], 30)} | {row['estimated_seconds']:g} | {marks}"
         )
+        if row.get("visual"):
+            lines.append(f"  画面意象：{clip(row['visual'], limit)}")
     return "\n".join(lines)

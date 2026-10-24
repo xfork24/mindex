@@ -26,6 +26,8 @@ class ShotBody(StrictModel):
     recall: studio.ShotRecall | None = None  # 与 Shot 严格同步（StrictModel extra=forbid）
     granularity: studio.Granularity | None = None
     recall_limit: int | None = Field(default=None, ge=1, le=50)
+    # 只约束类型；长度由处理函数用 studio.visual_error 检查，保证 422 detail 为中文字符串。
+    visual: str | None = None
 
 
 def validate_recall_references(config, store: Store, job_id, shots):
@@ -57,6 +59,11 @@ def validate_recall_references(config, store: Store, job_id, shots):
 class StoryboardBody(StrictModel):
     title: str | None = Field(default=None, max_length=60)
     shots: list[ShotBody] = Field(min_length=1)
+
+
+class QuerySuggestionBody(StrictModel):
+    # 省略时使用该分镜已保存的画面意象；只约束类型，空值与长度由处理函数给出中文 422。
+    visual: str | None = None
 
 
 class ManualVideoBody(StrictModel):

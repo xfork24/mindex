@@ -488,10 +488,10 @@ def test_api_execution_lock_and_recovery(config):
     entered, release = Event(), Event()
 
     class Slow(FixtureStoryboarder):
-        def split(self, text):
+        def split(self, text, vocabulary=None):
             entered.set()
             release.wait(10)
-            return super().split(text)
+            return super().split(text, vocabulary)
 
     client = TestClient(create_app(config, storyboarder=Slow(config)))
     jid = convert_to_legacy(

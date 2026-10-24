@@ -17,5 +17,6 @@ artifacts/
 
 # 计划执行台账（本地暂存）
 .superpowers/
+.kiro/
 
 /build/

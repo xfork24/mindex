@@ -154,10 +154,12 @@ class FixtureWriter:
         self.vary = vary
         self.calls = 0
         self.outlines: list[str] = []
+        self.materials: list = []  # 每次调用收到的素材摘要（None 或 MaterialDigest）
 
-    def write(self, outline: str) -> str:
+    def write(self, outline: str, materials=None) -> str:
         self.calls += 1
         self.outlines.append(outline)
+        self.materials.append(materials)
         text = outline.strip()
         return f"{text}第{self.calls}版。" if self.vary else text
 
@@ -196,12 +198,29 @@ class FixtureStoryboarder:
     def __init__(self, config: Config):
         self.config = config
         self.calls = 0
+        self.vocabularies: list[list[str] | None] = []  # 每次 split 收到的 vocabulary，供测试断言
+        self.suggestions: list[dict] = []  # 每次 suggest_query 收到的参数，供接口测试断言
 
     def title(self, text: str) -> str:
         return "测试创作标题"
 
-    def split(self, text: str) -> list[ShotDraft]:
+    def suggest_query(
+        self, text: str, visual: str, context: tuple[str, str], vocabulary: list[str] | None
+    ) -> str:
+        """确定性地由输入派生召回词：visual 的前两个词 + “画面”，相同输入逐字节相同。"""
+        self.suggestions.append({
+            "text": text,
+            "visual": visual,
+            "context": tuple(context),
+            "vocabulary": None if vocabulary is None else list(vocabulary),
+        })
+        words = (visual or "").split() or (text or "").split()
+        head = " ".join(words[:2])[:40]
+        return f"{head} 画面".strip()
+
+    def split(self, text: str, vocabulary: list[str] | None = None) -> list[ShotDraft]:
         self.calls += 1
+        self.vocabularies.append(None if vocabulary is None else list(vocabulary))
         parts: list[str] = []
         current = ""
         for char in text:
@@ -213,7 +232,12 @@ class FixtureStoryboarder:
             parts.append(current)
         parts = [part.strip() for part in parts if part.strip()] or [text.strip()]
         return [
-            ShotDraft(text=part, query=f"{part} 画面", estimated_seconds=round(len(part) / 4, 2))
+            ShotDraft(
+                visual=f"画面：{part[:40]}",
+                text=part,
+                query=f"{part} 画面",
+                estimated_seconds=round(len(part) / 4, 2),
+            )
             for part in parts
         ]
 

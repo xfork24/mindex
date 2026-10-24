@@ -16,15 +16,16 @@ from typing import Literal
 from uuid import uuid4
 
 from filelock import FileLock, Timeout
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_serializer, model_validator
 
 from mindex.admin.curation import EntityNotFound
 from mindex.models.storyboard import coverage_warning
 from mindex.shared.config import Config, StrictModel, fingerprint, portable_parameters
+from mindex.shared.trace import record as trace_record
 from mindex.shared.types import Filters, Granularity
 
 STEPS = ("split", "recall", "tts", "select", "render")
-SPLIT_VERSION = 6  # 6: 拆分镜提示词改为按画面意象拆细
+SPLIT_VERSION = 7  # 7: 具体意象单独成镜、抽象列举不拆、最短长度、visual 字段与召回词公共规则
 STEP_LABELS = {
     "split": "文本拆分镜",
     "recall": "语义召回",
@@ -40,6 +41,52 @@ DEPENDENCIES: dict[str, tuple[str, ...]] = {
     "render": ("select",),
 }
 _JOB_ID = re.compile(r"^\d{8}-\d{6}-[0-9a-f]{6}$")  # YYYYMMDD-HHMMSS-hex6
+VISUAL_LIMIT = 120  # 分镜画面意象上限（按 Unicode 字符计）
+
+
+def normalize_visual(value: str | None) -> str | None:
+    """去除首尾空白；None、空串或纯空白返回 None（表示未填写）。"""
+    if value is None:
+        return None
+    visual = value.strip()
+    return visual or None
+
+
+def clip_visual(value: str | None) -> tuple[str | None, bool]:
+    """模型输出用：规范化后截到前 VISUAL_LIMIT 个字符，返回 (结果, 是否发生截断)。"""
+    visual = normalize_visual(value)
+    if visual is None or len(visual) <= VISUAL_LIMIT:
+        return visual, False
+    return visual[:VISUAL_LIMIT], True
+
+
+def clipped_visual(index: int, value: str | None) -> str | None:
+    """拆分产物用：截断超长 visual 并记录 split-visual-truncated 诊断，不让拆分失败。"""
+    visual, truncated = clip_visual(value)
+    if truncated:
+        length = len(normalize_visual(value) or "")
+        trace_record(
+            "split-visual-truncated",
+            {
+                "index": index,
+                "length": length,
+                "message": f"第 {index} 个分镜的画面意象 {length} 字，超过 {VISUAL_LIMIT} 字上限，已截断",
+            },
+        )
+    return visual
+
+
+def visual_error(shots) -> str | None:
+    """人工/智能助手提交用：返回第一个超长分镜的中文错误，全部合法时返回 None。
+
+    shots 可以是模型对象（读 .visual）或字典（读 ["visual"]）。
+    """
+    for index, shot in enumerate(shots, 1):
+        raw = shot.get("visual") if isinstance(shot, dict) else getattr(shot, "visual", None)
+        visual = normalize_visual(raw) if isinstance(raw, str) else None
+        if visual is not None and len(visual) > VISUAL_LIMIT:
+            return f"第 {index} 个分镜的画面意象超过 {VISUAL_LIMIT} 字上限（当前 {len(visual)} 字）"
+    return None
 
 
 class StudioError(ValueError):
@@ -100,6 +147,26 @@ class Shot(StrictModel):
     # 分镜级召回覆盖：None = 跟随方案（粒度取服务配置，数量取方案 recall_limit）。
     granularity: Granularity | None = None
     recall_limit: int | None = Field(default=None, ge=1, le=50)
+    # 画面意象：一句中文（≤120 字）；不参与任何签名。None/空白 = 未填写，dump 时省略该键，
+    # 使未含 visual 的老分镜再次保存时 content 版本号不变。
+    visual: str | None = None
+
+    @field_validator("visual", mode="before")
+    @classmethod
+    def _normalize_visual(cls, value):
+        if value is None or not isinstance(value, str):
+            return value
+        visual = normalize_visual(value)
+        if visual is not None and len(visual) > VISUAL_LIMIT:
+            raise ValueError(f"画面意象超过 {VISUAL_LIMIT} 字上限（当前 {len(visual)} 字）")
+        return visual
+
+    @model_serializer(mode="wrap")
+    def _omit_empty_visual(self, handler):
+        data = handler(self)
+        if isinstance(data, dict) and data.get("visual") is None:
+            data.pop("visual", None)
+        return data
 
 
 class Storyboard(StrictModel):

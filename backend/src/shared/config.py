@@ -181,6 +181,9 @@ class StudioConfig(StrictModel):
 
     max_input_chars: int = Field(default=2000, ge=1)
     max_shots: int = Field(default=1024, ge=1)
+    # 文案/拆分镜参考的可用素材摘要总字符预算（按 Unicode 字符计）；0 表示关闭。
+    # strict 拒绝 1.5、"12000"、true 等非整数值。
+    material_digest_chars: int = Field(default=12000, ge=0, le=100000, strict=True)
     generator: GeneratorConfig = Field(default_factory=GeneratorConfig)
     # 文案创作 LLM：按视频大纲写旁白正文。与拆分镜同为 OpenAI 兼容聊天服务，
     # yaml 未单独配置时复制 generator，保证升级后无需改配置即可使用。

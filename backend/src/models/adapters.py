@@ -15,7 +15,7 @@ import httpx
 
 from mindex.shared.config import Config
 from mindex.shared.trace import record
-from mindex.shared.types import Annotation, ShotDraft, Utterance
+from mindex.shared.types import Annotation, MaterialDigest, ShotDraft, Utterance
 
 
 class ModelError(RuntimeError):
@@ -188,11 +188,15 @@ class Speaker(Protocol):
 class Storyboarder(Protocol):
     def title(self, text: str) -> str: ...
 
-    def split(self, text: str) -> list[ShotDraft]: ...
+    def split(self, text: str, vocabulary: list[str] | None = None) -> list[ShotDraft]: ...
+
+    def suggest_query(
+        self, text: str, visual: str, context: tuple[str, str], vocabulary: list[str] | None
+    ) -> str: ...
 
 
 class Writer(Protocol):
-    def write(self, outline: str) -> str: ...
+    def write(self, outline: str, materials: MaterialDigest | None = None) -> str: ...
 
 
 def parse_json(content: str):
