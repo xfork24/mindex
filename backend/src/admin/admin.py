@@ -1,12 +1,23 @@
 from __future__ import annotations
 
+import threading
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Query, UploadFile
+from fastapi import APIRouter, HTTPException, Query, Request, Response, UploadFile
 
 from mindex.admin.curation import CurationPatch, Library, Visibility, segment_public
 from mindex.shared.shot_media import file_response as FileResponse
 from mindex.shared.storage import Store
+
+# Process-wide cap on concurrent FFmpeg frame decodes for /sources/{id}/frame.
+FRAME_SLOTS = threading.BoundedSemaphore(4)
+
+
+def etag_matches(header: str | None, etag: str) -> bool:
+    if not header:
+        return False
+    values = {value.strip().removeprefix("W/") for value in header.split(",")}
+    return "*" in values or etag in values
 
 
 def admin_router(store: Store, runtime=None) -> APIRouter:
@@ -80,6 +91,54 @@ def admin_router(store: Store, runtime=None) -> APIRouter:
         from mindex.shared.shot_media import ShotMedia
         library.source_row(source_id)
         return ShotMedia(store).playlist(source_id, prefix="/api/admin/shots")
+
+    @router.get("/sources/{source_id}/frame")
+    def source_frame(
+        request: Request,
+        source_id: str,
+        t: float = Query(..., description="素材时间点（秒）"),
+        width: int = Query(default=768, ge=16, le=1024),
+    ):
+        import hashlib
+        import json
+        import math
+
+        from mindex.shared.media import MediaError
+        from mindex.shared.shot_media import ShotMedia
+
+        row = store.one("SELECT media FROM sources WHERE id=?", (source_id,))
+        if row is None:
+            raise HTTPException(404, "找不到素材")
+        duration = float(json.loads(row["media"])["duration"])
+        if not math.isfinite(t) or not 0 <= t <= duration:
+            raise HTTPException(422, f"时间点必须在 0 到 {duration:.3f} 秒之间")
+        media = ShotMedia(store)
+        try:
+            revision = media.frame_revision(source_id, t)
+            etag = '"' + hashlib.sha256(f"{revision}:{t!r}:{width}".encode()).hexdigest()[:20] + '"'
+            headers = {"ETag": etag, "Cache-Control": "private, max-age=3600"}
+            if etag_matches(request.headers.get("if-none-match"), etag):
+                return Response(status_code=304, headers=headers)
+            with FRAME_SLOTS:
+                content, _ = media.frame_jpeg(source_id, t, width)
+        except FileNotFoundError as exc:
+            raise HTTPException(404, "镜头文件缺失，请通过 split 命令修复") from exc
+        except MediaError as exc:
+            raise HTTPException(422, f"无法抽取该时间点的画面：{exc}") from exc
+        return Response(content, media_type="image/jpeg", headers=headers)
+
+    @router.get("/sources/{source_id}/report")
+    def source_report(source_id: str):
+        # 同步端点：FastAPI 在线程池执行，避免逐文件检查阻塞事件循环。
+        from mindex.diagnostics.film import source_report as build_report
+        from mindex.shared.config import Config
+
+        library.source_row(source_id)
+        config = runtime.current() if runtime else Config(data_dir=store.root)
+        try:
+            return build_report(config, source_id)
+        except ValueError as exc:
+            raise HTTPException(404, "找不到素材") from exc
 
     @router.api_route("/shots/{shot_id}/media", methods=["GET", "HEAD"])
     def shot_media(shot_id: str):

@@ -46,6 +46,11 @@ def agent(config, job):
         yield client, llm, job
 
 
+def page(job):
+    """创作页上下文：自动加载 studio 领域（编辑类工具都在该领域）。"""
+    return {"page": "studio", "job_id": job}
+
+
 def workspace(client, job):
     return client.get(f"/api/studio/jobs/{job}/workspace").json()
 
@@ -103,7 +108,7 @@ def test_merge_with_approval(agent):
     untouched = before["plans"][before["active_plan"]]["shots"][SHOTS[2]]["content"]
     llm.extend([call("edit_shots", call_id="m1", job_id=job, **MERGE)], [say("已合并。")])
     sid = new_session(client)
-    send(client, sid, "合并 a1daad59 和 925281d5")
+    send(client, sid, "合并 a1daad59 和 925281d5", context=page(job))
     pending = wait_pending(client, sid, "approval")
     assert pending["name"] == "edit_shots" and pending["risk"] == "write" and pending["allowGrant"]
     preview = pending["preview"]
@@ -133,7 +138,7 @@ def test_reject_and_cancelled_do_not_mutate(agent):
     client, llm, job = agent
     llm.extend([call("edit_shots", job_id=job, **MERGE)], [say("好的，不合并。")])
     sid = new_session(client)
-    send(client, sid, "合并")
+    send(client, sid, "合并", context=page(job))
     pending = wait_pending(client, sid, "approval")
     client.post(f"/api/agent/sessions/{sid}/approvals/{pending['requestId']}", json={"outcome": "rejected"})
     events = wait_idle(client, sid)
@@ -146,7 +151,7 @@ def test_reject_and_cancelled_do_not_mutate(agent):
     assert client.post(f"/api/agent/sessions/{sid}/approvals/x", json={"outcome": "maybe"}).status_code == 422
 
     llm.extend([call("edit_shots", job_id=job, **MERGE)])
-    send(client, sid, "再试")
+    send(client, sid, "再试", context=page(job))
     wait_pending(client, sid, "approval")
     client.post(f"/api/agent/sessions/{sid}/cancel")
     events = wait_idle(client, sid)
@@ -158,7 +163,7 @@ def test_stale_revision_is_recoverable(agent):
     client, llm, job = agent
     llm.extend([call("edit_shots", job_id=job, **MERGE)], [say("工作台变了，我重新读取。")])
     sid = new_session(client)
-    send(client, sid, "合并")
+    send(client, sid, "合并", context=page(job))
     pending = wait_pending(client, sid, "approval")
     data = workspace(client, job)
     renamed = client.patch(f"/api/studio/jobs/{job}/plans/{data['active_plan']}",
@@ -178,13 +183,13 @@ def test_session_grant_skips_later_write_approvals(agent):
     llm.extend([call("edit_shots", job_id=job, **update)], [say("好")],
                [call("edit_shots", job_id=job, operations=[{"op": "delete", "shot": "#3"}])], [say("删了")])
     sid = new_session(client)
-    send(client, sid, "改查询")
+    send(client, sid, "改查询", context=page(job))
     pending = wait_pending(client, sid, "approval")
     client.post(f"/api/agent/sessions/{sid}/approvals/{pending['requestId']}",
                 json={"outcome": "allowed-once", "grant": True})
     wait_idle(client, sid)
     assert client.get(f"/api/agent/sessions/{sid}").json()["grants"] == ["edit_shots"]
-    send(client, sid, "删掉第三镜")
+    send(client, sid, "删掉第三镜", context=page(job))
     events = wait_idle(client, sid)
     assert order(workspace(client, job)) == SHOTS[:2]
     assert sum(1 for e in events if e["type"] == "plugin:mindex/approval-asked") == 1
@@ -197,7 +202,7 @@ def test_no_approval_channel_fails_closed(config, job):
     app.state.agent_runtime.approvals = False
     with TestClient(app) as client:
         sid = new_session(client)
-        send(client, sid, "合并")
+        send(client, sid, "合并", context=page(job))
         events = wait_idle(client, sid)
     assert results(events)[0]["error"]["code"] == "unavailable"
     assert order(TestClient(app).get(f"/api/studio/jobs/{job}/workspace").json()) == SHOTS
@@ -217,7 +222,7 @@ def test_other_write_tools(agent):
     ]
     llm.extend(*scripted)
     sid = new_session(client)
-    send(client, sid, "一系列修改")
+    send(client, sid, "一系列修改", context=page(job))
     for _ in range(5):
         pending = wait_pending(client, sid, "approval")
         assert pending["preview"]["summary"]
@@ -244,7 +249,7 @@ def test_ambiguous_and_non_adjacent_merge_errors(agent):
     llm.extend([call("edit_shots", job_id=job, operations=[{"op": "merge", "shots": ["#1", "#3"]}])],
                [call("edit_shots", job_id=job, operations=[{"op": "delete", "shot": "zzzz"}])], [say("需要确认")])
     sid = new_session(client)
-    send(client, sid, "合并一和三")
+    send(client, sid, "合并一和三", context=page(job))
     events = wait_idle(client, sid)
     codes = [r["error"]["code"] for r in results(events)]
     assert codes == ["not_adjacent", "missing_shot"]  # 预览阶段即失败，不会请求确认
@@ -259,7 +264,7 @@ def test_update_sets_and_clears_visual(agent):
     llm.extend([call("edit_shots", job_id=job, **set_op)], [say("已设置")],
                [call("edit_shots", job_id=job, **clear_op)], [say("已清空")])
     sid = new_session(client)
-    send(client, sid, "设置第二镜画面意象")
+    send(client, sid, "设置第二镜画面意象", context=page(job))
     pending = wait_pending(client, sid, "approval")
     change = pending["preview"]["changes"][0]
     assert change["before"] is None and change["after"] == "湖边安静的村落"
@@ -271,7 +276,7 @@ def test_update_sets_and_clears_visual(agent):
     assert content(after, SHOTS[1])["visual"] == "湖边安静的村落"
     assert "visual" not in content(after, SHOTS[0])
 
-    send(client, sid, "清空第二镜画面意象")
+    send(client, sid, "清空第二镜画面意象", context=page(job))
     events = wait_idle(client, sid)
     assert not results(events)[0]["message"].get("isError"), result_text(results(events)[0])
     cleared = workspace(client, job)
@@ -307,7 +312,7 @@ def test_overlong_visual_is_rejected_without_patch(agent):
     op = {"operations": [{"op": "update", "shot": "#1", "fields": {"visual": too_long}}]}
     llm.extend([call("edit_shots", job_id=job, **op)], [say("画面意象太长")])
     sid = new_session(client)
-    send(client, sid, "设置很长的画面意象")
+    send(client, sid, "设置很长的画面意象", context=page(job))
     events = wait_idle(client, sid)
     result = results(events)[0]
     assert result["error"]["code"] == "invalid_shot" and result["message"]["isError"]

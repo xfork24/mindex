@@ -127,6 +127,15 @@ class TextSearch(BaseModel):
         return self
 
 
+class SimilarSearch(BaseModel):
+    """按库内片段找相似（POST /api/search/similar）；粒度缺省时沿用种子片段的粒度。"""
+
+    segment_id: str = Field(min_length=1)
+    granularity: Granularity | None = None
+    limit: int = Field(default=20, ge=1, le=50)
+    filters: Filters = Field(default_factory=Filters)
+
+
 DigestEmptyReason = Literal["预算为 0", "无生效索引", "无已分析镜头"]
 
 

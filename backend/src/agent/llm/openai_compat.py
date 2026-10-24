@@ -1,5 +1,8 @@
 """OpenAI 兼容 ``/chat/completions`` 工具调用协议（DeepSeek、Qwen、GLM、自建服务等）。
 
+图片：user 消息中的已解析图片块转为 ``image_url`` 数据 URL；tool 消息只能是文本，工具结果的图片由
+``agent.vision.materialize`` 放进紧随其后的合成 user 消息。
+
 流式解析 SSE：``delta.content`` → text 块，``delta.reasoning_content`` → reasoning 块，
 ``delta.tool_calls[i]`` 按 index 累积参数片段。``finish_reason`` 映射为 dsh 结束原因，
 ``usage`` 映射为 TokenUsage（inputTokens 不含缓存命中）。
@@ -18,12 +21,33 @@ from mindex.agent.llm.types import LlmError, LlmRequest, StreamEmitter, message_
 RETRY_STATUS = {429, 500, 502, 503, 504}
 
 
+def user_content(message: dict) -> str | list[dict]:
+    """user 消息内容：没有已解析图片时为纯文本（兼容不支持数组内容的服务）；
+    有图片时按块顺序输出 ``text`` / ``image_url``（数据 URL）数组。
+
+    只有带 ``data`` 的已解析图片块才发出：未解析的引用块（只有 ``ref``）防御性跳过，
+    正常情况下 ``agent.vision.materialize`` 已经替换掉它们。
+    """
+    blocks = message.get("content", [])
+    if not any(b.get("type") == "image" and b.get("data") for b in blocks):
+        return message_text(message)
+    parts: list[dict] = []
+    for block in blocks:
+        if block.get("type") == "text" and block.get("text"):
+            parts.append({"type": "text", "text": block["text"]})
+        elif block.get("type") == "image" and block.get("data"):
+            media_type = block.get("mediaType") or "image/jpeg"
+            parts.append({"type": "image_url",
+                          "image_url": {"url": f"data:{media_type};base64,{block['data']}"}})
+    return parts
+
+
 def convert_messages(system: str, messages: list[dict]) -> list[dict]:
     result = [{"role": "system", "content": system}] if system else []
     for message in messages:
         role = message["role"]
         if role == "user":
-            result.append({"role": "user", "content": message_text(message)})
+            result.append({"role": "user", "content": user_content(message)})
         elif role == "assistant":
             calls = tool_calls(message)
             item = {"role": "assistant", "content": message_text(message) or None}

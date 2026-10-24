@@ -62,7 +62,7 @@ curl http://127.0.0.1:4050/health
 - `GET /api/persons/review/shots`、`GET /review/shots/{shot_id}`：按镜头读取审核证据；`POST /review/shot`：`{"source_id":"...","shot_id":"...","selections":[{"actor_id":"...","role_id":null}]}`。空 selections 排除该镜头全部人物证据。
   列表支持 `source_id`、`status`、`actor_id` + 可选 `role_id` 精确配对筛选，`no_candidate=true` 筛选无候选；`limit` / `offset` 分页，`compact=true` 为跨页全选返回去重身份及状态，不传特征或截图数据。`status=rejected` 时忽略身份及无候选筛选，`filters` 为空且 `items[].candidate` 为 null。其他状态响应中的 `filters` 是当前素材、状态下各配对的全量分镜计数，`items[].candidate` 是最高分候选（无候选为 null），`items[].confirmed_people` 是该分镜全部已接受身份，包含 `score`、`original_score` 和 `manual`（人工确认）字段；`scope_total` 是当前素材、状态下未按身份筛选的去重分镜总数。
 - `DELETE /api/persons/tasks/{id}`：删除失败或中断的任务记录，保留镜头缓存与出镜证据。
-- `POST /api/persons/publish`：`{}` 绑定活动内容索引；`GET /api/persons/releases` 返回当前生效组合（`content_id` / `release_id` / `person_id`）与最近 30 条检索组合；`POST /api/persons/releases/{id}/activate` 恢复组合，`DELETE /api/persons/releases/{id}` 删除非生效组合。`GET /api/persons` 不再携带发布记录。
+- `POST /api/persons/publish`：`{}` 绑定活动内容索引；`GET /api/persons/releases` 返回当前生效组合（`content_id` / `release_id` / `person_id`）与最近 30 条检索组合；`POST /api/persons/releases/{id}/activate` 恢复组合，`DELETE /api/persons/releases/{id}` 删除非生效组合。`GET /api/persons` 不再携带发布记录；人物库页面用 `GET /api/persons?compact=true`，以 `coverage_counts`（素材 id → 覆盖分镜数）代替逐行 `coverage`，也不计算 `review_shots`。
 
 上述缩写路径均继续以 `/api/persons` 为前缀。
 

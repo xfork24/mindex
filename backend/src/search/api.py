@@ -10,9 +10,9 @@ from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
 
 from mindex.admin.curation import Library
-from mindex.search.search import SearchEngine, public_segment, status
+from mindex.search.search import SearchEngine, SimilarUnavailable, public_segment, status
 from mindex.shared.shot_media import file_response as FileResponse
-from mindex.shared.types import Filters, Granularity, TextSearch
+from mindex.shared.types import Filters, Granularity, SimilarSearch, TextSearch
 from mindex.shared.uploads import save_upload
 
 
@@ -27,6 +27,17 @@ def search_router(config, runtime, store, embedder=None, *, index_id=None):
     @router.post("/api/search/text")
     def text_search(query: TextSearch):
         return SearchEngine(runtime.current(), embedder, index_id=index_id).text(query)
+
+    @router.post("/api/search/similar")
+    def similar_search(body: SimilarSearch):
+        # 种子不存在 → EntityNotFound（全局 404）；种子无画面渠道 → ValueError（全局 422）；
+        # 画面向量缺失属于库内不一致，不是 ValueError，在此映射为 409。
+        try:
+            return SearchEngine(runtime.current(), embedder, index_id=index_id).similar(
+                body.segment_id, body.granularity, body.limit, body.filters
+            )
+        except SimilarUnavailable as exc:
+            raise HTTPException(409, str(exc)) from exc
 
     @router.post("/api/search/image")
     async def image_search(

@@ -38,6 +38,7 @@ from mindex.studio import studio, studio_steps
 from mindex.studio import studio_workspace as workspace
 from mindex.studio.material_digest import build_digest, merged_vocabulary, safe_digest
 from mindex.studio.studio_artifacts import digest, safe_path
+from mindex.studio.studio_diagnostics import diagnostics
 from mindex.studio.studio_files import file_routes
 from mindex.studio.studio_logs import ExecutionLog, read_events
 from mindex.studio.studio_models import (
@@ -72,8 +73,14 @@ def studio_router(
     router = APIRouter(prefix="/api/studio", tags=["创作"])
     guard = threading.Lock()  # 进程内单执行器；跨进程由 studio.lock 兜底
     executor: dict[str, threading.Thread | None] = {"thread": None}
+    # 运行中构建的进程内取消事件；跨进程取消走 workspace.cancel_sentinel 哨兵文件。
+    cancels: dict[str, threading.Event] = {}
 
     base = config if isinstance(config, Config) else config.base  # 路径与渲染参数走基础配置
+
+    def legacy_cancel_path(job_id: str) -> Path:
+        """旧任务步骤执行器的取消哨兵：跨进程可见，worker 在步骤之间检查。"""
+        return studio.job_dir(base, job_id) / "steps.cancel"
 
     def current() -> Config:
         """传入 RuntimeConfig 时按最新覆盖层解析；覆盖层不触碰路径，路径用法保持稳定。"""
@@ -119,6 +126,7 @@ def studio_router(
                     ids = {s.id for s in studio.load_storyboard(cfg, job_id).shots}
                     if not set(body.shot_ids) <= ids:
                         raise HTTPException(422, "指定分镜不存在于当前任务")
+                legacy_cancel_path(job_id).unlink(missing_ok=True)  # 上次执行残留的取消请求作废
                 studio.begin_step(cfg, job_id, steps[0])
                 response = studio.set_execution(cfg, job_id, "running", steps[0], steps[1:])
             except Exception:
@@ -130,6 +138,10 @@ def studio_router(
                 try:
                     for index, step in enumerate(steps):
                         if index:
+                            # 只在步骤之间检查取消：已开始的步骤照常完成，未开始的步骤保持原状态。
+                            if legacy_cancel_path(job_id).exists():
+                                status = "cancelled"
+                                break
                             studio.begin_step(cfg, job_id, step)
                             studio.set_execution(cfg, job_id, "running", step, steps[index + 1 :])
                         studio_steps.run_step(
@@ -151,6 +163,7 @@ def studio_router(
                 finally:
                     try:
                         studio.set_execution(cfg, job_id, status, None, [])
+                        legacy_cancel_path(job_id).unlink(missing_ok=True)
                     finally:
                         file_lock.release()
 
@@ -380,6 +393,18 @@ def studio_router(
             workspace.persist(base, job_id, w)
         return workspace.detail(current(), job_id, w)
 
+    @router.delete("/jobs/{job_id}/plans/{plan_id}")
+    def delete_plan(job_id: str, plan_id: str):
+        """只删除方案记录：版本、构建记录与文件全部保留，未被引用的产物由 mindex clean 回收。"""
+        with mutation_lock():
+            w = workspace.load(current(), job_id)
+            workspace.plan(w, plan_id)  # 不存在 → "找不到构建方案"
+            if any(b["status"] == "running" for b in w["builds"]):
+                raise HTTPException(409, "有构建正在执行，请等待完成或取消后再删除方案")
+            workspace.remove_plan(w, plan_id)
+            workspace.persist(base, job_id, w)
+        return workspace.detail(current(), job_id, w)
+
     @router.patch("/jobs/{job_id}/plans/{plan_id}")
     def patch_plan(job_id: str, plan_id: str, body: PlanPatchBody):
         from uuid import uuid4
@@ -538,6 +563,22 @@ def studio_router(
         w = read_workspace(job_id)
         return workspace.preflight(current(), job_id, w, workspace.plan(w, plan_id), force=force)
 
+    @router.get("/jobs/{job_id}/plans/{plan_id}/diagnostics")
+    def plan_diagnostics(job_id: str, plan_id: str):
+        """方案诊断：分镜检查、字幕环境、已选节点状态与变化原因、各阶段当前输入。
+
+        只读：不加锁、不 persist，构建执行期间也可调用。不使用 read_workspace()——它在任务
+        未迁移或有运行中的构建时会加锁并写盘。
+        """
+        studio.load_job(base, job_id)  # 不存在 → EntityNotFound → 404"找不到创作任务"
+        if not workspace.path(base, job_id).is_file():
+            raise EntityNotFound("找不到构建方案")  # 未接入版本工作台的任务没有方案
+        w = workspace.load(base, job_id)
+        p = w["plans"].get(plan_id)
+        if p is None:
+            raise EntityNotFound("找不到构建方案")
+        return diagnostics(current(), job_id, w, p, store=store)
+
     def launch_build(job_id, plan_id, *, body=None, node=None, column=None):
         from uuid import uuid4
 
@@ -594,12 +635,13 @@ def studio_router(
             except Exception:
                 file_lock.release()
                 raise
+            cancel_event = cancels[bid] = threading.Event()
 
             def worker():
                 try:
                     workspace.run_build(
                         cfg, job_id, bid, speaker=speaker, storyboarder=storyboarder, embedder=embedder,
-                        writer=writer,
+                        writer=writer, cancel_event=cancel_event,
                     )
                 except Exception as exc:  # noqa: BLE001 — all background errors need terminal state
                     fresh = workspace.load(cfg, job_id)
@@ -608,6 +650,8 @@ def studio_router(
                     ExecutionLog(cfg, job_id, bid).emit(f"执行失败：{exc}", "error")
                     workspace.persist(cfg, job_id, fresh)
                 finally:
+                    cancels.pop(bid, None)
+                    workspace.clear_build_cancel(cfg, job_id, bid)
                     file_lock.release()
 
             thread = threading.Thread(target=worker, daemon=True, name=f"studio-build-{job_id}")
@@ -615,6 +659,7 @@ def studio_router(
             try:
                 thread.start()
             except Exception as exc:
+                cancels.pop(bid, None)
                 build.update(status="failed", error=str(exc), finished_at=studio.now())
                 ExecutionLog(cfg, job_id, bid).emit(f"无法启动执行：{exc}", "error")
                 workspace.persist(cfg, job_id, w)
@@ -645,6 +690,27 @@ def studio_router(
         if build is None:
             raise EntityNotFound("找不到构建执行")
         return {"build_id": build_id, "status": build["status"], **read_events(base, job_id, build_id, after)}
+
+    @router.post("/jobs/{job_id}/builds/{build_id}/cancel")
+    def cancel_build(job_id: str, build_id: str):
+        """请求取消运行中的构建：执行器在下一个节点开始前停止，已开始的节点照常完成。
+
+        不加锁读取工作台：构建执行期间创作锁由 worker 持有。
+        """
+        studio.load_job(base, job_id)  # 不存在 → EntityNotFound → 404"找不到创作任务"
+        build = None
+        if workspace.path(base, job_id).is_file():
+            w = workspace.load(base, job_id)
+            build = next((b for b in w["builds"] if b["id"] == build_id), None)
+        if build is None:
+            raise EntityNotFound("找不到构建执行")
+        if build["status"] != "running":
+            raise HTTPException(409, "构建不在执行中，无法取消")
+        workspace.request_build_cancel(base, job_id, build_id)
+        if (event := cancels.get(build_id)) is not None:
+            event.set()
+        ExecutionLog(base, job_id, build_id).emit("已请求取消，当前节点完成后停止", "warning")
+        return {"build_id": build_id, "status": "cancelling"}
 
     @router.get("/sources/{source_id}/shots")
     def source_shots(source_id: str):
@@ -949,6 +1015,19 @@ def studio_router(
     @router.post("/jobs/{job_id}/run", status_code=202)
     def run_all(job_id: str):
         return launch(job_id, None, RunStepBody())
+
+    @router.post("/jobs/{job_id}/cancel")
+    def cancel_steps(job_id: str):
+        """请求取消旧任务的步骤执行：当前步骤完成后停止，未开始的步骤保持原状态。
+
+        不加锁：执行期间创作锁由 worker 持有；哨兵文件对其他进程同样可见。
+        """
+        state = studio.load_job(base, job_id)
+        if state.get("execution", {}).get("status") != "running":
+            raise HTTPException(409, "任务没有正在执行的步骤，无法取消")
+        path = legacy_cancel_path(job_id)
+        path.touch()
+        return {"job_id": job_id, "status": "cancelling"}
 
     @router.patch("/jobs/{job_id}/storyboard")
     def patch_storyboard(job_id: str, body: StoryboardBody):

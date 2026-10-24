@@ -15,7 +15,7 @@ from contextlib import nullcontext
 from datetime import UTC, datetime
 from threading import Lock
 
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 from mindex.persons.person_models import (
     CastConfirm,
@@ -56,6 +56,18 @@ def _cache_put(cache: OrderedDict, key, value, limit=PUBLISHED_CACHE_ENTRIES):
         cache.move_to_end(key)
         while len(cache) > limit:
             cache.popitem(last=False)
+    return value
+
+
+def _reference_value(row):
+    """person_references 行 → 接口形状（去掉 stage_id，解码 data，附图片地址）。"""
+    value = {
+        **{k: v for k, v in row.items() if k != "stage_id"},
+        "data": json.loads(row["data"]),
+        "url": "/api/persons/references/" + row["id"] + "/image",
+    }
+    if row["role_id"]:
+        value["actor_ids"] = [row["actor_id"]]
     return value
 
 
@@ -304,20 +316,11 @@ class Persons:
         row = self.store.one("SELECT * FROM person_references WHERE id=?", (identifier,))
         if not row:
             raise ValueError("找不到参考图")
-        value = {
-            **{k: v for k, v in row.items() if k != "stage_id"},
-            "data": json.loads(row["data"]),
-            "url": "/api/persons/references/" + identifier + "/image",
-        }
-        if row["role_id"]:
-            value["actor_ids"] = [row["actor_id"]]
-        return value
+        return _reference_value(row)
 
     def references(self):
-        return [
-            self.reference(r["id"])
-            for r in self.store.rows("SELECT id FROM person_references ORDER BY rowid")
-        ]
+        # 一次查询取全部参考图，避免逐条 reference() 的 N+1 查询（人物库首屏会调用）。
+        return [_reference_value(r) for r in self.store.rows("SELECT * FROM person_references ORDER BY rowid")]
 
     def update_reference(self, identifier, actor_id=None, entity=None, role_id=None):
         """Save reference pairing and the selected identity's metadata atomically."""
@@ -1483,10 +1486,18 @@ def _migrate_frames(config, store, source_id, apply):
 
 
 def encode_frame(raw, *, max_edge=0, image_format="PNG", jpeg_quality=85):
-    with Image.open(io.BytesIO(raw)) as original:
+    try:
+        original = Image.open(io.BytesIO(raw))
+    except (UnidentifiedImageError, Image.DecompressionBombError) as exc:
+        # 非图片或损坏的上传（参考图、演员表截图）是调用方输入错误：422 而不是 500。
+        raise ValueError("图片无法解码、文件损坏或尺寸过大") from exc
+    with original:
         if original.width * original.height > 40_000_000:
             raise ValueError("图片尺寸过大")
-        image = ImageOps.exif_transpose(original).convert("RGB")
+        try:
+            image = ImageOps.exif_transpose(original).convert("RGB")
+        except OSError as exc:
+            raise ValueError("图片无法解码、文件损坏或尺寸过大") from exc
         if max_edge and max(image.size) > max_edge:
             image = ImageOps.contain(image, (max_edge, max_edge))
         buffer = io.BytesIO()

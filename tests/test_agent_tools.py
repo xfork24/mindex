@@ -50,9 +50,25 @@ def run_tool(app, name, arguments, page=None):
     return asyncio.run(go())
 
 
+def module_spec_count() -> int:
+    """各工具模块 ``specs()`` 的总数（自动发现 mindex.agent.tools 下声明了 specs 的模块）。"""
+    import importlib
+    import pkgutil
+
+    from mindex.agent import tools as package
+
+    total = 0
+    for info in pkgutil.iter_modules(package.__path__):
+        module = importlib.import_module(f"{package.__name__}.{info.name}")
+        if callable(getattr(module, "specs", None)):
+            total += len(module.specs())
+    return total
+
+
 def test_registry_names_and_schemas():
     registry = build_registry()
-    assert len(registry) <= 31
+    # 与各工具模块实际声明的数量一致（结构断言：新增工具无需同步修改）。
+    assert len(registry) == len(registry.all()) == module_spec_count()
     shot_details = [s for s in registry.all() if s.name == "get_shot_details"]
     assert len(shot_details) == 1
     assert shot_details[0].domain == "studio" and shot_details[0].risk == "read" and shot_details[0].mcp is True
@@ -63,6 +79,31 @@ def test_registry_names_and_schemas():
         assert "$ref" not in json.dumps(schema) and "$defs" not in json.dumps(schema)
         assert spec.risk in {"read", "write", "danger"}
     assert {s.name for s in registry.restrict(["studio"]).all()} >= {"list_jobs", "get_workspace_summary"}
+
+
+def test_registry_domain_filter_and_domain_tools():
+    from mindex.agent.registry import ToolSpec
+    from mindex.shared.agent_domains import AGENT_DOMAINS, DOMAIN_INFO, LOADABLE_DOMAINS, PAGE_DOMAIN
+
+    assert LOADABLE_DOMAINS == AGENT_DOMAINS[1:] and "meta" not in LOADABLE_DOMAINS
+    assert set(DOMAIN_INFO) == set(LOADABLE_DOMAINS)
+    assert set(PAGE_DOMAIN.values()) <= set(LOADABLE_DOMAINS)
+    registry = build_registry()
+    spec = registry.all()[0]
+    with pytest.raises(ValueError):
+        ToolSpec(name="x", domain="unknown", description="", input_model=spec.input_model,
+                 risk="read", execute=spec.execute)
+    grouped = registry.domain_tools()
+    assert sorted(n for names in grouped.values() for n in names) == sorted(s.name for s in registry.all())
+    for domain, names in grouped.items():
+        assert names == [s.name for s in registry.all() if s.domain == domain]
+    assert len(registry.schemas()) == len(registry)
+    only = {s["name"] for s in registry.schemas(domains={"meta"})}
+    assert only == set(grouped.get("meta", []))
+    assert registry.schemas(domains=()) == []
+    studio_first = registry.schemas(first=("studio",), domains={"meta", "studio"})
+    assert {s["name"] for s in studio_first} == set(grouped.get("meta", [])) | set(grouped.get("studio", []))
+    assert studio_first[0]["name"] in grouped["studio"]
 
 
 def test_cli_lists_tools(tmp_path):

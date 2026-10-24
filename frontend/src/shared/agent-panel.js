@@ -11,6 +11,7 @@
   const TAB_KEY = 'mindex.agent.tab';
   const FOCUS_KEY = 'mindex.agent.focus';
   const FOLLOW_KEY = 'mindex.agent.follow';
+  const ALWAYS_ALLOW_KEY = 'mindex.agent.alwaysAllow';
   const WIDTH_KEY = 'mindex.agent.width';
   const DEFAULT_WIDTH = 440, MIN_WIDTH = 320, WIDTH_STEP = 24;
   const PAGES = { '': 'search', 'index.html': 'search', studio: 'studio', settings: 'settings', admin: 'admin', persons: 'persons' };
@@ -21,8 +22,11 @@
   const state = {
     session: null, seq: -1, source: null, retry: null, status: 'idle', open: false, live: false,
     cards: new Map(), streams: new Map(), approvals: new Map(), questions: new Map(), builds: new Map(),
-    feedSeq: null, feed: null, feedRetry: null, pendingNav: null, follow: true,
+    feedSeq: null, feed: null, feedRetry: null, pendingNav: null, follow: true, alwaysAllow: false,
+    attachments: [], creating: null,
   };
+  const MAX_ATTACHMENTS = 12; // 与后端 MessageBody.attachments 上限一致
+  const ATTACHMENT_REF = /^attachment:\/\/([0-9a-f]{32})$/;
   const TAB = (() => {
     try {
       let id = sessionStorage.getItem(TAB_KEY);
@@ -34,6 +38,7 @@
     } catch { return 'tab-' + Math.random().toString(36).slice(2); }
   })();
   try { state.follow = localStorage.getItem(FOLLOW_KEY) !== '0'; } catch {}
+  try { state.alwaysAllow = localStorage.getItem(ALWAYS_ALLOW_KEY) === '1'; } catch {}
   function currentPage() {
     const segment = location.pathname.replace(/^\/+|\/+$/g, '').replace(/\.html$/, '').split('/')[0];
     return PAGES[segment] || PAGES[segment + '.html'] || segment || 'search';
@@ -103,7 +108,21 @@
   });
   followLabel.append(followBox, node('span', '', t('ui.agent_follow')));
   if (i18n()) i18n().setAttr(followLabel, 'title', t('ui.agent_follow_hint'));
-  head.append(followLabel);
+  // 总是允许：开启后收到确认请求即自动回复 allowed-once，不再逐次询问（选择记在本机）。
+  const alwaysLabel = node('label', 'agent-always-allow');
+  const alwaysBox = node('input');
+  alwaysBox.type = 'checkbox';
+  alwaysBox.checked = state.alwaysAllow;
+  alwaysBox.addEventListener('change', () => {
+    state.alwaysAllow = alwaysBox.checked;
+    try { localStorage.setItem(ALWAYS_ALLOW_KEY, state.alwaysAllow ? '1' : '0'); } catch {}
+    if (state.alwaysAllow) autoAllowPending();
+  });
+  alwaysLabel.append(alwaysBox, node('span', '', t('ui.agent_always_allow')));
+  if (i18n()) i18n().setAttr(alwaysLabel, 'title', t('ui.agent_always_allow_hint'));
+  const toggles = node('div', 'agent-toggles');
+  toggles.append(followLabel, alwaysLabel);
+  head.append(toggles);
   const statusLine = node('div', 'agent-status');
   statusLine.setAttribute('role', 'status');
   const log = node('div', 'agent-log');
@@ -119,14 +138,31 @@
   const warning = node('p', 'agent-warning');
   warning.hidden = true;
   warning.setAttribute('role', 'alert');
+  // 待发送附件：chip 列表 + 上传/发送受阻提示（与疑似密钥提示分开，互不覆盖）。
+  const attachList = node('div', 'agent-attachments');
+  attachList.setAttribute('role', 'list');
+  label(attachList, t('ui.agent_attach_list'));
+  attachList.hidden = true;
+  const attachStatus = node('p', 'agent-attach-status');
+  attachStatus.setAttribute('role', 'alert');
+  attachStatus.hidden = true;
   const actions = node('div', 'agent-actions');
+  const fileInput = node('input', 'agent-attach-input');
+  fileInput.type = 'file';
+  fileInput.multiple = true;
+  fileInput.hidden = true;
+  fileInput.tabIndex = -1;
+  const attachButton = button(t('ui.agent_attach'), 'quiet agent-attach', () => fileInput.click());
+  if (i18n()) i18n().setAttr(attachButton, 'title', t('ui.agent_attach_hint'));
   const send = button(t('ui.agent_send'), 'submit agent-send');
   send.type = 'submit';
   const cancel = button(t('ui.agent_cancel'), 'quiet', () => cancelTurn().catch(fail));
   cancel.hidden = true;
-  actions.append(cancel, send);
-  form.append(warning, input, actions);
-  drawer.append(head, statusLine, log, form);
+  actions.append(attachButton, fileInput, cancel, send);
+  form.append(warning, attachList, attachStatus, input, actions);
+  const dropzone = node('div', 'agent-dropzone', t('ui.agent_attach_drop'));
+  dropzone.setAttribute('aria-hidden', 'true');
+  drawer.append(head, statusLine, log, form, dropzone);
 
   // ------------------------------------------------------------ 可调宽度：左边缘拖拽手柄（鼠标、触屏、键盘）
   const resizer = node('div', 'agent-resize');
@@ -316,6 +352,12 @@
     await loadSessions(session.id);
     return session.id;
   }
+  // 附件上传与发送共用：没有会话时只创建一次（并发拖入多个文件时复用同一个请求）。
+  function ensureSession() {
+    if (state.session) return Promise.resolve(state.session);
+    if (!state.creating) state.creating = startSession().finally(() => { state.creating = null; });
+    return state.creating;
+  }
   async function removeSession() {
     if (!state.session) return;
     if (!window.confirm(i18n() ? i18n().render(t('ui.agent_delete_confirm')) : '删除此会话？')) return;
@@ -331,6 +373,7 @@
     for (const timer of state.builds.values()) clearTimeout(timer.timer);
     Object.assign(state, { session: id, seq: -1, source: null, status: 'idle', live: false });
     state.cards.clear(); state.streams.clear(); state.approvals.clear(); state.questions.clear(); state.builds.clear();
+    clearAttachments({ revoke: true }); // 附件归属原会话，切换或删除会话后不能再随新消息发送
     log.replaceChildren();
     if (!id) log.append(node('p', 'agent-empty', t('ui.agent_empty')));
     setStatus('idle');
@@ -359,6 +402,7 @@
       if (state.session !== id) return;
       state.live = true; // 状态帧在补发的历史之后到达：此后才是实时事件
       setStatus(JSON.parse(message.data).status);
+      autoAllowPending();
     });
     source.onerror = () => {
       source.close();
@@ -415,8 +459,17 @@
     const data = event.data;
     switch (event.type) {
       case 'user/message': {
-        const text = (data.content || []).map((b) => b.text || '').join('');
-        if (data.source?.kind === 'user') bubble('user', text);
+        let text = (data.content || []).map((b) => b.text || '').join('');
+        if (data.source?.kind === 'user') {
+          const files = Array.isArray(data.attachments) ? data.attachments : [];
+          if (files.length) {
+            // 运行时在正文末尾逐行附上「附件：attachment://… 名称（类型，大小）」供模型引用；界面改用 chip 展示。
+            const cut = text.lastIndexOf('\n\n\u9644\u4ef6\uff1a' + files[0].ref);
+            if (cut >= 0) text = text.slice(0, cut);
+          }
+          const item = bubble('user', text);
+          if (files.length) item.append(messageAttachments(files));
+        }
         else if (data.source?.kind === 'followup') bubble('system', t('ui.agent_followup_note'));
         break;
       }
@@ -519,21 +572,40 @@
     const outcome = node('p', 'agent-outcome');
     outcome.setAttribute('role', 'status');
     card.append(outcome);
-    async function decide(value) {
+    async function decide(value, { silent = false } = {}) {
       allow.disabled = reject.disabled = true;
       try {
         await api(`/api/agent/sessions/${state.session}/approvals/${data.requestId}`, 'POST',
           { outcome: value, grant: Boolean(grant?.checked) });
-      } catch (error) { allow.disabled = reject.disabled = false; fail(error); }
+      } catch (error) {
+        const entry = state.approvals.get(data.requestId);
+        if (entry?.decided) return;
+        allow.disabled = reject.disabled = false;
+        if (entry) entry.auto = false;
+        // 自动允许失败（例如另一标签页已回复）时不弹错误，保留按钮供手动处理。
+        if (!silent) fail(error);
+      }
     }
-    state.approvals.set(data.requestId, { card, allow, reject, grant, outcome });
+    state.approvals.set(data.requestId, { card, allow, reject, grant, outcome, decide, decided: false, auto: false });
     log.append(card);
     scroll();
-    allow.focus({ preventScroll: true });
+    // 历史补发阶段（state.live=false）不自动回复：已决的请求随后会收到 approval-decided，
+    // 仍待确认的请求在状态帧到达后由 autoAllowPending 统一处理。
+    if (state.alwaysAllow && state.live) autoAllowPending();
+    else allow.focus({ preventScroll: true });
+  }
+  function autoAllowPending() {
+    if (!state.alwaysAllow || !state.live) return;
+    for (const entry of state.approvals.values()) {
+      if (entry.decided || entry.auto) continue;
+      entry.auto = true;
+      entry.decide('allowed-once', { silent: true });
+    }
   }
   function approvalDecided(data) {
     const entry = state.approvals.get(data.requestId);
     if (!entry) return;
+    entry.decided = true;
     entry.allow.disabled = entry.reject.disabled = true;
     if (entry.grant) entry.grant.disabled = true;
     const labels = { 'allowed-once': 'ui.agent_outcome_allowed', rejected: 'ui.agent_outcome_rejected',
@@ -811,6 +883,227 @@
     openViewer(images, images.findIndex((entry) => entry.url === image.getAttribute('src')));
   });
 
+  // ------------------------------------------------------------ 附件：选择、拖放、粘贴，XHR 上传（带进度），发送前等待完成
+  // 上传到 POST /api/agent/attachments（multipart：file + session_id），返回 {id: "attachment://<token>", …}；
+  // 发送消息时把 id 列表放进 attachments。移除已上传的附件会 DELETE 撤销暂存。
+  const PREVIEW_TYPES = /^image\/(?:png|jpeg|gif|webp|bmp)$/; // 后端按原类型内联返回的图片类型
+  function formatSize(bytes) {
+    const value = Number(bytes) || 0;
+    if (value < 1024) return `${value} B`;
+    const units = ['KB', 'MB', 'GB'];
+    let size = value / 1024, unit = 0;
+    while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit += 1; }
+    return `${size < 10 ? size.toFixed(1) : Math.round(size)} ${units[unit]}`;
+  }
+  function attachmentUrl(ref) {
+    const match = ATTACHMENT_REF.exec(String(ref || ''));
+    return match ? `/api/agent/attachments/${match[1]}/content` : null;
+  }
+  function revokeRemote(ref) {
+    const match = ATTACHMENT_REF.exec(String(ref || ''));
+    if (match) fetch(`/api/agent/attachments/${match[1]}`, { method: 'DELETE' }).catch(() => {});
+  }
+  function showAttachStatus(message, kind) {
+    attachStatus.hidden = false;
+    attachStatus.dataset.kind = kind;
+    attachStatus.setAttribute('role', kind === 'error' ? 'alert' : 'status');
+    if (i18n()) i18n().setText(attachStatus, message); else attachStatus.textContent = String(message);
+  }
+  function hideAttachStatus() {
+    attachStatus.hidden = true;
+    delete attachStatus.dataset.kind;
+  }
+  function refreshAttachments() {
+    attachList.hidden = !state.attachments.length;
+    if (attachStatus.dataset.kind === 'error' && !state.attachments.some((entry) => entry.status === 'error')) hideAttachStatus();
+  }
+  function setEntryState(entry, status) {
+    entry.status = status;
+    entry.chip.dataset.state = status;
+    entry.progress.hidden = status !== 'uploading';
+    entry.error.hidden = status !== 'error';
+  }
+  function attachmentChip(entry) {
+    const chip = node('div', 'agent-attachment');
+    chip.setAttribute('role', 'listitem');
+    if (PREVIEW_TYPES.test(entry.file.type || '')) {
+      entry.preview = URL.createObjectURL(entry.file);
+      const image = node('img', 'agent-attachment-preview');
+      image.alt = '';
+      image.src = entry.preview;
+      chip.append(image);
+    }
+    const name = node('span', 'agent-attachment-name', entry.file.name || 'file');
+    name.title = entry.file.name || '';
+    const size = node('span', 'agent-attachment-size', formatSize(entry.file.size));
+    entry.progress = node('progress', 'agent-attachment-progress');
+    entry.progress.max = 100;
+    label(entry.progress, t('ui.agent_attach_uploading', { p0: entry.file.name || '' }));
+    entry.error = node('span', 'agent-attachment-error');
+    const remove = button('✕', 'quiet agent-attachment-remove', () => removeAttachment(entry));
+    label(remove, t('ui.agent_attach_remove', { p0: entry.file.name || '' }));
+    chip.append(name, size, entry.progress, entry.error, remove);
+    entry.chip = chip;
+    entry.remove = remove;
+    return chip;
+  }
+  function uploadAttachment(entry) {
+    return new Promise((resolve) => {
+      const xhr = new XMLHttpRequest();
+      entry.xhr = xhr;
+      const failed = (reason) => {
+        if (entry.removed) { resolve(); return; }
+        entry.reason = i18n() ? i18n().system(reason) : String(reason?.detail || reason);
+        if (i18n()) i18n().setText(entry.error, entry.reason); else entry.error.textContent = entry.reason;
+        setEntryState(entry, 'error');
+        refreshAttachments();
+        resolve();
+      };
+      xhr.upload.addEventListener('progress', (event) => {
+        if (event.lengthComputable) entry.progress.value = Math.round((event.loaded / event.total) * 100);
+      });
+      xhr.addEventListener('load', () => {
+        entry.xhr = null;
+        let data = {};
+        try { data = JSON.parse(xhr.responseText || '{}'); } catch {}
+        if (xhr.status >= 200 && xhr.status < 300 && typeof data.id === 'string') {
+          if (entry.removed) { revokeRemote(data.id); resolve(); return; } // 移除与上传完成交错
+          entry.ref = data.id;
+          entry.meta = data;
+          entry.progress.value = 100;
+          setEntryState(entry, 'done');
+          refreshAttachments();
+          resolve();
+        } else failed(data && (data.detail || data.message) ? data : `HTTP ${xhr.status}`);
+      });
+      xhr.addEventListener('error', () => { entry.xhr = null; failed('Failed to fetch'); });
+      xhr.addEventListener('abort', () => { entry.xhr = null; resolve(); });
+      const body = new FormData();
+      body.append('session_id', entry.session);
+      body.append('file', entry.file, entry.file.name || 'file');
+      xhr.open('POST', '/api/agent/attachments');
+      xhr.send(body);
+    });
+  }
+  async function addFiles(list) {
+    const files = [...(list || [])].filter((file) => file instanceof Blob);
+    if (!files.length) return;
+    let sid;
+    try { sid = await ensureSession(); } catch (error) { fail(error); return; }
+    if (state.session !== sid) return;
+    const room = Math.max(0, MAX_ATTACHMENTS - state.attachments.length);
+    if (files.length > room) showAttachStatus(t('ui.agent_attach_limit', { p0: MAX_ATTACHMENTS }), 'error');
+    for (const file of files.slice(0, room)) {
+      const entry = { file, session: sid, status: 'uploading', ref: null, xhr: null, removed: false };
+      attachList.append(attachmentChip(entry));
+      setEntryState(entry, 'uploading');
+      state.attachments.push(entry);
+      entry.promise = uploadAttachment(entry);
+    }
+    refreshAttachments();
+  }
+  function discardAttachment(entry, revoke) {
+    entry.removed = true;
+    if (entry.xhr) entry.xhr.abort();
+    else if (revoke && entry.ref) revokeRemote(entry.ref);
+    if (entry.preview) URL.revokeObjectURL(entry.preview);
+    entry.chip.remove();
+  }
+  function removeAttachment(entry) {
+    const index = state.attachments.indexOf(entry);
+    if (index < 0) return;
+    // 键盘移除后把焦点交给相邻 chip 的移除按钮，没有则回到输入框。
+    const next = state.attachments[index + 1] || state.attachments[index - 1];
+    state.attachments.splice(index, 1);
+    discardAttachment(entry, true);
+    refreshAttachments();
+    (next ? next.remove : input).focus({ preventScroll: true });
+  }
+  function clearAttachments({ revoke }) {
+    for (const entry of state.attachments) discardAttachment(entry, revoke);
+    state.attachments = [];
+    hideAttachStatus();
+    refreshAttachments();
+  }
+  // 发送前等待：返回附件引用列表；有失败项或会话已切换时返回 null（阻止发送）。
+  async function settleAttachments(sid) {
+    if (state.attachments.some((entry) => entry.status === 'uploading')) showAttachStatus(t('ui.agent_attach_wait'), 'info');
+    while (state.attachments.some((entry) => entry.status === 'uploading')) {
+      await Promise.all(state.attachments.map((entry) => entry.promise));
+    }
+    if (state.session !== sid) return null;
+    const failed = state.attachments.filter((entry) => entry.status === 'error');
+    if (failed.length) {
+      const first = failed[0];
+      showAttachStatus(t('ui.agent_attach_failed', { p0: first.file.name || '', p1: first.reason || '' }), 'error');
+      return null;
+    }
+    hideAttachStatus();
+    return state.attachments.map((entry) => entry.ref);
+  }
+  // 消息中的附件：图片显示缩略图并可在大图浏览中打开；其他文件显示可打开/下载的 chip。
+  function messageAttachments(files) {
+    const block = node('div', 'agent-message-attachments');
+    label(block, t('ui.agent_attach_message'));
+    const images = files
+      .filter((file) => PREVIEW_TYPES.test(file.content_type || '') && attachmentUrl(file.ref))
+      .map((file) => ({ kind: 'image', url: attachmentUrl(file.ref), title: file.filename || '', file }));
+    images.forEach((entry, index) => {
+      const tile = button('', 'agent-attachment-thumb');
+      label(tile, t('ui.agent_media_open', { p0: entry.title }));
+      const image = node('img');
+      image.loading = 'lazy';
+      image.alt = '';
+      image.src = entry.url;
+      tile.append(image);
+      tile.addEventListener('click', () => openViewer(images, index));
+      block.append(tile);
+    });
+    for (const file of files) {
+      if (images.some((entry) => entry.file === file)) continue;
+      const url = attachmentUrl(file.ref);
+      const chip = node(url ? 'a' : 'span', 'agent-attachment-file');
+      chip.append(node('span', 'agent-attachment-name', file.filename || ''),
+        node('span', 'agent-attachment-size', formatSize(file.bytes)));
+      if (url) {
+        chip.href = url;
+        chip.target = '_blank';
+        chip.rel = 'noopener';
+        label(chip, t('ui.agent_attach_open', { p0: file.filename || '' }));
+      }
+      block.append(chip);
+    }
+    return block;
+  }
+  fileInput.addEventListener('change', () => {
+    const files = [...fileInput.files];
+    fileInput.value = ''; // 允许再次选择同一文件
+    addFiles(files);
+  });
+  const draggingFiles = (event) => [...(event.dataTransfer?.types || [])].includes('Files');
+  drawer.addEventListener('dragover', (event) => {
+    if (!draggingFiles(event)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+    drawer.classList.add('is-dragover');
+  });
+  drawer.addEventListener('dragleave', (event) => {
+    if (!drawer.contains(event.relatedTarget)) drawer.classList.remove('is-dragover');
+  });
+  drawer.addEventListener('drop', (event) => {
+    drawer.classList.remove('is-dragover');
+    if (!draggingFiles(event)) return;
+    event.preventDefault();
+    addFiles(event.dataTransfer.files);
+  });
+  // 粘贴文件（截图、复制的文件）作为附件；粘贴文本仍走输入框的疑似密钥检测。
+  drawer.addEventListener('paste', (event) => {
+    const files = event.clipboardData?.files;
+    if (!files?.length) return;
+    event.preventDefault();
+    addFiles(files);
+  });
+
   // ------------------------------------------------------------ 发送
   function looksLikeSecret(text) { return KEY_PATTERN.test(text); }
   function warn(show) {
@@ -818,6 +1111,7 @@
     if (show && i18n()) i18n().setText(warning, t('ui.agent_secret_paste'));
   }
   input.addEventListener('paste', (event) => {
+    if (event.clipboardData?.files?.length) return; // 文件由抽屉上的 paste 监听处理
     const text = event.clipboardData?.getData('text') || '';
     if (looksLikeSecret(text)) { event.preventDefault(); warn(true); }
   });
@@ -828,17 +1122,23 @@
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     const text = input.value.trim();
-    if (!text || state.status !== 'idle') return;
+    if (!text || state.status !== 'idle' || send.dataset.sending) return;
     if (looksLikeSecret(text)) { warn(true); return; }
     send.disabled = true;
+    send.dataset.sending = '1';
     try {
-      if (!state.session) await startSession();
-      await api(`/api/agent/sessions/${state.session}/messages`, 'POST', { content: text, context: pageContext() });
+      const sid = await ensureSession();
+      const refs = await settleAttachments(sid);
+      if (refs === null) { send.disabled = state.status !== 'idle'; return; }
+      await api(`/api/agent/sessions/${sid}/messages`, 'POST', { content: text, context: pageContext(), attachments: refs });
       input.value = '';
+      clearAttachments({ revoke: false });
       setStatus('running');
     } catch (error) {
       fail(error);
-      send.disabled = false;
+      send.disabled = state.status !== 'idle';
+    } finally {
+      delete send.dataset.sending;
     }
   });
   async function cancelTurn() {
@@ -846,6 +1146,6 @@
   }
 
   window.MindexAgent = { toggle, open: () => toggle(true), looksLikeSecret, state, highlight, clearHighlights,
-    tab: TAB, currentPage, setWidth, get width() { return width; }, openViewer };
+    tab: TAB, currentPage, setWidth, get width() { return width; }, openViewer, addFiles };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount); else mount();
 })();

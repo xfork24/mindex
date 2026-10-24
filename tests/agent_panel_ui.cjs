@@ -240,9 +240,13 @@ const focused = (page, selector) => page.locator(`${selector}[data-agent-focus]`
         return videos.length && videos.at(-1).readyState >= 1;
       }, null, {timeout: 15000});
 
-      // 检索结果：片段缩略图网格。
+      // 检索结果：片段缩略图网格；检索工具带检索页定位，面板（跟随助手）在本轮结束后跳到检索页。
       await say(page, '找绿色素材');
       await page.locator('.agent-media').last().locator('.agent-media-tile[data-kind="video"]').first().waitFor({timeout: 15000});
+      await page.waitForURL(`${base}/`, {timeout: 15000});
+      await page.goto(studioUrl);
+      await page.locator('#agent-drawer:not([hidden])').waitFor();
+      await page.locator('.agent-media-tile[data-kind="video"]').first().waitFor({timeout: 15000});  // 历史重放
 
       // Markdown 图片：本站图片显示并可点开，外链图片不加载。
       await say(page, '显示参考图');
@@ -253,12 +257,145 @@ const focused = (page, selector) => page.locator(`${selector}[data-agent-focus]`
       await page.locator('dialog.agent-viewer[open] img.agent-viewer-image').waitFor();
       await page.keyboard.press('Escape');
 
-      // 关闭面板时暂停播放。
+      // 关闭面板时暂停播放（历史重放后音频重新折叠，先展开再播放）。
+      const replayed = page.locator('details.agent-player-audio').first();
+      if (await replayed.getAttribute('open') === null) await replayed.locator('summary').click();
+      await page.waitForFunction(() => document.querySelector('details.agent-player-audio audio')?.readyState >= 1, null, {timeout: 15000});
       await page.evaluate(() => { const a = document.querySelector('details.agent-player-audio audio'); a.muted = true; return a.play(); });
       await page.waitForFunction(() => !document.querySelector('details.agent-player-audio audio').paused);
       await page.locator('.agent-close').click();
       assert.equal(await page.evaluate(() => document.querySelector('details.agent-player-audio audio').paused), true);
       assert.deepEqual(external.filter((u) => !u.startsWith('data:')), []);
+    }
+
+    if (scenario === 'attach') {
+      // 附件：选择文件、拖放、粘贴文件、移除、上传失败阻止发送、发送后在消息中显示。
+      const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+      const posted = [];
+      page.on('request', (r) => { if (r.method() === 'POST' && /\/api\/agent\/sessions\/[^/]+\/messages$/.test(r.url())) posted.push(r.postDataJSON()); });
+      const chips = page.locator('.agent-attachments .agent-attachment');
+      const chip = (name, state = '') => page.locator(`.agent-attachments .agent-attachment${state ? `[data-state="${state}"]` : ''}`)
+        .filter({has: page.locator('.agent-attachment-name', {hasText: name})});
+      const done = (name) => chip(name, 'done').waitFor({timeout: 15000});
+      const token = (ref) => ref.match(/^attachment:\/\/([0-9a-f]{32})$/)[1];
+      const gone = async (ref) => {
+        for (const until = Date.now() + 10000; Date.now() < until; await page.waitForTimeout(200)) {
+          if ((await page.request.get(`${base}/api/agent/attachments/${token(ref)}`)).status() === 404) return;
+        }
+        assert.fail(`附件未被撤销：${ref}`);
+      };
+      await page.goto(studioUrl);
+      await page.locator('#job-workspace:not([hidden])').waitFor();
+      await openPanel(page);
+      assert.equal(await page.locator('.agent-attachments').isHidden(), true);
+      assert.ok((await page.locator('.agent-attach').textContent()).trim());
+
+      // 1) 选择多个文件（没有会话时自动创建）。
+      await page.locator('.agent-attach-input').setInputFiles([
+        {name: 'frame.png', mimeType: 'image/png', buffer: PNG},
+        {name: 'notes.srt', mimeType: 'application/x-subrip', buffer: Buffer.from('1\n00:00:00,000 --> 00:00:01,000\n你好\n')},
+      ]);
+      await done('frame.png');
+      await done('notes.srt');
+      assert.equal(await page.locator('.agent-attachments').isVisible(), true);
+      assert.equal(await page.locator('.agent-attachments').getAttribute('role'), 'list');
+      assert.equal(await chip('frame.png').getAttribute('role'), 'listitem');
+      assert.match(await chip('frame.png').locator('.agent-attachment-size').textContent(), /\d+ B/);
+      assert.equal(await chip('frame.png').locator('img.agent-attachment-preview').count(), 1);
+      assert.equal(await chip('notes.srt').locator('img.agent-attachment-preview').count(), 0);
+      assert.equal(await chip('frame.png').locator('progress.agent-attachment-progress').isHidden(), true);
+      const sid = await page.evaluate(() => window.MindexAgent.state.session);
+      assert.ok(sid, '上传附件前应已创建会话');
+
+      // 2) 移除：按钮有无障碍标签，已上传的暂存被撤销。
+      const srtRef = await page.evaluate(() => window.MindexAgent.state.attachments.find((a) => a.file.name === 'notes.srt').ref);
+      const removeSrt = page.getByRole('button', {name: '移除附件 notes.srt'});
+      await removeSrt.click();
+      assert.equal(await chips.count(), 1);
+      await gone(srtRef);
+
+      // 3) 拖放：拖入时抽屉高亮并显示放置区，放下后开始上传。
+      await page.evaluate(() => {
+        const data = new DataTransfer();
+        data.items.add(new File(['dropped text'], 'dropped.txt', {type: 'text/plain'}));
+        document.querySelector('#agent-drawer').dispatchEvent(new DragEvent('dragover', {dataTransfer: data, bubbles: true, cancelable: true}));
+        window.__dropData = data;
+      });
+      assert.equal(await page.locator('#agent-drawer').evaluate((d) => d.classList.contains('is-dragover')), true);
+      assert.equal(await page.locator('.agent-dropzone').isVisible(), true);
+      await page.evaluate(() => document.querySelector('#agent-drawer').dispatchEvent(
+        new DragEvent('drop', {dataTransfer: window.__dropData, bubbles: true, cancelable: true})));
+      assert.equal(await page.locator('#agent-drawer').evaluate((d) => d.classList.contains('is-dragover')), false);
+      await done('dropped.txt');
+
+      // 4) 粘贴文件：进入附件列表，不触发疑似密钥提示，也不写入输入框。
+      await page.locator('.agent-input').focus();
+      await page.evaluate(() => {
+        const data = new DataTransfer();
+        data.items.add(new File(['pasted'], 'pasted.txt', {type: 'text/plain'}));
+        document.querySelector('.agent-input').dispatchEvent(new ClipboardEvent('paste', {clipboardData: data, bubbles: true, cancelable: true}));
+      });
+      await done('pasted.txt');
+      assert.equal(await page.locator('.agent-input').inputValue(), '');
+      assert.equal(await page.locator('.agent-warning').isHidden(), true);
+
+      // 5) 上传失败（空文件 422）：显示原因并阻止发送；移除失败项后提示消失。
+      await page.locator('.agent-attach-input').setInputFiles({name: 'empty.bin', mimeType: 'application/octet-stream', buffer: Buffer.alloc(0)});
+      const broken = chip('empty.bin', 'error');
+      await broken.waitFor({timeout: 15000});
+      assert.match(await broken.locator('.agent-attachment-error').textContent(), /上传文件为空/);
+      await page.locator('.agent-input').fill('带附件的消息');
+      await page.locator('.agent-send').click();
+      const status = page.locator('.agent-attach-status[data-kind="error"]');
+      await status.waitFor({timeout: 10000});
+      assert.equal(await status.getAttribute('role'), 'alert');
+      assert.match(await status.textContent(), /empty\.bin/);
+      await page.waitForTimeout(500);
+      assert.equal(posted.length, 0, '有失败附件时不应发送消息');
+      assert.equal(await page.locator('.agent-user').count(), 0);
+      assert.equal(await page.locator('.agent-input').inputValue(), '带附件的消息');
+      await page.getByRole('button', {name: '移除附件 empty.bin'}).click();
+      assert.equal(await page.locator('.agent-attach-status').isHidden(), true);
+
+      // 6) 发送：消息体携带引用列表，发送后列表清空，消息中显示附件。
+      const refs = await page.evaluate(() => window.MindexAgent.state.attachments.map((a) => a.ref));
+      assert.equal(refs.length, 3);
+      await page.locator('.agent-send:not([disabled])').click();
+      const user = page.locator('.agent-user', {hasText: '带附件的消息'});
+      await user.locator('.agent-message-attachments').waitFor({timeout: 15000});
+      assert.equal(posted.length, 1);
+      assert.deepEqual(posted[0].attachments, refs);
+      assert.equal(await page.locator('.agent-attachments').isHidden(), true);
+      assert.equal(await page.evaluate(() => window.MindexAgent.state.attachments.length), 0);
+      assert.ok(!(await user.locator('.agent-text').textContent()).includes('attachment://'), '正文不显示附件引用行');
+      await page.locator('.agent-assistant', {hasText: '收到：带附件的消息'}).waitFor({timeout: 15000});
+      const renderUser = async () => {
+        const block = page.locator('.agent-user', {hasText: '带附件的消息'}).locator('.agent-message-attachments');
+        await block.waitFor({timeout: 15000});
+        assert.equal(await block.locator('button.agent-attachment-thumb').count(), 1);
+        const files = await block.locator('a.agent-attachment-file .agent-attachment-name').allTextContents();
+        assert.deepEqual(files.sort(), ['dropped.txt', 'pasted.txt']);
+        return block;
+      };
+      let block = await renderUser();
+      const href = await block.locator('a.agent-attachment-file').first().getAttribute('href');
+      assert.match(href, /^\/api\/agent\/attachments\/[0-9a-f]{32}\/content$/);
+      // 图片附件在大图浏览中打开，地址指向附件内容端点。
+      await block.locator('button.agent-attachment-thumb').click();
+      const image = page.locator('.agent-viewer[open] .agent-viewer-image');
+      await image.waitFor();
+      assert.equal(await image.getAttribute('src'), `/api/agent/attachments/${token(refs[0])}/content`);
+      await page.waitForFunction(() => document.querySelector('.agent-viewer[open] .agent-viewer-image')?.naturalWidth > 0);
+      await page.keyboard.press('Escape');
+      // 事件日志只记录引用与元数据。
+      const logData = await (await page.request.get(`${base}/api/agent/sessions/${sid}/log`)).json();
+      const message = logData.items.find((e) => e.type === 'user/message' && e.data.source.kind === 'user');
+      assert.deepEqual(message.data.attachments.map((a) => a.ref), refs);
+      assert.deepEqual(message.data.attachments.map((a) => a.filename), ['frame.png', 'dropped.txt', 'pasted.txt']);
+      // 刷新后按历史重放仍显示附件。
+      await page.reload();
+      await page.locator('#agent-drawer:not([hidden])').waitFor();
+      block = await renderUser();
     }
 
     if (scenario === 'resize') {

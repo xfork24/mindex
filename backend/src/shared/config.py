@@ -7,7 +7,9 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from mindex.shared.agent_domains import LOADABLE_DOMAINS
 
 
 def fingerprint(value: object) -> str:
@@ -302,6 +304,8 @@ class AgentLlmConfig(Service):
     timeout: float = 120
     api_key_env: str = "MINDEX_AGENT_API_KEY"
     max_tokens: int = Field(default=4096, gt=0)
+    # 模型是否接受图片输入；开启后助手会把图片附件与工具抽取的画面一并发给模型（最多 agent.max_images 张）。
+    vision: bool = False
 
 
 class AgentMcpConfig(StrictModel):
@@ -312,6 +316,23 @@ class AgentMcpConfig(StrictModel):
     # read=只允许只读工具；write=再允许可逆写操作；all=再允许删除、改模型、构建等高风险操作。
     policy: Literal["read", "write", "all"] = "read"
     token_env: str = "MINDEX_MCP_TOKEN"
+    # 导出的工具领域；None=全部领域，列表=只导出这些领域（另外总会导出 report_capability_gap）。
+    domains: list[str] | None = None
+
+    @field_validator("domains")
+    @classmethod
+    def valid_domains(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        if not value:
+            raise ValueError("agent.mcp.domains 至少指定一个领域；导出全部领域请设为 null")
+        unknown = [item for item in value if item not in LOADABLE_DOMAINS]
+        if unknown:
+            raise ValueError(
+                f"agent.mcp.domains 包含未知领域：{'、'.join(unknown)}；"
+                f"可选：{'、'.join(LOADABLE_DOMAINS)}"
+            )
+        return list(dict.fromkeys(value))
 
 
 class AgentConfig(StrictModel):
@@ -320,6 +341,12 @@ class AgentConfig(StrictModel):
     max_context_tokens: int = Field(default=60000, ge=4000)
     # 表单收集的密钥只以 secret:// 引用出现在会话里，引用在此时长后失效。
     secret_ttl_seconds: int = Field(default=1800, ge=60)
+    # 助手附件（attachment://）有效期；过期后由 mindex clean 的「过期助手附件」规则回收。
+    attachment_ttl_hours: int = Field(default=168, ge=1)
+    # 单个附件上限（MiB）；超出时上传返回 413。
+    attachment_max_mb: int = Field(default=500, ge=1, le=20480)
+    # 单次模型请求最多携带的图片数（只保留最近的）。
+    max_images: int = Field(default=8, ge=0, le=32)
     llm: AgentLlmConfig = Field(default_factory=AgentLlmConfig)
     mcp: AgentMcpConfig = Field(default_factory=AgentMcpConfig)
 

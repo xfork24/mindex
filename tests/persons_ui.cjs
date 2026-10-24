@@ -54,7 +54,7 @@ const role = {id: 'role', kind: 'role', name: '角色', aliases: [], actor_ids: 
 const orphan = {...role, id: 'orphan', name: '未配对角色', actor_ids: []};
 const data = {
   entities: [actor, other, role, orphan, {id: 'work', kind: 'work', name: '作品', aliases: []}],
-  references: [], sources: [{id: 'source', name: '原片', work_id: 'work'}], coverage: [],
+  references: [], sources: [{id: 'source', name: '原片', work_id: 'work'}], coverage_counts: {},
   review_shots: {}, tasks: [{id: 'failed', source_id: 'source', status: 'failed', progress: {}}],
 };
 const requests = [];
@@ -142,6 +142,21 @@ function find(root, predicate) {
   const retry = find(get('tasks'), n => n.textContent === '重试');
   await retry.onclick();
   assert.ok(requests.some(r => r.url === '/api/persons/tasks/failed/retry' && r.method === 'POST'));
+  // 排队中/运行中的任务可取消；已取消的任务显示「已取消」并可重试或删除。
+  const savedTasks = data.tasks;
+  data.tasks = [{id: 'running', source_id: 'source', status: 'running', progress: {}},
+    {id: 'cancelled', source_id: 'source', status: 'cancelled', error: '已取消', progress: {}}];
+  await sandbox.refresh();
+  const [runningRow, cancelledRow] = get('tasks').children;
+  const labels = row => row.children.filter(n => n.tagName === 'button').map(n => n.textContent);
+  assert.deepEqual(labels(runningRow), ['取消']);
+  assert.deepEqual(labels(cancelledRow), ['重试', '删除任务记录']);
+  assert.ok(cancelledRow.children.some(n => n.textContent === '已取消'), 'cancelled reason is shown');
+  await find(runningRow, n => n.textContent === '取消').onclick();
+  await flush();
+  assert.ok(requests.some(r => r.url === '/api/persons/tasks/running/cancel' && r.method === 'POST'));
+  data.tasks = savedTasks;
+  await sandbox.refresh();
 
   const card = sandbox.roleCard(role);
   const form = find(card, n => n.tagName === 'form');

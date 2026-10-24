@@ -44,6 +44,7 @@ runs 行的 bytes 无法精确统计，诚实输出 0 并在 policy 说明。
 | `studio_exports` | `studio/<任务>/exports/*.zip` | mtime 超 `studio_export_max_age_days`；页面可重新打包 |
 | `reports_exports` | `reports/` | 树 mtime 超 `reports_max_age_days`；可重新导出 |
 | `subtitle_cache` | `subtitles/<源>/*.json(.lock/.partial)` | mtime 超期；**`uploads/` 用户原件永不触碰**；缓存键含原片字节与 mtime，按需重提取 |
+| `agent_attachments` | `agent-attachments/<token>/`、`agent-attachments/.uploads/` | 过期助手附件：记录超过 `agent.attachment_ttl_hours`（默认 168 小时）即删除记录与目录；`agent.sqlite3` 中无记录的 token 目录与 `.uploads/` 上传暂存残留超过 `temp_grace_hours` 才删；`agent.sqlite3` 不存在时不会创建，其余表不触碰 |
 | `runs_history` | runs 表 complete/failed 行 | `finished_at` 超 `runs_max_age_days` 且非 running；行删除不缩小库文件（见 VACUUM） |
 
 ## C 级：只报告不删（notes 字段）

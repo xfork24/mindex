@@ -193,6 +193,32 @@ def test_agent_role_profiles(config):
     assert bad.status_code == 422
 
 
+def test_agent_vision_profile_round_trip(config):
+    """vision 默认关闭；档案可保存、读回、激活后热生效，非布尔值被拒。"""
+    assert config.agent.llm.vision is False and "vision" in PROFILE_FIELDS["agent"]
+    client = TestClient(create_app(config))
+    effective = lambda: next(r for r in client.get("/api/settings?probe_embedding=false").json()["roles"]
+                             if r["role"] == "agent")
+    assert effective()["effective"]["vision"] is False
+    created = client.post("/api/settings/profiles", json={
+        "role": "agent", "name": "视觉助手", "provider": "custom",
+        "config": {"backend": "openai", "base_url": "https://llm.test/v1", "model": "vl", "vision": True}})
+    assert created.status_code == 201, created.text
+    pid = created.json()["id"]
+    assert next(p for p in effective()["profiles"] if p["id"] == pid)["config"]["vision"] is True
+    assert client.post(f"/api/settings/profiles/{pid}/activate").status_code == 200
+    assert effective()["effective"]["vision"] is True
+    assert client.app.state.runtime_config.current().agent.llm.vision is True
+    updated = client.put(f"/api/settings/profiles/{pid}", json={
+        "role": "agent", "name": "视觉助手", "provider": "custom",
+        "config": {"backend": "openai", "base_url": "https://llm.test/v1", "model": "vl", "vision": False}})
+    assert updated.status_code == 200, updated.text
+    assert client.app.state.runtime_config.current().agent.llm.vision is False
+    bad = client.post("/api/settings/profiles", json={
+        "role": "agent", "name": "坏视觉", "provider": "custom", "config": {"model": "x", "vision": "sometimes"}})
+    assert bad.status_code == 422
+
+
 @pytest.mark.parametrize("calls_tool", [True, False])
 def test_agent_probe_verifies_tool_calling(config, monkeypatch, calls_tool):
     def handler(request: httpx.Request):

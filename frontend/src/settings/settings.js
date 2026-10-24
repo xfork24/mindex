@@ -71,7 +71,9 @@ const ROLE_EXTRA = {
   { key: 'max_output_tokens', label: MindexI18n.msg("ui.ee7fe23f341f"), type: 'number', min: 64, max: 131072 }],
 
   asr: [],
-  agent: [{ key: 'max_tokens', label: 'max_tokens', type: 'number', min: 256 }]
+  agent: [
+  { key: 'max_tokens', label: 'max_tokens', type: 'number', min: 256 },
+  { key: 'vision', label: MindexI18n.msg("ui.agent_vision"), hint: MindexI18n.msg("ui.agent_vision_hint"), type: 'checkbox' }]
 };
 const WEIGHT_LABELS = {
   video: MindexI18n.msg("ui.1a6981c253a3"), description: MindexI18n.msg("ui.522d79717392"), style: MindexI18n.msg("ui.5e46e0ea4cd0"), dialogue: MindexI18n.msg("ui.56073ee07b2d"), lexical: MindexI18n.msg("ui.7fe742805071")
@@ -596,6 +598,18 @@ function fillExtraFields(role, values = {}) {
   wrap.replaceChildren();
   ROLE_EXTRA[role].forEach((field) => {
     const label = node('label');
+    if (field.type === 'checkbox') {
+      // 复选框沿用 label.check 样式：框在前、标题与说明在后。
+      label.className = 'check';
+      const input = node('input');
+      input.type = 'checkbox';
+      input.id = `pf-${field.key}`;
+      input.checked = Boolean(values[field.key]);
+      label.append(input, node('span', field.label));
+      if (field.hint) label.append(node('span', field.hint, 'muted'));
+      wrap.append(label);
+      return;
+    }
     label.append(node('span', field.label));
     let input;
     if (field.type === 'select') {
@@ -786,6 +800,10 @@ $('profile-form').onsubmit = async (event) => {
   ROLE_EXTRA[role].forEach((field) => {
     const input = $(`pf-${field.key}`);
     if (!input) return;
+    if (field.type === 'checkbox') {
+      config[field.key] = input.checked;
+      return;
+    }
     const value = input.value.trim();
     if (value !== '') config[field.key] = field.type === 'number' ? Number(value) : value;
     if (field.type === 'json') {

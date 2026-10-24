@@ -12,9 +12,11 @@ from __future__ import annotations
 
 import contextlib
 import hmac
+import inspect
 import json
 import logging
 import os
+from collections.abc import Iterable
 
 import mcp.types as types
 from mcp.server.lowlevel import Server
@@ -43,29 +45,45 @@ def annotations(spec) -> types.ToolAnnotations:
     )
 
 
-def exported(registry: ToolRegistry) -> list:
-    return [spec for spec in registry.all() if spec.mcp]
+ALWAYS_EXPORTED = "report_capability_gap"
+
+
+def exported(registry: ToolRegistry, domains: Iterable[str] | None = None) -> list:
+    """MCP 导出集合：``spec.mcp`` 为真，且 ``domains`` 为 None、属于 ``domains`` 或为能力缺口记录工具。"""
+    allowed = None if domains is None else set(domains)
+    return [spec for spec in registry.all()
+            if spec.mcp and (allowed is None or spec.domain in allowed or spec.name == ALWAYS_EXPORTED)]
+
+
+async def _resolve(value):
+    return await value if inspect.isawaitable(value) else value
 
 
 def build_server(registry: ToolRegistry, client_factory, *, policy, agent_profile=lambda: None,
-                 record_gap=None, publish=None) -> Server:
+                 record_gap=None, publish=None, domains=lambda: None) -> Server:
     """``policy`` 为字符串或返回字符串的函数（热生效）。
+
+    ``domains`` 为领域列表（None 表示全部导出）或返回它的函数；``list_tools``/``call_tool`` 每次重新计算导出集合，
+    配置变更无需重启即可生效。``agent_profile``、``record_gap`` 可以是同步或异步函数。
 
     ``publish(kind, data)`` 把成功调用的改动与定位写入全局通道，让打开的 Mindex 页面刷新并被动高亮；
     可以是同步或异步函数（远程模式经 HTTP 报告）。
     """
     server = Server(SERVER_NAME, instructions=INSTRUCTIONS)
-    specs = {spec.name: spec for spec in exported(registry)}
 
     def current_policy() -> str:
         return policy() if callable(policy) else policy
+
+    def current_specs() -> dict:
+        value = domains() if callable(domains) else domains
+        return {spec.name: spec for spec in exported(registry, value)}
 
     @server.list_tools()
     async def list_tools() -> list[types.Tool]:
         return [
             types.Tool(name=spec.name, description=f"[{spec.risk}] {spec.description}", inputSchema=spec.parameters(),
                        annotations=annotations(spec))
-            for spec in specs.values()
+            for spec in current_specs().values()
         ]
 
     @server.call_tool()
@@ -73,15 +91,18 @@ def build_server(registry: ToolRegistry, client_factory, *, policy, agent_profil
         def error(text: str) -> types.CallToolResult:
             return types.CallToolResult(content=[types.TextContent(type="text", text=text)], isError=True)
 
-        spec = specs.get(name)
+        spec = current_specs().get(name)
         if spec is None:
+            known = registry.get(name)
+            if known is not None and known.mcp:
+                return error(f"工具 {name} 未在当前 MCP 导出范围内（agent.mcp.domains）")
             return error(f"未知工具 {name}")
         decision = policies.mcp_decide(spec, current_policy())
         if decision.kind != "allow":
             return error(decision.reason)
         try:
             args = spec.parse(arguments)
-            ctx = ToolContext(client=client_factory(), agent_profile_id=agent_profile(),
+            ctx = ToolContext(client=client_factory(), agent_profile_id=await _resolve(agent_profile()),
                               extra={"record_gap": record_gap} if record_gap else {})
             output = await spec.execute(args, ctx)
         except ToolError as exc:
@@ -93,14 +114,18 @@ def build_server(registry: ToolRegistry, client_factory, *, policy, agent_profil
                 if not data:
                     continue
                 try:
-                    result = publish(kind, data)
-                    if hasattr(result, "__await__"):
-                        await result
+                    await _resolve(publish(kind, data))
                 except Exception:  # noqa: BLE001 — 通知失败不影响工具结果
                     logger.warning("发布页面改动通知失败", exc_info=True)
         text = output.render()
         if output.watch_build:
             text += f"\n（MCP 调用方不会自动收到构建结束通知：请用 get_build_status 查询构建 {output.watch_build['build_id']}）"
+        task = output.watch_task or {}
+        if task.get("kind") == "build" and task.get("build_id") and not output.watch_build:
+            text += f"\n（MCP 调用方不会自动收到构建结束通知：请用 get_build_status 查询构建 {task['build_id']}）"
+        elif task.get("task_id"):
+            text += (f"\n（MCP 调用方不会自动收到任务结束通知：请用 get_task_status(kind={task.get('kind')}) "
+                     f"查询任务 {task['task_id']}）")
         structured = output.value if isinstance(output.value, dict) else {"value": output.value}
         return types.CallToolResult(content=[types.TextContent(type="text", text=text)],
                                     structuredContent=json.loads(json.dumps(structured, default=str)), isError=False)
@@ -108,7 +133,9 @@ def build_server(registry: ToolRegistry, client_factory, *, policy, agent_profil
     return server
 
 
-def server_for_app(app, runtime_config, store, *, policy: str | None = None) -> Server:
+def server_for_app(app, runtime_config, store, *, policy: str | None = None,
+                   domains: list[str] | None = None) -> Server:
+    """进程内 MCP 服务；``domains`` 显式给出时覆盖 ``agent.mcp.domains``（否则每次调用读取最新配置）。"""
     from mindex.agent.session_store import SessionStore
     from mindex.agent.tools import build_registry
     from mindex.settings.runtime_settings import get_setting
@@ -117,7 +144,11 @@ def server_for_app(app, runtime_config, store, *, policy: str | None = None) -> 
 
     def client_factory():
         if "client" not in holder:
-            holder["client"] = MindexClient(app)
+            from mindex.agent.attachments import AttachmentStore
+
+            # MCP 工具调用只能使用 mcp 附件（持 MCP 令牌或本机默认上传、不绑定会话）。
+            resolver = AttachmentStore(store.root).resolver(session_id=None, owner="mcp")
+            holder["client"] = MindexClient(app, resolve_attachment=resolver)
         return holder["client"]
 
     def agent_profile():
@@ -131,7 +162,9 @@ def server_for_app(app, runtime_config, store, *, policy: str | None = None) -> 
     return build_server(build_registry(), client_factory,
                         policy=policy or (lambda: runtime_config.current().agent.mcp.policy),
                         agent_profile=agent_profile, record_gap=gaps.add_gap,
-                        publish=lambda kind, data: feed.publish(kind, data, source="mcp"))
+                        publish=lambda kind, data: feed.publish(kind, data, source="mcp"),
+                        domains=list(domains) if domains is not None
+                        else (lambda: runtime_config.current().agent.mcp.domains))
 
 
 def remote_publisher(client: MindexClient):
@@ -143,6 +176,46 @@ def remote_publisher(client: MindexClient):
             logger.warning("报告页面改动失败：%s", result.get("error"))
 
     return publish
+
+
+class RemoteAgentProfile:
+    """远程模式：从运行中的服务读取智能助手当前档案 ID（用于自身档案保护），结果缓存 ``ttl`` 秒。
+
+    读取失败时抛 ToolError，调用被拒绝而不是在缺少保护信息的情况下继续执行。
+    """
+
+    def __init__(self, client: MindexClient, ttl: float = 10.0, clock=None):
+        import time
+
+        self.client = client
+        self.ttl = ttl
+        self.clock = clock or time.monotonic
+        self._cached: tuple[float, int | None] | None = None
+
+    async def __call__(self) -> int | None:
+        now = self.clock()
+        if self._cached is not None and now - self._cached[0] < self.ttl:
+            return self._cached[1]
+        result = await self.client.get("/api/settings", probe_embedding="false")
+        if not result["ok"]:
+            raise ToolError(f"无法读取智能助手档案：{result.get('error')}", code="unavailable")
+        roles = (result["data"] or {}).get("roles") or []
+        value = next((role.get("active_profile_id") for role in roles if role.get("role") == "agent"), None)
+        self._cached = (now, value)
+        return value
+
+
+def remote_gap_recorder(client: MindexClient):
+    """远程模式：经 ``POST /api/agent/gaps`` 记录能力缺口（不关联会话），返回缺口记录。"""
+
+    async def record(_sid, request: str, reason: str, suggestion: str = "") -> dict:
+        result = await client.post("/api/agent/gaps",
+                                   {"request": request, "reason": reason, "suggestion": suggestion})
+        if not result["ok"]:
+            raise ToolError(f"记录能力缺口失败：{result.get('error')}", code="unavailable")
+        return result["data"]
+
+    return record
 
 
 class StreamableEndpoint:

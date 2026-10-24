@@ -15,6 +15,7 @@ from mindex.api import create_app
 from mindex.shared.storage import Store
 
 SECRET = "sk-live-PLAINTEXT-0123456789abcdef"
+SETTINGS_PAGE = {"page": "settings"}  # 自动加载 settings 领域
 
 
 def last_tool_json(request) -> dict:
@@ -53,7 +54,7 @@ def test_secret_form_never_leaks(agent):
     client, llm, config = agent
     llm.extend([ASK], create_from_answer, [say("档案已创建")])
     sid = new_session(client)
-    send(client, sid, "我要用自建的 Qwen 做拆分镜")
+    send(client, sid, "我要用自建的 Qwen 做拆分镜", context=SETTINGS_PAGE)
     pending = wait_pending(client, sid, "question")
     assert pending["questions"][0]["fields"][2]["type"] == "secret"
     assert answer(client, sid, pending, {"base_url": "http://gpu:4040/v1", "model": "qwen3",
@@ -84,7 +85,7 @@ def test_plaintext_and_expired_refs_rejected(agent):
     llm.extend([call("create_model_profile", role="generator", name="坏", config={"model": "x"}, api_key="sk-plain")],
                [ASK], create_from_answer, [say("引用过期")])
     sid = new_session(client)
-    send(client, sid, "试试")
+    send(client, sid, "试试", context=SETTINGS_PAGE)
     pending = wait_pending(client, sid, "question")
     answer(client, sid, pending, {"base_url": "http://gpu/v1", "model": "q", "api_key": SECRET})
     approval = wait_pending(client, sid, "approval")
@@ -124,7 +125,7 @@ def test_settings_tools_and_self_profile_guard(agent):
         [say("完成")],
     )
     sid = new_session(client)
-    send(client, sid, "看看设置")
+    send(client, sid, "看看设置", context=SETTINGS_PAGE)
     for _ in range(2):
         pending = wait_pending(client, sid, "approval")
         client.post(f"/api/agent/sessions/{sid}/approvals/{pending['requestId']}", json={"outcome": "allowed-once"})

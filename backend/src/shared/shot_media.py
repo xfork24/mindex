@@ -211,23 +211,34 @@ class ShotMedia:
                            (path, source_id, start, end, version, json.dumps([asdict(r) for r in refs])))
         return refs
 
-    def _frame_reference(self, source_id, timestamp):
-        from bisect import bisect_right
-
-        from mindex.shared.media import frame_timestamps
-
+    def _frame_shot(self, source_id, timestamp):
+        """Shot reference holding the frame shown at ``timestamp`` (no frame decoding)."""
         source = self.store.one('SELECT media FROM sources WHERE id=?', (source_id,))
         if source is None:
             raise MediaError('Unknown source')
         duration = json.loads(source['media'])['duration']
         if timestamp == duration:
-            ref = self.references(source_id)[-1]
-            local = frame_timestamps(self._path(ref.path))[-1]
+            return self.references(source_id)[-1], True
+        return self.references(source_id, timestamp, min(duration, timestamp + EPSILON))[0], False
+
+    def _frame_reference(self, source_id, timestamp):
+        from bisect import bisect_right
+
+        from mindex.shared.media import frame_timestamps
+
+        ref, last = self._frame_shot(source_id, timestamp)
+        timestamps = frame_timestamps(self._path(ref.path))
+        if last:
+            local = timestamps[-1]
         else:
-            ref = self.references(source_id, timestamp, min(duration, timestamp + EPSILON))[0]
-            timestamps = frame_timestamps(self._path(ref.path))
             local = timestamps[max(0, bisect_right(timestamps, ref.start + EPSILON) - 1)]
         return ref, local
+
+    def frame_revision(self, source_id: str, timestamp: float) -> str:
+        """Revision of the shot file a frame at ``timestamp`` is decoded from; cheap
+        enough to validate HTTP caches before any FFmpeg decode."""
+        ref, _ = self._frame_shot(source_id, timestamp)
+        return self.file_revision(ref.path)
 
     def frame_bytes(self, source_id, timestamp):
         from mindex.shared.media import command
@@ -239,6 +250,21 @@ class ShotMedia:
         if not raw:
             raise MediaError('Shot frame decode failed')
         return raw
+
+    def frame_jpeg(self, source_id: str, timestamp: float, width: int = 768) -> tuple[bytes, str]:
+        """Decode the nearest real frame at or before ``timestamp`` as a scaled JPEG.
+
+        Returns ``(jpeg_bytes, revision)``; ``revision`` identifies the shot file the
+        frame came from so callers can build stable cache validators."""
+        from mindex.shared.media import command
+
+        ref, local = self._frame_reference(source_id, timestamp)
+        raw = command(['ffmpeg', '-v', 'error', '-ss', str(local), '-i',
+                       str(self._path(ref.path)), '-frames:v', '1',
+                       '-vf', f'scale={int(width)}:-2', '-f', 'image2pipe', '-vcodec', 'mjpeg', 'pipe:1'])
+        if not raw:
+            raise MediaError('Shot frame decode failed')
+        return raw, self.file_revision(ref.path)
 
     def frame(self, source_id: str, timestamp: float, output: Path):
         ref, local = self._frame_reference(source_id, timestamp)

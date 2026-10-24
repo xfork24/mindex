@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from mindex.agent.llm.scripted import ScriptedLlm, call, say
 from mindex.agent.prompts import SYSTEM_PROMPT
+from mindex.agent.tools import build_registry
 from mindex.api import create_app
 from mindex.processing.indexing import IndexBuilder
 from mindex.processing.pipeline import Pipeline
@@ -24,13 +25,15 @@ def indexed(config, video_file):
 
 def test_library_and_search_tools(indexed):
     config, embedder = indexed
-    llm = ScriptedLlm([[call("search_media", text="绿色 草地", limit=3), call("list_sources"),
+    llm = ScriptedLlm([[call("search_media", text="绿色 草地", limit=3),
+                        call("load_tools", domains=["library", "persons"]), call("list_sources"),
                         call("list_persons")], [say("找到了")]])
     with TestClient(create_app(config, embedder, agent_llm=llm)) as client:
         sid = new_session(client)
         send(client, sid, "找一段绿色的素材", context={"page": "search"})
         events = wait_idle(client, sid)
-    search, sources, persons = results(events)
+    search, loaded, sources, persons = results(events)
+    assert not loaded["message"].get("isError"), result_text(loaded)
     assert not search["message"].get("isError"), result_text(search)
     assert {k: v for k, v in search["meta"].items() if k != "media"} == {"kind": "search", "count": 3}
     assert len(search["meta"]["media"]) == 3 and all(m["url"].startswith("/api/playlists/") for m in search["meta"]["media"])
@@ -39,9 +42,14 @@ def test_library_and_search_tools(indexed):
     assert "测试素材" in result_text(search) and "片段" in result_text(search)
     assert "共 1 个素材" in result_text(sources)
     assert "| 作品 | 测试素材.mp4" in result_text(persons)  # 每个素材自动对应一个作品
-    # 当前页面领域的工具排在前面（元工具之后）。
+    # 检索页首步只下发 search 领域与元工具，页面领域排在最前；load_tools 加载的领域从下一步起下发。
     names = [t["name"] for t in llm.requests[0].tools]
-    assert names.index("search_media") < names.index("list_jobs")
+    meta = set(build_registry().domain_tools()["meta"])
+    search_tools = set(build_registry().domain_tools()["search"])
+    assert names[0] == "search_media" and set(names) == {*search_tools, *meta}
+    assert "list_jobs" not in names
+    later = {t["name"] for t in llm.requests[1].tools}
+    assert {"search_media", "list_sources", "list_persons"} <= later and "list_jobs" not in later
     assert "视频检索" in llm.requests[0].system
 
 
@@ -75,7 +83,7 @@ def test_prompt_injection_cannot_bypass_approval(config):
     llm = ScriptedLlm([[call("get_workspace_summary", job_id=job)], tricked, [say("不会删除。")]])
     with TestClient(create_app(config, agent_llm=llm)) as client:
         sid = new_session(client)
-        send(client, sid, "总结这个任务")
+        send(client, sid, "总结这个任务", context={"page": "studio", "job_id": job})
         pending = wait_pending(client, sid, "approval")
         assert pending["name"] == "delete_job"
         assert client.get(f"/api/studio/jobs/{job}").status_code == 200  # 未确认前任务仍在

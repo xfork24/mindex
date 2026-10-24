@@ -50,7 +50,7 @@ PROFILE_FIELDS = {
     },
     "generator": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "llama_template", "max_tokens"},
     "writer": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "llama_template", "max_tokens"},
-    "agent": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "max_tokens"},
+    "agent": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "max_tokens", "vision"},
     "embedding": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "quantization", "dimensions"},
     "asr": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "enabled"},
     "tts": {

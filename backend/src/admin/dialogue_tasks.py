@@ -22,7 +22,16 @@ from mindex.settings.runtime_settings import RuntimeConfig
 from mindex.shared.config import Config, StrictModel, absolutize_config_paths, relativize_config_paths
 from mindex.shared.processing_lock import ProcessingLock, recover_tasks
 from mindex.shared.storage import Store, dumps
-from mindex.shared.task_progress import reset_task_attempt, save_task_progress, task_logs
+from mindex.shared.task_cancel import TaskCancelled, registry_for
+from mindex.shared.task_progress import (
+    RETRYABLE,
+    begin_task,
+    mark_cancelled,
+    request_task_cancel,
+    reset_task_attempt,
+    save_task_progress,
+    task_logs,
+)
 
 log = logging.getLogger(__name__)
 
@@ -171,7 +180,7 @@ class DialogueTasks:
             if row is None:
                 raise HTTPException(404, "找不到对白任务")
             publication = json.loads(row["publication"] or "{}")
-            if row["status"] not in {"failed", "interrupted"} and publication.get("status") != "failed":
+            if row["status"] not in RETRYABLE and publication.get("status") != "failed":
                 raise HTTPException(409, "只有失败或中断的任务可以重试")
             snapshot = json.loads(row["config"])
             profiles = snapshot.pop("_credential_profiles", {})
@@ -195,6 +204,14 @@ class DialogueTasks:
             lock.release()
             raise
 
+    def cancel(self, task_id):
+        status = request_task_cancel(self.store, "dialogue_tasks", task_id)
+        if status is None:
+            raise HTTPException(404, "找不到对白任务")
+        if status not in {"queued", "running"}:
+            raise HTTPException(409, "只有排队中或运行中的任务可以取消")
+        return self.get(task_id)
+
     def _launch(self, task_id, config, lock):
         thread = threading.Thread(
             target=self._run, args=(task_id, config, lock), daemon=True, name="dialogue-" + task_id[:8]
@@ -204,12 +221,10 @@ class DialogueTasks:
 
     @task_logs("dialogue_tasks")
     def _run(self, task_id, config, lock):
+        cancels = registry_for(self.store.root)
         try:
             row = self.store.one("SELECT * FROM dialogue_tasks WHERE id=?", (task_id,))
-            self.store.execute(
-                "UPDATE dialogue_tasks SET status='running',updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                (task_id,),
-            )
+            begin_task(self.store, "dialogue_tasks", task_id)
 
             def progress(value):
                 save_task_progress(self.store, "dialogue_tasks", task_id, value)
@@ -232,6 +247,8 @@ class DialogueTasks:
                 "UPDATE dialogue_tasks SET status='complete',result=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
                 (dumps(result), task_id),
             )
+        except TaskCancelled:
+            mark_cancelled(self.store, "dialogue_tasks", task_id)
         except BaseException as exc:
             log.exception("Dialogue task %s failed", task_id)
             self.store.execute(
@@ -239,6 +256,7 @@ class DialogueTasks:
                 (str(exc)[:2000], task_id),
             )
         finally:
+            cancels.clear(task_id)
             lock.release()
             self.threads.pop(task_id, None)
 
@@ -293,5 +311,9 @@ def dialogue_router(runtime, store, embedder=None):
     @router.post("/dialogue-tasks/{task_id}/retry", status_code=202)
     def retry(task_id: str):
         return manager.retry(task_id)
+
+    @router.post("/dialogue-tasks/{task_id}/cancel")
+    def cancel(task_id: str):
+        return manager.cancel(task_id)
 
     return router

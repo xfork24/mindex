@@ -44,6 +44,29 @@
 .agent-composer{border-top:1px solid var(--line);padding:10px 14px 14px;display:flex;flex-direction:column;gap:8px}
 .agent-input{min-height:64px;resize:vertical;font-size:13px}
 .agent-actions{display:flex;justify-content:flex-end;gap:8px}
+.agent-attach{margin-right:auto}
+/* 附件：待发送 chip（名称、大小、进度、错误、移除）、消息中的缩略图与文件 chip、拖放提示。 */
+.agent-attachments{display:flex;flex-wrap:wrap;gap:6px}
+.agent-attachments[hidden]{display:none}
+.agent-attachment{display:flex;align-items:center;gap:6px;max-width:100%;padding:3px 4px 3px 8px;border:1px solid var(--line);border-radius:8px;background:#fff;font-size:12px;flex-wrap:wrap}
+.agent-attachment[data-state="error"]{border-color:#e7b9a3;background:#fffaf6}
+.agent-attachment-preview{width:28px;height:28px;object-fit:cover;border-radius:4px}
+.agent-attachment-name{max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.agent-attachment-size{color:var(--muted);white-space:nowrap}
+.agent-attachment-progress{width:72px;height:6px}
+.agent-attachment-error{flex-basis:100%;color:#a83e2a;white-space:normal}
+.agent-attachment-progress[hidden],.agent-attachment-error[hidden]{display:none}
+.agent-attachment-remove{--control-size:24px;width:24px;min-width:0;padding:0;font-size:11px}
+.agent-attach-status{margin:0;font-size:12px;color:var(--muted)}
+.agent-attach-status[data-kind="error"]{color:#a83e2a}
+.agent-message-attachments{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;white-space:normal}
+.agent-attachment-thumb{display:block;width:96px;height:auto;min-height:0;padding:0;border-radius:6px;overflow:hidden;background:#e9ede6;aspect-ratio:4/3;cursor:zoom-in}
+.agent-attachment-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.agent-attachment-thumb:focus-visible,.agent-attachment-file:focus-visible{outline:3px solid #97b9a0;outline-offset:2px}
+.agent-attachment-file{display:inline-flex;align-items:center;gap:6px;max-width:100%;padding:3px 8px;border:1px solid #c9dcc8;border-radius:8px;background:#f4f8f2;color:inherit;font-size:12px;text-decoration:none}
+.agent-attachment-file::before{content:"📎"}
+.agent-dropzone{display:none;position:absolute;inset:8px;z-index:2;align-items:center;justify-content:center;border:2px dashed #97b9a0;border-radius:12px;background:#f4f8f2e6;color:#2f6b45;font-size:14px;font-weight:600;pointer-events:none}
+.agent-drawer.is-dragover .agent-dropzone{display:flex}
 .agent-send{--control-size:34px;min-width:84px;margin-left:0}
 .agent-warning{margin:0;font-size:12px;color:#a83e2a}
 .agent-error{margin:0;font-size:12px;color:#a83e2a;background:#fcf1e9;border-radius:8px;padding:8px 10px}
@@ -54,8 +77,9 @@
 .agent-focus{animation:agent-focus-pulse 2.4s ease-out 1;border-radius:6px}
 tr.agent-focus{animation:none}
 tr.agent-focus>*{animation:agent-focus-pulse 2.4s ease-out 1}
-.agent-follow{display:flex;align-items:center;gap:6px;width:100%;font-size:12px;color:var(--muted)}
-.agent-follow input{height:auto}
+.agent-toggles{display:flex;align-items:center;gap:6px 16px;width:100%;flex-wrap:wrap}
+.agent-follow,.agent-always-allow{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
+.agent-follow input,.agent-always-allow input{height:auto}
 
 /* 助手回复的 Markdown（经 DOMPurify 净化）；用户消息仍是保留换行的纯文本。 */
 .agent-assistant{white-space:normal}

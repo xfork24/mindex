@@ -1,7 +1,9 @@
-"""Studio 高风险工具（danger）：整体构建、单节点执行、删除任务。每次都需要用户显式确认。
+"""Studio 构建与删除工具：整体构建、单节点执行、删除任务、删除方案（danger，每次显式确认）；
+取消构建（write，可按会话授权）。
 
 构建提交后立即返回；运行时登记 ``plugin:mindex/build-watch``，构建结束时写入结果并自动触发一轮总结。
 同一时间全局只能有一个构建（studio.lock），冲突返回 409，作为可恢复结果交给模型。
+取消只是请求：执行器在下一个节点开始前停止，结束（cancelled）时同样经跟踪触发总结。
 """
 
 from __future__ import annotations
@@ -161,6 +163,152 @@ async def delete_job(args: DeleteJob, ctx: ToolContext) -> ToolOutput:
                       mutation=mutation(args.job_id, deleted=True), focus={"page": "studio", "section": "jobs"})
 
 
+# ------------------------------------------------------------ 取消构建 / 旧任务步骤执行
+class CancelBuild(StrictModel):
+    job_id: str | None = JobId
+    build_id: str | None = Field(
+        default=None,
+        description="要取消的构建 ID；省略时取该任务正在执行的构建，旧任务则取消正在执行的步骤")
+
+
+def node_label(node: dict) -> str:
+    stage = STAGE_LABELS.get(node.get("stage"), node.get("stage") or "")
+    return stage + (f"（分镜 {short(node['shot_id'])}）" if node.get("shot_id") else "")
+
+
+async def cancel_target(args: CancelBuild, ctx: ToolContext) -> dict:
+    """确定取消目标：``{"kind": "build", ...}`` 运行中的构建，或 ``{"kind": "steps", ...}`` 旧任务步骤执行。
+
+    先读任务本身（不加锁、不迁移）判断旧任务是否在执行步骤；执行期间旧任务的工作台迁移会被锁拒绝。
+    """
+    job = ctx.job_id(args.job_id)
+    if args.build_id is None:
+        detail = check(await ctx.client.get(f"/api/studio/jobs/{job}"), "读取创作任务")
+        execution = detail["job"].get("execution") or {}
+        if execution.get("status") == "running":
+            return {"kind": "steps", "job_id": job, "title": detail["job"].get("title"),
+                    "current": execution.get("current_step"), "remaining": list(execution.get("remaining_steps") or [])}
+    data = check(await ctx.client.get(f"/api/studio/jobs/{job}/workspace", compact="true"), "读取工作台")
+    builds = data["builds"]
+    if args.build_id:
+        build = next((b for b in builds if b["id"] == args.build_id), None)
+        if build is None:
+            raise ToolError(f"找不到构建执行 {args.build_id}", code="missing_build")
+        if build["status"] != "running":
+            raise ToolError(f"构建 {build['id']} 不在执行中（状态：{build['status']}），无法取消",
+                            code="not_running", value={"build_id": build["id"], "status": build["status"]})
+    else:
+        build = next((b for b in reversed(builds) if b["status"] == "running"), None)
+        if build is None:
+            raise ToolError(f"任务 {job} 没有正在执行的构建或步骤，无需取消", code="not_running")
+    plan = data["plans"].get(build["plan_id"]) or {}
+    return {"kind": "build", "job_id": job, "build_id": build["id"], "plan_id": build["plan_id"],
+            "plan_name": plan.get("name"), "nodes": build["nodes"]}
+
+
+async def preview_cancel_build(args: CancelBuild, ctx: ToolContext) -> Preview:
+    target = await cancel_target(args, ctx)
+    planned(ctx, "cancel", target)
+    if target["kind"] == "steps":
+        current = STAGE_LABELS.get(target["current"], target["current"]) if target["current"] else "—"
+        remaining = "、".join(STAGE_LABELS.get(s, s) for s in target["remaining"]) or "无"
+        return Preview(f"取消旧任务「{target['title'] or target['job_id']}」的步骤执行",
+                       [{"label": "当前步骤（照常完成）", "after": current}, {"label": "不再执行的步骤", "after": remaining}],
+                       warnings=["当前步骤会照常完成，之后停止；未开始的步骤保持原状态，之后可以继续执行"],
+                       focus=studio_focus(target["job_id"]))
+    nodes = target["nodes"]
+    running = [node_label(n) for n in nodes if n.get("status") == "running"]
+    pending = [n for n in nodes if n.get("status", "pending") == "pending"]
+    done = len(nodes) - len(running) - len(pending)
+    changes = [{"label": "已结束节点（保留结果）", "after": done},
+               {"label": "执行中节点（照常完成）", "after": "、".join(running) or "无"},
+               {"label": "将标为已取消的节点", "after": len(pending)}]
+    changes += [{"label": f"- {node_label(n)}"} for n in pending[:20]]
+    plan = f"（方案「{target['plan_name']}」）" if target.get("plan_name") else ""
+    return Preview(f"取消构建 {target['build_id']}{plan}",
+                   changes,
+                   warnings=["正在执行的节点会照常完成，其余未开始的节点标为“已取消”；已生成的版本保留，之后重新构建可复用"],
+                   value={"build_id": target["build_id"], "pending": len(pending)},
+                   focus=studio_focus(target["job_id"], target["plan_id"], section="log", build_id=target["build_id"]))
+
+
+def watched(ctx: ToolContext, build_id: str) -> bool:
+    """本会话是否已在跟踪该构建：已跟踪时不重复登记（面板按 build-watch 事件渲染构建卡片）。"""
+    runtime = ctx.extra.get("runtime")
+    if runtime is None or ctx.session_id is None:
+        return False
+    events = runtime.store.events(ctx.session_id, types=("plugin:mindex/build-watch",))
+    return any(e["data"].get("build_id") == build_id for e in events)
+
+
+async def cancel_build(args: CancelBuild, ctx: ToolContext) -> ToolOutput:
+    target = planned(ctx, "cancel") or await cancel_target(args, ctx)
+    job = target["job_id"]
+    if target["kind"] == "steps":
+        check(await ctx.client.post(f"/api/studio/jobs/{job}/cancel"), "取消步骤执行")
+        return ToolOutput({"job_id": job, "status": "cancelling"},
+                          text=f"已请求取消任务 {job} 的步骤执行：当前步骤完成后停止，未开始的步骤保持原状态。"
+                               "可在创作页查看执行状态。",
+                          mutation=mutation(job), focus=studio_focus(job))
+    bid, pid = target["build_id"], target["plan_id"]
+    check(await ctx.client.post(f"/api/studio/jobs/{job}/builds/{bid}/cancel"), "取消构建")
+    watch = {"job_id": job, "build_id": bid, "plan_id": pid}
+    return ToolOutput({"build_id": bid, "status": "cancelling"},
+                      text=f"已请求取消构建 {bid}：正在执行的节点完成后停止，其余节点标为“已取消”。构建结束后系统会通知你。",
+                      meta={"kind": "build", **watch, "status": "cancelling"}, mutation=mutation(job, pid),
+                      watch_build=None if watched(ctx, bid) else watch,
+                      focus=studio_focus(job, pid, section="log", build_id=bid))
+
+
+# ------------------------------------------------------------ 删除方案
+class DeletePlan(StrictModel):
+    job_id: str | None = JobId
+    plan_id: str = Field(description="要删除的方案 ID（必须明确给出，不使用页面默认值）")
+
+
+def plan_label(plan: dict) -> str:
+    return f"「{plan.get('name')}」({plan['id']})"
+
+
+async def preview_delete_plan(args: DeletePlan, ctx: ToolContext) -> Preview:
+    job = ctx.job_id(args.job_id)
+    data = check(await ctx.client.get(f"/api/studio/jobs/{job}/workspace", compact="true"), "读取工作台")
+    plans = data["plans"]
+    if args.plan_id not in plans:
+        names = ", ".join(plan_label(p) for p in plans.values())
+        raise ToolError(f"方案不存在：{args.plan_id}；可用方案：{names}", code="missing_plan")
+    if len(plans) == 1:
+        raise ToolError("至少保留一个方案：这是任务中唯一的方案，不能删除", code="last_plan")
+    if any(b["status"] == "running" for b in data["builds"]):
+        raise ToolError("有构建正在执行，请等待完成或取消后再删除方案", code="build_running")
+    target = plans[args.plan_id]
+    active = data["active_plan"] == args.plan_id
+    rest = [p for p in plans.values() if p["id"] != args.plan_id]
+    after = max(rest, key=lambda p: p.get("created_at") or "") if active else plans[data["active_plan"]]
+    builds = sum(1 for b in data["builds"] if b["plan_id"] == args.plan_id)
+    return Preview(
+        f"删除方案{plan_label(target)}",
+        [{"label": "方案", "before": plan_label(target)},
+         {"label": "是否当前方案", "after": "是" if active else "否"},
+         {"label": "删除后的当前方案", "before": plan_label(plans[data["active_plan"]]), "after": plan_label(after)},
+         {"label": "该方案的构建记录（保留）", "after": builds}],
+        warnings=["只删方案记录，版本与文件保留，未引用产物由 mindex clean 回收"],
+        value={"active": active, "next_active_plan": after["id"]},
+        focus=studio_focus(job, args.plan_id, section="plan"),
+    )
+
+
+async def delete_plan(args: DeletePlan, ctx: ToolContext) -> ToolOutput:
+    job = ctx.job_id(args.job_id)
+    data = check(await ctx.client.delete(f"/api/studio/jobs/{job}/plans/{args.plan_id}"), "删除方案")
+    active = data["active_plan"]
+    name = (data["plans"].get(active) or {}).get("name")
+    return ToolOutput({"deleted_plan": args.plan_id, "active_plan": active, "plans": list(data["plans"])},
+                      text=f"已删除方案 {args.plan_id}；当前方案为「{name}」({active})。版本与文件均已保留。",
+                      mutation=mutation(job, active, deleted_plan=args.plan_id),
+                      focus=studio_focus(job, active, section="plan"))
+
+
 def specs() -> list[ToolSpec]:
     return [
         ToolSpec("run_build", "studio",
@@ -171,4 +319,10 @@ def specs() -> list[ToolSpec]:
                  RunNode, "danger", run_node, preview_run_node),
         ToolSpec("delete_job", "studio", "永久删除一个创作任务及其全部方案与产物。", DeleteJob, "danger", delete_job,
                  preview_delete_job),
+        ToolSpec("cancel_build", "studio",
+                 "取消正在执行的构建（或旧任务的步骤执行）：正在执行的节点照常完成，其余节点标为已取消，已生成版本保留。",
+                 CancelBuild, "write", cancel_build, preview_cancel_build),
+        ToolSpec("delete_plan", "studio",
+                 "删除一个方案记录（不能删除唯一的方案；有构建执行时不可删）。版本与文件保留，删的是当前方案时切到最新创建的其余方案。",
+                 DeletePlan, "danger", delete_plan, preview_delete_plan),
     ]

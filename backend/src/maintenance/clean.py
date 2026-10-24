@@ -752,6 +752,95 @@ def subtitle_cache(scan: Scan) -> CleanAction | None:
     )
 
 
+def agent_attachments(scan: Scan) -> CleanAction | None:
+    """助手附件：过期记录（连同目录）、无记录的孤儿 token 目录、.uploads/ 上传暂存残留。
+
+    agent.sqlite3 不存在时不创建它：此时没有任何登记记录，只按宽限期回收孤儿与暂存残留。
+    """
+    from mindex.agent.attachments import DIRNAME, TOKEN_RE, AttachmentStore, token
+
+    root = scan.store.root / DIRNAME
+    database = scan.store.root / "agent.sqlite3"
+    has_db = database.is_file()
+    if not root.is_dir() and not has_db:
+        return None
+    attachments = AttachmentStore(scan.store.root) if has_db else None
+    grace_hours = scan.config.clean.temp_grace_hours
+    cutoff = scan.now - timedelta(hours=grace_hours)
+    stamp = int(scan.now.timestamp() * 1000)
+
+    def stale(path: Path) -> bool:
+        _, newest = _tree_stats(path)
+        return newest == 0.0 or datetime.fromtimestamp(newest, UTC) < cutoff
+
+    items: list[CleanItem] = []
+    expired: list[str] = []
+    orphans: list[Path] = []
+    staging: list[Path] = []
+    kept = {"within_grace": 0}
+
+    for meta in attachments.expired(stamp) if attachments else []:
+        folder = root / token(meta["id"])
+        size, _ = _tree_stats(folder)
+        expired.append(meta["id"])
+        items.append(CleanItem(f"{DIRNAME}/{folder.name}", size,
+                               {"reason": "expired", "filename": meta["filename"]}))
+    registered = attachments.tokens() if attachments else set()
+    if root.is_dir():
+        for entry in sorted(os.scandir(root), key=lambda item: item.name):
+            path = Path(entry.path)
+            if entry.is_dir(follow_symlinks=False) and TOKEN_RE.fullmatch(entry.name):
+                if entry.name in registered:
+                    continue  # 有记录：未过期保留，过期的已在上面列出
+                if not stale(path):
+                    kept["within_grace"] += 1  # 可能正在登记（目录先建、记录后写）
+                    continue
+                size, _ = _tree_stats(path)
+                orphans.append(path)
+                items.append(CleanItem(f"{DIRNAME}/{entry.name}", size, {"reason": "orphan"}))
+            elif entry.name == ".uploads" and entry.is_dir(follow_symlinks=False):
+                for child in sorted(path.iterdir()):
+                    if not child.is_file():
+                        continue
+                    if not stale(child):
+                        kept["within_grace"] += 1  # 进行中的上传
+                        continue
+                    staging.append(child)
+                    items.append(CleanItem(f"{DIRNAME}/.uploads/{child.name}", child.stat().st_size,
+                                           {"reason": "staging"}))
+
+    def execute() -> dict:
+        deleted = 0
+        for ref in expired:
+            try:
+                attachments.delete(ref)  # 记录与目录一起删除
+            except Exception:  # noqa: BLE001 — 扫描后已被会话删除级联清掉
+                continue
+            deleted += 1
+        # 扫描在持锁前完成：执行时重新读取登记集，期间刚登记的目录不删。
+        current = attachments.tokens() if attachments else set()
+        for path in orphans:
+            if path.name in current:
+                continue
+            shutil.rmtree(path, ignore_errors=True)
+            deleted += 1
+        for path in staging:
+            path.unlink(missing_ok=True)
+            deleted += 1
+        return {"deleted": deleted}
+
+    if not items:
+        return None
+    return CleanAction(
+        category="agent_attachments", level="B", stage="pipeline",
+        description="过期助手附件",
+        policy=f"记录超过 agent.attachment_ttl_hours（{scan.config.agent.attachment_ttl_hours} 小时）"
+               f"有效期即删除记录与文件；无记录的附件目录与 .uploads/ 暂存残留超过 "
+               f"{grace_hours} 小时宽限期才删除；agent.sqlite3 其余内容不触碰",
+        items=items, kept=kept, execute=execute,
+    )
+
+
 def runs_history(scan: Scan) -> CleanAction | None:
     days = scan.config.clean.runs_max_age_days
     cutoff = (scan.now - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
@@ -797,6 +886,7 @@ RULES: list[Callable[[Scan], CleanAction | None]] = [
     shot_media_cache,
     reports_exports,
     subtitle_cache,
+    agent_attachments,
     runs_history,
 ]
 

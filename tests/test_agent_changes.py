@@ -160,10 +160,12 @@ def test_tool_focus_catalogue(agent):
         "role": "writer", "name": "文案", "provider": "custom",
         "config": {"backend": "openai", "base_url": "http://x/v1", "model": "w"}}).json()
     llm.extend(
+        # 创作页只自动加载 studio；跨领域先 load_tools（同时最多保持 3 个领域，最久未用的被卸载）。
         [call("list_jobs"), call("get_workspace_summary", job_id=job), call("get_preflight", job_id=job),
-         call("list_versions", job_id=job, stage="script"), call("get_settings", role="tts"),
+         call("list_versions", job_id=job, stage="script"),
+         call("load_tools", domains=["settings", "search", "library"]), call("get_settings", role="tts"),
          call("get_settings"), call("list_voices"), call("search_media", text="夜景"),
-         call("list_sources"), call("list_persons"),
+         call("list_sources"), call("load_tools", domains=["persons"]), call("list_persons"),
          call("navigate", page="settings", role="agent"),
          call("navigate", page="studio", job_id=job, shots=["a1daad59", "#3"], stage="tts"),
          call("navigate", page="studio", job_id=job, shots=["925281d"]),
@@ -198,11 +200,15 @@ def test_tool_focus_catalogue(agent):
     assert codes[-2:] == ["ambiguous_shot", "invalid_arguments"] and len(codes) == 3
     navigated = [r for r in results(events) if "已在用户页面上打开：创作" in result_text(r)]
     assert "#1 shot-a1daad59" in result_text(navigated[0])
+    loaded = [e["data"]["loaded"] for e in events if e["type"] == "plugin:mindex/tools-loaded"]
+    assert loaded == [["settings", "search", "library"], ["settings", "library", "persons"]]
 
 
 def test_navigate_not_exported():
+    from test_agent_tools import module_spec_count
+
     from mindex.agent.tools import build_registry
 
     registry = build_registry()
-    assert len(registry) == 31
+    assert len(registry) == len(registry.all()) == module_spec_count()
     assert not registry.get("navigate").mcp and registry.get("navigate").risk == "read"

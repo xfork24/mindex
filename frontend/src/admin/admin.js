@@ -146,7 +146,10 @@ async function loadSegments() {
     const links = node('div', undefined, 'relationship');
     if (item.kind === 'shot') links.append(action(MindexI18n.msg("ui.8427ef7b1fc2", { p0: item.child_count }), async () => {state.kind = 'moment';state.parent = item;state.segmentPage = 1;await loadSegments();}));else
     if (item.parent_id) links.append(action(MindexI18n.msg("ui.f982f961d8a1"), async () => {const parent = await api(`/api/admin/segments/${item.parent_id}`);state.kind = 'shot';state.parent = null;state.focus = parent.id;state.segmentPage = Math.floor((parent.position - 1) / 48) + 1;$('segment-visibility').value = 'all';$('segment-favorite').checked = false;await loadSegments();$('segment-list').querySelector('.is-focused')?.scrollIntoView({ block: 'center', behavior: 'smooth' });}));
-    const download = node('a', MindexI18n.msg("ui.f68895f93388"));download.href = `${item.media_url}?download=true&v=${item.media_revision}`;links.append(download);body.append(links);card.append(poster, body);$('segment-list').append(card);
+    // 出镜审核：在人物库打开该分镜的出镜人物审核；精细片段审核其所属分镜。
+    const shotId = item.kind === 'shot' ? item.id : item.parent_id;
+    if (shotId) {const review = node('a', MindexI18n.msg("ui.review_appearance_link"));review.href = `/persons?${params({ source: state.source.id, shot: shotId })}`;review.target = '_blank';review.rel = 'noopener';links.append(review);}
+    body.append(links);card.append(poster, body);$('segment-list').append(card);
   });
   if (!data.items.length) {const empty = node('div', undefined, 'empty');empty.append(node('h3', MindexI18n.msg("ui.dd8121f6916e")), node('p', MindexI18n.msg("ui.c6c1305ed0ef")));$('segment-list').append(empty);}
   pager('segment', state.segmentPage, data.total);
@@ -220,7 +223,7 @@ let workPoll = null;
 const workPreferences = new Map();
 const workNames = { shots: MindexI18n.msg("ui.6a4811595787"), dialogue: MindexI18n.msg("ui.d2126f3ca6e8"), analysis: MindexI18n.msg("ui.5484a583c2c9"), persons: MindexI18n.msg("ui.0c0ae35b2935") };
 const workStatus = { complete: MindexI18n.msg("ui.9e593295eddf"), partial: MindexI18n.msg("ui.53951802211e"), empty: MindexI18n.msg("ui.b5a5666d7068"), no_audio: MindexI18n.msg("ui.dde19df44760"), disabled: MindexI18n.msg("ui.8bb38ef00ccc"), not_processed: MindexI18n.msg("ui.59a9eb4e6574"), failed: MindexI18n.msg("ui.3e3c8068bb0e"), processing: MindexI18n.msg("ui.fcb979ef0b91"), pending_alignment: MindexI18n.msg("ui.db56f1b7b2c7") };
-const taskStatus = { queued: MindexI18n.msg("ui.4dcbbcfa6154"), running: MindexI18n.msg("ui.594249700590"), complete: MindexI18n.msg("ui.33246f6a5e5b"), failed: MindexI18n.msg("ui.3e3c8068bb0e"), interrupted: MindexI18n.msg("ui.8dd5ad764e4b") };
+const taskStatus = { queued: MindexI18n.msg("ui.4dcbbcfa6154"), running: MindexI18n.msg("ui.594249700590"), complete: MindexI18n.msg("ui.33246f6a5e5b"), failed: MindexI18n.msg("ui.3e3c8068bb0e"), interrupted: MindexI18n.msg("ui.8dd5ad764e4b"), cancelled: MindexI18n.msg("ui.a5ffdc95eeb0") };
 const stages = { detect: MindexI18n.msg("ui.91642f5bbeab"), split: MindexI18n.msg("ui.717b1c7595ac"), repair: MindexI18n.msg("ui.58723ed9df0b"), subtitle: MindexI18n.msg("ui.1721b0103d0d"), asr: MindexI18n.msg("ui.65aa0b969118"), analyze: MindexI18n.msg("ui.b6582c9a3f55"), scene_grouping: MindexI18n.msg("ui.cd2b1a5f7983"), scenes: MindexI18n.msg("ui.008acfbd3a5f"), matching: MindexI18n.msg("ui.525d34888b72"), extracting: MindexI18n.msg("ui.7d76ffac1b58"), publish: MindexI18n.msg("ui.77e695de5cac"), embedding: MindexI18n.msg("ui.c56c156ecf6c"), index_check: MindexI18n.msg("ui.7e5154331f03"), published: MindexI18n.msg("ui.fb01358330b1"), indexed: MindexI18n.msg("ui.efc142bf91f3") };
 function preferences(id) {if (!workPreferences.has(id)) workPreferences.set(id, { publish: { shots: true, dialogue: true, analysis: true, persons: true }, errors: {}, method: 'auto', track: '', subtitleInitialized: false, uploadingSubtitle: false });return workPreferences.get(id);}
 function post(url, value) {return api(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) });}
@@ -232,7 +235,7 @@ function analysisCoverageText(result = {}, task) {
   const unclassified = Math.max(0, (result.skipped || 0) - reasons.reduce((sum, item) => sum + item.count, 0));
   if (unclassified) text += '，' + MindexI18n.msg('ui.analysis_skipped_reason', {count: unclassified, reason: MindexI18n.msg('ui.analysis_reason_unknown')});
   const pending = result.pending ?? Math.max(0, (result.total || 0) - (result.analyzed || 0) - (result.skipped || 0));
-  if (pending) text += '，' + (['failed', 'interrupted'].includes(task?.status) && MindexI18n.system(task.error)
+  if (pending) text += '，' + (['failed', 'interrupted', 'cancelled'].includes(task?.status) && MindexI18n.system(task.error)
     ? MindexI18n.msg('ui.analysis_unfinished_reason', {count: pending, reason: MindexI18n.system(task.error)})
     : MindexI18n.msg('ui.analysis_pending_count', {count: pending}));
   return text;
@@ -355,6 +358,9 @@ function renderWork(source, target) {
     return;
   }
   const prefs = preferences(source.id),busy = Object.values(source.work || {}).some((w) => [w.task, w.publish_task, w.extra_publish_task].some((t) => t && ['queued', 'running'].includes(t.status)));
+  // 已请求取消、仍在运行的任务保持「正在取消…」；任务离开排队/运行后丢弃该记录。
+  const activeIds = new Set(Object.values(source.work || {}).flatMap((w) => [w.task, w.publish_task, w.extra_publish_task]).filter((t) => t && ['queued', 'running'].includes(t.status)).map((t) => t.id));
+  prefs.cancelling = new Set([...(prefs.cancelling || [])].filter((id) => activeIds.has(id)));
   if (!prefs.subtitleInitialized && source.subtitle_files?.length) {
     const selected = source.dialogue_task?.options.subtitle_file || source.channels?.dialogue?.subtitle_file?.id || source.subtitle_files.at(-1).id;
     prefs.track = `file:${selected}`;prefs.method = 'subtitle';prefs.subtitleInitialized = true;
@@ -434,10 +440,29 @@ function renderWork(source, target) {
     if (name === 'persons') {const link = node('a', MindexI18n.msg("ui.8face9a73c34"), 'quiet nav-link');link.href = `/persons?source=${encodeURIComponent(source.id)}#review`;controls.append(link);card.append(node('p', MindexI18n.msg("ui.4e65b9bde907"), 'muted'));}
     card.append(controls);
     for (const row of rows) appendWorkProgress(card, label, row);
+    const processEndpoint = ['shots', 'analysis'].includes(name) ? '/api/admin/source-tasks' : name === 'dialogue' ? '/api/admin/dialogue-tasks' : '/api/persons/tasks';
+    // 取消：排队中或运行中的处理/发布任务各一个按钮。自动发布阶段的发布行指向处理任务本身，
+    // 独立发布任务都是素材任务。运行中的任务要到下一个检查点才停，期间按钮保持「正在取消…」。
+    const cancelShown = new Set();
+    for (const row of rows) {
+      const task = row.task;
+      if (!task || !row.running || cancelShown.has(task.id)) continue;
+      cancelShown.add(task.id);
+      const endpoint = task === work.task ? processEndpoint : '/api/admin/source-tasks';
+      const requested = prefs.cancelling.has(task.id);
+      const cancel = action(MindexI18n.msg(requested ? 'ui.6bc0d687aeaa' : 'ui.4d0b4688c787'), perform(row.type, async () => {
+        prefs.cancelling.add(task.id);
+        try {await post(`${endpoint}/${task.id}/cancel`, {});}
+        catch (e) {prefs.cancelling.delete(task.id);throw e;}
+        await refreshWork(source.id);
+      }));
+      cancel.classList.add('work-cancel');cancel.dataset.phase = row.type;cancel.disabled = requested;
+      MindexI18n.setAttr(cancel, 'aria-label', MindexI18n.msg('ui.4d0b4688c787') + ' · ' + label + ' · ' + (row.text || MindexI18n.msg(row.key, {done: Math.min(row.done, row.total), total: row.total})));
+      card.append(cancel);
+    }
     for (const {type, task} of rows) if (type === 'process' && task) {
-      if (['failed', 'interrupted'].includes(task.status)) {
-        const endpoint = ['shots', 'analysis'].includes(name) ? '/api/admin/source-tasks' : name === 'dialogue' ? '/api/admin/dialogue-tasks' : '/api/persons/tasks';
-        const retry = action(MindexI18n.msg("ui.23e1269c0ea7"), perform('process', async () => {await post(`${endpoint}/${task.id}/retry`, {});await refreshWork(source.id);}));retry.disabled = blocked || processBusy;card.append(retry);
+      if (['failed', 'interrupted', 'cancelled'].includes(task.status)) {
+        const retry = action(MindexI18n.msg("ui.23e1269c0ea7"), perform('process', async () => {await post(`${processEndpoint}/${task.id}/retry`, {});await refreshWork(source.id);}));retry.disabled = blocked || processBusy;card.append(retry);
       }
     }
     if (MindexI18n.system(work.start_reason)) card.append(node('p', MindexI18n.system(work.start_reason), 'muted'));

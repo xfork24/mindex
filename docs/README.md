@@ -37,7 +37,7 @@
 - [admin.md](admin.md) — 素材后台功能与管理 API
 - [settings.md](settings.md) — 设置页：模型服务档案热切换、线上厂商支持、音色克隆、检索调参、密钥安全
 - [studio.md](studio.md) — 创作工作流：拆分镜/召回/配音/选片/渲染五步状态机、人工编辑、API
-- [agent.md](agent.md) — 智能助手：全局面板、分级确认、密钥表单、页面同步与定位、Markdown 回复、图片与音视频、可调宽度、构建跟踪、MCP 导出与 deepseek-harness 兼容
+- [agent.md](agent.md) — 智能助手：全局面板、分级确认与删除策略、工具领域与动态加载、附件、视觉输入、密钥表单、页面同步与定位、Markdown 回复、图片与音视频、可调宽度、任务跟踪与取消、全部工具表、MCP 导出（领域过滤）与 deepseek-harness 兼容
 - [tools.md](tools.md) — m4s-converter 等附带工具
 - [cleanup.md](cleanup.md) — 磁盘清理：三级分类（每次删/策略过期/只报告）、保留规则、锁与并发
 - [backup.md](backup.md) — 离线备份、部分迁移、已有库合并、切换中断恢复和全新 clone 恢复流程

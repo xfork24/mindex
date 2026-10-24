@@ -164,7 +164,7 @@ uv run mindex search '雨夜，一个人强忍眼泪，镜头慢慢推近' --gra
 扫描可安全回收的磁盘数据；**默认预览**，加 `--apply` 才真正删除。分级判定、保留策略与 C 级待调整清单详见 [cleanup.md](cleanup.md)；过期阈值在配置 `clean` 节调整（[config-reference.md](config-reference.md)）。
 
 - **A 级（每次都删）**：崩溃残留临时目录、`.DS_Store`、上传暂存残留、孤儿文件（切片/缩略图/转码缓存/人物图/声音样本/未注册原片），以及 `persons/frames` 冗余展示帧（已确认镜头每身份保留一帧，未确认镜头全部保留）；部分上传/原片残留受 `clean.temp_grace_hours` 宽限期保护
-- **B 级（策略过期）**：非活动索引版本（保留活动 + 最近 `clean.index_keep_versions` 个非活动 ready + 全部非 ready）、旧指纹检查点、context/shot_media/studio/reports/字幕缓存、runs 旧记录
+- **B 级（策略过期）**：非活动索引版本（保留活动 + 最近 `clean.index_keep_versions` 个非活动 ready + 全部非 ready）、旧指纹检查点、context/shot_media/studio/reports/字幕缓存、过期助手附件（`agent.attachment_ttl_hours`）、runs 旧记录
 - **C 级（只报告不删）**：model-cache、一次性验证产物、数据库备份、VACUUM 建议——出现在输出 `notes` 中
 
 apply 分两段持锁：先独占 `pipeline.lock` + `index-write.lock`（管线与索引类，与素材删除同序），释放后再取 `studio.lock`（创作类，拿不到则该三类标记 skipped 而非失败）。管线/索引锁被占时以中文提示退出码 1。大规模清理前建议停 serve。输出 JSON 的 `categories` 包含各类别 `error`/`skipped`，应逐项检查；单类别错误记录在报告中，不一定使整体退出码为 1。CLI 只提供 `--apply`，无按类别删除或命令行过期天数选项；保留策略在 YAML 的 `clean` 节配置。
@@ -178,11 +178,11 @@ uv run mindex clean --apply               # 实际删除
 
 ### `mindex agent tools [--domain DOMAIN...] [--names-only]`
 
-输出智能助手工具注册表：名称、领域、风险级别（read/write/danger）、描述与参数 JSON Schema。只读，不访问素材库。
+输出智能助手工具注册表：名称、领域、风险级别（read/write/danger）、是否导出 MCP、描述与参数 JSON Schema。`--domain` 可重复，取值 `meta`、`studio`、`studio_detail`、`library`、`search`、`index`、`persons`、`settings`。只读，不访问素材库。
 
-### `mindex mcp [--base-url URL] [--token-env MINDEX_WEB_TOKEN] [--policy read|write|all]`
+### `mindex mcp [--base-url URL] [--token-env MINDEX_WEB_TOKEN] [--policy read|write|all] [--domain DOMAIN...]`
 
-以 stdio 传输运行 MCP 服务（服务名 `mindex`），供 deepseek-harness、Claude Code、Codex 等调用；标准输出只用于协议。省略 `--base-url` 时在本进程内装配应用，否则连接已运行的服务。写操作与高风险操作受 `agent.mcp.policy`（默认 `read`）限制。需要 `uv sync --extra mcp`。配置示例见 [智能助手](agent.md#mcp-导出与外部-harness)。
+以 stdio 传输运行 MCP 服务（服务名 `mindex`），供 deepseek-harness、Claude Code、Codex 等调用；标准输出只用于协议。省略 `--base-url` 时在本进程内装配应用，否则连接已运行的服务。写操作与高风险操作受 `agent.mcp.policy`（默认 `read`）限制。`--domain` 可重复，只导出这些领域（`report_capability_gap` 始终导出），覆盖 `agent.mcp.domains`；未知领域启动失败。需要 `uv sync --extra mcp`。配置示例见 [智能助手](agent.md#mcp-导出与外部-harness)。
 
 ## 评测与联调
 
@@ -246,7 +246,7 @@ phase 取值：`smoke → visual → preview → asr → align → analyze(-smok
 {"source_id":"SOURCE_ID","shot_id":"SHOT_ID","selections":[{"actor_id":"ACTOR_ID","role_id":null}]}
 ```
 
-`process --retry TASK` 只接受同素材的 failed/interrupted 任务。`activate` 的参数是检索组合 ID，不是单独的人物版本 ID；切换后仍需匹配的嵌入配置才能执行向量查询。
+`process --retry TASK` 只接受同素材的 failed/interrupted/cancelled 任务。`activate` 的参数是检索组合 ID，不是单独的人物版本 ID；切换后仍需匹配的嵌入配置才能执行向量查询。
 
 ## 旧切片迁移与镜头维护
 

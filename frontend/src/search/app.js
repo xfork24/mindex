@@ -170,7 +170,7 @@ function managementLink(result) {
   link.href = `/admin?${params}`;link.target = '_blank';link.rel = 'noopener';return link;
 }
 function correctionLink(result, evidence = bestPersonEvidence(result.person_evidence)[0]) {
-  const link = element('a', MindexI18n.msg("ui.172ab1bd2fb8"));
+  const link = element('a', MindexI18n.msg("ui.review_appearance_link"));
   const params = new URLSearchParams();
   if (evidence) params.set('evidence', evidence.id);else
   {
@@ -225,6 +225,11 @@ function render(data) {
     card.append(preview, body);$('results').append(card);
   });
 }
+// Ctrl/⌘ + Enter 视为点击「查找片段」；按钮禁用（检索中）时 click() 不触发提交。
+$('search-form').addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter' || !(event.ctrlKey || event.metaKey) || event.isComposing) return;
+  event.preventDefault();$('search-button').click();
+});
 $('search-form').onsubmit = async (event) => {
   event.preventDefault();if (busy) return;
   if (!selectedValues('source').length) {notice(MindexI18n.msg("ui.search_source_required"), 'error');return;}

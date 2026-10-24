@@ -23,16 +23,33 @@ SHOTS = ["shot-a1daad59aa", "shot-925281d5bb", "shot-77f0c3e1cc"]
 
 
 class FixtureAgentLlm(ScriptedLlm):
-    """脚本为空时按规则回应：读取最后一条消息决定调用工具或回答。"""
+    """脚本为空时按规则回应：读取最后一条消息决定调用工具或回答。
+
+    规则要调用的工具不在本步下发的工具里（所在领域未加载）时，先调用 ``load_tools``，下一步再调用该工具，
+    与真实模型在动态加载下的做法一致。
+    """
 
     job_id: str | None = None
     segment_id: str | None = None
 
     async def stream(self, request):
         if not self.script:
-            self.script.append(self.rule(request))
+            self.script.extend(self.with_loading(request, self.rule(request)))
         async for chunk in super().stream(request):
             yield chunk
+
+    @staticmethod
+    def with_loading(request, blocks):
+        from mindex.agent.tools import build_registry
+
+        offered = {t["name"] for t in request.tools}
+        registry = build_registry()
+        missing = []
+        for block in blocks:
+            spec = registry.get(block["name"]) if block["type"] == "tool-call" else None
+            if spec is not None and block["name"] not in offered and spec.domain not in missing:
+                missing.append(spec.domain)
+        return [[call("load_tools", domains=missing)], blocks] if missing else [blocks]
 
     def rule(self, request):
         last = request.messages[-1]

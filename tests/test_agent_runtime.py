@@ -95,7 +95,7 @@ def test_llm_error_unknown_tool_and_bad_arguments(agent):
         {"blocks": [], "error": "上游 500"},
     )
     sid = new_session(client)
-    send(client, sid, "试试")
+    send(client, sid, "试试", context={"page": "studio"})
     events = wait_idle(client, sid)
     errors = [r["error"]["code"] for r in results(events)]
     assert errors == ["UNKNOWN_TOOL", "invalid_arguments", "invalid_arguments"]
@@ -109,7 +109,7 @@ def test_max_steps(config):
     llm = ScriptedLlm([[call("list_jobs")]] * 5)
     with TestClient(create_app(config, agent_llm=llm)) as client:
         sid = new_session(client)
-        send(client, sid, "无限循环")
+        send(client, sid, "无限循环", context={"page": "studio"})
         events = wait_idle(client, sid)
     assert events[-1]["data"]["reason"] == {"kind": "blocked"}
     assert any(e["type"] == "plugin:mindex/notice" and e.get("ignorable") for e in events)

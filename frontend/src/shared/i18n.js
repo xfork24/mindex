@@ -141,7 +141,7 @@
     return catalog['voice.' + item.voice_id] ? msg('voice.' + item.voice_id) : item.label;
   }
   function status(value) {
-    const labels = {running: 'ui.594249700590', queued: 'ui.4dcbbcfa6154', failed: 'ui.3e3c8068bb0e', complete: 'ui.33246f6a5e5b', interrupted: 'ui.8dd5ad764e4b', pending: 'ui.59a9eb4e6574', blocked: 'ui.a00db105bd49', reused: 'ui.68f7d028b705', skipped: 'ui.31a98593f16d'};
+    const labels = {running: 'ui.594249700590', queued: 'ui.4dcbbcfa6154', failed: 'ui.3e3c8068bb0e', complete: 'ui.33246f6a5e5b', interrupted: 'ui.8dd5ad764e4b', cancelled: 'ui.a5ffdc95eeb0', pending: 'ui.59a9eb4e6574', blocked: 'ui.a00db105bd49', reused: 'ui.68f7d028b705', skipped: 'ui.31a98593f16d'};
     return labels[value] ? msg(labels[value]) : value;
   }
   window.MindexI18n = {msg, render, system, builtin, voice, status, setText, setAttr, textNode, bind, setLanguage, date: (value, time = false) => {

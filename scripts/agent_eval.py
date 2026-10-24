@@ -10,6 +10,8 @@
     ANTHROPIC_API_KEY=... uv run python scripts/agent_eval.py --backend anthropic \\
         --base-url https://api.anthropic.com --model claude-sonnet-4-5 --api-key-env ANTHROPIC_API_KEY
     可用 --scenario merge_rebuild 只跑指定场景（可重复）；报告与事件日志写入 --output 目录。
+    --list 列出全部场景及说明（无需模型与密钥）；模型不支持图片输入时用 --no-vision 跳过需要视觉的场景。
+    场景含面板附件、索引回退、构建与后台任务取消、人物审核发布等；全部在隔离数据目录内完成。
 """
 
 from __future__ import annotations
@@ -41,28 +43,45 @@ def make_video(path: Path) -> Path:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--backend", choices=["openai", "anthropic"], required=True)
-    parser.add_argument("--base-url", required=True)
-    parser.add_argument("--model", required=True)
+    parser.add_argument("--backend", choices=["openai", "anthropic"])
+    parser.add_argument("--base-url")
+    parser.add_argument("--model")
     parser.add_argument("--api-key-env", default="MINDEX_AGENT_API_KEY")
     parser.add_argument("--max-tokens", type=int, default=4096)
     parser.add_argument("--scenario", action="append", help="只运行指定场景，可重复")
+    parser.add_argument("--no-vision", action="store_true", help="跳过需要模型支持图片输入的场景")
+    parser.add_argument("--list", action="store_true", help="列出全部场景及说明后退出（不调用模型）")
     parser.add_argument("--timeout", type=float, default=300, help="单个场景超时秒数")
     parser.add_argument("--output", type=Path, default=ROOT / "artifacts" / "agent-eval")
     args = parser.parse_args()
+
+    from agent_scenarios import SCENARIOS, drive, final_text, prepare, tool_names
+
+    if args.list:
+        for scenario in SCENARIOS:
+            needs = f" [需要：{'、'.join(scenario.needs)}]" if scenario.needs else ""
+            print(f"{scenario.name}{needs}\n    请求：{scenario.prompt}" + (f"\n    说明：{scenario.note}" if scenario.note else ""))
+        return 0
+    missing = [flag for flag, value in (("--backend", args.backend), ("--base-url", args.base_url),
+                                        ("--model", args.model)) if not value]
+    if missing:
+        parser.error("缺少参数：" + " ".join(missing))
     if not os.environ.get(args.api_key_env):
         print(f"环境变量 {args.api_key_env} 未设置模型密钥", file=sys.stderr)
         return 2
 
-    from agent_scenarios import SCENARIOS, build_world, drive, final_text, tool_names
     from fastapi.testclient import TestClient
 
     from mindex.shared.config import Config
 
-    chosen = [s for s in SCENARIOS if not args.scenario or s.name in args.scenario]
+    chosen = [s for s in SCENARIOS if (not args.scenario or s.name in args.scenario)
+              and not (args.no_vision and "vision" in s.needs)]
     if not chosen:
         print("没有匹配的场景：" + ", ".join(s.name for s in SCENARIOS), file=sys.stderr)
         return 2
+    # 附件端点在启用令牌时要求凭证；评测以本机面板身份上传附件。
+    for name in ("MINDEX_WEB_TOKEN", "MINDEX_MCP_TOKEN"):
+        os.environ.pop(name, None)
     stamp = time.strftime("%Y%m%d-%H%M%S")
     output = args.output / f"{stamp}-{args.backend}-{args.model.replace('/', '_')}"
     output.mkdir(parents=True, exist_ok=True)
@@ -76,10 +95,10 @@ def main() -> int:
                 "backend": args.backend, "base_url": args.base_url, "model": args.model,
                 "api_key_env": args.api_key_env, "max_tokens": args.max_tokens})
             started = time.monotonic()
-            entry = {"name": scenario.name, "prompt": scenario.prompt}
+            entry = {"name": scenario.name, "prompt": scenario.prompt, "note": scenario.note}
             events = []
             try:
-                world = build_world(config, video)
+                world = prepare(scenario, config, video)
                 with TestClient(world.app()) as client:
                     events = drive(client, scenario, world, timeout=args.timeout)
                     scenario.check(world, client, events)

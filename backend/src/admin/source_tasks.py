@@ -14,7 +14,16 @@ from mindex.processing.pipeline import Pipeline
 from mindex.shared.config import Config, StrictModel, absolutize_config_paths, relativize_config_paths
 from mindex.shared.processing_lock import ProcessingLock, recover_tasks
 from mindex.shared.storage import dumps
-from mindex.shared.task_progress import reset_task_attempt, save_task_progress, task_logs
+from mindex.shared.task_cancel import TaskCancelled, registry_for
+from mindex.shared.task_progress import (
+    RETRYABLE,
+    begin_task,
+    mark_cancelled,
+    request_task_cancel,
+    reset_task_attempt,
+    save_task_progress,
+    task_logs,
+)
 
 Work = Literal["shots", "dialogue", "analysis", "persons"]
 
@@ -120,6 +129,14 @@ def publication_attempt(config, source_id, work, *, embedder=None, save=None, pr
         value = {"status": "complete", "error": None, **publish_work(
             config, source_id, work, embedder, progress=notify, scope=scope
         )}
+    except TaskCancelled as exc:
+        # 取消不是发布失败：记录 cancelled 后上抛，由任务置为 cancelled 终态。
+        value = {"status": "cancelled", "error": str(exc)}
+        if latest_progress:
+            value["progress"] = latest_progress
+        if save:
+            save(value)
+        raise
     except Exception as exc:  # noqa: BLE001 — 发布错误独立持久化，不丢失处理结果
         value = {"status": "failed", "error": str(exc)[:2000]}
     if latest_progress:
@@ -263,7 +280,7 @@ class SourceTasks:
             if not row:
                 raise HTTPException(404, "找不到素材任务")
             publication = json.loads(row["publication"] or "{}")
-            if row["status"] not in {"failed", "interrupted"} and publication.get("status") != "failed":
+            if row["status"] not in RETRYABLE and publication.get("status") != "failed":
                 raise HTTPException(409, "仅失败、中断或检索更新失败的任务可以重试")
             config = restore_config(row["config"], self.runtime, self.store)
             reset_task_attempt(self.store, "source_tasks", task_id)
@@ -273,6 +290,14 @@ class SourceTasks:
             lock.release()
             raise
 
+    def cancel(self, task_id):
+        status = request_task_cancel(self.store, "source_tasks", task_id)
+        if status is None:
+            raise HTTPException(404, "找不到素材任务")
+        if status not in {"queued", "running"}:
+            raise HTTPException(409, "只有排队中或运行中的任务可以取消")
+        return self.get(task_id)
+
     def launch(self, task_id, config, lock):
         thread = threading.Thread(target=self.run, args=(task_id, config, lock), daemon=True)
         self.threads[task_id] = thread
@@ -280,13 +305,13 @@ class SourceTasks:
 
     @task_logs("source_tasks")
     def run(self, task_id, config, lock):
+        cancels = registry_for(self.store.root)
         try:
             row = self.store.one("SELECT * FROM source_tasks WHERE id=?", (task_id,))
             if row['work'] == 'publish':
-                lock.admit()
-            self.store.execute(
-                "UPDATE source_tasks SET status='running',updated_at=CURRENT_TIMESTAMP WHERE id=?", (task_id,)
-            )
+                # 等待 GPU 准入期间（仍为 queued）也可取消。
+                lock.admit(check=lambda: cancels.check(task_id))
+            begin_task(self.store, "source_tasks", task_id)
 
             def save(field, value):
                 if field == "progress":
@@ -331,12 +356,15 @@ class SourceTasks:
                 "UPDATE source_tasks SET status='complete',updated_at=CURRENT_TIMESTAMP WHERE id=?",
                 (task_id,),
             )
+        except TaskCancelled:
+            mark_cancelled(self.store, "source_tasks", task_id)
         except BaseException as exc:  # noqa: BLE001 — 后台任务必须记录终态并释放管线锁
             self.store.execute(
                 "UPDATE source_tasks SET status='failed',error=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
                 (str(exc)[:2000], task_id),
             )
         finally:
+            cancels.clear(task_id)
             lock.release()
             self.threads.pop(task_id, None)
 
@@ -390,6 +418,10 @@ def source_tasks_router(runtime, store, embedder=None):
     @router.post("/source-tasks/{task_id}/retry", status_code=202)
     def retry(task_id: str):
         return manager.retry(task_id)
+
+    @router.post("/source-tasks/{task_id}/cancel")
+    def cancel(task_id: str):
+        return manager.cancel(task_id)
 
     @router.get("/sources/{source_id}/person-setup")
     def setup(source_id: str, work_id: str | None = None):

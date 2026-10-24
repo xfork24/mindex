@@ -149,7 +149,7 @@
 | 键 | 类型 | 默认 | 说明 |
 |---|---|---|---|
 | `index_keep_versions` | int ≥1 | 2 | 除活动版本外额外保留的最近 ready 索引版本数（向量复用与回退来源）；building 一律保留 |
-| `temp_grace_hours` | int ≥1 | 24 | 未注册上传文件 / 空上传目录的宽限小时数，防正在进行的上传 |
+| `temp_grace_hours` | int ≥1 | 24 | 未注册上传文件 / 空上传目录 / 无记录助手附件目录与附件上传暂存的宽限小时数，防正在进行的上传 |
 | `transcripts_max_age_days` | int ≥1 | 30 | 旧 `asr_key` 转写块检查点保留天数（换配置后永不命中） |
 | `analysis_max_age_days` | int ≥1 | 30 | 旧分析 profile 的场景分组检查点保留天数 |
 | `dialogue_max_age_days` | int ≥1 | 30 | 旧对白 profile 的 30 秒块检查点保留天数（按 `channel_data` 现行 profile 判定） |
@@ -164,7 +164,7 @@
 
 ## `agent` — 智能助手
 
-全局助手面板与 MCP 导出：`enabled`、`max_steps`、`max_context_tokens`、`secret_ttl_seconds`、`llm.*`（`backend: openai|anthropic`，设置页「智能助手」档案可覆盖）与 `mcp.*`（`http_enabled`、`policy: read|write|all`、`token_env`）。键说明与默认值见 [智能助手 · 配置](agent.md#配置)。
+全局助手面板与 MCP 导出：`enabled`、`max_steps`、`max_context_tokens`、`secret_ttl_seconds`、附件（`attachment_ttl_hours`、`attachment_max_mb`）与视觉（`max_images`）、`llm.*`（`backend: openai|anthropic`、`vision`，设置页「智能助手」档案可覆盖）与 `mcp.*`（`http_enabled`、`policy: read|write|all`、`token_env`、`domains`）。键说明与默认值见 [智能助手 · 配置](agent.md#配置)。
 
 ## 常用组合
 

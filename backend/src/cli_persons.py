@@ -102,12 +102,12 @@ def persons_process(
     end: Annotated[float | None, typer.Option(help="原片扫描结束时间，单位秒；省略处理至结尾。")] = None,
     publish: Annotated[bool, typer.Option(help="请求任务完成后发布人物检索组合；默认只处理。")] = False,
     retry: Annotated[
-        str | None, typer.Option(help="同素材 failed/interrupted 任务 ID，复用该任务重试。")
+        str | None, typer.Option(help="同素材 failed/interrupted/cancelled 任务 ID，复用该任务重试。")
     ] = None,
 ):
     """登记人物扫描任务并启动独立后台进程，立即返回任务信息。
 
-    SOURCE 是库内素材 ID，需人物服务与参考图；可限制原片起止秒数。输出 task_id、queued 状态和日志路径，使用 persons status 轮询。--retry 仅接受同素材 failed/interrupted 任务 ID；默认不发布，--publish 请求完成后发布。
+    SOURCE 是库内素材 ID，需人物服务与参考图；可限制原片起止秒数。输出 task_id、queued 状态和日志路径，使用 persons status 轮询。--retry 仅接受同素材 failed/interrupted/cancelled 任务 ID；默认不发布，--publish 请求完成后发布。
 
     示例：
 
@@ -129,9 +129,13 @@ def persons_process(
     with ProcessingLock(ctx.obj, source_id=source, work="persons"):
         identifier = retry or uid()
         if retry:
+            from mindex.shared.task_cancel import registry_for
+            from mindex.shared.task_progress import RETRYABLE
+
             row = store.one("SELECT * FROM person_tasks WHERE id=?", (retry,))
-            if not row or row["status"] not in {"failed", "interrupted"} or row["source_id"] != source:
+            if not row or row["status"] not in RETRYABLE or row["source_id"] != source:
                 raise typer.BadParameter("重试任务必须失败/中断且归属该素材")
+            registry_for(store.root).clear(retry)
             store.execute(
                 "UPDATE person_tasks SET status='queued',error=NULL,result=NULL WHERE id=?", (retry,)
             )

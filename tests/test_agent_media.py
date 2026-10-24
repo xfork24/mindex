@@ -112,7 +112,7 @@ def test_media_in_tool_result_meta(built):
     world, _, client, llm, _ = built
     llm.extend([call("resolve_shots", job_id=world.job, refs=["#2"])], [say("好")])
     sid = new_session(client)
-    send(client, sid, "看第二镜")
+    send(client, sid, "看第二镜", context={"page": "studio", "job_id": world.job})
     events = wait_idle(client, sid)
     result = next(e for e in events if e["type"] == "tool/result")
     media = result["data"]["meta"]["media"]

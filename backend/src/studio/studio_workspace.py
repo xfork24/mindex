@@ -135,6 +135,17 @@ def new_plan(name, options):
     }
 
 
+def remove_plan(w, plan_id):
+    """从工作台删除方案记录，不触碰版本与构建记录；删的是当前方案时切到其余方案中最新创建的。"""
+    plan(w, plan_id)
+    if len(w["plans"]) == 1:
+        raise studio.StudioError("至少保留一个方案")
+    w["plans"].pop(plan_id)
+    if w["active_plan"] == plan_id:
+        w["active_plan"] = max(w["plans"].values(), key=lambda p: p.get("created_at") or "")["id"]
+    return w["active_plan"]
+
+
 def script_text(w, p):
     vid = p.get("script")
     return version(w, vid)["data"]["text"] if vid else None
@@ -1670,27 +1681,70 @@ def column_nodes(config, job_id, w, p, stage, inputs_by_shot):
     return nodes
 
 
-def run_build(config, job_id, build_id, *, speaker=None, storyboarder=None, embedder=None, writer=None):
+CANCELLED = "已取消"
+
+
+def cancel_sentinel(config, job_id, build_id):
+    """构建取消哨兵文件：跨进程可见（CLI/另一个服务进程也能请求取消）。"""
+    return safe_path(root(config, job_id), f"builds/{build_id}.cancel")
+
+
+def request_build_cancel(config, job_id, build_id):
+    path = cancel_sentinel(config, job_id, build_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.touch()
+
+
+def build_cancelled(config, job_id, build_id, event=None):
+    """进程内事件已置位，或哨兵文件存在，即视为已请求取消。"""
+    return bool(event is not None and event.is_set()) or cancel_sentinel(config, job_id, build_id).exists()
+
+
+def clear_build_cancel(config, job_id, build_id):
+    cancel_sentinel(config, job_id, build_id).unlink(missing_ok=True)
+
+
+def cancel_remaining(nodes):
+    """取消时尚未开始的节点一律阻塞并注明已取消；已有结果的节点保持原记录。"""
+    count = 0
+    for node in nodes:
+        if node.get("status") in (None, "pending"):
+            node.update(status="blocked", error=CANCELLED)
+            count += 1
+    return count
+
+
+def run_build(config, job_id, build_id, *, speaker=None, storyboarder=None, embedder=None, writer=None,
+              cancel_event=None):
     log = ExecutionLog(config, job_id, build_id)
     token = active_log.set(log)
     try:
         return _run_build(
             config, job_id, build_id, log, speaker=speaker, storyboarder=storyboarder, embedder=embedder,
-            writer=writer,
+            writer=writer, cancel_event=cancel_event,
         )
     finally:
         active_log.reset(token)
 
 
 def _run_build(config, job_id, build_id, log, *, speaker=None, storyboarder=None, embedder=None,
-               writer=None):
+               writer=None, cancel_event=None):
     w = load(config, job_id)
     build = next(b for b in w["builds"] if b["id"] == build_id)
     p = plan(w, build["plan_id"])
     failed = set()
+    cancelled = False
     log.emit("开始执行")
-    for node in build["nodes"]:
+    for position, node in enumerate(build["nodes"]):
         stage, sid = node["stage"], node["shot_id"]
+        # 只在节点之间检查取消：已开始执行的节点照常完成。auto_split 重新预检替换
+        # 后续节点后，下一轮迭代立即在这里检查，新展开的节点同样会被取消。
+        if build_cancelled(config, job_id, build_id, cancel_event):
+            cancelled = True
+            count = cancel_remaining(build["nodes"][position:])
+            log.stage = log.shot_id = None
+            log.emit(f"已取消执行：{count} 个节点未执行", "warning")
+            break
         log.stage, log.shot_id = stage, sid
         deps = node_dependencies(w, p, stage, sid) if stage != "split" else []
         if node["action"] == "skip":
@@ -1739,7 +1793,6 @@ def _run_build(config, job_id, build_id, log, *, speaker=None, storyboarder=None
                     node["version"] = attempted
                 failed.add(node["key"])
         if build.get("auto_split") and stage in ("script", "split"):
-            position = build["nodes"].index(node)
             if node["status"] not in ("complete", "reused"):
                 for pending in build["nodes"][position + 1:]:
                     pending.update(action="blocked", reason="生成文案失败" if stage == "script" else "拆分镜失败")
@@ -1757,23 +1810,29 @@ def _run_build(config, job_id, build_id, log, *, speaker=None, storyboarder=None
             "failed": "失败",
             "blocked": "阻塞",
             "skipped": "跳过",
+            "cancelled": CANCELLED,
         }
         log.emit(
-            f"{LABELS[stage]}：{labels[node['status']]}"
+            f"{LABELS[stage]}：{labels.get(node['status'], node['status'])}"
             + (f" · {node['error']}" if node.get("error") else ""),
             "error" if node["status"] == "failed" else ("warning" if node["status"] == "blocked" else "info"),
         )
     successes = any(n["status"] in ("complete", "reused") for n in build["nodes"])
-    build.update(
-        status=("partial" if successes else "failed") if failed else "complete", finished_at=studio.now()
-    )
+    if cancelled:
+        status = "cancelled"
+    else:
+        status = ("partial" if successes else "failed") if failed else "complete"
+    build.update(status=status, finished_at=studio.now())
     # 记录本次构建完成后的分镜工作台状态，便于日后切回此文案版本时还原分镜选用。
     build["board_result"] = board_snapshot(p)
     log.stage = log.shot_id = None
     log.emit(
-        "执行结束：" + {"complete": "全部完成", "partial": "部分完成", "failed": "失败"}[build["status"]]
+        "执行结束："
+        + {"complete": "全部完成", "partial": "部分完成", "failed": "失败", "cancelled": CANCELLED}[status],
+        "warning" if status == "cancelled" else "info",
     )
     persist(config, job_id, w)
+    clear_build_cancel(config, job_id, build_id)
 
 
 def recover(config, job_id, w):
@@ -1830,6 +1889,8 @@ def recover(config, job_id, w):
                 if node.get("status") in ("pending", "running"):
                     node.update(status="blocked", error="服务重启中断，请重新预检续建")
             build.update(status="partial", finished_at=studio.now())
+            # 重启前残留的取消请求已无意义：构建已按中断收尾。
+            clear_build_cancel(config, job_id, build["id"])
             ExecutionLog(config, job_id, build["id"]).emit("服务中断，请重新提交执行", "error")
             changed = True
     if changed:

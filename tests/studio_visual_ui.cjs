@@ -77,6 +77,7 @@ const sandbox = {
   accept: async () => {},
   api: async (url, method, body) => { requests.push(plain({ url, method, body })); return apiImpl(url, method, body); },
 };
+sandbox.statusText = value => sandbox.STATUS[value] || String(value ?? "");
 vm.createContext(sandbox);
 const source = fs.readFileSync("frontend/src/studio/studio.js", "utf8");
 const slice = (start, end) => {
@@ -132,13 +133,15 @@ function openEditor(sid) {
 const visualSpans = cell => findAll(cell, n => String(n.className).includes("visual-summary"));
 
 const cases = [
-  ["编辑器第一项是画面意象，预填已存 visual，标签双语", () => {
+  ["编辑器字段顺序为旁白与字幕、画面意象、召回关键字；预填已存 visual，标签双语", () => {
     assert.equal(catalog["ui.visual_label"].zh, "画面意象");
     assert.equal(catalog["ui.visual_label"].en, "Visual imagery");
+    assert.equal(catalog["ui.recall_keywords_label"].zh, "召回关键字");
     const { body, input } = openEditor("s1");
     const fields = findAll(body, n => n.dataset.shotField);
-    assert.equal(fields[0].dataset.shotField, "visual");
-    assert.equal(fields[0].tagName, "textarea");
+    assert.deepEqual(fields.slice(0, 3).map(n => n.dataset.shotField), ["text", "visual", "query"]);
+    assert.equal(input("visual").tagName, "textarea");
+    assert.equal(input("query").attrs["aria-label"], "召回关键字");
     assert.equal(input("visual").value, "晨雾笼罩的山间步道");
     assert.equal(input("visual").attrs["aria-label"], "画面意象");
     const label = find(body, n => n.tagName === "label" && n.children.includes(input("visual")));

@@ -20,8 +20,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ValidationError
 
+from mindex.shared.agent_domains import AGENT_DOMAINS
+
 Risk = Literal["read", "write", "danger"]
-DOMAINS = ("meta", "studio", "settings", "library", "search")
+DOMAINS = AGENT_DOMAINS
 NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 MAX_TEXT = 12000
 
@@ -43,10 +45,16 @@ class ToolOutput:
     mutation: dict | None = None
     # 提交构建后由运行时跟踪：{"job_id", "build_id"}。
     watch_build: dict | None = None
+    # 提交后台任务后由运行时跟踪，终态时发 followup：
+    # {"kind": "source"|"dialogue"|"person", "task_id", "source_id"?, "work"?}；kind="build" 等价于 watch_build。
+    watch_task: dict | None = None
     # 页面定位描述：{page, job_id, plan_id, shots, stage, section, role, profile_id, query, ...}。
     focus: dict | None = None
     # 面板媒体卡片：[{kind: image|audio|video, url, title, poster?, playlist?, collapsed}]，只允许本站地址。
     media: list[dict] | None = None
+    # 交给模型看的图片引用：本站 /api/ 地址或 attachment://；运行时写进 tool 消息的 images（只存引用），
+    # 视觉开启时由 agent.vision.materialize 在发请求前解析。
+    images: list[str] | None = None
 
     def render(self) -> str:
         if self.text is not None:
@@ -143,7 +151,16 @@ def inline_schema(schema: dict) -> dict:
                 target = definitions[node["$ref"].split("/")[-1]]
                 merged = {**copy.deepcopy(target), **{k: v for k, v in node.items() if k != "$ref"}}
                 return resolve(merged)
-            return {k: resolve(v) for k, v in node.items() if k not in ("$defs", "title")}
+            result = {}
+            for k, v in node.items():
+                if k in ("$defs", "title"):
+                    continue
+                if k == "properties" and isinstance(v, dict):
+                    # 键是字段名而不是 schema 关键字：名为 title 的字段（如 rename_job.title）必须保留。
+                    result[k] = {name: resolve(sub) for name, sub in v.items()}
+                else:
+                    result[k] = resolve(v)
+            return result
         if isinstance(node, list):
             return [resolve(item) for item in node]
         return node
@@ -175,10 +192,22 @@ class ToolRegistry:
         allowed = set(domains)
         return ToolRegistry([s for s in self._specs.values() if s.domain in allowed])
 
-    def schemas(self, first: tuple[str, ...] = ()) -> list[dict]:
-        """``first`` 中的领域排在前面（当前页面相关的工具优先），其余保持注册顺序。"""
-        specs = sorted(self._specs.values(), key=lambda s: (s.domain not in first, s.domain != "meta"))
+    def schemas(self, first: tuple[str, ...] = (), domains=None) -> list[dict]:
+        """``first`` 中的领域排在前面（当前页面相关的工具优先），其余保持注册顺序。
+
+        ``domains`` 为 None 时不过滤（CLI 与 MCP 使用）；否则只返回这些领域的工具。
+        """
+        allowed = None if domains is None else set(domains)
+        candidates = [s for s in self._specs.values() if allowed is None or s.domain in allowed]
+        specs = sorted(candidates, key=lambda s: (s.domain not in first, s.domain != "meta"))
         return [spec.schema() for spec in specs]
+
+    def domain_tools(self) -> dict[str, list[str]]:
+        """领域 → 工具名（注册顺序）；没有工具的领域不出现。"""
+        result: dict[str, list[str]] = {}
+        for spec in self._specs.values():
+            result.setdefault(spec.domain, []).append(spec.name)
+        return result
 
     def __len__(self):
         return len(self._specs)

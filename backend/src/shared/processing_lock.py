@@ -97,8 +97,11 @@ class PublicationLock(ProcessingLock):
                       FileLock(str(path), timeout=0, thread_local=False)]
         self.pipeline = SharedFileLock(config.data_dir / 'pipeline.lock', exclusive=config.enforce_gpu_lock)
 
-    def admit(self):
+    def admit(self, check=None):
+        """等待 GPU 准入；check 每轮调用一次，可抛出 TaskCancelled 结束等待。"""
         while True:
+            if check is not None:
+                check()
             try:
                 self.pipeline.acquire()
                 return

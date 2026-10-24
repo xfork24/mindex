@@ -22,11 +22,12 @@ from pathlib import Path
 from uuid import uuid4
 
 from mindex.agent.llm.types import tool_calls, tool_message
+from mindex.agent.vision import image_count
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS agent_sessions (
   id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'idle',
-  grants TEXT NOT NULL DEFAULT '[]', context TEXT,
+  grants TEXT NOT NULL DEFAULT '[]', context TEXT, loaded_domains TEXT NOT NULL DEFAULT '[]',
   created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS agent_events (
@@ -43,6 +44,7 @@ CREATE TABLE IF NOT EXISTS agent_gaps (
 );
 """
 
+JSON_FIELDS = ("grants", "context", "loaded_domains")
 SECRET_PREFIX = "secret://"
 OMITTED = "（较早的工具结果已省略以控制上下文长度；需要时请重新调用工具获取最新数据）"
 
@@ -88,6 +90,10 @@ class SessionStore:
         with self.store.connect() as db:
             db.execute("PRAGMA journal_mode=WAL")
             db.executescript(SCHEMA)
+            # 旧库的 agent_sessions 没有 loaded_domains（CREATE TABLE IF NOT EXISTS 不会补列）。
+            columns = {row["name"] for row in db.execute("PRAGMA table_info(agent_sessions)")}
+            if "loaded_domains" not in columns:
+                db.execute("ALTER TABLE agent_sessions ADD COLUMN loaded_domains TEXT NOT NULL DEFAULT '[]'")
 
     # ------------------------------------------------------------ 会话
     def create(self, title: str = "") -> dict:
@@ -103,7 +109,8 @@ class SessionStore:
         row = self.store.one("SELECT * FROM agent_sessions WHERE id=?", (sid,))
         if row is None:
             raise SessionNotFound("找不到助手会话")
-        return {**row, "grants": json.loads(row["grants"]), "context": json.loads(row["context"] or "null")}
+        return {**row, "grants": json.loads(row["grants"]), "context": json.loads(row["context"] or "null"),
+                "loaded_domains": json.loads(row["loaded_domains"] or "[]")}
 
     def list(self) -> list[dict]:
         rows = self.store.rows("SELECT id,title,status,created_at,updated_at FROM agent_sessions ORDER BY updated_at DESC")
@@ -112,7 +119,7 @@ class SessionStore:
     def update(self, sid: str, **fields) -> None:
         if not fields:
             return
-        values = {k: json.dumps(v, ensure_ascii=False) if k in ("grants", "context") else v for k, v in fields.items()}
+        values = {k: json.dumps(v, ensure_ascii=False) if k in JSON_FIELDS else v for k, v in fields.items()}
         values["updated_at"] = now_ms()
         assignments = ",".join(f"{k}=?" for k in values)
         self.store.execute(f"UPDATE agent_sessions SET {assignments} WHERE id=?", (*values.values(), sid))
@@ -221,16 +228,30 @@ class SessionStore:
         return self.store.rows("SELECT * FROM agent_gaps ORDER BY id DESC LIMIT ?", (limit,))
 
 
-def estimate_tokens(value) -> int:
-    return len(json.dumps(value, ensure_ascii=False)) // 3 + 1
+def estimate_tokens(value, *, image_tokens: int = 0, image_limit: int | None = None) -> int:
+    """按 JSON 长度粗估 token；消息列表里的图片（日志中只是引用，体积很小）另按每张 ``image_tokens`` 计，
+    最多计 ``image_limit`` 张（单次请求实际只发送这么多）。"""
+    total = len(json.dumps(value, ensure_ascii=False)) // 3 + 1
+    if image_tokens and isinstance(value, list):
+        count = image_count([m for m in value if isinstance(m, dict)])
+        if image_limit is not None:
+            count = min(count, max(0, image_limit))
+        total += count * image_tokens
+    return total
 
 
-def derive_messages(events: list[dict], *, budget: int | None = None, keep_recent_results: int = 6) -> list[dict]:
+def derive_messages(events: list[dict], *, budget: int | None = None, keep_recent_results: int = 6,
+                    image_tokens: int = 0, image_limit: int | None = None) -> list[dict]:
     """从日志派生发给模型的消息序列。
 
     每个工具调用都要有对应结果：日志里缺失的（例如进程被杀）补一条错误结果，保证协议合法。
-    超出预算时，先把较早的工具结果替换为省略说明，仍超出再从最早的完整用户轮次起整体丢弃。
+    超出预算时，先把较早的工具结果替换为省略说明（连同其图片引用），仍超出再从最早的完整用户轮次起整体丢弃。
+    ``image_tokens``/``image_limit``：视觉开启时每张图片计入预算的 token 数与单次请求的图片上限。
     """
+
+    def estimate(value) -> int:
+        return estimate_tokens(value, image_tokens=image_tokens, image_limit=image_limit)
+
     messages: list[dict] = []
     answered: set[str] = set()
     for event in events:
@@ -272,14 +293,15 @@ def derive_messages(events: list[dict], *, budget: int | None = None, keep_recen
         else:
             ordered.append(message)
     ordered.extend(pending_users)
-    if budget is None or estimate_tokens(ordered) <= budget:
+    if budget is None or estimate(ordered) <= budget:
         return ordered
     tool_indexes = [i for i, m in enumerate(ordered) if m["role"] == "tool"]
     for i in tool_indexes[:-keep_recent_results] if keep_recent_results else tool_indexes:
-        ordered[i] = {**ordered[i], "content": [{"type": "text", "text": OMITTED}]}
-        if estimate_tokens(ordered) <= budget:
+        trimmed = {k: v for k, v in ordered[i].items() if k != "images"}
+        ordered[i] = {**trimmed, "content": [{"type": "text", "text": OMITTED}]}
+        if estimate(ordered) <= budget:
             return ordered
-    while estimate_tokens(ordered) > budget:
+    while estimate(ordered) > budget:
         starts = [i for i, m in enumerate(ordered) if m["role"] == "user" and m["source"].get("kind") != "context"]
         if len(starts) < 2:
             break

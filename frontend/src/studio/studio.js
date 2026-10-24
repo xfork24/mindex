@@ -68,8 +68,11 @@ const STATUS = {
   pending: MindexI18n.msg("ui.25d23b92b225"),
   complete: MindexI18n.msg("ui.33246f6a5e5b"),
   reused: MindexI18n.msg("ui.68f7d028b705"),
-  skipped: MindexI18n.msg("ui.31a98593f16d")
+  skipped: MindexI18n.msg("ui.31a98593f16d"),
+  cancelled: MindexI18n.msg("ui.a5ffdc95eeb0")
 };
+// 未知状态（服务端新增取值）回退显示原始值，而不是空白或 undefined。
+const statusText = (value) => STATUS[value] || String(value ?? "");
 const state = {
   id: null,
   data: null,
@@ -77,6 +80,7 @@ const state = {
   timer: null,
   token: 0,
   submitting: false,
+  cancelling: null, // 已请求取消的执行："build:<id>" 或 "job:<id>"，用于显示“正在取消…”
   titleEditing: false,
   titleDraft: null,
   expanded: new Map(),
@@ -248,7 +252,16 @@ async function selectJob(id, { reloadJobs = true } = {}) {
   history.replaceState(null, "", `/studio?job=${id}`);
   closeDialog();
   loadRecallOptions().catch((error) => notice(MindexI18n.msg("ui.867f562167d6", { p0: error.message }), true));
-  await refresh();
+  try {
+    await refresh();
+  } catch (error) {
+    // 旧任务步骤执行期间工作台被锁（409）：改为显示执行状态与“取消执行”。
+    if (id === state.id && await legacyRunView(id)) {
+      if (reloadJobs) loadJobs().catch(fail);
+      return;
+    }
+    throw error;
+  }
   if (id !== state.id) return;
   if (reloadJobs) loadJobs().catch(fail);
   loadArtifacts().catch(fail);
@@ -559,7 +572,8 @@ async function refresh() {
   notice(MindexI18n.msg("ui.5c458a043061", { p0: error.message }), true)
   );
   clearTimeout(state.timer);
-  if (busy()) state.timer = setTimeout(() => refresh().catch(fail), 1200);else
+  // 旧任务的步骤执行不锁工作台，但仍需轮询，以便取消后及时刷新状态。
+  if (busy() || legacyRunning()) state.timer = setTimeout(() => refresh().catch(fail), 1200);else
   if (wasBusy) {
     void loadMaterialDigest(id, { fresh: true });
     await loadArtifacts();
@@ -579,6 +593,7 @@ function render() {
     job = state.data.job,
     locked = busy();
   $("no-job").hidden = true;
+  $("legacy-run").hidden = true;
   $("job-workspace").hidden = false;
   const header = $("job-header");
   header.replaceChildren();
@@ -702,7 +717,7 @@ async function showVersion(id) {
   }
   const item = ver(id),
     body = showDialog(
-      `${LABEL[item.stage]} · ${id.slice(0, 8)} · ${STATUS[item.status]}`
+      `${LABEL[item.stage]} · ${id.slice(0, 8)} · ${statusText(item.status)}`
     );
   if (item.incomplete)
   body.append(
@@ -786,12 +801,19 @@ function updateLocks() {
   "copy-plan",
   "delete-job",
   "rename-plan",
+  "delete-plan",
   "plan-settings",
   "run-all"])
   {
     $(id).disabled = locked || dirty && !["plan-select", "delete-job"].includes(id);
     MindexI18n.setAttr($(id), "title", dirty && !["plan-select", "delete-job"].includes(id) ? MindexI18n.msg("ui.9f185b0cc351") : "");
   }
+  // 唯一的方案不能删除：按钮保持可见但禁用，并说明原因。
+  if (Object.keys(state.data.plans).length < 2) {
+    $("delete-plan").disabled = true;
+    MindexI18n.setAttr($("delete-plan"), "title", MindexI18n.msg("ui.delete_plan_last"));
+  }
+  renderCancel();
   document.querySelectorAll(".regenerate-column, .execute-column").forEach((n) => {
     n.disabled =
     locked || dirty || n.dataset.stage !== "split" && !order().length;
@@ -922,7 +944,7 @@ function cellSummary(sid, stage) {
   const node = latestNode(stage, sid);
   if (node)
   trigger.append(
-    el("span", MindexI18n.msg("ui.7f95d89a3924", { p0: STATUS[node.status] }), "cell-status")
+    el("span", MindexI18n.msg("ui.7f95d89a3924", { p0: statusText(node.status) }), "cell-status")
   );
   const error = executionError(stage, sid);
   if (error) trigger.append(el("span", error, "cell-summary warn-text"));
@@ -1392,9 +1414,9 @@ function renderShotEditor(body, sid) {
   const fields = el("div", "", "shot-editor-fields");
   const inputs = {};
   for (const [name, label, type] of [
-  ["visual", MindexI18n.msg("ui.visual_label"), "textarea"],
   ["text", MindexI18n.msg("ui.58c9fb9115f5"), "textarea"],
-  ["query", MindexI18n.msg("ui.711363c42474"), "textarea"],
+  ["visual", MindexI18n.msg("ui.visual_label"), "textarea"],
+  ["query", MindexI18n.msg("ui.recall_keywords_label"), "textarea"],
   ["estimated_seconds", MindexI18n.msg("ui.9e54a98e61db"), "number"]])
   {
     const f = field(label, draft.data[name], type);
@@ -1833,7 +1855,7 @@ function historyCell(stage, sid, preferred = null) {
   for (const item of items) {
     const o = el(
       "option",
-      `${item.id.slice(0, 8)} · ${STATUS[item.status]} · ${MindexI18n.date(new Date(item.created_at), false)}`
+      `${item.id.slice(0, 8)} · ${statusText(item.status)} · ${MindexI18n.date(new Date(item.created_at), false)}`
     );
     o.value = item.id;
     select.append(o);
@@ -2484,7 +2506,7 @@ function renderFinal() {
   reverse()) {
     const row = el("div", "", "final-row");
     row.append(
-      el("span", `${item.id.slice(0, 8)} · ${STATUS[item.status]}`),
+      el("span", `${item.id.slice(0, 8)} · ${statusText(item.status)}`),
       button(MindexI18n.msg("ui.23a597a9dc81"), () => showVersion(item.id))
     );
     if (item.status === "complete") {
@@ -2514,6 +2536,97 @@ function renderFinal() {
   if (selected) d.append(dependencyTree(selected.id));
   history.append(d);
 }
+// 取消执行与删除方案：版本工作台的构建与旧任务的步骤执行都可取消；已开始的节点或步骤照常完成。
+const runningBuild = () => state.data?.builds.find((b) => b.status === "running") || null;
+const legacyRunning = (job = state.data?.job) => job?.execution?.status === "running";
+function cancelTarget() {
+  const build = runningBuild();
+  if (build) return { key: `build:${build.id}`, url: `${base()}/builds/${build.id}/cancel`, message: "ui.5d662e5ba0e8" };
+  if (legacyRunning()) return { key: `job:${state.id}`, url: `${base()}/cancel`, message: "ui.studio_cancel_steps_requested" };
+  return null;
+}
+function cancelLabel(n, cancelling) {
+  n.disabled = cancelling;
+  MindexI18n.setText(n, MindexI18n.msg(cancelling ? "ui.6bc0d687aeaa" : "ui.studio_cancel_run"));
+  MindexI18n.setAttr(n, "title", MindexI18n.msg("ui.studio_cancel_run_hint"));
+}
+function renderCancel() {
+  const n = $("cancel-run"), target = cancelTarget();
+  // 执行已结束（或换了一次执行）时清掉“正在取消”标记。
+  if (state.cancelling && state.cancelling !== target?.key) state.cancelling = null;
+  n.hidden = !target;
+  cancelLabel(n, !target || state.cancelling === target.key);
+}
+async function requestCancel(target, node) {
+  state.cancelling = target.key;
+  cancelLabel(node, true);
+  try {
+    await api(target.url, "POST");
+    notice(MindexI18n.msg(target.message));
+  } catch (error) {
+    // 409：执行刚好已结束，刷新后按钮自然消失；其余错误照常提示。
+    state.cancelling = null;
+    fail(error);
+  }
+}
+async function cancelRun() {
+  const target = state.data && cancelTarget(), id = state.id;
+  if (!target) return;
+  await requestCancel(target, $("cancel-run"));
+  if (state.id === id) await refresh();
+}
+async function legacyRunView(id) {
+  const detail = await api(`/api/studio/jobs/${encodeURIComponent(id)}`).catch(() => null);
+  if (id !== state.id) return true;
+  const execution = detail?.job?.execution, box = $("legacy-run");
+  if (!legacyRunning(detail?.job)) {
+    box.hidden = true;
+    if (state.cancelling === `job:${id}`) state.cancelling = null;
+    return false;
+  }
+  $("no-job").hidden = true;
+  $("job-workspace").hidden = true;
+  box.hidden = false;
+  MindexI18n.setText($("legacy-run-text"), MindexI18n.msg("ui.legacy_run_active", {
+    p0: LABEL[execution.current_step] || execution.current_step || "…" }));
+  cancelLabel($("cancel-legacy"), state.cancelling === `job:${id}`);
+  clearTimeout(state.timer);
+  state.timer = setTimeout(() => reopenAfterLegacy(id), 1500);
+  return true;
+}
+async function reopenAfterLegacy(id) {
+  if (id !== state.id) return;
+  try {
+    await refresh();
+    loadArtifacts().catch(fail);
+  } catch (error) {
+    if (id === state.id && !(await legacyRunView(id))) fail(error);
+  }
+}
+async function cancelLegacy() {
+  const id = state.id;
+  if (!id) return;
+  await requestCancel({ key: `job:${id}`, url: `${base()}/cancel`, message: "ui.studio_cancel_steps_requested" },
+    $("cancel-legacy"));
+  if (state.id === id && !(await legacyRunView(id))) await reopenAfterLegacy(id);
+}
+async function deletePlan() {
+  if (!state.data || busy() || Object.keys(state.data.plans).length < 2) return;
+  const id = state.id, target = plan();
+  if (!window.confirm(MindexI18n.render(MindexI18n.msg("ui.delete_plan_confirm", { p0: target.name })))) return;
+  state.submitting = true;
+  updateLocks();
+  try {
+    const data = await api(`${base()}/plans/${encodeURIComponent(target.id)}`, "DELETE");
+    state.submitting = false;
+    if (state.id !== id) return;
+    await accept(data);
+    notice(MindexI18n.msg("ui.plan_deleted", { p0: target.name }));
+  } finally {
+    state.submitting = false;
+    if (state.data) updateLocks();
+  }
+}
 function renderBuilds() {
   const view = $("build-history");
   view.replaceChildren();
@@ -2522,14 +2635,14 @@ function renderBuilds() {
     d.append(
       el(
         "summary", MindexI18n.msg("ui.9610eb026792", { p0:
-          shortId(b.id), p1: state.data.plans[b.plan_id]?.name || shortId(b.plan_id), p2: STATUS[b.status] })
+          shortId(b.id), p1: state.data.plans[b.plan_id]?.name || shortId(b.plan_id), p2: statusText(b.status) })
       )
     );
     for (const node of b.nodes)
     d.append(
       el(
         "p",
-        shortIds(`${LABEL[node.stage]} ${node.shot_id || ""} · ${STATUS[node.status]}${node.error ? ` · ${MindexI18n.system(node.error)}` : ""}`)
+        shortIds(`${LABEL[node.stage]} ${node.shot_id || ""} · ${statusText(node.status)}${node.error ? ` · ${MindexI18n.system(node.error)}` : ""}`)
       )
     );
     view.append(d);
@@ -2659,7 +2772,7 @@ function historyVersionRow(item, debugFiles) {
   const row = el("div", "", "artifact-row");
   const label = el(
     "span",
-    `${LABEL[item.stage] || item.stage} · ${shortId(item.id)} · ${STATUS[item.status] || item.status}` +
+    `${LABEL[item.stage] || item.stage} · ${shortId(item.id)} · ${statusText(item.status)}` +
     `${item.incomplete ? MindexI18n.msg("ui.68f4c0f5e0e0") : ""}`
   );
   if (MindexI18n.system(item.error)) MindexI18n.setAttr(label, "title", shortIds(MindexI18n.system(item.error)));
@@ -2858,6 +2971,9 @@ $("delete-job").addEventListener("click", async () => {
   }
 });
 $("rename-plan").addEventListener("click", renamePlan);
+$("delete-plan").addEventListener("click", () => deletePlan().catch(fail));
+$("cancel-run").addEventListener("click", () => cancelRun().catch(fail));
+$("cancel-legacy").addEventListener("click", () => cancelLegacy().catch(fail));
 $("plan-settings").addEventListener("click", editSettings);
 $("run-all").addEventListener("click", () => preflight().catch(fail));
 $("collapse-all-rows").addEventListener("click", collapseAllRows);
@@ -2876,6 +2992,12 @@ const matrixResize = new ResizeObserver((entries) => {
   );
 });
 matrixResize.observe(document.querySelector(".matrix-scroll"));
+// Ctrl/⌘ + Enter 视为点击「创建任务」；按钮禁用（创建中）时 click() 不触发提交。
+$("create-form").addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" || !(event.ctrlKey || event.metaKey) || event.isComposing) return;
+  event.preventDefault();
+  $("create-button").click();
+});
 $("create-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   $("create-button").disabled = true;

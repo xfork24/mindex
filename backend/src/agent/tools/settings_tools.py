@@ -309,6 +309,210 @@ async def update_business_settings(args: Business, ctx: ToolContext) -> ToolOutp
     return ToolOutput(result, text=f"已更新业务设置：{result}", mutation=SETTINGS, focus=business_focus(args))
 
 
+class DeleteProfile(StrictModel):
+    profile_id: int = Field(description="要删除的配置档案 ID")
+
+
+async def deletion_target(args: DeleteProfile, ctx: ToolContext):
+    """删除前的保护：智能助手自身档案、各角色正在使用的档案都拒绝，且不发送删除请求。"""
+    if ctx.agent_profile_id is not None and args.profile_id == ctx.agent_profile_id:
+        raise ToolError("不能删除智能助手当前正在使用的档案；请在设置页处理", code="self_profile")
+    role, profile = find_profile(await load_settings(ctx), args.profile_id)
+    if role["active_profile_id"] == profile["id"]:
+        raise ToolError(f"档案「{profile['name']}」是{role['label']}当前正在使用的档案，无法删除；请先激活其他档案",
+                        code="active_profile")
+    return role, profile
+
+
+async def preview_delete_profile(args: DeleteProfile, ctx: ToolContext) -> Preview:
+    role, profile = await deletion_target(args, ctx)
+    return Preview(f"删除{role['label']}档案「{profile['name']}」",
+                   [{"label": "档案", "before": f"#{profile['id']} {profile['name']} [{profile['provider']}] "
+                                                f"{profile['config'].get('model') or ''}".strip(), "after": "删除"}],
+                   warnings=["删除后不可恢复，档案中保存的密钥一并删除"],
+                   focus=settings_focus(role=role["role"], profile_id=profile["id"]))
+
+
+async def delete_model_profile(args: DeleteProfile, ctx: ToolContext) -> ToolOutput:
+    role, profile = await deletion_target(args, ctx)
+    check(await ctx.client.delete(f"/api/settings/profiles/{args.profile_id}"), "删除配置档案")
+    return ToolOutput({"deleted": args.profile_id, "role": role["role"]},
+                      text=f"已删除{role['label']}档案 #{profile['id']}「{profile['name']}」。",
+                      mutation=SETTINGS, focus=settings_focus(role=role["role"]))
+
+
+async def preview_reset_business(args: Empty, ctx: ToolContext) -> Preview:
+    business = (await load_settings(ctx))["business"]
+    search = business["search"]
+    changes = [
+        {"label": "GPU 互斥", "before": business["enforce_gpu_lock"], "after": "恢复配置文件值"},
+        {"label": "检索调参", "before": f"三渠道权重={search['channel_weights']}，rrf_k={search['rrf_k']}，"
+                                     f"候选数={search['candidates']}", "after": "恢复配置文件值"},
+        {"label": "默认音色", "before": business["default_voice"] or "无覆盖", "after": "清除覆盖（跟随语音合成档案）"},
+    ]
+    return Preview("重置业务设置：删除页面上保存的全部业务覆盖，恢复配置文件中的值（保存即热生效）", changes,
+                   focus=settings_focus(section="processing"))
+
+
+async def reset_business_settings(args: Empty, ctx: ToolContext) -> ToolOutput:
+    check(await ctx.client.delete("/api/settings/business"), "重置业务设置")
+    business = (await load_settings(ctx))["business"]
+    return ToolOutput(business, text=f"已重置业务设置，当前值：{business}", mutation=SETTINGS,
+                      focus=settings_focus(section="processing"))
+
+
+async def list_voice_catalog(args: Empty, ctx: ToolContext) -> ToolOutput:
+    data = check(await ctx.client.get("/api/settings/voices/catalog"), "读取音色目录")
+    clone = data.get("clone") or {}
+    lines = [f"语音合成后端：{data['backend']}；默认音色覆盖：{data.get('default_voice') or '无'}；"
+             f"克隆：{'支持（' + str(clone.get('mode')) + '）' if clone.get('supported') else '目录未声明'}"]
+    if data.get("error"):
+        lines.append(f"目录查询出错：{data['error']}")
+    for group in data.get("groups") or []:
+        voices = group.get("voices") or []
+        shown = "、".join(f"{v.get('label') or v['voice_id']}({v['voice_id']})" for v in voices[:40])
+        more = f" 等 {len(voices)} 个" if len(voices) > 40 else ""
+        lines.append(f"{group.get('label')}：{shown or '（空）'}{more}")
+    library = data.get("library") or []
+    lines.append("音色库：" + ("、".join(f"{v.get('label') or v.get('name') or v['voice_id']}({v['voice_id']})"
+                                     for v in library) or "（空）"))
+    return ToolOutput(data, text="\n".join(lines), focus=settings_focus(section="voices"))
+
+
+class RegisterVoice(StrictModel):
+    name: str = Field(min_length=1, max_length=60, description="音色显示名")
+    provider: Literal["minimax", "dashscope", "self", "openai"] = Field(description="音色所属厂商")
+    voice_id: str = Field(min_length=1, max_length=200, description="厂商侧的音色 ID")
+    kind: Literal["preset", "clone"] = "preset"
+    notes: str = Field(default="", max_length=400)
+
+
+async def preview_register_voice(args: RegisterVoice, ctx: ToolContext) -> Preview:
+    changes = [{"label": k, "after": v} for k, v in args.model_dump().items() if v not in ("", None)]
+    return Preview(f"把音色「{args.name}」登记到音色库", changes, focus=settings_focus(section="voices"))
+
+
+async def register_voice(args: RegisterVoice, ctx: ToolContext) -> ToolOutput:
+    voice = check(await ctx.client.post("/api/settings/voices", args.model_dump()), "登记音色")
+    return ToolOutput({"voice": voice}, text=f"已登记音色 #{voice['id']}「{voice['name']}」voice_id={voice['voice_id']}。",
+                      mutation=SETTINGS, focus=settings_focus(section="voices"))
+
+
+class DeleteVoice(StrictModel):
+    voice_id: int = Field(description="音色库记录 ID（list_voices 中的 #ID，不是厂商 voice_id）")
+
+
+async def voice_target(args: DeleteVoice, ctx: ToolContext) -> tuple[dict, dict]:
+    data = await load_settings(ctx)
+    voice = next((v for v in data["voices"] if v["id"] == args.voice_id), None)
+    if voice is None:
+        raise ToolError(f"音色 #{args.voice_id} 不存在", code="missing_voice")
+    return data, voice
+
+
+async def preview_delete_voice(args: DeleteVoice, ctx: ToolContext) -> Preview:
+    data, voice = await voice_target(args, ctx)
+    warnings = ["只删除音色库记录，厂商侧的音色不会被删除"]
+    if data["business"]["default_voice"] == voice["voice_id"]:
+        warnings.append("这是当前默认音色：删除后默认音色覆盖会一并清除，改为跟随语音合成档案")
+    return Preview(f"从音色库删除「{voice['name']}」",
+                   [{"label": "音色", "before": f"#{voice['id']} {voice['name']} voice_id={voice['voice_id']} "
+                                                f"[{voice['provider']}/{voice['kind']}]", "after": "删除"}],
+                   warnings=warnings, focus=settings_focus(section="voices"))
+
+
+async def delete_voice(args: DeleteVoice, ctx: ToolContext) -> ToolOutput:
+    data, voice = await voice_target(args, ctx)
+    check(await ctx.client.delete(f"/api/settings/voices/{args.voice_id}"), "删除音色")
+    cleared = data["business"]["default_voice"] == voice["voice_id"]
+    return ToolOutput({"deleted": args.voice_id, "default_cleared": cleared},
+                      text=f"已删除音色 #{voice['id']}「{voice['name']}」" + ("，并清除了默认音色覆盖。" if cleared else "。"),
+                      mutation=SETTINGS, focus=settings_focus(section="voices"))
+
+
+CONSENT = "我确认拥有该声音的合法使用授权"
+DECLINE = "取消"
+CLONE_UPLOAD = {"openai", "minimax"}  # 上传样本克隆；dashscope 用公网 URL 复刻
+
+
+class CloneVoice(StrictModel):
+    """注意：没有 consent 字段——授权只能由用户在表单中确认，模型无法代为声明。"""
+
+    name: str | None = Field(default=None, max_length=60, description="建议的音色名称（表单中可修改）")
+    ref_text: str | None = Field(default=None, max_length=400, description="样本对应的参考文本（可选）")
+    attachment: str | None = Field(default=None, description="声音样本附件 attachment://…（openai、minimax 后端必填；"
+                                                              "wav/mp3/m4a）")
+    audio_url: str | None = Field(default=None, max_length=1000, description="公网可访问的样本 URL（dashscope 后端）")
+
+
+async def clone_backend(args: CloneVoice, ctx: ToolContext) -> str:
+    backend = (await load_settings(ctx))["business"]["tts_backend"]
+    if backend in CLONE_UPLOAD:
+        if not args.attachment:
+            raise ToolError(f"当前语音合成后端 {backend} 需要上传声音样本：请让用户把 wav/mp3/m4a 样本作为附件发送，"
+                            "再传 attachment", code="invalid_arguments")
+    elif backend != "dashscope":
+        raise ToolError(f"当前语音合成后端 {backend} 不支持克隆；请先激活 MiniMax（上传样本）或阿里云（URL 复刻）档案",
+                        code="unsupported_backend")
+    return backend
+
+
+async def preview_clone_voice(args: CloneVoice, ctx: ToolContext) -> Preview:
+    backend = await clone_backend(args, ctx)
+    changes = [{"label": "语音合成后端", "after": backend},
+               {"label": "样本", "after": args.attachment if backend in CLONE_UPLOAD else (args.audio_url or "在表单中填写 URL")}]
+    if args.name:
+        changes.append({"label": "音色名称", "after": args.name})
+    return Preview("克隆音色（确认后会弹出表单，由你本人确认声音授权）", changes,
+                   warnings=["克隆会把声音样本发送给语音合成服务；只有在表单中勾选授权确认后才会执行"],
+                   focus=settings_focus(section="voices"))
+
+
+def consent_question(args: CloneVoice, backend: str) -> dict:
+    fields = [{"id": "name", "label": "音色名称", "type": "text", "required": True, **({"default": args.name} if args.name else {})},
+              {"id": "ref_text", "label": "参考文本（可选）", "type": "text",
+               **({"default": args.ref_text} if args.ref_text else {})}]
+    if backend == "dashscope":
+        fields.append({"id": "audio_url", "label": "样本公网 URL", "type": "text", "required": True,
+                       **({"default": args.audio_url} if args.audio_url else {})})
+    return {"id": "clone_consent", "header": "声音授权", "fields": fields,
+            "question": "克隆音色前请确认：你拥有该声音的合法使用授权（本人声音或已获得声音所有者授权）。",
+            "options": [{"label": CONSENT}, {"label": DECLINE}]}
+
+
+def consented(answer: dict) -> dict | None:
+    """只有表单答复中明确选择了授权项才返回表单值；其余（取消、拒绝、未选）一律返回 None。"""
+    if answer.get("cancelled"):
+        return None
+    item = next((a for a in answer.get("answers") or [] if a.get("id") == "clone_consent"), None)
+    if item is None or CONSENT not in (item.get("selected") or []) or DECLINE in (item.get("selected") or []):
+        return None
+    return item.get("values") or {}
+
+
+async def clone_voice(args: CloneVoice, ctx: ToolContext) -> ToolOutput:
+    runtime = ctx.extra.get("runtime")
+    if runtime is None or ctx.session_id is None:
+        raise ToolError("需要在 Mindex 页面助手中确认声音授权；当前环境无法弹出授权表单", code="consent_unavailable")
+    backend = await clone_backend(args, ctx)
+    answer = await runtime.ask_question(ctx.session_id, ctx.extra.get("call_id"), [consent_question(args, backend)])
+    values = consented(answer)
+    if values is None:
+        raise ToolError("用户未确认声音授权，已取消克隆", code="consent_declined")
+    name = str(values.get("name") or args.name or "").strip()
+    if not name:
+        raise ToolError("表单未填写音色名称，已取消克隆", code="invalid_arguments")
+    data = {"name": name, "consent": True, "ref_text": str(values.get("ref_text") or args.ref_text or "").strip()}
+    if backend == "dashscope":
+        data["audio_url"] = str(values.get("audio_url") or args.audio_url or "").strip()
+    files = {"file": args.attachment} if backend in CLONE_UPLOAD else {}
+    voice = check(await ctx.client.upload("/api/settings/voices/clone", files=files, data=data), "克隆音色")
+    return ToolOutput({"voice": voice},
+                      text=f"已克隆音色 #{voice['id']}「{voice['name']}」voice_id={voice['voice_id']}（{voice.get('status')}）。"
+                           "如需设为默认音色，可用 update_business_settings(default_voice_id=…)。",
+                      mutation=SETTINGS, focus=settings_focus(section="voices"))
+
+
 def specs() -> list[ToolSpec]:
     return [
         ToolSpec("get_settings", "settings", "读取设置：各模型角色的生效配置、配置档案（ID、厂商、模型、密钥掩码）与业务设置。",
@@ -329,4 +533,22 @@ def specs() -> list[ToolSpec]:
         ToolSpec("activate_model_profile", "settings",
                  "激活配置档案，立即热生效。不能切换智能助手自身的档案。", ActivateProfile, "danger",
                  activate_model_profile, preview_activate_profile),
+        ToolSpec("delete_model_profile", "settings",
+                 "删除配置档案（不可恢复）。不能删除各角色正在使用的档案，也不能删除智能助手自身的档案。",
+                 DeleteProfile, "danger", delete_model_profile, preview_delete_profile),
+        ToolSpec("reset_business_settings", "settings",
+                 "重置业务设置：清除页面保存的 GPU 互斥、检索调参与默认音色覆盖，恢复配置文件中的值。",
+                 Empty, "danger", reset_business_settings, preview_reset_business),
+        ToolSpec("list_voice_catalog", "settings",
+                 "查询当前语音合成后端的音色目录：系统音色分组、音色库、默认音色与是否支持克隆。",
+                 Empty, "read", list_voice_catalog),
+        ToolSpec("register_voice", "settings", "把已有的厂商音色（voice_id）登记到音色库。",
+                 RegisterVoice, "write", register_voice, preview_register_voice),
+        ToolSpec("delete_voice", "settings",
+                 "从音色库删除一条音色记录（按记录 ID）；若它是默认音色，默认音色覆盖会一并清除。",
+                 DeleteVoice, "danger", delete_voice, preview_delete_voice),
+        ToolSpec("clone_voice", "settings",
+                 "克隆音色：openai/minimax 后端需要声音样本附件（attachment://），dashscope 后端使用公网样本 URL。"
+                 "执行时会弹出表单，由用户本人确认声音授权；你无法代为授权。仅在 Mindex 页面助手中可用。",
+                 CloneVoice, "danger", clone_voice, preview_clone_voice),
     ]

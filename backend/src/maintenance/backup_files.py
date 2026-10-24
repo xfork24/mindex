@@ -147,6 +147,8 @@ def excluded(relative):
         return '数据库通过 SQLite backup API 单独保存'
     if path.name == 'agent.sqlite3' and len(path.parts) == 1:
         return '智能助手会话与密钥保险库属于本机运行状态，不进入备份'
+    if path.parts[:1] == ('agent-attachments',):
+        return '智能助手附件是会话内临时暂存，过期由 mindex clean 回收，不进入备份'
     if path.suffix in MODEL_SUFFIXES:
         return '模型权重需单独补充'
     if path.name == '.env' or path.name.startswith('.env.'):

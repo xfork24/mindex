@@ -75,7 +75,7 @@
 
 画面意象 `visual` 是每镜一句中文画面描述，上限 120 字（按 Unicode 字符计）。存储时去掉首尾空白，为空时不写入该键，所以没有 visual 的老分镜重新保存后内容版本号不变。模型输出超过 120 字时截断并记录 `split-visual-truncated` 诊断，拆分不失败；人工或智能助手提交超过 120 字时整份请求以 422 拒绝（“第 N 个分镜的画面意象超过 120 字上限（当前 M 字）”），不写入任何分镜。visual 不进任何签名：召回只看 query、粒度、数量和召回设置，配音和选片只看 text，所以只改 visual 时召回、配音、选片和渲染版本仍然复用。
 
-分镜表的文本与查询详情中，第一项是“画面意象”输入框，改动后标为未保存；格内摘要在 visual 非空时完整显示，为空时不显示这一行。保存此镜时整份 PATCH 带上每镜当前的 visual，被拒时保留草稿和未保存标记并显示服务端错误。合并分镜时跳过空值，按顺序用“；”拼接，截断到 120 字，全为空时合并结果没有 visual。智能助手的 update、split 和 merge 规则相同（`visual=""` 表示清空，拆开时各段默认继承原镜 visual），`shot_rows` 输出 visual，为空时为 null。
+分镜表的文本与查询详情中，输入框依次为“旁白与字幕”“画面意象”“召回关键字”（即 query），画面意象改动后标为未保存；格内摘要在 visual 非空时完整显示，为空时不显示这一行。保存此镜时整份 PATCH 带上每镜当前的 visual，被拒时保留草稿和未保存标记并显示服务端错误。合并分镜时跳过空值，按顺序用“；”拼接，截断到 120 字，全为空时合并结果没有 visual。智能助手的 update、split 和 merge 规则相同（`visual=""` 表示清空，拆开时各段默认继承原镜 visual），`shot_rows` 输出 visual，为空时为 null。
 
 按画面意象重写召回词：在文本与查询详情中修改画面意象后，点击“按画面意象重写召回词”。前端用草稿中当前的 visual 请求建议，请求期间禁用按钮；成功后只替换草稿里的 query 并标为未保存，点击“保存此镜”后才生效，在此之前已保存的 query 和召回产物不变。失败时在编辑器中显示错误，草稿和未保存标记不变。服务端用 `suggest_query` 调用一次拆分镜模型（不重试），参考前后镜的 text 和素材画面词表。
 
@@ -93,7 +93,7 @@
 
 “构建成片”先显示复用、重建、阻塞和无需执行的清单，确认后执行。预检令牌绑定方案、输入版本与生效参数，提交时变化会要求重新预检。每格也支持单独执行或复用，强制重新生成是单独入口。
 
-某节点失败后，其他独立镜头及分支继续执行，依赖失败节点的后续节点标为阻塞。必需依赖未齐时不合成新成片，已有成片始终可播放和下载。再次预检续建会复用输入指纹和文件哈希均匹配的成功版本。构建状态为 running/complete/partial/failed，节点另有 reused/blocked/skipped 状态。
+某节点失败后，其他独立镜头及分支继续执行，依赖失败节点的后续节点标为阻塞。必需依赖未齐时不合成新成片，已有成片始终可播放和下载。再次预检续建会复用输入指纹和文件哈希均匹配的成功版本。构建状态为 running/complete/partial/failed/cancelled，节点另有 reused/blocked/skipped 状态；界面遇到未知状态时显示原始值。
 
 逐镜选片按“选择召回候选 → 拖动定长窗口 → 保存当前窗口”操作。召回和选片详情分别提供候选预览、设为参考锚点与恢复自动选择；自动模式沿用综合评分，不固定使用首个候选。锚点按方案和分镜保存，绑定召回版本与候选 ID。选择只修改构建输入，保留已有选片与视频；更换锚点会移除此前确认范围。切换召回版本后，人工锚点来自其他版本时显示具体冲突，需重新选择候选或恢复自动模式。
 
@@ -114,6 +114,20 @@
 旧方案没有记录默认音色与人工覆盖的区别，现按跟随默认处理；旧值保留为 `legacy_voice` 参考，不再参与执行。读取时仅在内存中规范化，下一次受执行锁保护的写操作才保存；历史产物与成片快照不修改。若需要固定某个旧音色，可重新明确指定。
 
 仍使用全局 `studio.lock` 串行执行。方案编辑、选择、删除任务、ZIP 导出与执行互斥，冲突返回 409。服务重启后的未完成构建保留历史并标为中断，可重新预检续建。
+
+## 取消执行与删除方案
+
+构建执行中，“构建成片”旁显示“取消执行”。点击后请求取消（`POST /jobs/{id}/builds/{build}/cancel`），工作日志记一条“已请求取消，当前节点完成后停止”，按钮显示为正在取消。执行器在下一个节点开始前检查取消标记（进程内事件与哨兵文件 `builds/<build_id>.cancel`，跨进程可见）：已开始的节点照常完成，其余 pending 节点标为阻塞、原因“已取消”，构建状态记为 `cancelled`，已生成的版本全部保留，之后可重新预检续建。服务重启恢复只处理 running 的构建，不改变已取消的构建。只有 running 构建可以取消，其他状态返回 409。
+
+旧任务的步骤执行（`/steps`、`/run`）运行时，页面显示执行中提示和“取消执行”按钮（`POST /jobs/{id}/cancel`）：worker 在步骤之间检查任务目录下的 `steps.cancel` 哨兵，当前步骤完成后停止，执行状态记为 `cancelled`，未开始的步骤保持原状态。
+
+方案栏的“删除方案”需要二次确认，只剩一个方案时不可用。`DELETE /jobs/{id}/plans/{plan}` 在创作修改锁内只删除方案记录：版本、构建记录和文件都保留，不再被引用的产物由 `mindex clean` 按策略回收。删除的是当前方案时，切换到其余方案中创建时间最新的一个。有构建正在执行时返回 409，删除唯一的方案返回 422（“至少保留一个方案”），两种情况都不做修改。
+
+## 诊断与智能助手
+
+`GET /jobs/{id}/plans/{plan}/diagnostics` 汇总一个方案的状态，只读、不加锁，构建执行期间也可调用：分镜的硬性检查、软性问题与文案覆盖；方案烧录字幕时的字幕滤镜与字体检查；各已选节点是否缺失、失败、文件损坏或过期，以及与 `conflicts` 一致的变化原因（例如“旁白已变化”）；构建预检摘要；各阶段当前的输入（`inputs_by_stage`）。智能助手的 `diagnose_plan` 用它解释“为什么这个分镜要重建”，`run_column` 用 `inputs_by_stage` 组装整列执行的输入。
+
+智能助手在创作页可完成的操作见 [智能助手](agent.md#能力范围与缺口)：`studio` 领域覆盖任务、方案、文案、分镜（含逐镜召回设置、图片或视频召回）、构建、取消与删除方案；`studio_detail` 领域覆盖诊断、版本依赖、召回词建议、素材摘要、版本预览、整列执行和人工选片。人工选片工具与页面走同一组接口：`get_selection_candidates` 读取 selection-context，`preview_selection` 用候选加起点（定长窗口，必要时先设人工锚点）或素材加起止时间（任意区间）调用 range-preview，`confirm_selection` 提交与预览一致的请求体和 preview_token 调用 range-confirm。方案 revision 或对齐结果在预览后变化时提交会被拒绝，需要重新预览；没有成功配音或有构建正在执行时，选片工具直接返回原因。
 
 ## 文件与迁移
 
@@ -157,6 +171,8 @@ data/studio/<job_id>/
 | PATCH /jobs/{id}/title | 独立编辑任务标题 |
 | POST /jobs/{id}/plans | 新建、copy_from 复制方案或 from_final 恢复成片方案 |
 | POST /jobs/{id}/plans/{plan}/activate | 切换方案，不执行任何阶段 |
+| DELETE /jobs/{id}/plans/{plan} | 只删除方案记录，版本与文件保留；删当前方案时切到最新创建的其余方案。有构建执行 409，唯一方案 422 |
+| GET /jobs/{id}/plans/{plan}/diagnostics | 方案诊断：分镜检查、字幕环境、已选节点状态与变化原因、预检摘要、`inputs_by_stage`；只读、不加锁 |
 | PATCH /jobs/{id}/plans/{plan} | 携 revision 保存名称、options 或完整 shots |
 | POST /jobs/{id}/plans/{plan}/query-media | multipart file + kind=image/video；校验、去重上传并返回 media_id、预览 URL，201 |
 | POST /jobs/{id}/plans/{plan}/shots/{shot}/query-suggestion | 可选 `visual`（省略时用已保存的值）；返回建议 `{"query": ...}`，不保存。只读、不加锁，分镜与版本号不变。任务、方案或分镜不存在返回 404（“找不到创作任务 / 构建方案 / 分镜”）；visual 为空返回 422“请先填写画面意象，再重写召回词”，超过 120 字返回 422；这两种情况都不调用模型。模型超时、不可用或返回空 query 时返回 503“召回词重写失败：…” |
@@ -169,6 +185,8 @@ data/studio/<job_id>/
 | POST /jobs/{id}/plans/{plan}/nodes | revision、stage、shot_id、inputs、force；明确输入版本，202 |
 | POST /jobs/{id}/plans/{plan}/regenerate-column | revision、stage、inputs_by_shot；强制重跑一列，split 的输入表为空，其余绑定全部当前分镜输入，202 |
 | GET /jobs/{id}/builds/{build}/logs?after=0 | 按 seq 增量读取执行日志，返回 next_seq、has_more；无日志的旧执行标记 legacy |
+| POST /jobs/{id}/builds/{build}/cancel | 请求取消运行中的构建，返回 `{build_id, status: "cancelling"}`；当前节点完成后停止，非 running 409 |
+| POST /jobs/{id}/cancel | 请求取消旧任务的步骤执行，当前步骤完成后停止；执行状态不是 running 时 409 |
 | GET /sources/{source}/shots | 按时间排列的镜头及可见性 |
 | POST /jobs/{id}/plans/{plan}/anchor | revision、shot_id、mode=auto/manual；manual 还需 recall_version、candidate_id；只保存输入 |
 | GET /jobs/{id}/plans/{plan}/shots/{shot}/selection-context | 实际锚点、候选引用、配音版本、合法范围、定长时长、帧步长、镜头边界及缓存视频/缩略图 |

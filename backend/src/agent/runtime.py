@@ -16,7 +16,7 @@ cancel                      取消当前轮次（turn/end aborted）
 ==========================  ==============================================
 
 ``BuiltinRuntime`` 跑在 Web 进程的 asyncio 事件循环上：每个会话同一时间只有一个轮次；需要确认或提问时
-轮次挂起（status=waiting），收到答复后继续；构建由 ``watcher`` 跟踪，结束时排队一轮 followup 总结。
+轮次挂起（status=waiting），收到答复后继续；构建与后台任务由 ``watcher`` 跟踪，结束时排队一轮 followup 总结。
 """
 
 from __future__ import annotations
@@ -31,11 +31,13 @@ from typing import Any, Protocol
 from uuid import uuid4
 
 from mindex.agent import policy
+from mindex.agent.domains import touch
 from mindex.agent.llm.types import (
     Assembler,
     LlmError,
     LlmRequest,
     assistant_message,
+    image_block,
     parse_arguments,
     tool_calls,
     tool_message,
@@ -44,23 +46,63 @@ from mindex.agent.llm.types import (
 from mindex.agent.prompts import system_prompt
 from mindex.agent.registry import ToolContext, ToolError, ToolOutput, ToolRegistry
 from mindex.agent.session_store import SessionStore, derive_messages
+from mindex.agent.vision import (
+    IMAGE_TOKENS,
+    image_count,
+    is_image_ref,
+    make_loader,
+    materialize,
+    protocol_for,
+)
+from mindex.shared.agent_domains import LOADABLE_DOMAINS, PAGE_DOMAIN
 
 log = logging.getLogger(__name__)
 
 
-PAGE_DOMAINS = {"studio": ("studio",), "settings": ("settings",), "search": ("search", "library"),
-                "admin": ("library", "search"), "persons": ("library",)}
+PAGE_DOMAINS = PAGE_DOMAIN
+# 用户附件中作为图片交给模型的类型（SVG 等矢量格式无法解码为位图，只按普通附件列出）。
+VISION_TYPES = ("image/jpeg", "image/png", "image/webp", "image/gif", "image/bmp", "image/tiff")
+NO_VISION_TOOL_NOTE = "（当前模型未开启视觉输入：图片未发送给模型，仅在面板展示）"
+NO_VISION_PROMPT = ("\n\n## 图片\n当前智能助手模型未开启视觉输入：对话中的图片（用户附件、工具返回的画面）不会发送给你。"
+                    "不要假装看过图片内容；需要判断画面时，请借助检索、识别等工具的文字结果，"
+                    "或提示用户在设置页为支持视觉的模型档案开启「视觉输入」。")
+
+
+def vision_settings(settings) -> tuple[bool, int]:
+    """当前生效的视觉开关与单次请求图片上限（settings 每轮从运行时配置读取，热生效）。"""
+    llm = getattr(settings, "llm", None)
+    return bool(getattr(llm, "vision", False)), int(getattr(settings, "max_images", 8))
+
+
+async def _no_loader(ref: str) -> bytes:  # 视觉关闭时 materialize 不读取图片
+    raise RuntimeError("视觉输入未开启")
+
+
+def page_domain(page: dict | None) -> str | None:
+    """当前页面对应的工具领域；没有对应领域的页面返回 None。"""
+    return PAGE_DOMAIN.get((page or {}).get("page", ""))
 
 
 def page_domains(page: dict | None) -> tuple[str, ...]:
-    """第一期工具共 29 个，全部加载（跨页面需求很常见，例如在创作页要求更换模型）；
-    只按页面调整工具顺序，让当前页面相关的工具排在前面。"""
-    return PAGE_DOMAINS.get((page or {}).get("page", ""), ())
+    """当前页面领域（排在工具列表前面）；没有对应领域时为空。"""
+    domain = page_domain(page)
+    return (domain,) if domain else ()
+
+
+def size_label(size: int) -> str:
+    """附件大小的简短文字（B / KB / MB / GB），写进给模型看的附件行。"""
+    value = float(size)
+    for unit in ("B", "KB", "MB"):
+        if value < 1024:
+            return f"{int(value)} {unit}" if unit == "B" else f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{value:.1f} GB"
 
 
 class AgentRuntime(Protocol):
     async def create_or_resume(self, session_id: str | None = None, title: str = "") -> dict: ...
-    async def prompt(self, session_id: str, content: list[dict], *, context: dict | None = None) -> dict: ...
+    async def prompt(self, session_id: str, content: list[dict], *, context: dict | None = None,
+                     attachments: list[dict] | None = None) -> dict: ...
     def events(self, session_id: str, after_seq: int = -1, *, follow: bool = True) -> AsyncIterator[dict]: ...
     async def answer_approval(self, session_id: str, request_id: str, outcome: str, *, grant: bool = False) -> None: ...
     async def answer_question(self, session_id: str, request_id: str, answers: list[dict]) -> None: ...
@@ -107,8 +149,9 @@ class BuiltinRuntime:
         self.approvals = approvals  # False = 没有确认通道（无头调用），write/danger 一律 unavailable
         self._sessions: dict[str, _Session] = {}
         self._started = False
-        self.watcher = None  # BuildWatcher，由装配处注入
+        self.watcher = None  # TaskWatcher（构建与后台任务跟踪），由装配处注入
         self.feed = None  # ChangeFeed：改动与定位的全局通道，由装配处注入
+        self.attachments = None  # AttachmentStore：附件暂存，由装配处注入
 
     # ------------------------------------------------------------ 生命周期
     def state(self, sid: str) -> _Session:
@@ -197,14 +240,29 @@ class BuiltinRuntime:
         return list(self.state(session_id).pending.values())
 
     async def prompt(self, session_id: str, content: list[dict], *, context: dict | None = None,
-                     source: str = "user") -> dict:
+                     source: str = "user", attachments: list[dict] | None = None) -> dict:
+        """``attachments`` 为已由调用方校验归属的附件元数据（ref/filename/content_type/bytes）：
+        写进 ``user/message`` 的 ``attachments`` 字段供界面渲染，并在文本末尾逐行列出供模型引用。"""
         await self.start()
         session = self.store.get(session_id)
         state = self.state(session_id)
         text = "".join(b.get("text", "") for b in content if b.get("type") == "text").strip()
         if not text:
             raise ValueError("消息不能为空")
-        message = user_message(text, source)
+        items = [{k: item[k] for k in ("ref", "filename", "content_type", "bytes")} for item in attachments or []]
+        body = text
+        if items:
+            body += "\n\n" + "\n".join(
+                f"附件：{item['ref']} {item['filename']}（{item['content_type']}，{size_label(item['bytes'])}）"
+                for item in items)
+        message = user_message(body, source)
+        if items:
+            message["attachments"] = items
+            # 图片附件另附引用块（只存引用；视觉开启时发请求前才解析为图片数据）。
+            for item in items:
+                ctype = str(item["content_type"]).split(";", 1)[0].strip().lower()
+                if ctype in VISION_TYPES and is_image_ref(item["ref"]):
+                    message["content"].append(image_block(item["ref"], ctype))
         busy = state.task is not None and not state.task.done()
         if busy:
             if source != "followup":
@@ -327,10 +385,13 @@ class BuiltinRuntime:
         self._append(sid, "turn/start", {"turn": turn})
         reason: dict = {"kind": "completed"}
         page = context or self.store.get(sid)["context"] or {}
+        current = page_domain(page)
         step = 0
         assembler = None
         llm = None
         try:
+            if current:
+                self._touch_domains(sid, [current])
             context_message = self._context_message(sid, context)
             if context_message:
                 self._append(sid, "user/message", context_message)
@@ -346,10 +407,13 @@ class BuiltinRuntime:
                     break
                 self._append(sid, "step/start", {"turn": turn, "step": step})
                 registry = self.registry
+                messages, note = await self._model_messages(sid, settings, llm)
                 request = LlmRequest(
-                    system=system_prompt(page),
-                    messages=derive_messages(self.store.events(sid), budget=settings.max_context_tokens),
-                    tools=registry.schemas(first=page_domains(page)),
+                    system=system_prompt(page, self.loaded_domains(sid), registry.domain_tools()) + note,
+                    messages=messages,
+                    # 每步重新读取已加载领域：load_tools 在本步加载的领域从下一步起生效。
+                    tools=registry.schemas(first=(current,) if current else (),
+                                           domains=self._active_domains(sid)),
                     max_tokens=settings.llm.max_tokens,
                 )
                 assembler = Assembler()
@@ -396,6 +460,31 @@ class BuiltinRuntime:
             reason = {"kind": "error", "error": {"message": str(exc)[:500], "code": "internal"}}
         self._append(sid, "turn/end", {"turn": turn, "reason": reason})
 
+    # ------------------------------------------------------------ 模型输入
+    def _image_loader(self, sid: str):
+        """面板会话只能读取归属本会话的附件；本站 /api/ 图片经回环客户端读取。"""
+        attachment = (self.attachments.resolver(session_id=sid, owner="session")
+                      if self.attachments is not None else None)
+        return make_loader(attachment=attachment, client=self.client_factory(None))
+
+    async def _model_messages(self, sid: str, settings, llm) -> tuple[list[dict], str]:
+        """本步发给模型的消息与系统提示附注。
+
+        历史从日志派生（只含图片引用）；视觉开启时按协议把最近 ``max_images`` 张解析成内存中的图片数据，
+        关闭时去掉全部图片，并在系统提示里说明图片没有发送。解析结果只进入本次请求，不写日志、不推 SSE。
+        """
+        vision, limit = vision_settings(settings)
+        history = derive_messages(self.store.events(sid), budget=settings.max_context_tokens,
+                                  image_tokens=IMAGE_TOKENS if vision else 0, image_limit=limit)
+        images = image_count(history)
+        if not images:
+            return history, ""
+        if not vision:
+            return await materialize(history, enabled=False, limit=0, load=_no_loader), NO_VISION_PROMPT
+        messages = await materialize(history, enabled=True, limit=limit, load=self._image_loader(sid),
+                                     protocol=protocol_for(getattr(llm, "provider", None)))
+        return messages, ""
+
     def _close_pending(self, sid: str, outcome: str) -> None:
         state = self.state(sid)
         for request_id, item in list(state.pending.items()):
@@ -426,6 +515,32 @@ class BuiltinRuntime:
             state.pending.pop(request_id, None)
             if state.status == "waiting":
                 self._set_status(sid, "running")
+
+    # ------------------------------------------------------------ 工具领域
+    def loaded_domains(self, sid: str) -> list[str]:
+        """会话已加载的非 meta 领域，按最近使用排序（末尾为最近）。"""
+        return list(self.store.get(sid).get("loaded_domains") or [])
+
+    def _active_domains(self, sid: str) -> set[str]:
+        return {"meta", *self.loaded_domains(sid)}
+
+    def _touch_domains(self, sid: str, domains) -> list[str]:
+        loaded = self.loaded_domains(sid)
+        updated = touch(loaded, domains)
+        if updated != loaded:
+            self.store.update(sid, loaded_domains=updated)
+        return updated
+
+    def load_domains(self, sid: str, domains: list[str]) -> list[str]:
+        """``load_tools`` 的落点：把 domains 标为最近使用并持久化，返回加载后的领域列表。"""
+        invalid = [d for d in domains if d not in LOADABLE_DOMAINS]
+        if invalid:
+            raise ToolError(f"未知或不可加载的工具领域：{'、'.join(map(str, invalid))}；"
+                            f"可选：{'、'.join(LOADABLE_DOMAINS)}", code="invalid_arguments")
+        loaded = self._touch_domains(sid, domains)
+        self._append(sid, "plugin:mindex/tools-loaded", {"domains": list(domains), "loaded": loaded},
+                     ignorable=True)
+        return loaded
 
     def record_gap(self, sid: str | None, request: str, reason: str, suggestion: str = "") -> dict:
         item = self.store.add_gap(sid, request, reason, suggestion)
@@ -469,8 +584,9 @@ class BuiltinRuntime:
             self._append(sid, "plugin:mindex/grant", {"tool": spec.name, "scope": "session"}, ignorable=True)
         return answer["outcome"], preview
 
-    def _result(self, sid, turn, step, call_id, text, *, error=None, meta=None) -> None:
-        data = {"turn": turn, "step": step, "message": tool_message(call_id, text, is_error=error is not None)}
+    def _result(self, sid, turn, step, call_id, text, *, error=None, meta=None, images=None) -> None:
+        message = tool_message(call_id, text, is_error=error is not None, images=images)
+        data = {"turn": turn, "step": step, "message": message}
         if error is not None:
             data["error"] = error
         if meta is not None:
@@ -483,6 +599,13 @@ class BuiltinRuntime:
             self._result(sid, turn, step, call["id"], f"Error: 未知工具 {call['name']}",
                          error={"name": "UnknownTool", "code": "UNKNOWN_TOOL"})
             return
+        if spec.domain not in self._active_domains(sid):
+            text = (f"工具 {spec.name} 属于领域 {spec.domain}，尚未加载；"
+                    f'请先调用 load_tools(domains=["{spec.domain}"])')
+            self._result(sid, turn, step, call["id"], f"Error: {text}",
+                         error={"name": "ToolNotLoaded", "code": "TOOL_NOT_LOADED", "reason": text,
+                                "domain": spec.domain})
+            return
         try:
             raw = parse_arguments(call["arguments"])
             args = spec.parse(raw)
@@ -491,7 +614,15 @@ class BuiltinRuntime:
             self._result(sid, turn, step, call["id"], f"Error: {message}",
                          error={"name": "ToolError", "code": "invalid_arguments", "reason": message})
             return
-        client = self.client_factory(lambda ref: self.store.resolve_secret(sid, ref))
+        def resolve_secret(ref: str) -> str:
+            return self.store.resolve_secret(sid, ref)
+
+        client = self.client_factory(resolve_secret)
+        if hasattr(client, "with_resolvers"):
+            # 面板会话的工具调用只能使用归属本会话的附件。
+            resolve_attachment = (self.attachments.resolver(session_id=sid, owner="session")
+                                  if self.attachments is not None else None)
+            client = client.with_resolvers(secret=resolve_secret, attachment=resolve_attachment)
         ctx = ToolContext(client=client, session_id=sid, page=page or {}, agent_profile_id=self.agent_profile(),
                           extra={"runtime": self, "call_id": call["id"], "record_gap": self.record_gap})
         try:
@@ -521,6 +652,8 @@ class BuiltinRuntime:
             self._result(sid, turn, step, call["id"], f"Error: 工具执行出错：{exc}",
                          error={"name": type(exc).__name__, "code": "internal", "reason": str(exc)[:500]})
             return
+        if spec.domain != "meta":
+            self._touch_domains(sid, [spec.domain])
         meta = output.meta
         if output.mutation:
             meta = {**(meta or {}), "mutation": output.mutation}
@@ -530,16 +663,26 @@ class BuiltinRuntime:
             media = clean(output.media)
             if media:
                 meta = {**(meta or {}), "media": media}
-        self._result(sid, turn, step, call["id"], output.render(), meta=meta)
+        text = output.render()
+        # 只记录安全的图片引用（附件或本站 /api/ 地址）；日志与 SSE 里永远没有图片数据。
+        images = list(dict.fromkeys(ref for ref in output.images or [] if is_image_ref(ref)))
+        if images and not vision_settings(self.settings())[0]:
+            text += "\n" + NO_VISION_TOOL_NOTE
+        self._result(sid, turn, step, call["id"], text, meta=meta, images=images or None)
         if output.mutation:
             self._append(sid, "plugin:mindex/mutation", output.mutation, ignorable=True)
             if self.feed is not None:
                 self.feed.publish("mutation", self.store.redact(sid, output.mutation), source="agent",
                                   session_id=sid, tab=(page or {}).get("tab_id"))
         self._focus(sid, output.focus, page)
-        if output.watch_build and self.watcher is not None:
-            self._append(sid, "plugin:mindex/build-watch", output.watch_build)
-            self.watcher.watch(sid, output.watch_build)
+        if self.watcher is not None:
+            for target in (output.watch_build, output.watch_task):
+                if not target:
+                    continue
+                try:
+                    self.watcher.register(sid, target)
+                except ValueError:
+                    log.warning("工具 %s 返回了无效的跟踪目标：%s", spec.name, target)
 
 
 def frame_sse(frame: dict) -> str:

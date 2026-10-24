@@ -21,7 +21,7 @@ app = typer.Typer(
 @app.command("tools")
 def agent_tools(
     domain: Annotated[
-        list[str] | None, typer.Option(help="只列出指定领域，可重复：meta/studio/settings/library/search。")
+        list[str] | None, typer.Option(help="只列出指定领域，可重复：meta/studio/studio_detail/library/search/index/persons/settings。")
     ] = None,
     names_only: Annotated[bool, typer.Option("--names-only", help="只输出工具名、风险级别与领域。")] = False,
 ):
@@ -58,6 +58,11 @@ def mcp_command(
     policy: Annotated[
         str | None, typer.Option(help="覆盖 agent.mcp.policy：read / write / all；省略使用配置值。")
     ] = None,
+    domain: Annotated[
+        list[str] | None,
+        typer.Option(help="只导出指定领域的工具，可重复：studio/studio_detail/library/search/index/persons/settings；"
+                     "覆盖 agent.mcp.domains，省略使用配置值（未配置则全部导出）。report_capability_gap 始终导出。"),
+    ] = None,
 ):
     """以 stdio 传输运行 MCP 服务（服务名 mindex），供 deepseek-harness、Claude Code、Codex 等调用。
 
@@ -69,10 +74,19 @@ def mcp_command(
     \b
       mindex mcp
       mindex mcp --policy write
+      mindex mcp --domain studio --domain search
       mindex mcp --base-url http://127.0.0.1:8000
     """
     import asyncio
     import os
+
+    from mindex.shared.agent_domains import LOADABLE_DOMAINS
+
+    unknown = [name for name in domain or [] if name not in LOADABLE_DOMAINS]
+    if unknown:
+        raise typer.BadParameter(
+            f"未知领域：{', '.join(unknown)}；可选：{', '.join(LOADABLE_DOMAINS)}", param_hint="--domain")
+    domains = list(dict.fromkeys(domain)) if domain else None
 
     try:
         from mindex.agent import mcp_server
@@ -90,15 +104,19 @@ def mcp_command(
         if base_url:
             token = os.environ.get(token_env, "").strip() or None
             client = MindexClient(base_url=base_url, token=token)
-            server = mcp_server.build_server(build_registry(), lambda: client, policy=chosen,
-                                             publish=mcp_server.remote_publisher(client))
+            server = mcp_server.build_server(
+                build_registry(), lambda: client, policy=chosen,
+                agent_profile=mcp_server.RemoteAgentProfile(client),
+                record_gap=mcp_server.remote_gap_recorder(client),
+                publish=mcp_server.remote_publisher(client),
+                domains=domains if domains is not None else config.agent.mcp.domains)
         else:
             from mindex.api import create_app
 
             config.agent.mcp.http_enabled = False  # stdio 进程不再挂载 HTTP 端点
             app = create_app(config)
             server = mcp_server.server_for_app(app, app.state.runtime_config, app.state.store,
-                                               policy=policy)
+                                               policy=policy, domains=domains)
         await mcp_server.serve_stdio(server)
 
     asyncio.run(main())

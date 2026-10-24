@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 import re
 import tempfile
@@ -11,7 +12,7 @@ from time import perf_counter
 
 import jieba
 
-from mindex.admin.curation import SOURCE_SQL, Library, source_public
+from mindex.admin.curation import SOURCE_SQL, EntityNotFound, Library, source_public
 from mindex.models.adapters import ModelError, MultimodalEmbedder, make_embedder
 from mindex.processing.indexing import VectorIndex
 from mindex.shared.config import Config, fingerprint
@@ -28,6 +29,13 @@ DOCUMENT_TERMS_CACHE_SIZE = 50000
 QUERY_VECTOR_CACHE_SIZE = 128
 _QUERY_VECTORS: OrderedDict = OrderedDict()
 _QUERY_VECTOR_LOCK = threading.Lock()
+
+
+class SimilarUnavailable(Exception):
+    """种子片段的画面向量在向量库中缺失（库内不一致），找相似无法进行；接口映射为 409。
+
+    刻意不继承 ValueError，以免被通用的 422 处理器吞掉。
+    """
 
 
 def tokens(text: str) -> list[str]:
@@ -169,14 +177,24 @@ class SearchEngine:
                 _QUERY_VECTORS.popitem(last=False)
         return vector
 
-    def _context(self, granularity: str, filters: Filters, *, text=False, person=False):
+    def _active(self) -> dict:
+        """当前检索使用的索引版本：固定索引优先，否则为活动索引；必须已就绪。"""
         active = self.store.index_version(self.index_id) if self.index_id else self.store.active_index()
         if active is None:
             raise ValueError("尚未发布索引，请先完成离线处理并执行 index --activate")
         if active["status"] != "ready":
             raise ModelError("当前索引未就绪")
+        return active
+
+    def _context(self, granularity: str, filters: Filters, *, text=False, person=False):
+        active = self._active()
         if not text or (active["spec"].get("format", 1) == 1 and not person):
             self._validate_space(active)
+        snapshots = self._snapshots(active, granularity, filters)
+        return active, snapshots, VectorIndex(self.store.root, active["id"])
+
+    def _snapshots(self, active: dict, granularity: str, filters: Filters) -> list[dict]:
+        """按隐藏、粒度、素材、时长与分析字段过滤后的候选快照；不做向量空间校验。"""
         snapshots = []
         library = Library(self.store)
         sources, segments = library.overlays()
@@ -205,7 +223,7 @@ class SearchEngine:
             ):
                 continue
             snapshots.append(segment)
-        return active, snapshots, VectorIndex(self.store.root, active["id"])
+        return snapshots
 
     def _result(
         self,
@@ -497,6 +515,64 @@ class SearchEngine:
         # Image queries compare only with video vectors, independent of text-fusion weights.
         ranked = fuse({"video": hits}, {"video": 1}, self.config.search.rrf_k)
         return self._result(active, snapshots, {}, limit, started, ranked=ranked)
+
+    def similar(
+        self, segment_id: str, granularity: str | None = None, limit: int = 20, filters: Filters | None = None
+    ) -> dict:
+        """以库内片段的画面向量找相似片段。
+
+        只读同一索引里已存的 video 向量，不调用查询嵌入服务，因此无需空间校验、离线时也可用。
+        种子有多个窗口向量时，每个窗口一路近邻检索，按等权 RRF 融合（与视频查询一致）。
+        """
+        started = perf_counter()
+        active = self._active()
+        row = self.store.one(
+            "SELECT snapshot FROM index_members WHERE index_id=? AND segment_id=? AND complete=1",
+            (active["id"], segment_id),
+        )
+        if row is None:
+            raise EntityNotFound("片段不在当前索引中或尚未完成")
+        seed = json.loads(row["snapshot"])
+        visual_only = active["spec"].get("format", 1) >= 2
+        if visual_only and "video" not in seed.get("indexed_views", []):
+            raise ValueError("该片段没有画面表示，无法找相似")
+        ids = [
+            r["id"]
+            for r in self.store.rows(
+                "SELECT id FROM representations WHERE index_id=? AND segment_id=? AND view='video' ORDER BY id",
+                (active["id"], segment_id),
+            )
+        ]
+        vectors = VectorIndex(self.store.root, active["id"])
+        found = vectors.vectors(ids) if ids else {}
+        embeddings = [found[i] for i in ids if i in found]
+        if not embeddings:
+            raise SimilarUnavailable("该片段的画面向量缺失，请重建索引后再试")
+        snapshots = [
+            s
+            for s in self._snapshots(active, granularity or seed["kind"], filters or Filters())
+            if (not visual_only or "video" in s.get("indexed_views", []))
+            and s["id"] != seed["id"]
+            and not (
+                s["source_id"] == seed["source_id"]
+                and min(s["end"], seed["end"]) - max(s["start"], seed["start"]) > 0
+            )
+        ]
+        if not snapshots:
+            result = self._result(active, snapshots, {}, limit, started)
+            return {**result, "seed_segment_id": segment_id}
+        eligible = [s["id"] for s in snapshots]
+        routes = {
+            f"video_{index}": vectors.query(embedding, "video", eligible, self.config.search.candidates)
+            for index, embedding in enumerate(embeddings)
+        }
+        weights = {key: 1 / len(routes) for key in routes}
+        fused = fuse(routes, weights, self.config.search.rrf_k)
+        for hit in fused:
+            for match in hit["matches"]:
+                match["route"] = "video"
+        result = self._result(active, snapshots, {}, limit, started, ranked=fused)
+        return {**result, "seed_segment_id": segment_id}
 
 
 def status(

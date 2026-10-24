@@ -2,6 +2,7 @@
 
 请求：``system`` 独立字段，工具为 ``{name, description, input_schema}``；工具结果并入 user
 消息的 ``tool_result`` 块，相邻同角色消息合并以满足严格的 user/assistant 交替。
+图片：user 消息与 ``tool_result`` 内的已解析图片块转为 ``image{source: base64}`` 块。
 流式：``content_block_start/delta/stop`` 映射为 dsh StreamChunk；``stop_reason`` 映射为结束原因。
 """
 
@@ -20,6 +21,31 @@ API_VERSION = "2023-06-01"
 STOP = {"end_turn": "stop", "tool_use": "tool-calls", "max_tokens": "max-tokens", "stop_sequence": "stop"}
 
 
+def image_part(block: dict) -> dict | None:
+    """已解析图片块 → Anthropic ``image`` 块；未解析的引用块（只有 ``ref``）防御性跳过。"""
+    if block.get("type") != "image" or not block.get("data"):
+        return None
+    return {"type": "image", "source": {"type": "base64", "media_type": block.get("mediaType") or "image/jpeg",
+                                        "data": block["data"]}}
+
+
+def content_parts(message: dict, empty: str) -> list[dict]:
+    """按块顺序输出 text / image；没有任何内容时用 ``empty`` 占位（Anthropic 拒绝空内容）。"""
+    parts: list[dict] = []
+    for block in message.get("content", []):
+        if block.get("type") == "text" and block.get("text"):
+            parts.append({"type": "text", "text": block["text"]})
+        elif (image := image_part(block)) is not None:
+            parts.append(image)
+    if not any(p["type"] == "text" for p in parts):
+        parts.insert(0, {"type": "text", "text": empty})
+    return parts
+
+
+def has_images(message: dict) -> bool:
+    return any(image_part(b) is not None for b in message.get("content", []))
+
+
 def convert_messages(messages: list[dict]) -> list[dict]:
     result: list[dict] = []
 
@@ -34,7 +60,10 @@ def convert_messages(messages: list[dict]) -> list[dict]:
     for message in messages:
         role = message["role"]
         if role == "user":
-            push("user", [{"type": "text", "text": message_text(message) or "（空）"}])
+            if has_images(message):
+                push("user", content_parts(message, "（空）"))
+            else:
+                push("user", [{"type": "text", "text": message_text(message) or "（空）"}])
         elif role == "assistant":
             blocks = []
             for block in message.get("content", []):
@@ -52,7 +81,9 @@ def convert_messages(messages: list[dict]) -> list[dict]:
             push("user", [{
                 "type": "tool_result",
                 "tool_use_id": message["toolCallId"],
-                "content": message_text(message) or "（无内容）",
+                # 带图片的工具结果用块数组（text + image）；纯文本保持字符串。
+                "content": content_parts(message, "（无内容）") if has_images(message)
+                else message_text(message) or "（无内容）",
                 **({"is_error": True} if message.get("isError") else {}),
             }])
     if result and result[0]["role"] != "user":

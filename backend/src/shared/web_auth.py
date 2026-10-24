@@ -22,7 +22,8 @@ from mindex.shared.web_assets import frontend_root
 TOKEN_ENV = "MINDEX_WEB_TOKEN"
 COOKIE = "mindex_session"
 # 登录页自身所需的公共静态资源（样式、脚本、文案字典），不含业务数据。
-PUBLIC_PREFIXES = ("/assets/shared/",)
+# /api/agent/attachments 由端点自行鉴权：既接受网页凭证，也接受 MINDEX_MCP_TOKEN（见 agent/api.py）。
+PUBLIC_PREFIXES = ("/assets/shared/", "/api/agent/attachments")
 # /mcp 自行校验 MINDEX_MCP_TOKEN（未设置令牌时不会挂载），不复用网页登录。
 PUBLIC_PATHS = {"/login", "/logout", "/mcp"}
 
@@ -48,8 +49,12 @@ def authorized(request: Request, token: str) -> bool:
 
 
 def install_web_auth(app: FastAPI, token: str | None = None) -> bool:
-    """令牌非空时安装认证中间件与 /login、/logout；返回是否启用。"""
+    """令牌非空时安装认证中间件与 /login、/logout；返回是否启用。
+
+    生效的令牌记在 ``app.state.web_auth_token``（未启用时为空串），供自行鉴权的端点复用。
+    """
     secret = configured_token(token)
+    app.state.web_auth_token = secret
     if not secret:
         return False
 

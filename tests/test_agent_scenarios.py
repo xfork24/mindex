@@ -6,15 +6,23 @@
 from __future__ import annotations
 
 import pytest
-from agent_scenarios import SCENARIOS, build_world, drive
+from agent_scenarios import SCENARIOS, drive, prepare
 from fastapi.testclient import TestClient
 
 from mindex.agent.llm.scripted import ScriptedLlm
 
 
+def test_scenario_names_unique():
+    names = [s.name for s in SCENARIOS]
+    assert len(names) == len(set(names))
+
+
 @pytest.mark.parametrize("scenario", SCENARIOS, ids=[s.name for s in SCENARIOS])
-def test_scenario(config, video_file, scenario):
-    world = build_world(config, video_file)
+def test_scenario(config, video_file, monkeypatch, scenario):
+    # 附件端点在启用令牌时要求凭证；场景以本机面板身份上传。
+    monkeypatch.delenv("MINDEX_WEB_TOKEN", raising=False)
+    monkeypatch.delenv("MINDEX_MCP_TOKEN", raising=False)
+    world = prepare(scenario, config, video_file)
     llm = ScriptedLlm(scenario.script(world))
     with TestClient(world.app(llm)) as client:
         events = drive(client, scenario, world)

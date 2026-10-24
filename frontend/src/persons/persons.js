@@ -234,11 +234,19 @@ function renderTasks(data) {
     if (task.result?.reference_errors?.length) {
       row.append(node('p', task.result.reference_errors.map((e) => `${referenceErrorLabel(e)}：${MindexI18n.system(e.error)}`).join('；')));
     }
-    if (['failed', 'interrupted'].includes(task.status)) {
+    if (['queued', 'running'].includes(task.status)) {
+      // 运行中的任务到下一个检查点才停止；请求成功后刷新列表即可看到最新状态。
+      row.append(button(MindexI18n.msg("ui.4d0b4688c787"), async (b) => {
+        b.disabled = true;
+        try {await api(`/api/persons/tasks/${task.id}/cancel`, { method: 'POST' });} finally {b.disabled = false;}
+        await refresh();
+      }));
+    }
+    if (['failed', 'interrupted', 'cancelled'].includes(task.status)) {
       row.append(button(MindexI18n.msg("ui.e2d53a6d3a6a"), async () => {
         await api(`/api/persons/tasks/${task.id}/retry`, { method: 'POST' });
         await refresh();
-      }), button(MindexI18n.msg("ui.0c635748b755"), async () => {
+      }), button(MindexI18n.msg(task.status === 'cancelled' ? "ui.4a570da8de32" : "ui.0c635748b755"), async () => {
         await api(`/api/persons/tasks/${task.id}`, { method: 'DELETE' });
         await refresh();
         notice(MindexI18n.msg("ui.2369895a4183"));
@@ -256,7 +264,7 @@ async function refresh() {void loadImportGallery().catch((e) => notice(e.message
     MindexI18n.setAttr(work, 'aria-label', source.name + MindexI18n.msg("ui.5a48edc9a5b1"));
     options(work, entities('work'), false);
     work.value = source.work_id;
-    const count = data.coverage.filter((item) => item.source_id === source.id).length;
+    const count = data.coverage_counts?.[source.id] || 0;
     const actions = node('div', undefined, 'source-work-actions');
     actions.append(button(MindexI18n.msg("ui.86e2bd39e95b"), async () => {
       await api(`/api/persons/sources/${source.id}/work`, json('PUT', { work_id: work.value }));

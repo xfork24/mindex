@@ -169,7 +169,8 @@ person:
 clean:
   # 除活动版本外额外保留的最近 ready 索引版本数（向量复用与回退来源）。
   index_keep_versions: 2
-  # 未注册上传文件 / 空上传目录的宽限小时数，防正在进行的上传。
+  # 未注册上传文件 / 空上传目录 / 无记录助手附件目录的宽限小时数，防正在进行的上传。
+  # 助手附件按 agent.attachment_ttl_hours 过期，由 B 级规则 agent_attachments 回收。
   temp_grace_hours: 24
   # 旧配置指纹检查点：转写 / 分析 / 对白（换配置后永不命中的目录）。
   transcripts_max_age_days: 30
@@ -194,6 +195,9 @@ agent:
   max_steps: 16              # 单轮对话内模型最多连续调用工具的步数
   max_context_tokens: 60000  # 发送给模型的历史估算上限；超出时先省略较早的工具结果
   secret_ttl_seconds: 1800   # 表单收集的密钥引用（secret://）有效期
+  attachment_ttl_hours: 168  # 助手附件（attachment://）有效期；过期后由 mindex clean 回收
+  attachment_max_mb: 500     # 单个附件上限（MiB），超出返回 413
+  max_images: 8              # 单次模型请求最多携带的图片数（只保留最近的）
   llm:
     backend: openai          # openai（OpenAI 兼容 tools 协议）或 anthropic（原生 Messages 协议）
     base_url: https://api.deepseek.com/v1
@@ -201,7 +205,12 @@ agent:
     api_key_env: MINDEX_AGENT_API_KEY
     timeout: 120
     max_tokens: 4096
+    vision: false            # 模型支持图片输入时开启：附件图片与工具抽取的画面会一并发给模型（受 max_images 限制）
   mcp:
     http_enabled: false      # 开启后挂载 streamable-http /mcp，需设置 MINDEX_MCP_TOKEN
     policy: read             # read / write / all：MCP 调用方允许执行的最高风险级别
     token_env: MINDEX_MCP_TOKEN
+    # domains: null 导出全部领域；也可只导出部分领域（另外总会导出 report_capability_gap），
+    # 可选 studio / studio_detail / library / search / index / persons / settings，例如：
+    # domains: [search, library]
+    domains: null

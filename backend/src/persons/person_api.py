@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse
 from filelock import Timeout
 from pydantic import Field, model_validator
 
-from mindex.models.adapters import request
+from mindex.models.adapters import ModelError, request
 from mindex.models.qwen import analysis_options
 from mindex.persons.person_models import (
     CastConfirm,
@@ -23,10 +23,13 @@ from mindex.persons.person_models import (
     checked_box,
 )
 from mindex.persons.person_processing import (
+    EvidenceReferences,
     PersonClient,
     PersonOptions,
     PersonTasks,
+    cosine,
     ensure_reference_quality,
+    face_match,
 )
 from mindex.persons.persons import Persons
 from mindex.persons.profiling import note as profiling_note
@@ -126,6 +129,69 @@ def parse_cast(config, image):
     return {"entries": entries, "warnings": warnings}
 
 
+IDENTIFY_MAX_BYTES = 20 * 1024 * 1024
+IDENTIFY_TIMEOUT = 60.0
+
+
+def _ranked(observation, references, key, person_config):
+    """按 key（role_id / actor_id）分组取最大余弦，返回 [(score, entity_id, reference)] 降序。
+
+    参考图质量门槛与匹配流程（face_match / matched_reference）一致；同分时按 ID 倒序，
+    与 face_match 的排序保持一致，使首位角色与 accepted_role 对得上。
+    """
+    best = {}
+    for reference in references:
+        identifier = reference.get(key)
+        if not identifier or reference.get("face_quality", 0) < person_config.min_reference_quality:
+            continue
+        score = cosine(observation.get("face_feature"), reference.get("face_feature"))
+        current = best.get(identifier)
+        if current is None or score > current[0] or (score == current[0] and reference["id"] < current[1]["id"]):
+            best[identifier] = (score, reference)
+    return sorted(((s, i, r) for i, (s, r) in best.items()), key=lambda x: (x[0], x[1]), reverse=True)
+
+
+def identify_faces(observations, references, entities, person_config, top_k):
+    """对每张有特征的人脸分别按角色、按演员给出前 top_k 个候选；纯计算，不调用模型。
+
+    是否达到接受条件沿用自动确认规则：人脸质量 ≥ min_face_quality、相似度 ≥ face_threshold，
+    且领先第二名至少 face_margin（因此只有首位可能被接受）。
+    """
+    faces = []
+    for observation in observations:
+        if observation.get("face_feature") is None:
+            continue
+        quality = observation.get("face_quality", 0)
+        face = {"face_bbox": observation.get("face_bbox"), "face_quality": quality}
+        for field, key in (("roles", "role_id"), ("actors", "actor_id")):
+            ranked = _ranked(observation, references, key, person_config)
+            candidates = []
+            for index, (score, identifier, reference) in enumerate(ranked[:top_k]):
+                runner = max((s for j, (s, _, _) in enumerate(ranked) if j != index), default=-1.0)
+                entity = entities.get(identifier) or {}
+                candidates.append({
+                    "id": identifier,
+                    "name": entity.get("name"),
+                    "kind": entity.get("kind", "role" if key == "role_id" else "actor"),
+                    "score": round(score, 4),
+                    "accepted": bool(
+                        quality >= person_config.min_face_quality
+                        and score >= person_config.face_threshold
+                        and score - runner >= person_config.face_margin
+                    ),
+                    "reference_id": reference["id"],
+                    "reference_url": f"/api/persons/references/{reference['id']}/image",
+                })
+            face[field] = candidates
+        role, score, accepted = face_match(observation, references, person_config)
+        face["accepted_role"] = (
+            {"id": role, "name": (entities.get(role) or {}).get("name"), "score": round(score, 4)}
+            if accepted else None
+        )
+        faces.append(face)
+    return faces
+
+
 def reference_checker(runtime, store):
     """添加参考图时的同步质检闭包：配置每次请求热生效，同一请求多张图只做一次 /health。
 
@@ -150,7 +216,9 @@ def person_router(runtime, store):
     @router.get("")
     def listing(compact: bool = False):
         names = store.source_names()
-        sources = [{**s, "name": names[s["id"]], "work_id": catalogue.work_for(s["id"])}
+        # 一次取齐素材→作品映射；只有尚未登记作品的素材才走 work_for（会创建默认作品）。
+        works = {r["source_id"]: r["work_id"] for r in store.rows("SELECT source_id,work_id FROM person_sources")}
+        sources = [{**s, "name": names[s["id"]], "work_id": works.get(s["id"]) or catalogue.work_for(s["id"])}
                    for s in store.sources()]
         # 待核对数量以分镜为单位，且与审核列表同一套分类规则。
         return {
@@ -158,13 +226,14 @@ def person_router(runtime, store):
             "references": catalogue.references(),
             "sources": [{"id": s["id"], "name": s["name"], "work_id": s["work_id"]} for s in sources],
             "review_shots": catalogue.review_summary() if not compact else {},
-            "coverage": store.rows("SELECT source_id FROM person_coverage") if compact else [
+            # 精简模式只给每个素材的覆盖分镜数（页面只显示计数），不逐行下发覆盖记录。
+            **({"coverage_counts": {
+                r["source_id"]: r["n"]
+                for r in store.rows("SELECT source_id,COUNT(*) AS n FROM person_coverage GROUP BY source_id")
+            }} if compact else {"coverage": [
                 {**r, "data": json.loads(r["data"])} for r in store.rows("SELECT * FROM person_coverage")
-            ],
-            "tasks": [
-                tasks.get(r["id"])
-                for r in store.rows("SELECT id FROM person_tasks ORDER BY rowid DESC LIMIT 30")
-            ],
+            ]}),
+            "tasks": tasks.recent(30),
         }
 
     @router.get("/releases")
@@ -394,6 +463,55 @@ def person_router(runtime, store):
     def process(source_id: str, options: PersonOptions):
         return tasks.start(source_id, options)
 
+    def identify_image(path, top_k):
+        from PIL import Image
+
+        from mindex.shared.images import image_png
+
+        config = runtime.current()
+        raw = image_png(path, config.video.max_pixels)
+        normalized = path.with_name("query.png")
+        normalized.write_bytes(raw)
+        with Image.open(normalized) as image:
+            size = list(image.size)
+        # 识别是交互式只读请求：人物服务超时收紧到 60 秒，避免页面或助手长时间挂起。
+        bounded = config.model_copy(update={
+            "person": config.person.model_copy(update={"timeout": min(config.person.timeout, IDENTIFY_TIMEOUT)}),
+        })
+        client = PersonClient(bounded)
+        space = client.identity()
+        extracted = client.image(normalized)
+        if extracted.get("space") != space:
+            raise ModelError("特征提取响应空间与任务固定空间不符")
+        resolver = EvidenceReferences(config, store)
+        references = resolver.candidates(space)
+        entities = {e["id"]: e for e in catalogue.entities()}
+        return {
+            "faces": identify_faces(
+                extracted.get("observations", []), references, entities, config.person, top_k
+            ),
+            "image_size": size,
+            "references_total": len(resolver.references),
+            # 没有当前空间特征缓存（或缓存不合格）的参考图不参与比对；重新处理人物或重新添加后才覆盖。
+            "uncovered_references": len(resolver.references) - len(references),
+            "space_model": space.get("model"),
+        }
+
+    @router.post("/identify")
+    async def identify(
+        file: Annotated[UploadFile, File()],
+        top_k: Annotated[int, Form(ge=1, le=20)] = 5,
+    ):
+        """上传一张图片识别画面中的演员与角色；只读，只比对已缓存的参考图特征。"""
+        from starlette.concurrency import run_in_threadpool
+
+        from mindex.shared.uploads import save_upload
+
+        with tempfile.TemporaryDirectory(dir=store.root) as directory:
+            path = Path(directory) / "upload"
+            await save_upload(file, path, IDENTIFY_MAX_BYTES)
+            return await run_in_threadpool(identify_image, path, top_k)
+
     @router.get("/tasks/{identifier}")
     def get_task(identifier: str):
         return tasks.get(identifier)
@@ -401,6 +519,10 @@ def person_router(runtime, store):
     @router.post("/tasks/{identifier}/retry", status_code=202)
     def retry(identifier: str):
         return tasks.retry(identifier)
+
+    @router.post("/tasks/{identifier}/cancel")
+    def cancel_task(identifier: str):
+        return tasks.cancel(identifier)
 
     @router.delete("/tasks/{identifier}")
     def delete_task(identifier: str):

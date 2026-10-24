@@ -106,7 +106,7 @@ def _effective(section, role: str) -> dict:
         "tts": ("voice", "response_format"),
         "generator": ("max_tokens",),
         "writer": ("max_tokens",),
-        "agent": ("max_tokens",),
+        "agent": ("max_tokens", "vision"),
     }
     for key in extras.get(role, ()):
         info[key] = dump.get(key)

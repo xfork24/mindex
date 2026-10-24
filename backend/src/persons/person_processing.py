@@ -22,7 +22,16 @@ from mindex.persons.persons import Persons
 from mindex.shared.config import StrictModel, fingerprint
 from mindex.shared.processing_lock import ProcessingLock, recover_tasks
 from mindex.shared.storage import Store, dumps
-from mindex.shared.task_progress import reset_task_attempt, save_task_progress, task_logs
+from mindex.shared.task_cancel import TaskCancelled, registry_for
+from mindex.shared.task_progress import (
+    RETRYABLE,
+    begin_task,
+    mark_cancelled,
+    request_task_cancel,
+    reset_task_attempt,
+    save_task_progress,
+    task_logs,
+)
 
 
 class PersonOptions(StrictModel):
@@ -859,6 +868,15 @@ class PersonProcessor:
                     raise ModelError("人物服务返回无效检测框")
 
 
+def _task_value(row):
+    """person_tasks 行 → 接口形状（去掉 config，解码 JSON 列）。"""
+    return {
+        k: json.loads(v) if k in {"options", "progress", "result", "publication"} and v else v
+        for k, v in row.items()
+        if k != "config"
+    }
+
+
 class PersonTasks:
     def __init__(self, runtime, store):
         self.runtime, self.store, self.threads = runtime, store, {}
@@ -871,11 +889,11 @@ class PersonTasks:
         row = self.store.one("SELECT * FROM person_tasks WHERE id=?", (identifier,))
         if not row:
             raise HTTPException(404, "找不到人物任务")
-        return {
-            k: json.loads(v) if k in {"options", "progress", "result", "publication"} and v else v
-            for k, v in row.items()
-            if k != "config"
-        }
+        return _task_value(row)
+
+    def recent(self, limit=30):
+        """最近的任务（新在前），一次查询取齐，避免逐条 get() 的 N+1 查询。"""
+        return [_task_value(r) for r in self.store.rows("SELECT * FROM person_tasks ORDER BY rowid DESC LIMIT ?", (limit,))]
 
     def start(self, source_id, options):
         if not self.store.one("SELECT id FROM sources WHERE id=?", (source_id,)):
@@ -886,7 +904,7 @@ class PersonTasks:
         row = self.store.one("SELECT * FROM person_tasks WHERE id=?", (identifier,))
         if not row:
             raise HTTPException(404, "找不到人物任务")
-        if row["status"] not in {"failed", "interrupted"} and json.loads(row["publication"] or "{}").get("status") != "failed":
+        if row["status"] not in RETRYABLE and json.loads(row["publication"] or "{}").get("status") != "failed":
             raise HTTPException(409, "仅失败或中断任务可以重试")
         return self.launch(
             row["source_id"],
@@ -903,10 +921,18 @@ class PersonTasks:
         row = self.store.one("SELECT status FROM person_tasks WHERE id=?", (identifier,))
         if not row:
             raise HTTPException(404, "找不到人物任务")
-        if row["status"] not in {"failed", "interrupted"}:
+        if row["status"] not in RETRYABLE:
             raise HTTPException(409, "仅失败或中断的任务可以删除")
         self.store.execute("DELETE FROM person_tasks WHERE id=?", (identifier,))
         return {"removed": identifier}
+
+    def cancel(self, identifier):
+        status = request_task_cancel(self.store, "person_tasks", identifier)
+        if status is None:
+            raise HTTPException(404, "找不到人物任务")
+        if status not in {"queued", "running"}:
+            raise HTTPException(409, "只有排队中或运行中的任务可以取消")
+        return self.get(identifier)
 
     def launch(self, source_id, options, identifier=None, config=None):
         lock = self.lock(source_id)
@@ -950,11 +976,9 @@ class PersonTasks:
 
     @task_logs("person_tasks")
     def run(self, identifier, config, source_id, options, lock):
+        cancels = registry_for(self.store.root)
         try:
-            self.store.execute(
-                "UPDATE person_tasks SET status='running',updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                (identifier,),
-            )
+            begin_task(self.store, "person_tasks", identifier)
 
             def progress(value):
                 save_task_progress(self.store, "person_tasks", identifier, value)
@@ -975,11 +999,14 @@ class PersonTasks:
                 "UPDATE person_tasks SET status='complete',result=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
                 (dumps(result), identifier),
             )
+        except TaskCancelled:
+            mark_cancelled(self.store, "person_tasks", identifier)
         except BaseException as exc:  # noqa: BLE001 — persist terminal worker failures before releasing its lease
             self.store.execute(
                 "UPDATE person_tasks SET status='failed',error=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
                 (str(exc)[:2000], identifier),
             )
         finally:
+            cancels.clear(identifier)
             lock.release()
             self.threads.pop(identifier, None)

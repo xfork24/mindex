@@ -81,18 +81,19 @@ def test_summary_status_omits_expensive_coverage(config, monkeypatch):
 
 def test_person_catalogue_compact_coverage_preserves_row_counts(config, monkeypatch):
     store = Store(config.data_dir)
-    # The UI counts coverage records per source; it does not consume frame data.
+    # The UI shows per-source coverage counts; it consumes neither frame data nor per-row records.
     app = create_app(config)
     original = store.rows
     def rows(self, sql, args=()):
-        if sql == 'SELECT * FROM person_coverage':
-            raise AssertionError('Frame data loaded for compact catalogue')
-        if sql == 'SELECT source_id FROM person_coverage':
-            return [{'source_id': 'a'}, {'source_id': 'a'}, {'source_id': 'b'}]
+        if sql in ('SELECT * FROM person_coverage', 'SELECT source_id FROM person_coverage'):
+            raise AssertionError('Coverage rows loaded for compact catalogue')
+        if sql == 'SELECT source_id,COUNT(*) AS n FROM person_coverage GROUP BY source_id':
+            return [{'source_id': 'a', 'n': 2}, {'source_id': 'b', 'n': 1}]
         return original(sql, args)
     monkeypatch.setattr(Store, 'rows', rows)
     monkeypatch.setattr(Persons, 'review_summary', lambda self: (_ for _ in ()).throw(AssertionError('Unused review summary')))
     with TestClient(app) as client:
         response = client.get('/api/persons?compact=true')
     assert response.status_code == 200
-    assert response.json()['coverage'] == [{'source_id': 'a'}, {'source_id': 'a'}, {'source_id': 'b'}]
+    assert response.json()['coverage_counts'] == {'a': 2, 'b': 1}
+    assert 'coverage' not in response.json()

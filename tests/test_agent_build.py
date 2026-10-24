@@ -73,7 +73,7 @@ def test_merge_then_build_with_followup_summary(prepared):
     ])
     with TestClient(make_app(config, embedder, llm)) as client:
         sid = new_session(client)
-        send(client, sid, "合并 a1daad59 和 925281d5 两个分镜，并重新生成该分镜的后续流程")
+        send(client, sid, "合并 a1daad59 和 925281d5 两个分镜，并重新生成该分镜的后续流程", context={"page": "studio", "job_id": job})
         approve(client, sid)
         pending = approve(client, sid)
         assert pending["name"] == "run_build" and pending["risk"] == "danger" and not pending["allowGrant"]
@@ -120,7 +120,7 @@ def test_restart_resumes_watch_and_conflict(prepared):
         lock = FileLock(str(studio.lock_path(config)), timeout=0)
         lock.acquire()
         try:
-            send(client, sid, "构建")
+            send(client, sid, "构建", context={"page": "studio", "job_id": job})
             approve(client, sid)
             events = wait_idle(client, sid)
         finally:
@@ -134,7 +134,7 @@ def test_danger_cannot_be_granted_and_delete(prepared):
     llm = ScriptedLlm([[call("delete_job", job_id=job)], [say("已删除")]])
     with TestClient(make_app(config, embedder, llm)) as client:
         sid = new_session(client)
-        send(client, sid, "删除这个任务")
+        send(client, sid, "删除这个任务", context={"page": "studio", "job_id": job})
         pending = wait_pending(client, sid, "approval")
         assert "无法恢复" in pending["preview"]["warnings"][0]
         client.post(f"/api/agent/sessions/{sid}/approvals/{pending['requestId']}",

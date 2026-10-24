@@ -3,8 +3,10 @@
 全部用普通 JSON 字典表示，字段名逐字沿用 dsh（camelCase），便于事件日志原样落库、
 SSE 原样转发，未来切换到 dsh 运行时也无需转换：
 
-- 内容块：``text`` / ``reasoning`` / ``tool-call{id, name, arguments: 原始 JSON 字符串}``
-- 消息：``{id, role, content[], source}``；工具结果消息另有 ``toolCallId`` 与 ``isError``
+- 内容块：``text`` / ``reasoning`` / ``tool-call{id, name, arguments: 原始 JSON 字符串}`` /
+  ``image{ref, mediaType}``（落库只存引用；``image{data, mediaType}`` 只在发请求前存在于内存）
+- 消息：``{id, role, content[], source}``；工具结果消息另有 ``toolCallId``、``isError`` 与可选
+  ``images[]``（图片引用）
 - 流式块（StreamChunk）：``block-start`` / ``text-delta`` / ``reasoning-delta`` /
   ``tool-call-delta{id, name?, argumentsDelta}`` / ``block-end{block}`` / ``usage`` / ``finish``
 - 结束原因：``stop`` / ``tool-calls`` / ``max-tokens`` / ``aborted`` / ``error``（后两者带 failure）
@@ -50,7 +52,22 @@ def assistant_message(content: list[dict], provider: str, model: str) -> dict:
     }
 
 
-def tool_message(call_id: str, text: str, *, is_error: bool = False) -> dict:
+def image_block(ref: str, media_type: str = "image/jpeg") -> dict:
+    """图片引用块：``ref`` 为 ``attachment://…`` 或本站 ``/api/…`` 地址。
+
+    事件日志、SSE 与 ``derive_messages`` 的输出里只出现这种引用块；发请求前由
+    ``agent.vision.materialize`` 换成 ``resolved_image_block``。
+    """
+    return {"type": "image", "ref": ref, "mediaType": media_type}
+
+
+def resolved_image_block(data_b64: str, media_type: str = "image/jpeg") -> dict:
+    """已解析的图片块（base64 数据）；只在构造模型请求时存在于内存中，不得落库。"""
+    return {"type": "image", "data": data_b64, "mediaType": media_type}
+
+
+def tool_message(call_id: str, text: str, *, is_error: bool = False, images: list[str] | None = None) -> dict:
+    """工具结果消息；``images`` 为工具结果声明的图片引用（只存引用，视觉开启时才发给模型）。"""
     message = {
         "id": new_id("msg"),
         "role": "tool",
@@ -60,6 +77,8 @@ def tool_message(call_id: str, text: str, *, is_error: bool = False) -> dict:
     }
     if is_error:
         message["isError"] = True
+    if images:
+        message["images"] = list(images)
     return message
 
 
