@@ -626,6 +626,19 @@ def clean(
         raise typer.Exit(1) from None
 
 
+def _is_loopback_host(host: str) -> bool:
+    """127.0.0.0/8、::1 与 localhost 视为仅本机可访问。"""
+    import ipaddress
+
+    value = host.strip().strip("[]")
+    if value.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(value).is_loopback
+    except ValueError:
+        return False
+
+
 @app.command()
 def serve(
     ctx: typer.Context,
@@ -636,23 +649,38 @@ def serve(
     index_id: Annotated[
         str | None, typer.Option(help="将查询与相关媒体固定到指定 ready 索引，不修改活动索引。")
     ] = None,
+    allow_insecure: Annotated[
+        bool,
+        typer.Option(
+            "--allow-insecure",
+            help="允许在未设置 MINDEX_WEB_TOKEN 时监听非回环地址；网络中的任何人都可读写全部功能。",
+        ),
+    ] = False,
 ):
     """启动同一进程提供的网页、静态资源和 HTTP API。
 
-    页面为 /、/admin、/persons、/studio、/settings，接口文档 /docs。不启动模型服务。--index-id 将检索和相关媒体固定到指定 ready 索引，不更改活动指针。无需前端构建；用 Ctrl+C 停止服务。
+    页面为 /、/admin、/persons、/studio、/settings，接口文档 /docs。不启动模型服务。--index-id 将检索和相关媒体固定到指定 ready 索引，不更改活动指针。监听非回环地址时必须设置 MINDEX_WEB_TOKEN，或显式传 --allow-insecure。无需前端构建；用 Ctrl+C 停止服务。
 
     示例：
 
     \b
       mindex serve --host 127.0.0.1 --port 8000
+      MINDEX_WEB_TOKEN=<令牌> mindex serve --host 0.0.0.0
     """
-    import os
-
     import uvicorn
 
     from mindex.api import create_app
+    from mindex.shared.web_auth import configured_token
 
-    if host not in {"127.0.0.1", "localhost", "::1"} and not os.environ.get("MINDEX_WEB_TOKEN"):
+    if not _is_loopback_host(host) and not configured_token():
+        if not allow_insecure:
+            typer.secho(
+                f"拒绝启动：监听 {host} 但未设置 MINDEX_WEB_TOKEN，网络中的任何人都可读写全部功能。"
+                "请设置环境变量 MINDEX_WEB_TOKEN 启用访问令牌，或确认风险后传入 --allow-insecure。",
+                fg=typer.colors.RED,
+                err=True,
+            )
+            raise typer.Exit(1)
         typer.secho(
             f"警告：监听 {host} 且未设置 MINDEX_WEB_TOKEN，网络中的任何人都可读写全部功能。",
             fg=typer.colors.YELLOW,

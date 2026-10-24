@@ -11,7 +11,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import os
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
@@ -26,6 +26,21 @@ COOKIE = "mindex_session"
 PUBLIC_PREFIXES = ("/assets/shared/", "/api/agent/attachments")
 # /mcp 自行校验 MINDEX_MCP_TOKEN（未设置令牌时不会挂载），不复用网页登录。
 PUBLIC_PATHS = {"/login", "/logout", "/mcp"}
+
+
+def safe_next(value: str) -> str:
+    """只接受站内相对路径（以单个 ``/`` 开头、无反斜杠与控制字符、无 scheme/netloc），否则回落到 ``/``。"""
+    if not value.startswith("/") or value.startswith("//") or "\\" in value:
+        return "/"
+    if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in value):
+        return "/"
+    try:
+        parts = urlsplit(value)
+    except ValueError:
+        return "/"
+    if parts.scheme or parts.netloc:
+        return "/"
+    return value
 
 
 def configured_token(explicit: str | None = None) -> str:
@@ -64,7 +79,7 @@ def install_web_auth(app: FastAPI, token: str | None = None) -> bool:
 
     @app.post("/login", include_in_schema=False)
     def login(request: Request, token: str = Form(default=""), next: str = Form(default="/")):
-        target = next if next.startswith("/") and not next.startswith("//") else "/"
+        target = safe_next(next)
         if not hmac.compare_digest(token.strip(), secret):
             return RedirectResponse(f"/login?error=1&next={quote(target)}", status_code=303)
         response = RedirectResponse(target, status_code=303)
@@ -78,7 +93,8 @@ def install_web_auth(app: FastAPI, token: str | None = None) -> bool:
         )
         return response
 
-    @app.api_route("/logout", methods=["GET", "POST"], include_in_schema=False)
+    # 只接受 POST，避免第三方页面用链接或图片触发登出（CSRF）。
+    @app.post("/logout", include_in_schema=False)
     def logout():
         response = RedirectResponse("/login", status_code=303)
         response.delete_cookie(COOKIE, path="/")

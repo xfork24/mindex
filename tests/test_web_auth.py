@@ -63,13 +63,75 @@ def test_cookie_login_and_logout(client):
     assert "HttpOnly" in cookie and "SameSite=strict" in cookie and TOKEN not in cookie
     assert client.get("/api/status").status_code == 200
     assert client.get("/admin").status_code == 200
-    out = client.get("/logout")
+    assert client.get("/logout").status_code == 405
+    assert client.get("/api/status").status_code == 200
+    out = client.post("/logout")
     assert out.status_code == 303 and out.headers["location"] == "/login"
     client.cookies.clear()
     assert client.get("/api/status").status_code == 401
 
 
 def test_login_redirect_cannot_leave_the_site(client):
-    for target in ("//evil.example", "https://evil.example"):
+    for target in (
+        "//evil.example",
+        "https://evil.example",
+        "/\\evil.example",
+        "/\\/evil.example",
+        "\\\\evil.example",
+        "/admin\nLocation: https://evil.example",
+        "/\tevil",
+        "javascript:alert(1)",
+        "evil.example",
+        "",
+    ):
         response = client.post("/login", data={"token": TOKEN, "next": target})
         assert response.headers["location"] == "/"
+
+
+def test_login_keeps_site_relative_next(client):
+    response = client.post("/login", data={"token": TOKEN, "next": "/studio?job=a%2Fb#x"})
+    assert response.headers["location"] == "/studio?job=a%2Fb#x"
+
+
+def _serve(monkeypatch, tmp_path, args, token=None):
+    from typer.testing import CliRunner
+
+    from mindex.cli import app
+
+    calls = []
+    monkeypatch.setattr("uvicorn.run", lambda app, host, port: calls.append((host, port)))
+    monkeypatch.setattr("mindex.search.warmup.warm_up_in_background", lambda *_: None)
+    if token is None:
+        monkeypatch.delenv("MINDEX_WEB_TOKEN", raising=False)
+    else:
+        monkeypatch.setenv("MINDEX_WEB_TOKEN", token)
+    path = tmp_path / "config.yaml"
+    path.write_text(f"data_dir: {tmp_path / 'data'}\n", encoding="utf-8")
+    result = CliRunner().invoke(app, ["-c", str(path), "serve", *args])
+    return result, calls
+
+
+@pytest.mark.parametrize("host", ["0.0.0.0", "192.168.1.5", "::"])
+def test_serve_refuses_public_host_without_token(monkeypatch, tmp_path, host):
+    result, calls = _serve(monkeypatch, tmp_path, ["--host", host])
+    assert result.exit_code == 1 and calls == []
+    assert "MINDEX_WEB_TOKEN" in result.output and "--allow-insecure" in result.output
+
+
+@pytest.mark.parametrize(
+    ("args", "token"),
+    [
+        (["--host", "0.0.0.0", "--allow-insecure"], None),
+        (["--host", "0.0.0.0"], TOKEN),
+        (["--host", "127.0.0.2"], None),
+        (["--host", "localhost"], None),
+        (["--host", "::1"], None),
+        ([], None),
+    ],
+)
+def test_serve_allows_loopback_token_or_explicit_insecure(monkeypatch, tmp_path, args, token):
+    result, calls = _serve(monkeypatch, tmp_path, args, token)
+    assert result.exit_code == 0, result.output
+    assert len(calls) == 1
+    if "--allow-insecure" in args:
+        assert "警告" in result.output

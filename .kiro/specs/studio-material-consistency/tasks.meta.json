@@ -1,0 +1,1098 @@
+{
+  "pbtResults": {
+    "1.2 编写 clip_visual 的属性测试（tests/test_studio_visual.py）": {
+      "status": "passed",
+      "lastRunTimestamp": 1792828768710
+    },
+    "1.3 编写 visual_error 的属性测试（tests/test_studio_visual.py）": {
+      "status": "passed",
+      "lastRunTimestamp": 1792829264820
+    },
+    "1.4 编写 visual 往返的属性测试（tests/test_studio_visual.py）": {
+      "status": "passed",
+      "lastRunTimestamp": 1792830114085
+    },
+    "4.3 编写范围过滤的属性测试（tests/test_material_digest.py）": {
+      "status": "passed",
+      "lastRunTimestamp": 1792830143759
+    },
+    "2.4 编写合并 visual 的属性测试（tests/test_agent_write.py）": {
+      "status": "passed",
+      "lastRunTimestamp": 1792830162920
+    },
+    "5.2 编写空摘要请求一致性的属性测试（tests/test_studio_writer.py）": {
+      "status": "passed",
+      "lastRunTimestamp": 1792830373637
+    },
+    "1.5 编写空 visual 不改变老分镜 dump 的属性测试（tests/test_studio_visual.py）": {
+      "status": "passed",
+      "lastRunTimestamp": 1792830806429
+    },
+    "4.4 编写不合格片段不影响摘要的属性测试（tests/test_material_digest.py）": {
+      "status": "passed",
+      "lastRunTimestamp": 1792830842644
+    },
+    "5.3 编写非空摘要独立段的属性测试（tests/test_studio_writer.py）": {
+      "status": "passed",
+      "lastRunTimestamp": 1792831021471
+    },
+    "4.5 编写确定性的属性测试（tests/test_material_digest.py）": {
+      "status": "passed",
+      "lastRunTimestamp": 1792831086654
+    },
+    "1.7 编写 visual 不进签名的属性测试（tests/test_studio_visual.py）": {
+      "status": "passed",
+      "lastRunTimestamp": 1792831117862
+    },
+    "4.6 编写指纹敏感性的属性测试（tests/test_material_digest.py）": {
+      "status": "passed",
+      "lastRunTimestamp": 1792831447702
+    },
+    "7.4 编写硬校验的属性测试（tests/test_studio_split_props.py）": {
+      "status": "passed",
+      "lastRunTimestamp": 1792832100043
+    },
+    "4.7 编写预算分配的属性测试（tests/test_material_digest.py）": {
+      "status": "passed",
+      "lastRunTimestamp": 1792832137166
+    },
+    "7.5 编写软校验的属性测试（tests/test_studio_split_props.py）": {
+      "status": "passed",
+      "lastRunTimestamp": 1792832698092
+    },
+    "4.8 编写故事线抽样的属性测试（tests/test_material_digest.py）": {
+      "status": "passed",
+      "lastRunTimestamp": 1792832702972
+    },
+    "4.9 编写画面词表的属性测试（tests/test_material_digest.py）": {
+      "status": "passed",
+      "lastRunTimestamp": 1792832938106
+    },
+    "7.6 编写重试与最佳尝试的属性测试（tests/test_studio_split_props.py）": {
+      "status": "passed",
+      "lastRunTimestamp": 1792832982499
+    },
+    "7.7 编写召回词规则公共常量的属性测试（tests/test_studio_split_props.py）": {
+      "status": "passed",
+      "lastRunTimestamp": 1792833070130
+    },
+    "8.2 编写词表只在提供时进入请求的属性测试（tests/test_studio_split_props.py）": {
+      "status": "passed",
+      "lastRunTimestamp": 1792833241878
+    },
+    "10.3 编写评测指标的属性测试（tests/test_split_eval.py）": {
+      "status": "passed",
+      "lastRunTimestamp": 1792833435481
+    }
+  },
+  "executionHistory": {
+    "1.1 在分镜模型中加入 visual 字段及规范化函数": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118262
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828127852
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828717917
+      }
+    ],
+    "1.2 编写 clip_visual 的属性测试（tests/test_studio_visual.py）": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118267
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828722917
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792829215822
+      }
+    ],
+    "1.3 编写 visual_error 的属性测试（tests/test_studio_visual.py）": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118271
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792829222395
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792829433220
+      }
+    ],
+    "1.4 编写 visual 往返的属性测试（tests/test_studio_visual.py）": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118275
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792830063405
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792830293447
+      }
+    ],
+    "1.5 编写空 visual 不改变老分镜 dump 的属性测试（tests/test_studio_visual.py）": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118279
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792830771407
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792830947237
+      }
+    ],
+    "1.6 在各条路径中透传 visual": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118282
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828724092
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792829216086
+      }
+    ],
+    "1.7 编写 visual 不进签名的属性测试（tests/test_studio_visual.py）": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118285
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792831041829
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792831376590
+      }
+    ],
+    "1.8 编写 visual 后端集成测试（tests/test_studio_visual_flow.py）": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118288
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792829223197
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792829434188
+      }
+    ],
+    "2.1 前端分镜表支持 visual": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118290
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792829224399
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792829434995
+      }
+    ],
+    "2.2 编写分镜表 visual 的前端测试（tests/studio_visual_ui.cjs + tests/test_studio_visual_ui.py 包装）": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118295
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792830064369
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792830294140
+      }
+    ],
+    "2.3 智能助手工具支持 visual": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118297
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792829225194
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792829436196
+      }
+    ],
+    "2.4 编写合并 visual 的属性测试（tests/test_agent_write.py）": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118299
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792830065167
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792830295339
+      }
+    ],
+    "2.5 编写智能助手 visual 测试（tests/test_agent_write.py）": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118301
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792830772619
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792830947723
+      }
+    ],
+    "3. Checkpoint - 确保所有测试通过": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118303
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792837029518
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792837066959
+      }
+    ],
+    "4.1 新增摘要数据模型与配置项": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118305
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828724817
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792829216905
+      }
+    ],
+    "4.2 实现 `backend/src/studio/material_digest.py`": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118307
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792829226024
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792829436855
+      }
+    ],
+    "4.3 编写范围过滤的属性测试（tests/test_material_digest.py）": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118310
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792830066366
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792830296139
+      }
+    ],
+    "4.4 编写不合格片段不影响摘要的属性测试（tests/test_material_digest.py）": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118312
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792830773410
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792830948926
+      }
+    ],
+    "4.5 编写确定性的属性测试（tests/test_material_digest.py）": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118314
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792831043086
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792831377525
+      }
+    ],
+    "4.6 编写指纹敏感性的属性测试（tests/test_material_digest.py）": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118315
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792831388725
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792832005313
+      }
+    ],
+    "4.7 编写预算分配的属性测试（tests/test_material_digest.py）": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118317
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792832013150
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792832623776
+      }
+    ],
+    "4.8 编写故事线抽样的属性测试（tests/test_material_digest.py）": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118319
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792832635042
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792832863129
+      }
+    ],
+    "4.9 编写画面词表的属性测试（tests/test_material_digest.py）": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118321
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792832871145
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792833014770
+      }
+    ],
+    "4.10 编写素材摘要示例测试（tests/test_material_digest_examples.py）": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118323
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792830067321
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792830296961
+      }
+    ],
+    "4.11 实现 GET /api/studio/jobs/{job}/material-digest": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118324
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792830302081
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792830764651
+      }
+    ],
+    "4.12 前端任务元信息中的素材摘要折叠块": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118326
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792830774617
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792830949727
+      }
+    ],
+    "4.13 编写预览接口与折叠块测试": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118328
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792831043889
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792831378727
+      }
+    ],
+    "5.1 实现 Writer v2": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118329
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792829447030
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792830057517
+      }
+    ],
+    "5.2 编写空摘要请求一致性的属性测试（tests/test_studio_writer.py）": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118331
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792830303280
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792830765554
+      }
+    ],
+    "5.3 编写非空摘要独立段的属性测试（tests/test_studio_writer.py）": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118333
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792830961886
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792831036186
+      }
+    ],
+    "5.4 script 阶段接入 Digest 并在前端显示参考提示": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118335
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792831044899
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792831379702
+      }
+    ],
+    "5.5 编写 script 阶段与提示显示测试": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118336
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792831387621
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792832006518
+      }
+    ],
+    "6. Checkpoint - 确保所有测试通过": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118338
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792837072388
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792837224424
+      }
+    ],
+    "7.1 重写拆分镜提示词": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118340
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792830303750
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792830763849
+      }
+    ],
+    "7.2 实现拆分校验纯函数": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118341
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792830775184
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792830950522
+      }
+    ],
+    "7.3 实现 `split(text, vocabulary=None)` 的重试与最佳尝试选择": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118343
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792831386775
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792832007226
+      }
+    ],
+    "7.4 编写硬校验的属性测试（tests/test_studio_split_props.py）": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118345
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792832014130
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792832624941
+      }
+    ],
+    "7.5 编写软校验的属性测试（tests/test_studio_split_props.py）": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118347
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792832634278
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792832864342
+      }
+    ],
+    "7.6 编写重试与最佳尝试的属性测试（tests/test_studio_split_props.py）": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118348
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792832871693
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792833015718
+      }
+    ],
+    "7.7 编写召回词规则公共常量的属性测试（tests/test_studio_split_props.py）": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118350
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792833023046
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792833165203
+      }
+    ],
+    "7.8 改写 tests/test_studio_split.py 的提示词断言": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118352
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792832014928
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792832625735
+      }
+    ],
+    "8.1 实现 suggest_query": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118353
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792832015872
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792832626604
+      }
+    ],
+    "8.2 编写词表只在提供时进入请求的属性测试（tests/test_studio_split_props.py）": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118355
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792833172721
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792833370340
+      }
+    ],
+    "8.3 实现 POST …/plans/{plan}/shots/{sid}/query-suggestion": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118357
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792832633081
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792832865232
+      }
+    ],
+    "8.4 前端\"按画面意象重写召回词\"按钮": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118359
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792832872561
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792833016342
+      }
+    ],
+    "8.5 编写重写召回词测试": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118360
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792833023755
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792833166402
+      }
+    ],
+    "9. Checkpoint - 确保所有测试通过": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118362
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792837229889
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792837257461
+      }
+    ],
+    "10.1 编写 eval/split_cases.jsonl": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118364
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792833024539
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792833166976
+      }
+    ],
+    "10.2 实现 eval/split_eval.py": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118366
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792833173489
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792833369577
+      }
+    ],
+    "10.3 编写评测指标的属性测试（tests/test_split_eval.py）": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118368
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792833376169
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792833449225
+      }
+    ],
+    "10.4 编写评测单元测试（tests/test_split_eval.py）": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118369
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792833455532
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792833567034
+      }
+    ],
+    "10.5 编写 eval/README.md 的\"拆分镜全链路评测\"一节": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118371
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792833376824
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792833449991
+      }
+    ],
+    "10.6 用真实服务运行评测并做只读带召回检查": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118373
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792833573840
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792835269275
+      }
+    ],
+    "11.1 更新 docs/studio.md": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118374
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792835276553
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792835425950
+      }
+    ],
+    "11.2 运行全部检查并修复问题": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118376
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792835431212
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792837019014
+      }
+    ],
+    "12. Final checkpoint - 确保所有测试通过": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792828118378
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792837264668
+      },
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792837477004
+      }
+    ],
+    "2. 分镜表显示和编辑画面意象，智能助手同步支持": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792830947726
+      }
+    ],
+    "1. 后端支持 visual 字段的存储与透传": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792831376593
+      }
+    ],
+    "5. 文案模型参考素材摘要（v2）": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792832006524
+      }
+    ],
+    "4. 素材摘要模块、配置项、预览接口与任务元信息折叠块": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792833014776
+      }
+    ],
+    "7. 拆分镜提示词 v7 与校验重试": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792833165209
+      }
+    ],
+    "8. 按画面意象重写召回词": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792833370344
+      }
+    ],
+    "10. 全链路评测": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792835269287
+      }
+    ],
+    "11. 文档与整体验证": [
+      {
+        "executionId": "4eb09488-6e66-4913-8f33-bc4c363d8ca1",
+        "chatSessionId": "sess_32077603-60a1-4340-a2b3-5f929cb926bc",
+        "timestamp": 1792837019019
+      }
+    ]
+  }
+}
