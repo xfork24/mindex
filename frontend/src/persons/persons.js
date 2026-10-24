@@ -703,3 +703,13 @@ run(async () => {
 });
 $('reload').onclick = () => {$('reload').disabled = true;run(async () => {await refresh();}).finally(() => {$('reload').disabled = false;});};
 setInterval(() => {if (!$('processing').hidden) run(refresh);}, 5000);
+// 智能助手：定位时切换到指定分页并高亮；被动定位只高亮当前分页。控制器单测在没有 window 的沙箱里运行本文件。
+if (typeof window !== 'undefined') {
+  window.MindexAgentContext = () => ({ page: 'persons', pane: document.querySelector('[data-pane].active')?.dataset.pane || null });
+  window.MindexAgentFocus = async (focus, { passive = false } = {}) => {
+    if (focus.pane && !passive) document.querySelector(`[data-pane="${CSS.escape(focus.pane)}"]`)?.click();
+    const pane = [...document.querySelectorAll('.pane')].find((n) => !n.hidden);
+    window.MindexAgent?.highlight(pane || document.querySelector('main'));
+    return true;
+  };
+}

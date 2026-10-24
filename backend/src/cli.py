@@ -11,6 +11,8 @@ import typer
 from typer import rich_utils
 from typer.core import TyperGroup
 
+from mindex.cli_agent import app as agent_app
+from mindex.cli_agent import mcp_command
 from mindex.cli_clips import app as clips_app
 from mindex.cli_common import SortedGroup, print_json
 from mindex.cli_e2e import app as e2e_app
@@ -86,6 +88,8 @@ app.add_typer(indexes, name="indexes")
 app.add_typer(e2e_app, name="e2e")
 app.add_typer(persons_app, name="persons")
 app.add_typer(clips_app, name="clips")
+app.add_typer(agent_app, name="agent")
+app.command("mcp")(mcp_command)
 
 
 class IndexMode(str, Enum):

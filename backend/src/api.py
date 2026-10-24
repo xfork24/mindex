@@ -31,11 +31,15 @@ def create_app(
     speaker: Speaker | None = None,
     writer: Writer | None = None,
     web_token: str | None = None,
+    agent_llm=None,
 ) -> FastAPI:
     config = config or load_config()
     store = Store(config.data_dir)
     runtime = RuntimeConfig(config, store)  # 设置页保存后经覆盖层热生效，无需重启
     app = FastAPI(title="Mindex 视频素材检索", version="0.1.0")
+    from mindex.agent.loopback import ensure_internal_token
+
+    ensure_internal_token(app)  # 智能助手回环请求的进程内凭证，须在认证中间件生效前就绪
 
     @app.middleware("http")
     async def localized_messages(request, call_next):
@@ -75,6 +79,19 @@ def create_app(
     app.include_router(studio_router(
         runtime, store, embedder=embedder, storyboarder=storyboarder, speaker=speaker, writer=writer
     ))
+
+    from mindex.agent.api import agent_router, build_runtime
+
+    # 智能助手：同一工具注册表经回环调用上面的 REST 路由；agent_llm 供测试注入脚本化模型。
+    app.state.agent_runtime = build_runtime(app, runtime, store, agent_llm=agent_llm)
+    app.state.runtime_config, app.state.store = runtime, store
+    app.include_router(agent_router(app.state.agent_runtime, runtime, injected=agent_llm is not None))
+    if config.agent.mcp.http_enabled:
+        try:
+            from mindex.agent.mcp_server import install_http
+        except ImportError as exc:  # pragma: no cover - 依赖缺失时给出明确指引
+            raise RuntimeError("开启 agent.mcp.http_enabled 需要安装 MCP 依赖：uv sync --extra mcp") from exc
+        install_http(app, runtime, store)
 
     @app.exception_handler(EntityNotFound)
     async def entity_not_found(_, exc):

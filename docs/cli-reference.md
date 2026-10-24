@@ -174,6 +174,16 @@ uv run mindex clean                       # 预览各类别可回收项与字节
 uv run mindex clean --apply               # 实际删除
 ```
 
+## 智能助手与 MCP
+
+### `mindex agent tools [--domain DOMAIN...] [--names-only]`
+
+输出智能助手工具注册表：名称、领域、风险级别（read/write/danger）、描述与参数 JSON Schema。只读，不访问素材库。
+
+### `mindex mcp [--base-url URL] [--token-env MINDEX_WEB_TOKEN] [--policy read|write|all]`
+
+以 stdio 传输运行 MCP 服务（服务名 `mindex`），供 deepseek-harness、Claude Code、Codex 等调用；标准输出只用于协议。省略 `--base-url` 时在本进程内装配应用，否则连接已运行的服务。写操作与高风险操作受 `agent.mcp.policy`（默认 `read`）限制。需要 `uv sync --extra mcp`。配置示例见 [智能助手](agent.md#mcp-导出与外部-harness)。
+
 ## 评测与联调
 
 ### `mindex evaluate QUERIES [--split test] [--split dev|video] [--output FILE] [--index-id INDEX_ID]`

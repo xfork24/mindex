@@ -14,6 +14,7 @@ import json
 import sqlite3
 
 from mindex.shared.config import (
+    AgentLlmConfig,
     AnalyzerConfig,
     ASRConfig,
     Config,
@@ -25,8 +26,9 @@ from mindex.shared.config import (
 )
 from mindex.shared.storage import Store
 
-ROLES = ("analyzer", "writer", "generator", "embedding", "asr", "tts", "person")
+ROLES = ("analyzer", "writer", "generator", "embedding", "asr", "tts", "person", "agent")
 ROLE_LABELS = {
+    "agent": "智能助手",
     "person": "人物识别",
     "analyzer": "多模态理解",
     "writer": "文案创作",
@@ -48,6 +50,7 @@ PROFILE_FIELDS = {
     },
     "generator": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "llama_template", "max_tokens"},
     "writer": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "llama_template", "max_tokens"},
+    "agent": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "max_tokens"},
     "embedding": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "quantization", "dimensions"},
     "asr": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "enabled"},
     "tts": {
@@ -70,10 +73,11 @@ SECTION_TYPES = {
     "embedding": EmbeddingConfig,
     "asr": ASRConfig,
     "tts": SpeakerConfig,
+    "agent": AgentLlmConfig,
 }
 _STUDIO_ROLES = {"generator", "writer", "tts"}
 
-PROVIDERS = ("custom", "self", "zhipu", "deepseek", "aliyun", "tencent", "minimax")
+PROVIDERS = ("custom", "self", "zhipu", "deepseek", "aliyun", "tencent", "minimax", "anthropic")
 PROVIDER_LABELS = {
     "custom": "自定义",
     "self": "自建服务",
@@ -82,6 +86,7 @@ PROVIDER_LABELS = {
     "aliyun": "阿里云百炼",
     "tencent": "腾讯云",
     "minimax": "MiniMax",
+    "anthropic": "Anthropic",
 }
 
 # 线上厂商预设：均为「最佳已知」预填值，模型名会随平台演进漂移，页面可改 + 测试连接兜底。
@@ -230,6 +235,24 @@ for _roles in PROVIDER_PRESETS.values():
             "config": dict(_roles["generator"]["config"]),
             "note": _roles["generator"]["note"].replace("纯文本拆分镜的性价比之选", "文本模型，性价比之选"),
         }
+
+# 智能助手需要稳定的多轮工具调用：只为确认支持 function calling 的文本模型提供预设。
+_AGENT_PRESETS = {
+    "deepseek": ("https://api.deepseek.com/v1", "deepseek-chat", "OpenAI 兼容工具调用；名称以平台模型列表为准"),
+    "aliyun": ("https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen-plus", "Qwen 工具调用，OpenAI 兼容"),
+    "zhipu": ("https://open.bigmodel.cn/api/paas/v4", "glm-4.6", "GLM 工具调用，OpenAI 兼容"),
+}
+for _provider, (_url, _model, _note) in _AGENT_PRESETS.items():
+    PROVIDER_PRESETS[_provider]["agent"] = {
+        "config": {"backend": "openai", "base_url": _url, "model": _model},
+        "note": _note,
+    }
+PROVIDER_PRESETS["anthropic"] = {
+    "agent": {
+        "config": {"backend": "anthropic", "base_url": "https://api.anthropic.com", "model": "claude-sonnet-4-5"},
+        "note": "Anthropic 原生 Messages 协议；模型名以控制台列表为准",
+    }
+}
 
 # 显式清除已存密钥的哨兵值（空字符串视为未填、保留原值）。
 CLEAR_KEY = "__clear__"
@@ -426,6 +449,8 @@ def activate_profile(store: Store, profile_id: int) -> dict:
 
 
 def _section(config: Config, role: str):
+    if role == "agent":
+        return config.agent.llm
     if role == "generator":
         return config.studio.generator
     if role == "writer":
@@ -453,6 +478,8 @@ def merge_profile(config: Config, role: str, profile: dict) -> Config:
     merged = SECTION_TYPES[role].model_validate({**current.model_dump(), **fields})
     if role in _STUDIO_ROLES:
         return config.model_copy(update={"studio": config.studio.model_copy(update={role: merged})})
+    if role == "agent":
+        return config.model_copy(update={"agent": config.agent.model_copy(update={"llm": merged})})
     return config.model_copy(update={role: merged})
 
 

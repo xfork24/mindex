@@ -161,6 +161,10 @@
 | `subtitles_max_age_days` | int ≥1 | 30 | 字幕轨道解析缓存保留天数（不含 `uploads/` 用户原件） |
 | `runs_max_age_days` | int ≥1 | 90 | `runs` 审计表已完成记录保留天数（running 一律保留） |
 
+## `agent` — 智能助手
+
+全局助手面板与 MCP 导出：`enabled`、`max_steps`、`max_context_tokens`、`secret_ttl_seconds`、`llm.*`（`backend: openai|anthropic`，设置页「智能助手」档案可覆盖）与 `mcp.*`（`http_enabled`、`policy: read|write|all`、`token_env`）。键说明与默认值见 [智能助手 · 配置](agent.md#配置)。
+
 ## 常用组合
 
 **整部电影画面索引（只有 WeMM）**：默认 adaptive detector + `embedding` 指向 WeMM，`index --mode visual --source ID --activate`。

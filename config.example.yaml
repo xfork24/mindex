@@ -184,3 +184,21 @@ clean:
   subtitles_max_age_days: 30
   # runs 审计表已完成记录（running 一律保留）。
   runs_max_age_days: 90
+
+# 智能助手（全局面板 /api/agent，详见 docs/agent.md）。模型也可在设置页「智能助手」角色里配置档案。
+agent:
+  enabled: true
+  max_steps: 16              # 单轮对话内模型最多连续调用工具的步数
+  max_context_tokens: 60000  # 发送给模型的历史估算上限；超出时先省略较早的工具结果
+  secret_ttl_seconds: 1800   # 表单收集的密钥引用（secret://）有效期
+  llm:
+    backend: openai          # openai（OpenAI 兼容 tools 协议）或 anthropic（原生 Messages 协议）
+    base_url: https://api.deepseek.com/v1
+    model: deepseek-chat
+    api_key_env: MINDEX_AGENT_API_KEY
+    timeout: 120
+    max_tokens: 4096
+  mcp:
+    http_enabled: false      # 开启后挂载 streamable-http /mcp，需设置 MINDEX_MCP_TOKEN
+    policy: read             # read / write / all：MCP 调用方允许执行的最高风险级别
+    token_env: MINDEX_MCP_TOKEN

@@ -187,17 +187,34 @@ run(async () => {
   if (id) {
     await selectSource(id);const parent = query.get('parent'),segment = query.get('segment');
     if (segment) {
-      const item = await api(`/api/admin/segments/${segment}`);
-      if (item.source_id !== id || !['shot', 'moment'].includes(item.kind)) throw new Error(MindexI18n.msg("ui.1f054c110e3f"));
-      state.kind = item.kind;state.parent = null;state.focus = item.id;state.segmentPage = Math.floor((item.position - 1) / 48) + 1;
-      $('segment-visibility').value = 'all';$('segment-favorite').checked = false;await loadSegments();
-      $('segment-list').querySelector('.is-focused')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      await focusSegment(id, segment);
     } else if (parent) {
       const item = await api(`/api/admin/segments/${parent}`);if (item.source_id !== id || item.kind !== 'shot') throw new Error(MindexI18n.msg("ui.ea6b2bd87cda"));
       state.kind = 'moment';state.parent = item;await loadSegments();
     }
   }
 });
+
+// 打开素材下的指定镜头或片段并滚动到它；启动参数与智能助手定位共用。
+async function focusSegment(sourceId, segmentId) {
+  const item = await api(`/api/admin/segments/${segmentId}`);
+  if (item.source_id !== sourceId || !['shot', 'moment'].includes(item.kind)) throw new Error(MindexI18n.msg("ui.1f054c110e3f"));
+  state.kind = item.kind;state.parent = null;state.focus = item.id;state.segmentPage = Math.floor((item.position - 1) / 48) + 1;
+  $('segment-visibility').value = 'all';$('segment-favorite').checked = false;await loadSegments();
+  const focused = $('segment-list').querySelector('.is-focused');
+  if (window.MindexAgent && focused) window.MindexAgent.highlight(focused);
+  else focused?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+}
+window.MindexAgentContext = () => ({ page: 'admin', source_id: state.source?.id || null });
+window.MindexAgentFocus = async (focus, { passive = false } = {}) => {
+  const mark = (element) => window.MindexAgent?.highlight(element);
+  if (!focus.source_id) {mark(document.querySelector('.source-panel') || $('source-list'));return true;}
+  if (passive && state.source?.id !== focus.source_id) return true;
+  if (state.source?.id !== focus.source_id) await selectSource(focus.source_id);
+  if (focus.segment_id) await focusSegment(focus.source_id, focus.segment_id);
+  else mark($('source-workspace'));
+  return true;
+};
 
 let workPoll = null;
 const workPreferences = new Map();

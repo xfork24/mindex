@@ -23,7 +23,8 @@ TOKEN_ENV = "MINDEX_WEB_TOKEN"
 COOKIE = "mindex_session"
 # 登录页自身所需的公共静态资源（样式、脚本、文案字典），不含业务数据。
 PUBLIC_PREFIXES = ("/assets/shared/",)
-PUBLIC_PATHS = {"/login", "/logout"}
+# /mcp 自行校验 MINDEX_MCP_TOKEN（未设置令牌时不会挂载），不复用网页登录。
+PUBLIC_PATHS = {"/login", "/logout", "/mcp"}
 
 
 def configured_token(explicit: str | None = None) -> str:
@@ -37,6 +38,11 @@ def session_value(token: str) -> str:
 def authorized(request: Request, token: str) -> bool:
     header = request.headers.get("authorization", "")
     if header.lower().startswith("bearer ") and hmac.compare_digest(header[7:].strip(), token):
+        return True
+    # 智能助手工具的进程内回环请求：凭证是本进程启动时生成的随机值，外部无法得知。
+    internal = getattr(request.app.state, "agent_internal_token", None)
+    supplied = request.headers.get("x-mindex-internal", "")
+    if internal and supplied and hmac.compare_digest(supplied, internal):
         return True
     return hmac.compare_digest(request.cookies.get(COOKIE, ""), session_value(token))
 

@@ -82,9 +82,13 @@ uv run mindex clean [--apply]                    # 磁盘清理：默认预览�
 
 **i18n**：文案目录 `frontend/src/shared/messages.json`（约 1800 键，中文原文为唯一源），键为 `ui.` 前缀（语义名或中文原文 sha1 前 12 位）；浏览器侧镜像 `messages.js` 由 `python scripts/build-messages.py` 从 json 生成，不要手工编辑（`tests/test_i18n.py` 用 `--check` 校验）。`frontend/src/shared/i18n.js` 负责语言切换，不重建 DOM、保留未提交输入（`tests/i18n_ui.cjs` 回归）。后端 `shared/i18n.py` 把中文消息反向映射为稳定 `message_key`/`message_params`（未匹配回落 `system.diagnostic`），供前端按键展示译文。
 
+### 智能助手（agent/，全局面板）
+
+`agent/` 是与运行方式无关的工具层 + 可替换运行时，详见 `docs/agent.md`。`llm/` 为 dsh 对齐的词汇与 OpenAI 兼容 / Anthropic 两种流式工具调用适配器（`scripted.py` 是测试专用脚本化模型，经 `create_app(agent_llm=...)` 注入）；`registry.py` 工具定义（read/write/danger）；`tools/` 全部经 `loopback.py` 的进程内 ASGI 回环调用既有 REST 接口（内部凭证由 `web_auth` 放行），不复制业务逻辑；`policy.py` 分级确认；`runtime.py` 的 `BuiltinRuntime` 跑轮次循环，事件为 dsh 形状、存 `data_dir/agent.sqlite3`（不进备份，含密钥保险库）；`watcher.py` 构建跟踪与 followup；`api.py` 为 `/api/agent`；`mcp_server.py` 导出 MCP（`mindex mcp`、可选 `/mcp`）。`changes.py` 是全局改动与定位通道（`agent_changes` 表，`/api/agent/changes` SSE，内置助手与 MCP 都发布）；工具与预览返回 `focus` 定位描述，`tools/navigate.py` 供模型主动切页。前端 `frontend/src/shared/agent-panel.js` 被五个页面引入（Markdown 经 `agent-markdown.js` + 仓库内固定版本的 `marked.umd.js`/`purify.min.js` 渲染，见 `THIRD_PARTY_NOTICES.md`）；页面通过 `window.MindexAgentContext` 提供上下文、实现 `window.MindexAgentFocus(focus, {passive})` 定位，并监听 `mindex:agent-mutation` 刷新。工具可附带 `media`（`tools/media.py` 构造，只允许本站 `/api/` 地址），面板据此显示缩略图网格、大图浏览与音视频。新增工具：在 `tools/` 实现并注册，写操作提供 `preview`，读写都给出 `focus`，有媒体时给出 `media`，保持总数约 30 以内。
+
 ### 设置页与热生效（/settings）
 
-七个模型角色（理解/文案创作/拆分镜/嵌入/ASR/TTS/人物识别）的「配置档案」存 SQLite（`settings/runtime_settings.py`：`model_profiles`/`voices` 表 + settings KV 覆盖层），保存即热生效：Web 经 `RuntimeConfig.current()` 每请求/每次任务启动解析，CLI 在 `load_config` 后统一合并（`mindex e2e` 除外，可用 `--no-runtime-overrides` 冻结）。支持线上厂商订阅（智谱/DeepSeek/阿里/腾讯 TokenHub/MiniMax，预设+自定义+测试连接）与自建服务互切；`settings/voice_clone.py` 提供 MiniMax 上传克隆与阿里 URL 复刻。密钥明文存库但接口只出掩码，`Service.api_key` 带 `exclude=True` 不进任何指纹/快照。切换嵌入档案后身份指纹变化，检索 503 直至 `mindex index --activate` 重建（页面横幅常显匹配状态）。详见 `docs/settings.md`。
+八个模型角色（理解/文案创作/拆分镜/嵌入/ASR/TTS/人物识别/智能助手）的「配置档案」存 SQLite（`settings/runtime_settings.py`：`model_profiles`/`voices` 表 + settings KV 覆盖层），保存即热生效：Web 经 `RuntimeConfig.current()` 每请求/每次任务启动解析，CLI 在 `load_config` 后统一合并（`mindex e2e` 除外，可用 `--no-runtime-overrides` 冻结）。支持线上厂商订阅（智谱/DeepSeek/阿里/腾讯 TokenHub/MiniMax，预设+自定义+测试连接）与自建服务互切；`settings/voice_clone.py` 提供 MiniMax 上传克隆与阿里 URL 复刻。密钥明文存库但接口只出掩码，`Service.api_key` 带 `exclude=True` 不进任何指纹/快照。切换嵌入档案后身份指纹变化，检索 503 直至 `mindex index --activate` 重建（页面横幅常显匹配状态）。详见 `docs/settings.md`。
 
 ### 独立服务与数据维护
 

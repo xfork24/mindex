@@ -369,3 +369,20 @@ $('query').addEventListener('input', () => {
   const names = registeredPeople.filter((p) => [p.name, ...p.aliases].some((name) => text.toLocaleLowerCase().includes(name.toLocaleLowerCase())));
   MindexI18n.setText($('person-hint'), names.length ? MindexI18n.msg("ui.4759bc4a8e9a") + names.map((p) => `${personKinds[p.kind] || p.kind} ${p.name} · ${p.id.slice(0, 8)}`).join('、') + MindexI18n.msg("ui.58b4558e0c39") : MindexI18n.msg("ui.e18397481723"));
 });
+// 智能助手：上下文提供当前检索词；定位时填入检索词并执行（被动定位只高亮，不替用户检索）。
+window.MindexAgentContext = () => ({ page: 'search', mode, query: $('query').value.trim() || null });
+window.MindexAgentFocus = async (focus, { passive = false } = {}) => {
+  const mark = (element) => window.MindexAgent?.highlight(element);
+  if (!focus.query?.text || passive) {
+    mark(document.querySelector('.search-panel') || $('search-form'));
+    return true;
+  }
+  if (!$('source').options.length || busy) return false; // 素材选项尚未加载或正在检索
+  if (mode !== 'text') switchMode('text');
+  $('query').value = focus.query.text;
+  if (focus.query.granularity && [...$('granularity').options].some((o) => o.value === focus.query.granularity))
+    $('granularity').value = focus.query.granularity;
+  $('search-form').requestSubmit();
+  mark(document.querySelector('.results-section'));
+  return true;
+};

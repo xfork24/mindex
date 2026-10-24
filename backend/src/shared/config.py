@@ -289,6 +289,38 @@ class CleanConfig(StrictModel):
     runs_max_age_days: int = Field(default=90, ge=1)
 
 
+class AgentLlmConfig(Service):
+    """智能助手模型：OpenAI 兼容 tools 协议或 Anthropic 原生 Messages 协议，须支持工具调用。"""
+
+    backend: Literal["openai", "anthropic"] = "openai"
+    base_url: str = "https://api.deepseek.com/v1"
+    model: str = "deepseek-chat"
+    revision: str = "main"
+    timeout: float = 120
+    api_key_env: str = "MINDEX_AGENT_API_KEY"
+    max_tokens: int = Field(default=4096, gt=0)
+
+
+class AgentMcpConfig(StrictModel):
+    """把工具注册表导出为 MCP 服务；外部 harness 不支持确认交互，因此由 policy 在服务端兜底。"""
+
+    # streamable-http /mcp 默认关闭；开启后必须设置 token_env 指向的 Bearer 令牌。
+    http_enabled: bool = False
+    # read=只允许只读工具；write=再允许可逆写操作；all=再允许删除、改模型、构建等高风险操作。
+    policy: Literal["read", "write", "all"] = "read"
+    token_env: str = "MINDEX_MCP_TOKEN"
+
+
+class AgentConfig(StrictModel):
+    enabled: bool = True
+    max_steps: int = Field(default=16, ge=1, le=64)
+    max_context_tokens: int = Field(default=60000, ge=4000)
+    # 表单收集的密钥只以 secret:// 引用出现在会话里，引用在此时长后失效。
+    secret_ttl_seconds: int = Field(default=1800, ge=60)
+    llm: AgentLlmConfig = Field(default_factory=AgentLlmConfig)
+    mcp: AgentMcpConfig = Field(default_factory=AgentMcpConfig)
+
+
 class Config(StrictModel):
     data_dir: Path = Path("data")
     source_upload_max_bytes: int = Field(default=20 * 1024**3, ge=1)
@@ -303,6 +335,7 @@ class Config(StrictModel):
     video: VideoConfig = Field(default_factory=VideoConfig)
     search: SearchConfig = Field(default_factory=SearchConfig)
     clean: CleanConfig = Field(default_factory=CleanConfig)
+    agent: AgentConfig = Field(default_factory=AgentConfig)
 
     @property
     def layout_key(self) -> str:

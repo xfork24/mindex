@@ -44,7 +44,7 @@ def client_for(config) -> TestClient:
 def test_get_settings_snapshot(config):
     data = client_for(config).get("/api/settings").json()
     roles = {role["role"]: role for role in data["roles"]}
-    assert set(roles) == {"analyzer", "writer", "generator", "embedding", "asr", "tts", "person"}
+    assert set(roles) == {"analyzer", "writer", "generator", "embedding", "asr", "tts", "person", "agent"}
     assert roles["writer"]["label"] == "文案创作"
     assert roles["writer"]["effective"]["max_tokens"] == config.studio.writer.max_tokens
     assert data["presets"]["deepseek"]["writer"]["config"] == data["presets"]["deepseek"]["generator"]["config"]

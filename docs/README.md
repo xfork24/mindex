@@ -19,6 +19,7 @@
 | 备份、迁移合并或全新 clone 恢复 | [数据备份与迁移](backup.md) | [CLI 参考](cli-reference.md#数据备份与迁移) |
 | 切换线上/自建模型、克隆音色、调检索权重 | [设置页指南](settings.md) | [配置参考](config-reference.md) |
 | 从文案生成视频（创作工作台） | [创作工作流](studio.md) | [修订计划](../plans/STUDIO_REFINEMENT_PLAN.md) / [验收记录](studio-verification.md) |
+| 用自然语言操作 Mindex，或接入外部 harness（MCP） | [智能助手](agent.md) | [设置页指南](settings.md) |
 | 用哔哩哔哩缓存转 MP4 | [附带工具](tools.md) | [tools/m4s-converter/README.md](../tools/m4s-converter/README.md) |
 | 标注评测查询 | [评测标注说明](../eval/README.md) | [e2e 实验框架](e2e-framework.md) |
 
@@ -36,6 +37,7 @@
 - [admin.md](admin.md) — 素材后台功能与管理 API
 - [settings.md](settings.md) — 设置页：模型服务档案热切换、线上厂商支持、音色克隆、检索调参、密钥安全
 - [studio.md](studio.md) — 创作工作流：拆分镜/召回/配音/选片/渲染五步状态机、人工编辑、API
+- [agent.md](agent.md) — 智能助手：全局面板、分级确认、密钥表单、页面同步与定位、Markdown 回复、图片与音视频、可调宽度、构建跟踪、MCP 导出与 deepseek-harness 兼容
 - [tools.md](tools.md) — m4s-converter 等附带工具
 - [cleanup.md](cleanup.md) — 磁盘清理：三级分类（每次删/策略过期/只报告）、保留规则、锁与并发
 - [backup.md](backup.md) — 离线备份、部分迁移、已有库合并、切换中断恢复和全新 clone 恢复流程

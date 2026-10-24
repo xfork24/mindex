@@ -145,6 +145,8 @@ def excluded(relative):
         'metadata.sqlite3', 'metadata.sqlite3-wal', 'metadata.sqlite3-shm',
     }:
         return '数据库通过 SQLite backup API 单独保存'
+    if path.name == 'agent.sqlite3' and len(path.parts) == 1:
+        return '智能助手会话与密钥保险库属于本机运行状态，不进入备份'
     if path.suffix in MODEL_SUFFIXES:
         return '模型权重需单独补充'
     if path.name == '.env' or path.name.startswith('.env.'):

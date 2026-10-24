@@ -6,7 +6,7 @@
 
 相关模块：`settings/runtime_settings.py`（档案/覆盖层/预设）、`settings/settings_api.py`（API）、`settings/voice_clone.py`（厂商克隆客户端）、`frontend/src/settings/settings.*`（页面）。
 
-## 六个模型角色
+## 八个模型角色
 
 | 角色 | 配置段 | 说明 |
 |---|---|---|
@@ -16,6 +16,7 @@
 | 多模态嵌入 | `embedding` | 文本/图片/视频统一向量空间，**切换后需重建索引** |
 | 语音识别 | `asr` | 线上模型只出纯文本，时间戳仍由本地 CPU ForcedAligner 补齐 |
 | 语音合成 | `studio.tts` | 创作配音；支持预定义与克隆音色 |
+| 智能助手 | `agent.llm` | 全局助手面板的对话模型，须支持工具调用（OpenAI 兼容 tools 或 Anthropic 原生协议）；测试连接会验证工具调用，见 [智能助手](agent.md) |
 
 每个角色可保存多个「配置档案」（名称 + 厂商 + 连接字段 + 密钥），任意时刻激活其一；未激活时直接用 `config.local.yaml` 的取值。档案只覆盖白名单连接字段（`runtime_settings.PROFILE_FIELDS`），`data_dir`、切分布局、对齐器等本地设施永不被触碰。
 

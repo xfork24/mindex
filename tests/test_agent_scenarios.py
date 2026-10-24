@@ -1,0 +1,23 @@
+"""智能助手验收场景（确定性）：脚本化模型驱动真实应用，按最终状态判定。
+
+同一组场景由 scripts/agent_eval.py 交给真实模型评测；这里只验证工程链路，不代表真实模型质量。
+"""
+
+from __future__ import annotations
+
+import pytest
+from agent_scenarios import SCENARIOS, build_world, drive
+from fastapi.testclient import TestClient
+
+from mindex.agent.llm.scripted import ScriptedLlm
+
+
+@pytest.mark.parametrize("scenario", SCENARIOS, ids=[s.name for s in SCENARIOS])
+def test_scenario(config, video_file, scenario):
+    world = build_world(config, video_file)
+    llm = ScriptedLlm(scenario.script(world))
+    with TestClient(world.app(llm)) as client:
+        events = drive(client, scenario, world)
+        assert events[-1]["type"] == "turn/end" and events[-1]["data"]["reason"]["kind"] == "completed", events[-1]
+        scenario.check(world, client, events)
+    assert not llm.script, f"脚本未用完：{llm.script}"

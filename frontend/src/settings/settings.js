@@ -23,7 +23,7 @@ function syncSectionRows() {
 }
 let settingsRequest = 0;
 
-const ROLE_ORDER = ['analyzer', 'writer', 'generator', 'embedding', 'asr', 'tts', 'person'];
+const ROLE_ORDER = ['analyzer', 'writer', 'generator', 'embedding', 'asr', 'tts', 'person', 'agent'];
 const ROLE_DESC = {
   person: MindexI18n.msg("ui.907c176fe85a"),
   analyzer: MindexI18n.msg("ui.85feed61e44f"),
@@ -31,7 +31,8 @@ const ROLE_DESC = {
   generator: MindexI18n.msg("ui.09b768c5ad0a"),
   embedding: MindexI18n.msg("ui.bd997040b2e2"),
   asr: MindexI18n.msg("ui.b74f293dd13e"),
-  tts: MindexI18n.msg("ui.35cda4046011")
+  tts: MindexI18n.msg("ui.35cda4046011"),
+  agent: MindexI18n.msg("ui.agent_role_description")
 };
 const ROLE_BACKENDS = {
   person: ['mindex'],
@@ -40,7 +41,8 @@ const ROLE_BACKENDS = {
   generator: ['openai'],
   embedding: ['mindex', 'llama_cpp', 'tokenhub'],
   asr: ['mindex', 'llama_cpp', 'openai', 'minimax'],
-  tts: ['openai', 'minimax', 'dashscope']
+  tts: ['openai', 'minimax', 'dashscope'],
+  agent: ['openai', 'anthropic']
 };
 const ROLE_EXTRA = {
   person: [
@@ -68,7 +70,8 @@ const ROLE_EXTRA = {
   { key: 'initial_output_tokens', label: MindexI18n.msg("ui.377c6dff15af"), type: 'number', min: 64, max: 131072 },
   { key: 'max_output_tokens', label: MindexI18n.msg("ui.ee7fe23f341f"), type: 'number', min: 64, max: 131072 }],
 
-  asr: []
+  asr: [],
+  agent: [{ key: 'max_tokens', label: 'max_tokens', type: 'number', min: 256 }]
 };
 const WEIGHT_LABELS = {
   video: MindexI18n.msg("ui.1a6981c253a3"), description: MindexI18n.msg("ui.522d79717392"), style: MindexI18n.msg("ui.5e46e0ea4cd0"), dialogue: MindexI18n.msg("ui.56073ee07b2d"), lexical: MindexI18n.msg("ui.7fe742805071")
@@ -155,6 +158,7 @@ function renderRole(rolePayload) {
   const open = state.expanded.has(role);
 
   const row = node('article', undefined, `role-row${open ? ' is-open' : ''}`);
+  row.dataset.role = role;
   const head = node('button', undefined, 'role-row-head');
   head.type = 'button';
   head.setAttribute('aria-expanded', String(open));
@@ -183,6 +187,7 @@ function renderRole(rolePayload) {
   }
   rolePayload.profiles.forEach((profile) => {
     const item = node('div', undefined, `profile-item ${rolePayload.active_profile_id === profile.id ? 'is-active' : ''}`);
+    item.dataset.profileId = String(profile.id);
     const head2 = node('div', undefined, 'profile-head');
     head2.append(node('strong', profile.name));
     if (rolePayload.active_profile_id === profile.id) head2.append(node('span', MindexI18n.msg("ui.e6aa2cbd7b42"), 'active-badge'));
@@ -870,3 +875,44 @@ for (const head of document.querySelectorAll('.role-row-head[data-section]')) {
 }
 syncSectionRows();
 run(loadSettings);
+// 智能助手修改设置（档案、业务调参）后刷新本页，并定位到相关角色、档案或区块。
+// 控制器单测在没有 window 的沙箱里运行本文件，因此需要守卫。
+if (typeof window !== 'undefined' && window.addEventListener) {
+  let agentReload = Promise.resolve();
+  window.MindexAgentContext = () => ({ page: 'settings', expanded_roles: [...state.expanded] });
+  window.addEventListener('mindex:agent-mutation', (event) => {
+    if ((event.detail || {}).domain === 'settings') agentReload = run(loadSettings);
+  });
+  const persist = () => {
+    try {localStorage.setItem(EXPANDED_KEY, JSON.stringify([...state.expanded]));} catch {}
+  };
+  window.MindexAgentFocus = async (focus, { passive = false } = {}) => {
+    if (!state.data) return false;
+    await agentReload;
+    const mark = (element, options) => window.MindexAgent?.highlight(element, options);
+    if (focus.role) {
+      if (!passive && !state.expanded.has(focus.role)) {
+        state.expanded.add(focus.role);
+        persist();
+        renderRoles(state.data);
+      }
+      const row = document.querySelector(`.role-row[data-role="${CSS.escape(focus.role)}"]`);
+      const card = focus.profile_id != null ?
+        document.querySelector(`.profile-item[data-profile-id="${CSS.escape(String(focus.profile_id))}"]`) : null;
+      mark(row, { scroll: !card });
+      if (card) mark(card);
+      return true;
+    }
+    const section = focus.section;
+    if (['tuning', 'voices', 'releases'].includes(section)) {
+      if (!passive) {
+        state.expanded.add(section);
+        persist();
+        syncSectionRows();
+      }
+      mark($(`${section}-row`));
+    } else if (section === 'processing') mark($('processing-settings'));
+    else mark($('roles'));
+    return true;
+  };
+}

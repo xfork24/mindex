@@ -20,6 +20,14 @@ def test_page_bundle_assets(config, page):
         assert assets
         feedback = '/assets/shared/feedback.js?v=20261022-local-feedback'
         assert feedback in assets
+        # 全局智能助手面板在每个页面都可唤起，且须在 i18n.js 之后加载。
+        panel = '/assets/shared/agent-panel.js?v=20261025-media'
+        assert panel in assets and '/assets/shared/agent-panel.css?v=20261025-media' in assets
+        # Markdown 依赖须在面板之前加载：i18n < marked < DOMPurify < agent-markdown < agent-panel。
+        chain = ['/assets/shared/i18n.js', '/assets/shared/marked.umd.js?v=18.1.1',
+                 '/assets/shared/purify.min.js?v=3.4.17', '/assets/shared/agent-markdown.js?v=20261025-media', panel]
+        positions = [response.text.index(item) for item in chain]
+        assert positions == sorted(positions)
         assert response.text.index(feedback) < response.text.index('/assets/' + (
             'search/app.js' if page in {'/', '/index.html'} else page.strip('/').split('.')[0] + '/' + page.strip('/').split('.')[0] + '.js'
         ))

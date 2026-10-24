@@ -106,6 +106,7 @@ def _effective(section, role: str) -> dict:
         "tts": ("voice", "response_format"),
         "generator": ("max_tokens",),
         "writer": ("max_tokens",),
+        "agent": ("max_tokens",),
     }
     for key in extras.get(role, ()):
         info[key] = dump.get(key)
@@ -141,11 +142,56 @@ def _silence_wav(path: Path, seconds: float = 0.5) -> None:
         handle.writeframes(b"\x00\x00" * int(16000 * seconds))
 
 
+ECHO_TOOL = {
+    "name": "echo",
+    "description": "连接测试工具：原样返回 text。",
+    "parameters": {
+        "type": "object",
+        "properties": {"text": {"type": "string"}},
+        "required": ["text"],
+    },
+}
+
+
+def _probe_agent(config: Config, *, transport=None) -> dict:
+    """智能助手必须支持工具调用：要求模型调用 echo 工具，并核对调用名与参数可解析。"""
+    import asyncio
+
+    from mindex.agent.llm.factory import make_agent_llm
+    from mindex.agent.llm.types import LlmRequest, collect, parse_arguments
+
+    request = LlmRequest(
+        system="你在做连接测试。必须调用 echo 工具，参数 text 为 ok，不要输出其他内容。",
+        messages=[{"id": "probe", "role": "user", "source": {"kind": "user"},
+                   "content": [{"type": "text", "text": "请调用 echo 工具，text=ok"}]}],
+        tools=[ECHO_TOOL],
+        max_tokens=min(config.agent.llm.max_tokens, 512),
+        temperature=0,
+    )
+    result = asyncio.run(collect(make_agent_llm(config, transport=transport), request))
+    calls = [b for b in result.content if b["type"] == "tool-call"]
+    text = "".join(b.get("text", "") for b in result.content if b["type"] == "text")
+    ok = bool(calls) and calls[0]["name"] == "echo"
+    if ok:
+        try:
+            parse_arguments(calls[0]["arguments"])
+        except ValueError:
+            ok = False
+    return {
+        "model": config.agent.llm.model,
+        "backend": config.agent.llm.backend,
+        "tool_calling": ok,
+        "reply": "工具调用可用" if ok else f"模型未按要求调用工具（{text[:60] or '无文本输出'}）",
+    }
+
+
 def _probe(config: Config, role: str, *, store: Store | None = None, profile_name: str = "") -> dict:
     """对单个角色做一次最小真实调用，返回可呈现的探测结果。"""
     if role == "person":
         from mindex.persons.person_processing import PersonClient
         return {"ready": True, "space": PersonClient(config).identity()}
+    if role == "agent":
+        return _probe_agent(config)
     if role in {"analyzer", "generator", "writer"}:
         service = (
             config.analyzer if role == "analyzer"
@@ -374,6 +420,9 @@ def settings_router(runtime: RuntimeConfig, store: Store) -> APIRouter:
         try:
             config = merge_profile(runtime.base, profile["role"], profile)
             detail = _probe(config, profile["role"], store=store, profile_name=profile["name"])
+            if detail.get("tool_calling") is False:
+                return {"ok": False, "latency_ms": round((time.monotonic() - started) * 1000),
+                        "detail": detail["reply"], **detail}
             return {"ok": True, "latency_ms": round((time.monotonic() - started) * 1000), **detail}
         except Exception as exc:  # noqa: BLE001 — 测试结果要回报给页面而不是 500
             return {
