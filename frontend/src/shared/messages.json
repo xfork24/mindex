@@ -1034,8 +1034,8 @@
     "en": "Save tuning"
   },
   "ui.3401af34627a": {
-    "zh": "TTS 设置",
-    "en": "TTS settings"
+    "zh": "语音合成设置",
+    "en": "Speech synthesis settings"
   },
   "ui.9af210fec713": {
     "zh": "音色库与默认音色，用于创作工作流配音",
@@ -4850,8 +4850,8 @@
     "en": "The {p0} section of the storyboard contains hidden material, please re-select it."
   },
   "ui.96e98108c6f5": {
-    "zh": "分镜 {p0} 配音返回空音频，请检查 TTS 服务",
-    "en": "Storyboard {p0} dubbing returns empty audio, please check the TTS service"
+    "zh": "分镜 {p0} 配音返回空音频，请检查语音合成服务",
+    "en": "Storyboard {p0} dubbing returns empty audio, please check the speech synthesis service"
   },
   "ui.04838584a719": {
     "zh": "所选区间包含隐藏素材，请重新选片",
@@ -6146,8 +6146,8 @@
     "en": "Task not found"
   },
   "ui.e18151537887": {
-    "zh": "TTS 服务返回的 JSON 中没有可解码的音频字段",
-    "en": "There is no decodable audio field in the JSON returned by the TTS service"
+    "zh": "语音合成服务返回的 JSON 中没有可解码的音频字段",
+    "en": "There is no decodable audio field in the JSON returned by the speech synthesis service"
   },
   "ui.2e10857e5d50": {
     "zh": "DashScope TTS 未返回可用的音频 URL 或数据",
@@ -6210,8 +6210,8 @@
     "en": "Scene grouping exceeds 45 seconds"
   },
   "ui.af63d2741a1a": {
-    "zh": "TTS 服务未返回可识别的音频数据",
-    "en": "TTS service did not return recognizable audio data"
+    "zh": "语音合成服务未返回可识别的音频数据",
+    "en": "Speech synthesis service did not return recognizable audio data"
   },
   "ui.482f48fcc0b9": {
     "zh": "MiniMax TTS 合成失败：{p0}",
@@ -7307,7 +7307,7 @@
   },
   "ui.voice_catalog_unavailable": {
     "zh": "音色列表加载失败，请稍后重试或到设置页面检查配音服务。",
-    "en": "Could not load voices. Retry or check the TTS service in Settings."
+    "en": "Could not load voices. Retry or check the speech synthesis service in Settings."
   },
   "ui.original_gain_help": {
     "zh": "仅在“配音与原声”模式且素材有音轨时生效，控制素材原声音量；0.15 表示原声振幅的 15%，不改变配音音量。",

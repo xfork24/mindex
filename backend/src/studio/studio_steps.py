@@ -183,7 +183,7 @@ def run_tts(config: Config, job_id: str, state: dict, speaker: Speaker) -> dict:
             target = session.target(logical) if session else directory / f"{shot.id}.wav"
             payload = speaker.speak(shot.text, voice)
             if not payload:
-                raise ModelError(f"分镜 {shot.id} 配音返回空音频，请检查 TTS 服务")
+                raise ModelError(f"分镜 {shot.id} 配音返回空音频，请检查语音合成服务")
             studio.save_bytes(target, payload)
             info = audio_info(target)
             if session:

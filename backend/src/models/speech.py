@@ -1,4 +1,4 @@
-"""TTS 语音合成客户端：OpenAI 风格、MiniMax、阿里 DashScope。"""
+"""语音合成客户端：OpenAI 风格、MiniMax、阿里 DashScope。"""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ def decode_audio(payload: bytes) -> bytes:
     try:
         document = json.loads(payload)
     except (ValueError, TypeError):
-        raise ModelError("TTS 服务未返回可识别的音频数据") from None
+        raise ModelError("语音合成服务未返回可识别的音频数据") from None
     if isinstance(document, dict):
         for key in ("audio", "data", "content", "b64_json"):
             value = document.get(key)
@@ -29,7 +29,7 @@ def decode_audio(payload: bytes) -> bytes:
                     return base64.b64decode(value, validate=True)
                 except (ValueError, TypeError):
                     continue
-    raise ModelError("TTS 服务返回的 JSON 中没有可解码的音频字段")
+    raise ModelError("语音合成服务返回的 JSON 中没有可解码的音频字段")
 
 
 class OpenAISpeaker:
@@ -84,7 +84,7 @@ class MiniMaxSpeaker:
 
 
 class DashScopeSpeaker:
-    """阿里百炼原生协议 TTS（qwen-tts 系列，multimodal-generation 端点）。"""
+    """阿里百炼原生协议语音合成（qwen-tts 系列，multimodal-generation 端点）。"""
 
     def __init__(self, config: Config):
         self.profile = config.studio.tts

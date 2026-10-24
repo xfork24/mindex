@@ -120,7 +120,7 @@ const buttons = (row) => row.children.filter(n => n.tagName === 'button');
     assert.ok(settings.includes(`id="${id}"`), id);
     assert.ok(!persons.includes(`id="${id}"`), id);
   }
-  assert.ok(settings.lastIndexOf('aria-label="索引版本"') > settings.lastIndexOf('aria-label="TTS 设置"'));
+  assert.ok(settings.lastIndexOf('aria-label="索引版本"') > settings.lastIndexOf('aria-label="语音合成设置"'));
   assert.ok(settings.indexOf('aria-label="索引版本"') < settings.indexOf('</main>'));
   assert.ok(!persons.includes('发布与回退') && !persons.includes('处理与发布'));
   console.log('settings release UI checks passed');

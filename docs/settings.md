@@ -28,12 +28,12 @@
 | 文案创作 / 文本拆分镜 | GLM 文本 | **deepseek-chat（性价比首选）** | qwen 文本 | 混元文本 | M 系列 |
 | 多模态嵌入 | — | — | — | **TokenHub**（WeMM 系，`/v1/embeddings/multimodal`） | — |
 | ASR | — | — | qwen3-asr-flash（chat + input_audio） | —（自有签名协议） | asr-1.0（speech_to_text 专用适配器） |
-| TTS | — | — | DashScope 原生（专用适配器） | —（自有协议） | t2a_v2（专用适配器） |
+| 语音合成 | — | — | DashScope 原生（专用适配器） | —（自有协议） | t2a_v2（专用适配器） |
 
 要点：
 
 - **多模态嵌入的线上选择基本只有腾讯 TokenHub**（`kinfra-vl-embedding-2b/8b`，与本地 WeMM 同系）。适配器在客户端按 `video` 配置抽帧后以图片序列发送，保证预处理指纹诚实；身份纯由配置构造，进入索引空间指纹。
-- **TTS 五家都没有标准 OpenAI `/audio/speech` 端点**，因此写了两个专用适配器：`minimax`（t2a_v2，hex 音频解码）与 `dashscope`（原生协议，音频 URL 二次下载或 base64）。
+- **语音合成五家都没有标准 OpenAI `/audio/speech` 端点**，因此写了两个专用适配器：`minimax`（t2a_v2，hex 音频解码）与 `dashscope`（原生协议，音频 URL 二次下载或 base64）。
 - **ASR 线上协议分两类**：OpenAI 兼容 chat + input_audio（阿里）与 MiniMax `speech_to_text`（multipart 表单上传，单文件 ≤500 秒/50MB，管线 30 秒切块远小于上限）；两者都只出纯文本，时间戳由本地对齐补齐。
 - 理解/文案创作/拆分镜的 OpenAI 兼容端点会自动省略 llama-server 专有的 `chat_template_kwargs`（档案里 `llama_template=false`）；本地服务保持默认 `true` 不变。
 - 预设的模型名是「最佳已知」预填值，会随平台演进漂移——页面所有字段可改，每个档案有「测试连接」按钮（最小真实调用）兜底。
@@ -58,11 +58,11 @@
 ## 音色库与声音克隆
 
 - 音色分**预定义**（厂商/本地服务自带，直接录入 voice_id）与**克隆**（上传样本生成）。
-- **音色目录**（`GET /api/settings/voices/catalog`，`settings/voices_catalog.py`）：按当前 TTS 后端聚合可选音色——本地 Qwen3-TTS 为静态 CustomVoice 九音色表 + qwentts `GET /audio/voices` 动态合并；MiniMax 经 `POST /get_voice`（voice_type=all）实时查询全量系统/复刻/生成音色，按 voice_id 前缀分组。设置页默认音色下拉与创作页「方案参数」的音色下拉均由此驱动，支持 voice_id 字面量设默认（`PUT business` 的 `default_voice` 字段，目录/音色库内校验）。
+- **音色目录**（`GET /api/settings/voices/catalog`，`settings/voices_catalog.py`）：按当前语音合成后端聚合可选音色——本地 Qwen3-TTS 为静态 CustomVoice 九音色表 + qwentts `GET /audio/voices` 动态合并；MiniMax 经 `POST /get_voice`（voice_type=all）实时查询全量系统/复刻/生成音色，按 voice_id 前缀分组。设置页默认音色下拉与创作页「方案参数」的音色下拉均由此驱动，支持 voice_id 字面量设默认（`PUT business` 的 `default_voice` 字段，目录/音色库内校验）。
 - **本地 Qwen3-TTS 克隆**（qwentts.cpp tts-server）：上传样本 + 可选参考文本 → `POST /audio/voices` 注册，试听音频回存；注册表存于服务进程内存，**服务重启后丢失**——mindex 持久化样本于 `data/voices/`（ref_text 存 `voices.notes`），目录加载时自动重注册自愈；任务执行途中若服务重启会报 unknown voice，重开设置页/方案参数即恢复。
 - **MiniMax**：页面直接上传样本（wav/mp3/m4a，10 秒~5 分钟）→ `/files/upload` + `/voice_clone` → 自定义 voice_id 即可用于 t2a_v2；样本与预览音频存 `data/voices/`。有资料称快速复刻音色 7 天未使用可能被回收，页面有提示。
 - **阿里 DashScope**：复刻 API 要求**公网可访问的样本 URL**（不支持本地直传），页面提供「URL 复刻」模式；也可在百炼控制台复刻后用「录入已有」登记 voice_id。复刻音色与合成模型绑定。
-- 克隆必须勾选授权确认。默认音色（覆盖 `studio.tts.voice`）须与当前 TTS 后端厂商匹配，页面强制校验；进行中任务按创建时快照继续；创作页方案参数可改音色（改后重跑 tts 列即级联作废下游）。
+- 克隆必须勾选授权确认。默认音色（覆盖 `studio.tts.voice`）须与当前语音合成后端厂商匹配，页面强制校验；进行中任务按创建时快照继续；创作页方案参数可改音色（改后重跑 tts 列即级联作废下游）。
 
 ## 检索调参
 

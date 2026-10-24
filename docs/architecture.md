@@ -25,7 +25,7 @@ Mindex 是中文视频片段检索系统：文字找视频优先，支持视频�
     旧版索引（format 1）：四路向量召回 + jieba BM25 → 五路加权 RRF
   图片 / 视频查询 ──（视频按 4s/3s 窗口）──→ 仅画面表示召回 ────────────┘
 
-创作（/studio）：文案 ─拆分镜→ 逐镜召回（上面的检索）与 TTS 配音 ─选片对齐→ FFmpeg 渲染 → 成片与产物
+创作（/studio）：文案 ─拆分镜→ 逐镜召回（上面的检索）与语音合成配音 ─选片对齐→ FFmpeg 渲染 → 成片与产物
 ```
 
 三渠道的细节见 [recall-enhancement.md](recall-enhancement.md)，旧版五路召回见 [search.md](search.md)。
@@ -96,7 +96,7 @@ wheel 安装后读取随包的 `mindex/web/`。Setuptools 通过包目录映射�
 | `studio/studio_steps.py` / `studio/studio_select.py` / `studio/studio_render.py` | 创作各步骤编排、选片纯算法、ffmpeg 渲染合成 |
 | `studio/studio_artifacts.py` | 创作检查点/产物/诊断记录（attempt 不可变留档） |
 | `models/adapters.py` | 模型适配层公共部分：`ModelError` 等错误类型、带重试的 `request`、七个 Protocol 与 `make_*` 工厂（见下）；工厂调用时才导入后端 |
-| `models/embedders.py` / `models/qwen.py` / `models/speech.py` / `models/storyboard.py` / `models/transcribers.py` / `models/detectors.py` | 各角色的后端实现：嵌入、Qwen 分析、TTS、拆分镜（含原文覆盖校验）、转写（含 MiniMax 词级时间戳解析）、分镜检测 |
+| `models/embedders.py` / `models/qwen.py` / `models/speech.py` / `models/storyboard.py` / `models/transcribers.py` / `models/detectors.py` | 各角色的后端实现：嵌入、Qwen 分析、语音合成、拆分镜（含原文覆盖校验）、转写（含 MiniMax 词级时间戳解析）、分镜检测 |
 | `models/llama_cpp.py` | 对用户已有 llama-server 的原生协议适配（`/v1/embeddings` 的 `input_video`、`input_audio`）；部署清单核验 |
 | `shared/images.py` / `models/image_embedding.py` | 静态图片解码、方向/透明度/像素处理；扩展原生图片嵌入，保持既有文字/视频空间指纹 |
 | `models/model_server.py` | GPU 侧自定义服务（`mindex-model-server`，角色独立 venv）：WeMMEngine / ASREngine / TransNetEngine |
@@ -118,7 +118,7 @@ wheel 安装后读取随包的 `mindex/web/`。Setuptools 通过包目录映射�
 | `persons/person_processing.py` / `persons/person_worker.py` / `persons/person_frames.py` / `persons/person_thumbnails.py` | 人物扫描管线与后台 worker、展示帧布局、缩略图 |
 | `persons/person_server.py` | GPU 侧人物检测/特征服务（`mindex-person-server`） |
 | `studio/studio_workspace.py` / `studio/studio_window.py` / `studio/studio_logs.py` | 方案、构建与版本工作台，定长选片窗口，只追加的执行事件日志 |
-| `settings/voices_catalog.py` | TTS 音色目录：按当前合成后端聚合系统音色、本地音色库与克隆能力 |
+| `settings/voices_catalog.py` | 语音合成音色目录：按当前合成后端聚合系统音色、本地音色库与克隆能力 |
 | `shared/shot_media.py` | 统一镜头媒体服务：时间基准转换、截图/抽帧、跨镜重建；业务读取不直读历史切片路径 |
 | `shared/processing_lock.py` / `shared/task_progress.py` | 处理锁（含 GPU 互斥）、任务进度持久化 |
 | `admin/work_cache.py` | 素材工作台摘要缓存：先返回上次结果，后台刷新昂贵的覆盖统计 |
