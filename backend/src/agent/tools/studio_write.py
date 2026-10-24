@@ -242,7 +242,8 @@ class ShotOperation(StrictModel):
     to_index: int | None = Field(default=None, ge=1, description="move：目标位置（从 1 开始）")
     fields: ShotFields | None = Field(default=None, description="update/insert：要设置的字段")
     parts: list[ShotFields] | None = Field(default=None, min_length=2,
-                                           description="split：拆分后的各镜，旁白按顺序拼接须等于原旁白")
+                                           description="split：拆分后的各镜；各段旁白须由 get_shot_details 返回的完整旁白"
+                                                       "按顺序切分，按顺序拼接（忽略空白）须等于原旁白")
 
 
 class EditShots(StrictModel):
@@ -535,7 +536,8 @@ def specs() -> list[ToolSpec]:
                  EditScript, "write", edit_script, preview_edit_script),
         ToolSpec("edit_shots", "studio",
                  "批量修改分镜结构：update/insert/delete/move/merge/split。合并规则与创作页一致（旁白拼接、查询以「；」连接、"
-                 "时长相加、画面意象以「；」连接并截到 120 字）。只能合并相邻分镜。未改动分镜保留产物，只有受影响分镜需要重建。",
+                 "时长相加、画面意象以「；」连接并截到 120 字）。只能合并相邻分镜。未改动分镜保留产物，只有受影响分镜需要重建。"
+                 "split 的各段旁白须由 get_shot_details 返回的完整旁白按顺序切分，各段按顺序拼接（忽略空白）须等于原旁白。",
                  EditShots, "write", edit_shots, preview_edit_shots),
         ToolSpec("select_version", "studio", "选用某个历史版本作为当前方案的产物（文案、分镜内容、召回、配音、选片、渲染或成片）。",
                  SelectVersion, "write", select_version, preview_select_version),

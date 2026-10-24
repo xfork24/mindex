@@ -5,12 +5,20 @@ from __future__ import annotations
 from collections import Counter
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, StrictInt, field_validator, model_validator
 
 from mindex.agent.ids import resolve_shot, short
 from mindex.agent.registry import ToolContext, ToolError, ToolOutput, ToolSpec
 from mindex.agent.tools.common import STAGE_LABELS, STAGES, board_text, check, clip, load_view
 from mindex.agent.tools.media import final_media, shot_media, version_media
+from mindex.agent.tools.shot_details import (
+    details_focus,
+    page_details,
+    plan_header,
+    render_list,
+    render_refs,
+    resolve_refs,
+)
 from mindex.shared.config import StrictModel
 
 JobId = Field(default=None, description="创作任务 ID；省略时使用当前页面打开的任务")
@@ -103,6 +111,55 @@ async def resolve_shots(args: ResolveShots, ctx: ToolContext) -> ToolOutput:
         focus["section"] = "storyboard"
     media = [entry for sid in shots[:4] for entry in shot_media(view, sid)]
     return ToolOutput({"plan_id": view.plan_id, "results": results}, text="\n".join(lines), focus=focus, media=media)
+
+
+class ShotDetailsArgs(StrictModel):
+    refs: list[str] | None = Field(
+        default=None, min_length=1, max_length=50,
+        description="要读取的分镜：完整 ID、界面短 ID（如 a1daad59 或 shot-a1daad59）或 #序号；省略时按顺序读取全部分镜")
+    offset: StrictInt | None = Field(
+        default=None, ge=0, description="仅在省略 refs 时使用：从第几个分镜开始（从 0 计），默认 0")
+    limit: StrictInt | None = Field(
+        default=None, ge=1, le=100, description="仅在省略 refs 时使用：最多返回多少个分镜（1–100），默认 100")
+    job_id: str | None = JobId
+    plan_id: str | None = PlanId
+
+    @field_validator("refs")
+    @classmethod
+    def no_blank(cls, value):
+        if value is not None and any(not item.strip() for item in value):
+            raise ValueError("refs 不能包含空字符串或仅含空白的项")
+        return value
+
+    @model_validator(mode="after")
+    def exclusive(self):
+        if self.refs is not None and (self.offset is not None or self.limit is not None):
+            raise ValueError("refs 与 offset/limit 不能同时提供")
+        return self
+
+
+async def get_shot_details(args: ShotDetailsArgs, ctx: ToolContext) -> ToolOutput:
+    view = await load_view(ctx, args.job_id, args.plan_id)
+    header = plan_header(view)
+    if args.refs is None:
+        offset = 0 if args.offset is None else args.offset
+        limit = 100 if args.limit is None else args.limit
+        details = page_details(view, offset, limit)
+        text, shown = render_list(header, details, offset)
+        has_more = offset + shown < header["total"]
+        value = {**header, "mode": "list", "offset": offset, "returned": shown, "has_more": has_more,
+                 "next_offset": offset + shown if has_more else None, "shots": details[:shown]}
+        focus = details_focus(view, None)
+    else:
+        items = resolve_refs(view, args.refs)
+        text, rendered = render_refs(header, items)
+        value = {**header, "mode": "refs", "returned": sum(item["status"] == "ok" for item in items),
+                 "unrendered_refs": [item["ref"] for item in items[rendered:] if item["status"] == "ok"],
+                 "results": items}
+        focus = details_focus(view, items)
+    return ToolOutput(value, text=text,
+                      meta={"kind": "shot_details", "job_id": view.job["id"], "plan_id": view.plan_id},
+                      focus=focus)
 
 
 class Preflight(StrictModel):
@@ -238,12 +295,19 @@ def specs() -> list[ToolSpec]:
     return [
         ToolSpec("list_jobs", "studio", "列出创作任务（ID、标题、创建时间）。", ListJobs, "read", list_jobs),
         ToolSpec("get_workspace_summary", "studio",
-                 "读取创作任务的工作台：方案、方案参数、revision、文案、分镜表（序号、短ID、完整ID、旁白、查询、各阶段状态）、"
+                 "读取创作任务的工作台：方案、方案参数、revision、文案、分镜表（序号、短ID、完整ID、旁白、查询、各阶段状态；"
+                 "旁白与画面意象截断到 60 字、查询截断到 30 字，完整内容用 get_shot_details 读取）、"
                  "成片与最近构建。修改分镜或方案前先调用它获取最新状态。",
                  WorkspaceSummary, "read", get_workspace_summary),
         ToolSpec("resolve_shots", "studio",
                  "把用户提到的分镜（界面短 ID、完整 ID 或 #序号）解析为完整分镜 ID；有歧义时返回候选，须向用户确认。",
                  ResolveShots, "read", resolve_shots),
+        ToolSpec("get_shot_details", "studio",
+                 "读取分镜的完整详情（不截断）：旁白、查询、画面意象、预估时长、召回粒度/数量与召回设置、人工区间、"
+                 "召回/配音/选片/渲染各阶段状态、字幕文本与时间轴（秒）、配音时长（秒）。省略 refs 时按顺序分页读取全部分镜"
+                 "（offset/limit，结果给出下一次 offset）；提供 refs（短 ID、完整 ID 或 #序号）时读取指定分镜。"
+                 "拆分、合并或改写旁白前必须先用它读取完整旁白。",
+                 ShotDetailsArgs, "read", get_shot_details),
         ToolSpec("get_preflight", "studio",
                  "构建预检：列出构建成片时哪些节点会重建、复用、阻塞或跳过，以及阻塞原因。不执行任何构建。",
                  Preflight, "read", get_preflight),

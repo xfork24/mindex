@@ -17,7 +17,10 @@ from mcp.client.session import ClientSession  # noqa: E402
 from mcp.client.stdio import StdioServerParameters, stdio_client  # noqa: E402
 from mcp.shared.memory import create_connected_server_and_client_session  # noqa: E402
 
-from mindex.agent.mcp_server import server_for_app  # noqa: E402
+from mindex.agent.loopback import MindexClient  # noqa: E402
+from mindex.agent.mcp_server import build_server, server_for_app  # noqa: E402
+from mindex.agent.registry import ToolContext  # noqa: E402
+from mindex.agent.tools import build_registry  # noqa: E402
 from mindex.api import create_app  # noqa: E402
 from mindex.studio import studio  # noqa: E402
 from mindex.studio import studio_workspace as ws  # noqa: E402
@@ -60,7 +63,7 @@ def test_tools_annotations_and_read_policy(config, job):
         ("report_capability_gap", {"request": "调粗拆分粒度", "reason": "没有参数"}),
     ]))
     tools = {tool.name: tool for tool in listing.tools}
-    assert "ask_user_question" not in tools and len(tools) == 28
+    assert "ask_user_question" not in tools and len(tools) == 29
     for name, tool in tools.items():
         public = f"mcp__mindex__{name}"
         assert re.fullmatch(r"[A-Za-z0-9_-]{1,64}", public)  # dsh publicToolName 不会改写
@@ -82,6 +85,57 @@ def test_write_policy_allows_write_not_danger(config, job):
     assert not merged.isError and "2 → 1" in text(merged)
     assert delete.isError and "danger" in text(delete)
     assert TestClient(app).get(f"/api/studio/jobs/{job}").status_code == 200
+
+
+def test_get_shot_details_mcp_matches_builtin(config, job):
+    app = create_app(config)
+    registry = build_registry()
+    spec = registry.get("get_shot_details")
+    arguments = {"job_id": job, "refs": ["#2", "a1daad59"]}
+
+    async def builtin():
+        client = MindexClient(app)
+        try:
+            return await spec.execute(spec.parse(arguments), ToolContext(client=client))
+        finally:
+            await client.aclose()
+
+    expected = run(builtin())
+    expected_structured = json.loads(json.dumps(expected.value, default=str))
+    for policy in ("read", "write", "all"):
+        published = []
+        server = build_server(registry, lambda: MindexClient(app), policy=policy,
+                              publish=lambda kind, data, sink=published: sink.append((kind, data)))
+        listing, (ok, bad, conflict) = run(session_calls(server, [
+            ("get_shot_details", arguments),
+            ("get_shot_details", {"job_id": job, "limit": 0}),
+            ("get_shot_details", {"job_id": job, "refs": ["#1"], "offset": 0}),
+        ]))
+        tool = next(t for t in listing.tools if t.name == "get_shot_details")
+        assert tool.inputSchema == spec.parameters()
+        assert tool.annotations.readOnlyHint is True and tool.annotations.destructiveHint is False
+        assert not ok.isError, text(ok)
+        assert text(ok) == expected.render()
+        assert ok.structuredContent == expected_structured
+        assert [kind for kind, _ in published] == ["focus"]  # 只有成功调用发布定位
+        published.clear()
+        assert bad.isError and conflict.isError
+        assert published == []
+
+
+def test_get_shot_details_invalid_args_do_not_publish(config, job):
+    app = create_app(config)
+    published = []
+    server = build_server(build_registry(), lambda: MindexClient(app), policy="all",
+                          publish=lambda kind, data: published.append((kind, data)))
+    _, results = run(session_calls(server, [
+        ("get_shot_details", {"job_id": job, "refs": []}),
+        ("get_shot_details", {"job_id": job, "refs": ["  "]}),
+        ("get_shot_details", {"job_id": job, "unknown": 1}),
+        ("get_shot_details", {"job_id": job, "limit": 101}),
+    ]))
+    assert all(result.isError for result in results)
+    assert published == []
 
 
 def test_streamable_http_requires_token(config, job, monkeypatch):

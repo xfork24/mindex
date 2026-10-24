@@ -28,6 +28,7 @@ SERVER_NAME = "mindex"
 INSTRUCTIONS = (
     "Mindex 视频素材管理与 AI 视频创作工作台。创作任务的方案流水线：文案 → 拆分镜 → 每镜召回/配音 → 选片 → 渲染 → 成片。"
     "修改前先用 get_workspace_summary 读取最新状态；用户给出的分镜短 ID 先用 resolve_shots 解析。"
+    "拆分、合并分镜或改写旁白前，先用 get_shot_details 读取完整旁白（摘要中的旁白是截断的）。"
     "写操作与高风险操作受服务端策略 agent.mcp.policy 限制；提交构建后用 get_build_status 查询进度。"
 )
 

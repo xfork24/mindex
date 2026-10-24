@@ -52,7 +52,10 @@ def run_tool(app, name, arguments, page=None):
 
 def test_registry_names_and_schemas():
     registry = build_registry()
-    assert len(registry) <= 30
+    assert len(registry) <= 31
+    shot_details = [s for s in registry.all() if s.name == "get_shot_details"]
+    assert len(shot_details) == 1
+    assert shot_details[0].domain == "studio" and shot_details[0].risk == "read" and shot_details[0].mcp is True
     for spec in registry.all():
         assert NAME_PATTERN.match(spec.name) and len(f"mcp__mindex__{spec.name}") <= 64
         schema = spec.schema()
@@ -133,3 +136,45 @@ def test_studio_read_tools(config, board):
         run_tool(app, "get_workspace_summary", {"job_id": "20990101-000000-abcdef"})
     with pytest.raises(ToolError, match="工具参数无效"):
         build_registry().get("list_jobs").parse({"limit": 0})
+
+
+TRUNCATION_NOTE = "（旁白与画面意象截断到 60 字、查询截断到 30 字；完整内容请用 get_shot_details 读取）"
+
+
+def test_system_prompt_requires_reading_full_narration():
+    """Validates: Requirements 6.1, 6.6"""
+    from mindex.agent.prompts import SYSTEM_PROMPT
+
+    assert "get_shot_details" in SYSTEM_PROMPT
+    for phrase in ["拆分（split）", "合并（merge）", "update 修改旁白（text）", "完整旁白",
+                   "截断摘要", "get_workspace_summary", "resolve_shots", "按顺序切分",
+                   "重新调用 get_shot_details 读取当前旁白后再提交"]:
+        assert phrase in SYSTEM_PROMPT, phrase
+
+
+def test_tool_descriptions_mention_truncation_and_detail_tool():
+    """Validates: Requirements 6.2, 6.3"""
+    from mindex.agent.tools.studio_write import ShotOperation
+
+    registry = build_registry()
+    summary = registry.get("get_workspace_summary").description
+    assert "旁白与画面意象截断到 60 字" in summary and "查询截断到 30 字" in summary
+    assert "get_shot_details" in summary
+    edit = registry.get("edit_shots").description
+    assert "split" in edit and "get_shot_details" in edit and "按顺序切分" in edit and "忽略空白" in edit
+    parts = ShotOperation.model_fields["parts"].description
+    assert "get_shot_details" in parts and "按顺序切分" in parts and "忽略空白" in parts
+
+
+def test_board_text_truncation_note(config, board):
+    """Validates: Requirements 6.2"""
+    from mindex.agent.tools.common import PlanView, board_text
+
+    data = TestClient(create_app(config)).get(f"/api/studio/jobs/{board}/workspace", params={"compact": "true"}).json()
+    text = board_text(PlanView(data))
+    assert "get_shot_details" in text
+    assert text.splitlines()[-1] == TRUNCATION_NOTE
+    empty = PlanView({"active_plan": "p1", "plans": {"p1": {"name": "空方案"}}, "versions": {}, "job": {}})
+    empty_text = board_text(empty)
+    assert empty_text == "（当前方案还没有分镜）"
+    assert "截断" not in empty_text and "get_shot_details" not in empty_text

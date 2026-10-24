@@ -129,4 +129,5 @@ def board_text(view: PlanView, rows: list[dict] | None = None, limit: int = 60) 
         )
         if row.get("visual"):
             lines.append(f"  画面意象：{clip(row['visual'], limit)}")
+    lines.append(f"（旁白与画面意象截断到 {limit} 字、查询截断到 30 字；完整内容请用 get_shot_details 读取）")
     return "\n".join(lines)

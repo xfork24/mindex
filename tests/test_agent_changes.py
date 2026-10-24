@@ -204,5 +204,5 @@ def test_navigate_not_exported():
     from mindex.agent.tools import build_registry
 
     registry = build_registry()
-    assert len(registry) == 30
+    assert len(registry) == 31
     assert not registry.get("navigate").mcp and registry.get("navigate").risk == "read"
