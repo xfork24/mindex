@@ -85,6 +85,33 @@
 
 .tuning-actions .submit{min-width:120px}
 
+/* 索引版本：当前组合 + 组合列表 + 发布入口 */
+.release-current{margin:0 0 14px;font-size:13px;line-height:1.7;color:#47765d}
+
+.release-current.is-empty{color:var(--muted)}
+
+.release-list{list-style:none;margin:0 0 16px;padding:0;display:flex;flex-direction:column;gap:8px}
+
+.release-item{border:1px solid #edf0ea;border-radius:10px;padding:10px 13px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:13px}
+
+.release-item.is-active{border-color:#9fbd8f;background:#f7faf3}
+
+.release-item .release-text{flex:1 1 320px;min-width:0;overflow-wrap:anywhere}
+
+.release-item .release-badge{flex:none;font-size:11px;color:#47765d;border:1px solid #9fbd8f;border-radius:999px;padding:1px 8px}
+
+.release-item button,.release-publish button{margin:0}
+
+.release-item .danger{color:#a4472e}
+
+.release-item .danger:hover{color:#8c3421}
+
+.release-publish{display:flex;align-items:center;gap:12px;flex-wrap:wrap;border-top:1px solid #edf0ea;padding-top:16px;font-size:12px}
+
+.release-publish .muted{flex:1 1 240px;min-width:0}
+
+#release-notice:empty{display:none}
+
 #pf-error{color:#a83e2a;font-size:12px;min-height:18px;margin:10px 0}
 
 #pf-key-hint{margin:6px 0 0}

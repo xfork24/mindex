@@ -259,6 +259,55 @@ def wait_build(client, jid):
     raise AssertionError("build timeout")
 
 
+def test_workspace_reports_retrieval_combination_dependency(prepared):
+    """分镜表上方的检索组合：生效组合与各分镜选用召回版本记录的组合一致 / 不一致。"""
+    config, embedder = prepared
+    client = TestClient(
+        create_app(config, embedder, speaker=FixtureSpeaker(config), storyboarder=FixtureStoryboarder(config))
+    )
+    jid = convert_to_legacy(
+        config,
+        client.post("/api/studio/jobs", json={"text": "红色开场。", "options": {"burn": False}}).json()["id"],
+    )["id"]
+    base = f"/api/studio/jobs/{jid}"
+    data = client.get(f"{base}/workspace").json()
+    pid = data["active_plan"]
+    assert client.post(f"{base}/plans/{pid}/nodes", json=split_node(data, pid)).status_code == 202
+    wait_build(client, jid)
+    checked = client.get(f"{base}/plans/{pid}/preflight").json()
+    assert client.post(f"{base}/plans/{pid}/build", json={"token": checked["token"]}).status_code == 202
+    data = wait_build(client, jid)
+
+    shots = data["plans"][pid]["shots"]
+    recalled = [s["recall"] for s in shots.values() if s.get("recall")]
+    assert recalled
+    parameters = data["versions"][recalled[0]]["parameters"]
+    retrieval = data["retrieval"]
+    assert retrieval["active"]["content_id"] == parameters["index_id"]
+    assert retrieval["active"]["release_id"] == parameters["person_release"]
+    assert [(g["content_id"], g["release_id"], g["shots"], g["current"]) for g in retrieval["used"]] == [
+        (parameters["index_id"], parameters["person_release"], len(recalled), True)
+    ]
+    # 成片合成版本沿 渲染 → 选片 → 召回 依赖链用到的组合。
+    composes = [vid for vid, item in data["versions"].items() if item["stage"] == "compose"]
+    assert composes and set(retrieval["compose"]) == set(composes)
+    assert [(g["content_id"], g["release_id"], g["shots"], g["current"]) for g in retrieval["compose"][composes[0]]] == [
+        (parameters["index_id"], parameters["person_release"], len(recalled), True)
+    ]
+
+    # 激活另一个内容索引后，生效组合改变，已有召回仍显示它们生成时依赖的组合。
+    store = Store(config.data_dir)
+    store.execute("INSERT INTO index_versions(id,spec,status) VALUES('other-index','{}','ready')")
+    store.activate("other-index")
+    time.sleep(1.1)  # 详情读取 active_index 有 1 秒展示缓存
+    changed = client.get(f"{base}/workspace").json()["retrieval"]
+    assert changed["active"]["content_id"] == "other-index"
+    assert changed["active"]["release_id"] != parameters["person_release"]
+    assert [(g["content_id"], g["current"]) for g in changed["used"]] == [(parameters["index_id"], False)]
+    assert [(g["content_id"], g["current"]) for g in changed["compose"][composes[0]]] == [(parameters["index_id"], False)]
+    assert client.get(f"{base}/workspace?compact=true").json()["retrieval"] == changed
+
+
 def test_plan_options_patch_applies_to_task_recall(prepared):
     """方案参数 PATCH 后直接作用于本任务：旧召回版本标记不一致，重跑按新召回数量执行。"""
     config, embedder = prepared

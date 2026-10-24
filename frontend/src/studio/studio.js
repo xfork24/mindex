@@ -578,12 +578,31 @@ function render() {
   p.board && state.data.script_stale ? MindexI18n.msg("ui.script_stale_board") :
   p.board && original !== texts ? MindexI18n.msg("ui.34f1df936c8a") : "");
   renderScript();
+  renderRetrieval();
   renderMatrix();
   renderFinal();
   renderBuilds();
   renderCurrentArtifacts();
   renderLogShell();
   updateLocks();
+}
+// 成片合成版本沿依赖链（渲染 → 选片 → 召回）用到的检索组合；与当前生效组合不同时标出。
+function retrievalEdges(id) {
+  const groups = state.data.retrieval?.compose?.[id];
+  if (!groups) return [];
+  if (!groups.length) {
+    const row = el("div", "", "dependency-edge");
+    row.append(el("span", MindexI18n.msg("ui.retrieval_edge_name"), "muted"), el("span", MindexI18n.msg("ui.retrieval_edge_none"), "retrieval-edge"));
+    return [row];
+  }
+  return groups.map((item) => {
+    const row = el("div", "", "dependency-edge");
+    const text = el("span", MindexI18n.msg("ui.retrieval_combo_shots", { p0: retrievalCombo(item), p1: item.shots }), "retrieval-edge");
+    MindexI18n.setAttr(text, "title", MindexI18n.msg("ui.retrieval_combo_shots", { p0: retrievalCombo(item, true), p1: item.shots }));
+    row.append(el("span", MindexI18n.msg("ui.retrieval_edge_name"), "muted"), text);
+    if (!item.current) row.append(el("span", MindexI18n.msg("ui.retrieval_edge_diff"), "retrieval-badge warn-text"));
+    return row;
+  });
 }
 function dependencyTree(id, seen = new Set()) {
   const item = ver(id);
@@ -598,6 +617,7 @@ function dependencyTree(id, seen = new Set()) {
   d.append(button(MindexI18n.msg("ui.c56d640f8fde"), () => showVersion(id)));
   if (seen.has(id)) return d;
   const next = new Set(seen).add(id);
+  if (item.stage === "compose") for (const row of retrievalEdges(id)) d.append(row);
   for (const [name, dep] of Object.entries(item.inputs))
   if (dep) {
     const row = el("div", "", "dependency-edge");
@@ -859,6 +879,37 @@ function cellSummary(sid, stage) {
   });
   cell.append(trigger);
   return cell;
+}
+// 检索组合依赖（后端 detail().retrieval）：召回签名记录并比对内容索引与检索发布版，
+// 两者不一致的召回节点会提示选用版本不兼容。
+function retrievalCombo(item, full) {
+  const cut = (id) => full ? id : shortId(id);
+  const unbound = MindexI18n.msg("ui.index_release_unbound");
+  return MindexI18n.msg("ui.retrieval_combo", {
+    p0: item.release_id ? cut(item.release_id) : unbound,
+    p1: cut(item.content_id),
+    p2: !item.release_id ? unbound : !item.known ? MindexI18n.msg("ui.retrieval_deps_unknown") : item.person_id ? cut(item.person_id) : MindexI18n.msg("ui.5a65ae692a28")
+  });
+}
+// 分镜表上方一行：当前生效的组合、工作台依赖的组合，以及两者是否一致。
+function renderRetrieval() {
+  const box = $("retrieval-deps"), info = state.data.retrieval;
+  box.replaceChildren();
+  box.hidden = !info;
+  if (!info) return;
+  const describe = (full) => {
+    const active = info.active ? retrievalCombo(info.active, full) : MindexI18n.msg("ui.retrieval_line_no_active");
+    const used = !info.used.length ? MindexI18n.msg("ui.retrieval_line_no_recall") :
+    info.used.map((item) => info.used.length > 1 ?
+    MindexI18n.msg("ui.retrieval_combo_shots", { p0: retrievalCombo(item, full), p1: item.shots }) : retrievalCombo(item, full)).join(" / ");
+    const verdict = !info.used.length || !info.active ? "ui.retrieval_line_na" :
+    info.used.every((item) => item.current) ? "ui.retrieval_line_same" : "ui.retrieval_line_diff";
+    return { text: MindexI18n.msg("ui.retrieval_line", { p0: active, p1: used, p2: MindexI18n.msg(verdict) }), verdict };
+  };
+  const line = describe(false);
+  const row = el("p", line.text, `retrieval-line${line.verdict === "ui.retrieval_line_diff" ? " is-mismatch" : ""}`);
+  MindexI18n.setAttr(row, "title", describe(true).text);
+  box.append(row);
 }
 function renderMatrix() {
   const body = $("matrix-body"),

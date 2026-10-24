@@ -165,6 +165,23 @@ def person_router(runtime, store):
                 tasks.get(r["id"])
                 for r in store.rows("SELECT id FROM person_tasks ORDER BY rowid DESC LIMIT 30")
             ],
+        }
+
+    @router.get("/releases")
+    def releases():
+        """检索组合列表与当前生效组合；设置页「索引版本」使用。
+
+        active 与创作召回签名读取的是同一来源（store.active_index）：内容索引 ID
+        与检索发布版 ID。检索发布版由「内容索引 + 人物快照」决定，二者任一变化，
+        检索发布版 ID 都会变化；当前生效指针与内容索引不匹配时 release_id 为 None。
+        """
+        active = store.active_index()
+        return {
+            "active": {
+                "content_id": active["id"],
+                "release_id": active.get("search_release_id"),
+                "person_id": active.get("person_version"),
+            } if active else None,
             "releases": store.rows("SELECT * FROM search_releases ORDER BY rowid DESC LIMIT 30"),
         }
 

@@ -1,6 +1,6 @@
 # 设置页指南
 
-`/settings`（顶部导航「设置」进入）把模型服务连接、音色库与检索调参集中在一个页面，**保存即热生效，无需重启**：配置档案存 SQLite（`model_profiles` / `voices` 表 + `settings` KV），Web API 与 CLI 命令统一经覆盖层合成「生效配置」。
+`/settings`（顶部导航「设置」进入）把模型服务连接、音色库、检索调参与索引版本集中在一个页面，**保存即热生效，无需重启**：配置档案存 SQLite（`model_profiles` / `voices` 表 + `settings` KV），Web API 与 CLI 命令统一经覆盖层合成「生效配置」。
 
 文案创作档案在升级后第一次启动时自动从当前激活的“文本拆分镜”档案复制（含厂商与密钥）并激活，只做一次；之后可单独修改或删除，不会被再次覆盖。没有激活的拆分镜档案时，`studio.writer` 在 yaml 里省略即复制 `studio.generator`。
 
@@ -67,6 +67,16 @@
 
 新版三渠道权重 `search.channel_weights`（画面/对白/分析，默认 1:1:1），旧版五路召回权重 `search.weights`（画面/动作场景/情绪镜头/对白/词法 BM25）、RRF k、候选数；保存为 `override.search`，每请求生效，与索引无关。
 
+## 索引版本
+
+设置页最底部的“索引版本”（原人物库页的“发布与回退”）管理**检索组合**：内容索引 + 人物快照。折叠状态显示当前检索发布版 ID；展开后包含：
+
+- 当前生效：检索发布版、内容索引、人物快照 ID（正文取前 8 位，悬停显示完整值）。内容索引没有匹配的发布版时发布版显示“未绑定”。
+- 最近 30 条检索组合（新到旧），每行同样显示三个 ID；非生效组合可“恢复此组合”，生效组合不可恢复，也不能直接删除。
+- “发布当前检索组合”：冻结已接受证据并绑定当前内容索引。进度与结果显示在本区域内，不占用页面顶部提示；恢复、发布、删除后会同步刷新顶部嵌入与索引匹配横幅。
+
+该区域读取的“当前生效”与创作召回签名（`index_id`、`person_release`）同源，用于排查召回节点出现“选用版本兼容性”提示的原因。本区域不构建或删除内容索引本身，构建见 [索引版本与空间身份](index-versions.md)，清理旧索引见 [清理](cleanup.md)。
+
 ## 密钥安全
 
 - API Key 明文存 `metadata.sqlite3` 的 `model_profiles.api_key`（本机单用户工具的务实选择）。
@@ -85,5 +95,6 @@
 | PUT/DELETE | `/api/settings/business` | 检索调参与默认音色 / 恢复默认 |
 | POST/DELETE | `/api/settings/voices[/{id}]` | 录入/删除音色 |
 | POST | `/api/settings/voices/clone` | 克隆（multipart 上传样本 或 URL 复刻；须 consent） |
+| GET | `/api/persons/releases` | 当前生效组合与最近 30 条检索组合（索引版本区域使用；恢复 / 删除 / 发布仍为 `/api/persons/releases/{id}/activate`、`DELETE /api/persons/releases/{id}`、`POST /api/persons/publish`） |
 
 人物配置 `person.frame_interval`（设置页“间隔帧数”）：整数且 ≥1，默认 15。每个分镜从首个有效帧开始每隔该帧数抽取，保留实际 PTS；1 表示逐帧。旧 `person.fps` 仅兼容旧配置，不叠加抽帧限制。

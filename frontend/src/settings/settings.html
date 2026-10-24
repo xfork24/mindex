@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title data-i18n="[[0,&quot;ui.5e9681d20f56&quot;]]">Mindex · 设置</title><link rel="icon" href="/assets/shared/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/assets/shared/style.css?v=20261022-local-feedback"><link rel="stylesheet" href="/assets/settings/settings.css?v=20261019-refresh-left">
-  <script src="/assets/shared/messages.js?v=20261023-script-writer" defer></script><script src="/assets/shared/i18n.js?v=20261018-i18n" defer></script><script src="/assets/shared/feedback.js?v=20261022-local-feedback" defer></script><script src="/assets/settings/settings.js?v=20261023-script-writer" defer></script>
+  <link rel="stylesheet" href="/assets/shared/style.css?v=20261022-local-feedback"><link rel="stylesheet" href="/assets/settings/settings.css?v=20261024-index-versions">
+  <script src="/assets/shared/messages.js?v=20261024-index-versions-2" defer></script><script src="/assets/shared/i18n.js?v=20261018-i18n" defer></script><script src="/assets/shared/feedback.js?v=20261022-local-feedback" defer></script><script src="/assets/settings/settings.js?v=20261024-index-versions-2" defer></script>
 </head>
 <body class="settings">
   <header><a class="brand" href="/">m<span>index</span><i></i></a><nav class="page-nav" aria-label="页面导航 / Main navigation"><a class="quiet nav-link" href="/" data-i18n="[[0,&quot;ui.c9b1e68e3537&quot;]]">视频检索</a><a class="quiet nav-link" href="/studio" data-i18n="[[0,&quot;ui.b6fc3cef0bd0&quot;]]">创作</a><a class="quiet nav-link" href="/admin" data-i18n="[[0,&quot;ui.f517302fec0d&quot;]]">素材管理</a><a class="quiet nav-link" href="/persons" data-i18n="[[0,&quot;ui.0973ef28d791&quot;]]">人物库</a><a class="quiet nav-link" href="/settings" aria-current="page" data-i18n="[[0,&quot;ui.7debf9cb0372&quot;]]">设置</a></nav><button class="quiet" id="reload" data-i18n="[[0,&quot;ui.c3147ba1672a&quot;]]">刷新设置</button><button type="button" class="quiet language-switch" data-language-toggle aria-label="中文 / English"><span data-language="zh" lang="zh-CN">文</span><span class="language-divider" aria-hidden="true">/</span><span data-language="en" lang="en">En</span></button></header>
@@ -64,6 +64,28 @@
               <button class="quiet" type="button" id="voice-register" data-i18n="[[0,&quot;ui.a890acccfa32&quot;]]">+ 录入已有音色</button>
               <button class="submit" type="button" id="voice-clone" data-i18n="[[0,&quot;ui.e640fb281933&quot;]]">克隆我的声音 <span>↗</span></button>
             </div>
+          </div>
+        </div>
+      </div>
+    </section>
+    <section aria-label="索引版本" data-i18n-aria-label="ui.index_versions">
+      <div class="section-heading"><h2 data-i18n="[[0,&quot;ui.index_versions&quot;]]">索引版本</h2><span data-i18n="[[0,&quot;ui.index_versions_desc&quot;]]">内容索引与人物证据组成的检索组合，可发布、回退或删除</span></div>
+      <div class="role-row" id="releases-row">
+        <button type="button" class="role-row-head" data-section="releases" aria-controls="releases-body" aria-expanded="false">
+          <span class="chevron">▸</span>
+          <strong class="role-row-title" data-i18n="[[0,&quot;ui.index_release_title&quot;]]">检索组合</strong>
+          <span class="role-row-summary"><span class="role-row-effective" id="releases-summary"></span></span>
+        </button>
+        <div class="role-row-body" id="releases-body" hidden>
+          <p class="role-desc" data-i18n="[[0,&quot;ui.index_versions_hint&quot;]]">创作召回版本会记录并校验两项：内容索引 ID 与检索发布版 ID。检索发布版由内容索引加人物快照决定，任一变化，已有召回节点都会提示不兼容。</p>
+          <div class="tuning-panel">
+            <p id="release-current" class="release-current"></p>
+            <ul id="releases" class="release-list"></ul>
+            <div class="release-publish">
+              <button class="quiet" type="button" id="publish" data-i18n="[[0,&quot;ui.f69976398866&quot;]]">发布当前检索组合</button>
+              <span class="muted" data-i18n="[[0,&quot;ui.04a8ed2659fc&quot;]]">绑定当前内容索引；只发布已接受的证据。已发布检索无需人物服务在线。</span>
+            </div>
+            <div id="release-notice" class="notice" role="status" aria-live="polite"></div>
           </div>
         </div>
       </div>

@@ -73,9 +73,6 @@
 
 .danger:hover{color:#8c3421}
 
-/* 发布与回退行不在 .person-card 内，按钮间距与卡片内保持一致 */
-#releases button{margin:0 6px 0 0}
-
 .person-card.role-card{border-color:#e4e4df;padding:7px;border-radius:7px;font-size:12px}
 
 .role-card h4{font-size:13px;margin:0 0 4px;overflow-wrap:anywhere}

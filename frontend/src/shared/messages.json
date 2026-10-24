@@ -2,6 +2,31 @@
   "ui.person_release_locked": {"zh": "处理锁被占用，请稍后重试人物发布操作", "en": "A processing lock is held. Retry the person release operation later."},
   "ui.person_release_busy": {"zh": "正在处理人物发布操作…", "en": "Processing person release…"},
   "ui.person_release_complete": {"zh": "人物证据已发布；内容未变化时复用已有发布记录。", "en": "Person evidence published. Unchanged content reuses the existing release."},
+  "ui.index_versions": {"zh": "索引版本", "en": "Index versions"},
+  "ui.index_release_title": {"zh": "检索组合", "en": "Search combinations"},
+  "ui.index_versions_desc": {"zh": "内容索引与人物证据组成的检索组合，可发布、回退或删除", "en": "Search combinations of a content index and person evidence; publish, restore or delete them"},
+  "ui.index_versions_hint": {"zh": "创作召回版本会记录并校验两项：内容索引 ID 与检索发布版 ID。检索发布版由内容索引加人物快照决定，任一变化，已有召回节点都会提示不兼容。", "en": "Studio recall versions record and verify two IDs: the content index ID and the search release ID. The release is derived from the content index plus the person snapshot; if either changes, existing recall nodes are flagged as incompatible."},
+  "ui.index_release_current": {"zh": "当前生效 · 检索发布版 {p0} · 内容索引 {p1} · 人物快照 {p2}", "en": "Active · Search release {p0} · Content index {p1} · Person snapshot {p2}"},
+  "ui.index_release_none": {"zh": "当前没有生效的检索组合", "en": "No search combination is active"},
+  "ui.index_release_summary": {"zh": "检索发布版 {p0}", "en": "Search release {p0}"},
+  "ui.index_release_item": {"zh": "{p0} · 检索发布版 {p1} · 内容索引 {p2} · 人物快照 {p3}", "en": "{p0} · Search release {p1} · Content index {p2} · Person snapshot {p3}"},
+  "ui.index_release_active": {"zh": "当前生效", "en": "Active"},
+  "ui.index_release_unbound": {"zh": "未绑定", "en": "Unbound"},
+  "ui.retrieval_deps_label": {"zh": "检索组合依赖", "en": "Retrieval combination dependency"},
+  "ui.retrieval_deps_match": {"zh": "与当前生效一致", "en": "Matches the active combination"},
+  "ui.retrieval_deps_unknown": {"zh": "未知", "en": "Unknown"},
+  "ui.retrieval_combo": {"zh": "检索发布版 {p0}（内容索引 {p1} · 人物快照 {p2}）", "en": "search release {p0} (content index {p1} · person snapshot {p2})"},
+  "ui.retrieval_combo_shots": {"zh": "{p0}，{p1} 个分镜", "en": "{p0}, {p1} shots"},
+  "ui.retrieval_line": {"zh": "检索组合：当前生效 {p0}；工作台依赖 {p1}；{p2}", "en": "Retrieval combination: active {p0}; workbench depends on {p1}; {p2}"},
+  "ui.retrieval_line_same": {"zh": "一致", "en": "consistent"},
+  "ui.retrieval_line_diff": {"zh": "不一致，请重新召回或在设置页“索引版本”恢复", "en": "inconsistent: re-run recall or restore it in Settings under \"Index versions\""},
+  "ui.retrieval_line_no_active": {"zh": "无（没有生效的内容索引）", "en": "none (no content index is active)"},
+  "ui.retrieval_line_no_recall": {"zh": "暂无召回结果", "en": "no recall results yet"},
+  "ui.retrieval_line_na": {"zh": "无需比较", "en": "nothing to compare"},
+  "ui.retrieval_edge_name": {"zh": "检索组合", "en": "retrieval combination"},
+  "ui.retrieval_edge_none": {"zh": "无召回依赖（分镜均不使用召回结果）", "en": "No recall dependency (no shot uses recall results)"},
+  "ui.retrieval_edge_diff": {"zh": "与当前生效不一致", "en": "Differs from the active combination"},
+  "ui.index_release_empty": {"zh": "还没有任何检索组合", "en": "No search combinations yet"},
 
   "ui.recognized_people": {"zh": "识别人物汇总（含所有帧候选）", "en": "Recognized people (candidates from all frames)"},
   "ui.recognized_person": {"zh": "{p0} · {p1} · {p2} 条识别证据", "en": "{p0} · {p1} · {p2} observations"},
@@ -625,8 +650,8 @@
     "en": "People and references"
   },
   "ui.159e808d9a1d": {
-    "zh": "处理与发布",
-    "en": "Process and publish"
+    "zh": "处理与审核",
+    "en": "Process and review"
   },
   "ui.4941181d36f0": {
     "zh": "新建演员",
@@ -749,8 +774,8 @@
     "en": "Start person processing"
   },
   "ui.8c1a5ace67f9": {
-    "zh": "终点填 0 表示从起点处理至片尾；填写具体秒数可限定处理区间。请先确认参考图，处理完成后核对出镜证据，再发布。",
-    "en": "End time 0 processes from the start time to the end of the video. Set a time to limit the interval. Confirm references, review evidence after processing, then publish."
+    "zh": "终点填 0 表示从起点处理至片尾；填写具体秒数可限定处理区间。请先确认参考图，处理完成后核对出镜证据，再到设置页“索引版本”发布。",
+    "en": "End time 0 processes from the start time to the end of the video. Set a time to limit the interval. Confirm references, review evidence after processing, then publish it in Settings under \"Index versions\"."
   },
   "ui.ee2ded50d7af": {
     "zh": "出镜审核",
@@ -804,13 +829,9 @@
     "zh": "审核仅显示当前作品的有效演员-角色配对。待确认按最高分角色候选归类；已接受按全部确认角色筛选；未识别角色的分镜归入“无候选”。全选包含当前筛选的所有页。",
     "en": "Review shows valid actor/character pairs from the current work only. Pending shots use the highest-scoring character candidate; accepted shots use all confirmed characters. Unidentified shots appear under “No candidates”. Selection includes all filtered pages."
   },
-  "ui.caee96480a63": {
-    "zh": "发布与回退",
-    "en": "Publish and roll back"
-  },
   "ui.f69976398866": {
-    "zh": "发布当前人物证据",
-    "en": "Publish current person evidence"
+    "zh": "发布当前检索组合",
+    "en": "Publish current search combination"
   },
   "ui.04a8ed2659fc": {
     "zh": "绑定当前内容索引；只发布已接受的证据。已发布检索无需人物服务在线。",
@@ -2335,10 +2356,6 @@
   "ui.e9eb38d595ce": {
     "zh": "人物覆盖缺失",
     "en": "Person coverage missing"
-  },
-  "ui.edd719772ace": {
-    "zh": "{p0} · 内容 {p1} · 人物 {p2} ",
-    "en": "{p0} · Content {p1} · Character {p2}"
   },
   "ui.5a65ae692a28": {
     "zh": "未发布",

@@ -458,6 +458,7 @@ async function loadSettings() {
   renderRoles(data);
   renderTuning(data);
   renderVoices(data, state.voiceCatalog);
+  loadReleases().catch((error) => showRelease(MindexI18n.system(error.message), true));
   // An unavailable TTS catalog must not block model settings or recall tuning.
   api('/api/settings/voices/catalog').then((catalog) => {
     if (request !== settingsRequest) return;
@@ -465,6 +466,95 @@ async function loadSettings() {
     renderVoices(data, catalog);
   }).catch(() => {});
 }
+
+// ---- 索引版本：检索组合 = 内容索引 + 人物快照 ----
+// 创作召回版本的签名记录并比对「内容索引 ID」与「检索发布版 ID」；
+// 这里的「当前生效」与它们读取同一来源（GET /api/persons/releases 的 active）。
+let releasesRequest = 0;
+const shortId = (id, empty) => (id ? id.slice(0, 8) : empty);
+function showRelease(text, error = false) {
+  const status = $('release-notice');
+  MindexI18n.setText(status, text);
+  status.className = `notice ${error ? 'error' : 'info'}`;
+}
+async function releaseAction(control, task, message) {
+  control.disabled = true;
+  showRelease(MindexI18n.msg('ui.person_release_busy'));
+  try {await task();showRelease(message);}
+  catch (error) {showRelease(MindexI18n.system(error.message), true);}
+  finally {control.disabled = false;}
+}
+// 发布、恢复、删除后：刷新列表，并同步顶部「嵌入与索引是否匹配」横幅。
+async function refreshReleases() {
+  await loadReleases();
+  api('/api/settings/embedding-status').then(renderIndexBanner).catch(() => {});
+}
+function releaseButton(text, task, message, className = 'quiet') {
+  const b = node('button', text, className);
+  b.type = 'button';
+  b.onclick = () => releaseAction(b, task, message);
+  return b;
+}
+async function loadReleases() {
+  const request = ++releasesRequest;
+  const data = await api('/api/persons/releases');
+  if (request !== releasesRequest) return;
+  renderReleases(data);
+}
+function renderReleases(data) {
+  const active = data.active;
+  const unbound = MindexI18n.msg('ui.index_release_unbound');
+  const unpublished = MindexI18n.msg('ui.5a65ae692a28');
+  const current = $('release-current');
+  current.classList.toggle('is-empty', !active);
+  if (active) {
+    const params = (full) => ({
+      p0: full ? active.release_id || unbound : shortId(active.release_id, unbound),
+      p1: full ? active.content_id : shortId(active.content_id),
+      p2: full ? active.person_id || unpublished : shortId(active.person_id, unpublished),
+    });
+    MindexI18n.setText(current, MindexI18n.msg('ui.index_release_current', params(false)));
+    MindexI18n.setAttr(current, 'title', MindexI18n.msg('ui.index_release_current', params(true)));
+    MindexI18n.setText($('releases-summary'), MindexI18n.msg('ui.index_release_summary', { p0: shortId(active.release_id, unbound) }));
+  } else {
+    MindexI18n.setText(current, MindexI18n.msg('ui.index_release_none'));
+    current.removeAttribute('title');
+    MindexI18n.setText($('releases-summary'), MindexI18n.msg('ui.index_release_none'));
+  }
+  const list = $('releases');
+  list.replaceChildren();
+  if (!data.releases.length) list.append(node('li', MindexI18n.msg('ui.index_release_empty'), 'muted'));
+  for (const release of data.releases) {
+    const isActive = release.id === active?.release_id;
+    const row = node('li', undefined, `release-item${isActive ? ' is-active' : ''}`);
+    const text = node('span', MindexI18n.msg('ui.index_release_item', {
+      p0: release.created_at,
+      p1: shortId(release.id),
+      p2: shortId(release.content_id),
+      p3: shortId(release.person_id, unpublished),
+    }), 'release-text');
+    MindexI18n.setAttr(text, 'title', MindexI18n.msg('ui.index_release_item', {
+      p0: release.created_at, p1: release.id, p2: release.content_id, p3: release.person_id || unpublished,
+    }));
+    row.append(text);
+    if (isActive) row.append(node('span', MindexI18n.msg('ui.index_release_active'), 'release-badge'));
+    else {
+      row.append(releaseButton(MindexI18n.msg('ui.9abe6a920d15'), async () => {
+        await api(`/api/persons/releases/${release.id}/activate`, { method: 'POST' });
+        await refreshReleases();
+      }, MindexI18n.msg('ui.ce106faa390a')));
+    }
+    row.append(releaseButton(MindexI18n.msg('ui.3755f56f2f83'), async () => {
+      await api(`/api/persons/releases/${release.id}`, { method: 'DELETE' });
+      await refreshReleases();
+    }, MindexI18n.msg('ui.69d484db9977'), 'quiet danger'));
+    list.append(row);
+  }
+}
+$('publish').onclick = () => releaseAction($('publish'), async () => {
+  await api('/api/persons/publish', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  await refreshReleases();
+}, MindexI18n.msg('ui.person_release_complete'));
 
 async function activateProfile(profileId) {
   const result = await api(`/api/settings/profiles/${profileId}/activate`, { method: 'POST' });

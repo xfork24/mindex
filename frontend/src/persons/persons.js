@@ -204,21 +204,6 @@ function renderCatalogue() {
   if (!actors.length && !unassigned.length) list.append(node('p', MindexI18n.msg("ui.5874ad9173c1"), 'empty'));
   MindexI18n.setText($('filter-summary'), MindexI18n.msg("ui.496d890b2912", { p0: actors.length, p1: entities('actor').length, p2: state.expanded.size ? MindexI18n.msg("ui.951ef9f72b23", { p0: state.expanded.size }) : '' }));
 }
-// 删除已发布的检索组合：与「修改」同款，只用红色区分。
-function deleteReleaseButton(release) {
-  const b = node('button', MindexI18n.msg("ui.3755f56f2f83"), 'danger');b.type = 'button';
-  b.onclick = () => releaseAction(b, async () => {await api(`/api/persons/releases/${release.id}`, { method: 'DELETE' });await refresh();}, MindexI18n.msg('ui.69d484db9977'));
-  return b;
-}
-async function releaseAction(control, action, message) {
-  const status = $('release-notice');
-  control.disabled = true;
-  const show = (text, error = false) => {MindexI18n.setText(status, text);status.className = `notice ${error ? 'error' : 'info'}`;};
-  show(MindexI18n.msg('ui.person_release_busy'));
-  try {await action();show(message);}
-  catch (error) {show(MindexI18n.system(error.message), true);}
-  finally {control.disabled = false;}
-}
 function referenceErrorLabel(error) {
   const reference = state.references.find((r) => r.id === error.reference_id);
   const hasIdentity = error.actor_name !== undefined || error.actor_id !== undefined;
@@ -282,7 +267,7 @@ async function refresh() {void loadImportGallery().catch((e) => notice(e.message
     $('source-works').append(row);
   }
   renderTasks(data);
-  $('releases').replaceChildren();for (const r of data.releases) {const row = node('p', MindexI18n.msg("ui.edd719772ace", { p0: r.created_at, p1: r.content_id.slice(0, 8), p2: r.person_id?.slice(0, 8) || MindexI18n.msg("ui.5a65ae692a28") }));row.append(button(MindexI18n.msg("ui.9abe6a920d15"), async (control) => releaseAction(control, async () => {await api(`/api/persons/releases/${r.id}/activate`, { method: 'POST' });await refresh();}, MindexI18n.msg('ui.ce106faa390a'))), deleteReleaseButton(r));$('releases').append(row);}entityFields();}
+  entityFields();}
 // 从原片选取参考：演员与角色同时指定，截图始终配给角色；框选坐标是原图像素。
 const capture = { box: null, ready: false };
 function fillCaptureRoles() {
@@ -347,7 +332,6 @@ $('capture-form').onsubmit = async (e) => {e.preventDefault();
 };
 for (const tab of document.querySelectorAll('[data-pane]')) tab.onclick = () => {document.querySelectorAll('.pane').forEach((n) => n.hidden = n.id !== tab.dataset.pane);document.querySelectorAll('[data-pane]').forEach((n) => n.classList.toggle('active', n === tab));};
 $('process-form').onsubmit = (e) => {e.preventDefault();run(async () => {if (!$('process-source').value) throw Error(MindexI18n.msg("ui.f3b909f8529a"));const task = await api(`/api/persons/sources/${$('process-source').value}/process`, json('POST', { start: Number($('process-start').value), end: Number($('process-end').value || 0), publish: false }));notice(MindexI18n.msg("ui.c2d8790c0fdb") + task.id);await refresh();});};
-$('publish').onclick = () => releaseAction($('publish'), async () => {await api('/api/persons/publish', json('POST', {}));await refresh();}, MindexI18n.msg('ui.person_release_complete'));
 // 演员表导入：多图草稿，全部原图纵向排列，条目统一列在图下方（每行两个）。
 function newEntry() {return { image_id: state.draft.images[0].id, actor_name: '', foreign_name: '', role_name: '', actor_id: null, role_id: null, bbox: null };}
 const importCanvases = new Map();

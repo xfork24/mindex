@@ -1832,6 +1832,72 @@ def compact_version(item):
     return {**item, "data": data, "compact": True}
 
 
+def recall_closure(w, version_id):
+    """某个版本（如成片合成）沿依赖链能到达的已完成召回版本，按 (index_id, person_release) 归组。"""
+    groups, seen, pending = {}, set(), [version_id]
+    while pending:
+        item = w["versions"].get(pending.pop())
+        if item is None or item["id"] in seen:
+            continue
+        seen.add(item["id"])
+        if item["stage"] == "recall" and item["status"] == "complete":
+            key = (item["parameters"].get("index_id"), item["parameters"].get("person_release"))
+            groups.setdefault(key, set()).add(item["shot_id"])
+        pending.extend(dep for dep in item["inputs"].values() if dep)
+    return groups
+
+
+def retrieval_dependencies(config, w, p, *, context):
+    """检索组合依赖：当前生效组合、当前方案各分镜选用的召回版本依赖的组合，
+    以及每个成片合成版本沿依赖链用到的组合。
+
+    与召回签名同源：index_id / person_release 取自 settings(..., "recall")，
+    召回版本依赖的组合取自其 parameters；二者不同的召回节点会提示选用版本不兼容。
+    """
+    store = context.database(config)
+    releases = {}
+
+    def release(release_id):
+        if release_id not in releases:
+            releases[release_id] = store.one(
+                "SELECT content_id, person_id FROM search_releases WHERE id=?", (release_id,)
+            ) if release_id else None
+        return releases[release_id]
+
+    def describe(content_id, release_id):
+        row = release(release_id)
+        return {"content_id": content_id, "release_id": release_id,
+                "person_id": row["person_id"] if row else None, "known": bool(row)}
+
+    current = settings(config, p, "recall", context=context)
+    active = describe(current["index_id"], current["person_release"]) if current["index_id"] else None
+
+    def summarize(groups):
+        result = [
+            {**describe(content_id, release_id), "shots": len(shots),
+             "current": bool(active) and (content_id, release_id) == (active["content_id"], active["release_id"])}
+            for (content_id, release_id), shots in groups.items()
+        ]
+        result.sort(key=lambda item: (not item["current"], -item["shots"]))
+        return result
+
+    selected = {}
+    for sid in ordered_shots(w, p):
+        vid = p["shots"][sid].get("recall")
+        item = w["versions"].get(vid) if vid else None
+        if item and item["status"] == "complete":
+            key = (item["parameters"].get("index_id"), item["parameters"].get("person_release"))
+            selected.setdefault(key, set()).add(sid)
+    return {
+        "active": active,
+        "used": summarize(selected),
+        "compose": {
+            vid: summarize(recall_closure(w, vid))
+            for vid, item in w["versions"].items() if item["stage"] == "compose"
+        },
+    }
+
+
 def detail(config, job_id, w, *, store=None, compact=False):
     p = plan(w, w["active_plan"])
     context = DetailContext(store=store, display=True)
@@ -1890,6 +1956,7 @@ def detail(config, job_id, w, *, store=None, compact=False):
         "voice_mode": p["options"].get("voice_mode", "inherit"),
     }
     result["conflicts"] = {}
+    result["retrieval"] = retrieval_dependencies(config, w, p, context=context)
     # 分镜编辑器「跟随方案」粒度默认值展示；数量默认直接读方案 recall_limit。
     result["recall_granularity"] = config.studio.recall.granularity
     from mindex.studio.studio_window import anchor_conflict

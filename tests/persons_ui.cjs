@@ -54,7 +54,7 @@ const role = {id: 'role', kind: 'role', name: '角色', aliases: [], actor_ids: 
 const orphan = {...role, id: 'orphan', name: '未配对角色', actor_ids: []};
 const data = {
   entities: [actor, other, role, orphan, {id: 'work', kind: 'work', name: '作品', aliases: []}],
-  references: [], sources: [{id: 'source', name: '原片', work_id: 'work'}], coverage: [], releases: [],
+  references: [], sources: [{id: 'source', name: '原片', work_id: 'work'}], coverage: [],
   review_shots: {}, tasks: [{id: 'failed', source_id: 'source', status: 'failed', progress: {}}],
 };
 const requests = [];
@@ -488,21 +488,9 @@ function find(root, predicate) {
   sandbox.fillReviewChoices([sharedShot, {...sharedShot, source_id: 'foreign-source'}]);
   assert.equal(get('review-choices').querySelectorAll('input').length, 0, '跨作品批量不显示不适用于所有分镜的角色');
 
-  // 发布操作在原地显示进行中、成功和错误，且结束后恢复按钮。
-  const topNoticeBeforeRelease = get('notice').textContent;
-  const releaseButton = get('publish');
-  let completeRelease;
-  const pendingRelease = sandbox.releaseAction(releaseButton, () => new Promise(resolve => {completeRelease = resolve;}), '发布成功');
-  assert.equal(releaseButton.disabled, true);
-  assert.ok(get('release-notice').textContent);
-  completeRelease();await pendingRelease;
-  assert.equal(releaseButton.disabled, false);
-  assert.equal(get('release-notice').textContent, '发布成功');
-  await sandbox.releaseAction(releaseButton, async () => {throw Error('当前组合不能删除');}, '不应成功');
-  assert.equal(get('release-notice').textContent, '当前组合不能删除');
-  assert.equal(get('release-notice').className, 'notice error');
-  assert.equal(get('notice').textContent, topNoticeBeforeRelease, 'release feedback must not duplicate into the page notice');
-  assert.equal(releaseButton.disabled, false);
+  // 发布与回退已移到设置页「索引版本」；人物库页面不再带发布入口。
+  assert.equal(typeof sandbox.releaseAction, 'undefined');
+  assert.ok(!fs.readFileSync('frontend/src/persons/persons.html', 'utf8').includes('id="publish"'));
 
   console.log('persons UI regression checks passed');
 })().catch(error => {console.error(error); process.exitCode = 1;});

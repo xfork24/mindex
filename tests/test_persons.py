@@ -1683,6 +1683,35 @@ def test_release_delete_rejects_active_and_cleans_snapshot(catalogue, config):
     assert p.entity(actor["id"])
 
 
+def test_release_listing_reports_the_active_ids_used_by_studio_recall(catalogue, config):
+    """设置页「索引版本」显示的生效 ID，与创作召回签名读取的内容索引 / 检索发布版一致。"""
+    from mindex.studio.studio_workspace import _settings
+
+    p, _work, _actor = catalogue
+    client = TestClient(create_app(config))
+    publish_content(p, config, "content1")
+    first = p.publish()
+    publish_content(p, config, "content2")
+    second = p.publish()
+
+    body = client.get("/api/persons/releases").json()
+    assert body["active"] == {
+        "content_id": "content2", "release_id": second["release_id"], "person_id": second["person_version"],
+    }
+    assert [r["id"] for r in body["releases"]][:2] == [second["release_id"], first["release_id"]]  # 新到旧
+    recall = _settings(config, {"options": {"recall_limit": 20}}, "recall")
+    assert (recall["index_id"], recall["person_release"]) == ("content2", second["release_id"])
+
+    # 恢复旧组合后，列表与召回签名同时改变；发布版 ID 随内容索引变化。
+    assert client.post(f"/api/persons/releases/{first['release_id']}/activate").status_code == 200
+    body = client.get("/api/persons/releases").json()
+    assert body["active"]["release_id"] == first["release_id"] and body["active"]["content_id"] == "content1"
+    recall = _settings(config, {"options": {"recall_limit": 20}}, "recall")
+    assert (recall["index_id"], recall["person_release"]) == ("content1", first["release_id"])
+    # 人物页列表不再携带发布记录。
+    assert "releases" not in client.get("/api/persons").json()
+
+
 def test_purge_keeps_global_references_and_removes_all_source_evidence(catalogue, config):
     from mindex.maintenance.purge import purge_source
 
