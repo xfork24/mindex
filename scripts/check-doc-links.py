@@ -5,7 +5,7 @@
     python scripts/check-doc-links.py
 
 只检查相对链接（含 HTML 的 href/src）；http(s)/mailto 链接不联网检查。
-代码块内的内容被忽略。存在失效链接时退出码为 1。
+代码块与行内代码内的内容被忽略。存在失效链接时退出码为 1。
 """
 
 from __future__ import annotations
@@ -48,6 +48,7 @@ def anchors(path: Path) -> set[str]:
 
 def check(path: Path) -> list[str]:
     body = re.sub(r"```.*?```", "", path.read_text(encoding="utf-8"), flags=re.S)
+    body = re.sub(r"`[^`\n]*`", "``", body)  # 行内代码是示例而非链接（如 `<video src="url#t=s,e">`）
     problems = []
     for match in LINK.finditer(body):
         target = match.group(1) or match.group(2) or match.group(3)
