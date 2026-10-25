@@ -61,7 +61,24 @@ def verified_file(path: Path, expected: str | None = None) -> dict:
             "ctime_ns": state[5],
         }
     except OSError as exc:
-        raise ModelError(f"无法核验本地文件 {path}: {exc}") from exc
+        raise ModelError(f"无法核验本地文件 {path}: {exc}{moved_hint(path)}") from exc
+
+
+def moved_hint(path: Path) -> str:
+    """清单记录的权重文件不存在时，在其所在 models 目录的子目录里找同名文件，提示是否被移动过。"""
+    if path.exists():
+        return ""
+    root = next((parent for parent in path.parents if parent.name == "models"), None)
+    if root is None or not root.is_dir():
+        return ""
+    found = sorted(p for p in root.rglob(path.name) if p.is_file())[:3]
+    if not found:
+        return ""
+    return (
+        f"。在 {', '.join(str(p.parent) for p in found)} 找到同名文件，文件可能被移动过："
+        "部署清单固定了绝对路径，也是部署身份的一部分；请改回原路径（或放同名软链接），"
+        "或重新 pin 并重新通过 smoke（见 docs/macos-model-migration.md）"
+    )
 
 
 def content_identity(weights: str, mmproj: str) -> dict:

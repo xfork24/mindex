@@ -172,6 +172,17 @@ def test_content_identity_tracks_actual_weights_and_projection(native):
     assert native["models"]["data"][0]["meta"]["ftype"] == "Q8_0"
 
 
+def test_missing_pinned_file_hints_at_moved_location(tmp_path):
+    root = tmp_path / "models"
+    (root / "WeMM-Embedding").mkdir(parents=True)
+    (root / "WeMM-Embedding" / "w.gguf").write_bytes(b"x")
+    with pytest.raises(adapters.ModelError, match="可能被移动过"):
+        deployment.verified_file(root / "w.gguf")
+    with pytest.raises(adapters.ModelError) as plain:  # 没有同名文件时不加提示
+        deployment.verified_file(root / "absent.gguf")
+    assert "移动过" not in str(plain.value)
+
+
 def test_space_excludes_paths_aliases_addresses_build_and_ctx(native, tmp_path):
     config = native["config"]
     space = LlamaEmbedder(config).identity()

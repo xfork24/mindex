@@ -32,6 +32,8 @@ bash scripts/run-wemm.sh > data/e2e/wemm-macos-32768.log 2>&1
 
 先启动 WeMM，再执行以下命令；不要覆盖现有输出清单。
 
+清单记录的权重绝对路径（即 `/props.model_path`）属于部署观测身份：移动或改名 GGUF 文件会得到新的 `deployment_id`，必须重新 pin 并重新通过六片段 smoke；仅向量空间（`space_id`）不变，索引无需重建。当前 WeMM 清单固定在 `models/WeMM-9B-Q8_0.gguf`，权重已移到 `models/WeMM-Embedding/`，因此 `scripts/run-wemm.sh` 以顶层同名软链接启动。重新 pin 时 smoke 需要六片段提示视频经 ffmpeg 重新编码后与基线逐字节一致；基线建于 ffmpeg 9.0.2 安装之前（2026-10-14），现在重编码的哈希已不同，因此即使模型文件未动，新部署也无法通过现有基线。
+
 ```bash
 uv run mindex --config config.macos-v2.yaml --no-runtime-overrides e2e probe \
   --output data/e2e/wemm-macos-v2-probe.json
