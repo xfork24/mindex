@@ -37,11 +37,12 @@ from mindex.shared.images import image_png
 from mindex.shared.shot_media import ShotMedia
 from mindex.shared.storage import Store
 from mindex.shared.uploads import save_upload
-from mindex.studio import script_templates, studio, studio_steps
+from mindex.studio import brands, script_templates, studio, studio_steps
 from mindex.studio import workspace as workspace
 from mindex.studio.executor import StudioExecutor
 from mindex.studio.material_digest import build_digest, merged_vocabulary, safe_digest
 from mindex.studio.studio_artifacts import digest, safe_path
+from mindex.studio.studio_brands_api import brand_routes
 from mindex.studio.studio_diagnostics import diagnostics
 from mindex.studio.studio_files import SANDBOX_HEADERS, file_routes
 from mindex.studio.studio_logs import ExecutionLog, read_events
@@ -52,7 +53,9 @@ from mindex.studio.studio_models import (
     ColumnBody,
     CreateJobBody,
     LyricsBody,
+    MetadataBody,
     NodeBody,
+    OverlaySourceBody,
     PlanBody,
     PlanPatchBody,
     QuerySuggestionBody,
@@ -67,7 +70,9 @@ from mindex.studio.studio_models import (
     validate_recall_references,
     validate_source_references,
 )
+from mindex.studio.studio_music_api import music_routes
 from mindex.studio.studio_templates_api import template_routes
+from mindex.studio.studio_tools_api import tool_routes
 
 log = logging.getLogger(__name__)
 
@@ -435,6 +440,12 @@ def studio_router(
             if body.options:
                 if not script_templates.exists(store, body.options.template_id):
                     raise studio.StudioError(f"找不到文案模板：{body.options.template_id}")
+                if body.options.brand_id and not brands.exists(store, body.options.brand_id):
+                    raise studio.StudioError(f"找不到品牌模板：{body.options.brand_id}")
+                overrides = body.options.brand_overrides
+                for key in ("intro", "outro", "watermark"):
+                    if overrides is not None and (clip := getattr(overrides, key)) is not None:
+                        brands.require_asset(base, clip.asset)
                 p["options"] = {
                     **body.options.model_dump(),
                     # 参考文稿登记只经 /references 增删：整份提交方案参数时保留现有登记。
@@ -450,6 +461,9 @@ def studio_router(
                 validate_recall_references(base, store, job_id, shots)
                 validate_source_references(base, job_id, shots)
                 workspace.set_board(current(), job_id, w, p, shots)
+            # 多画幅重新渲染：创建或同步关联子方案（没有 rerender 导出时不改动任何方案）。
+            if body.options or body.shots is not None:
+                workspace.variants.sync(w, p)
             workspace.persist(base, job_id, w)
         return workspace.detail(current(), job_id, w)
 
@@ -657,9 +671,12 @@ def studio_router(
         return workspace.detail(current(), job_id, w)
 
     @router.get("/jobs/{job_id}/plans/{plan_id}/preflight")
-    def build_preflight(job_id: str, plan_id: str, force: bool = False):
+    def build_preflight(job_id: str, plan_id: str, force: bool = False, all_canvases: bool = False):
         w = read_workspace(job_id)
-        return workspace.preflight(current(), job_id, w, workspace.plan(w, plan_id), force=force)
+        p = workspace.plan(w, plan_id)
+        if all_canvases:
+            return workspace.variants.preflight_all(current(), job_id, w, p, force=force)
+        return workspace.preflight(current(), job_id, w, p, force=force)
 
     @router.get("/jobs/{job_id}/plans/{plan_id}/diagnostics")
     def plan_diagnostics(job_id: str, plan_id: str):
@@ -713,7 +730,8 @@ def studio_router(
                 ]
                 force = node.force
             else:
-                checked = workspace.preflight(cfg, job_id, w, p, force=body.force)
+                checked = (workspace.variants.preflight_all(cfg, job_id, w, p, force=body.force) if body.all_canvases
+                           else workspace.preflight(cfg, job_id, w, p, force=body.force))
                 if body.token != checked["token"]:
                     raise studio.StudioError("预检已变化，请重新查看构建清单")
                 nodes, force = checked["nodes"], body.force
@@ -1152,6 +1170,86 @@ def studio_router(
             workspace.persist(base, job_id, w)
         return workspace.detail(cfg, job_id, w)
 
+    @router.patch("/jobs/{job_id}/plans/{plan_id}/shots/{shot_id}/overlay")
+    def save_overlay(job_id: str, plan_id: str, shot_id: str, body: OverlaySourceBody):
+        """人工保存 HTML 文字层的叠加层源码（``index`` 为该层在分镜 overlays 中的序号）。
+
+        只有该分镜的渲染与成片需要重建；之后的构建保留人工源码。``dry_run`` 只做静态校验。"""
+        from mindex.models.animator import animation_errors
+
+        if body.dry_run:
+            cfg = current()
+            w = workspace.load(base, job_id)
+            workspace.require_revision(workspace.plan(w, plan_id), body.revision)
+            limit = cfg.studio.animator.max_html_kb
+            errors = animation_errors(body.html, limit)
+            return {"valid": not errors, "errors": errors, "bytes": len(body.html.encode("utf-8")), "max_kb": limit}
+        with mutation_lock():
+            cfg = current()
+            w = workspace.load(cfg, job_id)
+            p = workspace.plan(w, plan_id)
+            workspace.require_revision(p, body.revision)
+            if shot_id not in p["shots"] or shot_id not in workspace.ordered_shots(w, p):
+                raise EntityNotFound("找不到分镜")
+            workspace.save_overlay(cfg, job_id, w, p, shot_id, body.index, body.html)
+            workspace.persist(base, job_id, w)
+        return workspace.detail(cfg, job_id, w)
+
+    @router.get("/jobs/{job_id}/versions/{version_id}/overlay-{index}.html")
+    def overlay_source(job_id: str, version_id: str, index: int):
+        """HTML 文字层的叠加层源码（text/html，严格 CSP），供沙箱预览与源码编辑读取。"""
+        w = read_workspace(job_id)
+        item = workspace.version(w, version_id)
+        if item["stage"] != "overlay" or f"overlay-{index}" not in item["files"]:
+            raise studio.StudioError("此版本没有这个叠加层源码")
+        content = workspace.file_path(base, job_id, item, f"overlay-{index}").read_bytes()
+        return Response(content, media_type="text/html; charset=utf-8",
+                        headers={**SANDBOX_HEADERS, "Cache-Control": "no-store"})
+
+    @router.get("/platforms")
+    def list_platforms():
+        """平台发布预设（bilibili、douyin、youtube）：画幅、封面尺寸、标题/简介/标签限制与章节规则。"""
+        from mindex.studio import platforms
+
+        return {"items": platforms.list_presets()}
+
+    @router.get("/jobs/{job_id}/plans/{plan_id}/cover-candidates")
+    def cover_candidates(job_id: str, plan_id: str, platform: str, limit: int = Query(default=6, ge=1, le=20)):
+        """封面候选帧：在该平台对应成片的每个镜头中点抽帧，按清晰度排序（缓存在任务 previews/ 下，不改动版本）。"""
+        from mindex.studio.platforms import preset
+
+        preset(platform)
+        w = read_workspace(job_id)
+        p = workspace.plan(w, plan_id)
+        _, vid = workspace.publish.film_version(w, p, platform)
+        item = w["versions"].get(vid or "")
+        if not item or item["status"] != "complete":
+            raise studio.StudioError("该平台对应画幅的成片还没有构建")
+        frame = "clean" if "clean" in item["files"] else "mp4"
+        source = workspace.file_path(base, job_id, item, frame)
+        directory = safe_path(studio.job_dir(base, job_id), f"previews/cover-{item['id']}")
+        directory.mkdir(parents=True, exist_ok=True)
+        with FileLock(str(directory) + ".lock"):
+            found = workspace.publish.frame_candidates(source, item["data"].get("boundaries") or [], directory, limit)
+        relative = studio.job_dir(base, job_id)
+        return {"film": item["id"], "items": [
+            {**{k: v for k, v in entry.items() if k != "path"},
+             "url": f"/api/studio/jobs/{job_id}/artifacts/{entry['path'].relative_to(relative).as_posix()}"}
+            for entry in found]}
+
+    @router.patch("/jobs/{job_id}/plans/{plan_id}/publish-metadata/{platform}")
+    def edit_publish_metadata(job_id: str, plan_id: str, platform: str, body: MetadataBody):
+        """人工修改某个平台的发布元数据（按平台预设校验修正）；新版本被钉住，发布包随之重建。"""
+        with mutation_lock():
+            cfg = current()
+            w = workspace.load(cfg, job_id)
+            p = workspace.plan(w, plan_id)
+            workspace.require_revision(p, body.revision)
+            workspace.save_metadata(cfg, job_id, w, p, platform, body.model_dump(exclude_unset=True,
+                                                                                exclude={"revision"}))
+            workspace.persist(base, job_id, w)
+        return workspace.detail(cfg, job_id, w)
+
     @router.get("/jobs/{job_id}/versions/{version_id}/animation.html")
     def animation_source(job_id: str, version_id: str):
         """动画源码（text/html）：带严格 CSP 与 nosniff，供沙箱 iframe 预览与源码编辑读取。"""
@@ -1302,5 +1400,8 @@ def studio_router(
 
     file_routes(router, base, store, mutation_lock)
     template_routes(router, base, store, mutation_lock, current=current, writer=writer)
+    brand_routes(router, base, store, mutation_lock, current=current)
+    music_routes(router, base, store, mutation_lock, current=current, writer=writer)
+    tool_routes(router, base, store, mutation_lock)
 
     return router

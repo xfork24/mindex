@@ -1,0 +1,12 @@
+id: plain
+name: 简洁
+description: 白字细描边字幕，文字层白字黑底；没有片头片尾与水印。复制后可上传自己的片头、片尾与水印。
+version: 1
+subtitle:
+  outline: 1.5
+  shadow: 0.5
+overlay:
+  primary: "#FFFFFF"
+  accent: "#FFB000"
+  background: "#000000"
+  background_opacity: 0.55

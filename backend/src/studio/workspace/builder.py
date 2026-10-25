@@ -131,8 +131,16 @@ def _run_build(config, job_id, build_id, log, *, speaker=None, storyboarder=None
         return executor.cancel_requested(config, "build", job_id, build_id, cancel_event)
 
     log.emit("开始执行")
+    main = p
+
+    def scoped(node_plan, key):
+        # 构建全部画幅时节点可属于关联子方案（node["plan_id"]）：依赖与失败按方案区分。
+        return key if node_plan is None else f"{node_plan}/{key}"
+
     for position, node in enumerate(build["nodes"]):
         stage, sid = node["stage"], node["shot_id"]
+        node_plan = node.get("plan_id")
+        p = plan(w, node_plan) if node_plan else main
         # 在节点之间检查取消：已开始执行的节点照常完成（生成画面在轮询之间自行检查并以「已取消」失败）。auto_split 重新预检替换
         # 后续节点后，下一轮迭代立即在这里检查，新展开的节点同样会被取消。
         if cancel_check():
@@ -146,10 +154,10 @@ def _run_build(config, job_id, build_id, log, *, speaker=None, storyboarder=None
         deps = node_dependencies(w, p, stage, sid) if stage != "split" else []
         if node["action"] == "skip":
             node["status"] = "skipped"
-        elif node["action"] == "blocked" or any(dep in failed for dep in deps):
+        elif node["action"] == "blocked" or any(scoped(node_plan, dep) in failed for dep in deps):
             node["status"] = "blocked"
             node["error"] = node.get("reason") or "依赖失败"
-            failed.add(node["key"])
+            failed.add(scoped(node_plan, node["key"].split("/", 1)[-1]))
         else:
             node.update(status="running", started_at=studio.now())
             persist(config, job_id, w)
@@ -196,7 +204,7 @@ def _run_build(config, job_id, build_id, log, *, speaker=None, storyboarder=None
                 )
                 if attempted:
                     node["version"] = attempted
-                failed.add(node["key"])
+                failed.add(scoped(node_plan, node["key"].split("/", 1)[-1]))
         if build.get("auto_split") and stage in ("script", "split"):
             if node["status"] not in ("complete", "reused"):
                 for pending in build["nodes"][position + 1:]:
@@ -222,6 +230,7 @@ def _run_build(config, job_id, build_id, log, *, speaker=None, storyboarder=None
             + (f" · {node['error']}" if node.get("error") else ""),
             "error" if node["status"] == "failed" else ("warning" if node["status"] == "blocked" else "info"),
         )
+    p = main
     successes = any(n["status"] in ("complete", "reused") for n in build["nodes"])
     if cancelled:
         status = "cancelled"

@@ -261,7 +261,8 @@ async def get_build_status(args: BuildStatus, ctx: ToolContext) -> ToolOutput:
 
 class ListVersions(StrictModel):
     job_id: str | None = JobId
-    stage: Literal["script", "content", "recall", "tts", "music", "draw", "generate", "animate", "select", "render", "compose"] | None = None
+    stage: Literal["script", "content", "recall", "tts", "music", "draw", "generate", "animate", "select", "overlay",
+                   "render", "compose"] | None = None
     shot: str | None = Field(default=None, description="分镜：完整 ID、短 ID 或 #序号")
     limit: int = Field(default=20, ge=1, le=100)
 

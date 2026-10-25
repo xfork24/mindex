@@ -1,0 +1,16 @@
+id: news
+name: 新闻资讯
+description: 半透明底条字幕，文字层深蓝底、红色强调，适合热点评论与资讯解读。
+version: 1
+subtitle:
+  box: true
+  box_color: "#0B1F3A"
+  box_opacity: 0.75
+  outline: 0
+  shadow: 0
+  highlight: "#FF5A4E"
+overlay:
+  primary: "#FFFFFF"
+  accent: "#FF5A4E"
+  background: "#0B1F3A"
+  background_opacity: 0.85

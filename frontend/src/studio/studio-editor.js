@@ -51,7 +51,8 @@ const SOURCE_KINDS = [
 ["image", MindexI18n.msg("ui.source_image")],
 ["aigc_image", MindexI18n.msg("ui.source_aigc_image_kind")],
 ["aigc", MindexI18n.msg("ui.source_aigc")],
-["animation", MindexI18n.msg("ui.source_animation")]];
+["animation", MindexI18n.msg("ui.source_animation")],
+["tool", MindexI18n.msg("ui.source_tool")]];
 
 const MOTIONS = [
 ["zoom-in", MindexI18n.msg("ui.motion_zoom_in")],
@@ -72,7 +73,16 @@ function sourceEditable(kind, previous) {
   return { kind, prompt: same?.prompt ?? null, reference_id: same?.reference_id ?? null, seed: same?.seed ?? null,
     prompt_optimizer: same?.prompt_optimizer ?? false, motion: same?.motion || "zoom-in", strength: same?.strength ?? 0.3 };
   if (kind === "animation") return { kind, brief: same?.brief ?? null };
+  if (kind === "tool") return toolCanonical({ ...(same || {}), kind });
   return null;
+}
+// ToolShotSource 的键序（与服务端 dump 一致）：uploads 只在非空时出现，运动参数只对图片产物出现。
+function toolCanonical(value) {
+  const result = { kind: "tool", tool_id: value.tool_id ?? "", tool: value.tool ?? "", arguments: value.arguments || {} };
+  if (value.uploads?.length) result.uploads = value.uploads;
+  result.output = value.output || "video";
+  if (result.output === "image") Object.assign(result, { motion: value.motion || "zoom-in", strength: value.strength ?? 0.3 });
+  return result;
 }
 // AigcSource 的键序：前五个总在；MiniMax H3 的逐镜选项只在设置时出现（与服务端 dump 省略 None 一致）。
 const AIGC_OPTIONAL = ["mode", "last_image_id", "references", "model", "resolution", "ratio", "duration"];
@@ -103,6 +113,9 @@ function sourceSummary(source) {
   if (source?.kind === "aigc")
   return MindexI18n.msg("ui.source_summary_aigc", { p0: source.prompt || MindexI18n.msg("ui.source_aigc_default_prompt") }) +
   (source.mode ? ` · ${VIDEO_MODE_LABEL[source.mode]}` : "");
+  if (source?.kind === "tool")
+  return MindexI18n.msg("ui.source_summary_tool", { p0: source.tool_id || "?", p1: source.tool || "?",
+    p2: MindexI18n.msg(source.output === "image" ? "ui.invoke_output_image" : "ui.invoke_output_video") });
   if (source?.kind === "animation")
   return MindexI18n.msg("ui.source_summary_animation", { p0: source.brief || MindexI18n.msg("ui.source_animation_default_brief") });
   return "";
@@ -126,6 +139,89 @@ function renderAnimationEditor(section, draft, markDirty) {
   const briefRow = el("div", "", "source-options");
   briefRow.append(brief.wrap);
   section.append(briefRow);
+}
+// 第三方工具来源：选择登记的工具源与白名单中的工具（产物类型随工具登记），JSON 参数与（允许时）上传素材。
+function renderToolEditor(section, sid, draft, markDirty, redraw) {
+  const value = draft.data.source;
+  const setSource = (patch) => {draft.data.source = toolCanonical({ ...draft.data.source, ...patch });markDirty();};
+  const hint = el("p", "", "muted");
+  hint.setAttribute("role", "status");
+  const sourceField = field(MindexI18n.msg("ui.tool_source_label"), value.tool_id || "", "text", [["", MindexI18n.msg("ui.tool_loading")]]);
+  sourceField.input.dataset.shotInput = "true";
+  sourceField.input.dataset.shotSource = "tool_id";
+  const toolField = field(MindexI18n.msg("ui.tool_name_label"), value.tool || "", "text", [["", "—"]]);
+  toolField.input.dataset.shotInput = "true";
+  toolField.input.dataset.shotSource = "tool";
+  const line = el("div", "", "source-options");
+  line.append(sourceField.wrap, toolField.wrap);
+  section.append(line);
+  const manage = el("a", MindexI18n.msg("ui.invoke_manage"), "quiet nav-link");
+  manage.href = `/studio/tools?job=${encodeURIComponent(state.id)}`;
+  section.append(manage, hint);
+  const fillTools = (items) => {
+    const found = items.find((item) => item.id === draft.data.source.tool_id);
+    toolField.input.replaceChildren();
+    for (const [v, text] of [["", MindexI18n.msg("ui.tool_choose")], ...(found?.tools || []).map((tool) =>
+      [tool.name, `${tool.label || tool.name} · ${MindexI18n.msg(tool.output === "image" ? "ui.invoke_output_image" : "ui.invoke_output_video")}`])]) {
+      const option = el("option", text);
+      option.value = v;
+      toolField.input.append(option);
+    }
+    toolField.input.value = draft.data.source.tool || "";
+    const tool = found?.tools.find((item) => item.name === draft.data.source.tool);
+    MindexI18n.setText(hint, !found && draft.data.source.tool_id ? MindexI18n.msg("ui.tool_source_missing") :
+      tool ? MindexI18n.msg(tool.allow_upload ? "ui.tool_upload_allowed" : "ui.tool_upload_denied") : "");
+    return tool;
+  };
+  const load = state.toolSources ? Promise.resolve(state.toolSources) :
+  api("/api/studio/tool-sources").then((data) => (state.toolSources = data.items));
+  load.then((items) => {
+    if (!sourceField.input.isConnected) return;
+    sourceField.input.replaceChildren();
+    for (const [v, text] of [["", items.length ? MindexI18n.msg("ui.tool_choose") : MindexI18n.msg("ui.tool_none_registered")],
+      ...items.map((item) => [item.id, item.name])]) {
+      const option = el("option", text);
+      option.value = v;
+      sourceField.input.append(option);
+    }
+    sourceField.input.value = draft.data.source.tool_id || "";
+    fillTools(items);
+    sourceField.input.addEventListener("change", () => {setSource({ tool_id: sourceField.input.value, tool: "" });fillTools(items);});
+    toolField.input.addEventListener("change", () => {
+      const tool = items.find((item) => item.id === draft.data.source.tool_id)?.tools.find((t) => t.name === toolField.input.value);
+      setSource({ tool: toolField.input.value, output: tool?.output || "video" });
+      redraw();
+    });
+  }).catch((error) => MindexI18n.setText(hint, shortIds(error.message)));
+  const args = field(MindexI18n.msg("ui.tool_arguments"), JSON.stringify(value.arguments || {}, null, 2), "textarea");
+  args.input.rows = 5;
+  args.input.dataset.shotInput = "true";
+  args.input.dataset.shotSource = "arguments";
+  const argsError = el("p", "", "warn-text");
+  args.input.addEventListener("input", () => {
+    try {
+      const parsed = JSON.parse(args.input.value || "{}");
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("object");
+      MindexI18n.setText(argsError, "");
+      setSource({ arguments: parsed });
+    } catch {
+      MindexI18n.setText(argsError, MindexI18n.msg("ui.tool_arguments_invalid"));
+    }
+  });
+  section.append(args.wrap, el("p", MindexI18n.msg("ui.tool_arguments_help"), "muted"), argsError);
+  const uploads = value.uploads || [];
+  const list = el("div", "", "reference-media-list");
+  uploads.forEach((ref, index) => {
+    const row = el("div", "", "recall-upload-row");
+    row.append(el("span", `${MindexI18n.msg("ui.video_ref_" + ref.kind)} · ${ref.media_id.slice(0, 8)}`, "muted"),
+    button(MindexI18n.msg("ui.source_aigc_clear_image"), () => {setSource({ uploads: uploads.filter((_, i) => i !== index) });redraw();}));
+    list.append(row);
+  });
+  section.append(el("h4", MindexI18n.msg("ui.tool_uploads", { p0: uploads.length })), list);
+  if (uploads.length < 4) for (const kind of ["image", "video"])
+  section.append(mediaSlot(sid, draft, "tool", kind, MindexI18n.msg("ui.video_ref_add_" + kind), null,
+    (id) => setSource({ uploads: [...(draft.data.source.uploads || []), { kind, media_id: id }] }), redraw));
+  if (value.output === "image") section.append(motionOptions(draft, markDirty));
 }
 // AIGC 来源：提示词（缺省用画面意象，再缺省用召回查询）、反向提示词、种子与可选的首帧参考图。
 function renderAigcEditor(section, sid, draft, markDirty, redraw) {
@@ -382,6 +478,11 @@ function renderSourceEditor(body, sid, draft) {
   }
   if (kind === "animation") {
     renderAnimationEditor(section, draft, markDirty);
+    body.append(section);
+    return false;
+  }
+  if (kind === "tool") {
+    renderToolEditor(section, sid, draft, markDirty, redraw);
     body.append(section);
     return false;
   }
@@ -870,6 +971,14 @@ async function changeStructure(sid, op) {
     shots[index - 1].recall = shots[index].recall;
     // 背景音乐提示点：保留上一镜的；上一镜没有时继承被合并镜的。
     if (!shots[index - 1].music && shots[index].music) shots[index - 1].music = shots[index].music;
+    // 转场：保留上一镜的入场，出场与到下一镜的重叠转场取被合并镜的（与智能助手 edit_shots 一致）。
+    const first = shots[index - 1].transition || {},
+      second = shots[index].transition || {};
+    const merged = Object.fromEntries([["enter", first.enter], ["leave", second.leave], ["next", second.next]].filter(([, v]) => v));
+    if (Object.keys(merged).length) shots[index - 1].transition = merged;else
+    delete shots[index - 1].transition;
+    const words = [...new Set([...(shots[index - 1].highlights || []), ...(shots[index].highlights || [])])].slice(0, 10);
+    if (words.length) shots[index - 1].highlights = words;
     shots.splice(index, 1);
   }
   const result = await api(planBase(), "PATCH", {

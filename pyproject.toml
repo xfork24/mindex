@@ -47,6 +47,7 @@ packages = [
   "mindex.studio",
   "mindex.studio.workspace",
   "mindex.studio.workspace.handlers",
+  "mindex.studio.tools",
   "mindex.topics",
   "mindex.topics.sources",
   "mindex.web",
@@ -63,7 +64,7 @@ packages = [
 "mindex.web" = "frontend/src"
 
 [tool.setuptools.package-data]
-"mindex.studio" = ["templates/*.yaml"]
+"mindex.studio" = ["templates/*.yaml", "brands/*.yaml", "overlays/*.html", "platforms/*.yaml"]
 "mindex.topics" = ["samples/*.csv"]
 "mindex.web" = ["*/*.html", "*/*.js", "*/*.css", "*/*.json", "*/*.svg"]
 

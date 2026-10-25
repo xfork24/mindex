@@ -30,7 +30,7 @@
 
 - 不提供会删除磁盘文件的工具：删除素材（`DELETE /api/admin/sources/{id}`）和删除演员表导入图片（`DELETE /api/persons/imports/{id}/images/{image_id}`）只能在页面上操作。
 - 例外是 `delete_job`（删除整个创作任务及其产物），保留为 danger 级。
-- 只删除记录、文件留给 `mindex clean` 回收的删除一律为 danger 级：`delete_plan`、`remove_reference_text`、`delete_script_template`、`delete_person`、`remove_person_reference`、`change_search_release(action=delete)`、`delete_model_profile`、`delete_voice`。
+- 只删除记录、文件留给 `mindex clean` 回收的删除一律为 danger 级：`delete_plan`、`remove_reference_text`、`delete_script_template`、`delete_brand`、`delete_person`、`remove_person_reference`、`change_search_release(action=delete)`、`delete_model_profile`、`delete_voice`。
 - 回环客户端拒绝路径中含 `.`/`..` 段、`?` 或 `#` 的请求（返回 400 `invalid_path`，不发送请求），防止工具参数里的 ID 经路径规整打到别的接口，例如把 `delete_job(job_id="../../admin/sources/x")` 变成删除素材。
 
 ## 工具领域与动态加载
@@ -42,6 +42,7 @@
 | `meta` | 提问、能力缺口、界面导航、`load_tools`；始终下发 | — |
 | `studio` | 创作任务、方案、文案与文案模板、参考文稿、画幅、分镜与画面来源（含 AI 生成图片、AI 生成视频与 AI 动画）、背景音乐与歌词生成、构建与版本 | 创作页 |
 | `studio_detail` | 创作诊断、版本依赖、召回词建议、人工选片、整列重做、AI 动画源码读取与修改、背景音乐歌词生成 | — |
+| `studio_post` | 成片后期与交付：品牌模板（字幕样式、文字层样式、片头片尾、水印）与品牌素材上传、HTML 叠加层源码、多画幅导出、平台发布（预设、封面、发布元数据、发布包）；音乐库与第三方工具也在这里 | — |
 | `library` | 素材与片段浏览、整理信息、素材报告、处理任务、上传素材与字幕 | 素材管理页 |
 | `search` | 文字/图片/视频检索、找相似、区间抽帧、系统状态 | 检索页 |
 | `index` | 内容索引版本列表、一致性检查、激活与回退 | — |
@@ -185,7 +186,7 @@ curl -s -H "Authorization: Bearer $MINDEX_MCP_TOKEN" -F file=@shot.png http://12
 
 ## 能力范围与缺口
 
-共 121 个工具，其中 118 个导出到 MCP（`load_tools`、`ask_user_question`、`navigate` 不导出）。所有工具都经进程内回环调用既有 REST 接口，校验、锁与错误信息与页面操作完全一致。
+共 146 个工具，其中 142 个导出到 MCP（`load_tools`、`ask_user_question`、`navigate` 与会在本机启动进程的 `save_stdio_tool_source` 不导出）。所有工具都经进程内回环调用既有 REST 接口，校验、锁与错误信息与页面操作完全一致。
 
 ### meta
 
@@ -214,7 +215,7 @@ curl -s -H "Authorization: Bearer $MINDEX_MCP_TOKEN" -F file=@shot.png http://12
 | `activate_plan` | write | 是 | 切换当前方案 |
 | `update_plan_options` | write | 是 | 修改方案参数（含文案模板 `template_id`、画幅 `canvas` 与适配 `fit`）或名称；换模板不重写已有文案，换画幅提示重建渲染与成片 |
 | `edit_script` | write | 是 | 用完整新文案替换方案文案 |
-| `edit_shots` | write | 是 | 批量 update/insert/delete/move/merge/split 分镜，可设置或 `clear` 召回设置、粒度、数量与画面来源 `source`（recall / clip / image / aigc_image / aigc / animation；aigc_image 可设 `prompt`、主体参考图 `reference_id`、`seed`、`prompt_optimizer`、`motion`、`strength`；aigc 可设 `prompt`、`negative`、`seed`、首帧 `image_id`，以及 MiniMax H3 的 `mode`（text/first_frame/last_frame/first_last/reference）、`last_image_id`、`references`、`model`、`resolution`、`ratio`、`duration`；animation 可设画面说明 `brief`），以及背景音乐提示点 `music`（generate/cover/none，`prompt`、`lyrics`、`instrumental`、`audio_id`、`volume`；之后的分镜顺延） |
+| `edit_shots` | write | 是 | 批量 update/insert/delete/move/merge/split 分镜，可设置或 `clear` 召回设置、粒度、数量与画面来源 `source`（recall / clip / image / aigc_image / aigc / animation；aigc_image 可设 `prompt`、主体参考图 `reference_id`、`seed`、`prompt_optimizer`、`motion`、`strength`；aigc 可设 `prompt`、`negative`、`seed`、首帧 `image_id`，以及 MiniMax H3 的 `mode`（text/first_frame/last_frame/first_last/reference）、`last_image_id`、`references`、`model`、`resolution`、`ratio`、`duration`；animation 可设画面说明 `brief`），以及背景音乐提示点 `music`（generate/cover/none，`prompt`、`lyrics`、`instrumental`、`audio_id`、`volume`；之后的分镜顺延）、转场 `transition`（`enter`/`leave` 镜内转场 fade/white/zoom/slide，`next` 到下一镜的重叠转场）、字幕高亮词 `highlights` 与文字层 `overlays`（title/lower_third/data_card/custom，`engine` 为 ass 或 html）；`clear` 可恢复硬切、清空高亮词与文字层 |
 | `rename_job` | write | 是 | 修改任务标题 |
 | `attach_query_media` | write | 是 | 把图片或视频附件设为分镜的召回查询（上传 + 改召回，一次确认）；`purpose=source` 时上传为画面文件并把分镜来源改为上传片段（视频）或静态图片（图片）；分镜已是 aigc 来源时按 `role` 作为首帧（缺省）、尾帧或主体参考（图片/视频/音频），aigc_image 来源时图片作为主体参考图；`role=cover` 的音频附件作为背景音乐翻唱参考并设 cover 提示点（同样一次确认） |
 | `add_reference_text` | write | 是 | 为方案登记参考文稿（文本附件或粘贴正文）；预览显示名称与字数，不自动重写文案 |
@@ -249,6 +250,38 @@ curl -s -H "Authorization: Bearer $MINDEX_MCP_TOKEN" -F file=@shot.png http://12
 | `generate_lyrics` | write | 是 | 调用音乐生成服务的歌词生成（`write_full_song` 或 `edit`），只返回歌名、风格标签与歌词，不改分镜；预览提示可能产生费用，ComfyUI 音乐档案不支持 |
 | `get_animation_source` | read | 是 | 读取 AI 动画分镜的 HTML/JS 源码（按字符分页 `offset`/`limit`，单次 ≤10000 字符）、版本与来源（模型生成/人工修改）、时长与画布、沙箱预览地址与录制画面 |
 | `edit_animation_source` | write | 是 | 修改 AI 动画源码：整份替换 `html` 或查找替换 `replacements`（每个 `find` 须恰好出现一次）；预览先以 `dry_run` 做服务端静态校验（未通过直接报告违规项，不出确认卡），显示源码大小前后对比与校验结果；保存为人工版本并选用，只重建该镜渲染与成片，之后的构建不会覆盖 |
+
+### studio_post
+
+成片后期工具与 Web 页面（创作页分镜详情的「后期」面板、`/studio/brands` 品牌模板页、方案参数）、`mindex studio` CLI 与 MCP 共用同一组 REST 接口，Web 与桌面版行为一致。转场、字幕高亮词与文字层是分镜字段，用 `studio` 领域的 `edit_shots` 设置（`transition`、`highlights`、`overlays`）；字幕样式、品牌与节拍对齐用 `update_plan_options`（`subtitle_style`、`brand_id`、`brand_overrides`、`beat_align`）；曲库选曲用 `edit_shots` 的 `music={kind: library, track_id}`，第三方工具画面用 `edit_shots` 的 `source={kind: tool, tool_id, tool, arguments}`。
+
+| 工具 | 风险 | MCP | 说明 |
+|---|---|---|---|
+| `list_brands` | read | 是 | 列出品牌模板：内置（简洁、新闻资讯、科技评测）与用户模板，是否有片头/片尾/水印 |
+| `get_brand` | read | 是 | 读取品牌模板的字幕样式、文字层样式、片头、片尾与水印 |
+| `copy_brand` | write | 是 | 复制为用户模板（内置模板只读） |
+| `update_brand` | write | 是 | 修改用户模板，只传要改的字段；影响成片的字段传 null 去掉；使用它的方案下次构建只重新合成成片 |
+| `delete_brand` | danger | 是 | 删除用户模板（只删记录）；被方案引用时拒绝（409） |
+| `upload_brand_asset` | write | 是 | 上传品牌素材（水印图片或 ≤30 秒的片头片尾视频），返回可引用的 `asset` |
+| `get_overlay_source` | read | 是 | 读取分镜 HTML 文字层（`engine=html`）的透明叠加层源码（按层序号，分页） |
+| `set_exports` | write | 是 | 设置多画幅导出（整体替换）：derive 快速派生；rerender 维护关联子方案，用 `run_build(all_canvases=true)` 一起构建 |
+| `list_platforms` | read | 是 | 平台发布预设：画幅、封面尺寸、标题/简介/标签/章节限制 |
+| `set_publish` | write | 是 | 设置发布平台与封面（成片挑帧、AI 生成或上传，标题与副标题）；平台画幅缺导出时提示 |
+| `cover_candidates` | read | 是 | 某平台成片的封面候选帧（按清晰度），附缩略图 |
+| `get_publish_metadata` | read | 是 | 读取某平台的标题、简介（含章节与署名）、标签与校验修正说明 |
+| `edit_publish_metadata` | write | 是 | 人工修改标题、简介正文与标签，按平台限制修正；保存后钉住 |
+| `build_publish_package` | danger | 是 | 构建发布包（含导出、元数据、封面），有重新渲染导出时构建全部画幅，后台执行并跟踪 |
+| `edit_overlay_source` | write | 是 | 整份替换某层叠加层源码；预览先做安全检查，保存后版本被钉住，只重建该镜渲染与成片 |
+| `list_music_tracks` | read | 是 | 列出曲库曲目（BPM、情绪、授权是否过期），可按情绪或关键词筛选 |
+| `get_music_track` | read | 是 | 读取单首曲目：授权、署名、节奏分析与情绪标签 |
+| `import_music_track` | write | 是 | 把音频附件导入曲库（授权来源、许可、署名必填），自动分析并打情绪标签；相同音频去重 |
+| `update_music_track` | write | 是 | 修改曲目的授权信息、标签或情绪标签 |
+| `analyze_music_track` | write | 是 | 重新分析节奏，可选重新打情绪标签 |
+| `recommend_music` | read | 是 | 按段落文案或提示点分镜推荐曲目（情绪、BPM、时长与理由） |
+| `list_tool_sources` | read | 是 | 列出第三方工具源（协议、白名单工具、产物类型、上传许可、缺少的密钥） |
+| `test_tool_source` | write | 是 | 测试工具源连接并列出服务端工具（不提交任务；mcp-stdio 会启动本机进程） |
+| `save_tool_source` | danger | 是 | 登记或整体替换 http / mcp-http 工具源；密钥只接受 `secret://` 引用 |
+| `save_stdio_tool_source` | danger | 否 | 登记本机 MCP 服务器（mcp-stdio，绝对路径命令）；外部 MCP 客户端不能让 Mindex 执行任意命令 |
 
 ### library
 
@@ -426,7 +459,7 @@ curl -s -H "Authorization: Bearer $MINDEX_MCP_TOKEN" -F file=@shot.png http://12
 | `mcp.http_enabled` | `false` | 挂载 streamable-http `/mcp` |
 | `mcp.policy` | `read` | MCP 调用方允许的最高风险级别：`read`、`write`、`all` |
 | `mcp.token_env` | `MINDEX_MCP_TOKEN` | `/mcp` 与附件端点的 Bearer 令牌所在环境变量；开启 HTTP 但未设置令牌时服务拒绝启动 |
-| `mcp.domains` | `null` | MCP 导出的领域；`null` 导出全部，列表只导出这些领域（另加 `report_capability_gap`）。只接受 `studio`、`studio_detail`、`library`、`search`、`index`、`persons`、`settings`，空列表或未知领域校验失败 |
+| `mcp.domains` | `null` | MCP 导出的领域；`null` 导出全部，列表只导出这些领域（另加 `report_capability_gap`）。只接受 `studio`、`studio_detail`、`studio_post`、`library`、`search`、`index`、`persons`、`settings`、`topics`，空列表或未知领域校验失败 |
 
 会话（含已加载领域）、密钥保险库、附件记录与能力缺口存放在 `data_dir/agent.sqlite3`，附件文件在 `data_dir/agent-attachments/`，都属于本机运行状态，不进入 `mindex backup`。
 
@@ -435,7 +468,7 @@ curl -s -H "Authorization: Bearer $MINDEX_MCP_TOKEN" -F file=@shot.png http://12
 安装依赖：`uv sync --extra mcp`（开发环境的 `--extra dev` 已包含）。服务名 `mindex`。导出规则：
 
 - `load_tools`、`navigate`、`ask_user_question` 从不导出；MCP 不做动态加载，直接导出所选领域的全部工具。
-- `agent.mcp.domains` 为 `null` 时导出全部 118 个工具；为领域列表时只导出这些领域，`report_capability_gap` 始终导出。
+- `agent.mcp.domains` 为 `null` 时导出全部 142 个工具；为领域列表时只导出这些领域，`report_capability_gap` 始终导出。
 - `tools/list` 与 `tools/call` 每次重新读取配置，修改 `agent.mcp.domains` 无需重启（进程内 stdio 与 `/mcp`）。调用不在导出范围内的工具返回 `isError`，说明该工具未导出。
 - `mindex mcp --domain <领域>` 可重复指定，覆盖配置值；出现未知领域时启动失败并列出可选领域。远程模式（`--base-url`）在启动时读取一次本地配置的 `agent.mcp.domains`。
 - read 工具标注 `readOnlyHint`，danger 工具标注 `destructiveHint`。

@@ -46,18 +46,26 @@ def preflight(config, job_id, w, p, *, force=False):
             stage_handler.preflight(config, job_id, w, p, sid, spec, found, node)
             nodes.append(node)
             draft["shots"][sid][stage] = found or f"@{key}"
+    # 成片阶段按注册顺序、逐变体展开；草稿写入占位，下游成片阶段（导出、封面、发布包）的签名据此看到上游。
     for stage in names(scope="final"):
-        found = None if force or not p["board"] or resplit else signatures.match(config, job_id, w, draft, stage)
-        nodes.append(
-            {
-                "key": stage,
+        stage_handler = handler(stage)
+        for variant in stage_handler.variants(config, w, p):
+            key = stages.final_key(stage, variant)
+            found = (None if force or not p["board"] or resplit
+                     else signatures.match(config, job_id, w, draft, stage, variant))
+            node = {
+                "key": key,
                 "stage": stage,
-                "shot_id": None,
+                "shot_id": variant,
                 "action": "reuse" if found else "rebuild",
                 "version": found,
-                "reason": handler(stage).reason,
+                "reason": stage_handler.reason,
             }
-        )
+            if p["board"] and not resplit:
+                spec = signatures.specification(config, job_id, w, draft, stage, variant)
+                stage_handler.preflight(config, job_id, w, p, variant, spec, found, node)
+            nodes.append(node)
+            stage_handler.assign(draft, variant, found or f"@{key}")
     # Predict blockers transitively; the worker still rechecks every dependency.
     blocked = {n["key"] for n in nodes if n["action"] == "blocked"}
     for n in nodes:

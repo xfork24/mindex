@@ -94,12 +94,29 @@ class StageHandler:
     def run(self, ctx: RunContext) -> tuple[dict, dict]:
         raise NotImplementedError
 
+    def variants(self, config, w, p) -> list[str | None]:
+        """final 阶段的变体（例如画幅、平台）；None 表示没有变体。返回空列表时本方案不需要该阶段。"""
+        return [None]
+
     def selected(self, p, sid):
+        """方案当前选用的版本。final 阶段的 ``sid`` 是变体：compose 用 ``p["final"]``，其余 final 阶段用
+        ``p["finals"]["阶段[:变体]"]``（键只在首次选用时出现，旧方案没有 ``finals``）。"""
         if self.scope == "final":
-            return p.get("final")
+            if self.name == "compose":
+                return p.get("final")
+            return (p.get("finals") or {}).get(final_key(self.name, sid))
         if self.scope == "plan":
             return p.get(self.name)
         return p["shots"].get(sid, {}).get(self.name)
+
+    def assign(self, p, sid, vid) -> None:
+        """把 final 阶段（变体 ``sid``）的选用指向 ``vid``。"""
+        if self.scope != "final":
+            raise studio.StudioError("只有成片阶段可以这样选用")
+        if self.name == "compose":
+            p["final"] = vid
+        else:
+            p.setdefault("finals", {})[final_key(self.name, sid)] = vid
 
     def pre_conflicts(self, w, p, sid, item) -> list[str]:
         """不论签名是否一致都要报告的冲突（例如锚点）。"""
@@ -108,6 +125,16 @@ class StageHandler:
     def conflict_labels(self, config, w, item, expected, messages) -> list[str]:
         """签名不一致时的阶段专属说明；``messages`` 是此前已收集的说明（只读）。"""
         return []
+
+
+def final_key(stage: str, variant: str | None) -> str:
+    """final 阶段的节点键与 ``p["finals"]`` 键：没有变体时为阶段名，否则为 ``阶段:变体``。"""
+    return stage if variant is None else f"{stage}:{variant}"
+
+
+def parse_final_key(key: str) -> tuple[str, str | None]:
+    stage, _, variant = key.partition(":")
+    return stage, variant or None
 
 
 REGISTRY: dict[str, StageHandler] = {}
@@ -143,10 +170,13 @@ SHOT_SOURCES: dict[str, tuple[str, ...]] = {
     "aigc_image": ("tts", "draw", "render"),
     "aigc": ("tts", "generate", "select", "render"),
     "animation": ("tts", "animate", "render"),
+    # 第三方工具：视频产物在产物内选窗对齐；图片产物（output=image）没有选片，见 TOOL_IMAGE_STAGES。
+    "tool": ("tts", "invoke", "select", "render"),
 }
+TOOL_IMAGE_STAGES = ("tts", "invoke", "render")
 # 画面阶段：每个分镜至多一个（召回素材 / 生成图片 / 生成视频 / 生成动画），在分镜工作台里统一显示在“召回”列。
 # 列操作用虚拟列名 picture 一次覆盖全部分镜各自的画面阶段（上传片段/图片的分镜没有画面阶段，不参与）。
-PICTURE_STAGES = ("recall", "draw", "generate", "animate")
+PICTURE_STAGES = ("recall", "draw", "generate", "animate", "invoke")
 PICTURE_COLUMN = "picture"
 
 
@@ -160,19 +190,32 @@ def shot_stages(content) -> tuple[str, ...]:
     source = (content or {}).get("source") or {}
     kind = source.get("kind", "recall") if isinstance(source, dict) else "recall"
     stages = SHOT_SOURCES.get(kind)
+    if kind == "tool" and source.get("output") == "image":
+        stages = TOOL_IMAGE_STAGES
     if stages is None:
         raise studio.StudioError(f"未知的镜头来源：{kind}")
     if music_cue(content):
         # 背景音乐提示点（生成/翻唱）在配音之后多一个背景音乐阶段；停止（none）与顺延的分镜没有。
         index = stages.index("tts") + 1
         stages = (*stages[:index], "music", *stages[index:])
+    if html_overlays(content):
+        # HTML 文字层：在分镜渲染之前生成透明叠加层源码（字幕引擎文字层在成片合成时烧录，没有这个阶段）。
+        index = stages.index("render")
+        stages = (*stages[:index], "overlay", *stages[index:])
     return stages
 
 
+def html_overlays(content) -> list[tuple[int, dict]]:
+    """content 中用 HTML 方式（engine=html）的文字层：``[(在 overlays 中的序号, 文字层)]``。"""
+    layers = (content or {}).get("overlays") or []
+    return [(index, layer) for index, layer in enumerate(layers)
+            if isinstance(layer, dict) and layer.get("engine") == "html"]
+
+
 def music_cue(content) -> dict | None:
-    """content 中需要生成背景音乐的提示点（kind 为 generate/cover）；没有或为停止时返回 None。"""
+    """content 中需要背景音乐阶段的提示点（kind 为 generate/cover/library）；没有或为停止时返回 None。"""
     cue = (content or {}).get("music")
-    return cue if isinstance(cue, dict) and cue.get("kind") in ("generate", "cover") else None
+    return cue if isinstance(cue, dict) and cue.get("kind") in ("generate", "cover", "library") else None
 
 
 def shot_content(w, p, sid):

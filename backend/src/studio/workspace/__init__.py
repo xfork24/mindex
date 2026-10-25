@@ -15,14 +15,20 @@ studio_api 调用 ``ws.run_build``、``ws.load``）替换本包属性；包内�
 from . import (
     handlers,  # noqa: F401 — 导入即登记全部阶段处理器
     music,
+    post,
+    publish,
     references,
     sources,
     stages,
+    transitions,
+    variants,
 )
 from .builder import CANCELLED, VersionDiagnostics, cancel_remaining, execute, recover, run_build
 from .details import compact_version, detail, recall_closure, retrieval_dependencies
 from .handlers.animate import save_manual as save_animation
-from .media_nodes import alignment, clip_alignment, compose, render_node, source_shots, validate_range
+from .handlers.overlay import save_manual as save_overlay
+from .handlers.publish import save_metadata
+from .media_nodes import alignment, clip_alignment, render_node, source_shots, validate_range
 from .persistence import load, normalize_script
 from .plans import (
     BOARD_FIELDS,
@@ -45,6 +51,7 @@ from .plans import (
     script_text,
     set_board,
 )
+from .post import compose
 from .preflight import column_nodes, node_dependencies, preflight
 from .signatures import (
     DetailContext,
@@ -118,7 +125,9 @@ __all__ = [
     "path",
     "persist",
     "plan",
+    "post",
     "preflight",
+    "publish",
     "query_media",
     "recall_closure",
     "recall_signature",
@@ -135,6 +144,8 @@ __all__ = [
     "root",
     "run_build",
     "save_animation",
+    "save_metadata",
+    "save_overlay",
     "script_stale",
     "script_text",
     "set_board",
@@ -145,7 +156,9 @@ __all__ = [
     "sources",
     "specification",
     "stages",
+    "transitions",
     "valid_files",
     "validate_range",
+    "variants",
     "version",
 ]

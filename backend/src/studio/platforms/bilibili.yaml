@@ -1,0 +1,10 @@
+# 数值核对日期：2026-10-26。来源：B 站创作中心投稿页的输入限制与公开资料；平台调整时只改这里。
+id: bilibili
+name: 哔哩哔哩
+canvas: "16:9"
+cover: {width: 1920, height: 1080, format: jpeg, max_kb: 5120}
+title: {max_chars: 80}
+description: {max_chars: 2000}
+tags: {max_count: 10, max_chars_each: 20}
+chapters: {enabled: true, min_count: 2, first_at_zero: true, min_seconds: 5}
+language: zh

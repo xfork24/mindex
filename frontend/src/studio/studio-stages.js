@@ -23,9 +23,17 @@ function renderStageDetails(body, sid, stage) {
   "muted"));
   const recallSource = shotStages(sid).includes("recall");
   const aigcSource = shotStages(sid).includes("generate");
+  const toolSource = shotStages(sid).includes("invoke");
   if (stage === "select") body.append(el("p", MindexI18n.msg(recallSource ? "ui.6ad63039cb96" :
-  aigcSource ? "ui.select_generated_help" : "ui.select_clip_help"),
+  aigcSource ? "ui.select_generated_help" : toolSource ? "ui.select_tool_help" : "ui.select_clip_help"),
   "muted"));
+  if (stage === "invoke") {
+    const help = el("p", MindexI18n.msg("ui.invoke_help"), "muted");
+    const manage = el("a", MindexI18n.msg("ui.invoke_manage"), "quiet nav-link");
+    manage.href = `/studio/tools?job=${encodeURIComponent(state.id)}`;
+    help.append(" ", manage);
+    body.append(help);
+  }
   if (stage === "generate") body.append(el("p", MindexI18n.msg("ui.generate_help"), "muted"));
   if (stage === "draw") body.append(el("p", MindexI18n.msg("ui.draw_help"), "muted"));
   if (stage === "animate") {
@@ -112,6 +120,15 @@ function renderStageDetails(body, sid, stage) {
       body.append(el("p", MindexI18n.msg("ui.generate_detail", { p0: d.task_id || "?", p1: secs(d.seconds),
         p2: secs(d.duration), p3: d.width || "?", p4: d.height || "?" }), "muted"));
       if (item.files.generated?.url) body.append(media("video", item.files.generated.url));
+    } else if (stage === "invoke") {
+      // 第三方工具产物：工具源与工具名、产物类型、来源主机与尺寸/时长；预览视频或图片。
+      const d = item.data;
+      body.append(el("p", MindexI18n.msg("ui.invoke_detail", { p0: d.tool_id || "?", p1: d.tool || "?",
+        p2: MindexI18n.msg(d.output === "image" ? "ui.invoke_output_image" : "ui.invoke_output_video"), p3: d.origin || "?" })));
+      body.append(el("p", d.output === "image" ? MindexI18n.msg("ui.draw_summary", { p0: d.width || "?", p1: d.height || "?" }) :
+        MindexI18n.msg("ui.invoke_video_detail", { p0: secs(d.duration), p1: d.width || "?", p2: d.height || "?" }), "muted"));
+      const url = item.files.artifact?.url;
+      if (url) body.append(d.output === "image" ? queryPreviewNode(url, "image") : media("video", url));
     } else if (stage === "animate") {
       // 动画源码：来源（模型生成/人工修改）、字符数与时长；沙箱 iframe 预览（严格 CSP，不含 allow-same-origin）。
       const d = item.data;
@@ -121,10 +138,10 @@ function renderStageDetails(body, sid, stage) {
       // 上传片段 / 生成画面：窗口是文件内的时间。
       const d = item.data,
         video = d.event.video;
-      body.append(el("p", MindexI18n.msg("ui.5e5e44f7ea35", { p0: MindexI18n.msg(d.generated ? "ui.source_aigc" : "ui.source_clip") })));
+      body.append(el("p", MindexI18n.msg("ui.5e5e44f7ea35", { p0: MindexI18n.msg(d.generated ? "ui.source_aigc" : d.tool ? "ui.source_tool" : "ui.source_clip") })));
       body.append(
         el("p", MindexI18n.msg("ui.select_clip_window", { p0: secs(video.start), p1: secs(video.end),
-          p2: secs((d.clip || d.generated)?.duration), p3: (d.atempo || d.event.audio.atempo).toFixed(3), p4: secs(d.freeze_seconds) }))
+          p2: secs((d.clip || d.generated || d.tool)?.duration), p3: (d.atempo || d.event.audio.atempo).toFixed(3), p4: secs(d.freeze_seconds) }))
       );
       if (d.event.warning) body.append(el("p", shortIds(d.event.warning), "warn-text"));
     } else if (stage === "select") {
@@ -185,7 +202,10 @@ function renderStageDetails(body, sid, stage) {
 
   }
   if (stage === "tts") renderMusicSection(body, sid);
-  if (stage === "render") renderMusicMaterial(body, sid);
+  if (stage === "render") {
+    renderMusicMaterial(body, sid);
+    renderPostSection(body, sid);
+  }
   const history = el("div");
   history.dataset.rowHistory = stage;
   body.append(el("h4", MindexI18n.msg("ui.a3bc41e89f3b")), history);
@@ -319,6 +339,14 @@ function renderSourceDetails(body, sid) {
 function shotCue(sid) {
   return ver(plan().shots[sid]?.content)?.data?.music || null;
 }
+// 提示点类型的显示名与说明（生成/翻唱为描述，曲库为曲名）。
+function musicKindText(cue) {
+  return MindexI18n.msg(cue?.kind === "cover" ? "ui.music_kind_cover" : cue?.kind === "library" ? "ui.music_kind_library" : "ui.music_kind_generate");
+}
+function musicCueText(cue, item) {
+  if (cue?.kind === "library") return item?.data?.title || (cue.track_id || "").slice(0, 8);
+  return cue?.prompt || "";
+}
 function musicSummary(sid) {
   const belong = state.data.shot_music?.[sid];
   if (!belong) return "";
@@ -326,15 +354,16 @@ function musicSummary(sid) {
   if (belong.start) {
     const cue = shotCue(sid);
     const item = ver(plan().shots[sid].music);
-    return MindexI18n.msg("ui.music_summary_start", { p0: MindexI18n.msg(cue?.kind === "cover" ? "ui.music_kind_cover" : "ui.music_kind_generate"),
-      p1: cue?.prompt || "", p2: item ? statusText(item.status) : MindexI18n.msg("ui.53e2db70167f") });
+    return MindexI18n.msg("ui.music_summary_start", { p0: musicKindText(cue),
+      p1: musicCueText(cue, item), p2: item ? statusText(item.status) : MindexI18n.msg("ui.53e2db70167f") });
   }
   return MindexI18n.msg("ui.music_summary_continue", { p0: order().indexOf(belong.from) + 1, p1: shortId(belong.from) });
 }
 function musicEditable(cue) {
   // 键序与 ShotMusic 字段一致。
   return { kind: cue?.kind || "", prompt: cue?.prompt ?? null, lyrics: cue?.lyrics ?? null,
-    instrumental: cue?.instrumental ?? true, audio_id: cue?.audio_id ?? null, volume: cue?.volume ?? 0.25 };
+    instrumental: cue?.instrumental ?? true, audio_id: cue?.audio_id ?? null, track_id: cue?.track_id ?? null,
+    volume: cue?.volume ?? 0.25 };
 }
 // 某分镜适用的背景音乐素材：起始提示点所在分镜（from）、提示点、已选用的音乐版本；停止或没有背景音乐时为 null / {stop}。
 function musicMaterial(sid) {
@@ -358,10 +387,11 @@ function renderMusicMaterial(body, sid) {
   if (found.stop) section.append(el("p", MindexI18n.msg("ui.music_render_stop")));else
   {
     const cue = found.cue;
-    const kind = MindexI18n.msg(cue?.kind === "cover" ? "ui.music_kind_cover" : "ui.music_kind_generate");
+    const kind = musicKindText(cue);
+    const text = musicCueText(cue, found.item);
     section.append(el("p", found.start ?
-    MindexI18n.msg("ui.music_render_start", { p0: kind, p1: cue?.prompt || "" }) :
-    MindexI18n.msg("ui.music_render_continue", { p0: order().indexOf(found.from) + 1, p1: shortId(found.from), p2: kind, p3: cue?.prompt || "" })));
+    MindexI18n.msg("ui.music_render_start", { p0: kind, p1: text }) :
+    MindexI18n.msg("ui.music_render_continue", { p0: order().indexOf(found.from) + 1, p1: shortId(found.from), p2: kind, p3: text })));
     const item = found.item;
     if (item) {
       section.append(el("p", MindexI18n.msg("ui.music_render_meta", { p0: cue?.volume ?? 0.25, p1: item.id.slice(0, 8),
@@ -391,10 +421,13 @@ function renderMusicSection(body, sid) {
   const redraw = () => {invalidatePanel(sid);renderMatrix();};
   const kind = field(MindexI18n.msg("ui.music_kind"), value.kind, "text", [
   ["", MindexI18n.msg("ui.music_kind_continue")], ["generate", MindexI18n.msg("ui.music_kind_generate")],
-  ["cover", MindexI18n.msg("ui.music_kind_cover")], ["none", MindexI18n.msg("ui.music_kind_none")]]);
+  ["cover", MindexI18n.msg("ui.music_kind_cover")], ["library", MindexI18n.msg("ui.music_kind_library")],
+  ["none", MindexI18n.msg("ui.music_kind_none")]]);
   kind.input.addEventListener("change", () => {value.kind = kind.input.value;redraw();});
   section.append(kind.wrap);
-  if (["generate", "cover"].includes(value.kind)) {
+  if (value.kind === "library") section.append(musicLibraryPicker(sid, value));
+  if (["generate", "cover", "library"].includes(value.kind)) {
+    if (value.kind !== "library") {
     const prompt = field(MindexI18n.msg(value.kind === "cover" ? "ui.music_cover_prompt" : "ui.music_prompt"), value.prompt ?? "", "textarea");
     prompt.input.rows = 2;
     prompt.input.maxLength = value.kind === "cover" ? 300 : 2000;
@@ -436,6 +469,7 @@ function renderMusicSection(body, sid) {
     if (value.kind === "cover")
     section.append(mediaSlot(sid, null, null, "audio", MindexI18n.msg("ui.music_cover_audio"), value.audio_id,
       (id) => {value.audio_id = id;}, redraw, () => state.musicDrafts.get(key) === draft));
+    }
     const volumeWrap = el("label", MindexI18n.msg("ui.music_volume", { p0: value.volume }), "form-field");
     const slider = document.createElement("input");
     slider.type = "range";
@@ -459,7 +493,13 @@ function renderMusicSection(body, sid) {
   }
   section.append(actions);
   const item = ver(plan().shots[sid].music);
-  if (item) {
+  if (item?.data?.kind === "library") {
+    section.append(el("p", MindexI18n.msg("ui.music_library_version", { p0: item.data.title || "", p1: item.data.attribution || "",
+      p2: secs(item.data.duration) }) + (item.status === "complete" ? "" : ` · ${statusText(item.status)}`),
+      item.status === "failed" ? "warn-text" : "muted"));
+    if (item.error) section.append(el("p", shortIds(MindexI18n.system(item.error)), "warn-text"));
+    if (item.files.music?.url) section.append(media("audio", item.files.music.url));
+  } else if (item) {
     const modelName = item.parameters?.music_generator?.model || MindexI18n.msg("ui.9865b5e9b32d");
     // 成功的版本不再重复写“完成”，其余状态照常显示。
     const statusPart = item.status === "complete" ? "" : ` · ${statusText(item.status)}`;
@@ -471,6 +511,60 @@ function renderMusicSection(body, sid) {
   if (shotStages(sid).includes("music")) section.append(historyCell("music", sid));
   body.append(section);
 }
+// 曲库选曲：下拉列出曲库曲目（过期曲目不可选），“按文案推荐”调用推荐接口给出本段的候选与理由。
+function musicLibraryPicker(sid, value) {
+  const box = el("div", "", "music-library-picker");
+  const pick = field(MindexI18n.msg("ui.music_library_track"), value.track_id || "", "text",
+    [["", MindexI18n.msg("ui.music_library_loading")]]);
+  pick.input.dataset.musicTrack = sid;
+  const select = pick.input;
+  const hint = el("p", "", "muted");
+  hint.setAttribute("role", "status");
+  const fill = (items, chosen) => {
+    select.replaceChildren();
+    const empty = document.createElement("option");
+    empty.value = "";
+    MindexI18n.setText(empty, MindexI18n.msg(items.length ? "ui.music_library_choose" : "ui.music_library_empty"));
+    select.append(empty);
+    for (const item of items) {
+      const option = document.createElement("option");
+      option.value = item.id;
+      option.disabled = Boolean(item.expired);
+      const bpm = item.bpm ? ` · ${Math.round(item.bpm)} BPM` : "";
+      const moods = (item.moods || []).map((key) => MindexI18n.msg(`ui.music_mood_${key}`)).join("、");
+      MindexI18n.setText(option, `${item.title}${item.artist ? ` — ${item.artist}` : ""} · ${secs(item.duration)}${bpm}${moods ? ` · ${moods}` : ""}${item.expired ? ` · ${MindexI18n.msg("ui.music_library_expired")}` : ""}`);
+      select.append(option);
+    }
+    select.value = chosen || "";
+  };
+  MindexApi.json("/api/studio/music-library").then((result) => {
+    fill(result.items, value.track_id);
+    if (value.track_id && !result.items.some((item) => item.id === value.track_id))
+    MindexI18n.setText(hint, MindexI18n.msg("ui.music_library_missing"));
+  }).catch((error) => MindexI18n.setText(hint, shortIds(error.message)));
+  select.addEventListener("change", () => {value.track_id = select.value || null;});
+  const recommend = button(MindexI18n.msg("ui.music_library_recommend"), async () => {
+    recommend.disabled = true;
+    MindexI18n.setText(hint, MindexI18n.msg("ui.music_library_recommending"));
+    try {
+      const result = await api("/api/studio/music-library/recommend", "POST", { job_id: state.id, plan_id: plan().id, shot_id: sid });
+      if (!result.items.length) {MindexI18n.setText(hint, MindexI18n.msg("ui.music_library_no_match"));return;}
+      fill(result.items, result.items[0].id);
+      value.track_id = result.items[0].id;
+      const moods = (result.moods || []).map((key) => MindexI18n.msg(`ui.music_mood_${key}`)).join("、") || "—";
+      const range = result.bpm_range ? `${result.bpm_range[0]}–${result.bpm_range[1]}` : "—";
+      MindexI18n.setText(hint, MindexI18n.msg("ui.music_library_recommended", { p0: moods, p1: range, p2: result.items[0].reasons.join("；") || "—" }));
+    } catch (error) {
+      MindexI18n.setText(hint, shortIds(error.message));
+    } finally {recommend.disabled = false;}
+  });
+  const manage = el("a", MindexI18n.msg("ui.music_library_manage"), "quiet");
+  manage.href = `/studio/music?job=${encodeURIComponent(state.id)}`;
+  const actions = el("div", "", "detail-actions");
+  actions.append(recommend, manage);
+  box.append(pick.wrap, actions, hint);
+  return box;
+}
 async function saveMusic(sid, draft) {
   if (state.drafts.get(draftKey(sid))?.dirty) throw new Error(MindexI18n.msg("ui.music_content_dirty"));
   const value = draft.data;
@@ -478,8 +572,15 @@ async function saveMusic(sid, draft) {
   const shot = shots[order().indexOf(sid)];
   if (!value.kind) delete shot.music;else
   if (value.kind === "none") shot.music = { kind: "none", prompt: null, lyrics: null, instrumental: true, audio_id: null, volume: value.volume };else
-  shot.music = { ...value, lyrics: value.kind === "cover" || value.instrumental === false ? value.lyrics : null,
-    audio_id: value.kind === "cover" ? value.audio_id : null };
+  if (value.kind === "library") {
+    if (!value.track_id) throw new Error(MindexI18n.msg("ui.music_library_pick_first"));
+    shot.music = { kind: "library", prompt: null, lyrics: null, instrumental: true, audio_id: null, track_id: value.track_id,
+      volume: value.volume };
+  } else {
+    shot.music = { ...value, lyrics: value.kind === "cover" || value.instrumental === false ? value.lyrics : null,
+      audio_id: value.kind === "cover" ? value.audio_id : null };
+    delete shot.music.track_id;
+  }
   const scope = scopeKey();
   const result = await api(planBase(), "PATCH", { revision: state.data.revision, shots });
   state.musicDrafts.delete(draftKey(sid));
@@ -620,16 +721,18 @@ function nodeInputs(stage, sid) {
   const inputs = { content: s.content };
   const present = shotStages(sid);
   if (stage === "generate" || stage === "animate") inputs.tts = s.tts || null;
-  if (stage === "draw" || stage === "music") return inputs;
+  if (stage === "draw" || stage === "music" || stage === "invoke") return inputs;
   if (stage === "select") {
     inputs.tts = s.tts || null;
     if (present.includes("generate")) inputs.generate = s.generate || null;
+    if (present.includes("invoke")) inputs.invoke = s.invoke || null;
     if (present.includes("recall") && (!plan().ranges[sid] || plan().ranges[sid].anchor_ref)) inputs.recall = s.recall || null;
   }
   if (stage === "render") {
     Object.assign(inputs, present.includes("select") ? { select: s.select || null, tts: s.tts || null } : { tts: s.tts || null });
     if (present.includes("animate")) inputs.animate = s.animate || null;
     if (present.includes("draw")) inputs.draw = s.draw || null;
+    if (present.includes("invoke") && !present.includes("select")) inputs.invoke = s.invoke || null;
   }
   return inputs;
 }

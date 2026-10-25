@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; background: transparent; }
+  #root { position: relative; overflow: hidden; background: transparent; font-family: sans-serif; }
+  .panel { position: absolute; box-sizing: border-box; opacity: 0; }
+  .title { left: 8%; right: 8%; top: 50%; text-align: center; font-weight: 700; }
+  .title .sub { display: block; font-weight: 400; margin-top: 0.4em; }
+  .lower { left: 4%; bottom: 17%; display: flex; align-items: stretch; }
+  .lower .bar { width: 0.35em; }
+  .lower .text { padding: 0.35em 0.8em; }
+  .lower .sub { display: block; font-size: 0.62em; margin-top: 0.2em; }
+  .card { right: 4%; top: 6%; min-width: 26%; padding: 0.6em 0.9em; border-radius: 0.3em; }
+  .card .head { font-weight: 700; margin-bottom: 0.35em; }
+  .card .row { display: flex; justify-content: space-between; gap: 1.2em; margin-top: 0.25em; }
+  .card .bar { height: 0.18em; margin-top: 0.15em; transform-origin: left center; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+// Mindex 内置文字叠加层：由 studio/workspace/overlays.py 注入数据，透明背景，按虚拟时钟逐帧推进。
+const DATA = /*MINDEX_DATA*/null;
+const root = document.getElementById("root");
+const W = DATA.width, H = DATA.height, S = DATA.style, SHORT = Math.min(W, H);
+root.style.width = W + "px";
+root.style.height = H + "px";
+function rgba(hex, alpha) {
+  const n = parseInt(hex.slice(1), 16);
+  return "rgba(" + (n >> 16 & 255) + "," + (n >> 8 & 255) + "," + (n & 255) + "," + alpha + ")";
+}
+function node(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text != null) n.textContent = text;
+  return n;
+}
+const panel = node("div", "panel");
+const rows = [];
+panel.style.color = S.primary;
+if (S.font) panel.style.fontFamily = S.font + ", sans-serif";
+if (DATA.kind === "title") {
+  panel.classList.add("title");
+  panel.style.fontSize = SHORT * 0.09 + "px";
+  panel.style.textShadow = "0 0 " + SHORT * 0.01 + "px rgba(0,0,0,.8)";
+  panel.append(node("span", "", DATA.title || ""));
+  if (DATA.subtitle) {
+    const sub = node("span", "sub", DATA.subtitle);
+    sub.style.fontSize = "0.5em";
+    panel.append(sub);
+  }
+} else if (DATA.kind === "lower_third") {
+  panel.classList.add("lower");
+  panel.style.fontSize = SHORT * 0.05 + "px";
+  const bar = node("div", "bar");
+  bar.style.background = S.accent;
+  const text = node("div", "text");
+  text.style.background = rgba(S.background, S.background_opacity);
+  text.append(node("span", "", DATA.title || ""));
+  if (DATA.subtitle) text.append(node("span", "sub", DATA.subtitle));
+  panel.append(bar, text);
+} else {
+  panel.classList.add("card");
+  panel.style.fontSize = SHORT * 0.042 + "px";
+  panel.style.background = rgba(S.background, S.background_opacity);
+  if (DATA.title) panel.append(node("div", "head", DATA.title));
+  const values = (DATA.items || []).map(item => parseFloat(String(item.value).replace(/[^0-9.\-]/g, "")));
+  const max = Math.max(1, ...values.filter(v => !isNaN(v)).map(Math.abs));
+  (DATA.items || []).forEach((item, i) => {
+    const row = node("div", "row");
+    const value = node("span", "", item.value);
+    value.style.color = S.accent;
+    value.style.fontWeight = "700";
+    row.append(node("span", "", item.label), value);
+    const bar = node("div", "bar");
+    bar.style.background = S.accent;
+    bar.style.width = (isNaN(values[i]) ? 0 : Math.abs(values[i]) / max * 100) + "%";
+    panel.append(row, bar);
+    rows.push(bar);
+  });
+}
+root.append(panel);
+const total = DATA.seconds * 1000, enter = Math.min(400, total / 3), leave = Math.min(300, total / 4);
+const ease = x => 1 - Math.pow(1 - Math.min(1, Math.max(0, x)), 3);
+function frame(t) {
+  const a = DATA.effect === "none" ? 1 : Math.min(ease(t / enter), ease((total - t) / leave));
+  panel.style.opacity = String(Math.max(0, a));
+  let shift = 0;
+  if (DATA.effect === "slide") shift = (1 - ease(t / enter)) * (DATA.kind === "data_card" ? 1 : -1) * W * 0.3;
+  const lift = DATA.kind === "title" ? "translateY(-50%) " : "";
+  panel.style.transform = lift + "translateX(" + shift + "px)";
+  rows.forEach((bar, i) => { bar.style.transform = "scaleX(" + ease((t - enter - i * 120) / 500) + ")"; });
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+frame(0);
+</script>
+</body>
+</html>

@@ -24,12 +24,14 @@ class RunBuild(StrictModel):
     job_id: str | None = JobId
     plan_id: str | None = PlanId
     force: bool = Field(default=False, description="true=忽略可复用版本全部重新生成（耗时且可能产生费用），默认只重建变化部分")
+    all_canvases: bool = Field(default=False, description="true=同时构建多画幅“重新渲染”导出的关联子方案（构建全部画幅）")
 
 
 async def build_plan(args: RunBuild, ctx: ToolContext):
     view = await load_view(ctx, args.job_id, args.plan_id)
     data = check(await ctx.client.get(
-        f"/api/studio/jobs/{view.job['id']}/plans/{view.plan_id}/preflight", force=str(args.force).lower()), "构建预检")
+        f"/api/studio/jobs/{view.job['id']}/plans/{view.plan_id}/preflight", force=str(args.force).lower(),
+        all_canvases=str(args.all_canvases).lower() if args.all_canvases else None), "构建预检")
     return view, data
 
 
@@ -70,8 +72,8 @@ async def run_build(args: RunBuild, ctx: ToolContext) -> ToolOutput:
         view, data = await build_plan(args, ctx)
         stored = (view.job["id"], view.plan_id, data["token"])
     job, pid, token = stored
-    build = check(await ctx.client.post(f"/api/studio/jobs/{job}/plans/{pid}/build", {"token": token, "force": args.force}),
-                  "提交构建")
+    body = {"token": token, "force": args.force, **({"all_canvases": True} if args.all_canvases else {})}
+    build = check(await ctx.client.post(f"/api/studio/jobs/{job}/plans/{pid}/build", body), "提交构建")
     target = {"job_id": job, "build_id": build["id"], "plan_id": pid}
     return ToolOutput({"build_id": build["id"], "nodes": len(build["nodes"])},
                       text=f"已提交构建 {build['id']}（{len(build['nodes'])} 个节点）。系统会跟踪进度，结束后通知你总结。",
@@ -82,8 +84,10 @@ async def run_build(args: RunBuild, ctx: ToolContext) -> ToolOutput:
 class RunNode(StrictModel):
     job_id: str | None = JobId
     plan_id: str | None = PlanId
-    stage: Literal["script", "split", "recall", "tts", "music", "draw", "generate", "animate", "select", "render"] = Field(
+    stage: Literal["script", "split", "recall", "tts", "music", "draw", "generate", "animate", "select", "overlay",
+                   "render"] = Field(
         description="script=按大纲生成文案；split=按文案重新拆分镜；其余为单个分镜的阶段"
+                    "（overlay=含 HTML 文字层分镜的叠加层源码，force=false 时保留人工修改）"
                     "（music=背景音乐提示点分镜的背景音乐，会调用音乐生成服务；draw=aigc_image 分镜的生成图片，会调用图片生成服务；"
                     "generate=aigc 分镜的生成画面，会调用视频生成服务；animate=animation 分镜的生成动画，"
                     "调用动画生成模型重写动画源码，force=false 时保留人工修改的源码）")
@@ -145,7 +149,7 @@ async def node_body(args: RunNode, ctx: ToolContext):
             raise ToolError(f"分镜 {short(sid)} 的画面来源不是 aigc_image，没有生成图片阶段；可先用 edit_shots 把来源设为 aigc_image",
                             code="invalid_stage")
         music = (view.content(sid) or {}).get("music") or {}
-        if args.stage == "music" and music.get("kind") not in ("generate", "cover"):
+        if args.stage == "music" and music.get("kind") not in ("generate", "cover", "library"):
             raise ToolError(f"分镜 {short(sid)} 没有背景音乐提示点（生成/翻唱）；可先用 edit_shots 设置 music",
                             code="invalid_stage")
         if args.stage == "animate" and kind != "animation":

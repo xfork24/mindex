@@ -39,3 +39,7 @@
 .template-card{padding:4px 14px 16px}
 .template-title-row .head-actions{margin-left:0}
 }
+/* 品牌模板页 */
+.brand-section{margin-top:16px;border-top:1px solid var(--line);padding-top:12px}
+.brand-asset{margin:8px 0}
+.brand-preview{display:block;max-width:320px;max-height:180px;margin:6px 0;background:repeating-conic-gradient(#ddd 0 25%,#fff 0 50%) 0 0/16px 16px}

@@ -6,13 +6,15 @@ import copy
 from typing import Literal
 from uuid import uuid4
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_serializer, model_validator
 
 from mindex.shared.config import StrictModel
 from mindex.shared.types import SCRIPT_TEMPLATE_ID
 from mindex.studio import studio
+from mindex.studio.brands import BRAND_ID, BrandOverrides
 
-from .stages import shot_stages
+from .publish import PublishOptions
+from .stages import handler, names, shot_stages
 from .versions import add_version, plan, version
 
 
@@ -25,6 +27,24 @@ class ReferenceRef(StrictModel):
 
 
 DEFAULT_CANVAS = ("16:9", "pad")
+
+
+class ExportSpec(StrictModel):
+    """多画幅导出：derive 由主成片裁切或加边快速派生；rerender 用关联子方案按该画幅重新渲染（画质更好、耗时更长）。"""
+
+    canvas: Literal["16:9", "9:16", "1:1"]
+    fit: Literal["pad", "crop"] = "crop"
+    mode: Literal["derive", "rerender"] = "derive"
+
+
+class BeatAlign(StrictModel):
+    """节拍对齐：成片合成时把背景音乐段落内的切点推迟到 ``tolerance`` 秒内最近的节拍（画面用尾部余量补足，
+    配音补静音）。开启后分镜渲染多留 ``tolerance`` 秒余量。"""
+
+    tolerance: float = Field(default=0.25, ge=0.04, le=1.0, allow_inf_nan=False)
+
+
+OPTIONAL_OPTIONS = ("subtitle_style", "brand_id", "brand_overrides", "exports", "publish", "beat_align")
 
 
 class PlanOptions(StrictModel):
@@ -43,6 +63,48 @@ class PlanOptions(StrictModel):
     # 画幅与适配方式：没有这两个键的旧方案等价 16:9 + pad。
     canvas: Literal["16:9", "9:16", "1:1"] = "16:9"
     fit: Literal["pad", "crop"] = "pad"
+    # 字幕样式模板（烧录字幕时生效，workspace/ass.py）：None = 沿用 studio.subtitle 的字体与字号（旧版样式）。
+    subtitle_style: Literal["classic", "outline", "box", "highlight"] | None = None
+    # 品牌模板（studio/brands.py）与方案覆盖：都没有时成片与旧版一致。存在性由 API 校验。
+    brand_id: str | None = Field(default=None, pattern=BRAND_ID)
+    brand_overrides: BrandOverrides | None = None
+    # 多画幅导出（每个画幅至多一项，不含方案自身画幅）：None/空 = 不导出。
+    exports: list[ExportSpec] | None = Field(default=None, max_length=2)
+    # 平台发布（封面、发布元数据与发布包，workspace/publish.py）：None = 不发布。
+    publish: PublishOptions | None = None
+    # 节拍对齐（workspace/post.py）：None = 关闭，切点与旧版一致。
+    beat_align: BeatAlign | None = None
+
+    @field_validator("exports", mode="after")
+    @classmethod
+    def _unique_exports(cls, value):
+        if not value:
+            return None
+        canvases = [item.canvas for item in value]
+        if len(set(canvases)) != len(canvases):
+            raise ValueError("每个画幅只能导出一次")
+        return value
+
+    @model_serializer(mode="wrap")
+    def _omit_new_defaults(self, handler):
+        # M3 新增的方案参数为 None 时不落键：旧方案与新建方案的 options（及方案 revision）与之前逐字节一致。
+        data = handler(self)
+        if isinstance(data, dict):
+            for key in OPTIONAL_OPTIONS:
+                if data.get(key) is None:
+                    data.pop(key, None)
+        return data
+
+    @model_validator(mode="after")
+    def _exports_differ(self):
+        if self.exports and any(item.canvas == self.canvas for item in self.exports):
+            raise ValueError("导出画幅不能与方案画幅相同")
+        return self
+
+    @field_validator("brand_overrides", mode="after")
+    @classmethod
+    def _empty_overrides(cls, value):
+        return None if value is not None and value.empty else value
 
     @model_validator(mode="before")
     @classmethod
@@ -116,6 +178,12 @@ def remove_plan(w, plan_id):
     plan(w, plan_id)
     if len(w["plans"]) == 1:
         raise studio.StudioError("至少保留一个方案")
+    link = w["plans"][plan_id].get("variant_of") or {}
+    parent = w["plans"].get(link.get("plan"))
+    if parent and any(item.get("canvas") == link.get("canvas") and item.get("mode") == "rerender"
+                      for item in parent["options"].get("exports") or []):
+        raise studio.StudioError(f"这是方案「{parent['name']}」{link['canvas']} 画幅重新渲染的子方案；"
+                                 "请先在主方案取消该画幅的重新渲染导出")
     w["plans"].pop(plan_id)
     if w["active_plan"] == plan_id:
         w["active_plan"] = max(w["plans"].values(), key=lambda p: p.get("created_at") or "")["id"]
@@ -253,8 +321,8 @@ def choose(w, p, stage, sid, vid):
     item = version(w, vid)
     if item["status"] != "complete" or item["stage"] != stage or item["shot_id"] != sid:
         raise studio.StudioError("只能选用属于此阶段和分镜的成功版本")
-    if stage == "compose":
-        p["final"] = vid
+    if stage in names(scope="final"):
+        handler(stage).assign(p, sid, vid)
     elif stage == "script":
         # 选用新的文案版本：若现有分镜不是从它拆出的，分镜工作台立即清空
         # （该版本文案尚未处理）。整体构建会紧接着重新拆分镜；切回旧版本由

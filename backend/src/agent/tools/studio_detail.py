@@ -296,7 +296,7 @@ async def preview_version(args: PreviewVersion, ctx: ToolContext) -> ToolOutput:
 
 # ------------------------------------------------------------ 整列执行 / 重做
 class RunColumn(StrictModel):
-    stage: Literal["recall", "tts", "music", "draw", "generate", "animate", "select", "render"] = Field(
+    stage: Literal["recall", "tts", "music", "draw", "generate", "animate", "select", "overlay", "render"] = Field(
         description="要整列执行的阶段：召回/配音/背景音乐（仅背景音乐提示点分镜）/生成图片（仅 aigc_image 分镜）/"
                     "生成画面（仅 aigc 分镜）/生成动画（仅 animation 分镜）/选片/渲染")
     force: bool = Field(

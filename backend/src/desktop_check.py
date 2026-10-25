@@ -60,6 +60,14 @@ def run(work: Path) -> dict:
     from mindex.topics.sources import calendar
 
     report["topic_samples"] = sum(item["events"] > 0 for item in calendar.sample_list())
+    from mindex.studio import brands
+    from mindex.studio.workspace.handlers import overlay
+
+    report["brands"] = len(brands.builtins())
+    report["overlay_template"] = overlay.TEMPLATE.is_file()
+    from mindex.studio import platforms
+
+    report["platforms"] = len(platforms.presets())
     report["align_worker"] = Path(pipeline.__file__).with_name("align_worker.py").is_file()
     report["source_hashes"] = {
         "mindex/models/llama_cpp.py": content_hash(Path(llama_cpp.__file__)),
@@ -80,6 +88,110 @@ def subtitles(work: Path, font_file: Path) -> dict:
     return {"subtitles": True, "ffmpeg": ffmpeg_bin()}
 
 
+def post(work: Path) -> dict:
+    """成片后期（M3）在冻结环境里的 ffmpeg 路径：镜内转场、重叠转场（xfade）与水印叠加，都经 shared/media。"""
+    from types import SimpleNamespace
+
+    from PIL import Image
+
+    from mindex.shared.media import atomic_media, command, ffprobe_bin
+    from mindex.studio.studio_render import apply_edges, watermark_graph
+
+    render = SimpleNamespace(width=160, height=90, fps=25, preset="ultrafast", crf=28)
+    clips = []
+    for index, color in enumerate(("red", "blue")):
+        target = work / f"post-{index}.mp4"
+        atomic_media(["-f", "lavfi", "-i", f"color=c={color}:s=160x90:r=25:d=1", "-c:v", "libx264", "-preset",
+                      "ultrafast", "-pix_fmt", "yuv420p"], target)
+        clips.append(target)
+    edged = work / "post-edged.mp4"
+    apply_edges(clips[0], edged, render, frames=25, enter={"kind": "fade", "duration": 0.3},
+                leave={"kind": "slide", "duration": 0.3})
+    joined = work / "post-xfade.mp4"
+    atomic_media(["-i", str(edged), "-i", str(clips[1]), "-filter_complex",
+                  "[0:v][1:v]xfade=transition=dissolve:duration=0.2:offset=0.8[v]", "-map", "[v]", "-c:v", "libx264",
+                  "-preset", "ultrafast", "-pix_fmt", "yuv420p"], joined)
+    logo = work / "logo.png"
+    Image.new("RGBA", (20, 20), (255, 255, 255, 255)).save(logo)
+    marked = work / "post-watermark.mp4"
+    atomic_media(["-i", str(joined), "-vf", watermark_graph(logo, {"position": "bottom-left"}, 160, 90), "-c:v",
+                  "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p"], marked)
+    frames = command([ffprobe_bin(), "-v", "error", "-count_frames", "-select_streams", "v:0", "-show_entries",
+                      "stream=nb_read_frames", "-of", "csv=p=0", str(marked)]).decode().strip()
+    return {"post": frames == "45", "post_frames": frames}
+
+
+def extensions(work: Path) -> dict:
+    """扩展能力（M3 第三期）在冻结环境里的路径：曲目节奏分析（numpy + ffmpeg 解码）、HTTP 工具适配器
+    （本机替身服务：提交 → 产物下载 → 图片校验），以及随包的 mcp 客户端组件可导入。"""
+    import io
+    import math
+    import struct
+    import threading
+    import wave
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    from PIL import Image
+
+    from mindex.studio import beats
+    from mindex.studio.tools import adapter, artifacts
+    from mindex.studio.tools.mcp import unavailable
+
+    rate, bpm = 22050, 120
+    samples = [0.0] * (rate * 6)
+    for beat in range(12):
+        start = int(beat * 60 / bpm * rate)
+        for i in range(400):
+            samples[start + i] += math.sin(2 * math.pi * 1000 * i / rate) * math.exp(-i / 90)
+    metronome = work / "metronome.wav"
+    with wave.open(str(metronome), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(rate)
+        handle.writeframes(b"".join(struct.pack("<h", int(max(-1.0, min(1.0, value)) * 20000)) for value in samples))
+    found = beats.analyze(metronome)
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (64, 36), (30, 120, 200)).save(buffer, "PNG")
+    picture = buffer.getvalue()
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def reply(self, body: bytes, kind: str):
+            self.send_response(200)
+            self.send_header("Content-Type", kind)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_POST(self):
+            self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            self.reply(json.dumps({"status": "succeeded", "output": {"url": "/still.png"}}).encode(), "application/json")
+
+        def do_GET(self):
+            self.reply(picture, "image/png")
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        base = f"http://127.0.0.1:{server.server_address[1]}"
+        record = {"protocol": "http", "secrets": {}, "artifact_hosts": [],
+                  "connection": {"base_url": base, "headers": {}, "submit_path": "/tools/{tool}/jobs", "poll_path": None,
+                                 "poll_interval": 1, "id_field": "id", "status_field": "status", "done": ["succeeded"],
+                                 "failed": ["failed"], "result_field": "output.url", "error_field": "error"}}
+        produced, _ = adapter(record).call("still", {}, [], timeout=30)
+        raw = artifacts.download(produced[0], work / "tool.bin", hosts={base.split("//", 1)[1]}, max_bytes=1 << 20,
+                                 timeout=30)
+        _, info = artifacts.normalize(raw, work, "image", 1_000_000)
+    finally:
+        server.shutdown()
+        server.server_close()
+    return {"beats": abs(found["bpm"] - bpm) / bpm <= 0.02, "beats_bpm": found["bpm"],
+            "tool_http": info == {"width": 64, "height": 36}, "mcp_client": unavailable() is None}
+
+
 def animation(work: Path) -> dict:
     """录制一段 0.4 秒的 AI 动画（需要已安装 Chromium headless shell，位置取 PLAYWRIGHT_BROWSERS_PATH）。"""
     from mindex.shared.media import probe
@@ -90,7 +202,16 @@ def animation(work: Path) -> dict:
             "requestAnimationFrame(f)})</script></body></html>")
     target = work / "animation.mp4"
     stats = capture(html, seconds=0.4, width=160, height=90, fps=10, target=target, max_seconds=120)
-    return {"animation": probe(target)["duration"] > 0.3, "animation_frames": stats.get("frames")}
+    # HTML 文字层：透明录制为 argb MOV。
+    from mindex.shared.media import command, ffprobe_bin
+
+    layer = work / "overlay.mov"
+    capture(html.replace("background:#123", "background:transparent"), seconds=0.4, width=160, height=90, fps=10,
+            target=layer, max_seconds=120, transparent=True)
+    pix = command([ffprobe_bin(), "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=pix_fmt", "-of",
+                   "csv=p=0", str(layer)]).decode().strip()
+    return {"animation": probe(target)["duration"] > 0.3, "animation_frames": stats.get("frames"),
+            "overlay_alpha": pix == "argb"}
 
 
 BENCH_HTML = ("<html><body style='margin:0;background:#123'><div id=b style='width:80px;height:80px;background:#fc0'>"
@@ -124,6 +245,8 @@ def main() -> None:
     work = Path(args[0])
     work.mkdir(parents=True, exist_ok=True)
     report = run(work)
+    report.update(post(work))
+    report.update(extensions(work))
     if len(args) == 2:
         report.update(subtitles(work, Path(args[1])))
     if record_animation:

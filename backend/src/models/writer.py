@@ -48,6 +48,11 @@ class QwenWriter:
         self.config = config
         self.profile = config.studio.writer
 
+    def complete(self, instructions: str, text: str) -> str:
+        """单轮补全（发布元数据等结构化输出用），温度 0.4；返回模型原文。"""
+        return chat_completion(self.profile, [{"type": "text", "text": text}], instructions, temperature=0.4,
+                               service="文案服务", config_path="studio.writer")
+
     def write(
         self,
         outline: str,

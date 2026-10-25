@@ -4,12 +4,15 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from mindex.shared.config import StrictModel
 from mindex.shared.storage import Store
 from mindex.studio import studio
 from mindex.studio import workspace as workspace
+from mindex.studio.brands import BrandClip, BrandOverrides, Watermark  # noqa: F401 — 请求模型对外接口（智能助手）
+from mindex.studio.post_styles import OverlayStyle, SubtitleStyle  # noqa: F401 — 同上
+from mindex.studio.tools.registry import HttpConfig, McpHttpConfig, StdioConfig, ToolEntry  # noqa: F401 — 同上
 from mindex.studio.workspace import stages as stage_registry
 
 # 阶段取值由注册表生成（导入时固定）；顺序与取值同注册顺序：plan → shot → final。
@@ -49,6 +52,14 @@ class ShotBody(StrictModel):
     visual: str | None = None
     source: studio.ShotSource | None = None  # 画面来源；None/recall = 素材召回
     music: studio.ShotMusic | None = None  # 背景音乐提示点；None = 顺延前面分镜
+    transition: studio.ShotTransition | None = None  # 转场；None = 硬切
+    highlights: list[str] | None = None  # 字幕高亮词（烧录 ASS 字幕时生效）
+    overlays: list[studio.ShotOverlay] | None = Field(default=None, max_length=studio.OVERLAY_LIMIT)  # 文字层
+
+    @field_validator("highlights", mode="before")
+    @classmethod
+    def _highlights(cls, value):
+        return studio.normalize_highlights(value)
 
 
 def validate_recall_references(config, store: Store, job_id, shots):
@@ -92,6 +103,11 @@ def validate_source_references(config, job_id, shots):
         source = shot.source
         if source is None or source.kind in ("recall", "animation"):
             continue
+        if source.kind == "tool":
+            uploads = [item.model_dump() for item in source.uploads or []]
+            if workspace.sources.missing_reference(config, job_id, {"references": uploads}):
+                raise studio.StudioError(f"第 {index} 个分镜的工具上传素材缺失或类型不符，请先上传素材")
+            continue
         if source.kind in ("aigc", "aigc_image"):
             reason = workspace.sources.missing_reference(config, job_id, source.model_dump())
             if reason:
@@ -111,6 +127,24 @@ class AnimationBody(StrictModel):
     revision: str
     html: str = Field(min_length=1, max_length=10_000_000)
     dry_run: bool = False  # 只做静态校验并返回结果，不写版本（智能助手预览用）
+
+
+class OverlaySourceBody(StrictModel):
+    """人工保存某个 HTML 文字层的叠加层源码（整份替换）：经静态校验后成为该分镜选用的人工叠加层版本。"""
+
+    revision: str
+    index: int = Field(ge=0, le=3)
+    html: str = Field(min_length=1, max_length=10_000_000)
+    dry_run: bool = False
+
+
+class MetadataBody(StrictModel):
+    """人工修改发布元数据：只填要改的字段；简介只写正文，章节、音乐署名与话题由系统附加。"""
+
+    revision: str
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=10000)
+    tags: list[str] | None = Field(default=None, max_length=50)
 
 
 class StoryboardBody(StrictModel):
@@ -210,6 +244,7 @@ class VersionChoiceBody(StrictModel):
 class BuildBody(StrictModel):
     token: str
     force: bool = False
+    all_canvases: bool = False  # 同时构建多画幅重新渲染的关联子方案（预检须用 ?all_canvases=true）
 
 
 class NodeBody(StrictModel):

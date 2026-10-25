@@ -170,8 +170,10 @@ function stageSummaryNodes(sid, stage) {
       MindexI18n.msg("ui.generate_summary", { p0: secs(d.duration), p1: d.polls ?? "?" }) :
       stage === "animate" ?
       MindexI18n.msg(d.origin === "manual" ? "ui.animate_summary_manual" : "ui.animate_summary", { p0: d.chars ?? "?", p1: secs(d.seconds) }) :
+      stage === "invoke" ?
+      MindexI18n.msg("ui.invoke_summary", { p0: d.tool || "?", p1: d.output === "image" ? `${d.width || "?"}×${d.height || "?"}` : secs(d.duration) }) :
       stage === "select" ?
-      `${d.event.video.kind === "file" ? MindexI18n.msg(d.generated ? "ui.source_aigc" : "ui.source_clip") : sourceName(d.event.video.source_id, d.event.video.source_name)} ${secs(d.event.video.start)}–${secs(d.event.video.end)}` : MindexI18n.msg("ui.a8e554e0bc5a", { p0:
+      `${d.event.video.kind === "file" ? MindexI18n.msg(d.generated ? "ui.source_aigc" : d.tool ? "ui.source_tool" : "ui.source_clip") : sourceName(d.event.video.source_id, d.event.video.source_name)} ${secs(d.event.video.start)}–${secs(d.event.video.end)}` : MindexI18n.msg("ui.a8e554e0bc5a", { p0:
         d.frames || "?", p1: d.fps || "?" });
       nodes.push(el("span", summary, "cell-summary"));
     }
@@ -180,6 +182,10 @@ function stageSummaryNodes(sid, stage) {
     // 背景音乐显示在配音列（提示点、顺延或停止），分镜渲染列同样标出本镜适用的背景音乐。
     const line = musicSummary(sid);
     if (line) nodes.push(el("span", line, "cell-summary music-summary"));
+  }
+  if (stage === "render") {
+    const line = transitionSummary(sid);
+    if (line) nodes.push(el("span", line, "cell-summary post-summary"));
   }
   const messages = state.data.conflicts[`${stage}:${sid}`] || [];
   if (messages.length)
@@ -467,7 +473,8 @@ function renderStagePanel() {
   stage === "content" ? ids : null,
   stage === "tts" ? [state.data.tts_settings, plan().shots[sid].content, plan().shots[sid].music,
   state.data.shot_music?.[sid], latestNode("music", sid)] : null,
-  stage === "render" ? musicMaterialKey(sid) : null,
+  stage === "render" ? [musicMaterialKey(sid), plan().shots[sid].content, plan().shots[sid].render,
+  plan().shots[sid].overlay, latestNode("overlay", sid)] : null,
   stage === "select" ? state.data.revision : null,
   stage === "source" ? plan().shots[sid].content : null,
   ["recall", "select"].includes(stage) ? [plan().anchors?.[sid], plan().shots[sid].recall, plan().shots[sid].tts, plan().ranges[sid]] : null]
@@ -681,6 +688,9 @@ function cardMediaSpec(sid, stage) {
   if (stage === "render") return files.preview?.url || files.video?.url ?
   { key: [stage, item.id], build: (box) => box.replaceChildren(renderPreviewVideo(item)) } : null;
   if (stage === "generate") return video(files.generated?.url) || null;
+  if (stage === "invoke") return item.data.output === "image" ?
+  files.artifact?.url ? { key: [stage, item.id], build: (box) => box.replaceChildren(cardImage(files.artifact.url, LABEL.invoke)) } : null :
+  video(files.artifact?.url) || null;
   if (stage === "draw") return files.image?.url ? { key: [stage, item.id], build: (box) => box.replaceChildren(cardImage(files.image.url, LABEL.draw)) } : null;
   if (stage === "recall") {
     const thumbs = (item.data.results || []).filter((c) => c.thumbnail_url).slice(0, 3);
@@ -699,7 +709,8 @@ function selectMediaSpec(sid, item) {
   const shot = plan().shots[sid],
     range = item.data.event.video;
   if (range.kind === "file") {
-    const generated = shotStages(sid).includes("generate") ? ver(shot.generate)?.files?.generated?.url : null;
+    const generated = shotStages(sid).includes("generate") ? ver(shot.generate)?.files?.generated?.url :
+    shotStages(sid).includes("invoke") ? ver(shot.invoke)?.files?.artifact?.url : null;
     const mediaId = ver(shot.content)?.data?.source?.media_id;
     return { key: ["select-file", item.id, generated, mediaId], build: (box) => (generated ? Promise.resolve(generated) : inputUrl(mediaId)).then((url) => {
         if (!url || !box.isConnected) return;

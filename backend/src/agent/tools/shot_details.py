@@ -101,6 +101,8 @@ def music_info(view: PlanView, sid: str) -> dict | None:
         info["continues"] = short(belong["from"])
     if cue and cue.get("kind") in ("generate", "cover"):
         info["generated"] = _version_info(view, sid, "music", ("duration", "prompt"))
+    elif cue and cue.get("kind") == "library":
+        info["library"] = _version_info(view, sid, "music", ("duration", "title", "attribution"))
     return info
 
 

@@ -1,12 +1,12 @@
 /* 创作页 · 常量、全局状态、通用 DOM/请求/对话框工具。按 studio.html 中的顺序以经典脚本加载，顶层声明共享全局作用域。 */
 "use strict";
 // 全部逐镜阶段（后端注册顺序）；draw（生成图片）只属于 AI 生成图片来源，generate（生成画面）只属于 AI 生成视频来源，
-// animate（生成动画）只属于 AI 动画来源；music（背景音乐）只属于背景音乐提示点分镜，显示在配音列里而不单独成列。
-const STAGES = ["recall", "tts", "music", "draw", "generate", "animate", "select", "render"];
+// animate（生成动画）只属于 AI 动画来源，invoke（调用第三方工具）只属于第三方工具来源；music（背景音乐）只属于背景音乐提示点分镜，显示在配音列里而不单独成列。
+const STAGES = ["recall", "tts", "music", "draw", "generate", "animate", "invoke", "select", "render"];
 const RECALL_STAGES = ["recall", "tts", "select", "render"];
 // 画面阶段：每个分镜至多一个，统一显示在“召回”列（后端 stages.PICTURE_STAGES）；列操作用虚拟列名 picture。
 // 上传片段/图片的分镜没有画面阶段，该列显示上传的素材（虚拟阶段 source，只预览，不执行）。
-const PICTURE_STAGES = ["recall", "draw", "generate", "animate"];
+const PICTURE_STAGES = ["recall", "draw", "generate", "animate", "invoke"];
 const PICTURE_COLUMN = "picture";
 // 分镜按画面来源实际包含的逐镜阶段（后端 detail().shot_stages）；缺省为素材召回的四个阶段。
 function shotStages(sid) {
@@ -114,9 +114,15 @@ const LABEL = {
   draw: MindexI18n.msg("ui.draw_stage_label"),
   generate: MindexI18n.msg("ui.generate_stage_label"),
   animate: MindexI18n.msg("ui.animate_stage_label"),
+  invoke: MindexI18n.msg("ui.invoke_stage_label"),
+  overlay: MindexI18n.msg("ui.overlay_stage_label"),
   select: MindexI18n.msg("ui.7a88bdc950ad"),
   render: MindexI18n.msg("ui.d458415b7971"),
-  compose: MindexI18n.msg("ui.47badcfc4cad")
+  compose: MindexI18n.msg("ui.47badcfc4cad"),
+  export: MindexI18n.msg("ui.export_stage_label"),
+  metadata: MindexI18n.msg("ui.metadata_stage_label"),
+  cover: MindexI18n.msg("ui.cover_stage_label"),
+  package: MindexI18n.msg("ui.package_stage_label")
 };
 // 与检索页（index.html）一致的检索粒度选项文案。
 const GRANULARITY_LABEL = {

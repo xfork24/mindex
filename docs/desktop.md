@@ -67,7 +67,7 @@ scripts/build-desktop-mac.sh            # ffmpeg（缺失时从源码编译）�
 |---|---|
 | `scripts/build-desktop-ffmpeg.sh` | 从固定版本与 sha256 的源码编译 ffmpeg（约 3 分钟） |
 | `scripts/build-desktop-sidecar.sh` | 在独立环境中冻结后端到 `desktop/build/backend/` |
-| `python scripts/check-desktop-sidecar.py [--isolated-path --ffmpeg-dir … --font … --animation]` | 冻结后端冒烟：自检、package-data、`-m` 分发、prepare、serve、字幕烧录、动画录制 |
+| `python scripts/check-desktop-sidecar.py [--isolated-path --ffmpeg-dir … --font … --animation]` | 冻结后端冒烟：自检（含品牌模板、叠加层模板与成片后期的转场、水印 ffmpeg 路径，曲目节奏分析、HTTP 工具替身调用与随包 mcp 客户端）、package-data、`-m` 分发、prepare、serve（含 `/studio/brands`、`/studio/music`、`/studio/tools` 与 `mindex studio --url` 连接）、字幕烧录、动画录制（含 HTML 文字层的透明录制） |
 | `cd desktop && npm start` | 开发模式：外壳以 `uv run mindex` 运行仓库后端；`MINDEX_DESKTOP_BACKEND=frozen` 改用已构建的冻结后端 |
 | `node tests/desktop_smoke.cjs` | Electron 冒烟（`MINDEX_SMOKE_APP=/Applications/Mindex.app/Contents/MacOS/Mindex` 针对已安装应用） |
 | `uv run python scripts/desktop-bench.py` | 与同机 Web 版的性能对比 |
@@ -90,6 +90,8 @@ scripts/build-desktop-mac.sh            # ffmpeg（缺失时从源码编译）�
 - ffmpeg/ffprobe 调用一律经 `shared/media.py` 的 `command()`、`ffmpeg_bin()`、`ffprobe_bin()`。
 - 以自身源码哈希作指纹的模块须登记在 `desktop/sidecar/mindex.spec` 的 `SOURCE_MODULES`（`tests/test_desktop_frozen.py` 检查）；只经 `mindex -m` 运行的入口加进 `hiddenimports`。
 - 新增 package-data 后运行 `check-desktop-sidecar.py`，它会核对 pyproject 声明的文件都已打包。
+- 成片后期（转场、字幕样式、文字层、品牌模板、片头片尾、水印）全部在后端实现，页面与 Web 版共用；页面不使用 `window.prompt`（Electron 不支持），文件选择与下载用标准文件输入和 `Content-Disposition`。HTML 文字层依赖可选的动画录制组件，未安装时分镜渲染在预检阶段阻塞并提示安装。
+- 曲库分析是纯 numpy（经随包 ffmpeg 解码），桌面版无需额外组件；曲目文件在用户数据目录的 `music/` 下。第三方工具的 MCP 客户端随包（`mcp` extra）；`mcp-stdio` 工具源必须登记命令的绝对路径，环境变量只在最小默认环境上追加，不依赖 GUI 应用的 PATH。
 
 ## 已知限制
 

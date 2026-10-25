@@ -17,18 +17,23 @@ def build_registry() -> ToolRegistry:
         search,
         settings_tools,
         studio_animation,
+        studio_brands,
         studio_build,
+        studio_delivery,
         studio_detail,
+        studio_music,
+        studio_overlays,
         studio_read,
         studio_templates,
+        studio_tools,
         studio_write,
         topics,
     )
 
     registry = ToolRegistry()
-    for module in (meta, navigate, studio_read, studio_templates, studio_write, studio_build, studio_detail,
-                   studio_animation, library, library_tasks, search, index, persons, persons_review, settings_tools,
-                   topics):
+    for module in (meta, navigate, studio_read, studio_templates, studio_brands, studio_delivery, studio_write,
+                   studio_build, studio_detail, studio_animation, studio_overlays, studio_music, studio_tools, library,
+                   library_tasks, search, index, persons, persons_review, settings_tools, topics):
         for spec in module.specs():
             registry.add(spec)
     return registry

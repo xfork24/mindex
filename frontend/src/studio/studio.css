@@ -360,6 +360,18 @@ textarea.code-editor { width: 100%; min-height: 360px; font-family: ui-monospace
 .render-preview{position:relative;display:block;min-width:0}
 .render-subtitle{position:absolute;box-sizing:border-box;padding:0 6%;text-align:center;color:#fff;line-height:1.35;font-weight:500;white-space:pre-line;overflow-wrap:anywhere;text-shadow:0 0 2px #000,0 1px 3px #000,0 0 6px #000c;pointer-events:none}
 .render-subtitle[hidden]{display:none}
+/* 分镜后期（转场等）：类型与时长并排，窄屏换行。 */
+.post-editor{margin-top:12px}
+.post-row{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:flex-end}
+.post-row .form-field{margin:0;flex:1 1 180px;min-width:0}
+.post-row .form-field:last-child{flex:0 1 120px}
+.overlay-editor{margin-top:10px}
+.overlay-item{border:1px solid var(--line,#ddd);border-radius:6px;padding:8px;margin:8px 0}
+.cover-candidates{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
+.cover-candidate{display:flex;flex-direction:column;align-items:center;padding:4px}
+.cover-candidate img{width:128px;height:auto;display:block}
+.publish-result{border-top:1px solid var(--line);margin-top:12px;padding-top:8px}
+.publish-cover{display:block;max-width:320px;height:auto;margin:6px 0}
 
 /* 从选题创建的任务：来源选题与账号档案快照（/studio/topics） */
 .job-topic{border:1px solid #d6e3cf;background:#f4f8f0;border-radius:10px;padding:8px 12px;margin:0 0 12px;font-size:12px}

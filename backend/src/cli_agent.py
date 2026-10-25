@@ -21,7 +21,7 @@ app = typer.Typer(
 @app.command("tools")
 def agent_tools(
     domain: Annotated[
-        list[str] | None, typer.Option(help="只列出指定领域，可重复：meta/studio/studio_detail/library/search/index/persons/settings/topics。")
+        list[str] | None, typer.Option(help="只列出指定领域，可重复：meta/studio/studio_detail/studio_post/library/search/index/persons/settings/topics。")
     ] = None,
     names_only: Annotated[bool, typer.Option("--names-only", help="只输出工具名、风险级别与领域。")] = False,
 ):
@@ -60,7 +60,7 @@ def mcp_command(
     ] = None,
     domain: Annotated[
         list[str] | None,
-        typer.Option(help="只导出指定领域的工具，可重复：studio/studio_detail/library/search/index/persons/settings/topics；"
+        typer.Option(help="只导出指定领域的工具，可重复：studio/studio_detail/studio_post/library/search/index/persons/settings/topics；"
                      "覆盖 agent.mcp.domains，省略使用配置值（未配置则全部导出）。report_capability_gap 始终导出。"),
     ] = None,
 ):

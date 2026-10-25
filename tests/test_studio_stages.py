@@ -12,22 +12,24 @@ from mindex.studio import workspace as ws
 from mindex.studio.workspace import stages
 
 
-def test_registry_lists_exactly_the_nine_stages_in_order():
-    assert list(ws.REGISTRY) == ["script", "split", "recall", "tts", "music", "draw", "generate", "animate", "select",
-                                 "render", "compose"]
+def test_registry_lists_exactly_the_stages_in_order():
+    assert list(ws.REGISTRY) == ["script", "split", "recall", "tts", "music", "draw", "generate", "animate", "invoke",
+                                 "select", "overlay", "render", "compose", "export", "metadata", "cover", "package"]
     for name, item in ws.REGISTRY.items():
         assert isinstance(item, ws.StageHandler)
         assert item.name == name and item.label
         assert item.scope in ("plan", "shot", "final")
     assert stages.names(scope="plan") == ("script", "split")
     # 逐镜阶段按注册顺序；generate 只属于 aigc 来源、animate 只属于 animation 来源，recall 来源的序列（STAGES）不变。
-    assert stages.names(scope="shot") == ("recall", "tts", "music", "draw", "generate", "animate", "select", "render")
+    assert stages.names(scope="shot") == ("recall", "tts", "music", "draw", "generate", "animate", "invoke", "select",
+                                          "overlay", "render")
     assert ws.STAGES == ("recall", "tts", "select", "render")
-    assert stages.names(scope="final") == ("compose",)
+    assert stages.names(scope="final") == ("compose", "export", "metadata", "cover", "package")
     assert {name: item.label for name, item in ws.REGISTRY.items()} == {
         "script": "生成文案", "split": "拆分镜", "recall": "召回", "tts": "配音", "music": "背景音乐",
         "draw": "生成图片", "generate": "生成画面",
-        "animate": "生成动画", "select": "选片与对齐", "render": "分镜渲染", "compose": "成片合成",
+        "animate": "生成动画", "invoke": "调用第三方工具", "select": "选片与对齐", "overlay": "生成叠加层", "render": "分镜渲染", "compose": "成片合成",
+        "export": "多画幅导出", "metadata": "发布元数据", "cover": "封面", "package": "发布包",
     }
 
 
@@ -41,12 +43,13 @@ def test_shot_stages_default_to_recall_source():
 
 def test_request_models_accept_registry_stages():
     assert studio_models.VERSION_STAGES == ("script", "content", "recall", "tts", "music", "draw", "generate", "animate",
-                                            "select", "render", "compose")
+                                            "invoke", "select", "overlay", "render", "compose", "export", "metadata",
+                                            "cover", "package")
     assert studio_models.NODE_STAGES == ("script", "split", "recall", "tts", "music", "draw", "generate", "animate",
-                                         "select", "render")
+                                         "invoke", "select", "overlay", "render")
     # picture：分镜表“召回”列的虚拟列，覆盖各分镜的画面阶段（recall/draw/generate/animate）。
-    assert studio_models.COLUMN_STAGES == ("split", "recall", "tts", "music", "draw", "generate", "animate", "select",
-                                           "render", "picture")
+    assert studio_models.COLUMN_STAGES == ("split", "recall", "tts", "music", "draw", "generate", "animate", "invoke",
+                                           "select", "overlay", "render", "picture")
 
 
 class FakeHandler(ws.StageHandler):

@@ -20,6 +20,8 @@ hiddenimports += collect_submodules("mindex")
 hiddenimports += collect_submodules("uvicorn")
 # 只经 `mindex -m 模块` 运行、没有被任何模块导入的入口（AI 动画录制组件安装）。
 hiddenimports += ["playwright.__main__"]
+# 第三方 MCP 工具的客户端（studio/tools/mcp.py 惰性导入）。
+hiddenimports += collect_submodules("mcp.client")
 datas += collect_data_files("mindex")
 datas += copy_metadata("mindex")
 datas += collect_data_files("jieba")

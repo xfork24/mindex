@@ -8,9 +8,10 @@ from mindex.agent.registry import ToolContext, ToolError
 STAGES = ("recall", "tts", "select", "render")
 STAGE_LABELS = {"script": "文案", "split": "拆分镜", "recall": "召回", "tts": "配音", "music": "背景音乐",
                 "draw": "生成图片", "generate": "生成画面",
-                "animate": "生成动画", "select": "选片", "render": "渲染", "compose": "合成", "content": "分镜内容"}
+                "animate": "生成动画", "invoke": "调用第三方工具", "select": "选片", "overlay": "生成叠加层", "render": "渲染", "compose": "合成",
+                "content": "分镜内容"}
 # 只属于部分来源的逐镜阶段：分镜表在四列之外另起一行显示。
-EXTRA_STAGES = {"aigc": "generate", "animation": "animate", "aigc_image": "draw"}
+EXTRA_STAGES = {"aigc": "generate", "animation": "animate", "aigc_image": "draw", "tool": "invoke"}
 
 
 def shot_stage_names(content: dict) -> tuple[str, ...]:
@@ -19,8 +20,10 @@ def shot_stage_names(content: dict) -> tuple[str, ...]:
     extra = EXTRA_STAGES.get(((content or {}).get("source") or {}).get("kind"))
     stages = ("recall", "tts", extra, "select", "render") if extra else STAGES
     music = (content or {}).get("music") or {}
-    if music.get("kind") in ("generate", "cover"):
+    if music.get("kind") in ("generate", "cover", "library"):
         stages = (*stages, "music")
+    if any(isinstance(layer, dict) and layer.get("engine") == "html" for layer in (content or {}).get("overlays") or []):
+        stages = (*stages, "overlay")
     return stages
 
 
@@ -34,6 +37,9 @@ def source_line(source: dict) -> str:
         options = "、".join(f"{k}={v}" for k, v in source.items() if k not in ("kind", "prompt") and v is not None)
         prompt = clip(source.get("prompt"), 40) if source.get("prompt") else "（缺省用画面意象/查询）"
         return f"AI 生成图片 提示词 {prompt}" + (f"（{options}）" if options else "")
+    if source["kind"] == "tool":
+        return (f"第三方工具 {source['tool_id']}/{source['tool']}（{'图片' if source.get('output') == 'image' else '视频'}）"
+                + (f" 参数 {clip(str(source.get('arguments')), 40)}" if source.get("arguments") else ""))
     if source["kind"] == "animation":
         return "AI 动画 画面说明 " + (clip(source.get("brief"), 40) if source.get("brief") else "（缺省用画面意象/旁白）")
     options = "、".join(f"{k}={v}" for k, v in source.items() if k not in ("kind", "media_id"))
@@ -131,6 +137,12 @@ class PlanView:
                 row["source"] = content["source"]
             if content.get("music"):
                 row["music"] = content["music"]
+            if content.get("transition"):
+                row["transition"] = content["transition"]
+            if content.get("highlights"):
+                row["highlights"] = content["highlights"]
+            if content.get("overlays"):
+                row["overlays"] = content["overlays"]
             if sid in self.plan.get("ranges", {}):
                 row["manual_range"] = self.plan["ranges"][sid]
             rows.append(row)
@@ -173,12 +185,24 @@ def board_text(view: PlanView, rows: list[dict] | None = None, limit: int = 60) 
                 lines.append(f"  生成图片：{stage_mark(row['stages']['draw'])}")
         if row.get("music"):
             music = row["music"]
-            label = {"generate": "生成", "cover": "翻唱", "none": "停止"}[music["kind"]]
+            label = {"generate": "生成", "cover": "翻唱", "library": "曲库", "none": "停止"}[music["kind"]]
             text = f"  背景音乐提示点：{label}"
             if music.get("prompt"):
                 text += f" 描述 {clip(music['prompt'], 40)}"
+            if music.get("track_id"):
+                text += f" 曲目 {music['track_id'][:12]}"
             if "music" in row["stages"]:
                 text += f"（{stage_mark(row['stages']['music'])}）"
             lines.append(text + "；之后的分镜顺延")
+        if row.get("transition"):
+            from mindex.studio import workspace as ws
+
+            lines.append(f"  转场：{ws.transitions.describe(row['transition'])}")
+        if row.get("highlights"):
+            lines.append(f"  字幕高亮词：{'、'.join(row['highlights'])}")
+        if row.get("overlays"):
+            from mindex.agent.tools.studio_write import overlays_text
+
+            lines.append(f"  文字层：{overlays_text(row['overlays'])}")
     lines.append(f"（旁白与画面意象截断到 {limit} 字、查询截断到 30 字；完整内容请用 get_shot_details 读取）")
     return "\n".join(lines)

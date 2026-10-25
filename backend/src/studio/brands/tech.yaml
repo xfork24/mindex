@@ -1,0 +1,14 @@
+id: tech
+name: 科技评测
+description: 粗描边字幕配青色高亮词，文字层深灰底、青色强调，适合产品发布与评测。
+version: 1
+subtitle:
+  bold: true
+  outline: 2.2
+  shadow: 0
+  highlight: "#00E5FF"
+overlay:
+  primary: "#FFFFFF"
+  accent: "#00E5FF"
+  background: "#111418"
+  background_opacity: 0.8

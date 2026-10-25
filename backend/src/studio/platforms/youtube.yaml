@@ -1,0 +1,11 @@
+# 数值核对日期：2026-10-26。来源：YouTube 帮助中心（标题 100 字符、简介 5000 字符、标签合计 500 字符、
+# 缩略图 1280×720 且小于 2 MB、章节至少 3 段且第一段从 00:00 开始、每段至少 10 秒）。平台调整时只改这里。
+id: youtube
+name: YouTube
+canvas: "16:9"
+cover: {width: 1280, height: 720, format: jpeg, max_kb: 2048}
+title: {max_chars: 100}
+description: {max_chars: 5000}
+tags: {max_count: 30, max_chars_each: 30, max_total_chars: 500}
+chapters: {enabled: true, min_count: 3, first_at_zero: true, min_seconds: 10}
+language: zh

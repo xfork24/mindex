@@ -12,6 +12,7 @@ AGENT_DOMAINS: tuple[str, ...] = (
     "meta",
     "studio",
     "studio_detail",
+    "studio_post",
     "library",
     "search",
     "index",

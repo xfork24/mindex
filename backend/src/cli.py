@@ -16,6 +16,7 @@ from mindex.cli_agent import mcp_command
 from mindex.cli_clips import app as clips_app
 from mindex.cli_e2e import app as e2e_app
 from mindex.cli_persons import app as persons_app
+from mindex.cli_studio import app as studio_app
 from mindex.cli_topics import app as topics_app
 from mindex.maintenance.backup_cli import app as backup_app
 from mindex.shared.cli_support import SortedGroup, print_json
@@ -93,6 +94,7 @@ app.add_typer(persons_app, name="persons")
 app.add_typer(clips_app, name="clips")
 app.add_typer(agent_app, name="agent")
 app.add_typer(topics_app, name="topics")
+app.add_typer(studio_app, name="studio")
 app.command("mcp")(mcp_command)
 
 

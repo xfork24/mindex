@@ -58,5 +58,9 @@ def segment_seconds(w, p, sid) -> int:
 
 
 def cue_identity(cue: dict) -> dict:
-    """提示点在 music 阶段签名中的身份（不含混音音量：音量只影响成片合成）。"""
-    return {key: cue.get(key) for key in CUE_FIELDS}
+    """提示点在 music 阶段签名中的身份（不含混音音量：音量只影响成片合成）。``track_id`` 只在曲库提示点出现，
+    生成/翻唱提示点的身份与旧版完全相同。"""
+    identity = {key: cue.get(key) for key in CUE_FIELDS}
+    if cue.get("track_id"):
+        identity["track_id"] = cue["track_id"]
+    return identity

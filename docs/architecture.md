@@ -108,6 +108,8 @@ wheel 安装后读取随包的 `mindex/web/`。Setuptools 通过包目录映射�
 | `studio/studio_diagnostics.py` / `studio/material_digest.py` | 方案诊断（只读：分镜检查、字幕环境、已选节点状态与变化原因）；可用素材摘要 |
 | `studio/animation_capture.py` | AI 动画录制沙箱：无头 Chromium、虚拟时钟、网络拦截、逐帧截图经管道交给 ffmpeg（可选 extra `animation`） |
 | `studio/studio_artifacts.py` | 创作检查点/产物/诊断记录（attempt 不可变留档） |
+| `studio/music_library.py` / `studio/beats.py` / `studio/studio_music_api.py` | 曲库：导入（授权必填、内容去重）、纯 numpy 节奏分析（BPM、节拍、能量、亮度）、情绪标签与按段落文案推荐；`/api/studio/music-library` 路由 |
+| `studio/tools/` / `studio/studio_tools_api.py` | 第三方工具：工具源登记与白名单（`registry`）、HTTP manifest 与 MCP（stdio / streamable-http）适配器、产物下载与校验（`artifacts`）；`/api/studio/tool-sources` 路由 |
 | `models/adapters.py` | 模型适配层公共部分：`ModelError` 等错误类型、带重试的 `request`、十个 Protocol 与 `make_*` 工厂（见下）；工厂调用时才导入后端 |
 | `models/embedders.py` / `models/qwen.py` / `models/speech.py` / `models/storyboard.py` / `models/writer.py` / `models/transcribers.py` / `models/detectors.py` | 各角色的后端实现：嵌入、Qwen 分析、语音合成、拆分镜（含原文覆盖校验）、文案创作（按文案模板）、转写（含 MiniMax 词级时间戳解析）、分镜检测 |
 | `models/video_generators.py` / `shared/comfyui.py` | 视频生成后端（MiniMax 海螺、阿里通义万相、自建 ComfyUI）；ComfyUI 工作流与节点映射的纯校验 |
@@ -134,7 +136,7 @@ wheel 安装后读取随包的 `mindex/web/`。Setuptools 通过包目录映射�
 | `persons/person_models.py` / `persons/person_names.py` | 人物请求/实体模型与小型校验；名称解析、文档提及识别与出镜区间查询辅助 |
 | `persons/person_processing.py` / `persons/person_worker.py` / `persons/person_frames.py` / `persons/person_thumbnails.py` | 人物扫描管线与后台 worker、展示帧布局、缩略图 |
 | `persons/person_server.py` | GPU 侧人物检测/特征服务（`mindex-person-server`） |
-| `studio/workspace/` / `studio/studio_window.py` / `studio/studio_logs.py` | 方案、构建与版本工作台（包内按职责分 `versions`、`plans`、`persistence`、`signatures`、`preflight`、`media_nodes`、`builder`、`details`、`references`（参考文稿）、`sources`（分镜画面来源文件），`stages` 阶段注册表与 `handlers/` 各阶段处理器 script/split/recall/tts/generate/animate/select/render/compose，`__init__` 导出公共入口），定长选片窗口，只追加的执行事件日志 |
+| `studio/workspace/` / `studio/studio_window.py` / `studio/studio_logs.py` | 方案、构建与版本工作台（包内按职责分 `versions`、`plans`、`persistence`、`signatures`、`preflight`、`media_nodes`、`post`（成片后期管线）、`builder`、`details`、`references`（参考文稿）、`sources`（分镜画面来源文件），`stages` 阶段注册表与 `handlers/` 各阶段处理器 script/split/recall/tts/music/draw/generate/animate/invoke/select/overlay/render/compose/export/publish，`__init__` 导出公共入口），定长选片窗口，只追加的执行事件日志 |
 | `settings/voices_catalog.py` | 语音合成音色目录：按当前合成后端聚合系统音色、本地音色库与克隆能力 |
 | `shared/shot_media.py` | 统一镜头媒体服务：时间基准转换、截图/抽帧、跨镜重建；业务读取不直读历史切片路径 |
 | `shared/locks.py` | 具名文件锁（pipeline/index-write/library/register/studio）与 `acquire_ordered` 规范加锁顺序 |
@@ -242,6 +244,9 @@ data/
 | `model_profiles` | 设置页的模型服务配置档案（角色/名称/厂商/连接配置 JSON/密钥，UNIQUE(role,name)） |
 | `voices` | 音色库：预定义与克隆音色（厂商 voice_id、样本路径、状态） |
 | `script_templates` | 用户文案模板（迁移步骤 v2；内置模板在 `studio/templates/*.yaml`，不入库） |
+| `brand_templates` | 用户品牌模板（迁移步骤 v4；内置模板在 `studio/brands/*.yaml`，品牌素材在 `data_dir/brand/`） |
+| `music_tracks` | 曲库曲目（迁移步骤 v5；ID 即音频 sha256，文件在 `data_dir/music/`；授权信息、节奏分析与情绪标签） |
+| `tool_sources` | 第三方工具源（迁移步骤 v6；连接、工具白名单、产物主机；`secret` 列为只写密钥，不含密钥的备份导出清空） |
 
 `agent.sqlite3`（`agent/schema.py`）有 6 张表：`agent_sessions`（含已加载领域）、`agent_events`（dsh 形状事件日志）、`agent_secrets`（密钥保险库）、`agent_gaps`（能力缺口）、`agent_attachments`、`agent_changes`（全局改动与定位通道）。
 

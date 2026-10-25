@@ -215,8 +215,48 @@ CREATE INDEX IF NOT EXISTS topic_calendar_events_source ON topic_calendar_events
 """)
 
 
+def _metadata_v4(db) -> None:
+    """用户品牌模板（studio/brands.py）：内置模板来自 YAML，只有复制出的用户模板入库。
+
+    body 为 JSON：description、version、subtitle、overlay、intro、outro、watermark；素材以 ``brand/…`` 相对路径引用。"""
+    execute_script(db, """
+CREATE TABLE IF NOT EXISTS brand_templates (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, base_id TEXT, body TEXT NOT NULL,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+""")
+
+
+def _metadata_v5(db) -> None:
+    """曲库（studio/music_library.py）：曲目 ID 即音频内容 sha256，文件在 ``data_dir/music/<sha256><suffix>``。
+
+    beats/moods/tags 为 JSON 数组；analysis_status 为 pending、ready 或 failed。"""
+    execute_script(db, """
+CREATE TABLE IF NOT EXISTS music_tracks (
+  id TEXT PRIMARY KEY, suffix TEXT NOT NULL, title TEXT NOT NULL, artist TEXT NOT NULL DEFAULT '',
+  source TEXT NOT NULL, license TEXT NOT NULL, attribution TEXT NOT NULL, expires_at TEXT,
+  duration REAL NOT NULL, bpm REAL, beats TEXT NOT NULL DEFAULT '[]', energy REAL, brightness REAL,
+  moods TEXT NOT NULL DEFAULT '[]', tags TEXT NOT NULL DEFAULT '[]',
+  analysis_status TEXT NOT NULL DEFAULT 'pending', analysis_error TEXT, analysis_version INTEGER,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+""")
+
+
+def _metadata_v6(db) -> None:
+    """第三方工具源（studio/tools/registry.py）：connection/tools/artifact_hosts 为 JSON；
+    ``secret`` 为密钥 JSON（只写不读，不含密钥的备份导出时清空）。"""
+    execute_script(db, """
+CREATE TABLE IF NOT EXISTS tool_sources (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, protocol TEXT NOT NULL, connection TEXT NOT NULL,
+  tools TEXT NOT NULL, artifact_hosts TEXT NOT NULL DEFAULT '[]', secret TEXT,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+""")
+
+
 # metadata.sqlite3 的有序迁移：只追加，不修改已发布的步骤（见 shared/migrations.py）。
-METADATA_STEPS = (_metadata_v1, _metadata_v2, _metadata_v3)
+METADATA_STEPS = (_metadata_v1, _metadata_v2, _metadata_v3, _metadata_v4, _metadata_v5, _metadata_v6)
 
 
 def migrate_metadata(db) -> int:

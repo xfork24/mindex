@@ -24,7 +24,8 @@ from mindex.studio.studio_models import validate_recall_references
 SOFT_LABELS = {**SOFT_REASONS, "long": "文本过长"}
 # 逐镜阶段按注册顺序（含只属于部分来源的 generate）；不属于某分镜来源的阶段在该分镜上没有选用版本。
 SHOT_STAGES = workspace.stages.names(scope="shot")
-NODE_STAGES = (*SHOT_STAGES, "compose")
+FINAL_STAGES = workspace.stages.names(scope="final")
+NODE_STAGES = (*SHOT_STAGES, *FINAL_STAGES)
 
 
 def _contents(w, p):
@@ -118,8 +119,8 @@ def subtitle_checks(config: Config, p) -> dict:
 
 
 def _selected(p, stage, sid):
-    if stage == "compose":
-        return p.get("final")
+    if stage in FINAL_STAGES:
+        return workspace.stages.handler(stage).selected(p, sid)
     return p["shots"].get(sid, {}).get(stage)
 
 
@@ -127,7 +128,8 @@ def node_states(config: Config, job_id, w, p, context) -> list[dict]:
     """每个已选节点：ok / missing / failed / corrupt / stale，stale 的原因与工作台 conflicts 一致。"""
     nodes = []
     targets = [(stage, sid) for sid in workspace.ordered_shots(w, p) for stage in SHOT_STAGES]
-    targets.append(("compose", None))
+    for stage in FINAL_STAGES:
+        targets += [(stage, variant) for variant in workspace.stages.handler(stage).variants(config, w, p)]
     for stage, sid in targets:
         vid = _selected(p, stage, sid)
         if not vid:

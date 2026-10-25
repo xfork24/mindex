@@ -91,6 +91,7 @@
 | `aigc_image` | 可选 `prompt`（≤1500 字）、`reference_id`（主体参考图 sha256，图生图）、`seed`、`prompt_optimizer`；`motion`、`strength` 同 image | 配音 → 生成图片 → 分镜渲染 | AI 生成图片：图片生成服务按提示词生成一张图片，再按静态图片推拉/平移；见 [AI 生成图片](#ai-生成图片) |
 | `aigc` | 可选 `prompt`（≤1000 字）、`negative`（≤500 字）、`image_id`（首帧图 sha256）、`seed`（0–2147483647）；MiniMax H3 另有 `mode`、`last_image_id`、`references`、`model`、`resolution`、`ratio`、`duration` | 配音 → 生成画面 → 选片对齐 → 分镜渲染 | AI 生成视频：视频生成服务按提示词生成片段，再从片段开头取与配音等长的窗口；见 [AI 生成视频](#ai-生成视频) |
 | `animation` | 可选 `brief`（画面说明，≤2000 字） | 配音 → 生成动画 → 分镜渲染 | 动画生成 LLM 写自包含 HTML/JS 动画，渲染时在离线沙箱里逐帧录制；源码可人工修改；见 [AI 动画](#ai-动画) |
+| `tool` | `tool_id`（工具源）、`tool`（白名单工具名）、`arguments`（JSON，≤8000 字符）、可选 `uploads`（≤4 个任务素材）、`output`（video/image）；图片产物另有 `motion`、`strength` | 视频：配音 → 调用第三方工具 → 选片对齐 → 分镜渲染；图片：配音 → 调用第三方工具 → 分镜渲染 | 调用登记的 HTTP 或 MCP 工具生成画面；见 [第三方工具](#第三方工具) |
 
 `source` 为空即素材召回，dump 时省略该键；显式提交 `{"kind": "recall"}` 也规范化为空。因此没有设置来源的分镜内容版本号与签名都不变（`tests/test_studio_signature_snapshot.py`）。来源表在阶段注册表的 `SHOT_SOURCES`，预检、依赖与执行按每个分镜的序列展开：clip 与 image 没有召回节点，不需要发布索引，纯 clip/image 任务在没有活动索引时也能完整构建；混合来源的分镜在成片合成里按分镜顺序拼接。改变来源时，新来源没有的阶段选用（例如改为图片后的召回与选片）以及人工区间、参考锚点从方案中移除；候选、锚点与人工选片接口对非召回分镜返回 422“该分镜的画面来源不是素材召回，不能选择候选或人工选片”。
 
@@ -147,17 +148,109 @@
 |---|---|---|
 | `generate` | `prompt`（音乐描述，≤2000 字）、`instrumental`（缺省 true 纯音乐）、可选 `lyrics`（≤3500 字，非纯音乐时使用；为空时由模型按描述写词）、`volume`（0–1，缺省 0.25） | 从此分镜起生成新的背景音乐 |
 | `cover` | `audio_id`（参考音频 sha256，6 秒–6 分钟）、`prompt`（目标风格，10–300 字）、可选 `lyrics`、`volume` | 从此分镜起按参考音频翻唱 |
+| `library` | `track_id`（曲库曲目 ID，即音频 sha256）、`volume` | 从此分镜起铺曲库音乐，见 [曲库](#曲库) |
 | `none` | — | 从此分镜起停止背景音乐 |
 
 没有提示点的分镜顺延前一段背景音乐，直到下一个提示点；方案开头到第一个提示点之前没有背景音乐（`workspace/music.py` 的 `segments`）。工作台详情的 `shot_music` 给出每个分镜的归属（`start` 提示点、`from` 顺延自哪个分镜、`stop` 停止）。配音可以跨分镜，背景音乐段落按分镜边界计算，与配音如何切分无关。
 
-- 背景音乐阶段（`music`，`handlers/music.py`）只出现在 generate/cover 提示点分镜上，位于配音之后；调用设置页的“音乐生成”角色（`studio.music_generator`，默认 MiniMax `music-3.0`，翻唱 `music-cover`；或本地 ComfyUI 工作流，映射 prompt/lyrics/seconds/seed/audio），产物为 `versions/<vid>/music.<ext>`。签名为提示点（不含音量）与服务 backend/model（ComfyUI 另含工作流与段落预估时长）；改音量只重新合成成片。未激活音乐生成档案时预检阻塞为“未配置音乐生成服务，请在设置页激活音乐生成档案”。
+- 背景音乐阶段（`music`，`handlers/music.py`）只出现在 generate/cover/library 提示点分镜上，位于配音之后（library 只复制曲库曲目，见 [曲库](#曲库)）；调用设置页的“音乐生成”角色（`studio.music_generator`，默认 MiniMax `music-3.0`，翻唱 `music-cover`；或本地 ComfyUI 工作流，映射 prompt/lyrics/seconds/seed/audio），产物为 `versions/<vid>/music.<ext>`。签名为提示点（不含音量）与服务 backend/model（ComfyUI 另含工作流与段落预估时长）；改音量只重新合成成片。未激活音乐生成档案时预检阻塞为“未配置音乐生成服务，请在设置页激活音乐生成档案”。
 - 歌词生成：`POST /jobs/{id}/music/lyrics`（MiniMax `lyrics_generation`，`write_full_song` 或 `edit`），只返回 `{title, style_tags, lyrics}`，不改分镜；ComfyUI 档案不支持。
 - 成片合成：每段音乐循环/截断到段落长度（按分镜采样边界），淡入 0.5 秒、淡出最多 1.5 秒，按 `volume` 缩放，段外静音；再以配音为侧链（`sidechaincompress`，阈值 0.06、压缩比 3）自动压低后与配音混合——说话时背景音乐约压低 3–6 dB 但仍清晰可闻（旧参数阈值 0.03、比 6 会把整段配音下的背景音乐压到近乎无声，已修正）。切换发生在对应的提示点分镜：上一段在分镜边界前淡出，新的一段从提示点分镜起淡入，不会跨镜重叠。成片签名只在有背景音乐段落时加入各段（起始分镜、覆盖分镜、音乐版本与音量）和混音版本 `music_mix`（`MUSIC_MIX_VERSION`，修改混音参数时递增，使旧的有背景音乐成片需要重新合成），没有背景音乐的成片签名与旧版逐字节一致。
 - 素材列表：分镜卡片停在分镜渲染阶段时的摘要与分镜渲染详情列出本镜适用的背景音乐（在哪个分镜切入/顺延/停止、描述、音量、音乐版本与试听，尚未生成时提示）；分镜预览只含配音（与原声），背景音乐不进入 `render` 签名——音乐跨分镜循环，只能按成片时间线在合成时混入，改音乐或音量因此不会重新渲染分镜。成片版本数据 `music` 记录实际混入的各段（`cue`、`shots`、`version`、`volume`、`kind`、`prompt`、成片时间线 `start`/`end`），“成片”面板据此列出每段并可试听；没有背景音乐时无此键。
 - MiniMax 公告：自 2026-08-20 起付费音乐生成与歌词生成接口不再对新用户开放，历史付费用户可继续使用；无权限时平台错误原样转述。
 
 创作页在配音格内显示背景音乐摘要（从此镜开始 / 顺延 #n / 停止），配音详情里的“背景音乐”区可选择顺延、生成、翻唱或停止，填写描述、纯音乐开关、歌词（“生成/改写歌词”调用歌词生成）、上传翻唱参考音频、调整音量，保存后可单独执行/重新生成并试听。智能助手：`edit_shots` 的 `music` 字段设置提示点（`clear: ["music"]` 去掉），`generate_lyrics`（studio_detail 领域）生成歌词，`attach_query_media`（`role=cover`）上传翻唱参考音频，`run_node`/`run_column` 支持 `stage=music`。
+
+### 曲库
+
+曲库（`studio/music_library.py`，`/studio/music` 页面）保存带授权信息的音乐：导入时授权来源、许可、署名必填，有效期可选（`YYYY-MM-DD`，含当天）。曲目 ID 即音频内容 sha256，文件按内容寻址存放在 `data_dir/music/`，重复导入返回已有曲目、不改原记录；记录在 metadata 库 `music_tracks` 表，备份随数据目录带上文件。
+
+- 分析（`studio/beats.py`，纯 numpy，桌面版同样可用）：ffmpeg 解码为 22050 Hz 单声道 → STFT（2048/512）→ 半波整流谱通量 → 自相关在 60–200 BPM 求峰（对数高斯先验偏向 120 BPM）→ 动态规划节拍跟踪，另算能量与亮度（频谱质心）。合成节拍器上 BPM 误差 ≤ 2%、节拍误差 ≤ 30 ms（`tests/test_studio_beats.py`）。导入时自动分析，在请求线程池中同步完成（几分钟的曲目约 1 秒）；`ANALYSIS_VERSION` 变化后曲目标为需要重新分析。
+- 情绪标签：文案模型（`studio.writer`）按曲名、标签与节奏特征从固定词表（calm、warm、happy、energetic、epic、tense、sad、mysterious、inspiring、tech、romantic、playful）选 1–3 个；模型不可用或输出无效时按节奏特征推断。可在曲库页修改；重新分析时可保留人工标签。
+- 推荐：`POST /music-library/recommend` 按段落文案（或提示点分镜到下一个提示点之前的旁白与预估时长）推断情绪与 BPM 区间（文案模型，不可用时按关键词），按情绪重合、BPM 距离与时长覆盖打分，给出理由；授权过期的曲目不参与。
+- 选用：提示点 `kind=library` 的背景音乐阶段把曲目复制进版本目录（签名只有提示点身份，与音乐生成服务无关），版本数据带曲名、许可与署名；成片版本数据 `music` 的曲库段落含 `attribution`，发布元数据把署名写进简介。曲目不存在、文件损坏或授权过期时预检阻塞（过期时即使已有版本也阻塞）；被方案选用的曲目拒绝删除（409）。
+
+创作页配音详情的“背景音乐”区选择“曲库音乐”后可从下拉选曲或“按文案推荐”；`mindex studio music import/list/show/update/analyze/recommend/use/delete`；智能助手 `list_music_tracks`、`get_music_track`、`import_music_track`、`update_music_track`、`analyze_music_track`、`recommend_music`（`studio_post` 领域，MCP 同名导出），选曲用 `edit_shots` 的 `music={kind: library, track_id}`。
+
+### 节拍对齐
+
+方案参数 `beat_align = {tolerance}`（秒，0.04–1；None 关闭）。开启后成片合成把背景音乐段落内的切点推迟到 `[切点 − 半帧, 切点 + tolerance]` 内最近的节拍（`workspace/beat_align.py`）：
+
+- 每个非末镜的分镜渲染多留 `tolerance` 秒尾部余量（与重叠转场共用余量，取较大值）；切点推迟 δ 帧（≤ 余量）时画面多取 δ 帧，配音段末尾补 δ 帧静音，之后的字幕、背景音乐与边界整体后移。对齐后切点与节拍距离 ≤ 1 帧，配音不被截断。
+- 节拍取自段落音乐文件的分析，段落循环播放时按曲长周期延伸；只对同一段落内的切点对齐，有重叠转场（`next`）或出场转场（`leave`）的切点不推迟（有出场转场的分镜不留余量）。
+- 成片边界中被推迟的切点带 `beat_delay`（帧数）；关闭时 render 与 compose 签名与旧版一致。
+
+创作页方案参数“节拍对齐容差”，`mindex studio plan set --beat-align 0.3`（0 关闭），智能助手 `update_plan_options` 的 `beat_align`。
+
+## 成片后期
+
+后期能力都在合成成片或分镜渲染时生效，每项都有四个入口：创作页（分镜「分镜渲染」详情里的「后期」面板、方案参数、`/studio/brands` 品牌模板页）、`mindex studio` CLI（`shot set`、`plan set`、`brand …`、`overlay …`，见 [CLI 参考](cli-reference.md#创作任务)）、智能助手与 MCP（`edit_shots`、`update_plan_options` 与 `studio_post` 领域，见 [智能助手](agent.md#studio_post)）。底层是同一组 REST 接口，Web 与桌面版行为一致。没有使用任何后期能力的方案，签名与产物与之前完全相同。
+
+成片合成在 `studio/workspace/post.py` 里按步骤执行：逐镜对齐 → 画面拼接（硬切或重叠转场）→ 配音与背景音乐 → 片头片尾 → 字幕与文字层 → 水印与封装。
+
+### 转场
+
+分镜字段 `transition`：
+
+- `enter` / `leave` 是镜内转场：fade 黑场、white 白场、zoom 缩放（伴随淡入淡出）、slide 滑入滑出。时长 0.1–2 秒，超过镜头一半时自动截短，并在渲染版本里记录说明。镜头时长不变，只重建该镜渲染。
+- `next` 是到下一镜的重叠转场（xfade 样式：fade、dissolve、wipeleft、slideleft、circleopen 等）。本镜在渲染时多出等于转场时长的尾部画面：素材类优先从源继续取，取不到时冻结末帧；图片与动画直接多渲染。合成时只把重叠转场相连的几镜用 xfade 重新编码，其余仍复制码流。过渡从切点开始、在下一镜开头完成，所以成片总帧数、配音、字幕、背景音乐与边界都与硬切相同。
+- 设置了 `next` 时，本镜的 `leave` 与下一镜的 `enter` 被取代；最后一镜的 `next` 被忽略。
+
+### 字幕样式与高亮词
+
+方案参数 `subtitle_style` 选择烧录字幕的样式：classic 经典、outline 粗描边、box 底条、highlight 描边加高亮。分镜字段 `highlights` 是字幕里要变色的词（最多 10 个）。只有烧录字幕且选了样式（或有高亮词、或品牌模板给出样式）时，成片才改用生成的 `final.ass` 烧录；字号与边距按短边换算，竖屏底边距与旧版一致。SRT 与 VTT 照常导出。样式只影响成片合成。
+
+### 文字层
+
+分镜字段 `overlays`（每镜最多 4 个）：title 标题卡（居中）、lower_third 下三分之一信息条（左下，在字幕上方）、data_card 数据卡片（右上，标签与数值），custom 只用于 HTML 方式。`start`/`end` 是相对本镜的秒数，留空表示整镜；入场效果 none、fade、slide。两种方式按图层选：
+
+- `engine=ass`：在成片合成时写进同一份 `final.ass` 烧录，轻量、快。软字幕方案同样烧录文字层，字幕保持软字幕轨。
+- `engine=html`：分镜多一个「生成叠加层」阶段（`overlay`），产出透明背景的 HTML 动画源码。标题卡、信息条、数据卡片用内置模板 `studio/overlays/layer.html` 注入数据生成，不调用模型；custom 按画面说明由动画生成模型编写（透明背景提示词），需要激活动画生成档案。分镜渲染时透明录制（argb MOV）并叠加在画面上，先于镜内转场，因此需要动画录制组件（桌面版为可选的 Chromium 组件），没有时预检阻塞并提示安装。叠加层源码可在后期面板、`mindex studio overlay edit` 或 `edit_overlay_source` 人工修改，人工版本被钉住，之后的构建保留它。
+
+文字层的颜色取自品牌模板的文字层样式，没有品牌时为白字、黑色半透明底、橙色强调。
+
+### 品牌模板、片头片尾与水印
+
+品牌模板统一字幕样式、文字层样式、片头、片尾与水印。内置三个只读模板（简洁、新闻资讯、科技评测，`studio/brands/*.yaml`），复制后可修改并上传素材；用户模板存在 metadata 库的 `brand_templates` 表，被方案引用时不能删除。品牌素材（片头片尾视频不超过 30 秒，水印建议透明 PNG）按内容寻址存放在 `data_dir/brand/`，读取时复验摘要，备份按数据库引用自动带上。
+
+方案参数 `brand_id` 选用模板，`brand_overrides` 覆盖其中几项（完整的字幕或文字层样式、换一个片头或片尾）或用 `disable` 关闭片头、片尾、水印。字幕样式的优先级：方案覆盖里的完整样式 > 方案参数 `subtitle_style` > 品牌模板样式。
+
+- 片头片尾按方案画幅、帧率与适配方式规范化后接在正文前后；字幕、文字层、背景音乐报告与章节时间整体后移，背景音乐只铺在正文里。成片版本数据 `bookends` 记录各段帧数与时长。
+- 水印按短边比例缩放，放在画面一角，默认只出现在正文时间段（`include_bookends` 为真时片头片尾也加）。软字幕方案同样叠加水印。
+- 修改品牌模板或方案覆盖只重新合成成片，分镜产物照常复用。
+
+## 多画幅导出与平台发布
+
+创作页“交付”区、`mindex studio export … / publish …`、智能助手与 MCP（`set_exports`、`set_publish`、`build_publish_package` 等，`studio_post` 领域）共用同一组接口。这些都是成片之后的阶段（compose → export → metadata → cover → package），按变体（画幅或平台）展开节点；选用记在方案的 `finals`（`阶段:变体` → 版本），compose 仍在 `final`。只有 compose 的方案行为不变。
+
+### 多画幅导出
+
+方案参数 `exports`（最多两项，不能与方案画幅相同）：
+
+- `derive` 快速派生：成片阶段另存一份无字幕、无水印的画面 `clean.mp4`，导出阶段 `export:<画幅>` 按目标画幅 pad/crop，再按新画幅重新排版字幕、字幕引擎文字层与水印，音轨直接取自成片。HTML 文字层已叠进逐镜画面，只能随画面一起缩放裁切。
+- `rerender` 重新渲染：工作台自动维护一个关联子方案（`variant_of = {plan, canvas}`，名称“方案名 · 画幅”），与主方案共享分镜内容、文案、召回、配音、背景音乐与选片，按该画幅逐镜重新渲染与合成；主方案保存分镜或参数时同步。导出阶段登记子方案的成片。“构建全部画幅”（`?all_canvases=true` 预检与 `{all_canvases: true}` 构建；CLI `build --all-canvases`；`run_build(all_canvases=true)`）在一次构建里先构建子方案再构建主方案，可整体取消。子方案被主方案引用时不能删除；取消该画幅的重新渲染后子方案保留并解除关联。
+
+### 平台发布
+
+方案参数 `publish = {platforms, cover}`。内置平台预设 `studio/platforms/*.yaml`：bilibili（16:9）、douyin（9:16，无章节）、youtube（16:9）。每个平台的成片取与预设画幅一致的那个（方案画幅一致时用成片，否则用该画幅的导出；都没有时用方案成片并在发布包清单标出 `mismatch`）。
+
+- 发布元数据 `metadata:<平台>`：文案模型（`studio.writer`）按大纲与逐镜旁白写标题、简介与标签（JSON），按预设截断、去重；章节由成片镜头边界生成（含片头偏移，按最短时长合并，不满足规则时不附章节）；曲库音乐的署名写进简介。人工修改（`PATCH …/publish-metadata/{平台}`）的版本被钉住。
+- 封面 `cover:<平台>`：成片挑帧（`time` 省略时自动选清晰度最高的镜头中点；`GET …/cover-candidates?platform=` 列出候选）、图片生成模型生成（`prompt`，未激活图片生成档案时预检阻塞）或上传图片（`media_id`）；居中裁切到预设尺寸，底部叠加标题与副标题（标题缺省取发布元数据；字体与字幕相同，颜色取品牌文字层样式），按格式与大小上限保存。
+- 发布包 `package:<平台>`：`<平台>/` 目录（video.mp4、cover、subtitles.srt/vtt、metadata.json、metadata.txt、manifest.json 含各文件 sha256）与 zip，经产物接口 `?download=true` 下载。上游任一产物变化后需要重建。
+
+平台限制数值写在 YAML 注释里，注明核对日期与来源；B 站与抖音的字数与标签上限没有找到平台官方文档，发布前请人工复核。
+
+## 第三方工具
+
+分镜画面来源 `kind=tool` 调用登记的第三方工具（`studio/tools/`，`/studio/tools` 页面）。工具源记录在 metadata 库 `tool_sources` 表：
+
+- 协议：`http`（HTTP manifest：`POST base_url + submit_path` 提交 `{"tool", "arguments", "uploads"}`，`poll_path` 轮询直到 `status_field` 进入 done/failed，按 `result_field` 点分路径取产物地址；`poll_path` 为空时提交响应即结果）、`mcp-stdio`（本机进程，`command` 必须是绝对路径，`env` 追加到最小默认环境，不依赖 GUI 的 PATH）、`mcp-http`（streamable-http）。MCP 经 `list_tools` 发现、`call_tool` 调用，产物取图片内容、内嵌二进制资源、资源链接、`structuredContent.url(s)` 或文本里的 http(s) 地址；`mcp` 是可选组件（`uv sync --extra mcp`，桌面版已内置），缺失时预检提示安装。
+- 白名单：只有 `tools` 里的工具能被调用；每个工具声明产物（video/image）、`allow_upload`（未勾选时携带素材的分镜预检阻塞）、`timeout`（秒）与 `max_mb`（产物上限）。产物只能从 `artifact_hosts`（http 协议另含 base_url 的主机）下载，流式计数超限即中止，手动跟随重定向并逐跳检查主机。
+- 密钥：请求头与环境变量的值写 `secret:名称`，运行时替换为该工具源 `secrets` 中的值。密钥只写不读（接口只返回名称与是否已填写），不含密钥的备份导出清空 `secret` 列。
+- `invoke` 阶段（画面阶段）：参数字符串里的 `{{text}}`/`{{visual}}`/`{{query}}` 替换为本镜内容；签名含工具源 ID、工具配置摘要（协议、连接、产物类型与上传许可；不含密钥值、超时与主机白名单）、工具名、参数、上传素材摘要与产物类型。产物经 ffprobe（视频，统一封装为 `artifact.mp4`）或图片解码（`artifact.png`）校验后登记为不可变版本文件，另存 `request.json`（参数、任务记录、产物来源主机，无密钥）。视频产物之后在产物内选窗对齐（与 AI 生成视频相同），图片产物直接按运动参数渲染。
+- 预检阻塞：工具源未登记、工具不在白名单、产物类型不符、携带素材但未允许上传、缺密钥、缺 mcp 组件、上传素材缺失。被分镜使用的工具源拒绝删除（409）。
+
+创作页分镜“画面来源”选“第三方工具”后选择工具源与工具，填写 JSON 参数并（允许时）上传素材；`mindex studio tools list/show/add/test/delete` 与 `shot set --tool 源/工具 --tool-args JSON`；智能助手 `list_tool_sources`、`test_tool_source`、`save_tool_source`（http / mcp-http，danger）与 `save_stdio_tool_source`（danger，不导出到 MCP：外部 MCP 客户端不能让 Mindex 执行任意命令），分镜用 `edit_shots` 的 `source={kind: tool, …}`。
 
 ## 可用素材摘要
 
@@ -301,6 +394,31 @@ data/studio/<job_id>/
 | PUT /templates/{template} | 修改用户模板（name、category、kind、description、instructions、max_chars，只填要改的）；内置模板 403 |
 | POST /templates/{template}/preview | 试写：`{outline, references?, kind?, instructions?, max_chars?}`，后三项临时覆盖模板（编辑中未保存的内容，`max_chars: null` 跟随系统上限），同步调用文案模型一次；返回 `{text, chars, limit, elapsed_ms, template:{id, hash, name, kind}}`。不落库、不涉及任务、不附素材摘要；大纲超过 `studio.max_input_chars` 或参考文稿总字数超过 `studio.max_reference_chars` 返回 422，模型失败 503 |
 | DELETE /templates/{template} | 删除用户模板；内置模板 403，被方案引用 409 |
+| GET /platforms | 平台发布预设列表 `{items}` |
+| GET /jobs/{id}/plans/{plan}/cover-candidates?platform=&limit= | 封面候选帧（各镜头中点，按清晰度排序），缓存在任务 `previews/` 下 |
+| PATCH /jobs/{id}/plans/{plan}/publish-metadata/{platform} | `{revision, title?, description?, tags?}`：人工修改发布元数据，按预设校验修正，生成钉住的新版本 |
+| GET /brands | 品牌模板列表 `{items}`：内置在前；每项含字幕样式、文字层样式、片头、片尾、水印与 `hash`、`builtin` |
+| GET /brands/{brand} | 单个品牌模板；不存在 404 |
+| POST /brands/{brand}/copy | `{name}`；复制为用户模板（`user-…`），201 |
+| PUT /brands/{brand} | 修改用户模板（name、description、subtitle、overlay、intro、outro、watermark，只填要改的；影响成片的字段传 null 去掉）；素材缺失 422，内置模板 403 |
+| DELETE /brands/{brand} | 删除用户模板；内置 403，被方案引用 409 |
+| POST /brand-assets | multipart `file`：图片（PNG/JPEG/WebP，水印）或视频（MP4/MOV/WebM/MKV，≤30 秒，片头片尾）；按内容寻址保存到 `data_dir/brand/`，返回 `{sha256, suffix, kind, name, …, url}`，201 |
+| GET /brand-assets/{sha256}{后缀} | 品牌素材文件（复验摘要）；`?download=true` 以附件下载 |
+| GET /music-library?mood=&q= | 曲库曲目 `{items, moods}`（不含节拍列表） |
+| POST /music-library | multipart `file` + `source`、`license`、`attribution`（必填）与可选 `title`、`artist`、`expires_at`、`tags`、`analyze`、`ai`；按内容去重（`duplicate: true` 时返回已有曲目），201 |
+| GET /music-library/{track} | 单首曲目（含 `beats`） |
+| PUT /music-library/{track} | 修改授权信息、`tags`、`moods`（词表内，≤3）；`expires_at: null` 改为长期 |
+| DELETE /music-library/{track} | 删除记录与文件；被分镜选用 409 |
+| POST /music-library/{track}/analyze | `{ai?, retag?}`：重新分析节奏，可选重新打情绪标签 |
+| GET /music-library/{track}/file | 音频文件（复验摘要）；`?download=true` 以附件下载 |
+| POST /music-library/recommend | `{text}` 或 `{job_id, plan_id, shot_id}`，可选 `seconds`、`limit`、`ai`；返回 `{moods, bpm_range, source, items[{…, score, reasons}]}` |
+| GET /tool-sources | 第三方工具源列表（密钥只给名称与 `set`） |
+| GET /tool-sources/{source} | 单个工具源 |
+| PUT /tool-sources/{source} | 登记或整体替换：`{name, protocol, http|stdio|mcp_http, tools, artifact_hosts, secrets?}`；`secrets` 只写，值为 null 删除，未给出的保留 |
+| DELETE /tool-sources/{source} | 删除登记；被分镜使用 409 |
+| POST /tool-sources/{source}/test | 连接并列出服务端工具 `{ok, tools, missing, elapsed_ms}`；失败时 `{ok: false, error}` |
+| PATCH /jobs/{id}/plans/{plan}/shots/{shot}/overlay | `{revision, index, html, dry_run?}`：人工保存 HTML 文字层的叠加层源码（静态校验未通过 422）；生成并选用钉住的叠加层版本 |
+| GET /jobs/{id}/versions/{version}/overlay-{index}.html | 叠加层源码（严格 CSP 与 nosniff） |
 | POST /jobs/{id}/music/lyrics | `{prompt?, mode: write_full_song|edit, lyrics?, title?}`：调用音乐生成服务的歌词生成，只返回 `{title, style_tags, lyrics}`；未配置音乐生成 422，服务错误 502 |
 | POST /jobs/{id}/plans/{plan}/query-media | multipart file + kind=image/video/audio（audio 只能 `purpose=source`，≤6 分钟，用于主体参考与翻唱），可选 `purpose=query`（缺省，查询文件，按 `search.*` 限制）或 `source`（[分镜画面来源](#分镜画面来源)，视频按 `studio.max_clip_seconds`/`max_clip_mb`）；校验、去重上传并返回 media_id、kind、purpose、duration（视频）、预览 URL，201 |
 | POST /jobs/{id}/plans/{plan}/shots/{shot}/query-suggestion | 可选 `visual`（省略时用已保存的值）；返回建议 `{"query": ...}`，不保存。只读、不加锁，分镜与版本号不变。任务、方案或分镜不存在返回 404（“找不到创作任务 / 构建方案 / 分镜”）；visual 为空返回 422“请先填写画面意象，再重写召回词”，超过 120 字返回 422；这两种情况都不调用模型。模型超时、不可用或返回空 query 时返回 503“召回词重写失败：…” |
@@ -311,7 +429,7 @@ data/studio/<job_id>/
 | GET /jobs/{id}/plans/{plan}/preflight?force=false | 构建清单与确认 token |
 | POST /jobs/{id}/plans/{plan}/build | 提交 token、force；后台执行，202 |
 | POST /jobs/{id}/plans/{plan}/nodes | revision、stage、shot_id、inputs、force；明确输入版本，202 |
-| POST /jobs/{id}/plans/{plan}/regenerate-column | revision、stage、inputs_by_shot；强制重跑一列，split 的输入表为空，其余绑定全部当前分镜输入，202 `stage=picture` 是批量操作“召回（画面）”的虚拟阶段：绑定所有有画面阶段（recall/draw/generate/animate）的分镜，每镜按各自的画面阶段输入；execute-column 同理 |
+| POST /jobs/{id}/plans/{plan}/regenerate-column | revision、stage、inputs_by_shot；强制重跑一列，split 的输入表为空，其余绑定全部当前分镜输入，202 `stage=picture` 是批量操作“召回（画面）”的虚拟阶段：绑定所有有画面阶段（recall/draw/generate/animate/invoke）的分镜，每镜按各自的画面阶段输入；execute-column 同理 |
 | GET /jobs/{id}/builds/{build}/logs?after=0 | 按 seq 增量读取执行日志，返回 next_seq、has_more；无日志的旧执行标记 legacy |
 | POST /jobs/{id}/builds/{build}/cancel | 请求取消运行中的构建，返回 `{build_id, status: "cancelling"}`；当前节点完成后停止，非 running 409 |
 | POST /jobs/{id}/cancel | 请求取消旧任务的步骤执行，当前步骤完成后停止；执行状态不是 running 时 409 |
@@ -335,9 +453,9 @@ data/studio/<job_id>/
 
 ## 验证
 
-工作台代码位于 `studio/workspace/` 包：`versions`（任务目录、`workspace.json` 落盘、不可变版本与文件校验）、`plans`（方案选项、文案与分镜编辑、版本选用、分镜快照还原）、`persistence`（读取与旧任务迁移）、`signatures`（阶段参数、签名、冲突与复用）、`preflight`（预检与列重生成节点）、`media_nodes`（区间校验、选片对齐、分镜渲染与成片合成）、`builder`（节点执行、整次构建、取消与重启恢复）、`details`（详情视图）、`stages` 与 `handlers/`（阶段注册表，见下）。`tests/test_studio_signature_snapshot.py` 以 `tests/fixtures/studio_signatures.json` 冻结各阶段签名、预检结果与固定 fixture 的成片时间线结构；只有签名变化是有意为之时才用 `MINDEX_UPDATE_SNAPSHOTS=1` 重新生成。
+工作台代码位于 `studio/workspace/` 包：`versions`（任务目录、`workspace.json` 落盘、不可变版本与文件校验）、`plans`（方案选项、文案与分镜编辑、版本选用、分镜快照还原）、`persistence`（读取与旧任务迁移）、`signatures`（阶段参数、签名、冲突与复用）、`preflight`（预检与列重生成节点）、`media_nodes`（区间校验、选片对齐、分镜渲染）、`post`（成片后期管线：拼接、背景音乐、字幕、封装）、`builder`（节点执行、整次构建、取消与重启恢复）、`details`（详情视图）、`stages` 与 `handlers/`（阶段注册表，见下）。`tests/test_studio_signature_snapshot.py` 以 `tests/fixtures/studio_signatures.json` 冻结各阶段签名、预检结果与固定 fixture 的成片时间线结构；只有签名变化是有意为之时才用 `MINDEX_UPDATE_SNAPSHOTS=1` 重新生成。
 
-阶段注册表：每个阶段一个 `StageHandler`（`studio/workspace/stages.py`），处理器位于 `handlers/`（`script`、`split`、`recall`、`tts`、`music`、`draw`、`generate`、`animate`、`select`、`render`、`compose`），导入时经 `register()` 按 plan → shot → final 顺序登记到 `REGISTRY`。处理器提供显示名 `label`、作用域 `scope`、阶段参数 `settings`、签名载荷 `specification`（签名外壳仍在 `signatures.specification`，与历史版本逐字节一致）、依赖 `dependencies`、预检钩子 `preflight`、执行 `run` 与冲突说明 `conflict_labels`；`builder.execute`、预检、列重生成、冲突与复用都按注册表分派，请求体（`NodeBody`、`ColumnBody`、`VersionChoiceBody`）的阶段取值也由注册表生成。每个分镜的阶段序列由镜头来源决定（`shot_stages`，来源表 `SHOT_SOURCES`）：recall 为 `recall → tts → select → render`（即 `ws.STAGES`），clip 为 `tts → select → render`，image 为 `tts → render`，aigc_image 为 `tts → draw → render`，aigc 为 `tts → generate → select → render`，animation 为 `tts → animate → render`；带 generate/cover 背景音乐提示点的分镜在配音后多一个 `music`（见[分镜画面来源](#分镜画面来源)；来源文件的定位与复验在 `workspace/sources.py`）。新增阶段或来源只需实现处理器并登记，不改预检与执行（`tests/test_studio_stages.py`）。
+阶段注册表：每个阶段一个 `StageHandler`（`studio/workspace/stages.py`），处理器位于 `handlers/`（`script`、`split`、`recall`、`tts`、`music`、`draw`、`generate`、`animate`、`invoke`、`select`、`overlay`、`render`、`compose`、`export`、`publish`），导入时经 `register()` 按 plan → shot → final 顺序登记到 `REGISTRY`。处理器提供显示名 `label`、作用域 `scope`、阶段参数 `settings`、签名载荷 `specification`（签名外壳仍在 `signatures.specification`，与历史版本逐字节一致）、依赖 `dependencies`、预检钩子 `preflight`、执行 `run` 与冲突说明 `conflict_labels`；`builder.execute`、预检、列重生成、冲突与复用都按注册表分派，请求体（`NodeBody`、`ColumnBody`、`VersionChoiceBody`）的阶段取值也由注册表生成。每个分镜的阶段序列由镜头来源决定（`shot_stages`，来源表 `SHOT_SOURCES`）：recall 为 `recall → tts → select → render`（即 `ws.STAGES`），clip 为 `tts → select → render`，image 为 `tts → render`，aigc_image 为 `tts → draw → render`，aigc 为 `tts → generate → select → render`，animation 为 `tts → animate → render`，tool 为 `tts → invoke → select → render`（图片产物 `tts → invoke → render`）；带 generate/cover/library 背景音乐提示点的分镜在配音后多一个 `music`（见[分镜画面来源](#分镜画面来源)；来源文件的定位与复验在 `workspace/sources.py`）。新增阶段或来源只需实现处理器并登记，不改预检与执行（`tests/test_studio_stages.py`）。
 
 `tests/test_studio_workspace.py` 覆盖版本选择、失败保护、混选依赖、方案隔离、续建、连续/隐藏镜头、预览确认、迁移和执行锁；使用真实 ffmpeg、SQLite、Chroma 及确定性模型。非整数帧率测试校验帧数、累计采样边界、字幕、完整解码和依赖文件哈希。浏览器及本轮检查见 [工作台验收记录](history/studio-workspace-verification.md)；此前真实模型的质量结论见 [历史验收记录](studio-verification.md)。
 

@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import copy
+import json
 from typing import Literal
 
 from pydantic import Field, ValidationError, model_validator
@@ -27,6 +28,9 @@ from mindex.agent.tools.common import STAGE_LABELS, PlanView, check, clip, load_
 from mindex.agent.tools.library_tasks import attachment_meta, size_text
 from mindex.agent.tools.search import upload_check
 from mindex.shared.config import StrictModel
+from mindex.studio.studio_models import VERSION_STAGES, BrandOverrides
+
+VersionStage = Literal[VERSION_STAGES]  # type: ignore[valid-type]  # 由阶段注册表生成
 
 JobId = Field(default=None, description="创作任务 ID；省略时使用当前页面打开的任务")
 PlanId = Field(default=None, description="方案 ID；省略时使用任务当前激活的方案")
@@ -152,6 +156,18 @@ class PlanOptionChanges(StrictModel):
         default=None, description="成片画幅：16:9 横屏、9:16 竖屏、1:1 方形；分辨率来自配置 studio.render.canvases")
     fit: Literal["pad", "crop"] | None = Field(
         default=None, description="画面适配：pad=完整保留并补黑边；crop=铺满画幅并居中裁切")
+    subtitle_style: Literal["default", "classic", "outline", "box", "highlight"] | None = Field(
+        default=None, description="烧录字幕的样式模板（需要 burn=true）：classic 经典、outline 粗描边、box 底条、"
+                                  "highlight 描边加高亮词变色；default=恢复配置的字体字号（旧版样式）")
+    brand_id: str | None = Field(default=None, pattern=r"^(none|[a-z0-9][a-z0-9-]{0,63})$",
+                                 description="品牌模板 ID（list_brands 列出）：统一字幕样式、文字层样式、片头片尾与水印；"
+                                             "none=不使用品牌")
+    brand_overrides: BrandOverrides | None = Field(
+        default=None, description="对所选品牌模板的方案覆盖（整体替换）：subtitle/overlay/intro/outro/watermark 替换模板中的同名项，"
+                                  "disable 关掉片头/片尾/水印；传空对象 {} 清除覆盖")
+    beat_align: float | None = Field(
+        default=None, ge=0, le=1.0, description="节拍对齐容差（秒，0.04–1）：成片合成时把背景音乐段落内的切点推迟到"
+                                                "该范围内最近的节拍；0=关闭")
 
 
 class UpdatePlanOptions(StrictModel):
@@ -175,6 +191,14 @@ async def plan_options_body(args: UpdatePlanOptions, ctx: ToolContext):
     updates = args.changes.model_dump(exclude_none=True) if args.changes else {}
     if "voice" in updates and "voice_mode" not in updates:
         updates["voice_mode"] = "custom"
+    if updates.get("subtitle_style") == "default":
+        updates["subtitle_style"] = None
+    if updates.get("brand_id") == "none":
+        updates["brand_id"] = None
+    if "brand_overrides" in updates and BrandOverrides.model_validate(updates["brand_overrides"]).empty:
+        updates["brand_overrides"] = None
+    if "beat_align" in updates:
+        updates["beat_align"] = {"tolerance": updates["beat_align"]} if updates["beat_align"] else None
     after = {**before, **updates}
     if after.get("voice_mode") == "inherit":
         after["voice"] = None
@@ -182,6 +206,9 @@ async def plan_options_body(args: UpdatePlanOptions, ctx: ToolContext):
         after = PlanOptions.model_validate(after).model_dump()
     except ValidationError as exc:
         raise ToolError(f"方案参数无效：{exc.errors()[0]['msg']}", code="invalid_options") from exc
+    if updates.get("brand_id"):
+        brand = check(await ctx.client.get(f"/api/studio/brands/{updates['brand_id']}"), "读取品牌模板")
+        ctx.extra.setdefault("brand_names", {})[brand["id"]] = brand["name"]
     if "template_id" in updates:
         # 先确认模板存在，预览里给出名称；不存在时服务端同样会拒绝。
         template = check(await ctx.client.get(f"/api/studio/templates/{updates['template_id']}"), "读取文案模板")
@@ -211,6 +238,17 @@ async def preview_update_plan_options(args: UpdatePlanOptions, ctx: ToolContext)
             warnings.append("更换文案模板不会重写已有文案；需要按新模板写时再重新生成文案")
     if any(c["label"] in ("canvas", "fit") for c in changes):
         warnings.append("画幅或适配方式变化后，下次构建会重建全部分镜渲染与成片；召回、配音与选片照常复用")
+    for change in changes:
+        if change["label"] == "brand_id" and change["after"]:
+            change["after"] = f"{change['after']}（{ctx.extra.get('brand_names', {}).get(change['after'], '')}）"
+    if any(c["label"] in ("brand_id", "brand_overrides") for c in changes):
+        warnings.append("品牌模板或覆盖变化后，下次构建只重新合成成片；分镜产物照常复用")
+    if any(c["label"] == "beat_align" for c in changes):
+        warnings.append("节拍对齐只作用于有背景音乐的段落：开启或改容差会重建非末镜的分镜渲染（多留余量）与成片"
+                        if after.get("beat_align") else "关闭节拍对齐后分镜渲染与成片恢复原切点（重建一次）")
+    if any(c["label"] == "subtitle_style" for c in changes):
+        warnings.append("字幕样式只在烧录字幕（burn=true）时生效；变化后只重新合成成片" if after.get("burn")
+                        else "字幕样式只在烧录字幕（burn=true）时生效，当前为软字幕，成片不受影响")
     return Preview(f"修改方案「{view.plan['name']}」参数", changes, warnings=warnings,
                    focus=studio_focus(view.job["id"], view.plan_id, section="plan"))
 
@@ -291,12 +329,13 @@ class MediaRefArgs(StrictModel):
 class ShotSourceArgs(StrictModel):
     """分镜画面来源（与 Shot.source 一致），整体替换；恢复素材召回用 kind=recall 或 clear。"""
 
-    kind: Literal["recall", "clip", "image", "aigc_image", "aigc", "animation"] = Field(
+    kind: Literal["recall", "clip", "image", "aigc_image", "aigc", "animation", "tool"] = Field(
         description="recall=素材召回（缺省）；clip=上传的视频片段；image=静态图片（推拉/平移）；"
                     "aigc_image=AI 生成图片：图片生成模型按提示词生成一张图片（可带主体参考图 reference_id 图生图），"
                     "再按静态图片推拉/平移（需在设置页激活图片生成档案）；"
                     "aigc=AI 生成视频：视频生成服务按提示词生成画面（需在设置页激活视频生成档案）；"
-                    "animation=由动画生成模型按画面说明写 HTML/JS 动画再逐帧录制（数据图表、文字动效、示意动画）")
+                    "animation=由动画生成模型按画面说明写 HTML/JS 动画再逐帧录制（数据图表、文字动效、示意动画）；"
+                    "tool=调用登记的第三方工具（list_tool_sources 列出）生成视频或图片")
     media_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$",
                                  description="clip/image 必填：已上传画面文件的 media_id；用户给的是附件时请改用 "
                                              "attach_query_media（purpose=source）")
@@ -332,13 +371,22 @@ class ShotSourceArgs(StrictModel):
     motion: Literal["zoom-in", "zoom-out", "pan-left", "pan-right", "none"] | None = Field(
         default=None, description="image/aigc_image：运动方式，缺省 zoom-in")
     strength: float | None = Field(default=None, ge=0, le=1, description="image/aigc_image：运动强度 0–1，缺省 0.3")
+    tool_id: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9-]{0,39}$",
+                                description="tool 必填：工具源 ID（list_tool_sources 列出）")
+    tool: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_.:/-]{1,128}$", description="tool 必填：白名单中的工具名")
+    arguments: dict | None = Field(default=None, description="tool：传给工具的 JSON 参数（≤8000 字符）；字符串值里的 "
+                                                             "{{text}}/{{visual}}/{{query}} 替换为本镜旁白、画面意象与查询")
+    uploads: list[MediaRefArgs] | None = Field(default=None, max_length=4,
+                                               description="tool：随调用上传的素材（需要该工具允许上传），先用 attach_query_media 上传")
+    output: Literal["video", "image"] | None = Field(default=None, description="tool：产物类型，须与工具登记一致，缺省 video")
 
 
 class ShotMusicArgs(StrictModel):
     """背景音乐提示点（与 Shot.music 一致），整体替换：从该分镜起换成新的背景音乐或停止，之后的分镜顺延。"""
 
-    kind: Literal["generate", "cover", "none"] = Field(
-        description="generate=音乐生成模型按描述生成（缺省纯音乐）；cover=按参考音频 audio_id 翻唱；none=从该分镜起停止背景音乐")
+    kind: Literal["generate", "cover", "library", "none"] = Field(
+        description="generate=音乐生成模型按描述生成（缺省纯音乐）；cover=按参考音频 audio_id 翻唱；"
+                    "library=选用曲库曲目 track_id（recommend_music / list_music_tracks 给出）；none=从该分镜起停止背景音乐")
     prompt: str | None = Field(default=None, max_length=2000,
                                description="音乐描述（风格、情绪、场景，例如「轻快电子，明亮，旅行 vlog」）；cover 时为 10–300 字的目标风格")
     lyrics: str | None = Field(default=None, max_length=3500,
@@ -346,7 +394,54 @@ class ShotMusicArgs(StrictModel):
     instrumental: bool | None = Field(default=None, description="是否纯音乐（无人声），缺省 true")
     audio_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$",
                                  description="cover：参考音频 media_id（attach_query_media 上传音频）")
+    track_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$",
+                                 description="library：曲库曲目 ID（recommend_music / list_music_tracks 给出）")
     volume: float | None = Field(default=None, ge=0, le=1, description="混音音量 0–1，缺省 0.25；配音出现时自动压低")
+
+
+class TransitionEdgeArgs(StrictModel):
+    kind: Literal["fade", "white", "zoom", "slide"] = Field(
+        description="fade=黑场淡入/淡出；white=白场；zoom=缩放并淡入/淡出；slide=从右滑入/向左滑出")
+    duration: float | None = Field(default=None, ge=0.1, le=2, description="时长（秒），缺省 0.5；超过镜头一半时自动截短")
+
+
+class OverlapTransitionArgs(StrictModel):
+    kind: Literal["fade", "dissolve", "fadeblack", "fadewhite", "wipeleft", "wiperight", "slideleft", "slideright",
+                  "circleopen", "circleclose", "smoothleft", "smoothright"] | None = Field(
+        default=None, description="过渡样式（ffmpeg xfade），缺省 fade 交叉淡化")
+    duration: float | None = Field(default=None, ge=0.1, le=2, description="时长（秒），缺省 0.5")
+
+
+class CardItemArgs(StrictModel):
+    label: str = Field(min_length=1, max_length=20, description="标签")
+    value: str = Field(min_length=1, max_length=20, description="数值（强调色显示）")
+
+
+class ShotOverlayArgs(StrictModel):
+    """文字层（与 Shot.overlays 的元素一致）。"""
+
+    engine: Literal["ass", "html"] | None = Field(
+        default=None, description="ass=字幕引擎烧录（轻量，缺省）；html=透明 HTML 动画叠加（效果更丰富，需要动画录制组件）")
+    kind: Literal["title", "lower_third", "data_card", "custom"] = Field(
+        description="title=标题卡（居中）；lower_third=下三分之一信息条（姓名、职位等）；data_card=数据卡片（右上角）；"
+                    "custom=自定义 HTML 动画叠加（仅 html，按 brief 生成）")
+    title: str | None = Field(default=None, max_length=60, description="标题（title/lower_third 必填）")
+    subtitle: str | None = Field(default=None, max_length=80, description="副标题 / 第二行")
+    items: list[CardItemArgs] | None = Field(default=None, max_length=6, description="data_card 的数据行")
+    brief: str | None = Field(default=None, max_length=1000, description="custom：叠加层画面说明")
+    start: float | None = Field(default=None, ge=0, le=60, description="相对本镜开头的开始秒，缺省从头")
+    end: float | None = Field(default=None, gt=0, le=60, description="相对本镜开头的结束秒，缺省到尾")
+    effect: Literal["none", "fade", "slide"] | None = Field(default=None, description="入场效果，缺省 fade")
+
+
+class ShotTransitionArgs(StrictModel):
+    """分镜转场（与 Shot.transition 一致），整体替换。镜内转场不改变时长；重叠转场不改变成片时间线
+    （本镜多渲染尾部画面，过渡从切点开始、在下一镜开头完成）。"""
+
+    enter: TransitionEdgeArgs | None = Field(default=None, description="本镜开头的镜内转场")
+    leave: TransitionEdgeArgs | None = Field(default=None, description="本镜结尾的镜内转场（设置了 next 时被取代）")
+    next: OverlapTransitionArgs | None = Field(
+        default=None, description="本镜到下一镜的重叠转场（最后一镜忽略；下一镜的 enter 被取代）")
 
 
 class ShotFields(StrictModel):
@@ -363,9 +458,17 @@ class ShotFields(StrictModel):
     music: ShotMusicArgs | None = Field(
         default=None, description="背景音乐提示点（整体替换）：从该分镜起换成新的背景音乐（generate/cover）或停止（none），"
                                   "之后的分镜顺延；去掉提示点（改为顺延前面的背景音乐）请用 clear")
+    transition: ShotTransitionArgs | None = Field(
+        default=None, description="转场（整体替换）：enter/leave 镜内转场，next 到下一镜的重叠转场；恢复硬切请用 clear")
+    highlights: list[str] | None = Field(
+        default=None, max_length=10, description="字幕高亮词（整体替换，≤10 个、每个 ≤20 字）：烧录字幕时这些词变色；清空请用 clear")
+    overlays: list[ShotOverlayArgs] | None = Field(
+        default=None, max_length=4, description="文字层（整体替换，≤4 个）：标题卡、信息条、数据卡片或自定义 HTML 叠加；"
+                                                "ass 文字层即使软字幕也会烧录进画面；清空请用 clear")
 
 
-ClearableField = Literal["recall", "granularity", "recall_limit", "visual", "source", "music"]
+ClearableField = Literal["recall", "granularity", "recall_limit", "visual", "source", "music", "transition",
+                         "highlights", "overlays"]
 
 
 class ShotOperation(StrictModel):
@@ -379,7 +482,8 @@ class ShotOperation(StrictModel):
     fields: ShotFields | None = Field(default=None, description="update/insert：要设置的字段")
     clear: list[ClearableField] | None = Field(
         default=None, description="update：恢复为跟随方案或清空的字段（recall=默认文字召回，granularity=跟随服务配置，"
-                                  "recall_limit=跟随方案，visual=清空画面意象，source=恢复素材召回，music=去掉背景音乐提示点、顺延前面）；"
+                                  "recall_limit=跟随方案，visual=清空画面意象，source=恢复素材召回，music=去掉背景音乐提示点、顺延前面，"
+                                  "transition=恢复硬切，highlights=清空高亮词，overlays=去掉文字层）；"
                                   "不能与 fields 中的同名字段同时给出")
     parts: list[ShotFields] | None = Field(default=None, min_length=2,
                                            description="split：拆分后的各镜；各段旁白须由 get_shot_details 返回的完整旁白"
@@ -407,7 +511,8 @@ def recall_is_default(recall: dict | None) -> bool:
 
 LABELS = {"visual": "画面意象", "text": "旁白", "query": "查询", "estimated_seconds": "时长",
           "recall": "召回设置", "granularity": "召回粒度", "recall_limit": "召回数量", "source": "画面来源",
-          "music": "背景音乐"}
+          "music": "背景音乐", "transition": "转场", "highlights": "字幕高亮词",
+          "overlays": "文字层"}
 RECALL_KEYS = ("recall", "granularity", "recall_limit")
 INHERITED_KEYS = (*RECALL_KEYS, "source")  # split 时未提供即继承原镜的字段
 MODE_LABELS = {"text": "文字召回", "image": "图片召回", "video": "视频召回"}
@@ -415,8 +520,8 @@ GRANULARITY_LABELS = {"shot": "镜头", "moment": "精细片段", "scene": "场�
 PERSON_MODE_LABELS = {"auto": "自动", "onscreen": "画面出镜", "mentioned": "对白提及"}
 RECALL_REBUILD = "召回、选片、渲染及成片会在下次构建时重建"
 SOURCE_LABELS = {"recall": "素材召回", "clip": "上传片段", "image": "静态图片", "aigc_image": "AI 生成图片",
-                 "aigc": "AI 生成视频", "animation": "AI 动画"}
-MUSIC_LABELS = {"generate": "生成背景音乐", "cover": "翻唱", "none": "停止背景音乐"}
+                 "aigc": "AI 生成视频", "animation": "AI 动画", "tool": "第三方工具"}
+MUSIC_LABELS = {"generate": "生成背景音乐", "cover": "翻唱", "library": "曲库音乐", "none": "停止背景音乐"}
 VIDEO_MODE_LABELS = {"text": "文生视频", "first_frame": "首帧图生视频", "last_frame": "尾帧图生视频",
                      "first_last": "首尾帧生视频", "reference": "主体参考生视频"}
 MOTION_LABELS = {"zoom-in": "推近", "zoom-out": "拉远", "pan-left": "向左平移", "pan-right": "向右平移", "none": "静止"}
@@ -428,6 +533,7 @@ SOURCE_REBUILD = {
     "aigc_image": "生成图片（调用图片生成服务，可能产生费用）、图片画面渲染及成片会在下次构建时重建（不需要召回、选片与索引）",
     "aigc": "生成画面（调用视频生成服务，可能产生费用）、选窗、渲染及成片会在下次构建时重建（不需要召回与索引）",
     "animation": "生成动画（调用动画生成模型写源码）、录制渲染及成片会在下次构建时重建（不需要召回、选片与索引）",
+    "tool": "调用第三方工具（参数与允许上传的素材会发送给该服务）、选窗或图片渲染及成片会在下次构建时重建（不需要召回与索引）",
 }
 
 
@@ -460,14 +566,15 @@ def normalize_source(value: ShotSourceArgs | dict | None) -> dict | None:
     data = value.model_dump(exclude_none=True) if isinstance(value, ShotSourceArgs) else dict(value)
     if data.get("kind") == "recall":
         return None
-    if data.get("kind") not in ("aigc", "aigc_image", "animation") and not data.get("media_id"):
+    if data.get("kind") not in ("aigc", "aigc_image", "animation", "tool") and not data.get("media_id"):
         raise ToolError("clip/image 来源需要 media_id；用户给的附件请用 attach_query_media（purpose=source）上传",
                         code="invalid_source")
     allowed = {"clip": {"kind", "media_id", "start"}, "image": {"kind", "media_id", "motion", "strength"},
                "aigc": {"kind", "prompt", "negative", "image_id", "seed", "mode", "last_image_id", "references", "model",
                         "resolution", "ratio", "duration"},
                "aigc_image": {"kind", "prompt", "reference_id", "seed", "prompt_optimizer", "motion", "strength"},
-               "animation": {"kind", "brief"}}
+               "animation": {"kind", "brief"},
+               "tool": {"kind", "tool_id", "tool", "arguments", "uploads", "output", "motion", "strength"}}
     extra = set(data) - allowed[data["kind"]]
     if extra:
         raise ToolError(f"{SOURCE_LABELS[data['kind']]}来源不支持字段：{'、'.join(sorted(extra))}", code="invalid_source")
@@ -494,6 +601,20 @@ def normalize_music(value: ShotMusicArgs | dict | None) -> dict | None:
         raise ToolError(f"背景音乐设置无效：{validation_message(exc)}", code="invalid_music") from exc
 
 
+def normalize_transition(value: ShotTransitionArgs | dict | None) -> dict | None:
+    """转场参数 → Shot.transition 的规范形状；三项皆空返回 None（硬切不落键）。"""
+    from mindex.studio.studio import ShotTransition
+
+    if value is None:
+        return None
+    data = value.model_dump(exclude_none=True) if isinstance(value, ShotTransitionArgs) else dict(value)
+    try:
+        parsed = ShotTransition.model_validate(data)
+    except ValidationError as exc:
+        raise ToolError(f"转场设置无效：{validation_message(exc)}", code="invalid_transition") from exc
+    return None if parsed.empty else parsed.model_dump()
+
+
 def music_text(music: dict | None, media: str | None = None) -> str:
     if not music:
         return "无提示点（顺延前面分镜的背景音乐）"
@@ -507,6 +628,8 @@ def music_text(music: dict | None, media: str | None = None) -> str:
         parts.append("纯音乐" if music.get("instrumental", True) else "带人声" + ("（含歌词）" if music.get("lyrics") else "（自动写词）"))
     if music.get("audio_id"):
         parts.append(f"参考音频 {media or music['audio_id'][:8]}")
+    if music.get("track_id"):
+        parts.append(f"曲目 {music['track_id'][:8]}")
     parts.append(f"音量 {music.get('volume', 0.25):g}")
     return "，".join(parts)
 
@@ -537,6 +660,11 @@ def source_text(source: dict | None, media: str | None = None) -> str:
     if kind == "animation":
         brief = f"画面说明「{clip(source['brief'], 60)}」" if source.get("brief") else "画面说明缺省（画面意象/旁白）"
         return f"AI 动画，{brief}"
+    if kind == "tool":
+        extra = [f"参数 {clip(json.dumps(source.get('arguments') or {}, ensure_ascii=False), 60)}",
+                 f"上传素材 {len(source['uploads'])} 个" if source.get("uploads") else ""]
+        return (f"第三方工具 {source['tool_id']} / {source['tool']}（产物{'图片' if source.get('output') == 'image' else '视频'}），"
+                + "，".join(item for item in extra if item))
     name = media or source["media_id"][:8]
     if kind == "clip":
         return f"上传片段 {name}，起点 {source.get('start') or 0:g} 秒"
@@ -555,6 +683,17 @@ def shot_values(fields: ShotFields | None) -> dict:
         values["source"] = normalize_source(fields.source)
     if fields.music is not None:
         values["music"] = normalize_music(fields.music)
+    if fields.transition is not None:
+        values["transition"] = normalize_transition(fields.transition)
+    if fields.overlays is not None:
+        values["overlays"] = normalize_overlays(fields.overlays)
+    if fields.highlights is not None:
+        from mindex.studio.studio import normalize_highlights
+
+        try:
+            values["highlights"] = normalize_highlights(fields.highlights)
+        except ValueError as exc:
+            raise ToolError(f"字幕高亮词无效：{exc}", code="invalid_highlights") from exc
     return values
 
 
@@ -596,7 +735,45 @@ def field_text(key: str, value):
         return source_text(value)
     if key == "music":
         return music_text(value)
+    if key == "transition":
+        from mindex.studio import workspace as ws
+
+        return ws.transitions.describe(value)
+    if key == "highlights":
+        return "、".join(value) if value else "无"
+    if key == "overlays":
+        return overlays_text(value)
     return value
+
+
+OVERLAY_LABELS = {"title": "标题卡", "lower_third": "信息条", "data_card": "数据卡片", "custom": "自定义叠加"}
+
+
+def overlays_text(value: list[dict] | None) -> str:
+    if not value:
+        return "无"
+    parts = []
+    for layer in value:
+        name = OVERLAY_LABELS[layer["kind"]] + ("（HTML）" if layer.get("engine") == "html" else "")
+        detail = layer.get("title") or clip(layer.get("brief") or "", 30)
+        if layer.get("items"):
+            detail += " " + "、".join(f"{item['label']} {item['value']}" for item in layer["items"])
+        parts.append(f"{name}「{detail.strip()}」")
+    return "；".join(parts)
+
+
+def normalize_overlays(value) -> list[dict] | None:
+    from pydantic import TypeAdapter
+
+    from mindex.studio.studio import ShotOverlay
+
+    if not value:
+        return None
+    data = [item.model_dump(exclude_none=True) if isinstance(item, ShotOverlayArgs) else dict(item) for item in value]
+    try:
+        return [layer.model_dump() for layer in TypeAdapter(list[ShotOverlay]).validate_python(data)]
+    except ValidationError as exc:
+        raise ToolError(f"文字层无效：{validation_message(exc)}", code="invalid_overlays") from exc
 
 
 def recall_warnings(view: PlanView, shots: list[dict]) -> list[str]:
@@ -617,7 +794,10 @@ def music_warnings(view: PlanView, shots: list[dict]) -> list[str]:
         sid = shot.get("id")
         if sid in before and before[sid].get("music") != shot.get("music"):
             music = shot.get("music")
-            if music and music["kind"] in ("generate", "cover"):
+            if music and music["kind"] == "library":
+                found.append(f"#{view.order.index(sid) + 1} {short(sid)} 改用曲库音乐：下次构建复制曲目（不调用生成服务），"
+                             "之后的分镜顺延这段音乐，成片重新合成")
+            elif music and music["kind"] in ("generate", "cover"):
                 found.append(f"#{view.order.index(sid) + 1} {short(sid)} 的背景音乐将变化：下次构建会调用音乐生成服务"
                              "（可能产生费用），之后的分镜顺延这段音乐，成片重新合成")
             else:
@@ -665,6 +845,34 @@ def merge_into(previous: dict, current: dict) -> None:
     set_visual(previous, join_visual(previous.get("visual"), current.get("visual")))
     if not previous.get("music") and current.get("music"):
         previous["music"] = current["music"]
+    merge_transition(previous, current)
+    words = list(dict.fromkeys([*(previous.get("highlights") or []), *(current.get("highlights") or [])]))[:10]
+    if words:
+        previous["highlights"] = words
+    if not previous.get("overlays") and current.get("overlays"):  # 文字层：保留上一镜的，没有时继承被合并镜的
+        previous["overlays"] = current["overlays"]
+
+
+def merge_transition(previous: dict, current: dict) -> None:
+    """合并：保留前一镜的入场转场，出场与重叠转场取后一镜（与 studio-editor.js 一致）。"""
+    first, last = previous.get("transition") or {}, current.get("transition") or {}
+    merged = {key: value for key, value in (("enter", first.get("enter")), ("leave", last.get("leave")),
+                                            ("next", last.get("next"))) if value}
+    if merged:
+        previous["transition"] = merged
+    else:
+        previous.pop("transition", None)
+
+
+def split_transition(original: dict | None, number: int, count: int) -> dict | None:
+    """拆分：入场转场留在第一段，出场与重叠转场留在最后一段，中间各段硬切。"""
+    original = original or {}
+    kept = {}
+    if number == 0 and original.get("enter"):
+        kept["enter"] = original["enter"]
+    if number == count - 1:
+        kept.update({key: original[key] for key in ("leave", "next") if original.get(key)})
+    return kept or None
 
 
 def plan_shots(view: PlanView, operations: list[ShotOperation]) -> tuple[list[dict], list[dict]]:
@@ -708,7 +916,7 @@ def plan_shots(view: PlanView, operations: list[ShotOperation]) -> tuple[list[di
             shot = shots[position(sid)]
             for key in clear:
                 before = shot.get(key)
-                if key in ("visual", "source", "music"):
+                if key in ("visual", "source", "music", "transition", "highlights", "overlays"):
                     shot.pop(key, None)
                 else:
                     shot[key] = None
@@ -726,6 +934,8 @@ def plan_shots(view: PlanView, operations: list[ShotOperation]) -> tuple[list[di
                                 "before": field_text(key, shot.get(key)), "after": field_text(key, value)})
                 if key == "source" and value is None:
                     shot.pop("source", None)  # 素材召回不落键，与已存内容一致
+                elif key in ("transition", "highlights", "overlays") and value is None:
+                    shot.pop(key, None)  # 硬切 / 无高亮词不落键
                 else:
                     shot[key] = value
         elif op.op == "insert":
@@ -790,6 +1000,18 @@ def plan_shots(view: PlanView, operations: list[ShotOperation]) -> tuple[list[di
                     shot.pop("music", None)
                 elif "music" in part:
                     shot["music"] = part["music"]
+                if "transition" in part:
+                    shot["transition"] = part["transition"]
+                else:
+                    shot["transition"] = split_transition(original.get("transition"), number, len(parts))
+                if not shot.get("transition"):
+                    shot.pop("transition", None)
+                if number and "overlays" not in part:  # 文字层只留在第一段
+                    shot.pop("overlays", None)
+                elif "overlays" in part:
+                    shot["overlays"] = part["overlays"]
+                if not shot.get("overlays"):
+                    shot.pop("overlays", None)
                 if shot.get("source", ...) is None:
                     shot.pop("source", None)
                 new.append(shot)
@@ -1201,15 +1423,35 @@ async def remove_reference_text(args: RemoveReferenceText, ctx: ToolContext) -> 
 class SelectVersion(StrictModel):
     job_id: str | None = JobId
     plan_id: str | None = PlanId
-    stage: Literal["script", "content", "recall", "tts", "select", "render", "compose"]
+    stage: VersionStage = Field(description="阶段：script 文案、content 分镜内容、各逐镜阶段，或成片阶段（compose 成片等）")
     version: str = Field(description="版本 ID 或其前缀（界面显示前 8 位）")
     shot: str | None = Field(default=None, description="分镜级阶段需要：完整 ID、短 ID 或 #序号")
+    variant: str | None = Field(default=None, max_length=40,
+                                description="有变体的成片阶段（如某个画幅的导出、某个平台的封面）需要：变体名")
+
+
+def final_stages() -> tuple[str, ...]:
+    from mindex.studio import workspace as ws
+
+    return ws.stages.names(scope="final")
+
+
+def selected_version(plan: dict, stage: str, sid: str | None):
+    from mindex.studio import workspace as ws
+
+    if stage == "script":
+        return plan.get("script")
+    if stage in final_stages():
+        return ws.stages.handler(stage).selected(plan, sid)
+    return plan["shots"][sid].get(stage)
 
 
 async def select_body(args: SelectVersion, ctx: ToolContext):
     view = await load_view(ctx, args.job_id, args.plan_id)
     shot_id = None
-    if args.stage not in ("script", "compose"):
+    if args.stage in final_stages():
+        shot_id = args.variant
+    elif args.stage != "script":
         if not args.shot:
             raise ToolError(f"{STAGE_LABELS[args.stage]}阶段需要指定分镜", code="missing_shot")
         found = resolve_shot(view.order, args.shot)
@@ -1226,15 +1468,12 @@ async def select_body(args: SelectVersion, ctx: ToolContext):
 async def preview_select_version(args: SelectVersion, ctx: ToolContext) -> Preview:
     view, body = await select_body(args, ctx)
     planned(ctx, "select", (view.job["id"], view.plan_id, body))
-    if body["stage"] == "script":
-        current = view.plan.get("script")
-    elif body["stage"] == "compose":
-        current = view.plan.get("final")
-    else:
-        current = view.plan["shots"][body["shot_id"]].get(body["stage"])
+    current = selected_version(view.plan, body["stage"], body["shot_id"])
     item = view.w["versions"][body["version_id"]]
+    final = body["stage"] in final_stages()
+    where = (f"（{body['shot_id']}）" if final else f"（分镜 {short(body['shot_id'])}）") if body["shot_id"] else ""
     return Preview(
-        f"选用{STAGE_LABELS[body['stage']]}版本" + (f"（分镜 {short(body['shot_id'])}）" if body["shot_id"] else ""),
+        f"选用{STAGE_LABELS.get(body['stage'], body['stage'])}版本" + where,
         [{"label": "版本", "before": short(current) or "（无）", "after": f"{short(body['version_id'])} · {item['status']}"}],
         warnings=["选用文案版本会把分镜工作台还原为该文案对应的最近一次构建结果"] if body["stage"] == "script" else [],
         focus=version_focus(view.job["id"], view.plan_id, body),
@@ -1244,7 +1483,7 @@ async def preview_select_version(args: SelectVersion, ctx: ToolContext) -> Previ
 def version_focus(job, pid, body) -> dict:
     if body["stage"] == "script":
         return studio_focus(job, pid, section="script")
-    if body["stage"] == "compose":
+    if body["stage"] in final_stages():
         return studio_focus(job, pid, section="final")
     return studio_focus(job, pid, shots=[body["shot_id"]], stage=body["stage"])
 
@@ -1304,7 +1543,8 @@ def specs() -> list[ToolSpec]:
                  preview_activate_plan),
         ToolSpec("update_plan_options", "studio",
                  "修改方案参数（音色、召回数量、音轨模式、字幕烧录、变速、对齐策略、原声音量、文案模板 template_id、"
-                 "画幅 canvas 与适配 fit）或方案名称。只传要改的字段。",
+                 "画幅 canvas 与适配 fit、字幕样式 subtitle_style、品牌 brand_id/brand_overrides、节拍对齐 beat_align）"
+                 "或方案名称。只传要改的字段。",
                  UpdatePlanOptions, "write", update_plan_options, preview_update_plan_options),
         ToolSpec("edit_script", "studio", "用完整新文案替换方案文案（保存为手动版本）；分镜随之过期，构建时重新拆分镜。",
                  EditScript, "write", edit_script, preview_edit_script),
@@ -1316,8 +1556,11 @@ def specs() -> list[ToolSpec]:
                  "recall_limit；source 设置画面来源（recall 素材召回 / clip 已上传片段 + 起点 start / image 已上传图片 + "
                  "motion、strength / aigc_image AI 生成图片 / aigc AI 生成视频（mode 选文生、首帧、尾帧、首尾帧、主体参考，"
                  "以及 H3 的 model、resolution、ratio、duration）/ animation AI 动画）；music 设置背景音乐提示点（从该分镜起"
-                 "生成/翻唱/停止背景音乐，之后的分镜顺延，默认没有背景音乐）；update 的 clear 把这些字段恢复为跟随方案"
-                 "（visual 为清空、source 恢复素材召回、music 去掉提示点）。"
+                 "生成/翻唱/停止背景音乐，之后的分镜顺延，默认没有背景音乐）；transition 设置转场（enter/leave 镜内转场"
+                 "fade/white/zoom/slide，next 到下一镜的重叠转场，默认硬切）；update 的 clear 把这些字段恢复为跟随方案"
+                 "（visual 为清空、source 恢复素材召回、music 去掉提示点、transition 恢复硬切）；highlights 设置字幕高亮词"
+                 "（烧录字幕时变色，字幕样式用 update_plan_options 的 subtitle_style）；overlays 设置文字层"
+                 "（标题卡 / 信息条 / 数据卡片，engine=ass 烧录或 html 透明动画叠加）。"
                  "用户给的图片/视频附件请用 attach_query_media。",
                  EditShots, "write", edit_shots, preview_edit_shots),
         ToolSpec("rename_job", "studio", "修改创作任务标题（手动命名后不再自动生成标题）。", RenameJob, "write",

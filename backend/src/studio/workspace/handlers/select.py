@@ -1,7 +1,7 @@
 """选片对齐阶段（逐镜）：在召回候选或人工区间里选定原片时间区间并与配音对齐。
 
 上传片段（clip 来源）没有召回：在片段内从人工起点（缺省 0）取与配音等长的窗口；AIGC（aigc 来源）在 generate
-版本的生成片段内从 0 起取窗，片段短于配音时冻结末帧补足。
+版本的生成片段内从 0 起取窗，片段短于配音时冻结末帧补足；第三方工具（tool 来源，视频产物）同样在 invoke 版本的产物内取窗。
 """
 
 from __future__ import annotations
@@ -9,12 +9,13 @@ from __future__ import annotations
 from mindex.studio import studio
 
 from .. import sources
-from ..media_nodes import alignment, clip_alignment, generated_alignment, validate_range
+from ..media_nodes import alignment, clip_alignment, generated_alignment, tool_alignment, validate_range
 from ..plans import needs_recall
 from ..stages import StageHandler, plan_shot_stages, register, shot_content
 
 CLIP_VERSION = 1
 AIGC_VERSION = 1
+TOOL_VERSION = 1
 
 
 class SelectHandler(StageHandler):
@@ -37,6 +38,12 @@ class SelectHandler(StageHandler):
             inputs["generate"] = selected.get("generate")
             payload = {"text": content["text"], "tts": inputs["tts"], "generate": inputs["generate"],
                        "aigc_version": AIGC_VERSION}
+            return payload, inputs, params
+        if source and source["kind"] == "tool":
+            # 第三方工具的视频产物由 invoke 版本决定（其签名含工具配置摘要与参数）；窗口固定从 0 开始。
+            inputs["invoke"] = selected.get("invoke")
+            payload = {"text": content["text"], "tts": inputs["tts"], "invoke": inputs["invoke"],
+                       "tool_version": TOOL_VERSION}
             return payload, inputs, params
         if source:
             # 片段摘要（media_id）与起点决定窗口；不依赖召回与人工区间。
@@ -62,7 +69,7 @@ class SelectHandler(StageHandler):
 
     def dependencies(self, w, p, sid, *, resplit=False):
         present = plan_shot_stages(w, p, sid)
-        wanted = ["tts", "generate"] + (["recall"] if needs_recall(p, sid) else [])
+        wanted = ["tts", "generate", "invoke"] + (["recall"] if needs_recall(p, sid) else [])
         return [f"{stage}:{sid}" for stage in wanted if stage in present]
 
     def prepare(self, config, w, p, sid):
@@ -96,6 +103,8 @@ class SelectHandler(StageHandler):
         source = sources.plan_source(ctx.w, ctx.p, ctx.sid)
         if source and source["kind"] == "aigc":
             return generated_alignment(ctx.config, ctx.job_id, ctx.w, ctx.p, ctx.sid), {}
+        if source and source["kind"] == "tool":
+            return tool_alignment(ctx.config, ctx.job_id, ctx.w, ctx.p, ctx.sid), {}
         if source:
             return clip_alignment(ctx.config, ctx.job_id, ctx.w, ctx.p, ctx.sid), {}
         return alignment(ctx.config, ctx.job_id, ctx.w, ctx.p, ctx.sid, ctx.p["ranges"].get(ctx.sid)), {}

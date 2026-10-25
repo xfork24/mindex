@@ -155,6 +155,9 @@ def create_app(
     register_page("studio", "templates.html", ("/studio/templates", "/studio/templates/"))
     # 选题挖掘同为创作页子页面（标签位于创作任务与文案模板之间）。
     register_page("studio", "topics.html", ("/studio/topics", "/studio/topics/"))
+    register_page("studio", "brands.html", ("/studio/brands", "/studio/brands/"))
+    register_page("studio", "music.html", ("/studio/music", "/studio/music/"))
+    register_page("studio", "tools.html", ("/studio/tools", "/studio/tools/"))
     for group in ("search", "admin", "persons", "studio", "settings", "shared"):
         app.mount(f"/assets/{group}", StaticFiles(directory=assets_root / group), name=f"assets-{group}")
 

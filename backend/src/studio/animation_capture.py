@@ -145,17 +145,22 @@ def available() -> bool:
 
 
 def capture(html: str, *, seconds: float, width: int, height: int, fps: float, target: Path,
-            max_seconds: float, frame_timeout: float = 5, frames: int | None = None) -> dict:
+            max_seconds: float, frame_timeout: float = 5, frames: int | None = None, transparent: bool = False) -> dict:
     """录制 ``frames``（缺省 ``round(seconds × fps)``）帧到 ``target``（H.264/yuv420p MP4）。
 
-    第 i 帧对应虚拟时刻 ``i × 1000 / fps`` 毫秒（第 0 帧为加载完成时的画面）。返回录制统计。"""
+    ``transparent=True`` 时截图省略页面背景（页面自身须为透明背景），编码为带透明通道的 QuickTime RLE（argb）
+    MOV，供分镜渲染作为文字叠加层合成。第 i 帧对应虚拟时刻 ``i × 1000 / fps`` 毫秒（第 0 帧为加载完成时的画面）。
+    返回录制统计。"""
     sync_playwright, PlaywrightError = _playwright()
     rate = Fraction(str(fps))
     count = frames if frames is not None else max(1, round(seconds * float(rate)))
     step = 1000 / float(rate)
     target = Path(target)
     target.parent.mkdir(parents=True, exist_ok=True)
-    partial = target.with_name(target.stem + ".partial.mp4")
+    partial = target.with_name(target.stem + (".partial.mov" if transparent else ".partial.mp4"))
+    output = (["-c:v", "qtrle", "-pix_fmt", "argb", "-f", "mov"] if transparent else
+              ["-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", "-movflags",
+               "+faststart", "-f", "mp4"])
     started = time.monotonic()
     blocked: list[str] = []
     profile = Path(tempfile.mkdtemp(prefix="mindex-animation-"))
@@ -205,15 +210,15 @@ def capture(html: str, *, seconds: float, width: int, height: int, fps: float, t
                 encoder = subprocess.Popen(
                     [ffmpeg_bin(), "-hide_banner", "-loglevel", "error", "-y", "-f", "image2pipe",
                      "-framerate", f"{rate.numerator}/{rate.denominator}", "-c:v", "png", "-i", "-",
-                     "-frames:v", str(count), "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
-                     "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-f", "mp4", str(partial)],
+                     "-frames:v", str(count), *output, str(partial)],
                     stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                 )
                 for index in range(count):
                     check_wall()
                     _advance(cdp, 0 if index == 0 else step, frame_timeout, index)
                     try:
-                        shot = page.screenshot(type="png", timeout=frame_timeout * 1000)
+                        shot = page.screenshot(type="png", timeout=frame_timeout * 1000,
+                                               omit_background=transparent)
                     except PlaywrightError as exc:
                         raise MediaError(f"第 {index + 1} 帧截图超时或失败") from exc
                     try:

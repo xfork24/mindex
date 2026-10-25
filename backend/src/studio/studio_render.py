@@ -259,6 +259,65 @@ def still_shot(image: Path, render, output: Path, *, frames: int, motion: str = 
     still.unlink(missing_ok=True)
 
 
+EDGE_ZOOM = 0.2  # 缩放转场的幅度：入场从 1.2 倍推到 1 倍，出场从 1 倍推到 1.2 倍
+
+
+def edge_filter(width: int, height: int, fps: Fraction, frames: int, enter: dict | None,
+                leave: dict | None) -> str:
+    """镜内转场的 filter_complex（输入 ``[0:v]``，输出 ``[v]``），帧数与时长都不变。
+
+    ``enter``/``leave`` 为 ``{"kind", "duration"}``（时长已截到镜头的一半以内）。fade 黑场淡入淡出；white 白场；
+    zoom 缩放并伴随黑场淡入淡出；slide 在黑底上从右滑入 / 向左滑出。"""
+    total = float(frames / fps)
+    rate = f"{fps.numerator}/{fps.denominator}"
+    chain, fades = [], []
+    kinds = {"enter": (enter or {}).get("kind"), "leave": (leave or {}).get("kind")}
+    if "zoom" in kinds.values():
+        terms = []
+        if kinds["enter"] == "zoom":
+            n = max(1, round(enter["duration"] * fps))
+            terms.append(f"if(lt(in,{n}),{1 + EDGE_ZOOM}-{EDGE_ZOOM}*in/{n},1)")
+        if kinds["leave"] == "zoom":
+            n = max(1, round(leave["duration"] * fps))
+            start = frames - 1 - n
+            terms.append(f"if(gt(in,{start}),1+{EDGE_ZOOM}*(in-{start})/{n},1)")
+        chain += [f"scale={width * 2}:{height * 2}", "setsar=1",
+                  f"zoompan=z='{'*'.join(terms)}':x='(iw-iw/zoom)/2':y='(ih-ih/zoom)/2':d=1:s={width}x{height}"
+                  f":fps={rate}", "setsar=1"]
+    for side, edge in (("enter", enter), ("leave", leave)):
+        if not edge or edge["kind"] == "slide":
+            continue
+        color = "white" if edge["kind"] == "white" else "black"
+        start = 0.0 if side == "enter" else max(0.0, total - edge["duration"])
+        fades.append(f"fade=t={'in' if side == 'enter' else 'out'}:st={start:.6f}:d={edge['duration']:.6f}:c={color}")
+    body = ",".join([*chain, "setpts=PTS-STARTPTS"])
+    if "slide" not in kinds.values():
+        return f"[0:v]{','.join([body, *fades, 'format=yuv420p'])}[v]"
+    a = enter["duration"] if kinds["enter"] == "slide" else 0
+    b = leave["duration"] if kinds["leave"] == "slide" else 0
+    x = "0"
+    if b:
+        x = f"if(gt(t,{total - b:.6f}),-{width}*(t-{total - b:.6f})/{b:.6f},0)"
+    if a:
+        x = f"if(lt(t,{a:.6f}),{width}*(1-t/{a:.6f}),{x})"
+    tail = ",".join([*fades, "format=yuv420p"])
+    return (f"[0:v]{body}[fg];color=c=black:s={width}x{height}:r={rate}:d={total + 1:.6f}[bg];"
+            f"[bg][fg]overlay=x='{x}':y=0:eof_action=repeat,{tail}[v]")
+
+
+def apply_edges(source: Path, output: Path, render, *, frames: int, enter: dict | None, leave: dict | None):
+    """在确定帧数的分镜画面上叠加镜内转场，输出同帧数、同尺寸的画面（无音轨）。"""
+    fps = Fraction(str(render.fps))
+    graph = edge_filter(render.width, render.height, fps, frames, enter, leave)
+    atomic_media(
+        ["-i", str(source), "-filter_complex", graph, "-map", "[v]", "-an", "-frames:v", str(frames),
+         "-c:v", "libx264", "-preset", render.preset, "-crf", str(render.crf), "-pix_fmt", "yuv420p",
+         "-movflags", "+faststart"],
+        output,
+        timeout=max(600, float(frames / fps) * 10),
+    )
+
+
 def process_shot_audio(voice_source: Path, ambient_source: Path | None, event, audio_cfg, output: Path):
     """配音 atempo→loudnorm→48k；ducking 模式叠加压低后的原声（duration=first 以配音为准）。"""
     voice = output.with_name(f"{event.shot_id}.voice.wav")
@@ -314,27 +373,51 @@ def extract_ambient(source: Path, event, audio_cfg, output: Path):
     )
 
 
+def watermark_graph(image: Path, mark: dict, width: int, height: int, *, window: tuple[float, float] | None = None) -> str:
+    """水印滤镜片段（用在 -vf 链首）：图片按短边比例缩放、乘以不透明度，叠加在画面一角；
+    ``window`` 给出时只在该时间段显示（例如不含片头片尾）。"""
+    short = min(width, height)
+    size = max(2, round(mark.get("scale", 0.12) * short / 2) * 2)
+    margin = round(mark.get("margin", 0.03) * short)
+    position = mark.get("position", "top-right")
+    x = f"{margin}" if position.endswith("left") else f"main_w-overlay_w-{margin}"
+    y = f"{margin}" if position.startswith("top") else f"main_h-overlay_h-{margin}"
+    enable = f":enable='between(t,{window[0]:.6f},{window[1]:.6f})'" if window else ""
+    return (f"movie={_escape_filter_path(image)}:loop=0,setpts=N/FRAME_RATE/TB,format=rgba,scale={size}:-2,"
+            f"colorchannelmixer=aa={float(mark.get('opacity', 0.8)):.3f}[wm];"
+            f"[in][wm]overlay={x}:{y}:shortest=1:format=auto{enable}")
+
+
+def ass_filter(ass_path: Path, subtitle: SubtitleConfig) -> str:
+    """烧录 ASS（样式写在文件里，不再 force_style）；字体目录与 SRT 烧录一致。"""
+    parts = f"subtitles={_escape_filter_path(ass_path)}"
+    if subtitle.font_file:
+        parts += f":fontsdir={_escape_filter_path(Path(subtitle.font_file).parent)}"
+    return parts
+
+
 def mux(video: Path, audio_track: Path, srt: Path, output: Path, config: Config, *, burn: bool,
-        style: dict | None = None):
+        style: dict | None = None, ass: Path | None = None, ass_subtitles: bool = True,
+        extra_filters: list[str] | None = None):
+    """封装成片。``ass`` 给出时烧录该 ASS（字幕样式与文字层）；``ass_subtitles=False`` 表示 ASS 只有文字层，
+    烧录字幕仍按 SRT + force_style（旧版样式）叠在其上。``burn=False`` 时另带软字幕轨。
+    ``extra_filters`` 为烧录前的画面滤镜（水印等）。都没有时与旧版完全相同。"""
     render, subtitle = config.studio.render, config.studio.subtitle
     args = ["-i", str(video), "-i", str(audio_track)]
-    if burn:
-        args += [
-            "-map",
-            "0:v:0",
-            "-map",
-            "1:a:0",
-            "-vf",
-            subtitle_filter(srt, subtitle, style=style),
-            "-c:v",
-            "libx264",
-            "-preset",
-            render.preset,
-            "-crf",
-            str(render.crf),
-            "-pix_fmt",
-            "yuv420p",
-        ]
+    filters = list(extra_filters or [])
+    if ass is not None:
+        filters.append(ass_filter(ass, subtitle))
+    if burn and (ass is None or not ass_subtitles):
+        filters.append(subtitle_filter(srt, subtitle, style=style))
+    if filters:
+        args += ["-map", "0:v:0", "-map", "1:a:0"]
+        if not burn:
+            args[4:4] = ["-i", str(srt)]
+            args += ["-map", "2:s:0"]
+        args += ["-vf", ",".join(filters), "-c:v", "libx264", "-preset", render.preset, "-crf", str(render.crf),
+                 "-pix_fmt", "yuv420p"]
+        if not burn:
+            args += ["-c:s", "mov_text", "-metadata:s:s:0", "language=chi"]
     else:
         args += [
             "-i",

@@ -25,7 +25,7 @@ from mindex.models.video_generators import MiniMaxH3VideoGenerator, VideoRequest
 from mindex.shared.media import audio_info, command
 from mindex.studio import studio
 from mindex.studio import workspace as ws
-from mindex.studio.workspace.media_nodes import MUSIC_MIX_VERSION
+from mindex.studio.workspace.post import MUSIC_MIX_VERSION
 
 slow = pytest.mark.slow
 

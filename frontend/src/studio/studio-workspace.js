@@ -255,6 +255,7 @@ function render() {
   renderRetrieval();
   renderMatrix();
   renderFinal();
+  renderDelivery();
   renderBuilds();
   renderCurrentArtifacts();
   renderLogShell();

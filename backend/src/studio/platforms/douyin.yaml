@@ -1,0 +1,11 @@
+# 数值核对日期：2026-10-26。来源：抖音开放平台上传视频文档（竖版 9:16、720p 及以上）与发布页公开资料；
+# 抖音没有章节功能。平台调整时只改这里。
+id: douyin
+name: 抖音
+canvas: "9:16"
+cover: {width: 1080, height: 1920, format: jpeg, max_kb: 5120}
+title: {max_chars: 55}
+description: {max_chars: 1000}
+tags: {max_count: 5, max_chars_each: 20, hashtag: true}
+chapters: {enabled: false}
+language: zh

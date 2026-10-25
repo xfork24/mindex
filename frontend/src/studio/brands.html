@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title data-i18n="[[0,&quot;ui.brands_page_title&quot;]]">Mindex · 品牌模板</title><link rel="icon" href="/assets/shared/favicon.svg?v=8d7f9242de" type="image/svg+xml">
+  <link rel="stylesheet" href="/assets/shared/style.css?v=e4cee29ab0"><link rel="stylesheet" href="/assets/shared/agent-panel.css?v=5ce91a25c0"><link rel="stylesheet" href="/assets/studio/studio.css?v=77c24dd741"><link rel="stylesheet" href="/assets/studio/templates.css?v=b8efb5756d">
+  <script src="/assets/shared/messages.js?v=55c4b7123a" defer></script><script src="/assets/shared/i18n.js?v=42497bb7f1" defer></script><script src="/assets/shared/api.js?v=aa52e4865d" defer></script><script src="/assets/shared/marked.umd.js?v=b82b933440" defer></script><script src="/assets/shared/purify.min.js?v=cd37898f97" defer></script><script src="/assets/shared/agent-markdown.js?v=8f0018e90a" defer></script><script src="/assets/shared/agent-panel.js?v=e45b7f1ace" defer></script><script src="/assets/shared/feedback.js?v=4d2340032a" defer></script><script src="/assets/studio/brands.js?v=495e1029ae" defer></script>
+</head>
+<body class="studio studio-templates studio-brands">
+  <header><a class="brand" href="/">m<span>index</span><i></i></a><nav class="page-nav" aria-label="页面导航 / Main navigation"><a class="quiet nav-link" href="/" data-i18n="[[0,&quot;ui.c9b1e68e3537&quot;]]">视频检索</a><a class="quiet nav-link" href="/studio" aria-current="page" data-i18n="[[0,&quot;ui.b6fc3cef0bd0&quot;]]">创作</a><a class="quiet nav-link" href="/admin" data-i18n="[[0,&quot;ui.f517302fec0d&quot;]]">素材管理</a><a class="quiet nav-link" href="/persons" data-i18n="[[0,&quot;ui.0973ef28d791&quot;]]">人物库</a><a class="quiet nav-link" href="/settings" data-i18n="[[0,&quot;ui.7debf9cb0372&quot;]]">设置</a></nav><button id="reload" class="quiet" type="button" data-i18n="[[0,&quot;ui.brands_reload&quot;]]">刷新品牌模板</button><button type="button" class="quiet language-switch" data-language-toggle aria-label="中文 / English"><span data-language="zh" lang="zh-CN">文</span><span class="language-divider" aria-hidden="true">/</span><span data-language="en" lang="en">En</span></button></header>
+  <main class="studio-main">
+    <section class="studio-intro"><span class="eyebrow" data-i18n="[[0,&quot;ui.brands_eyebrow&quot;]]">字幕样式 · 文字层 · 片头片尾 · 水印</span><h1 data-i18n="[[0,&quot;ui.brands_heading&quot;]]">一套品牌模板，统一全部成片的风格。</h1><p data-i18n="[[0,&quot;ui.brands_intro&quot;]]">浏览内置与自定义品牌模板，设置字幕样式、文字层颜色，上传片头、片尾与水印；在创作任务的方案参数里选用，方案还可以单独覆盖其中几项。</p></section>
+    <nav class="studio-tabs" aria-label="创作分区" data-i18n-aria-label="ui.studio_tabs_aria"><a class="studio-tab" id="studio-jobs-tab" href="/studio" data-i18n="[[0,&quot;ui.studio_tab_jobs&quot;]]">创作任务</a><a class="studio-tab" id="studio-topics-tab" href="/studio/topics" data-i18n="[[0,&quot;ui.studio_tab_topics&quot;]]">选题挖掘</a><a class="studio-tab" href="/studio/templates" data-i18n="[[0,&quot;ui.studio_tab_templates&quot;]]">文案模板</a><a class="studio-tab" href="/studio/brands" aria-current="page" data-i18n="[[0,&quot;ui.studio_tab_brands&quot;]]">品牌模板</a><a class="studio-tab" href="/studio/music" data-i18n="[[0,&quot;ui.studio_tab_music&quot;]]">音乐库</a><a class="studio-tab" href="/studio/tools" data-i18n="[[0,&quot;ui.studio_tab_tools&quot;]]">第三方工具</a></nav>
+    <div id="notice" class="notice" role="status" aria-live="polite"></div>
+    <div class="workspace">
+      <aside class="job-panel template-panel" aria-label="品牌模板列表" data-i18n-aria-label="ui.brands_list_aria">
+        <div id="brand-list"></div>
+      </aside>
+      <section class="work-panel" aria-label="品牌模板详情" data-i18n-aria-label="ui.brands_detail_aria">
+        <div id="brand-empty" class="empty"><h2 data-i18n="[[0,&quot;ui.brands_select_title&quot;]]">选择一个品牌模板</h2><p data-i18n="[[0,&quot;ui.brands_select_hint&quot;]]">在左侧选择模板，查看与修改字幕样式、文字层、片头片尾与水印。</p></div>
+        <div id="brand-view" hidden>
+          <div class="template-card">
+            <div class="section-head template-title-row">
+              <h2 id="brand-title"></h2><span id="brand-tags" class="template-tags"></span>
+              <div class="head-actions"><button id="brand-copy" class="quiet" type="button" data-i18n="[[0,&quot;ui.brands_copy_action&quot;]]">复制为自定义模板</button><button id="brand-delete" class="quiet danger" type="button" data-i18n="[[0,&quot;ui.brands_delete&quot;]]">删除</button></div>
+            </div>
+            <p id="brand-note" class="template-note"></p>
+            <form id="brand-form" class="template-form" novalidate>
+              <div class="template-fields">
+                <label class="form-field" data-i18n="[[0,&quot;ui.brands_field_name&quot;]]">名称<input id="bf-name" maxlength="40" required></label>
+                <label class="form-field" data-i18n="[[0,&quot;ui.brands_field_description&quot;]]">说明<input id="bf-description" maxlength="200"></label>
+              </div>
+              <div id="brand-subtitle" class="brand-section"></div>
+              <div id="brand-overlay" class="brand-section"></div>
+              <div id="brand-bookends" class="brand-section"></div>
+              <div id="brand-watermark" class="brand-section"></div>
+              <div class="template-form-foot">
+                <span id="brand-dirty" class="warn-text" hidden data-i18n="[[0,&quot;ui.templates_unsaved&quot;]]">有未保存的修改</span>
+                <span class="template-form-actions"><button id="brand-revert" class="quiet" type="button" data-i18n="[[0,&quot;ui.templates_revert&quot;]]">放弃修改</button><button id="brand-save" class="submit" type="submit" data-i18n="[[0,&quot;ui.brands_save&quot;]]">保存品牌模板</button></span>
+              </div>
+              <p id="brand-error" class="warn-text" role="alert" hidden></p>
+            </form>
+            <p id="brand-meta" class="muted template-meta"></p>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+  <footer><span data-i18n="[[0,&quot;ui.brands_footer&quot;]]">Mindex / 品牌模板</span><span data-i18n="[[0,&quot;ui.3c60f44b51aa&quot;]]">本地素材库 · 工作流分步执行</span></footer>
+</body>
+</html>

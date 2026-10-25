@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """桌面版冻结后端冒烟：用临时配置与数据目录运行 desktop/build/backend/mindex。
 
-依次验证：冻结自检（chromadb、jieba、opencv、Pillow、playwright、前端、模板、align_worker、源码收集模块的哈希
-与仓库一致）、pyproject 声明的 package-data 全部打包、``-m`` 分发、注册并 prepare 测试视频、``serve`` 健康与页面、
-SIGTERM 后按时退出。
+依次验证：冻结自检（chromadb、jieba、opencv、Pillow、playwright、前端、模板、品牌模板与叠加层模板、成片后期的
+转场与水印、align_worker、源码收集模块的哈希与仓库一致）、pyproject 声明的 package-data 全部打包、``-m`` 分发、
+注册并 prepare 测试视频、``serve`` 健康与页面（含品牌模板页与 ``mindex studio --url`` 连接）、SIGTERM 后按时退出。
 
     python scripts/check-desktop-sidecar.py [--backend 路径] [--ffmpeg-dir 目录] [--font 字体] [--isolated-path]
 
@@ -134,13 +134,22 @@ def main() -> int:
             problems.append("templates")
         if report.get("topic_samples", 0) < 3:
             problems.append("topic_samples")
+        # M3 成片后期：品牌模板、叠加层模板与转场/水印的 ffmpeg 路径。
+        if report.get("brands", 0) < 3 or report.get("overlay_template") is not True or report.get("platforms") != 3:
+            problems.append("brands/overlay_template")
+        if report.get("post") is not True:
+            problems.append("post")
+        # M3 第三期：曲目节奏分析、HTTP 工具适配器与随包 mcp 客户端。
+        for key in ("beats", "tool_http", "mcp_client"):
+            if report.get(key) is not True:
+                problems.append(key)
         for relative, digest in report["source_hashes"].items():
             source = ROOT / "backend" / "src" / Path(relative).relative_to("mindex")
             if digest != sha256(source):
                 problems.append(f"源码哈希不一致：{relative}")
         if args.font and report.get("subtitles") is not True:
             problems.append("subtitles")
-        if args.animation and report.get("animation") is not True:
+        if args.animation and (report.get("animation") is not True or report.get("overlay_alpha") is not True):
             problems.append("animation")
         if args.ffmpeg_dir and report.get("ffmpeg") != env["MINDEX_FFMPEG"]:
             problems.append("ffmpeg 未使用 MINDEX_FFMPEG")
@@ -190,6 +199,22 @@ def main() -> int:
                 assert status == 200, (page, status)
             templates = json.loads(get(f"{base}/api/studio/templates")[1])
             assert templates.get("items"), templates
+            # M3：品牌模板页与接口、studio CLI（连接运行中的服务，与桌面外壳同一后端）。
+            status, _ = get(base + "/studio/brands")
+            assert status == 200, ("/studio/brands", status)
+            brands = json.loads(get(f"{base}/api/studio/brands")[1])
+            assert [item["id"] for item in brands["items"]][:3] == ["plain", "news", "tech"], brands
+            for page in ("/studio/music", "/studio/tools"):
+                status, _ = get(base + page)
+                assert status == 200, (page, status)
+            assert json.loads(get(f"{base}/api/studio/music-library")[1])["items"] == []
+            assert json.loads(get(f"{base}/api/studio/tool-sources")[1])["items"] == []
+            presets = json.loads(get(f"{base}/api/studio/platforms")[1])
+            assert [item["id"] for item in presets["items"]] == ["bilibili", "douyin", "youtube"], presets
+            cli = subprocess.run([str(backend), "--config", str(config), "studio", "--url", base, "jobs", "--json"],
+                                 env={**env, "MINDEX_WEB_TOKEN": TOKEN}, cwd=work, capture_output=True, text=True,
+                                 timeout=120, check=False)
+            assert cli.returncode == 0 and json.loads(cli.stdout) == [], (cli.stdout, cli.stderr)
             status = json.loads(get(f"{base}/api/status?summary=true", timeout=30)[1])
             assert len(status["sources"]) == 1, status.get("sources")
         finally:

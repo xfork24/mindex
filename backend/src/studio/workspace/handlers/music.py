@@ -1,9 +1,11 @@
-"""背景音乐阶段（逐镜，只在背景音乐提示点分镜上）：调用音乐生成模型生成（或翻唱）一段背景音乐。
+"""背景音乐阶段（逐镜，只在背景音乐提示点分镜上）：调用音乐生成模型生成（或翻唱）一段背景音乐，或复制曲库曲目。
 
 - 提示点 generate：按描述生成纯音乐（instrumental=True，缺省）或带歌词的歌曲（歌词为空时由模型按描述写词）；
   cover：按上传的参考音频（audio_id）翻唱，描述为目标风格；
+  library：把曲库曲目（track_id，即音频 sha256）复制进版本目录，版本数据带上曲名、许可与署名（发布元数据用）；
+  曲目缺失、文件损坏或授权过期时预检阻塞（过期即使已有版本也阻塞，避免过期音乐进入新成片）；
 - 背景音乐从提示点分镜起顺延到下一个提示点之前的全部分镜，成片合成时循环/截断到段落长度、淡入淡出并在配音下自动压低；
-- 签名：提示点（不含音量）与生成服务（backend/model，ComfyUI 另含工作流摘要，本地后端另含段落预估时长；audiocpp 另含采样步数）；
+- 签名：提示点（不含音量；曲库提示点只有提示点身份，不含生成服务）与生成服务（backend/model，ComfyUI 另含工作流摘要，本地后端另含段落预估时长；audiocpp 另含采样步数）；
 - 产物：``versions/<vid>/music.<ext>`` 与 ``request.json``。
 """
 
@@ -45,6 +47,27 @@ def audio_suffix(payload: bytes) -> str:
     return ".mp3"
 
 
+def library_blocker(config, track_id: str, *, check_file: bool = True, store=None) -> str | None:
+    """曲库提示点的阻塞原因：曲目不存在、文件缺失或损坏、授权过期；没有返回 None。"""
+    from mindex.admin.curation import EntityNotFound
+    from mindex.shared.storage import Store
+    from mindex.studio import music_library
+
+    store = store or Store(config.data_dir)
+    try:
+        track = music_library.get_track(store, track_id)
+    except EntityNotFound:
+        return "曲库中找不到所选曲目，请重新选曲"
+    if track["expired"]:
+        return f"曲目「{track['title']}」的授权已于 {track['expires_at']} 过期，请续期或换用其他背景音乐"
+    if check_file:
+        try:
+            music_library.require_file(config, store, track_id)
+        except studio.StudioError as exc:
+            return str(exc)
+    return None
+
+
 class MusicHandler(StageHandler):
     name, label, scope = "music", "背景音乐", "shot"
 
@@ -55,15 +78,21 @@ class MusicHandler(StageHandler):
         selected, content = shot_content(w, p, sid)
         cue = music_cue(content) or {}
         payload = {"music": cue_identity(cue), "music_version": MUSIC_VERSION}
+        if cue.get("kind") == "library":  # 曲目内容寻址：track_id 即音频摘要，与生成服务无关
+            return payload, {"content": selected["content"]}, {}
         if config.studio.music_generator.backend in ("comfyui", "audiocpp"):  # 本地后端按段落时长生成
             payload["seconds"] = segment_seconds(w, p, sid)
         return payload, {"content": selected["content"]}, params
 
     def preflight(self, config, job_id, w, p, sid, spec, found, node):
-        if found:
-            return
         _, content = shot_content(w, p, sid)
         cue = music_cue(content) or {}
+        if cue.get("kind") == "library":
+            if reason := library_blocker(config, cue["track_id"], check_file=not found):
+                node.update(action="blocked", reason=reason)
+            return
+        if found:
+            return
         reason = unavailable(config)
         if reason is None and cue.get("audio_id") and not sources.present(config, job_id, cue["audio_id"], "audio"):
             reason = "翻唱参考音频缺失或已损坏，请重新上传"
@@ -71,13 +100,15 @@ class MusicHandler(StageHandler):
             node.update(action="blocked", reason=reason)
 
     def run(self, ctx):
+        _, content = shot_content(ctx.w, ctx.p, ctx.sid)
+        cue = music_cue(content)
+        if cue is not None and cue["kind"] == "library":
+            return self.copy_track(ctx, cue)
         generator = ctx.services.get("music_generator")
         if generator is None:
             if reason := unavailable(ctx.config):
                 raise studio.StudioError(reason)
             generator = make_music_generator(ctx.config)
-        _, content = shot_content(ctx.w, ctx.p, ctx.sid)
-        cue = music_cue(content)
         if cue is None:
             raise studio.StudioError("该分镜没有背景音乐提示点")
         audio = None
@@ -108,6 +139,23 @@ class MusicHandler(StageHandler):
                 "instrumental": bool(cue.get("instrumental", True)), "duration": info["duration"]}
         return data, {"music": file_info(ctx.config, ctx.job_id, target),
                       "request": file_info(ctx.config, ctx.job_id, record_path)}
+
+    @staticmethod
+    def copy_track(ctx, cue):
+        from mindex.shared.storage import Store
+        from mindex.studio import music_library
+
+        store = Store(ctx.config.data_dir)
+        if reason := library_blocker(ctx.config, cue["track_id"], store=store):
+            raise studio.StudioError(reason)
+        track = music_library.get_track(store, cue["track_id"])
+        source = music_library.require_file(ctx.config, store, cue["track_id"])
+        target = ctx.directory / f"music{track['suffix']}"
+        studio.save_bytes(target, source.read_bytes())
+        data = {"kind": "library", "track_id": track["id"], "title": track["title"], "artist": track["artist"],
+                "source": track["source"], "license": track["license"], "attribution": track["attribution"],
+                "bpm": track["bpm"], "duration": track["duration"]}
+        return data, {"music": file_info(ctx.config, ctx.job_id, target)}
 
     def conflict_labels(self, config, w, item, expected, messages):
         found = []

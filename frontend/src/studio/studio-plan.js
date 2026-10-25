@@ -96,6 +96,9 @@ async function editSettings() {
   ["false", MindexI18n.msg("ui.2cf51a1af708")]]],
 
 
+  ["subtitle_style", MindexI18n.msg("ui.plan_subtitle_style"), "text", [
+    ["", MindexI18n.msg("ui.plan_subtitle_style_default")],
+    ...["classic", "outline", "box", "highlight"].map((name) => [name, MindexI18n.msg(`ui.plan_subtitle_style_${name}`)])]],
   ["atempo", MindexI18n.msg("ui.8a1c10056984"), "number"],
   ["canvas", MindexI18n.msg("ui.plan_canvas_label"), "text", ["16:9", "9:16", "1:1"].map((name) => [
     name, MindexI18n.msg(CANVAS_LABELS[name], { p0: (state.data.canvases?.[name] || []).join("×") })])],
@@ -107,17 +110,75 @@ async function editSettings() {
     const value = key === "preset_voice" || key === "clone_voice" ? "" :
     key === "atempo" ? o.atempo ?? 1 :
     key === "canvas" ? o.canvas || "16:9" :
-    key === "fit" ? o.fit || "pad" : o[key];
+    key === "fit" ? o.fit || "pad" :
+    key === "subtitle_style" ? o.subtitle_style || "" : o[key];
     const f = field(label, value, type, choices);
     fields[key] = f.input;
     body.append(f.wrap);
     const helpKey = {
       duck_gain: "ui.original_gain_help",
       atempo: "ui.narration_speed_help",
-      fit: "ui.plan_canvas_help"
+      fit: "ui.plan_canvas_help",
+      subtitle_style: "ui.plan_subtitle_style_help"
     }[key];
     if (helpKey) body.append(el("p", MindexI18n.msg(helpKey), "muted"));
   }
+  // 品牌模板：下拉在目录到达后回填；关闭项写进 brand_overrides.disable（其余覆盖项原样保留）。
+  const brand = field(MindexI18n.msg("ui.plan_brand"), o.brand_id || "", "text", [["", MindexI18n.msg("ui.plan_brand_none")],
+    ...(o.brand_id ? [[o.brand_id, o.brand_id]] : [])]);
+  brand.input.dataset.planBrand = "true";
+  body.append(brand.wrap);
+  const disabled = new Set(o.brand_overrides?.disable || []);
+  const toggles = el("div", "", "detail-actions");
+  toggles.append(el("span", MindexI18n.msg("ui.plan_brand_disable"), "muted"));
+  const disableBoxes = {};
+  for (const key of ["intro", "outro", "watermark"]) {
+    const wrap = el("label", "", "check");
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.checked = disabled.has(key);
+    disableBoxes[key] = box;
+    wrap.append(box, el("span", MindexI18n.msg(`ui.brands_asset_${key}`)));
+    toggles.append(wrap);
+  }
+  // 本方案替换片头 / 片尾（brand_overrides.intro / outro）：上传视频后随保存生效。
+  const replaced = { intro: o.brand_overrides?.intro || null, outro: o.brand_overrides?.outro || null };
+  const replaceRow = el("div", "", "detail-actions");
+  replaceRow.dataset.planBookends = "true";
+  const drawReplace = () => {
+    replaceRow.replaceChildren();
+    for (const key of ["intro", "outro"]) {
+      const label = replaced[key] ? MindexI18n.msg("ui.plan_bookend_replaced", { p0: MindexI18n.msg(`ui.brands_asset_${key}`),
+        p1: replaced[key].asset.name || replaced[key].asset.sha256.slice(0, 8) }) : MindexI18n.msg("ui.plan_bookend_replace", { p0: MindexI18n.msg(`ui.brands_asset_${key}`) });
+      replaceRow.append(button(label, async () => {
+        const input = document.createElement("input");
+        input.type = "file";
+        input.accept = "video/mp4,video/quicktime,video/webm,video/x-matroska";
+        const file = await new Promise((resolve) => {input.addEventListener("change", () => resolve(input.files?.[0] || null), { once: true });input.click();});
+        if (!file) return;
+        const form = new FormData();
+        form.append("file", file, file.name);
+        const asset = await api("/api/studio/brand-assets", "POST", form);
+        replaced[key] = { asset: { sha256: asset.sha256, suffix: asset.suffix, kind: asset.kind, name: asset.name } };
+        drawReplace();
+      }));
+      if (replaced[key]) replaceRow.append(button(MindexI18n.msg("ui.plan_bookend_reset"), () => {replaced[key] = null;drawReplace();}));
+    }
+  };
+  drawReplace();
+  body.append(toggles, replaceRow, el("p", MindexI18n.msg("ui.plan_brand_help"), "muted"));
+  // 节拍对齐：容差（秒）为空表示关闭；只作用于有背景音乐的段落。
+  const beat = field(MindexI18n.msg("ui.plan_beat_align"), o.beat_align?.tolerance ?? "", "number");
+  beat.input.dataset.planBeatAlign = "true";
+  beat.input.min = "0.04";
+  beat.input.max = "1";
+  beat.input.step = "0.01";
+  MindexI18n.setAttr(beat.input, "placeholder", MindexI18n.msg("ui.plan_beat_align_off"));
+  body.append(beat.wrap, el("p", MindexI18n.msg("ui.plan_beat_align_help"), "muted"));
+  api("/api/studio/brands").then((data) => {
+    if ($("dialog-content") !== body) return;
+    fillSelect(brand.input, [["", MindexI18n.msg("ui.plan_brand_none")], ...data.items.map((item) => [item.id, item.name])], o.brand_id || "");
+  }).catch(() => {});
   // 音色目录尚未就绪：先禁用音色相关控件与保存，待目录到达再回填与放开。
   fields.preset_voice.disabled = true;
   fields.clone_voice.disabled = true;
@@ -140,6 +201,14 @@ async function editSettings() {
       options.atempo =
       fields.atempo.value === "" ? 1 : Number(fields.atempo.value);
       options.burn = options.burn === "true";
+      options.subtitle_style = options.subtitle_style || null;
+      options.brand_id = brand.input.value || null;
+      const disable = Object.entries(disableBoxes).filter(([, box]) => box.checked).map(([key]) => key);
+      const overrides = { ...(o.brand_overrides || {}), disable, intro: replaced.intro, outro: replaced.outro };
+      const empty = !disable.length && !["subtitle", "overlay", "intro", "outro", "watermark"].some((key) => overrides[key]);
+      options.brand_overrides = empty ? null : overrides;
+      const tolerance = beat.input.value === "" ? 0 : Number(beat.input.value);
+      options.beat_align = tolerance > 0 ? { tolerance } : null;
       if (voiceChanged) {
         options.voice = fields.clone_voice.value || fields.preset_voice.value || null;
         options.voice_mode = options.voice ? "custom" : "inherit";

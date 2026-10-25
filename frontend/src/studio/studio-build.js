@@ -265,7 +265,7 @@ function currentVersionEntries() {
   if (p.board) entries.push([p.board, LABEL.board]);
   for (const sid of order()) {
     const s = p.shots[sid] || {};
-    for (const stage of ["content", "recall", "draw", "generate", "animate", "tts", "select", "render"])
+    for (const stage of ["content", "recall", "draw", "generate", "animate", "invoke", "tts", "select", "render"])
     if (s[stage]) entries.push([s[stage], `${LABEL[stage]} · ${shortId(sid)}`]);
   }
   if (p.final) entries.push([p.final, LABEL.compose]);
@@ -351,7 +351,7 @@ function renderCurrentArtifacts() {
     shots.append(el("summary", MindexI18n.msg("ui.ae9da1d3ed8c", { p0: order().length })));
     order().forEach((sid, index) => {
       const s = p.shots[sid] || {};
-      const stages = ["content", "recall", "draw", "generate", "animate", "tts", "select", "render"].filter((k) => s[k] && ver(s[k]));
+      const stages = ["content", "recall", "draw", "generate", "animate", "invoke", "tts", "select", "render"].filter((k) => s[k] && ver(s[k]));
       if (!stages.length) return;
       const shot = el("details", "", "dependency-edge");
       shot.append(el("summary", MindexI18n.msg("ui.09c83d435a6c", { p0: index + 1, p1: shortId(sid), p2: stages.length })));

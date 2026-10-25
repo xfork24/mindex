@@ -16,7 +16,7 @@ from mindex.shared.storage import Store
 from mindex.studio import studio
 from mindex.studio.studio_artifacts import digest
 
-from .stages import handler, names
+from .stages import handler, names, parse_final_key
 from .versions import root, valid_files, version
 
 
@@ -171,6 +171,14 @@ def conflicts(config, job_id, w, p, stage, sid, vid, *, context=None):
             messages.append("阶段参数与当前方案不一致")
         if not messages:
             messages.append("实际输入内容或素材文件已变化")
+    # 上游成片阶段（导出、封面等以 ``阶段[:变体]`` 为依赖键）递归检查。
+    finals = set(names(scope="final"))
+    for dep_key, dep_id in expected["inputs"].items():
+        dep_stage, dep_variant = parse_final_key(dep_key)
+        if dep_stage in finals and dep_id and dep_id in w["versions"]:
+            upstream = conflicts(config, job_id, w, p, dep_stage, dep_variant, dep_id, context=context)
+            if upstream:
+                messages.append(f"上游 {dep_key} 已变化：{upstream[0]}")
     # 上游逐镜阶段按注册顺序递归检查。
     for dependency in names(scope="shot"):
         dep_id = expected["inputs"].get(dependency)

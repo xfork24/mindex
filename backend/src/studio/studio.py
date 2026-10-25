@@ -12,7 +12,7 @@ import re
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 from uuid import uuid4
 
 from filelock import Timeout
@@ -298,8 +298,52 @@ class AnimationSource(StrictModel):
         return value
 
 
+TOOL_SOURCE_ID = r"^[a-z0-9][a-z0-9-]{0,39}$"
+TOOL_NAME = r"^[A-Za-z0-9_.:/-]{1,128}$"
+TOOL_ARGUMENTS_LIMIT = 8000
+
+
+class ToolShotSource(StrictModel):
+    """第三方工具：invoke 阶段调用登记的第三方工具（``tool_id`` 为工具源 ID，``tool`` 为白名单中的工具名），
+    产物为视频（之后选片对齐、渲染）或图片（直接按运动参数渲染）。
+
+    ``arguments`` 为传给工具的 JSON 参数（≤8000 字符），字符串值里的 ``{{text}}``/``{{visual}}``/``{{query}}``
+    替换为本镜旁白、画面意象与查询；``uploads`` 为随调用上传的任务素材（需要该工具勾选 allow_upload）。"""
+
+    kind: Literal["tool"]
+    tool_id: str = Field(pattern=TOOL_SOURCE_ID)
+    tool: str = Field(pattern=TOOL_NAME)
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    uploads: list[MediaReference] | None = Field(default=None, max_length=4)
+    output: Literal["video", "image"] = "video"
+    motion: Literal["zoom-in", "zoom-out", "pan-left", "pan-right", "none"] = "zoom-in"
+    strength: float = Field(default=0.3, ge=0, le=1, allow_inf_nan=False)
+
+    @field_validator("arguments", mode="after")
+    @classmethod
+    def _arguments_size(cls, value):
+        if len(json.dumps(value, ensure_ascii=False)) > TOOL_ARGUMENTS_LIMIT:
+            raise ValueError(f"工具参数不能超过 {TOOL_ARGUMENTS_LIMIT} 字符")
+        return value
+
+    @field_validator("uploads", mode="after")
+    @classmethod
+    def _empty_uploads(cls, value):
+        return value or None
+
+    @model_serializer(mode="wrap")
+    def _omit_empty(self, handler):
+        data = handler(self)
+        if self.uploads is None:
+            data.pop("uploads", None)
+        if self.output == "video":  # 运动参数只对图片产物生效
+            data.pop("motion", None)
+            data.pop("strength", None)
+        return data
+
+
 ShotSource = Annotated[
-    RecallSource | ClipSource | ImageSource | AiImageSource | AigcSource | AnimationSource,
+    RecallSource | ClipSource | ImageSource | AiImageSource | AigcSource | AnimationSource | ToolShotSource,
     Field(discriminator="kind"),
 ]
 
@@ -311,14 +355,16 @@ class ShotMusic(StrictModel):
     """背景音乐提示点：从这个分镜开始换成新的背景音乐（或停止），之后的分镜顺延，直到下一个提示点。
 
     kind：generate 由音乐生成模型（music-3.0）按描述生成（缺省纯音乐；给出歌词或关闭纯音乐时为带人声歌曲）；
-    cover 按参考音频（``audio_id``，inputs 内的音频 sha256）翻唱；none 从此分镜起不再有背景音乐。
-    ``volume`` 为混音音量（0–1），配音出现时背景音乐自动压低。"""
+    cover 按参考音频（``audio_id``，inputs 内的音频 sha256）翻唱；library 选用曲库曲目（``track_id``，曲目内容 sha256）；
+    none 从此分镜起不再有背景音乐。``volume`` 为混音音量（0–1），配音出现时背景音乐自动压低。
+    ``track_id`` 为 None 时 dump 省略，旧提示点数据形态不变。"""
 
-    kind: Literal["generate", "cover", "none"]
+    kind: Literal["generate", "cover", "library", "none"]
     prompt: str | None = Field(default=None, max_length=MUSIC_PROMPT_LIMIT)
     lyrics: str | None = Field(default=None, max_length=MUSIC_LYRICS_LIMIT)
     instrumental: bool = True
     audio_id: str | None = Field(default=None, pattern=MEDIA_ID)
+    track_id: str | None = Field(default=None, pattern=MEDIA_ID)
     volume: float = Field(default=0.25, ge=0, le=1, allow_inf_nan=False)
 
     @field_validator("prompt", "lyrics", mode="before")
@@ -338,7 +384,139 @@ class ShotMusic(StrictModel):
                 raise ValueError("翻唱需要上传参考音频")
             if not self.prompt or not 10 <= len(self.prompt) <= 300:
                 raise ValueError("翻唱需要 10–300 字的目标风格描述")
+        if self.kind == "library" and not self.track_id:
+            raise ValueError("选用曲库音乐需要曲目 ID（track_id）")
+        if self.kind != "library" and self.track_id:
+            raise ValueError("只有曲库音乐（kind=library）可以填写 track_id")
         return self
+
+    @model_serializer(mode="wrap")
+    def _omit_track(self, handler):
+        data = handler(self)
+        if self.track_id is None:
+            data.pop("track_id", None)
+        return data
+
+
+# 镜内转场：只作用于本镜开头（enter）或结尾（leave），不改变镜头时长。
+EDGE_KINDS = Literal["fade", "white", "zoom", "slide"]
+# 重叠转场（ffmpeg xfade 的 transition 取值子集）：本镜与下一镜交叉过渡，由本镜多渲染的尾部余量承担。
+OVERLAP_KINDS = Literal["fade", "dissolve", "fadeblack", "fadewhite", "wipeleft", "wiperight", "slideleft",
+                        "slideright", "circleopen", "circleclose", "smoothleft", "smoothright"]
+
+
+class TransitionEdge(StrictModel):
+    """镜内转场：fade 黑场淡入/淡出；white 白场；zoom 缩放并淡入/淡出；slide 从右滑入 / 向左滑出（黑底）。"""
+
+    kind: EDGE_KINDS
+    duration: float = Field(default=0.5, ge=0.1, le=2, allow_inf_nan=False)
+
+
+class OverlapTransition(StrictModel):
+    """本镜与下一镜之间的重叠转场：成片时长与时间线不变（本镜多渲染 ``duration`` 秒的尾部画面供过渡消耗）。"""
+
+    kind: OVERLAP_KINDS = "fade"
+    duration: float = Field(default=0.5, ge=0.1, le=2, allow_inf_nan=False)
+
+
+class ShotTransition(StrictModel):
+    """分镜转场：enter/leave 为镜内转场，next 为通往下一镜的重叠转场；三者为 None 时 dump 省略。"""
+
+    enter: TransitionEdge | None = None
+    leave: TransitionEdge | None = None
+    next: OverlapTransition | None = None
+
+    @model_serializer(mode="wrap")
+    def _omit_empty(self, handler):
+        data = handler(self)
+        if isinstance(data, dict):
+            for key in ("enter", "leave", "next"):
+                if data.get(key) is None:
+                    data.pop(key, None)
+        return data
+
+    @property
+    def empty(self) -> bool:
+        return self.enter is None and self.leave is None and self.next is None
+
+
+HIGHLIGHT_LIMIT = 10
+HIGHLIGHT_CHARS = 20
+OVERLAY_LIMIT = 4
+
+
+class CardItem(StrictModel):
+    """数据卡片的一行：标签与数值（数值以强调色显示）。"""
+
+    label: str = Field(min_length=1, max_length=20)
+    value: str = Field(min_length=1, max_length=20)
+
+
+class ShotOverlay(StrictModel):
+    """文字层：叠加在本镜画面上的标题卡、下三分之一信息条或数据卡片。
+
+    ``engine``：ass 由字幕引擎在成片时烧录（轻量，文字与简单入场）；html 由叠加层阶段生成透明 HTML 动画、
+    在分镜渲染时叠加（效果更丰富，需要动画录制组件）。custom 只用于 html，按 ``brief`` 由动画生成模型编写。
+    ``start``/``end`` 为相对本镜开头的秒数，None = 从头 / 到尾。"""
+
+    engine: Literal["ass", "html"] = "ass"
+    kind: Literal["title", "lower_third", "data_card", "custom"]
+    title: str | None = Field(default=None, max_length=60)
+    subtitle: str | None = Field(default=None, max_length=80)
+    items: list[CardItem] | None = Field(default=None, max_length=6)
+    brief: str | None = Field(default=None, max_length=1000)
+    start: float | None = Field(default=None, ge=0, le=60, allow_inf_nan=False)
+    end: float | None = Field(default=None, gt=0, le=60, allow_inf_nan=False)
+    effect: Literal["none", "fade", "slide"] = "fade"
+
+    @field_validator("title", "subtitle", "brief", mode="before")
+    @classmethod
+    def _blank_is_none(cls, value):
+        if isinstance(value, str):
+            value = value.strip()
+            return value or None
+        return value
+
+    @model_validator(mode="after")
+    def _inputs(self):
+        if self.kind in ("title", "lower_third") and not self.title:
+            raise ValueError("标题卡与信息条需要填写标题")
+        if self.kind == "data_card" and not self.items:
+            raise ValueError("数据卡片至少需要一行数据")
+        if self.kind == "custom" and (self.engine != "html" or not self.brief):
+            raise ValueError("自定义文字层只能用 HTML 方式，并需要填写画面说明")
+        if self.start is not None and self.end is not None and self.end <= self.start:
+            raise ValueError("文字层结束时间必须晚于开始时间")
+        return self
+
+    @model_serializer(mode="wrap")
+    def _omit_empty(self, handler):
+        data = handler(self)
+        if isinstance(data, dict):
+            for key in ("title", "subtitle", "items", "brief", "start", "end"):
+                if data.get(key) is None:
+                    data.pop(key, None)
+        return data
+
+
+def normalize_highlights(value) -> list[str] | None:
+    """分镜高亮词：去空白、去重、保持顺序；空列表为 None（不落键）。"""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = re.split(r"[,，、\s]+", value)
+    if not isinstance(value, (list, tuple)):
+        raise ValueError("高亮词必须是字符串列表")
+    words = []
+    for item in value:
+        word = str(item).strip()
+        if word and word not in words:
+            words.append(word)
+    if len(words) > HIGHLIGHT_LIMIT:
+        raise ValueError(f"高亮词最多 {HIGHLIGHT_LIMIT} 个")
+    if any(len(word) > HIGHLIGHT_CHARS for word in words):
+        raise ValueError(f"每个高亮词不超过 {HIGHLIGHT_CHARS} 字")
+    return words or None
 
 
 class Shot(StrictModel):
@@ -358,6 +536,27 @@ class Shot(StrictModel):
     source: ShotSource | None = None
     # 背景音乐提示点：None = 沿用前面分镜的背景音乐（没有则无背景音乐）；None 时 dump 省略，旧 content 不变。
     music: ShotMusic | None = None
+    # 转场：None（或三项皆空）= 硬切；None 时 dump 省略，旧 content 不变。
+    transition: ShotTransition | None = None
+    # 字幕高亮词（烧录 ASS 字幕时变色）：None/空 = 无，dump 省略。
+    highlights: list[str] | None = None
+    # 文字层（标题卡、信息条、数据卡片）：None/空 = 无，dump 省略。
+    overlays: list[ShotOverlay] | None = Field(default=None, max_length=OVERLAY_LIMIT)
+
+    @field_validator("overlays", mode="after")
+    @classmethod
+    def _empty_overlays(cls, value):
+        return value or None
+
+    @field_validator("highlights", mode="before")
+    @classmethod
+    def _normalize_highlights(cls, value):
+        return normalize_highlights(value)
+
+    @field_validator("transition", mode="after")
+    @classmethod
+    def _empty_transition(cls, value):
+        return None if value is not None and value.empty else value
 
     @field_validator("visual", mode="before")
     @classmethod
@@ -378,7 +577,7 @@ class Shot(StrictModel):
     def _omit_empty_visual(self, handler):
         data = handler(self)
         if isinstance(data, dict):
-            for key in ("visual", "source", "music"):
+            for key in ("visual", "source", "music", "transition", "highlights", "overlays"):
                 if data.get(key) is None:
                     data.pop(key, None)
         return data

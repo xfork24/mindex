@@ -26,6 +26,7 @@ uv run mindex e2e phase -h
 | `backup` | `list`、`inspect`、`export`、`import`、`recover` |
 | `e2e` | `init`、`probe`、`pin`、`phase`、`freeze`、`review`、`status` |
 | `agent` | `tools`（另有顶层命令 `mcp`，见[智能助手与 MCP](#智能助手与-mcp)） |
+| `studio` | `jobs`、`plans`、`preflight`、`build`、`status`、`download`，以及 `shot`、`plan`、`brand`、`overlay` 子命令组（见[创作任务](#创作任务)） |
 
 ## 全局规则
 
@@ -203,6 +204,56 @@ uv run mindex clean --apply               # 实际删除
 | `job-profile show/sync JOB` | 任务的账号档案快照与同步 |
 | `gaps list/done/reopen/export` | 素材采集清单；`export PROFILE [--output FILE]` 输出 UTF-8 BOM 的 CSV |
 | `schedule status` | 每日定时状态（定时只在 `mindex serve` 运行期间生效） |
+## 创作任务
+
+`mindex studio` 命令组在终端完成创作任务的查看、预检、构建、跟踪与下载。所有命令都调用 REST，与创作页、智能助手和 MCP 走同一条路径，校验、乐观锁、studio 锁与 409 冲突原样生效。
+
+- 默认在本进程内装配应用，经 ASGI 调用。构建线程属于本进程，所以 `build` 会一直等到构建结束。
+- `studio --url URL` 连接已运行的服务（Web 或桌面版的 `mindex serve`），令牌从 `--token-env` 指定的环境变量读取，默认 `MINDEX_WEB_TOKEN`。此时 `build` 提交后立即返回，加 `--watch` 跟踪日志。
+- 任务与方案 ID 可写唯一前缀，`--plan` 也接受方案名称，缺省为当前方案。
+- 每个子命令都支持 `--json`。进度日志写标准错误。
+- 退出码：409 冲突（执行器正忙或方案已在别处修改）为 2，其余失败为 1；`build` 结束状态不是 `complete` 时为 1。
+
+| 子命令 | 作用 |
+| --- | --- |
+| `jobs` | 列出任务（最新在前） |
+| `plans JOB` | 列出方案：ID、名称、画幅、分镜数、是否有成片，`*` 为当前方案 |
+| `preflight JOB [--plan P] [--force]` | 构建预检，只列出复用、重建与阻塞的节点 |
+| `build JOB [--plan P] [--force] [--watch]` | 预检后提交整体构建 |
+| `status JOB [BUILD] [--watch]` | 构建状态与执行日志，缺省为最近一次构建 |
+| `download JOB [--plan P] [--file mp4\|srt\|vtt] [-o PATH]` | 下载当前选用的成片文件，写入前校验 sha256 |
+
+后期命令组（都经方案 PATCH 或品牌接口保存，改动影响哪些阶段与页面一致，见 [Studio 成片后期](studio.md#成片后期)）：
+
+| 子命令 | 作用 |
+| --- | --- |
+| `shot show JOB SHOT` | 查看分镜（转场、字幕高亮词、文字层） |
+| `shot set JOB SHOT [--enter K[:秒]] [--leave K[:秒]] [--next K[:秒]] [--clear-transition] [--highlight 词…] [--clear-highlights] [--title 标题\|副标题] [--lower-third 姓名\|职位] [--card 标题\|标签=值,…] [--overlay JSON] [--engine ass\|html] [--clear-overlays] [--tool 源/工具 [--tool-args JSON] [--tool-output video\|image]]` | 设置转场、高亮词、文字层，或把画面来源设为第三方工具；分镜写完整 ID、唯一前缀或 `#序号` |
+| `plan show JOB` / `plan set JOB [--burn\|--soft] [--subtitle-style S] [--brand ID\|none] [--disable intro\|outro\|watermark…] [--intro 文件] [--outro 文件] [--clear-overrides] [--beat-align 秒]` | 方案的字幕烧录、字幕样式、品牌模板与覆盖、节拍对齐容差（0 关闭） |
+| `brand list` / `show` / `copy ID 名称` / `update ID [--subtitle 预设\|JSON] [--overlay JSON] [--intro 文件] [--outro 文件] [--watermark 文件] [--watermark-position …]` / `delete ID [--yes]` / `upload 文件` | 品牌模板与素材；`--intro`/`--watermark` 等给本地路径时自动上传 |
+| `overlay show JOB SHOT [--index N]` / `overlay edit JOB SHOT 文件 [--index N]` | 读取或人工替换 HTML 文字层的叠加层源码 |
+| `export list JOB` / `export set JOB 画幅 [--mode derive\|rerender] [--fit crop\|pad]` / `export clear JOB [画幅]` | 多画幅导出；rerender 用 `build --all-canvases` 一起构建，`download --export 画幅` 下载导出成片 |
+| `platforms` | 平台发布预设 |
+| `publish set JOB --platform P… [--cover frame\|aigc\|upload] [--cover-time 秒] [--cover-prompt …] [--cover-image 文件] [--cover-title …] [--cover-subtitle …] [--clear]` | 发布平台与封面 |
+| `publish show` / `build [--watch]` / `download JOB 平台 [--file zip\|cover\|metadata] [-o 路径]` / `cover JOB 平台` / `metadata JOB 平台 [--title …] [--description …] [--tag …]` | 查看、构建与下载发布包，候选封面帧，查看或人工修改发布元数据 |
+| `music list [--mood M] [-q 词]` / `show TRACK` / `import 文件 --source … --license … --attribution … [--title …] [--artist …] [--expires YYYY-MM-DD] [--tag …] [--no-ai]` / `update TRACK […] [--mood M…] [--expires 日期\|none]` / `analyze TRACK [--keep-moods] [--no-ai]` / `delete TRACK [--yes]` | 曲库：曲目 ID 可写唯一前缀；导入按内容去重并分析节奏；被分镜选用时删除返回退出码 2 |
+| `music recommend (--text 文案 \| --job JOB --shot SHOT) [--seconds 秒] [--limit N] [--no-ai]` / `music use JOB SHOT TRACK [--volume 0.25]` | 按文案或提示点分镜段落推荐曲目；把曲目设为分镜的背景音乐提示点 |
+| `tools list` / `show ID` / `add ID (--file JSON \| --http URL \| --mcp-url URL \| --stdio 绝对路径 [--arg …] [--env K=V…]) [--tool 名称[:video\|image][:upload]…] [--header K=V…] [--host 主机…] [--secret 名称=环境变量…]` / `test ID` / `delete ID [--yes]` | 第三方工具源：登记（整体替换）、测试连接（失败退出码 1）、删除（被分镜使用时退出码 2）；`--secret` 从环境变量读取密钥值，命令行不出现明文 |
+
+```bash
+uv run mindex studio jobs
+uv run mindex studio shot set 3f2a '#2' --enter fade:0.4 --next dissolve:0.6 --lower-third '张三|研究员'
+uv run mindex studio plan set 3f2a --burn --subtitle-style highlight --brand news
+uv run mindex studio music import bgm.mp3 --source Pixabay --license 'Pixabay License' --attribution 'Artist - Song'
+uv run mindex studio music recommend --job 3f2a --shot '#1'
+uv run mindex studio plan set 3f2a --beat-align 0.3
+GEN_TOKEN=… uv run mindex studio tools add gen --http https://gen.example.com --tool make_video:video \
+  --header 'Authorization=secret:token' --secret token=GEN_TOKEN
+uv run mindex studio shot set 3f2a '#3' --tool gen/make_video --tool-args '{"prompt": "{{visual}}"}'
+uv run mindex studio build 3f2a
+uv run mindex studio --url http://127.0.0.1:8000 build 3f2a --watch
+uv run mindex studio download 3f2a -o film.mp4
+```
 
 ## 评测与联调
 

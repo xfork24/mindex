@@ -19,7 +19,7 @@ TABLES = {
     'person_references', 'person_imports', 'person_features', 'person_evidence', 'person_coverage',
     'person_tasks', 'person_versions', 'search_releases', 'script_templates',
     'topic_profiles', 'topic_sources', 'topic_items', 'topic_runs', 'topic_cards', 'topic_gaps',
-    'topic_calendar_events',
+    'topic_calendar_events', 'brand_templates', 'music_tracks', 'tool_sources',
 }
 # 这些表的 source_id 指向选题档案/选题数据源，而不是素材库 sources；
 # 部分备份不按素材裁剪它们，也不做素材依赖校验（与 script_templates 一样整体保留）。

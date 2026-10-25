@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from .. import music
-from ..media_nodes import MUSIC_MIX_VERSION, compose
+from .. import music, post
 from ..plans import canvas_render
+from ..post import MUSIC_MIX_VERSION, compose
 from ..stages import StageHandler, register
 from ..versions import ordered_shots
 from .render import canvas_settings
@@ -44,6 +44,8 @@ class ComposeHandler(StageHandler):
             payload["music"] = segments
             payload["music_mix"] = MUSIC_MIX_VERSION
             inputs.update({f"music:{item['cue']}": item["music"] for item in segments})
+        # 后期能力：都未参与时为空；数据库只在方案选了品牌模板时才打开。
+        payload.update(post.compose_payload(config, w, p, resources.database if resources else None))
         return payload, inputs, params
 
     def dependencies(self, w, p, sid, *, resplit=False):
