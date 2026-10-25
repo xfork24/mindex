@@ -144,7 +144,7 @@ def _effective(section, role: str) -> dict:
         "video_generator": ("enabled", "durations", "fps", "poll_interval", "max_wait"),
         "animator": ("enabled", "max_tokens", "retries", "max_capture_seconds", "max_html_kb"),
         "image_generator": ("enabled", "poll_interval", "max_wait"),
-        "music_generator": ("enabled", "cover_model", "poll_interval", "max_wait"),
+        "music_generator": ("enabled", "cover_model", "poll_interval", "max_wait", "num_inference_steps", "max_seconds"),
         "generator": ("max_tokens",),
         "writer": ("max_tokens",),
         "agent": ("max_tokens", "vision"),

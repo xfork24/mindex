@@ -3,7 +3,7 @@
 - 提示点 generate：按描述生成纯音乐（instrumental=True，缺省）或带歌词的歌曲（歌词为空时由模型按描述写词）；
   cover：按上传的参考音频（audio_id）翻唱，描述为目标风格；
 - 背景音乐从提示点分镜起顺延到下一个提示点之前的全部分镜，成片合成时循环/截断到段落长度、淡入淡出并在配音下自动压低；
-- 签名：提示点（不含音量）与生成服务（backend/model，ComfyUI 另含工作流摘要与段落预估时长）；
+- 签名：提示点（不含音量）与生成服务（backend/model，ComfyUI 另含工作流摘要，本地后端另含段落预估时长；audiocpp 另含采样步数）；
 - 产物：``versions/<vid>/music.<ext>`` 与 ``request.json``。
 """
 
@@ -55,7 +55,7 @@ class MusicHandler(StageHandler):
         selected, content = shot_content(w, p, sid)
         cue = music_cue(content) or {}
         payload = {"music": cue_identity(cue), "music_version": MUSIC_VERSION}
-        if config.studio.music_generator.backend == "comfyui":
+        if config.studio.music_generator.backend in ("comfyui", "audiocpp"):  # 本地后端按段落时长生成
             payload["seconds"] = segment_seconds(w, p, sid)
         return payload, {"content": selected["content"]}, params
 

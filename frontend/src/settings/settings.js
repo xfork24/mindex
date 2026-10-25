@@ -50,7 +50,7 @@ const ROLE_BACKENDS = {
   tts: ['openai', 'minimax', 'dashscope'],
   image_generator: ['minimax', 'comfyui'],
   video_generator: ['minimax_h3', 'comfyui', 'minimax', 'dashscope'],
-  music_generator: ['minimax', 'comfyui'],
+  music_generator: ['minimax', 'comfyui', 'audiocpp'],
   animator: ['openai', 'anthropic'],
   agent: ['openai', 'anthropic']
 };
@@ -101,6 +101,8 @@ const ROLE_EXTRA = {
 
   music_generator: [
   { key: 'cover_model', label: MindexI18n.msg("ui.music_cover_model"), type: 'text', placeholder: 'music-cover' },
+  { key: 'num_inference_steps', label: 'num_inference_steps', type: 'number', min: 1, max: 200, step: 1 },
+  { key: 'max_seconds', label: 'max_seconds', type: 'number', min: 1, max: 300, step: 1 },
   { key: 'poll_interval', label: MindexI18n.msg("ui.video_poll_interval"), type: 'number', min: 0.1 },
   { key: 'max_wait', label: MindexI18n.msg("ui.video_max_wait"), type: 'number', min: 1 }],
 

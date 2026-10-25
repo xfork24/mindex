@@ -357,10 +357,16 @@ def make_image_generator(config: Config) -> ImageGenerator:
 
 
 def make_music_generator(config: Config) -> MusicGenerator:
-    from mindex.models.music_generators import ComfyUIMusicGenerator, MiniMaxMusicGenerator
+    from mindex.models.music_generators import (
+        AudioCppMusicGenerator,
+        ComfyUIMusicGenerator,
+        MiniMaxMusicGenerator,
+    )
 
     if config.studio.music_generator.backend == "comfyui":
         return ComfyUIMusicGenerator(config)
+    if config.studio.music_generator.backend == "audiocpp":
+        return AudioCppMusicGenerator(config)
     return MiniMaxMusicGenerator(config)
 
 

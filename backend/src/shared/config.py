@@ -217,12 +217,17 @@ class MusicGeneratorConfig(_ComfyUIMixin, Service):
     music-cover（翻唱）与歌词生成（lyrics_generation），或本地 ComfyUI 工作流（不含歌词生成）。
 
     缺省关闭：设置页激活「音乐生成」档案或 yaml 设 enabled: true 后才会调用；测试连接只做鉴权探测，不生成音乐。
+    ``audiocpp`` 后端对接本地 audio.cpp 服务（``audiocpp_server`` 上的 MiniMax-Music3-GGUF），见 scripts/run-music3.sh。
     """
 
-    backend: Literal["minimax", "comfyui"] = "minimax"
+    backend: Literal["minimax", "comfyui", "audiocpp"] = "minimax"
     base_url: str = "https://api.minimax.cn/v1"
     model: str = "music-3.0"
     cover_model: str = "music-cover"
+    # audiocpp 后端（本地 audio.cpp 的 MiniMax-Music3-GGUF）的 flow matching 步数：越小越快，音质略降。
+    num_inference_steps: int = Field(default=30, ge=1, le=200)
+    # audiocpp 后端单次生成的最长秒数（耗时近似与之成正比）；成片合成时背景音乐会循环/截断到段落长度。
+    max_seconds: int = Field(default=20, ge=1, le=300)
     timeout: float = Field(default=GENERATION_TIMEOUT, gt=0)  # 音乐生成为同步接口，单次请求需要较长超时
     api_key_env: str = "MINDEX_MUSIC_API_KEY"
     enabled: bool = False
@@ -232,7 +237,10 @@ class MusicGeneratorConfig(_ComfyUIMixin, Service):
         return self._check_comfyui(MUSIC_MAPPING_FIELDS)
 
     def signature(self) -> dict:
-        return self._comfy_signature({"backend": self.backend, "model": self.model, "cover_model": self.cover_model})
+        value = {"backend": self.backend, "model": self.model, "cover_model": self.cover_model}
+        if self.backend == "audiocpp":  # 只在本地后端加键：其他后端的指纹与旧版逐字节一致
+            value.update(num_inference_steps=self.num_inference_steps, max_seconds=self.max_seconds)
+        return self._comfy_signature(value)
 
 
 class AnimatorConfig(Service):

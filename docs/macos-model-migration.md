@@ -36,8 +36,8 @@ bash scripts/run-wemm.sh > data/e2e/wemm-macos-32768.log 2>&1
 uv run mindex --config config.macos-v2.yaml --no-runtime-overrides e2e probe \
   --output data/e2e/wemm-macos-v2-probe.json
 uv run mindex --config config.macos-v2.yaml --no-runtime-overrides e2e pin \
-  --weights-file models/WeMM-9B-Q8_0.gguf \
-  --mmproj-file models/mmproj-WeMM-9B-BF16.gguf \
+  --weights-file models/WeMM-Embedding/WeMM-9B-Q8_0.gguf \
+  --mmproj-file models/WeMM-Embedding/mmproj-WeMM-9B-BF16.gguf \
   --server-cwd "$PWD" --quantization Q8_0 \
   --launch-parameters data/e2e/wemm-macos-v2-alias-launch.json \
   --output data/deployments/wemm-macos-v2-32768-alias.json

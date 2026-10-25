@@ -430,7 +430,10 @@ function historyCell(stage, sid, preferred = null) {
     select.append(o);
   }
   if (!items.length) return el("p", MindexI18n.msg("ui.482a16ecfa18"), "muted");
-  if (items.some((item) => item.id === preferred)) select.value = preferred;
+  // 默认显示方案里已选用的版本（刷新或面板重建后不回到最新版本）；调用方给出 preferred 时优先。
+  const selected = sid ? plan().shots?.[sid]?.[stage] : null;
+  const wanted = items.some((item) => item.id === preferred) ? preferred : selected;
+  if (items.some((item) => item.id === wanted)) select.value = wanted;
   const choose = mutationButton(MindexI18n.msg("ui.1dd40d446b45"),
 
   async () => {

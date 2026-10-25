@@ -91,7 +91,7 @@ PROFILE_FIELDS = {
     },
     "music_generator": {
         "backend", "base_url", "model", "cover_model", "revision", "timeout", "api_key_env", "poll_interval",
-        "max_wait", "comfyui_workflow", "comfyui_mapping",
+        "max_wait", "comfyui_workflow", "comfyui_mapping", "num_inference_steps", "max_seconds",
     },
     # 同上：激活动画生成档案即启用（merge_profile 置 enabled=True）。
     "animator": {

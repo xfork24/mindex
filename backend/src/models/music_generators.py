@@ -9,6 +9,9 @@
 
 平台公告：自 2026-08-20 起付费音乐与歌词接口不再向新用户开放，历史付费用户可继续使用；无权限时平台返回的错误
 会原样转述。``health()`` 发送缺少必填参数的请求，只验证鉴权与可达性，不生成音乐（不计费）。
+
+本地 audio.cpp（``audiocpp`` 后端）：``audiocpp_server`` 的 ``POST /v1/tasks/run``（family ``minimax_music3``，
+MiniMax-Music3-GGUF），同步返回 base64 WAV；歌词必填，纯音乐用 ``[Instrumental]`` 结构标签；不支持翻唱与歌词生成。
 """
 
 from __future__ import annotations
@@ -181,3 +184,73 @@ class ComfyUIMusicGenerator:
 
     def health(self) -> dict:
         return self.runner.health()
+
+
+# duration_sec 是自回归帧预算，不是成片时长硬上限；实际生成时长上限由档案的 max_seconds 决定
+# （背景音乐成片合成时会循环/截断到段落长度，不必生成整段）。
+AUDIOCPP_DEFAULT_SECONDS = 20
+AUDIOCPP_INSTRUMENTAL = "[Instrumental]"
+
+
+class AudioCppMusicGenerator:
+    """本地 audio.cpp 服务（``audiocpp_server``）上的 MiniMax-Music3-GGUF：不计费、无需密钥（可选 Bearer）。
+
+    生成是同步长请求（实测 Apple Silicon 的 Metal 后端 30 秒音频约 15 分钟，实时率约 30），耗时与生成时长、
+    ``num_inference_steps`` 近似成正比，因此只发一次、不自动重试，生成时长受 ``max_seconds`` 限制，
+    超时由档案的 ``timeout`` 控制（须大于预计耗时，否则客户端放弃而服务端仍在白白计算）。"""
+
+    def __init__(self, config: Config):
+        self.profile = config.studio.music_generator
+
+    def _url(self, path: str) -> str:
+        return self.profile.base_url.rstrip("/") + path
+
+    def request_body(self, request: MusicRequest) -> dict:
+        lyrics = AUDIOCPP_INSTRUMENTAL if request.instrumental else (request.lyrics or "").strip()
+        if not lyrics:
+            raise ModelError("本地音乐生成模型需要歌词：请填写歌词，或把该提示点设为纯音乐")
+        seconds = min(self.profile.max_seconds, max(1, round(request.seconds or AUDIOCPP_DEFAULT_SECONDS)))
+        options = {"lyrics": lyrics, "duration_sec": str(seconds),
+                   "num_inference_steps": str(self.profile.num_inference_steps)}
+        if request.seed is not None:
+            options["seed"] = str(request.seed)
+        return {"model": self.profile.model, "request": {"text": request.prompt, "options": options}}
+
+    def generate(self, request: MusicRequest) -> tuple[bytes, dict]:
+        if request.cover_audio is not None:
+            raise ModelError("本地 audio.cpp 音乐生成不支持翻唱；请切换到 MiniMax 音乐生成档案")
+        body = self.request_body(request)
+        payload = adapters.request("POST", self._url("/v1/tasks/run"), timeout=self.profile.timeout,
+                                   headers=self.profile.headers(), json=body, attempts=1)
+        audio = payload.get("audio") if isinstance(payload, dict) else None
+        if not isinstance(audio, str) or not audio:
+            raise ModelError("本地音乐生成服务没有返回音频")
+        try:
+            data = base64.b64decode(audio, validate=True)
+        except ValueError as exc:
+            raise ModelError("本地音乐生成服务返回的音频无法解码") from exc
+        # request：实际发给服务的内容（描述 text 与 options），记入 request.json 便于核对。
+        return data, {"backend": "audiocpp", "request": body["request"], "sample_rate": payload.get("sample_rate"),
+                      "channels": payload.get("channels"), "timing": payload.get("timing")}
+
+    def lyrics(self, prompt: str, *, mode: str = "write_full_song", lyrics: str | None = None,
+               title: str | None = None) -> Lyrics:
+        raise ModelError("当前音乐生成档案是本地 audio.cpp，不支持歌词生成；请切换到 MiniMax 音乐生成档案或手动填写歌词")
+
+    def health(self) -> dict:
+        """只读探测：GET /health 与 /v1/models，确认服务可达且模型 id 已登记；绝不触发生成或加载模型。"""
+        headers = self.profile.headers()
+        try:
+            adapters.request("GET", self._url("/health"), timeout=min(self.profile.timeout, 15),
+                             headers=headers, attempts=1)
+            models = adapters.request("GET", self._url("/v1/models"), timeout=min(self.profile.timeout, 15),
+                                      headers=headers, attempts=1)
+        except ModelError as exc:
+            raise ModelError(f"无法连接本地音乐生成服务 {self.profile.base_url}：{exc}") from exc
+        items = {item.get("id"): item for item in models.get("data") or [] if isinstance(item, dict)}
+        item = items.get(self.profile.model)
+        if item is None:
+            raise ModelError(f"服务可达，但没有登记模型 {self.profile.model!r}；已登记：{', '.join(map(str, items)) or '无'}")
+        if item.get("family") != "minimax_music3":
+            raise ModelError(f"模型 {self.profile.model!r} 的 family 是 {item.get('family')!r}，需要 minimax_music3")
+        return {"ready": True, "reply": "服务可达，模型已登记（未生成音乐；首次生成时才会加载权重）"}

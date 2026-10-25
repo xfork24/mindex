@@ -115,15 +115,19 @@ AI 生成图片（`aigc_image`）分镜 `draw` 阶段使用的图片生成服务
 | 键 | 类型 | 默认 | 说明 |
 |---|---|---|---|
 | `enabled` | bool | false | 关闭时背景音乐提示点的预检阻塞为“未配置音乐生成服务” |
-| `backend` | `minimax` \| `comfyui` | `minimax` | MiniMax 音乐生成（同步接口）/ 本地 ComfyUI（不支持歌词生成） |
+| `backend` | `minimax` \| `comfyui` \| `audiocpp` | `minimax` | MiniMax 音乐生成（同步接口）/ 本地 ComfyUI / 本地 audio.cpp 的 MiniMax-Music3-GGUF（后两者不支持歌词生成，audiocpp 也不支持翻唱） |
 | `base_url` / `model` | str | `https://api.minimax.cn/v1` / `music-3.0` | 音乐生成模型 |
 | `cover_model` | str | `music-cover` | 翻唱模型 |
 | `api_key_env` | str | `MINDEX_MUSIC_API_KEY` | 环境变量名；设置页档案的密钥优先 |
 | `timeout` | float >0 | 600 | 单次请求超时秒（音乐同步生成较慢） |
 | `poll_interval` / `max_wait` | float | 2 / 900 | 仅 ComfyUI |
+| `num_inference_steps` | int 1–200 | 30 | 仅 audiocpp：flow matching 步数，越小越快 |
+| `max_seconds` | int 1–300 | 20 | 仅 audiocpp：单次生成时长上限（耗时近似成正比；成片时背景音乐循环/截断到段落长度）。实测 Mac Metal 30 秒音频约 15 分钟 |
 | `comfyui_workflow` / `comfyui_mapping` | dict \| null | null | 映射字段限 `prompt`（必填）、`lyrics`、`seconds`（段落预估时长）、`seed`、`audio`（翻唱参考音频） |
 
-签名只含 backend、model、cover_model（ComfyUI 另含工作流摘要与映射）；`studio_key` 只在 `enabled` 时加入该段。
+`audiocpp` 后端：`base_url` 指向 `audiocpp_server`（如 `http://127.0.0.1:8891`，启动见 `scripts/run-music3.sh`、`deploy/audiocpp-music3.json`），`model` 为服务配置里的模型 id（`minimax-music3`），无需密钥；调用 `POST /v1/tasks/run`，纯音乐以 `[Instrumental]` 作歌词，`duration_sec` 取段落预估时长（上限 300 秒）；Apple Silicon 的 Metal 后端实时率约 30 倍，`timeout` 必须大于预计耗时（否则客户端超时放弃，服务端仍继续计算）；服务端同一时刻只处理一个请求，`deploy/audiocpp-music3.json` 已把 `busy_timeout_ms` 设为 0，排队请求不会 503。
+
+签名只含 backend、model、cover_model（ComfyUI 另含工作流摘要与映射，audiocpp 另含 `num_inference_steps`、`max_seconds`）；`studio_key` 只在 `enabled` 时加入该段。
 
 ## `animator` — 动画生成（studio.animator）
 

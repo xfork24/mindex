@@ -586,7 +586,7 @@ def specs() -> list[ToolSpec]:
                  "新建模型配置档案（不会自动激活）。api_key 只能是 ask_user_question secret 字段返回的 secret:// 引用。"
                  "视频生成（video_generator）档案：backend 为 minimax_h3（MiniMax H3，只需 base_url 与密钥，生成方式在分镜设置）"
                  "/minimax/dashscope/comfyui；图片生成（image_generator，MiniMax image-01）与音乐生成（music_generator，"
-                 "MiniMax music-3.0）的 backend 为 minimax/comfyui；comfyui 需 comfyui_workflow（API 格式）与 comfyui_mapping。",
+                 "MiniMax music-3.0）的 backend 为 minimax/comfyui（音乐生成另有 audiocpp：本地 audio.cpp 的 MiniMax-Music3-GGUF，不支持翻唱与歌词生成）；comfyui 需 comfyui_workflow（API 格式）与 comfyui_mapping。",
                  CreateProfile, "write", create_model_profile, preview_create_profile),
         ToolSpec("update_business_settings", "settings", "修改业务设置：GPU 互斥、检索权重、默认音色。",
                  Business, "write", update_business_settings, preview_business),

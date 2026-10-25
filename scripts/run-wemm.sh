@@ -2,10 +2,10 @@
 set -euo pipefail
 
 PROJECT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-LLAMA_SERVER="${MINDEX_LLAMA_SERVER:-${PROJECT_DIR}/../llama.cpp/build/bin/llama-server}"
+LLAMA_SERVER="${MINDEX_LLAMA_SERVER:-${PROJECT_DIR}/bin/llama-server}"
 CTX_SIZE="${MINDEX_WEMM_CTX_SIZE:-32768}"
 # 使用权重目录的物理路径，避免 clone 中的 models 软链接改变部署观测身份。
-MODEL_DIR="$(cd -- "${MINDEX_WEMM_MODEL_DIR:-${PROJECT_DIR}/models}" && pwd -P)"
+MODEL_DIR="$(cd -- "${MINDEX_WEMM_MODEL_DIR:-${PROJECT_DIR}/models/WeMM-Embedding}" && pwd -P)"
 cd -- "$PROJECT_DIR"
 exec "$LLAMA_SERVER" \
   -m "${MODEL_DIR}/WeMM-9B-Q8_0.gguf" \
