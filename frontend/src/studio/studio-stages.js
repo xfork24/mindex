@@ -1,5 +1,11 @@
 /* 创作页 · 阶段详情、整列执行、执行日志、历史版本与单节点执行。按 studio.html 中的顺序以经典脚本加载，顶层声明共享全局作用域。 */
 "use strict";
+// 动画规格一行：画面说明在前，句号分隔，其后是来源、字符数、时长与尺寸。
+function animateLine(d) {
+  const detail = MindexI18n.msg("ui.animate_detail", { p0: MindexI18n.msg(d.origin === "manual" ? "ui.animate_origin_manual" : "ui.animate_origin_generated"),
+    p1: d.chars ?? "?", p2: secs(d.seconds), p3: d.width || "?", p4: d.height || "?" });
+  return d.brief ? `${MindexI18n.msg("ui.animate_brief_line", { p0: d.brief })}。${detail}` : detail;
+}
 function renderStageDetails(body, sid, stage) {
   const vid = plan().shots[sid][stage],
     item = ver(vid),
@@ -23,15 +29,17 @@ function renderStageDetails(body, sid, stage) {
   if (stage === "generate") body.append(el("p", MindexI18n.msg("ui.generate_help"), "muted"));
   if (stage === "draw") body.append(el("p", MindexI18n.msg("ui.draw_help"), "muted"));
   if (stage === "animate") {
-    body.append(el("p", MindexI18n.msg("ui.animate_help"), "muted"));
     // 人工编辑源码：没有成功版本时也可从空白模板开始写。
     actions.append(mutationButton(MindexI18n.msg("ui.animate_edit_source"), () => openAnimationEditor(sid)));
   }
   if (stage === "tts") {
     const current = state.data.tts_settings;
-    body.append(el("p", current ? MindexI18n.msg("ui.905f065f533b", { p0:
+    const base = current ? MindexI18n.msg("ui.905f065f533b", { p0:
       current.voice_mode === "inherit" ? MindexI18n.msg("ui.79cde58eb13b") : MindexI18n.msg("ui.7a506144d437"), p1: current.voice, p2: current.model }) : MindexI18n.msg("ui.b695402e923b", { p0:
-      plan().options.voice || MindexI18n.msg("ui.79cde58eb13b") }), "muted"));
+      plan().options.voice || MindexI18n.msg("ui.79cde58eb13b") });
+    // 已选版本的时长并入同一行。
+    const seconds = item?.data?.duration;
+    body.append(el("p", seconds == null ? base : `${base} · ${MindexI18n.msg("ui.tts_duration", { p0: secs(seconds) })}`, "muted"));
   }
   if (!item) body.append(el("p", MindexI18n.msg("ui.f72548296145"), "muted"));else
   {
@@ -84,12 +92,6 @@ function renderStageDetails(body, sid, stage) {
       }
       renderCandidatePicker(body, sid);
     } else if (stage === "tts") {
-      body.append(
-        el(
-          "p", MindexI18n.msg("ui.bfc2b2b2a536", { p0:
-            item.parameters.voice || MindexI18n.msg("ui.9865b5e9b32d"), p1: secs(item.data.duration) })
-        )
-      );
       if (item.files.audio) body.append(media("audio", item.files.audio.url));
     } else if (stage === "draw") {
       // 生成图片：提示词、尺寸与图片预览；渲染阶段按静态图片推拉/平移。
@@ -107,9 +109,7 @@ function renderStageDetails(body, sid, stage) {
     } else if (stage === "animate") {
       // 动画源码：来源（模型生成/人工修改）、字符数与时长；沙箱 iframe 预览（严格 CSP，不含 allow-same-origin）。
       const d = item.data;
-      body.append(el("p", MindexI18n.msg("ui.animate_detail", { p0: MindexI18n.msg(d.origin === "manual" ? "ui.animate_origin_manual" : "ui.animate_origin_generated"),
-        p1: d.chars ?? "?", p2: secs(d.seconds), p3: d.width || "?", p4: d.height || "?" })));
-      if (d.brief) body.append(el("p", MindexI18n.msg("ui.animate_brief_line", { p0: d.brief }), "muted"));
+      body.append(el("p", animateLine(item.data)));
       if (item.status === "complete" && item.files.animation) body.append(animationFrame(vid, d.width, d.height));
     } else if (stage === "select" && item.data.event.video.kind === "file") {
       // 上传片段 / 生成画面：窗口是文件内的时间。
@@ -160,9 +160,10 @@ function renderStageDetails(body, sid, stage) {
       );
       if (d.event.warning) body.append(el("p", shortIds(d.event.warning), "warn-text"));
     } else if (stage === "render") {
-      body.append(
-        el("p", MindexI18n.msg("ui.a8e554e0bc5a", { p0: item.data.frames || "?", p1: item.data.fps || "?" }))
-      );
+      // AI 动画分镜：动画规格（画面说明、来源、字符数、时长、尺寸）与帧数放在同一行，用 · 连接。
+      const animation = ver(plan().shots[sid].animate);
+      const frames = MindexI18n.msg("ui.a8e554e0bc5a", { p0: item.data.frames || "?", p1: item.data.fps || "?" });
+      body.append(el("p", animation?.data ? `${animateLine(animation.data)} · ${frames}` : frames));
       // 只显示带配音与字幕的分镜视频，不再单独列出音频。
       const video = renderPreviewVideo(item);
       if (video) body.append(video);
@@ -297,8 +298,7 @@ function renderSourceDetails(body, sid) {
   body.append(el("p", sourceSummary(source)));
   const host = el("div", "", "query-preview-host");
   body.append(host);
-  if (!source.media_id) host.append(el("p", MindexI18n.msg("ui.source_no_file"), "muted"));else
-  {
+  if (source.media_id) {
     host.append(el("p", MindexI18n.msg("ui.e454bbfe7b70"), "muted"));
     inputUrl(source.media_id).then((url) => {
       if (!url || !host.isConnected) return;
@@ -366,7 +366,6 @@ function renderMusicMaterial(body, sid) {
     if (!item || item.status !== "complete")
     section.append(el("p", MindexI18n.msg("ui.music_render_missing"), "warn-text"));
   }
-  section.append(el("p", MindexI18n.msg("ui.music_render_hint"), "muted"));
   body.append(section);
 }
 function renderMusicSection(body, sid) {
@@ -455,13 +454,15 @@ function renderMusicSection(body, sid) {
   section.append(actions);
   const item = ver(plan().shots[sid].music);
   if (item) {
-    section.append(el("p", MindexI18n.msg("ui.music_version", { p0: item.id.slice(0, 8), p1: statusText(item.status),
-      p2: secs(item.data?.duration) }), item.status === "failed" ? "warn-text" : "muted"));
+    const modelName = item.parameters?.music_generator?.model || MindexI18n.msg("ui.9865b5e9b32d");
+    // 成功的版本不再重复写“完成”，其余状态照常显示。
+    const statusPart = item.status === "complete" ? "" : ` · ${statusText(item.status)}`;
+    section.append(el("p", `${MindexI18n.msg("ui.music_model_prefix", { p0: modelName })}${statusPart} · ${secs(item.data?.duration)}`,
+      item.status === "failed" ? "warn-text" : "muted"));
     if (item.error) section.append(el("p", shortIds(MindexI18n.system(item.error)), "warn-text"));
     if (item.files.music?.url) section.append(media("audio", item.files.music.url));
   }
   if (shotStages(sid).includes("music")) section.append(historyCell("music", sid));
-  section.append(el("p", MindexI18n.msg("ui.music_hint"), "muted"));
   body.append(section);
 }
 async function saveMusic(sid, draft) {

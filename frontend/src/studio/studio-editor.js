@@ -123,7 +123,9 @@ function renderAnimationEditor(section, draft, markDirty) {
     draft.data.source.brief = brief.input.value.trim() ? brief.input.value : null;
     markDirty();
   });
-  section.append(brief.wrap, el("p", MindexI18n.msg("ui.source_animation_hint"), "muted"));
+  const briefRow = el("div", "", "source-options");
+  briefRow.append(brief.wrap);
+  section.append(briefRow);
 }
 // AIGC 来源：提示词（缺省用画面意象，再缺省用召回查询）、反向提示词、种子与可选的首帧参考图。
 function renderAigcEditor(section, sid, draft, markDirty, redraw) {
@@ -141,8 +143,9 @@ function renderAigcEditor(section, sid, draft, markDirty, redraw) {
     draft.data.source.prompt = prompt.input.value.trim() ? prompt.input.value : null;
     markDirty();
   });
-  const negative = field(MindexI18n.msg("ui.source_aigc_negative"), value.negative ?? "");
+  const negative = field(MindexI18n.msg("ui.source_aigc_negative"), value.negative ?? "", "textarea");
   negative.input.maxLength = 500;
+  negative.input.rows = 3;
   negative.input.dataset.shotInput = "true";
   negative.input.dataset.shotSource = "negative";
   negative.input.addEventListener("input", () => {
@@ -159,9 +162,9 @@ function renderAigcEditor(section, sid, draft, markDirty, redraw) {
     draft.data.source.seed = raw === "" || !Number.isInteger(number) || number < 0 ? null : number;
     markDirty();
   });
-  const options = el("div", "", "source-options");
-  options.append(negative.wrap, seed.wrap);
-  section.append(prompt.wrap, options);
+  const promptRow = el("div", "", "source-options");
+  promptRow.append(prompt.wrap, negative.wrap, seed.wrap);
+  section.append(promptRow);
   const setSource = (patch) => {
     draft.data.source = aigcCanonical({ ...draft.data.source, ...patch });
     markDirty();
@@ -187,12 +190,13 @@ function renderAigcEditor(section, sid, draft, markDirty, redraw) {
   }
   section.append(h3);
   const effective = value.mode || (value.image_id ? "first_frame" : "text");
+  const slotLine = (slot) => {const line = el("div", "", "source-line slot-only");line.append(slot);return line;};
   if (["first_frame", "first_last"].includes(effective) || !value.mode)
-  section.append(mediaSlot(sid, draft, "aigc", "image", MindexI18n.msg("ui.source_aigc_image"), value.image_id,
-    (id) => setSource({ image_id: id }), redraw));
+  section.append(slotLine(mediaSlot(sid, draft, "aigc", "image", MindexI18n.msg("ui.source_aigc_image"), value.image_id,
+    (id) => setSource({ image_id: id }), redraw)));
   if (["last_frame", "first_last"].includes(effective))
-  section.append(mediaSlot(sid, draft, "aigc", "image", MindexI18n.msg("ui.source_aigc_last_image"), value.last_image_id,
-    (id) => setSource({ last_image_id: id }), redraw));
+  section.append(slotLine(mediaSlot(sid, draft, "aigc", "image", MindexI18n.msg("ui.source_aigc_last_image"), value.last_image_id,
+    (id) => setSource({ last_image_id: id }), redraw)));
   if (effective === "reference") {
     const refs = value.references || [];
     const list = el("div", "", "reference-media-list");
@@ -212,7 +216,6 @@ function renderAigcEditor(section, sid, draft, markDirty, redraw) {
   }
   if (state.data.generators?.video?.backend !== "minimax_h3")
   section.append(el("p", MindexI18n.msg("ui.video_h3_only_hint"), "muted"));
-  section.append(el("p", MindexI18n.msg("ui.source_aigc_hint"), "muted"));
 }
 // 参考素材上传位：上传到 inputs/（purpose=source），成功后经 onUploaded 写入草稿；有值时显示预览与移除按钮。
 const MEDIA_ACCEPT = { image: "image/jpeg,image/png,image/webp", video: "video/mp4,video/quicktime,video/*",
@@ -287,17 +290,20 @@ function renderAiImageEditor(section, sid, draft, markDirty, redraw) {
   box.dataset.shotInput = "true";
   box.addEventListener("change", () => {draft.data.source.prompt_optimizer = box.checked;markDirty();});
   optimizer.append(box, el("span", MindexI18n.msg("ui.image_prompt_optimizer")));
-  const options = el("div", "", "source-options");
-  options.append(seed.wrap, optimizer);
-  section.append(prompt.wrap, options);
-  section.append(mediaSlot(sid, draft, "aigc_image", "image", MindexI18n.msg("ui.image_reference"), value.reference_id,
-    (id) => {draft.data.source = { ...draft.data.source, reference_id: id };markDirty();}, redraw));
-  section.append(motionOptions(draft, markDirty));
-  section.append(el("p", MindexI18n.msg("ui.source_aigc_image_hint"), "muted"));
+  // 第一行：提示词、随机种子、提示词自动优化；第二行：主体参考图（含上传）、运动方式、运动强度。
+  const promptLine = el("div", "", "source-line");
+  prompt.wrap.classList.add("is-wide");
+  promptLine.append(prompt.wrap, seed.wrap, optimizer);
+  const motionLine = el("div", "", "source-line");
+  motionLine.append(mediaSlot(sid, draft, "aigc_image", "image", MindexI18n.msg("ui.image_reference"), value.reference_id,
+    (id) => {draft.data.source = { ...draft.data.source, reference_id: id };markDirty();}, redraw),
+  motionOptions(draft, markDirty, true));
+  section.append(promptLine, motionLine);
 }
-function motionOptions(draft, markDirty) {
+// inline=true 时返回 display:contents 的分组，运动方式/强度直接并入外层 .source-line 同一行。
+function motionOptions(draft, markDirty, inline = false) {
   const value = draft.data.source;
-  const options = el("div", "", "source-options");
+  const options = el("div", "", inline ? "source-inline-group" : "source-options");
   const motionField = field(MindexI18n.msg("ui.source_motion"), value.motion || "zoom-in", "text", MOTIONS);
   motionField.input.dataset.shotInput = "true";
   motionField.input.dataset.shotSource = "motion";
@@ -403,41 +409,31 @@ function renderSourceEditor(body, sid, draft) {
     notice(MindexI18n.msg("ui.source_uploaded"));
   });
   uploadButton.classList.add("recall-upload-button");
-  const uploadRow = el("div", "", "recall-upload-row");
-  uploadRow.append(uploadWrap, uploadButton);
-  section.append(uploadRow);
-  const options = el("div", "", "source-options");
+  // 上传文件、上传按钮与起点/运动设置另起一行（窄屏自动换行）。
+  const line = el("div", "", "source-line");
+  section.append(line);
+  line.append(uploadWrap, uploadButton);
   if (kind === "clip") {
     const startField = field(MindexI18n.msg("ui.source_clip_start"), value.start ?? "", "number");
     startField.input.dataset.shotInput = "true";
     startField.input.dataset.shotSource = "start";
     startField.input.min = "0";
     startField.input.step = "0.1";
-    const windowNote = el("p", "", "muted");
-    const describe = () => {
-      const speech = ver(plan().shots[sid].tts);
-      const start = secs(draft.data.source?.start || 0);
-      MindexI18n.setText(windowNote, speech?.status === "complete" && speech.data?.duration ?
-      MindexI18n.msg("ui.source_clip_window", { p0: start, p1: secs(speech.data.duration) }) :
-      MindexI18n.msg("ui.source_clip_window_pending", { p0: start }));
-    };
     startField.input.addEventListener("input", () => {
       const raw = startField.input.value.trim();
       const number = Number(raw);
       draft.data.source.start = raw === "" || !Number.isFinite(number) ? null : Math.max(0, number);
       markDirty();
-      describe();
     });
-    describe();
-    options.append(startField.wrap);
-    section.append(options, windowNote);
+    line.append(startField.wrap);
   } else {
-    section.append(motionOptions(draft, markDirty));
+    line.append(motionOptions(draft, markDirty, true));
   }
   const host = el("div", "", "query-preview-host");
   section.append(host);
-  if (!value.media_id) host.append(el("p", MindexI18n.msg("ui.source_no_file"), "muted"));else
-  if (draft.sourcePreview?.media_id === value.media_id) {
+  if (!value.media_id) {
+    // 尚未上传画面文件：不显示说明文字
+  } else if (draft.sourcePreview?.media_id === value.media_id) {
     host.append(sourcePreviewNode(draft.sourcePreview.url, kind, value.start));
   } else {
     host.append(el("p", MindexI18n.msg("ui.e454bbfe7b70"), "muted"));
@@ -446,7 +442,6 @@ function renderSourceEditor(body, sid, draft) {
       host.replaceChildren(sourcePreviewNode(url, kind, value.start));
     });
   }
-  section.append(el("p", MindexI18n.msg("ui.source_hint"), "muted"));
   body.append(section);
   return false;
 }

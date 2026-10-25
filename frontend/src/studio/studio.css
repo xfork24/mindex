@@ -226,6 +226,16 @@ summary{cursor:pointer}
 .source-options .form-field{margin:0;width:100%;min-width:0}
 .source-options input[type=range]{width:100%}
 .source-editor .query-preview-host{flex-basis:100%}
+.source-editor>.media-slot{flex:1 1 100%;min-width:0}
+.source-line{display:flex;flex-wrap:wrap;gap:12px;align-items:end;flex-basis:100%;min-width:0}
+.source-line>.form-field,.source-line .source-inline-group>.form-field,.source-line .media-slot .form-field{margin:0;flex:1 1 150px;min-width:0}
+.source-line>.form-field.is-wide{flex:3 1 300px}
+.source-line>.check{flex:0 0 auto;min-height:40px}
+.source-inline-group,.source-line .media-slot,.source-line .media-slot .recall-upload-row{display:contents}
+.source-line .media-slot .query-preview-host{flex-basis:100%;order:10}
+.source-line.slot-only .media-slot .form-field{flex:0 1 calc((100% - 120px) / 3)}
+.source-line.slot-only .media-slot .form-field input{width:100%}
+.source-line input[type=range]{width:100%}
 @media(max-width:540px){.source-options{grid-template-columns:minmax(0,1fr)}}
 
 .recall-primary-options,.recall-scope-options,.recall-filters{display:grid;gap:12px;flex-basis:100%;min-width:0;align-items:start}
