@@ -1,7 +1,7 @@
 """冻结环境自检：``mindex -m mindex.desktop_check <临时目录>``，输出一行 JSON。
 
 验证桌面版冻结后端里容易漏打包的部分能真正工作（可选：``字体文件`` 做一次烧录字幕，``--animation`` 录制一段 AI 动画）：chromadb 本地存储（写入与查询）、jieba 词典、opencv/scenedetect、
-Pillow、playwright 包、前端资源与文案模板，以及以源码收集的模块（哈希须与源码运行一致）。不访问网络与模型服务。
+Pillow、playwright 包、前端资源、文案模板与选题日历样例，以及以源码收集的模块（哈希须与源码运行一致）。不访问网络与模型服务。
 源码环境中同样可以运行。
 """
 
@@ -57,6 +57,9 @@ def run(work: Path) -> dict:
     report["frontend"] = all((root / group / f"{group}.html").is_file() for group in ("admin", "persons", "studio", "settings"))
     report["frontend_root"] = str(root)
     report["templates"] = len(list(Path(script_templates.BUILTIN_DIR).glob("*.yaml")))
+    from mindex.topics.sources import calendar
+
+    report["topic_samples"] = sum(item["events"] > 0 for item in calendar.sample_list())
     report["align_worker"] = Path(pipeline.__file__).with_name("align_worker.py").is_file()
     report["source_hashes"] = {
         "mindex/models/llama_cpp.py": content_hash(Path(llama_cpp.__file__)),

@@ -19,6 +19,7 @@ import yaml
 from filelock import FileLock, Timeout
 
 from mindex.maintenance.backup_db import (
+    NON_LIBRARY_SOURCE_ID,
     SECRET_FIELDS,
     TABLES,
     filter_database,
@@ -291,7 +292,8 @@ def file_owners(root, all_sources):
     # 注册路径可以不使用约定目录布局。
     for table in sorted(TABLES):
         for row in store.rows(f'SELECT * FROM {table}'):
-            sid = row.get('source_id') or (row.get('id') if table == 'sources' else None)
+            sid = ((row.get('source_id') if table not in NON_LIBRARY_SOURCE_ID else None) or
+                   (row.get('id') if table == 'sources' else None))
             if not sid:
                 continue
             for value in row.values():

@@ -157,13 +157,15 @@ class FixtureWriter:
         self.materials: list = []  # 每次调用收到的素材摘要（None 或 MaterialDigest）
         self.templates: list = []  # 每次调用收到的文案模板（ScriptTemplate）
         self.references: list = []  # 每次调用收到的参考文稿
+        self.profiles: list = []  # 每次调用收到的账号档案写作约束（None 表示没有档案）
 
-    def write(self, outline: str, *, template, materials=None, references=()) -> str:
+    def write(self, outline: str, *, template, materials=None, references=(), profile=None) -> str:
         self.calls += 1
         self.outlines.append(outline)
         self.materials.append(materials)
         self.templates.append(template)
         self.references.append(tuple(references))
+        self.profiles.append(profile)
         # 大纲为空（改写模板）时以第一份参考文稿为文案。
         text = outline.strip() or next((r.strip() for r in references if r.strip()), "")
         return f"{text}第{self.calls}版。" if self.vary else text

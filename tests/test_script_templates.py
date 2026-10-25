@@ -364,12 +364,13 @@ def test_legacy_plans_without_template_key_and_old_script_versions(config):
 
 # ---------------------------------------------------------------- 迁移 v2
 def test_migration_v2_creates_template_table_on_fresh_and_existing_db(tmp_path):
-    assert len(METADATA_STEPS) == 2
+    assert len(METADATA_STEPS) >= 2
+    latest = len(METADATA_STEPS)
     fresh = Store(tmp_path / "fresh")
     with fresh.connect() as db:
-        assert user_version(db) == 2
+        assert user_version(db) == latest
         assert db.execute("SELECT name FROM sqlite_master WHERE name='script_templates'").fetchone()
-    # 已在 v1 的库：只追加 v2 步骤。
+    # 已在 v1 的库：只追加后续步骤。
     path = tmp_path / "old" / "metadata.sqlite3"
     path.parent.mkdir()
     db = sqlite3.connect(path)
@@ -381,7 +382,7 @@ def test_migration_v2_creates_template_table_on_fresh_and_existing_db(tmp_path):
     db.close()
     store = Store(tmp_path / "old")
     with store.connect() as db:
-        assert user_version(db) == 2
+        assert user_version(db) == latest
         columns = {row[1] for row in db.execute("PRAGMA table_info(script_templates)")}
     assert columns == {"id", "name", "category", "kind", "base_id", "body", "created_at", "updated_at"}
     assert store.one("SELECT value FROM settings WHERE key='active'")["value"] == "i1"

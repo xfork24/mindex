@@ -7,6 +7,10 @@
 参考文稿（``workspace/references.py``）作为"仅供参考"的独立段落交给 writer：rewrite 模板允许大纲为空
 但至少需要一份参考文稿；outline 模板把参考文稿当补充材料，大纲与参考文稿至少有其一。
 
+从选题创建的任务（``topics/create_job.py``）在方案上记录账号档案快照哈希 ``profile_hash``，任务目录有
+``profile.json``：签名参数只在方案有该键时加 ``profile``（没有档案的方案签名逐字节不变），执行时复验快照哈希，
+并把受众、定位与禁区作为写作约束交给 writer。档案同步后只提示 ``script_profile_changed``，不自动重写。
+
 测试改提示词版本时替换本模块的 ``WRITER_PROMPT_VERSION``。
 """
 
@@ -34,6 +38,36 @@ def template_id(p) -> str:
 
 def plan_template(config, p, store=None):
     return script_templates.get_template(store or Store(config.data_dir), template_id(p))
+
+
+def profile_changed(w, p) -> bool:
+    """当前文案生成时用的账号档案快照与方案现在的不同（同步过档案）：只提示可重新生成。"""
+    vid = p.get("script")
+    item = w["versions"].get(vid) if vid else None
+    if not item or item.get("data", {}).get("origin") != "generated":
+        return False
+    recorded = (item["data"].get("profile") or {}).get("hash")
+    return recorded != p.get("profile_hash")
+
+
+def profile_block(config, job_id, p) -> str | None:
+    """方案记录了档案快照时，复验任务目录的 profile.json 并返回写作约束正文。"""
+    expected = p.get("profile_hash")
+    if not expected:
+        return None
+    import json
+
+    from mindex.shared.writing_profile import profile_hash, writer_block
+
+    path = studio.job_dir(config, job_id) / "profile.json"
+    try:
+        saved = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raise studio.StudioError("账号档案快照缺失或已损坏，请在选题挖掘页重新同步档案") from None
+    snapshot = saved.get("snapshot") or {}
+    if profile_hash(snapshot) != expected:
+        raise studio.StudioError("账号档案快照已变化，请刷新后重试")
+    return writer_block(snapshot) or None
 
 
 def template_changed(config, w, p, *, store=None) -> bool:
@@ -69,6 +103,8 @@ class ScriptHandler(StageHandler):
         }
         if ids := references.reference_ids(p):
             result["references"] = ids  # 只在有参考文稿时加键，旧签名逐字节不变
+        if p.get("profile_hash"):
+            result["profile"] = p["profile_hash"]  # 只在带账号档案快照时加键
         return result
 
     def specification(self, config, job_id, w, p, sid, params, resources):
@@ -108,6 +144,9 @@ class ScriptHandler(StageHandler):
             raise studio.StudioError("文案模板已变化，请刷新后重试")
         if references.reference_ids(ctx.p) != ctx.spec["parameters"].get("references", []):
             raise studio.StudioError("参考文稿已变化，请刷新后重试")
+        if ctx.p.get("profile_hash") != ctx.spec["parameters"].get("profile"):
+            raise studio.StudioError("账号档案快照已变化，请刷新后重试")
+        profile = profile_block(config, ctx.job_id, ctx.p)
         # 逐份复验摘要：文件缺失或被改动时拒绝执行，不用错误的正文写文案。
         texts = references.load_texts(config, ctx.job_id, ctx.p)
         if template.kind == "rewrite" and not texts:
@@ -122,7 +161,8 @@ class ScriptHandler(StageHandler):
             on_error=lambda message: diagnostics.record("material-digest-error", {"message": message}),
         )
         writer = ctx.services.get("writer") or adapters.make_writer(config)
-        text = writer.write(outline, template=template, materials=digest, references=texts)
+        extra = {"profile": profile} if profile else {}  # 没有档案时调用形状不变
+        text = writer.write(outline, template=template, materials=digest, references=texts, **extra)
         if not text.strip():
             raise studio.StudioError("文案服务返回了空内容")
         if len(text) > config.studio.max_input_chars:
@@ -134,6 +174,8 @@ class ScriptHandler(StageHandler):
         }
         if texts:
             data["references"] = copy.deepcopy(references.references(ctx.p))
+        if ctx.p.get("profile_hash"):
+            data["profile"] = {"hash": ctx.p["profile_hash"]}
         if not digest.empty:
             # 只有实际参考了非空摘要才记录全文与统计（需求 4.10、4.11）。
             diagnostics.record("material-digest", {"text": digest.text, **digest.stats()})

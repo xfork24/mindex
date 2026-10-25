@@ -29,6 +29,9 @@ Mindex 是中文视频片段检索系统：文字找视频优先，支持视频�
   逐镜按画面来源：recall 召回（上面的检索）/ clip 上传片段 / image 静态图片 / aigc 视频生成 / animation AI 动画
   + 语音合成配音 ─选片对齐→ FFmpeg 按方案画幅渲染 → 成片合成 → 成片与产物
 
+选题挖掘（/studio/topics，/api/topics）：领域档案 ─数据源抓取→ 候选条目 ─嵌入聚类 + LLM 归纳→ 选题卡片
+  ─打分（素材覆盖查询上面的检索）→ 前 N 名写大纲 ─→ 建成创作任务（文案阶段带账号档案约束）
+
 智能助手（全局面板 /api/agent，MCP 导出 mindex mcp 与 /mcp）：工具经进程内回环调用上面各模块的 REST 接口
 ```
 
@@ -44,16 +47,17 @@ mindex/
 │   ├── search/       # 视频检索 HTML/JS
 │   ├── admin/        # 素材管理 HTML/JS/CSS
 │   ├── persons/      # 人物库 HTML/JS/CSS
-│   ├── studio/       # 创作 HTML/JS/CSS
+│   ├── studio/       # 创作 HTML/JS/CSS（含选题挖掘 topics.* 与文案模板 templates.*）
 │   ├── settings/     # 设置 HTML/JS/CSS
 │   └── shared/       # 公共样式、国际化、请求封装 api.js、播放器、侧栏、多选组件、智能助手面板
 └── backend/src/
-    ├── api.py / cli.py / cli_*.py / __init__.py  # 应用装配、命令入口及 e2e/persons/clips/agent 命令组、包信息
+    ├── api.py / cli.py / cli_*.py / __init__.py  # 应用装配、命令入口及 e2e/persons/clips/topics/agent 命令组、包信息
     ├── agent/        # 智能助手：工具注册表、运行时、模型协议、会话存储、MCP 导出
     ├── search/       # 视频检索、检索/媒体 API
     ├── admin/        # 素材管理、素材/对白任务、详情
     ├── persons/      # 人物库、扫描 worker、人物服务
     ├── studio/       # 创作：版本工作台（workspace/）、执行器、文案模板、渲染、动画录制
+    ├── topics/       # 选题挖掘：领域档案、数据源、挖掘任务、打分与素材覆盖、建创作任务、采集清单、每日定时
     ├── settings/     # 运行时设置、音色库、声音克隆
     ├── processing/   # 管线、索引、对白、字幕、镜头修复、对齐 worker
     ├── models/       # 模型适配、部署核验、模型服务

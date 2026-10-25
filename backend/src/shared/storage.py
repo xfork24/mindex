@@ -161,8 +161,62 @@ CREATE TABLE IF NOT EXISTS script_templates (
 """)
 
 
+def _metadata_v3(db) -> None:
+    """选题挖掘（topics/）：档案、数据源、候选条目、挖掘任务、选题卡片、素材缺口与导入的日历事件。
+
+    JSON 列（body/config/options/progress/result/publication）存 UTF-8 JSON 文本。``topic_runs`` 沿用
+    后台任务表的列约定（``source_id`` 存档案 ID），以复用 ``BackgroundTaskRunner`` 与 ``task_progress``。
+    子表不声明外键，删除档案由 ``topics/profiles.delete`` 在一个事务里级联。"""
+    execute_script(db, """
+CREATE TABLE IF NOT EXISTS topic_profiles (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, body TEXT NOT NULL,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS topic_sources (
+  id TEXT PRIMARY KEY, profile_id TEXT NOT NULL, kind TEXT NOT NULL, name TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1, config TEXT NOT NULL, secret TEXT,
+  last_fetch_at TEXT, last_error TEXT, last_count INTEGER,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS topic_sources_profile ON topic_sources(profile_id);
+CREATE TABLE IF NOT EXISTS topic_items (
+  id TEXT PRIMARY KEY, profile_id TEXT NOT NULL, source_id TEXT NOT NULL, dedup_key TEXT NOT NULL,
+  title TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '', url TEXT, published_at TEXT, event_at TEXT,
+  hot REAL, fetched_at TEXT NOT NULL,
+  UNIQUE(profile_id, dedup_key)
+);
+CREATE INDEX IF NOT EXISTS topic_items_profile ON topic_items(profile_id, fetched_at);
+CREATE TABLE IF NOT EXISTS topic_runs (
+  id TEXT PRIMARY KEY, source_id TEXT NOT NULL, trigger TEXT NOT NULL DEFAULT 'manual',
+  status TEXT NOT NULL, config TEXT NOT NULL, options TEXT NOT NULL, progress TEXT NOT NULL DEFAULT '{}',
+  error TEXT, result TEXT, publication TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS topic_runs_profile ON topic_runs(source_id, created_at);
+CREATE TABLE IF NOT EXISTS topic_cards (
+  id TEXT PRIMARY KEY, profile_id TEXT NOT NULL, run_id TEXT, title TEXT NOT NULL, body TEXT NOT NULL,
+  total REAL NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'new', job_id TEXT,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS topic_cards_profile ON topic_cards(profile_id, status, total);
+CREATE TABLE IF NOT EXISTS topic_gaps (
+  id TEXT PRIMARY KEY, profile_id TEXT NOT NULL, card_id TEXT, card_ids TEXT NOT NULL DEFAULT '[]',
+  visual TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 1, status TEXT NOT NULL DEFAULT 'open',
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS topic_gaps_profile ON topic_gaps(profile_id, status);
+CREATE TABLE IF NOT EXISTS topic_calendar_events (
+  id TEXT PRIMARY KEY, source_id TEXT NOT NULL, date TEXT NOT NULL, title TEXT NOT NULL,
+  summary TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL DEFAULT '', recurring INTEGER NOT NULL DEFAULT 0,
+  has_year INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS topic_calendar_events_source ON topic_calendar_events(source_id);
+""")
+
+
 # metadata.sqlite3 的有序迁移：只追加，不修改已发布的步骤（见 shared/migrations.py）。
-METADATA_STEPS = (_metadata_v1, _metadata_v2)
+METADATA_STEPS = (_metadata_v1, _metadata_v2, _metadata_v3)
 
 
 def migrate_metadata(db) -> int:

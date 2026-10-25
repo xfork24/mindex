@@ -1,0 +1,120 @@
+/* 选题挖掘页：顶部档案条、左侧选题列表、右侧卡片详情与折叠分区。复用 studio.css 的 .workspace / .job-panel / .job-item。 */
+.topics-bar{display:flex;flex-wrap:wrap;align-items:end;gap:12px 16px;background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px 18px;margin:0 0 18px}
+.topics-profile-field{min-width:240px;flex:0 1 320px}
+.topics-profile-field select{width:100%}
+.topics-bar-actions{display:flex;gap:8px;flex-wrap:wrap}
+.topics-profile-summary{flex:1 1 100%;font-size:12px;margin:0;line-height:1.7;overflow-wrap:anywhere}
+.topics-empty{margin:24px 0}
+.topics-empty p{font-size:13px;line-height:1.8;margin:0 0 16px}
+.topics-empty .submit{margin:0 auto}
+.topics-list-empty{font-size:12px;line-height:1.7}
+.topics-form-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.topics-weights,.topics-schedule{border:1px solid var(--line);border-radius:10px;padding:10px 14px 14px;margin:12px 0;display:flex;flex-wrap:wrap;gap:12px;align-items:end}
+.topics-weights legend,.topics-schedule legend{font-size:12px;color:var(--muted);padding:0 4px}
+.topics-weights label{flex:1 1 90px}
+.topics-weights input{width:100%}
+#pf-weights-sum{font-size:12px;flex:1 1 100%}
+#profile-form textarea{resize:vertical}
+#pf-error{margin:8px 0}
+.danger{color:#a4472e}
+/* 折叠分区：数据源、候选条目、素材采集清单 */
+.topics-section{background:#fff;border:1px solid var(--line);border-radius:14px;padding:12px 18px;margin:0 0 14px}
+.topics-section>summary{display:flex;align-items:baseline;gap:12px;font-size:14px;font-weight:550;color:#2d4a3c;padding:4px 0}
+.topics-section>summary .muted{font-size:12px;font-weight:400}
+.topics-section-hint{font-size:12px;line-height:1.7;margin:6px 0 10px}
+.source-list{display:flex;flex-direction:column;gap:8px;margin:8px 0 14px}
+.source-row{border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:grid;gap:4px}
+.source-row.is-disabled{background:#f7f8f5;opacity:.85}
+.source-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.source-name{font-size:13px;overflow-wrap:anywhere}
+.source-meta,.source-url{font-size:11px;overflow-wrap:anywhere}
+.source-error{font-size:12px;overflow-wrap:anywhere}
+.source-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
+.source-empty{font-size:12px;margin:0}
+.source-form{border-top:1px dashed var(--line);padding-top:10px}
+.source-form-title{font-size:13px;margin:4px 0 0;color:#47765d}
+.source-form .form-grid{margin:10px 0}
+.source-enabled{align-self:end;min-height:32px}
+.source-fields{display:flex;flex-direction:column;gap:10px}
+.source-fields .form-field{margin:0}
+.source-fields input,.source-fields select,.source-fields textarea{width:100%}
+.source-field-hint{font-size:11px}
+.source-form-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:10px}
+.source-form-actions .submit{margin-left:0}
+.source-test{border:1px solid var(--line);border-radius:10px;background:#fafcf7;padding:8px 12px;margin-top:12px;max-height:320px;overflow:auto}
+.items-actions{display:flex;align-items:center;gap:12px;margin:8px 0}
+.item-list{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-direction:column;gap:8px}
+.item-row{display:grid;gap:2px;font-size:13px;line-height:1.6;border-bottom:1px solid #eef1ec;padding-bottom:6px}
+.item-title{color:#21352f;overflow-wrap:anywhere}
+.item-meta{font-size:11px}
+.item-summary{margin:0;font-size:12px;color:#526258;overflow-wrap:anywhere}
+@media(max-width:700px){.topics-form-grid-3{grid-template-columns:minmax(0,1fr)}
+.topics-profile-field{flex:1 1 100%}
+}
+/* 挖掘任务条 */
+.topics-runs{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;background:#f4f8f0;border:1px solid #d6e3cf;border-radius:14px;padding:12px 18px;margin:0 0 18px}
+.topics-runs .submit{margin-left:0}
+.run-progress{flex:1 1 280px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.run-status{font-size:13px;color:#2d4a3c;line-height:1.6;overflow-wrap:anywhere}
+.run-progress progress{width:100%;height:6px;accent-color:var(--green)}
+.run-actions-inline{display:inline-flex;gap:8px}
+.run-warnings{flex:1 1 100%;margin:0;padding-left:18px;font-size:12px;color:#8a5a2b;line-height:1.7}
+/* 选题列表 */
+.card-filters{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr);gap:10px;margin-bottom:6px}
+.card-filters select,.card-filters input{width:100%}
+.topic-item-head{display:flex;align-items:flex-start;gap:8px}
+.topic-item-head .job-title{overflow-wrap:anywhere}
+.topic-score-badge{flex:0 0 auto;min-width:34px;text-align:center;font-size:12px;font-weight:600;color:#fff;background:var(--green);border-radius:999px;padding:1px 6px}
+.topic-item .job-sub{display:flex;gap:8px;flex-wrap:wrap}
+/* 卡片详情 */
+.topic-title-row h2{font-size:19px;letter-spacing:-.3px;overflow-wrap:anywhere}
+.topic-total{background:#205b44;color:#fff;border-color:#205b44}
+.topic-angle{font-size:14px;line-height:1.8;margin:0 0 4px;color:#21352f}
+.topic-reason{font-size:12px;line-height:1.7;margin:0 0 12px}
+.topic-scores{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px 18px;margin:8px 0 6px}
+.topic-score{display:grid;grid-template-columns:64px minmax(0,1fr) 36px;align-items:center;gap:8px;font-size:12px}
+.topic-score-bar{height:6px;border-radius:999px;background:#e7ede3;overflow:hidden}
+.topic-score-fill{display:block;height:100%;background:#6f9a62;border-radius:999px}
+.topic-score-value{text-align:right;color:#526258;font-variant-numeric:tabular-nums}
+.topic-block{border-top:1px solid var(--line);margin-top:16px;padding-top:6px}
+.topic-block h3{font-size:14px;margin:10px 0 6px}
+.topic-block .section-head{margin:8px 0 6px}
+.coverage-list{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-direction:column;gap:10px}
+.coverage-row{border:1px solid var(--line);border-radius:10px;padding:8px 10px}
+.coverage-row.is-gap{border-style:dashed;background:#fdf8f2}
+.coverage-head{display:flex;gap:8px;align-items:baseline;font-size:13px}
+.coverage-mark{font-size:11px;padding:1px 7px;border-radius:999px;background:#e5efe0;color:#2d5a3a;flex:0 0 auto}
+.is-gap .coverage-mark{background:#f6e3d3;color:#8a4a20}
+.coverage-visual{overflow-wrap:anywhere}
+.coverage-clips{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
+.coverage-clip{display:flex;flex-direction:column;gap:4px;width:150px;text-decoration:none;color:#526258;font-size:11px}
+.coverage-clip img{width:150px;height:84px;object-fit:cover;border-radius:6px;background:#15231e}
+.coverage-caption{overflow-wrap:anywhere}
+#card-outline{width:100%;min-height:200px;resize:vertical;font:13px/1.8 ui-monospace,SFMono-Regular,Menlo,"PingFang SC",monospace}
+.topic-outline-foot{display:flex;align-items:end;gap:14px;flex-wrap:wrap;margin-top:8px;font-size:12px}
+.topic-outline-foot label{min-width:220px}
+.topic-outline-actions{margin-left:auto;display:inline-flex;gap:8px}
+.item-source{justify-self:start}
+@media(max-width:700px){.card-filters{grid-template-columns:minmax(0,1fr)}
+.topic-score{grid-template-columns:64px minmax(0,1fr) 36px}
+}
+.topic-job-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;border-top:1px solid var(--line);margin-top:16px;padding-top:14px}
+.topic-job-bar .muted{font-size:12px;flex:1 1 240px}
+.topic-job-bar .submit{margin-left:0}
+/* 素材采集清单 */
+.gaps-actions{display:flex;align-items:end;gap:12px;margin:6px 0 10px}
+.gaps-actions label{min-width:160px}
+.gap-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.gap-row{border:1px dashed #e2c9b2;background:#fdf8f2;border-radius:10px;padding:8px 12px;display:grid;gap:4px}
+.gap-row.is-done{border-style:solid;border-color:var(--line);background:#f7f9f4;opacity:.8}
+.gap-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.gap-visual{font-size:13px;overflow-wrap:anywhere}
+.gap-head .quiet{margin-left:auto}
+.gap-cards{display:flex;gap:10px;flex-wrap:wrap;font-size:11px}
+.gap-card{color:#47765d}
+/* 日历导入 */
+.calendar-import{border-top:1px dashed var(--line);margin-top:12px;padding-top:10px}
+.calendar-row{display:flex;flex-wrap:wrap;align-items:end;gap:10px 14px}
+.calendar-row label{min-width:160px}
+.calendar-row .check{min-width:0;min-height:32px}
+.schedule-status{flex:1 1 100%;margin:0;font-size:12px;line-height:1.7}

@@ -58,7 +58,11 @@ def create_app(
     music_generator=None,
     web_token: str | None = None,
     agent_llm=None,
+    topic_llm=None,
+    scheduler: bool = False,
 ) -> FastAPI:
+    """``topic_llm`` 供测试注入选题挖掘的脚本化模型；``scheduler`` 为真时随应用启停每日选题调度器
+    （``mindex serve`` 按 ``topics.scheduler.enabled`` 传入，测试与内嵌应用缺省关闭）。"""
     config = config or load_config()
     store = Store(config.data_dir)
     runtime = RuntimeConfig(config, store)  # 设置页保存后经覆盖层热生效，无需重启
@@ -109,6 +113,15 @@ def create_app(
         video_generator=video_generator, animator=animator, animation_capture=animation_capture,
         image_generator=image_generator, music_generator=music_generator,
     ))
+    from mindex.topics.api import topics_router
+
+    topics = topics_router(runtime, store, embedder, topic_llm=topic_llm, scheduler=scheduler)
+    app.include_router(topics)
+    app.state.topic_scheduler = None
+    if scheduler:
+        from mindex.topics.scheduler import install as install_topic_scheduler
+
+        install_topic_scheduler(app, store, topics.topic_runs, config)
 
     from mindex.agent.api import agent_router, build_runtime
 
@@ -140,6 +153,8 @@ def create_app(
         register_page(group, f"{group}.html", (f"/{group}", f"/{group}/", f"/{group}.html"))
     # 文案模板管理是创作页的子页面（与创作任务并列的分区标签），资源仍在 /assets/studio/ 下。
     register_page("studio", "templates.html", ("/studio/templates", "/studio/templates/"))
+    # 选题挖掘同为创作页子页面（标签位于创作任务与文案模板之间）。
+    register_page("studio", "topics.html", ("/studio/topics", "/studio/topics/"))
     for group in ("search", "admin", "persons", "studio", "settings", "shared"):
         app.mount(f"/assets/{group}", StaticFiles(directory=assets_root / group), name=f"assets-{group}")
 

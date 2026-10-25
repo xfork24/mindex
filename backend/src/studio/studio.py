@@ -781,6 +781,7 @@ def load_job(config: Config, job_id: str) -> dict:
     state.setdefault("source_ids", None)  # 老任务没有素材范围，即不限
     state.setdefault("title_pending", False)  # 老任务标题早已确定，不处于待生成态
     state.setdefault("outline", "")  # 老任务没有大纲，input_text 本身就是文案
+    state.setdefault("topic", None)  # 不是从选题创建的任务（含老任务）没有选题来源与档案快照
     return state
 
 

@@ -393,6 +393,9 @@ window.MindexAgentFocus = async (focus, { passive = false } = {}) => {
   if (focus.job_id && !passive) location.href = `/studio?job=${encodeURIComponent(focus.job_id)}`;
   return true;
 };
-if (page.job) $("studio-jobs-tab").href = `/studio?job=${encodeURIComponent(page.job)}`;
+if (page.job) {
+  $("studio-jobs-tab").href = `/studio?job=${encodeURIComponent(page.job)}`;
+  $("studio-topics-tab").href = `/studio/topics?job=${encodeURIComponent(page.job)}`;
+}
 restorePreview();
 load(query.get("id") || "base").catch(failed);

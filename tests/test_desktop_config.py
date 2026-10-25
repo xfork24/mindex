@@ -24,6 +24,7 @@ def test_template_validates_and_resolves_inside_user_data(tmp_path):
     for url in (config.embedding.base_url, config.asr.base_url, config.studio.tts.base_url):
         assert url.startswith("http://127.0.0.1:"), url
     assert config.detector.backend == "adaptive"  # 不依赖模型服务即可 prepare
+    assert config.topics.scheduler.enabled  # 桌面版托盘常驻，定时选题挖掘缺省开启
 
 
 def test_template_ports_match_run_scripts():

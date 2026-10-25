@@ -15,22 +15,26 @@ from mindex.agent.registry import ToolContext, ToolError, ToolOutput, ToolSpec
 from mindex.agent.tools.common import load_view
 from mindex.shared.config import StrictModel
 
-PAGES = {"studio": "创作", "settings": "设置", "search": "视频检索", "admin": "素材管理", "persons": "人物库"}
+PAGES = {"studio": "创作", "settings": "设置", "search": "视频检索", "admin": "素材管理", "persons": "人物库",
+         "topics": "选题挖掘"}
 STUDIO_SECTIONS = ("jobs", "script", "plan", "storyboard", "log", "final", "artifacts")
 SETTINGS_SECTIONS = ("models", "processing", "tuning", "voices", "releases")
+TOPICS_SECTIONS = ("profiles", "sources", "runs", "cards", "card", "gaps", "schedule")
 
 
 class Navigate(StrictModel):
-    page: Literal["studio", "settings", "search", "admin", "persons"]
+    page: Literal["studio", "settings", "search", "admin", "persons", "topics"]
     job_id: str | None = Field(default=None, description="创作页：要打开的任务；省略时用当前页面上下文里的任务")
     plan_id: str | None = None
     shots: list[str] | None = Field(default=None, max_length=20, description="创作页：要定位的分镜（短 ID、完整 ID 或 #序号）")
     stage: Literal["content", "recall", "tts", "music", "draw", "generate", "animate", "select", "render"] | None = Field(
         default=None, description="创作页：展开分镜的哪个阶段详情")
     section: Literal["jobs", "script", "plan", "storyboard", "log", "final", "artifacts",
-                     "models", "processing", "tuning", "voices", "releases"] | None = Field(
+                     "models", "processing", "tuning", "voices", "releases",
+                     "profiles", "sources", "runs", "cards", "card", "gaps", "schedule"] | None = Field(
         default=None, description="创作页区块：jobs/script/plan/storyboard/log/final/artifacts；"
-                                  "设置页区块：models/processing/tuning/voices/releases")
+                                  "设置页区块：models/processing/tuning/voices/releases；"
+                                  "选题挖掘页区块：profiles/sources/runs/cards/card/gaps/schedule")
     role: Literal["analyzer", "writer", "generator", "embedding", "asr", "tts", "image_generator", "video_generator",
                   "music_generator", "animator", "person", "agent"] | None = Field(
         default=None, description="设置页：展开的模型角色")
@@ -40,13 +44,15 @@ class Navigate(StrictModel):
     source_id: str | None = Field(default=None, description="素材管理页：打开的素材")
     segment_id: str | None = Field(default=None, description="素材管理页：定位的镜头或片段")
     pane: str | None = Field(default=None, description="人物库页：切换到的分页，如 cast、processing")
+    topic_profile_id: str | None = Field(default=None, description="选题挖掘页：切换到的领域档案")
+    card_id: str | None = Field(default=None, description="选题挖掘页：打开的选题卡片")
 
 
 async def navigate(args: Navigate, ctx: ToolContext) -> ToolOutput:
     focus: dict = {"page": args.page}
     label = PAGES[args.page]
     if args.section:
-        allowed = STUDIO_SECTIONS if args.page == "studio" else SETTINGS_SECTIONS if args.page == "settings" else ()
+        allowed = {"studio": STUDIO_SECTIONS, "settings": SETTINGS_SECTIONS, "topics": TOPICS_SECTIONS}.get(args.page, ())
         if args.section not in allowed:
             raise ToolError(f"{label}页没有区块 {args.section}", code="invalid_arguments")
         focus["section"] = args.section
@@ -86,6 +92,8 @@ async def navigate(args: Navigate, ctx: ToolContext) -> ToolOutput:
         focus.update({k: v for k, v in (("source_id", args.source_id), ("segment_id", args.segment_id)) if v})
     elif args.page == "persons" and args.pane:
         focus["pane"] = args.pane
+    elif args.page == "topics":
+        focus.update({k: v for k, v in (("profile_id", args.topic_profile_id), ("card_id", args.card_id)) if v})
     return ToolOutput(focus, text=f"已在用户页面上打开：{label}" + (f"（{args.section}）" if args.section else ""),
                       focus=focus)
 
@@ -93,7 +101,7 @@ async def navigate(args: Navigate, ctx: ToolContext) -> ToolOutput:
 def specs() -> list[ToolSpec]:
     return [
         ToolSpec("navigate", "meta",
-                 "在用户浏览器里切换页面并定位（创作任务/分镜/区块、设置角色/档案、检索词、素材）。只改变界面，不修改数据；"
+                 "在用户浏览器里切换页面并定位（创作任务/分镜/区块、设置角色/档案、检索词、素材、选题档案/卡片）。只改变界面，不修改数据；"
                  "其他工具已会自动定位，仅在用户要求打开或查看某处时调用。",
                  Navigate, "read", navigate, mcp=False),
     ]

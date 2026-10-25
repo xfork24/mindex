@@ -46,6 +46,17 @@ def test_dictionary_and_bindings():
         assert key in catalog, key
     for key in re.findall(r'"(ui\.templates?_\w+|ui\.studio_tab\w*)"', (STATIC / "studio" / "templates.js").read_text()):
         assert key in catalog, key
+    # 选题挖掘页（创作页的子页面）：HTML 与脚本里引用的全部文案键都要存在。
+    html = (STATIC / "studio" / "topics.html").read_text()
+    assert html.count('data-language="zh"') == html.count('data-language="en"') == 1
+    assert html.index('/assets/shared/i18n.js') < html.index('/assets/studio/topics.js')
+    for key in re.findall(r'(?:data-i18n-[a-z-]+="|&quot;)(ui\.[\w.]+)', html):
+        assert key in catalog, key
+    script = (STATIC / "studio" / "topics.js").read_text()
+    for key in re.findall(r'"(ui\.topics_\w+)"', script):
+        assert key in catalog, key
+    for prefix in re.findall(r'`(ui\.topics_[a-z_]+)\$\{', script):  # 拼接的键：状态与任务状态
+        assert any(key.startswith(prefix) for key in catalog), prefix
 
 
 def test_system_metadata_preserves_content_and_diagnostics():

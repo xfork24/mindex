@@ -26,15 +26,17 @@ ALLOWED = {
 # 既有债务（2026-10 冻结）：上层包之间的现存依赖。不得新增；消除后从这里删除。
 ALLOWED_UPPER = {
     "admin": {"diagnostics", "maintenance", "models", "persons", "processing", "search", "shared"},
-    "agent": {"processing", "settings", "shared", "studio"},
+    "agent": {"processing", "settings", "shared", "studio", "topics"},
     APP: {"admin", "agent", "diagnostics", "maintenance", "models", "persons", "processing", "search",
-          "settings", "shared", "studio"},
+          "settings", "shared", "studio", "topics"},
     "diagnostics": {"models", "processing", "search", "shared"},
     "maintenance": {"agent", "models", "persons", "processing", "shared"},
     "persons": {"admin", "maintenance", "models", "settings", "shared"},
     "search": {"admin", "models", "persons", "processing", "settings", "shared"},
     "settings": {"agent", "models", "persons", "shared"},
     "studio": {"admin", "models", "persons", "search", "settings", "shared"},
+    # 选题挖掘（M2）：只向下依赖；studio 不反向依赖 topics（写作约束快照在 shared/writing_profile.py）。
+    "topics": {"admin", "models", "search", "shared", "studio"},
 }
 
 # 任何情况下都不允许的边（白名单也不能放开）。
@@ -49,6 +51,9 @@ AGENT_EXTERNAL_MODULES = {
     "mindex.studio.studio",
     "mindex.studio.studio_models",
     "mindex.studio.workspace",
+    # 选题工具的参数模型（ID 格式、权重与定时），与 studio_models 同类。
+    "mindex.topics.common",
+    "mindex.topics.models",
 }
 
 

@@ -47,12 +47,18 @@ async function waitFor(predicate, timeout, message) {
     assert.equal(isolated.desktop.platform, "darwin");
     assert.equal(isolated.frozen, true);
 
-    // 2. 五个页面与模板子页都直接可用（认证由外壳注入，不出现登录页）。
-    for (const page of ["/", "/admin", "/persons", "/studio", "/settings", "/studio/templates"]) {
+    // 2. 五个页面与模板、选题子页都直接可用（认证由外壳注入，不出现登录页）。
+    for (const page of ["/", "/admin", "/persons", "/studio", "/settings", "/studio/templates", "/studio/topics"]) {
       const response = await win.goto(`${origin}${page}`);
       assert.equal(response.status(), 200, page);
       assert.ok(!win.url().includes("/login"), `${page} 被重定向到登录页`);
     }
+    // 选题挖掘页与 Web 端同一套前端：标签顺序一致，档案接口经外壳认证可用。
+    const tabs = await win.$$eval(".studio-tabs a", (links) => links.map((a) => a.getAttribute("href")));
+    assert.deepEqual(tabs, ["/studio", "/studio/topics", "/studio/templates"]);
+    await win.locator("#topics-empty").waitFor({ timeout: 15000 });
+    const profiles = await win.evaluate(async () => (await fetch("/api/topics/profiles")).status);
+    assert.equal(profiles, 200);
 
     // 3. 页面脚本自身的请求（不带任何凭证设置）与 SSE 都通过认证。
     const health = await win.evaluate(async () => {
@@ -71,6 +77,27 @@ async function waitFor(predicate, timeout, message) {
       source.onerror = () => { clearTimeout(timer); source.close(); resolve("error"); };
     }));
     assert.equal(sse, "ready");
+
+    // 3b. 托盘常驻：渲染进程能读到后台偏好；选题页提示定时照常执行（sidecar 运行着每日调度）。
+    assert.equal(isolated.desktop.background, true);
+    const created = await win.evaluate(async () => (await fetch("/api/topics/profiles", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "冒烟档案", domain: "测试", schedule: { enabled: true, time: "23:59", count: 1 } }),
+    })).status);
+    assert.equal(created, 201);
+    await win.goto(`${origin}/studio/topics`);
+    await win.locator("#schedule-status", { hasText: "后台运行中" }).waitFor({ timeout: 15000 });
+    // 关闭窗口只隐藏，后端继续运行；点 Dock（activate）重新显示。
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close());
+    await waitFor(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map((w) => w.isVisible()))
+      .then((visible) => visible.length === 1 && visible[0] === false), 10000, "关闭窗口后窗口应隐藏而不是销毁");
+    assert.ok(alive(sidecarPid));
+    const hiddenHealth = await win.evaluate(async () => (await fetch("/api/health")).status);
+    assert.equal(hiddenHealth, 200);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(home, "user-data", "desktop-state.json"), "utf8")).background_hint_shown, true);
+    await app.evaluate(({ app: electronApp }) => electronApp.emit("activate"));
+    await waitFor(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible()), 10000,
+      "activate 后窗口应重新显示");
 
     // 4. 下载经外壳保存（测试时直接写入临时目录，正式使用弹出保存对话框）。
     await win.evaluate(() => {

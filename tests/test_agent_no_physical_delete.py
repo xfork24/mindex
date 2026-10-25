@@ -53,6 +53,8 @@ ALLOWED_DELETES = {
     "delete_model_profile": re.compile(r"^/api/settings/profiles/[^/]+$"),
     "reset_business_settings": re.compile(r"^/api/settings/business$"),
     "delete_voice": re.compile(r"^/api/settings/voices/[^/]+$"),
+    "delete_topic_profile": re.compile(r"^/api/topics/profiles/[^/]+$"),
+    "delete_topic_source": re.compile(r"^/api/topics/sources/[^/]+$"),
 }
 
 # 设计文档「风险分级汇总」中的新增工具（逐项核对）。
@@ -163,7 +165,37 @@ TEMPLATE = {"id": "user-0123456789ab", "name": "我的模板", "category": "base
             "description": "说明", "instructions": "提示词", "constraints": {"max_chars": None}, "builtin": False,
             "base_id": "base"}
 
+TOPIC_PROFILE = {"id": "tp_0123456789ab", "name": "财经号", "domain": "金融", "subtopics": [], "audience": "",
+                 "positioning": "", "taboos": [], "keywords": [], "language": "zh-hans", "region": "CN",
+                 "canvas": "16:9", "weights": {}, "schedule": {"enabled": False, "time": "08:00", "count": 10}}
+
+TOPIC_SOURCE = {"id": "ts_0123456789ab", "profile_id": TOPIC_PROFILE["id"], "kind": "rss", "kind_label": "RSS",
+                "name": "要闻", "enabled": True, "config": {"url": "https://example.com/feed.xml"}, "has_secret": False,
+                "secret_mask": None, "last_fetch_at": None, "last_error": None, "last_count": None}
+
+TOPIC_RUN = {"id": "a" * 32, "profile_id": TOPIC_PROFILE["id"], "status": "failed", "trigger": "manual",
+             "progress": {}, "result": None, "error": "失败"}
+TOPIC_CARD = {"id": "tc_0123456789ab", "profile_id": TOPIC_PROFILE["id"], "run_id": "a" * 32, "title": "选题",
+              "status": "new", "job_id": None, "total": 0.5, "angle": "", "reason": "", "visuals": ["a", "b"],
+              "scores": {}, "outline": None, "outline_origin": None, "template_id": "base", "warnings": [],
+              "item_ids": [], "coverage": None, "items": []}
+
 GET_ROUTES = [
+    (re.compile(r"^/api/topics/profiles/[^/]+/gaps$"), lambda: {"items": []}),
+    (re.compile(r"^/api/topics/jobs/[^/]+/profile$"), lambda: {"job_id": JOB, "topic": {"card_id": TOPIC_CARD["id"]},
+                                                                "hash": "h1", "current_hash": "h2", "outdated": True,
+                                                                "profile_exists": True, "snapshot": {}}),
+    (re.compile(r"^/api/topics/runs/[^/]+$"), lambda: TOPIC_RUN),
+    (re.compile(r"^/api/topics/profiles/[^/]+/runs$"), lambda: {"items": [TOPIC_RUN]}),
+    (re.compile(r"^/api/topics/profiles/[^/]+/cards$"), lambda: {"items": [TOPIC_CARD], "counts": {}}),
+    (re.compile(r"^/api/topics/cards/[^/]+/coverage$"), lambda: {"card_id": TOPIC_CARD["id"], "title": "选题",
+                                                                  "coverage": None}),
+    (re.compile(r"^/api/topics/cards/[^/]+$"), lambda: TOPIC_CARD),
+    (re.compile(r"^/api/topics/profiles/[^/]+/sources$"), lambda: {"items": [TOPIC_SOURCE], "kinds": []}),
+    (re.compile(r"^/api/topics/profiles/[^/]+/items$"), lambda: {"items": []}),
+    (re.compile(r"^/api/topics/sources/[^/]+$"), lambda: TOPIC_SOURCE),
+    (re.compile(r"^/api/topics/profiles/[^/]+$"), lambda: TOPIC_PROFILE),
+    (re.compile(r"^/api/topics/profiles$"), lambda: {"items": [TOPIC_PROFILE]}),
     (re.compile(r"^/api/studio/templates/[^/]+$"), lambda: TEMPLATE),
     (re.compile(r"^/api/studio/templates$"), lambda: {"items": [TEMPLATE], "default": "base"}),
     (re.compile(r"^/api/studio/jobs/[^/]+/workspace$"), workspace),
@@ -414,6 +446,33 @@ MANUAL = {
     "copy_script_template": [{"template_id": "base", "name": "副本"}],
     "start_local_service": [{"name": "wemm"}, {"name": "nope"}],
     "stop_local_service": [{"name": "wemm"}],
+    "save_topic_profile": [{"name": "新档案", "domain": "金融"},
+                           {"topic_profile_id": TOPIC_PROFILE["id"], "taboos": ["不荐股"]}],
+    "delete_topic_profile": [{"topic_profile_id": TOPIC_PROFILE["id"]}],
+    "save_topic_source": [{"topic_profile_id": TOPIC_PROFILE["id"], "kind": "rss", "name": "要闻",
+                           "config": {"url": "https://example.com/feed.xml"}},
+                          {"topic_source_id": TOPIC_SOURCE["id"], "enabled": False}],
+    "delete_topic_source": [{"topic_source_id": TOPIC_SOURCE["id"]}],
+    "test_topic_source": [{"topic_source_id": TOPIC_SOURCE["id"]}],
+    "fetch_topic_items": [{"topic_profile_id": TOPIC_PROFILE["id"]}],
+    "list_topic_sources": [{"topic_profile_id": TOPIC_PROFILE["id"]}],
+    "list_topic_items": [{"topic_profile_id": TOPIC_PROFILE["id"]}],
+    "discover_topics": [{"topic_profile_id": TOPIC_PROFILE["id"]}],
+    "get_topic_run": [{"run_id": TOPIC_RUN["id"]}, {"topic_profile_id": TOPIC_PROFILE["id"]}],
+    "manage_topic_run": [{"run_id": TOPIC_RUN["id"], "action": "retry"}, {"run_id": TOPIC_RUN["id"], "action": "cancel"}],
+    "list_topics": [{"topic_profile_id": TOPIC_PROFILE["id"]}],
+    "get_topic": [{"card_id": TOPIC_CARD["id"]}],
+    "score_topic": [{"card_id": TOPIC_CARD["id"]}],
+    "topic_coverage": [{"card_id": TOPIC_CARD["id"]}],
+    "draft_topic_outline": [{"card_id": TOPIC_CARD["id"]}],
+    "update_topic": [{"card_id": TOPIC_CARD["id"], "status": "dismissed"}],
+    "create_job_from_topic": [{"card_id": TOPIC_CARD["id"]}],
+    "get_job_profile": [{"job_id": JOB}],
+    "sync_job_profile": [{"job_id": JOB}],
+    "topic_gaps": [{"topic_profile_id": TOPIC_PROFILE["id"]}],
+    "import_topic_calendar": [{"topic_source_id": TOPIC_SOURCE["id"], "sample": "history"},
+                              {"topic_source_id": TOPIC_SOURCE["id"], "text": "date,title\n10-24,程序员节"}],
+    "update_topic_gap": [{"gap_id": "tg_0123456789ab", "status": "done"}],
     "edit_animation_source": [{"shot": "#1", "html": "<html><body></body></html>"},
                               {"shot": "#1", "replacements": [{"find": "body", "replace": "main"}]}],
 }

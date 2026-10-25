@@ -22,11 +22,13 @@ def build_registry() -> ToolRegistry:
         studio_read,
         studio_templates,
         studio_write,
+        topics,
     )
 
     registry = ToolRegistry()
     for module in (meta, navigate, studio_read, studio_templates, studio_write, studio_build, studio_detail,
-                   studio_animation, library, library_tasks, search, index, persons, persons_review, settings_tools):
+                   studio_animation, library, library_tasks, search, index, persons, persons_review, settings_tools,
+                   topics):
         for spec in module.specs():
             registry.add(spec)
     return registry

@@ -132,6 +132,8 @@ def main() -> int:
                                     "frontend", "align_worker") if report.get(key) is not True]
         if report.get("templates", 0) < 1:
             problems.append("templates")
+        if report.get("topic_samples", 0) < 3:
+            problems.append("topic_samples")
         for relative, digest in report["source_hashes"].items():
             source = ROOT / "backend" / "src" / Path(relative).relative_to("mindex")
             if digest != sha256(source):
@@ -183,7 +185,7 @@ def main() -> int:
                 return 1
             print(f"   就绪 {time.monotonic() - started:.1f}s，版本 {health['version']}，pid {health['pid']}")
             assert health["pid"] == process.pid and Path(health["data_dir"]) == (work / "data").resolve(), health
-            for page in ("/", "/admin", "/persons", "/studio", "/settings", "/studio/templates", "/docs"):
+            for page in ("/", "/admin", "/persons", "/studio", "/settings", "/studio/templates", "/studio/topics", "/docs"):
                 status, _ = get(base + page)
                 assert status == 200, (page, status)
             templates = json.loads(get(f"{base}/api/studio/templates")[1])

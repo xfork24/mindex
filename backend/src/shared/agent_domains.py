@@ -17,6 +17,7 @@ AGENT_DOMAINS: tuple[str, ...] = (
     "index",
     "persons",
     "settings",
+    "topics",
 )
 
 # 可按需加载的领域（不含 meta）。

@@ -25,13 +25,17 @@ test("会话 Cookie 与后端 web_auth.session_value 一致", () => {
 test("状态文件：缺失、损坏与非法值回落到默认；原子写入", () => {
   const dir = temp();
   const file = path.join(dir, "nested", "desktop-state.json");
-  assert.deepEqual(loadState(file), { port: null, data_dir: null, sidecar: null });
+  const defaults = { port: null, data_dir: null, sidecar: null, keep_in_background: true, background_hint_shown: false };
+  assert.deepEqual(loadState(file), defaults);
   saveState(file, { port: 51234, data_dir: "/Volumes/素材/data" });
-  assert.deepEqual(loadState(file), { port: 51234, data_dir: "/Volumes/素材/data", sidecar: null });
+  assert.deepEqual(loadState(file), { ...defaults, port: 51234, data_dir: "/Volumes/素材/data" });
   fs.writeFileSync(file, "{broken");
   assert.equal(loadState(file).port, null);
-  fs.writeFileSync(file, JSON.stringify({ port: 70000, data_dir: "relative/dir", sidecar: { pid: "x" } }));
-  assert.deepEqual(loadState(file), { port: null, data_dir: null, sidecar: null });
+  fs.writeFileSync(file, JSON.stringify({ port: 70000, data_dir: "relative/dir", sidecar: { pid: "x" },
+    keep_in_background: "no", background_hint_shown: 1 }));
+  assert.deepEqual(loadState(file), defaults);
+  saveState(file, { keep_in_background: false, background_hint_shown: true });
+  assert.deepEqual(loadState(file), { ...defaults, keep_in_background: false, background_hint_shown: true });
   assert.deepEqual(fs.readdirSync(path.dirname(file)), ["desktop-state.json"]);
 });
 

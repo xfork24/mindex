@@ -233,6 +233,7 @@ function render() {
   );
   const select = $("plan-select");
   renderJobMeta();
+  renderJobTopic();
   select.replaceChildren();
   for (const item of Object.values(state.data.plans)) {
     const o = el("option", item.name);

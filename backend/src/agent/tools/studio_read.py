@@ -56,7 +56,8 @@ async def get_workspace_summary(args: WorkspaceSummary, ctx: ToolContext) -> Too
         "plan": {"id": view.plan_id, "name": p["name"], "revision": view.revision, "options": p["options"],
                  "final": short(p.get("final")), "script_stale": bool(w.get("script_stale")) if view.active else None,
                  "template_id": p["options"].get("template_id", "base"),
-                 "script_template_changed": bool(w.get("script_template_changed")) if view.active else None},
+                 "script_template_changed": bool(w.get("script_template_changed")) if view.active else None,
+                 "script_profile_changed": bool(w.get("script_profile_changed")) if view.active else None},
         "script": view.script(),
         "shots": view.shot_rows(),
         "recent_builds": [{"id": b["id"], "status": b["status"], "created_at": b["created_at"]} for b in builds],
@@ -73,6 +74,8 @@ async def get_workspace_summary(args: WorkspaceSummary, ctx: ToolContext) -> Too
         lines.append("注意：文案已变化，现有分镜按旧文案拆出，构建时会重新拆分镜。")
     if value["plan"]["script_template_changed"]:
         lines.append("提示：所选文案模板或提示词与当前文案生成时不同；已有文案不会自动重写，需要时用 run_node 重新生成文案。")
+    if value["plan"].get("script_profile_changed"):
+        lines.append("提示：账号档案已同步，当前文案按旧档案写成；需要时用 run_node 重新生成文案。")
     lines.append(f"分镜 {len(view.order)} 个（状态标记 ✓完成 ✗失败 —缺失）：")
     lines.append(board_text(view))
     lines.append(f"成片版本：{short(p.get('final')) or '（尚无成片）'}")

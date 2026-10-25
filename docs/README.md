@@ -18,9 +18,10 @@
 | 回收磁盘空间 | [磁盘清理](cleanup.md) | [CLI 参考](cli-reference.md#磁盘清理) |
 | 备份、迁移合并或全新 clone 恢复 | [数据备份与迁移](backup.md) | [CLI 参考](cli-reference.md#数据备份与迁移) |
 | 切换线上/自建模型、克隆音色、调检索权重 | [设置页指南](settings.md) | [配置参考](config-reference.md) |
+| 按领域发现选题、打分并建成创作任务 | [选题挖掘](topics.md) | [创作工作流](studio.md) |
 | 从文案生成视频（创作工作台） | [创作工作流](studio.md) | [设置页：视频生成与动画生成角色](settings.md) / [部署：ComfyUI 与动画录制](DEPLOYMENT.md#comfyui可选的-aigc-视频生成服务) |
 | 用自然语言操作 Mindex，或接入外部 harness（MCP） | [智能助手](agent.md) | [设置页指南](settings.md) |
-| 安装或构建 macOS 桌面版、管理本机模型服务 | [macOS 桌面版](desktop.md) | [设置页：本机服务](settings.md#本机服务) |
+| 安装或构建 macOS 桌面版、管理本机模型服务、后台运行 | [macOS 桌面版](desktop.md) | [设置页：本机服务](settings.md#本机服务) |
 | 用哔哩哔哩缓存转 MP4 | [m4s-converter](../tools/m4s-converter/README.md) | — |
 | 标注评测查询 | [评测标注说明](../eval/README.md) | [e2e 实验框架](e2e-framework.md) |
 | 了解后续规划与最近一次审查 | [功能路线图](../plans/ROADMAP.md) | [2026-10 审查报告](#审查报告) |
@@ -29,7 +30,7 @@
 
 - [architecture.md](architecture.md) — 按页面划分的源码目录、模块职责、离线/在线数据流、存储布局、SQLite 表、五条核心不变量
 - [pipeline.md](pipeline.md) — detect/split/transcribe/align/analyze/index 各阶段机制、检查点与断点续跑、指纹键
-- [cli-reference.md](cli-reference.md) — `mindex`（含 `agent`、`mcp`）、`mindex-model-server` 与 `mindex-person-server` 的命令、参数、默认值、示例
+- [cli-reference.md](cli-reference.md) — `mindex`（含 `agent`、`mcp`、`topics`）、`mindex-model-server` 与 `mindex-person-server` 的命令、参数、默认值、示例
 - [config-reference.md](config-reference.md) — 全部配置键、类型、默认值、影响与常用组合
 - [search.md](search.md) — 三渠道召回（新版）与五路召回（旧版）、加权 RRF、视频查询窗口化、筛选器、分数语义
 - [recall-enhancement.md](recall-enhancement.md) — 画面、对白、分析三渠道的独立处理、增量发布与召回
@@ -39,10 +40,11 @@
 - [admin.md](admin.md) — 素材后台功能与管理 API
 - [settings.md](settings.md) — 设置页：十个模型角色的档案热切换、线上厂商支持、音色克隆、检索调参、索引版本、密钥安全
 - [studio.md](studio.md) — 创作工作流：文案模板与参考文稿、拆分镜、五种分镜画面来源（召回/片段/图片/AIGC/AI 动画）、画幅、版本与构建、阶段注册表、API
+- [topics.md](topics.md) — 选题挖掘：领域档案、数据源（RSS、热榜、Brave、日历、本地）、挖掘与打分、素材覆盖、建创作任务、档案同步、素材采集清单、每日定时、四个入口
 - [agent.md](agent.md) — 智能助手：全局面板、分级确认与删除策略、工具领域与动态加载、附件、视觉输入、密钥表单、页面同步与定位、Markdown 回复、图片与音视频、可调宽度、任务跟踪与取消、全部工具表、MCP 导出（领域过滤）与 deepseek-harness 兼容
 - [cleanup.md](cleanup.md) — 磁盘清理：三级分类（每次删/策略过期/只报告）、保留规则、锁与并发
 - [backup.md](backup.md) — 离线备份、部分迁移、已有库合并、切换中断恢复和全新 clone 恢复流程
-- [desktop.md](desktop.md) — macOS 桌面版：安装与首次打开、文件位置、本机模型服务、AI 动画录制组件、随包组件、构建与同步演进约定
+- [desktop.md](desktop.md) — macOS 桌面版：安装与首次打开、文件位置、本机模型服务、AI 动画录制组件、后台运行与每日选题、随包组件、构建与同步演进约定
 
 ## 验证与审计记录
 

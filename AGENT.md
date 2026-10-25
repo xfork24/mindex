@@ -14,7 +14,7 @@
 - 后端直接位于 `backend/src/`，由 Setuptools 映射为 `mindex`；例如 `from mindex.search.search import SearchEngine`。使用当前分包路径，不增加旧模块转发层。
 - 前端位于 `frontend/src/`，采用原生 HTML/JS/CSS，无打包步骤。两侧按 search/admin/persons/studio/settings 功能组织，共享资源位于各自的 shared/。请求统一经 `shared/api.js`（`window.MindexApi`），各页面 `api()` 只是薄封装。创作页由 `studio/studio-*.js` 多个经典脚本按 `studio.html` 中的顺序加载，顶层声明共享全局作用域；加载期执行的代码只放在最后的 `studio-main.js`。
 - 改动任何被页面引用的 JS/CSS 后运行 `python scripts/build-assets.py`，把 HTML 中 `/assets/` 地址的 `?v=` 更新为内容哈希（`--check` 仅校验；文案改动先运行 build-messages.py）。
-- API 装配在 `backend/src/api.py`；CLI 入口在 `backend/src/cli.py`（全局选项、核心命令与 `indexes`），`e2e`、`persons`、`clips`、`agent` 命令组在 `cli_e2e.py`、`cli_persons.py`、`cli_clips.py`、`cli_agent.py`（顶层 `mcp` 也在后者），`backup` 在 `maintenance/backup_cli.py`；重依赖保留在命令函数内延迟导入。
+- API 装配在 `backend/src/api.py`；CLI 入口在 `backend/src/cli.py`（全局选项、核心命令与 `indexes`），`e2e`、`persons`、`clips`、`topics`、`agent` 命令组在 `cli_e2e.py`、`cli_persons.py`、`cli_clips.py`、`cli_topics.py`、`cli_agent.py`（顶层 `mcp` 也在后者），`backup` 在 `maintenance/backup_cli.py`；重依赖保留在命令函数内延迟导入。
 - 静态资源统一通过 `shared/web_assets.py` 定位；同时考虑源码目录与 wheel 中的 `mindex.web`，打包规则在 `pyproject.toml`、`MANIFEST.in`。
 - UI 文案只改 `frontend/src/shared/messages.json`，然后运行 `python scripts/build-messages.py` 生成 `messages.js`（`--check` 仅校验）。保留语言切换前的输入和页面状态。
 - 新模型通过 `models/adapters.py` 的协议与 `make_*` 工厂接入，具体后端各在一个模块（`embedders`、`qwen`、`speech`、`storyboard`、`writer`、`transcribers`、`detectors`、`video_generators`、`animator`）；模型依赖使用独立环境，不混入应用环境。单 GPU 按阶段轮换服务，不假设全部服务同时在线。
@@ -58,6 +58,7 @@ uv run pytest -q                                    # 完整回归，约 20 分�
 | 页面、静态资源、文案 | `test_page_assets.py`、`test_i18n.py`、改动 JS 的语法检查及对应 UI 回归 |
 | Studio、人物、备份 | 对应功能测试，必要时覆盖媒体与跨进程恢复链路；Studio 签名变化检查 `test_studio_signature_snapshot.py` |
 | 智能助手工具 | `tests/test_agent_*.py`（含工具数量断言与 `agent_scenarios.py` 场景），同步 `docs/agent.md` 工具表 |
+| 选题挖掘 | `tests/test_topics_*.py`（含入口一致性 `test_topics_parity.py`）；新能力同时提供页面、CLI、REST 与智能助手工具，并登记 `topics/capabilities.py` |
 | 目录、导入或打包 | CLI、资源加载、独立服务入口及 wheel/源码包内容 |
 | 仅文档 | 核对命令、文件路径、相对链接，并执行 `git diff --check` |
 

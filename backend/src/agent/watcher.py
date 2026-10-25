@@ -4,7 +4,7 @@
 
 - 创作构建 ``{"job_id", "build_id", "plan_id"?}``（``kind`` 省略或为 ``build``）：跟踪关系记为
   ``plugin:mindex/build-watch``，结束写 ``plugin:mindex/build-finished``（面板构建卡片依赖这两个事件）。
-- 后台任务 ``{"kind": "source"|"dialogue"|"person", "task_id", "source_id"?, "work"?}``：跟踪关系记为
+- 后台任务 ``{"kind": "source"|"dialogue"|"person"|"topics", "task_id", "source_id"?, "work"?}``：跟踪关系记为
   ``plugin:mindex/task-watch``，结束写 ``plugin:mindex/task-finished``。
 
 服务重启后 ``resume_all`` 会继续跟踪尚未出现结束事件的目标；目标若已在重启期间结束，会立即补写结果
@@ -27,6 +27,7 @@ TASK_KINDS = {
     "source": ("/api/admin/source-tasks/{}", "素材任务"),
     "dialogue": ("/api/admin/dialogue-tasks/{}", "对白任务"),
     "person": ("/api/persons/tasks/{}", "人物任务"),
+    "topics": ("/api/topics/runs/{}", "选题挖掘任务"),
 }
 WATCH_KINDS = ("build", *TASK_KINDS)
 # 仍在进行中的任务状态；其余（complete、partial、failed、cancelled、interrupted 及未知值）都视为终态。
@@ -180,6 +181,8 @@ class TaskWatcher:
         for key in ("progress", "publication"):
             if isinstance(task.get(key), dict):
                 summary[key] = task[key]
+        if target.get("kind") == "topics" and isinstance(task.get("result"), dict):
+            summary["result"] = {k: task["result"].get(k) for k in ("cards", "outlined", "warnings")}
         return summary
 
     # ------------------------------------------------------------ followup
@@ -199,8 +202,24 @@ class TaskWatcher:
         return "\n".join(lines)
 
     @staticmethod
+    def topics_followup_text(summary: dict) -> str:
+        lines = [f"[系统通知] 选题挖掘任务 {summary['task_id']} 已结束，状态：{summary['status']}。"]
+        if summary.get("error"):
+            lines.append(f"错误：{summary['error']}")
+        result = summary.get("result") or {}
+        if result:
+            lines.append(f"产出 {result.get('cards', 0)} 张选题卡片，{result.get('outlined', 0)} 张已写大纲。")
+            for warning in (result.get("warnings") or [])[:5]:
+                lines.append(f"- 告警：{warning}")
+        lines.append("请用 list_topics 列出得分最高的选题向用户总结；如失败、中断或已取消，说明原因并建议下一步"
+                     "（可用 manage_topic_run 重试）。")
+        return "\n".join(lines)
+
+    @staticmethod
     def task_followup_text(summary: dict) -> str:
         kind = summary["kind"]
+        if kind == "topics":
+            return TaskWatcher.topics_followup_text(summary)
         scope = [f"素材 {summary['source_id']}"] if summary.get("source_id") else []
         if summary.get("work"):
             scope.append(f"工作 {WORK.get(summary['work'], summary['work'])}")

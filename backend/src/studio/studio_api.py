@@ -389,6 +389,10 @@ def studio_router(
                 )
                 # 新方案从当前文案出发重新拆分镜；文案不必重写。
                 p["script"] = active.get("script")
+            # 从选题创建的任务：新方案沿用任务的账号档案快照（文案写作约束）。
+            current_profile = workspace.plan(w, w["active_plan"]).get("profile_hash")
+            if current_profile and "profile_hash" not in p:
+                p["profile_hash"] = current_profile
             w["plans"][p["id"]] = p
             w["active_plan"] = p["id"]
             workspace.persist(base, job_id, w)

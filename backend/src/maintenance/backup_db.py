@@ -18,7 +18,17 @@ TABLES = {
     'settings', 'model_profiles', 'voices', 'runs', 'person_entities', 'person_sources',
     'person_references', 'person_imports', 'person_features', 'person_evidence', 'person_coverage',
     'person_tasks', 'person_versions', 'search_releases', 'script_templates',
+    'topic_profiles', 'topic_sources', 'topic_items', 'topic_runs', 'topic_cards', 'topic_gaps',
+    'topic_calendar_events',
 }
+# 这些表的 source_id 指向选题档案/选题数据源，而不是素材库 sources；
+# 部分备份不按素材裁剪它们，也不做素材依赖校验（与 script_templates 一样整体保留）。
+NON_LIBRARY_SOURCE_ID = frozenset({'topic_items', 'topic_runs', 'topic_calendar_events'})
+
+
+def library_source_id(table, columns):
+    """表的 source_id 列是否引用素材库 sources。"""
+    return 'source_id' in columns and table not in NON_LIBRARY_SOURCE_ID
 SECRET_FIELDS = {
     'api_key', 'apikey', 'access_token', 'refresh_token', 'secret', 'password',
     'authorization', 'bearer_token', 'client_secret',
@@ -257,7 +267,7 @@ def filter_database(path, selected: set[str] | None, *, allow_legacy_representat
         db.executemany('INSERT INTO chosen VALUES(?)', [(s,) for s in selected])
         for table in sorted(tables - {'sources', 'segments', 'index_members', 'representations'}):
             columns = {r['name'] for r in db.execute(f'PRAGMA table_info({table})')}
-            if 'source_id' in columns:
+            if library_source_id(table, columns):
                 db.execute(f'DELETE FROM {table} WHERE source_id IS NOT NULL AND source_id NOT IN chosen')
                 if table in {'dialogue_tasks', 'runs'}:
                     db.execute(f'DELETE FROM {table} WHERE source_id IS NULL')
@@ -340,6 +350,8 @@ def interrupt_tasks(path):
             db.execute(f"UPDATE {table} SET status='interrupted',error='迁移时任务已中断；请手动重试' "
                        "WHERE status IN ('queued','running')")
         db.execute("UPDATE runs SET status='interrupted' WHERE status IN ('queued','running')")
+        db.execute("UPDATE topic_runs SET status='interrupted',error='迁移时任务已中断；请手动重试' "
+                   "WHERE status IN ('queued','running')")
 
 
 def validate_database(root, *, basic=False):
@@ -353,7 +365,7 @@ def validate_database(root, *, basic=False):
             raise ValueError('SQLite 外键检查失败')
         for table in sorted(TABLES):
             columns = {r['name'] for r in db.execute(f'PRAGMA table_info({table})')}
-            if 'source_id' in columns and db.execute(
+            if library_source_id(table, columns) and db.execute(
                 f'SELECT 1 FROM {table} t WHERE t.source_id IS NOT NULL AND NOT EXISTS '
                 '(SELECT 1 FROM sources s WHERE s.id=t.source_id)'
             ).fetchone():

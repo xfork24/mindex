@@ -211,6 +211,7 @@ class Writer(Protocol):
         template: ScriptTemplate,
         materials: MaterialDigest | None = None,
         references: Sequence[str] = (),
+        profile: str | None = None,
     ) -> str: ...
 
 

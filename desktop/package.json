@@ -26,6 +26,7 @@
       "preload.js",
       "lib/**",
       "pages/**",
+      "assets/**",
       "package.json"
     ],
     "extraResources": [

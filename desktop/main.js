@@ -4,7 +4,7 @@
 const childProcess = require("node:child_process");
 const path = require("node:path");
 
-const { app, BrowserWindow, Menu, dialog, session, shell } = require("electron");
+const { app, BrowserWindow, Menu, Notification, Tray, dialog, nativeImage, session, shell } = require("electron");
 
 const { COOKIE, newToken, sessionValue } = require("./lib/auth");
 const { dataDirProblem, ensureConfig, ensureFonts } = require("./lib/firstrun");
@@ -14,6 +14,7 @@ const security = require("./lib/security");
 const sidecarLib = require("./lib/sidecar");
 const { loadState, saveState } = require("./lib/state");
 const { format, strings } = require("./lib/strings");
+const trayLib = require("./lib/tray");
 
 // 测试与调试：MINDEX_DESKTOP_HOME 把用户数据与日志放到隔离目录，不碰真实的 ~/Library。
 const HOME = process.env.MINDEX_DESKTOP_HOME;
@@ -28,6 +29,7 @@ let text = strings("zh");
 let mainWindow = null;
 let quitting = false;
 let shuttingDown = false;
+let tray = null;
 
 // ------------------------------------------------------------------ sidecar
 
@@ -140,7 +142,7 @@ function webPreferences() {
     nodeIntegration: false,
     webSecurity: true,
     spellcheck: false,
-    additionalArguments: [`--mindex-version=${VERSION}`],
+    additionalArguments: [`--mindex-version=${VERSION}`, `--mindex-background=${keepInBackground() ? "1" : "0"}`],
   };
 }
 
@@ -168,10 +170,71 @@ function createWindow() {
     webPreferences: webPreferences(),
   });
   mainWindow.once("ready-to-show", () => mainWindow.show());
+  // 关闭窗口：偏好开启时只隐藏，sidecar 继续运行（每日选题定时照常执行）；从托盘菜单“退出”才真正退出。
+  mainWindow.on("close", (event) => {
+    if (!trayLib.shouldHide({ quitting: quitting || shuttingDown, keepInBackground: keepInBackground() })) return;
+    event.preventDefault();
+    mainWindow.hide();
+    backgroundHint();
+  });
   mainWindow.on("closed", () => {
     mainWindow = null;
   });
   showLoading();
+}
+
+function showWindow() {
+  if (!mainWindow) createWindow();
+  else {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  }
+}
+
+// ------------------------------------------------------------------ 托盘 / 菜单栏
+
+function keepInBackground() {
+  return paths ? loadState(paths.stateFile).keep_in_background !== false : true;
+}
+
+function backgroundHint() {
+  const state = loadState(paths.stateFile);
+  if (state.background_hint_shown) return;
+  saveState(paths.stateFile, { ...state, background_hint_shown: true });
+  // 隔离测试（MINDEX_DESKTOP_HOME）不弹系统通知。
+  if (HOME || !Notification.isSupported()) return;
+  new Notification({ title: text.backgroundTitle, body: text.backgroundBody, silent: true }).show();
+}
+
+function trayAction(action) {
+  if (action === "open") showWindow();
+  else if (action === "topics") {
+    showWindow();
+    const url = trayLib.topicsUrl(backend.origin);
+    if (url && backend.child) mainWindow?.loadURL(url);
+  } else if (action === "toggle-background") {
+    const state = loadState(paths.stateFile);
+    saveState(paths.stateFile, { ...state, keep_in_background: !keepInBackground() });
+    refreshTray();
+  } else if (action === "quit") app.quit();
+}
+
+function refreshTray() {
+  if (!tray) return;
+  const items = trayLib.menuItems(text, { keepInBackground: keepInBackground() }).map((item) =>
+    item.type === "separator" ? item : { ...item, click: () => trayAction(item.action) });
+  tray.setContextMenu(Menu.buildFromTemplate(items));
+}
+
+function createTray() {
+  const image = nativeImage.createFromPath(trayLib.iconPath(process.platform, paths.desktopDir));
+  if (process.platform === "darwin") image.setTemplateImage(true);
+  tray = new Tray(image);
+  tray.setToolTip(text.trayTooltip);
+  // Windows：单击托盘图标打开窗口；macOS 单击即弹出菜单。
+  if (process.platform !== "darwin") tray.on("click", showWindow);
+  refreshTray();
 }
 
 // 所有 webContents（主窗口与应用内新窗口）统一的导航、新窗口与外壳命令处理。
@@ -292,9 +355,11 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on("second-instance", () => {
-    if (!mainWindow) return;
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.focus();
+    if (paths) showWindow();
+  });
+  // macOS：点 Dock 图标重新显示隐藏的窗口。
+  app.on("activate", () => {
+    if (paths) showWindow();
   });
 
   app.on("web-contents-created", (_, contents) => guard(contents));
@@ -318,6 +383,7 @@ if (!app.requestSingleInstanceLock()) {
       });
   });
 
+  // 只有在不保留后台（偏好关闭）时窗口才会真正关闭，此时按原行为退出。
   app.on("window-all-closed", () => app.quit());
   for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => app.quit());
 
@@ -338,6 +404,7 @@ if (!app.requestSingleInstanceLock()) {
     });
     buildMenu();
     createWindow();
+    createTray();
     launch();
   });
 }

@@ -276,6 +276,27 @@ local_services:
        argv: [/path/to/mindex/scripts/run-wemm.sh], cwd: /path/to/mindex}
 ```
 
+## `topics` — 选题挖掘
+
+创作页「选题挖掘」（见[选题挖掘](topics.md)）。领域档案、数据源与定时时刻在页面里设置并存放在数据库里，这里只有全局参数。该段不进入任何 `model_dump`（`exclude=True`），不影响任务快照、备份配置与指纹。
+
+| 键 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `llm` | 同 `studio.writer` \| null | null | 选题模型（归纳、受众匹配、大纲）；null 时复用 `studio.writer`（含设置页「文案创作」档案） |
+| `scheduler.enabled` | bool | true | `mindex serve` 运行时按档案定时每天挖掘，启动时补跑当天错过的定时 |
+| `scheduler.interval_seconds` | int 5–3600 | 60 | 定时检查间隔 |
+| `fetch.timeout` | float | 15 | 单次请求超时（秒） |
+| `fetch.max_bytes` | int | 2097152 | 单次响应与日历上传上限 |
+| `fetch.item_days` | int 1–365 | 30 | 候选条目保留天数（被卡片引用的不清理） |
+| `fetch.max_items_per_source` | int | 100 | 每个来源每次最多条目 |
+| `cluster.threshold` | float (0, 1] | 0.82 | 聚类的余弦相似度阈值 |
+| `cluster.max_clusters` | int | 40 | 每次挖掘最多候选簇 |
+| `cluster.batch` | int | 8 | 每次请求模型归纳的簇数 |
+| `coverage.min_similarity` | float 0–1 | 0.3 | 关键画面首个检索结果的向量相似度达到该值记为素材命中 |
+| `coverage.limit` | int 1–10 | 3 | 每条关键画面取几个候选片段 |
+| `brave.base_url` | str | `https://api.search.brave.com` | Brave Search 接口地址 |
+| `brave.max_queries` | int 1–100 | 10 | 每次抓取调用 Brave 的次数上限（计费保护） |
+
 ## 常用组合
 
 **整部电影画面索引（只有 WeMM）**：默认 adaptive detector + `embedding` 指向 WeMM，`index --mode visual --source ID --activate`。

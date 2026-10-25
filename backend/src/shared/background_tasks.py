@@ -61,10 +61,14 @@ class BackgroundTaskRunner:
     def __init__(self, runtime, store, embedder=None):
         self.runtime, self.store, self.embedder = runtime, store, embedder
         self.threads = {}
-        recover_tasks(store, self.table)
+        self.recover()
         _RUNNERS.add(self)
 
     # ------------------------------------------------------------ 子类钩子
+    def recover(self):
+        """启动时把无人持有工作锁的 queued/running 任务标记为中断；默认按素材工作锁判断。"""
+        recover_tasks(self.store, self.table)
+
     def row_lock(self, row):
         """重试时按任务行重建锁；默认按素材加锁。"""
         return self.lock(row["source_id"])

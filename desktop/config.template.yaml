@@ -73,3 +73,9 @@ local_services:
   #     argv: [/path/to/mindex/scripts/run-person-service.sh]
   #     cwd: /path/to/mindex
   #     port: 4050
+
+# 选题挖掘（创作 → 选题挖掘）：各领域档案的定时时刻与条数在页面里设置。
+# 桌面版关闭窗口后默认留在菜单栏/托盘继续运行，定时会准点执行；错过的定时在下次启动时补跑。
+topics:
+  scheduler:
+    enabled: true

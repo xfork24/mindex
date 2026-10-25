@@ -6,7 +6,7 @@ from mindex.shared.storage import Store
 from mindex.studio import studio
 
 from . import signatures
-from .handlers.script import template_changed
+from .handlers.script import profile_changed, template_changed
 from .plans import effective_voice, script_stale
 from .stages import plan_shot_stages
 from .versions import ordered_shots, plan, revision
@@ -144,6 +144,8 @@ def detail(config, job_id, w, *, store=None, compact=False):
     result["script_stale"] = script_stale(p)
     # 所选文案模板（或提示词）与当前文案生成时不同：只提示可重新生成，不自动重写。
     result["script_template_changed"] = template_changed(config, w, p, store=context.database(config))
+    # 从选题创建的任务同步过账号档案：已有文案按旧档案写成，只提示可重新生成。
+    result["script_profile_changed"] = profile_changed(w, p)
     result["tts_settings"] = {
         "backend": config.studio.tts.backend,
         "model": config.studio.tts.model,

@@ -44,7 +44,9 @@
   try { state.follow = localStorage.getItem(FOLLOW_KEY) !== '0'; } catch {}
   try { state.alwaysAllow = localStorage.getItem(ALWAYS_ALLOW_KEY) === '1'; } catch {}
   function currentPage() {
-    const segment = location.pathname.replace(/^\/+|\/+$/g, '').replace(/\.html$/, '').split('/')[0];
+    const path = location.pathname.replace(/^\/+|\/+$/g, '').replace(/\.html$/, '');
+    if (path === 'studio/topics') return 'topics'; // 选题挖掘是创作页子页面，但有独立的工具领域与定位
+    const segment = path.split('/')[0];
     return PAGES[segment] || PAGES[segment + '.html'] || segment || 'search';
   }
 
@@ -241,6 +243,12 @@
   function urlFor(focus) {
     if (focus.page === 'studio') return focus.job_id ? `/studio?job=${encodeURIComponent(focus.job_id)}` : '/studio';
     if (focus.page === 'search') return '/';
+    if (focus.page === 'topics') {
+      const params = new URLSearchParams();
+      if (focus.profile_id) params.set('profile', focus.profile_id);
+      if (focus.card_id) params.set('card', focus.card_id);
+      return '/studio/topics' + (params.toString() ? `?${params}` : '');
+    }
     return '/' + focus.page;
   }
   function navigateTo(focus) {

@@ -20,6 +20,10 @@ const STRINGS = {
     errorTitle: "Mindex 启动失败",
     retry: "重试", logs: "打开日志", quit: "退出",
     backendExited: "后端进程意外退出",
+    trayTooltip: "Mindex（后台运行中）",
+    trayOpen: "打开 Mindex", trayTopics: "今日选题", trayKeep: "关闭窗口时保留在后台", trayQuit: "退出 Mindex",
+    backgroundTitle: "Mindex 仍在后台运行",
+    backgroundBody: "关闭窗口后 Mindex 留在菜单栏（Windows 为系统托盘），每日选题会按时生成。从图标菜单选择“退出 Mindex”可完全退出。",
   },
   en: {
     app: "Mindex",
@@ -40,6 +44,10 @@ const STRINGS = {
     errorTitle: "Mindex failed to start",
     retry: "Retry", logs: "Open Logs", quit: "Quit",
     backendExited: "The backend process exited unexpectedly",
+    trayTooltip: "Mindex (running in the background)",
+    trayOpen: "Open Mindex", trayTopics: "Today's Topics", trayKeep: "Keep Running When Window Is Closed", trayQuit: "Quit Mindex",
+    backgroundTitle: "Mindex is still running",
+    backgroundBody: "After you close the window, Mindex stays in the menu bar (system tray on Windows) and daily topics are generated on schedule. Choose “Quit Mindex” from the icon menu to quit completely.",
   },
 };
 

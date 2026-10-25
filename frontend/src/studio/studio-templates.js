@@ -25,8 +25,12 @@ function renderTemplateSelect() {
   if (manage) manage.href = templatesPageUrl(planTemplateId(), state.id);
   const tab = $("studio-templates-tab");
   if (tab) tab.href = templatesPageUrl(null, state.id);
+  const topicsTab = $("studio-topics-tab");
+  if (topicsTab) topicsTab.href = state.id ? `/studio/topics?job=${encodeURIComponent(state.id)}` : "/studio/topics";
   const changed = $("script-template-changed");
   if (changed) changed.hidden = !state.data.script_template_changed;
+  const profileChanged = $("script-profile-changed");
+  if (profileChanged) profileChanged.hidden = !state.data.script_profile_changed;
   select.disabled = busy() || !scriptTemplates.items;
   if (!scriptTemplates.items) {
     // 读取失败只提示一次，不在每次重绘时重试；页面重新可见时会重新读取。
@@ -151,4 +155,59 @@ async function removeReference(item) {
   const query = `?revision=${encodeURIComponent(state.data.revision)}`;
   await accept(await api(`${planBase()}/references/${encodeURIComponent(item.id)}${query}`, "DELETE"));
   notice(MindexI18n.msg("ui.reference_removed"));
+}
+// 选题来源与账号档案快照（job.topic，见 /studio/topics）：显示来源选题、档案是否已更新，并可同步。
+const jobTopic = { key: null, data: null, loading: null };
+function renderJobTopic() {
+  const box = $("job-topic");
+  if (!box || !state.data) return;
+  const topic = state.data.job.topic;
+  if (!topic) {
+    box.hidden = true;
+    box.replaceChildren();
+    jobTopic.key = null;
+    return;
+  }
+  const key = `${state.id}:${topic.profile_hash}`;
+  if (jobTopic.key !== key && !jobTopic.loading) {
+    jobTopic.loading = api(`/api/topics/jobs/${encodeURIComponent(state.id)}/profile`).then((data) => {
+      jobTopic.key = key;
+      jobTopic.data = data;
+    }).catch((error) => {
+      jobTopic.key = key;
+      jobTopic.data = null;
+      fail(error);
+    }).finally(() => {
+      jobTopic.loading = null;
+      renderJobTopic();
+    });
+  }
+  const data = jobTopic.key === key ? jobTopic.data : null;
+  box.hidden = false;
+  box.replaceChildren();
+  const link = document.createElement("a");
+  link.className = "quiet nav-link";
+  const params = new URLSearchParams({ profile: topic.profile_id, card: topic.card_id, job: state.id });
+  link.href = `/studio/topics?${params}`;
+  link.textContent = topic.title || topic.card_id;
+  const line = el("p", null, "job-topic-line");
+  line.append(el("span", MindexI18n.msg("ui.job_topic_from")), link);
+  if (data?.profile_name) line.append(el("span", MindexI18n.msg("ui.job_topic_profile", { p0: data.profile_name }), "muted"));
+  box.append(line);
+  if (!data) return;
+  if (!data.profile_exists) box.append(el("p", MindexI18n.msg("ui.job_topic_profile_deleted"), "muted"));
+  else if (data.outdated) {
+    const row = el("p", null, "job-topic-outdated");
+    const sync = mutationButton(MindexI18n.msg("ui.job_topic_sync"), () => syncJobTopic());
+    sync.disabled = busy();
+    row.append(el("span", MindexI18n.msg("ui.job_topic_outdated"), "warn-text"), sync);
+    box.append(row);
+  }
+}
+async function syncJobTopic() {
+  if (busy() || !state.id) return;
+  await api(`/api/topics/jobs/${encodeURIComponent(state.id)}/profile/sync`, "POST");
+  jobTopic.key = null;
+  await refresh();
+  notice(MindexI18n.msg("ui.job_topic_synced"));
 }

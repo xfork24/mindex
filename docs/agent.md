@@ -47,6 +47,7 @@
 | `index` | 内容索引版本列表、一致性检查、激活与回退 | — |
 | `persons` | 演员/角色/参考图、识别演员、出镜审核、人物发布、检索组合、演员表导入 | 人物库页 |
 | `settings` | 模型档案、业务设置、音色库与音色克隆 | 设置页 |
+| `topics` | 选题挖掘：领域档案、数据源（RSS、热榜、Brave 搜索、日历）、挖掘任务、选题打分与素材覆盖、大纲、从选题建创作任务、任务档案同步、素材采集清单、每日定时（见[选题挖掘](topics.md)） | 选题挖掘页（`/studio/topics`） |
 
 加载规则：
 
@@ -161,10 +162,10 @@ curl -s -H "Authorization: Bearer $MINDEX_MCP_TOKEN" -F file=@shot.png http://12
 
 ## 任务跟踪与取消
 
-助手提交创作构建（`run_build`、`run_node`、`run_column`）或后台任务（`start_source_task`、`retry_task`）后，`agent/watcher.py` 的 `TaskWatcher` 轮询状态：
+助手提交创作构建（`run_build`、`run_node`、`run_column`）、后台任务（`start_source_task`、`retry_task`）或选题挖掘（`discover_topics`、`manage_topic_run` 重试）后，`agent/watcher.py` 的 `TaskWatcher` 轮询状态：
 
 - 构建：跟踪事件 `plugin:mindex/build-watch`，结束写 `plugin:mindex/build-finished`，面板显示进度卡片。
-- 素材、对白、人物任务：跟踪事件 `plugin:mindex/task-watch`，结束写 `plugin:mindex/task-finished`。
+- 素材、对白、人物任务与选题挖掘任务：跟踪事件 `plugin:mindex/task-watch`，结束写 `plugin:mindex/task-finished`；选题挖掘结束的总结附产出卡片数、大纲数与告警，并提示用 `list_topics` 汇报高分选题。
 
 进入终态（complete、partial、failed、cancelled、interrupted）后自动触发一轮 followup 总结：构建给出重建、复用、失败数量，失败或阻塞时说明原因并建议下一步。全局同一时间只能有一个构建，冲突时助手会告知并建议稍后重试。服务重启后，未结束的对话轮次标记为中断，尚未结束的跟踪目标继续跟踪；重启期间已结束的立即补写结果并总结。
 
@@ -184,7 +185,7 @@ curl -s -H "Authorization: Bearer $MINDEX_MCP_TOKEN" -F file=@shot.png http://12
 
 ## 能力范围与缺口
 
-共 92 个工具，其中 89 个导出到 MCP（`load_tools`、`ask_user_question`、`navigate` 不导出）。所有工具都经进程内回环调用既有 REST 接口，校验、锁与错误信息与页面操作完全一致。
+共 121 个工具，其中 118 个导出到 MCP（`load_tools`、`ask_user_question`、`navigate` 不导出）。所有工具都经进程内回环调用既有 REST 接口，校验、锁与错误信息与页面操作完全一致。
 
 ### meta
 
@@ -334,6 +335,38 @@ curl -s -H "Authorization: Bearer $MINDEX_MCP_TOKEN" -F file=@shot.png http://12
 
 现有能力做不到的需求（例如「调整拆分镜粒度」——粒度目前写死在拆分镜提示词里），助手会如实说明、给出替代做法，并记录到能力缺口列表：`GET /api/agent/gaps`。
 
+### topics
+
+参数名带 `topic_` 前缀（`topic_profile_id`、`topic_source_id`），与设置页模型档案的 `profile_id`、素材的 `source_id` 区分。改动事件为 `{domain: "topics", profile_id}`，选题页据此刷新；定位为 `{page: "topics", profile_id, card_id, section}`，建出创作任务后定位到创作页。
+
+| 工具 | 风险 | MCP | 说明 |
+|---|---|---|---|
+| `list_topic_profiles` | read | 是 | 领域档案：领域、子方向、每日定时 |
+| `save_topic_profile` | write | 是 | 新建或修改档案（受众、定位、禁区、关键词、权重、定时等） |
+| `delete_topic_profile` | danger | 是 | 删除档案及其数据源、选题、采集清单与挖掘记录（只删记录） |
+| `list_topic_sources` | read | 是 | 数据源：类型、状态、最近抓取与错误、密钥掩码 |
+| `save_topic_source` | write | 是 | 新建或修改数据源（rss/hotlist/brave/calendar/local；密钥只接受 `secret://` 引用或明文，保存后只显示掩码） |
+| `delete_topic_source` | danger | 是 | 删除数据源记录 |
+| `test_topic_source` | read | 是 | 试抓并返回前 20 条，不入库 |
+| `import_topic_calendar` | write | 是 | 为日历来源导入 ICS/CSV 文本或内置样例 |
+| `fetch_topic_items` | write | 是 | 立即抓取并入库去重 |
+| `list_topic_items` | read | 是 | 最近的候选条目 |
+| `discover_topics` | danger | 是 | 开始挖掘（后台任务，调用嵌入服务与模型）；结束时 followup |
+| `get_topic_run` | read | 是 | 挖掘任务的状态、进度、产出与告警 |
+| `manage_topic_run` | write | 是 | 取消或重试挖掘任务 |
+| `list_topics` | read | 是 | 按总分列出选题卡片 |
+| `get_topic` | read | 是 | 卡片详情：分项分数、关键画面、大纲、推荐模板与来源条目 |
+| `score_topic` | write | 是 | 重新打分（受众匹配调用模型，覆盖按当前索引检索） |
+| `topic_coverage` | read | 是 | 素材覆盖报告：命中片段（附缩略图）与缺口 |
+| `draft_topic_outline` | write | 是 | 生成或重新生成大纲与推荐模板 |
+| `update_topic` | write | 是 | 修改标题、大纲、推荐模板，或忽略/恢复 |
+| `create_job_from_topic` | write | 是 | 从选题建创作任务（模板、画幅、来源资料与档案快照预先设好） |
+| `get_job_profile` | read | 是 | 任务的账号档案快照与是否已过期 |
+| `sync_job_profile` | write | 是 | 用当前档案更新任务快照（文案只提示可重新生成） |
+| `topic_gaps` | read | 是 | 素材采集清单 |
+| `update_topic_gap` | write | 是 | 标记缺口已采集或重新打开 |
+| `get_topic_schedule` | read | 是 | 每日定时：下次运行、今日运行与产出 |
+
 ## API
 
 | 方法与路径 | 用途 |
@@ -402,7 +435,7 @@ curl -s -H "Authorization: Bearer $MINDEX_MCP_TOKEN" -F file=@shot.png http://12
 安装依赖：`uv sync --extra mcp`（开发环境的 `--extra dev` 已包含）。服务名 `mindex`。导出规则：
 
 - `load_tools`、`navigate`、`ask_user_question` 从不导出；MCP 不做动态加载，直接导出所选领域的全部工具。
-- `agent.mcp.domains` 为 `null` 时导出全部 89 个工具；为领域列表时只导出这些领域，`report_capability_gap` 始终导出。
+- `agent.mcp.domains` 为 `null` 时导出全部 118 个工具；为领域列表时只导出这些领域，`report_capability_gap` 始终导出。
 - `tools/list` 与 `tools/call` 每次重新读取配置，修改 `agent.mcp.domains` 无需重启（进程内 stdio 与 `/mcp`）。调用不在导出范围内的工具返回 `isError`，说明该工具未导出。
 - `mindex mcp --domain <领域>` 可重复指定，覆盖配置值；出现未知领域时启动失败并列出可选领域。远程模式（`--base-url`）在启动时读取一次本地配置的 `agent.mcp.domains`。
 - read 工具标注 `readOnlyHint`，danger 工具标注 `destructiveHint`。

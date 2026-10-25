@@ -273,6 +273,20 @@ agent:
     policy: read             # read / write / all：MCP 调用方允许执行的最高风险级别
     token_env: MINDEX_MCP_TOKEN
     # domains: null 导出全部领域；也可只导出部分领域（另外总会导出 report_capability_gap），
-    # 可选 studio / studio_detail / library / search / index / persons / settings，例如：
+    # 可选 studio / studio_detail / library / search / index / persons / settings / topics，例如：
     # domains: [search, library]
     domains: null
+
+# 选题挖掘（创作 → 选题挖掘，/api/topics，详见 docs/topics.md）。领域档案、数据源与定时时刻在页面里设置。
+topics:
+  # llm: 缺省复用 studio.writer；需要单独的选题模型时按 studio.writer 的字段填写。
+  scheduler:
+    enabled: true            # mindex serve 运行时按档案定时每天挖掘；错过的定时在启动时补跑
+  fetch:
+    timeout: 15              # 单次请求超时（秒）；数据源只请求你配置的地址，不内置爬虫
+    max_bytes: 2097152       # 单次响应上限
+    item_days: 30            # 候选条目保留天数
+  coverage:
+    min_similarity: 0.3      # 关键画面检索结果的向量余弦相似度达到该值记为素材命中
+  brave:
+    max_queries: 10          # 每次挖掘调用 Brave Search 的次数上限（计费保护）

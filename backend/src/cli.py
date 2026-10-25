@@ -16,6 +16,7 @@ from mindex.cli_agent import mcp_command
 from mindex.cli_clips import app as clips_app
 from mindex.cli_e2e import app as e2e_app
 from mindex.cli_persons import app as persons_app
+from mindex.cli_topics import app as topics_app
 from mindex.maintenance.backup_cli import app as backup_app
 from mindex.shared.cli_support import SortedGroup, print_json
 from mindex.shared.config import load_config
@@ -40,14 +41,16 @@ class HelpAwareGroup(SortedGroup):
     def resolve_command(self, ctx, args):
         name, command, remaining = super().resolve_command(ctx, args)
         options = remaining[: remaining.index("--")] if "--" in remaining else remaining
-        if (
-            any(argument in ctx.help_option_names for argument in options)
-            or isinstance(command, TyperGroup)
-            and not remaining
-            and command.no_args_is_help
-        ):
+        if any(argument in ctx.help_option_names for argument in options) or self._empty_group(command, remaining):
             self._parse_help(command, name, remaining, ctx)
         return name, command, remaining
+
+    @staticmethod
+    def _empty_group(command, args):
+        """参数只由子命令名组成并停在一个无参即帮助的命令组（如 ``topics profiles``）。"""
+        while isinstance(command, TyperGroup) and args and args[0] in command.commands:
+            command, args = command.commands[args[0]], args[1:]
+        return isinstance(command, TyperGroup) and not args and command.no_args_is_help
 
     @staticmethod
     def _parse_help(command, name, args, parent):
@@ -89,6 +92,7 @@ app.add_typer(e2e_app, name="e2e")
 app.add_typer(persons_app, name="persons")
 app.add_typer(clips_app, name="clips")
 app.add_typer(agent_app, name="agent")
+app.add_typer(topics_app, name="topics")
 app.command("mcp")(mcp_command)
 
 
@@ -659,7 +663,7 @@ def serve(
 ):
     """启动同一进程提供的网页、静态资源和 HTTP API。
 
-    页面为 /、/admin、/persons、/studio、/settings，接口文档 /docs。不启动模型服务。--index-id 将检索和相关媒体固定到指定 ready 索引，不更改活动指针。监听非回环地址时必须设置 MINDEX_WEB_TOKEN，或显式传 --allow-insecure。无需前端构建；用 Ctrl+C 停止服务。
+    页面为 /、/admin、/persons、/studio（含 /studio/topics、/studio/templates）、/settings，接口文档 /docs。不启动模型服务；topics.scheduler.enabled 为真时随服务运行每日选题挖掘。--index-id 将检索和相关媒体固定到指定 ready 索引，不更改活动指针。监听非回环地址时必须设置 MINDEX_WEB_TOKEN，或显式传 --allow-insecure。无需前端构建；用 Ctrl+C 停止服务。
 
     示例：
 
@@ -689,7 +693,8 @@ def serve(
     from mindex.search.warmup import warm_up_in_background
     from mindex.settings import local_services
 
-    app = create_app(ctx.obj, index_id=index_id)
+    # 每日选题挖掘调度随服务启停（桌面版 sidecar 同样经这里启动）。
+    app = create_app(ctx.obj, index_id=index_id, scheduler=ctx.obj.topics.scheduler.enabled)
     warm_up_in_background(ctx.obj, index_id)  # 后台线程，不阻塞监听；失败只记日志
     local_services.autostart_in_background(ctx.obj)  # 只在开启本机服务管理且有 autostart 服务时生效
     try:

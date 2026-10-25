@@ -7,7 +7,8 @@ from fastapi.testclient import TestClient
 from mindex.api import create_app
 
 
-@pytest.mark.parametrize("page", ["/", "/index.html", "/studio/templates", "/studio/templates/", *[
+@pytest.mark.parametrize("page", ["/", "/index.html", "/studio/templates", "/studio/templates/", "/studio/topics",
+                                  "/studio/topics/", *[
     url for name in ("admin", "persons", "studio", "settings")
     for url in (f"/{name}", f"/{name}/", f"/{name}.html")
 ]])
@@ -36,7 +37,10 @@ def test_page_bundle_assets(config, page):
         ] if name == 'studio' else [
             # 文案模板管理页：创作页的子页面，与创作页共用模板显示文字。
             '/assets/studio/studio-template-text.js', '/assets/studio/templates.js'
-        ] if name == 'studio-templates' else [f'/assets/{name}/{name}.js']
+        ] if name == 'studio-templates' else [
+            # 选题挖掘页：同为创作页子页面，推荐模板的显示文字与模板页共用。
+            '/assets/studio/studio-template-text.js', '/assets/studio/topics.js'
+        ] if name == 'studio-topics' else [f'/assets/{name}/{name}.js']
         positions = [paths.index(item) for item in [*chain, *page_scripts]]
         assert positions == sorted(positions)
         for asset in assets:

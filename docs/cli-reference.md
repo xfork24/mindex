@@ -138,7 +138,7 @@ uv run mindex search '雨夜，一个人强忍眼泪，镜头慢慢推近' --gra
 
 ### `mindex serve [--host 127.0.0.1] [--port 8000] [--index-id INDEX_ID] [--allow-insecure]`
 
-启动页面与检索 API。`/` 检索页、`/admin` 素材后台、`/persons` 人物库、`/studio` 创作页、`/settings` 设置页、`/docs` OpenAPI。
+启动页面与检索 API。`/` 检索页、`/admin` 素材后台、`/persons` 人物库、`/studio` 创作页（含 `/studio/topics` 选题挖掘与 `/studio/templates` 文案模板）、`/settings` 设置页、`/docs` OpenAPI。`topics.scheduler.enabled` 为真时随服务运行每日选题挖掘，并在启动时补跑当天错过的定时（见[选题挖掘](topics.md#每日定时)）。
 
 `--index-id` 将查询、片段媒体和上下文绑定到指定 ready 索引，用于独立版本验证；不会修改活动索引。
 
@@ -184,6 +184,25 @@ uv run mindex clean --apply               # 实际删除
 ### `mindex mcp [--base-url URL] [--token-env MINDEX_WEB_TOKEN] [--policy read|write|all] [--domain DOMAIN...]`
 
 以 stdio 传输运行 MCP 服务（服务名 `mindex`），供 deepseek-harness、Claude Code、Codex 等调用；标准输出只用于协议。省略 `--base-url` 时在本进程内装配应用，否则连接已运行的服务。写操作与高风险操作受 `agent.mcp.policy`（默认 `read`）限制。`--domain` 可重复，只导出这些领域（`report_capability_gap` 始终导出），覆盖 `agent.mcp.domains`；未知领域启动失败。需要 `uv sync --extra mcp`。配置示例见 [智能助手](agent.md#mcp-导出与外部-harness)。
+
+## 选题挖掘
+
+`mindex topics` 命令组与创作页「选题挖掘」、`/api/topics`、智能助手 `topics` 领域共用同一服务层。命令直接读写数据目录，不需要服务在运行，输出均为 JSON；失败时错误写到标准错误，退出码为 1。机制与示例见[选题挖掘](topics.md)。
+
+| 命令 | 说明 |
+|---|---|
+| `profiles list/show/create/update/delete` | 领域档案；`create`/`update` 接受 `--name --domain --subtopic --audience --positioning --taboo --keyword --canvas --schedule/--no-schedule --schedule-time --schedule-count` 或 `--file`；`delete` 需要 `--yes` |
+| `sources list/add/update/remove/test` | 数据源；`add PROFILE --kind rss\|hotlist\|brave\|calendar\|local --name … [--url …] [--config JSON] [--secret-env VAR]`；`remove` 需要 `--yes` |
+| `sources import-calendar SOURCE [FILE] [--sample finance\|tech\|history] [--append]` | 为日历来源导入 ICS/CSV 或内置样例 |
+| `fetch PROFILE [--source ID...]`、`items PROFILE [--limit N] [--source ID]` | 立即抓取并入库去重；列出候选条目 |
+| `discover PROFILE [--skip-fetch] [--outline-count N]` | 在本进程前台运行一次挖掘，进度写到标准错误；已有挖掘任务在运行时退出码 1 |
+| `runs list/show/cancel/retry` | 挖掘任务记录、取消（跨进程生效）、前台重试 |
+| `list PROFILE [--status new\|adopted\|dismissed\|all]`、`show CARD`、`update CARD [--title] [--outline-file] [--template] [--status]` | 选题卡片 |
+| `score CARD`、`coverage CARD`、`outline CARD` | 重新打分、素材覆盖报告、生成大纲 |
+| `create-job CARD [--force]` | 从选题建创作任务 |
+| `job-profile show/sync JOB` | 任务的账号档案快照与同步 |
+| `gaps list/done/reopen/export` | 素材采集清单；`export PROFILE [--output FILE]` 输出 UTF-8 BOM 的 CSV |
+| `schedule status` | 每日定时状态（定时只在 `mindex serve` 运行期间生效） |
 
 ## 评测与联调
 

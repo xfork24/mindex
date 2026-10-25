@@ -574,6 +574,51 @@ class LocalServicesConfig(StrictModel):
         return next((service for service in self.services if service.name == name), None)
 
 
+class TopicsSchedulerConfig(StrictModel):
+    # mindex serve 内置的每日定时挖掘；各档案的时刻与条数在档案里设置。
+    enabled: bool = True
+    interval_seconds: int = Field(default=60, ge=5, le=3600)
+
+
+class TopicsFetchConfig(StrictModel):
+    timeout: float = Field(default=15, gt=0, le=120)
+    max_bytes: int = Field(default=2 * 1024**2, ge=1024, le=50 * 1024**2)
+    # 候选条目保留天数；更早的条目在抓取时清理。
+    item_days: int = Field(default=30, ge=1, le=365)
+    max_items_per_source: int = Field(default=100, ge=1, le=1000)
+
+
+class TopicsClusterConfig(StrictModel):
+    # 余弦相似度不低于阈值的条目归为同一候选选题。
+    threshold: float = Field(default=0.82, gt=0, le=1)
+    max_clusters: int = Field(default=40, ge=1, le=200)
+    # 每次请求 LLM 归纳的簇数。
+    batch: int = Field(default=8, ge=1, le=40)
+
+
+class TopicsCoverageConfig(StrictModel):
+    # 关键画面的首个检索结果中，向量路由的余弦相似度达到该值才记为命中。
+    min_similarity: float = Field(default=0.3, ge=0, le=1)
+    limit: int = Field(default=3, ge=1, le=10)
+
+
+class TopicsBraveConfig(StrictModel):
+    base_url: str = "https://api.search.brave.com"
+    # 每次挖掘调用 Brave 的次数上限（计费保护）。
+    max_queries: int = Field(default=10, ge=1, le=100)
+
+
+class TopicsConfig(StrictModel):
+    """选题挖掘（topics/）。llm 缺省复用 studio.writer。"""
+
+    llm: GeneratorConfig | None = None
+    scheduler: TopicsSchedulerConfig = Field(default_factory=TopicsSchedulerConfig)
+    fetch: TopicsFetchConfig = Field(default_factory=TopicsFetchConfig)
+    cluster: TopicsClusterConfig = Field(default_factory=TopicsClusterConfig)
+    coverage: TopicsCoverageConfig = Field(default_factory=TopicsCoverageConfig)
+    brave: TopicsBraveConfig = Field(default_factory=TopicsBraveConfig)
+
+
 class Config(StrictModel):
     data_dir: Path = Path("data")
     source_upload_max_bytes: int = Field(default=20 * 1024**3, ge=1)
@@ -591,6 +636,8 @@ class Config(StrictModel):
     agent: AgentConfig = Field(default_factory=AgentConfig)
     # 本机模型服务管理（桌面版缺省开启）。exclude=True：不进入任何 model_dump，任务快照、备份配置与指纹逐字节不变。
     local_services: LocalServicesConfig = Field(default_factory=LocalServicesConfig, exclude=True)
+    # 选题挖掘；exclude=True 同上：不进入任务快照、备份配置与任何指纹。
+    topics: TopicsConfig = Field(default_factory=TopicsConfig, exclude=True)
 
     @model_validator(mode="after")
     def animator_defaults_to_agent(self):

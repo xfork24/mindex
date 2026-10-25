@@ -47,6 +47,8 @@ packages = [
   "mindex.studio",
   "mindex.studio.workspace",
   "mindex.studio.workspace.handlers",
+  "mindex.topics",
+  "mindex.topics.sources",
   "mindex.web",
   "mindex.web.admin",
   "mindex.web.persons",
@@ -62,6 +64,7 @@ packages = [
 
 [tool.setuptools.package-data]
 "mindex.studio" = ["templates/*.yaml"]
+"mindex.topics" = ["samples/*.csv"]
 "mindex.web" = ["*/*.html", "*/*.js", "*/*.css", "*/*.json", "*/*.svg"]
 
 [tool.pytest.ini_options]

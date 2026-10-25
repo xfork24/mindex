@@ -21,7 +21,7 @@ Mindex 桌面版是一个 Electron 外壳：双击启动时，外壳在后台运
 | 素材库（数据目录） | `~/Library/Application Support/Mindex/data`；菜单“Mindex → 选择数据目录…”可改用其他目录 |
 | 字幕字体 | `~/Library/Application Support/Mindex/fonts/`（随包 Noto Sans CJK SC，首次启动复制） |
 | AI 动画录制浏览器 | `~/Library/Application Support/Mindex/browsers/`（按需安装） |
-| 外壳状态 | `~/Library/Application Support/Mindex/desktop-state.json`（端口、所选数据目录） |
+| 外壳状态 | `~/Library/Application Support/Mindex/desktop-state.json`（端口、所选数据目录、关闭窗口时是否留在后台） |
 | 日志 | `~/Library/Logs/Mindex/backend.log`（按 10 MB 轮转），菜单“Mindex → 打开日志目录” |
 
 “选择数据目录…”接受空目录（新建素材库）或已有的 Mindex 数据目录（含 `metadata.sqlite3`），选定后重启后端。不要让 Web 版与桌面版**同时**使用同一个数据目录。
@@ -73,6 +73,15 @@ scripts/build-desktop-mac.sh            # ffmpeg（缺失时从源码编译）�
 | `uv run python scripts/desktop-bench.py` | 与同机 Web 版的性能对比 |
 
 外壳版本号来自 `desktop/package.json`，必须与 `pyproject.toml` 的 `version` 一致（测试检查）；外壳启动时校验后端 `/api/health` 报告的版本与 pid，确认连到的是自己启动的后端。
+
+## 后台运行与每日选题
+
+关闭窗口时，Mindex 缺省不会退出，而是留在菜单栏（Windows 为系统托盘）继续运行后端，所以「选题挖掘」的每日定时会准点执行（见[选题挖掘 · 每日定时](topics.md#每日定时)）。第一次缩到后台时会弹出一次系统通知。
+
+- 菜单栏或托盘图标的菜单：「打开 Mindex」「今日选题」（打开 `/studio/topics`）「关闭窗口时保留在后台」（勾选开关）「退出 Mindex」。只有「退出 Mindex」或 ⌘Q 会走正常退出流程：有任务时先确认，再停止本机服务与后端。
+- macOS 点 Dock 图标、Windows 单击托盘图标，都会重新显示窗口。
+- 取消勾选「关闭窗口时保留在后台」后，关闭窗口即退出应用（旧行为）。这时错过的定时会在下次启动时补跑。
+- 偏好保存在 `desktop-state.json` 的 `keep_in_background`。页面通过 `window.MindexDesktop.background` 读取它，选题页据此提示"后台运行中"；Web 端没有这个对象，不显示该提示。
 
 ## 同步演进约定
 

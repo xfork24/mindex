@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title data-i18n="[[0,&quot;ui.topics_page_title&quot;]]">Mindex · 选题挖掘</title><link rel="icon" href="/assets/shared/favicon.svg?v=8d7f9242de" type="image/svg+xml">
+  <link rel="stylesheet" href="/assets/shared/style.css?v=e4cee29ab0"><link rel="stylesheet" href="/assets/shared/agent-panel.css?v=5ce91a25c0"><link rel="stylesheet" href="/assets/studio/studio.css?v=04f96381e5"><link rel="stylesheet" href="/assets/studio/topics.css?v=11aad5c061">
+  <script src="/assets/shared/messages.js?v=1b2df467d5" defer></script><script src="/assets/shared/i18n.js?v=42497bb7f1" defer></script><script src="/assets/shared/api.js?v=aa52e4865d" defer></script><script src="/assets/shared/marked.umd.js?v=b82b933440" defer></script><script src="/assets/shared/purify.min.js?v=cd37898f97" defer></script><script src="/assets/shared/agent-markdown.js?v=8f0018e90a" defer></script><script src="/assets/shared/agent-panel.js?v=e45b7f1ace" defer></script><script src="/assets/shared/feedback.js?v=4d2340032a" defer></script><script src="/assets/studio/studio-template-text.js?v=718b03ed0e" defer></script><script src="/assets/studio/topics.js?v=05c2ad1804" defer></script>
+</head>
+<body class="studio studio-topics">
+  <header><a class="brand" href="/">m<span>index</span><i></i></a><nav class="page-nav" aria-label="页面导航 / Main navigation"><a class="quiet nav-link" href="/" data-i18n="[[0,&quot;ui.c9b1e68e3537&quot;]]">视频检索</a><a class="quiet nav-link" href="/studio" aria-current="page" data-i18n="[[0,&quot;ui.b6fc3cef0bd0&quot;]]">创作</a><a class="quiet nav-link" href="/admin" data-i18n="[[0,&quot;ui.f517302fec0d&quot;]]">素材管理</a><a class="quiet nav-link" href="/persons" data-i18n="[[0,&quot;ui.0973ef28d791&quot;]]">人物库</a><a class="quiet nav-link" href="/settings" data-i18n="[[0,&quot;ui.7debf9cb0372&quot;]]">设置</a></nav><button id="reload" class="quiet" type="button" data-i18n="[[0,&quot;ui.topics_reload&quot;]]">刷新</button><button type="button" class="quiet language-switch" data-language-toggle aria-label="中文 / English"><span data-language="zh" lang="zh-CN">文</span><span class="language-divider" aria-hidden="true">/</span><span data-language="en" lang="en">En</span></button></header>
+  <main class="studio-main">
+    <section class="studio-intro"><span class="eyebrow" data-i18n="[[0,&quot;ui.topics_eyebrow&quot;]]">领域档案 · 热点与日历 · 打分 · 素材覆盖</span><h1 data-i18n="[[0,&quot;ui.topics_heading&quot;]]">先找值得做的选题，再动笔写文案。</h1><p data-i18n="[[0,&quot;ui.topics_intro&quot;]]">按领域档案从你配置的订阅、热榜、搜索与日历中发现候选选题，按时效、受众、素材覆盖、去重与制作成本打分；满意的选题一键建成创作任务。</p></section>
+    <nav class="studio-tabs" aria-label="创作分区" data-i18n-aria-label="ui.studio_tabs_aria"><a class="studio-tab" id="studio-jobs-tab" href="/studio" data-i18n="[[0,&quot;ui.studio_tab_jobs&quot;]]">创作任务</a><a class="studio-tab" href="/studio/topics" aria-current="page" data-i18n="[[0,&quot;ui.studio_tab_topics&quot;]]">选题挖掘</a><a class="studio-tab" id="studio-templates-tab" href="/studio/templates" data-i18n="[[0,&quot;ui.studio_tab_templates&quot;]]">文案模板</a></nav>
+    <div id="notice" class="notice" role="status" aria-live="polite"></div>
+    <section id="topics-bar" class="topics-bar" data-capability="profiles" aria-label="领域档案" data-i18n-aria-label="ui.topics_profiles_aria">
+      <label class="topics-profile-field" data-i18n="[[0,&quot;ui.topics_profile_label&quot;]]">领域档案<select id="profile-select"></select></label>
+      <div class="topics-bar-actions"><button id="profile-new" class="quiet" type="button" data-i18n="[[0,&quot;ui.topics_profile_new&quot;]]">新建档案</button><button id="profile-edit" class="quiet" type="button" data-i18n="[[0,&quot;ui.topics_profile_edit&quot;]]">编辑档案</button><button id="profile-delete" class="quiet danger" type="button" data-i18n="[[0,&quot;ui.topics_profile_delete&quot;]]">删除档案</button></div>
+      <p id="profile-summary" class="muted topics-profile-summary"></p>
+    </section>
+    <details id="sources-section" class="topics-section" data-capability="sources" hidden>
+      <summary><span data-i18n="[[0,&quot;ui.topics_sources_title&quot;]]">数据源</span><span id="sources-summary" class="muted"></span></summary>
+      <p class="muted topics-section-hint" data-i18n="[[0,&quot;ui.topics_sources_hint&quot;]]">只请求你配置的订阅、热榜、搜索与日历地址，不内置爬虫。密钥只保存在本地数据库，页面只显示掩码。</p>
+      <div id="source-list" class="source-list"></div>
+      <form id="source-form" class="source-form" novalidate>
+        <h3 id="sf-title" class="source-form-title" data-i18n="[[0,&quot;ui.topics_source_add_title&quot;]]">添加数据源</h3>
+        <div class="form-grid topics-form-grid-3">
+          <label data-i18n="[[0,&quot;ui.topics_source_kind&quot;]]">类型<select id="sf-kind"></select></label>
+          <label data-i18n="[[0,&quot;ui.topics_source_name&quot;]]">名称<input id="sf-name" maxlength="40" required></label>
+          <label class="check source-enabled" data-i18n="[[1,&quot;ui.topics_source_enabled&quot;]]"><input id="sf-enabled" type="checkbox" checked> 启用</label>
+        </div>
+        <div id="sf-fields" class="source-fields"></div>
+        <p id="sf-third-party" class="template-note" hidden data-i18n="[[0,&quot;ui.topics_source_third_party&quot;]]">抓取时会请求这个第三方地址；联网搜索会把档案关键词发给搜索服务。</p>
+        <p id="sf-error" class="warn-text" role="alert" hidden></p>
+        <div class="source-form-actions"><button id="sf-cancel" class="quiet" type="button" hidden data-i18n="[[0,&quot;ui.topics_source_cancel&quot;]]">取消编辑</button><button id="sf-save" class="submit" type="submit" data-i18n="[[0,&quot;ui.topics_source_add&quot;]]">添加数据源</button></div>
+      </form>
+      <div id="source-test" class="source-test" role="status" aria-live="polite" hidden></div>
+      <div id="calendar-import" class="calendar-import" data-capability="calendar" hidden>
+        <h3 class="source-form-title" data-i18n="[[0,&quot;ui.topics_calendar_title&quot;]]">导入日历事件</h3>
+        <p class="muted topics-section-hint" data-i18n="[[0,&quot;ui.topics_calendar_hint&quot;]]">支持 ICS，或 CSV（表头 date,title，可选 desc,kind,recurring；date 写 YYYY-MM-DD 或 MM-DD）。挖掘时只取今天起的近期事件。</p>
+        <div class="calendar-row">
+          <label data-i18n="[[0,&quot;ui.topics_calendar_source&quot;]]">日历<select id="calendar-source"></select></label>
+          <label data-i18n="[[0,&quot;ui.topics_calendar_file&quot;]]">文件<input id="calendar-file" type="file" accept=".ics,.csv,text/calendar,text/csv"></label>
+          <label data-i18n="[[0,&quot;ui.topics_calendar_sample&quot;]]">或载入样例<select id="calendar-sample"></select></label>
+          <label class="check" data-i18n="[[1,&quot;ui.topics_calendar_append&quot;]]"><input id="calendar-append" type="checkbox"> 追加到已有事件</label>
+          <button id="calendar-run" class="quiet" type="button" data-i18n="[[0,&quot;ui.topics_calendar_run&quot;]]">导入</button>
+        </div>
+        <p id="calendar-status" class="muted" role="status" aria-live="polite"></p>
+      </div>
+    </details>
+    <details id="items-section" class="topics-section" data-capability="fetch" hidden>
+      <summary><span data-i18n="[[0,&quot;ui.topics_items_title&quot;]]">候选条目</span><span id="items-summary" class="muted"></span></summary>
+      <div class="items-actions"><button id="fetch-run" class="quiet" type="button" data-i18n="[[0,&quot;ui.topics_fetch_run&quot;]]">立即抓取</button><span id="fetch-status" class="muted" role="status" aria-live="polite"></span></div>
+      <ul id="item-list" class="item-list"></ul>
+    </details>
+    <section id="runs-bar" class="topics-runs" data-capability="runs" aria-label="选题挖掘" data-i18n-aria-label="ui.topics_runs_aria" hidden>
+      <button id="run-start" class="submit" type="button" data-i18n="[[0,&quot;ui.topics_run_start&quot;]]">开始挖掘</button>
+      <label class="check" data-i18n="[[1,&quot;ui.topics_run_skip_fetch&quot;]]"><input id="run-skip-fetch" type="checkbox"> 不重新抓取</label>
+      <div class="run-progress"><div id="run-status" class="run-status" role="status" aria-live="polite"></div><progress id="run-meter" max="1" value="0" hidden></progress></div>
+      <span class="run-actions-inline"><button id="run-cancel" class="quiet" type="button" hidden data-i18n="[[0,&quot;ui.topics_run_cancel&quot;]]">取消</button><button id="run-retry" class="quiet" type="button" hidden data-i18n="[[0,&quot;ui.topics_run_retry&quot;]]">重试</button></span>
+      <p id="schedule-status" class="schedule-status muted" data-capability="schedule" role="status"></p>
+      <ul id="run-warnings" class="run-warnings" hidden></ul>
+    </section>
+    <div id="topics-empty" class="empty topics-empty" hidden><h3 data-i18n="[[0,&quot;ui.topics_empty_title&quot;]]">先新建一份领域档案</h3><p data-i18n="[[0,&quot;ui.topics_empty_hint&quot;]]">档案说明你做什么领域、给谁看、不碰哪些话题；选题打分和从选题创建的文案都会参考它。</p><button id="profile-new-empty" class="submit" type="button" data-i18n="[[0,&quot;ui.topics_profile_new&quot;]]">新建档案</button></div>
+    <div id="topics-workspace" class="workspace" hidden>
+      <aside class="job-panel topics-panel" aria-label="选题列表" data-i18n-aria-label="ui.topics_list_aria" data-capability="cards">
+        <div class="card-filters"><label data-i18n="[[0,&quot;ui.topics_card_status_label&quot;]]">状态<select id="card-status"><option value="new" data-i18n="[[0,&quot;ui.topics_status_new&quot;]]">新选题</option><option value="adopted" data-i18n="[[0,&quot;ui.topics_status_adopted&quot;]]">已建任务</option><option value="dismissed" data-i18n="[[0,&quot;ui.topics_status_dismissed&quot;]]">已忽略</option><option value="all" data-i18n="[[0,&quot;ui.topics_status_all&quot;]]">全部</option></select></label>
+          <label data-i18n="[[0,&quot;ui.topics_card_filter_label&quot;]]">搜索<input id="card-filter" type="search" autocomplete="off" placeholder="标题或角度" data-i18n-placeholder="ui.topics_card_filter_placeholder"></label></div>
+        <div id="card-list"><p class="muted topics-list-empty" data-i18n="[[0,&quot;ui.topics_cards_empty&quot;]]">还没有选题。配置数据源后开始挖掘。</p></div>
+      </aside>
+      <section class="work-panel" aria-label="选题详情" data-i18n-aria-label="ui.topics_detail_aria">
+        <div id="card-empty" class="empty"><h2 data-i18n="[[0,&quot;ui.topics_select_title&quot;]]">选择一个选题</h2><p data-i18n="[[0,&quot;ui.topics_select_hint&quot;]]">在左侧选择选题，查看分数、素材覆盖与大纲，满意后建成创作任务。</p></div>
+        <article id="card-view" class="template-card topic-card" data-capability="card" hidden>
+          <div class="section-head topic-title-row">
+            <h2 id="card-title"></h2><span id="card-tags" class="template-tags"></span>
+            <div class="head-actions"><button id="card-score" class="quiet" type="button" data-capability="score" data-i18n="[[0,&quot;ui.topics_card_rescore&quot;]]">重新打分</button><button id="card-dismiss" class="quiet" type="button"></button></div>
+          </div>
+          <p id="card-angle" class="topic-angle"></p>
+          <p id="card-reason" class="muted topic-reason"></p>
+          <div id="card-scores" class="topic-scores" aria-label="分项分数" data-i18n-aria-label="ui.topics_scores_aria"></div>
+          <section id="card-coverage" class="topic-block" data-capability="coverage" aria-labelledby="coverage-title">
+            <h3 id="coverage-title" data-i18n="[[0,&quot;ui.topics_coverage_title&quot;]]">素材覆盖</h3>
+            <p id="coverage-summary" class="muted"></p>
+            <ul id="coverage-list" class="coverage-list"></ul>
+          </section>
+          <section class="topic-block" data-capability="outline" aria-labelledby="outline-title">
+            <div class="section-head"><h3 id="outline-title" data-i18n="[[0,&quot;ui.topics_outline_title&quot;]]">大纲</h3><span id="card-dirty" class="warn-text" hidden data-i18n="[[0,&quot;ui.topics_card_unsaved&quot;]]">有未保存的修改</span>
+              <div class="head-actions"><button id="card-outline-run" class="quiet" type="button" data-i18n="[[0,&quot;ui.topics_outline_run&quot;]]">生成大纲</button></div></div>
+            <textarea id="card-outline" rows="10" maxlength="20000" aria-labelledby="outline-title" placeholder="还没有大纲：点「生成大纲」或直接填写" data-i18n-placeholder="ui.topics_outline_placeholder"></textarea>
+            <div class="topic-outline-foot">
+              <label data-i18n="[[0,&quot;ui.topics_card_template&quot;]]">文案模板<select id="card-template"></select></label>
+              <span id="card-outline-count" class="muted"></span>
+              <span class="topic-outline-actions"><button id="card-revert" class="quiet" type="button" data-i18n="[[0,&quot;ui.topics_card_revert&quot;]]">放弃修改</button><button id="card-save" class="quiet" type="button" data-i18n="[[0,&quot;ui.topics_card_save&quot;]]">保存</button></span>
+            </div>
+            <p id="card-error" class="warn-text" role="alert" hidden></p>
+          </section>
+          <section class="topic-block" aria-labelledby="card-items-title">
+            <h3 id="card-items-title" data-i18n="[[0,&quot;ui.topics_card_items&quot;]]">来源条目</h3>
+            <ul id="card-items" class="item-list"></ul>
+          </section>
+          <p id="card-warnings" class="template-note" hidden></p>
+          <div class="topic-job-bar" data-capability="create-job"><span id="card-job-note" class="muted"></span><a id="card-job-link" class="quiet nav-link" hidden data-i18n="[[0,&quot;ui.topics_card_open_job&quot;]]">打开创作任务</a><button id="card-job" class="submit" type="button" data-i18n="[[0,&quot;ui.topics_card_create_job&quot;]]">创建创作任务</button></div>
+        </article>
+      </section>
+    </div>
+    <details id="gaps-section" class="topics-section" data-capability="gaps" hidden>
+      <summary><span data-i18n="[[0,&quot;ui.topics_gaps_title&quot;]]">素材采集清单</span><span id="gaps-summary" class="muted"></span></summary>
+      <p class="muted topics-section-hint" data-i18n="[[0,&quot;ui.topics_gaps_hint&quot;]]">选题需要、但素材库里没有找到的画面，按出现次数排序；补齐后标记为已采集。</p>
+      <div class="gaps-actions"><label data-i18n="[[0,&quot;ui.topics_gaps_status&quot;]]">状态<select id="gaps-status"><option value="open" data-i18n="[[0,&quot;ui.topics_gap_open&quot;]]">待采集</option><option value="done" data-i18n="[[0,&quot;ui.topics_gap_done&quot;]]">已采集</option><option value="all" data-i18n="[[0,&quot;ui.topics_status_all&quot;]]">全部</option></select></label><a id="gaps-export" class="quiet nav-link" download data-i18n="[[0,&quot;ui.topics_gaps_export&quot;]]">导出 CSV</a></div>
+      <ul id="gap-list" class="gap-list"></ul>
+    </details>
+  </main>
+  <dialog id="profile-dialog" aria-labelledby="profile-title">
+    <button id="profile-close" type="button" class="quiet close" aria-label="关闭" data-i18n-aria-label="ui.6c14bd7f6f9e">✕</button>
+    <h2 id="profile-title"></h2>
+    <form id="profile-form" novalidate>
+      <div class="form-grid">
+        <label data-i18n="[[0,&quot;ui.topics_field_name&quot;]]">档案名称<input id="pf-name" maxlength="40" required placeholder="例如：财经号" data-i18n-placeholder="ui.topics_field_name_placeholder"></label>
+        <label data-i18n="[[0,&quot;ui.topics_field_domain&quot;]]">领域<input id="pf-domain" maxlength="40" required placeholder="例如：金融、科技、历史" data-i18n-placeholder="ui.topics_field_domain_placeholder"></label>
+      </div>
+      <label class="form-field" data-i18n="[[0,&quot;ui.topics_field_subtopics&quot;]]">子方向（用逗号或换行分隔）<input id="pf-subtopics" placeholder="例如：宏观经济，A 股，财报解读" data-i18n-placeholder="ui.topics_field_subtopics_placeholder"></label>
+      <div class="form-grid">
+        <label data-i18n="[[0,&quot;ui.topics_field_audience&quot;]]">目标受众<textarea id="pf-audience" rows="2" maxlength="500" placeholder="例如：25–40 岁、刚开始理财的上班族" data-i18n-placeholder="ui.topics_field_audience_placeholder"></textarea></label>
+        <label data-i18n="[[0,&quot;ui.topics_field_positioning&quot;]]">账号定位与表达风格<textarea id="pf-positioning" rows="2" maxlength="500" placeholder="例如：用大白话讲清楚财经新闻背后的逻辑" data-i18n-placeholder="ui.topics_field_positioning_placeholder"></textarea></label>
+      </div>
+      <label class="form-field" data-i18n="[[0,&quot;ui.topics_field_taboos&quot;]]">禁区（每行一条；选题与文案都会遵守）<textarea id="pf-taboos" rows="3" placeholder="例如：不荐股、不预测个股涨跌" data-i18n-placeholder="ui.topics_field_taboos_placeholder"></textarea></label>
+      <label class="form-field" data-i18n="[[0,&quot;ui.topics_field_keywords&quot;]]">关键词（用逗号或换行分隔；联网搜索时使用）<input id="pf-keywords" placeholder="例如：降息，CPI，财报" data-i18n-placeholder="ui.topics_field_keywords_placeholder"></label>
+      <div class="form-grid topics-form-grid-3">
+        <label data-i18n="[[0,&quot;ui.topics_field_language&quot;]]">搜索语言<input id="pf-language" maxlength="16" value="zh-hans"></label>
+        <label data-i18n="[[0,&quot;ui.topics_field_region&quot;]]">搜索地区<input id="pf-region" maxlength="8" value="CN"></label>
+        <label data-i18n="[[0,&quot;ui.topics_field_canvas&quot;]]">建任务时的默认画幅<select id="pf-canvas"><option value="16:9">16:9</option><option value="9:16">9:16</option><option value="1:1">1:1</option></select></label>
+      </div>
+      <fieldset class="topics-weights"><legend data-i18n="[[0,&quot;ui.topics_field_weights&quot;]]">打分权重（合计为 1）</legend>
+        <label data-i18n="[[0,&quot;ui.topics_weight_timeliness&quot;]]">时效<input id="pf-w-timeliness" type="number" min="0" max="1" step="0.05"></label>
+        <label data-i18n="[[0,&quot;ui.topics_weight_audience&quot;]]">受众匹配<input id="pf-w-audience" type="number" min="0" max="1" step="0.05"></label>
+        <label data-i18n="[[0,&quot;ui.topics_weight_coverage&quot;]]">素材覆盖<input id="pf-w-coverage" type="number" min="0" max="1" step="0.05"></label>
+        <label data-i18n="[[0,&quot;ui.topics_weight_novelty&quot;]]">去重<input id="pf-w-novelty" type="number" min="0" max="1" step="0.05"></label>
+        <label data-i18n="[[0,&quot;ui.topics_weight_cost&quot;]]">制作成本<input id="pf-w-cost" type="number" min="0" max="1" step="0.05"></label>
+        <span id="pf-weights-sum" class="muted"></span>
+      </fieldset>
+      <fieldset class="topics-schedule"><legend data-i18n="[[0,&quot;ui.topics_field_schedule&quot;]]">每日定时挖掘</legend>
+        <label class="check" data-i18n="[[1,&quot;ui.topics_schedule_enabled&quot;]]"><input id="pf-s-enabled" type="checkbox"> 开启</label>
+        <label data-i18n="[[0,&quot;ui.topics_schedule_time&quot;]]">时刻<input id="pf-s-time" type="time" value="08:00"></label>
+        <label data-i18n="[[0,&quot;ui.topics_schedule_count&quot;]]">前 N 名写大纲<input id="pf-s-count" type="number" min="1" max="50" step="1" value="10"></label>
+      </fieldset>
+      <p id="pf-error" class="warn-text" role="alert" hidden></p>
+      <button class="submit" type="submit" id="pf-save" data-i18n="[[0,&quot;ui.topics_profile_save&quot;]]">保存档案</button>
+    </form>
+  </dialog>
+  <footer><span data-i18n="[[0,&quot;ui.topics_footer&quot;]]">Mindex / 选题挖掘</span><span data-i18n="[[0,&quot;ui.3c60f44b51aa&quot;]]">本地素材库 · 工作流分步执行</span></footer>
+</body>
+</html>

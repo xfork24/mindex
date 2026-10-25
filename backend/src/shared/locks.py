@@ -2,7 +2,7 @@
 
 规范顺序（``ORDER``）::
 
-    pipeline → index-write → library → register → studio
+    pipeline → index-write → library → register → studio → topics
 
 - ``pipeline``（``data_dir/pipeline.lock``）：管线/GPU 互斥。处理任务持共享锁（开启 ``enforce_gpu_lock``
   时持独占锁）；clean、帧迁移、prune、备份迁移持独占锁以排除全部处理任务。
@@ -11,6 +11,7 @@
 - ``library``（``data_dir/locks/library.lock``）：素材库整体。普通处理持共享锁，删除素材与物理清理持独占锁。
 - ``register``（``data_dir/sources/.register.lock``）：导入登记的短租约，只有独占模式。
 - ``studio``（``data_dir/studio/studio.lock``）：创作步骤/构建全局单执行，只有独占模式。
+- ``topics``（``data_dir/locks/topics.lock``）：选题挖掘任务全局单执行（含定时触发与 CLI），只有独占模式。
 
 一次需要多把锁时用 ``acquire_ordered``，名称必须按 ``ORDER`` 不递减排列，逆序直接拒绝（``ValueError``），
 从而避免两个持锁方互相等待。``ProcessingLock`` 先取 library 再取 index-write 的历史顺序与此不同，
@@ -32,7 +33,7 @@ from pathlib import Path
 
 from filelock import Timeout
 
-ORDER = ("pipeline", "index-write", "library", "register", "studio")
+ORDER = ("pipeline", "index-write", "library", "register", "studio", "topics")
 
 PATHS = {
     "pipeline": "pipeline.lock",
@@ -40,6 +41,7 @@ PATHS = {
     "library": "locks/library.lock",
     "register": "sources/.register.lock",
     "studio": "studio/studio.lock",
+    "topics": "locks/topics.lock",
 }
 
 # 可以共享持有的锁；其余锁历史上一直由 filelock 独占持有，不提供共享模式以免破坏互斥。
