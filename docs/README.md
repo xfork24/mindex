@@ -20,6 +20,7 @@
 | 切换线上/自建模型、克隆音色、调检索权重 | [设置页指南](settings.md) | [配置参考](config-reference.md) |
 | 从文案生成视频（创作工作台） | [创作工作流](studio.md) | [设置页：视频生成与动画生成角色](settings.md) / [部署：ComfyUI 与动画录制](DEPLOYMENT.md#comfyui可选的-aigc-视频生成服务) |
 | 用自然语言操作 Mindex，或接入外部 harness（MCP） | [智能助手](agent.md) | [设置页指南](settings.md) |
+| 安装或构建 macOS 桌面版、管理本机模型服务 | [macOS 桌面版](desktop.md) | [设置页：本机服务](settings.md#本机服务) |
 | 用哔哩哔哩缓存转 MP4 | [m4s-converter](../tools/m4s-converter/README.md) | — |
 | 标注评测查询 | [评测标注说明](../eval/README.md) | [e2e 实验框架](e2e-framework.md) |
 | 了解后续规划与最近一次审查 | [功能路线图](../plans/ROADMAP.md) | [2026-10 审查报告](#审查报告) |
@@ -41,6 +42,7 @@
 - [agent.md](agent.md) — 智能助手：全局面板、分级确认与删除策略、工具领域与动态加载、附件、视觉输入、密钥表单、页面同步与定位、Markdown 回复、图片与音视频、可调宽度、任务跟踪与取消、全部工具表、MCP 导出（领域过滤）与 deepseek-harness 兼容
 - [cleanup.md](cleanup.md) — 磁盘清理：三级分类（每次删/策略过期/只报告）、保留规则、锁与并发
 - [backup.md](backup.md) — 离线备份、部分迁移、已有库合并、切换中断恢复和全新 clone 恢复流程
+- [desktop.md](desktop.md) — macOS 桌面版：安装与首次打开、文件位置、本机模型服务、AI 动画录制组件、随包组件、构建与同步演进约定
 
 ## 验证与审计记录
 

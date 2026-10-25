@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import time
+from functools import cache
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
@@ -28,6 +30,17 @@ from mindex.shared.storage import Store
 from mindex.shared.web_assets import frontend_root
 from mindex.shared.web_auth import install_web_auth
 from mindex.studio.studio_api import studio_router
+
+
+@cache
+def app_version() -> str:
+    """已安装包的版本号（与 pyproject 一致；桌面外壳据此确认连到的是同版本后端）。"""
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        return version("mindex")
+    except PackageNotFoundError:  # pragma: no cover - 只在未安装的源码树中出现
+        return "0+unknown"
 
 
 def create_app(
@@ -139,6 +152,16 @@ def create_app(
         return JSONResponse(status_code=422, content={"detail": str(exc)})
 
     app.include_router(search_router(config, runtime, store, embedder, index_id=index_id))
+
+    @app.get("/api/health")
+    def health():
+        """轻量就绪检查（桌面外壳轮询用）：不读素材表、不探测模型服务；随 web_auth 一起受令牌保护。"""
+        from mindex.shared.background_tasks import busy_categories
+        from mindex.studio.executor import busy_executors
+
+        tasks = (["studio"] if busy_executors(config.data_dir) else []) + busy_categories(config.data_dir)
+        return {"version": app_version(), "pid": os.getpid(), "data_dir": str(config.data_dir),
+                "busy": bool(tasks), "tasks": tasks}
 
     # 设置 MINDEX_WEB_TOKEN（或传入 web_token）后才启用访问令牌；未设置时行为不变。
     install_web_auth(app, web_token)

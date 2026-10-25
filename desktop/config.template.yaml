@@ -1,0 +1,75 @@
+# Mindex 桌面版配置。首次启动时复制到 ~/Library/Application Support/Mindex/config.yaml，之后不会覆盖你的修改。
+#
+# - 相对路径都相对本文件所在目录解析（data、fonts）。菜单“Mindex → 选择数据目录…”可改用其他数据目录。
+# - 模型服务通常在“设置”页以配置档案管理：档案保存在数据目录的数据库里，激活后优先于本文件。
+#   这里只给出本机服务的默认地址（与 scripts/run-*.sh 的默认端口一致）。
+# - 配置为严格校验：未知键会导致后端启动失败，可在“打开日志目录”的 backend.log 查看原因。
+data_dir: data
+
+embedding:
+  backend: llama_cpp
+  base_url: http://127.0.0.1:8888/v1
+
+asr:
+  backend: llama_cpp
+  base_url: http://127.0.0.1:8889/v1
+
+detector:
+  backend: adaptive
+
+studio:
+  tts:
+    backend: openai
+    base_url: http://127.0.0.1:8890/v1
+    model: qwen3-tts-customvoice
+  subtitle:
+    font_family: Noto Sans CJK SC
+    # 随包字体：首次启动时从应用复制到 fonts/。
+    font_file: fonts/NotoSansCJKsc-Regular.otf
+
+# 本机模型服务：设置页“本机服务”可以启停这里定义的服务、查看健康与日志，并设置随后端自动启动 / 退出时停止。
+# 页面只能启停，不能修改命令；改完本文件后用菜单“Mindex → 重启后端”生效。
+# 下面的示例对应仓库 scripts/ 里的启动脚本：把 /path/to/mindex 换成你的 Mindex 仓库目录（含 bin/ 与 models/），
+# 再去掉对应条目的注释。端口与 scripts/run-*.sh 的默认值一致；单 GPU 环境不要同时启动多个大模型服务。
+local_services:
+  enabled: true
+  services: []
+  # services:
+  #   - name: wemm
+  #     label: WeMM 嵌入
+  #     role: embedding
+  #     argv: [/path/to/mindex/scripts/run-wemm.sh]
+  #     cwd: /path/to/mindex
+  #     port: 8888
+  #     health_path: /health
+  #   - name: asr
+  #     label: Qwen3 ASR
+  #     role: asr
+  #     argv: [/path/to/mindex/scripts/run-qwen3-asr.sh]
+  #     cwd: /path/to/mindex
+  #     port: 8889
+  #   - name: tts
+  #     label: Qwen3 TTS（声音克隆）
+  #     role: tts
+  #     argv: [/path/to/mindex/scripts/run-tts-voiceclone.sh]
+  #     cwd: /path/to/mindex
+  #     port: 8890
+  #     health_path: /v1/models
+  #   - name: music
+  #     label: MiniMax-Music3（audio.cpp）
+  #     role: music
+  #     argv: [/path/to/mindex/scripts/run-music-gen.sh]
+  #     cwd: /path/to/mindex
+  #     port: 8891
+  #   - name: transnet
+  #     label: TransNetV2 分镜
+  #     role: detector
+  #     argv: [/path/to/mindex/scripts/run-transnet.sh]
+  #     cwd: /path/to/mindex
+  #     port: 18203
+  #   - name: person
+  #     label: 人物识别
+  #     role: person
+  #     argv: [/path/to/mindex/scripts/run-person-service.sh]
+  #     cwd: /path/to/mindex
+  #     port: 4050

@@ -91,6 +91,18 @@
 
 该区域读取的“当前生效”与创作召回签名（`index_id`、`person_release`）同源，用于排查召回节点出现“选用版本兼容性”提示的原因。本区域不构建或删除内容索引本身，构建见 [索引版本与空间身份](index-versions.md)，清理旧索引见 [清理](cleanup.md)。
 
+## 本机服务
+
+设置页最底部的“本机服务”启停配置文件 `local_services` 中定义的本机模型服务（桌面版缺省开启，Web 版需要在配置文件中设置 `local_services.enabled: true`）。每个服务显示端口、用途、pid、运行状态（运行中 / 已停止 / 外部运行）与健康（请求 `http://127.0.0.1:<端口><health_path>`，2xx 为健康），提供启动、停止、日志尾部，以及“随后端自动启动”“退出时停止”两个开关。有服务正在启动（进程在、健康检查未通过）时每 3 秒刷新。
+
+- 只能启停配置文件里定义的服务；接口不接受命令、工作目录或环境变量，因此不会成为远程执行任意命令的入口。功能未开启时全部操作返回 403。
+- 服务以独立进程组启动，日志写入 `data_dir/logs/services/<name>.log`，pid 与进程启动时刻记在 `data_dir/locks/services/<name>.json`；后端重启后据此重新接管仍在运行的服务。停止时向整个进程组发 SIGTERM，8 秒后 SIGKILL。
+- 端口上已有不是由本应用启动的服务时显示“外部运行”，不能在这里启动或停止它。
+- 两个开关保存在数据目录 settings 表的 `local_services.flags`（不属于业务覆盖，“恢复默认”不会清除），没有保存时取配置文件的缺省值。`mindex serve` 启动时在后台拉起“随后端自动启动”的服务，退出时停止“退出时停止”的服务；桌面版退出前还会主动调用 `stop-on-exit`。
+- 智能助手工具：`list_local_services`（只读）、`start_local_service`、`stop_local_service`（需确认）。
+
+同一区块下的“AI 动画录制组件”检查 Playwright 的 Chromium headless shell 是否已安装（目录取 `PLAYWRIGHT_BROWSERS_PATH`，桌面版为用户数据目录的 `browsers/`），未安装时可一键安装（后台运行 `python -m playwright install --only-shell chromium`，显示进度与结果）。创作页 AI 动画阶段的详情提供“管理 AI 动画录制组件”入口（`/settings#browser`）。
+
 ## 密钥安全
 
 - API Key 明文存 `metadata.sqlite3` 的 `model_profiles.api_key`（本机单用户工具的务实选择）。
@@ -112,5 +124,12 @@
 | POST/DELETE | `/api/settings/voices[/{id}]` | 录入/删除音色 |
 | POST | `/api/settings/voices/clone` | 克隆（multipart 上传样本 或 URL 复刻；须 consent） |
 | GET | `/api/persons/releases` | 当前生效组合与最近 30 条检索组合（索引版本区域使用；恢复 / 删除 / 发布仍为 `/api/persons/releases/{id}/activate`、`DELETE /api/persons/releases/{id}`、`POST /api/persons/publish`） |
+| GET | `/api/settings/local-services` | 本机服务列表与状态 `{enabled, items}`（未开启时 `items` 为空） |
+| POST | `/api/settings/local-services/{name}/start` · `/stop` | 启动 / 停止（未开启 403；未知服务 404；端口被外部服务占用 409；可执行文件缺失或启动后立即退出 422） |
+| GET | `/api/settings/local-services/{name}/logs?tail=200` | 服务日志尾部 |
+| PATCH | `/api/settings/local-services/{name}` | 只接受 `autostart`、`stop_on_exit` |
+| POST | `/api/settings/local-services/stop-on-exit` | 停止所有“退出时停止”且由本应用启动的服务（桌面版退出前调用） |
+| GET / POST | `/api/settings/animation-browser` · `/install` | AI 动画录制组件的安装状态 / 后台安装（安装中再次请求 409） |
+| GET | `/api/health` | 轻量就绪检查 `{version, pid, data_dir, busy, tasks}`（桌面外壳轮询；受访问令牌保护，不读素材表、不探测模型服务） |
 
 人物配置 `person.frame_interval`（设置页“间隔帧数”）：整数且 ≥1，默认 15。每个分镜从首个有效帧开始每隔该帧数抽取，保留实际 PTS；1 表示逐帧。旧 `person.fps` 仅兼容旧配置，不叠加抽帧限制。

@@ -88,25 +88,29 @@ flowchart LR
 
 **定位**：复刻 Web 版功能，私有部署时不暴露源码；模型服务可以在本机或局域网。
 
-**推荐方案**：Tauri 2 外壳加 Python sidecar。
+**推荐方案**：Electron 外壳加 Python sidecar。实施计划与决策记录见 [MACOS_NATIVE_PLAN.md](MACOS_NATIVE_PLAN.md)，任务进度见 `.kiro/specs/macos-desktop/`。
+
+两种外壳的后端完全相同（都是 sidecar 运行 `mindex serve`，窗口加载同一套前端），功能完整与否与外壳无关；差异只在外壳层：
 
 | 方案 | 性能 | 体积 | 源码保护 | 结论 |
 |---|---|---|---|---|
-| Tauri + PyInstaller onedir sidecar | 后端是原生 CPython，与 Web 版相同；界面用系统 WebView | 小（外壳约 10 MB + Python 运行时） | 字节码，保护弱 | 首版可用 |
-| Tauri + Nuitka 编译 sidecar | 编译为 C 扩展，启动更快，热点路径略快 | 中 | 编译产物，保护较强 | **推荐正式版** |
-| Electron + Python | 后端相同；Chromium 常驻内存高 | 大（+150 MB） | 同上 | 不推荐 |
+| Electron + PyInstaller sidecar | 后端是原生 CPython，与 Web 版相同；界面是自带 Chromium，与 Web 版使用的 Chrome 一致 | 外壳多约 100–150 MB；sidecar 本身已含 CPython、chromadb、opencv、ffmpeg 与字体 | 字节码，保护弱 | **首版** |
+| Electron + Nuitka 编译 sidecar | 编译为 C 扩展，启动更快 | 中 | 编译产物，保护较强 | 正式版可选 |
+| Tauri 2 + Python sidecar | 后端相同；macOS 用 WKWebView（WebKit），需要额外兼容测试 | 外壳约 10 MB | 同上 | 备选 |
 | pywebview | 后端同进程 | 小 | 弱 | 适合原型 |
+
+选 Electron 的理由：界面引擎与 Web 版一致，不需要维护 WebKit 兼容面；Playwright 可直接驱动 Electron 做回归；外壳与前端同为 JS，团队不引入 Rust。体积与内存的差距相对 Python 依赖本身属于次要，ROADMAP 的验收标准是“性能不低于 Web 版”，Web 版本就运行在 Chrome 中。
 
 关键点：
 
-- 后端仍是 `mindex serve`。由外壳启动 sidecar，监听随机回环端口，并注入一次性 `MINDEX_WEB_TOKEN`，WebView 带令牌访问。不改前端，也不改业务逻辑，所以性能与 Web 版一致；
-- FFmpeg、ffprobe 随包分发（LGPL 构建，附 libass 与 CJK 字体）；代码里改为通过配置或环境变量定位二进制，不依赖 PATH；
+- 后端仍是 `mindex serve`。由外壳启动 sidecar，监听持久化的回环端口（端口变化会丢失 `localStorage` 中的界面偏好），并注入一次性 `MINDEX_WEB_TOKEN`，窗口对本 origin 的请求附带令牌。不改前端，也不改业务逻辑，所以性能与 Web 版一致；
+- FFmpeg、ffprobe 随包分发（成片使用 libx264，因此为 GPL 构建，从源码编译并提供对应源码；附 libass 与 CJK 字体）；代码里通过环境变量定位二进制，不依赖 PATH；
+- 冻结兼容：以源码哈希作指纹的位置在冻结后读取构建时摘要，`sys.executable -m` 子进程由冻结入口分发；
 - AI 动画录制所需的 Chromium 作为可选组件按需下载；
 - 数据目录用系统用户数据目录（`~/Library/Application Support/Mindex`、`%APPDATA%\Mindex`），配置文件随之迁移；
-- 模型服务：提供"本机服务管理"面板（启停、健康、显存），或者只连接局域网和线上服务；
+- 模型服务：提供"本机服务管理"面板（启停、健康、日志），或者只连接局域网和线上服务；
 - 文件锁：现有锁基于 fcntl，Windows 需要 `msvcrt` 或 `filelock` 后端，接口由 `shared/locks.py` 统一；
-- 签名与公证：macOS notarization，Windows Authenticode；
-- 自动更新：Tauri updater，配合差分包。
+- 签名与公证（macOS notarization，Windows Authenticode）与自动更新（electron-updater，支持 blockmap 差分；macOS 上要求应用已签名）需要 Apple Developer ID，取得前首版以 ad-hoc 签名内部分发、手动升级。
 
 **性能验收（与同机 Web 版对比，劣化不超过 5%）**：
 
@@ -124,5 +128,5 @@ flowchart LR
 ```text
 M1（已完成） ──► M3 后期（依赖文件型画面、画幅）
      └──────► M2 选题（依赖文案模板）
-M4 桌面端可与 M2/M3 并行；前置条件：锁跨平台、二进制定位可配置、用户数据目录
+M4 桌面端可与 M2/M3 并行；前置条件：锁跨平台（Windows 阶段）、二进制定位可配置、用户数据目录、冻结兼容
 ```

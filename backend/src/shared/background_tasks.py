@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 import logging
 import threading
+import weakref
+from pathlib import Path
 
 from fastapi import HTTPException
 from filelock import Timeout
@@ -28,6 +30,18 @@ from mindex.shared.task_progress import (
 )
 
 JSON_COLUMNS = frozenset({"options", "progress", "result", "publication"})
+# 进程内全部 runner（弱引用）：健康接口据此报告哪些类别的后台任务在运行。
+_RUNNERS: weakref.WeakSet = weakref.WeakSet()
+
+
+def busy_categories(data_dir) -> list[str]:
+    """属于 ``data_dir`` 的 runner 中有存活线程的类别（``thread_prefix``：source/dialogue/person）。"""
+    target = Path(data_dir).resolve()
+    found = set()
+    for runner in list(_RUNNERS):
+        if Path(runner.store.root).resolve() == target and any(t.is_alive() for t in list(runner.threads.values())):
+            found.add(runner.thread_prefix)
+    return sorted(found)
 
 
 def public_task(row):
@@ -48,6 +62,7 @@ class BackgroundTaskRunner:
         self.runtime, self.store, self.embedder = runtime, store, embedder
         self.threads = {}
         recover_tasks(store, self.table)
+        _RUNNERS.add(self)
 
     # ------------------------------------------------------------ 子类钩子
     def row_lock(self, row):

@@ -19,6 +19,8 @@ uv run pytest tests/test_pipeline.py -q          # 单个文件
 uv run pytest tests/test_pipeline.py::test_name  # 单个测试
 uv run ruff check backend/src tests                      # lint（line-length 110，target py311）
 for f in frontend/src/*/*.js; do node --check "$f"; done   # 静态 JS 语法检查
+(cd desktop && npm ci && node --test test/*.test.js)      # 桌面外壳纯逻辑；node tests/desktop_smoke.cjs 为 Electron 冒烟
+scripts/build-desktop-mac.sh                     # macOS 桌面版 DMG（ffmpeg 源码编译 → 冻结后端 → 冒烟 → electron-builder）
 python scripts/build-messages.py --check           # messages.js 与 messages.json 一致
 python scripts/build-assets.py --check             # 页面 /assets/ 的 ?v= 与内容哈希一致（不带 --check 则改写）
 uv run mindex serve                              # 启动 http://127.0.0.1:8000（/docs、/admin）
@@ -86,6 +88,10 @@ uv run mindex clean [--apply]                    # 磁盘清理：默认预览�
 `api.py`（应用装配 + create_app）、`search/api.py`（检索与媒体 API）、`admin/admin.py`（素材后台 API）、`admin/indexes.py`（`/api/indexes` 索引版本列表/检查/激活）、`agent/api.py`（`/api/agent`）、`shared/web_auth.py`（可选 `MINDEX_WEB_TOKEN`：`/login`，`next` 只收站内路径，`/logout` 仅 POST）、`settings/settings_api.py`（设置 API）、`studio/studio_api.py`（创作 API）、`persons/person_api.py`（人物 API）、`frontend/src/`（原生 HTML/JS，无前端框架与打包；请求统一经 `shared/api.js` 的 `window.MindexApi`；创作页拆为按序加载的 `studio/studio-*.js` 经典脚本，启动代码在最后的 `studio-main.js`；资源 `?v=` 由 `scripts/build-assets.py` 写为内容哈希；五个页面：`/` 检索、`/admin` 素材处理工作台、`/studio` 创作（子页面 `/studio/templates` 文案模板管理，`studio/templates.html` + `templates.js`）、`/settings` 设置、`/persons` 人物库）。`/admin` 直接读 SQLite，不依赖活动索引，支持分步启动分镜/转写/分析/人物处理（`admin/source_tasks.py`/`admin/dialogue_tasks.py` 后台任务，`shared/background_tasks.py` 公共生命周期，`shared/task_progress.py` 持久化进度，`shared/processing_lock.py` GPU 互斥）；curation（显示名/备注/收藏/隐藏，`admin/curation.py`）与不可变索引快照分离，hidden 在召回前过滤。`/studio` 的召回依赖活动索引与嵌入服务（身份校验由 SearchEngine 继承），步骤执行为后台线程 + 前端轮询。
 
 **i18n**：文案目录 `frontend/src/shared/messages.json`（约 2290 键，中文原文为唯一源），键为 `ui.` 前缀（语义名或中文原文 sha1 前 12 位）；浏览器侧镜像 `messages.js` 由 `python scripts/build-messages.py` 从 json 生成，不要手工编辑（`tests/test_i18n.py` 用 `--check` 校验）。`frontend/src/shared/i18n.js` 负责语言切换，不重建 DOM、保留未提交输入（`tests/i18n_ui.cjs` 回归）。后端 `shared/i18n.py` 把中文消息反向映射为稳定 `message_key`/`message_params`（未匹配回落 `system.diagnostic`），供前端按键展示译文。
+
+### 桌面版（desktop/，macOS Apple Silicon）
+
+Electron 外壳 + PyInstaller 冻结的 `mindex serve`（sidecar），窗口加载同一套 Web 前端，与 Web 版同步演进、不维护第二份业务代码（`docs/desktop.md`，决策见 `plans/MACOS_NATIVE_PLAN.md`，任务见 `.kiro/specs/macos-desktop/`）。外壳（`desktop/main.js` + `lib/`）负责单实例、持久化回环端口（`localStorage` 按 origin 隔离）、每次启动的随机 `MINDEX_WEB_TOKEN`（对本 origin 注入 Bearer 与会话 Cookie）、轮询 `GET /api/health`（`version`/`pid`/`busy`）、窗口安全（`contextIsolation`、`sandbox`、导航限本 origin）、下载与菜单、退出时先 `POST /api/settings/local-services/stop-on-exit` 再停后端进程组；用户数据在 `~/Library/Application Support/Mindex`。冻结入口 `desktop_entry.py` 分发 `mindex -m <模块>`（现有 `sys.executable -m` 子进程无需改），`desktop_check.py` 是冻结环境自检；`desktop/sidecar/mindex.spec` 的 `SOURCE_MODULES` 以源码收集自哈希模块（`llama_cpp.py` 的文件哈希属于嵌入空间身份，不要为打包改它）。随包 ffmpeg 由 `scripts/build-desktop-ffmpeg.sh` 从固定源码编译（GPL：libx264、libass[CoreText]、dav1d），后端经 `MINDEX_FFMPEG`/`MINDEX_FFPROBE` 定位（`shared/media.py`），路径不进签名。本机模型服务管理（`settings/local_services.py`，配置 `local_services`，`exclude=True` 不进快照）只能启停配置文件里定义的命令；AI 动画录制组件按需安装见 `settings/browser_install.py`。
 
 ### 智能助手（agent/，全局面板）
 

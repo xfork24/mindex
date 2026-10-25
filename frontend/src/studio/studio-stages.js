@@ -29,6 +29,12 @@ function renderStageDetails(body, sid, stage) {
   if (stage === "generate") body.append(el("p", MindexI18n.msg("ui.generate_help"), "muted"));
   if (stage === "draw") body.append(el("p", MindexI18n.msg("ui.draw_help"), "muted"));
   if (stage === "animate") {
+    // 录制需要浏览器组件：设置页可检查与一键安装（缺少时录制报错里也会提示）。
+    const help = el("p", "", "muted");
+    const manage = el("a", MindexI18n.msg("ui.animation_browser_link"), "quiet nav-link");
+    manage.href = "/settings#browser";
+    help.append(manage);
+    body.append(help);
     // 人工编辑源码：没有成功版本时也可从空白模板开始写。
     actions.append(mutationButton(MindexI18n.msg("ui.animate_edit_source"), () => openAnimationEditor(sid)));
   }

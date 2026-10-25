@@ -17,6 +17,8 @@ from urllib.parse import unquote
 
 ROOT = Path(__file__).resolve().parents[1]
 SKIP_DIRS = {".git", ".venv", ".venv-detector", ".venv-person", "node_modules", "models", ".pytest_cache"}
+# 桌面版构建产物（冻结后端、构建环境、安装包）里带有第三方包自己的 Markdown，不属于本仓库文档。
+SKIP_PATHS = ("desktop/build", "desktop/dist")
 LINK = re.compile(
     r'(?<!!)\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)|!\[[^\]]*\]\(([^)\s]+)\)|(?:href|src)="([^"]+)"'
 )
@@ -28,6 +30,7 @@ def markdown_files() -> list[Path]:
         for path in ROOT.rglob("*.md")
         if not (set(path.relative_to(ROOT).parts) & SKIP_DIRS)
         and not any(part.endswith(".egg-info") for part in path.parts)
+        and not path.relative_to(ROOT).as_posix().startswith(SKIP_PATHS)
     )
 
 

@@ -252,6 +252,30 @@ animate 签名只含 backend、model、`max_html_kb` 与提示词版本，不含
 
 全局助手面板与 MCP 导出：`enabled`、`max_steps`、`max_context_tokens`、`secret_ttl_seconds`、附件（`attachment_ttl_hours`、`attachment_max_mb`）与视觉（`max_images`）、`llm.*`（`backend: openai|anthropic`、`vision`，设置页「智能助手」档案可覆盖）与 `mcp.*`（`http_enabled`、`policy: read|write|all`、`token_env`、`domains`）。键说明与默认值见 [智能助手 · 配置](agent.md#配置)。
 
+## `local_services` — 本机模型服务
+
+设置页“本机服务”能启停的本机服务（见 [设置页指南 · 本机服务](settings.md#本机服务)、[桌面版](desktop.md#本机模型服务)）。该段不进入任何 `model_dump`（`exclude=True`），任务快照、备份配置与指纹不受影响。
+
+| 键 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `enabled` | bool | false | 开启管理；关闭时接口全部返回 403。桌面版配置模板为 true |
+| `services[].name` | str | — | 服务名，`^[a-z0-9][a-z0-9-]{0,31}$`，不能重复 |
+| `services[].label` / `role` | str | 空 | 显示名与用途说明（如 embedding、asr、tts、music、detector、person） |
+| `services[].argv` | list[str] | — | 启动命令（至少一项）；`argv[0]` 含路径分隔符时相对 `cwd`，否则从 PATH 查找，`~` 展开 |
+| `services[].cwd` | str \| null | null | 工作目录；相对路径按配置文件所在目录解析 |
+| `services[].env` | dict | {} | 追加的环境变量 |
+| `services[].port` | int | — | 本机监听端口，不能重复；健康检查访问 `http://127.0.0.1:<port><health_path>` |
+| `services[].health_path` | str | `/health` | 健康检查路径（2xx 为健康） |
+| `services[].autostart` / `stop_on_exit` | bool | false / true | 缺省值；设置页修改后保存在数据目录，优先于这里 |
+
+```yaml
+local_services:
+  enabled: true
+  services:
+    - {name: wemm, label: WeMM 嵌入, role: embedding, port: 8888,
+       argv: [/path/to/mindex/scripts/run-wemm.sh], cwd: /path/to/mindex}
+```
+
 ## 常用组合
 
 **整部电影画面索引（只有 WeMM）**：默认 adaptive detector + `embedding` 指向 WeMM，`index --mode visual --source ID --activate`。
@@ -274,6 +298,8 @@ animate 签名只含 backend、model、`max_html_kb` 与提示词版本，不含
 | `MINDEX_VIDEO_API_KEY` | 视频生成服务密钥（`studio.video_generator.api_key_env` 默认） |
 | `MINDEX_PLAYWRIGHT_MODULE` | 仅测试：UI 回归（Node）使用的 Playwright 模块路径 |
 | `MINDEX_WEB_TOKEN` | 设置后 `mindex serve` 的页面和 API 需要访问令牌，见 [CLI 参考](cli-reference.md#mindex-serve---host-127001---port-8000---index-id-index_id---allow-insecure)；监听非回环地址时必须设置，否则 `serve` 拒绝启动（除非传 `--allow-insecure`） |
+| `MINDEX_FFMPEG` / `MINDEX_FFPROBE` | ffmpeg / ffprobe 可执行文件路径（桌面版指向随包构建）；缺省从 PATH 查找。不进入任何签名 |
+| `MINDEX_DESKTOP` | 桌面外壳为后端设置为 `1`：AI 动画录制缺少浏览器时提示到设置页一键安装 |
 | `MINDEX_GPU_LOCK` | GPU 文件锁路径（各角色须一致） |
 | `MINDEX_TRANSNET_DIR` | 服务端 TransNetV2 `inference` 目录 |
 

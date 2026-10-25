@@ -326,6 +326,9 @@ curl -s -H "Authorization: Bearer $MINDEX_MCP_TOKEN" -F file=@shot.png http://12
 | `reset_business_settings` | danger | 是 | 清除页面保存的业务设置覆盖 |
 | `delete_voice` | danger | 是 | 删除音色记录；是默认音色时一并清除默认覆盖 |
 | `clone_voice` | danger | 是 | 克隆音色（授权只来自页面表单，见下） |
+| `list_local_services` | read | 是 | 本机模型服务（配置文件 `local_services` 定义）：运行状态、健康、端口与自启设置 |
+| `start_local_service` | danger | 是 | 启动配置文件中定义的本机服务（不能改命令）；会占用本机内存/显存 |
+| `stop_local_service` | danger | 是 | 停止由本应用启动的本机服务；正在使用它的任务会失败 |
 
 `clone_voice` 在确认卡之后再弹出一张表单：音色名称、参考文本（可选）和声音授权确认项（dashscope 后端另有样本 URL）。只有你在表单中选择「我确认拥有该声音的合法使用授权」时，才以 `consent=true` 调用克隆接口；工具参数里没有授权字段，模型无法代为授权。openai/minimax 后端使用音频附件，dashscope 后端使用公网 URL。拒绝、取消表单或没有提问通道（MCP 调用）时不调用接口并说明原因。
 

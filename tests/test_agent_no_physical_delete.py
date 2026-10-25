@@ -66,11 +66,11 @@ DESIGN_RISKS = {
              "import_cast confirm_cast_import register_voice generate_lyrics",
     "danger": "activate_index start_source_task delete_plan run_column delete_person remove_person_reference "
               "publish_persons change_search_release delete_model_profile reset_business_settings delete_voice "
-              "clone_voice",
+              "clone_voice start_local_service stop_local_service",
 }
 # GPU 任务、发布、激活、构建类工具（Req 19.4；含既有的构建与档案激活工具）。
 HEAVY = ("start_source_task", "publish_persons", "activate_index", "change_search_release", "activate_model_profile",
-         "run_build", "run_node", "run_column", "clone_voice")
+         "run_build", "run_node", "run_column", "clone_voice", "start_local_service")
 
 
 def check_requests(name: str, requests: list[tuple[str, str]]) -> None:
@@ -176,9 +176,13 @@ GET_ROUTES = [
     (re.compile(r"^/api/indexes$"), lambda: INDEXES),
     (re.compile(r"^/api/indexes/[^/]+/check$"), lambda: {"index_id": "idx-bbbbbb02", "ok": True, "issues": []}),
     (re.compile(r"^/api/settings$"), lambda: SETTINGS),
+    (re.compile(r"^/api/settings/local-services$"), lambda: LOCAL_SERVICES),
     (re.compile(r"^/api/admin/sources/[^/]+$"), lambda: SOURCE),
     (re.compile(r"^/api/admin/sources$"), lambda: {"items": [SOURCE], "total": 1}),
 ]
+LOCAL_SERVICES = {"enabled": True, "items": [
+    {"name": "wemm", "label": "WeMM 嵌入", "role": "embedding", "port": 8888, "running": False, "healthy": False,
+     "external": False, "autostart": False, "stop_on_exit": True, "pid": None, "detail": ""}]}
 FAULTS = (404, 409, 422, 500)
 
 
@@ -408,6 +412,8 @@ MANUAL = {
     "update_script_template": [{"template_id": TEMPLATE["id"], "instructions": "新提示词"},
                                {"template_id": TEMPLATE["id"], "max_chars": None}],
     "copy_script_template": [{"template_id": "base", "name": "副本"}],
+    "start_local_service": [{"name": "wemm"}, {"name": "nope"}],
+    "stop_local_service": [{"name": "wemm"}],
     "edit_animation_source": [{"shot": "#1", "html": "<html><body></body></html>"},
                               {"shot": "#1", "replacements": [{"find": "body", "replace": "main"}]}],
 }

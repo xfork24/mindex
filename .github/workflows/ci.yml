@@ -54,7 +54,7 @@ jobs:
         run: uv run python scripts/build-assets.py --check
 
       - name: 前端 JS 语法
-        run: for f in frontend/src/*/*.js; do node --check "$f"; done
+        run: for f in frontend/src/*/*.js desktop/*.js desktop/lib/*.js desktop/scripts/*.js; do node --check "$f"; done
 
       - name: CLI 入口
         run: uv run mindex --help
@@ -66,3 +66,95 @@ jobs:
       - name: 完整回归
         if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.full)
         run: uv run pytest -q
+
+  # 桌面版（macOS Apple Silicon）：外壳纯逻辑、桌面相关后端测试与 Electron 开发模式冒烟。
+  desktop:
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 ffmpeg（开发模式与测试使用）
+        run: brew install ffmpeg
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.13"
+          enable-cache: true
+
+      - name: 安装依赖
+        run: |
+          uv sync --extra dev
+          cd desktop && npm ci --no-audit --no-fund
+
+      - name: 外壳纯逻辑
+        working-directory: desktop
+        run: node --test test/*.test.js
+
+      - name: 桌面相关后端测试
+        run: >-
+          uv run pytest -q tests/test_desktop_health.py tests/test_desktop_frozen.py tests/test_desktop_config.py
+          tests/test_media_binaries.py tests/test_local_services.py tests/test_browser_install.py
+          tests/test_settings_local_services_ui.py
+
+      - name: Electron 开发模式冒烟
+        run: node tests/desktop_smoke.cjs
+
+  # 定时与手动触发：从源码构建 GPL ffmpeg（按构建脚本缓存）、冻结后端与 DMG，安装后冒烟，产物保留 14 天。
+  desktop-package:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: desktop
+    runs-on: macos-14
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.13"
+          enable-cache: true
+
+      - name: 构建工具
+        run: brew install pkg-config
+
+      - name: 缓存随包 ffmpeg
+        uses: actions/cache@v4
+        with:
+          path: desktop/build/ffmpeg
+          key: desktop-ffmpeg-${{ hashFiles('scripts/build-desktop-ffmpeg.sh') }}
+
+      - name: 构建安装包
+        run: |
+          uv sync --extra dev
+          scripts/build-desktop-mac.sh
+
+      - name: 安装并冒烟（PATH 不含 Homebrew）
+        run: |
+          mount="$(mktemp -d)"
+          hdiutil attach -nobrowse -readonly -mountpoint "$mount" desktop/dist/Mindex-*-arm64.dmg
+          ditto "$mount/Mindex.app" "$RUNNER_TEMP/Mindex.app"
+          hdiutil detach "$mount"
+          codesign --verify --deep --strict "$RUNNER_TEMP/Mindex.app"
+          env PATH="/usr/bin:/bin:$(dirname "$(command -v node)")" \
+            MINDEX_SMOKE_APP="$RUNNER_TEMP/Mindex.app/Contents/MacOS/Mindex" node tests/desktop_smoke.cjs
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mindex-desktop-macos-arm64
+          retention-days: 14
+          path: |
+            desktop/dist/*.dmg
+            desktop/dist/*.zip
+            desktop/dist/mindex-desktop-ffmpeg-sources-*.tar

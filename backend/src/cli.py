@@ -687,10 +687,15 @@ def serve(
             err=True,
         )
     from mindex.search.warmup import warm_up_in_background
+    from mindex.settings import local_services
 
     app = create_app(ctx.obj, index_id=index_id)
     warm_up_in_background(ctx.obj, index_id)  # 后台线程，不阻塞监听；失败只记日志
-    uvicorn.run(app, host=host, port=port)
+    local_services.autostart_in_background(ctx.obj)  # 只在开启本机服务管理且有 autostart 服务时生效
+    try:
+        uvicorn.run(app, host=host, port=port)
+    finally:
+        local_services.stop_on_exit(ctx.obj)
 
 
 @app.command()

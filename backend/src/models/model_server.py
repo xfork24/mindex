@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
 from mindex.shared.config import Config, fingerprint, load_config
-from mindex.shared.media import content_hash, probe
+from mindex.shared.media import content_hash, ffmpeg_bin, probe
 from mindex.shared.uploads import save_upload
 
 
@@ -266,7 +266,7 @@ class TransNetEngine:
         probe(path)
         process = subprocess.Popen(
             [
-                "ffmpeg",
+                ffmpeg_bin(),
                 "-hide_banner",
                 "-loglevel",
                 "error",

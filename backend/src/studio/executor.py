@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import weakref
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -29,6 +30,15 @@ from mindex.studio import studio
 from mindex.studio.studio_artifacts import safe_path
 
 log = logging.getLogger(__name__)
+
+# 进程内全部执行器（弱引用）：健康接口据此报告是否有创作执行在运行。
+_EXECUTORS: weakref.WeakSet = weakref.WeakSet()
+
+
+def busy_executors(data_dir) -> bool:
+    """属于 ``data_dir`` 的执行器中是否有存活的执行线程。"""
+    target = Path(data_dir).resolve()
+    return any(Path(e.base.data_dir).resolve() == target and e.busy() for e in list(_EXECUTORS))
 
 BUSY = "已有创作步骤在执行，请稍候再试"
 
@@ -107,6 +117,7 @@ class StudioExecutor:
         self.guard = threading.RLock()
         self._thread: threading.Thread | None = None
         self._events: dict[tuple[str, str, str | None], threading.Event] = {}
+        _EXECUTORS.add(self)
 
     # ------------------------------------------------------------ 锁
 

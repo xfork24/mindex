@@ -1,0 +1,54 @@
+{
+  "name": "mindex-desktop",
+  "productName": "Mindex",
+  "version": "0.1.0",
+  "description": "Mindex 桌面版：Electron 外壳 + mindex serve sidecar",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test \"test/**/*.test.js\""
+  },
+  "devDependencies": {
+    "electron": "45.0.0",
+    "electron-builder": "26.18.0",
+    "playwright-core": "1.64.1"
+  },
+  "build": {
+    "appId": "dev.mindex.desktop",
+    "productName": "Mindex",
+    "artifactName": "Mindex-${version}-${arch}.${ext}",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "lib/**",
+      "pages/**",
+      "package.json"
+    ],
+    "extraResources": [
+      { "from": "build/backend", "to": "backend" },
+      { "from": "build/ffmpeg/bin", "to": "bin" },
+      { "from": "build/fonts", "to": "fonts" },
+      { "from": "config.template.yaml", "to": "config.template.yaml" }
+    ],
+    "asar": true,
+    "afterPack": "scripts/after-pack.js",
+    "mac": {
+      "target": [
+        { "target": "dmg", "arch": ["arm64"] },
+        { "target": "zip", "arch": ["arm64"] }
+      ],
+      "category": "public.app-category.video",
+      "minimumSystemVersion": "13.0",
+      "identity": null,
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false
+    },
+    "dmg": {
+      "sign": false
+    }
+  }
+}

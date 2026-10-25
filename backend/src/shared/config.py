@@ -540,6 +540,40 @@ class AgentConfig(StrictModel):
     mcp: AgentMcpConfig = Field(default_factory=AgentMcpConfig)
 
 
+class LocalServiceConfig(StrictModel):
+    """一个本机模型服务（例如 scripts/run-wemm.sh 启动的 llama-server）。只能在配置文件里定义：
+    页面与接口只能启停、看状态和日志、改 autostart/stop_on_exit，不能改命令。"""
+
+    name: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{0,31}$")
+    label: str = Field(default="", max_length=60)
+    role: str = Field(default="", max_length=32)  # 用途说明，例如 embedding、asr、tts、music、detector、person
+    argv: list[str] = Field(min_length=1)
+    cwd: str | None = None  # 相对路径按配置文件所在目录解析
+    env: dict[str, str] = Field(default_factory=dict)
+    port: int = Field(ge=1, le=65535)
+    health_path: str = Field(default="/health", pattern=r"^/")
+    autostart: bool = False  # 缺省值；设置页修改后保存在数据目录的 settings 表
+    stop_on_exit: bool = True
+
+
+class LocalServicesConfig(StrictModel):
+    enabled: bool = False
+    services: list[LocalServiceConfig] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _unique(self):
+        names = [service.name for service in self.services]
+        if len(set(names)) != len(names):
+            raise ValueError("local_services.services 的 name 不能重复")
+        ports = [service.port for service in self.services]
+        if len(set(ports)) != len(ports):
+            raise ValueError("local_services.services 的 port 不能重复")
+        return self
+
+    def get(self, name: str) -> LocalServiceConfig | None:
+        return next((service for service in self.services if service.name == name), None)
+
+
 class Config(StrictModel):
     data_dir: Path = Path("data")
     source_upload_max_bytes: int = Field(default=20 * 1024**3, ge=1)
@@ -555,6 +589,8 @@ class Config(StrictModel):
     search: SearchConfig = Field(default_factory=SearchConfig)
     clean: CleanConfig = Field(default_factory=CleanConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
+    # 本机模型服务管理（桌面版缺省开启）。exclude=True：不进入任何 model_dump，任务快照、备份配置与指纹逐字节不变。
+    local_services: LocalServicesConfig = Field(default_factory=LocalServicesConfig, exclude=True)
 
     @model_validator(mode="after")
     def animator_defaults_to_agent(self):
@@ -647,6 +683,11 @@ def load_config(path: str | Path | None = None) -> Config:
             service.deployment_manifest = str((base / service.deployment_manifest).resolve())
     if config.studio.subtitle.font_file:
         config.studio.subtitle.font_file = str((base / Path(config.studio.subtitle.font_file).expanduser()).resolve())
+    for service in config.local_services.services:
+        if service.cwd:
+            service.cwd = str((base / Path(service.cwd).expanduser()).resolve())
+        if service.argv[0].startswith("~"):
+            service.argv[0] = str(Path(service.argv[0]).expanduser())
     return config
 
 

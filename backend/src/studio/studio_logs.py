@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from contextvars import ContextVar
+from pathlib import Path
 
 from mindex.shared.i18n import add_message_metadata, message_metadata
 from mindex.studio import studio
@@ -83,7 +84,9 @@ def diagnostic_event(kind, value):
         log.emit("素材摘要生成失败，已按无摘要继续", "warning")
     elif kind == "command":
         executable = value.get("args", [""])[0]
-        log.emit("正在处理音视频（ffmpeg）" if str(executable).endswith("ffmpeg") else "正在检查媒体信息")
+        # 首参数可能是 MINDEX_FFMPEG 配置的绝对路径：按文件名识别。
+        is_ffmpeg = Path(str(executable)).name == "ffmpeg"
+        log.emit("正在处理音视频（ffmpeg）" if is_ffmpeg else "正在检查媒体信息")
     elif kind == "command-result":
         log.emit("媒体处理完成")
     elif kind == "command-error":

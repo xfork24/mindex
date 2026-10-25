@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title data-i18n="[[0,&quot;ui.5e9681d20f56&quot;]]">Mindex · 设置</title><link rel="icon" href="/assets/shared/favicon.svg?v=8d7f9242de" type="image/svg+xml">
-  <link rel="stylesheet" href="/assets/shared/style.css?v=e4cee29ab0"><link rel="stylesheet" href="/assets/shared/agent-panel.css?v=5ce91a25c0"><link rel="stylesheet" href="/assets/settings/settings.css?v=dcd0ae2a9c">
-  <script src="/assets/shared/messages.js?v=eb6bac2fe2" defer></script><script src="/assets/shared/i18n.js?v=42497bb7f1" defer></script><script src="/assets/shared/api.js?v=aa52e4865d" defer></script><script src="/assets/shared/marked.umd.js?v=b82b933440" defer></script><script src="/assets/shared/purify.min.js?v=cd37898f97" defer></script><script src="/assets/shared/agent-markdown.js?v=8f0018e90a" defer></script><script src="/assets/shared/agent-panel.js?v=a5a754151e" defer></script><script src="/assets/shared/feedback.js?v=4d2340032a" defer></script><script src="/assets/settings/settings.js?v=31f7c5b5af" defer></script>
+  <link rel="stylesheet" href="/assets/shared/style.css?v=e4cee29ab0"><link rel="stylesheet" href="/assets/shared/agent-panel.css?v=5ce91a25c0"><link rel="stylesheet" href="/assets/settings/settings.css?v=ae9e01be2a">
+  <script src="/assets/shared/messages.js?v=3b110b12d2" defer></script><script src="/assets/shared/i18n.js?v=42497bb7f1" defer></script><script src="/assets/shared/api.js?v=aa52e4865d" defer></script><script src="/assets/shared/marked.umd.js?v=b82b933440" defer></script><script src="/assets/shared/purify.min.js?v=cd37898f97" defer></script><script src="/assets/shared/agent-markdown.js?v=8f0018e90a" defer></script><script src="/assets/shared/agent-panel.js?v=a5a754151e" defer></script><script src="/assets/shared/feedback.js?v=4d2340032a" defer></script><script src="/assets/settings/settings.js?v=f21dbe4de2" defer></script>
 </head>
 <body class="settings">
   <header><a class="brand" href="/">m<span>index</span><i></i></a><nav class="page-nav" aria-label="页面导航 / Main navigation"><a class="quiet nav-link" href="/" data-i18n="[[0,&quot;ui.c9b1e68e3537&quot;]]">视频检索</a><a class="quiet nav-link" href="/studio" data-i18n="[[0,&quot;ui.b6fc3cef0bd0&quot;]]">创作</a><a class="quiet nav-link" href="/admin" data-i18n="[[0,&quot;ui.f517302fec0d&quot;]]">素材管理</a><a class="quiet nav-link" href="/persons" data-i18n="[[0,&quot;ui.0973ef28d791&quot;]]">人物库</a><a class="quiet nav-link" href="/settings" aria-current="page" data-i18n="[[0,&quot;ui.7debf9cb0372&quot;]]">设置</a></nav><button class="quiet" id="reload" data-i18n="[[0,&quot;ui.c3147ba1672a&quot;]]">刷新设置</button><button type="button" class="quiet language-switch" data-language-toggle aria-label="中文 / English"><span data-language="zh" lang="zh-CN">文</span><span class="language-divider" aria-hidden="true">/</span><span data-language="en" lang="en">En</span></button></header>
@@ -86,6 +86,45 @@
               <span class="muted" data-i18n="[[0,&quot;ui.04a8ed2659fc&quot;]]">绑定当前内容索引；只发布已接受的证据。已发布检索无需人物服务在线。</span>
             </div>
             <div id="release-notice" class="notice" role="status" aria-live="polite"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+    <section aria-label="本机服务" data-i18n-aria-label="ui.local_services">
+      <div class="section-heading"><h2 data-i18n="[[0,&quot;ui.local_services&quot;]]">本机服务</h2><span data-i18n="[[0,&quot;ui.local_services_desc&quot;]]">启停本机已安装的模型服务（配置文件 local_services 中定义）</span></div>
+      <div class="role-row" id="services-row">
+        <button type="button" class="role-row-head" data-section="services" aria-controls="services-body" aria-expanded="false">
+          <span class="chevron">▸</span>
+          <strong class="role-row-title" data-i18n="[[0,&quot;ui.local_services_title&quot;]]">本机模型服务</strong>
+          <span class="role-row-summary"><span class="role-row-effective" id="services-summary"></span></span>
+        </button>
+        <div class="role-row-body" id="services-body" hidden>
+          <p class="role-desc" data-i18n="[[0,&quot;ui.local_services_hint&quot;]]">只能启停配置文件里定义的服务；命令、端口与工作目录请在配置文件中修改（桌面版：菜单“Mindex → 打开配置文件”）。单 GPU 环境不要同时启动多个大模型服务。</p>
+          <div class="tuning-panel">
+            <ul id="services" class="release-list service-list"></ul>
+            <div class="release-publish">
+              <button class="quiet" type="button" id="services-refresh" data-i18n="[[0,&quot;ui.local_services_refresh&quot;]]">刷新状态</button>
+            </div>
+            <div id="services-notice" class="notice" role="status" aria-live="polite"></div>
+          </div>
+        </div>
+      </div>
+      <div class="role-row" id="browser-row">
+        <button type="button" class="role-row-head" data-section="browser" aria-controls="browser-body" aria-expanded="false">
+          <span class="chevron">▸</span>
+          <strong class="role-row-title" data-i18n="[[0,&quot;ui.animation_browser_title&quot;]]">AI 动画录制组件</strong>
+          <span class="role-row-summary"><span class="role-row-effective" id="browser-summary"></span></span>
+        </button>
+        <div class="role-row-body" id="browser-body" hidden>
+          <p class="role-desc" data-i18n="[[0,&quot;ui.animation_browser_hint&quot;]]">AI 动画分镜在无头 Chromium 里逐帧录制。首次使用前安装浏览器组件（约 100 MB，需要联网）。</p>
+          <div class="tuning-panel">
+            <p id="browser-state" class="release-current"></p>
+            <div class="release-publish">
+              <button class="quiet" type="button" id="browser-install" data-i18n="[[0,&quot;ui.animation_browser_install&quot;]]">安装浏览器组件</button>
+              <span class="muted" id="browser-path"></span>
+            </div>
+            <pre id="browser-log" class="service-log" hidden></pre>
+            <div id="browser-notice" class="notice" role="status" aria-live="polite"></div>
           </div>
         </div>
       </div>

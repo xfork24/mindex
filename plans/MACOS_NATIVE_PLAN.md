@@ -1,6 +1,6 @@
 # macOS 桌面端实施计划（Electron 外壳 + Python sidecar）
 
-状态：已确认，待在 `main` 上新建分支实施。调查基于提交 `a445d46`（当时 `main` 与 `mindex-features` 指向同一提交），文中的行号以该提交为准，实施前先复核。
+状态：实施中。本文件是决策与调查背景；需求、设计与任务进度以 [.kiro/specs/macos-desktop/](../.kiro/specs/macos-desktop/tasks.md) 为准。调查基于提交 `a445d46`（当时 `main` 与 `mindex-features` 指向同一提交），文中的行号以该提交为准。
 
 ## 1. 目标
 
@@ -239,7 +239,7 @@ T13、T14 推迟（需 Apple Developer ID）
 ### T6 冻结运行兼容
 
 - 改动：
-  - 新增 `shared/source_digest.py`：`module_digest(module)`，源码文件存在时现场计算 `content_hash`（与现在完全相同），不存在时读取构建时生成的 `mindex/_build_digests.json`；替换 `llama_cpp.py:259`、`model_server.py:90`。
+  - 以自身源码哈希作指纹的模块（`llama_cpp.py:259`、`model_server.py:90`）在 PyInstaller 中以 `.py` 源码打包（`module_collection_mode="py"`），冻结后哈希不变。实施时改为此做法：原设想的 `shared/source_digest.py` 需要修改 `llama_cpp.py`，而它的文件哈希是嵌入空间身份（`adapter_sha256`）的一部分，改动会使现有索引失配。
   - 新增冻结入口 `mindex/desktop_entry.py`：参数为 `-m <模块> ...` 时用 `runpy.run_module(<模块>, run_name="__main__")` 执行（覆盖 `backup_vectors`、`person_worker`、`playwright`），否则调用 `mindex.cli:app`。`sys.executable -m ...` 的调用处无需修改。
 - 测试：
   - 同一文件两条路径得到相同摘要；现有分析与 ASR 缓存键不变（与改动前的值对比）。
@@ -249,8 +249,8 @@ T13、T14 推迟（需 Apple Developer ID）
 ### T7 PyInstaller sidecar 构建
 
 - 改动：
-  - `desktop/sidecar/mindex.spec`（onedir，arm64，入口 `desktop_entry.py`，PyInstaller 锁定版本）：`collect_submodules("mindex")`；datas 包括 `frontend/src` → `mindex/web`、`studio/templates/*.yaml`、`processing/align_worker.py`、jieba 字典、`mindex/_build_digests.json`、`mindex` 包元数据（`copy_metadata`，供 `importlib.metadata`）；chromadb、onnxruntime、tokenizers、opencv 的 hook 与二进制；包含 `animation` extra（playwright 的 Python 包与 driver，浏览器另装，见 T12）。不包含 `dev`、`person` extra（人物识别走独立的人物服务）。
-  - `scripts/build-desktop-sidecar.sh`：在干净的 uv 环境中安装依赖、生成 `_build_digests.json`、执行 PyInstaller，输出到 `desktop/build/backend/`。
+  - `desktop/sidecar/mindex.spec`（onedir，arm64，入口 `desktop_entry.py`，PyInstaller 锁定版本）：`collect_submodules("mindex")`；datas 包括 `frontend/src` → `mindex/web`、`studio/templates/*.yaml`、`processing/align_worker.py`、jieba 字典、`SOURCE_MODULES` 以源码收集、`mindex` 包元数据（`copy_metadata`，供 `importlib.metadata`）；chromadb、onnxruntime、tokenizers、opencv 的 hook 与二进制；包含 `animation` extra（playwright 的 Python 包与 driver，浏览器另装，见 T12）。不包含 `dev`、`person` extra（人物识别走独立的人物服务）。
+  - `scripts/build-desktop-sidecar.sh`：在干净的 uv 环境中安装依赖、执行 PyInstaller，输出到 `desktop/build/backend/`。
   - 外壳生产模式改为运行 `Resources/backend/mindex`。
   - `scripts/check-desktop-sidecar.py`：用临时配置与数据目录启动冻结后端，依次验证 `/api/health`、五个页面返回 200、`-m mindex.maintenance.backup_vectors --help` 分发、注册并 prepare 一个测试视频（adaptive 本地检测）、文案模板列表非空、对 pyproject 的 package-data 与 spec 的 datas 做一致性检查（防止以后新增数据文件时漏打包）。
 - 测试：`check-desktop-sidecar.py` 全部通过。
@@ -323,7 +323,7 @@ T13、T14 推迟（需 Apple Developer ID）
 - CI：
   - `ci.yml` 新增 macOS 任务（Apple Silicon runner，`macos-14` 或更新）：`pytest -m "not slow"`、`node --test desktop/test`、Electron 开发模式冒烟。
   - 定时任务新增：构建 ffmpeg（命中缓存时跳过）、构建 sidecar、`check-desktop-sidecar.py`、打包 DMG 并对已安装应用冒烟；产物作为 artifact 保留。
-- 性能：`scripts/desktop-bench.sh` 按 ROADMAP 六项指标与同机 Web 版对比（冷启动到可交互、1 万片段文字检索 P50/P95、1 小时 1080p prepare 吞吐、30 镜 3 分钟 1080p 成片渲染、10 秒 25fps 1280×720 动画录制、空闲/检索/渲染时常驻内存），劣化不超过 5%；结果记入 `docs/VERIFICATION.md`。
+- 性能：`scripts/desktop-bench.py` 按 ROADMAP 六项指标与同机 Web 版对比（冷启动到可交互、1 万片段文字检索 P50/P95、1 小时 1080p prepare 吞吐、30 镜 3 分钟 1080p 成片渲染、10 秒 25fps 1280×720 动画录制、空闲/检索/渲染时常驻内存），劣化不超过 5%；结果记入 `docs/VERIFICATION.md`。
 - 文档：
   - 新增 `docs/desktop.md`（安装与首次打开、数据目录、本机服务、日志、已知限制），登记到 `docs/README.md`。
   - `CLAUDE.md` 与 `AGENT.md` 补充桌面架构与同步演进约定：
@@ -331,7 +331,7 @@ T13、T14 推迟（需 Apple Developer ID）
     - 桌面专属能力只经 preload 的 `window.MindexDesktop`，前端必须有 Web 回退。
     - ffmpeg/ffprobe 调用一律经 `ffmpeg_bin()`/`ffprobe_bin()`。
     - 新增包数据文件须同步 `mindex.spec`（`check-desktop-sidecar.py` 会检查）。
-    - 以源码哈希作指纹时一律经 `source_digest`。
+    - 以自身源码哈希作指纹的模块须登记在 `mindex.spec` 的 `SOURCE_MODULES`（测试检查）。
   - `README.md` 增加桌面版入口说明。
 - 验收：CI 全绿；性能报告达标。
 

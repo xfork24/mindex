@@ -4,6 +4,7 @@ import base64
 import hashlib
 import json
 import math
+import os
 import subprocess
 import threading
 from collections import OrderedDict
@@ -16,7 +17,27 @@ class MediaError(ValueError):
     pass
 
 
+def ffmpeg_bin() -> str:
+    """ffmpeg 可执行文件：``MINDEX_FFMPEG``（桌面版指向随包构建），缺省从 PATH 查找 ``ffmpeg``。
+
+    路径只决定用哪个二进制，不进入任何签名或缓存键。新增的 ffmpeg 调用一律经此函数或 ``command()``。"""
+    return os.environ.get("MINDEX_FFMPEG", "").strip() or "ffmpeg"
+
+
+def ffprobe_bin() -> str:
+    """ffprobe 可执行文件：``MINDEX_FFPROBE``，缺省 ``ffprobe``。"""
+    return os.environ.get("MINDEX_FFPROBE", "").strip() or "ffprobe"
+
+
+def resolve_tool(args: list[str]) -> list[str]:
+    """把首参数 ``ffmpeg``/``ffprobe`` 换成配置的可执行文件；其他命令原样返回。"""
+    if args and args[0] in ("ffmpeg", "ffprobe"):
+        return [ffmpeg_bin() if args[0] == "ffmpeg" else ffprobe_bin(), *args[1:]]
+    return list(args)
+
+
 def command(args: list[str], *, timeout: float = 600) -> bytes:
+    args = resolve_tool(args)
     record("command", {"args": args, "timeout": timeout})
     try:
         result = subprocess.run(args, check=True, capture_output=True, timeout=timeout)

@@ -13,3 +13,33 @@
 
 - marked（MIT）：Copyright (c) 2018+, MarkedJS；Copyright (c) 2011-2018, Christopher Jeffrey。全文见 <https://github.com/markedjs/marked/blob/v18.1.1/LICENSE.md>。
 - DOMPurify（Apache-2.0 / MPL-2.0）：Copyright (c) Cure53 and other contributors。全文见 <https://github.com/cure53/DOMPurify/blob/3.4.17/LICENSE>。
+
+## 桌面版（macOS）随包组件
+
+以下组件只随桌面版安装包（`Mindex.app`）分发，不在仓库中。构建脚本见 `scripts/build-desktop-ffmpeg.sh`、`scripts/build-desktop-sidecar.sh` 与 `scripts/build-desktop-mac.sh`。
+
+### FFmpeg 与 ffprobe（GPL 构建）
+
+`Mindex.app/Contents/Resources/bin/ffmpeg`、`ffprobe` 由 `scripts/build-desktop-ffmpeg.sh` 从源码编译，静态链接下列库；因为包含 libx264，整个构建按 **GNU GPL v2 或更高版本** 分发。
+
+| 组件 | 版本 | 许可证 | 来源 |
+|---|---|---|---|
+| FFmpeg | 9.0.2（`--enable-gpl`） | GPL-2.0-or-later（含 GPL 组件时） | https://ffmpeg.org/ |
+| x264 | stable 分支提交 `b35605ace3ddf7c1a5d67a2eb553f034aef41d55` | GPL-2.0-or-later | https://code.videolan.org/videolan/x264 |
+| libass | 0.17.5 | ISC | https://github.com/libass/libass |
+| FreeType | 2.15.0 | FreeType License（FTL） | https://freetype.org/ |
+| FriBidi | 1.0.17 | LGPL-2.1-or-later | https://github.com/fribidi/fribidi |
+| HarfBuzz | 15.0.0 | MIT（“Old MIT”） | https://github.com/harfbuzz/harfbuzz |
+| dav1d | 1.5.4 | BSD-2-Clause | https://code.videolan.org/videolan/dav1d |
+
+对应源码：每个桌面版发布都附带 `mindex-desktop-ffmpeg-sources-<版本>.tar`，内含上表全部源码包（版本与 sha256 固定在构建脚本中）以及 `build-desktop-ffmpeg.sh` 本身，可完整重现随包二进制。ffmpeg 与 FreeType 源码包已核对官方 GPG 签名。
+
+### Noto Sans CJK SC 字体
+
+`Mindex.app/Contents/Resources/fonts/NotoSansCJKsc-Regular.otf`（Noto CJK Sans 2.004，© Google / Adobe），按 **SIL Open Font License 1.1** 分发，许可全文随字体附带（`LICENSE-NotoSansCJK.txt`）。来源：https://github.com/notofonts/noto-cjk 。首次启动时复制到 `~/Library/Application Support/Mindex/fonts/`，用作烧录字幕字体。
+
+### 冻结后端与外壳
+
+- 后端以 PyInstaller（GPL-2.0 with bootloader exception；冻结产物不受 GPL 约束）冻结，内含 CPython（PSF License）与 `pyproject.toml`、`uv.lock` 锁定的 Python 依赖，各依赖的许可随其包元数据（`*.dist-info`）一同打包。
+- 外壳为 Electron（MIT，内含 Chromium，BSD-3-Clause 及其第三方组件），许可文件位于 `Mindex.app/Contents/Resources/`（`LICENSE`、`LICENSES.chromium.html`）。
+- AI 动画录制所需的 Chromium（Playwright 构建）不随包分发，首次使用时下载到用户数据目录。

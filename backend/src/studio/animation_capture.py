@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import tempfile
@@ -27,9 +28,15 @@ import time
 from fractions import Fraction
 from pathlib import Path
 
-from mindex.shared.media import MediaError
+from mindex.shared.media import MediaError, ffmpeg_bin
 
 INSTALL_HINT = "AI 动画录制需要安装可选依赖：uv sync --extra animation && uv run playwright install chromium"
+# 桌面版（外壳设置 MINDEX_DESKTOP=1）已随包带 playwright，只缺浏览器：引导到设置页一键安装。
+DESKTOP_INSTALL_HINT = "AI 动画录制需要先安装浏览器组件：在设置页“本机服务”的“AI 动画录制组件”中一键安装"
+
+
+def install_hint() -> str:
+    return DESKTOP_INSTALL_HINT if os.environ.get("MINDEX_DESKTOP") == "1" else INSTALL_HINT
 ALLOWED_SCHEMES = ("data:", "blob:", "about:")
 # 单次推进最多执行的定时器回调数：超过视为定时器风暴（例如 setTimeout(f, 0) 自我递归）。
 TIMER_BUDGET = 100000
@@ -124,7 +131,7 @@ def _playwright():
     try:
         from playwright.sync_api import Error, sync_playwright
     except ImportError as exc:
-        raise MediaError(INSTALL_HINT) from exc
+        raise MediaError(install_hint()) from exc
     return sync_playwright, Error
 
 
@@ -179,7 +186,7 @@ def capture(html: str, *, seconds: float, width: int, height: int, fps: float, t
                 )
             except PlaywrightError as exc:
                 if "Executable doesn't exist" in str(exc) or "playwright install" in str(exc):
-                    raise MediaError(INSTALL_HINT) from exc
+                    raise MediaError(install_hint()) from exc
                 raise MediaError(f"无法启动录制浏览器：{str(exc).splitlines()[0][:300]}") from exc
             try:
                 context.route("**/*", route)
@@ -196,7 +203,7 @@ def capture(html: str, *, seconds: float, width: int, height: int, fps: float, t
                     raise MediaError(f"动画页面在 {frame_timeout:g} 秒内未加载完成（可能存在死循环）") from exc
                 cdp = context.new_cdp_session(page)
                 encoder = subprocess.Popen(
-                    ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "image2pipe",
+                    [ffmpeg_bin(), "-hide_banner", "-loglevel", "error", "-y", "-f", "image2pipe",
                      "-framerate", f"{rate.numerator}/{rate.denominator}", "-c:v", "png", "-i", "-",
                      "-frames:v", str(count), "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
                      "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-f", "mp4", str(partial)],

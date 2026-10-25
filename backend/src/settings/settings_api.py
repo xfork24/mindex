@@ -17,7 +17,7 @@ import wave
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from pydantic import Field
 from starlette.concurrency import run_in_threadpool
 
@@ -32,6 +32,7 @@ from mindex.models.adapters import (
     make_video_generator,
 )
 from mindex.models.qwen import analysis_options
+from mindex.settings.local_services import ServiceConflict, ServiceError, manager_for
 from mindex.settings.runtime_settings import (
     PROFILE_FIELDS,
     PROVIDER_LABELS,
@@ -118,6 +119,13 @@ class BusinessBody(StrictModel):
     default_voice_id: int | None = None
     default_voice: str | None = None
     clear_default_voice: bool = False
+
+
+class LocalServiceFlags(StrictModel):
+    """本机服务只允许修改这两个开关；命令、工作目录、环境变量只能在配置文件里改。"""
+
+    autostart: bool | None = Field(default=None, strict=True)
+    stop_on_exit: bool | None = Field(default=None, strict=True)
 
 
 def _effective(section, role: str) -> dict:
@@ -744,5 +752,75 @@ def settings_router(runtime: RuntimeConfig, store: Store) -> APIRouter:
             422,
             "当前语音合成后端不支持克隆；请先激活 MiniMax（上传样本克隆）或阿里云（URL 复刻）档案",
         )
+
+    # ---- 本机服务：只启停配置文件里定义的服务（见 settings/local_services.py） ----
+    services = manager_for(store)
+
+    def local_service(name: str):
+        config = runtime.current().local_services
+        if not config.enabled:
+            raise HTTPException(403, "本机服务管理未开启：在配置文件中设置 local_services.enabled: true")
+        service = config.get(name)
+        if service is None:
+            raise HTTPException(404, f"配置文件中没有本机服务 {name}")
+        return service
+
+    def service_call(fn, service):
+        try:
+            return fn(service)
+        except ServiceConflict as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except ServiceError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @router.get("/local-services")
+    def list_local_services():
+        config = runtime.current().local_services
+        if not config.enabled:
+            return {"enabled": False, "items": []}
+        return {"enabled": True, "items": [services.status(service) for service in config.services]}
+
+    @router.post("/local-services/stop-on-exit")
+    def stop_local_services_on_exit():
+        """桌面版退出前调用：停止标记为退出时停止、且由本应用启动的服务。"""
+        current = runtime.current()
+        if not current.local_services.enabled:
+            raise HTTPException(403, "本机服务管理未开启")
+        return {"stopped": services.stop_on_exit(current)}
+
+    @router.post("/local-services/{name}/start")
+    def start_local_service(name: str):
+        return service_call(services.start, local_service(name))
+
+    @router.post("/local-services/{name}/stop")
+    def stop_local_service(name: str):
+        return service_call(services.stop, local_service(name))
+
+    @router.get("/local-services/{name}/logs")
+    def local_service_logs(name: str, tail: int = Query(default=200, ge=1, le=2000)):
+        service = local_service(name)
+        return {"name": name, "text": services.log_tail(service, tail)}
+
+    @router.patch("/local-services/{name}")
+    def patch_local_service(name: str, body: LocalServiceFlags):
+        service = local_service(name)
+        services.set_flags(service, autostart=body.autostart, stop_on_exit=body.stop_on_exit)
+        return services.status(service)
+
+    # ---- AI 动画录制组件（Playwright Chromium headless shell），见 settings/browser_install.py ----
+    @router.get("/animation-browser")
+    def animation_browser():
+        from mindex.settings.browser_install import installer
+
+        return installer().state()
+
+    @router.post("/animation-browser/install", status_code=202)
+    def install_animation_browser():
+        from mindex.settings.browser_install import installer
+
+        try:
+            return installer().start()
+        except RuntimeError as exc:
+            raise HTTPException(409, str(exc)) from exc
 
     return router

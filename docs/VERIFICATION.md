@@ -2,6 +2,34 @@
 
 > 历史记录，内容可能与当前代码不符，以当前源码、CLI 帮助与本次实际运行的测试为准。
 
+## macOS 桌面版验证（2026-10-25）
+
+环境：Apple M1、16 GB、macOS 26.7.1；Electron 45.0.0、PyInstaller 6.22.3、CPython 3.13；随包 ffmpeg 9.0.2（源码编译，GPL）。任务见 `.kiro/specs/macos-desktop/`。
+
+- 安装包：`scripts/build-desktop-mac.sh` 生成 `Mindex-0.1.0-arm64.dmg`（324 MB）与 `.zip`（314 MB）、GPL 对应源码包（53 MB）；`.app` 761 MB，172 个随包 Mach-O 经 ad-hoc 签名，`codesign --verify --deep --strict` 通过。从 DMG 安装到 `/Applications` 后，在 `PATH=/usr/bin:/bin`（无 uv、无 Homebrew）下 Electron 冒烟全部通过：五个页面与模板子页、页面请求与 SSE 认证、下载、同源新窗口、阻止导航到本地文件、后端被杀后错误页与重试、端口持久化、所选数据目录、退出后无残留进程。经 Launch Services 打开与 AppleScript 退出正常；覆盖安装后第一次 `open` 出现过一次 “Launch failed”，`lsregister -f` 后正常（已写入 desktop.md）。
+- 冻结后端（`check-desktop-sidecar.py --isolated-path --ffmpeg-dir … --font … --animation`）：chromadb 写入与查询、jieba、opencv/scenedetect、Pillow、playwright、前端与文案模板、align_worker、`llama_cpp.py`/`model_server.py` 源码哈希与仓库一致、pyproject package-data 全部打包、`-m` 分发、prepare 测试视频、serve 健康与页面、SIGTERM 退出、中文字幕烧录、经 `-m playwright` 安装 Chromium headless shell 并录制 AI 动画。
+- 随包 ffmpeg：`subtitles`（libass，CoreText 字体后端）、libx264、libdav1d 均存在，只链接系统库与框架（minos 13.0）；用随包 Noto Sans CJK SC 实际烧录中文字幕帧。把它放在 PATH 最前面运行快速 pytest（1343 通过）与媒体慢测（28 通过）。
+- 本机服务：在桌面开发模式中经设置页“本机服务”用 `scripts/run-wemm.sh` 启动 WeMM，8 秒后健康；现有 Web 后端（:8000，真实素材库）文字检索返回 200；退出应用后 WeMM 进程停止、8888 端口关闭。
+- 回归：快速 pytest 1357 通过（排除缺少 `person` extra 的 `test_person_frame_pruning`，与本次改动无关）；相关慢测 109 通过、7 跳过；`node --test desktop/test` 17 通过；ruff、文档链接（仅 `.kiro/specs/studio-storyboard-strip/design.md` 既有一处）、messages/assets 校验通过。
+
+性能对比（`uv run python scripts/desktop-bench.py`；Web 版 = 未冻结的同一依赖环境 + Homebrew ffmpeg，桌面版 = 冻结后端 + 随包 ffmpeg；计时类指标两者交替运行）：
+
+| 指标 | Web 版 | 桌面版 | 差异 | 说明 |
+|---|---|---|---|---|
+| 启动到 `/api/health` 就绪 | 1.16 s | 1.18 s | +1.7% | 后端部分；外壳窗口加载另计 |
+| prepare（120 秒 1080p 合成视频） | 47.3 s | 41.2 s | −12.8% | 交替 2 轮取最小 |
+| 成片编码（120 秒 1080p libx264 + 烧录中文字幕） | 18.98 s | 18.89 s | −0.5% | 交替 3 轮中位数 |
+| AI 动画录制（10 秒 25 fps 1280×720） | 4.70 s | 4.70 s | 0% | 交替 5 轮中位数，同一浏览器 |
+| 后端空闲常驻内存 | 183.5 MB | 193.2 MB | +5.3%（+9.7 MB） | 略超 5% 门槛 |
+| 文字检索 P50 / P95（5359 片段真实库，本机 WeMM） | 414 / 1174 ms | 338 / 977 ms | −18% / −17% | 顺序运行（Web 先），桌面受益于嵌入服务预热；只说明没有劣化 |
+| 检索后常驻内存 | 564 MB | 586 MB | +3.8% | |
+
+另测得已安装应用空闲时 Electron 四个进程共 444 MB、后端 196 MB；Web 版对应的是用户浏览器的开销，未纳入对比。
+
+未完成或偏离 ROADMAP 原定规模的项：prepare 用 120 秒合成视频代替 1 小时真实 1080p；检索库为 5359 片段而非 1 万；成片编码用单条 120 秒 1080p 编码代替 30 镜 3 分钟构建；没有渲染中的内存曲线。GitHub Actions 的 macOS 任务（`desktop`、`desktop-package`）已写入 `ci.yml`，需推送后在 runner 上确认。签名公证与自动更新（需要 Apple Developer ID）未实施。
+
+## 2026-10-13 记录
+
 验证日期：2026-10-13。客户端环境为 macOS / Apple Silicon、Python 3.11.16、uv、FFmpeg/ffprobe。GPU 模型运行在用户的远程 16GB CUDA 主机；强制对齐使用本机独立 CPU 环境。
 
 ## 真实模型端到端增量验证

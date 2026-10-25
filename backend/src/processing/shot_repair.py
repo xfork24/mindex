@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 import numpy as np
 
 from mindex.models.model_server import refine_cut_frame
-from mindex.shared.media import MediaError, atomic_media, command, probe
+from mindex.shared.media import MediaError, atomic_media, command, ffmpeg_bin, probe
 from mindex.shared.storage import Store, bump_snapshot_revision
 
 VERSION = 'shot-boundary-v1'
@@ -19,7 +19,7 @@ VERSION = 'shot-boundary-v1'
 
 def inspect_boundary(path, timestamp, origin=0., *, include_rgb=False):
     """Decode only a small neighborhood, retaining real input PTS (including VFR)."""
-    result = subprocess.run(['ffmpeg', '-hide_banner', '-loglevel', 'info', '-ss',
+    result = subprocess.run([ffmpeg_bin(), '-hide_banner', '-loglevel', 'info', '-ss',
                              str(max(0, timestamp - .16)), '-copyts', '-i', str(path),
                              '-an', '-frames:v', '12', '-vf', 'scale=48:27,showinfo',
                              '-fps_mode', 'passthrough', '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-'],

@@ -573,6 +573,82 @@ async def clone_voice(args: CloneVoice, ctx: ToolContext) -> ToolOutput:
                       mutation=SETTINGS, focus=settings_focus(section="voices"))
 
 
+def service_line(item: dict) -> str:
+    state = ("运行中" if item.get("running") else "外部运行" if item.get("external") else "已停止")
+    health = "健康" if item.get("healthy") else "未就绪"
+    flags = "，".join(label for key, label in (("autostart", "随后端自动启动"), ("stop_on_exit", "退出时停止"))
+                     if item.get(key))
+    detail = f"；{item['detail']}" if item.get("detail") else ""
+    return (f"{item.get('label') or item.get('name')}（{item.get('name')}，{item.get('role') or '未注明用途'}，端口 "
+            f"{item.get('port')}）：{state}·{health}{('，' + flags) if flags else ''}{detail}")
+
+
+async def load_local_services(ctx: ToolContext) -> dict:
+    return check(await ctx.client.get("/api/settings/local-services"), "读取本机服务")
+
+
+async def list_local_services(args: Empty, ctx: ToolContext) -> ToolOutput:
+    data = await load_local_services(ctx)
+    items = data.get("items") or []
+    if not data.get("enabled"):
+        text = "本机服务管理未开启（配置文件 local_services.enabled 为 false）；桌面版缺省开启。"
+    elif not items:
+        text = "配置文件中没有定义本机服务（local_services.services）。"
+    else:
+        text = "本机服务：\n" + "\n".join(f"- {service_line(item)}" for item in items)
+    return ToolOutput({"enabled": bool(data.get("enabled")), "items": items}, text=text,
+                      focus=settings_focus(section="services"))
+
+
+class LocalServiceName(StrictModel):
+    name: str = Field(min_length=1, max_length=32, pattern=r"^[a-z0-9][a-z0-9-]{0,31}$",
+                      description="本机服务名（list_local_services 返回的 name）")
+
+
+async def local_service_target(args: LocalServiceName, ctx: ToolContext) -> dict:
+    data = await load_local_services(ctx)
+    if not data.get("enabled"):
+        raise ToolError("本机服务管理未开启（配置文件 local_services.enabled 为 false）", code="local_services_disabled")
+    item = next((item for item in data.get("items") or [] if item.get("name") == args.name), None)
+    if item is None:
+        raise ToolError(f"配置文件中没有本机服务 {args.name}", code="missing_local_service")
+    return item
+
+
+async def preview_start_local_service(args: LocalServiceName, ctx: ToolContext) -> Preview:
+    item = await local_service_target(args, ctx)
+    warnings = ["会在本机启动模型服务进程，可能占用大量内存或显存；单 GPU 环境下不要同时启动多个大模型服务"]
+    if item.get("external"):
+        warnings.append("该端口上已有其他程序启动的服务，启动会被拒绝")
+    return Preview(f"启动本机服务「{item.get('label') or args.name}」（端口 {item.get('port')}）",
+                   [{"label": "状态", "before": service_line(item), "after": "运行中"}], warnings=warnings,
+                   focus=settings_focus(section="services"))
+
+
+async def start_local_service(args: LocalServiceName, ctx: ToolContext) -> ToolOutput:
+    await local_service_target(args, ctx)
+    item = check(await ctx.client.post(f"/api/settings/local-services/{args.name}/start"), "启动本机服务")
+    return ToolOutput(item, text=f"已启动：{service_line(item)}。模型加载需要一段时间，健康后即可使用。",
+                      mutation=SETTINGS, focus=settings_focus(section="services"))
+
+
+async def preview_stop_local_service(args: LocalServiceName, ctx: ToolContext) -> Preview:
+    item = await local_service_target(args, ctx)
+    warnings = ["正在使用该服务的任务（检索、转写、配音等）会失败"]
+    if item.get("external"):
+        warnings.append("该服务不是由本应用启动的，无法在这里停止")
+    return Preview(f"停止本机服务「{item.get('label') or args.name}」",
+                   [{"label": "状态", "before": service_line(item), "after": "已停止"}], warnings=warnings,
+                   focus=settings_focus(section="services"))
+
+
+async def stop_local_service(args: LocalServiceName, ctx: ToolContext) -> ToolOutput:
+    await local_service_target(args, ctx)
+    item = check(await ctx.client.post(f"/api/settings/local-services/{args.name}/stop"), "停止本机服务")
+    return ToolOutput(item, text=f"已停止：{service_line(item)}", mutation=SETTINGS,
+                      focus=settings_focus(section="services"))
+
+
 def specs() -> list[ToolSpec]:
     return [
         ToolSpec("get_settings", "settings", "读取设置：各模型角色的生效配置、配置档案（ID、厂商、模型、密钥掩码）与业务设置。",
@@ -614,4 +690,13 @@ def specs() -> list[ToolSpec]:
                  "克隆音色：openai/minimax 后端需要声音样本附件（attachment://），dashscope 后端使用公网样本 URL。"
                  "执行时会弹出表单，由用户本人确认声音授权；你无法代为授权。仅在 Mindex 页面助手中可用。",
                  CloneVoice, "danger", clone_voice, preview_clone_voice),
+        ToolSpec("list_local_services", "settings",
+                 "列出本机模型服务（配置文件 local_services 中定义的 WeMM、ASR、TTS 等）：运行状态、健康、端口与自启设置。",
+                 Empty, "read", list_local_services),
+        ToolSpec("start_local_service", "settings",
+                 "启动一个本机模型服务（只能启动配置文件中定义的服务，不能改命令）。会占用本机内存/显存。",
+                 LocalServiceName, "danger", start_local_service, preview_start_local_service),
+        ToolSpec("stop_local_service", "settings",
+                 "停止一个由本应用启动的本机模型服务；正在使用它的任务会失败。",
+                 LocalServiceName, "danger", stop_local_service, preview_stop_local_service),
     ]

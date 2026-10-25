@@ -508,6 +508,8 @@ async function loadSettings() {
   renderTuning(data);
   renderVoices(data, state.voiceCatalog);
   loadReleases().catch((error) => showRelease(MindexI18n.system(error.message), true));
+  loadLocalServices().catch((error) => showServices(MindexI18n.system(error.message), true));
+  loadAnimationBrowser().catch((error) => showBrowser(MindexI18n.system(error.message), true));
   // An unavailable TTS catalog must not block model settings or recall tuning.
   api('/api/settings/voices/catalog').then((catalog) => {
     if (request !== settingsRequest) return;
@@ -609,6 +611,173 @@ $('publish').onclick = () => releaseAction($('publish'), async () => {
   await api('/api/persons/publish', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
   await refreshReleases();
 }, MindexI18n.msg('ui.person_release_complete'));
+
+// ---- 本机服务：启停配置文件 local_services 中定义的本机模型服务（后端 settings/local_services.py） ----
+// 只有启停、日志与两个开关；命令、端口、工作目录只能在配置文件里改。
+let servicesRequest = 0;
+let servicesTimer = null;
+const servicesLogs = new Set();
+function showServices(text, error = false) {
+  const status = $('services-notice');
+  MindexI18n.setText(status, text);
+  status.className = `notice ${error ? 'error' : 'info'}`;
+}
+async function serviceAction(control, task, message) {
+  control.disabled = true;
+  try {await task();if (message) showServices(message);}
+  catch (error) {showServices(MindexI18n.system(error.message), true);}
+  finally {control.disabled = false;}
+}
+async function loadLocalServices() {
+  const request = ++servicesRequest;
+  const data = await api('/api/settings/local-services');
+  if (request !== servicesRequest) return;
+  renderLocalServices(data || {});
+  // 有服务正在启动（进程在、健康检查未通过）时每 3 秒刷新，直到健康或退出。
+  if (servicesTimer) clearTimeout(servicesTimer);
+  servicesTimer = null;
+  if ((data?.items || []).some((item) => item.running && !item.healthy) && typeof setTimeout === 'function')
+    servicesTimer = setTimeout(() => loadLocalServices().catch(() => {}), 3000);
+}
+function serviceBadge(text, tone) {
+  return node('span', text, `service-badge${tone ? ` ${tone}` : ''}`);
+}
+function serviceFlag(item, key, label) {
+  const wrap = node('label');
+  const box = node('input');
+  box.type = 'checkbox';
+  box.checked = Boolean(item[key]);
+  box.onchange = () => serviceAction(box, async () => {
+    await api(`/api/settings/local-services/${encodeURIComponent(item.name)}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [key]: box.checked }),
+    });
+    await loadLocalServices();
+  });
+  wrap.append(box, node('span', label));
+  return wrap;
+}
+function renderLocalServices(data) {
+  const list = $('services');
+  list.replaceChildren();
+  const items = data.items || [];
+  if (!data.enabled) {
+    MindexI18n.setText($('services-summary'), MindexI18n.msg('ui.local_services_summary_off'));
+    list.append(node('li', MindexI18n.msg('ui.local_services_disabled'), 'muted'));
+    return;
+  }
+  MindexI18n.setText($('services-summary'), MindexI18n.msg('ui.local_services_summary', {
+    p0: items.length, p1: items.filter((item) => item.running || item.external).length,
+  }));
+  if (!items.length) list.append(node('li', MindexI18n.msg('ui.local_services_empty'), 'muted'));
+  for (const item of items) {
+    const row = node('li', undefined, `release-item service-item${item.running && item.healthy ? ' is-active' : ''}`);
+    row.dataset.service = item.name;
+    const head = node('div', undefined, 'service-head');
+    head.append(node('strong', item.label || item.name));
+    head.append(node('span', MindexI18n.msg('ui.local_service_meta', {
+      p0: item.port, p1: item.role || item.name, p2: item.pid ?? '—',
+    }), 'muted'));
+    const badges = node('div', undefined, 'service-badges');
+    badges.append(
+      item.running ? serviceBadge(MindexI18n.msg('ui.local_service_running'), 'ok') :
+      item.external ? serviceBadge(MindexI18n.msg('ui.local_service_external'), 'warn') :
+      serviceBadge(MindexI18n.msg('ui.local_service_stopped')),
+      item.healthy ? serviceBadge(MindexI18n.msg('ui.local_service_healthy'), 'ok') :
+      serviceBadge(MindexI18n.msg('ui.local_service_unhealthy'), item.running ? 'warn' : ''),
+    );
+    head.append(badges);
+    row.append(head);
+    const name = encodeURIComponent(item.name);
+    if (item.running) {
+      const stop = node('button', MindexI18n.msg('ui.local_service_stop'), 'quiet danger');
+      stop.type = 'button';
+      stop.onclick = () => serviceAction(stop, async () => {
+        await api(`/api/settings/local-services/${name}/stop`, { method: 'POST' });
+        await loadLocalServices();
+      }, MindexI18n.msg('ui.local_service_stopped_notice', { p0: item.label || item.name }));
+      row.append(stop);
+    } else if (!item.external) {
+      const start = node('button', MindexI18n.msg('ui.local_service_start'), 'quiet');
+      start.type = 'button';
+      start.onclick = () => serviceAction(start, async () => {
+        showServices(MindexI18n.msg('ui.local_service_starting', { p0: item.label || item.name }));
+        await api(`/api/settings/local-services/${name}/start`, { method: 'POST' });
+        await loadLocalServices();
+      }, MindexI18n.msg('ui.local_service_started', { p0: item.label || item.name }));
+      row.append(start);
+    }
+    const open = servicesLogs.has(item.name);
+    const logs = node('button', MindexI18n.msg(open ? 'ui.local_service_hide_logs' : 'ui.local_service_logs'), 'quiet');
+    logs.type = 'button';
+    logs.setAttribute('aria-expanded', String(open));
+    logs.onclick = () => serviceAction(logs, async () => {
+      if (servicesLogs.has(item.name)) servicesLogs.delete(item.name);else servicesLogs.add(item.name);
+      await loadLocalServices();
+    });
+    row.append(logs);
+    if (item.detail) row.append(node('div', MindexI18n.system(item.detail), 'service-detail'));
+    const flags = node('div', undefined, 'service-flags');
+    flags.append(serviceFlag(item, 'autostart', MindexI18n.msg('ui.local_service_autostart')),
+      serviceFlag(item, 'stop_on_exit', MindexI18n.msg('ui.local_service_stop_on_exit')));
+    row.append(flags);
+    if (open) {
+      const pre = node('pre', MindexI18n.msg('ui.local_service_no_logs'), 'service-log');
+      row.append(pre);
+      api(`/api/settings/local-services/${name}/logs?tail=200`).then((result) => {
+        MindexI18n.setText(pre, result?.text || MindexI18n.msg('ui.local_service_no_logs'));
+      }).catch((error) => MindexI18n.setText(pre, MindexI18n.system(error.message)));
+    }
+    list.append(row);
+  }
+}
+$('services-refresh').onclick = () => serviceAction($('services-refresh'), loadLocalServices);
+
+// ---- AI 动画录制组件：Playwright Chromium headless shell 的检测与一键安装（后端 settings/browser_install.py） ----
+let browserRequest = 0;
+let browserTimer = null;
+function showBrowser(text, error = false) {
+  const status = $('browser-notice');
+  MindexI18n.setText(status, text);
+  status.className = `notice ${error ? 'error' : 'info'}`;
+}
+async function loadAnimationBrowser() {
+  const request = ++browserRequest;
+  const data = await api('/api/settings/animation-browser');
+  if (request !== browserRequest) return;
+  renderAnimationBrowser(data || {});
+  if (browserTimer) clearTimeout(browserTimer);
+  browserTimer = null;
+  if (data?.task?.status === 'running' && typeof setTimeout === 'function')
+    browserTimer = setTimeout(() => loadAnimationBrowser().catch(() => {}), 2000);
+}
+function renderAnimationBrowser(data) {
+  const task = data.task || {};
+  const running = task.status === 'running';
+  const stateKey = !data.available ? 'ui.animation_browser_unavailable' : running ? 'ui.animation_browser_installing' :
+    data.installed ? 'ui.animation_browser_installed' : 'ui.animation_browser_missing';
+  MindexI18n.setText($('browser-state'), MindexI18n.msg(stateKey, { p0: data.revision || '' }));
+  MindexI18n.setText($('browser-summary'), MindexI18n.msg(stateKey, { p0: data.revision || '' }));
+  MindexI18n.setText($('browser-path'), data.path ? MindexI18n.msg('ui.animation_browser_path', { p0: data.path }) : '');
+  const install = $('browser-install');
+  install.hidden = !data.available || Boolean(data.installed && !running);
+  install.disabled = running;
+  const log = $('browser-log');
+  log.hidden = !task.log;
+  MindexI18n.setText(log, task.log || '');
+  if (task.status === 'failed') showBrowser(MindexI18n.system(task.error || ''), true);
+  else if (task.status === 'complete' && data.installed) showBrowser(MindexI18n.msg('ui.animation_browser_done'));
+}
+$('browser-install').onclick = () => run(async () => {
+  $('browser-install').disabled = true;
+  try {
+    await api('/api/settings/animation-browser/install', { method: 'POST' });
+    showBrowser(MindexI18n.msg('ui.animation_browser_started'));
+    await loadAnimationBrowser();
+  } catch (error) {
+    showBrowser(MindexI18n.system(error.message), true);
+    $('browser-install').disabled = false;
+  }
+});
 
 async function activateProfile(profileId) {
   const result = await api(`/api/settings/profiles/${profileId}/activate`, { method: 'POST' });
@@ -1075,6 +1244,9 @@ $('reload').onclick = () => run(async () => {
 for (const head of document.querySelectorAll('.role-row-head[data-section]')) {
   head.onclick = () => toggleRole(head.dataset.section);
 }
+if (typeof location !== 'undefined' && /^#(services|browser)$/.test(location.hash || '')) {
+  state.expanded.add(location.hash.slice(1));
+}
 syncSectionRows();
 run(loadSettings);
 // 智能助手修改设置（档案、业务调参）后刷新本页，并定位到相关角色、档案或区块。
@@ -1106,7 +1278,7 @@ if (typeof window !== 'undefined' && window.addEventListener) {
       return true;
     }
     const section = focus.section;
-    if (['tuning', 'voices', 'releases'].includes(section)) {
+    if (['tuning', 'voices', 'releases', 'services', 'browser'].includes(section)) {
       if (!passive) {
         state.expanded.add(section);
         persist();
