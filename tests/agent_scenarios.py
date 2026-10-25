@@ -11,22 +11,24 @@ from __future__ import annotations
 import io
 import json
 import re
+import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from conftest import FixtureEmbedder, FixtureSpeaker, FixtureStoryboarder, legacy_job
+from conftest import FixtureEmbedder, FixtureSpeaker, FixtureStoryboarder, FixtureWriter, legacy_job
 
 from mindex.agent.llm.scripted import call, say
 from mindex.agent.runtime import NO_VISION_PROMPT, NO_VISION_TOOL_NOTE
 from mindex.api import create_app
+from mindex.models.video_generators import VideoStatus, allowed_seconds
 from mindex.processing.indexing import IndexBuilder
 from mindex.processing.pipeline import Pipeline
 from mindex.shared.config import Config
 from mindex.shared.storage import Store, dumps
 from mindex.studio import studio
-from mindex.studio import studio_workspace as ws
+from mindex.studio import workspace as ws
 
 SHOTS = ["shot-a1daad59aa", "shot-925281d5bb", "shot-925281d6cc", "shot-77f0c3e1dd"]
 SLOW_SHOTS = ["shot-5105105a01", "shot-5105105a02"]
@@ -50,6 +52,105 @@ class FlakySpeaker(FixtureSpeaker):
         return super().speak(text, voice)
 
 
+class ScenarioVideoGenerator:
+    """测试专用：确定性视频生成服务（本机 ffmpeg 生成紫色片段，排队 → 生成中 → 完成），绝不调用付费接口。"""
+
+    def __init__(self):
+        self.requests, self.cancelled, self.current = [], [], 0
+
+    def submit(self, request):
+        self.requests.append(request)
+        self.current = 0
+        return f"scenario-task-{len(self.requests)}"
+
+    def poll(self, task_id):
+        state = ("queued", "running", "succeeded")[min(self.current, 2)]
+        self.current += 1
+        return VideoStatus(state=state, url="https://cdn.example.invalid/out.mp4" if state == "succeeded" else None,
+                           raw={"task_id": task_id, "status": state})
+
+    def fetch(self, status, target: Path):
+        seconds = self.requests[-1].seconds
+        subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", f"color=c=purple:s=160x120:r=25:d={seconds}",
+                        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-f", "mp4", str(target)], check=True)
+
+    def cancel(self, task_id):
+        self.cancelled.append(task_id)
+
+    def health(self):
+        return {"backend": "scenario", "ready": True, "reply": "测试桩（未发起生成）"}
+
+    def allowed_seconds(self, seconds):
+        return allowed_seconds([1.0, 2.0, 3.0], seconds)
+
+
+class ScenarioImageGenerator:
+    """测试专用：确定性图片生成服务（返回绿色 PNG），绝不调用付费接口。"""
+
+    def __init__(self):
+        self.requests = []
+
+    def generate(self, request):
+        self.requests.append(request)
+        return png("green")
+
+    def health(self):
+        return {"backend": "scenario", "ready": True, "reply": "测试桩（未生成图片）"}
+
+
+class ScenarioMusicGenerator:
+    """测试专用：确定性音乐生成与歌词生成（本机 ffmpeg 生成正弦波），绝不调用付费接口。"""
+
+    def __init__(self):
+        self.requests, self.lyric_calls = [], []
+
+    def generate(self, request):
+        self.requests.append(request)
+        out = subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=330:duration=1",
+                              "-f", "wav", "-"], check=True, capture_output=True).stdout
+        return out, {"music_duration": 1000}
+
+    def lyrics(self, prompt, *, mode="write_full_song", lyrics=None, title=None):
+        from mindex.models.music_generators import Lyrics
+
+        self.lyric_calls.append(prompt)
+        return Lyrics(title=title or "极光", style_tags="Pop, Dreamy", lyrics=f"[Verse]\n{prompt}\n[Chorus]\n啦啦啦")
+
+    def health(self):
+        return {"backend": "scenario", "ready": True, "reply": "测试桩（未生成音乐）"}
+
+
+SCENARIO_BAR = "#1f77b4"
+
+
+class ScenarioAnimator:
+    """测试专用：确定性动画生成模型（返回固定柱状图 HTML），绝不调用真实 LLM。"""
+
+    def __init__(self):
+        self.calls = []
+
+    def animate(self, brief, *, seconds, width, height, fps, previous=None, feedback=None):
+        self.calls.append({"brief": brief, "seconds": seconds, "width": width, "height": height})
+        bars = "".join(f'<div class="bar" style="height:{20 + 15 * i}px"></div>' for i in range(5))
+        return ("<!DOCTYPE html><html><head><style>html,body{margin:0;overflow:hidden;background:#fff;"
+                "font-family:sans-serif}.bar{display:inline-block;width:20px;margin:2px;background:"
+                f"{SCENARIO_BAR}" + "}</style></head><body>" + bars
+                + "<script>requestAnimationFrame(function f(t){document.body.style.opacity=Math.min(1,t/300);"
+                "requestAnimationFrame(f)})</script></body></html>")
+
+    def ping(self):
+        return {"model": "scenario", "reply": "ok"}
+
+
+def scenario_capture(html, *, seconds, width, height, fps, target, max_seconds, frame_timeout=5, frames=None):
+    """测试专用：代替 Chromium 沙箱录制（ffmpeg 纯色画面，帧数精确），确定性测试与真实模型评测都不需要浏览器。"""
+    color = "orange" if "#ff8800" in html else "blue"
+    subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", f"color=c={color}:s={width}x{height}:r={fps}",
+                    "-frames:v", str(frames), "-c:v", "libx264", "-pix_fmt", "yuv420p", "-f", "mp4", str(target)],
+                   check=True)
+    return {"frames": frames, "fps": str(fps), "blocked_requests": [], "wall_seconds": 0.0}
+
+
 def png(color: str) -> bytes:
     from PIL import Image
 
@@ -69,10 +170,19 @@ class World:
     broken_build: str
     source_id: str = ""
     extra: dict = field(default_factory=dict)  # 场景 setup 准备的专属数据
+    # 视频生成始终注入确定性桩：确定性测试与真实模型评测都不会调用付费生成接口。
+    video_generator: ScenarioVideoGenerator = field(default_factory=ScenarioVideoGenerator)
+    # 动画生成与录制同样注入确定性替身：不调用真实 LLM，也不需要 Chromium。
+    animator: ScenarioAnimator = field(default_factory=ScenarioAnimator)
+    image_generator: ScenarioImageGenerator = field(default_factory=ScenarioImageGenerator)
+    music_generator: ScenarioMusicGenerator = field(default_factory=ScenarioMusicGenerator)
 
     def app(self, llm=None):
         app = create_app(self.config, self.embedder, storyboarder=FixtureStoryboarder(self.config),
-                         speaker=FlakySpeaker(self.config), agent_llm=llm)
+                         speaker=FlakySpeaker(self.config), writer=FixtureWriter(self.config), agent_llm=llm,
+                         video_generator=self.video_generator, animator=self.animator,
+                         animation_capture=scenario_capture, image_generator=self.image_generator,
+                         music_generator=self.music_generator)
         app.state.agent_runtime.watcher.interval = 0.05
         return app
 
@@ -341,7 +451,7 @@ def setup_slow_job(world):
 
 def setup_gpu_busy(world):
     """模拟另一个 GPU 任务独占 pipeline 锁：发布任务停在 GPU 准入等待（queued），可被确定地取消。"""
-    from mindex.shared.processing_lock import SharedFileLock
+    from mindex.shared.locks import SharedFileLock
 
     world.extra["gpu_holder"] = SharedFileLock(world.config.data_dir / "pipeline.lock", exclusive=True).acquire()
     world.extra["index_before"] = Store(world.config.data_dir).active_index()["id"]
@@ -585,6 +695,323 @@ def no_vision_script(world):
             [say("已抽取 3 帧，画面在面板展示。")]]
 
 
+# ------------------------------------------------------------ 创作扩展场景：文案模板、参考文稿、画幅、画面来源
+INTERVIEW = "问：您做这行多久了？\n答：三十年了，手上的活一天都没停过。"
+
+
+def setup_interview(world):
+    """新式任务（只有大纲、尚无文案）；大纲清空，改写模板的文案完全来自参考文稿。"""
+    job = studio.create_job(world.config, "讲讲一位老匠人的一天。")["id"]
+    state = studio.load_job(world.config, job)
+    studio.save(studio.job_path(world.config, job), {**state, "outline": ""})
+    world.extra["interview_job"] = job
+
+
+def interview_attachment(world):
+    return [("匠人访谈.txt", INTERVIEW.encode("utf-8"), "text/plain")]
+
+
+def check_interview(world, client, events):
+    data = workspace(client, world.extra["interview_job"])
+    p = data["plans"][data["active_plan"]]
+    assert p["options"]["template_id"] == "interview", p["options"]
+    references = p["options"].get("references") or []
+    assert len(references) == 1 and references[0]["chars"] == len(INTERVIEW), references
+    assert p.get("script"), "没有生成文案"
+    script = data["versions"][p["script"]]
+    assert script["status"] == "complete" and script["data"]["text"] == INTERVIEW, script["data"]
+    assert [r["id"] for r in script["data"]["references"]] == [references[0]["id"]]
+    assert ok_results(events, "add_reference_text") and ok_results(events, "run_node")
+    finished = [e["data"] for e in events if e["type"] == "plugin:mindex/build-finished"]
+    assert finished and finished[-1]["status"] == "complete", finished
+    assert followups(events), "文案生成结束后应有 followup 总结"
+
+
+def interview_script(world):
+    job = world.extra["interview_job"]
+    return [lambda request: [call("add_reference_text", job_id=job, attachment=attachment_ref(request))],
+            [call("update_plan_options", job_id=job, changes={"template_id": "interview"})],
+            [call("run_node", job_id=job, stage="script")],
+            [say("已登记访谈稿并开始按访谈改写模板生成文案。")],
+            [say("文案已按访谈稿改写完成。")]]
+
+
+def built_job(world, title, ids, texts=("红色开场。", "绿色结尾。")):
+    """分镜任务（缺省两镜），完整构建一次成片；返回 (job, plan)。"""
+    from fastapi.testclient import TestClient
+
+    job = legacy_job(world.config, "".join(texts), options={"burn": False}, title=title)["id"]
+    plan = board(world.config, job, list(texts), ids)
+    with TestClient(world.app()) as client:
+        token = client.get(f"/api/studio/jobs/{job}/plans/{plan}/preflight").json()["token"]
+        build = client.post(f"/api/studio/jobs/{job}/plans/{plan}/build", json={"token": token}).json()
+        deadline = time.monotonic() + 120
+        while client.get(f"/api/studio/jobs/{job}/builds/{build['id']}/logs").json()["status"] == "running":
+            assert time.monotonic() < deadline, f"{title}构建未结束"
+            time.sleep(0.1)
+        assert workspace(client, job)["builds"][-1]["status"] == "complete"
+    return job, plan
+
+
+def setup_built_job(world):
+    """供换画幅后预检的已构建任务。"""
+    job, plan = built_job(world, "横屏短片", ["shot-c4a5e1aa01", "shot-c4a5e1aa02"])
+    world.extra.update(built_job=job, built_plan=plan)
+
+
+def check_portrait(world, client, events):
+    job, original = world.extra["built_job"], world.extra["built_plan"]
+    data = workspace(client, job)
+    created = [pid for pid in data["plans"] if pid != original]
+    assert len(created) == 1, f"应新建一个竖屏方案：{list(data['plans'])}"
+    pid = created[0]
+    assert data["plans"][pid]["options"].get("canvas") == "9:16", data["plans"][pid]["options"]
+    assert data["plans"][original]["options"].get("canvas", "16:9") == "16:9", "原方案不应改画幅"
+    nodes = client.get(f"/api/studio/jobs/{job}/plans/{pid}/preflight").json()["nodes"]
+    rebuilt = {n["stage"] for n in nodes if n["action"] != "reuse"}
+    assert rebuilt == {"render", "compose"}, nodes
+    assert all(n["action"] in ("reuse", "rebuild") for n in nodes), nodes
+    checked = ok_results(events, "get_preflight")
+    assert checked, "没有做构建预检"
+    lines = [line for line in text_of(checked[-1]).splitlines() if line.startswith("- ")]
+    assert lines and all(line.startswith(("- 渲染", "- 合成")) for line in lines), lines
+
+
+def portrait_script(world):
+    job, plan = world.extra["built_job"], world.extra["built_plan"]
+
+    def options(request):
+        pid = re.search(r"\(([^)]+)\) 并设为当前方案", last_tool(request)).group(1)
+        world.extra["portrait_plan"] = pid
+        return [call("update_plan_options", job_id=job, plan_id=pid, changes={"canvas": "9:16", "fit": "crop"})]
+
+    return [[call("create_plan", job_id=job, name="竖屏版", copy_from=plan)], options,
+            lambda request: [call("get_preflight", job_id=job, plan_id=world.extra["portrait_plan"])],
+            [say("已新建竖屏方案；预检显示只需重建渲染与成片，召回、配音、选片全部复用。")]]
+
+
+SOURCE_SHOT = SHOTS[3]
+
+
+def check_attachment_source(world, client, events):
+    data = workspace(client, world.job)
+    p = data["plans"][world.plan]
+    content = data["versions"][p["shots"][SOURCE_SHOT]["content"]]["data"]
+    source = content.get("source") or {}
+    assert source.get("kind") == "image" and source.get("motion") == "pan-left", source
+    assert re.fullmatch(r"[0-9a-f]{64}", source.get("media_id") or ""), source
+    assert data["shot_stages"][SOURCE_SHOT] == ["tts", "render"], data["shot_stages"]
+    attached = calls_of(events, "attach_query_media")
+    assert attached and attached[-1].get("purpose") == "source", attached
+    details = ok_results(events, "get_shot_details")
+    assert details, "没有读取分镜详情"
+    text = text_of(details[-1])
+    assert '"kind":"image"' in text and '"motion":"pan-left"' in text, text
+    others = [data["versions"][p["shots"][sid]["content"]]["data"] for sid in SHOTS[:3]]
+    assert not any(item.get("source") for item in others), "其他分镜不应改画面来源"
+
+
+def attachment_source_script(world):
+    job, plan = world.job, world.plan
+
+    def edit(request):
+        media = re.search(r'"media_id":"([0-9a-f]{64})"', last_tool(request)).group(1)
+        return [call("edit_shots", job_id=job, plan_id=plan, operations=[
+            {"op": "update", "shot": "#4", "fields": {"source": {"kind": "image", "media_id": media,
+                                                                  "motion": "pan-left"}}}])]
+
+    return [lambda request: [call("attach_query_media", job_id=job, plan_id=plan, shot="#4",
+                                  attachment=attachment_ref(request), purpose="source")],
+            [call("get_shot_details", job_id=job, plan_id=plan, refs=["#4"])], edit,
+            [call("get_shot_details", job_id=job, plan_id=plan, refs=["#4"])],
+            [say("第 4 镜已改用你的图片，画面向左平移；下次构建只重建该镜渲染与成片。")]]
+
+
+AIGC_SHOTS = ["shot-a16cc0aa01", "shot-a16cc0aa02"]
+AIGC_PROMPT = "极光下的雪山，镜头缓慢推进"
+
+
+def setup_aigc(world):
+    """已构建的两镜任务，并启用视频生成（服务由 World 注入的确定性桩提供）。"""
+    job, plan = built_job(world, "极光短片", AIGC_SHOTS)
+    generator = world.config.studio.video_generator
+    generator.enabled, generator.backend, generator.model = True, "minimax", "scenario-hailuo"
+    generator.durations, generator.poll_interval, generator.max_wait = [1.0, 2.0, 3.0], 0.01, 60
+    world.extra.update(aigc_job=job, aigc_plan=plan)
+
+
+def check_aigc(world, client, events):
+    job, plan = world.extra["aigc_job"], world.extra["aigc_plan"]
+    sid = AIGC_SHOTS[1]
+    data = workspace(client, job)
+    p = data["plans"][plan]
+    source = data["versions"][p["shots"][sid]["content"]]["data"].get("source") or {}
+    assert source.get("kind") == "aigc" and source.get("prompt") == AIGC_PROMPT and source.get("seed") == 42, source
+    assert data["shot_stages"][sid] == ["tts", "generate", "select", "render"], data["shot_stages"]
+    version = data["versions"][p["shots"][sid]["generate"]]
+    assert version["status"] == "complete" and "generated" in version["files"], version
+    requests = world.video_generator.requests
+    assert len(requests) == 1 and requests[0].prompt == AIGC_PROMPT and requests[0].seed == 42, requests
+    assert ok_results(events, "edit_shots") and ok_results(events, "run_node")
+    finished = [e["data"] for e in events if e["type"] == "plugin:mindex/build-finished"]
+    assert finished and finished[-1]["status"] == "complete", finished
+    details = ok_results(events, "get_shot_details")
+    assert details and "生成画面：版本" in text_of(details[-1]), details
+    media = (details[-1].get("meta") or {}).get("media") or []
+    assert any(m["kind"] == "video" and m["url"].startswith("/api/") and "生成画面" in m["title"] for m in media), media
+    first = data["versions"][p["shots"][AIGC_SHOTS[0]]["content"]]["data"]
+    assert not first.get("source"), "其他分镜不应改画面来源"
+
+
+def aigc_script(world):
+    job, plan = world.extra["aigc_job"], world.extra["aigc_plan"]
+    return [[call("edit_shots", job_id=job, plan_id=plan, operations=[
+                {"op": "update", "shot": "#2", "fields": {"source": {"kind": "aigc", "prompt": AIGC_PROMPT,
+                                                                      "seed": 42}}}])],
+            [call("run_node", job_id=job, plan_id=plan, stage="generate", shot="#2")],
+            [say("已提交第 2 镜的 AI 生成视频，完成后告诉你。")],
+            [call("get_shot_details", job_id=job, plan_id=plan, refs=["#2"])],
+            [say("第 2 镜的画面已生成；下次构建会在生成片段内选片并重新渲染成片。")]]
+
+
+ANIMATION_SHOTS = ["shot-a71a7e0a01", "shot-a71a7e0a02"]
+ANIMATION_BRIEF = "柱状图展示 2020–2024 年销量逐年增长"
+
+
+def setup_animation(world):
+    """已构建的两镜任务（动画生成与录制由 World 注入的确定性替身提供）。"""
+    job, plan = built_job(world, "动画短片", ANIMATION_SHOTS)
+    world.config.studio.animator.model = "scenario-animator"
+    world.extra.update(animation_job=job, animation_plan=plan)
+
+
+def check_animation(world, client, events):
+    job, plan = world.extra["animation_job"], world.extra["animation_plan"]
+    sid = ANIMATION_SHOTS[1]
+    data = workspace(client, job)
+    p = data["plans"][plan]
+    source = data["versions"][p["shots"][sid]["content"]]["data"].get("source") or {}
+    assert source == {"kind": "animation", "brief": ANIMATION_BRIEF}, source
+    assert data["shot_stages"][sid] == ["tts", "animate", "render"], data["shot_stages"]
+    animated = data["versions"][p["shots"][sid]["animate"]]
+    assert animated["status"] == "complete" and animated["data"]["origin"] == "manual", animated
+    html = client.get(f"/api/studio/jobs/{job}/versions/{animated['id']}/animation.html").text
+    assert "#ff8800" in html and SCENARIO_BAR not in html, html
+    assert len(world.animator.calls) == 1 and world.animator.calls[0]["brief"] == ANIMATION_BRIEF, world.animator.calls
+    render = data["versions"][p["shots"][sid]["render"]]
+    assert render["status"] == "complete" and render["inputs"]["animate"] == animated["id"], render["inputs"]
+    for name in ("edit_shots", "run_node", "get_animation_source", "edit_animation_source", "get_shot_details"):
+        assert ok_results(events, name), f"没有成功调用 {name}"
+    stages = [call.get("stage") for call in calls_of(events, "run_node")]
+    assert "animate" in stages and "render" in stages, stages
+    details = ok_results(events, "get_shot_details")
+    assert "动画源码：版本" in text_of(details[-1]) and "人工修改" in text_of(details[-1])
+    media = (details[-1].get("meta") or {}).get("media") or []
+    assert any(m["kind"] == "video" and m["url"].startswith("/api/") and "动画录制" in m["title"] for m in media), media
+    first = data["versions"][p["shots"][ANIMATION_SHOTS[0]]["content"]]["data"]
+    assert not first.get("source"), "其他分镜不应改画面来源"
+
+
+def animation_script(world):
+    job, plan = world.extra["animation_job"], world.extra["animation_plan"]
+    return [[call("edit_shots", job_id=job, plan_id=plan, operations=[
+                {"op": "update", "shot": "#2", "fields": {"source": {"kind": "animation",
+                                                                      "brief": ANIMATION_BRIEF}}}])],
+            [call("run_node", job_id=job, plan_id=plan, stage="animate", shot="#2")],
+            [say("已提交第 2 镜的动画生成，完成后我来改颜色。")],
+            [call("load_tools", domains=["studio_detail"])],
+            [call("get_animation_source", job_id=job, plan_id=plan, shot="#2")],
+            [call("edit_animation_source", job_id=job, plan_id=plan, shot="#2",
+                  replacements=[{"find": SCENARIO_BAR, "replace": "#ff8800"}])],
+            [call("run_node", job_id=job, plan_id=plan, stage="render", shot="#2")],
+            [say("柱子已改成橙色，正在重新录制第 2 镜。")],
+            [call("get_shot_details", job_id=job, plan_id=plan, refs=["#2"])],
+            [say("第 2 镜的动画已按橙色柱子重新录制，可以在面板里播放。")]]
+
+
+AI_IMAGE_SHOTS = ["shot-a1a9e0aa01", "shot-a1a9e0aa02"]
+AI_IMAGE_PROMPT = "清晨薄雾中的竹林小径，柔和逆光"
+
+
+def setup_ai_image(world):
+    """已构建的两镜任务，并启用图片生成（服务由 World 注入的确定性桩提供）。"""
+    job, plan = built_job(world, "竹林短片", AI_IMAGE_SHOTS)
+    world.config.studio.image_generator.enabled = True
+    world.extra.update(image_job=job, image_plan=plan)
+
+
+def check_ai_image(world, client, events):
+    job, plan = world.extra["image_job"], world.extra["image_plan"]
+    sid = AI_IMAGE_SHOTS[1]
+    data = workspace(client, job)
+    p = data["plans"][plan]
+    source = data["versions"][p["shots"][sid]["content"]]["data"].get("source") or {}
+    assert source.get("kind") == "aigc_image" and source.get("prompt") == AI_IMAGE_PROMPT, source
+    assert source.get("motion") == "pan-right", source
+    assert data["shot_stages"][sid] == ["tts", "draw", "render"], data["shot_stages"]
+    drawn = data["versions"][p["shots"][sid]["draw"]]
+    assert drawn["status"] == "complete" and "image" in drawn["files"], drawn
+    assert [r.prompt for r in world.image_generator.requests] == [AI_IMAGE_PROMPT]
+    assert ok_results(events, "edit_shots") and ok_results(events, "run_node")
+    details = ok_results(events, "get_shot_details")
+    assert details and "生成图片：版本" in text_of(details[-1]), details
+
+
+def ai_image_script(world):
+    job, plan = world.extra["image_job"], world.extra["image_plan"]
+    return [[call("edit_shots", job_id=job, plan_id=plan, operations=[
+                {"op": "update", "shot": "#2", "fields": {"source": {"kind": "aigc_image", "prompt": AI_IMAGE_PROMPT,
+                                                                      "motion": "pan-right"}}}])],
+            [call("run_node", job_id=job, plan_id=plan, stage="draw", shot="#2")],
+            [say("已提交第 2 镜的 AI 生成图片，完成后告诉你。")],
+            [call("get_shot_details", job_id=job, plan_id=plan, refs=["#2"])],
+            [say("第 2 镜的图片已生成，渲染时会向右平移。")]]
+
+
+BGM_SHOTS = ["shot-b6a0c0aa01", "shot-b6a0c0aa02", "shot-b6a0c0aa03"]
+BGM_PROMPT = "梦幻流行，女声，适合极光旅行短片"
+
+
+def setup_bgm(world):
+    job, plan = built_job(world, "配乐短片", BGM_SHOTS, ("红色开场。", "蓝色中段。", "绿色结尾。"))
+    world.config.studio.music_generator.enabled = True
+    world.extra.update(bgm_job=job, bgm_plan=plan)
+
+
+def check_bgm(world, client, events):
+    job, plan = world.extra["bgm_job"], world.extra["bgm_plan"]
+    data = workspace(client, job)
+    p = data["plans"][plan]
+    cue = data["versions"][p["shots"][BGM_SHOTS[1]]["content"]]["data"].get("music") or {}
+    assert cue.get("kind") == "generate" and cue.get("prompt") == BGM_PROMPT and cue.get("instrumental") is False, cue
+    assert "[Chorus]" in (cue.get("lyrics") or ""), cue
+    first = data["versions"][p["shots"][BGM_SHOTS[0]]["content"]]["data"]
+    assert not first.get("music"), "第 1 镜不应有背景音乐"
+    assert data["shot_music"] == {BGM_SHOTS[1]: {"from": BGM_SHOTS[1], "start": True},
+                                  BGM_SHOTS[2]: {"from": BGM_SHOTS[1], "start": False}}, data["shot_music"]
+    music = data["versions"][p["shots"][BGM_SHOTS[1]]["music"]]
+    assert music["status"] == "complete" and "music" in music["files"], music
+    assert world.music_generator.lyric_calls and len(world.music_generator.requests) == 1
+    assert ok_results(events, "generate_lyrics") and ok_results(events, "edit_shots") and ok_results(events, "run_node")
+
+
+def bgm_script(world):
+    job, plan = world.extra["bgm_job"], world.extra["bgm_plan"]
+
+    def edit(request):
+        lyrics = json.loads(last_tool(request))["lyrics"] if last_tool(request).startswith("{") else None
+        lyrics = lyrics or re.search(r"(\[Verse\][\s\S]*啦啦啦)", last_tool(request).replace("\\n", "\n")).group(1)
+        return [call("edit_shots", job_id=job, plan_id=plan, operations=[
+            {"op": "update", "shot": "#2", "fields": {"music": {"kind": "generate", "prompt": BGM_PROMPT,
+                                                                 "instrumental": False, "lyrics": lyrics}}}])]
+
+    return [[call("load_tools", domains=["studio_detail"])],
+            [call("generate_lyrics", job_id=job, prompt=BGM_PROMPT)], edit,
+            [call("run_node", job_id=job, plan_id=plan, stage="music", shot="#2")],
+            [say("已从第 2 镜起设置背景音乐并提交生成，之后的分镜会顺延这段音乐。")],
+            [say("背景音乐已生成；下次构建成片时会混在配音下面。")]]
+
+
 SCENARIOS = [
     Scenario("custom_model", "我想使用自定义模型配置：拆分镜改用我自建的模型服务", check_custom_model, custom_model_script,
              form={"url": "http://127.0.0.1:9/v1", "endpoint": "http://127.0.0.1:9/v1", "model": "qwen3-self",
@@ -642,6 +1069,46 @@ SCENARIOS = [
              note="视觉开启：用户图片附件与 sample_frames 画面都以图片进入模型请求（需支持图片输入的模型）"),
     Scenario("no_vision", "从这个素材开头 2 秒抽 3 帧画面给我看看", check_no_vision, no_vision_script, page=admin_page,
              note="视觉关闭：不发送图片，工具结果注明仅在面板展示，系统提示说明图片未发送"),
+    # ---------------- 创作扩展：访谈改写、竖屏方案、附件作画面、AIGC 分镜、AI 动画分镜
+    Scenario("interview_rewrite", "把我上传的访谈稿登记为参考文稿，用访谈改写模板生成这个任务的文案",
+             check_interview, interview_script,
+             page=lambda w: {"page": "studio", "job_id": w.extra["interview_job"]}, setup=setup_interview,
+             attachments=interview_attachment,
+             note="add_reference_text(附件) → update_plan_options(template_id=interview) → run_node(script)；"
+                  "文案由参考文稿改写"),
+    Scenario("portrait_plan", "给「横屏短片」新建一个竖屏 9:16 的方案（铺满裁切），先看看构建时哪些要重做",
+             check_portrait, portrait_script, page=lambda w: {"page": "studio", "job_id": w.extra["built_job"]},
+             setup=setup_built_job,
+             note="create_plan(复制) → update_plan_options(canvas=9:16) → get_preflight：只重建渲染与成片"),
+    Scenario("attachment_source", "用我上传的这张图片作为第 4 个分镜的画面，并让画面向左平移", check_attachment_source,
+             attachment_source_script, page=lambda w: {"page": "studio", "job_id": w.job, "plan_id": w.plan},
+             attachments=red_attachment,
+             note="attach_query_media(purpose=source) → edit_shots(source.motion=pan-left) → get_shot_details"),
+    Scenario("aigc_shot", "素材库里没有极光雪山的画面，把「极光短片」第 2 个分镜改成 AI 生成视频："
+             f"提示词「{AIGC_PROMPT}」，种子 42，然后单独生成这一镜的画面给我看", check_aigc, aigc_script,
+             page=lambda w: {"page": "studio", "job_id": w.extra["aigc_job"], "plan_id": w.extra["aigc_plan"]},
+             setup=setup_aigc,
+             note="edit_shots(source=aigc) → run_node(generate，danger，提示费用) → get_shot_details（生成画面媒体）；"
+                  "视频生成服务为确定性桩"),
+    Scenario("ai_image_shot", f"把「竹林短片」第 2 个分镜改成 AI 生成图片：提示词「{AI_IMAGE_PROMPT}」，"
+             "画面向右平移，然后单独生成这一镜的图片", check_ai_image, ai_image_script,
+             page=lambda w: {"page": "studio", "job_id": w.extra["image_job"], "plan_id": w.extra["image_plan"]},
+             setup=setup_ai_image,
+             note="edit_shots(source=aigc_image) → run_node(draw，提示费用) → get_shot_details；图片生成服务为确定性桩"),
+    Scenario("background_music", f"给「配乐短片」从第 2 个分镜开始加一段带人声的背景音乐：{BGM_PROMPT}，"
+             "先帮我写歌词，然后生成这段音乐", check_bgm, bgm_script,
+             page=lambda w: {"page": "studio", "job_id": w.extra["bgm_job"], "plan_id": w.extra["bgm_plan"]},
+             setup=setup_bgm,
+             note="load_tools(studio_detail) → generate_lyrics → edit_shots(music) → run_node(music)；"
+                  "音乐生成服务为确定性桩，第 3 镜顺延"),
+    Scenario("animation_shot", f"把「动画短片」第 2 个分镜改成 AI 动画，画面说明「{ANIMATION_BRIEF}」；生成动画后"
+             "把柱子颜色改成橙色 #ff8800，重新录制这一镜给我看", check_animation, animation_script,
+             page=lambda w: {"page": "studio", "job_id": w.extra["animation_job"],
+                             "plan_id": w.extra["animation_plan"]},
+             setup=setup_animation,
+             note="edit_shots(source=animation) → run_node(animate) → get_animation_source → "
+                  "edit_animation_source(查找替换，预览校验) → run_node(render) → get_shot_details（录制媒体）；"
+                  "动画生成与录制为确定性替身"),
 ]
 
 

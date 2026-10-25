@@ -15,6 +15,8 @@ from mindex.processing.pipeline import Pipeline
 from mindex.settings.runtime_settings import RuntimeConfig
 from mindex.shared.processing_lock import recover_tasks
 
+pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
+
 
 def test_processing_defaults_never_chain_embeddings():
     assert not WorkOptions().publish

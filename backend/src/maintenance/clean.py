@@ -1,8 +1,8 @@
 """磁盘清理：A 级无条件安全项每次删除，B 级按策略过期删除；默认预览，--apply 才执行。
 
 分级判定、锁行为与待调整清单详见 docs/cleanup.md。规则为数据驱动的类别列表：
-扫描阶段绝不删除；apply 阶段分两段持锁执行——先独占 pipeline.lock + index-write.lock
-（管线与索引类），释放后再取 studio.lock（创作类），与 admin 删除、CLI index 同序避免死锁。
+扫描阶段绝不删除；apply 阶段分两段持锁执行——先经 ``shared/locks.acquire_ordered`` 独占
+pipeline.lock + index-write.lock（管线与索引类），释放后再取 studio.lock（创作类），遵循规范加锁顺序。
 """
 
 from __future__ import annotations
@@ -730,6 +730,7 @@ def subtitle_cache(scan: Scan) -> CleanAction | None:
             if not path.is_file() or not (
                 path.name.endswith(".json") or path.name.endswith(".json.lock")
                 or path.name.endswith(".json.partial")
+                or (".json." in path.name and path.name.endswith(".partial"))  # jsonio 的唯一临时名
             ):
                 continue  # uploads/ 子目录与其它文件不碰
             if not scan.expired(path, days):
@@ -919,51 +920,37 @@ def clean_library(config: Config, *, apply: bool = False, now: datetime | None =
 
 def _apply(config: Config, store: Store, actions: list[CleanAction]) -> None:
     """两段持锁执行：管线+索引段 → 释放 → studio 段；锁冲突抛 CleanBusy 或标记 skipped。"""
-    from filelock import FileLock, Timeout
+    from filelock import Timeout
 
-    from mindex.shared.processing_lock import SharedFileLock, index_write_lock
+    from mindex.shared import locks
 
     pipeline_actions = [action for action in actions if action.stage == "pipeline"]
     studio_actions = [action for action in actions if action.stage == "studio"]
 
-    guard = SharedFileLock(config.data_dir / "pipeline.lock", exclusive=True)
+    # 独占 pipeline.lock 已与全部 ProcessingLock 用户互斥；index-write 短等待兜底
+    # 未走 ProcessingLock 的写入方。
     try:
-        guard.acquire()
-    except Timeout:
-        raise CleanBusy("有离线处理任务正在运行，无法安全清理；请等待管线空闲后重试") from None
-    try:
-        # 独占 pipeline.lock 已与全部 ProcessingLock 用户互斥；index-write 短等待兜底
-        # 未走 ProcessingLock 的写入方。
-        write = index_write_lock(store.root)
-        write.timeout = 10
-        try:
-            write.acquire()
-        except Timeout:
+        held = locks.acquire_ordered(store.root, ["pipeline", "index-write"], exclusive=True,
+                                     timeout={"index-write": 10})
+    except Timeout as exc:
+        if Path(exc.lock_file).name == "index-write.lock":
             raise CleanBusy("索引正在构建或发布（index-write.lock 被持有），请稍后重试") from None
-        try:
-            for action in pipeline_actions:
-                _execute(action)
-        finally:
-            write.release()
-    finally:
-        guard.release()
+        raise CleanBusy("有离线处理任务正在运行，无法安全清理；请等待管线空闲后重试") from None
+    with held:
+        for action in pipeline_actions:
+            _execute(action)
 
     if not studio_actions:
         return
-    from mindex.studio.studio import lock_path
-
-    studio_lock = FileLock(str(lock_path(config)), timeout=0, thread_local=False)
     try:
-        studio_lock.acquire()
+        studio_lock = locks.acquire_ordered(store.root, ["studio"])
     except Timeout:
         for action in studio_actions:
             action.skipped = "创作任务正在执行，已跳过 studio 清理"
         return
-    try:
+    with studio_lock:
         for action in studio_actions:
             _execute(action)
-    finally:
-        studio_lock.release()
 
 
 def _execute(action: CleanAction) -> None:

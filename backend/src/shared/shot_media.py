@@ -77,7 +77,7 @@ class ShotMedia:
         # existing entry without acquiring thousands of filesystem locks.
         if self.reuse_checks:
             try:
-                value = json.loads(cached.read_text())
+                value = json.loads(cached.read_text(encoding="utf-8"))
                 if value['identity'] == identity:
                     self._probes[path] = value['media']
                     return value['media']
@@ -86,7 +86,7 @@ class ShotMedia:
         with FileLock(str(cached) + '.lock'):
             if cached.exists():
                 try:
-                    value = json.loads(cached.read_text())
+                    value = json.loads(cached.read_text(encoding="utf-8"))
                     if value['identity'] == identity:
                         self._probes[path] = value['media']
                         return value['media']
@@ -94,7 +94,7 @@ class ShotMedia:
                     pass
             info = probe(path)
             partial = cached.with_suffix('.partial')
-            partial.write_text(json.dumps({'identity': identity, 'media': info}))
+            partial.write_text(json.dumps({'identity': identity, 'media': info}), encoding="utf-8")
             partial.replace(cached)
             self._probes[path] = info
             return info

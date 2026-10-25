@@ -45,6 +45,8 @@ STUDIO_JOB = re.compile(r"^/api/studio/jobs/[^/]+/?$")
 ALLOWED_DELETES = {
     "delete_job": re.compile(r"^/api/studio/jobs/[^/]+$"),
     "delete_plan": re.compile(r"^/api/studio/jobs/[^/]+/plans/[^/]+$"),
+    "remove_reference_text": re.compile(r"^/api/studio/jobs/[^/]+/plans/[^/]+/references/[^/]+$"),
+    "delete_script_template": re.compile(r"^/api/studio/templates/[^/]+$"),
     "delete_person": re.compile(r"^/api/persons/entities/[^/]+$"),
     "remove_person_reference": re.compile(r"^/api/persons/references/[^/]+$"),
     "change_search_release": re.compile(r"^/api/persons/releases/[^/]+$"),
@@ -61,7 +63,7 @@ DESIGN_RISKS = {
             "preview_selection get_person identify_person list_review_shots list_search_releases list_voice_catalog",
     "write": "update_curation retry_task cancel_task upload_source upload_subtitle rename_job cancel_build "
              "attach_query_media confirm_selection save_person assign_source_work add_person_reference review_shot "
-             "import_cast confirm_cast_import register_voice",
+             "import_cast confirm_cast_import register_voice generate_lyrics",
     "danger": "activate_index start_source_task delete_plan run_column delete_person remove_person_reference "
               "publish_persons change_search_release delete_model_profile reset_business_settings delete_voice "
               "clone_voice",
@@ -93,7 +95,8 @@ PNG = b"\x89PNG\r\n\x1a\n" + b"\0" * 32
 
 def workspace() -> dict:
     plan = {"name": "方案", "created_at": "2024-01-01T00:00:00", "board": BOARD_VERSION, "script": None,
-            "shots": {SHOT: {"content": CONTENT_VERSION}}, "ranges": {}, "options": {}}
+            "shots": {SHOT: {"content": CONTENT_VERSION}}, "ranges": {},
+            "options": {"references": [{"id": "c" * 64, "name": "参考文稿", "chars": 4}]}}
     return {
         "job": {"id": JOB, "title": "测试任务", "outline": "大纲"},
         "active_plan": PLAN_A, "revision": "rev-1", "conflicts": {}, "builds": [],
@@ -156,8 +159,13 @@ SETTINGS = {
 }
 SOURCE = {"id": "src-1", "name": "素材一", "prepared": True, "hidden": False, "favorite": False, "work": {},
           "media": {"duration": 60.0}, "shot_count": 1}
+TEMPLATE = {"id": "user-0123456789ab", "name": "我的模板", "category": "base", "kind": "outline", "version": 1,
+            "description": "说明", "instructions": "提示词", "constraints": {"max_chars": None}, "builtin": False,
+            "base_id": "base"}
 
 GET_ROUTES = [
+    (re.compile(r"^/api/studio/templates/[^/]+$"), lambda: TEMPLATE),
+    (re.compile(r"^/api/studio/templates$"), lambda: {"items": [TEMPLATE], "default": "base"}),
     (re.compile(r"^/api/studio/jobs/[^/]+/workspace$"), workspace),
     (re.compile(r"^/api/studio/jobs/[^/]+$"),
      lambda: {"job": {"id": JOB, "title": "测试任务", "execution": {}}}),
@@ -225,7 +233,7 @@ class FakeRuntime:
 
 
 def context(client, panel: bool) -> ToolContext:
-    gap = lambda *a: {"id": 1}  # noqa: E731
+    gap = lambda *a: {"id": 1}
     if panel:
         return ToolContext(client=client, session_id="sess-1", agent_profile_id=3,
                            page={"page": "studio", "job_id": JOB, "plan_id": PLAN_A},
@@ -250,7 +258,7 @@ async def _drive(spec, args, server: FakeServer, panel: bool) -> str:
             await spec.execute(args, ctx)
         except ToolError as exc:
             outcome = f"tool_error:{exc.code}"
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 — 记录崩溃类型供断言，不让单个工具中断扫描
             outcome = f"crash:{type(exc).__name__}"
     finally:
         await client.aclose()
@@ -394,6 +402,14 @@ MANUAL = {
     "delete_model_profile": [{"profile_id": 2}, {"profile_id": 1}, {"profile_id": 3}],
     "delete_plan": [{"job_id": JOB, "plan_id": PLAN_B}, {"plan_id": PLAN_A}],
     "clone_voice": [{"name": "新音色", "attachment": ATTACHMENTS[0]}],
+    "add_reference_text": [{"text": "参考正文"}, {"attachment": ATTACHMENTS[0], "name": "附件文稿"}],
+    "remove_reference_text": [{"reference": "参考文稿"}, {"reference": "c" * 8}],
+    "delete_script_template": [{"template_id": TEMPLATE["id"]}],
+    "update_script_template": [{"template_id": TEMPLATE["id"], "instructions": "新提示词"},
+                               {"template_id": TEMPLATE["id"], "max_chars": None}],
+    "copy_script_template": [{"template_id": "base", "name": "副本"}],
+    "edit_animation_source": [{"shot": "#1", "html": "<html><body></body></html>"},
+                              {"shot": "#1", "replacements": [{"find": "body", "replace": "main"}]}],
 }
 
 
@@ -526,7 +542,8 @@ def test_every_tool_has_valid_minimal_arguments():
 @pytest.mark.parametrize("name", sorted(ALLOWED_DELETES))
 def test_record_delete_tools_reach_their_delete(name):
     """正向对照：记录删除工具在数据一致时确实发出 DELETE（证明记录器能看到删除请求）。"""
-    arguments = {"change_search_release": {"release_id": "rel-bbbbbb02", "action": "delete"}}.get(
+    arguments = {"change_search_release": {"release_id": "rel-bbbbbb02", "action": "delete"},
+                 "remove_reference_text": {"reference": "参考文稿"}}.get(
         name, examples(REGISTRY.get(name))[0])
     requests, outcome = run_tool(name, arguments)
     deletes = [path for method, path in requests if method == "DELETE"]
@@ -560,6 +577,7 @@ def test_unsafe_path_allows_normal_paths():
     assert unsafe_path("/api/admin/sources/src-1/frame?t=1.5") is not None
 
 
+@pytest.mark.slow
 def test_exhaustive_sweep_never_physically_deletes():
     """确定性全量扫描：每个工具 × 每组确定性参数（含恶意 ID 变体）× 面板/MCP 两种上下文。"""
     reached = set()

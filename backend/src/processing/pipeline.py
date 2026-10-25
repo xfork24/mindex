@@ -7,8 +7,6 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from filelock import FileLock
-
 from mindex.models.adapters import (
     AnalysisContentRejected,
     ShotDetector,
@@ -18,6 +16,7 @@ from mindex.models.adapters import (
     make_detector,
     make_transcriber,
 )
+from mindex.shared import locks
 from mindex.shared.config import Config, fingerprint
 from mindex.shared.media import content_hash, cut, probe, thumbnail, windows
 from mindex.shared.shot_media import ShotMedia
@@ -140,7 +139,7 @@ class Pipeline:
         destination = self.store.root / (existing["path"] if existing else f"sources/{identifier}/{name}")
         destination.parent.mkdir(parents=True, exist_ok=True)
         # Registration has its own short lease; uploads need not wait for a running model.
-        with FileLock(str(self.store.root / "sources" / ".register.lock")):
+        with locks.named(self.store.root, "register", timeout=None):
             existing = self.store.one("SELECT * FROM sources WHERE id=?", (identifier,))
             if existing:
                 destination = self.store.root / existing["path"]
@@ -204,7 +203,7 @@ class Pipeline:
                     "shots": [{"start": a, "end": b} for a, b in ranges],
                 }
                 partial = plan_path.with_suffix(".partial")
-                partial.write_text(dumps(plan))
+                partial.write_text(dumps(plan), encoding="utf-8")
                 partial.replace(plan_path)
             else:
                 self._read_plan(source)
@@ -229,7 +228,7 @@ class Pipeline:
         path = self.store.root / "plans" / f"{source['id']}.json"
         if not path.exists():
             raise ValueError("没有分镜计划，请先执行 detect 或 prepare")
-        plan = json.loads(path.read_text())
+        plan = json.loads(path.read_text(encoding="utf-8"))
         if plan["source_id"] != source["id"] or plan["layout_key"] != self.config.layout_key:
             raise ValueError("分镜计划与当前配置不符，请使用原配置或新的 data_dir")
         ranges = [(s["start"], s["end"]) for s in plan["shots"]]
@@ -350,7 +349,7 @@ class Pipeline:
                             continue
                         checkpoint = cache / f"{number}.json"
                         if checkpoint.exists():
-                            chunk = json.loads(checkpoint.read_text())
+                            chunk = json.loads(checkpoint.read_text(encoding="utf-8"))
                         else:
                             with tempfile.TemporaryDirectory(prefix="asr-", dir=self.store.root) as directory:
                                 audio = Path(directory) / "audio.wav"
@@ -369,7 +368,7 @@ class Pipeline:
                                     }
                                 )
                             temporary = checkpoint.with_suffix(".partial")
-                            temporary.write_text(dumps(chunk))
+                            temporary.write_text(dumps(chunk), encoding="utf-8")
                             temporary.replace(checkpoint)
                         utterances.extend(chunk)
                 self.store.put_json(
@@ -427,7 +426,7 @@ class Pipeline:
                     if self.config.asr_key != profile:
                         raise ValueError("转写过程中部署清单发生变化")
                     temporary = target.with_suffix(".partial")
-                    temporary.write_text(dumps({**result, "start": start, "duration": duration}))
+                    temporary.write_text(dumps({**result, "start": start, "duration": duration}), encoding="utf-8")
                     temporary.replace(target)
                 self.store.put_json(
                     "transcripts",
@@ -457,7 +456,7 @@ class Pipeline:
             utterances = []
             with self.store.run("align", source["id"]):
                 for path in sorted((cache / "raw").glob("*.json"), key=lambda p: int(p.stem)):
-                    raw = json.loads(path.read_text())
+                    raw = json.loads(path.read_text(encoding="utf-8"))
                     target = cache / ("aligned-" + path.name)
                     if not target.exists():
                         with tempfile.TemporaryDirectory(prefix="align-", dir=self.store.root) as directory:
@@ -484,7 +483,7 @@ class Pipeline:
                                 ],
                                 timeout=1800,
                             )
-                    aligned = json.loads(target.read_text())
+                    aligned = json.loads(target.read_text(encoding="utf-8"))
                     if aligned["revision"] != self.config.asr.aligner_revision:
                         raise ValueError("对齐检查点模型版本不匹配")
                     for value in coalesce_alignment(aligned["utterances"]):
@@ -652,7 +651,7 @@ class Pipeline:
                             })
                         checkpoint = checkpoint_root / (fingerprint(current) + ".json")
                         if checkpoint.is_file():
-                            groups = json.loads(checkpoint.read_text())
+                            groups = json.loads(checkpoint.read_text(encoding="utf-8"))
                         else:
                             try:
                                 groups = self.analyzer.group_scenes(current)

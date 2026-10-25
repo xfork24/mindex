@@ -21,6 +21,7 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import Field
+from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile as StarletteUpload
 
 from mindex.agent.attachments import AttachmentError, AttachmentStore
@@ -251,9 +252,11 @@ def agent_router(runtime: BuiltinRuntime, runtime_config, *, injected: bool = Fa
         temp = staging / secrets.token_hex(16)
         try:
             await save_upload(file, temp, limit)
-            return attachments.put(temp, filename=file.filename, content_type=file.content_type, owner=owner,
-                                   session_id=session_id if owner == "session" else None,
-                                   ttl_hours=cfg.attachment_ttl_hours)
+            # 整文件 sha256 与移动是阻塞 IO，放进线程池以免冻结事件循环。
+            return await run_in_threadpool(
+                attachments.put, temp, filename=file.filename, content_type=file.content_type, owner=owner,
+                session_id=session_id if owner == "session" else None, ttl_hours=cfg.attachment_ttl_hours,
+            )
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
         finally:

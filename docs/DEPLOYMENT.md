@@ -21,7 +21,7 @@ uv pip install --python .venv-embedding/bin/python -e .
 
 ```bash
 .venv-embedding/bin/python -c 'import torch; print(torch.__version__, torch.version.cuda, torch.cuda.is_available()); print(torch.cuda.get_device_name(0), torch.cuda.get_device_capability(0)); print(torch.ones(2, device="cuda") + 1)'
-uv pip install --python .venv-embedding/bin/python -r deploy/embedding.txt
+uv pip install --python .venv-embedding/bin/python 'transformers==5.2.0' 'accelerate>=1.1.0' 'bitsandbytes>=0.45' 'qwen-vl-utils[decord]==0.0.14' 'Pillow>=11'
 cp config.example.yaml config.local.yaml
 .venv-embedding/bin/mindex-model-server --role embedding --config config.local.yaml --host 0.0.0.0
 ```
@@ -42,7 +42,7 @@ cp config.example.yaml config.local.yaml
 uv venv --python 3.11 .venv-asr
 uv pip install --python .venv-asr/bin/python -e .
 # 在该环境安装适配 GPU 的 CUDA 版 torch / torchvision。
-uv pip install --python .venv-asr/bin/python -r deploy/asr.txt
+uv pip install --python .venv-asr/bin/python qwen-asr   # qwen-asr 自行约束 Transformers 版本
 .venv-asr/bin/mindex-model-server --role asr --config config.local.yaml --host 0.0.0.0
 ```
 
@@ -87,7 +87,7 @@ Web 已运行时需在当前任务结束后重启，以加载 YAML。新素材�
 ```bash
 uv venv --python 3.11 .venv-detector
 uv pip install --python .venv-detector/bin/python -e .
-uv pip install --python .venv-detector/bin/python -r deploy/detector.txt
+uv pip install --python .venv-detector/bin/python 'tensorflow[and-cuda]>=2.16'
 git clone https://github.com/soCzech/TransNetV2.git models/TransNetV2
 ```
 
@@ -100,13 +100,41 @@ export MINDEX_TRANSNET_DIR="$PWD/models/TransNetV2/inference"
 
 客户端改 `detector.backend: transnet`，再执行 `prepare`。服务逐帧低分辨率解码，以 100 帧上下文窗口、50 帧输出步长调用上游 `predict_raw`，避免一次加载整部视频。连续高分转场取中点，客户端合并相距不超过 2 帧的重复边界，并映射到原视频帧时间戳。默认阈值 0.5，需用真实素材抽检。
 
+## ComfyUI：可选的 AIGC 视频生成服务
+
+`aigc` 分镜（见 [AI 生成视频](studio.md#ai-生成视频)）可改用自建 ComfyUI 代替线上 MiniMax/通义万相；图片生成与音乐生成同样可用本地 ComfyUI 工作流（设置页已建好“本地 ComfyUI”卡，导入工作流与节点映射后激活）。ComfyUI 不随本项目安装，按其官方说明在 GPU 机器上单独部署并装好所需视频模型与自定义节点（例如 Wan、HunyuanVideo、LTX-Video 等工作流），启动时监听局域网地址：
+
+```bash
+python main.py --listen 0.0.0.0 --port 8188
+```
+
+Mindex 只使用 ComfyUI 内置的 HTTP 路由：`GET /system_stats`（设置页测试连接，只检查可达性与工作流，不提交任务）、`POST /upload/image`（首帧参考图）、`POST /prompt`（提交）、`GET /history/{prompt_id}` 与 `GET /queue`（轮询）、`GET /view`（下载输出）、`POST /queue` / `POST /interrupt`（取消）。
+
+1. 在 ComfyUI 中调通一个输出视频的工作流（保存节点需输出 mp4/webm/gif/webp 等），用菜单「导出（API）」（Export (API)）保存 JSON；界面格式（含 `nodes`/`links`）会被拒绝。
+2. 设置页“视频生成”角色新建档案，后端选 `comfyui`，base_url 填 `http://<GPU主机>:8188`，导入上一步的 JSON，并为请求字段填节点映射 `节点ID.inputs.输入名`：`prompt` 必填，`negative`、`seed`、`frames`（= 时长 × `fps`）、`width`、`height`、`image`（加载图片节点的 `image` 输入，有参考图的分镜必需）按工作流选填；未映射或未提供的字段保留工作流原值。保存时逐项校验节点与输入是否存在，错误为中文。
+3. `durations` 填工作流实际能生成的时长（秒），`fps` 与工作流帧率一致；测试连接通过后激活档案。
+
+ComfyUI 自身没有鉴权；如在前面加了反向代理鉴权，可用档案的 `api_key_env`（默认 `MINDEX_VIDEO_API_KEY`）以 `Authorization: Bearer` 头传递。ComfyUI 占用 GPU 时不受本项目 GPU 锁管理，与其他角色共用一张卡时需手动错开。
+
+## AI 动画录制（可选）
+
+AI 动画分镜（`animation` 来源）的渲染在本机（运行 `mindex serve` 的机器，CPU 即可）用无头 Chromium 逐帧录制动画源码，不需要 GPU 服务。录制依赖是可选 extra，不装时其余功能不受影响，只有 animation 分镜的渲染会失败并给出安装指引：
+
+```bash
+uv sync --extra dev --extra animation        # 安装固定版本的 playwright（Python）
+uv run playwright install chromium           # 下载 Playwright 对应版本的 Chromium（约 150 MB，需联网）
+# Linux 服务器缺系统库时：uv run playwright install --with-deps chromium（需要 root）
+```
+
+浏览器缓存在 `~/.cache/ms-playwright`（macOS 为 `~/Library/Caches/ms-playwright`），可用 `PLAYWRIGHT_BROWSERS_PATH` 改位置。录制时浏览器离线运行、拦截全部网络请求、使用录完即删的临时 profile；单个分镜的墙钟上限为 `studio.animator.max_capture_seconds`（默认 60 秒，画幅大或镜头长时调大）。动画源码本身由“动画生成”角色的 LLM（缺省跟随智能助手模型）编写，见 [设置页](settings.md)。
+
 ## 单 GPU 调度与访问配置
 
 使用 GPU 的本项目模型服务共享进程间 GPU 文件锁，默认 `~/.cache/mindex/gpu.lock`，同时启动第二个角色会失败。CPU 模式 TransNetV2 不占用此锁。自定义 `MINDEX_GPU_LOCK` 时，各 GPU 角色必须使用同一路径；服务运行单 worker。
 
 **现有 Qwen 服务不受该锁管理。** 请手动停止它并确认显存释放后，再运行 ASR、TransNetV2 或 WeMM；切回 Qwen 前先停止其他角色。项目不会擅自停止已有服务。
 
-可设置 `MINDEX_MODEL_API_KEY` 保护三个服务，客户端通过配置的 `api_key_env` 从同名环境变量读取。Qwen 可单独使用 `MINDEX_QWEN_API_KEY`。局域网服务监听 `0.0.0.0`，本地网页默认仅监听 `127.0.0.1`；该 Demo 不提供多用户认证。
+可设置 `MINDEX_MODEL_API_KEY` 保护三个服务，客户端通过配置的 `api_key_env` 从同名环境变量读取。Qwen 可单独使用 `MINDEX_QWEN_API_KEY`。局域网服务监听 `0.0.0.0`，本地网页默认仅监听 `127.0.0.1`；需要网络访问时用 `MINDEX_WEB_TOKEN` 启用单一访问令牌（未设置令牌时监听非回环地址会被 `serve` 拒绝，除非传 `--allow-insecure`），不提供多用户账户。
 
 ## 服务协议
 

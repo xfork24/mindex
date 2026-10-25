@@ -23,8 +23,12 @@
     session: null, seq: -1, source: null, retry: null, status: 'idle', open: false, live: false,
     cards: new Map(), streams: new Map(), approvals: new Map(), questions: new Map(), builds: new Map(),
     feedSeq: null, feed: null, feedRetry: null, pendingNav: null, follow: true, alwaysAllow: false,
-    attachments: [], creating: null,
+    attachments: [], creating: null, retryDelay: null, feedRetryDelay: null,
   };
+  // SSE 断线重连：1.5 秒起指数退避，上限 30 秒；收到 ready / session.status 后复位。
+  // 服务关闭或返回 401 时，每个标签页不再每 1.5 秒请求一次。
+  const RECONNECT_BASE_MS = 1500, RECONNECT_MAX_MS = 30000;
+  const nextReconnectDelay = (delay) => (delay ? Math.min(delay * 2, RECONNECT_MAX_MS) : RECONNECT_BASE_MS);
   const MAX_ATTACHMENTS = 12; // 与后端 MessageBody.attachments 上限一致
   const ATTACHMENT_REF = /^attachment:\/\/([0-9a-f]{32})$/;
   const TAB = (() => {
@@ -63,14 +67,13 @@
     return b;
   }
   async function api(url, method = 'GET', body) {
-    const response = await fetch(url, {
-      method,
-      ...(body !== undefined ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}),
-    });
-    if (response.status === 204) return {};
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(i18n() ? i18n().render(i18n().system(data)) : (data.detail || response.status));
-    return data;
+    try {
+      return await window.MindexApi.json(url, method, body);
+    } catch (error) {
+      // 面板把错误写进纯文本区域：服务端错误在此渲染为当前语言的字符串。
+      if (error.status !== undefined && i18n()) error.message = i18n().render(error.message);
+      throw error;
+    }
   }
   function pageContext() {
     let context = { page: currentPage() };
@@ -288,6 +291,7 @@
     const source = new EventSource(`/api/agent/changes?after=${after}`);
     state.feed = source;
     source.addEventListener('ready', (message) => {
+      state.feedRetryDelay = null;
       if (state.feedSeq === null) state.feedSeq = JSON.parse(message.data).seq;
     });
     source.addEventListener('change', (message) => {
@@ -299,7 +303,8 @@
     source.onerror = () => {
       source.close();
       clearTimeout(state.feedRetry);
-      state.feedRetry = setTimeout(subscribeFeed, 1500);
+      state.feedRetryDelay = nextReconnectDelay(state.feedRetryDelay);
+      state.feedRetry = setTimeout(subscribeFeed, state.feedRetryDelay);
     };
   }
 
@@ -361,7 +366,7 @@
   async function removeSession() {
     if (!state.session) return;
     if (!window.confirm(i18n() ? i18n().render(t('ui.agent_delete_confirm')) : '删除此会话？')) return;
-    await api(`/api/agent/sessions/${state.session}`, 'DELETE');
+    await api(`/api/agent/sessions/${encodeURIComponent(state.session)}`, 'DELETE');
     localStorage.removeItem(STORAGE_KEY);
     reset(null);
     await loadSessions('');
@@ -371,7 +376,7 @@
     if (state.source) state.source.close();
     clearTimeout(state.retry);
     for (const timer of state.builds.values()) clearTimeout(timer.timer);
-    Object.assign(state, { session: id, seq: -1, source: null, status: 'idle', live: false });
+    Object.assign(state, { session: id, seq: -1, source: null, status: 'idle', live: false, retryDelay: null });
     state.cards.clear(); state.streams.clear(); state.approvals.clear(); state.questions.clear(); state.builds.clear();
     clearAttachments({ revoke: true }); // 附件归属原会话，切换或删除会话后不能再随新消息发送
     log.replaceChildren();
@@ -386,7 +391,7 @@
   function subscribe() {
     if (!state.session) return;
     const id = state.session;
-    const source = new EventSource(`/api/agent/sessions/${id}/events?after=${state.seq}`);
+    const source = new EventSource(`/api/agent/sessions/${encodeURIComponent(id)}/events?after=${state.seq}`);
     state.source = source;
     source.addEventListener('session.event', (message) => {
       if (state.session !== id) return;
@@ -400,6 +405,7 @@
     });
     source.addEventListener('session.status', (message) => {
       if (state.session !== id) return;
+      state.retryDelay = null;
       state.live = true; // 状态帧在补发的历史之后到达：此后才是实时事件
       setStatus(JSON.parse(message.data).status);
       autoAllowPending();
@@ -408,7 +414,8 @@
       source.close();
       if (state.session !== id) return;
       clearTimeout(state.retry);
-      state.retry = setTimeout(subscribe, 1500); // 按最后 seq 续传
+      state.retryDelay = nextReconnectDelay(state.retryDelay);
+      state.retry = setTimeout(subscribe, state.retryDelay); // 按最后 seq 续传
     };
   }
 
@@ -575,7 +582,7 @@
     async function decide(value, { silent = false } = {}) {
       allow.disabled = reject.disabled = true;
       try {
-        await api(`/api/agent/sessions/${state.session}/approvals/${data.requestId}`, 'POST',
+        await api(`/api/agent/sessions/${encodeURIComponent(state.session)}/approvals/${encodeURIComponent(data.requestId)}`, 'POST',
           { outcome: value, grant: Boolean(grant?.checked) });
       } catch (error) {
         const entry = state.approvals.get(data.requestId);
@@ -693,7 +700,7 @@
       });
       submit.disabled = true;
       try {
-        await api(`/api/agent/sessions/${state.session}/questions/${data.requestId}`, 'POST', { answers });
+        await api(`/api/agent/sessions/${encodeURIComponent(state.session)}/questions/${encodeURIComponent(data.requestId)}`, 'POST', { answers });
         // 密钥明文只发给保险库一次，提交后立即从页面清除。
         for (const entry of controls) for (const control of entry.fields) if (control.dataset.kind === 'secret') control.value = '';
       } catch (error) { submit.disabled = false; fail(error); }
@@ -756,7 +763,7 @@
   // 只加载本站 /api/ 地址；与后端 tools/media.py 的校验一致。
   const SAFE_MEDIA = /^\/api\/[^\s]*$/;
   const safeMedia = (url) => typeof url === 'string' && SAFE_MEDIA.test(url) && !url.includes('//') && !url.includes('..');
-  const PLAYER_SRC = '/assets/shared/shot-player.js?v=20261019-shot-media-6';
+  const PLAYER_SRC = '/assets/shared/shot-player.js?v=d5fc85925a';
   let playerLoading = null;
   function ensureShotPlayer() {
     if (window.ShotPlayer) return Promise.resolve();
@@ -1130,7 +1137,7 @@
       const sid = await ensureSession();
       const refs = await settleAttachments(sid);
       if (refs === null) { send.disabled = state.status !== 'idle'; return; }
-      await api(`/api/agent/sessions/${sid}/messages`, 'POST', { content: text, context: pageContext(), attachments: refs });
+      await api(`/api/agent/sessions/${encodeURIComponent(sid)}/messages`, 'POST', { content: text, context: pageContext(), attachments: refs });
       input.value = '';
       clearAttachments({ revoke: false });
       setStatus('running');
@@ -1142,7 +1149,7 @@
     }
   });
   async function cancelTurn() {
-    if (state.session) await api(`/api/agent/sessions/${state.session}/cancel`, 'POST', {});
+    if (state.session) await api(`/api/agent/sessions/${encodeURIComponent(state.session)}/cancel`, 'POST', {});
   }
 
   window.MindexAgent = { toggle, open: () => toggle(true), looksLikeSecret, state, highlight, clearHighlights,

@@ -439,7 +439,7 @@ def test_pipeline_lock_conflict_exit_code(tmp_path):
     config_path = make_config(tmp_path)
     root = tmp_path / "data"
     write(root / ".DS_Store")
-    from mindex.shared.processing_lock import SharedFileLock
+    from mindex.shared.locks import SharedFileLock
 
     with SharedFileLock(root / "pipeline.lock", exclusive=True):
         result = invoke(config_path, "--apply")

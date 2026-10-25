@@ -14,10 +14,10 @@ from typer.core import TyperGroup
 from mindex.cli_agent import app as agent_app
 from mindex.cli_agent import mcp_command
 from mindex.cli_clips import app as clips_app
-from mindex.cli_common import SortedGroup, print_json
 from mindex.cli_e2e import app as e2e_app
 from mindex.cli_persons import app as persons_app
 from mindex.maintenance.backup_cli import app as backup_app
+from mindex.shared.cli_support import SortedGroup, print_json
 from mindex.shared.config import load_config
 
 
@@ -746,7 +746,7 @@ def check_model(
     report = model_check(ctx.obj, video, text, repeats)
     if output:
         output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(json.dumps(report, ensure_ascii=False, indent=2))
+        output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print_json(report)
 
 

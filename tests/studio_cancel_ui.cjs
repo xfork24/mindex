@@ -1,4 +1,4 @@
-// 创作页“取消执行”与“删除方案”的控制逻辑（真实 studio.js 代码 + 轻量 DOM 桩）。
+// 创作页“取消执行”与“删除方案”的控制逻辑（真实创作页脚本代码 + 轻量 DOM 桩）。
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
@@ -40,10 +40,10 @@ const sandbox = {
   api: async (url, method = "GET", body) => { requests.push({ url, method, body }); return apiImpl(url, method, body); },
 };
 vm.createContext(sandbox);
-const source = fs.readFileSync("frontend/src/studio/studio.js", "utf8");
+const source = require("./studio_source.cjs").studioSource();
 const slice = (start, end) => {
   const a = source.indexOf(start), b = source.indexOf(end, a);
-  assert.ok(a >= 0 && b > a, `studio.js 中找不到代码片段：${start} … ${end}`);
+  assert.ok(a >= 0 && b > a, `创作页脚本中找不到代码片段：${start} … ${end}`);
   return source.slice(a, b);
 };
 vm.runInContext(slice("const STATUS = {", "const state = {") + slice("// 取消执行与删除方案", "function renderBuilds("), sandbox);

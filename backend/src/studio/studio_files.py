@@ -16,6 +16,16 @@ from mindex.shared.shot_media import ShotMedia
 from mindex.studio import studio, studio_steps
 from mindex.studio.studio_artifacts import safe_path
 
+# 动画源码等 HTML 产物：只允许内联脚本与样式、data:/blob: 媒体，禁止任何网络加载；``sandbox allow-scripts`` 让页面
+# 即使被直接打开也运行在不透明源里（拿不到本站凭证与 DOM）。创作页以 sandbox="allow-scripts" 的 iframe 预览。
+SANDBOX_CSP = (
+    "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; "
+    "media-src data: blob:; font-src data:; sandbox allow-scripts"
+)
+SANDBOX_HEADERS = {"Content-Security-Policy": SANDBOX_CSP, "X-Content-Type-Options": "nosniff",
+                   "Referrer-Policy": "no-referrer"}
+ACTIVE_TYPES = ("text/html", "application/xhtml+xml", "image/svg+xml")
+
 
 def file_routes(router, base, store, mutation_lock):
     """注册产物相关路由；与 studio_router 共用同一个路由对象和任务锁。"""
@@ -30,7 +40,8 @@ def file_routes(router, base, store, mutation_lock):
             else mimetypes.guess_type(target.name)[0] or "application/octet-stream"
         )
         return FileResponse(
-            target, media_type=media_type, filename=f"{job_id}_{target.name}" if download else None
+            target, media_type=media_type, filename=f"{job_id}_{target.name}" if download else None,
+            headers=SANDBOX_HEADERS if media_type in ACTIVE_TYPES else None,
         )
 
     def artifact_items(job_id):

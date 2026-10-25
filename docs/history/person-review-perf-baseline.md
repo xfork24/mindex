@@ -1,5 +1,7 @@
 # 人物库出镜审核读取耗时基线
 
+> 历史记录（2026-10-23 由 `scripts/profile_person_review.py` 生成的本机基线），内容可能与当前代码不符，重新测量以该脚本输出为准。
+
 - 数据目录：`/Users/hengliu/workspace/mindex/data`；每组 1 次预热 + 3 次计时；单位毫秒；进程内 TestClient，不含网络与浏览器。
 - 单元格为 p50 / p95。`assemble` 为 Python 端组装（总耗时减去各阶段与 middleware）。
 

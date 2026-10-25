@@ -1,5 +1,5 @@
 // 文案创作区域的控制逻辑：状态文字、未保存修改保护、自动保存、重新生成与历史版本切换
-// （真实 studio.js 代码 + 轻量 DOM 桩）。
+// （真实创作页脚本代码 + 轻量 DOM 桩）。
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
@@ -51,9 +51,12 @@ const sandbox = {
   runNode: async (...args) => { runs.push(args); },
   api: async (url, method, body) => { requests.push({ url, method, body }); return {}; },
   accept: async data => { accepted.push(data); },
+  renderTemplateSelect: () => {},  // 模板下拉在 studio-templates.js，另有用例覆盖
+  renderReferences: () => {},  // 参考文稿面板同在 studio-templates.js
+  planReferences: () => plans.p1.options?.references || [],
 };
 vm.createContext(sandbox);
-const source = fs.readFileSync("frontend/src/studio/studio.js", "utf8");
+const source = require("./studio_source.cjs").studioSource();
 vm.runInContext(source.slice(source.indexOf("const scriptDrafts"), source.indexOf("async function inputUrl(")), sandbox);
 const area = nodes["script-text"];
 const view = () => vm.runInContext("renderScript()", sandbox);

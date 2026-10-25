@@ -10,6 +10,7 @@ import time
 from typing import ClassVar
 
 import numpy as np
+import pytest
 import uvicorn
 from conftest import FixtureEmbedder, FixtureStoryboarder
 from fastapi.testclient import TestClient
@@ -20,6 +21,8 @@ from mindex.persons.person_server import create_person_app
 from mindex.processing.indexing import IndexBuilder
 from mindex.processing.pipeline import Pipeline
 from mindex.shared.media import command
+
+pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
 
 
 class ColorPersonEngine:

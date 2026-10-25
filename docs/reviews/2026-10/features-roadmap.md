@@ -78,14 +78,16 @@ Mindex 已经把"素材管理 → 多模态检索 → 文案驱动的混剪成�
 
 ## 当前可做（本期 M1，对应 spec `mindex-review-2026-10`）
 
-| 任务 | 内容 |
-|---|---|
-| 17 | 文案模板：6 个内置模板（通用解说为基础模板，承接现有生成）+ 用户自定义模板 |
-| 18 | 参考文稿：访谈稿等文本改写为视频文案 |
-| 19 | 方案级画幅：16:9 / 9:16 / 1:1，pad / crop |
-| 20 | 分镜来源抽象 + 临时导入片段 |
-| 21 | 静态图片来源（Ken Burns 推拉） |
-| 22–23 | "视频生成"模型角色 + AIGC 视频来源（MiniMax、通义万相、ComfyUI） |
-| 24–25 | "动画生成"模型角色 + AI 动画来源（沙箱逐帧录制） |
+| 任务 | 内容 | 状态 |
+|---|---|---|
+| 17 | 文案模板：6 个内置模板（通用解说为基础模板，承接现有生成）+ 用户自定义模板 | 已完成。模块名为 `studio/script_templates.py`（设计稿写作 `studio/templates.py`，因与 `studio/templates/` 目录同名而改名），路由在 `studio/studio_templates_api.py`；用户模板表 `script_templates` 为 metadata 迁移 v2；`WRITER_PROMPT_VERSION=3` |
+| 18 | 参考文稿：访谈稿等文本改写为视频文案 | 已完成（`studio/workspace/references.py`，`studio.max_reference_chars`）。智能助手的 `remove_reference_text` 为 danger（删除登记），`add_reference_text` 为 write |
+| 19 | 方案级画幅：16:9 / 9:16 / 1:1，pad / crop | 已完成（`studio.render.canvases`；只进 render/compose 签名，16:9 + pad 签名与旧版逐字节一致） |
+| 20 | 分镜来源抽象 + 临时导入片段 | 已完成（`Shot.source`、`TimelineVideo` 判别联合、`SHOT_SOURCES`；`studio.max_clip_seconds`/`max_clip_mb`） |
+| 21 | 静态图片来源（Ken Burns 推拉） | 已完成（zoompan，`motion`/`strength`）；21.5 补齐了 17–21 的智能助手工具与场景 |
+| 22–23 | "视频生成"模型角色 + AIGC 视频来源（MiniMax、通义万相、ComfyUI） | 已完成（`models/video_generators.py`、`shared/comfyui.py`、`generate` 阶段）；测试连接不提交生成 |
+| 24–25 | "动画生成"模型角色 + AI 动画来源（沙箱逐帧录制） | 已完成（`models/animator.py`、`studio/animation_capture.py`、`animate` 阶段，可选 extra `animation`）；真实浏览器录制需安装 Playwright Chromium，自动化测试中有未安装时跳过的用例 |
+
+状态于 2026-10 任务 26 回填，依据 spec `mindex-review-2026-10` 的 tasks.md。
 
 M2–M4 见 [路线图](../../../plans/ROADMAP.md)。

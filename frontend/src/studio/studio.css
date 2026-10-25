@@ -89,6 +89,21 @@
 .script-panel p{margin:0;font-size:12px;line-height:1.7;overflow-wrap:anywhere;white-space:pre-line}
 .script-panel textarea{min-height:150px;font-size:13px}
 .script-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.script-template-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13px}
+.script-template-bar select{min-width:200px;max-width:100%}
+.script-references{display:flex;flex-direction:column;gap:6px;font-size:13px}
+.script-references-head{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.script-references p{margin:0}
+.reference-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}
+.reference-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;border:1px solid var(--line,#ddd);border-radius:6px;padding:4px 8px}
+.reference-row>span:first-child{flex:1;min-width:0;overflow-wrap:anywhere}
+.reference-actions{display:flex;gap:8px;flex-wrap:wrap}
+.template-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+.template-row{border:1px solid var(--line,#ddd);border-radius:6px;padding:8px 10px}
+.template-row p{margin:4px 0;font-size:12px}
+.template-head{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.template-tag{font-size:11px;padding:0 6px;border:1px solid currentColor;border-radius:999px}
+.template-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
 .matrix-scroll{overflow:auto;max-height:72vh;border:1px solid var(--line);border-radius:10px;background:white}
 .shot-matrix{border-collapse:separate;border-spacing:0;min-width:1300px;table-layout:fixed;width:100%;font-size:12px}
 .shot-matrix th,.shot-matrix td{padding:12px;border-bottom:1px solid var(--line);border-right:1px solid var(--line);vertical-align:top;width:220px;overflow-wrap:anywhere}
@@ -224,6 +239,13 @@ summary{cursor:pointer}
 .recall-editor{display:flex;flex-wrap:wrap;gap:12px;align-items:end;border-top:1px dashed var(--line,#dfe5dc);margin-top:14px;padding-top:10px}
 
 .recall-editor h4{flex-basis:100%;margin:0}
+.source-editor{display:flex;flex-wrap:wrap;gap:12px;align-items:end;border-top:1px dashed var(--line,#dfe5dc);margin-top:14px;padding-top:10px}
+.source-editor h4,.source-editor>p{flex-basis:100%;margin:0}
+.source-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;flex-basis:100%;min-width:0;align-items:end}
+.source-options .form-field{margin:0;width:100%;min-width:0}
+.source-options input[type=range]{width:100%}
+.source-editor .query-preview-host{flex-basis:100%}
+@media(max-width:540px){.source-options{grid-template-columns:minmax(0,1fr)}}
 
 .recall-primary-options,.recall-scope-options,.recall-filters{display:grid;gap:12px;flex-basis:100%;min-width:0;align-items:start}
 .recall-primary-options{grid-template-columns:repeat(3,minmax(0,1fr));align-items:end}
@@ -277,3 +299,15 @@ summary{cursor:pointer}
 .material-digest{grid-column:1/-1;padding:6px 0;font-size:12px;line-height:18px}
 .material-digest>summary{cursor:pointer;color:var(--muted)}
 .material-digest-text{margin:6px 0 0;max-height:320px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;background:#f6f8f7;border:1px solid var(--line);border-radius:4px;padding:8px}
+
+/* AI 动画：沙箱 iframe 预览（按画布尺寸渲染后等比缩放）与源码编辑器 */
+.animation-preview-wrap { display: flex; align-items: flex-end; gap: 8px; flex-wrap: wrap; margin: 6px 0; }
+.animation-preview { position: relative; overflow: hidden; border: 1px solid var(--line, #d0d5dd); border-radius: 6px; background: #000; }
+.animation-preview iframe { position: absolute; left: 0; top: 0; border: 0; transform-origin: 0 0; }
+textarea.code-editor { width: 100%; min-height: 360px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.5; white-space: pre; tab-size: 2; }
+
+/* 创作分区标签：创作任务 / 文案模板（两个页面共用） */
+.studio-tabs{display:flex;gap:28px;border-bottom:1px solid var(--line);margin:0 0 18px}
+.studio-tab{display:inline-flex;align-items:center;min-height:40px;padding:10px 0 9px;border-bottom:3px solid transparent;margin-bottom:-1px;color:var(--muted);font-size:14px;text-decoration:none}
+.studio-tab:hover{color:#3b5145}
+.studio-tab[aria-current="page"]{border-color:var(--green);color:var(--green);font-weight:600}

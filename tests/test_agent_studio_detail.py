@@ -34,7 +34,9 @@ from mindex.agent.tools import build_registry
 from mindex.agent.tools.studio_detail import SELECTION_PREVIEWS
 from mindex.api import create_app
 from mindex.studio import studio
-from mindex.studio import studio_workspace as ws
+from mindex.studio import workspace as ws
+
+pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
 
 selection_job = test_studio_window.refinement  # 真实素材 + 召回候选池（10 个 1 秒镜头）
 

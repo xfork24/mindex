@@ -31,7 +31,7 @@ from typing import Any, Protocol
 from uuid import uuid4
 
 from mindex.agent import policy
-from mindex.agent.domains import touch
+from mindex.agent.domains import PAGE_DOMAIN, touch
 from mindex.agent.llm.types import (
     Assembler,
     LlmError,
@@ -54,12 +54,12 @@ from mindex.agent.vision import (
     materialize,
     protocol_for,
 )
-from mindex.shared.agent_domains import LOADABLE_DOMAINS, PAGE_DOMAIN
+from mindex.shared.agent_domains import LOADABLE_DOMAINS
 
 log = logging.getLogger(__name__)
 
 
-PAGE_DOMAINS = PAGE_DOMAIN
+WAIT_IDLE_TIMEOUT = 30  # wait_idle 的等待上限（秒）
 # 用户附件中作为图片交给模型的类型（SVG 等矢量格式无法解码为位图，只按普通附件列出）。
 VISION_TYPES = ("image/jpeg", "image/png", "image/webp", "image/gif", "image/bmp", "image/tiff")
 NO_VISION_TOOL_NOTE = "（当前模型未开启视觉输入：图片未发送给模型，仅在面板展示）"
@@ -333,16 +333,20 @@ class BuiltinRuntime:
         finally:
             state.subscribers.discard(queue)
 
-    async def wait_idle(self, session_id: str, timeout: float = 30) -> None:
-        """测试与脚本用：等待当前及排队的轮次全部结束。"""
-        deadline = asyncio.get_running_loop().time() + timeout
-        while True:
-            state = self.state(session_id)
-            if (state.task is None or state.task.done()) and not state.queue:
-                return
-            if asyncio.get_running_loop().time() > deadline:
-                raise TimeoutError("助手会话在限定时间内没有空闲")
-            await asyncio.sleep(0.02)
+    async def wait_idle(self, session_id: str) -> None:
+        """测试与脚本用：等待当前及排队的轮次全部结束；超过 ``WAIT_IDLE_TIMEOUT`` 秒抛 TimeoutError。
+
+        需要其他时限时由调用方包一层 ``asyncio.timeout``。
+        """
+        try:
+            async with asyncio.timeout(WAIT_IDLE_TIMEOUT):
+                while True:
+                    state = self.state(session_id)
+                    if (state.task is None or state.task.done()) and not state.queue:
+                        return
+                    await asyncio.sleep(0.02)
+        except TimeoutError:
+            raise TimeoutError("助手会话在限定时间内没有空闲") from None
 
     # ------------------------------------------------------------ 轮次
     async def _drive(self, sid: str, message: dict, context: dict | None) -> None:
@@ -455,7 +459,7 @@ class BuiltinRuntime:
             self._append(sid, "turn/end", {"turn": turn, "reason": {"kind": "aborted", "reason": {"kind": "user"}}})
             self._set_status(sid, "idle")
             raise
-        except Exception as exc:  # noqa: BLE001 — 任何意外都必须以终态结束轮次
+        except Exception as exc:  # 任何意外都必须以终态结束轮次
             log.exception("助手轮次异常")
             reason = {"kind": "error", "error": {"message": str(exc)[:500], "code": "internal"}}
         self._append(sid, "turn/end", {"turn": turn, "reason": reason})
@@ -647,7 +651,7 @@ class BuiltinRuntime:
             self._result(sid, turn, step, call["id"], "Error: 用户取消了本轮对话，该工具调用未完成",
                          error={"name": "Aborted", "code": "ABORTED", "reason": "用户取消"})
             raise
-        except Exception as exc:  # noqa: BLE001 — 工具内部错误作为可恢复结果交给模型
+        except Exception as exc:  # 工具内部错误作为可恢复结果交给模型
             log.exception("工具 %s 执行异常", spec.name)
             self._result(sid, turn, step, call["id"], f"Error: 工具执行出错：{exc}",
                          error={"name": type(exc).__name__, "code": "internal", "reason": str(exc)[:500]})

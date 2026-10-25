@@ -1,0 +1,68 @@
+# 统一检查：推送与合并请求运行快速回归（跳过 slow 标记的重媒体用例）；
+# 每晚定时与手动触发（workflow_dispatch）运行完整测试。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 18 * * *"  # 每天 UTC 18:00（北京时间 02:00）完整回归
+  workflow_dispatch:
+    inputs:
+      full:
+        description: "运行完整测试（含 slow 用例）"
+        type: boolean
+        default: true
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: 安装依赖
+        run: uv sync --extra dev
+
+      - name: ruff
+        run: uv run ruff check backend/src tests
+
+      - name: 文档链接
+        run: uv run python scripts/check-doc-links.py
+
+      - name: 界面文案镜像
+        run: uv run python scripts/build-messages.py --check
+
+      - name: 页面资源版本参数
+        run: uv run python scripts/build-assets.py --check
+
+      - name: 前端 JS 语法
+        run: for f in frontend/src/*/*.js; do node --check "$f"; done
+
+      - name: CLI 入口
+        run: uv run mindex --help
+
+      - name: 快速回归（跳过 slow）
+        if: github.event_name == 'push' || github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && !inputs.full)
+        run: uv run pytest -m "not slow" -q
+
+      - name: 完整回归
+        if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.full)
+        run: uv run pytest -q

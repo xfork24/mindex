@@ -1,5 +1,5 @@
 // 检索组合依赖：分镜表上方一行（当前生效 / 工作台依赖 / 是否一致），以及成片合成依赖树里的检索组合
-// （真实 studio.js 代码 + DOM 桩）。
+// （真实创作页脚本代码 + DOM 桩）。
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
@@ -26,7 +26,7 @@ const sandbox = {
   LABEL: { compose: "成片合成", render: "分镜渲染" },
 };
 vm.createContext(sandbox);
-const source = fs.readFileSync("frontend/src/studio/studio.js", "utf8");
+const source = require("./studio_source.cjs").studioSource();
 vm.runInContext(source.slice(source.indexOf("// 检索组合依赖（后端"), source.indexOf("function renderMatrix(")), sandbox);
 vm.runInContext(source.slice(source.indexOf("// 成片合成版本沿依赖链"), source.indexOf("function versionFiles(")), sandbox);
 const render = (retrieval) => { sandbox.state.data = { retrieval }; vm.runInContext("renderRetrieval()", sandbox); };

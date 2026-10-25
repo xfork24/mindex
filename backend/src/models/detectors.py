@@ -57,7 +57,7 @@ class HTTPShotDetector:
             payload = adapters.request(
                 "POST",
                 self.config.detector.base_url.rstrip("/") + "/detect/video",
-                timeout=1800,
+                timeout=self.config.detector.timeout,
                 headers={"Authorization": f"Bearer {key}"} if key else {},
                 files={"file": (path.name, handle, "video/mp4")},
                 data={"threshold": str(self.config.detector.threshold)},

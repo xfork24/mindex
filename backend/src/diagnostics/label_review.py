@@ -15,8 +15,8 @@ from mindex.shared.storage import Store
 
 def render_review(config: Config, run: Path, queries: Path) -> Path:
     store = Store(config.data_dir)
-    state = json.loads((run / "run.json").read_text())
-    entries = [json.loads(line) for line in queries.read_text().splitlines() if line.strip()]
+    state = json.loads((run / "run.json").read_text(encoding="utf-8"))
+    entries = [json.loads(line) for line in queries.read_text(encoding="utf-8").splitlines() if line.strip()]
     if any(not entry.get("text", "").strip() for entry in entries):
         raise ValueError("该复核页只接受已填写文字的查询")
     segments = store.segments(state["source_id"], "moment")
@@ -89,7 +89,7 @@ document.getElementById('export').onclick=()=>{
     target.write_text(
         template.replace("__STYLE__", review_style())
         .replace("__DATA__", data)
-        .replace("__COUNT__", str(len(cards)))
+        .replace("__COUNT__", str(len(cards))), encoding="utf-8"
     )
     save(
         run / "label-review-info.json",

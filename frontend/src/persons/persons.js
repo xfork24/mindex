@@ -5,7 +5,7 @@ function node(tag, text, cls) {const n = document.createElement(tag);if (text !=
 function notice(text, error = false) {
   if (globalThis.MindexFeedback) return globalThis.MindexFeedback.show('notice', error ? MindexI18n.system(text) : text, error ? 'error' : 'info');
   MindexI18n.setText($('notice'), error ? MindexI18n.system(text) : text);$('notice').className = `notice ${error ? 'error' : 'info'}`;}
-async function api(url, opts = {}) {const r = await fetch(url, opts);const d = await r.json();if (!r.ok) {const error = Error(MindexI18n.system(d));error.detail = d.detail;error.status = r.status;throw error;}return d;}
+async function api(url, opts = {}) {return MindexApi.request(url, opts);}
 const json = (method, data) => ({ method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
 async function run(fn) {try {await fn();} catch (e) {notice(e.message, true);}}
 function button(text, fn) {const b = node('button', text);b.type = 'button';b.onclick = () => run(() => fn(b));return b;}
@@ -710,7 +710,31 @@ run(async () => {
   }
 });
 $('reload').onclick = () => {$('reload').disabled = true;run(async () => {await refresh();}).finally(() => {$('reload').disabled = false;});};
-setInterval(() => {if (!$('processing').hidden) run(refresh);}, 5000);
+// 处理进度轮询：上一轮刷新结束后才排下一轮，慢请求不会叠加；页面隐藏时暂停，重新可见时立即刷新；
+// 失败按 5 秒起翻倍退避（上限 60 秒），成功后复位。
+const POLL_BASE_MS = 5000, POLL_MAX_MS = 60000;
+let pollDelay = POLL_BASE_MS, pollTimer = null, pollRunning = false;
+function schedulePoll(delay = pollDelay) {
+  clearTimeout(pollTimer);
+  pollTimer = null;
+  if (!document.hidden) pollTimer = setTimeout(pollOnce, delay);
+}
+async function pollOnce() {
+  pollTimer = null;
+  if (document.hidden || pollRunning) return;
+  if (!$('processing').hidden) {
+    pollRunning = true;
+    try {await refresh();pollDelay = POLL_BASE_MS;}
+    catch (e) {pollDelay = Math.min(pollDelay * 2, POLL_MAX_MS);notice(e.message, true);}
+    finally {pollRunning = false;}
+  }
+  schedulePoll();
+}
+document.addEventListener?.('visibilitychange', () => {
+  if (document.hidden) {clearTimeout(pollTimer);pollTimer = null;}
+  else if (!pollRunning) schedulePoll(0);
+});
+schedulePoll();
 // 智能助手：定位时切换到指定分页并高亮；被动定位只高亮当前分页。控制器单测在没有 window 的沙箱里运行本文件。
 if (typeof window !== 'undefined') {
   window.MindexAgentContext = () => ({ page: 'persons', pane: document.querySelector('[data-pane].active')?.dataset.pane || null });

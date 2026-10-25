@@ -17,7 +17,7 @@ from mindex.agent.llm.types import message_text
 from mindex.api import create_app
 from mindex.shared.config import Config
 from mindex.studio import studio
-from mindex.studio import studio_workspace as ws
+from mindex.studio import workspace as ws
 
 SHOTS = ["shot-a1daad59aa", "shot-925281d5bb", "shot-77f0c3e1cc"]
 

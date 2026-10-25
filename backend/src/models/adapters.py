@@ -1,6 +1,6 @@
 """模型适配层公共部分：错误类型、带重试的 HTTP 请求、各角色 Protocol 与按配置构造的工厂。
 
-具体后端见 embedders、qwen、speech、storyboard、transcribers、detectors；工厂在调用时才导入它们。
+具体后端见 embedders、qwen、speech、storyboard、transcribers、detectors、video_generators、animator；工厂在调用时才导入它们。
 """
 
 from __future__ import annotations
@@ -8,14 +8,20 @@ from __future__ import annotations
 import json
 import re
 import time
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 import httpx
 
 from mindex.shared.config import Config
 from mindex.shared.trace import record
-from mindex.shared.types import Annotation, MaterialDigest, ShotDraft, Utterance
+from mindex.shared.types import Annotation, MaterialDigest, ScriptTemplate, ShotDraft, Utterance
+
+if TYPE_CHECKING:
+    from mindex.models.image_generators import ImageRequest
+    from mindex.models.music_generators import Lyrics, MusicRequest
+    from mindex.models.video_generators import VideoRequest, VideoStatus
 
 
 class ModelError(RuntimeError):
@@ -89,10 +95,12 @@ def _error_detail(response) -> str:
     return (response.text or "").strip()[:ERROR_DETAIL_LIMIT]
 
 
-def request(method: str, url: str, *, timeout: float = 180, attempts: int = 3, **kwargs) -> dict:
+def request(method: str, url: str, *, timeout: float = 180, attempts: int = 3, audit=None, **kwargs) -> dict:
+    """带重试的 JSON 请求。诊断只记录方法、URL 与请求体（``audit`` 给出时记录它代替请求体，
+    用于省略内联图片等大字段）；请求头（含鉴权）永不记录。"""
     for attempt in range(attempts):
         record("model-request", {"method": method, "url": url, "attempt": attempt,
-                                 "json": kwargs.get("json")})
+                                 "json": kwargs.get("json") if audit is None else audit})
         try:
             response = httpx.request(method, url, timeout=timeout, trust_env=False, **kwargs)
             record(
@@ -196,7 +204,58 @@ class Storyboarder(Protocol):
 
 
 class Writer(Protocol):
-    def write(self, outline: str, materials: MaterialDigest | None = None) -> str: ...
+    def write(
+        self,
+        outline: str,
+        *,
+        template: ScriptTemplate,
+        materials: MaterialDigest | None = None,
+        references: Sequence[str] = (),
+    ) -> str: ...
+
+
+class VideoGenerator(Protocol):
+    """异步视频生成：提交任务 → 轮询状态 → 下载结果；取消可选（不支持时为空操作）。"""
+
+    def submit(self, request: VideoRequest) -> str: ...
+
+    def poll(self, task_id: str) -> VideoStatus: ...
+
+    def fetch(self, status: VideoStatus, target: Path) -> None: ...
+
+    def cancel(self, task_id: str) -> None: ...
+
+    def health(self) -> dict: ...  # 鉴权/可达性探测，绝不发起生成
+
+    def allowed_seconds(self, seconds: float) -> float: ...
+
+
+class ImageGenerator(Protocol):
+    """AI 生成图片：一次请求生成一张图片（PNG/JPEG 字节）。"""
+
+    def generate(self, request: ImageRequest) -> bytes: ...
+
+    def health(self) -> dict: ...  # 鉴权/可达性探测，绝不生成图片
+
+
+class MusicGenerator(Protocol):
+    """背景音乐：音乐生成（含翻唱）与歌词生成。"""
+
+    def generate(self, request: MusicRequest) -> tuple[bytes, dict]: ...
+
+    def lyrics(self, prompt: str, *, mode: str = "write_full_song", lyrics: str | None = None,
+               title: str | None = None) -> Lyrics: ...
+
+    def health(self) -> dict: ...  # 鉴权/可达性探测，绝不生成音乐
+
+
+class Animator(Protocol):
+    """AI 动画：按画面说明生成自包含 HTML/JS 动画源码（已通过静态校验）。"""
+
+    def animate(self, brief: str, *, seconds: float, width: int, height: int, fps: float,
+                previous: str | None = None, feedback: str | None = None) -> str: ...
+
+    def ping(self) -> dict: ...  # 设置页测试连接：一次最小对话
 
 
 def parse_json(content: str):
@@ -269,3 +328,43 @@ def make_writer(config: Config) -> Writer:
     from mindex.models.writer import QwenWriter
 
     return QwenWriter(config)
+
+
+def make_video_generator(config: Config) -> VideoGenerator:
+    from mindex.models.video_generators import (
+        ComfyUIVideoGenerator,
+        DashScopeVideoGenerator,
+        MiniMaxH3VideoGenerator,
+        MiniMaxVideoGenerator,
+    )
+
+    backend = config.studio.video_generator.backend
+    if backend == "minimax_h3":
+        return MiniMaxH3VideoGenerator(config)
+    if backend == "minimax":
+        return MiniMaxVideoGenerator(config)
+    if backend == "dashscope":
+        return DashScopeVideoGenerator(config)
+    return ComfyUIVideoGenerator(config)
+
+
+def make_image_generator(config: Config) -> ImageGenerator:
+    from mindex.models.image_generators import ComfyUIImageGenerator, MiniMaxImageGenerator
+
+    if config.studio.image_generator.backend == "comfyui":
+        return ComfyUIImageGenerator(config)
+    return MiniMaxImageGenerator(config)
+
+
+def make_music_generator(config: Config) -> MusicGenerator:
+    from mindex.models.music_generators import ComfyUIMusicGenerator, MiniMaxMusicGenerator
+
+    if config.studio.music_generator.backend == "comfyui":
+        return ComfyUIMusicGenerator(config)
+    return MiniMaxMusicGenerator(config)
+
+
+def make_animator(config: Config) -> Animator:
+    from mindex.models.animator import LlmAnimator
+
+    return LlmAnimator(config)

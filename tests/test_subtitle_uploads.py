@@ -12,6 +12,8 @@ from mindex.processing.dialogue import current_dialogue, relative_dialogue
 from mindex.processing.pipeline import Pipeline
 from mindex.shared.processing_lock import ProcessingLock
 
+pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
+
 SRT = "1\n00:00:00,200 --> 00:00:01,400\n<i>你好</i>，牛车水！\n第二行\n\n"
 ASS = """[Script Info]
 ScriptType: v4.00+

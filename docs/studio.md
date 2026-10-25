@@ -10,7 +10,7 @@
 
 任务 ID 与构建方案之间有只读的“任务元信息”折叠区，只展示创建后不可变的输入：视频大纲（老任务显示创建时填写的创作文案；整行铺开，按原文分段换行，不截断）、创建时间、可用素材（`null` 显示为“不限（全部素材）”）。这些值取自 `job.json`，面板不提供任何写入路径；音轨、字幕、召回数量、音色等高级选项由方案参数独立展示并可动态调整，不在元信息中重复。
 
-分镜矩阵的列依次为文本与查询、召回、配音、选片与对齐、分镜渲染。格内显示已选版本、摘要、最近执行结果和兼容性提示，详情展开后可浏览候选、试听、查看历史或选为构建输入。这两个历史操作互相独立；选择版本不会执行模型或渲染。矩阵支持横向滚动，固定分镜标识和表头，也可以整体折叠。下方依次为成片、产物与调试记录。
+分镜矩阵固定五列：文本与查询、召回、配音、选片与对齐、分镜渲染，不随[画面来源](#分镜画面来源)增加列。“召回”列统一显示每个分镜的画面：素材召回显示召回结果，AI 生成图片、AI 生成视频、AI 动画分别显示生成图片（draw）、生成画面（generate）、生成动画（animate）阶段，展开即该阶段的详情；上传片段/静态图片分镜显示上传的素材（展开预览，在文本与查询里更换）。该列的“全部执行/复用”“全部重新生成”以虚拟列 `picture` 提交，一次构建里为每个分镜执行各自的画面阶段（上传素材的分镜不参与；生成视频/动画依赖配音，还没有配音时这些节点阻塞并说明原因）。[背景音乐](#背景音乐)显示在配音列里，不单独成列；分镜的画面来源没有的其他阶段（如静态图片的选片）显示“不适用”。格内显示已选版本、摘要、最近执行结果和兼容性提示，详情展开后可浏览候选、试听、查看历史或选为构建输入。这两个历史操作互相独立；选择版本不会执行模型或渲染。矩阵支持横向滚动，固定分镜标识和表头，也可以整体折叠。下方依次为成片、产物与调试记录。
 
 召回详情的“执行 / 复用”优先选择输入、检索设置及索引等匹配且文件完好的成功召回版本，没有时才重新检索；“强制重新生成”跳过复用，每次重新检索并新增版本。两者仅执行召回。“查看完整版本”集中展示完整的实际输入、参数、候选数据、依赖树及 candidates 文件下载；单元格详情不再重复下载入口和参数段落。
 
@@ -30,7 +30,7 @@
 
 文案是方案级的版本化阶段 `script`，位于“分镜工作台”上方的“文案创作”区域：
 
-- 默认显示“文案待创作”。点击“生成文案”调用“文案创作”模型（设置页新增的 `writer` 角色，配置与“文本拆分镜”相同，见 [设置页](settings.md)）。模型收到大纲，以及一段独立的“可用素材摘要”参考段（见下文）。提示词要求只保留旁白正文，不要标题、小标题、Markdown 或前后说明，并遵守大纲对语言、字数和顺序的要求；温度 0.7，重复点击会得到新的文案版本。
+- 默认显示“文案待创作”。点击“生成文案”调用“文案创作”模型（设置页新增的 `writer` 角色，配置与“文本拆分镜”相同，见 [设置页](settings.md)）。模型收到大纲，以及一段独立的“可用素材摘要”参考段（见下文）。系统提示来自方案选择的[文案模板](#文案模板)（缺省“通用解说”）：只保留旁白正文，不要标题、小标题、Markdown 或前后说明，并遵守大纲对语言、字数和顺序的要求；温度 0.7，重复点击会得到新的文案版本。
 - 文案可在文本框里直接修改，点击“保存文案”生成新版本（`origin=manual`）。文本框有未保存修改时，“构建成片”和其他会改动方案的按钮不可用；重新生成会丢弃这些修改，并先确认。
 - 每个版本记录来源：`generated`（模型生成）、`manual`（手动保存）、`legacy`（老任务迁移）。新建方案继承当前方案的文案，不带分镜；复制方案连同文案和分镜一起复制。
 
@@ -41,6 +41,120 @@
 老任务的 `input_text` 本来就是文案：首次读取时迁移为一个已完成的 `legacy` 文案版本，所有方案共用，现有分镜视为由它拆出，因此行为不变，也不会被判为过期。老任务没有大纲，不能重新生成文案，但可以手动编辑保存。
 
 旧的分步接口（`/steps`、`/run`）只认创建时传入的文案；新任务没有 `input_text`，调用会返回 422，请改用版本工作台。
+
+## 文案模板
+
+文案区的“文案模板”下拉为当前方案选择模板（方案参数 `options.template_id`，新方案缺省 `base`；没有该键的旧方案同样按 `base` 处理）。内置六个模板，定义在 `backend/src/studio/templates/*.yaml`，随程序打包、只读：
+
+| ID | 名称 | 类型 | 要点 |
+|---|---|---|---|
+| `base` | 通用解说 | outline | 按大纲组织：开头抓住注意，中段逐点展开，结尾总结；短句、适合配音节奏 |
+| `history` | 历史解说 | outline | 时间线与因果推进，人物和事件交代清楚，有史实边界，避免演义化 |
+| `hot` | 热点评论 | outline | 先说事件和争议点，再给观点与论据，最后做判断，事实与观点分开 |
+| `film` | 影视解说 | outline | 剧情压缩，关键转折处设悬念，讲清人物动机，控制剧透程度 |
+| `science` | 知识科普 | outline | 从问题引入，再讲概念、例证和类比，结尾给结论 |
+| `interview` | 访谈改写 | rewrite | 从参考文稿提炼观点，改成第三人称叙述，保留关键原话 |
+
+模板字段：`id`、`name`、`category`、`kind`（`outline` 按大纲写 / `rewrite` 改写参考文稿）、`version`、`description`、`instructions`（系统提示）、`constraints.max_chars`（`null` 时用 `studio.max_input_chars`，否则取二者较小值）。模型严格校验（`shared/types.py` 的 `ScriptTemplate`），未知字段直接报错。`rewrite` 模板允许大纲为空，但至少需要一份[参考文稿](#参考文稿)；没有参考文稿时预检把文案节点列为阻塞，原因“访谈改写模板需要参考文稿”。
+
+模板在独立的模板管理页 `/studio/templates` 管理（创作页顶部“创作任务 / 文案模板”分区标签，或文案区的“管理模板”链接进入；链接带上当前模板与来源任务 `?id=…&job=…`，“创作任务”标签回到该任务）。左侧列出全部模板并可按名称、分类或提示词搜索；右侧显示完整提示词。内置模板只读，可以查看与试写，“复制为自定义模板”后才能修改；复制出的用户模板（ID 以 `user-` 开头，存 metadata 库的 `script_templates` 表，迁移步骤 v2）可以修改名称、分类、类型、字数上限、说明和提示词，也可以删除。被任一任务的任一方案引用（`options.template_id`）的用户模板不能删除（409，提示换用其他模板）。用户模板随 `mindex backup` 导出与导入。
+
+管理页下方的“试写效果”用表单里的提示词、类型与字数上限（含未保存的修改）和示例大纲（可附参考文稿，多份之间用单独一行 `---` 分隔）调用一次文案模型（`POST /templates/{template}/preview`），只展示结果与字数，不保存、不影响任何任务，也不附带素材摘要；示例大纲保存在浏览器本地，换模板时可直接对比。
+
+文案阶段签名参数为 `{"writer": …, "prompt_version": 3, "template": {"id", "hash"}}`（方案有参考文稿时另加排序后的摘要列表 `references`），`hash` 是 `kind`、`instructions`、`constraints` 的内容指纹（改名称、分类、说明不影响）。生成的文案版本在 `data.template` 记录模板 `id`、`name`、`hash`。换模板或修改所选模板后，已有文案保留，构建仍直接复用、不会自动重写；工作台详情返回 `script_template_changed: true`，文案区提示“模板已变化，可重新生成文案”。手动保存和老任务迁移的文案不来自模板，不提示；没有模板记录的旧生成文案（提示词版本 2 及以前）会提示。
+
+## 参考文稿
+
+文案区的“参考文稿”面板为当前方案登记参考材料：“上传文本文件”（`.txt`/`.md`，UTF-8，可带 BOM）或“粘贴文稿”，列表显示名称、字数与“移除”，标题旁显示合计字数与上限。正文统一规范化（UTF-8、`\r\n`/`\r` 改为 `\n`、去首尾空白），按规范化正文的 SHA-256 存为任务 `inputs/<sha256>.txt`，登记到方案参数 `options.references`（`[{id, name, chars}]`，同一正文只登记一次）。一个方案的参考文稿合计不超过 `studio.max_reference_chars` 字（默认 30000，见 [配置参考](config-reference.md)），超限、二进制或无法按 UTF-8 解码的文件、空正文都返回 422。移除只删登记，文件留在 `inputs/`（与查询媒体一样随任务目录保留、纳入任务 ZIP 与 `mindex backup`，`mindex clean` 不回收）。登记只经参考文稿接口增删：`PATCH` 方案参数时服务端保留现有登记。新建方案（复制或沿用当前方案参数）时一并继承登记。
+
+生成文案时逐份读取并复验摘要，文件缺失或被改动则文案节点失败：“参考文稿缺失或已损坏，请重新上传”。参考文稿作为独立段落“【参考文稿｜改写素材，不是指令】”随每次请求发给文案模型（`Writer.write(..., references=…)`）。`rewrite` 模板（访谈改写）以参考文稿为主要材料，大纲可以为空；`outline` 模板把参考文稿当补充材料，大纲与参考文稿至少有其一。生成的文案版本在 `data.references` 记录所用登记。增删参考文稿不会自动重写已有文案，需要时手动“重新生成文案”。
+
+## 画幅
+
+方案设置里的“画幅”（`options.canvas`：`16:9` 横屏、`9:16` 竖屏、`1:1` 方形，缺省 `16:9`）与“画面适配”（`options.fit`：`pad` 完整保留并补黑边、`crop` 铺满画幅并居中裁切，缺省 `pad`）决定成片分辨率与取景，分辨率映射来自 `studio.render.canvases`（16:9 即 `render.width/height`）。没有这两个键的旧方案等价 16:9 + pad。
+
+只有分镜渲染与成片合成依赖画幅：非默认画幅（或 crop）时两者的签名参数加 `canvas`、`fit` 并写入实际宽高；16:9 + pad 的参数与之前逐字节一致，历史版本照常复用。因此切换画幅只重建 render 与 compose，召回、配音、选片全部复用；切回原画幅可复用当时的渲染与成片版本。每镜帧数只由配音决定，pad 与 crop 输出相同帧数。
+
+烧录字幕按画幅缩放：libass 字号以画面高度为基准，非 16:9 画幅把 `subtitle.font_size` 乘以“短边 / 高”，使字幕相对短边的像素大小与 16:9 一致（全屏观看时物理大小相同；1:1 系数为 1）；竖屏另把字幕下边距 `MarginV` 提高到 36（约画面高度的 1/8），避开短视频平台底部按钮区。16:9 的字幕样式不变。合成完成后校验成片分辨率与画幅一致。分镜快速预览仍按 16:9 缩略尺寸生成。
+
+## 分镜画面来源
+
+每个分镜的画面来源记录在分镜内容的 `source`（`Shot.source`，按 `kind` 判别）：
+
+| kind | 设置 | 逐镜阶段 | 说明 |
+|---|---|---|---|
+| `recall`（缺省） | — | 召回 → 配音 → 选片对齐 → 分镜渲染 | 素材库召回与选片，即原有流程；需要活动索引 |
+| `clip` | `media_id`，可选 `start`（秒，≥0） | 配音 → 选片对齐 → 分镜渲染 | 上传的视频片段：从起点（缺省 0）起取与配音等长的窗口 |
+| `image` | `media_id`，`motion`（`zoom-in`/`zoom-out`/`pan-left`/`pan-right`/`none`，缺省 zoom-in），`strength`（0–1，缺省 0.3） | 配音 → 分镜渲染 | 静态图片按运动方式生成与配音等长的画面 |
+| `aigc_image` | 可选 `prompt`（≤1500 字）、`reference_id`（主体参考图 sha256，图生图）、`seed`、`prompt_optimizer`；`motion`、`strength` 同 image | 配音 → 生成图片 → 分镜渲染 | AI 生成图片：图片生成服务按提示词生成一张图片，再按静态图片推拉/平移；见 [AI 生成图片](#ai-生成图片) |
+| `aigc` | 可选 `prompt`（≤1000 字）、`negative`（≤500 字）、`image_id`（首帧图 sha256）、`seed`（0–2147483647）；MiniMax H3 另有 `mode`、`last_image_id`、`references`、`model`、`resolution`、`ratio`、`duration` | 配音 → 生成画面 → 选片对齐 → 分镜渲染 | AI 生成视频：视频生成服务按提示词生成片段，再从片段开头取与配音等长的窗口；见 [AI 生成视频](#ai-生成视频) |
+| `animation` | 可选 `brief`（画面说明，≤2000 字） | 配音 → 生成动画 → 分镜渲染 | 动画生成 LLM 写自包含 HTML/JS 动画，渲染时在离线沙箱里逐帧录制；源码可人工修改；见 [AI 动画](#ai-动画) |
+
+`source` 为空即素材召回，dump 时省略该键；显式提交 `{"kind": "recall"}` 也规范化为空。因此没有设置来源的分镜内容版本号与签名都不变（`tests/test_studio_signature_snapshot.py`）。来源表在阶段注册表的 `SHOT_SOURCES`，预检、依赖与执行按每个分镜的序列展开：clip 与 image 没有召回节点，不需要发布索引，纯 clip/image 任务在没有活动索引时也能完整构建；混合来源的分镜在成片合成里按分镜顺序拼接。改变来源时，新来源没有的阶段选用（例如改为图片后的召回与选片）以及人工区间、参考锚点从方案中移除；候选、锚点与人工选片接口对非召回分镜返回 422“该分镜的画面来源不是素材召回，不能选择候选或人工选片”。
+
+来源文件复用查询文件通道上传（`POST …/query-media`，`purpose=source`），按内容 SHA-256 存为任务 `inputs/<sha256>.<suffix>`：视频受 `studio.max_clip_seconds`（默认 300 秒）与 `studio.max_clip_mb`（默认 500 MB）限制，图片与查询图片相同。保存分镜时校验文件已上传且类型匹配（clip 须为视频、image 须为图片），预检在文件缺失时把节点阻塞为“画面文件缺失或已损坏，请重新上传”，执行前按文件名中的摘要复验，文件被改动时节点失败并给出同样的原因。来源文件与查询媒体、参考文稿一样随任务目录保留、纳入任务 ZIP 与 `mindex backup`，`mindex clean` 不回收 `inputs/`。
+
+- clip 选片：窗口为 `[start, start + 配音时长 / 变速]`（变速取方案 `atempo`，自动时不变速），片段从起点起不够长时冻结末帧补足（`alignment=padded`，并给出警告；`strict` 对齐时拒绝），起点超出片段时长时报错。选片签名只含旁白、配音版本、片段摘要与起点（`clip_version`），因此改起点只重建选片、渲染与成片，配音复用。ducking 音轨使用片段自身的原声。
+- image 渲染：图片先经 `shared/images.image_png` 归一化（EXIF 方向、透明铺白），按画幅 pad/crop 适配到 2 倍超采样画布，再由 ffmpeg zoompan 逐帧取景，输出恰好等于配音帧数、尺寸等于方案画幅的画面（`studio_render.still_shot`）。zoom-in 从 1 倍推到 `1 + strength/2` 倍，zoom-out 反向，pan-left/pan-right 在最大倍数下把取景框从右到左/从左到右移过画面，none 为静止；同一输入输出确定。图片没有原声，ducking 方案也只有配音。渲染签名含图片摘要、`motion`、`strength`、变速与画幅参数（`image_version`），改运动方式或强度只重建该镜渲染与成片。
+
+时间线视频因此有两种形态（`TimelineVideo` 判别联合）：素材区间 `LibraryVideo`（缺省形态，旧数据没有 `kind`，dump 也不写 `kind`，旧选片版本逐字节不变）与文件区间 `FileVideo`（`kind=file`，`ref` 为 `{"input": "<sha256>.<suffix>"}` 或 `{"version", "file"}`，`start`/`end` 是文件内秒数）。clip 的选片版本与 image 的渲染版本记录文件区间；分镜渲染、带声预览、成片字幕与智能助手的选片摘要都识别两种形态。
+
+创作页分镜内容的“画面来源”选择素材召回 / 上传片段 / 静态图片 / AI 生成图片 / AI 生成视频 / AI 动画：上传片段提供文件上传、起点（秒）与预览（视频从起点开始播放，并说明窗口按配音时长截取），静态图片提供文件上传、运动方式与强度滑块；非召回来源隐藏召回设置与粒度/数量覆盖，分镜表中该来源没有的阶段显示“不适用”。工作台详情的 `shot_stages` 给出每个分镜的阶段序列。智能助手 `edit_shots` 的 `source` 字段设置来源（`clear: ["source"]` 恢复素材召回），`attach_query_media` 的 `purpose=source` 把附件上传为画面文件并设为 clip（视频）或 image（图片）来源，预览说明下次构建要重建哪些阶段；`get_shot_details` 显示画面来源。
+
+### AI 生成图片
+
+`aigc_image` 分镜由设置页的“图片生成”角色（`studio.image_generator`，默认 MiniMax `image-01`，也可用本地 ComfyUI 工作流；`models/image_generators.py`，协议 `ImageGenerator`：generate / health）先生成一张图片，之后与静态图片完全相同。没有激活图片生成档案（且 yaml 未设 `enabled: true`）时，预检把 `draw` 节点阻塞为“未配置图片生成服务，请在设置页激活图片生成档案”，其后的渲染与成片随之阻塞。
+
+- 生成图片（`draw`，`studio/workspace/handlers/draw.py`）不依赖配音：提示词取 `prompt`，缺省用画面意象，再缺省用召回查询；MiniMax 的 `aspect_ratio` 取与方案画幅最接近的比例（16:9 / 9:16 / 1:1 等），ComfyUI 直接映射宽高；有 `reference_id` 时作为主体参考（`subject_reference`，图生图）。请求只取一张（`n=1`，base64 返回，立即落盘）。结果经 `image_png` 规范化为 `versions/<vid>/image.png`，另存脱敏 `request.json`。
+- 签名：参数为图片生成服务的 backend、model（ComfyUI 另含工作流摘要与映射），载荷为提示词、参考图摘要、seed、提示词优化开关与画幅尺寸；`motion`/`strength` 只进渲染签名，改运动方式不会重新生成图片。
+- 渲染：与 image 相同的 `still_shot`，图片取自所选 `draw` 版本（时间线文件区间 `{"version": <draw 版本>, "file": "image"}`），签名含 draw 版本、图片摘要、运动参数与变速。
+
+创作页“AI 生成图片”提供提示词、种子、提示词自动优化、主体参考图上传/移除，以及与静态图片相同的运动方式和强度；生成图片阶段显示在分镜表的“召回”列。智能助手：`edit_shots` 的 `source` 支持 `kind=aigc_image`，分镜是 aigc_image 时 `attach_query_media`（`purpose=source`）把图片附件设为主体参考图，`run_node`/`run_column` 支持 `stage=draw`。
+
+### AI 生成视频
+
+`aigc` 分镜由设置页的“视频生成”角色（`studio.video_generator`，见 [设置页](settings.md) 与 [配置参考](config-reference.md)）生成画面。设置页默认档案为 MiniMax H3（`backend: minimax_h3`，视频生成 V2：`POST /v2/video_generation`、`GET /v2/query/video_generation/{task_id}`），设置页只配置 endpoint 与密钥，生成方式与 H3 参数逐镜设置；也可用 MiniMax 海螺、阿里通义万相或本地 ComfyUI（`models/video_generators.py`，协议 `VideoGenerator`：submit / poll / fetch / 可选 cancel / health）。没有激活视频生成档案（且 yaml 未设 `enabled: true`）时，预检把 `generate` 节点阻塞为“未配置视频生成服务，请在设置页激活视频生成档案”，其后的选片、渲染与成片随之阻塞；ComfyUI 未导入工作流或节点映射、线上后端未填模型名时同样阻塞并说明原因。
+
+- 生成方式 `mode`：`text` 文生视频；`first_frame` 首帧图生视频（`image_id`）；`last_frame` 尾帧图生视频（`last_image_id`）；`first_last` 首尾帧生视频；`reference` 主体（多模态）参考生视频（`references`：`{kind: image|video|audio, media_id}`，最多 9 图、3 视频、3 音频，不能只有音频）。缺省时有首帧图为 `first_frame`，否则 `text`。H3 逐镜参数：`model`（`MiniMax-H3` / `-Highspeed` / `-Lite` / `-Max`，缺省用档案模型）、`resolution`（480P/768P/2K，缺省 768P；2K 只有 MiniMax-H3，480P 只有 Lite/Max）、`ratio`（缺省按方案画幅；文生视频不能为 adaptive，图生视频固定 adaptive）、`duration`（4–15 秒整数，Max 为 5–15；缺省按配音时长取整）。尾帧、首尾帧与主体参考只有 H3 支持：其他后端的预检阻塞为“当前视频生成档案（…）不支持…”。参考素材（图片/视频/音频）都经 `query-media`（`purpose=source`）上传，PATCH 与预检校验已上传。H3 文档未给出取消接口，取消构建时只停止轮询。
+- 生成画面（`generate`，`studio/workspace/handlers/generate.py`）依赖配音：提示词取 `prompt`，缺省用画面意象 `visual`，再缺省用召回查询 `query`；时长 = 配音时长 ÷ 方案变速，向上取整到 `durations` 中的允许值，都更短时取最大值（不足部分由选片冻结末帧补足）；尺寸为方案画幅分辨率。参考图经 `query-media`（`kind=image`，`purpose=source`）上传为 `inputs/<sha256>.<suffix>`，保存分镜时校验已上传，预检缺失时阻塞为“参考图片缺失或已损坏，请重新上传”，执行前复验摘要。
+- 执行：提交任务后轮询，间隔从 `poll_interval`（默认 5 秒）起按 1.5 倍退避、上限 4 倍，总等待不超过 `max_wait`（默认 900 秒），超时尽力撤销远端任务并失败；轮询之间每 0.2 秒检查一次构建取消，取消时撤销远端任务，节点记为“已取消”，其余未执行节点阻塞。连续 3 次轮询网络错误才失败，审核拒绝立即失败。状态变化（排队中/生成中/已完成）写入执行日志。结果下载后统一封装为 MP4（无法直接封装时转 H.264）并经 ffprobe 校验。
+- 产物：`versions/<vid>/generated.mp4` 与 `request.json`（提示词、时长、尺寸、参考图摘要、生成服务 backend/model、任务 ID、最后一次状态与轮询次数；不含密钥与请求头，结果 URL 去掉签名查询串）。失败或取消的版本保留 `request.json` 与 `debug/` 诊断，不被选用。
+- 签名：`generate` 的参数为生成服务的 backend、model、允许时长（ComfyUI 另含 fps、工作流内容摘要与节点映射），载荷为提示词、反向提示词、seed、参考图摘要、取整后的时长与画幅尺寸，输入为分镜内容与配音版本；不含密钥、超时与轮询参数。签名一致时直接复用已生成版本，不再调用服务（线上生成按次计费）。
+- 选片：在生成片段内从 0 起取与配音等长的窗口，时间线记录文件区间 `{"version": <generate 版本>, "file": "generated"}`；片段偏短时冻结末帧补足（`alignment=padded` 并给出警告，`strict` 对齐拒绝）。选片签名含旁白、配音版本与生成版本（`aigc_version`）。渲染与成片沿用文件区间流程；ducking 方案使用生成片段自带的音轨（如有）。
+
+创作页“画面来源”选择“AI 生成视频”后提供生成方式、模型档位、分辨率、宽高比、时长（MiniMax H3 专用，档案不是 H3 时有提示），首帧/尾帧图与主体参考素材的上传/移除，以及提示词（占位文字显示缺省会用的画面意象或查询）、反向提示词与种子；生成画面阶段显示在分镜表的“召回”列，格内显示生成时长与轮询次数，详情展示提示词、任务 ID、请求/实际时长与生成结果预览。智能助手 `edit_shots` 的 `source` 支持 `kind=aigc` 及 `prompt`/`negative`/`image_id`/`seed` 与 H3 的 `mode`/`last_image_id`/`references`/`model`/`resolution`/`ratio`/`duration`，分镜已是 aigc 来源时 `attach_query_media`（`purpose=source`，`role=first_frame|last_frame|reference`）把附件设为首帧、尾帧或主体参考；`run_node`/`run_column` 支持 `stage=generate`（预览提示会调用视频生成服务、可能产生费用），`get_shot_details` 显示 aigc 来源、生成状态并以媒体附上生成画面；视频生成档案可用 `create_model_profile` 等档案工具管理（见 [智能助手](agent.md)）。自建 ComfyUI 的部署与工作流导出见 [GPU 模型部署](DEPLOYMENT.md#comfyui可选的-aigc-视频生成服务)。
+
+### AI 动画
+
+`animation` 分镜由设置页的“动画生成”角色（`studio.animator`；设置页首次启动建好并激活默认档案智谱 `glm-5.3-flash`，需要填写 API Key；没有激活动画生成档案时才复制 `agent.llm` 并跟随激活的智能助手档案，见 [设置页](settings.md) 与 [配置参考](config-reference.md#animator--动画生成studioanimator)）编写 HTML/JS 动画源码，再在沙箱里逐帧录制成画面。它适合数据图表、文字动效、流程/原理示意、时间线等需要准确文字与数字的画面；与 AIGC（扩散模型生成写实视频）不同，动画是可读可改的程序，画面完全由源码决定。未启用动画生成（`enabled=false`）或档案缺少地址/模型名时，预检把 `animate` 节点阻塞为“未配置动画生成服务，请在设置页激活动画生成档案”，其后的渲染与成片随之阻塞。
+
+- 生成动画（`animate`，`studio/workspace/handlers/animate.py`，模型客户端 `models/animator.py`）依赖配音：画面说明取 `brief`，缺省用画面意象 `visual`，再缺省用旁白 `text`；动画时长 = 配音时长 ÷ 方案变速，画布为方案画幅分辨率，帧率为 `studio.render.fps`。系统提示要求只输出一份自包含 HTML（内联 CSS/JS，画布恰好铺满、`overflow: hidden`，只由时间驱动、同一时刻画面确定，中文字体只用 `sans-serif`），改提示词须递增 `ANIMATOR_PROMPT_VERSION`（当前 1）。产物为 `versions/<vid>/animation.html`（`data.origin = "generated"`）。
+- 静态校验（`validate_animation`，生成结果与人工保存都要过）：大小不超过 `max_html_kb`（默认 200 KB）；必须含 `<html>` 或 `<body>`；拒绝属性、CSS `url()` 与脚本赋值中的 `http://`、`https://`、`//` 外部地址，`@import`，`fetch`、`XMLHttpRequest`、`WebSocket`、`EventSource`、`navigator.sendBeacon`、动态 `import()`、Worker/Service Worker，`<script src>`、`<link>`、`<iframe>`、`<object>`、`<embed>`、`<meta http-equiv=refresh>`，`window.open`、`localStorage`/`sessionStorage`、`indexedDB`、`document.cookie`。未通过时把中文违规清单作为反馈让模型重写，最多重试 `retries` 次（默认 2）。
+- 录制（`studio/animation_capture.py`，渲染阶段执行）：Playwright 无头 Chromium，每次使用全新的临时 user-data-dir（录完即删），离线模式，`context.route` 中止除 `data:`/`blob:`/`about:` 以外的全部请求，WebSocket 一律接管且不连接服务器，Service Worker 禁用。初始化脚本在页面脚本之前接管 `Date`（从固定时刻起走）、`performance.now`、`requestAnimationFrame`、定时器、`requestIdleCallback` 与 `document.timeline.currentTime`，并把 `Math.random` 换成固定种子；CSS 动画/过渡与 Web Animations 每帧暂停并把 `currentTime` 设为虚拟时刻。第 i 帧对应虚拟时刻 `i × 1000 / fps` 毫秒，按渲染帧数（与配音采样对齐的 `frames`）逐帧推进并截图，PNG 经管道交给 ffmpeg 编为 H.264（`animation.mp4`），再按画幅规范化为 `video.mp4`。同一源码、画布与 fps 的两次录制逐帧一致。页面加载与每帧推进各有 5 秒上限（推进经 CDP `Runtime.evaluate` 的 timeout 终止脚本，死循环与定时器风暴都会以中文错误失败），整体墙钟不超过 `max_capture_seconds`（默认 60 秒）。依赖为可选 extra `animation`，未安装时渲染失败并提示“AI 动画录制需要安装可选依赖：uv sync --extra animation && uv run playwright install chromium”（见 [部署](DEPLOYMENT.md#ai-动画录制可选)）。动画没有原声，ducking 方案也只有配音。
+- 签名：`animate` 的参数为动画生成服务的 backend、model、`max_html_kb` 与提示词版本，载荷为画面说明、时长、画布尺寸与帧率，输入为分镜内容与配音版本；不含密钥与超时。渲染的输入为分镜内容、配音与动画版本，载荷含动画版本、源码 SHA-256 与变速（`animation_version`），画幅与帧率在渲染参数里。
+- 人工修改：`PATCH …/shots/{shot}/animation`（`{revision, html}`）经同一套静态校验后写入 `origin = "manual"` 的新动画版本并选用，只有该分镜的渲染（重新录制）与成片需要重建，配音与其他分镜复用。人工版本被“钉住”：选用期间构建直接复用它（即使画面说明或配音之后变化，也不会按签名重新生成覆盖，冲突列表不报告它自身的签名差异），只有强制构建或单独执行生成动画（重新生成）才替换；手改版本的签名由源码摘要派生，不会被按签名的复用误选。`dry_run: true` 只返回 `{valid, errors, bytes, max_kb}`，不写版本（智能助手预览用）。
+- 预览：`GET …/versions/{vid}/animation.html` 返回源码，响应头 `Content-Security-Policy: default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; font-src data:; sandbox allow-scripts` 与 `X-Content-Type-Options: nosniff`；产物下载接口返回 HTML/SVG 文件时带同样的沙箱头。创作页以 `<iframe sandbox="allow-scripts">`（不含 `allow-same-origin`）加载，动画脚本运行在不透明源里，拿不到本站 Cookie、存储与父页面 DOM，也无法发起网络请求。
+
+创作页“画面来源”选择“AI 动画”后提供画面说明（占位文字显示缺省会用的画面意象或旁白）；生成动画阶段显示在分镜表的“召回”列，格内显示来源（模型生成/人工修改）、字符数与时长，详情展示画面说明、沙箱预览（可重新播放）与“编辑源码”对话框（等宽文本框，保存即提交 PATCH，校验未通过时在对话框顶部列出违规项），“重新生成”按钮让模型重写源码，渲染格的“重新生成”只重新录制。智能助手：`edit_shots` 的 `source` 支持 `kind=animation` 与 `brief`，`run_node`/`run_column` 支持 `stage=animate`，`get_animation_source`/`edit_animation_source`（studio_detail 领域）读取与修改源码（修改走预览确认，预览先做服务端静态校验），`get_shot_details` 显示动画版本、沙箱预览地址并以媒体附上录制画面；动画生成档案可用档案工具管理（见 [智能助手](agent.md)）。
+
+## 背景音乐
+
+背景音乐在分镜工作台的配音列设置：分镜内容的 `music`（`Shot.music`）是提示点，默认没有背景音乐。
+
+| kind | 设置 | 含义 |
+|---|---|---|
+| `generate` | `prompt`（音乐描述，≤2000 字）、`instrumental`（缺省 true 纯音乐）、可选 `lyrics`（≤3500 字，非纯音乐时使用；为空时由模型按描述写词）、`volume`（0–1，缺省 0.25） | 从此分镜起生成新的背景音乐 |
+| `cover` | `audio_id`（参考音频 sha256，6 秒–6 分钟）、`prompt`（目标风格，10–300 字）、可选 `lyrics`、`volume` | 从此分镜起按参考音频翻唱 |
+| `none` | — | 从此分镜起停止背景音乐 |
+
+没有提示点的分镜顺延前一段背景音乐，直到下一个提示点；方案开头到第一个提示点之前没有背景音乐（`workspace/music.py` 的 `segments`）。工作台详情的 `shot_music` 给出每个分镜的归属（`start` 提示点、`from` 顺延自哪个分镜、`stop` 停止）。配音可以跨分镜，背景音乐段落按分镜边界计算，与配音如何切分无关。
+
+- 背景音乐阶段（`music`，`handlers/music.py`）只出现在 generate/cover 提示点分镜上，位于配音之后；调用设置页的“音乐生成”角色（`studio.music_generator`，默认 MiniMax `music-3.0`，翻唱 `music-cover`；或本地 ComfyUI 工作流，映射 prompt/lyrics/seconds/seed/audio），产物为 `versions/<vid>/music.<ext>`。签名为提示点（不含音量）与服务 backend/model（ComfyUI 另含工作流与段落预估时长）；改音量只重新合成成片。未激活音乐生成档案时预检阻塞为“未配置音乐生成服务，请在设置页激活音乐生成档案”。
+- 歌词生成：`POST /jobs/{id}/music/lyrics`（MiniMax `lyrics_generation`，`write_full_song` 或 `edit`），只返回 `{title, style_tags, lyrics}`，不改分镜；ComfyUI 档案不支持。
+- 成片合成：每段音乐循环/截断到段落长度（按分镜采样边界），淡入 0.5 秒、淡出最多 1.5 秒，按 `volume` 缩放，段外静音；再以配音为侧链（`sidechaincompress`）自动压低后与配音混合。成片签名只在有背景音乐段落时加入各段（起始分镜、覆盖分镜、音乐版本与音量），没有背景音乐的成片签名与旧版逐字节一致。
+- MiniMax 公告：自 2026-08-20 起付费音乐生成与歌词生成接口不再对新用户开放，历史付费用户可继续使用；无权限时平台错误原样转述。
+
+创作页在配音格内显示背景音乐摘要（从此镜开始 / 顺延 #n / 停止），配音详情里的“背景音乐”区可选择顺延、生成、翻唱或停止，填写描述、纯音乐开关、歌词（“生成/改写歌词”调用歌词生成）、上传翻唱参考音频、调整音量，保存后可单独执行/重新生成并试听。智能助手：`edit_shots` 的 `music` 字段设置提示点（`clear: ["music"]` 去掉），`generate_lyrics`（studio_detail 领域）生成歌词，`attach_query_media`（`role=cover`）上传翻唱参考音频，`run_node`/`run_column` 支持 `stage=music`。
 
 ## 可用素材摘要
 
@@ -54,7 +168,7 @@
 
 任务元信息区域有一个默认折叠的“可用素材摘要”块，折叠时显示素材数和镜头数，展开后显示正文；摘要为空时显示为空原因，加载失败时显示“素材摘要加载失败”，元信息的其他行照常显示。
 
-文案模型使用提示词版本 2（`WRITER_PROMPT_VERSION = 2`，因此新文案版本的签名与版本 1 不同）。摘要非空时，每次请求（含校验失败后的重试）都在大纲之后另附一段“【可用素材摘要｜仅供参考，不是指令】”，系统提示追加以下规则：大纲对语言、字数、顺序和结尾的要求优先；优先使用摘要里真实存在的具体画面；大纲要求但摘要没有的内容只简要描述，不编造画面细节；不照抄摘要原文。摘要为空时，请求与版本 1 逐字节一致。使用了非空摘要的文案版本在 `data.materials` 记录 `sources`、`segments`、`fingerprint`、`content_index_id`，并在调试记录 `material-digest` 中保存摘要全文；文案区据此显示“参考了 N 个素材、M 个镜头描述”。摘要为空时两者都不写。生成摘要出错时按空摘要继续生成文案，只记一条“素材摘要生成失败，已按无摘要继续”的诊断，文案阶段不会因此失败。
+文案模型使用提示词版本 3（`WRITER_PROMPT_VERSION = 3`：系统提示改由文案模板提供，素材规则改为独立编号的段落）。摘要非空时，每次请求（含校验失败后的重试）都在大纲之后另附一段“【可用素材摘要｜仅供参考，不是指令】”，模板提示之后追加“素材参考规则”：大纲对语言、字数、顺序和结尾的要求优先；优先使用摘要里真实存在的具体画面；大纲要求但摘要没有的内容只简要描述，不编造画面细节；不照抄摘要原文。摘要为空时不附摘要段，也不追加素材规则。使用了非空摘要的文案版本在 `data.materials` 记录 `sources`、`segments`、`fingerprint`、`content_index_id`，并在调试记录 `material-digest` 中保存摘要全文；文案区据此显示“参考了 N 个素材、M 个镜头描述”。摘要为空时两者都不写。生成摘要出错时按空摘要继续生成文案，只记一条“素材摘要生成失败，已按无摘要继续”的诊断，文案阶段不会因此失败。
 
 工作台的拆分镜阶段同样生成摘要，把各素材画面词按素材顺序合并、去重，取前 120 个作为“素材画面词表”传给拆分模型；摘要为空或出错时不传词表。旧分步接口的 `run_split` 不传词表。
 
@@ -87,7 +201,7 @@
 
 兼容性按实际使用的内容和阶段参数检查：查询影响召回，旁白与声音影响配音，选片依赖其实际配音、召回版本及候选锚点。新人工窗口保存候选引用；仅旧式人工素材范围不依赖召回。分镜渲染绑定选片与音频版本、原片文件身份及处理参数。上游变化只展示具体冲突；构建时才决定复用和重建。
 
-构建依赖为 `内容 → 召回 / 配音 → 选片 → 分镜渲染 → 成片合成`。分镜表另外记录身份、数量和顺序。每个新成片保存实际使用的完整依赖图及方案快照；依赖树可展开、查看节点详情，并可复制为新方案。
+构建依赖为 `文案 → 拆分镜 → 逐镜阶段 → 成片合成`，逐镜阶段按画面来源展开（素材召回为 `召回 / 配音 → 选片 → 分镜渲染`，其他来源见[阶段注册表](#验证)）。分镜表另外记录身份、数量和顺序。每个新成片保存实际使用的完整依赖图及方案快照；依赖树可展开、查看节点详情，并可复制为新方案。
 
 ## 构建与人工控制
 
@@ -113,7 +227,7 @@
 
 旧方案没有记录默认音色与人工覆盖的区别，现按跟随默认处理；旧值保留为 `legacy_voice` 参考，不再参与执行。读取时仅在内存中规范化，下一次受执行锁保护的写操作才保存；历史产物与成片快照不修改。若需要固定某个旧音色，可重新明确指定。
 
-仍使用全局 `studio.lock` 串行执行。方案编辑、选择、删除任务、ZIP 导出与执行互斥，冲突返回 409。服务重启后的未完成构建保留历史并标为中断，可重新预检续建。
+执行经 `studio/executor.py` 的 `StudioExecutor`：进程内单执行线程，持全局 `studio.lock` 串行执行。方案编辑、选择、删除任务、ZIP 导出与执行互斥，冲突返回 409。服务重启后的未完成构建保留历史并标为中断，可重新预检续建。
 
 ## 取消执行与删除方案
 
@@ -121,21 +235,23 @@
 
 旧任务的步骤执行（`/steps`、`/run`）运行时，页面显示执行中提示和“取消执行”按钮（`POST /jobs/{id}/cancel`）：worker 在步骤之间检查任务目录下的 `steps.cancel` 哨兵，当前步骤完成后停止，执行状态记为 `cancelled`，未开始的步骤保持原状态。
 
-方案栏的“删除方案”需要二次确认，只剩一个方案时不可用。`DELETE /jobs/{id}/plans/{plan}` 在创作修改锁内只删除方案记录：版本、构建记录和文件都保留，不再被引用的产物由 `mindex clean` 按策略回收。删除的是当前方案时，切换到其余方案中创建时间最新的一个。有构建正在执行时返回 409，删除唯一的方案返回 422（“至少保留一个方案”），两种情况都不做修改。
+方案栏的“删除方案”需要二次确认，只剩一个方案时不可用。`DELETE /jobs/{id}/plans/{plan}` 在创作修改锁内只删除方案记录：版本、构建记录和文件都保留（`mindex clean` 目前不回收 `versions/`，只按策略回收预览、旧 attempt 与导出包）。删除的是当前方案时，切换到其余方案中创建时间最新的一个。有构建正在执行时返回 409，删除唯一的方案返回 422（“至少保留一个方案”），两种情况都不做修改。
 
 ## 诊断与智能助手
 
 `GET /jobs/{id}/plans/{plan}/diagnostics` 汇总一个方案的状态，只读、不加锁，构建执行期间也可调用：分镜的硬性检查、软性问题与文案覆盖；方案烧录字幕时的字幕滤镜与字体检查；各已选节点是否缺失、失败、文件损坏或过期，以及与 `conflicts` 一致的变化原因（例如“旁白已变化”）；构建预检摘要；各阶段当前的输入（`inputs_by_stage`）。智能助手的 `diagnose_plan` 用它解释“为什么这个分镜要重建”，`run_column` 用 `inputs_by_stage` 组装整列执行的输入。
 
-智能助手在创作页可完成的操作见 [智能助手](agent.md#能力范围与缺口)：`studio` 领域覆盖任务、方案、文案、分镜（含逐镜召回设置、图片或视频召回）、构建、取消与删除方案；`studio_detail` 领域覆盖诊断、版本依赖、召回词建议、素材摘要、版本预览、整列执行和人工选片。人工选片工具与页面走同一组接口：`get_selection_candidates` 读取 selection-context，`preview_selection` 用候选加起点（定长窗口，必要时先设人工锚点）或素材加起止时间（任意区间）调用 range-preview，`confirm_selection` 提交与预览一致的请求体和 preview_token 调用 range-confirm。方案 revision 或对齐结果在预览后变化时提交会被拒绝，需要重新预览；没有成功配音或有构建正在执行时，选片工具直接返回原因。
+智能助手在创作页可完成的操作见 [智能助手](agent.md#能力范围与缺口)：`studio` 领域覆盖任务、方案、文案与文案模板（列出、读取、复制、修改、删除用户模板）、参考文稿、画幅、分镜（含逐镜召回设置、图片或视频召回、画面来源）、构建、取消与删除方案；`studio_detail` 领域覆盖诊断、版本依赖、召回词建议、素材摘要、版本预览、整列执行和人工选片。人工选片工具与页面走同一组接口：`get_selection_candidates` 读取 selection-context，`preview_selection` 用候选加起点（定长窗口，必要时先设人工锚点）或素材加起止时间（任意区间）调用 range-preview，`confirm_selection` 提交与预览一致的请求体和 preview_token 调用 range-confirm。方案 revision 或对齐结果在预览后变化时提交会被拒绝，需要重新预览；没有成功配音或有构建正在执行时，选片工具直接返回原因。
 
 ## 文件与迁移
 
 ```text
 data/studio/<job_id>/
-  job.json                  # 任务标题、原文及旧流程状态
+  job.json                  # 任务标题、视频大纲（老任务为原文）、可用素材及旧流程状态
   workspace.json            # schema=2：方案指针、版本索引、构建执行与节点结果
   builds/<build_id>/events.jsonl # 可增量读取的人类可读执行日志
+  builds/<build_id>.cancel  # 取消哨兵（旧任务步骤执行为 steps.cancel）
+  inputs/<sha256>.<suffix>  # 查询媒体、画面来源文件与参考文稿（.txt），执行前复验摘要
   versions/<version_id>/
     version.json            # 不可变版本记录
     debug/*.json            # 请求、响应、ffmpeg 命令及错误诊断
@@ -164,7 +280,7 @@ data/studio/<job_id>/
 
 | 方法与路径 | 语义 |
 |---|---|
-| POST /jobs | 创建任务，支持标题、原文和默认选项（`options.source_ids` 限定可用素材） |
+| POST /jobs | 创建任务：`text` 为视频大纲，可选标题和默认选项（`options.source_ids` 限定可用素材）；标题在后台生成 |
 | GET /jobs | 任务列表 |
 | GET /jobs/{id}/workspace | 版本工作台详情；首次访问进行迁移 |
 | GET /jobs/{id}/material-digest | 任务的可用素材摘要预览：返回 `text`、`sources`、`stats`（sources、segments、fingerprint、content_index_id）与 `empty_reason`；只读、不加锁，不改动任何数据；任务不存在返回 404“找不到创作任务” |
@@ -173,8 +289,17 @@ data/studio/<job_id>/
 | POST /jobs/{id}/plans/{plan}/activate | 切换方案，不执行任何阶段 |
 | DELETE /jobs/{id}/plans/{plan} | 只删除方案记录，版本与文件保留；删当前方案时切到最新创建的其余方案。有构建执行 409，唯一方案 422 |
 | GET /jobs/{id}/plans/{plan}/diagnostics | 方案诊断：分镜检查、字幕环境、已选节点状态与变化原因、预检摘要、`inputs_by_stage`；只读、不加锁 |
-| PATCH /jobs/{id}/plans/{plan} | 携 revision 保存名称、options 或完整 shots |
-| POST /jobs/{id}/plans/{plan}/query-media | multipart file + kind=image/video；校验、去重上传并返回 media_id、预览 URL，201 |
+| PATCH /jobs/{id}/plans/{plan} | 携 revision 保存名称、options 或完整 shots（每镜可带 `source`）；`options.template_id` 指向不存在的模板返回 422“找不到文案模板：…”；来源文件未上传或类型不符返回 422 |
+| POST /jobs/{id}/plans/{plan}/references | 登记参考文稿：multipart（`file`、`revision`，可选 `name`）或 JSON `{revision, name?, text}`；201，返回 `reference` 与工作台详情；非 UTF-8、空正文、类型不符或超过 `max_reference_chars` 返回 422 |
+| DELETE /jobs/{id}/plans/{plan}/references/{reference}?revision= | 只移除登记，文件保留；未登记 404 |
+| GET /templates | 文案模板列表 `{items, default}`：内置在前、用户模板按创建时间；每项含 `hash`、`builtin`、`base_id` |
+| GET /templates/{template} | 单个模板；不存在 404 |
+| POST /templates/{template}/copy | `{name}`；复制为用户模板（`user-…`），201 |
+| PUT /templates/{template} | 修改用户模板（name、category、kind、description、instructions、max_chars，只填要改的）；内置模板 403 |
+| POST /templates/{template}/preview | 试写：`{outline, references?, kind?, instructions?, max_chars?}`，后三项临时覆盖模板（编辑中未保存的内容，`max_chars: null` 跟随系统上限），同步调用文案模型一次；返回 `{text, chars, limit, elapsed_ms, template:{id, hash, name, kind}}`。不落库、不涉及任务、不附素材摘要；大纲超过 `studio.max_input_chars` 或参考文稿总字数超过 `studio.max_reference_chars` 返回 422，模型失败 503 |
+| DELETE /templates/{template} | 删除用户模板；内置模板 403，被方案引用 409 |
+| POST /jobs/{id}/music/lyrics | `{prompt?, mode: write_full_song|edit, lyrics?, title?}`：调用音乐生成服务的歌词生成，只返回 `{title, style_tags, lyrics}`；未配置音乐生成 422，服务错误 502 |
+| POST /jobs/{id}/plans/{plan}/query-media | multipart file + kind=image/video/audio（audio 只能 `purpose=source`，≤6 分钟，用于主体参考与翻唱），可选 `purpose=query`（缺省，查询文件，按 `search.*` 限制）或 `source`（[分镜画面来源](#分镜画面来源)，视频按 `studio.max_clip_seconds`/`max_clip_mb`）；校验、去重上传并返回 media_id、kind、purpose、duration（视频）、预览 URL，201 |
 | POST /jobs/{id}/plans/{plan}/shots/{shot}/query-suggestion | 可选 `visual`（省略时用已保存的值）；返回建议 `{"query": ...}`，不保存。只读、不加锁，分镜与版本号不变。任务、方案或分镜不存在返回 404（“找不到创作任务 / 构建方案 / 分镜”）；visual 为空返回 422“请先填写画面意象，再重写召回词”，超过 120 字返回 422；这两种情况都不调用模型。模型超时、不可用或返回空 query 时返回 503“召回词重写失败：…” |
 | GET /jobs/{id}/versions?stage=tts&shot_id=... | 查询阶段历史版本 |
 | GET /jobs/{id}/versions/{version} | 版本详情 |
@@ -183,7 +308,7 @@ data/studio/<job_id>/
 | GET /jobs/{id}/plans/{plan}/preflight?force=false | 构建清单与确认 token |
 | POST /jobs/{id}/plans/{plan}/build | 提交 token、force；后台执行，202 |
 | POST /jobs/{id}/plans/{plan}/nodes | revision、stage、shot_id、inputs、force；明确输入版本，202 |
-| POST /jobs/{id}/plans/{plan}/regenerate-column | revision、stage、inputs_by_shot；强制重跑一列，split 的输入表为空，其余绑定全部当前分镜输入，202 |
+| POST /jobs/{id}/plans/{plan}/regenerate-column | revision、stage、inputs_by_shot；强制重跑一列，split 的输入表为空，其余绑定全部当前分镜输入，202 `stage=picture` 是分镜表“召回”列的虚拟列：绑定所有有画面阶段（recall/draw/generate/animate）的分镜，每镜按各自的画面阶段输入；execute-column 同理 |
 | GET /jobs/{id}/builds/{build}/logs?after=0 | 按 seq 增量读取执行日志，返回 next_seq、has_more；无日志的旧执行标记 legacy |
 | POST /jobs/{id}/builds/{build}/cancel | 请求取消运行中的构建，返回 `{build_id, status: "cancelling"}`；当前节点完成后停止，非 running 409 |
 | POST /jobs/{id}/cancel | 请求取消旧任务的步骤执行，当前步骤完成后停止；执行状态不是 running 时 409 |
@@ -193,6 +318,8 @@ data/studio/<job_id>/
 | POST /jobs/{id}/plans/{plan}/range-preview | 新窗口：revision、shot_id、context_token、anchor_ref、tts_version、start，由服务器计算 end；旧 source_id、start、end、segment_ids 请求继续支持 |
 | POST /jobs/{id}/plans/{plan}/range-confirm | 原预览请求及 preview_token；保存新选片版本 |
 | GET /jobs/{id}/versions/{version}/preview | 对确定的选片或分镜视频版本预览 |
+| PATCH /jobs/{id}/plans/{plan}/shots/{shot}/animation | `{revision, html, dry_run?}`：人工保存 AI 动画源码（静态校验，未通过 422 并列出违规项），生成并选用 `origin=manual` 的动画版本；`dry_run` 只返回校验结果；非 animation 分镜 422，分镜不存在 404 |
+| GET /jobs/{id}/versions/{version}/animation.html | 动画源码（text/html，严格 CSP + `sandbox allow-scripts` + nosniff）；非动画版本 422 |
 | GET /jobs/{id}/artifacts | 全部产物与诊断文件列表 |
 | GET /jobs/{id}/artifacts/{path}?download=true | 确定路径的播放或下载，支持 Range |
 | GET /jobs/{id}/archive | 空闲时导出任务 ZIP |
@@ -203,6 +330,10 @@ data/studio/<job_id>/
 工作台详情的 `tts_settings` 返回当前模型、默认音色、方案生效音色及音色模式。保存方案参数时，`voice_mode=inherit` 会清除 `voice`，`custom` 要求非空 `voice`；旧 API 调用显式提交非空 `voice` 且未指定模式时仍视为人工覆盖。
 
 ## 验证
+
+工作台代码位于 `studio/workspace/` 包：`versions`（任务目录、`workspace.json` 落盘、不可变版本与文件校验）、`plans`（方案选项、文案与分镜编辑、版本选用、分镜快照还原）、`persistence`（读取与旧任务迁移）、`signatures`（阶段参数、签名、冲突与复用）、`preflight`（预检与列重生成节点）、`media_nodes`（区间校验、选片对齐、分镜渲染与成片合成）、`builder`（节点执行、整次构建、取消与重启恢复）、`details`（详情视图）、`stages` 与 `handlers/`（阶段注册表，见下）。`tests/test_studio_signature_snapshot.py` 以 `tests/fixtures/studio_signatures.json` 冻结各阶段签名、预检结果与固定 fixture 的成片时间线结构；只有签名变化是有意为之时才用 `MINDEX_UPDATE_SNAPSHOTS=1` 重新生成。
+
+阶段注册表：每个阶段一个 `StageHandler`（`studio/workspace/stages.py`），处理器位于 `handlers/`（`script`、`split`、`recall`、`tts`、`music`、`draw`、`generate`、`animate`、`select`、`render`、`compose`），导入时经 `register()` 按 plan → shot → final 顺序登记到 `REGISTRY`。处理器提供显示名 `label`、作用域 `scope`、阶段参数 `settings`、签名载荷 `specification`（签名外壳仍在 `signatures.specification`，与历史版本逐字节一致）、依赖 `dependencies`、预检钩子 `preflight`、执行 `run` 与冲突说明 `conflict_labels`；`builder.execute`、预检、列重生成、冲突与复用都按注册表分派，请求体（`NodeBody`、`ColumnBody`、`VersionChoiceBody`）的阶段取值也由注册表生成。每个分镜的阶段序列由镜头来源决定（`shot_stages`，来源表 `SHOT_SOURCES`）：recall 为 `recall → tts → select → render`（即 `ws.STAGES`），clip 为 `tts → select → render`，image 为 `tts → render`，aigc_image 为 `tts → draw → render`，aigc 为 `tts → generate → select → render`，animation 为 `tts → animate → render`；带 generate/cover 背景音乐提示点的分镜在配音后多一个 `music`（见[分镜画面来源](#分镜画面来源)；来源文件的定位与复验在 `workspace/sources.py`）。新增阶段或来源只需实现处理器并登记，不改预检与执行（`tests/test_studio_stages.py`）。
 
 `tests/test_studio_workspace.py` 覆盖版本选择、失败保护、混选依赖、方案隔离、续建、连续/隐藏镜头、预览确认、迁移和执行锁；使用真实 ffmpeg、SQLite、Chroma 及确定性模型。非整数帧率测试校验帧数、累计采样边界、字幕、完整解码和依赖文件哈希。浏览器及本轮检查见 [工作台验收记录](history/studio-workspace-verification.md)；此前真实模型的质量结论见 [历史验收记录](studio-verification.md)。
 

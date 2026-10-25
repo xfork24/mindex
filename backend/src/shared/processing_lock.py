@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import json
 import time
@@ -10,39 +9,7 @@ from pathlib import Path
 
 from filelock import FileLock, Timeout
 
-
-class SharedFileLock:
-    def __init__(self, path, *, exclusive=False):
-        self.path, self.exclusive, self.handle = Path(path), exclusive, None
-
-    @property
-    def is_locked(self):
-        return self.handle is not None
-
-    def acquire(self, **_):
-        if self.handle is not None:
-            return self
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        handle = self.path.open("a+b")
-        try:
-            fcntl.flock(handle, (fcntl.LOCK_EX if self.exclusive else fcntl.LOCK_SH) | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
-            handle.close()
-            raise Timeout(str(self.path)) from exc
-        self.handle = handle
-        return self
-
-    def release(self):
-        if self.handle is not None:
-            fcntl.flock(self.handle, fcntl.LOCK_UN)
-            self.handle.close()
-            self.handle = None
-
-    def __enter__(self):
-        return self.acquire()
-
-    def __exit__(self, *_):
-        self.release()
+from mindex.shared import locks
 
 
 def scope_path(root, source_id, work):
@@ -52,11 +19,12 @@ def scope_path(root, source_id, work):
 
 class ProcessingLock:
     def __init__(self, config, *, source_id=None, work=None, deleting=False):
-        self.locks = [SharedFileLock(config.data_dir / "pipeline.lock", exclusive=config.enforce_gpu_lock)]
+        self.locks = [locks.named(config.data_dir, "pipeline", exclusive=config.enforce_gpu_lock)]
         if source_id is None or deleting:
-            self.locks.append(SharedFileLock(config.data_dir / "locks" / "library.lock", exclusive=deleting))
+            self.locks.append(locks.named(config.data_dir, "library", exclusive=deleting))
         if source_id is not None:
-            self.locks.append(SharedFileLock(scope_path(config.data_dir, source_id, "source"), exclusive=deleting))
+            self.locks.append(
+                locks.SharedFileLock(scope_path(config.data_dir, source_id, "source"), exclusive=deleting))
         if work is not None:
             path = scope_path(config.data_dir, source_id, work)
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -92,10 +60,10 @@ class PublicationLock(ProcessingLock):
     def __init__(self, config, *, source_id, work):
         path = scope_path(config.data_dir, source_id, work)
         path.parent.mkdir(parents=True, exist_ok=True)
-        self.locks = [SharedFileLock(config.data_dir / 'locks' / 'library.lock'),
-                      SharedFileLock(scope_path(config.data_dir, source_id, 'source')),
+        self.locks = [locks.named(config.data_dir, 'library'),
+                      locks.SharedFileLock(scope_path(config.data_dir, source_id, 'source')),
                       FileLock(str(path), timeout=0, thread_local=False)]
-        self.pipeline = SharedFileLock(config.data_dir / 'pipeline.lock', exclusive=config.enforce_gpu_lock)
+        self.pipeline = locks.named(config.data_dir, 'pipeline', exclusive=config.enforce_gpu_lock)
 
     def admit(self, check=None):
         """等待 GPU 准入；check 每轮调用一次，可抛出 TaskCancelled 结束等待。"""
@@ -149,5 +117,5 @@ def _recover_tasks(store, table):
 
 
 def index_write_lock(root):
-    # Incremental builds must read the latest active index after prior writers finish.
-    return FileLock(str(Path(root) / "index-write.lock"), thread_local=False)
+    """独占 index-write 锁，默认一直等待（增量构建须在前一个写入者结束后读取最新活动索引）。"""
+    return locks.named(root, "index-write", timeout=None)

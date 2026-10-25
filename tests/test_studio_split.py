@@ -160,7 +160,7 @@ def test_qwen_storyboarder_omits_vocabulary_when_absent(config, monkeypatch):
 
 
 def test_execute_split_passes_vocabulary_keyword(config):
-    from mindex.studio import studio_workspace as ws
+    from mindex.studio import workspace as ws
 
     job_id = legacy_job(config, "红色首先出现在画面里。随后蓝色铺满屏幕。")["id"]
     w = ws.load(config, job_id)
@@ -297,7 +297,7 @@ def test_split_examples_are_one_contrasting_pair_without_singapore():
 
 def test_execute_split_failure_keeps_board(config):
     """拆分失败时只新增失败版本，已有方案的 board 与分镜内容不变（需求 6.6）。"""
-    from mindex.studio import studio_workspace as ws
+    from mindex.studio import workspace as ws
 
     class Broken:
         def split(self, text: str, vocabulary: list[str] | None = None) -> list[ShotDraft]:

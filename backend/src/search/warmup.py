@@ -206,12 +206,12 @@ def warm_up_in_background(
         store = Store(config.data_dir)
         try:
             baseline = serving_signature(store, index_id)  # 先于预热取得：预热期间的发布会触发再次预热
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 — 读不到基线只影响再预热判断，线程继续
             log.warning("读取服务状态失败：%s", exc)
             baseline = None
         try:
             warm_up(RuntimeConfig(config, store).current(), index_id)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 — 预热是优化而非功能，失败不得影响服务
             log.warning("预热失败：%s", exc)
         if watch:
             watch_and_rewarm(config, index_id, stop, interval=interval, last=baseline)

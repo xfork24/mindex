@@ -20,9 +20,7 @@ from mindex.shared.storage import Store
 
 logger = logging.getLogger(__name__)
 
-# 音色目录是交互式调用（打开“方案参数”/设置页就触发），不能沿用合成用的 300s 超时与 3 次重试，
-# 否则 TTS 服务不可达时对话框会挂起数分钟。这里封顶为快速失败的交互超时与单次尝试。
-CATALOG_TIMEOUT = 8.0
+# 音色目录是交互式调用（打开“方案参数”/设置页就触发）：超时用语音合成档案配置的值，只尝试一次。
 CATALOG_ATTEMPTS = 1
 
 # Qwen3-TTS CustomVoice 内置音色（服务端 /audio/voices 返回小写 id；描述来自官方音色表）。
@@ -59,7 +57,7 @@ def _live_voices(tts) -> tuple[list[str], str | None]:
     try:
         payload = adapters.request(
             "GET", tts.base_url.rstrip("/") + "/audio/voices",
-            timeout=min(tts.timeout, CATALOG_TIMEOUT), attempts=CATALOG_ATTEMPTS,
+            timeout=tts.timeout, attempts=CATALOG_ATTEMPTS,
         )
     except Exception as exc:  # noqa: BLE001 — 目录拉取失败必须降级而不是 500
         return [], f"音色列表拉取失败：{str(exc)[:200]}"
@@ -87,7 +85,7 @@ def _heal_local_clones(store: Store, tts, live: list[str]) -> list[str]:
         if sample is None or not sample.is_file():
             continue
         try:
-            qwentts_register(tts.base_url, sample, row["voice_id"], row["notes"] or "")
+            qwentts_register(tts.base_url, sample, row["voice_id"], row["notes"] or "", timeout=tts.timeout)
             healed.append(row["voice_id"])
         except Exception as exc:  # noqa: BLE001 — 自愈失败不阻塞目录返回，合成时会有明确报错
             logger.warning("克隆音色 %s 重注册失败：%s", row["voice_id"], exc)
@@ -99,10 +97,10 @@ def _minimax_groups(tts) -> tuple[list[dict], list[dict], str | None]:
     try:
         payload = adapters.request(
             "POST", tts.base_url.rstrip("/") + "/get_voice",
-            timeout=min(tts.timeout, CATALOG_TIMEOUT), attempts=CATALOG_ATTEMPTS,
+            timeout=tts.timeout, attempts=CATALOG_ATTEMPTS,
             headers=tts.headers(), json={"voice_type": "all"},
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001 — 音色查询失败降级为提示，不让目录接口 500
         return [], [], f"MiniMax 音色查询失败：{str(exc)[:200]}"
     if (payload.get("base_resp") or {}).get("status_code", 0) != 0:
         return [], [], f"MiniMax 音色查询失败：{payload.get('base_resp')}"

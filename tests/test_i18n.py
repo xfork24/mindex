@@ -34,9 +34,18 @@ def test_dictionary_and_bindings():
         group = "search" if name == "index" else name
         html = (STATIC / group / f"{name}.html").read_text()
         assert html.count('data-language="zh"') == html.count('data-language="en"') == 1
-        assert html.index('/assets/shared/i18n.js') < html.index(f'/assets/{group}/' + ('app' if name == 'index' else name) + '.js')
+        page_script = {"index": "app", "studio": "studio-state"}.get(name, name)  # 创作页首个分片脚本
+        assert html.index('/assets/shared/i18n.js') < html.index(f'/assets/{group}/{page_script}.js')
         for key in re.findall(r'\bui\.[a-f0-9]{12}\b', html):
             assert key in catalog
+    # 文案模板管理页（创作页的子页面）：语言切换与 HTML 中引用的全部文案键都要存在。
+    html = (STATIC / "studio" / "templates.html").read_text()
+    assert html.count('data-language="zh"') == html.count('data-language="en"') == 1
+    assert html.index('/assets/shared/i18n.js') < html.index('/assets/studio/templates.js')
+    for key in re.findall(r'(?:data-i18n-[a-z-]+="|&quot;)(ui\.[\w.]+)', html):
+        assert key in catalog, key
+    for key in re.findall(r'"(ui\.templates?_\w+|ui\.studio_tab\w*)"', (STATIC / "studio" / "templates.js").read_text()):
+        assert key in catalog, key
 
 
 def test_system_metadata_preserves_content_and_diagnostics():

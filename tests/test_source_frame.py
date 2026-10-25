@@ -56,6 +56,7 @@ def test_frame_returns_jpeg_with_requested_width(frame):
         {},
     ],
 )
+@pytest.mark.slow
 def test_frame_rejects_out_of_range(frame, params):
     client, url, _ = frame
     assert client.get(url, params=params).status_code == 422

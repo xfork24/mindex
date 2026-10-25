@@ -38,7 +38,7 @@ def inspect_service(service: Service) -> dict:
 
     def get(route):
         return adapters.request(
-            "GET", root(service) + route, timeout=5, attempts=1, headers=service.headers()
+            "GET", root(service) + route, timeout=service.timeout, attempts=1, headers=service.headers()
         )
 
     health = get("/health")
@@ -328,7 +328,7 @@ class LlamaEmbedder(HTTPEmbedder):
             return
         path = self.config.data_dir / "capabilities" / (fingerprint(space) + ".json")
         try:
-            gate = json.loads(path.read_text()) if path.is_file() else {}
+            gate = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
             if not gate.get("passed") or gate.get("space") != space:
                 raise ValueError("未通过")
         except (OSError, ValueError, TypeError) as exc:
@@ -356,7 +356,7 @@ class LlamaTranscriber:
             json={
                 "model": before["model_id"],
                 "temperature": 0,
-                "max_tokens": 2048,
+                "max_tokens": self.profile.max_tokens,
                 "messages": [
                     {
                         "role": "user",

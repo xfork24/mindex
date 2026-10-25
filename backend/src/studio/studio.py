@@ -12,14 +12,15 @@ import re
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import uuid4
 
-from filelock import FileLock, Timeout
-from pydantic import Field, field_validator, model_serializer, model_validator
+from filelock import Timeout
+from pydantic import Discriminator, Field, Tag, field_validator, model_serializer, model_validator
 
 from mindex.admin.curation import EntityNotFound
 from mindex.models.storyboard import coverage_warning
+from mindex.shared import jsonio, locks
 from mindex.shared.config import Config, StrictModel, fingerprint, portable_parameters
 from mindex.shared.trace import record as trace_record
 from mindex.shared.types import Filters, Granularity
@@ -98,17 +99,13 @@ def now() -> str:
 
 
 def save(path: Path, value):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(".partial")
-    temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2))
-    temporary.replace(path)
+    """原子写入 JSON；实现见 ``shared/jsonio``。"""
+    jsonio.save(path, value)
 
 
 def save_bytes(path: Path, payload: bytes):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(".partial")
-    temporary.write_bytes(payload)
-    temporary.replace(path)
+    """原子写入字节；实现见 ``shared/jsonio``。"""
+    jsonio.save_bytes(path, payload)
 
 
 # ---------------------------------------------------------------- 数据模型
@@ -138,6 +135,212 @@ class ShotRecall(StrictModel):
         return self
 
 
+MEDIA_ID = r"^[0-9a-f]{64}$"  # 任务 inputs/ 内容寻址文件的 sha256
+IMAGE_MOTIONS = ("zoom-in", "zoom-out", "pan-left", "pan-right", "none")
+
+
+class RecallSource(StrictModel):
+    """素材召回（缺省来源）：召回 → 选片对齐 → 渲染。"""
+
+    kind: Literal["recall"] = "recall"
+
+
+class ClipSource(StrictModel):
+    """上传片段：在片段内按配音时长取定长窗口；``start`` 为人工起点（秒），None = 从头开始。"""
+
+    kind: Literal["clip"]
+    media_id: str = Field(pattern=MEDIA_ID)
+    start: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+
+
+class ImageSource(StrictModel):
+    """静态图片：按 motion 推拉/平移生成与配音等长的画面；strength 控制幅度（放大到 1 + strength/2）。"""
+
+    kind: Literal["image"]
+    media_id: str = Field(pattern=MEDIA_ID)
+    motion: Literal["zoom-in", "zoom-out", "pan-left", "pan-right", "none"] = "zoom-in"
+    strength: float = Field(default=0.3, ge=0, le=1, allow_inf_nan=False)
+
+
+AIGC_PROMPT_LIMIT = 1000
+# MiniMax H3（V2 多模态）专用的逐镜生成选项；其余视频生成后端只支持 text / first_frame。
+VIDEO_MODES = Literal["text", "first_frame", "last_frame", "first_last", "reference"]
+VIDEO_MODELS = Literal["MiniMax-H3", "MiniMax-H3-Highspeed", "MiniMax-H3-Lite", "MiniMax-H3-Max"]
+VIDEO_RESOLUTIONS = Literal["480P", "768P", "2K"]
+VIDEO_RATIOS = Literal["adaptive", "21:9", "16:9", "4:3", "1:1", "3:4", "9:16"]
+# 新增字段为 None 时 dump 省略：老 aigc 分镜再次保存时 content 不变。
+AIGC_OPTIONAL = ("mode", "last_image_id", "references", "model", "resolution", "ratio", "duration")
+
+
+class MediaReference(StrictModel):
+    """多模态参考素材：任务 ``inputs/`` 内的图片、视频或音频（sha256），经 query-media purpose=source 上传。"""
+
+    kind: Literal["image", "video", "audio"]
+    media_id: str = Field(pattern=MEDIA_ID)
+
+
+class AigcSource(StrictModel):
+    """AI 生成视频：generate 阶段按提示词（缺省用画面意象，再缺省用召回查询）生成片段，再在片段内选窗对齐。
+
+    ``image_id`` 是首帧参考图（任务 ``inputs/`` 内的图片 sha256，经 query-media purpose=source 上传）。
+    生成方式 ``mode``：text 文生视频、first_frame 首帧图生视频、last_frame 尾帧图生视频、first_last 首尾帧生视频、
+    reference 主体（多模态）参考生视频；None = 有首帧图时为 first_frame，否则 text。尾帧图 ``last_image_id``、
+    参考素材 ``references``（≤9 图、≤3 视频、≤3 音频）、模型档位、分辨率、比例与时长（None = 按配音时长取整）
+    只对 MiniMax H3 生效。"""
+
+    kind: Literal["aigc"]
+    prompt: str | None = Field(default=None, max_length=AIGC_PROMPT_LIMIT)
+    negative: str | None = Field(default=None, max_length=500)
+    image_id: str | None = Field(default=None, pattern=MEDIA_ID)
+    seed: int | None = Field(default=None, ge=0, le=2147483647)
+    mode: VIDEO_MODES | None = None
+    last_image_id: str | None = Field(default=None, pattern=MEDIA_ID)
+    references: list[MediaReference] | None = Field(default=None, max_length=12)
+    model: VIDEO_MODELS | None = None
+    resolution: VIDEO_RESOLUTIONS | None = None
+    ratio: VIDEO_RATIOS | None = None
+    duration: int | None = Field(default=None, ge=4, le=15)
+
+    @field_validator("prompt", "negative", mode="before")
+    @classmethod
+    def _blank_is_none(cls, value):
+        if isinstance(value, str):
+            value = value.strip()
+            return value or None
+        return value
+
+    @field_validator("references", mode="after")
+    @classmethod
+    def _reference_limits(cls, value):
+        if not value:
+            return None
+        counts = {kind: sum(1 for item in value if item.kind == kind) for kind in ("image", "video", "audio")}
+        if counts["image"] > 9 or counts["video"] > 3 or counts["audio"] > 3:
+            raise ValueError("参考素材最多 9 张图片、3 段视频、3 段音频")
+        return value
+
+    @model_validator(mode="after")
+    def _mode_inputs(self):
+        mode = self.effective_mode
+        if mode in ("first_frame", "first_last") and not self.image_id:
+            raise ValueError("首帧/首尾帧生视频需要上传首帧图片")
+        if mode in ("last_frame", "first_last") and not self.last_image_id:
+            raise ValueError("尾帧/首尾帧生视频需要上传尾帧图片")
+        if mode == "reference" and not self.references:
+            raise ValueError("主体参考生视频至少需要一个参考图片或视频")
+        if mode == "reference" and all(item.kind == "audio" for item in self.references or []):
+            raise ValueError("主体参考生视频不能只有参考音频，请至少加入一张参考图或一段参考视频")
+        if self.model == "MiniMax-H3-Max" and self.duration == 4:
+            raise ValueError("MiniMax-H3-Max 的时长为 5–15 秒")
+        if self.resolution == "2K" and self.model not in (None, "MiniMax-H3"):
+            raise ValueError("只有 MiniMax-H3 支持 2K 分辨率")
+        if self.resolution == "480P" and self.model in (None, "MiniMax-H3", "MiniMax-H3-Highspeed"):
+            raise ValueError("480P 只适用于 MiniMax-H3-Lite 与 MiniMax-H3-Max")
+        return self
+
+    @property
+    def effective_mode(self) -> str:
+        if self.mode:
+            return self.mode
+        return "first_frame" if self.image_id else "text"
+
+    @model_serializer(mode="wrap")
+    def _omit_new_defaults(self, handler):
+        data = handler(self)
+        if isinstance(data, dict):
+            for key in AIGC_OPTIONAL:
+                if data.get(key) is None:
+                    data.pop(key, None)
+        return data
+
+
+IMAGE_PROMPT_LIMIT = 1500
+
+
+class AiImageSource(StrictModel):
+    """AI 生成图片：draw 阶段调用图片生成模型（MiniMax image-01，文生图；给出 ``reference_id`` 时为主体参考图生图）
+    按提示词（缺省用画面意象，再缺省用召回查询）生成一张图片，之后与静态图片相同：按 motion/strength 推拉/平移渲染。"""
+
+    kind: Literal["aigc_image"]
+    prompt: str | None = Field(default=None, max_length=IMAGE_PROMPT_LIMIT)
+    reference_id: str | None = Field(default=None, pattern=MEDIA_ID)
+    seed: int | None = Field(default=None, ge=0, le=2147483647)
+    prompt_optimizer: bool = False
+    motion: Literal["zoom-in", "zoom-out", "pan-left", "pan-right", "none"] = "zoom-in"
+    strength: float = Field(default=0.3, ge=0, le=1, allow_inf_nan=False)
+
+    @field_validator("prompt", mode="before")
+    @classmethod
+    def _blank_is_none(cls, value):
+        if isinstance(value, str):
+            value = value.strip()
+            return value or None
+        return value
+
+
+ANIMATION_BRIEF_LIMIT = 2000
+
+
+class AnimationSource(StrictModel):
+    """AI 动画：animate 阶段由动画生成 LLM 按画面说明写 HTML/JS 动画，render 阶段在沙箱里逐帧录制。
+
+    ``brief`` 为画面说明（≤2000 字）；None = 用画面意象，再缺省用旁白。动画源码可在创作页人工修改（origin=manual）。"""
+
+    kind: Literal["animation"]
+    brief: str | None = Field(default=None, max_length=ANIMATION_BRIEF_LIMIT)
+
+    @field_validator("brief", mode="before")
+    @classmethod
+    def _blank_is_none(cls, value):
+        if isinstance(value, str):
+            value = value.strip()
+            return value or None
+        return value
+
+
+ShotSource = Annotated[
+    RecallSource | ClipSource | ImageSource | AiImageSource | AigcSource | AnimationSource,
+    Field(discriminator="kind"),
+]
+
+MUSIC_PROMPT_LIMIT = 2000
+MUSIC_LYRICS_LIMIT = 3500
+
+
+class ShotMusic(StrictModel):
+    """背景音乐提示点：从这个分镜开始换成新的背景音乐（或停止），之后的分镜顺延，直到下一个提示点。
+
+    kind：generate 由音乐生成模型（music-3.0）按描述生成（缺省纯音乐；给出歌词或关闭纯音乐时为带人声歌曲）；
+    cover 按参考音频（``audio_id``，inputs 内的音频 sha256）翻唱；none 从此分镜起不再有背景音乐。
+    ``volume`` 为混音音量（0–1），配音出现时背景音乐自动压低。"""
+
+    kind: Literal["generate", "cover", "none"]
+    prompt: str | None = Field(default=None, max_length=MUSIC_PROMPT_LIMIT)
+    lyrics: str | None = Field(default=None, max_length=MUSIC_LYRICS_LIMIT)
+    instrumental: bool = True
+    audio_id: str | None = Field(default=None, pattern=MEDIA_ID)
+    volume: float = Field(default=0.25, ge=0, le=1, allow_inf_nan=False)
+
+    @field_validator("prompt", "lyrics", mode="before")
+    @classmethod
+    def _blank_is_none(cls, value):
+        if isinstance(value, str):
+            value = value.strip()
+            return value or None
+        return value
+
+    @model_validator(mode="after")
+    def _inputs(self):
+        if self.kind == "generate" and not self.prompt and not self.lyrics:
+            raise ValueError("生成背景音乐需要填写音乐描述或歌词")
+        if self.kind == "cover":
+            if not self.audio_id:
+                raise ValueError("翻唱需要上传参考音频")
+            if not self.prompt or not 10 <= len(self.prompt) <= 300:
+                raise ValueError("翻唱需要 10–300 字的目标风格描述")
+        return self
+
+
 class Shot(StrictModel):
     id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$")
     text: str = Field(min_length=1, max_length=200)
@@ -150,6 +353,11 @@ class Shot(StrictModel):
     # 画面意象：一句中文（≤120 字）；不参与任何签名。None/空白 = 未填写，dump 时省略该键，
     # 使未含 visual 的老分镜再次保存时 content 版本号不变。
     visual: str | None = None
+    # 画面来源：None = 素材召回（缺省）。与 visual 一样为 None 时 dump 省略该键，旧 content 版本号不变；
+    # 显式的 {"kind": "recall"} 规范化为 None。
+    source: ShotSource | None = None
+    # 背景音乐提示点：None = 沿用前面分镜的背景音乐（没有则无背景音乐）；None 时 dump 省略，旧 content 不变。
+    music: ShotMusic | None = None
 
     @field_validator("visual", mode="before")
     @classmethod
@@ -161,12 +369,23 @@ class Shot(StrictModel):
             raise ValueError(f"画面意象超过 {VISUAL_LIMIT} 字上限（当前 {len(visual)} 字）")
         return visual
 
+    @field_validator("source", mode="after")
+    @classmethod
+    def _recall_is_default(cls, value):
+        return None if isinstance(value, RecallSource) else value
+
     @model_serializer(mode="wrap")
     def _omit_empty_visual(self, handler):
         data = handler(self)
-        if isinstance(data, dict) and data.get("visual") is None:
-            data.pop("visual", None)
+        if isinstance(data, dict):
+            for key in ("visual", "source", "music"):
+                if data.get(key) is None:
+                    data.pop(key, None)
         return data
+
+    @property
+    def source_kind(self) -> str:
+        return self.source.kind if self.source else "recall"
 
 
 class Storyboard(StrictModel):
@@ -188,7 +407,23 @@ class TimelineAudio(StrictModel):
     render_duration: float = Field(gt=0)
 
 
-class TimelineVideo(StrictModel):
+ALIGNMENTS = Literal[
+    "nearest",
+    "extended",
+    "atempo",
+    "extended+atempo",
+    "padded",
+    "trimmed",
+    "extended+padded",
+    "extended+trimmed",
+    "manual",
+]
+
+
+class LibraryVideo(StrictModel):
+    """素材库区间（缺省形态）：旧数据没有 kind；dump 时省略 kind，保证旧选片版本逐字节不变。"""
+
+    kind: Literal["library"] = "library"
     source_id: str = Field(min_length=1)
     source_name: str = ""
     segment_id: str = Field(min_length=1)
@@ -197,23 +432,72 @@ class TimelineVideo(StrictModel):
     end: float = Field(gt=0)
     score: float = 0.0
     rank: int = 0
-    alignment: Literal[
-        "nearest",
-        "extended",
-        "atempo",
-        "extended+atempo",
-        "padded",
-        "trimmed",
-        "extended+padded",
-        "extended+trimmed",
-        "manual",
-    ]
+    alignment: ALIGNMENTS
 
     @model_validator(mode="after")
     def ordered(self):
         if self.end <= self.start:
             raise ValueError("视频区间 end 必须大于 start")
         return self
+
+    @model_serializer(mode="wrap")
+    def _omit_kind(self, handler):
+        data = handler(self)
+        if isinstance(data, dict):
+            data.pop("kind", None)
+        return data
+
+
+class FileRef(StrictModel):
+    """文件区间引用：任务 ``inputs/`` 的上传文件（``input`` = 文件名，``<sha256>.<suffix>``），
+    或某个版本的产物文件（``version`` + ``file``）。"""
+
+    input: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}\.[a-z0-9]{1,8}$")
+    version: str | None = Field(default=None, pattern=r"^[0-9a-f]{32}$")
+    file: str | None = Field(default=None, min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def one_target(self):
+        if (self.input is None) == (self.version is None) or (self.version is None) != (self.file is None):
+            raise ValueError("文件引用必须是 input，或 version + file 之一")
+        return self
+
+    @model_serializer(mode="wrap")
+    def _omit_none(self, handler):
+        data = handler(self)
+        return {k: v for k, v in data.items() if v is not None} if isinstance(data, dict) else data
+
+
+class FileVideo(StrictModel):
+    """文件区间：画面来自上传片段、图片生成的画面等文件，start/end 是文件内的秒数。"""
+
+    kind: Literal["file"]
+    ref: FileRef
+    start: float = Field(ge=0)
+    end: float = Field(gt=0)
+    alignment: ALIGNMENTS
+
+    @model_validator(mode="after")
+    def ordered(self):
+        if self.end <= self.start:
+            raise ValueError("视频区间 end 必须大于 start")
+        return self
+
+    @property
+    def media_id(self) -> str | None:
+        return self.ref.input.split(".")[0] if self.ref.input else None
+
+
+def _video_kind(value):
+    if isinstance(value, dict):
+        return value.get("kind", "library")
+    return getattr(value, "kind", "library")
+
+
+TimelineVideo = Annotated[
+    Annotated[LibraryVideo, Tag("library")] | Annotated[FileVideo, Tag("file")],
+    Discriminator(_video_kind),
+]
 
 
 class TimelineSubtitle(StrictModel):
@@ -337,7 +621,7 @@ def _validate_job_id(job_id: str):
 def _read_json(path: Path, missing_message: str) -> dict:
     if not path.is_file():
         raise EntityNotFound(missing_message)
-    return json.loads(path.read_text())
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _write_model(path: Path, model, **extra):
@@ -508,7 +792,7 @@ def list_jobs(config: Config, *, recover: bool = False) -> list[dict]:
         return []
     lock = None
     if recover:
-        lock = FileLock(str(lock_path(config)), timeout=0)
+        lock = locks.named(config.data_dir, "studio")
         try:
             lock.acquire()
         except Timeout:
@@ -634,7 +918,7 @@ def recover_stale(config: Config):
     root = studio_root(config)
     if not root.is_dir():
         return
-    lock = FileLock(str(lock_path(config)), timeout=0)
+    lock = locks.named(config.data_dir, "studio")
     try:
         lock.acquire()
     except Timeout:
@@ -645,7 +929,7 @@ def recover_stale(config: Config):
             if path is None or not path.is_file():
                 continue
             try:
-                state = json.loads(path.read_text())
+                state = json.loads(path.read_text(encoding="utf-8"))
             except ValueError:
                 continue
             running = [s for s, v in state.get("steps", {}).items() if v.get("status") == "running"]
@@ -688,7 +972,7 @@ def save_storyboard(config: Config, job_id: str, storyboard: Storyboard) -> dict
     archive_edit(config, job_id, "storyboard", storyboard_path(config, job_id))
     registry = job_dir(config, job_id) / "checkpoints.json"
     if registry.is_file():
-        checkpoints = json.loads(registry.read_text())
+        checkpoints = json.loads(registry.read_text(encoding="utf-8"))
         checkpoints.pop("storyboard.json", None)
         save(registry, checkpoints)
     state["updated_at"] = now()

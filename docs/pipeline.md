@@ -62,7 +62,7 @@
 
 ```bash
 uv venv .venv-align --python 3.11
-uv pip install --python .venv-align/bin/python -r deploy/requirements-alignment.txt
+uv pip install --python .venv-align/bin/python 'qwen-asr>=0.0.6' 'huggingface-hub>=0.36' 'torch>=2.8'
 uv run mindex align .venv-align/bin/python            # 解释器是位置参数
 uv run mindex align .venv-align/bin/python --source SOURCE_ID   # 只处理一个素材
 ```

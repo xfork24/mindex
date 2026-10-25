@@ -15,6 +15,8 @@ from mindex.shared.config import fingerprint
 from mindex.shared.media import command
 from mindex.shared.types import Annotation, TextSearch
 
+pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
+
 
 class CountingEmbedder(FixtureEmbedder):
     video_calls = 0

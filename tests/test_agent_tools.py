@@ -17,7 +17,7 @@ from mindex.agent.registry import NAME_PATTERN, ToolContext, ToolError
 from mindex.agent.tools import build_registry
 from mindex.api import create_app
 from mindex.studio import studio
-from mindex.studio import studio_workspace as ws
+from mindex.studio import workspace as ws
 
 SHOTS = ["shot-a1daad59aa", "shot-925281d5bb", "shot-925281d6cc"]
 
@@ -82,8 +82,9 @@ def test_registry_names_and_schemas():
 
 
 def test_registry_domain_filter_and_domain_tools():
+    from mindex.agent.domains import DOMAIN_INFO, PAGE_DOMAIN
     from mindex.agent.registry import ToolSpec
-    from mindex.shared.agent_domains import AGENT_DOMAINS, DOMAIN_INFO, LOADABLE_DOMAINS, PAGE_DOMAIN
+    from mindex.shared.agent_domains import AGENT_DOMAINS, LOADABLE_DOMAINS
 
     assert LOADABLE_DOMAINS == AGENT_DOMAINS[1:] and "meta" not in LOADABLE_DOMAINS
     assert set(DOMAIN_INFO) == set(LOADABLE_DOMAINS)

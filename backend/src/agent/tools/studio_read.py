@@ -1,4 +1,7 @@
-"""Studio 只读工具：任务列表、工作台摘要、短 ID 解析、构建预检、构建状态、版本历史。"""
+"""Studio 只读工具：任务列表、工作台摘要、短 ID 解析、构建预检、构建状态、版本历史。
+
+文案模板的读取与管理工具在 ``studio_templates``。
+"""
 
 from __future__ import annotations
 
@@ -10,7 +13,7 @@ from pydantic import Field, StrictInt, field_validator, model_validator
 from mindex.agent.ids import resolve_shot, short
 from mindex.agent.registry import ToolContext, ToolError, ToolOutput, ToolSpec
 from mindex.agent.tools.common import STAGE_LABELS, STAGES, board_text, check, clip, load_view
-from mindex.agent.tools.media import final_media, shot_media, version_media
+from mindex.agent.tools.media import animation_media, final_media, generated_media, shot_media, version_media
 from mindex.agent.tools.shot_details import (
     details_focus,
     page_details,
@@ -51,7 +54,9 @@ async def get_workspace_summary(args: WorkspaceSummary, ctx: ToolContext) -> Too
                 "source_ids": view.job.get("source_ids")},
         "plans": [{"id": k, "name": v["name"], "active": k == w["active_plan"]} for k, v in w["plans"].items()],
         "plan": {"id": view.plan_id, "name": p["name"], "revision": view.revision, "options": p["options"],
-                 "final": short(p.get("final")), "script_stale": bool(w.get("script_stale")) if view.active else None},
+                 "final": short(p.get("final")), "script_stale": bool(w.get("script_stale")) if view.active else None,
+                 "template_id": p["options"].get("template_id", "base"),
+                 "script_template_changed": bool(w.get("script_template_changed")) if view.active else None},
         "script": view.script(),
         "shots": view.shot_rows(),
         "recent_builds": [{"id": b["id"], "status": b["status"], "created_at": b["created_at"]} for b in builds],
@@ -66,6 +71,8 @@ async def get_workspace_summary(args: WorkspaceSummary, ctx: ToolContext) -> Too
     ]
     if value["plan"]["script_stale"]:
         lines.append("注意：文案已变化，现有分镜按旧文案拆出，构建时会重新拆分镜。")
+    if value["plan"]["script_template_changed"]:
+        lines.append("提示：所选文案模板或提示词与当前文案生成时不同；已有文案不会自动重写，需要时用 run_node 重新生成文案。")
     lines.append(f"分镜 {len(view.order)} 个（状态标记 ✓完成 ✗失败 —缺失）：")
     lines.append(board_text(view))
     lines.append(f"成片版本：{short(p.get('final')) or '（尚无成片）'}")
@@ -157,9 +164,13 @@ async def get_shot_details(args: ShotDetailsArgs, ctx: ToolContext) -> ToolOutpu
                  "unrendered_refs": [item["ref"] for item in items[rendered:] if item["status"] == "ok"],
                  "results": items}
         focus = details_focus(view, items)
+    shown_ids = ([d["shot_id"] for d in value["shots"]] if args.refs is None
+                 else list(dict.fromkeys(item["shot_id"] for item in value["results"] if item["status"] == "ok")))
+    media = [entry for sid in shown_ids
+             for entry in (*generated_media(view, sid), *animation_media(view, sid))][:6]
     return ToolOutput(value, text=text,
                       meta={"kind": "shot_details", "job_id": view.job["id"], "plan_id": view.plan_id},
-                      focus=focus)
+                      focus=focus, media=media or None)
 
 
 class Preflight(StrictModel):
@@ -247,7 +258,7 @@ async def get_build_status(args: BuildStatus, ctx: ToolContext) -> ToolOutput:
 
 class ListVersions(StrictModel):
     job_id: str | None = JobId
-    stage: Literal["script", "content", "recall", "tts", "select", "render", "compose"] | None = None
+    stage: Literal["script", "content", "recall", "tts", "music", "draw", "generate", "animate", "select", "render", "compose"] | None = None
     shot: str | None = Field(default=None, description="分镜：完整 ID、短 ID 或 #序号")
     limit: int = Field(default=20, ge=1, le=100)
 
@@ -277,7 +288,8 @@ async def list_versions(args: ListVersions, ctx: ToolContext) -> ToolOutput:
     ) or "（没有匹配的版本）"
     focus = {"page": "studio", "job_id": view.job["id"], "plan_id": view.plan_id}
     if shot_id:
-        focus.update(shots=[shot_id], stage=args.stage if args.stage in ("content", *STAGES) else "content")
+        focus.update(shots=[shot_id],
+                     stage=args.stage if args.stage in ("content", "music", "draw", "generate", "animate", *STAGES) else "content")
     elif args.stage == "script":
         focus["section"] = "script"
     elif args.stage == "compose":
@@ -306,6 +318,7 @@ def specs() -> list[ToolSpec]:
                  "读取分镜的完整详情（不截断）：旁白、查询、画面意象、预估时长、召回粒度/数量与召回设置、人工区间、"
                  "召回/配音/选片/渲染各阶段状态、字幕文本与时间轴（秒）、配音时长（秒）。省略 refs 时按顺序分页读取全部分镜"
                  "（offset/limit，结果给出下一次 offset）；提供 refs（短 ID、完整 ID 或 #序号）时读取指定分镜。"
+                 "aigc 分镜附生成状态与生成画面，animation 分镜附动画源码版本、沙箱预览地址与录制画面。"
                  "拆分、合并或改写旁白前必须先用它读取完整旁白。",
                  ShotDetailsArgs, "read", get_shot_details),
         ToolSpec("get_preflight", "studio",

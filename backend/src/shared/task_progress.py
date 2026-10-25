@@ -105,7 +105,7 @@ def task_logs(table):
                             f"UPDATE {table} SET progress=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
                             (dumps(progress), task_id),
                         )
-                    except Exception:  # noqa: BLE001 — logging must never fail a processing task.
+                    except Exception:  # noqa: BLE001 — 日志写入失败绝不能导致处理任务失败
                         return
 
             handler = LatestLog()

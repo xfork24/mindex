@@ -1,5 +1,7 @@
 # REHASH_MIGRATION：macOS 模型身份迁移实际执行记录
 
+> 历史记录，内容可能与当前代码不符，以 [macos-model-migration.md](macos-model-migration.md) 与 [index-versions.md](index-versions.md) 为准。
+
 日期：2026-10-14。执行依据：[REHASH_REFINEMENT_PLAN.md](../plans/REHASH_REFINEMENT_PLAN.md)；操作手册：[macos-model-migration.md](macos-model-migration.md)。
 
 > 本文是 2026-10-14 的历史记录，保留当时的名称。其中的 `scripts/run-local-wemm.sh`、`scripts/run-local-qwen3-asr.sh` 现名 `scripts/run-wemm.sh`、`scripts/run-qwen3-asr.sh`；`config.macos-v2.yaml` 是操作员本地文件，不在仓库中。

@@ -6,8 +6,9 @@ import json
 from collections import defaultdict
 from types import SimpleNamespace
 
-from mindex.admin.source_tasks import person_setup, public_task
+from mindex.admin.source_tasks import person_setup
 from mindex.processing.dialogue import READY, current_dialogue
+from mindex.shared.background_tasks import public_task
 from mindex.shared.config import fingerprint
 
 

@@ -59,7 +59,7 @@ const sandbox = {
   },
 };
 vm.createContext(sandbox);
-const source = fs.readFileSync("frontend/src/studio/studio.js", "utf8");
+const source = require("./studio_source.cjs").studioSource();
 vm.runInContext(source.slice(source.indexOf("function shortIds("), source.indexOf("function el(")), sandbox);
 vm.runInContext(source.slice(source.indexOf("async function manualRange("), source.indexOf("\nasync function preflight(")), sandbox);
 const find = (node, predicate) => node.children.find(predicate) || node.children.map(n => find(n, predicate)).find(Boolean);

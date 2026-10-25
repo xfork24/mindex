@@ -70,7 +70,7 @@ uv run mindex e2e phase asr --run data/e2e/trailer-20261013
 
 ```bash
 uv venv .venv-align --python 3.11
-uv pip install --python .venv-align/bin/python -r deploy/requirements-alignment.txt
+uv pip install --python .venv-align/bin/python 'qwen-asr>=0.0.6' 'huggingface-hub>=0.36' 'torch>=2.8'
 uv run mindex e2e phase align --run data/e2e/trailer-20261013 \
   --python .venv-align/bin/python
 ```

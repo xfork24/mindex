@@ -40,7 +40,7 @@ def model_check(config: Config, video: Path, text: str, repeats: int = 3) -> dic
         gpu = request(
             "GET",
             config.embedding.base_url.rstrip("/") + "/metrics",
-            timeout=3,
+            timeout=config.embedding.timeout,
             attempts=1,
             headers=config.embedding.headers(),
         )

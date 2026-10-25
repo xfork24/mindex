@@ -80,13 +80,15 @@
 
 ## 当前可做
 
-| 任务 | 内容 | 风险 |
-|---|---|---|
-| 7 | ruff 规则、CI、递归导入边界与白名单、agent 常量归位 | 低 |
-| 8 | `BackgroundTaskRunner` | 中 |
-| 9 | 两个库的版本化迁移 | 中 |
-| 10 | 统一锁模块与有序加锁 | 中高 |
-| 12 | `StudioExecutor` 与取消统一 | 中 |
-| 13 | 拆分 `studio_workspace.py`（签名快照兜底） | 高 |
-| 14 | 阶段注册表 | 高 |
-| 15 | `shared/api.js`、拆分 `studio.js`、`build-assets.py` | 中（本机缺 Playwright，浏览器回归不可验证） |
+| 任务 | 内容 | 风险 | 状态 |
+|---|---|---|---|
+| 7 | ruff 规则、CI、递归导入边界与白名单、agent 常量归位 | 低 | 已完成：`.github/workflows/ci.yml`（推送/合并请求跑 `-m "not slow"`，每晚完整回归）；`tests/test_import_boundaries.py` 递归扫描并冻结白名单；`cli_common.py` 改为 `shared/cli_support.py`；`DOMAIN_INFO`、`PAGE_DOMAIN` 移入 `agent/domains.py`，`shared/agent_domains.py` 只留领域名 |
+| 8 | `BackgroundTaskRunner` | 中 | 已完成（`shared/background_tasks.py`） |
+| 9 | 两个库的版本化迁移 | 中 | 已完成（`shared/migrations.py`；`METADATA_STEPS` 现有 v1、v2，`agent/schema.py` 的 `STEPS`） |
+| 10 | 统一锁模块与有序加锁 | 中高 | 已完成（`shared/locks.py`，顺序 pipeline → index-write → library → register → studio；`ProcessingLock` 的 library 非阻塞尝试是记录在案的例外） |
+| 12 | `StudioExecutor` 与取消统一 | 中 | 已完成（`studio/executor.py`；后台素材/对白/人物任务的取消哨兵在 `shared/task_cancel.py`，`locks/cancel/`） |
+| 13 | 拆分 `studio_workspace.py`（签名快照兜底） | 高 | 已完成（`studio/workspace/` 包，单文件 ≤700 行；`tests/test_studio_signature_snapshot.py`） |
+| 14 | 阶段注册表 | 高 | 已完成（`studio/workspace/stages.py` 与 `handlers/`，`shot_stages` 按来源展开） |
+| 15 | `shared/api.js`、拆分 `studio.js`、`build-assets.py` | 中（本机缺 Playwright，浏览器回归不可验证） | 已完成，与设计稿有出入：`studio.js` 按原文件顺序原样切分为 10 个经典脚本（`studio.html` 中依次为 `studio-state`、`studio-jobs`、`studio-workspace`、`studio-board`、`studio-editor`、`studio-stages`、`studio-plan`、`studio-recall`、`studio-build`、`studio-main`），按序拼接即原文件，文件名与设计稿的划分不同；任务 17 再新增 `studio-templates.js`（排在 `studio-main.js` 之前）。顶层声明仍共享全局作用域，没有改为 `window.MindexStudio`；浏览器回归仍取决于本机 Playwright |
+
+A9 随任务 12、13 部分缓解（`studio_router` 已变短，仍是闭包式路由工厂）；A10、A11 本期未做，维持原结论。状态于 2026-10 任务 26 回填。

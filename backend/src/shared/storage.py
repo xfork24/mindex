@@ -9,6 +9,8 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+from mindex.shared.migrations import execute_script, migrate
+
 # 检索热路径的整索引快照缓存（活动索引 + 一个固定预览索引足够）。
 SNAPSHOT_CACHE_ENTRIES = 2
 # 原地改写或删除 index_members 的维护操作用它显式使缓存失效。
@@ -26,123 +28,156 @@ def dumps(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
+METADATA_SCHEMA_V1 = """
+CREATE TABLE IF NOT EXISTS clip_migration_files (
+  path TEXT PRIMARY KEY, source_id TEXT NOT NULL, version TEXT NOT NULL,
+  status TEXT NOT NULL, dependency_digest TEXT,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS media_references (
+  path TEXT PRIMARY KEY, source_id TEXT NOT NULL, start REAL NOT NULL,
+  end REAL NOT NULL, version TEXT NOT NULL, refs TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS sources (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL,
+  media TEXT NOT NULL, layout_key TEXT NOT NULL, prepared INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS segments (
+  id TEXT PRIMARY KEY, source_id TEXT NOT NULL REFERENCES sources(id),
+  kind TEXT NOT NULL, start REAL NOT NULL, end REAL NOT NULL,
+  path TEXT NOT NULL, thumbnail TEXT NOT NULL, generation TEXT NOT NULL,
+  parent_id TEXT, reason TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS segments_source ON segments(source_id, kind);
+CREATE INDEX IF NOT EXISTS segments_parent ON segments(parent_id);
+CREATE INDEX IF NOT EXISTS segments_timeline ON segments(source_id,kind,start,end,id);
+CREATE TABLE IF NOT EXISTS source_curation (
+  id TEXT PRIMARY KEY REFERENCES sources(id), display_name TEXT,
+  notes TEXT NOT NULL DEFAULT '', favorite INTEGER NOT NULL DEFAULT 0,
+  hidden INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS segment_curation (
+  id TEXT PRIMARY KEY REFERENCES segments(id), display_name TEXT,
+  notes TEXT NOT NULL DEFAULT '', favorite INTEGER NOT NULL DEFAULT 0,
+  hidden INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS transcripts (
+  source_id TEXT NOT NULL, profile TEXT NOT NULL, data TEXT NOT NULL,
+  PRIMARY KEY(source_id, profile)
+);
+CREATE TABLE IF NOT EXISTS annotations (
+  segment_id TEXT NOT NULL, profile TEXT NOT NULL, data TEXT NOT NULL,
+  PRIMARY KEY(segment_id, profile)
+);
+CREATE TABLE IF NOT EXISTS scene_plans (
+  source_id TEXT NOT NULL, profile TEXT NOT NULL, data TEXT NOT NULL,
+  PRIMARY KEY(source_id, profile)
+);
+CREATE TABLE IF NOT EXISTS index_versions (
+  id TEXT PRIMARY KEY, spec TEXT NOT NULL, status TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS index_members (
+  index_id TEXT NOT NULL, segment_id TEXT NOT NULL, snapshot TEXT NOT NULL,
+  complete INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY(index_id, segment_id)
+);
+CREATE TABLE IF NOT EXISTS representations (
+  id TEXT PRIMARY KEY, index_id TEXT NOT NULL, segment_id TEXT NOT NULL,
+  view TEXT NOT NULL, document TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS representations_version ON representations(index_id);
+CREATE TABLE IF NOT EXISTS channel_data (
+  source_id TEXT NOT NULL, channel TEXT NOT NULL, profile TEXT NOT NULL,
+  status TEXT NOT NULL, data TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(source_id,channel)
+);
+CREATE TABLE IF NOT EXISTS dialogue_tasks (
+  id TEXT PRIMARY KEY, source_id TEXT, status TEXT NOT NULL,
+  config TEXT NOT NULL, options TEXT NOT NULL, progress TEXT NOT NULL DEFAULT '{}',
+  error TEXT, result TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS source_tasks (
+  id TEXT PRIMARY KEY, source_id TEXT NOT NULL, work TEXT NOT NULL, status TEXT NOT NULL,
+  config TEXT NOT NULL, options TEXT NOT NULL, progress TEXT NOT NULL DEFAULT '{}',
+  error TEXT, result TEXT, publication TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS model_profiles (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  role TEXT NOT NULL, name TEXT NOT NULL, provider TEXT NOT NULL,
+  config TEXT NOT NULL, api_key TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(role, name)
+);
+CREATE TABLE IF NOT EXISTS voices (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE, kind TEXT NOT NULL, provider TEXT NOT NULL,
+  voice_id TEXT NOT NULL, sample_path TEXT, status TEXT NOT NULL DEFAULT 'ready',
+  notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS runs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, stage TEXT NOT NULL,
+  source_id TEXT, status TEXT NOT NULL, message TEXT NOT NULL DEFAULT '',
+  started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, finished_at TEXT
+);
+"""
+
+
+def _add_missing_columns(db, columns) -> None:
+    for table, column, definition in columns:
+        if column not in {row[1] for row in db.execute(f"PRAGMA table_info({table})")}:
+            db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
+def _metadata_v1(db) -> None:
+    """引入版本号时的完整 schema；对 user_version=0 的旧库幂等（补齐后来新增的列）。"""
+    from mindex.shared.person_schema import init_person_schema
+
+    execute_script(db, METADATA_SCHEMA_V1)
+    init_person_schema(db)
+    _add_missing_columns(db, (
+        ("sources", "layout_config", "TEXT"), ("dialogue_tasks", "publication", "TEXT"),
+        ("person_tasks", "publication", "TEXT"), ("clip_migration_files", "dependency_digest", "TEXT"),
+        ("representations", "cache_key", "TEXT"),
+    ))
+    db.execute("CREATE INDEX IF NOT EXISTS representations_cache ON representations(cache_key)")
+
+
+def _metadata_v2(db) -> None:
+    """用户文案模板（studio/script_templates.py）：内置模板来自 YAML，只有复制出的用户模板入库。
+
+    body 为 JSON：version、description、instructions、constraints。"""
+    execute_script(db, """
+CREATE TABLE IF NOT EXISTS script_templates (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, category TEXT NOT NULL, kind TEXT NOT NULL,
+  base_id TEXT, body TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+""")
+
+
+# metadata.sqlite3 的有序迁移：只追加，不修改已发布的步骤（见 shared/migrations.py）。
+METADATA_STEPS = (_metadata_v1, _metadata_v2)
+
+
+def migrate_metadata(db) -> int:
+    """把已打开的 metadata 库升级到最新版本（不切换日志模式；连接须用 ``sqlite3.Row``）；返回最终版本。"""
+    return migrate(db, METADATA_STEPS)
+
+
 class Store:
     def __init__(self, root: Path):
         self.root = root.resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         self.path = self.root / "metadata.sqlite3"
         with self.connect() as db:
-            db.executescript("""
-                PRAGMA journal_mode=WAL;
-                CREATE TABLE IF NOT EXISTS clip_migration_files (
-                  path TEXT PRIMARY KEY, source_id TEXT NOT NULL, version TEXT NOT NULL,
-                  status TEXT NOT NULL, dependency_digest TEXT,
-                  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-                );
-                CREATE TABLE IF NOT EXISTS media_references (
-                  path TEXT PRIMARY KEY, source_id TEXT NOT NULL, start REAL NOT NULL,
-                  end REAL NOT NULL, version TEXT NOT NULL, refs TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS sources (
-                  id TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL,
-                  media TEXT NOT NULL, layout_key TEXT NOT NULL, prepared INTEGER NOT NULL DEFAULT 0
-                );
-                CREATE TABLE IF NOT EXISTS segments (
-                  id TEXT PRIMARY KEY, source_id TEXT NOT NULL REFERENCES sources(id),
-                  kind TEXT NOT NULL, start REAL NOT NULL, end REAL NOT NULL,
-                  path TEXT NOT NULL, thumbnail TEXT NOT NULL, generation TEXT NOT NULL,
-                  parent_id TEXT, reason TEXT NOT NULL
-                );
-                CREATE INDEX IF NOT EXISTS segments_source ON segments(source_id, kind);
-                CREATE INDEX IF NOT EXISTS segments_parent ON segments(parent_id);
-                CREATE INDEX IF NOT EXISTS segments_timeline ON segments(source_id,kind,start,end,id);
-                CREATE TABLE IF NOT EXISTS source_curation (
-                  id TEXT PRIMARY KEY REFERENCES sources(id), display_name TEXT,
-                  notes TEXT NOT NULL DEFAULT '', favorite INTEGER NOT NULL DEFAULT 0,
-                  hidden INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-                );
-                CREATE TABLE IF NOT EXISTS segment_curation (
-                  id TEXT PRIMARY KEY REFERENCES segments(id), display_name TEXT,
-                  notes TEXT NOT NULL DEFAULT '', favorite INTEGER NOT NULL DEFAULT 0,
-                  hidden INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-                );
-                CREATE TABLE IF NOT EXISTS transcripts (
-                  source_id TEXT NOT NULL, profile TEXT NOT NULL, data TEXT NOT NULL,
-                  PRIMARY KEY(source_id, profile)
-                );
-                CREATE TABLE IF NOT EXISTS annotations (
-                  segment_id TEXT NOT NULL, profile TEXT NOT NULL, data TEXT NOT NULL,
-                  PRIMARY KEY(segment_id, profile)
-                );
-                CREATE TABLE IF NOT EXISTS scene_plans (
-                  source_id TEXT NOT NULL, profile TEXT NOT NULL, data TEXT NOT NULL,
-                  PRIMARY KEY(source_id, profile)
-                );
-                CREATE TABLE IF NOT EXISTS index_versions (
-                  id TEXT PRIMARY KEY, spec TEXT NOT NULL, status TEXT NOT NULL,
-                  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-                );
-                CREATE TABLE IF NOT EXISTS index_members (
-                  index_id TEXT NOT NULL, segment_id TEXT NOT NULL, snapshot TEXT NOT NULL,
-                  complete INTEGER NOT NULL DEFAULT 0,
-                  PRIMARY KEY(index_id, segment_id)
-                );
-                CREATE TABLE IF NOT EXISTS representations (
-                  id TEXT PRIMARY KEY, index_id TEXT NOT NULL, segment_id TEXT NOT NULL,
-                  view TEXT NOT NULL, document TEXT NOT NULL
-                );
-                CREATE INDEX IF NOT EXISTS representations_version ON representations(index_id);
-                CREATE TABLE IF NOT EXISTS channel_data (
-                  source_id TEXT NOT NULL, channel TEXT NOT NULL, profile TEXT NOT NULL,
-                  status TEXT NOT NULL, data TEXT NOT NULL,
-                  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                  PRIMARY KEY(source_id,channel)
-                );
-                CREATE TABLE IF NOT EXISTS dialogue_tasks (
-                  id TEXT PRIMARY KEY, source_id TEXT, status TEXT NOT NULL,
-                  config TEXT NOT NULL, options TEXT NOT NULL, progress TEXT NOT NULL DEFAULT '{}',
-                  error TEXT, result TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-                );
-                CREATE TABLE IF NOT EXISTS source_tasks (
-                  id TEXT PRIMARY KEY, source_id TEXT NOT NULL, work TEXT NOT NULL, status TEXT NOT NULL,
-                  config TEXT NOT NULL, options TEXT NOT NULL, progress TEXT NOT NULL DEFAULT '{}',
-                  error TEXT, result TEXT, publication TEXT,
-                  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-                );
-                CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-                CREATE TABLE IF NOT EXISTS model_profiles (
-                  id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  role TEXT NOT NULL, name TEXT NOT NULL, provider TEXT NOT NULL,
-                  config TEXT NOT NULL, api_key TEXT,
-                  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                  UNIQUE(role, name)
-                );
-                CREATE TABLE IF NOT EXISTS voices (
-                  id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  name TEXT NOT NULL UNIQUE, kind TEXT NOT NULL, provider TEXT NOT NULL,
-                  voice_id TEXT NOT NULL, sample_path TEXT, status TEXT NOT NULL DEFAULT 'ready',
-                  notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-                );
-                CREATE TABLE IF NOT EXISTS runs (
-                  id INTEGER PRIMARY KEY AUTOINCREMENT, stage TEXT NOT NULL,
-                  source_id TEXT, status TEXT NOT NULL, message TEXT NOT NULL DEFAULT '',
-                  started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, finished_at TEXT
-                );
-            """)
-            from mindex.shared.person_schema import init_person_schema
-
-            init_person_schema(db)
-            for table, column in (("sources", "layout_config"), ("dialogue_tasks", "publication"),
-                                  ("person_tasks", "publication"), ("clip_migration_files", "dependency_digest")):
-                if column not in {r[1] for r in db.execute(f"PRAGMA table_info({table})")}:
-                    db.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT")
-            columns = {row[1] for row in db.execute("PRAGMA table_info(representations)")}
-            if "cache_key" not in columns:
-                db.execute("ALTER TABLE representations ADD COLUMN cache_key TEXT")
-            db.execute("CREATE INDEX IF NOT EXISTS representations_cache ON representations(cache_key)")
+            db.execute("PRAGMA journal_mode=WAL")
+            migrate(db, METADATA_STEPS)
         # 创作详情热路径的短 TTL 缓存：同一轮 UI 交互里反复读 active_index / visibility_key
         # 会重复开关 sqlite 连接。缓存只影响冲突展示，构建仍在锁内用新读校验签名。
         self._hot_cache: dict[str, tuple[float, object]] = {}

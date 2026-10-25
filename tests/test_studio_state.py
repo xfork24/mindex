@@ -153,7 +153,7 @@ def test_timeline_edit_requires_select_and_invalidates_render(config):
                 audio=studio.TimelineAudio(
                     file="audio/shot-01.wav", duration=4.0, atempo=1.0, render_duration=4.0
                 ),
-                video=studio.TimelineVideo(
+                video=studio.LibraryVideo(
                     source_id="src",
                     segment_id="seg",
                     segment_ids=["seg"],

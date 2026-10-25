@@ -158,7 +158,8 @@ def test_identify_ranks_roles_and_actors_and_counts_uncovered(library, config):
     image = next(s for s in StubPersonClient.seen if s[0] == "image")
     assert image[1] == "PNG" and image[2][0] * image[2][1] <= config.video.max_pixels < 1600 * 1200
     assert body["image_size"] == list(image[2])
-    assert ("timeout", 60.0) in StubPersonClient.seen
+    # 识别使用人物识别档案配置的超时（缺省 3 分钟），不再写死上限。
+    assert ("timeout", config.person.timeout) in StubPersonClient.seen and config.person.timeout == 180
 
 
 def test_identify_top_k_and_no_faces(library):

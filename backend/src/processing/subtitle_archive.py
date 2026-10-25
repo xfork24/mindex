@@ -16,7 +16,7 @@ def load_archive(store, source_id):
     path = archive_path(store, source_id)
     if not path.is_file():
         raise MediaError('Subtitle archive missing; run explicit preparation/migration')
-    data = json.loads(path.read_text())
+    data = json.loads(path.read_text(encoding="utf-8"))
     for relative, digest in data['files'].items():
         if content_hash(store.resolve_media(relative)) != digest:
             raise MediaError('Subtitle archive integrity check failed')

@@ -24,7 +24,7 @@ class HTTPEmbedder:
         payload = adapters.request(
             "GET",
             self.profile.base_url.rstrip("/") + "/health",
-            timeout=3,
+            timeout=self.profile.timeout,
             attempts=1,
             headers=self.profile.headers(),
         )

@@ -1,4 +1,4 @@
-"""创作页“取消执行”“删除方案”：控制逻辑（真实 studio.js 代码 + 轻量 DOM 桩）与真实浏览器回归。"""
+"""创作页“取消执行”“删除方案”：控制逻辑（真实创作页脚本代码 + 轻量 DOM 桩）与真实浏览器回归。"""
 
 import os
 import re
@@ -9,6 +9,8 @@ import time
 from pathlib import Path
 
 import pytest
+
+pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -47,7 +49,7 @@ def blocked_studio(tmp_path):
 
     from mindex.api import create_app
     from mindex.shared.config import Config
-    from mindex.studio import studio_workspace as ws
+    from mindex.studio import workspace as ws
 
     config = Config(data_dir=(tmp_path / "data").resolve())
     config.embedding.dimensions = 8

@@ -44,7 +44,8 @@ def client_for(config) -> TestClient:
 def test_get_settings_snapshot(config):
     data = client_for(config).get("/api/settings").json()
     roles = {role["role"]: role for role in data["roles"]}
-    assert set(roles) == {"analyzer", "writer", "generator", "embedding", "asr", "tts", "person", "agent"}
+    assert set(roles) == {"analyzer", "writer", "generator", "embedding", "asr", "tts", "video_generator",
+                          "image_generator", "music_generator", "animator", "person", "agent"}
     assert roles["writer"]["label"] == "文案创作"
     assert roles["writer"]["effective"]["max_tokens"] == config.studio.writer.max_tokens
     assert data["presets"]["deepseek"]["writer"]["config"] == data["presets"]["deepseek"]["generator"]["config"]
@@ -502,3 +503,25 @@ def test_writer_profile_test_connection_uses_writer_service(config, monkeypatch)
     roles = {r["role"]: r for r in client.get("/api/settings?probe_embedding=false").json()["roles"]}
     assert roles["writer"]["effective"]["model"] == "deepseek-writer"
     assert roles["generator"]["effective"]["model"] == config.studio.generator.model
+
+
+def test_profile_test_connection_redacts_detail_and_logs_full_error(config, monkeypatch, caplog):
+    client = client_for(config)
+    profile = client.post("/api/settings/profiles", json={**TOKENHUB, "api_key": "sk-tokenhub-secret-1"}).json()
+
+    def fail(method, url, **kwargs):
+        raise adapters.ModelError(
+            "请求失败 https://tokenhub.example/v1/embeddings?api_key=leak-1&sig=leak-2 "
+            "Authorization: Bearer leak-3 token=leak-4 密钥 sk-tokenhub-secret-1"
+        )
+
+    monkeypatch.setattr(adapters, "request", fail)
+    with caplog.at_level("WARNING", logger="mindex.settings.settings_api"):
+        result = client.post(f"/api/settings/profiles/{profile['id']}/test").json()
+    assert result["ok"] is False
+    detail = result["detail"]
+    assert "请求失败 https://tokenhub.example/v1/embeddings" in detail
+    for leaked in ("leak-1", "leak-2", "leak-3", "leak-4", "sk-tokenhub-secret-1"):
+        assert leaked not in detail
+    record = next(r for r in caplog.records if "连接测试失败" in r.getMessage())
+    assert record.exc_info and "leak-1" in str(record.exc_info[1])

@@ -19,3 +19,6 @@ artifacts/
 .superpowers/
 
 /build/
+
+# 本机工具二进制（不入库）
+/bin/

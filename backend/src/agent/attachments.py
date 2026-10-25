@@ -19,6 +19,7 @@ import unicodedata
 from pathlib import Path
 from typing import Literal
 
+from mindex.agent.schema import initialize
 from mindex.agent.session_store import Database, now_ms
 
 PREFIX = "attachment://"
@@ -26,16 +27,6 @@ DIRNAME = "agent-attachments"
 OWNERS = ("session", "mcp")
 TOKEN_RE = re.compile(r"[0-9a-f]{32}")
 MAX_FILENAME = 120
-
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS agent_attachments (
-  id TEXT PRIMARY KEY, session_id TEXT, owner TEXT NOT NULL, filename TEXT NOT NULL,
-  content_type TEXT NOT NULL, bytes INTEGER NOT NULL, sha256 TEXT NOT NULL, path TEXT NOT NULL,
-  created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS agent_attachments_session ON agent_attachments(session_id);
-CREATE INDEX IF NOT EXISTS agent_attachments_expires ON agent_attachments(expires_at);
-"""
 
 # 文件名里不允许的字符：路径分隔符与 Windows 保留字符；控制字符另行剔除。
 UNSAFE = re.compile(r'[/\\:*?"<>|]')
@@ -78,9 +69,7 @@ class AttachmentStore:
         self.data_dir = Path(data_dir)
         self.root = self.data_dir / DIRNAME
         self.store = Database(self.data_dir / "agent.sqlite3")
-        with self.store.connect() as db:
-            db.execute("PRAGMA journal_mode=WAL")
-            db.executescript(SCHEMA)
+        initialize(self.store)
 
     # ------------------------------------------------------------ 写入
     def put(self, upload_path: Path, *, filename: str | None, content_type: str | None,

@@ -18,8 +18,10 @@ from mindex.shared.media import cut
 from mindex.shared.storage import Store
 from mindex.shared.types import Filters
 from mindex.studio import studio
-from mindex.studio import studio_workspace as ws
+from mindex.studio import workspace as ws
 from mindex.studio.studio import Shot, ShotRecall
+
+pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
 
 
 def test_shot_recall_mode_media_and_person_constraints():

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 Granularity = Literal["shot", "moment", "scene"]
 
@@ -201,3 +201,41 @@ class MaterialDigest(BaseModel):
     @classmethod
     def empty_of(cls, reason: DigestEmptyReason, content_index_id: str | None = None) -> MaterialDigest:
         return cls(empty_reason=reason, content_index_id=content_index_id)
+
+
+ScriptTemplateKind = Literal["outline", "rewrite"]
+SCRIPT_TEMPLATE_ID = r"^[a-z0-9][a-z0-9-]{0,63}$"
+
+
+class ScriptTemplateConstraints(BaseModel):
+    """文案输出约束；max_chars 为 None 时使用 studio.max_input_chars。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_chars: int | None = Field(default=None, ge=50, le=20000)
+
+
+class ScriptTemplate(BaseModel):
+    """文案模板（内置 YAML 或用户模板）。定义在 shared 层，使 models/ 下的 Writer 不必依赖 studio/。
+
+    kind：outline=按视频大纲写；rewrite=把参考文稿改写为视频文案。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=SCRIPT_TEMPLATE_ID)
+    name: str = Field(min_length=1, max_length=40)
+    category: str = Field(min_length=1, max_length=40)
+    kind: ScriptTemplateKind = "outline"
+    version: int = Field(default=1, ge=1)
+    description: str = Field(default="", max_length=200)
+    instructions: str = Field(min_length=1, max_length=6000)
+    constraints: ScriptTemplateConstraints = Field(default_factory=ScriptTemplateConstraints)
+
+    @field_validator("name", "category", "instructions")
+    @classmethod
+    def nonblank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("不能为空")
+        return value

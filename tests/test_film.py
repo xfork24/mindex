@@ -18,6 +18,8 @@ from mindex.shared import media
 from mindex.shared.media import command, probe
 from mindex.shared.types import TextSearch
 
+pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
+
 
 class NoModels:
     def __getattr__(self, name):

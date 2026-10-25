@@ -3,27 +3,20 @@
 from __future__ import annotations
 
 import json
-import threading
+import logging
 import uuid
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException
-from filelock import Timeout
 
 from mindex.processing.pipeline import Pipeline
+from mindex.shared.background_tasks import BackgroundTaskRunner, public_task
 from mindex.shared.config import Config, StrictModel, absolutize_config_paths, relativize_config_paths
-from mindex.shared.processing_lock import ProcessingLock, recover_tasks
+from mindex.shared.processing_lock import ProcessingLock
 from mindex.shared.storage import dumps
-from mindex.shared.task_cancel import TaskCancelled, registry_for
-from mindex.shared.task_progress import (
-    RETRYABLE,
-    begin_task,
-    mark_cancelled,
-    request_task_cancel,
-    reset_task_attempt,
-    save_task_progress,
-    task_logs,
-)
+from mindex.shared.task_cancel import TaskCancelled
+
+log = logging.getLogger(__name__)
 
 Work = Literal["shots", "dialogue", "analysis", "persons"]
 
@@ -137,21 +130,14 @@ def publication_attempt(config, source_id, work, *, embedder=None, save=None, pr
         if save:
             save(value)
         raise
-    except Exception as exc:  # noqa: BLE001 — 发布错误独立持久化，不丢失处理结果
+    except Exception as exc:  # 发布错误独立持久化，不丢失处理结果
+        log.warning("素材 %s 处理后发布失败", source_id, exc_info=True)
         value = {"status": "failed", "error": str(exc)[:2000]}
     if latest_progress:
         value["progress"] = latest_progress
     if save:
         save(value)
     return value
-
-
-def public_task(row):
-    return {
-        k: json.loads(v) if v and k in {"options", "progress", "result", "publication"} else v
-        for k, v in row.items()
-        if k != "config"
-    }
 
 
 def person_setup(store, source_id, work_id=None):
@@ -194,11 +180,12 @@ def person_setup(store, source_id, work_id=None):
     }
 
 
-class SourceTasks:
-    def __init__(self, runtime, store, embedder=None):
-        self.runtime, self.store, self.embedder = runtime, store, embedder
-        self.threads = {}
-        recover_tasks(store, "source_tasks")
+class SourceTasks(BackgroundTaskRunner):
+    table = "source_tasks"
+    label = "素材任务"
+    busy = "GPU 独占锁或该素材同类任务正在运行"
+    not_retryable = "仅失败、中断或检索更新失败的任务可以重试"
+    thread_prefix = "source"
 
     def lock(self, source_id, work, options=None):
         from mindex.shared.processing_lock import PublicationLock, task_lock_work
@@ -207,11 +194,8 @@ class SourceTasks:
         kind = PublicationLock if work == 'publish' else ProcessingLock
         return kind(self.runtime.current(), source_id=source_id, work=task_lock_work(work, values))
 
-    def get(self, task_id):
-        row = self.store.one("SELECT * FROM source_tasks WHERE id=?", (task_id,))
-        if not row:
-            raise HTTPException(404, "找不到素材任务")
-        return public_task(row)
+    def row_lock(self, row):
+        return self.lock(row["source_id"], row["work"], json.loads(row["options"]))
 
     def validate(self, source_id, work):
         source = self.store.one("SELECT * FROM sources WHERE id=?", (source_id,))
@@ -222,12 +206,7 @@ class SourceTasks:
         return source
 
     def start(self, source_id, work, options):
-        lock = self.lock(source_id, work, options)
-        try:
-            lock.acquire()
-        except Timeout as exc:
-            raise HTTPException(409, "GPU 独占锁或该素材同类任务正在运行，请稍后启动") from exc
-        try:
+        def create():
             source = self.validate(source_id, options.work if work == "publish" else work)
             if work == "publish":
                 from mindex.admin.curation import Library
@@ -260,113 +239,50 @@ class SourceTasks:
                     options.model_dump_json(),
                 ),
             )
-            self.launch(task_id, config, lock)
-            return self.get(task_id)
-        except BaseException:
-            lock.release()
-            raise
+            return task_id, config
 
-    def retry(self, task_id):
-        row = self.store.one("SELECT * FROM source_tasks WHERE id=?", (task_id,))
-        if not row:
-            raise HTTPException(404, "找不到素材任务")
-        lock = self.lock(row["source_id"], row["work"], json.loads(row["options"]))
-        try:
-            lock.acquire()
-        except Timeout as exc:
-            raise HTTPException(409, "GPU 独占锁或该素材同类任务正在运行，请稍后重试") from exc
-        try:
-            row = self.store.one("SELECT * FROM source_tasks WHERE id=?", (task_id,))
-            if not row:
-                raise HTTPException(404, "找不到素材任务")
-            publication = json.loads(row["publication"] or "{}")
-            if row["status"] not in RETRYABLE and publication.get("status") != "failed":
-                raise HTTPException(409, "仅失败、中断或检索更新失败的任务可以重试")
-            config = restore_config(row["config"], self.runtime, self.store)
-            reset_task_attempt(self.store, "source_tasks", task_id)
-            self.launch(task_id, config, lock)
-            return self.get(task_id)
-        except BaseException:
-            lock.release()
-            raise
+        return self.submit(self.lock(source_id, work, options), create)
 
-    def cancel(self, task_id):
-        status = request_task_cancel(self.store, "source_tasks", task_id)
-        if status is None:
-            raise HTTPException(404, "找不到素材任务")
-        if status not in {"queued", "running"}:
-            raise HTTPException(409, "只有排队中或运行中的任务可以取消")
-        return self.get(task_id)
+    def restore(self, row):
+        return restore_config(row["config"], self.runtime, self.store)
 
-    def launch(self, task_id, config, lock):
-        thread = threading.Thread(target=self.run, args=(task_id, config, lock), daemon=True)
-        self.threads[task_id] = thread
-        thread.start()
+    def admit(self, row, lock, cancels):
+        if row["work"] == "publish":
+            # 等待 GPU 准入期间（仍为 queued）也可取消。
+            lock.admit(check=lambda: cancels.check(row["id"]))
 
-    @task_logs("source_tasks")
-    def run(self, task_id, config, lock):
-        cancels = registry_for(self.store.root)
-        try:
-            row = self.store.one("SELECT * FROM source_tasks WHERE id=?", (task_id,))
-            if row['work'] == 'publish':
-                # 等待 GPU 准入期间（仍为 queued）也可取消。
-                lock.admit(check=lambda: cancels.check(task_id))
-            begin_task(self.store, "source_tasks", task_id)
-
-            def save(field, value):
-                if field == "progress":
-                    return save_task_progress(self.store, "source_tasks", task_id, value)
-                self.store.execute(
-                    f"UPDATE source_tasks SET {field}=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                    (dumps(value), task_id),
-                )
-
-            options = json.loads(row["options"])
-            pipeline = Pipeline(config)
-            result = json.loads(row["result"]) if row["result"] else None
-            if row["work"] == "publish":
-                publication = publication_attempt(
-                    config,
-                    row["source_id"],
-                    options["work"],
-                    scope=options.get("scope", "moment"),
-                    embedder=self.embedder,
-                    save=lambda v: save("publication", v),
-                    progress=lambda v: save("progress", v),
-                )
-                save("result", publication)
-                if publication["status"] == "failed":
-                    raise ValueError(publication["error"])
+    def execute(self, task_id, row, config, save):
+        options = json.loads(row["options"])
+        pipeline = Pipeline(config)
+        if row["work"] == "publish":
+            publication = publication_attempt(
+                config,
+                row["source_id"],
+                options["work"],
+                scope=options.get("scope", "moment"),
+                embedder=self.embedder,
+                save=lambda v: save("publication", v),
+                progress=lambda v: save("progress", v),
+            )
+            save("result", publication)
+            if publication["status"] == "failed":
+                raise ValueError(publication["error"])
+            return
+        result = json.loads(row["result"]) if row["result"] else None
+        if result is None:
+            if row["work"] == "shots":
+                pipeline.detect_source(row["source_id"], lambda v: save("progress", v))
+                pipeline.split(row["source_id"], lambda v: save("progress", v))
             else:
-                if result is None:
-                    if row["work"] == "shots":
-                        pipeline.detect_source(row["source_id"], lambda v: save("progress", v))
-                        pipeline.split(row["source_id"], lambda v: save("progress", v))
-                    else:
-                        pipeline.analyze(row["source_id"], lambda v: save("progress", v))
-                    result = {"processing_status": "complete"}
-                    save("result", result)
-                if options["publish"]:
-                    save('publication', enqueue_publications(
-                        self.runtime, self.store, row['source_id'], row['work'], self.embedder,
-                    ))
-                else:
-                    save("publication", {"status": "not_requested"})
-            self.store.execute(
-                "UPDATE source_tasks SET status='complete',updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                (task_id,),
-            )
-        except TaskCancelled:
-            mark_cancelled(self.store, "source_tasks", task_id)
-        except BaseException as exc:  # noqa: BLE001 — 后台任务必须记录终态并释放管线锁
-            self.store.execute(
-                "UPDATE source_tasks SET status='failed',error=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                (str(exc)[:2000], task_id),
-            )
-        finally:
-            cancels.clear(task_id)
-            lock.release()
-            self.threads.pop(task_id, None)
+                pipeline.analyze(row["source_id"], lambda v: save("progress", v))
+            result = {"processing_status": "complete"}
+            save("result", result)
+        if options["publish"]:
+            save('publication', enqueue_publications(
+                self.runtime, self.store, row['source_id'], row['work'], self.embedder,
+            ))
+        else:
+            save("publication", {"status": "not_requested"})
 
 
 def enqueue_publications(runtime, store, source_id, work, embedder=None):

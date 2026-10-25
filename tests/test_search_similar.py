@@ -16,6 +16,8 @@ from mindex.shared.config import Config
 from mindex.shared.media import command, cut
 from mindex.shared.types import Filters, TextSearch
 
+pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
+
 
 class NoEmbedder:
     """找相似只读库内向量：任何嵌入调用都算违规。"""

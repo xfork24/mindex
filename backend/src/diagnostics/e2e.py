@@ -38,7 +38,7 @@ PHASES = (
 
 
 def progress(config: Config, directory: Path) -> dict:
-    state = json.loads((directory / "run.json").read_text())
+    state = json.loads((directory / "run.json").read_text(encoding="utf-8"))
     store = Store(config.data_dir)
     counts = store.rows(
         "SELECT s.kind,count(*) AS count FROM annotations a JOIN segments s ON s.id=a.segment_id "
@@ -58,7 +58,7 @@ def progress(config: Config, directory: Path) -> dict:
         },
         "analysis_key": config.analysis_key,
         "annotations": counts,
-        "expected_moments": len(json.loads((directory / "segments.json").read_text())),
+        "expected_moments": len(json.loads((directory / "segments.json").read_text(encoding="utf-8"))),
         "active_index": active["id"] if active else None,
         "acceptance": state["acceptance"],
     }
@@ -132,9 +132,9 @@ def initialize(config: Config, source_id: str, directory: Path):
     for i, segment in enumerate(segments):
         lines.append(f"- {i + 1:02} `{segment['id']}`：{segment['start']:.3f}–{segment['end']:.3f}s")
     directory.mkdir(parents=True, exist_ok=True)
-    (directory / "LABELING.md").write_text("\n".join(lines))
+    (directory / "LABELING.md").write_text("\n".join(lines), encoding="utf-8")
     (directory / "queries.draft.jsonl").write_text(
-        "\n".join(json.dumps(v, ensure_ascii=False) for v in drafts) + "\n"
+        "\n".join(json.dumps(v, ensure_ascii=False) for v in drafts) + "\n", encoding="utf-8"
     )
     diagnostics = [
         {
@@ -156,7 +156,7 @@ def initialize(config: Config, source_id: str, directory: Path):
         )
     ]
     (directory / "no-answer.draft.jsonl").write_text(
-        "\n".join(json.dumps(v, ensure_ascii=False) for v in diagnostics) + "\n"
+        "\n".join(json.dumps(v, ensure_ascii=False) for v in diagnostics) + "\n", encoding="utf-8"
     )
     make_video_queries(store, source_id, segments, directory)
     return state
@@ -216,12 +216,12 @@ def make_video_queries(store: Store, source_id: str, segments: list[dict], direc
             }
         )
     (directory / "video-queries.draft.jsonl").write_text(
-        "\n".join(json.dumps(v, ensure_ascii=False) for v in entries) + "\n"
+        "\n".join(json.dumps(v, ensure_ascii=False) for v in entries) + "\n", encoding="utf-8"
     )
 
 
 def freeze(directory: Path, path: Path, confirmed_by: str):
-    entries = [json.loads(v) for v in path.read_text().splitlines() if v.strip()]
+    entries = [json.loads(v) for v in path.read_text(encoding="utf-8").splitlines() if v.strip()]
     if not confirmed_by.strip() or not entries or len({v["id"] for v in entries}) != len(entries):
         raise ValueError("需要确认人、唯一查询 ID 和非空查询集")
     for entry in entries:
@@ -242,7 +242,7 @@ def freeze(directory: Path, path: Path, confirmed_by: str):
         for key in ("video", "image"):
             if key in entry:
                 entry[key] = str((path.parent / entry[key]).resolve())
-    target.write_text("\n".join(json.dumps(v, ensure_ascii=False) for v in entries) + "\n")
+    target.write_text("\n".join(json.dumps(v, ensure_ascii=False) for v in entries) + "\n", encoding="utf-8")
     save(
         target.with_suffix(".manifest.json"),
         {
@@ -268,7 +268,7 @@ def _smoke(config: Config, directory: Path) -> dict:
     from mindex.models import compatibility
     from mindex.models.deployment import ADAPTER_VERSION
 
-    rows = json.loads((directory / "segments.json").read_text())
+    rows = json.loads((directory / "segments.json").read_text(encoding="utf-8"))
     unique = list({row["sha256"]: row for row in rows}.values())
     if len(unique) < 6:
         raise ValueError("至少需要六个不同的实际视频文件")
@@ -390,14 +390,14 @@ def run_phase(
     directory = directory.resolve()
     with FileLock(str(directory / "run.lock"), timeout=0):
         state_path = directory / "run.json"
-        state = json.loads(state_path.read_text())
+        state = json.loads(state_path.read_text(encoding="utf-8"))
         store = Store(config.data_dir)
         selected_index = index_id
         if selected_index is None:
             for mode in ("enriched", "visual"):
                 completed = state["phases"].get(mode, {})
                 if completed.get("status") == "complete":
-                    selected_index = json.loads((directory / completed["result_file"]).read_text())[
+                    selected_index = json.loads((directory / completed["result_file"]).read_text(encoding="utf-8"))[
                         "index_id"
                     ]
                     break
@@ -412,7 +412,7 @@ def run_phase(
         from mindex.shared.shot_media import ShotMedia
         ShotMedia(store).references(state["source_id"])
         load_archive(store, state["source_id"])
-        rows = json.loads((directory / "segments.json").read_text())
+        rows = json.loads((directory / "segments.json").read_text(encoding="utf-8"))
         if fingerprint(rows) != state["segments_hash"]:
             raise ValueError("实验切片清单发生变化")
         for row in rows:
@@ -483,7 +483,7 @@ def run_phase(
 
                 if queries is None:
                     raise ValueError("preview 需要 --queries 指定文字或视频查询草稿")
-                entries = [json.loads(v) for v in queries.read_text().splitlines() if v.strip()]
+                entries = [json.loads(v) for v in queries.read_text(encoding="utf-8").splitlines() if v.strip()]
                 if selected_index is None:
                     raise ValueError("请先建立实验索引或指定 --index-id")
                 engine = SearchEngine(config, index_id=selected_index)
@@ -512,7 +512,7 @@ def run_phase(
                 if queries is None:
                     raise ValueError("需要 --queries 指定已冻结的人工标注")
                 label_manifest = queries.with_suffix(".manifest.json")
-                if not label_manifest.is_file() or json.loads(label_manifest.read_text())[
+                if not label_manifest.is_file() or json.loads(label_manifest.read_text(encoding="utf-8"))[
                     "sha256"
                 ] != content_hash(queries):
                     raise ValueError("标注未冻结或已变化，请先 e2e freeze")

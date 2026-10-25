@@ -15,7 +15,9 @@ from mindex.api import create_app
 from mindex.processing.indexing import IndexBuilder
 from mindex.processing.pipeline import Pipeline
 from mindex.studio import studio
-from mindex.studio import studio_workspace as ws
+from mindex.studio import workspace as ws
+
+pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
 
 SHOTS = ["shot-a1daad59aa", "shot-925281d5bb", "shot-77f0c3e1cc"]
 

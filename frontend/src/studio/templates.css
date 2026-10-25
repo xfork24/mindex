@@ -1,0 +1,41 @@
+/* 文案模板管理页：左侧模板列表，右侧详情编辑与试写。复用 studio.css 的 .workspace / .job-panel / .job-item。 */
+.template-panel input[type=search]{width:100%;margin:8px 0 6px}
+.template-group{margin-top:14px}
+.template-group-title{display:flex;justify-content:space-between;align-items:baseline;font-size:12px;font-weight:550;color:#47765d;margin:0 0 2px;letter-spacing:.5px}
+.template-group-title .muted{font-weight:400}
+.template-group-empty{font-size:12px;line-height:1.7;margin:8px 0 0}
+.template-items{list-style:none;margin:0;padding:0}
+.template-item{height:auto;flex-direction:column;align-items:stretch;gap:0}
+.template-card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:4px 22px 20px;margin-bottom:18px}
+.template-title-row h2{font-size:20px;letter-spacing:-.4px}
+.template-tags{display:inline-flex;flex-wrap:wrap;gap:6px}
+.template-tag{font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid #c9d8c2;color:#47765d;background:#f4f8f0}
+#template-description{font-size:13px;margin:0 0 8px;line-height:1.7}
+.template-note{font-size:12px;line-height:1.7;margin:0 0 16px;padding:8px 12px;border-radius:8px;background:#f7f9f4;color:#526258}
+.template-note.is-readonly{background:#fbf6ee;color:#8a5a2b}
+.template-form{display:flex;flex-direction:column;gap:12px}
+.template-form .form-field{display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--muted)}
+.template-form input,.template-form select{width:100%}
+.template-fields{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1.4fr) minmax(0,1.2fr) minmax(0,1.4fr);gap:12px}
+#tf-instructions{min-height:320px;resize:vertical;font:13px/1.75 ui-monospace,SFMono-Regular,Menlo,"PingFang SC",monospace}
+.template-form input:read-only,.template-form textarea:read-only,.template-form select:disabled{background:#f7f9f4;color:#526258}
+.template-form-foot{display:flex;align-items:center;gap:14px;flex-wrap:wrap;font-size:12px}
+.template-form-actions{margin-left:auto;display:inline-flex;gap:10px;align-items:center}
+.template-form-actions .submit{margin-left:0}
+.template-meta{font-size:11px;margin:14px 0 0;overflow-wrap:anywhere}
+#template-error,#preview-error{margin:0}
+.danger{color:#a4472e}
+.preview-inputs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.preview-inputs .form-field{display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--muted)}
+.preview-inputs textarea{resize:vertical}
+.template-preview>p.muted{font-size:12px;line-height:1.7;margin:0 0 12px}
+.preview-actions{display:flex;align-items:center;gap:14px;margin:14px 0 10px}
+.preview-actions .submit{margin-left:0}
+.preview-result{border:1px solid var(--line);border-radius:10px;background:#fafcf7;margin-top:6px}
+.preview-result-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 12px;border-bottom:1px solid var(--line);font-size:12px}
+.preview-text{white-space:pre-wrap;overflow-wrap:anywhere;padding:14px 16px;font-size:14px;line-height:1.9;color:#21352f;max-height:520px;overflow:auto}
+@media(max-width:1100px){.template-fields{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:700px){.template-fields,.preview-inputs{grid-template-columns:minmax(0,1fr)}
+.template-card{padding:4px 14px 16px}
+.template-title-row .head-actions{margin-left:0}
+}

@@ -12,7 +12,7 @@ from mindex.api import create_app
 from mindex.processing.indexing import IndexBuilder
 from mindex.processing.pipeline import Pipeline
 from mindex.studio import studio, studio_steps
-from mindex.studio import studio_workspace as ws
+from mindex.studio import workspace as ws
 
 # 含首尾空白、emoji 与恰好 120 字的 visual，用于逐字符回读。
 VISUAL = "  湖边安静的村落🌅，晨雾里的木屋  "

@@ -1,5 +1,7 @@
 # Qwen 语义分析的检索增益与处理成本评估
 
+> 历史记录，内容可能与当前代码不符，以 [search.md](search.md) 与 [recall-enhancement.md](recall-enhancement.md) 为准。
+
 日期：2026-10-13。用户重点：海量视频场景下，增加慢速 Qwen3.8:27b 分析，相比仅 WeMM 嵌入是否值得。评估结论写入 `E2E_RESULTS.md`，原始结果保留于实验目录，不预设融合必然提升。
 
 ## 固定条件

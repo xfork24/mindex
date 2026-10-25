@@ -58,7 +58,7 @@ def version_media(version: dict | None, title: str, *, collapsed: bool = True) -
     for name, meta in (version.get("files") or {}).items():
         url, path = meta.get("url"), (meta.get("path") or "").lower()
         if path.endswith(VIDEO):
-            found.append(item("video", url, f"{title} · {name}" if name not in ("mp4", "video") else title,
+            found.append(item("video", url, f"{title} · {name}" if name not in ("mp4", "video", "generated") else title,
                               collapsed=collapsed))
         elif path.endswith(AUDIO):
             found.append(item("audio", url, title, collapsed=True))
@@ -92,8 +92,28 @@ def shot_media(view, sid: str) -> list[dict]:
     label = f"#{index} {short(sid)}"
     selected = view.plan["shots"].get(sid, {})
     return (version_media(view.version(selected.get("tts")), f"{label} 配音")
+            + generated_media(view, sid)
             + version_media(view.version(selected.get("render")), f"{label} 渲染")
             + candidate_media(view.version(selected.get("recall")), label))
+
+
+def generated_media(view, sid: str) -> list[dict]:
+    """aigc 分镜当前选中的生成画面（generated.mp4）；其他来源或未生成时为空。"""
+    vid = view.plan["shots"].get(sid, {}).get("generate")
+    if not vid:
+        return []
+    index = view.order.index(sid) + 1 if sid in view.order else "?"
+    return version_media(view.version(vid), f"#{index} {short(sid)} 生成画面")
+
+
+def animation_media(view, sid: str) -> list[dict]:
+    """animation 分镜当前渲染版本里的动画录制（展开显示）；其他来源或未渲染时为空。"""
+    content = view.version(view.plan["shots"].get(sid, {}).get("content")) or {}
+    if ((content.get("data") or {}).get("source") or {}).get("kind") != "animation":
+        return []
+    index = view.order.index(sid) + 1 if sid in view.order else "?"
+    render = view.version(view.plan["shots"].get(sid, {}).get("render"))
+    return version_media(render, f"#{index} {short(sid)} 动画录制", collapsed=False)
 
 
 def final_media(view, version_id: str | None = None) -> list[dict]:

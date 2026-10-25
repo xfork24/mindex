@@ -15,9 +15,17 @@ from pydantic import Field
 
 from mindex.agent.registry import Preview, ToolContext, ToolError, ToolOutput, ToolSpec
 from mindex.agent.tools.common import check
+from mindex.shared.comfyui import (
+    IMAGE_MAPPING_FIELDS,
+    MAPPING_FIELDS,
+    MUSIC_MAPPING_FIELDS,
+    validate_workflow,
+    workflow_hash,
+)
 from mindex.shared.config import StrictModel
 
-ROLE_NAMES = Literal["analyzer", "writer", "generator", "embedding", "asr", "tts", "person", "agent"]
+ROLE_NAMES = Literal["analyzer", "writer", "generator", "embedding", "asr", "tts", "image_generator", "video_generator",
+                     "music_generator", "animator", "person", "agent"]
 SETTINGS = {"domain": "settings"}
 CLEAR_KEY = "__clear__"
 
@@ -153,6 +161,45 @@ class ProfileConfig(StrictModel):
     voice: str | None = Field(default=None, description="语音合成档案的默认音色")
     dimensions: int | None = Field(default=None, ge=1, description="嵌入维度")
     quantization: str | None = None
+    durations: list[float] | None = Field(default=None, min_length=1, description="视频生成：后端允许的生成时长（秒）")
+    poll_interval: float | None = Field(default=None, gt=0, description="视频生成：轮询间隔（秒）")
+    max_wait: float | None = Field(default=None, gt=0, description="视频生成：单镜总等待上限（秒）")
+    fps: int | None = Field(default=None, ge=1, le=60, description="视频生成（ComfyUI）：帧数映射 = 时长 × fps")
+    retries: int | None = Field(default=None, ge=0, le=10, description="动画生成：源码未通过静态校验时的重试次数")
+    max_capture_seconds: float | None = Field(default=None, gt=0, le=3600,
+                                              description="动画生成：单个分镜逐帧录制的墙钟时长上限（秒）")
+    max_html_kb: int | None = Field(default=None, ge=1, le=5000, description="动画生成：动画源码大小上限（KiB）")
+    comfyui_workflow: dict | None = Field(
+        default=None, description="视频生成（ComfyUI）：「导出（API）」格式工作流 JSON 对象 {节点ID: {class_type, inputs}}")
+    cover_model: str | None = Field(default=None, description="音乐生成：翻唱模型名（缺省 music-cover）")
+    comfyui_mapping: dict[str, str] | None = Field(
+        default=None, description="ComfyUI 视频/图片/音乐生成：请求字段 → \"节点ID.inputs.输入名\"；视频字段可选 "
+                                  + "、".join(MAPPING_FIELDS) + "；图片字段可选 " + "、".join(IMAGE_MAPPING_FIELDS)
+                                  + "；音乐字段可选 " + "、".join(MUSIC_MAPPING_FIELDS) + "；prompt 必填")
+
+
+COMFY_FIELDS = {"video_generator": MAPPING_FIELDS, "image_generator": IMAGE_MAPPING_FIELDS,
+                "music_generator": MUSIC_MAPPING_FIELDS}
+
+
+def check_video_config(role: str, config: dict) -> None:
+    """视频/图片/音乐生成档案的 ComfyUI 工作流与映射先在本地校验，给出与设置页一致的中文错误（服务端仍会再校验）。"""
+    workflow, mapping = config.get("comfyui_workflow"), config.get("comfyui_mapping")
+    if role not in COMFY_FIELDS or (workflow is None and mapping is None):
+        return
+    if workflow is None:
+        raise ToolError("已填写 ComfyUI 节点映射，但没有导入工作流", code="invalid_profile")
+    try:
+        validate_workflow(workflow, mapping or {}, COMFY_FIELDS[role])
+    except ValueError as exc:
+        raise ToolError(str(exc), code="invalid_profile") from exc
+
+
+def config_text(key: str, value):
+    """预览里的字段值：工作流只显示节点数与摘要，不展开全文。"""
+    if key == "comfyui_workflow" and isinstance(value, dict):
+        return f"{len(value)} 个节点（摘要 {workflow_hash(value)}）"
+    return value
 
 
 class CreateProfile(StrictModel):
@@ -166,9 +213,12 @@ class CreateProfile(StrictModel):
 async def preview_create_profile(args: CreateProfile, ctx: ToolContext) -> Preview:
     check_key(args.api_key)
     config = args.config.model_dump(exclude_none=True)
-    changes = [{"label": key, "after": value} for key, value in config.items()]
+    check_video_config(args.role, config)
+    changes = [{"label": key, "after": config_text(key, value)} for key, value in config.items()]
     changes.append({"label": "API Key", "after": "已通过表单提供" if args.api_key else "未提供"})
-    return Preview(f"新建「{args.role}」角色的配置档案「{args.name}」（不会自动激活）", changes,
+    warnings = ["测试连接只做鉴权/可达性探测，不发起生成；激活后 aigc 分镜构建时会调用该服务，可能产生费用"] \
+        if args.role in ("video_generator", "image_generator", "music_generator") else []
+    return Preview(f"新建「{args.role}」角色的配置档案「{args.name}」（不会自动激活）", changes, warnings=warnings,
                    focus=settings_focus(role=args.role))
 
 
@@ -176,6 +226,7 @@ async def create_model_profile(args: CreateProfile, ctx: ToolContext) -> ToolOut
     check_key(args.api_key)
     body = {"role": args.role, "name": args.name, "provider": args.provider,
             "config": args.config.model_dump(exclude_none=True)}
+    check_video_config(args.role, body["config"])
     if args.api_key:
         body["api_key"] = args.api_key  # 回环客户端在发送前解引用
     profile = check(await ctx.client.post("/api/settings/profiles", body), "新建配置档案")
@@ -199,6 +250,7 @@ async def profile_body(args: UpdateProfile, ctx: ToolContext):
     data = await load_settings(ctx)
     role, profile = find_profile(data, args.profile_id)
     config = {**profile["config"], **(args.config.model_dump(exclude_none=True) if args.config else {})}
+    check_video_config(role["role"], config)
     body = {"role": role["role"], "name": args.name or profile["name"], "provider": profile["provider"], "config": config}
     if args.api_key:
         body["api_key"] = args.api_key
@@ -207,7 +259,7 @@ async def profile_body(args: UpdateProfile, ctx: ToolContext):
 
 async def preview_update_profile(args: UpdateProfile, ctx: ToolContext) -> Preview:
     role, profile, body = await profile_body(args, ctx)
-    changes = [{"label": key, "before": profile["config"].get(key), "after": value}
+    changes = [{"label": key, "before": config_text(key, profile["config"].get(key)), "after": config_text(key, value)}
                for key, value in body["config"].items() if profile["config"].get(key) != value]
     if body["name"] != profile["name"]:
         changes.append({"label": "名称", "before": profile["name"], "after": body["name"]})
@@ -244,8 +296,16 @@ async def preview_activate_profile(args: ActivateProfile, ctx: ToolContext) -> P
     warnings = ["保存即热生效：之后的任务与请求都会使用新模型"]
     if role["role"] == "embedding":
         warnings.append("切换嵌入模型后，若身份与已发布索引不一致，检索将不可用，直至重建并发布索引")
-    if role["role"] in ("generator", "writer", "tts"):
+    if role["role"] in ("generator", "writer", "tts", "video_generator", "image_generator", "music_generator", "animator"):
         warnings.append("已有创作产物不受影响；下次构建时受影响的节点会重建")
+    if role["role"] == "animator":
+        warnings.append("激活即启用动画生成：之后构建 animation 分镜会调用该模型编写动画源码（人工修改的源码保留）")
+    if role["role"] == "video_generator":
+        warnings.append("激活即启用视频生成：之后构建 aigc 分镜会调用该服务，可能产生费用")
+    if role["role"] == "image_generator":
+        warnings.append("激活即启用图片生成：之后构建 aigc_image 分镜会调用该服务，可能产生费用")
+    if role["role"] == "music_generator":
+        warnings.append("激活即启用音乐生成：之后构建带背景音乐提示点的分镜会调用该服务，可能产生费用")
     return Preview(f"激活{role['label']}档案", [{"label": role["label"], "before": current, "after": profile["name"]}],
                    warnings=warnings, focus=settings_focus(role=role["role"], profile_id=profile["id"]))
 
@@ -520,10 +580,13 @@ def specs() -> list[ToolSpec]:
         ToolSpec("list_provider_presets", "settings", "列出各厂商为各模型角色提供的预设（endpoint、模型名），用于新建档案时预填。",
                  Presets, "read", list_provider_presets),
         ToolSpec("list_voices", "settings", "列出音色库与当前默认音色、语音合成模型。", Empty, "read", list_voices),
-        ToolSpec("test_model_profile", "settings", "测试某个配置档案能否连通（会对该服务发起一次最小调用）。",
+        ToolSpec("test_model_profile", "settings", "测试某个配置档案能否连通（会对该服务发起一次最小调用；视频/图片/音乐生成档案只做鉴权/可达性探测，不发起生成）。",
                  TestProfile, "read", test_model_profile),
         ToolSpec("create_model_profile", "settings",
-                 "新建模型配置档案（不会自动激活）。api_key 只能是 ask_user_question secret 字段返回的 secret:// 引用。",
+                 "新建模型配置档案（不会自动激活）。api_key 只能是 ask_user_question secret 字段返回的 secret:// 引用。"
+                 "视频生成（video_generator）档案：backend 为 minimax_h3（MiniMax H3，只需 base_url 与密钥，生成方式在分镜设置）"
+                 "/minimax/dashscope/comfyui；图片生成（image_generator，MiniMax image-01）与音乐生成（music_generator，"
+                 "MiniMax music-3.0）的 backend 为 minimax/comfyui；comfyui 需 comfyui_workflow（API 格式）与 comfyui_mapping。",
                  CreateProfile, "write", create_model_profile, preview_create_profile),
         ToolSpec("update_business_settings", "settings", "修改业务设置：GPU 互斥、检索权重、默认音色。",
                  Business, "write", update_business_settings, preview_business),

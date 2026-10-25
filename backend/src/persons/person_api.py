@@ -130,7 +130,6 @@ def parse_cast(config, image):
 
 
 IDENTIFY_MAX_BYTES = 20 * 1024 * 1024
-IDENTIFY_TIMEOUT = 60.0
 
 
 def _ranked(observation, references, key, person_config):
@@ -474,11 +473,8 @@ def person_router(runtime, store):
         normalized.write_bytes(raw)
         with Image.open(normalized) as image:
             size = list(image.size)
-        # 识别是交互式只读请求：人物服务超时收紧到 60 秒，避免页面或助手长时间挂起。
-        bounded = config.model_copy(update={
-            "person": config.person.model_copy(update={"timeout": min(config.person.timeout, IDENTIFY_TIMEOUT)}),
-        })
-        client = PersonClient(bounded)
+        # 请求超时用人物识别档案配置的值（设置页可改）。
+        client = PersonClient(config)
         space = client.identity()
         extracted = client.image(normalized)
         if extracted.get("space") != space:

@@ -13,7 +13,7 @@ from pathlib import Path
 
 import av
 
-from mindex.shared.processing_lock import SharedFileLock
+from mindex.shared import locks
 
 
 def sampled_pts(path, start, end, interval):
@@ -50,7 +50,7 @@ def main():
     if args.interval < 1:
         parser.error('interval must be >= 1')
     root = args.data_dir.resolve()
-    with SharedFileLock(root / 'pipeline.lock', exclusive=True), SharedFileLock(root / 'locks/library.lock', exclusive=True):
+    with locks.acquire_ordered(root, ['pipeline', 'library'], exclusive=True):
         db = sqlite3.connect(root / 'metadata.sqlite3', timeout=30)
         db.row_factory = sqlite3.Row
         # A write reservation prevents concurrent database changes during planning.

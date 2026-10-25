@@ -21,7 +21,7 @@ from mindex.agent.tools import build_registry
 from mindex.agent.tools.studio_build import watched
 from mindex.api import create_app
 from mindex.studio import studio
-from mindex.studio import studio_workspace as ws
+from mindex.studio import workspace as ws
 
 
 def call_tool(app, name, arguments, *, steps=("preview", "execute")):

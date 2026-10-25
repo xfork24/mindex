@@ -5,7 +5,6 @@ from __future__ import annotations
 import base64
 import json
 import math
-import threading
 import time
 from collections import defaultdict
 from itertools import pairwise
@@ -13,25 +12,16 @@ from itertools import pairwise
 import httpx
 import numpy as np
 from fastapi import HTTPException
-from filelock import Timeout
 from pydantic import Field, model_validator
 
 from mindex.models.adapters import ModelError
 from mindex.persons.person_models import uid
 from mindex.persons.persons import Persons
+from mindex.shared.background_tasks import BackgroundTaskRunner, public_task
 from mindex.shared.config import StrictModel, fingerprint
-from mindex.shared.processing_lock import ProcessingLock, recover_tasks
+from mindex.shared.processing_lock import ProcessingLock
 from mindex.shared.storage import Store, dumps
-from mindex.shared.task_cancel import TaskCancelled, registry_for
-from mindex.shared.task_progress import (
-    RETRYABLE,
-    begin_task,
-    mark_cancelled,
-    request_task_cancel,
-    reset_task_attempt,
-    save_task_progress,
-    task_logs,
-)
+from mindex.shared.task_progress import RETRYABLE
 
 
 class PersonOptions(StrictModel):
@@ -868,54 +858,60 @@ class PersonProcessor:
                     raise ModelError("人物服务返回无效检测框")
 
 
-def _task_value(row):
-    """person_tasks 行 → 接口形状（去掉 config，解码 JSON 列）。"""
-    return {
-        k: json.loads(v) if k in {"options", "progress", "result", "publication"} and v else v
-        for k, v in row.items()
-        if k != "config"
-    }
-
-
-class PersonTasks:
-    def __init__(self, runtime, store):
-        self.runtime, self.store, self.threads = runtime, store, {}
-        recover_tasks(store, "person_tasks")
+class PersonTasks(BackgroundTaskRunner):
+    table = "person_tasks"
+    label = "人物任务"
+    busy = "GPU 独占锁或该素材人物任务正在运行"
+    not_retryable = "仅失败或中断任务可以重试"
+    thread_prefix = "person"
 
     def lock(self, source_id):
         return ProcessingLock(self.runtime.current(), source_id=source_id, work="persons")
 
-    def get(self, identifier):
-        row = self.store.one("SELECT * FROM person_tasks WHERE id=?", (identifier,))
-        if not row:
-            raise HTTPException(404, "找不到人物任务")
-        return _task_value(row)
-
     def recent(self, limit=30):
         """最近的任务（新在前），一次查询取齐，避免逐条 get() 的 N+1 查询。"""
-        return [_task_value(r) for r in self.store.rows("SELECT * FROM person_tasks ORDER BY rowid DESC LIMIT ?", (limit,))]
+        return [public_task(r) for r in self.store.rows("SELECT * FROM person_tasks ORDER BY rowid DESC LIMIT ?", (limit,))]
 
     def start(self, source_id, options):
         if not self.store.one("SELECT id FROM sources WHERE id=?", (source_id,)):
             raise HTTPException(404, "找不到素材")
-        return self.launch(source_id, options)
 
-    def retry(self, identifier):
-        row = self.store.one("SELECT * FROM person_tasks WHERE id=?", (identifier,))
-        if not row:
-            raise HTTPException(404, "找不到人物任务")
-        if row["status"] not in RETRYABLE and json.loads(row["publication"] or "{}").get("status") != "failed":
-            raise HTTPException(409, "仅失败或中断任务可以重试")
-        return self.launch(
-            row["source_id"],
-            PersonOptions.model_validate_json(row["options"]),
-            identifier,
-            self.restore(row["config"]),
-        )
+        def create():
+            from mindex.admin.source_tasks import freeze_config
 
-    def restore(self, raw):
+            config = self.runtime.current().model_copy(deep=True)
+            self.validate(source_id, options)
+            if options.work_id:
+                Persons(self.store).assign_work(source_id, options.work_id)
+            identifier = uid()
+            self.store.execute(
+                "INSERT INTO person_tasks(id,source_id,status,config,options) VALUES(?,?,?,?,?)",
+                (identifier, source_id, "queued", freeze_config(config, self.store), options.model_dump_json()),
+            )
+            return identifier, config
+
+        return self.submit(self.lock(source_id), create)
+
+    def validate(self, source_id, options, publish_only=False):
+        """需已完成分镜；新工作台选择作品时做资料预检（仅重新发布时跳过）。"""
+        from mindex.admin.source_tasks import person_setup
+
+        source = self.store.one("SELECT prepared FROM sources WHERE id=?", (source_id,))
+        if not source or not source["prepared"]:
+            raise HTTPException(409, "请先完成分镜处理")
+        if options.work_id and not publish_only:
+            setup = person_setup(self.store, source_id, options.work_id)
+            if not setup["ready"]:
+                raise HTTPException(409, "；".join(setup["missing"]))
+
+    def prepare_retry(self, row, config):
+        # 重试沿用冻结配置，凭据由档案引用或环境恢复。
+        options = PersonOptions.model_validate_json(row["options"])
+        self.validate(row["source_id"], options, publish_only=bool(row["result"] and options.publish))
+
+    def restore(self, row):
         from mindex.admin.source_tasks import restore_config
-        return restore_config(raw, self.runtime, self.store)
+        return restore_config(row["config"], self.runtime, self.store)
 
     def delete(self, identifier):
         row = self.store.one("SELECT status FROM person_tasks WHERE id=?", (identifier,))
@@ -926,87 +922,14 @@ class PersonTasks:
         self.store.execute("DELETE FROM person_tasks WHERE id=?", (identifier,))
         return {"removed": identifier}
 
-    def cancel(self, identifier):
-        status = request_task_cancel(self.store, "person_tasks", identifier)
-        if status is None:
-            raise HTTPException(404, "找不到人物任务")
-        if status not in {"queued", "running"}:
-            raise HTTPException(409, "只有排队中或运行中的任务可以取消")
-        return self.get(identifier)
+    def execute(self, task_id, row, config, save):
+        options = PersonOptions.model_validate_json(row["options"])
+        result = json.loads(row["result"]) if row["result"] and options.publish else PersonProcessor(config).run(
+            row["source_id"], options.model_copy(update={"publish": False}), lambda v: save("progress", v))
+        save("result", result)
+        if options.publish:
+            from mindex.admin.source_tasks import enqueue_publications
 
-    def launch(self, source_id, options, identifier=None, config=None):
-        lock = self.lock(source_id)
-        try:
-            lock.acquire()
-        except Timeout as exc:
-            raise HTTPException(409, "GPU 独占锁或该素材人物任务正在运行，请稍后启动") from exc
-        try:
-            config = config or self.runtime.current().model_copy(deep=True)
-            from mindex.admin.source_tasks import freeze_config, person_setup
-            source = self.store.one("SELECT prepared FROM sources WHERE id=?", (source_id,))
-            if not source or not source["prepared"]:
-                raise HTTPException(409, "请先完成分镜处理")
-            # 新工作台选择作品时做资料预检；兼容既有 CLI/API 的区间任务。
-            prior = self.store.one("SELECT result FROM person_tasks WHERE id=?", (identifier,)) if identifier else None
-            publish_only = bool(prior and prior["result"] and options.publish)
-            if options.work_id and not publish_only:
-                setup = person_setup(self.store, source_id, options.work_id)
-                if not setup["ready"]:
-                    raise HTTPException(409, "；".join(setup["missing"]))
-                if not identifier:
-                    Persons(self.store).assign_work(source_id, options.work_id)
-            identifier = identifier or uid()
-            if self.store.one("SELECT id FROM person_tasks WHERE id=?", (identifier,)):
-                # 重试沿用冻结配置，凭据由档案引用或环境恢复。
-                reset_task_attempt(self.store, "person_tasks", identifier)
-            else:
-                self.store.execute(
-                    "INSERT INTO person_tasks(id,source_id,status,config,options) VALUES(?,?,?,?,?)",
-                    (identifier, source_id, "queued", freeze_config(config, self.store), options.model_dump_json()),
-                )
-            thread = threading.Thread(
-                target=self.run, args=(identifier, config, source_id, options, lock), daemon=True
-            )
-            self.threads[identifier] = thread
-            thread.start()
-            return self.get(identifier)
-        except BaseException:
-            lock.release()
-            raise
-
-    @task_logs("person_tasks")
-    def run(self, identifier, config, source_id, options, lock):
-        cancels = registry_for(self.store.root)
-        try:
-            begin_task(self.store, "person_tasks", identifier)
-
-            def progress(value):
-                save_task_progress(self.store, "person_tasks", identifier, value)
-
-            row = self.store.one("SELECT result FROM person_tasks WHERE id=?", (identifier,))
-            result = json.loads(row["result"]) if row["result"] and options.publish else PersonProcessor(config).run(
-                source_id, options.model_copy(update={"publish": False}), progress)
-            self.store.execute("UPDATE person_tasks SET result=? WHERE id=?", (dumps(result), identifier))
-            if options.publish:
-                from mindex.admin.source_tasks import enqueue_publications
-
-                publication = enqueue_publications(self.runtime, self.store, source_id, 'persons')
-                self.store.execute('UPDATE person_tasks SET publication=? WHERE id=?', (dumps(publication), identifier))
-            else:
-                self.store.execute("UPDATE person_tasks SET publication=? WHERE id=?",
-                                   (dumps({"status": "not_requested"}), identifier))
-            self.store.execute(
-                "UPDATE person_tasks SET status='complete',result=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                (dumps(result), identifier),
-            )
-        except TaskCancelled:
-            mark_cancelled(self.store, "person_tasks", identifier)
-        except BaseException as exc:  # noqa: BLE001 — persist terminal worker failures before releasing its lease
-            self.store.execute(
-                "UPDATE person_tasks SET status='failed',error=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                (str(exc)[:2000], identifier),
-            )
-        finally:
-            cancels.clear(identifier)
-            lock.release()
-            self.threads.pop(identifier, None)
+            save("publication", enqueue_publications(self.runtime, self.store, row["source_id"], "persons"))
+        else:
+            save("publication", {"status": "not_requested"})

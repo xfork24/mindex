@@ -97,6 +97,7 @@ class OpenAIChatTranscriber:
             json={
                 "model": self.profile.model,
                 "temperature": 0,
+                "max_tokens": self.profile.max_tokens,
                 "messages": [
                     {
                         "role": "user",

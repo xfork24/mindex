@@ -17,7 +17,7 @@ from filelock import FileLock
 from mindex.api import create_app
 from mindex.models.adapters import ModelError
 from mindex.studio import studio
-from mindex.studio import studio_workspace as ws
+from mindex.studio import workspace as ws
 
 
 def tree_hashes(directory: Path) -> dict[str, str]:

@@ -23,7 +23,7 @@ def source_report(config: Config, source_id: str) -> dict:
     if source is None:
         raise ValueError("找不到素材 ID")
     plan_path = store.root / "plans" / f"{source_id}.json"
-    plan = json.loads(plan_path.read_text()) if plan_path.exists() else None
+    plan = json.loads(plan_path.read_text(encoding="utf-8")) if plan_path.exists() else None
     media = json.loads(source["media"])
     segments = store.segments(source_id)
     shots = plan["shots"] if plan else [s for s in segments if s["kind"] == "shot"]
@@ -74,7 +74,7 @@ def export_source(config: Config, source_id: str, output: Path | None = None) ->
     output.mkdir(parents=True, exist_ok=True)
     segments = store.segments(source_id)
     if report["plan_path"]:
-        report["shots"] = json.loads(Path(report["plan_path"]).read_text())["shots"]
+        report["shots"] = json.loads(Path(report["plan_path"]).read_text(encoding="utf-8"))["shots"]
     else:
         report["shots"] = [{"start": s["start"], "end": s["end"]} for s in segments if s["kind"] == "shot"]
     report["segments"] = segments

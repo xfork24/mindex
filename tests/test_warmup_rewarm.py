@@ -257,7 +257,7 @@ def test_retain_published_person_versions(tmp_path):
         catalogue.published_entities(release)
         catalogue.published_evidence(release)
     path = str(store.path)
-    names = lambda cache: {k[1] for k in cache if k[0] == path}  # noqa: E731
+    names = lambda cache: {k[1] for k in cache if k[0] == path}
     assert names(_ENTITY_CACHE) == names(_EVIDENCE_CACHE) == {"pv1", "pv2"}
     assert catalogue.retain_published({"pv2"}) == 2
     assert names(_ENTITY_CACHE) == names(_EVIDENCE_CACHE) == {"pv2"}

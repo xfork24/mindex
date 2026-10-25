@@ -10,6 +10,8 @@ from mindex.processing.pipeline import Pipeline
 from mindex.shared.media import MediaError, audio_info, command, probe
 from mindex.studio import studio, studio_render, studio_steps
 
+pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
+
 
 @pytest.fixture
 def video_with_audio(tmp_path):
@@ -77,7 +79,7 @@ def build_job(config, video_file, events_spec, *, burn=False, audio_mode="tts_on
                 audio=studio.TimelineAudio(
                     file=f"audio/{shot_id}.wav", duration=duration, atempo=1.0, render_duration=duration
                 ),
-                video=studio.TimelineVideo(
+                video=studio.LibraryVideo(
                     source_id=source,
                     source_name="测试素材",
                     segment_id=f"{shot_id}-anchor",

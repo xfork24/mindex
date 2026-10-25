@@ -76,7 +76,7 @@ def register_subtitle(store, source_id: str, path: Path, name: str) -> dict:
     root = upload_root(store, source_id) / identifier
     manifest = root / "manifest.json"
     if manifest.is_file():
-        metadata = json.loads(manifest.read_text())
+        metadata = json.loads(manifest.read_text(encoding="utf-8"))
         try:
             resolve_subtitle(store, source_id, identifier)
         except ValueError:
@@ -93,7 +93,7 @@ def register_subtitle(store, source_id: str, path: Path, name: str) -> dict:
 
 def uploaded_subtitles(store, source_id: str) -> list[dict]:
     paths = sorted(upload_root(store, source_id).glob("*/manifest.json"), key=lambda path: path.stat().st_mtime_ns)
-    return [json.loads(path.read_text()) for path in paths]
+    return [json.loads(path.read_text(encoding="utf-8")) for path in paths]
 
 
 def resolve_subtitle(store, source_id: str, identifier: str) -> tuple[Path, dict]:
@@ -101,7 +101,7 @@ def resolve_subtitle(store, source_id: str, identifier: str) -> tuple[Path, dict
         raise ValueError("无效的字幕文件标识")
     root = upload_root(store, source_id) / identifier
     try:
-        metadata = json.loads((root / "manifest.json").read_text())
+        metadata = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
         suffix = "." + metadata["format"]
         if suffix not in SUBTITLE_EXTENSIONS:
             raise ValueError("无效的字幕文件格式")

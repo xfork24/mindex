@@ -23,7 +23,9 @@ function syncSectionRows() {
 }
 let settingsRequest = 0;
 
-const ROLE_ORDER = ['analyzer', 'writer', 'generator', 'embedding', 'asr', 'tts', 'person', 'agent'];
+const ROLE_ORDER = ['analyzer', 'writer', 'generator', 'embedding', 'asr', 'tts', 'image_generator', 'video_generator', 'music_generator', 'animator', 'person', 'agent'];
+// 支持本地 ComfyUI 工作流导入的角色及其可映射字段（与后端 shared/comfyui.py 一致）。
+const COMFY_ROLES = ['video_generator', 'image_generator', 'music_generator'];
 const ROLE_DESC = {
   person: MindexI18n.msg("ui.907c176fe85a"),
   analyzer: MindexI18n.msg("ui.85feed61e44f"),
@@ -32,6 +34,10 @@ const ROLE_DESC = {
   embedding: MindexI18n.msg("ui.bd997040b2e2"),
   asr: MindexI18n.msg("ui.b74f293dd13e"),
   tts: MindexI18n.msg("ui.35cda4046011"),
+  image_generator: MindexI18n.msg("ui.image_generator_role_description"),
+  video_generator: MindexI18n.msg("ui.video_generator_role_description"),
+  music_generator: MindexI18n.msg("ui.music_generator_role_description"),
+  animator: MindexI18n.msg("ui.animator_role_description"),
   agent: MindexI18n.msg("ui.agent_role_description")
 };
 const ROLE_BACKENDS = {
@@ -42,8 +48,20 @@ const ROLE_BACKENDS = {
   embedding: ['mindex', 'llama_cpp', 'tokenhub'],
   asr: ['mindex', 'llama_cpp', 'openai', 'minimax'],
   tts: ['openai', 'minimax', 'dashscope'],
+  image_generator: ['minimax', 'comfyui'],
+  video_generator: ['minimax_h3', 'comfyui', 'minimax', 'dashscope'],
+  music_generator: ['minimax', 'comfyui'],
+  animator: ['openai', 'anthropic'],
   agent: ['openai', 'anthropic']
 };
+// 每个模型档案都可配置单次请求超时（秒），所有调用该模型的地方都用它；留空用缺省值：
+// 图片、视频、音乐与动画生成 10 分钟，其他模型 3 分钟（与后端 shared/config.py 一致）。
+const GENERATION_ROLES = ['video_generator', 'image_generator', 'music_generator', 'animator'];
+function timeoutField(role) {
+  const fallback = GENERATION_ROLES.includes(role) ? 600 : 180;
+  return { key: 'timeout', label: MindexI18n.msg("ui.model_timeout"), type: 'number', min: 1, step: 1,
+    placeholder: MindexI18n.msg("ui.model_timeout_placeholder", { p0: fallback }) };
+}
 const ROLE_EXTRA = {
   person: [
   { key: 'expected_space', label: MindexI18n.msg("ui.7f5c519b5795"), type: 'json' },
@@ -70,11 +88,33 @@ const ROLE_EXTRA = {
   { key: 'initial_output_tokens', label: MindexI18n.msg("ui.377c6dff15af"), type: 'number', min: 64, max: 131072 },
   { key: 'max_output_tokens', label: MindexI18n.msg("ui.ee7fe23f341f"), type: 'number', min: 64, max: 131072 }],
 
-  asr: [],
+  asr: [{ key: 'max_tokens', label: 'max_tokens', type: 'number', min: 256 }],
+  video_generator: [
+  { key: 'durations', label: MindexI18n.msg("ui.video_durations"), type: 'list', placeholder: MindexI18n.msg("ui.video_durations_placeholder") },
+  { key: 'fps', label: MindexI18n.msg("ui.video_fps"), type: 'number', min: 1, max: 60, step: 1 },
+  { key: 'poll_interval', label: MindexI18n.msg("ui.video_poll_interval"), type: 'number', min: 0.1 },
+  { key: 'max_wait', label: MindexI18n.msg("ui.video_max_wait"), type: 'number', min: 1 }],
+
+  image_generator: [
+  { key: 'poll_interval', label: MindexI18n.msg("ui.video_poll_interval"), type: 'number', min: 0.1 },
+  { key: 'max_wait', label: MindexI18n.msg("ui.video_max_wait"), type: 'number', min: 1 }],
+
+  music_generator: [
+  { key: 'cover_model', label: MindexI18n.msg("ui.music_cover_model"), type: 'text', placeholder: 'music-cover' },
+  { key: 'poll_interval', label: MindexI18n.msg("ui.video_poll_interval"), type: 'number', min: 0.1 },
+  { key: 'max_wait', label: MindexI18n.msg("ui.video_max_wait"), type: 'number', min: 1 }],
+
+  animator: [
+  { key: 'max_tokens', label: 'max_tokens', type: 'number', min: 1000 },
+  { key: 'retries', label: MindexI18n.msg("ui.animator_retries"), type: 'number', min: 0, max: 10, step: 1 },
+  { key: 'max_html_kb', label: MindexI18n.msg("ui.animator_max_html_kb"), type: 'number', min: 1, max: 5000, step: 1 },
+  { key: 'max_capture_seconds', label: MindexI18n.msg("ui.animator_max_capture_seconds"), type: 'number', min: 1, max: 3600 }],
+
   agent: [
   { key: 'max_tokens', label: 'max_tokens', type: 'number', min: 256 },
   { key: 'vision', label: MindexI18n.msg("ui.agent_vision"), hint: MindexI18n.msg("ui.agent_vision_hint"), type: 'checkbox' }]
 };
+for (const role of Object.keys(ROLE_EXTRA)) ROLE_EXTRA[role].unshift(timeoutField(role));
 const WEIGHT_LABELS = {
   video: MindexI18n.msg("ui.1a6981c253a3"), description: MindexI18n.msg("ui.522d79717392"), style: MindexI18n.msg("ui.5e46e0ea4cd0"), dialogue: MindexI18n.msg("ui.56073ee07b2d"), lexical: MindexI18n.msg("ui.7fe742805071")
 };
@@ -105,10 +145,7 @@ function errorText(detail) {
   typeof detail === 'string' ? detail : JSON.stringify(detail);
 }
 async function api(url, options = {}) {
-  const response = await fetch(url, options);
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(MindexI18n.system(data));
-  return data;
+  return MindexApi.request(url, options);
 }
 async function run(task) {
   try {await task();} catch (e) {notify(e.message, true);}
@@ -168,13 +205,14 @@ function renderRole(rolePayload) {
   head.onclick = () => toggleRole(role);
 
   const effective = rolePayload.effective;
-  const keyState = effective.api_key.has_key ? MindexI18n.msg("ui.bc24ebb490a2", { p0: effective.api_key.hint }) :
+  const keyState = effective.key_shared_from === 'analyzer' ? MindexI18n.msg("ui.animator_key_shared", { p0: effective.api_key.hint }) :
+  effective.api_key.has_key ? MindexI18n.msg("ui.bc24ebb490a2", { p0: effective.api_key.hint }) :
   effective.env_key_set ? MindexI18n.msg("ui.aa7487d83f4a", {}) : MindexI18n.msg("ui.a3e7368ec053");
   head.append(node('span', '▸', 'chevron'));
   head.append(node('strong', MindexI18n.builtin(rolePayload.label), 'role-row-title'));
   const summary = node('span', undefined, 'role-row-summary');
   summary.append(node('span', MindexI18n.msg("ui.61236d70e259", { p0: effective.model, p1: effective.backend, p2: effective.base_url }), 'role-row-effective'));
-  summary.append(node('span', `${keyState}${effective.dimensions ? MindexI18n.msg("ui.d5b0619c7e95", { p0: effective.dimensions }) : ''}`, 'role-row-key'));
+  summary.append(node('span', `${keyState}${effective.dimensions ? MindexI18n.msg("ui.d5b0619c7e95", { p0: effective.dimensions }) : ''}${MindexI18n.msg("ui.model_timeout_summary", { p0: effective.timeout })}`, 'role-row-key'));
   head.append(summary);
   row.append(head);
 
@@ -196,7 +234,9 @@ function renderRole(rolePayload) {
     head2.append(node('span', profile.provider, 'provider-chip'));
     item.append(head2);
     item.append(node('div', `${profile.config.model || ''} · ${profile.config.backend || ''} · ${profile.config.base_url || ''}`, 'profile-meta'));
-    const keyHint = profile.api_key.has_key ? MindexI18n.msg("ui.bc24ebb490a2", { p0: profile.api_key.hint }) : MindexI18n.msg("ui.e80f2d522dd3");
+    const keyHint = profile.api_key.has_key ? MindexI18n.msg("ui.bc24ebb490a2", { p0: profile.api_key.hint }) :
+    role === 'animator' && rolePayload.active_profile_id === profile.id && effective.key_shared_from === 'analyzer' ?
+    MindexI18n.msg("ui.animator_key_shared", { p0: effective.api_key.hint }) : MindexI18n.msg("ui.e80f2d522dd3");
     item.append(node('div', keyHint, 'profile-meta'));
     const bar = node('div', undefined, 'profile-actions');
     if (rolePayload.active_profile_id !== profile.id) bar.append(action(MindexI18n.msg("ui.4c25820818d6"), () => activateProfile(profile.id)));
@@ -471,7 +511,10 @@ async function loadSettings() {
     if (request !== settingsRequest) return;
     state.voiceCatalog = catalog;
     renderVoices(data, catalog);
-  }).catch(() => {});
+  }).catch((error) => {
+    // 音色目录不可用不阻塞其它设置，但要告诉用户，而不是静默吞掉。
+    if (request === settingsRequest) notify(error.message, true);
+  });
 }
 
 // ---- 索引版本：检索组合 = 内容索引 + 人物快照 ----
@@ -494,7 +537,9 @@ async function releaseAction(control, task, message) {
 // 发布、恢复、删除后：刷新列表，并同步顶部「嵌入与索引是否匹配」横幅。
 async function refreshReleases() {
   await loadReleases();
-  api('/api/settings/embedding-status').then(renderIndexBanner).catch(() => {});
+  api('/api/settings/embedding-status').then(renderIndexBanner).catch((error) => {
+    $('index-banner').replaceChildren(node('div', error.message, 'index-banner-error'));
+  });
 }
 function releaseButton(text, task, message, className = 'quiet') {
   const b = node('button', text, className);
@@ -621,17 +666,138 @@ function fillExtraFields(role, values = {}) {
       });
     } else {
       input = node('input');
-      input.type = field.type === 'json' ? 'text' : field.type;
+      input.type = field.type === 'json' || field.type === 'list' ? 'text' : field.type;
       if (field.min !== undefined) input.min = field.min;
       if (field.max !== undefined) input.max = field.max;
       if (field.type === 'number') input.step = field.step || 'any';
       if (field.placeholder) MindexI18n.setAttr(input, "placeholder", field.placeholder);
     }
     input.id = `pf-${field.key}`;
-    if (values[field.key] !== undefined && values[field.key] !== null) input.value = field.type === 'json' ? JSON.stringify(values[field.key]) : values[field.key];
+    if (values[field.key] !== undefined && values[field.key] !== null) input.value = field.type === 'json' ? JSON.stringify(values[field.key]) :
+    field.type === 'list' ? values[field.key].join(', ') : values[field.key];
     label.append(input);
     wrap.append(label);
   });
+  fillComfyEditor(role, values);
+}
+
+// ComfyUI 工作流导入与节点映射（只在视频生成角色的 comfyui 后端显示）。映射字段与后端 shared/comfyui.py 一致。
+const COMFY_FIELDS = {
+  video_generator: [
+  ['prompt', "ui.comfyui_field_prompt"], ['negative', "ui.comfyui_field_negative"], ['seed', "ui.comfyui_field_seed"],
+  ['frames', "ui.comfyui_field_frames"], ['width', "ui.comfyui_field_width"], ['height', "ui.comfyui_field_height"],
+  ['image', "ui.comfyui_field_image"]],
+  image_generator: [
+  ['prompt', "ui.comfyui_field_prompt"], ['negative', "ui.comfyui_field_negative"], ['seed', "ui.comfyui_field_seed"],
+  ['width', "ui.comfyui_field_width"], ['height', "ui.comfyui_field_height"], ['image', "ui.comfyui_field_subject"]],
+  music_generator: [
+  ['prompt', "ui.comfyui_field_music_prompt"], ['lyrics', "ui.comfyui_field_lyrics"], ['seconds', "ui.comfyui_field_seconds"],
+  ['seed', "ui.comfyui_field_seed"], ['audio', "ui.comfyui_field_audio"]]
+};
+
+function fillComfyEditor(role, values = {}) {
+  const host = $('pf-comfyui');
+  host.replaceChildren();
+  host.hidden = !COMFY_ROLES.includes(role);
+  if (host.hidden) {
+    $('pf-model').required = true;
+    return;
+  }
+  host.append(node('h3', MindexI18n.msg("ui.comfyui_workflow_title")));
+  host.append(node('p', MindexI18n.msg("ui.comfyui_workflow_hint"), 'muted'));
+  const area = node('textarea');
+  area.id = 'pf-comfyui-workflow';
+  area.rows = 6;
+  area.spellcheck = false;
+  MindexI18n.setAttr(area, 'aria-label', MindexI18n.msg("ui.comfyui_workflow_title"));
+  MindexI18n.setAttr(area, 'placeholder', MindexI18n.msg("ui.comfyui_workflow_placeholder"));
+  if (values.comfyui_workflow) area.value = JSON.stringify(values.comfyui_workflow, null, 2);
+  const fileLabel = node('label', undefined);
+  fileLabel.append(node('span', MindexI18n.msg("ui.comfyui_workflow_file")));
+  const file = node('input');
+  file.type = 'file';
+  file.accept = '.json,application/json';
+  file.id = 'pf-comfyui-file';
+  file.onchange = async () => {
+    const chosen = file.files[0];
+    if (!chosen) return;
+    area.value = await chosen.text();
+    const status = $('pf-comfyui-status');
+    try {
+      const workflow = parseWorkflow(area.value);
+      MindexI18n.setText(status, MindexI18n.msg("ui.comfyui_workflow_loaded", { p0: Object.keys(workflow).length }));
+      status.className = 'muted';
+    } catch (error) {
+      MindexI18n.setText(status, error.message);
+      status.className = 'warn-text';
+    }
+  };
+  fileLabel.append(file);
+  const status = node('p', '', 'muted');
+  status.id = 'pf-comfyui-status';
+  status.setAttribute('role', 'status');
+  host.append(area, fileLabel, status);
+  host.append(node('h3', MindexI18n.msg("ui.comfyui_mapping_title")));
+  const grid = node('div', undefined, 'form-grid');
+  const mapping = values.comfyui_mapping || {};
+  for (const [key, label] of COMFY_FIELDS[role]) {
+    const row = node('label');
+    row.append(node('span', `${MindexI18n.msg(label)} · ${key}`));
+    const input = node('input');
+    input.id = `pf-comfyui-map-${key}`;
+    input.dataset.mappingField = key;
+    MindexI18n.setAttr(input, 'placeholder', MindexI18n.msg("ui.comfyui_mapping_placeholder"));
+    input.value = mapping[key] || '';
+    row.append(input);
+    grid.append(row);
+  }
+  host.append(grid);
+  syncComfyEditor();
+}
+function syncComfyEditor() {
+  const host = $('pf-comfyui');
+  if (!COMFY_ROLES.includes($('pf-role').value)) return;
+  const comfy = $('pf-backend').value === 'comfyui';
+  host.hidden = !comfy;
+  // 模型名对 ComfyUI 与 MiniMax H3 可选（以工作流/分镜设置为准），其余线上厂商必填。
+  $('pf-model').required = !comfy && $('pf-backend').value !== 'minimax_h3';
+}
+$('pf-backend').addEventListener('change', () => syncComfyEditor());
+
+// 客户端预校验：与后端校验同口径，失败时给出中文/英文提示，服务端仍会再次校验。
+function parseWorkflow(text) {
+  let workflow;
+  try {workflow = JSON.parse(text);} catch (error) {
+    throw new Error(MindexI18n.msg("ui.comfyui_invalid_json", { p0: error.message }));
+  }
+  if (!workflow || typeof workflow !== 'object' || Array.isArray(workflow) || !Object.keys(workflow).length)
+  throw new Error(MindexI18n.msg("ui.comfyui_invalid_json", { p0: '{}' }));
+  if ('nodes' in workflow && 'links' in workflow) throw new Error(MindexI18n.msg("ui.comfyui_ui_format"));
+  for (const [id, item] of Object.entries(workflow)) {
+    if (!item || typeof item.class_type !== 'string' || !item.inputs || typeof item.inputs !== 'object')
+    throw new Error(MindexI18n.msg("ui.comfyui_not_api", { p0: id }));
+  }
+  return workflow;
+}
+function comfyConfig() {
+  const text = $('pf-comfyui-workflow').value.trim();
+  const mapping = {};
+  for (const input of document.querySelectorAll('#pf-comfyui [data-mapping-field]')) {
+    const value = input.value.trim();
+    if (value) mapping[input.dataset.mappingField] = value;
+  }
+  if (!text) throw new Error(MindexI18n.msg("ui.comfyui_workflow_required"));
+  const workflow = parseWorkflow(text);
+  if (!mapping.prompt) throw new Error(MindexI18n.msg("ui.comfyui_mapping_prompt_required"));
+  for (const [key, target] of Object.entries(mapping)) {
+    const parts = target.split('.');
+    if (parts.length !== 3 || parts[1] !== 'inputs' || !parts[0] || !parts[2])
+    throw new Error(MindexI18n.msg("ui.comfyui_mapping_format", { p0: key }));
+    if (!workflow[parts[0]]) throw new Error(MindexI18n.msg("ui.comfyui_mapping_node", { p0: key, p1: parts[0] }));
+    if (!(parts[2] in workflow[parts[0]].inputs))
+    throw new Error(MindexI18n.msg("ui.comfyui_mapping_input", { p0: key, p1: parts[0], p2: parts[2] }));
+  }
+  return { comfyui_workflow: workflow, comfyui_mapping: mapping };
 }
 function applyPreset(role, provider) {
   const preset = state.data?.presets?.[provider]?.[role];
@@ -805,12 +971,28 @@ $('profile-form').onsubmit = async (event) => {
       return;
     }
     const value = input.value.trim();
+    if (field.type === 'list') {
+      if (value !== '') config[field.key] = value.split(/[,，\s]+/).filter(Boolean).map(Number);
+      return;
+    }
     if (value !== '') config[field.key] = field.type === 'number' ? Number(value) : value;
     if (field.type === 'json') {
       if (value === '') config[field.key] = null;else
       {try {config[field.key] = JSON.parse(value);} catch {config[field.key] = value;}}
     }
   });
+  if (COMFY_ROLES.includes(role)) {
+    if ((config.durations || []).some((value) => !Number.isFinite(value) || value <= 0)) {
+      MindexI18n.setText($('pf-error'), MindexI18n.msg("ui.video_durations_invalid"));
+      return;
+    }
+    try {
+      Object.assign(config, config.backend === 'comfyui' ? comfyConfig() : { comfyui_workflow: null, comfyui_mapping: null });
+    } catch (error) {
+      MindexI18n.setText($('pf-error'), error.message);
+      return;
+    }
+  }
   const apiKey = $('pf-api-key').value;
   $('pf-save').disabled = true;
   MindexI18n.setText($('pf-error'), '');

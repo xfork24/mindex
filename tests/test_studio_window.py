@@ -16,7 +16,9 @@ from mindex.shared.media import command, probe
 from mindex.shared.storage import Store
 from mindex.studio import studio
 from mindex.studio import studio_window as window
-from mindex.studio import studio_workspace as ws
+from mindex.studio import workspace as ws
+
+pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
 
 
 def rows(count=10):

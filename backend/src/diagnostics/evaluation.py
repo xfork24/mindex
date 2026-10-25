@@ -58,7 +58,7 @@ def metrics(results: list[dict], targets: list[dict]) -> dict:
 def evaluate(
     config: Config, path: Path, split: str, output: Path | None = None, *, index_id: str | None = None
 ) -> dict:
-    entries = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    entries = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
     entries = [entry for entry in entries if entry.get("split") == split]
     if any(entry.get("label_status", "confirmed") != "confirmed" for entry in entries):
         raise ValueError("标注草稿不能计质量分数；请先人工复核，或使用 preview 查看排名")
@@ -191,5 +191,5 @@ def evaluate(
     }
     if output:
         output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(json.dumps(report, ensure_ascii=False, indent=2))
+        output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     return report

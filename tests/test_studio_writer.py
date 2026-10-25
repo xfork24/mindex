@@ -12,7 +12,6 @@ from hypothesis import strategies as st
 from mindex.models import adapters
 from mindex.models.adapters import ModelError
 from mindex.models.writer import (
-    INSTRUCTIONS,
     MATERIAL_HEADER,
     MATERIAL_RULES,
     WRITER_PROMPT_VERSION,
@@ -20,6 +19,10 @@ from mindex.models.writer import (
     QwenWriter,
 )
 from mindex.shared.types import DigestEmptyReason, DigestSource, MaterialDigest
+from mindex.studio.script_templates import builtins
+
+BASE = builtins()["base"]
+INSTRUCTIONS = BASE.instructions.strip()  # 通用解说模板即原内置提示词的改进版
 
 
 def chat_payload(content: str, finish_reason: str = "stop") -> dict:
@@ -44,7 +47,7 @@ def test_writer_uses_writer_service_and_returns_plain_text(writer_config, monkey
         return chat_payload("```\nYour journey starts at Changi Airport.\n\nThen the gardens.\n```")
 
     monkeypatch.setattr(adapters, "request", reply)
-    text = QwenWriter(writer_config).write("  新加坡旅游介绍，英文  ")
+    text = QwenWriter(writer_config).write("  新加坡旅游介绍，英文  ", template=BASE)
     assert text == "Your journey starts at Changi Airport.\n\nThen the gardens."
     url, body = calls[0]
     assert url == "http://writer.test/v1/chat/completions"
@@ -66,7 +69,7 @@ def test_writer_retries_overlong_output_with_feedback(writer_config, monkeypatch
         return next(replies)
 
     monkeypatch.setattr(adapters, "request", reply)
-    assert QwenWriter(writer_config).write("大纲") == "短文案。"
+    assert QwenWriter(writer_config).write("大纲", template=BASE) == "短文案。"
     assert len(calls) == 2
     assert "10 字" in calls[1]["messages"][1]["content"][-1]["text"]
 
@@ -74,15 +77,15 @@ def test_writer_retries_overlong_output_with_feedback(writer_config, monkeypatch
 def test_writer_fails_after_exhausted_retries(writer_config, monkeypatch):
     monkeypatch.setattr(adapters, "request", lambda *a, **k: chat_payload("```\n```"))
     with pytest.raises(ModelError, match="文案输出多次未通过校验"):
-        QwenWriter(writer_config).write("大纲")
+        QwenWriter(writer_config).write("大纲", template=BASE)
 
 
 def test_writer_rejects_empty_outline_and_truncation(writer_config, monkeypatch):
     with pytest.raises(ModelError, match="大纲为空"):
-        QwenWriter(writer_config).write("   ")
+        QwenWriter(writer_config).write("   ", template=BASE)
     monkeypatch.setattr(adapters, "request", lambda *a, **k: chat_payload("半截", "length"))
     with pytest.raises(ModelError, match="studio.writer.max_tokens"):
-        QwenWriter(writer_config).write("大纲")
+        QwenWriter(writer_config).write("大纲", template=BASE)
 
 
 def sample_digest() -> MaterialDigest:
@@ -94,17 +97,17 @@ def sample_digest() -> MaterialDigest:
     )
 
 
-def test_writer_prompt_version_is_two():
-    assert WRITER_PROMPT_VERSION == 2
+def test_writer_prompt_version_is_three():
+    assert WRITER_PROMPT_VERSION == 3
 
 
 def test_writer_empty_digest_matches_none_and_omits_material_rules(writer_config, monkeypatch):
     bodies = []
     monkeypatch.setattr(adapters, "request", lambda m, u, **k: bodies.append(k["json"]) or chat_payload("文案。"))
     writer = QwenWriter(writer_config)
-    writer.write("大纲")
-    writer.write("大纲", materials=None)
-    writer.write("大纲", materials=MaterialDigest.empty_of("预算为 0"))
+    writer.write("大纲", template=BASE)
+    writer.write("大纲", template=BASE, materials=None)
+    writer.write("大纲", template=BASE, materials=MaterialDigest.empty_of("预算为 0"))
     assert bodies[0] == bodies[1] == bodies[2]
     assert bodies[0]["messages"][0]["content"] == INSTRUCTIONS
     assert bodies[0]["messages"][1]["content"] == [{"type": "text", "text": "大纲"}]
@@ -122,7 +125,7 @@ def test_writer_sends_digest_as_separate_segment_on_every_attempt(writer_config,
 
     monkeypatch.setattr(adapters, "request", reply)
     digest = sample_digest()
-    assert QwenWriter(writer_config).write("  大纲  ", materials=digest) == "短文案。"
+    assert QwenWriter(writer_config).write("  大纲  ", template=BASE, materials=digest) == "短文案。"
     assert len(bodies) == 2
     for body in bodies:
         system = body["messages"][0]["content"]
@@ -160,10 +163,10 @@ EMPTY_DIGESTS = st.one_of(
 MATERIAL_RULE_LINES = [line for line in MATERIAL_RULES.split("\n") if line.strip()]
 
 
-# Feature: studio-material-consistency, Property 8: 空摘要时请求与 v1 一致
+# Feature: studio-material-consistency, Property 8: 空摘要时请求与不传摘要一致
 @settings(max_examples=100, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture])
 @given(outline=OUTLINES, digest=EMPTY_DIGESTS)
-def test_property_empty_digest_request_matches_v1(writer_config, outline, digest):
+def test_property_empty_digest_request_matches_no_digest(writer_config, outline, digest):
     """**Validates: Requirements 4.2, 4.5**"""
     bodies = []
 
@@ -173,13 +176,13 @@ def test_property_empty_digest_request_matches_v1(writer_config, outline, digest
 
     writer = QwenWriter(writer_config)
     with patch.object(adapters, "request", reply):
-        writer.write(outline)
-        writer.write(outline, materials=None)
-        writer.write(outline, materials=digest)
+        writer.write(outline, template=BASE)
+        writer.write(outline, template=BASE, materials=None)
+        writer.write(outline, template=BASE, materials=digest)
     assert len(bodies) == 3
     assert bodies[0] == bodies[1] == bodies[2]
     body = bodies[0]
-    # v1 形状：system 为 INSTRUCTIONS 原文，user 只有去空白后的大纲一段，温度 0.7。
+    # system 为模板提示原文，user 只有去空白后的大纲一段，温度 0.7。
     assert body["messages"][0]["role"] == "system"
     assert body["messages"][0]["content"] == INSTRUCTIONS
     assert body["messages"][1]["content"] == [{"type": "text", "text": outline.strip()}]
@@ -253,9 +256,9 @@ def test_property_nonempty_digest_sent_as_separate_segment_every_attempt(writer_
     with patch.object(adapters, "request", reply):
         if failures > retries:
             with pytest.raises(ModelError, match="文案输出多次未通过校验"):
-                writer.write(outline, materials=digest)
+                writer.write(outline, template=BASE, materials=digest)
         else:
-            assert writer.write(outline, materials=digest) == GOOD_REPLY
+            assert writer.write(outline, template=BASE, materials=digest) == GOOD_REPLY
 
     assert len(bodies) == min(failures + 1, retries + 1)
     outline_part = {"type": "text", "text": outline.strip()}

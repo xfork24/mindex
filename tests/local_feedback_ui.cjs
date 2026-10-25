@@ -57,7 +57,7 @@ feedback.show('notice', '');
 assert.equal(notice.hidden, true);
 assert.match(fs.readFileSync('frontend/src/shared/style.css', 'utf8'), /\.notice\.local-feedback\{[^}]*white-space:nowrap/);
 // Studio's existing dialog error area must be the only recipient of an error.
-const studio = fs.readFileSync('frontend/src/studio/studio.js', 'utf8');
+const studio = require("./studio_source.cjs").studioSource();
 let globalErrors = 0, dialogErrors = 0;
 const workDialog = {open: true};
 const errorContext = {

@@ -10,15 +10,6 @@ from mindex.studio import studio
 from mindex.studio.studio_artifacts import safe_path
 
 active_log: ContextVar[ExecutionLog | None] = ContextVar("studio_execution_log", default=None)
-LABELS = {
-    "script": "生成文案",
-    "split": "拆分镜",
-    "recall": "召回",
-    "tts": "配音",
-    "select": "选片与对齐",
-    "render": "分镜渲染",
-    "compose": "成片合成",
-}
 
 
 def log_path(config, job_id, build_id):
@@ -56,7 +47,7 @@ class ExecutionLog:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.seq = 0
         if self.path.is_file():
-            for line in self.path.read_text().splitlines():
+            for line in self.path.read_text(encoding="utf-8").splitlines():
                 try:
                     self.seq = max(self.seq, json.loads(line)["seq"])
                 except (ValueError, KeyError):

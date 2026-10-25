@@ -57,7 +57,8 @@ curl http://127.0.0.1:4050/health
 - `POST /api/persons/references`（multipart，演员照片给 `actor_id`，角色照片给 `role_id` 及照片中的 `actor_id`；角色只有一名演员时可省略 `actor_id`）、`PUT/DELETE /api/persons/references/{id}`（PUT 的 JSON 使用相同配对字段）、`POST /api/persons/references/from-source`。三条参考图添加路径（含 `/imports/{id}/confirm`）入库前同步质检：不合格返回 422 及中文原因（导入确认会点名「条目 N（演员名）」），人物服务不可用返回 503；被拒图片不写入人物库。
 - `POST /api/persons/imports`（multipart 多文件）、`POST /imports/{id}/parse`、`PUT /imports/{id}`（保存草稿）、`POST /imports/{id}/confirm`（人工确认）。
 - `POST /api/persons/sources/{id}/process`：`{"start":0,"end":180,"publish":false}`，返回 202 和任务 ID。
-- `GET /api/persons/tasks/{id}`、`POST /tasks/{id}/retry`。
+- `GET /api/persons/tasks/{id}`、`POST /tasks/{id}/retry`、`POST /tasks/{id}/cancel`（取消排队中或运行中的任务，其他状态 409；已保存的检查点保留，可重试续接）。
+- `POST /api/persons/identify`：multipart `file`（≤20 MiB）+ `top_k`（默认 5），对图片中的每张人脸按角色和按演员返回前 k 个候选（智能助手 `identify_person` 使用）；人物服务不可用或空间不符返回 503。
 - `GET /api/persons/evidence?source_id=...&status=candidate`：分页读取原始证据。
 - `GET /api/persons/review/shots`、`GET /review/shots/{shot_id}`：按镜头读取审核证据；`POST /review/shot`：`{"source_id":"...","shot_id":"...","selections":[{"actor_id":"...","role_id":null}]}`。空 selections 排除该镜头全部人物证据。
   列表支持 `source_id`、`status`、`actor_id` + 可选 `role_id` 精确配对筛选，`no_candidate=true` 筛选无候选；`limit` / `offset` 分页，`compact=true` 为跨页全选返回去重身份及状态，不传特征或截图数据。`status=rejected` 时忽略身份及无候选筛选，`filters` 为空且 `items[].candidate` 为 null。其他状态响应中的 `filters` 是当前素材、状态下各配对的全量分镜计数，`items[].candidate` 是最高分候选（无候选为 null），`items[].confirmed_people` 是该分镜全部已接受身份，包含 `score`、`original_score` 和 `manual`（人工确认）字段；`scope_total` 是当前素材、状态下未按身份筛选的去重分镜总数。

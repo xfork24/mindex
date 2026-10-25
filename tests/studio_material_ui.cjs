@@ -1,5 +1,5 @@
 // 任务元信息中的可用素材摘要折叠块：默认折叠并显示计数、为空时显示原因、加载失败时显示提示
-// 且其余元信息正常（真实 studio.js 代码 + 轻量 DOM 桩，不依赖浏览器）。
+// 且其余元信息正常（真实创作页脚本代码 + 轻量 DOM 桩，不依赖浏览器）。
 // 用例以 cases 数组登记，后续功能（如文案区"参考了 N 个素材"）可直接追加。
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -53,10 +53,10 @@ const sandbox = {
   api: async (url, method = "GET", body) => { requests.push({ url, method, body }); return apiImpl(url, method, body); },
 };
 vm.createContext(sandbox);
-const source = fs.readFileSync("frontend/src/studio/studio.js", "utf8");
+const source = require("./studio_source.cjs").studioSource();
 const slice = (start, end) => {
   const a = source.indexOf(start), b = source.indexOf(end, a);
-  assert.ok(a >= 0 && b > a, `studio.js 中找不到代码片段：${start} … ${end}`);
+  assert.ok(a >= 0 && b > a, `创作页脚本中找不到代码片段：${start} … ${end}`);
   return source.slice(a, b);
 };
 // renderJobMeta、DIGEST_EMPTY_REASON、loadMaterialDigest、materialDigestNode 是连续的顶层代码。

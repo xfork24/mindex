@@ -33,8 +33,10 @@ from mindex.agent.tools.studio_write import (
 from mindex.api import create_app
 from mindex.shared.types import Filters
 from mindex.studio import studio
-from mindex.studio import studio_workspace as ws
+from mindex.studio import workspace as ws
 from mindex.studio.studio_models import ShotBody
+
+pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
 
 SHOTS = ["shot-a1daad59aa", "shot-925281d5bb", "shot-77f0c3e1cc"]
 RECALL_KEYS = ("recall", "granularity", "recall_limit")

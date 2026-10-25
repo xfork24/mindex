@@ -33,7 +33,7 @@ class PersonEngine:
         manifests = list(package.glob("*manifest*.json"))
         if len(manifests) != 1:
             raise RuntimeError("需要完整的 cheetah_l V2 模型包及唯一 manifest JSON；服务不会自动下载模型")
-        manifest = json.loads(manifests[0].read_text())
+        manifest = json.loads(manifests[0].read_text(encoding="utf-8"))
         tasks = manifest.get("tasks", {})
         required = {"person_detection", "person_reid", "detection", "recognition"}
         if manifest.get("manifest_version") != 2 or not required <= tasks.keys():

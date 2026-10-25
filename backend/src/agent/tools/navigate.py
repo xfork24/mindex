@@ -25,13 +25,14 @@ class Navigate(StrictModel):
     job_id: str | None = Field(default=None, description="创作页：要打开的任务；省略时用当前页面上下文里的任务")
     plan_id: str | None = None
     shots: list[str] | None = Field(default=None, max_length=20, description="创作页：要定位的分镜（短 ID、完整 ID 或 #序号）")
-    stage: Literal["content", "recall", "tts", "select", "render"] | None = Field(
+    stage: Literal["content", "recall", "tts", "music", "draw", "generate", "animate", "select", "render"] | None = Field(
         default=None, description="创作页：展开分镜的哪个阶段详情")
     section: Literal["jobs", "script", "plan", "storyboard", "log", "final", "artifacts",
                      "models", "processing", "tuning", "voices", "releases"] | None = Field(
         default=None, description="创作页区块：jobs/script/plan/storyboard/log/final/artifacts；"
                                   "设置页区块：models/processing/tuning/voices/releases")
-    role: Literal["analyzer", "writer", "generator", "embedding", "asr", "tts", "person", "agent"] | None = Field(
+    role: Literal["analyzer", "writer", "generator", "embedding", "asr", "tts", "image_generator", "video_generator",
+                  "music_generator", "animator", "person", "agent"] | None = Field(
         default=None, description="设置页：展开的模型角色")
     profile_id: int | None = Field(default=None, description="设置页：高亮的配置档案")
     query: str | None = Field(default=None, max_length=400, description="检索页：填入并执行的检索文字")

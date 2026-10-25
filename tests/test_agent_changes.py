@@ -14,7 +14,7 @@ from mindex.agent.changes import ChangeFeed
 from mindex.agent.llm.scripted import ScriptedLlm, call, say
 from mindex.api import create_app
 from mindex.studio import studio
-from mindex.studio import studio_workspace as ws
+from mindex.studio import workspace as ws
 
 SHOTS = ["shot-a1daad59aa", "shot-925281d5bb", "shot-925281d6cc"]
 TAB = "tab-test-1"

@@ -11,7 +11,7 @@ from typing import Annotated
 
 import typer
 
-from mindex.cli_common import SortedGroup
+from mindex.shared.cli_support import SortedGroup
 
 app = typer.Typer(
     cls=SortedGroup,

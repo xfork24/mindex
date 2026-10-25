@@ -1,7 +1,7 @@
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const vm=require('node:vm');
-const code=fs.readFileSync('frontend/src/studio/studio.js','utf8');
+const code=require("./studio_source.cjs").studioSource();
 let release,calls=0,filled=0;
 const state={id:'A',matrixRows:new Map(),data:null};
 const ctx=vm.createContext({state,Date,api:async(url)=>{

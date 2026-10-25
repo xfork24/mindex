@@ -118,10 +118,10 @@ class PersonHasLinkedShots(ValueError):
 def frame_review_lock(store):
     from filelock import Timeout
 
-    from mindex.shared.processing_lock import SharedFileLock
+    from mindex.shared import locks
 
     try:
-        with SharedFileLock(store.root / "pipeline.lock"):
+        with locks.named(store.root, "pipeline"):
             yield
     except Timeout:
         raise ValueError("人物帧正在迁移或清理，请稍后重试审核") from None

@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
 from filelock import Timeout
 
-from mindex.persons.person_processing import PersonOptions, PersonTasks
+from mindex.persons.person_processing import PersonTasks
 from mindex.settings.runtime_settings import RuntimeConfig
 from mindex.shared.config import Config
 from mindex.shared.storage import Store
@@ -31,9 +30,7 @@ def main():
     except Timeout as exc:
         store.execute("UPDATE person_tasks SET status='failed',error=? WHERE id=?", (str(exc), identifier))
         return
-    manager.run(
-        identifier, config, row["source_id"], PersonOptions.model_validate(json.loads(row["options"])), lock
-    )
+    manager.run(identifier, config, lock)
 
 
 if __name__ == "__main__":

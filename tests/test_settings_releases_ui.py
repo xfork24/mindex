@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
+
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="Node is needed for the UI controller checks")
 def test_settings_release_section():

@@ -12,7 +12,7 @@ from mindex.api import create_app
 from mindex.settings.runtime_settings import activate_profile, save_profile
 from mindex.shared.storage import Store
 from mindex.studio import studio
-from mindex.studio import studio_workspace as ws
+from mindex.studio import workspace as ws
 
 
 def test_new_and_legacy_plans_inherit_without_changing_history(config):

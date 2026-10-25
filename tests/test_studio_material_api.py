@@ -20,6 +20,8 @@ from mindex.processing.pipeline import Pipeline
 from mindex.studio import studio
 from mindex.studio.material_digest import EMPTY_BUDGET, EMPTY_INDEX, EMPTY_SEGMENTS, build_digest
 
+pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
+
 
 def tree_hashes(directory: Path) -> dict[str, str]:
     """目录下全部文件的 sha256（相对路径 → 哈希），用来断言请求前后逐字节一致。"""

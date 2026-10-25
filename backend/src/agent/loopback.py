@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import copy
 import json as jsonlib
@@ -156,7 +157,7 @@ class MindexClient:
                 raise SecretError("当前环境不能使用密钥引用")
             try:
                 return self.resolve_secret(value)
-            except Exception as exc:  # noqa: BLE001 — 引用失效等原因统一作为可恢复错误返回
+            except Exception as exc:  # 引用失效等原因统一作为可恢复错误返回
                 raise SecretError(str(exc)) from exc
         if isinstance(value, dict):
             return {k: self._deref(v) for k, v in value.items()}
@@ -183,7 +184,7 @@ class MindexClient:
         if self.resolve_attachment is not None:
             try:
                 return self.resolve_attachment(ref)
-            except Exception as exc:  # noqa: BLE001 — 引用失效、越权等统一作为可恢复错误返回
+            except Exception as exc:  # 引用失效、越权等统一作为可恢复错误返回
                 raise AttachmentRefError(str(exc)) from exc
         if not self.remote:
             raise AttachmentRefError("当前环境不能使用附件引用")
@@ -227,7 +228,10 @@ class MindexClient:
         with contextlib.ExitStack() as stack:
             parts = []
             for field, (filename, content, ctype) in resolved:
-                body = stack.enter_context(Path(content).open("rb")) if isinstance(content, Path) else content
+                if isinstance(content, Path):
+                    body = stack.enter_context(await asyncio.to_thread(content.open, "rb"))
+                else:
+                    body = content
                 parts.append((field, (filename, body, ctype)))
             response = await self.http.request(
                 method, path, files=parts, data=fields,
@@ -260,8 +264,8 @@ class MindexClient:
     async def put(self, path: str, body: Any) -> dict:
         return await self.request("PUT", path, json=body)
 
-    async def delete(self, path: str) -> dict:
-        return await self.request("DELETE", path)
+    async def delete(self, path: str, **params) -> dict:
+        return await self.request("DELETE", path, params=params or None)
 
     async def aclose(self):
         await self.http.aclose()

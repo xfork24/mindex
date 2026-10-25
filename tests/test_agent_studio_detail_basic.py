@@ -17,7 +17,7 @@ from mindex.agent.loopback import MindexClient
 from mindex.agent.registry import ToolContext, ToolError
 from mindex.agent.tools import build_registry
 from mindex.api import create_app
-from mindex.studio import studio_workspace as ws
+from mindex.studio import workspace as ws
 
 READ = ("diagnose_plan", "get_version_lineage", "suggest_shot_query", "get_material_digest", "preview_version")
 selection_job = test_studio_window.refinement  # 复用选片窗口测试的真实素材与召回候选 fixture

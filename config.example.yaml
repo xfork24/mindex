@@ -41,9 +41,11 @@ asr:
   base_url: http://192.168.1.86:4020
   model: Qwen/Qwen3-ASR-1.7B
   revision: main
-  timeout: 300
+  timeout: 180
   api_key_env: MINDEX_MODEL_API_KEY
   enabled: true
+  # llama_cpp / openai（聊天式）后端单次转写请求的输出 token 上限。
+  max_tokens: 32768
 studio:
   # 创作工作流（文本生成视频）：拆分镜 LLM + TTS + 召回选片 + 渲染合成。
   max_input_chars: 2000
@@ -51,13 +53,19 @@ studio:
   # 可用素材摘要总字符预算（0–100000，默认 12000，0 表示关闭）：
   # 文案创作与拆分镜参考当前任务素材的画面分析摘要，使文案与召回词贴近素材实际画面。
   material_digest_chars: 12000
+  # 每个方案登记的参考文稿总字数上限（整数，默认 30000），超限上传/粘贴返回 422。
+  max_reference_chars: 30000
+  # 分镜画面来源“上传片段”（clip）的视频上限：时长（秒）与文件大小（MB）；
+  # 来源图片沿用 search.max_image_upload_mb。查询视频仍按 search.max_query_seconds / max_upload_mb。
+  max_clip_seconds: 300
+  max_clip_mb: 500
   generator:
     # 文本拆分镜 LLM，OpenAI 兼容端点（llama-server GGUF）。
     backend: openai
     base_url: http://192.168.1.86:4040/v1
     model: qwen3.8:27b
     revision: deployed-2026-10-12
-    timeout: 300
+    timeout: 180
     api_key_env: MINDEX_QWEN_API_KEY
     max_tokens: 4000
     split_retries: 2
@@ -68,7 +76,7 @@ studio:
     base_url: http://192.168.1.86:4040/v1
     model: qwen3.8:27b
     revision: deployed-2026-10-12
-    timeout: 300
+    timeout: 180
     api_key_env: MINDEX_QWEN_API_KEY
     max_tokens: 4000
     split_retries: 2
@@ -80,8 +88,57 @@ studio:
     voice: Cherry
     response_format: wav
     speech_path: /audio/speech
-    timeout: 300
+    timeout: 180
     api_key_env: MINDEX_QWEN_API_KEY
+  video_generator:
+    # “AI 生成视频”分镜的视频生成服务（generate 阶段）；缺省关闭，设置页激活“视频生成”档案即启用。
+    # 设置页首次启动会建好默认档案：MiniMax H3（激活）与本地 ComfyUI（备用）。
+    # backend: minimax_h3（MiniMax H3 V2，base_url https://api.minimax.cn；生成方式在创作页逐镜设置）/
+    # minimax（海螺，base_url https://api.minimax.cn/v1）/ dashscope（通义万相，
+    # base_url https://dashscope.aliyuncs.com）/ comfyui（自建，需导入 API 格式工作流与节点映射）。
+    enabled: false
+    backend: comfyui
+    base_url: http://127.0.0.1:8188
+    model: ""
+    api_key_env: MINDEX_VIDEO_API_KEY
+    timeout: 600
+    poll_interval: 5
+    max_wait: 900
+    durations: [5.0]
+    fps: 16
+    comfyui_workflow: null
+    comfyui_mapping: null
+  # “AI 生成图片”分镜的图片生成服务（draw 阶段）：默认 MiniMax image-01；backend 可为 minimax / comfyui。
+  # image_generator:
+  #   enabled: false
+  #   backend: minimax
+  #   base_url: https://api.minimax.cn/v1
+  #   model: image-01
+  #   api_key_env: MINDEX_IMAGE_API_KEY
+  # 配音列背景音乐的音乐生成服务（music 阶段）：默认 MiniMax music-3.0（翻唱 music-cover、歌词生成）；
+  # backend 可为 minimax / comfyui（ComfyUI 映射字段 prompt/lyrics/seconds/seed/audio，不支持歌词生成）。
+  # music_generator:
+  #   enabled: false
+  #   backend: minimax
+  #   base_url: https://api.minimax.cn/v1
+  #   model: music-3.0
+  #   cover_model: music-cover
+  #   api_key_env: MINDEX_MUSIC_API_KEY
+  # AI 动画分镜的动画生成 LLM（animate 阶段）：写 HTML/JS 动画后在沙箱逐帧录制。
+  # 设置页首次启动会建好默认档案 GLM-5.3-Flash（智谱 https://open.bigmodel.cn/api/paas/v4，需填写 API Key）并激活。
+  # 省略整段时复制 agent.llm 的 backend/base_url/model/revision/api_key_env，并跟随设置页激活的智能助手档案；
+  # 录制需要可选依赖：uv sync --extra animation && uv run playwright install chromium
+  # animator:
+  #   enabled: true
+  #   backend: openai            # openai（OpenAI 兼容）/ anthropic（Messages 协议）
+  #   base_url: https://api.deepseek.com/v1
+  #   model: deepseek-chat
+  #   api_key_env: MINDEX_AGENT_API_KEY
+  #   timeout: 600
+  #   max_tokens: 16000
+  #   retries: 2
+  #   max_html_kb: 200
+  #   max_capture_seconds: 60
   recall:
     # shot 适合含镜头粒度的索引；纯 visual 模式索引可改为 moment。
     granularity: shot
@@ -110,6 +167,11 @@ studio:
     fps: 25
     crf: 20
     preset: fast
+    # 方案画幅 → 分辨率（宽高为偶数）。16:9 恒为上面的 width/height（这里若写必须一致）；
+    # 未列出的画幅用默认值 9:16 → 720×1280、1:1 → 1080×1080。
+    # canvases:
+    #   "9:16": [720, 1280]
+    #   "1:1": [1080, 1080]
 detector:
   # adaptive works on the local CPU. Use transnet for the supplied GPU service.
   backend: adaptive
@@ -203,7 +265,7 @@ agent:
     base_url: https://api.deepseek.com/v1
     model: deepseek-chat
     api_key_env: MINDEX_AGENT_API_KEY
-    timeout: 120
+    timeout: 180
     max_tokens: 4096
     vision: false            # 模型支持图片输入时开启：附件图片与工具抽取的画面会一并发给模型（受 max_images 限制）
   mcp:

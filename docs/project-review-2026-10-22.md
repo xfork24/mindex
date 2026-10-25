@@ -1,5 +1,7 @@
 # 项目架构与规范审查（2026-10-22）
 
+> 历史记录，内容可能与当前代码不符；之后的审查与修正状态以 [docs/reviews/2026-10/](reviews/2026-10/architecture.md) 为准（例如 `cli_common.py` 已改为 `shared/cli_support.py`，`studio_workspace.py` 与 `studio.js` 已拆分）。
+
 范围：`HEAD` 2227bff 的源码、测试、打包配置与全部 Markdown。方法：阅读结构与关键模块，用脚本核对 CLI 帮助、配置模型、API 路由、相对链接与文档路径，运行 `ruff` 与 `pytest`。本文是带日期的审查记录，不代表之后的代码状态。
 
 ## 结论

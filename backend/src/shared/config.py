@@ -4,12 +4,13 @@ import hashlib
 import json
 import os
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
 from mindex.shared.agent_domains import LOADABLE_DOMAINS
+from mindex.shared.comfyui import IMAGE_MAPPING_FIELDS, MUSIC_MAPPING_FIELDS, validate_workflow, workflow_hash
 
 
 def fingerprint(value: object) -> str:
@@ -21,10 +22,16 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
 
+# 图片、视频、音乐与动画生成类模型的缺省请求超时（秒）；其他模型缺省 180 秒（Service.timeout）。
+GENERATION_TIMEOUT = 600
+
+
 class Service(StrictModel):
     base_url: str
     model: str
     revision: str = "main"
+    # 单次模型请求的超时（秒）：设置页模型档案可改，所有调用该模型的地方都用它。
+    # 缺省 3 分钟；图片、视频、音乐与动画生成类模型缺省 10 分钟（GENERATION_TIMEOUT）。
     timeout: float = Field(default=180, gt=0)
     api_key_env: str = "MINDEX_MODEL_API_KEY"
     # 明文密钥只存 SQLite 覆盖层；exclude=True 保证指纹、任务快照与序列化永不携带。
@@ -50,7 +57,6 @@ class PersonConfig(Service):
     base_url: str = "http://127.0.0.1:4050"
     model: Literal["cheetah_l"] = "cheetah_l"
     revision: str = "manifest-v2"
-    timeout: float = 600
     model_root: str = "~/.insightface"
     expected_space: dict | None = None
     frames_max_edge: int = Field(default=640, ge=0)
@@ -87,7 +93,8 @@ class ASRConfig(Service):
     base_url: str = "http://192.168.1.86:4020"
     model: str = "Qwen/Qwen3-ASR-1.7B"
     enabled: bool = True
-    timeout: float = 300
+    # 聊天式 ASR（llama_cpp / openai 后端）单次请求的输出 token 上限；只影响截断，不进入转写指纹。
+    max_tokens: int = Field(default=32768, gt=0)
     aligner_model: str = "Qwen/Qwen3-ForcedAligner-0.6B"
     aligner_revision: str = "main"
 
@@ -100,7 +107,6 @@ class GeneratorConfig(Service):
     base_url: str = "http://192.168.1.86:4040/v1"
     model: str = "qwen3.8:27b"
     revision: str = "deployed-2026-10-12"
-    timeout: float = 300
     api_key_env: str = "MINDEX_QWEN_API_KEY"
     max_tokens: int = Field(default=4000, gt=0)
     split_retries: int = Field(default=2, ge=0)
@@ -115,8 +121,149 @@ class SpeakerConfig(Service):
     voice: str = "Cherry"
     response_format: str = "wav"
     speech_path: str = "/audio/speech"
-    timeout: float = 300
     api_key_env: str = "MINDEX_QWEN_API_KEY"
+
+
+class VideoGeneratorConfig(Service):
+    """AIGC 视频生成服务（aigc 分镜的 generate 阶段）：MiniMax H3（V2 多模态）/ MiniMax 海螺 / 阿里通义万相 / 自建 ComfyUI。
+
+    缺省关闭：设置页激活「视频生成」档案或 yaml 设 enabled: true 后才会提交生成任务；
+    测试连接只做鉴权/可达性探测，从不发起付费生成。``minimax_h3`` 后端在设置页只需配置 endpoint 与密钥，
+    生成方式（文生/首帧/尾帧/首尾帧/多模态参考）、模型档位、分辨率、比例与时长在创作页逐镜设置。
+    """
+
+    backend: Literal["minimax_h3", "minimax", "dashscope", "comfyui"] = "comfyui"
+    base_url: str = "http://127.0.0.1:8188"
+    model: str = ""
+    timeout: float = Field(default=GENERATION_TIMEOUT, gt=0)  # 单次 HTTP 请求超时（含下载生成结果）
+    api_key_env: str = "MINDEX_VIDEO_API_KEY"
+    poll_interval: float = Field(default=5, gt=0, le=300)  # 首次轮询间隔（秒），之后按 1.5 倍退避
+    max_wait: float = Field(default=900, gt=0, le=86400)  # 单个分镜从提交到完成的总等待上限（秒）
+    # 后端允许的生成时长（秒）：配音时长向上取整到最近的允许值，超过最大值时取最大值（不足部分冻结帧兜底）。
+    durations: list[Annotated[float, Field(gt=0, le=120)]] = Field(default_factory=lambda: [5.0], min_length=1)
+    fps: int = Field(default=16, ge=1, le=60)  # ComfyUI 帧数映射 = 时长 × fps
+    comfyui_workflow: dict | None = None  # ComfyUI「导出（API）」格式工作流
+    comfyui_mapping: dict[str, str] | None = None  # 请求字段 → "节点ID.inputs.输入名"
+    enabled: bool = False
+
+    @model_validator(mode="after")
+    def valid_comfyui(self):
+        self.durations = sorted(set(self.durations))
+        if self.comfyui_workflow is not None or self.comfyui_mapping is not None:
+            if self.comfyui_workflow is None:
+                raise ValueError("已填写 ComfyUI 节点映射，但没有导入工作流")
+            validate_workflow(self.comfyui_workflow, self.comfyui_mapping or {})
+        return self
+
+    def signature(self) -> dict:
+        """影响生成画面的字段（无密钥、超时与轮询参数）；工作流以内容摘要代替全文。"""
+        value = {"backend": self.backend, "model": self.model, "durations": list(self.durations)}
+        if self.backend == "comfyui":
+            value.update(fps=self.fps, workflow=workflow_hash(self.comfyui_workflow),
+                         mapping=dict(sorted((self.comfyui_mapping or {}).items())))
+        return value
+
+
+# MiniMax H3 V2：整数时长 4–15 秒（H3-Max 为 5–15 秒）。
+H3_DURATIONS = tuple(float(value) for value in range(4, 16))
+
+
+class _ComfyUIMixin(StrictModel):
+    """图片/音乐生成的 ComfyUI 字段：本地 ComfyUI 后端时导入「导出（API）」工作流与节点映射。"""
+
+    poll_interval: float = Field(default=2, gt=0, le=300)
+    max_wait: float = Field(default=900, gt=0, le=86400)
+    comfyui_workflow: dict | None = None
+    comfyui_mapping: dict[str, str] | None = None
+
+    def _check_comfyui(self, fields):
+        if self.comfyui_workflow is not None or self.comfyui_mapping is not None:
+            if self.comfyui_workflow is None:
+                raise ValueError("已填写 ComfyUI 节点映射，但没有导入工作流")
+            validate_workflow(self.comfyui_workflow, self.comfyui_mapping or {}, fields)
+        return self
+
+    def _comfy_signature(self, value: dict) -> dict:
+        if self.backend == "comfyui":
+            value.update(workflow=workflow_hash(self.comfyui_workflow),
+                         mapping=dict(sorted((self.comfyui_mapping or {}).items())))
+        return value
+
+
+class ImageGeneratorConfig(_ComfyUIMixin, Service):
+    """AI 生成图片服务（aigc_image 分镜的 draw 阶段）：MiniMax image-01（文生图 / 主体参考图生图）或本地 ComfyUI。
+
+    缺省关闭：设置页激活「图片生成」档案或 yaml 设 enabled: true 后才会调用；测试连接只做鉴权探测，不生成图片。
+    生成的图片按静态图片的方式（推拉/平移）渲染成分镜画面。
+    """
+
+    backend: Literal["minimax", "comfyui"] = "minimax"
+    base_url: str = "https://api.minimax.cn/v1"
+    model: str = "image-01"
+    timeout: float = Field(default=GENERATION_TIMEOUT, gt=0)
+    api_key_env: str = "MINDEX_IMAGE_API_KEY"
+    enabled: bool = False
+
+    @model_validator(mode="after")
+    def valid_comfyui(self):
+        return self._check_comfyui(IMAGE_MAPPING_FIELDS)
+
+    def signature(self) -> dict:
+        return self._comfy_signature({"backend": self.backend, "model": self.model})
+
+
+class MusicGeneratorConfig(_ComfyUIMixin, Service):
+    """背景音乐生成服务（分镜工作台配音列的背景音乐 music 阶段）：MiniMax music-3.0（音乐生成）、
+    music-cover（翻唱）与歌词生成（lyrics_generation），或本地 ComfyUI 工作流（不含歌词生成）。
+
+    缺省关闭：设置页激活「音乐生成」档案或 yaml 设 enabled: true 后才会调用；测试连接只做鉴权探测，不生成音乐。
+    """
+
+    backend: Literal["minimax", "comfyui"] = "minimax"
+    base_url: str = "https://api.minimax.cn/v1"
+    model: str = "music-3.0"
+    cover_model: str = "music-cover"
+    timeout: float = Field(default=GENERATION_TIMEOUT, gt=0)  # 音乐生成为同步接口，单次请求需要较长超时
+    api_key_env: str = "MINDEX_MUSIC_API_KEY"
+    enabled: bool = False
+
+    @model_validator(mode="after")
+    def valid_comfyui(self):
+        return self._check_comfyui(MUSIC_MAPPING_FIELDS)
+
+    def signature(self) -> dict:
+        return self._comfy_signature({"backend": self.backend, "model": self.model, "cover_model": self.cover_model})
+
+
+class AnimatorConfig(Service):
+    """AI 动画生成 LLM（animation 分镜的 animate 阶段）：按画面说明写自包含 HTML/JS 动画，再由沙箱逐帧录制。
+
+    协议与智能助手相同（OpenAI 兼容 /chat/completions 或 Anthropic /v1/messages，非流式、无工具调用）；
+    yaml 省略 ``studio.animator`` 时由 ``Config`` 复制 ``agent.llm`` 的连接字段（backend/base_url/model/
+    revision/api_key_env），设置页未单独激活动画生成档案时也跟随激活的智能助手档案。
+    """
+
+    backend: Literal["openai", "anthropic"] = "openai"
+    base_url: str = "https://api.deepseek.com/v1"
+    model: str = "deepseek-chat"
+    revision: str = "main"
+    timeout: float = Field(default=GENERATION_TIMEOUT, gt=0)
+    api_key_env: str = "MINDEX_AGENT_API_KEY"
+    max_tokens: int = Field(default=16000, gt=0)
+    retries: int = Field(default=2, ge=0, le=10)  # 静态校验未通过时带反馈重试的次数
+    max_capture_seconds: float = Field(default=60, gt=0, le=3600)  # 单个分镜录制的墙钟时长上限（秒）
+    max_html_kb: int = Field(default=200, ge=1, le=5000)  # 动画源码大小上限（KiB）
+    enabled: bool = True
+    # 是否由 agent.llm 复制而来（yaml 未写 studio.animator）；运行时据此跟随激活的智能助手档案。
+    _inherited: bool = PrivateAttr(default=False)
+
+    def signature(self) -> dict:
+        """影响生成源码的字段（无密钥与超时）；提示词版本由 animate 阶段另行加入。"""
+        return {"backend": self.backend, "model": self.model, "max_html_kb": self.max_html_kb}
+
+
+# 动画生成从智能助手复制的连接字段。
+ANIMATOR_INHERITED = ("backend", "base_url", "model", "revision", "api_key_env")
 
 
 class StudioRecallConfig(StrictModel):
@@ -162,12 +309,22 @@ class SubtitleConfig(StrictModel):
     font_size: int = Field(default=7, ge=1, le=100)
 
 
+CanvasName = Literal["16:9", "9:16", "1:1"]
+DEFAULT_CANVASES: dict[str, tuple[int, int]] = {"9:16": (720, 1280), "1:1": (1080, 1080)}
+
+
 class RenderConfig(StrictModel):
     width: int = Field(default=1280, gt=0)
     height: int = Field(default=720, gt=0)
     fps: float = Field(default=25, gt=0)
     crf: int = Field(default=20, ge=0, le=51)
     preset: str = "fast"
+    # 方案画幅 → 输出分辨率。16:9 始终取 width/height（保持旧配置与旧签名不变），这里给出时必须一致；
+    # 未给出的画幅用 DEFAULT_CANVASES。exclude=True：不进入任何 model_dump，因此既有渲染签名、
+    # 配置指纹与任务快照逐字节不变；非默认画幅的尺寸由 render/compose 阶段显式写入签名参数。
+    canvases: dict[CanvasName, tuple[Annotated[int, Field(gt=0, strict=True)],
+                                     Annotated[int, Field(gt=0, strict=True)]]] = Field(
+        default_factory=dict, exclude=True)
 
     @model_validator(mode="after")
     def valid_canvas(self):
@@ -175,7 +332,19 @@ class RenderConfig(StrictModel):
             raise ValueError("render width/height must be even numbers for x264")
         if self.preset not in {"ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow"}:
             raise ValueError("render.preset must be a valid x264 preset")
+        for name, (width, height) in self.canvases.items():
+            if width % 2 or height % 2:
+                raise ValueError(f"render.canvases.{name} 的宽高必须是偶数")
+        if "16:9" in self.canvases and tuple(self.canvases["16:9"]) != (self.width, self.height):
+            raise ValueError("render.canvases.16:9 必须与 render.width/height 一致（16:9 即基础分辨率）")
         return self
+
+    def size(self, canvas: str = "16:9") -> tuple[int, int]:
+        """画幅对应的输出宽高；16:9 读当前 width/height（测试与运行时覆盖都即时生效）。"""
+        if canvas == "16:9":
+            return self.width, self.height
+        width, height = self.canvases.get(canvas) or DEFAULT_CANVASES[canvas]
+        return int(width), int(height)
 
 
 class StudioConfig(StrictModel):
@@ -186,11 +355,22 @@ class StudioConfig(StrictModel):
     # 文案/拆分镜参考的可用素材摘要总字符预算（按 Unicode 字符计）；0 表示关闭。
     # strict 拒绝 1.5、"12000"、true 等非整数值。
     material_digest_chars: int = Field(default=12000, ge=0, le=100000, strict=True)
+    # 每个方案登记的参考文稿总字符数上限（按 Unicode 字符计，规范化后统计）；超限返回 422。
+    max_reference_chars: int = Field(default=30000, ge=1, le=1000000, strict=True)
+    # 分镜画面来源（clip/image）上传上限：片段时长（秒）与文件大小（MB）；图片沿用 search.max_image_upload_mb。
+    max_clip_seconds: float = Field(default=300, gt=0, le=3600)
+    max_clip_mb: int = Field(default=500, ge=1, le=10000)
     generator: GeneratorConfig = Field(default_factory=GeneratorConfig)
     # 文案创作 LLM：按视频大纲写旁白正文。与拆分镜同为 OpenAI 兼容聊天服务，
     # yaml 未单独配置时复制 generator，保证升级后无需改配置即可使用。
     writer: GeneratorConfig = Field(default_factory=GeneratorConfig)
     tts: SpeakerConfig = Field(default_factory=SpeakerConfig)
+    video_generator: VideoGeneratorConfig = Field(default_factory=VideoGeneratorConfig)
+    # AI 生成图片（aigc_image 分镜）与背景音乐生成（配音列的背景音乐）。
+    image_generator: ImageGeneratorConfig = Field(default_factory=ImageGeneratorConfig)
+    music_generator: MusicGeneratorConfig = Field(default_factory=MusicGeneratorConfig)
+    # AI 动画生成 LLM；yaml 未单独配置时由 Config 复制 agent.llm（见 Config.animator_defaults_to_agent）。
+    animator: AnimatorConfig = Field(default_factory=AnimatorConfig)
     recall: StudioRecallConfig = Field(default_factory=StudioRecallConfig)
     selection: SelectionConfig = Field(default_factory=SelectionConfig)
     audio: StudioAudioConfig = Field(default_factory=StudioAudioConfig)
@@ -210,6 +390,8 @@ class DetectorConfig(StrictModel):
     backend: str = "adaptive"
     base_url: str = "http://192.168.1.86:18203"
     api_key_env: str = "MINDEX_MODEL_API_KEY"
+    # 整段视频上传检测，长视频耗时较长；该服务不在设置页，超时只能在 yaml 配置。
+    timeout: float = Field(default=1800, gt=0)
     threshold: float = Field(default=0.5, gt=0, lt=1)
     adaptive_threshold: float = Field(default=3, gt=0)
     min_content_val: float = Field(default=10, ge=0)
@@ -301,7 +483,6 @@ class AgentLlmConfig(Service):
     base_url: str = "https://api.deepseek.com/v1"
     model: str = "deepseek-chat"
     revision: str = "main"
-    timeout: float = 120
     api_key_env: str = "MINDEX_AGENT_API_KEY"
     max_tokens: int = Field(default=4096, gt=0)
     # 模型是否接受图片输入；开启后助手会把图片附件与工具抽取的画面一并发给模型（最多 agent.max_images 张）。
@@ -367,10 +548,23 @@ class Config(StrictModel):
     clean: CleanConfig = Field(default_factory=CleanConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
 
+    @model_validator(mode="after")
+    def animator_defaults_to_agent(self):
+        """yaml 未写 ``studio.animator`` 时复制 ``agent.llm`` 的连接字段（含 api_key_env），其余取动画生成默认值。"""
+        if "animator" not in self.studio.model_fields_set:
+            llm = self.agent.llm
+            inherited = AnimatorConfig(**{key: getattr(llm, key) for key in ANIMATOR_INHERITED})
+            inherited._inherited = True
+            self.studio.animator = inherited
+            # 赋值会把 animator 记入 fields_set；移除以保持「未显式配置」的语义（序列化不受影响）。
+            self.studio.model_fields_set.discard("animator")
+        return self
+
     @property
     def layout_key(self) -> str:
+        # 超时只影响请求等待，不影响切分结果；排除它使切分布局（及片段 ID）与加入 timeout 字段之前一致。
         return fingerprint(
-            {"schema": 1, "detector": self.detector.model_dump(), "video": self.video.model_dump()}
+            {"schema": 1, "detector": self.detector.model_dump(exclude={"timeout"}), "video": self.video.model_dump()}
         )
 
     @property
@@ -390,15 +584,15 @@ class Config(StrictModel):
     def analyzer_deployment(self):
         path = Path(self.analyzer.deployment_manifest or "")
         return (
-            json.loads(path.read_text()) if self.analyzer.backend == "llama_cpp" and path.is_file() else None
+            json.loads(path.read_text(encoding="utf-8")) if self.analyzer.backend == "llama_cpp" and path.is_file() else None
         )
 
     @property
     def asr_key(self) -> str:
-        value = self.asr.model_dump(exclude={"timeout", "api_key_env"})
+        value = self.asr.model_dump(exclude={"timeout", "api_key_env", "max_tokens"})
         if self.asr.backend == "llama_cpp":
             path = Path(self.asr.deployment_manifest or "")
-            value["deployment"] = json.loads(path.read_text()) if path.is_file() else "missing"
+            value["deployment"] = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else "missing"
         return fingerprint(value)
 
     @property
@@ -414,6 +608,13 @@ class Config(StrictModel):
                 "audio": self.studio.audio.model_dump(),
                 "subtitle": self.studio.subtitle.model_dump(),
                 "render": self.studio.render.model_dump(),
+                # 视频生成只在启用时加键：未启用的配置指纹与旧版逐字节一致。
+                **({"video_generator": self.studio.video_generator.signature()}
+                   if self.studio.video_generator.enabled else {}),
+                **({"image_generator": self.studio.image_generator.signature()}
+                   if self.studio.image_generator.enabled else {}),
+                **({"music_generator": self.studio.music_generator.signature()}
+                   if self.studio.music_generator.enabled else {}),
             }
         )
 
@@ -422,7 +623,7 @@ def load_config(path: str | Path | None = None) -> Config:
     selected = Path(path or os.environ.get("MINDEX_CONFIG", "config.local.yaml"))
     if path and not selected.exists():
         raise FileNotFoundError(selected)
-    values = (yaml.safe_load(selected.read_text()) or {}) if selected.exists() else {}
+    values = (yaml.safe_load(selected.read_text(encoding="utf-8")) or {}) if selected.exists() else {}
     config = Config.model_validate(values)
     # Preserve existing layout IDs when a full YAML spells default 4 as 4.0.
     # Pydantic validates explicit floats, but leaves numeric defaults as declared.
@@ -442,11 +643,18 @@ def load_config(path: str | Path | None = None) -> Config:
 
 
 def portable_parameters(config, value, reference=None):
-    """Store local dependencies relative to the project, including pre-move snapshots."""
+    """Store local dependencies relative to the project, including pre-move snapshots.
+
+    与当前参数（reference）比较历史参数时，请求超时 ``timeout`` 按当前值看待：超时只影响等待时长，
+    不影响产物；调整缺省超时不应让历史版本失去复用。
+    """
     if isinstance(value, dict):
         result = {}
         for key, item in value.items():
             current = reference.get(key) if isinstance(reference, dict) else None
+            if key == "timeout" and isinstance(reference, dict) and key in reference:
+                result[key] = current
+                continue
             if key in {"deployment_manifest", "font_file"} and item:
                 path = Path(item)
                 if path.is_absolute():

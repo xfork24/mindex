@@ -30,18 +30,18 @@
 
 - 不提供会删除磁盘文件的工具：删除素材（`DELETE /api/admin/sources/{id}`）和删除演员表导入图片（`DELETE /api/persons/imports/{id}/images/{image_id}`）只能在页面上操作。
 - 例外是 `delete_job`（删除整个创作任务及其产物），保留为 danger 级。
-- 只删除记录、文件留给 `mindex clean` 回收的删除一律为 danger 级：`delete_plan`、`delete_person`、`remove_person_reference`、`change_search_release(action=delete)`、`delete_model_profile`、`delete_voice`。
+- 只删除记录、文件留给 `mindex clean` 回收的删除一律为 danger 级：`delete_plan`、`remove_reference_text`、`delete_script_template`、`delete_person`、`remove_person_reference`、`change_search_release(action=delete)`、`delete_model_profile`、`delete_voice`。
 - 回环客户端拒绝路径中含 `.`/`..` 段、`?` 或 `#` 的请求（返回 400 `invalid_path`，不发送请求），防止工具参数里的 ID 经路径规整打到别的接口，例如把 `delete_job(job_id="../../admin/sources/x")` 变成删除素材。
 
 ## 工具领域与动态加载
 
-工具按领域组织（`backend/src/shared/agent_domains.py`）。每一步只把 meta 领域和会话已加载领域的工具发给模型，工具数量增长后不必全部下发。
+工具按领域组织（领域名在 `backend/src/shared/agent_domains.py`，页面领域映射与领域说明在 `backend/src/agent/domains.py`）。每一步只把 meta 领域和会话已加载领域的工具发给模型，工具数量增长后不必全部下发。
 
 | 领域 | 说明 | 默认加载页面 |
 |---|---|---|
 | `meta` | 提问、能力缺口、界面导航、`load_tools`；始终下发 | — |
-| `studio` | 创作任务、方案、文案、分镜、构建与版本 | 创作页 |
-| `studio_detail` | 创作诊断、版本依赖、召回词建议、人工选片、整列重做 | — |
+| `studio` | 创作任务、方案、文案与文案模板、参考文稿、画幅、分镜与画面来源（含 AI 生成图片、AI 生成视频与 AI 动画）、背景音乐与歌词生成、构建与版本 | 创作页 |
+| `studio_detail` | 创作诊断、版本依赖、召回词建议、人工选片、整列重做、AI 动画源码读取与修改、背景音乐歌词生成 | — |
 | `library` | 素材与片段浏览、整理信息、素材报告、处理任务、上传素材与字幕 | 素材管理页 |
 | `search` | 文字/图片/视频检索、找相似、区间抽帧、系统状态 | 检索页 |
 | `index` | 内容索引版本列表、一致性检查、激活与回退 | — |
@@ -61,7 +61,7 @@
 
 ## 附件
 
-交给助手的文件先暂存，再由工具以 `attachment://<token>` 引用。用到附件的工具：`search_by_media`、`upload_source`、`upload_subtitle`、`attach_query_media`、`add_person_reference`、`identify_person`、`import_cast`、`clone_voice`。
+交给助手的文件先暂存，再由工具以 `attachment://<token>` 引用。用到附件的工具：`search_by_media`、`upload_source`、`upload_subtitle`、`attach_query_media`、`add_reference_text`、`add_person_reference`、`identify_person`、`import_cast`、`clone_voice`。
 
 面板操作：
 
@@ -184,7 +184,7 @@ curl -s -H "Authorization: Bearer $MINDEX_MCP_TOKEN" -F file=@shot.png http://12
 
 ## 能力范围与缺口
 
-共 83 个工具，其中 80 个导出到 MCP（`load_tools`、`ask_user_question`、`navigate` 不导出）。所有工具都经进程内回环调用既有 REST 接口，校验、锁与错误信息与页面操作完全一致。
+共 92 个工具，其中 89 个导出到 MCP（`load_tools`、`ask_user_question`、`navigate` 不导出）。所有工具都经进程内回环调用既有 REST 接口，校验、锁与错误信息与页面操作完全一致。
 
 ### meta
 
@@ -202,26 +202,35 @@ curl -s -H "Authorization: Bearer $MINDEX_MCP_TOKEN" -F file=@shot.png http://12
 | `list_jobs` | read | 是 | 列出创作任务 |
 | `get_workspace_summary` | read | 是 | 工作台：方案、参数、revision、文案、分镜摘要、成片与最近构建 |
 | `resolve_shots` | read | 是 | 把短 ID、完整 ID 或 #序号解析为分镜 ID，有歧义时返回候选 |
-| `get_shot_details` | read | 是 | 分镜完整详情（旁白、查询、画面意象、召回设置、各阶段状态、字幕时间轴） |
+| `get_shot_details` | read | 是 | 分镜完整详情（旁白、查询、画面意象、召回设置、画面来源、各阶段状态、字幕时间轴；aigc 分镜附生成状态与生成画面媒体；aigc_image 分镜附生成图片版本；背景音乐提示点附提示点与生成版本，顺延分镜说明顺延自哪一镜；animation 分镜附动画源码版本、沙箱预览地址与录制画面） |
 | `get_preflight` | read | 是 | 构建预检：重建、复用、阻塞、跳过的节点 |
 | `get_build_status` | read | 是 | 构建状态、失败或阻塞的节点、最近执行日志 |
 | `list_versions` | read | 是 | 产物版本历史，标出当前选用版本 |
+| `list_script_templates` | read | 是 | 文案模板（内置与用户模板）的 ID、名称、分类、类型与说明，可附完整提示词 |
+| `get_script_template` | read | 是 | 单个文案模板的完整信息与完整提示词 |
 | `create_job` | write | 是 | 新建创作任务（视频大纲） |
 | `create_plan` | write | 是 | 新建方案（可复制或从成片恢复）并设为当前 |
 | `activate_plan` | write | 是 | 切换当前方案 |
-| `update_plan_options` | write | 是 | 修改方案参数或名称 |
+| `update_plan_options` | write | 是 | 修改方案参数（含文案模板 `template_id`、画幅 `canvas` 与适配 `fit`）或名称；换模板不重写已有文案，换画幅提示重建渲染与成片 |
 | `edit_script` | write | 是 | 用完整新文案替换方案文案 |
-| `edit_shots` | write | 是 | 批量 update/insert/delete/move/merge/split 分镜，可设置或 `clear` 召回设置、粒度、数量 |
+| `edit_shots` | write | 是 | 批量 update/insert/delete/move/merge/split 分镜，可设置或 `clear` 召回设置、粒度、数量与画面来源 `source`（recall / clip / image / aigc_image / aigc / animation；aigc_image 可设 `prompt`、主体参考图 `reference_id`、`seed`、`prompt_optimizer`、`motion`、`strength`；aigc 可设 `prompt`、`negative`、`seed`、首帧 `image_id`，以及 MiniMax H3 的 `mode`（text/first_frame/last_frame/first_last/reference）、`last_image_id`、`references`、`model`、`resolution`、`ratio`、`duration`；animation 可设画面说明 `brief`），以及背景音乐提示点 `music`（generate/cover/none，`prompt`、`lyrics`、`instrumental`、`audio_id`、`volume`；之后的分镜顺延） |
 | `rename_job` | write | 是 | 修改任务标题 |
-| `attach_query_media` | write | 是 | 把图片或视频附件设为分镜的召回查询（上传 + 改召回，一次确认） |
+| `attach_query_media` | write | 是 | 把图片或视频附件设为分镜的召回查询（上传 + 改召回，一次确认）；`purpose=source` 时上传为画面文件并把分镜来源改为上传片段（视频）或静态图片（图片）；分镜已是 aigc 来源时按 `role` 作为首帧（缺省）、尾帧或主体参考（图片/视频/音频），aigc_image 来源时图片作为主体参考图；`role=cover` 的音频附件作为背景音乐翻唱参考并设 cover 提示点（同样一次确认） |
+| `add_reference_text` | write | 是 | 为方案登记参考文稿（文本附件或粘贴正文）；预览显示名称与字数，不自动重写文案 |
+| `remove_reference_text` | danger | 是 | 移除方案登记的参考文稿（只删登记，文件保留） |
 | `select_version` | write | 是 | 选用历史版本作为当前方案的产物 |
+| `copy_script_template` | write | 是 | 把内置或用户模板复制为新的用户模板；预览显示来源模板与新名称 |
+| `update_script_template` | write | 是 | 修改用户模板（只提交给出的字段）；预览列出变化字段的前后对比（提示词截断） |
 | `cancel_build` | write | 是 | 取消运行中的构建或旧任务步骤执行 |
 | `run_build` | danger | 是 | 按预检清单后台构建成片 |
-| `run_node` | danger | 是 | 执行单个节点 |
+| `run_node` | danger | 是 | 执行单个节点；`stage=draw` 只用于 aigc_image 分镜（调用图片生成服务），`stage=music` 只用于背景音乐提示点分镜（调用音乐生成服务），`stage=generate` 只用于 aigc 分镜，预览提示调用视频生成服务可能产生费用；`stage=animate` 只用于 animation 分镜（force=true 让动画生成模型重写并替换源码，含人工修改；false 时保留可复用或人工源码），animation 分镜的 `stage=render` 即重新录制 |
 | `delete_job` | danger | 是 | 永久删除创作任务及其全部产物 |
 | `delete_plan` | danger | 是 | 删除方案记录（版本与文件保留） |
+| `delete_script_template` | danger | 是 | 删除用户模板记录；内置模板 403、被方案引用 409，原因原样转述 |
 
-`edit_shots` 的合并规则与创作页相同：旁白拼接、查询以「；」连接、时长相加，保留前一镜的召回设置（前一镜为默认文字召回时继承被合并镜）；只能合并相邻分镜。修改召回设置时预览提示该分镜的召回、选片、渲染及成片会在下次构建时重建；服务端拒绝（人物不存在、选择了作品、素材超出任务范围、查询文件缺失）的中文原因原样转述。
+`edit_shots` 的合并规则与创作页相同：旁白拼接、查询以「；」连接、时长相加，保留前一镜的召回设置（前一镜为默认文字召回时继承被合并镜）；只能合并相邻分镜。修改召回设置时预览提示该分镜的召回、选片、渲染及成片会在下次构建时重建；服务端拒绝（人物不存在、选择了作品、素材超出任务范围、查询文件缺失）的中文原因原样转述。修改画面来源（`source`，见 [分镜画面来源](studio.md#分镜画面来源)）时预览按新来源说明要重建的阶段：素材召回为召回、选片、渲染及成片，上传片段为片段选窗、渲染及成片，静态图片为渲染及成片，AIGC 生成为生成画面、选窗、渲染及成片（并提示会调用视频生成服务、可能产生费用），AI 动画为生成动画、录制渲染及成片；配音不受影响。`get_shot_details` 输出画面来源；aigc 分镜另输出生成状态（版本、时长、提示词或失败原因），并以媒体附上当前生成画面（`list_versions(stage=generate)` 同样附带）。`run_build` 预检中有要重建的生成画面节点时，预览提示将调用视频生成服务的分镜数。未激活视频生成档案时预检阻塞，原因原样转述。animation 分镜另输出动画源码状态（版本、模型生成或人工修改、字符数、时长与画布、沙箱预览地址、录制是否基于当前源码），并以媒体附上当前渲染的录制画面；`run_build` 预检中有要重建的生成动画节点时，预览提示将调用动画生成模型的分镜数。
+
+文案模板工具（`agent/tools/studio_templates.py`，见 [文案模板](studio.md#文案模板)）：内置模板只读，要定制先 `copy_script_template`；`update_script_template` 修改类型、提示词或字数上限后，选用该模板的方案在创作页显示「模板已变化」，已有文案不会自动重写，需要时用 `run_node(stage=script)` 重新生成；只改名称、分类、说明不影响已有文案。模板改动发布 `{domain: "studio", templates: true}`，创作页据此重新读取模板目录。
 
 ### studio_detail
 
@@ -235,7 +244,10 @@ curl -s -H "Authorization: Bearer $MINDEX_MCP_TOKEN" -F file=@shot.png http://12
 | `get_selection_candidates` | read | 是 | 人工选片前查看召回候选、锚点、配音时长与就绪状态 |
 | `preview_selection` | read | 是 | 生成选片预览与 preview_token（候选窗口或任意区间），不改选片 |
 | `confirm_selection` | write | 是 | 确认选片预览，生成并选用新选片版本 |
-| `run_column` | danger | 是 | 整列执行召回/配音/选片/渲染（`force` 为整列重做），并跟踪构建 |
+| `run_column` | danger | 是 | 整列执行召回/配音/背景音乐/生成图片/生成画面/生成动画/选片/渲染（`force` 为整列重做；背景音乐、生成图片、生成画面与生成动画只绑定对应的分镜），并跟踪构建 |
+| `generate_lyrics` | write | 是 | 调用音乐生成服务的歌词生成（`write_full_song` 或 `edit`），只返回歌名、风格标签与歌词，不改分镜；预览提示可能产生费用，ComfyUI 音乐档案不支持 |
+| `get_animation_source` | read | 是 | 读取 AI 动画分镜的 HTML/JS 源码（按字符分页 `offset`/`limit`，单次 ≤10000 字符）、版本与来源（模型生成/人工修改）、时长与画布、沙箱预览地址与录制画面 |
+| `edit_animation_source` | write | 是 | 修改 AI 动画源码：整份替换 `html` 或查找替换 `replacements`（每个 `find` 须恰好出现一次）；预览先以 `dry_run` 做服务端静态校验（未通过直接报告违规项，不出确认卡），显示源码大小前后对比与校验结果；保存为人工版本并选用，只重建该镜渲染与成片，之后的构建不会覆盖 |
 
 ### library
 
@@ -304,8 +316,8 @@ curl -s -H "Authorization: Bearer $MINDEX_MCP_TOKEN" -F file=@shot.png http://12
 | `list_provider_presets` | read | 是 | 厂商预设 |
 | `list_voices` | read | 是 | 音色库、默认音色与语音合成模型 |
 | `list_voice_catalog` | read | 是 | 当前语音合成后端的音色目录、音色库、默认音色与是否支持克隆 |
-| `test_model_profile` | read | 是 | 测试档案连通性 |
-| `create_model_profile` | write | 是 | 新建档案（不自动激活；`api_key` 只能是 `secret://` 引用） |
+| `test_model_profile` | read | 是 | 测试档案连通性（视频/图片/音乐生成档案只做鉴权/可达性探测，不发起生成；动画生成档案只发一次最小对话） |
+| `create_model_profile` | write | 是 | 新建档案（不自动激活；`api_key` 只能是 `secret://` 引用）；`video_generator`（backend 含 `minimax_h3`）、`image_generator`、`music_generator`（可带 `cover_model`）角色都支持 ComfyUI 工作流与映射；`video_generator` 角色可带 `durations`、`poll_interval`、`max_wait`、`fps`、`comfyui_workflow`、`comfyui_mapping`，ComfyUI 工作流与映射先在本地校验并给出中文错误；`animator` 角色可带 `max_tokens`、`retries`、`max_html_kb`、`max_capture_seconds`（激活即启用动画生成） |
 | `update_business_settings` | write | 是 | 修改 GPU 互斥、检索权重、默认音色 |
 | `register_voice` | write | 是 | 把已有厂商音色登记到音色库 |
 | `update_model_profile` | danger | 是 | 修改档案（不能修改助手自身档案） |
@@ -387,7 +399,7 @@ curl -s -H "Authorization: Bearer $MINDEX_MCP_TOKEN" -F file=@shot.png http://12
 安装依赖：`uv sync --extra mcp`（开发环境的 `--extra dev` 已包含）。服务名 `mindex`。导出规则：
 
 - `load_tools`、`navigate`、`ask_user_question` 从不导出；MCP 不做动态加载，直接导出所选领域的全部工具。
-- `agent.mcp.domains` 为 `null` 时导出全部 80 个工具；为领域列表时只导出这些领域，`report_capability_gap` 始终导出。
+- `agent.mcp.domains` 为 `null` 时导出全部 89 个工具；为领域列表时只导出这些领域，`report_capability_gap` 始终导出。
 - `tools/list` 与 `tools/call` 每次重新读取配置，修改 `agent.mcp.domains` 无需重启（进程内 stdio 与 `/mcp`）。调用不在导出范围内的工具返回 `isError`，说明该工具未导出。
 - `mindex mcp --domain <领域>` 可重复指定，覆盖配置值；出现未知领域时启动失败并列出可选领域。远程模式（`--base-url`）在启动时读取一次本地配置的 `agent.mcp.domains`。
 - read 工具标注 `readOnlyHint`，danger 工具标注 `destructiveHint`。
@@ -458,13 +470,13 @@ args = ["run", "--project", "/path/to/mindex", "mindex", "mcp"]
 
 ## 验证
 
-- `uv run pytest tests/test_agent_*.py`：协议适配、工具、运行时、确认、任务跟踪、密钥、MCP、动态加载、附件、视觉，以及 18 个确定性验收场景（`tests/agent_scenarios.py`，含跨领域加载、附件检索、找相似、索引回退、取消构建、取消素材任务、人物审核与发布、视觉输入）。这些测试使用脚本化模型，只验证工程链路，不代表真实模型质量。
+- `uv run pytest tests/test_agent_*.py`：协议适配、工具、运行时、确认、任务跟踪、密钥、MCP、动态加载、附件、视觉，以及 26 个确定性验收场景（`tests/agent_scenarios.py`，含跨领域加载、附件检索、找相似、索引回退、取消构建、取消素材任务、人物审核与发布、视觉输入、访谈改写、竖屏方案、附件作画面、AI 生成视频分镜、AI 生成图片分镜、背景音乐与歌词生成、AI 动画分镜生成与源码修改）。这些测试使用脚本化模型，只验证工程链路，不代表真实模型质量。
 - 后端接口：`tests/test_search_similar.py`、`test_source_frame.py`、`test_index_api.py`、`test_task_cancel.py`、`test_studio_cancel.py`、`test_studio_diagnostics.py`、`test_person_identify.py`。
 - `tests/test_agent_no_physical_delete.py`：用记录请求的客户端执行全部工具，确认不会请求物理删除接口，且每个 write/danger 工具都有预览。
 - `tests/test_agent_changes.py`：改动与定位通道、各工具定位描述、`navigate`。
 - `tests/test_agent_media.py`：各工具附带的媒体只含本站地址且真实可加载、折叠默认值。
 - `tests/test_agent_panel_ui.py`：Playwright 驱动真实页面，覆盖跨页跳转后确认、页内定位、双标签刷新、外部改动、关闭跟随、导航、媒体卡片与大图浏览、宽度调整、附件（选择、拖放、移除、失败阻止发送、消息中的附件）与 Markdown（含 XSS 向量，`tests/agent_markdown_ui.cjs`）（需要 node 与 Playwright，可用 `MINDEX_PLAYWRIGHT_MODULE` 指定模块）。
-- 真实模型评测：`scripts/agent_eval.py` 让真实模型跑同一组场景（素材、嵌入、配音仍是测试专用适配器），输出通过率与每个场景的事件日志：
+- 真实模型评测：`scripts/agent_eval.py` 让真实模型跑同一组场景（素材、嵌入、配音、视频生成、动画生成与动画录制仍是测试专用适配器，不调用付费生成接口与真实浏览器），输出通过率与每个场景的事件日志：
 
 ```bash
 MINDEX_AGENT_API_KEY=... uv run python scripts/agent_eval.py --backend openai \

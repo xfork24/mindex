@@ -28,10 +28,7 @@ function errorText(detail) {
   return typeof detail === 'string' ? detail : JSON.stringify(detail);
 }
 async function api(url, options = {}) {
-  const response = await fetch(url, options);
-  const data = await response.json();
-  if (!response.ok) throw new Error(MindexI18n.system(data.detail || data));
-  return data;
+  return MindexApi.request(url, options);
 }
 function switchMode(next) {
   if (busy) return;

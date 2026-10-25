@@ -215,7 +215,7 @@ async def get_version_lineage(args: VersionLineage, ctx: ToolContext) -> ToolOut
     sid = root.get("shot_id")
     if sid and sid in view.order:
         focus = studio_focus(view.job["id"], view.plan_id, shots=[sid],
-                             stage=root["stage"] if root["stage"] in ("content", *STAGES) else None)
+                             stage=root["stage"] if root["stage"] in ("content", "music", "draw", "generate", "animate", *STAGES) else None)
     else:
         section = {"script": "script", "compose": "final"}.get(root["stage"], "storyboard")
         focus = studio_focus(view.job["id"], view.plan_id, section=section)
@@ -296,7 +296,9 @@ async def preview_version(args: PreviewVersion, ctx: ToolContext) -> ToolOutput:
 
 # ------------------------------------------------------------ 整列执行 / 重做
 class RunColumn(StrictModel):
-    stage: Literal["recall", "tts", "select", "render"] = Field(description="要整列执行的阶段：召回/配音/选片/渲染")
+    stage: Literal["recall", "tts", "music", "draw", "generate", "animate", "select", "render"] = Field(
+        description="要整列执行的阶段：召回/配音/背景音乐（仅背景音乐提示点分镜）/生成图片（仅 aigc_image 分镜）/"
+                    "生成画面（仅 aigc 分镜）/生成动画（仅 animation 分镜）/选片/渲染")
     force: bool = Field(
         default=False,
         description="false=执行/复用：已有匹配版本的分镜直接选用，只生成缺失或过期的；"
@@ -312,7 +314,7 @@ def column_blocked(view: PlanView, stage: str, inputs: dict) -> str | None:
         dep = versions.get(vid) if vid else None
         if not dep or dep["status"] != "complete":
             return f"依赖 {STAGE_LABELS.get(name, name)} 缺失或失败"
-    if stage == "render":
+    if stage == "render" and "select" in inputs:
         selection = versions.get(inputs["select"]) or {}
         if (selection.get("inputs") or {}).get("tts") != inputs.get("tts"):
             return "选片绑定的配音与当前选择不同，请先重新对齐"
@@ -326,13 +328,20 @@ async def column_plan(args: RunColumn, ctx: ToolContext):
     if not view.order:
         raise ToolError("当前方案还没有分镜，无法整列执行", code="no_shots")
     inputs = data["inputs_by_stage"].get(args.stage) or {}
-    missing = [sid for sid in view.order if sid not in inputs]
+    # 生成画面/生成动画只属于 aigc/animation 分镜：整列执行只绑定这些分镜（与服务端 column_nodes 一致）。
+    partial = ("generate", "animate", "draw", "music")
+    order = [sid for sid in view.order if sid in inputs] if args.stage in partial else view.order
+    if not order:
+        noun = {"generate": "AI 生成视频分镜，生成画面", "animate": "AI 动画分镜，生成动画",
+                "draw": "AI 生成图片分镜，生成图片", "music": "背景音乐提示点，背景音乐"}.get(args.stage, args.stage)
+        raise ToolError(f"当前方案没有 {noun}列无法执行", code="column_unavailable")
+    missing = [sid for sid in order if sid not in inputs]
     if missing:
         names = "、".join(shot_label(view, sid) for sid in missing[:10])
         raise ToolError(f"{STAGE_LABELS[args.stage]}列无法执行：分镜 {names} 的输入无法确定（通常是前置阶段尚未完成）；"
                         "可用 diagnose_plan 查看原因", code="column_unavailable", value={"shots": missing})
     body = {"revision": data["revision"], "stage": args.stage,
-            "inputs_by_shot": {sid: inputs[sid] for sid in view.order}}
+            "inputs_by_shot": {sid: inputs[sid] for sid in order}}
     return view, data, body
 
 
@@ -343,7 +352,7 @@ async def preview_run_column(args: RunColumn, ctx: ToolContext) -> Preview:
     nodes = {n["key"]: n for n in data["nodes"]}
     actions = {n["key"]: n for n in data["preflight"]["nodes"]}
     rows, blocked = [], []
-    for sid in view.order:
+    for sid in body["inputs_by_shot"]:
         key = f"{args.stage}:{sid}"
         reason = column_blocked(view, args.stage, body["inputs_by_shot"][sid])
         node = nodes.get(key)
@@ -360,7 +369,7 @@ async def preview_run_column(args: RunColumn, ctx: ToolContext) -> Preview:
         rows.append({"label": f"- {shot_label(view, sid)}：{state}"})
     changes = [{"label": "阶段", "after": label},
                {"label": "方式", "after": "全部重新生成" if args.force else "执行/复用（只生成缺失或过期的）"},
-               {"label": "分镜数", "after": len(view.order)}] + rows[:40]
+               {"label": "分镜数", "after": len(body["inputs_by_shot"])}] + rows[:40]
     warnings = []
     if args.force:
         warnings.append("全部重新生成会忽略已有版本，耗时且可能调用付费模型服务")
@@ -487,6 +496,10 @@ def selection_summary(version: dict | None) -> dict | None:
     data = version.get("data") or {}
     video = (data.get("event") or {}).get("video") or {}
     anchor = data.get("anchor") or {}
+    if video.get("kind") == "file":  # 上传片段：区间是片段文件内的秒数
+        media = (video.get("ref") or {}).get("input") or ""
+        return {"version_id": version["id"], "source_id": None, "source_name": f"上传片段 {media[:8]}",
+                "start": video.get("start"), "end": video.get("end"), "manual": False}
     return {"version_id": version["id"], "source_id": video.get("source_id"),
             "source_name": anchor.get("source_name"), "start": video.get("start"), "end": video.get("end"),
             "manual": bool(data.get("manual"))}

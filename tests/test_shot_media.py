@@ -97,9 +97,10 @@ def test_business_modules_do_not_resolve_source_path():
     from pathlib import Path
 
     modules = ['api', 'admin/admin', 'persons/person_api', 'persons/person_processing',
-               'processing/dialogue', 'admin/segment_details', 'studio/studio_workspace',
+               'processing/dialogue', 'admin/segment_details',
                'studio/studio_window', 'studio/studio_steps', 'studio/studio_api']
     root = Path(__file__).resolve().parents[1] / 'backend' / 'src'
+    modules += [f'studio/workspace/{path.stem}' for path in sorted((root / 'studio/workspace').glob('*.py'))]
     for name in modules:
         source = (root / f'{name}.py').read_text()
         assert 'resolve_media(source["path"])' not in source, name

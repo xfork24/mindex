@@ -80,10 +80,12 @@ ruff 没有启用能发现这些问题的规则。
 
 ## 当前可做
 
-| 任务 | 对应发现 |
-|---|---|
-| 4 安全与鉴权 | Q5、Q6、Q7 |
-| 5 IO 与资源 | Q1、Q2、Q3、Q8、Q9、Q16、Q17、Q18 |
-| 6 日志与前端轮询 | Q10、Q11、Q13、Q14、Q19、Q20 |
-| 7.1 Lint | Q15 |
-| 12 StudioExecutor | Q4、Q12 |
+| 任务 | 对应发现 | 状态 |
+|---|---|---|
+| 4 安全与鉴权 | Q5、Q6、Q7 | 已完成：`safe_next` 拒绝 netloc、反斜杠与控制字符；`/logout` 只接受 POST；`serve` 监听非回环地址且无令牌时拒绝启动，`--allow-insecure` 放行 |
+| 5 IO 与资源 | Q1、Q2、Q3、Q8、Q9、Q16、Q17、Q18 | 已完成（`shared/jsonio.py` 为唯一原子写实现） |
+| 6 日志与前端轮询 | Q10、Q11、Q13、Q14、Q19、Q20 | 已完成 |
+| 7.1 Lint | Q15 | 已完成（ruff 启用 ASYNC、BLE、RUF100） |
+| 12 StudioExecutor | Q4、Q12 | 已完成（`studio/executor.py`） |
+
+Q21（daemon 线程无关闭钩子）按原结论本期不做；Q22 魔法数字只在改动处顺手整理。状态于 2026-10 任务 26 回填。

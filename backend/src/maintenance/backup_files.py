@@ -29,9 +29,12 @@ from mindex.maintenance.backup_db import (
     store_at,
     walk,
 )
+from mindex.shared import locks
 from mindex.shared.config import Config, fingerprint
-from mindex.shared.processing_lock import SharedFileLock
 from mindex.shared.storage import Store, dumps
+
+# 向量备份/恢复子进程的超时：大库也足够宽裕，只防止进程挂死后永远等待。
+VECTOR_PROCESS_TIMEOUT_SECONDS = 6 * 3600
 
 EXCLUDED_DIRS = {'chroma', 'locks', 'models', 'model-cache', '.cache', '__pycache__'}
 
@@ -172,16 +175,9 @@ def offline(root):
                 raise ValueError('迁移锁不能是符号链接')
             stack.enter_context(FileLock(str(migration_lock), timeout=0))
             if root.exists():
-                for relative in ('pipeline.lock', 'locks/library.lock', 'sources/.register.lock',
-                                 'index-write.lock', 'studio/studio.lock'):
-                    safe_path(root, relative)
-                stack.enter_context(SharedFileLock(root / 'pipeline.lock', exclusive=True))
-                stack.enter_context(SharedFileLock(root / 'locks/library.lock', exclusive=True))
-                (root / 'sources').mkdir(exist_ok=True)
-                stack.enter_context(FileLock(str(root / 'sources/.register.lock'), timeout=0))
-                stack.enter_context(FileLock(str(root / 'index-write.lock'), timeout=0))
-                (root / 'studio').mkdir(exist_ok=True)
-                stack.enter_context(FileLock(str(root / 'studio/studio.lock'), timeout=0))
+                for name in locks.ORDER:
+                    safe_path(root, locks.PATHS[name])
+                stack.enter_context(locks.acquire_ordered(root, locks.ORDER, exclusive=True))
             yield
     except Timeout as exc:
         raise ValueError('迁移锁被占用；请停止 Web 和全部后台写入任务后重试') from exc
@@ -193,10 +189,15 @@ def vector_worker(action, root, bundle, **options):
     with temporary_directory(prefix='mindex-vector-') as temporary:
         path = Path(temporary) / 'request.json'
         path.write_text(dumps(request), encoding='utf-8')
-        result = subprocess.run(
-            [sys.executable, '-m', 'mindex.maintenance.backup_vectors', str(path)],
-            capture_output=True, text=True, check=False,
-        )
+        try:
+            result = subprocess.run(
+                [sys.executable, '-m', 'mindex.maintenance.backup_vectors', str(path)],
+                capture_output=True, text=True, encoding='utf-8', errors='replace', check=False,
+                timeout=VECTOR_PROCESS_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired:
+            hours = VECTOR_PROCESS_TIMEOUT_SECONDS // 3600
+            raise ValueError(f'向量迁移进程超过 {hours} 小时仍未结束，已终止；请检查向量库后重试') from None
     try:
         response = json.loads(result.stdout.strip().splitlines()[-1])
     except (ValueError, IndexError):
@@ -246,13 +247,13 @@ def job_selection(root, selected, known):
     for row in store.rows('SELECT id,content_id FROM search_releases'):
         versions[row['id']] = versions.get(row['content_id'], set())
     for path in sorted((root / 'studio').glob('*/job.json')):
-        state = json.loads(path.read_text())
+        state = json.loads(path.read_text(encoding="utf-8"))
         refs = set(state.get('source_ids') or [])
         historical = set()
         for artifact in path.parent.rglob('*.json'):
             if finder_metadata(artifact):
                 continue
-            text = artifact.read_text()
+            text = artifact.read_text(encoding="utf-8")
             refs.update(s for s in known if s in text)
             refs.update(s for token, s in tokens.items() if token in text)
             historical.update(v for v in versions if v in text)
@@ -473,7 +474,7 @@ def _config_dependencies(config, base_dir, payload, data_root=None):
                     paths[str(original)] = relative
                     paths[item] = relative
                     if key == 'deployment_manifest':
-                        pinned = json.loads(original.read_text())
+                        pinned = json.loads(original.read_text(encoding="utf-8"))
                         missing.append({'path': str(original), 'reason': '部署清单已保存；权重和服务进程需另行部署',
                                         'file_identity': pinned.get('file_identity')})
                 else:
@@ -507,7 +508,7 @@ def compatibility_files(root, database):
             if finder_metadata(gate):
                 continue
             marker = gate.with_suffix('.sha256')
-            verified_file(gate, marker.read_text().strip())
+            verified_file(gate, marker.read_text(encoding="utf-8").strip())
             paths.extend((gate, marker))
         for path in paths:
             relative = path.relative_to(root).as_posix()

@@ -13,6 +13,8 @@ from mindex.processing.pipeline import Pipeline
 from mindex.shared.storage import Store
 from mindex.studio import studio
 
+pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
+
 
 @pytest.fixture
 def studio_client(config, video_file):

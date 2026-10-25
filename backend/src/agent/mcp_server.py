@@ -115,7 +115,7 @@ def build_server(registry: ToolRegistry, client_factory, *, policy, agent_profil
                     continue
                 try:
                     await _resolve(publish(kind, data))
-                except Exception:  # noqa: BLE001 — 通知失败不影响工具结果
+                except Exception:  # 通知失败不影响工具结果
                     logger.warning("发布页面改动通知失败", exc_info=True)
         text = output.render()
         if output.watch_build:

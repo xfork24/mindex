@@ -17,6 +17,7 @@ from time import perf_counter
 
 from mindex.models.adapters import make_transcriber
 from mindex.models.transcribers import parse_minimax_words
+from mindex.shared import jsonio
 from mindex.shared.config import Config, fingerprint
 from mindex.shared.media import MediaError, command
 from mindex.shared.storage import Store, dumps
@@ -27,10 +28,7 @@ READY = {"complete", "empty", "no_audio", "disabled"}
 
 
 def atomic_json(path: Path, value):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    partial = path.with_suffix(".partial")
-    partial.write_text(dumps(value), encoding="utf-8")
-    partial.replace(path)
+    jsonio.save_text(path, dumps(value))
 
 
 def subtitle_tracks(path: Path) -> list[dict]:
@@ -334,7 +332,7 @@ class DialogueProcessor:
             reason = "指定字幕为位图字幕，无法提取文本"
         # The ASR profile deliberately excludes local aligner and subtitle identity.
         model = self.config.asr.model_dump(
-            exclude={"timeout", "api_key_env", "aligner_model", "aligner_revision", "deployment_manifest"}
+            exclude={"timeout", "api_key_env", "max_tokens", "aligner_model", "aligner_revision", "deployment_manifest"}
         )
         profile = fingerprint(["asr-words-context1-v1", sid, model])
         common.update(source="asr", fallback_reason=reason if method != "asr" else None, model_identity=model)
@@ -433,7 +431,7 @@ class DialogueProcessor:
             for number in range(total):
                 target = cache / f"{number}.json"
                 if target.exists():
-                    words.extend(json.loads(target.read_text())["words"])
+                    words.extend(json.loads(target.read_text(encoding="utf-8"))["words"])
                     completed += 1
             state = "partial" if completed < total else "complete" if words else "empty"
             data = self.save(

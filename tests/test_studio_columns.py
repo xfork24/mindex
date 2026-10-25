@@ -10,7 +10,7 @@ from test_studio_workspace import setup_workspace, wait_build
 from mindex.api import create_app
 from mindex.shared.trace import record
 from mindex.studio import studio
-from mindex.studio import studio_workspace as ws
+from mindex.studio import workspace as ws
 from mindex.studio.studio_logs import ExecutionLog, log_path, read_events
 
 

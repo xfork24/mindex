@@ -10,13 +10,13 @@ from pathlib import Path
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from mindex.agent.domains import touch
+from mindex.agent.domains import DOMAIN_INFO, PAGE_DOMAIN, touch
 from mindex.agent.llm.scripted import ScriptedLlm, call, say
 from mindex.agent.registry import ToolOutput, ToolRegistry, ToolSpec
 from mindex.agent.runtime import BuiltinRuntime
 from mindex.agent.session_store import SessionStore
 from mindex.agent.tools import meta
-from mindex.shared.agent_domains import DOMAIN_INFO, LOADABLE_DOMAINS, PAGE_DOMAIN
+from mindex.shared.agent_domains import LOADABLE_DOMAINS
 from mindex.shared.config import AgentConfig, StrictModel
 
 # 合法领域 + meta + 未知名称，覆盖需要忽略的输入。

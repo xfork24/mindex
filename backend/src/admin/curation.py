@@ -271,8 +271,8 @@ class Library:
             "SELECT * FROM dialogue_tasks WHERE source_id=? ORDER BY created_at DESC,rowid DESC LIMIT 1",
             (identifier,),
         )
-        from mindex.admin.dialogue_tasks import task_public
         from mindex.processing.subtitle_uploads import uploaded_subtitles
+        from mindex.shared.background_tasks import public_task
 
         active = self.store.active_index()
         published = self.store.snapshots(active["id"], identifier) if active else []
@@ -284,7 +284,7 @@ class Library:
             "published_channels": channel_coverage(self.store, source_id=identifier, snapshots=published),
             "subtitle_tracks": tracks,
             "subtitle_files": uploaded_subtitles(self.store, identifier),
-            "dialogue_task": task_public(task) if task else None,
+            "dialogue_task": public_task(task) if task else None,
             "runs": self.store.rows(
                 "SELECT * FROM runs WHERE source_id=? ORDER BY id DESC LIMIT 5", (identifier,)
             ),

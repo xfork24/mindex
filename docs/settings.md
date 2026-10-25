@@ -2,11 +2,13 @@
 
 `/settings`（顶部导航「设置」进入）把模型服务连接、音色库、检索调参与索引版本集中在一个页面，**保存即热生效，无需重启**：配置档案存 SQLite（`model_profiles` / `voices` 表 + `settings` KV），Web API 与 CLI 命令统一经覆盖层合成「生效配置」。
 
+动画生成、视频生成、图片生成与音乐生成在升级后第一次启动时各建好“默认生效配置卡”（只对还没有任何档案的角色，只做一次，之后删改不会被再次覆盖）：动画生成为智谱 GLM-5.3-Flash（`glm-5.3-flash`；卡片不填密钥且未设环境变量时，复用“多模态理解”里同名模型档案的密钥与 Base URL（二者成对：例如智谱 GLM Coding Plan 的密钥只能用于 `/api/coding/paas/v4`，用于通用端点会报 429“余额不足”）——激活的档案优先，其次最近更新的，按模型名不区分大小写匹配，概览显示“密钥复用多模态理解同名模型”），视频生成为 MiniMax H3，图片生成为 MiniMax image-01，音乐生成为 MiniMax music-3.0，均激活为默认，需要在卡片里填入对应厂商的 API Key；视频/图片/音乐生成另建一张未激活的“本地 ComfyUI”卡（`http://127.0.0.1:8188`，导入工作流与节点映射后可激活）。
+
 文案创作档案在升级后第一次启动时自动从当前激活的“文本拆分镜”档案复制（含厂商与密钥）并激活，只做一次；之后可单独修改或删除，不会被再次覆盖。没有激活的拆分镜档案时，`studio.writer` 在 yaml 里省略即复制 `studio.generator`。
 
 相关模块：`settings/runtime_settings.py`（档案/覆盖层/预设）、`settings/settings_api.py`（API）、`settings/voice_clone.py`（厂商克隆客户端）、`frontend/src/settings/settings.*`（页面）。
 
-## 八个模型角色
+## 十二个模型角色
 
 | 角色 | 配置段 | 说明 |
 |---|---|---|
@@ -14,8 +16,13 @@
 | 文案创作 | `studio.writer` | 创作任务内按视频大纲写旁白文案，纯文本任务；配置字段与文本拆分镜相同，可共用同一个模型 |
 | 文本拆分镜 | `studio.generator` | 创作文案拆分镜，纯文本任务，可选高性价比文本模型（本地默认复用理解模型） |
 | 多模态嵌入 | `embedding` | 文本/图片/视频统一向量空间，**切换后需重建索引** |
-| 语音识别 | `asr` | 线上模型只出纯文本，时间戳仍由本地 CPU ForcedAligner 补齐 |
+| 语音识别 | `asr` | 阿里 qwen3-asr-flash 等 OpenAI 兼容后端只出纯文本，时间戳由本地 CPU ForcedAligner 补齐；MiniMax（`backend: minimax`）解析词级时间戳，无需对齐 |
 | 语音合成 | `studio.tts` | 创作配音；支持预定义与克隆音色 |
+| 图片生成 | `studio.image_generator` | AI 生成图片分镜的生成图片（`backend`：`minimax` image-01 文生图/主体参考图生图 / `comfyui` 本地工作流，映射 `prompt`、`negative`、`seed`、`width`、`height`、`image`）；激活档案即启用。测试连接只发送缺少提示词的请求验证鉴权（ComfyUI 读 `/system_stats`），**从不生成图片**；见 [创作工作流](studio.md#ai-生成图片) |
+| 视频生成 | `studio.video_generator` | AI 生成视频分镜的生成画面（`backend`：`minimax_h3` MiniMax H3 视频生成 V2（默认卡）/ `minimax` 海螺 / `dashscope` 通义万相 / `comfyui` 本地）；H3 在设置页只需 endpoint（`https://api.minimax.cn`，误填 `/v1` 也可）与密钥，模型名可留空，文生/首帧/尾帧/首尾帧/主体参考等生成方式、模型档位、分辨率、比例与时长在创作页逐镜设置；激活档案即启用（`enabled=true`），无激活档案时沿用 yaml 的 `enabled`（缺省关闭）。测试连接只调用 `health()`（MiniMax/DashScope 查询一个不存在的任务以验证鉴权，ComfyUI 读 `/system_stats` 并校验工作流映射），**从不提交生成**。ComfyUI 档案在表单里导入「导出（API）」格式工作流 JSON（粘贴或选文件）并逐项填写节点映射（`prompt`、`negative`、`seed`、`frames`、`width`、`height`、`image` → `节点ID.inputs.输入名`），页面先做 JSON 与映射预校验，保存时服务端再校验并返回中文错误；见 [创作工作流](studio.md#ai-生成视频) |
+| 音乐生成 | `studio.music_generator` | 配音列背景音乐的生成（`backend`：`minimax` music-3.0 音乐生成、`cover_model`（缺省 `music-cover`）翻唱与歌词生成 / `comfyui` 本地工作流，映射 `prompt`、`lyrics`、`seconds`、`seed`、`audio`，不支持歌词生成）；激活档案即启用。测试连接只验证鉴权，**从不生成音乐**。MiniMax 自 2026-08-20 起付费音乐/歌词接口仅对历史付费用户开放；见 [创作工作流](studio.md#背景音乐) |
+| 动画生成 | `studio.animator` | AI 动画分镜的生成动画（写 HTML/JS 动画源码，渲染时沙箱逐帧录制）；协议与智能助手相同（`openai` / `anthropic`）。默认卡为智谱 GLM-5.3-Flash；没有激活动画生成档案且 yaml 省略该段时复制 `agent.llm` 并跟随激活的智能助手档案；激活档案即启用（`enabled=true`）。档案字段另含 `max_tokens`、`retries`（校验重试）、`max_html_kb`（源码上限）、`max_capture_seconds`（录制墙钟上限）。测试连接只发一次最小对话；预设沿用智能助手的 DeepSeek、阿里百炼与 Anthropic，智谱为 `glm-5.3-flash`（`max_tokens` 预填 16000）；见 [创作工作流](studio.md#ai-动画) |
+| 人物识别 | `person` | 独立人物检测/特征服务（`mindex-person-server`）的连接与匹配参数，见 [人物库](persons.md) |
 | 智能助手 | `agent.llm` | 全局助手面板的对话模型，须支持工具调用（OpenAI 兼容 tools 或 Anthropic 原生协议）；测试连接会验证工具调用，见 [智能助手](agent.md) |
 
 每个角色可保存多个「配置档案」（名称 + 厂商 + 连接字段 + 密钥），任意时刻激活其一；未激活时直接用 `config.local.yaml` 的取值。档案只覆盖白名单连接字段（`runtime_settings.PROFILE_FIELDS`），`data_dir`、切分布局、对齐器等本地设施永不被触碰。
@@ -29,20 +36,26 @@
 | 多模态嵌入 | — | — | — | **TokenHub**（WeMM 系，`/v1/embeddings/multimodal`） | — |
 | ASR | — | — | qwen3-asr-flash（chat + input_audio） | —（自有签名协议） | asr-1.0（speech_to_text 专用适配器） |
 | 语音合成 | — | — | DashScope 原生（专用适配器） | —（自有协议） | t2a_v2（专用适配器） |
+| 图片生成 | — | — | — | — | image-01（image_generation 专用适配器） |
+| 视频生成 | — | — | 通义万相 wan 系列（DashScope 异步任务，专用适配器） | — | **MiniMax H3**（视频生成 V2 专用适配器）；海螺 MiniMax-Hailuo（video_generation） |
+| 音乐生成 | — | — | — | — | music-3.0 / music-cover / 歌词生成（专用适配器） |
 
 要点：
 
 - **多模态嵌入的线上选择基本只有腾讯 TokenHub**（`kinfra-vl-embedding-2b/8b`，与本地 WeMM 同系）。适配器在客户端按 `video` 配置抽帧后以图片序列发送，保证预处理指纹诚实；身份纯由配置构造，进入索引空间指纹。
 - **语音合成五家都没有标准 OpenAI `/audio/speech` 端点**，因此写了两个专用适配器：`minimax`（t2a_v2，hex 音频解码）与 `dashscope`（原生协议，音频 URL 二次下载或 base64）。
-- **ASR 线上协议分两类**：OpenAI 兼容 chat + input_audio（阿里）与 MiniMax `speech_to_text`（multipart 表单上传，单文件 ≤500 秒/50MB，管线 30 秒切块远小于上限）；两者都只出纯文本，时间戳由本地对齐补齐。
+- **ASR 线上协议分两类**：OpenAI 兼容 chat + input_audio（阿里）与 MiniMax `speech_to_text`（multipart 表单上传，单文件 ≤500 秒/50MB，管线 30 秒切块远小于上限）；阿里只出纯文本，时间戳由本地对齐补齐；MiniMax 请求词级时间戳（`timestamp_level=word`），直接得到带时间戳的对白。
 - 理解/文案创作/拆分镜的 OpenAI 兼容端点会自动省略 llama-server 专有的 `chat_template_kwargs`（档案里 `llama_template=false`）；本地服务保持默认 `true` 不变。
+- 动画生成预设与智能助手相同（同为工具无关的聊天调用，`max_tokens` 预填 16000，源码较长）。
+- 视频生成预设：MiniMax 为 `minimax_h3` / `MiniMax-H3`（时长 4–15 秒，按配音时长或逐镜设置；海螺 `MiniMax-Hailuo-2.3` 可用自定义档案选 `minimax` 后端）、阿里云百炼 `wan2.6-t2v`（5/10/15 秒，base_url 与 DashScope 语音合成相同；有参考图的分镜需改用图生视频模型如 `wan2.6-i2v-flash`）；密钥沿用各厂商同一 API Key。协议出处与核对日期记录在 `models/video_generators.py` 文件头。
+- 图片/音乐生成预设：MiniMax `image-01` 与 `music-3.0`（翻唱 `music-cover`），base_url 与 MiniMax 语音合成相同；协议出处见 `models/image_generators.py`、`models/music_generators.py` 文件头。
 - 预设的模型名是「最佳已知」预填值，会随平台演进漂移——页面所有字段可改，每个档案有「测试连接」按钮（最小真实调用）兜底。
 
 ## 热生效机制
 
 “处理设置 → 强加 GPU 锁”默认关闭。保存后影响后续任务启动、重试和素材删除，Web 与 CLI 共用 `enforce_gpu_lock` 覆盖层。开启恢复全局处理互斥；关闭允许不同素材、不同类型并行，同类重复启动与正在处理素材的删除保护仍保留。运行中的任务继续持有启动时取得的锁，改为关闭不会强制释放正在使用的独占锁。
 
-- CLI：`mindex` 每条命令在 `load_config` 后应用覆盖层（`runtime_settings.apply_runtime_overrides`）；`mindex e2e` 除外（验证框架保持 yaml 原值可复现）。
+- CLI：`mindex` 每条命令在 `load_config` 后应用覆盖层（`runtime_settings.apply_runtime_overrides`）；`mindex e2e`、`mindex clips`、`mindex backup` 除外（验证框架保持 yaml 原值可复现；切片迁移与备份按 YAML 原值运行，备份另行携带数据库覆盖层）。
 - Web：`create_app` 持有 `RuntimeConfig`，检索/状态路由每请求解析 `current()`；创作任务在 launch 时解析一次（一次任务运行绑定同一配置，改配置下次生效，studio 的 reconcile 指纹机制会级联作废受影响步骤）。
 - 覆盖层无长驻缓存：每次打开页面看到的即是当前生效版本。
 
@@ -89,11 +102,13 @@
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/settings` | 生效视图：五角色档案+掩码+生效值、预设目录、嵌入/索引匹配、音色库、调参当前值 |
+| GET | `/api/settings` | 生效视图：十个角色档案+掩码+生效值、预设目录、嵌入/索引匹配、音色库、调参当前值 |
 | POST/PUT/DELETE | `/api/settings/profiles[/{id}]` | 档案 CRUD（api_key：留空保留，`__clear__` 清除） |
 | POST | `/api/settings/profiles/{id}/activate` | 激活；嵌入角色附索引不一致警告 |
 | POST | `/api/settings/profiles/{id}/test` | 测试连接（最小真实调用，回报时延/维度/回复） |
+| GET | `/api/settings/embedding-status` | 嵌入身份与活动索引是否匹配（页面横幅） |
 | PUT/DELETE | `/api/settings/business` | 检索调参与默认音色 / 恢复默认 |
+| GET/POST | `/api/settings/voices/catalog[/preview]` | 当前语音合成后端的音色目录 / 试听 |
 | POST/DELETE | `/api/settings/voices[/{id}]` | 录入/删除音色 |
 | POST | `/api/settings/voices/clone` | 克隆（multipart 上传样本 或 URL 复刻；须 consent） |
 | GET | `/api/persons/releases` | 当前生效组合与最近 30 条检索组合（索引版本区域使用；恢复 / 删除 / 发布仍为 `/api/persons/releases/{id}/activate`、`DELETE /api/persons/releases/{id}`、`POST /api/persons/publish`） |

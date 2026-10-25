@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from mindex.shared.config import fingerprint
-from mindex.shared.storage import Store, dumps
+from mindex.shared.storage import Store, dumps, migrate_metadata
 
 # 新业务表必须在这里明确归属，避免升级后部分备份悄悄携带无关素材。
 TABLES = {
@@ -17,7 +17,7 @@ TABLES = {
     'index_members', 'representations', 'channel_data', 'dialogue_tasks', 'source_tasks',
     'settings', 'model_profiles', 'voices', 'runs', 'person_entities', 'person_sources',
     'person_references', 'person_imports', 'person_features', 'person_evidence', 'person_coverage',
-    'person_tasks', 'person_versions', 'search_releases',
+    'person_tasks', 'person_versions', 'search_releases', 'script_templates',
 }
 SECRET_FIELDS = {
     'api_key', 'apikey', 'access_token', 'refresh_token', 'secret', 'password',
@@ -63,6 +63,16 @@ def snapshot(origin, destination, *, allow_legacy=False):
         schema(src, require_current=not allow_legacy)
         src.backup(dst)
         dst.execute('PRAGMA journal_mode=DELETE')
+
+
+def upgrade_database(path):
+    """把隔离副本按版本化迁移升级到当前 schema（旧备份可能是 user_version=0 的旧结构）。"""
+    db = sqlite3.connect(path)
+    db.row_factory = sqlite3.Row  # 迁移步骤按列名读取
+    try:
+        migrate_metadata(db)
+    finally:
+        db.close()
 
 
 def walk(value, transform):

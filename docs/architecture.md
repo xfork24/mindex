@@ -25,7 +25,11 @@ Mindex 是中文视频片段检索系统：文字找视频优先，支持视频�
     旧版索引（format 1）：四路向量召回 + jieba BM25 → 五路加权 RRF
   图片 / 视频查询 ──（视频按 4s/3s 窗口）──→ 仅画面表示召回 ────────────┘
 
-创作（/studio）：文案 ─拆分镜→ 逐镜召回（上面的检索）与语音合成配音 ─选片对齐→ FFmpeg 渲染 → 成片与产物
+创作（/studio）：视频大纲（+ 文案模板、参考文稿）─文案创作→ 文案 ─拆分镜→ 分镜
+  逐镜按画面来源：recall 召回（上面的检索）/ clip 上传片段 / image 静态图片 / aigc 视频生成 / animation AI 动画
+  + 语音合成配音 ─选片对齐→ FFmpeg 按方案画幅渲染 → 成片合成 → 成片与产物
+
+智能助手（全局面板 /api/agent，MCP 导出 mindex mcp 与 /mcp）：工具经进程内回环调用上面各模块的 REST 接口
 ```
 
 三渠道的细节见 [recall-enhancement.md](recall-enhancement.md)，旧版五路召回见 [search.md](search.md)。
@@ -42,13 +46,14 @@ mindex/
 │   ├── persons/      # 人物库 HTML/JS/CSS
 │   ├── studio/       # 创作 HTML/JS/CSS
 │   ├── settings/     # 设置 HTML/JS/CSS
-│   └── shared/       # 公共样式、国际化、播放器、侧栏、多选组件
+│   └── shared/       # 公共样式、国际化、请求封装 api.js、播放器、侧栏、多选组件、智能助手面板
 └── backend/src/
-    ├── api.py / cli.py / cli_*.py / __init__.py  # 应用装配、命令入口及 e2e/persons/clips 命令组、包信息
+    ├── api.py / cli.py / cli_*.py / __init__.py  # 应用装配、命令入口及 e2e/persons/clips/agent 命令组、包信息
+    ├── agent/        # 智能助手：工具注册表、运行时、模型协议、会话存储、MCP 导出
     ├── search/       # 视频检索、检索/媒体 API
     ├── admin/        # 素材管理、素材/对白任务、详情
     ├── persons/      # 人物库、扫描 worker、人物服务
-    ├── studio/       # 创作状态机、工作台与各步骤
+    ├── studio/       # 创作：版本工作台（workspace/）、执行器、文案模板、渲染、动画录制
     ├── settings/     # 运行时设置、音色库、声音克隆
     ├── processing/   # 管线、索引、对白、字幕、镜头修复、对齐 worker
     ├── models/       # 模型适配、部署核验、模型服务
@@ -61,12 +66,12 @@ mindex/
 `mindex.studio.studio_api`。仓库统一使用新导入路径，不提供旧模块兼容层。
 `__init__.py` 不自动加载业务模块，保持 CLI 延迟加载与服务环境隔离。
 
-页面路径 `/`、`/admin`、`/persons`、`/studio`、`/settings` 与 `/api/*` 接口不变。
+页面路径 `/`、`/admin`、`/persons`、`/studio`、`/settings` 与 `/api/*` 接口不变。前端请求统一经 `shared/api.js`（`window.MindexApi`）；创作页拆为 `studio/studio-*.js` 多个经典脚本，按 `studio.html` 中的顺序加载并共享全局作用域，启动代码在最后的 `studio-main.js`。
 静态资源由 `/assets/<功能模块>/<文件名>` 提供，源码位于 `frontend/src/<功能模块>/`。
 `shared/web_assets.py` 统一定位资源：源码运行时读取仓库的 `frontend/src/`；
 wheel 安装后读取随包的 `mindex/web/`。Setuptools 通过包目录映射将后端源码安装为 `mindex`，将前端资源打入 wheel 的 `mindex/web/`，
-源码发布包也保留 `frontend/src/`。导出检查页和后端国际化使用同一份共享资源。
-前端保持原生 HTML/JS/CSS，无需额外 Node 构建或单独启动前端服务器。
+内置文案模板 `studio/templates/*.yaml` 以 package-data 随 `mindex.studio` 打包；源码发布包也保留 `frontend/src/`。导出检查页和后端国际化使用同一份共享资源。
+前端保持原生 HTML/JS/CSS，无需额外 Node 构建或单独启动前端服务器。HTML 中 `/assets/` 地址的 `?v=` 是被引用文件的内容哈希，由 `scripts/build-assets.py` 改写（`--check` 仅校验，CI 执行）。
 
 旧检出目录迁移后，主环境运行 `uv sync --extra dev` 刷新可编辑安装；
 已有独立服务环境可运行 `uv pip install --python .venv-person/bin/python --no-deps -e .`
@@ -81,7 +86,7 @@ wheel 安装后读取随包的 `mindex/web/`。Setuptools 通过包目录映射�
 | 模块 | 职责 |
 |---|---|
 | `cli.py` | Typer CLI 入口（`mindex`）：全局选项、核心命令、`indexes` 组；重模块在命令函数内延迟导入，`--config` 必须放在子命令之前 |
-| `cli_e2e.py` / `cli_persons.py` / `cli_clips.py` / `cli_common.py` | `e2e`、`persons`、`clips` 命令组，以及共用的 JSON 输出函数 |
+| `cli_e2e.py` / `cli_persons.py` / `cli_clips.py` / `cli_agent.py` | `e2e`、`persons`、`clips`、`agent` 命令组（顶层 `mcp` 命令也在 `cli_agent.py`）；共用的排序命令组与 JSON 输出函数在 `shared/cli_support.py` |
 | `processing/pipeline.py` | 各阶段编排：导入去重、分镜、切片、转写、对齐、分析；`pipeline.lock` 文件锁 |
 | `processing/indexing.py` | `IndexBuilder`（建索引、发布前检查）与 `VectorIndex`（Chroma 封装） |
 | `search/search.py` | `SearchEngine`：新版三渠道召回与旧版五路召回、RRF 融合、去重、BM25 降级；`status()` |
@@ -90,13 +95,20 @@ wheel 安装后读取随包的 `mindex/web/`。Setuptools 通过包目录映射�
 | `settings/runtime_settings.py` | 设置页数据层：模型配置档案（model_profiles）、音色库（voices）、业务覆盖键（settings KV）与 `apply_overrides` 热生效覆盖层 |
 | `settings/settings_api.py` | `/api/settings/*` 路由：档案 CRUD/激活/测试连接、业务调参、音色与克隆 |
 | `settings/voice_clone.py` | 厂商声音克隆客户端：MiniMax 上传克隆、阿里 DashScope URL 复刻 |
-| `studio/studio.py` | 创作任务状态机与 job.json 持久化（五步：split/recall/tts/select/render） |
+| `studio/studio.py` | 创作任务与 job.json 持久化；旧任务的分步状态机（split/recall/tts/select/render，仅服务老任务） |
 | `studio/studio_api.py` | `/api/studio/*` 路由：任务创建、轮询、后台线程执行 |
+| `studio/executor.py` | `StudioExecutor`：进程内单执行线程与 studio 锁、取消事件与哨兵文件、后台 worker 异常与终态包装 |
 | `studio/studio_models.py` / `studio/studio_files.py` | 创作 API 的请求体模型与召回引用校验；产物下载、分镜预览、打包与任务删除路由 |
-| `studio/studio_steps.py` / `studio/studio_select.py` / `studio/studio_render.py` | 创作各步骤编排、选片纯算法、ffmpeg 渲染合成 |
+| `studio/script_templates.py` / `studio/studio_templates_api.py` / `studio/templates/*.yaml` | 文案模板：内置模板（YAML 随包，package-data）与用户模板（`script_templates` 表）的加载、严格校验、内容哈希、复制/修改/删除与引用保护；`/api/studio/templates` 路由 |
+| `studio/studio_steps.py` / `studio/studio_select.py` / `studio/studio_render.py` | 旧任务的步骤编排、选片纯算法、ffmpeg 渲染合成（含图片 zoompan、画幅适配） |
+| `studio/studio_diagnostics.py` / `studio/material_digest.py` | 方案诊断（只读：分镜检查、字幕环境、已选节点状态与变化原因）；可用素材摘要 |
+| `studio/animation_capture.py` | AI 动画录制沙箱：无头 Chromium、虚拟时钟、网络拦截、逐帧截图经管道交给 ffmpeg（可选 extra `animation`） |
 | `studio/studio_artifacts.py` | 创作检查点/产物/诊断记录（attempt 不可变留档） |
-| `models/adapters.py` | 模型适配层公共部分：`ModelError` 等错误类型、带重试的 `request`、七个 Protocol 与 `make_*` 工厂（见下）；工厂调用时才导入后端 |
-| `models/embedders.py` / `models/qwen.py` / `models/speech.py` / `models/storyboard.py` / `models/transcribers.py` / `models/detectors.py` | 各角色的后端实现：嵌入、Qwen 分析、语音合成、拆分镜（含原文覆盖校验）、转写（含 MiniMax 词级时间戳解析）、分镜检测 |
+| `models/adapters.py` | 模型适配层公共部分：`ModelError` 等错误类型、带重试的 `request`、十个 Protocol 与 `make_*` 工厂（见下）；工厂调用时才导入后端 |
+| `models/embedders.py` / `models/qwen.py` / `models/speech.py` / `models/storyboard.py` / `models/writer.py` / `models/transcribers.py` / `models/detectors.py` | 各角色的后端实现：嵌入、Qwen 分析、语音合成、拆分镜（含原文覆盖校验）、文案创作（按文案模板）、转写（含 MiniMax 词级时间戳解析）、分镜检测 |
+| `models/video_generators.py` / `shared/comfyui.py` | 视频生成后端（MiniMax 海螺、阿里通义万相、自建 ComfyUI）；ComfyUI 工作流与节点映射的纯校验 |
+| `models/animator.py` | AI 动画生成 LLM 客户端（OpenAI 兼容 / Anthropic）与动画源码静态校验 |
+| `models/deployment.py` | 文件内容身份、向量契约与部署清单 |
 | `models/llama_cpp.py` | 对用户已有 llama-server 的原生协议适配（`/v1/embeddings` 的 `input_video`、`input_audio`）；部署清单核验 |
 | `shared/images.py` / `models/image_embedding.py` | 静态图片解码、方向/透明度/像素处理；扩展原生图片嵌入，保持既有文字/视频空间指纹 |
 | `models/model_server.py` | GPU 侧自定义服务（`mindex-model-server`，角色独立 venv）：WeMMEngine / ASREngine / TransNetEngine |
@@ -104,7 +116,8 @@ wheel 安装后读取随包的 `mindex/web/`。Setuptools 通过包目录映射�
 | `diagnostics/evaluation.py` + `diagnostics/benchmark.py` | 评测（Hit@1/5、MRR@10、nDCG@10）与 `model-check` 单模型联调 |
 | `diagnostics/film.py` | `inspect` 进度报告与 `export`（JSON/CSV/分页检查页） |
 | `shared/media.py` | FFmpeg/ffprobe 封装：探测、精确切片、缩略图、抽帧、帧时间戳 |
-| `shared/storage.py` | SQLite `Store`：建表、JSON 检查点、runs 记录、活动索引切换 |
+| `shared/storage.py` | SQLite `Store`：版本化迁移（`METADATA_STEPS`）、JSON 检查点、runs 记录、活动索引切换 |
+| `shared/migrations.py` | `migrate(conn, steps)`：按 `PRAGMA user_version` 执行有序迁移步骤，每步与版本递增同一事务提交 |
 | `processing/align_worker.py` | 强制对齐独立子进程 worker（不导入 mindex/chromadb/GPU 运行时） |
 | `models/analyzers.py` | `PinnedQwenAnalyzer`：把分析检查点绑定到实际 GGUF 部署 |
 | `shared/types.py` | Pydantic 模型：Granularity、Filters、TextSearch、Annotation、Utterance |
@@ -117,13 +130,16 @@ wheel 安装后读取随包的 `mindex/web/`。Setuptools 通过包目录映射�
 | `persons/person_models.py` / `persons/person_names.py` | 人物请求/实体模型与小型校验；名称解析、文档提及识别与出镜区间查询辅助 |
 | `persons/person_processing.py` / `persons/person_worker.py` / `persons/person_frames.py` / `persons/person_thumbnails.py` | 人物扫描管线与后台 worker、展示帧布局、缩略图 |
 | `persons/person_server.py` | GPU 侧人物检测/特征服务（`mindex-person-server`） |
-| `studio/studio_workspace.py` / `studio/studio_window.py` / `studio/studio_logs.py` | 方案、构建与版本工作台，定长选片窗口，只追加的执行事件日志 |
+| `studio/workspace/` / `studio/studio_window.py` / `studio/studio_logs.py` | 方案、构建与版本工作台（包内按职责分 `versions`、`plans`、`persistence`、`signatures`、`preflight`、`media_nodes`、`builder`、`details`、`references`（参考文稿）、`sources`（分镜画面来源文件），`stages` 阶段注册表与 `handlers/` 各阶段处理器 script/split/recall/tts/generate/animate/select/render/compose，`__init__` 导出公共入口），定长选片窗口，只追加的执行事件日志 |
 | `settings/voices_catalog.py` | 语音合成音色目录：按当前合成后端聚合系统音色、本地音色库与克隆能力 |
 | `shared/shot_media.py` | 统一镜头媒体服务：时间基准转换、截图/抽帧、跨镜重建；业务读取不直读历史切片路径 |
-| `shared/processing_lock.py` / `shared/task_progress.py` | 处理锁（含 GPU 互斥）、任务进度持久化 |
+| `shared/locks.py` | 具名文件锁（pipeline/index-write/library/register/studio）与 `acquire_ordered` 规范加锁顺序 |
+| `shared/processing_lock.py` / `shared/task_progress.py` | 处理锁（含 GPU 互斥，基于 `shared/locks.py`）、任务进度持久化 |
+| `shared/task_cancel.py` | 后台任务取消标记：进程内事件与 `locks/cancel/<key>` 哨兵文件，跨进程生效 |
+| `shared/background_tasks.py` | `BackgroundTaskRunner`：素材、对白、人物后台任务共用的查询/重试/取消/线程与终态写入 |
 | `admin/work_cache.py` | 素材工作台摘要缓存：先返回上次结果，后台刷新昂贵的覆盖统计 |
 | `shared/trace.py` | 调用诊断记录槽：模型适配与 ffmpeg 调用写入，Studio 执行步骤时接管；无会话时不记录 |
-| `shared/person_schema.py` | 人物库 SQLite 表结构、迁移与实体规范化，供 `Store` 初始化使用 |
+| `shared/person_schema.py` | 人物库 SQLite 表结构、迁移与实体规范化，属于 metadata 库 v1 迁移步骤 |
 | `models/compatibility.py` | 按部署绑定的嵌入兼容性门槛（六文本六视频基线） |
 | `shared/uploads.py` / `shared/review_style.py` / `shared/web_assets.py` / `shared/jsonio.py` | 流式上传落盘与限额、导出复核页内嵌样式、静态资源定位、JSON 原子写入 |
 | `shared/web_auth.py` | 可选访问令牌认证（`MINDEX_WEB_TOKEN`）：`/login`、`/logout`、Cookie 与 Bearer；未设置时不安装 |
@@ -132,11 +148,19 @@ wheel 安装后读取随包的 `mindex/web/`。Setuptools 通过包目录映射�
 | `maintenance/backup.py` / `backup_files.py` / `backup_cli.py` / `backup_db.py` / `backup_vectors.py` | 离线备份与迁移：导出导入编排、文件与校验辅助、CLI 注册、SQLite 与向量处理 |
 | `maintenance/clips.py` | 旧切片迁移、物化、归档校验与边界修复 |
 | `diagnostics/label_review.py` | 离线相关性复核页；确认仍由人工完成 |
+| `admin/indexes.py` | `/api/indexes`：内容索引版本列表、一致性检查、激活/回退（约束与 `mindex indexes activate` 一致） |
+| `search/warmup.py` / `persons/profiling.py` | 服务启动后的检索预热；人物审核读取链路的分段计时 |
+| `agent/registry.py` / `agent/tools/` / `agent/loopback.py` | 工具注册表（read/write/danger、领域、MCP 导出标记）；各领域工具；进程内 ASGI 回环调用 REST 接口 |
+| `agent/runtime.py` / `agent/policy.py` / `agent/prompts.py` / `agent/domains.py` | 内置运行时（轮次循环、dsh 形状事件）、分级确认、系统提示词、领域说明与动态加载（领域名在 `shared/agent_domains.py`） |
+| `agent/llm/` | 模型协议：OpenAI 兼容与 Anthropic 流式工具调用适配器、测试专用脚本化模型 |
+| `agent/session_store.py` / `agent/schema.py` / `agent/attachments.py` / `agent/changes.py` | `agent.sqlite3` 的会话事件与密钥保险库、表结构与迁移、附件暂存、全局改动与定位通道 |
+| `agent/watcher.py` / `agent/vision.py` / `agent/ids.py` | 任务跟踪与 followup、图片引用解析为图片块、分镜与版本 ID 解析 |
+| `agent/api.py` / `agent/mcp_server.py` | `/api/agent` 路由；MCP 导出（`mindex mcp` stdio、可选 `/mcp`） |
 | `frontend/src/` | 原生 HTML/JS/CSS，按五个页面划分模块；公共组件位于 `frontend/src/shared/` |
 
 ## 模型适配层
 
-七个 `Protocol` 与 `make_*` 工厂在 `models/adapters.py`，后端实现分在同目录的 `embedders`、`qwen`、`speech`、`storyboard`、`transcribers`、`detectors` 模块：`MultimodalEmbedder`、`VisualAnalyzer`、`Transcriber`、`Aligner`、`ShotDetector`、`Speaker`（TTS）、`Storyboarder`（拆分镜 LLM）。替换模型 = 实现协议接入新 backend，不改检索管线。
+十个 `Protocol` 与 `make_*` 工厂在 `models/adapters.py`，后端实现分在同目录的 `embedders`、`qwen`、`speech`、`storyboard`、`writer`、`transcribers`、`detectors`、`video_generators`、`animator` 模块：`MultimodalEmbedder`、`VisualAnalyzer`、`Transcriber`、`Aligner`、`ShotDetector`、`Speaker`（TTS）、`Storyboarder`（拆分镜 LLM）、`Writer`（文案创作 LLM）、`VideoGenerator`（AIGC 视频生成）、`Animator`（AI 动画 LLM）。替换模型 = 实现协议接入新 backend，不改检索管线。
 
 | 工厂 | backend 值 | 实现 |
 |---|---|---|
@@ -146,12 +170,18 @@ wheel 安装后读取随包的 `mindex/web/`。Setuptools 通过包目录映射�
 | `make_transcriber` | `mindex` | `HTTPTranscriber`：`/transcribe` 直接返回带时间戳对白 |
 | | `llama_cpp` | `LlamaTranscriber`：`input_audio` 只出原始文本，须再跑 CPU 对齐 |
 | | `openai` | `OpenAIChatTranscriber`：OpenAI 兼容 chat + `input_audio`（如百炼 qwen3-asr-flash），同样只出原始文本 |
+| | `minimax` | `MiniMaxTranscriber`：MiniMax `/speech_to_text`，解析词级时间戳，无需对齐 |
 | `make_analyzer` | `openai`（默认） | `QwenAnalyzer`：OpenAI 兼容 `/v1/chat/completions` |
 | | `llama_cpp` | `PinnedQwenAnalyzer`：额外核验部署清单与视觉投影 |
 | `make_speaker` | `openai`（默认） | `OpenAISpeaker`：`/audio/speech`（本地 llama-server） |
 | | `minimax` | `MiniMaxSpeaker`：t2a_v2（hex 音频解码） |
 | | `dashscope` | `DashScopeSpeaker`：阿里 DashScope 原生协议 |
 | `make_storyboarder` | `openai` | `QwenStoryboarder`：OpenAI 兼容 chat 拆分镜 |
+| `make_writer` | `openai` | `QwenWriter`：OpenAI 兼容 chat 写文案（温度 0.7，`studio.writer` 缺省复制 `studio.generator`） |
+| `make_video_generator` | `comfyui`（默认） | `ComfyUIVideoGenerator`：自建 ComfyUI，「导出（API）」工作流 + 节点映射 |
+| | `minimax` | `MiniMaxVideoGenerator`：海螺 video_generation 异步任务 |
+| | `dashscope` | `DashScopeVideoGenerator`：阿里通义万相异步任务 |
+| `make_animator` | `openai` / `anthropic` | `LlmAnimator`：写自包含 HTML/JS 动画源码（`studio.animator` 缺省复制 `agent.llm`） |
 | `make_detector` | `adaptive`（默认） | `AdaptiveShotDetector`：本地 PySceneDetect 逐帧检测 |
 | | `transnet` | `HTTPShotDetector`：远程 TransNetV2 服务 `/detect/video` |
 
@@ -171,14 +201,16 @@ data/
 ├── deployments/      # e2e pin 生成的部署清单（wemm.json、asr.json、analyzer.json）
 ├── e2e/              # 分阶段实验目录（见 e2e-framework.md）
 ├── model-cache/      # 对齐 worker 的 HF 权重缓存
-├── studio/           # 创作任务目录（storyboard/candidates/audio/timeline/render + job.json）
+├── studio/           # 创作任务目录：job.json、workspace.json、versions/、builds/、inputs/（查询媒体、画面来源文件、参考文稿）；studio.lock
 ├── persons/          # 人物参考图（references/）、导入图（imports/）、展示帧（frames/<source_id>/）
 ├── subtitles/        # 字幕轨道解析缓存与外部字幕上传（<source_id>/uploads/）
-├── locks/            # 素材库与按素材/工作类型的处理锁
+├── locks/            # 素材库锁 library.lock、按素材/工作类型的处理锁、后台任务取消哨兵 cancel/
 ├── cache/            # 可重建缓存：admin-work/、shot-media/
 ├── verification/     # 运行时验证产物（如对白召回最新结果）
 ├── voices/           # 克隆音色样本与预览音频（设置页）
-├── pipeline.lock     # 全局管线文件锁
+├── agent-attachments/  # 智能助手附件（attachment://），过期由 clean 回收；不进备份
+├── pipeline.lock     # 全局管线文件锁（另有 index-write.lock、sources/.register.lock）
+├── agent.sqlite3     # 智能助手会话、密钥保险库、附件记录、能力缺口、改动通道；不进备份
 └── metadata.sqlite3  # 事实来源
 ```
 
@@ -205,6 +237,13 @@ data/
 | `settings` | KV：`active` 活动索引指针、`active.profile.<role>` 档案激活指针、`override.search` / `override.studio.voice` 业务覆盖键 |
 | `model_profiles` | 设置页的模型服务配置档案（角色/名称/厂商/连接配置 JSON/密钥，UNIQUE(role,name)） |
 | `voices` | 音色库：预定义与克隆音色（厂商 voice_id、样本路径、状态） |
+| `script_templates` | 用户文案模板（迁移步骤 v2；内置模板在 `studio/templates/*.yaml`，不入库） |
+
+`agent.sqlite3`（`agent/schema.py`）有 6 张表：`agent_sessions`（含已加载领域）、`agent_events`（dsh 形状事件日志）、`agent_secrets`（密钥保险库）、`agent_gaps`（能力缺口）、`agent_attachments`、`agent_changes`（全局改动与定位通道）。
+
+库结构用 `PRAGMA user_version` 记录版本：`shared/storage.py` 的 `METADATA_STEPS` 是 metadata 库的有序迁移列表（v1 为完整 schema，对没有版本号的旧库幂等补列），`agent/schema.py` 的 `STEPS` 管理 `agent.sqlite3`。改表结构只追加步骤，不修改已发布的步骤；已是最新版本时打开库只读一次版本号。备份导入先把暂存副本升级到当前版本再合并。
+
+多把数据目录锁一起获取时经 `shared/locks.py` 的 `acquire_ordered`，顺序为 pipeline → index-write → library → register → studio，逆序抛出 `ValueError`。
 
 向量不是记录主键：表示 ID 是稳定主键，业务数据通过 segment/representation ID 关联回 SQLite；Chroma 显式接收向量（`embedding_function=None`）。
 
@@ -218,7 +257,9 @@ data/
 
 ## 在线服务
 
-- `uv run mindex serve` 启动 <http://127.0.0.1:8000>：检索页 `/`、后台 `/admin`、创作页 `/studio`、设置页 `/settings`、OpenAPI 文档 `/docs`。
+- `uv run mindex serve` 启动 <http://127.0.0.1:8000>：检索页 `/`、后台 `/admin`、人物库 `/persons`、创作页 `/studio`、设置页 `/settings`、OpenAPI 文档 `/docs`。
+- 接口前缀：`/api/search`、`/api/admin`、`/api/indexes`、`/api/persons`、`/api/studio`、`/api/settings`、`/api/agent`；`agent.mcp.http_enabled` 时挂载 `/mcp`（Bearer `MINDEX_MCP_TOKEN`）。
+- 设置 `MINDEX_WEB_TOKEN` 后启用访问令牌：页面在 `/login` 登录（`next` 只接受站内相对路径），`/logout` 只接受 POST，脚本用 `Authorization: Bearer`。监听非回环地址而未设置令牌时 `serve` 拒绝启动，除非传 `--allow-insecure`。
 - 页面与 API 在无素材或服务未就绪时显示明确未就绪状态，**不用模拟向量冒充真实检索**。
 - 检索 API 细节见 [search.md](search.md)，管理 API 见 [admin.md](admin.md)，设置页见 [settings.md](settings.md)。
 

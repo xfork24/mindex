@@ -11,22 +11,33 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 
+from mindex.shared.comfyui import validate_workflow
 from mindex.shared.config import (
+    ANIMATOR_INHERITED,
+    H3_DURATIONS,
     AgentLlmConfig,
     AnalyzerConfig,
+    AnimatorConfig,
     ASRConfig,
     Config,
     EmbeddingConfig,
     GeneratorConfig,
+    ImageGeneratorConfig,
+    MusicGeneratorConfig,
     PersonConfig,
     SearchConfig,
     SpeakerConfig,
+    VideoGeneratorConfig,
 )
 from mindex.shared.storage import Store
 
-ROLES = ("analyzer", "writer", "generator", "embedding", "asr", "tts", "person", "agent")
+ROLES = (
+    "analyzer", "writer", "generator", "embedding", "asr", "tts", "image_generator", "video_generator",
+    "music_generator", "animator", "person", "agent",
+)
 ROLE_LABELS = {
     "agent": "智能助手",
     "person": "人物识别",
@@ -36,6 +47,10 @@ ROLE_LABELS = {
     "embedding": "多模态嵌入",
     "asr": "语音识别",
     "tts": "语音合成",
+    "image_generator": "图片生成",
+    "video_generator": "视频生成",
+    "music_generator": "音乐生成",
+    "animator": "动画生成",
 }
 
 # 各角色允许 profile 覆盖的字段；未列字段永远承袭 yaml 原值。
@@ -52,7 +67,7 @@ PROFILE_FIELDS = {
     "writer": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "llama_template", "max_tokens"},
     "agent": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "max_tokens", "vision"},
     "embedding": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "quantization", "dimensions"},
-    "asr": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "enabled"},
+    "asr": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "enabled", "max_tokens"},
     "tts": {
         "backend",
         "base_url",
@@ -64,6 +79,25 @@ PROFILE_FIELDS = {
         "response_format",
         "voice",
     },
+    # enabled 不在白名单：激活档案即启用视频生成（merge_profile 置 True）。
+    "video_generator": {
+        "backend", "base_url", "model", "revision", "timeout", "api_key_env", "poll_interval", "max_wait",
+        "durations", "fps", "comfyui_workflow", "comfyui_mapping",
+    },
+    # 图片/音乐生成同理：激活档案即启用。
+    "image_generator": {
+        "backend", "base_url", "model", "revision", "timeout", "api_key_env", "poll_interval", "max_wait",
+        "comfyui_workflow", "comfyui_mapping",
+    },
+    "music_generator": {
+        "backend", "base_url", "model", "cover_model", "revision", "timeout", "api_key_env", "poll_interval",
+        "max_wait", "comfyui_workflow", "comfyui_mapping",
+    },
+    # 同上：激活动画生成档案即启用（merge_profile 置 enabled=True）。
+    "animator": {
+        "backend", "base_url", "model", "revision", "timeout", "api_key_env", "max_tokens", "retries",
+        "max_capture_seconds", "max_html_kb",
+    },
 }
 SECTION_TYPES = {
     "person": PersonConfig,
@@ -73,9 +107,15 @@ SECTION_TYPES = {
     "embedding": EmbeddingConfig,
     "asr": ASRConfig,
     "tts": SpeakerConfig,
+    "video_generator": VideoGeneratorConfig,
+    "image_generator": ImageGeneratorConfig,
+    "music_generator": MusicGeneratorConfig,
+    "animator": AnimatorConfig,
     "agent": AgentLlmConfig,
 }
-_STUDIO_ROLES = {"generator", "writer", "tts"}
+_STUDIO_ROLES = {"generator", "writer", "tts", "video_generator", "image_generator", "music_generator", "animator"}
+# 激活档案即启用的角色（无档案时沿用 yaml 的 enabled）。
+_ENABLING_ROLES = ("video_generator", "image_generator", "music_generator", "animator")
 
 PROVIDERS = ("custom", "self", "zhipu", "deepseek", "aliyun", "tencent", "minimax", "anthropic")
 PROVIDER_LABELS = {
@@ -167,6 +207,15 @@ PROVIDER_PRESETS: dict[str, dict[str, dict]] = {
             },
             "note": "DashScope 原生协议专用适配器",
         },
+        "video_generator": {
+            "config": {
+                "backend": "dashscope",
+                "base_url": "https://dashscope.aliyuncs.com",
+                "model": "wan2.6-t2v",
+                "durations": [5.0, 10.0, 15.0],
+            },
+            "note": "通义万相异步任务；有参考图的分镜需改用图生视频模型（如 wan2.6-i2v-flash）",
+        },
     },
     "tencent": {
         "analyzer": {
@@ -225,7 +274,33 @@ PROVIDER_PRESETS: dict[str, dict[str, dict]] = {
             },
             "note": "speech_to_text 专用协议；音频 ≤500 秒/50MB，30 秒切块远小于上限",
         },
+        "video_generator": {
+            "config": {
+                "backend": "minimax_h3",
+                "base_url": "https://api.minimax.cn/v1",
+                "model": "MiniMax-H3",
+                "durations": list(H3_DURATIONS),
+            },
+            "note": "MiniMax H3 视频生成 V2：设置页只需 endpoint 与 API Key；文生/首帧/尾帧/首尾帧/主体参考、"
+                    "模型档位、分辨率与时长在创作页逐镜设置",
+        },
+        "image_generator": {
+            "config": {"backend": "minimax", "base_url": "https://api.minimax.cn/v1", "model": "image-01"},
+            "note": "image-01 文生图 / 主体参考图生图（/v1/image_generation）",
+        },
+        "music_generator": {
+            "config": {"backend": "minimax", "base_url": "https://api.minimax.cn/v1", "model": "music-3.0",
+                       "cover_model": "music-cover"},
+            "note": "music-3.0 音乐生成、music-cover 翻唱与歌词生成；2026-08-20 起仅对历史付费用户开放",
+        },
     },
+}
+# 本地 ComfyUI：导入「导出（API）」工作流与节点映射后可用（视频/图片/音乐生成）。
+COMFYUI_PRESETS = {
+    "video_generator": {"backend": "comfyui", "base_url": "http://127.0.0.1:8188", "model": "", "durations": [5.0],
+                        "fps": 16},
+    "image_generator": {"backend": "comfyui", "base_url": "http://127.0.0.1:8188", "model": ""},
+    "music_generator": {"backend": "comfyui", "base_url": "http://127.0.0.1:8188", "model": ""},
 }
 
 # 文案创作与拆分镜同为文本聊天模型：各厂商的文案预设直接复制拆分镜预设。
@@ -252,6 +327,32 @@ PROVIDER_PRESETS["anthropic"] = {
         "config": {"backend": "anthropic", "base_url": "https://api.anthropic.com", "model": "claude-sonnet-4-5"},
         "note": "Anthropic 原生 Messages 协议；模型名以控制台列表为准",
     }
+}
+
+# 动画生成与智能助手同协议（OpenAI 兼容 / Anthropic Messages）：沿用智能助手的厂商预设，另需较大的 max_tokens。
+for _roles in PROVIDER_PRESETS.values():
+    if "agent" in _roles:
+        _roles["animator"] = {
+            "config": {**_roles["agent"]["config"], "max_tokens": 16000},
+            "note": "写 HTML/JS 动画源码，与智能助手同协议；源码较长，max_tokens 宜 ≥ 8000",
+        }
+
+# 动画生成的默认模型：智谱 GLM-5.3-Flash（OpenAI 兼容）；档案不填密钥时复用多模态理解里同名模型档案的密钥。
+PROVIDER_PRESETS["zhipu"]["animator"] = {
+    "config": {"backend": "openai", "base_url": "https://open.bigmodel.cn/api/paas/v4", "model": "glm-5.3-flash",
+               "max_tokens": 16000},
+    "note": "GLM-5.3-Flash 写 HTML/JS 动画源码（默认）；OpenAI 兼容协议；不填密钥时复用多模态理解里同名模型档案的密钥与地址",
+}
+
+# 设置页的默认档案卡：首次启动时为下列角色各建一张（已有档案的角色不建），第一张激活为默认生效配置。
+DEFAULT_PROFILES = {
+    "animator": [("GLM-5.3-Flash（默认）", "zhipu", PROVIDER_PRESETS["zhipu"]["animator"]["config"])],
+    "video_generator": [("MiniMax H3（默认）", "minimax", PROVIDER_PRESETS["minimax"]["video_generator"]["config"]),
+                        ("本地 ComfyUI", "self", COMFYUI_PRESETS["video_generator"])],
+    "image_generator": [("MiniMax image-01（默认）", "minimax", PROVIDER_PRESETS["minimax"]["image_generator"]["config"]),
+                        ("本地 ComfyUI", "self", COMFYUI_PRESETS["image_generator"])],
+    "music_generator": [("MiniMax music-3.0（默认）", "minimax", PROVIDER_PRESETS["minimax"]["music_generator"]["config"]),
+                        ("本地 ComfyUI", "self", COMFYUI_PRESETS["music_generator"])],
 }
 
 # 显式清除已存密钥的哨兵值（空字符串视为未填、保留原值）。
@@ -349,6 +450,13 @@ def _validate_fields(role: str, fields: dict) -> None:
     unknown = set(fields) - PROFILE_FIELDS[role]
     if unknown:
         raise ValueError(f"配置档案不支持字段 {sorted(unknown)}；角色 {role} 仅允许 {sorted(PROFILE_FIELDS[role])}")
+    if role == "video_generator" and (
+        fields.get("comfyui_workflow") is not None or fields.get("comfyui_mapping") is not None
+    ):
+        # 先给出纯中文的工作流/映射错误，再做完整的字段校验。
+        if fields.get("comfyui_workflow") is None:
+            raise ValueError("已填写 ComfyUI 节点映射，但没有导入工作流")
+        validate_workflow(fields["comfyui_workflow"], fields.get("comfyui_mapping") or {})
     SECTION_TYPES[role].model_validate({**SECTION_TYPES[role]().model_dump(), **fields})
 
 
@@ -457,6 +565,12 @@ def _section(config: Config, role: str):
         return config.studio.writer
     if role == "tts":
         return config.studio.tts
+    if role == "video_generator":
+        return config.studio.video_generator
+    if role == "animator":
+        return config.studio.animator
+    if role in ("image_generator", "music_generator"):
+        return getattr(config.studio, role)
     return getattr(config, role)
 
 
@@ -475,6 +589,8 @@ def merge_profile(config: Config, role: str, profile: dict) -> Config:
     current = _section(config, role)
     fields = {key: value for key, value in profile["config"].items() if key in PROFILE_FIELDS[role]}
     fields["api_key"] = profile.get("api_key") or ""
+    if role in _ENABLING_ROLES:
+        fields["enabled"] = True  # 有激活（或正在测试）的档案即启用；无档案时沿用 yaml 的 enabled
     merged = SECTION_TYPES[role].model_validate({**current.model_dump(), **fields})
     if role in _STUDIO_ROLES:
         return config.model_copy(update={"studio": config.studio.model_copy(update={role: merged})})
@@ -483,14 +599,67 @@ def merge_profile(config: Config, role: str, profile: dict) -> Config:
     return config.model_copy(update={role: merged})
 
 
+def _animator_follows_agent(config: Config, active: dict) -> Config:
+    """yaml 未写 studio.animator（复制自 agent.llm）且没有激活动画生成档案时，跟随激活的智能助手档案。"""
+    agent = active.get("agent")
+    animator = config.studio.animator
+    if agent is None or "animator" in active or not animator._inherited:
+        return config
+    llm = config.agent.llm
+    merged = animator.model_copy(update={**{key: getattr(llm, key) for key in ANIMATOR_INHERITED},
+                                         "api_key": llm.api_key})
+    merged._inherited = True
+    return config.model_copy(update={"studio": config.studio.model_copy(update={"animator": merged})})
+
+
+def shared_analyzer_profile(store: Store, model: str) -> dict | None:
+    """多模态理解里与 ``model`` 同名（不区分大小写）且带密钥的档案：激活的档案优先，其次最近更新的。"""
+    if not model:
+        return None
+    pointer = get_setting(store, "active.profile.analyzer")
+    rows = store.rows("SELECT * FROM model_profiles WHERE role='analyzer' AND api_key IS NOT NULL AND api_key<>'' "
+                      "ORDER BY updated_at DESC, id DESC")
+    matches = [{**row, "config": json.loads(row["config"])} for row in rows
+               if str(json.loads(row["config"]).get("model") or "").lower() == model.lower()]
+    matches.sort(key=lambda row: str(row["id"]) != pointer)
+    return matches[0] if matches else None
+
+
+def shared_analyzer_key(store: Store, model: str) -> str | None:
+    found = shared_analyzer_profile(store, model)
+    return found["api_key"] if found else None
+
+
+def animator_shares_analyzer_key(config: Config, store: Store) -> Config:
+    """动画生成没有自己的密钥（档案未填且环境变量未设）时，复用多模态理解里同名模型（如 GLM-5.3-Flash）档案的
+    密钥与 base_url：密钥与端点成对（例如智谱 GLM Coding Plan 的密钥只能用于 /api/coding/paas/v4，
+    用于通用端点 /api/paas/v4 会按余额计费而报 429「余额不足」），只借密钥会连错端点。"""
+    animator = config.studio.animator
+    if animator.api_key or os.environ.get(animator.api_key_env, ""):
+        return config
+    found = shared_analyzer_profile(store, animator.model)
+    if not found:
+        return config
+    update = {"api_key": found["api_key"]}
+    if found["config"].get("base_url"):
+        update["base_url"] = found["config"]["base_url"]
+    merged = animator.model_copy(update=update)
+    merged._inherited = animator._inherited
+    return config.model_copy(update={"studio": config.studio.model_copy(update={"animator": merged})})
+
+
 def apply_overrides(config: Config, store: Store) -> Config:
     """按激活档案与业务键合成生效配置；返回新对象，无覆盖时返回原对象。"""
     if not config.runtime_overrides:
         return config
+    active = {}
     for role in ROLES:
         profile = _active_profile(store, role)
         if profile is not None:
+            active[role] = profile
             config = merge_profile(config, role, profile)
+    config = _animator_follows_agent(config, active)
+    config = animator_shares_analyzer_key(config, store)
 
     raw_search = get_setting(store, "override.search")
     if raw_search:
@@ -554,12 +723,39 @@ def ensure_writer_profile(store: Store) -> dict | None:
     return created
 
 
+DEFAULT_PROFILES_KEY = "migration.default_profiles"
+
+
+def ensure_default_profiles(store: Store) -> list[dict]:
+    return seed_default_profiles(store)
+
+
+def seed_default_profiles(store: Store) -> list[dict]:
+    """一次性：为动画/视频/图片/音乐生成建默认档案卡（MiniMax 或 GLM 默认激活，本地 ComfyUI 备用）。
+
+    已有档案的角色不建；角色没有激活档案时才激活第一张。完成后写标记，之后删除或改动不会被重新覆盖。"""
+    if get_setting(store, DEFAULT_PROFILES_KEY):
+        return []
+    created = []
+    for role, entries in DEFAULT_PROFILES.items():
+        if list_profiles(store, role):
+            continue
+        for index, (name, provider, config) in enumerate(entries):
+            profile = save_profile(store, role=role, name=name, provider=provider, config=dict(config))
+            if index == 0 and get_setting(store, f"active.profile.{role}") is None:
+                activate_profile(store, profile["id"])
+            created.append(profile)
+    put_setting(store, DEFAULT_PROFILES_KEY, "1")
+    return created
+
+
 def apply_runtime_overrides(config: Config) -> Config:
     """CLI 入口：data_dir 已有元数据库时合并覆盖层，否则原样返回。"""
     if not config.runtime_overrides or not (config.data_dir / "metadata.sqlite3").is_file():
         return config
     store = Store(config.data_dir)
     ensure_writer_profile(store)
+    ensure_default_profiles(store)
     return apply_overrides(config, store)
 
 
@@ -571,6 +767,7 @@ class RuntimeConfig:
         self.store = store
         if base.runtime_overrides:
             ensure_writer_profile(store)
+            ensure_default_profiles(store)
 
     def current(self) -> Config:
         return apply_overrides(self.base, self.store)

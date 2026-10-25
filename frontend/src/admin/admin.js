@@ -18,7 +18,7 @@ function time(value) {
   return `${hours ? `${hours}:` : ''}${String(minutes).padStart(2, '0')}:${seconds}`;
 }
 function errorText(detail) {return Array.isArray(detail) ? detail.map((e) => e.msg).join('；') : typeof detail === 'string' ? detail : JSON.stringify(detail);}
-async function api(url, options = {}) {const r = await fetch(url, options);const data = await r.json();if (!r.ok) throw new Error(MindexI18n.system(data.detail || data));return data;}
+async function api(url, options = {}) {return MindexApi.request(url, options);}
 function params(values) {return new URLSearchParams(Object.entries(values).filter(([, v]) => v !== null && v !== undefined));}
 function pager(prefix, page, total) {MindexI18n.setText($(`${prefix}-page`), `${page} / ${Math.max(1, Math.ceil(total / 48))}`);$(`${prefix}-prev`).disabled = page <= 1;$(`${prefix}-next`).disabled = page * 48 >= total;}
 function pauseList() {$('segment-list').querySelectorAll('video').forEach((v) => v.pause());}

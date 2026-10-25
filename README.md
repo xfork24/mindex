@@ -32,9 +32,10 @@ Mindex 将海量视频的管理、理解、检索与再创作连接在同一个�
 | **🎞️ 视频资产管理** | 批量导入与预处理，按原片、镜头、片段和帧浏览素材；搜索、备注、收藏、隐藏，按需播放与下载。 |
 | **🔎 多模态与复合检索** | 文字、图片、视频查询，结合人物、台词、场景、情绪、景别与时长筛选，在素材库中定位可用画面。 |
 | **👥 人物与角色管理** | 导入演员表，管理演员、角色、作品与参考图；处理人物识别，审核出镜证据并发布、回溯。 |
-| **✍️ AI 视频创作** | 从文案自动生成分镜，逐镜召回素材与配音，选择候选、调整音画对齐，渲染带字幕的成片。 |
+| **✍️ AI 视频创作** | 按大纲与文案模板写文案（可附参考文稿），自动拆分镜；每镜可用素材召回、上传片段、静态图片、AI 生成图片、AI 生成视频或 AI 动画作画面，配音（可从任一分镜起铺背景音乐并自动顺延）、对齐后按所选画幅渲染带字幕的成片。 |
 | **🧩 构建与产物管理** | 多方案创作、逐节点重做、历史版本复用、完整依赖树，以及分镜、音频、字幕、成片的统一留档。 |
-| **⚙️ 模型与声音配置** | 七类模型角色独立配置，连接自建或线上服务；调整检索权重、管理音色与声音克隆。 |
+| **⚙️ 模型与声音配置** | 十类模型角色独立配置，连接自建或线上服务；调整检索权重、管理音色与声音克隆。 |
+| **🤖 智能助手与 MCP** | 每个页面右侧的助手面板用自然语言完成检索、整理、人物审核、创作与设置，写操作先预览确认；同一套工具可经 MCP 导出给 Claude Code、Codex 等外部代理。 |
 
 ## 快速开始
 
@@ -106,7 +107,7 @@ uv run mindex check
 
 ### 4. 用素材库创作新视频
 
-在 `/studio` 输入视频大纲并限定可用素材，创建任务后由文案创作模型写出文案（可编辑、可重新生成），再拆分镜、逐镜召回画面与生成旁白，最后选片、预览并构建成片。可导出 **MP4、SRT、WebVTT、时间轴 JSON**，也可打包下载任务产物。
+在 `/studio` 输入视频大纲并限定可用素材，创建任务后由文案创作模型按所选文案模板写出文案（可附参考文稿改写，可编辑、可重新生成），再拆分镜、逐镜准备画面与生成旁白，最后选片、预览并按方案画幅（16:9、9:16、1:1）构建成片。可导出 **MP4、SRT、WebVTT、时间轴 JSON**，也可打包下载任务产物。
 
 | 环节 | 所需能力 |
 | :--- | :--- |
@@ -115,8 +116,12 @@ uv run mindex check
 | 画面语义召回 | 活动内容索引 + 匹配的嵌入服务 |
 | 配音 | TTS + 可用音色 |
 | 选片、渲染、合成 | 本地 FFmpeg；烧录字幕另需 libass 与可用字体 |
+| AI 生成图片分镜（可选） | 图片生成服务（默认 MiniMax image-01，或本地 ComfyUI） |
+| AI 生成视频分镜（可选） | 视频生成服务（默认 MiniMax H3，或 MiniMax 海螺、阿里通义万相、本地 ComfyUI） |
+| 背景音乐（可选） | 音乐生成服务（默认 MiniMax music-3.0，含翻唱与歌词生成，或本地 ComfyUI） |
+| AI 动画分镜（可选） | 动画生成 LLM（默认智谱 GLM-5.3-Flash）+ `uv sync --extra animation` 与 Chromium |
 
-召回与配音可以分阶段执行，适合单 GPU 轮换模型服务。Studio 从已有素材中选片与合成，选片的叙事效果仍需人工审阅。完整操作见[Studio 指南](docs/studio.md)。
+上传片段与静态图片分镜不需要索引和召回。召回与配音可以分阶段执行，适合单 GPU 轮换模型服务。Studio 从已有素材中选片与合成，选片的叙事效果仍需人工审阅。完整操作见[Studio 指南](docs/studio.md)。
 
 ### 常见问题
 
@@ -241,7 +246,7 @@ uv run mindex check
 
 ### 06 · 自由组合模型，配置检索与创作能力
 
-多模态理解、文案创作、文本拆分镜、嵌入、语音识别、语音合成和人物识别分别配置模型档案，可连接已适配的线上服务与自建服务。检索权重、默认音色等设置对后续请求或任务生效，支持音色管理与声音克隆。
+多模态理解、文案创作、文本拆分镜、嵌入、语音识别、语音合成、图片生成、视频生成、音乐生成、动画生成、人物识别和智能助手分别配置模型档案（图片/视频/音乐/动画生成首次启动即有默认档案卡，另备本地 ComfyUI 卡），可连接已适配的线上服务与自建服务。检索权重、默认音色等设置对后续请求或任务生效，支持音色管理与声音克隆。
 
 <details>
 <summary>查看模型服务、召回权重与音色克隆配置</summary>
@@ -272,12 +277,24 @@ flowchart LR
     F --> G[文字 / 图片 / 视频检索]
     Q --> G
     G --> H[Studio 逐镜选片]
-    I[创作文案] --> J[拆分镜]
-    J --> G
+    T[大纲 + 文案模板 + 参考文稿] --> I[文案创作]
+    I --> J[拆分镜]
+    J -->|素材召回| G
+    J -->|上传片段 / 静态图片| H
+    J -->|AI 生成图片| P[图片生成]
+    P --> L
+    J -->|AI 生成视频| V[视频生成]
+    J -->|AI 动画| N[动画源码 + 沙箱录制]
+    V --> H
     J --> K[TTS 配音]
     K --> H
-    H --> L[FFmpeg 渲染与字幕合成]
+    K -.背景音乐.-> B[音乐生成]
+    B --> L
+    H --> L[FFmpeg 按画幅渲染与字幕合成]
+    N --> L
     L --> M[成片与可追溯产物]
+    X[智能助手面板 / MCP] -.调用同一套 API.-> G
+    X -.-> I
 ```
 
 **三渠道召回。** 新版文字查询分别检索画面、对白和分析。对白与分析内部结合语义向量和 BM25，再按默认 1:1:1 的渠道权重做 RRF 融合，并去除同源重叠片段。图片与视频查询只走画面渠道；在线查询无需实时 LLM 描述或重排。嵌入服务不可用且有文本渠道时，可明确降级为 BM25。
@@ -317,6 +334,9 @@ data/
 ├── studio/               创作任务、方案、版本与成片
 ├── voices/               克隆音色样本
 ├── chroma/               向量数据
+├── locks/                处理锁与取消标记
+├── agent-attachments/    智能助手附件（不进备份）
+├── agent.sqlite3         智能助手会话（不进备份）
 └── metadata.sqlite3      元数据与运行设置
 ```
 
@@ -342,6 +362,7 @@ curl -X POST http://127.0.0.1:8000/api/search/text \
 | `GET /api/admin/sources` | 浏览素材；不依赖活动索引 |
 | `GET /api/persons` | 人物、参考图、覆盖与发布记录 |
 | `GET /api/studio/jobs` | 创作任务；方案、构建与版本接口见 Studio 文档 |
+| `/api/agent/*` | 智能助手会话与事件流，见[智能助手](docs/agent.md#api) |
 | `GET /api/status?health=true` | 索引与模型健康状态 |
 
 `granularity` 支持 `moment`（精细片段）、`shot`（镜头）、`scene`（已分析的连续场景）；所选粒度需要已建库。返回数量为 1–50。详细筛选与排名语义见[检索指南](docs/search.md)。
@@ -370,12 +391,17 @@ docs/             使用指南、架构与验证记录
 
 ```bash
 uv sync --extra person --extra dev
-uv run pytest -q
 uv run ruff check backend/src tests
-node --check frontend/src/search/app.js
+python scripts/check-doc-links.py
+python scripts/build-messages.py --check
+python scripts/build-assets.py --check
+for f in frontend/src/*/*.js; do node --check "$f"; done
+uv run pytest -m "not slow" -q   # 快速回归；完整回归去掉 -m
 ```
 
-UI 回归另需 Node.js、Playwright 及其浏览器；可用 `MINDEX_PLAYWRIGHT_MODULE` 指定模块路径。完整 `pytest` 在 2026-10-22 的运行结果为 966 项全部通过；历史失败的复现情况见[目录重组验证记录](docs/history/source-layout-verification.md)和[项目审查](docs/project-review-2026-10-22.md)。自动化测试使用真实媒体处理、数据库与 HTTP 链路，模型部分使用明确标记的确定性测试适配器；它们验证工程行为，不证明真实模型的检索或人物识别准确率。
+CI（`.github/workflows/ci.yml`）在推送与合并请求时运行上述检查与快速回归，每晚运行完整测试。
+
+UI 回归另需 Node.js、Playwright 及其浏览器；可用 `MINDEX_PLAYWRIGHT_MODULE` 指定模块路径。完整 `pytest` 在 2026-10-25 的运行结果为 1918 passed、13 skipped（历史记录，以本次运行为准）；历史失败的复现情况见[目录重组验证记录](docs/history/source-layout-verification.md)和[项目审查](docs/project-review-2026-10-22.md)。自动化测试使用真实媒体处理、数据库与 HTTP 链路，模型部分使用明确标记的确定性测试适配器；它们验证工程行为，不证明真实模型的检索或人物识别准确率。
 
 真实质量评测需要人工标注查询并固定模型、预处理与索引版本。流程见[端到端操作手册](docs/E2E_RUNBOOK.md)、[e2e 框架](docs/e2e-framework.md)及[评测标注说明](eval/README.md)。检索分数是排序依据，不是匹配概率。
 
@@ -391,10 +417,12 @@ UI 回归另需 Node.js、Playwright 及其浏览器；可用 `MINDEX_PLAYWRIGHT
 | 管理素材、字幕与处理任务 | [素材后台](docs/admin.md) |
 | 管理人物并按出镜查找片段 | [人物库与证据审核](docs/persons.md) |
 | 从文案制作视频、调整方案 | [Studio 工作台](docs/studio.md) |
+| 用助手面板或 MCP 操作 Mindex | [智能助手](docs/agent.md) |
 | 配置服务、音色和检索参数 | [设置页](docs/settings.md) · [配置参考](docs/config-reference.md) |
 | 备份素材、迁移合并或在新机器恢复 | [数据备份与迁移](docs/backup.md) |
 | 查看命令、模块和数据流 | [CLI 参考](docs/cli-reference.md) · [架构](docs/architecture.md) |
 | 评测模型或切换索引版本 | [端到端验证](docs/E2E_RUNBOOK.md) · [索引版本与回退](docs/index-versions.md) |
+| 了解后续规划 | [功能路线图](plans/ROADMAP.md) · [2026-10 审查报告](docs/reviews/2026-10/features-roadmap.md) |
 
 更多机制说明、操作手册与历史验收记录见 **[文档中心](docs/README.md)**。
 

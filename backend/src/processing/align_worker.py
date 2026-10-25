@@ -41,7 +41,7 @@ def main():
     from huggingface_hub.errors import LocalEntryNotFoundError
     from qwen_asr import Qwen3ForcedAligner
 
-    raw = json.loads(Path(args.raw).read_text())
+    raw = json.loads(Path(args.raw).read_text(encoding="utf-8"))
     rows = []
     if raw["text"].strip():
         try:
@@ -67,7 +67,7 @@ def main():
                 "revision": args.revision,
             },
             ensure_ascii=False,
-        )
+        ), encoding="utf-8"
     )
     temporary.replace(target)
 

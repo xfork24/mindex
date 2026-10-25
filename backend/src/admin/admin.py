@@ -42,10 +42,13 @@ def admin_router(store: Store, runtime=None) -> APIRouter:
         if name in {"", ".", ".."}:
             await file.close()
             raise HTTPException(422, "无效的文件名")
-        directory = store.root / "sources" / ".uploads"
-        directory.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(dir=directory, suffix=Path(name).suffix, delete=False) as handle:
-            path = Path(handle.name)
+        def reserve() -> Path:
+            directory = store.root / "sources" / ".uploads"
+            directory.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(dir=directory, suffix=Path(name).suffix, delete=False) as handle:
+                return Path(handle.name)
+
+        path = await run_in_threadpool(reserve)
         try:
             await save_upload(file, path, config.source_upload_max_bytes)
             try:
@@ -53,6 +56,7 @@ def admin_router(store: Store, runtime=None) -> APIRouter:
             except (MediaError, ValueError) as exc:
                 raise HTTPException(422, str(exc)) from exc
         finally:
+            # 取消路径上不能再 await（可能被再次取消而留下临时文件）；单次 unlink 开销可忽略。
             path.unlink(missing_ok=True)
 
     @router.get("/sources")

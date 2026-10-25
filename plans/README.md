@@ -9,6 +9,7 @@
 | 文件 | 主题 |
 |---|---|
 | [PLAN.md](PLAN.md) | 视频片段检索的实施计划与设计决策 |
+| [ROADMAP.md](ROADMAP.md) | 功能路线图（M1–M4）；对应审查报告见 [docs/reviews/2026-10/](../docs/reviews/2026-10/features-roadmap.md) |
 | [E2E_TEST_PLAN.md](E2E_TEST_PLAN.md) | 端到端测试计划 |
 
 ## 检索与索引
@@ -37,7 +38,7 @@
 | [STUDIO_REFINEMENT_PLAN.md](STUDIO_REFINEMENT_PLAN.md) | Studio 静态修复与集成验收 |
 | [STUDIO_UI_PLAN.md](STUDIO_UI_PLAN.md) | 分镜与版本构建工作台改造 |
 | [STUDIO_REFINEMENT_UI_PLAN.md](STUDIO_REFINEMENT_UI_PLAN.md) | 召回候选选择与定长窗口选片 |
-| [RECALL_MIGRATION_PLAN.md](RECALL_MIGRATION_PLAN.md) | 创作页分镜四类召回与镜头详情人物信息 |
+| [RECALL_MIGRATION_PLAN.md](RECALL_MIGRATION_PLAN.md) | 创作页分镜四类召回与镜头详情人物信息（已实施） |
 | [CLIP_WINDOW_ENHANCEMENT_PLAN.md](CLIP_WINDOW_ENHANCEMENT_PLAN.md) | 修复"保存窗口"耗时问题 |
 
 ## 素材管理、界面与运维

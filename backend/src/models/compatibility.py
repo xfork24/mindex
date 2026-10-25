@@ -38,7 +38,7 @@ def validation_path(config: Config, space: dict, deployment_id: str) -> Path:
 
 def _read(path: Path) -> dict:
     try:
-        value = json.loads(path.read_text())
+        value = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(value, dict):
             raise TypeError("需要对象")
         return value
@@ -85,7 +85,7 @@ def load_baseline(config: Config, space: dict, *, allow_missing=False) -> dict |
         if not any(p.get("baseline_sha256") or p.get("passed") is True for p in prior):
             return None
     try:
-        expected = marker.read_text().strip()
+        expected = marker.read_text(encoding="utf-8").strip()
         verified_file(path, expected)
         baseline = _read(path)
         if (
@@ -111,7 +111,7 @@ def save_validation(config: Config, space: dict, deployment_id: str, report: dic
     save(path, report)
     marker = path.with_suffix(".sha256")
     temporary = marker.with_suffix(".partial")
-    temporary.write_text(content_hash(path) + "\n")
+    temporary.write_text(content_hash(path) + "\n", encoding="utf-8")
     temporary.replace(marker)
 
 
@@ -184,7 +184,7 @@ def complete_validation(
         save(directory / "baseline.json", baseline)
         marker = directory / "baseline.sha256"
         temporary = marker.with_name(marker.name + ".partial")
-        temporary.write_text(content_hash(directory / "baseline.json") + "\n")
+        temporary.write_text(content_hash(directory / "baseline.json") + "\n", encoding="utf-8")
         temporary.replace(marker)
     if baseline is None:
         return {**report, "passed": False, "compatibility": {"status": "structural-smoke-failed"}}
@@ -217,7 +217,7 @@ def require_gate(config: Config, space: dict, report: dict):
     try:
         baseline = load_baseline(config, space)
         gate_path = validation_path(config, space, report["deployment_id"])
-        verified_file(gate_path, gate_path.with_suffix(".sha256").read_text().strip())
+        verified_file(gate_path, gate_path.with_suffix(".sha256").read_text(encoding="utf-8").strip())
         gate = _read(gate_path)
         if (
             gate["schema"] != 2

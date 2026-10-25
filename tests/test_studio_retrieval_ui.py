@@ -1,10 +1,12 @@
-"""检索组合依赖（分镜表上方一行、成片依赖树）的 UI 控制逻辑，用真实 studio.js 代码和 DOM 桩运行，不依赖浏览器。"""
+"""检索组合依赖（分镜表上方一行、成片依赖树）的 UI 控制逻辑，用真实创作页脚本代码和 DOM 桩运行，不依赖浏览器。"""
 
 import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
+
+pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="Node is needed for the UI controller checks")

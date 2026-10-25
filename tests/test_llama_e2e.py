@@ -19,6 +19,8 @@ from mindex.shared.config import fingerprint
 from mindex.shared.jsonio import save
 from mindex.shared.media import MediaError, atomic_media, command, content_hash, cut, frame_timestamps, probe
 
+pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
+
 
 @pytest.fixture
 def llama(config, monkeypatch, tmp_path):

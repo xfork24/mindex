@@ -29,7 +29,7 @@ from mindex.agent.tools.studio_write import (
 )
 from mindex.api import create_app
 from mindex.studio import studio
-from mindex.studio import studio_workspace as ws
+from mindex.studio import workspace as ws
 
 SHOTS = ["shot-a1daad59aa", "shot-925281d5bb", "shot-77f0c3e1cc"]
 PERSON_RECALL = {"mode": "text", "person_ids": ["p1"], "person_mode": "onscreen", "person_relation": "any",

@@ -18,7 +18,7 @@ from test_studio_workspace import wait_build
 
 from mindex.api import create_app
 from mindex.studio import studio
-from mindex.studio import studio_workspace as ws
+from mindex.studio import workspace as ws
 
 
 def tree_hashes(directory: Path) -> dict[str, str]:
@@ -67,7 +67,8 @@ def test_structure_and_storyboard_checks(env):
     ]
     assert body["subtitle"] == {"burn": False, "filter": None, "font": None}
     assert body["nodes"] == []  # 还没有任何已选的阶段版本
-    assert set(body["inputs_by_stage"]) == set(ws.STAGES)
+    assert set(body["inputs_by_stage"]) == set(ws.stages.names(scope="shot"))
+    assert body["inputs_by_stage"]["generate"] == {}  # 没有 aigc 分镜：来源专属阶段不给出 inputs
     for stage in ws.STAGES:
         for sid in ("a", "b", "c"):
             expected = ws.specification(config, job_id, w, p, stage, sid)["inputs"]

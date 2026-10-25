@@ -43,6 +43,7 @@ const sandbox = {
   },
 };
 vm.createContext(sandbox);
+vm.runInContext(fs.readFileSync('frontend/src/shared/api.js', 'utf8'), sandbox);
 vm.runInContext(fs.readFileSync('frontend/src/settings/settings.js', 'utf8'), sandbox);
 const flush = () => new Promise(resolve => setImmediate(resolve));
 const buttons = (row) => row.children.filter(n => n.tagName === 'button');

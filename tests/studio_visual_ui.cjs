@@ -1,5 +1,5 @@
 // 分镜表的画面意象（visual）：编辑器预填与双语标签、未保存标记、格内摘要、整份 PATCH、
-// 保存被拒后保留草稿、合并时拼接截断（真实 studio.js 代码 + 轻量 DOM 桩）。
+// 保存被拒后保留草稿、合并时拼接截断（真实创作页脚本代码 + 轻量 DOM 桩）。
 // 用例以 cases 数组登记，后续功能（如按画面意象重写召回词）可直接追加。
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -79,10 +79,10 @@ const sandbox = {
 };
 sandbox.statusText = value => sandbox.STATUS[value] || String(value ?? "");
 vm.createContext(sandbox);
-const source = fs.readFileSync("frontend/src/studio/studio.js", "utf8");
+const source = require("./studio_source.cjs").studioSource();
 const slice = (start, end) => {
   const a = source.indexOf(start), b = source.indexOf(end, a);
-  assert.ok(a >= 0 && b > a, `studio.js 中找不到代码片段：${start} … ${end}`);
+  assert.ok(a >= 0 && b > a, `创作页脚本中找不到代码片段：${start} … ${end}`);
   return source.slice(a, b);
 };
 vm.runInContext([

@@ -9,7 +9,15 @@ from fastapi.staticfiles import StaticFiles
 
 from mindex.admin.admin import admin_router
 from mindex.admin.curation import EntityNotFound
-from mindex.models.adapters import ModelError, MultimodalEmbedder, Speaker, Storyboarder, Writer
+from mindex.models.adapters import (
+    Animator,
+    ModelError,
+    MultimodalEmbedder,
+    Speaker,
+    Storyboarder,
+    VideoGenerator,
+    Writer,
+)
 from mindex.persons import profiling
 from mindex.search.api import search_router
 from mindex.settings.runtime_settings import RuntimeConfig
@@ -30,6 +38,11 @@ def create_app(
     storyboarder: Storyboarder | None = None,
     speaker: Speaker | None = None,
     writer: Writer | None = None,
+    video_generator: VideoGenerator | None = None,
+    animator: Animator | None = None,
+    animation_capture=None,
+    image_generator=None,
+    music_generator=None,
     web_token: str | None = None,
     agent_llm=None,
 ) -> FastAPI:
@@ -79,7 +92,9 @@ def create_app(
     app.include_router(admin_router(store, runtime))
     app.include_router(settings_router(runtime, store))
     app.include_router(studio_router(
-        runtime, store, embedder=embedder, storyboarder=storyboarder, speaker=speaker, writer=writer
+        runtime, store, embedder=embedder, storyboarder=storyboarder, speaker=speaker, writer=writer,
+        video_generator=video_generator, animator=animator, animation_capture=animation_capture,
+        image_generator=image_generator, music_generator=music_generator,
     ))
 
     from mindex.agent.api import agent_router, build_runtime
@@ -110,6 +125,8 @@ def create_app(
     register_page("search", "index.html", ("/", "/index.html"))
     for group in ("admin", "persons", "studio", "settings"):
         register_page(group, f"{group}.html", (f"/{group}", f"/{group}/", f"/{group}.html"))
+    # 文案模板管理是创作页的子页面（与创作任务并列的分区标签），资源仍在 /assets/studio/ 下。
+    register_page("studio", "templates.html", ("/studio/templates", "/studio/templates/"))
     for group in ("search", "admin", "persons", "studio", "settings", "shared"):
         app.mount(f"/assets/{group}", StaticFiles(directory=assets_root / group), name=f"assets-{group}")
 

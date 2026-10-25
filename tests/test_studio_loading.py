@@ -15,7 +15,8 @@ from mindex.api import create_app
 from mindex.persons.persons import Persons
 from mindex.shared.storage import Store
 from mindex.studio import studio
-from mindex.studio import studio_workspace as ws
+from mindex.studio import workspace as ws
+from mindex.studio.workspace import signatures
 
 
 def indexed_store(config):
@@ -57,7 +58,7 @@ def test_detail_reuses_database_settings_and_dependency_checks_per_request(confi
             p["shots"][sid][stage] = ws.add_version(config, job_id, w, stage, sid, **spec)
     original = copy.deepcopy(w)
     settings_calls, spec_calls, stores = Counter(), Counter(), []
-    original_settings, original_specification = ws._settings, ws.specification
+    original_settings, original_specification = signatures._settings, signatures.specification
 
     def tracked_store(root):
         stores.append(root)
@@ -71,9 +72,9 @@ def test_detail_reuses_database_settings_and_dependency_checks_per_request(confi
         spec_calls[(stage, sid)] += 1
         return original_specification(cfg, jid, workspace, selected_plan, stage, sid, **kw)
 
-    monkeypatch.setattr(ws, "Store", tracked_store)
-    monkeypatch.setattr(ws, "_settings", tracked_settings)
-    monkeypatch.setattr(ws, "specification", tracked_specification)
+    monkeypatch.setattr(signatures, "Store", tracked_store)
+    monkeypatch.setattr(signatures, "_settings", tracked_settings)
+    monkeypatch.setattr(signatures, "specification", tracked_specification)
     detail = ws.detail(config, job_id, w)
     assert len(stores) == 1
     assert settings_calls == Counter({stage: 1 for stage in ws.STAGES})

@@ -19,6 +19,8 @@ from mindex.processing.pipeline import Pipeline
 from mindex.settings.runtime_settings import RuntimeConfig
 from mindex.shared.storage import Store
 
+pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
+
 
 def finished(manager, task):
     for _ in range(1000):

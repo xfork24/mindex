@@ -95,7 +95,7 @@ const sandbox = {
     video.shotPlayer = player;return player;}},
   // multiselect.js 未在 vm 中加载；给出与真实组件同接口的桩。
   MindexMultiSearch: {sort: entries => entries.slice().sort((a, b) => String(a.name).localeCompare(String(b.name), 'zh')), attach() {}, refilter() {}},
-  console, URLSearchParams, FormData, location: {search: ''}, setInterval() {},
+  console, URLSearchParams, FormData, location: {search: ''}, setInterval() {}, setTimeout() {}, clearTimeout() {},
   document: {getElementById: get, createElement: tag => new Element(tag), querySelectorAll: () => []},
   fetch: async (url, options = {}) => {
     requests.push({url, ...options});
@@ -128,6 +128,7 @@ const sandbox = {
   },
 };
 vm.createContext(sandbox);
+vm.runInContext(fs.readFileSync('frontend/src/shared/api.js', 'utf8'), sandbox);
 vm.runInContext(fs.readFileSync('frontend/src/persons/persons.js', 'utf8'), sandbox);
 const flush = () => new Promise(resolve => setImmediate(resolve));
 const event = {preventDefault() {}, stopPropagation() {}};

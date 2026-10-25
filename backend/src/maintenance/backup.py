@@ -21,6 +21,7 @@ from mindex.maintenance.backup_db import (
     rewrite_database,
     snapshot,
     store_at,
+    upgrade_database,
     validate_database,
     walk,
 )
@@ -70,7 +71,7 @@ def build_bundle(config, output, *, selected, include_secrets, config_path, allo
     transform = lambda value: ids.get(value, value) if isinstance(value, str) else value
     secrets = _saved_secrets(root)
     rewrite_database(payload / 'metadata.sqlite3', transform, secrets=include_secrets)
-    base = yaml.safe_load(config_path.read_text()) if config_path.is_file() else config.model_dump(mode='json')
+    base = yaml.safe_load(config_path.read_text(encoding="utf-8")) if config_path.is_file() else config.model_dump(mode='json')
     base = base or {}
     if not include_secrets:
         base = redact(base)
@@ -85,7 +86,7 @@ def build_bundle(config, output, *, selected, include_secrets, config_path, allo
         configs.extend(json.loads(row['config']) for row in store_at(payload).rows(f'SELECT config FROM {table}'))
     for path in (root / 'studio').glob('*/job.json'):
         if path.parent.name in jobs:
-            configs.append(json.loads(path.read_text()))
+            configs.append(json.loads(path.read_text(encoding="utf-8")))
     deps, missing, env = _config_dependencies(configs, config_path.parent, payload, data_root=root)
     owners = file_owners(root, known)
     references = referenced_files(root, payload / 'metadata.sqlite3', available_files=owners)
@@ -115,7 +116,7 @@ def build_bundle(config, output, *, selected, include_secrets, config_path, allo
             destination.parent.mkdir(parents=True, exist_ok=True)
             # 证据摘要和部署 ID 绑定原始字节，禁止重写已验证内容。
             if origin.suffix == '.json' and not include_secrets:
-                text = origin.read_text()
+                text = origin.read_text(encoding="utf-8")
                 value = json.loads(text)
                 if redact(value) != value or any(secret in text for secret in secrets):
                     raise ValueError(f'兼容性证据含凭据，不能脱敏后沿用验证：{relative}')
@@ -168,7 +169,7 @@ def inspect_bundle(bundle, *, verification='full'):
 
 def _inspect_bundle(bundle, *, verification='full'):
     bundle = bundle.resolve()
-    manifest = json.loads(safe_path(bundle, 'manifest.json').read_text())
+    manifest = json.loads(safe_path(bundle, 'manifest.json').read_text(encoding="utf-8"))
     if (not isinstance(manifest, dict) or manifest.get('format') != 'mindex-backup'
             or type(manifest.get('version')) is not int or manifest.get('version') != FORMAT_VERSION):
         raise ValueError('不支持的备份格式或版本')
@@ -208,7 +209,7 @@ def _inspect_bundle(bundle, *, verification='full'):
         identifiers = set()
         count = 0
         for name in collection['batches']:
-            rows = json.loads(safe_path(bundle, name).read_text())
+            rows = json.loads(safe_path(bundle, name).read_text(encoding="utf-8"))
             count += len(rows)
             identifiers.update(r['id'] for r in rows)
         if count != collection['count'] or len(identifiers) != count:
@@ -328,6 +329,7 @@ def _portable_base_config(base, root, config_path):
 
 def _filter_payload(bundle, incoming, selected, manifest):
     snapshot(bundle / 'data/metadata.sqlite3', incoming / 'metadata.sqlite3')
+    upgrade_database(incoming / 'metadata.sqlite3')
     maps = filter_database(incoming / 'metadata.sqlite3', selected)
     kept = {s['id'] for s in source_list(incoming)}
     jobs, omitted = job_selection(bundle / 'data', selected, {s['id'] for s in manifest['sources']})
@@ -432,7 +434,7 @@ def _recover(root, config_path):
         raise ValueError('迁移日志不能是符号链接')
     if not journal.exists():
         return {'ok': True, 'recovered': False}
-    value = json.loads(journal.read_text())
+    value = json.loads(journal.read_text(encoding="utf-8"))
     if value['target'] != str(root) or value['config'] != str(config_path):
         raise ValueError('中断日志的目标与本次命令不同；请用原 --data-dir 和 --config 恢复')
     # 日志中的临时路径必须是本次目标的同级保留名称，不能用日志删除任意路径。
@@ -553,13 +555,13 @@ def import_backup(config, bundle, *, all_sources=False, sources=None, skip_exist
                 continue
             if path.suffix in {'.json', '.yaml', '.yml'} and not immutable_evidence(path.relative_to(incoming).as_posix()):
                 _copy_payload_file(path, path, transform=relocate, include_secrets=True, secrets=[], selected=selected)
-        base = yaml.safe_load((bundle / 'config/base.yaml').read_text()) or {}
+        base = yaml.safe_load((bundle / 'config/base.yaml').read_text(encoding="utf-8")) or {}
         base = walk(base, relocate)
         base['data_dir'] = str(root)
         Config.model_validate(base)
         base = _portable_base_config(base, root, config_path)
         config_text = yaml.safe_dump(base, allow_unicode=True) if write_config else None
-        current_base = yaml.safe_load(config_path.read_text()) if config_path.is_file() else {}
+        current_base = yaml.safe_load(config_path.read_text(encoding="utf-8")) if config_path.is_file() else {}
         # 差异仅输出字段名和脱敏值，--json 不暴露现有密钥。
         config_diff = {'before': redact(current_base), 'after': redact(base)} if write_config else {}
         report = {'ok': True, 'dry_run': dry_run, 'sources': source_list(incoming),
@@ -590,6 +592,7 @@ def import_backup(config, bundle, *, all_sources=False, sources=None, skip_exist
             if (root / 'metadata.sqlite3').exists():
                 # 目标也通过 backup API + Chroma API 重建，绝不拷贝内部 HNSW 文件。
                 snapshot(root / 'metadata.sqlite3', stage / 'metadata.sqlite3')
+                upgrade_database(stage / 'metadata.sqlite3')
                 prior_active = store_at(root).active_index()
                 for path in files_under(root):
                     relative = path.relative_to(root).as_posix()
@@ -615,8 +618,8 @@ def import_backup(config, bundle, *, all_sources=False, sources=None, skip_exist
                     if relative.startswith('metadata.sqlite3'):
                         continue
                     if path.suffix in {'.json', '.yaml', '.yml'} and not immutable_evidence(relative):
-                        value = (json.loads(path.read_text()) if path.suffix == '.json'
-                                 else yaml.safe_load(path.read_text()))
+                        value = (json.loads(path.read_text(encoding="utf-8")) if path.suffix == '.json'
+                                 else yaml.safe_load(path.read_text(encoding="utf-8")))
                         remapped = remap_local_refs(value, report['integer_id_maps'])
                         if remapped != value:
                             path.write_text(dumps(remapped) if path.suffix == '.json'
@@ -649,7 +652,7 @@ def import_backup(config, bundle, *, all_sources=False, sources=None, skip_exist
                 report['active_index'] = prior_active['id'] if prior_active else None
             interrupt_tasks(stage / 'metadata.sqlite3')
             for path in (stage / 'studio').glob('*/job.json'):
-                value = json.loads(path.read_text())
+                value = json.loads(path.read_text(encoding="utf-8"))
                 def interrupted(item):
                     if isinstance(item, dict):
                         return {key: ('interrupted' if key == 'status' and v in ('queued', 'running')

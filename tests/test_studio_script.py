@@ -13,7 +13,9 @@ from mindex.models.adapters import ModelError
 from mindex.processing.indexing import IndexBuilder
 from mindex.processing.pipeline import Pipeline
 from mindex.studio import studio
-from mindex.studio import studio_workspace as ws
+from mindex.studio import workspace as ws
+
+pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
 
 OUTLINE = "红色开场。蓝色结尾。"
 
@@ -297,7 +299,7 @@ def test_switch_to_unbuilt_script_version_clears_storyboard(env):
 
 def test_script_failure_blocks_the_rest_of_the_build(config, video_file):
     class Failing:
-        def write(self, outline, materials=None):
+        def write(self, outline, *, template, materials=None, references=()):
             raise ModelError("文案服务不可用")
 
     Pipeline(config).prepare(video_file)

@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const code = fs.readFileSync('frontend/src/studio/studio.js', 'utf8');
+const code = require("./studio_source.cjs").studioSource();
 
 // 方案参数音色目录：往返昂贵，必须短 TTL 缓存并合并在途请求，避免每次开对话框都阻塞一次 TTS 服务调用。
 let release, calls = 0;

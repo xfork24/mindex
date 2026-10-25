@@ -10,11 +10,11 @@ from hypothesis import strategies as st
 
 pytest.importorskip("mcp")
 
-from mcp.shared.memory import create_connected_server_and_client_session  # noqa: E402
+from mcp.shared.memory import create_connected_server_and_client_session
 
-from mindex.agent.mcp_server import build_server, exported  # noqa: E402
-from mindex.agent.tools import build_registry  # noqa: E402
-from mindex.shared.agent_domains import LOADABLE_DOMAINS  # noqa: E402
+from mindex.agent.mcp_server import build_server, exported
+from mindex.agent.tools import build_registry
+from mindex.shared.agent_domains import LOADABLE_DOMAINS
 
 REGISTRY = build_registry()
 NEVER_EXPORTED = {"load_tools", "navigate", "ask_user_question"}

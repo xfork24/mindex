@@ -8,23 +8,26 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 import tempfile
 import threading
-from contextlib import contextmanager
 from pathlib import Path
 from typing import Annotated
 from urllib.parse import quote
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
-from filelock import FileLock, Timeout
+from fastapi import APIRouter, File, Form, HTTPException, Query, Request, Response, UploadFile
+from filelock import FileLock
 from starlette.concurrency import run_in_threadpool
+from starlette.datastructures import UploadFile as StarletteUpload
 
 from mindex.admin.curation import EntityNotFound, Library
 from mindex.models.adapters import (
+    Animator,
     ModelError,
     MultimodalEmbedder,
     Speaker,
     Storyboarder,
+    VideoGenerator,
     Writer,
     make_storyboarder,
 )
@@ -34,23 +37,27 @@ from mindex.shared.images import image_png
 from mindex.shared.shot_media import ShotMedia
 from mindex.shared.storage import Store
 from mindex.shared.uploads import save_upload
-from mindex.studio import studio, studio_steps
-from mindex.studio import studio_workspace as workspace
+from mindex.studio import script_templates, studio, studio_steps
+from mindex.studio import workspace as workspace
+from mindex.studio.executor import StudioExecutor
 from mindex.studio.material_digest import build_digest, merged_vocabulary, safe_digest
 from mindex.studio.studio_artifacts import digest, safe_path
 from mindex.studio.studio_diagnostics import diagnostics
-from mindex.studio.studio_files import file_routes
+from mindex.studio.studio_files import SANDBOX_HEADERS, file_routes
 from mindex.studio.studio_logs import ExecutionLog, read_events
 from mindex.studio.studio_models import (
     AnchorBody,
+    AnimationBody,
     BuildBody,
     ColumnBody,
     CreateJobBody,
+    LyricsBody,
     NodeBody,
     PlanBody,
     PlanPatchBody,
     QuerySuggestionBody,
     RangeBody,
+    ReferenceBody,
     RunStepBody,
     StoryboardBody,
     TimelineBody,
@@ -58,7 +65,12 @@ from mindex.studio.studio_models import (
     VersionChoiceBody,
     WindowBody,
     validate_recall_references,
+    validate_source_references,
 )
+from mindex.studio.studio_templates_api import template_routes
+
+log = logging.getLogger(__name__)
+
 
 
 def studio_router(
@@ -69,113 +81,92 @@ def studio_router(
     storyboarder: Storyboarder | None = None,
     speaker: Speaker | None = None,
     writer: Writer | None = None,
+    video_generator: VideoGenerator | None = None,
+    animator: Animator | None = None,
+    animation_capture=None,
+    image_generator=None,
+    music_generator=None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api/studio", tags=["创作"])
-    guard = threading.Lock()  # 进程内单执行器；跨进程由 studio.lock 兜底
-    executor: dict[str, threading.Thread | None] = {"thread": None}
-    # 运行中构建的进程内取消事件；跨进程取消走 workspace.cancel_sentinel 哨兵文件。
-    cancels: dict[str, threading.Event] = {}
-
     base = config if isinstance(config, Config) else config.base  # 路径与渲染参数走基础配置
-
-    def legacy_cancel_path(job_id: str) -> Path:
-        """旧任务步骤执行器的取消哨兵：跨进程可见，worker 在步骤之间检查。"""
-        return studio.job_dir(base, job_id) / "steps.cancel"
+    # 进程内单执行线程 + 跨进程 studio.lock；取消走进程内事件加哨兵文件，见 studio/executor.py。
+    runner = StudioExecutor(base)
+    mutation_lock = runner.mutation
 
     def current() -> Config:
         """传入 RuntimeConfig 时按最新覆盖层解析；覆盖层不触碰路径，路径用法保持稳定。"""
         return config.current() if isinstance(config, RuntimeConfig) else config
 
-    def acquire_lock() -> FileLock:
-        try:
-            lock = FileLock(str(studio.lock_path(base)), timeout=0, thread_local=False)
-            lock.acquire()
-            return lock
-        except Timeout:
-            raise HTTPException(409, "已有创作步骤在执行，请稍候再试") from None
-
-    @contextmanager
-    def mutation_lock():
-        with guard:
-            lock = acquire_lock()
-            try:
-                yield
-            finally:
-                lock.release()
-
     def launch(job_id: str, requested_step: str | None, body: RunStepBody):
-        with guard:
-            if executor["thread"] is not None and executor["thread"].is_alive():
-                raise HTTPException(409, "已有创作步骤在执行，请稍候再试")
-            file_lock = acquire_lock()
+        with runner.reserve() as file_lock:
             cfg = current()  # 一次任务运行绑定同一份生效配置；运行中改设置下次生效
-            try:
-                reject_legacy_mutation(job_id)
-                state = studio.reconcile(cfg, job_id)
-                studio.legacy_text(state)  # 新任务没有外部文案，只能走版本工作台
-                if requested_step:
-                    studio.check_step(state, requested_step)
-                    steps = [requested_step]
-                else:
-                    steps = [step for step in studio.STEPS if state["steps"][step]["status"] != "complete"]
-                    if not steps:
-                        raise HTTPException(422, "所有步骤均已完成，可重新生成单步或编辑产物后继续")
-                if body.shot_ids is not None:
-                    if requested_step not in {"recall", "tts", "render"}:
-                        raise HTTPException(422, "只有召回、配音、渲染支持指定分镜")
-                    ids = {s.id for s in studio.load_storyboard(cfg, job_id).shots}
-                    if not set(body.shot_ids) <= ids:
-                        raise HTTPException(422, "指定分镜不存在于当前任务")
-                legacy_cancel_path(job_id).unlink(missing_ok=True)  # 上次执行残留的取消请求作废
-                studio.begin_step(cfg, job_id, steps[0])
-                response = studio.set_execution(cfg, job_id, "running", steps[0], steps[1:])
-            except Exception:
-                file_lock.release()
-                raise
+            reject_legacy_mutation(job_id)
+            state = studio.reconcile(cfg, job_id)
+            studio.legacy_text(state)  # 新任务没有外部文案，只能走版本工作台
+            if requested_step:
+                studio.check_step(state, requested_step)
+                steps = [requested_step]
+            else:
+                steps = [step for step in studio.STEPS if state["steps"][step]["status"] != "complete"]
+                if not steps:
+                    raise HTTPException(422, "所有步骤均已完成，可重新生成单步或编辑产物后继续")
+            if body.shot_ids is not None:
+                if requested_step not in {"recall", "tts", "render"}:
+                    raise HTTPException(422, "只有召回、配音、渲染支持指定分镜")
+                ids = {s.id for s in studio.load_storyboard(cfg, job_id).shots}
+                if not set(body.shot_ids) <= ids:
+                    raise HTTPException(422, "指定分镜不存在于当前任务")
+            runner.clear("steps", job_id)  # 上次执行残留的取消请求作废
+            runner.cancel_event("steps", job_id)
+            studio.begin_step(cfg, job_id, steps[0])
+            response = studio.set_execution(cfg, job_id, "running", steps[0], steps[1:])
+            outcome = {"status": "complete"}
+
+            def run_steps():
+                for index, step in enumerate(steps):
+                    if index:
+                        # 只在步骤之间检查取消：已开始的步骤照常完成，未开始的步骤保持原状态。
+                        if runner.cancelled("steps", job_id):
+                            outcome["status"] = "cancelled"
+                            return
+                        studio.begin_step(cfg, job_id, step)
+                        studio.set_execution(cfg, job_id, "running", step, steps[index + 1 :])
+                    studio_steps.run_step(
+                        cfg,
+                        job_id,
+                        step,
+                        storyboarder=storyboarder,
+                        speaker=speaker,
+                        embedder=embedder,
+                        mode=body.mode,
+                        shot_ids=body.shot_ids,
+                        started=True,
+                    )
+
+            def record_failure(exc):  # 所有后台失败必须记录终态
+                outcome["status"] = "failed"
+                fresh = studio.load_job(cfg, job_id)
+                fresh["execution"]["error"] = str(exc)
+                studio.save(studio.job_path(cfg, job_id), fresh)
+
+            def finish():
+                try:
+                    studio.set_execution(cfg, job_id, outcome["status"], None, [])
+                finally:
+                    runner.clear("steps", job_id)
 
             def worker():
-                status = "complete"
-                try:
-                    for index, step in enumerate(steps):
-                        if index:
-                            # 只在步骤之间检查取消：已开始的步骤照常完成，未开始的步骤保持原状态。
-                            if legacy_cancel_path(job_id).exists():
-                                status = "cancelled"
-                                break
-                            studio.begin_step(cfg, job_id, step)
-                            studio.set_execution(cfg, job_id, "running", step, steps[index + 1 :])
-                        studio_steps.run_step(
-                            cfg,
-                            job_id,
-                            step,
-                            storyboarder=storyboarder,
-                            speaker=speaker,
-                            embedder=embedder,
-                            mode=body.mode,
-                            shot_ids=body.shot_ids,
-                            started=True,
-                        )
-                except Exception as exc:  # noqa: BLE001 — 所有后台失败必须记录终态
-                    status = "failed"
-                    fresh = studio.load_job(cfg, job_id)
-                    fresh["execution"]["error"] = str(exc)
-                    studio.save(studio.job_path(cfg, job_id), fresh)
-                finally:
-                    try:
-                        studio.set_execution(cfg, job_id, status, None, [])
-                        legacy_cancel_path(job_id).unlink(missing_ok=True)
-                    finally:
-                        file_lock.release()
+                runner.run_guarded(
+                    run_steps, message=f"创作任务 {job_id} 的步骤执行失败",
+                    on_error=record_failure, finally_=finish,
+                )
 
-            thread = threading.Thread(target=worker, daemon=True, name=f"studio-{job_id}")
-            executor["thread"] = thread
-            try:
-                thread.start()
-            except Exception as exc:
+            def start_failed(exc):
+                runner.clear("steps", job_id)
                 studio.fail_step(cfg, job_id, steps[0], exc)
                 studio.set_execution(cfg, job_id, "failed", None, [])
-                file_lock.release()
-                raise
+
+            runner.start(f"studio-{job_id}", worker, lock=file_lock, on_failure=start_failed)
             return {
                 "steps": {name: info["status"] for name, info in response["steps"].items()},
                 "execution": response["execution"],
@@ -186,7 +177,7 @@ def studio_router(
         summary = {**shot, "candidates": None, "audio": None, "selection": None}
         candidate_file = studio.candidates_dir(base, shot["job_id"]) / f"{shot['id']}.json"
         if candidate_file.is_file():
-            document = json.loads(candidate_file.read_text())
+            document = json.loads(candidate_file.read_text(encoding="utf-8"))
             summary["candidates"] = {
                 "status": document.get("status"),
                 "count": len(document.get("results", [])),
@@ -195,7 +186,7 @@ def studio_router(
             }
         manifest_file = studio.job_dir(base, shot["job_id"]) / "audio.json"
         if manifest_file.is_file():
-            manifest = json.loads(manifest_file.read_text()).get("shots", {})
+            manifest = json.loads(manifest_file.read_text(encoding="utf-8")).get("shots", {})
             if shot["id"] in manifest:
                 summary["audio"] = {
                     "duration": manifest[shot["id"]]["duration"],
@@ -204,7 +195,7 @@ def studio_router(
                 }
         timeline_file = studio.timeline_path(base, shot["job_id"])
         if timeline_file.is_file():
-            events = json.loads(timeline_file.read_text()).get("events", [])
+            events = json.loads(timeline_file.read_text(encoding="utf-8")).get("events", [])
             summary["selection"] = next(
                 (
                     {
@@ -295,6 +286,25 @@ def studio_router(
         """任务元信息中的可用素材摘要预览：只读、不加锁，不改动任务、方案、版本与签名。"""
         state = studio.load_job(base, job_id)  # 不存在 → EntityNotFound → 404"找不到创作任务"
         return build_digest(current(), store, state).public()
+
+    @router.post("/jobs/{job_id}/music/lyrics")
+    def generate_lyrics(job_id: str, body: LyricsBody):
+        """背景音乐歌词生成（MiniMax lyrics_generation）：只返回结果，不改动分镜；由页面或助手写入提示点后再保存。"""
+        from mindex.models.adapters import make_music_generator
+        from mindex.studio.workspace.handlers.music import unavailable
+
+        studio.load_job(base, job_id)  # 不存在 → 404
+        cfg = current()
+        generator = music_generator
+        if generator is None:
+            if reason := unavailable(cfg):
+                raise HTTPException(422, reason)
+            generator = make_music_generator(cfg)
+        try:
+            result = generator.lyrics(body.prompt or "", mode=body.mode, lyrics=body.lyrics, title=body.title)
+        except ModelError as exc:
+            raise HTTPException(502, str(exc)) from exc
+        return {"title": result.title, "style_tags": result.style_tags, "lyrics": result.lyrics}
 
     @router.post("/jobs/{job_id}/plans/{plan_id}/shots/{shot_id}/query-suggestion")
     def query_suggestion(job_id: str, plan_id: str, shot_id: str, body: QuerySuggestionBody):
@@ -419,7 +429,13 @@ def studio_router(
             if body.name is not None:
                 p["name"] = body.name
             if body.options:
-                p["options"] = body.options.model_dump()
+                if not script_templates.exists(store, body.options.template_id):
+                    raise studio.StudioError(f"找不到文案模板：{body.options.template_id}")
+                p["options"] = {
+                    **body.options.model_dump(),
+                    # 参考文稿登记只经 /references 增删：整份提交方案参数时保留现有登记。
+                    "references": workspace.references.references(p),
+                }
             if body.script is not None:
                 workspace.add_script(current(), job_id, w, p, body.script, "manual")
             if body.shots is not None:
@@ -428,6 +444,7 @@ def studio_router(
                     for s in body.shots
                 ]
                 validate_recall_references(base, store, job_id, shots)
+                validate_source_references(base, job_id, shots)
                 workspace.set_board(current(), job_id, w, p, shots)
             workspace.persist(base, job_id, w)
         return workspace.detail(current(), job_id, w)
@@ -438,13 +455,22 @@ def studio_router(
         plan_id: str,
         file: Annotated[UploadFile, File()],
         kind: Annotated[str, Form()],
+        purpose: Annotated[str, Form()] = "query",
     ):
-        """分镜查询文件：内容寻址去重落盘 inputs/，校验与检索页上传一致。"""
+        """分镜查询文件或画面来源文件：内容寻址去重落盘 inputs/。
+
+        ``purpose=query``（缺省）的校验与检索页上传一致；``purpose=source`` 用于 clip/image 画面来源，
+        视频按 ``studio.max_clip_mb`` / ``studio.max_clip_seconds`` 限制，图片与查询图片相同。"""
         from mindex.shared.media import probe
 
-        if kind not in {"image", "video"}:
-            raise HTTPException(422, "查询文件类型只支持 image 或 video")
+        if kind not in {"image", "video", "audio"}:
+            raise HTTPException(422, "查询文件类型只支持 image、video 或 audio")
+        if purpose not in {"query", "source"}:
+            raise HTTPException(422, "上传用途只支持 query 或 source")
+        if kind == "audio" and purpose != "source":
+            raise HTTPException(422, "音频只能作为参考素材（purpose=source）上传")
         config = current()
+        label = "画面" if purpose == "source" else "查询"
         # Streaming must not hold a blocking threading.Lock on the event loop.
         # Verify and commit together in a worker, under the normal mutation lock.
         with tempfile.TemporaryDirectory(prefix="studio-upload-") as directory:
@@ -452,33 +478,47 @@ def studio_router(
             allowed = (
                 {".png", ".jpg", ".jpeg", ".webp"}
                 if kind == "image"
+                else {".mp3", ".wav", ".flac", ".m4a", ".aac"} if kind == "audio"
                 else {".mp4", ".mov", ".mkv", ".webm", ".avi"}
             )
             if suffix not in allowed:
-                suffix = ".png" if kind == "image" else ".mp4"
+                suffix = {"image": ".png", "audio": ".mp3"}.get(kind, ".mp4")
             staged = Path(directory) / ("query" + suffix)
-            limit = (
-                (config.search.max_image_upload_mb if kind == "image" else config.search.max_upload_mb)
-                * 1024
-                * 1024
-            )
+            if kind == "image":
+                megabytes = config.search.max_image_upload_mb
+            else:
+                megabytes = config.studio.max_clip_mb if purpose == "source" else config.search.max_upload_mb
+            limit = megabytes * 1024 * 1024
             await save_upload(file, staged, limit)
 
             def commit():
                 with mutation_lock():
                     w = workspace.load(config, job_id)
                     workspace.plan(w, plan_id)
+                    seconds = None
                     try:
                         if kind == "image":
                             image_png(staged, config.video.max_pixels)
+                        elif kind == "audio":
+                            # 参考音频：多模态参考生视频（2–15 秒）或翻唱（6 秒–6 分钟），具体时长由生成服务校验。
+                            from mindex.shared.media import audio_info
+
+                            seconds = audio_info(staged)["duration"]
+                            if seconds > 360 + 0.05:
+                                raise ValueError("参考音频不能超过 6 分钟")
                         else:
                             info = probe(staged)
-                            if info["duration"] > config.search.max_query_seconds + 0.05:
-                                raise ValueError(f"查询视频不能超过 {config.search.max_query_seconds:g} 秒")
+                            seconds = info["duration"]
+                            maximum = (
+                                config.studio.max_clip_seconds if purpose == "source"
+                                else config.search.max_query_seconds
+                            )
+                            if seconds > maximum + 0.05:
+                                raise ValueError(f"{label}视频不能超过 {maximum:g} 秒")
                     except HTTPException:
                         raise
                     except Exception as exc:
-                        raise HTTPException(422, f"查询文件无法解码：{exc}") from exc
+                        raise HTTPException(422, f"{label}文件无法解码：{exc}") from exc
                     media_id = digest(staged)
                     inputs = studio.job_dir(config, job_id) / "inputs"
                     inputs.mkdir(parents=True, exist_ok=True)
@@ -492,12 +532,66 @@ def studio_router(
                     return {
                         "media_id": media_id,
                         "kind": kind,
+                        "purpose": purpose,
+                        "duration": seconds,
                         "bytes": target.stat().st_size,
                         "name": file.filename,
                         "preview_url": f"/api/studio/jobs/{job_id}/artifacts/inputs/{target.name}",
                     }
 
             return await run_in_threadpool(commit)
+
+    @router.post("/jobs/{job_id}/plans/{plan_id}/references", status_code=201)
+    async def add_reference(job_id: str, plan_id: str, request: Request):
+        """登记参考文稿：multipart（``file`` + ``revision`` + 可选 ``name``）或 JSON ``{revision, name, text}``。
+
+        正文规范化为 UTF-8 后按 sha256 存 ``inputs/<sha>.txt``，同一正文只登记一次；总字数超过
+        ``studio.max_reference_chars`` 返回 422。"""
+        config = current()
+        limit = config.studio.max_reference_chars * 4 + 4096  # UTF-8 每字最多 4 字节
+        if (request.headers.get("content-type") or "").startswith("multipart/form-data"):
+            form = await request.form()
+            upload, revision = form.get("file"), form.get("revision")
+            if not isinstance(upload, StarletteUpload) or not isinstance(revision, str):
+                raise HTTPException(422, "请上传参考文稿文件并提供方案 revision")
+            suffix = Path(upload.filename or "").suffix.lower()
+            ctype = (upload.content_type or "").split(";")[0].strip().lower()
+            if suffix not in workspace.references.TEXT_SUFFIXES and not ctype.startswith("text/"):
+                raise HTTPException(422, "参考文稿只支持 .txt 或 .md 文本文件")
+            raw = await upload.read(limit + 1)
+            await upload.close()
+            if len(raw) > limit:
+                raise HTTPException(413, "上传文件过大")
+            name = form.get("name")
+            name = name if isinstance(name, str) and name.strip() else Path(upload.filename or "").stem
+        else:
+            try:
+                body = ReferenceBody.model_validate(await request.json())
+            except ValueError as exc:
+                raise HTTPException(422, "请求体必须是包含 revision 与 text 的 JSON") from exc
+            revision, name, raw = body.revision, body.name or "", body.text
+
+        def commit():
+            with mutation_lock():
+                w = workspace.load(config, job_id)
+                p = workspace.plan(w, plan_id)
+                workspace.require_revision(p, revision)
+                item = workspace.references.register(config, job_id, p, name, raw)
+                workspace.persist(base, job_id, w)
+            return {"reference": item, **workspace.detail(config, job_id, w)}
+
+        return await run_in_threadpool(commit)
+
+    @router.delete("/jobs/{job_id}/plans/{plan_id}/references/{reference_id}")
+    def remove_reference(job_id: str, plan_id: str, reference_id: str, revision: str):
+        """只移除登记；inputs/ 里的文件保留（可能被其他方案或历史文案引用）。"""
+        with mutation_lock():
+            w = workspace.load(current(), job_id)
+            p = workspace.plan(w, plan_id)
+            workspace.require_revision(p, revision)
+            workspace.references.unregister(p, reference_id)
+            workspace.persist(base, job_id, w)
+        return workspace.detail(current(), job_id, w)
 
     @router.get("/jobs/{job_id}/versions")
     def get_versions(job_id: str, stage: str | None = None, shot_id: str | None = None):
@@ -582,89 +676,92 @@ def studio_router(
     def launch_build(job_id, plan_id, *, body=None, node=None, column=None):
         from uuid import uuid4
 
-        with guard:
-            file_lock = acquire_lock()
+        with runner.reserve() as file_lock:
             cfg = current()
-            try:
-                w = workspace.load(cfg, job_id)
-                workspace.recover(cfg, job_id, w)
-                p = workspace.plan(w, plan_id)
-                if column:
-                    workspace.require_revision(p, column.revision)
-                    nodes = workspace.column_nodes(cfg, job_id, w, p, column.stage, column.inputs_by_shot)
-                    force = column.force
-                elif node:
-                    workspace.require_revision(p, node.revision)
-                    spec = workspace.specification(cfg, job_id, w, p, node.stage, node.shot_id)
-                    if node.inputs != spec["inputs"]:
-                        raise studio.StudioError("输入版本已变化，请刷新后重试")
-                    if node.stage in ("script", "split") and node.shot_id is not None:
-                        raise studio.StudioError("生成文案和拆分镜不能指定单镜")
-                    if node.stage == "split" and not p.get("script"):
-                        raise studio.StudioError("请先生成文案，再拆分镜")
-                    nodes = [
-                        {
-                            "key": f"{node.stage}:{node.shot_id}" if node.shot_id else node.stage,
-                            "stage": node.stage,
-                            "shot_id": node.shot_id,
-                            "action": "rebuild",
-                        }
-                    ]
-                    force = node.force
-                else:
-                    checked = workspace.preflight(cfg, job_id, w, p, force=body.force)
-                    if body.token != checked["token"]:
-                        raise studio.StudioError("预检已变化，请重新查看构建清单")
-                    nodes, force = checked["nodes"], body.force
-                bid = uuid4().hex[:12]
-                build = {
-                    "id": bid,
-                    "plan_id": plan_id,
-                    "status": "running",
-                    "force": force,
-                    "created_at": studio.now(),
-                    # 整体构建以文案或拆分镜开头时，拆分完成后按新分镜展开后续节点。
-                    "auto_split": not node and not column
-                    and any(n["stage"] in ("script", "split") for n in nodes),
-                    "plan_snapshot": copy.deepcopy(p),
-                    "nodes": [{**n, "status": "pending"} for n in nodes],
-                }
-                w["builds"].append(build)
-                workspace.persist(cfg, job_id, w)
-                ExecutionLog(cfg, job_id, bid).emit(f"已提交执行，共 {len(nodes)} 项")
-            except Exception:
-                file_lock.release()
-                raise
-            cancel_event = cancels[bid] = threading.Event()
+            w = workspace.load(cfg, job_id)
+            workspace.recover(cfg, job_id, w)
+            p = workspace.plan(w, plan_id)
+            if column:
+                workspace.require_revision(p, column.revision)
+                nodes = workspace.column_nodes(cfg, job_id, w, p, column.stage, column.inputs_by_shot)
+                force = column.force
+            elif node:
+                workspace.require_revision(p, node.revision)
+                if (
+                    node.shot_id in p["shots"] and node.stage in workspace.stages.names(scope="shot")
+                    and node.stage not in workspace.stages.plan_shot_stages(w, p, node.shot_id)
+                ):
+                    raise studio.StudioError("此画面来源没有该阶段")
+                spec = workspace.specification(cfg, job_id, w, p, node.stage, node.shot_id)
+                if node.inputs != spec["inputs"]:
+                    raise studio.StudioError("输入版本已变化，请刷新后重试")
+                if node.stage in ("script", "split") and node.shot_id is not None:
+                    raise studio.StudioError("生成文案和拆分镜不能指定单镜")
+                if node.stage == "split" and not p.get("script"):
+                    raise studio.StudioError("请先生成文案，再拆分镜")
+                nodes = [
+                    {
+                        "key": f"{node.stage}:{node.shot_id}" if node.shot_id else node.stage,
+                        "stage": node.stage,
+                        "shot_id": node.shot_id,
+                        "action": "rebuild",
+                    }
+                ]
+                force = node.force
+            else:
+                checked = workspace.preflight(cfg, job_id, w, p, force=body.force)
+                if body.token != checked["token"]:
+                    raise studio.StudioError("预检已变化，请重新查看构建清单")
+                nodes, force = checked["nodes"], body.force
+            bid = uuid4().hex[:12]
+            build = {
+                "id": bid,
+                "plan_id": plan_id,
+                "status": "running",
+                "force": force,
+                "created_at": studio.now(),
+                # 整体构建以文案或拆分镜开头时，拆分完成后按新分镜展开后续节点。
+                "auto_split": not node and not column
+                and any(n["stage"] in ("script", "split") for n in nodes),
+                "plan_snapshot": copy.deepcopy(p),
+                "nodes": [{**n, "status": "pending"} for n in nodes],
+            }
+            w["builds"].append(build)
+            workspace.persist(cfg, job_id, w)
+            ExecutionLog(cfg, job_id, bid).emit(f"已提交执行，共 {len(nodes)} 项")
+            cancel_event = runner.cancel_event("build", job_id, bid)
+
+            def run():
+                workspace.run_build(
+                    cfg, job_id, bid, speaker=speaker, storyboarder=storyboarder, embedder=embedder,
+                    writer=writer, video_generator=video_generator, animator=animator,
+                    animation_capture=animation_capture, cancel_event=cancel_event,
+                    image_generator=image_generator, music_generator=music_generator,
+                )
+
+            def record_failure(exc):  # 所有后台失败必须记录终态
+                fresh = workspace.load(cfg, job_id)
+                record = next((b for b in fresh["builds"] if b["id"] == bid), None)
+                if record is None:  # 构建记录已不存在：原始异常已记入日志，这里只说明无法写终态
+                    log.error("创作任务 %s 的构建 %s 记录已不存在，无法写入失败状态", job_id, bid)
+                    return
+                record.update(status="failed", error=str(exc), finished_at=studio.now())
+                ExecutionLog(cfg, job_id, bid).emit(f"执行失败：{exc}", "error")
+                workspace.persist(cfg, job_id, fresh)
 
             def worker():
-                try:
-                    workspace.run_build(
-                        cfg, job_id, bid, speaker=speaker, storyboarder=storyboarder, embedder=embedder,
-                        writer=writer, cancel_event=cancel_event,
-                    )
-                except Exception as exc:  # noqa: BLE001 — all background errors need terminal state
-                    fresh = workspace.load(cfg, job_id)
-                    record = next(b for b in fresh["builds"] if b["id"] == bid)
-                    record.update(status="failed", error=str(exc), finished_at=studio.now())
-                    ExecutionLog(cfg, job_id, bid).emit(f"执行失败：{exc}", "error")
-                    workspace.persist(cfg, job_id, fresh)
-                finally:
-                    cancels.pop(bid, None)
-                    workspace.clear_build_cancel(cfg, job_id, bid)
-                    file_lock.release()
+                runner.run_guarded(
+                    run, message=f"创作任务 {job_id} 的构建 {bid} 失败",
+                    on_error=record_failure, finally_=lambda: runner.clear("build", job_id, bid),
+                )
 
-            thread = threading.Thread(target=worker, daemon=True, name=f"studio-build-{job_id}")
-            executor["thread"] = thread
-            try:
-                thread.start()
-            except Exception as exc:
-                cancels.pop(bid, None)
+            def start_failed(exc):
+                runner.clear("build", job_id, bid)
                 build.update(status="failed", error=str(exc), finished_at=studio.now())
                 ExecutionLog(cfg, job_id, bid).emit(f"无法启动执行：{exc}", "error")
                 workspace.persist(cfg, job_id, w)
-                file_lock.release()
-                raise
+
+            runner.start(f"studio-build-{job_id}", worker, lock=file_lock, on_failure=start_failed)
             return build
 
     @router.post("/jobs/{job_id}/plans/{plan_id}/build", status_code=202)
@@ -706,15 +803,18 @@ def studio_router(
             raise EntityNotFound("找不到构建执行")
         if build["status"] != "running":
             raise HTTPException(409, "构建不在执行中，无法取消")
-        workspace.request_build_cancel(base, job_id, build_id)
-        if (event := cancels.get(build_id)) is not None:
-            event.set()
+        runner.request_cancel("build", job_id, build_id)
         ExecutionLog(base, job_id, build_id).emit("已请求取消，当前节点完成后停止", "warning")
         return {"build_id": build_id, "status": "cancelling"}
 
     @router.get("/sources/{source_id}/shots")
     def source_shots(source_id: str):
         return {"items": workspace.source_shots(current(), source_id)}
+
+    def require_recall_shot(w, p, shot_id):
+        """候选、锚点与人工区间只属于素材召回来源的分镜。"""
+        if shot_id in p["shots"] and "recall" not in workspace.stages.plan_shot_stages(w, p, shot_id):
+            raise studio.StudioError("该分镜的画面来源不是素材召回，不能选择候选或人工选片")
 
     @router.post("/jobs/{job_id}/plans/{plan_id}/anchor")
     def select_anchor(job_id: str, plan_id: str, body: AnchorBody):
@@ -724,6 +824,7 @@ def studio_router(
             w = workspace.load(current(), job_id)
             p = workspace.plan(w, plan_id)
             workspace.require_revision(p, body.revision)
+            require_recall_shot(w, p, body.shot_id)
             if body.mode == "manual" and (not body.recall_version or not body.candidate_id):
                 raise studio.StudioError("请选择召回版本及候选")
             choice = {"mode": body.mode}
@@ -744,6 +845,7 @@ def studio_router(
         p = workspace.plan(w, plan_id)
         if shot_id not in p["shots"]:
             raise studio.StudioError("分镜不存在于当前方案")
+        require_recall_shot(w, p, shot_id)
         speech = w["versions"].get(p["shots"][shot_id].get("tts"), {})
         target = speech.get("data", {}).get("duration") if speech.get("status") == "complete" else None
         anchor = studio_window.resolve_anchor(cfg, w, p, shot_id, target)
@@ -758,6 +860,7 @@ def studio_router(
         # Serialize ffmpeg resource generation with builds, previews and mutations.
         with mutation_lock():
             w = workspace.load(current(), job_id)
+            require_recall_shot(w, workspace.plan(w, plan_id), shot_id)
             ctx = studio_window.context(current(), job_id, w, workspace.plan(w, plan_id), shot_id)
             ctx.update(studio_window.resources(current(), job_id, ctx))
         return ctx
@@ -765,6 +868,7 @@ def studio_router(
     def preview_range(job_id, w, p, body):
         import copy
 
+        require_recall_shot(w, p, body.shot_id)
         draft = copy.deepcopy(p)
         if isinstance(body, WindowBody):
             from mindex.studio import studio_window
@@ -836,7 +940,7 @@ def studio_router(
             workspace.execute(current(), job_id, w, p, "select", body.shot_id)
         return workspace.detail(current(), job_id, w)
 
-    def create_event_preview(job_id, data, key, options=None, *, window_range=None):
+    def create_event_preview(job_id, data, key, options=None, *, window_range=None, w=None):
         import math
         import wave
         from fractions import Fraction
@@ -855,6 +959,8 @@ def studio_router(
             }
         )
         event = studio.TimelineEvent.model_validate(data)
+        if event.video.kind == "file":
+            return file_event_preview(job_id, event, key, preview_render, cfg, options, w)
         if not studio_steps.interval_visible(
             store,
             event.video.source_id,
@@ -930,6 +1036,48 @@ def studio_router(
                 )
         return f"/api/studio/jobs/{job_id}/artifacts/{output.relative_to(studio.job_dir(base, job_id)).as_posix()}"
 
+    def file_event_preview(job_id, event, key, preview_render, cfg, options, w):
+        """文件区间（上传片段）的带声预览：画面与原声直接取自复验摘要后的片段文件。"""
+        import math
+        import wave
+        from fractions import Fraction
+
+        from mindex.shared.media import atomic_media, probe
+        from mindex.studio.studio_render import cut_shot, extract_ambient, process_shot_audio
+
+        source = workspace.sources.video_file(cfg, job_id, w, event.video)
+        directory = safe_path(studio.job_dir(base, job_id), f"previews/quick-v1-{key}")
+        directory.mkdir(parents=True, exist_ok=True)
+        output = directory / "preview.mp4"
+        with FileLock(str(output) + ".lock", timeout=0):
+            if not output.is_file():
+                voice = safe_path(studio.job_dir(base, job_id), event.audio.file)
+                audio_config = cfg.studio.audio
+                ambient = None
+                if options:
+                    audio_config = audio_config.model_copy(update={"duck_gain": options["duck_gain"]})
+                    if options["audio_mode"] == "ducking" and probe(source)["audio"]:
+                        ambient = directory / "ambient.wav"
+                        extract_ambient(source, event, audio_config, ambient)
+                process_shot_audio(voice, ambient, event, audio_config, directory / "audio.wav")
+                with wave.open(str(directory / "audio.wav"), "rb") as handle:
+                    samples = handle.getnframes()
+                fps = Fraction(str(preview_render.fps))
+                frames = math.ceil(Fraction(samples, 48000) * fps)
+                while math.floor(Fraction(frames, 1) / fps * 48000) < samples:
+                    frames += 1
+                cut_shot(source, event, preview_render, directory / "video.mp4", frames=frames)
+                end_sample = round(Fraction(frames, 1) / fps * 48000)
+                atomic_media(
+                    [
+                        "-i", str(directory / "video.mp4"), "-i", str(directory / "audio.wav"),
+                        "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy",
+                        "-af", f"apad=whole_len={end_sample},atrim=end_sample={end_sample}", "-c:a", "aac",
+                    ],
+                    output,
+                )
+        return f"/api/studio/jobs/{job_id}/artifacts/{output.relative_to(studio.job_dir(base, job_id)).as_posix()}"
+
     @router.get("/jobs/{job_id}/versions/{version_id}/preview")
     def version_preview(job_id: str, version_id: str):
         w = read_workspace(job_id)
@@ -950,14 +1098,54 @@ def studio_router(
         with mutation_lock():
             return {
                 "url": create_event_preview(
-                    job_id, item["data"]["event"], key, window_range=item["data"].get("range")
+                    job_id, item["data"]["event"], key, window_range=item["data"].get("range"), w=w
                 )
             }
+
+    @router.patch("/jobs/{job_id}/plans/{plan_id}/shots/{shot_id}/animation")
+    def save_animation(job_id: str, plan_id: str, shot_id: str, body: AnimationBody):
+        """人工保存 AI 动画源码：静态校验通过后成为该分镜选用的 origin=manual 动画版本。
+
+        只有该分镜的渲染与成片随之需要重建；之后的构建保留人工源码，不会按签名重新生成覆盖。
+        ``dry_run`` 只做静态校验并返回 ``{valid, errors, bytes, max_kb}``，不加锁、不写版本。"""
+        if body.dry_run:
+            from mindex.models.animator import animation_errors
+
+            cfg = current()
+            w = workspace.load(base, job_id)
+            p = workspace.plan(w, plan_id)
+            workspace.require_revision(p, body.revision)
+            limit = cfg.studio.animator.max_html_kb
+            errors = animation_errors(body.html, limit)
+            return {"valid": not errors, "errors": errors, "bytes": len(body.html.encode("utf-8")), "max_kb": limit}
+        with mutation_lock():
+            cfg = current()
+            w = workspace.load(cfg, job_id)
+            p = workspace.plan(w, plan_id)
+            workspace.require_revision(p, body.revision)
+            if shot_id not in p["shots"] or shot_id not in workspace.ordered_shots(w, p):
+                raise EntityNotFound("找不到分镜")
+            workspace.save_animation(cfg, job_id, w, p, shot_id, body.html)
+            workspace.persist(base, job_id, w)
+        return workspace.detail(cfg, job_id, w)
+
+    @router.get("/jobs/{job_id}/versions/{version_id}/animation.html")
+    def animation_source(job_id: str, version_id: str):
+        """动画源码（text/html）：带严格 CSP 与 nosniff，供沙箱 iframe 预览与源码编辑读取。"""
+        w = read_workspace(job_id)
+        item = workspace.version(w, version_id)
+        if item["stage"] != "animate" or "animation" not in item["files"]:
+            raise studio.StudioError("此版本没有动画源码")
+        content = workspace.file_path(base, job_id, item, "animation").read_bytes()
+        # 严格 CSP（见 studio_files.SANDBOX_CSP）：页面以 sandbox="allow-scripts"（不含 allow-same-origin）的 iframe
+        # 加载，直接打开时 CSP 的 sandbox 指令同样把它隔离在不透明源里。
+        return Response(content, media_type="text/html; charset=utf-8",
+                        headers={**SANDBOX_HEADERS, "Cache-Control": "no-store"})
 
     def generate_title_async(job_id: str, text: str):
         """后台补全标题：失败不影响任务，占位标题继续可用。
 
-        仅用进程内 ``guard`` 串行化（标题生成只发生在创建任务的 Web 进程），
+        仅用进程内 ``runner.guard`` 串行化（标题生成只发生在创建任务的 Web 进程），
         不持有跨进程文件锁，避免阻塞步骤执行或让紧随其后的运行请求误报 409。
         """
 
@@ -966,9 +1154,11 @@ def studio_router(
             try:
                 title = (storyboarder or make_storyboarder(cfg)).title(text)  # text 为视频大纲
             except Exception:
+                # 标题生成失败只保留占位标题，但要留下诊断（常见于模型配置错误）。
+                log.warning("创作任务 %s 的标题生成失败，保留占位标题", job_id, exc_info=True)
                 title = None
             try:
-                with guard:  # 与 patch_title/其它 job.json 写入串行，避免丢更新
+                with runner.guard:  # 与 patch_title/其它 job.json 写入串行，避免丢更新
                     state = studio.load_job(base, job_id)
                     if not state.get("title_pending"):
                         return  # 用户已手动改名，尊重用户输入
@@ -977,10 +1167,16 @@ def studio_router(
                     state["title_pending"] = False
                     state["updated_at"] = studio.now()
                     studio.save(studio.job_path(base, job_id), state)
+            except EntityNotFound:
+                return  # 任务已被删除，无需更新标题
             except Exception:
-                return  # 任务可能已被删除；占位标题仍然有效
+                log.exception("创作任务 %s 写入生成标题失败", job_id)
 
-        threading.Thread(target=worker, daemon=True, name=f"studio-title-{job_id}").start()
+        threading.Thread(
+            target=lambda: runner.run_guarded(worker, message=f"创作任务 {job_id} 的标题生成线程异常"),
+            daemon=True,
+            name=f"studio-title-{job_id}",
+        ).start()
 
     @router.post("/jobs", status_code=201)
     def create_job(body: CreateJobBody):
@@ -1025,8 +1221,7 @@ def studio_router(
         state = studio.load_job(base, job_id)
         if state.get("execution", {}).get("status") != "running":
             raise HTTPException(409, "任务没有正在执行的步骤，无法取消")
-        path = legacy_cancel_path(job_id)
-        path.touch()
+        runner.request_cancel("steps", job_id)
         return {"job_id": job_id, "status": "cancelling"}
 
     @router.patch("/jobs/{job_id}/storyboard")
@@ -1037,6 +1232,8 @@ def studio_router(
                 raise HTTPException(422, error)
             shots, seen = [], set()
             for index, item in enumerate(body.shots, 1):
+                if item.source is not None and item.source.kind != "recall":
+                    raise HTTPException(422, "老任务不支持设置画面来源，请先接入版本工作台")
                 shot_id = (item.id or f"shot-{index:02d}").strip()
                 if shot_id in seen:
                     raise HTTPException(422, f"分镜 id 重复：{shot_id}")
@@ -1080,5 +1277,6 @@ def studio_router(
 
 
     file_routes(router, base, store, mutation_lock)
+    template_routes(router, base, store, mutation_lock, current=current, writer=writer)
 
     return router

@@ -205,7 +205,7 @@ def create_manifest(
 
 def read_manifest(path: Path, service, role: str) -> dict:
     try:
-        value = json.loads(path.read_text())
+        value = json.loads(path.read_text(encoding="utf-8"))
         schema = value["schema"]
         if type(schema) is not int or schema not in (1, 2) or value["role"] != role:
             raise ValueError("schema/role 不匹配")

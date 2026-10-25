@@ -25,6 +25,7 @@ uv run mindex e2e phase -h
 | `clips` | `migrate`、`materialize`、`verify-archives`、`repair-boundaries`、`prune` |
 | `backup` | `list`、`inspect`、`export`、`import`、`recover` |
 | `e2e` | `init`、`probe`、`pin`、`phase`、`freeze`、`review`、`status` |
+| `agent` | `tools`（另有顶层命令 `mcp`，见[智能助手与 MCP](#智能助手与-mcp)） |
 
 ## 全局规则
 

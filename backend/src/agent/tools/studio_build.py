@@ -40,6 +40,18 @@ async def preview_run_build(args: RunBuild, ctx: ToolContext) -> Preview:
     warnings = []
     if counts.get("blocked"):
         warnings.append(f"{counts['blocked']} 个节点被阻塞，构建将部分完成")
+    generating = sum(1 for n in data["nodes"] if n.get("stage") == "generate" and n.get("action") == "rebuild")
+    if generating:
+        warnings.append(f"将为 {generating} 个 aigc 分镜调用视频生成服务生成画面，可能产生费用")
+    drawing = sum(1 for n in data["nodes"] if n.get("stage") == "draw" and n.get("action") == "rebuild")
+    if drawing:
+        warnings.append(f"将为 {drawing} 个 aigc_image 分镜调用图片生成服务生成图片，可能产生费用")
+    composing = sum(1 for n in data["nodes"] if n.get("stage") == "music" and n.get("action") == "rebuild")
+    if composing:
+        warnings.append(f"将为 {composing} 个背景音乐提示点调用音乐生成服务，可能产生费用")
+    animating = sum(1 for n in data["nodes"] if n.get("stage") == "animate" and n.get("action") == "rebuild")
+    if animating:
+        warnings.append(f"将为 {animating} 个 animation 分镜调用动画生成模型编写动画源码，并在沙箱中逐帧录制")
     if args.force:
         warnings.append("强制模式会忽略已有版本，全部重新生成")
     if not counts.get("rebuild") and not counts.get("blocked"):
@@ -70,14 +82,17 @@ async def run_build(args: RunBuild, ctx: ToolContext) -> ToolOutput:
 class RunNode(StrictModel):
     job_id: str | None = JobId
     plan_id: str | None = PlanId
-    stage: Literal["script", "split", "recall", "tts", "select", "render"] = Field(
-        description="script=按大纲生成文案；split=按文案重新拆分镜；其余为单个分镜的阶段")
+    stage: Literal["script", "split", "recall", "tts", "music", "draw", "generate", "animate", "select", "render"] = Field(
+        description="script=按大纲生成文案；split=按文案重新拆分镜；其余为单个分镜的阶段"
+                    "（music=背景音乐提示点分镜的背景音乐，会调用音乐生成服务；draw=aigc_image 分镜的生成图片，会调用图片生成服务；"
+                    "generate=aigc 分镜的生成画面，会调用视频生成服务；animate=animation 分镜的生成动画，"
+                    "调用动画生成模型重写动画源码，force=false 时保留人工修改的源码）")
     shot: str | None = Field(default=None, description="分镜级阶段需要：完整 ID、短 ID 或 #序号")
     force: bool = Field(default=True, description="true=重新生成；false=有可复用版本时直接选用")
 
 
 def node_inputs(view: PlanView, stage: str, sid: str | None) -> dict:
-    """与 studio.js nodeInputs 一致：必须等于服务端当前规格的 inputs，否则提交被拒绝。"""
+    """与 studio-stages.js 的 nodeInputs 一致：必须等于服务端当前规格的 inputs，否则提交被拒绝。"""
     p = view.plan
     if stage == "script":
         return {}
@@ -85,13 +100,27 @@ def node_inputs(view: PlanView, stage: str, sid: str | None) -> dict:
         return {"script": p.get("script")}
     s = p["shots"][sid]
     inputs = {"content": s["content"]}
+    kind = ((view.content(sid) or {}).get("source") or {}).get("kind", "recall")
+    if stage in ("generate", "animate"):
+        inputs["tts"] = s.get("tts")
+    if stage in ("draw", "music"):
+        return inputs
     if stage == "select":
         inputs["tts"] = s.get("tts")
+        if kind == "aigc":
+            inputs["generate"] = s.get("generate")
         rng = p.get("ranges", {}).get(sid)
-        if not rng or rng.get("anchor_ref"):
+        if kind == "recall" and (not rng or rng.get("anchor_ref")):
             inputs["recall"] = s.get("recall")
     if stage == "render":
-        inputs.update(select=s.get("select"), tts=s.get("tts"))
+        if kind == "image":
+            inputs["tts"] = s.get("tts")
+        elif kind == "aigc_image":
+            inputs.update(tts=s.get("tts"), draw=s.get("draw"))
+        elif kind == "animation":
+            inputs.update(tts=s.get("tts"), animate=s.get("animate"))
+        else:
+            inputs.update(select=s.get("select"), tts=s.get("tts"))
     return inputs
 
 
@@ -108,6 +137,20 @@ async def node_body(args: RunNode, ctx: ToolContext):
         if found["status"] != "ok":
             raise ToolError(f"无法确定分镜 {args.shot}：{found['status']}", code="unresolved_shot", value=found)
         sid = found["shot_id"]
+        kind = ((view.content(sid) or {}).get("source") or {}).get("kind", "recall")
+        if args.stage == "generate" and kind != "aigc":
+            raise ToolError(f"分镜 {short(sid)} 的画面来源不是 aigc，没有生成画面阶段；可先用 edit_shots 把来源设为 aigc",
+                            code="invalid_stage")
+        if args.stage == "draw" and kind != "aigc_image":
+            raise ToolError(f"分镜 {short(sid)} 的画面来源不是 aigc_image，没有生成图片阶段；可先用 edit_shots 把来源设为 aigc_image",
+                            code="invalid_stage")
+        music = (view.content(sid) or {}).get("music") or {}
+        if args.stage == "music" and music.get("kind") not in ("generate", "cover"):
+            raise ToolError(f"分镜 {short(sid)} 没有背景音乐提示点（生成/翻唱）；可先用 edit_shots 设置 music",
+                            code="invalid_stage")
+        if args.stage == "animate" and kind != "animation":
+            raise ToolError(f"分镜 {short(sid)} 的画面来源不是 animation，没有生成动画阶段；"
+                            "可先用 edit_shots 把来源设为 animation", code="invalid_stage")
     body = {"revision": view.revision, "stage": args.stage, "shot_id": sid, "force": args.force,
             "inputs": node_inputs(view, args.stage, sid)}
     return view, body
@@ -120,6 +163,19 @@ async def preview_run_node(args: RunNode, ctx: ToolContext) -> Preview:
     warnings = ["重新拆分镜会生成全新的分镜（新 ID），原分镜的产物只保留在历史版本中"] if args.stage == "split" else []
     if args.stage == "script":
         warnings.append("生成的新文案会成为当前文案，现有分镜随之过期")
+    if args.stage == "generate":
+        warnings.append("将调用视频生成服务生成画面，可能产生费用；生成通常需要数分钟，结束后该分镜的选片、渲染与成片"
+                        "需要重新构建")
+    if args.stage == "draw":
+        warnings.append("将调用图片生成服务生成图片，可能产生费用；结束后该分镜的渲染与成片需要重新构建")
+    if args.stage == "music":
+        warnings.append("将调用音乐生成服务生成背景音乐，可能产生费用；结束后成片需要重新合成")
+    if args.stage == "animate":
+        if args.force:
+            warnings.append("将调用动画生成模型重新编写动画源码（消耗模型调用额度），会替换当前源码（含人工修改，"
+                            "历史版本仍保留）；结束后该分镜的渲染（逐帧录制）与成片需要重新构建")
+        else:
+            warnings.append("有可复用或人工修改的动画源码时直接选用，否则调用动画生成模型编写")
     return Preview(f"执行单个节点：{target}" + ("（重新生成）" if args.force else ""), [], warnings=warnings,
                    focus=node_focus(view.job["id"], view.plan_id, body))
 
@@ -144,7 +200,7 @@ async def run_node(args: RunNode, ctx: ToolContext) -> ToolOutput:
 
 
 class DeleteJob(StrictModel):
-    job_id: str = Field(description="要删除的创作任务 ID（必须明确给出，不使用页面默认值）")
+    job_id: str = Field(min_length=1, description="要删除的创作任务 ID（必须明确给出，不使用页面默认值）")
 
 
 async def preview_delete_job(args: DeleteJob, ctx: ToolContext) -> Preview:
@@ -263,7 +319,7 @@ async def cancel_build(args: CancelBuild, ctx: ToolContext) -> ToolOutput:
 # ------------------------------------------------------------ 删除方案
 class DeletePlan(StrictModel):
     job_id: str | None = JobId
-    plan_id: str = Field(description="要删除的方案 ID（必须明确给出，不使用页面默认值）")
+    plan_id: str = Field(min_length=1, description="要删除的方案 ID（必须明确给出，不使用页面默认值）")
 
 
 def plan_label(plan: dict) -> str:
@@ -315,7 +371,9 @@ def specs() -> list[ToolSpec]:
                  "构建成片：按预检清单在后台执行（只重建变化的节点，其余复用）。提交后立即返回，结束时系统会通知你。",
                  RunBuild, "danger", run_build, preview_run_build),
         ToolSpec("run_node", "studio",
-                 "执行单个节点：生成文案、重新拆分镜，或对某个分镜重新召回/配音/选片/渲染。后台执行，结束时系统会通知你。",
+                 "执行单个节点：生成文案、重新拆分镜，或对某个分镜重新召回/配音/生成画面（仅 aigc 分镜，调用视频生成服务"
+                 "可能产生费用）/生成动画（仅 animation 分镜，调用动画生成模型重写源码）/选片/渲染（animation 分镜即"
+                 "重新录制）。后台执行，结束时系统会通知你。",
                  RunNode, "danger", run_node, preview_run_node),
         ToolSpec("delete_job", "studio", "永久删除一个创作任务及其全部方案与产物。", DeleteJob, "danger", delete_job,
                  preview_delete_job),

@@ -17,6 +17,8 @@ from mindex.processing.pipeline import Pipeline
 from mindex.settings.runtime_settings import RuntimeConfig
 from mindex.shared.types import Annotation
 
+pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
+
 REASON = "系统检测到输入或生成内容可能包含不安全或敏感内容，请您避免输入易产生敏感内容的提示语，感谢您的配合。"
 
 

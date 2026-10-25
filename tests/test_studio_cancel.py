@@ -15,9 +15,10 @@ from test_studio_columns import request_body
 from test_studio_workspace import setup_workspace, wait_build
 
 from mindex.api import create_app
-from mindex.studio import studio
-from mindex.studio import studio_workspace as ws
+from mindex.studio import executor, studio
+from mindex.studio import workspace as ws
 from mindex.studio.studio_logs import read_events
+from mindex.studio.workspace import builder, signatures
 
 KEYS = [("tts", "a"), ("tts", "b"), ("select", "a"), ("select", "b")]
 
@@ -43,8 +44,8 @@ def fake_execution(monkeypatch, on_execute):
         on_execute(len(calls))
         return f"v-{stage}-{sid}"
 
-    monkeypatch.setattr(ws, "match", lambda *a, **k: None)
-    monkeypatch.setattr(ws, "execute", execute)
+    monkeypatch.setattr(signatures, "match", lambda *a, **k: None)
+    monkeypatch.setattr(builder, "execute", execute)
     return calls
 
 
@@ -54,7 +55,7 @@ def test_sentinel_cancel_lets_running_node_finish_and_blocks_rest(config, monkey
 
     def on_execute(n):
         if n == 2:  # 第二个节点执行期间请求取消（模拟另一进程写哨兵）
-            ws.request_build_cancel(config, jid, bid)
+            executor.request_cancel(config, "build", jid, bid)
 
     calls = fake_execution(monkeypatch, on_execute)
     ws.run_build(config, jid, bid)
@@ -68,7 +69,7 @@ def test_sentinel_cancel_lets_running_node_finish_and_blocks_rest(config, monkey
     for key in ("select:a", "select:b"):
         assert nodes[key]["status"] == "blocked" and nodes[key]["error"] == "已取消"
         assert "started_at" not in nodes[key]
-    assert not ws.cancel_sentinel(config, jid, bid).exists()
+    assert not executor.cancel_sentinel(config, "build", jid, bid).exists()
     messages = [e["message"] for e in read_events(config, jid, bid)["items"]]
     assert any("执行结束：已取消" in m for m in messages)
 
@@ -79,8 +80,8 @@ def test_event_cancel_before_first_node_runs_nothing(config, monkeypatch):
     event = threading.Event()
     event.set()
     calls = fake_execution(monkeypatch, lambda n: None)
-    assert ws.build_cancelled(config, jid, bid, event)
-    assert not ws.build_cancelled(config, jid, bid)
+    assert executor.cancel_requested(config, "build", jid, bid, event)
+    assert not executor.cancel_requested(config, "build", jid, bid)
 
     ws.run_build(config, jid, bid, cancel_event=event)
 
@@ -107,7 +108,7 @@ def test_recover_leaves_cancelled_build_and_clears_stale_sentinel(config):
     cancelled = next(b for b in w["builds"] if b["id"] == done)
     cancelled_before = dict(cancelled, nodes=[dict(n) for n in cancelled["nodes"]])
     live = add_build(config, jid, w, p, bid="live")
-    ws.request_build_cancel(config, jid, live)
+    executor.request_cancel(config, "build", jid, live)
     w = ws.load(config, jid)
 
     ws.recover(config, jid, w)
@@ -115,8 +116,8 @@ def test_recover_leaves_cancelled_build_and_clears_stale_sentinel(config):
     fresh = {b["id"]: b for b in ws.load(config, jid)["builds"]}
     assert fresh[done] == cancelled_before
     assert fresh[live]["status"] == "partial"
-    assert not ws.cancel_sentinel(config, jid, live).exists()
-    ws.clear_build_cancel(config, jid, live)  # 幂等
+    assert not executor.cancel_sentinel(config, "build", jid, live).exists()
+    executor.clear_cancel(config, "build", jid, live)  # 幂等
 
 
 # ---------------------------------------------------------------- API：构建取消、旧执行器取消、删除方案
@@ -151,7 +152,7 @@ def test_cancel_build_endpoint_finishes_running_node_and_blocks_rest(config):
         cancel = client.post(f"{base}/builds/{bid}/cancel")
         assert cancel.status_code == 200, cancel.text
         assert cancel.json() == {"build_id": bid, "status": "cancelling"}
-        assert ws.cancel_sentinel(config, jid, bid).exists()
+        assert executor.cancel_sentinel(config, "build", jid, bid).exists()
     finally:
         release.set()
     done = wait_build(client, jid)["builds"][-1]
@@ -159,13 +160,13 @@ def test_cancel_build_endpoint_finishes_running_node_and_blocks_rest(config):
     nodes = {n["key"]: n for n in done["nodes"]}
     assert nodes["tts:a"]["status"] == "complete"  # 已开始的节点照常完成
     assert nodes["tts:b"]["status"] == "blocked" and nodes["tts:b"]["error"] == "已取消"
-    assert not ws.cancel_sentinel(config, jid, bid).exists()
+    assert not executor.cancel_sentinel(config, "build", jid, bid).exists()
     messages = [e["message"] for e in client.get(f"{base}/builds/{bid}/logs").json()["items"]]
     assert any("已请求取消" in m for m in messages) and messages[-1] == "执行结束：已取消"
 
     again = client.post(f"{base}/builds/{bid}/cancel")
     assert again.status_code == 409 and "不在执行中" in again.json()["detail"]
-    assert not ws.cancel_sentinel(config, jid, bid).exists()
+    assert not executor.cancel_sentinel(config, "build", jid, bid).exists()
     assert client.post(f"{base}/builds/missing/cancel").status_code == 404
     assert client.post("/api/studio/jobs/missing/builds/x/cancel").status_code == 404
 
@@ -288,7 +289,7 @@ def test_cancelled_build_survives_restart_recovery(config):
     # 模拟重启前进程被杀：另有一个构建停在 running，且残留了取消请求。
     w = ws.load(config, jid)
     crashed = add_build(config, jid, w, ws.plan(w, w["active_plan"]), bid="crashed")
-    ws.request_build_cancel(config, jid, crashed)
+    executor.request_cancel(config, "build", jid, crashed)
 
     restarted = TestClient(create_app(config, speaker=FixtureSpeaker(config)))  # 新进程：读取即触发恢复
     data = restarted.get(f"{base}/workspace")
@@ -299,7 +300,7 @@ def test_cancelled_build_survives_restart_recovery(config):
     assert nodes == {"tts:a": "complete", "tts:b": "blocked"}
     assert builds[crashed]["status"] == "partial"
     assert all(n["status"] == "blocked" and n["error"] != ws.CANCELLED for n in builds[crashed]["nodes"])
-    assert not ws.cancel_sentinel(config, jid, crashed).exists()
+    assert not executor.cancel_sentinel(config, "build", jid, crashed).exists()
     assert restarted.get(f"{base}/builds/{bid}/logs").json()["items"] == logs
     assert restarted.post(f"{base}/builds/{bid}/cancel").status_code == 409
     assert restarted.post(f"{base}/builds/{crashed}/cancel").status_code == 409
@@ -308,7 +309,7 @@ def test_cancelled_build_survives_restart_recovery(config):
 def test_sentinel_from_another_process_cancels_api_build(config):
     client, jid, base, bid, release = start_blocked_build(config)
     try:
-        ws.request_build_cancel(config, jid, bid)  # 只写哨兵：模拟 CLI / 另一个服务进程发起取消
+        executor.request_cancel(config, "build", jid, bid)  # 只写哨兵：模拟 CLI / 另一个服务进程发起取消
     finally:
         release.set()
     done = wait_build(client, jid)["builds"][-1]
@@ -316,7 +317,7 @@ def test_sentinel_from_another_process_cancels_api_build(config):
     nodes = {n["key"]: n for n in done["nodes"]}
     assert nodes["tts:a"]["status"] == "complete"
     assert nodes["tts:b"]["status"] == "blocked" and nodes["tts:b"]["error"] == ws.CANCELLED
-    assert not ws.cancel_sentinel(config, jid, bid).exists()
+    assert not executor.cancel_sentinel(config, "build", jid, bid).exists()
     messages = [e["message"] for e in client.get(f"{base}/builds/{bid}/logs").json()["items"]]
     assert not any("已请求取消" in m for m in messages)  # 未经本进程接口
     assert any("已取消执行" in m for m in messages) and messages[-1] == "执行结束：已取消"
@@ -330,7 +331,7 @@ def test_cancel_finished_build_rejected_without_side_effects(config, status):
     before = ws.path(config, jid).read_bytes()
     response = client.post(f"/api/studio/jobs/{jid}/builds/{bid}/cancel")
     assert response.status_code == 409 and response.json()["detail"] == "构建不在执行中，无法取消"
-    assert not ws.cancel_sentinel(config, jid, bid).exists()
+    assert not executor.cancel_sentinel(config, "build", jid, bid).exists()
     assert ws.path(config, jid).read_bytes() == before
     assert not any("已请求取消" in e["message"] for e in read_events(config, jid, bid)["items"])
 
@@ -486,7 +487,7 @@ def test_property_cancel_state(config, monkeypatch):
 
         def request():
             if via_sentinel:
-                ws.request_build_cancel(config, jid, bid)  # 模拟另一进程写哨兵
+                executor.request_cancel(config, "build", jid, bid)  # 模拟另一进程写哨兵
             else:
                 event.set()
 
@@ -498,8 +499,8 @@ def test_property_cancel_state(config, monkeypatch):
                 raise RuntimeError("桩失败")
             return f"v-{stage}-{sid}"
 
-        monkeypatch.setattr(ws, "match", lambda *a, **k: None)
-        monkeypatch.setattr(ws, "execute", execute)
+        monkeypatch.setattr(signatures, "match", lambda *a, **k: None)
+        monkeypatch.setattr(builder, "execute", execute)
         w["builds"].append({
             "id": bid, "plan_id": p["id"], "status": "running", "force": False, "auto_split": False,
             "nodes": [
@@ -535,7 +536,7 @@ def test_property_cancel_state(config, monkeypatch):
             bad = [s for s in statuses if s in ("failed", "blocked")]
             assert build["status"] == (("partial" if done else "failed") if bad else "complete")
         assert build["finished_at"] and "board_result" in build
-        assert not ws.cancel_sentinel(config, jid, bid).exists()
+        assert not executor.cancel_sentinel(config, "build", jid, bid).exists()
 
     check()
 

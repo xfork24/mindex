@@ -27,15 +27,17 @@ def minimax_clone(
     voice_id: str,
     model: str,
     preview_text: str = "你好，这是克隆音色的连接测试。",
+    *,
+    timeout: float,
 ) -> bytes:
-    """上传样本并克隆；成功返回预览音频字节（hex 编码解码而来）。"""
+    """上传样本并克隆；成功返回预览音频字节（hex 编码解码而来）。timeout 为语音合成档案的请求超时。"""
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     mime = SAMPLE_MIME.get(sample.suffix.lower(), "application/octet-stream")
     with sample.open("rb") as handle:
         upload = adapters.request(
             "POST",
             base_url.rstrip("/") + "/files/upload",
-            timeout=600,
+            timeout=timeout,
             headers=headers,
             data={"purpose": "voice_clone"},
             files={"file": (sample.name, handle, mime)},
@@ -46,7 +48,7 @@ def minimax_clone(
     payload = adapters.request(
         "POST",
         base_url.rstrip("/") + "/voice_clone",
-        timeout=600,
+        timeout=timeout,
         headers=headers,
         json={"file_id": file_id, "voice_id": voice_id, "model": model, "text": preview_text},
     )
@@ -62,7 +64,7 @@ def minimax_clone(
     return b""
 
 
-def qwentts_register(base_url: str, sample: Path, name: str, ref_text: str = "") -> None:
+def qwentts_register(base_url: str, sample: Path, name: str, ref_text: str = "", *, timeout: float) -> None:
     """向本地 qwentts.cpp tts-server 注册克隆音色（POST /audio/voices）。
 
     服务端注册表存于进程内存，重启即丢；调用方需持久化样本以便重注册（自愈）。
@@ -78,18 +80,19 @@ def qwentts_register(base_url: str, sample: Path, name: str, ref_text: str = "")
     adapters.request(
         "POST",
         base_url.rstrip("/") + "/audio/voices",
-        timeout=600,
+        timeout=timeout,
         json={"name": name, "ref_text": ref_text, "wav_b64": base64.b64encode(payload).decode()},
     )
 
 
-def aliyun_enroll(base_url: str, api_key: str, audio_url: str, prefix: str, target_model: str) -> str:
+def aliyun_enroll(base_url: str, api_key: str, audio_url: str, prefix: str, target_model: str, *,
+                  timeout: float) -> str:
     """按公网 URL 提交复刻，返回生成的音色 voice_id（与 target_model 绑定）。"""
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     payload = adapters.request(
         "POST",
         base_url.rstrip("/") + "/api/v1/services/audio/tts/customization",
-        timeout=600,
+        timeout=timeout,
         headers=headers,
         json={
             "model": "voice-enrollment",

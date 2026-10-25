@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import json
-import logging
 import tempfile
-import threading
 import uuid
 from pathlib import Path
 from time import perf_counter
@@ -18,22 +16,10 @@ from starlette.concurrency import run_in_threadpool
 
 from mindex.processing.dialogue import atomic_json
 from mindex.processing.pipeline import Pipeline
-from mindex.settings.runtime_settings import RuntimeConfig
+from mindex.shared.background_tasks import BackgroundTaskRunner
 from mindex.shared.config import Config, StrictModel, absolutize_config_paths, relativize_config_paths
-from mindex.shared.processing_lock import ProcessingLock, recover_tasks
-from mindex.shared.storage import Store, dumps
-from mindex.shared.task_cancel import TaskCancelled, registry_for
-from mindex.shared.task_progress import (
-    RETRYABLE,
-    begin_task,
-    mark_cancelled,
-    request_task_cancel,
-    reset_task_attempt,
-    save_task_progress,
-    task_logs,
-)
-
-log = logging.getLogger(__name__)
+from mindex.shared.processing_lock import ProcessingLock
+from mindex.shared.storage import dumps
 
 
 class DialogueOptions(StrictModel):
@@ -48,28 +34,6 @@ class DialogueOptions(StrictModel):
         if self.subtitle_file and (self.method != "subtitle" or self.subtitle_stream is not None):
             raise ValueError("上传字幕必须使用字幕方式，且不能同时选择内嵌字幕轨道")
         return self
-
-
-def task_public(row):
-    if row is None:
-        raise ValueError("找不到对白任务")
-    return {
-        key: json.loads(row[key])
-        if row.get(key) is not None and key in {"options", "progress", "result", "publication"}
-        else row.get(key)
-        for key in (
-            "id",
-            "source_id",
-            "status",
-            "options",
-            "progress",
-            "error",
-            "result",
-            "publication",
-            "created_at",
-            "updated_at",
-        )
-    }
 
 
 def execute_dialogue(
@@ -112,29 +76,18 @@ def execute_dialogue(
     return result
 
 
-class DialogueTasks:
-    def __init__(self, runtime: RuntimeConfig, store: Store, embedder=None):
-        self.runtime, self.store = runtime, store
-        self.threads = {}
-        self.embedder = embedder
-        recover_tasks(store, "dialogue_tasks")
+class DialogueTasks(BackgroundTaskRunner):
+    table = "dialogue_tasks"
+    label = "对白任务"
+    busy = "GPU 独占锁或该素材对白任务正在运行"
+    not_retryable = "只有失败或中断的任务可以重试"
+    thread_prefix = "dialogue"
 
     def lock(self, source_id):
         return ProcessingLock(self.runtime.current(), source_id=source_id, work="dialogue")
 
-    def get(self, task_id):
-        row = self.store.one("SELECT * FROM dialogue_tasks WHERE id=?", (task_id,))
-        if row is None:
-            raise HTTPException(404, "找不到对白任务")
-        return task_public(row)
-
     def start(self, source_id, options: DialogueOptions):
-        lock = self.lock(source_id)
-        try:
-            lock.acquire()
-        except Timeout as exc:
-            raise HTTPException(409, "GPU 独占锁或该素材对白任务正在运行，请稍后启动") from exc
-        try:
+        def create():
             if not self.store.one("SELECT 1 FROM sources WHERE id=?", (source_id,)):
                 raise HTTPException(404, "找不到素材")
             if options.subtitle_file:
@@ -146,119 +99,61 @@ class DialogueTasks:
                     raise HTTPException(422, str(exc)) from exc
             config = self.runtime.current().model_copy(deep=True)
             task_id = uuid.uuid4().hex
-            snapshot = config.model_dump()
-            snapshot["data_dir"] = str(config.data_dir)
-            # 数据目录内部的路径相对 data_dir.parent 存储（移动/改名后仍可解析）；
-            # 外部路径保持绝对，由 retry 回读时按当前 data_dir 还原。
-            snapshot = relativize_config_paths(config.data_dir, snapshot)
-            # Freeze service settings and retain a reference to credentials, never serialize keys.
-            snapshot["_credential_profiles"] = {
-                role: self.store.one("SELECT value FROM settings WHERE key=?", ("active.profile." + role,))
-                for role in ("asr", "embedding")
-            }
             self.store.execute(
                 "INSERT INTO dialogue_tasks(id,source_id,status,config,options) VALUES(?,?,?,?,?)",
-                (task_id, source_id, "queued", dumps(snapshot), options.model_dump_json()),
+                (task_id, source_id, "queued", self.freeze(config), options.model_dump_json()),
             )
-            self._launch(task_id, config, lock)
-            return self.get(task_id)
-        except BaseException:
-            lock.release()
-            raise
+            return task_id, config
 
-    def retry(self, task_id):
-        row = self.store.one("SELECT * FROM dialogue_tasks WHERE id=?", (task_id,))
-        if row is None:
-            raise HTTPException(404, "找不到对白任务")
-        lock = self.lock(row["source_id"])
-        try:
-            lock.acquire()
-        except Timeout as exc:
-            raise HTTPException(409, "GPU 独占锁或该素材对白任务正在运行，请稍后重试") from exc
-        try:
-            row = self.store.one("SELECT * FROM dialogue_tasks WHERE id=?", (task_id,))
-            if row is None:
-                raise HTTPException(404, "找不到对白任务")
-            publication = json.loads(row["publication"] or "{}")
-            if row["status"] not in RETRYABLE and publication.get("status") != "failed":
-                raise HTTPException(409, "只有失败或中断的任务可以重试")
-            snapshot = json.loads(row["config"])
-            profiles = snapshot.pop("_credential_profiles", {})
-            # 可移植路径按当前 data_dir 还原为绝对路径（镜像 load_config），
-            # 使数据目录移动/改名后的历史任务仍能解析 data_dir / 部署清单 / 字幕字体。
-            snapshot = absolutize_config_paths(self.runtime.base.data_dir, snapshot)
-            config = Config.model_validate(snapshot)
-            from mindex.admin.source_tasks import preserve_numbers
-            preserve_numbers(config, snapshot)
-            for role, reference in profiles.items():
-                if reference:
-                    profile = self.store.one(
-                        "SELECT api_key FROM model_profiles WHERE id=?", (reference["value"],)
-                    )
-                    if profile:
-                        getattr(config, role).api_key = profile["api_key"] or ""
-            reset_task_attempt(self.store, "dialogue_tasks", task_id)
-            self._launch(task_id, config, lock)
-            return self.get(task_id)
-        except BaseException:
-            lock.release()
-            raise
+        return self.submit(self.lock(source_id), create)
 
-    def cancel(self, task_id):
-        status = request_task_cancel(self.store, "dialogue_tasks", task_id)
-        if status is None:
-            raise HTTPException(404, "找不到对白任务")
-        if status not in {"queued", "running"}:
-            raise HTTPException(409, "只有排队中或运行中的任务可以取消")
-        return self.get(task_id)
+    def freeze(self, config):
+        snapshot = config.model_dump()
+        snapshot["data_dir"] = str(config.data_dir)
+        # 数据目录内部的路径相对 data_dir.parent 存储（移动/改名后仍可解析）；
+        # 外部路径保持绝对，由 retry 回读时按当前 data_dir 还原。
+        snapshot = relativize_config_paths(config.data_dir, snapshot)
+        # Freeze service settings and retain a reference to credentials, never serialize keys.
+        snapshot["_credential_profiles"] = {
+            role: self.store.one("SELECT value FROM settings WHERE key=?", ("active.profile." + role,))
+            for role in ("asr", "embedding")
+        }
+        return dumps(snapshot)
 
-    def _launch(self, task_id, config, lock):
-        thread = threading.Thread(
-            target=self._run, args=(task_id, config, lock), daemon=True, name="dialogue-" + task_id[:8]
+    def restore(self, row):
+        snapshot = json.loads(row["config"])
+        profiles = snapshot.pop("_credential_profiles", {})
+        # 可移植路径按当前 data_dir 还原为绝对路径（镜像 load_config），
+        # 使数据目录移动/改名后的历史任务仍能解析 data_dir / 部署清单 / 字幕字体。
+        snapshot = absolutize_config_paths(self.runtime.base.data_dir, snapshot)
+        config = Config.model_validate(snapshot)
+        from mindex.admin.source_tasks import preserve_numbers
+        preserve_numbers(config, snapshot)
+        for role, reference in profiles.items():
+            if reference:
+                profile = self.store.one(
+                    "SELECT api_key FROM model_profiles WHERE id=?", (reference["value"],)
+                )
+                if profile:
+                    getattr(config, role).api_key = profile["api_key"] or ""
+        return config
+
+    def execute(self, task_id, row, config, save):
+        options = json.loads(row["options"])
+        publish = options.pop("publish", True)
+        result = json.loads(row["result"]) if row["result"] and publish else execute_dialogue(
+            config, row["source_id"], **options, publish=False,
+            progress=lambda v: save("progress", v), embedder=self.embedder,
         )
-        self.threads[task_id] = thread
-        thread.start()
+        save("result", result)
+        if publish:
+            from mindex.admin.source_tasks import enqueue_publications
 
-    @task_logs("dialogue_tasks")
-    def _run(self, task_id, config, lock):
-        cancels = registry_for(self.store.root)
-        try:
-            row = self.store.one("SELECT * FROM dialogue_tasks WHERE id=?", (task_id,))
-            begin_task(self.store, "dialogue_tasks", task_id)
-
-            def progress(value):
-                save_task_progress(self.store, "dialogue_tasks", task_id, value)
-
-            options = json.loads(row["options"])
-            publish = options.pop("publish", True)
-            result = json.loads(row["result"]) if row["result"] and publish else execute_dialogue(
-                config, row["source_id"], **options, publish=False, progress=progress, embedder=self.embedder,
-            )
-            self.store.execute("UPDATE dialogue_tasks SET result=? WHERE id=?", (dumps(result), task_id))
-            if publish:
-                from mindex.admin.source_tasks import enqueue_publications
-
-                publication = enqueue_publications(self.runtime, self.store, row['source_id'], 'dialogue', self.embedder)
-                self.store.execute('UPDATE dialogue_tasks SET publication=? WHERE id=?', (dumps(publication), task_id))
-            else:
-                self.store.execute("UPDATE dialogue_tasks SET publication=? WHERE id=?",
-                                   (dumps({"status": "not_requested"}), task_id))
-            self.store.execute(
-                "UPDATE dialogue_tasks SET status='complete',result=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                (dumps(result), task_id),
-            )
-        except TaskCancelled:
-            mark_cancelled(self.store, "dialogue_tasks", task_id)
-        except BaseException as exc:
-            log.exception("Dialogue task %s failed", task_id)
-            self.store.execute(
-                "UPDATE dialogue_tasks SET status='failed',error=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                (str(exc)[:2000], task_id),
-            )
-        finally:
-            cancels.clear(task_id)
-            lock.release()
-            self.threads.pop(task_id, None)
+            save("publication", enqueue_publications(
+                self.runtime, self.store, row['source_id'], 'dialogue', self.embedder,
+            ))
+        else:
+            save("publication", {"status": "not_requested"})
 
 
 def dialogue_router(runtime, store, embedder=None):

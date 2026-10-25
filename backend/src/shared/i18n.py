@@ -10,7 +10,7 @@ from mindex.shared.web_assets import frontend_root
 
 @lru_cache(maxsize=1)
 def message_patterns():
-    catalog = json.loads((frontend_root() / "shared" / "messages.json").read_text())
+    catalog = json.loads((frontend_root() / "shared" / "messages.json").read_text(encoding="utf-8"))
     patterns = []
     for key, entry in catalog.items():
         if key.startswith("system.") or not re.search(r"[一-鿿]", entry["zh"]):

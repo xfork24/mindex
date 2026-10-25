@@ -34,8 +34,10 @@ from mindex.maintenance.backup_files import (
 )
 from mindex.models.adapters import ModelError
 from mindex.shared.config import Config, fingerprint
-from mindex.shared.processing_lock import SharedFileLock
+from mindex.shared.locks import SharedFileLock
 from mindex.shared.storage import Store, dumps
+
+pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
 
 
 def test_temporary_cleanup_retries_directory_recreated_by_finder(tmp_path, monkeypatch):
@@ -265,6 +267,7 @@ def test_secret_redaction_including_snapshot_pages(library, tmp_path, monkeypatc
     history = sqlite3.connect(config.data_dir / 'old.sqlite3')
     history.execute('PRAGMA journal_mode=WAL')
     history.execute('DROP TABLE person_features')  # 模拟旧 schema 的历史备份
+    history.execute('PRAGMA user_version=0')  # 旧 schema 早于版本化迁移
     history.commit()
     assert (config.data_dir / 'old.sqlite3-wal').exists()
     bundle = tmp_path / 'backup'

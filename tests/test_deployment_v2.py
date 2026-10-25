@@ -649,6 +649,7 @@ def test_index_and_search_require_gate_even_without_inference(native, video_file
     assert native["posts"] == []
 
 
+@pytest.mark.slow
 def test_real_media_smoke_reuses_fixed_baseline_and_rejects_changed_deployment(native, tmp_path, monkeypatch):
     from mindex.processing.pipeline import Pipeline
     from mindex.shared.media import command

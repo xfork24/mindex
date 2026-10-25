@@ -1,6 +1,6 @@
 """人物库的 SQLite 表结构、迁移与实体规范化。
 
-放在 shared 层，使 `Store` 初始化不必依赖 persons 包；人物业务逻辑仍在 `persons/persons.py`。
+放在 shared 层，使 `Store` 的 v1 迁移（`storage.METADATA_STEPS`）不必依赖 persons 包；人物业务逻辑仍在 `persons/persons.py`。
 """
 
 from __future__ import annotations
@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 
 from mindex.shared.config import fingerprint
+from mindex.shared.migrations import execute_script
 from mindex.shared.storage import dumps
 
 SCHEMA = """
@@ -44,9 +45,8 @@ CREATE TABLE IF NOT EXISTS search_releases(id TEXT PRIMARY KEY, content_id TEXT 
 
 
 def init_person_schema(db):
-    db.executescript(SCHEMA)
-    # Serialize schema inspection and migration so concurrent workers cannot both add the column.
-    db.execute("BEGIN IMMEDIATE")
+    """metadata 库 v1 迁移的人物部分：幂等，可在调用方事务内执行（由 ``migrate`` 串行化）。"""
+    execute_script(db, SCHEMA)
     columns = {row["name"] for row in db.execute("PRAGMA table_info(person_references)")}
     if "role_id" not in columns:
         db.execute("ALTER TABLE person_references ADD COLUMN role_id TEXT")

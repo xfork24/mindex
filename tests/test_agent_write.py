@@ -14,7 +14,7 @@ from mindex.agent.tools.common import PlanView, board_text
 from mindex.agent.tools.studio_write import ShotFields, ShotOperation, merge_into, plan_shots
 from mindex.api import create_app
 from mindex.studio import studio
-from mindex.studio import studio_workspace as ws
+from mindex.studio import workspace as ws
 from mindex.studio.studio import VISUAL_LIMIT
 
 SHOTS = ["shot-a1daad59aa", "shot-925281d5bb", "shot-77f0c3e1cc"]

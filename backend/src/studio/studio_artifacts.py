@@ -52,7 +52,7 @@ class ArtifactSession:
         self.directory.mkdir(parents=True, exist_ok=True)
         self.registry_path = safe_path(self.root, "checkpoints.json")
         try:
-            self.registry = json.loads(self.registry_path.read_text())
+            self.registry = json.loads(self.registry_path.read_text(encoding="utf-8"))
         except (FileNotFoundError, ValueError):
             self.registry = {}
         self.outputs = {}

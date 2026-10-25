@@ -1,5 +1,7 @@
 # 创作页分镜四类召回 + 镜头详情人物处理信息
 
+> 历史记录：本计划已实施（验收见 [implementation-review](../docs/history/implementation-review.md)），内容可能与当前代码不符，以 [docs/studio.md](../docs/studio.md) 为准。
+
 日期：2026-10-17。状态：已批准，待实施。
 
 ## Context

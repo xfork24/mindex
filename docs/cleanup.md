@@ -74,4 +74,4 @@ runs 行的 bytes 无法精确统计，诚实输出 0 并在 policy 说明。
 
 `sources/<hash>/` 原片、`metadata.sqlite3`、`deployments/`、`persons/references|imports`
 （有引用时）、`subtitles/*/uploads/` 字幕原件、在用 voices 样本、`capabilities/`、`plans/`、
-锁文件（0 字节）。素材级整源删除走 `/admin` 的删除接口（含 studio 引用保护）。
+锁文件（0 字节）、创作任务的 `studio/<任务>/versions/` 版本产物与 `inputs/`（查询媒体、画面来源文件、参考文稿；删除方案后不再被引用的版本也保留）、`agent.sqlite3`（只按 `agent_attachments` 规则删附件记录）。素材级整源删除走 `/admin` 的删除接口（含 studio 引用保护）。

@@ -49,7 +49,7 @@ def fixed_hash_paths(store):
             if 'node_modules' in path.parts or path.stat().st_size > 16 * 1024**2:
                 continue
             try:
-                visit(json.loads(path.read_text()))
+                visit(json.loads(path.read_text(encoding="utf-8")))
             except (ValueError, OSError, UnicodeError):
                 continue
     return pinned
@@ -175,7 +175,7 @@ def migrate(config, source_id=None, *, apply=False, verify=False):
         destination = store.root / 'migration-reports' / f'clips-{stamp}.json'
         destination.parent.mkdir(parents=True, exist_ok=True)
         report['report'] = str(destination)
-        destination.write_text(json.dumps(report, ensure_ascii=False, indent=2))
+        destination.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     return report
 
 
@@ -231,11 +231,11 @@ def prune(config, migration_report, *, apply=False):
     """Delete only freshly verified, reconstructible moment/scene entities after acceptance."""
     import os
 
-    from mindex.shared.processing_lock import SharedFileLock, index_write_lock
+    from mindex.shared import locks
 
     store = Store(config.data_dir)
     report_path = Path(migration_report)
-    migration = json.loads(report_path.read_text())
+    migration = json.loads(report_path.read_text(encoding="utf-8"))
     stamp = datetime.now(UTC).strftime('%Y%m%dT%H%M%S%fZ')
     destination = store.root / 'migration-reports' / f'prune-{stamp}.json'
     journal = destination.with_suffix('.jsonl')
@@ -243,8 +243,8 @@ def prune(config, migration_report, *, apply=False):
               'deleted_files': 0, 'deleted_logical_bytes': 0, 'released_allocated_bytes': 0,
               'report': str(destination), 'journal': str(journal)}
     # Explicit pipeline exclusivity also covers installations without enforce_gpu_lock.
-    with SharedFileLock(store.root / 'pipeline.lock', exclusive=True), \
-            SharedFileLock(store.root / "locks" / "library.lock", exclusive=True), index_write_lock(store.root):
+    with locks.acquire_ordered(store.root, ["pipeline", "index-write", "library"], exclusive=True,
+                               timeout={"index-write": None}):
         before = protected_digest(store)
         result['protected_before'] = before
         pinned = fixed_hash_paths(store)
@@ -305,7 +305,7 @@ def prune(config, migration_report, *, apply=False):
 
         def save():
             partial = destination.with_suffix('.partial')
-            partial.write_text(json.dumps(result, ensure_ascii=False, indent=2))
+            partial.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
             partial.replace(destination)
 
         save()

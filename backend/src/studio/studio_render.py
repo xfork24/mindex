@@ -29,12 +29,32 @@ def _escape_filter_path(path: Path) -> str:
     return str(path).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
 
 
-def subtitle_filter(srt_path: Path, subtitle: SubtitleConfig) -> str:
+# 竖屏字幕抬高到画面下方约 1/8 处，避开短视频平台底部的按钮与文案区（单位为 libass PlayResY=288）。
+PORTRAIT_MARGIN_V = 36
+
+
+def canvas_subtitle_style(canvas: str, width: int, height: int, subtitle: SubtitleConfig) -> dict | None:
+    """按画幅缩放字幕：16:9 返回 None（样式与旧版逐字节一致）。
+
+    libass 的 FontSize 以 PlayResY（SRT 转换缺省 288）为基准、随画面高度缩放；16:9 下画面高度即短边。
+    其他画幅把字号乘以 ``短边 / 高``，使字幕像素大小相对短边与 16:9 一致——全屏播放时（横屏看 16:9、
+    竖屏看 9:16）字幕的物理大小相同；1:1 系数为 1。竖屏另把 MarginV 提高到 ``PORTRAIT_MARGIN_V``。
+    """
+    if canvas == "16:9":
+        return None
+    scaled = round(subtitle.font_size * min(width, height) / height, 2)
+    style = {"FontSize": f"{scaled:g}"}
+    if height > width:
+        style["MarginV"] = str(PORTRAIT_MARGIN_V)
+    return style
+
+
+def subtitle_filter(srt_path: Path, subtitle: SubtitleConfig, *, style: dict | None = None) -> str:
     parts = f"subtitles={_escape_filter_path(srt_path)}"
     if subtitle.font_file:
         parts += f":fontsdir={_escape_filter_path(Path(subtitle.font_file).parent)}"
-    style = f"FontName={subtitle.font_family},FontSize={subtitle.font_size}"
-    return f"{parts}:force_style='{style}'"
+    values = {"FontName": subtitle.font_family, "FontSize": str(subtitle.font_size), **(style or {})}
+    return f"{parts}:force_style='{','.join(f'{k}={v}' for k, v in values.items())}'"
 
 
 def check_font(srt_path: Path, subtitle: SubtitleConfig):
@@ -105,7 +125,7 @@ def _concat_list(paths: list[Path], listing: Path):
     quote = "'"
     escaped = quote + "\\" + quote + quote
     entries = [f"file '{str(path.absolute()).replace(quote, escaped)}'" for path in paths]
-    listing.write_text("\n".join(entries) + "\n")
+    listing.write_text("\n".join(entries) + "\n", encoding="utf-8")
 
 
 def concat_media(paths: list[Path], output: Path, *, timeout: float = 600):
@@ -114,8 +134,18 @@ def concat_media(paths: list[Path], output: Path, *, timeout: float = 600):
     atomic_media(["-f", "concat", "-safe", "0", "-i", str(listing), "-c", "copy"], output, timeout=timeout)
 
 
-def cut_shot(source: Path, event, render, output: Path, *, frames: int | None = None):
-    """先裁所选区间，再补末帧，输出确定帧数。"""
+def fit_filters(width: int, height: int, fit: str = "pad") -> list[str]:
+    """pad：完整保留画面并补黑边；crop：铺满画布并居中裁掉多余部分。"""
+    if fit == "crop":
+        return [f"scale={width}:{height}:force_original_aspect_ratio=increase", f"crop={width}:{height}"]
+    return [
+        f"scale={width}:{height}:force_original_aspect_ratio=decrease",
+        f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2",
+    ]
+
+
+def cut_shot(source: Path, event, render, output: Path, *, frames: int | None = None, fit: str = "pad"):
+    """先裁所选区间，再按画幅适配（pad/crop）并补末帧，输出确定帧数。"""
     fps = Fraction(str(render.fps))
     frames = frames or math.ceil(event.audio.render_duration * fps)
     duration = float(frames / fps)
@@ -123,8 +153,7 @@ def cut_shot(source: Path, event, render, output: Path, *, frames: int | None = 
         f"trim=duration={event.video.end - event.video.start:.9f}",
         "setpts=PTS-STARTPTS",
         f"fps={fps.numerator}/{fps.denominator}",
-        f"scale={render.width}:{render.height}:force_original_aspect_ratio=decrease",
-        f"pad={render.width}:{render.height}:(ow-iw)/2:(oh-ih)/2",
+        *fit_filters(render.width, render.height, fit),
         "setsar=1",
         f"tpad=stop_mode=clone:stop_duration={duration + 1:.9f}",
     ]
@@ -155,6 +184,79 @@ def cut_shot(source: Path, event, render, output: Path, *, frames: int | None = 
         output,
         timeout=max(600, duration * 10),
     )
+
+
+# 静态图片解码上限（像素）：先归一化为 PNG（方向、透明底铺白），再按画幅超采样做推拉。
+STILL_MAX_PIXELS = 16_000_000
+STILL_SUPERSAMPLE = 2  # zoompan 的取景坐标按整数像素取整：在 2 倍画布上取景，减轻推拉抖动
+
+
+def still_motion(motion: str, strength: float, frames: int) -> tuple[str, str, str]:
+    """zoompan 的 z/x/y 表达式（``on`` 为输出帧序号，从 0 开始）。
+
+    最大放大倍数 ``1 + strength/2``：zoom-in 由 1 推到最大，zoom-out 反向；pan-left/pan-right 在最大
+    放大倍数下把取景框从右到左 / 从左到右水平移过整幅画面；none（或 strength=0）为静止画面。"""
+    peak = 1 + strength * 0.5 if motion != "none" else 1.0
+    k = peak - 1
+    t = f"(on/{max(frames - 1, 1)})"
+    center_x, center_y = "(iw-iw/zoom)/2", "(ih-ih/zoom)/2"
+    if motion == "zoom-in":
+        return f"1+{k:.6f}*{t}", center_x, center_y
+    if motion == "zoom-out":
+        return f"{peak:.6f}-{k:.6f}*{t}", center_x, center_y
+    if motion == "pan-left":
+        return f"{peak:.6f}", f"(iw-iw/zoom)*(1-{t})", center_y
+    if motion == "pan-right":
+        return f"{peak:.6f}", f"(iw-iw/zoom)*{t}", center_y
+    return f"{peak:.6f}", center_x, center_y
+
+
+def still_shot(image: Path, render, output: Path, *, frames: int, motion: str = "zoom-in",
+               strength: float = 0.3, fit: str = "pad"):
+    """静态图片 → 恰好 ``frames`` 帧、画幅尺寸的推拉/平移画面（无音轨）。
+
+    图片先经 ``shared/images.image_png`` 归一化（EXIF 方向、透明铺白、像素上限），再按 pad/crop 适配到
+    超采样画布，由 zoompan 逐帧取景后缩放到 ``render.width × render.height``；同一输入输出确定。"""
+    from mindex.shared.images import image_png
+
+    fps = Fraction(str(render.fps))
+    width, height = render.width, render.height
+    still = output.with_name(output.stem + ".still.png")
+    save_bytes(still, image_png(image, STILL_MAX_PIXELS))
+    zoom, x, y = still_motion(motion, strength, frames)
+    filters = [
+        *fit_filters(width * STILL_SUPERSAMPLE, height * STILL_SUPERSAMPLE, fit),
+        "setsar=1",
+        f"zoompan=z='{zoom}':x='{x}':y='{y}':d={frames}:s={width}x{height}:fps={fps.numerator}/{fps.denominator}",
+        "setsar=1",
+    ]
+    duration = float(frames / fps)
+    atomic_media(
+        [
+            "-i",
+            str(still),
+            "-map",
+            "0:v:0",
+            "-an",
+            "-vf",
+            ",".join(filters),
+            "-frames:v",
+            str(frames),
+            "-c:v",
+            "libx264",
+            "-preset",
+            render.preset,
+            "-crf",
+            str(render.crf),
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "+faststart",
+        ],
+        output,
+        timeout=max(600, duration * 10),
+    )
+    still.unlink(missing_ok=True)
 
 
 def process_shot_audio(voice_source: Path, ambient_source: Path | None, event, audio_cfg, output: Path):
@@ -212,7 +314,8 @@ def extract_ambient(source: Path, event, audio_cfg, output: Path):
     )
 
 
-def mux(video: Path, audio_track: Path, srt: Path, output: Path, config: Config, *, burn: bool):
+def mux(video: Path, audio_track: Path, srt: Path, output: Path, config: Config, *, burn: bool,
+        style: dict | None = None):
     render, subtitle = config.studio.render, config.studio.subtitle
     args = ["-i", str(video), "-i", str(audio_track)]
     if burn:
@@ -222,7 +325,7 @@ def mux(video: Path, audio_track: Path, srt: Path, output: Path, config: Config,
             "-map",
             "1:a:0",
             "-vf",
-            subtitle_filter(srt, subtitle),
+            subtitle_filter(srt, subtitle, style=style),
             "-c:v",
             "libx264",
             "-preset",
@@ -469,7 +572,7 @@ def render_timeline(
     return {"final": final, "srt": srt, "vtt": vtt, "events": len(timeline.events), "total_seconds": duration}
 
 
-def validate_final(path: Path, duration: float, burn: bool, fps: float):
+def validate_final(path: Path, duration: float, burn: bool, fps: float, *, size: tuple[int, int] | None = None):
     import json
 
     raw = json.loads(command(["ffprobe", "-v", "error", "-show_streams", "-of", "json", str(path)]))
@@ -480,6 +583,8 @@ def validate_final(path: Path, duration: float, burn: bool, fps: float):
         raise MediaError("成片缺少视频或配音轨道")
     if not burn and not any(s["codec_type"] == "subtitle" for s in streams):
         raise MediaError("成片缺少软字幕轨道")
+    if size is not None and (int(video["width"]), int(video["height"])) != tuple(size):
+        raise MediaError(f"成片分辨率 {video['width']}x{video['height']} 与画幅 {size[0]}x{size[1]} 不一致")
     if abs(float(video["duration"]) - duration) > 1 / fps + 0.002:
         raise MediaError("成片视频时长与渲染清单不一致")
     if abs(float(audio["duration"]) - duration) > 0.05:

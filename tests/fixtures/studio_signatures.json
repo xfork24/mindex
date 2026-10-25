@@ -1,0 +1,575 @@
+{
+ "signatures": {
+  "compose": "62a5253f47576b7823982de3",
+  "conflicts": {
+   "recall:a": [],
+   "recall:b": [],
+   "recall:c": [],
+   "render:a": [
+    "上游 tts 不兼容：方案音色已变化：Cherry → 另一个声音",
+    "上游 select 不兼容：上游 tts 不兼容：方案音色已变化：Cherry → 另一个声音"
+   ],
+   "render:b": [
+    "上游 tts 不兼容：方案音色已变化：Cherry → 另一个声音",
+    "上游 select 不兼容：上游 tts 不兼容：方案音色已变化：Cherry → 另一个声音"
+   ],
+   "render:c": [
+    "上游 tts 不兼容：方案音色已变化：Cherry → 另一个声音",
+    "上游 select 不兼容：上游 tts 不兼容：方案音色已变化：Cherry → 另一个声音"
+   ],
+   "select:a": [
+    "上游 tts 不兼容：方案音色已变化：Cherry → 另一个声音"
+   ],
+   "select:b": [
+    "上游 tts 不兼容：方案音色已变化：Cherry → 另一个声音"
+   ],
+   "select:c": [
+    "上游 tts 不兼容：方案音色已变化：Cherry → 另一个声音"
+   ],
+   "tts:a": [
+    "方案音色已变化：Cherry → 另一个声音"
+   ],
+   "tts:b": [
+    "方案音色已变化：Cherry → 另一个声音"
+   ],
+   "tts:c": [
+    "方案音色已变化：Cherry → 另一个声音"
+   ]
+  },
+  "preflight": {
+   "force": false,
+   "nodes": [
+    {
+     "action": "reuse",
+     "key": "recall:a",
+     "reason": "匹配成功版本",
+     "shot_id": "a",
+     "stage": "recall",
+     "version": "00000000000000000000000000000008"
+    },
+    {
+     "action": "reuse",
+     "key": "recall:b",
+     "reason": "匹配成功版本",
+     "shot_id": "b",
+     "stage": "recall",
+     "version": "0000000000000000000000000000000a"
+    },
+    {
+     "action": "reuse",
+     "key": "recall:c",
+     "reason": "匹配成功版本",
+     "shot_id": "c",
+     "stage": "recall",
+     "version": "0000000000000000000000000000000c"
+    },
+    {
+     "action": "reuse",
+     "key": "tts:a",
+     "reason": "匹配成功版本",
+     "shot_id": "a",
+     "stage": "tts",
+     "version": "00000000000000000000000000000009"
+    },
+    {
+     "action": "reuse",
+     "key": "tts:b",
+     "reason": "匹配成功版本",
+     "shot_id": "b",
+     "stage": "tts",
+     "version": "0000000000000000000000000000000b"
+    },
+    {
+     "action": "reuse",
+     "key": "tts:c",
+     "reason": "匹配成功版本",
+     "shot_id": "c",
+     "stage": "tts",
+     "version": "0000000000000000000000000000000d"
+    },
+    {
+     "action": "blocked",
+     "key": "select:a",
+     "reason": "召回版本没有候选，请修改查询或人工选片",
+     "shot_id": "a",
+     "stage": "select",
+     "version": "0000000000000000000000000000000e"
+    },
+    {
+     "action": "reuse",
+     "key": "select:b",
+     "reason": "匹配成功版本",
+     "shot_id": "b",
+     "stage": "select",
+     "version": "0000000000000000000000000000000f"
+    },
+    {
+     "action": "reuse",
+     "key": "select:c",
+     "reason": "匹配成功版本",
+     "shot_id": "c",
+     "stage": "select",
+     "version": "00000000000000000000000000000010"
+    },
+    {
+     "action": "blocked",
+     "key": "render:a",
+     "reason": "必需依赖阻塞",
+     "shot_id": "a",
+     "stage": "render",
+     "version": "00000000000000000000000000000011"
+    },
+    {
+     "action": "reuse",
+     "key": "render:b",
+     "reason": "匹配成功版本",
+     "shot_id": "b",
+     "stage": "render",
+     "version": "00000000000000000000000000000012"
+    },
+    {
+     "action": "reuse",
+     "key": "render:c",
+     "reason": "匹配成功版本",
+     "shot_id": "c",
+     "stage": "render",
+     "version": "00000000000000000000000000000013"
+    },
+    {
+     "action": "blocked",
+     "key": "compose",
+     "reason": "必需依赖阻塞",
+     "shot_id": null,
+     "stage": "compose",
+     "version": null
+    }
+   ],
+   "plan_id": "000000000000",
+   "revision": "8e9c1bdc7aa77fd19a190006",
+   "token": "6ee602e765839ba346ac90a8"
+  },
+  "preflight:force": {
+   "force": true,
+   "nodes": [
+    {
+     "action": "rebuild",
+     "key": "recall:a",
+     "reason": "缺少匹配的成功版本",
+     "shot_id": "a",
+     "stage": "recall",
+     "version": null
+    },
+    {
+     "action": "skip",
+     "key": "recall:b",
+     "reason": "人工选片不依赖召回",
+     "shot_id": "b",
+     "stage": "recall",
+     "version": null
+    },
+    {
+     "action": "rebuild",
+     "key": "recall:c",
+     "reason": "缺少匹配的成功版本",
+     "shot_id": "c",
+     "stage": "recall",
+     "version": null
+    },
+    {
+     "action": "rebuild",
+     "key": "tts:a",
+     "reason": "缺少匹配的成功版本",
+     "shot_id": "a",
+     "stage": "tts",
+     "version": null
+    },
+    {
+     "action": "rebuild",
+     "key": "tts:b",
+     "reason": "缺少匹配的成功版本",
+     "shot_id": "b",
+     "stage": "tts",
+     "version": null
+    },
+    {
+     "action": "rebuild",
+     "key": "tts:c",
+     "reason": "缺少匹配的成功版本",
+     "shot_id": "c",
+     "stage": "tts",
+     "version": null
+    },
+    {
+     "action": "rebuild",
+     "key": "select:a",
+     "reason": "缺少匹配的成功版本",
+     "shot_id": "a",
+     "stage": "select",
+     "version": null
+    },
+    {
+     "action": "rebuild",
+     "key": "select:b",
+     "reason": "缺少匹配的成功版本",
+     "shot_id": "b",
+     "stage": "select",
+     "version": null
+    },
+    {
+     "action": "rebuild",
+     "key": "select:c",
+     "reason": "缺少匹配的成功版本",
+     "shot_id": "c",
+     "stage": "select",
+     "version": null
+    },
+    {
+     "action": "rebuild",
+     "key": "render:a",
+     "reason": "缺少匹配的成功版本",
+     "shot_id": "a",
+     "stage": "render",
+     "version": null
+    },
+    {
+     "action": "rebuild",
+     "key": "render:b",
+     "reason": "缺少匹配的成功版本",
+     "shot_id": "b",
+     "stage": "render",
+     "version": null
+    },
+    {
+     "action": "rebuild",
+     "key": "render:c",
+     "reason": "缺少匹配的成功版本",
+     "shot_id": "c",
+     "stage": "render",
+     "version": null
+    },
+    {
+     "action": "rebuild",
+     "key": "compose",
+     "reason": "全部分镜就绪后合成",
+     "shot_id": null,
+     "stage": "compose",
+     "version": null
+    }
+   ],
+   "plan_id": "000000000000",
+   "revision": "8e9c1bdc7aa77fd19a190006",
+   "token": "030c7521937a444481c18398"
+  },
+  "recall:a": "ff9b4379032031f12fb74a55",
+  "recall:a:scoped": "325449452c28751536d0d76a",
+  "recall:b": "30eae49268fcc08109e60101",
+  "recall:c": "606a1c8f251e010f8716fdc3",
+  "render:a": "efcc0da967a163eafde12b78",
+  "render:b": "35ca96751295accd647e71ed",
+  "render:c": "84f6411c8779ba8225917073",
+  "script": "b606278ad49223c6fae83576",
+  "select:a": "f487860b12f2a75e13c4a841",
+  "select:b": "c405e81aae9dba2942096f4c",
+  "select:c": "380d9b6a8fbf9796fb83a35e",
+  "split": "b59ef66634ae2b502896f78e",
+  "tts:a": "6cfe19eae539980a50a4542b",
+  "tts:b": "40dc3a846376c3503bc54342",
+  "tts:c": "bcd719fdc78612b314fe2538"
+ },
+ "timeline": {
+  "boundaries": [
+   {
+    "end": 0.9009009009009009,
+    "end_sample": 43243,
+    "frames": 27,
+    "shot_id": "a",
+    "start": 0.0,
+    "start_sample": 0
+   },
+   {
+    "end": 1.8018018018018018,
+    "end_sample": 86486,
+    "frames": 27,
+    "shot_id": "b",
+    "start": 0.9009009009009009,
+    "start_sample": 43243
+   }
+  ],
+  "burn": false,
+  "options": {
+   "alignment": "auto",
+   "atempo": 1.0,
+   "audio_mode": "tts_only",
+   "burn": false,
+   "canvas": "16:9",
+   "duck_gain": 0.15,
+   "fit": "pad",
+   "recall_limit": 20,
+   "references": [],
+   "template_id": "base",
+   "voice": null,
+   "voice_mode": "inherit"
+  },
+  "order": [
+   "a",
+   "b"
+  ],
+  "shots": [
+   {
+    "content": {
+     "estimated_seconds": 1.0,
+     "granularity": null,
+     "id": "a",
+     "query": "红色",
+     "recall": null,
+     "recall_limit": null,
+     "text": "红色开场。"
+    },
+    "recall": [
+     "9d63af9fd724d46a9839fb3a",
+     "2b86ce260dc8797d8441334b",
+     "550e41a4eaaef197ef8b83ef"
+    ],
+    "render": {
+     "event": {
+      "audio": {
+       "atempo": 1.0,
+       "duration": 0.9,
+       "render_duration": 0.899938
+      },
+      "order": 1,
+      "shot_id": "a",
+      "subtitle": {
+       "end": 0.899938,
+       "start": 0.0,
+       "text": "红色开场。"
+      },
+      "video": {
+       "alignment": "manual",
+       "end": 0.899938,
+       "rank": 1,
+       "score": 0.01639344262295082,
+       "segment_id": "9d63af9fd724d46a9839fb3a",
+       "segment_ids": [
+        "9d63af9fd724d46a9839fb3a"
+       ],
+       "source_id": "4d808b9b6e502d8c84990c1fb005d19347c6b6bd877bf841ba88f5747aad6052",
+       "source_name": "测试素材.mp4",
+       "start": 0.0
+      },
+      "warning": null
+     },
+     "fps": "2997/100",
+     "frames": 27,
+     "samples": 43197
+    },
+    "select": {
+     "actual_range": {
+      "end": 0.899938,
+      "source_id": "4d808b9b6e502d8c84990c1fb005d19347c6b6bd877bf841ba88f5747aad6052",
+      "start": 0.0
+     },
+     "anchor": {
+      "end": 1.0,
+      "rank": 1,
+      "segment_id": "9d63af9fd724d46a9839fb3a",
+      "source_id": "4d808b9b6e502d8c84990c1fb005d19347c6b6bd877bf841ba88f5747aad6052",
+      "start": 0.0
+     },
+     "anchor_choice": {
+      "mode": "auto"
+     },
+     "atempo": 1.0,
+     "context_range": {
+      "end": 10.0,
+      "start": 0.0
+     },
+     "event": {
+      "audio": {
+       "atempo": 1.0,
+       "duration": 0.9,
+       "render_duration": 0.899938
+      },
+      "order": 1,
+      "shot_id": "a",
+      "subtitle": {
+       "end": 0.899938,
+       "start": 0.0,
+       "text": "红色开场。"
+      },
+      "video": {
+       "alignment": "manual",
+       "end": 0.899938,
+       "rank": 1,
+       "score": 0.01639344262295082,
+       "segment_id": "9d63af9fd724d46a9839fb3a",
+       "segment_ids": [
+        "9d63af9fd724d46a9839fb3a"
+       ],
+       "source_id": "4d808b9b6e502d8c84990c1fb005d19347c6b6bd877bf841ba88f5747aad6052",
+       "source_name": "测试素材.mp4",
+       "start": 0.0
+      },
+      "warning": null
+     },
+     "freeze_seconds": 0,
+     "manual": false,
+     "range": {
+      "atempo": 1.0,
+      "context_range": {
+       "end": 10.0,
+       "start": 0.0
+      },
+      "end": 0.899938,
+      "resource_key": "b0f405242797a75f2839f02a",
+      "segment_ids": [
+       "9d63af9fd724d46a9839fb3a"
+      ],
+      "source_id": "4d808b9b6e502d8c84990c1fb005d19347c6b6bd877bf841ba88f5747aad6052",
+      "start": 0.0
+     },
+     "trim_seconds": 0
+    },
+    "shot_id": "a",
+    "tts": {
+     "channels": 1,
+     "duration": 0.899938,
+     "sample_rate": 16000
+    }
+   },
+   {
+    "content": {
+     "estimated_seconds": 1.0,
+     "granularity": null,
+     "id": "b",
+     "query": "蓝色",
+     "recall": null,
+     "recall_limit": null,
+     "text": "蓝色结尾。"
+    },
+    "recall": [
+     "550e41a4eaaef197ef8b83ef",
+     "2b86ce260dc8797d8441334b",
+     "9d63af9fd724d46a9839fb3a"
+    ],
+    "render": {
+     "event": {
+      "audio": {
+       "atempo": 1.0,
+       "duration": 0.9,
+       "render_duration": 0.899938
+      },
+      "order": 1,
+      "shot_id": "b",
+      "subtitle": {
+       "end": 0.899938,
+       "start": 0.0,
+       "text": "蓝色结尾。"
+      },
+      "video": {
+       "alignment": "manual",
+       "end": 1.8999380000000001,
+       "rank": 1,
+       "score": 0.01639344262295082,
+       "segment_id": "550e41a4eaaef197ef8b83ef",
+       "segment_ids": [
+        "550e41a4eaaef197ef8b83ef"
+       ],
+       "source_id": "4d808b9b6e502d8c84990c1fb005d19347c6b6bd877bf841ba88f5747aad6052",
+       "source_name": "测试素材.mp4",
+       "start": 1.0
+      },
+      "warning": null
+     },
+     "fps": "2997/100",
+     "frames": 27,
+     "samples": 43197
+    },
+    "select": {
+     "actual_range": {
+      "end": 1.8999380000000001,
+      "source_id": "4d808b9b6e502d8c84990c1fb005d19347c6b6bd877bf841ba88f5747aad6052",
+      "start": 1.0
+     },
+     "anchor": {
+      "end": 2.0,
+      "rank": 1,
+      "segment_id": "550e41a4eaaef197ef8b83ef",
+      "source_id": "4d808b9b6e502d8c84990c1fb005d19347c6b6bd877bf841ba88f5747aad6052",
+      "start": 1.0
+     },
+     "anchor_choice": {
+      "mode": "auto"
+     },
+     "atempo": 1.0,
+     "context_range": {
+      "end": 10.0,
+      "start": 0.0
+     },
+     "event": {
+      "audio": {
+       "atempo": 1.0,
+       "duration": 0.9,
+       "render_duration": 0.899938
+      },
+      "order": 1,
+      "shot_id": "b",
+      "subtitle": {
+       "end": 0.899938,
+       "start": 0.0,
+       "text": "蓝色结尾。"
+      },
+      "video": {
+       "alignment": "manual",
+       "end": 1.8999380000000001,
+       "rank": 1,
+       "score": 0.01639344262295082,
+       "segment_id": "550e41a4eaaef197ef8b83ef",
+       "segment_ids": [
+        "550e41a4eaaef197ef8b83ef"
+       ],
+       "source_id": "4d808b9b6e502d8c84990c1fb005d19347c6b6bd877bf841ba88f5747aad6052",
+       "source_name": "测试素材.mp4",
+       "start": 1.0
+      },
+      "warning": null
+     },
+     "freeze_seconds": 0,
+     "manual": false,
+     "range": {
+      "atempo": 1.0,
+      "context_range": {
+       "end": 10.0,
+       "start": 0.0
+      },
+      "end": 1.8999380000000001,
+      "resource_key": "b0f405242797a75f2839f02a",
+      "segment_ids": [
+       "550e41a4eaaef197ef8b83ef"
+      ],
+      "source_id": "4d808b9b6e502d8c84990c1fb005d19347c6b6bd877bf841ba88f5747aad6052",
+      "start": 1.0
+     },
+     "trim_seconds": 0
+    },
+    "shot_id": "b",
+    "tts": {
+     "channels": 1,
+     "duration": 0.899938,
+     "sample_rate": 16000
+    }
+   }
+  ],
+  "stages": [
+   "board",
+   "content",
+   "recall",
+   "render",
+   "select",
+   "tts"
+  ],
+  "total_frames": 54,
+  "total_samples": 86486,
+  "total_seconds": 1.8018018018018018
+ }
+}

@@ -293,7 +293,8 @@ def test_minimax_presets_use_cn_domain():
 
 
 def test_roles_cover_all_sections():
-    assert set(ROLES) == {"analyzer", "writer", "generator", "embedding", "asr", "tts", "person", "agent"}
+    assert set(ROLES) == {"analyzer", "writer", "generator", "embedding", "asr", "tts", "video_generator",
+                          "image_generator", "music_generator", "animator", "person", "agent"}
 
 
 def test_writer_config_defaults_to_generator():

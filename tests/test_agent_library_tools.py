@@ -22,8 +22,11 @@ from mindex.agent.tools import build_registry
 from mindex.api import create_app
 from mindex.processing.indexing import IndexBuilder
 from mindex.processing.pipeline import Pipeline
-from mindex.shared.processing_lock import ProcessingLock, SharedFileLock
+from mindex.shared.locks import SharedFileLock
+from mindex.shared.processing_lock import ProcessingLock
 from mindex.shared.storage import Store
+
+pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
 
 REF = "attachment://" + "b" * 32
 SRT = "1\n00:00:00,000 --> 00:00:01,000\n你好\n".encode()

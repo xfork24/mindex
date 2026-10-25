@@ -13,14 +13,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from mindex.agent.schema import initialize
 from mindex.agent.session_store import Database, now_ms
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS agent_changes (
-  seq INTEGER PRIMARY KEY AUTOINCREMENT, time INTEGER NOT NULL, kind TEXT NOT NULL, source TEXT NOT NULL,
-  session_id TEXT, tab TEXT, data TEXT NOT NULL
-);
-"""
 KINDS = ("mutation", "focus")
 SOURCES = ("agent", "mcp")
 KEEP = 5000
@@ -29,9 +24,7 @@ KEEP = 5000
 class ChangeFeed:
     def __init__(self, data_dir: Path):
         self.db = Database(Path(data_dir) / "agent.sqlite3")
-        with self.db.connect() as db:
-            db.execute("PRAGMA journal_mode=WAL")
-            db.executescript(SCHEMA)
+        initialize(self.db)
         self._published = 0
 
     def publish(self, kind: str, data: dict, *, source: str = "agent", session_id: str | None = None,

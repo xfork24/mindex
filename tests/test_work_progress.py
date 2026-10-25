@@ -13,6 +13,8 @@ from mindex.processing.pipeline import Pipeline
 from mindex.shared.processing_lock import index_write_lock
 from mindex.shared.task_progress import save_task_progress
 
+pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
+
 
 @pytest.mark.parametrize("work", ["shots", "dialogue", "analysis"])
 def test_publish_work_reports_scope_counts_for_every_channel(config, video_file, work):

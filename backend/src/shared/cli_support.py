@@ -1,4 +1,7 @@
-"""CLI 命令共用的输出辅助。"""
+"""Typer 命令共用的辅助：稳定排序的命令组与 JSON 输出。
+
+放在 shared，供顶层 ``cli*.py`` 与 ``maintenance/backup_cli.py`` 共用，维护包因此不依赖 CLI 层。
+"""
 
 from __future__ import annotations
 

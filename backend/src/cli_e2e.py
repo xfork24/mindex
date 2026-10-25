@@ -9,7 +9,7 @@ from typing import Annotated
 
 import typer
 
-from mindex.cli_common import SortedGroup, print_json
+from mindex.shared.cli_support import SortedGroup, print_json
 from mindex.shared.config import fingerprint
 
 app = typer.Typer(
@@ -132,7 +132,7 @@ def pin_deployment(
     if output.exists():
         raise typer.BadParameter("清单已存在；更换部署请使用新文件，保留旧清单")
     try:
-        parameters = json.loads(launch_parameters.read_text()) if launch_parameters else {}
+        parameters = json.loads(launch_parameters.read_text(encoding="utf-8")) if launch_parameters else {}
         if not isinstance(parameters, dict):
             raise TypeError("启动参数 JSON 必须为对象")
         # 参数错误应在联网/读取大文件前报告。

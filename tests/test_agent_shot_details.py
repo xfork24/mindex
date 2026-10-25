@@ -28,13 +28,13 @@ from mindex.agent.tools.common import STAGES, PlanView
 from mindex.agent.tools.shot_details import page_details, speech_info, subtitle_info
 from mindex.api import create_app
 from mindex.studio import studio
-from mindex.studio import studio_workspace as ws
+from mindex.studio import workspace as ws
 
 HEX = "0123456789abcdef"
 STATUSES = ("complete", "failed", "running", "pending")
 DETAIL_KEYS = {
     "index", "short_id", "shot_id", "text", "query", "visual", "estimated_seconds", "granularity",
-    "recall_limit", "recall", "manual_range", "stages", "subtitle", "speech",
+    "recall_limit", "recall", "source", "manual_range", "stages", "subtitle", "speech", "generation", "animation", "drawing", "music",
 }
 
 # 旁白/查询等自由文本：含换行、全角空格、连续空白、标点与 emoji
@@ -46,7 +46,7 @@ def free_text(min_size: int, max_size: int):
     return st.lists(CHARS, min_size=min_size, max_size=max_size).map("".join)
 
 
-hex_str = lambda n: st.text(HEX, min_size=n, max_size=n)  # noqa: E731
+hex_str = lambda n: st.text(HEX, min_size=n, max_size=n)
 finite = st.floats(min_value=0, max_value=600, allow_nan=False, allow_infinity=False)
 
 
@@ -213,6 +213,7 @@ def test_page_details_complete_and_consistent(view: PlanView):
         assert detail["granularity"] == content.get("granularity")
         assert detail["recall_limit"] == content.get("recall_limit")
         assert detail["recall"] == (content.get("recall") or None)
+        assert (detail["generation"] is None) == ((content.get("source") or {}).get("kind") != "aigc")
         assert detail["manual_range"] == view.plan.get("ranges", {}).get(sid)
         assert set(detail["stages"]) == set(STAGES)
         assert detail["short_id"] == row["short_id"]
@@ -394,7 +395,9 @@ def test_ref_details_equal_list_details(data):
 
 
 # Feature: agent-storyboard-detail-access, Property 9: 页面定位
-@settings(max_examples=100, deadline=None)
+# 本属性有意生成大方案与长引用列表（越过 20 个分镜的定位上限），数据量大是设计使然。
+@settings(max_examples=100, deadline=None,
+          suppress_health_check=[HealthCheck.data_too_large, HealthCheck.too_slow])
 @given(data=st.data())
 def test_details_focus_page_location(data):
     """**Validates: Requirements 7.1, 7.2**"""

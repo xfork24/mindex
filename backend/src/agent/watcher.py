@@ -121,7 +121,7 @@ class TaskWatcher:
                 await asyncio.sleep(self.interval)
         except asyncio.CancelledError:
             raise
-        except Exception as exc:  # noqa: BLE001 — 跟踪失败也要告知会话
+        except Exception as exc:  # 跟踪失败也要告知会话
             log.exception("构建跟踪失败")
             summary = {"job_id": job, "build_id": build_id, "status": "unknown", "error": str(exc)}
         self.runtime._append(sid, "plugin:mindex/build-finished", summary)
@@ -162,7 +162,7 @@ class TaskWatcher:
                 await asyncio.sleep(self.interval)
         except asyncio.CancelledError:
             raise
-        except Exception as exc:  # noqa: BLE001 — 跟踪失败也要告知会话
+        except Exception as exc:  # 跟踪失败也要告知会话
             log.exception("后台任务跟踪失败")
             summary = {**target, "status": "unknown", "error": str(exc)}
         self.runtime._append(sid, "plugin:mindex/task-finished", summary)

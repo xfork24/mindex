@@ -11,6 +11,8 @@ from fastapi.testclient import TestClient
 
 from mindex.agent.llm.scripted import ScriptedLlm
 
+pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
+
 
 def test_scenario_names_unique():
     names = [s.name for s in SCENARIOS]

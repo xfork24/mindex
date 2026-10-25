@@ -25,8 +25,13 @@ def inspect_boundary(path, timestamp, origin=0., *, include_rgb=False):
                              '-fps_mode', 'passthrough', '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-'],
                             capture_output=True, check=True, timeout=90)
     frames = np.frombuffer(result.stdout, np.uint8).reshape(-1, 27, 48, 3).astype(np.float32)
-    log = result.stderr.decode()
-    num, den = map(int, re.search(r'config in time_base:\s*(\d+)/(\d+)', log).groups())
+    log = result.stderr.decode(errors='replace')
+    base = re.search(r'config in time_base:\s*(\d+)/(\d+)', log)
+    if base is None:
+        raise MediaError('无法检查镜头边界：ffmpeg 输出中缺少 time_base 信息')
+    num, den = map(int, base.groups())
+    if not den:
+        raise MediaError('无法检查镜头边界：ffmpeg 报告的 time_base 分母为 0')
     times = [int(pts) * num / den - origin for pts in re.findall(r'\bn:\s*\d+\s+pts:\s*(-?\d+)', log)][:len(frames)]
     if len(times) != len(frames) or len(times) < 3:
         raise MediaError('Cannot inspect shot boundary PTS')
@@ -55,7 +60,7 @@ def audit(store, source_id=None, *, workers=4, progress=None):
     report = {'version': VERSION, 'sources': [], 'physical_deletions': 0}
     for source in sources:
         plan_path = store.root / 'plans' / f"{source['id']}.json"
-        plan_data = json.loads(plan_path.read_text()) if plan_path.exists() else {}
+        plan_data = json.loads(plan_path.read_text(encoding="utf-8")) if plan_path.exists() else {}
         if plan_data.get('boundary_repair', {}).get('version') == VERSION:
             shots = store.segments(source['id'], 'shot')
             report['sources'].append({'source_id': source['id'], 'name': source['name'],
@@ -100,7 +105,7 @@ def adjusted(segment, shots, changes):
 def _write_json(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
     partial = path.with_suffix('.partial')
-    partial.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n')
+    partial.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n', encoding="utf-8")
     partial.replace(path)
 
 

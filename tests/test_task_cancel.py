@@ -165,7 +165,7 @@ def test_cancel_endpoints_queued_terminal_and_unknown(config):
 def test_cancelled_while_queued_never_starts_work(config):
     """排队时取消：线程启动后既不置 running 也不执行，锁全部释放。"""
     from mindex.admin.dialogue_tasks import DialogueTasks
-    from mindex.persons.person_processing import PersonOptions, PersonTasks
+    from mindex.persons.person_processing import PersonTasks
     from mindex.settings.runtime_settings import RuntimeConfig
 
     store = Store(config.data_dir)
@@ -176,9 +176,9 @@ def test_cancelled_while_queued_never_starts_work(config):
     dialogue.cancel("d1")
     persons.cancel("p1")
     lock = dialogue.lock("s").acquire()
-    dialogue._run("d1", config, lock)
+    dialogue.run("d1", config, lock)
     lock = persons.lock("s").acquire()
-    persons.run("p1", config, "s", PersonOptions(), lock)
+    persons.run("p1", config, lock)
     for manager, identifier in ((dialogue, "d1"), (persons, "p1")):
         row = manager.get(identifier)
         assert row["status"] == "cancelled" and row["error"] == "已取消"
@@ -372,6 +372,7 @@ def test_running_person_task_cancels_between_progress_and_resumes(config, video_
     assert value["result"] == {"source_id": sid, "shots": 3}
 
 
+@pytest.mark.slow
 def test_index_build_cancelled_keeps_active_index_and_resumes(config, video_file, tmp_path):
     """发布中途取消：活动索引不变、候选版本保持 building 可续建，重试复用已写向量。"""
     from conftest import FixtureEmbedder

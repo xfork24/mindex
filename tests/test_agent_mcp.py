@@ -13,17 +13,17 @@ from fastapi.testclient import TestClient
 
 pytest.importorskip("mcp")
 
-from mcp.client.session import ClientSession  # noqa: E402
-from mcp.client.stdio import StdioServerParameters, stdio_client  # noqa: E402
-from mcp.shared.memory import create_connected_server_and_client_session  # noqa: E402
+from mcp.client.session import ClientSession
+from mcp.client.stdio import StdioServerParameters, stdio_client
+from mcp.shared.memory import create_connected_server_and_client_session
 
-from mindex.agent.loopback import MindexClient  # noqa: E402
-from mindex.agent.mcp_server import build_server, exported, server_for_app  # noqa: E402
-from mindex.agent.registry import ToolContext  # noqa: E402
-from mindex.agent.tools import build_registry  # noqa: E402
-from mindex.api import create_app  # noqa: E402
-from mindex.studio import studio  # noqa: E402
-from mindex.studio import studio_workspace as ws  # noqa: E402
+from mindex.agent.loopback import MindexClient
+from mindex.agent.mcp_server import build_server, exported, server_for_app
+from mindex.agent.registry import ToolContext
+from mindex.agent.tools import build_registry
+from mindex.api import create_app
+from mindex.studio import studio
+from mindex.studio import workspace as ws
 
 
 @pytest.fixture

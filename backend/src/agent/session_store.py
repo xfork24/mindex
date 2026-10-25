@@ -22,27 +22,8 @@ from pathlib import Path
 from uuid import uuid4
 
 from mindex.agent.llm.types import tool_calls, tool_message
+from mindex.agent.schema import initialize
 from mindex.agent.vision import image_count
-
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS agent_sessions (
-  id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'idle',
-  grants TEXT NOT NULL DEFAULT '[]', context TEXT, loaded_domains TEXT NOT NULL DEFAULT '[]',
-  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS agent_events (
-  session_id TEXT NOT NULL, seq INTEGER NOT NULL, time INTEGER NOT NULL, type TEXT NOT NULL,
-  data TEXT NOT NULL, ignorable INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(session_id, seq)
-);
-CREATE TABLE IF NOT EXISTS agent_secrets (
-  id TEXT PRIMARY KEY, session_id TEXT NOT NULL, value TEXT NOT NULL,
-  created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS agent_gaps (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, request TEXT NOT NULL, reason TEXT NOT NULL,
-  suggestion TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL
-);
-"""
 
 JSON_FIELDS = ("grants", "context", "loaded_domains")
 SECRET_PREFIX = "secret://"
@@ -87,13 +68,7 @@ class Database:
 class SessionStore:
     def __init__(self, data_dir: Path):
         self.store = Database(Path(data_dir) / "agent.sqlite3")
-        with self.store.connect() as db:
-            db.execute("PRAGMA journal_mode=WAL")
-            db.executescript(SCHEMA)
-            # 旧库的 agent_sessions 没有 loaded_domains（CREATE TABLE IF NOT EXISTS 不会补列）。
-            columns = {row["name"] for row in db.execute("PRAGMA table_info(agent_sessions)")}
-            if "loaded_domains" not in columns:
-                db.execute("ALTER TABLE agent_sessions ADD COLUMN loaded_domains TEXT NOT NULL DEFAULT '[]'")
+        initialize(self.store)
 
     # ------------------------------------------------------------ 会话
     def create(self, title: str = "") -> dict:

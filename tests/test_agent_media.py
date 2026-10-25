@@ -16,6 +16,8 @@ from mindex.agent.registry import ToolContext
 from mindex.agent.tools import build_registry
 from mindex.agent.tools.media import clean, item, safe
 
+pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
+
 
 @pytest.fixture
 def built(config, video_file):

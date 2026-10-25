@@ -13,7 +13,7 @@ from conftest import legacy_job
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from mindex.studio import studio_workspace as ws
+from mindex.studio import workspace as ws
 from mindex.studio.studio import VISUAL_LIMIT, Shot, clip_visual, visual_error
 
 # ---------------------------------------------------------------------------

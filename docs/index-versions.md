@@ -38,6 +38,8 @@ Chroma collection 名为 `idx-<index_id>`，`embedding_function=None`（显式�
 3. `--activate` 或 `mindex indexes activate ID` → 再查一遍 → SQLite 事务内把 `settings.active` 指向该索引。
 4. `mindex check [--index-id]` 可随时复查，问题列出且退出码 1。
 
+Web 与智能助手使用同样约束的 `/api/indexes`（`admin/indexes.py`）：`GET /api/indexes` 列出全部版本（新到旧）、当前活动版本与检索组合；`GET /api/indexes/{id}/check` 返回 `{index_id, ok, issues}`；`POST /api/indexes/{id}/activate` 持处理锁与索引写锁，依次检查一致性、嵌入空间与能力门槛、视频预处理，全部通过才激活并在后台预热检索（检查有问题 422，空间或预处理不符 503，锁超时 409，失败时活动索引不变）。
+
 **回退 = 先切回旧模型服务/配置，再 `indexes activate 旧索引ID`。** 只激活旧索引而查询端还用新模型会被空间身份校验拒绝（503）。
 
 ## chroma HNSW 落盘阈值与向量孤儿自愈

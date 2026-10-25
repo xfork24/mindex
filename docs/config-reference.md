@@ -4,6 +4,8 @@
 
 > **运行时设置**：模型服务连接、音色与检索调参可在 `/settings` 设置页管理（SQLite 覆盖层，保存即热生效，Web 与 CLI 共用），本文档的 yaml 取值是「未激活任何档案时」的基础值。详见 [settings.md](settings.md)。所有服务段共有的可选键 `api_key`（默认空，仅由设置页写入；优先于 `api_key_env`）不参与任何指纹。
 
+> 模型请求超时：每个模型段的 `timeout` 是对该模型单次请求的超时（秒），设置页模型档案的“请求超时（秒）”可覆盖，所有调用该模型的地方（构建、连接测试、音色目录与声音克隆、人物识别、健康探测等）都使用它。缺省值：图片、视频、音乐与动画生成 600 秒，其他模型 180 秒。
+
 ## 顶层
 
 | 键 | 类型 | 默认 | 说明 |
@@ -48,15 +50,16 @@
 
 | 键 | 类型 | 默认 | 说明 |
 |---|---|---|---|
-| `backend` | `mindex` \| `llama_cpp` \| `openai` | `mindex` | `mindex` 直接返回时间戳；`llama_cpp` 与 `openai`（如百炼 qwen3-asr-flash，chat + `input_audio`）只出原始文本，需再 `align` |
+| `backend` | `mindex` \| `llama_cpp` \| `openai` \| `minimax` | `mindex` | `mindex` 直接返回时间戳；`minimax` 走 MiniMax `/speech_to_text` 并解析词级时间戳，无需 `align`；`llama_cpp` 与 `openai`（如百炼 qwen3-asr-flash，chat + `input_audio`）只出原始文本，需再 `align` |
 | `deployment_manifest` | str \| null | null | llama_cpp 时必填 |
 | `base_url` | str | `http://192.168.1.86:4020` | |
 | `model` | str | `Qwen/Qwen3-ASR-1.7B` | |
 | `revision` | str | `main` | |
 | `enabled` | bool | true | `false` 时 transcribe 记录 `disabled`，无对白召回 |
+| `max_tokens` | int >0 | 32768 | 聊天式 ASR（`llama_cpp`、`openai` 后端）单次转写请求的输出 token 上限；不进入转写指纹 |
 | `aligner_model` | str | `Qwen/Qwen3-ForcedAligner-0.6B` | CPU 对齐模型 |
 | `aligner_revision` | str | 代码默认 `main`；示例配置已固定 commit | 为 `main` 时 `align` 拒绝执行 |
-| `timeout` | float >0 | 300 | HTTP 超时秒 |
+| `timeout` | float >0 | 180 | HTTP 超时秒 |
 
 ## `tts` — 创作配音（studio.tts）
 
@@ -66,7 +69,81 @@
 | `base_url` / `model` / `voice` | str | `http://192.168.1.86:4030/v1` / `Qwen3-TTS` / `Cherry` | `voice` 可被设置页默认音色覆盖 |
 | `response_format` | str | `wav` | 三种后端共用的音频格式 |
 | `speech_path` | str | `/audio/speech` | 仅 openai 后端使用 |
-| `timeout` | float >0 | 300 | HTTP 超时秒 |
+| `timeout` | float >0 | 180 | HTTP 超时秒 |
+
+## `video_generator` — 视频生成（studio.video_generator）
+
+AI 生成视频（`aigc`）分镜 `generate` 阶段使用的视频生成服务，见 [创作工作流](studio.md#ai-生成视频)。设置页首次启动建好的默认卡为 MiniMax H3（`minimax_h3`）。设置页激活“视频生成”档案时自动启用并覆盖下列连接字段（`enabled` 不在档案白名单内）。
+
+| 键 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `enabled` | bool | false | 是否启用；关闭时 aigc 分镜的预检阻塞为“未配置视频生成服务” |
+| `backend` | `minimax_h3` \| `minimax` \| `dashscope` \| `comfyui` | `comfyui` | MiniMax H3 视频生成 V2（生成方式等逐镜设置）/ MiniMax 海螺 video_generation / 阿里通义万相异步任务 / 自建 ComfyUI |
+| `base_url` | str | `http://127.0.0.1:8188` | MiniMax H3 用 `https://api.minimax.cn`（末尾 `/v1` 自动去掉），海螺用 `https://api.minimax.cn/v1`，阿里用 `https://dashscope.aliyuncs.com` |
+| `model` | str | 空 | H3 可留空（缺省 `MiniMax-H3`，可逐镜覆盖）；其余线上后端必填（如 `MiniMax-Hailuo-2.3`、`wan2.6-t2v`）；ComfyUI 可留空（以工作流为准） |
+| `api_key_env` | str | `MINDEX_VIDEO_API_KEY` | 环境变量名；设置页档案的密钥优先 |
+| `timeout` | float >0 | 600 | 单次 HTTP 请求超时秒（提交、轮询与下载结果都用它） |
+| `poll_interval` | float 0–300 | 5 | 首次轮询间隔秒，之后按 1.5 倍退避，上限为 4 倍 |
+| `max_wait` | float 0–86400 | 900 | 单个分镜从提交到完成的总等待上限秒；超时撤销远端任务并失败 |
+| `durations` | list[float]，至少 1 项 | `[5.0]` | 后端允许的生成时长（秒，自动去重排序）：配音时长向上取整到最近的允许值，都更短时取最大值 |
+| `fps` | int 1–60 | 16 | 仅 ComfyUI：映射 `frames` = 时长 × fps |
+| `comfyui_workflow` | dict \| null | null | ComfyUI「导出（API）」格式工作流（`{节点ID: {class_type, inputs}}`）；界面格式（含 `nodes`/`links`）在加载时报错 |
+| `comfyui_mapping` | dict[str,str] \| null | null | 请求字段 → `节点ID.inputs.输入名`；字段限 `prompt`（必填）、`negative`、`seed`、`frames`、`width`、`height`、`image`，每个目标节点与输入都必须存在于工作流，否则加载/保存时报中文错误 |
+
+签名与配置指纹只含 backend、model、durations（ComfyUI 另含 fps、工作流摘要与映射），不含密钥、超时与轮询参数；`studio_key` 只在 `enabled` 时加入该段，未启用的配置指纹与旧版一致。
+
+## `image_generator` — 图片生成（studio.image_generator）
+
+AI 生成图片（`aigc_image`）分镜 `draw` 阶段使用的图片生成服务，见 [创作工作流](studio.md#ai-生成图片)。激活“图片生成”档案时自动启用。
+
+| 键 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `enabled` | bool | false | 关闭时 aigc_image 分镜的预检阻塞为“未配置图片生成服务” |
+| `backend` | `minimax` \| `comfyui` | `minimax` | MiniMax image-01 / 本地 ComfyUI |
+| `base_url` / `model` | str | `https://api.minimax.cn/v1` / `image-01` | ComfyUI 用 `http://127.0.0.1:8188`，`model` 可留空 |
+| `api_key_env` | str | `MINDEX_IMAGE_API_KEY` | 环境变量名；设置页档案的密钥优先 |
+| `timeout` | float >0 | 600 | 单次请求超时秒 |
+| `poll_interval` / `max_wait` | float | 2 / 900 | 仅 ComfyUI：轮询间隔与总等待上限秒 |
+| `comfyui_workflow` / `comfyui_mapping` | dict \| null | null | ComfyUI「导出（API）」工作流与映射；字段限 `prompt`（必填）、`negative`、`seed`、`width`、`height`、`image`（主体参考图） |
+
+签名只含 backend、model（ComfyUI 另含工作流摘要与映射）；`studio_key` 只在 `enabled` 时加入该段。
+
+## `music_generator` — 音乐生成（studio.music_generator）
+
+配音列[背景音乐](studio.md#背景音乐)的 `music` 阶段与歌词生成使用的服务。激活“音乐生成”档案时自动启用。
+
+| 键 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `enabled` | bool | false | 关闭时背景音乐提示点的预检阻塞为“未配置音乐生成服务” |
+| `backend` | `minimax` \| `comfyui` | `minimax` | MiniMax 音乐生成（同步接口）/ 本地 ComfyUI（不支持歌词生成） |
+| `base_url` / `model` | str | `https://api.minimax.cn/v1` / `music-3.0` | 音乐生成模型 |
+| `cover_model` | str | `music-cover` | 翻唱模型 |
+| `api_key_env` | str | `MINDEX_MUSIC_API_KEY` | 环境变量名；设置页档案的密钥优先 |
+| `timeout` | float >0 | 600 | 单次请求超时秒（音乐同步生成较慢） |
+| `poll_interval` / `max_wait` | float | 2 / 900 | 仅 ComfyUI |
+| `comfyui_workflow` / `comfyui_mapping` | dict \| null | null | 映射字段限 `prompt`（必填）、`lyrics`、`seconds`（段落预估时长）、`seed`、`audio`（翻唱参考音频） |
+
+签名只含 backend、model、cover_model（ComfyUI 另含工作流摘要与映射）；`studio_key` 只在 `enabled` 时加入该段。
+
+## `animator` — 动画生成（studio.animator）
+
+AI 动画分镜 `animate` 阶段使用的 LLM：按画面说明写自包含 HTML/JS 动画源码，渲染阶段在沙箱里逐帧录制，见 [创作工作流](studio.md#ai-动画)。协议与智能助手相同（OpenAI 兼容 `/chat/completions` 或 Anthropic `/v1/messages`，非流式、无工具调用）。
+
+设置页首次启动建好并激活默认卡智谱 GLM-5.3-Flash（`backend: openai`、`base_url: https://open.bigmodel.cn/api/paas/v4`、`model: glm-5.3-flash`），激活后覆盖下述继承；档案与环境变量都没有密钥时，运行时复用多模态理解里同名模型档案的密钥与 `base_url`（`runtime_settings.animator_shares_analyzer_key`）。**yaml 省略 `studio.animator` 且没有激活动画生成档案时复制 `agent.llm` 的 `backend`、`base_url`、`model`、`revision`、`api_key_env`**，其余字段取下表默认值；设置页没有激活“动画生成”档案而激活了“智能助手”档案时，同样跟随该档案（含密钥）。显式写了 `studio.animator` 段则不再跟随。激活“动画生成”档案即启用（`enabled` 不在档案白名单内）。
+
+| 键 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `enabled` | bool | true | 关闭时 animation 分镜的预检阻塞为“未配置动画生成服务” |
+| `backend` | `openai` \| `anthropic` | 同 `agent.llm`（`openai`） | 协议 |
+| `base_url` / `model` / `revision` | str | 同 `agent.llm` | 连接字段 |
+| `api_key_env` | str | 同 `agent.llm`（`MINDEX_AGENT_API_KEY`） | 环境变量名；设置页档案的密钥优先 |
+| `timeout` | float >0 | 600 | 单次请求超时秒 |
+| `max_tokens` | int >0 | 16000 | 输出上限；被截断时报错提示调大 |
+| `retries` | int 0–10 | 2 | 生成的源码未通过静态校验时，带违规项反馈重试的次数 |
+| `max_html_kb` | int 1–5000 | 200 | 动画源码大小上限（KiB），生成与人工保存都受限 |
+| `max_capture_seconds` | float 0–3600 | 60 | 单个分镜逐帧录制的墙钟时长上限秒；画幅大、镜头长时可调大 |
+
+animate 签名只含 backend、model、`max_html_kb` 与提示词版本，不含密钥与超时；该段不进入 `studio_key`。录制依赖为可选 extra `animation`（见 [部署](DEPLOYMENT.md#ai-动画录制可选)）。
 
 ## `studio` — 创作工作流
 
@@ -75,6 +152,9 @@
 | `max_input_chars` | int ≥1 | 2000 | 视频大纲和文案的字数上限 |
 | `max_shots` | int ≥1 | 1024 | 单任务分镜数量上限；拆分镜按意象拆细，条数会明显多于按场景拆分 |
 | `material_digest_chars` | int 0–100000 | 12000 | 可用素材摘要的总字符预算（按 Unicode 字符计）。摘要只取任务素材范围内、未隐藏、已分析片段的画面分析文字，供文案创作与拆分镜参考；`0` 表示关闭（不生成摘要，文案请求与未接入摘要时一致）。必须是整数，越界或非整数在加载配置时报错 |
+| `max_reference_chars` | int 1–1000000 | 30000 | 单个方案登记的[参考文稿](studio.md#参考文稿)总字符数上限（规范化后按 Unicode 字符计），超限的上传或粘贴返回 422。必须是整数 |
+| `max_clip_seconds` | float 0–3600 | 300 | [分镜画面来源](studio.md#分镜画面来源)“上传片段”的视频时长上限（秒），超过返回 422“画面视频不能超过 N 秒”；查询视频仍按 `search.max_query_seconds` |
+| `max_clip_mb` | int 1–10000 | 500 | 上传片段的文件大小上限（MB），超过返回 413；来源图片沿用 `search.max_image_upload_mb` |
 
 ### `studio.generator` — 文本拆分镜 LLM
 
@@ -83,7 +163,7 @@
 | `backend` | `openai` | `openai` | OpenAI 兼容 `/v1/chat/completions` |
 | `llama_template` | bool | `true` | 是否发送 llama-server 专有的 `chat_template_kwargs`；线上厂商档案设 `false` |
 | `base_url` / `model` / `revision` | str | `http://192.168.1.86:4040/v1` / `qwen3.8:27b` / `deployed-2026-10-12` | 本地默认复用理解模型；可切线上文本模型（如 deepseek-chat） |
-| `timeout` / `api_key_env` | | 300 / `MINDEX_QWEN_API_KEY` | |
+| `timeout` / `api_key_env` | | 180 / `MINDEX_QWEN_API_KEY` | |
 | `max_tokens` | int >0 | 4000 | 单次请求允许模型输出的最大 token 数（原样作为 chat/completions 的 `max_tokens` 发送），截断会明确报错；设置页里激活的“文本拆分镜”档案会覆盖这个值。分镜按意象拆细后输出更长，文案较长时请调高 |
 | `split_retries` | int ≥0 | 2 | 分镜校验失败后的带反馈重试次数 |
 
@@ -102,9 +182,10 @@
 | `selection.weights` | 五键 dict | semantic 1 / duration 1 / extension 0.3 / repeat 0.5 / overlap 1 | semantic 与 duration 必须为正 |
 | `audio.mode` | `tts_only` \| `ducking` | `tts_only` | 配音与原声混合策略 |
 | `audio.duck_gain` / `audio.loudnorm` | | 0.15 / `I=-16:TP=-1.5:LRA=11` | ducking 压低增益 / 响度归一参数 |
-| `subtitle.burn` / `subtitle.font_family` / `subtitle.font_file` / `subtitle.font_size` | | true / `Noto Sans CJK SC` / null / 7 | 烧录字幕（依赖 ffmpeg libass） |
+| `subtitle.burn` / `subtitle.font_family` / `subtitle.font_file` / `subtitle.font_size` | | false / `Noto Sans CJK SC` / null / 7 | `burn: true` 时烧录字幕（依赖 ffmpeg libass）；默认输出软字幕轨道 |
 | `render.width` / `render.height` | 偶数 | 1280 / 720 | 成片画布（x264 要求偶数） |
 | `render.fps` / `render.crf` / `render.preset` | | 25 / 20 / `fast` | crf 0–51；preset 限 x264 枚举 |
+| `render.canvases` | `{画幅: [宽, 高]}` | `9:16` → 720×1280，`1:1` → 1080×1080 | 方案[画幅](studio.md#画幅)的分辨率。键只能是 `16:9`、`9:16`、`1:1`，宽高为正偶数整数；未列出的画幅用默认值。`16:9` 恒为 `render.width/height`（写出时必须与之一致），旧配置与 16:9 方案的渲染签名因此不变。该键不进入配置指纹与任务快照（非默认画幅的实际宽高由 render/compose 阶段写进签名参数） |
 
 ## `detector` — 分镜
 
@@ -115,6 +196,7 @@
 | `threshold` | 0<float<1 | 0.5 | transnet 转场阈值 |
 | `adaptive_threshold` | float >0 | 3.0 | AdaptiveDetector 灵敏度 |
 | `min_content_val` | float ≥0 | 10.0 | AdaptiveDetector 内容阈值 |
+| `timeout` | float >0 | 1800 | transnet 整段视频检测的请求超时秒（该服务不在设置页，只能在 yaml 配置） |
 | `api_key_env` | str | `MINDEX_MODEL_API_KEY` | |
 
 ## `video` — 切分与采样（变化 = 新 `data_dir`）
@@ -182,8 +264,12 @@
 |---|---|
 | `MINDEX_CONFIG` | 默认配置文件路径 |
 | `MINDEX_MODEL_API_KEY` | 模型服务 Bearer token（embedding/asr/detector 共用默认） |
-| `MINDEX_QWEN_API_KEY` | Qwen 服务 token |
-| `MINDEX_WEB_TOKEN` | 设置后 `mindex serve` 的页面和 API 需要访问令牌，见 [CLI 参考](cli-reference.md#mindex-serve---host-127001---port-8000---index-id-index_id) |
+| `MINDEX_QWEN_API_KEY` | Qwen 服务 token（分析、拆分镜、文案、TTS 默认） |
+| `MINDEX_AGENT_API_KEY` | 智能助手 LLM 的密钥（`agent.llm.api_key_env` 默认；`studio.animator` 缺省时跟随） |
+| `MINDEX_MCP_TOKEN` | `/mcp` 的 Bearer 令牌（`agent.mcp.token_env` 默认），见 [智能助手](agent.md#mcp-导出与外部-harness) |
+| `MINDEX_VIDEO_API_KEY` | 视频生成服务密钥（`studio.video_generator.api_key_env` 默认） |
+| `MINDEX_PLAYWRIGHT_MODULE` | 仅测试：UI 回归（Node）使用的 Playwright 模块路径 |
+| `MINDEX_WEB_TOKEN` | 设置后 `mindex serve` 的页面和 API 需要访问令牌，见 [CLI 参考](cli-reference.md#mindex-serve---host-127001---port-8000---index-id-index_id---allow-insecure)；监听非回环地址时必须设置，否则 `serve` 拒绝启动（除非传 `--allow-insecure`） |
 | `MINDEX_GPU_LOCK` | GPU 文件锁路径（各角色须一致） |
 | `MINDEX_TRANSNET_DIR` | 服务端 TransNetV2 `inference` 目录 |
 
@@ -202,7 +288,7 @@
 | `base_url` | URL | `http://127.0.0.1:4050` | 人物服务地址 |
 | `model` | `cheetah_l` | `cheetah_l` | 人物模型 |
 | `revision` | str | `manifest-v2` | 模型清单版本 |
-| `timeout` | float >0 | 600 | 请求超时（秒） |
+| `timeout` | float >0 | 180 | 请求超时（秒） |
 | `model_root` | str | `~/.insightface` | 服务端模型文件根目录 |
 | `expected_space` | object 或 null | null | 把服务 `/health` 返回的 `space` 完整复制到此处，可固定模型文件摘要与预处理；不一致时拒绝处理 |
 | `frame_interval` | int ≥1 | 15 | 每个分镜每隔多少帧抽取一帧，见下文 |

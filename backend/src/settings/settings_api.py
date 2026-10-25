@@ -7,6 +7,7 @@ GET /api/settings 返回的永远是「当前生效」视图——激活档案 +
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import secrets
@@ -18,9 +19,18 @@ from typing import Annotated
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import Field
+from starlette.concurrency import run_in_threadpool
 
 from mindex.models import adapters
-from mindex.models.adapters import make_embedder, make_speaker, make_transcriber
+from mindex.models.adapters import (
+    make_animator,
+    make_embedder,
+    make_image_generator,
+    make_music_generator,
+    make_speaker,
+    make_transcriber,
+    make_video_generator,
+)
 from mindex.models.qwen import analysis_options
 from mindex.settings.runtime_settings import (
     PROFILE_FIELDS,
@@ -31,6 +41,7 @@ from mindex.settings.runtime_settings import (
     RuntimeConfig,
     _section,
     activate_profile,
+    animator_shares_analyzer_key,
     delete_profile,
     delete_voice,
     get_setting,
@@ -42,14 +53,40 @@ from mindex.settings.runtime_settings import (
     put_setting,
     save_profile,
     save_voice,
+    shared_analyzer_key,
 )
 from mindex.settings.voice_clone import aliyun_enroll, minimax_clone, qwentts_register
 from mindex.settings.voices_catalog import fetch_catalog, voice_kind
+from mindex.shared.comfyui import workflow_hash
 from mindex.shared.config import Config, SearchConfig, SpeakerConfig, StrictModel
 from mindex.shared.storage import Store
+from mindex.shared.uploads import save_upload
+
+log = logging.getLogger(__name__)
 
 _SETTING_KEYS = ("override.search", "override.studio.voice", "override.enforce_gpu_lock")
 _CLONE_SAMPLE_SUFFIXES = {".wav", ".mp3", ".m4a"}
+MAX_VOICE_SAMPLE_BYTES = 50 * 1024 * 1024  # 声音样本上传上限（50 MiB）
+TEST_DETAIL_MAX_CHARS = 500
+_SECRET_WORDS = ("key", "token", "secret", "password", "passwd", "signature", "auth", "credential")
+_REDACTED = "<已隐藏>"
+_URL_QUERY = re.compile(r"((?:https?|wss?)://[^\s?#'\"<>]+)[?#][^\s'\"<>]*", re.IGNORECASE)
+_BEARER = re.compile(r"\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]+", re.IGNORECASE)
+_SECRET_ASSIGNMENT = re.compile(
+    r"([\w.-]*(?:" + "|".join(_SECRET_WORDS) + r")[\w.-]*)(['\"]?\s*[=:]\s*['\"]?)[^\s&'\",;}<>]+",
+    re.IGNORECASE,
+)
+_KEY_LIKE = re.compile(r"\b(sk|pk|ak)-[A-Za-z0-9_-]{8,}")
+
+
+def redact_error(text: str, known_secrets: list[str] | tuple[str, ...] = ()) -> str:
+    """去掉错误文本中的 URL 查询串、Bearer 凭证、``key=...`` 形式的值以及已知密钥。"""
+    for secret in sorted({value for value in known_secrets if len(value) >= 4}, key=len, reverse=True):
+        text = text.replace(secret, _REDACTED)
+    text = _URL_QUERY.sub(lambda m: f"{m.group(1)}?{_REDACTED}", text)
+    text = _BEARER.sub(lambda m: f"{m.group(1)} {_REDACTED}", text)
+    text = _SECRET_ASSIGNMENT.sub(lambda m: f"{m.group(1)}{m.group(2)}{_REDACTED}", text)
+    return _KEY_LIKE.sub(lambda m: f"{m.group(1)}-{_REDACTED}", text)
 
 
 class ProfileBody(StrictModel):
@@ -102,14 +139,22 @@ def _effective(section, role: str) -> dict:
             "min_reference_quality", "body_threshold",
         ),
         "embedding": ("dimensions", "quantization"),
-        "asr": ("enabled",),
+        "asr": ("enabled", "max_tokens"),
         "tts": ("voice", "response_format"),
+        "video_generator": ("enabled", "durations", "fps", "poll_interval", "max_wait"),
+        "animator": ("enabled", "max_tokens", "retries", "max_capture_seconds", "max_html_kb"),
+        "image_generator": ("enabled", "poll_interval", "max_wait"),
+        "music_generator": ("enabled", "cover_model", "poll_interval", "max_wait"),
         "generator": ("max_tokens",),
         "writer": ("max_tokens",),
         "agent": ("max_tokens", "vision"),
     }
     for key in extras.get(role, ()):
         info[key] = dump.get(key)
+    if role in ("video_generator", "image_generator", "music_generator"):
+        # 工作流全文不出现在概览里：只报告是否已导入与摘要。
+        info["comfyui_workflow"] = workflow_hash(dump.get("comfyui_workflow"))
+        info["comfyui_mapping"] = dump.get("comfyui_mapping")
     return info
 
 
@@ -192,6 +237,18 @@ def _probe(config: Config, role: str, *, store: Store | None = None, profile_nam
         return {"ready": True, "space": PersonClient(config).identity()}
     if role == "agent":
         return _probe_agent(config)
+    if role == "video_generator":
+        # 只做鉴权/可达性探测：绝不提交生成任务（线上生成按次计费）。
+        return make_video_generator(config).health()
+    if role == "image_generator":
+        # 只做鉴权/可达性探测：绝不生成图片。
+        return make_image_generator(config).health()
+    if role == "music_generator":
+        # 只做鉴权/可达性探测：绝不生成音乐。
+        return make_music_generator(config).health()
+    if role == "animator":
+        # 一次最小对话（不生成动画）：验证地址、模型名与密钥。
+        return make_animator(config).ping()
     if role in {"analyzer", "generator", "writer"}:
         service = (
             config.analyzer if role == "analyzer"
@@ -208,7 +265,7 @@ def _probe(config: Config, role: str, *, store: Store | None = None, profile_nam
         payload = adapters.request(
             "POST",
             service.base_url.rstrip("/") + "/chat/completions",
-            timeout=min(service.timeout, 60),
+            timeout=service.timeout,
             headers=service.headers(),
             # 推理模型（如 MiniMax-M3.1）先消耗思考 token，预算太小会导致正文永远为空；
             # 但这里必须用档案实际配置的 max_tokens，否则参数超限这类拒绝在测试里看不见。
@@ -337,6 +394,12 @@ def settings_router(runtime: RuntimeConfig, store: Store) -> APIRouter:
                     "profiles": by_role[role],
                 }
             )
+        # 动画生成的密钥复用自多模态理解的同名模型档案时，在概览里注明来源（仍只给掩码）。
+        animator = next(item for item in roles_payload if item["role"] == "animator")
+        own = next((p for p in animator["profiles"] if p["id"] == animator["active_profile_id"]), None)
+        if (current.studio.animator.api_key and not (own and own["api_key"]["has_key"])
+                and current.studio.animator.api_key == shared_analyzer_key(store, current.studio.animator.model)):
+            animator["effective"]["key_shared_from"] = "analyzer"
 
         embedding_status = get_embedding_status() if probe_embedding else None
 
@@ -419,16 +482,24 @@ def settings_router(runtime: RuntimeConfig, store: Store) -> APIRouter:
         started = time.monotonic()
         try:
             config = merge_profile(runtime.base, profile["role"], profile)
+            if profile["role"] == "animator":
+                config = animator_shares_analyzer_key(config, store)
             detail = _probe(config, profile["role"], store=store, profile_name=profile["name"])
             if detail.get("tool_calling") is False:
                 return {"ok": False, "latency_ms": round((time.monotonic() - started) * 1000),
                         "detail": detail["reply"], **detail}
             return {"ok": True, "latency_ms": round((time.monotonic() - started) * 1000), **detail}
-        except Exception as exc:  # noqa: BLE001 — 测试结果要回报给页面而不是 500
+        except Exception as exc:  # 测试结果要回报给页面而不是 500
+            # 完整错误只写服务端日志；页面拿到的是脱敏后的摘要。
+            log.warning("配置档案 %s 连接测试失败", profile_id, exc_info=True)
+            secrets_in_profile = [str(profile.get("api_key") or "")] + [
+                str(value) for key, value in profile["config"].items()
+                if isinstance(value, str) and value and any(word in key.lower() for word in _SECRET_WORDS)
+            ]
             return {
                 "ok": False,
                 "latency_ms": round((time.monotonic() - started) * 1000),
-                "detail": str(exc)[:500],
+                "detail": redact_error(str(exc), secrets_in_profile)[:TEST_DETAIL_MAX_CHARS],
             }
 
     @router.put("/business")
@@ -575,90 +646,93 @@ def settings_router(runtime: RuntimeConfig, store: Store) -> APIRouter:
             raise HTTPException(422, "请填写音色名称")
         if not consent:
             raise HTTPException(422, "请确认你拥有该声音的合法使用授权")
-        tts = runtime.current().studio.tts
+        current = runtime.current()
+        tts = current.studio.tts
         slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:24] or "voice"
         directory = store.root / "voices"
         directory.mkdir(parents=True, exist_ok=True)
 
-        if tts.backend == "openai":
+        async def clone_from_sample(provider: str, missing: str, clone, notes: str = "") -> dict:
+            """上传样本类克隆（本地 qwentts、MiniMax）：限额落盘 → pending 记录 → 线程池克隆 → 转正。
+
+            ``clone(sample, voice_id)`` 在线程池执行并返回试听音频（可为空）；失败时删除待定样本，
+            记录标为 failed。
+            """
             if file is None:
-                raise HTTPException(422, "本地克隆需要上传声音样本（wav/mp3/m4a，3 秒以上清晰人声）")
+                raise HTTPException(422, missing)
             suffix = Path(file.filename or "").suffix.lower()
             if suffix not in _CLONE_SAMPLE_SUFFIXES:
+                await file.close()
                 raise HTTPException(422, "样本格式仅支持 wav/mp3/m4a")
             sample = directory / f"pending-{secrets.token_hex(4)}{suffix}"
-            sample.write_bytes(await file.read())
+            await save_upload(file, sample, MAX_VOICE_SAMPLE_BYTES)  # 超限 413，失败自行删除半成品
             voice_id = f"mindex-{slug}-{secrets.token_hex(3)}"
-            voice = save_voice(
-                store, name=name, provider="self", voice_id=voice_id,
-                kind="clone", sample_path=str(sample.relative_to(store.root)),
-                status="pending", notes=ref_text.strip()[:400],
-            )
+            voice = None
             try:
-                qwentts_register(tts.base_url, sample, voice_id, ref_text.strip())
-                preview = make_speaker(runtime.current()).speak("你好，这是克隆音色的试听。", voice=voice_id)
-            except Exception as exc:
-                save_voice(
-                    store, name=name, provider="self", voice_id=voice_id,
+                voice = save_voice(
+                    store, name=name, provider=provider, voice_id=voice_id,
                     kind="clone", sample_path=str(sample.relative_to(store.root)),
-                    status="failed", notes=str(exc)[:400], voice_pk=voice["id"],
+                    status="pending", notes=notes,
                 )
+                preview = await run_in_threadpool(clone, sample, voice_id)
+            except Exception as exc:
+                sample.unlink(missing_ok=True)
+                if voice is not None:
+                    save_voice(
+                        store, name=name, provider=provider, voice_id=voice_id, kind="clone",
+                        status="failed", notes=str(exc)[:400], voice_pk=voice["id"],
+                    )
+                log.warning("声音克隆失败（%s）", provider, exc_info=True)
                 raise HTTPException(502, f"克隆失败：{exc}") from exc
             final_sample = directory / f"{voice['id']}{suffix}"
-            sample.replace(final_sample)
-            (directory / f"{voice['id']}-preview.wav").write_bytes(preview)
+
+            def finish():
+                sample.replace(final_sample)
+                if preview:
+                    (directory / f"{voice['id']}-preview.wav").write_bytes(preview)
+
+            await run_in_threadpool(finish)
             return _with_sample(
                 save_voice(
-                    store, name=name, provider="self", voice_id=voice_id,
+                    store, name=name, provider=provider, voice_id=voice_id,
                     kind="clone", sample_path=str(final_sample.relative_to(store.root)),
-                    status="ready", notes=ref_text.strip()[:400], voice_pk=voice["id"],
+                    status="ready", notes=notes, voice_pk=voice["id"],
                 )
             )
 
-        if tts.backend == "minimax":
-            if file is None:
-                raise HTTPException(422, "MiniMax 克隆需要上传声音样本（wav/mp3/m4a，10 秒到 5 分钟）")
-            suffix = Path(file.filename or "").suffix.lower()
-            if suffix not in _CLONE_SAMPLE_SUFFIXES:
-                raise HTTPException(422, "样本格式仅支持 wav/mp3/m4a")
-            sample = directory / f"pending-{secrets.token_hex(4)}{suffix}"
-            sample.write_bytes(await file.read())
-            voice_id = f"mindex-{slug}-{secrets.token_hex(3)}"
-            voice = save_voice(
-                store, name=name, provider="minimax", voice_id=voice_id,
-                kind="clone", sample_path=str(sample.relative_to(store.root)), status="pending",
+        if tts.backend == "openai":
+            reference = ref_text.strip()
+
+            def qwentts_clone(sample: Path, voice_id: str) -> bytes:
+                qwentts_register(tts.base_url, sample, voice_id, reference, timeout=tts.timeout)
+                return make_speaker(current).speak("你好，这是克隆音色的试听。", voice=voice_id)
+
+            return await clone_from_sample(
+                "self", "本地克隆需要上传声音样本（wav/mp3/m4a，3 秒以上清晰人声）",
+                qwentts_clone, notes=reference[:400],
             )
-            try:
-                preview = minimax_clone(tts.base_url, tts.api_key, sample, voice_id, tts.model)
-            except Exception as exc:
-                save_voice(
-                    store, name=name, provider="minimax", voice_id=voice_id,
-                    kind="clone", sample_path=str(sample.relative_to(store.root)),
-                    status="failed", notes=str(exc)[:400], voice_pk=voice["id"],
-                )
-                raise HTTPException(502, f"克隆失败：{exc}") from exc
-            final_sample = directory / f"{voice['id']}{suffix}"
-            sample.replace(final_sample)
-            if preview:
-                (directory / f"{voice['id']}-preview.wav").write_bytes(preview)
-            return _with_sample(
-                save_voice(
-                    store, name=name, provider="minimax", voice_id=voice_id,
-                    kind="clone", sample_path=str(final_sample.relative_to(store.root)),
-                    status="ready", voice_pk=voice["id"],
-                )
+
+        if tts.backend == "minimax":
+            return await clone_from_sample(
+                "minimax", "MiniMax 克隆需要上传声音样本（wav/mp3/m4a，10 秒到 5 分钟）",
+                lambda sample, voice_id: minimax_clone(tts.base_url, tts.api_key, sample, voice_id, tts.model,
+                                                           timeout=tts.timeout),
             )
 
         if tts.backend == "dashscope":
             if not audio_url.strip():
                 raise HTTPException(422, "阿里复刻需要公网可访问的音频样本 URL（wav/mp3/m4a，10~20 秒）")
             try:
-                voice_id = aliyun_enroll(
-                    tts.base_url, tts.api_key, audio_url.strip(), f"mindex-{slug}", tts.model
+                voice_id = await run_in_threadpool(
+                    aliyun_enroll, tts.base_url, tts.api_key, audio_url.strip(), f"mindex-{slug}", tts.model,
+                    timeout=tts.timeout,
                 )
             except Exception as exc:
+                log.warning("阿里声音复刻失败", exc_info=True)
+                # 失败记录的 voice_id 加随机后缀，重复失败不会冲突。
                 save_voice(
-                    store, name=name, provider="dashscope", voice_id=f"mindex-{slug}-failed",
+                    store, name=name, provider="dashscope",
+                    voice_id=f"mindex-{slug}-failed-{secrets.token_hex(3)}",
                     kind="clone", status="failed", notes=str(exc)[:400],
                 )
                 raise HTTPException(502, f"复刻失败：{exc}") from exc

@@ -86,7 +86,7 @@ def run(request):
             wanted = {r['id'] for r in store.rows('SELECT id FROM representations WHERE index_id=?', (identifier,))}
             seen = set()
             for relative in item['batches']:
-                rows = json.loads((bundle / relative).read_text())
+                rows = json.loads((bundle / relative).read_text(encoding="utf-8"))
                 batch = []
                 for row in rows:
                     rid = request['rep_map'].get(row['id'], row['id'])
@@ -187,7 +187,7 @@ def run(request):
 
 if __name__ == '__main__':
     try:
-        result = run(json.loads(Path(sys.argv[1]).read_text()))
+        result = run(json.loads(Path(sys.argv[1]).read_text(encoding="utf-8")))
         print(dumps({'result': result}))
     except Exception as exc:  # noqa: BLE001 — 子进程边界统一返回结构化失败，主进程拒绝发布
         print(dumps({'error': str(exc)}))

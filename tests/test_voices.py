@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from conftest import FixtureStoryboarder
 from fastapi.testclient import TestClient
 
@@ -177,10 +178,11 @@ def test_clone_failure_records_status(config, monkeypatch):
     )
     assert response.status_code == 502
     assert "配额不足" in response.json()["detail"]
-    # 失败留档：样本保留、状态 failed
+    # 失败留档：状态 failed；待定样本已删除，不在 voices/ 残留
     data = client.get("/api/settings").json()
     failed = [v for v in data["voices"] if v["name"] == "失败克隆"]
-    assert failed and failed[0]["status"] == "failed"
+    assert failed and failed[0]["status"] == "failed" and not failed[0]["sample_present"]
+    assert not list((Store(config.data_dir).root / "voices").iterdir())
 
 
 def test_get_settings_includes_voices(config):
@@ -199,14 +201,16 @@ def test_qwentts_register_contract(monkeypatch, tmp_path):
     captured = {}
 
     def reply(method, url, **kwargs):
-        captured.update(method=method, url=url, json=kwargs["json"])
+        captured.update(method=method, url=url, json=kwargs["json"], timeout=kwargs["timeout"])
         return {}
 
     monkeypatch.setattr(adapters, "request", reply)
     sample = tmp_path / "s.wav"
     sample.write_bytes(b"RIFF-x")
-    qwentts_register("http://127.0.0.1:8890/v1", sample, "mindex-clone-9", "参考文本")
+    qwentts_register("http://127.0.0.1:8890/v1", sample, "mindex-clone-9", "参考文本", timeout=123)
     import base64
+
+    assert captured["timeout"] == 123
 
     assert captured["method"] == "POST" and captured["url"].endswith("/audio/voices")
     body = captured["json"]
@@ -391,3 +395,105 @@ def test_catalog_preview_minimax_clone_kind_by_name(config, monkeypatch):
     catalog = client.post("/api/settings/voices/catalog/preview", json={"profile_id": profile["id"]}).json()
     assert catalog["voice_kind"] == "clone"
     assert catalog["groups"] == []
+
+
+def test_clone_sample_over_limit_returns_413_and_leaves_no_file(config, monkeypatch):
+    from mindex.settings import settings_api
+
+    monkeypatch.setattr(settings_api, "MAX_VOICE_SAMPLE_BYTES", 1024)
+    monkeypatch.setattr(settings_api, "qwentts_register", lambda *a, **kw: pytest.fail("超限样本不应克隆"))
+    client = TestClient(create_app(config))
+    response = client.post(
+        "/api/settings/voices/clone",
+        data={"name": "超大样本", "consent": "true"},
+        files={"file": ("sample.wav", sample_wav(), "audio/wav")},
+    )
+    assert response.status_code == 413
+    assert not list((Store(config.data_dir).root / "voices").iterdir())
+    assert not [v for v in client.get("/api/settings").json()["voices"] if v["name"] == "超大样本"]
+
+
+def test_clone_failure_removes_pending_sample_local(config, monkeypatch):
+    from mindex.settings import settings_api
+
+    def fail(*args, **kwargs):
+        raise adapters.ModelError("服务不可用")
+
+    monkeypatch.setattr(settings_api, "qwentts_register", fail)
+    client = TestClient(create_app(config))
+    response = client.post(
+        "/api/settings/voices/clone",
+        data={"name": "本地失败", "consent": "true"},
+        files={"file": ("sample.wav", sample_wav(), "audio/wav")},
+    )
+    assert response.status_code == 502 and "服务不可用" in response.json()["detail"]
+    assert not list((Store(config.data_dir).root / "voices").iterdir())
+    failed = [v for v in client.get("/api/settings").json()["voices"] if v["name"] == "本地失败"]
+    assert failed and failed[0]["status"] == "failed" and failed[0]["sample_path"] is None
+
+
+def test_dashscope_failed_records_have_unique_voice_ids(config, monkeypatch):
+    from mindex.settings import settings_api
+
+    client = TestClient(create_app(config))
+    profile = client.post(
+        "/api/settings/profiles",
+        json={
+            "role": "tts", "provider": "aliyun", "name": "阿里",
+            "config": {"backend": "dashscope", "base_url": "https://dashscope.aliyuncs.com/api/v1",
+                       "model": "cosyvoice-v2"},
+            "api_key": "sk-aliyun-key-1234",
+        },
+    )
+    assert profile.status_code in (200, 201), profile.text
+    client.post(f"/api/settings/profiles/{profile.json()['id']}/activate")
+
+    def fail(*args, **kwargs):
+        raise adapters.ModelError("URL 不可访问")
+
+    monkeypatch.setattr(settings_api, "aliyun_enroll", fail)
+    ids = []
+    for name in ("复刻一", "复刻二"):
+        response = client.post(
+            "/api/settings/voices/clone",
+            data={"name": name, "consent": "true", "audio_url": "https://example.com/a.wav"},
+        )
+        assert response.status_code == 502
+    for voice in client.get("/api/settings").json()["voices"]:
+        if voice["status"] == "failed":
+            ids.append(voice["voice_id"])
+    assert len(ids) == 2 and len(set(ids)) == 2
+
+
+def test_clone_does_not_block_event_loop(config, monkeypatch):
+    import asyncio
+    import time
+
+    import httpx
+
+    from mindex.settings import settings_api
+
+    monkeypatch.setattr(settings_api, "qwentts_register", lambda *a, **kw: time.sleep(1.0))
+    monkeypatch.setattr(adapters, "request_bytes", lambda *a, **kw: b"RIFF-preview")
+    app = create_app(config)
+
+    async def scenario():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            clone = asyncio.create_task(client.post(
+                "/api/settings/voices/clone",
+                data={"name": "慢克隆", "consent": "true"},
+                files={"file": ("sample.wav", sample_wav(), "audio/wav")},
+            ))
+            await asyncio.sleep(0.2)
+            started = time.monotonic()
+            status = await client.get("/api/status")
+            cheap_elapsed = time.monotonic() - started
+            assert not clone.done(), "克隆应仍在线程池中执行"
+            response = await clone
+            return status, cheap_elapsed, response
+
+    status, cheap_elapsed, response = asyncio.run(scenario())
+    assert status.status_code == 200
+    assert cheap_elapsed < 0.7
+    assert response.status_code == 201, response.text

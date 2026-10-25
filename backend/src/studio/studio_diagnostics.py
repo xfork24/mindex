@@ -1,8 +1,8 @@
 """创作方案诊断：只读汇总分镜检查、字幕环境、已选节点状态与变化原因。
 
 全部复用已有规则——拆分镜硬/软校验（models.storyboard）、画面意象上限（studio.visual_error）、
-召回引用校验（studio_models.validate_recall_references）、节点签名冲突（studio_workspace.conflicts）、
-构建预检（studio_workspace.preflight）、字幕烟测（studio_render.check_font）——不另立一套判断。
+召回引用校验（studio_models.validate_recall_references）、节点签名冲突（workspace.conflicts）、
+构建预检（workspace.preflight）、字幕烟测（studio_render.check_font）——不另立一套判断。
 调用方负责只读加载工作台；这里不加锁、不 persist。
 """
 
@@ -18,11 +18,13 @@ from mindex.shared.media import MediaError
 from mindex.shared.storage import Store
 from mindex.shared.types import ShotDraft
 from mindex.studio import studio
-from mindex.studio import studio_workspace as workspace
+from mindex.studio import workspace as workspace
 from mindex.studio.studio_models import validate_recall_references
 
 SOFT_LABELS = {**SOFT_REASONS, "long": "文本过长"}
-NODE_STAGES = (*workspace.STAGES, "compose")
+# 逐镜阶段按注册顺序（含只属于部分来源的 generate）；不属于某分镜来源的阶段在该分镜上没有选用版本。
+SHOT_STAGES = workspace.stages.names(scope="shot")
+NODE_STAGES = (*SHOT_STAGES, "compose")
 
 
 def _contents(w, p):
@@ -124,7 +126,7 @@ def _selected(p, stage, sid):
 def node_states(config: Config, job_id, w, p, context) -> list[dict]:
     """每个已选节点：ok / missing / failed / corrupt / stale，stale 的原因与工作台 conflicts 一致。"""
     nodes = []
-    targets = [(stage, sid) for sid in workspace.ordered_shots(w, p) for stage in workspace.STAGES]
+    targets = [(stage, sid) for sid in workspace.ordered_shots(w, p) for stage in SHOT_STAGES]
     targets.append(("compose", None))
     for stage, sid in targets:
         vid = _selected(p, stage, sid)
@@ -153,9 +155,11 @@ def node_states(config: Config, job_id, w, p, context) -> list[dict]:
 def inputs_by_stage(config: Config, job_id, w, p, context) -> dict:
     """各逐镜阶段每个分镜当前规格的 inputs：与 column_nodes 校验的值相同，可直接作为 inputs_by_shot 提交。"""
     result = {}
-    for stage in workspace.STAGES:
+    for stage in SHOT_STAGES:
         values = {}
         for sid in workspace.ordered_shots(w, p):
+            if stage not in workspace.STAGES and stage not in workspace.stages.plan_shot_stages(w, p, sid):
+                continue  # 来源专属阶段（generate）只对含该阶段的分镜给出 inputs
             try:
                 values[sid] = workspace.specification(config, job_id, w, p, stage, sid, context=context)["inputs"]
             except (studio.StudioError, EntityNotFound):

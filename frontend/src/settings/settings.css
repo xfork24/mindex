@@ -178,3 +178,6 @@
 .role-row-summary{flex-basis:100%;justify-content:flex-start}
 .weight-grid{grid-template-columns:minmax(0,1fr)}
 }
+.comfyui-editor{display:grid;gap:8px;margin:4px 0 8px}
+.comfyui-editor h3{font-size:13px;margin:6px 0 0}
+.comfyui-editor textarea{width:100%;min-height:120px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;box-sizing:border-box}

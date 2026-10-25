@@ -1390,14 +1390,13 @@ def migrate_frames(config, *, source_id=None, apply=False):
     """Migrate display assets only. Feature vectors, cache IDs and releases stay intact."""
     from filelock import Timeout
 
-    from mindex.shared.processing_lock import SharedFileLock, index_write_lock
+    from mindex.shared import locks
 
     store = Store(config.data_dir)
-    guard = SharedFileLock(store.root / "pipeline.lock", exclusive=True)
-    write = index_write_lock(store.root)
-    write.timeout = 10
     try:
-        with guard, write, store.run("persons-migrate-frames") if apply else nullcontext():
+        with locks.acquire_ordered(store.root, ["pipeline", "index-write"], exclusive=True,
+                                   timeout={"index-write": 10}), \
+                store.run("persons-migrate-frames") if apply else nullcontext():
             return _migrate_frames(config, store, source_id, apply)
     except Timeout:
         raise ValueError("有离线处理任务或索引发布正在运行，请稍后重试") from None
@@ -1477,7 +1476,7 @@ def _migrate_frames(config, store, source_id, apply):
                     if apply:
                         path.unlink()
                         _prune_empty_parents(path, base)
-        except Exception as exc:  # noqa: BLE001 — isolate sources, never delete after a failed conversion
+        except Exception as exc:  # noqa: BLE001 — 按素材隔离失败，转换失败后绝不删除
             report["error"] = str(exc)
     totals = {key: sum(r[key] for r in reports) for key in
               ("kept_frames", "reencoded", "unchanged", "deleted_files", "deleted_bytes",

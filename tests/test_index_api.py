@@ -23,6 +23,8 @@ from mindex.settings import settings_api
 from mindex.shared.processing_lock import ProcessingLock, index_write_lock
 from mindex.shared.storage import Store
 
+pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
+
 
 class SchemaEmbedder(FixtureEmbedder):
     """schema 2 空间：激活时会比对嵌入身份并调用能力门槛。"""

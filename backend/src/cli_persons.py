@@ -7,7 +7,7 @@ from typing import Annotated
 
 import typer
 
-from mindex.cli_common import SortedGroup, print_json
+from mindex.shared.cli_support import SortedGroup, print_json
 
 app = typer.Typer(
     cls=SortedGroup,
@@ -59,7 +59,7 @@ def persons_save(
     from mindex.shared.storage import Store
 
     print_json(
-        Persons(Store(ctx.obj.data_dir)).save(Entity.model_validate_json(file.read_text()), identifier)
+        Persons(Store(ctx.obj.data_dir)).save(Entity.model_validate_json(file.read_text(encoding="utf-8")), identifier)
     )
 
 
@@ -226,7 +226,7 @@ def persons_review(
     from mindex.persons.persons import Persons
     from mindex.shared.storage import Store
 
-    print_json(Persons(Store(ctx.obj.data_dir)).shot_review(ShotReview.model_validate_json(file.read_text())))
+    print_json(Persons(Store(ctx.obj.data_dir)).shot_review(ShotReview.model_validate_json(file.read_text(encoding="utf-8"))))
 
 
 @app.command("activate")

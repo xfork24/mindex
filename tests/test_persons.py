@@ -31,6 +31,8 @@ from mindex.shared.person_schema import init_person_schema
 from mindex.shared.storage import Store, dumps
 from mindex.shared.types import TextSearch
 
+pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
+
 
 def photo(color="red", size=(100, 120)):
     b = io.BytesIO()
@@ -1052,9 +1054,10 @@ def test_old_reference_table_gains_role_id_column_without_losing_rows(config):
     with store.connect() as db:
         db.execute("DROP INDEX IF EXISTS person_references_role")
         db.execute("ALTER TABLE person_references DROP COLUMN role_id")
+        db.execute("PRAGMA user_version=0")  # 引入版本号之前的旧库
+    Store(config.data_dir)  # 旧库首次启动：v1 迁移补列 + 建索引
     with store.connect() as db:
-        init_person_schema(db)  # 旧库首次启动：补列 + 建索引
-        init_person_schema(db)  # 迁移必须幂等
+        init_person_schema(db)  # 迁移步骤必须幂等
         assert "role_id" in {row["name"] for row in db.execute("PRAGMA table_info(person_references)")}
         assert "person_references_role" in {row["name"] for row in db.execute("PRAGMA index_list(person_references)")}
         assert [r["id"] for r in db.execute("SELECT id FROM person_references")] == [kept["id"]]
@@ -1096,6 +1099,7 @@ def test_legacy_stage_migrates_to_role_without_losing_references_or_published_hi
     release = p.publish()
     frozen = p.store.one("SELECT data FROM person_versions WHERE id=?", (release["person_version"],))["data"]
     p.store.execute("DELETE FROM settings WHERE key='migration.person-roles-v2'")
+    p.store.execute("PRAGMA user_version=0")  # 旧库早于版本化迁移
     migrated = Persons(Store(config.data_dir))
     aged = migrated.entity("old-stage")
     assert aged["kind"] == "role" and aged["work_ids"] == [work] and aged["name"] == "老年叶淑柔"
@@ -1685,7 +1689,7 @@ def test_release_delete_rejects_active_and_cleans_snapshot(catalogue, config):
 
 def test_release_listing_reports_the_active_ids_used_by_studio_recall(catalogue, config):
     """设置页「索引版本」显示的生效 ID，与创作召回签名读取的内容索引 / 检索发布版一致。"""
-    from mindex.studio.studio_workspace import _settings
+    from mindex.studio.workspace.signatures import _settings
 
     p, _work, _actor = catalogue
     client = TestClient(create_app(config))
@@ -2796,7 +2800,7 @@ def test_frame_clean_rechecks_references_after_scan(catalogue, config):
 
 def test_migrate_frames_respects_pipeline_lock(catalogue, config):
     from mindex.persons.persons import migrate_frames
-    from mindex.shared.processing_lock import SharedFileLock
+    from mindex.shared.locks import SharedFileLock
     p, _, _ = catalogue
     with SharedFileLock(p.store.root / "pipeline.lock"), pytest.raises(ValueError, match="离线处理任务"):
         migrate_frames(config, apply=True)
@@ -2868,7 +2872,7 @@ def test_frame_cache_reuse_after_missing_images_needs_no_model_extraction(catalo
 
 
 def test_frame_migration_lock_blocks_review(catalogue, config):
-    from mindex.shared.processing_lock import SharedFileLock
+    from mindex.shared.locks import SharedFileLock
     p, _, actor = catalogue
     client = TestClient(create_app(config))
     with SharedFileLock(p.store.root / "pipeline.lock", exclusive=True):
@@ -3184,3 +3188,18 @@ def test_review_without_person_evidence_uses_shot_thumbnail(catalogue, config):
     detail = client.get('/api/persons/review/shots/shot0', params={"source_id": "source"})
     assert detail.status_code == 200
     assert detail.json()["image_url"] == '/api/admin/segments/shot0/thumbnail'
+
+
+def test_persons_polling_backoff_unit():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("人物页面轮询退避检查需要 Node.js")
+    result = subprocess.run(
+        [node, "tests/persons_poll_unit.cjs"],
+        cwd=Path(__file__).resolve().parents[1],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0 and "checks passed" in result.stdout, result.stdout + result.stderr

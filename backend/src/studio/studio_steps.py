@@ -110,7 +110,7 @@ def run_recall(config: Config, job_id: str, state: dict, embedder: MultimodalEmb
         key = fingerprint(signature)
         cached_path = session.reuse(logical, key) if session else None
         if cached_path:
-            cached = json.loads(cached_path.read_text())
+            cached = json.loads(cached_path.read_text(encoding="utf-8"))
             if cached.get("status") == "empty":
                 empty.append(shot.id)
             continue
@@ -263,7 +263,7 @@ def load_audio_manifest(config: Config, job_id: str, storyboard) -> dict:
     manifest_file = studio.job_dir(config, job_id) / "audio.json"
     if not manifest_file.is_file():
         raise studio.StudioError("尚未生成配音时长清单，请先执行生成配音")
-    manifest = json.loads(manifest_file.read_text())["shots"]
+    manifest = json.loads(manifest_file.read_text(encoding="utf-8"))["shots"]
     missing = [shot.id for shot in storyboard.shots if shot.id not in manifest]
     if missing:
         raise studio.StudioError(f"分镜 {'、'.join(missing)} 缺少配音，请重跑生成配音")
@@ -301,7 +301,7 @@ def run_select(config: Config, job_id: str, state: dict) -> dict:
     source_duration, extend_next, extend_prev, covered_shots = _selection_callbacks(store)
     candidates = {}
     for shot in storyboard.shots:
-        document = json.loads((studio.candidates_dir(config, job_id) / f"{shot.id}.json").read_text())
+        document = json.loads((studio.candidates_dir(config, job_id) / f"{shot.id}.json").read_text(encoding="utf-8"))
         candidates[shot.id] = [
             item
             for item in document.get("results", [])
@@ -386,7 +386,7 @@ def apply_timeline_patch(
             events.append(prior.model_copy(update={"order": order}))
             continue
         if video.get("segment_id"):
-            document = json.loads((studio.candidates_dir(config, job_id) / f"{shot_id}.json").read_text())
+            document = json.loads((studio.candidates_dir(config, job_id) / f"{shot_id}.json").read_text(encoding="utf-8"))
             anchor = next(
                 (item for item in document.get("results", []) if item["segment_id"] == video["segment_id"]),
                 None,

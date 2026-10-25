@@ -15,12 +15,19 @@ from fastapi.testclient import TestClient
 
 from mindex.api import create_app
 from mindex.models import adapters
-from mindex.models.writer import INSTRUCTIONS, MATERIAL_HEADER, MATERIAL_RULES, QwenWriter
+from mindex.models.writer import MATERIAL_HEADER, MATERIAL_RULES, QwenWriter
 from mindex.processing.indexing import IndexBuilder
 from mindex.processing.pipeline import Pipeline
 from mindex.shared.storage import Store
 from mindex.studio import material_digest, studio
-from mindex.studio import studio_workspace as ws
+from mindex.studio import workspace as ws
+from mindex.studio.script_templates import builtins
+from mindex.studio.workspace.handlers import script as script_handler
+
+pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
+
+BASE = builtins()["base"]
+INSTRUCTIONS = BASE.instructions.strip()
 
 OUTLINE = "港口的一天。渔船靠岸。"
 
@@ -81,17 +88,17 @@ def debug_records(config, jid, vid) -> dict[str, list[dict]]:
     return found
 
 
-def test_prompt_version_2_changes_script_signature(env, monkeypatch):
+def test_prompt_version_changes_script_signature(env, monkeypatch):
     config, client, _ = env
     jid, pid = new_job(client)
     w = ws.load(config, jid)
     p = w["plans"][pid]
+    v3 = ws.specification(config, jid, w, p, "script")
+    assert v3["parameters"]["prompt_version"] == 3
+    monkeypatch.setattr(script_handler, "WRITER_PROMPT_VERSION", 2)
     v2 = ws.specification(config, jid, w, p, "script")
     assert v2["parameters"]["prompt_version"] == 2
-    monkeypatch.setattr(ws, "WRITER_PROMPT_VERSION", 1)
-    v1 = ws.specification(config, jid, w, p, "script")
-    assert v1["parameters"]["prompt_version"] == 1
-    assert v1["signature"] != v2["signature"]
+    assert v2["signature"] != v3["signature"]
 
 
 def test_nonempty_digest_is_passed_to_writer_and_recorded(env):
@@ -137,7 +144,9 @@ def test_digest_error_falls_back_to_empty_and_script_still_generated(env, monkey
     data, vid = run_script(client, jid, pid)
     version = data["versions"][vid]
     assert version["status"] == "complete"
-    assert version["data"] == {"text": OUTLINE + "第1版。", "origin": "generated"}
+    assert {k: v for k, v in version["data"].items() if k != "template"} == {
+        "text": OUTLINE + "第1版。", "origin": "generated"}
+    assert version["data"]["template"]["id"] == "base"
     assert writer.materials[0].empty
     records = debug_records(config, jid, vid)
     assert "material-digest" not in records
@@ -164,7 +173,7 @@ def test_nonempty_digest_prompt_contains_material_rules(env, monkeypatch):
         return chat_payload("港口清晨，渔船缓缓靠岸。")
 
     monkeypatch.setattr(adapters, "request", reply)
-    assert QwenWriter(copied).write(OUTLINE, materials=digest) == "港口清晨，渔船缓缓靠岸。"
+    assert QwenWriter(copied).write(OUTLINE, template=BASE, materials=digest) == "港口清晨，渔船缓缓靠岸。"
     system = calls[0]["messages"][0]["content"]
     assert system == INSTRUCTIONS + MATERIAL_RULES
     for rule in (

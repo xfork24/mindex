@@ -154,7 +154,7 @@ def neighborhood(rows, anchor, length):
 
 
 def context(config, job_id, w, p, sid):
-    from mindex.studio import studio_workspace as ws
+    from mindex.studio import workspace as ws
 
     if sid not in p["shots"]:
         raise studio.StudioError("分镜不存在于当前方案")
@@ -232,7 +232,7 @@ def context(config, job_id, w, p, sid):
 
 def resources(config, job_id, ctx):
     """Shared low-resolution continuous video and a bounded thumbnail strip, cached by source identity."""
-    from mindex.studio import studio_workspace as ws
+    from mindex.studio import workspace as ws
 
     if not ctx.get("source_id"):
         return {}
@@ -297,7 +297,7 @@ def resources(config, job_id, ctx):
 
 
 def selected_range(config, job_id, w, p, sid, token, start, *, ref, tts_version, _context=None):
-    from mindex.studio import studio_workspace as ws
+    from mindex.studio import workspace as ws
 
     ctx = _context if _context is not None else context(config, job_id, w, p, sid)
     if token != ctx["context_token"] or ref != ctx.get("anchor_ref") or tts_version != ctx["tts_version"]:
@@ -326,7 +326,7 @@ def selected_range(config, job_id, w, p, sid, token, start, *, ref, tts_version,
 
 
 def alignment(config, job_id, w, p, sid, selected, *, _context=None):
-    from mindex.studio import studio_workspace as ws
+    from mindex.studio import workspace as ws
 
     ctx = _context if _context is not None else context(config, job_id, w, p, sid)
     selected, _ = selected_range(
