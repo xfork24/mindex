@@ -468,6 +468,32 @@ def render_node(config, job_id, w, p, sid, directory, *, capture=None):
 
 MUSIC_FADE_IN = 0.5
 MUSIC_FADE_OUT = 1.5
+# 配音出现时背景音乐的侧链压低：配音已归一到约 -16 LUFS（RMS 约 0.12），阈值取 0.06、压缩比 3，
+# 说话时背景音乐约压低 3–6 dB 但仍清晰可闻。旧参数（阈值 0.03、比 6）会把整段配音下的背景音乐压到近乎无声，
+# 改动混音参数时递增 MUSIC_MIX_VERSION（进入有背景音乐的成片签名，使旧成片需要重新合成）。
+MUSIC_MIX_VERSION = 2
+MUSIC_DUCKING = "threshold=0.06:ratio=3:attack=50:release=500"
+
+
+def music_report(w, p, boundaries) -> list[dict]:
+    """成片里实际混入的背景音乐段落（写进成片版本数据，供页面列出素材）：
+    起始分镜、覆盖分镜、音乐版本、音量，以及在成片时间线上的起止秒。没有背景音乐时为空。"""
+    from . import music
+
+    spans = {item["shot_id"]: item for item in boundaries}
+    return [
+        {
+            "cue": segment["cue"],
+            "shots": segment["shots"],
+            "version": p["shots"][segment["cue"]].get("music"),
+            "volume": float(segment["music"].get("volume", 0.25)),
+            "kind": segment["music"].get("kind"),
+            "prompt": segment["music"].get("prompt"),
+            "start": spans[segment["shots"][0]]["start"],
+            "end": spans[segment["shots"][-1]]["end"],
+        }
+        for segment in music.segments(w, p)
+    ]
 
 
 def mix_music(config, job_id, w, p, directory, voice, boundaries, total_samples):
@@ -521,7 +547,7 @@ def mix_music(config, job_id, w, p, directory, voice, boundaries, total_samples)
     atomic_media(
         ["-i", str(voice), "-i", str(bed), "-filter_complex",
          "[0:a]asplit=2[voice][key];"
-         "[1:a][key]sidechaincompress=threshold=0.03:ratio=6:attack=20:release=400[bed];"
+         f"[1:a][key]sidechaincompress={MUSIC_DUCKING}[bed];"
          "[voice][bed]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,"
          f"atrim=end_sample={total_samples}",
          "-c:a", "pcm_s16le", "-ar", "48000", "-ac", "2"],
@@ -635,6 +661,8 @@ def compose(config, job_id, w, p, directory):
         "boundaries": boundaries,
         "burn": timeline.burn,
     }
+    if report := music_report(w, p, boundaries):  # 只在有背景音乐时加键，旧成片数据形态不变
+        data["music"] = report
     studio.save(directory / "timeline.json", data)
     return data, {
         name: file_info(config, job_id, target)

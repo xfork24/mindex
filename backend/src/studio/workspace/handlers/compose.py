@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from .. import music
-from ..media_nodes import compose
+from ..media_nodes import MUSIC_MIX_VERSION, compose
 from ..plans import canvas_render
 from ..stages import StageHandler, register
 from ..versions import ordered_shots
@@ -42,6 +42,7 @@ class ComposeHandler(StageHandler):
         segments = music_payload(w, p)
         if segments:  # 只在有背景音乐时加键：没有背景音乐的成片签名与旧版逐字节一致
             payload["music"] = segments
+            payload["music_mix"] = MUSIC_MIX_VERSION
             inputs.update({f"music:{item['cue']}": item["music"] for item in segments})
         return payload, inputs, params
 

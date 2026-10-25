@@ -176,8 +176,8 @@ function stageSummaryNodes(sid, stage) {
       nodes.push(el("span", summary, "cell-summary"));
     }
   }
-  if (stage === "tts") {
-    // 背景音乐并入配音阶段：提示点、顺延或停止。
+  if (stage === "tts" || stage === "render") {
+    // 背景音乐显示在配音列（提示点、顺延或停止），分镜渲染列同样标出本镜适用的背景音乐。
     const line = musicSummary(sid);
     if (line) nodes.push(el("span", line, "cell-summary music-summary"));
   }
@@ -467,6 +467,7 @@ function renderStagePanel() {
   stage === "content" ? ids : null,
   stage === "tts" ? [state.data.tts_settings, plan().shots[sid].content, plan().shots[sid].music,
   state.data.shot_music?.[sid], latestNode("music", sid)] : null,
+  stage === "render" ? musicMaterialKey(sid) : null,
   stage === "select" ? state.data.revision : null,
   stage === "source" ? plan().shots[sid].content : null,
   ["recall", "select"].includes(stage) ? [plan().anchors?.[sid], plan().shots[sid].recall, plan().shots[sid].tts, plan().ranges[sid]] : null]

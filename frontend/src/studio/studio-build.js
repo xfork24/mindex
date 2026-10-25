@@ -59,6 +59,24 @@ async function preflight(force = false) {
     )
   );
 }
+// 成片实际混入的背景音乐段落（成片版本数据 music）：按分镜边界切换，列出每段的分镜范围、时间、音量与试听。
+function renderFinalMusic(body, item) {
+  const list = item.data?.music;
+  if (!list?.length) return;
+  const box = el("div", "", "final-music");
+  box.append(el("h4", MindexI18n.msg("ui.music_final_heading")));
+  const bounds = item.data.boundaries || [];
+  const number = (sid) => bounds.findIndex((b) => b.shot_id === sid) + 1;
+  for (const segment of list) {
+    const row = el("div", "", "final-music-row");
+    row.append(el("p", MindexI18n.msg("ui.music_final_item", { p0: number(segment.shots[0]), p1: number(segment.shots[segment.shots.length - 1]),
+      p2: secs(segment.start), p3: secs(segment.end), p4: segment.volume, p5: segment.prompt || "" })));
+    const music = ver(segment.version);
+    if (music?.files?.music?.url) row.append(media("audio", music.files.music.url));
+    box.append(row);
+  }
+  body.append(box);
+}
 function renderFinal() {
   const p = plan(),
     selected = ver(p.final);
@@ -86,6 +104,7 @@ function renderFinal() {
       }
       player.append(video);
       versionFiles(player, selected);
+      renderFinalMusic(player, selected);
     }
   }
   const history = $("final-history");

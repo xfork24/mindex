@@ -178,6 +178,7 @@ function renderStageDetails(body, sid, stage) {
 
   }
   if (stage === "tts") renderMusicSection(body, sid);
+  if (stage === "render") renderMusicMaterial(body, sid);
   const history = el("div");
   history.dataset.rowHistory = stage;
   body.append(el("h4", MindexI18n.msg("ui.a3bc41e89f3b")), history);
@@ -328,6 +329,45 @@ function musicEditable(cue) {
   // 键序与 ShotMusic 字段一致。
   return { kind: cue?.kind || "", prompt: cue?.prompt ?? null, lyrics: cue?.lyrics ?? null,
     instrumental: cue?.instrumental ?? true, audio_id: cue?.audio_id ?? null, volume: cue?.volume ?? 0.25 };
+}
+// 某分镜适用的背景音乐素材：起始提示点所在分镜（from）、提示点、已选用的音乐版本；停止或没有背景音乐时为 null / {stop}。
+function musicMaterial(sid) {
+  const belong = state.data.shot_music?.[sid];
+  if (!belong || belong.stop) return belong || null;
+  const from = belong.from;
+  return { from, start: belong.start, cue: shotCue(from), item: ver(plan().shots[from]?.music) };
+}
+// 分镜渲染详情缓存键：背景音乐素材变化（切换提示点、音乐版本状态、音量）时重建详情。
+function musicMaterialKey(sid) {
+  const found = musicMaterial(sid);
+  return [found?.stop || false, found?.from, found?.start, found?.cue, found?.item?.id, found?.item?.status];
+}
+// 分镜渲染阶段列出本镜适用的背景音乐素材：在哪个分镜切入、描述、音量、音乐版本与试听。
+// 分镜预览本身只含配音（与原声）；背景音乐在成片合成时按分镜边界切换并铺在配音下面。
+function renderMusicMaterial(body, sid) {
+  const section = el("div", "", "music-material");
+  section.append(el("h4", MindexI18n.msg("ui.music_render_heading")));
+  const found = musicMaterial(sid);
+  if (!found) section.append(el("p", MindexI18n.msg("ui.music_render_none"), "muted"));else
+  if (found.stop) section.append(el("p", MindexI18n.msg("ui.music_render_stop")));else
+  {
+    const cue = found.cue;
+    const kind = MindexI18n.msg(cue?.kind === "cover" ? "ui.music_kind_cover" : "ui.music_kind_generate");
+    section.append(el("p", found.start ?
+    MindexI18n.msg("ui.music_render_start", { p0: kind, p1: cue?.prompt || "" }) :
+    MindexI18n.msg("ui.music_render_continue", { p0: order().indexOf(found.from) + 1, p1: shortId(found.from), p2: kind, p3: cue?.prompt || "" })));
+    const item = found.item;
+    if (item) {
+      section.append(el("p", MindexI18n.msg("ui.music_render_meta", { p0: cue?.volume ?? 0.25, p1: item.id.slice(0, 8),
+        p2: statusText(item.status), p3: secs(item.data?.duration) }), item.status === "failed" ? "warn-text" : "muted"));
+      if (item.error) section.append(el("p", shortIds(MindexI18n.system(item.error)), "warn-text"));
+      if (item.files?.music?.url) section.append(media("audio", item.files.music.url));
+    }
+    if (!item || item.status !== "complete")
+    section.append(el("p", MindexI18n.msg("ui.music_render_missing"), "warn-text"));
+  }
+  section.append(el("p", MindexI18n.msg("ui.music_render_hint"), "muted"));
+  body.append(section);
 }
 function renderMusicSection(body, sid) {
   const section = el("div", "", "music-editor");

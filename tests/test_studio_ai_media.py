@@ -25,6 +25,7 @@ from mindex.models.video_generators import MiniMaxH3VideoGenerator, VideoRequest
 from mindex.shared.media import audio_info, command
 from mindex.studio import studio
 from mindex.studio import workspace as ws
+from mindex.studio.workspace.media_nodes import MUSIC_MIX_VERSION
 
 slow = pytest.mark.slow
 
@@ -37,13 +38,13 @@ def png_bytes(color=(30, 160, 60)) -> bytes:
     return buffer.getvalue()
 
 
-def tone_wav(seconds=1.0, rate=48000) -> bytes:
+def tone_wav(seconds=1.0, rate=48000, frequency=330) -> bytes:
     buffer = io.BytesIO()
     with wave.open(buffer, "wb") as handle:
         handle.setnchannels(1)
         handle.setsampwidth(2)
         handle.setframerate(rate)
-        handle.writeframes(b"".join(struct.pack("<h", int(8000 * math.sin(2 * math.pi * 330 * i / rate)))
+        handle.writeframes(b"".join(struct.pack("<h", int(8000 * math.sin(2 * math.pi * frequency * i / rate)))
                                     for i in range(int(rate * seconds))))
     return buffer.getvalue()
 
@@ -344,6 +345,81 @@ def test_background_music_mixed_under_voice_and_continues(media, tmp_path):
     previous = p["final"]
     w, p = run(media, job_id, w, p, images=images, music=music)
     assert len(music.requests) == 1 and p["final"] != previous
+
+
+class ToneMusicGenerator(FakeMusicGenerator):
+    """每次请求返回不同频率的音乐（1000 / 2500 Hz），用来区分成片里哪一段背景音乐在响。配音是 440 Hz。"""
+
+    def generate(self, request):
+        self.requests.append(request)
+        return tone_wav(2.0, frequency=(1000, 2500)[(len(self.requests) - 1) % 2]), {}
+
+
+def band_level(path, start, seconds, frequency) -> float:
+    """成片某一时间窗内、以 ``frequency`` 为中心的窄带最大音量（dB）。"""
+    import subprocess
+
+    log = subprocess.run(
+        ["ffmpeg", "-v", "info", "-ss", str(start), "-t", str(seconds), "-i", str(path), "-vn", "-af",
+         f"bandpass=f={frequency}:width_type=h:w=40,volumedetect", "-f", "null", "-"],
+        capture_output=True, text=True, check=True).stderr
+    return float(next(line for line in log.splitlines() if "max_volume" in line).split("max_volume:")[1].split()[0])
+
+
+@slow
+def test_background_music_is_audible_and_switches_at_the_cue_shot(media):
+    """分镜 b 切入音乐 A（1000 Hz），顺延到 c；分镜 d 切入音乐 B（2500 Hz）；a 之前没有背景音乐。
+    成片里：a 听不到任一段；b、c 只有 A；d 只有 B（B 的音量设得比 A 低，也必须明显可闻）。"""
+    text = "一二三四五六七八九十一二三四五六七八"  # 18 字 → 配音约 2.5 秒，足够跨过淡入淡出
+    shots = [shot("a", text, source={"kind": "aigc_image"}),
+             shot("b", text, source={"kind": "aigc_image"}, music={"kind": "generate", "prompt": "甲", "volume": 0.6}),
+             shot("c", text, source={"kind": "aigc_image"}),
+             shot("d", text, source={"kind": "aigc_image"}, music={"kind": "generate", "prompt": "乙", "volume": 0.4})]
+    job_id, w, p = setup(media, shots)
+    music = ToneMusicGenerator()
+    w, p = run(media, job_id, w, p, images=FakeImageGenerator(), music=music)
+    assert w["builds"][-1]["status"] == "complete", w["builds"][-1]
+    assert [request.prompt for request in music.requests] == ["甲", "乙"]
+    final = ws.version(w, p["final"])
+    mp4 = ws.file_path(media, job_id, final, "mp4")
+    spans = {item["shot_id"]: (item["start"], item["end"]) for item in final["data"]["boundaries"]}
+
+    def level(sid, frequency, *, head=0.6, tail=0.6):
+        start, end = spans[sid]
+        return band_level(mp4, start + head, end - start - head - tail, frequency)
+
+    silent = level("a", 1000)
+    assert level("a", 2500) < silent + 3  # 开头没有背景音乐：两个频段都只是配音的泄漏
+    assert level("b", 1000) > silent + 10 and level("c", 1000, head=0.1, tail=1.0) > silent + 10
+    assert level("b", 2500) < silent + 3 and level("c", 2500, head=0.1, tail=1.0) < silent + 3
+    assert level("d", 2500) > silent + 10  # 在 d 切换到另一段音乐
+    assert level("d", 1000) < silent + 3
+    # 成片版本记录实际混入的背景音乐素材（页面据此列出）。
+    report = final["data"]["music"]
+    assert [(item["cue"], item["shots"], item["volume"]) for item in report] == [
+        ("b", ["b", "c"], 0.6), ("d", ["d"], 0.4)]
+    assert report[0]["version"] == p["shots"]["b"]["music"] and report[0]["start"] == pytest.approx(spans["b"][0])
+    assert report[1]["end"] == pytest.approx(spans["d"][1])
+
+
+def test_compose_signature_tracks_mix_version_only_with_music(media, monkeypatch):
+    from mindex.studio.workspace import handlers
+
+    with_music = [shot("a", "一。", source={"kind": "aigc_image"}),
+                  shot("b", "二。", source={"kind": "aigc_image"}, music={"kind": "generate", "prompt": "甲"})]
+    without = [with_music[0]]
+
+    def signatures():
+        job_id, w, p = setup(media, with_music)
+        first = ws.specification(media, job_id, w, p, "compose")["signature"]
+        job_id, w, p = setup(media, without)
+        return first, ws.specification(media, job_id, w, p, "compose")["signature"]
+
+    before = signatures()
+    monkeypatch.setattr(handlers.compose, "MUSIC_MIX_VERSION", MUSIC_MIX_VERSION + 1)
+    after = signatures()
+    assert after[0] != before[0]  # 混音参数变化：有背景音乐的旧成片需要重新合成
+    assert after[1] == before[1]  # 没有背景音乐的成片签名与混音版本无关
 
 
 def test_lyrics_endpoint_and_audio_upload(media, tmp_path):
