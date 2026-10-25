@@ -32,6 +32,9 @@ class CreateJobBody(StrictModel):
     text: str  # 视频大纲；文案在任务内由文案创作模型生成
     title: str | None = Field(default=None, max_length=60)
     options: dict | None = None
+    # 用户的原始输入（只读展示）：页面创建时与 text 相同可省略；智能助手创建时为用户在对话里的原话，
+    # text 则是助手整理后的大纲。不参与文案生成与任何签名。
+    original_input: str | None = Field(default=None, max_length=20000)
 
 
 class ShotBody(StrictModel):

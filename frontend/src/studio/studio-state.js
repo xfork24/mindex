@@ -15,7 +15,7 @@ function shotStages(sid) {
 function pictureStage(sid) {
   return shotStages(sid).find((stage) => PICTURE_STAGES.includes(stage)) || null;
 }
-// 分镜表固定为五列：文案与查询 + 下面四列；与画面来源无关。
+// 批量操作的阶段（原分镜表的四列）：文案与查询之外的四个阶段，与画面来源无关。
 function matrixStages() {
   return RECALL_STAGES;
 }
@@ -23,6 +23,40 @@ function matrixStages() {
 function cellStage(sid, column) {
   if (column !== "recall") return column;
   return pictureStage(sid) || "source";
+}
+// 分镜卡片可打开的阶段：文案与查询、画面阶段（无画面阶段时为上传素材预览 source），再加该分镜包含的配音/选片/渲染。
+// 背景音乐（music）并入配音阶段显示，不单独列出。
+function barStages(sid) {
+  const present = shotStages(sid);
+  return ["content", cellStage(sid, "recall"), ...["tts", "select", "render"].filter((stage) => present.includes(stage))];
+}
+// 阶段是否已有产物：普通阶段看方案里选用的版本；上传素材预览看文案与查询里是否有上传文件。
+function stageHasVersion(sid, stage) {
+  const shot = plan().shots[sid] || {};
+  if (stage === "source") return !!ver(shot.content)?.data?.source?.media_id;
+  return !!shot[stage];
+}
+// 阶段状态：running > failed > stale > complete > none。
+// stale = 已选版本但后端重算签名后有冲突；failed/running 取最近一次包含该节点的构建。
+function stageState(sid, stage) {
+  if (stage === "source") return stageHasVersion(sid, stage) ? "complete" : "none";
+  const builds = state.data?.builds || [];
+  const build = [...builds].reverse().find((b) => b.plan_id === plan().id &&
+  b.nodes.some((n) => n.stage === stage && n.shot_id === sid));
+  const node = build?.nodes.find((n) => n.stage === stage && n.shot_id === sid);
+  if (build?.status === "running" && ["pending", "running"].includes(node?.status)) return "running";
+  if (node?.status === "failed") return "failed";
+  if (!stageHasVersion(sid, stage)) return "none";
+  return state.data?.conflicts?.[`${stage}:${sid}`]?.length ? "stale" : "complete";
+}
+// 卡片显示的阶段：第一个已过期的阶段；没有时为最后一个已有产物的阶段；都没有时为文案与查询。
+// 失败或执行中但仍保留旧版本的阶段：只要旧版本过期就算过期。
+function cardStage(sid) {
+  const stages = barStages(sid);
+  const stale = stages.find((stage) => stageHasVersion(sid, stage) &&
+  stage !== "source" && state.data?.conflicts?.[`${stage}:${sid}`]?.length);
+  if (stale) return stale;
+  return [...stages].reverse().find((stage) => stageHasVersion(sid, stage)) || "content";
 }
 // 多选框顶部的“全部选择”占位值，不是一个真实人物 ID。
 const ALL_VALUE = "__all__";
@@ -113,11 +147,12 @@ const state = {
   cancelling: null, // 已请求取消的执行："build:<id>" 或 "job:<id>"，用于显示“正在取消…”
   titleEditing: false,
   titleDraft: null,
-  expanded: new Map(),
+  selection: new Map(), // 任务/方案 → 当前打开的 {sid, stage}
   drafts: new Map(),
   windowDrafts: new Map(),
-  matrixRows: new Map(),
-  matrixScope: null,
+  shotCards: new Map(), // sid → 分镜卡片缓存 {card, body, mediaBox, key, mediaKey}
+  boardScope: null,
+  stagePanel: { key: null, historyKey: null }, // 阶段详情区的重建键
   logViews: new Map(),
   finalUrl: null,
   persons: null, // 懒加载的人物身份（演员/角色；作品不参与选择）

@@ -49,7 +49,7 @@ const sandbox = {
   state: {
     id: "job",
     data: { revision: "r1", conflicts: {}, recall_granularity: "shot" },
-    drafts: new Map(), matrixRows: new Map(), expanded: new Map(),
+    drafts: new Map(), shotCards: new Map(), selection: new Map(), stagePanel: { key: null },
   },
   LABEL: { content: "文案与查询", recall: "召回", tts: "配音", select: "选片", render: "渲染" },
   GRANULARITY_LABEL: { shot: "镜头", moment: "片段", scene: "场景" },
@@ -69,7 +69,13 @@ const sandbox = {
   latestNode: () => undefined,
   executionError: () => "",
   selectionWithin: () => false,
+  openStage: () => {},
   toggleCell: () => {},
+  // 卡片刷新桩：真实实现重建分镜卡片正文，这里只把 content 摘要放回卡片。
+  refreshShotCard: sid => {
+    const entry = sandbox.state.shotCards.get(sid);
+    entry?.summary.replaceChildren(vm.runInContext(`cellSummary(${JSON.stringify(sid)}, "content")`, sandbox));
+  },
   updateLocks: () => {},
   renderMatrix: () => {},
   renderRecallEditor: () => {},
@@ -87,11 +93,10 @@ const slice = (start, end) => {
 };
 vm.runInContext([
   slice("function field(", "function jsonView("),
-  slice("function draftKey(", "function expandedRows("),
-  "function expandedRows() { return state.expanded.get(scopeKey()) || state.expanded.set(scopeKey(), new Map()).get(scopeKey()); }",
+  slice("function draftKey(", "function hasDirtyDraft("),
   slice("function invalidatePanel(", "\n}\n") + "\n}\n",
   slice("function recallEditable(", "function queryPreviewNode("),
-  slice("function cellSummary(", "function retrievalCombo("),
+  slice("function stageSummaryNodes(", "function retrievalCombo("),
   slice("function renderShotEditor(", "function renderStageDetails("),
 ].join("\n"), sandbox);
 
@@ -114,15 +119,15 @@ function reset() {
     plans.p1.shots[d.id] = { content: `c-${d.id}` };
   }
   sandbox.state.drafts.clear();
-  sandbox.state.matrixRows.clear();
+  sandbox.state.shotCards.clear();
   requests.length = 0;
   apiImpl = async () => ({ ok: true });
 }
-// 打开某镜编辑器：为 input 监听准备分镜行（summary 第 2 格是 content 摘要）。
+// 打开某镜编辑器：为 input 监听准备分镜卡片（summary 是卡片正文，内含 content 摘要）。
 function openEditor(sid) {
-  const summary = new Node("tr");
-  summary.append(new Node("td"), run(`cellSummary(${JSON.stringify(sid)}, "content")`));
-  sandbox.state.matrixRows.set(sid, { summary, panelKey: "x" });
+  const summary = new Node("div");
+  summary.append(run(`cellSummary(${JSON.stringify(sid)}, "content")`));
+  sandbox.state.shotCards.set(sid, { summary });
   const body = new Node("div");
   run(`renderShotEditor`)(body, sid);
   const input = name => find(body, n => n.dataset.shotField === name);
@@ -153,8 +158,8 @@ const cases = [
     const e = openEditor("s1");
     e.type("visual", "晨雾笼罩的山间步道，远处有人");
     assert.equal(e.draft().dirty, true);
-    // 格内摘要随之刷新：显示未保存标记，摘要仍是已存版本的 visual。
-    const cell = e.summary.children[1];
+    // 卡片摘要随之刷新：显示未保存标记，摘要仍是已存版本的 visual。
+    const cell = e.summary.children[0];
     assert.ok(find(cell, n => n.className === "badge warn"));
     assert.equal(visualSpans(cell)[0].textContent, "画面意象：晨雾笼罩的山间步道");
     e.type("visual", "晨雾笼罩的山间步道");
@@ -281,8 +286,8 @@ const cases = [
     assert.equal(versions["c-s1"].data.query, "山间 步道 晨雾");
     const status = find(e.body, n => n.attrs.role === "status");
     assert.equal(status.hidden, true);
-    // 格内摘要随之显示未保存标记。
-    assert.ok(find(e.summary.children[1], n => n.className === "badge warn"));
+    // 卡片摘要随之显示未保存标记。
+    assert.ok(find(e.summary.children[0], n => n.className === "badge warn"));
     // 保存后整份 PATCH 带上建议 query。
     apiImpl = async () => ({ ok: true });
     await run(`saveShot("s1")`);

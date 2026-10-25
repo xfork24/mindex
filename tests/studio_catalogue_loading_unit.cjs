@@ -3,10 +3,10 @@ const fs=require('node:fs');
 const vm=require('node:vm');
 const code=require("./studio_source.cjs").studioSource();
 let release,calls=0,filled=0;
-const state={id:'A',matrixRows:new Map(),data:null};
+const state={id:'A',stagePanel:{key:'x'},data:null};
 const ctx=vm.createContext({state,Date,api:async(url)=>{
  assert.equal(url,'/api/persons/filters');calls++;return new Promise(resolve=>release=resolve);
-},fillCreateSources(){filled++;},renderJobMeta(){},renderMatrix(){}});
+},fillCreateSources(){filled++;},renderJobMeta(){},renderMatrix(){},invalidatePanel(){state.stagePanel.key=null;}});
 vm.runInContext(code.slice(code.indexOf('let recallCatalogue ='),code.indexOf('function fillCreateSources(')),ctx);
 (async()=>{
  const sources=ctx.loadSources(),recall=ctx.loadRecallOptions();

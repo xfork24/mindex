@@ -34,7 +34,7 @@ async function selectJob(id, { reloadJobs = true } = {}) {
   state.titleDraft = null;
   state.data = null;
   state.finalUrl = null;
-  state.matrixScope = null;
+  state.boardScope = null; // 下一次渲染时重置分镜条与详情区
   state.persons = state.inputs = state.materialDigest = null; // 素材摘要在 renderJobMeta 中按任务重新获取
   history.replaceState(null, "", `/studio?job=${id}`);
   closeDialog();
@@ -82,7 +82,7 @@ async function loadRecallOptions() {
   state.persons = persons.entities;
   state.personSources = persons.sources;
   applySources(persons.sources);
-  for (const entry of state.matrixRows.values()) entry.panelKey = null;
+  invalidatePanel();
   if (state.data) renderMatrix();
 }
 // Shared by the creation form and per-shot recall editors.
@@ -132,12 +132,13 @@ function sourceName(id, fallback) {
 // 音轨/字幕/召回数量属于方案参数，可在方案参数里动态调整，不在此重复展示。
 function renderJobMeta() {
   const job = state.data.job, body = $("job-meta-body");
-  // 新任务只有视频大纲，文案在方案里创作；老任务的 input_text 就是创建时填写的文案。
+  // 新任务显示用户的原始输入（智能助手创建时为用户原话；视频大纲在下方“文案创作”里显示）；
+  // 早于原始输入字段的任务没有原话，退回显示大纲。老任务的 input_text 就是创建时填写的文案。
   const legacyText = !job.outline && job.input_text;
   const rows = [
-    // 大纲/文案保留非空行，素材列表独占整行并逐项展示。
-    [legacyText ? "ui.7407393d52c7" : "ui.job_outline_label",
-    (job.outline || job.input_text || "").split(/\r?\n/).filter((line) => line.trim()).join("\n"), true],
+    // 原始输入/文案保留非空行，素材列表独占整行并逐项展示。
+    [legacyText ? "ui.7407393d52c7" : "ui.job_original_input_label",
+    (job.original_input || job.outline || job.input_text || "").split(/\r?\n/).filter((line) => line.trim()).join("\n"), true],
     ["ui.84e3802f60a7", MindexI18n.date(job.created_at)],
     ["ui.f711792f098b", (job.source_ids?.length ? job.source_ids : (state.sources || []).map((s) => s.id)).map(sourceName).join("\n") || MindexI18n.msg("ui.0a9eab1a4d36"), true]
   ];

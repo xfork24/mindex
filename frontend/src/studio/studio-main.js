@@ -33,11 +33,10 @@ $("delete-job").addEventListener("click", async () => {
     if (state.id === id) {
       state.token++;
       clearTimeout(state.timer);
-      state.id = state.data = state.finalUrl = state.matrixScope = null;
+      resetBoard();
+      state.id = state.data = state.finalUrl = null;
       state.drafts.clear();
       state.windowDrafts.clear();
-      state.matrixRows.clear();
-      $("matrix-body").replaceChildren();
       $("final-player").replaceChildren();
       closeDialog();
       $("play-video").pause();
@@ -63,22 +62,36 @@ $("cancel-run").addEventListener("click", () => cancelRun().catch(fail));
 $("cancel-legacy").addEventListener("click", () => cancelLegacy().catch(fail));
 $("plan-settings").addEventListener("click", editSettings);
 $("run-all").addEventListener("click", () => preflight().catch(fail));
-$("collapse-all-rows").addEventListener("click", collapseAllRows);
+// 批量操作：两个按钮的 data-stage 由阶段下拉同步（updateLocks）。
+$("batch-stage").addEventListener("change", () => {if (state.data) updateLocks();});
 document.
 querySelectorAll(".regenerate-column, .execute-column").
 forEach((n) =>
 n.addEventListener("click", () =>
-regenerateColumn(n.dataset.stage, !n.classList.contains("execute-column")).catch(fail)
+regenerateColumn($("batch-stage").value, !n.classList.contains("execute-column")).catch(fail)
 )
 );
-const matrixResize = new ResizeObserver((entries) => {
-  for (const entry of entries)
-  entry.target.style.setProperty(
-    "--matrix-viewport-width",
-    `${entry.contentRect.width}px`
-  );
+// 分镜条：两端按钮、滚轮转横向、滚动时浮层跟随卡片。
+$("strip-prev").addEventListener("click", () => scrollStrip(-1));
+$("strip-next").addEventListener("click", () => scrollStrip(1));
+$("shot-strip").addEventListener("wheel", stripWheel, { passive: false });
+$("shot-strip").addEventListener("scroll", () => {updateStripNav();positionPopover();}, { passive: true });
+window.addEventListener("resize", () => {if (state.data) updateStripNav();positionPopover();});
+window.addEventListener("scroll", positionPopover, { passive: true, capture: true });
+// 阶段浮层：鼠标在浮层内保持展开；键盘上下切换、Esc 收起；焦点或点击离开卡片与浮层时收起。
+$("stage-popover").addEventListener("pointerenter", () => clearTimeout(popover.timer));
+$("stage-popover").addEventListener("pointerleave", (event) => {if (event.pointerType !== "touch") scheduleHidePopover();});
+$("stage-popover").addEventListener("keydown", popoverKeydown);
+$("stage-popover").addEventListener("focusout", (event) => {
+  const next = event.relatedTarget, card = state.shotCards.get(popover.sid)?.card;
+  if (next && !$("stage-popover").contains(next) && !card?.contains(next)) hidePopover();
 });
-matrixResize.observe(document.querySelector(".matrix-scroll"));
+document.addEventListener("pointerdown", (event) => {
+  if (!popover.sid || $("stage-popover").contains(event.target)) return;
+  if (event.target.closest?.(".stage-menu-button")) return;
+  if (event.pointerType === "mouse" && state.shotCards.get(popover.sid)?.card.contains(event.target)) return;
+  hidePopover();
+});
 // Ctrl/⌘ + Enter 视为点击「创建任务」；按钮禁用（创建中）时 click() 不触发提交。
 $("create-form").addEventListener("keydown", (event) => {
   if (event.key !== "Enter" || !(event.ctrlKey || event.metaKey) || event.isComposing) return;
@@ -146,7 +159,9 @@ window.MindexAgentContext = () => {
     job_title: state.data.job?.title,
     plan_id: plan().id,
     shot_count: order().length,
-    expanded_shots: [...expandedRows().keys()].map(shortId)
+    // 当前在详情区打开的分镜（沿用 expanded_shots 键名，至多一个）与阶段。
+    expanded_shots: selection() ? [shortId(selection().sid)] : [],
+    open_stage: selection()?.stage || null
   };
 };
 // 改动来自任何来源（本标签、其他标签、MCP）都刷新；切换任务只由本标签的定位决定。
@@ -193,11 +208,17 @@ window.MindexAgentFocus = async (focus, { passive = false } = {}) => {
   if (shots.length) {
     $("storyboard-section").open = true;
     if (focus.stage && !passive) {
-      // 召回列统一显示画面阶段：定位到召回/生成图片/生成画面/生成动画时展开该分镜实际的画面阶段。
-      for (const sid of shots.slice(0, 5)) expandedRows().set(sid, PICTURE_STAGES.includes(focus.stage) ? cellStage(sid, "recall") : focus.stage);
+      // 画面阶段统一映射为该分镜实际的画面阶段（或上传素材预览），背景音乐并入配音；只打开第一个目标分镜。
+      const sid = shots[0];
+      const stage = PICTURE_STAGES.includes(focus.stage) ? cellStage(sid, "recall") : focus.stage === "music" ? "tts" : focus.stage;
+      if (barStages(sid).includes(stage)) state.selection.set(scopeKey(), { sid, stage });
       render();
     }
-    shots.forEach((sid, index) => mark(state.matrixRows.get(sid)?.summary, { scroll: index === 0 }));
+    shots.forEach((sid, index) => {
+      const card = state.shotCards.get(sid)?.card;
+      if (index === 0) card?.scrollIntoView({ block: "nearest", inline: "nearest" });
+      mark(card, { scroll: index === 0 });
+    });
     return true;
   }
   const target = document.querySelector(AGENT_SECTIONS[focus.section] || AGENT_SECTIONS.storyboard);

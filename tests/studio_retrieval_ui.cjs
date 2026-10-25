@@ -94,8 +94,8 @@ assert.equal(edges(root)[0].children[1].textContent, "无召回依赖（分镜�
 assert.equal(edges(tree("r1", { compose: { c1: [group()] } })).length, 0);
 assert.equal(edges(tree("c1", undefined)).length, 1);
 
-// 页面结构：一行描述位于分镜工作台内、分镜表之前。
+// 页面结构：一行描述位于分镜工作台内、分镜条之前。
 const html = fs.readFileSync("frontend/src/studio/studio.html", "utf8");
 const at = html.indexOf('id="retrieval-deps"');
-assert.ok(at > html.indexOf('id="storyboard-section"') && at < html.indexOf('class="shot-matrix"'));
+assert.ok(at > html.indexOf('id="storyboard-section"') && at < html.indexOf('id="shot-strip"'));
 console.log("studio retrieval UI checks passed");

@@ -163,12 +163,9 @@ function renderStageDetails(body, sid, stage) {
       body.append(
         el("p", MindexI18n.msg("ui.a8e554e0bc5a", { p0: item.data.frames || "?", p1: item.data.fps || "?" }))
       );
-      if (item.files.preview?.url || item.files.video?.url)
-      body.append(
-        media("video", item.files.preview?.url || item.files.video.url)
-      );
-      if (item.files.audio?.url)
-      body.append(media("audio", item.files.audio.url));
+      // 只显示带配音与字幕的分镜视频，不再单独列出音频。
+      const video = renderPreviewVideo(item);
+      if (video) body.append(video);
     }
   }
   if (stage === "select" && recallSource) {
@@ -184,6 +181,113 @@ function renderStageDetails(body, sid, stage) {
   const history = el("div");
   history.dataset.rowHistory = stage;
   body.append(el("h4", MindexI18n.msg("ui.a3bc41e89f3b")), history);
+}
+// 分镜渲染预览：带配音的 preview.mp4（旧版本没有时退回无声 video.mp4），叠加该镜字幕。
+// 字幕取版本时间线事件 event.subtitle（相对本镜起点），生成 WebVTT 字幕轨，与成片字幕同一来源。
+// 浏览器原生字幕的位置不可精确控制，所以字幕轨设为 hidden，按当前 cue 在视频上叠加一层文字：
+// 字幕底边对齐可视画面底边（画幅按 pad 适配时画面上下可能带黑边，取帧检测黑边，字幕放在黑边之上）。
+// 视频全屏时叠加层不可见，改用原生字幕显示。
+function renderPreviewVideo(item) {
+  const url = item.files.preview?.url || item.files.video?.url;
+  if (!url) return null;
+  const video = media("video", url);
+  const wrap = el("div", "", "render-preview");
+  wrap.append(video);
+  const src = shotSubtitleUrl(item.data?.event?.subtitle);
+  if (!src) return wrap;
+  const track = document.createElement("track");
+  Object.assign(track, { kind: "subtitles", srclang: "zh", src });
+  MindexI18n.setAttr(track, "label", MindexI18n.msg("ui.board_subtitle_label"));
+  track.addEventListener("load", () => URL.revokeObjectURL(src), { once: true });
+  video.append(track);
+  const caption = el("div", "", "render-subtitle");
+  caption.hidden = true;
+  wrap.append(caption);
+  const text = track.track;
+  text.mode = "hidden";
+  const update = () => {
+    const full = document.fullscreenElement === video;
+    const active = [...text.activeCues || []].map((cue) => cue.text).join("\n");
+    if (caption.textContent !== active) caption.textContent = active;
+    caption.hidden = !active || full;
+    placeCaption(video, caption);
+  };
+  text.addEventListener("cuechange", update);
+  video.addEventListener("loadedmetadata", update);
+  video.addEventListener("fullscreenchange", () => {
+    text.mode = document.fullscreenElement === video ? "showing" : "hidden";
+    update();
+  });
+  if (typeof ResizeObserver === "function") new ResizeObserver(() => placeCaption(video, caption)).observe(video);
+  // 首帧可能尚未解码（preload=metadata）或整帧偏暗（如淡入）：在加载、跳转、播放时反复尝试，直到检测出画面。
+  const events = ["loadeddata", "seeked", "playing", "timeupdate"];
+  const attempt = () => {
+    if (video.readyState < 2) return;
+    const bottom = pictureBottom(video, video.videoWidth, video.videoHeight);
+    if (bottom == null) return;
+    video.dataset.pictureBottom = String(bottom);
+    placeCaption(video, caption);
+    for (const name of events) video.removeEventListener(name, attempt);
+  };
+  for (const name of events) video.addEventListener(name, attempt);
+  return wrap;
+}
+// 叠加字幕的位置：按 object-fit: contain 求视频画面在元素中的实际矩形，字幕宽度与画面一致，
+// 底边落在画面内“可视画面底边”（pictureBottom，缺省为整帧底边）；字号随画面短边缩放。
+function placeCaption(video, caption) {
+  const vw = video.videoWidth, vh = video.videoHeight, w = video.clientWidth, h = video.clientHeight;
+  if (!vw || !vh || !w || !h) return;
+  const scale = Math.min(w / vw, h / vh),
+    picW = vw * scale,
+    picH = vh * scale;
+  const left = video.offsetLeft + (w - picW) / 2,
+    top = video.offsetTop + (h - picH) / 2;
+  const bottom = Math.min(1, Math.max(0, Number(video.dataset.pictureBottom || 1)));
+  const wrapHeight = caption.parentElement?.clientHeight || video.offsetTop + h;
+  Object.assign(caption.style, {
+    left: `${left}px`,
+    width: `${picW}px`,
+    bottom: `${Math.max(0, wrapHeight - (top + picH * bottom))}px`,
+    fontSize: `${Math.max(11, Math.round(Math.min(picW, picH) * 0.06))}px`
+  });
+}
+// 可视画面底边占整帧高度的比例（0–1）：从下往上找第一行“有画面”的像素行；整帧都偏暗时返回 null。
+// 黑边是纯黑（编码后亮度约 16 以下），画面行要求至少 2% 的像素亮度超过阈值。
+function pictureBottom(source, width, height) {
+  if (!width || !height) return null;
+  const w = 64, h = Math.max(1, Math.round(w * height / width));
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  try {
+    ctx.drawImage(source, 0, 0, w, h);
+  } catch {
+    return null;
+  }
+  const { data } = ctx.getImageData(0, 0, w, h);
+  const need = Math.max(1, Math.ceil(w * 0.02));
+  for (let y = h - 1; y >= 0; y--) {
+    let lit = 0;
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4;
+      if (0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2] > 28) lit++;
+    }
+    if (lit >= need) return (y + 1) / h;
+  }
+  return null;
+}
+function shotSubtitleUrl(subtitle) {
+  if (!subtitle?.text || !(subtitle.end > subtitle.start)) return null;
+  const stamp = (seconds) => {
+    const ms = Math.max(0, Math.round(seconds * 1000));
+    const pad = (n, size = 2) => String(n).padStart(size, "0");
+    return `${pad(Math.floor(ms / 3600000))}:${pad(Math.floor(ms / 60000) % 60)}:${pad(Math.floor(ms / 1000) % 60)}.${pad(ms % 1000, 3)}`;
+  };
+  // 字幕文本里的 "-->" 与空行会破坏 WebVTT 结构，替换掉。
+  const text = String(subtitle.text).replace(/-->/g, "→").replace(/\n\s*\n/g, "\n");
+  const vtt = `WEBVTT\n\n1\n${stamp(subtitle.start)} --> ${stamp(subtitle.end)}\n${text}\n`;
+  return URL.createObjectURL(new Blob([vtt], { type: "text/vtt" }));
 }
 // 召回列里上传片段/图片分镜：预览上传的素材；更换素材或调整起点在“文案与查询”里进行。
 function renderSourceDetails(body, sid) {
@@ -201,7 +305,7 @@ function renderSourceDetails(body, sid) {
     });
   }
   const actions = el("div", "", "detail-actions");
-  actions.append(button(MindexI18n.msg("ui.source_cell_edit"), () => toggleCell(sid, "content")));
+  actions.append(button(MindexI18n.msg("ui.source_cell_edit"), () => openStage(sid, "content")));
   body.append(el("p", MindexI18n.msg("ui.source_cell_hint"), "muted"), actions);
 }
 // 背景音乐（配音列）：分镜上的提示点从此镜起换成新的背景音乐或停止，之后的分镜顺延；默认没有背景音乐。

@@ -1078,6 +1078,25 @@ def studio_router(
                 )
         return f"/api/studio/jobs/{job_id}/artifacts/{output.relative_to(studio.job_dir(base, job_id)).as_posix()}"
 
+    @router.get("/jobs/{job_id}/versions/{version_id}/source-playlist")
+    def version_source_playlist(job_id: str, version_id: str):
+        """选片版本对应原片区间的镜头播放列表（分镜卡片静音预览用）。
+
+        只读：不调用 ffmpeg、不持有变更锁、不写任务数据。镜头地址用 /api/admin/shots，
+        不要求素材仍在当前生效索引中（工作台依赖的检索组合可能与当前生效的不同）。"""
+        w = read_workspace(job_id)
+        item = workspace.version(w, version_id)
+        if item["stage"] != "select" or item["status"] != "complete" or item.get("incomplete"):
+            raise studio.StudioError("只有已完成的选片版本可以播放原片区间")
+        video = item["data"]["event"]["video"]
+        if video.get("kind", "library") != "library":
+            raise studio.StudioError("此选片来自上传片段或生成画面，请直接播放对应文件")
+        if not studio_steps.interval_visible(
+            store, video["source_id"], video["start"], video["end"], overlays=Library(store).overlays(),
+        ):
+            raise studio.StudioError("所选区间包含隐藏素材")
+        return ShotMedia(store).playlist(video["source_id"], video["start"], video["end"], prefix="/api/admin/shots")
+
     @router.get("/jobs/{job_id}/versions/{version_id}/preview")
     def version_preview(job_id: str, version_id: str):
         w = read_workspace(job_id)
@@ -1185,6 +1204,7 @@ def studio_router(
             # 标题生成改为后台执行：创建立即返回占位标题，避免阻塞 LLM 往返。
             state = studio.create_job(
                 cfg, body.text, body.title, body.options, store=store, defer_title=True,
+                original_input=body.original_input,
             )
             if state.get("title_pending"):
                 generate_title_async(state["id"], state["outline"])

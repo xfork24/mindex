@@ -11,12 +11,12 @@ class Node {
 }
 const state = {
   sources: ['s1', 's2', 's3'].map(id => ({id, name: id})),
-  persons: [], personSources: [], matrixRows: new Map(), data: {job: {source_ids: null}},
+  persons: [], personSources: [], shotCards: new Map(), data: {job: {source_ids: null}},
 };
 const context = vm.createContext({
   state, document: {createElement: tag => new Node(tag)},
   el: tag => new Node(tag), field: () => ({wrap: new Node('label'), input: new Node('input')}),
-  updateLocks() {},
+  updateLocks() {}, refreshShotCard() {},
   MindexI18n: {msg: id => id, setAttr() {}},
   MindexMultiSearch: {sort: x => x, attach() {}, refilter() {}},
   RECALL_MODES: [],

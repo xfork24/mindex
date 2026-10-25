@@ -274,6 +274,27 @@ class BuiltinRuntime:
         state.task = asyncio.create_task(self._drive(session_id, message, context))
         return {"messageId": message["id"]}
 
+    def user_input(self, sid: str, call_id: str | None = None) -> str | None:
+        """本会话里用户亲自输入的原话：上一次 create_job 调用（不含 ``call_id`` 本身）之后的全部用户消息，
+        按顺序以空行连接；附件说明行、页面上下文与任务跟进消息不计入。没有时返回 None。
+
+        供 create_job 记录任务的「原始输入」：任务大纲是助手整理后的文字，原话单独保存只读展示。"""
+        texts: list[str] = []
+        for event in self.store.events(sid, types=("user/message", "tool/call")):
+            data = event["data"]
+            if event["type"] == "tool/call":
+                if data.get("name") == "create_job" and data.get("callId") != call_id:
+                    texts = []
+                continue
+            if data.get("source", {}).get("kind") != "user":
+                continue
+            text = "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text")
+            if data.get("attachments"):
+                text = text.split("\n\n附件：", 1)[0]
+            if text.strip():
+                texts.append(text.strip())
+        return "\n\n".join(texts) or None
+
     async def followup(self, session_id: str, text: str) -> dict:
         return await self.prompt(session_id, [{"type": "text", "text": text}], source="followup")
 
@@ -628,7 +649,8 @@ class BuiltinRuntime:
                                   if self.attachments is not None else None)
             client = client.with_resolvers(secret=resolve_secret, attachment=resolve_attachment)
         ctx = ToolContext(client=client, session_id=sid, page=page or {}, agent_profile_id=self.agent_profile(),
-                          extra={"runtime": self, "call_id": call["id"], "record_gap": self.record_gap})
+                          extra={"runtime": self, "call_id": call["id"], "record_gap": self.record_gap,
+                                 "user_input": lambda: self.user_input(sid, call["id"])})
         try:
             decision = policy.decide(spec, self.store.get(sid)["grants"])
             if decision.kind == "ask":

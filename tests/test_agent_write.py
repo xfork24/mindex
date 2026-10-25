@@ -359,3 +359,34 @@ def test_shot_rows_include_visual(agent):
     assert [row["visual"] for row in rows] == [None, "蓝色海面", None]
     text = board_text(view, rows)
     assert text.count("画面意象：") == 1 and "  画面意象：蓝色海面" in text
+
+
+def test_create_job_records_user_words_as_original_input(agent):
+    """create_job 的任务大纲是助手整理的文字；任务的 original_input 记录用户原话：
+    上一次 create_job 之后用户发的全部消息（按顺序空行连接），不含页面上下文与跟进消息。"""
+    client, llm, job = agent
+    llm.extend([say("好的，请问时长多少？")],
+               [call("create_job", outline="A 60-second autumn short film about falling leaves")],
+               [say("已创建")],
+               [call("create_job", outline="A winter short film")],
+               [say("已创建")])
+    sid = new_session(client)
+
+    def approve():
+        pending = wait_pending(client, sid, "approval")
+        client.post(f"/api/agent/sessions/{sid}/approvals/{pending['requestId']}", json={"outcome": "allowed-once"})
+
+    send(client, sid, "做一个关于秋天落叶的短片", context=page(job))
+    wait_idle(client, sid)
+    send(client, sid, "一分钟左右", context=page(job))
+    approve()
+    wait_idle(client, sid)
+    send(client, sid, "再做一个冬天的", context=page(job))
+    approve()
+    wait_idle(client, sid)
+    detail = {}
+    for item in client.get("/api/studio/jobs").json()["items"]:
+        job = client.get(f"/api/studio/jobs/{item['id']}/workspace").json()["job"]
+        detail[job["outline"]] = job
+    assert detail["A 60-second autumn short film about falling leaves"]["original_input"] == "做一个关于秋天落叶的短片\n\n一分钟左右"
+    assert detail["A winter short film"]["original_input"] == "再做一个冬天的"

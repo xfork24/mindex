@@ -90,7 +90,7 @@ const focused = (page, selector) => page.locator(`${selector}[data-agent-focus]`
       const card = page.locator('.agent-approval');
       await card.waitFor({timeout: 15000});
       assert.match(await card.textContent(), /合并/);
-      await focused(page, 'tr');  // 确认前先定位到将被合并的分镜
+      await focused(page, '.shot-card');  // 确认前先定位到将被合并的分镜
       await card.locator('button', {hasText: '允许'}).click();
       await page.locator('.agent-approval[data-outcome="allowed-once"]').waitFor();
       await waitShots(page, 2);
@@ -108,11 +108,11 @@ const focused = (page, selector) => page.locator(`${selector}[data-agent-focus]`
       await page.locator('#agent-drawer:not([hidden])').waitFor();
       const card = page.locator('.agent-approval:not([data-outcome])');
       await card.waitFor({timeout: 15000});
-      await focused(page, 'tr');
+      await focused(page, '.shot-card');
       await card.locator('button', {hasText: '允许'}).click();
       await waitShots(page, 2);
       await page.waitForFunction(() => {
-        const row = document.querySelector('tr[data-agent-focus] th');
+        const row = document.querySelector('.shot-card[data-agent-focus] .shot-card-id');
         return row && row.textContent.includes('a1daad59');
       }, null, {timeout: 15000});
     }
@@ -123,7 +123,7 @@ const focused = (page, selector) => page.locator(`${selector}[data-agent-focus]`
       await openPanel(page);
       await say(page, '查看第 2 镜');
       await page.waitForFunction(() => {
-        const row = document.querySelector('tr[data-agent-focus] th');
+        const row = document.querySelector('.shot-card[data-agent-focus] .shot-card-id');
         return row && row.textContent.includes('925281d5');
       }, null, {timeout: 15000});
       assert.equal(new URL(page.url()).pathname, '/studio');

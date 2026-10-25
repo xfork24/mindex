@@ -704,12 +704,15 @@ def scoped_filters(filters: Filters, scope: set[str] | None) -> Filters:
 
 
 def create_job(config: Config, text: str, title: str | None = None, options: dict | None = None,
-               *, store=None, defer_title: bool = False) -> dict:
+               *, store=None, defer_title: bool = False, original_input: str | None = None) -> dict:
     """创建创作任务。``text`` 是视频大纲，文案在任务内由文案创作模型生成。
 
     标题生成是一次阻塞的 LLM 往返，会显著拖慢创建的感知延迟。调用方传入
     ``defer_title=True`` 时，这里只写占位标题并标记 ``title_pending``，由上层在后台
     线程里补全真实标题；不需要延迟（如 CLI、测试）时留空即用占位标题。
+
+    ``original_input`` 是用户的原始输入（智能助手创建时为用户原话，``text`` 是助手整理后的大纲）；
+    省略时即 ``text``。只用于任务元信息展示，不参与文案生成与签名。
     """
     text = (text or "").strip()
     if not text:
@@ -742,6 +745,7 @@ def create_job(config: Config, text: str, title: str | None = None, options: dic
         "title_pending": title_pending,
         # 新任务只保存大纲；旧任务的 input_text 即文案，迁移为方案的 legacy 文案版本。
         "outline": text,
+        "original_input": (original_input or "").strip() or text,
         "created_at": now(),
         "updated_at": now(),
         "voice_mode": "custom" if parsed.voice else "inherit",

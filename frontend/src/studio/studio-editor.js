@@ -338,9 +338,7 @@ function renderSourceEditor(body, sid, draft) {
   const section = el("div", "", "source-editor");
   const markDirty = () => {
     draft.dirty = JSON.stringify(draft.data) !== JSON.stringify(draft.original);
-    const entry = state.matrixRows.get(sid);
-    entry?.summary.children[1]?.replaceWith(cellSummary(sid, "content"));
-    updateLocks();
+    refreshShotCard(sid);
   };
   const redraw = () => {
     invalidatePanel(sid);
@@ -479,9 +477,7 @@ function renderRecallEditor(body, sid, draft, overrides) {
     draft.data.recall = recallIsDefault(next) ? null : next;
     draft.dirty =
     JSON.stringify(draft.data) !== JSON.stringify(draft.original);
-    const entry = state.matrixRows.get(sid);
-    entry?.summary.children[1]?.replaceWith(cellSummary(sid, "content"));
-    updateLocks();
+    refreshShotCard(sid);
   };
   const draw = () => {
     section.replaceChildren(el("h4", MindexI18n.msg("ui.fc0d8a6e8d52")));
@@ -705,18 +701,14 @@ function renderShotEditor(body, sid) {
       type === "number" ? Number(f.input.value) : f.input.value;
       draft.dirty =
       JSON.stringify(draft.data) !== JSON.stringify(draft.original);
-      const entry = state.matrixRows.get(sid);
-      entry.summary.children[1].replaceWith(cellSummary(sid, "content"));
-      updateLocks();
+      refreshShotCard(sid);
     });
     fields.append(f.wrap);
   }
   // 检索粒度/返回数量与检索页同款选项；默认「跟随方案」，选定后仅覆盖本分镜的召回。
   const markDirty = () => {
     draft.dirty = JSON.stringify(draft.data) !== JSON.stringify(draft.original);
-    const entry = state.matrixRows.get(sid);
-    entry.summary.children[1].replaceWith(cellSummary(sid, "content"));
-    updateLocks();
+    refreshShotCard(sid);
   };
   const planGranularity =
     GRANULARITY_LABEL[state.data.recall_granularity] || state.data.recall_granularity || "—";
@@ -898,7 +890,8 @@ async function changeStructure(sid, op) {
     if (op === "insert") {
       const p = result.plans[result.active_plan];
       const added = Object.keys(p.shots).find((id) => !oldIds.includes(id));
-      expandedRows().set(added, "content");
+      state.selection.set(scopeKey(), { sid: added, stage: "content" });
+      state.revealShot = added;
     }
   }
   if (scope === scopeKey()) await accept(result);

@@ -3,6 +3,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const {chromium} = require(process.env.MINDEX_PLAYWRIGHT_MODULE || 'playwright');
+const batchRun=async(page,stage)=>{if(stage==='split'&&!await page.evaluate(()=>plan().script)){await page.locator('#script-text').fill(await page.evaluate(()=>state.data.job.outline||'红色开场。'));await page.evaluate(()=>saveScript());await page.waitForFunction(()=>!!plan().script);}await page.locator('#batch-stage').selectOption(stage==='recall'?'picture':stage);await page.locator('#batch-regenerate').click();};
+const openShotStage=(page,shot,n)=>page.evaluate(([i,k])=>{const sid=order()[i];openStage(sid,barStages(sid)[k]);},[shot,n]);
 const base = process.env.MINDEX_RECALL_URL || 'http://127.0.0.1:18338';
 assert.match(base, /^http:\/\/127\.0\.0\.1:/);
 const out = process.env.MINDEX_RECALL_OUTPUT || 'artifacts/recall-filters';
@@ -81,9 +83,9 @@ async function picked(selector) {return page.locator(selector).evaluate(n=>[...n
     assert.deepEqual(a.upload,b.upload,`file geometry ${a.lang}/${a.width}`);
   }
   await page.goto(base+'/studio');await page.locator('#create-text').fill('红色开场画面。蓝色结尾画面。');await page.locator('#create-button').click();
-  await page.locator('#job-workspace').waitFor();await page.locator('[data-stage=split]').click();
-  await page.waitForFunction(()=>!busy()&&document.querySelector('#matrix-body .cell-trigger'));
-  await page.locator('#matrix-body .cell-trigger').first().click();
+  await page.locator('#job-workspace').waitFor();await batchRun(page,'split');
+  await page.waitForFunction(()=>!busy()&&document.querySelector('#shot-strip .shot-card'));
+  await page.locator('#shot-strip .shot-card').first().click();
   const source='[data-recall-filter=source_ids]';
   await page.locator(source+' option').nth(3).waitFor({state:'attached'});
   await page.locator(source).selectOption(ids);
@@ -94,7 +96,7 @@ async function picked(selector) {return page.locator(selector).evaluate(n=>[...n
   assert.deepEqual(new Set(await picked(source)),new Set(ids));assert.equal(await page.locator('[data-recall-filter=scene]').inputValue(),'室内');
   await page.locator('[data-recall-filter=scene]').fill('取消的场景');await page.getByRole('button',{name:'取消修改',exact:true}).click();
   assert.equal(await page.locator('[data-recall-filter=scene]').inputValue(),'室内');
-  await page.locator('[data-stage=recall]').click();
+  await batchRun(page,'recall');
   await page.waitForFunction(()=>!busy()&&Object.values(state.data.versions).some(v=>v.stage==='recall'&&v.status==='complete'));
   const saved=await page.evaluate(()=>Object.values(state.data.versions).filter(v=>v.stage==='recall'&&v.status==='complete').at(-1).data);
   assert.ok(saved.results.length);assert.ok(saved.results.every(r=>ids.includes(r.source_id)));

@@ -4,6 +4,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const {chromium} = require(process.env.MINDEX_PLAYWRIGHT_MODULE || 'playwright');
+const batchRun=async(page,stage)=>{if(stage==='split'&&!await page.evaluate(()=>plan().script)){await page.locator('#script-text').fill(await page.evaluate(()=>state.data.job.outline||'红色开场。'));await page.evaluate(()=>saveScript());await page.waitForFunction(()=>!!plan().script);}await page.locator('#batch-stage').selectOption(stage==='recall'?'picture':stage);await page.locator('#batch-regenerate').click();};
+const openShotStage=(page,shot,n)=>page.evaluate(([i,k])=>{const sid=order()[i];openStage(sid,barStages(sid)[k]);},[shot,n]);
 const base = process.env.MINDEX_LAYOUT_URL || 'http://127.0.0.1:18329';
 assert.match(base, /^http:\/\/127\.0\.0\.1:/, 'acceptance must use an isolated local server');
 const root = process.env.MINDEX_LAYOUT_DATA || '/tmp/mindex-ui-layout-fixture';
@@ -29,7 +31,7 @@ async function audit(group, languages=['zh','en'], screenshots=true) {
         const visible=n=>n.getClientRects().length && getComputedStyle(n).visibility!=='hidden' && !n.closest('template');
         const describe=n=>n.id || n.className || n.tagName.toLowerCase()+':'+(n.textContent||'').slice(0,30);
         const intrinsic='option,svg,svg *,input,textarea,.sr-only';
-        const scrollers='.matrix-scroll,.candidate-strip,.profile-scroller,.multi-list,.source-shots,.json-view,#source-list,.job-panel,.tabs,.window-viewport';
+        const scrollers='.shot-strip,.candidate-strip,.profile-scroller,.multi-list,.source-shots,.json-view,#source-list,.job-panel,.tabs,.window-viewport';
         if(document.documentElement.scrollWidth>innerWidth+1)issues.push('page overflow '+document.documentElement.scrollWidth);
         for(const n of document.querySelectorAll('button,input:not([type=hidden]),textarea,select,a.quiet')) {
           if(!visible(n))continue;
@@ -41,7 +43,7 @@ async function audit(group, languages=['zh','en'], screenshots=true) {
           if((n.type==='checkbox'||n.type==='radio')&&(Math.abs(r.height-16)>1||Math.abs(r.width-16)>1))issues.push(describe(n)+' checkbox '+r.width+'x'+r.height);
           if((type==='input'&&!['checkbox','radio','file','range','hidden'].includes(n.type)||type==='select'&&!n.multiple)&&Math.abs(r.height-size)>1)issues.push(describe(n)+' height '+r.height+' expected '+size);
           if(type==='select'&&n.multiple&&r.height<48)issues.push(describe(n)+' collapsed multiselect '+r.height);
-          const custom=n.matches('.tab,.clone-mode,.source-item,.job-item,.poster-button,.gallery-cell,.role-row-head,.new-profile-card,.cell-trigger,.detail-candidate,.candidate-thumb');
+          const custom=n.matches('.tab,.clone-mode,.source-item,.job-item,.poster-button,.gallery-cell,.role-row-head,.new-profile-card,.shot-card,.stage-option,.stage-menu-button,.strip-nav,.card-play,.detail-candidate,.candidate-thumb');
           if(type==='button'&&!custom){
             if(r.height<size-1)issues.push(describe(n)+' small button '+r.height);
             if(innerWidth>540&&r.height>size+1)issues.push(describe(n)+' tall button '+r.height+' expected '+size);
@@ -143,19 +145,20 @@ async function boundedResize(selector,dx,dy){
  for(const mode of ['url','upload']){await page.locator(`.clone-mode[data-mode=${mode}]`).click();await audit('settings-voice-'+mode);}
  await close('#clone-close');
  await goto('/studio');await audit('studio-initial');await page.locator('#create-text').fill('山风吹过山谷，远处的寺庙亮着灯。');await page.locator('#create-button').click();await page.locator('#job-workspace').waitFor();
- await page.locator('[data-stage=split]').click();await page.locator('#matrix-body .cell-trigger').first().waitFor();await page.waitForFunction(()=>document.querySelector('#execution-log').textContent.includes('执行结束'));await audit('studio-board');
+ await batchRun(page,'split');await page.locator('#shot-strip .shot-card').first().waitFor();await page.waitForFunction(()=>document.querySelector('#execution-log').textContent.includes('执行结束'));await audit('studio-board');
  for(const [id,name] of [['new-plan','new'],['copy-plan','copy'],['rename-plan','rename'],['plan-settings','parameters'],['run-all','preflight']]){await page.locator('#'+id).click();await page.locator('#work-dialog').waitFor();await audit('studio-dialog-'+name);await close('#dialog-close');}
- await page.locator('#matrix-body .cell-trigger').first().click();await audit('studio-text-editor');
+ await page.locator('#shot-strip .shot-card').first().click();await audit('studio-text-editor');
  for(const mode of ['image','video','text']){await page.locator('.recall-editor select').first().selectOption(mode);await audit('studio-query-'+mode);}
  await page.getByRole('button',{name:'取消修改',exact:true}).click();
- for(const stage of ['recall','tts','select','render']){await page.locator(`[data-stage=${stage}]`).click();await page.waitForFunction(stage=>!busy()&&Object.values(state.data.versions).some(v=>v.stage===stage&&v.status==='complete')&&state.data.builds.at(-1)?.status!=='running',stage);}
- for(let i=1;i<5;i++){await page.locator('#matrix-body .shot-summary-row').first().locator('.cell-trigger').nth(i).click();await audit('studio-stage-'+i);}
- await page.locator('#matrix-body .shot-summary-row').first().locator('.cell-trigger').nth(3).click();
+ for(const stage of ['recall','tts','select','render']){await batchRun(page,stage);await page.waitForFunction(stage=>!busy()&&Object.values(state.data.versions).some(v=>v.stage===stage&&v.status==='complete')&&state.data.builds.at(-1)?.status!=='running',stage);}
+ for(let i=1;i<5;i++){await openShotStage(page,0,i);await audit('studio-stage-'+i);}
+ await page.locator('#shot-strip .shot-card').first().locator('.shot-card-head').hover();await page.locator('#stage-popover').waitFor();await audit('studio-stage-popover');await page.mouse.move(5,5);
+ await openShotStage(page,0,3);
 
  // Verify the real manual window, save, candidate preview and version details.
- await page.locator('.window-viewport').waitFor();await audit('studio-window');const slider=page.locator('.fixed-window');await slider.focus();await page.keyboard.press('ArrowRight');await page.keyboard.press('ArrowLeft');await page.getByRole('button',{name:'保存当前窗口',exact:true}).click();await page.waitForFunction(()=>!busy());assert.equal(await page.locator('.manual-range-host .window-viewport').count(),1);assert.equal(await page.locator('.candidate-picker').count(),0);await page.locator('#matrix-body .shot-summary-row').first().locator('.cell-trigger').nth(1).click();await page.locator('.candidate-picker button').filter({hasText:'预览'}).first().click();await audit('studio-candidate-player');await close('#play-close');
+ await page.locator('.window-viewport').waitFor();await audit('studio-window');const slider=page.locator('.fixed-window');await slider.focus();await page.keyboard.press('ArrowRight');await page.keyboard.press('ArrowLeft');await page.getByRole('button',{name:'保存当前窗口',exact:true}).click();await page.waitForFunction(()=>!busy());assert.equal(await page.locator('.manual-range-host .window-viewport').count(),1);assert.equal(await page.locator('.candidate-picker').count(),0);await openShotStage(page,0,1);await page.locator('.candidate-picker button').filter({hasText:'预览'}).first().click();await audit('studio-candidate-player');await close('#play-close');
  await page.locator('.shot-detail-panel').getByRole('button',{name:'查看版本信息',exact:true}).click();await audit('studio-version-detail');await close('#dialog-close');
- await page.locator('#collapse-all-rows').click();await page.locator('#run-all').click();await page.locator('#dialog-content').getByRole('button',{name:'确认构建',exact:true}).click();await page.locator('#final-video').waitFor({timeout:60000});await page.waitForFunction(()=>!busy());await audit('studio-final');
+ await page.evaluate(()=>closeStage());await page.locator('#run-all').click();await page.locator('#dialog-content').getByRole('button',{name:'确认构建',exact:true}).click();await page.locator('#final-video').waitFor({timeout:60000});await page.waitForFunction(()=>!busy());await audit('studio-final');
  await page.locator('#final-history>details>summary').click();await audit('studio-final-history');await page.locator('#final-history').getByRole('button',{name:'复制为新方案',exact:true}).first().click();await audit('studio-restore-plan');await close('#dialog-close');
  await page.locator('#artifacts-section>summary').click();await audit('studio-artifacts');
  for(const [kind,url] of [['film',reviewURL(fixture.film)],['labels',reviewURL(fixture.labels)]]){

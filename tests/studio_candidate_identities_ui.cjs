@@ -1,6 +1,8 @@
 // Run only against serve_fixture.py with candidate-fixture.json seeded under /tmp.
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
 const {chromium}=require(process.env.MINDEX_PLAYWRIGHT_MODULE||'playwright');
+const batchRun=async(page,stage)=>{if(stage==='split'&&!await page.evaluate(()=>plan().script)){await page.locator('#script-text').fill(await page.evaluate(()=>state.data.job.outline||'红色开场。'));await page.evaluate(()=>saveScript());await page.waitForFunction(()=>!!plan().script);}await page.locator('#batch-stage').selectOption(stage==='recall'?'picture':stage);await page.locator('#batch-regenerate').click();};
+const openShotStage=(page,shot,n)=>page.evaluate(([i,k])=>{const sid=order()[i];openStage(sid,barStages(sid)[k]);},[shot,n]);
 const base=process.env.MINDEX_CANDIDATE_URL||'http://127.0.0.1:18340';
 assert.match(base,/^http:\/\/127\.0\.0\.1:/);
 const fixture=JSON.parse(fs.readFileSync('/tmp/mindex-candidate-identities-20261019/candidate-fixture.json'));
@@ -10,9 +12,9 @@ let browser,page;
  browser=await chromium.launch({headless:true});page=await browser.newPage({viewport:{width:1440,height:1000}});
  const errors=[],records=[];page.on('pageerror',e=>errors.push(e.message));
  await page.goto(base+'/studio');await page.locator('#create-text').fill('验收演员');await page.locator('#create-button').click();
- await page.locator('#job-workspace').waitFor();await page.locator('[data-stage=split]').click();await page.waitForFunction(()=>!busy()&&document.querySelector('.cell-trigger'));
- await page.locator('[data-stage=recall]').click();await page.waitForFunction(()=>!busy()&&Object.values(state.data.versions).some(v=>v.stage==='recall'&&v.status==='complete'));
- await page.locator('.shot-summary-row').first().locator('.cell-trigger').nth(1).click();
+ await page.locator('#job-workspace').waitFor();await batchRun(page,'split');await page.waitForFunction(()=>!busy()&&document.querySelector('#shot-strip .shot-card'));
+ await batchRun(page,'recall');await page.waitForFunction(()=>!busy()&&Object.values(state.data.versions).some(v=>v.stage==='recall'&&v.status==='complete'));
+ await openShotStage(page,0,1);
  await page.locator('.candidate-picker .detail-candidate').first().waitFor();
  for(const lang of ['zh','en'])for(const width of [1440,1000,800,540,390,320]){
   await page.evaluate(l=>MindexI18n.setLanguage(l),lang);await page.setViewportSize({width,height:1000});

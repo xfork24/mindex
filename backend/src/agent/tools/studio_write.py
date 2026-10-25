@@ -72,6 +72,11 @@ async def create_job(args: CreateJob, ctx: ToolContext) -> ToolOutput:
     body = {"text": args.outline, **({"title": args.title} if args.title else {})}
     if args.source_ids:
         body["options"] = {"source_ids": args.source_ids}
+    # 任务元信息的「原始输入」记录用户在对话里的原话；大纲是助手整理后的文字。MCP 调用没有会话，省略即同大纲。
+    original = ctx.extra.get("user_input")
+    original = original() if callable(original) else None
+    if original:
+        body["original_input"] = original[:20000]
     job = check(await ctx.client.post("/api/studio/jobs", body), "创建任务")
     return ToolOutput({"job_id": job["id"], "title": job["title"]},
                       text=f"已创建任务 {job['id']}「{job['title']}」。",

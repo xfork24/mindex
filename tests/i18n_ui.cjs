@@ -1,6 +1,8 @@
 // Run with serve_fixture.py on an isolated library. No real model/service required.
 const assert = require('node:assert/strict');
 const {chromium} = require(process.env.MINDEX_PLAYWRIGHT_MODULE || 'playwright');
+const batchRun=async(page,stage)=>{if(stage==='split'&&!await page.evaluate(()=>plan().script)){await page.locator('#script-text').fill(await page.evaluate(()=>state.data.job.outline||'红色开场。'));await page.evaluate(()=>saveScript());await page.waitForFunction(()=>!!plan().script);}await page.locator('#batch-stage').selectOption(stage==='recall'?'picture':stage);await page.locator('#batch-regenerate').click();};
+const openShotStage=(page,shot,n)=>page.evaluate(([i,k])=>{const sid=order()[i];openStage(sid,barStages(sid)[k]);},[shot,n]);
 const base = process.env.MINDEX_I18N_TEST_URL || 'http://127.0.0.1:8027';
 (async () => {
   const browser = await chromium.launch({headless:true});
@@ -80,13 +82,13 @@ const base = process.env.MINDEX_I18N_TEST_URL || 'http://127.0.0.1:8027';
     assert.equal(await page.locator('#entity-name').inputValue(),'中文人物');await page.locator('#entity-close').click();
     // Create real fixture storyboard; retain unsaved narration/query and dynamic selects.
     await page.goto(base + '/studio');await page.locator('#create-text').fill('山风吹过山谷，远处的寺庙亮着灯。');await page.locator('#create-button').click();
-    await page.locator('#job-workspace').waitFor({state:'visible'});await page.locator('[data-stage=split]').click();
-    await page.locator('#matrix-body .cell-trigger').first().waitFor();
+    await page.locator('#job-workspace').waitFor({state:'visible'});await batchRun(page,'split');
+    await page.locator('#shot-strip .shot-card').first().waitFor();
     await page.waitForFunction(()=>document.querySelector('#execution-log').textContent.includes('执行结束'));
     const chineseLog = await page.locator('#execution-log').innerText();await toggle('en');
     assert.ok(!/[\u4e00-\u9fff]/.test(await page.locator('#execution-log').innerText()));
     await toggle('zh');assert.equal(await page.locator('#execution-log').innerText(),chineseLog);
-    await page.locator('#matrix-body .cell-trigger').first().click();
+    await page.locator('#shot-strip .shot-card').first().click();
     const narration = page.locator('textarea[aria-label="旁白与字幕"]');await narration.fill('未保存的中文旁白');
     await page.evaluate(()=>{window.keptNarration=document.querySelector('textarea[aria-label="旁白与字幕"]');});
     await toggle('en');assert.equal(await page.locator('textarea[aria-label="Narration and subtitles"]').inputValue(),'未保存的中文旁白');

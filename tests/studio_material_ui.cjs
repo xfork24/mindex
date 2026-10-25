@@ -170,6 +170,18 @@ const cases = [
       assert.equal(scriptNote.hidden, true, JSON.stringify(item));
     }
   }],
+  ["元信息第一行为“原始输入”：显示用户原话而非整理后的大纲；没有原话的旧任务退回大纲", async () => {
+    sandbox.state.data = { job: { ...job(), outline: "整理后的大纲", original_input: "帮我做个港口视频\n\n要有渔船" } };
+    await renderAndLoad();
+    let row = metaRows()[0];
+    assert.equal(textOf(row.children[0]), "原始输入");
+    assert.equal(row.children[1].textContent, "帮我做个港口视频\n要有渔船");
+    reset();
+    await renderAndLoad();
+    row = metaRows()[0];
+    assert.equal(textOf(row.children[0]), "原始输入");
+    assert.equal(row.children[1].textContent, "港口的一天\n渔船靠岸");
+  }],
 ];
 
 module.exports = { cases, sandbox, run, reset, renderAndLoad, find, findAll, textOf, requests, metaBody,

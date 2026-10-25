@@ -5,7 +5,7 @@ const code = require("./studio_source.cjs").studioSource();
 
 // 方案参数音色目录：往返昂贵，必须短 TTL 缓存并合并在途请求，避免每次开对话框都阻塞一次 TTS 服务调用。
 let release, calls = 0;
-const state = { id: 'A', matrixRows: new Map(), data: null };
+const state = { id: 'A', shotCards: new Map(), data: null };
 const ctx = vm.createContext({
   state, Date,
   api: async (url) => {
