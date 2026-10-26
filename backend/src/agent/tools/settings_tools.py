@@ -149,6 +149,89 @@ async def test_model_profile(args: TestProfile, ctx: ToolContext) -> ToolOutput:
     return ToolOutput(result, text=text, focus=settings_focus(role=role, profile_id=args.profile_id))
 
 
+def mb(path: str | None) -> str:
+    return path or "未定位"
+
+
+class ProbeDeployment(StrictModel):
+    profile_id: int = Field(description="llama_cpp 后端的嵌入/ASR/多模态理解配置档案 ID")
+
+
+async def probe_model_deployment(args: ProbeDeployment, ctx: ToolContext) -> ToolOutput:
+    role = role_of(await load_settings(ctx), args.profile_id)
+    result = check(await ctx.client.post(f"/api/settings/profiles/{args.profile_id}/deployment/probe"), "e2e probe")
+    focus = settings_focus(role=role, profile_id=args.profile_id)
+    if not result["ready"]:
+        return ToolOutput(result, text=f"探测失败（服务未就绪）：{result['error']}", focus=focus)
+    meta, caps, found = result.get("metadata") or {}, result.get("capabilities") or {}, result["detected"]
+    lines = [
+        f"服务就绪：{result['base_url']} · 模型 {result.get('model_id')} · 量化 {meta.get('ftype')} · "
+        f"n_embd {meta.get('n_embd')} · 能力 {caps}",
+        f"自动定位：weights={mb(found.get('weights_file'))}，mmproj={mb(found.get('mmproj_file'))}，"
+        f"server_cwd={mb(found.get('server_cwd'))}",
+    ]
+    if result["current_manifest_valid"]:
+        lines.append(f"档案已关联有效清单：{result['current_manifest']}")
+    elif result["reusable_manifests"]:
+        lines.append(f"可复用的一致清单：{', '.join(result['reusable_manifests'])}（pin_model_deployment 会直接关联）")
+    else:
+        lines.append("没有与当前部署一致的清单；pin_model_deployment 会计算 SHA256 生成新清单")
+    return ToolOutput(result, text="\n".join(lines), focus=focus)
+
+
+class PinDeployment(StrictModel):
+    profile_id: int = Field(description="llama_cpp 后端的嵌入/ASR/多模态理解配置档案 ID")
+    quantization: str | None = Field(default=None, description="实际 GGUF 量化，例如 Q8_0；省略取档案或 GGUF 元数据")
+    weights_file: str | None = Field(default=None, description="本地 GGUF 路径；省略时从本机监听进程/props 自动定位")
+    mmproj_file: str | None = Field(default=None, description="本地 mmproj 路径；省略时从本机监听进程自动定位")
+    server_cwd: str | None = Field(default=None, description="llama-server 实际工作目录；省略时自动定位")
+    weights_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$",
+                                       description="远程部署：操作员声明的 GGUF SHA256（与本地文件方式互斥）")
+    mmproj_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$",
+                                      description="远程部署：操作员声明的 mmproj SHA256")
+    launch_parameters: dict | None = Field(default=None, description="部署者确认的启动参数；参与部署身份")
+    force_new: bool = Field(default=False, description="true=即使有一致的旧清单也生成新清单")
+
+
+async def pin_target(args: PinDeployment, ctx: ToolContext) -> tuple[dict, dict]:
+    role, profile = find_profile(await load_settings(ctx), args.profile_id)
+    if role["role"] not in ("embedding", "asr", "analyzer"):
+        raise ToolError("只有 llama_cpp 后端的嵌入、ASR、多模态理解档案需要部署清单", code="invalid_profile")
+    return role, profile
+
+
+async def preview_pin_deployment(args: PinDeployment, ctx: ToolContext) -> Preview:
+    role, profile = await pin_target(args, ctx)
+    remote = args.weights_sha256 is not None
+    how = ("使用操作员声明的 SHA256" if remote else
+           "使用指定文件计算 SHA256" if args.weights_file or args.mmproj_file else
+           "优先复用与当前部署一致的旧清单，否则自动定位本机 GGUF/mmproj 并计算 SHA256（大文件约需数十秒）")
+    changes = [{"label": "部署清单", "before": profile["config"].get("deployment_manifest") or "未设置",
+                "after": "新清单（data/deployments/，不覆盖旧文件）" if args.force_new else "一致的旧清单或新清单"},
+               {"label": "方式", "after": how}]
+    warnings = ["写入档案的 deployment_manifest，立即生效"] if role["active_profile_id"] == profile["id"] else []
+    if role["role"] == "embedding":
+        warnings.append("新的部署身份需要通过 e2e smoke 能力门槛后才能建索引/检索；复用旧清单时沿用已通过的门槛")
+    return Preview(f"为{role['label']}档案「{profile['name']}」执行 e2e pin", changes, warnings=warnings,
+                   focus=settings_focus(role=role["role"], profile_id=profile["id"]))
+
+
+async def pin_model_deployment(args: PinDeployment, ctx: ToolContext) -> ToolOutput:
+    role, profile = await pin_target(args, ctx)
+    body = args.model_dump(exclude={"profile_id"})
+    result = check(await ctx.client.post(f"/api/settings/profiles/{args.profile_id}/deployment/pin", body), "e2e pin")
+    text = (f"{'已生成新清单' if result['created'] else '已复用一致的清单'} {result['manifest']}"
+            f"（{result['trust']}，量化 {result['quantization']}，deployment {result['deployment_id']}），"
+            f"已写入档案「{profile['name']}」。")
+    gate = result.get("gate")
+    if gate is not None:
+        text += ("smoke 能力门槛：已通过。" if gate["passed"] else
+                 f"smoke 能力门槛未通过：{gate.get('detail')}；需在命令行执行 mindex e2e phase smoke 后才能建索引/检索。")
+    text += "可用 test_model_profile 复测连接。"
+    return ToolOutput(result, text=text, mutation=SETTINGS,
+                      focus=settings_focus(role=role["role"], profile_id=profile["id"]))
+
+
 class ProfileConfig(StrictModel):
     backend: str | None = Field(default=None, description="协议后端，例如 openai、anthropic、mindex、llama_cpp")
     base_url: str | None = Field(default=None, description="服务 endpoint，例如 https://api.deepseek.com/v1")
@@ -161,6 +244,9 @@ class ProfileConfig(StrictModel):
     voice: str | None = Field(default=None, description="语音合成档案的默认音色")
     dimensions: int | None = Field(default=None, ge=1, description="嵌入维度")
     quantization: str | None = None
+    deployment_manifest: str | None = Field(
+        default=None, description="llama_cpp 嵌入/ASR/分析档案的部署清单路径（相对路径按数据目录解析）；"
+                                  "通常由 pin_model_deployment 自动写入")
     durations: list[float] | None = Field(default=None, min_length=1, description="视频生成：后端允许的生成时长（秒）")
     poll_interval: float | None = Field(default=None, gt=0, description="视频生成：轮询间隔（秒）")
     max_wait: float | None = Field(default=None, gt=0, description="视频生成：单镜总等待上限（秒）")
@@ -658,6 +744,16 @@ def specs() -> list[ToolSpec]:
         ToolSpec("list_voices", "settings", "列出音色库与当前默认音色、语音合成模型。", Empty, "read", list_voices),
         ToolSpec("test_model_profile", "settings", "测试某个配置档案能否连通（会对该服务发起一次最小调用；视频/图片/音乐生成档案只做鉴权/可达性探测，不发起生成）。",
                  TestProfile, "read", test_model_profile),
+        ToolSpec("probe_model_deployment", "settings",
+                 "e2e probe：只读探测 llama_cpp 嵌入/ASR/多模态理解档案的服务（/health、/props、/v1/models，不推理），"
+                 "报告量化、维度、能力，自动定位本机 GGUF/mmproj，并列出可复用的一致部署清单。"
+                 "遇到「缺少 … 部署清单」时先调用它。",
+                 ProbeDeployment, "read", probe_model_deployment),
+        ToolSpec("pin_model_deployment", "settings",
+                 "e2e pin：为 llama_cpp 档案固定 GGUF/mmproj 哈希并写入档案的 deployment_manifest。"
+                 "默认复用与当前部署一致的旧清单，否则自动定位本机文件计算 SHA256 生成新清单（不覆盖旧文件）；"
+                 "远程服务需提供文件路径或 weights_sha256/mmproj_sha256 声明。嵌入新部署还需命令行 e2e smoke。",
+                 PinDeployment, "write", pin_model_deployment, preview_pin_deployment),
         ToolSpec("create_model_profile", "settings",
                  "新建模型配置档案（不会自动激活）。api_key 只能是 ask_user_question secret 字段返回的 secret:// 引用。"
                  "视频生成（video_generator）档案：backend 为 minimax_h3（MiniMax H3，只需 base_url 与密钥，生成方式在分镜设置）"

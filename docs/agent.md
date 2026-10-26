@@ -186,7 +186,7 @@ curl -s -H "Authorization: Bearer $MINDEX_MCP_TOKEN" -F file=@shot.png http://12
 
 ## 能力范围与缺口
 
-共 146 个工具，其中 142 个导出到 MCP（`load_tools`、`ask_user_question`、`navigate` 与会在本机启动进程的 `save_stdio_tool_source` 不导出）。所有工具都经进程内回环调用既有 REST 接口，校验、锁与错误信息与页面操作完全一致。
+共 148 个工具，其中 144 个导出到 MCP（`load_tools`、`ask_user_question`、`navigate` 与会在本机启动进程的 `save_stdio_tool_source` 不导出）。所有工具都经进程内回环调用既有 REST 接口，校验、锁与错误信息与页面操作完全一致。
 
 ### meta
 
@@ -351,6 +351,8 @@ curl -s -H "Authorization: Bearer $MINDEX_MCP_TOKEN" -F file=@shot.png http://12
 | `list_voices` | read | 是 | 音色库、默认音色与语音合成模型 |
 | `list_voice_catalog` | read | 是 | 当前语音合成后端的音色目录、音色库、默认音色与是否支持克隆 |
 | `test_model_profile` | read | 是 | 测试档案连通性（视频/图片/音乐生成档案只做鉴权/可达性探测，不发起生成；动画生成档案只发一次最小对话） |
+| `probe_model_deployment` | read | 是 | e2e probe：只读探测 llama_cpp 嵌入/ASR/多模态理解档案的服务，报告量化、维度与能力，自动定位本机 GGUF/mmproj，列出与当前部署一致、可复用的部署清单 |
+| `pin_model_deployment` | write | 是 | e2e pin：优先复用一致的旧清单，否则计算 GGUF/mmproj SHA256 生成新 schema 2 清单（`data/deployments/`，不覆盖），并写入档案的 `deployment_manifest`；本机服务从监听进程命令行与工作目录自动定位文件，远程服务需给出路径或 SHA256 声明；嵌入档案返回 smoke 门槛状态 |
 | `create_model_profile` | write | 是 | 新建档案（不自动激活；`api_key` 只能是 `secret://` 引用）；`video_generator`（backend 含 `minimax_h3`）、`image_generator`、`music_generator`（可带 `cover_model`）角色都支持 ComfyUI 工作流与映射；`video_generator` 角色可带 `durations`、`poll_interval`、`max_wait`、`fps`、`comfyui_workflow`、`comfyui_mapping`，ComfyUI 工作流与映射先在本地校验并给出中文错误；`animator` 角色可带 `max_tokens`、`retries`、`max_html_kb`、`max_capture_seconds`（激活即启用动画生成） |
 | `update_business_settings` | write | 是 | 修改 GPU 互斥、检索权重、默认音色 |
 | `register_voice` | write | 是 | 把已有厂商音色登记到音色库 |
@@ -468,7 +470,7 @@ curl -s -H "Authorization: Bearer $MINDEX_MCP_TOKEN" -F file=@shot.png http://12
 安装依赖：`uv sync --extra mcp`（开发环境的 `--extra dev` 已包含）。服务名 `mindex`。导出规则：
 
 - `load_tools`、`navigate`、`ask_user_question` 从不导出；MCP 不做动态加载，直接导出所选领域的全部工具。
-- `agent.mcp.domains` 为 `null` 时导出全部 142 个工具；为领域列表时只导出这些领域，`report_capability_gap` 始终导出。
+- `agent.mcp.domains` 为 `null` 时导出全部 144 个工具；为领域列表时只导出这些领域，`report_capability_gap` 始终导出。
 - `tools/list` 与 `tools/call` 每次重新读取配置，修改 `agent.mcp.domains` 无需重启（进程内 stdio 与 `/mcp`）。调用不在导出范围内的工具返回 `isError`，说明该工具未导出。
 - `mindex mcp --domain <领域>` 可重复指定，覆盖配置值；出现未知领域时启动失败并列出可选领域。远程模式（`--base-url`）在启动时读取一次本地配置的 `agent.mcp.domains`。
 - read 工具标注 `readOnlyHint`，danger 工具标注 `destructiveHint`。

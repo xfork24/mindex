@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+from pathlib import Path
 
 from mindex.shared.comfyui import validate_workflow
 from mindex.shared.config import (
@@ -61,13 +62,20 @@ PROFILE_FIELDS = {
     },
     "analyzer": {
         "backend", "base_url", "model", "revision", "timeout", "api_key_env", "llama_template",
-        "response_retries", "initial_output_tokens", "max_output_tokens", "thinking_mode",
+        "response_retries", "initial_output_tokens", "max_output_tokens", "thinking_mode", "deployment_manifest",
     },
     "generator": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "llama_template", "max_tokens"},
     "writer": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "llama_template", "max_tokens"},
     "agent": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "max_tokens", "vision"},
-    "embedding": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "quantization", "dimensions"},
-    "asr": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "enabled", "max_tokens"},
+    # deployment_manifest：llama_cpp 部署清单（e2e pin 生成）；相对路径按数据目录解析。
+    "embedding": {
+        "backend", "base_url", "model", "revision", "timeout", "api_key_env", "quantization", "dimensions",
+        "deployment_manifest",
+    },
+    "asr": {
+        "backend", "base_url", "model", "revision", "timeout", "api_key_env", "enabled", "max_tokens",
+        "deployment_manifest",
+    },
     "tts": {
         "backend",
         "base_url",
@@ -588,6 +596,9 @@ def merge_profile(config: Config, role: str, profile: dict) -> Config:
     """把单个档案套到配置上（无论是否激活）；返回新 Config，绝不修改原对象。"""
     current = _section(config, role)
     fields = {key: value for key, value in profile["config"].items() if key in PROFILE_FIELDS[role]}
+    manifest = fields.get("deployment_manifest")
+    if isinstance(manifest, str) and manifest and not Path(manifest).expanduser().is_absolute():
+        fields["deployment_manifest"] = str(Path(config.data_dir) / manifest)
     fields["api_key"] = profile.get("api_key") or ""
     if role in _ENABLING_ROLES:
         fields["enabled"] = True  # 有激活（或正在测试）的档案即启用；无档案时沿用 yaml 的 enabled

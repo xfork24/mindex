@@ -118,6 +118,8 @@
 | POST/PUT/DELETE | `/api/settings/profiles[/{id}]` | 档案 CRUD（api_key：留空保留，`__clear__` 清除） |
 | POST | `/api/settings/profiles/{id}/activate` | 激活；嵌入角色附索引不一致警告 |
 | POST | `/api/settings/profiles/{id}/test` | 测试连接（最小真实调用，回报时延/维度/回复） |
+| POST | `/api/settings/profiles/{id}/deployment/probe` | llama_cpp 嵌入/ASR/多模态理解档案的 e2e probe：只读探测，自动定位本机 GGUF/mmproj，列出可复用的一致清单 |
+| POST | `/api/settings/profiles/{id}/deployment/pin` | e2e pin：复用一致清单或生成新清单（`data/deployments/`，不覆盖），写入档案 `deployment_manifest`（数据目录内存相对路径）；嵌入档案返回 smoke 门槛状态 |
 | GET | `/api/settings/embedding-status` | 嵌入身份与活动索引是否匹配（页面横幅） |
 | PUT/DELETE | `/api/settings/business` | 检索调参与默认音色 / 恢复默认 |
 | GET/POST | `/api/settings/voices/catalog[/preview]` | 当前语音合成后端的音色目录 / 试听 |

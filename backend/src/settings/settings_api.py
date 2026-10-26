@@ -32,6 +32,7 @@ from mindex.models.adapters import (
     make_video_generator,
 )
 from mindex.models.qwen import analysis_options
+from mindex.settings import deployment_pin
 from mindex.settings.local_services import ServiceConflict, ServiceError, manager_for
 from mindex.settings.runtime_settings import (
     PROFILE_FIELDS,
@@ -96,6 +97,19 @@ class ProfileBody(StrictModel):
     provider: str
     config: dict
     api_key: str | None = Field(default=None, max_length=4096)
+
+
+class PinBody(StrictModel):
+    """e2e pin 参数；全部省略时复用一致的旧清单，或从本机监听进程自动定位文件。"""
+
+    quantization: str | None = Field(default=None, max_length=32)
+    weights_file: str | None = Field(default=None, max_length=4096)
+    mmproj_file: str | None = Field(default=None, max_length=4096)
+    server_cwd: str | None = Field(default=None, max_length=4096)
+    weights_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    mmproj_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    launch_parameters: dict | None = None
+    force_new: bool = False
 
 
 class VoiceBody(StrictModel):
@@ -509,6 +523,52 @@ def settings_router(runtime: RuntimeConfig, store: Store) -> APIRouter:
                 "latency_ms": round((time.monotonic() - started) * 1000),
                 "detail": redact_error(str(exc), secrets_in_profile)[:TEST_DETAIL_MAX_CHARS],
             }
+
+    def _llama_profile(profile_id: int) -> tuple[dict, Config]:
+        row = store.one("SELECT * FROM model_profiles WHERE id=?", (profile_id,))
+        if row is None:
+            raise HTTPException(404, "配置档案不存在")
+        profile = {**row, "config": json.loads(row["config"])}
+        if profile["role"] not in deployment_pin.PIN_ROLES:
+            raise HTTPException(422, f"只有 {'/'.join(deployment_pin.PIN_ROLES)} 档案需要部署清单")
+        return profile, merge_profile(runtime.base, profile["role"], profile)
+
+    def _current_manifest(config: Config, role: str) -> str | None:
+        value = getattr(config, role).deployment_manifest
+        return value if value and Path(value).is_file() else None
+
+    @router.post("/profiles/{profile_id}/deployment/probe")
+    def probe_deployment(profile_id: int):
+        """e2e probe：只读探测该档案的 llama.cpp 服务，自动定位本地 GGUF/mmproj 与可复用清单。"""
+        profile, config = _llama_profile(profile_id)
+        try:
+            return deployment_pin.probe(config, profile["role"],
+                                        current_manifest=_current_manifest(config, profile["role"]))
+        except adapters.ModelError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @router.post("/profiles/{profile_id}/deployment/pin")
+    def pin_deployment(profile_id: int, body: PinBody):
+        """e2e pin：复用一致的清单或生成新清单（不覆盖），并写入档案的 deployment_manifest。"""
+        profile, config = _llama_profile(profile_id)
+        role = profile["role"]
+        try:
+            result = deployment_pin.pin(
+                config, role, label=profile["name"], **body.model_dump(),
+                current_manifest=_current_manifest(config, role),
+            )
+        except (adapters.ModelError, ValueError, OSError) as exc:
+            raise HTTPException(422, str(exc)) from exc
+        updated = {**profile["config"], "deployment_manifest": result["manifest"]}
+        if role == "embedding" and not updated.get("quantization"):
+            updated["quantization"] = result["quantization"]
+        save_profile(store, role=role, name=profile["name"], provider=profile["provider"], config=updated,
+                     profile_id=profile_id)
+        gate = None
+        if role == "embedding":
+            merged = merge_profile(runtime.base, role, {**profile, "config": updated})
+            gate = deployment_pin.gate_status(merged)
+        return {**result, "profile_id": profile_id, "role": role, "gate": gate}
 
     @router.put("/business")
     def put_business(body: BusinessBody):
