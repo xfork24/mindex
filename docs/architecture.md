@@ -110,9 +110,10 @@ wheel 安装后读取随包的 `mindex/web/`。Setuptools 通过包目录映射�
 | `studio/studio_artifacts.py` | 创作检查点/产物/诊断记录（attempt 不可变留档） |
 | `studio/music_library.py` / `studio/beats.py` / `studio/studio_music_api.py` | 曲库：导入（授权必填、内容去重）、纯 numpy 节奏分析（BPM、节拍、能量、亮度）、情绪标签与按段落文案推荐；`/api/studio/music-library` 路由 |
 | `studio/tools/` / `studio/studio_tools_api.py` | 第三方工具：工具源登记与白名单（`registry`）、HTTP manifest 与 MCP（stdio / streamable-http）适配器、产物下载与校验（`artifacts`）；`/api/studio/tool-sources` 路由 |
-| `models/adapters.py` | 模型适配层公共部分：`ModelError` 等错误类型、带重试的 `request`、十个 Protocol 与 `make_*` 工厂（见下）；工厂调用时才导入后端 |
+| `models/adapters.py` | 模型适配层公共部分：`ModelError` 等错误类型、带重试的 `request`、十二个 Protocol 与 `make_*` 工厂（见下）；工厂调用时才导入后端 |
 | `models/embedders.py` / `models/qwen.py` / `models/speech.py` / `models/storyboard.py` / `models/writer.py` / `models/transcribers.py` / `models/detectors.py` | 各角色的后端实现：嵌入、Qwen 分析、语音合成、拆分镜（含原文覆盖校验）、文案创作（按文案模板）、转写（含 MiniMax 词级时间戳解析）、分镜检测 |
-| `models/video_generators.py` / `shared/comfyui.py` | 视频生成后端（MiniMax 海螺、阿里通义万相、自建 ComfyUI）；ComfyUI 工作流与节点映射的纯校验 |
+| `models/video_generators.py` / `shared/comfyui.py` | 视频生成后端（MiniMax H3 与海螺、阿里通义万相、自建 ComfyUI）；ComfyUI 工作流与节点映射的纯校验 |
+| `models/image_generators.py` / `models/music_generators.py` | 图片生成后端（MiniMax image-01、自建 ComfyUI）与音乐生成后端（MiniMax music-3.0 与翻唱、自建 ComfyUI、audio.cpp） |
 | `models/animator.py` | AI 动画生成 LLM 客户端（OpenAI 兼容 / Anthropic）与动画源码静态校验 |
 | `models/deployment.py` | 文件内容身份、向量契约与部署清单 |
 | `models/llama_cpp.py` | 对用户已有 llama-server 的原生协议适配（`/v1/embeddings` 的 `input_video`、`input_audio`）；部署清单核验 |
@@ -162,11 +163,11 @@ wheel 安装后读取随包的 `mindex/web/`。Setuptools 通过包目录映射�
 | `agent/session_store.py` / `agent/schema.py` / `agent/attachments.py` / `agent/changes.py` | `agent.sqlite3` 的会话事件与密钥保险库、表结构与迁移、附件暂存、全局改动与定位通道 |
 | `agent/watcher.py` / `agent/vision.py` / `agent/ids.py` | 任务跟踪与 followup、图片引用解析为图片块、分镜与版本 ID 解析 |
 | `agent/api.py` / `agent/mcp_server.py` | `/api/agent` 路由；MCP 导出（`mindex mcp` stdio、可选 `/mcp`） |
-| `frontend/src/` | 原生 HTML/JS/CSS，按五个页面划分模块；公共组件位于 `frontend/src/shared/` |
+| `frontend/src/` | 原生 HTML/JS/CSS，按五个主页面及其子页面（选题/模板/风格/曲库）划分模块；公共组件位于 `frontend/src/shared/` |
 
 ## 模型适配层
 
-十个 `Protocol` 与 `make_*` 工厂在 `models/adapters.py`，后端实现分在同目录的 `embedders`、`qwen`、`speech`、`storyboard`、`writer`、`transcribers`、`detectors`、`video_generators`、`animator` 模块：`MultimodalEmbedder`、`VisualAnalyzer`、`Transcriber`、`Aligner`、`ShotDetector`、`Speaker`（TTS）、`Storyboarder`（拆分镜 LLM）、`Writer`（文案创作 LLM）、`VideoGenerator`（AIGC 视频生成）、`Animator`（AI 动画 LLM）。替换模型 = 实现协议接入新 backend，不改检索管线。
+十二个 `Protocol` 与 `make_*` 工厂在 `models/adapters.py`，后端实现分在同目录的 `embedders`、`qwen`、`speech`、`storyboard`、`writer`、`transcribers`、`detectors`、`video_generators`、`image_generators`、`music_generators`、`animator` 模块：`MultimodalEmbedder`、`VisualAnalyzer`、`Transcriber`、`Aligner`、`ShotDetector`、`Speaker`（TTS）、`Storyboarder`（拆分镜 LLM）、`Writer`（文案创作 LLM）、`VideoGenerator`（AIGC 视频生成）、`ImageGenerator`（AI 生图）、`MusicGenerator`（音乐生成）、`Animator`（AI 动画 LLM）。替换模型 = 实现协议接入新 backend，不改检索管线。
 
 | 工厂 | backend 值 | 实现 |
 |---|---|---|

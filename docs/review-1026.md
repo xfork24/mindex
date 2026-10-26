@@ -329,7 +329,7 @@ Electron 外壳（`desktop/main.js` + `lib/` 9 个纯逻辑模块，node --test 
 
 **问题与建议**
 
-1. **CLAUDE.md 已有漂移**（它是 AI 协作的事实入口，漂移代价高）：模型角色实为 12 个（缺图片生成、音乐生成两个）；i18n 键实为 3,104（写作「约 2290」）；「五个页面」未计 /admin/music、/studio/brands 等子页；「`ingest` 单 GPU 场景禁用」实为「建议分步」（命令仍在，docstring 提示单 GPU 分步）。建议随下次提交校正。
+1. ~~**CLAUDE.md 已有漂移**~~（**已于 2026-10-26 修正**）：模型角色实为 12 个（原文缺图片生成、音乐生成）；i18n 键实为 3,104（原文写「约 2290」）；「五个页面」未计 /admin/music、/studio/brands 等子页；「`ingest` 单 GPU 场景禁用」实为「建议分步」；studio 画面来源链缺 aigc_image；适配层后端列表缺 minimax_h3 与图片/音乐生成模块；厂商列表缺 Anthropic。同批修正了 AGENT.md、README.md、docs/README.md、docs/architecture.md、docs/settings.md、docs/cli-reference.md 中的同类漂移（十→十二个角色/协议、五→七种画面来源、studio 子命令组汇总、视频生成后端清单、回归耗时估计）。
 2. **无 LICENSE**：沿袭上次审查结论，缺省等于保留全部权利，是否开源需所有者表态。
 3. **`enforce_gpu_lock` 默认 False**：单 GPU 互斥目前依赖操作纪律；/admin 后台任务与手工 CLI 并行时可能同时打 GPU 服务。对典型单 GPU 部署建议默认开启或首次启动引导开启。
 4. **studio 领域 28 个工具已触及自定上限**（CLAUDE.md 亦约定「过大时拆分领域」），topics/studio_post 各 25 也在增长；继续加工具前先拆领域，否则模型选用准确率会先于数量见顶。

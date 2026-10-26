@@ -17,7 +17,7 @@
 - API 装配在 `backend/src/api.py`；CLI 入口在 `backend/src/cli.py`（全局选项、核心命令与 `indexes`），`e2e`、`persons`、`clips`、`topics`、`agent` 命令组在 `cli_e2e.py`、`cli_persons.py`、`cli_clips.py`、`cli_topics.py`、`cli_agent.py`（顶层 `mcp` 也在后者），`backup` 在 `maintenance/backup_cli.py`；重依赖保留在命令函数内延迟导入。
 - 静态资源统一通过 `shared/web_assets.py` 定位；同时考虑源码目录与 wheel 中的 `mindex.web`，打包规则在 `pyproject.toml`、`MANIFEST.in`。
 - UI 文案只改 `frontend/src/shared/messages.json`，然后运行 `python scripts/build-messages.py` 生成 `messages.js`（`--check` 仅校验）。保留语言切换前的输入和页面状态。
-- 新模型通过 `models/adapters.py` 的协议与 `make_*` 工厂接入，具体后端各在一个模块（`embedders`、`qwen`、`speech`、`storyboard`、`writer`、`transcribers`、`detectors`、`video_generators`、`animator`）；模型依赖使用独立环境，不混入应用环境。单 GPU 按阶段轮换服务，不假设全部服务同时在线。
+- 新模型通过 `models/adapters.py` 的协议与 `make_*` 工厂接入，具体后端各在一个模块（`embedders`、`qwen`、`speech`、`storyboard`、`writer`、`transcribers`、`detectors`、`video_generators`、`image_generators`、`music_generators`、`animator`）；模型依赖使用独立环境，不混入应用环境。单 GPU 按阶段轮换服务，不假设全部服务同时在线。
 - 桌面版（`desktop/`，Electron 外壳 + 冻结的 `mindex serve`）与 Web 版共用全部前后端代码：`desktop/` 只放外壳与打包，业务一律在后端经 REST 访问；桌面专属能力只经 preload 的 `window.MindexDesktop`，前端在没有它时保持 Web 行为。ffmpeg/ffprobe 调用一律经 `shared/media.py` 的 `command()`、`ffmpeg_bin()`、`ffprobe_bin()`；以自身源码哈希作指纹的模块登记在 `desktop/sidecar/mindex.spec` 的 `SOURCE_MODULES`，只经 `mindex -m` 运行的入口加进 `hiddenimports`；新增 package-data 后运行 `python scripts/check-desktop-sidecar.py`。详见 `docs/desktop.md`。
 
 ## 必须保持的行为
@@ -44,8 +44,8 @@ for f in frontend/src/*/*.js; do node --check "$f"; done   # 前端 JS 语法
 (cd desktop && npm ci && node --test test/*.test.js)    # 桌面外壳（改动 desktop/ 时）
 uv run mindex --help
 uv run pytest tests/test_pipeline.py -q             # 按改动范围选择测试
-uv run pytest -m "not slow" -q                      # 快速回归，约 5 分钟（跳过重媒体用例）
-uv run pytest -q                                    # 完整回归，约 20 分钟
+uv run pytest -m "not slow" -q                      # 快速回归，约 10 分钟（跳过重媒体用例）
+uv run pytest -q                                    # 完整回归（含 slow 用例，耗时随用例数增长）
 ```
 
 人物相关主环境依赖使用 `uv sync --extra dev --extra person`；推理服务安装与启动见 CLAUDE.md。`--config` 放在子命令前，也可使用 `MINDEX_CONFIG`。配置拒绝未知键。

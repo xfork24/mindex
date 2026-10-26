@@ -38,8 +38,8 @@
 - [index-versions.md](index-versions.md) — 索引版本指纹、发布检查、激活与回退、能力门槛
 - [e2e-framework.md](e2e-framework.md) — probe/pin 信任模型、11 个 phase 状态机、标注冻结、评测 profile
 - [admin.md](admin.md) — 素材后台功能与管理 API
-- [settings.md](settings.md) — 设置页：十个模型角色的档案热切换、线上厂商支持、音色克隆、检索调参、索引版本、密钥安全
-- [studio.md](studio.md) — 创作工作流：文案模板与参考文稿、拆分镜、五种分镜画面来源（召回/片段/图片/AIGC/AI 动画）、画幅、版本与构建、阶段注册表、API
+- [settings.md](settings.md) — 设置页：十二个模型角色的档案热切换、线上厂商支持、音色克隆、检索调参、索引版本、密钥安全
+- [studio.md](studio.md) — 创作工作流：文案模板与参考文稿、拆分镜、七种分镜画面来源（召回/上传片段/静态图片/AI 生成图片/AI 生成视频/AI 动画/第三方工具）、画幅、成片后期与多画幅导出、版本与构建、阶段注册表、API
 - [topics.md](topics.md) — 选题挖掘：领域档案、数据源（RSS、热榜、Brave、日历、本地）、挖掘与打分、素材覆盖、建创作任务、档案同步、素材采集清单、每日定时、四个入口
 - [agent.md](agent.md) — 智能助手：全局面板、分级确认与删除策略、工具领域与动态加载、附件、视觉输入、密钥表单、页面同步与定位、Markdown 回复、图片与音视频、可调宽度、任务跟踪与取消、全部工具表、MCP 导出（领域过滤）与 deepseek-harness 兼容
 - [cleanup.md](cleanup.md) — 磁盘清理：三级分类（每次删/策略过期/只报告）、保留规则、锁与并发

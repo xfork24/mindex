@@ -26,7 +26,7 @@ uv run mindex e2e phase -h
 | `backup` | `list`、`inspect`、`export`、`import`、`recover` |
 | `e2e` | `init`、`probe`、`pin`、`phase`、`freeze`、`review`、`status` |
 | `agent` | `tools`（另有顶层命令 `mcp`，见[智能助手与 MCP](#智能助手与-mcp)） |
-| `studio` | `jobs`、`plans`、`preflight`、`build`、`status`、`download`，以及 `shot`、`plan`、`brand`、`overlay` 子命令组（见[创作任务](#创作任务)） |
+| `studio` | `jobs`、`plans`、`preflight`、`build`、`status`、`download`，以及 `shot`、`plan`、`brand`、`overlay`、`music`、`tools`、`export`、`publish` 等后期子命令组（见[创作任务](#创作任务)） |
 
 ## 全局规则
 

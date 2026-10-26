@@ -114,7 +114,7 @@
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/settings` | 生效视图：十个角色档案+掩码+生效值、预设目录、嵌入/索引匹配、音色库、调参当前值 |
+| GET | `/api/settings` | 生效视图：十二个角色档案+掩码+生效值、预设目录、嵌入/索引匹配、音色库、调参当前值 |
 | POST/PUT/DELETE | `/api/settings/profiles[/{id}]` | 档案 CRUD（api_key：留空保留，`__clear__` 清除） |
 | POST | `/api/settings/profiles/{id}/activate` | 激活；嵌入角色附索引不一致警告 |
 | POST | `/api/settings/profiles/{id}/test` | 测试连接（最小真实调用，回报时延/维度/回复） |
