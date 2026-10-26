@@ -1363,6 +1363,7 @@ animation = [
     { name = "playwright" },
 ]
 dev = [
+    { name = "av" },
     { name = "hypothesis" },
     { name = "mcp" },
     { name = "pytest" },
@@ -1378,6 +1379,7 @@ person = [
 
 [package.metadata]
 requires-dist = [
+    { name = "av", marker = "extra == 'dev'", specifier = ">=14,<17" },
     { name = "av", marker = "extra == 'person'", specifier = ">=14,<17" },
     { name = "charset-normalizer", specifier = ">=3,<4" },
     { name = "chromadb", specifier = ">=1.0,<2" },

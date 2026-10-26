@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -49,7 +50,7 @@ def test_annotation_validation_failure_retries_with_field_feedback(config, monke
 
     monkeypatch.setattr(adapters, "request", reply)
     monkeypatch.setattr(qwen, "frame_data", frames)
-    monkeypatch.setattr(adapters.time, "sleep", delays.append)
+    monkeypatch.setattr(qwen, "time", SimpleNamespace(sleep=delays.append))
     monkeypatch.setattr(qwen, "record", lambda kind, data: records.append((kind, data)))
     dialogue = [{"start": 0, "end": 1, "text": "看看这里。"}]
     result = QwenAnalyzer(config).analyze(None, dialogue)
@@ -79,7 +80,7 @@ def test_annotation_validation_exhausts_configured_retries(config, monkeypatch, 
 
     monkeypatch.setattr(adapters, "request", reply)
     monkeypatch.setattr(qwen, "frame_data", lambda *args: [])
-    monkeypatch.setattr(adapters.time, "sleep", delays.append)
+    monkeypatch.setattr(qwen, "time", SimpleNamespace(sleep=delays.append))
     with caplog.at_level("WARNING", logger="mindex.models.adapters"), pytest.raises(
         ModelError, match=rf"连续 {retries + 1} 次无效.*重试已耗尽.*scene: Input should be a valid list",
     ):
@@ -107,7 +108,7 @@ def test_syntax_and_field_errors_share_one_retry_budget(config, monkeypatch):
 
     monkeypatch.setattr(adapters, "request", reply)
     monkeypatch.setattr(qwen, "frame_data", lambda *args: [])
-    monkeypatch.setattr(adapters.time, "sleep", delays.append)
+    monkeypatch.setattr(qwen, "time", SimpleNamespace(sleep=delays.append))
     with pytest.raises(ModelError, match="连续 3 次无效.*scene"):
         QwenAnalyzer(config).analyze(None, [])
     assert len(calls) == 3 and delays == [1, 2]
@@ -137,7 +138,7 @@ def test_invalid_scene_grouping_uses_response_retries(config, monkeypatch, inval
         return next(responses)
 
     monkeypatch.setattr(adapters, "request", reply)
-    monkeypatch.setattr(adapters.time, "sleep", delays.append)
+    monkeypatch.setattr(qwen, "time", SimpleNamespace(sleep=delays.append))
     units = [{"start": 0, "end": 30}, {"start": 30, "end": 60}]
     assert QwenAnalyzer(config).group_scenes(units) == [[0], [1]]
     assert len(bodies) == 2 and delays == [1]
@@ -163,7 +164,7 @@ def test_pipeline_stores_only_valid_annotations_and_reuses_checkpoints(config, v
 
     monkeypatch.setattr(adapters, "request", reply)
     monkeypatch.setattr(qwen, "frame_data", lambda *args: [(0, "data:image/jpeg;base64,TEST")])
-    monkeypatch.setattr(adapters.time, "sleep", delays.append)
+    monkeypatch.setattr(qwen, "time", SimpleNamespace(sleep=delays.append))
     pipeline = Pipeline(config, analyzer=QwenAnalyzer(config))
     source_id = pipeline.prepare(video_file)
     pipeline.analyze(source_id)
@@ -225,7 +226,7 @@ def test_invalid_scene_boundaries_retry_with_specific_feedback(config, monkeypat
         return next(responses)
 
     monkeypatch.setattr(adapters, "request", reply)
-    monkeypatch.setattr(adapters.time, "sleep", delays.append)
+    monkeypatch.setattr(qwen, "time", SimpleNamespace(sleep=delays.append))
     units = [{"start": i * 20, "end": (i + 1) * 20} for i in range(3)]
     assert QwenAnalyzer(config).group_scenes(units) == [[0], [1], [2]]
     assert delays == [1] and len(bodies) == 2
@@ -246,7 +247,7 @@ def test_legacy_scene_grouping_reports_missing_chinatown_tail(config, monkeypatc
         return next(responses)
 
     monkeypatch.setattr(adapters, "request", reply)
-    monkeypatch.setattr(adapters.time, "sleep", lambda _: None)
+    monkeypatch.setattr(qwen, "time", SimpleNamespace(sleep=lambda _: None))
     units = [{"start": i, "end": i + 1} for i in range(32)]
     groups = QwenAnalyzer(config).group_scenes(units)
     assert groups[-1] == [28, 29, 30, 31]

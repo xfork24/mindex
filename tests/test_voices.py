@@ -467,13 +467,20 @@ def test_dashscope_failed_records_have_unique_voice_ids(config, monkeypatch):
 
 def test_clone_does_not_block_event_loop(config, monkeypatch):
     import asyncio
-    import time
+    from threading import Event
 
     import httpx
 
     from mindex.settings import settings_api
 
-    monkeypatch.setattr(settings_api, "qwentts_register", lambda *a, **kw: time.sleep(1.0))
+    entered, release = Event(), Event()
+
+    def register(*args, **kwargs):
+        entered.set()
+        if not release.wait(timeout=10):
+            raise TimeoutError("克隆线程未收到测试释放信号")
+
+    monkeypatch.setattr(settings_api, "qwentts_register", register)
     monkeypatch.setattr(adapters, "request_bytes", lambda *a, **kw: b"RIFF-preview")
     app = create_app(config)
 
@@ -485,15 +492,16 @@ def test_clone_does_not_block_event_loop(config, monkeypatch):
                 data={"name": "慢克隆", "consent": "true"},
                 files={"file": ("sample.wav", sample_wav(), "audio/wav")},
             ))
-            await asyncio.sleep(0.2)
-            started = time.monotonic()
-            status = await client.get("/api/status")
-            cheap_elapsed = time.monotonic() - started
-            assert not clone.done(), "克隆应仍在线程池中执行"
-            response = await clone
-            return status, cheap_elapsed, response
+            try:
+                assert await asyncio.to_thread(entered.wait, 10), "克隆线程未启动"
+                # 状态请求必须在克隆线程被释放前完成，避免依赖 CI 机器上的固定耗时。
+                status = await asyncio.wait_for(client.get("/api/status"), timeout=5)
+                assert not clone.done(), "克隆应仍在线程池中执行"
+            finally:
+                release.set()
+            response = await asyncio.wait_for(clone, timeout=10)
+            return status, response
 
-    status, cheap_elapsed, response = asyncio.run(scenario())
+    status, response = asyncio.run(scenario())
     assert status.status_code == 200
-    assert cheap_elapsed < 0.7
     assert response.status_code == 201, response.text
