@@ -24,6 +24,7 @@
     cards: new Map(), streams: new Map(), approvals: new Map(), questions: new Map(), builds: new Map(),
     feedSeq: null, feed: null, feedRetry: null, pendingNav: null, follow: true, alwaysAllow: false,
     attachments: [], creating: null, retryDelay: null, feedRetryDelay: null,
+    inputHistory: [], historyIndex: null, historyDraft: null,
   };
   // SSE 断线重连：1.5 秒起指数退避，上限 30 秒；收到 ready / session.status 后复位。
   // 服务关闭或返回 401 时，每个标签页不再每 1.5 秒请求一次。
@@ -387,6 +388,8 @@
     clearTimeout(state.retry);
     for (const timer of state.builds.values()) clearTimeout(timer.timer);
     Object.assign(state, { session: id, seq: -1, source: null, status: 'idle', live: false, retryDelay: null });
+    state.inputHistory = [];
+    endHistory();
     state.cards.clear(); state.streams.clear(); state.approvals.clear(); state.questions.clear(); state.builds.clear();
     clearAttachments({ revoke: true }); // 附件归属原会话，切换或删除会话后不能再随新消息发送
     log.replaceChildren();
@@ -484,6 +487,7 @@
             const cut = text.lastIndexOf('\n\n\u9644\u4ef6\uff1a' + files[0].ref);
             if (cut >= 0) text = text.slice(0, cut);
           }
+          state.inputHistory.push(text); // 与渲染共用 SSE 序号去重；相同文字的不同消息分别保留。
           const item = bubble('user', text);
           if (files.length) item.append(messageAttachments(files));
         }
@@ -1127,13 +1131,56 @@
     warning.hidden = !show;
     if (show && i18n()) i18n().setText(warning, t('ui.agent_secret_paste'));
   }
+  // 历史只回填文字；待发送附件与会话切换时的草稿处理保持原有行为。
+  function endHistory() {
+    state.historyIndex = null;
+    state.historyDraft = null;
+  }
+  function historySelectionChanged() {
+    if (state.historyIndex !== null && (input.selectionStart !== input.value.length || input.selectionEnd !== input.value.length)) endHistory();
+  }
+  function browseHistory(step) {
+    historySelectionChanged();
+    if (state.historyIndex === null) {
+      if (step > 0 || !state.inputHistory.length || input.selectionStart !== 0 || input.selectionEnd !== 0) return false;
+      state.historyDraft = {
+        value: input.value, start: input.selectionStart, end: input.selectionEnd, direction: input.selectionDirection,
+      };
+      state.historyIndex = state.inputHistory.length;
+    }
+    const next = Math.max(0, state.historyIndex + step);
+    if (next >= state.inputHistory.length) {
+      const draft = state.historyDraft;
+      endHistory();
+      input.value = draft.value;
+      input.setSelectionRange(draft.start, draft.end, draft.direction);
+    } else {
+      state.historyIndex = next;
+      input.value = state.inputHistory[next];
+      input.setSelectionRange(input.value.length, input.value.length);
+    }
+    warn(looksLikeSecret(input.value));
+    return true;
+  }
+  let composing = false;
+  input.addEventListener('compositionstart', () => { composing = true; endHistory(); });
+  input.addEventListener('compositionend', () => { composing = false; });
+  input.addEventListener('pointerdown', endHistory);
+  input.addEventListener('click', endHistory);
+  input.addEventListener('select', historySelectionChanged);
   input.addEventListener('paste', (event) => {
     if (event.clipboardData?.files?.length) return; // 文件由抽屉上的 paste 监听处理
     const text = event.clipboardData?.getData('text') || '';
     if (looksLikeSecret(text)) { event.preventDefault(); warn(true); }
   });
-  input.addEventListener('input', () => { if (!looksLikeSecret(input.value)) warn(false); });
+  input.addEventListener('input', () => { endHistory(); if (!looksLikeSecret(input.value)) warn(false); });
   input.addEventListener('keydown', (event) => {
+    if (composing || event.isComposing || event.keyCode === 229) return;
+    if ((event.key === 'ArrowUp' || event.key === 'ArrowDown') && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
+      if (browseHistory(event.key === 'ArrowUp' ? -1 : 1)) event.preventDefault();
+      return;
+    }
+    if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'].includes(event.key)) endHistory();
     if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) { event.preventDefault(); form.requestSubmit(); }
   });
   form.addEventListener('submit', async (event) => {
@@ -1147,10 +1194,13 @@
       const sid = await ensureSession();
       const refs = await settleAttachments(sid);
       if (refs === null) { send.disabled = state.status !== 'idle'; return; }
+      const seq = state.seq;
       await api(`/api/agent/sessions/${encodeURIComponent(sid)}/messages`, 'POST', { content: text, context: pageContext(), attachments: refs });
+      endHistory();
       input.value = '';
       clearAttachments({ revoke: false });
-      setStatus('running');
+      // 快速回复的 SSE 可能早于 HTTP 响应；保留已收到的完成/待确认状态。
+      if (state.seq === seq) setStatus('running');
     } catch (error) {
       fail(error);
       send.disabled = state.status !== 'idle';

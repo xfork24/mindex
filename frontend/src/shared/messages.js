@@ -7557,7 +7557,7 @@ window.MindexMessages = {
   "ui.agent_no_session": {"zh": "（新会话）", "en": "(new session)"},
   "ui.agent_empty": {"zh": "用自然语言描述你想做的事，例如：合并分镜 a1daad59 和 925281d5 并重新生成后续流程；或：我想使用自定义模型配置。", "en": "Describe what you want in plain language, for example: merge shots a1daad59 and 925281d5 and regenerate the downstream pipeline; or: I want to use a custom model configuration."},
   "ui.agent_input_label": {"zh": "给智能助手的消息", "en": "Message to the assistant"},
-  "ui.agent_placeholder": {"zh": "描述你的需求，Ctrl/⌘ + Enter 发送", "en": "Describe what you need; Ctrl/⌘ + Enter to send"},
+  "ui.agent_placeholder": {"zh": "描述你的需求，Ctrl/⌘ + Enter 发送；光标在开头时按 ↑ 浏览历史，↓ 返回草稿", "en": "Describe what you need; Ctrl/⌘ + Enter to send. Press ↑ at the start to browse history, ↓ to return to your draft"},
   "ui.agent_send": {"zh": "发送", "en": "Send"},
   "ui.agent_cancel": {"zh": "停止", "en": "Stop"},
   "ui.agent_status_running": {"zh": "助手正在处理…", "en": "The assistant is working…"},

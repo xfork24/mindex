@@ -68,7 +68,7 @@ def agent_server(tmp_path):
 
 @pytest.mark.skipif(not playwright_available(), reason="需要 node 与 Playwright")
 @pytest.mark.parametrize("scenario", ["basic", "approval", "cross", "query", "external", "nofollow", "navigate", "markdown",
-                                      "resize", "attach"])
+                                      "resize", "attach", "history", "history-session"])
 def test_agent_panel(agent_server, scenario):
     url, job_id = agent_server
     result = subprocess.run(
