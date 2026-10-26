@@ -160,7 +160,8 @@ def agent_router(runtime: BuiltinRuntime, runtime_config, *, injected: bool = Fa
             "backend": cfg.llm.backend,
             "model": "scripted-test" if injected else cfg.llm.model,
             "configured": injected or bool(key) or not cfg.llm.base_url.startswith("https://"),
-            "max_steps": cfg.max_steps,
+            "max_steps": None,  # 兼容旧客户端：null 表示不限执行步数。
+            "context_window_steps": cfg.context_window_steps,
         }
 
     @router.get("/sessions")

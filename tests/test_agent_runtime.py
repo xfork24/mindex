@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+from threading import Event
+
 import pytest
 from agent_helpers import final_text, new_session, parse_sse, result_text, results, send, wait_idle
 from fastapi.testclient import TestClient
 
 from mindex.agent.llm.scripted import ScriptedLlm, call, say
-from mindex.agent.llm.types import tool_message, user_message
+from mindex.agent.llm.types import assistant_message, tool_calls, tool_message, user_message
 from mindex.agent.session_store import OMITTED, SessionStore, derive_messages
 from mindex.api import create_app
+from mindex.shared.config import AgentConfig
 
 CORE = {"turn/start", "turn/end", "step/start", "step/end", "user/message", "assistant/message", "tool/call",
         "tool/result"}
@@ -104,15 +107,92 @@ def test_llm_error_unknown_tool_and_bad_arguments(agent):
     assert events[-1]["data"]["reason"]["error"]["message"] == "上游 500"
 
 
-def test_max_steps(config):
-    config.agent.max_steps = 2
-    llm = ScriptedLlm([[call("list_jobs")]] * 5)
+def test_unlimited_steps_with_rolling_window(config):
+    # 即使配置文件仍带旧的步数限制，也应跨过 16 步和 256 步后正常完成。
+    config.agent = AgentConfig.model_validate({"max_steps": 2, "max_context_tokens": 1_000_000})
+    llm = ScriptedLlm([[call("list_jobs", call_id=f"c{i}")] for i in range(260)] + [[say("全部完成")]])
     with TestClient(create_app(config, agent_llm=llm)) as client:
         sid = new_session(client)
-        send(client, sid, "无限循环", context={"page": "studio"})
+        send(client, sid, "完成长任务", context={"page": "studio"})
         events = wait_idle(client, sid)
-    assert events[-1]["data"]["reason"] == {"kind": "blocked"}
-    assert any(e["type"] == "plugin:mindex/notice" and e.get("ignorable") for e in events)
+        status = client.get("/api/agent/status").json()
+        assert status["max_steps"] is None and status["context_window_steps"] == 256
+    assert events[-1]["data"]["reason"] == {"kind": "completed"}
+    assert final_text(events) == "全部完成"
+    assert [e["data"]["step"] for e in events if e["type"] == "step/start"] == list(range(1, 262))
+    assert len(results(events)) == 260  # 日志不随模型窗口删除。
+    for index, request in enumerate(llm.requests):
+        calls = [c["id"] for m in request.messages if m["role"] == "assistant" for c in tool_calls(m)]
+        answers = [m["toolCallId"] for m in request.messages if m["role"] == "tool"]
+        assert calls == answers == [f"c{i}" for i in range(max(0, index - 256), index)]
+        assert request.messages[0]["source"]["kind"] == "context"
+        assert request.messages[1]["content"][0]["text"] == "完成长任务"
+
+
+def test_rolling_window_across_turns_and_reopen(tmp_path):
+    store = SessionStore(tmp_path)
+    sid = store.create()["id"]
+    store.append(sid, "user/message", user_message("旧任务"))
+    store.append(sid, "assistant/message", {"message": assistant_message([say("旧回答")], "p", "m")})
+    store.append(sid, "user/message", user_message("页面 A", "context"))
+    store.append(sid, "user/message", user_message("当前任务"))
+    for step in range(3):
+        calls = [call("list_jobs", call_id=f"c{step}-{i}") for i in range(2)]
+        store.append(sid, "assistant/message", {"message": assistant_message(calls, "p", "m")})
+        for item in calls:
+            store.append(sid, "tool/result", {"message": tool_message(item["id"], "结果")})
+    store.append(sid, "user/message", user_message("页面 B", "context"))
+    store.append(sid, "user/message", user_message("继续", "followup"))
+    # 重新打开会话后，窗口仍按完整步骤裁剪，多工具结果不被拆开。
+    reopened = SessionStore(tmp_path)
+    history = derive_messages(reopened.model_events(sid, window_steps=2))
+    assert [m["content"][0]["text"] for m in history if m["role"] == "user"] == [
+        "页面 A", "当前任务", "页面 B", "继续"]
+    assert [c["id"] for m in history if m["role"] == "assistant" for c in tool_calls(m)] == [
+        "c1-0", "c1-1", "c2-0", "c2-1"]
+    assert [m["toolCallId"] for m in history if m["role"] == "tool"] == [
+        "c1-0", "c1-1", "c2-0", "c2-1"]
+    # 新轮次的回复把上轮最后一步留在窗口内，之前的任务指令仍可解释该步。
+    store.append(sid, "assistant/message", {"message": assistant_message([say("完成")], "p", "m")})
+    history = derive_messages(store.model_events(sid, window_steps=2))
+    assert [m["content"][0]["text"] for m in history if m["role"] == "user"] == [
+        "页面 A", "当前任务", "页面 B", "继续"]
+    history = derive_messages(store.model_events(sid, window_steps=1))
+    assert [m["content"][0]["text"] for m in history if m["role"] == "user"] == ["页面 B", "继续"]
+    assert history[-1]["content"][0]["text"] == "完成"
+
+
+def test_cancel_after_window_rollover(config):
+    config.agent.context_window_steps = 2
+    reached = Event()
+
+    def pause(_request):
+        reached.set()
+        return {"blocks": [say("继续处理中")], "delay": 30}
+
+    llm = ScriptedLlm([[call("list_jobs", call_id=f"c{i}")] for i in range(20)] + [pause])
+    with TestClient(create_app(config, agent_llm=llm)) as client:
+        sid = new_session(client)
+        send(client, sid, "处理长任务", context={"page": "studio"})
+        assert reached.wait(timeout=10)
+        assert [m["toolCallId"] for m in llm.requests[-1].messages if m["role"] == "tool"] == [
+            "c18", "c19"]
+        response = client.post(f"/api/agent/sessions/{sid}/cancel")
+        assert response.json()["status"] == "idle"
+        events = wait_idle(client, sid)
+        assert events[-1]["data"]["reason"]["kind"] == "aborted"
+        llm.extend([say("已恢复")])
+        send(client, sid, "继续")
+        assert final_text(wait_idle(client, sid)) == "已恢复"
+
+
+@pytest.mark.parametrize("size", [0, 257])
+def test_context_window_size_bounds(size, tmp_path):
+    with pytest.raises(ValueError):
+        AgentConfig(context_window_steps=size)
+    store = SessionStore(tmp_path)
+    with pytest.raises(ValueError, match="1–256"):
+        store.model_events(store.create()["id"], window_steps=size)
 
 
 def test_restart_closes_open_turn(config):

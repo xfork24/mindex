@@ -424,12 +424,6 @@ class BuiltinRuntime:
             llm = self.llm_factory()
             while True:
                 step += 1
-                if step > settings.max_steps:
-                    self._append(sid, "plugin:mindex/notice",
-                                 {"turn": turn, "text": f"已达到单轮最多 {settings.max_steps} 步，暂停执行"},
-                                 ignorable=True)
-                    reason = {"kind": "blocked"}
-                    break
                 self._append(sid, "step/start", {"turn": turn, "step": step})
                 registry = self.registry
                 messages, note = await self._model_messages(sid, settings, llm)
@@ -495,11 +489,13 @@ class BuiltinRuntime:
     async def _model_messages(self, sid: str, settings, llm) -> tuple[list[dict], str]:
         """本步发给模型的消息与系统提示附注。
 
-        历史从日志派生（只含图片引用）；视觉开启时按协议把最近 ``max_images`` 张解析成内存中的图片数据，
+        从日志读取滚动操作窗口后按 token 预算派生历史（只含图片引用）；
+        视觉开启时按协议把最近 ``max_images`` 张解析成内存中的图片数据，
         关闭时去掉全部图片，并在系统提示里说明图片没有发送。解析结果只进入本次请求，不写日志、不推 SSE。
         """
         vision, limit = vision_settings(settings)
-        history = derive_messages(self.store.events(sid), budget=settings.max_context_tokens,
+        history = derive_messages(self.store.model_events(sid, window_steps=settings.context_window_steps),
+                                  budget=settings.max_context_tokens,
                                   image_tokens=IMAGE_TOKENS if vision else 0, image_limit=limit)
         images = image_count(history)
         if not images:

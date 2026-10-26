@@ -49,7 +49,12 @@ def _v1(db) -> None:
         db.execute("ALTER TABLE agent_sessions ADD COLUMN loaded_domains TEXT NOT NULL DEFAULT '[]'")
 
 
-STEPS = (_v1,)
+def _v2(db) -> None:
+    """滚动操作窗口按事件类型读取最近记录，避免每步扫描完整会话。"""
+    db.execute("CREATE INDEX IF NOT EXISTS agent_events_type ON agent_events(session_id, type, seq)")
+
+
+STEPS = (_v1, _v2)
 
 
 def initialize(database) -> int:

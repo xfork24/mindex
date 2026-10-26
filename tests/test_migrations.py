@@ -202,6 +202,19 @@ def test_agent_reopen_does_not_rerun_steps(tmp_path, monkeypatch):
     ChangeFeed(tmp_path)
 
 
+def test_agent_v1_upgrade_adds_window_index_without_changing_log(tmp_path):
+    with sqlite3.connect(tmp_path / "agent.sqlite3") as db:
+        db.executescript(agent_schema.SCHEMA_V1)
+        db.execute("PRAGMA user_version=1")
+        db.execute("INSERT INTO agent_events(session_id,seq,time,type,data) VALUES(?,?,?,?,?)",
+                   ("session-old", 0, 1, "user/message", '{"text":"旧任务"}'))
+    store = SessionStore(tmp_path)
+    assert store.events("session-old")[0]["data"] == {"text": "旧任务"}
+    with store.store.connect() as db:
+        assert user_version(db) == len(agent_schema.STEPS)
+        assert "agent_events_type" in {row[1] for row in db.execute("PRAGMA index_list(agent_events)")}
+
+
 def test_backup_upgrade_sets_latest_version_on_isolated_copy(tmp_path):
     path = tmp_path / "metadata.sqlite3"
     with sqlite3.connect(path) as db:

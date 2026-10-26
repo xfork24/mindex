@@ -250,7 +250,7 @@ animate 签名只含 backend、model、`max_html_kb` 与提示词版本，不含
 
 ## `agent` — 智能助手
 
-全局助手面板与 MCP 导出：`enabled`、`max_steps`、`max_context_tokens`、`secret_ttl_seconds`、附件（`attachment_ttl_hours`、`attachment_max_mb`）与视觉（`max_images`）、`llm.*`（`backend: openai|anthropic`、`vision`，设置页「智能助手」档案可覆盖）与 `mcp.*`（`http_enabled`、`policy: read|write|all`、`token_env`、`domains`）。键说明与默认值见 [智能助手 · 配置](agent.md#配置)。
+全局助手面板与 MCP 导出：`enabled`、`context_window_steps`（默认 256，执行步数不限）、`max_context_tokens`、`secret_ttl_seconds`、附件（`attachment_ttl_hours`、`attachment_max_mb`）与视觉（`max_images`）、`llm.*`（`backend: openai|anthropic`、`vision`，设置页「智能助手」档案可覆盖）与 `mcp.*`（`http_enabled`、`policy: read|write|all`、`token_env`、`domains`）。旧 `max_steps` 配置忽略。键说明与默认值见 [智能助手 · 配置](agent.md#配置)。
 
 ## `local_services` — 本机模型服务
 

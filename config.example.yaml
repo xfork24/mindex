@@ -254,7 +254,7 @@ clean:
 # 智能助手（全局面板 /api/agent，详见 docs/agent.md）。模型也可在设置页「智能助手」角色里配置档案。
 agent:
   enabled: true
-  max_steps: 16              # 单轮对话内模型最多连续调用工具的步数
+  context_window_steps: 256  # 执行步数不限；模型输入滚动保留最近的步骤（1–256）
   max_context_tokens: 60000  # 发送给模型的历史估算上限；超出时先省略较早的工具结果
   secret_ttl_seconds: 1800   # 表单收集的密钥引用（secret://）有效期
   attachment_ttl_hours: 168  # 助手附件（attachment://）有效期；过期后由 mindex clean 回收

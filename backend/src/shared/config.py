@@ -526,7 +526,8 @@ class AgentMcpConfig(StrictModel):
 
 class AgentConfig(StrictModel):
     enabled: bool = True
-    max_steps: int = Field(default=16, ge=1, le=64)
+    # 执行步数不限；模型输入滚动保留最近的操作步骤（每步含全部工具调用与结果）。
+    context_window_steps: int = Field(default=256, ge=1, le=256)
     max_context_tokens: int = Field(default=60000, ge=4000)
     # 表单收集的密钥只以 secret:// 引用出现在会话里，引用在此时长后失效。
     secret_ttl_seconds: int = Field(default=1800, ge=60)
@@ -538,6 +539,14 @@ class AgentConfig(StrictModel):
     max_images: int = Field(default=8, ge=0, le=32)
     llm: AgentLlmConfig = Field(default_factory=AgentLlmConfig)
     mcp: AgentMcpConfig = Field(default_factory=AgentMcpConfig)
+
+    @model_validator(mode="before")
+    @classmethod
+    def discard_legacy_step_limit(cls, value):
+        """旧配置中的 max_steps 不再限制执行，也不作为窗口大小。"""
+        if isinstance(value, dict) and "max_steps" in value:
+            return {k: v for k, v in value.items() if k != "max_steps"}
+        return value
 
 
 class LocalServiceConfig(StrictModel):

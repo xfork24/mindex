@@ -34,6 +34,14 @@ def now_ms() -> int:
     return int(time.time() * 1000)
 
 
+def decode_event(row: dict) -> dict:
+    event = {"session_id": row["session_id"], "seq": row["seq"], "time": row["time"], "type": row["type"],
+             "data": json.loads(row["data"])}
+    if row["ignorable"]:
+        event["ignorable"] = True
+    return event
+
+
 class SessionNotFound(Exception):
     pass
 
@@ -131,16 +139,39 @@ class SessionStore:
         rows = self.store.rows(
             "SELECT * FROM agent_events WHERE session_id=? AND seq>? ORDER BY seq", (sid, after)
         )
-        result = []
-        for row in rows:
-            if types and row["type"] not in types:
-                continue
-            event = {"session_id": sid, "seq": row["seq"], "time": row["time"], "type": row["type"],
-                     "data": json.loads(row["data"])}
-            if row["ignorable"]:
-                event["ignorable"] = True
-            result.append(event)
-        return result
+        return [decode_event(row) for row in rows if not types or row["type"] in types]
+
+    def model_events(self, sid: str, *, window_steps: int = 256) -> list[dict]:
+        """模型操作窗口：最近至多 256 个模型步骤及其完整结果，不裁剪持久化日志。
+
+        窗口从 assistant/message 开始，按整步滚动；保留首个步骤所属的用户指令及之后的消息，
+        并带上其前最近的页面上下文。查询仅解码窗口内的数据，长轮次也不读取全部历史。
+        """
+        if not 1 <= window_steps <= 256:
+            raise ValueError("操作窗口步数必须在 1–256 之间")
+        boundary = self.store.one(
+            "SELECT seq FROM agent_events WHERE session_id=? AND type='assistant/message' "
+            "ORDER BY seq DESC LIMIT 1 OFFSET ?", (sid, window_steps - 1),
+        )
+        cutoff = boundary["seq"] if boundary else 0
+        anchor = self.store.one(
+            "SELECT seq FROM agent_events WHERE session_id=? AND type='user/message' AND seq<? "
+            "AND json_extract(data,'$.source.kind')!='context' ORDER BY seq DESC LIMIT 1", (sid, cutoff),
+        )
+        start = anchor["seq"] if anchor else cutoff
+        context = self.store.one(
+            "SELECT seq FROM agent_events WHERE session_id=? AND type='user/message' AND seq<? "
+            "AND json_extract(data,'$.source.kind')='context' ORDER BY seq DESC LIMIT 1", (sid, start),
+        )
+        rows = self.store.rows(
+            "SELECT * FROM agent_events WHERE session_id=? AND seq>=? "
+            "AND type IN ('user/message','assistant/message','tool/result') "
+            "UNION ALL SELECT * FROM agent_events WHERE session_id=? AND type='user/message' "
+            "AND seq>=? AND seq<? "
+            "UNION ALL SELECT * FROM agent_events WHERE session_id=? AND seq=? ORDER BY seq",
+            (sid, cutoff, sid, start, cutoff, sid, context["seq"] if context else -1),
+        )
+        return [decode_event(row) for row in rows]
 
     def last_turn(self, sid: str) -> int:
         row = self.store.one(

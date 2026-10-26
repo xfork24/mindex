@@ -449,7 +449,7 @@ curl -s -H "Authorization: Bearer $MINDEX_MCP_TOKEN" -F file=@shot.png http://12
 | 键 | 默认 | 说明 |
 |---|---|---|
 | `enabled` | `true` | 关闭后面板接口返回 503 |
-| `max_steps` | `16` | 单轮最多连续工具调用步数，超出后暂停 |
+| `context_window_steps` | `256` | 模型输入滚动保留最近的操作步骤（1–256），每步含该次模型回复及全部工具调用结果；执行步数不限 |
 | `max_context_tokens` | `60000` | 历史估算上限；超出时先省略较早的工具结果，再丢弃最早的轮次 |
 | `secret_ttl_seconds` | `1800` | 密钥引用有效期 |
 | `attachment_ttl_hours` | `168` | 附件有效期，过期后由 `mindex clean` 回收 |
@@ -462,6 +462,8 @@ curl -s -H "Authorization: Bearer $MINDEX_MCP_TOKEN" -F file=@shot.png http://12
 | `mcp.policy` | `read` | MCP 调用方允许的最高风险级别：`read`、`write`、`all` |
 | `mcp.token_env` | `MINDEX_MCP_TOKEN` | `/mcp` 与附件端点的 Bearer 令牌所在环境变量；开启 HTTP 但未设置令牌时服务拒绝启动 |
 | `mcp.domains` | `null` | MCP 导出的领域；`null` 导出全部，列表只导出这些领域（另加 `report_capability_gap`）。只接受 `studio`、`studio_detail`、`studio_post`、`library`、`search`、`index`、`persons`、`settings`、`topics`，空列表或未知领域校验失败 |
+
+单轮不再因步数耗尽而暂停；助手持续执行到完成、取消或出错，需要确认或提问时仍会等待答复。超过操作窗口时，较早步骤及其工具结果整体移出模型输入，保留窗口起点所属的用户指令和最近页面上下文；`max_context_tokens` 仍可进一步缩减历史。完整事件日志保留，面板回放与 SSE 续传不受滚动窗口影响。旧配置中的 `max_steps` 会被忽略，无需手动删除；`GET /api/agent/status` 返回 `max_steps: null` 和当前 `context_window_steps`。
 
 会话（含已加载领域）、密钥保险库、附件记录与能力缺口存放在 `data_dir/agent.sqlite3`，附件文件在 `data_dir/agent-attachments/`，都属于本机运行状态，不进入 `mindex backup`。
 
