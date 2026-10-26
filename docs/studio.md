@@ -163,7 +163,7 @@
 
 ### 曲库
 
-曲库（`studio/music_library.py`，`/studio/music` 页面）保存带授权信息的音乐：导入时授权来源、许可、署名必填，有效期可选（`YYYY-MM-DD`，含当天）。曲目 ID 即音频内容 sha256，文件按内容寻址存放在 `data_dir/music/`，重复导入返回已有曲目、不改原记录；记录在 metadata 库 `music_tracks` 表，备份随数据目录带上文件。
+曲库（`studio/music_library.py`，素材管理页的“音乐库”标签 `/admin/music`；旧地址 `/studio/music` 重定向到这里）保存带授权信息的音乐：导入时授权来源、许可、署名必填，有效期可选（`YYYY-MM-DD`，含当天）。曲目 ID 即音频内容 sha256，文件按内容寻址存放在 `data_dir/music/`，重复导入返回已有曲目、不改原记录；记录在 metadata 库 `music_tracks` 表，备份随数据目录带上文件。
 
 - 分析（`studio/beats.py`，纯 numpy，桌面版同样可用）：ffmpeg 解码为 22050 Hz 单声道 → STFT（2048/512）→ 半波整流谱通量 → 自相关在 60–200 BPM 求峰（对数高斯先验偏向 120 BPM）→ 动态规划节拍跟踪，另算能量与亮度（频谱质心）。合成节拍器上 BPM 误差 ≤ 2%、节拍误差 ≤ 30 ms（`tests/test_studio_beats.py`）。导入时自动分析，在请求线程池中同步完成（几分钟的曲目约 1 秒）；`ANALYSIS_VERSION` 变化后曲目标为需要重新分析。
 - 情绪标签：文案模型（`studio.writer`）按曲名、标签与节奏特征从固定词表（calm、warm、happy、energetic、epic、tense、sad、mysterious、inspiring、tech、romantic、playful）选 1–3 个；模型不可用或输出无效时按节奏特征推断。可在曲库页修改；重新分析时可保留人工标签。
@@ -242,7 +242,7 @@
 
 ## 第三方工具
 
-分镜画面来源 `kind=tool` 调用登记的第三方工具（`studio/tools/`，`/studio/tools` 页面）。工具源记录在 metadata 库 `tool_sources` 表：
+分镜画面来源 `kind=tool` 调用登记的第三方工具（`studio/tools/`，设置页的“第三方工具”配置组 `/settings#tools`；旧地址 `/studio/tools` 重定向到这里）。工具源记录在 metadata 库 `tool_sources` 表：
 
 - 协议：`http`（HTTP manifest：`POST base_url + submit_path` 提交 `{"tool", "arguments", "uploads"}`，`poll_path` 轮询直到 `status_field` 进入 done/failed，按 `result_field` 点分路径取产物地址；`poll_path` 为空时提交响应即结果）、`mcp-stdio`（本机进程，`command` 必须是绝对路径，`env` 追加到最小默认环境，不依赖 GUI 的 PATH）、`mcp-http`（streamable-http）。MCP 经 `list_tools` 发现、`call_tool` 调用，产物取图片内容、内嵌二进制资源、资源链接、`structuredContent.url(s)` 或文本里的 http(s) 地址；`mcp` 是可选组件（`uv sync --extra mcp`，桌面版已内置），缺失时预检提示安装。
 - 白名单：只有 `tools` 里的工具能被调用；每个工具声明产物（video/image）、`allow_upload`（未勾选时携带素材的分镜预检阻塞）、`timeout`（秒）与 `max_mb`（产物上限）。产物只能从 `artifact_hosts`（http 协议另含 base_url 的主机）下载，流式计数超限即中止，手动跟随重定向并逐跳检查主机。

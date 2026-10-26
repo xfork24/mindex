@@ -18,6 +18,7 @@ PAGE_DOMAIN: dict[str, str] = {
     "admin": "library",
     "persons": "persons",
     "topics": "topics",
+    "music": "studio_post",  # 素材管理 · 音乐库子页面（曲库工具在 studio_post 领域）
 }
 
 # 系统提示词中的领域目录：每个可加载领域一句说明。

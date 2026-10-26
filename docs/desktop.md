@@ -67,7 +67,7 @@ scripts/build-desktop-mac.sh            # ffmpeg（缺失时从源码编译）�
 |---|---|
 | `scripts/build-desktop-ffmpeg.sh` | 从固定版本与 sha256 的源码编译 ffmpeg（约 3 分钟） |
 | `scripts/build-desktop-sidecar.sh` | 在独立环境中冻结后端到 `desktop/build/backend/` |
-| `python scripts/check-desktop-sidecar.py [--isolated-path --ffmpeg-dir … --font … --animation]` | 冻结后端冒烟：自检（含品牌模板、叠加层模板与成片后期的转场、水印 ffmpeg 路径，曲目节奏分析、HTTP 工具替身调用与随包 mcp 客户端）、package-data、`-m` 分发、prepare、serve（含 `/studio/brands`、`/studio/music`、`/studio/tools` 与 `mindex studio --url` 连接）、字幕烧录、动画录制（含 HTML 文字层的透明录制） |
+| `python scripts/check-desktop-sidecar.py [--isolated-path --ffmpeg-dir … --font … --animation]` | 冻结后端冒烟：自检（含品牌模板、叠加层模板与成片后期的转场、水印 ffmpeg 路径，曲目节奏分析、HTTP 工具替身调用与随包 mcp 客户端）、package-data、`-m` 分发、prepare、serve（含 `/studio/brands`、`/admin/music` 与 `mindex studio --url` 连接）、字幕烧录、动画录制（含 HTML 文字层的透明录制） |
 | `cd desktop && npm start` | 开发模式：外壳以 `uv run mindex` 运行仓库后端；`MINDEX_DESKTOP_BACKEND=frozen` 改用已构建的冻结后端 |
 | `node tests/desktop_smoke.cjs` | Electron 冒烟（`MINDEX_SMOKE_APP=/Applications/Mindex.app/Contents/MacOS/Mindex` 针对已安装应用） |
 | `uv run python scripts/desktop-bench.py` | 与同机 Web 版的性能对比 |

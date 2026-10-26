@@ -4,9 +4,10 @@ import json
 import os
 import time
 from functools import cache
+from urllib.parse import urlencode
 
-from fastapi import FastAPI
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from mindex.admin.admin import admin_router
@@ -156,8 +157,25 @@ def create_app(
     # 选题挖掘同为创作页子页面（标签位于创作任务与文案模板之间）。
     register_page("studio", "topics.html", ("/studio/topics", "/studio/topics/"))
     register_page("studio", "brands.html", ("/studio/brands", "/studio/brands/"))
-    register_page("studio", "music.html", ("/studio/music", "/studio/music/"))
-    register_page("studio", "tools.html", ("/studio/tools", "/studio/tools/"))
+    # 音乐库是素材管理页的子页面（与素材并列的分区标签）；第三方工具是设置页的一个配置组。
+    register_page("admin", "music.html", ("/admin/music", "/admin/music/"))
+
+    def moved(target, rename=None):
+        """旧地址（创作页的音乐库、第三方工具标签）重定向到新位置，兼容书签与旧链接。
+
+        保留查询参数（按 rename 改名），丢弃只用于返回创作任务的 job 参数。
+        """
+        def redirect(request: Request):
+            params = {(rename or {}).get(key, key): value for key, value in request.query_params.items() if key != "job"}
+            path, _, fragment = target.partition("#")
+            url = path + (f"?{urlencode(params)}" if params else "") + (f"#{fragment}" if fragment else "")
+            return RedirectResponse(url, status_code=308)
+        return redirect
+
+    for url in ("/studio/music", "/studio/music/"):
+        app.add_api_route(url, moved("/admin/music"), methods=["GET"], include_in_schema=False)
+    for url in ("/studio/tools", "/studio/tools/"):
+        app.add_api_route(url, moved("/settings#tools", {"id": "tool"}), methods=["GET"], include_in_schema=False)
     for group in ("search", "admin", "persons", "studio", "settings", "shared"):
         app.mount(f"/assets/{group}", StaticFiles(directory=assets_root / group), name=f"assets-{group}")
 

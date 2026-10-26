@@ -1,9 +1,12 @@
-/* 创作 · 第三方工具（/studio/tools）：登记 HTTP / MCP 工具源、维护工具白名单与上传授权、填写密钥（只写）、测试连接。
-   经典脚本，依赖 shared/*（MindexI18n、MindexApi、MindexFeedback）。全部经 /api/studio/tool-sources
-   （与 CLI、智能助手、MCP 同一接口）；Web 与桌面版共用（不使用 window.prompt）。 */
+/* 设置 · 第三方工具（/settings#tools 配置组）：登记 HTTP / MCP 工具源、维护工具白名单与上传授权、填写密钥（只写）、测试连接。
+   经典脚本，在 settings.js 之后加载；整段包在函数作用域里，避免与 settings.js 的顶层声明（$、api、state…）冲突。
+   依赖 shared/*（MindexI18n、MindexApi、MindexFeedback）。全部经 /api/studio/tool-sources
+   （与 CLI、智能助手、MCP 同一接口）；Web 与桌面版共用（不使用 window.prompt）。
+   智能助手的页面上下文与定位由 settings.js 统一提供（section: tools）。 */
+(() => {
 "use strict";
 const query = new URLSearchParams(location.search);
-const page = { items: [], selected: null, creating: false, entries: [], secrets: {}, job: query.get("job") };
+const page = { items: [], selected: null, creating: false, entries: [], secrets: {} };
 const $ = (id) => document.getElementById(id);
 const api = (url, method = "GET", body) => MindexApi.json(url, method, body);
 const sourceUrl = (id, suffix = "") => `/api/studio/tool-sources/${encodeURIComponent(id)}${suffix}`;
@@ -34,25 +37,32 @@ function renderList() {
   const box = $("tool-list");
   box.replaceChildren();
   if (!page.items.length) {
-    box.append(el("p", MindexI18n.msg("ui.tools_list_empty"), "muted template-group-empty"));
+    box.append(el("p", MindexI18n.msg("ui.tools_list_empty"), "muted"));
     return;
   }
-  const list = el("ul", null, "template-items");
+  const list = el("ul", null, "tool-items");
   for (const item of page.items) {
     const li = el("li");
-    const entry = el("button", null, "job-item template-item");
+    const entry = el("button", null, "tool-item");
     entry.type = "button";
     entry.dataset.id = item.id;
     if (page.selected?.id === item.id) entry.classList.add("active");
-    entry.append(el("div", item.name, "job-title"));
+    entry.append(el("div", item.name, "tool-item-title"));
     const parts = [item.protocol, MindexI18n.msg("ui.tools_count", { p0: item.tools.length })];
     if (item.missing_secrets.length) parts.push(MindexI18n.msg("ui.tools_missing_secrets"));
-    entry.append(el("div", parts.join(" · "), item.missing_secrets.length ? "job-sub warn-text" : "job-sub"));
+    entry.append(el("div", parts.join(" · "), item.missing_secrets.length ? "tool-item-sub tool-warn" : "tool-item-sub"));
     entry.addEventListener("click", () => select(item.id).catch(failed));
     li.append(entry);
     list.append(li);
   }
   box.append(list);
+}
+function renderSummary() {
+  const missing = page.items.filter((item) => item.missing_secrets.length).length;
+  const text = page.items.length ? MindexI18n.msg("ui.tools_settings_summary", { p0: page.items.length }) +
+    (missing ? ` · ${MindexI18n.msg("ui.tools_settings_summary_missing", { p0: missing })}` : "") :
+    MindexI18n.msg("ui.tools_list_empty");
+  MindexI18n.setText($("tools-summary"), text);
 }
 function control(label, value, type, onChange, extra = {}) {
   const wrap = el("label", label, extra.check ? "check" : "form-field");
@@ -73,7 +83,7 @@ function renderEntries() {
   const box = $("tool-entries");
   box.replaceChildren(el("h3", MindexI18n.msg("ui.tools_whitelist")));
   page.entries.forEach((entry, index) => {
-    const row = el("div", "", "template-fields");
+    const row = el("div", "", "tool-fields tool-entry");
     row.dataset.toolEntry = String(index);
     const set = (key) => (value) => {entry[key] = value;};
     row.append(
@@ -159,13 +169,14 @@ async function select(id) {
   page.selected = await api(sourceUrl(id));
   page.entries = JSON.parse(JSON.stringify(page.selected.tools));
   page.secrets = {};
-  history.replaceState(null, "", `/studio/tools?id=${encodeURIComponent(id)}${page.job ? `&job=${encodeURIComponent(page.job)}` : ""}`);
+  history.replaceState(null, "", `/settings?tool=${encodeURIComponent(id)}#tools`);
   renderList();
   renderDetail();
 }
 async function load(preferred) {
   page.items = (await api("/api/studio/tool-sources")).items;
   renderList();
+  renderSummary();
   const id = preferred || page.selected?.id;
   if (id && page.items.some((item) => item.id === id)) await select(id);
 }
@@ -202,9 +213,9 @@ async function test() {
   box.replaceChildren(el("p", MindexI18n.msg("ui.tools_testing")));
   const result = await api(sourceUrl(page.selected.id, "/test"), "POST");
   box.replaceChildren();
-  if (!result.ok) return box.append(el("p", MindexI18n.msg("ui.tools_test_failed", { p0: MindexI18n.system(result.error) }), "warn-text"));
+  if (!result.ok) return box.append(el("p", MindexI18n.msg("ui.tools_test_failed", { p0: MindexI18n.system(result.error) }), "tool-warn"));
   box.append(el("p", MindexI18n.msg("ui.tools_test_ok", { p0: result.elapsed_ms, p1: result.tools ? result.tools.length : "—" })));
-  if (result.missing?.length) box.append(el("p", MindexI18n.msg("ui.tools_test_missing", { p0: result.missing.join("、") }), "warn-text"));
+  if (result.missing?.length) box.append(el("p", MindexI18n.msg("ui.tools_test_missing", { p0: result.missing.join("、") }), "tool-warn"));
   const known = new Set(page.entries.map((entry) => entry.name));
   for (const tool of result.tools || []) {
     if (known.has(tool.name)) continue;
@@ -225,6 +236,7 @@ async function remove() {
   if (!window.confirm(MindexI18n.render(MindexI18n.msg("ui.tools_delete_confirm", { p0: page.selected.name })))) return;
   await api(sourceUrl(page.selected.id), "DELETE");
   page.selected = null;
+  history.replaceState(null, "", "/settings#tools");
   await load();
   renderDetail();
   notice(MindexI18n.msg("ui.tools_deleted"));
@@ -248,16 +260,12 @@ $("tool-new").addEventListener("click", () => {
   renderDetail();
   $("tf-id").focus();
 });
-$("reload").addEventListener("click", () => load().then(() => notice(MindexI18n.msg("ui.tools_reloaded"))).catch(failed));
-window.addEventListener("mindex:languagechange", () => {renderList();if (page.selected || page.creating) {renderEntries();renderSecrets(page.selected);connectionHelp();}});
+// 页头“刷新设置”同时刷新工具源（settings.js 用 onclick 绑定，这里追加监听）。
+$("reload").addEventListener("click", () => load().catch(failed));
+window.addEventListener("mindex:languagechange", () => {renderList();renderSummary();if (page.selected || page.creating) {renderEntries();renderSecrets(page.selected);connectionHelp();}});
 window.addEventListener("mindex:agent-mutation", (event) => {
   const detail = event.detail || {};
   if (detail.domain === "studio" && detail.tool_sources) load().catch(() => {});
 });
-window.MindexAgentContext = () => ({ page: "studio", section: "tools", tool_source_id: page.selected?.id || null });
-window.MindexAgentFocus = async (focus, { passive = false } = {}) => {
-  if (focus.job_id && !passive) location.href = `/studio?job=${encodeURIComponent(focus.job_id)}`;
-  return true;
-};
-if (page.job) $("studio-jobs-tab").href = `/studio?job=${encodeURIComponent(page.job)}`;
-load(query.get("id")).catch(failed);
+load(query.get("tool")).catch(failed);
+})();

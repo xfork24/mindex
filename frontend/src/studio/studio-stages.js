@@ -30,7 +30,9 @@ function renderStageDetails(body, sid, stage) {
   if (stage === "invoke") {
     const help = el("p", MindexI18n.msg("ui.invoke_help"), "muted");
     const manage = el("a", MindexI18n.msg("ui.invoke_manage"), "quiet nav-link");
-    manage.href = `/studio/tools?job=${encodeURIComponent(state.id)}`;
+    manage.href = "/settings#tools"; // 第三方工具在设置页的配置组里；新标签页打开，保留当前创作任务
+    manage.target = "_blank";
+    manage.rel = "noopener";
     help.append(" ", manage);
     body.append(help);
   }
@@ -559,7 +561,9 @@ function musicLibraryPicker(sid, value) {
     } finally {recommend.disabled = false;}
   });
   const manage = el("a", MindexI18n.msg("ui.music_library_manage"), "quiet");
-  manage.href = `/studio/music?job=${encodeURIComponent(state.id)}`;
+  manage.href = "/admin/music"; // 音乐库在素材管理页；新标签页打开，保留当前创作任务
+  manage.target = "_blank";
+  manage.rel = "noopener";
   const actions = el("div", "", "detail-actions");
   actions.append(recommend, manage);
   box.append(pick.wrap, actions, hint);

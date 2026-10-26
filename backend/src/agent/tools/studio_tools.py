@@ -20,7 +20,7 @@ from mindex.shared.config import StrictModel
 from mindex.studio.studio_models import HttpConfig, McpHttpConfig, StdioConfig, ToolEntry
 
 SourceId = Field(pattern=r"^[a-z0-9][a-z0-9-]{0,39}$", description="工具源 ID（小写字母、数字与连字符）")
-FOCUS = {"page": "studio_post", "section": "tools"}
+FOCUS = {"page": "settings", "section": "tools"}  # 设置页“第三方工具”配置组
 MUTATION = {"domain": "studio", "tool_sources": True}
 
 

@@ -156,7 +156,9 @@ function renderToolEditor(section, sid, draft, markDirty, redraw) {
   line.append(sourceField.wrap, toolField.wrap);
   section.append(line);
   const manage = el("a", MindexI18n.msg("ui.invoke_manage"), "quiet nav-link");
-  manage.href = `/studio/tools?job=${encodeURIComponent(state.id)}`;
+  manage.href = "/settings#tools"; // 第三方工具在设置页的配置组里；新标签页打开，保留当前创作任务
+  manage.target = "_blank";
+  manage.rel = "noopener";
   section.append(manage, hint);
   const fillTools = (items) => {
     const found = items.find((item) => item.id === draft.data.source.tool_id);

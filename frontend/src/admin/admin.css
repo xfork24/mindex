@@ -3,6 +3,11 @@
 .admin-main{max-width:1560px;padding:36px 28px}
 .admin-intro h1{font-size:30px;letter-spacing:-.8px;margin:12px 0}
 .admin-intro p{font-size:13px;color:var(--muted);margin:0 0 22px}
+/* 素材管理分区标签（素材 / 音乐库）：与创作页 studio.css 的 .studio-tabs 同一样式；音乐库页直接用 studio.css。 */
+.studio-tabs{display:flex;gap:28px;border-bottom:1px solid var(--line);margin:0 0 18px}
+.studio-tab{display:inline-flex;align-items:center;min-height:40px;padding:10px 0 9px;border-bottom:3px solid transparent;margin-bottom:-1px;color:var(--muted);font-size:14px;text-decoration:none}
+.studio-tab:hover{color:#3b5145}
+.studio-tab[aria-current="page"]{border-color:var(--green);color:var(--green);font-weight:600}
 .admin .notice{margin:0 0 18px}
 .admin .notice:empty{display:none}
 .workspace{display:grid;--sidebar-width:310px;grid-template-columns:var(--sidebar-width) minmax(0,1fr);gap:24px;align-items:start}

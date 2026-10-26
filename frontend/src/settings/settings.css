@@ -192,3 +192,35 @@
 .service-item .service-flags label{display:inline-flex;align-items:center;gap:6px}
 .service-item .service-detail{flex-basis:100%;font-size:12px;color:#8a6a2a}
 .service-item .service-log{flex-basis:100%;margin:0;max-height:260px;overflow:auto;padding:8px 10px;border-radius:8px;background:#f5f6f2;font-size:11px;white-space:pre-wrap;overflow-wrap:anywhere}
+
+/* 第三方工具配置组（tools.js）：左侧工具源列表，右侧登记表单。 */
+.tools-layout{display:grid;grid-template-columns:240px minmax(0,1fr);gap:22px;align-items:start}
+.tools-list-panel{min-width:0}
+.tools-list-panel .detail-actions{margin:0 0 6px}
+.tool-items{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.tool-item{display:block;width:100%;height:auto;min-height:0;text-align:left;background:#fff;border:1px solid #edf0ea;border-radius:9px;color:#3b5145;padding:10px 12px;cursor:pointer}
+.tool-item:hover{border-color:var(--line)}
+.tool-item.active{border-color:#97b9a0;background:#f2f6ef}
+.tool-item-title{font-weight:550;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tool-item-sub{font-size:11px;color:var(--muted);margin-top:4px}
+.tool-item-sub.tool-warn{color:#a15c2d}
+.tools-detail{min-width:0}
+.tools-detail .empty{padding:32px}
+.tool-title-row{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin:0 0 6px}
+.tool-title-row h3{font-size:15px;margin:0}
+.tool-title-row .head-actions{margin-left:auto}
+.tool-fields{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;align-items:end}
+.tool-fields .form-field{margin:0}
+.tool-entry{margin-bottom:10px}
+.tool-form .tool-connection{width:100%;min-height:180px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;box-sizing:border-box}
+.tool-section{margin-top:16px;border-top:1px solid #edf0ea;padding-top:12px}
+.tool-section h3{font-size:13px;margin:0 0 10px}
+.tool-section .detail-actions{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
+.tool-form .tuning-actions{margin-top:16px}
+.tool-warn{font-size:12px;color:#a15c2d}
+.tool-form p.muted,#tool-test-result{font-size:12px;line-height:1.7;color:var(--muted);margin:8px 0}
+.tool-entry>button{justify-self:start}
+.tool-form .danger{color:#a4472e}
+@media(max-width:1100px){.tool-fields{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:900px){.tools-layout{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:540px){.tool-fields{grid-template-columns:minmax(0,1fr)}}

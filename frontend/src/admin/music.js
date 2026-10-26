@@ -1,9 +1,9 @@
-/* 创作 · 音乐库（/studio/music）：导入带授权信息的音乐、查看节奏分析、修改授权与情绪标签、删除。
+/* 素材管理 · 音乐库（/admin/music）：导入带授权信息的音乐、查看节奏分析、修改授权与情绪标签、删除。
    经典脚本，依赖 shared/*（MindexI18n、MindexApi、MindexFeedback）。全部经 /api/studio/music-library
    （与 CLI、智能助手、MCP 同一接口）；Web 与桌面版共用（不使用 window.prompt）。 */
 "use strict";
 const query = new URLSearchParams(location.search);
-const page = { items: [], moods: [], selected: null, job: query.get("job") };
+const page = { items: [], moods: [], selected: null };
 const $ = (id) => document.getElementById(id);
 const api = (url, method = "GET", body) => MindexApi.json(url, method, body);
 const trackUrl = (id, suffix = "") => `/api/studio/music-library/${encodeURIComponent(id)}${suffix}`;
@@ -123,7 +123,7 @@ function renderDetail() {
 }
 async function select(id) {
   page.selected = await api(trackUrl(id));
-  history.replaceState(null, "", `/studio/music?id=${encodeURIComponent(id)}${page.job ? `&job=${encodeURIComponent(page.job)}` : ""}`);
+  history.replaceState(null, "", `/admin/music?id=${encodeURIComponent(id)}`);
   renderList();
   renderDetail();
 }
@@ -202,10 +202,9 @@ window.addEventListener("mindex:agent-mutation", (event) => {
   const detail = event.detail || {};
   if (detail.domain === "studio" && detail.music_library) load().catch(() => {});
 });
-window.MindexAgentContext = () => ({ page: "studio", section: "music", track_id: page.selected?.id || null });
-window.MindexAgentFocus = async (focus, { passive = false } = {}) => {
-  if (focus.job_id && !passive) location.href = `/studio?job=${encodeURIComponent(focus.job_id)}`;
+window.MindexAgentContext = () => ({ page: "music", track_id: page.selected?.id || null });
+window.MindexAgentFocus = async () => {
+  window.MindexAgent?.highlight($("music-list"));
   return true;
 };
-if (page.job) $("studio-jobs-tab").href = `/studio?job=${encodeURIComponent(page.job)}`;
 load(query.get("id")).catch(failed);

@@ -17,7 +17,7 @@ from mindex.agent.tools.studio_write import JobId, PlanId
 from mindex.shared.config import StrictModel
 
 TrackId = Field(pattern=r"^[0-9a-f]{64}$", description="曲目 ID（list_music_tracks 或 recommend_music 给出的完整 64 位 ID）")
-FOCUS = {"page": "studio_post", "section": "music"}
+FOCUS = {"page": "music"}  # 素材管理 · 音乐库（/admin/music）
 MUTATION = {"domain": "studio", "music_library": True}
 MOOD_LABELS = {"calm": "平静", "warm": "温暖", "happy": "欢快", "energetic": "动感", "epic": "恢宏", "tense": "紧张",
                "sad": "伤感", "mysterious": "神秘", "inspiring": "励志", "tech": "科技", "romantic": "浪漫",

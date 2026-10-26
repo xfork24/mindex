@@ -8,7 +8,7 @@ from mindex.api import create_app
 
 
 @pytest.mark.parametrize("page", ["/", "/index.html", "/studio/templates", "/studio/templates/", "/studio/topics",
-                                  "/studio/topics/", "/studio/brands", "/studio/music", "/studio/tools", *[
+                                  "/studio/topics/", "/studio/brands", "/admin/music", "/admin/music/", *[
     url for name in ("admin", "persons", "studio", "settings")
     for url in (f"/{name}", f"/{name}/", f"/{name}.html")
 ]])
@@ -41,7 +41,9 @@ def test_page_bundle_assets(config, page):
             # 选题挖掘页：同为创作页子页面，推荐模板的显示文字与模板页共用。
             '/assets/studio/studio-template-text.js', '/assets/studio/topics.js'
         ] if name == 'studio-topics' else ['/assets/studio/brands.js'] if name == 'studio-brands' else [
-            '/assets/studio/music.js'] if name == 'studio-music' else ['/assets/studio/tools.js'] if name == 'studio-tools' else [
+            '/assets/admin/music.js'] if name == 'admin-music' else [
+            # 设置页：第三方工具配置组的脚本在 settings.js 之后加载。
+            '/assets/settings/settings.js', '/assets/settings/tools.js'] if name == 'settings' else [
             f'/assets/{name}/{name}.js']
         positions = [paths.index(item) for item in [*chain, *page_scripts]]
         assert positions == sorted(positions)
@@ -50,3 +52,15 @@ def test_page_bundle_assets(config, page):
             assert resource.status_code == 200, asset
             assert resource.content, asset
         assert client.get("/assets/shared/../config.py").status_code == 404
+
+
+@pytest.mark.parametrize(("old", "new"), [
+    ("/studio/music", "/admin/music"), ("/studio/music/?id=abc&job=j1", "/admin/music?id=abc"),
+    ("/studio/tools", "/settings#tools"), ("/studio/tools?id=my-tool&job=j1", "/settings?tool=my-tool#tools"),
+])
+def test_moved_pages_redirect(config, old, new):
+    """音乐库移到素材管理页、第三方工具移到设置页：旧地址重定向到新位置。"""
+    with TestClient(create_app(config)) as client:
+        response = client.get(old, follow_redirects=False)
+        assert response.status_code == 308
+        assert response.headers["location"] == new

@@ -1244,9 +1244,11 @@ $('reload').onclick = () => run(async () => {
 for (const head of document.querySelectorAll('.role-row-head[data-section]')) {
   head.onclick = () => toggleRole(head.dataset.section);
 }
-if (typeof location !== 'undefined' && /^#(services|browser)$/.test(location.hash || '')) {
+if (typeof location !== 'undefined' && /^#(services|browser|tools)$/.test(location.hash || '')) {
   state.expanded.add(location.hash.slice(1));
 }
+// 第三方工具配置组（tools.js）：带 ?tool= 打开时展开该组。
+if (typeof location !== 'undefined' && new URLSearchParams(location.search || '').has('tool')) state.expanded.add('tools');
 syncSectionRows();
 run(loadSettings);
 // 智能助手修改设置（档案、业务调参）后刷新本页，并定位到相关角色、档案或区块。
@@ -1278,7 +1280,7 @@ if (typeof window !== 'undefined' && window.addEventListener) {
       return true;
     }
     const section = focus.section;
-    if (['tuning', 'voices', 'releases', 'services', 'browser'].includes(section)) {
+    if (['tuning', 'voices', 'releases', 'services', 'browser', 'tools'].includes(section)) {
       if (!passive) {
         state.expanded.add(section);
         persist();

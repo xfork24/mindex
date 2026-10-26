@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title data-i18n="[[0,&quot;ui.5e9681d20f56&quot;]]">Mindex · 设置</title><link rel="icon" href="/assets/shared/favicon.svg?v=8d7f9242de" type="image/svg+xml">
-  <link rel="stylesheet" href="/assets/shared/style.css?v=e4cee29ab0"><link rel="stylesheet" href="/assets/shared/agent-panel.css?v=5ce91a25c0"><link rel="stylesheet" href="/assets/settings/settings.css?v=ae9e01be2a">
-  <script src="/assets/shared/messages.js?v=55c4b7123a" defer></script><script src="/assets/shared/i18n.js?v=42497bb7f1" defer></script><script src="/assets/shared/api.js?v=aa52e4865d" defer></script><script src="/assets/shared/marked.umd.js?v=b82b933440" defer></script><script src="/assets/shared/purify.min.js?v=cd37898f97" defer></script><script src="/assets/shared/agent-markdown.js?v=8f0018e90a" defer></script><script src="/assets/shared/agent-panel.js?v=e45b7f1ace" defer></script><script src="/assets/shared/feedback.js?v=4d2340032a" defer></script><script src="/assets/settings/settings.js?v=f21dbe4de2" defer></script>
+  <link rel="stylesheet" href="/assets/shared/style.css?v=e4cee29ab0"><link rel="stylesheet" href="/assets/shared/agent-panel.css?v=5ce91a25c0"><link rel="stylesheet" href="/assets/settings/settings.css?v=5bbb9db7e1">
+  <script src="/assets/shared/messages.js?v=f24d33b9a9" defer></script><script src="/assets/shared/i18n.js?v=42497bb7f1" defer></script><script src="/assets/shared/api.js?v=aa52e4865d" defer></script><script src="/assets/shared/marked.umd.js?v=b82b933440" defer></script><script src="/assets/shared/purify.min.js?v=cd37898f97" defer></script><script src="/assets/shared/agent-markdown.js?v=8f0018e90a" defer></script><script src="/assets/shared/agent-panel.js?v=17d639cf45" defer></script><script src="/assets/shared/feedback.js?v=4d2340032a" defer></script><script src="/assets/settings/settings.js?v=e2c39fe9d6" defer></script><script src="/assets/settings/tools.js?v=6cceb98ba7" defer></script>
 </head>
 <body class="settings">
   <header><a class="brand" href="/">m<span>index</span><i></i></a><nav class="page-nav" aria-label="页面导航 / Main navigation"><a class="quiet nav-link" href="/" data-i18n="[[0,&quot;ui.c9b1e68e3537&quot;]]">视频检索</a><a class="quiet nav-link" href="/studio" data-i18n="[[0,&quot;ui.b6fc3cef0bd0&quot;]]">创作</a><a class="quiet nav-link" href="/admin" data-i18n="[[0,&quot;ui.f517302fec0d&quot;]]">素材管理</a><a class="quiet nav-link" href="/persons" data-i18n="[[0,&quot;ui.0973ef28d791&quot;]]">人物库</a><a class="quiet nav-link" href="/settings" aria-current="page" data-i18n="[[0,&quot;ui.7debf9cb0372&quot;]]">设置</a></nav><button class="quiet" id="reload" data-i18n="[[0,&quot;ui.c3147ba1672a&quot;]]">刷新设置</button><button type="button" class="quiet language-switch" data-language-toggle aria-label="中文 / English"><span data-language="zh" lang="zh-CN">文</span><span class="language-divider" aria-hidden="true">/</span><span data-language="en" lang="en">En</span></button></header>
@@ -125,6 +125,47 @@
             </div>
             <pre id="browser-log" class="service-log" hidden></pre>
             <div id="browser-notice" class="notice" role="status" aria-live="polite"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+    <section aria-label="第三方工具" data-i18n-aria-label="ui.studio_tab_tools">
+      <div class="section-heading"><h2 data-i18n="[[0,&quot;ui.studio_tab_tools&quot;]]">第三方工具</h2><span data-i18n="[[0,&quot;ui.tools_eyebrow&quot;]]">HTTP · MCP · 白名单 · 上传授权</span></div>
+      <div class="role-row" id="tools-row">
+        <button type="button" class="role-row-head" data-section="tools" aria-controls="tools-body" aria-expanded="false">
+          <span class="chevron">▸</span>
+          <strong class="role-row-title" data-i18n="[[0,&quot;ui.tools_settings_title&quot;]]">工具源</strong>
+          <span class="role-row-summary"><span class="role-row-effective" id="tools-summary"></span></span>
+        </button>
+        <div class="role-row-body" id="tools-body" hidden>
+          <p class="role-desc" data-i18n="[[0,&quot;ui.tools_intro&quot;]]">登记 HTTP 服务或 MCP 服务器，列出允许调用的工具、产物类型与是否允许携带素材上传；在分镜的画面来源里选择“第三方工具”即可调用。密钥只写不读。</p>
+          <div class="tuning-panel tools-layout">
+            <aside class="tools-list-panel" aria-label="工具源列表" data-i18n-aria-label="ui.tools_list_aria">
+              <div class="detail-actions"><button id="tool-new" class="quiet" type="button" data-i18n="[[0,&quot;ui.tools_new&quot;]]">登记工具源</button></div>
+              <div id="tool-list"></div>
+            </aside>
+            <div class="tools-detail" aria-label="工具源详情" data-i18n-aria-label="ui.tools_detail_aria" role="region">
+              <div id="tool-empty" class="empty"><h3 data-i18n="[[0,&quot;ui.tools_select_title&quot;]]">选择或登记一个工具源</h3><p data-i18n="[[0,&quot;ui.tools_select_hint&quot;]]">登记后测试连接，确认白名单中的工具都能被服务端找到。</p></div>
+              <form id="tool-form" class="tool-form" novalidate hidden>
+                <div class="tool-title-row">
+                  <h3 id="tool-title"></h3>
+                  <div class="head-actions"><button id="tool-test" class="quiet" type="button" data-i18n="[[0,&quot;ui.tools_test&quot;]]">测试连接</button><button id="tool-delete" class="quiet danger" type="button" data-i18n="[[0,&quot;ui.tools_delete&quot;]]">删除</button></div>
+                </div>
+                <div class="tool-fields">
+                  <label class="form-field" data-i18n="[[0,&quot;ui.tools_field_id&quot;]]">工具源 ID<input id="tf-id" maxlength="40" pattern="[a-z0-9][a-z0-9-]*" required></label>
+                  <label class="form-field" data-i18n="[[0,&quot;ui.tools_field_name&quot;]]">名称<input id="tf-name" maxlength="60" required></label>
+                  <label class="form-field" data-i18n="[[0,&quot;ui.tools_field_protocol&quot;]]">协议<select id="tf-protocol"><option value="http">HTTP</option><option value="mcp-http">MCP (streamable-http)</option><option value="mcp-stdio">MCP (stdio)</option></select></label>
+                  <label class="form-field" data-i18n="[[0,&quot;ui.tools_field_hosts&quot;]]">产物下载主机（逗号分隔）<input id="tf-hosts" maxlength="1000"></label>
+                </div>
+                <label class="form-field" data-i18n="[[0,&quot;ui.tools_field_connection&quot;]]">连接设置（JSON）<textarea id="tf-connection" class="tool-connection" rows="10" spellcheck="false"></textarea></label>
+                <p id="tf-connection-help" class="muted"></p>
+                <div id="tool-entries" class="tool-section"></div>
+                <div id="tool-secrets" class="tool-section"></div>
+                <div class="tuning-actions"><button id="tool-save" class="submit" type="submit" data-i18n="[[0,&quot;ui.tools_save&quot;]]">保存工具源</button></div>
+                <p id="tool-error" class="tool-warn" role="alert" hidden></p>
+                <div id="tool-test-result" class="muted" role="status"></div>
+              </form>
+            </div>
           </div>
         </div>
       </div>

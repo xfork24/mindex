@@ -149,8 +149,8 @@ studio/tools/
 | 封面 | 发布面板封面编辑 | `cover candidates/set` | `cover_candidates`、`set_cover` |
 | 发布元数据 | 发布面板元数据编辑 | `metadata show/edit` | `get_publish_metadata`、`edit_publish_metadata` |
 | 发布包 | 发布面板下载 | `publish` | `build_publish_package` |
-| 曲库 | 设置页“音乐库”；音乐提示点选曲 | `music import/list/analyze/recommend` | `list_music_tracks`、`analyze_music_track`、`recommend_music` |
-| 第三方工具 | 设置页“第三方工具”；分镜来源选择 | `tools list/test/add` | `list_tool_sources`、`test_tool_source`、`save_tool_source`（danger；mcp-stdio 登记不导出） |
+| 曲库 | 素材管理页“音乐库”标签（`/admin/music`）；音乐提示点选曲 | `music import/list/analyze/recommend` | `list_music_tracks`、`analyze_music_track`、`recommend_music` |
+| 第三方工具 | 设置页“第三方工具”配置组（`/settings#tools`）；分镜来源选择 | `tools list/test/add` | `list_tool_sources`、`test_tool_source`、`save_tool_source`（danger；mcp-stdio 登记不导出） |
 
 `tests/test_m3_entrypoints.py` 以此表为数据，断言 REST 路由、typer 命令、`build_registry()` 工具名、MCP 导出列表与页面 HTML 中的元素 id 都存在。
 

@@ -204,7 +204,7 @@ def main() -> int:
             assert status == 200, ("/studio/brands", status)
             brands = json.loads(get(f"{base}/api/studio/brands")[1])
             assert [item["id"] for item in brands["items"]][:3] == ["plain", "news", "tech"], brands
-            for page in ("/studio/music", "/studio/tools"):
+            for page in ("/admin/music",):
                 status, _ = get(base + page)
                 assert status == 200, (page, status)
             assert json.loads(get(f"{base}/api/studio/music-library")[1])["items"] == []

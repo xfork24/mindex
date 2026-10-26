@@ -152,8 +152,8 @@ MATRIX = (
                   ("studio", "music", "update"), ("studio", "music", "analyze"), ("studio", "music", "delete")),
         tools=("list_music_tracks", "get_music_track", "import_music_track", "update_music_track",
                "analyze_music_track"),
-        page=(("studio/music.html", ('id="music-list"', 'id="music-import"', 'id="music-moods"', "/assets/studio/music.js")),
-              ("studio/studio.html", ('href="/studio/music"',))),
+        page=(("admin/music.html", ('id="music-list"', 'id="music-import"', 'id="music-moods"', "/assets/admin/music.js")),
+              ("admin/admin.html", ('href="/admin/music"',))),
     ),
     Capability(
         "music-recommend-select",
@@ -177,8 +177,8 @@ MATRIX = (
         commands=(("studio", "tools", "list"), ("studio", "tools", "show"), ("studio", "tools", "add"),
                   ("studio", "tools", "test"), ("studio", "tools", "delete")),
         tools=("list_tool_sources", "test_tool_source", "save_tool_source", "save_stdio_tool_source"),
-        page=(("studio/tools.html", ('id="tool-list"', 'id="tool-form"', 'id="tool-entries"', "/assets/studio/tools.js")),
-              ("studio/studio.html", ('href="/studio/tools"',))),
+        page=(("settings/settings.html", ('id="tool-list"', 'id="tool-form"', 'id="tool-entries"', 'data-section="tools"',
+                                          "/assets/settings/tools.js")),),
         mcp_hidden=("save_stdio_tool_source",),
     ),
     Capability(
