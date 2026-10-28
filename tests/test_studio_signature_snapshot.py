@@ -10,6 +10,11 @@
 确定性：版本号与方案号来自 ``uuid4``，测试期间替换为递增计数；``studio.now`` 固定；
 分镜媒体文件的 mtime 固定（``ShotMedia.identity`` 含 mtime）；任务目录、data_dir 等
 绝对路径不进入签名（``portable_parameters`` 相对化）。
+
+平台绑定：fixture 素材由平台 ffmpeg 编码，其内容哈希（source_id → segment/索引指纹 →
+recall 参数）与切片文件体积（``ShotMedia.identity`` → render 签名）随 ffmpeg 构建变化，
+逐字节比对只在生成快照的基线平台（darwin）成立。其他平台跳过这些环境绑定键、把内容
+寻址 id 规范化为占位符后比较其余内容，结构与稳定值的回归仍会被捕获。
 """
 
 from __future__ import annotations
@@ -17,6 +22,7 @@ from __future__ import annotations
 import itertools
 import json
 import os
+import re
 import sys
 import uuid
 from pathlib import Path
@@ -38,6 +44,29 @@ SNAPSHOT = Path(__file__).parent / "fixtures" / "studio_signatures.json"
 UPDATE = os.environ.get("MINDEX_UPDATE_SNAPSHOTS") == "1"
 FIXED_MTIME = 1_700_000_000
 VERSION_KEYS = {"anchor_ref", "tts_version", "recall_version"}
+BASELINE_PLATFORM = "darwin"
+# 环境绑定键：recall 参数含活动索引 index_id（素材清单指纹）；render payload 含
+# ShotMedia.identity（切片体积）；select:b/c 的人工区间与锚点含 source/segment 哈希。
+ENV_BOUND_KEYS = re.compile(r"^(recall|render|select:[bc])")
+HEX_ID = re.compile(r"^[0-9a-f]{20,64}$")
+
+
+def normalized_ids(value):
+    """内容寻址 id（source/segment/resource 哈希）→ 按首次出现顺序的占位符。"""
+    mapping = {}
+
+    def walk(item):
+        if isinstance(item, dict):
+            return {key: walk(entry) for key, entry in item.items()}
+        if isinstance(item, list):
+            return [walk(entry) for entry in item]
+        if isinstance(item, str) and HEX_ID.match(item):
+            if item not in mapping:
+                mapping[item] = f"<id{len(mapping)}>"
+            return mapping[item]
+        return item
+
+    return walk(value)
 
 
 def check_snapshot(name, value):
@@ -51,6 +80,20 @@ def check_snapshot(name, value):
         return
     assert name in data, f"快照 {name} 缺失：用 MINDEX_UPDATE_SNAPSHOTS=1 在重构前的代码上生成"
     expected = data[name]
+    if sys.platform != BASELINE_PLATFORM:
+        if name == "signatures":
+            value = {key: entry for key, entry in value.items() if not ENV_BOUND_KEYS.match(key)}
+            expected = {key: entry for key, entry in expected.items() if not ENV_BOUND_KEYS.match(key)}
+            # preflight 的 revision/token 是覆盖方案内容的指纹（含内容寻址 id，跨平台必然不同）；
+            # 非基线平台比较其余全部字段（含逐镜 version id——它们跨平台一致）。
+            for entries in (value, expected):
+                for key, entry in entries.items():
+                    if isinstance(entry, dict):
+                        entries[key] = {k: v for k, v in entry.items() if k not in ("revision", "token")}
+        else:
+            value, expected = normalized_ids(value), normalized_ids(expected)
+        assert value == expected, f"快照 {name} 在非基线平台的规范化比对不一致"
+        return
     if isinstance(value, dict):
         assert sorted(value) == sorted(expected)
         for key in value:

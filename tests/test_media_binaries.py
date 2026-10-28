@@ -50,8 +50,11 @@ def test_build_uses_configured_binaries_without_path(media_config, monkeypatch, 
     log = tmp_path / "calls.log"
     monkeypatch.setenv("MINDEX_FFMPEG", str(wrapper(tmp_path, "ffmpeg", log)))
     monkeypatch.setenv("MINDEX_FFPROBE", str(wrapper(tmp_path, "ffprobe", log)))
-    monkeypatch.setenv("PATH", "/usr/bin:/bin")
-    assert shutil.which("ffmpeg") is None
+    # 空 PATH：Linux CI 的 ffmpeg 就装在 /usr/bin，不能用系统目录构造「PATH 里没有 ffmpeg」。
+    empty = tmp_path / "empty-path"
+    empty.mkdir()
+    monkeypatch.setenv("PATH", str(empty))
+    assert shutil.which("ffmpeg") is None and shutil.which("ffprobe") is None
     assert ws.specification(media_config, job_id, w, p, "compose")["signature"] == before
     w, p = run(media_config, job_id, w, p, images=FakeImageGenerator())
     assert w["builds"][-1]["status"] == "complete", w["builds"][-1]

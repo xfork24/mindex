@@ -26,8 +26,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 安装 ffmpeg
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+      - name: 安装 ffmpeg 与中文字体
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg fonts-noto-cjk
 
       - uses: actions/setup-node@v4
         with:
@@ -39,7 +39,8 @@ jobs:
           enable-cache: true
 
       - name: 安装依赖
-        run: uv sync --extra dev
+        # person extra（supervision/av）供完整回归的人物库端到端用例使用（docs/persons.md）
+        run: uv sync --extra dev --extra person
 
       - name: ruff
         run: uv run ruff check backend/src tests
