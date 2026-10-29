@@ -14,7 +14,7 @@ fi
 uv pip install --python .venv-detector/bin/python -r deploy/detector-local.txt
 # 仅安装服务所需依赖，不向此环境引入 Chroma、ASR 或人物依赖。
 uv pip install --python .venv-detector/bin/python --no-deps -e .
-.venv-detector/bin/python scripts/setup_transnet_weights.py
+.venv-detector/bin/python scripts/download_transnet_weights.py
 export MINDEX_TRANSNET_DIR="${MINDEX_TRANSNET_DIR:-${PROJECT_DIR}/models/TransNetV2/inference}"
 export MINDEX_TRANSNET_DEVICE=cpu
 export TF_NUM_INTRAOP_THREADS="${TF_NUM_INTRAOP_THREADS:-4}"
