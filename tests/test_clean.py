@@ -279,12 +279,12 @@ def test_index_versions_retention(tmp_path):
     config_path = make_config(tmp_path)
     root = tmp_path / "data"
     store = Store(root)
-    # active=最旧 v1；最近两个非活动 ready 是 v4/v3；v2 应删；v5 building 应保留。
+    # active=最旧 v1；最近两个非活动 ready 是 v4/v3；v2 应删；v5 building（7 天内）应保留。
     seed_index_version(store, "v1", "2026-01-01 00:00:00")
     seed_index_version(store, "v2", "2026-01-02 00:00:00")
     seed_index_version(store, "v3", "2026-01-03 00:00:00")
     seed_index_version(store, "v4", "2026-01-04 00:00:00")
-    seed_index_version(store, "v5", "2026-01-05 00:00:00", status="building")
+    seed_index_version(store, "v5", _recent(days=1), status="building")
     with store.connect() as db:
         db.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('active','v1')")
         db.execute("INSERT OR REPLACE INTO search_releases(id,content_id,person_id) "
@@ -458,3 +458,216 @@ def test_subtitle_cache_keeps_uploads(tmp_path):
 
     assert not stale.exists()
     assert upload.exists(), "用户上传字幕原件永不清理"
+
+
+# ---------------------------------------------------------------- chroma 孤儿目录 / 超期 building / person_features / VACUUM
+
+
+def _recent(days: int = 1) -> str:
+    return (datetime.now(UTC) - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _segment_dirs_of(root: Path, collection: str) -> list[str]:
+    import sqlite3
+
+    with sqlite3.connect(root / "chroma" / "chroma.sqlite3") as db:
+        ids = [row[0] for row in db.execute(
+            "SELECT s.id FROM segments s JOIN collections c ON s.collection=c.id WHERE c.name=?",
+            (collection,))]
+    # 每个集合有 VECTOR/METADATA 两个 segment，只有 VECTOR 落 HNSW 目录
+    return [sid for sid in ids if (root / "chroma" / sid).is_dir()]
+
+
+def test_chroma_orphan_segments_removed(tmp_path):
+    config_path = make_config(tmp_path)
+    root = tmp_path / "data"
+    store = Store(root)
+    seed_index_version(store, "v1", "2026-01-01 00:00:00")
+    with store.connect() as db:
+        db.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('active','v1')")
+    # 模拟历史 delete_collection 只删行不删目录的残留：伪造一个不在 segments 表里的 UUID 目录
+    orphan = root / "chroma" / "00000000-0000-4000-8000-000000000000"
+    (orphan / "sub").mkdir(parents=True)
+    (orphan / "sub" / "data_level0.bin").write_bytes(b"x" * 4096)
+    live = _segment_dirs_of(root, "idx-v1")
+
+    report = report_of(invoke(config_path))  # 预览不删
+    names = categories(report)
+    assert [item["path"] for item in names["chroma_orphan_segments"]["items"]] == [
+        f"chroma/{orphan.name}"]
+    assert names["chroma_orphan_segments"]["level"] == "A"
+    assert names["chroma_orphan_segments"]["bytes"] == 4096
+    assert orphan.exists()
+
+    report_of(invoke(config_path, "--apply"))
+
+    assert not orphan.exists(), "孤儿 HNSW 目录应被删除"
+    for name in live:
+        assert (root / "chroma" / name).is_dir(), "存活集合的 segment 目录不能动"
+
+
+def test_stale_building_version_pruned_with_segment_dirs(tmp_path):
+    config_path = make_config(tmp_path)
+    root = tmp_path / "data"
+    store = Store(root)
+    seed_index_version(store, "v1", "2026-01-01 00:00:00")
+    seed_index_version(store, "vstale", "2026-01-02 00:00:00", status="building")
+    seed_index_version(store, "vnew", _recent(days=1), status="building")
+    with store.connect() as db:
+        db.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('active','v1')")
+    stale_dirs = _segment_dirs_of(root, "idx-vstale")
+
+    report = report_of(invoke(config_path, "--apply"))
+
+    names = categories(report)
+    paths = [item["path"] for item in names["index_versions"]["items"]]
+    assert paths == ["vstale"], "超期 building 应删除，7 天内的应保留"
+    assert set(names["index_versions"]["kept"]["versions"]) == {"v1", "vnew"}
+    assert store.one("SELECT * FROM index_versions WHERE id='vstale'") is None
+    for name in stale_dirs:
+        assert not (root / "chroma" / name).exists(), "版本删除应连带回收 segment 目录"
+
+
+def test_orphan_person_features_pruned(tmp_path):
+    config_path = make_config(tmp_path)
+    root = tmp_path / "data"
+    store = Store(root)
+    with store.connect() as db:
+        db.execute("INSERT OR REPLACE INTO sources(id,name,path,media,layout_key,prepared) "
+                   "VALUES('s1','s1','sources/s1/a.mp4','{}','layout',1)")
+        db.executemany(
+            "INSERT OR REPLACE INTO person_features(id,source_id,space,kind,data) VALUES(?,?,?,?,?)",
+            [("feat-alive", "s1", "{}", "shot", '"x"'),
+             ("feat-orphan", "s-gone", "{}", "shot", '"x"'),
+             ("feat-ref", None, "{}", "reference", '"x"')])
+
+    report = report_of(invoke(config_path))
+
+    names = categories(report)
+    assert [item["path"] for item in names["orphan_person_features"]["items"]] == [
+        "person_features#feat-orphan"]
+    assert names["orphan_person_features"]["level"] == "A"
+
+    report_of(invoke(config_path, "--apply"))
+
+    ids = {row["id"] for row in store.rows("SELECT id FROM person_features")}
+    assert ids == {"feat-alive", "feat-ref"}, "在源特征与 reference（source_id 为空）保留"
+
+
+def test_vacuum_shrinks_metadata_database(tmp_path):
+    config_path = make_config(tmp_path)
+    root = tmp_path / "data"
+    store = Store(root)
+    with store.connect() as db:
+        db.executemany(
+            "INSERT OR REPLACE INTO person_features(id,source_id,space,kind,data) VALUES(?,?,?,?,?)",
+            [(f"big-{i}", None, "{}", "reference", "x" * 200_000) for i in range(50)])
+        db.execute("DELETE FROM person_features")
+
+    report = report_of(invoke(config_path, "--apply", "--vacuum"))
+
+    entries = {entry["path"]: entry for entry in report["vacuum"]["databases"]}
+    entry = entries["metadata.sqlite3"]
+    assert entry["bytes_after"] < entry["bytes_before"], "VACUUM 应回收已删行的库文件空间"
+    assert (root / "metadata.sqlite3").stat().st_size < entry["bytes_before"]
+
+
+def test_vacuum_preview_reports_sizes_without_running(tmp_path):
+    config_path = make_config(tmp_path)
+    Store(tmp_path / "data")
+
+    report = report_of(invoke(config_path, "--vacuum"))
+
+    entries = {entry["path"]: entry for entry in report["vacuum"]["databases"]}
+    assert "bytes_before" in entries["metadata.sqlite3"]
+    assert "bytes_after" not in entries["metadata.sqlite3"]
+
+
+def test_vacuum_busy_database_skips_without_failure(tmp_path):
+    config_path = make_config(tmp_path)
+    root = tmp_path / "data"
+    store = Store(root)
+    seed_index_version(store, "v1", "2026-01-01 00:00:00")
+    with store.connect() as db:
+        db.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('active','v1')")
+    import sqlite3
+
+    blocker = sqlite3.connect(root / "chroma" / "chroma.sqlite3", timeout=1)
+    blocker.execute("BEGIN EXCLUSIVE")
+    try:
+        report = report_of(invoke(config_path, "--apply", "--vacuum"))
+    finally:
+        blocker.rollback()
+        blocker.close()
+
+    entries = {entry["path"]: entry for entry in report["vacuum"]["databases"]}
+    assert "bytes_after" in entries["metadata.sqlite3"], "未被占用的库正常收缩"
+    assert entries["chroma/chroma.sqlite3"].get("error"), "被占用的库应记 error 而非失败退出"
+
+
+# ---------------------------------------------------------------- --days 阈值覆盖
+
+
+def test_days_replaces_age_thresholds(tmp_path):
+    config_path = make_config(tmp_path)
+    root = tmp_path / "data"
+    store = Store(root)
+    fresh = write(root / "cache" / "shot-media" / "abc.mp4")  # mtime = 现在
+    just_finished = (datetime.now(UTC) - timedelta(seconds=5)).strftime("%Y-%m-%d %H:%M:%S")
+    with store.connect() as db:
+        db.execute("INSERT INTO runs(stage,status,finished_at) VALUES('detect','complete',?)",
+                   (just_finished,))
+
+    report = report_of(invoke(config_path, "--apply", "--days", "7"))
+
+    assert fresh.exists(), "--days 7 保留 7 天内的新缓存"
+    assert "shot_media_cache" not in categories(report)
+    assert any(row["stage"] == "detect" for row in store.rows("SELECT stage FROM runs")), \
+        "--days 7 不动刚完成的 runs 记录"
+
+    report = report_of(invoke(config_path, "--apply", "--days", "0"))
+
+    assert not fresh.exists(), "--days 0 清空全部按龄过期项"
+    assert categories(report)["shot_media_cache"]["result"] == {"deleted": 1}
+    assert not [row for row in store.rows("SELECT stage FROM runs") if row["stage"] == "detect"], \
+        "--days 0 连刚完成的 runs 记录也按龄清掉"
+
+
+def test_days_zero_keeps_hard_protections(tmp_path):
+    config_path = make_config(tmp_path)
+    root = tmp_path / "data"
+    store = Store(root)
+    upload = write(root / "subtitles" / "s1" / "uploads" / "sha" / "subtitle.srt")
+    with store.connect() as db:
+        db.execute("INSERT OR REPLACE INTO channel_data VALUES('s1','dialogue','p-now',"
+                   "'complete','{}',CURRENT_TIMESTAMP)")
+    dialogue_now = age(write(root / "dialogue" / "s1" / "p-now" / "0.json"), 40)
+    seed_index_version(store, "v1", "2026-01-01 00:00:00")
+    with store.connect() as db:
+        db.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('active','v1')")
+
+    result = invoke(config_path, "--apply", "--days", "0")
+    assert result.exit_code == 0, result.output
+
+    assert upload.exists(), "uploads 用户原件永不清理"
+    assert dialogue_now.exists(), "现行对白 profile 即使 --days 0 也保留"
+    assert store.one("SELECT * FROM index_versions WHERE id='v1'") is not None, "活动索引不受影响"
+
+    import chromadb
+    from chromadb.config import Settings
+
+    client = chromadb.PersistentClient(
+        path=str(root / "chroma"), settings=Settings(anonymized_telemetry=False)
+    )
+    client.get_collection("idx-v1", embedding_function=None)
+
+
+def test_days_preview_deletes_nothing(tmp_path):
+    config_path = make_config(tmp_path)
+    root = tmp_path / "data"
+    fresh = write(root / "cache" / "shot-media" / "abc.mp4")
+
+    report = report_of(invoke(config_path, "--days", "0"))
+
+    assert fresh.exists()
+    assert categories(report)["shot_media_cache"]["item_count"] == 1

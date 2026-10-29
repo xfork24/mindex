@@ -596,37 +596,66 @@ def clean(
     apply: Annotated[
         bool, typer.Option("--apply", help="实际删除扫描到的可回收数据；缺省只预览 JSON，不删除候选。")
     ] = False,
+    vacuum: Annotated[
+        bool, typer.Option(
+            "--vacuum",
+            help="配合 --apply 在删除完成后对 metadata 与 chroma 库文件执行 VACUUM 收缩；"
+                 "库被其他连接占用（如 serve）时单库跳过并提示，不失败退出。"
+                 "单独使用只报告库大小与建议。",
+        )
+    ] = False,
+    days: Annotated[
+        int | None, typer.Option(
+            "--days", min=0,
+            help="把本次运行的全部时间阈值（clean.*_max_age_days、超期 building 与助手附件 "
+                 "TTL）临时替换为 N 天：更小更激进，--days 0 即清空全部按龄过期项；不改配置文件。"
+                 "硬保护不受影响：现行检查点、活动与保留索引版本、引用中的 attempt、上传宽限与 "
+                 "uploads 原件。注意旧转写/分析检查点删除后重生成需 ASR 重听/LLM 重算。",
+        )
+    ] = None,
 ):
     """扫描磁盘可回收项并输出 JSON 报告；默认仅预览。
 
     加 --apply 才实际删除。保留数量与过期天数在 YAML 的 clean 节配置，
     CLI 不提供按类别删除或修改过期阈值的选项。
 
-    A 级：临时残留、孤儿媒体/参考图/音色、人物冗余展示帧；
-    部分上传与未注册原片残留受 clean.temp_grace_hours 宽限期保护。
+    A 级：临时残留、孤儿媒体/参考图/音色、人物冗余展示帧、源已删的人物特征
+    缓存行、chroma 孤儿 HNSW segment 目录；部分上传与未注册原片残留受
+    clean.temp_grace_hours 宽限期保护。
 
-    B 级：按策略清理旧索引、旧指纹检查点、媒体缓存、报告、运行记录，
-    以及 Studio 预览、旧 attempt 和导出 ZIP。
-    保留活动索引、全部非 ready 索引和最近 clean.index_keep_versions 个非活动 ready 版本。
-    删除旧索引后失去该版本的回退与向量复用能力。
+    B 级：按策略清理旧索引（含超期 building 版本）、旧指纹检查点、媒体缓存、
+    报告、运行记录，以及 Studio 预览、旧 attempt 和导出 ZIP。
+    保留活动索引、clean.index_building_max_age_days 天内的 building 和最近
+    clean.index_keep_versions 个非活动 ready 版本。
+    删除旧索引后失去该版本的回退与向量复用能力，超期 building 另失去同
+    spec 跨运行续跑。
 
-    C 级：模型缓存、e2e/验证产物与数据库备份只在 notes 报告，不自动删除，也不执行 VACUUM。
+    C 级：模型缓存、e2e/验证产物与数据库备份只在 notes 报告，不自动删除；
+    库文件空间回收用 --apply --vacuum 显式执行。
 
-    输出 JSON：categories 为逐类别结果，total 为候选数量/字节数，notes 为保留项建议。
-    请检查类别的 error/skipped，单类别错误不一定使整体退出码为 1。
-    管线或索引锁冲突退出 1；Studio 锁冲突只跳过该部分。大规模清理前建议停服。
+    --days N 把本次运行的全部时间阈值（clean.*_max_age_days、超期 building 与
+    助手附件 TTL）临时替换为 N 天，不改配置文件；--days 0 即清空全部按龄过期项。
+    硬保护不受影响：现行检查点、活动与保留索引版本、引用中的 attempt、上传宽限
+    与 uploads 原件。
+
+    输出 JSON：categories 为逐类别结果，total 为候选数量/字节数，notes 为保留项
+    建议，--vacuum 时另有 vacuum 字段。请检查类别的 error/skipped，单类别错误不一定
+    使整体退出码为 1。管线或索引锁冲突退出 1；Studio 锁冲突只跳过该部分。
+    大规模清理前建议停服。
 
     示例：
 
     \b
       mindex clean
       mindex clean --apply
+      mindex clean --apply --vacuum
+      mindex clean --apply --days 0
       mindex --config /路径/config.yaml --data-dir /路径/data clean
     """
     from mindex.maintenance.clean import CleanBusy, clean_library
 
     try:
-        print_json(clean_library(ctx.obj, apply=apply))
+        print_json(clean_library(ctx.obj, apply=apply, vacuum=vacuum, days=days))
     except CleanBusy as exc:
         typer.echo(str(exc))
         raise typer.Exit(1) from None

@@ -230,11 +230,12 @@ animate 签名只含 backend、model、`max_html_kb` 与提示词版本，不含
 
 ## `clean` — 磁盘清理（`mindex clean`）
 
-所有天数为 mtime 年龄；分级判定与锁行为详见 [cleanup.md](cleanup.md)。默认预览，`--apply` 才执行删除。
+所有天数为 mtime 年龄；分级判定与锁行为详见 [cleanup.md](cleanup.md)。默认预览，`--apply` 才执行删除；CLI `--days N` 可把全部 `*_days` 阈值临时替换为 N 天（不改本文件，硬保护不受影响）。
 
 | 键 | 类型 | 默认 | 说明 |
 |---|---|---|---|
-| `index_keep_versions` | int ≥1 | 2 | 除活动版本外额外保留的最近 ready 索引版本数（向量复用与回退来源）；building 一律保留 |
+| `index_keep_versions` | int ≥1 | 2 | 除活动版本外额外保留的最近 ready 索引版本数（向量复用与回退来源） |
+| `index_building_max_age_days` | int ≥1 | 7 | building 索引版本的保留天数：超期视为中断残留并入 `index_versions` 删除（真实构建远短于此）；删除即放弃同 spec 的跨运行续跑 |
 | `temp_grace_hours` | int ≥1 | 24 | 未注册上传文件 / 空上传目录 / 无记录助手附件目录与附件上传暂存的宽限小时数，防正在进行的上传 |
 | `transcripts_max_age_days` | int ≥1 | 30 | 旧 `asr_key` 转写块检查点保留天数（换配置后永不命中） |
 | `analysis_max_age_days` | int ≥1 | 30 | 旧分析 profile 的场景分组检查点保留天数 |

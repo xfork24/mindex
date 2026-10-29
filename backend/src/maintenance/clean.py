@@ -110,7 +110,10 @@ class Scan:
         if self._media is None:
             from mindex.maintenance.clean_index import retained_versions
 
-            retained = retained_versions(self.store, self.config.clean.index_keep_versions)
+            retained = retained_versions(
+                self.store, self.config.clean.index_keep_versions,
+                building_max_age_days=self.config.clean.index_building_max_age_days, now=self.now,
+            )
             references: set[str] = set()
             segment_ids: set[str] = set()
             for row in self.store.rows("SELECT id, path, thumbnail FROM segments"):
@@ -450,6 +453,37 @@ def orphan_person_png(scan: Scan) -> CleanAction | None:
         description="无引用计数的人物参考图/导入图 PNG",
         policy="与 delete_import_image 同口径：person_references.digest ∪ person_imports.images[].digest",
         items=items, execute=execute,
+    )
+
+
+def orphan_person_features(scan: Scan) -> CleanAction | None:
+    """源已删的人物特征缓存行（源删除接口的防御性兜底）。
+
+    reference 行（source_id 为空）天然保留。换人物模型产生的旧空间缓存不做
+    自动清理：clean 离线运行拿不到人物服务当前空间身份，无法安全判定死缓存
+    （总量在 notes 中报告，见 docs/cleanup.md C 级说明）。
+    """
+    rows = scan.store.rows(
+        "SELECT id, source_id, LENGTH(CAST(data AS BLOB)) AS bytes FROM person_features "
+        "WHERE source_id IS NOT NULL AND source_id NOT IN (SELECT id FROM sources)"
+    )
+    if not rows:
+        return None
+    ids = [(row["id"],) for row in rows]
+
+    def execute() -> dict:
+        with scan.store.connect() as db:
+            db.executemany("DELETE FROM person_features WHERE id=?", ids)
+        return {"deleted": len(ids)}
+
+    return CleanAction(
+        category="orphan_person_features", level="A", stage="pipeline",
+        description="人物特征缓存中源已删除的行",
+        policy="source_id 不在 sources 表即源删除后的遗留；source_id 为空的 reference 行保留；"
+               "换模型产生的旧空间缓存因离线拿不到人物空间身份不自动清理（C 级 notes 报告）",
+        items=[CleanItem(f"person_features#{row['id']}", row["bytes"], {"source_id": row["source_id"]})
+               for row in rows],
+        execute=execute,
     )
 
 
@@ -877,6 +911,7 @@ RULES: list[Callable[[Scan], CleanAction | None]] = [
     orphan_thumbnails,
     orphan_context,
     orphan_person_png,
+    orphan_person_features,
     person_frames,
     orphan_voices,
     orphan_sources,
@@ -899,8 +934,20 @@ def _all_rules() -> list[Callable[[Scan], CleanAction | None]]:
     return RULES + index_rules + studio_rules
 
 
-def clean_library(config: Config, *, apply: bool = False, now: datetime | None = None) -> dict:
-    """扫描（并可选执行）全部清理规则；返回统一 JSON 报告。"""
+def clean_library(config: Config, *, apply: bool = False, now: datetime | None = None,
+                  vacuum: bool = False, days: int | None = None) -> dict:
+    """扫描（并可选执行）全部清理规则；返回统一 JSON 报告。
+
+    vacuum=True 且 apply=True 时，删除执行完、锁释放后对 metadata 与 chroma
+    库文件执行 VACUUM；库被其他连接占用（如 serve 运行中）时单库记 error
+    跳过，整体不失败。仅传 vacuum 不传 apply 时只报告库大小与建议。
+
+    days 不为 None 时，把 clean 节全部 ``*_days`` 阈值与助手附件 TTL 临时替换为
+    该值（0 即清空全部按龄过期项）；硬保护（现行检查点、活动/保留索引版本、
+    上传宽限与 uploads 原件）不受影响，配置文件不被修改。
+    """
+    if days is not None:
+        config = _with_days(config, days)
     store = Store(config.data_dir)
     scan = Scan(config, store, now or datetime.now(UTC))
     actions: list[CleanAction] = []
@@ -915,7 +962,56 @@ def clean_library(config: Config, *, apply: bool = False, now: datetime | None =
     if apply:
         with store.run("clean"):
             _apply(config, store, actions)
-    return _report(store, actions, applied=apply, scanned_at=scan.now)
+    report = _report(store, actions, applied=apply, scanned_at=scan.now)
+    if vacuum:
+        report["vacuum"] = _vacuum_databases(store, applied=apply)
+    return report
+
+
+# VACUUM 收缩的库文件（相对 data 根）；缺省不存在的跳过
+VACUUM_DATABASES = ("metadata.sqlite3", "chroma/chroma.sqlite3")
+
+
+def _with_days(config: Config, days: int) -> Config:
+    """构造本次运行的阈值覆盖：clean 节所有 ``*_days`` 字段替换为 days，助手附件
+    TTL 换算为小时。
+
+    ``model_copy`` 不重跑校验，days=0 可越过字段的 ge=1 约束（这正是清空语义）；
+    保护类阈值（``temp_grace_hours`` 等 ``*_hours``）不在 ``*_days`` 之列，不覆盖。
+    """
+    clean_type = type(config.clean)
+    overrides = {name: days for name in clean_type.model_fields if name.endswith("_days")}
+    agent = config.agent.model_copy(update={"attachment_ttl_hours": days * 24})
+    return config.model_copy(update={
+        "clean": config.clean.model_copy(update=overrides), "agent": agent})
+
+
+def _vacuum_databases(store: Store, *, applied: bool) -> dict:
+    """对库文件执行 VACUUM 回收已删行的空间；预览只报大小，被占用单库跳过。"""
+    import sqlite3
+
+    databases = []
+    for label in VACUUM_DATABASES:
+        path = store.root / label
+        if not path.is_file():
+            continue
+        entry: dict = {"path": label, "bytes_before": path.stat().st_size}
+        if not applied:
+            entry["advice"] = "预览不执行；--apply --vacuum 时收缩库文件（需无其他连接）"
+        else:
+            try:
+                db = sqlite3.connect(path, timeout=5)
+                try:
+                    db.execute("VACUUM")
+                finally:
+                    db.close()
+                entry["bytes_after"] = path.stat().st_size
+            except sqlite3.Error as exc:
+                entry["error"] = str(exc)
+                entry["advice"] = ("库被其他连接占用（如 serve 运行中）：停服后重跑 "
+                                   "mindex clean --apply --vacuum 或手动执行 VACUUM")
+        databases.append(entry)
+    return {"applied": applied, "databases": databases}
 
 
 def _apply(config: Config, store: Store, actions: list[CleanAction]) -> None:
@@ -996,6 +1092,15 @@ def _notes(store: Store) -> list[dict]:
     if (store.root / "metadata.sqlite3").is_file():
         notes.append({
             "path": "metadata.sqlite3", "bytes": 0,
-            "advice": "大量删除后可停服执行 sqlite3 metadata.sqlite3 'VACUUM' 回收库文件空间（需独占库）",
+            "advice": "大量删除后可用 mindex clean --apply --vacuum 回收库文件空间"
+                      "（需独占库，被 serve 占用时单库跳过并提示）",
+        })
+    features = store.rows("SELECT kind, COUNT(*) AS n FROM person_features GROUP BY kind")
+    if features:
+        counts = " / ".join(f"{row['kind']} {row['n']}" for row in features)
+        notes.append({
+            "path": "person_features", "bytes": 0,
+            "advice": f"人物特征缓存（{counts}，C 级待调整）：换模型产生的旧空间缓存 clean 离线"
+                      "拿不到人物空间身份，无法安全判定，删除请人工决定；删除代价是人物重扫全量 GPU 推理",
         })
     return notes

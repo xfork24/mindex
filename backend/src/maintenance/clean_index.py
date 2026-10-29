@@ -1,34 +1,94 @@
-"""索引版本保留与删除：活动、building 与最近 N 个非活动 ready 一律保留。
+"""索引版本保留与删除：活动、未超期 building 与最近 N 个非活动 ready 一律保留。
 
-删除一个版本 = chroma 集合 + representations/index_members/index_versions 行 +
-index_report 设置键 + 关联检索组合（search_releases，其人物快照无其他引用则连带删除）。
-删除后该版本不再可用于 indexes activate 回退，也失去增量发布的向量复用来源。
+删除一个版本 = chroma 集合（含 segment HNSW 目录）+ representations/index_members/
+index_versions 行 + index_report 设置键 + 关联检索组合（search_releases，其人物快照
+无其他引用则连带删除）。删除后该版本不再可用于 indexes activate 回退，也失去增量
+发布的向量复用来源；超期 building 版本被删后，同 spec 的跨运行续跑
+（INSERT OR IGNORE 确定性 id）同样失效。
 """
 
 from __future__ import annotations
 
 import logging
+import re
+import shutil
+import sqlite3
+from datetime import UTC, datetime, timedelta
 
 from mindex.maintenance.clean import CleanAction, CleanItem, Scan
 
 log = logging.getLogger(__name__)
 
+# chroma 顶层 segment 目录名为 UUID；非 UUID 形态的目录与库文件不进孤儿判定
+UUID_DIR = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
-def retained_versions(store, keep_recent: int) -> dict:
-    """返回 {"active", "keep", "deletable"}：keep = 活动 ∪ 全部非 ready ∪ 最近 N 个
-    其余 ready；deletable = 其余 ready 版本（按 created_at 新到旧）。"""
+
+def retained_versions(store, keep_recent: int, *, building_max_age_days: int | None = None,
+                      now: datetime | None = None) -> dict:
+    """返回 {"active", "keep", "deletable"}：keep = 活动 ∪ 未超期 building ∪ 其他非
+    ready 状态 ∪ 最近 N 个其余 ready；deletable = 其余 ready + 超期 building
+    （按 created_at 新到旧）。building_max_age_days 为 None 时 building 全保留（旧行为）。"""
     active = store.one("SELECT value FROM settings WHERE key='active'")
     active_id = active["value"] if active else None
     versions = store.rows(
         "SELECT id, status, created_at FROM index_versions ORDER BY created_at DESC, id"
     )
+    stale_cutoff = None
+    if building_max_age_days is not None:
+        cutoff = (now or datetime.now(UTC)) - timedelta(days=building_max_age_days)
+        stale_cutoff = cutoff.strftime("%Y-%m-%d %H:%M:%S")
+    stale_building = [
+        v for v in versions
+        if v["status"] == "building" and stale_cutoff is not None and v["created_at"] < stale_cutoff
+    ]
     inactive_ready = [v for v in versions if v["status"] == "ready" and v["id"] != active_id]
-    keep = {v["id"] for v in versions if v["status"] != "ready"}
+    keep = {v["id"] for v in versions if v["status"] != "ready"} - {v["id"] for v in stale_building}
     keep |= {v["id"] for v in inactive_ready[: max(keep_recent, 0)]}
     if active_id:
         keep.add(active_id)
-    deletable = [v for v in inactive_ready if v["id"] not in keep]
+    deletable = [v for v in inactive_ready if v["id"] not in keep] + stale_building
     return {"active": active_id, "keep": sorted(keep), "deletable": deletable}
+
+
+def _chroma_db(store) -> object | None:
+    database = store.root / "chroma" / "chroma.sqlite3"
+    if not database.is_file():
+        return None
+    return database
+
+
+def _collection_segment_dirs(store, collection_name: str) -> list[str]:
+    """集合名 → 其 segment 目录名列表（删除集合前读取，删完连带回收）。"""
+    database = _chroma_db(store)
+    if database is None:
+        return []
+    try:
+        with sqlite3.connect(database) as db:
+            return [row[0] for row in db.execute(
+                "SELECT s.id FROM segments s JOIN collections c ON s.collection=c.id "
+                "WHERE c.name=?", (collection_name,))]
+    except sqlite3.Error:
+        return []
+
+
+def _orphan_segment_dirs(store) -> list[tuple[str, int]]:
+    """(目录名, 字节) 列表：chroma 顶层 UUID 目录不在 segments 表中即孤儿。"""
+    root = store.root / "chroma"
+    database = _chroma_db(store)
+    if database is None or not root.is_dir():
+        return []
+    try:
+        with sqlite3.connect(database) as db:
+            live = {row[0] for row in db.execute("SELECT id FROM segments")}
+    except sqlite3.Error:
+        return []
+    orphans = []
+    for entry in sorted(root.iterdir()):
+        if not entry.is_dir() or not UUID_DIR.match(entry.name) or entry.name in live:
+            continue
+        total = sum(path.stat().st_size for path in entry.rglob("*") if path.is_file())
+        orphans.append((entry.name, total))
+    return orphans
 
 
 def delete_index_version(store, index_id: str) -> dict:
@@ -47,10 +107,14 @@ def delete_index_version(store, index_id: str) -> dict:
     client = chromadb.PersistentClient(
         path=str(store.root / "chroma"), settings=Settings(anonymized_telemetry=False)
     )
+    # delete_collection 只删 sqlite 行不回收 HNSW 目录：先记目录，集合删成后连带删除
+    stale_dirs = _collection_segment_dirs(store, "idx-" + index_id)
     try:
         client.delete_collection("idx-" + index_id)
     except Exception as exc:  # noqa: BLE001 — 旧集合可能已被清理
         log.warning("索引 %s 的向量集合删除跳过：%s", index_id, exc)
+    for name in stale_dirs:
+        shutil.rmtree(store.root / "chroma" / name, ignore_errors=True)
     active_release = store.one("SELECT value FROM settings WHERE key='active.release'")
     with store.connect() as db:
         db.execute("DELETE FROM representations WHERE index_id=?", (index_id,))
@@ -76,6 +140,7 @@ def index_versions_rule(scan: Scan) -> CleanAction | None:
     if not deletable:
         return None
     keep_recent = scan.config.clean.index_keep_versions
+    building_days = scan.config.clean.index_building_max_age_days
     items = []
     for version in deletable:
         members = scan.store.one(
@@ -87,6 +152,7 @@ def index_versions_rule(scan: Scan) -> CleanAction | None:
         items.append(CleanItem(version["id"], 0, {
             "members": members, "representations": representations,
             "created_at": version["created_at"],
+            "stale_building": version["status"] == "building",
         }))
 
     def execute() -> dict:
@@ -94,12 +160,42 @@ def index_versions_rule(scan: Scan) -> CleanAction | None:
 
     return CleanAction(
         category="index_versions", level="B", stage="pipeline",
-        description=f"非活动索引版本（保留活动 + 最近 {keep_recent} 个 ready + 全部 building）",
-        policy="删除 chroma 集合与 representations/index_members/index_versions 行、index_report "
-               "键及关联检索组合；向量字节数无法按版本精确统计（以 chroma 整体大小为回收上限参考）；"
-               "删除后失去该版本的回退与向量复用能力",
+        description=f"非活动索引版本（保留活动 + 最近 {keep_recent} 个 ready + "
+                    f"{building_days} 天内的 building）",
+        policy="删除 chroma 集合（含 segment HNSW 目录）与 representations/index_members/"
+               "index_versions 行、index_report 键及关联检索组合；向量字节数无法按版本精确统计"
+               "（以 chroma 整体大小为回收上限参考）；删除后失去该版本的回退与向量复用能力，"
+               f"超期 building（{building_days} 天）另失去同 spec 跨运行续跑",
         items=items, kept={"versions": retained["keep"]}, execute=execute,
     )
 
 
-RULES = [index_versions_rule]
+def chroma_orphan_segments(scan: Scan) -> CleanAction | None:
+    """chroma 删除集合不回收 HNSW segment 目录的残留（A 级兜底）。
+
+    历史上 delete_collection 只删 sqlite 行：集合已不存在而目录仍在的，即孤儿。
+    与 index_versions 同 stage，执行段持 index-write 锁与索引构建互斥；正在写入
+    的集合其 segments 行先于目录落盘，绝不会被误判。
+    """
+    orphans = _orphan_segment_dirs(scan.store)
+    if not orphans:
+        return None
+
+    def execute() -> dict:
+        # 扫描在持锁前完成：执行段在锁内重读引用，期间刚被复活的目录不删
+        removed = [name for name, _ in _orphan_segment_dirs(scan.store)]
+        for name in removed:
+            shutil.rmtree(scan.store.root / "chroma" / name, ignore_errors=True)
+        return {"deleted": len(removed)}
+
+    return CleanAction(
+        category="chroma_orphan_segments", level="A", stage="pipeline",
+        description="chroma 孤儿 HNSW segment 目录",
+        policy="顶层 UUID 目录不在 chroma segments 表中即集合删除后的残留；apply 段持 "
+               "index-write 锁重读引用后删除；非 UUID 目录与 chroma.sqlite3 不触碰",
+        items=[CleanItem(f"chroma/{name}", size) for name, size in orphans],
+        execute=execute,
+    )
+
+
+RULES = [index_versions_rule, chroma_orphan_segments]

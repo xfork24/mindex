@@ -9,7 +9,17 @@
 ```bash
 uv run mindex clean             # 预览
 uv run mindex clean --apply     # 实际删除
+uv run mindex clean --apply --vacuum  # 删除后收缩 metadata/chroma 库文件
+uv run mindex clean --apply --days 0  # 清空全部按龄过期项（阈值临时替换为 0 天）
 ```
+
+## 阈值临时覆盖（--days）
+
+`--days N` 把本次运行的全部时间阈值临时替换为 N 天，不改配置文件：clean 节所有
+`*_max_age_days`（含超期 building 版本）与助手附件 TTL（换算 N×24 小时）。N 比配置
+小更激进（`--days 0` 即清空全部按龄过期项），比配置大更保守。**硬保护不受影响**：
+现行 profile 检查点、活动与保留索引版本、引用中/当前 attempt、上传宽限期与 `uploads/`
+用户原件。注意旧转写/分析检查点被删后重生成需 ASR 重听/LLM 重算。
 
 输出为统一 JSON：`categories`（每类 `category/level/description/policy/item_count/bytes/items
 （前 20 条）/kept/result/error/skipped`）、`notes`（C 级待调整项与建议）、`total`。索引版本与
@@ -26,14 +36,16 @@ runs 行的 bytes 无法精确统计，诚实输出 0 并在 policy 说明。
 | `orphan_context` | `context/*.mp4` 无对应 segment 行 | 文件名即 segment id；下次访问秒级重转码 |
 | `person_frames` | 人物冗余展示帧 | 已确认镜头每个演员/角色保留真实分最高的 accepted 帧；未确认镜头保留全部证据帧；持锁后重算引用；旧库先执行 `persons migrate-frames` 压缩 |
 | `orphan_person_png` | references/imports 下无引用 PNG | `person_references.digest` ∪ `person_imports.images[].digest` 引用计数（与删除接口同口径） |
+| `orphan_person_features` | `person_features` 中源已删的缓存行 | `source_id` 非空且不在 sources 表（源删除接口的防御性兜底）；`source_id` 为空的 reference 行保留；换模型产生的旧空间缓存不自动清理（C 级 notes 报告总量，clean 离线拿不到人物空间身份） |
 | `orphan_voices` | voices 下无 `voices.sample_path` 引用的文件 | 含 `pending-*` 失败残留与试听文件（可再生） |
 | `orphan_sources` | sources 根下未注册文件 | 不在 sources 表且超宽限期；已注册原片永不触碰 |
+| `chroma_orphan_segments` | chroma 顶层不在 segments 表中的 UUID 目录 | chroma 的 delete_collection 只删 sqlite 行不回收 HNSW 目录；集合已不存在的目录即残留，字节数精确统计；apply 段持 index-write 锁重读引用后删除（正在写入的集合其 segments 行先于目录落盘，不会被误判）。版本删除（`delete_index_version`）自身也连带回收该版本的 segment 目录，本规则兜底历史残留 |
 
 ## B 级：策略过期（可能要用，超期才删）
 
 | 类别 | 范围 | 保留规则 |
 |---|---|---|
-| `index_versions` | 非活动索引版本 | 保留活动 + 最近 `index_keep_versions`（默认 2）个 ready + **全部 building**；删除 = chroma 集合 + representations/index_members/index_versions 行 + `index_report.` 键 + 关联检索组合（其人物快照无其他引用则连带删）。删除后失去该版本 `indexes activate` 回退能力与增量发布向量复用 |
+| `index_versions` | 非活动索引版本 | 保留活动 + 最近 `index_keep_versions`（默认 2）个 ready + **`index_building_max_age_days`（默认 7 天）内的 building**（超期视为中断残留并入删除，另失去同 spec 跨运行续跑）；删除 = chroma 集合（含 segment HNSW 目录）+ representations/index_members/index_versions 行 + `index_report.` 键 + 关联检索组合（其人物快照无其他引用则连带删）。删除后失去该版本 `indexes activate` 回退能力与增量发布向量复用 |
 | `transcript_checkpoints` | `transcripts/<源>/<asr_key>/` | 当前 asr_key 永不删（即使过期）；旧指纹超 `transcripts_max_age_days` 删（重生成 = ASR 重听） |
 | `analysis_checkpoints` | `analysis/<源>/<profile>/` | 当前 annotation_profile（分析配置 + 对白内容版本）永不删；旧 profile 超期删（重生成 = LLM 重算，最贵） |
 | `dialogue_checkpoints` | `dialogue/<源>/<profile>/` | 保留集 = `channel_data` 现行 dialogue profile（processing 行天然保护进行中任务） |
@@ -56,7 +68,16 @@ runs 行的 bytes 无法精确统计，诚实输出 0 并在 policy 说明。
 | `model-cache/` | 强制对齐 HF 模型缓存（1.7G），删除后下次 align 重新下载 |
 | `studio-verification/`、`e2e/`、`verification/` | 一次性人工验证产物，归档或删除请人工决定 |
 | `metadata.sqlite3.bak-*` | 人工数据库备份，确认无需回退后手动删除 |
-| VACUUM 建议 | 大量删除后可停服执行 `sqlite3 metadata.sqlite3 'VACUUM'` 回收库文件空间（需独占库，1.8G 库耗时较长）；`person_features` 等大表的回收依赖人物侧调整 |
+| `person_features` | 人物特征缓存总量（按 kind 报行数）：换模型产生的旧空间缓存 clean 离线拿不到人物空间身份，无法安全判定，删除请人工决定；删除代价是人物重扫全量 GPU 推理 |
+| VACUUM 建议 | 大量删除后可用 `mindex clean --apply --vacuum` 回收库文件空间（见下节）；此前为手动执行 `sqlite3 … 'VACUUM'` |
+
+## 库文件收缩（--vacuum）
+
+删除行不会缩小库文件。`mindex clean --apply --vacuum` 在全部删除执行完、锁释放**之后**，
+对 `metadata.sqlite3` 与 `chroma/chroma.sqlite3` 依次执行 `VACUUM`（结果在顶层 `vacuum`
+字段，含每库前后字节数）。VACUUM 需要无其他连接：库被占用（如 serve 运行中）时单库记
+`error` 跳过并提示停服重试，整体不失败退出。只传 `--vacuum` 不传 `--apply` 时仅报告库
+大小与建议。4G 级库收缩耗时数分钟，故不默认执行。
 
 ## 锁与并发
 

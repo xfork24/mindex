@@ -464,6 +464,9 @@ class CleanConfig(StrictModel):
 
     # 除活动版本外额外保留的最近 ready 索引版本数（向量复用与回退来源）
     index_keep_versions: int = Field(default=2, ge=1)
+    # building 版本视为中断残留的年龄：超期并入删除（真实构建远短于此；
+    # 删除即放弃同 spec 的跨运行续跑能力）
+    index_building_max_age_days: int = Field(default=7, ge=1)
     # 未注册上传文件的宽限小时数（防正在进行的上传）
     temp_grace_hours: int = Field(default=24, ge=1)
     # 旧配置指纹的检查点保留天数：转写 / 分析 / 对白
