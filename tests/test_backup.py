@@ -24,9 +24,10 @@ from mindex.maintenance.backup import (
     journal_path,
     recover_import,
 )
-from mindex.maintenance.backup_db import merge_database, store_at
+from mindex.maintenance.backup_db import TABLES, merge_database, store_at
 from mindex.maintenance.backup_files import (
     _saved_secrets,
+    digest,
     finder_metadata,
     source_list,
     temporary_directory,
@@ -35,7 +36,8 @@ from mindex.maintenance.backup_files import (
 from mindex.models.adapters import ModelError
 from mindex.shared.config import Config, fingerprint
 from mindex.shared.locks import SharedFileLock
-from mindex.shared.storage import Store, dumps
+from mindex.shared.migrations import migrate
+from mindex.shared.storage import METADATA_STEPS, Store, dumps
 
 pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
 
@@ -160,6 +162,82 @@ print(json.dumps(SearchEngine(config, FixtureEmbedder(config)).text(
                             capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stdout + result.stderr
     return json.loads(result.stdout)
+
+
+def strip_to_schema_v1(path):
+    """把库降级为 v1 形态（模拟版本化迁移早期导出的备份或旧目标库）。
+
+    v1 表集由参照库动态推导，后续追加迁移步骤不会让这里失效。
+    """
+    reference = sqlite3.connect(':memory:')
+    reference.row_factory = sqlite3.Row
+    try:
+        migrate(reference, METADATA_STEPS[:1])
+        keep = {row[0] for row in reference.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+    finally:
+        reference.close()
+    with sqlite3.connect(path) as db:
+        db.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+        names = [row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")]
+        for name in names:
+            if name not in keep and name != 'sqlite_sequence':
+                db.execute(f'DROP TABLE "{name}"')
+        db.execute('PRAGMA user_version=1')
+
+
+def reseal_manifest(bundle):
+    """改动备份内文件后重算清单的 bytes/sha256，保持 inspect 校验可通过。"""
+    manifest_path = bundle / 'manifest.json'
+    manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+    for item in manifest['files']:
+        path = bundle / item['path']
+        if path.is_file():
+            item['bytes'] = path.stat().st_size
+            item['sha256'] = digest(path)
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+
+
+def schema_version(path):
+    db = sqlite3.connect(path)
+    try:
+        return db.execute('PRAGMA user_version').fetchone()[0]
+    finally:
+        db.close()
+
+
+def test_import_upgrades_older_schema_bundle(library, tmp_path):
+    """旧结构备份包（缺 v2+ 新表）在暂存区按版本化迁移升级后正常导入。"""
+    _, sources, index, _ = library
+    bundle = tmp_path / 'old-bundle'
+    export(library, bundle)
+    strip_to_schema_v1(bundle / 'data/metadata.sqlite3')
+    reseal_manifest(bundle)
+    assert schema_version(bundle / 'data/metadata.sqlite3') == 1
+    target = tmp_path / 'target'
+    result = restore(bundle, target)
+    assert result['ok'] is True
+    assert result['searchable_sources'] == sorted(sources)
+    assert schema_version(target / 'metadata.sqlite3') == len(METADATA_STEPS)
+    tables = {row['name'] for row in store_at(target).rows(
+        "SELECT name FROM sqlite_master WHERE type='table'")}
+    assert TABLES <= tables
+    assert store_at(target).active_index()['id'] == index
+
+
+def test_import_merges_into_older_schema_target(library, tmp_path):
+    """目标库停在旧结构（v1）时同样在暂存区升级合并，不要求先手动迁移。"""
+    _, sources, _, _ = library
+    bundle = tmp_path / 'backup'
+    export(library, bundle)
+    target = tmp_path / 'target'
+    Store(target)
+    strip_to_schema_v1(target / 'metadata.sqlite3')
+    result = restore(bundle, target)
+    assert result['ok'] is True
+    assert result['searchable_sources'] == sorted(sources)
+    assert schema_version(target / 'metadata.sqlite3') == len(METADATA_STEPS)
+    assert [s['id'] for s in store_at(target).sources()] == sources
 
 
 def test_full_restore_relocated_and_cross_process_vectors(library, tmp_path):

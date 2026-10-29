@@ -354,10 +354,11 @@ def interrupt_tasks(path):
                    "WHERE status IN ('queued','running')")
 
 
-def validate_database(root, *, basic=False):
+def validate_database(root, *, basic=False, legacy=False):
     store = store_at(root)
     with store.connect() as db:
-        schema(db)
+        # legacy=True 只要求核心表：旧结构备份在导入暂存区会按版本化迁移升级到当前结构。
+        schema(db, require_current=not legacy)
         check = 'quick_check' if basic else 'integrity_check'
         if db.execute(f'PRAGMA {check}').fetchone()[0] != 'ok':
             raise ValueError('SQLite 完整性检查失败')

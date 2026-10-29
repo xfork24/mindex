@@ -232,7 +232,7 @@ def _inspect_bundle(bundle, *, verification='full'):
             or any(row not in (current_sources.get(row['id']), original_sources.get(row['id']))
                    for row in recorded_sources)):
         raise ValueError('备份素材清单与数据库不一致')
-    validate_database(bundle / 'data', basic=verification == 'basic')
+    validate_database(bundle / 'data', basic=verification == 'basic', legacy=True)
     validate_media(bundle / 'data')
     manifest['sources'] = list(current_sources.values())
     return manifest
@@ -328,7 +328,8 @@ def _portable_base_config(base, root, config_path):
 
 
 def _filter_payload(bundle, incoming, selected, manifest):
-    snapshot(bundle / 'data/metadata.sqlite3', incoming / 'metadata.sqlite3')
+    # 备份可能是较早结构：先按核心表快照，暂存副本随后升级到当前 schema 再过滤。
+    snapshot(bundle / 'data/metadata.sqlite3', incoming / 'metadata.sqlite3', allow_legacy=True)
     upgrade_database(incoming / 'metadata.sqlite3')
     maps = filter_database(incoming / 'metadata.sqlite3', selected)
     kept = {s['id'] for s in source_list(incoming)}
@@ -591,7 +592,8 @@ def import_backup(config, bundle, *, all_sources=False, sources=None, skip_exist
             prior_active = None
             if (root / 'metadata.sqlite3').exists():
                 # 目标也通过 backup API + Chroma API 重建，绝不拷贝内部 HNSW 文件。
-                snapshot(root / 'metadata.sqlite3', stage / 'metadata.sqlite3')
+                # 目标库可能是旧结构：暂存副本升级后再参与合并。
+                snapshot(root / 'metadata.sqlite3', stage / 'metadata.sqlite3', allow_legacy=True)
                 upgrade_database(stage / 'metadata.sqlite3')
                 prior_active = store_at(root).active_index()
                 for path in files_under(root):
