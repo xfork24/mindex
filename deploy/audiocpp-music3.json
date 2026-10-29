@@ -9,7 +9,7 @@
     {
       "id": "minimax-music3",
       "family": "minimax_music3",
-      "path": "../models/MiniMax-Music3-GGUF",
+      "path": "../models/MiniMax-Music3-GGUF/language_model_q4_k.gguf",
       "task": "gen",
       "mode": "offline",
       "session_options": {

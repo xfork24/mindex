@@ -4,11 +4,11 @@
 
 ## 身份与信任
 
-schema 2 区分三层：weights/mmproj 的 SHA256 内容身份；决定索引兼容性的显式向量空间契约；包含地址、路径、别名、构建、ctx 与可观察参数的部署观测。七个模型字段是类型及结构校验，不能证明文件内容。缺失字段、维度错误、量化不符及能力不足均拒绝。
+schema 2 区分三层：weights/mmproj 的 SHA256 内容身份；决定索引兼容性的显式向量空间契约；包含地址、路径、别名、构建、ctx 与可观察参数的部署观测。本地 SHA256 清单允许仅文件路径变化，核验内容一致后沿用原部署身份；路径仍保留在诊断报告中。七个模型字段是类型及结构校验，不能证明文件内容。缺失字段、维度错误、量化不符及能力不足均拒绝。
 
 空间契约采用 `llama-native-wemm-2`。模板、池化、归一化、视频/图片预处理有独立语义版本；修改相关行为必须升级对应版本。修改日志、注释或 ASR 不影响 WeMM 空间。`embedding.numerical_implementation` 默认 `llama-cpp-wemm-1`，用于兼容失败后的显式新空间；不自动升级或降低阈值。
 
-本地 pin 流式读取文件并记录绝对路径、文件状态和服务器工作目录，核对 `/props.model_path` 的解析结果。新进程首次使用重新计算 SHA256，随后按路径、设备/文件标识、大小、纳秒 mtime/ctime 缓存；状态变化重新哈希。推理期间即使文件内容没变、只有状态改变，也拒绝此次结果。服务请求使用当前完整核验报告里的模型 ID。
+本地 pin 流式读取文件并记录绝对路径、文件状态和服务器工作目录，核对 `/props.model_path` 的解析结果。运行时按当前 `/props.model_path` 核验权重；相对路径按清单的服务器工作目录解析。投影优先使用 `/props.mmproj_path`，未提供时使用清单路径；该路径已不存在时，查找当前权重目录下与原投影同名的文件，仍须通过清单的 SHA256 校验。新进程首次使用重新计算 SHA256，随后按路径、设备/文件标识、大小、纳秒 mtime/ctime 缓存；状态变化重新哈希。推理期间即使文件内容没变、只有状态改变，也拒绝此次结果。服务请求使用当前完整核验报告里的模型 ID。
 
 本地文件 SHA256 证明本地文件的内容。HTTP API 不能证明实际加载的 mmproj、后端、缓存数值配置或全部启动参数，仍由部署者确认；`--launch-parameters` JSON 记录这部分声明并参与部署摘要。远程 SHA 参数明确标记 `operator-attested-sha256`。schema 1 按原字段和运行指纹读取、校验，不自动改写；旧索引回滚需恢复旧代码与配套部署。
 
@@ -32,7 +32,9 @@ bash scripts/run-wemm.sh > data/e2e/wemm-macos-32768.log 2>&1
 
 先启动 WeMM，再执行以下命令；不要覆盖现有输出清单。
 
-清单记录的权重绝对路径（即 `/props.model_path`）属于部署观测身份：移动或改名 GGUF 文件会得到新的 `deployment_id`，必须重新 pin 并重新通过六片段 smoke；仅向量空间（`space_id`）不变，索引无需重建。当前 WeMM 清单固定在 `models/WeMM-9B-Q8_0.gguf`，权重已移到 `models/WeMM-Embedding/`，因此 `scripts/run-wemm.sh` 以顶层同名软链接启动。重新 pin 时 smoke 需要六片段提示视频经 ffmpeg 重新编码后与基线逐字节一致；基线建于 ffmpeg 9.0.2 安装之前（2026-10-14），现在重编码的哈希已不同，因此即使模型文件未动，新部署也无法通过现有基线。
+仅移动、改名或通过软链接引用本地 GGUF 文件，不需要重新 pin、smoke 或重建索引：运行时重新核对当前 weights/mmproj 的 SHA256，内容与其他部署参数一致后，沿用原清单的 `deployment_id` 和已有 smoke 记录，不改写历史证据。旧 WeMM 清单记录 `models/WeMM-9B-Q8_0.gguf`，`scripts/run-wemm.sh` 可直接使用 `models/WeMM-Embedding/` 内的原权重及同名投影，无需顶层软链接。远程 SHA 声明无法在服务端新路径核验内容，仍需重新 pin/smoke；schema 1 保持原运行指纹校验。
+
+构建、别名、ctx 或其他部署参数变化仍需重新 pin 并通过六片段 smoke。重新 pin 时 smoke 需要六片段提示视频经 ffmpeg 重新编码后与基线逐字节一致；基线建于 ffmpeg 9.0.2 安装之前（2026-10-14），现在重编码的哈希已不同，因此新部署无法通过现有基线。确需重验且兼容失败时，须升级数值实现版本、建立新基线并重建索引；单纯本地文件路径迁移不触发此流程。
 
 ```bash
 uv run mindex --config config.macos-v2.yaml --no-runtime-overrides e2e probe \

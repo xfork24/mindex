@@ -125,7 +125,7 @@ AI 生成图片（`aigc_image`）分镜 `draw` 阶段使用的图片生成服务
 | `max_seconds` | int 1–300 | 20 | 仅 audiocpp：单次生成时长上限（耗时近似成正比；成片时背景音乐循环/截断到段落长度）。实测 Mac Metal 30 秒音频约 15 分钟 |
 | `comfyui_workflow` / `comfyui_mapping` | dict \| null | null | 映射字段限 `prompt`（必填）、`lyrics`、`seconds`（段落预估时长）、`seed`、`audio`（翻唱参考音频） |
 
-`audiocpp` 后端：`base_url` 指向 `audiocpp_server`（如 `http://127.0.0.1:8891`，启动见 `scripts/run-music3.sh`、`deploy/audiocpp-music3.json`），`model` 为服务配置里的模型 id（`minimax-music3`），无需密钥；调用 `POST /v1/tasks/run`，纯音乐以 `[Instrumental]` 作歌词，`duration_sec` 取段落预估时长（上限 300 秒）；Apple Silicon 的 Metal 后端实时率约 30 倍，`timeout` 必须大于预计耗时（否则客户端超时放弃，服务端仍继续计算）；服务端同一时刻只处理一个请求，`deploy/audiocpp-music3.json` 已把 `busy_timeout_ms` 设为 0，排队请求不会 503。
+`audiocpp` 后端：`base_url` 指向 `audiocpp_server`（如 `http://127.0.0.1:8891`，启动见 `scripts/run-music-gen.sh`、`deploy/audiocpp-music3.json`），`model` 为服务配置里的模型 id（`minimax-music3`），无需密钥；调用 `POST /v1/tasks/run`，纯音乐以 `[Instrumental]` 作歌词，`duration_sec` 取段落预估时长（上限 300 秒）；Apple Silicon 的 Metal 后端实时率约 30 倍，`timeout` 必须大于预计耗时（否则客户端超时放弃，服务端仍继续计算）；服务端同一时刻只处理一个请求，`deploy/audiocpp-music3.json` 已把 `busy_timeout_ms` 设为 0，排队请求不会 503。
 
 签名只含 backend、model、cover_model（ComfyUI 另含工作流摘要与映射，audiocpp 另含 `num_inference_steps`、`max_seconds`）；`studio_key` 只在 `enabled` 时加入该段。
 

@@ -106,6 +106,29 @@ def test_pin_rejects_non_llama_and_mixed_modes(server):
     assert mixed.status_code == 422 and "互斥" in mixed.json()["detail"]
 
 
+def test_probe_and_pin_reuse_local_manifest_after_model_move(server, tmp_path):
+    config, weights, mmproj = server
+    client = TestClient(create_app(config))
+    profile = client.post("/api/settings/profiles", json=WEMM).json()
+    url = f"/api/settings/profiles/{profile['id']}/deployment"
+    first = client.post(f"{url}/pin", json={}).json()
+    manifest_path = config.data_dir / first["manifest"]
+    manifest_bytes = manifest_path.read_bytes()
+
+    moved = tmp_path / "relocated"
+    moved.mkdir()
+    weights.rename(moved / weights.name)
+    mmproj.rename(moved / mmproj.name)
+    props = adapters.request("GET", "http://127.0.0.1:8888/props")
+    props["model_path"] = str(moved / weights.name)
+    probe = client.post(f"{url}/probe").json()
+    assert probe["current_manifest_valid"] is True
+    assert probe["reusable_manifests"] == [first["manifest"]]
+    reused = client.post(f"{url}/pin", json={}).json()
+    assert reused["created"] is False and reused["manifest"] == first["manifest"]
+    assert manifest_path.read_bytes() == manifest_bytes
+
+
 def test_agent_tools_probe_and_pin(server):
     config, _, _ = server
     app = create_app(config)

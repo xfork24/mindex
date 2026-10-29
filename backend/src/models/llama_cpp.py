@@ -143,11 +143,21 @@ def checked_runtime(service: Service, pinned: dict) -> dict:
             **observed["deployment"],
             "launch_parameters": pinned["trust"]["launch_parameters"],
         }
+        if pinned["trust"]["source"] == "local-sha256":
+            # 路径只用于定位文件；内容由 check_local_files 在当前路径重新核验。
+            # 沿用清单中的路径拼写，以兼容既有 deployment_id 和 smoke 记录，
+            # 原始路径仍保留在 observed.observable/props 中供诊断。
+            observed["deployment"] = copy.deepcopy(observed["deployment"])
+            observed["deployment"]["observable"]["model_path"] = pinned["deployment"]["observable"]["model_path"]
+            parameters = observed["deployment"]["parameters"]
+            pinned_parameters = pinned["deployment"]["parameters"]
+            if "mmproj_path" in parameters and "mmproj_path" in pinned_parameters:
+                parameters["mmproj_path"] = pinned_parameters["mmproj_path"]
         observed["deployment_id"] = fingerprint(observed["deployment"])
         if observed["deployment_id"] != pinned["deployment_id"]:
             raise ModelError("llama.cpp 部署观测发生变化，请核对清单并重新 pin/smoke")
         validate_role(service, pinned["role"], observed, pinned["quantization"])
-        observed["file_states"] = check_local_files(pinned, observed)
+        observed["file_states"] = check_local_files(pinned, observed, allow_relocation=True)
     return observed
 
 

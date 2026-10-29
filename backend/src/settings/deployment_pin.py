@@ -136,7 +136,7 @@ def summary(report: dict) -> dict:
 
 
 def matching_manifests(config: Config, role: str, report: dict, prefer: str | None = None) -> list[Path]:
-    """数据目录 deployments/ 下与当前部署完全一致（部署观测、本地文件、空间契约）的清单。"""
+    """数据目录 deployments/ 下与当前部署兼容（部署观测、本地文件、空间契约）的清单。"""
     service = getattr(config, role)
     folder = Path(config.data_dir) / "deployments"
     candidates = sorted(folder.glob("*.json")) if folder.is_dir() else []
@@ -149,7 +149,12 @@ def matching_manifests(config: Config, role: str, report: dict, prefer: str | No
             raw = json.loads(path.read_text(encoding="utf-8"))
             if raw.get("schema") != 2 or raw.get("role") != role:
                 continue
-            if raw.get("deployment", {}).get("observable") != report["deployment"]["observable"]:
+            expected = raw.get("deployment", {}).get("observable", {})
+            actual = report["deployment"]["observable"]
+            if raw.get("trust", {}).get("source") == "local-sha256":
+                expected = {k: v for k, v in expected.items() if k != "model_path"}
+                actual = {k: v for k, v in actual.items() if k != "model_path"}
+            if expected != actual:
                 continue  # 先做廉价比较，避免对无关清单重新哈希大文件
             pinned = read_manifest(path, service, role)
             if role == "embedding" and service.quantization != pinned["quantization"]:

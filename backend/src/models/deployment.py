@@ -76,8 +76,8 @@ def moved_hint(path: Path) -> str:
         return ""
     return (
         f"。在 {', '.join(str(p.parent) for p in found)} 找到同名文件，文件可能被移动过："
-        "部署清单固定了绝对路径，也是部署身份的一部分；请改回原路径（或放同名软链接），"
-        "或重新 pin 并重新通过 smoke（见 docs/macos-model-migration.md）"
+        "本地 schema 2 清单允许按服务报告的新模型路径重新核验 SHA256；"
+        "请确认服务的 model_path 和投影文件位置（见 docs/macos-model-migration.md）"
     )
 
 
@@ -142,20 +142,33 @@ def validate_role(service, role: str, report: dict, quantization: str):
         raise ModelError("ASR 服务未启用音频投影")
 
 
-def check_local_files(pinned: dict, report: dict) -> dict:
+def check_local_files(pinned: dict, report: dict, *, allow_relocation: bool = False) -> dict:
     local = pinned["trust"]["source"] == "local-sha256"
     if not local:
         return {}
-    files = {
-        name: verified_file(Path(record["path"]), pinned["file_identity"][name + "_sha256"])
-        for name, record in pinned["files"].items()
-    }
     cwd = Path(pinned["server_cwd"])
     model_path = report["observable"].get("model_path")
     if not isinstance(model_path, str) or not model_path.strip():
         raise ModelError("/props 缺少有效 model_path，无法核验本地 weights")
     loaded = Path(model_path)
     resolved = (cwd / loaded).resolve()
+    paths = {name: Path(record["path"]) for name, record in pinned["files"].items()}
+    if allow_relocation:
+        # 核验服务当前报告的文件，不能仅核验仍留在旧路径的同名权重。
+        paths["weights"] = cwd / loaded
+        projection = report["props"].get("mmproj_path")
+        if projection is not None:
+            if not isinstance(projection, str) or not projection.strip():
+                raise ModelError("/props 缺少有效 mmproj_path，无法核验本地投影")
+            paths["mmproj"] = cwd / projection
+        elif not paths["mmproj"].exists():
+            # 标准 llama-server 通常不报告投影路径；支持模型和同名投影一起迁移。
+            # 这里只定位候选文件，下面仍须核对清单中的内容摘要。
+            paths["mmproj"] = resolved.parent / paths["mmproj"].name
+    files = {
+        name: verified_file(path, pinned["file_identity"][name + "_sha256"])
+        for name, path in paths.items()
+    }
     if resolved != Path(files["weights"]["resolved_path"]):
         raise ModelError("/props.model_path 解析结果与本地 weights 文件不同")
     return files

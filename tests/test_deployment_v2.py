@@ -211,6 +211,95 @@ def test_space_excludes_paths_aliases_addresses_build_and_ctx(native, tmp_path):
     assert all(k not in space for k in ("base_url", "model", "runtime_id", "adapter_sha256", "model_path"))
 
 
+@pytest.mark.parametrize("mode", ["move", "copy", "symlink", "relative"])
+def test_local_path_changes_reuse_existing_manifest_space_and_gate(native, tmp_path, mode):
+    client, gate = establish(native)
+    config = native["config"]
+    manifest_path = Path(config.embedding.deployment_manifest)
+    manifest_bytes = manifest_path.read_bytes()
+    gate_path = compatibility.validation_path(config, client.identity(), gate["deployment_id"])
+    gate_bytes = gate_path.read_bytes()
+    directory = tmp_path / "relocated"
+    directory.mkdir()
+    weights = directory / "renamed.gguf"
+    if mode == "symlink":
+        weights.symlink_to(native["weights"])
+    elif mode == "copy":
+        weights.write_bytes(native["weights"].read_bytes())
+    else:
+        native["weights"].rename(weights)
+        native["mmproj"].rename(directory / native["mmproj"].name)
+    native["props"]["model_path"] = str(weights.relative_to(tmp_path) if mode == "relative" else weights)
+
+    current = LlamaEmbedder(config)
+    assert current.identity() == gate["space"]
+    assert current._runtime["deployment_id"] == gate["deployment_id"]
+    assert current._runtime["observable"]["model_path"] == native["props"]["model_path"]
+    assert current._runtime["file_states"]["weights"]["resolved_path"] == str(weights.resolve())
+    current.require_gate()
+    assert len(current.text(["迁移后仍可检索"])[0]) == 8
+    assert manifest_path.read_bytes() == manifest_bytes
+    assert gate_path.read_bytes() == gate_bytes
+
+
+def test_reported_projection_path_can_move_independently(native, tmp_path):
+    native["props"]["mmproj_path"] = str(native["mmproj"])
+    native["pin"]()
+    client, gate = establish(native)
+    moved = tmp_path / "renamed-projection.gguf"
+    native["mmproj"].rename(moved)
+    native["props"]["mmproj_path"] = moved.name
+    assert client.identity() == gate["space"]
+    assert client._runtime["file_states"]["mmproj"]["resolved_path"] == str(moved)
+    client.require_gate()
+    assert len(client.text(["投影路径迁移"])[0]) == 8
+
+
+@pytest.mark.parametrize("changed", ["weights", "mmproj"])
+def test_relocated_files_must_match_pinned_hashes(native, tmp_path, changed):
+    establish(native)
+    directory = tmp_path / "relocated"
+    directory.mkdir()
+    # 旧权重仍在时，也必须核验服务当前报告的文件，而不能只检查旧文件。
+    weights = directory / native["weights"].name
+    weights.write_bytes(native["weights"].read_bytes())
+    mmproj = directory / native["mmproj"].name
+    native["mmproj"].rename(mmproj)
+    {"weights": weights, "mmproj": mmproj}[changed].write_bytes(b"different-content")
+    native["props"]["model_path"] = str(weights)
+    with pytest.raises(adapters.ModelError, match="SHA256"):
+        LlamaEmbedder(native["config"]).text(["拒绝不同权重"])
+    assert native["posts"] == []
+
+
+@pytest.mark.parametrize("field", ["build_info", "default_generation_settings"])
+def test_path_relocation_does_not_hide_other_deployment_changes(native, tmp_path, field):
+    establish(native)
+    moved = tmp_path / "renamed.gguf"
+    native["weights"].rename(moved)
+    native["props"]["model_path"] = str(moved)
+    native["props"][field] = "new-build" if field == "build_info" else {"n_ctx": 16384}
+    with pytest.raises(adapters.ModelError, match="部署观测发生变化"):
+        LlamaEmbedder(native["config"]).text(["仍须重新验证"])
+    assert native["posts"] == []
+
+
+def test_path_relocation_does_not_bypass_missing_gate(native, tmp_path):
+    moved = tmp_path / "renamed.gguf"
+    native["weights"].rename(moved)
+    native["props"]["model_path"] = str(moved)
+    with pytest.raises(adapters.ModelError, match="兼容性门槛"):
+        LlamaEmbedder(native["config"]).text(["尚未通过验证"])
+    assert native["posts"] == []
+
+
+def test_remote_path_changes_still_require_operator_attestation(native, tmp_path):
+    pinned = native["pin"](remote=True)
+    native["props"]["model_path"] = str(tmp_path / "remote-renamed.gguf")
+    with pytest.raises(adapters.ModelError, match="部署观测发生变化"):
+        checked_runtime(native["config"].embedding, pinned)
+
+
 def test_explicit_semantic_versions_change_space(native, monkeypatch):
     config = native["config"]
     content = native["pinned"]["file_identity"]
