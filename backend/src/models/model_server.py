@@ -227,6 +227,27 @@ class ASREngine:
         return {"model": self.model_name, "revision": self.revision, "utterances": utterances}
 
 
+def configure_transnet_device(tf, device: str) -> None:
+    if device not in {"auto", "cpu", "metal", "cuda"}:
+        raise ValueError("MINDEX_TRANSNET_DEVICE 必须是 cpu、metal、cuda 或 auto")
+    if device == "cpu":
+        tf.config.set_visible_devices([], "GPU")
+    elif device in {"metal", "cuda"}:
+        if device == "cuda" and not tf.test.is_built_with_cuda():
+            raise RuntimeError("所选后端 cuda 不可用：请在 .venv-detector 安装支持 CUDA 的 TensorFlow")
+        if device == "metal":
+            try:
+                importlib.metadata.version("tensorflow-metal")
+            except importlib.metadata.PackageNotFoundError as exc:
+                raise RuntimeError("所选后端 metal 不可用：请在 .venv-detector 安装 tensorflow-metal") from exc
+        if not tf.config.get_visible_devices("GPU"):
+            raise RuntimeError(f"所选后端 {device} 不可用：TensorFlow 未发现可见 GPU")
+    # Metal 插件不使用 CUDA 的显存按需增长设置。
+    if device != "metal":
+        for gpu in tf.config.get_visible_devices("GPU"):
+            tf.config.experimental.set_memory_growth(gpu, True)
+
+
 class TransNetEngine:
     def __init__(self):
         # Use upstream inference and weights, not an unverified third-party conversion.
@@ -236,12 +257,7 @@ class TransNetEngine:
         import tensorflow as tf
 
         device = os.environ.get("MINDEX_TRANSNET_DEVICE", "auto")
-        if device not in {"auto", "cpu"}:
-            raise ValueError("MINDEX_TRANSNET_DEVICE 必须是 cpu 或 auto")
-        if device == "cpu":
-            tf.config.set_visible_devices([], "GPU")
-        for gpu in tf.config.get_visible_devices("GPU"):
-            tf.config.experimental.set_memory_growth(gpu, True)
+        configure_transnet_device(tf, device)
         weights = directory / "transnetv2-weights"
         for name in ("saved_model.pb", "variables/variables.index", "variables/variables.data-00000-of-00001"):
             path = weights / name

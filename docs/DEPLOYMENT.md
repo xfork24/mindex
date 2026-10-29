@@ -4,6 +4,34 @@
 
 用户提供的地址：WeMM `192.168.1.86:4010`，ASR `:4020`，TTS `:4030`，Qwen `:4040/v1`。截至 2026-10-13，四个模型均已部署但未启动，按需单独启动；保存地址不会触发启动或模型调用。TransNetV2 可选服务使用 `:18203`。TTS 地址已作为预留配置保存，不参与视频切片或检索。实际接口仍须符合下文协议。
 
+## 启动脚本的后端选项
+
+全部 `scripts/run-*.sh` 接受 `--backend metal|cuda|cpu`，也支持 `--backend=cuda` 和 `--help`。命令行优先于对应环境变量；不指定选项或新环境变量时，保持原默认设备选择。
+
+```bash
+bash scripts/run-wemm.sh --backend metal
+bash scripts/run-qwen3-asr.sh --backend cuda
+bash scripts/run-tts-voiceclone.sh --backend cpu
+bash scripts/run-tts-voicedesign.sh --backend metal
+bash scripts/run-music-gen.sh --backend cuda
+bash scripts/run-transnet.sh --backend cpu
+bash scripts/run-person-service.sh --backend cpu
+```
+
+| 脚本 | 后端环境变量 | 原默认行为 | 映射 |
+| --- | --- | --- | --- |
+| `run-wemm.sh` | `MINDEX_WEMM_BACKEND` | GPU 层数 99，服务自动选设备 | Metal → `MTL0`，CUDA → `CUDA0`；CPU 关闭模型层、投影、KV 和运算卸载 |
+| `run-qwen3-asr.sh` | `MINDEX_ASR_BACKEND` | GPU 层数 99，服务自动选设备 | 同 WeMM |
+| `run-tts-voiceclone.sh` | `MINDEX_TTS_BACKEND` | 服务自动选设备 | `MTL0` / `CUDA0` / `CPU` |
+| `run-tts-voicedesign.sh` | `MINDEX_TTS_BACKEND` | 服务自动选设备 | 同 voiceclone |
+| `run-music-gen.sh` | `MINDEX_MUSIC3_BACKEND` | Metal | audio.cpp 原生 `--backend` |
+| `run-transnet.sh` | `MINDEX_TRANSNET_BACKEND` | `MINDEX_TRANSNET_DEVICE`，未设时 CPU | TensorFlow Metal 插件 / CUDA / 隐藏 GPU |
+| `run-person-service.sh` | `MINDEX_PERSON_BACKEND` | `MINDEX_PERSON_PROVIDERS`，未设时 CPU | ONNX Runtime CUDA / CPU Provider；当前 SDK 不支持 Metal，选择时明确报错 |
+
+所选后端需要匹配的硬件、二进制构建及独立 Python 环境。TransNet 的 Metal 需要与 TensorFlow 版本兼容的 [`tensorflow-metal`](https://developer.apple.com/metal/tensorflow-plugin/)，CUDA 需要支持 CUDA 的 TensorFlow 和可见 NVIDIA GPU。人物服务使用的固定版 InsightFace `PersonAnalysis` 仅允许 CPU/CUDA，`--backend metal` 会明确报错，即使 ONNX Runtime 本身提供 CoreML 也不会冒充支持；扩展它需要另行适配第三方 SDK。人物服务的 CUDA 需要提供 `CUDAExecutionProvider` 的 ONNX Runtime。显式选择 GPU 后端但依赖或设备不可用时启动报错；人物模型中 CUDA Provider 不支持的算子仍可由 CPU Provider 执行。
+
+这些选项只选择推理设备，不安装依赖，也不改写模型清单。切换 WeMM/ASR 的实际推理后端或参数仍需按原流程重新 pin/验证；仅模型路径迁移的兼容规则不受影响。设置页管理服务时可在 YAML 的 `local_services.services[].argv` 中加入 `--backend` 及其值。
+
 ## 当前部署路径：已有 llama.cpp / GGUF 服务
 
 用户的四个服务地址保持不变，当前 `config.local.yaml` 的嵌入、ASR 与分析（Qwen）三个后端均选择 `llama_cpp`，各自需要 `e2e probe` + `e2e pin` 生成的部署清单（`data/deployments/wemm.json`、`asr.json`、`analyzer.json`；清单缺失或哈希不符时对应阶段拒绝执行）。WeMM 已确认使用 Q8_0 GGUF、BF16 mmproj，需 `--embeddings --pooling last --video-fps 4`。详细启动、哈希固定、原生视频接口验证和单 GPU 切换流程见 [E2E_RUNBOOK.md](E2E_RUNBOOK.md)。下文的自定义 `mindex` 模型服务仍作为可切换的替代后端，按本文档各节部署。
@@ -76,7 +104,7 @@ detector:
 
 Web 已运行时需在当前任务结束后重启，以加载 YAML。新素材登记时冻结分镜配置，已有素材及任务继续保留原切分方式；重试旧任务不会切换检测器。需要用 TransNetV2 重切已登记的 Adaptive 素材时，应在新的 `data_dir` 导入，以保留原布局和索引。
 
-启动参数通过环境变量调整：`MINDEX_CONFIG`、`MINDEX_TRANSNET_HOST`（默认 127.0.0.1）、`MINDEX_TRANSNET_PORT`（默认 18203）、`MINDEX_TRANSNET_DIR`、`MINDEX_TRANSNET_DEVICE`（默认 cpu，auto 可使用环境中可见的 GPU）、`TF_NUM_INTRAOP_THREADS`（默认 4）、`TF_NUM_INTEROP_THREADS`（默认 2）。GPU/auto 模式仍遵守 GPU 角色锁。HTTP 认证沿用 `MINDEX_MODEL_API_KEY`。
+启动参数通过环境变量调整：`MINDEX_CONFIG`、`MINDEX_TRANSNET_HOST`（默认 127.0.0.1）、`MINDEX_TRANSNET_PORT`（默认 18203）、`MINDEX_TRANSNET_DIR`、`MINDEX_TRANSNET_DEVICE`（默认 cpu，可设 metal/cuda，auto 可使用环境中可见的 GPU）、`TF_NUM_INTRAOP_THREADS`（默认 4）、`TF_NUM_INTEROP_THREADS`（默认 2）。`--backend` 或 `MINDEX_TRANSNET_BACKEND` 优先于旧 `MINDEX_TRANSNET_DEVICE`。GPU/auto 模式仍遵守 GPU 角色锁。HTTP 认证沿用 `MINDEX_MODEL_API_KEY`。
 
 2026-10-18 本机验证：Apple Silicon、TensorFlow 2.18.1、FFmpeg 9.0.2，真实上游权重处理 6 秒 / 150 帧红→蓝→绿测试视频，返回 `cut_frames: [49,99]`；HTTP 客户端映射为 `[0,1.96]`、`[1.96,3.96]`、`[3.96,6]`，隔离 `prepare` 生成三个镜头和三个精细片段。约 1.8 秒完成 HTTP 检测。接口及帧数边界测试通过 15 项；测试视频仅验证工程链路和明显转场，正式素材仍需抽检。FFmpeg 9 使用 `-fps_mode passthrough` 保留每帧，不使用已删除的 `-vsync`。
 

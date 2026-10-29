@@ -24,8 +24,29 @@ from starlette.concurrency import run_in_threadpool
 from mindex.shared.config import load_config
 
 
+def execution_providers() -> list[str]:
+    backend = os.environ.get("MINDEX_PERSON_BACKEND")
+    if not backend:
+        return [p.strip() for p in os.environ.get("MINDEX_PERSON_PROVIDERS", "CPUExecutionProvider").split(",")]
+    if backend == "metal":
+        raise RuntimeError(
+            "当前固定版本的 InsightFace PersonAnalysis 仅支持 CPU/CUDA，暂不支持 Metal/CoreML；"
+            "请使用 --backend cpu 或 --backend cuda"
+        )
+    choices = {"cuda": "CUDAExecutionProvider", "cpu": "CPUExecutionProvider"}
+    if backend not in choices:
+        raise ValueError("MINDEX_PERSON_BACKEND 必须是 metal、cuda 或 cpu")
+    import onnxruntime as ort
+
+    provider = choices[backend]
+    if provider not in ort.get_available_providers():
+        raise RuntimeError(f"所选后端 {backend} 不可用：当前 ONNX Runtime 未提供 {provider}")
+    return [provider] if backend == "cpu" else [provider, "CPUExecutionProvider"]
+
+
 class PersonEngine:
     def __init__(self, config):
+        providers = execution_providers()
         from insightface.app import PersonAnalysis
 
         root = Path(os.environ.get("MINDEX_PERSON_MODEL_ROOT", config.person.model_root)).expanduser().resolve()
@@ -48,9 +69,6 @@ class PersonEngine:
             if digest != task["sha256"]:
                 raise RuntimeError("模型文件摘要不符：" + name)
             hashes[name] = digest
-        providers = [
-            p.strip() for p in os.environ.get("MINDEX_PERSON_PROVIDERS", "CPUExecutionProvider").split(",")
-        ]
         self.space = {
             "model": config.person.model,
             "weights": hashes,
