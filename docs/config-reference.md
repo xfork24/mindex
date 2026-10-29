@@ -340,7 +340,7 @@ local_services:
 | `model` | `cheetah_l` | `cheetah_l` | 人物模型 |
 | `revision` | str | `manifest-v2` | 模型清单版本 |
 | `timeout` | float >0 | 180 | 请求超时（秒） |
-| `model_root` | str | `~/.insightface` | 服务端模型文件根目录 |
+| `model_root` | str | `~/.insightface` | 服务端模型文件根目录；环境变量 `MINDEX_PERSON_MODEL_ROOT` 优先（`run-person-service.sh` 默认指向仓库 `models/insightface`） |
 | `expected_space` | object 或 null | null | 把服务 `/health` 返回的 `space` 完整复制到此处，可固定模型文件摘要与预处理；不一致时拒绝处理 |
 | `frame_interval` | int ≥1 | 15 | 每个分镜每隔多少帧抽取一帧，见下文 |
 | `fps` | float 0–5 | 5 | 兼容旧配置，不参与抽帧 |

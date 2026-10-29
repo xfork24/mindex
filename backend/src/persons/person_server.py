@@ -28,7 +28,7 @@ class PersonEngine:
     def __init__(self, config):
         from insightface.app import PersonAnalysis
 
-        root = Path(config.person.model_root).expanduser().resolve()
+        root = Path(os.environ.get("MINDEX_PERSON_MODEL_ROOT", config.person.model_root)).expanduser().resolve()
         package = root / "models" / config.person.model
         manifests = list(package.glob("*manifest*.json"))
         if len(manifests) != 1:

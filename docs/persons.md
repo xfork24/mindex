@@ -23,7 +23,7 @@ uv sync --extra person --extra dev
 ./scripts/setup-person-service.sh
 ```
 
-模型环境为 `.venv-person`。SDK 固定到 InsightFace commit `81929474ec02e54e3655f6841bced800009c592d`，使用 [`PersonAnalysis` 官方接口](https://github.com/deepinsight/insightface/blob/81929474ec02e54e3655f6841bced800009c592d/python-package/docs/person_analysis.md)。模型包须自行安装完整的 `cheetah_l` V2 到 `~/.insightface/models/cheetah_l/` 或配置的 `person.model_root/models/cheetah_l/`。服务检查四类任务、所有模型文件 SHA-256 与 manifest 摘要；不自动下载或修复模型。没有模型包时启动明确失败。
+模型环境为 `.venv-person`。SDK 固定到 InsightFace commit `81929474ec02e54e3655f6841bced800009c592d`，使用 [`PersonAnalysis` 官方接口](https://github.com/deepinsight/insightface/blob/81929474ec02e54e3655f6841bced800009c592d/python-package/docs/person_analysis.md)。`setup-person-service.sh` 通过 `scripts/download_insightface_weights.py`（幂等、仅标准库）从官方 model-zoo 下载完整 `cheetah_l` V2 到 `models/insightface/models/cheetah_l/`，并做一次引擎级验证；位置可用 `MINDEX_PERSON_MODEL_ROOT` 覆盖，`run-person-service.sh` 默认导出同一根目录。也可按 `person.model_root/models/cheetah_l/` 手动安装离线包。服务检查四类任务、所有模型文件 SHA-256 与 manifest 摘要；服务自身不自动下载或修复模型，没有模型包时启动明确失败；下载脚本遇到损坏的已有包会改名保留（`.invalid-<时间戳>`）后重装。
 
 ```sh
 ./scripts/run-person-service.sh
