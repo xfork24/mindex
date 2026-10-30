@@ -4,8 +4,8 @@
   <script src="/assets/shared/i18n-boot.js?v=bf7e8b3c7c"></script>
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title data-i18n="[[0,&quot;ui.5e9681d20f56&quot;]]">Mindex · 设置</title><link rel="icon" href="/assets/shared/favicon.svg?v=8d7f9242de" type="image/svg+xml">
-  <link rel="stylesheet" href="/assets/shared/style.css?v=89f1d907cc"><link rel="stylesheet" href="/assets/shared/agent-panel.css?v=0e652cc50a"><link rel="stylesheet" href="/assets/settings/settings.css?v=76e008d877">
-  <script src="/assets/shared/messages.js?v=1ef3a51b6b" defer></script><script src="/assets/shared/i18n.js?v=e981ac227d" defer></script><script src="/assets/shared/api.js?v=aa52e4865d" defer></script><script src="/assets/shared/marked.umd.js?v=b82b933440" defer></script><script src="/assets/shared/purify.min.js?v=cd37898f97" defer></script><script src="/assets/shared/agent-markdown.js?v=8f0018e90a" defer></script><script src="/assets/shared/agent-panel.js?v=e6fca9cf73" defer></script><script src="/assets/shared/feedback.js?v=4630718c9e" defer></script><script src="/assets/settings/settings.js?v=9411f021fc" defer></script><script src="/assets/settings/tools.js?v=6cceb98ba7" defer></script>
+  <link rel="stylesheet" href="/assets/shared/style.css?v=89f1d907cc"><link rel="stylesheet" href="/assets/shared/agent-panel.css?v=0e652cc50a"><link rel="stylesheet" href="/assets/settings/settings.css?v=48c413d6f5">
+  <script src="/assets/shared/messages.js?v=912cdb8a6d" defer></script><script src="/assets/shared/i18n.js?v=e981ac227d" defer></script><script src="/assets/shared/api.js?v=aa52e4865d" defer></script><script src="/assets/shared/marked.umd.js?v=b82b933440" defer></script><script src="/assets/shared/purify.min.js?v=cd37898f97" defer></script><script src="/assets/shared/agent-markdown.js?v=8f0018e90a" defer></script><script src="/assets/shared/agent-panel.js?v=e6fca9cf73" defer></script><script src="/assets/shared/feedback.js?v=4630718c9e" defer></script><script src="/assets/settings/settings.js?v=47b73ef572" defer></script><script src="/assets/settings/tools.js?v=6cceb98ba7" defer></script>
 </head>
 <body class="settings">
   <header><a class="brand" href="/">m<span>index</span><i></i></a><nav class="page-nav" aria-label="页面导航" data-i18n-aria-label="ui.main_navigation"><a class="quiet nav-link" href="/" data-i18n="[[0,&quot;ui.c9b1e68e3537&quot;]]">视频检索</a><a class="quiet nav-link" href="/studio" data-i18n="[[0,&quot;ui.b6fc3cef0bd0&quot;]]">创作</a><a class="quiet nav-link" href="/admin" data-i18n="[[0,&quot;ui.f517302fec0d&quot;]]">素材管理</a><a class="quiet nav-link" href="/persons" data-i18n="[[0,&quot;ui.0973ef28d791&quot;]]">人物库</a><a class="quiet nav-link" href="/settings" aria-current="page" data-i18n="[[0,&quot;ui.7debf9cb0372&quot;]]">设置</a></nav><button class="quiet" id="reload" data-i18n="[[0,&quot;ui.c3147ba1672a&quot;]]">刷新设置</button><button type="button" class="quiet language-switch" data-language-toggle aria-label="中文 / English"><span data-language="zh" lang="zh-CN">文</span><span class="language-divider" aria-hidden="true">/</span><span data-language="en" lang="en">En</span></button></header>
@@ -34,11 +34,15 @@
         <div class="role-row-body" id="tuning-body" hidden>
           <p class="role-desc" data-i18n="[[0,&quot;ui.cbf76d66b8c4&quot;]]">新版三渠道权重与旧版五路权重，保存即热生效</p>
           <form id="search-tuning" class="tuning-panel">
-            <div class="weight-grid" id="weight-grid"></div>
+            <div class="tuning-controls"><div class="weight-grid" id="weight-grid"></div>
             <div class="tuning-row">
               <label>RRF k<input id="rrf-k" type="number" min="1" step="1"></label>
               <label data-i18n="[[0,&quot;ui.f630f9dfa637&quot;]]">候选数<input id="candidates" type="number" min="1" max="1000" step="1"></label>
             </div>
+              <label><span data-i18n='[[0,"ui.duration_weight"]]'>时长匹配权重</span><input id="duration-weight" type="number" min="0" max="0.5" step="0.05"></label>
+              <label><span data-i18n='[[0,"ui.duration_exponent"]]'>时长不足惩罚指数</span><input id="duration-exponent" type="number" min="0.1" max="8" step="0.1"></label>
+            </div>
+            <p class="role-desc" data-i18n='[[0,"ui.tuning_normalized_help"]]'>各渠道按相对权重归一化；时长充足得 1 分，不足时按时长比例的指数次方计分，仅影响任务分镜召回。</p>
             <div class="tuning-actions"><button class="quiet" type="button" id="tuning-reset" data-i18n="[[0,&quot;ui.a191935bc678&quot;]]">恢复默认</button><button class="submit" type="submit" id="tuning-save" data-i18n="[[0,&quot;ui.865d4c5c2e91&quot;]]">保存调参 <span>↗</span></button></div>
           </form>
         </div>

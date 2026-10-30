@@ -191,18 +191,20 @@ video:
 search:
   # 新版（format 2）索引的三渠道 RRF 权重；必须同时给出三个键。
   channel_weights:
-    visual: 1.0
-    dialogue: 1.0
-    analysis: 1.0
+    visual: 0.35
+    dialogue: 0.15
+    analysis: 0.5
   candidates: 100
-  rrf_k: 60
+  rrf_k: 30
+  duration_weight: 0.15  # 任务召回：时长匹配占比，0 禁用，最多 0.5
+  duration_exponent: 2.0  # 不足时得分 (候选时长/分镜预估时长)^指数
   # 旧版（format 1）索引的五路权重，与 channel_weights 互不影响。
   weights:
-    video: 1.0
-    description: 1.0
-    style: 1.0
-    dialogue: 0.5
-    lexical: 0.5
+    video: 0.35
+    description: 0.35
+    style: 0.1
+    dialogue: 0.1
+    lexical: 0.1
   max_upload_mb: 100
   max_image_upload_mb: 20
   max_query_seconds: 30

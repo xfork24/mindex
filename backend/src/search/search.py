@@ -75,6 +75,11 @@ def lexical_search(text: str, snapshots: list[dict], count: int, exclude=()) -> 
 
 def fuse(routes: dict[str, list[dict]], weights: dict[str, float], k: int) -> list[dict]:
     scores, reasons = defaultdict(float), defaultdict(list)
+    # Normalize against the theoretical best RRF score, never the observed maximum.
+    # Multiplying all weights by a constant cannot change the score or ordering.
+    scale = max((weights.get(route, 0) for route, hits in routes.items() if hits), default=0) or 1
+    relative = {route: weight / scale for route, weight in weights.items()}
+    ceiling = sum(relative.get(route, 0) for route, hits in routes.items() if hits and relative.get(route, 0) > 0) / (k + 1)
     for route, hits in routes.items():
         if weights.get(route, 0) == 0:
             continue
@@ -95,15 +100,34 @@ def fuse(routes: dict[str, list[dict]], weights: dict[str, float], k: int) -> li
             ):
                 rank = position
             previous_value = value
-            scores[hit["id"]] += weights[route] / (k + rank)
+            scores[hit["id"]] += relative[route] / (k + rank)
             reason = {"route": route, "rank": rank}
             if "distance" in hit:
                 reason["cosine_similarity"] = 1 - hit["distance"]
             reasons[hit["id"]].append(reason)
     return [
-        {"id": identifier, "score": score, "matches": reasons[identifier]}
+        {"id": identifier, "score": min(1.0, max(0.0, score / ceiling)), "matches": reasons[identifier]}
         for identifier, score in sorted(scores.items(), key=lambda v: (-v[1], v[0]))
     ]
+
+
+
+def duration_rank(ranked: list[dict], segments: dict[str, dict], target: float | None, settings) -> list[dict]:
+    """Bounded blend of relevance and usable duration; missing targets leave ordinary search intact."""
+    if target is None or settings.duration_weight == 0:
+        return ranked
+    results = []
+    for position, hit in enumerate(ranked, 1):
+        segment = segments[hit["id"]]
+        ratio = min(1.0, max(0.0, segment["end"] - segment["start"]) / target)
+        duration = ratio ** settings.duration_exponent
+        relevance = hit["score"]
+        if any(match.get("route") == "person" for match in hit["matches"]):
+            relevance = (settings.rrf_k + 1) / (settings.rrf_k + position)
+        score = (1 - settings.duration_weight) * relevance + settings.duration_weight * duration
+        results.append({**hit, "score": score, "relevance_score": relevance,
+                        "duration_score": duration, "target_duration": target})
+    return sorted(results, key=lambda item: (-item["score"], item["id"]))
 
 
 def time_iou(left: dict, right: dict) -> float:
@@ -233,17 +257,20 @@ class SearchEngine:
         limit: int,
         started: float,
         ranked: list[dict] | None = None,
+        target_duration: float | None = None,
     ):
         if ranked is None:
             ranked = fuse(routes, self.config.search.weights, self.config.search.rrf_k)
         lookup = {s["id"]: s for s in snapshots}
+        ranked = duration_rank(ranked, lookup, target_duration, self.config.search)
         selected, results = [], []
         for hit in ranked:
             segment = lookup[hit["id"]]
             if any(time_iou(segment, prior) > 0.5 for prior in selected):
                 continue
             selected.append(segment)
-            results.append({**public_segment(segment), "score": hit["score"], "matches": hit["matches"]})
+            results.append({**public_segment(segment), **{key: hit[key] for key in
+                            ("score", "matches", "relevance_score", "duration_score", "target_duration") if key in hit}})
             if len(results) >= limit:
                 break
         return {
@@ -251,7 +278,7 @@ class SearchEngine:
             "index_mode": active["spec"].get("mode", "enriched"),
             "results": results,
             "elapsed_ms": round((perf_counter() - started) * 1000),
-            "score_type": "weighted_rrf",
+            "score_type": "duration_blend" if target_duration and self.config.search.duration_weight else "weighted_rrf",
             "eligible_segments": len(snapshots),
         }
 
@@ -333,8 +360,8 @@ class SearchEngine:
                     return total + quality * 0.001
                 ranked = [{'id': s['id'], 'score': score(s), 'matches': [{'route': 'person', 'rank': i+1}]}
                           for i, s in enumerate(sorted(snapshots, key=lambda s: (-score(s), s['id'])))]
-                result = finish_references(self._result(active, snapshots, {}, query.limit, started, ranked=ranked))
-                result['score_type'] = 'person_coverage_quality'
+                result = finish_references(self._result(active, snapshots, {}, query.limit, started, ranked=ranked, target_duration=query.target_duration))
+                result['score_type'] = 'duration_blend' if query.target_duration and self.config.search.duration_weight else 'person_coverage_quality'
                 return {**result, **meta}
             query = query.model_copy(update={'text': remaining})
         elif mode == 'mentioned':
@@ -356,7 +383,7 @@ class SearchEngine:
 
     def _text_query(self, query, active, snapshots, vectors, started):
         if not snapshots:
-            return self._result(active, snapshots, {}, query.limit, started)
+            return self._result(active, snapshots, {}, query.limit, started, target_duration=query.target_duration)
         if active["spec"].get("format", 1) >= 2:
             return self._channel_text(query, active, snapshots, vectors, started)
         self._validate_space(active)
@@ -386,7 +413,7 @@ class SearchEngine:
                 set(self.config.search.lexical_exclude)
                 | ({"description", "style", "dialogue"} - selected_views),
             )
-        return self._result(active, snapshots, routes, query.limit, started)
+        return self._result(active, snapshots, routes, query.limit, started, target_duration=query.target_duration)
 
     def _channel_text(self, query, active, snapshots, vectors, started):
         selected = set(query.channels or ("visual", "dialogue", "analysis"))
@@ -395,7 +422,7 @@ class SearchEngine:
         available = {v for s in snapshots for v in s.get("indexed_views", [])}
         selected = {c for c in selected if ("video" if c == "visual" else c) in available}
         if not selected:
-            result = self._result(active, snapshots, {}, query.limit, started)
+            result = self._result(active, snapshots, {}, query.limit, started, target_duration=query.target_duration)
             return {**result, "channels": [], "degraded": False, "warnings": []}
         ids = [s["id"] for s in snapshots]
         lexical = {}
@@ -457,7 +484,7 @@ class SearchEngine:
                     match["route"] = "video"
                     match["matched_text"] = None
                     match["evidence"] = [{"start": segment["start"], "end": segment["end"]}]
-        result = self._result(active, snapshots, {}, query.limit, started, ranked=ranked)
+        result = self._result(active, snapshots, {}, query.limit, started, ranked=ranked, target_duration=query.target_duration)
         return {
             **result,
             "channels": sorted(selected),
@@ -465,7 +492,7 @@ class SearchEngine:
             "warnings": ["嵌入不可用，已降级为所选文本渠道的 BM25 检索：" + warning] if warning else [],
         }
 
-    def video(self, path: Path, granularity="moment", limit=20, filters: Filters | None = None) -> dict:
+    def video(self, path: Path, granularity="moment", limit=20, filters: Filters | None = None, *, target_duration: float | None = None) -> dict:
         started = perf_counter()
         info = probe(path)
         if info["duration"] > self.config.search.max_query_seconds + 0.05:
@@ -474,7 +501,7 @@ class SearchEngine:
         if active["spec"].get("format", 1) >= 2:
             snapshots = [s for s in snapshots if "video" in s.get("indexed_views", [])]
         if not snapshots:
-            return self._result(active, snapshots, {}, limit, started)
+            return self._result(active, snapshots, {}, limit, started, target_duration=target_duration)
         v = self.config.video
         pieces = windows(0, info["duration"], v.window_seconds, v.stride_seconds)
         routes = {}
@@ -495,16 +522,16 @@ class SearchEngine:
         for hit in fused:
             for match in hit["matches"]:
                 match["route"] = "video"
-        return self._result(active, snapshots, {}, limit, started, ranked=fused)
+        return self._result(active, snapshots, {}, limit, started, ranked=fused, target_duration=target_duration)
 
-    def image(self, path: Path, granularity="moment", limit=20, filters: Filters | None = None) -> dict:
+    def image(self, path: Path, granularity="moment", limit=20, filters: Filters | None = None, *, target_duration: float | None = None) -> dict:
         started = perf_counter()
         png = image_png(path, self.config.video.max_pixels)
         active, snapshots, vectors = self._context(granularity, filters or Filters())
         if active["spec"].get("format", 1) >= 2:
             snapshots = [s for s in snapshots if "video" in s.get("indexed_views", [])]
         if not snapshots:
-            return self._result(active, snapshots, {}, limit, started)
+            return self._result(active, snapshots, {}, limit, started, target_duration=target_duration)
         if not hasattr(self.embedder, "image"):
             raise ModelError("当前嵌入适配器尚不支持图片输入，请切换支持图片的模型服务")
         with tempfile.TemporaryDirectory(prefix="query-image-", dir=self.store.root) as directory:
@@ -514,7 +541,7 @@ class SearchEngine:
         hits = vectors.query(embedding, "video", [s["id"] for s in snapshots], self.config.search.candidates)
         # Image queries compare only with video vectors, independent of text-fusion weights.
         ranked = fuse({"video": hits}, {"video": 1}, self.config.search.rrf_k)
-        return self._result(active, snapshots, {}, limit, started, ranked=ranked)
+        return self._result(active, snapshots, {}, limit, started, ranked=ranked, target_duration=target_duration)
 
     def similar(
         self, segment_id: str, granularity: str | None = None, limit: int = 20, filters: Filters | None = None

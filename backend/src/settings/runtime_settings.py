@@ -678,7 +678,7 @@ def apply_overrides(config: Config, store: Store) -> Config:
             partial = json.loads(raw_search)
         except json.JSONDecodeError as exc:
             raise ValueError("override.search 不是有效 JSON") from exc
-        allowed = {"weights", "channel_weights", "rrf_k", "candidates"}
+        allowed = {"weights", "channel_weights", "rrf_k", "candidates", "duration_weight", "duration_exponent"}
         unknown = set(partial) - allowed
         if unknown:
             raise ValueError(f"检索调参不支持字段 {sorted(unknown)}；仅允许 {sorted(allowed)}")

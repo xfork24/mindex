@@ -232,8 +232,8 @@ def test_interrupted_index_resumes_without_publishing_partial(processed, config)
 
 def test_rrf_deduplicates_windows_before_ranking():
     result = fuse({"video": [{"id": "a"}, {"id": "a"}, {"id": "b"}]}, {"video": 1}, 60)
-    assert result[0]["score"] == pytest.approx(1 / 61)
-    assert result[1]["score"] == pytest.approx(1 / 62)
+    assert result[0]["score"] == pytest.approx(1.0)
+    assert result[1]["score"] == pytest.approx(61 / 62)
 
 
 def test_evaluation_isolates_qwen_from_asr_in_vectors_and_lexical(processed, config, monkeypatch, tmp_path):

@@ -121,6 +121,8 @@ class VoiceBody(StrictModel):
 
 
 class SearchTuning(StrictModel):
+    duration_weight: float | None = Field(default=None, ge=0, le=0.5, allow_inf_nan=False)
+    duration_exponent: float | None = Field(default=None, ge=0.1, le=8, allow_inf_nan=False)
     channel_weights: dict[str, float] | None = None
     weights: dict[str, float] | None = None
     rrf_k: int | None = Field(default=None, ge=1)
@@ -439,6 +441,8 @@ def settings_router(runtime: RuntimeConfig, store: Store) -> APIRouter:
                     "weights": current.search.weights,
                     "channel_weights": current.search.channel_weights,
                     "rrf_k": current.search.rrf_k,
+                    "duration_weight": current.search.duration_weight,
+                    "duration_exponent": current.search.duration_exponent,
                     "candidates": current.search.candidates,
                 },
                 "default_voice": get_setting(store, "override.studio.voice"),
@@ -587,6 +591,8 @@ def settings_router(runtime: RuntimeConfig, store: Store) -> APIRouter:
                             "weights": merged.weights,
                             "channel_weights": merged.channel_weights,
                             "rrf_k": merged.rrf_k,
+                            "duration_weight": merged.duration_weight,
+                            "duration_exponent": merged.duration_exponent,
                             "candidates": merged.candidates,
                         },
                         ensure_ascii=False,

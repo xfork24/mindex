@@ -265,8 +265,14 @@ function renderRoles(data) {
   $('roles').replaceChildren(...ROLE_ORDER.map((role) => renderRole(byRole[role])));
 }
 
+function normalizedWeights(values) {
+  const scale = Math.max(...Object.values(values), 0) || 1;
+  const total = Object.values(values).reduce((sum, value) => sum + value / scale, 0) || 1;
+  return Object.fromEntries(Object.entries(values).map(([key, value]) => [key, Number((value / scale / total).toFixed(4))]));
+}
 function renderTuning(data) {
-  const weights = data.business.search.weights;
+  const weights = normalizedWeights(data.business.search.weights);
+  const channels = normalizedWeights(data.business.search.channel_weights);
   const grid = $('weight-grid');
   grid.replaceChildren();
   for (const [key, label] of Object.entries(WEIGHT_LABELS)) {
@@ -276,7 +282,7 @@ function renderTuning(data) {
     input.id = `weight-${key}`;
     input.type = 'number';
     input.min = '0';
-    input.step = '0.1';
+    input.step = 'any';input.max = '1';
     input.value = weights[key];
     wrap.append(input);
     grid.append(wrap);
@@ -284,14 +290,16 @@ function renderTuning(data) {
   for (const [key, label] of Object.entries({ visual: MindexI18n.msg("ui.fe84e2eb06a1"), dialogue: MindexI18n.msg("ui.19a061a8abf3"), analysis: MindexI18n.msg("ui.5484a583c2c9") })) {
     const wrap = node('label');wrap.append(node('span', label));
     const input = node('input');input.id = `channel-weight-${key}`;
-    input.type = 'number';input.min = '0';input.step = '0.1';
-    input.value = data.business.search.channel_weights[key];
+    input.type = 'number';input.min = '0';input.step = 'any';input.max = '1';
+    input.value = channels[key];
     wrap.append(input);grid.append(wrap);
   }
+  $('duration-weight').value = data.business.search.duration_weight;
+  $('duration-exponent').value = data.business.search.duration_exponent;
   $('rrf-k').value = data.business.search.rrf_k;
   $('candidates').value = data.business.search.candidates;
   const summary = $('tuning-summary');
-  MindexI18n.setText(summary, MindexI18n.msg("ui.3329e060c3ae", { p0: ['visual', 'dialogue', 'analysis'].map((k) => data.business.search.channel_weights[k]).join('/'), p1: ['video', 'description', 'style', 'dialogue', 'lexical'].map((k) => weights[k]).join('/') }) + MindexI18n.msg("ui.5035217a37ce", { p0:
+  MindexI18n.setText(summary, MindexI18n.msg("ui.3329e060c3ae", { p0: ['visual', 'dialogue', 'analysis'].map((k) => channels[k]).join('/'), p1: ['video', 'description', 'style', 'dialogue', 'lexical'].map((k) => weights[k]).join('/') }) + MindexI18n.msg("ui.5035217a37ce", { p0:
     data.business.search.rrf_k, p1: data.business.search.candidates }));
   MindexI18n.setAttr(summary, "title", MindexI18n.msg("ui.278a6e38a880"));
 }
@@ -1210,7 +1218,7 @@ $('search-tuning').onsubmit = async (event) => {
     await api('/api/settings/business', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ search: { weights, channel_weights, rrf_k: Number($('rrf-k').value), candidates: Number($('candidates').value) } })
+      body: JSON.stringify({ search: { weights, channel_weights, rrf_k: Number($('rrf-k').value), candidates: Number($('candidates').value), duration_weight: Number($('duration-weight').value), duration_exponent: Number($('duration-exponent').value) } })
     });
     notify(MindexI18n.msg("ui.df0f016c336e"));
     await loadSettings();

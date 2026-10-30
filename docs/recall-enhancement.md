@@ -36,7 +36,7 @@ mindex indexes activate OLD_INDEX_ID
 
 ## 检索
 
-`POST /api/search/text` 可附加 `channels: ["visual", "dialogue", "analysis"]`，省略则使用所有可用渠道。新版对白和分析分别等权融合向量与 BM25，再按 `search.channel_weights`（默认 1:1:1）进行渠道 RRF。关闭渠道同时排除该渠道词法文本。旧版索引继续使用 `search.weights`。图片、视频只查询画面表示。
+`POST /api/search/text` 可附加 `channels: ["visual", "dialogue", "analysis"]`，省略则使用所有可用渠道。新版对白和分析分别等权融合向量与 BM25，再按 `search.channel_weights`（默认 0.35:0.15:0.5）进行渠道 RRF。关闭渠道同时排除该渠道词法文本。旧版索引继续使用 `search.weights`。图片、视频只查询画面表示。
 
 结果包含 `matches[].channel`、渠道排名、内部 `rank_details`、`matched_text`、原片 `evidence` 时间。保留隐藏继承、筛选和同源时间重叠去重。查询嵌入不可用时，选中的文本渠道仍可 BM25 检索；响应 `degraded=true` 并带 `warnings`。无可用词法渠道时返回明确错误，不静默返回空结果。
 

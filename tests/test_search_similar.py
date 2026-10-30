@@ -234,7 +234,7 @@ def test_similar_fuses_every_seed_window_with_equal_weights(config, video_file):
         blue["id"]: (1 / (k + 2) + (windows - 1) / (k + 1)) / windows,
     }
     for identifier, score in expected.items():
-        assert hits[identifier]["score"] == pytest.approx(score)
+        assert hits[identifier]["score"] == pytest.approx(score * (k + 1))
         assert len(hits[identifier]["matches"]) == windows
         assert {m["route"] for m in hits[identifier]["matches"]} == {"video"}
     assert [hit["id"] for hit in result["results"]] == [blue["id"], red["id"]]

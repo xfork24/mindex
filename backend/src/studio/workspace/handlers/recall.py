@@ -39,7 +39,7 @@ class RecallHandler(StageHandler):
     def specification(self, config, job_id, w, p, sid, params, resources):
         selected, content = shot_content(w, p, sid)
         inputs = {"content": selected["content"]}
-        payload = {"query": content["query"]}
+        payload = {"query": content["query"], "target_duration": content["estimated_seconds"], "ranking_version": 2}
         # 分镜级覆盖仅在实际设置时进签名，保证未覆盖分镜与历史版本签名逐字节一致。
         if content.get("granularity"):
             payload["granularity"] = content["granularity"]
@@ -94,6 +94,7 @@ class RecallHandler(StageHandler):
             result = engine.text(
                 TextSearch(
                     text=content["query"],
+                    target_duration=content["estimated_seconds"],
                     granularity=granularity,
                     limit=limit,
                     person_ids=recall.person_ids if recall else [],
@@ -122,6 +123,7 @@ class RecallHandler(StageHandler):
                 granularity=granularity,
                 limit=limit,
                 filters=studio.scoped_filters(recall.filters, scope),
+                target_duration=content["estimated_seconds"],
             )
         entries = [
             {

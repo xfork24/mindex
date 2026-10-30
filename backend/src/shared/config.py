@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 from typing import Annotated, Literal
@@ -429,18 +430,20 @@ class VideoConfig(StrictModel):
 
 class SearchConfig(StrictModel):
     channel_weights: dict[str, float] = Field(
-        default_factory=lambda: {"visual": 1, "dialogue": 1, "analysis": 1}
+        default_factory=lambda: {"visual": 0.35, "dialogue": 0.15, "analysis": 0.5}
     )
     lexical_exclude: list[Literal["description", "style", "dialogue"]] = Field(default_factory=list)
     candidates: int = Field(default=100, ge=1, le=1000)
-    rrf_k: int = Field(default=60, ge=1)
+    rrf_k: int = Field(default=30, ge=1)
+    duration_weight: float = Field(default=0.15, ge=0, le=0.5, allow_inf_nan=False)
+    duration_exponent: float = Field(default=2.0, ge=0.1, le=8, allow_inf_nan=False)
     weights: dict[str, float] = Field(
         default_factory=lambda: {
-            "video": 1,
-            "description": 1,
-            "style": 1,
-            "dialogue": 0.5,
-            "lexical": 0.5,
+            "video": 0.35,
+            "description": 0.35,
+            "style": 0.1,
+            "dialogue": 0.1,
+            "lexical": 0.1,
         }
     )
     max_upload_mb: int = Field(default=100, ge=1)
@@ -450,11 +453,11 @@ class SearchConfig(StrictModel):
     @model_validator(mode="after")
     def valid_weights(self):
         if set(self.channel_weights) != {"visual", "dialogue", "analysis"} or any(
-            value < 0 for value in self.channel_weights.values()
+            not math.isfinite(value) or value < 0 for value in self.channel_weights.values()
         ):
             raise ValueError("Provide non-negative channel weights for visual/dialogue/analysis")
         allowed = {"video", "description", "style", "dialogue", "lexical"}
-        if set(self.weights) != allowed or any(v < 0 for v in self.weights.values()):
+        if set(self.weights) != allowed or any(not math.isfinite(v) or v < 0 for v in self.weights.values()):
             raise ValueError("Provide non-negative weights for video/description/style/dialogue/lexical")
         return self
 

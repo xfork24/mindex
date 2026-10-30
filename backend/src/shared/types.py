@@ -110,6 +110,7 @@ class Filters(BaseModel):
 
 
 class TextSearch(BaseModel):
+    target_duration: float | None = Field(default=None, gt=0, allow_inf_nan=False)
     person_ids: list[str] = Field(default_factory=list, max_length=30)
     person_mode: Literal["auto", "onscreen", "mentioned"] = "auto"
     person_relation: Literal["all", "any"] = "all"

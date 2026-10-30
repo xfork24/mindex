@@ -8982,5 +8982,8 @@
   "ui.main_navigation": {"zh": "页面导航", "en": "Main navigation"},
   "ui.segment_default_shot": {"zh": "镜头 {start}–{end}s", "en": "Shot {start}–{end}s"},
   "ui.segment_default_moment": {"zh": "精细片段 {start}–{end}s", "en": "Moment {start}–{end}s"},
-  "ui.segment_default_scene": {"zh": "场景 {start}–{end}s", "en": "Scene {start}–{end}s"}
+  "ui.segment_default_scene": {"zh": "场景 {start}–{end}s", "en": "Scene {start}–{end}s"},
+  "ui.duration_weight": {"zh": "时长匹配权重", "en": "Duration match weight"},
+  "ui.duration_exponent": {"zh": "时长不足惩罚指数", "en": "Shortfall exponent"},
+  "ui.tuning_normalized_help": {"zh": "各组渠道权重自动归一化，相关性与时长得分均为 0–1。时长充足得 1 分，不足时得分为（候选时长 ÷ 所需时长）的指数次方。时长权重仅影响任务分镜召回，使用分镜预估时长。", "en": "Channel weights are normalized within each group. Relevance and duration scores range from 0 to 1. Sufficient duration scores 1; shorter clips score (clip duration / required duration) raised to the exponent. Duration weighting applies to job recall using the shot’s estimated duration."}
 }

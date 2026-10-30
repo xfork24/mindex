@@ -234,3 +234,9 @@
 .tool-fields{grid-template-columns:repeat(auto-fit,minmax(min(210px,100%),1fr))}
 #clone-register-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(210px,100%),1fr));gap:16px}
 #clone-register-fields>label{margin:0}
+
+/* All tuning fields share one continuous wrapping flow. */
+.tuning-controls{display:flex;flex-wrap:wrap;gap:14px;margin-bottom:18px}
+#search-tuning .weight-grid,#search-tuning .tuning-row{display:contents}
+.tuning-controls label{display:flex;flex-direction:column;gap:7px;flex:0 1 140px;min-width:0;font-size:12px;color:var(--muted)}
+.tuning-controls input{width:100%;min-width:0;box-sizing:border-box}
