@@ -674,7 +674,7 @@ class Config(StrictModel):
     def analysis_key(self) -> str:
         return fingerprint(
             {
-                "prompt": 1,
+                "prompt": 2,  # Chinese / English paired analysis; do not reuse monolingual checkpoints.
                 "model": self.analyzer.model_dump(
                     exclude={"timeout", "api_key_env", "response_retries", "initial_output_tokens", "max_output_tokens", "thinking_mode"}
                 ),

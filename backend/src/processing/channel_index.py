@@ -176,6 +176,7 @@ def build_channels(builder, *, activate=False, mode="auto", source_id=None, kind
     if mode == "visual" and kinds and "scene" in kinds:
         raise ValueError("visual 模式不生成语义场景")
     store = builder.store
+    log.info("索引准备开始 · 素材 %s · 渠道 %s · 粒度 %s", source_id or "全部", ",".join(sorted(selected)), ",".join(kinds or (["moment", "shot"] if mode == "visual" else ["moment", "shot", "scene"])))
     previous = store.active_index()
     old = {s["id"]: normalize_snapshot(s) for s in store.snapshots(previous["id"])} if previous else {}
     if kinds is None:
@@ -228,6 +229,7 @@ def build_channels(builder, *, activate=False, mode="auto", source_id=None, kind
             media.references(s["source_id"], s["start"], s["end"])
         except (ValueError, OSError) as exc:
             raise ModelError(f"素材 {s['source_id']} ({s['source_name']}) 媒体缺失：{exc}") from exc
+    log.info("索引快照准备完成 · %d 个片段；开始核验嵌入模型身份", len(snapshots))
     identity = builder.embedder.identity()
     if hasattr(builder.embedder, "require_gate"):
         builder.embedder.require_gate()
@@ -259,17 +261,21 @@ def build_channels(builder, *, activate=False, mode="auto", source_id=None, kind
                 "unit": "segments", "index_id": index_id,
             })
 
+    log.info("索引 %s · 待更新 %d 个片段 · 保留及合并共 %d 个片段", index_id, len(targets), len(snapshots))
     existing_version = store.one("SELECT status FROM index_versions WHERE id=?", (index_id,))
     if existing_version and existing_version["status"] == "ready":
         completed.update(targets)
         notify("index_check")
+        log.info("复用已就绪索引 %s；开始一致性校验", index_id)
         issues = check_index(store, index_id)
         if issues:
             raise ModelError("索引一致性检查失败：" + "; ".join(issues[:5]))
         if activate:
             notify("publish")
+            log.info("开始激活索引 %s", index_id)
             store.activate(index_id)
         notify("published" if activate else "indexed")
+        log.info("索引 %s %s · 用时 %.2f 秒", index_id, "已激活" if activate else "已就绪", perf_counter() - started)
         return index_id
     store.execute(
         "INSERT OR IGNORE INTO index_versions(id,spec,status) VALUES(?,?,'building')", (index_id, dumps(spec))
@@ -282,7 +288,9 @@ def build_channels(builder, *, activate=False, mode="auto", source_id=None, kind
     durable = existing & recorded
     completed.update(sid for sid, ids in targets.items() if ids <= durable)
     notify("embedding")
+    log.info("扫描可复用嵌入缓存 · %d 个片段检查点已完成", len(completed))
     cache = reusable_vectors(builder, identity)
+    log.info("嵌入缓存扫描完成 · %d 个可复用项", len(cache))
     opened = {index_id: vectors}
     reused = embedded = resumed = 0
     task_reused = task_embedded = 0
@@ -301,6 +309,8 @@ def build_channels(builder, *, activate=False, mode="auto", source_id=None, kind
                     version, identifier = cache[key]
                     copies[version].append((identifier, rep_id, s, view, document))
         copied = set()
+        copy_total = sum(len(entries) for entries in copies.values())
+        log.info("开始复制可复用向量 · 共 %d 项", copy_total)
         for version, entries in copies.items():
             if version not in opened:
                 opened[version] = VectorIndex(store.root, version)
@@ -312,6 +322,7 @@ def build_channels(builder, *, activate=False, mode="auto", source_id=None, kind
                 if writes:
                     vectors.upsert_many(writes)
                     copied.update(entry[0] for entry in writes)
+                log.info("向量缓存复制 %d/%d · 来源索引 %s", len(copied), copy_total, version)
         existing.update(copied)
         # Finish and report reusable segments first, even if missing segments
         # occur earlier in the source's ID ordering.
@@ -319,6 +330,9 @@ def build_channels(builder, *, activate=False, mode="auto", source_id=None, kind
             fingerprint([index_id, r[0]]) in existing for r in representations(builder, s)
         ))
         for s in snapshots:
+            if s["id"] in targets:
+                log.info("索引片段 %s [%s] %s %.2f–%.2fs [%s] · 完成 %d/%d",
+                         s.get("source_name", ""), s["source_id"], s["kind"], s["start"], s["end"], s["id"], len(completed), len(targets))
             store.execute(
                 "INSERT OR IGNORE INTO index_members(index_id,segment_id,snapshot) VALUES(?,?,?)",
                 (index_id, s["id"], dumps(s)),
@@ -348,6 +362,8 @@ def build_channels(builder, *, activate=False, mode="auto", source_id=None, kind
                             raise ModelError(
                                 f"保留索引中的 {view} 向量缺失（{s['id']}）；请单独更新对应子任务"
                             )
+                        log.info("生成嵌入开始 · %s [%s] %s %.2f–%.2fs · 渠道 %s · 向量 %s",
+                                 s.get("source_name", ""), s["source_id"], s["kind"], s["start"], s["end"], view, rep_id)
                         if view == "video":
                             a, b = bounds or (0, s["end"] - s["start"])
                             with media.inference_video(
@@ -379,11 +395,14 @@ def build_channels(builder, *, activate=False, mode="auto", source_id=None, kind
                     len(completed), len(targets), task_reused, task_embedded,
                 )
         # 冲过 chroma HNSW 落盘阈值，避免尾部向量只存于内存与 WAL（详见 VectorIndex.flush）。
+        log.info("嵌入处理结束 · 新生成 %d · 复用 %d · 断点续传 %d；开始向量落盘", embedded, reused, resumed)
         vectors.flush()
         notify("index_check")
+        log.info("向量落盘完成；开始索引一致性校验 %s", index_id)
         issues = check_index(store, index_id)
         if issues:
             raise ModelError("索引一致性检查失败：" + "; ".join(issues[:5]))
+        log.info("索引一致性校验通过；重新核验嵌入模型身份")
         if builder.embedder.identity() != identity:
             raise ModelError("索引完成前模型空间发生变化，拒绝发布")
         if hasattr(builder.embedder, "require_gate"):
@@ -404,6 +423,9 @@ def build_channels(builder, *, activate=False, mode="auto", source_id=None, kind
         )
         if activate:
             notify("publish")
+            log.info("开始激活索引 %s", index_id)
             store.activate(index_id)
         notify("published" if activate else "indexed")
+    log.info("索引 %s %s · 用时 %.2f 秒 · 新生成 %d · 复用 %d · 断点续传 %d", index_id,
+             "已激活" if activate else "已就绪", perf_counter() - started, embedded, reused, resumed)
     return index_id

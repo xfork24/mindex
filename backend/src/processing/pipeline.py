@@ -6,6 +6,7 @@ import math
 import shutil
 import tempfile
 from pathlib import Path
+from time import perf_counter
 
 from mindex.models.adapters import (
     AnalysisContentRejected,
@@ -545,6 +546,7 @@ class Pipeline:
         profile = self.annotation_profile(segment["source_id"])
         saved = self.store.json_value("annotations", "segment_id", segment["id"], profile)
         if saved is not None:
+            log.info("分析检查点命中 %s %s %.2f–%.2fs [%s]", segment["source_id"], segment["kind"], segment["start"], segment["end"], segment["id"])
             return saved
         same = self.store.one(
             "SELECT a.data FROM annotations a JOIN segments s ON s.id=a.segment_id "
@@ -553,6 +555,7 @@ class Pipeline:
             (profile, segment["source_id"], segment["start"], segment["end"], segment["start"], segment["end"]),
         )
         if same:
+            log.info("复用相同时间范围的分析检查点 %s %s %.2f–%.2fs [%s]", segment["source_id"], segment["kind"], segment["start"], segment["end"], segment["id"])
             saved = json.loads(same["data"])
             self.store.put_json("annotations", "segment_id", segment["id"], profile, saved)
             return saved
@@ -582,24 +585,30 @@ class Pipeline:
                 ),
             },
         )
+        log.info("分析检查点已保存 %s %s %.2f–%.2fs [%s] · %s", segment["source_id"], segment["kind"], segment["start"], segment["end"], segment["id"], "skipped" if output.get("status") == "skipped" else "complete")
         return output
 
     def analyze(self, source_id: str | None = None, progress=None):
         from mindex.processing.dialogue import atomic_json
 
-        for source in self.selected_sources(source_id):
+        sources = self.selected_sources(source_id)
+        log.info("LLM 分析范围：%d 个素材", len(sources))
+        for source_number, source in enumerate(sources, 1):
+            source_started = perf_counter()
+            log.info("开始素材 %d/%d %s [%s]", source_number, len(sources), source["name"], source["id"])
             profile = self.annotation_profile(source["id"])
             counts = {"skipped": 0}
 
-            def notify(value, counts=counts):
+            def notify(value, counts=counts, source=source, source_number=source_number):
                 if progress:
-                    progress({**value, **counts})
+                    progress({**value, **counts, "source_name": source["name"], "source_id": source["id"],
+                              "source_number": source_number, "source_total": len(sources)})
 
             with self.store.run("analyze", source["id"]):
                 base = [s for s in self.store.segments(source["id"]) if s["kind"] != "scene"]
                 for number, segment in enumerate(base, 1):
                     if progress:
-                        notify({"stage": "analyze", "completed": number - 1, "total": len(base), "unit": "segments"})
+                        notify({"stage": "analyze", "completed": number - 1, "total": len(base), "unit": "segments", **{k: segment[k] for k in ("kind", "start", "end")}, "segment_id": segment["id"]})
                     log.info(
                         "Analyze %s %s %.2f–%.2f",
                         source["name"],
@@ -610,8 +619,10 @@ class Pipeline:
                     saved = self._annotate(segment)
                     counts["skipped"] += saved.get("status") == "skipped"
                     if progress:
-                        notify({"stage": "analyze", "completed": number, "total": len(base), "unit": "segments"})
+                        notify({"stage": "analyze", "completed": number, "total": len(base), "unit": "segments", **{k: segment[k] for k in ("kind", "start", "end")}, "segment_id": segment["id"]})
                 plan = self.store.json_value("scene_plans", "source_id", source["id"], profile)
+                if plan is not None:
+                    log.info("场景计划检查点命中 %s · %d 个场景", source["name"], len(plan))
                 if plan is None:
                     # Turn overlapping moments into contiguous units, while retaining
                     # their descriptions and original boundaries for semantic grouping.
@@ -651,8 +662,10 @@ class Pipeline:
                             })
                         checkpoint = checkpoint_root / (fingerprint(current) + ".json")
                         if checkpoint.is_file():
+                            log.info("场景分组检查点命中 %s %.2f–%.2fs", sid, current[0]["start"], current[-1]["end"])
                             groups = json.loads(checkpoint.read_text(encoding="utf-8"))
                         else:
+                            log.info("场景分组开始 %s · %d 个片段 · %.2f–%.2fs", sid, len(current), current[0]["start"], current[-1]["end"])
                             try:
                                 groups = self.analyzer.group_scenes(current)
                             except AnalysisContentRejected as exc:
@@ -675,18 +688,24 @@ class Pipeline:
                         batch.append(unit)
                     plan.extend(grouped(batch, len(units), checkpoint_root))
                     self.store.put_json("scene_plans", "source_id", source["id"], profile, plan)
+                log.info("场景计划就绪 %s · %d 个场景", source["name"], len(plan))
                 if not plan and progress:
                     notify({"stage": "scenes", "completed": 0, "total": 0, "unit": "scenes"})
                 for scene_number, (start, end) in enumerate(plan, 1):
                     if progress:
                         notify({"stage": "scenes", "completed": scene_number - 1, "total": len(plan),
-                                  "unit": "scenes",
+                                  "unit": "scenes", "kind": "scene", "start": start, "end": end,
                                   "message": "正在生成场景分析"})
                     scene = self._segment(source, "scene", start, end, profile, None, "semantic_grouping")
+                    log.info("分析场景 %s %d/%d %.2f–%.2fs [%s]", source["name"], scene_number, len(plan), start, end, scene["id"])
                     saved = self._annotate(scene)
                     counts["skipped"] += saved.get("status") == "skipped"
                     if progress:
-                        notify({"stage": "scenes", "completed": scene_number, "total": len(plan), "unit": "scenes"})
+                        notify({"stage": "scenes", "completed": scene_number, "total": len(plan), "unit": "scenes",
+                                "kind": "scene", "start": start, "end": end, "segment_id": scene["id"]})
+
+            log.info("素材完成 %d/%d %s [%s] · 用时 %.2f 秒 · 跳过 %d 个片段",
+                     source_number, len(sources), source["name"], source["id"], perf_counter() - source_started, counts["skipped"])
 
     def snapshots(self, source_id: str | None = None) -> list[dict]:
         result = []

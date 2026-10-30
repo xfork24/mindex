@@ -274,7 +274,7 @@ def test_analysis_prompts_request_only_compact_required_json(config, monkeypatch
     assert "未知或空列表省略" in analysis_prompt and "禁止 Markdown" in analysis_prompt
     assert "仅使用以下字段" in analysis_prompt and "最多3项" in analysis_prompt
     assert "即使只有一项也必须写成数组" in analysis_prompt
-    assert 'scene 正确为 ["夜间城市滨水区"]' in analysis_prompt
+    assert 'scene 正确为 ["夜间城市滨水区 / urban waterfront at night"]' in analysis_prompt
     assert "每个元素都是字符串" in analysis_prompt
     assert "唯一字段为 scene_starts" in grouping_prompt and "分组说明" in grouping_prompt
     assert "本批共有 2 个片段，index 为 0 到 1" in grouping_prompt
@@ -440,7 +440,7 @@ def test_analyzer_retry_policy_preserves_existing_analysis_key(config):
     from mindex.shared.config import fingerprint
 
     assert original == fingerprint({
-        "prompt": 1, "model": old_config, "deployment": config.analyzer_deployment, "layout": config.layout_key,
+        "prompt": 2, "model": old_config, "deployment": config.analyzer_deployment, "layout": config.layout_key,
     })
     config.analyzer.response_retries = 20
     config.analyzer.initial_output_tokens = 8000

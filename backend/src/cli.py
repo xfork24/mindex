@@ -127,7 +127,7 @@ def configure(
         ),
     ] = False,
 ):
-    logging.basicConfig(level=logging.DEBUG if verbose else logging.INFO, format="%(levelname)s %(message)s")
+    logging.basicConfig(level=logging.DEBUG if verbose else logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%Y-%m-%d %H:%M:%S%z")
     selected_config = Path(config or os.environ.get("MINDEX_CONFIG", "config.local.yaml")).resolve()
     ctx.meta["config_path"] = selected_config
     if ctx.invoked_subcommand == "backup" and not selected_config.exists():
@@ -374,10 +374,15 @@ def analyze(
       mindex analyze --source SOURCE_ID
     """
     from mindex.processing.pipeline import Pipeline
+    from mindex.shared.command_progress import CommandProgress
 
-    pipeline = Pipeline(ctx.obj)
-    with pipeline.lock(source, "analysis"):
-        pipeline.analyze(source)
+    with CommandProgress("LLM 分析") as progress:
+        pipeline = Pipeline(ctx.obj)
+        logging.getLogger(__name__).info("分析模型：%s / %s；范围：%s", ctx.obj.analyzer.backend, ctx.obj.analyzer.model, source or "全部素材")
+        progress.update({"stage": "lock_wait"})
+        with pipeline.lock(source, "analysis"):
+            progress.update({"stage": "analyze", "message": "扫描素材并准备分析"})
+            pipeline.analyze(source, progress=progress.update)
 
 
 @app.command(name="index")
@@ -414,17 +419,21 @@ def build_index(
     """
     from mindex.processing.indexing import IndexBuilder
     from mindex.processing.pipeline import Pipeline
+    from mindex.shared.command_progress import CommandProgress
 
-    with Pipeline(ctx.obj).lock(source, "publish"):
-        typer.echo(
-            IndexBuilder(ctx.obj).build(
-                activate=activate,
-                mode=mode.value,
-                source_id=source,
-                kinds=tuple(kind) if kind else None,
-                channels=channel,
+    with CommandProgress("索引更新") as progress:
+        logging.getLogger(__name__).info("嵌入模型：%s / %s；范围：%s；渠道：%s；粒度：%s；发布：%s",
+                                         ctx.obj.embedding.backend, ctx.obj.embedding.model, source or "全部素材",
+                                         ",".join(channel or (["visual"] if mode == IndexMode.visual else ["visual", "dialogue", "analysis"])),
+                                         ",".join(kind or (["moment", "shot"] if mode == IndexMode.visual else ["moment", "shot", "scene"])), activate)
+        progress.update({"stage": "lock_wait"})
+        with Pipeline(ctx.obj).lock(source, "publish"):
+            progress.update({"stage": "index_prepare", "message": "初始化索引构建器"})
+            result = IndexBuilder(ctx.obj).build(
+                activate=activate, mode=mode.value, source_id=source,
+                kinds=tuple(kind) if kind else None, channels=channel, progress=progress.update,
             )
-        )
+        typer.echo(result)
 
 
 @app.command()

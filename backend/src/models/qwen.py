@@ -126,6 +126,8 @@ class QwenAnalyzer:
     ):
         started = perf_counter()
         text_only = all(item.get("type") == "text" for item in content)
+        log.info("LLM 请求开始 %s · %s · max_tokens=%d · timeout=%gs",
+                 self.profile.model, "场景分组/文本任务" if text_only else "视频分析", max_tokens, self.profile.timeout)
         payload = adapters.request(
             "POST",
             self.profile.base_url.rstrip("/") + "/chat/completions",
@@ -205,23 +207,29 @@ class QwenAnalyzer:
                 {"type": "image_url", "image_url": {"url": uri}},
             ]
         instructions = (
-            "为影视片段返回简洁、客观、可检索的中文描述。"
+            "为影视片段同时生成简洁、客观、可检索的中文和英文分析。"
+            "中英文必须在同一次响应中同时输出，不能只选一种语言。"
+            "保持下述字段名和类型不变，不增加 zh、en、translations 或任何新字段。"
+            "每个字符串统一使用『中文 / English』格式：先中文，再用空格、斜杠、空格分隔，后接自然英文。"
+            "description 的中文描述后必须紧跟含义一致的英文描述；所有数组中的每一项也必须是中英对照短语。"
+            "英文用常见、具体的视频检索词和规范镜头术语，不用拼音，不照抄中文冒充英文。"
+            "两种语言描述同一组事实，英文不得增加画面中不存在的细节、人物身份、声音或事件。"
             "输出只能是一个合法 JSON 对象，从 { 开始到 } 结束。"
             "禁止 Markdown、代码块、前言、总结、分析过程、字段说明及 JSON 之外的任何文字。"
             "仅使用以下字段，description 必填，其余仅有明确依据时输出，未知或空列表省略："
-            "description（字符串，1到2句，尽量不超过120字，概括主体、关键动作和环境）；"
+            "description（字符串，中文1到2句、尽量不超过120字，英文1到2句、尽量不超过60词；概括主体、关键动作和环境）；"
             "actions（动作顺序）、people（可见人物外观）、objects（主要物品）、scene（地点与环境）、"
             "emotions（可观察情绪）、atmosphere（氛围）、shot_size（景别）、angle（角度）、"
             "camera_motion（镜头运动）、visual_evidence（关键画面依据）、"
             "dialogue_inference（仅对白支持的推断）、uncertainty（影响理解的重要不确定项）。"
-            "除 description 外字段都是字符串数组，每项用短语，通常每字段最多3项；"
+            "除 description 外字段都是字符串数组，每项是一对中英文短语，不要把两种语言拆成两个数组元素，通常每字段最多3项；"
             "这些字段即使只有一项也必须写成数组，不能写成字符串、对象或 null；"
-            '例如 scene 正确为 ["夜间城市滨水区"]，不能写成 "夜间城市滨水区"；'
-            'shot_size 正确为 ["远景"]，不能写成 "远景"。'
-            '格式示例：{"description":"城市滨水区的灯光倒映在水面。",'
-            '"scene":["夜间城市滨水区","水面倒映灯光"],"shot_size":["远景"]}。'
+            '例如 scene 正确为 ["夜间城市滨水区 / urban waterfront at night"]，不能写成 "夜间城市滨水区"；'
+            'shot_size 正确为 ["远景 / wide shot"]，不能写成 "远景"。'
+            '格式示例：{"description":"城市滨水区的灯光倒映在水面。 / City waterfront lights reflect on the water.",'
+            '"scene":["夜间城市滨水区 / urban waterfront at night","水面倒映灯光 / lights reflected on water"],"shot_size":["远景 / wide shot"]}。'
             "示例仅说明格式，内容须以当前画面为准。输出前检查 description 是非空字符串，"
-            "其余已输出字段均为数组且每个元素都是字符串；未知字段省略，不用 null 或空字符串占位。"
+            "其余已输出字段均为数组且每个元素都是字符串，并检查每个字符串都有中文及含义一致的英文；未知字段省略，不用 null 或空字符串占位。"
             "visual_evidence、dialogue_inference、uncertainty 各最多2项，不重复复述描述。"
             "只保留有区分度且有依据的信息，不列无关细节，不逐帧复述。"
             "情绪须有表情或行为依据；人物仅描述外观，不识别真实身份。"

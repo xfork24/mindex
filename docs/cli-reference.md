@@ -107,6 +107,33 @@ uv run mindex align .venv-align/bin/python
 
 分析镜头和精细片段，组织连续场景；失败后可重跑，已完成片段的检查点复用。
 
+当前提示词同时生成中英文分析：保留原 JSON 字段结构，描述与每个标签使用 `中文 / English` 对照格式，英文与中文必须表达相同的可见事实。分析提示词版本已升级，重新运行时不会复用旧版单语分析检查点。对白原文保持不变。
+
+重跑全库 LLM 分析并发布分析渠道：
+
+```bash
+uv run mindex analyze
+uv run mindex index --channel analysis --activate
+```
+
+先在设置中选定并验证本地分析模型档案。上述流程不重跑 ASR 或修改原始视频；分析完成后仍须更新并激活索引，新文本才会用于检索。分析渠道的语义向量和 BM25 文本均包含两种语言；已有纯中文分析也能参与英文查询的语义向量匹配，但 BM25 不自动翻译查询，跨语言语义召回效果取决于嵌入模型。
+
+长时间批量运行时，`analyze` 和 `index` 默认在 stderr 输出带日期、时间及 UTC 偏移的 INFO 日志，不需要 `--verbose`。包含当前模型、素材序号/总数、素材名称/ID、阶段、片段粒度与时间范围、阶段完成数量、缓存命中/保存、模型响应耗时及重试、向量复用/新生成、落盘、一致性检查、索引激活和结束汇总。stdout 仍只输出原命令的结果（`index` 的索引 ID）。
+
+两个命令每 30 秒输出本地进程心跳：总耗时、当前进度、距最近工作日志/进度的时间和最近一条工作日志。心跳不代表远端模型正常响应，也不提供模型内部 token 生成进度；单次模型响应后才会记录服务返回的 token 用量。失败或 Ctrl+C 会输出当前阶段和检查点保留信息，失败返回非零状态，`&&` 后的索引命令不会运行；相同配置下重新执行命令可复用已持久化的检查点。
+
+终端实时查看并保存完整输出（Bash/Zsh）：
+
+```bash
+mkdir -p logs
+set -o pipefail
+export PYTHONUNBUFFERED=1
+{ uv run mindex analyze && uv run mindex index --channel analysis --activate; } 2>&1 | tee -a "logs/llm-analysis-$(date +%Y%m%d-%H%M%S).log"
+```
+
+`2>&1` 同时保存进度、警告与错误；`pipefail` 保留命令失败状态，避免被 `tee` 的成功状态掩盖。需要退出终端仍继续运行时，可将上述命令放在 tmux 会话中执行。
+
+
 ### `mindex index [--activate] [--mode auto|visual|enriched] [--channel CHANNEL...] [--source SOURCE_ID] [--kind KIND...]`
 
 建立或继续新索引，输出索引 ID。

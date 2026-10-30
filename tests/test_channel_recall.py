@@ -405,3 +405,19 @@ def test_skipped_null_annotation_remains_searchable_and_filters_safely(config, v
     for field in ('scene', 'emotion', 'shot_size'):
         _, filtered, _ = engine._context('moment', Filters(**{field:'室内'}), text=True)
         assert segment['id'] not in {s['id'] for s in filtered}
+
+
+def test_english_query_uses_chinese_analysis_semantic_route(config, video_file):
+    """Verify routing with fixture vectors, not the real model's cross-language accuracy."""
+    pipeline = Pipeline(config)
+    source = pipeline.prepare(video_file)
+    segment = pipeline.store.segments(source, "moment")[0]
+    add_analysis(pipeline.store, segment)
+    embedder = CountingEmbedder(config)
+    IndexBuilder(config, embedder).build(activate=True, channels=["analysis"])
+    result = SearchEngine(config, embedder).text(TextSearch(text="quiet room", channels=["analysis"]))
+    assert result["results"]
+    match = result["results"][0]["matches"][0]
+    assert match["channel"] == "analysis"
+    assert "红色房间" in match["matched_text"]
+    assert {detail["route"] for detail in match["rank_details"]} == {"semantic"}

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import time
 from collections.abc import Sequence
@@ -17,6 +18,8 @@ import httpx
 from mindex.shared.config import Config
 from mindex.shared.trace import record
 from mindex.shared.types import Annotation, MaterialDigest, ScriptTemplate, ShotDraft, Utterance
+
+log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from mindex.models.image_generators import ImageRequest
@@ -128,7 +131,10 @@ def request(method: str, url: str, *, timeout: float = 180, attempts: int = 3, a
                 handle = value[1] if isinstance(value, tuple) else value
                 if hasattr(handle, "seek"):
                     handle.seek(0)
-            time.sleep(0.25 * (2**attempt))
+            delay = 0.25 * (2**attempt)
+            status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else type(exc).__name__
+            log.warning("模型 HTTP 请求准备重试 %d/%d · %s · 等待 %.2f 秒", attempt + 2, attempts, status, delay)
+            time.sleep(delay)
         except (ValueError, KeyError) as exc:
             raise ModelError(f"模型服务返回了无效 JSON: {url}") from exc
     raise AssertionError("unreachable")
@@ -161,7 +167,10 @@ def request_bytes(method: str, url: str, *, timeout: float = 180, attempts: int 
                     else ""
                 )
                 raise ModelError(f"模型服务调用失败 {url}: {exc}{detail}") from exc
-            time.sleep(0.25 * (2**attempt))
+            delay = 0.25 * (2**attempt)
+            status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else type(exc).__name__
+            log.warning("模型 HTTP 请求准备重试 %d/%d · %s · 等待 %.2f 秒", attempt + 2, attempts, status, delay)
+            time.sleep(delay)
     raise AssertionError("unreachable")
 
 

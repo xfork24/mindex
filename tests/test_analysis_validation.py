@@ -269,3 +269,53 @@ def test_empty_scene_grouping_does_not_call_model(config, monkeypatch):
 
     monkeypatch.setattr(adapters, "request", unexpected)
     assert QwenAnalyzer(config).group_scenes([]) == []
+
+
+def test_bilingual_annotation_prompt_and_searchable_text(config, monkeypatch):
+    from mindex.search.search import lexical_search
+    from mindex.shared.types import Annotation
+
+    bilingual = {
+        "description": "城市灯光倒映在水面。 / City lights reflect on the water.",
+        "actions": ["行走 / walking"],
+        "scene": ["夜间滨水区 / waterfront at night"],
+        "emotions": ["平静 / calm"],
+        "shot_size": ["远景 / wide shot"],
+        "visual_evidence": ["水面可见灯光倒影 / Reflections of lights are visible on the water"],
+    }
+    requests = []
+
+    def reply(*args, **kwargs):
+        requests.append(kwargs["json"])
+        return chat_response(bilingual)
+
+    monkeypatch.setattr(adapters, "request", reply)
+    monkeypatch.setattr(qwen, "frame_data", lambda *args: [])
+    result = QwenAnalyzer(config).analyze(None, [])
+    assert Annotation.model_validate(result.model_dump()) == result
+    assert result.model_dump(exclude_defaults=True) == bilingual
+    prompt = requests[0]["messages"][0]["content"]
+    assert "中文和英文" in prompt and "同一次响应" in prompt
+    assert "中文 / English" in prompt and "每一项" in prompt
+    assert "不要把两种语言拆成两个数组元素" in prompt
+    assert "保持下述字段名和类型不变" in prompt
+    assert "英文不得增加" in prompt and "不识别真实身份" in prompt
+    analysis = "\n".join(result.views("").values())
+    docs = [{"id": "bilingual", "views": {"analysis": analysis}},
+            {"id": "other", "views": {"analysis": "山顶有积雪。 / Snow covers the mountain."}}]
+    for text in ("waterfront", "walking", "wide shot", "灯光", "平静"):
+        assert lexical_search(text, docs, 2)[0]["id"] == "bilingual"
+
+
+def test_bilingual_prompt_changes_analysis_cache_identity(config):
+    from mindex.shared.config import fingerprint
+
+    old = fingerprint({
+        "prompt": 1,
+        "model": config.analyzer.model_dump(exclude={
+            "timeout", "api_key_env", "response_retries", "initial_output_tokens", "max_output_tokens", "thinking_mode",
+        }),
+        "deployment": config.analyzer_deployment,
+        "layout": config.layout_key,
+    })
+    assert config.analysis_key != old
