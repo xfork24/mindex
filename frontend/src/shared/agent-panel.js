@@ -11,6 +11,7 @@
   const TAB_KEY = 'mindex.agent.tab';
   const FOCUS_KEY = 'mindex.agent.focus';
   const FOLLOW_KEY = 'mindex.agent.follow';
+  const FOLLOW_SCROLL_KEY = 'mindex.agent.followScroll';
   const ALWAYS_ALLOW_KEY = 'mindex.agent.alwaysAllow';
   const WIDTH_KEY = 'mindex.agent.width';
   const DEFAULT_WIDTH = 440, MIN_WIDTH = 320, WIDTH_STEP = 24;
@@ -22,7 +23,7 @@
   const state = {
     session: null, seq: -1, source: null, retry: null, status: 'idle', open: false, live: false,
     cards: new Map(), streams: new Map(), approvals: new Map(), questions: new Map(), builds: new Map(),
-    feedSeq: null, feed: null, feedRetry: null, pendingNav: null, follow: true, alwaysAllow: false,
+    feedSeq: null, feed: null, feedRetry: null, pendingNav: null, follow: true, followScroll: false, alwaysAllow: false,
     attachments: [], creating: null, retryDelay: null, feedRetryDelay: null,
     inputHistory: [], historyIndex: null, historyDraft: null,
   };
@@ -43,6 +44,7 @@
     } catch { return 'tab-' + Math.random().toString(36).slice(2); }
   })();
   try { state.follow = localStorage.getItem(FOLLOW_KEY) !== '0'; } catch {}
+  try { state.followScroll = localStorage.getItem(FOLLOW_SCROLL_KEY) === '1'; } catch {}
   try { state.alwaysAllow = localStorage.getItem(ALWAYS_ALLOW_KEY) === '1'; } catch {}
   function currentPage() {
     const path = location.pathname.replace(/^\/+|\/+$/g, '').replace(/\.html$/, '');
@@ -115,6 +117,17 @@
   });
   followLabel.append(followBox, node('span', '', t('ui.agent_follow')));
   if (i18n()) i18n().setAttr(followLabel, 'title', t('ui.agent_follow_hint'));
+  const followScrollLabel = node('label', 'agent-follow-scroll');
+  const followScrollBox = node('input');
+  followScrollBox.type = 'checkbox';
+  followScrollBox.checked = state.followScroll;
+  followScrollBox.addEventListener('change', () => {
+    state.followScroll = followScrollBox.checked;
+    try { localStorage.setItem(FOLLOW_SCROLL_KEY, state.followScroll ? '1' : '0'); } catch {}
+    scroll();
+  });
+  followScrollLabel.append(followScrollBox, node('span', '', t('ui.agent_follow_scroll')));
+  if (i18n()) i18n().setAttr(followScrollLabel, 'title', t('ui.agent_follow_scroll_hint'));
   // 总是允许：开启后收到确认请求即自动回复 allowed-once，不再逐次询问（选择记在本机）。
   const alwaysLabel = node('label', 'agent-always-allow');
   const alwaysBox = node('input');
@@ -128,7 +141,7 @@
   alwaysLabel.append(alwaysBox, node('span', '', t('ui.agent_always_allow')));
   if (i18n()) i18n().setAttr(alwaysLabel, 'title', t('ui.agent_always_allow_hint'));
   const toggles = node('div', 'agent-toggles');
-  toggles.append(followLabel, alwaysLabel);
+  toggles.append(followLabel, followScrollLabel, alwaysLabel);
   head.append(toggles);
   const statusLine = node('div', 'agent-status');
   statusLine.setAttribute('role', 'status');
@@ -340,7 +353,7 @@
     log.append(item);
     scroll();
   }
-  function scroll() { log.scrollTop = log.scrollHeight; }
+  function scroll() { if (state.followScroll) log.scrollTop = log.scrollHeight; }
 
   // ------------------------------------------------------------ 会话
   async function loadSessions(select) {
@@ -532,6 +545,7 @@
         break;
       default: break;
     }
+    scroll();
   }
   function toolCall(data) {
     const card = node('details', 'agent-tool');

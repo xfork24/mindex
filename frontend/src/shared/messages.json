@@ -7591,6 +7591,8 @@
   "ui.agent_secret_paste": {"zh": "这看起来像 API 密钥。为了安全，请不要在对话里粘贴密钥；需要时助手会弹出密钥表单。", "en": "This looks like an API key. For safety, do not paste keys into the chat; the assistant will show a key form when needed."},
   "ui.agent_follow": {"zh": "跟随助手定位", "en": "Follow the assistant"},
   "ui.agent_follow_hint": {"zh": "开启后，页面会切换并定位到助手查询或修改的位置；关闭后只刷新数据。", "en": "When on, the page switches to and highlights what the assistant queries or changes; when off, data only refreshes."},
+  "ui.agent_follow_scroll": {"zh": "跟随滚动", "en": "Follow scrolling"},
+  "ui.agent_follow_scroll_hint": {"zh": "开启后，助手消息区域随新消息和回复自动滚动到底部；关闭后保留当前阅读位置。", "en": "When on, the assistant's messages automatically scroll to the bottom as new messages and replies arrive; when off, the current reading position is kept."},
   "ui.agent_focus_other_plan": {"zh": "助手操作的是方案「{p0}」，不是当前打开的方案", "en": "The assistant worked on plan \"{p0}\", not the plan currently open"},
   "ui.agent_media_open": {"zh": "查看 {p0}", "en": "View {p0}"},
   "ui.agent_media_viewer": {"zh": "媒体浏览", "en": "Media viewer"},

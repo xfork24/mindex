@@ -78,8 +78,8 @@
 tr.agent-focus{animation:none}
 tr.agent-focus>*{animation:agent-focus-pulse 2.4s ease-out 1}
 .agent-toggles{display:flex;align-items:center;gap:6px 16px;width:100%;flex-wrap:wrap}
-.agent-follow,.agent-always-allow{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
-.agent-follow input,.agent-always-allow input{height:auto}
+.agent-follow,.agent-follow-scroll,.agent-always-allow{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
+.agent-follow input,.agent-follow-scroll input,.agent-always-allow input{height:auto}
 
 /* 助手回复的 Markdown（经 DOMPurify 净化）；用户消息仍是保留换行的纯文本。 */
 .agent-assistant{white-space:normal}
