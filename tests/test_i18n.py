@@ -121,7 +121,7 @@ def test_diagnostic_language_switching():
 
 def test_all_pages_boot_language_before_visible_content():
     pages = list(STATIC.glob('*/*.html'))
-    assert len(pages) == 10
+    assert len(pages) == 11
     for page in pages:
         html = page.read_text()
         boot = re.search(r'<script\s+src="/assets/shared/i18n-boot\.js[^\"]*"[^>]*>', html)

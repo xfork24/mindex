@@ -581,7 +581,7 @@ async function showAnalysis(item) {
       const labels = { description: MindexI18n.msg("ui.412f54dc38e6"), actions: MindexI18n.msg("ui.d9d9827827e1"), people: MindexI18n.msg("ui.b755b68373c8"), objects: MindexI18n.msg("ui.539cb3b0a662"), scene: MindexI18n.msg("ui.625b392c7b8a"), emotions: MindexI18n.msg("ui.6e8e0c3eeeac"), atmosphere: MindexI18n.msg("ui.6b8f229d5eb9"), shot_size: MindexI18n.msg("ui.6867f7b4537a"), angle: MindexI18n.msg("ui.96ba4a436593"), camera_motion: MindexI18n.msg("ui.0118461d56e8"), visual_evidence: MindexI18n.msg("ui.cf5030475efb"), dialogue_inference: MindexI18n.msg("ui.cf335345e962"), uncertainty: MindexI18n.msg("ui.43f1d3835b20") };
       for (const [key, value] of Object.entries(data.llm.annotation)) {
         const text = Array.isArray(value) ? value.join('；') : String(value ?? '');
-        if (text) llm.append(node('p', `${labels[key] || key}：${text}`));
+        if (text) llm.append(MindexAnalysisText.setText(node('p'), value, {label: labels[key] || key}));
       }
     } else {llm.append(node('p', MindexI18n.system(data.llm)));if (data.llm.reason) llm.append(node('p', MindexI18n.system(data.llm.reason), 'muted'));}
     target.append(llm);

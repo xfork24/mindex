@@ -130,14 +130,21 @@ function details(result) {
   target.append(element('h3', result.display_name || result.source_name));
   if (result.display_name) target.append(element('p', result.source_name));
   const video = element('video');queueMicrotask(() => ShotPlayer.attach(video, `/api/playlists/${result.id}`));video.controls = true;video.preload = 'metadata';
-  target.append(video, element('p', `${clock(result.start)} — ${clock(result.end)}`), element('p', annotation.description || MindexI18n.msg(result.annotation_status === 'skipped' ? 'ui.search_analysis_skipped' : 'ui.fec3adb80692')));
+  const summary = element('p');
+  if (annotation.description) MindexAnalysisText.setText(summary, annotation.description);
+  else MindexI18n.setText(summary, MindexI18n.msg(result.annotation_status === 'skipped' ? 'ui.search_analysis_skipped' : 'ui.fec3adb80692'));
+  target.append(video, element('p', `${clock(result.start)} — ${clock(result.end)}`), summary);
   for (const [title, items] of [[MindexI18n.msg("ui.d9d9827827e1"), (annotation.actions || [])], [MindexI18n.msg("ui.cf5030475efb"), (annotation.visual_evidence || [])], [MindexI18n.msg("ui.cf335345e962"), (annotation.dialogue_inference || [])], [MindexI18n.msg("ui.43f1d3835b20"), (annotation.uncertainty || [])]]) {
-    if (items.length) target.append(element('p', `${title}：${items.join('；')}`));
+    if (items.length) target.append(MindexAnalysisText.setText(element('p'), items, {label: title}));
   }
   if (result.dialogue.length) target.append(element('pre', result.dialogue.map((u) => `${clock(result.start + u.start)} ${u.text}`).join('\n')));
   target.append(element('p', MindexI18n.msg("ui.f1a2a7a0cfdc", { p0: result.score.toFixed(5), p1: result.matches.map((m) => MindexI18n.msg("ui.ff429c0bec08", { p0: routeNames[m.route] || m.route, p1: m.rank })).join('；') })));
   for (const match of result.matches || []) {
-    if (match.matched_text) target.append(element('p', `${routeNames[match.channel] || match.channel}：${match.matched_text}`));
+    if (match.matched_text) {
+      const analysis = match.channel === 'analysis' || ['description', 'style'].includes(match.route);
+      target.append(analysis ? MindexAnalysisText.setText(element('p'), match.matched_text, {label: routeNames[match.channel] || routeNames[match.route] || match.channel || match.route, view: true}) :
+        element('p', `${routeNames[match.channel] || match.channel}：${match.matched_text}`));
+    }
     for (const evidence of match.evidence || []) {
       if (evidence.text) target.append(element('p', `${clock(evidence.start)} — ${clock(evidence.end)}：${evidence.text}`));
     }
@@ -209,14 +216,21 @@ function render(data) {
     }
     for (const name of personTags.slice(0, 3)) tags.append(element('span', name, 'tag'));
     channels.forEach((channel) => tags.append(element('span', routeNames[channel] || channel, 'tag')));
-    [...(annotation.scene || []), ...(annotation.emotions || []), ...(annotation.shot_size || [])].slice(0, 5).forEach((tag) => tags.append(element('span', tag, 'tag')));
+    [...(annotation.scene || []), ...(annotation.emotions || []), ...(annotation.shot_size || [])].slice(0, 5).forEach((tag) => tags.append(MindexAnalysisText.setText(element('span', undefined, 'tag'), tag)));
     const actions = element('div', undefined, 'card-actions');
     const detail = element('button', MindexI18n.msg("ui.faea8c1db9cc"));detail.type = 'button';detail.onclick = () => details(result);
     actions.append(detail, managementLink(result), correctionLink(result));
-    const evidenceText = (result.matches || []).find((match) => match.matched_text)?.matched_text;
+    const evidenceMatch = (result.matches || []).find((match) => match.matched_text);
+    const evidenceText = evidenceMatch?.matched_text;
     const description = result.display_name || evidenceText || (result.annotation_status === 'not_analyzed' ? '' : annotation.description || '');
     body.append(title);
-    if (description) body.append(element('p', description, 'card-description'));
+    if (description) {
+      const content = element('p', undefined, 'card-description');
+      const analysisEvidence = evidenceMatch?.channel === 'analysis' || ['description', 'style'].includes(evidenceMatch?.route);
+      if (!result.display_name && (!evidenceText || analysisEvidence)) MindexAnalysisText.setText(content, description, {view: Boolean(evidenceText)});
+      else MindexI18n.setText(content, description);
+      body.append(content);
+    }
     if (tags.childElementCount) body.append(tags);
     body.append(actions);
     card.append(preview, body);$('results').append(card);
