@@ -10,14 +10,22 @@ from fastapi.testclient import TestClient
 
 def wait_idle(client: TestClient, sid: str, timeout: float = 30, status=("idle",)) -> list[dict]:
     deadline = time.monotonic() + timeout
+    events: list[dict] = []
+    after = -1
+    starts = ends = 0
     while time.monotonic() < deadline:
-        data = client.get(f"/api/agent/sessions/{sid}/log").json()
+        # 长任务只读取新增事件，避免反复传输、解码全部历史拖慢运行中的会话。
+        data = client.get(f"/api/agent/sessions/{sid}/log", params={"after": after}).json()
+        events.extend(data["items"])
+        if data["items"]:
+            after = data["items"][-1]["seq"]
         types = [e["type"] for e in data["items"]]
-        starts, ends = types.count("turn/start"), types.count("turn/end")
+        starts += types.count("turn/start")
+        ends += types.count("turn/end")
         if data["status"] in status and starts and starts == ends:
-            return data["items"]
+            return events
         if data["status"] == "waiting" and "waiting" in status:
-            return data["items"]
+            return events
         time.sleep(0.02)
     raise AssertionError(f"会话 {sid} 未在 {timeout}s 内到达 {status}：{client.get(f'/api/agent/sessions/{sid}/log').json()}")
 

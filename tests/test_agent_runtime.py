@@ -114,7 +114,8 @@ def test_unlimited_steps_with_rolling_window(config):
     with TestClient(create_app(config, agent_llm=llm)) as client:
         sid = new_session(client)
         send(client, sid, "完成长任务", context={"page": "studio"})
-        events = wait_idle(client, sid)
+        # 260 次真实工具调用与 SQLite 落盘在 CI 上可能超过普通会话的 30 秒等待预算。
+        events = wait_idle(client, sid, timeout=120)
         status = client.get("/api/agent/status").json()
         assert status["max_steps"] is None and status["context_window_steps"] == 256
     assert events[-1]["data"]["reason"] == {"kind": "completed"}
