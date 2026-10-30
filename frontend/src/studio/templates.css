@@ -43,3 +43,15 @@
 .brand-section{margin-top:16px;border-top:1px solid var(--line);padding-top:12px}
 .brand-asset{margin:8px 0}
 .brand-preview{display:block;max-width:320px;max-height:180px;margin:6px 0;background:repeating-conic-gradient(#ddd 0 25%,#fff 0 50%) 0 0/16px 16px}
+
+/* Shared by copy, style and music templates: short fields flow across the available width. */
+.template-fields{grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr))}
+.preview-inputs{grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr))}
+.template-form-actions,.preview-actions,.preview-result-head{flex-wrap:wrap;min-width:0;max-width:100%}
+.brand-preview{max-width:min(320px,100%)}
+.brand-section:has(>.brand-asset){display:flex;flex-wrap:wrap;align-items:flex-start;gap:12px 16px}
+.brand-section>h3,.brand-section>.template-fields{flex-basis:100%}
+.brand-asset{flex:1 1 240px;min-width:0;max-width:100%}
+
+.template-form .form-field:has(>input[type=checkbox]){flex-direction:row-reverse;justify-content:flex-end;align-items:center}
+.template-form input[type=checkbox],.template-form input[type=radio]{width:16px;flex:0 0 16px}

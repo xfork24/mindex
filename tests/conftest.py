@@ -159,6 +159,9 @@ class FixtureWriter:
         self.references: list = []  # 每次调用收到的参考文稿
         self.profiles: list = []  # 每次调用收到的账号档案写作约束（None 表示没有档案）
 
+    def complete(self, instructions: str, text: str) -> str:
+        return '{"title":"交付测试标题","description":"交付测试简介","tags":["测试"]}'
+
     def write(self, outline: str, *, template, materials=None, references=(), profile=None) -> str:
         self.calls += 1
         self.outlines.append(outline)
@@ -197,6 +200,8 @@ def convert_to_legacy(config: Config, job_id: str) -> dict:
 
     state = studio.load_job(config, job_id)
     state["input_text"] = state.pop("outline")
+    for key in ("delivery", "exports", "publish"):
+        state["options"].pop(key, None)
     studio.save(studio.job_path(config, job_id), state)
     return state
 

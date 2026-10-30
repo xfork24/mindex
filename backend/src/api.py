@@ -156,6 +156,7 @@ def create_app(
     register_page("studio", "templates.html", ("/studio/templates", "/studio/templates/"))
     # 选题挖掘同为创作页子页面（标签位于创作任务与文案模板之间）。
     register_page("studio", "topics.html", ("/studio/topics", "/studio/topics/"))
+    register_page("studio", "delivery-templates.html", ("/studio/delivery-templates", "/studio/delivery-templates/"))
     register_page("studio", "brands.html", ("/studio/brands", "/studio/brands/"))
     # 音乐库是素材管理页的子页面（与素材并列的分区标签）；第三方工具是设置页的一个配置组。
     register_page("admin", "music.html", ("/admin/music", "/admin/music/"))

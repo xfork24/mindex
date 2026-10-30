@@ -968,6 +968,9 @@ def create_job(config: Config, text: str, title: str | None = None, options: dic
         "execution": {"status": "idle", "current_step": None, "remaining_steps": []},
         "artifact_version": 1,
     }
+    from mindex.shared.storage import Store
+    from mindex.studio.delivery_templates import apply, default_snapshot
+    state["options"] = apply(state["options"], default_snapshot(store or Store(config.data_dir)))
     save(job_path(config, job_id), state)
     return state
 

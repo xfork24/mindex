@@ -169,7 +169,7 @@ def _metadata_v3(db) -> None:
     子表不声明外键，删除档案由 ``topics/profiles.delete`` 在一个事务里级联。"""
     execute_script(db, """
 CREATE TABLE IF NOT EXISTS topic_profiles (
-  id TEXT PRIMARY KEY, name TEXT NOT NULL, body TEXT NOT NULL,
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, body TEXT NOT NULL, asset_paths TEXT NOT NULL DEFAULT '[]',
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS topic_sources (
@@ -255,8 +255,34 @@ CREATE TABLE IF NOT EXISTS tool_sources (
 """)
 
 
+def _metadata_v7(db) -> None:
+    execute_script(db, """
+CREATE TABLE IF NOT EXISTS delivery_templates (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, body TEXT NOT NULL, asset_paths TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+""")
+
+
+def _metadata_v8(db) -> None:
+    """Seed once; tombstones prevent deleted IDs being resurrected or reused."""
+    import yaml
+
+    execute_script(db, """
+CREATE TABLE IF NOT EXISTS delivery_platforms (
+  id TEXT PRIMARY KEY, body TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+""")
+    for key in ("bilibili", "douyin", "youtube"):
+        source = Path(__file__).resolve().parent.parent / "studio" / "platforms" / f"{key}.yaml"
+        body = yaml.safe_load(source.read_text(encoding="utf-8"))
+        db.execute("INSERT OR IGNORE INTO delivery_platforms(id,body,created_at,updated_at) VALUES(?,?,?,?)",
+                   (key, dumps(body), "2026-01-01T00:00:00", "2026-01-01T00:00:00"))
+
+
 # metadata.sqlite3 的有序迁移：只追加，不修改已发布的步骤（见 shared/migrations.py）。
-METADATA_STEPS = (_metadata_v1, _metadata_v2, _metadata_v3, _metadata_v4, _metadata_v5, _metadata_v6)
+METADATA_STEPS = (_metadata_v1, _metadata_v2, _metadata_v3, _metadata_v4, _metadata_v5, _metadata_v6, _metadata_v7, _metadata_v8)
 
 
 def migrate_metadata(db) -> int:

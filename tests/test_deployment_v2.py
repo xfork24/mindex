@@ -903,3 +903,29 @@ def test_keyboard_interrupt_records_failed_pipeline_run(config):
     row = store.one("SELECT status,message,finished_at FROM runs ORDER BY id DESC LIMIT 1")
     assert row["status"] == "failed" and row["message"] == "KeyboardInterrupt"
     assert row["finished_at"] is not None
+
+
+@pytest.mark.parametrize("changed", [False, True])
+def test_warmup_uses_relocated_model_files(native, tmp_path, monkeypatch, changed):
+    from mindex.search.warmup import _warm_model_files
+
+    config = native["config"]
+    manifest_path = Path(config.embedding.deployment_manifest)
+    manifest_bytes = manifest_path.read_bytes()
+    moved = tmp_path / "WeMM-Embedding"
+    moved.mkdir()
+    weights = moved / native["weights"].name
+    native["weights"].rename(weights)
+    native["mmproj"].rename(moved / native["mmproj"].name)
+    native["props"]["model_path"] = str(weights)
+    baselines = []
+    monkeypatch.setattr(compatibility, "load_baseline", lambda *args: baselines.append(args))
+    if changed:
+        weights.write_bytes(b"different-model")
+        with pytest.raises(adapters.ModelError, match="SHA256"):
+            _warm_model_files(config)
+        assert not baselines
+    else:
+        _warm_model_files(config)
+        assert len(baselines) == 1
+    assert manifest_path.read_bytes() == manifest_bytes

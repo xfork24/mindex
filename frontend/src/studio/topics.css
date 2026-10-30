@@ -118,3 +118,12 @@
 .calendar-row label{min-width:160px}
 .calendar-row .check{min-width:0;min-height:32px}
 .schedule-status{flex:1 1 100%;margin:0;font-size:12px;line-height:1.7}
+
+/* Data-source fields and action rows use the same wrapping logic as delivery settings. */
+.topics-form-grid-3{grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr))}
+.source-fields{flex-direction:row;flex-wrap:wrap;align-items:flex-end;gap:12px 16px}
+.source-fields>.form-field{flex:1 1 220px;min-width:0}
+.source-fields>.form-field:has(textarea){flex-basis:320px}
+.source-form-actions,.gaps-actions,.topic-outline-actions,.topics-section>summary{flex-wrap:wrap}
+.topics-profile-field{min-width:0;flex:1 1 240px}
+.topic-outline-foot label,.calendar-row label,.gaps-actions label{min-width:0;flex:1 1 180px}

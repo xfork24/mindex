@@ -326,3 +326,11 @@ button.language-switch .language-divider::after{content:"";position:absolute;ins
 /* Transient operation feedback stays on one line in its local region. */
 .notice.local-feedback{grid-column:1/-1;min-width:0;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:8px;padding:6px 10px;line-height:1.5}
 .notice.local-feedback[hidden]{display:none}
+
+/* Form groups follow available container width, including side panels and dialogs. */
+.form-grid,.filter-grid{grid-template-columns:repeat(auto-fit,minmax(min(210px,100%),1fr))}
+.fields>label{flex:1 1 210px;max-width:none}
+.fields>:is(input,select,textarea){max-width:100%;min-width:0}
+.search-scope-row,.search-filter-row{grid-template-columns:repeat(auto-fit,minmax(min(190px,100%),1fr))}
+.form-grid>.check{align-self:center}
+:is(.section-heading,.preview-actions,.preview-result-head,.source-form-actions,.gaps-actions,.topic-outline-actions){flex-wrap:wrap;min-width:0}

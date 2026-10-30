@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import copy
+
 from mindex.shared.storage import Store
 from mindex.studio import studio
+from mindex.studio.platforms import snapshot_publish
 
 from . import signatures
 from .handlers.script import profile_changed, template_changed
@@ -139,6 +142,16 @@ def detail(config, job_id, w, *, store=None, compact=False):
         for k, v in w["versions"].items()
     }
     result = {**w, "versions": versions}
+    # Materialize legacy rules only in the response; revision and historical stage signatures stay unchanged.
+    def display_plan(item):
+        options = copy.deepcopy(item["options"])
+        if options.get("publish"):
+            options["publish"] = snapshot_publish(options["publish"], legacy=True)
+        delivery = options.get("delivery")
+        if delivery and delivery["config"].get("publish"):
+            delivery["config"]["publish"] = snapshot_publish(delivery["config"]["publish"], legacy=True)
+        return {**item, "options": options}
+    result["plans"] = {key: display_plan(item) for key, item in w["plans"].items()}
     result["job"] = studio.load_job(config, job_id)
     result["revision"] = revision(p)
     result["script_stale"] = script_stale(p)

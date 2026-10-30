@@ -14,6 +14,7 @@ from mindex.agent.registry import Preview, ToolContext, ToolError, ToolOutput, T
 from mindex.agent.tools.common import check, load_view
 from mindex.agent.tools.studio_write import JobId, PlanId, mutation, planned, studio_focus
 from mindex.shared.config import StrictModel
+from mindex.studio.platforms import PlatformId, for_plan
 
 MODES = {"derive": "快速派生", "rerender": "重新渲染"}
 FITS = {"crop": "裁切铺满", "pad": "加边完整保留"}
@@ -86,7 +87,10 @@ def specs() -> list[ToolSpec]:
 
 
 # ------------------------------------------------------------ 平台发布
-PLATFORM_NAMES = {"bilibili": "哔哩哔哩", "douyin": "抖音", "youtube": "YouTube"}
+def platform_name(value, key):
+    return (value or {}).get("platform_specs", {}).get(key, {}).get("name", key)
+
+
 COVER_SOURCES = {"frame": "成片挑帧", "aigc": "AI 生成", "upload": "上传图片"}
 
 
@@ -117,8 +121,8 @@ class CoverArgs(StrictModel):
 class SetPublish(StrictModel):
     job_id: str | None = JobId
     plan_id: str | None = PlanId
-    platforms: list[Literal["bilibili", "douyin", "youtube"]] = Field(
-        max_length=3, description="发布平台（整体替换）；空列表表示不再发布")
+    platforms: list[PlatformId] = Field(
+        description="发布平台标识（list_platforms 列出）；整体替换，空列表表示不再发布")
     cover: CoverArgs | None = Field(default=None, description="封面设置（整体替换）；省略保留现有设置")
 
 
@@ -126,7 +130,7 @@ def publish_text(value) -> str:
     if not value:
         return "不发布"
     cover = value.get("cover") or {}
-    return (f"平台 {'、'.join(PLATFORM_NAMES[item] for item in value['platforms'])}；封面 "
+    return (f"平台 {'、'.join(platform_name(value, item) for item in value['platforms'])}；封面 "
             f"{COVER_SOURCES[cover.get('source', 'frame')]}" + (f"（{cover['time']:g} 秒）" if cover.get("time") is not None
                                                              else "") + (f"，标题「{cover['title']}」" if cover.get("title") else ""))
 
@@ -137,7 +141,16 @@ async def publish_body(args: SetPublish, ctx: ToolContext):
     value = None
     if args.platforms:
         cover = args.cover.model_dump(exclude_none=True) if args.cover else (current.get("cover") or {})
-        value = {"platforms": list(dict.fromkeys(args.platforms)), "cover": cover}
+        catalogue = {item["id"]: item for item in check(await ctx.client.get("/api/studio/platforms"), "读取平台")["items"]}
+        specs = {}
+        for key in args.platforms:
+            if key in current.get("platforms", []):
+                specs[key] = for_plan(view.plan, key).model_dump()
+            elif key in catalogue:
+                specs[key] = catalogue[key]
+            else:
+                raise ToolError(f"找不到平台：{key}", code="platform_missing")
+        value = {"platforms": list(dict.fromkeys(args.platforms)), "cover": cover, "platform_specs": specs}
     options = {key: item for key, item in view.plan["options"].items() if key != "references"}
     return view, current or None, value, {"revision": view.revision, "options": {**options, "publish": value}}
 
@@ -148,10 +161,10 @@ async def preview_set_publish(args: SetPublish, ctx: ToolContext) -> Preview:
     warnings = []
     canvas = view.plan["options"].get("canvas") or "16:9"
     exports = {item["canvas"] for item in view.plan["options"].get("exports") or []}
-    wanted = {"bilibili": "16:9", "douyin": "9:16", "youtube": "16:9"}
+    wanted = {key: spec["canvas"] for key, spec in (after or {}).get("platform_specs", {}).items()}
     for platform in (after or {}).get("platforms", []):
         if wanted[platform] != canvas and wanted[platform] not in exports:
-            warnings.append(f"{PLATFORM_NAMES[platform]} 需要 {wanted[platform]} 画幅，方案没有该画幅的导出，"
+            warnings.append(f"{platform_name(after, platform)} 需要 {wanted[platform]} 画幅，方案没有该画幅的导出，"
                             "发布包会用方案成片（画幅不符）；可先用 set_exports 增加导出")
     if after:
         warnings.append("下次构建会生成发布元数据（调用文案模型）、封面与发布包；用 build_publish_package 构建")
@@ -175,7 +188,7 @@ async def set_publish(args: SetPublish, ctx: ToolContext) -> ToolOutput:
 class CoverCandidates(StrictModel):
     job_id: str | None = JobId
     plan_id: str | None = PlanId
-    platform: Literal["bilibili", "douyin", "youtube"]
+    platform: PlatformId
     limit: int = Field(default=6, ge=1, le=20)
 
 
@@ -191,7 +204,7 @@ async def cover_candidates(args: CoverCandidates, ctx: ToolContext) -> ToolOutpu
 class GetPublishMetadata(StrictModel):
     job_id: str | None = JobId
     plan_id: str | None = PlanId
-    platform: Literal["bilibili", "douyin", "youtube"]
+    platform: PlatformId
 
 
 def metadata_of(view, platform) -> dict | None:
@@ -203,9 +216,9 @@ async def get_publish_metadata(args: GetPublishMetadata, ctx: ToolContext) -> To
     view = await load_view(ctx, args.job_id, args.plan_id)
     item = metadata_of(view, args.platform)
     if not item or item.get("status") != "complete":
-        raise ToolError(f"{PLATFORM_NAMES[args.platform]} 还没有发布元数据；先 set_publish 再构建", code="metadata_missing")
+        raise ToolError(f"{platform_name(view.plan['options'].get('publish'), args.platform)} 还没有发布元数据；先 set_publish 再构建", code="metadata_missing")
     data = item["data"]
-    text = (f"{PLATFORM_NAMES[args.platform]} 发布元数据（{'人工修改' if data.get('origin') == 'manual' else '模型生成'}）：\n"
+    text = (f"{platform_name(view.plan['options'].get('publish'), args.platform)} 发布元数据（{'人工修改' if data.get('origin') == 'manual' else '模型生成'}）：\n"
             f"标题：{data['title']}\n简介：\n{data['description']}\n标签：{'、'.join(data['tags'])}")
     if data.get("notes"):
         text += "\n校验修正：" + "；".join(data["notes"])
@@ -216,7 +229,7 @@ async def get_publish_metadata(args: GetPublishMetadata, ctx: ToolContext) -> To
 class EditPublishMetadata(StrictModel):
     job_id: str | None = JobId
     plan_id: str | None = PlanId
-    platform: Literal["bilibili", "douyin", "youtube"]
+    platform: PlatformId
     title: str | None = Field(default=None, min_length=1, max_length=200, description="新标题")
     description: str | None = Field(default=None, max_length=10000, description="新简介正文（章节、署名与话题由系统附加）")
     tags: list[str] | None = Field(default=None, max_length=50, description="新标签（整体替换）")
@@ -240,7 +253,7 @@ async def preview_edit_publish_metadata(args: EditPublishMetadata, ctx: ToolCont
     before = {"title": item["data"]["title"], "description": item["data"].get("body"), "tags": "、".join(item["data"]["tags"])}
     rows = [{"label": labels[key], "before": before[key], "after": "、".join(value) if key == "tags" else value}
             for key, value in body.items() if key in labels]
-    return Preview(f"修改 {PLATFORM_NAMES[args.platform]} 的发布元数据（按平台限制校验修正，保存后被钉住）", rows,
+    return Preview(f"修改 {platform_name(view.plan['options'].get('publish'), args.platform)} 的发布元数据（按平台限制校验修正，保存后被钉住）", rows,
                    warnings=["封面（标题来自元数据时）与发布包会在下次构建时重建"],
                    focus=studio_focus(view.job["id"], view.plan_id, section="final"))
 
@@ -256,7 +269,7 @@ async def edit_publish_metadata(args: EditPublishMetadata, ctx: ToolContext) -> 
     vid = data["plans"][pid]["finals"][f"metadata:{platform}"]
     saved = data["versions"][vid]["data"]
     return ToolOutput({"version": vid, "title": saved["title"], "tags": saved["tags"]},
-                      text=f"已保存 {PLATFORM_NAMES[platform]} 发布元数据：「{saved['title']}」。", mutation=mutation(job, pid))
+                      text=f"已保存 {platform_name(data['plans'][pid]['options'].get('publish'), platform)} 发布元数据：「{saved['title']}」。", mutation=mutation(job, pid))
 
 
 class BuildPublishPackage(StrictModel):

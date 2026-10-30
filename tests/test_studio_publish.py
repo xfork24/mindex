@@ -47,7 +47,7 @@ def test_presets_load_and_validate():
     with pytest.raises(ValueError):
         publish.PublishOptions.model_validate({"platforms": ["youtube", "youtube"]})
     with pytest.raises(ValueError):
-        publish.PublishOptions.model_validate({"platforms": ["tiktok"]})
+        publish.PublishOptions.model_validate({"platforms": ["invalid/id"]})
 
 
 def test_normalize_metadata_rules():

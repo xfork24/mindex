@@ -12,6 +12,7 @@ from mindex.shared.config import StrictModel
 from mindex.shared.types import SCRIPT_TEMPLATE_ID
 from mindex.studio import studio
 from mindex.studio.brands import BRAND_ID, BrandOverrides
+from mindex.studio.delivery_templates import DeliverySnapshot
 
 from .publish import PublishOptions
 from .stages import handler, names, shot_stages
@@ -44,7 +45,7 @@ class BeatAlign(StrictModel):
     tolerance: float = Field(default=0.25, ge=0.04, le=1.0, allow_inf_nan=False)
 
 
-OPTIONAL_OPTIONS = ("subtitle_style", "brand_id", "brand_overrides", "exports", "publish", "beat_align")
+OPTIONAL_OPTIONS = ("subtitle_style", "brand_id", "brand_overrides", "exports", "publish", "beat_align", "delivery")
 
 
 class PlanOptions(StrictModel):
@@ -72,6 +73,7 @@ class PlanOptions(StrictModel):
     exports: list[ExportSpec] | None = Field(default=None, max_length=2)
     # 平台发布（封面、发布元数据与发布包，workspace/publish.py）：None = 不发布。
     publish: PublishOptions | None = None
+    delivery: DeliverySnapshot | None = None
     # 节拍对齐（workspace/post.py）：None = 关闭，切点与旧版一致。
     beat_align: BeatAlign | None = None
 
@@ -94,6 +96,15 @@ class PlanOptions(StrictModel):
                 if data.get(key) is None:
                     data.pop(key, None)
         return data
+
+    @model_validator(mode="before")
+    @classmethod
+    def snapshot_canvas(cls, value):
+        if isinstance(value, dict) and value.get("delivery") and value.get("exports"):
+            value = dict(value)
+            canvas = value.get("canvas", "16:9")
+            value["exports"] = [x for x in value["exports"] if (x.get("canvas") if isinstance(x, dict) else x.canvas) != canvas]
+        return value
 
     @model_validator(mode="after")
     def _exports_differ(self):

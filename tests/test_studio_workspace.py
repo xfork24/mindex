@@ -683,6 +683,6 @@ def test_build_without_storyboard_runs_full_pipeline(prepared, legacy):
     assert build["status"] == "complete", build
     stages = [n["stage"] for n in build["nodes"]]
     expected = ["split", "recall", "tts", "select", "render", "compose"]
-    assert list(dict.fromkeys(stages)) == (expected if legacy else ["script", *expected])
+    assert list(dict.fromkeys(stages)) == (expected if legacy else ["script", *expected, "export", "metadata", "cover", "package"])
     assert all(n["status"] in ("complete", "reused") for n in build["nodes"])
     assert data["plans"][pid]["final"]

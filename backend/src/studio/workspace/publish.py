@@ -16,52 +16,15 @@ import json
 import re
 import subprocess
 from pathlib import Path
-from typing import Literal
 
-from pydantic import Field, field_validator
-
-from mindex.shared.config import StrictModel
 from mindex.studio import studio
-from mindex.studio.platforms import PlatformId, PlatformPreset, preset
+from mindex.studio.delivery_models import CoverOptions, PublishOptions  # noqa: F401
+from mindex.studio.platforms import PlatformPreset, for_plan
 
 # 改动封面排版、元数据提示词或校验规则、发布包内容时递增：进入对应阶段签名。
 COVER_VERSION = 1
 METADATA_PROMPT_VERSION = 1
 PACKAGE_VERSION = 1
-
-
-class CoverOptions(StrictModel):
-    """封面：frame 从成片挑一帧（``time`` 为成片秒数，None = 自动挑清晰度最高的镜头中点）；aigc 用图片生成模型按
-    ``prompt`` 生成；upload 用任务 inputs 中上传的图片（``media_id``）。``title``/``subtitle`` 叠加在封面上，
-    None = 用发布元数据的标题（不叠副标题）。"""
-
-    source: Literal["frame", "aigc", "upload"] = "frame"
-    time: float | None = Field(default=None, ge=0)
-    prompt: str | None = Field(default=None, max_length=1500)
-    media_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
-    title: str | None = Field(default=None, max_length=40)
-    subtitle: str | None = Field(default=None, max_length=60)
-    text: bool = True  # 是否叠加标题文字
-
-    @field_validator("prompt", "title", "subtitle", mode="before")
-    @classmethod
-    def _blank(cls, value):
-        if isinstance(value, str):
-            value = value.strip()
-            return value or None
-        return value
-
-
-class PublishOptions(StrictModel):
-    platforms: list[PlatformId] = Field(min_length=1, max_length=3)
-    cover: CoverOptions = Field(default_factory=CoverOptions)
-
-    @field_validator("platforms", mode="after")
-    @classmethod
-    def _unique(cls, value):
-        if len(set(value)) != len(value):
-            raise ValueError("平台不能重复")
-        return value
 
 
 def publish_options(p) -> dict | None:
@@ -76,7 +39,7 @@ def platforms_of(p) -> list[str]:
 
 def film_key(p, platform: str) -> str:
     """平台对应的成片节点键：compose 或 ``export:<画幅>``。"""
-    canvas = preset(platform).canvas
+    canvas = for_plan(p, platform).canvas
     if ((p.get("options") or {}).get("canvas") or "16:9") == canvas:
         return "compose"
     if any(item["canvas"] == canvas for item in (p.get("options") or {}).get("exports") or []):
@@ -92,7 +55,7 @@ def film_version(w, p, platform: str) -> tuple[str, str | None]:
 
 def film_mismatch(p, platform: str) -> bool:
     return film_key(p, platform) == "compose" and (
-        ((p.get("options") or {}).get("canvas") or "16:9") != preset(platform).canvas)
+        ((p.get("options") or {}).get("canvas") or "16:9") != for_plan(p, platform).canvas)
 
 
 # ---------------------------------------------------------------- 字体与封面
@@ -272,10 +235,12 @@ def timestamp(seconds: float) -> str:
 
 def clip_chars(text: str, limit: int) -> str:
     text = (text or "").strip()
+    if limit <= 0:
+        return ""
     return text if len(text) <= limit else text[:max(0, limit - 1)].rstrip() + "…"
 
 
-def normalize_metadata(raw: dict, spec: PlatformPreset, *, chapters: list[dict], credits: list[str]) -> tuple[dict, list]:
+def normalize_metadata(raw: dict, spec: PlatformPreset, *, chapters: list[dict], credits: list[str], footer: str = "") -> tuple[dict, list]:
     """按平台预设校验并修正：截断标题与简介、去重并截断标签、拼接章节与音乐署名。返回 (元数据, 修正说明)。"""
     notes = []
     title = str(raw.get("title") or "").strip()
@@ -306,20 +271,27 @@ def normalize_metadata(raw: dict, spec: PlatformPreset, *, chapters: list[dict],
         extra.append("音乐：" + "；".join(credits))
     if spec.tags.hashtag and tags:
         extra.append(" ".join(f"#{tag}" for tag in tags))
+    if footer.strip():
+        extra.append(footer.strip())
     tail = "\n\n".join(extra)
     body = str(raw.get("description") or "").strip()
     room = spec.description.max_chars - (len(tail) + 2 if tail else 0)
     if room < 0:
         notes.append("章节与署名超过简介上限，已省略章节")
+        if chapters:
+            extra = extra[1:]
         chapters = []
-        tail = "\n\n".join(item for item in extra[1:])
+        tail = "\n\n".join(extra)
+        if len(tail) > spec.description.max_chars:
+            notes.append("尾注与署名超过简介上限，已截断")
+            tail = clip_chars(tail, spec.description.max_chars)
         room = spec.description.max_chars - (len(tail) + 2 if tail else 0)
     if len(body) > room:
         notes.append(f"简介超过 {spec.description.max_chars} 字，已截断")
         body = clip_chars(body, max(0, room))
     description = "\n\n".join(item for item in (body, tail) if item)
     return {"title": title, "description": description, "body": body, "tags": tags, "chapters": chapters,
-            "credits": list(credits)}, notes
+            "credits": list(credits), **({"footer": footer} if footer else {})}, notes
 
 
 def parse_metadata(text: str) -> dict:
@@ -334,3 +306,21 @@ def parse_metadata(text: str) -> dict:
     if not isinstance(data, dict):
         raise studio.StudioError("发布元数据不是 JSON 对象")
     return data
+
+
+def delivery_config(p):
+    return ((p.get("options") or {}).get("delivery") or {}).get("config") or {}
+
+
+def metadata_rule(p, platform):
+    return delivery_config(p).get("rules", {}).get(platform, {})
+
+
+def check_policy(p, kind):
+    return delivery_config(p).get("checks", {}).get(kind, "warn")
+
+
+def safe_package_name(pattern, *, job_id, plan_id, platform, canvas):
+    name = pattern.format(job_id=job_id, plan_id=plan_id, platform=platform, canvas=canvas)
+    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name).strip(" .")[:180]
+    return name or "delivery"

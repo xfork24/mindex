@@ -44,10 +44,14 @@ def _warm_model_files(config: Config) -> None:
     from mindex.models.deployment import verified_file
 
     pinned = llama_cpp.manifest(config.embedding, "embedding")
-    for record in pinned.get("files", {}).values():
-        verified_file(Path(record["path"]))
     if pinned["schema"] == 2:
+        # 与真实检索一致：按服务当前报告的路径定位迁移后的权重/投影，
+        # 核对原清单的内容摘要，而不是重新读取清单里的历史路径。
+        llama_cpp.checked_runtime(config.embedding, pinned)
         compatibility.load_baseline(config, pinned["space_contract"])
+    else:
+        for record in pinned.get("files", {}).values():
+            verified_file(Path(record["path"]))
 
 
 def warm_up(config: Config, index_id: str | None = None, *, startup: bool = True) -> None:

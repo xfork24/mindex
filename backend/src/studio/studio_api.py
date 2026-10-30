@@ -384,10 +384,11 @@ def studio_router(
                 p.update(id=uuid4().hex[:12], name=body.name, created_at=studio.now())
             else:
                 active = workspace.plan(w, w["active_plan"])
+                from mindex.studio.delivery_templates import apply, default_snapshot
                 p = workspace.new_plan(
                     body.name,
                     {
-                        **copy.deepcopy(active["options"]),
+                        **apply(copy.deepcopy(active["options"]), default_snapshot(store)),
                         "voice_mode": "inherit",
                         "voice": None,
                     },
@@ -446,6 +447,31 @@ def studio_router(
                 for key in ("intro", "outro", "watermark"):
                     if overrides is not None and (clip := getattr(overrides, key)) is not None:
                         brands.require_asset(base, clip.asset)
+                if body.options.delivery:
+                    from mindex.studio.delivery_templates import apply, copy_cover
+                    previous = p["options"].get("delivery")
+                    from mindex.studio.delivery_templates import DeliverySnapshot, freeze_config
+                    hydrated = DeliverySnapshot.model_validate(previous) if previous else None
+                    if hydrated:
+                        freeze_config(hydrated.config, legacy=True)
+                    same_snapshot = body.options.delivery.model_dump() in (previous, hydrated.model_dump() if hydrated else None)
+                    if same_snapshot and body.options.canvas == p["options"].get("canvas", "16:9"):
+                        cfg = body.options.delivery.config
+                        from mindex.studio.delivery_templates import DeliveryExport
+                        own = next((x for x in cfg.exports if x.canvas == body.options.canvas), None)
+                        cfg.exports = ([own] if own else []) + [DeliveryExport(**x.model_dump()) for x in body.options.exports or []]
+                        old_media = cfg.publish.cover.media_id if cfg.publish else None
+                        cfg.publish = body.options.publish
+                        if cfg.publish and cfg.publish.cover.media_id != old_media:
+                            cfg.cover_asset = None
+                    copy_cover(current(), job_id, body.options.delivery)
+                    body.options = type(body.options).model_validate(apply(body.options.model_dump(), body.options.delivery))
+                from mindex.studio import platforms
+                if body.options.publish:
+                    body.options.publish = type(body.options.publish).model_validate(platforms.snapshot_publish(
+                        body.options.publish.model_dump(), store, previous=p["options"].get("publish")))
+                    if body.options.delivery:
+                        body.options.delivery.config.publish = body.options.publish
                 p["options"] = {
                     **body.options.model_dump(),
                     # 参考文稿登记只经 /references 增删：整份提交方案参数时保留现有登记。
@@ -1206,21 +1232,14 @@ def studio_router(
         return Response(content, media_type="text/html; charset=utf-8",
                         headers={**SANDBOX_HEADERS, "Cache-Control": "no-store"})
 
-    @router.get("/platforms")
-    def list_platforms():
-        """平台发布预设（bilibili、douyin、youtube）：画幅、封面尺寸、标题/简介/标签限制与章节规则。"""
-        from mindex.studio import platforms
-
-        return {"items": platforms.list_presets()}
-
     @router.get("/jobs/{job_id}/plans/{plan_id}/cover-candidates")
     def cover_candidates(job_id: str, plan_id: str, platform: str, limit: int = Query(default=6, ge=1, le=20)):
         """封面候选帧：在该平台对应成片的每个镜头中点抽帧，按清晰度排序（缓存在任务 previews/ 下，不改动版本）。"""
-        from mindex.studio.platforms import preset
+        from mindex.studio.platforms import for_plan
 
-        preset(platform)
         w = read_workspace(job_id)
         p = workspace.plan(w, plan_id)
+        for_plan(p, platform)
         _, vid = workspace.publish.film_version(w, p, platform)
         item = w["versions"].get(vid or "")
         if not item or item["status"] != "complete":
@@ -1401,7 +1420,12 @@ def studio_router(
     file_routes(router, base, store, mutation_lock)
     template_routes(router, base, store, mutation_lock, current=current, writer=writer)
     brand_routes(router, base, store, mutation_lock, current=current)
+    from mindex.studio.delivery_templates import delivery_routes
+    delivery_routes(router, store, mutation_lock, current=current)
     music_routes(router, base, store, mutation_lock, current=current, writer=writer)
     tool_routes(router, base, store, mutation_lock)
+
+    from mindex.studio.platforms import platform_routes
+    platform_routes(router, store, mutation_lock)
 
     return router

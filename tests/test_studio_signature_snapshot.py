@@ -145,6 +145,9 @@ def test_stage_signatures_and_preflight_match_snapshot(prepared, deterministic):
     jid = studio.create_job(config, "从红色画面讲到蓝色天空。", options={"burn": False})["id"]
     w = ws.load(config, jid)
     p = ws.plan(w, w["active_plan"])
+    # This snapshot freezes pre-delivery-template plans, which have no delivery settings.
+    for key in ("delivery", "exports", "publish"):
+        p["options"].pop(key, None)
     result = {}
 
     def record(key, stage, sid=None):

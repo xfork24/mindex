@@ -1104,8 +1104,6 @@ def export_clear(ctx: typer.Context, job: Annotated[str, typer.Argument(help="�
 
 # ---------------------------------------------------------------- 平台发布
 
-PLATFORMS = ("bilibili", "douyin", "youtube")
-
 
 @app.command("platforms")
 def platforms_command(ctx: typer.Context, as_json: JsonOption = False):
@@ -1134,12 +1132,17 @@ publish_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(publish_app, name="publish")
-PlatformArgument = Annotated[str, typer.Argument(help="平台：bilibili / douyin / youtube。")]
+PlatformArgument = Annotated[str, typer.Argument(help="平台标识（studio platforms 列出可选平台）。")]
 
 
 def check_platform(value):
-    if value not in PLATFORMS:
-        raise typer.BadParameter(f"可选：{' / '.join(PLATFORMS)}", param_hint="PLATFORM")
+    from pydantic import TypeAdapter, ValidationError
+
+    from mindex.studio.platforms import PlatformId
+    try:
+        TypeAdapter(PlatformId).validate_python(value)
+    except ValidationError as exc:
+        raise typer.BadParameter("平台标识需为小写字母开头的字母、数字或连字符", param_hint="PLATFORM") from exc
 
 
 @publish_app.command("set")

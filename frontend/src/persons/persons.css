@@ -138,3 +138,17 @@
 #entity-dialog .fields>label{flex-basis:100%}
 .role-grid-wide{grid-template-columns:minmax(0,1fr)}
 }
+
+/* Reference capture and person processing wrap instead of creating horizontal form scrolling. */
+#capture-form{display:flex;flex-wrap:wrap;overflow-x:visible;gap:12px 16px}
+#capture-form>label{flex:1 1 180px;max-width:none}
+#capture-form>label:has(#capture-time){flex:0 1 140px}
+#capture-time{width:100%}
+#capture-error{flex-basis:100%}
+.source-work-actions{flex-wrap:wrap;flex-shrink:1;white-space:normal;min-width:0}
+.cast-left,.cast-history{min-width:0;flex-basis:300px}
+#cast .cast-entry-row .restore-field{flex-wrap:wrap}
+.work-row{max-width:none}
+.role-grid-wide{grid-template-columns:repeat(auto-fill,minmax(min(190px,100%),1fr))}
+.coordinates{grid-template-columns:repeat(auto-fit,minmax(min(100px,100%),1fr))}
+#entity-dialog .fields>label{flex:1 1 210px}
