@@ -85,7 +85,7 @@ def studio_lock(config):
         raise TopicConflict(STUDIO_BUSY) from exc
 
 
-def create_from_card(config, store, card_id: str, *, force: bool = False) -> dict:
+def create_from_card(config, store, card_id: str, *, force: bool = False, language: str = "zh") -> dict:
     from mindex.studio import workspace as ws
 
     card = topic_cards.get_card(store, card_id)
@@ -99,7 +99,7 @@ def create_from_card(config, store, card_id: str, *, force: bool = False) -> dic
     outline = outline[: config.studio.max_input_chars]
     items = topic_items.items_by_id(store, card["item_ids"])
     state = studio.create_job(config, outline, card["title"][:60], store=store,
-                              original_input=f"来自选题：{card['title']}")
+                              original_input=f"来自选题：{card['title']}", language=language)
     job_id = state["id"]
     try:
         lock = studio_lock(config)

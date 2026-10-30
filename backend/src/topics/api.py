@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 from functools import wraps
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import Response
@@ -27,6 +27,7 @@ from mindex.topics.sources import base as source_base
 
 
 class CreateJobBody(StrictModel):
+    language: Literal["zh", "en"] = "zh"
     force: bool = False
 
 
@@ -220,7 +221,8 @@ def topics_router(runtime, store, embedder=None, *, topic_llm=None, scheduler: b
     @router.post("/cards/{card_id}/job", status_code=201)
     @conflicts
     def create_job(card_id: str, body: CreateJobBody | None = None):
-        return topic_jobs.create_from_card(runtime.current(), store, card_id, force=bool(body and body.force))
+        return topic_jobs.create_from_card(runtime.current(), store, card_id, force=bool(body and body.force),
+                                           language=body.language if body else "zh")
 
     @router.get("/jobs/{job_id}/profile")
     def job_profile(job_id: str):

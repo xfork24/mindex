@@ -114,6 +114,7 @@ $("create-form").addEventListener("submit", async (event) => {
       throw new Error(MindexI18n.msg("ui.0fb24191cd2c"));
     const job = await api("/api/studio/jobs", "POST", {
       text: $("create-text").value,
+      language: MindexI18n.language,
       options: {
         // 音轨/字幕/召回数量不再在创建时设置：默认值生效，之后在方案参数里调整。
         // 全选时 scope 为 null：不限素材，后续新增素材自动可用。

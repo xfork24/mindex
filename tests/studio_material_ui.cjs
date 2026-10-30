@@ -42,7 +42,8 @@ const metaBody = new Node("dl");
 const scriptNote = new Node("p");
 const nodes = { "job-meta-body": metaBody, "script-materials": scriptNote };
 const sandbox = {
-  MindexI18n: require("./i18n_adapter.cjs"),
+  MindexI18n: {...require("./i18n_adapter.cjs"), language: "zh"},
+  window: {addEventListener() {}},
   console, Map, Set, Promise, Error, JSON, String, Boolean, Object, Date, Array, Number,
   document: { createElement: tag => new Node(tag) },
   state: { id: "job-1", data: null, sources: null, materialDigest: null },
@@ -69,6 +70,7 @@ const job = (id = "job-1") => ({
   id, outline: "港口的一天\n\n渔船靠岸", created_at: "2026-10-26T08:00:00Z", source_ids: ["src-a", "src-b"],
 });
 function reset() {
+  sandbox.MindexI18n.language = "zh";
   sandbox.state.id = "job-1";
   sandbox.state.data = { job: job() };
   sandbox.state.materialDigest = null;
@@ -105,7 +107,7 @@ const cases = [
     run("renderJobMeta()");
     assert.equal(textOf(statusOf(digestBox())), "加载中…");
     await sandbox.state.materialDigest.request;
-    assert.deepEqual(requests.map(r => [r.url, r.method]), [["/api/studio/jobs/job-1/material-digest", "GET"]]);
+    assert.deepEqual(requests.map(r => [r.url, r.method]), [["/api/studio/jobs/job-1/material-digest?language=zh", "GET"]]);
     const box = digestBox();
     assert.equal(box.open, false);
     const summary = find(box, n => n.tagName === "summary");
@@ -128,7 +130,7 @@ const cases = [
     sandbox.state.id = "job-2";
     sandbox.state.data = { job: job("job-2") };
     await renderAndLoad();
-    assert.equal(requests.at(-1).url, "/api/studio/jobs/job-2/material-digest");
+    assert.equal(requests.at(-1).url, "/api/studio/jobs/job-2/material-digest?language=zh");
     assert.equal(digestBox().open, false);
   }],
   ["摘要为空时显示接口给出的原因，不显示正文", async () => {

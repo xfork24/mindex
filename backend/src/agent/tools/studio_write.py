@@ -73,7 +73,7 @@ async def preview_create_job(args: CreateJob, ctx: ToolContext) -> Preview:
 
 
 async def create_job(args: CreateJob, ctx: ToolContext) -> ToolOutput:
-    body = {"text": args.outline, **({"title": args.title} if args.title else {})}
+    body = {"language": ctx.page.get("language", "zh"), "text": args.outline, **({"title": args.title} if args.title else {})}
     if args.source_ids:
         body["options"] = {"source_ids": args.source_ids}
     # 任务元信息的「原始输入」记录用户在对话里的原话；大纲是助手整理后的文字。MCP 调用没有会话，省略即同大纲。

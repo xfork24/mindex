@@ -13,12 +13,13 @@ import logging
 from collections import Counter
 from collections.abc import Callable, Iterable
 
+from mindex.shared.analysis_text import select_analysis
 from mindex.shared.config import Config, fingerprint
 from mindex.shared.types import DigestSource, MaterialDigest
 
 log = logging.getLogger(__name__)
 
-DIGEST_VERSION = 1
+DIGEST_VERSION = 2
 VOCABULARY_SIZE = 30  # 每素材画面词上限（需求 2.4）
 MIN_SOURCE_CHARS = 200  # 每素材最低配额（需求 2.5）
 STORY_ITEM_CHARS = 60  # 单条故事线描述上限（按 Unicode 字符计，超出截断并以"…"结尾）
@@ -35,7 +36,7 @@ STORY_KINDS = ("scene", "shot")  # 故事线来源优先级：scene 描述，没
 VOCAB_KINDS = ("shot", "moment")
 
 
-def parse_analysis(text: str) -> tuple[str, dict[str, list[str]]]:
+def parse_analysis(text: str, language: str = "zh") -> tuple[str, dict[str, list[str]]]:
     """把 views.analysis 拆成"描述正文"与标签行。
 
     格式来自 ``Annotation.views()``：以"动作：/场景：/人物：/对象：/人物情绪：/氛围：/景别：/角度：/镜头运动："
@@ -52,8 +53,8 @@ def parse_analysis(text: str) -> tuple[str, dict[str, list[str]]]:
             body.append(stripped)
             continue
         words = [w.strip() for w in stripped[len(label) + 1 :].split("；")]
-        labels.setdefault(label, []).extend(w for w in words if w)
-    return " ".join(body), labels
+        labels.setdefault(label, []).extend(select_analysis(w, language) for w in words if w)
+    return select_analysis(" ".join(body), language), labels
 
 
 def allocate(counts: list[int], budget: int) -> list[int]:
@@ -95,7 +96,7 @@ def _clip_story(text: str) -> str:
     return text[: STORY_ITEM_CHARS - 1] + "…"
 
 
-def _storyline(segments: list[dict]) -> list[str]:
+def _storyline(segments: list[dict], language: str = "zh") -> list[str]:
     """scene 描述按 (start, id) 升序、截断到 STORY_ITEM_CHARS 后去重（保留最早一条）；
     没有 scene 描述时改用 shot（需求 2.2/2.3）。"""
     for kind in STORY_KINDS:
@@ -104,7 +105,7 @@ def _storyline(segments: list[dict]) -> list[str]:
         story: list[str] = []
         for segment in picked:
             # 先截断再去重：截断后相同的条目也只保留最早一条，保证故事线条目两两不同。
-            body = _clip_story(parse_analysis(segment["views"]["analysis"])[0].strip())
+            body = _clip_story(parse_analysis(segment["views"]["analysis"], language)[0].strip())
             if body and body not in seen:
                 seen.add(body)
                 story.append(body)
@@ -113,35 +114,38 @@ def _storyline(segments: list[dict]) -> list[str]:
     return []
 
 
-def _vocabulary(segments: list[dict]) -> list[str]:
+def _vocabulary(segments: list[dict], language: str = "zh") -> list[str]:
     """shot/moment 的场景、对象、动作词合并计数，按（频次降序，词升序）取前 30 个（需求 2.4）。"""
     counter: Counter[str] = Counter()
     for segment in segments:
         if segment["kind"] not in VOCAB_KINDS:
             continue
-        labels = parse_analysis(segment["views"]["analysis"])[1]
+        labels = parse_analysis(segment["views"]["analysis"], language)[1]
         for label in VOCAB_LABELS:
             counter.update(labels.get(label, []))
     ranked = sorted(counter.items(), key=lambda item: (-item[1], item[0]))
     return [word for word, _ in ranked[:VOCABULARY_SIZE]]
 
 
-def _render(name: str, duration: float, vocabulary: list[str], story: list[str], quota: int) -> tuple[str, list[str]]:
+def _render(
+    name: str, duration: float, vocabulary: list[str], story: list[str], quota: int, language: str = "zh"
+) -> tuple[str, list[str]]:
     """按配额渲染一个素材块，返回（块正文，实际写入的故事线条目）；块长度不超过 quota。"""
-    header = f"【{name}】时长 {round(duration)} 秒\n"
+    header = (f"[{name}] Duration: {round(duration)} seconds\n" if language == "en"
+              else f"【{name}】时长 {round(duration)} 秒\n")
     if len(header) >= quota:
         return header[:quota], []
     block = header
     words = list(vocabulary)
     while words:
-        line = "画面词：" + "、".join(words) + "\n"
+        line = (("Visual vocabulary: " + ", ".join(words)) if language == "en" else "画面词：" + "、".join(words)) + "\n"
         if len(block) + len(line) <= quota:
             block += line
             break
         words.pop()
     for k in range(len(story), 0, -1):
         picked = sample(story, k)
-        line = "故事线：" + "；".join(picked) + "\n"
+        line = (("Storyline: " + "; ".join(picked)) if language == "en" else "故事线：" + "；".join(picked)) + "\n"
         if len(block) + len(line) <= quota:
             return block + line, picked
     return block, []
@@ -156,7 +160,7 @@ def _eligible(segment: dict, scope: set[str] | None) -> bool:
 
 
 def compose_digest(
-    snapshots: Iterable[dict], *, scope: set[str] | None, budget: int, content_index_id: str | None
+    snapshots: Iterable[dict], *, scope: set[str] | None, budget: int, content_index_id: str | None, language: str = "zh"
 ) -> MaterialDigest:
     """纯函数核心：snapshots 为已 decorate 的快照字典（含 effective_hidden 与生效显示名）。
 
@@ -189,8 +193,8 @@ def compose_digest(
     for (source_id, items), quota in zip(ordered, quotas, strict=True):
         name = source_name(items)
         duration = max(float(s.get("source_duration") or s.get("end") or 0) for s in items)
-        vocabulary = _vocabulary(items)
-        block, story = _render(name, duration, vocabulary, _storyline(items), quota)
+        vocabulary = _vocabulary(items, language)
+        block, story = _render(name, duration, vocabulary, _storyline(items, language), quota, language)
         if not block:
             continue
         blocks.append(block)
@@ -244,7 +248,7 @@ def merged_vocabulary(digest: MaterialDigest | None) -> list[str] | None:
     return merged or None
 
 
-def build_digest(config: Config, store=None, state: dict | None = None) -> MaterialDigest:
+def build_digest(config: Config, store=None, state: dict | None = None, *, language: str | None = None) -> MaterialDigest:
     """I/O 外壳：读取生效索引快照、覆盖层、任务范围与预算，调用 compose_digest。只读。
 
     空原因优先级：预算为 0 → 无生效索引 → 无已分析镜头（需求 3.6）。
@@ -268,6 +272,7 @@ def build_digest(config: Config, store=None, state: dict | None = None) -> Mater
         scope=material_scope(state or {}),
         budget=budget,
         content_index_id=active["id"],
+        language=language or (state or {}).get("language", "zh"),
     )
 
 

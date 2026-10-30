@@ -83,14 +83,15 @@ def load(config, job_id):
             shutil.copy2(source, snapshot / name)
     state = studio.load_job(config, job_id)
     p = new_plan(
-        "默认方案",
+        "Default Plan" if state.get("language") == "en" else "默认方案",
         PlanOptions(
             **state["options"],
             voice_mode=state.get("voice_mode", "inherit"),
             duck_gain=config.studio.audio.duck_gain,
         ).model_dump(),
     )
-    w = {"schema": 2, "active_plan": p["id"], "plans": {p["id"]: p}, "versions": {}, "builds": []}
+    w = {"schema": 2, "job_language": state.get("language", "zh"), "active_plan": p["id"],
+         "plans": {p["id"]: p}, "versions": {}, "builds": []}
     del p["script"], p["board_script"]  # 由 normalize_script 统一迁移
     try:
         board = studio.load_storyboard(config, job_id)

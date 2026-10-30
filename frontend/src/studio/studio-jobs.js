@@ -150,8 +150,8 @@ function renderJobMeta() {
     row.append(term, detail);
     body.append(row);
   }
-  body.append(materialDigestNode(state.materialDigest?.jobId === job.id ? state.materialDigest : null));
-  if (state.materialDigest?.jobId !== job.id) void loadMaterialDigest(job.id);
+  body.append(materialDigestNode(state.materialDigest?.jobId === job.id && state.materialDigest.language === MindexI18n.language ? state.materialDigest : null));
+  if (state.materialDigest?.jobId !== job.id || state.materialDigest.language !== MindexI18n.language) void loadMaterialDigest(job.id);
 }
 // 可用素材摘要：只读预览，按任务缓存；切换任务或构建结束刷新工作台时重新获取。
 // 接口返回的为空原因是固定的中文取值，界面按条目翻译，不直接显示原文。
@@ -162,9 +162,9 @@ const DIGEST_EMPTY_REASON = {
 };
 function loadMaterialDigest(jobId, { fresh = false } = {}) {
   const cached = state.materialDigest;
-  if (!fresh && cached?.jobId === jobId) return cached.request;
-  const entry = { jobId, status: "loading", data: null, open: cached?.jobId === jobId && cached.open };
-  entry.request = api(`/api/studio/jobs/${jobId}/material-digest`).then(
+  if (!fresh && cached?.jobId === jobId && cached.language === MindexI18n.language) return cached.request;
+  const entry = { jobId, language: MindexI18n.language, status: "loading", data: null, open: cached?.jobId === jobId && cached.open };
+  entry.request = api(`/api/studio/jobs/${jobId}/material-digest?language=${entry.language}`).then(
     (data) => {entry.status = "ok";entry.data = data;},
     () => {entry.status = "error";}
   ).then(() => {
@@ -198,3 +198,5 @@ function materialDigestNode(entry) {
   }
   return box;
 }
+
+window.addEventListener("mindex:languagechange", () => {if (state.data) renderJobMeta();});

@@ -26,7 +26,7 @@ from mindex.shared.trace import record as trace_record
 from mindex.shared.types import Filters, Granularity
 
 STEPS = ("split", "recall", "tts", "select", "render")
-SPLIT_VERSION = 7  # 7: 具体意象单独成镜、抽象列举不拆、最短长度、visual 字段与召回词公共规则
+SPLIT_VERSION = 8  # 8: 创建语言决定 visual/query；7: 具体意象单独成镜、抽象列举不拆、最短长度、visual 字段与召回词公共规则
 STEP_LABELS = {
     "split": "文本拆分镜",
     "recall": "语义召回",
@@ -903,7 +903,7 @@ def scoped_filters(filters: Filters, scope: set[str] | None) -> Filters:
 
 
 def create_job(config: Config, text: str, title: str | None = None, options: dict | None = None,
-               *, store=None, defer_title: bool = False, original_input: str | None = None) -> dict:
+               *, store=None, defer_title: bool = False, original_input: str | None = None, language: str = "zh") -> dict:
     """创建创作任务。``text`` 是视频大纲，文案在任务内由文案创作模型生成。
 
     标题生成是一次阻塞的 LLM 往返，会显著拖慢创建的感知延迟。调用方传入
@@ -913,6 +913,8 @@ def create_job(config: Config, text: str, title: str | None = None, options: dic
     ``original_input`` 是用户的原始输入（智能助手创建时为用户原话，``text`` 是助手整理后的大纲）；
     省略时即 ``text``。只用于任务元信息展示，不参与文案生成与签名。
     """
+    if language not in {"zh", "en"}:
+        raise StudioError("Unsupported job language")
     text = (text or "").strip()
     if not text:
         raise StudioError("请输入创作视频大纲")
@@ -970,6 +972,7 @@ def create_job(config: Config, text: str, title: str | None = None, options: dic
     }
     from mindex.shared.storage import Store
     from mindex.studio.delivery_templates import apply, default_snapshot
+    state["language"] = language
     state["options"] = apply(state["options"], default_snapshot(store or Store(config.data_dir)))
     save(job_path(config, job_id), state)
     return state

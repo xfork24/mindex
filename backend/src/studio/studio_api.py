@@ -12,7 +12,7 @@ import logging
 import tempfile
 import threading
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 from urllib.parse import quote
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, Response, UploadFile
@@ -287,10 +287,10 @@ def studio_router(
         return workspace.detail(current(), job_id, read_workspace(job_id), store=store, compact=compact)
 
     @router.get("/jobs/{job_id}/material-digest")
-    def get_material_digest(job_id: str):
+    def get_material_digest(job_id: str, language: Literal["zh", "en"] = "zh"):
         """任务元信息中的可用素材摘要预览：只读、不加锁，不改动任务、方案、版本与签名。"""
         state = studio.load_job(base, job_id)  # 不存在 → EntityNotFound → 404"找不到创作任务"
-        return build_digest(current(), store, state).public()
+        return build_digest(current(), store, state, language=language).public()
 
     @router.post("/jobs/{job_id}/music/lyrics")
     def generate_lyrics(job_id: str, body: LyricsBody):
@@ -348,7 +348,8 @@ def studio_router(
         vocabulary = merged_vocabulary(safe_digest(cfg, job_id, store=store))
         try:
             query = (storyboarder or make_storyboarder(cfg)).suggest_query(
-                current_shot.get("text", ""), visual, (previous, following), vocabulary
+                current_shot.get("text", ""), visual, (previous, following), vocabulary,
+                **({"language": "en"} if w.get("job_language") == "en" else {})
             )
         except ModelError as exc:
             raise ModelError(f"召回词重写失败：{exc}") from exc
@@ -1325,7 +1326,7 @@ def studio_router(
             # 标题生成改为后台执行：创建立即返回占位标题，避免阻塞 LLM 往返。
             state = studio.create_job(
                 cfg, body.text, body.title, body.options, store=store, defer_title=True,
-                original_input=body.original_input,
+                original_input=body.original_input, language=body.language,
             )
             if state.get("title_pending"):
                 generate_title_async(state["id"], state["outline"])

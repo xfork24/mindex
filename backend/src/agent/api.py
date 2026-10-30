@@ -94,6 +94,7 @@ def build_runtime(app, runtime_config, store, *, agent_llm=None, registry=None) 
         SessionStore(store.root),
         registry=registry or build_registry(),
         llm_factory=(lambda: agent_llm) if agent_llm is not None else (lambda: make_agent_llm(runtime_config.current())),
+        title_llm_factory=(lambda: make_agent_llm(runtime_config.current())) if agent_llm is None else None,
         client_factory=client_factory,
         settings=lambda: runtime_config.current().agent,
         agent_profile=agent_profile,

@@ -32,6 +32,7 @@ ColumnStage = Literal[COLUMN_STAGES]  # type: ignore[valid-type]
 
 
 class CreateJobBody(StrictModel):
+    language: Literal["zh", "en"] = "zh"
     text: str  # 视频大纲；文案在任务内由文案创作模型生成
     title: str | None = Field(default=None, max_length=60)
     options: dict | None = None

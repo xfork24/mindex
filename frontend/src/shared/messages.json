@@ -8979,5 +8979,8 @@
   "ui.a14c35fc39a4": {"zh": "选用{p0}版本{p1}", "en": "Select {p0} version{p1}"},
   "ui.f9712aa848b2": {"zh": "修改第三方工具源 {p0}", "en": "Edit third-party tool source {p0}"},
   "ui.80eeba5bdbfe": {"zh": "登记第三方工具源 {p0}", "en": "Register third-party tool source {p0}"},
-  "ui.main_navigation": {"zh": "页面导航", "en": "Main navigation"}
+  "ui.main_navigation": {"zh": "页面导航", "en": "Main navigation"},
+  "ui.segment_default_shot": {"zh": "镜头 {start}–{end}s", "en": "Shot {start}–{end}s"},
+  "ui.segment_default_moment": {"zh": "精细片段 {start}–{end}s", "en": "Moment {start}–{end}s"},
+  "ui.segment_default_scene": {"zh": "场景 {start}–{end}s", "en": "Scene {start}–{end}s"}
 }

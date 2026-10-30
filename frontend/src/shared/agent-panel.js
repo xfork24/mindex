@@ -86,7 +86,7 @@
     try {
       if (typeof window.MindexAgentContext === 'function') context = { ...context, ...window.MindexAgentContext() };
     } catch {}
-    return { ...context, tab_id: TAB };
+    return { ...context, language: i18n()?.language || "zh", tab_id: TAB };
   }
 
   // ------------------------------------------------------------ DOM
@@ -536,6 +536,11 @@
       case 'plugin:mindex/build-watch': buildCard(data); break;
       case 'plugin:mindex/build-finished': buildFinished(data); break;
       // 改动与定位统一由全局通道（/api/agent/changes）派发，会话事件里的记录只用于追溯。
+      case 'plugin:mindex/session-title': {
+        const option = Array.from(sessions.options).find(item => item.value === event.session_id);
+        if (option) {if (i18n()) i18n().setText(option, data.title); else option.textContent = data.title;}
+        break;
+      }
       case 'plugin:mindex/notice': bubble('system', data.text); break;
       case 'turn/end':
         if (data.reason?.kind === 'error') fail(new Error(i18n() ? i18n().render(t('ui.agent_turn_error', { p0: data.reason.error?.message || '' })) : data.reason.error?.message));

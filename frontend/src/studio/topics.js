@@ -933,7 +933,7 @@ async function createJob() {
   if (again && !window.confirm(MindexI18n.render(MindexI18n.msg("ui.topics_card_create_job_again_confirm")))) return;
   $("card-job").disabled = true;
   try {
-    const result = await api(cardUrl(card.id, "/job"), "POST", { force: again });
+    const result = await api(cardUrl(card.id, "/job"), "POST", { force: again, language: MindexI18n.language });
     location.href = `/studio?job=${enc(result.job_id)}`;
   } finally {
     $("card-job").disabled = false;

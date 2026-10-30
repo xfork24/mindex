@@ -225,7 +225,7 @@ class FixtureStoryboarder:
         return "测试创作标题"
 
     def suggest_query(
-        self, text: str, visual: str, context: tuple[str, str], vocabulary: list[str] | None
+        self, text: str, visual: str, context: tuple[str, str], vocabulary: list[str] | None, *, language: str = "zh"
     ) -> str:
         """确定性地由输入派生召回词：visual 的前两个词 + “画面”，相同输入逐字节相同。"""
         self.suggestions.append({
@@ -238,7 +238,7 @@ class FixtureStoryboarder:
         head = " ".join(words[:2])[:40]
         return f"{head} 画面".strip()
 
-    def split(self, text: str, vocabulary: list[str] | None = None) -> list[ShotDraft]:
+    def split(self, text: str, vocabulary: list[str] | None = None, *, language: str = "zh") -> list[ShotDraft]:
         self.calls += 1
         self.vocabularies.append(None if vocabulary is None else list(vocabulary))
         parts: list[str] = []

@@ -88,6 +88,7 @@ def segment_public(row: dict) -> dict:
         "source_id": row["source_id"],
         "kind": row["kind"],
         "name": row["custom_name"] or f"{prefix} {row['start']:.3f}–{row['end']:.3f}s",
+        "custom_name": row["custom_name"],
         "source_name": row["custom_source_name"] or row["original_source_name"],
         "original_source_name": row["original_source_name"],
         "start": row["start"],

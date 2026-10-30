@@ -26,7 +26,7 @@ class SplitHandler(StageHandler):
         }
 
     def specification(self, config, job_id, w, p, sid, params, resources):
-        return {"text": script_text(w, p)}, {"script": p.get("script")}, params
+        return {"text": script_text(w, p), "language": w.get("job_language", "zh")}, {"script": p.get("script")}, params
 
     def dependencies(self, w, p, sid, *, resplit=False):
         return ["script"] if not p.get("script") else []
@@ -65,7 +65,8 @@ class SplitHandler(StageHandler):
             on_error=lambda message: ctx.diagnostics.record("material-digest-error", {"message": message}),
         ))
         storyboarder = ctx.services.get("storyboarder") or make_storyboarder(config)
-        drafts = storyboarder.split(text, vocabulary=vocabulary)
+        drafts = storyboarder.split(text, vocabulary=vocabulary,
+                                    **({"language": w.get("job_language", "zh")} if w.get("job_language") == "en" else {}))
         if studio.coverage_warning(text, [s.text for s in drafts]):
             raise studio.StudioError("自动分镜未完整覆盖原文")
         # New identities avoid aliasing an old shot after a structural re-split.

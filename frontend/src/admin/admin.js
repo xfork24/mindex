@@ -122,7 +122,11 @@ async function selectSource(id) {
 function syncUrl() {history.replaceState(null, '', `/admin?${params({ source: state.source?.id, kind: state.kind, parent: state.parent?.id, segment: state.focus })}`);}
 function syncTabs() {
   for (const [id, kind] of [['shots-tab', 'shot'], ['moments-tab', 'moment']]) {$(id).classList.toggle('active', state.kind === kind);$(id).setAttribute('aria-selected', String(state.kind === kind));}
-  $('parent-filter').hidden = !state.parent;if (state.parent) MindexI18n.setText($('parent-label'), MindexI18n.msg("ui.6688020c0556", { p0: state.parent.name }));
+  $('parent-filter').hidden = !state.parent;if (state.parent) MindexI18n.setText($('parent-label'), MindexI18n.msg("ui.6688020c0556", { p0: segmentName(state.parent) }));
+}
+function segmentName(item) {
+  if (item.custom_name || item.custom_name === undefined) return item.name;
+  return MindexI18n.msg(`ui.segment_default_${item.kind}`, {start: item.start.toFixed(3), end: item.end.toFixed(3)});
 }
 async function loadSegments() {
   if (!state.source) return;const request = ++segmentRequest;syncTabs();syncUrl();
@@ -135,10 +139,10 @@ async function loadSegments() {
   pauseList();$('segment-list').replaceChildren();
   data.items.forEach((item) => {
     const card = node('article', undefined, `segment-card ${item.effective_hidden ? 'is-hidden' : ''} ${state.focus === item.id ? 'is-focused' : ''}`);card.dataset.segmentId = item.id;
-    const poster = node('button', undefined, 'poster-button');poster.type = 'button';MindexI18n.setAttr(poster, 'aria-label', MindexI18n.msg("ui.c61073cbe212", { p0: item.name }));
-    const image = node('img');image.src = item.thumbnail_url;MindexI18n.setAttr(image, "alt", item.name);image.loading = 'lazy';
+    const poster = node('button', undefined, 'poster-button');poster.type = 'button';MindexI18n.setAttr(poster, 'aria-label', MindexI18n.msg("ui.c61073cbe212", { p0: segmentName(item) }));
+    const image = node('img');image.src = item.thumbnail_url;MindexI18n.setAttr(image, "alt", segmentName(item));image.loading = 'lazy';
     poster.append(image, node('span', '▶', 'play-symbol'));poster.onclick = () => play(item);
-    const body = node('div', undefined, 'segment-body');body.append(node('h3', item.name), node('p', MindexI18n.msg("ui.a8e728244086", { p0: time(item.start), p1: time(item.end), p2: item.duration.toFixed(2) }), 'segment-time'));
+    const body = node('div', undefined, 'segment-body');body.append(node('h3', segmentName(item)), node('p', MindexI18n.msg("ui.a8e728244086", { p0: time(item.start), p1: time(item.end), p2: item.duration.toFixed(2) }), 'segment-time'));
     if (item.effective_hidden) body.append(node('span', item.inherited_hidden ? MindexI18n.msg("ui.9cfcc90a06a1") : MindexI18n.msg("ui.5fce4fb22d1d"), 'hidden-badge'));
     if (item.notes) body.append(node('p', item.notes, 'segment-note'));
     body.append(actions('segment', item));
@@ -170,7 +174,7 @@ $('edit-form').onsubmit = async (event) => {
   catch (e) {MindexI18n.setText($('edit-error'), e.message);} finally {$('edit-save').disabled = false;}
 };
 $('edit-close').onclick = () => $('edit-dialog').close();
-function play(item) {MindexI18n.setText($('play-title'), item.name);ShotPlayer.attach($('play-video'), `/api/admin/segments/${item.id}/playlist`);$('play-video').poster = item.thumbnail_url;MindexI18n.setText($('play-time'), MindexI18n.msg("ui.0159b6eb9834", { p0: time(item.start), p1: time(item.end), p2: item.source_name }));$('play-download').href = `${item.media_url}?download=true&v=${item.media_revision}`;if (!$('play-dialog').open) $('play-dialog').showModal();}
+function play(item) {MindexI18n.setText($('play-title'), segmentName(item));ShotPlayer.attach($('play-video'), `/api/admin/segments/${item.id}/playlist`);$('play-video').poster = item.thumbnail_url;MindexI18n.setText($('play-time'), MindexI18n.msg("ui.0159b6eb9834", { p0: time(item.start), p1: time(item.end), p2: item.source_name }));$('play-download').href = `${item.media_url}?download=true&v=${item.media_revision}`;if (!$('play-dialog').open) $('play-dialog').showModal();}
 $('play-close').onclick = () => $('play-dialog').close();
 $('play-dialog').addEventListener('close', () => {$('play-video').pause();$('play-video').removeAttribute('src');$('play-video').load();});
 async function run(task) {try {await task();} catch (e) {if (e.name !== 'AbortError') notify(e.message, true);}}
@@ -554,7 +558,7 @@ async function processUploads() {
 let analysisRequest = 0;
 async function showAnalysis(item) {
   const request = ++analysisRequest;
-  MindexI18n.setText($('analysis-title'), `${item.name} · ${time(item.start)} — ${time(item.end)}`);
+  MindexI18n.setText($('analysis-title'), `${segmentName(item)} · ${time(item.start)} — ${time(item.end)}`);
   const target = $('analysis-content');target.replaceChildren(node('p', MindexI18n.msg("ui.919609d4ae0e")));
   if (!$('analysis-dialog').open) $('analysis-dialog').showModal();
   try {

@@ -3,9 +3,10 @@ import os
 import subprocess
 
 import pytest
-from conftest import FixtureEmbedder
+from conftest import FixtureEmbedder, FixtureStoryboarder
 from test_agent_panel_ui import ROOT, playwright_available, serve
 
+from mindex.agent.llm.scripted import ScriptedLlm, say
 from mindex.api import create_app
 from mindex.processing.dialogue import DialogueProcessor
 from mindex.processing.indexing import IndexBuilder
@@ -39,7 +40,9 @@ def test_analysis_language_display(config, video_file):
     })
     embedder = FixtureEmbedder(config)
     IndexBuilder(config, embedder).build(channels=["analysis", "dialogue"], activate=True)
-    server, thread, url = serve(create_app(config, embedder))
+    app = create_app(config, embedder, storyboarder=FixtureStoryboarder(config), agent_llm=ScriptedLlm([[say("Ready")]]))
+    app.state.agent_runtime.title_llm_factory = lambda: ScriptedLlm([{"blocks": [say("Harbor video planning")], "delay": .2}])
+    server, thread, url = serve(app)
     try:
         result = subprocess.run(["node", "tests/analysis_display_ui.cjs"], cwd=ROOT, env={
             **os.environ, "MINDEX_ANALYSIS_URL": url, "MINDEX_ANALYSIS_SOURCE": source,
