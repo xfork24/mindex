@@ -47,15 +47,15 @@ async function waitFor(predicate, timeout, message) {
     assert.equal(isolated.desktop.platform, "darwin");
     assert.equal(isolated.frozen, true);
 
-    // 2. 五个页面与模板、选题子页都直接可用（认证由外壳注入，不出现登录页）。
-    for (const page of ["/", "/admin", "/persons", "/studio", "/settings", "/studio/templates", "/studio/topics"]) {
+    // 2. 五个主页面与文案、风格、交付模板及选题子页都直接可用（认证由外壳注入，不出现登录页）。
+    for (const page of ["/", "/admin", "/persons", "/studio", "/settings", "/studio/templates", "/studio/brands", "/studio/delivery-templates", "/studio/topics"]) {
       const response = await win.goto(`${origin}${page}`);
       assert.equal(response.status(), 200, page);
       assert.ok(!win.url().includes("/login"), `${page} 被重定向到登录页`);
     }
     // 选题挖掘页与 Web 端同一套前端：标签顺序一致，档案接口经外壳认证可用。
     const tabs = await win.$$eval(".studio-tabs a", (links) => links.map((a) => a.getAttribute("href")));
-    assert.deepEqual(tabs, ["/studio", "/studio/topics", "/studio/templates", "/studio/brands"]);
+    assert.deepEqual(tabs, ["/studio", "/studio/topics", "/studio/templates", "/studio/brands", "/studio/delivery-templates"]);
     await win.locator("#topics-empty").waitFor({ timeout: 15000 });
     const profiles = await win.evaluate(async () => (await fetch("/api/topics/profiles")).status);
     assert.equal(profiles, 200);

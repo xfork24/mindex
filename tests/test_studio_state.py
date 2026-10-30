@@ -17,6 +17,20 @@ def complete(config, job_id, step, result=None):
     studio.complete_step(config, job_id, step, result or {})
 
 
+
+def job_options_with_default_delivery(state):
+    """新任务保存基本交付模板的独立快照，同时保留原有创作选项。"""
+    options = dict(state["options"])
+    delivery = options.pop("delivery")
+    assert delivery["template_id"] == "base"
+    assert [item["canvas"] for item in delivery["config"]["exports"]] == ["16:9", "9:16", "1:1"]
+    publish = options.pop("publish")
+    assert publish["platforms"] == ["bilibili", "douyin", "youtube"]
+    assert publish == delivery["config"]["publish"]
+    assert {item["canvas"] for item in options.pop("exports")} == {"9:16", "1:1"}
+    return options
+
+
 def test_studio_config_defaults_and_validation(config):
     assert config.studio.recall.granularity == "shot"
     assert config.studio.recall.limit == 20
@@ -42,14 +56,16 @@ def test_create_job_validates_input_and_persists(config):
     assert state["outline"] == "夜色沉了下去。远处有火车经过。" and "input_text" not in state
     assert state["title"].startswith("夜色沉了下去")
     assert state["steps"]["split"]["status"] == "pending"
-    assert state["options"] == {
+    assert job_options_with_default_delivery(state) == {
         "voice": config.studio.tts.voice,
         "audio_mode": "tts_only",
         "recall_limit": 20,
         "burn": False,
     }
     assert (config.data_dir / "studio" / job_id / "job.json").is_file()
-    assert studio.load_job(config, job_id)["id"] == job_id
+    saved = studio.load_job(config, job_id)
+    assert saved["id"] == job_id
+    assert saved["options"] == state["options"]
     listing = studio.list_jobs(config)
     assert listing[0]["id"] == job_id and listing[0]["current_step"] == "split"
     with pytest.raises(studio.StudioError):
@@ -66,7 +82,7 @@ def test_create_job_options_override_defaults(config):
         "带选项的文案。",
         options={"audio_mode": "ducking", "recall_limit": 10, "burn": False, "voice": "Ethan"},
     )
-    assert state["options"] == {"voice": "Ethan", "audio_mode": "ducking", "recall_limit": 10, "burn": False}
+    assert job_options_with_default_delivery(state) == {"voice": "Ethan", "audio_mode": "ducking", "recall_limit": 10, "burn": False}
     with pytest.raises(studio.StudioError):
         studio.create_job(config, "非法选项。", options={"audio_mode": "invalid"})
 

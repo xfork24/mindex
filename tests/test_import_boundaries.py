@@ -50,6 +50,8 @@ AGENT_EXTERNAL_MODULES = {
     "mindex.settings.runtime_settings",
     "mindex.studio.studio",
     "mindex.studio.studio_models",
+    # 可管理的平台 ID 校验及既有方案的规则快照解析，与 studio_models 同类的领域接口。
+    "mindex.studio.platforms",
     "mindex.studio.workspace",
     # 选题工具的参数模型（ID 格式、权重与定时），与 studio_models 同类。
     "mindex.topics.common",
