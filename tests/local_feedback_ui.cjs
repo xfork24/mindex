@@ -21,7 +21,7 @@ const document = {
   querySelectorAll() {return [intro, section];},
   querySelector() {return main;},
 };
-const sandbox = {window: {}, document, MindexI18n: {setText(element, text) {element.textContent = text;}}};
+const sandbox = {window: {}, document, MindexI18n: {setText(element, text) {element.textContent = text;}, setAttr(element, attr, text) {element[attr] = text;}}};
 vm.createContext(sandbox);
 vm.runInContext(fs.readFileSync('frontend/src/shared/feedback.js', 'utf8'), sandbox);
 const feedback = sandbox.window.MindexFeedback;

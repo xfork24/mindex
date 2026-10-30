@@ -35,3 +35,40 @@ def test_font_and_manifest_snapshots_are_relative(config):
     result = portable_parameters(config, params)
     assert result['subtitle']['font_file'] == 'fonts/subtitle.ttf'
     assert result['analyzer']['deployment_manifest'] == config.data_dir.name + '/pins/analyzer.json'
+
+
+def test_llama_cpp_equivalent_endpoint_keeps_historical_recall(config):
+    jid, w, p = setup_workspace(config)
+    config.embedding.backend = 'llama_cpp'
+    config.embedding.base_url = 'http://127.0.0.1:8888/v1'
+    spec = ws.specification(config, jid, w, p, 'recall', 'a')
+    vid = ws.add_version(config, jid, w, 'recall', 'a', **spec)
+    p['shots']['a']['recall'] = vid
+    for endpoint in ('http://127.0.0.1:8888', 'http://127.0.0.1:8888/v1/'):
+        config.embedding.base_url = endpoint
+        assert ws.conflicts(config, jid, w, p, 'recall', 'a', vid) == []
+        assert ws.match(config, jid, w, p, 'recall', 'a', verify=False) == vid
+    config.search.channel_weights['visual'] = 3
+    assert '参数 召回权重（视觉）：原值 1，当前 3' in ws.conflicts(config, jid, w, p, 'recall', 'a', vid)
+    config.search.channel_weights['visual'] = 1
+    config.embedding.base_url = 'http://127.0.0.1:9999'
+    assert ws.conflicts(config, jid, w, p, 'recall', 'a', vid)
+
+
+def test_parameter_conflicts_identify_each_effective_change(config):
+    from mindex.studio.workspace.signatures import parameter_conflicts
+
+    previous = {'search': {'channel_weights': {'visual': 3}}, 'visibility': 'old-visibility',
+                'index_id': 'old-index', 'embedding': {'backend': 'llama_cpp',
+                'base_url': 'http://localhost:8888/v1', 'expected_space': {'model_sha256': 'old-model'}}}
+    current = {'search': {'channel_weights': {'visual': 1}}, 'visibility': 'new-visibility',
+               'index_id': 'new-index', 'embedding': {'backend': 'llama_cpp',
+               'base_url': 'http://localhost:8888', 'expected_space': {'model_sha256': 'new-model'}}}
+    messages = parameter_conflicts(config, previous, current)
+    assert len(messages) == 4
+    assert '参数 召回权重（视觉）：原值 3，当前 1' in messages
+    assert '参数 素材可见性指纹：原值 "old-visibility"，当前 "new-visibility"' in messages
+    assert '参数 活动索引版本：原值 "old-index"，当前 "new-index"' in messages
+    assert any('embedding.expected_space.model_sha256' in message for message in messages)
+    assert not any('base_url' in message or '嵌入服务地址' in message for message in messages)
+    assert previous['embedding']['base_url'].endswith('/v1')

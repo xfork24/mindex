@@ -786,7 +786,7 @@ function renderShotEditor(body, sid) {
     f.input.dataset.shotField = name;
     inputs[name] = f.input;
     // visual 不设 maxLength：浏览器按 UTF-16 计数，与服务端按码点计的 120 字上限不一致，超长交给服务端 422。
-    if (name === "visual") f.input.placeholder = MindexI18n.msg("ui.visual_placeholder");else
+    if (name === "visual") MindexI18n.setAttr(f.input, "placeholder", MindexI18n.msg("ui.visual_placeholder"));else
     if (type === "textarea") f.input.maxLength = name === "text" ? 200 : 400;else
     {
       f.input.min = "0.001";
@@ -952,8 +952,8 @@ async function changeStructure(sid, op) {
   if (op === "insert")
   shots.splice(index + 1, 0, {
     id: null,
-    text: "新旁白",
-    query: "新画面",
+    text: MindexI18n.render(MindexI18n.msg("ui.108ae6548bd6")),
+    query: MindexI18n.render(MindexI18n.msg("ui.59891c364fe4")),
     estimated_seconds: 3
   });
   if (op === "delete") shots.splice(index, 1);

@@ -20,9 +20,9 @@ async function createProfile(page, { name, domain, taboos = [] }) {
 
 scenario("profiles", async (page) => {
   await page.goto(`${base}/studio/topics`);
-  // 标签顺序：创作任务 → 选题挖掘 → 文案模板，当前页高亮
+  // 标签顺序：创作任务 → 选题挖掘 → 文案模板 → 风格模板，当前页高亮
   const tabs = await page.$$eval(".studio-tabs a", (links) => links.map((a) => [a.getAttribute("href"), a.getAttribute("aria-current")]));
-  assert.deepEqual(tabs, [["/studio", null], ["/studio/topics", "page"], ["/studio/templates", null]]);
+  assert.deepEqual(tabs, [["/studio", null], ["/studio/topics", "page"], ["/studio/templates", null], ["/studio/brands", null]]);
   await page.locator("#topics-empty").waitFor();
   assert.equal(await page.isVisible("#topics-bar"), false);
   await createProfile(page, { name: "财经号", domain: "金融", taboos: ["不荐股", "不预测涨跌"] });

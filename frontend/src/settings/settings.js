@@ -65,7 +65,7 @@ function timeoutField(role) {
 const ROLE_EXTRA = {
   person: [
   { key: 'expected_space', label: MindexI18n.msg("ui.7f5c519b5795"), type: 'json' },
-  { key: 'frame_interval', label: '间隔帧数', type: 'number', min: 1, step: 1 },
+  { key: 'frame_interval', label: MindexI18n.msg("ui.person_frame_interval"), type: 'number', min: 1, step: 1 },
   { key: 'face_threshold', label: MindexI18n.msg("ui.c7501d1b57d8"), type: 'number', min: 0.01 },
   { key: 'face_margin', label: MindexI18n.msg("ui.400a124b6162"), type: 'number', min: 0.01 },
   { key: 'min_face_quality', label: MindexI18n.msg("ui.9ced26663827"), type: 'number', min: 0, max: 1 },
@@ -673,7 +673,7 @@ function renderLocalServices(data) {
     const row = node('li', undefined, `release-item service-item${item.running && item.healthy ? ' is-active' : ''}`);
     row.dataset.service = item.name;
     const head = node('div', undefined, 'service-head');
-    head.append(node('strong', item.label || item.name));
+    head.append(node('strong', MindexI18n.builtin(item.label || item.name)));
     head.append(node('span', MindexI18n.msg('ui.local_service_meta', {
       p0: item.port, p1: item.role || item.name, p2: item.pid ?? '—',
     }), 'muted'));
@@ -1037,7 +1037,7 @@ async function refreshVoiceCandidates() {
       }
       if (![...select.options].some((option) => option.value === previousClone)) select.value = '';
     } else {
-      const empty = node('option', catalog?.hint || MindexI18n.msg("ui.ecd04f151041"));
+      const empty = node('option', MindexI18n.system(catalog?.hint) || MindexI18n.msg("ui.ecd04f151041"));
       empty.value = '';
       select.append(empty);
       select.value = '';

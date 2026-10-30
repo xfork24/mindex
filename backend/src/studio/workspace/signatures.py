@@ -134,10 +134,66 @@ def specification(config, job_id, w, p, stage, sid=None, *, context=None, parame
     }
 
 
+def comparable_parameters(config, parameters, expected):
+    """Compare effective settings while preserving immutable historical hashes."""
+    value = portable_parameters(config, parameters, expected)
+    # llama_cpp.root() accepts both service roots and OpenAI /v1 URLs.
+    # Restrict this equivalence to that adapter; other services may use /v1 differently.
+    value = dict(value)
+    embedding = value.get("embedding")
+    if isinstance(embedding, dict) and embedding.get("backend") == "llama_cpp":
+        embedding = dict(embedding)
+        if isinstance(embedding.get("base_url"), str):
+            embedding["base_url"] = embedding["base_url"].rstrip("/").removesuffix("/v1")
+        value["embedding"] = embedding
+    return value
+
+
+def parameters_match(config, parameters, expected):
+    return comparable_parameters(config, parameters, expected) == comparable_parameters(config, expected, expected)
+
+
+PARAMETER_LABELS = {
+    "search.channel_weights.visual": "召回权重（视觉）",
+    "search.channel_weights.dialogue": "召回权重（对白）",
+    "search.channel_weights.analysis": "召回权重（分析）",
+    "visibility": "素材可见性指纹",
+    "index_id": "活动索引版本",
+    "person_release": "人物检索发布版本",
+    "embedding.base_url": "嵌入服务地址",
+    "embedding.model": "嵌入模型",
+    "embedding.backend": "嵌入服务类型",
+    "embedding.expected_space": "嵌入空间身份",
+    "embedding.deployment_manifest": "嵌入部署清单",
+    "limit": "召回数量",
+    "sources": "任务素材范围",
+}
+
+
+def parameter_conflicts(config, previous, current):
+    """Report each effective setting difference, including identities and visibility."""
+    messages = []
+
+    def display(value):
+        import json
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+    def walk(old, new, path=""):
+        if isinstance(old, dict) and isinstance(new, dict):
+            for key in sorted(old.keys() | new.keys()):
+                walk(old.get(key), new.get(key), f"{path}.{key}" if path else key)
+        elif old != new:
+            label = PARAMETER_LABELS.get(path, path)
+            messages.append(f"参数 {label}：原值 {display(old)}，当前 {display(new)}")
+
+    walk(comparable_parameters(config, previous, current), comparable_parameters(config, current, current))
+    return messages
+
+
 def signature_matches(config, job_id, w, p, stage, sid, item, expected, *, context=None):
     if item["signature"] == expected["signature"]:
         return True
-    if portable_parameters(config, item["parameters"], expected["parameters"]) != expected["parameters"]:
+    if not parameters_match(config, item["parameters"], expected["parameters"]):
         return False
     # Reconstruct the current payload with the historical path spelling. This
     # verifies the original hash without rewriting immutable version records.
@@ -166,9 +222,9 @@ def conflicts(config, job_id, w, p, stage, sid, vid, *, context=None):
                     f"依赖 {key}：原版本 {item['inputs'].get(key) or '缺失'}，当前 {value or '缺失'}"
                 )
         if stage_handler.checks_parameters and (
-            portable_parameters(config, item["parameters"], expected["parameters"]) != expected["parameters"]
+            not parameters_match(config, item["parameters"], expected["parameters"])
         ):
-            messages.append("阶段参数与当前方案不一致")
+            messages.extend(parameter_conflicts(config, item["parameters"], expected["parameters"]))
         if not messages:
             messages.append("实际输入内容或素材文件已变化")
     # 上游成片阶段（导出、封面等以 ``阶段[:变体]`` 为依赖键）递归检查。

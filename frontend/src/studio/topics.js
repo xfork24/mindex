@@ -82,10 +82,10 @@ function renderProfileSummary() {
   if (item.subtopics.length) parts.push(item.subtopics.join("、"));
   if (item.audience) parts.push(item.audience);
   const schedule = item.schedule.enabled
-    ? MindexI18n.render(MindexI18n.msg("ui.topics_schedule_summary", { p0: item.schedule.time, p1: item.schedule.count }))
-    : MindexI18n.render(MindexI18n.msg("ui.topics_schedule_off"));
+    ? MindexI18n.msg("ui.topics_schedule_summary", { p0: item.schedule.time, p1: item.schedule.count })
+    : MindexI18n.msg("ui.topics_schedule_off");
   parts.push(schedule);
-  box.textContent = parts.join(" · ");
+  MindexI18n.setText(box, parts.join(" · "));
 }
 async function selectProfile(id) {
   page.profile = page.profiles.find((item) => item.id === id) || null;
@@ -547,8 +547,8 @@ function itemRow(entry) {
   const when = entry.event_at || entry.published_at;
   const meta = [];
   if (when) meta.push(MindexI18n.date(when));
-  if (entry.hot != null) meta.push(MindexI18n.render(MindexI18n.msg("ui.topics_item_hot", { p0: entry.hot })));
-  if (meta.length) li.append(content("span", meta.join(" · "), "muted item-meta"));
+  if (entry.hot != null) meta.push(MindexI18n.msg("ui.topics_item_hot", { p0: entry.hot }));
+  if (meta.length) li.append(el("span", meta.join(" · "), "muted item-meta"));
   if (entry.summary) li.append(content("p", entry.summary, "item-summary"));
   return li;
 }
@@ -738,9 +738,9 @@ function renderCoverage(card) {
     MindexI18n.setText($("coverage-summary"), report.reason ? MindexI18n.system(report.reason) : MindexI18n.msg("ui.topics_coverage_none"));
     return;
   }
-  const summary = [MindexI18n.render(MindexI18n.msg("ui.topics_coverage_summary", { p0: report.hits, p1: report.total }))];
-  if (report.reason) summary.push(MindexI18n.render(MindexI18n.system(report.reason)));
-  $("coverage-summary").textContent = summary.join(" · ");
+  const summary = [MindexI18n.msg("ui.topics_coverage_summary", { p0: report.hits, p1: report.total })];
+  if (report.reason) summary.push(MindexI18n.system(report.reason));
+  MindexI18n.setText($("coverage-summary"), summary.join(" · "));
   for (const row of report.visuals || []) {
     const li = el("li", null, "coverage-row" + (row.hit ? " is-hit" : " is-gap"));
     const head = el("div", null, "coverage-head");
@@ -805,7 +805,7 @@ function renderCard() {
   if (!card) return;
   $("card-title").textContent = card.title;
   const tags = $("card-tags");
-  tags.replaceChildren(content("span", MindexI18n.render(MindexI18n.msg("ui.topics_card_total", { p0: percent(card.total) })), "template-tag topic-total"),
+  tags.replaceChildren(el("span", MindexI18n.msg("ui.topics_card_total", { p0: percent(card.total) }), "template-tag topic-total"),
     el("span", MindexI18n.msg(`ui.topics_status_${card.status}`), "template-tag"));
   $("card-angle").textContent = card.angle || "";
   $("card-reason").textContent = card.reason || "";
@@ -821,7 +821,7 @@ function renderCard() {
   }));
   const warnings = $("card-warnings");
   warnings.hidden = !(card.warnings || []).length;
-  warnings.textContent = (card.warnings || []).map((w) => MindexI18n.render(MindexI18n.system(w))).join("；");
+  MindexI18n.setText(warnings, (card.warnings || []).map((w) => MindexI18n.system(w)).join("; "));
   showError("card-error", null);
   for (const hook of cardHooks) hook(card);
 }
@@ -1007,14 +1007,14 @@ async function loadSchedule(profile) {
   const data = await api("/api/topics/schedule");
   const item = data.items.find((entry) => entry.profile_id === profile.id);
   if (!item || !item.enabled) return MindexI18n.setText(box, MindexI18n.msg("ui.topics_schedule_off_hint"));
-  const parts = [MindexI18n.render(MindexI18n.msg("ui.topics_schedule_summary", { p0: item.time, p1: item.count }))];
-  if (!data.scheduler) parts.push(MindexI18n.render(MindexI18n.msg("ui.topics_schedule_inactive")));
-  else if (item.next_run) parts.push(MindexI18n.render(MindexI18n.msg("ui.topics_schedule_next", { p0: MindexI18n.date(item.next_run) })));
-  parts.push(MindexI18n.render(MindexI18n.msg("ui.topics_schedule_today", { p0: item.today.cards })));
+  const parts = [MindexI18n.msg("ui.topics_schedule_summary", { p0: item.time, p1: item.count })];
+  if (!data.scheduler) parts.push(MindexI18n.msg("ui.topics_schedule_inactive"));
+  else if (item.next_run) parts.push(MindexI18n.msg("ui.topics_schedule_next", { p0: MindexI18n.date(item.next_run) }));
+  parts.push(MindexI18n.msg("ui.topics_schedule_today", { p0: item.today.cards }));
   // 桌面版：关闭窗口后留在托盘/菜单栏，定时照常执行（只经 window.MindexDesktop 特性检测，Web 端不显示）。
   if (data.scheduler && globalThis.window?.MindexDesktop?.background)
-    parts.push(MindexI18n.render(MindexI18n.msg("ui.topics_schedule_background")));
-  box.textContent = parts.join(" · ");
+    parts.push(MindexI18n.msg("ui.topics_schedule_background"));
+  MindexI18n.setText(box, parts.join(" · "));
 }
 profileHooks.push(loadSchedule);
 

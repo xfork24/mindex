@@ -48,5 +48,8 @@
       {select.options[j].hidden = !matches(select.options[j], query);select.options[j].title = select.options[j].textContent;}
     }
   };
+  window.addEventListener('mindex:languagechange', function () {
+    document.querySelectorAll('select[multiple][data-searchable]').forEach(api.refilter);
+  });
   window.MindexMultiSearch = api;
 })();

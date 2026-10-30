@@ -96,10 +96,10 @@ function renderFinal() {
         Object.assign(track, {
           kind: "subtitles",
           srclang: "zh",
-          label: "中文",
           default: true,
           src: selected.files.vtt.url
         });
+        MindexI18n.setAttr(track, "label", MindexI18n.msg("ui.7be2d2d20c10"));
         video.append(track);
       }
       player.append(video);

@@ -37,11 +37,29 @@
       return template.replace(/\{(\w+)\}/g, (all, name) => render(item.params[name] ?? all, depth + 1));
     });
   }
+  function diagnosticParam(value) {
+    // Only diagnostic templates opt into nested translation. Content parameters
+    // passed to msg() remain verbatim, even when they match a UI label.
+    const text = String(value);
+    if (text.includes('；')) return text.split('；').map(diagnosticParam).join('; ');
+    if (legacy.some(entry => entry.regex.test(text))) return system(text);
+    return text;
+  }
+  function systemParams(key, params) {
+    // Only these diagnostic templates contain other system messages. A job,
+    // profile, or file name in an ordinary template must remain user content.
+    const nested = {
+      'ui.conflict_upstream': ['p1'], 'ui.conflict_upstream_changed': ['p1'],
+      'ui.parameter_difference': ['p0'],
+    };
+    return Object.fromEntries(Object.entries(params).map(([name, value]) =>
+      [name, (nested[key] || []).includes(name) ? diagnosticParam(value) : value]));
+  }
   function system(value) {
     if (!value) return '';
     if (Array.isArray(value)) return msg('system.validation', {diagnostic: value.map(item => [...(item.loc || []), item.msg || JSON.stringify(item)].join(': ')).join('; ')});
     if (typeof value === 'object') {
-      if (value.message_key && catalog[value.message_key]) return msg(value.message_key, value.message_params || {});
+      if (value.message_key && catalog[value.message_key]) return msg(value.message_key, systemParams(value.message_key, value.message_params || {}));
       return system(value.message ?? value.detail ?? value.error ?? JSON.stringify(value));
     }
     const text = String(value);
@@ -49,7 +67,7 @@
     if (/\uE000z\d+\uE001/.test(text)) return text;
     for (const entry of legacy) {
       const found = text.match(entry.regex);
-      if (found) return msg(entry.key, Object.fromEntries(entry.names.map((n, i) => [n, found[i + 1]])));
+      if (found) return msg(entry.key, systemParams(entry.key, Object.fromEntries(entry.names.map((n, i) => [n, found[i + 1]]))));
     }
     return msg('system.diagnostic', {diagnostic: text});
   }
@@ -95,8 +113,7 @@
     const visit = node => {
       for (const [attribute, value] of bindings.get(node) || []) {
         if (attribute === '#text') {
-          if (Array.isArray(value)) return msg('system.validation', {diagnostic: value.map(item => [...(item.loc || []), item.msg || JSON.stringify(item)].join(': ')).join('; ')});
-    if (typeof value === 'object') {
+          if (typeof value === 'object') {
             if (value.target.parentNode === node) value.target.data = render(value.value);
           } else if (node.nodeType === 3) node.data = render(value);
         } else setAttr(node, attribute, value);
@@ -129,6 +146,7 @@
     }
     document.querySelectorAll('[data-language-toggle]').forEach(button => button.addEventListener('click', () => setLanguage(language === 'zh' ? 'en' : 'zh')));
     update();
+    document.documentElement.removeAttribute('data-i18n-pending');
   }
   window.addEventListener('storage', event => {
     if (event.key === storageKey || event.key === null) setLanguage(event.newValue, false);

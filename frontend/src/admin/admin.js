@@ -583,7 +583,7 @@ async function showAnalysis(item) {
         const text = Array.isArray(value) ? value.join('；') : String(value ?? '');
         if (text) llm.append(node('p', `${labels[key] || key}：${text}`));
       }
-    } else {llm.append(node('p', MindexI18n.system(data.llm)));if (data.llm.reason) llm.append(node('p', data.llm.reason, 'muted'));}
+    } else {llm.append(node('p', MindexI18n.system(data.llm)));if (data.llm.reason) llm.append(node('p', MindexI18n.system(data.llm.reason), 'muted'));}
     target.append(llm);
     const person = node('section', undefined, 'analysis-section');
     person.append(node('h3', MindexI18n.msg("ui.0c0ae35b2935")), node('p', MindexI18n.system(data.person)));

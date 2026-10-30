@@ -149,7 +149,7 @@ function renderPublish(box, p) {
       choice.className = "quiet cover-candidate";
       const img = document.createElement("img");
       img.src = item.url;
-      img.alt = MindexI18n.render(MindexI18n.msg("ui.publish_cover_at", { p0: item.time }));
+      MindexI18n.setAttr(img, "alt", MindexI18n.msg("ui.publish_cover_at", { p0: item.time }));
       choice.append(img, el("span", MindexI18n.msg("ui.publish_cover_at", { p0: item.time }), "muted"));
       choice.addEventListener("click", () => {cover.source = "frame";cover.time = item.time;source.input.value = "frame";at.input.value = item.time;});
       candidates.append(choice);
@@ -181,7 +181,7 @@ function platformResult(p, id) {
     const img = document.createElement("img");
     img.src = cover.files.cover.url;
     img.className = "publish-cover";
-    img.alt = MindexI18n.render(MindexI18n.msg("ui.publish_cover_alt"));
+    MindexI18n.setAttr(img, "alt", MindexI18n.msg("ui.publish_cover_alt"));
     card.append(img);
   }
   if (meta?.data) {

@@ -38,7 +38,7 @@ window.MindexFeedback = (() => {
     MindexI18n.setText(message, text);
     message.className = `notice local-feedback ${type}`;
     message.dataset.type = type;
-    message.title = String(text || '');
+    MindexI18n.setAttr(message, 'title', text || '');
     message.hidden = !text;
   }
   for (const id of ['notice', 'admin-notice']) if (document.getElementById(id)) show(id, '');

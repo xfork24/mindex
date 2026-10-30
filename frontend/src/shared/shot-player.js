@@ -6,20 +6,20 @@ window.ShotPlayer = class ShotPlayer {
     this.container = document.createElement('div');this.container.className = 'shot-player';this.container.style.position = 'relative';
     video.replaceWith(this.container);
     this.media = document.createElement('div');this.media.className = 'shot-player-media';this.container.append(this.media);this.media.append(...this.videos);
-    this.overlay = document.createElement('button');this.overlay.type = 'button';this.overlay.className = 'shot-play-overlay';this.overlay.textContent = '▶';this.overlay.setAttribute('aria-label', 'Play video');
+    this.overlay = document.createElement('button');this.overlay.type = 'button';this.overlay.className = 'shot-play-overlay';this.overlay.textContent = '▶';this.label(this.overlay, 'ui.player_play', 'Play video');
     this.overlay.onclick = () => this.togglePlayback();this.media.append(this.overlay);
     this.videos[1].removeAttribute('id');this.videos.forEach(v => {v.style.width = '100%';v.style.maxHeight = '75vh';});
     this.bar = document.createElement('input');this.bar.type = 'range';this.bar.min = 0;this.bar.step = .01;this.bar.value = 0;
     const controls = document.createElement('div');controls.className = 'shot-player-controls';
-    this.toggle = document.createElement('button');this.toggle.type = 'button';this.toggle.setAttribute('aria-label', 'Play / pause');this.toggle.textContent = '▶ / Ⅱ';
+    this.toggle = document.createElement('button');this.toggle.type = 'button';this.label(this.toggle, 'ui.player_toggle', 'Play / pause');this.toggle.textContent = '▶ / Ⅱ';
     this.toggle.onclick = () => this.togglePlayback();
-    const replay = document.createElement('button');replay.type = 'button';replay.setAttribute('aria-label', 'Replay');replay.textContent = '↻';replay.onclick = () => this.seek(0, true);
-    const speed = document.createElement('select');
+    const replay = document.createElement('button');replay.type = 'button';this.label(replay, 'ui.player_replay', 'Replay');replay.textContent = '↻';replay.onclick = () => this.seek(0, true);
+    const speed = document.createElement('select');this.label(speed, 'ui.player_speed', 'Playback speed');
     for(const rate of [.5, 1, 1.5, 2]) {const option = document.createElement('option');option.value = rate;option.textContent = `${rate}×`;option.selected = rate === 1;speed.append(option);}
     speed.onchange = () => this.videos.forEach(v => v.playbackRate = Number(speed.value));
-    const full = document.createElement('button');full.type = 'button';full.setAttribute('aria-label', 'Fullscreen');full.textContent = '⛶';full.onclick = () => this.container.requestFullscreen();
+    const full = document.createElement('button');full.type = 'button';this.label(full, 'ui.player_fullscreen', 'Fullscreen');full.textContent = '⛶';full.onclick = () => this.container.requestFullscreen();
     controls.append(this.toggle, replay, speed, full, this.bar);this.container.append(controls);
-    this.bar.setAttribute('aria-label', 'Clip position');this.bar.oninput = () => this.seek(Number(this.bar.value), !this.current.paused);
+    this.label(this.bar, 'ui.player_position', 'Clip position');this.bar.oninput = () => this.seek(Number(this.bar.value), !this.current.paused);
     this.videos.forEach((v, n) => {v.controls = false;v.preload = 'auto';v.hidden = n !== 0;
       v.onclick = () => {if(n === this.active) this.togglePlayback();};
       v.addEventListener('play', () => {if(n === this.active) this.overlay.hidden = true;});
@@ -27,18 +27,23 @@ window.ShotPlayer = class ShotPlayer {
       v.addEventListener('timeupdate', () => {if(n !== this.active || !this.items) return;const item = this.items[this.index];this.bar.value = item.offset + v.currentTime - item.start;
         if(v.currentTime >= item.end - .015) this.next();});
       v.addEventListener('ended', () => {if(n === this.active) this.next();});
-      v.addEventListener('error', () => this.fail(Error('Shot decode failed')));
+      v.addEventListener('error', () => this.fail(Error('镜头解码失败')));
     });
+  }
+  label(node, key, fallback) {
+    const i18n = window.MindexI18n;
+    if (i18n) i18n.setAttr(node, 'aria-label', i18n.msg(key));
+    else node.setAttribute('aria-label', fallback);
   }
   async togglePlayback() {
     try {await this.ready;const v = this.current;if(v.paused) await v.play();else v.pause();} catch(error) {this.fail(error);}
   }
   get current() {return this.videos[this.active];}
   get time() {const item = this.items?.[this.index];return item ? item.offset + this.current.currentTime - item.start : 0;}
-  fail(error) {this.container.dataset.error = error.message;this.container.title = error.message;this.current.pause();}
+  fail(error) {this.container.dataset.error = error.message;if (window.MindexI18n) window.MindexI18n.setAttr(this.container, 'title', window.MindexI18n.system(error.message));else this.container.title = error.message;this.current.pause();}
   async load(url, position = 0) {
     this.videos.forEach(v => {v.pause();v.removeAttribute('src');v.load();});
-    this.overlay.hidden = false;this.active = 0;this.index = 0;this.switching = false;this.items = null;delete this.container.dataset.error;this.container.title = '';
+    this.overlay.hidden = false;this.active = 0;this.index = 0;this.switching = false;this.items = null;delete this.container.dataset.error;if (window.MindexI18n) window.MindexI18n.setAttr(this.container, 'title', '');else this.container.title = '';
     this.videos.forEach((v, n) => {v.hidden = n !== 0;});
     const generation = ++this.generation;
     const response = await fetch(url);if(!response.ok) throw Error(await response.text());

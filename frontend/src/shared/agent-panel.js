@@ -575,19 +575,19 @@
     const card = node('section', `agent-card agent-approval risk-${data.risk}`);
     label(card, t('ui.agent_approval_title'));
     card.append(node('h3', '', t(data.risk === 'danger' ? 'ui.agent_approval_danger' : 'ui.agent_approval_write', { p0: data.name })));
-    if (data.preview?.summary) card.append(node('p', 'agent-preview', data.preview.summary));
+    if (data.preview?.summary) card.append(node('p', 'agent-preview', i18n() ? i18n().system(data.preview.summary) : data.preview.summary));
     if (data.preview?.changes?.length) {
       const list = node('ul', 'agent-changes');
       for (const change of data.preview.changes) {
         const item = node('li');
-        item.append(node('strong', '', change.label || ''));
+        item.append(node('strong', '', i18n() ? i18n().system(change.label || '') : change.label || ''));
         if (change.before !== undefined) item.append(node('span', 'agent-before', String(change.before ?? '—')));
         if (change.after !== undefined) item.append(node('span', 'agent-after', String(change.after ?? '—')));
         list.append(item);
       }
       card.append(list);
     }
-    for (const text of data.preview?.warnings || []) card.append(node('p', 'agent-warning', text));
+    for (const text of data.preview?.warnings || []) card.append(node('p', 'agent-warning', i18n() ? i18n().system(text) : text));
     const details = node('details', 'agent-args-wrap');
     details.append(node('summary', '', t('ui.agent_arguments')), node('pre', 'agent-args', prettyJson(data.arguments)));
     card.append(details);
@@ -766,8 +766,10 @@
     try {
       const data = await api(`/api/studio/jobs/${entry.data.job_id}/builds/${entry.data.build_id}/logs?after=${entry.seq}`);
       for (const item of data.items) {
-        const text = i18n() ? i18n().render(i18n().system(item)) : item.message;
-        entry.lines.textContent = (entry.lines.textContent + '\n' + text).trim().split('\n').slice(-6).join('\n');
+        const text = i18n() ? i18n().system(item) : item.message;
+        entry.logMessages = [...(entry.logMessages || []), text].slice(-6);
+        if (i18n()) i18n().setText(entry.lines, entry.logMessages.join('\n'));
+        else entry.lines.textContent = entry.logMessages.join('\n');
       }
       entry.seq = data.next_seq ?? entry.seq;
       if (data.status !== 'running') return finishBuild(entry, data.status);
@@ -791,7 +793,7 @@
   // 只加载本站 /api/ 地址；与后端 tools/media.py 的校验一致。
   const SAFE_MEDIA = /^\/api\/[^\s]*$/;
   const safeMedia = (url) => typeof url === 'string' && SAFE_MEDIA.test(url) && !url.includes('//') && !url.includes('..');
-  const PLAYER_SRC = '/assets/shared/shot-player.js?v=d5fc85925a';
+  const PLAYER_SRC = '/assets/shared/shot-player.js?v=0d7ae3ceb4';
   let playerLoading = null;
   function ensureShotPlayer() {
     if (window.ShotPlayer) return Promise.resolve();

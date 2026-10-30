@@ -189,7 +189,7 @@ function stageSummaryNodes(sid, stage) {
   }
   const messages = state.data.conflicts[`${stage}:${sid}`] || [];
   if (messages.length)
-  nodes.push(el("span", shortIds(MindexI18n.msg("ui.e5d4ec45ff67", { p0: messages.join("；") })), "cell-summary warn-text"));
+  nodes.push(el("span", shortIds(MindexI18n.msg("ui.e5d4ec45ff67", { p0: messages.map((message) => MindexI18n.system(message)).join("; ") })), "cell-summary warn-text"));
   const node = latestNode(stage, sid);
   if (node)
   nodes.push(

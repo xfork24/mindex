@@ -146,6 +146,8 @@ class RecallHandler(StageHandler):
         return data, {"candidates": file_info(config, job_id, target)}
 
     def conflict_labels(self, config, w, item, expected, messages):
+        if not signatures.parameters_match(config, item["parameters"], expected["parameters"]):
+            return []
         return ["查询、召回方式或召回设置已变化"]
 
 
