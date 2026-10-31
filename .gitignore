@@ -19,6 +19,7 @@ clean.js
 # 计划执行台账（本地暂存）
 .superpowers/
 
+/node_modules/
 /build/
 logs/
 
