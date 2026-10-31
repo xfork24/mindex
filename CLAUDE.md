@@ -85,7 +85,7 @@ uv run mindex clean [--apply]                    # 磁盘清理：默认预览�
 
 ### 检索（search/search.py）
 
-新版索引文字查询按 `visual`、`dialogue`、`analysis` 三渠道召回：对白与分析内部先融合语义向量和 BM25，再按 `search.channel_weights`（默认 1:1:1）做 RRF，最后同源 IoU 去重。旧格式索引仍保留 video/description/style/dialogue 向量与 lexical 的融合路径（`search.weights`），不要混淆两组配置。新版文本查询在嵌入不可用或空间不匹配时，可在有可用文本渠道的条件下显式降级 BM25，并返回 `degraded`/`warnings`；禁止绕过空间校验比较向量。图片与视频查询只检索画面表示；视频拆 4s/3s 窗口，不入库、清理临时文件。在线无 LLM 实时重排，分数不是概率。
+新版索引文字查询按 `visual`、`dialogue`、`analysis` 三渠道召回：对白与分析内部先融合语义向量和 BM25，再按 `search.channel_weights`（默认 0.35:0.15:0.5）做 RRF，最后同源 IoU 去重。旧格式索引仍保留 video/description/style/dialogue 向量与 lexical 的融合路径（`search.weights`），不要混淆两组配置。新版文本查询在嵌入不可用或空间不匹配时，可在有可用文本渠道的条件下显式降级 BM25，并返回 `degraded`/`warnings`；禁止绕过空间校验比较向量。图片与视频查询只检索画面表示；视频拆 4s/3s 窗口，不入库、清理临时文件。在线无 LLM 实时重排，分数不是概率。
 
 ### Web/API
 

@@ -79,7 +79,7 @@
 
 ## 检索调参
 
-新版三渠道权重 `search.channel_weights`（画面/对白/分析，默认 1:1:1），旧版五路召回权重 `search.weights`（画面/动作场景/情绪镜头/对白/词法 BM25）、RRF k、候选数；保存为 `override.search`，每请求生效，与索引无关。
+新版三渠道权重 `search.channel_weights`（画面/对白/分析，默认 0.35:0.15:0.5），旧版五路召回权重 `search.weights`（画面/动作场景/情绪镜头/对白/词法 BM25）、RRF k、候选数；保存为 `override.search`，每请求生效，与索引无关。
 
 ## 索引版本
 

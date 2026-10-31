@@ -233,7 +233,7 @@ def test_split_prompt_preserves_narration_and_requires_chinese_keywords(config, 
 
 
 def test_split_prompt_contains_all_granularity_rules():
-    """提示词固定写入全部粒度规则（需求 5.1–5.6），SPLIT_VERSION 递增为 7。"""
+    """提示词固定写入全部粒度规则（需求 5.1–5.6），SPLIT_VERSION 递增为 8。"""
     from mindex.models.storyboard import split_instructions
 
     system = split_instructions(12)
@@ -251,7 +251,7 @@ def test_split_prompt_contains_all_granularity_rules():
         "分镜数量不超过 12",
     ):
         assert rule in system, rule
-    assert studio.SPLIT_VERSION == 7
+    assert studio.SPLIT_VERSION == 8
 
 
 def test_split_prompt_orders_visual_text_query():
@@ -259,7 +259,7 @@ def test_split_prompt_orders_visual_text_query():
     from mindex.models.storyboard import split_instructions
 
     system = split_instructions(12)
-    order = "先为每镜规划 visual（一句中文画面意象），再按 visual 切分 text，最后编写 query"
+    order = "先为每镜规划 visual（一句画面意象），再按 visual 切分 text，最后编写 query"
     assert order in system
     sections = [system.index(title) for title in ("一、产出顺序", "三、text 规则", "四、visual 规则", "五、query 规则")]
     assert sections == sorted(sections)

@@ -48,9 +48,10 @@ def test_llama_cpp_equivalent_endpoint_keeps_historical_recall(config):
         config.embedding.base_url = endpoint
         assert ws.conflicts(config, jid, w, p, 'recall', 'a', vid) == []
         assert ws.match(config, jid, w, p, 'recall', 'a', verify=False) == vid
+    original = config.search.channel_weights['visual']
     config.search.channel_weights['visual'] = 3
-    assert '参数 召回权重（视觉）：原值 1，当前 3' in ws.conflicts(config, jid, w, p, 'recall', 'a', vid)
-    config.search.channel_weights['visual'] = 1
+    assert f'参数 召回权重（视觉）：原值 {original}，当前 3' in ws.conflicts(config, jid, w, p, 'recall', 'a', vid)
+    config.search.channel_weights['visual'] = original
     config.embedding.base_url = 'http://127.0.0.1:9999'
     assert ws.conflicts(config, jid, w, p, 'recall', 'a', vid)
 
