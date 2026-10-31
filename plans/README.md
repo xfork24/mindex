@@ -51,3 +51,4 @@
 | [MINDEX_CLEAN_PLAN.md](MINDEX_CLEAN_PLAN.md) | `mindex clean` 磁盘清理 |
 | [DATA_MIGRATION_PLAN.md](DATA_MIGRATION_PLAN.md) | CLI 数据备份与迁移工具 |
 | [MACOS_NATIVE_PLAN.md](MACOS_NATIVE_PLAN.md) | macOS 桌面端（Electron 外壳 + Python sidecar）决策与实施计划；任务进度见 `.kiro/specs/macos-desktop/` |
+| [WIN_LINUX_NATIVE_PLAN.md](WIN_LINUX_NATIVE_PLAN.md) | 桌面版 Windows x64 / Linux x64 跨平台决策与实施计划；任务进度见 `.kiro/specs/desktop-cross-platform/` |
