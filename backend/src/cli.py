@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from enum import Enum
 from pathlib import Path
 from typing import Annotated
@@ -652,7 +653,9 @@ def clean(
     与 uploads 原件。
 
     输出 JSON：categories 为逐类别结果，total 为候选数量/字节数，notes 为保留项
-    建议，--vacuum 时另有 vacuum 字段。请检查类别的 error/skipped，单类别错误不一定
+    建议，--vacuum 时另有 vacuum 字段。执行过程先在 stdout 输出带时间戳的中文
+    进度日志（逐规则扫描、取锁与执行、VACUUM 心跳），JSON 报告在最后整体输出。
+    请检查类别的 error/skipped，单类别错误不一定
     使整体退出码为 1。管线或索引锁冲突退出 1；Studio 锁冲突只跳过该部分。
     大规模清理前建议停服。
 
@@ -668,10 +671,16 @@ def clean(
     from mindex.maintenance.clean import CleanBusy, clean_library
 
     try:
-        print_json(clean_library(ctx.obj, apply=apply, vacuum=vacuum, days=days))
+        print_json(clean_library(ctx.obj, apply=apply, vacuum=vacuum, days=days,
+                                 progress=_clean_progress))
     except CleanBusy as exc:
         typer.echo(str(exc))
         raise typer.Exit(1) from None
+
+
+def _clean_progress(message: str) -> None:
+    """清理命令的进度日志：带时间戳写 stdout 并立即刷新，长任务期间可确认仍在工作。"""
+    print(f"[{time.strftime('%H:%M:%S')}] {message}", flush=True)
 
 
 def _is_loopback_host(host: str) -> bool:

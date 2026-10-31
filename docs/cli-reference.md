@@ -196,7 +196,7 @@ uv run mindex search '雨夜，一个人强忍眼泪，镜头慢慢推近' --gra
 - **B 级（策略过期）**：非活动索引版本（保留活动 + 最近 `clean.index_keep_versions` 个非活动 ready + 全部非 ready）、旧指纹检查点、context/shot_media/studio/reports/字幕缓存、过期助手附件（`agent.attachment_ttl_hours`）、runs 旧记录
 - **C 级（只报告不删）**：model-cache、一次性验证产物、数据库备份、VACUUM 建议——出现在输出 `notes` 中
 
-apply 分两段持锁：先独占 `pipeline.lock` + `index-write.lock`（管线与索引类，与素材删除同序），释放后再取 `studio.lock`（创作类，拿不到则该三类标记 skipped 而非失败）。管线/索引锁被占时以中文提示退出码 1。大规模清理前建议停 serve。输出 JSON 的 `categories` 包含各类别 `error`/`skipped`，应逐项检查；单类别错误记录在报告中，不一定使整体退出码为 1。CLI 只提供 `--apply`，无按类别删除或命令行过期天数选项；保留策略在 YAML 的 `clean` 节配置。
+apply 分两段持锁：先独占 `pipeline.lock` + `index-write.lock`（管线与索引类，与素材删除同序），释放后再取 `studio.lock`（创作类，拿不到则该三类标记 skipped 而非失败）。管线/索引锁被占时以中文提示退出码 1。大规模清理前建议停 serve。执行过程先向 stdout 输出带时间戳的中文进度日志（逐规则扫描、取锁与执行、VACUUM 心跳），完整 JSON 报告在最后输出；`categories` 包含各类别 `error`/`skipped`，应逐项检查；单类别错误记录在报告中，不一定使整体退出码为 1。CLI 只提供 `--apply`，无按类别删除或命令行过期天数选项；保留策略在 YAML 的 `clean` 节配置。
 
 ```bash
 uv run mindex clean                       # 预览各类别可回收项与字节数

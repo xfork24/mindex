@@ -25,6 +25,11 @@ uv run mindex clean --apply --days 0  # 清空全部按龄过期项（阈值临�
 （前 20 条）/kept/result/error/skipped`）、`notes`（C 级待调整项与建议）、`total`。索引版本与
 runs 行的 bytes 无法精确统计，诚实输出 0 并在 policy 说明。
 
+CLI 在 JSON 之前向 stdout 输出带时间戳的中文进度日志：入口与媒体引用集、逐规则扫描
+（`i/N` 与耗时）、取锁/逐类别执行（含删除数）、VACUUM 开始/完成与心跳（`仍在 VACUUM …`，
+默认每 5 秒一条，因 VACUUM 不触发 sqlite 进度回调故由后台线程计时）、总耗时汇总。长任务
+期间无输出即真实卡住（如等待管线锁），可直接从最后一行判断当前阶段。
+
 ## A 级：每次都删（无条件安全）
 
 | 类别 | 范围 | 判定 |
@@ -77,7 +82,7 @@ runs 行的 bytes 无法精确统计，诚实输出 0 并在 policy 说明。
 对 `metadata.sqlite3` 与 `chroma/chroma.sqlite3` 依次执行 `VACUUM`（结果在顶层 `vacuum`
 字段，含每库前后字节数）。VACUUM 需要无其他连接：库被占用（如 serve 运行中）时单库记
 `error` 跳过并提示停服重试，整体不失败退出。只传 `--vacuum` 不传 `--apply` 时仅报告库
-大小与建议。4G 级库收缩耗时数分钟，故不默认执行。
+大小与建议。4G 级库收缩耗时数分钟（期间每 5 秒输出一条心跳日志），故不默认执行。
 
 ## 锁与并发
 

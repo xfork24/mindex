@@ -11,7 +11,10 @@ import json
 import logging
 import os
 import shutil
-from collections.abc import Callable, Iterable
+import threading
+import time
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -21,7 +24,14 @@ from mindex.shared.storage import Store
 
 log = logging.getLogger(__name__)
 
+# 进度回调：接收中文进度消息；CLI 传入带时间戳写 stdout 的实现，测试捕获为列表。
+Progress = Callable[[str], None]
+
 ITEM_PREVIEW_LIMIT = 20
+
+# VACUUM 心跳间隔秒数：VACUUM 期间 sqlite 的 progress_handler 不会被调用，
+# 用后台线程按此间隔报告仍在工作，长收缩期间不再无输出。
+VACUUM_HEARTBEAT_SECONDS = 5.0
 
 # TemporaryDirectory 写在 data 根下的已知前缀；正常退出自动消失，存在即崩溃残留。
 CRASH_TEMP_PREFIXES = (
@@ -137,6 +147,63 @@ class Scan:
         if newest == 0.0:
             return True  # 空目录视为过期
         return datetime.fromtimestamp(newest, UTC) < self.now - timedelta(days=days)
+
+
+# ---------------------------------------------------------------- 进度与计时工具
+
+# 时钟可替换（测试用它伪造各阶段耗时的流逝时间）。
+_monotonic = time.monotonic
+
+_RESULT_LABELS = {"deleted": "删除", "skipped": "跳过"}
+
+
+def _noop(message: str) -> None:
+    return None
+
+
+def _elapsed(started: float) -> str:
+    return f"{_monotonic() - started:.1f}s"
+
+
+def _fmt_bytes(size: int) -> str:
+    value = float(size)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if value < 1024 or unit == "TB":
+            return f"{int(value)} B" if unit == "B" else f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{size} B"
+
+
+def _result_brief(result: dict) -> str:
+    """执行结果摘要：{"deleted": 3, "skipped": 1} → "删除 3、跳过 1"。"""
+    parts = []
+    for key, value in result.items():
+        label = _RESULT_LABELS.get(key, key)
+        parts.append(f"{label} {len(value)} 个" if isinstance(value, list) else f"{label} {value}")
+    return "、".join(parts) or "无变化"
+
+
+@contextmanager
+def _vacuum_heartbeat(label: str, say: Progress) -> Iterator[None]:
+    """VACUUM 期间的后台心跳：按 VACUUM_HEARTBEAT_SECONDS 间隔报告仍在工作。
+
+    VACUUM 不触发 sqlite 的 progress_handler，只能用线程计时；with 块退出时
+    停止线程，下一次心跳绝不晚于 VACUUM 的完成消息。
+    """
+    started = _monotonic()
+    stop = threading.Event()
+
+    def beat() -> None:
+        while not stop.wait(VACUUM_HEARTBEAT_SECONDS):
+            say(f"仍在 VACUUM {label}，已耗时 {_monotonic() - started:.0f}s")
+
+    thread = threading.Thread(target=beat, daemon=True, name=f"vacuum-heartbeat-{label}")
+    thread.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        thread.join()
 
 
 # ---------------------------------------------------------------- 通用遍历与删除工具
@@ -970,8 +1037,12 @@ def _all_rules() -> list[Callable[[Scan], CleanAction | None]]:
 
 
 def clean_library(config: Config, *, apply: bool = False, now: datetime | None = None,
-                  vacuum: bool = False, days: int | None = None) -> dict:
+                  vacuum: bool = False, days: int | None = None,
+                  progress: Progress | None = None) -> dict:
     """扫描（并可选执行）全部清理规则；返回统一 JSON 报告。
+
+    progress 接收各阶段中文进度消息（入口、逐规则扫描、取锁/执行、VACUUM 与
+    心跳、汇总）；缺省不发，报告内容不受影响。
 
     vacuum=True 且 apply=True 时，删除执行完、锁释放后对 metadata 与 chroma
     库文件执行 VACUUM；库被其他连接占用（如 serve 运行中）时单库记 error
@@ -981,25 +1052,46 @@ def clean_library(config: Config, *, apply: bool = False, now: datetime | None =
     该值（0 即清空全部按龄过期项）；硬保护（现行检查点、活动/保留索引版本、
     上传宽限与 uploads 原件）不受影响，配置文件不被修改。
     """
+    say = progress or _noop
+    started = _monotonic()
     if days is not None:
         config = _with_days(config, days)
     store = Store(config.data_dir)
     scan = Scan(config, store, now or datetime.now(UTC))
+    say(f"开始清理：数据目录 {store.root}"
+        f"（{'执行删除' if apply else '仅预览'}"
+        + (f"，全部时间阈值临时覆盖为 {days} 天" if days is not None else "") + "）")
+    say("正在构建媒体引用集（segments 行 + 保留索引快照）…")
+    references, segment_ids, _ = scan.media_state
+    say(f"媒体引用集就绪：{len(references)} 个引用文件 / {len(segment_ids)} 个 segment")
+    rules = _all_rules()
     actions: list[CleanAction] = []
-    for rule in _all_rules():
+    for index, rule in enumerate(rules, start=1):
+        name = getattr(rule, "__name__", str(rule))
+        say(f"扫描 {index}/{len(rules)} {name} …")
+        rule_started = _monotonic()
         try:
             action = rule(scan)
         except Exception as exc:  # noqa: BLE001 — 单规则失败不拖垮整体扫描
-            log.warning("清理规则 %s 扫描失败：%s", getattr(rule, "__name__", rule), exc)
+            log.warning("清理规则 %s 扫描失败：%s", name, exc)
+            say(f"扫描 {index}/{len(rules)} {name} 失败：{exc}")
             continue
-        if action is not None:
-            actions.append(action)
+        if action is None:
+            say(f"扫描 {index}/{len(rules)} {name} 完成：无可回收项（{_elapsed(rule_started)}）")
+            continue
+        actions.append(action)
+        say(f"扫描 {index}/{len(rules)} {name} 完成：{len(action.items)} 项 / "
+            f"{_fmt_bytes(action.total_bytes)}（{_elapsed(rule_started)}）")
     if apply:
         with store.run("clean"):
-            _apply(config, store, actions)
+            _apply(config, store, actions, say)
     report = _report(store, actions, applied=apply, scanned_at=scan.now)
     if vacuum:
-        report["vacuum"] = _vacuum_databases(store, applied=apply)
+        report["vacuum"] = _vacuum_databases(store, applied=apply, say=say)
+    total = report["total"]
+    say(f"清理完成：{total['categories']} 个类别 / {total['item_count']} 项 / "
+        f"{_fmt_bytes(total['bytes'])} 候选，{'已执行删除' if apply else '仅预览'}，"
+        f"总耗时 {_elapsed(started)}")
     return report
 
 
@@ -1021,7 +1113,7 @@ def _with_days(config: Config, days: int) -> Config:
         "clean": config.clean.model_copy(update=overrides), "agent": agent})
 
 
-def _vacuum_databases(store: Store, *, applied: bool) -> dict:
+def _vacuum_databases(store: Store, *, applied: bool, say: Progress) -> dict:
     """对库文件执行 VACUUM 回收已删行的空间；预览只报大小，被占用单库跳过。"""
     import sqlite3
 
@@ -1033,23 +1125,33 @@ def _vacuum_databases(store: Store, *, applied: bool) -> dict:
         entry: dict = {"path": label, "bytes_before": path.stat().st_size}
         if not applied:
             entry["advice"] = "预览不执行；--apply --vacuum 时收缩库文件（需无其他连接）"
+            say(f"VACUUM 预览：{label} 当前 {_fmt_bytes(entry['bytes_before'])}；"
+                "--apply --vacuum 时收缩（需无其他连接）")
         else:
+            say(f"VACUUM {label} 开始（当前 {_fmt_bytes(entry['bytes_before'])}，需独占库文件）…")
+            started = _monotonic()
             try:
                 db = sqlite3.connect(path, timeout=5)
                 try:
-                    db.execute("VACUUM")
+                    with _vacuum_heartbeat(label, say):
+                        db.execute("VACUUM")
                 finally:
                     db.close()
                 entry["bytes_after"] = path.stat().st_size
+                say(f"VACUUM {label} 完成：{_fmt_bytes(entry['bytes_before'])} → "
+                    f"{_fmt_bytes(entry['bytes_after'])}（节省 "
+                    f"{_fmt_bytes(entry['bytes_before'] - entry['bytes_after'])}，{_elapsed(started)}）")
             except sqlite3.Error as exc:
                 entry["error"] = str(exc)
                 entry["advice"] = ("库被其他连接占用（如 serve 运行中）：停服后重跑 "
                                    "mindex clean --apply --vacuum 或手动执行 VACUUM")
+                say(f"VACUUM {label} 跳过：{exc}；库被其他连接占用（如 serve 运行中），"
+                    "可停服后重试")
         databases.append(entry)
     return {"applied": applied, "databases": databases}
 
 
-def _apply(config: Config, store: Store, actions: list[CleanAction]) -> None:
+def _apply(config: Config, store: Store, actions: list[CleanAction], say: Progress) -> None:
     """两段持锁执行：管线+索引段 → 释放 → studio 段；锁冲突抛 CleanBusy 或标记 skipped。"""
     from filelock import Timeout
 
@@ -1060,6 +1162,7 @@ def _apply(config: Config, store: Store, actions: list[CleanAction]) -> None:
 
     # 独占 pipeline.lock 已与全部 ProcessingLock 用户互斥；index-write 短等待兜底
     # 未走 ProcessingLock 的写入方。
+    say("等待并获取管线与索引写锁（pipeline + index-write，独占）…")
     try:
         held = locks.acquire_ordered(store.root, ["pipeline", "index-write"], exclusive=True,
                                      timeout={"index-write": 10})
@@ -1068,30 +1171,40 @@ def _apply(config: Config, store: Store, actions: list[CleanAction]) -> None:
             raise CleanBusy("索引正在构建或发布（index-write.lock 被持有），请稍后重试") from None
         raise CleanBusy("有离线处理任务正在运行，无法安全清理；请等待管线空闲后重试") from None
     with held:
+        say(f"已获取锁，执行 {len(pipeline_actions)} 个管线/索引类清理")
         for action in pipeline_actions:
-            _execute(action)
+            _execute(action, say)
+    say("管线/索引类清理完成，已释放锁")
 
     if not studio_actions:
         return
+    say("获取创作锁（studio）…")
     try:
         studio_lock = locks.acquire_ordered(store.root, ["studio"])
     except Timeout:
         for action in studio_actions:
             action.skipped = "创作任务正在执行，已跳过 studio 清理"
+        say(f"创作任务正在执行：跳过 {len(studio_actions)} 个 studio 类清理")
         return
     with studio_lock:
+        say(f"已获取创作锁，执行 {len(studio_actions)} 个 studio 类清理")
         for action in studio_actions:
-            _execute(action)
+            _execute(action, say)
+    say("studio 类清理完成，已释放锁")
 
 
-def _execute(action: CleanAction) -> None:
+def _execute(action: CleanAction, say: Progress) -> None:
     if action.execute is None:
         return
+    started = _monotonic()
     try:
         action.result = action.execute()
     except Exception as exc:  # noqa: BLE001 — 单类别失败不中断其余类别
         action.error = str(exc) or type(exc).__name__
         log.warning("清理类别 %s 执行失败：%s", action.category, action.error)
+        say(f"执行 {action.category} 失败：{action.error}（{_elapsed(started)}）")
+        return
+    say(f"执行 {action.category} 完成：{_result_brief(action.result)}（{_elapsed(started)}）")
 
 
 def _report(store: Store, actions: list[CleanAction], *, applied: bool,

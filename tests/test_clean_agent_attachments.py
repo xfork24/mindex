@@ -29,7 +29,9 @@ def make_config(tmp_path: Path) -> Path:
 def clean(config_path: Path, *args) -> dict:
     result = runner.invoke(app, ["--config", str(config_path), "clean", *args])
     assert result.exit_code == 0, result.output
-    return json.loads(result.output)
+    lines = result.output.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith("{"))
+    return json.loads("\n".join(lines[start:]))
 
 
 def rule(report: dict) -> dict | None:

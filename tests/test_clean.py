@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -12,6 +14,7 @@ import pytest
 from typer.testing import CliRunner
 
 from mindex.cli import app
+from mindex.maintenance.clean import clean_library
 from mindex.shared.config import Config
 from mindex.shared.storage import Store
 
@@ -79,7 +82,9 @@ def categories(report: dict) -> dict:
 
 def report_of(result) -> dict:
     assert result.exit_code == 0, result.output
-    return json.loads(result.output)
+    lines = result.output.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith("{"))
+    return json.loads("\n".join(lines[start:]))
 
 
 # ---------------------------------------------------------------- 基础行为
@@ -706,3 +711,99 @@ def test_cache_cleanup_keeps_recently_accessed_old_media(tmp_path, rule_name, re
     assert action.execute() == {'deleted': 0, 'skipped': 1}
     assert path.is_file()
     assert getattr(clean, rule_name)(scan) is None
+
+
+# ---------------------------------------------------------------- 进度日志（progress 回调）
+
+
+def test_progress_reports_scan_and_summary(tmp_path):
+    """预览模式：入口/逐规则扫描/汇总消息齐全，且不出现执行段消息。"""
+    config = Config(data_dir=tmp_path / "data")
+    write(config.data_dir / "sub" / ".DS_Store")
+    messages: list[str] = []
+
+    report = clean_library(config, progress=messages.append)
+
+    assert report["applied"] is False
+    assert "开始清理" in messages[0] and str(config.data_dir) in messages[0]
+    assert any("扫描 2/" in m and "ds_store" in m and "1 项" in m for m in messages)
+    assert "清理完成" in messages[-1] and "预览" in messages[-1]
+    assert not any(m.startswith("执行 ") for m in messages)
+
+
+def test_progress_reports_apply_execution(tmp_path):
+    """apply 模式：取锁与逐类别执行消息，含实际删除数量。"""
+    config = Config(data_dir=tmp_path / "data")
+    ds = write(config.data_dir / "sub" / ".DS_Store")
+    messages: list[str] = []
+
+    clean_library(config, apply=True, progress=messages.append)
+
+    assert not ds.exists()
+    assert any("管线" in m and "锁" in m for m in messages)
+    assert any(m.startswith("执行 ds_store 完成") and "删除 1" in m for m in messages)
+
+
+def test_progress_reports_vacuum_stages(tmp_path):
+    """apply+vacuum：每个库输出开始（含当前大小）与完成（含节省）消息。"""
+    config = Config(data_dir=tmp_path / "data")
+    store = Store(config.data_dir)
+    with store.connect() as db:
+        db.executemany(
+            "INSERT OR REPLACE INTO person_features(id,source_id,space,kind,data) VALUES(?,?,?,?,?)",
+            [(f"big-{i}", None, "{}", "reference", "x" * 200_000) for i in range(20)])
+        db.execute("DELETE FROM person_features")
+    messages: list[str] = []
+
+    clean_library(config, apply=True, vacuum=True, progress=messages.append)
+
+    assert any("VACUUM metadata.sqlite3 开始" in m for m in messages)
+    assert any("VACUUM metadata.sqlite3 完成" in m and "节省" in m for m in messages)
+
+
+def test_progress_reports_vacuum_busy_skip(tmp_path):
+    """被占用的库：输出跳过原因，不抛错。"""
+    import sqlite3
+
+    config = Config(data_dir=tmp_path / "data")
+    Store(config.data_dir)
+    chroma = config.data_dir / "chroma"
+    chroma.mkdir(parents=True, exist_ok=True)
+    blocker = sqlite3.connect(chroma / "chroma.sqlite3", timeout=1)
+    blocker.execute("BEGIN EXCLUSIVE")
+    messages: list[str] = []
+    try:
+        clean_library(config, apply=True, vacuum=True, progress=messages.append)
+    finally:
+        blocker.rollback()
+        blocker.close()
+
+    assert any("VACUUM chroma/chroma.sqlite3" in m and "占用" in m for m in messages)
+
+
+def test_progress_vacuum_heartbeat(monkeypatch):
+    """VACUUM 心跳线程：超过间隔发「仍在 VACUUM」；with 退出后线程停止。"""
+    from mindex.maintenance import clean as clean_module
+
+    monkeypatch.setattr(clean_module, "VACUUM_HEARTBEAT_SECONDS", 0.05)
+    messages: list[str] = []
+
+    with clean_module._vacuum_heartbeat("metadata.sqlite3", messages.append):
+        time.sleep(0.15)
+
+    assert any("仍在 VACUUM metadata.sqlite3" in m for m in messages)
+    emitted = len(messages)
+    time.sleep(0.1)
+    assert len(messages) == emitted, "with 块退出后心跳线程应停止"
+
+
+def test_cli_progress_lines_precede_json(tmp_path):
+    """CLI：stdout 先输出带时间戳的进度行，最后的 JSON 报告仍可整体解析。"""
+    config_path = make_config(tmp_path)
+    write(tmp_path / "data" / ".DS_Store")
+
+    result = invoke(config_path, "--apply")
+
+    assert result.exit_code == 0, result.output
+    assert any(re.match(r"^\[\d{2}:\d{2}:\d{2}\] ", line) for line in result.output.splitlines())
+    assert categories(report_of(result))["ds_store"]["result"] == {"deleted": 1}
