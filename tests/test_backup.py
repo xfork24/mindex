@@ -535,6 +535,80 @@ def test_switch_failure_rolls_back_data_and_config(library, tmp_path, video_file
     assert recover_import(target, config_path=tmp_path / 'target.yaml')['recovered'] is False
 
 
+def test_switch_cleanup_race_after_commit_does_not_fail_import(library, tmp_path, monkeypatch):
+    """已提交切换后的临时目录清理撞上 Finder 竞态时，导入仍应成功。"""
+    bundle, target = tmp_path / 'backup', tmp_path / 'target'
+    export(library, bundle)
+    remove = shutil.rmtree
+    calls = []
+
+    def race(path):
+        name = Path(path).name
+        if name.startswith('.target.migration-work-'):
+            calls.append(name)
+            if len(calls) == 1:
+                raise OSError(errno.ENOTEMPTY, 'Directory not empty', '20261030-150419-491a96')
+        remove(path)
+
+    monkeypatch.setattr('mindex.maintenance.backup.shutil.rmtree', race)
+    result = restore(bundle, target)
+    assert result['ok'] is True
+    # 三次调用：_recover 首次撞上竞态、重试删除成功、上下文退出时再删已不存在
+    assert len(calls) == 3
+    assert not journal_path(target).exists()
+    assert not list(tmp_path.glob('.target.migration-*'))
+
+
+def test_persistent_cleanup_failure_warns_and_still_clears_journal(library, tmp_path, monkeypatch):
+    """清理持续失败只应警告并清掉日志，不该把已成功的导入标成失败。"""
+    bundle, target = tmp_path / 'backup', tmp_path / 'target'
+    export(library, bundle)
+    remove = shutil.rmtree
+
+    def fail(path):
+        if Path(path).name.startswith('.target.migration-'):
+            raise OSError(errno.ENOTEMPTY, 'Directory not empty', '20261030-150419-491a96')
+        remove(path)
+
+    monkeypatch.setattr('mindex.maintenance.backup.shutil.rmtree', fail)
+    with pytest.warns(RuntimeWarning, match='临时目录清理失败'):
+        result = restore(bundle, target)
+    assert result['ok'] is True
+    assert not journal_path(target).exists()
+    assert list(tmp_path.glob('.target.migration-work-*'))
+
+
+def test_stage_cleanup_race_does_not_mask_original_import_error(library, tmp_path, monkeypatch):
+    """失败导入的暂存区清理竞态不能遮住原始错误。"""
+    bundle, target = tmp_path / 'backup', tmp_path / 'target'
+    export(library, bundle)
+    remove = shutil.rmtree
+    calls = []
+
+    def race(path):
+        name = Path(path).name
+        if name.startswith('.target.migration-stage-'):
+            calls.append(name)
+            if len(calls) == 1:
+                raise OSError(errno.ENOTEMPTY, 'Directory not empty', 'cache')
+        remove(path)
+
+    monkeypatch.setattr('mindex.maintenance.backup.shutil.rmtree', race)
+    original = vector_worker
+
+    def fail_load(action, *args, **kwargs):
+        if action == 'load':
+            raise ValueError('模拟加载中断')
+        return original(action, *args, **kwargs)
+
+    monkeypatch.setattr('mindex.maintenance.backup.vector_worker', fail_load)
+    with pytest.raises(ValueError, match='模拟加载中断'):
+        restore(bundle, target)
+    assert len(calls) == 2
+    assert not journal_path(target).exists()
+    assert not list(tmp_path.glob('.target.migration-stage-*'))
+
+
 def test_missing_media_refused(library, tmp_path):
     (library[0].data_dir / store_at(library[0].data_dir).sources()[0]['path']).unlink()
     with pytest.raises(ValueError, match='必需媒体'):

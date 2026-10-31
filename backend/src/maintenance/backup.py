@@ -41,6 +41,7 @@ from mindex.maintenance.backup_files import (
     job_selection,
     offline,
     referenced_files,
+    remove_tree,
     safe_path,
     selection,
     source_list,
@@ -464,8 +465,8 @@ def _recover(root, config_path):
             elif not value['had_config'] and not config_new.exists():
                 config_path.unlink(missing_ok=True)
     for path in paths.values():
-        if path.exists():
-            shutil.rmtree(path)
+        # 提交/回滚已完成，剩余临时目录只是磁盘垃圾；清理竞态不能把迁移结果标成失败。
+        remove_tree(path)
     config_old.unlink(missing_ok=True)
     config_new.unlink(missing_ok=True)
     journal.unlink()
@@ -678,4 +679,4 @@ def import_backup(config, bundle, *, all_sources=False, sources=None, skip_exist
             return report
         finally:
             if stage.exists() and not journal_path(root).exists():
-                shutil.rmtree(stage)
+                remove_tree(stage)

@@ -59,24 +59,29 @@ def verification_report(value, *, exporting=False):
     return {'verification': value, 'skipped_checks': skipped if value == 'basic' else []}
 
 
+def remove_tree(path):
+    """Finder 等进程可能在删除期间重建目录项；重试后仍失败只警告，绝不遮住迁移结果。"""
+    for attempt in range(3):
+        try:
+            shutil.rmtree(path)
+            return
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            if exc.errno == errno.ENOTEMPTY and attempt < 2:
+                continue
+            warnings.warn(f'临时目录清理失败，请手动清理 {path}：{exc}', RuntimeWarning, stacklevel=2)
+            return
+
+
 @contextmanager
 def temporary_directory(**kwargs):
-    """Finder 等进程可能在删除期间重建目录项；清理不能遮住真正的迁移错误。"""
+    """临时目录退出时尽力清理；清理失败只警告，不能遮住真正的迁移错误。"""
     path = tempfile.mkdtemp(**kwargs)
     try:
         yield path
     finally:
-        for attempt in range(3):
-            try:
-                shutil.rmtree(path)
-                break
-            except FileNotFoundError:
-                break
-            except OSError as exc:
-                if exc.errno == errno.ENOTEMPTY and attempt < 2:
-                    continue
-                warnings.warn(f'临时目录清理失败，请手动清理 {path}：{exc}', RuntimeWarning, stacklevel=2)
-                break
+        remove_tree(path)
 
 
 def digest(path):

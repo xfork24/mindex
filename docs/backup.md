@@ -122,6 +122,8 @@ uv run mindex --config /new/config.local.yaml --data-dir /new/data backup recove
 
 尚未提交的切换回滚到旧数据和旧配置；已经提交但未完成清理的操作仅清理旧副本。不要在恢复前手动删除操作日志或旧目录。正常成功会清理日志、旧库和暂存副本。
 
+迁移结果提交之后的临时目录清理带有重试：Finder、Spotlight 等进程在删除期间重建目录项（macOS 常见竞态）只会触发重试，重试后仍失败则发出 `RuntimeWarning` 提示手动清理，绝不把已经成功的导入或恢复标成失败。
+
 ## 全新 clone 恢复流程
 
 1. clone 项目并进入项目目录，安装 Python 3.11–3.13、uv、ffmpeg/ffprobe 等系统依赖。
