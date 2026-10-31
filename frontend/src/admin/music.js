@@ -6,7 +6,8 @@ const query = new URLSearchParams(location.search);
 const page = { items: [], moods: [], selected: null };
 const $ = (id) => document.getElementById(id);
 const api = (url, method = "GET", body) => MindexApi.json(url, method, body);
-const musicGroups = MindexGroups.picker("music", [], () => load(), "ui.groups_music_filter");
+// 组筛选与素材页/检索页同款：可搜索多选列表框，选择后过滤左侧曲目列表。
+const musicGroups = MindexGroups.picker("music", [], () => load(), "ui.groups_music_filter", {listbox: true});
 $("music-group-filter").append(musicGroups.wrap);
 const trackUrl = (id, suffix = "") => `/api/studio/music-library/${encodeURIComponent(id)}${suffix}`;
 const MAX_MOODS = 3;
@@ -202,9 +203,10 @@ let searchTimer = null;
 $("music-search").addEventListener("input", () => {clearTimeout(searchTimer);searchTimer = setTimeout(() => load().catch(failed), 250);});
 $("reload").addEventListener("click", () => load().then(() => notice(MindexI18n.msg("ui.music_reloaded"))).catch(failed));
 window.addEventListener("mindex:languagechange", () => {renderMoodFilter();renderList();if (page.selected) renderDetail();});
+window.addEventListener("mindex:groups-changed", () => { void musicGroups.refresh(); });
 window.addEventListener("mindex:agent-mutation", (event) => {
   const detail = event.detail || {};
-  if (detail.groups || detail.domain === "studio" && detail.music_library) load().catch(() => {});
+  if (detail.groups || detail.domain === "studio" && detail.music_library) { load().catch(() => {}); void musicGroups.refresh(); }
 });
 window.MindexAgentContext = () => ({ page: "music", track_id: page.selected?.id || null, music_group_ids: musicGroups.values() });
 window.MindexAgentFocus = async (focus) => {

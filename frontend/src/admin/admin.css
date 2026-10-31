@@ -150,7 +150,7 @@
 .dialogue-row[hidden],.dialogue-row [hidden]{display:none}
 
 .source-panel{display:flex;flex-direction:column;top:0;height:var(--source-panel-height,calc(100dvh - 255px));max-height:100dvh}
-.source-panel>form,.source-panel>.source-filters,.source-panel>.muted,.source-panel>.pager,.source-panel>.sidebar-help{flex-shrink:0}
+.source-panel>form,.source-panel>.source-filters,.source-panel>#source-group-filter,.source-panel>.muted,.source-panel>.pager,.source-panel>.sidebar-help{flex-shrink:0}
 #source-list{flex:1;min-height:0;overflow-y:auto;overscroll-behavior-y:contain;scrollbar-gutter:stable}
 @media(max-width:750px){.source-panel{height:auto;max-height:none}
 #source-list{flex:auto;max-height:50dvh}

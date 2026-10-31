@@ -41,9 +41,16 @@ new ResizeObserver(scheduleSourcePanelSize).observe(document.querySelector('head
 new ResizeObserver(scheduleSourcePanelSize).observe($('admin-notice'));
 scheduleSourcePanelSize();
 
+// 素材组筛选：与检索页同款可搜索多选列表框，选中后按组过滤左侧素材列表（服务端 source_group_ids，空组结果为空）。
+const sourceGroups = MindexGroups.picker("source", [], () => sourceFiltersChanged(), "ui.groups_filter", {listbox: true});
+$('source-group-filter').append(sourceGroups.wrap);
+window.addEventListener('mindex:groups-changed', () => { void sourceGroups.refresh(); });
+
 async function loadSources() {
   const request = ++sourceRequest;
-  const data = await api(`/api/admin/sources?${params({ q: $('source-query').value.trim(), visibility: $('source-visibility').value, favorite_only: $('source-favorite').checked, page: state.sourcePage })}`);
+  const search = params({ q: $('source-query').value.trim(), visibility: $('source-visibility').value, favorite_only: $('source-favorite').checked, page: state.sourcePage });
+  for (const id of sourceGroups.values()) search.append('source_group_ids', id);
+  const data = await api(`/api/admin/sources?${search}`);
   if (request !== sourceRequest) return;
   if (state.sourcePage > 1 && !data.items.length) {state.sourcePage--;return loadSources();}
   state.sourceTotal = data.total;MindexI18n.setText($('source-count'), MindexI18n.msg("ui.42d218e9f146", { p0: data.total }));$('source-list').replaceChildren();
@@ -213,7 +220,7 @@ async function focusSegment(sourceId, segmentId) {
   if (window.MindexAgent && focused) window.MindexAgent.highlight(focused);
   else focused?.scrollIntoView({ block: 'center', behavior: 'smooth' });
 }
-window.MindexAgentContext = () => ({ page: 'admin', source_id: state.source?.id || null });
+window.MindexAgentContext = () => ({ page: 'admin', source_id: state.source?.id || null, source_group_ids: sourceGroups.values() });
 window.MindexAgentFocus = async (focus, { passive = false } = {}) => {
   const mark = (element) => window.MindexAgent?.highlight(element);
   if (!focus.source_id) {mark(document.querySelector('.source-panel') || $('source-list'));return true;}
@@ -607,5 +614,5 @@ $('analysis-dialog').addEventListener('close', () => {analysisRequest++;});
 
 window.addEventListener('mindex:agent-mutation', (event) => {
   if (!event.detail?.groups) return;
-  run(async () => { if (state.source?.id) await refreshWork(state.source.id); await loadSources(); });
+  run(async () => { if (state.source?.id) await refreshWork(state.source.id); await loadSources(); void sourceGroups.refresh(); });
 });

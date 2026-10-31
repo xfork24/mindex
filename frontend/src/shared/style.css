@@ -353,6 +353,10 @@ button.language-switch .language-divider::after{content:"";position:absolute;ins
 .search-scope-row .person-search-options{flex:0 1 auto;min-width:0}
 .group-picker-listbox>.group-options{display:block}
 .group-picker-listbox .multi-list>select option{white-space:normal;overflow-wrap:anywhere}
+/* 侧栏纵向堆叠里的组筛选（素材页/音乐库页左侧）占满整列，不随内容宽度收缩；
+   选项在列表内自然换行，长组名不再经 min-width 撑破侧栏。 */
+#source-group-filter>.group-picker,#music-group-filter>.group-picker{width:100%!important;max-width:100%}
+#source-group-filter .multi-list>select,#music-group-filter .multi-list>select{min-width:0!important}
 
 /* 字段布局共用一条规则：内容宽度、横向排列、按容器宽度换行。 */
 .content-flow{display:flex!important;flex-direction:row!important;flex-wrap:wrap!important;align-items:flex-start;gap:12px;min-width:0;max-width:100%}
