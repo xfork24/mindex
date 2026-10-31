@@ -114,7 +114,6 @@ def persons_process(
     \b
       mindex persons process SOURCE_ID --start 0 --end 60
     """
-    import subprocess
     import sys
 
     from mindex.persons.person_models import uid
@@ -148,12 +147,12 @@ def persons_process(
     log_path.parent.mkdir(parents=True, exist_ok=True)
     try:
         with log_path.open("ab") as handle:
-            subprocess.Popen(
+            from mindex.shared import process_ops
+
+            process_ops.spawn_detached(
                 [sys.executable, "-m", "mindex.persons.person_worker", str(store.root), identifier],
-                stdin=subprocess.DEVNULL,
                 stdout=handle,
                 stderr=handle,
-                start_new_session=True,
             )
     except OSError as exc:
         store.execute("UPDATE person_tasks SET status='failed',error=? WHERE id=?", (str(exc), identifier))

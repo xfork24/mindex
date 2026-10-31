@@ -5,7 +5,8 @@
   所有操作被拒绝（桌面版配置缺省开启）。
 - 进程以独立会话（进程组）启动，日志写入 ``data_dir/logs/services/<name>.log``；pid 文件
   ``data_dir/locks/services/<name>.json`` 记录 pid 与进程启动时刻，后端重启后据此重新接管仍在运行的服务
-  （启动时刻不符视为 pid 已被复用）。停止时向整个进程组发 SIGTERM，超时后 SIGKILL。
+  （启动时刻不符视为 pid 已被复用）。停止时向整个进程树发 SIGTERM、超时后 SIGKILL（Windows 经
+  ``shared.process_ops`` 用 ``taskkill /T /F`` 强杀整树，见该模块的停止语义说明）。
 - autostart/stop_on_exit 的修改保存在数据目录 settings 表的 ``local_services.flags``（不属于 ``override.*``，
   “恢复默认”不会清除），没有保存时取配置文件里的缺省值。
 """
@@ -16,7 +17,6 @@ import json
 import logging
 import os
 import shutil
-import signal
 import subprocess
 import threading
 import time
@@ -26,6 +26,7 @@ from pathlib import Path
 import httpx
 
 from mindex.settings.runtime_settings import get_setting, put_setting
+from mindex.shared import process_ops
 from mindex.shared.config import Config, LocalServiceConfig
 from mindex.shared.storage import Store
 
@@ -46,23 +47,12 @@ class ServiceConflict(ServiceError):
 
 
 def _process_start(pid: int) -> str | None:
-    """进程启动时刻（``ps -o lstart``）；pid 复用后会不同。进程不存在时返回 None。"""
-    try:
-        value = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True,
-                               timeout=5, check=False).stdout.strip()
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    return value or None
+    """进程启动时刻指纹（平台实现见 ``shared.process_ops``）；pid 复用后会不同。进程不存在时返回 None。"""
+    return process_ops.process_start(pid)
 
 
 def _alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-        return True
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
+    return process_ops.alive(pid)
 
 
 def _executable(service: LocalServiceConfig) -> str | None:
@@ -197,9 +187,9 @@ class LocalServiceManager:
                 handle.write(f"\n===== {datetime.now(UTC).isoformat()} 启动：{' '.join(service.argv)}\n".encode())
                 handle.flush()
                 try:
-                    child = subprocess.Popen(
+                    child = process_ops.spawn_detached(
                         service.argv, cwd=service.cwd or None, env={**os.environ, **service.env},
-                        stdin=subprocess.DEVNULL, stdout=handle, stderr=subprocess.STDOUT, start_new_session=True,
+                        stdout=handle, stderr=subprocess.STDOUT,
                     )
                 except OSError as exc:
                     raise ServiceError(f"无法启动 {service.name}：{exc}") from exc
@@ -224,22 +214,7 @@ class LocalServiceManager:
             pid = self._running_pid(service)
             child = self._children.get(service.name)
             if pid is not None:
-                try:
-                    os.killpg(pid, signal.SIGTERM)
-                except ProcessLookupError:
-                    pass
-                deadline = time.monotonic() + grace
-                while time.monotonic() < deadline:
-                    if (child.poll() is not None) if child is not None else not _alive(pid):
-                        break
-                    time.sleep(0.1)
-                else:
-                    try:
-                        os.killpg(pid, signal.SIGKILL)
-                    except ProcessLookupError:
-                        pass
-                    if child is not None:
-                        child.wait(5)
+                process_ops.stop_tree(pid, grace=grace, child=child)
                 log.info("本机服务 %s 已停止", service.name)
             self._children.pop(service.name, None)
             self._pid_file(service.name).unlink(missing_ok=True)
