@@ -548,7 +548,8 @@ class PersonProcessor:
         if options.start >= duration or (options.end is not None and options.end > duration + 0.001):
             raise ValueError("处理区间超出原片")
         shots = [
-            {**s, "start": max(s["start"], options.start), "end": min(s["end"], options.end or duration)}
+            {**s, "media_start": s["start"], "start": max(s["start"], options.start),
+             "end": min(s["end"], options.end or duration)}
             for s in shots
             if s["end"] > options.start and s["start"] < (options.end or duration)
         ]
@@ -619,10 +620,18 @@ class PersonProcessor:
                         "role_id": e["role_id"],
                     }
                 )
+        reusable = defaultdict(list)
+        for row in self.store.rows('SELECT cache_id,data FROM person_coverage WHERE source_id=?', (source_id,)):
+            coverage = json.loads(row['data'])
+            if (coverage.get('space') == space and coverage.get('sampling_rule') in {'frame-interval-v3', 'frame-offset-v4'}
+                    and coverage.get('frame_interval') == self.config.person.frame_interval):
+                reusable[(round(coverage['start'], 6), round(coverage['end'], 6), coverage['sampling_rule'])].append(row['cache_id'])
         for position, shot in enumerate(shots):
+            clipped = shot['start'] > shot['media_start']
+            sampling_rule = 'frame-offset-v4' if clipped else 'frame-interval-v3'
             key = fingerprint(
                 [
-                    "shot-features-frame-interval-v3",
+                    "shot-features-frame-offset-v4" if clipped else "shot-features-frame-interval-v3",
                     source_id,
                     source["layout_key"],
                     shot["id"],
@@ -633,6 +642,20 @@ class PersonProcessor:
                 ]
             )
             extracted = self.feature(key)
+            if extracted is None:
+                # 镜头 ID / 布局身份变化不改变同一原片区间的采样输入。
+                for previous_key in reusable[(round(shot['start'], 6), round(shot['end'], 6), sampling_rule)]:
+                    previous = self.feature(previous_key)
+                    if previous is None:
+                        continue
+                    try:
+                        self.validate_space(previous, space)
+                        self.validate_frames(previous['frames'], shot)
+                    except (ModelError, KeyError, TypeError):
+                        continue
+                    extracted = previous
+                    self.cache(key, source_id, space, 'shot', extracted)
+                    break
             if extracted is None:
                 if progress:
                     progress(
@@ -646,14 +669,14 @@ class PersonProcessor:
                     )
                 extracted = self.client.video(
                     self.store.resolve_media(shot["path"]),
-                    0,
-                    shot["end"] - shot["start"],
+                    shot["start"] - shot["media_start"],
+                    shot["end"] - shot["media_start"],
                     self.config.person.frame_interval,
                 )
                 self.validate_space(extracted, space)
                 frames = extracted["frames"]
                 for frame in frames:
-                    frame["timestamp"] += shot["start"]
+                    frame["timestamp"] += shot["media_start"]
                 self.validate_frames(frames, shot)
                 for frame in frames:
                     if frame.get("image_base64"):
@@ -794,7 +817,7 @@ class PersonProcessor:
                                 "space": space,
                                 "frames": len(extracted["frames"]),
                                 "frame_interval": self.config.person.frame_interval,
-                                "sampling_rule": "frame-interval-v3",
+                                "sampling_rule": sampling_rule,
                                 "match_key": match_key,
                             }
                         ),

@@ -430,7 +430,8 @@ def test_legacy_analysis_snapshot_uses_new_defaults_and_preserves_frozen_cap(con
     assert restored.analysis_key == config.analysis_key
 
 
-def test_scene_grouping_retry_reuses_successful_batch_and_limits_dense_input(config, video_file):
+@pytest.mark.parametrize("switch_model", [False, True])
+def test_scene_grouping_retry_reuses_successful_batch_and_limits_dense_input(config, video_file, switch_model):
     from mindex.shared.types import Annotation
 
     pipeline = Pipeline(config)
@@ -468,6 +469,8 @@ def test_scene_grouping_retry_reuses_successful_batch_and_limits_dense_input(con
         pipeline.analyze(sid)
     assert analyzer.calls == [32, 8]
     analyzer.fail = False
+    if switch_model:
+        config.analyzer.model = 'resume-scene-model-alias'
     pipeline.analyze(sid)
     assert analyzer.calls == [32, 8, 8]  # successful first batch not sent again
     assert pipeline.store.json_value("scene_plans", "source_id", sid, config.analysis_key)

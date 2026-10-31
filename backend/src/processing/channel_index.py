@@ -10,6 +10,7 @@ from mindex.models.adapters import ModelError
 from mindex.processing.dialogue import CHANNELS, current_dialogue, indexed_dialogue, relative_dialogue
 from mindex.processing.indexing import VectorIndex, check_index
 from mindex.shared.config import fingerprint
+from mindex.shared.scene_plans import current_segments
 from mindex.shared.storage import dumps
 from mindex.shared.types import Annotation
 
@@ -45,7 +46,7 @@ def snapshots_for(builder, source_id, kinds, *, status_only=False, segments=None
             "WHERE s.source_id=? ORDER BY a.rowid DESC", (source['id'],))
         for record in records:
             latest.setdefault(record['segment_id'], record)
-        for segment in segments if segments is not None else store.segments(source["id"]):
+        for segment in current_segments(store, source["id"], segments):
             if segment["kind"] not in kinds:
                 continue
             row = latest.get(segment["id"])
@@ -65,7 +66,7 @@ def snapshots_for(builder, source_id, kinds, *, status_only=False, segments=None
             views = {k: v for k, v in {"analysis": analysis, "dialogue": text}.items() if v.strip()}
             versions = {"visual": fingerprint([source["id"], segment["start"], segment["end"]])}
             if value:
-                versions["analysis"] = fingerprint(value)
+                versions["analysis"] = fingerprint({k: v for k, v in value.items() if k != "reused_from_profile"})
             if transcript:
                 versions["dialogue"] = transcript["content_version"]
             elif dialogue:
@@ -97,8 +98,8 @@ def snapshots_for(builder, source_id, kinds, *, status_only=False, segments=None
                 metadata["analysis"] = {
                     "status": "skipped" if skipped else "complete",
                     "content_version": versions["analysis"],
-                    "input_fingerprint": value.get("input_fingerprint", row["profile"]),
-                    "model_identity": value.get("model_identity", {"profile": row["profile"]}),
+                    "input_fingerprint": value.get("input_fingerprint", value.get("reused_from_profile", row["profile"])),
+                    "model_identity": value.get("model_identity", {"profile": value.get("reused_from_profile", row["profile"])}),
                     "dialogue_input_version": value.get("dialogue_input_version"),
                 }
             result.append(
@@ -184,6 +185,17 @@ def build_channels(builder, *, activate=False, mode="auto", source_id=None, kind
     fresh = snapshots_for(builder, source_id, kinds)
     # Preserve other sources and channels, even when building one source/channel only.
     merged = dict(old)
+    if "scene" in kinds:
+        for source in store.sources():
+            if source_id is not None and source['id'] != source_id:
+                continue
+            plan_row = store.one('SELECT data FROM scene_plans WHERE source_id=? ORDER BY rowid DESC LIMIT 1',
+                                 (source['id'],))
+            scene_ids = {s['id'] for s in fresh if s['source_id'] == source['id'] and s['kind'] == 'scene'}
+            if plan_row and len(scene_ids) == len(json.loads(plan_row['data'])):
+                # 只在当前计划完整落地后替换旧场景；历史发布快照仍不可变。
+                merged = {sid: s for sid, s in merged.items() if s['source_id'] != source['id']
+                          or s['kind'] != 'scene' or sid in scene_ids}
     for s in fresh:
         prior = old.get(s["id"])
         result = dict(prior or s)
@@ -223,7 +235,7 @@ def build_channels(builder, *, activate=False, mode="auto", source_id=None, kind
         s["representation_ids"] = [r[0] for r in representations(builder, s)]
     # Validate physical dependencies before creating a candidate or invoking a model.
     from mindex.shared.shot_media import ShotMedia
-    media = ShotMedia(store, cache_probes=False)
+    media = ShotMedia(store, cache_probes=False, reuse_checks=True)
     for s in snapshots:
         try:
             media.references(s["source_id"], s["start"], s["end"])
@@ -331,7 +343,7 @@ def build_channels(builder, *, activate=False, mode="auto", source_id=None, kind
         ))
         for s in snapshots:
             if s["id"] in targets:
-                log.info("索引片段 %s [%s] %s %.2f–%.2fs [%s] · 完成 %d/%d",
+                log.debug("发布片段 %s [%s] %s %.2f–%.2fs [%s] · 完成 %d/%d",
                          s.get("source_name", ""), s["source_id"], s["kind"], s["start"], s["end"], s["id"], len(completed), len(targets))
             store.execute(
                 "INSERT OR IGNORE INTO index_members(index_id,segment_id,snapshot) VALUES(?,?,?)",
@@ -390,7 +402,7 @@ def build_channels(builder, *, activate=False, mode="auto", source_id=None, kind
                 completed.add(s["id"])
                 notify("embedding")
                 log.info(
-                    "Embedding %s [%s] %d/%d · reused %d · embedded %d",
+                    "发布进度 %s [%s] %d/%d · 缓存复用向量 %d · 模型新生成向量 %d",
                     ",".join(sorted(selected)), ",".join(sorted(kinds)),
                     len(completed), len(targets), task_reused, task_embedded,
                 )

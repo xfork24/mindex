@@ -38,13 +38,13 @@ class DialogueOptions(StrictModel):
 
 def execute_dialogue(
     config, source_id=None, *, method="auto", subtitle_stream=None, subtitle_file=None, publish=True, workers=2,
-    progress=None, embedder=None
+    progress=None, embedder=None, force=False
 ):
     started = perf_counter()
     pipeline = Pipeline(config)
     result = pipeline.enrich_dialogue(
         source_id, method=method, subtitle_stream=subtitle_stream, subtitle_file=subtitle_file,
-        workers=workers, progress=progress
+        workers=workers, progress=progress, **({"force": True} if force else {})
     )
     summaries = [
         {

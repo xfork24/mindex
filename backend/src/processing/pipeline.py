@@ -89,16 +89,17 @@ class Pipeline:
         identifier = existing["id"] if existing else segment_id or fingerprint(
             [source["id"], kind, round(start, 6), round(end, 6), generation])
         relative = existing["path"] if existing else f"clips/{source['id']}/{kind}/{identifier}.mp4"
-        image = f"thumbnails/{identifier}.jpg"
+        image = existing["thumbnail"] if existing else f"thumbnails/{identifier}.jpg"
         output = self.store.root / relative
         if kind == "shot":
-            if not output.exists():
+            if not output.is_file() or not output.stat().st_size:
                 cut(self.store.resolve_media(source["path"]), start, end, output)
-            thumbnail(output, self.store.root / image)
+            if not (self.store.root / image).is_file() or not (self.store.root / image).stat().st_size:
+                thumbnail(output, self.store.root / image)
         else:
             service = ShotMedia(self.store)
             service.register(relative, source["id"], start, end)
-            if not (self.store.root / image).exists():
+            if not (self.store.root / image).is_file() or not (self.store.root / image).stat().st_size:
                 service.frame(source["id"], (start + end) / 2, self.store.root / image)
         segment = {
             "id": identifier,
@@ -325,16 +326,26 @@ class Pipeline:
             raise ValueError("存在未完成切片的素材，请先重新执行 prepare")
         return sources
 
-    def transcribe(self, source_id: str | None = None):
+    def _reuse_transcript(self, source_id):
+        from mindex.processing.dialogue import current_dialogue
+
+        data = current_dialogue(self.store, source_id)
+        if not data or data.get('source') not in {'asr', 'legacy_asr'} or data.get('status') not in {'complete', 'empty', 'no_audio'}:
+            return False
+        current = self.store.json_value('transcripts', 'source_id', source_id, self.config.asr_key)
+        if current is None or current.get('status') not in {'complete', 'empty', 'no_audio'}:
+            self.store.put_json('transcripts', 'source_id', source_id, self.config.asr_key,
+                                {**data, 'reused_from_profile': data.get('input_fingerprint') or data.get('profile')})
+        log.info('复用已完成转写 %s，不重新调用 ASR', source_id)
+        return True
+
+    def transcribe(self, source_id: str | None = None, *, force=False):
         if self.config.asr.backend == "minimax" and self.config.asr.enabled:
-            return self.enrich_dialogue(source_id)
+            return self.enrich_dialogue(source_id, **({"force": True} if force else {}))
         if self.config.asr.backend in {"llama_cpp", "openai"} and self.config.asr.enabled:
-            return self.transcribe_raw(source_id)
+            return self.transcribe_raw(source_id, **({"force": True} if force else {}))
         for source in self.selected_sources(source_id):
-            if (
-                self.store.json_value("transcripts", "source_id", source["id"], self.config.asr_key)
-                is not None
-            ):
+            if not force and self._reuse_transcript(source["id"]):
                 continue
             with self.store.run("transcribe", source["id"]):
                 info = json.loads(source["media"])
@@ -349,7 +360,7 @@ class Pipeline:
                         if duration <= 0:
                             continue
                         checkpoint = cache / f"{number}.json"
-                        if checkpoint.exists():
+                        if checkpoint.exists() and not force:
                             chunk = json.loads(checkpoint.read_text(encoding="utf-8"))
                         else:
                             with tempfile.TemporaryDirectory(prefix="asr-", dir=self.store.root) as directory:
@@ -387,7 +398,38 @@ class Pipeline:
                     },
                 )
 
-    def transcribe_raw(self, source_id: str | None = None):
+    def _reuse_raw_chunk(self, source_id, cache, number, start, duration):
+        from mindex.shared.jsonio import save
+
+        for path in (self.store.root / 'transcripts' / source_id).glob(f'*/raw/{number}.json'):
+            if path.parent == cache:
+                continue
+            try:
+                value = json.loads(path.read_text(encoding='utf-8'))
+                if (not all(math.isfinite(value[k]) for k in ('start', 'duration'))
+                        or abs(value['start'] - start) > 1e-6 or abs(value['duration'] - duration) > 1e-6
+                        or not isinstance(value['text'], str) or not isinstance(value['language'], str)):
+                    continue
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
+            save(cache / path.name, {**value, 'reused_from_profile': path.parent.parent.name})
+            aligned_path = path.parent.parent / ('aligned-' + path.name)
+            try:
+                aligned = json.loads(aligned_path.read_text(encoding='utf-8'))
+                if (isinstance(aligned, dict) and aligned.get('revision') == self.config.asr.aligner_revision
+                        and isinstance(aligned.get('utterances'), list)
+                        and (not value['text'].strip() or aligned['utterances'])):
+                    from mindex.processing.align_worker import coalesce_alignment
+                    from mindex.shared.types import Utterance
+
+                    rows = [Utterance.model_validate(row) for row in coalesce_alignment(aligned['utterances'])]
+                    if all(row.end <= duration + .2 for row in rows):
+                        save(cache.parent / aligned_path.name, aligned)
+            except (OSError, ValueError, TypeError, KeyError):
+                pass
+            return
+
+    def transcribe_raw(self, source_id: str | None = None, *, force=False):
         """Checkpoint raw GGUF ASR output independently from CPU alignment."""
         from mindex.models.llama_cpp import checked_runtime, manifest
 
@@ -395,7 +437,8 @@ class Pipeline:
         checked = False
         for source in self.selected_sources(source_id):
             current = self.store.json_value("transcripts", "source_id", source["id"], profile)
-            if current and current["status"] in {"complete", "no_audio"}:
+            if not force and ((current and current["status"] in {"complete", "no_audio"})
+                              or self._reuse_transcript(source["id"])):
                 continue
             info = json.loads(source["media"])
             if not info["audio"]:
@@ -407,18 +450,21 @@ class Pipeline:
                     {"utterances": [], "status": "no_audio"},
                 )
                 continue
-            if not checked:
-                checked = True
-                if self.config.asr.backend == "llama_cpp":
-                    pinned = manifest(self.config.asr, "asr")
-                    checked_runtime(self.config.asr, pinned)
             with self.store.run("transcribe_raw", source["id"]):
                 cache = self.store.root / "transcripts" / source["id"] / profile / "raw"
                 cache.mkdir(parents=True, exist_ok=True)
                 for number, start in enumerate(range(0, math.ceil(info["duration"]), 30)):
                     target = cache / f"{number}.json"
-                    if target.exists():
+                    if not force and not target.exists():
+                        self._reuse_raw_chunk(source["id"], cache, number, start,
+                                              min(30, info["duration"] - start))
+                    if target.exists() and not force:
                         continue
+                    if not checked:
+                        checked = True
+                        if self.config.asr.backend == "llama_cpp":
+                            pinned = manifest(self.config.asr, "asr")
+                            checked_runtime(self.config.asr, pinned)
                     duration = min(30, info["duration"] - start)
                     with tempfile.TemporaryDirectory(prefix="asr-", dir=self.store.root) as directory:
                         audio = Path(directory) / "audio.wav"
@@ -427,14 +473,18 @@ class Pipeline:
                     if self.config.asr_key != profile:
                         raise ValueError("转写过程中部署清单发生变化")
                     temporary = target.with_suffix(".partial")
-                    temporary.write_text(dumps({**result, "start": start, "duration": duration}), encoding="utf-8")
+                    temporary.write_text(dumps({**result, "start": start, "duration": duration,
+                                                "model_identity": self.config.asr.model_dump()}), encoding="utf-8")
                     temporary.replace(target)
+                    (cache.parent / f"aligned-{number}.json").unlink(missing_ok=True)
+                identities = {}
+                for raw_path in cache.glob('*.json'):
+                    raw_value = json.loads(raw_path.read_text(encoding='utf-8'))
+                    identities[raw_path.stem] = raw_value.get('model_identity') or {
+                        'profile': raw_value.get('reused_from_profile', profile)}
                 self.store.put_json(
-                    "transcripts",
-                    "source_id",
-                    source["id"],
-                    profile,
-                    {"utterances": [], "status": "pending_alignment"},
+                    "transcripts", "source_id", source["id"], profile,
+                    {"utterances": [], "status": "pending_alignment", "chunk_model_identities": identities},
                 )
 
     def align(self, python: Path, source_id: str | None = None):
@@ -500,18 +550,13 @@ class Pipeline:
                         )
                 if not list((cache / "raw").glob("*.json")):
                     raise ValueError("缺少原始转写检查点")
-                self.store.put_json(
-                    "transcripts",
-                    "source_id",
-                    source["id"],
-                    profile,
-                    {
-                        "utterances": utterances,
-                        "status": "complete",
+                data = {**record, "utterances": utterances, "status": "complete", "source": "asr",
                         "alignment_model": self.config.asr.aligner_model,
-                        "alignment_revision": self.config.asr.aligner_revision,
-                    },
-                )
+                        "alignment_revision": self.config.asr.aligner_revision}
+                from mindex.processing.dialogue import DialogueProcessor
+
+                data = DialogueProcessor(self.config).save(source["id"], profile, data)
+                self.store.put_json("transcripts", "source_id", source["id"], profile, data)
 
     def _dialogue(self, source_id: str, start: float, end: float) -> list[dict]:
         from mindex.processing.dialogue import current_dialogue, relative_dialogue
@@ -641,13 +686,14 @@ class Pipeline:
                     for previous in self.store.rows(
                         "SELECT profile,data FROM scene_plans WHERE source_id=? ORDER BY rowid DESC", (source["id"],)
                     ):
-                        completed = {r["segment_id"] for r in self.store.rows(
-                            "SELECT a.segment_id FROM annotations a JOIN segments s ON s.id=a.segment_id "
+                        completed = {(r["kind"], round(r["start"], 6), round(r["end"], 6)) for r in self.store.rows(
+                            "SELECT s.kind,s.start,s.end FROM annotations a JOIN segments s ON s.id=a.segment_id "
                             "WHERE s.source_id=? AND a.profile=? AND "
                             "(json_type(a.data,'$.annotation')='object' OR json_extract(a.data,'$.status')='skipped')",
                             (source["id"], previous["profile"]),
                         )}
-                        if all(segment["id"] in completed for segment in base):
+                        if all((segment["kind"], round(segment["start"], 6), round(segment["end"], 6)) in completed
+                               for segment in base):
                             plan = json.loads(previous["data"])
                             self.store.put_json("scene_plans", "source_id", source["id"], profile, plan)
                             break
@@ -691,9 +737,28 @@ class Pipeline:
                                 "message": f"正在组织场景 {current[0]['start']:.2f}–{current[-1]['end']:.2f} 秒",
                             })
                         checkpoint = checkpoint_root / (fingerprint(current) + ".json")
-                        if checkpoint.is_file() and not force:
+                        groups = None
+                        if not force:
+                            candidates = [checkpoint, *(self.store.root / 'analysis' / sid).glob('*/' + checkpoint.name)]
+                            for candidate in candidates:
+                                try:
+                                    saved_groups = json.loads(candidate.read_text(encoding='utf-8'))
+                                    if not isinstance(saved_groups, list) or any(
+                                        not isinstance(group, list) or not group
+                                        or any(type(index) is not int for index in group) for group in saved_groups
+                                    ):
+                                        continue
+                                    flattened = [index for group in saved_groups for index in group]
+                                    if saved_groups and flattened != list(range(len(current))):
+                                        continue
+                                except (OSError, ValueError, TypeError):
+                                    continue
+                                groups = saved_groups
+                                if candidate != checkpoint:
+                                    atomic_json(checkpoint, groups)
+                                break
+                        if groups is not None:
                             log.info("场景分组检查点命中 %s %.2f–%.2fs", sid, current[0]["start"], current[-1]["end"])
-                            groups = json.loads(checkpoint.read_text(encoding="utf-8"))
                         else:
                             log.info("场景分组开始 %s · %d 个片段 · %.2f–%.2fs", sid, len(current), current[0]["start"], current[-1]["end"])
                             try:
@@ -721,12 +786,19 @@ class Pipeline:
                 log.info("场景计划就绪 %s · %d 个场景", source["name"], len(plan))
                 if not plan and progress:
                     notify({"stage": "scenes", "completed": 0, "total": 0, "unit": "scenes"})
+                from mindex.shared.scene_plans import select_scenes
+
+                existing_scenes = select_scenes(self.store.segments(source["id"], "scene"), plan, profile)
                 for scene_number, (start, end) in enumerate(plan, 1):
                     if progress:
                         notify({"stage": "scenes", "completed": scene_number - 1, "total": len(plan),
                                   "unit": "scenes", "kind": "scene", "start": start, "end": end,
                                   "message": "正在生成场景分析"})
-                    scene = self._segment(source, "scene", start, end, profile, None, "semantic_grouping")
+                    existing = next((s for s in existing_scenes if abs(s["start"] - start) < 1e-6
+                                     and abs(s["end"] - end) < 1e-6), None)
+                    scene = self._segment(source, "scene", start, end,
+                                          existing["generation"] if existing else profile, None, "semantic_grouping",
+                                          segment_id=existing["id"] if existing else None)
                     log.info("分析场景 %s %d/%d %.2f–%.2fs [%s]", source["name"], scene_number, len(plan), start, end, scene["id"])
                     saved = self._annotate(scene, force=force, reuse_completed=True)
                     counts["skipped"] += saved.get("status") == "skipped"
@@ -744,9 +816,13 @@ class Pipeline:
             if self.store.json_value("scene_plans", "source_id", source["id"], profile) is None:
                 raise ValueError(f"{source['name']} 尚未完成当前配置的分析阶段")
             transcript = self.store.json_value("transcripts", "source_id", source["id"], self.config.asr_key)
-            scenes = [s for s in self.store.segments(source["id"], "scene") if s["generation"] == profile]
+            from mindex.shared.scene_plans import select_scenes
+
+            plan = self.store.json_value("scene_plans", "source_id", source["id"], profile)
+            scenes = select_scenes(self.store.segments(source["id"], "scene"), plan, profile)
+            current_scene_ids = {s["id"] for s in scenes}
             for segment in self.store.segments(source["id"]):
-                if segment["kind"] == "scene" and segment["generation"] != profile:
+                if segment["kind"] == "scene" and segment["id"] not in current_scene_ids:
                     continue
                 value = self.store.json_value("annotations", "segment_id", segment["id"], profile)
                 if value is None:

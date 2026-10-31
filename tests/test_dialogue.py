@@ -167,8 +167,10 @@ def test_minimax_overlap_checkpoints_recovery(config, tmp_path):
     assert pipeline.store.one("SELECT status FROM channel_data")["status"] == "failed"
     assert len(list((config.data_dir / "dialogue").rglob("0.json"))) == 1
     asr.fail = False
+    config.asr.model = "resume-model-alias"
     result = processor.process(sid)["sources"][0]
-    assert asr.calls == 4  # completed first chunk reused
+    assert asr.calls == 4  # 已完成分块不因模型配置身份变化而重算
+    assert result["model_identity"]["source"] == "mixed_asr_chunks"
     assert result["completed_chunks"] == 3
     assert all(30 <= (w["start"] + w["end"]) / 2 < 60 for w in result["words"] if w["chunk"] == 1)
     assert not any(w["text"] == "前" for w in result["words"] if w["chunk"] == 1)

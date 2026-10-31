@@ -3203,3 +3203,44 @@ def test_persons_polling_backoff_unit():
         timeout=30,
     )
     assert result.returncode == 0 and "checks passed" in result.stdout, result.stdout + result.stderr
+
+
+def test_person_features_reuse_same_intervals_after_shot_ids_change(catalogue, config, monkeypatch):
+    p, _work, actor = catalogue
+    p.add_reference(actor['id'], photo())
+    client = FakeClient()
+    processor = PersonProcessor(config, client, Tracker)
+    processor.run('source', PersonOptions())
+    original = (client.videos, client.images)
+    p.store.execute("UPDATE segments SET id='alias-' || id WHERE source_id='source'")
+    p.store.execute("UPDATE sources SET layout_key='layout-alias' WHERE id='source'")
+
+    def unexpected(*args, **kwargs):
+        pytest.fail('镜头 ID 变化不改变原片区间，不能重新提取人物特征')
+
+    monkeypatch.setattr(client, 'video', unexpected)
+    monkeypatch.setattr(client, 'image', unexpected)
+    result = processor.run('source', PersonOptions())
+    assert result['reused_shots'] == 3 and result['extracted_shots'] == 0
+    assert (client.videos, client.images) == original
+
+
+def test_partial_person_sampling_uses_actual_shot_offset_and_reuses_it(catalogue, config):
+    _catalogue, _work, _actor = catalogue
+
+    class Observed(FakeClient):
+        def __init__(self):
+            super().__init__()
+            self.ranges = []
+
+        def video(self, path, start, end, interval):
+            self.ranges.append((start, end))
+            return super().video(path, start, end, interval)
+
+    client = Observed()
+    processor = PersonProcessor(config, client, Tracker)
+    options = PersonOptions(start=1.2, end=1.8)
+    first = processor.run('source', options)
+    second = processor.run('source', options)
+    assert client.ranges == [pytest.approx((.2, .8))]
+    assert first['extracted_shots'] == 1 and second['reused_shots'] == 1

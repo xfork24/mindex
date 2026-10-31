@@ -25,6 +25,7 @@ def test_model_switch_reuses_completed_and_force_reanalyzes(config, video_file):
     pipeline = Pipeline(config, analyzer=first)
     sid = pipeline.prepare(video_file)
     pipeline.analyze(sid)
+    original_scene_ids = {s["id"] for s in pipeline.store.segments(sid, "scene")}
     original_profile = pipeline.annotation_profile(sid)
     original = {s['id']: pipeline.store.json_value('annotations', 'segment_id', s['id'], original_profile)
                 for s in pipeline.store.segments(sid) if s['kind'] != 'scene'}
@@ -34,6 +35,7 @@ def test_model_switch_reuses_completed_and_force_reanalyzes(config, video_file):
     resumed = Pipeline(changed, analyzer=second)
     resumed.analyze(sid)
     assert second.calls == second.group_calls == 0
+    assert {s["id"] for s in resumed.store.segments(sid, "scene")} == original_scene_ids
     profile = resumed.annotation_profile(sid)
     for segment_id, previous in original.items():
         saved = resumed.store.json_value('annotations', 'segment_id', segment_id, profile)

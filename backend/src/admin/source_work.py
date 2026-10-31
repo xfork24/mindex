@@ -10,6 +10,7 @@ from mindex.admin.source_tasks import person_setup
 from mindex.processing.dialogue import READY, current_dialogue
 from mindex.shared.background_tasks import public_task
 from mindex.shared.config import fingerprint
+from mindex.shared.scene_plans import current_segments, select_scenes
 
 
 def covered_shots(shots, rows):
@@ -46,7 +47,7 @@ def source_work(store, source, *, segments=None, analysis_rows=None, active=None
     from mindex.processing.channel_index import normalize_snapshot, snapshots_for
 
     sid = source["id"]
-    segments = segments if segments is not None else store.segments(sid)
+    segments = current_segments(store, sid, segments)
     shots = [s for s in segments if s["kind"] == "shot"]
     segment_ids = {s["id"] for s in segments}
     scene_plan = store.one(
@@ -57,8 +58,7 @@ def source_work(store, source, *, segments=None, analysis_rows=None, active=None
     if scene_plan:
         plan = json.loads(scene_plan["data"])
         if isinstance(plan, list):
-            scenes = [s for s in segments if s["kind"] == "scene"
-                      and s["generation"] == scene_plan["profile"] and s.get("parent_id") is None]
+            scenes = select_scenes(segments, plan, scene_plan["profile"])
             for start, end in plan:
                 # Match Pipeline._segment's existing-record lookup. Historical IDs
                 # need not equal the ID a current fingerprint would generate.

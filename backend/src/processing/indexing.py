@@ -431,13 +431,21 @@ def check_index(store: Store, index_id: str) -> list[str]:
     row = store.one("SELECT * FROM index_versions WHERE id=?", (index_id,))
     if row is None:
         return ["找不到索引版本"]
-    expected = {r["id"] for r in store.rows("SELECT id FROM representations WHERE index_id=?", (index_id,))}
+    from collections import defaultdict
+
+    representations = store.rows('SELECT id,segment_id,view FROM representations WHERE index_id=?', (index_id,))
+    expected = {r['id'] for r in representations}
+    member_views, member_ids = defaultdict(set), defaultdict(set)
+    for representation in representations:
+        member_views[representation['segment_id']].add(representation['view'])
+        member_ids[representation['segment_id']].add(representation['id'])
     actual = VectorIndex(store.root, index_id).ids()
     if expected != actual:
         issues.append(f"向量与元数据不一致：缺少 {len(expected - actual)}，多出 {len(actual - expected)}")
     members = store.rows("SELECT * FROM index_members WHERE index_id=?", (index_id,))
     from mindex.shared.shot_media import ShotMedia
-    media = ShotMedia(store, cache_probes=False)
+    media = ShotMedia(store, cache_probes=False, reuse_checks=True)
+    archives = {}
     for member in members:
         if not member["complete"]:
             issues.append(f"片段未完成：{member['segment_id']}")
@@ -454,25 +462,21 @@ def check_index(store: Store, index_id: str) -> list[str]:
         from mindex.processing.subtitle_archive import load_archive
         try:
             media.references(snapshot["source_id"], snapshot["start"], snapshot["end"])
-            load_archive(store, snapshot["source_id"])
+            sid = snapshot['source_id']
+            if sid not in archives:
+                try:
+                    load_archive(store, sid)
+                    archives[sid] = None
+                except (ValueError, OSError) as exc:
+                    archives[sid] = str(exc)
+            if archives[sid] is not None:
+                raise ValueError(archives[sid])
         except (ValueError, OSError) as exc:
             issues.append(f"Shot/subtitle dependency failure: {exc}")
-        views = {
-            r["view"]
-            for r in store.rows(
-                "SELECT view FROM representations WHERE index_id=? AND segment_id=?",
-                (index_id, member["segment_id"]),
-            )
-        }
+        views = member_views[member['segment_id']]
         if "representation_ids" in snapshot:
             manifest_ids = {fingerprint([index_id, rep]) for rep in snapshot["representation_ids"]}
-            stored_ids = {
-                r["id"]
-                for r in store.rows(
-                    "SELECT id FROM representations WHERE index_id=? AND segment_id=?",
-                    (index_id, member["segment_id"]),
-                )
-            }
+            stored_ids = member_ids[member['segment_id']]
             if manifest_ids != stored_ids:
                 issues.append(f"片段表示清单不一致：{member['segment_id']}")
         expected_views = set(snapshot.get("indexed_views", {"video", *snapshot["views"]}))

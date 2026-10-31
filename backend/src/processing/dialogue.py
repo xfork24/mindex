@@ -233,8 +233,38 @@ class DialogueProcessor:
         )
         return data
 
+    def _reuse_chunks(self, sid, cache, total, duration, previous):
+        previous_data = json.loads(previous['data']) if previous else {}
+        for path in (self.store.root / 'dialogue' / sid).glob('*/*.json'):
+            if path.parent == cache or not path.stem.isdigit():
+                continue
+            number = int(path.stem)
+            target = cache / path.name
+            if number >= total or target.exists():
+                continue
+            try:
+                saved = json.loads(path.read_text(encoding='utf-8'))
+                a, b = number * 30, min((number + 1) * 30, duration)
+                bounds = (a, b, max(0, a - 1), min(duration, b + 1))
+                if any(abs(saved[key] - expected) > 1e-6 for key, expected in zip(
+                        ('core_start', 'core_end', 'context_start', 'context_end'), bounds)):
+                    continue
+                if not isinstance(saved['words'], list) or any(
+                    not isinstance(w.get('text'), str) or not w['text'].strip()
+                    or not all(math.isfinite(w[k]) for k in ('start', 'end'))
+                    or not (bounds[2] <= w['start'] < w['end'] <= bounds[3])
+                    or not (a <= (w['start'] + w['end']) / 2 < b)
+                    for w in saved['words']
+                ):
+                    continue
+            except (OSError, ValueError, KeyError, TypeError, AttributeError):
+                continue
+            identity = previous_data.get('model_identity') if previous and path.parent.name == previous['profile'] else None
+            atomic_json(target, {**saved, 'model_identity': saved.get('model_identity') or identity or
+                                 {'profile': path.parent.name}})
+
     def process(self, source_id=None, *, method="auto", subtitle_stream=None, subtitle_file=None, start=0, end=None,
-                progress=None, workers=1):
+                progress=None, workers=1, force=False):
         if method not in {"auto", "subtitle", "asr"}:
             raise ValueError("对白方式必须是 auto、subtitle 或 asr")
         if subtitle_file and (method != "subtitle" or subtitle_stream is not None or source_id is None):
@@ -247,18 +277,26 @@ class DialogueProcessor:
         for source in sources:
             with self.store.run("dialogue", source["id"]):
                 results.append(self._source(source, subtitle_stream, start, end, progress, workers, method,
-                                            subtitle_file))
+                                            subtitle_file, force=force))
         return {"sources": results, "elapsed_seconds": round(perf_counter() - started, 3)}
 
-    def _source(self, source, stream, start, end, progress, workers, method, subtitle_file=None):
+    def _source(self, source, stream, start, end, progress, workers, method, subtitle_file=None, *, force=False):
         sid = source["id"]
+        previous_complete = current_dialogue(self.store, sid) if not force else None
+        if (not subtitle_file and stream is None and previous_complete
+                and previous_complete.get('status') in {'complete', 'empty', 'no_audio'}
+                and method == 'asr' and previous_complete.get('source') in {'asr', 'legacy_asr'}):
+            if progress:
+                progress({'stage': 'asr' if previous_complete.get('source') in {'asr', 'legacy_asr'} else 'subtitle',
+                          'message': '复用已完成对白，不重新转写', 'completed': 1, 'total': 1})
+            return {'source_id': sid, **previous_complete, 'reused': True}
         if subtitle_file:
             from mindex.processing.subtitle_uploads import parse_subtitle_file, resolve_subtitle
 
             path, metadata = resolve_subtitle(self.store, sid, subtitle_file)
             profile = fingerprint(["uploaded-subtitle-v1", sid, subtitle_file])
             previous = self.store.one("SELECT * FROM channel_data WHERE source_id=? AND channel='dialogue'", (sid,))
-            if previous and previous["profile"] == profile and previous["status"] in READY:
+            if not force and previous and previous["profile"] == profile and previous["status"] in READY:
                 if progress:
                     progress({"stage": "subtitle", "completed": 1, "total": 1, "unit": "files"})
                 return {"source_id": sid, **json.loads(previous["data"]), "reused": True}
@@ -297,7 +335,7 @@ class DialogueProcessor:
             previous = self.store.one(
                 "SELECT * FROM channel_data WHERE source_id=? AND channel='dialogue'", (sid,)
             )
-            if previous and previous["profile"] == profile and previous["status"] in READY and (
+            if not force and previous and previous["profile"] == profile and previous["status"] in READY and (
                 manual_subtitle or json.loads(previous["data"]).get("utterances")
             ):
                 if progress:
@@ -330,6 +368,11 @@ class DialogueProcessor:
                 reason = "字幕提取失败：" + str(exc)
         elif selected:
             reason = "指定字幕为位图字幕，无法提取文本"
+        if (not force and previous_complete and previous_complete.get('source') in {'asr', 'legacy_asr'}
+                and previous_complete.get('status') in {'complete', 'empty', 'no_audio'}):
+            if progress:
+                progress({'stage': 'asr', 'completed': 1, 'total': 1, 'message': '复用已完成对白，不重新转写'})
+            return {'source_id': sid, **previous_complete, 'reused': True}
         # The ASR profile deliberately excludes local aligner and subtitle identity.
         model = self.config.asr.model_dump(
             exclude={"timeout", "api_key_env", "max_tokens", "aligner_model", "aligner_revision", "deployment_manifest"}
@@ -337,7 +380,7 @@ class DialogueProcessor:
         profile = fingerprint(["asr-words-context1-v1", sid, model])
         common.update(source="asr", fallback_reason=reason if method != "asr" else None, model_identity=model)
         old = self.store.one("SELECT * FROM channel_data WHERE source_id=? AND channel='dialogue'", (sid,))
-        if old and old["profile"] == profile and old["status"] in READY:
+        if not force and old and old["profile"] == profile and old["status"] in READY:
             if progress:
                 previous = json.loads(old["data"])
                 progress({"stage": "asr", "completed_chunks": previous.get("completed_chunks", 0),
@@ -360,6 +403,8 @@ class DialogueProcessor:
         total = math.ceil(info["duration"] / 30)
         cache = self.store.root / "dialogue" / sid / profile
         cache.mkdir(parents=True, exist_ok=True)
+        if not force:
+            self._reuse_chunks(sid, cache, total, info["duration"], old)
         self.save(sid, profile, {**common, "status": "processing", "utterances": [], "words": []})
         if not 1 <= workers <= 8:
             raise ValueError("workers 必须在 1–8 之间")
@@ -367,7 +412,7 @@ class DialogueProcessor:
         def chunk(number):
             core_start, core_end = number * 30, min((number + 1) * 30, info["duration"])
             target = cache / f"{number}.json"
-            if not target.exists():
+            if force or not target.exists():
                 a, b = max(0, core_start - 1), min(info["duration"], core_end + 1)
                 if self.transcriber is None:
                     self.transcriber = make_transcriber(self.config)
@@ -396,6 +441,7 @@ class DialogueProcessor:
                         "core_end": core_end,
                         "context_start": a,
                         "context_end": b,
+                        "model_identity": model,
                     },
                 )
             return core_end
@@ -428,10 +474,13 @@ class DialogueProcessor:
                                 }
                             )
             words, completed = [], 0
+            chunk_models = {}
             for number in range(total):
                 target = cache / f"{number}.json"
                 if target.exists():
-                    words.extend(json.loads(target.read_text(encoding="utf-8"))["words"])
+                    saved = json.loads(target.read_text(encoding="utf-8"))
+                    words.extend(saved["words"])
+                    chunk_models[str(number)] = saved.get('model_identity', model)
                     completed += 1
             state = "partial" if completed < total else "complete" if words else "empty"
             data = self.save(
@@ -444,6 +493,9 @@ class DialogueProcessor:
                     "utterances": coalesce_words(words),
                     "completed_chunks": completed,
                     "total_chunks": total,
+                    "chunk_model_identities": chunk_models,
+                    "model_identity": model if all(value == model for value in chunk_models.values()) else
+                        {"source": "mixed_asr_chunks", "models": list({fingerprint(v): v for v in chunk_models.values()}.values())},
                 },
             )
             return {"source_id": sid, **data}

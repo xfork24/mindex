@@ -276,6 +276,7 @@ def export_source(
 def transcribe(
     ctx: typer.Context,
     source: Annotated[str | None, typer.Option(help="素材 ID；省略处理全部素材，不是文件路径。")] = None,
+    force: Annotated[bool, typer.Option("--force", help="强制重新转写，忽略已完成结果和转写检查点。")] = False,
 ):
     """使用配置的 ASR 转写已完成分镜的素材，保留断点检查点。
 
@@ -290,7 +291,7 @@ def transcribe(
 
     pipeline = Pipeline(ctx.obj)
     with pipeline.lock(source, "dialogue"):
-        pipeline.transcribe(source)
+        pipeline.transcribe(source, **({"force": True} if force else {}))
 
 
 @app.command("enrich-dialogue")
@@ -308,6 +309,7 @@ def enrich_dialogue(
         bool, typer.Option("--no-publish", help="只补充对白，不构建或发布索引；适合分阶段轮换 GPU 服务。")
     ] = False,
     workers: Annotated[int, typer.Option(min=1, max=8, help="对白并发工作数，范围 1–8。")] = 2,
+    force: Annotated[bool, typer.Option("--force", help="强制重新提取对白，忽略已完成结果和转写检查点。")] = False,
 ):
     """补充字幕或 ASR 对白，支持断点续跑，默认检查并发布索引。
 
@@ -331,6 +333,7 @@ def enrich_dialogue(
                 publish=not no_publish,
                 workers=workers,
                 progress=lambda value: typer.echo(json.dumps(value, ensure_ascii=False)),
+                **({"force": True} if force else {}),
             )
         )
 
