@@ -40,6 +40,8 @@ scenario("material_scope", async (page) => {
   assert.deepEqual(await page.locator("#topic-material-current li").allTextContents(), ["material-a"]);
   await page.reload();
   await page.waitForFunction((id) => document.querySelector("#topic-material-scope .group-picker select")?.selectedOptions[0]?.value === id, chosen);
+  // 恢复流程先选中组、再异步 resolve 回填素材列表；等列表就绪后再断言，避免竞态。
+  await page.waitForFunction(() => document.querySelectorAll("#topic-material-sources option").length === 1);
   assert.deepEqual(await sources.evaluate((node) => [...node.options].map((o) => o.value)), ["material-a"]);
   await page.locator("#topic-material-current-members summary").filter({hasText: "1"}).waitFor();
   assert.match(await page.locator("#topic-material-current").textContent(), /选题素材组/);
