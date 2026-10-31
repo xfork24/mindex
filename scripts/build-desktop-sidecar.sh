@@ -6,6 +6,7 @@
 set -euo pipefail
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "${ROOT}"  # 无论从哪个目录调用，后续步骤一律以项目根为工作目录
 BUILD="${ROOT}/desktop/build"
 VENV="${BUILD}/sidecar-venv"
 PYTHON_VERSION="${MINDEX_SIDECAR_PYTHON:-3.13}"
