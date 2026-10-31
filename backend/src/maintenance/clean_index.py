@@ -9,6 +9,7 @@ index_versions 行 + index_report 设置键 + 关联检索组合（search_releas
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import shutil
@@ -21,6 +22,32 @@ log = logging.getLogger(__name__)
 
 # chroma 顶层 segment 目录名为 UUID；非 UUID 形态的目录与库文件不进孤儿判定
 UUID_DIR = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+
+
+def _pinned_versions(store):
+    pinned = set()
+    files = [*store.root.glob('studio/*/workspace.json'), *store.root.glob('studio/*/job.json')]
+    for path in files:
+        try:
+            stack = [json.loads(path.read_text(encoding='utf-8'))]
+        except (OSError, ValueError):
+            log.warning('无法核对创作索引引用，保留全部索引：%s', path)
+            return None
+        while stack:
+            value = stack.pop()
+            if isinstance(value, dict):
+                for key, item in value.items():
+                    if key in {'index_id', 'content_index_id', 'content_id'} and isinstance(item, str):
+                        pinned.add(item)
+                    elif isinstance(item, (dict, list)):
+                        stack.append(item)
+            elif isinstance(value, list):
+                stack.extend(item for item in value if isinstance(item, (dict, list)))
+    for row in store.rows("SELECT progress FROM source_tasks WHERE status IN ('queued','running','failed','interrupted','cancelled')"):
+        value = json.loads(row['progress'])
+        if value.get('index_id'):
+            pinned.add(value['index_id'])
+    return pinned
 
 
 def retained_versions(store, keep_recent: int, *, building_max_age_days: int | None = None,
@@ -46,7 +73,9 @@ def retained_versions(store, keep_recent: int, *, building_max_age_days: int | N
     keep |= {v["id"] for v in inactive_ready[: max(keep_recent, 0)]}
     if active_id:
         keep.add(active_id)
-    deletable = [v for v in inactive_ready if v["id"] not in keep] + stale_building
+    pinned = _pinned_versions(store)
+    keep.update(pinned if pinned is not None else (v['id'] for v in versions))
+    deletable = [v for v in inactive_ready + stale_building if v["id"] not in keep]
     return {"active": active_id, "keep": sorted(keep), "deletable": deletable}
 
 

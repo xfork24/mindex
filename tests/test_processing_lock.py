@@ -195,3 +195,31 @@ def test_all_four_processing_groups_across_sources_follow_gpu_setting(config, mo
         release.set()
         for manager,task in jobs:
             assert finished(manager, task)['status'] == 'complete'
+
+
+def test_index_wait_can_be_cancelled_without_waiting_for_writer(config):
+    from mindex.shared.processing_lock import index_write_lock
+    from mindex.shared.task_cancel import TaskCancelled
+
+    cancelled = threading.Event()
+    finished = threading.Event()
+    errors = []
+
+    def check():
+        if cancelled.is_set():
+            raise TaskCancelled()
+
+    def wait():
+        try:
+            with index_write_lock(config.data_dir, check=check):
+                errors.append('等待者不应进入占用中的写锁')
+        except TaskCancelled:
+            finished.set()
+
+    with index_write_lock(config.data_dir):
+        worker = threading.Thread(target=wait)
+        worker.start()
+        cancelled.set()
+        assert finished.wait(2)
+        worker.join(2)
+    assert not errors and not worker.is_alive()

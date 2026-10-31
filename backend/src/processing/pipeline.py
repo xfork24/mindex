@@ -19,6 +19,7 @@ from mindex.models.adapters import (
 )
 from mindex.shared import locks
 from mindex.shared.config import Config, fingerprint
+from mindex.shared.jsonio import save_text
 from mindex.shared.media import content_hash, cut, probe, thumbnail, windows
 from mindex.shared.shot_media import ShotMedia
 from mindex.shared.storage import Store, dumps
@@ -204,9 +205,7 @@ class Pipeline:
                     "detector": self.config.detector.backend,
                     "shots": [{"start": a, "end": b} for a, b in ranges],
                 }
-                partial = plan_path.with_suffix(".partial")
-                partial.write_text(dumps(plan), encoding="utf-8")
-                partial.replace(plan_path)
+                save_text(plan_path, dumps(plan))
             else:
                 self._read_plan(source)
         log.info("Cut plan ready: %s", plan_path)
@@ -379,9 +378,7 @@ class Pipeline:
                                         "text": item.text,
                                     }
                                 )
-                            temporary = checkpoint.with_suffix(".partial")
-                            temporary.write_text(dumps(chunk), encoding="utf-8")
-                            temporary.replace(checkpoint)
+                            save_text(checkpoint, dumps(chunk))
                         utterances.extend(chunk)
                 self.store.put_json(
                     "transcripts",
@@ -472,10 +469,8 @@ class Pipeline:
                         result = self.transcriber.raw(audio)
                     if self.config.asr_key != profile:
                         raise ValueError("转写过程中部署清单发生变化")
-                    temporary = target.with_suffix(".partial")
-                    temporary.write_text(dumps({**result, "start": start, "duration": duration,
-                                                "model_identity": self.config.asr.model_dump()}), encoding="utf-8")
-                    temporary.replace(target)
+                    save_text(target, dumps({**result, "start": start, "duration": duration,
+                                             "model_identity": self.config.asr.model_dump()}))
                     (cache.parent / f"aligned-{number}.json").unlink(missing_ok=True)
                 identities = {}
                 for raw_path in cache.glob('*.json'):

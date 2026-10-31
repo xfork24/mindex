@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 from filelock import FileLock, Timeout
@@ -116,6 +117,27 @@ def _recover_tasks(store, table):
             pass
 
 
-def index_write_lock(root):
-    """独占 index-write 锁，默认一直等待（增量构建须在前一个写入者结束后读取最新活动索引）。"""
-    return locks.named(root, "index-write", timeout=None)
+def index_write_lock(root, *, check=None):
+    """串行发布；有检查回调时等待可取消，拿锁后再读取活动版本。"""
+    if check is None:
+        return locks.named(root, "index-write", timeout=None)
+    return _checked_index_write_lock(root, check)
+
+
+@contextmanager
+def _checked_index_write_lock(root, check):
+    lock = locks.named(root, 'index-write', timeout=0)
+    last_check = time.monotonic()
+    while True:
+        try:
+            lock.acquire()
+            break
+        except Timeout:
+            if time.monotonic() - last_check >= .5:
+                check()
+                last_check = time.monotonic()
+            time.sleep(.05)
+    try:
+        yield lock
+    finally:
+        lock.release()

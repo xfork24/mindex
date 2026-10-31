@@ -36,6 +36,30 @@ const {chromium}=require(process.env.MINDEX_PLAYWRIGHT_MODULE || 'playwright');
   await page.goto(base+'/');
   await page.locator('#query').fill('walking');await page.locator('#search-button').click();
   await page.locator('#results .card').first().waitFor();
+  // Compact English actions must remain readable at normal and narrow card widths.
+  const resultCard=page.locator('#results .card').first();
+  for(const language of ['en','zh']){
+   await choose(language);
+   if(language==='en') assert.deepEqual(await resultCard.locator('.card-actions>*').allTextContents(),['Details','Similar','Manage ↗','People ↗']);
+   assert.equal(await resultCard.locator('.card-actions button').first().getAttribute('aria-label'),language==='en'?'View details':'查看详情');
+   for(const width of [350,280,220]){
+    await resultCard.evaluate((card,width)=>{card.style.width=width+'px';},width);
+    await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(resolve)));
+    const issues=await resultCard.evaluate(card=>{
+     const group=card.querySelector('.card-actions'), bounds=group.getBoundingClientRect();
+     const controls=[...group.children], rects=controls.map(control=>control.getBoundingClientRect());
+     return controls.flatMap((control,i)=>{
+      const range=document.createRange();range.selectNodeContents(control);
+      const text=range.getBoundingClientRect(), box=rects[i];
+      const invalid=text.left<box.left-1||text.right>box.right+1||box.left<bounds.left-1||box.right>bounds.right+1;
+      const overlap=rects.some((other,j)=>j<i&&Math.min(box.right,other.right)-Math.max(box.left,other.left)>1&&Math.min(box.bottom,other.bottom)-Math.max(box.top,other.top)>1);
+      return invalid||overlap?[control.textContent]:[];
+     });
+    });
+    assert.deepEqual(issues,[],`${language} card width ${width}: overlapping actions`);
+   }
+  }
+  await resultCard.evaluate(card=>card.style.removeProperty('width'));
   await page.locator('#results .card').first().locator('.card-actions button').first().click();
   const details=page.locator('#detail-content');await details.locator('[data-analysis-text]').first().waitFor();
   await page.evaluate(()=>{window.analysisTestVideo=document.querySelector('#detail-content video');});

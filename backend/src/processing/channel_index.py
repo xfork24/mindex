@@ -16,6 +16,9 @@ from mindex.shared.types import Annotation
 
 log = logging.getLogger(__name__)
 
+# 仅缓存命中的元数据按批提交；新模型结果仍逐向量保存检查点。
+REUSED_METADATA_BATCH_SIZE = 128
+
 
 def normalize_snapshot(snapshot):
     s = dict(snapshot)
@@ -140,19 +143,28 @@ def representations(builder, segment):
     return [r for r in result if r[1] in segment["indexed_views"]]
 
 
-def reusable_vectors(builder, identity):
+def reusable_vectors(builder, identity, keys=None):
     store, cache = builder.store, {}
+    remaining = set(keys) if keys is not None else None
+    if remaining is not None and not remaining:
+        return cache
+    preprocessing = builder.config.video.model_dump()
     for row in store.rows(
         "SELECT id,spec FROM index_versions WHERE status IN ('ready','building') ORDER BY created_at DESC"
     ):
         spec = json.loads(row["spec"])
-        if spec["space"] != identity or spec["preprocessing"] != builder.config.video.model_dump():
+        if spec["space"] != identity or spec["preprocessing"] != preprocessing:
             continue
-        records = store.rows("SELECT * FROM representations WHERE index_id=?", (row["id"],))
+        records = store.rows("SELECT id,cache_key FROM representations WHERE index_id=?", (row["id"],))
         record_ids = {r["id"] for r in records if not r["cache_key"]}
         for r in records:
-            if r["cache_key"]:
-                cache.setdefault(r["cache_key"], (row["id"], r["id"]))
+            key = r['cache_key']
+            if key and (remaining is None or key in remaining):
+                cache.setdefault(key, (row['id'], r['id']))
+                if remaining is not None:
+                    remaining.discard(key)
+        if remaining is not None and not remaining:
+            break
         # Reconstruct interval keys for legacy and format 2 indexes.
         if not record_ids:
             continue
@@ -161,7 +173,12 @@ def reusable_vectors(builder, identity):
                 rep_id = fingerprint([row["id"], rep])
                 if rep_id in record_ids:
                     key = representation_key(builder, identity, segment, view, document, bounds)
-                    cache.setdefault(key, (row["id"], rep_id))
+                    if remaining is None or key in remaining:
+                        cache.setdefault(key, (row["id"], rep_id))
+                        if remaining is not None:
+                            remaining.discard(key)
+        if remaining is not None and not remaining:
+            break
     return cache
 
 
@@ -236,7 +253,9 @@ def build_channels(builder, *, activate=False, mode="auto", source_id=None, kind
     # Validate physical dependencies before creating a candidate or invoking a model.
     from mindex.shared.shot_media import ShotMedia
     media = ShotMedia(store, cache_probes=False, reuse_checks=True)
-    for s in snapshots:
+    for media_number, s in enumerate(snapshots, 1):
+        if progress and media_number % 128 == 0:
+            progress({'stage': 'index_prepare', 'phase': 'publish'})
         try:
             media.references(s["source_id"], s["start"], s["end"])
         except (ValueError, OSError) as exc:
@@ -258,8 +277,14 @@ def build_channels(builder, *, activate=False, mode="auto", source_id=None, kind
     }
     index_id = fingerprint(spec)
     selected_views = {"video" if c == "visual" else c for c in selected}
+    representation_plan = {
+        s['id']: [(fingerprint([index_id, local_id]), view, document, bounds,
+                   representation_key(builder, identity, s, view, document, bounds))
+                  for local_id, view, document, bounds in representations(builder, s)]
+        for s in snapshots
+    }
     targets = {
-        s["id"]: {fingerprint([index_id, r[0]]) for r in representations(builder, s) if r[1] in selected_views}
+        s["id"]: {r[0] for r in representation_plan[s['id']] if r[1] in selected_views}
         for s in snapshots
         if (source_id is None or s["source_id"] == source_id) and s["kind"] in kinds
     }
@@ -301,12 +326,51 @@ def build_channels(builder, *, activate=False, mode="auto", source_id=None, kind
     completed.update(sid for sid, ids in targets.items() if ids <= durable)
     notify("embedding")
     log.info("扫描可复用嵌入缓存 · %d 个片段检查点已完成", len(completed))
-    cache = reusable_vectors(builder, identity)
-    log.info("嵌入缓存扫描完成 · %d 个可复用项", len(cache))
+    cache_started = perf_counter()
+    needed_keys = {key for entries in representation_plan.values() for rep_id, _, _, _, key in entries
+                   if rep_id not in existing}
+    cache = reusable_vectors(builder, identity, needed_keys)
+    cache_seconds = perf_counter() - cache_started
+    log.info("嵌入缓存扫描完成 · 命中 %d/%d 个待用输入 · %.3f 秒", len(cache), len(needed_keys), cache_seconds)
     opened = {index_id: vectors}
     reused = embedded = resumed = 0
     task_reused = task_embedded = 0
     coverage = {c: 0 for c in CHANNELS}
+    cached_members = []
+    metadata_batches = 0
+    metadata_seconds = 0.0
+
+    def report_progress():
+        notify("embedding")
+        log.info("发布进度 %s [%s] %d/%d · 缓存复用向量 %d · 模型新生成向量 %d",
+                 ",".join(sorted(selected)), ",".join(sorted(kinds)), len(completed), len(targets),
+                 task_reused, task_embedded)
+
+    def flush_cached():
+        nonlocal metadata_batches, metadata_seconds
+        if not cached_members:
+            return
+        checkpoint_started = perf_counter()
+        with store.connect() as db:
+            db.executemany('INSERT OR IGNORE INTO index_members(index_id,segment_id,snapshot) VALUES(?,?,?)',
+                           [(index_id, s['id'], dumps(s)) for s in cached_members])
+            db.executemany('INSERT OR REPLACE INTO representations(id,index_id,segment_id,view,document,cache_key) '
+                           'VALUES(?,?,?,?,?,?)',
+                           [(rep_id, index_id, s['id'], view, document, key) for s in cached_members
+                            for rep_id, view, document, _, key in representation_plan[s['id']]])
+            db.executemany('UPDATE index_members SET complete=1 WHERE index_id=? AND segment_id=?',
+                           [(index_id, s['id']) for s in cached_members])
+        metadata_batches += 1
+        metadata_seconds += perf_counter() - checkpoint_started
+        changed = {s['id'] for s in cached_members if s['id'] in targets} - completed
+        # 提交完成后才报告完成；取消或崩溃不会把内存态误报为持久检查点。
+        completed.update(changed)
+        cached_members.clear()
+        if changed:
+            report_progress()
+        else:
+            notify('embedding')
+
     with store.run("index"):
         # Copy checkpoints in batches before invoking the model. A new immutable
         # index still needs the vectors, but reuse requires no media/model work.
@@ -314,14 +378,13 @@ def build_channels(builder, *, activate=False, mode="auto", source_id=None, kind
 
         copies = defaultdict(list)
         for s in snapshots:
-            for local_id, view, document, bounds in representations(builder, s):
-                rep_id = fingerprint([index_id, local_id])
-                key = representation_key(builder, identity, s, view, document, bounds)
+            for rep_id, view, document, _bounds, key in representation_plan[s['id']]:
                 if rep_id not in existing and key in cache:
                     version, identifier = cache[key]
                     copies[version].append((identifier, rep_id, s, view, document))
         copied = set()
         copy_total = sum(len(entries) for entries in copies.values())
+        copy_started = perf_counter()
         log.info("开始复制可复用向量 · 共 %d 项", copy_total)
         for version, entries in copies.items():
             if version not in opened:
@@ -335,13 +398,29 @@ def build_channels(builder, *, activate=False, mode="auto", source_id=None, kind
                     vectors.upsert_many(writes)
                     copied.update(entry[0] for entry in writes)
                 log.info("向量缓存复制 %d/%d · 来源索引 %s", len(copied), copy_total, version)
+                notify('embedding')
+        copy_seconds = perf_counter() - copy_started
         existing.update(copied)
+        log.info('向量缓存复制完成 · %d 项 · %.3f 秒', len(copied), copy_seconds)
         # Finish and report reusable segments first, even if missing segments
         # occur earlier in the source's ID ordering.
-        snapshots.sort(key=lambda s: not all(
-            fingerprint([index_id, r[0]]) in existing for r in representations(builder, s)
-        ))
+        snapshots.sort(key=lambda s: not all(r[0] in existing for r in representation_plan[s['id']]))
         for s in snapshots:
+            planned = representation_plan[s['id']]
+            if all(r[0] in existing for r in planned):
+                for rep_id, _, _, _, _ in planned:
+                    if rep_id in copied:
+                        reused += 1
+                        task_reused += int(rep_id in targets.get(s['id'], set()))
+                    else:
+                        resumed += 1
+                for view in s['indexed_views']:
+                    coverage['visual' if view == 'video' else view] += 1
+                cached_members.append(s)
+                if len(cached_members) >= REUSED_METADATA_BATCH_SIZE:
+                    flush_cached()
+                continue
+            flush_cached()
             if s["id"] in targets:
                 log.debug("发布片段 %s [%s] %s %.2f–%.2fs [%s] · 完成 %d/%d",
                          s.get("source_name", ""), s["source_id"], s["kind"], s["start"], s["end"], s["id"], len(completed), len(targets))
@@ -349,9 +428,7 @@ def build_channels(builder, *, activate=False, mode="auto", source_id=None, kind
                 "INSERT OR IGNORE INTO index_members(index_id,segment_id,snapshot) VALUES(?,?,?)",
                 (index_id, s["id"], dumps(s)),
             )
-            for local_id, view, document, bounds in representations(builder, s):
-                rep_id = fingerprint([index_id, local_id])
-                key = representation_key(builder, identity, s, view, document, bounds)
+            for rep_id, view, document, bounds, key in planned:
                 target_rep = rep_id in targets.get(s["id"], set())
                 if rep_id in existing:
                     if rep_id in copied:
@@ -400,12 +477,9 @@ def build_channels(builder, *, activate=False, mode="auto", source_id=None, kind
             )
             if s["id"] in targets and s["id"] not in completed:
                 completed.add(s["id"])
-                notify("embedding")
-                log.info(
-                    "发布进度 %s [%s] %d/%d · 缓存复用向量 %d · 模型新生成向量 %d",
-                    ",".join(sorted(selected)), ",".join(sorted(kinds)),
-                    len(completed), len(targets), task_reused, task_embedded,
-                )
+                report_progress()
+        flush_cached()
+        log.info('复用元数据提交完成 · %d 批 · %.3f 秒', metadata_batches, metadata_seconds)
         # 冲过 chroma HNSW 落盘阈值，避免尾部向量只存于内存与 WAL（详见 VectorIndex.flush）。
         log.info("嵌入处理结束 · 新生成 %d · 复用 %d · 断点续传 %d；开始向量落盘", embedded, reused, resumed)
         vectors.flush()
@@ -427,6 +501,10 @@ def build_channels(builder, *, activate=False, mode="auto", source_id=None, kind
             "resumed_vectors": resumed,
             "channel_coverage": coverage,
             "segments": len(snapshots),
+            "cache_scan_seconds": round(cache_seconds, 3),
+            "vector_copy_seconds": round(copy_seconds, 3),
+            "cached_metadata_batches": metadata_batches,
+            "cached_metadata_seconds": round(metadata_seconds, 3),
             "rollback_index": previous["id"] if previous else None,
         }
         store.execute(

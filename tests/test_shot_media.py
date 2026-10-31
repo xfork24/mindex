@@ -344,3 +344,27 @@ def test_ffmpeg_times_use_decimal_not_scientific_notation(library):
     assert args[args.index('-ss') + 1] == '0.000000000'
     assert args[args.index('-t') + 1] == '0.000000500'
     assert 'trim=duration=0.000000500' in args[args.index('-filter_complex') + 1]
+
+
+def test_cached_stream_releases_lease_when_send_fails(tmp_path):
+    import asyncio
+
+    from filelock import FileLock
+
+    from mindex.shared.shot_media import file_response
+
+    path = tmp_path / 'cache/shot-media/test.mp4'
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b'fixture')
+    response = file_response(path)
+
+    async def send(message):
+        raise OSError('模拟客户端断开')
+
+    async def receive():
+        return {'type': 'http.disconnect'}
+
+    with pytest.raises(OSError, match='客户端断开'):
+        asyncio.run(response({'type': 'http', 'method': 'GET', 'headers': []}, receive, send))
+    with FileLock(str(path) + '.lock', timeout=0):
+        pass

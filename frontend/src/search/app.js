@@ -244,7 +244,18 @@ function render(data) {
         render(data);
       } catch (error) { notice(error.message, 'error'); } finally { similar.disabled = false; }
     };
-    actions.append(detail, similar, managementLink(result), correctionLink(result));
+    const manage = managementLink(result), people = correctionLink(result);
+    for (const [control, shortKey, fullKey] of [
+      [detail, 'ui.search_card_details', 'ui.faea8c1db9cc'],
+      [similar, 'ui.search_card_similar', 'ui.groups_similar'],
+      [manage, 'ui.search_card_manage', 'ui.5c5434cf5afa'],
+      [people, 'ui.search_card_people', 'ui.review_appearance_link'],
+    ]) {
+      MindexI18n.setText(control, MindexI18n.msg(shortKey));
+      MindexI18n.setAttr(control, 'title', MindexI18n.msg(fullKey));
+      MindexI18n.setAttr(control, 'aria-label', MindexI18n.msg(fullKey));
+    }
+    actions.append(detail, similar, manage, people);
     const evidenceMatch = (result.matches || []).find((match) => match.matched_text);
     const evidenceText = evidenceMatch?.matched_text;
     const description = result.display_name || evidenceText || (result.annotation_status === 'not_analyzed' ? '' : annotation.description || '');

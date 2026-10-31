@@ -134,7 +134,7 @@ def test_context_expiry_threshold(tmp_path):
 
 
 def test_shot_media_cache_expiry(tmp_path):
-    """cache/shot-media：过期合成媒体连同其锁文件与过期探测缓存一起删，未过期保留。"""
+    """过期媒体和探测缓存删除；锁文件保留 inode，未过期项保留。"""
     config_path = make_config(tmp_path)
     root = tmp_path / "data"
     Store(root)
@@ -148,7 +148,7 @@ def test_shot_media_cache_expiry(tmp_path):
 
     assert names["shot_media_cache"]["level"] == "B"
     assert names["shot_media_cache"]["item_count"] == 2
-    assert not stale.exists() and not stale_lock.exists() and not stale_probe.exists()
+    assert not stale.exists() and stale_lock.exists() and not stale_probe.exists()
     assert fresh.exists()
 
 
@@ -671,3 +671,38 @@ def test_days_preview_deletes_nothing(tmp_path):
 
     assert fresh.exists()
     assert categories(report)["shot_media_cache"]["item_count"] == 1
+
+
+@pytest.mark.parametrize('rule_name,relative', [
+    ('context_cache', 'context/scene.mp4'), ('shot_media_cache', 'cache/shot-media/scene.mp4')])
+def test_cache_cleanup_rechecks_lease_after_preview(tmp_path, rule_name, relative):
+    from filelock import FileLock
+
+    from mindex.maintenance import clean
+
+    root = tmp_path / 'data'
+    store = Store(root)
+    path = age(write(root / relative), 40)
+    scan = clean.Scan(Config(data_dir=root), store, datetime.now(UTC))
+    action = getattr(clean, rule_name)(scan)
+    assert action and action.items
+    with FileLock(str(path) + '.lock'):
+        result = action.execute()
+    assert path.is_file() and result == {'deleted': 0, 'skipped': 1}
+
+
+@pytest.mark.parametrize('rule_name,relative', [
+    ('context_cache', 'context/scene.mp4'), ('shot_media_cache', 'cache/shot-media/scene.mp4')])
+def test_cache_cleanup_keeps_recently_accessed_old_media(tmp_path, rule_name, relative):
+    from mindex.maintenance import clean
+
+    root = tmp_path / 'data'
+    store = Store(root)
+    path = age(write(root / relative), 40)
+    scan = clean.Scan(Config(data_dir=root), store, datetime.now(UTC))
+    action = getattr(clean, rule_name)(scan)
+    assert action
+    os.utime(path, (datetime.now(UTC).timestamp(), path.stat().st_mtime))
+    assert action.execute() == {'deleted': 0, 'skipped': 1}
+    assert path.is_file()
+    assert getattr(clean, rule_name)(scan) is None

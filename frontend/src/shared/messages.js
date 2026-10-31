@@ -1,4 +1,8 @@
 window.MindexMessages = {
+  "ui.search_card_details": {"zh": "查看详情", "en": "Details"},
+  "ui.search_card_similar": {"zh": "找相似", "en": "Similar"},
+  "ui.search_card_manage": {"zh": "管理此片段 ↗", "en": "Manage ↗"},
+  "ui.search_card_people": {"zh": "出镜审核 ↗", "en": "People ↗"},
   "ui.topics_material_current": {"zh": "当前已保存的素材范围", "en": "Currently saved material scope"},
   "ui.topics_material_unlimited": {"zh": "不限", "en": "Unrestricted"},
   "ui.topics_material_current_groups": {"zh": "素材组：", "en": "Source groups:"},

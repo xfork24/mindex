@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
 import os
 import tempfile
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
@@ -14,10 +16,14 @@ from pathlib import Path
 
 from filelock import FileLock
 
+from mindex.shared.jsonio import save
 from mindex.shared.media import MediaError, atomic_media, probe
 
 VERSION = 'shot-media-v1'
 EPSILON = 0.000001
+_PRUNE_LOCK = threading.Lock()
+_LAST_PRUNE = {}
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -93,9 +99,7 @@ class ShotMedia:
                 except (ValueError, KeyError, OSError):
                     pass
             info = probe(path)
-            partial = cached.with_suffix('.partial')
-            partial.write_text(json.dumps({'identity': identity, 'media': info}), encoding="utf-8")
-            partial.replace(cached)
+            save(cached, {'identity': identity, 'media': info})
             self._probes[path] = info
             return info
 
@@ -341,15 +345,37 @@ class ShotMedia:
                              '-preset', 'fast', '-crf', '20', '-c:a', 'aac', '-movflags', '+faststart'], output)
             stat = output.stat()
             os.utime(output, ns=(time.time_ns(), stat.st_mtime_ns))
+            self._prune_if_due()
         return output
+
+    def _prune_if_due(self):
+        if not _PRUNE_LOCK.acquire(blocking=False):
+            return
+        try:
+            now = time.monotonic()
+            if now - _LAST_PRUNE.get(self.store.root, -math.inf) >= 60:
+                _LAST_PRUNE[self.store.root] = now
+                try:
+                    self.prune_cache(max_age=math.inf)
+                except OSError as exc:
+                    log.warning('媒体缓存回收失败，保留有效产物：%s', exc)
+        finally:
+            _PRUNE_LOCK.release()
 
     def prune_cache(self, *, max_age=7 * 86400, max_bytes=5 * 1024**3):
         """Nonblocking eviction; callers holding a cache lease protect active files."""
         from filelock import Timeout
 
         directory = self.store.root / 'cache' / 'shot-media'
-        files = sorted(directory.glob('*.mp4'), key=lambda p: p.stat().st_atime)
-        total = sum(p.stat().st_size for p in files)
+        files = []
+        for path in directory.glob('*.mp4'):
+            try:
+                stat = path.stat()
+                files.append((stat.st_atime, path, stat.st_size))
+            except FileNotFoundError:
+                continue
+        total = sum(size for _, _, size in files)
+        files = [path for _, path, _ in sorted(files)]
         removed = []
         for path in files:
             try:
@@ -410,4 +436,11 @@ def file_response(path: Path, **kwargs):
     if not path.is_file():
         lock.release()
         raise FileNotFoundError(path)
-    return FileResponse(path, background=BackgroundTask(lock.release), **kwargs)
+    class LeasedFileResponse(FileResponse):
+        async def __call__(self, scope, receive, send):
+            try:
+                await super().__call__(scope, receive, send)
+            finally:
+                lock.release()
+
+    return LeasedFileResponse(path, background=BackgroundTask(lock.release), **kwargs)

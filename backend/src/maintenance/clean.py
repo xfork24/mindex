@@ -227,9 +227,28 @@ def temp_crash(scan: Scan) -> CleanAction | None:
         targets.append(path)
         items.append(CleanItem(path.relative_to(scan.store.root).as_posix(), size))
 
+    references = set(scan.media_state[0]) | {r['path'] for r in scan.store.rows('SELECT path FROM sources')}
+    for name in ('plans', 'transcripts', 'dialogue', 'analysis', 'subtitle-archives', 'clips', 'thumbnails'):
+        for path in _iter_files(scan.store.root / name):
+            if not (path.name.endswith('.partial') or '.partial.' in path.name):
+                continue
+            relative = path.relative_to(scan.store.root).as_posix()
+            if relative not in references:
+                targets.append(path)
+                items.append(CleanItem(relative, path.stat().st_size))
+    items = [item for item in items if item.path not in references
+             and not any(ref.startswith(item.path + '/') for ref in references)]
+    allowed = {item.path for item in items}
+    targets = [path for path in targets if path.relative_to(scan.store.root).as_posix() in allowed]
+
     def execute() -> dict:
+        current = set(Scan(scan.config, scan.store, scan.now).media_state[0])
+        current.update(r['path'] for r in scan.store.rows('SELECT path FROM sources'))
         deleted = 0
         for path in targets:
+            relative = path.relative_to(scan.store.root).as_posix()
+            if relative in current or any(ref.startswith(relative + '/') for ref in current):
+                continue
             if path.is_dir():
                 shutil.rmtree(path)
             else:
@@ -374,8 +393,11 @@ def _orphan_action(scan: Scan, category: str, description: str, root_name: str,
     root = scan.store.root / root_name
 
     def execute() -> dict:
+        references, _, _ = Scan(scan.config, scan.store, scan.now).media_state
         deleted = 0
         for item in items:
+            if item.path in references:
+                continue
             path = scan.store.root / item.path
             path.unlink(missing_ok=True)
             _prune_empty_parents(path, root)
@@ -417,7 +439,7 @@ def person_frames(scan: Scan) -> CleanAction | None:
         return {"deleted": deleted}
 
     return CleanAction(category="person_frames", level="A", stage="pipeline",
-                       description="人物冗余展示帧", policy="已确认镜头每身份保留一帧；未确认镜头全部保留；"
+                       description="人物冗余展示帧", policy="已确认镜头每身份保留一帧；未确认镜头及发布快照引用的帧保留；"
                        "旧库先运行 persons migrate-frames 获得压缩收益", items=items, execute=execute)
 
 
@@ -627,6 +649,31 @@ def _profile_dirs(scan: Scan, base: Path, keep: str | dict[str, set[str]], days:
     )
 
 
+
+def _cache_expired(path: Path, days: int, now: datetime) -> bool:
+    stat = path.stat()
+    return max(stat.st_atime, stat.st_mtime) < (now - timedelta(days=days)).timestamp()
+
+
+def _delete_cache_items(pairs, days, now):
+    from filelock import FileLock, Timeout
+
+    deleted = skipped = 0
+    for path, _ in pairs:
+        try:
+            # 预览和实际删除之间，读者可能刚获取租约或刷新访问时间。
+            with FileLock(str(path) + '.lock', timeout=0):
+                if not path.is_file() or not _cache_expired(path, days, now):
+                    skipped += 1
+                    continue
+                path.unlink()
+                deleted += 1
+                # 锁文件保留稳定 inode，避免后续读者锁住另一份同名文件。
+        except (Timeout, FileNotFoundError):
+            skipped += 1
+    return {'deleted': deleted, **({'skipped': skipped} if skipped else {})}
+
+
 def context_cache(scan: Scan) -> CleanAction | None:
     from filelock import FileLock, Timeout
 
@@ -640,7 +687,7 @@ def context_cache(scan: Scan) -> CleanAction | None:
     for path in sorted(directory.iterdir()):
         if not path.is_file() or not path.name.endswith(".mp4"):
             continue
-        if not scan.expired(path, days):
+        if not _cache_expired(path, days, scan.now):
             continue
         lock_file = path.with_name(path.name + ".lock")
         if lock_file.is_file():
@@ -654,20 +701,14 @@ def context_cache(scan: Scan) -> CleanAction | None:
         items.append(CleanItem(path.relative_to(scan.store.root).as_posix(), path.stat().st_size))
 
     def execute() -> dict:
-        deleted = 0
-        for path, lock_file in pairs:
-            path.unlink(missing_ok=True)
-            if lock_file is not None:
-                lock_file.unlink(missing_ok=True)
-            deleted += 1
-        return {"deleted": deleted}
+        return _delete_cache_items(pairs, days, scan.now)
 
     if not items:
         return None
     return CleanAction(
         category="context_cache", level="B", stage="pipeline",
         description="超过生命期的在线播放转码缓存",
-        policy=f"mtime 早于 {days} 天；下次访问秒级重转码；写入中的（锁被持）跳过",
+        policy=f"最近访问或修改均早于 {days} 天；删除时重新检查租约，锁文件保留；可按需重转码",
         items=items, kept={"locked": kept}, execute=execute,
     )
 
@@ -685,7 +726,7 @@ def shot_media_cache(scan: Scan) -> CleanAction | None:
     for path in sorted(directory.rglob("*")):
         if not path.is_file() or path.name.startswith(".") or path.name.endswith(".lock"):
             continue  # 锁文件随对应媒体同批处理
-        if not scan.expired(path, days):
+        if not _cache_expired(path, days, scan.now):
             continue
         lock_file = path.with_name(path.name + ".lock")
         if lock_file.is_file():
@@ -699,20 +740,14 @@ def shot_media_cache(scan: Scan) -> CleanAction | None:
         items.append(CleanItem(path.relative_to(scan.store.root).as_posix(), path.stat().st_size))
 
     def execute() -> dict:
-        deleted = 0
-        for path, lock_file in pairs:
-            path.unlink(missing_ok=True)
-            if lock_file is not None:
-                lock_file.unlink(missing_ok=True)
-            deleted += 1
-        return {"deleted": deleted}
+        return _delete_cache_items(pairs, days, scan.now)
 
     if not items:
         return None
     return CleanAction(
         category="shot_media_cache", level="B", stage="pipeline",
         description="超过生命期的 shot 媒体合成与探测缓存（cache/shot-media）",
-        policy=f"mtime 早于 {days} 天；按内容指纹可由现行 shot 重新合成；读取中的（缓存租约锁被持）跳过",
+        policy=f"最近访问或修改均早于 {days} 天；按内容指纹可重建；删除时重新检查租约，锁文件保留",
         items=items, kept={"locked": kept}, execute=execute,
     )
 

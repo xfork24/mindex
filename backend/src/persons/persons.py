@@ -1365,7 +1365,21 @@ def existing_frame(store, rows, fallback):
     return fallback
 
 
-def retained_frame_paths(store, source_id=None):
+def published_frame_paths(store, source_id=None):
+    """不可变人物发布快照仍引用的展示文件不能作为任务垃圾删除。"""
+    result = {}
+    sql = ("SELECT DISTINCT json_extract(e.value,'$.source_id') AS source_id, "
+           "json_extract(e.value,'$.data.image_path') AS path "
+           "FROM person_versions v,json_each(v.data,'$.evidence') e "
+           "WHERE json_type(e.value,'$.data.image_path')='text'")
+    if source_id is not None:
+        sql += " AND json_extract(e.value,'$.source_id')=?"
+    for row in store.rows(sql, (source_id,) if source_id is not None else ()):
+        result.setdefault(row['source_id'], set()).add(row['path'])
+    return result
+
+
+def retained_frame_paths(store, source_id=None, *, include_published=True):
     groups, result = {}, {}
     for row in store.rows("SELECT * FROM person_evidence" + (" WHERE source_id=?" if source_id else ""),
                           (source_id,) if source_id else ()):
@@ -1383,6 +1397,20 @@ def retained_frame_paths(store, source_id=None):
             if row["status"] == "accepted" and path and identity not in identities:
                 paths.add(path)
                 identities.add(identity)
+    # 没有匹配证据的帧同样可能属于待审核镜头，不能只从 evidence 行推导保留集。
+    sql = ("SELECT DISTINCT c.source_id,json_extract(f.value,'$.image_path') AS path "
+           "FROM person_coverage c JOIN person_features p ON p.id=c.cache_id, "
+           "json_each(p.data,'$.frames') f WHERE p.kind='shot' "
+           "AND json_type(f.value,'$.image_path')='text' AND NOT EXISTS "
+           "(SELECT 1 FROM person_evidence e WHERE e.source_id=c.source_id "
+           "AND e.shot_id=json_extract(c.data,'$.shot_id') AND e.status='accepted')")
+    if source_id is not None:
+        sql += ' AND c.source_id=?'
+    for row in store.rows(sql, (source_id,) if source_id is not None else ()):
+        result.setdefault(row['source_id'], set()).add(row['path'])
+    if include_published:
+        for source, paths in published_frame_paths(store, source_id).items():
+            result.setdefault(source, set()).update(paths)
     return result
 
 
@@ -1403,7 +1431,8 @@ def migrate_frames(config, *, source_id=None, apply=False):
 
 
 def _migrate_frames(config, store, source_id, apply):
-    retained = retained_frame_paths(store)
+    retained = retained_frame_paths(store, include_published=False)
+    published = published_frame_paths(store)
     base = store.root / "persons/frames"
     sources = set(retained)
     if base.is_dir():
@@ -1424,6 +1453,7 @@ def _migrate_frames(config, store, source_id, apply):
             mapping = {}
             keep = {path for owner, paths in retained.items() if owner != source
                     for path in paths if path.startswith(prefix)}
+            keep.update(path for paths in published.values() for path in paths if path.startswith(prefix))
             for relative in sorted(retained.get(source, set())):
                 path = (store.root / relative).resolve()
                 if not path.is_relative_to(directory):

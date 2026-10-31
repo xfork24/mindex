@@ -306,8 +306,8 @@ button.language-switch .language-divider::after{content:"";position:absolute;ins
 .card-description{-webkit-line-clamp:1;margin-bottom:5px}
 .card-body .tags{max-height:23px;overflow:hidden;flex-wrap:nowrap}
 .card-body .tag{white-space:nowrap;padding:3px 6px}
-.card-body .card-actions{flex-wrap:nowrap;gap:6px;margin-top:5px;padding-top:4px}
-.card-actions a,.card-actions button{display:inline-flex;align-items:center;justify-content:center;height:28px;min-height:28px;line-height:1;white-space:nowrap;margin:0;padding:0 2px}
+.card-body .card-actions{flex-wrap:wrap;gap:6px;margin-top:5px;padding-top:4px}
+.card-actions a,.card-actions button{flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;height:28px;min-height:28px;line-height:1;white-space:nowrap;margin:0;padding:0 2px}
 
 /* 检索筛选：素材与人物同排，检索参数独立一排，操作按钮置底。 */
 .search-scope-row,.search-filter-row{display:grid;gap:12px;min-width:0;margin-top:18px}

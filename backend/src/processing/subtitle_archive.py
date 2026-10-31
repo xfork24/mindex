@@ -5,6 +5,7 @@ import json
 
 from filelock import FileLock
 
+from mindex.shared.jsonio import save
 from mindex.shared.media import MediaError, atomic_media, command, content_hash
 
 
@@ -52,7 +53,5 @@ def archive_subtitles(store, source):
             if track['text']:
                 data['utterances'][str(track['index'])] = extract_subtitles(
                     original, track, json.loads(source['media'])['duration'])
-        partial = manifest.with_suffix('.partial')
-        partial.write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
-        partial.replace(manifest)
+        save(manifest, data)
         return data

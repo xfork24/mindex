@@ -2749,10 +2749,10 @@ def test_migrate_frames_preview_apply_resume_and_vectors(catalogue, config):
     assert new.endswith(".jpg") and (p.store.root / new).is_file()
     assert updated["frames"][0]["observations"] == vectors["frames"][0]["observations"]
     assert json.loads(p.store.one("SELECT data FROM person_versions WHERE id='published'")["data"]) == version
-    assert not (p.store.root / first).exists()
+    assert (p.store.root / first).is_file(), '发布快照引用的原图仍须保留'
     again = migrate_frames(config, apply=True)
     assert again["total"]["reencoded"] == again["total"]["deleted_files"] == 0
-    (p.store.root / first).write_bytes(photo())
+    (p.store.root / 'persons/frames/source/unreferenced.png').write_bytes(photo())
     assert migrate_frames(config, apply=True)["total"]["deleted_files"] == 1
 
 
@@ -3244,3 +3244,17 @@ def test_partial_person_sampling_uses_actual_shot_offset_and_reuses_it(catalogue
     second = processor.run('source', options)
     assert client.ranges == [pytest.approx((.2, .8))]
     assert first['extracted_shots'] == 1 and second['reused_shots'] == 1
+
+
+def test_frame_retention_protects_unmatched_features_and_published_versions(catalogue, config):
+    from mindex.persons.persons import retained_frame_paths
+
+    p, _work, actor = catalogue
+    p.store.execute('INSERT INTO person_features VALUES(?,?,?,?,?)', (
+        'feature', 'source', '{}', 'shot', json.dumps({'frames': [{'image_path': 'unmatched.jpg'}]})))
+    p.store.execute('INSERT INTO person_coverage VALUES(?,?,?)', (
+        'source', 'feature', json.dumps({'shot_id': 'shot0'})))
+    p.store.execute('INSERT INTO person_versions(id,data) VALUES(?,?)', ('release', json.dumps({
+        'evidence': [{'source_id': 'source', 'data': {'image_path': 'published.jpg'}}]})))
+    frame_evidence(p, actor, 'accepted', 'current.jpg', shot='shot1')
+    assert retained_frame_paths(p.store)['source'] == {'unmatched.jpg', 'published.jpg', 'current.jpg'}

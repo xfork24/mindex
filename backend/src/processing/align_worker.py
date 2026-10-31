@@ -58,18 +58,21 @@ def main():
         ]
     target = Path(args.output)
     temporary = target.with_suffix(".partial")
-    temporary.write_text(
-        json.dumps(
-            {
-                "utterances": coalesce_alignment(rows),
-                "raw_tokens": rows,
-                "policy": "merge-zero-duration-adjacent-v1",
-                "revision": args.revision,
-            },
-            ensure_ascii=False,
-        ), encoding="utf-8"
-    )
-    temporary.replace(target)
+    try:
+        temporary.write_text(
+            json.dumps(
+                {
+                    "utterances": coalesce_alignment(rows),
+                    "raw_tokens": rows,
+                    "policy": "merge-zero-duration-adjacent-v1",
+                    "revision": args.revision,
+                },
+                ensure_ascii=False,
+            ), encoding="utf-8"
+        )
+        temporary.replace(target)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

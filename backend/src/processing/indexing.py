@@ -296,7 +296,8 @@ class IndexBuilder:
 
         if progress:
             progress({"stage": "index_wait", "phase": "publish"})
-        with index_write_lock(self.store.root):
+        check_wait = (lambda: progress({"stage": "index_wait", "phase": "publish"})) if progress else None
+        with index_write_lock(self.store.root, check=check_wait):
             if progress:
                 progress({"stage": "index_prepare", "phase": "publish"})
             if mode == "enriched":
@@ -446,12 +447,15 @@ def check_index(store: Store, index_id: str) -> list[str]:
     from mindex.shared.shot_media import ShotMedia
     media = ShotMedia(store, cache_probes=False, reuse_checks=True)
     archives = {}
+    references = {r['path']: r for r in store.rows(
+        "SELECT path,source_id,start,end FROM media_references WHERE source_id IN "
+        "(SELECT DISTINCT json_extract(snapshot,'$.source_id') FROM index_members WHERE index_id=?)", (index_id,))}
     for member in members:
         if not member["complete"]:
             issues.append(f"片段未完成：{member['segment_id']}")
         snapshot = json.loads(member["snapshot"])
         # Validate references against physical shots without materializing media.
-        reference = store.one('SELECT * FROM media_references WHERE path=?', (snapshot['path'],))
+        reference = references.get(snapshot['path'])
         thumbnail = (store.root / snapshot["thumbnail"]).resolve()
         if not thumbnail.is_relative_to(store.root) or not thumbnail.is_file():
             issues.append(f"文件缺失：{snapshot['thumbnail']}")

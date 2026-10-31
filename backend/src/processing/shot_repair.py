@@ -103,10 +103,9 @@ def adjusted(segment, shots, changes):
 
 
 def _write_json(path, data):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    partial = path.with_suffix('.partial')
-    partial.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n', encoding="utf-8")
-    partial.replace(path)
+    from mindex.shared.jsonio import save_text
+
+    save_text(path, json.dumps(data, ensure_ascii=False, indent=2) + '\n')
 
 
 def apply(config, report, *, progress=None, video_encoder="libx264"):
