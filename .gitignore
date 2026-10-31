@@ -21,6 +21,7 @@ clean.js
 
 /node_modules/
 /build/
+models
 logs/
 
 # 本机工具二进制（不入库）
