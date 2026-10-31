@@ -44,6 +44,7 @@ def body_of(store, profile_id: str) -> ProfileBody:
 
 
 def create_profile(store, body: ProfileBody) -> dict:
+    validate_materials(store, body)
     profile_id, stamp = new_id("tp"), now()
     store.execute(
         "INSERT INTO topic_profiles(id,name,body,created_at,updated_at) VALUES(?,?,?,?,?)",
@@ -55,6 +56,8 @@ def create_profile(store, body: ProfileBody) -> dict:
 def update_profile(store, profile_id: str, changes: ProfileChanges) -> dict:
     current = body_of(store, profile_id)
     body = ProfileBody.model_validate({**current.model_dump(), **changes.values()})
+    if {"source_ids", "source_group_ids"} & changes.values().keys():
+        validate_materials(store, body)
     store.execute(
         "UPDATE topic_profiles SET name=?,body=?,updated_at=? WHERE id=?",
         (body.name, dumps(body.model_dump()), now(), profile_id),
@@ -87,3 +90,34 @@ def delete_profile(store, profile_id: str) -> dict:
 def snapshot_body(body: ProfileBody) -> dict:
     data = body.model_dump()
     return {key: data[key] for key in WRITING_KEYS}
+
+
+def material_filters(body: ProfileBody):
+    """素材组并集与手动素材取交集；空列表沿用不限语义。"""
+    from mindex.shared.types import Filters
+
+    return Filters(source_ids=body.source_ids, source_group_ids=body.source_group_ids)
+
+
+def validate_materials(store, body: ProfileBody) -> None:
+    unknown = set(body.source_ids) - store.source_ids()
+    if unknown:
+        raise ValueError("找不到素材：" + "、".join(sorted(unknown)))
+    material_filters(body).effective_sources(store)
+
+
+def material_state(body: ProfileBody) -> dict:
+    return {"source_ids": body.source_ids or None, "source_group_ids": body.source_group_ids}
+
+
+def material_signature(store, body: ProfileBody) -> dict:
+    from mindex.shared.media_groups import Groups
+
+    return {"source_ids": sorted(set(body.source_ids)),
+            "groups": Groups(store).state("source", body.source_group_ids)}
+
+
+def scoped_items(store, body: ProfileBody, items: list[dict]) -> list[dict]:
+    scope = material_filters(body).effective_sources(store)
+    return [item for item in items if scope is None or not item.get("dedup_key", "").startswith("local:source:")
+            or item["dedup_key"].removeprefix("local:source:") in scope]

@@ -131,6 +131,8 @@ def profiles_create(
     audience: Audience = None, positioning: Positioning = None, taboo: Taboo = None, keyword: Keyword = None,
     canvas: Canvas = None, schedule_time: ScheduleTime = None, schedule_count: ScheduleCount = None,
     schedule_enabled: ScheduleEnabled = None,
+    material_source: Annotated[list[str] | None, typer.Option("--material-source", help="素材库 ID，可重复；与素材组取交集。")]=None,
+    source_group: Annotated[list[str] | None, typer.Option("--source-group", help="素材组 ID，可重复，多组取并集。")]=None,
 ):
     """新建领域档案（--name 与 --domain 必填，可来自 --file）。
 
@@ -145,6 +147,7 @@ def profiles_create(
 
     values = _profile_values(file, name, domain, subtopic, audience, positioning, taboo, keyword, canvas,
                              schedule_time, schedule_count, schedule_enabled)
+    values.update({k: v for k, v in {"source_ids": material_source, "source_group_ids": source_group}.items() if v is not None})
     print_json(run(lambda: profiles.create_profile(_store(ctx), ProfileBody.model_validate(values))))
 
 
@@ -154,6 +157,8 @@ def profiles_update(
     name: Name = None, domain: Domain = None, subtopic: Subtopic = None, audience: Audience = None,
     positioning: Positioning = None, taboo: Taboo = None, keyword: Keyword = None, canvas: Canvas = None,
     schedule_time: ScheduleTime = None, schedule_count: ScheduleCount = None, schedule_enabled: ScheduleEnabled = None,
+    material_source: Annotated[list[str] | None, typer.Option("--material-source", help="素材库 ID，可重复；与素材组取交集。")]=None,
+    source_group: Annotated[list[str] | None, typer.Option("--source-group", help="素材组 ID，可重复，多组取并集。")]=None,
 ):
     """修改领域档案：只改给出的字段（列表类选项整体替换）。
 
@@ -172,6 +177,7 @@ def profiles_update(
         current = profiles.get_profile(store, profile_id)
         values = _profile_values(file, name, domain, subtopic, audience, positioning, taboo, keyword, canvas,
                                  schedule_time, schedule_count, schedule_enabled, current["schedule"])
+        values.update({k: v for k, v in {"source_ids": material_source, "source_group_ids": source_group}.items() if v is not None})
         if not values:
             raise ValueError("至少给出一个要修改的字段")
         return profiles.update_profile(store, profile_id, ProfileChanges.model_validate(values))

@@ -17,6 +17,22 @@
 
 面板顶部的「跟随滚动」位于「跟随助手定位」与「总是允许」之间，默认关闭，选择记在本机浏览器。开启后立即滚动到最新消息，并随新消息和流式回复自动滚动到底部；关闭后保留当前阅读位置，可以手动滚动查看历史消息。
 
+## 组管理工具
+
+以下工具同时注册到 Agent 与 MCP，复用 `library` 领域权限（任务范围编辑属于 `studio_detail`）：
+
+| 工具 | 风险 | 功能 |
+|---|---|---|
+| `list_groups` / `get_group` | read | 按 `type=source/music` 列举、查看组与分页成员 |
+| `create_group` / `update_group` | write | 创建组、编辑名称或说明 |
+| `delete_group` | danger | 删除组与关系，媒体保留；任务引用需重新选择 |
+| `add_group_members` / `remove_group_members` | write | 批量添加或移除成员 |
+| `set_member_groups` | write | 设置单项素材或音乐的全部所属组 |
+| `resolve_material_scope` | read | 查询素材组与手动素材限制的有效交集 |
+| `set_job_material_scope` | write | 设置任务 `source_group_ids` 与 `source_ids` |
+
+`list_sources`、`search_media`、`search_by_media`、`find_similar`、`create_job` 及分镜召回筛选支持 `source_group_ids`；曲库列举与推荐支持 `music_group_ids`。多组选取并集，再与其他限制取交集。不选组不限，空组无候选；失效或类型不符的组返回明确错误。组修改影响下一次操作，既有选片与音乐保持明确媒体 ID。管理页上下文携带当前组，工具结果提供管理页定位与刷新事件。
+
 ## 确认与安全
 
 | 风险级别 | 工具示例 | 行为 |
@@ -565,3 +581,7 @@ ANTHROPIC_API_KEY=... uv run python scripts/agent_eval.py --backend anthropic \
 ```
 
 未经自动化验证的范围：真实模型的视觉效果、真实人物服务的识别质量、真实 GPU 任务的取消时延。
+
+`save_topic_profile` 的 `source_ids` 与 `source_group_ids` 保存选题的素材范围；多组取并集，与手动素材取交集。空列表不限，所选空组没有候选。素材候选、覆盖评分、大纲参考和从选题创建的任务沿用该范围。可先用 `list_groups`、`get_group` 查询素材组；组失效时应请用户重新选择。
+
+系统组 `ungrouped-source` / `ungrouped-music` 为自动“未分类”组，`list_groups`、`get_group` 返回 `system: true`。可以用于素材/音乐筛选，成员随普通组归属实时变化；编辑、删除及批量改成员会明确拒绝，应修改普通组归属。单项归属设置仅传普通组 ID，空列表自动回到未分类。

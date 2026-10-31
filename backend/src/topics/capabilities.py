@@ -22,7 +22,7 @@ class Capability:
 
 CAPABILITIES: tuple[Capability, ...] = (
     Capability(
-        "profiles", "领域档案",
+        "profiles", "领域档案（含素材组与素材范围）",
         rest=(("GET", "/api/topics/profiles"), ("POST", "/api/topics/profiles"),
               ("GET", "/api/topics/profiles/{profile_id}"), ("PATCH", "/api/topics/profiles/{profile_id}"),
               ("DELETE", "/api/topics/profiles/{profile_id}")),

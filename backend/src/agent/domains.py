@@ -16,6 +16,7 @@ PAGE_DOMAIN: dict[str, str] = {
     "settings": "settings",
     "search": "search",
     "admin": "library",
+    "groups": "library",
     "persons": "persons",
     "topics": "topics",
     "music": "studio_post",  # 素材管理 · 音乐库子页面（曲库工具在 studio_post 领域）
@@ -28,7 +29,7 @@ DOMAIN_INFO: dict[str, str] = {
     "studio_detail": "创作诊断、版本依赖、召回词建议、人工选片、整列重做、AI 动画源码读取与修改、背景音乐歌词生成",
     "studio_post": "成片后期与交付：品牌模板（字幕样式、文字层样式、片头片尾、水印）与品牌素材上传、HTML 叠加层源码、多画幅导出、平台预设、"
                    "封面、发布元数据与发布包、音乐库与选曲推荐、第三方工具",
-    "library": "素材与片段浏览、整理信息、素材报告、处理任务、上传素材与字幕",
+    "library": "素材组与音乐组管理、组成员与有效范围查询、素材与片段浏览、整理信息、素材报告、处理任务、上传素材与字幕",
     "search": "文字/图片/视频检索、找相似、区间抽帧、系统状态",
     "index": "内容索引版本列表、一致性检查、激活与回退",
     "persons": "演员/角色/参考图、识别演员、出镜审核、人物发布、检索组合、演员表导入",

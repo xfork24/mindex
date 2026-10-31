@@ -1,4 +1,11 @@
 /* 创作页 · 页面事件绑定、新建任务、智能助手上下文与启动（必须最后加载）。按 studio.html 中的顺序以经典脚本加载，顶层声明共享全局作用域。 */
+const createGroups = MindexGroups.picker("source", [], () => {}, "ui.groups_filter", {listbox: true});
+$("create-sources").closest("label").before(createGroups.wrap);
+createGroupLink = MindexGroups.linkSources(createGroups, $("create-sources"), {
+  entries: () => state.sources || [], selection: () => createSourceSelection,
+  fill: (entries, chosen) => fillCreateSources(entries, chosen), onError: (error) => fail(error)
+});
+$("create-sources").addEventListener("change", () => { toggleAllOf($("create-sources")); createSourceSelection = pickedIds($("create-sources")); });
 "use strict";
 $("play-close").addEventListener("click", () => {
   $("play-video").pause();
@@ -118,7 +125,8 @@ $("create-form").addEventListener("submit", async (event) => {
       options: {
         // 音轨/字幕/召回数量不再在创建时设置：默认值生效，之后在方案参数里调整。
         // 全选时 scope 为 null：不限素材，后续新增素材自动可用。
-        ...(scope ? { source_ids: scope } : {})
+        ...(scope ? { source_ids: scope } : {}),
+        source_group_ids: createGroups.values()
       }
     });
     await selectJob(job.id);
@@ -158,6 +166,7 @@ window.MindexAgentContext = () => {
     page: "studio",
     job_id: state.id,
     job_title: state.data.job?.title,
+    source_group_ids: state.data.job?.source_group_ids || [],
     plan_id: plan().id,
     shot_count: order().length,
     // 当前在详情区打开的分镜（沿用 expanded_shots 键名，至多一个）与阶段。
@@ -169,6 +178,7 @@ window.MindexAgentContext = () => {
 let agentRefresh = Promise.resolve();
 window.addEventListener("mindex:agent-mutation", (event) => {
   const detail = event.detail || {};
+  if (detail.groups && state.id) { state.materialDigest = null; refresh().catch(fail); }
   if (detail.domain !== "studio") return;
   loadJobs().catch(() => {});
   // 文案模板是全局数据（复制/修改/删除模板）：重新读取模板目录。

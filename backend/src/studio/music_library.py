@@ -171,11 +171,18 @@ def view(row: dict, *, beats: bool = True) -> dict:
 
 
 def get_track(store, track_id: str) -> dict:
-    return view(_row(store, track_id))
+    from mindex.shared.media_groups import Groups
+
+    return {**view(_row(store, track_id)), "groups": Groups(store).for_member("music", track_id)}
 
 
-def list_tracks(store, *, mood: str | None = None, query: str | None = None) -> list[dict]:
+def list_tracks(store, *, mood: str | None = None, query: str | None = None, music_group_ids: list[str] | None = None) -> list[dict]:
     items = [view(row, beats=False) for row in store.rows("SELECT * FROM music_tracks ORDER BY created_at, id")]
+    from mindex.shared.media_groups import Groups
+
+    allowed = Groups(store).resolve("music", music_group_ids)
+    if allowed is not None:
+        items = [item for item in items if item["id"] in allowed]
     if mood:
         items = [item for item in items if mood in item["moods"]]
     if query:
@@ -276,7 +283,10 @@ def delete_track(config, store, track_id: str) -> None:
         first = used[0]
         raise TrackInUse(f"曲目正被 {len(used)} 处分镜选用（如任务 {first['job_id']} 的方案「{first['plan_name']}」），"
                          "请先为这些分镜换用其他背景音乐")
-    store.execute("DELETE FROM music_tracks WHERE id=?", (track_id,))
+    with store.connect() as db:
+        db.execute("UPDATE media_groups SET updated_at=CURRENT_TIMESTAMP WHERE id IN "
+                   "(SELECT group_id FROM media_group_members WHERE music_id=?)", (track_id,))
+        db.execute("DELETE FROM music_tracks WHERE id=?", (track_id,))
     track_path(config, track_id, row["suffix"]).unlink(missing_ok=True)
 
 
@@ -414,11 +424,12 @@ def score(item: dict, moods: list[str], bpm_range, seconds: float | None) -> tup
     return round(total, 3), reasons
 
 
-def recommend(store, text: str, *, seconds: float | None = None, limit: int = 5, writer=None) -> dict:
+def recommend(store, text: str, *, seconds: float | None = None, limit: int = 5, writer=None, music_group_ids: list[str] | None = None) -> dict:
     """按段落文案推荐曲目：情绪重合度、BPM 区间、时长覆盖排序；过期授权的曲目不参与。"""
+    candidates = list_tracks(store, music_group_ids=music_group_ids)
     inferred = infer(text, writer)
     items = []
-    for item in list_tracks(store):
+    for item in candidates:
         if item["expired"]:
             continue
         value, reasons = score(item, inferred["moods"], inferred["bpm_range"], seconds)

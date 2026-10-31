@@ -21,7 +21,7 @@ from mindex.topics.models import Schedule, Weights
 
 # 参数名带 topic_ 前缀，避免与设置页模型档案的 profile_id、素材的 source_id 混淆。
 ProfileId = Field(pattern=ID_PATTERN, description="领域档案 ID（tp_ 开头，list_topic_profiles 列出）")
-PROFILE_LABELS = {"name": "名称", "domain": "领域", "subtopics": "子方向", "audience": "目标受众",
+PROFILE_LABELS = {"source_ids": "素材范围", "source_group_ids": "素材组", "name": "名称", "domain": "领域", "subtopics": "子方向", "audience": "目标受众",
                   "positioning": "账号定位", "taboos": "禁区", "keywords": "关键词", "language": "搜索语言",
                   "region": "搜索地区", "canvas": "默认画幅", "weights": "打分权重", "schedule": "每日定时"}
 
@@ -49,7 +49,9 @@ def profile_line(item: dict) -> str:
     schedule = item.get("schedule") or {}
     timer = f"每天 {schedule.get('time')} 前 {schedule.get('count')} 名写大纲" if schedule.get("enabled") else "未开启定时"
     subtopics = "、".join(item.get("subtopics") or []) or "—"
-    return f"{item['id']} | {item['name']} | {item['domain']}（{subtopics}）| {timer}"
+    sources = "、".join(item.get("source_ids") or []) or "不限"
+    groups = "、".join(item.get("source_group_ids") or []) or "不限"
+    return f"{item['id']} | {item['name']} | {item['domain']}（{subtopics}）| {timer} | 素材：{sources} | 素材组：{groups}"
 
 
 async def fetch_profile(ctx: ToolContext, profile_id: str) -> dict:
@@ -83,8 +85,10 @@ class SaveTopicProfile(StrictModel):
     taboos: list[str] | None = Field(default=None, max_length=30,
                                      description="禁区（整体替换）；也会作为写作约束进入从选题创建的任务的文案提示词")
     keywords: list[str] | None = Field(default=None, max_length=30, description="检索与搜索关键词（整体替换）")
-    language: str | None = Field(default=None, min_length=2, max_length=16, description="搜索语言，如 zh-hans、en")
-    region: str | None = Field(default=None, min_length=2, max_length=8, description="搜索地区，如 CN、US")
+    language: str | None = Field(default=None, min_length=2, max_length=16, description="旧档案兼容字段；默认全球搜索不采用此限制，定向搜索可配置数据源 search_lang")
+    region: str | None = Field(default=None, min_length=2, max_length=8, description="旧档案兼容字段；默认全球搜索不采用此限制，定向搜索可配置数据源 country")
+    source_ids: list[str] | None = Field(default=None, max_length=200, description="素材库 ID 多选；空列表不限，与素材组并集取交集")
+    source_group_ids: list[str] | None = Field(default=None, max_length=200, description="素材组 ID 多选取并集；与素材范围取交集，空组无候选")
     canvas: Literal["16:9", "9:16", "1:1"] | None = Field(default=None, description="从选题建任务时的默认画幅")
     weights: Weights | None = Field(default=None, description="五项打分权重，和为 1（需整体给出）")
     schedule: Schedule | None = Field(default=None, description="每日定时：enabled、time（HH:MM）、count（前 N 名写大纲）")

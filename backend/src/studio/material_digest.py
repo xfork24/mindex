@@ -248,15 +248,24 @@ def merged_vocabulary(digest: MaterialDigest | None) -> list[str] | None:
     return merged or None
 
 
-def build_digest(config: Config, store=None, state: dict | None = None, *, language: str | None = None) -> MaterialDigest:
+def build_digest(config: Config, store=None, state: dict | None = None, *, language: str | None = None,
+                 filters=None) -> MaterialDigest:
     """I/O 外壳：读取生效索引快照、覆盖层、任务范围与预算，调用 compose_digest。只读。
 
     空原因优先级：预算为 0 → 无生效索引 → 无已分析镜头（需求 3.6）。
     """
     from mindex.admin.curation import Library
     from mindex.shared.storage import Store
-    from mindex.studio.studio import material_scope
+    from mindex.shared.types import Filters
 
+    store = store or Store(config.data_dir)
+    state = state or {}
+    scope = Filters(source_ids=state.get("source_ids") or [],
+                    source_group_ids=state.get("source_group_ids") or []).effective_sources(store)
+    if filters is not None:
+        additional = filters.effective_sources(store)
+        if additional is not None:
+            scope = additional if scope is None else scope & additional
     budget = config.studio.material_digest_chars
     if budget == 0:
         return MaterialDigest.empty_of(EMPTY_BUDGET)
@@ -267,9 +276,21 @@ def build_digest(config: Config, store=None, state: dict | None = None, *, langu
     library = Library(store)
     sources, segments = library.overlays()
     decorated = [library.decorate(s, sources, segments) for s in store.snapshots_shared(active["id"])]
+    if filters is not None:
+        def matches(segment):
+            duration = segment["end"] - segment["start"]
+            annotation = segment.get("annotation") or {}
+            return (duration >= filters.min_duration
+                    and (filters.max_duration is None or duration <= filters.max_duration)
+                    and all(not value or any(value.casefold() in item.casefold()
+                                             for item in annotation.get(field) or [])
+                            for field, value in (("scene", filters.scene), ("emotions", filters.emotion),
+                                                 ("shot_size", filters.shot_size))))
+
+        decorated = [segment for segment in decorated if matches(segment)]
     return compose_digest(
         decorated,
-        scope=material_scope(state or {}),
+        scope=scope,
         budget=budget,
         content_index_id=active["id"],
         language=language or (state or {}).get("language", "zh"),
@@ -277,21 +298,42 @@ def build_digest(config: Config, store=None, state: dict | None = None, *, langu
 
 
 def safe_digest(
-    config: Config, job_id: str, *, store=None, on_error: Callable[[str], None] | None = None
+    config: Config, job_id: str, *, store=None, on_error: Callable[[str], None] | None = None, filters=None
 ) -> MaterialDigest:
-    """script/split 阶段与重写召回词使用的容错版本：任何异常都退化为空 Digest，不让调用方失败。
+    """script/split 阶段与重写召回词共用：范围失效报错，基础设施异常退化为空 Digest。
 
     出错时记一条中文日志，并把同一条中文诊断交给 on_error（例如写入版本调试记录）。
     回退的空 Digest 为空原因取"无已分析镜头"：调用方只看 ``empty``，该原因不会展示给用户
     （预览接口直接调用 build_digest，出错照常上抛）。
     """
-    try:
-        from mindex.studio.studio import load_job
+    from mindex.shared.storage import Store
+    from mindex.shared.types import Filters
+    from mindex.studio.studio import load_job
 
-        return build_digest(config, store, load_job(config, job_id))
+    state = load_job(config, job_id)
+    store = store or Store(config.data_dir)
+    # 用户范围错误不能作为基础设施故障吞掉，否则会掩盖已删除的组。
+    Filters(source_ids=state.get("source_ids") or [],
+            source_group_ids=state.get("source_group_ids") or []).effective_sources(store)
+    if filters is not None:
+        filters.effective_sources(store)
+    try:
+        return build_digest(config, store, state, filters=filters)
     except Exception as exc:  # noqa: BLE001 - 摘要只是参考资料，任何错误都不应中断主流程
         message = f"素材摘要生成失败，已按无摘要继续：{exc}"
         log.warning(message)
         if on_error is not None:
             on_error(message)
         return MaterialDigest.empty_of(EMPTY_SEGMENTS)
+
+
+def scope_parameters(config, job_id, store) -> dict:
+    """只为显式限定素材的任务追加动态范围签名，保留旧任务签名。"""
+    from mindex.shared.media_groups import Groups
+    from mindex.studio.studio import load_job
+
+    state = load_job(config, job_id)
+    if not state.get("source_ids") and not state.get("source_group_ids"):
+        return {}
+    return {"material_scope": {"source_ids": sorted(state.get("source_ids") or []),
+                               "groups": Groups(store).state("source", state.get("source_group_ids") or [])}}

@@ -7,6 +7,7 @@ from mindex.agent.registry import ToolRegistry
 
 def build_registry() -> ToolRegistry:
     from mindex.agent.tools import (
+        groups,
         index,
         library,
         library_tasks,
@@ -31,7 +32,7 @@ def build_registry() -> ToolRegistry:
     )
 
     registry = ToolRegistry()
-    for module in (meta, navigate, studio_read, studio_templates, studio_brands, studio_delivery, studio_write,
+    for module in (groups, meta, navigate, studio_read, studio_templates, studio_brands, studio_delivery, studio_write,
                    studio_build, studio_detail, studio_animation, studio_overlays, studio_music, studio_tools, library,
                    library_tasks, search, index, persons, persons_review, settings_tools, topics):
         for spec in module.specs():

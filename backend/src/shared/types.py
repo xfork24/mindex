@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer, model_validator
 
 Granularity = Literal["shot", "moment", "scene"]
 
@@ -92,6 +92,7 @@ class StoryboardDraft(BaseModel):
 class Filters(BaseModel):
     source_id: str | None = None
     source_ids: list[str] = Field(default_factory=list)
+    source_group_ids: list[str] = Field(default_factory=list, max_length=200)
     min_duration: float = Field(default=0, ge=0)
     max_duration: float | None = Field(default=None, gt=0)
     scene: str | None = None
@@ -103,6 +104,23 @@ class Filters(BaseModel):
         if self.max_duration is not None and self.max_duration < self.min_duration:
             raise ValueError("max_duration must be >= min_duration")
         return self
+
+    @model_serializer(mode="wrap")
+    def serialize(self, handler):
+        value = handler(self)
+        if not self.source_group_ids:
+            value.pop("source_group_ids", None)
+        return value
+
+    def effective_sources(self, store) -> set[str] | None:
+        """共享范围：多组取并集，与手动素材限制取交集；保留空集合语义。"""
+        from mindex.shared.media_groups import Groups
+
+        manual = self.selected_sources()
+        members = Groups(store).resolve("source", self.source_group_ids)
+        if members is None:
+            return manual or None
+        return manual & members if manual else members
 
     def selected_sources(self) -> set[str]:
         """Multi-source selection takes precedence; an empty selection retains legacy behavior."""

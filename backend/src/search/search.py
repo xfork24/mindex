@@ -222,7 +222,7 @@ class SearchEngine:
         snapshots = []
         library = Library(self.store)
         sources, segments = library.overlays()
-        selected_sources = filters.selected_sources()
+        selected_sources = filters.effective_sources(self.store)
         for segment in self.store.snapshots_shared(active["id"]):
             segment = library.decorate(segment, sources, segments)
             if segment["effective_hidden"]:
@@ -230,7 +230,7 @@ class SearchEngine:
             if segment["kind"] != granularity:
                 continue
             duration = segment["end"] - segment["start"]
-            if (filters.source_id or filters.source_ids) and segment["source_id"] not in selected_sources:
+            if selected_sources is not None and segment["source_id"] not in selected_sources:
                 continue
             if duration < filters.min_duration or (
                 filters.max_duration is not None and duration > filters.max_duration

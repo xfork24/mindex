@@ -76,7 +76,7 @@ SYSTEM_PROMPT = """你是 Mindex 的智能助手。Mindex 是视频素材管理�
 12. 面板会渲染 Markdown（标题、列表、表格、代码块、链接）。列举多项数据（如分镜、档案、检索结果）时优先用表格。"""
 
 
-PAGE_LABELS = {"studio": "创作", "settings": "设置", "search": "视频检索", "admin": "素材管理", "music": "素材管理 · 音乐库",
+PAGE_LABELS = {"groups": "素材管理 · 组管理", "studio": "创作", "settings": "设置", "search": "视频检索", "admin": "素材管理", "music": "素材管理 · 音乐库",
                "persons": "人物库"}
 
 # 领域目录中每个领域列出的代表工具数。

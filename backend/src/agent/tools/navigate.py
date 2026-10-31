@@ -15,7 +15,7 @@ from mindex.agent.registry import ToolContext, ToolError, ToolOutput, ToolSpec
 from mindex.agent.tools.common import load_view
 from mindex.shared.config import StrictModel
 
-PAGES = {"studio": "创作", "settings": "设置", "search": "视频检索", "admin": "素材管理", "persons": "人物库",
+PAGES = {"groups": "组管理", "music": "音乐库", "studio": "创作", "settings": "设置", "search": "视频检索", "admin": "素材管理", "persons": "人物库",
          "topics": "选题挖掘"}
 STUDIO_SECTIONS = ("jobs", "script", "plan", "storyboard", "log", "final", "artifacts")
 SETTINGS_SECTIONS = ("models", "processing", "tuning", "voices", "releases")
@@ -23,7 +23,8 @@ TOPICS_SECTIONS = ("profiles", "sources", "runs", "cards", "card", "gaps", "sche
 
 
 class Navigate(StrictModel):
-    page: Literal["studio", "settings", "search", "admin", "persons", "topics"]
+    page: Literal["studio", "settings", "search", "admin", "persons", "topics", "groups", "music"]
+    group_id: str | None = Field(default=None, description="组管理页：当前素材组或音乐组 ID")
     job_id: str | None = Field(default=None, description="创作页：要打开的任务；省略时用当前页面上下文里的任务")
     plan_id: str | None = None
     shots: list[str] | None = Field(default=None, max_length=20, description="创作页：要定位的分镜（短 ID、完整 ID 或 #序号）")
@@ -90,6 +91,8 @@ async def navigate(args: Navigate, ctx: ToolContext) -> ToolOutput:
         if args.segment_id and not args.source_id:
             raise ToolError("定位片段需要同时给出 source_id", code="invalid_arguments")
         focus.update({k: v for k, v in (("source_id", args.source_id), ("segment_id", args.segment_id)) if v})
+    elif args.page == "groups" and args.group_id:
+        focus["group_id"] = args.group_id
     elif args.page == "persons" and args.pane:
         focus["pane"] = args.pane
     elif args.page == "topics":

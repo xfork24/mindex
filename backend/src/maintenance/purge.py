@@ -118,6 +118,8 @@ def purge_source(store: Store, source_id: str) -> dict:
         from mindex.persons.persons import purge_person_source
 
         purge_person_source(db, source_id)
+        db.execute("UPDATE media_groups SET updated_at=CURRENT_TIMESTAMP WHERE id IN "
+                   "(SELECT group_id FROM media_group_members WHERE source_id=?)", (source_id,))
         db.execute("DELETE FROM sources WHERE id=?", (source_id,))
 
     files = 0

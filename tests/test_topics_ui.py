@@ -65,3 +65,24 @@ def test_topics_page(topics_server, scenario):
 @pytest.mark.parametrize("scenario", ["cards", "job"])
 def test_topics_discovery_page(discovery_server, scenario):
     run_scenario(discovery_server, scenario)
+
+
+@needs_browser
+def test_topics_material_scope_page(config):
+    from mindex.shared.media_groups import Groups
+    from mindex.shared.storage import Store, dumps
+
+    store = Store(config.data_dir)
+    for sid in ('material-a', 'material-b'):
+        store.execute('INSERT INTO sources(id,name,path,media,layout_key) VALUES(?,?,?,?,?)',
+                      (sid, sid, f'sources/{sid}.mp4', dumps({'duration': 5}), 'layout'))
+    groups = Groups(store)
+    first = groups.save('source', '选题素材组')['id']
+    groups.change_members(first, ['material-a'])
+    groups.save('source', '空素材组')
+    server, thread, url = start(create_app(config))
+    try:
+        run_scenario(url, 'material_scope')
+    finally:
+        server.should_exit = True
+        thread.join(timeout=10)

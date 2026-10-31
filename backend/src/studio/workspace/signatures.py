@@ -85,7 +85,9 @@ def recall_signature(recall):
     if not recall:
         return None
     value = studio.ShotRecall.model_validate(recall) if isinstance(recall, dict) else recall
-    filters = {k: v for k, v in value.filters.model_dump().items() if k != "source_ids" and v not in (None, 0)}
+    filters = {k: v for k, v in value.filters.model_dump().items() if k != "source_ids" and v not in (None, 0, [])}
+    if value.filters.source_group_ids:
+        filters["source_group_ids"] = sorted(set(value.filters.source_group_ids))
     sources = sorted(value.filters.selected_sources())
     if len(sources) == 1:
         filters["source_id"] = sources[0]
@@ -167,6 +169,8 @@ PARAMETER_LABELS = {
     "embedding.deployment_manifest": "嵌入部署清单",
     "limit": "召回数量",
     "sources": "任务素材范围",
+    "source_groups": "素材组成员或状态",
+    "scope_error": "素材组范围失效",
 }
 
 

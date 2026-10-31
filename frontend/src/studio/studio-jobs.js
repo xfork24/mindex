@@ -1,5 +1,6 @@
 /* 创作页 · 任务列表与切换、召回与音色目录、素材范围、任务元信息与素材摘要。按 studio.html 中的顺序以经典脚本加载，顶层声明共享全局作用域。 */
 "use strict";
+let createSourceSelection = null, createGroupLink = null;
 async function loadJobs() {
   const data = await api("/api/studio/jobs");
   state.jobs = data.items;
@@ -88,7 +89,7 @@ async function loadRecallOptions() {
 // Shared by the creation form and per-shot recall editors.
 function applySources(sources) {
   state.sources = sources;
-  fillCreateSources();
+  if (createGroupLink) void createGroupLink.refresh(); else fillCreateSources();
   if (state.data) renderJobMeta();
 }
 async function loadSources() {
@@ -96,25 +97,25 @@ async function loadSources() {
   applySources(catalogue.sources);
   return state.sources;
 }
-function fillCreateSources() {
+function fillCreateSources(sources = state.sources || [], chosen = null) {
   const select = $("create-sources");
   if (!select) return;
-  const sources = state.sources || [];
-  const chosen = select.options.length ? new Set(pickedIds(select)) : new Set(sources.map((s) => s.id));
-  fillAllSelect(select, sources, chosen);
+  fillAllSelect(select, sources, chosen || new Set(createSourceSelection === null ? sources.map((item) => item.id) : createSourceSelection));
   select.disabled = sources.length === 0;
   $("create-sources-empty").hidden = sources.length > 0;
+  MindexI18n.setText($("create-sources-empty"), MindexI18n.msg("ui.groups_no_sources"));
 }
 // 创建时选中的素材；全选等价于「不限」，因此不传 source_ids。
 function createSourceScope() {
-  const select = $("create-sources");
+  // 自动联动展示的全选不是额外的手动限制；保留组 ID 即可保证不会扩大到全库。
+  if (createSourceSelection === null) return null;
   const sources = state.sources || [];
-  if (!sources.length) return null;
-  const picked = pickedIds(select);
-  return picked.length === sources.length ? null : picked;
+  return createSourceSelection.length === sources.length && !createGroups.values().length ? null : [...createSourceSelection];
 }
 // 任务级素材范围：null 表示不限。逐镜编辑器只能在这个范围内二次选择。
 function jobScope() {
+  const effective = state.data?.material_scope;
+  if (effective) return effective.source_ids === null ? null : new Set(effective.source_ids);
   const ids = state.data?.job?.source_ids;
   return ids?.length ? new Set(ids) : null;
 }
@@ -135,12 +136,14 @@ function renderJobMeta() {
   // 新任务显示用户的原始输入（智能助手创建时为用户原话；视频大纲在下方“文案创作”里显示）；
   // 早于原始输入字段的任务没有原话，退回显示大纲。老任务的 input_text 就是创建时填写的文案。
   const legacyText = !job.outline && job.input_text;
+  const effectiveSources = state.data.material_scope?.source_ids ?? job.source_ids;
+  const materialNames = (effectiveSources ?? (state.sources || []).map((s) => s.id)).map(sourceName).join("\n");
   const rows = [
     // 原始输入/文案保留非空行，素材列表独占整行并逐项展示。
     [legacyText ? "ui.7407393d52c7" : "ui.job_original_input_label",
     (job.original_input || job.outline || job.input_text || "").split(/\r?\n/).filter((line) => line.trim()).join("\n"), true],
     ["ui.84e3802f60a7", MindexI18n.date(job.created_at)],
-    ["ui.f711792f098b", (job.source_ids?.length ? job.source_ids : (state.sources || []).map((s) => s.id)).map(sourceName).join("\n") || MindexI18n.msg("ui.0a9eab1a4d36"), true]
+    ["ui.f711792f098b", materialNames || MindexI18n.msg(effectiveSources?.length === 0 ? "ui.groups_no_sources" : "ui.0a9eab1a4d36"), true]
   ];
   body.replaceChildren();
   for (const [label, value, wide] of rows) {
@@ -150,8 +153,11 @@ function renderJobMeta() {
     row.append(term, detail);
     body.append(row);
   }
-  body.append(materialDigestNode(state.materialDigest?.jobId === job.id && state.materialDigest.language === MindexI18n.language ? state.materialDigest : null));
-  if (state.materialDigest?.jobId !== job.id || state.materialDigest.language !== MindexI18n.language) void loadMaterialDigest(job.id);
+  if (state.data.material_scope?.error) body.append(el("p", MindexI18n.system(state.data.material_scope.error), "source-warning"));
+  const digestMatches = state.materialDigest?.jobId === job.id && state.materialDigest.language === MindexI18n.language
+    && state.materialDigest.scopeKey === materialDigestScopeKey();
+  body.append(materialDigestNode(digestMatches ? state.materialDigest : null));
+  if (!digestMatches) void loadMaterialDigest(job.id);
 }
 // 可用素材摘要：只读预览，按任务缓存；切换任务或构建结束刷新工作台时重新获取。
 // 接口返回的为空原因是固定的中文取值，界面按条目翻译，不直接显示原文。
@@ -160,10 +166,11 @@ const DIGEST_EMPTY_REASON = {
   "无生效索引": "ui.material_digest_empty_index",
   "无已分析镜头": "ui.material_digest_empty_segments"
 };
+function materialDigestScopeKey() { return JSON.stringify(state.data?.material_scope || null); }
 function loadMaterialDigest(jobId, { fresh = false } = {}) {
   const cached = state.materialDigest;
-  if (!fresh && cached?.jobId === jobId && cached.language === MindexI18n.language) return cached.request;
-  const entry = { jobId, language: MindexI18n.language, status: "loading", data: null, open: cached?.jobId === jobId && cached.open };
+  if (!fresh && cached?.jobId === jobId && cached.language === MindexI18n.language && cached.scopeKey === materialDigestScopeKey()) return cached.request;
+  const entry = { jobId, scopeKey: materialDigestScopeKey(), language: MindexI18n.language, status: "loading", data: null, open: cached?.jobId === jobId && cached.open };
   entry.request = api(`/api/studio/jobs/${jobId}/material-digest?language=${entry.language}`).then(
     (data) => {entry.status = "ok";entry.data = data;},
     () => {entry.status = "error";}

@@ -49,6 +49,7 @@
   function currentPage() {
     const path = location.pathname.replace(/^\/+|\/+$/g, '').replace(/\.html$/, '');
     if (path === 'studio/topics') return 'topics'; // 选题挖掘是创作页子页面，但有独立的工具领域与定位
+    if (path === 'admin/groups') return 'groups';
     if (path === 'admin/music') return 'music'; // 音乐库是素材管理页子页面，曲库工具在 studio_post 领域
     const segment = path.split('/')[0];
     return PAGES[segment] || PAGES[segment + '.html'] || segment || 'search';
@@ -259,6 +260,7 @@
     if (focus.page === 'studio') return focus.job_id ? `/studio?job=${encodeURIComponent(focus.job_id)}` : '/studio';
     if (focus.page === 'search') return '/';
     if (focus.page === 'music') return '/admin/music';
+    if (focus.page === 'groups') return '/admin/groups';
     if (focus.page === 'topics') {
       const params = new URLSearchParams();
       if (focus.profile_id) params.set('profile', focus.profile_id);

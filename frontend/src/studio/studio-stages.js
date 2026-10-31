@@ -539,17 +539,24 @@ function musicLibraryPicker(sid, value) {
     }
     select.value = chosen || "";
   };
-  MindexApi.json("/api/studio/music-library").then((result) => {
+  const groups = MindexGroups.picker("music", [], () => loadTracks(), "ui.groups_music_filter");
+  box.append(groups.wrap);
+  function loadTracks() {
+    const query = new URLSearchParams();
+    for (const id of groups.values()) query.append("music_group_ids", id);
+    return MindexApi.json(`/api/studio/music-library?${query}`).then((result) => {
     fill(result.items, value.track_id);
     if (value.track_id && !result.items.some((item) => item.id === value.track_id))
     MindexI18n.setText(hint, MindexI18n.msg("ui.music_library_missing"));
   }).catch((error) => MindexI18n.setText(hint, shortIds(error.message)));
+  }
+  loadTracks();
   select.addEventListener("change", () => {value.track_id = select.value || null;});
   const recommend = button(MindexI18n.msg("ui.music_library_recommend"), async () => {
     recommend.disabled = true;
     MindexI18n.setText(hint, MindexI18n.msg("ui.music_library_recommending"));
     try {
-      const result = await api("/api/studio/music-library/recommend", "POST", { job_id: state.id, plan_id: plan().id, shot_id: sid });
+      const result = await api("/api/studio/music-library/recommend", "POST", { job_id: state.id, plan_id: plan().id, shot_id: sid, music_group_ids: groups.values() });
       if (!result.items.length) {MindexI18n.setText(hint, MindexI18n.msg("ui.music_library_no_match"));return;}
       fill(result.items, result.items[0].id);
       value.track_id = result.items[0].id;

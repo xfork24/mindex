@@ -250,6 +250,17 @@ def job_selection(root, selected, known):
     for path in sorted((root / 'studio').glob('*/job.json')):
         state = json.loads(path.read_text(encoding="utf-8"))
         refs = set(state.get('source_ids') or [])
+        bounded = bool(state.get('source_ids'))
+        if state.get('source_group_ids'):
+            from mindex.shared.types import Filters
+
+            try:
+                scope = Filters(source_ids=state.get('source_ids') or [],
+                                source_group_ids=state['source_group_ids']).effective_sources(store)
+                bounded = scope is not None
+                refs = set(scope or [])
+            except ValueError:
+                bounded = False  # 失效引用只在全量备份中保留，部分备份不能推断范围。
         historical = set()
         for artifact in path.parent.rglob('*.json'):
             if finder_metadata(artifact):
@@ -259,7 +270,7 @@ def job_selection(root, selected, known):
             refs.update(s for token, s in tokens.items() if token in text)
             historical.update(v for v in versions if v in text)
         valid_history = selected is None or all(versions[v] & selected for v in historical)
-        if refs <= known and valid_history and (selected is None or state.get('source_ids') and refs <= selected):
+        if refs <= known and valid_history and (selected is None or bounded and refs <= selected):
             included[path.parent.name] = sorted(refs or known)
         else:
             omitted.append({'job_id': path.parent.name, 'reason': '素材依赖不完整或无法确定范围',
@@ -314,6 +325,11 @@ def referenced_files(root, database, *, available_files=None):
     available = (set(available_files) if available_files is not None else
                  {path.relative_to(root).as_posix() for path in files_under(root)})
     store = store_at(database.parent)
+    for row in store.rows('SELECT id,suffix FROM music_tracks'):
+        relative = f"music/{row['id']}{row['suffix']}"
+        if relative in available:
+            safe_path(root, relative)
+            result.add(relative)
     for table in sorted(TABLES):
         for row in store.rows(f'SELECT * FROM {table}'):
             for value in row.values():

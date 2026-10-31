@@ -61,6 +61,7 @@ class CreateJob(StrictModel):
     outline: str = Field(min_length=1, max_length=2000, description="视频大纲；文案由文案创作模型按大纲生成")
     title: str | None = Field(default=None, max_length=60, description="任务标题；省略时自动生成")
     source_ids: list[str] | None = Field(default=None, description="限定可用素材 ID；省略表示不限")
+    source_group_ids: list[str] = Field(default_factory=list, description="素材组取并集，与手动素材取交集；空组无候选")
 
 
 async def preview_create_job(args: CreateJob, ctx: ToolContext) -> Preview:
@@ -69,13 +70,15 @@ async def preview_create_job(args: CreateJob, ctx: ToolContext) -> Preview:
         changes.append({"label": "标题", "after": args.title})
     if args.source_ids:
         changes.append({"label": "可用素材", "after": "、".join(args.source_ids)})
+    if args.source_group_ids:
+        changes.append({"label": "素材组", "after": "、".join(args.source_group_ids)})
     return Preview("新建创作任务（不会自动生成文案或构建）", changes)
 
 
 async def create_job(args: CreateJob, ctx: ToolContext) -> ToolOutput:
     body = {"language": ctx.page.get("language", "zh"), "text": args.outline, **({"title": args.title} if args.title else {})}
-    if args.source_ids:
-        body["options"] = {"source_ids": args.source_ids}
+    if args.source_ids or args.source_group_ids:
+        body["options"] = {"source_ids": args.source_ids, "source_group_ids": args.source_group_ids}
     # 任务元信息的「原始输入」记录用户在对话里的原话；大纲是助手整理后的文字。MCP 调用没有会话，省略即同大纲。
     original = ctx.extra.get("user_input")
     original = original() if callable(original) else None
@@ -298,6 +301,7 @@ class RecallFilterArgs(StrictModel):
 
     source_id: str | None = Field(default=None, description="旧版单素材限定；优先使用 source_ids")
     source_ids: list[str] = Field(default_factory=list, description="只在这些素材里召回（须在任务素材范围内）")
+    source_group_ids: list[str] = Field(default_factory=list, description="素材组取并集，与任务和手动素材取交集")
     min_duration: float = Field(default=0, ge=0, description="片段最短时长（秒）")
     max_duration: float | None = Field(default=None, gt=0, description="片段最长时长（秒）")
     scene: str | None = Field(default=None, max_length=100, description="场景标签")
@@ -503,7 +507,7 @@ def recall_is_default(recall: dict | None) -> bool:
     return (
         recall.get("mode", "text") == "text" and not recall.get("person_ids")
         and recall.get("person_mode", "auto") == "auto" and recall.get("person_relation", "all") == "all"
-        and not filters.get("source_id") and not filters.get("source_ids") and not filters.get("min_duration")
+        and not filters.get("source_id") and not filters.get("source_ids") and not filters.get("source_group_ids") and not filters.get("min_duration")
         and not filters.get("max_duration") and not filters.get("scene") and not filters.get("emotion")
         and not filters.get("shot_size")
     )

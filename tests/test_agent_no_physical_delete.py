@@ -43,6 +43,7 @@ FORBIDDEN = (
 STUDIO_JOB = re.compile(r"^/api/studio/jobs/[^/]+/?$")
 # 允许发出 DELETE 的工具及其唯一允许的路径：delete_job 是用户确认保留的例外，其余只删除记录。
 ALLOWED_DELETES = {
+    "delete_group": re.compile(r"^/api/admin/groups/[^/]+$"),
     "delete_job": re.compile(r"^/api/studio/jobs/[^/]+$"),
     "delete_plan": re.compile(r"^/api/studio/jobs/[^/]+/plans/[^/]+$"),
     "remove_reference_text": re.compile(r"^/api/studio/jobs/[^/]+/plans/[^/]+/references/[^/]+$"),
@@ -550,7 +551,9 @@ def test_design_risk_table_matches_registry():
 
 
 def test_record_deletes_and_heavy_tools_are_danger():
-    deleting = [s for s in SPECS if s.name.startswith(("delete_", "remove_", "reset_"))]
+    # 移除组成员是可逆关系编辑，经 POST 完成，不删除媒体或组记录。
+    deleting = [s for s in SPECS if s.name.startswith(("delete_", "remove_", "reset_"))
+                and s.name != "remove_group_members"]
     assert {s.name for s in deleting} | {"change_search_release"} == set(ALLOWED_DELETES)
     for name in ALLOWED_DELETES:
         assert REGISTRY.get(name).risk == "danger", name

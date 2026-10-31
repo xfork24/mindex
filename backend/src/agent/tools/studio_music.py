@@ -46,6 +46,8 @@ def track_text(item: dict) -> str:
     lines = [f"曲目 {item['id']}「{item['title']}」{('，作者 ' + item['artist']) if item.get('artist') else ''}",
              f"授权：{license_text(item)}", f"署名：{item['attribution']}",
              f"时长 {item['duration']:g} 秒；标签：{'、'.join(item.get('tags') or []) or '无'}；情绪：{moods_text(item.get('moods'))}"]
+    if item.get("groups"):
+        lines.append("所属组：" + "、".join(f"{group['name']} ({group['id']})" for group in item["groups"]))
     if item.get("analysis_status") == "ready":
         lines.append(f"节奏分析：{item['bpm']:g} BPM，{item.get('beat_count')} 个节拍，能量 {item.get('energy')}，"
                      f"亮度 {item.get('brightness')}" + ("（分析算法已更新，建议 analyze_music_track）" if item.get("stale") else ""))
@@ -60,17 +62,20 @@ def compact(item: dict) -> dict:
 
 
 class ListMusicTracks(StrictModel):
+    music_group_ids: list[str] = Field(default_factory=list, description="多组成员取并集，再与其他限制取交集；空组无候选")
     mood: str | None = Field(default=None, description=f"按情绪键筛选：{', '.join(MOOD_KEYS)}")
     query: str | None = Field(default=None, max_length=100, description="按曲名、作者、来源、标签搜索")
 
 
 async def list_music_tracks(args: ListMusicTracks, ctx: ToolContext) -> ToolOutput:
     params = {key: value for key, value in (("mood", args.mood), ("q", args.query)) if value}
+    if args.music_group_ids:
+        params["music_group_ids"] = args.music_group_ids
     items = check(await ctx.client.get("/api/studio/music-library", **params), "列出曲库")["items"]
     rows = [compact(item) for item in items]
     text = "\n".join(track_row(item) for item in items) or "（曲库为空：可用 import_music_track 导入）"
     return ToolOutput({"items": rows}, text=f"共 {len(rows)} 首曲目（ID | 曲名 | 时长 | BPM | 情绪 | 授权）：\n{text}\n"
-                                            "用 edit_shots 的 music={kind: library, track_id} 选用。", focus=FOCUS)
+                                            "用 edit_shots 的 music={kind: library, track_id} 选用。", focus={**FOCUS, **({"music_group_ids": args.music_group_ids} if args.music_group_ids else {})})
 
 
 class GetMusicTrack(StrictModel):
@@ -179,6 +184,7 @@ async def analyze_music_track(args: AnalyzeMusicTrack, ctx: ToolContext) -> Tool
 
 
 class RecommendMusic(StrictModel):
+    music_group_ids: list[str] = Field(default_factory=list, description="音乐组取并集；推荐仅在组成员内评分")
     job_id: str | None = JobId
     plan_id: str | None = PlanId
     shot: str | None = Field(default=None, description="背景音乐段落起始分镜：完整 ID、短 ID 或 #序号")
@@ -194,7 +200,7 @@ class RecommendMusic(StrictModel):
 
 
 async def recommend_music(args: RecommendMusic, ctx: ToolContext) -> ToolOutput:
-    body = {"limit": args.limit, "seconds": args.seconds, "ai": True}
+    body = {"limit": args.limit, "seconds": args.seconds, "ai": True, "music_group_ids": args.music_group_ids}
     if args.text and args.text.strip():
         body["text"] = args.text
     else:
@@ -210,7 +216,7 @@ async def recommend_music(args: RecommendMusic, ctx: ToolContext) -> ToolOutput:
             f"节奏 {bpm} BPM。\n" + ("\n".join(lines) or "没有可用曲目（曲库为空或授权都已过期）")
             + "\n选定后用 edit_shots 把该分镜的 music 设为 {kind: library, track_id}。")
     return ToolOutput({**{k: result[k] for k in ("moods", "bpm_range", "source", "seconds")}, "items": rows},
-                      text=text, focus=FOCUS)
+                      text=text, focus={**FOCUS, **({"music_group_ids": args.music_group_ids} if args.music_group_ids else {})})
 
 
 def specs() -> list[ToolSpec]:

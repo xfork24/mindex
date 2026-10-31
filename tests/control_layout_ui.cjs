@@ -29,6 +29,11 @@ const {chromium}=require(process.env.MINDEX_PLAYWRIGHT_MODULE || 'playwright');
       const id=n.id||n.className||n.tagName;
       controls.push({id,x:r.x,y:r.y,width:r.width,height:r.height});
       if(!n.closest('.shot-strip,.candidate-strip,.window-viewport,.multi-list,#source-list,.job-panel,.profile-scroller,.tabs') && (r.x < -1 || r.right>innerWidth+1)) faults.push(`${id} outside viewport ${r.x}/${r.right}`);
+      if(n.tagName==='SELECT' && n.multiple && n.closest('.multi-select')){
+       const wrapper=n.closest('.multi-select'), host=n.closest('.content-field');
+       const wanted=parseFloat(wrapper.style.getPropertyValue('--control-content-width'));
+       if(host && wanted && wrapper.getBoundingClientRect().width+1<Math.min(wanted,host.getBoundingClientRect().width))faults.push(`${id} listbox too narrow for its options`);
+      }
       if(n.type==='checkbox'||n.type==='radio') if(Math.abs(r.width-16)>1||Math.abs(r.height-16)>1) faults.push(`${id} stretched checkbox ${r.width}/${r.height}`);
       if(n.tagName==='BUTTON' && !n.matches('.role-row-head,.source-item,.job-item,.new-profile-card,.gallery-cell,.gallery-delete,.tool-item,.tab,.clone-mode,.shot-card,.stage-menu-button,.strip-nav,.card-play,.poster-button')){
        const range=document.createRange();range.selectNodeContents(n);const text=range.getBoundingClientRect();
@@ -40,7 +45,9 @@ const {chromium}=require(process.env.MINDEX_PLAYWRIGHT_MODULE || 'playwright');
      }
      for(const n of document.querySelectorAll('.form-grid,.template-fields,.tool-fields,.source-options,.recall-primary-options,.recall-scope-options,.recall-filters')){
       const children=[...n.children].filter(visible), r=n.getBoundingClientRect();
-      if(visible(n)&&r.width>500 && children.length>=2 && getComputedStyle(n).gridTemplateColumns.split(' ').length<2)faults.push(`${n.id||n.className} unnecessarily stacked`);
+      const fields=children.filter(child=>child.matches('label,.form-field,.field,.group-picker'));
+      if(visible(n)&&fields.length>=2){const [a,b]=fields.map(child=>child.getBoundingClientRect());
+       if(a.width+b.width+16<=r.width && Math.abs(a.top-b.top)>2)faults.push(`${n.id||n.className} unnecessarily stacked`);}
      }
      return {controls,faults};
     });
@@ -56,9 +63,24 @@ const {chromium}=require(process.env.MINDEX_PLAYWRIGHT_MODULE || 'playwright');
  async function go(route){await page.goto(base+route);await page.waitForLoadState('networkidle');}
  try{
   await go('/');await audit('search');
+  await page.setViewportSize({width:1440,height:1000});
+  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+  const pair=await page.locator('#person-mode,#person-relation').evaluateAll(nodes=>nodes.map(n=>n.getBoundingClientRect().top));
+  assert(Math.abs(pair[0]-pair[1])<2,'人物检索方式与多人物关系应水平排列');
+  const bottom=await page.locator('.form-bottom').evaluate(row=>{
+   const nodes=[...row.querySelectorAll('select,#filter-reset')],canvas=document.createElement('canvas'),ctx=canvas.getContext('2d');
+   return nodes.map(n=>{const r=n.getBoundingClientRect(),s=getComputedStyle(n);ctx.font=s.font;return {center:r.y+r.height/2,
+    fits:n.tagName!=='SELECT'||ctx.measureText(n.selectedOptions[0].textContent).width<=n.clientWidth-parseFloat(s.paddingLeft)-parseFloat(s.paddingRight)+1,
+    labelHeight:n.closest('label')?.getBoundingClientRect().height,height:r.height};});
+  });
+  assert(bottom.every(n=>n.fits),'下拉选中的文字必须完整显示');
+  assert(bottom.every(n=>Math.abs(n.center-bottom[0].center)<1),'清除筛选与下拉框垂直居中');
+  assert(bottom.every(n=>!n.labelHeight||n.labelHeight<=n.height+1),'行内短标签不得换行');
+  assert(!await page.getByText('可多选；不选时搜索全部素材。',{exact:true}).count());
   for(const id of ['image-tab','video-tab']){await page.locator('#'+id).click();await audit('search-'+id);}
   await go('/admin');await audit('admin');await page.locator('.source-item').first().click();await page.locator('details.work-panel').waitFor();await page.locator('details.work-panel > summary').click();await page.locator('.work-card').first().waitFor();await audit('admin-workspace');
   await page.locator('#add-source').click();await audit('admin-upload');await page.locator('#upload-close').click();
+  await go('/admin/groups');await audit('groups');
   await go('/admin/music');await audit('music');await page.locator('#music-list .template-item').first().click();await audit('music-editor');
   await go('/persons');await audit('persons');
   await page.locator('#entity-new').click();await audit('person-editor');await page.locator('#entity-close').click();await page.locator('.actor-card').first().click();await page.locator('.role-card > button').first().click();await audit('person-role-editor');await page.locator('#entity-close').click();

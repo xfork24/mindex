@@ -188,3 +188,29 @@ def test_nonempty_digest_prompt_contains_material_rules(env, monkeypatch):
         {"type": "text", "text": OUTLINE},
         {"type": "text", "text": MATERIAL_HEADER + digest.text},
     ]
+
+
+def test_writer_uses_latest_group_scope_without_replacing_script(env):
+    from mindex.shared.media_groups import Groups
+
+    config, client, writer = env
+    store = Store(config.data_dir)
+    sid = next(iter(store.source_ids()))
+    groups = Groups(store)
+    group_id = groups.save('source', '文案范围')['id']
+    groups.change_members(group_id, [sid])
+    jid, pid = new_job(client)
+    response = client.put(f'/api/studio/jobs/{jid}/material-scope',
+                          json={'source_ids': None, 'source_group_ids': [group_id]})
+    assert response.status_code == 200, response.text
+    data, first_version = run_script(client, jid, pid)
+    assert {source.source_id for source in writer.materials[-1].sources} == {sid}
+    assert not data['script_material_scope_changed']
+    previous = data['versions'][first_version]['data']['text']
+    groups.change_members(group_id, [sid], remove=True)
+    changed = workspace(client, jid)
+    assert changed['script_material_scope_changed']
+    assert changed['plans'][pid]['script'] == first_version
+    assert changed['versions'][first_version]['data']['text'] == previous
+    _, second_version = run_script(client, jid, pid)
+    assert writer.materials[-1].empty and first_version != second_version

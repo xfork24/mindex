@@ -34,11 +34,15 @@ def empty(visuals: list[str], status: str, reason: str) -> dict:
             "hits": 0, "total": len(visuals), "ratio": 0.0}
 
 
-def report(config, store, visuals: list[str], *, embedder=None, engine=None) -> dict:
+def report(config, store, visuals: list[str], *, embedder=None, engine=None, filters=None) -> dict:
     """``engine`` 供测试注入（需有 ``text(TextSearch)``）；缺省按活动索引构造 ``SearchEngine``。"""
-    from mindex.shared.types import TextSearch
+    from mindex.shared.types import Filters, TextSearch
 
+    filters = filters or Filters()
+    scope = filters.effective_sources(store)
     visuals = [v for v in visuals if v and v.strip()]
+    if scope == set():
+        return empty(visuals, "ok", "所选素材范围为空")
     if not visuals:
         return empty([], "ok", "没有关键画面")
     active = store.active_index()
@@ -53,13 +57,14 @@ def report(config, store, visuals: list[str], *, embedder=None, engine=None) -> 
     for visual in visuals:
         try:
             result = engine.text(TextSearch(text=visual[:400], granularity=config.studio.recall.granularity,
-                                            limit=limits.limit))
+                                            limit=limits.limit, filters=filters))
         except ModelError as exc:
             return {**empty(visuals, "unavailable", f"检索不可用：{exc}"), "index_id": active and active["id"]}
         except ValueError as exc:
             rows.append({"visual": visual, "hit": False, "similarity": None, "clips": [], "error": str(exc)})
             continue
-        clips = [clip_view(hit) for hit in result.get("results") or []]
+        clips = [clip_view(hit) for hit in result.get("results") or []
+                 if scope is None or hit.get("source_id") in scope]
         top = clips[0]["similarity"] if clips else None
         lowered = bool(result.get("degraded"))
         degraded = degraded or lowered

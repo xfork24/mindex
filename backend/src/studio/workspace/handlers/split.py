@@ -6,7 +6,7 @@ from uuid import uuid4
 
 from mindex.models.adapters import make_storyboarder
 from mindex.studio import studio
-from mindex.studio.material_digest import merged_vocabulary, safe_digest
+from mindex.studio.material_digest import merged_vocabulary, safe_digest, scope_parameters
 from mindex.studio.studio_artifacts import sanitized
 
 from ..plans import script_stale, script_text, set_board
@@ -16,6 +16,7 @@ from ..stages import StageHandler, register
 class SplitHandler(StageHandler):
     name, label, scope = "split", "拆分镜", "plan"
     reusable = False  # 重新拆分是显式的方案级操作，从不切换指针复用
+    uses_store = True
     selects = False  # 执行时已由 set_board 写入分镜工作台
     choosable = False
 
@@ -26,7 +27,8 @@ class SplitHandler(StageHandler):
         }
 
     def specification(self, config, job_id, w, p, sid, params, resources):
-        return {"text": script_text(w, p), "language": w.get("job_language", "zh")}, {"script": p.get("script")}, params
+        return {"text": script_text(w, p), "language": w.get("job_language", "zh")}, {"script": p.get("script")}, {
+            **params, **scope_parameters(config, job_id, resources.database())}
 
     def dependencies(self, w, p, sid, *, resplit=False):
         return ["script"] if not p.get("script") else []

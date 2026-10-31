@@ -25,6 +25,7 @@ GRANULARITY_FIELD = Field(default="moment", description="shot=镜头；moment=�
 
 
 class SearchFilters(StrictModel):
+    source_group_ids: list[str] = Field(default_factory=list, description="素材组 ID：多组取并集，与素材及其他限制取交集；空组无候选")
     """与检索页筛选一致；未给出的条件不过滤。"""
 
     min_duration: float | None = Field(default=None, ge=0, description="片段最短时长（秒）")
@@ -34,10 +35,14 @@ class SearchFilters(StrictModel):
     shot_size: str | None = Field(default=None, max_length=100, description="景别标签")
 
 
-def filters_body(filters: SearchFilters | None, source_ids: list[str] | None) -> dict:
+def filters_body(filters: SearchFilters | None, source_ids: list[str] | None, source_group_ids=None) -> dict:
     body = filters.model_dump(exclude_none=True) if filters else {}
+    if source_group_ids:
+        body["source_group_ids"] = sorted(set(body.get("source_group_ids", []) + source_group_ids))
     if source_ids:
         body["source_ids"] = source_ids
+    if not body.get("source_group_ids"):
+        body.pop("source_group_ids", None)
     return body
 
 
@@ -45,6 +50,7 @@ class SearchMedia(StrictModel):
     text: str = Field(default="", max_length=400, description="中文检索描述，例如：城市 夜景 灯光")
     granularity: Granularity = GRANULARITY_FIELD
     limit: int = Field(default=8, ge=1, le=20)
+    source_group_ids: list[str] = Field(default_factory=list, description="多组取并集，与素材及其他条件取交集；空组无候选")
     source_ids: list[str] | None = Field(default=None, description="只在这些素材里检索")
     person_ids: list[str] | None = Field(default=None, max_length=30, description="要求出现的人物（演员或角色 ID）")
     person_mode: Literal["auto", "onscreen", "mentioned"] | None = Field(
@@ -107,7 +113,7 @@ def search_output(data: dict, lines: list[str], rows: list[dict], media: list[di
 
 async def search_media(args: SearchMedia, ctx: ToolContext) -> ToolOutput:
     body: dict = {"text": args.text, "granularity": args.granularity, "limit": args.limit}
-    filters = filters_body(args.filters, args.source_ids)
+    filters = filters_body(args.filters, args.source_ids, args.source_group_ids)
     if filters:
         body["filters"] = filters
     for key in ("person_ids", "person_mode", "person_relation", "channels"):
@@ -117,7 +123,8 @@ async def search_media(args: SearchMedia, ctx: ToolContext) -> ToolOutput:
     data = check(await ctx.client.post("/api/search/text", body), "检索")
     rows, media, lines = result_rows(data)
     return search_output(data, lines, rows, media,
-                         {"page": "search", "query": {"text": args.text, "granularity": args.granularity}})
+                         {"page": "search", "query": {"text": args.text, "granularity": args.granularity,
+                             **({"filters": filters} if filters.get("source_group_ids") else {})}})
 
 
 class SearchByMedia(StrictModel):
@@ -126,6 +133,7 @@ class SearchByMedia(StrictModel):
         default=None, description="附件类型；缺省按附件的内容类型推断")
     granularity: Granularity = GRANULARITY_FIELD
     limit: int = Field(default=8, ge=1, le=20)
+    source_group_ids: list[str] = Field(default_factory=list, description="多组取并集，与素材及其他条件取交集；空组无候选")
     source_ids: list[str] | None = Field(default=None, description="只在这些素材里检索")
     filters: SearchFilters | None = None
 
@@ -158,7 +166,7 @@ async def search_by_media(args: SearchByMedia, ctx: ToolContext) -> ToolOutput:
     data = upload_check(await ctx.client.upload(
         f"/api/search/{kind}", files={"file": args.attachment},
         data={"granularity": args.granularity, "limit": str(args.limit),
-              "filters": json.dumps(filters_body(args.filters, args.source_ids), ensure_ascii=False)},
+              "filters": json.dumps(filters_body(args.filters, args.source_ids, args.source_group_ids), ensure_ascii=False)},
     ), "以图搜索" if kind == "image" else "以视频搜索")
     rows, media, lines = result_rows(data)
     output = search_output(data, lines, rows, media, {"page": "search"}, kind=kind)
@@ -172,6 +180,7 @@ class FindSimilar(StrictModel):
     segment_id: str = Field(min_length=1, description="种子片段 ID（来自检索结果的 segment_id）")
     granularity: Granularity | None = Field(default=None, description="结果粒度；缺省沿用种子片段的粒度")
     limit: int = Field(default=8, ge=1, le=20)
+    source_group_ids: list[str] = Field(default_factory=list, description="多组取并集，与素材及其他条件取交集；空组无候选")
     source_ids: list[str] | None = Field(default=None, description="只在这些素材里找")
     filters: SearchFilters | None = None
 
@@ -187,7 +196,7 @@ async def find_similar(args: FindSimilar, ctx: ToolContext) -> ToolOutput:
     body: dict = {"segment_id": args.segment_id, "limit": args.limit}
     if args.granularity:
         body["granularity"] = args.granularity
-    filters = filters_body(args.filters, args.source_ids)
+    filters = filters_body(args.filters, args.source_ids, args.source_group_ids)
     if filters:
         body["filters"] = filters
     result = await ctx.client.post("/api/search/similar", body)

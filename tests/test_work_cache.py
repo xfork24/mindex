@@ -13,7 +13,8 @@ def cache(tmp_path, monkeypatch):
     monkeypatch.setattr(module, 'source_public', lambda row: dict(row))
     progress = {'completed': 1}
     monkeypatch.setattr(module, 'attach_tasks', lambda store, source, work: work.update(task=dict(progress)))
-    store = SimpleNamespace(root=tmp_path, path=tmp_path / 'metadata.sqlite3')
+    # 详情接口实时读取所属组；本夹具只验证工作缓存，成员查询为空。
+    store = SimpleNamespace(root=tmp_path, path=tmp_path / 'metadata.sqlite3', rows=lambda sql, args=(): [])
     store.path.write_text('initial')
     class Library:
         calls = 0

@@ -48,8 +48,9 @@ class LocalSource:
         if not cfg.library:
             return []
         from mindex.studio.material_digest import build_digest
+        from mindex.topics.profiles import material_state
 
-        digest = build_digest(ctx.config, ctx.store)
+        digest = build_digest(ctx.config, ctx.store, material_state(ctx.profile))
         items = []
         for source in digest.sources:
             summary = "；".join(filter(None, [

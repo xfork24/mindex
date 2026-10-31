@@ -53,6 +53,7 @@ from mindex.studio.studio_models import (
     ColumnBody,
     CreateJobBody,
     LyricsBody,
+    MaterialScopeBody,
     MetadataBody,
     NodeBody,
     OverlaySourceBody,
@@ -345,7 +346,8 @@ def studio_router(
         index = order.index(shot_id)
         previous = content(order[index - 1]).get("text", "") if index > 0 else ""
         following = content(order[index + 1]).get("text", "") if index + 1 < len(order) else ""
-        vocabulary = merged_vocabulary(safe_digest(cfg, job_id, store=store))
+        recall = studio.ShotRecall.model_validate(current_shot.get("recall") or {})
+        vocabulary = merged_vocabulary(safe_digest(cfg, job_id, store=store, filters=recall.filters))
         try:
             query = (storyboarder or make_storyboarder(cfg)).suggest_query(
                 current_shot.get("text", ""), visual, (previous, following), vocabulary,
@@ -357,6 +359,28 @@ def studio_router(
         if not query:
             raise ModelError("召回词重写失败：服务返回了空召回词")
         return {"query": query}
+
+    @router.get("/jobs/{job_id}/material-scope")
+    def get_material_scope(job_id: str):
+        state = studio.load_job(base, job_id)
+        return {**studio.scope_status(state, store),
+                "source_group_ids": state.get("source_group_ids", [])}
+
+    @router.put("/jobs/{job_id}/material-scope")
+    def set_material_scope(job_id: str, body: MaterialScopeBody):
+        with mutation_lock():
+            state = studio.load_job(base, job_id)
+            parsed = studio.JobOptions.model_validate(body.model_dump())
+            if parsed.source_ids and set(parsed.source_ids) - store.source_ids():
+                raise studio.StudioError("素材不存在，请重新选择")
+            from mindex.shared.media_groups import Groups
+
+            Groups(store).resolve("source", parsed.source_group_ids)
+            state["source_ids"] = sorted(set(parsed.source_ids)) if parsed.source_ids else None
+            state["source_group_ids"] = sorted(set(parsed.source_group_ids))
+            state["updated_at"] = studio.now()
+            studio.save(studio.job_path(base, job_id), state)
+            return {**studio.scope_status(state, store), "source_group_ids": state["source_group_ids"]}
 
     @router.patch("/jobs/{job_id}/title")
     def patch_title(job_id: str, body: TitleBody):

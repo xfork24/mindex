@@ -2,7 +2,7 @@
 
 - 请求 ``{topics.brave.base_url}/res/v1/{news|web}/search``，请求头 ``X-Subscription-Token``（数据源密钥）。
 - 查询词：配置的 ``queries``；没有时用档案关键词，再没有时用"领域 + 子方向"。
-- ``freshness``（pd/pw/pm/py）、``country``、``search_lang`` 取自配置，缺省用档案的地区与语言。
+- ``freshness``（pd/pw/pm/py）、``country``、``search_lang`` 取自配置，缺省为全球地区，不附加档案语言限制。
 - 计费保护：同一次挖掘里所有 Brave 来源合计不超过 ``topics.brave.max_queries`` 次查询。
 注意：查询词（档案关键词）会发送给 Brave。
 """
@@ -27,8 +27,8 @@ class BraveConfig(StrictModel):
     queries: list[str] = Field(default_factory=list, max_length=MAX_QUERIES_PER_SOURCE,
                                description="查询词；留空时用档案关键词或领域与子方向")
     count: int = Field(default=10, ge=1, le=20, description="每个查询取几条结果")
-    country: str | None = Field(default=None, pattern=r"^[A-Za-z]{2,3}$", description="国家代码；缺省用档案地区")
-    search_lang: str | None = Field(default=None, pattern=r"^[A-Za-z-]{2,16}$", description="搜索语言；缺省用档案语言")
+    country: str | None = Field(default=None, pattern=r"^[A-Za-z]{2,3}$", description="国家代码；缺省 ALL（全球）")
+    search_lang: str | None = Field(default=None, pattern=r"^[A-Za-z-]{2,16}$", description="搜索语言；缺省不传，不沿用档案语言")
 
     @field_validator("queries")
     @classmethod
@@ -95,8 +95,9 @@ class BraveSource:
                 continue
             ctx.budget["brave"] = used + 1
             params = {"q": query, "count": cfg.count, "freshness": cfg.freshness,
-                      "country": (cfg.country or ctx.profile.region).upper(),
-                      "search_lang": cfg.search_lang or ctx.profile.language}
+                      "country": (cfg.country or "ALL").upper()}
+            if cfg.search_lang:
+                params["search_lang"] = cfg.search_lang
             try:
                 _, _, body = http_get(ctx.config, url, params=params, headers=headers, label="Brave Search")
             except SourceError as exc:

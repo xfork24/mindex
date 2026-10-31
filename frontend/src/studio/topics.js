@@ -97,6 +97,125 @@ async function selectProfile(id) {
 // 档案切换后的刷新钩子与助手定位钩子：后续分区（数据源、挖掘、卡片、采集清单）在此登记。
 const profileHooks = [];
 const focusHooks = [];
+// 档案持久化素材范围；组多选取并集，再与手动素材选择取交集。
+const topicGroups = MindexGroups.picker("source", [], () => {}, "ui.groups_filter", {listbox: true});
+const topicSources = document.createElement("select");
+topicSources.id = "topic-material-sources";
+topicSources.multiple = true;
+topicSources.size = 5;
+const topicSourceLabel = el("label", MindexI18n.msg("ui.topics_material_sources"));
+topicSourceLabel.append(topicSources);
+const topicScopeSave = el("button", MindexI18n.msg("ui.topics_material_save"), "quiet");
+topicScopeSave.id = "topic-material-save";
+topicScopeSave.type = "button";
+const topicScopeHint = el("p", MindexI18n.msg("ui.topics_material_hint"), "muted");
+const topicScopeReset = el("button", MindexI18n.msg("ui.topics_material_reset"), "quiet");
+topicScopeReset.type = "button";
+topicScopeReset.id = "topic-material-reset";
+topicScopeReset.addEventListener("click", async () => {
+  topicSourceSelection = null; topicGroups.setValues([]);
+  await topicScopeLink.refresh();
+});
+const topicCurrentScope = document.createElement("section");
+topicCurrentScope.id = "topic-material-current";
+topicCurrentScope.className = "topic-material-current";
+topicCurrentScope.setAttribute("aria-live", "polite");
+$("topic-material-scope").append(topicCurrentScope, topicGroups.wrap, topicSourceLabel, topicScopeSave, topicScopeReset, topicScopeHint);
+let savedMaterialScope = null, savedScopeRequest = 0;
+function renderSavedMaterialScope() {
+  topicCurrentScope.replaceChildren(el("h3", MindexI18n.msg("ui.topics_material_current")));
+  if (!savedMaterialScope) return;
+  const data = savedMaterialScope;
+  const names = new Map(topicSourcePool.map((source) => [source.id, source.name]));
+  function line(key, value) {
+    const row = document.createElement("p");
+    row.append(el("span", MindexI18n.msg(key)), content("span", value));
+    topicCurrentScope.append(row);
+  }
+  const unlimited = MindexI18n.render(MindexI18n.msg("ui.topics_material_unlimited"));
+  const groups = new Map(data.groups.map((group) => [group.id, group]));
+  line("ui.topics_material_current_groups", data.groupIds.length ? data.groupIds.map((id) => {
+    const group = groups.get(id);
+    return group?.system ? MindexI18n.render(MindexI18n.msg("ui.groups_ungrouped")) : group?.name || id;
+  }).join("、") : unlimited);
+  line("ui.topics_material_current_manual", data.sourceIds.length ? data.sourceIds.map((id) => names.get(id) || id).join("、") : unlimited);
+  if (data.error) {
+    topicCurrentScope.append(el("p", MindexI18n.system(data.error), "warn-text"));
+    return;
+  }
+  const ids = data.effective === null ? topicSourcePool.map((source) => source.id) : data.effective.filter((id) => names.has(id));
+  const details = document.createElement("details"); details.id = "topic-material-current-members";
+  details.append(el("summary", MindexI18n.msg("ui.topics_material_current_count", {p0: ids.length})));
+  if (ids.length) {
+    const list = document.createElement("ul");
+    for (const id of ids) list.append(content("li", names.get(id) || id));
+    details.append(list);
+  } else details.append(el("p", MindexI18n.msg("ui.groups_no_sources")));
+  topicCurrentScope.append(details);
+}
+async function loadSavedMaterialScope(profile) {
+  const request = ++savedScopeRequest;
+  const [groups, scope] = await Promise.allSettled([
+    api("/api/admin/groups?type=source"),
+    api("/api/admin/groups/resolve", "POST", {source_ids: profile.source_ids || [], source_group_ids: profile.source_group_ids || []})
+  ]);
+  if (request !== savedScopeRequest || page.profile?.id !== profile.id) return;
+  const empty = scope.status === "rejected" && scope.reason.status === 422 &&
+    (scope.reason.detail === "所选组与素材范围没有成员，请重新选择" || scope.reason.data?.message_key === "ui.groups_empty_resolve");
+  savedMaterialScope = {groupIds: [...(profile.source_group_ids || [])], sourceIds: [...(profile.source_ids || [])],
+    groups: groups.status === "fulfilled" ? groups.value.items : [],
+    effective: scope.status === "fulfilled" ? scope.value.source_ids : [],
+    error: scope.status === "rejected" && !empty ? scope.reason.message : groups.status === "rejected" ? groups.reason.message : null};
+  renderSavedMaterialScope();
+}
+MindexMultiSearch.attach(topicSources);
+let topicSourcePool = [], topicSourceSelection = null;
+const topicScopeLink = MindexGroups.linkSources(topicGroups, topicSources, {
+  entries: () => topicSourcePool, selection: () => topicSourceSelection,
+  fill: (entries, selected) => {
+    topicSources.replaceChildren(...MindexMultiSearch.sort(entries).map((item) => {
+      const option = content("option", item.name);
+      option.value = item.id; option.selected = selected.has(item.id);
+      return option;
+    }));
+    MindexMultiSearch.refilter(topicSources);
+  }, onError: failed
+});
+topicSources.addEventListener("change", () => {
+  topicSourceSelection = [...topicSources.selectedOptions].map((option) => option.value);
+});
+topicScopeSave.addEventListener("click", async () => {
+  if (!page.profile) return;
+  if (topicSourceSelection?.length === 0) return failed(MindexI18n.msg("ui.topics_material_select_required"));
+  topicScopeSave.disabled = true;
+  try {
+    await api(profileUrl(page.profile.id), "PATCH", {
+      source_ids: topicSourceSelection || [], source_group_ids: topicGroups.values()
+    });
+    await loadProfiles(page.profile.id);
+    notice(MindexI18n.msg("ui.topics_material_saved"));
+  } catch (error) { failed(error); }
+  finally { topicScopeSave.disabled = false; }
+});
+profileHooks.push(async (profile) => {
+  $("topic-material-scope").hidden = !profile;
+  if (!profile) { savedMaterialScope = null; ++savedScopeRequest; topicCurrentScope.replaceChildren(); return; }
+  savedMaterialScope = null; renderSavedMaterialScope();
+  topicSourceSelection = profile.source_ids?.length ? profile.source_ids : null;
+  topicGroups.setValues(profile.source_group_ids || []);
+  topicSourcePool = [];
+  let materialPage = 1;
+  while (true) {
+    const data = await api(`/api/admin/sources?visibility=all&page_size=100&page=${materialPage}`);
+    topicSourcePool.push(...data.items);
+    if (!data.items.length || topicSourcePool.length >= data.total) break;
+    materialPage += 1;
+  }
+  await topicGroups.refresh();
+  await topicScopeLink.refresh();
+  await loadSavedMaterialScope(profile);
+});
+
 async function profileChanged() {
   for (const hook of profileHooks) await hook(page.profile);
 }
@@ -119,7 +238,7 @@ function syncUrl() {
 // ------------------------------------------------------------ 档案对话框
 function fillProfileForm(item) {
   const value = item || { name: "", domain: "", subtopics: [], audience: "", positioning: "", taboos: [], keywords: [],
-    language: "zh-hans", region: "CN", canvas: "16:9",
+    canvas: "16:9",
     weights: { timeliness: 0.25, audience: 0.25, coverage: 0.25, novelty: 0.15, cost: 0.1 },
     schedule: { enabled: false, time: "08:00", count: 10 } };
   $("pf-name").value = value.name;
@@ -129,8 +248,6 @@ function fillProfileForm(item) {
   $("pf-positioning").value = value.positioning;
   $("pf-taboos").value = value.taboos.join("\n");
   $("pf-keywords").value = value.keywords.join("，");
-  $("pf-language").value = value.language;
-  $("pf-region").value = value.region;
   $("pf-canvas").value = value.canvas;
   for (const key of WEIGHT_KEYS) $(`pf-w-${key}`).value = value.weights[key];
   $("pf-s-enabled").checked = value.schedule.enabled;
@@ -148,8 +265,6 @@ function profileFormValues() {
     positioning: $("pf-positioning").value.trim(),
     taboos: splitLines($("pf-taboos").value),
     keywords: splitList($("pf-keywords").value),
-    language: $("pf-language").value.trim() || "zh-hans",
-    region: $("pf-region").value.trim() || "CN",
     canvas: $("pf-canvas").value,
     weights,
     schedule: { enabled: $("pf-s-enabled").checked, time: $("pf-s-time").value || "08:00",
@@ -674,7 +789,7 @@ const SCORE_KEYS = [["timeliness", "ui.topics_weight_timeliness"], ["audience", 
 const cards = { items: [], counts: {}, selected: null, saved: null, templates: [], saving: false };
 page.card = topicsQuery.get("card");
 const cardUrl = (id, suffix = "") => `/api/topics/cards/${enc(id)}${suffix}`;
-const percent = (value) => `${Math.round((value || 0) * 100)}`;
+const percent = (value) => value == null ? "—" : `${Math.round(value * 100)}`;
 
 function cardMatches(item, needle) {
   if (!needle) return true;
@@ -1080,6 +1195,7 @@ $("reload").addEventListener("click", async () => {
   }
 });
 window.addEventListener("mindex:languagechange", () => {
+  renderSavedMaterialScope();
   renderProfiles();
   renderKindOptions();
   renderSources();
@@ -1095,11 +1211,17 @@ window.addEventListener("mindex:languagechange", () => {
 // 助手或其他来源改动了选题数据：重新读取档案（并经钩子刷新各分区）。
 window.addEventListener("mindex:agent-mutation", (event) => {
   const detail = event.detail || {};
+  if (detail.groups) {
+    Promise.all([topicGroups.refresh().then(() => topicScopeLink.refresh()), loadCards(page.profile),
+      page.profile ? loadSavedMaterialScope(page.profile) : Promise.resolve()]).catch(failed);
+    return;
+  }
   if (detail.domain !== "topics") return;
   loadProfiles(detail.profile_id && page.profiles.some((p) => p.id === detail.profile_id) ? page.profile?.id : undefined)
     .catch(() => {});
 });
-window.MindexAgentContext = () => ({ page: "topics", profile_id: page.profile?.id || null, card_id: page.card || null });
+window.MindexAgentContext = () => ({ page: "topics", profile_id: page.profile?.id || null, card_id: page.card || null,
+  source_group_ids: topicGroups.values(), source_ids: topicSourceSelection });
 // 助手定位：切换档案、打开卡片并高亮对应分区；建出创作任务时回到创作页。
 window.MindexAgentFocus = async (focus, { passive = false } = {}) => {
   if (focus.page === "studio" && focus.job_id) {

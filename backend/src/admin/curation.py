@@ -295,8 +295,17 @@ class Library:
                                      active=active, published=published)
         return result
 
-    def list_sources(self, q: str, visibility: Visibility, favorite_only: bool, page: int, page_size: int):
+    def list_sources(self, q: str, visibility: Visibility, favorite_only: bool, page: int, page_size: int,
+                     source_group_ids=None):
         clauses, args = [], []
+        if source_group_ids:
+            from mindex.shared.media_groups import Groups
+
+            allowed = Groups(self.store).resolve('source', source_group_ids)
+            if not allowed:
+                return {'items': [], 'total': 0, 'page': page, 'page_size': page_size}
+            clauses.append('s.id IN (' + ','.join('?' for _ in allowed) + ')')
+            args.extend(sorted(allowed))
         if q.strip():
             clauses.append(
                 "(INSTR(LOWER(s.name),LOWER(?))>0 OR INSTR(LOWER(COALESCE(c.display_name,'')),LOWER(?))>0)"

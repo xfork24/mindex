@@ -61,7 +61,8 @@ const slice = (start, end) => {
   return source.slice(a, b);
 };
 // renderJobMeta、DIGEST_EMPTY_REASON、loadMaterialDigest、materialDigestNode 是连续的顶层代码。
-vm.runInContext(slice("function renderJobMeta(", "const scriptDrafts = new Map()"), sandbox);
+const jobSource = fs.readFileSync("frontend/src/studio/studio-jobs.js", "utf8");
+vm.runInContext(jobSource.slice(jobSource.indexOf("function renderJobMeta(")), sandbox);
 // 文案区"参考了 N 个素材、M 个镜头描述"提示（renderScript 中调用的顶层函数）。
 vm.runInContext(slice("function renderScriptMaterials(", "function renderScript()"), sandbox);
 const run = code => vm.runInContext(code, sandbox);

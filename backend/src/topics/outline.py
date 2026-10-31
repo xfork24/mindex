@@ -47,9 +47,15 @@ def references_text(items: list[dict]) -> str:
 
 def draft(llm, store, config, profile, card: dict, items: list[dict], *, retries: int) -> tuple[str, str, list[str]]:
     """返回（大纲，模板 ID，告警）。"""
+    from mindex.studio.material_digest import build_digest
+    from mindex.topics.profiles import material_state
+
+    digest = build_digest(config, store, material_state(profile))
     templates = script_templates.list_templates(store)
     limit = config.studio.max_input_chars
     parts = [{"type": "text", "text": profile_text(profile)}, {"type": "text", "text": card_text(card, items)}]
+    if not digest.empty:
+        parts.append({"type": "text", "text": "仅参考以下范围内素材的画面相关性：\n" + digest.text})
     if items:
         parts.append({"type": "text", "text": REFERENCE_HEADER + references_text(items)})
 

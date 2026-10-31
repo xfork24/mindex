@@ -12,7 +12,7 @@ from mindex.shared.storage import Store, dumps, migrate_metadata
 
 # 新业务表必须在这里明确归属，避免升级后部分备份悄悄携带无关素材。
 TABLES = {
-    'clip_migration_files', 'media_references', 'sources', 'segments', 'source_curation',
+    'media_groups', 'media_group_members', 'clip_migration_files', 'media_references', 'sources', 'segments', 'source_curation',
     'segment_curation', 'transcripts', 'annotations', 'scene_plans', 'index_versions',
     'index_members', 'representations', 'channel_data', 'dialogue_tasks', 'source_tasks',
     'settings', 'model_profiles', 'voices', 'runs', 'person_entities', 'person_sources',
@@ -271,6 +271,8 @@ def filter_database(path, selected: set[str] | None, *, allow_legacy_representat
                 db.execute(f'DELETE FROM {table} WHERE source_id IS NOT NULL AND source_id NOT IN chosen')
                 if table in {'dialogue_tasks', 'runs'}:
                     db.execute(f'DELETE FROM {table} WHERE source_id IS NULL')
+        db.execute('DELETE FROM media_groups WHERE NOT EXISTS '
+                   '(SELECT 1 FROM media_group_members m WHERE m.group_id=media_groups.id)')
         db.execute('DELETE FROM source_curation WHERE id NOT IN chosen')
         db.execute('DELETE FROM sources WHERE id NOT IN chosen')
         db.execute('DELETE FROM segments WHERE source_id NOT IN chosen')
@@ -371,6 +373,13 @@ def validate_database(root, *, basic=False, legacy=False):
                 '(SELECT 1 FROM sources s WHERE s.id=t.source_id)'
             ).fetchone():
                 raise ValueError(f'{table} 存在缺失的素材依赖')
+        if 'media_group_members' in schema(db, require_current=not legacy):
+            invalid = db.execute(
+                "SELECT 1 FROM media_group_members m JOIN media_groups g ON g.id=m.group_id "
+                "WHERE (g.type='source' AND m.source_id IS NULL) OR (g.type='music' AND m.music_id IS NULL) LIMIT 1"
+            ).fetchone()
+            if invalid:
+                raise ValueError('组成员类型与组类型不符')
         if basic and db.execute(
             "SELECT 1 FROM index_members m WHERE json_extract(snapshot,'$.id') IS NOT segment_id "
             "OR NOT EXISTS (SELECT 1 FROM sources s WHERE s.id=json_extract(m.snapshot,'$.source_id')) LIMIT 1"
@@ -402,7 +411,7 @@ def validate_database(root, *, basic=False, legacy=False):
 def merge_database(target, incoming, *, restore_config):
     """仅写暂存库；同 ID 内容冲突一律拒绝。整数 ID 在关联引用前分配。"""
     src, dst = store_at(incoming), store_at(target)
-    remaps = {'model_profiles': {}, 'voices': {}, 'runs': {}}
+    remaps = {'model_profiles': {}, 'voices': {}, 'runs': {}, 'media_groups': {}}
     with dst.connect() as db:
         db.execute('PRAGMA foreign_keys=OFF')
         for table in ('model_profiles', 'voices', 'runs'):
@@ -435,11 +444,43 @@ def merge_database(target, incoming, *, restore_config):
                                         + ','.join('?' for _ in values) + ')', tuple(values.values()))
                     equivalent = cursor.lastrowid
                 remaps[table][old] = equivalent
+        # 组的稳定 ID 保留；同类型同名组沿用目标库 ID，并映射任务与成员引用。
+        for row in src.rows('SELECT * FROM media_groups ORDER BY id'):
+            existing = db.execute('SELECT * FROM media_groups WHERE id=?', (row['id'],)).fetchone()
+            if existing:
+                canonical_name = f"{row['name']}（导入 {row['id'][:8]}）"
+                if any(not same_value(existing[k], v) for k, v in row.items()
+                       if k != 'updated_at' and not (k == 'name' and existing[k] == canonical_name)):
+                    raise ValueError(f"同 ID 组内容冲突：{row['id']}")
+                remaps['media_groups'][row['id']] = row['id']
+                continue
+            named = db.execute('SELECT * FROM media_groups WHERE type=? AND name=?',
+                               (row['type'], row['name'])).fetchone()
+            if named:
+                def members(database, group_id):
+                    return {(item['source_id'], item['music_id']) for item in database.execute(
+                        'SELECT source_id,music_id FROM media_group_members WHERE group_id=?', (group_id,))}
+
+                incoming_members = {(item['source_id'], item['music_id']) for item in src.rows(
+                    'SELECT source_id,music_id FROM media_group_members WHERE group_id=?', (row['id'],))}
+                if named['description'] == row['description'] and members(db, named['id']) == incoming_members:
+                    remaps['media_groups'][row['id']] = named['id']
+                    continue
+                # 同名不等于同一范围：保留导入组身份，避免把已有成员并入任务范围。
+                row['name'] += f"（导入 {row['id'][:8]}）"
+            db.execute('INSERT INTO media_groups(id,type,name,description,updated_at) VALUES(?,?,?,?,?)',
+                       tuple(row[k] for k in ('id', 'type', 'name', 'description', 'updated_at')))
+            remaps['media_groups'][row['id']] = row['id']
         # sources 必须先于带外键的依赖行；其余关联由最终的全库检查兜底。
-        for table in ['sources', *sorted(TABLES - {'sources', 'model_profiles', 'voices', 'runs'})]:
+        for table in ['sources', *sorted(TABLES - {'sources', 'model_profiles', 'voices', 'runs', 'media_groups'})]:
             info = db.execute(f'PRAGMA table_info({table})').fetchall()
             keys = [r['name'] for r in info if r['pk']]
             for row in src.rows(f'SELECT * FROM {table}'):
+                if table == 'media_group_members':
+                    from mindex.shared.media_groups import membership_id
+
+                    row['group_id'] = remaps['media_groups'].get(row['group_id'], row['group_id'])
+                    row['id'] = membership_id(row['group_id'], row['source_id'] or row['music_id'])
                 for column, value in row.items():
                     parsed = json_container(value)
                     if parsed is not None:
@@ -479,6 +520,9 @@ def remap_local_refs(value, remaps):
     if isinstance(value, dict):
         result = {}
         for key, item in value.items():
+            if key in {'source_group_ids', 'music_group_ids', 'group_ids'} and isinstance(item, list):
+                result[key] = [remaps.get('media_groups', {}).get(group_id, group_id) for group_id in item]
+                continue
             if key == '_credential_profiles' and isinstance(item, dict):
                 profiles = {}
                 for role, reference in item.items():

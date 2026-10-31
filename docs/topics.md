@@ -31,7 +31,7 @@ flowchart LR
 
 ## 领域档案
 
-档案包含名称、领域、子方向、目标受众、账号定位、禁区、关键词、搜索语言与地区、建任务时的默认画幅、打分权重和每日定时。一份档案对应一个账号或方向，页面顶部可以切换档案。
+档案包含名称、领域、子方向、目标受众、账号定位、禁区、关键词、建任务时的默认画幅、打分权重和每日定时。一份档案对应一个账号或方向，页面顶部可以切换档案。
 
 禁区同时用在两个地方：选题模型不会产出触犯禁区的选题；从选题建出的任务写文案时，受众、定位与禁区作为「账号档案｜写作约束」加进提示词。档案的写作哈希只覆盖领域、子方向、受众、定位与禁区；改名称、关键词、权重或定时，不会让已有文案提示过期。
 
@@ -43,7 +43,7 @@ flowchart LR
 |---|---|---|
 | `rss` | `url` | RSS 2.0、RSS 1.0（RDF）与 Atom；含 DOCTYPE 或实体声明的文档会被拒绝 |
 | `hotlist` | 通用：`url`、`items_path`（点分路径）、`fields`（title/desc/url/hot/time）；或 `preset: dailyhot` + `base_url` + `boards` | 热榜 JSON 接口。DailyHotApi 是开源的热榜聚合服务（[项目地址](https://github.com/imsyy/DailyHotApi)），可用 Docker 自建，`/all` 列出可用榜单，例如 `weibo`、`zhihu`、`36kr`、`history`。时间接受秒或毫秒时间戳与 ISO 字符串，热度接受数字或"12.5万" |
-| `brave` | `endpoint`（news/web）、`freshness`（pd/pw/pm/py）、`queries`、`count`、`country`、`search_lang`；密钥为 Brave Search API Key | 查询词缺省取档案关键词，没有关键词时用"领域 + 子方向"；国家与语言缺省取档案。同一次抓取里所有 Brave 来源合计不超过 `topics.brave.max_queries` 次查询。401/403/429 会给出中文原因 |
+| `brave` | `endpoint`（news/web）、`freshness`（pd/pw/pm/py）、`queries`、`count`、`country`、`search_lang`；密钥为 Brave Search API Key | 查询词缺省取档案关键词，没有关键词时用"领域 + 子方向"；默认地区为 `ALL`（全球），不附加档案语言限制；仅在数据源明确设置 `search_lang` 时传入语言偏好。旧档案的语言与地区字段不再限制搜索。同一次抓取里所有 Brave 来源合计不超过 `topics.brave.max_queries` 次查询。401/403/429 会给出中文原因 |
 | `calendar` | `url`（可选 ICS 订阅）、`days`（默认 14） | 导入 ICS（VEVENT 的 SUMMARY/DTSTART/DESCRIPTION 与 `RRULE:FREQ=YEARLY`）或 CSV（表头 `date,title`，可选 `desc,kind,recurring`；`date` 写 `YYYY-MM-DD`，或写 `MM-DD` 表示每年重复）。每年重复且有起始年份的事件，标题会附"N 周年"。内置 finance/tech/history 三份样例；前两份是示例日期，请按实际日程修改 |
 | `local` | `library` | 素材库里每个已分析的素材作为一条候选（"按素材找选题"），不发网络请求 |
 
@@ -156,3 +156,13 @@ MINDEX_PLAYWRIGHT_MODULE=desktop/node_modules/playwright-core uv run pytest test
 ```
 
 工程测试使用确定性的脚本化选题模型和颜色 fixture 嵌入，只能证明链路正确，不代表真实模型的选题质量。
+
+领域档案可保存素材组与素材范围。选题页的素材组为可搜索的多选列表，多组选中成员取并集，再与素材范围取交集；不选组表示不限，选空组表示没有素材，不回退全库。本地素材候选、素材覆盖评分和大纲的素材参考只使用这份范围；从选题创建的视频任务继承组 ID 与手动素材限制，文案、拆分镜和分镜召回词建议继续遵守任务范围，分镜限制再与任务范围取交集。
+
+组成员按下一次操作时的最新值解析。范围或所选组成员变化后，旧覆盖报告提示重新打分，已有文案提示可重新生成；保存的大纲、文案、选片和构建产物不会自动替换。删除被引用的组会明确报错，需重新选择。外部资讯来源仍按领域档案采集；已做视频的去重比较仍保留完整历史。
+
+CLI 可用 `topics profiles create/update --material-source <素材ID> --source-group <组ID>`（参数可重复）；使用 `--file` 提供 `source_ids: []`、`source_group_ids: []` 可清除对应限制。REST 的档案创建/修改接口及 Agent/MCP 的 `save_topic_profile` 支持相同字段。
+
+选题页常驻“当前已保存的素材范围”，显示已保存的素材组、手动素材限制，并可展开查看当前生效成员。编辑筛选控件时，这个展示仍代表已保存值；保存、刷新和切换档案后重新读取，组成员变化时按当前成员解析。
+
+领域档案的新建和编辑窗口无需指定搜索语言或地区。Brave 默认使用全球地区参数 `country=ALL`，不提交 `search_lang`；这是取消应用层的地域/语言限制，实际搜索覆盖及默认排序、语言偏好仍由搜索服务决定，见 [Brave Search 参数说明](https://api-dashboard.search.brave.com/api-reference/news/news_search/get)。

@@ -29,6 +29,8 @@ function renderTemplateSelect() {
   if (topicsTab) topicsTab.href = state.id ? `/studio/topics?job=${encodeURIComponent(state.id)}` : "/studio/topics";
   const changed = $("script-template-changed");
   if (changed) changed.hidden = !state.data.script_template_changed;
+  const scopeChanged = $("script-material-scope-changed");
+  if (scopeChanged) scopeChanged.hidden = !state.data.script_material_scope_changed;
   const profileChanged = $("script-profile-changed");
   if (profileChanged) profileChanged.hidden = !state.data.script_profile_changed;
   select.disabled = busy() || !scriptTemplates.items;

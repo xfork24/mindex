@@ -22,7 +22,7 @@ from mindex.models import adapters
 from mindex.models.writer import WRITER_PROMPT_VERSION
 from mindex.shared.storage import Store
 from mindex.studio import script_templates, studio
-from mindex.studio.material_digest import safe_digest
+from mindex.studio.material_digest import safe_digest, scope_parameters
 from mindex.studio.studio_artifacts import sanitized
 
 from .. import references
@@ -108,7 +108,8 @@ class ScriptHandler(StageHandler):
         return result
 
     def specification(self, config, job_id, w, p, sid, params, resources):
-        return {"outline": studio.load_job(config, job_id)["outline"]}, {}, params
+        return {"outline": studio.load_job(config, job_id)["outline"]}, {}, {
+            **params, **scope_parameters(config, job_id, resources.database())}
 
     def plan_node(self, config, job_id, w, p):
         # 已有文案时直接复用，绝不在构建中悄悄重写；只在缺少文案时先生成。

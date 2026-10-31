@@ -6,6 +6,7 @@ import copy
 
 from mindex.shared.storage import Store
 from mindex.studio import studio
+from mindex.studio.material_digest import scope_parameters
 from mindex.studio.platforms import snapshot_publish
 
 from . import signatures
@@ -153,12 +154,17 @@ def detail(config, job_id, w, *, store=None, compact=False):
         return {**item, "options": options}
     result["plans"] = {key: display_plan(item) for key, item in w["plans"].items()}
     result["job"] = studio.load_job(config, job_id)
+    result["material_scope"] = studio.scope_status(result["job"], context.database(config))
     result["revision"] = revision(p)
     result["script_stale"] = script_stale(p)
     # 所选文案模板（或提示词）与当前文案生成时不同：只提示可重新生成，不自动重写。
     result["script_template_changed"] = template_changed(config, w, p, store=context.database(config))
     # 从选题创建的任务同步过账号档案：已有文案按旧档案写成，只提示可重新生成。
     result["script_profile_changed"] = profile_changed(w, p)
+    script = w["versions"].get(p.get("script")) or {}
+    current_scope = scope_parameters(config, job_id, context.database(config)).get("material_scope")
+    result["script_material_scope_changed"] = (script.get("data", {}).get("origin") == "generated"
+        and script.get("parameters", {}).get("material_scope") != current_scope)
     result["tts_settings"] = {
         "backend": config.studio.tts.backend,
         "model": config.studio.tts.model,

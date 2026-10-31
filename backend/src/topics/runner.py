@@ -58,6 +58,7 @@ def candidate_items(store, profile_id: str, now: datetime | None = None) -> list
         moment = parse_time(row["published_at"]) or parse_time(row["fetched_at"])
         if moment is not None and now - moment <= timedelta(days=RECENT_DAYS):
             found.append(row)
+    found = profiles.scoped_items(store, profiles.body_of(store, profile_id), found)
     # 先按时间倒序，再按热度倒序（稳定排序：同热度保持时间顺序）。
     found.sort(key=lambda r: str(r["published_at"] or r["event_at"] or r["fetched_at"]), reverse=True)
     found.sort(key=lambda r: -(r["hot"] or 0))

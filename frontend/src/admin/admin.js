@@ -86,6 +86,7 @@ function renderSource(source) {
   const heading = node('div', undefined, 'source-heading');heading.append(node('h2', source.name));
   if (source.hidden) heading.append(node('span', MindexI18n.msg("ui.5fce4fb22d1d"), 'hidden-badge'));
   target.append(heading);
+  MindexGroups.membership(target, "source", source);
   if (source.notes) target.append(node('p', source.notes, 'source-notes'));
   target.append(node('p', MindexI18n.msg("ui.b1a5c99af4bf", { p0: source.original_name, p1: source.id.slice(0, 8) }), 'source-meta'), node('p', MindexI18n.msg("ui.9df908393a6a", { p0: time(source.media.duration), p1: source.media.width, p2: source.media.height, p3: source.media.fps.toFixed(2), p4: source.shot_count, p5: source.moment_count }), 'source-meta'), node('p', source.prepared ? MindexI18n.msg("ui.db093aeb92d3") : MindexI18n.msg("ui.be2019fc93ba"), 'source-meta'));
   if (source.missing_artifacts) target.append(node('p', MindexI18n.msg("ui.95c85cb38091", { p0: source.missing_artifacts }), 'source-warning'));
@@ -603,3 +604,8 @@ async function showAnalysis(item) {
 }
 $('analysis-close').onclick = () => $('analysis-dialog').close();
 $('analysis-dialog').addEventListener('close', () => {analysisRequest++;});
+
+window.addEventListener('mindex:agent-mutation', (event) => {
+  if (!event.detail?.groups) return;
+  run(async () => { if (state.source?.id) await refreshWork(state.source.id); await loadSources(); });
+});

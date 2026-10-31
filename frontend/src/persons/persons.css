@@ -152,3 +152,9 @@
 .role-grid-wide{grid-template-columns:repeat(auto-fill,minmax(min(190px,100%),1fr))}
 .coordinates{grid-template-columns:repeat(auto-fit,minmax(min(100px,100%),1fr))}
 #entity-dialog .fields>label{flex:1 1 210px}
+
+/* 长姓名不能把导入网格的最小列宽撑出面板。 */
+#import-entries>.entry{min-width:0;max-width:100%;box-sizing:border-box}
+.entry>label{max-width:100%;box-sizing:border-box}
+
+#cast .cast-entry-row .restore-field{flex-wrap:wrap}

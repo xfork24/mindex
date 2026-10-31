@@ -107,3 +107,7 @@ curl -s 'http://127.0.0.1:8000/api/status?health=true'
 ## 评测消融
 
 `mindex evaluate` 在同一候选集上比较 profile：`video_only`、`video_asr`、`description_only`、`fusion`（配置权重）、`no_dialogue`、`no_style`。`video_asr` 排除 description/style 向量及 BM25 字段，另外两个消融同时移除对应 BM25 字段，避免词法泄漏。视频查询只进 `video_only`。报告含候选时间布局与整理状态哈希，便于检查跨索引比较条件。指标 Hit@1/5、MRR@10、按相关组计的 nDCG@10，详见 [e2e-framework.md](e2e-framework.md)。
+
+## 动态组范围
+
+共享 `filters.source_group_ids` 用于文字、图片、视频和找相似。所选组成员先取并集，再与 `source_ids`（或旧的 `source_id`）、任务范围、隐藏状态、时长和标签取交集；空组无候选。每次查询读取当前 SQLite 成员，不要求重建索引。删除组或使用音乐组 ID 作为素材组时返回 422。管理与任务范围接口见[素材后台指南](admin.md#素材组与音乐组)。

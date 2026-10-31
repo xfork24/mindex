@@ -97,9 +97,11 @@ def create_from_card(config, store, card_id: str, *, force: bool = False, langua
     snapshot = profiles.snapshot_body(body)
     outline = (card.get("outline") or "").strip() or fallback_outline(card)
     outline = outline[: config.studio.max_input_chars]
-    items = topic_items.items_by_id(store, card["item_ids"])
+    profiles.validate_materials(store, body)
+    items = profiles.scoped_items(store, body, topic_items.items_by_id(store, card["item_ids"]))
     state = studio.create_job(config, outline, card["title"][:60], store=store,
-                              original_input=f"来自选题：{card['title']}", language=language)
+                              original_input=f"来自选题：{card['title']}", language=language,
+                              options=profiles.material_state(body))
     job_id = state["id"]
     try:
         lock = studio_lock(config)

@@ -417,3 +417,17 @@ textarea.code-editor { width: 100%; min-height: 360px; font-family: ui-monospace
 /* Studio navigation also wraps when translated labels need more space. */
 .studio-tabs{flex-wrap:wrap;gap:4px 24px}
 .studio-tab{min-width:0;max-width:100%;overflow-wrap:anywhere}
+
+/* 新增组范围使用紧凑的横向控件，按可用空间自然换行。 */
+.material-scope-controls,.recall-scope-options{display:flex;flex-wrap:wrap;align-items:flex-start;gap:14px;min-width:0}
+.material-scope-controls>.group-picker,.recall-scope-options>.group-picker{flex:0 1 auto;width:max-content;max-width:100%;margin:0}
+.material-scope-controls>.form-field,.recall-scope-options .form-field{flex:0 1 auto;width:max-content;max-width:100%;min-width:0;margin:0}
+.material-scope-controls>button{flex:0 0 auto;align-self:flex-end;max-width:100%;height:auto;white-space:normal}
+.material-scope-controls>.source-warning{flex-basis:100%}
+#create-form>.group-picker{margin:12px 0;max-width:100%}
+.music-library-picker>.group-picker{width:240px;max-width:100%}
+/* 文案与查询：组、素材、演员、角色及两个人物条件共用紧凑间距，宽屏可在同一行。 */
+.recall-scope-options{gap:12px}
+.recall-scope-options>.group-picker,.recall-scope-options>.recall-material-field{flex:0 1 auto;width:max-content;max-width:100%}
+.recall-scope-options .recall-person-list{flex:0 1 auto;width:max-content;max-width:100%}
+.recall-scope-options .recall-person-choice{flex:0 1 auto;width:max-content;max-width:100%}

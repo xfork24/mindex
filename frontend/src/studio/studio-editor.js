@@ -17,6 +17,7 @@ function recallEditable(value) {
     filters: {
       source_id: v.filters?.source_id ?? null,
       source_ids: [...(v.filters?.source_ids || [])],
+      source_group_ids: [...(v.filters?.source_group_ids || [])],
       min_duration: v.filters?.min_duration ?? 0,
       max_duration: v.filters?.max_duration ?? null,
       scene: v.filters?.scene ?? null,
@@ -35,6 +36,7 @@ function recallIsDefault(r) {
     r.person_relation === "all" &&
     !r.filters.source_id &&
     !r.filters.source_ids.length &&
+    !r.filters.source_group_ids.length &&
     !r.filters.min_duration &&
     !r.filters.max_duration &&
     !r.filters.scene &&
@@ -609,6 +611,8 @@ function renderRecallEditor(body, sid, draft, overrides) {
       let persons = scopedRecallPersons(value);
       const actorField = multiField(MindexI18n.msg("ui.acc714bb0167"));
       const roleField = multiField(MindexI18n.msg("ui.224f21d3016f"));
+      actorField.wrap.classList.add("recall-person-list");
+      roleField.wrap.classList.add("recall-person-list");
       const commitPersons = () => {
         const next = recallEditable(draft.data.recall);
         next.person_ids = [...new Set([...pickedIds(actorField.select), ...pickedIds(roleField.select)])];
@@ -645,6 +649,8 @@ function renderRecallEditor(body, sid, draft, overrides) {
 
       {
         const f = field(label, value?.[key] || (key === "person_mode" ? "auto" : "all"), "text", choices);
+        f.wrap.classList.add("recall-person-choice");
+        f.wrap.dataset.recallPerson = key;
         f.input.addEventListener("change", () => {
           const next = recallEditable(draft.data.recall);
           next[key] = f.input.value;
@@ -702,20 +708,20 @@ function renderRecallEditor(body, sid, draft, overrides) {
     }
     const sourceField = multiField(MindexI18n.msg("ui.df2bc29adabb"));
     sourceField.select.dataset.recallFilter = "source_ids";
+    sourceField.wrap.classList.add("recall-material-field");
     // 只列任务范围内的素材；越界的旧值（历史数据或手改 API）一并裁掉。
     const entries = scopedSourceEntries();
     const scope = jobScope();
     const sources = value?.filters?.source_ids?.length ? value.filters.source_ids : value?.filters?.source_id ? [value.filters.source_id] : [];
     const chosen = new Set((sources.length ? sources : entries.map((entry) => entry.id)).filter((id) => !scope || scope.has(id)));
     fillAllSelect(sourceField.select, entries, chosen);
-    sourceField.wrap.append(el("span", MindexI18n.msg("ui.c1b8365074c7"), "muted"));
     sourceField.select.addEventListener("change", () => {
       toggleAllOf(sourceField.select);
       const picked = pickedIds(sourceField.select);
       const next = recallEditable(draft.data.recall);
       next.filters.source_id = null;
       // 全选 = 不写筛选，签名保持默认，历史召回版本继续复用。
-      next.filters.source_ids = picked.length === entries.length ? [] : picked;
+      next.filters.source_ids = picked.length === entries.length && !next.filters.source_group_ids.length ? [] : picked;
       const allowed = new Set(scopedRecallPersons(next).map((p) => p.id));
       next.person_ids = next.person_ids.filter((id) => allowed.has(id));
       // Keep the active material control (focus, search, scroll and resized height) intact.
@@ -726,6 +732,19 @@ function renderRecallEditor(body, sid, draft, overrides) {
     });
     const scopeOptions = el("div", "", "recall-scope-options");
     scopeOptions.append(sourceField.wrap, personOptions);
+    // 历史分镜已保存的组限制仍参与范围解析，此处仅提供素材范围控件。
+    const sourceLink = MindexGroups.linkSources({
+      values: () => draft.data.recall?.filters?.source_group_ids || [], onChange: () => {}
+    }, sourceField.select, {
+      entries: () => scopedSourceEntries(),
+      selection: () => {
+        const filters = draft.data.recall?.filters;
+        return filters?.source_ids?.length ? filters.source_ids : filters?.source_id ? [filters.source_id] : null;
+      },
+      fill: (choices, picked) => fillAllSelect(sourceField.select, choices, picked),
+      onError: (error) => notice(error.message, true)
+    });
+    queueMicrotask(() => { if (scopeOptions.isConnected) void sourceLink.refresh(); });
     section.append(scopeOptions);
     const filters = el("div", "", "recall-filters");
     for (const [key, label, placeholder, type] of [

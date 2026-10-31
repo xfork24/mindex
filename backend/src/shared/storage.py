@@ -281,8 +281,39 @@ CREATE TABLE IF NOT EXISTS delivery_platforms (
                    (key, dumps(body), "2026-01-01T00:00:00", "2026-01-01T00:00:00"))
 
 
+def _metadata_v9(db):
+    execute_script(db, """
+CREATE TABLE IF NOT EXISTS media_groups (
+ id TEXT PRIMARY KEY, type TEXT NOT NULL CHECK(type IN ('source','music')),
+ name TEXT NOT NULL CHECK(length(trim(name)) > 0 AND name=trim(name)), description TEXT NOT NULL DEFAULT '',
+ updated_at TEXT NOT NULL, UNIQUE(type,name)
+);
+CREATE TABLE IF NOT EXISTS media_group_members (
+ id TEXT PRIMARY KEY,
+ group_id TEXT NOT NULL REFERENCES media_groups(id) ON DELETE CASCADE,
+ source_id TEXT REFERENCES sources(id) ON DELETE CASCADE,
+ music_id TEXT REFERENCES music_tracks(id) ON DELETE CASCADE,
+ CHECK((source_id IS NOT NULL) != (music_id IS NOT NULL))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS group_source_unique ON media_group_members(group_id,source_id);
+CREATE UNIQUE INDEX IF NOT EXISTS group_music_unique ON media_group_members(group_id,music_id);
+""")
+
+
+def _metadata_v10(db):
+    # 为系统默认组保留名称；旧自定义组只改显示名，ID、成员和任务引用保持原样。
+    for row in db.execute("SELECT id,type FROM media_groups WHERE name='未分类'").fetchall():
+        suffix = 1
+        while True:
+            name = "未分类（自定义）" if suffix == 1 else f"未分类（自定义 {suffix}）"
+            if not db.execute("SELECT 1 FROM media_groups WHERE type=? AND name=?", (row["type"], name)).fetchone():
+                break
+            suffix += 1
+        db.execute("UPDATE media_groups SET name=? WHERE id=?", (name, row["id"]))
+
+
 # metadata.sqlite3 的有序迁移：只追加，不修改已发布的步骤（见 shared/migrations.py）。
-METADATA_STEPS = (_metadata_v1, _metadata_v2, _metadata_v3, _metadata_v4, _metadata_v5, _metadata_v6, _metadata_v7, _metadata_v8)
+METADATA_STEPS = (_metadata_v1, _metadata_v2, _metadata_v3, _metadata_v4, _metadata_v5, _metadata_v6, _metadata_v7, _metadata_v8, _metadata_v9, _metadata_v10)
 
 
 def migrate_metadata(db) -> int:

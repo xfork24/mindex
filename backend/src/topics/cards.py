@@ -48,8 +48,16 @@ def _coverage_summary(report: dict | None) -> dict | None:
 
 def view(row: dict, *, detail: bool = False, store=None) -> dict:
     body = loads(row["body"], {})
+    if store is not None and body.get("coverage"):
+        current = profiles.material_signature(store, profiles.body_of(store, row["profile_id"]))
+        previous = body["coverage"].get("material_scope", {"source_ids": [], "groups": []})
+        if current != previous:
+            body["coverage"] = {"status": "stale", "reason": "素材范围或组成员已变化，请重新打分",
+                                "visuals": [], "hits": 0, "total": 0, "ratio": 0}
+            body["scores"] = {}
     result = {"id": row["id"], "profile_id": row["profile_id"], "run_id": row["run_id"], "title": row["title"],
-              "status": row["status"], "job_id": row["job_id"], "total": row["total"],
+              "status": row["status"], "job_id": row["job_id"],
+              "total": None if (body.get("coverage") or {}).get("status") == "stale" else row["total"],
               "angle": body.get("angle", ""), "reason": body.get("reason", ""), "visuals": body.get("visuals", []),
               "scores": body.get("scores") or {}, "outline": body.get("outline"),
               "outline_origin": body.get("outline_origin"), "template_id": body.get("template_id") or "base",
@@ -80,7 +88,7 @@ def list_cards(store, profile_id: str, *, status: str | None = "new", limit: int
             raise ValueError(f"未知的卡片状态：{status}")
         rows = store.rows("SELECT * FROM topic_cards WHERE profile_id=? AND status=? "
                           "ORDER BY total DESC, created_at DESC, id LIMIT ?", (profile_id, status, limit))
-    return [view(row) for row in rows]
+    return [view(row, store=store) for row in rows]
 
 
 def counts(store, profile_id: str) -> dict:
@@ -162,6 +170,8 @@ def evaluate(config, store, profile_id: str, card_ids: list[str], *, llm, embedd
     from mindex.topics import gaps as topic_gaps
 
     profile = profiles.body_of(store, profile_id)
+    filters = profiles.material_filters(profile)
+    filters.effective_sources(store)  # 失效引用必须在模型调用前报错
     weights = profile.weights.model_dump()
     rows = [_row(store, card_id) for card_id in card_ids]
     bodies = [loads(row["body"], {}) for row in rows]
@@ -186,7 +196,8 @@ def evaluate(config, store, profile_id: str, card_ids: list[str], *, llm, embedd
         if progress:
             progress({"stage": "score", "message": f"打分与素材覆盖 {index + 1}/{len(rows)}", "done": index,
                       "total": len(rows)})
-        report = topic_coverage.report(config, store, body.get("visuals") or [], embedder=embedder)
+        report = topic_coverage.report(config, store, body.get("visuals") or [], embedder=embedder, filters=filters)
+        report["material_scope"] = profiles.material_signature(store, profile)
         if report["status"] != "ok" and report["reason"] and report["reason"] not in warnings:
             warnings.append(report["reason"])
         members = topic_items.items_by_id(store, body.get("item_ids") or [])
@@ -213,7 +224,7 @@ def write_outline(config, store, card_id: str, *, llm) -> dict:
     row = _row(store, card_id)
     body = loads(row["body"], {})
     profile = profiles.body_of(store, row["profile_id"])
-    members = topic_items.items_by_id(store, body.get("item_ids") or [])
+    members = profiles.scoped_items(store, profile, topic_items.items_by_id(store, body.get("item_ids") or []))
     retries = (config.topics.llm or config.studio.writer).split_retries
     text, template_id, warnings = topic_outline.draft(llm, store, config, profile, {"title": row["title"], **body},
                                                       members, retries=retries)

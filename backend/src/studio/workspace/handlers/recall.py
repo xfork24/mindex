@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from mindex.shared.storage import Store
 from mindex.studio import studio
 from mindex.studio.studio_artifacts import sanitized, visibility_key
 
@@ -46,9 +47,23 @@ class RecallHandler(StageHandler):
         if content.get("recall_limit"):
             payload["limit"] = content["recall_limit"]
         # 只在有限制时加键，保证不限任务的签名与历史版本逐字节一致。
-        if scope := studio.material_scope(studio.load_job(config, job_id)):
-            params = {**params, "sources": sorted(scope)}
+        database = resources.database()
+        state = studio.load_job(config, job_id)
+        status = studio.scope_status(state, database)
+        if status['source_ids'] is not None:
+            params = {**params, "sources": status['source_ids']}
         recall = signatures.recall_signature(content.get("recall"))
+        shot_groups = ((content.get("recall") or {}).get("filters") or {}).get("source_group_ids")
+        if shot_groups or state.get("source_group_ids"):
+            from mindex.shared.media_groups import Groups
+
+            groups = Groups(database)
+            params = {**params, "source_groups": {
+                "job": groups.state("source", state.get("source_group_ids")),
+                "shot": groups.state("source", shot_groups),
+            }}
+            if status['error']:
+                params['scope_error'] = status['error']
         if recall is not None:
             payload["recall"] = recall
         from mindex.persons.person_names import AUTO_PERSON_QUERY_VERSION, has_document_reference
@@ -63,6 +78,13 @@ class RecallHandler(StageHandler):
         return payload, inputs, params
 
     def preflight(self, config, job_id, w, p, sid, spec, found, node):
+        error = spec['parameters'].get('scope_error')
+        for values in spec['parameters'].get('source_groups', {}).values():
+            if any(group.get('invalid') for group in values):
+                error = "素材组已删除或类型不符，请重新选择"
+        if error and needs_recall(p, sid):
+            node.update(action="blocked", reason=error)
+            return
         if spec["parameters"]["index_id"] is None and needs_recall(p, sid):
             node.update(action="blocked", reason="尚未发布索引")
         # Explicit ranges do not need recall and can be built without an index.
@@ -89,7 +111,7 @@ class RecallHandler(StageHandler):
         limit = content.get("recall_limit") or params["limit"]
         granularity = content.get("granularity") or config.studio.recall.granularity
         # 任务素材范围是硬上限，回显的 recall 仍是用户原始设置。
-        scope = studio.material_scope(studio.load_job(config, job_id))
+        scope = studio.material_scope(studio.load_job(config, job_id), Store(config.data_dir))
         if mode == "text":
             result = engine.text(
                 TextSearch(

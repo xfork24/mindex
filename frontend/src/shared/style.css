@@ -315,7 +315,7 @@ button.language-switch .language-divider::after{content:"";position:absolute;ins
 .search-scope-row .material-filters,#person-filters,#person-controls{display:contents}
 .search-scope-row label,#person-controls label:has(.multi-select),#person-controls label:not(:has(.multi-select)){width:100%;min-width:0;max-width:100%;margin:0}
 .search-scope-row .muted{font-size:12px;line-height:18px}
-#person-controls .person-search-options{display:flex;flex-direction:column;gap:12px;min-width:0}
+#person-controls .person-search-options{display:flex;flex-direction:row;flex-wrap:wrap;gap:12px;min-width:0}
 .search-scope-row:has(#person-filters[hidden]){grid-template-columns:minmax(0,1fr)}
 .search-filter-row{grid-template-columns:repeat(5,minmax(0,1fr));align-items:end}
 .search-filter-row label{margin:0}
@@ -334,3 +334,53 @@ button.language-switch .language-divider::after{content:"";position:absolute;ins
 .search-scope-row,.search-filter-row{grid-template-columns:repeat(auto-fit,minmax(min(190px,100%),1fr))}
 .form-grid>.check{align-self:center}
 :is(.section-heading,.preview-actions,.preview-result-head,.source-form-actions,.gaps-actions,.topic-outline-actions){flex-wrap:wrap;min-width:0}
+
+/* 媒体组：复选标签按内容自然换行，避免原生多选框的空白、截断与横向滚动。 */
+.group-picker{display:block;min-width:0;min-inline-size:0;max-width:100%;margin:12px 0;padding:0;border:0;white-space:normal}
+.group-picker>.group-caption{display:block;max-width:100%;margin:0 0 8px;padding:0;font-size:12px;color:var(--muted);white-space:normal;overflow-wrap:anywhere}
+.group-picker>.group-options{display:flex;flex-wrap:wrap;align-items:flex-start;gap:8px;min-width:0}
+.group-picker .group-option{display:flex;align-items:flex-start;gap:7px;max-width:100%;min-width:0;margin:0;padding:7px 10px;border:1px solid var(--line);border-radius:8px;font-size:12px;line-height:1.6;cursor:pointer;white-space:normal}
+.group-picker .group-option>input[type=checkbox]{flex:0 0 16px;width:16px;height:16px;min-width:16px;margin:2px 0 0;padding:0}
+.group-picker .group-option>span{min-width:0;white-space:normal;overflow-wrap:anywhere;word-break:normal}
+.group-picker .group-option:has(input:checked){background:#eef4e8;border-color:#cad9c0}
+.group-picker .group-status{margin:6px 0 0;white-space:normal;overflow-wrap:anywhere}
+.group-picker .group-status:empty{display:none}
+
+/* 素材范围筛选按固定的适中宽度排列，不用等分列把少量控件撑满。 */
+.search-scope-row,.search-scope-row:has(#person-filters[hidden]){display:flex;flex-wrap:wrap;align-items:flex-start;gap:14px}
+.search-scope-row>.group-picker,.search-scope-row .material-filters>.group-picker{flex:0 1 auto;width:max-content;max-width:100%;margin:0}
+.search-scope-row label,#person-controls label:has(.multi-select),#person-controls label:not(:has(.multi-select)){flex:0 1 auto;width:max-content;max-width:100%;min-width:0}
+.search-scope-row .person-search-options{flex:0 1 auto;min-width:0}
+.group-picker-listbox>.group-options{display:block}
+.group-picker-listbox .multi-list>select option{white-space:normal;overflow-wrap:anywhere}
+
+/* 字段布局共用一条规则：内容宽度、横向排列、按容器宽度换行。 */
+.content-flow{display:flex!important;flex-direction:row!important;flex-wrap:wrap!important;align-items:flex-start;gap:12px;min-width:0;max-width:100%}
+.content-flow[hidden]{display:none!important}
+.content-flow>.content-flow,.content-flow>:is(h2,h3,h4,p,details,.buttons,.source-form-actions){flex-basis:100%}
+.content-flow>label:has(textarea),.content-flow>.form-field:has(textarea),.content-flow>.field:has(textarea){flex:1 1 300px;max-width:100%}
+.content-flow>textarea{flex-basis:100%;width:100%}
+.content-flow>button{width:auto!important;flex:0 1 auto;align-self:flex-end;max-width:100%;white-space:normal}
+.content-field{flex:0 1 auto!important;width:var(--control-content-width,auto)!important;min-width:0!important;max-width:100%!important;box-sizing:border-box}
+label.content-field,.form-field.content-field,.field.content-field,.group-picker.content-field{margin-top:0;margin-bottom:0}
+.content-field>:is(select,input:not([type=checkbox],[type=radio]),.multi-select),.content-field>.group-options>.multi-select{width:100%!important;max-width:100%;min-width:0}
+.content-flow>label:not(.content-field){margin:0;flex:0 1 auto;max-width:100%;min-width:0}
+.content-flow>.group-picker{margin:0}
+/* 分镜的素材名可比人物名更长，不使用固定 145px/190px 上限。 */
+.recall-scope-options>.content-field{max-width:100%!important}
+#person-controls .person-search-options{display:flex;flex-direction:row;flex-wrap:wrap;flex:0 1 auto;gap:12px;width:auto;max-width:100%;align-items:flex-start}
+.search-scope-row #person-filters,.search-scope-row #person-controls,.search-scope-row .material-filters{display:contents}
+.content-flow .multi-select{max-width:100%}
+
+.content-control{width:var(--control-content-width,auto);min-width:0!important;max-width:100%!important;box-sizing:border-box}
+.content-flow>.content-control{flex:0 1 var(--control-content-width,auto)}
+
+/* 标签与下拉在同一行时，字段宽度须包含标签、间距和控件三部分。 */
+.content-field.content-inline{flex-wrap:nowrap!important;white-space:nowrap;align-items:center}
+.content-field.content-inline>:is(select,input:not([type=checkbox],[type=radio])){width:var(--control-content-width)!important;flex:0 1 auto;min-width:0}
+.form-bottom.content-flow{align-items:center}
+.form-bottom.content-flow>button{align-self:center}
+
+/* 选项文字保持单行；极长名称在列表内部横向滚动，不把页面撑宽。 */
+select option{white-space:nowrap!important;overflow-wrap:normal!important;word-break:normal}
+.multi-list>select.content-options{min-width:var(--control-content-width)!important;max-width:none!important}

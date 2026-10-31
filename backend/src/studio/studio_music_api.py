@@ -10,7 +10,7 @@ import tempfile
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import File, Form, HTTPException, UploadFile
+from fastapi import File, Form, HTTPException, Query, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from pydantic import Field, ValidationError, model_validator
@@ -27,6 +27,7 @@ class AnalyzeBody(StrictModel):
 
 
 class RecommendBody(StrictModel):
+    music_group_ids: list[str] = Field(default_factory=list, max_length=200)
     text: str | None = Field(default=None, max_length=8000, description="段落文案；与 job_id/plan_id/shot_id 二选一")
     job_id: str | None = None
     plan_id: str | None = None
@@ -56,8 +57,9 @@ def music_routes(router, base, store, mutation_lock, *, current, writer=None):
         return adapters.make_writer(current())
 
     @router.get("/music-library")
-    def list_tracks(mood: str | None = None, q: str | None = None):
-        return {"items": music_library.list_tracks(store, mood=mood, query=q),
+    def list_tracks(mood: str | None = None, q: str | None = None,
+                    music_group_ids: Annotated[list[str] | None, Query()] = None):
+        return {"items": music_library.list_tracks(store, mood=mood, query=q, music_group_ids=music_group_ids),
                 "moods": [{"key": key, "label": label} for key, (label, _, _) in music_library.MOODS.items()]}
 
     @router.post("/music-library", status_code=201)
@@ -102,7 +104,8 @@ def music_routes(router, base, store, mutation_lock, *, current, writer=None):
         if not text.strip():
             text, estimated = music_library.segment_text(current(), body.job_id, body.plan_id, body.shot_id)
             seconds = seconds or estimated or None
-        return music_library.recommend(store, text, seconds=seconds, limit=body.limit, writer=text_model(body.ai))
+        return music_library.recommend(store, text, seconds=seconds, limit=body.limit, writer=text_model(body.ai),
+                                       music_group_ids=body.music_group_ids)
 
     @router.get("/music-library/{track_id}")
     def get_track(track_id: str):

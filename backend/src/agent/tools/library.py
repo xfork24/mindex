@@ -52,12 +52,14 @@ async def first_thumbnail(ctx: ToolContext, source_id: str) -> str | None:
 
 
 class ListSources(StrictModel):
+    source_group_ids: list[str] = Field(default_factory=list, description="多组取并集，再与搜索条件取交集；空组无候选")
     q: str = Field(default="", max_length=200, description="按名称过滤")
     limit: int = Field(default=30, ge=1, le=100)
 
 
 async def list_sources(args: ListSources, ctx: ToolContext) -> ToolOutput:
-    data = check(await ctx.client.get("/api/admin/sources", q=args.q, page=1, page_size=args.limit), "列出素材")
+    data = check(await ctx.client.get("/api/admin/sources", q=args.q, page=1, page_size=args.limit,
+                                           source_group_ids=args.source_group_ids or None), "列出素材")
     rows = [{"id": s["id"], "name": s["name"], "duration": (s.get("media") or {}).get("duration"),
              "prepared": s["prepared"], "shots": s.get("shot_count"), "hidden": s.get("hidden")}
             for s in data["items"]]
@@ -161,13 +163,15 @@ async def get_source(args: GetSource, ctx: ToolContext) -> ToolOutput:
               f"镜头 {data.get('shot_count', 0)}｜精细片段 {data.get('moment_count', 0)}"
               + ("｜" + "、".join(flags) if flags else ""))
     lines = [header]
+    if data.get("groups"):
+        lines.append("所属组：" + "、".join(f"{group['name']} ({group['id']})" for group in data["groups"]))
     if data.get("notes"):
         lines.append(f"备注：{clip(data['notes'], 200)}")
     lines += [work_line(name, work[name]) for name in WORK_NAMES if name in work]
     if data.get("work_refreshing"):
         lines.append("（工作状态正在后台刷新，覆盖与发布数据可能稍有滞后）")
     value = {"id": data["id"], "name": data["name"], "media": data.get("media"), "hidden": data.get("hidden"),
-             "favorite": data.get("favorite"), "notes": data.get("notes"),
+             "favorite": data.get("favorite"), "notes": data.get("notes"), "groups": data.get("groups", []),
              "work": {name: compact_work(work[name]) for name in WORK_NAMES if name in work}}
     poster = await first_thumbnail(ctx, data["id"])
     return ToolOutput(value, text="\n".join(lines), focus=admin_focus(data["id"]),

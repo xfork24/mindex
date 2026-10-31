@@ -6,6 +6,8 @@ const query = new URLSearchParams(location.search);
 const page = { items: [], moods: [], selected: null };
 const $ = (id) => document.getElementById(id);
 const api = (url, method = "GET", body) => MindexApi.json(url, method, body);
+const musicGroups = MindexGroups.picker("music", [], () => load(), "ui.groups_music_filter");
+$("music-group-filter").append(musicGroups.wrap);
 const trackUrl = (id, suffix = "") => `/api/studio/music-library/${encodeURIComponent(id)}${suffix}`;
 const MAX_MOODS = 3;
 
@@ -68,6 +70,7 @@ async function load(preferred) {
   const params = new URLSearchParams();
   if ($("music-search").value.trim()) params.set("q", $("music-search").value.trim());
   if ($("music-mood").value) params.set("mood", $("music-mood").value);
+  for (const id of musicGroups.values()) params.append("music_group_ids", id);
   const result = await api(`/api/studio/music-library${params.size ? `?${params}` : ""}`);
   page.items = result.items;
   page.moods = result.moods;
@@ -101,6 +104,7 @@ function renderDetail() {
   $("music-empty").hidden = Boolean(item);
   $("music-view").hidden = !item;
   if (!item) return;
+  MindexGroups.membership($("music-view"), "music", item);
   MindexI18n.setText($("music-title"), item.title);
   MindexI18n.setText($("music-tags"), item.expired ? MindexI18n.msg("ui.music_library_expired") : item.expires_at ?
     MindexI18n.msg("ui.music_expires_on", { p0: item.expires_at }) : MindexI18n.msg("ui.music_no_expiry"));
@@ -200,10 +204,11 @@ $("reload").addEventListener("click", () => load().then(() => notice(MindexI18n.
 window.addEventListener("mindex:languagechange", () => {renderMoodFilter();renderList();if (page.selected) renderDetail();});
 window.addEventListener("mindex:agent-mutation", (event) => {
   const detail = event.detail || {};
-  if (detail.domain === "studio" && detail.music_library) load().catch(() => {});
+  if (detail.groups || detail.domain === "studio" && detail.music_library) load().catch(() => {});
 });
-window.MindexAgentContext = () => ({ page: "music", track_id: page.selected?.id || null });
-window.MindexAgentFocus = async () => {
+window.MindexAgentContext = () => ({ page: "music", track_id: page.selected?.id || null, music_group_ids: musicGroups.values() });
+window.MindexAgentFocus = async (focus) => {
+  if (focus.music_group_ids) { musicGroups.setValues(focus.music_group_ids); await load(); }
   window.MindexAgent?.highlight($("music-list"));
   return true;
 };

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import threading
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response, UploadFile
 
@@ -66,13 +66,16 @@ def admin_router(store: Store, runtime=None) -> APIRouter:
         favorite_only: bool = False,
         page: int = Query(default=1, ge=1),
         page_size: int = Query(default=48, ge=1, le=100),
+        source_group_ids: Annotated[list[str] | None, Query()] = None,
     ):
-        return library.list_sources(q, visibility, favorite_only, page, page_size)
+        return library.list_sources(q, visibility, favorite_only, page, page_size, source_group_ids)
 
     @router.get("/sources/{source_id}")
     def source(source_id: str, detail: Literal["full", "summary", "work"] = "full"):
         config = runtime.current() if runtime else None
         value = work_cache.get(source_id) if detail == "work" else library.source(source_id, detail=detail)
+        from mindex.shared.media_groups import Groups
+        value["groups"] = Groups(store).for_member("source", source_id)
         return {**value, "enforce_gpu_lock": config.enforce_gpu_lock if config else False}
 
     @router.post("/sources/{source_id}/work-cache/refresh")

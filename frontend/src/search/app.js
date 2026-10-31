@@ -7,6 +7,7 @@ let registeredPeople = [];
 let registeredSources = [];
 // Keep the explicit material scope separate from options narrowed by person filters.
 let sourceScope = null;
+let groupSourceScope = null;
 const routeNames = { visual: MindexI18n.msg("ui.fe84e2eb06a1"), analysis: MindexI18n.msg("ui.5484a583c2c9"), video: MindexI18n.msg("ui.83b37291f23c"), description: MindexI18n.msg("ui.7c0f30403c16"), style: MindexI18n.msg("ui.bd17acd89736"), dialogue: MindexI18n.msg("ui.7d722c18e001"), lexical: MindexI18n.msg("ui.cc1b21e80080"), person: MindexI18n.msg("ui.bc9173082f3e") };
 const personKinds = { actor: MindexI18n.msg("ui.5fdb8b2c027a"), role: MindexI18n.msg("ui.6b26695e4dce") };
 
@@ -102,10 +103,21 @@ function bindDrop(panelId, inputId, labelId, kind, show) {
 bindDrop('image-input', 'image-file', 'image-drop', 'image', showImage);
 bindDrop('video-input', 'video-file', 'video-drop', 'video', showVideo);
 
+const searchGroups = MindexGroups.picker("source", [], () => {}, "ui.groups_filter", {listbox: true});
+$("source").closest(".material-filters").prepend(searchGroups.wrap);
+const searchGroupLink = MindexGroups.linkSources(searchGroups, $('source'), {
+  entries: () => searchFilterEntries('source'), selection: () => sourceScope,
+  fill: (entries) => fillOptions('source', entries),
+  onScope: (allowed) => { groupSourceScope = allowed; },
+  updated: () => fillSearchFilters(), onError: (error) => notice(error.message, 'error')
+});
+
 function filters() {
   const values = { scene: $('scene').value.trim(), emotion: $('emotion').value.trim(), shot_size: $('shot-size').value.trim() };
-  const sources = selectedValues('source');
+  const sources = sourceScope === null ? selectedValues('source') : sourceScope;
   if (sources.length) values.source_ids = sources;
+  const groupIds = searchGroups.values();
+  if (groupIds.length) values.source_group_ids = groupIds;
   for (const [key, id] of [['min_duration', 'min-duration'], ['max_duration', 'max-duration']]) {
     if ($(id).value !== '') values[key] = Number($(id).value);
   }
@@ -219,7 +231,19 @@ function render(data) {
     [...(annotation.scene || []), ...(annotation.emotions || []), ...(annotation.shot_size || [])].slice(0, 5).forEach((tag) => tags.append(MindexAnalysisText.setText(element('span', undefined, 'tag'), tag)));
     const actions = element('div', undefined, 'card-actions');
     const detail = element('button', MindexI18n.msg("ui.faea8c1db9cc"));detail.type = 'button';detail.onclick = () => details(result);
-    actions.append(detail, managementLink(result), correctionLink(result));
+    const similar = element('button', MindexI18n.msg('ui.groups_similar'));
+    similar.type = 'button';
+    similar.onclick = async () => {
+      similar.disabled = true;
+      try {
+        const data = await MindexApi.json('/api/search/similar', 'POST', {
+          segment_id: result.id, granularity: $('granularity').value,
+          limit: Number($('limit').value), filters: filters()
+        });
+        render(data);
+      } catch (error) { notice(error.message, 'error'); } finally { similar.disabled = false; }
+    };
+    actions.append(detail, similar, managementLink(result), correctionLink(result));
     const evidenceMatch = (result.matches || []).find((match) => match.matched_text);
     const evidenceText = evidenceMatch?.matched_text;
     const description = result.display_name || evidenceText || (result.annotation_status === 'not_analyzed' ? '' : annotation.description || '');
@@ -303,9 +327,10 @@ function fillOptions(id, entries) {
 function searchFilterEntries(id, useRoles = true) {
   const actors = new Set(selectedValues('actor-select'));
   const roles = new Set(useRoles ? selectedValues('role-select') : []);
-  const sources = new Set(sourceScope || []);
-  const scoped = sourceScope !== null;
-  const works = new Set(registeredSources.filter((s) => sources.has(s.id)).map((s) => s.work_id));
+  const availableSources = registeredSources.filter((item) => groupSourceScope === null || groupSourceScope.has(item.id));
+  const sources = new Set(sourceScope === null ? availableSources.map((item) => item.id) : sourceScope);
+  const scoped = sourceScope !== null || groupSourceScope !== null;
+  const works = new Set(availableSources.filter((s) => sources.has(s.id)).map((s) => s.work_id));
   const matches = registeredPeople.filter((e) => e.kind === 'role' &&
     (id === 'source' || !scoped || (e.work_ids || []).some((w) => works.has(w))) &&
     (id === 'actor-select' || !actors.size || (e.actor_ids || []).some((a) => actors.has(a))) &&
@@ -315,9 +340,9 @@ function searchFilterEntries(id, useRoles = true) {
     const ids = new Set(matches.flatMap((r) => r.actor_ids || []));
     return registeredPeople.filter((e) => e.kind === 'actor' && (!scoped && !roles.size || ids.has(e.id)));
   }
-  if (mode !== 'text' || !actors.size && !roles.size) return registeredSources;
+  if (mode !== 'text' || !actors.size && !roles.size) return availableSources;
   const ids = new Set(matches.flatMap((r) => r.work_ids || []));
-  return registeredSources.filter((s) => ids.has(s.work_id));
+  return availableSources.filter((s) => ids.has(s.work_id));
 }
 function fillSearchFilters(changed = 'source') {
   // First remove selections invalidated by the changed control, then update the other facets.
@@ -334,7 +359,9 @@ function fillSearchFilters(changed = 'source') {
   fillOptions('role-select', searchFilterEntries('role-select'));
 }
 $('filter-reset').onclick = () => {
-  sourceScope = null;
+  searchGroups.setValues([]);
+  sourceScope = null; groupSourceScope = null;
+  void searchGroupLink.refresh();
   for (const [id, value] of Object.entries({ 'person-mode': 'auto', 'person-relation': 'all', granularity: 'moment', limit: '20', scene: '', emotion: '', 'shot-size': '', 'min-duration': '', 'max-duration': '' })) $(id).value = value;
   for (const id of ['actor-select', 'role-select', 'source']) {
     applyAll($(id), id === 'source');
@@ -351,14 +378,13 @@ $('filter-reset').onclick = () => {
 async function refresh() {
   $('refresh').disabled = true;
   try {
-    const filtersReady = api('/api/persons/filters').then((catalogue) => {
+    const filtersReady = api('/api/persons/filters').then(async (catalogue) => {
       registeredPeople = catalogue.entities;
       registeredSources = catalogue.sources;
       if (sourceScope !== null) {
         sourceScope = sourceScope.filter((id) => registeredSources.some((s) => s.id === id));
       }
-      fillOptions('source', registeredSources);
-      fillSearchFilters();
+      await searchGroupLink.refresh();
     });
     const [data] = await Promise.all([api('/api/status?health=true&summary=true'), filtersReady]);
     const count = data.segment_counts.find((item) => item.kind === 'moment')?.count || 0;
@@ -386,7 +412,7 @@ $('query').addEventListener('input', () => {
   MindexI18n.setText($('person-hint'), names.length ? MindexI18n.msg("ui.4759bc4a8e9a") + names.map((p) => `${personKinds[p.kind] || p.kind} ${p.name} · ${p.id.slice(0, 8)}`).join('、') + MindexI18n.msg("ui.58b4558e0c39") : MindexI18n.msg("ui.e18397481723"));
 });
 // 智能助手：上下文提供当前检索词；定位时填入检索词并执行（被动定位只高亮，不替用户检索）。
-window.MindexAgentContext = () => ({ page: 'search', mode, query: $('query').value.trim() || null });
+window.MindexAgentContext = () => ({ page: 'search', mode, query: $('query').value.trim() || null, source_group_ids: searchGroups.values() });
 window.MindexAgentFocus = async (focus, { passive = false } = {}) => {
   const mark = (element) => window.MindexAgent?.highlight(element);
   if (!focus.query?.text || passive) {
@@ -395,6 +421,15 @@ window.MindexAgentFocus = async (focus, { passive = false } = {}) => {
   }
   if (!$('source').options.length || busy) return false; // 素材选项尚未加载或正在检索
   if (mode !== 'text') switchMode('text');
+  if (focus.query.filters) {
+    const values = focus.query.filters;
+    searchGroups.setValues(values.source_group_ids || []);
+    sourceScope = values.source_ids?.length ? values.source_ids : null;
+    await searchGroupLink.refresh();
+    for (const [key, id] of [['scene', 'scene'], ['emotion', 'emotion'], ['shot_size', 'shot-size'], ['min_duration', 'min-duration'], ['max_duration', 'max-duration']]) {
+      $(id).value = values[key] ?? '';
+    }
+  }
   $('query').value = focus.query.text;
   if (focus.query.granularity && [...$('granularity').options].some((o) => o.value === focus.query.granularity))
     $('granularity').value = focus.query.granularity;

@@ -752,6 +752,7 @@ class JobOptions(StrictModel):
     recall_limit: int | None = Field(default=None, ge=1, le=50)
     burn: bool | None = None
     source_ids: list[str] | None = Field(default=None, max_length=200)
+    source_group_ids: list[str] = Field(default_factory=list, max_length=200)
 
     @model_validator(mode="after")
     def known_sources(self):
@@ -879,10 +880,29 @@ def _summary(state: dict) -> dict:
     }
 
 
-def material_scope(state: dict) -> set[str] | None:
-    """任务允许使用的素材集合；None 表示不限（全选）。创建后只读，不随方案变化。"""
+def scope_status(state: dict, store) -> dict:
+    """用于页面、候选和签名的最新任务范围；失效任务仍可打开并重新选择。"""
     ids = state.get("source_ids")
-    return set(ids) if ids else None
+    filters = Filters(source_ids=ids or [], source_group_ids=state.get("source_group_ids") or [])
+    try:
+        scope = filters.effective_sources(store)
+        error = "所选素材组与素材范围没有可用成员，请重新选择" if scope == set() else None
+        return {"source_ids": sorted(scope) if scope is not None else None, "error": error}
+    except ValueError as exc:
+        return {"source_ids": [], "error": str(exc)}
+
+
+def material_scope(state: dict, store=None) -> set[str] | None:
+    """动态组范围与手动素材范围取交集，失效引用或空范围明确报错。"""
+    if not state.get("source_group_ids"):
+        ids = state.get("source_ids")
+        return set(ids) if ids else None
+    if store is None:
+        raise StudioError("解析素材组需要素材数据库")
+    status = scope_status(state, store)
+    if status["error"]:
+        raise StudioError(status["error"])
+    return set(status["source_ids"]) if status["source_ids"] is not None else None
 
 
 def scoped_filters(filters: Filters, scope: set[str] | None) -> Filters:
@@ -891,8 +911,10 @@ def scoped_filters(filters: Filters, scope: set[str] | None) -> Filters:
     空交集说明分镜选中的素材全部被排除在任务范围之外，直接报错而不是退化成「不限」——
     Filters 的空选择表示全库，静默放宽会让任务范围失效。
     """
-    if not scope:
+    if scope is None:
         return filters
+    if not scope:
+        raise StudioError("素材范围没有可用成员，请重新选择")
     picked = filters.selected_sources()
     if picked and not picked & scope:
         raise StudioError("分镜素材范围与本任务允许的素材范围没有交集，请调整分镜的素材范围")
@@ -928,6 +950,8 @@ def create_job(config: Config, text: str, title: str | None = None, options: dic
         from mindex.shared.storage import Store
 
         store = Store(config.data_dir)
+    if parsed.source_group_ids:
+        material_scope(parsed.model_dump(), store)
     known = store.source_ids() if parsed.source_ids else set()
     unknown = [value for value in parsed.source_ids or [] if value not in known]
     if unknown:
@@ -950,8 +974,9 @@ def create_job(config: Config, text: str, title: str | None = None, options: dic
         "created_at": now(),
         "updated_at": now(),
         "voice_mode": "custom" if parsed.voice else "inherit",
-        # 素材范围是任务级只读约束，刻意不放进 options：方案参数对话框不该改它。
+        # 素材范围是任务级约束，独立于方案参数，通过 material-scope 接口编辑。
         "source_ids": sorted(set(parsed.source_ids)) if parsed.source_ids else None,
+        **({"source_group_ids": sorted(set(parsed.source_group_ids))} if parsed.source_group_ids else {}),
         "options": {
             "voice": parsed.voice or config.studio.tts.voice,
             "audio_mode": parsed.audio_mode or config.studio.audio.mode,
@@ -1240,6 +1265,8 @@ def set_execution(config, job_id, status, current_step, remaining_steps):
 
 
 def step_configuration(config, state, step):
+    from mindex.shared.storage import Store
+
     studio = config.studio
     recall = {
         "recall": studio.recall.model_dump(),
@@ -1249,7 +1276,7 @@ def step_configuration(config, state, step):
         "limit": state["options"]["recall_limit"],
     }
     # 只在有限制时加键，保证不限任务的指纹与历史检查点逐字节一致。
-    if scope := material_scope(state):
+    if scope := material_scope(state, Store(config.data_dir)):
         recall["sources"] = sorted(scope)
     values = {
         "split": {"generator": portable_parameters(config, studio.generator.model_dump()), "version": SPLIT_VERSION},

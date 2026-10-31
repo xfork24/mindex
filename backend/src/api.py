@@ -107,6 +107,8 @@ def create_app(
     app.include_router(dialogue_router(runtime, store, embedder))
     app.include_router(source_tasks_router(runtime, store, embedder))
     app.include_router(indexes_router(runtime, store, embedder))
+    from mindex.admin.groups import groups_router
+    app.include_router(groups_router(store))
     app.include_router(admin_router(store, runtime))
     app.include_router(settings_router(runtime, store))
     app.include_router(studio_router(
@@ -159,6 +161,7 @@ def create_app(
     register_page("studio", "delivery-templates.html", ("/studio/delivery-templates", "/studio/delivery-templates/"))
     register_page("studio", "brands.html", ("/studio/brands", "/studio/brands/"))
     # 音乐库是素材管理页的子页面（与素材并列的分区标签）；第三方工具是设置页的一个配置组。
+    register_page("admin", "groups.html", ("/admin/groups", "/admin/groups/"))
     register_page("admin", "music.html", ("/admin/music", "/admin/music/"))
 
     def moved(target, rename=None):

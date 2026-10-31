@@ -10,6 +10,7 @@ const scenario = (name, run) => scenarios.push({ name, run });
 
 async function createProfile(page, { name, domain, taboos = [] }) {
   await page.locator(await page.locator("#profile-new").isVisible() ? "#profile-new" : "#profile-new-empty").click();
+  assert.equal(await page.locator("#pf-language,#pf-region").count(), 0, "领域档案不提供语言地区限制");
   await page.fill("#pf-name", name);
   await page.fill("#pf-domain", domain);
   if (taboos.length) await page.fill("#pf-taboos", taboos.join("\n"));
@@ -17,6 +18,47 @@ async function createProfile(page, { name, domain, taboos = [] }) {
   await page.waitForFunction((n) => [...document.querySelectorAll("#profile-select option")]
     .some((o) => o.selected && o.textContent.startsWith(n)), name);
 }
+
+scenario("material_scope", async (page) => {
+  await page.goto(`${base}/studio/topics`);
+  await createProfile(page, { name: "范围测试", domain: "科技" });
+  const groupSelect = page.locator("#topic-material-scope .group-picker select");
+  const sources = page.locator("#topic-material-sources");
+  await page.waitForFunction(() => document.querySelector("#topic-material-sources").options.length === 2);
+  const response = await page.request.get(`${base}/api/admin/groups?type=source`);
+  const groups = (await response.json()).items;
+  const chosen = groups.find((g) => g.name === "选题素材组").id;
+  const empty = groups.find((g) => g.name === "空素材组").id;
+  await groupSelect.selectOption(chosen);
+  await page.waitForFunction(() => document.querySelector("#topic-material-sources").options.length === 1);
+  assert.deepEqual(await sources.evaluate((node) => [...node.options].map((o) => o.value)), ["material-a"]);
+  await page.click("#topic-material-save");
+  await page.waitForFunction(() => document.querySelector("#notice").textContent.includes("素材范围已保存"));
+  await page.locator("#topic-material-current-members summary").filter({hasText: "1"}).waitFor();
+  assert.match(await page.locator("#topic-material-current").textContent(), /选题素材组/);
+  await page.locator("#topic-material-current-members summary").click();
+  assert.deepEqual(await page.locator("#topic-material-current li").allTextContents(), ["material-a"]);
+  await page.reload();
+  await page.waitForFunction((id) => document.querySelector("#topic-material-scope .group-picker select")?.selectedOptions[0]?.value === id, chosen);
+  assert.deepEqual(await sources.evaluate((node) => [...node.options].map((o) => o.value)), ["material-a"]);
+  await page.locator("#topic-material-current-members summary").filter({hasText: "1"}).waitFor();
+  assert.match(await page.locator("#topic-material-current").textContent(), /选题素材组/);
+  await groupSelect.selectOption(empty);
+  await page.waitForFunction(() => document.querySelector("#topic-material-sources").disabled && document.querySelector("#topic-material-sources").options.length === 0);
+  assert.equal(await sources.locator("option").count(), 0);
+  await page.click("#topic-material-save");
+  await page.waitForFunction(() => document.querySelector("#notice").textContent.includes("素材范围已保存"));
+  await page.locator("#topic-material-current-members summary").filter({hasText: "0"}).waitFor();
+  assert.match(await page.locator("#topic-material-current").textContent(), /空素材组/);
+  for (const width of [1280, 390, 320]) {
+    await page.setViewportSize({width, height: 900});
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+    assert.doesNotMatch(await page.locator("#topic-material-scope").textContent(), /[\uE000\uE001]/);
+  }
+  await page.click("[data-language-toggle]");
+  assert.match(await page.textContent("#topic-material-save"), /Save material scope/);
+  assert.match(await page.locator("#topic-material-current h3").textContent(), /Currently saved material scope/);
+});
 
 scenario("profiles", async (page) => {
   await page.goto(`${base}/studio/topics`);

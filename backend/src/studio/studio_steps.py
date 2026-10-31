@@ -88,7 +88,7 @@ def run_recall(config: Config, job_id: str, state: dict, embedder: MultimodalEmb
     empty: list[str] = []
     session = current.get()
     visibility = visibility_key(store)
-    scope = studio.material_scope(state)
+    scope = studio.material_scope(state, store)
     for shot in storyboard.shots:
         # 分镜级覆盖优先，未设置时跟随方案数量与服务配置粒度。
         limit = shot.recall_limit or state["options"]["recall_limit"]

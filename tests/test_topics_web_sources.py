@@ -55,7 +55,7 @@ def test_hotlist_config_validation():
 @pytest.fixture
 def store_profile(config):
     store = Store(config.data_dir)
-    body = ProfileBody(name="财经号", domain="金融", subtopics=["宏观", "股市"], keywords=[], region="cn")
+    body = ProfileBody(name="财经号", domain="金融", subtopics=["宏观", "股市"], keywords=[], region="cn", language="zh-hans")
     return store, profiles.create_profile(store, body)["id"]
 
 
@@ -118,10 +118,10 @@ def test_brave_queries_params_errors_and_budget(config, store_profile, monkeypat
     result = datasources.try_source(config, store, brave["id"])
     assert result["ok"] and result["items"][0]["title"] == "央行宣布降息" and result["items"][0]["summary"] == "降息 25 个基点"
     assert result["items"][0]["published_at"].startswith("2026-10-25T08:00:00")
-    # 查询词：没有关键词时用"领域 + 子方向"；地区转大写，语言取档案
+    # 查询词：没有关键词时用"领域 + 子方向"；默认全球，不再继承旧档案的语言/地区
     assert [c.url.params["q"] for c in calls] == ["金融 宏观", "金融 股市"]
     params = calls[0].url.params
-    assert params["freshness"] == "pd" and params["country"] == "CN" and params["search_lang"] == "zh-hans"
+    assert params["freshness"] == "pd" and params["country"] == "ALL" and "search_lang" not in params
     assert params["count"] == "10" and calls[0].headers["x-subscription-token"] == "good-key-1234"
     web = datasources.create_source(store, pid, datasources.SourceBody(
         kind="brave", name="网页", secret="good-key-1234",

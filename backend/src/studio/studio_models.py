@@ -69,7 +69,11 @@ def validate_recall_references(config, store: Store, job_id, shots):
 
     catalogue = Persons(store)
     inputs = studio.job_dir(config, job_id) / "inputs"
-    scope = studio.material_scope(studio.load_job(config, job_id))
+    job = studio.load_job(config, job_id)
+    scope = studio.material_scope(job, store)
+    # 动态组与逐镜手动范围在召回时取交集；静态任务素材白名单仍按原行为校验越界。
+    if job.get("source_group_ids"):
+        scope = set(job['source_ids']) if job.get('source_ids') else None
     for shot in shots:
         recall = shot.recall
         if not recall:
@@ -78,6 +82,7 @@ def validate_recall_references(config, store: Store, job_id, shots):
             entity = catalogue.entity(identifier)
             if entity["kind"] == "work":
                 raise studio.StudioError("人物召回不能选择作品，请选择演员或角色")
+        recall.filters.effective_sources(store)  # 校验组引用类型与存在性
         outside = recall.filters.selected_sources() - scope if scope else set()
         if outside:
             raise studio.StudioError(
@@ -290,3 +295,8 @@ class WindowBody(StrictModel):
     start: float = Field(ge=0, allow_inf_nan=False)
     preview_token: str | None = None
     render_preview: bool = True
+
+
+class MaterialScopeBody(StrictModel):
+    source_ids: list[str] | None = Field(default=None, max_length=200)
+    source_group_ids: list[str] = Field(default_factory=list, max_length=200)

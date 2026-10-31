@@ -59,8 +59,10 @@ class ProfileBody(StrictModel):
     positioning: str = Field(default="", max_length=500, description="账号定位与表达风格")
     taboos: list[str] = Field(default_factory=list, max_length=30, description="禁区：不做的选题与不写的内容")
     keywords: list[str] = Field(default_factory=list, max_length=30, description="检索与搜索关键词")
-    language: str = Field(default="zh-hans", min_length=2, max_length=16, pattern=r"^[A-Za-z-]+$")
-    region: str = Field(default="CN", min_length=2, max_length=8, pattern=r"^[A-Za-z]+$")
+    language: str | None = Field(default=None, min_length=2, max_length=16, pattern=r"^[A-Za-z-]+$")
+    region: str | None = Field(default=None, min_length=2, max_length=8, pattern=r"^[A-Za-z]+$")
+    source_ids: list[str] = Field(default_factory=list, max_length=200)
+    source_group_ids: list[str] = Field(default_factory=list, max_length=200)
     canvas: Canvas = "16:9"
     weights: Weights = Field(default_factory=Weights)
     schedule: Schedule = Field(default_factory=Schedule)
@@ -107,6 +109,8 @@ class ProfileChanges(StrictModel):
     keywords: list[str] | None = Field(default=None, max_length=30)
     language: str | None = Field(default=None, min_length=2, max_length=16, pattern=r"^[A-Za-z-]+$")
     region: str | None = Field(default=None, min_length=2, max_length=8, pattern=r"^[A-Za-z]+$")
+    source_ids: list[str] | None = Field(default=None, max_length=200)
+    source_group_ids: list[str] | None = Field(default=None, max_length=200)
     canvas: Canvas | None = None
     weights: Weights | None = None
     schedule: Schedule | None = None
