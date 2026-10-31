@@ -26,6 +26,7 @@
       data = response.ok ? {} : {detail: `HTTP ${response.status}`};
     }
     if (!response.ok) throw failure(response, data);
+    if (data?._analysis_translations) root.MindexAnalysisText?.addTranslations(data._analysis_translations);
     return data;
   }
   function json(url, method = 'GET', body, options = {}) {

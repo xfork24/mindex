@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from collections.abc import Callable
 from itertools import pairwise
@@ -24,6 +25,7 @@ from mindex.models.adapters import (
     analysis_content_rejection,
     parse_json,
 )
+from mindex.shared.analysis_text import select_analysis
 from mindex.shared.config import Config
 from mindex.shared.media import frame_data
 from mindex.shared.trace import record
@@ -184,7 +186,19 @@ class QwenAnalyzer:
     @staticmethod
     def _validate_annotation(result) -> Annotation:
         try:
-            return Annotation.model_validate(result)
+            annotation = Annotation.model_validate(result)
+            values = [(field if isinstance(value, str) else f"{field}.{i}", text)
+                      for field, value in annotation.model_dump().items()
+                      for i, text in enumerate([value] if isinstance(value, str) else value)]
+            # 单语旧适配器仍兼容；双语响应必须逐项分隔且英文中不再混入汉字。
+            if any(re.search(r"[\u3400-\u9fff]", text) and re.search(r"[A-Za-z]", text)
+                   for _, text in values):
+                for field, text in values:
+                    english = select_analysis(text, "en")
+                    if english == text or re.search(r"[\u3400-\u9fff]", english):
+                        raise InvalidAnalysisStructure(
+                            f"{field}: 双语分析必须使用中文 / English，英文部分不得含汉字")
+            return annotation
         except ValidationError as exc:
             # Feed back field paths and expected types, not untrusted model text.
             errors = "; ".join(
@@ -213,6 +227,8 @@ class QwenAnalyzer:
             "每个字符串统一使用『中文 / English』格式：先中文，再用空格、斜杠、空格分隔，后接自然英文。"
             "description 的中文描述后必须紧跟含义一致的英文描述；所有数组中的每一项也必须是中英对照短语。"
             "英文用常见、具体的视频检索词和规范镜头术语，不用拼音，不照抄中文冒充英文。"
+            "英文部分不得含任何汉字；画面文字、字幕引用和人名也须翻译或转写为英文。"
+            "禁止省略中英文之间的空格斜杠空格分隔符，例如必须写仰视 / low-angle view，不能写仰视 low-angle view。"
             "两种语言描述同一组事实，英文不得增加画面中不存在的细节、人物身份、声音或事件。"
             "输出只能是一个合法 JSON 对象，从 { 开始到 } 结束。"
             "禁止 Markdown、代码块、前言、总结、分析过程、字段说明及 JSON 之外的任何文字。"

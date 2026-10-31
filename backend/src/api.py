@@ -83,7 +83,9 @@ def create_app(
         rewrite_started = time.perf_counter()
         payload = b"".join([chunk async for chunk in response.body_iterator])
         try:
-            data = add_message_metadata(json.loads(payload))
+            from mindex.shared.analysis_translations import display_metadata
+
+            data = display_metadata(add_message_metadata(json.loads(payload)), store.root)
         except (ValueError, UnicodeDecodeError):
             from starlette.responses import Response
             return Response(payload, status_code=response.status_code, headers=dict(response.headers))

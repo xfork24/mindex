@@ -2,6 +2,7 @@
 (function () {
   'use strict';
   const bindings = new WeakMap();
+  const translations = new Map();
   const labels = {
     '动作': 'ui.d9d9827827e1', '场景': 'ui.625b392c7b8a', '人物': 'ui.b755b68373c8',
     '对象': 'ui.539cb3b0a662', '人物情绪': 'ui.6e8e0c3eeeac', '氛围': 'ui.6b8f229d5eb9',
@@ -10,6 +11,7 @@
   const current = () => window.MindexI18n.language;
   function select(value, language = current()) {
     const text = String(value ?? '');
+    if (language === 'en' && translations.has(text)) return translations.get(text);
     // The analysis prompt defines Chinese / English within each string. Ordinary
     // slashes, Chinese alternatives, URLs and old monolingual values stay intact.
     for (const match of text.matchAll(/\s+\/\s+/g)) {
@@ -55,5 +57,11 @@
   window.addEventListener('mindex:languagechange', () => {
     document.querySelectorAll('[data-analysis-text]').forEach(update);
   });
-  window.MindexAnalysisText = {select, view, setText};
+  function addTranslations(values) {
+    for (const [source, english] of Object.entries(values)) {
+      if (typeof english === 'string' && english.trim() && !/[\u3400-\u9fff]/.test(english)) translations.set(source, english);
+    }
+    document.querySelectorAll('[data-analysis-text]').forEach(update);
+  }
+  window.MindexAnalysisText = {select, view, setText, addTranslations};
 })();

@@ -319,3 +319,22 @@ def test_bilingual_prompt_changes_analysis_cache_identity(config):
         "layout": config.layout_key,
     })
     assert config.analysis_key != old
+
+
+@pytest.mark.parametrize('bad', ['仰视 low-angle view', '仰视 / 仰视 low-angle view', '仰视'])
+def test_malformed_bilingual_values_are_retried(config, monkeypatch, bad):
+    config.analyzer.response_retries = 1
+    valid = {'description': '树林。 / Woodland.', 'angle': ['仰视 / low-angle view']}
+    responses = iter([chat_response({**valid, 'angle': [bad]}), chat_response(valid)])
+    bodies = []
+
+    def reply(*args, **kwargs):
+        bodies.append(kwargs['json'])
+        return next(responses)
+
+    monkeypatch.setattr(adapters, 'request', reply)
+    monkeypatch.setattr(qwen, 'frame_data', lambda *args: [])
+    monkeypatch.setattr(qwen, 'time', SimpleNamespace(sleep=lambda _: None))
+    result = QwenAnalyzer(config).analyze(None, [])
+    assert result.angle == valid['angle']
+    assert 'angle.0: 双语分析' in bodies[1]['messages'][0]['content']

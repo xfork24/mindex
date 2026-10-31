@@ -11,6 +11,7 @@ from mindex.api import create_app
 from mindex.processing.dialogue import DialogueProcessor
 from mindex.processing.indexing import IndexBuilder
 from mindex.processing.pipeline import Pipeline
+from mindex.shared.jsonio import save
 from mindex.shared.types import Annotation
 
 
@@ -25,8 +26,8 @@ def test_analysis_language_display(config, video_file):
     annotation = Annotation(
         description="城市夜景。 / City lights at night.", actions=["行走 / walking"],
         people=["穿红衣的人 / A person in red"], objects=["灯光 / lights"], scene=["滨水区 / waterfront"],
-        emotions=["平静 / calm"], atmosphere=["安静 / quiet"], shot_size=["远景 / wide shot"],
-        angle=["平视 / eye level"], camera_motion=["固定镜头 / static shot"],
+        emotions=["平静 / calm"], atmosphere=["清新 lush", "静谧 quiet", "明亮 illuminated"], shot_size=["远景 / wide shot"],
+        angle=["仰视 low-angle view"], camera_motion=["固定镜头 / static shot"],
         visual_evidence=["水面有倒影 / Reflections on water"], dialogue_inference=["提及夜晚 / Mentions the night"],
         uncertainty=["身份不明 / Identity unknown"],
     )
@@ -37,6 +38,11 @@ def test_analysis_language_display(config, video_file):
         "status": "complete", "source": "asr", "utterances": [
             {"start": .1, "end": 17.9, "text": "对白原文 / Original dialogue"},
         ], "words": [], "model_identity": {"fixture": True},
+    })
+    save(config.data_dir / 'analysis-translations.en.json', {
+        '仰视 low-angle view': 'low-angle view', '清新 lush': 'lush',
+        '静谧 quiet': 'quiet', '明亮 illuminated': 'illuminated',
+        '旧版中文描述': 'Legacy Chinese description', '行走': 'walking',
     })
     embedder = FixtureEmbedder(config)
     IndexBuilder(config, embedder).build(channels=["analysis", "dialogue"], activate=True)

@@ -50,8 +50,8 @@ def test_duration_handles_multiday_runs():
     assert duration(90061) == "1天 01:01:01"
 
 
-@pytest.mark.parametrize("command", ["analyze", "index"])
-def test_cli_wires_progress_and_keeps_index_stdout(config, monkeypatch, caplog, command):
+@pytest.mark.parametrize("command,force", [("analyze", False), ("analyze", True), ("index", False)])
+def test_cli_wires_progress_and_keeps_index_stdout(config, monkeypatch, caplog, command, force):
     from mindex.processing import indexing, pipeline
 
     calls = []
@@ -63,8 +63,8 @@ def test_cli_wires_progress_and_keeps_index_stdout(config, monkeypatch, caplog, 
         def lock(self, source, work):
             return nullcontext()
 
-        def analyze(self, source, *, progress):
-            calls.append(("analyze", source))
+        def analyze(self, source, *, progress, force=False):
+            calls.append(("analyze", source, force))
             progress({"stage": "analyze", "completed": 1, "total": 1})
 
     class IndexBuilder:
@@ -82,6 +82,8 @@ def test_cli_wires_progress_and_keeps_index_stdout(config, monkeypatch, caplog, 
     monkeypatch.setattr(pipeline, "Pipeline", Pipeline)
     monkeypatch.setattr(indexing, "IndexBuilder", IndexBuilder)
     args = [command] if command == "analyze" else ["index", "--channel", "analysis", "--activate"]
+    if force:
+        args.append("--force")
     with caplog.at_level(logging.INFO):
         result = CliRunner().invoke(cli.app, args)
     assert result.exit_code == 0, result.output
@@ -90,6 +92,8 @@ def test_cli_wires_progress_and_keeps_index_stdout(config, monkeypatch, caplog, 
     if command == "index":
         assert result.stdout.strip() == "index-fixture"
         assert calls[0][1]["channels"] == ["analysis"] and calls[0][1]["activate"]
+    else:
+        assert calls == [("analyze", None, force)]
 
 
 def test_interrupt_is_not_reported_as_success(caplog):

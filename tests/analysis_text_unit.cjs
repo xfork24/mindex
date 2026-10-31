@@ -42,3 +42,15 @@ assert.equal(actions.textContent,'动作：行走；交谈');
 assert.equal(JSON.stringify(annotation),original);
 assert.equal(select('<img src=x onerror=alert(1)>'),' <img src=x onerror=alert(1)>'.trim());
 console.log('Analysis text selection, legacy fallback, slashes, multiline views and live language bindings passed');
+// Legacy/malformed model output uses explicit translations and retains its Chinese original.
+const legacy=node();
+setText(legacy,['仰视 low-angle view','清新 lush'],{label:'Angle'});
+root.MindexAnalysisText.addTranslations({'仰视 low-angle view':'low-angle view','清新 lush':'lush','旧版描述':'Legacy description','坏翻译':'中文 English'});
+assert.equal(select('仰视 low-angle view','zh'),'仰视 low-angle view');
+assert.equal(select('仰视 low-angle view','en'),'low-angle view');
+assert.equal(select('坏翻译','en'),'坏翻译');
+language('en');
+assert.equal(legacy.textContent,'Angle: low-angle view; lush');
+assert.equal(view('旧版描述\n角度：仰视 low-angle view\n氛围：清新 lush','en').split('\n')[0],'Legacy description');
+language('zh');
+assert.equal(legacy.textContent,'Angle：仰视 low-angle view；清新 lush');

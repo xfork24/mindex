@@ -288,12 +288,21 @@ def build_digest(config: Config, store=None, state: dict | None = None, *, langu
                                                  ("shot_size", filters.shot_size))))
 
         decorated = [segment for segment in decorated if matches(segment)]
+    selected_language = language or state.get("language", "zh")
+    if selected_language == "en":
+        from mindex.shared.analysis_translations import english_analysis_view, load_translations
+
+        translations = load_translations(store.root)
+        if translations:
+            decorated = [{**segment, "views": {**segment.get("views", {}),
+                          "analysis": english_analysis_view(segment.get("views", {}).get("analysis", ""), translations)}}
+                         for segment in decorated]
     return compose_digest(
         decorated,
         scope=scope,
         budget=budget,
         content_index_id=active["id"],
-        language=language or (state or {}).get("language", "zh"),
+        language=selected_language,
     )
 
 

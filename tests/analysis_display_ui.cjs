@@ -14,7 +14,7 @@ const {chromium}=require(process.env.MINDEX_PLAYWRIGHT_MODULE || 'playwright');
    const text=(await root.locator('[data-analysis-text]').allTextContents()).join('\n');
    assert(text.length>0);
    if(language==='en'){
-    assert(text.includes('City lights'),text);assert(text.includes('walking'),text);
+    assert(!/[\u3400-\u9fff]/.test(text),text);assert(text.includes('low-angle view')&&text.includes('lush')&&text.includes('illuminated'),text);assert(text.includes('City lights'),text);assert(text.includes('walking'),text);
     assert(!text.includes('城市夜景')&&!text.includes('行走')&&!text.includes('远景'),text);
    }else{
     assert(text.includes('城市夜景'),text);assert(text.includes('行走'),text);
@@ -32,11 +32,11 @@ const {chromium}=require(process.env.MINDEX_PLAYWRIGHT_MODULE || 'playwright');
   await page.locator('#analysis-close').click();
   await page.locator(`[data-segment-id="${process.env.MINDEX_ANALYSIS_LEGACY}"] .organization-actions button`).first().click();
   await admin.locator('[data-analysis-text]').first().waitFor();
-  for(const language of ['en','zh']){await choose(language);assert((await admin.textContent()).includes('旧版中文描述'));}
+  for(const language of ['en','zh']){await choose(language);assert((await admin.textContent()).includes(language==='en'?'Legacy Chinese description':'旧版中文描述'));}
   await page.goto(base+'/');
   await page.locator('#query').fill('walking');await page.locator('#search-button').click();
   await page.locator('#results .card').first().waitFor();
-  await page.locator('#results .card').first().locator('.card-actions button').click();
+  await page.locator('#results .card').first().locator('.card-actions button').first().click();
   const details=page.locator('#detail-content');await details.locator('[data-analysis-text]').first().waitFor();
   await page.evaluate(()=>{window.analysisTestVideo=document.querySelector('#detail-content video');});
   const requestCount=searchRequests;
@@ -50,7 +50,7 @@ const {chromium}=require(process.env.MINDEX_PLAYWRIGHT_MODULE || 'playwright');
   await choose('en');await page.reload();
   await page.locator('#query').fill('walking');await page.locator('#search-button').click();
   await page.locator('#results .card').first().waitFor();
-  await page.locator('#results .card').first().locator('.card-actions button').click();
+  await page.locator('#results .card').first().locator('.card-actions button').first().click();
   await details.locator('[data-analysis-text]').first().waitFor();await assertSelected(details,'en');
   // Default moment names, including details, follow the active language without renaming data.
   await page.goto(base+'/admin?source='+process.env.MINDEX_ANALYSIS_SOURCE+'&kind=moment');
