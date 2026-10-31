@@ -267,15 +267,15 @@ function workProgressRows(name, work) {
     if (Number.isFinite(liveTotal) && liveTotal > 0) {total = liveTotal;done = Math.max(done, liveDone || 0);}
   }
   const rows = [{task, progress: processing, type: 'process', key: `ui.work_${name}_coverage`, done, total, complete: ['complete', 'no_audio', 'empty'].includes(work.status), running}];
-  for (const [type, coverage, independent] of [['publish', search, work.publish_task], ['extra', work.extra_search || {}, work.extra_publish_task]]) {
-    if (type === 'extra' && !['shots', 'analysis'].includes(name)) continue;
+  for (const [type, coverage, independent] of [['publish', search, work.publish_task], ['scene', work.scene_search || {}, work.scene_publish_task]]) {
+    if (type === 'scene' && name === 'persons') continue;
     const automatic = type === 'publish' && publishing ? task : null;
     const latest = automatic && ['queued', 'running'].includes(automatic.status) ? automatic : independent && (!automatic || independent.created_at >= automatic.created_at) ? independent : automatic;
     const active = latest && ['queued', 'running'].includes(latest.status);
     let count = coverage.embedded_segments ?? coverage.indexed_segments ?? 0, expected = coverage.expected_segments || 0;
     // Execution progress is already cumulative; reuse it within the same subtask.
     if (active && !coverage.current && latest.progress?.total === expected) count = Math.max(count, latest.progress.completed || 0);
-    rows.push({coverage, task: latest, progress: latest?.progress || {}, type, key: type === 'extra' ? 'ui.work_extra_coverage' : name === 'persons' ? 'ui.work_person_index_coverage' : name === 'dialogue' ? 'ui.work_dialogue_index_coverage' : 'ui.work_moment_coverage', done: count, total: expected, complete: coverage.current, running: active});
+    rows.push({coverage, task: latest, progress: latest?.progress || {}, type, key: type === 'scene' ? 'ui.work_scene_coverage' : name === 'persons' ? 'ui.work_person_index_coverage' : name === 'dialogue' ? 'ui.work_dialogue_index_coverage' : 'ui.work_shot_moment_coverage', done: count, total: expected, complete: coverage.current, running: active});
   }
   if (name === 'analysis') rows[0].text = analysisCoverageText(result, task);
   for (const row of rows) {
@@ -369,9 +369,9 @@ function renderWork(source, target) {
     if (source.statusError) panel.append(action(MindexI18n.msg("ui.e2d53a6d3a6a"), () => refreshWork(source.id)));
     return;
   }
-  const prefs = preferences(source.id),busy = Object.values(source.work || {}).some((w) => [w.task, w.publish_task, w.extra_publish_task].some((t) => t && ['queued', 'running'].includes(t.status)));
+  const prefs = preferences(source.id),busy = Object.values(source.work || {}).some((w) => [w.task, w.publish_task, w.scene_publish_task].some((t) => t && ['queued', 'running'].includes(t.status)));
   // 已请求取消、仍在运行的任务保持「正在取消…」；任务离开排队/运行后丢弃该记录。
-  const activeIds = new Set(Object.values(source.work || {}).flatMap((w) => [w.task, w.publish_task, w.extra_publish_task]).filter((t) => t && ['queued', 'running'].includes(t.status)).map((t) => t.id));
+  const activeIds = new Set(Object.values(source.work || {}).flatMap((w) => [w.task, w.publish_task, w.scene_publish_task]).filter((t) => t && ['queued', 'running'].includes(t.status)).map((t) => t.id));
   prefs.cancelling = new Set([...(prefs.cancelling || [])].filter((id) => activeIds.has(id)));
   if (!prefs.subtitleInitialized && source.subtitle_files?.length) {
     const selected = source.dialogue_task?.options.subtitle_file || source.channels?.dialogue?.subtitle_file?.id || source.subtitle_files.at(-1).id;
@@ -392,9 +392,9 @@ function renderWork(source, target) {
     if (name === 'persons') summary = MindexI18n.msg("ui.1e1649402d6a", { p0: result.covered_shots || 0, p1: result.total_shots || 0, p2: result.people || 0, p3: result.accepted || 0, p4: result.candidate || 0, p5: result.rejected || 0 });
     const rows = workProgressRows(name, work);
     for (const row of rows) row.localError = prefs.errors?.[`${name}:${row.type}`];
-    card.append(node('p', rows.flatMap(row => row.type === 'extra' && work.extra_search?.by_kind ? Object.entries(work.extra_search.by_kind).map(([kind, counts]) => MindexI18n.msg(`ui.work_${kind}_index_coverage`, {done: counts.embedded_segments ?? counts.indexed_segments, total: counts.expected_segments})) : [row.text || MindexI18n.msg(row.key, {done: Math.min(row.done, row.total), total: row.total})]).join('，'), 'work-summary'));
+    card.append(node('p', rows.flatMap(row => row.coverage?.by_kind && Object.keys(row.coverage.by_kind).length > 1 ? Object.entries(row.coverage.by_kind).map(([kind, counts]) => MindexI18n.msg(`ui.work_${kind}_index_coverage`, {done: counts.embedded_segments ?? counts.indexed_segments, total: counts.expected_segments})) : [row.text || MindexI18n.msg(row.key, {done: Math.min(row.done, row.total), total: row.total})]).join('，'), 'work-summary'));
     card.append(node('p', summary, 'muted'));const search = work.search || {};
-    card.append(node('p', MindexI18n.msg(name === 'persons' ? "ui.13e6dc8c4328" : "ui.moment_search_coverage", { p0: search.current ? MindexI18n.msg("ui.112f98675ee2") : search.indexed_segments ? MindexI18n.msg("ui.53122735b7e9") : MindexI18n.msg("ui.30e81c8167e5"), p1: search.indexed_segments || 0, p2: search.expected_segments || 0, p3: name === 'persons' ? MindexI18n.msg("ui.313083c877dc") : MindexI18n.msg("ui.32145468cf4f") }), 'muted'));
+    card.append(node('p', MindexI18n.msg(name === 'persons' ? "ui.13e6dc8c4328" : "ui.shot_moment_search_coverage", { p0: search.current ? MindexI18n.msg("ui.112f98675ee2") : search.indexed_segments ? MindexI18n.msg("ui.53122735b7e9") : MindexI18n.msg("ui.30e81c8167e5"), p1: search.indexed_segments || 0, p2: search.expected_segments || 0, p3: name === 'persons' ? MindexI18n.msg("ui.313083c877dc") : MindexI18n.msg("ui.32145468cf4f") }), 'muted'));
     if (MindexI18n.system(result.fallback_reason)) card.append(node('p', MindexI18n.system(result.fallback_reason), 'muted'));
     if (name === 'dialogue') {
       // 处理方式：标签与下拉同一行左对齐（style.css 的 label:has(>select) 默认竖排，行内覆盖为横排）。
@@ -440,13 +440,13 @@ function renderWork(source, target) {
       if (name === 'dialogue') {if (prefs.uploadingSubtitle) throw Error(MindexI18n.msg("ui.49476949fc90"));options.method = prefs.method;if (prefs.method === 'subtitle') {if (!prefs.track) throw Error(MindexI18n.msg("ui.ed4caa4cf3b3"));if (prefs.track.startsWith('file:')) options.subtitle_file = prefs.track.slice(5);else options.subtitle_stream = Number(prefs.track);}}
       await post(`/api/admin/sources/${source.id}/${name}`, options);await refreshWork(source.id);
     }));start.disabled = blocked || processBusy || !work.can_start || name === 'dialogue' && prefs.uploadingSubtitle;controls.append(start);
-    const update = action(MindexI18n.msg(['shots', 'analysis'].includes(name) ? "ui.update_moment_embedding" : name === 'dialogue' ? "ui.update_dialogue_embedding" : "ui.0cb51b994992"), perform('publish', async () => {await post(`/api/admin/sources/${source.id}/publish`, { work: name, scope: 'moment' });await refreshWork(source.id);}));update.disabled = blocked || rows[1].running || !work.can_publish;controls.append(update);
-    if (['shots', 'analysis'].includes(name)) {
-      const extra = action(MindexI18n.msg("ui.update_extra_search"), perform('extra', async () => {
-        await post(`/api/admin/sources/${source.id}/publish`, { work: name, scope: 'extra' });await refreshWork(source.id);
-      }));extra.disabled = blocked || rows[2].running || !work.can_publish_extra;controls.append(extra);
-      const coverage = work.extra_search || {};
-      card.append(node('p', MindexI18n.msg("ui.extra_search_coverage", {done: coverage.indexed_segments || 0, total: coverage.expected_segments || 0}), 'muted'));
+    const update = action(MindexI18n.msg(name === 'persons' ? "ui.0cb51b994992" : "ui.update_shot_moment_embedding"), perform('publish', async () => {await post(`/api/admin/sources/${source.id}/publish`, { work: name, scope: 'shot_moment' });await refreshWork(source.id);}));update.disabled = blocked || rows[1].running || !work.can_publish;controls.append(update);
+    if (['shots', 'dialogue', 'analysis'].includes(name)) {
+      const scene = action(MindexI18n.msg("ui.update_scene_embedding"), perform('scene', async () => {
+        await post(`/api/admin/sources/${source.id}/publish`, { work: name, scope: 'scene' });await refreshWork(source.id);
+      }));scene.disabled = blocked || rows[2].running || !work.can_publish_scene;controls.append(scene);
+      const coverage = work.scene_search || {};
+      card.append(node('p', MindexI18n.msg("ui.scene_search_coverage", {done: coverage.indexed_segments || 0, total: coverage.expected_segments || 0}), 'muted'));
     }
     if (['shots', 'dialogue', 'analysis'].includes(name) && source.shot_count) controls.append(action(MindexI18n.msg("ui.0ef38438801b"), async () => {state.kind = 'shot';state.parent = null;state.segmentPage = 1;await loadSegments();$('segment-list').scrollIntoView({ block: 'start', behavior: 'smooth' });if (name !== 'shots') notify(MindexI18n.msg("ui.1844d03ed5e7"));}));
     if (name === 'persons') {const link = node('a', MindexI18n.msg("ui.8face9a73c34"), 'quiet nav-link');link.href = `/persons?source=${encodeURIComponent(source.id)}#review`;controls.append(link);card.append(node('p', MindexI18n.msg("ui.4e65b9bde907"), 'muted'));}

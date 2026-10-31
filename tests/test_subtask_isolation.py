@@ -24,7 +24,7 @@ def test_processing_defaults_never_chain_embeddings():
     assert not PersonOptions().publish
 
 
-def test_all_five_content_embedding_subtasks_are_isolated(config, video_file, monkeypatch):
+def test_all_six_content_embedding_subtasks_are_isolated(config, video_file, monkeypatch):
     embedder = FixtureEmbedder(config)
     pipeline = Pipeline(config, analyzer=FixtureAnalyzer(embedder))
     sid = pipeline.prepare(video_file)
@@ -38,14 +38,14 @@ def test_all_five_content_embedding_subtasks_are_isolated(config, video_file, mo
     monkeypatch.setattr(embedder, 'video', lambda path: calls.append(('video', str(path))) or [1., 0., 0., 0., 0., 0., 0., 0.])
     monkeypatch.setattr(embedder, 'text', lambda texts, **kwargs: [calls.append(('text', text)) or [1., 0., 0., 0., 0., 0., 0., 0.] for text in texts])
     previous = {}
-    for owner, scope, view in [('shots', 'moment', 'video'), ('analysis', 'moment', 'analysis'),
-                               ('dialogue', 'moment', 'dialogue'), ('shots', 'extra', 'video'),
-                               ('analysis', 'extra', 'analysis')]:
+    for owner, scope, view in [('shots', 'shot_moment', 'video'), ('analysis', 'shot_moment', 'analysis'),
+                               ('dialogue', 'shot_moment', 'dialogue'), ('shots', 'scene', 'video'),
+                               ('analysis', 'scene', 'analysis'), ('dialogue', 'scene', 'dialogue')]:
         calls.clear()
         events = []
         index = publish_work(config, sid, owner, embedder, scope=scope, progress=events.append)['index_id']
         current = {s['id']: normalize_snapshot(s) for s in pipeline.store.snapshots(index)}
-        kinds = {'moment'} if scope == 'moment' else {'shot', 'scene'}
+        kinds = {'moment', 'shot'} if scope == 'shot_moment' else {'scene'}
         for segment in current.values():
             before = previous.get(segment['id'])
             for other in {'video', 'analysis', 'dialogue'} - {view}:
@@ -54,7 +54,7 @@ def test_all_five_content_embedding_subtasks_are_isolated(config, video_file, mo
                     assert segment['views'].get(other) == (before['views'].get(other) if before else None)
             if segment['kind'] in kinds:
                 assert view in segment['indexed_views']
-        if scope == 'moment':
+        if scope == 'shot_moment':
             assert calls, (owner, scope)
         assert all(kind == ('video' if view == 'video' else 'text') for kind, _ in calls)
         if view != 'video':
@@ -64,8 +64,8 @@ def test_all_five_content_embedding_subtasks_are_isolated(config, video_file, mo
         previous = current
     # Each completed subtask reuses its own vectors without a new model call.
     calls.clear()
-    for owner, scope in [('shots', 'moment'), ('analysis', 'moment'), ('dialogue', 'moment'),
-                         ('shots', 'extra'), ('analysis', 'extra')]:
+    for owner, scope in [('shots', 'shot_moment'), ('analysis', 'shot_moment'), ('dialogue', 'shot_moment'),
+                         ('shots', 'scene'), ('analysis', 'scene'), ('dialogue', 'scene')]:
         publish_work(config, sid, owner, embedder, scope=scope)
     assert not calls
 
@@ -84,8 +84,9 @@ def test_subtask_locks_and_restart_recovery_are_independent(config, video_file):
     sid = pipeline.prepare(video_file)
     manager = SourceTasks(RuntimeConfig(config, pipeline.store), pipeline.store)
     with ExitStack() as locks:
-        for owner, scope in [('shots', 'moment'), ('shots', 'extra'), ('analysis', 'moment'),
-                             ('analysis', 'extra'), ('dialogue', 'moment'), ('persons', 'moment')]:
+        for owner, scope in [('shots', 'shot_moment'), ('shots', 'scene'), ('analysis', 'shot_moment'),
+                             ('analysis', 'scene'), ('dialogue', 'shot_moment'), ('dialogue', 'scene'),
+                             ('persons', 'shot_moment')]:
             options = PublishOptions(work=owner, scope=scope)
             locks.enter_context(manager.lock(sid, 'publish', options))
             with pytest.raises(Timeout), manager.lock(sid, 'publish', options):
@@ -110,9 +111,12 @@ def test_automatic_embedding_uses_separate_child_tasks_and_logs(config, video_fi
     config.enforce_gpu_lock = enforced
     pipeline = Pipeline(config)
     sid = pipeline.prepare(video_file)
+    # 先生成场景，链式发布才会同时创建 shot/moment 与 scene 两个子任务。
+    pipeline._analyzer = FixtureAnalyzer(FixtureEmbedder(config))
+    pipeline.analyze(sid)
     entered, release = threading.Event(), threading.Event()
 
-    def publish(config, source_id, owner, *args, scope='moment', progress=None, **kwargs):
+    def publish(config, source_id, owner, *args, scope='shot_moment', progress=None, **kwargs):
         assert owner == 'shots' and source_id == sid
         progress({'stage':'embedding','completed':0,'total':1})
         logging.getLogger('mindex.isolation').warning('own child %s %s', owner, scope)

@@ -370,7 +370,8 @@ def test_default_upgrade_all_granularities_without_media_cache(config, video_fil
         return original(path)
 
     monkeypatch.setattr(embedder, 'video', observe)
-    new = publish_work(config, sid, 'analysis', embedder, scope='extra')['index_id']
+    publish_work(config, sid, 'analysis', embedder, scope='shot_moment')
+    new = publish_work(config, sid, 'analysis', embedder, scope='scene')['index_id']
     snapshots = pipeline.store.snapshots(new)
     assert {s['kind'] for s in snapshots} == {'moment', 'shot', 'scene'}
     # 每个工作只发布自己的渠道：分析发布不会带入对白，对白需单独发布。
@@ -382,9 +383,10 @@ def test_default_upgrade_all_granularities_without_media_cache(config, video_fil
     assert before == after
     assert all(not p.exists() for p in paths if p.name == 'window.mp4')
     calls = embedder.calls
-    assert publish_work(config, sid, 'analysis', embedder, scope='extra')['index_id'] == new
+    publish_work(config, sid, 'analysis', embedder, scope='shot_moment')
+    assert publish_work(config, sid, 'analysis', embedder, scope='scene')['index_id'] == new
     assert embedder.calls == calls
-    dialogue = publish_work(config, sid, 'dialogue', embedder, scope='extra')['index_id']
+    dialogue = publish_work(config, sid, 'dialogue', embedder, scope='shot_moment')['index_id']
     assert any('dialogue' in s['indexed_views'] for s in pipeline.store.snapshots(dialogue) if s['kind'] == 'shot')
 
 

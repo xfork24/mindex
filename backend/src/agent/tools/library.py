@@ -130,7 +130,12 @@ def work_line(name: str, value: dict) -> str:
     if isinstance(search, dict) and search.get("expected_segments"):
         parts.append(f"检索已发布 {search.get('indexed_segments', 0)}/{search['expected_segments']}"
                      + ("（最新）" if search.get("current") else "（待发布）"))
-    for label, key in (("最近任务", "task"), ("最近发布", "publish_task")):
+    scene = value.get("scene_search")
+    if isinstance(scene, dict) and scene.get("expected_segments"):
+        parts.append(f"场景检索已发布 {scene.get('indexed_segments', 0)}/{scene['expected_segments']}"
+                     + ("（最新）" if scene.get("current") else "（待发布）"))
+    for label, key in (("最近任务", "task"), ("最近发布", "publish_task"),
+                       ("最近场景发布", "scene_publish_task")):
         brief = task_brief(value.get(key))
         if brief:
             parts.append(f"{label} {brief}")
@@ -142,14 +147,15 @@ def work_line(name: str, value: dict) -> str:
 
 def compact_work(value: dict) -> dict:
     keep = {}
-    for key in ("status", "result", "can_start", "start_reason", "can_publish", "can_publish_extra"):
+    for key in ("status", "result", "can_start", "start_reason", "can_publish", "can_publish_scene"):
         if key in value:
             keep[key] = value[key]
-    for key in ("task", "publish_task", "extra_publish_task"):
+    for key in ("task", "publish_task", "scene_publish_task"):
         task = value.get(key)
         keep[key] = {k: task.get(k) for k in ("id", "status", "work", "error", "progress", "updated_at")} if task else None
-    if isinstance(value.get("search"), dict):
-        keep["search"] = {k: value["search"].get(k) for k in ("current", "expected_segments", "indexed_segments")}
+    for field in ("search", "scene_search"):
+        if isinstance(value.get(field), dict):
+            keep[field] = {k: value[field].get(k) for k in ("current", "expected_segments", "indexed_segments")}
     if value.get("setup"):
         keep["setup"] = value["setup"]
     return keep

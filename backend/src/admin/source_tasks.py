@@ -27,7 +27,17 @@ class WorkOptions(StrictModel):
 
 class PublishOptions(StrictModel):
     work: Work
-    scope: Literal["moment", "extra"] = "moment"
+    scope: Literal["shot_moment", "scene"] = "shot_moment"
+
+
+# 发布范围到索引粒度的映射。旧值 moment/extra 仅出现在历史任务行的 options 里，
+# retry 直接透传 scope 不经过 PublishOptions 校验，因此保留映射以保真旧行为。
+PUBLISH_KINDS = {
+    "shot_moment": ("moment", "shot"),
+    "scene": ("scene",),
+    "moment": ("moment",),
+    "extra": ("shot", "scene"),
+}
 
 
 def freeze_config(config, store):
@@ -74,7 +84,7 @@ def preserve_numbers(model, snapshot):
             setattr(model, key, value)
 
 
-def publish_work(config, source_id, work, embedder=None, *, progress=None, scope="moment"):
+def publish_work(config, source_id, work, embedder=None, *, progress=None, scope="shot_moment"):
     from mindex.persons.persons import Persons
     from mindex.processing.indexing import IndexBuilder
 
@@ -95,14 +105,14 @@ def publish_work(config, source_id, work, embedder=None, *, progress=None, scope
     index_id = IndexBuilder(config, embedder).build(
         activate=True,
         source_id=source_id,
-        kinds=("shot", "scene") if scope == "extra" else ("moment",),
+        kinds=PUBLISH_KINDS[scope],
         channels=[{"shots": "visual", "analysis": "analysis", "dialogue": "dialogue"}[work]],
         progress=progress,
     )
     return {"index_id": index_id}
 
 
-def publication_attempt(config, source_id, work, *, embedder=None, save=None, progress=None, scope="moment"):
+def publication_attempt(config, source_id, work, *, embedder=None, save=None, progress=None, scope="shot_moment"):
     """发布失败不改变处理完成；运行标记在网络调用前落库。"""
     value = {"status": "running", "error": None}
     latest_progress = None
@@ -212,9 +222,9 @@ class SourceTasks(BackgroundTaskRunner):
                 from mindex.admin.curation import Library
 
                 info = Library(self.store).source(source_id)["work"][options.work]
-                if options.scope == "extra" and options.work not in {"shots", "analysis"}:
-                    raise HTTPException(422, "额外检索仅支持分镜和 LLM 分析")
-                if not info["can_publish_extra" if options.scope == "extra" else "can_publish"]:
+                if options.scope == "scene" and options.work not in {"shots", "dialogue", "analysis"}:
+                    raise HTTPException(422, "scene检索更新仅支持分镜、对白和 LLM 分析")
+                if not info["can_publish_scene" if options.scope == "scene" else "can_publish"]:
                     raise HTTPException(409, "该工作尚无可更新检索的处理结果")
             config = self.runtime.current().model_copy(deep=True)
             if work == "shots" and not source["prepared"] and source["layout_config"]:
@@ -292,15 +302,15 @@ def enqueue_publications(runtime, store, source_id, work, embedder=None):
     manager = SourceTasks(runtime, store, embedder)
     info = Library(store).source(source_id)['work'][work]
     tasks = []
-    for scope in ('moment', 'extra') if work in {'shots', 'analysis'} else ('moment',):
-        field = 'search' if scope == 'moment' else 'extra_search'
+    for scope in ('shot_moment', 'scene') if work in {'shots', 'dialogue', 'analysis'} else ('shot_moment',):
+        field = 'search' if scope == 'shot_moment' else 'scene_search'
         if work != 'persons' and not info.get(field, {}).get('expected_segments'):
             continue
         # Attach to a live execution rather than creating a duplicate subtask.
         existing = store.one(
             "SELECT * FROM source_tasks WHERE source_id=? AND work='publish' "
             "AND json_extract(options,'$.work')=? "
-            "AND COALESCE(json_extract(options,'$.scope'),'moment')=? "
+            "AND json_extract(options,'$.scope')=? "
             "AND status IN ('queued','running') ORDER BY rowid DESC LIMIT 1",
             (source_id, work, scope),
         )

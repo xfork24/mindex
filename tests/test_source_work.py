@@ -163,7 +163,8 @@ def test_pipeline_tasks_frozen_layout_prerequisites_resume_and_publish_only(conf
     assert task["status"] == "complete" and task["publication"]["status"] == "queued"
     assert task["result"]["processing_status"] == "complete"
     children = [finished(manager, manager.get(identifier)) for identifier in task['publication']['task_ids']]
-    assert len(children) == 2 and all(child['status'] == 'failed' for child in children)
+    # 未做 LLM 分析时没有场景，只链式创建 shot/moment 发布子任务。
+    assert len(children) == 1 and all(child['status'] == 'failed' for child in children)
     assert task['progress']['phase'] == 'process'
     fail[0] = False
     monkeypatch.setattr(Pipeline, "split", lambda *a, **kw: pytest.fail("仅重试发布不重跑切片"))
@@ -217,7 +218,7 @@ def test_embedding_progress_persisted_in_api_and_resumed_checkpoints(config, vid
         task_id = response.json()["id"]
         task_url = f"/api/admin/source-tasks/{task_id}"
         assert calls.get(timeout=5) == 1
-        total = len(pipeline.store.segments(sid, "moment"))
+        total = len(pipeline.store.segments(sid, "moment")) + len(pipeline.store.segments(sid, "shot"))
         assert total > 2
 
         def assert_progress():
@@ -259,14 +260,16 @@ def test_embedding_progress_persisted_in_api_and_resumed_checkpoints(config, vid
                 break
             time.sleep(0.01)
         durable_completed = task["progress"]["completed"]
-        assert durable_completed < total
+        assert 0 <= durable_completed < total
         assert task["publication"]["status"] == "failed"
         assert task["status"] == ("failed" if work == "publish" else "complete")
         retry = client.post(task_url + "/retry")
         assert retry.status_code == 202, retry.text
         assert calls.get(timeout=5) == 4
         assert_progress()
-        assert client.get(task_url).json()["progress"]["completed"] == durable_completed
+        # moment 与 shot 共享画面区间（moment 即 shot 的滑窗），断点续跑会先无调用地补完
+        # 共享片段，进度只会前进、不会重置到 0；不重复嵌入由最终调用次数隐式保证。
+        assert client.get(task_url).json()["progress"]["completed"] >= durable_completed
         for _ in range(total):
             release.release()
         for _ in range(500):
@@ -532,7 +535,7 @@ def test_full_source_flow_incremental_publish_retrieval_and_details(
     assert source["work"]["persons"]["search"]["current"]
     active = pipeline.store.active_index()
     assert old_members <= {s["id"] for s in pipeline.store.snapshots(active["id"])}
-    # 新素材默认 moment，已有其他素材粒度保留。
+    # 新素材默认发布 moment/shot，已有其他素材粒度保留。
     assert {s["kind"] for s in pipeline.store.snapshots(active["id"]) if s["source_id"] == other_id} == {
         "shot",
         "moment",

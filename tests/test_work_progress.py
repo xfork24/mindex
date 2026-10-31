@@ -34,7 +34,7 @@ def test_publish_work_reports_scope_counts_for_every_channel(config, video_file,
     assert events[0]["stage"] == "index_wait" and "total" not in events[0]
     assert events[-1]["stage"] == "published"
     assert all(event["phase"] == "publish" for event in events)
-    expected = len(snapshots_for(pipeline, sid, ["moment"]))
+    expected = len(snapshots_for(pipeline, sid, ["moment", "shot"]))
     counted = [e for e in events if "total" in e]
     assert counted and all(e["total"] == expected and e["unit"] == "segments" for e in counted)
     assert counted[-1]["completed"] == expected
@@ -133,7 +133,7 @@ def test_pipeline_reports_before_first_analysis_and_each_stage(config, video_fil
     assert events[-1]["completed"] == events[-1]["total"]
 
 
-def test_moment_and_extra_publication_are_independent(config, video_file):
+def test_shot_moment_and_scene_publication_are_independent(config, video_file):
     from mindex.admin.curation import Library
     from mindex.admin.source_tasks import PublishOptions, SourceTasks
     from mindex.settings.runtime_settings import RuntimeConfig
@@ -143,44 +143,44 @@ def test_moment_and_extra_publication_are_independent(config, video_file):
     sid = pipeline.prepare(video_file)
     pipeline.analyze(sid)
     publish_work(config, sid, 'shots', embedder)
-    moment = publish_work(config, sid, 'analysis', embedder)['index_id']
-    assert {s['kind'] for s in pipeline.store.snapshots(moment)} == {'moment'}
+    shot_moment = publish_work(config, sid, 'analysis', embedder)['index_id']
+    assert {s['kind'] for s in pipeline.store.snapshots(shot_moment)} == {'moment', 'shot'}
     work = Library(pipeline.store).source(sid)['work']
     assert work['shots']['search']['current']
     assert work['analysis']['search']['current']
-    assert work['shots']['extra_search']['indexed_segments'] == 0
-    assert work['analysis']['can_publish_extra']
+    assert work['shots']['scene_search']['indexed_segments'] == 0
+    assert work['analysis']['can_publish_scene']
     events = []
-    extra = publish_work(config, sid, 'analysis', embedder, scope='extra', progress=events.append)['index_id']
-    snapshots = pipeline.store.snapshots(extra)
+    scene = publish_work(config, sid, 'analysis', embedder, scope='scene', progress=events.append)['index_id']
+    snapshots = pipeline.store.snapshots(scene)
     assert {s['kind'] for s in snapshots} == {'moment', 'shot', 'scene'}
     assert all('analysis' in s['indexed_views'] for s in snapshots)
-    expected = len([s for s in snapshots if s['kind'] != 'moment'])
+    expected = len([s for s in snapshots if s['kind'] == 'scene'])
     assert all(e['total'] == expected for e in events if 'total' in e)
     work = Library(pipeline.store).source(sid)['work']
-    assert work['analysis']['extra_search']['current']
-    assert work['analysis']['extra_search']['indexed_segments'] == expected
+    assert work['analysis']['scene_search']['current']
+    assert work['analysis']['scene_search']['indexed_segments'] == expected
     again = publish_work(config, sid, 'shots', embedder)['index_id']
     assert {s['id'] for s in pipeline.store.snapshots(again)} == {s['id'] for s in snapshots}
     manager = SourceTasks(RuntimeConfig(config, pipeline.store), pipeline.store, embedder)
     # Capture queued options without launching a thread: the scope is durable for retry.
     manager.launch = lambda *args: args[-1].release()
-    task = manager.start(sid, 'publish', PublishOptions(work='analysis', scope='extra'))
+    task = manager.start(sid, 'publish', PublishOptions(work='analysis', scope='scene'))
     all_work = Library(pipeline.store).source(sid)['work']
     work = all_work['analysis']
-    assert work['extra_publish_task']['id'] == task['id']
-    assert work['extra_publish_task']['options']['scope'] == 'extra'
+    assert work['scene_publish_task']['id'] == task['id']
+    assert work['scene_publish_task']['options']['scope'] == 'scene'
     assert work['publish_task'] is None
-    assert all_work['shots']['extra_publish_task'] is None
+    assert all_work['shots']['scene_publish_task'] is None
     assert all_work['shots']['publish_task'] is None
-    # A moment update has its own owner too; shared vector coverage must not
+    # A shot/moment update has its own owner too; shared vector coverage must not
     # copy this execution's progress or logs onto the other work cards.
-    moment_task = manager.start(sid, 'publish', PublishOptions(work='shots', scope='moment'))
+    shot_moment_task = manager.start(sid, 'publish', PublishOptions(work='shots', scope='shot_moment'))
     all_work = Library(pipeline.store).source(sid)['work']
-    assert all_work['shots']['publish_task']['id'] == moment_task['id']
+    assert all_work['shots']['publish_task']['id'] == shot_moment_task['id']
     assert all_work['analysis']['publish_task'] is None
     assert all_work['dialogue']['publish_task'] is None
-    assert all_work['analysis']['extra_publish_task']['id'] == task['id']
+    assert all_work['analysis']['scene_publish_task']['id'] == task['id']
 
 
 def test_completed_processing_and_both_embedding_scopes_reuse_results(config, video_file, monkeypatch):
@@ -191,7 +191,7 @@ def test_completed_processing_and_both_embedding_scopes_reuse_results(config, vi
     pipeline = Pipeline(config, analyzer=analyzer)
     sid = pipeline.prepare(video_file)
     pipeline.analyze(sid)
-    for scope in ('moment', 'extra'):
+    for scope in ('shot_moment', 'scene'):
         publish_work(config, sid, 'shots', embedder, scope=scope)
         publish_work(config, sid, 'analysis', embedder, scope=scope)
 
@@ -206,21 +206,21 @@ def test_completed_processing_and_both_embedding_scopes_reuse_results(config, vi
     pipeline.detect_source(sid)
     pipeline.split(sid)
     pipeline.analyze(sid)
-    for scope in ('moment', 'extra'):
+    for scope in ('shot_moment', 'scene'):
         events = []
         publish_work(config, sid, 'analysis', embedder, scope=scope, progress=events.append)
         assert events[-1]['completed'] == events[-1]['total']
     work = Library(pipeline.store).source(sid)['work']
     for name in ('shots', 'analysis'):
         assert work[name]['status'] == 'complete'
-        for field in ('search', 'extra_search'):
+        for field in ('search', 'scene_search'):
             coverage = work[name][field]
             assert coverage['current']
             assert coverage['indexed_segments'] == coverage['expected_segments']
             assert all(c['indexed_segments'] == c['expected_segments'] for c in coverage['by_kind'].values())
 
 
-def test_extra_embedding_progress_survives_unpublished_index(config, video_file):
+def test_scene_embedding_progress_survives_unpublished_index(config, video_file):
     from mindex.admin.curation import Library
 
     embedder = FixtureEmbedder(config)
@@ -228,23 +228,23 @@ def test_extra_embedding_progress_survives_unpublished_index(config, video_file)
     sid = pipeline.prepare(video_file)
     pipeline.analyze(sid)
     publish_work(config, sid, 'shots', embedder)
-    moment = publish_work(config, sid, 'analysis', embedder)['index_id']
-    visual_extra = publish_work(config, sid, 'shots', embedder, scope='extra')['index_id']
-    extra = publish_work(config, sid, 'analysis', embedder, scope='extra')['index_id']
+    shot_moment = publish_work(config, sid, 'analysis', embedder)['index_id']
+    visual_scene = publish_work(config, sid, 'shots', embedder, scope='scene')['index_id']
+    scene = publish_work(config, sid, 'analysis', embedder, scope='scene')['index_id']
     # A final validation/publication failure leaves reusable, completed vectors.
-    pipeline.store.activate(moment)
-    pipeline.store.execute("UPDATE index_versions SET status='building' WHERE id=?", (extra,))
+    pipeline.store.activate(shot_moment)
+    pipeline.store.execute("UPDATE index_versions SET status='building' WHERE id=?", (scene,))
     work = Library(pipeline.store).source(sid)['work']
     for name in ('shots', 'analysis'):
-        coverage = work[name]['extra_search']
+        coverage = work[name]['scene_search']
         assert not coverage['current'] and coverage['indexed_segments'] == 0
         assert coverage['embedded_segments'] == coverage['expected_segments'] > 0
         assert all(c['embedded_segments'] == c['expected_segments'] for c in coverage['by_kind'].values())
     # An incomplete member is not reported as a completed embedding checkpoint.
-    pipeline.store.execute("UPDATE index_members SET complete=0 WHERE index_id IN (?,?)", (extra, visual_extra))
+    pipeline.store.execute("UPDATE index_members SET complete=0 WHERE index_id IN (?,?)", (scene, visual_scene))
     work = Library(pipeline.store).source(sid)['work']
-    assert work['shots']['extra_search']['by_kind']['shot']['embedded_segments'] == len(pipeline.store.segments(sid, 'shot'))
-    assert work['shots']['extra_search']['embedded_segments'] < work['shots']['extra_search']['expected_segments']
+    assert work['shots']['scene_search']['by_kind']['scene']['embedded_segments'] == 0
+    assert work['shots']['scene_search']['embedded_segments'] < work['shots']['scene_search']['expected_segments']
 
 
 def test_empty_person_release_is_not_full_shot_coverage(config, video_file):
@@ -334,7 +334,7 @@ def test_latest_worker_log_is_one_line_thread_scoped_and_phase_scoped(config):
     assert root.handlers == handlers
 
 
-@pytest.mark.parametrize('scope', ['moment', 'extra'])
+@pytest.mark.parametrize('scope', ['shot_moment', 'scene'])
 def test_analysis_coverage_uses_published_vectors_despite_metadata_changes(config, video_file, scope):
     from mindex.admin.curation import Library
 
@@ -343,7 +343,7 @@ def test_analysis_coverage_uses_published_vectors_despite_metadata_changes(confi
     sid = pipeline.prepare(video_file)
     pipeline.analyze(sid)
     index = publish_work(config, sid, 'analysis', embedder, scope=scope)['index_id']
-    field = 'search' if scope == 'moment' else 'extra_search'
+    field = 'search' if scope == 'shot_moment' else 'scene_search'
     snapshots = pipeline.store.snapshots(index, sid)
     for snapshot in snapshots:
         row = pipeline.store.one('SELECT rowid,data FROM annotations WHERE segment_id=? ORDER BY rowid DESC LIMIT 1',
@@ -371,7 +371,7 @@ def test_analysis_coverage_uses_published_vectors_despite_metadata_changes(confi
     assert coverage['pending_reasons'] == [{'code': 'inputs_changed', 'count': 1}]
 
     # Building reusable vectors elsewhere does not publish them into the active index.
-    IndexBuilder(config, embedder).build(source_id=sid, kinds=('moment',) if scope == 'moment' else ('shot', 'scene'),
+    IndexBuilder(config, embedder).build(source_id=sid, kinds=('moment', 'shot') if scope == 'shot_moment' else ('scene',),
                                          channels=['analysis'], activate=False)
     coverage = Library(pipeline.store).source(sid)['work']['analysis'][field]
     assert not coverage['current']

@@ -56,7 +56,7 @@ OPTION_LABELS = {"publish": "完成后自动发布检索", "method": "对白来�
                  "subtitle_file": "上传字幕 ID", "workers": "并发数", "work_id": "关联作品", "start": "起点（秒）",
                  "end": "终点（秒）", "target": "发布的工作", "scope": "发布范围"}
 METHOD_LABELS = {"auto": "自动（优先字幕）", "subtitle": "字幕", "asr": "语音识别"}
-SCOPE_LABELS = {"moment": "精细片段", "extra": "镜头与场景（额外检索）"}
+SCOPE_LABELS = {"shot_moment": "镜头与精细片段", "scene": "场景"}
 GPU_WORKS = {"shots", "analysis", "dialogue", "persons"}
 
 
@@ -158,8 +158,8 @@ class StartSourceTask(StrictModel):
     start: float | None = Field(default=None, ge=0, description="处理区间起点秒（仅 persons）")
     end: float | None = Field(default=None, ge=0, description="处理区间终点秒，0 表示至片尾（仅 persons）")
     target: PublishTarget | None = Field(default=None, description="要发布检索的工作（work=publish 时必填）")
-    scope: Literal["moment", "extra"] | None = Field(
-        default=None, description="发布范围（仅 publish）：moment 精细片段；extra 镜头与场景（仅分镜、分析）")
+    scope: Literal["shot_moment", "scene"] | None = Field(
+        default=None, description="发布范围（仅 publish）：shot_moment 镜头与精细片段；scene 场景（分镜、对白、分析）")
 
     @model_validator(mode="after")
     def applicable(self):
@@ -205,7 +205,7 @@ async def preview_start_source_task(args: StartSourceTask, ctx: ToolContext) -> 
         warnings.append("该素材尚未完成分镜处理，服务端会拒绝启动；请先 start_source_task(work=shots)")
     if args.work == "publish":
         warnings.append("发布会生成新的内容索引版本或人物检索组合，并切换当前生效的检索")
-        can = info.get("can_publish_extra" if args.scope == "extra" else "can_publish")
+        can = info.get("can_publish_scene" if args.scope == "scene" else "can_publish")
         if can is False:
             warnings.append(f"「{WORK_LABELS[work_key]}」目前没有可发布的处理结果，服务端可能拒绝")
     if args.publish:

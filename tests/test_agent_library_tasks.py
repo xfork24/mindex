@@ -59,8 +59,8 @@ def test_specs_risk_domain_and_arguments():
         start.parse({"source_id": "s", "work": "publish"})
     from mindex.agent.tools.library_tasks import task_body
 
-    assert task_body(start.parse({"source_id": "s", "work": "publish", "target": "analysis", "scope": "extra"})) == \
-        {"work": "analysis", "scope": "extra"}
+    assert task_body(start.parse({"source_id": "s", "work": "publish", "target": "analysis", "scope": "scene"})) == \
+        {"work": "analysis", "scope": "scene"}
     assert task_body(start.parse({"source_id": "s", "work": "dialogue", "method": "subtitle",
                                   "subtitle_file": "f" * 64})) == {"method": "subtitle", "subtitle_file": "f" * 64}
     assert task_body(start.parse({"source_id": "s", "work": "shots"})) == {}

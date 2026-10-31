@@ -36,7 +36,8 @@ def embedding_coverage(store, source_id, active, fresh, segments, published):
     for name, channel in (('shots', 'visual'), ('dialogue', 'dialogue'), ('analysis', 'analysis')):
         view = 'video' if channel == 'visual' else channel
         result[name] = {}
-        for field, kinds in (('search', {'moment'}), ('extra_search', {'shot', 'scene'})):
+        # search 覆盖分镜产出的物理粒度（moment/shot）；scene 由 LLM 分析重建，单独统计以隔离其影响。
+        for field, kinds in (('search', {'moment', 'shot'}), ('scene_search', {'scene'})):
             candidates = [s for s in fresh if s['kind'] in kinds and channel in s['channel_versions']
                           and (channel == 'visual' or s['views'].get(channel))]
             by_kind = {k: {'expected_segments': 0, 'indexed_segments': 0, 'embedded_segments': 0} for k in sorted(kinds)}

@@ -5,7 +5,7 @@ const source = fs.readFileSync('frontend/src/admin/admin.js', 'utf8');
 const context = vm.createContext({MindexI18n:{msg:(key,args={})=>JSON.stringify({key,...args}),system:value=>value?.message || value || ''},publicationStages: new Set(['embedding', 'publish'])});
 vm.runInContext(source.slice(source.indexOf('function workProgressRows('), source.indexOf('function appendWorkProgress(')), context);
 const rows = work => context.workProgressRows('shots', work);
-const saved = {status:'complete', result:{shots:35}, search:{current:true,indexed_segments:36,expected_segments:36}, extra_search:{current:false,indexed_segments:2,expected_segments:10}};
+const saved = {status:'complete', result:{shots:35}, search:{current:true,indexed_segments:36,expected_segments:36}, scene_search:{current:false,indexed_segments:2,expected_segments:10}};
 let result = rows(saved);
 assert.equal(result.length, 3);
 assert.deepEqual(Array.from(result, r=>[r.done,r.total]), [[35,35],[36,36],[2,10]]);
@@ -24,7 +24,7 @@ assert.equal(result.length,3);
 assert.ok(result.every(r=>r.done===0 && r.total===0));
 console.log('Persistent subtask coverage checks passed');
 // Completed embedding checkpoints can exist before publication.
-result = rows({...saved, extra_search:{indexed_segments:0,embedded_segments:28,expected_segments:28,current:false}});
+result = rows({...saved, scene_search:{indexed_segments:0,embedded_segments:28,expected_segments:28,current:false}});
 assert.equal(result[2].done,28);
 // The bar and its caption must use the same numeric coverage, even with stale flags.
 const rendered = [];
@@ -52,7 +52,7 @@ const failed = context.analysisCoverageText({analyzed:50,total:56,pending:6},{st
 assert.ok(failed.includes('模型服务连接超时'));
 context.taskStatus = {queued:'排队中',running:'运行中',complete:'已完成',failed:'失败'};
 context.stages = {embedding:'嵌入中'};
-const row = {type:'extra',task:{id:'existing-task',status:'running'},progress:{latest_log:'old running log'}};
+const row = {type:'scene',task:{id:'existing-task',status:'running'},progress:{latest_log:'old running log'}};
 assert.equal(context.workLog(row), null);
 assert.equal(context.workLog(row), null);
 row.progress.latest_log = 'new embedding log';
@@ -80,7 +80,7 @@ console.log('Page-session log reset checks passed');
 context.workLog.snapshots = new Map();
 const separate = {...saved,
   task:{id:'processing',status:'running',progress:{phase:'publish',stage:'embedding',latest_log:'old moment log',processing_progress:{latest_log:'processing done'}}},
-  extra_publish_task:{id:'extra',status:'running',options:{work:'shots',scope:'extra'},progress:{stage:'embedding',latest_log:'old extra log'}}};
+  scene_publish_task:{id:'scene',status:'running',options:{work:'shots',scope:'scene'},progress:{stage:'embedding',latest_log:'old scene log'}}};
 let scoped = rows(separate);
 scoped.forEach(r=>assert.equal(context.workLog(r),null));
 separate.task.progress.latest_log = 'moment-only index diagnostic';
@@ -88,19 +88,19 @@ scoped = rows(separate);
 assert.equal(context.workLog(scoped[0]),null);
 assert.equal(context.workLog(scoped[1]).message,'moment-only index diagnostic');
 assert.equal(context.workLog(scoped[2]),null);
-separate.extra_publish_task.progress.latest_log = 'extra-only index diagnostic';
+separate.scene_publish_task.progress.latest_log = 'scene-only index diagnostic';
 scoped = rows(separate);
 assert.equal(context.workLog(scoped[0]),null);
 assert.equal(context.workLog(scoped[1]).message,'moment-only index diagnostic');
-assert.equal(context.workLog(scoped[2]).message,'extra-only index diagnostic');
+assert.equal(context.workLog(scoped[2]).message,'scene-only index diagnostic');
 console.log('Independent subtask log checks passed');
-// Four work cards expose exactly ten independent rows and log areas.
+// Four work cards expose exactly eleven independent rows and log areas.
 let subtaskCount = 0;
 for (const name of ['shots','dialogue','analysis','persons']) {
   const taskFor = phase => ({id:`${name}-${phase}`,status:'running',created_at:'2026-10-20',options:{work:name},progress:{latest_log:`old-${name}-${phase}`}});
   const work = {status:'complete',result:{shots:1,total:1,total_shots:1,covered_shots:1,analyzed:1,utterances:1},
-    search:{expected_segments:1,indexed_segments:1,current:true},extra_search:{expected_segments:1,indexed_segments:1,current:true},
-    task:taskFor('process'),publish_task:taskFor('publish'),extra_publish_task:taskFor('extra')};
+    search:{expected_segments:1,indexed_segments:1,current:true},scene_search:{expected_segments:1,indexed_segments:1,current:true},
+    task:taskFor('process'),publish_task:taskFor('publish'),scene_publish_task:taskFor('scene')};
   let workRows = context.workProgressRows(name,work);
   subtaskCount += workRows.length;
   workRows.forEach(r=>assert.equal(context.workLog(r),null));
@@ -109,5 +109,5 @@ for (const name of ['shots','dialogue','analysis','persons']) {
     assert.equal(context.workLog(current).message,`new-${name}-${current.type}`);
   }
 }
-assert.equal(subtaskCount,10);
-console.log('All ten subtask log streams passed');
+assert.equal(subtaskCount,11);
+console.log('All eleven subtask log streams passed');

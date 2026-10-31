@@ -208,19 +208,19 @@ def attach_tasks(store, source, work):
             store.one(
                 "SELECT * FROM source_tasks WHERE source_id=? AND work='publish' "
                 "AND json_extract(options,'$.work')=? "
-                "AND COALESCE(json_extract(options,'$.scope'),'moment')='moment' ORDER BY rowid DESC LIMIT 1",
+                "AND json_extract(options,'$.scope')='shot_moment' ORDER BY rowid DESC LIMIT 1",
                 (sid, name),
             )
             if has_source_tasks
             else None
         )
         value["publish_task"] = public_task(publication_task) if publication_task else None
-        extra_task = store.one(
+        scene_task = store.one(
             "SELECT * FROM source_tasks WHERE source_id=? AND work='publish' "
-            "AND json_extract(options,'$.work')=? AND json_extract(options,'$.scope')='extra' "
+            "AND json_extract(options,'$.work')=? AND json_extract(options,'$.scope')='scene' "
             "ORDER BY rowid DESC LIMIT 1", (sid, name)
         ) if has_source_tasks else None
-        value["extra_publish_task"] = public_task(extra_task) if extra_task else None
+        value["scene_publish_task"] = public_task(scene_task) if scene_task else None
         latest = sorted(
             [t for t in (value["task"], value["publish_task"]) if t],
             key=lambda t: (t["updated_at"], t["created_at"]),
@@ -229,7 +229,7 @@ def attach_tasks(store, source, work):
         ready = name in {"shots", "dialogue"} or bool(source["prepared"])
         value["can_start"] = ready
         value["start_reason"] = None if ready else "请先完成分镜处理"
-        value["can_publish_extra"] = (name in {"shots", "analysis"} and bool(source["prepared"])
-                                      and value.get("extra_search", {}).get("expected_segments", 0) > 0)
+        value["can_publish_scene"] = (name in {"shots", "dialogue", "analysis"} and bool(source["prepared"])
+                                      and value.get("scene_search", {}).get("expected_segments", 0) > 0)
         value["can_publish"] = bool(source["prepared"]) and value["status"] in READY | {"partial"}
     return work

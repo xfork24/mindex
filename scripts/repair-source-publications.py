@@ -49,8 +49,8 @@ def main():
     save()
     for source in store.sources():
         work = Library(store).source(source['id'])['work']
-        for scope, field, names in [('moment', 'search', ('shots', 'dialogue', 'analysis')),
-                                    ('extra', 'extra_search', ('shots', 'analysis'))]:
+        for scope, field, names in [('shot_moment', 'search', ('shots', 'dialogue', 'analysis')),
+                                    ('scene', 'scene_search', ('shots', 'dialogue', 'analysis'))]:
             for name in names:
                 if work[name].get(field, {}).get('expected_segments', 0) and not work[name][field]['current']:
                     report['jobs'].append({'source_id': source['id'], 'name': source['name'], 'work': name,
@@ -86,14 +86,14 @@ def main():
                 continue
             if store.one("SELECT id FROM source_tasks WHERE source_id=? AND work='publish' "
                          "AND json_extract(options,'$.work')=? "
-                         "AND COALESCE(json_extract(options,'$.scope'),'moment')=? "
+                         "AND json_extract(options,'$.scope')=? "
                          "AND status IN ('queued','running')", (job['source_id'], job['work'], job['scope'])):
                 continue
             # A user's existing task owns the same lock: wait for it instead of
             # interrupting it or resetting its progress. Recheck after it finishes.
             try:
                 current = Library(store).source(job['source_id'])['work']
-                field = 'search' if job['scope'] == 'moment' else 'extra_search'
+                field = 'search' if job['scope'] == 'shot_moment' else 'scene_search'
                 coverage = current[job['work']][field]
                 if not coverage['expected_segments'] or coverage['current']:
                     job['status'] = 'complete'

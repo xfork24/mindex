@@ -320,7 +320,7 @@ curl -s -H "Authorization: Bearer $MINDEX_MCP_TOKEN" -F file=@shot.png http://12
 | `cancel_task` | write | 是 | 取消排队中或运行中的任务 |
 | `upload_source` | write | 是 | 把视频附件登记为新素材（不分镜） |
 | `upload_subtitle` | write | 是 | 上传字幕附件，返回字幕 ID |
-| `start_source_task` | danger | 是 | 发起 shots/analysis/dialogue/persons/publish 任务，选项原样透传，提交后跟踪 |
+| `start_source_task` | danger | 是 | 发起 shots/analysis/dialogue/persons/publish 任务，选项原样透传（publish 的 scope 取 shot_moment 或 scene），提交后跟踪 |
 
 不提供删除素材的工具。
 

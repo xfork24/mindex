@@ -199,7 +199,7 @@ def test_running_publication_cancels_at_next_progress_then_retries(config, video
     entered, proceed = threading.Event(), threading.Event()
     calls = []
 
-    def publish(config, source_id, owner, *args, scope="moment", progress=None, **kwargs):
+    def publish(config, source_id, owner, *args, scope="shot_moment", progress=None, **kwargs):
         calls.append(scope)
         progress({"stage": "embedding", "completed": 0, "total": 2})
         if len(calls) == 1:
