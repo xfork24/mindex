@@ -14,13 +14,16 @@
 - marked（MIT）：Copyright (c) 2018+, MarkedJS；Copyright (c) 2011-2018, Christopher Jeffrey。全文见 <https://github.com/markedjs/marked/blob/v18.1.1/LICENSE.md>。
 - DOMPurify（Apache-2.0 / MPL-2.0）：Copyright (c) Cure53 and other contributors。全文见 <https://github.com/cure53/DOMPurify/blob/3.4.17/LICENSE>。
 
-## 桌面版（macOS）随包组件
+## 桌面版随包组件
 
-以下组件只随桌面版安装包（`Mindex.app`）分发，不在仓库中。构建脚本见 `scripts/build-desktop-ffmpeg.sh`、`scripts/build-desktop-sidecar.sh` 与 `scripts/build-desktop-mac.sh`。
+以下组件只随桌面版安装包（macOS `Mindex.app`、Windows/Linux 安装目录）分发，不在仓库中。构建脚本见 `scripts/build-desktop-ffmpeg.sh`（三平台同一张源码锁定表）、`scripts/build-desktop-sidecar.{sh,ps1}` 与 `scripts/build-desktop-{mac,linux}.sh`、`scripts/build-desktop-win.ps1`。
 
 ### FFmpeg 与 ffprobe（GPL 构建）
 
-`Mindex.app/Contents/Resources/bin/ffmpeg`、`ffprobe` 由 `scripts/build-desktop-ffmpeg.sh` 从源码编译，静态链接下列库；因为包含 libx264，整个构建按 **GNU GPL v2 或更高版本** 分发。
+随包的 `ffmpeg`/`ffprobe`（macOS `Contents/Resources/bin/`、Windows/Linux `resources/bin/`，Windows 带 `.exe` 后缀）由 `scripts/build-desktop-ffmpeg.sh` 从源码编译，静态链接下列库；因为包含 libx264，整个构建按 **GNU GPL v2 或更高版本** 分发。
+
+- libass 的字体后端按平台：macOS CoreText、Windows DirectWrite（均为系统自带），Linux 不启用系统字体后端（字幕字体由 `studio.subtitle.font_file` 显式指定）。三平台都不链接 fontconfig。
+- Windows 构建经 MSYS2/MinGW（UCRT64）并以 `-static -static-libgcc -static-libwinpthread` 全静态链接 MinGW 运行时，产物只依赖 Windows 系统 DLL，不携带任何 MinGW 运行时库。
 
 | 组件 | 版本 | 许可证 | 来源 |
 |---|---|---|---|
@@ -32,7 +35,7 @@
 | HarfBuzz | 15.0.0 | MIT（“Old MIT”） | https://github.com/harfbuzz/harfbuzz |
 | dav1d | 1.5.4 | BSD-2-Clause | https://code.videolan.org/videolan/dav1d |
 
-对应源码：每个桌面版发布都附带 `mindex-desktop-ffmpeg-sources-<版本>.tar`，内含上表全部源码包（版本与 sha256 固定在构建脚本中）以及 `build-desktop-ffmpeg.sh` 本身，可完整重现随包二进制。ffmpeg 与 FreeType 源码包已核对官方 GPG 签名。
+对应源码：每个桌面版发布都附带 GPL 源码包（macOS/Linux 为 `mindex-desktop-ffmpeg-sources-<版本>.tar`，Windows 为 `.zip`），内含上表全部源码包（版本与 sha256 固定在构建脚本中）以及 `build-desktop-ffmpeg.sh`（Windows 包另含 `build-desktop-win.ps1` 与 `build-desktop-sidecar.ps1` 副本），可完整重现随包二进制。ffmpeg 与 FreeType 源码包已核对官方 GPG 签名。
 
 ### Noto Sans CJK SC 字体
 

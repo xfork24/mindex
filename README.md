@@ -69,7 +69,7 @@ uv run mindex serve
 >
 > `config.example.yaml` 中的局域网地址仅是部署示例。首次使用请修改 `config.local.yaml`，或在设置页配置并激活自己的模型服务。没有素材、索引或可用模型时，页面会显示真实的未就绪状态。
 >
-> **macOS 桌面版（Apple Silicon）：** 安装 DMG 后双击即用，不需要 Python、uv、FFmpeg，也不需要手动运行 `mindex serve`；功能与 Web 版相同，并可在设置页启停本机模型服务。见 [macOS 桌面版](docs/desktop.md)。
+> **桌面版（macOS arm64 / Windows x64 / Linux x64）：** 安装后双击即用，不需要 Python、uv、FFmpeg，也不需要手动运行 `mindex serve`；功能与 Web 版相同，并可在设置页启停本机模型服务。见 [Mindex 桌面版](docs/desktop.md)。
 
 ### 2. 导入素材，先跑通画面检索
 
@@ -422,7 +422,7 @@ UI 回归另需 Node.js、Playwright 及其浏览器；可用 `MINDEX_PLAYWRIGHT
 | 管理人物并按出镜查找片段 | [人物库与证据审核](docs/persons.md) |
 | 从文案制作视频、调整方案 | [Studio 工作台](docs/studio.md) |
 | 用助手面板或 MCP 操作 Mindex | [智能助手](docs/agent.md) |
-| 安装 macOS 桌面版、启停本机模型服务 | [macOS 桌面版](docs/desktop.md) |
+| 安装桌面版（macOS/Windows/Linux）、启停本机模型服务 | [Mindex 桌面版](docs/desktop.md) |
 | 配置服务、音色和检索参数 | [设置页](docs/settings.md) · [配置参考](docs/config-reference.md) |
 | 备份素材、迁移合并或在新机器恢复 | [数据备份与迁移](docs/backup.md) |
 | 查看命令、模块和数据流 | [CLI 参考](docs/cli-reference.md) · [架构](docs/architecture.md) |

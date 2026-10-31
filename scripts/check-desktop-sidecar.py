@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""桌面版冻结后端冒烟：用临时配置与数据目录运行 desktop/build/backend/mindex。
+"""桌面版冻结后端冒烟：用临时配置与数据目录运行 desktop/build/backend/mindex[.exe]（三平台）。
 
 依次验证：冻结自检（chromadb、jieba、opencv、Pillow、playwright、前端、模板、品牌模板与叠加层模板、成片后期的
 转场与水印、align_worker、源码收集模块的哈希与仓库一致）、pyproject 声明的 package-data 全部打包、``-m`` 分发、
-注册并 prepare 测试视频、``serve`` 健康与页面（含品牌模板页与 ``mindex studio --url`` 连接）、SIGTERM 后按时退出。
+注册并 prepare 测试视频、``serve`` 健康与页面（含品牌模板页与 ``mindex studio --url`` 连接）、SIGTERM 后按时退出
+（Windows 上 SIGTERM 即 TerminateProcess 强停，该步验证进程可被终止与退出码回收）。
 
     python scripts/check-desktop-sidecar.py [--backend 路径] [--ffmpeg-dir 目录] [--font 字体] [--isolated-path]
 
 ``--ffmpeg-dir``：以该目录的 ffmpeg/ffprobe 作为 MINDEX_FFMPEG/MINDEX_FFPROBE（随包构建）；
-``--isolated-path``：PATH 只保留 /usr/bin:/bin，确认不依赖 Homebrew；
+``--isolated-path``：PATH 只保留系统目录（POSIX 为 /usr/bin:/bin，Windows 为 System32），确认不依赖 Homebrew/MSYS2；
 ``--font``：额外做一次带烧录字幕的渲染；
 ``--animation``：经冻结后端的 ``-m playwright`` 把 Chromium headless shell 装到临时目录（需联网，约 100 MB），
 再录制一段 AI 动画。
@@ -83,7 +84,8 @@ def make_video(ffmpeg: str, path: Path):
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--backend", type=Path, default=ROOT / "desktop" / "build" / "backend" / "mindex")
+    exe = ".exe" if sys.platform == "win32" else ""
+    parser.add_argument("--backend", type=Path, default=ROOT / "desktop" / "build" / "backend" / f"mindex{exe}")
     parser.add_argument("--ffmpeg-dir", type=Path)
     parser.add_argument("--font", type=Path)
     parser.add_argument("--isolated-path", action="store_true")
@@ -92,15 +94,17 @@ def main() -> int:
     backend = args.backend.resolve()
     internal = backend.parent / "_internal"
     if not backend.is_file():
-        print(f"找不到冻结后端：{backend}（先运行 scripts/build-desktop-sidecar.sh）", file=sys.stderr)
+        builder = "scripts/build-desktop-sidecar.ps1" if sys.platform == "win32" else "scripts/build-desktop-sidecar.sh"
+        print(f"找不到冻结后端：{backend}（先运行 {builder}）", file=sys.stderr)
         return 1
 
     env = {key: value for key, value in os.environ.items() if not key.startswith("MINDEX_")}
     if args.isolated_path:
-        env["PATH"] = "/usr/bin:/bin"
+        # 验证不依赖 Homebrew/MSYS2/Chocolatey：只保留系统目录。
+        env["PATH"] = r"C:\Windows\System32;C:\Windows" if sys.platform == "win32" else "/usr/bin:/bin"
     if args.ffmpeg_dir:
-        env["MINDEX_FFMPEG"] = str((args.ffmpeg_dir / "ffmpeg").resolve())
-        env["MINDEX_FFPROBE"] = str((args.ffmpeg_dir / "ffprobe").resolve())
+        env["MINDEX_FFMPEG"] = str((args.ffmpeg_dir / f"ffmpeg{exe}").resolve())
+        env["MINDEX_FFPROBE"] = str((args.ffmpeg_dir / f"ffprobe{exe}").resolve())
     ffmpeg = env.get("MINDEX_FFMPEG") or shutil.which("ffmpeg", path=env.get("PATH"))
     if not ffmpeg:
         print("PATH 中没有 ffmpeg，请用 --ffmpeg-dir 指定随包构建", file=sys.stderr)

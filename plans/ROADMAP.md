@@ -94,11 +94,11 @@ flowchart LR
 - 第三方工具来源：以工具调用方式接入外部生成或特效服务（MCP 客户端或 HTTP 插件），产物登记为不可变文件版本，接入"文件型画面"；
 - 发布包：标题、简介、标签、章节时间点、多画幅成片一次导出。
 
-## M4 桌面端（macOS、Windows）
+## M4 桌面端（macOS、Windows、Linux）
 
 **定位**：复刻 Web 版功能，私有部署时不暴露源码；模型服务可以在本机或局域网。
 
-**推荐方案**：Electron 外壳加 Python sidecar。实施计划与决策记录见 [MACOS_NATIVE_PLAN.md](MACOS_NATIVE_PLAN.md)，任务进度见 `.kiro/specs/macos-desktop/`。
+**推荐方案**：Electron 外壳加 Python sidecar。macOS 实施与决策记录见 [MACOS_NATIVE_PLAN.md](MACOS_NATIVE_PLAN.md)（任务进度 `.kiro/specs/macos-desktop/`）；Windows/Linux 跨平台决策见 [WIN_LINUX_NATIVE_PLAN.md](WIN_LINUX_NATIVE_PLAN.md)（任务进度 `.kiro/specs/desktop-cross-platform/`）。
 
 两种外壳的后端完全相同（都是 sidecar 运行 `mindex serve`，窗口加载同一套前端），功能完整与否与外壳无关；差异只在外壳层：
 
@@ -138,5 +138,5 @@ flowchart LR
 ```text
 M1（已完成） ──► M3 后期（已完成；依赖文件型画面、画幅）
      └──────► M2 选题（已完成，依赖文案模板）
-M4 桌面端可与 M2/M3 并行；前置条件：锁跨平台（Windows 阶段）、二进制定位可配置、用户数据目录、冻结兼容
+M4 桌面端：macOS 已完成；Windows/Linux 已完成（锁跨平台、二进制定位、用户数据目录、冻结兼容等前置条件均已落地）
 ```

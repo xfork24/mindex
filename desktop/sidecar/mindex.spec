@@ -1,5 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
-# PyInstaller 规格：冻结 mindex serve 为 onedir 后端（arm64），由 scripts/build-desktop-sidecar.sh 在独立环境中调用。
+# PyInstaller 规格：冻结 mindex serve 为 onedir 后端（macOS arm64 / Linux x64 / Windows x64），
+# 由 scripts/build-desktop-sidecar.sh（mac、Linux）或 build-desktop-sidecar.ps1（Windows）在独立环境中调用。
 #
 # 维护约定：
 # - SOURCE_MODULES：以自身源码文件哈希作指纹的模块（content_hash(Path(__file__))）和需要以 .py 文件存在的脚本，
@@ -7,6 +8,10 @@
 #   llama_cpp.py 的哈希属于嵌入空间身份（adapter_sha256），不要为打包修改它。
 # - 包数据（前端、文案模板）经 collect_data_files("mindex") 从已安装的 wheel 收集；新增 package-data 时
 #   scripts/check-desktop-sidecar.py 会核对 pyproject 声明的文件都已打包。
+# - console=True 三平台一致：stdout/stderr 管道依赖它；Windows 下黑框由外壳 spawn 的 windowsHide 消除。
+# - target_arch/codesign_identity 仅 macOS 有意义，其他平台不传。
+import sys
+
 from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules, copy_metadata
 
 SOURCE_MODULES = {
@@ -49,6 +54,7 @@ analysis = Analysis(
     noarchive=False,
 )
 pyz = PYZ(analysis.pure)
+_darwin_only = {"target_arch": "arm64", "codesign_identity": None} if sys.platform == "darwin" else {}
 executable = EXE(
     pyz,
     analysis.scripts,
@@ -56,8 +62,7 @@ executable = EXE(
     exclude_binaries=True,
     name="mindex",
     console=True,
-    target_arch="arm64",
-    codesign_identity=None,
     upx=False,
+    **_darwin_only,
 )
 COLLECT(executable, analysis.binaries, analysis.datas, name="backend", upx=False)

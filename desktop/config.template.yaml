@@ -29,8 +29,9 @@ studio:
 
 # 本机模型服务：设置页“本机服务”可以启停这里定义的服务、查看健康与日志，并设置随后端自动启动 / 退出时停止。
 # 页面只能启停，不能修改命令；改完本文件后用菜单“Mindex → 重启后端”生效。
-# 下面的示例对应仓库 scripts/ 里的启动脚本：把 /path/to/mindex 换成你的 Mindex 仓库目录（含 bin/ 与 models/），
-# 再去掉对应条目的注释。端口与 scripts/run-*.sh 的默认值一致；单 GPU 环境不要同时启动多个大模型服务。
+# 下面的示例对应仓库 scripts/ 里的启动脚本（macOS/Linux 形式）：把 /path/to/mindex 换成你的 Mindex 仓库目录
+# （含 bin/ 与 models/），再去掉对应条目的注释。端口与 scripts/run-*.sh 的默认值一致；单 GPU 环境不要同时
+# 启动多个大模型服务。Windows 上命令需为 .bat/.ps1 或可执行文件路径（.sh 脚本不能直接作为命令）。
 local_services:
   enabled: true
   services: []
