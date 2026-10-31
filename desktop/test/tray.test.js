@@ -15,6 +15,13 @@ test("关闭窗口：偏好开启且未在退出时只隐藏；退出中或偏�
   assert.equal(tray.shouldHide({ quitting: false, keepInBackground: false }), false);
 });
 
+test("关闭窗口：托盘不可用（如无托盘守护进程的 Linux）时不隐藏，避免窗口无法唤回", () => {
+  assert.equal(tray.shouldHide({ quitting: false, keepInBackground: true, trayAvailable: false }), false);
+  assert.equal(tray.shouldHide({ quitting: false, keepInBackground: undefined, trayAvailable: false }), false);
+  assert.equal(tray.shouldHide({ quitting: false, keepInBackground: true, trayAvailable: true }), true);
+  assert.equal(tray.shouldHide({ quitting: false, keepInBackground: true, trayAvailable: undefined }), true);  // 缺省可用
+});
+
 test("托盘菜单：打开、今日选题、保留后台（勾选）、退出", () => {
   for (const text of [STRINGS.zh, STRINGS.en]) {
     const items = tray.menuItems(text, { keepInBackground: true });

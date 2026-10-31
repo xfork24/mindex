@@ -229,3 +229,65 @@ test("桌面版本号与后端 pyproject 一致", () => {
   const pyproject = fs.readFileSync(path.join(__dirname, "..", "..", "pyproject.toml"), "utf8");
   assert.equal(pkg.version, /^version\s*=\s*"([^"]+)"/m.exec(pyproject)[1]);
 });
+
+// ---------------------------------------------------------------- 跨平台分支
+
+const { binaryName, layout } = require("../lib/paths");
+
+test("可执行名：Windows 加 .exe，其他平台原样", () => {
+  assert.equal(binaryName("mindex", "win32"), "mindex.exe");
+  assert.equal(binaryName("ffmpeg", "win32"), "ffmpeg.exe");
+  assert.equal(binaryName("mindex", "darwin"), "mindex");
+  assert.equal(binaryName("mindex", "linux"), "mindex");
+});
+
+test("打包布局：三平台的随包二进制路径（Windows 带 .exe）", () => {
+  // ffmpeg/ffprobe 按存在性解析（打包后在 Resources/bin 下），需要真实的临时资源目录；
+  // backendExecutable 在打包模式下直接拼接。
+  const dir = temp();
+  fs.mkdirSync(path.join(dir, "bin"));
+  for (const name of ["ffmpeg", "ffprobe", "ffmpeg.exe", "ffprobe.exe"]) {
+    fs.writeFileSync(path.join(dir, "bin", name), "");
+  }
+  const base = { packaged: true, resourcesPath: dir, userData: path.join(dir, "user"), logs: path.join(dir, "logs") };
+  const mac = layout({ ...base, platform: "darwin" });
+  assert.equal(mac.backendExecutable, path.join(dir, "backend", "mindex"));
+  assert.equal(mac.ffmpeg, path.join(dir, "bin", "ffmpeg"));
+  const win = layout({ ...base, platform: "win32" });
+  assert.equal(win.backendExecutable, path.join(dir, "backend", "mindex.exe"));
+  assert.equal(win.ffmpeg, path.join(dir, "bin", "ffmpeg.exe"));
+  assert.equal(win.ffprobe, path.join(dir, "bin", "ffprobe.exe"));
+});
+
+test("进程组停止（Windows）：先 taskkill 软停，宽限后 /T /F 强杀", async () => {
+  const calls = [];
+  const exec = (command, args) => calls.push([command, ...args]);
+  // 宽限内退出（第 3 次探测起进程消失）：只有软停一次，未强杀。
+  let probes = 0;
+  assert.equal(await sidecar.stopGroup(42, { platform: "win32", graceMs: 300, pollMs: 10,
+    exec, isAlive: () => ++probes < 3, kill: (pid, sig) => calls.push(["kill", pid, sig]) }), false);
+  // 顽固进程：软停 + 宽限超时 + /T /F。
+  assert.equal(await sidecar.stopGroup(43, { platform: "win32", graceMs: 60, pollMs: 10,
+    exec, isAlive: () => true, kill: (pid, sig) => calls.push(["kill", pid, sig]) }), true);
+  assert.deepEqual(calls, [
+    ["taskkill", "/PID", "42", "/T"],
+    ["taskkill", "/PID", "43", "/T"],
+    ["taskkill", "/PID", "43", "/T", "/F"],
+  ]);
+});
+
+test("进程信息（Windows）：PowerShell 单次查询父 pid 与命令行；失败时容错", () => {
+  const json = JSON.stringify({ ProcessId: 7, ParentProcessId: 5, CommandLine: "C:\\app\\backend\\mindex.exe --config c serve" });
+  const exec = (command, args, options) => {
+    assert.equal(command, "powershell");
+    assert.match(args.join(" "), /Get-CimInstance/);
+    assert.match(args.join(" "), /ProcessId=7/);
+    return json;
+  };
+  const info = sidecar.processInfo(7, { platform: "win32", exec });
+  assert.deepEqual(info, { parent: 5, command: "C:\\app\\backend\\mindex.exe --config c serve" });
+  const broken = sidecar.processInfo(8, { platform: "win32", exec: () => { throw new Error("powershell 缺失"); } });
+  assert.deepEqual(broken, { parent: 0, command: "" });
+  // PowerShell 查不到进程（返回空）同样容错。
+  assert.deepEqual(sidecar.processInfo(9, { platform: "win32", exec: () => "" }), { parent: 0, command: "" });
+});

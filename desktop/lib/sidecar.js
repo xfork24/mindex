@@ -115,17 +115,33 @@ function isDescendant(pid, root, readParent = parentPid) {
   return false;
 }
 
-function parentPid(pid) {
+// 进程的父 pid 与命令行。Windows 用 PowerShell 单次查询（无 ps 命令）；POSIX 用两次 ps 调用。
+// 查询失败时返回 {parent: 0, command: ""}，与 POSIX 分支的容错语义一致。
+function processInfo(pid, { platform = process.platform, exec = childProcess.execFileSync } = {}) {
+  if (platform === "win32") {
+    try {
+      const script = `(Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}') | ConvertTo-Json -Compress`;
+      const output = exec("powershell", ["-NoProfile", "-NonInteractive", "-Command", script], { encoding: "utf8" });
+      const info = JSON.parse(String(output).trim());
+      return { parent: Number(info.ParentProcessId) || 0, command: String(info.CommandLine ?? "") };
+    } catch {
+      return { parent: 0, command: "" };
+    }
+  }
+  return { parent: parentPid(pid, { exec }), command: processCommand(pid, { exec }) };
+}
+
+function parentPid(pid, { exec = childProcess.execFileSync } = {}) {
   try {
-    return Number(childProcess.execFileSync("ps", ["-o", "ppid=", "-p", String(pid)], { encoding: "utf8" }).trim()) || 0;
+    return Number(exec("ps", ["-o", "ppid=", "-p", String(pid)], { encoding: "utf8" }).trim()) || 0;
   } catch {
     return 0;
   }
 }
 
-function processCommand(pid) {
+function processCommand(pid, { exec = childProcess.execFileSync } = {}) {
   try {
-    return childProcess.execFileSync("ps", ["-o", "command=", "-p", String(pid)], { encoding: "utf8" }).trim();
+    return exec("ps", ["-o", "command=", "-p", String(pid)], { encoding: "utf8" }).trim();
   } catch {
     return "";
   }
@@ -141,8 +157,25 @@ function alive(pid) {
 }
 
 // 停止进程组（detached 启动，pgid = pid）：SIGTERM，graceMs 后仍存活则 SIGKILL。返回是否被强制结束。
-async function stopGroup(pid, { graceMs = 10000, pollMs = 100, isAlive = alive, kill = process.kill.bind(process) } = {}) {
+// Windows：无跨进程 SIGTERM，先 taskkill /T 软停（对无窗进程基本无效），宽限后 taskkill /T /F 杀整树；
+// 优雅停止由退出前的 REST stop-on-exit 承担（与后端 shared/process_ops 的停止语义一致）。
+async function stopGroup(pid, { graceMs = 10000, pollMs = 100, isAlive = alive, kill = process.kill.bind(process),
+  platform = process.platform, exec = childProcess.execFileSync } = {}) {
   if (!pid || !isAlive(pid)) return false;
+  if (platform === "win32") {
+    try {
+      exec("taskkill", ["/PID", String(pid), "/T"], { stdio: "ignore" });
+    } catch {}
+    const deadline = Date.now() + graceMs;
+    while (Date.now() < deadline) {
+      if (!isAlive(pid)) return false;
+      await sleep(pollMs);
+    }
+    try {
+      exec("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore" });
+    } catch {}
+    return true;
+  }
   try {
     kill(-pid, "SIGTERM");
   } catch {
@@ -170,5 +203,5 @@ async function reapStale(pid, { isAlive = alive, command = processCommand, stop 
 
 module.exports = {
   serveArguments, buildCommand, buildEnv, RotatingLog, StartupError, waitForHealth,
-  isDescendant, parentPid, processCommand, alive, stopGroup, reapStale,
+  isDescendant, processInfo, parentPid, processCommand, alive, stopGroup, reapStale,
 };

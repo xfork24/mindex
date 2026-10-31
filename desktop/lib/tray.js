@@ -4,8 +4,9 @@
 const path = require("node:path");
 
 // 关闭窗口时是否只隐藏：正在退出时一律放行；偏好关闭时按原行为关闭窗口（随后退出应用）。
-function shouldHide({ quitting, keepInBackground }) {
-  return !quitting && keepInBackground !== false;
+// 托盘不可用（如无托盘守护进程的 Linux 桌面）时必须真正关闭——隐藏后没有图标可以唤回窗口。
+function shouldHide({ quitting, keepInBackground, trayAvailable = true }) {
+  return !quitting && trayAvailable && keepInBackground !== false;
 }
 
 // 托盘菜单：action 由 main.js 映射为具体操作；只有 quit 走优雅退出流程。

@@ -1,6 +1,7 @@
 // 桌面外壳冒烟：真实 Electron + 真实 mindex serve（开发模式 uv run，或 MINDEX_SMOKE_APP 指定已安装的 .app 可执行文件）。
 // 用户数据与日志放在临时目录（MINDEX_DESKTOP_HOME），不碰 ~/Library。
 const assert = require("node:assert/strict");
+const childProcess = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
@@ -8,11 +9,27 @@ const path = require("node:path");
 const desktop = path.join(__dirname, "..", "desktop");
 const { _electron } = require(path.join(desktop, "node_modules", "playwright-core"));
 const packaged = process.env.MINDEX_SMOKE_APP || "";
+const isWin = process.platform === "win32";
+const appImage = packaged.endsWith(".AppImage");
 const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "mindex-smoke-")));
 const downloads = path.join(home, "downloads");
 fs.mkdirSync(downloads);
 const APP = /^http:\/\/127\.0\.0\.1:\d+\//;
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+// Windows 没有对其他进程的 SIGKILL；dev 模式杀的还是 uv.exe 树，用 taskkill /T /F 连子进程一起结束。
+const killTree = (pid) => {
+  if (isWin) childProcess.execFileSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore" });
+  else process.kill(pid, "SIGKILL");
+};
+// Linux CI 容器里 Electron 需要 --no-sandbox（chrome-sandbox 未设 SUID）；AppImage 还需解包运行。
+const electronArgs = (appDir) => [
+  ...(appDir ? [appDir] : []),
+  ...(process.platform === "linux" ? ["--no-sandbox"] : []),
+];
+const launchEnv = () => ({
+  ...process.env,
+  ...(appImage ? { APPIMAGE_EXTRACT_AND_RUN: "1" } : {}),
+});
 
 async function waitFor(predicate, timeout, message) {
   const deadline = Date.now() + timeout;
@@ -26,8 +43,8 @@ async function waitFor(predicate, timeout, message) {
 (async () => {
   const app = await _electron.launch({
     executablePath: packaged || require(path.join(desktop, "node_modules", "electron")),
-    args: packaged ? [] : [desktop],
-    env: { ...process.env, MINDEX_DESKTOP_HOME: home, MINDEX_DESKTOP_DOWNLOAD_DIR: downloads, MINDEX_DESKTOP_FORCE_QUIT: "1" },
+    args: electronArgs(packaged ? null : desktop),
+    env: { ...launchEnv(), MINDEX_DESKTOP_HOME: home, MINDEX_DESKTOP_DOWNLOAD_DIR: downloads, MINDEX_DESKTOP_FORCE_QUIT: "1" },
     timeout: 180000,
   });
   let sidecarPid = null;
@@ -44,7 +61,7 @@ async function waitFor(predicate, timeout, message) {
     assert.equal(isolated.require, "undefined");
     assert.equal(isolated.process, "undefined");
     assert.equal(isolated.desktop.version, require(path.join(desktop, "package.json")).version);
-    assert.equal(isolated.desktop.platform, "darwin");
+    assert.equal(isolated.desktop.platform, process.platform);
     assert.equal(isolated.frozen, true);
 
     // 2. 五个主页面与文案、风格、交付模板及选题子页都直接可用（认证由外壳注入，不出现登录页）。
@@ -118,12 +135,13 @@ async function waitFor(predicate, timeout, message) {
 
     // 6. 不允许导航到本地文件（例如误把文件拖进窗口）。
     const before = win.url();
-    await win.evaluate(() => { location.href = "file:///etc/hosts"; });
+    const localFileUrl = isWin ? "file:///c:/windows/win.ini" : "file:///etc/hosts";
+    await win.evaluate((url) => { location.href = url; }, localFileUrl);
     await new Promise((resolve) => setTimeout(resolve, 800));
     assert.equal(win.url(), before);
 
     // 7. 后端意外退出：显示错误页；点“重试”后恢复。
-    process.kill(sidecarPid, "SIGKILL");
+    killTree(sidecarPid);
     await win.waitForURL(/shell\.html\?.*mode=error/, { timeout: 30000 });
     assert.match(await win.textContent("#message"), /意外退出|exited/);
     await win.click("#retry");
@@ -151,8 +169,8 @@ async function waitFor(predicate, timeout, message) {
   fs.writeFileSync(path.join(home, "user-data", "desktop-state.json"), JSON.stringify({ ...state, data_dir: custom }));
   const again = await _electron.launch({
     executablePath: packaged || require(path.join(desktop, "node_modules", "electron")),
-    args: packaged ? [] : [desktop],
-    env: { ...process.env, MINDEX_DESKTOP_HOME: home, MINDEX_DESKTOP_FORCE_QUIT: "1" },
+    args: electronArgs(packaged ? null : desktop),
+    env: { ...launchEnv(), MINDEX_DESKTOP_HOME: home, MINDEX_DESKTOP_FORCE_QUIT: "1" },
     timeout: 180000,
   });
   try {

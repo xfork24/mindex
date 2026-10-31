@@ -30,6 +30,7 @@ let mainWindow = null;
 let quitting = false;
 let shuttingDown = false;
 let tray = null;
+let trayUnavailable = false;
 
 // ------------------------------------------------------------------ sidecar
 
@@ -70,6 +71,7 @@ const backend = {
     this.stopping = false;
     const child = childProcess.spawn(command.command, command.args, {
       cwd: command.cwd, env, detached: true, stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,  // Windows：冻结后端为控制台程序，避免闪黑框（stdio 管道不受影响）
     });
     this.child = child;
     const exited = { value: false };
@@ -89,7 +91,11 @@ const backend = {
     const health = await sidecarLib.waitForHealth({
       url: `${this.origin}/api/health`, token: this.token, version: VERSION, timeoutMs: 120000,
       isRunning: () => !exited.value,
-      pidMatches: (pid) => pid === child.pid || sidecarLib.isDescendant(pid, child.pid),
+      // packaged 模式 exe 即服务进程，pid 严格相等；dev 模式 uv 间接拉起 python，按父链上溯。
+      // Windows dev 模式父链经 PowerShell 查询、不可靠，放宽为只靠令牌与版本校验（两者都是强校验）。
+      pidMatches: mode !== "packaged" && process.platform === "win32"
+        ? () => true
+        : (pid) => pid === child.pid || sidecarLib.isDescendant(pid, child.pid),
     });
     await this.authorize();
     return { health, changed };
@@ -171,8 +177,11 @@ function createWindow() {
   });
   mainWindow.once("ready-to-show", () => mainWindow.show());
   // 关闭窗口：偏好开启时只隐藏，sidecar 继续运行（每日选题定时照常执行）；从托盘菜单“退出”才真正退出。
+  // 托盘不可用时直接关闭（随后退出应用）——隐藏后没有图标可以唤回窗口。
   mainWindow.on("close", (event) => {
-    if (!trayLib.shouldHide({ quitting: quitting || shuttingDown, keepInBackground: keepInBackground() })) return;
+    if (!trayLib.shouldHide({
+      quitting: quitting || shuttingDown, keepInBackground: keepInBackground(), trayAvailable: !trayUnavailable,
+    })) return;
     event.preventDefault();
     mainWindow.hide();
     backgroundHint();
@@ -228,13 +237,26 @@ function refreshTray() {
 }
 
 function createTray() {
-  const image = nativeImage.createFromPath(trayLib.iconPath(process.platform, paths.desktopDir));
-  if (process.platform === "darwin") image.setTemplateImage(true);
-  tray = new Tray(image);
-  tray.setToolTip(text.trayTooltip);
-  // Windows：单击托盘图标打开窗口；macOS 单击即弹出菜单。
-  if (process.platform !== "darwin") tray.on("click", showWindow);
-  refreshTray();
+  // Linux 无托盘守护进程（如未装托盘扩展的 GNOME）时 Tray 可能抛错：降级为无托盘运行，
+  // 关闭窗口改为真正退出，并在本次启动提示一次（见 strings 的 trayUnavailable 文案）。
+  try {
+    const image = nativeImage.createFromPath(trayLib.iconPath(process.platform, paths.desktopDir));
+    if (process.platform === "darwin") image.setTemplateImage(true);
+    tray = new Tray(image);
+    tray.setToolTip(text.trayTooltip);
+    // Windows：单击托盘图标打开窗口；macOS 单击即弹出菜单。
+    if (process.platform !== "darwin") tray.on("click", showWindow);
+    refreshTray();
+  } catch (error) {
+    trayUnavailable = true;
+    tray = null;
+    backend.log?.write(`托盘不可用，已降级为关闭窗口即退出：${error?.message ?? error}\n`);
+    if (!HOME) {
+      dialog.showMessageBox(mainWindow ?? undefined, {
+        type: "info", title: text.trayUnavailableTitle, message: text.trayUnavailable, buttons: [text.ok],
+      }).catch(() => {});
+    }
+  }
 }
 
 // 所有 webContents（主窗口与应用内新窗口）统一的导航、新窗口与外壳命令处理。
@@ -392,6 +414,8 @@ if (!app.requestSingleInstanceLock()) {
       packaged: app.isPackaged, resourcesPath: process.resourcesPath,
       userData: app.getPath("userData"), logs: app.getPath("logs"),
     });
+    // Windows：系统通知按 AppUserModelID 归属应用。
+    if (process.platform === "win32") app.setAppUserModelId(process.execPath);
     text = strings(app.getLocale());
     session.defaultSession.setPermissionRequestHandler((_, permission, callback, details) =>
       callback(security.permissionAllowed(permission, details.requestingUrl, backend.origin)));

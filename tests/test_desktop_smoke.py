@@ -19,8 +19,8 @@ modules = DESKTOP / "node_modules"
 
 needs_node = pytest.mark.skipif(shutil.which("node") is None, reason="需要 node")
 needs_electron = pytest.mark.skipif(
-    sys.platform != "darwin" or not (modules / "electron").is_dir() or not (modules / "playwright-core").is_dir(),
-    reason="需要 macOS 与 desktop/ 的 npm 依赖（cd desktop && npm ci）",
+    not (modules / "electron").is_dir() or not (modules / "playwright-core").is_dir(),
+    reason="需要 desktop/ 的 npm 依赖（cd desktop && npm ci）",
 )
 
 
