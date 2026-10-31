@@ -24,8 +24,10 @@ log = logging.getLogger(__name__)
 UUID_DIR = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
 
-def _pinned_versions(store):
+def _pinned_versions(store, *, task_cutoff=None):
     pinned = set()
+    releases = {row['id']: row['content_id']
+                for row in store.rows('SELECT id,content_id FROM search_releases')}
     files = [*store.root.glob('studio/*/workspace.json'), *store.root.glob('studio/*/job.json')]
     for path in files:
         try:
@@ -39,14 +41,30 @@ def _pinned_versions(store):
                 for key, item in value.items():
                     if key in {'index_id', 'content_index_id', 'content_id'} and isinstance(item, str):
                         pinned.add(item)
+                    elif key in {'release_id', 'search_release_id', 'person_release'} and isinstance(item, str):
+                        if item in releases:
+                            pinned.add(releases[item])
                     elif isinstance(item, (dict, list)):
                         stack.append(item)
             elif isinstance(value, list):
                 stack.extend(item for item in value if isinstance(item, (dict, list)))
-    for row in store.rows("SELECT progress FROM source_tasks WHERE status IN ('queued','running','failed','interrupted','cancelled')"):
-        value = json.loads(row['progress'])
+    for row in store.rows(
+        "SELECT progress FROM source_tasks WHERE status IN ('queued','running') OR "
+        "(status IN ('failed','interrupted','cancelled') AND (? IS NULL OR updated_at>=?))",
+        (task_cutoff, task_cutoff),
+    ):
+        try:
+            value = json.loads(row['progress'])
+            if not isinstance(value, dict):
+                raise ValueError('任务进度不是对象')
+        except (TypeError, ValueError):
+            log.warning('无法核对素材任务索引引用，保留全部索引')
+            return None
         if value.get('index_id'):
             pinned.add(value['index_id'])
+    active_release = store.one("SELECT value FROM settings WHERE key='active.release'")
+    if active_release and active_release['value'] in releases:
+        pinned.add(releases[active_release['value']])
     return pinned
 
 
@@ -73,7 +91,7 @@ def retained_versions(store, keep_recent: int, *, building_max_age_days: int | N
     keep |= {v["id"] for v in inactive_ready[: max(keep_recent, 0)]}
     if active_id:
         keep.add(active_id)
-    pinned = _pinned_versions(store)
+    pinned = _pinned_versions(store, task_cutoff=stale_cutoff)
     keep.update(pinned if pinned is not None else (v['id'] for v in versions))
     deletable = [v for v in inactive_ready + stale_building if v["id"] not in keep]
     return {"active": active_id, "keep": sorted(keep), "deletable": deletable}
@@ -185,7 +203,12 @@ def index_versions_rule(scan: Scan) -> CleanAction | None:
         }))
 
     def execute() -> dict:
-        return {"deleted": [delete_index_version(scan.store, v["id"])["deleted"] for v in deletable]}
+        # 预览后可能有任务恢复、版本激活或创作引用新增；持锁后按新事实复核。
+        current = retained_versions(scan.store, keep_recent, building_max_age_days=building_days,
+                                    now=scan.now)
+        allowed = {v['id'] for v in current['deletable']}
+        return {"deleted": [delete_index_version(scan.store, v["id"])["deleted"]
+                            for v in deletable if v['id'] in allowed]}
 
     return CleanAction(
         category="index_versions", level="B", stage="pipeline",

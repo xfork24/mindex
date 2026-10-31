@@ -179,6 +179,77 @@ def test_index_check_validates_subtitle_dependency_once_per_source(config, video
 
 
 @pytest.mark.slow
+def test_index_check_reuses_probe_cache_but_rejects_changed_media(config, video_file, monkeypatch):
+    from mindex.shared import shot_media
+
+    pipeline = Pipeline(config)
+    sid = pipeline.prepare(video_file)
+    version = IndexBuilder(config, FixtureEmbedder(config)).build(source_id=sid, channels=['visual'])
+    original = shot_media.probe
+    checked = []
+
+    def probe(path):
+        checked.append(path)
+        return original(path)
+
+    monkeypatch.setattr(shot_media, 'probe', probe)
+    assert IndexBuilder(config, FixtureEmbedder(config)).build(source_id=sid, channels=['visual']) == version
+    assert check_index(pipeline.store, version) == []
+    assert checked == [], '已有有效探测结果，不应重复启动 ffprobe'
+    shot = pipeline.store.root / pipeline.store.segments(sid, 'shot')[0]['path']
+    shot.write_bytes(b'truncated')
+    assert check_index(pipeline.store, version), '媒体变化必须失效缓存并重新校验'
+    assert checked and set(checked) == {shot}
+
+
+@pytest.mark.slow
+def test_cached_publish_can_resume_after_committed_batch_without_media_work(config, video_file, monkeypatch):
+    from mindex.processing import channel_index
+
+    pipeline = Pipeline(config)
+    sid = pipeline.prepare(video_file)
+    builder = IndexBuilder(config, FixtureEmbedder(config))
+    original = builder.build(source_id=sid, kinds=['moment'], channels=['visual'], activate=True)
+    source = pipeline.store.one('SELECT * FROM sources WHERE id=?', (sid,))
+    template = pipeline.store.segments(sid, 'moment')[0]
+    for number in range(10):
+        pipeline._segment(source, 'scene', template['start'], template['end'],
+                          f'alias-{number}', None, 'fixture')
+
+    def unexpected(*args, **kwargs):
+        pytest.fail('已有相同区间向量，不应切片、探测媒体或请求模型')
+
+    monkeypatch.setattr(builder.embedder, 'video', unexpected)
+    monkeypatch.setattr('mindex.shared.shot_media.ShotMedia.inference_video', unexpected)
+    monkeypatch.setattr('mindex.shared.shot_media.probe', unexpected)
+    monkeypatch.setattr(channel_index, 'REUSED_METADATA_BATCH_SIZE', 4)
+    saved = []
+
+    class Cancelled(Exception):
+        pass
+
+    def progress(value):
+        if value['stage'] == 'embedding' and value['completed']:
+            count = pipeline.store.one("SELECT count(*) n FROM index_members WHERE index_id=? "
+                                       "AND complete=1 AND json_extract(snapshot,'$.kind')='scene'",
+                                       (value['index_id'],))['n']
+            assert count == value['completed'], '进度只能报告已提交的元数据'
+            assert 0 < count < 10
+            saved.append(value['index_id'])
+            raise Cancelled()
+
+    with pytest.raises(Cancelled):
+        builder.build(source_id=sid, kinds=['scene'], channels=['visual'], progress=progress)
+    resumed = builder.build(source_id=sid, kinds=['scene'], channels=['visual'])
+    assert saved == [resumed]
+    assert len(pipeline.store.snapshots(original)) == len(pipeline.store.segments(sid, 'moment'))
+    assert check_index(pipeline.store, resumed) == []
+    report = json.loads(pipeline.store.one('SELECT value FROM settings WHERE key=?',
+                                          ('index_report.' + resumed,))['value'])
+    assert report['embedded_vectors'] == 0 and report['cached_metadata_batches'] > 0
+
+
+@pytest.mark.slow
 def test_pending_raw_asr_reuses_chunks_before_initializing_model(config, video_file, monkeypatch):
     from mindex.shared.jsonio import save
 

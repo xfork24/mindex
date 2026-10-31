@@ -276,8 +276,19 @@ def _prune_empty_parents(path: Path, stop: Path) -> None:
 
 
 def temp_crash(scan: Scan) -> CleanAction | None:
-    """崩溃残留的临时目录与根级 .partial 文件；apply 段独占管线锁，无 mtime 门槛。"""
+    """处理临时残留；在线检索不持管线锁，需另外遵守宽限期。"""
     items, targets = [], []
+
+    def query_within_grace(path):
+        if not path.name.startswith(('query-', 'query-image-', 'query-window-')):
+            return False
+        try:
+            _, newest = _tree_stats(path)
+            newest = max(newest, path.stat().st_mtime)
+        except FileNotFoundError:
+            return True  # 在线请求已经自行回收，不再作为清理目标。
+        return newest >= (scan.now - timedelta(hours=scan.config.clean.temp_grace_hours)).timestamp()
+
     try:
         entries = list(os.scandir(scan.store.root))
     except OSError:
@@ -290,6 +301,8 @@ def temp_crash(scan: Scan) -> CleanAction | None:
         if not crashed or not (entry.is_dir(follow_symlinks=False) or entry.is_file(follow_symlinks=False)):
             continue
         path = Path(entry.path)
+        if query_within_grace(path):
+            continue
         size, _ = _tree_stats(path)
         targets.append(path)
         items.append(CleanItem(path.relative_to(scan.store.root).as_posix(), size))
@@ -313,6 +326,8 @@ def temp_crash(scan: Scan) -> CleanAction | None:
         current.update(r['path'] for r in scan.store.rows('SELECT path FROM sources'))
         deleted = 0
         for path in targets:
+            if not path.exists() or query_within_grace(path):
+                continue
             relative = path.relative_to(scan.store.root).as_posix()
             if relative in current or any(ref.startswith(relative + '/') for ref in current):
                 continue
@@ -328,7 +343,7 @@ def temp_crash(scan: Scan) -> CleanAction | None:
     return CleanAction(
         category="temp_crash", level="A", stage="pipeline",
         description="崩溃残留的临时目录与未完成写入",
-        policy="TemporaryDirectory 正常退出即消失，存在即残留；apply 时独占管线锁保证无在跑管线，存在即删",
+        policy="管线临时文件持独占锁回收；在线检索 query-* 不持管线锁，须超上传宽限期且执行前复核",
         items=items, execute=execute,
     )
 
@@ -524,13 +539,19 @@ def orphan_person_png(scan: Scan) -> CleanAction | None:
         if not directory.is_dir():
             continue
         for path in sorted(directory.glob("*.png")):
-            if path.stem not in digests:
+            if (path.stem not in digests and
+                    datetime.fromtimestamp(path.stat().st_mtime, UTC) <
+                    scan.now - timedelta(hours=scan.config.clean.temp_grace_hours)):
                 items.append(CleanItem(
                     path.relative_to(scan.store.root).as_posix(), path.stat().st_size))
 
     def execute() -> dict:
+        current = orphan_person_png(Scan(scan.config, scan.store, scan.now))
+        allowed = {item.path for item in current.items} if current else set()
         deleted = 0
         for item in items:
+            if item.path not in allowed:
+                continue
             (scan.store.root / item.path).unlink(missing_ok=True)
             deleted += 1
         return {"deleted": deleted}
@@ -540,7 +561,7 @@ def orphan_person_png(scan: Scan) -> CleanAction | None:
     return CleanAction(
         category="orphan_person_png", level="A", stage="pipeline",
         description="无引用计数的人物参考图/导入图 PNG",
-        policy="与 delete_import_image 同口径：person_references.digest ∪ person_imports.images[].digest",
+        policy="引用集为 person_references.digest ∪ person_imports.images[].digest；上传宽限期内保留，执行时复核引用",
         items=items, execute=execute,
     )
 
@@ -588,11 +609,17 @@ def orphan_voices(scan: Scan) -> CleanAction | None:
         CleanItem(path.relative_to(scan.store.root).as_posix(), path.stat().st_size)
         for path in sorted(directory.iterdir())
         if path.is_file() and path.relative_to(scan.store.root).as_posix() not in referenced
+        and datetime.fromtimestamp(path.stat().st_mtime, UTC) <
+        scan.now - timedelta(hours=scan.config.clean.temp_grace_hours)
     ]
 
     def execute() -> dict:
+        current = orphan_voices(Scan(scan.config, scan.store, scan.now))
+        allowed = {item.path for item in current.items} if current else set()
         deleted = 0
         for item in items:
+            if item.path not in allowed:
+                continue
             (scan.store.root / item.path).unlink(missing_ok=True)
             deleted += 1
         return {"deleted": deleted}
@@ -602,7 +629,7 @@ def orphan_voices(scan: Scan) -> CleanAction | None:
     return CleanAction(
         category="orphan_voices", level="A", stage="pipeline",
         description="无 voices 行引用的声音样本（pending 残留与试听文件）",
-        policy="voices.sample_path 为准；试听与失败残留可再生或已无用", items=items, execute=execute,
+        policy="voices.sample_path 为准；上传宽限期内保留，执行时复核引用；试听与失败残留可再生", items=items, execute=execute,
     )
 
 

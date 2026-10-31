@@ -219,9 +219,9 @@ def test_orphan_voices_and_person_png(tmp_path):
         db.execute("INSERT INTO person_imports VALUES('i1',?, 'confirmed')",
                    (json.dumps({"images": [{"digest": "d3"}]}),))
     kept_voice = write(root / "voices" / "v1.wav")
-    orphan_voice = write(root / "voices" / "orphan.wav")
+    orphan_voice = age(write(root / "voices" / "orphan.wav"), 3)
     kept_ref = write(root / "persons" / "references" / "d1.png")
-    orphan_ref = write(root / "persons" / "references" / "d2.png")
+    orphan_ref = age(write(root / "persons" / "references" / "d2.png"), 3)
     kept_import = write(root / "persons" / "imports" / "d3.png")
 
     invoke(config_path, "--apply")
@@ -244,6 +244,122 @@ def test_unregistered_source_grace(tmp_path):
     assert names["orphan_sources"]["items"][0]["path"].endswith("stale.mp4")
     invoke(config_path, "--apply")
     assert fresh.exists() and not stale.exists()
+
+
+@pytest.mark.parametrize('kind', ['image', 'voice'])
+def test_orphan_upload_cleanup_rechecks_references_and_grace(tmp_path, kind):
+    from mindex.maintenance.clean import Scan, orphan_person_png, orphan_voices
+
+    config = Config(data_dir=tmp_path)
+    store = Store(tmp_path)
+    rule = orphan_person_png if kind == 'image' else orphan_voices
+    relative = 'persons/references/digest.png' if kind == 'image' else 'voices/sample.wav'
+    path = write(tmp_path / relative)
+    now = datetime.now(UTC)
+    assert rule(Scan(config, store, now)) is None, '正在上传或检查的文件需要宽限期'
+    age(path, 3)
+    action = rule(Scan(config, store, now))
+    assert action and len(action.items) == 1
+    if kind == 'image':
+        store.execute('INSERT INTO person_references VALUES(?,?,?,?,?,?,?)',
+                      ('ref', 'actor', None, relative, 'digest', '{}', None))
+    else:
+        store.execute('INSERT INTO voices(name,kind,provider,voice_id,sample_path) VALUES(?,?,?,?,?)',
+                      ('voice', 'clone', 'self', 'vid', relative))
+    assert action.execute() == {'deleted': 0}
+    assert path.exists(), '预览后建立引用的文件不能删除'
+
+
+def test_nested_partial_cleanup_preserves_sources_and_rechecks_references(tmp_path):
+    from mindex.maintenance.clean import Scan, temp_crash
+
+    config = Config(data_dir=tmp_path)
+    store = Store(tmp_path)
+    junk = write(tmp_path / 'analysis/source/annotation.json.random.partial')
+    referenced = write(tmp_path / 'clips/source/upload.partial')
+    add_segment(store, 's', 'shot', 's')
+    store.execute('UPDATE segments SET path=? WHERE id=?',
+                  ('clips/source/upload.partial', 'shot'))
+    late = write(tmp_path / 'transcripts/source/input.partial')
+    archived = write(tmp_path / 'studio/job/versions/preserved.partial')
+    action = temp_crash(Scan(config, store, datetime.now(UTC)))
+    assert {item.path for item in action.items} == {
+        junk.relative_to(tmp_path).as_posix(), late.relative_to(tmp_path).as_posix()}
+    store.execute('UPDATE sources SET path=? WHERE id=?',
+                  (late.relative_to(tmp_path).as_posix(), 's'))
+    assert action.execute() == {'deleted': 1}
+    assert not junk.exists()
+    assert referenced.exists() and late.exists() and archived.exists()
+
+
+def test_temp_cleanup_does_not_interrupt_online_queries(tmp_path):
+    from mindex.maintenance.clean import Scan, temp_crash
+
+    config = Config(data_dir=tmp_path)
+    store = Store(tmp_path)
+    fresh = write(tmp_path / 'query-image-live/image.png')
+    empty = tmp_path / 'query-starting'
+    empty.mkdir()
+    stale = write(tmp_path / 'query-window-crashed/window.mp4')
+    resumed = write(tmp_path / 'query-resumed/input.mp4')
+    for path in (stale, resumed):
+        age(path, 3)
+        age(path.parent, 3)
+    scan = Scan(config, store, datetime.now(UTC))
+    action = temp_crash(scan)
+    assert {item.path for item in action.items} == {'query-window-crashed', 'query-resumed'}
+    resumed.touch()
+    assert action.execute() == {'deleted': 1}
+    assert fresh.exists() and empty.exists() and resumed.exists()
+    assert not stale.exists()
+
+
+def test_index_cleanup_rechecks_studio_and_resumable_task_pins(tmp_path, monkeypatch):
+    from mindex.maintenance.clean import Scan
+    from mindex.maintenance.clean_index import index_versions_rule, retained_versions
+
+    config = Config(data_dir=tmp_path)
+    config.clean.index_keep_versions = 0
+    store = Store(tmp_path)
+    for identifier in ('studio', 'release', 'resumable', 'junk'):
+        store.execute('INSERT INTO index_versions(id,spec,status,created_at) VALUES(?,?,?,?)',
+                      (identifier, '{}', 'ready', '2026-01-01'))
+    action = index_versions_rule(Scan(config, store, datetime.now(UTC)))
+    assert len(action.items) == 4
+    write(tmp_path / 'studio/job/workspace.json', json.dumps({'versions': [
+        {'parameters': {'index_id': 'studio', 'person_release': 'rel'}}]}).encode())
+    store.execute('INSERT INTO search_releases(id,content_id) VALUES(?,?)', ('rel', 'release'))
+    store.execute('INSERT INTO source_tasks(id,source_id,work,status,config,options,progress) '
+                  'VALUES(?,?,?,?,?,?,?)',
+                  ('task', 'source', 'visual', 'interrupted', '{}', '{}', '{"index_id":"resumable"}'))
+    deleted = []
+
+    def delete(store, identifier):
+        deleted.append(identifier)
+        return {'deleted': identifier}
+
+    monkeypatch.setattr('mindex.maintenance.clean_index.delete_index_version', delete)
+    assert action.execute() == {'deleted': ['junk']}
+    assert deleted == ['junk']
+    assert set(retained_versions(store, 0)['keep']) == {'studio', 'release', 'resumable'}
+    write(tmp_path / 'studio/job/workspace.json', b'{interrupted write')
+    assert not retained_versions(store, 0)['deletable'], '无法读取引用时保守保留'
+
+
+def test_task_index_pins_expire_but_running_tasks_remain_protected(tmp_path):
+    from mindex.maintenance.clean_index import retained_versions
+
+    store = Store(tmp_path)
+    for identifier, status in (('stale', 'interrupted'), ('live', 'running')):
+        store.execute('INSERT INTO index_versions(id,spec,status,created_at) VALUES(?,?,?,?)',
+                      (identifier, '{}', 'building', '2025-01-01'))
+        store.execute('INSERT INTO source_tasks(id,source_id,work,status,config,options,progress,updated_at) '
+                      'VALUES(?,?,?,?,?,?,?,?)',
+                      (identifier, 'source', 'publish', status, '{}', '{}',
+                       json.dumps({'index_id': identifier}), '2025-01-01'))
+    result = retained_versions(store, 0, building_max_age_days=7)
+    assert result['keep'] == ['live']
+    assert [v['id'] for v in result['deletable']] == ['stale']
 
 
 # ---------------------------------------------------------------- 索引版本

@@ -445,7 +445,8 @@ def check_index(store: Store, index_id: str) -> list[str]:
         issues.append(f"向量与元数据不一致：缺少 {len(expected - actual)}，多出 {len(actual - expected)}")
     members = store.rows("SELECT * FROM index_members WHERE index_id=?", (index_id,))
     from mindex.shared.shot_media import ShotMedia
-    media = ShotMedia(store, cache_probes=False, reuse_checks=True)
+    # 探测缓存绑定文件路径、大小及纳秒 mtime；有效文件不必每次启动 ffprobe。
+    media = ShotMedia(store, reuse_checks=True)
     archives = {}
     references = {r['path']: r for r in store.rows(
         "SELECT path,source_id,start,end FROM media_references WHERE source_id IN "

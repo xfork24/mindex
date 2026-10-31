@@ -16,6 +16,7 @@
 | 做真实模型端到端验证 | [e2e 实验框架](e2e-framework.md) | [端到端操作手册](E2E_RUNBOOK.md)、[测试计划](../plans/E2E_TEST_PLAN.md) |
 | 管理素材（改名/收藏/隐藏） | [素材后台指南](admin.md) | — |
 | 回收磁盘空间 | [磁盘清理](cleanup.md) | [CLI 参考](cli-reference.md#磁盘清理) |
+| 排查素材重复处理、发布等待或任务垃圾 | [素材处理复用规则](admin.md#素材处理的复用规则) | [素材任务检查记录](history/material-task-audit-2026-10-31.md) |
 | 备份、迁移合并或全新 clone 恢复 | [数据备份与迁移](backup.md) | [CLI 参考](cli-reference.md#数据备份与迁移) |
 | 切换线上/自建模型、克隆音色、调检索权重 | [设置页指南](settings.md) | [配置参考](config-reference.md) |
 | 按领域发现选题、打分并建成创作任务 | [选题挖掘](topics.md) | [创作工作流](studio.md) |

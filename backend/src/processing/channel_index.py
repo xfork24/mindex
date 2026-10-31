@@ -252,7 +252,7 @@ def build_channels(builder, *, activate=False, mode="auto", source_id=None, kind
         s["representation_ids"] = [r[0] for r in representations(builder, s)]
     # Validate physical dependencies before creating a candidate or invoking a model.
     from mindex.shared.shot_media import ShotMedia
-    media = ShotMedia(store, cache_probes=False, reuse_checks=True)
+    media = ShotMedia(store, reuse_checks=True)
     for media_number, s in enumerate(snapshots, 1):
         if progress and media_number % 128 == 0:
             progress({'stage': 'index_prepare', 'phase': 'publish'})
