@@ -98,7 +98,7 @@ async function selectProfile(id) {
 const profileHooks = [];
 const focusHooks = [];
 // 档案持久化素材范围；组多选取并集，再与手动素材选择取交集。
-const topicGroups = MindexGroups.picker("source", [], () => {}, "ui.groups_filter", {listbox: true});
+const topicGroups = MindexGroups.picker("source", [], () => {}, "ui.groups_filter", {listbox: true, defaultAll: true});
 const topicSources = document.createElement("select");
 topicSources.id = "topic-material-sources";
 topicSources.multiple = true;

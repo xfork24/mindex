@@ -539,7 +539,8 @@ function musicLibraryPicker(sid, value) {
     }
     select.value = chosen || "";
   };
-  const groups = MindexGroups.picker("music", [], () => loadTracks(), "ui.groups_music_filter");
+  // 音乐组筛选与音乐库同款默认全选（=不限），部分选择后过滤曲目与推荐范围。
+  const groups = MindexGroups.picker("music", [], () => loadTracks(), "ui.groups_music_filter", {defaultAll: true});
   box.append(groups.wrap);
   function loadTracks() {
     const query = new URLSearchParams();

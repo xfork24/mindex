@@ -1,5 +1,6 @@
 /* 创作页 · 页面事件绑定、新建任务、智能助手上下文与启动（必须最后加载）。按 studio.html 中的顺序以经典脚本加载，顶层声明共享全局作用域。 */
-const createGroups = MindexGroups.picker("source", [], () => {}, "ui.groups_filter", {listbox: true});
+// 任务创建的素材组筛选默认全选：全选=不限（不保存组 ID，后续新增素材组自动可用）。
+const createGroups = MindexGroups.picker("source", [], () => {}, "ui.groups_filter", {listbox: true, defaultAll: true});
 $("create-sources").closest("label").before(createGroups.wrap);
 createGroupLink = MindexGroups.linkSources(createGroups, $("create-sources"), {
   entries: () => state.sources || [], selection: () => createSourceSelection,

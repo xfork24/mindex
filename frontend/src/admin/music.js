@@ -6,8 +6,8 @@ const query = new URLSearchParams(location.search);
 const page = { items: [], moods: [], selected: null };
 const $ = (id) => document.getElementById(id);
 const api = (url, method = "GET", body) => MindexApi.json(url, method, body);
-// 组筛选与素材页/检索页同款：可搜索多选列表框，选择后过滤左侧曲目列表。
-const musicGroups = MindexGroups.picker("music", [], () => load(), "ui.groups_music_filter", {listbox: true});
+// 组筛选与素材页/检索页同款：可搜索多选列表框，默认全选（=不限），部分选择后过滤左侧曲目列表。
+const musicGroups = MindexGroups.picker("music", [], () => load(), "ui.groups_music_filter", {listbox: true, defaultAll: true});
 $("music-group-filter").append(musicGroups.wrap);
 const trackUrl = (id, suffix = "") => `/api/studio/music-library/${encodeURIComponent(id)}${suffix}`;
 const MAX_MOODS = 3;

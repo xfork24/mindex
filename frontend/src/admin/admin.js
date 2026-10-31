@@ -41,8 +41,8 @@ new ResizeObserver(scheduleSourcePanelSize).observe(document.querySelector('head
 new ResizeObserver(scheduleSourcePanelSize).observe($('admin-notice'));
 scheduleSourcePanelSize();
 
-// 素材组筛选：与检索页同款可搜索多选列表框，选中后按组过滤左侧素材列表（服务端 source_group_ids，空组结果为空）。
-const sourceGroups = MindexGroups.picker("source", [], () => sourceFiltersChanged(), "ui.groups_filter", {listbox: true});
+// 素材组筛选：与检索页同款可搜索多选列表框，默认全选（=不限），部分选择后按组过滤左侧素材列表（服务端 source_group_ids，空组结果为空）。
+const sourceGroups = MindexGroups.picker("source", [], () => sourceFiltersChanged(), "ui.groups_filter", {listbox: true, defaultAll: true});
 $('source-group-filter').append(sourceGroups.wrap);
 window.addEventListener('mindex:groups-changed', () => { void sourceGroups.refresh(); });
 

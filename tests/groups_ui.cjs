@@ -27,6 +27,16 @@ const sourceGroup = process.env.MINDEX_GROUPS_SOURCE_GROUP;
     }
     for (const id of ids) await control.locator(`input[value="${id}"]`).check();
   }
+  // 组筛选默认全选：全部实际组勾选且“全部选择”同步勾选（values 为空 = 不限）。
+  async function assertAllSelected(selector, name) {
+    await page.waitForFunction((sel) => {
+      const select = document.querySelector(sel);
+      if (!select) return false;
+      const real = [...select.options].filter((option) => option.value && option.value !== '__all__');
+      return real.length > 0 && real.every((option) => option.selected) &&
+        [...select.selectedOptions].some((option) => option.value === '__all__');
+    }, selector).catch(() => { throw new Error(`${name}：组筛选应默认全选`); });
+  }
   async function assertGroupText(name) {
     const result = await page.locator('.group-picker').evaluateAll((nodes) => nodes.filter((node) => node.getClientRects().length).map((node) => ({
       text: node.textContent,
@@ -113,9 +123,10 @@ const sourceGroup = process.env.MINDEX_GROUPS_SOURCE_GROUP;
     await page.reload();
     await page.waitForLoadState('networkidle');
     assert.deepEqual((await membership.locator('input:checked').evaluateAll((nodes) => nodes.map((n) => n.value))).sort(), [group, sourceGroup].sort());
-    // 素材 Tab 左侧列表组筛选：与检索页同款多选列表框，选择后按组过滤左侧素材列表。
+    // 素材 Tab 左侧列表组筛选：与检索页同款多选列表框，默认全选（=不限），选择后按组过滤左侧素材列表。
     const sourceFilter = page.locator('#source-group-filter .group-picker');
     assert(await sourceFilter.evaluate((node) => node.classList.contains('group-picker-listbox')), '素材页左侧组筛选应为多选列表框');
+    await assertAllSelected('#source-group-filter select[multiple]', '素材页组筛选');
     const filteredSources = page.waitForResponse((r) => r.url().includes('source_group_ids='));
     await chooseGroups(sourceFilter, [sourceGroup]);
     await (await filteredSources).json();
@@ -133,20 +144,25 @@ const sourceGroup = process.env.MINDEX_GROUPS_SOURCE_GROUP;
     await musicSaved;
     assert.equal(await page.locator('main > .group-picker').count(), 0, '音乐组筛选不能插在页面标题与 Tab 上方');
     assert.equal(await page.locator('main').evaluate((main) => main.firstElementChild.matches('.studio-intro')), true);
-    // 音乐库左侧组筛选：多选列表框样式，选择后过滤左侧曲目列表。
+    // 音乐库左侧组筛选：多选列表框样式，默认全选（=不限），选择后过滤左侧曲目列表。
     const musicFilter = page.locator('.template-panel #music-group-filter .group-picker');
     assert(await musicFilter.evaluate((node) => node.classList.contains('group-picker-listbox')), '音乐库组筛选应为多选列表框');
+    await assertAllSelected('.template-panel #music-group-filter select[multiple]', '音乐库组筛选');
     const filteredTracks = page.waitForResponse((r) => r.url().includes('music_group_ids='));
     await chooseGroups(musicFilter, [musicGroup]);
     await (await filteredTracks).json();
     await page.waitForFunction(() => document.querySelectorAll('#music-list .job-item').length === 1);
     await audit('groups-music-detail');
     await go('/');
-    await chooseGroups(page.locator('.group-picker'), ['__all__']);
+    // 检索页组筛选默认全选：值为空（不限），素材联动列出全部素材。
+    const searchFilter = page.locator('.material-filters .group-picker');
+    await assertAllSelected('.material-filters .group-picker select[multiple]', '检索页组筛选');
+    assert.deepEqual(await page.evaluate(() => searchGroups.values()), [], '默认全选应视为不限（空值）');
     await page.waitForFunction(() => document.getElementById('source').options.length === 3);
-    const allSourceGroups = await page.locator('.group-picker select option:not([value="__all__"])').evaluateAll(nodes=>nodes.map(n=>n.value));
-    assert.deepEqual((await page.evaluate(()=>searchGroups.values())).sort(), allSourceGroups.sort());
-    await chooseGroups(page.locator('.group-picker'), [group]);
+    await chooseGroups(searchFilter, ['__all__']);
+    await page.waitForFunction(() => document.getElementById('source').options.length === 3);
+    await assertAllSelected('.material-filters .group-picker select[multiple]', '检索页组筛选点击全部选择后');
+    await chooseGroups(searchFilter, [group]);
     await page.waitForFunction(() => !document.getElementById('source').disabled);
     assert.deepEqual(await page.locator('#source option:not([value="__all__"])').evaluateAll((nodes) => nodes.map((node) => node.value)), [source]);
     assert(await page.locator('.material-filters').evaluate((node) => node.firstElementChild.classList.contains('group-picker')));
@@ -166,9 +182,12 @@ const sourceGroup = process.env.MINDEX_GROUPS_SOURCE_GROUP;
     assert.deepEqual(await page.locator('.group-picker select option:checked').evaluateAll((nodes) => nodes.map((node) => node.value)), [group]);
     await audit('groups-search');
     await page.locator('#filter-reset').click();
-    assert.equal(await page.locator('.group-picker select option:checked').count(), 0);
+    // 重置回到默认全选（=不限），而不是清空勾选。
+    await assertAllSelected('.material-filters .group-picker select[multiple]', '检索页组筛选重置后');
+    assert.deepEqual(await page.evaluate(() => searchGroups.values()), [], '重置后应为不限（空值）');
     await page.waitForFunction(() => document.querySelectorAll('#source option').length === 3);
     await go('/studio?job=' + process.env.MINDEX_GROUPS_JOB);
+    await assertAllSelected('#create-form .group-picker select[multiple]', '任务创建组筛选');
     await chooseGroups(page.locator('#create-form > .group-picker'), [sourceGroup]);
     await page.waitForFunction(() => !document.getElementById('create-sources').disabled && document.getElementById('create-sources').options.length === 2);
     assert.deepEqual(await page.locator('#create-sources option:not([value="__all__"])').evaluateAll((nodes) => nodes.map((node) => node.value)), [source]);
@@ -196,6 +215,12 @@ const sourceGroup = process.env.MINDEX_GROUPS_SOURCE_GROUP;
     await audit('groups-shot-recall');
     await page.evaluate(() => { state.drafts.delete(draftKey(order()[0])); openStage(order()[0], 'tts'); });
     await page.locator('.music-editor > label select').first().selectOption('library');
+    // 分镜选曲的音乐组筛选（复选框样式）同样默认全选。
+    await page.waitForFunction(() => {
+      const box = document.querySelector('.music-library-picker .group-picker');
+      const real = [...box.querySelectorAll('input[type=checkbox]:not([data-group-all])')];
+      return real.length > 0 && real.every((input) => input.checked);
+    });
     await chooseGroups(page.locator('.music-library-picker .group-picker'), ['__all__']);
     assert.equal(await page.locator('.music-library-picker .group-picker input[type=checkbox]:not([data-group-all]):not(:checked)').count(), 0, '音乐组全部选择应勾选所有实际组');
     await chooseGroups(page.locator('.music-library-picker .group-picker'), [musicGroup]);

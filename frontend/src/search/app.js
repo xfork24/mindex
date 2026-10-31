@@ -103,7 +103,8 @@ function bindDrop(panelId, inputId, labelId, kind, show) {
 bindDrop('image-input', 'image-file', 'image-drop', 'image', showImage);
 bindDrop('video-input', 'video-file', 'video-drop', 'video', showVideo);
 
-const searchGroups = MindexGroups.picker("source", [], () => {}, "ui.groups_filter", {listbox: true});
+// 素材组筛选默认全选（全选=不限，不写入 source_group_ids）；部分选择才按组过滤。
+const searchGroups = MindexGroups.picker("source", [], () => {}, "ui.groups_filter", {listbox: true, defaultAll: true});
 $("source").closest(".material-filters").prepend(searchGroups.wrap);
 const searchGroupLink = MindexGroups.linkSources(searchGroups, $('source'), {
   entries: () => searchFilterEntries('source'), selection: () => sourceScope,

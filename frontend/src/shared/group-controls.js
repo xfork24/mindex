@@ -1,7 +1,9 @@
 (function () {
   'use strict';
   const api = (...args) => window.MindexApi.json(...args);
-  function picker(kind, selected = [], changed = () => {}, key, {listbox = false, includeSystem = true} = {}) {
+  // defaultAll：筛选类控件默认全选；全选视为“不限”（values 返回空，不写入筛选/保存值），
+  // 与任务创建“全选=不限”的既有约定一致。归属编辑（membership）不传该选项。
+  function picker(kind, selected = [], changed = () => {}, key, {listbox = false, includeSystem = true, defaultAll = false} = {}) {
     const wrap = document.createElement('fieldset');
     wrap.className = listbox ? 'group-picker group-picker-listbox' : 'group-picker';
     wrap.dataset.groupKind = kind;
@@ -23,7 +25,8 @@
     }
     const listeners = new Set();
     let selectedIds = [...new Set(selected)], items = [], disabled = false, loading = true, loaded = false;
-    const values = () => [...selectedIds];
+    const coversAll = (ids) => defaultAll && items.length > 0 && items.every((group) => ids.includes(group.id));
+    const values = () => coversAll(selectedIds) ? [] : [...selectedIds];
     function syncDisabled() {
       wrap.dataset.loading = loading ? '1' : '0';
       for (const input of options.querySelectorAll('input')) input.disabled = disabled || loading;
@@ -115,9 +118,12 @@
     }
     async function refresh() {
       loading = true; syncDisabled();
+      // defaultAll：从未选择过则取全选默认；原选择已覆盖全部组时刷新后保持全选（新增组不改变“不限”）。
+      const keepAll = defaultAll && items.length > 0 && items.every((group) => selectedIds.includes(group.id));
       try {
         const result = await api(`/api/admin/groups?type=${kind}`);
         items = result.items.filter((group) => includeSystem || !group.system); loaded = true;
+        if (defaultAll && (keepAll || selectedIds.length === 0)) selectedIds = items.map((group) => group.id);
         MindexI18n.setText(status, '');
       } catch (error) {
         MindexI18n.setText(status, MindexI18n.system(error.message));
@@ -128,7 +134,10 @@
     return {wrap, ready, values, refresh, onChange: (listener) => listeners.add(listener), setDisabled: (value) => {
       disabled = value; syncDisabled();
     }, setValues: (ids) => {
-      selectedIds = [...new Set(ids)]; draw();
+      const next = [...new Set(ids)];
+      // defaultAll 控件里清空选择等于回到“不限”默认：显示全选，values() 仍返回空。
+      selectedIds = defaultAll && !next.length ? items.map((group) => group.id) : next;
+      draw();
     }};
   }
   function membership(host, kind, item) {
