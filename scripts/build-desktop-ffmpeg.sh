@@ -233,8 +233,9 @@ elif [[ "${PLATFORM}" == "linux" ]]; then
   fi
 else
   # 只允许 Windows 系统 DLL；出现 libgcc/libwinpthread/libstdc++ 等 MinGW 运行时即静态链接不彻底。
+  # DWrite.dll 是 libass DirectWrite 字体后端（系统组件，Windows 7+ 自带）的必然依赖。
   dlls="$(objdump -p "${OUT}/bin/ffmpeg.exe" "${OUT}/bin/ffprobe.exe" | grep "DLL Name:")"
-  if grep -viE 'DLL Name: (KERNEL32|USER32|msvcrt|ucrtbase|api-ms-win-|ws2_32|advapi32|bcrypt|ole32|shell32|SHCore|secur32|crypt32)\.dll' <<<"${dlls}" | grep -q .; then
+  if grep -viE 'DLL Name: (KERNEL32|USER32|msvcrt|ucrtbase|api-ms-win-|ws2_32|advapi32|bcrypt|ole32|shell32|SHCore|secur32|crypt32|DWrite)\.dll' <<<"${dlls}" | grep -q .; then
     echo "${dlls}" >&2
     echo "ffmpeg.exe 依赖了非系统 DLL（MinGW 运行时未静态链接）" >&2
     exit 1

@@ -290,4 +290,18 @@ test("进程信息（Windows）：PowerShell 单次查询父 pid 与命令行；
   assert.deepEqual(broken, { parent: 0, command: "" });
   // PowerShell 查不到进程（返回空）同样容错。
   assert.deepEqual(sidecar.processInfo(9, { platform: "win32", exec: () => "" }), { parent: 0, command: "" });
+  // pid 来自状态文件（可能是字符串数字），查询前归一。
+  assert.deepEqual(sidecar.processInfo("7", { platform: "win32", exec }), { parent: 5, command: "C:\\app\\backend\\mindex.exe --config c serve" });
+});
+
+test("父 pid 与命令行查询（Windows 缺省走 PowerShell）——reapStale/isDescendant 在 Windows 可用的前提", () => {
+  const json = JSON.stringify({ ProcessId: 7, ParentProcessId: 5, CommandLine: "C:\\app\\backend\\mindex.exe --config c serve" });
+  const exec = () => json;
+  // parentPid/processCommand 的 win32 分支必须委托 processInfo（直接用 ps 在 Windows 上恒失败，
+  // 会让 reapStale 永远清理不了崩溃遗留的后端进程）。
+  assert.equal(sidecar.parentPid(7, { platform: "win32", exec }), 5);
+  assert.equal(sidecar.processCommand(7, { platform: "win32", exec }), "C:\\app\\backend\\mindex.exe --config c serve");
+  // 查询失败时的容错语义与 POSIX 一致。
+  assert.equal(sidecar.parentPid(7, { platform: "win32", exec: () => { throw new Error("x"); } }), 0);
+  assert.equal(sidecar.processCommand(7, { platform: "win32", exec: () => { throw new Error("x"); } }), "");
 });

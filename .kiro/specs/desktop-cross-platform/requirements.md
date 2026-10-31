@@ -26,7 +26,7 @@
 #### Acceptance Criteria
 
 1. THE `shared/locks.py` 的 `SharedFileLock` SHALL 在 POSIX 上维持 `fcntl.flock` 行为不变（现有测试逐条通过）。
-2. WHEN 运行在 Windows，THE `SharedFileLock` SHALL 用 `LockFileEx/UnlockFileEx` 实现共享/独占、非阻塞尝试 + 轮询 + `filelock.Timeout` 语义，锁区域（offset 0、长度 0=到 EOF）与 `filelock` 的 WindowsFileLock 一致以保持互操作。
+2. WHEN 运行在 Windows，THE `SharedFileLock` SHALL 用 `LockFileEx/UnlockFileEx` 实现共享/独占、非阻塞尝试 + 轮询 + `filelock.Timeout` 语义，锁区域（offset 0、长度 1 字节，与 `filelock` 的 WindowsFileLock 相同）保持互操作。
 3. THE `named`/`acquire_ordered`/`check_order`/`ORDER` SHALL 不因平台分支而改变签名或语义（`processing_lock.py` 等调用方零改动）。
 
 ### Requirement 2: 后端进程操作跨平台

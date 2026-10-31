@@ -65,6 +65,8 @@ jobs:
         run: uv run pytest -m "not slow" -q
 
       - name: 完整回归
+        if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.full)
+        run: uv run pytest -q
 
   # 桌面版（三平台矩阵）：外壳纯逻辑、桌面相关后端测试与 Electron 开发模式冒烟。
   desktop:
@@ -205,6 +207,7 @@ jobs:
           else powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-desktop-win.ps1; fi
 
       - name: 安装并冒烟（PATH 只留系统目录与 node）
+        shell: bash
         run: |
           if [ "$RUNNER_OS" = "macOS" ]; then
             mount="$(mktemp -d)"
@@ -218,9 +221,8 @@ jobs:
             env PATH="/usr/bin:/bin:$(dirname "$(command -v node)")" \
               MINDEX_SMOKE_APP="$PWD/desktop/dist/linux-unpacked/mindex" xvfb-run -a node tests/desktop_smoke.cjs
           else
-            $env:PATH = "C:\Windows\System32;C:\Windows;$(Split-Path (Get-Command node).Source)"
-            $env:MINDEX_SMOKE_APP = "$PWD\desktop\dist\win-unpacked\Mindex.exe"
-            node tests/desktop_smoke.cjs
+            export PATH="C:\Windows\System32;C:\Windows;$(dirname "$(command -v node)")"
+            MINDEX_SMOKE_APP="$(cygpath -w "$PWD/desktop/dist/win-unpacked/Mindex.exe")" node tests/desktop_smoke.cjs
           fi
 
       - uses: actions/upload-artifact@v4

@@ -117,7 +117,10 @@ function isDescendant(pid, root, readParent = parentPid) {
 
 // 进程的父 pid 与命令行。Windows 用 PowerShell 单次查询（无 ps 命令）；POSIX 用两次 ps 调用。
 // 查询失败时返回 {parent: 0, command: ""}，与 POSIX 分支的容错语义一致。
+// parentPid/processCommand 在 win32 下也走这里——reapStale（清理崩溃遗留的后端）与
+// isDescendant（健康检查的 pid 归属）依赖它们在 Windows 上可用。
 function processInfo(pid, { platform = process.platform, exec = childProcess.execFileSync } = {}) {
+  pid = Number(pid);
   if (platform === "win32") {
     try {
       const script = `(Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}') | ConvertTo-Json -Compress`;
@@ -131,7 +134,8 @@ function processInfo(pid, { platform = process.platform, exec = childProcess.exe
   return { parent: parentPid(pid, { exec }), command: processCommand(pid, { exec }) };
 }
 
-function parentPid(pid, { exec = childProcess.execFileSync } = {}) {
+function parentPid(pid, { platform = process.platform, exec = childProcess.execFileSync } = {}) {
+  if (platform === "win32") return processInfo(pid, { platform, exec }).parent;
   try {
     return Number(exec("ps", ["-o", "ppid=", "-p", String(pid)], { encoding: "utf8" }).trim()) || 0;
   } catch {
@@ -139,7 +143,8 @@ function parentPid(pid, { exec = childProcess.execFileSync } = {}) {
   }
 }
 
-function processCommand(pid, { exec = childProcess.execFileSync } = {}) {
+function processCommand(pid, { platform = process.platform, exec = childProcess.execFileSync } = {}) {
+  if (platform === "win32") return processInfo(pid, { platform, exec }).command;
   try {
     return exec("ps", ["-o", "command=", "-p", String(pid)], { encoding: "utf8" }).trim();
   } catch {

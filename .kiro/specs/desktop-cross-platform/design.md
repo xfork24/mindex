@@ -23,7 +23,7 @@ POSIX 路径零改动：现有 mac 代码只加分支不改行为；`SharedFileL
   - flags：`LOCKFILE_FAIL_IMMEDIATELY = 0x1`，独占再加 `LOCKFILE_EXCLUSIVE_LOCK = 0x2`。
   - 失败且 `ctypes.get_last_error() == 33`（`ERROR_LOCK_VIOLATION`）→ 抛 `BlockingIOError`，与 POSIX 分支的轮询结构同构（非阻塞尝试 → deadline → `time.sleep(0.05)` → `Timeout`）。
   - `OVERLAPPED`：`Internal/InternalHigh` 为 `c_size_t`、`Offset/OffsetHigh` 为 `c_ulong`、`hEvent` 句柄；Offset 置 0。
-  - **锁区域 offset 0、长度 0（到 EOF）**：与 `filelock` 的 WindowsFileLock（`msvcrt.locking` → LockFile 系）一致——字节范围锁只在重叠时冲突，区域一致才互操作。
+  - **锁区域 offset 0、长度 1 字节**：与 `filelock` 的 WindowsFileLock 完全相同的区域（`LockFileEx(..., 0, 1, 0, ...)`，见其 `_windows.py:_lock_fd_nonblocking`）——字节范围锁只在重叠时冲突，区域一致才互操作。（原始设计稿写的“长度 0=到 EOF”与 filelock 实际实现不符，已按实读源码修正。）
   - OS 句柄经 `msvcrt.get_osfhandle(handle.fileno())` 获取；文件以 `open("a+b")` 打开（Windows 下即读写权限，满足独占锁对写权限的要求）。
 
 共享锁（`LOCK_SH` / 不设 EXCLUSIVE 标志）与独占锁的并发语义与 POSIX flock 对齐。
