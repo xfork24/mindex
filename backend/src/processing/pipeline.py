@@ -537,7 +537,7 @@ class Pipeline:
         version = transcript.get("content_version") if transcript and transcript.get("utterances") else None
         return fingerprint([self.config.analysis_key, version]) if version else self.config.analysis_key
 
-    def _annotate(self, segment: dict):
+    def _annotate(self, segment: dict, *, force: bool = False, reuse_completed: bool = False):
         from mindex.processing.dialogue import current_dialogue
 
         transcript = current_dialogue(self.store, segment["source_id"])
@@ -545,7 +545,7 @@ class Pipeline:
         base_profile = self.config.analysis_key
         profile = self.annotation_profile(segment["source_id"])
         saved = self.store.json_value("annotations", "segment_id", segment["id"], profile)
-        if saved is not None:
+        if saved is not None and not force and (reuse_completed or not saved.get("reused_from_profile")):
             log.info("分析检查点命中 %s %s %.2f–%.2fs [%s]", segment["source_id"], segment["kind"], segment["start"], segment["end"], segment["id"])
             return saved
         same = self.store.one(
@@ -554,11 +554,26 @@ class Pipeline:
             "(json_extract(a.data,'$.status')='skipped' AND s.start<=? AND s.end>=?)) LIMIT 1",
             (profile, segment["source_id"], segment["start"], segment["end"], segment["start"], segment["end"]),
         )
-        if same:
+        if same and not force and (reuse_completed or not json.loads(same["data"]).get("reused_from_profile")):
             log.info("复用相同时间范围的分析检查点 %s %s %.2f–%.2fs [%s]", segment["source_id"], segment["kind"], segment["start"], segment["end"], segment["id"])
             saved = json.loads(same["data"])
             self.store.put_json("annotations", "segment_id", segment["id"], profile, saved)
             return saved
+        # 普通续跑可跨模型复用；模型验收等直接调用默认仍按配置区分检查点。
+        if reuse_completed and not force:
+            previous = self.store.one(
+                "SELECT a.profile,a.data FROM annotations a JOIN segments s ON s.id=a.segment_id "
+                "WHERE (a.segment_id=? OR (s.source_id=? AND s.kind=? AND s.start=? AND s.end=?)) "
+                "AND (json_type(a.data,'$.annotation')='object' OR json_extract(a.data,'$.status')='skipped') "
+                "ORDER BY a.rowid DESC LIMIT 1",
+                (segment["id"], segment["source_id"], segment["kind"], segment["start"], segment["end"]),
+            )
+            if previous:
+                saved = json.loads(previous["data"])
+                saved.setdefault("reused_from_profile", previous["profile"])
+                self.store.put_json("annotations", "segment_id", segment["id"], profile, saved)
+                log.info("跳过已完成片段，沿用原模型分析 %s [%s]", segment["source_id"], segment["id"])
+                return saved
         dialogue = self._dialogue(segment["source_id"], segment["start"], segment["end"])
         try:
             annotation = self.analyzer.analyze(self.store.resolve_media(segment["path"]), dialogue)
@@ -588,7 +603,7 @@ class Pipeline:
         log.info("分析检查点已保存 %s %s %.2f–%.2fs [%s] · %s", segment["source_id"], segment["kind"], segment["start"], segment["end"], segment["id"], "skipped" if output.get("status") == "skipped" else "complete")
         return output
 
-    def analyze(self, source_id: str | None = None, progress=None):
+    def analyze(self, source_id: str | None = None, progress=None, *, force: bool = False):
         from mindex.processing.dialogue import atomic_json
 
         sources = self.selected_sources(source_id)
@@ -616,11 +631,26 @@ class Pipeline:
                         segment["start"],
                         segment["end"],
                     )
-                    saved = self._annotate(segment)
+                    saved = self._annotate(segment, force=force, reuse_completed=True)
                     counts["skipped"] += saved.get("status") == "skipped"
                     if progress:
                         notify({"stage": "analyze", "completed": number, "total": len(base), "unit": "segments", **{k: segment[k] for k in ("kind", "start", "end")}, "segment_id": segment["id"]})
-                plan = self.store.json_value("scene_plans", "source_id", source["id"], profile)
+                plan = None if force else self.store.json_value("scene_plans", "source_id", source["id"], profile)
+                if plan is None and not force:
+                    # 仅沿用覆盖当前全部基础片段的旧计划；新增/重切的片段需重新分组。
+                    for previous in self.store.rows(
+                        "SELECT profile,data FROM scene_plans WHERE source_id=? ORDER BY rowid DESC", (source["id"],)
+                    ):
+                        completed = {r["segment_id"] for r in self.store.rows(
+                            "SELECT a.segment_id FROM annotations a JOIN segments s ON s.id=a.segment_id "
+                            "WHERE s.source_id=? AND a.profile=? AND "
+                            "(json_type(a.data,'$.annotation')='object' OR json_extract(a.data,'$.status')='skipped')",
+                            (source["id"], previous["profile"]),
+                        )}
+                        if all(segment["id"] in completed for segment in base):
+                            plan = json.loads(previous["data"])
+                            self.store.put_json("scene_plans", "source_id", source["id"], profile, plan)
+                            break
                 if plan is not None:
                     log.info("场景计划检查点命中 %s · %d 个场景", source["name"], len(plan))
                 if plan is None:
@@ -661,7 +691,7 @@ class Pipeline:
                                 "message": f"正在组织场景 {current[0]['start']:.2f}–{current[-1]['end']:.2f} 秒",
                             })
                         checkpoint = checkpoint_root / (fingerprint(current) + ".json")
-                        if checkpoint.is_file():
+                        if checkpoint.is_file() and not force:
                             log.info("场景分组检查点命中 %s %.2f–%.2fs", sid, current[0]["start"], current[-1]["end"])
                             groups = json.loads(checkpoint.read_text(encoding="utf-8"))
                         else:
@@ -698,7 +728,7 @@ class Pipeline:
                                   "message": "正在生成场景分析"})
                     scene = self._segment(source, "scene", start, end, profile, None, "semantic_grouping")
                     log.info("分析场景 %s %d/%d %.2f–%.2fs [%s]", source["name"], scene_number, len(plan), start, end, scene["id"])
-                    saved = self._annotate(scene)
+                    saved = self._annotate(scene, force=force, reuse_completed=True)
                     counts["skipped"] += saved.get("status") == "skipped"
                     if progress:
                         notify({"stage": "scenes", "completed": scene_number, "total": len(plan), "unit": "scenes",

@@ -363,10 +363,11 @@ def align(
 def analyze(
     ctx: typer.Context,
     source: Annotated[str | None, typer.Option(help="素材 ID；省略处理全部素材，不是文件路径。")] = None,
+    force: Annotated[bool, typer.Option("--force", help="强制重新分析已完成的片段并重新组织场景。")] = False,
 ):
     """分析镜头和精细片段，生成动作、场景、情绪等描述及连续场景。
 
-    需要已完成分镜的素材和配置的视觉理解服务。省略 --source 处理全部素材；检查点绑定分析配置，失败后可重跑。分析结果不会自动改写已发布索引，随后运行 index。
+    需要已完成分镜的素材和配置的视觉理解服务。省略 --source 处理全部素材；默认跳过已完成的片段（包括切换模型后），失败后可续跑；只有显式 --force 才重新分析。分析结果不会自动改写已发布索引，随后运行 index。
 
     示例：
 
@@ -382,7 +383,7 @@ def analyze(
         progress.update({"stage": "lock_wait"})
         with pipeline.lock(source, "analysis"):
             progress.update({"stage": "analyze", "message": "扫描素材并准备分析"})
-            pipeline.analyze(source, progress=progress.update)
+            pipeline.analyze(source, progress=progress.update, force=force)
 
 
 @app.command(name="index")
