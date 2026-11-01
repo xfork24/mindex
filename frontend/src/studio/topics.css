@@ -60,7 +60,7 @@
 .run-actions-inline{display:inline-flex;gap:8px}
 .run-warnings{flex:1 1 100%;margin:0;padding-left:18px;font-size:12px;color:#8a5a2b;line-height:1.7}
 /* 选题列表 */
-.card-filters{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr);gap:10px;margin-bottom:6px}
+.card-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(240px,100%),1fr));gap:10px;margin-bottom:6px}
 .card-filters select,.card-filters input{width:100%}
 .topic-item-head{display:flex;align-items:flex-start;gap:8px}
 .topic-item-head .job-title{overflow-wrap:anywhere}
@@ -95,7 +95,7 @@
 .topic-outline-foot label{min-width:220px}
 .topic-outline-actions{margin-left:auto;display:inline-flex;gap:8px}
 .item-source{justify-self:start}
-@media(max-width:700px){.card-filters{grid-template-columns:minmax(0,1fr)}
+@media(max-width:700px){
 .topic-score{grid-template-columns:64px minmax(0,1fr) 36px}
 }
 .topic-job-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;border-top:1px solid var(--line);margin-top:16px;padding-top:14px}

@@ -79,8 +79,6 @@
 
 .tuning-row{display:flex;gap:16px;margin-bottom:18px}
 
-.tuning-row input{width:130px}
-
 .tuning-actions{display:flex;justify-content:flex-end;gap:12px;border-top:1px solid #edf0ea;padding-top:16px}
 
 .tuning-actions .submit{min-width:120px}

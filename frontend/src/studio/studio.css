@@ -64,11 +64,9 @@
 .badge.bad{background:#f3ded9;color:#b3402a}
 .timeline-event{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:10px;font-size:13px}
 .timeline-event .line{margin:4px 0}
-.timeline-event select{max-width:420px}
 #final-video{width:100%;max-height:520px;background:#000;border-radius:12px}
 
 .plan-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:16px 0}
-.plan-bar select{max-width:260px}
 .form-field textarea{min-height:70px}
 #job-header{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap}
 #job-header>.form-field{margin:0}
@@ -108,7 +106,7 @@
 .cell-summary{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;margin:8px 0;line-height:1.6}
 .shot-detail-panel details{margin-top:12px}
 .version-history{display:flex;flex-wrap:wrap;gap:4px;margin:10px 0}
-.version-history select{max-width:200px;font-size:11px}
+.version-history select{font-size:11px}
 .json-view{white-space:pre-wrap;overflow-wrap:anywhere;background:#f4f6f0;border-radius:8px;padding:12px;max-height:45vh;overflow:auto;font-size:11px}
 .dependency{margin:8px 0}
 .dependency-edge{margin-left:18px;border-left:1px solid var(--line);padding-left:10px}
@@ -245,7 +243,7 @@ summary{cursor:pointer}
 .recall-primary-options .form-field,.recall-scope-options .form-field,.recall-filters>.form-field{margin:0;width:100%;min-width:0}
 .recall-primary-options select,.recall-scope-options select{width:100%;min-width:0}
 .recall-upload-row{display:flex;flex-wrap:wrap;align-items:end;gap:8px;flex:1 1 100%;min-width:0}
-.recall-upload-row>.form-field{margin:0;flex:1 1 260px;max-width:600px}
+.recall-upload-row>.form-field{margin:0;flex:1 1 260px}
 .recall-upload-row .recall-upload-button{--control-size:40px;height:40px;min-height:40px;flex:0 0 auto}
 @media(max-width:800px){.recall-scope-options,.recall-filters{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:540px){.recall-primary-options,.recall-scope-options,.recall-filters{grid-template-columns:minmax(0,1fr)}
@@ -273,7 +271,7 @@ summary{cursor:pointer}
 .window-viewport{max-width:100%}
 .head-actions{flex-wrap:wrap}
 #job-header .form-field{min-width:0}
-#job-header .form-field{flex:1 1 280px;max-width:600px}#job-header input{height:32px;font-size:14px}
+#job-header .form-field{flex:1 1 280px}#job-header input{height:32px;font-size:14px}
 .shot-editor-fields .form-field input{height:32px}
 
 @media(max-width:540px){.job-panel{max-height:none}
@@ -340,7 +338,7 @@ textarea.code-editor { width: 100%; min-height: 360px; font-family: ui-monospace
 .card-media video,.card-media img{display:block;width:100%;max-height:150px;object-fit:contain;background:#eef1ea;border-radius:6px}
 .card-media audio{display:block;width:100%;height:32px}
 .card-media .shot-player video{max-height:150px!important}
-.card-thumbs{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}
+.card-thumbs{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(120px,100%),1fr));gap:4px}
 .card-thumbs img{height:60px;object-fit:cover}
 .card-select-poster{display:flex;flex-direction:column;gap:6px;align-items:flex-start}
 .card-play{--control-size:28px;font-size:11px}
