@@ -4,12 +4,12 @@
 /* 素材管理分区标签（素材 / 音乐库）：与创作页 studio.css 的 .studio-tabs 同一样式；音乐库页直接用 studio.css。 */
 .studio-tabs{display:flex;gap:28px;border-bottom:1px solid var(--line);margin:0 0 18px}
 .studio-tab{display:inline-flex;align-items:center;min-height:40px;padding:10px 0 9px;border-bottom:3px solid transparent;margin-bottom:-1px;color:var(--muted);font-size:14px;text-decoration:none}
-.studio-tab:hover{color:#3b5145}
+.studio-tab:hover{color:var(--control-text)}
 .studio-tab[aria-current="page"]{border-color:var(--green);color:var(--green);font-weight:600}
 .admin .notice{margin:0 0 18px}
 .admin .notice:empty{display:none}
 .workspace{display:grid;--sidebar-width:310px;grid-template-columns:var(--sidebar-width) minmax(0,1fr);gap:24px;align-items:start}
-.source-panel{background:#fff;border:1px solid var(--line);border-radius:14px;padding:20px;position:sticky;top:20px}
+.source-panel{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px;position:sticky;top:20px}
 .source-panel label{font-size:12px;color:var(--muted)}
 .search-row{display:flex;gap:6px;margin-top:9px}
 .search-row input{width:100%}
@@ -18,9 +18,9 @@
 .source-filters>label:first-child{display:flex;flex-direction:column;gap:7px}
 
 .muted{font-size:12px;color:var(--muted);line-height:1.7}
-.source-item{height:auto;min-height:0;display:block;width:100%;text-align:left;background:#fff;border:1px solid transparent;border-radius:9px;color:#3b5145;padding:12px;margin-bottom:5px}
-.source-item:hover{background:#f4f7f0}
-.source-item.selected{background:#eef4e8;border-color:#cad9c0}
+.source-item{height:auto;min-height:0;display:block;width:100%;text-align:left;background:var(--surface);border:1px solid transparent;border-radius:9px;color:var(--control-text);padding:12px;margin-bottom:5px}
+.source-item:hover{background:var(--surface-2)}
+.source-item.selected{background:var(--info-bg);border-color:var(--focus)}
 .source-item strong{font-size:13px;font-weight:550;display:block;overflow-wrap:anywhere;margin-bottom:5px}
 .source-item small{font-size:11px;color:var(--muted);display:block;line-height:1.8}
 .sidebar-help{font-size:11px;color:var(--muted);line-height:1.8;border-top:1px solid var(--line);padding-top:15px}
@@ -31,8 +31,8 @@
 .source-meta{color:var(--muted);font-size:12px;line-height:1.9;overflow-wrap:anywhere;margin:0}
 .source-notes{white-space:pre-wrap;overflow-wrap:anywhere;color:var(--muted);font-size:12px;line-height:1.9;margin:0 0 8px}
 .organization-actions{display:flex;gap:6px;flex-wrap:wrap;margin:14px 0 20px}
-.organization-actions button[aria-pressed=true]{background:#e7f0df;border-color:#bed1b1;color:var(--green)}
-.hidden-badge{font-size:10px;background:#f6ece2;color:#926445;border-radius:4px;padding:4px 7px;display:inline-block;margin-right:6px}
+.organization-actions button[aria-pressed=true]{background:var(--info-bg);border-color:var(--focus);color:var(--green)}
+.hidden-badge{font-size:10px;background:var(--warn-bg);color:var(--warn-text);border-radius:4px;padding:4px 7px;display:inline-block;margin-right:6px}
 .segment-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin-top:22px;flex-wrap:wrap}
 .kind-tabs{display:flex;gap:25px}
 .kind-tabs button{border:0;border-bottom:3px solid transparent;background:none;color:var(--muted)}
@@ -41,32 +41,32 @@
 .segment-filters select{font-size:12px}
 .segment-summary{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin:20px 0 14px}
 .segment-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(280px,100%),1fr));gap:16px}
-.segment-card{border:1px solid var(--line);border-radius:12px;background:#fff;overflow:hidden;min-width:0}
-.segment-card.is-hidden{border-color:#e2cdbb}
+.segment-card{border:1px solid var(--line);border-radius:12px;background:var(--surface);overflow:hidden;min-width:0}
+.segment-card.is-hidden{border-color:var(--danger-line)}
 .poster-button{height:auto;min-height:0;display:block;width:100%;padding:0;border:0;background:#142a20;position:relative;aspect-ratio:16/9}
 .poster-button img{width:100%;height:100%;object-fit:contain;display:block}
 .poster-button .play-symbol{position:absolute;left:12px;bottom:10px;background:#18382bcc;color:white;border-radius:50%;width:32px;height:32px;display:grid;place-items:center;font-size:12px}
-.poster-button:hover .play-symbol{background:#205b44}
+.poster-button:hover .play-symbol{background:var(--accent)}
 .segment-body{padding:13px}
 .segment-body h3{font-size:13px;line-height:1.6;margin:0 0 7px;overflow-wrap:anywhere}
 .segment-time{font-variant-numeric:tabular-nums;font-size:11px;color:var(--muted);margin:0 0 10px}
-.segment-note{font-size:12px;line-height:1.7;color:#59705e;white-space:pre-wrap;overflow-wrap:anywhere;margin:10px 0}
+.segment-note{font-size:12px;line-height:1.7;color:var(--control-text);white-space:pre-wrap;overflow-wrap:anywhere;margin:10px 0}
 .segment-card .organization-actions{margin:12px 0 8px;gap:8px;--control-size:28px}
-.relationship{display:flex;justify-content:space-between;align-items:center;gap:8px;border-top:1px solid #edf0ea;padding-top:11px;margin-top:12px}
+.relationship{display:flex;justify-content:space-between;align-items:center;gap:8px;border-top:1px solid var(--line-soft);padding-top:11px;margin-top:12px}
 .relationship button,.relationship a{border:0;background:none;color:var(--green);text-decoration:none}
-.parent-filter{display:flex;justify-content:space-between;align-items:center;gap:12px;background:#eaf2e3;border-radius:8px;padding:10px 12px;margin-top:15px;font-size:12px}
+.parent-filter{display:flex;justify-content:space-between;align-items:center;gap:12px;background:var(--info-bg);border-radius:8px;padding:10px 12px;margin-top:15px;font-size:12px}
 .admin #edit-form{display:flex;flex-direction:column;gap:9px}
 .admin #edit-form label{font-size:13px}
 .admin #edit-notes{border:1px solid var(--line);border-radius:7px;min-height:120px;font-size:14px;padding:10px}
 .admin #edit-form .submit{align-self:flex-end;margin:0}
-.admin #edit-error{font-size:12px;color:#a83e2a;margin:0}
+.admin #edit-error{font-size:12px;color:var(--danger-text);margin:0}
 .admin #play-title{margin-right:40px}
 .admin #play-download{display:inline-flex;align-items:center;justify-content:center;min-height:36px;padding:8px 16px;font-size:14px;line-height:1.4;text-align:center}
 .admin .empty{padding:35px 15px}
 .admin .empty p{line-height:1.9}
 .admin #source-workspace[aria-busy=true]{opacity:.55}
 
-.source-warning{color:#a83e2a;font-size:12px}
+.source-warning{color:var(--danger-text);font-size:12px}
 .admin button:disabled{cursor:default}
 @media(max-width:1150px){
 .workspace{--sidebar-width:270px;grid-template-columns:var(--sidebar-width) minmax(0,1fr)}
@@ -84,7 +84,7 @@
 .segment-filters .check{font-size:11px}
 }
 
-.segment-card.is-focused{outline:3px solid #97b9a0;outline-offset:3px}
+.segment-card.is-focused{outline:3px solid var(--focus);outline-offset:3px}
 
 .channel-status-lines{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 0;max-width:100%;margin:13px 0;font-size:13px}
 
@@ -96,7 +96,7 @@
 .work-progress{display:block;width:100%;height:12px;margin:8px 0 14px;accent-color:var(--green)}
 
 #analysis-dialog{width:min(920px,94vw)}
- .analysis-section{padding:16px 0;border-top:1px solid #ddd}
+ .analysis-section{padding:16px 0;border-top:1px solid var(--line)}
 .analysis-section h3{margin:0 0 12px}
 .analysis-section p{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.6}
 .analysis-utterance{font-variant-numeric:tabular-nums}
@@ -104,7 +104,7 @@
 .admin-intro .submit{margin-left:auto;flex:0 0 auto;align-self:center}
 .work-panel{margin-top:24px}
 .work-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr));gap:14px}
-.work-card{padding:18px;background:#fff;border:1px solid var(--line);border-radius:12px;min-width:0}
+.work-card{padding:18px;background:var(--surface);border:1px solid var(--line);border-radius:12px;min-width:0}
 .work-heading{display:flex;justify-content:space-between;align-items:start;gap:12px}
 .work-heading h4{margin:0;font-size:15px}
 .work-status{font-size:12px;color:var(--green);white-space:nowrap}
@@ -114,8 +114,8 @@
 .work-card>label[hidden]{display:none}
 .work-controls{display:flex;gap:7px;flex-wrap:wrap;margin:14px 0}
 .work-card .source-warning{overflow-wrap:anywhere;line-height:1.7}
-.upload-drop{display:flex;flex-direction:column;align-items:center;gap:16px;border:2px dashed #a9bca3;border-radius:12px;background:#f4f7f0;padding:32px 14px;cursor:pointer}
-.upload-drop.dragging{background:#e5efdf}
+.upload-drop{display:flex;flex-direction:column;align-items:center;gap:16px;border:2px dashed var(--focus);border-radius:12px;background:var(--surface-2);padding:32px 14px;cursor:pointer}
+.upload-drop.dragging{background:var(--info-bg)}
 .upload-drop input{max-width:100%}
 .upload-row{padding:12px 0;border-bottom:1px solid var(--line)}
 .upload-row p{font-size:13px;overflow-wrap:anywhere}

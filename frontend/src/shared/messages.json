@@ -13954,5 +13954,17 @@
   "ui.dt_templates_section": {
     "zh": "模板列表",
     "en": "Templates"
+  },
+  "ui.theme_auto": {
+    "zh": "主题：跟随系统",
+    "en": "Theme: follow system"
+  },
+  "ui.theme_light": {
+    "zh": "主题：浅色",
+    "en": "Theme: light"
+  },
+  "ui.theme_dark": {
+    "zh": "主题：深色",
+    "en": "Theme: dark"
   }
 }

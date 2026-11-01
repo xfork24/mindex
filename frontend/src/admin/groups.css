@@ -1,4 +1,4 @@
-.groups-page .segment-panel{padding:20px;background:#fff;border:1px solid var(--line);border-radius:14px}
+.groups-page .segment-panel{padding:20px;background:var(--surface);border:1px solid var(--line);border-radius:14px}
 .groups-page .group-fields,.groups-page .group-actions,.groups-page .group-member-columns{display:flex;flex-wrap:wrap;gap:12px;min-width:0}
 .groups-page .group-fields{align-items:flex-end;margin-bottom:24px}
 .groups-page .group-fields>label{flex:0 1 210px;max-width:100%;min-width:0}
@@ -15,10 +15,10 @@
 .groups-page .group-member input[type=checkbox]{flex:0 0 16px;width:16px;height:16px;margin:2px 0 0}
 .groups-page .group-member span{min-width:0;overflow-wrap:anywhere;white-space:normal}
 .groups-page #groups-list button{width:100%;text-align:left}
-.groups-page #groups-list button.selected{background:#eef4e8;border-color:#cad9c0}
+.groups-page #groups-list button.selected{background:var(--info-bg);border-color:var(--focus)}
 .groups-page .multi-select{margin-top:8px;max-width:100%}
 .groups-page .multi-list{height:200px}
 .groups-page .multi-list option{white-space:normal;overflow-wrap:anywhere}
 .groups-page main button{height:auto;white-space:normal;overflow-wrap:anywhere}
-.groups-page #groups-error{color:#a74338;overflow-wrap:anywhere;margin:12px 0}
+.groups-page #groups-error{color:var(--danger-text);overflow-wrap:anywhere;margin:12px 0}
 .groups-page #groups-error:empty{display:none}
