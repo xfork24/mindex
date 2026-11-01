@@ -77,7 +77,7 @@ def moved_hint(path: Path) -> str:
     return (
         f"。在 {', '.join(str(p.parent) for p in found)} 找到同名文件，文件可能被移动过："
         "本地 schema 2 清单允许按服务报告的新模型路径重新核验 SHA256；"
-        "请确认服务的 model_path 和投影文件位置（见 docs/macos-model-migration.md）"
+        "请确认服务的 model_path 和投影文件位置（见 docs/index-versions.md）"
     )
 
 

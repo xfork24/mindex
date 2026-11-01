@@ -73,7 +73,7 @@ uv run mindex serve
 
 ### 2. 导入素材，先跑通画面检索
 
-最短路径只需要**嵌入服务**，无需先运行 ASR、LLM 分析或 TTS。默认主模型配置为 **WeMM-Embedding-9B / 4096 维**；部署方式见[模型部署指南](docs/DEPLOYMENT.md)。
+最短路径只需要**嵌入服务**，无需先运行 ASR、LLM 分析或 TTS。默认主模型配置为 **WeMM-Embedding-9B / 4096 维**；部署方式见[模型部署指南](docs/deployment.md)。
 
 ```bash
 # 本地 CPU：导入、检测镜头、生成片段。支持 FFmpeg 可解码的 MP4、MKV 等。
@@ -89,7 +89,7 @@ uv run mindex search '一个人在雨夜街道上奔跑'
 
 也可以全程使用素材管理页：**添加新素材 → 分镜处理 → 更新嵌入 / 检索 → 视频检索**。示例显式包含 `moment` 与 `shot`，方便同时用于精细片段检索和 Studio 默认的镜头召回。
 
-默认分镜使用本地 AdaptiveDetector，也可配置 TransNetV2；两者均需抽检。默认保留不超过 6 秒的短镜头，长镜头按 4 秒窗口、3 秒步长生成精细片段。详细步骤见[电影处理指南](docs/FILM_WORKFLOW.md)。
+默认分镜使用本地 AdaptiveDetector，也可配置 TransNetV2；两者均需抽检。默认保留不超过 6 秒的短镜头，长镜头按 4 秒窗口、3 秒步长生成精细片段。详细步骤见[电影处理指南](docs/film-workflow.md)。
 
 ### 3. 按需补全对白、分析和人物
 
@@ -405,9 +405,9 @@ uv run pytest -m "not slow" -q   # 快速回归；完整回归去掉 -m
 
 CI（`.github/workflows/ci.yml`）在推送与合并请求时运行上述检查与快速回归，每晚运行完整测试。
 
-UI 回归另需 Node.js、Playwright 及其浏览器；可用 `MINDEX_PLAYWRIGHT_MODULE` 指定模块路径。完整 `pytest` 在 2026-10-25 的运行结果为 1918 passed、13 skipped（历史记录，以本次运行为准）；历史失败的复现情况见[目录重组验证记录](docs/history/source-layout-verification.md)和[项目审查](docs/project-review-2026-10-22.md)。自动化测试使用真实媒体处理、数据库与 HTTP 链路，模型部分使用明确标记的确定性测试适配器；它们验证工程行为，不证明真实模型的检索或人物识别准确率。
+UI 回归另需 Node.js、Playwright 及其浏览器；可用 `MINDEX_PLAYWRIGHT_MODULE` 指定模块路径。完整 `pytest` 的通过数量随测试增加而变化，以本次实际运行为准。自动化测试使用真实媒体处理、数据库与 HTTP 链路，模型部分使用明确标记的确定性测试适配器；它们验证工程行为，不证明真实模型的检索或人物识别准确率（测试约定见[文档](docs/testing.md)）。
 
-真实质量评测需要人工标注查询并固定模型、预处理与索引版本。流程见[端到端操作手册](docs/E2E_RUNBOOK.md)、[e2e 框架](docs/e2e-framework.md)及[评测标注说明](eval/README.md)。检索分数是排序依据，不是匹配概率。
+真实质量评测需要人工标注查询并固定模型、预处理与索引版本。流程见[端到端操作手册](docs/e2e-runbook.md)、[e2e 框架](docs/e2e-framework.md)及[评测标注说明](eval/README.md)。检索分数是排序依据，不是匹配概率。
 
 </details>
 
@@ -415,8 +415,8 @@ UI 回归另需 Node.js、Playwright 及其浏览器；可用 `MINDEX_PLAYWRIGHT
 
 | 我想…… | 从这里开始 |
 | :--- | :--- |
-| 跑通一部电影的导入与画面索引 | [电影处理指南](docs/FILM_WORKFLOW.md) |
-| 部署模型、接入自建服务 | [部署与服务协议](docs/DEPLOYMENT.md) |
+| 跑通一部电影的导入与画面索引 | [电影处理指南](docs/film-workflow.md) |
+| 部署模型、接入自建服务 | [部署与服务协议](docs/deployment.md) |
 | 了解处理阶段、恢复与增量建库 | [离线管线](docs/pipeline.md) · [三渠道独立处理](docs/recall-enhancement.md) |
 | 管理素材、字幕与处理任务 | [素材后台](docs/admin.md) |
 | 管理人物并按出镜查找片段 | [人物库与证据审核](docs/persons.md) |
@@ -426,8 +426,8 @@ UI 回归另需 Node.js、Playwright 及其浏览器；可用 `MINDEX_PLAYWRIGHT
 | 配置服务、音色和检索参数 | [设置页](docs/settings.md) · [配置参考](docs/config-reference.md) |
 | 备份素材、迁移合并或在新机器恢复 | [数据备份与迁移](docs/backup.md) |
 | 查看命令、模块和数据流 | [CLI 参考](docs/cli-reference.md) · [架构](docs/architecture.md) |
-| 评测模型或切换索引版本 | [端到端验证](docs/E2E_RUNBOOK.md) · [索引版本与回退](docs/index-versions.md) |
-| 了解后续规划 | [功能路线图](plans/ROADMAP.md) · [2026-10 审查报告](docs/reviews/2026-10/features-roadmap.md) |
+| 评测模型或切换索引版本 | [端到端验证](docs/e2e-runbook.md) · [索引版本与回退](docs/index-versions.md) |
+| 了解后续规划 | [功能路线图](plans/roadmap.md) · [2026-10 审查报告](docs/review-2026-10-features-roadmap.md) |
 
 更多机制说明、操作手册与历史验收记录见 **[文档中心](docs/README.md)**。
 

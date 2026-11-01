@@ -4,7 +4,7 @@
 
 网页创建任务时会保存当前界面语言：中文任务的初始构建方案名为“默认方案”，英文任务为“Default Plan”；自动分镜的画面意象与召回关键词也使用任务创建语言，旁白原文保持原语言。之后切换界面不会重命名方案或翻译已保存的分镜。旧任务默认中文，可重新拆分镜生成新版结果。任务信息中的“可用素材摘要”独立跟随当前界面语言，选择双语分析中对应语言的故事线与画面词；旧的单语言分析保留原文。素材的自定义名称也保留原文。
 
-入口 `/studio`。设计依据为 [STUDIO_UI_PLAN.md](../plans/STUDIO_UI_PLAN.md)。保留 Python、文件存储和原生前端；首次进入任务工作台时接入版本模型，原文件和执行历史保留。
+入口 `/studio`。设计依据为 [studio-version-workbench-plan.md](../plans/studio-version-workbench-plan.md)。保留 Python、文件存储和原生前端；首次进入任务工作台时接入版本模型，原文件和执行历史保留。
 
 创作页有三个分区标签：「创作任务」（`/studio`）、「选题挖掘」（`/studio/topics`，见[选题挖掘](topics.md)）与「文案模板」（`/studio/templates`）。从选题建出的任务在任务详情顶部显示来源选题与账号档案；档案更新后可以「同步」，同步后文案区提示可重新生成文案（`script_profile_changed`），不会自动重写。
 
@@ -24,7 +24,7 @@
 
 鼠标悬停卡片（媒体区之外）约 120ms 后，卡片正下方竖排展开该分镜的全部阶段（带状态点与状态文字，当前打开的阶段高亮），鼠标在卡片或列表内时保持展开，离开约 200ms 后收起；列表渲染在分镜条之外，不被滚动区域裁剪，分镜条滚动时跟随卡片，卡片滚出可视区域时收起。点击列表中的阶段在下方打开该阶段；点击卡片空白处直接打开卡片显示的阶段。触屏没有悬停：卡片右上角的“阶段 ▾”按钮展开列表。键盘：Tab 聚焦卡片即展开列表，Enter 打开卡片显示的阶段，下方向键进入列表、上下键切换、Enter 打开、Esc 收起。下方详情区一次显示一个分镜的一个阶段，标题为“分镜 N · 阶段 · ID”，“关闭”后回到提示；打开的分镜卡片有选中样式。打开的分镜与阶段按任务和方案分别记住。文本、查询和预估时长水平编辑，保存只修改当前镜；移动、合并、插入和删除也在该镜详情内操作，新增的分镜自动打开其文本与查询。未保存草稿按任务、方案和分镜保留（卡片同样标“未保存修改”），执行前需保存或取消。轮询保留未变化的详情和播放器。
 
-文本与查询详情中的“召回设置”支持文字与人物、图片找视频、视频找相似，并可限定素材。文字模式可多选已登记人物，选择出镜或对白提及，以及同时出镜或任一人物。图片限 20MB，视频限 100MB、30 秒；上传后可预览，保存分镜后生效。每镜独立保存设置；合并保留上一镜设置，上一镜为默认文字时继承下一镜设置。人物候选显示身份、证据图及审核链接，覆盖不足时明确提示。文本与查询详情还提供“检索粒度”与“返回数量”下拉（选项与视频检索页一致）：默认“跟随方案”（粒度取服务配置、数量取方案参数的召回数量），选定后仅覆盖当前分镜的召回，格内摘要显示“召回覆盖”标记；四种召回模式均受其影响。
+文本与查询详情中的“召回设置”支持文字与人物、图片找视频、视频找相似，并可限定素材。文字模式可多选已登记人物，选择出镜或对白提及，以及同时出镜或任一人物。图片限 20MB，视频限 100MB、30 秒；上传后可预览，保存分镜后生效。每镜独立保存设置；合并保留上一镜设置，上一镜为默认文字时继承下一镜设置。人物候选显示身份、证据图及审核链接，覆盖不足时明确提示。每个候选按演员 ID＋角色 ID 组合去重，同演员不同角色保留独立标记；标记头像使用实际命中的参考图并保留人物库审核链接。历史召回详情按需补充显示字段、不改写历史产物：从保存的参考图编号或本地特征缓存恢复，缓存恢复需与原始匹配分数一致；参考图缺失、身份配对改变或无法证明匹配来源时仅保留文字标记，不用证据截图或任意照片代替。文本与查询详情还提供“检索粒度”与“返回数量”下拉（选项与视频检索页一致）：默认“跟随方案”（粒度取服务配置、数量取方案参数的召回数量），选定后仅覆盖当前分镜的召回，格内摘要显示“召回覆盖”标记；四种召回模式均受其影响。
 
 查询文件按 SHA-256 保存在任务的 `inputs/`，相同内容去重，纳入产物和任务 ZIP。执行前复验摘要，文件缺失或损坏会要求重新上传。更换召回方式、人物、素材或文件会使对应召回版本需要重建；改回旧设置可复用历史成功版本。召回同时绑定内容索引与人物发布记录，回退后使用对应组合。分镜工作台的分镜条上方用一行显示“检索组合”：当前生效的组合、当前工作台（各分镜已选召回版本）依赖的组合，以及两者是否一致；组合以检索发布版、内容索引、人物快照 ID 表示（正文取前 8 位，悬停显示完整值），依赖多个组合时逐个列出分镜数。“成片”面板的“历史成片与完整依赖”中，成片合成节点下增加“检索组合”一项，列出该成片沿 渲染 → 选片 → 召回 依赖链用到的组合，与当前生效不一致时标出。不一致的召回节点会提示“选用版本兼容性”，可重新执行召回，或在设置页“索引版本”恢复对应组合；数据来自工作区详情的 `retrieval` 字段（`active`、`used`、`compose`）。新增人物发布参数会使部署前的召回版本进行一次重建；全默认分镜设置保持旧查询 payload 不变。
 
@@ -129,7 +129,7 @@
 - 签名：`generate` 的参数为生成服务的 backend、model、允许时长（ComfyUI 另含 fps、工作流内容摘要与节点映射），载荷为提示词、反向提示词、seed、参考图摘要、取整后的时长与画幅尺寸，输入为分镜内容与配音版本；不含密钥、超时与轮询参数。签名一致时直接复用已生成版本，不再调用服务（线上生成按次计费）。
 - 选片：在生成片段内从 0 起取与配音等长的窗口，时间线记录文件区间 `{"version": <generate 版本>, "file": "generated"}`；片段偏短时冻结末帧补足（`alignment=padded` 并给出警告，`strict` 对齐拒绝）。选片签名含旁白、配音版本与生成版本（`aigc_version`）。渲染与成片沿用文件区间流程；ducking 方案使用生成片段自带的音轨（如有）。
 
-创作页“画面来源”选择“AI 生成视频”后提供生成方式、模型档位、分辨率、宽高比、时长（MiniMax H3 专用，档案不是 H3 时有提示），首帧/尾帧图与主体参考素材的上传/移除，以及提示词（占位文字显示缺省会用的画面意象或查询）、反向提示词与种子；生成画面作为该分镜的画面阶段显示，摘要显示生成时长与轮询次数，详情展示提示词、任务 ID、请求/实际时长与生成结果预览。智能助手 `edit_shots` 的 `source` 支持 `kind=aigc` 及 `prompt`/`negative`/`image_id`/`seed` 与 H3 的 `mode`/`last_image_id`/`references`/`model`/`resolution`/`ratio`/`duration`，分镜已是 aigc 来源时 `attach_query_media`（`purpose=source`，`role=first_frame|last_frame|reference`）把附件设为首帧、尾帧或主体参考；`run_node`/`run_column` 支持 `stage=generate`（预览提示会调用视频生成服务、可能产生费用），`get_shot_details` 显示 aigc 来源、生成状态并以媒体附上生成画面；视频生成档案可用 `create_model_profile` 等档案工具管理（见 [智能助手](agent.md)）。自建 ComfyUI 的部署与工作流导出见 [GPU 模型部署](DEPLOYMENT.md#comfyui可选的-aigc-视频生成服务)。
+创作页“画面来源”选择“AI 生成视频”后提供生成方式、模型档位、分辨率、宽高比、时长（MiniMax H3 专用，档案不是 H3 时有提示），首帧/尾帧图与主体参考素材的上传/移除，以及提示词（占位文字显示缺省会用的画面意象或查询）、反向提示词与种子；生成画面作为该分镜的画面阶段显示，摘要显示生成时长与轮询次数，详情展示提示词、任务 ID、请求/实际时长与生成结果预览。智能助手 `edit_shots` 的 `source` 支持 `kind=aigc` 及 `prompt`/`negative`/`image_id`/`seed` 与 H3 的 `mode`/`last_image_id`/`references`/`model`/`resolution`/`ratio`/`duration`，分镜已是 aigc 来源时 `attach_query_media`（`purpose=source`，`role=first_frame|last_frame|reference`）把附件设为首帧、尾帧或主体参考；`run_node`/`run_column` 支持 `stage=generate`（预览提示会调用视频生成服务、可能产生费用），`get_shot_details` 显示 aigc 来源、生成状态并以媒体附上生成画面；视频生成档案可用 `create_model_profile` 等档案工具管理（见 [智能助手](agent.md)）。自建 ComfyUI 的部署与工作流导出见 [GPU 模型部署](deployment.md#comfyui可选的-aigc-视频生成服务)。
 
 ### AI 动画
 
@@ -137,7 +137,7 @@
 
 - 生成动画（`animate`，`studio/workspace/handlers/animate.py`，模型客户端 `models/animator.py`）依赖配音：画面说明取 `brief`，缺省用画面意象 `visual`，再缺省用旁白 `text`；动画时长 = 配音时长 ÷ 方案变速，画布为方案画幅分辨率，帧率为 `studio.render.fps`。系统提示要求只输出一份自包含 HTML（内联 CSS/JS，画布恰好铺满、`overflow: hidden`，只由时间驱动、同一时刻画面确定，中文字体只用 `sans-serif`），改提示词须递增 `ANIMATOR_PROMPT_VERSION`（当前 1）。产物为 `versions/<vid>/animation.html`（`data.origin = "generated"`）。
 - 静态校验（`validate_animation`，生成结果与人工保存都要过）：大小不超过 `max_html_kb`（默认 200 KB）；必须含 `<html>` 或 `<body>`；拒绝属性、CSS `url()` 与脚本赋值中的 `http://`、`https://`、`//` 外部地址，`@import`，`fetch`、`XMLHttpRequest`、`WebSocket`、`EventSource`、`navigator.sendBeacon`、动态 `import()`、Worker/Service Worker，`<script src>`、`<link>`、`<iframe>`、`<object>`、`<embed>`、`<meta http-equiv=refresh>`，`window.open`、`localStorage`/`sessionStorage`、`indexedDB`、`document.cookie`。未通过时把中文违规清单作为反馈让模型重写，最多重试 `retries` 次（默认 2）。
-- 录制（`studio/animation_capture.py`，渲染阶段执行）：Playwright 无头 Chromium，每次使用全新的临时 user-data-dir（录完即删），离线模式，`context.route` 中止除 `data:`/`blob:`/`about:` 以外的全部请求，WebSocket 一律接管且不连接服务器，Service Worker 禁用。初始化脚本在页面脚本之前接管 `Date`（从固定时刻起走）、`performance.now`、`requestAnimationFrame`、定时器、`requestIdleCallback` 与 `document.timeline.currentTime`，并把 `Math.random` 换成固定种子；CSS 动画/过渡与 Web Animations 每帧暂停并把 `currentTime` 设为虚拟时刻。第 i 帧对应虚拟时刻 `i × 1000 / fps` 毫秒，按渲染帧数（与配音采样对齐的 `frames`）逐帧推进并截图，PNG 经管道交给 ffmpeg 编为 H.264（`animation.mp4`），再按画幅规范化为 `video.mp4`。同一源码、画布与 fps 的两次录制逐帧一致。页面加载与每帧推进各有 5 秒上限（推进经 CDP `Runtime.evaluate` 的 timeout 终止脚本，死循环与定时器风暴都会以中文错误失败），整体墙钟不超过 `max_capture_seconds`（默认 60 秒）。依赖为可选 extra `animation`，未安装时渲染失败并提示“AI 动画录制需要安装可选依赖：uv sync --extra animation && uv run playwright install chromium”（见 [部署](DEPLOYMENT.md#ai-动画录制可选)）。动画没有原声，ducking 方案也只有配音。
+- 录制（`studio/animation_capture.py`，渲染阶段执行）：Playwright 无头 Chromium，每次使用全新的临时 user-data-dir（录完即删），离线模式，`context.route` 中止除 `data:`/`blob:`/`about:` 以外的全部请求，WebSocket 一律接管且不连接服务器，Service Worker 禁用。初始化脚本在页面脚本之前接管 `Date`（从固定时刻起走）、`performance.now`、`requestAnimationFrame`、定时器、`requestIdleCallback` 与 `document.timeline.currentTime`，并把 `Math.random` 换成固定种子；CSS 动画/过渡与 Web Animations 每帧暂停并把 `currentTime` 设为虚拟时刻。第 i 帧对应虚拟时刻 `i × 1000 / fps` 毫秒，按渲染帧数（与配音采样对齐的 `frames`）逐帧推进并截图，PNG 经管道交给 ffmpeg 编为 H.264（`animation.mp4`），再按画幅规范化为 `video.mp4`。同一源码、画布与 fps 的两次录制逐帧一致。页面加载与每帧推进各有 5 秒上限（推进经 CDP `Runtime.evaluate` 的 timeout 终止脚本，死循环与定时器风暴都会以中文错误失败），整体墙钟不超过 `max_capture_seconds`（默认 60 秒）。依赖为可选 extra `animation`，未安装时渲染失败并提示“AI 动画录制需要安装可选依赖：uv sync --extra animation && uv run playwright install chromium”（见 [部署](deployment.md#ai-动画录制可选)）。动画没有原声，ducking 方案也只有配音。
 - 签名：`animate` 的参数为动画生成服务的 backend、model、`max_html_kb` 与提示词版本，载荷为画面说明、时长、画布尺寸与帧率，输入为分镜内容与配音版本；不含密钥与超时。渲染的输入为分镜内容、配音与动画版本，载荷含动画版本、源码 SHA-256 与变速（`animation_version`），画幅与帧率在渲染参数里。
 - 人工修改：`PATCH …/shots/{shot}/animation`（`{revision, html}`）经同一套静态校验后写入 `origin = "manual"` 的新动画版本并选用，只有该分镜的渲染（重新录制）与成片需要重建，配音与其他分镜复用。人工版本被“钉住”：选用期间构建直接复用它（即使画面说明或配音之后变化，也不会按签名重新生成覆盖，冲突列表不报告它自身的签名差异），只有强制构建或单独执行生成动画（重新生成）才替换；手改版本的签名由源码摘要派生，不会被按签名的复用误选。`dry_run: true` 只返回 `{valid, errors, bytes, max_kb}`，不写版本（智能助手预览用）。
 - 预览：`GET …/versions/{vid}/animation.html` 返回源码，响应头 `Content-Security-Policy: default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; font-src data:; sandbox allow-scripts` 与 `X-Content-Type-Options: nosniff`；产物下载接口返回 HTML/SVG 文件时带同样的沙箱头。创作页以 `<iframe sandbox="allow-scripts">`（不含 `allow-same-origin`）加载，动画脚本运行在不透明源里，拿不到本站 Cookie、存储与父页面 DOM，也无法发起网络请求。
@@ -337,7 +337,7 @@
 
 局部上下文为同一原片的前两镜、整个候选锚点组和后两镜；不足配音有效时长的两倍时，按前后两侧原有时长比例增加相邻镜头，直到总时长至少达到两倍；一侧无法延伸时由另一侧补足。隐藏区间、素材边界和断点均停止延伸。定长窗口使用当前成功配音的实际时长；明确设置速度时除以该速度，未指定时为原速。仍不足时禁用窗口与确认，不自动变速或冻结。无配音也能选择候选，窗口等待配音完成。
 
-时间轴显示连续视频缩略图、镜头边界与锚点标记。可以整体拖动、点击定位、左右方向键逐帧微调，Shift 移动十帧，Home / End 到合法边界；缩放后支持横向滚动。窗口可以完全离开锚点。拖动只在本地定位画面；直接使用视频窗口内的播放键播放当前选区，到窗口结束自动暂停，从结尾再次播放会回到窗口起点。“保存当前窗口”无需先点预览，内部自动获取当前范围的校验令牌后保存；缺少配音、素材不足或正在执行时禁用，并显示具体状态。“试听配音与画面”是可选操作，生成当前范围与配音混合的音画预览，本身不保存选片。保存后创建新选片版本，保存真实候选、上下文、最终范围、实际范围和音频依赖。配音、速度、素材可见性或方案 revision 变化会使旧预览失效。草稿按任务、方案、分镜、候选、配音版本和速度隔离，切换详情保留有效位置。
+时间轴显示连续视频缩略图、镜头边界与锚点标记。可以整体拖动、点击定位、左右方向键逐帧微调，Shift 移动十帧，Home / End 到合法边界；缩放后支持横向滚动。窗口可以完全离开锚点。拖动只在本地定位画面；直接使用视频窗口内的播放键播放当前选区，到窗口结束自动暂停，从结尾再次播放会回到窗口起点。“保存当前窗口”无需先点预览，内部自动获取当前范围的校验令牌后保存；缺少配音、素材不足或正在执行时禁用，并显示具体状态。“试听配音与画面”是可选操作，生成当前范围与配音混合的音画预览，本身不保存选片。保存后创建新选片版本，保存真实候选、上下文、最终范围、实际范围和音频依赖。窗口结束时间一律由服务端按起点与实际配音时长计算并校验，客户端提交的 `end` 不被接受；渲染输出按实际音频采样数向上取整到视频帧，不截断配音，字幕结束对齐镜头精确时长。配音、速度、素材可见性或方案 revision 变化会使旧预览失效。草稿按任务、方案、分镜、候选、配音版本和速度隔离，切换详情保留有效位置。
 
 选片详情的“按当前输入选片 / 复用”使用当前锚点或已保存范围，优先复用成功版本；“重新生成选片版本”跳过复用并新增版本。两者都不保存尚未提交的窗口草稿，也不自动渲染分镜或合成成片。
 
@@ -483,11 +483,9 @@ data/studio/<job_id>/
 
 阶段注册表：每个阶段一个 `StageHandler`（`studio/workspace/stages.py`），处理器位于 `handlers/`（`script`、`split`、`recall`、`tts`、`music`、`draw`、`generate`、`animate`、`invoke`、`select`、`overlay`、`render`、`compose`、`export`、`publish`），导入时经 `register()` 按 plan → shot → final 顺序登记到 `REGISTRY`。处理器提供显示名 `label`、作用域 `scope`、阶段参数 `settings`、签名载荷 `specification`（签名外壳仍在 `signatures.specification`，与历史版本逐字节一致）、依赖 `dependencies`、预检钩子 `preflight`、执行 `run` 与冲突说明 `conflict_labels`；`builder.execute`、预检、列重生成、冲突与复用都按注册表分派，请求体（`NodeBody`、`ColumnBody`、`VersionChoiceBody`）的阶段取值也由注册表生成。每个分镜的阶段序列由镜头来源决定（`shot_stages`，来源表 `SHOT_SOURCES`）：recall 为 `recall → tts → select → render`（即 `ws.STAGES`），clip 为 `tts → select → render`，image 为 `tts → render`，aigc_image 为 `tts → draw → render`，aigc 为 `tts → generate → select → render`，animation 为 `tts → animate → render`，tool 为 `tts → invoke → select → render`（图片产物 `tts → invoke → render`）；带 generate/cover/library 背景音乐提示点的分镜在配音后多一个 `music`（见[分镜画面来源](#分镜画面来源)；来源文件的定位与复验在 `workspace/sources.py`）。新增阶段或来源只需实现处理器并登记，不改预检与执行（`tests/test_studio_stages.py`）。
 
-`tests/test_studio_workspace.py` 覆盖版本选择、失败保护、混选依赖、方案隔离、续建、连续/隐藏镜头、预览确认、迁移和执行锁；使用真实 ffmpeg、SQLite、Chroma 及确定性模型。非整数帧率测试校验帧数、累计采样边界、字幕、完整解码和依赖文件哈希。浏览器及本轮检查见 [工作台验收记录](history/studio-workspace-verification.md)；此前真实模型的质量结论见 [历史验收记录](studio-verification.md)。
+`tests/test_studio_workspace.py` 覆盖版本选择、失败保护、混选依赖、方案隔离、续建、连续/隐藏镜头、预览确认、迁移和执行锁；使用真实 ffmpeg、SQLite、Chroma 及确定性模型。非整数帧率测试校验帧数、累计采样边界、字幕、完整解码和依赖文件哈希。此前真实模型的质量结论记录在[实现验证记录](verification.md)。
 
-本轮行详情与执行日志改造见 [行详情验收记录](history/studio-row-ui-verification.md)。
-
-候选锚点与定长窗口依据 [细化计划](../plans/STUDIO_REFINEMENT_UI_PLAN.md)；测试与浏览器结果见 [定长窗口验收记录](history/studio-refinement-verification.md)。
+候选锚点与定长窗口依据 [细化计划](../plans/studio-window-selection-ui-plan.md)。
 
 浏览器专用服务可通过 `uv run python tests/serve_fixture.py --data-dir <临时测试目录> --port 8001` 启动，勿将确定性颜色向量用于真实素材索引。
 

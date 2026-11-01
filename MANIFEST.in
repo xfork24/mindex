@@ -7,4 +7,3 @@ recursive-include deploy *.txt
 recursive-include docs *.md *.png *.svg
 recursive-include plans *.md
 recursive-include eval *.py *.md *.jsonl
-recursive-include tools *.sh *.md m4s-converter

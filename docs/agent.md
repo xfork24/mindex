@@ -158,7 +158,7 @@ curl -s -H "Authorization: Bearer $MINDEX_MCP_TOKEN" -F file=@shot.png http://12
 
 ## 回复格式
 
-助手回复按 Markdown 渲染：标题、列表、表格、代码块、引用、链接。渲染使用仓库内固定版本的 [marked](https://github.com/markedjs/marked) 18.1.1，结果经 [DOMPurify](https://github.com/cure53/DOMPurify) 3.4.17 按白名单净化后显示（版本、许可证与校验值见 [第三方组件声明](../THIRD_PARTY_NOTICES.md)）：脚本、事件属性、内联样式、`javascript:`/`data:`/协议相对链接都会被清除，外部链接在新窗口打开。用户消息、工具卡片仍按纯文本显示。
+助手回复按 Markdown 渲染：标题、列表、表格、代码块、引用、链接。渲染使用仓库内固定版本的 [marked](https://github.com/markedjs/marked) 18.1.1，结果经 [DOMPurify](https://github.com/cure53/DOMPurify) 3.4.17 按白名单净化后显示（版本、许可证与校验值见 [第三方组件声明](third-party-notices.md)）：脚本、事件属性、内联样式、`javascript:`/`data:`/协议相对链接都会被清除，外部链接在新窗口打开。用户消息、工具卡片仍按纯文本显示。
 
 ## 图片与音视频
 

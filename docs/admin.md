@@ -56,6 +56,7 @@
 |---|---|
 | `GET /sources?q=&visibility=visible\|hidden\|all&favorite_only=false&page=1&page_size=48` | 名称搜索（原名+显示名，不区分大小写子串）、筛选、分页 |
 | `GET /sources/{id}` | 媒体信息、镜头/片段计数、缺失文件数、最近 5 条处理记录 |
+| `GET /sources/{id}?detail=summary` | 轻量摘要：仅基础信息、片段数量与 GPU 锁配置，供详情页首屏并发加载；完整详情接口保持兼容 |
 | `POST /sources/upload` | multipart 单文件 `file`；返回 `source_id` 与 `duplicate`；前端顺序提交批量文件 |
 | `POST /sources/{id}/shots` | 分镜检测及切片/修复，`{"publish":true}`，返回持久任务（202） |
 | `POST /sources/{id}/subtitles` | multipart `file` 上传外部文本字幕，返回 `id/name/format/utterances`；上传只登记，未应用对白 |
@@ -139,13 +140,13 @@ LLM 提示词要求正文仅包含最终 JSON：片段描述保持1–2句、数
 
 片段分析达到 `N/N` 后还需场景分组和场景分析；工作台分别显示这些阶段。`finish_reason=length` 表示输出预算耗尽，推理模型可能仅返回推理内容而无 JSON 正文。分镜分析、场景分组和场景分析统一从 12768 输出 token 开始；每次可重试的无效响应后翻倍：12768、25536、51072、102144，默认上限 131072（后续重试保持此上限）。预算含模型推理 token。即使正文恰好能解析为 JSON，只要响应标记截断也不接受。设置页多模态理解档案可调整“首次请求输出 token 预算”和“重试输出 token 上限”；首次预算不超过上限，上限需符合厂商实际支持范围。更新代码后重启后端，旧任务未保存的字段使用新默认值；已冻结的自定义设置仍保留。若旧任务已冻结 16384 上限，可用“分析场景”启动使用当前配置的新任务，复用已完成片段注释。重试次数及输出预算不改变分析缓存身份。
 
-WeMM 按配置帧率采样视频。默认 4 fps 时，极短分镜可能因 FFmpeg 末尾取整而生成不含视频轨道的 MP4，服务会报 `ffprobe failed on buffer` / `Failed to load image or audio file`。客户端会检查采样结果，仅对这种极短空样本使用保帧兜底，并在请求前再次验证；已成功样本保持原有编码。更新代码后重启网页后端，确认 `bash scripts/run-wemm.sh` 启动的服务已就绪，再点击“更新shot/moment嵌入”即可复用已保存的嵌入检查点。无需重新切分或删除旧索引；切分完成并不表示嵌入及检索发布完成。
+WeMM 按配置帧率采样视频。默认 4 fps 时，极短分镜可能因 FFmpeg 末尾取整而生成不含视频轨道的 MP4，服务会报 `ffprobe failed on buffer` / `Failed to load image or audio file`。客户端会检查采样结果，仅对这种极短空样本使用保帧兜底，并在请求前再次验证；已成功样本保持原有编码。更新代码后重启网页后端，确认 `bash scripts/run-wemm.sh` 启动的服务已就绪，再点击“更新shot/moment嵌入”即可复用已保存的嵌入检查点。无需重新切分或删除旧索引；切分完成并不表示嵌入及检索发布完成。另注意：现存六条兼容性基线原视频在当前 FFmpeg 环境下的预处理哈希与历史保存值不同（历史输入重现已有差异，来源未定），重新执行模型兼容性 smoke 时仍应遵守现有严格门槛，不能以采样修复为由放宽。
 
 对白 API 旧调用与 CLI 保持兼容：未传 `method` 默认 `auto`，旧 `subtitle_stream` 在自动方式中仍可回退；仅 `method:subtitle` 保证严格字幕。CLI 可用 `mindex register 视频...` 只登记素材，`mindex enrich-dialogue SOURCE --method asr --no-publish` 单独处理对白。
 
 选择“字幕轨道”后可上传 SRT、ASS、SSA、VTT、文本 SUB、SMI、SAMI（每文件最多20 MiB）；支持 UTF-8、带 BOM 的 UTF-16、GB18030 和 Big5 中文编码。上传成功自动选中，刷新后可继续选择；上传期间禁用开始按钮。文件按素材和内容摘要保存，开始与重试校验摘要；上传新文件不会改变已有对白，直到点击处理。字幕按原视频时间轴提取，移除样式标签，裁切至素材时长；MicroDVD SUB 使用文件内帧率，缺省沿用素材帧率。无有效对白、无有效时间戳、超出全片范围或位图字幕上传报错；不转用 ASR。处理后的文件名和对白显示在工作台及镜头详情，检索更新沿用已有发布流程；删除素材同时清理上传字幕。
 
-工程验收见 [upload-verification.md](history/upload-verification.md)：隔离素材完成上传、四项任务、发布、检索、详情和浏览器桌面/窄屏测试。工程测试模型仅验证链路，不代表真实模型质量。
+工程验收时以隔离素材完成上传、四项任务、发布、检索、详情和浏览器桌面/窄屏测试。工程测试模型仅验证链路，不代表真实模型质量。
 
 ## 操作反馈位置
 

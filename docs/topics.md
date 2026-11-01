@@ -1,6 +1,6 @@
 # 选题挖掘
 
-创作页的「选题挖掘」标签（`/studio/topics`，位于「创作任务」与「文案模板」之间）按领域档案，从你配置的订阅、热榜、搜索与日历里发现候选选题。系统会给每个选题打分、检查素材库能否覆盖，并为排名靠前的选题写好大纲。满意的选题可以一键建成创作任务，任务会预先选好文案模板、参考资料与账号档案。实现位于 `backend/src/topics/`，对应路线图 [M2](../plans/ROADMAP.md#m2-垂直领域选题挖掘)，spec 在 `.kiro/specs/topic-discovery/`。
+创作页的「选题挖掘」标签（`/studio/topics`，位于「创作任务」与「文案模板」之间）按领域档案，从你配置的订阅、热榜、搜索与日历里发现候选选题。系统会给每个选题打分、检查素材库能否覆盖，并为排名靠前的选题写好大纲。满意的选题可以一键建成创作任务，任务会预先选好文案模板、参考资料与账号档案。实现位于 `backend/src/topics/`，对应路线图 [M2](../plans/roadmap.md#m2-垂直领域选题挖掘)。
 
 Web 端与桌面端运行同一套后端与页面，功能一致。每项能力都同时提供四个入口：页面、`mindex topics` CLI、REST（`/api/topics`），以及智能助手工具（`topics` 领域，MCP 同名导出）。能力与入口的对照表在 `backend/src/topics/capabilities.py`，`tests/test_topics_parity.py` 会逐项检查四个入口都在。
 

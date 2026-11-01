@@ -62,7 +62,7 @@ chroma 的元数据段每笔提交，HNSW 向量段仅在累计 `sync_threshold`
 
 `llama_cpp` 的 schema 2 在建索引、检索及普通推理前均核验当前部署已通过：先满足六文本/六视频的结构 smoke，再与同空间的固定基线逐条比较余弦相似度 ≥0.999。基线原视频、文本、输入哈希、预处理、原始向量和部署记录保存在 `data/capabilities/v2/<space_id>/baseline.json` 及样本目录，验证记录在 `deployments/<deployment_id>.json`。重验先撤销当前部署旧通过记录，基线保持不可变。缺失/损坏拒绝，兼容失败必须显式升级数值实现版本、建立新基线并重建。
 
-v2 空间由实际 weights/mmproj SHA256、维度、池化、归一化、输入模板、视频/图片预处理及显式适配器语义版本组成。路径、别名、地址、构建和整份源码哈希均不进入稳定空间。schema 1 仍读取旧格式并执行旧运行指纹校验，旧记录不会自动改写。详见 [macOS 迁移](macos-model-migration.md)。
+v2 空间由实际 weights/mmproj SHA256、维度、池化、归一化、输入模板、视频/图片预处理及显式适配器语义版本组成。路径、别名、地址、构建和整份源码哈希均不进入稳定空间。schema 1 仍读取旧格式并执行旧运行指纹校验，旧记录不会自动改写。详见 [模型身份重构计划](../plans/model-identity-rehash-plan.md)。
 
 ## 索引冻结快照
 

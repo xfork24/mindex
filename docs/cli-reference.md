@@ -362,7 +362,7 @@ phase 取值：`smoke → visual → preview → asr → align → analyze(-smok
 
 ## mindex-model-server（GPU 侧）
 
-在角色独立 venv 中运行本项目自定义模型服务（部署见 [DEPLOYMENT.md](DEPLOYMENT.md)）：
+在角色独立 venv 中运行本项目自定义模型服务（部署见 [deployment.md](deployment.md)）：
 
 ```bash
 .venv-embedding/bin/mindex-model-server --role embedding --config config.local.yaml --host 0.0.0.0
@@ -378,7 +378,7 @@ phase 取值：`smoke → visual → preview → asr → align → analyze(-smok
 
 ## schema 2 pin 与迁移
 
-本地使用 `--weights-file FILE --mmproj-file FILE --server-cwd DIR`，流式计算 SHA256 并核对 `/props.model_path`；远程使用 `--weights-sha256 SHA --mmproj-sha256 SHA`，明确标记操作员声明。`--launch-parameters FILE` 记录部署者确认的启动参数 JSON，并参与部署摘要。HTTP API 不能证明实际加载的投影或全部数值配置。未经当前部署 smoke 基线对照不能建索引或检索；详见 [macOS 迁移](macos-model-migration.md)。
+本地使用 `--weights-file FILE --mmproj-file FILE --server-cwd DIR`，流式计算 SHA256 并核对 `/props.model_path`；远程使用 `--weights-sha256 SHA --mmproj-sha256 SHA`，明确标记操作员声明。`--launch-parameters FILE` 记录部署者确认的启动参数 JSON，并参与部署摘要。HTTP API 不能证明实际加载的投影或全部数值配置。未经当前部署 smoke 基线对照不能建索引或检索；详见 [模型身份重构计划](../plans/model-identity-rehash-plan.md)。
 
 ## 原片只登记与对白方式
 

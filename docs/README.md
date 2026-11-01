@@ -1,104 +1,108 @@
 # Mindex 文档中心
 
-本目录收录项目的全部文档，讲清**机制与用法**。同一目录内既有机制文档（架构、管线、检索），也有按步骤执行的操作手册，两者互补、互相链接。设计决策与计划类文档放在 [`plans/`](../plans/README.md)，带日期的验证与审计记录放在 [`history/`](history/)。
+Mindex 定位为 **one-stop video creation agent**（一站式视频创作智能体）：从选题、文案、分镜、配音、选片到成片后期与平台交付的完整创作工作流，底座是中文视频片段检索与人物库。本目录收录全部机制与用法文档；设计决策与实施计划放在 [`plans/`](../plans/README.md)，带日期的验收结论追加在[实现验证记录](verification.md)。
 
 ## 按需求导航
 
 | 我想… | 先读 | 再读 |
 |---|---|---|
-| 了解整体架构与数据流 | [架构与模块详解](architecture.md) | [索引版本与空间身份](index-versions.md) |
-| 跑通离线处理管线 | [离线管线详解](pipeline.md) | [电影处理指南](FILM_WORKFLOW.md) |
+| 了解整体架构与数据流 | [架构与模块详解](architecture.md) | [共享基础设施](shared-infrastructure.md) |
+| 跑通离线处理管线 | [离线管线详解](pipeline.md) | [电影处理指南](film-workflow.md) |
 | 查某个命令怎么用 | [CLI 完全参考](cli-reference.md) | [配置参考](config-reference.md) |
 | 理解检索排名怎么算 | [检索机制详解](search.md) | [三渠道独立处理与召回](recall-enhancement.md) |
 | 管理演员、角色，按出镜查找片段 | [人物库与证据审核](persons.md) | [人物配置](config-reference.md#person--人物服务) |
-| 迁移到 macOS、建立 v2 空间 | [macOS 模型身份迁移](macos-model-migration.md) | [实际迁移记录](REHASH_MIGRATION.md) |
-| 换模型 / 回退索引 | [索引版本与空间身份](index-versions.md) | [部署说明](DEPLOYMENT.md) |
-| 做真实模型端到端验证 | [e2e 实验框架](e2e-framework.md) | [端到端操作手册](E2E_RUNBOOK.md)、[测试计划](../plans/E2E_TEST_PLAN.md) |
-| 管理素材（改名/收藏/隐藏） | [素材后台指南](admin.md) | — |
-| 回收磁盘空间 | [磁盘清理](cleanup.md) | [CLI 参考](cli-reference.md#磁盘清理) |
-| 排查素材重复处理、发布等待或任务垃圾 | [素材处理复用规则](admin.md#素材处理的复用规则) | [素材任务检查记录](history/material-task-audit-2026-10-31.md) |
+| 换模型 / 回退索引 | [索引版本与空间身份](index-versions.md) | [部署说明](deployment.md) |
+| 做真实模型端到端验证 | [e2e 实验框架](e2e-framework.md) | [端到端操作手册](e2e-runbook.md)、[验收测试计划](../plans/e2e-acceptance-test-plan.md) |
+| 管理素材（改名/收藏/隐藏/上传/处理任务） | [素材后台指南](admin.md) | — |
+| 回收磁盘空间、清退旧切片 | [磁盘清理](cleanup.md) | [旧切片维护](clips-maintenance.md) |
 | 备份、迁移合并或全新 clone 恢复 | [数据备份与迁移](backup.md) | [CLI 参考](cli-reference.md#数据备份与迁移) |
 | 切换线上/自建模型、克隆音色、调检索权重 | [设置页指南](settings.md) | [配置参考](config-reference.md) |
 | 按领域发现选题、打分并建成创作任务 | [选题挖掘](topics.md) | [创作工作流](studio.md) |
-| 从文案生成视频（创作工作台） | [创作工作流](studio.md) | [设置页：视频生成与动画生成角色](settings.md) / [部署：ComfyUI 与动画录制](DEPLOYMENT.md#comfyui可选的-aigc-视频生成服务) |
+| 从文案生成视频（创作工作台） | [创作工作流](studio.md) | [设置页：视频生成与动画生成角色](settings.md) / [部署：ComfyUI 与动画录制](deployment.md#comfyui可选的-aigc-视频生成服务) |
 | 用自然语言操作 Mindex，或接入外部 harness（MCP） | [智能助手](agent.md) | [设置页指南](settings.md) |
-| 安装或构建桌面版（macOS/Windows/Linux）、管理本机模型服务、后台运行 | [Mindex 桌面版](desktop.md) | [设置页：本机服务](settings.md#本机服务) |
-| 用哔哩哔哩缓存转 MP4 | [m4s-converter](../tools/m4s-converter/README.md) | — |
+| 安装或构建桌面版（macOS/Windows/Linux） | [Mindex 桌面版](desktop.md) | [设置页：本机服务](settings.md#本机服务) |
+| 了解前端结构与 UI 约定 | [前端结构](frontend.md) | [界面文案与多语言](i18n.md) |
+| 新增或修改界面文案 | [界面文案与多语言](i18n.md) | [前端结构](frontend.md#资源版本) |
+| 了解鉴权（访问令牌、MCP 令牌、桌面注入） | [Web/API 访问鉴权](web-auth.md) | — |
+| 写测试、跑回归、更新快照 | [测试约定](testing.md) | — |
+| 了解锁、迁移与后台任务机制 | [共享基础设施](shared-infrastructure.md) | [架构](architecture.md) |
 | 标注评测查询 | [评测标注说明](../eval/README.md) | [e2e 实验框架](e2e-framework.md) |
-| 了解后续规划与最近一次审查 | [功能路线图](../plans/ROADMAP.md) | [2026-10 审查报告](#审查报告) |
+| 了解后续规划与最近一次审查 | [功能路线图](../plans/roadmap.md) | [审查报告](#审查报告) |
 
 ## 文档一览
 
+**核心机制**：
+
 - [architecture.md](architecture.md) — 按页面划分的源码目录、模块职责、离线/在线数据流、存储布局、SQLite 表、五条核心不变量
 - [pipeline.md](pipeline.md) — detect/split/transcribe/align/analyze/index 各阶段机制、检查点与断点续跑、指纹键
-- [cli-reference.md](cli-reference.md) — `mindex`（含 `agent`、`mcp`、`topics`）、`mindex-model-server` 与 `mindex-person-server` 的命令、参数、默认值、示例
-- [config-reference.md](config-reference.md) — 全部配置键、类型、默认值、影响与常用组合
 - [search.md](search.md) — 三渠道召回（新版）与五路召回（旧版）、加权 RRF、视频查询窗口化、筛选器、分数语义
 - [recall-enhancement.md](recall-enhancement.md) — 画面、对白、分析三渠道的独立处理、增量发布与召回
-- [persons.md](persons.md) — 人物库、参考图、出镜审核、发布与人物检索、镜头详情
 - [index-versions.md](index-versions.md) — 索引版本指纹、发布检查、激活与回退、能力门槛
-- [e2e-framework.md](e2e-framework.md) — probe/pin 信任模型、11 个 phase 状态机、标注冻结、评测 profile
-- [admin.md](admin.md) — 素材后台功能与管理 API
+- [persons.md](persons.md) — 人物库、参考图、出镜审核、发布与人物检索（含文献指称规则）、镜头详情
+
+**操作与运维**：
+
+- [cli-reference.md](cli-reference.md) — `mindex`（含 `agent`、`mcp`、`topics`、`studio`）、`mindex-model-server` 与 `mindex-person-server` 的命令、参数、默认值、示例
+- [config-reference.md](config-reference.md) — 全部配置键、类型、默认值、影响与常用组合
+- [admin.md](admin.md) — 素材后台功能与管理 API（上传、四项处理工作台、素材组/音乐组、复用规则）
 - [settings.md](settings.md) — 设置页：十二个模型角色的档案热切换、线上厂商支持、音色克隆、检索调参、索引版本、密钥安全
-- [studio.md](studio.md) — 创作工作流：文案模板与参考文稿、拆分镜、七种分镜画面来源（召回/上传片段/静态图片/AI 生成图片/AI 生成视频/AI 动画/第三方工具）、画幅、成片后期与多画幅导出、版本与构建、阶段注册表、API
-- [topics.md](topics.md) — 选题挖掘：领域档案、数据源（RSS、热榜、Brave、日历、本地）、挖掘与打分、素材覆盖、建创作任务、档案同步、素材采集清单、每日定时、四个入口
-- [agent.md](agent.md) — 智能助手：全局面板、分级确认与删除策略、工具领域与动态加载、附件、视觉输入、密钥表单、页面同步与定位、Markdown 回复、图片与音视频、可调宽度、任务跟踪与取消、全部工具表、MCP 导出（领域过滤）与 deepseek-harness 兼容
 - [cleanup.md](cleanup.md) — 磁盘清理：三级分类（每次删/策略过期/只报告）、保留规则、锁与并发
+- [clips-maintenance.md](clips-maintenance.md) — 旧切片迁移、归档校验、边界修复与清退（`mindex clips`）
 - [backup.md](backup.md) — 离线备份、部分迁移、已有库合并、切换中断恢复和全新 clone 恢复流程
-- [desktop.md](desktop.md) — Mindex 桌面版（macOS/Windows/Linux）：安装与首次打开、文件位置、本机模型服务、AI 动画录制组件、后台运行与每日选题、随包组件、构建与同步演进约定
+- [deployment.md](deployment.md) — GPU 服务部署（各角色环境、启动脚本、HTTP 协议、ComfyUI、TransNetV2）
+- [desktop.md](desktop.md) — Mindex 桌面版（macOS/Windows/Linux）：安装与首次打开、本机模型服务、后台运行与每日选题、随包组件、构建约定
 
-## 验证与审计记录
+**创作**：
 
-带日期的历史档案，位于 [`docs/history/`](history/)，记录当时的验证范围与结果，不代表当前代码的测试结论。引用的 `artifacts/` 为本地产物，不在仓库中。
+- [studio.md](studio.md) — 创作工作流：文案模板与参考文稿、拆分镜、七种分镜画面来源、画幅、成片后期、曲库与品牌模板、多画幅导出与交付模板/平台、版本与构建、阶段注册表、API
+- [topics.md](topics.md) — 选题挖掘：领域档案、数据源、挖掘与打分、素材覆盖、建创作任务、每日定时、四个入口
+- [agent.md](agent.md) — 智能助手：全局面板、分级确认、工具领域与动态加载、附件、MCP 导出与 deepseek-harness 兼容
 
-| 文档 | 内容 |
-|---|---|
-| [project-review-2026-10-22.md](project-review-2026-10-22.md) | 项目架构与规范审查：发现、建议与当时已修正项（后续见[审查报告](#审查报告)） |
-| [source-layout-verification.md](history/source-layout-verification.md) | 前后端目录重组、打包与验证范围，含既有失败和未完成检查 |
-| [implementation-review.md](history/implementation-review.md) | 三份计划的实现审查与端到端验收 |
-| [recall-enhancement-verification.md](history/recall-enhancement-verification.md) | 三渠道改造验证 |
-| [persons-verification.md](history/persons-verification.md) / [person-reference-recall-verification.md](history/person-reference-recall-verification.md) | 人物召回、镜头详情、对白提及人物召回修复 |
-| [studio-workspace-verification.md](history/studio-workspace-verification.md) / [studio-refinement-verification.md](history/studio-refinement-verification.md) / [studio-row-ui-verification.md](history/studio-row-ui-verification.md) / [studio-loading-verification.md](history/studio-loading-verification.md) / [studio-alignment-verification.md](history/studio-alignment-verification.md) | Studio 工作台、候选与定长窗口、逐镜行、加载优化、对齐 UI 的验收 |
-| [candidate-identities-verification.md](history/candidate-identities-verification.md) / [recall-filters-verification.md](history/recall-filters-verification.md) | 召回人物标记与排名、召回筛选与素材多选 |
-| [ui-layout-verification.md](history/ui-layout-verification.md) / [ui-layout-coverage.md](history/ui-layout-coverage.md) / [ui-layout-final-coverage.md](history/ui-layout-final-coverage.md) | 全页面 UI 布局修正与覆盖记录 |
-| [upload-verification.md](history/upload-verification.md) / [source-detail-loading.md](history/source-detail-loading.md) / [source-work-audit-2026-10-20.md](history/source-work-audit-2026-10-20.md) | 素材上传、详情加载、素材工作台全量检查 |
-| [wemm-short-clip-verification.md](history/wemm-short-clip-verification.md) | WeMM 极短分镜采样修复 |
-| [person-review-perf-baseline.md](history/person-review-perf-baseline.md) | 人物库出镜审核读取耗时基线（`scripts/profile_person_review.py` 生成） |
+**平台与工程**：
+
+- [frontend.md](frontend.md) — 前端结构：无框架原生 JS、页面划分、请求封装、创作页按序脚本、资源版本、UI 约定
+- [i18n.md](i18n.md) — 界面文案与多语言：键规则、中文唯一源、生成链路、语言切换、后端消息反向映射
+- [web-auth.md](web-auth.md) — Web/API 访问鉴权：令牌、会话 Cookie、MCP 令牌、桌面与回环凭证
+- [testing.md](testing.md) — 测试约定：集成式哲学、分层与标记、浏览器回归与布局回归复现、快照与 parity 测试
+- [shared-infrastructure.md](shared-infrastructure.md) — 共享基础设施：具名文件锁与顺序、SQLite 版本化迁移、后台任务三件套
+
+**参考记录**：
+
+- [e2e-framework.md](e2e-framework.md) — probe/pin 信任模型、11 个 phase 状态机、标注冻结、评测 profile
+- [e2e-runbook.md](e2e-runbook.md) — 真实模型端到端验证操作手册
+- [verification.md](verification.md) — 实现验证记录（带日期追加的验收档案）
+- [third-party-notices.md](third-party-notices.md) — 第三方组件声明（仓库内固定版本脚本与随包组件的许可证、版本与校验值）
 
 ## 审查报告
 
-2026-10 的全面审查（spec `mindex-review-2026-10`），位于 [`reviews/2026-10/`](reviews/2026-10/)，各报告的"当前可做"表已回填完成状态：
+2026-10 的全面审查报告（铺平在本目录，`review-2026-10-*`），取代关系：~~project-review-2026-10-22（已删除）~~ → 2026-10 专项审查 → [review-2026-10-26-project-analysis.md](review-2026-10-26-project-analysis.md)（综合分析，最新）。各报告的"当前可做"表已回填完成状态；其中 architecture 与 code-quality 报告仍含未解决的遗留项（A10/A11、Q21/Q22），以报告内标注为准：
 
 | 文档 | 内容 |
 |---|---|
-| [features-roadmap.md](reviews/2026-10/features-roadmap.md) | 功能集缺口与本期（M1）创作能力扩展：文案模板、参考文稿、画幅、五种画面来源 |
-| [architecture.md](reviews/2026-10/architecture.md) | 仓库结构与架构：后台任务 runner、迁移、锁、执行器、工作台拆包、阶段注册表、前端拆分 |
-| [code-quality.md](reviews/2026-10/code-quality.md) | 代码质量：鉴权、IO、日志、前端轮询与 lint |
-| [docs-consistency.md](reviews/2026-10/docs-consistency.md) | 文档一致性偏差清单、修正状态与删除的文档 |
+| [review-2026-10-26-project-analysis.md](review-2026-10-26-project-analysis.md) | 综合项目分析（规模、功能全览、演进与 7 条建议） |
+| [features-roadmap.md](review-2026-10-features-roadmap.md) | 功能集缺口与本期（M1）创作能力扩展 |
+| [architecture.md](review-2026-10-architecture.md) | 仓库结构与架构审查（runner、迁移、锁、执行器、拆包） |
+| [code-quality.md](review-2026-10-code-quality.md) | 代码质量（鉴权、IO、日志、前端轮询与 lint） |
+| [docs-consistency.md](review-2026-10-docs-consistency.md) | 文档一致性偏差清单与修正状态 |
 
-长期路线图（M1–M4）见 [plans/ROADMAP.md](../plans/ROADMAP.md)。
+长期路线图（M1–M4）见 [plans/roadmap.md](../plans/roadmap.md)。
 
 ## 任务导向文档
 
 | 文档 | 用途 |
 |---|---|
 | [README.md](../README.md) | 项目概览与快速上手 |
-| [FILM_WORKFLOW.md](FILM_WORKFLOW.md) | 整部电影「分镜 → 切片 → 画面索引」最短流程 |
-| [DEPLOYMENT.md](DEPLOYMENT.md) | GPU 服务部署（自定义 mindex 服务 / llama.cpp 路径）、HTTP 协议 |
-| [macos-model-migration.md](macos-model-migration.md) / [REHASH_MIGRATION.md](REHASH_MIGRATION.md) | macOS 模型身份迁移：操作手册与实际执行记录 |
-| [E2E_RUNBOOK.md](E2E_RUNBOOK.md) | 真实模型端到端验证操作手册（当前实验：trailer-20261013） |
-| [E2E_RESULTS.md](E2E_RESULTS.md) | e2e 实验结果汇总 |
-| [VERIFICATION.md](VERIFICATION.md) | 实现验证记录（带日期的历史档案） |
-| [QWEN_BENEFIT_EVALUATION.md](QWEN_BENEFIT_EVALUATION.md) | 换用 Qwen 系模型的收益评估 |
-| [studio-verification.md](studio-verification.md) | 创作工作流验收记录 |
+| [film-workflow.md](film-workflow.md) | 整部电影「分镜 → 切片 → 画面索引」最短流程 |
+| [deployment.md](deployment.md) | GPU 服务部署（自定义 mindex 服务 / llama.cpp 路径）、HTTP 协议 |
+| [e2e-runbook.md](e2e-runbook.md) | 真实模型端到端验证操作手册 |
 | [eval/README.md](../eval/README.md) | 评测查询标注说明与模板生成器 |
 
 计划与设计决策文档在 [`plans/`](../plans/README.md)（含按主题分类的索引）：
 
 | 文档 | 用途 |
 |---|---|
-| [PLAN.md](../plans/PLAN.md) | 设计决策、验收标准（40 条测试集 Hit@5 ≥85%） |
-| [E2E_TEST_PLAN.md](../plans/E2E_TEST_PLAN.md) | 端到端测试设计与通过条件 |
-| [STUDIO_PLAN.md](../plans/STUDIO_PLAN.md) / [STUDIO_REFINEMENT_PLAN.md](../plans/STUDIO_REFINEMENT_PLAN.md) | 创作工作流设计与修订 |
-| [ROADMAP.md](../plans/ROADMAP.md) | 功能路线图（M1–M4：创作能力、选题与 agent、后期、桌面分发） |
-| [REHASH_REFINEMENT_PLAN.md](../plans/REHASH_REFINEMENT_PLAN.md) | 模型身份与索引兼容性重构计划 |
+| [retrieval-design-plan.md](../plans/retrieval-design-plan.md) | 检索的设计决策、验收标准（40 条测试集 Hit@5 ≥85%） |
+| [e2e-acceptance-test-plan.md](../plans/e2e-acceptance-test-plan.md) | 端到端验收测试设计与通过条件 |
+| [studio-initial-plan.md](../plans/studio-initial-plan.md) / [studio-refinement-plan.md](../plans/studio-refinement-plan.md) | 创作工作流初始设计与修订 |
+| [roadmap.md](../plans/roadmap.md) | 功能路线图（M1–M4：创作能力、选题与 agent、后期、桌面分发） |
+| [model-identity-rehash-plan.md](../plans/model-identity-rehash-plan.md) | 模型身份与索引兼容性重构（三层身份模型） |

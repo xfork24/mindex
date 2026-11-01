@@ -3,7 +3,7 @@
 
 用法：
     uv run python scripts/profile_person_review.py [--data-dir data] [--repeat 5]
-        [--image-samples 20] [--output docs/history/person-review-perf-baseline.md]
+        [--image-samples 20] [--output 报告.md]
 
 对数据库严格只读：连接使用 ``mode=ro`` 加 ``PRAGMA query_only=ON``，并跳过 Store 的建表迁移，
 任何写入都会直接报错。脚本前后会比对主库文件的大小与修改时间，并把结果写进报告。

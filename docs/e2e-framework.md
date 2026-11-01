@@ -4,7 +4,7 @@
 
 e2e 命令组**不应用设置页（`/settings`）保存的覆盖层**，始终使用 `config.local.yaml` 原值——验证实验必须可复现，不受运行时热切换影响（其余 CLI 命令都会合并覆盖层）。
 
-当前实验：`data/e2e/trailer-20261013/`（117 秒 trailer，61 shot / 61 moment）。**`run.json` 是实际阶段状态**，任何时候以它为准，不以文档描述为准。
+每个实验一个运行目录（`data/e2e/<run>/`）。**`run.json` 是实际阶段状态**，任何时候以它为准，不以文档描述为准。
 
 ## 信任模型：probe / pin
 
@@ -14,7 +14,7 @@ e2e 命令组**不应用设置页（`/settings`）保存的覆盖层**，始终�
 
 v2 空间使用显式协议版本 `llama-native-wemm-2`，不包含地址、路径、别名、构建或整文件源码哈希。本地文件仅路径变化且重新核对 SHA256 一致时，沿用原清单及 smoke 记录；其他部署变化须重新 pin/smoke。构建、后端或数值配置改变后，使用固定基线逐条验证余弦相似度 ≥0.999。标准 HTTP API 仍无法证明实际加载的投影及全部启动参数，这些由部署者声明；本地 SHA256 只证明本地文件内容。
 
-迁移全部命令显式指定 `--config config.macos-v2.yaml --no-runtime-overrides`，该开关贯穿验收 Web 配置读取。完整步骤和回滚见 [macOS 迁移](macos-model-migration.md)。
+迁移全部命令显式指定 `--config config.macos-v2.yaml --no-runtime-overrides`，该开关贯穿验收 Web 配置读取。完整步骤和回滚见 [模型身份重构计划](../plans/model-identity-rehash-plan.md)。
 
 ## init：冻结实验输入
 
@@ -84,10 +84,10 @@ uv run mindex e2e freeze data/e2e/trailer-20261013/queries.draft.jsonl \
 
 报告同时记录模型空间、查询 SHA256、索引与整理状态指纹；评测过程中索引或整理状态变化 → 拒绝比较。**只用 dev 调参**；trailer 规模属于冒烟，正式验收需多真实来源 + 20 dev + 40 test 人工标注，Hit@5 ≥85% 是目标而非现状。
 
-## 当前实验进度（截至 2026-10-13）
+## 实验进度
 
-`run.json` 是实时状态。已完成真实 WeMM、ASR/CPU 对齐及 Qwen 三片段验证；Qwen 批次分析已启动。新增完整电影已有独立 visual 索引（2,336 个 moment），trailer 实验继续使用独立版本。步骤见 [E2E_RUNBOOK.md](E2E_RUNBOOK.md)。
+各实验的实时状态见对应 `run.json`；已完成轮次的验收结论记录在 [实现验证记录](verification.md)，逐步操作见[端到端操作手册](e2e-runbook.md)。
 
 ## 工程测试 vs 真实验收
 
-`uv run pytest -q`（真实 FFmpeg/SQLite/Chroma/HTTP，确定性模型 fixture）验证**工程链路**；不证明真实模型中文检索质量、INT8 兼容性或显存峰值。真实验收走本框架并记录到 [VERIFICATION.md](VERIFICATION.md)。真实模型结果、人工标注、浏览器证据、GPU 数据缺一时，保持待验收状态。
+`uv run pytest -q`（真实 FFmpeg/SQLite/Chroma/HTTP，确定性模型 fixture）验证**工程链路**；不证明真实模型中文检索质量、INT8 兼容性或显存峰值。真实验收走本框架并记录到 [verification.md](verification.md)。真实模型结果、人工标注、浏览器证据、GPU 数据缺一时，保持待验收状态。

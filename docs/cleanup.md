@@ -4,7 +4,7 @@
 的按预定义策略（类别 + 文件生命期 / 保留数）过期删除；C 级只报告、永不自动删除**。
 默认预览（只列出将删除的内容与字节数），`--apply` 才执行。过期阈值在配置 `clean` 节调整，
 见 [config-reference.md](config-reference.md)。设计决策与评估记录见
-[../plans/MINDEX_CLEAN_PLAN.md](../plans/MINDEX_CLEAN_PLAN.md)。
+[../plans/disk-cleanup-plan.md](../plans/disk-cleanup-plan.md)。
 
 ```bash
 uv run mindex clean             # 预览

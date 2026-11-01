@@ -90,7 +90,7 @@ wheel 安装后读取随包的 `mindex/web/`。Setuptools 通过包目录映射�
 | 模块 | 职责 |
 |---|---|
 | `cli.py` | Typer CLI 入口（`mindex`）：全局选项、核心命令、`indexes` 组；重模块在命令函数内延迟导入，`--config` 必须放在子命令之前 |
-| `cli_e2e.py` / `cli_persons.py` / `cli_clips.py` / `cli_agent.py` | `e2e`、`persons`、`clips`、`agent` 命令组（顶层 `mcp` 命令也在 `cli_agent.py`）；共用的排序命令组与 JSON 输出函数在 `shared/cli_support.py` |
+| `cli_e2e.py` / `cli_persons.py` / `cli_clips.py` / `cli_agent.py` / `cli_studio.py` / `cli_topics.py` | `e2e`、`persons`、`clips`、`agent`、`studio`、`topics` 命令组（顶层 `mcp` 命令也在 `cli_agent.py`）；共用的排序命令组与 JSON 输出函数在 `shared/cli_support.py` |
 | `processing/pipeline.py` | 各阶段编排：导入去重、分镜、切片、转写、对齐、分析；`pipeline.lock` 文件锁 |
 | `processing/indexing.py` | `IndexBuilder`（建索引、发布前检查）与 `VectorIndex`（Chroma 封装） |
 | `search/search.py` | `SearchEngine`：新版三渠道召回与旧版五路召回、RRF 融合、去重、BM25 降级；`status()` |
@@ -140,7 +140,7 @@ wheel 安装后读取随包的 `mindex/web/`。Setuptools 通过包目录映射�
 | `studio/workspace/` / `studio/studio_window.py` / `studio/studio_logs.py` | 方案、构建与版本工作台（包内按职责分 `versions`、`plans`、`persistence`、`signatures`、`preflight`、`media_nodes`、`post`（成片后期管线）、`builder`、`details`、`references`（参考文稿）、`sources`（分镜画面来源文件），`stages` 阶段注册表与 `handlers/` 各阶段处理器 script/split/recall/tts/music/draw/generate/animate/invoke/select/overlay/render/compose/export/publish，`__init__` 导出公共入口），定长选片窗口，只追加的执行事件日志 |
 | `settings/voices_catalog.py` | 语音合成音色目录：按当前合成后端聚合系统音色、本地音色库与克隆能力 |
 | `shared/shot_media.py` | 统一镜头媒体服务：时间基准转换、截图/抽帧、跨镜重建；业务读取不直读历史切片路径 |
-| `shared/locks.py` | 具名文件锁（pipeline/index-write/library/register/studio）与 `acquire_ordered` 规范加锁顺序 |
+| `shared/locks.py` | 具名文件锁（pipeline/index-write/library/register/studio/topics）与 `acquire_ordered` 规范加锁顺序 |
 | `shared/processing_lock.py` / `shared/task_progress.py` | 处理锁（含 GPU 互斥，基于 `shared/locks.py`）、任务进度持久化 |
 | `shared/task_cancel.py` | 后台任务取消标记：进程内事件与 `locks/cancel/<key>` 哨兵文件，跨进程生效 |
 | `shared/background_tasks.py` | `BackgroundTaskRunner`：素材、对白、人物后台任务共用的查询/重试/取消/线程与终态写入 |
@@ -210,6 +210,8 @@ data/
 ├── model-cache/      # 对齐 worker 的 HF 权重缓存
 ├── studio/           # 创作任务目录：job.json、workspace.json、versions/、builds/、inputs/（查询媒体、画面来源文件、参考文稿）；studio.lock
 ├── persons/          # 人物参考图（references/）、导入图（imports/）、展示帧（frames/<source_id>/）
+├── music/            # 曲库曲目音频（ID 即内容 SHA256，music_tracks 表）
+├── brand/            # 品牌模板素材（logo/水印等，brand_templates 表引用）
 ├── subtitles/        # 字幕轨道解析缓存与外部字幕上传（<source_id>/uploads/）
 ├── locks/            # 素材库锁 library.lock、按素材/工作类型的处理锁、后台任务取消哨兵 cancel/
 ├── cache/            # 可重建缓存：admin-work/、shot-media/
@@ -253,7 +255,7 @@ data/
 
 库结构用 `PRAGMA user_version` 记录版本：`shared/storage.py` 的 `METADATA_STEPS` 是 metadata 库的有序迁移列表（v1 为完整 schema，对没有版本号的旧库幂等补列），`agent/schema.py` 的 `STEPS` 管理 `agent.sqlite3`。改表结构只追加步骤，不修改已发布的步骤；已是最新版本时打开库只读一次版本号。备份导入先把暂存副本升级到当前版本再合并。
 
-多把数据目录锁一起获取时经 `shared/locks.py` 的 `acquire_ordered`，顺序为 pipeline → index-write → library → register → studio，逆序抛出 `ValueError`。
+多把数据目录锁一起获取时经 `shared/locks.py` 的 `acquire_ordered`，顺序为 pipeline → index-write → library → register → studio → topics，逆序抛出 `ValueError`。
 
 向量不是记录主键：表示 ID 是稳定主键，业务数据通过 segment/representation ID 关联回 SQLite；Chroma 显式接收向量（`embedding_function=None`）。
 
@@ -277,4 +279,4 @@ data/
 
 - 各阶段机制与检查点：[pipeline.md](pipeline.md)
 - 索引版本与回退：[index-versions.md](index-versions.md)
-- GPU 服务部署与 HTTP 协议：[DEPLOYMENT.md](DEPLOYMENT.md)
+- GPU 服务部署与 HTTP 协议：[deployment.md](deployment.md)

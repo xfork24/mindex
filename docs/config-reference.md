@@ -147,7 +147,7 @@ AI 动画分镜 `animate` 阶段使用的 LLM：按画面说明写自包含 HTML
 | `max_html_kb` | int 1–5000 | 200 | 动画源码大小上限（KiB），生成与人工保存都受限 |
 | `max_capture_seconds` | float 0–3600 | 60 | 单个分镜逐帧录制的墙钟时长上限秒；画幅大、镜头长时可调大 |
 
-animate 签名只含 backend、model、`max_html_kb` 与提示词版本，不含密钥与超时；该段不进入 `studio_key`。录制依赖为可选 extra `animation`（见 [部署](DEPLOYMENT.md#ai-动画录制可选)）。
+animate 签名只含 backend、model、`max_html_kb` 与提示词版本，不含密钥与超时；该段不进入 `studio_key`。录制依赖为可选 extra `animation`（见 [部署](deployment.md#ai-动画录制可选)）。
 
 ## `studio` — 创作工作流
 
@@ -220,8 +220,8 @@ animate 签名只含 backend、model、`max_html_kb` 与提示词版本，不含
 | 键 | 类型 | 默认 | 说明 |
 |---|---|---|---|
 | `candidates` | int 1–1000 | 100 | 每路召回候选数 |
-| `rrf_k` | int ≥1 | 60 | RRF 常数 |
-| `channel_weights` | 三键非负：`visual`/`dialogue`/`analysis` | 均为 1 | 新版（format 2）索引的三渠道 RRF 权重，必须同时给出三个键；见 [三渠道说明](recall-enhancement.md) |
+| `rrf_k` | int ≥1 | 30 | RRF 常数 |
+| `channel_weights` | 三键非负：`visual`/`dialogue`/`analysis` | visual 0.35、dialogue 0.15、analysis 0.5 | 新版（format 2）索引的三渠道 RRF 权重，必须同时给出三个键；见 [三渠道说明](recall-enhancement.md) |
 | `weights` | 五键非负 | video/description/style=1，dialogue/lexical=0.5 | 旧版（format 1）索引的五路权重；某路设 0 即关闭该路。与 `channel_weights` 互不影响 |
 | `lexical_exclude` | list | `[]` | BM25 文档中排除的字段（评测消融用：`description`/`style`/`dialogue`） |
 | `max_upload_mb` | int ≥1 | 100 | 视频查询上传上限 |

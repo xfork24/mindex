@@ -3,7 +3,7 @@
 Mindex 桌面版是一个 Electron 外壳：双击启动时，外壳在后台运行随包的冻结后端（就是 `mindex serve`），窗口加载它提供的同一套 Web 页面；退出时一并停止。功能与 Web 版完全一致，不需要安装 Python、uv 或 ffmpeg，也不需要手动执行 `mindex serve`。
 
 - 支持的平台：macOS 14+（Apple Silicon，arm64）、Windows 10/11（x64）、Linux x64（AppImage / deb，dsh 运行时要求 glibc 2.28+）。macOS 最低版本由随包 dsh 运行时决定。
-- macOS 决策与取舍见 [plans/MACOS_NATIVE_PLAN.md](../plans/MACOS_NATIVE_PLAN.md)，Windows/Linux 跨平台决策见 [plans/WIN_LINUX_NATIVE_PLAN.md](../plans/WIN_LINUX_NATIVE_PLAN.md)；任务进度见 `.kiro/specs/macos-desktop/` 与 `.kiro/specs/desktop-cross-platform/`。
+- macOS 决策与取舍见 [plans/macos-native-plan.md](../plans/macos-native-plan.md)，Windows/Linux 跨平台决策见 [plans/windows-linux-desktop-plan.md](../plans/windows-linux-desktop-plan.md)。
 
 ## 安装与首次打开
 
@@ -67,7 +67,7 @@ AI 动画分镜在无头 Chromium（Playwright 的 headless shell）里逐帧录
 - ffmpeg/ffprobe：从源码编译的 GPL 构建（含 libx264、libass、dav1d），支持烧录中文字幕；libass 字体后端按平台（macOS CoreText、Windows DirectWrite、Linux 显式字体文件）；对应源码随每个发布附带（macOS/Linux 为 tar，Windows 为 zip）。
 - Noto Sans CJK SC（SIL OFL 1.1）。
 
-详见 [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)。
+详见 [third-party-notices.md](third-party-notices.md)。
 
 ## 构建（维护者）
 

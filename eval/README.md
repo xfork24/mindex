@@ -1,6 +1,6 @@
 # 中文素材检索评测
 
-真实 trailer 的 20 条待复核中文查询在 `trailer.queries.draft.jsonl`。本轮分阶段实验使用 `mindex e2e freeze/phase`，详见 [操作手册](../docs/E2E_RUNBOOK.md)。草稿只能运行 preview，不能产生质量分数。评测现包含 Hit@1/5、MRR@10、nDCG@10，以及去对白、去风格消融和候选集身份检查；无答案查询单独诊断。
+真实 trailer 的 20 条待复核中文查询在 `trailer.queries.draft.jsonl`。本轮分阶段实验使用 `mindex e2e freeze/phase`，详见 [操作手册](../docs/e2e-runbook.md)。草稿只能运行 preview，不能产生质量分数。评测现包含 Hit@1/5、MRR@10、nDCG@10，以及去对白、去风格消融和候选集身份检查；无答案查询单独诊断。
 
 ```bash
 uv run python eval/generate_queries.py
