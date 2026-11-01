@@ -143,6 +143,10 @@ test("后代进程判定与进程组停止", async () => {
   assert.equal(sidecar.isDescendant(30, 99, (pid) => parents[pid] || 0), false);
   assert.equal(sidecar.isDescendant(10, 10, () => 0), true);
 
+  // POSIX 信号语义（kill 注入）只在非 Windows 成立；Windows 的停止语义由
+  // “进程组停止（Windows）”用例按 taskkill 注入验证。
+  if (process.platform === "win32") return;
+
   let living = true;
   const signals = [];
   const graceful = await sidecar.stopGroup(42, { isAlive: () => living, kill: (pid, signal) => { signals.push([pid, signal]); living = false; } });
@@ -165,12 +169,23 @@ test("遗留后端：只结束命令行像 mindex serve 的进程", async () => 
 });
 
 test("真实子进程：detached 启动后整组停止，不残留孙进程", async () => {
+  // 用 node 自身代替 /bin/sh（Windows 没有 sh）；孙进程写 pid 到 stdout。
   const { spawn } = require("node:child_process");
-  const child = spawn("/bin/sh", ["-c", "sleep 30 & echo $!; wait"], { detached: true, stdio: ["ignore", "pipe", "ignore"] });
-  const grandchild = Number(await new Promise((resolve) => child.stdout.once("data", (data) => resolve(String(data).trim()))));
+  const script = `
+    const { spawn } = require("node:child_process");
+    const grandchild = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+    process.stdout.write(String(grandchild.pid));
+    setInterval(() => {}, 1000);
+  `;
+  const child = spawn(process.execPath, ["-e", script], { detached: true, stdio: ["ignore", "pipe", "ignore"] });
+  const grandchild = Number(await new Promise((resolve, reject) => {
+    child.stdout.once("data", (data) => resolve(String(data).trim()));
+    child.once("exit", () => reject(new Error("父进程在写出孙进程 pid 前退出")));
+    setTimeout(() => reject(new Error("等待孙进程 pid 超时")), 10000).unref();
+  }));
   assert.ok(sidecar.alive(grandchild));
-  await sidecar.stopGroup(child.pid, { graceMs: 3000 });
-  await new Promise((resolve) => setTimeout(resolve, 100));
+  await sidecar.stopGroup(child.pid, { graceMs: 5000 });
+  await new Promise((resolve) => setTimeout(resolve, 200));
   assert.equal(sidecar.alive(child.pid), false);
   assert.equal(sidecar.alive(grandchild), false);
 });
