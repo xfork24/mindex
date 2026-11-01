@@ -10,7 +10,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,
 .brand i{height:7px;width:7px;background:#b6ca88;border-radius:50%;margin:15px 0 0 5px}
 .quiet{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:var(--control-size);padding:0 12px;border:1px solid var(--line);background:transparent;border-radius:var(--control-radius);font-size:var(--control-font);line-height:18px;color:#526258;text-decoration:none}
 #refresh{margin-left:auto}
-main{max-width:1136px;margin:auto;padding:58px 24px 40px}
+main{margin:auto;padding:58px 24px 40px}
 .eyebrow{font-size:12px;letter-spacing:2px;color:#47765d}
 .intro h1{font-size:38px;font-weight:550;letter-spacing:-1.3px;margin:16px 0 12px}
 .intro p{font-size:14px;color:var(--muted);margin-bottom:30px}
@@ -67,7 +67,7 @@ h2{font-size:17px;font-weight:550}
 .library-status{border-top:1px solid var(--line);margin-top:36px;padding-top:22px;font-size:12px;color:var(--muted)}
 #library-summary{margin-left:10px;color:#47765d}
 #library-detail{line-height:1.9;padding:16px 0;overflow-wrap:anywhere}
-footer{max-width:1136px;margin:0 auto;padding:22px 24px 30px;display:flex;justify-content:space-between;gap:12px;font-size:10px;color:#929c91}
+footer{margin:0 auto;padding:22px 24px 30px;display:flex;justify-content:space-between;gap:12px;font-size:10px;color:#929c91}
 dialog{position:fixed;border:1px solid var(--line);border-radius:14px;max-width:min(900px,calc(100vw - 24px));width:calc(100% - 24px);max-height:calc(100dvh - 24px);overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable;padding:var(--dialog-padding);color:#314b3c}
 dialog::backdrop{background:#11281f66;backdrop-filter:blur(3px)}
 .close{position:absolute;top:16px;right:16px;float:none;width:32px;height:32px;min-height:32px;padding:0;z-index:1}

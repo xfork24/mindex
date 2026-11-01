@@ -1,6 +1,6 @@
 .nav-link{text-decoration:none;text-align:center}
 
-.admin-main{max-width:1560px;padding:36px 28px}
+.admin-main{padding:36px 28px}
 .admin-intro h1{font-size:30px;letter-spacing:-.8px;margin:12px 0}
 .admin-intro p{font-size:13px;color:var(--muted);margin:0 0 22px}
 /* 素材管理分区标签（素材 / 音乐库）：与创作页 studio.css 的 .studio-tabs 同一样式；音乐库页直接用 studio.css。 */
@@ -67,7 +67,7 @@
 .admin .empty{padding:35px 15px}
 .admin .empty p{line-height:1.9}
 .admin #source-workspace[aria-busy=true]{opacity:.55}
-.admin footer{max-width:1560px}
+
 .source-warning{color:#a83e2a;font-size:12px}
 .admin button:disabled{cursor:default}
 @media(max-width:1150px){.segment-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
