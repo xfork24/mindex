@@ -86,7 +86,11 @@ async function waitFor(predicate, timeout, message) {
     assert.equal(health.body.busy, false);
     sidecarPid = health.body.pid;
     assert.ok(alive(sidecarPid));
-    assert.ok(health.body.data_dir.startsWith(home), health.body.data_dir);
+    // data_dir 位于隔离的用户数据目录下。Windows 上 Electron 会把 8.3 短路径（RUNNER~1）
+    // 展开为长路径（runneradmin），字符串前缀比较不可靠——改为比较尾部目录名 + 存在性。
+    assert.equal(path.basename(health.body.data_dir), "data");
+    assert.equal(path.basename(path.dirname(health.body.data_dir)), "user-data");
+    assert.ok(fs.existsSync(path.join(home, "user-data", "data")), health.body.data_dir);
     const sse = await win.evaluate(() => new Promise((resolve) => {
       const source = new EventSource("/api/agent/changes?after=-1");
       const timer = setTimeout(() => { source.close(); resolve("timeout"); }, 15000);
