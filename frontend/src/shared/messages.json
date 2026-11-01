@@ -13966,5 +13966,29 @@
   "ui.theme_dark": {
     "zh": "主题：深色",
     "en": "Theme: dark"
+  },
+  "ui.footer_persons": {
+    "zh": "Mindex / 人物库",
+    "en": "Mindex / Persons"
+  },
+  "ui.footer_persons_hint": {
+    "zh": "演员与角色 · 出镜证据核对",
+    "en": "Actors & roles · appearance evidence"
+  },
+  "ui.footer_groups": {
+    "zh": "Mindex / 素材管理",
+    "en": "Mindex / Library"
+  },
+  "ui.footer_groups_hint": {
+    "zh": "组用于检索与创作的范围筛选",
+    "en": "Groups scope search and creation"
+  },
+  "ui.footer_delivery": {
+    "zh": "Mindex / 创作",
+    "en": "Mindex / Studio"
+  },
+  "ui.footer_delivery_hint": {
+    "zh": "交付模板与平台规则管理",
+    "en": "Delivery templates and platform rules"
   }
 }

@@ -1,15 +1,11 @@
 .nav-link{text-decoration:none;text-align:center}
 
-.admin-main{padding:36px 28px}
-/* 素材管理分区标签（素材 / 音乐库）：与创作页 studio.css 的 .studio-tabs 同一样式；音乐库页直接用 studio.css。 */
-.studio-tabs{display:flex;gap:28px;border-bottom:1px solid var(--line);margin:0 0 18px}
-.studio-tab{display:inline-flex;align-items:center;min-height:40px;padding:10px 0 9px;border-bottom:3px solid transparent;margin-bottom:-1px;color:var(--muted);font-size:14px;text-decoration:none}
-.studio-tab:hover{color:var(--control-text)}
-.studio-tab[aria-current="page"]{border-color:var(--green);color:var(--green);font-weight:600}
+.admin-main{padding:24px 28px}
+/* 分区标签统一定义在 style.css（.studio-tabs）。 */
 .admin .notice{margin:0 0 18px}
 .admin .notice:empty{display:none}
 .workspace{display:grid;--sidebar-width:310px;grid-template-columns:var(--sidebar-width) minmax(0,1fr);gap:24px;align-items:start}
-.source-panel{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px;position:sticky;top:20px}
+.source-panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--panel-radius);padding:16px;position:sticky;top:20px}
 .source-panel label{font-size:12px;color:var(--muted)}
 .search-row{display:flex;gap:6px;margin-top:9px}
 .search-row input{width:100%}
@@ -27,21 +23,21 @@
 .pager{display:flex;align-items:center;justify-content:center;gap:12px;margin-top:20px;font-size:12px;color:var(--muted)}
 .segment-panel{min-width:0}
 .source-heading{display:flex;justify-content:space-between;gap:14px;align-items:start}
-.source-heading h2{font-size:23px;margin:3px 0 9px;overflow-wrap:anywhere}
+.source-heading h2{font-size:18px;margin:3px 0 8px;overflow-wrap:anywhere}
 .source-meta{color:var(--muted);font-size:12px;line-height:1.9;overflow-wrap:anywhere;margin:0}
 .source-notes{white-space:pre-wrap;overflow-wrap:anywhere;color:var(--muted);font-size:12px;line-height:1.9;margin:0 0 8px}
 .organization-actions{display:flex;gap:6px;flex-wrap:wrap;margin:14px 0 20px}
 .organization-actions button[aria-pressed=true]{background:var(--info-bg);border-color:var(--focus);color:var(--green)}
 .hidden-badge{font-size:10px;background:var(--warn-bg);color:var(--warn-text);border-radius:4px;padding:4px 7px;display:inline-block;margin-right:6px}
 .segment-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin-top:22px;flex-wrap:wrap}
-.kind-tabs{display:flex;gap:25px}
-.kind-tabs button{border:0;border-bottom:3px solid transparent;background:none;color:var(--muted)}
+.kind-tabs{display:flex;gap:24px}
+.kind-tabs button{border:0;border-bottom:3px solid transparent;background:none;color:var(--muted);min-height:34px;font-size:13px}
 .kind-tabs button.active{color:var(--green);border-bottom-color:var(--green);font-weight:600}
 .segment-filters{display:flex;gap:14px;align-items:center;padding:9px 0}
 .segment-filters select{font-size:12px}
 .segment-summary{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin:20px 0 14px}
 .segment-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(280px,100%),1fr));gap:16px}
-.segment-card{border:1px solid var(--line);border-radius:12px;background:var(--surface);overflow:hidden;min-width:0}
+.segment-card{border:1px solid var(--line);border-radius:var(--card-radius);background:var(--surface);overflow:hidden;min-width:0}
 .segment-card.is-hidden{border-color:var(--danger-line)}
 .poster-button{height:auto;min-height:0;display:block;width:100%;padding:0;border:0;background:#142a20;position:relative;aspect-ratio:16/9}
 .poster-button img{width:100%;height:100%;object-fit:contain;display:block}
@@ -51,7 +47,7 @@
 .segment-body h3{font-size:13px;line-height:1.6;margin:0 0 7px;overflow-wrap:anywhere}
 .segment-time{font-variant-numeric:tabular-nums;font-size:11px;color:var(--muted);margin:0 0 10px}
 .segment-note{font-size:12px;line-height:1.7;color:var(--control-text);white-space:pre-wrap;overflow-wrap:anywhere;margin:10px 0}
-.segment-card .organization-actions{margin:12px 0 8px;gap:8px;--control-size:28px}
+.segment-card .organization-actions{margin:12px 0 8px;gap:8px}
 .relationship{display:flex;justify-content:space-between;align-items:center;gap:8px;border-top:1px solid var(--line-soft);padding-top:11px;margin-top:12px}
 .relationship button,.relationship a{border:0;background:none;color:var(--green);text-decoration:none}
 .parent-filter{display:flex;justify-content:space-between;align-items:center;gap:12px;background:var(--info-bg);border-radius:8px;padding:10px 12px;margin-top:15px;font-size:12px}
@@ -61,7 +57,7 @@
 .admin #edit-form .submit{align-self:flex-end;margin:0}
 .admin #edit-error{font-size:12px;color:var(--danger-text);margin:0}
 .admin #play-title{margin-right:40px}
-.admin #play-download{display:inline-flex;align-items:center;justify-content:center;min-height:36px;padding:8px 16px;font-size:14px;line-height:1.4;text-align:center}
+.admin #play-download{display:inline-flex;align-items:center;justify-content:center;min-height:var(--control-size);padding:8px 16px;font-size:14px;line-height:1.4;text-align:center}
 .admin .empty{padding:35px 15px}
 .admin .empty p{line-height:1.9}
 .admin #source-workspace[aria-busy=true]{opacity:.55}
@@ -73,9 +69,9 @@
 }
 @media(max-width:750px){.workspace{grid-template-columns:1fr}
 .source-panel{position:static}
-.admin-main{padding:24px 18px}
+.admin-main{padding:20px 16px}
 #source-list{max-height:270px;overflow:auto}
-.source-heading h2{font-size:20px}
+.source-heading h2{font-size:18px}
 .admin header .nav-link{font-size:12px}
 
 }
@@ -95,7 +91,7 @@
 .work-task-progress{font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
 .work-progress{display:block;width:100%;height:12px;margin:8px 0 14px;accent-color:var(--green)}
 
-#analysis-dialog{width:min(920px,94vw)}
+#analysis-dialog{width:min(var(--dialog-width-l),calc(100vw - 24px))}
  .analysis-section{padding:16px 0;border-top:1px solid var(--line)}
 .analysis-section h3{margin:0 0 12px}
 .analysis-section p{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.6}
@@ -104,9 +100,9 @@
 .admin-intro .submit{margin-left:auto;flex:0 0 auto;align-self:center}
 .work-panel{margin-top:24px}
 .work-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr));gap:14px}
-.work-card{padding:18px;background:var(--surface);border:1px solid var(--line);border-radius:12px;min-width:0}
+.work-card{padding:16px;background:var(--surface);border:1px solid var(--line);border-radius:var(--card-radius);min-width:0}
 .work-heading{display:flex;justify-content:space-between;align-items:start;gap:12px}
-.work-heading h4{margin:0;font-size:15px}
+.work-heading h4{margin:0;font-size:13px}
 .work-status{font-size:12px;color:var(--green);white-space:nowrap}
 .work-summary{font-size:13px;line-height:1.7;overflow-wrap:anywhere}
 .work-card>label{display:flex;align-items:center;gap:8px;font-size:12px;margin:12px 0}
@@ -120,7 +116,7 @@
 .upload-row{padding:12px 0;border-bottom:1px solid var(--line)}
 .upload-row p{font-size:13px;overflow-wrap:anywhere}
 .upload-row progress{display:block;width:100%;height:12px;margin:10px 0;accent-color:var(--green)}
-#upload-dialog,#person-dialog{width:min(650px,92vw)}
+#upload-dialog,#person-dialog{width:min(var(--dialog-width-m),calc(100vw - 24px))}
 #person-work{width:100%;margin:12px 0}
 #person-setup p{font-size:13px;line-height:1.7}
 @media(max-width:600px){
@@ -150,7 +146,7 @@
 
 .work-controls{gap:8px}
 .relationship{flex-wrap:wrap}
-.relationship button{--control-size:28px}
+.relationship button{margin:0}
 .work-heading{flex-wrap:wrap;align-items:center}
 .work-card>label{flex-wrap:wrap}
 .work-status{white-space:normal}

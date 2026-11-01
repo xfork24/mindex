@@ -6,8 +6,8 @@
 .template-group-empty{font-size:12px;line-height:1.7;margin:8px 0 0}
 .template-items{list-style:none;margin:0;padding:0}
 .template-item{height:auto;flex-direction:column;align-items:stretch;gap:0}
-.template-card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:4px 22px 20px;margin-bottom:18px}
-.template-title-row h2{font-size:20px;letter-spacing:-.4px}
+.template-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--panel-radius);padding:4px 16px 16px;margin-bottom:18px}
+.template-title-row h2{font-size:18px;letter-spacing:-.4px}
 .template-tags{display:inline-flex;flex-wrap:wrap;gap:6px}
 .template-tag{font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--accent-soft);background:var(--surface-2)}
 #template-description{font-size:13px;margin:0 0 8px;line-height:1.7}

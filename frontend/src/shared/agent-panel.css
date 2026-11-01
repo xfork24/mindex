@@ -32,7 +32,7 @@
 .agent-before{text-decoration:line-through;color:var(--danger-text);margin-right:6px;white-space:pre-wrap}
 .agent-after{color:var(--accent-soft);white-space:pre-wrap}
 .agent-card-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:8px;flex-wrap:wrap}
-.agent-card-actions .submit{--control-size:32px;min-width:0;margin-left:0}
+.agent-card-actions .submit{min-width:0;margin-left:0}
 .agent-grant{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);margin-right:auto}
 .agent-outcome{margin:6px 0 0;font-size:12px;color:var(--muted)}
 .agent-question fieldset{border:0;padding:0;margin:0 0 8px}

@@ -1,4 +1,4 @@
-.groups-page .segment-panel{padding:20px;background:var(--surface);border:1px solid var(--line);border-radius:14px}
+.groups-page .segment-panel{padding:16px;background:var(--surface);border:1px solid var(--line);border-radius:var(--panel-radius)}
 .groups-page .group-fields,.groups-page .group-actions,.groups-page .group-member-columns{display:flex;flex-wrap:wrap;gap:12px;min-width:0}
 .groups-page .group-fields{align-items:flex-end;margin-bottom:24px}
 .groups-page .group-fields>label{flex:0 1 210px;max-width:100%;min-width:0}
@@ -7,7 +7,7 @@
 .groups-page .group-actions{align-items:center;gap:8px}
 .groups-page .group-member-columns{gap:24px;align-items:flex-start}
 .groups-page .group-member-section{flex:0 1 auto;width:max-content;min-width:0;max-width:100%}
-.groups-page .group-member-section h2{font-size:17px;margin:0 0 12px;overflow-wrap:anywhere}
+.groups-page .group-member-section h2{font-size:15px;margin:0 0 10px;overflow-wrap:anywhere}
 .groups-page #groups-kind{width:auto;max-width:100%}
 .groups-page #groups-list,.groups-page #groups-members{display:grid;gap:8px;margin:12px 0}
 .groups-page #groups-members{max-height:260px;overflow:auto}

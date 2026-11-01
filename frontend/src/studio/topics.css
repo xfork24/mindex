@@ -1,5 +1,5 @@
 /* 选题挖掘页：顶部档案条、左侧选题列表、右侧卡片详情与折叠分区。复用 studio.css 的 .workspace / .job-panel / .job-item。 */
-.topics-bar{display:flex;flex-wrap:wrap;align-items:end;gap:12px 16px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 18px;margin:0 0 18px}
+.topics-bar{display:flex;flex-wrap:wrap;align-items:end;gap:12px 16px;background:var(--surface);border:1px solid var(--line);border-radius:var(--panel-radius);padding:12px 16px;margin:0 0 18px}
 .topics-profile-field{min-width:240px;flex:0 1 320px}
 .topics-profile-field select{width:100%}
 .topics-bar-actions{display:flex;gap:8px;flex-wrap:wrap}
@@ -18,7 +18,7 @@
 #pf-error{margin:8px 0}
 .danger{color:var(--danger-text)}
 /* 折叠分区：数据源、候选条目、素材采集清单 */
-.topics-section{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:12px 18px;margin:0 0 14px}
+.topics-section{background:var(--surface);border:1px solid var(--line);border-radius:var(--panel-radius);padding:10px 16px;margin:0 0 14px}
 .topics-section>summary{display:flex;align-items:baseline;gap:12px;font-size:14px;font-weight:550;color:var(--control-text);padding:4px 0}
 .topics-section>summary .muted{font-size:12px;font-weight:400}
 .topics-section-hint{font-size:12px;line-height:1.7;margin:6px 0 10px}
@@ -34,7 +34,7 @@
 .source-form{border-top:1px dashed var(--line);padding-top:10px}
 .source-form-title{font-size:13px;margin:4px 0 0;color:var(--accent-soft)}
 .source-form .form-grid{margin:10px 0}
-.source-enabled{align-self:end;min-height:32px}
+.source-enabled{align-self:end;min-height:var(--control-size)}
 .source-fields{display:flex;flex-direction:column;gap:10px}
 .source-fields .form-field{margin:0}
 .source-fields input,.source-fields select,.source-fields textarea{width:100%}
@@ -52,7 +52,7 @@
 .topics-profile-field{flex:1 1 100%}
 }
 /* 挖掘任务条 */
-.topics-runs{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;background:var(--surface-2);border:1px solid var(--line);border-radius:14px;padding:12px 18px;margin:0 0 18px}
+.topics-runs{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--panel-radius);padding:12px 16px;margin:0 0 18px}
 .topics-runs .submit{margin-left:0}
 .run-progress{flex:1 1 280px;display:flex;flex-direction:column;gap:6px;min-width:0}
 .run-status{font-size:13px;color:var(--control-text);line-height:1.6;overflow-wrap:anywhere}
@@ -67,7 +67,7 @@
 .topic-score-badge{flex:0 0 auto;min-width:34px;text-align:center;font-size:12px;font-weight:600;color:var(--on-accent);background:var(--green);border-radius:999px;padding:1px 6px}
 .topic-item .job-sub{display:flex;gap:8px;flex-wrap:wrap}
 /* 卡片详情 */
-.topic-title-row h2{font-size:19px;letter-spacing:-.3px;overflow-wrap:anywhere}
+.topic-title-row h2{font-size:18px;letter-spacing:-.3px;overflow-wrap:anywhere}
 .topic-total{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
 .topic-angle{font-size:14px;line-height:1.8;margin:0 0 4px;color:var(--text)}
 .topic-reason{font-size:12px;line-height:1.7;margin:0 0 12px}
@@ -116,7 +116,7 @@
 .calendar-import{border-top:1px dashed var(--line);margin-top:12px;padding-top:10px}
 .calendar-row{display:flex;flex-wrap:wrap;align-items:end;gap:10px 14px}
 .calendar-row label{min-width:160px}
-.calendar-row .check{min-width:0;min-height:32px}
+.calendar-row .check{min-width:0;min-height:var(--control-size)}
 .schedule-status{flex:1 1 100%;margin:0;font-size:12px;line-height:1.7}
 
 /* Data-source fields and action rows use the same wrapping logic as delivery settings. */

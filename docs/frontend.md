@@ -34,12 +34,17 @@
 
 `shared/agent-panel.js` 被九个页面（五个主页面与选题/模板/风格/曲库子页面）引入：Markdown 经 `agent-markdown.js` + 仓库内固定版本的 `marked.umd.js`/`purify.min.js` 渲染（版本与许可证见[第三方组件声明](third-party-notices.md)），支持附件、媒体网格与页面定位（`window.MindexAgentFocus`），机制见[智能助手](agent.md)。
 
+## 主题系统（浅色/深色）
+
+颜色全部收敛为 `shared/style.css` `:root` 里的主题 token（表面/线条/文字/品牌/状态/遮罩），浅色是默认值，`[data-theme=dark]` 覆盖为深色值；改 token 须同步两处。`shared/theme.js` 在 head 内同步加载（防闪烁）：三态 **跟随系统 ◐ / 浅色 ☀ / 深色 ☾** 循环切换，偏好持久化在 `localStorage['mindex.theme']`（缺省 auto，由 `prefers-color-scheme` 解析并监听系统变化）；aria-label 双语随 `mindex:languagechange` 联动。切换按钮位于顶栏右侧、语言切换左侧（login 页只加载脚本不加按钮）。媒体叠层色（视频底、缩略图角标、选中工具的青色系）与 logo 点、阴影保留字面量，不参与主题。回归：`tests/test_theme_ui.py`；`ui_layout_browser.cjs` 末尾有 dark-* 审计组。
+
 ## UI 约定（控件尺寸与布局）
 
 全站控件尺寸与布局统一（`shared/control-layout.js` + 共享样式）：
 
-- 控件高度三档：**普通控件 32px，主操作 40px，紧凑操作 28px**；人物多选默认宽 260px，素材范围 320px/260px。
+- 控件高度：**普通控件 28px（`--control-size`），主操作 40px（`.submit` 等）**；面板/卡片圆角两级 `--panel-radius:10px`/`--card-radius:8px`，控件圆角 6px；dialog 宽度两级 `--dialog-width-m:720px`/`--dialog-width-l:900px`。
+- 页面头为紧凑单行（`.intro/.studio-intro/.admin-intro`：18px 标题 + 单行简介，基线对齐；类名是 `feedback.js` 与回归测试的锚点，勿改名）。素材管理页头右端为主操作按钮。
+- 顶栏右侧动作组统一为 **刷新 + 主题切换 + 语言切换**；二级标签（`.studio-tabs`/`.tab`/`.kind-tabs`/`.clone-mode`）统一 34px/13px 规格，规范定义在 style.css。
+- 内容区无最大宽度上限：窗口拉大时网格（`auto-fit/minmax`）自动增列，表单控件按内容宽度经 `control-layout.js` 横排铺开；布局审计覆盖 320→2560px。
 - 多行输入（textarea）双向可调整宽高，最大宽度受容器限制。
-- 页头刷新按钮靠左（创作与设置页左边距为 0）；素材页刷新保持原有刷新逻辑。
-- 响应式支持 1440→320px：窄屏单列，横向内容（表格、时间轴、分镜条）内部滚动。
 - 布局正确性由全页面布局回归保障（复现方法见[测试约定](testing.md#全页面布局回归复现方法)）。

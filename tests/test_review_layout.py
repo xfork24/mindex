@@ -22,7 +22,7 @@ def test_both_review_exports_are_portable(config, video_file, tmp_path):
     for page in (label_path, run / "film" / "review.html"):
         html = page.read_text()
         assert 'name="viewport"' in html
-        assert "--control-size:32px" in html
+        assert "--control-size:28px" in html
         assert "resize:both" in html
         assert "100dvh" in html
         assert "__STYLE__" not in html

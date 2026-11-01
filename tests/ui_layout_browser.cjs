@@ -186,6 +186,12 @@ async function boundedResize(selector,dx,dy){
  await page.route('**/api/settings/voices/catalog*',route=>route.fulfill({status:503,json:{detail:'工程目录获取失败'}}));await page.locator('#roles .role-row').nth(4).locator('.new-profile-card').click();await page.locator('#pf-voice').waitFor();await audit('settings-manual-voice-fallback');await close('#profile-close');
  await goto('/persons');await page.locator('[data-pane=processing]').click();await page.locator('#review-source').selectOption(fixture.source_id);
  for(const status of ['accepted','rejected']){await page.locator('#review-status').selectOption(status);await page.waitForFunction(()=>document.querySelector('#evidence-list').children.length>0);await audit('persons-empty-'+status);}
+ // Dark theme spot checks: explicit dark tokens must not introduce overflow or control regressions.
+ await page.evaluate(()=>localStorage.setItem('mindex.theme','dark'));
+ await goto('/');await page.locator('#query').waitFor();await audit('dark-search',['zh']);
+ await goto('/settings');await page.locator('#roles .role-row-head').last().waitFor();await audit('dark-settings',['zh']);
+ await goto('/studio');await page.locator('.studio-tabs').first().waitFor();await audit('dark-studio',['zh']);
+ await page.evaluate(()=>localStorage.removeItem('mindex.theme'));
  fs.writeFileSync(path.join(out,'coverage.json'),JSON.stringify({records,problems,errors}));
  assert.deepEqual(errors,[],'browser script errors');assert.deepEqual(problems,[],'layout violations');
  console.log(`PASS: ${records.length} viewport/state/language cases, ${records.reduce((n,r)=>n+r.controlCount,0)} measured controls.`);
