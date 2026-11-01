@@ -55,7 +55,7 @@ else  # MSYS2 UCRT64：meson/ninja 来自 pacman（CI 经 msys2/setup-msys2 安�
   # 显式把 UCRT64 工具链放进 PATH：msys2_shell.cmd 启动的 shell 未必带 /ucrt64/bin
   export PATH="/ucrt64/bin:${PATH}"
   for tool in gcc make nasm pkgconf meson ninja; do
-    command -v "$tool" >/dev/null || { echo "缺少构建工具：$tool（pacman -S make mingw-w64-ucrt-x86_64-toolchain mingw-w64-ucrt-x86_64-nasm mingw-w64-ucrt-x86_64-pkgconf mingw-w64-ucrt-x86_64-meson mingw-w64-ucrt-x86_64-ninja）" >&2; exit 1; }
+    command -v "$tool" >/dev/null || { echo "缺少构建工具：$tool（pacman -S make mingw-w64-ucrt-x86_64-toolchain mingw-w64-ucrt-x86_64-nasm mingw-w64-ucrt-x86_64-pkgconf mingw-w64-ucrt-x86_64-meson mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-zlib mingw-w64-ucrt-x86_64-bzip2）" >&2; exit 1; }
   done
 fi
 
@@ -201,8 +201,10 @@ else
   # 静态链接 MinGW 运行时（-static 已隐含 libgcc/libwinpthread 静态；不能加 -static-libwinpthread，
   # UCRT64 的 gcc 16 不识别该旗标、configure 编译器测试会直接失败），不携带任何 MinGW DLL。
   # 末尾的 objdump DLL 白名单校验兜底：若运行时未静态彻底，构建在此失败。
+  # zlib/bzlib 与 macOS/Linux 分支一致（UCRT64 的 mingw zlib/bzip2 包，-static 下链 libz.a/libbz2.a）：
+  # --disable-autodetect 下没有 zlib 则原生 PNG 解码器被裁掉，水印图（PNG/JPG）无法解码。
   (cd "${WORK}/ffmpeg-9.0.2" && ./configure --prefix="${PREFIX}" --arch=x86_64 --cc=gcc --cxx=g++ \
-     ${COMMON_CONFIGURE} --enable-w32threads --disable-iconv \
+     ${COMMON_CONFIGURE} --enable-w32threads --disable-iconv --enable-zlib --enable-bzlib \
      --extra-cflags="${CFLAGS} -I${PREFIX}/include" --extra-ldflags="-static -static-libgcc -L${PREFIX}/lib" \
      >"${WORK}/ffmpeg-configure.log" 2>&1 && make -j"${JOBS}" >"${WORK}/ffmpeg-build.log" 2>&1 \
      && make install >>"${WORK}/ffmpeg-build.log" 2>&1) || { tail -n 40 "${WORK}/ffmpeg-configure.log" "${WORK}/ffmpeg-build.log" >&2 || true; exit 1; }
@@ -239,9 +241,13 @@ elif [[ "${PLATFORM}" == "linux" ]]; then
   fi
 else
   # 只允许 Windows 系统 DLL；出现 libgcc/libwinpthread/libstdc++ 等 MinGW 运行时即静态链接不彻底。
-  # DWrite.dll 是 libass DirectWrite 字体后端（系统组件，Windows 7+ 自带）的必然依赖。
+  # DWrite.dll 是 libass DirectWrite 字体后端（系统组件，Windows 7+ 自带）的必然依赖；
+  # GDI32/USER32/SHELL32/OLEAUT32/SHLWAPI 为图形与 COM 基础组件，AVICAP32 来自 avdevice 的
+  # vfwcap（Video for Windows 采集，System32 自带）；UCRT64 链接的 C 运行时以 api-ms-win-crt-*
+  # API 集形式出现（即 ucrtbase 的 API set），注意正则里要按前缀匹配（api-ms-win-.*），
+  # 整词匹配会把这些系统组件全部误判为非系统 DLL。
   dlls="$(objdump -p "${OUT}/bin/ffmpeg.exe" "${OUT}/bin/ffprobe.exe" | grep "DLL Name:")"
-  if grep -viE 'DLL Name: (KERNEL32|USER32|msvcrt|ucrtbase|api-ms-win-|ws2_32|advapi32|bcrypt|ole32|shell32|SHCore|secur32|crypt32|DWrite)\.dll' <<<"${dlls}" | grep -q .; then
+  if grep -viE 'DLL Name: (KERNEL32|USER32|msvcrt|ucrtbase|api-ms-win-.*|ws2_32|advapi32|bcrypt|ole32|oleaut32|shell32|shlwapi|gdi32|avicap32|SHCore|secur32|crypt32|DWrite)\.dll' <<<"${dlls}" | grep -q .; then
     echo "${dlls}" >&2
     echo "ffmpeg.exe 依赖了非系统 DLL（MinGW 运行时未静态链接）" >&2
     exit 1
