@@ -77,7 +77,7 @@ AI 动画分镜在无头 Chromium（Playwright 的 headless shell）里逐帧录
 scripts/build-desktop-mac.sh
 # 产物：desktop/dist/Mindex-<版本>-arm64.{dmg,zip}、mindex-desktop-ffmpeg-sources-<版本>.tar
 
-# Linux（x64；需要 gcc/g++、make、pkg-config、nasm、uv、node 22+）
+# Linux（x64；需要 gcc/g++、make、pkg-config、nasm、libbz2-dev、zlib1g-dev、uv、node 22+）
 scripts/build-desktop-linux.sh
 # 产物：desktop/dist/Mindex-<版本>-x64.{AppImage,deb}、mindex-desktop-ffmpeg-sources-<版本>.tar
 

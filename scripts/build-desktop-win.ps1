@@ -70,7 +70,7 @@ if ($RebuildFfmpeg -or -not (Test-Path $ffmpegBin)) {
     Push-Location $Root
     try {
         # -here：以当前目录（仓库根）为工作目录；脚本内部按自身路径定位 ROOT。
-        & $MsysShell -ucrt64 -defterm -no-start -here -use-full-path -c "bash scripts/build-desktop-ffmpeg.sh"
+        & $MsysShell -ucrt64 -defterm -no-start -here -c "bash scripts/build-desktop-ffmpeg.sh"
         if ($LASTEXITCODE -ne 0) { throw "build-desktop-ffmpeg.sh 退出码 $LASTEXITCODE" }
     } finally {
         Pop-Location

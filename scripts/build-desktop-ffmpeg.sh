@@ -50,6 +50,8 @@ elif [[ "${PLATFORM}" == "linux" ]]; then
     command -v "$tool" >/dev/null || { echo "缺少构建工具：$tool" >&2; exit 1; }
   done
 else  # MSYS2 UCRT64：meson/ninja 来自 pacman（CI 经 msys2/setup-msys2 安装），不用 Windows 原生 uv。
+  # 显式把 UCRT64 工具链放进 PATH：msys2_shell.cmd 启动的 shell 未必带 /ucrt64/bin
+  export PATH="/ucrt64/bin:${PATH}"
   for tool in gcc make nasm pkgconf meson ninja; do
     command -v "$tool" >/dev/null || { echo "缺少构建工具：$tool（pacman -S mingw-w64-ucrt-x86_64-toolchain mingw-w64-ucrt-x86_64-nasm mingw-w64-ucrt-x86_64-pkgconf mingw-w64-ucrt-x86_64-meson mingw-w64-ucrt-x86_64-ninja）" >&2; exit 1; }
   done
@@ -119,7 +121,7 @@ elif [[ "${PLATFORM}" == "linux" ]]; then
   export CFLAGS="-O2 -fPIC"
   export CXXFLAGS="${CFLAGS}"
   export LDFLAGS=""
-else  # MSYS2：PATH 由 UCRT64 环境提供（含 meson 的 python），隔离只靠 PKG_CONFIG_LIBDIR。
+else  # MSYS2：PATH 已在上面加上 /ucrt64/bin（含 meson 的 python），隔离只靠 PKG_CONFIG_LIBDIR。
   export CFLAGS="-O2"
   export CXXFLAGS="${CFLAGS}"
   export LDFLAGS=""

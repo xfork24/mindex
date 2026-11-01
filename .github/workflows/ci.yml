@@ -178,7 +178,7 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           if [ "$RUNNER_OS" = "macOS" ]; then brew install pkg-config; else
-            sudo apt-get update && sudo apt-get install -y --no-install-recommends build-essential pkg-config nasm
+            sudo apt-get update && sudo apt-get install -y --no-install-recommends build-essential pkg-config nasm libbz2-dev zlib1g-dev
           fi
 
       - name: Electron 运行依赖（Linux 冒烟用）
