@@ -1,5 +1,5 @@
 .venv*/
-/models/
+.kiro/
 __pycache__/
 *.pyc
 .pytest_cache/
@@ -21,8 +21,9 @@ clean.js
 
 /node_modules/
 /build/
-models
-logs/
+/models/
+/tools/
+/logs/
 
 # 本机工具二进制（不入库）
 /bin/
