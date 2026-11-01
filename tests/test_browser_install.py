@@ -33,9 +33,11 @@ def test_install_success_reports_progress_and_installed(monkeypatch, tmp_path):
     installer.wait(30)
     state = installer.state()
     assert state["installed"] is True and state["task"]["status"] == "complete" and state["task"]["error"] is None
-    # 探针：同一替身以 subprocess.run 读法对照，区分「替身 stdout 丢失」与「Popen 逐行读取丢失」。
-    probe = subprocess.run([*SUCCESS, "9999"], capture_output=True, timeout=60, check=False)
-    assert state["task"]["log"].splitlines() == ["100%", "done"], (state["task"], probe.stdout, probe.stderr)  # \r 进度只保留最后一段
+    # 探针：同一替身以 subprocess.run 读法对照（独立 revision 避免目录已存在），区分
+    # 「替身 stdout 丢失」（trampoline/句柄传递问题）与「Popen 逐行读取丢失」。
+    probe = subprocess.run([*SUCCESS, "9998"], capture_output=True, timeout=60, check=False)
+    detail = f"task.log={state['task']['log']!r} probe.returncode={probe.returncode} probe.stdout={probe.stdout!r} probe.stderr={probe.stderr[-400:]!r}"
+    assert state["task"]["log"].splitlines() == ["100%", "done"], detail  # \r 进度只保留最后一段
     assert state["task"]["finished_at"]
 
 
