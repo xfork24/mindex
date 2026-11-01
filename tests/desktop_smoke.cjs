@@ -182,7 +182,8 @@ async function waitFor(predicate, timeout, message) {
     await win.waitForURL(APP, { timeout: 180000 });
     assert.equal(new URL(win.url()).port, String(state.port));
     const body = await win.evaluate(async () => (await fetch("/api/health")).json());
-    assert.equal(body.data_dir, custom);
+    // 同上：Windows 上后端会把短路径展开为长路径，比较目录名而非整条路径。
+    assert.equal(path.basename(body.data_dir), "custom-data");
     assert.ok(fs.existsSync(path.join(custom, "metadata.sqlite3")));
     sidecarPid = body.pid;
   } finally {
