@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import math
+import os
 import re
 import wave
 from collections.abc import Callable
@@ -26,7 +27,12 @@ def has_subtitles_filter() -> bool:
 
 
 def _escape_filter_path(path: Path) -> str:
-    return str(path).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+    escaped = str(path).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+    # Windows 盘符的冒号即使转义（C\:），滤镜图解析器仍会在 C: 处截断文件名（avformat_open_input 'C'）；
+    # 单引号包裹后转义形式才生效（实测 ffmpeg 9.0.2）。POSIX 保持原形式不变。
+    if os.name == "nt":
+        return f"'{escaped}'"
+    return escaped
 
 
 # 竖屏字幕抬高到画面下方约 1/8 处，避开短视频平台底部的按钮与文案区（单位为 libass PlayResY=288）。

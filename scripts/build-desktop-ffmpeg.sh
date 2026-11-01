@@ -15,7 +15,9 @@
 #       （gcc/make/nasm/pkgconf/meson/ninja，经 CI 的 msys2/setup-msys2 或 pacman 安装）。
 set -euo pipefail
 
-ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+# pwd -P：走物理路径。MSYS2 里 bash 可能继承 Windows 形式的字面量 PWD（D:/...），逻辑 pwd 会
+# 保留该形式，GNU tar 随即把 "D:" 当远程主机（host:path 语法）导致解包失败；物理 pwd 恒为 POSIX 形式。
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "${ROOT}"  # 无论从哪个目录调用，后续步骤一律以项目根为工作目录
 OUT="${ROOT}/desktop/build/ffmpeg"
 SOURCES="${OUT}/sources"
@@ -53,7 +55,7 @@ else  # MSYS2 UCRT64：meson/ninja 来自 pacman（CI 经 msys2/setup-msys2 安�
   # 显式把 UCRT64 工具链放进 PATH：msys2_shell.cmd 启动的 shell 未必带 /ucrt64/bin
   export PATH="/ucrt64/bin:${PATH}"
   for tool in gcc make nasm pkgconf meson ninja; do
-    command -v "$tool" >/dev/null || { echo "缺少构建工具：$tool（pacman -S mingw-w64-ucrt-x86_64-toolchain mingw-w64-ucrt-x86_64-nasm mingw-w64-ucrt-x86_64-pkgconf mingw-w64-ucrt-x86_64-meson mingw-w64-ucrt-x86_64-ninja）" >&2; exit 1; }
+    command -v "$tool" >/dev/null || { echo "缺少构建工具：$tool（pacman -S make mingw-w64-ucrt-x86_64-toolchain mingw-w64-ucrt-x86_64-nasm mingw-w64-ucrt-x86_64-pkgconf mingw-w64-ucrt-x86_64-meson mingw-w64-ucrt-x86_64-ninja）" >&2; exit 1; }
   done
 fi
 
@@ -196,10 +198,12 @@ elif [[ "${PLATFORM}" == "linux" ]]; then
      >"${WORK}/ffmpeg-configure.log" 2>&1 && make -j"${JOBS}" >"${WORK}/ffmpeg-build.log" 2>&1 \
      && make install >>"${WORK}/ffmpeg-build.log" 2>&1) || { tail -n 40 "${WORK}/ffmpeg-configure.log" "${WORK}/ffmpeg-build.log" >&2 || true; exit 1; }
 else
-  # 静态链接 MinGW 运行时（-static-libgcc/-static-libwinpthread），不携带任何 MinGW DLL。
+  # 静态链接 MinGW 运行时（-static 已隐含 libgcc/libwinpthread 静态；不能加 -static-libwinpthread，
+  # UCRT64 的 gcc 16 不识别该旗标、configure 编译器测试会直接失败），不携带任何 MinGW DLL。
+  # 末尾的 objdump DLL 白名单校验兜底：若运行时未静态彻底，构建在此失败。
   (cd "${WORK}/ffmpeg-9.0.2" && ./configure --prefix="${PREFIX}" --arch=x86_64 --cc=gcc --cxx=g++ \
      ${COMMON_CONFIGURE} --enable-w32threads --disable-iconv \
-     --extra-cflags="${CFLAGS} -I${PREFIX}/include" --extra-ldflags="-static -static-libgcc -static-libwinpthread -L${PREFIX}/lib" \
+     --extra-cflags="${CFLAGS} -I${PREFIX}/include" --extra-ldflags="-static -static-libgcc -L${PREFIX}/lib" \
      >"${WORK}/ffmpeg-configure.log" 2>&1 && make -j"${JOBS}" >"${WORK}/ffmpeg-build.log" 2>&1 \
      && make install >>"${WORK}/ffmpeg-build.log" 2>&1) || { tail -n 40 "${WORK}/ffmpeg-configure.log" "${WORK}/ffmpeg-build.log" >&2 || true; exit 1; }
 fi

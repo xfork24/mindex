@@ -168,6 +168,7 @@ jobs:
           msystem: UCRT64
           update: false
           install: >-
+            make
             mingw-w64-ucrt-x86_64-toolchain
             mingw-w64-ucrt-x86_64-nasm
             mingw-w64-ucrt-x86_64-pkgconf
@@ -225,8 +226,12 @@ jobs:
             env PATH="/usr/bin:/bin:$(dirname "$(command -v node)")" \
               MINDEX_SMOKE_APP="$PWD/desktop/dist/linux-unpacked/$executable" xvfb-run -a node tests/desktop_smoke.cjs
           else
-            export PATH="C:\Windows\System32;C:\Windows;$(dirname "$(command -v node)")"
-            MINDEX_SMOKE_APP="$(cygpath -w "$PWD/desktop/dist/win-unpacked/Mindex.exe")" node tests/desktop_smoke.cjs
+            # Windows：Git Bash 只按 ':' 分隔 PATH（';' 分隔的整串会被当成一个目录名，
+            # node/powershell 全部找不到）。改用 POSIX 形式的受限 PATH 交给 env——
+            # env 按 ':' 找到 node.exe，MSYS 再为原生子进程转成 Windows 形式。
+            # 保留 WindowsPowerShell\v1.0：外壳查进程父子关系（reapStale）要调 powershell。
+            env PATH="$(cygpath -u -p "$SYSTEMROOT\\System32;$SYSTEMROOT;$SYSTEMROOT\\System32\\WindowsPowerShell\\v1.0"):$(dirname "$(cygpath -u "$(command -v node)")")" \
+              MINDEX_SMOKE_APP="$(cygpath -w "$PWD/desktop/dist/win-unpacked/Mindex.exe")" node tests/desktop_smoke.cjs
           fi
 
       - uses: actions/upload-artifact@v4
