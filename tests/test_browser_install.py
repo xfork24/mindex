@@ -34,7 +34,7 @@ def test_install_success_reports_progress_and_installed(monkeypatch, tmp_path):
     state = installer.state()
     assert state["installed"] is True and state["task"]["status"] == "complete" and state["task"]["error"] is None
     # 探针：同一替身以 subprocess.run 读法对照，区分「替身 stdout 丢失」与「Popen 逐行读取丢失」。
-    probe = subprocess.run([*SUCCESS, "9999"], capture_output=True, timeout=60)
+    probe = subprocess.run([*SUCCESS, "9999"], capture_output=True, timeout=60, check=False)
     assert state["task"]["log"].splitlines() == ["100%", "done"], (state["task"], probe.stdout, probe.stderr)  # \r 进度只保留最后一段
     assert state["task"]["finished_at"]
 
