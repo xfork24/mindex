@@ -163,6 +163,7 @@ jobs:
 
       - name: MSYS2（Windows 随包 ffmpeg 构建工具链）
         if: runner.os == 'Windows'
+        id: msys2
         uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
@@ -205,6 +206,10 @@ jobs:
 
       - name: 构建安装包
         shell: bash
+        env:
+          # setup-msys2 现装到 runner 工具缓存（不再是预装的 C:\msys64）——把实际安装位置
+          # 告诉 build-desktop-win.ps1，否则它调用裸的预装实例、ucrt64 工具链全部缺失。
+          MINDEX_MSYS2: ${{ steps.msys2.outputs.msys2-location }}
         run: |
           uv sync --extra dev
           if [ "$RUNNER_OS" = "macOS" ]; then scripts/build-desktop-mac.sh
