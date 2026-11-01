@@ -56,6 +56,19 @@ def step(name: str):
     print(f"· {name}", flush=True)
 
 
+def _force_utf8_streams():
+    """控制台代码页可能是 cp1252/cp936，中文输出会 UnicodeEncodeError；强制 UTF-8 且不因个别
+    不可编码字符失败（Windows 上 Python 缺省按代码页编码 stdout）。"""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):  # 非标准流（被测试捕获等）
+            pass
+
+
+_force_utf8_streams()
+
+
 def package_data(internal: Path) -> list[str]:
     """pyproject 的 package-data 在冻结目录中缺失的文件。"""
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["tool"]["setuptools"]
@@ -115,7 +128,8 @@ def main() -> int:
         config = work / "config.yaml"
         shutil.copy(ROOT / "desktop" / "config.template.yaml", config)
         run = lambda *argv, **kw: subprocess.run([str(backend), *argv], env=env, cwd=work, capture_output=True,
-                                                 text=True, timeout=kw.pop("timeout", 300), check=False, **kw)
+                                                 text=True, encoding="utf-8", errors="replace",
+                                                 timeout=kw.pop("timeout", 300), check=False, **kw)
 
         if args.animation:
             step("安装 Chromium headless shell（-m playwright）")
@@ -217,7 +231,7 @@ def main() -> int:
             assert [item["id"] for item in presets["items"]] == ["bilibili", "douyin", "youtube"], presets
             cli = subprocess.run([str(backend), "--config", str(config), "studio", "--url", base, "jobs", "--json"],
                                  env={**env, "MINDEX_WEB_TOKEN": TOKEN}, cwd=work, capture_output=True, text=True,
-                                 timeout=120, check=False)
+                                 encoding="utf-8", errors="replace", timeout=120, check=False)
             assert cli.returncode == 0 and json.loads(cli.stdout) == [], (cli.stdout, cli.stderr)
             status = json.loads(get(f"{base}/api/status?summary=true", timeout=30)[1])
             assert len(status["sources"]) == 1, status.get("sources")

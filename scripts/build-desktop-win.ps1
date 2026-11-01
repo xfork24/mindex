@@ -85,6 +85,9 @@ if (-not $SkipSidecar -or -not (Test-Path $backendExe)) {
 }
 
 # 冻结后端 + 随包 ffmpeg + 随包字体，在隔离 PATH 下冒烟（含中文字幕烧录）。
+# PYTHONUTF8=1：Windows 上 Python 缺省按控制台代码页编码 stdout，CI runner 的代码页是 cp1252，
+# 脚本与冻结后端的中文输出会 UnicodeEncodeError（env 传给整棵子进程树）。
+$env:PYTHONUTF8 = "1"
 uv run --project $Root python (Join-Path $Root "scripts\check-desktop-sidecar.py") --isolated-path `
     --ffmpeg-dir (Join-Path $Build "ffmpeg\bin") --font (Join-Path $Build "fonts\NotoSansCJKsc-Regular.otf")
 if ($LASTEXITCODE -ne 0) { throw "check-desktop-sidecar.py 退出码 $LASTEXITCODE" }
