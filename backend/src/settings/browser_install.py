@@ -56,6 +56,16 @@ def installed() -> bool:
     return (browsers_path() / f"chromium_headless_shell-{revision}" / "INSTALLATION_COMPLETE").is_file()
 
 
+def progress_line(raw: bytes) -> str:
+    """把子进程输出的一行解析成进度文本（空串表示无内容）。
+
+    下载进度用 ``\\r`` 刷新同一行，只保留最后一段。Windows 的文本模式会把 ``\\n`` 转成
+    ``\\r\\n``，因此要先去掉尾部的 ``\\r\\n`` 再按 ``\\r`` 切分——否则尾随的 ``\\r`` 会切出
+    空段，整行被丢弃（macOS/Linux 的管道输出无此转换）。
+    """
+    return raw.decode("utf-8", errors="replace").rstrip("\r\n").split("\r")[-1].strip()
+
+
 class BrowserInstaller:
     def __init__(self, command: list[str] | None = None):
         self.command = command  # 测试可替换为其他命令
@@ -102,28 +112,15 @@ class BrowserInstaller:
         env = {**os.environ, "PLAYWRIGHT_BROWSERS_PATH": str(browsers_path())}
         try:
             browsers_path().mkdir(parents=True, exist_ok=True)
-            # stdout/stderr 分开管道：Windows 上把 stderr 合并进 stdout 管道（STDERR=STDOUT）会
-            # 使子进程输出整条丢失（实测 uv venv 的 python 组合）；stderr 由伴生线程汇入日志。
             # 以字节读取：文本模式会把进度刷新用的 \r 当成换行。
-            process = subprocess.Popen(command, env=env, stdin=subprocess.DEVNULL,
-                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-
-            def drain_stderr() -> None:
-                for raw in process.stderr or ():
-                    text = raw.decode("utf-8", errors="replace").strip()
-                    if text:
-                        with self._lock:
-                            self._log.append(text)
-
-            worker = threading.Thread(target=drain_stderr, daemon=True, name="animation-browser-install-err")
-            worker.start()
+            process = subprocess.Popen(command, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                       stderr=subprocess.STDOUT)
             for raw in process.stdout:
-                # 下载进度用 \r 刷新同一行：只保留最后一段。
-                text = raw.decode("utf-8", errors="replace").rstrip("\n").split("\r")[-1].strip()
+                # 下载进度用 \r 刷新同一行：只保留最后一段（Windows 的 \r\n 换行见 progress_line）。
+                text = progress_line(raw)
                 if text:
                     with self._lock:
                         self._log.append(text)
-            worker.join(5)
             code = process.wait(INSTALL_TIMEOUT)
             with self._lock:
                 self.status = "complete" if code == 0 else "failed"

@@ -23,6 +23,22 @@ SUCCESS = [sys.executable, "-c",
            "print('done', flush=True)\n"]
 
 
+def test_progress_line_handles_windows_crlf_translation():
+    """Windows 文本模式把 \\n 转成 \\r\\n：解析要按 \\r 取最后一段，且不被尾部 \\r 吃掉。
+
+    （macOS/Linux 的管道输出无 \\r\\n 转换，原先的 rstrip("\\n") 恰好也能工作，
+    因此这个差异只会在 Windows 上暴露。）
+    """
+    from mindex.settings.browser_install import progress_line
+
+    assert progress_line(b"Downloading 10%\r 50%\r 100%\r\n") == "100%"  # Windows 的 \r\n
+    assert progress_line(b"Downloading 10%\r 50%\r 100%\n") == "100%"    # POSIX 的 \n
+    assert progress_line(b"done\r\n") == "done"
+    assert progress_line(b"done\n") == "done"
+    assert progress_line(b"\r\n") == ""
+    assert progress_line(b"") == ""
+
+
 def test_install_success_reports_progress_and_installed(monkeypatch, tmp_path):
     monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(tmp_path / "browsers"))
     monkeypatch.setattr(browser_install, "expected_revision", lambda: "9999")
