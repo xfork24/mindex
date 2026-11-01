@@ -16,7 +16,7 @@ const {chromium}=require(process.env.MINDEX_PLAYWRIGHT_MODULE || 'playwright');
  async function audit(name){
   for(const language of ['zh','en']){
    await page.evaluate(lang=>window.MindexI18n?.setLanguage(lang),language);
-   for(const width of [1440,1000,800,540,390,320]){
+   for(const width of [2560,1920,1440,1000,800,540,390,320]){
     await page.setViewportSize({width,height:1000});
     await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
     const result=await page.evaluate(()=>{

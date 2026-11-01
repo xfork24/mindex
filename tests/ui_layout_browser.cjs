@@ -14,7 +14,7 @@ const reviewURL=file=>reviewBase+'/'+path.relative(fs.realpathSync('/tmp'),file)
 const fixture = JSON.parse(fs.readFileSync(path.join(root, 'layout-fixture.json')));
 const out = process.env.MINDEX_LAYOUT_OUTPUT || 'artifacts/ui-layout/after';
 fs.mkdirSync(out, {recursive:true});
-const widths = [1440,1000,800,540,390,320];
+const widths = [2560,1920,1440,1000,800,540,390,320];
 const previous=process.env.MINDEX_LAYOUT_RESUME&&fs.existsSync(path.join(out,'coverage.json'))?JSON.parse(fs.readFileSync(path.join(out,'coverage.json'))):null;
 const records = previous?.records||[], problems = previous?.problems||[], errors = previous?.errors||[];
 let page, browser;
@@ -77,7 +77,7 @@ async function audit(group, languages=['zh','en'], screenshots=true) {
       });
       records.push({group,language:lang,width,...result});
       problems.push(...result.issues.map(issue=>({group,lang,width,issue})));
-      if(screenshots&&[1440,320].includes(width)&&lang===languages.at(-1))await page.screenshot({path:path.join(out,`${group}-${lang}-${width}.png`),fullPage:true});
+      if(screenshots&&[2560,1440,320].includes(width)&&lang===languages.at(-1))await page.screenshot({path:path.join(out,`${group}-${lang}-${width}.png`),fullPage:true});
     }
   }
   const modal=page.locator('dialog[open]');if(await modal.count()){
