@@ -28,7 +28,7 @@ def test_new_session_defaults_to_empty_and_round_trips(tmp_path):
     again = SessionStore(tmp_path).get(session["id"])  # 模拟服务重启
     assert again["loaded_domains"] == ["studio", "search"]
     assert again["grants"] == ["edit_shots"]
-    assert set(store.list()[0]) == {"id", "title", "status", "created_at", "updated_at"}
+    assert set(store.list()[0]) == {"id", "title", "status", "created_at", "updated_at", "runtime"}
 
 
 def test_old_schema_is_migrated_without_losing_rows(tmp_path):

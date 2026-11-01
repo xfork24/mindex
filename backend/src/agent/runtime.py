@@ -1,23 +1,4 @@
-"""智能助手运行时。
-
-``AgentRuntime`` 协议与 dsh SDK 方法一一对应，未来的 ``DshRuntime``（在工作线程里运行 dsh Python SDK，
-经 MCP 使用同一套 Mindex 工具）可以直接替换 ``BuiltinRuntime``，前端与工具不用改：
-
-==========================  ==============================================
-AgentRuntime                dsh SDK
-==========================  ==============================================
-create_or_resume            session/resume（未知 id 惰性创建）
-prompt                      session/prompt → {messageId}
-events                      session.event 通知（按 seq 续传）
-status                      session.status 通知（idle / running；Mindex 另有 waiting）
-answer_approval             approval/request 的响应 {outcome}
-answer_question             user-question/ask 的响应 {answers}
-cancel                      取消当前轮次（turn/end aborted）
-==========================  ==============================================
-
-``BuiltinRuntime`` 跑在 Web 进程的 asyncio 事件循环上：每个会话同一时间只有一个轮次；需要确认或提问时
-轮次挂起（status=waiting），收到答复后继续；构建与后台任务由 ``watcher`` 跟踪，结束时排队一轮 followup 总结。
-"""
+"""Shared session, tool execution and interaction support, plus the builtin model loop."""
 
 from __future__ import annotations
 
@@ -100,6 +81,21 @@ def size_label(size: int) -> str:
 
 
 class AgentRuntime(Protocol):
+    store: SessionStore
+    registry: ToolRegistry
+    attachments: Any
+    watcher: Any
+    feed: Any
+
+    async def start(self) -> None: ...
+    async def forget(self, session_id: str) -> None: ...
+    async def close(self) -> None: ...
+    def recover(self, session_id: str) -> None: ...
+    def pending(self, session_id: str) -> list[dict]: ...
+    async def wait_idle(self, session_id: str) -> None: ...
+    def loaded_domains(self, session_id: str) -> list[str]: ...
+    def load_domains(self, session_id: str, domains: list[str]) -> list[str]: ...
+    def _append(self, sid: str, kind: str, data, *, ignorable: bool = False) -> dict: ...
     async def create_or_resume(self, session_id: str | None = None, title: str = "") -> dict: ...
     async def prompt(self, session_id: str, content: list[dict], *, context: dict | None = None,
                      attachments: list[dict] | None = None) -> dict: ...
@@ -129,7 +125,7 @@ class _Session:
     subscribers: set[asyncio.Queue] = field(default_factory=set)
 
 
-class BuiltinRuntime:
+class RuntimeSupport:
     def __init__(
         self,
         store: SessionStore,
@@ -748,6 +744,10 @@ class BuiltinRuntime:
                     self.watcher.register(sid, target)
                 except ValueError:
                     log.warning("工具 %s 返回了无效的跟踪目标：%s", spec.name, target)
+
+
+class BuiltinRuntime(RuntimeSupport):
+    """Model loop implemented in the Web process."""
 
 
 def frame_sse(frame: dict) -> str:

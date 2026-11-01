@@ -513,6 +513,7 @@ async function loadSettings() {
     $('index-banner').append(node('div', error.message, 'index-banner-error'));
   });
   renderRoles(data);
+  loadAgentRuntime().catch((error) => notify(error.message, true));
   renderTuning(data);
   renderVoices(data, state.voiceCatalog);
   loadReleases().catch((error) => showRelease(MindexI18n.system(error.message), true));
@@ -1300,3 +1301,17 @@ if (typeof window !== 'undefined' && window.addEventListener) {
     return true;
   };
 }
+
+async function loadAgentRuntime() {
+  const data = await api('/api/settings/agent-runtime');
+  $('agent-runtime').value = data.runtime;
+  $('agent-runtime-status').textContent = data.dsh.ready ? 'dsh 依赖可用' : data.dsh.errors.join('；');
+}
+$('agent-runtime-form').addEventListener('submit', (event) => {
+  event.preventDefault();
+  run(async () => {
+    await api('/api/settings/agent-runtime', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({runtime: $('agent-runtime').value})});
+    await loadAgentRuntime();
+    notify('已保存，仅影响新会话');
+  });
+});

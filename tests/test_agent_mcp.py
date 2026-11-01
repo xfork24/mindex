@@ -386,3 +386,28 @@ def test_mcp_cli_rejects_unknown_domain(config, tmp_path):
     result = CliRunner().invoke(cli, ["--config", str(isolated), "--data-dir", str(config.data_dir),
                                       "mcp", "--domain", "studio", "--domain", "nope"])
     assert result.exit_code != 0 and "未知领域：nope" in result.output
+
+
+def test_real_http_client_initializes_lists_and_reads(config, monkeypatch):
+    import httpx
+    from mcp.client.streamable_http import streamablehttp_client
+    from test_agent_panel_ui import serve
+    monkeypatch.setenv('MINDEX_MCP_TOKEN', 'http-fixture-token')
+    config.agent.mcp.http_enabled = True
+    server, thread, url = serve(create_app(config))
+
+    async def exercise():
+        async with streamablehttp_client(url + '/mcp', headers={'Authorization': 'Bearer http-fixture-token'}) as streams:
+            async with ClientSession(streams[0], streams[1]) as session:
+                await session.initialize()
+                names = {t.name for t in (await session.list_tools()).tools}
+                assert 'list_local_services' in names
+                result = await session.call_tool('list_local_services', {})
+                assert not result.isError, result
+        async with httpx.AsyncClient() as http:
+            assert (await http.post(url + '/mcp', json={})).status_code == 401
+    try:
+        asyncio.run(exercise())
+    finally:
+        server.should_exit = True
+        thread.join(timeout=10)

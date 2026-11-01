@@ -22,6 +22,7 @@ dev = ["pytest>=8,<10", "ruff>=0.11", "mcp==1.30.0", "hypothesis==6.170.9", "av>
 person = ["supervision>=0.27,<0.28", "av>=14,<17"]
 # 智能助手的 MCP 导出（streamable-http /mcp 与 `mindex mcp` stdio）；未安装时其余功能不受影响。
 mcp = ["mcp==1.30.0"]
+dsh = ["deepseek-harness-sdk==0.2.1rc2", "deepseek-harness-runtime-bin==0.2.1rc2", "mcp==1.30.0"]
 # AI 动画分镜的沙箱录制（无头 Chromium 逐帧截图）；安装后还需 `uv run playwright install chromium`。
 animation = ["playwright==1.64.1"]
 

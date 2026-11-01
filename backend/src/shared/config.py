@@ -531,6 +531,7 @@ class AgentMcpConfig(StrictModel):
 
 
 class AgentConfig(StrictModel):
+    runtime: Literal["builtin", "dsh"] = "builtin"
     enabled: bool = True
     # 执行步数不限；模型输入滚动保留最近的操作步骤（每步含全部工具调用与结果）。
     context_window_steps: int = Field(default=256, ge=1, le=256)

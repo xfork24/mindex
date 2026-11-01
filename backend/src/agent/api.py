@@ -26,7 +26,7 @@ from starlette.datastructures import UploadFile as StarletteUpload
 
 from mindex.agent.attachments import AttachmentError, AttachmentStore
 from mindex.agent.loopback import MindexClient
-from mindex.agent.runtime import BuiltinRuntime, RequestNotFound, RuntimeBusy, frame_sse
+from mindex.agent.runtime import AgentRuntime, BuiltinRuntime, RequestNotFound, RuntimeBusy, frame_sse
 from mindex.agent.session_store import SessionNotFound, SessionStore
 from mindex.shared.config import StrictModel
 from mindex.shared.uploads import save_upload
@@ -74,7 +74,7 @@ class AnswersBody(StrictModel):
     answers: list[AnswerItem]
 
 
-def build_runtime(app, runtime_config, store, *, agent_llm=None, registry=None) -> BuiltinRuntime:
+def build_runtime(app, runtime_config, store, *, agent_llm=None, registry=None) -> AgentRuntime:
     from mindex.agent.llm.factory import make_agent_llm
     from mindex.agent.tools import build_registry
     from mindex.settings.runtime_settings import get_setting
@@ -106,7 +106,26 @@ def build_runtime(app, runtime_config, store, *, agent_llm=None, registry=None) 
 
     runtime.feed = ChangeFeed(store.root)
     runtime.attachments = AttachmentStore(store.root)
-    return runtime
+    from mindex.agent.dsh_runtime import DshRuntime
+    from mindex.agent.manager import RuntimeManager
+
+    dsh = DshRuntime(runtime.store, registry=runtime.registry, llm_factory=runtime.llm_factory,
+                     client_factory=client_factory, settings=runtime.settings, agent_profile=agent_profile)
+    dsh.feed, dsh.attachments, dsh.watcher = runtime.feed, runtime.attachments, runtime.watcher
+    manager = RuntimeManager(runtime, dsh, runtime.settings)
+    runtime.watcher.runtime = manager
+    from contextlib import asynccontextmanager
+    previous = app.router.lifespan_context
+
+    @asynccontextmanager
+    async def lifespan(application):
+        async with previous(application) as state:
+            try:
+                yield state
+            finally:
+                await manager.close()
+    app.router.lifespan_context = lifespan
+    return manager
 
 
 def attachment_caller(request: Request, mcp_token_env: str) -> dict:
@@ -134,7 +153,7 @@ def attachment_caller(request: Request, mcp_token_env: str) -> dict:
     return {"web": web, "mcp": mcp}
 
 
-def agent_router(runtime: BuiltinRuntime, runtime_config, *, injected: bool = False) -> APIRouter:
+def agent_router(runtime: AgentRuntime, runtime_config, *, injected: bool = False) -> APIRouter:
     router = APIRouter(prefix="/api/agent", tags=["智能助手"])
     store = runtime.store
     attachments: AttachmentStore = runtime.attachments
@@ -186,6 +205,7 @@ def agent_router(runtime: BuiltinRuntime, runtime_config, *, injected: bool = Fa
         session_or_404(sid)
         await runtime.cancel(sid)
         runtime.watcher.forget(sid)
+        await runtime.forget(sid)
         store.delete(sid)
         attachments.delete_session(sid)
 

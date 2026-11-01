@@ -663,6 +663,9 @@ def apply_overrides(config: Config, store: Store) -> Config:
     """按激活档案与业务键合成生效配置；返回新对象，无覆盖时返回原对象。"""
     if not config.runtime_overrides:
         return config
+    selected_runtime = get_setting(store, "agent.runtime")
+    if selected_runtime is not None:
+        config = config.model_copy(update={"agent": config.agent.model_copy(update={"runtime": selected_runtime})})
     active = {}
     for role in ROLES:
         profile = _active_profile(store, role)

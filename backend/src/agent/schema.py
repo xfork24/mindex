@@ -54,7 +54,13 @@ def _v2(db) -> None:
     db.execute("CREATE INDEX IF NOT EXISTS agent_events_type ON agent_events(session_id, type, seq)")
 
 
-STEPS = (_v1, _v2)
+def _v3(db) -> None:
+    db.execute("ALTER TABLE agent_sessions ADD COLUMN runtime TEXT NOT NULL DEFAULT 'builtin'")
+    db.execute("ALTER TABLE agent_events ADD COLUMN upstream_seq INTEGER")
+    db.execute("CREATE UNIQUE INDEX agent_upstream ON agent_events(session_id, upstream_seq)")
+
+
+STEPS = (_v1, _v2, _v3)
 
 
 def initialize(database) -> int:

@@ -529,7 +529,7 @@
         state.streams.delete(key);
         break;
       }
-      case 'tool/call': toolCall(data); break;
+      case 'tool/call': toolCall({...data, name: data.name.replace(/^mcp__mindex__/, '')}); break;
       case 'tool/result': toolResult(data); break;
       case 'plugin:mindex/approval-asked': approvalCard(data); break;
       case 'plugin:mindex/approval-decided': approvalDecided(data); break;

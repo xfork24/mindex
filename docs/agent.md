@@ -554,17 +554,35 @@ args = ["run", "--project", "/path/to/mindex", "mindex", "mcp"]
 
 ## 与 deepseek-harness 的兼容设计
 
-内置运行时的数据形状逐字沿用 dsh，未来可以直接换成 dsh 运行时，前端与工具都不用改：
+内置运行时和受管 dsh 运行时共用会话、交互卡片及工具执行通道：
 
 - 会话事件信封 `{session_id, seq, time, type, data, ignorable?}`，核心事件 `turn/start`、`turn/end{reason.kind}`、`step/start|end`、`user/message{source.kind: user|context|followup}`、`assistant/message`、`tool/call{callId, name, arguments: 原始 JSON 字符串}`、`tool/result{message, error?, meta?}`；Mindex 扩展事件一律为 `plugin:mindex/...`。发给模型的历史只从日志派生。
 - 内容块 `text` / `reasoning` / `tool-call`，以及只含引用的 `image`（`{type: "image", ref}`，发请求前才解析）；SSE 流式块沿用 dsh StreamChunk（`block-start`、`text-delta`、`tool-call-delta`、`block-end`、`usage`、`finish`），用量字段 `inputTokens` / `outputTokens` / `cacheReadTokens`。
 - 确认结果 `allowed-once | rejected | cancelled | unavailable`；提问工具 `ask_user_question` 的参数与结果是 dsh 同名工具的超集。
 - `AgentRuntime` 协议（`backend/src/agent/runtime.py`）与 dsh SDK 一一对应：`prompt` ↔ `session/prompt`，`create_or_resume` ↔ `session/resume`，`events`/`status` ↔ `session.event`/`session.status` 通知，`answer_approval` ↔ `approval/request` 的响应，`answer_question` ↔ `user-question/ask` 的响应。
 
-规划中的 `DshRuntime`：在工作线程里运行 dsh Python SDK（`deepseek_harness.HarnessClient`，`approval_requests=True`、`capabilities.userQuestions=True`），用上面的 stdio 或 HTTP 配置把 Mindex 工具挂给 dsh；把 `session.event` 通知原样写入同一张事件表，把 `approval/request` 与 `user-question/ask` 转成面板现有的确认卡片和表单卡片。
+受管 `DshRuntime` 使用官方 `HarnessClient`，SDK 和二进制运行时固定为 `0.2.1rc2`：
+
+```bash
+uv sync --extra dsh --extra dev
+```
+
+在设置页「智能助手运行时」选择 dsh 并保存，或在 YAML 设置 `agent.runtime: dsh`（默认 `builtin`）。设置页保存前只检查安装版本与模型配置，不调用模型。运行时继续使用当前智能助手模型档案，支持 OpenAI 兼容及 Anthropic 协议与视觉开关。更换模型档案在下一轮生效。
+
+运行时归属在会话创建时固定写入 SQLite；切换设置仅影响新会话，旧会话、运行轮次及待确认操作继续使用原运行时。缺少 dsh 时保留选择，在轮次中显示明确错误，不会回退到 builtin。设置读取与保存为 `GET/PUT /api/settings/agent-runtime`，保存体为 `{"runtime":"builtin"}` 或 `{"runtime":"dsh"}`，沿用网页鉴权。
+
+每个 dsh 会话使用 `data_dir/dsh/<session-id>/`，不读取个人 `~/.dsh`。受管 `sdk-minimal` profile 禁用 shell、文件、工作目录工具、资源发现与标题模型请求，只挂载 Mindex 内部 MCP 工具。内部监听器绑定回环地址的临时端口，以进程环境中的随机短期凭证绑定会话；独立于公开 `/mcp` 的开关、令牌和风险策略。模型密钥不写入生成的 patch。工具参数校验、领域加载门控、预览确认、revision、密钥表单、附件归属、页面刷新与定位、任务跟踪均复用 `RuntimeSupport`。固定发行版的 MCP 客户端不支持运行中刷新工具清单，因此展示全部 schema；领域执行权限仍由 Mindex 强制检查，未加载时拒绝执行并提示 `load_tools`。
+
+通知与客户端请求分别由 SDK 工作线程消费，Mindex 在 asyncio 循环中处理交互。Mindex 工具的审批与提问经内部桥接生成现有卡片；另提供原生 `approval/request`、`user-question/ask` 映射。**版本边界**：固定发行版不包含主分支新增的全部原生交互能力；真实进程测试验证的是受管 Mindex 工具的交互，不声称验证了新版原生工具。
+
+上游序号以 `upstream_seq` 保存，与本地连续 `seq` 分开；同一会话的重复上游事件在写入事务内去重。事件经密钥脱敏和图片字节清理，附件图片在模型请求边界才解析。面板去掉展示名称的 `mcp__mindex__` 前缀，并保留共用通道产生的工具卡片元数据。
+
+每轮结束关闭进程与内部监听器；下一轮以相同 home 和会话 ID 显式恢复持久历史。重启会结束被中断的轮次并恢复后台任务跟踪。取消、删除会话、应用退出或子进程故障均关闭 SDK 和工作线程；故障不重发可能已经执行的操作。删除会话会清理会话附件及对应的 dsh 持久目录。
+
 
 ## 验证
 
+- `uv run --extra dsh --extra dev pytest tests/test_dsh_runtime.py`：真实 dsh 进程与本地确定性 OpenAI 服务，验证工具执行、审批允许/拒绝、取消、进程异常、跨进程恢复、事件序号，以及设置页浏览器切换。
 - `uv run pytest tests/test_agent_*.py`：协议适配、工具、运行时、确认、任务跟踪、密钥、MCP、动态加载、附件、视觉，以及 26 个确定性验收场景（`tests/agent_scenarios.py`，含跨领域加载、附件检索、找相似、索引回退、取消构建、取消素材任务、人物审核与发布、视觉输入、访谈改写、竖屏方案、附件作画面、AI 生成视频分镜、AI 生成图片分镜、背景音乐与歌词生成、AI 动画分镜生成与源码修改）。这些测试使用脚本化模型，只验证工程链路，不代表真实模型质量。
 - 后端接口：`tests/test_search_similar.py`、`test_source_frame.py`、`test_index_api.py`、`test_task_cancel.py`、`test_studio_cancel.py`、`test_studio_diagnostics.py`、`test_person_identify.py`。
 - `tests/test_agent_no_physical_delete.py`：用记录请求的客户端执行全部工具，确认不会请求物理删除接口，且每个 write/danger 工具都有预览。

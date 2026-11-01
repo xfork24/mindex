@@ -48,6 +48,8 @@ git clone https://github.com/xfork24/mindex.git
 cd mindex
 
 uv sync                      # 开发或运行测试时改用 uv sync --extra dev
+# 可选：受管 DeepSeek Harness 助手运行时（随后在设置页选择）
+# uv sync --extra dsh
 cp config.example.yaml config.local.yaml
 uv run mindex serve
 ```

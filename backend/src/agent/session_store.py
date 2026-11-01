@@ -37,6 +37,8 @@ def now_ms() -> int:
 def decode_event(row: dict) -> dict:
     event = {"session_id": row["session_id"], "seq": row["seq"], "time": row["time"], "type": row["type"],
              "data": json.loads(row["data"])}
+    if row.get("upstream_seq") is not None:
+        event["upstream_seq"] = row["upstream_seq"]
     if row["ignorable"]:
         event["ignorable"] = True
     return event
@@ -79,12 +81,12 @@ class SessionStore:
         initialize(self.store)
 
     # ------------------------------------------------------------ 会话
-    def create(self, title: str = "") -> dict:
+    def create(self, title: str = "", *, runtime: str = "builtin") -> dict:
         sid = f"session-{uuid4().hex[:16]}"
         stamp = now_ms()
         self.store.execute(
-            "INSERT INTO agent_sessions(id,title,status,created_at,updated_at) VALUES(?,?,?,?,?)",
-            (sid, title[:60], "idle", stamp, stamp),
+            "INSERT INTO agent_sessions(id,title,status,created_at,updated_at,runtime) VALUES(?,?,?,?,?,?)",
+            (sid, title[:60], "idle", stamp, stamp, runtime),
         )
         return self.get(sid)
 
@@ -96,7 +98,7 @@ class SessionStore:
                 "loaded_domains": json.loads(row["loaded_domains"] or "[]")}
 
     def list(self) -> list[dict]:
-        rows = self.store.rows("SELECT id,title,status,created_at,updated_at FROM agent_sessions ORDER BY updated_at DESC")
+        rows = self.store.rows("SELECT id,title,status,created_at,updated_at,runtime FROM agent_sessions ORDER BY updated_at DESC")
         return rows
 
     def update(self, sid: str, **fields) -> None:
@@ -117,20 +119,27 @@ class SessionStore:
             db.execute("COMMIT")
 
     # ------------------------------------------------------------ 事件
-    def append(self, sid: str, kind: str, data, *, ignorable: bool = False) -> dict:
+    def append(self, sid: str, kind: str, data, *, ignorable: bool = False, upstream_seq: int | None = None) -> dict | None:
         data = self.redact(sid, data)
         stamp = now_ms()
         with self.store.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            if upstream_seq is not None and db.execute(
+                "SELECT 1 FROM agent_events WHERE session_id=? AND upstream_seq=?", (sid, upstream_seq)
+            ).fetchone():
+                db.execute("COMMIT")
+                return None
             row = db.execute("SELECT COALESCE(MAX(seq), -1) FROM agent_events WHERE session_id=?", (sid,)).fetchone()
             seq = row[0] + 1
             db.execute(
-                "INSERT INTO agent_events(session_id,seq,time,type,data,ignorable) VALUES(?,?,?,?,?,?)",
-                (sid, seq, stamp, kind, json.dumps(data, ensure_ascii=False), int(ignorable)),
+                "INSERT INTO agent_events(session_id,seq,time,type,data,ignorable,upstream_seq) VALUES(?,?,?,?,?,?,?)",
+                (sid, seq, stamp, kind, json.dumps(data, ensure_ascii=False), int(ignorable), upstream_seq),
             )
             db.execute("UPDATE agent_sessions SET updated_at=? WHERE id=?", (stamp, sid))
             db.execute("COMMIT")
         event = {"session_id": sid, "seq": seq, "time": stamp, "type": kind, "data": data}
+        if upstream_seq is not None:
+            event["upstream_seq"] = upstream_seq
         if ignorable:
             event["ignorable"] = True
         return event

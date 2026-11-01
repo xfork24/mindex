@@ -135,3 +135,10 @@
 | GET | `/api/health` | 轻量就绪检查 `{version, pid, data_dir, busy, tasks}`（桌面外壳轮询；受访问令牌保护，不读素材表、不探测模型服务） |
 
 人物配置 `person.frame_interval`（设置页“间隔帧数”）：整数且 ≥1，默认 15。每个分镜从首个有效帧开始每隔该帧数抽取，保留实际 PTS；1 表示逐帧。旧 `person.fps` 仅兼容旧配置，不叠加抽帧限制。
+
+
+## 智能助手运行时
+
+「智能助手运行时」可选内置（默认）或 DeepSeek Harness。先运行 `uv sync --extra dsh` 安装固定版本 SDK 与二进制，再在设置页选择 dsh 并保存。可用状态只检查依赖和模型配置，不产生模型费用。模型、连接地址、密钥和视觉能力继续由智能助手档案决定。
+
+切换只影响新会话，已有会话保留所属运行时。缺少依赖会显示安装命令；已保存的 dsh 选择不会被自动替换。配置文件对应 `agent.runtime: builtin | dsh`；禁用 `runtime_overrides` 时请直接修改配置文件。详见[助手运行时](agent.md#与-deepseek-harness-的兼容设计)。

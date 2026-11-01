@@ -5,7 +5,7 @@
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title data-i18n="[[0,&quot;ui.5e9681d20f56&quot;]]">Mindex · 设置</title><link rel="icon" href="/assets/shared/favicon.svg?v=8d7f9242de" type="image/svg+xml">
   <link rel="stylesheet" href="/assets/shared/style.css?v=bbec55271e"><link rel="stylesheet" href="/assets/shared/agent-panel.css?v=0e652cc50a"><link rel="stylesheet" href="/assets/settings/settings.css?v=48c413d6f5">
-  <script src="/assets/shared/messages.js?v=bb3a855110" defer></script><script src="/assets/shared/i18n.js?v=e981ac227d" defer></script><script src="/assets/shared/api.js?v=f5e2828ce0" defer></script><script src="/assets/shared/control-layout.js?v=11f375e653" defer></script><script src="/assets/shared/marked.umd.js?v=b82b933440" defer></script><script src="/assets/shared/purify.min.js?v=cd37898f97" defer></script><script src="/assets/shared/agent-markdown.js?v=8f0018e90a" defer></script><script src="/assets/shared/agent-panel.js?v=c72ac5a6f0" defer></script><script src="/assets/shared/feedback.js?v=4630718c9e" defer></script><script src="/assets/settings/settings.js?v=47b73ef572" defer></script><script src="/assets/settings/tools.js?v=6cceb98ba7" defer></script>
+  <script src="/assets/shared/messages.js?v=bb3a855110" defer></script><script src="/assets/shared/i18n.js?v=e981ac227d" defer></script><script src="/assets/shared/api.js?v=f5e2828ce0" defer></script><script src="/assets/shared/control-layout.js?v=11f375e653" defer></script><script src="/assets/shared/marked.umd.js?v=b82b933440" defer></script><script src="/assets/shared/purify.min.js?v=cd37898f97" defer></script><script src="/assets/shared/agent-markdown.js?v=8f0018e90a" defer></script><script src="/assets/shared/agent-panel.js?v=ea8d27edee" defer></script><script src="/assets/shared/feedback.js?v=4630718c9e" defer></script><script src="/assets/settings/settings.js?v=408f47c8db" defer></script><script src="/assets/settings/tools.js?v=6cceb98ba7" defer></script>
 </head>
 <body class="settings">
   <header><a class="brand" href="/">m<span>index</span><i></i></a><nav class="page-nav" aria-label="页面导航" data-i18n-aria-label="ui.main_navigation"><a class="quiet nav-link" href="/" data-i18n="[[0,&quot;ui.c9b1e68e3537&quot;]]">视频检索</a><a class="quiet nav-link" href="/studio" data-i18n="[[0,&quot;ui.b6fc3cef0bd0&quot;]]">创作</a><a class="quiet nav-link" href="/admin" data-i18n="[[0,&quot;ui.f517302fec0d&quot;]]">素材管理</a><a class="quiet nav-link" href="/persons" data-i18n="[[0,&quot;ui.0973ef28d791&quot;]]">人物库</a><a class="quiet nav-link" href="/settings" aria-current="page" data-i18n="[[0,&quot;ui.7debf9cb0372&quot;]]">设置</a></nav><button class="quiet" id="reload" data-i18n="[[0,&quot;ui.c3147ba1672a&quot;]]">刷新设置</button><button type="button" class="quiet language-switch" data-language-toggle aria-label="中文 / English"><span data-language="zh" lang="zh-CN">文</span><span class="language-divider" aria-hidden="true">/</span><span data-language="en" lang="en">En</span></button></header>
@@ -13,6 +13,15 @@
     <section class="intro"><span class="eyebrow" data-i18n="[[0,&quot;ui.70007cbabfdc&quot;]]">模型服务 / 检索调参 / 音色</span><h1 data-i18n="[[0,&quot;ui.81c5690759cb&quot;]]">一个页面，管住所有配置。</h1><p data-i18n="[[0,&quot;ui.39e1d87be0f0&quot;]]">切换线上订阅或自建服务，保存即热生效，无需重启；密钥只保存在本地数据库。</p></section>
     <div id="notice" class="notice" role="status" aria-live="polite"></div>
     <div id="index-banner"></div>
+    <section aria-label="智能助手运行时">
+      <div class="section-heading"><h2>智能助手运行时</h2><span>切换仅影响新会话，已有会话继续使用原运行时</span></div>
+      <form id="agent-runtime-form" class="tuning-panel">
+        <label for="agent-runtime">运行时</label>
+        <select id="agent-runtime"><option value="builtin">内置</option><option value="dsh">DeepSeek Harness (dsh)</option></select>
+        <p id="agent-runtime-status" role="status"></p>
+        <button type="submit">保存运行时</button>
+      </form>
+    </section>
     <section aria-label="处理设置" data-i18n-aria-label="ui.95630f7c78ef">
       <div class="section-heading"><h2 data-i18n="[[0,&quot;ui.95630f7c78ef&quot;]]">处理设置</h2><span data-i18n="[[0,&quot;ui.5c3c785f368b&quot;]]">不同类型任务的并行策略</span></div>
       <form id="processing-settings" class="tuning-panel">

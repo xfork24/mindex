@@ -365,6 +365,27 @@ def _probe(config: Config, role: str, *, store: Store | None = None, profile_nam
 def settings_router(runtime: RuntimeConfig, store: Store) -> APIRouter:
     router = APIRouter(prefix="/api/settings", tags=["设置"])
 
+    @router.get("/agent-runtime")
+    def get_agent_runtime():
+        from mindex.agent.dsh_runtime import readiness
+        cfg = runtime.current().agent
+        return {"runtime": cfg.runtime, "dsh": readiness(cfg)}
+
+    @router.put("/agent-runtime")
+    def save_agent_runtime(body: dict):
+        from mindex.agent.dsh_runtime import readiness
+        selected = body.get("runtime")
+        if selected not in ("builtin", "dsh") or set(body) != {"runtime"}:
+            raise HTTPException(422, "runtime 必须为 builtin 或 dsh")
+        if not runtime.base.runtime_overrides:
+            raise HTTPException(409, "当前已禁用设置覆盖，请修改配置文件")
+        if selected == "dsh":
+            check = readiness(runtime.current().agent)
+            if not check["ready"]:
+                raise HTTPException(422, "；".join(check["errors"]))
+        put_setting(store, "agent.runtime", selected)
+        return get_agent_runtime()
+
     def _with_sample(voice: dict | None) -> dict | None:
         if voice is None:
             return None
