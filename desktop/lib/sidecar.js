@@ -24,7 +24,9 @@ function buildCommand({ mode, repoRoot, backendExecutable, uv = "uv", configPath
 
 // 子进程环境：继承外壳环境，注入令牌与随包二进制；MINDEX_CONFIG 不传（显式 --config 优先，避免混淆）。
 function buildEnv(base, { token, ffmpeg, ffprobe, browsersPath, extra = {} }) {
-  const env = { ...base, ...extra, MINDEX_WEB_TOKEN: token, PYTHONUNBUFFERED: "1" };
+  // PYTHONUTF8：Windows 的 Python 缺省按控制台代码页（charmap/GBK）编码输出，中文日志会
+  // UnicodeEncodeError；强制 UTF-8 模式（macOS/Linux 本就是 UTF-8，无影响）。
+  const env = { ...base, ...extra, MINDEX_WEB_TOKEN: token, PYTHONUNBUFFERED: "1", PYTHONUTF8: "1" };
   delete env.MINDEX_CONFIG;
   // Electron 自身的变量不应传给 Python 后端。
   delete env.ELECTRON_RUN_AS_NODE;

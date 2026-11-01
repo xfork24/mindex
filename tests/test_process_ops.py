@@ -49,7 +49,10 @@ def spawn_parent(tmp_path: Path, script: str = PARENT_SCRIPT):
             break
         time.sleep(0.05)
     parent_pid, grandchild_pid = (int(value) for value in marker.read_text().split())
-    assert parent_pid == child.pid
+    if sys.platform != "win32":
+        assert parent_pid == child.pid
+    # Windows 上 uv 创建的 venv python.exe 是 trampoline：Popen.pid 是 trampoline，
+    # 脚本里的 os.getpid() 是它拉起的真实解释器，两者不同；树杀以 marker 里的真实 pid 为准。
     return child, parent_pid, grandchild_pid
 
 

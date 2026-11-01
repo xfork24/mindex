@@ -118,6 +118,8 @@ jobs:
         run: node --test "test/*.test.js"  # 引号防 shell 展开，node 自行处理 glob（三平台一致）
 
       - name: 桌面相关后端测试
+        env:
+          PYTHONUTF8: "1"  # Windows：子进程缺省按控制台代码页编码，中文输出会 UnicodeEncodeError
         run: >-
           uv run pytest -q tests/test_desktop_health.py tests/test_desktop_frozen.py tests/test_desktop_config.py
           tests/test_media_binaries.py tests/test_local_services.py tests/test_browser_install.py
