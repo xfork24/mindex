@@ -248,8 +248,8 @@
     "en": "Members"
   },
   "ui.groups_help": {
-    "zh": "多选组取并集，再与其他筛选取交集；不选组表示不限。空组没有候选。",
-    "en": "Selected groups form a union, intersected with other filters. No groups means unrestricted; empty groups have no candidates."
+    "zh": "维护素材组与音乐组，用作检索与创作流程的范围筛选；多选取并集，不选表示不限。",
+    "en": "Maintain source and music groups scoping search and creation; multiple selections union, none means unrestricted."
   },
   "ui.groups_select": {
     "zh": "所属组",
@@ -955,17 +955,13 @@
     "zh": "刷新状态",
     "en": "Refresh status"
   },
-  "ui.dcb5151061db": {
-    "zh": "从一句描述，找到一个画面",
-    "en": "Find a frame with a description"
-  },
   "ui.26be7bcfa843": {
-    "zh": "让素材回应你的想法。",
-    "en": "Bring your ideas into view."
+    "zh": "视频检索",
+    "en": "Video Search"
   },
   "ui.7a0275149990": {
-    "zh": "搜索动作、场景、情绪或一句对白，找到值得使用的视频片段。",
-    "en": "Search actions, scenes, emotions or dialogue to find video clips worth using."
+    "zh": "以文字、图片或视频为查询，在本地素材库中检索片段并按相关度排序。",
+    "en": "Query local clips by text, image or video and rank them by relevance."
   },
   "ui.dad5ed449c85": {
     "zh": "文字找视频",
@@ -1215,17 +1211,13 @@
     "zh": "刷新素材",
     "en": "Refresh media"
   },
-  "ui.51e92501b729": {
-    "zh": "素材 / 镜头 / 精细片段",
-    "en": "Media / Shots / Moments"
-  },
   "ui.ebda4d4c2ab6": {
-    "zh": "把每个画面，放在手边。",
-    "en": "Keep every frame within reach."
+    "zh": "素材管理",
+    "en": "Library"
   },
   "ui.06223cb62bb6": {
-    "zh": "上传视频，分别处理分镜、对白、分析与人物，整理值得保留的片段。",
-    "en": "Upload videos, process shots, dialogue, analysis and people separately, and organize useful clips."
+    "zh": "上传与整理视频素材，分别执行分镜、对白、分析与人物处理。",
+    "en": "Upload and organize sources; run shot, dialogue, analysis and person processing separately."
   },
   "ui.eb1b1f3d005e": {
     "zh": "添加新素材",
@@ -1435,17 +1427,13 @@
     "zh": "刷新人物库",
     "en": "Refresh people"
   },
-  "ui.d3bdf4c84d88": {
-    "zh": "人物与出镜证据",
-    "en": "People and on-screen evidence"
-  },
   "ui.d41248a91337": {
-    "zh": "从姓名，找到出镜画面。",
-    "en": "Find appearances by name."
+    "zh": "人物库",
+    "en": "Persons"
   },
   "ui.3c67b8f3b961": {
-    "zh": "登记演员与作品角色。演员表先审核，再进入人物库。",
-    "en": "Register actors and characters. Review cast lists before importing them."
+    "zh": "登记演员与作品角色，导入演员表并核对出镜证据。",
+    "en": "Register actors and roles, import cast sheets and review appearance evidence."
   },
   "ui.fe484a6506b8": {
     "zh": "演员表导入",
@@ -1755,17 +1743,13 @@
     "zh": "刷新设置",
     "en": "Refresh settings"
   },
-  "ui.70007cbabfdc": {
-    "zh": "模型服务 / 检索调参 / 音色",
-    "en": "Model services / Search tuning / Voices"
-  },
   "ui.81c5690759cb": {
-    "zh": "一个页面，管住所有配置。",
-    "en": "All your settings in one place."
+    "zh": "设置",
+    "en": "Settings"
   },
   "ui.39e1d87be0f0": {
-    "zh": "切换线上订阅或自建服务，保存即热生效，无需重启；密钥只保存在本地数据库。",
-    "en": "Switch cloud or self-hosted services. Saved settings take effect immediately; keys stay in the local database."
+    "zh": "配置模型服务、检索参数、音色与运行时，保存即生效，密钥仅存本地。",
+    "en": "Configure model services, retrieval tuning, voices and runtimes; changes apply immediately and keys stay local."
   },
   "ui.95630f7c78ef": {
     "zh": "处理设置",
@@ -2003,17 +1987,13 @@
     "zh": "刷新任务",
     "en": "Refresh tasks"
   },
-  "ui.a89476443984": {
-    "zh": "文案 · 分镜 · 配音 · 混剪",
-    "en": "Script · Storyboard · Narration · Editing"
-  },
   "ui.8c66fab876f3": {
-    "zh": "从一段文字，到一条成片。",
-    "en": "From words to a finished video."
+    "zh": "创作工作台",
+    "en": "Studio"
   },
   "ui.fae955fec0db": {
-    "zh": "把文案拆成分镜，逐镜配音并从素材库召回画面，自动合成为带字幕的视频。每一步可单独执行、重试和人工调整。",
-    "en": "Split your script into shots, narrate each shot, retrieve footage and compose a subtitled video. Run, retry or edit each step independently."
+    "zh": "从文案生成分镜，逐镜配音、召回画面并合成带字幕的成片，各步骤可单独执行与重试。",
+    "en": "Turn a script into a video: storyboard, per-shot voiceover and recall, then render and compose; every stage can run and retry on its own."
   },
   "ui.7407393d52c7": {
     "zh": "创作文案",
@@ -10299,17 +10279,13 @@
     "zh": "已刷新模板目录。",
     "en": "Templates refreshed."
   },
-  "ui.templates_eyebrow": {
-    "zh": "提示词 · 字数上限 · 试写",
-    "en": "Instructions · Limits · Trial runs"
-  },
   "ui.templates_heading": {
-    "zh": "先把模板调好，再批量写文案。",
-    "en": "Tune the template first, then write scripts at scale."
+    "zh": "文案模板",
+    "en": "Script Templates"
   },
   "ui.templates_intro": {
-    "zh": "浏览内置与自定义文案模板，查看并修改提示词，用示例大纲试写效果；满意后在创作任务的文案区选用。",
-    "en": "Browse built-in and custom script templates, view and edit their instructions, and try them on a sample outline. Then pick one in a job's script section."
+    "zh": "管理文案模板的提示词与字数上限，用示例大纲试写验证效果。",
+    "en": "Manage template prompts and length limits; trial-write with a sample outline."
   },
   "ui.templates_filter_label": {
     "zh": "搜索模板",
@@ -10611,17 +10587,13 @@
     "zh": "已刷新",
     "en": "Refreshed"
   },
-  "ui.topics_eyebrow": {
-    "zh": "领域档案 · 热点与日历 · 打分 · 素材覆盖",
-    "en": "Domain profiles · Trends & calendars · Scoring · Footage coverage"
-  },
   "ui.topics_heading": {
-    "zh": "先找值得做的选题，再动笔写文案。",
-    "en": "Find topics worth making before you write."
+    "zh": "选题挖掘",
+    "en": "Topic Mining"
   },
   "ui.topics_intro": {
-    "zh": "按领域档案从你配置的订阅、热榜、搜索与日历中发现候选选题，按时效、受众、素材覆盖、去重与制作成本打分；满意的选题一键建成创作任务。",
-    "en": "Discover candidate topics from the feeds, trending lists, searches and calendars you configure for each domain profile, scored by timeliness, audience fit, footage coverage, novelty and production cost. Turn a topic into a studio job in one click."
+    "zh": "按领域档案聚合订阅、热榜、搜索与日历，对候选选题打分并创建创作任务。",
+    "en": "Aggregate feeds, rankings, search and calendars by profile, score candidates and create studio jobs."
   },
   "ui.topics_profiles_aria": {
     "zh": "领域档案",
@@ -11907,17 +11879,13 @@
     "zh": "已刷新风格模板",
     "en": "Style templates reloaded"
   },
-  "ui.brands_eyebrow": {
-    "zh": "字幕样式 · 文字层 · 片头片尾 · 水印",
-    "en": "Subtitles · Text layers · Intro/outro · Watermark"
-  },
   "ui.brands_heading": {
-    "zh": "一套风格模板，统一全部成片的风格。",
-    "en": "One style template, one consistent look for every film."
+    "zh": "风格模板",
+    "en": "Style Templates"
   },
   "ui.brands_intro": {
-    "zh": "浏览内置与自定义风格模板，设置字幕样式、文字层颜色，上传片头、片尾与水印；在创作任务的方案参数里选用，方案还可以单独覆盖其中几项。",
-    "en": "Browse built-in and custom style templates, set subtitle style and text-layer colors, upload intro, outro and watermark. Select one in a plan's settings; a plan can still override individual items."
+    "zh": "管理字幕样式、文字层、片头片尾与水印，统一成片视觉风格。",
+    "en": "Manage subtitle styles, text overlays, bookends and watermarks for a consistent look."
   },
   "ui.brands_list_aria": {
     "zh": "风格模板列表",
@@ -12463,17 +12431,13 @@
     "zh": "刷新音乐库",
     "en": "Reload library"
   },
-  "ui.music_eyebrow": {
-    "zh": "授权 · 节奏分析 · 情绪标签 · 推荐",
-    "en": "Licensing · Beat analysis · Mood tags · Recommendations"
-  },
   "ui.music_heading_page": {
-    "zh": "有授权的背景音乐，按节奏和情绪挑选。",
-    "en": "Licensed background music, picked by tempo and mood."
+    "zh": "音乐库",
+    "en": "Music Library"
   },
   "ui.music_intro": {
-    "zh": "导入音乐时填写授权来源、许可与署名；系统分析 BPM 与节拍并打情绪标签。在分镜的背景音乐提示点选择“曲库音乐”即可选用或按文案推荐，署名会带进发布元数据。",
-    "en": "Enter the license source, license and attribution when importing; Mindex analyzes BPM and beats and tags moods. Choose “Library music” on a shot's music cue to pick a track or get recommendations from the narration; the attribution goes into publish metadata."
+    "zh": "导入授权音乐，分析 BPM 与节拍并标记情绪，供分镜配乐选用。",
+    "en": "Import licensed tracks; BPM, beats and mood tags feed storyboard scoring."
   },
   "ui.music_list_aria": {
     "zh": "曲目列表",
@@ -13982,5 +13946,13 @@
   "ui.f61b5478e34f": {
     "zh": "保存运行时",
     "en": "Save runtime"
+  },
+  "ui.groups_page_title": {
+    "zh": "组管理",
+    "en": "Groups"
+  },
+  "ui.dt_templates_section": {
+    "zh": "模板列表",
+    "en": "Templates"
   }
 }

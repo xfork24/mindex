@@ -1,8 +1,6 @@
 .nav-link{text-decoration:none;text-align:center}
 
 .admin-main{padding:36px 28px}
-.admin-intro h1{font-size:30px;letter-spacing:-.8px;margin:12px 0}
-.admin-intro p{font-size:13px;color:var(--muted);margin:0 0 22px}
 /* 素材管理分区标签（素材 / 音乐库）：与创作页 studio.css 的 .studio-tabs 同一样式；音乐库页直接用 studio.css。 */
 .studio-tabs{display:flex;gap:28px;border-bottom:1px solid var(--line);margin:0 0 18px}
 .studio-tab{display:inline-flex;align-items:center;min-height:40px;padding:10px 0 9px;border-bottom:3px solid transparent;margin-bottom:-1px;color:var(--muted);font-size:14px;text-decoration:none}
@@ -76,7 +74,6 @@
 @media(max-width:750px){.workspace{grid-template-columns:1fr}
 .source-panel{position:static}
 .admin-main{padding:24px 18px}
-.admin-intro h1{font-size:25px}
 #source-list{max-height:270px;overflow:auto}
 .source-heading h2{font-size:20px}
 .admin header .nav-link{font-size:12px}
@@ -104,8 +101,7 @@
 .analysis-section p{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.6}
 .analysis-utterance{font-variant-numeric:tabular-nums}
 
-.admin-intro{position:relative;padding-right:160px}
-.admin-intro #add-source{position:absolute;right:0;top:24px;margin:0}
+.admin-intro .submit{margin-left:auto;flex:0 0 auto;align-self:center}
 .work-panel{margin-top:24px}
 .work-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr));gap:14px}
 .work-card{padding:18px;background:#fff;border:1px solid var(--line);border-radius:12px;min-width:0}
@@ -127,8 +123,7 @@
 #upload-dialog,#person-dialog{width:min(650px,92vw)}
 #person-work{width:100%;margin:12px 0}
 #person-setup p{font-size:13px;line-height:1.7}
-@media(max-width:600px){.admin-intro{padding-right:0}
-.admin-intro #add-source{position:static;margin:0 0 20px}
+@media(max-width:600px){
 .admin header{height:auto;min-height:72px;flex-wrap:wrap;padding-top:14px;padding-bottom:14px}
 .work-card{padding:14px}
 }
