@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 构建桌面版冻结后端（PyInstaller onedir）：desktop/build/backend/mindex。
 #
-# 在独立虚拟环境中按 uv.lock 安装依赖（主依赖 + animation、mcp extra；不含 dev、person），以普通 wheel 安装 mindex，
+# 在独立虚拟环境中按 uv.lock 安装依赖（主依赖 + animation、mcp、dsh extra；不含 dev、person），以普通 wheel 安装 mindex，
 # 再用锁定版本的 PyInstaller 打包。不改动仓库的 .venv。支持 macOS（arm64）与 Linux（x64）；
 # Windows 用 scripts/build-desktop-sidecar.ps1（同一 mindex.spec）。
 set -euo pipefail
@@ -27,7 +27,7 @@ fi
 mkdir -p "${BUILD}"
 rm -rf "${VENV}" "${BUILD}/backend" "${BUILD}/pyinstaller-work"
 uv venv --quiet --python "${PYTHON_VERSION}" "${VENV}"
-uv export --quiet --project "${ROOT}" --frozen --no-dev --extra animation --extra mcp \
+uv export --quiet --project "${ROOT}" --frozen --no-dev --extra animation --extra mcp --extra dsh \
   --no-emit-project --no-hashes --output-file "${BUILD}/sidecar-requirements.txt"
 uv pip install --quiet --python "${VENV_BIN}/python" -r "${BUILD}/sidecar-requirements.txt"
 # 非 editable 安装：package-data（前端、模板）进入 site-packages，PyInstaller 从这里收集。

@@ -88,6 +88,41 @@ def subtitles(work: Path, font_file: Path) -> dict:
     return {"subtitles": True, "ffmpeg": ffmpeg_bin()}
 
 
+def dsh(work: Path) -> dict:
+    """启动随包原生 dsh 并完成 SDK 握手，不调用模型、下载资源或使用系统 Node。"""
+    import os
+    import subprocess
+
+    import yaml
+    from deepseek_harness import HarnessClient, HarnessConfig
+    from deepseek_harness_runtime import resolve_bundled_launch_args
+
+    from mindex.agent.dsh_runtime import patch, readiness
+    from mindex.shared.config import AgentConfig
+
+    settings = AgentConfig(llm={"model": "desktop-check", "base_url": "http://127.0.0.1:1/v1"})
+    status = readiness(settings)
+    if not status["ready"]:
+        raise RuntimeError("；".join(status["errors"]))
+    executable = Path(resolve_bundled_launch_args("exe")[0])
+    rg = executable.with_name(executable.stem + "-rg.exe" if sys.platform == "win32" else executable.name + "-rg")
+    result = subprocess.run([str(rg), "--version"], capture_output=True, text=True, timeout=30, check=True)
+    home = work / "dsh-home"
+    home.mkdir(parents=True, exist_ok=True)
+    content = patch(settings, "http://127.0.0.1:1/mcp")
+    # 只加载与实际运行相同的模型适配器；握手不需要 MCP 服务或模型请求。
+    content[-1]["insert"] = content[-1]["insert"][:1]
+    config = home / "check.patch.yml"
+    config.write_text(yaml.safe_dump(content), encoding="utf-8")
+    # 固定生产 exe；不受开发者终端 DSH_RUNTIME_MODE=node 的影响。
+    with HarnessClient(HarnessConfig(dsh_bin=str(executable), dsh_home=str(home), cwd=str(home),
+                                    profile="sdk-minimal", patches=(str(config),),
+                                    env={"DSH_TELEMETRY_DISABLED": "1"})) as client:
+        response = client.initialize(cwd=str(home), provider="mindex", model="desktop-check")
+    return {"dsh": response.serverInfo is not None, "dsh_version": status["version"],
+            "dsh_native": os.access(executable, os.X_OK), "dsh_ripgrep": "ripgrep" in result.stdout}
+
+
 def post(work: Path) -> dict:
     """成片后期（M3）在冻结环境里的 ffmpeg 路径：镜内转场、重叠转场（xfade）与水印叠加，都经 shared/media。"""
     from types import SimpleNamespace
@@ -232,6 +267,17 @@ def animation_bench(work: Path) -> dict:
 
 def main() -> None:
     args = sys.argv[1:]
+    if "--dsh-only" in args:
+        args.remove("--dsh-only")
+        if len(args) != 1:
+            sys.exit("用法：mindex -m mindex.desktop_check <临时目录> --dsh-only")
+        work = Path(args[0]).resolve()
+        work.mkdir(parents=True, exist_ok=True)
+        report = {"frozen": bool(getattr(sys, "frozen", False)), **dsh(work)}
+        print(json.dumps(report, ensure_ascii=False))
+        if not all(report[key] for key in ("dsh", "dsh_native", "dsh_ripgrep")):
+            sys.exit(1)
+        return
     record_animation = "--animation" in args
     bench = "--animation-bench" in args
     args = [arg for arg in args if arg not in ("--animation", "--animation-bench")]
@@ -247,6 +293,7 @@ def main() -> None:
     report = run(work)
     report.update(post(work))
     report.update(extensions(work))
+    report.update(dsh(work.resolve()))
     if len(args) == 2:
         report.update(subtitles(work, Path(args[1])))
     if record_animation:

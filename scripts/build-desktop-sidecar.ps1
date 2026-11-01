@@ -1,6 +1,6 @@
 ﻿# 构建 Windows 桌面版冻结后端（PyInstaller onedir）：desktop/build/backend/mindex.exe。
 # scripts/build-desktop-sidecar.sh 的 Windows 原生等价流程（同一 desktop/sidecar/mindex.spec）：
-# 在独立虚拟环境中按 uv.lock 安装依赖（主依赖 + animation、mcp extra；不含 dev、person），
+# 在独立虚拟环境中按 uv.lock 安装依赖（主依赖 + animation、mcp、dsh extra；不含 dev、person），
 # 以普通 wheel 安装 mindex，再用锁定版本的 PyInstaller 打包。不改动仓库的 .venv。
 $ErrorActionPreference = "Stop"
 
@@ -27,7 +27,7 @@ foreach ($stale in @($Venv, (Join-Path $Build "backend"), (Join-Path $Build "pyi
 # ErrorActionPreference=Stop 对原生命令的非零退出无效，每条之后显式检查。
 uv venv --quiet --python $PythonVersion $Venv
 if ($LASTEXITCODE -ne 0) { throw "uv venv 退出码 $LASTEXITCODE" }
-uv export --quiet --project $Root --frozen --no-dev --extra animation --extra mcp `
+uv export --quiet --project $Root --frozen --no-dev --extra animation --extra mcp --extra dsh `
     --no-emit-project --no-hashes --output-file (Join-Path $Build "sidecar-requirements.txt")
 if ($LASTEXITCODE -ne 0) { throw "uv export 退出码 $LASTEXITCODE" }
 uv pip install --quiet --python $VenvPython -r (Join-Path $Build "sidecar-requirements.txt")

@@ -6,6 +6,7 @@ import asyncio
 import base64
 import importlib.metadata
 import os
+import sys
 import threading
 
 from mindex.agent.dsh_bridge import bridge
@@ -28,23 +29,26 @@ DISABLED = (
 
 def readiness(settings):
     errors = []
+    frozen = bool(getattr(sys, "frozen", False))
+    install = "请更新或重新安装 Mindex 桌面版；如仍异常，请反馈安装包问题" if frozen else "uv sync --extra dsh"
+    repair = install if frozen else f"运行 {install}"
     for package in ("deepseek-harness-sdk", "deepseek-harness-runtime-bin", "mcp"):
         try:
             version = importlib.metadata.version(package)
             if package != "mcp" and version != DSH_VERSION:
-                errors.append(f"{package} 需要 {DSH_VERSION}（当前 {version}）")
+                errors.append(f"{package} 需要 {DSH_VERSION}（当前 {version}）；{repair}")
         except importlib.metadata.PackageNotFoundError:
-            errors.append(f"缺少 {package}；运行 uv sync --extra dsh")
+            errors.append(f"缺少 {package}；{repair}")
     if not errors:
         try:
             from deepseek_harness_runtime import resolve_bundled_launch_args
 
-            resolve_bundled_launch_args()
+            resolve_bundled_launch_args("exe" if frozen else None)
         except (ImportError, OSError, ValueError):
-            errors.append("dsh 运行时文件不完整；运行 uv sync --extra dsh 重新安装")
+            errors.append(f"dsh 运行时文件不完整；{repair}")
     if not settings.llm.model.strip() or not settings.llm.base_url.startswith(("http://", "https://")):
         errors.append("请先配置智能助手模型和服务地址")
-    return {"ready": not errors, "errors": errors, "install": "uv sync --extra dsh", "version": DSH_VERSION}
+    return {"ready": not errors, "errors": errors, "install": install, "version": DSH_VERSION}
 
 
 def patch(settings, url):
@@ -112,6 +116,14 @@ def safe_event(value, secrets=()):
 
 
 class DshRuntime(RuntimeSupport):
+    @staticmethod
+    def _bundled_executable():
+        if getattr(sys, "frozen", False):
+            from deepseek_harness_runtime import resolve_bundled_launch_args
+
+            return resolve_bundled_launch_args("exe")[0]
+        return None
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.clients = {}
@@ -242,6 +254,7 @@ class DshRuntime(RuntimeSupport):
                 }
                 client = HarnessClient(
                     HarnessConfig(
+                        dsh_bin=self._bundled_executable(),
                         dsh_home=str(home),
                         cwd=str(home),
                         profile="sdk-minimal",

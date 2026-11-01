@@ -44,7 +44,7 @@
         { "target": "zip", "arch": ["arm64"] }
       ],
       "category": "public.app-category.video",
-      "minimumSystemVersion": "13.0",
+      "minimumSystemVersion": "14.0",
       "identity": null,
       "hardenedRuntime": false,
       "gatekeeperAssess": false

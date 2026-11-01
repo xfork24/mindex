@@ -2,7 +2,7 @@
 """桌面版冻结后端冒烟：用临时配置与数据目录运行 desktop/build/backend/mindex[.exe]（三平台）。
 
 依次验证：冻结自检（chromadb、jieba、opencv、Pillow、playwright、前端、模板、品牌模板与叠加层模板、成片后期的
-转场与水印、align_worker、源码收集模块的哈希与仓库一致）、pyproject 声明的 package-data 全部打包、``-m`` 分发、
+转场与水印、align_worker、源码收集模块的哈希与仓库一致、原生 dsh SDK 握手及 ripgrep）、pyproject 声明的 package-data 全部打包、``-m`` 分发、
 注册并 prepare 测试视频、``serve`` 健康与页面（含品牌模板页与 ``mindex studio --url`` 连接）、SIGTERM 后按时退出
 （Windows 上 SIGTERM 即 TerminateProcess 强停，该步验证进程可被终止与退出码回收）。
 
@@ -158,7 +158,7 @@ def main() -> int:
         if report.get("post") is not True:
             problems.append("post")
         # M3 第三期：曲目节奏分析、HTTP 工具适配器与随包 mcp 客户端。
-        for key in ("beats", "tool_http", "mcp_client"):
+        for key in ("beats", "tool_http", "mcp_client", "dsh", "dsh_native", "dsh_ripgrep"):
             if report.get(key) is not True:
                 problems.append(key)
         for relative, digest in report["source_hashes"].items():

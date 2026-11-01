@@ -11,8 +11,13 @@
 # - console=True 三平台一致：stdout/stderr 管道依赖它；Windows 下黑框由外壳 spawn 的 windowsHide 消除。
 # - target_arch/codesign_identity 仅 macOS 有意义，其他平台不传。
 import sys
+from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules, copy_metadata
+from deepseek_harness_runtime import resolve_bundled_launch_args
+
+# 要求当前目标平台的生产运行时完整；不使用系统 Node 或开发态 carrier。
+resolve_bundled_launch_args("exe")
 
 SOURCE_MODULES = {
     "mindex.models.llama_cpp": "py",
@@ -27,6 +32,8 @@ hiddenimports += collect_submodules("uvicorn")
 hiddenimports += ["playwright.__main__"]
 # 第三方 MCP 工具的客户端（studio/tools/mcp.py 惰性导入）。
 hiddenimports += collect_submodules("mcp.client")
+hiddenimports += collect_submodules("deepseek_harness")
+hiddenimports += collect_submodules("deepseek_harness_runtime")
 datas += collect_data_files("mindex")
 datas += copy_metadata("mindex")
 datas += collect_data_files("jieba")
@@ -36,7 +43,8 @@ for package in ("chromadb", "scenedetect"):
     binaries += package_binaries
     hiddenimports += package_hidden
 # importlib.metadata 查询的依赖版本（uvicorn、fastapi 等启动时读取）。
-for package in ("fastapi", "uvicorn", "pydantic", "chromadb", "httpx", "playwright", "mcp"):
+for package in ("fastapi", "uvicorn", "pydantic", "chromadb", "httpx", "playwright", "mcp",
+                "deepseek-harness-sdk", "deepseek-harness-runtime-bin"):
     datas += copy_metadata(package)
 
 analysis = Analysis(
@@ -53,6 +61,11 @@ analysis = Analysis(
     module_collection_mode=SOURCE_MODULES,
     noarchive=False,
 )
+# Node SEA 可执行文件必须原样复制，不能被二进制依赖分析、重写加载路径或 strip。
+# onedir 的 COLLECT 会保留 DATA 的可执行位；macOS afterPack 再统一签名。
+# 包含原生 runtime、rg、macOS spawn-helper、downloads.json 和技能资源，保持 wheel 目录布局。
+analysis.datas += [(str(Path(destination) / Path(source).name), source, "DATA")
+                   for source, destination in collect_data_files("deepseek_harness_runtime")]
 pyz = PYZ(analysis.pure)
 _darwin_only = {"target_arch": "arm64", "codesign_identity": None} if sys.platform == "darwin" else {}
 executable = EXE(

@@ -17,6 +17,58 @@ from mindex.agent.tools import meta
 from mindex.shared.config import AgentConfig
 
 
+@pytest.mark.parametrize("frozen", [False, True])
+@pytest.mark.parametrize("failure", ["missing", "version", "files"])
+def test_dependency_repair_matches_installation(monkeypatch, frozen, failure):
+    import importlib.metadata
+
+    import mindex.agent.dsh_runtime as module
+
+    monkeypatch.setattr(module.sys, "frozen", frozen, raising=False)
+
+    def version(package):
+        if package == "deepseek-harness-sdk":
+            if failure == "missing":
+                raise importlib.metadata.PackageNotFoundError(package)
+            if failure == "version":
+                return "0.0.0"
+        return module.DSH_VERSION if package != "mcp" else "1.30.0"
+
+    monkeypatch.setattr(importlib.metadata, "version", version)
+    if failure == "files":
+        import types
+
+        def resolve(mode=None):
+            assert mode == ("exe" if frozen else None)
+            raise FileNotFoundError("missing runtime")
+
+        monkeypatch.setitem(module.sys.modules, "deepseek_harness_runtime",
+                            types.SimpleNamespace(resolve_bundled_launch_args=resolve))
+    result = readiness(AgentConfig(llm={"model": "test", "base_url": "http://localhost/v1"}))
+    assert not result["ready"]
+    message = "；".join([*result["errors"], result["install"]])
+    if frozen:
+        assert "桌面版" in message and "重新安装" in message
+        assert "uv sync" not in message
+    else:
+        assert "uv sync --extra dsh" in message
+
+
+def test_frozen_uses_bundled_executable(monkeypatch):
+    import types
+
+    import mindex.agent.dsh_runtime as module
+
+    monkeypatch.setattr(module.sys, "frozen", True, raising=False)
+    modes = []
+    monkeypatch.setitem(module.sys.modules, "deepseek_harness_runtime", types.SimpleNamespace(
+        resolve_bundled_launch_args=lambda mode: (modes.append(mode) or "/bundled/dsh",)))
+    assert DshRuntime._bundled_executable() == "/bundled/dsh"
+    assert modes == ["exe"]
+    monkeypatch.setattr(module.sys, "frozen", False)
+    assert DshRuntime._bundled_executable() is None
+
+
 class Empty(BaseModel):
     pass
 

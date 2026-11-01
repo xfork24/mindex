@@ -563,6 +563,8 @@ args = ["run", "--project", "/path/to/mindex", "mindex", "mcp"]
 
 受管 `DshRuntime` 使用官方 `HarnessClient`，SDK 和二进制运行时固定为 `0.2.1rc2`：
 
+桌面版的 macOS、Windows、Linux 安装包均内置目标平台的原生运行时，无需执行安装命令；依赖异常时请更新或重新安装桌面版。以下命令只用于源码环境：
+
 ```bash
 uv sync --extra dsh --extra dev
 ```

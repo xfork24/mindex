@@ -43,6 +43,7 @@
 
 ### 冻结后端与外壳
 
+- DeepSeek Harness SDK 与原生运行时 `0.2.1rc2`（MIT）随三平台后端提供，包含 Node SEA 可执行文件、ripgrep、macOS spawn-helper 与轻量技能资源。上游及所含第三方组件许可收集在 `deepseek_harness_{sdk,runtime_bin}-*.dist-info/licenses/`，保留上游 `THIRD_PARTY_NOTICES.md`。来源：https://github.com/deepseek-ai/deepseek-harness 。
 - 后端以 PyInstaller（GPL-2.0 with bootloader exception；冻结产物不受 GPL 约束）冻结，内含 CPython（PSF License）与 `pyproject.toml`、`uv.lock` 锁定的 Python 依赖，各依赖的许可随其包元数据（`*.dist-info`）一同打包。
 - 外壳为 Electron（MIT，内含 Chromium，BSD-3-Clause 及其第三方组件），许可文件位于 `Mindex.app/Contents/Resources/`（`LICENSE`、`LICENSES.chromium.html`）。
 - AI 动画录制所需的 Chromium（Playwright 构建）不随包分发，首次使用时下载到用户数据目录。

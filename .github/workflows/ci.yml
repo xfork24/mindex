@@ -125,6 +125,24 @@ jobs:
           tests/test_media_binaries.py tests/test_local_services.py tests/test_browser_install.py
           tests/test_settings_local_services_ui.py tests/test_process_ops.py
 
+      - name: 冻结后端（含目标平台原生 dsh）
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/build-desktop-sidecar.ps1
+          else scripts/build-desktop-sidecar.sh; fi
+
+      - name: 原生 dsh 握手（无系统 Node / uv / Python 的 PATH）
+        shell: bash
+        run: |
+          work="$(mktemp -d)/dsh check"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            env PATH="$(cygpath -u -p "$SYSTEMROOT\\System32;$SYSTEMROOT")" \
+              desktop/build/backend/mindex.exe -m mindex.desktop_check "$(cygpath -w "$work")" --dsh-only
+          else
+            env PATH="/usr/bin:/bin" desktop/build/backend/mindex -m mindex.desktop_check "$work" --dsh-only
+          fi
+
       - name: Electron 开发模式冒烟
         shell: bash
         run: |
@@ -225,11 +243,15 @@ jobs:
             ditto "$mount/Mindex.app" "$RUNNER_TEMP/Mindex.app"
             hdiutil detach "$mount"
             codesign --verify --deep --strict "$RUNNER_TEMP/Mindex.app"
+            env PATH="/usr/bin:/bin" "$RUNNER_TEMP/Mindex.app/Contents/Resources/backend/mindex" \
+              -m mindex.desktop_check "$RUNNER_TEMP/dsh installed check" --dsh-only
             env PATH="/usr/bin:/bin:$(dirname "$(command -v node)")" \
               MINDEX_SMOKE_APP="$RUNNER_TEMP/Mindex.app/Contents/MacOS/Mindex" node tests/desktop_smoke.cjs
           elif [ "$RUNNER_OS" = "Linux" ]; then
             executable="$(node -p 'require("./desktop/package.json").build.linux.executableName')"
             test -x "desktop/dist/linux-unpacked/$executable"
+            env PATH="/usr/bin:/bin" desktop/dist/linux-unpacked/resources/backend/mindex \
+              -m mindex.desktop_check "$RUNNER_TEMP/dsh installed check" --dsh-only
             env PATH="/usr/bin:/bin:$(dirname "$(command -v node)")" \
               MINDEX_SMOKE_APP="$PWD/desktop/dist/linux-unpacked/$executable" xvfb-run -a node tests/desktop_smoke.cjs
           else
@@ -237,6 +259,9 @@ jobs:
             # node/powershell 全部找不到）。改用 POSIX 形式的受限 PATH 交给 env——
             # env 按 ':' 找到 node.exe，MSYS 再为原生子进程转成 Windows 形式。
             # 保留 WindowsPowerShell\v1.0：外壳查进程父子关系（reapStale）要调 powershell。
+            env PATH="$(cygpath -u -p "$SYSTEMROOT\\System32;$SYSTEMROOT")" \
+              desktop/dist/win-unpacked/resources/backend/mindex.exe \
+              -m mindex.desktop_check "$(cygpath -w "$RUNNER_TEMP/dsh installed check")" --dsh-only
             env PATH="$(cygpath -u -p "$SYSTEMROOT\\System32;$SYSTEMROOT;$SYSTEMROOT\\System32\\WindowsPowerShell\\v1.0"):$(dirname "$(cygpath -u "$(command -v node)")")" \
               MINDEX_SMOKE_APP="$(cygpath -w "$PWD/desktop/dist/win-unpacked/Mindex.exe")" node tests/desktop_smoke.cjs
           fi
