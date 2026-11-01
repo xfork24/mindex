@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import sys
 
 import pytest
@@ -32,7 +33,9 @@ def test_install_success_reports_progress_and_installed(monkeypatch, tmp_path):
     installer.wait(30)
     state = installer.state()
     assert state["installed"] is True and state["task"]["status"] == "complete" and state["task"]["error"] is None
-    assert state["task"]["log"].splitlines() == ["100%", "done"]  # \r 进度只保留最后一段
+    # 探针：同一替身以 subprocess.run 读法对照，区分「替身 stdout 丢失」与「Popen 逐行读取丢失」。
+    probe = subprocess.run([*SUCCESS, "9999"], capture_output=True, timeout=60)
+    assert state["task"]["log"].splitlines() == ["100%", "done"], (state["task"], probe.stdout, probe.stderr)  # \r 进度只保留最后一段
     assert state["task"]["finished_at"]
 
 
@@ -46,7 +49,7 @@ def test_install_failure_and_concurrency(monkeypatch, tmp_path):
     failing.wait(30)
     state = failing.state()
     assert (state["installed"], state["task"]["status"]) == (False, "failed")
-    assert "退出码 7" in state["task"]["error"] and "network down" in state["task"]["log"]
+    assert "退出码 7" in state["task"]["error"] and "network down" in state["task"]["log"], state["task"]
     missing = BrowserInstaller(["/nonexistent/installer"])
     missing.start()
     missing.wait(30)

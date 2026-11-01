@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 import stat
+import sys
 from pathlib import Path
 
 import pytest
@@ -18,6 +19,11 @@ def wrapper(directory: Path, name: str, log: Path) -> Path:
     real = shutil.which(name)
     assert real, f"测试需要 {name}"
     path = directory / f"wrapped-{name}"
+    if sys.platform == "win32":
+        # Windows 没有 shebang 机制：包装脚本用批处理（%* 原样转交全部参数）。
+        path = path.with_suffix(".bat")
+        path.write_text(f'@echo off\r\necho {name} %* >> "{log}"\r\n"{real}" %*\r\n')
+        return path
     path.write_text(f'#!/bin/sh\necho "{name} $*" >> "{log}"\nexec "{real}" "$@"\n')
     path.chmod(path.stat().st_mode | stat.S_IEXEC)
     return path
@@ -57,7 +63,7 @@ def test_build_uses_configured_binaries_without_path(media_config, monkeypatch, 
     assert shutil.which("ffmpeg") is None and shutil.which("ffprobe") is None
     assert ws.specification(media_config, job_id, w, p, "compose")["signature"] == before
     w, p = run(media_config, job_id, w, p, images=FakeImageGenerator())
-    assert w["builds"][-1]["status"] == "complete", w["builds"][-1]
+    assert w["builds"][-1]["status"] == "complete", f"{w['builds'][-1]}"
     calls = log.read_text().splitlines()
     assert any(line.startswith("ffmpeg ") for line in calls) and any(line.startswith("ffprobe ") for line in calls)
 
