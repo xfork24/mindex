@@ -102,15 +102,28 @@ class BrowserInstaller:
         env = {**os.environ, "PLAYWRIGHT_BROWSERS_PATH": str(browsers_path())}
         try:
             browsers_path().mkdir(parents=True, exist_ok=True)
+            # stdout/stderr 分开管道：Windows 上把 stderr 合并进 stdout 管道（STDERR=STDOUT）会
+            # 使子进程输出整条丢失（实测 uv venv 的 python 组合）；stderr 由伴生线程汇入日志。
             # 以字节读取：文本模式会把进度刷新用的 \r 当成换行。
-            process = subprocess.Popen(command, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                       stderr=subprocess.STDOUT)
+            process = subprocess.Popen(command, env=env, stdin=subprocess.DEVNULL,
+                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+            def drain_stderr() -> None:
+                for raw in process.stderr or ():
+                    text = raw.decode("utf-8", errors="replace").strip()
+                    if text:
+                        with self._lock:
+                            self._log.append(text)
+
+            worker = threading.Thread(target=drain_stderr, daemon=True, name="animation-browser-install-err")
+            worker.start()
             for raw in process.stdout:
                 # 下载进度用 \r 刷新同一行：只保留最后一段。
                 text = raw.decode("utf-8", errors="replace").rstrip("\n").split("\r")[-1].strip()
                 if text:
                     with self._lock:
                         self._log.append(text)
+            worker.join(5)
             code = process.wait(INSTALL_TIMEOUT)
             with self._lock:
                 self.status = "complete" if code == 0 else "failed"
