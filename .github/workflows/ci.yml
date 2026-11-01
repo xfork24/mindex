@@ -115,7 +115,7 @@ jobs:
 
       - name: 外壳纯逻辑
         working-directory: desktop
-        run: node --test test
+        run: node --test "test/*.test.js"  # 引号防 shell 展开，node 自行处理 glob（三平台一致）
 
       - name: 桌面相关后端测试
         run: >-
