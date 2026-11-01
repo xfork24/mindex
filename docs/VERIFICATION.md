@@ -2,6 +2,35 @@
 
 > 历史记录，内容可能与当前代码不符，以当前源码、CLI 帮助与本次实际运行的测试为准。
 
+## 跨平台桌面版验证（2026-11-01）
+
+任务见 `.kiro/specs/desktop-cross-platform/`；计划与决策见 `plans/WIN_LINUX_NATIVE_PLAN.md`。目标平台为 Windows x64 与 Linux x64，功能与 macOS 端一致。
+
+### 本机（Apple M1）侧
+
+- 后端跨平台层：`shared/locks.py` 的 POSIX flock 分支行为逐字节不变（`tests/test_locks.py`、`tests/test_processing_lock.py` 全绿，含与 `filelock` 的互操作用例）；新增 `shared/process_ops.py`（脱离启动、存活、pid 指纹、整树停止）的 POSIX 用例用真实子进程验证（`tests/test_process_ops.py`）。
+- 外壳跨平台：`desktop/lib/` 的 `binaryName`、`sidecar.js` 的 Windows 分支（PowerShell 进程查询、taskkill 树杀）、`main.js` 的 `windowsHide`/`AppUserModelId`/托盘不可用降级，均有可在 macOS 上运行的注入式单测（`node --test desktop/test` 27 通过）。
+- 构建链：`scripts/build-desktop-mac.sh` 全链零回归（重构后的三环境 ffmpeg 脚本 Darwin 分支：源码编译 + `otool -L` 链接验收 + 冻结后端 + 冻结冒烟含中文字幕烧录 + electron-builder + ad-hoc 签名），产出 `Mindex-0.1.0-arm64.dmg`（324 MB）、`.zip`（315 MB）与 GPL 源码包（37 MB）；对打包产物跑 packaged 冒烟（`MINDEX_SMOKE_APP=…/Mindex.app/Contents/MacOS/Mindex`）全部通过。
+- 回归：快速 pytest 1964 通过（含 `person` extra 的人物库用例）；ruff、node --check、messages/assets/文档链接校验通过。
+
+### GitHub Actions 三平台矩阵（CI 运行 41268349954）
+
+`desktop` job 在 macos-14 / windows-2025 / ubuntu-24.04 三个平台**全部通过**：外壳纯逻辑单测、桌面相关后端 pytest（28 通过）、Electron 开发模式冒烟（真实外壳 + 真实 `mindex serve`）。
+
+Windows 首轮暴露并已修复的四类问题（均只在 Windows 出现，macOS/Linux 不可见）：
+
+1. **CI 步骤写法**：`node --test test`（裸目录）在 Node 22 不支持（`MODULE_NOT_FOUND`），改为引号包裹的 glob；冒烟步骤混合 bash/pwsh 语法，改为统一 `shell: bash`。
+2. **既有单测的平台假设**：POSIX 信号注入断言加 win32 守卫；真实子进程用例的 `/bin/sh` 改用 `process.execPath` + node 脚本。
+3. **Windows 文本模式的换行转换**：子进程输出经文本模式把 `\n` 转成 `\r\n`，而进度行解析用 `rstrip("\n").split("\r")[-1]` 会在尾部多出的 `\r` 上切出空段，导致浏览器组件安装的进度日志整条丢失（安装状态与退出码正常，唯独无输出）。改为 `rstrip("\r\n")` 并抽出 `progress_line()` 供回归测试（Windows CRLF 用例在 macOS 上也可跑）。这是生产问题，不止测试。
+4. **Windows 短路径展开**：Electron 的 `app.setPath` 与后端 `Path.resolve()` 会把 8.3 短路径（`RUNNER~1`）展开为长路径（`runneradmin`），与 Node 侧 `realpathSync` 的短路径形式不等；冒烟脚本的两处路径断言改为比较目录名 + 存在性。
+
+另外，生产侧的 `PYTHONUTF8=1`（外壳注入 + CI pytest 步骤）修掉了 Windows 上 Python 按控制台代码页编码输出中文日志的 `UnicodeEncodeError`。
+
+### 待完成
+
+- `desktop-package`（定时/手动触发，三平台）：从源码编译随包 ffmpeg、冻结 sidecar、冻结冒烟、electron-builder 出安装包、安装后 packaged 冒烟与 artifact 上传——结果待该 job 跑完后补记。
+- spike S1–S6（Windows 依赖解析、Linux libass 字体后端、MSYS2 meson 来源、LockFileEx 与 filelock 互操作实测、Linux 托盘失败模式、Windows console+windowsHide 闪框）的实机结论，回填 `.kiro/specs/desktop-cross-platform/design.md` §7。
+
 ## macOS 桌面版验证（2026-10-25）
 
 环境：Apple M1、16 GB、macOS 26.7.1；Electron 45.0.0、PyInstaller 6.22.3、CPython 3.13；随包 ffmpeg 9.0.2（源码编译，GPL）。任务见 `.kiro/specs/macos-desktop/`。
