@@ -151,7 +151,10 @@ def test_windows_spawn_detached_and_tree_stop(tmp_path):
         forced = process_ops.stop_tree(parent_pid, grace=8, child=child)
     child.wait(5)
     wait_gone(grandchild_pid)  # taskkill /T 连孙进程一起结束
-    assert forced in (True, False)
+    # 无窗 python 进程不响应 taskkill 软停（WM_CLOSE 只对有消息循环的窗口进程有效），
+    # 宽限超时后必走 /F 强杀。若 Windows 实测推翻（软停生效返回 False），翻转本断言即可——
+    # 这也是 spike S6 的验证点之一。
+    assert forced is True
 
 
 @windows_only

@@ -93,6 +93,7 @@ if ($LASTEXITCODE -ne 0) { throw "check-desktop-sidecar.py 退出码 $LASTEXITCO
 Push-Location $Desktop
 try {
     npm ci --no-audit --no-fund
+    if ($LASTEXITCODE -ne 0) { throw "npm ci 退出码 $LASTEXITCODE" }
     if (Test-Path (Join-Path $Desktop "dist")) { Remove-Item -Recurse -Force (Join-Path $Desktop "dist") }
     npx electron-builder --win --x64 --publish never
     if ($LASTEXITCODE -ne 0) { throw "electron-builder 退出码 $LASTEXITCODE" }

@@ -26,15 +26,29 @@ IS_WINDOWS = sys.platform == "win32"
 
 if IS_WINDOWS:  # 仅 Windows 导入；本模块必须能在 POSIX 上导入。
     import ctypes
+    from ctypes import wintypes
 
     _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
     _STILL_ACTIVE = 259
     _CREATE_NEW_PROCESS_GROUP = 0x00000200
     _CREATE_NO_WINDOW = 0x08000000
 
+    # 与 locks.py 一致：显式声明签名，避免依赖默认 int 转换截断 64 位句柄。
+    _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    _kernel32.OpenProcess.restype = wintypes.HANDLE
+    _kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    _kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+    _kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    _kernel32.GetProcessTimes.restype = wintypes.BOOL
+    _kernel32.GetProcessTimes.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.FILETIME),
+                                          ctypes.POINTER(wintypes.FILETIME), ctypes.POINTER(wintypes.FILETIME),
+                                          ctypes.POINTER(wintypes.FILETIME)]
+    _kernel32.CloseHandle.restype = wintypes.BOOL
+    _kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+
     def _open_process(pid: int) -> int:
         """查询权限的进程句柄；进程不存在或无法访问时返回 0。调用方负责 CloseHandle。"""
-        return ctypes.windll.kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        return _kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
 
 
 def spawn_detached(argv: list[str], *, cwd: str | None = None, env: dict | None = None,
@@ -56,12 +70,12 @@ def alive(pid: int) -> bool:
         if not handle:
             return False
         try:
-            code = ctypes.c_ulong()
-            if not ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+            code = wintypes.DWORD()
+            if not _kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
                 return False
             return code.value == _STILL_ACTIVE
         finally:
-            ctypes.windll.kernel32.CloseHandle(handle)
+            _kernel32.CloseHandle(handle)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -80,15 +94,16 @@ def process_start(pid: int) -> str | None:
         if not handle:
             return None
         try:
-            creation, exit_time, kernel, user = (ctypes.c_ulonglong() for _ in range(4))
-            if not ctypes.windll.kernel32.GetProcessTimes(
+            creation, exit_time, kernel, user = (wintypes.FILETIME() for _ in range(4))
+            if not _kernel32.GetProcessTimes(
                 handle, ctypes.byref(creation), ctypes.byref(exit_time),
                 ctypes.byref(kernel), ctypes.byref(user),
             ):
                 return None
-            return str(creation.value)  # FILETIME（100ns 刻度），同平台重启间比较
+            # FILETIME（100ns 刻度，双 DWORD 拼接），同平台重启间比较。
+            return str(creation.dwLowDateTime | (creation.dwHighDateTime << 32))
         finally:
-            ctypes.windll.kernel32.CloseHandle(handle)
+            _kernel32.CloseHandle(handle)
     try:
         value = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True,
                                timeout=5, check=False).stdout.strip()
