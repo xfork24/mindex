@@ -1305,7 +1305,9 @@ if (typeof window !== 'undefined' && window.addEventListener) {
 async function loadAgentRuntime() {
   const data = await api('/api/settings/agent-runtime');
   $('agent-runtime').value = data.runtime;
-  $('agent-runtime-status').textContent = data.dsh.ready ? 'dsh 依赖可用' : data.dsh.errors.join('；');
+  const status = $('agent-runtime-status');
+  status.textContent = data.dsh.ready ? 'dsh 依赖可用' : data.dsh.errors.join('；');
+  status.title = status.textContent;
 }
 $('agent-runtime-form').addEventListener('submit', (event) => {
   event.preventDefault();
