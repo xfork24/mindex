@@ -220,8 +220,10 @@ jobs:
             env PATH="/usr/bin:/bin:$(dirname "$(command -v node)")" \
               MINDEX_SMOKE_APP="$RUNNER_TEMP/Mindex.app/Contents/MacOS/Mindex" node tests/desktop_smoke.cjs
           elif [ "$RUNNER_OS" = "Linux" ]; then
+            executable="$(node -p 'require("./desktop/package.json").build.linux.executableName')"
+            test -x "desktop/dist/linux-unpacked/$executable"
             env PATH="/usr/bin:/bin:$(dirname "$(command -v node)")" \
-              MINDEX_SMOKE_APP="$PWD/desktop/dist/linux-unpacked/Mindex" xvfb-run -a node tests/desktop_smoke.cjs
+              MINDEX_SMOKE_APP="$PWD/desktop/dist/linux-unpacked/$executable" xvfb-run -a node tests/desktop_smoke.cjs
           else
             export PATH="C:\Windows\System32;C:\Windows;$(dirname "$(command -v node)")"
             MINDEX_SMOKE_APP="$(cygpath -w "$PWD/desktop/dist/win-unpacked/Mindex.exe")" node tests/desktop_smoke.cjs

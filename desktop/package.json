@@ -3,6 +3,7 @@
   "productName": "Mindex",
   "version": "0.1.0",
   "description": "Mindex 桌面版：Electron 外壳 + mindex serve sidecar",
+  "homepage": "https://github.com/xfork24/mindex",
   "private": true,
   "main": "main.js",
   "scripts": {
@@ -64,6 +65,7 @@
       "deleteAppDataOnUninstall": false
     },
     "linux": {
+      "executableName": "mindex",
       "target": [
         { "target": "AppImage", "arch": ["x64"] },
         { "target": "deb", "arch": ["x64"] }

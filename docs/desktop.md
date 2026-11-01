@@ -86,6 +86,8 @@ powershell scripts/build-desktop-win.ps1
 # 产物：desktop/dist/Mindex-<版本>-x64.{exe,zip}、mindex-desktop-ffmpeg-sources-<版本>.zip
 ```
 
+Linux 的 deb 构建要求 `desktop/package.json` 提供 `homepage`，维护包元数据时须保留。包内的可执行文件名由 `build.linux.executableName` 显式指定为 `mindex`；CI 从该配置读取 `linux-unpacked` 的冒烟启动路径。
+
 CI（`.github/workflows/ci.yml`）的 `desktop-package` 任务在定时/手动触发时按三平台矩阵构建并上传安装包，是默认产出方式；上述脚本在本地各平台同样可跑。MSYS2 工具链安装：`pacman -S mingw-w64-ucrt-x86_64-toolchain mingw-w64-ucrt-x86_64-nasm mingw-w64-ucrt-x86_64-pkgconf mingw-w64-ucrt-x86_64-meson mingw-w64-ucrt-x86_64-ninja`。
 
 分步执行：
