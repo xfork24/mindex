@@ -202,7 +202,7 @@ input[type=checkbox],input[type=radio]{appearance:auto;accent-color:var(--green)
 
 input[type=file]{height:auto;min-height:40px;width:100%;padding:5px;font-size:12px;line-height:24px}
 
-input[type=file]::file-selector-button{font:inherit;height:var(--control-size);margin:0 8px 0 0;padding:0 10px;border:1px solid var(--line);border-radius:5px;background:#f0f4eb;color:var(--control-text);cursor:pointer}
+input[type=file]::file-selector-button{font:inherit;height:var(--control-size);margin:0 8px 0 0;padding:0 10px;border:1px solid var(--line);border-radius:var(--control-radius);background:var(--surface-2);color:var(--control-text);cursor:pointer}
 
 input[type=range]{padding:0;accent-color:var(--green)}
 
@@ -310,7 +310,7 @@ textarea{resize:both;min-width:min(140px,100%);max-width:100%}
 #entity-filters>label{flex:1 1 240px;max-width:none}
 @media(max-width:540px){#person-controls label:has(.multi-select),#person-controls label:not(:has(.multi-select)){width:100%}#capture-form>label,#process-form>label,#capture-form>label:has(input[type=number]),#process-form>label:has(input[type=number]){flex-basis:100%}}
 
-button.language-switch{position:relative;isolation:isolate;overflow:hidden;width:80px;height:var(--control-size);min-height:var(--control-size);padding:0;border-radius:7px;background:var(--surface)}
+button.language-switch{position:relative;isolation:isolate;overflow:hidden;width:80px;height:var(--control-size);min-height:var(--control-size);padding:0;border-radius:var(--control-radius);background:var(--surface)}
 button.language-switch::before{content:"";position:absolute;inset:0;z-index:-1;background:var(--green);pointer-events:none;clip-path:polygon(0 0,58% 0,42% 100%,0 100%)}
 button.language-switch:has([data-language="en"][aria-current="true"])::before{clip-path:polygon(58% 0,100% 0,100% 100%,42% 100%)}
 button.language-switch [data-language]{position:absolute;top:0;bottom:0;display:flex;align-items:center;justify-content:center;width:40%}
