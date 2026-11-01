@@ -1,4 +1,4 @@
-# 构建 Windows 桌面版冻结后端（PyInstaller onedir）：desktop/build/backend/mindex.exe。
+﻿# 构建 Windows 桌面版冻结后端（PyInstaller onedir）：desktop/build/backend/mindex.exe。
 # scripts/build-desktop-sidecar.sh 的 Windows 原生等价流程（同一 desktop/sidecar/mindex.spec）：
 # 在独立虚拟环境中按 uv.lock 安装依赖（主依赖 + animation、mcp extra；不含 dev、person），
 # 以普通 wheel 安装 mindex，再用锁定版本的 PyInstaller 打包。不改动仓库的 .venv。

@@ -1,4 +1,4 @@
-# 构建 Windows 桌面版安装包（x64）：desktop/dist/Mindex-<版本>-x64.{exe[NSIS],zip}，
+﻿# 构建 Windows 桌面版安装包（x64）：desktop/dist/Mindex-<版本>-x64.{exe[NSIS],zip}，
 # 以及 GPL 对应源码包 desktop/dist/mindex-desktop-ffmpeg-sources-<版本>.zip。
 #
 #   powershell scripts/build-desktop-win.ps1 [-RebuildFfmpeg] [-SkipSidecar]

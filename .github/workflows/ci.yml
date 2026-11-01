@@ -206,7 +206,7 @@ jobs:
           uv sync --extra dev
           if [ "$RUNNER_OS" = "macOS" ]; then scripts/build-desktop-mac.sh
           elif [ "$RUNNER_OS" = "Linux" ]; then scripts/build-desktop-linux.sh
-          else powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-desktop-win.ps1; fi
+          else pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/build-desktop-win.ps1; fi
 
       - name: 安装并冒烟（PATH 只留系统目录与 node）
         shell: bash

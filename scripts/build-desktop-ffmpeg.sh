@@ -130,7 +130,7 @@ meson_build() {  # 目录 选项…
   local dir="$1"; shift
   (cd "${WORK}/${dir}" && "${MESON}" setup build --prefix="${PREFIX}" --libdir=lib --buildtype=release \
      --default-library=static --wrap-mode=nodownload "$@" >"${WORK}/${dir}.log" 2>&1 \
-   && ninja -C build install >>"${WORK}/${dir}.log" 2>&1) || { tail -40 "${WORK}/${dir}.log" >&2; exit 1; }
+   && ninja -C build install >>"${WORK}/${dir}.log" 2>&1) || { tail -n 40 "${WORK}/${dir}.log" >&2 || true; exit 1; }
 }
 
 echo "构建 x264"
@@ -186,20 +186,20 @@ if [[ "${PLATFORM}" == "mac" ]]; then
      ${COMMON_CONFIGURE} --enable-videotoolbox --enable-audiotoolbox --enable-zlib --enable-bzlib --enable-iconv \
      --extra-cflags="${CFLAGS} -I${PREFIX}/include" --extra-ldflags="${LDFLAGS} -L${PREFIX}/lib" --extra-libs="-lc++" \
      >"${WORK}/ffmpeg-configure.log" 2>&1 && make -j"${JOBS}" >"${WORK}/ffmpeg-build.log" 2>&1 \
-     && make install >>"${WORK}/ffmpeg-build.log" 2>&1) || { tail -40 "${WORK}/ffmpeg-configure.log" "${WORK}/ffmpeg-build.log" >&2; exit 1; }
+     && make install >>"${WORK}/ffmpeg-build.log" 2>&1) || { tail -n 40 "${WORK}/ffmpeg-configure.log" "${WORK}/ffmpeg-build.log" >&2 || true; exit 1; }
 elif [[ "${PLATFORM}" == "linux" ]]; then
   (cd "${WORK}/ffmpeg-9.0.2" && ./configure --prefix="${PREFIX}" --cc=gcc --cxx=g++ \
      ${COMMON_CONFIGURE} --enable-pthreads --enable-zlib --enable-bzlib --enable-iconv \
      --extra-cflags="${CFLAGS} -I${PREFIX}/include" --extra-ldflags="${LDFLAGS} -L${PREFIX}/lib" --extra-libs="-lpthread -lm" \
      >"${WORK}/ffmpeg-configure.log" 2>&1 && make -j"${JOBS}" >"${WORK}/ffmpeg-build.log" 2>&1 \
-     && make install >>"${WORK}/ffmpeg-build.log" 2>&1) || { tail -40 "${WORK}/ffmpeg-configure.log" "${WORK}/ffmpeg-build.log" >&2; exit 1; }
+     && make install >>"${WORK}/ffmpeg-build.log" 2>&1) || { tail -n 40 "${WORK}/ffmpeg-configure.log" "${WORK}/ffmpeg-build.log" >&2 || true; exit 1; }
 else
   # 静态链接 MinGW 运行时（-static-libgcc/-static-libwinpthread），不携带任何 MinGW DLL。
   (cd "${WORK}/ffmpeg-9.0.2" && ./configure --prefix="${PREFIX}" --arch=x86_64 --cc=gcc --cxx=g++ \
      ${COMMON_CONFIGURE} --enable-w32threads --disable-iconv \
      --extra-cflags="${CFLAGS} -I${PREFIX}/include" --extra-ldflags="-static -static-libgcc -static-libwinpthread -L${PREFIX}/lib" \
      >"${WORK}/ffmpeg-configure.log" 2>&1 && make -j"${JOBS}" >"${WORK}/ffmpeg-build.log" 2>&1 \
-     && make install >>"${WORK}/ffmpeg-build.log" 2>&1) || { tail -40 "${WORK}/ffmpeg-configure.log" "${WORK}/ffmpeg-build.log" >&2; exit 1; }
+     && make install >>"${WORK}/ffmpeg-build.log" 2>&1) || { tail -n 40 "${WORK}/ffmpeg-configure.log" "${WORK}/ffmpeg-build.log" >&2 || true; exit 1; }
 fi
 
 EXE=""
