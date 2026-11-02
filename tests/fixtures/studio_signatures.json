@@ -260,10 +260,10 @@
    "revision": "8e9c1bdc7aa77fd19a190006",
    "token": "030c7521937a444481c18398"
   },
-  "recall:a": "ff9b4379032031f12fb74a55",
-  "recall:a:scoped": "325449452c28751536d0d76a",
-  "recall:b": "30eae49268fcc08109e60101",
-  "recall:c": "606a1c8f251e010f8716fdc3",
+  "recall:a": "90335cf435be215bc3c53cbd",
+  "recall:a:scoped": "e638856ba12106c66d491f1d",
+  "recall:b": "7ead36be4e576baf35c1f004",
+  "recall:c": "b80f4592e7defdcd83c9d9f1",
   "render:a": "efcc0da967a163eafde12b78",
   "render:b": "35ca96751295accd647e71ed",
   "render:c": "84f6411c8779ba8225917073",
@@ -271,7 +271,7 @@
   "select:a": "f487860b12f2a75e13c4a841",
   "select:b": "c405e81aae9dba2942096f4c",
   "select:c": "380d9b6a8fbf9796fb83a35e",
-  "split": "b59ef66634ae2b502896f78e",
+  "split": "6ce81ec4e39b4172ef364078",
   "tts:a": "6cfe19eae539980a50a4542b",
   "tts:b": "40dc3a846376c3503bc54342",
   "tts:c": "bcd719fdc78612b314fe2538"
@@ -348,7 +348,7 @@
        "alignment": "manual",
        "end": 0.899938,
        "rank": 1,
-       "score": 0.01639344262295082,
+       "score": 1.0,
        "segment_id": "9d63af9fd724d46a9839fb3a",
        "segment_ids": [
         "9d63af9fd724d46a9839fb3a"
@@ -401,7 +401,7 @@
        "alignment": "manual",
        "end": 0.899938,
        "rank": 1,
-       "score": 0.01639344262295082,
+       "score": 1.0,
        "segment_id": "9d63af9fd724d46a9839fb3a",
        "segment_ids": [
         "9d63af9fd724d46a9839fb3a"
@@ -470,7 +470,7 @@
        "alignment": "manual",
        "end": 1.8999380000000001,
        "rank": 1,
-       "score": 0.01639344262295082,
+       "score": 1.0,
        "segment_id": "550e41a4eaaef197ef8b83ef",
        "segment_ids": [
         "550e41a4eaaef197ef8b83ef"
@@ -523,7 +523,7 @@
        "alignment": "manual",
        "end": 1.8999380000000001,
        "rank": 1,
-       "score": 0.01639344262295082,
+       "score": 1.0,
        "segment_id": "550e41a4eaaef197ef8b83ef",
        "segment_ids": [
         "550e41a4eaaef197ef8b83ef"

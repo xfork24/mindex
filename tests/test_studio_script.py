@@ -166,7 +166,8 @@ def test_build_from_scratch_starts_with_script_and_depends_on_it(env):
     build = data["builds"][-1]
     assert build["status"] == "complete", build
     stages = [n["stage"] for n in build["nodes"]]
-    assert list(dict.fromkeys(stages)) == ["script", "split", "recall", "tts", "select", "render", "compose"]
+    assert list(dict.fromkeys(stages)) == ["script", "split", "recall", "tts", "select", "render", "compose",
+                                          "export", "metadata", "cover", "package"]
     assert stages.count("script") == stages.count("split") == 1
     plan = data["plans"][pid]
     assert plan["final"] and plan["board_script"] == plan["script"] and not data["script_stale"]

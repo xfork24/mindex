@@ -71,10 +71,11 @@ const focused = (page, selector) => page.locator(`${selector}[data-agent-focus]`
       await page.locator('#agent-drawer:not([hidden])').waitFor();
       await page.locator('.agent-assistant', {hasText: '当前方案共有 3 个分镜'}).waitFor({timeout: 15000});
       assert.equal(await page.locator('[data-agent-focus]').count(), 0);  // 重放历史不定位
-      await page.locator('[data-language=en]').first().click();
+      // 语言按钮只显示当前语言的字形，切换动作由按钮本身承担（i18n.js 整钮循环 zh↔en）。
+      await page.locator('[data-language-toggle]').first().click();
       assert.equal(await page.locator('.agent-send').textContent(), 'Send');
       assert.equal(await page.locator('.agent-follow span').textContent(), 'Follow the assistant');
-      await page.locator('[data-language=zh]').first().click();
+      await page.locator('[data-language-toggle]').first().click();
     }
 
     if (scenario === 'approval') {
@@ -514,7 +515,8 @@ const focused = (page, selector) => page.locator(`${selector}[data-agent-focus]`
       await page.waitForFunction(() => !document.querySelector('details.agent-player-audio audio').paused);
       await page.locator('.agent-close').click();
       assert.equal(await page.evaluate(() => document.querySelector('details.agent-player-audio audio').paused), true);
-      assert.deepEqual(external.filter((u) => !u.startsWith('data:')), []);
+      // data: 与 blob: 都是本地内联/内存对象 URL（同源、无网络请求）；此处拦截的是第三方外链。
+      assert.deepEqual(external.filter((u) => !u.startsWith('data:') && !u.startsWith('blob:')), []);
     }
 
     if (scenario === 'attach') {

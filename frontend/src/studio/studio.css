@@ -372,6 +372,8 @@ textarea.code-editor { width: 100%; min-height: 360px; font-family: ui-monospace
 /* Delivery templates and plan snapshot editor. */
 .delivery-config-fields { min-width: 0; margin: 1rem 0; padding: 0; border: 0; }
 .delivery-config-fields .field { display: grid; gap: .4rem; margin: .8rem 0; }
+/* 交付配置区内的字段由 .delivery-fields 网格接管（标签列 + 控件列）。 */
+.delivery-config-fields .delivery-fields > label.field { display: contents; margin: 0; }
 .delivery-config-fields input:not([type=checkbox]), .delivery-config-fields select,
 .delivery-config-fields textarea { width: 100%; min-width: 0; box-sizing: border-box; }
 .delivery-config-fields textarea { min-height: 4rem; }
@@ -379,25 +381,32 @@ textarea.code-editor { width: 100%; min-height: 360px; font-family: ui-monospace
 #delivery-template-list [aria-current=true] { border-color: var(--accent, #d39c49); }
 #delivery-template-form { padding: 1rem; }
 
-/* Shared wrapping layout: template management and independent task copies. */
-.delivery-fields, .delivery-export-grid { display:flex; flex-wrap:wrap; align-items:flex-start; gap:12px 16px; min-width:0; }
+/* 交付配置：两列网格——左列标签、右列控件，标签之间与控件之间严格对齐；
+   勾选框落在控件列，与同列输入框左边缘对齐。 */
+.delivery-fields{display:grid;grid-template-columns:var(--delivery-label-width,200px) minmax(0,1fr);gap:10px 16px;align-items:center;min-width:0}
 .delivery-fields > h3, .delivery-fields > p, .delivery-fields > summary,
-.delivery-fields > .delivery-export-grid, .delivery-fields > .cover-candidates { flex-basis:100%; }
-.delivery-fields > .field { flex:1 1 210px; min-width:0; margin:.4rem 0; }
-.delivery-fields > .delivery-long { flex:1 1 300px; }
-.delivery-fields .delivery-check { display:flex; flex-direction:row-reverse; align-items:center; justify-content:flex-end; flex:0 1 auto; gap:8px; }
+.delivery-fields > .delivery-export-grid, .delivery-fields > .cover-candidates,
+.delivery-fields > .delivery-rule, .delivery-fields > .delivery-platform-choice { grid-column:1/-1 }
+.delivery-fields > label.field{display:contents}
+.delivery-fields > label.field > span{color:var(--muted);font-size:12px;line-height:1.5;align-self:center}
+.delivery-fields > label.field > input:not([type=checkbox]), .delivery-fields > label.field > select,
+.delivery-fields > label.field > textarea { width:100%; min-width:0; box-sizing:border-box }
+.delivery-fields > label.field > input[type=checkbox]{align-self:center}
+.delivery-fields > button{grid-column:2;justify-self:start}
+.delivery-export-grid { display:flex; flex-wrap:wrap; align-items:flex-start; gap:12px 16px; min-width:0; }
 .delivery-export-card { display:flex; flex-wrap:wrap; flex:1 1 210px; gap:8px; min-width:0; padding:12px; border:1px solid var(--line); border-radius:8px; }
 .delivery-export-card > strong { flex-basis:100%; }
 .delivery-export-card > .field { flex:1 1 160px; min-width:0; }
-.delivery-rule { flex:1 1 300px; min-width:0; }
-.delivery-platform-choice { display:flex; flex-wrap:wrap; align-items:center; gap:8px; max-width:100%; }
+.delivery-rule { min-width:0; }
+/* 平台勾选行：平台名在标签列，勾选框与输入框同列对齐，操作按钮紧随其后。 */
+.delivery-platform-choice { display:grid; grid-template-columns:var(--delivery-label-width,200px) auto minmax(0,1fr); gap:8px 16px; align-items:center; max-width:100%; }
+.delivery-platform-choice > .delivery-check{ display:contents; }
+.delivery-platform-choice > button{ justify-self:start; }
 .delivery-management { margin-bottom:28px; padding:16px; border:1px solid var(--line); border-radius:10px; }
 .delivery-platform-list { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0; }
 .delivery-platform-form { min-width:0; }
-.delivery-platform-form .field { display:grid; gap:6px; }
 .delivery-platform-form input, .delivery-platform-form select { width:100%; min-width:0; box-sizing:border-box; }
-.delivery-platform-form .delivery-check { display:flex; }
-@media(max-width:480px) { .delivery-fields > .field:not(.delivery-check), .delivery-export-card, .delivery-rule { flex-basis:100%; } }
+@media(max-width:480px) { .delivery-fields { grid-template-columns:minmax(0,1fr) } }
 
 /* Workflow fields adapt to panel width rather than a fixed number of columns. */
 .shot-grid{grid-template-columns:repeat(auto-fit,minmax(min(260px,100%),1fr))}

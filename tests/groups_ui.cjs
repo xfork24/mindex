@@ -204,12 +204,19 @@ const sourceGroup = process.env.MINDEX_GROUPS_SOURCE_GROUP;
     await page.locator('#stage-panel [data-recall-filter=source_ids]').waitFor();
     for (const language of ['zh', 'en']) {
       await page.evaluate((lang) => MindexI18n.setLanguage(lang), language);
+      // 控件宽度由 control-layout 在 rAF 中按内容测量写入，先等测量落定再断言。
+      await page.waitForFunction(() => {
+        const row = document.querySelector('#stage-panel .recall-scope-options');
+        if (!row) return false;
+        const nodes = [...row.querySelectorAll(':scope>.group-picker,:scope>.recall-material-field,.recall-person-list,.recall-person-choice')];
+        return nodes.length > 0 && nodes.every((node) => node.style.getPropertyValue('--control-content-width'));
+      }, null, {timeout: 15000});
       const fields = await page.locator('#stage-panel .recall-scope-options').evaluate((row) => {
         const nodes = [...row.querySelectorAll(':scope>.group-picker,:scope>.recall-material-field,.recall-person-list,.recall-person-choice')];
         return nodes.map((node) => { const r = node.getBoundingClientRect(); return {top:r.top,left:r.left,right:r.right,width:r.width,wanted:parseFloat(node.style.getPropertyValue("--control-content-width")),available:row.clientWidth}; });
       });
       assert.equal(fields.length, 5);
-      for (const field of fields) assert(Math.abs(field.width - Math.min(field.wanted, field.available)) < 3, `${language}: 多选框应按内容宽度并受容器约束`);
+      for (const field of fields) assert(Math.abs(field.width - Math.min(field.wanted, field.available)) < 3, `${language}: 多选框应按内容宽度并受容器约束 ${JSON.stringify(field)}`);
       for (let i=1;i<fields.length;i++) if (Math.abs(fields[i].top-fields[i-1].top)<2) assert(fields[i].left-fields[i-1].right<=13, "同行控件应保持统一间距");
     }
     await audit('groups-shot-recall');

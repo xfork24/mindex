@@ -86,11 +86,15 @@ def upgrade_database(path):
 
 
 def walk(value, transform):
+    """按 transform 改写结构中的字符串；布尔、数字与 null 原样保留。
+
+    transform 的契约是字符串改写（路径迁移、ID 重映射），对 JSON 标量直接调用会出错。
+    """
     if isinstance(value, dict):
         return {key: walk(item, transform) for key, item in value.items()}
     if isinstance(value, list):
         return [walk(item, transform) for item in value]
-    return transform(value)
+    return transform(value) if isinstance(value, str) else value
 
 
 def json_container(value):
