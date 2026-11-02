@@ -1,0 +1,169 @@
+{
+  "width": 1200,
+  "frame_ms": 3000,
+  "format": "webp",
+  "groups": [
+    {
+      "key": "admin",
+      "output": "gallery-admin.webp",
+      "output_sha256": "d87222704b35cd6d158e88c357a7915b86cd57ddc4a36c01753c73f6a1056e18",
+      "sources": [
+        {
+          "file": "admin-shot-analysis.png",
+          "zh": "镜头的 AI 分析结果",
+          "en": "Per-shot AI analysis result",
+          "sha256": "0f234d4950ccb2dc628876436c9ce98350ad5b85626234a33f656b808abe25bf"
+        },
+        {
+          "file": "admin-music.png",
+          "zh": "背景音乐曲库管理",
+          "en": "Background music library",
+          "sha256": "90799f925ef46cac9b3a32c688aee94ac58df32da15e90e809a6d4b5f801d67d"
+        },
+        {
+          "file": "admin-groups.png",
+          "zh": "素材分组管理",
+          "en": "Source group management",
+          "sha256": "e3bc049d9a3b1452252857f4ab94e5f31d8007c980ee8009fa1d315323cb8e65"
+        }
+      ]
+    },
+    {
+      "key": "persons",
+      "output": "gallery-persons.webp",
+      "output_sha256": "84c213645d44afe5fe01a52ee2b6fdb1fbbd82b1325c35b1f97663ac8ccd2611",
+      "sources": [
+        {
+          "file": "persons-appearance-detection.png",
+          "zh": "出镜识别与逐镜证据审核",
+          "en": "Appearance detection with per-shot evidence review",
+          "sha256": "ff9a2cd9b42ed60964d03328b9ee418affc39dfac462f6bbcdb75cd6db2207d5"
+        },
+        {
+          "file": "persons-cast-import.png",
+          "zh": "演员表导入与条目核对",
+          "en": "Cast-table import with entry review",
+          "sha256": "9e35142c75111a506daa40be5c69751aa799b3ceeeae9167a3c12260ee9cb43f"
+        }
+      ]
+    },
+    {
+      "key": "search",
+      "output": "gallery-search.webp",
+      "output_sha256": "51899941e904ff695f3d39a635e2ad9a0032fac42fc67ee456d6d0cd0bdf9789",
+      "sources": [
+        {
+          "file": "search-text-and-object.png",
+          "zh": "物体与场景语义查询",
+          "en": "Semantic query for objects and scenes",
+          "sha256": "dc6b8a4b0ea85b81a1bedd538209440745981ba64167b7fa9030c3dc31449091"
+        },
+        {
+          "file": "search-emotion-closeup.png",
+          "zh": "情绪与景别查询",
+          "en": "Emotion and shot-type queries",
+          "sha256": "206896f91b091e9fba983e5576b292524723a91118fbffd43918aa4f233e627b"
+        },
+        {
+          "file": "search-similar-scenes.png",
+          "zh": "跨素材的相似场景检索",
+          "en": "Similar-scene lookup across sources",
+          "sha256": "3419c3befc04b38ead9544fd8e629c7e508d38db553a44dff386721c65a72336"
+        },
+        {
+          "file": "search-by-image-or-video.png",
+          "zh": "以图片或视频检索",
+          "en": "Image or video similarity search",
+          "sha256": "1827a428194ddf086e015491773dc7e78f4cd3e565f6c794ccf1f00eaff15733"
+        }
+      ]
+    },
+    {
+      "key": "studio",
+      "output": "gallery-studio.webp",
+      "output_sha256": "9c57bc21a40305dd7136b56572f49db7595ab668c16425d5d6df74d4e942b59f",
+      "sources": [
+        {
+          "file": "studio-jobs.png",
+          "zh": "创作任务列表",
+          "en": "Creation task list",
+          "sha256": "cfbd5e5f224f99dfc4fca8cc22ea8813ebc27b5150a36b8064fb11f562376b65"
+        },
+        {
+          "file": "studio-script-templates.png",
+          "zh": "文案模板管理",
+          "en": "Script template management",
+          "sha256": "01fb75f16f8db985b1987970327819eae7ed501d72be988e0b319d28bff57fb8"
+        },
+        {
+          "file": "studio-delivery-templates.png",
+          "zh": "交付模板与平台规则管理",
+          "en": "Delivery template management",
+          "sha256": "944c8b64082b0f4d991b792d907055cf79a2619bf8c15a9fb50e5e0f80b9e05f"
+        },
+        {
+          "file": "studio-style-templates.png",
+          "zh": "风格模板设置",
+          "en": "Style template settings",
+          "sha256": "d53217ed3d5ad63509cc48df958004eb1b9fc674c7f1041bbccb23d1498c80e7"
+        }
+      ]
+    },
+    {
+      "key": "agent",
+      "output": "gallery-agent.webp",
+      "output_sha256": "64897a908e6649f027f7cbba4aeb073875da0d7487488128a09a929a3bf37607",
+      "sources": [
+        {
+          "file": "agent-create-video-2.png",
+          "zh": "Agent 会话：写文案并拆分镜",
+          "en": "Agent session: scripting and storyboard",
+          "sha256": "4f81dda304b6588f8ae191b0c792a8c85d013471c1489a1e2c35cd27b66f5ad7"
+        },
+        {
+          "file": "agent-create-video-3.png",
+          "zh": "Agent 会话：逐镜生产与配音",
+          "en": "Agent session: per-shot production and narration",
+          "sha256": "06b352092386dcbf0b1af27b74980eaf3f49d7681946ac7717b88d687eadbd0d"
+        },
+        {
+          "file": "agent-create-video-4.png",
+          "zh": "Agent 会话：最终构建与成片预览",
+          "en": "Agent session: final build with video preview",
+          "sha256": "fdfd9c31e77cf5a725ba0778b0de9b34edfc5eed530b50bd55174db2774e959e"
+        },
+        {
+          "file": "agent-search-clips.png",
+          "zh": "Agent 检索特定视频片段",
+          "en": "Agent retrieving specific video clips",
+          "sha256": "89aa64a99489e2c81a72d8125ed6c585ef4d88e890c29ae9006159d72831d8e9"
+        }
+      ]
+    },
+    {
+      "key": "settings",
+      "output": "gallery-settings.webp",
+      "output_sha256": "2f2a387340e9a7803f7188e2cd6eb322786fb9a62527e0d9fd1cf6268f68c00b",
+      "sources": [
+        {
+          "file": "settings-weights-voices-services.png",
+          "zh": "召回权重、音色库、本地服务与工具管理",
+          "en": "Recall weights, voice library, local services, and tool management",
+          "sha256": "7e083832503a15eb78fe23bf6f2853ade3da58860bccf931972525d7d280357a"
+        },
+        {
+          "file": "settings-model-card.png",
+          "zh": "模型档案卡",
+          "en": "Model profile card",
+          "sha256": "c4887013d6ad4f24da0cd965c9c3126b98d86dde9913557bd8f2ebc876e3b9a8"
+        },
+        {
+          "file": "settings-model-config.png",
+          "zh": "自定义模型档案配置",
+          "en": "Custom model profile configuration",
+          "sha256": "e3da848f426c344b5ccbc4a7b299eaf6a0864e5b409c354cc27a770059993fc3"
+        }
+      ]
+    }
+  ]
+}
