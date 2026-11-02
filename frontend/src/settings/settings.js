@@ -1306,7 +1306,8 @@ async function loadAgentRuntime() {
   const data = await api('/api/settings/agent-runtime');
   $('agent-runtime').value = data.runtime;
   const status = $('agent-runtime-status');
-  status.textContent = data.dsh.ready ? 'dsh 依赖可用' : data.dsh.errors.join('；');
+  // 就绪时不显示任何提示文字；仅在不可用时给出原因，便于排查。
+  status.textContent = data.dsh.ready ? '' : data.dsh.errors.join('；');
   status.title = status.textContent;
 }
 $('agent-runtime-form').addEventListener('submit', (event) => {
