@@ -1,7 +1,5 @@
 <div align="center">
 
-![Mindex — Manage massive video libraries, connect every creation](docs/assets/hero-en.svg)
-
 # Mindex
 
 **A local-first workbench for video asset management, multimodal retrieval, and AI-assisted video creation.**
@@ -466,13 +464,3 @@ MCP exports are filtered by domain (`agent.mcp.domains` / `--domain`) and by pol
 | Roadmap | [Roadmap](plans/roadmap.md) |
 
 Everything else — mechanisms, runbooks, and verification records — is in the [documentation center](docs/README.md). Agent collaboration conventions live in [AGENT.md](AGENT.md); the Claude Code technical map in [CLAUDE.md](CLAUDE.md).
-
----
-
-<div align="center">
-
-**From a growing library to every creation.**
-
-[Get started](#quick-start) · [Read the docs](docs/README.md) · [Report an issue](https://github.com/xfork24/mindex/issues)
-
-</div>

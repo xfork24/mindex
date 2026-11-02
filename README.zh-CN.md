@@ -1,7 +1,5 @@
 <div align="center">
 
-![Mindex：管理海量视频素材，连接每一次创作](docs/assets/hero.svg)
-
 # Mindex
 
 **本地优先的视频资产管理、多模态检索与 AI 视频创作工作台。**
@@ -465,13 +463,3 @@ MCP 导出可按领域过滤（`agent.mcp.domains` / `--domain`），并受策�
 | 路线图 | [功能路线图](plans/roadmap.md) |
 
 更多机制说明、操作手册与验收记录见[文档中心](docs/README.md)。代理协作约定见 [AGENT.md](AGENT.md)，Claude Code 技术导航见 [CLAUDE.md](CLAUDE.md)。
-
----
-
-<div align="center">
-
-**从海量素材，到每一次创作。**
-
-[开始使用](#快速开始) · [阅读文档](docs/README.md) · [反馈问题](https://github.com/xfork24/mindex/issues)
-
-</div>

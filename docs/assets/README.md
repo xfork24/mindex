@@ -37,5 +37,3 @@
 | `settings-model-config.png` | 5.3-自定义模型配置.png |
 | `settings-weights-voices-services.png` | 5.4-召回、音色库、本地服务与工具管理.png |
 | `settings-dark-theme-i18n.png` | 5.5-暗色风格和中英文切换.png |
-
-另有 `hero.svg`（中文横幅）与 `hero-en.svg`（英文横幅）为仓库自绘矢量图，分别由中文与英文 README 引用。
