@@ -8111,10 +8111,6 @@
     "zh": "更新scene场景嵌入",
     "en": "Update scene embeddings"
   },
-  "ui.scene_search_coverage": {
-    "zh": "scene场景嵌入（已发布）：{done}/{total}个片段",
-    "en": "Published scene embeddings: {done}/{total} segments"
-  },
   "ui.shot_moment_search_coverage": {
     "zh": "检索（shot/moment）：{p0} · {p1}/{p2} {p3}",
     "en": "Search (shot/moment): {p0} · {p1}/{p2} {p3}"

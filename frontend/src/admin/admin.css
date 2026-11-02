@@ -112,9 +112,9 @@
 .work-heading h4{margin:0;font-size:13px}
 .work-status{font-size:12px;color:var(--green);white-space:nowrap}
 .work-summary{font-size:13px;line-height:1.7;overflow-wrap:anywhere}
-.work-card-body>label{display:flex;align-items:center;gap:8px;font-size:12px;margin:12px 0}
+.work-card-progress>label{display:flex;align-items:center;gap:8px;font-size:12px;margin:0 0 10px}
 .work-card select{min-width:0;max-width:100%;font-size:12px}
-.work-card-body>label[hidden]{display:none}
+.work-card-progress>label[hidden]{display:none}
 .work-controls{display:flex;gap:7px;flex-wrap:wrap;margin:14px 0}
 .work-card .source-warning{overflow-wrap:anywhere;line-height:1.7}
 .upload-drop{display:flex;flex-direction:column;align-items:center;gap:16px;border:2px dashed var(--focus);border-radius:12px;background:var(--surface-2);padding:32px 14px;cursor:pointer}
@@ -156,7 +156,7 @@
 .relationship{flex-wrap:wrap}
 .relationship button{margin:0}
 .work-heading{flex-wrap:wrap;align-items:center}
-.work-card-body>label{flex-wrap:wrap}
+.work-card-progress>label{flex-wrap:wrap}
 .work-status{white-space:normal}
 .segment-summary{flex-wrap:wrap;gap:8px}
 .source-heading{align-items:center}
