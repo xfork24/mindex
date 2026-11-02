@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import importlib.metadata
+import logging
 import os
 import sys
 import threading
@@ -12,6 +13,8 @@ import threading
 from mindex.agent.dsh_bridge import bridge
 from mindex.agent.prompts import system_prompt
 from mindex.agent.runtime import RuntimeSupport, page_domain
+
+log = logging.getLogger(__name__)
 
 DSH_VERSION = "0.2.1rc2"
 DISABLED = (
@@ -401,7 +404,9 @@ class DshRuntime(RuntimeSupport):
             self._finish_interrupted_tools(sid)
             self._append(sid, "turn/end", {"turn": self.store.last_turn(sid), "reason": {"kind": "aborted"}})
             raise
-        except Exception:  # noqa: BLE001 — transport errors must terminate the turn
+        except Exception as exc:  # noqa: BLE001 — transport errors must terminate the turn
+            # 只记录异常类型：SDK 异常信息可能携带凭据或传输头，不得写入日志。
+            log.warning("dsh 轮次异常终止：%s", type(exc).__name__)
             self._ensure_turn(sid, before, message)
             # SDK diagnostics may include credentials/transport headers. Never expose them.
             self._close_pending(sid, "cancelled")

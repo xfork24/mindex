@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 import wave
 from fractions import Fraction
@@ -17,6 +18,8 @@ from . import transitions
 from .plans import canvas_render, needs_recall
 from .sources import content_source, plan_source, source_file, video_file
 from .versions import file_info, file_path, version
+
+log = logging.getLogger(__name__)
 
 
 def source_shots(config, source_id, *, overlays=None):
@@ -579,7 +582,8 @@ def render_node(config, job_id, w, p, sid, directory, *, capture=None):
                 picture_media = ShotMedia(store).materialize(
                     event.video.source_id, event.video.start, event.video.end + extra)
                 window.video.end = event.video.end + extra
-            except Exception:  # noqa: BLE001 — 任何越界都按冻结末帧处理
+            except Exception as exc:  # noqa: BLE001 — 任何越界都按冻结末帧处理
+                log.debug("选片余量延长失败，按冻结末帧处理：%s", exc)
                 picture_media = media
                 window.video.end = event.video.end
         window.video.end -= event.video.start

@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -18,6 +19,8 @@ import threading
 from collections import deque
 from datetime import UTC, datetime
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 INSTALL_COMMAND = ("-m", "playwright", "install", "--only-shell", "chromium")
 INSTALL_TIMEOUT = 1800  # 秒
@@ -125,7 +128,8 @@ class BrowserInstaller:
             with self._lock:
                 self.status = "complete" if code == 0 else "failed"
                 self.error = None if code == 0 else f"安装命令退出码 {code}"
-        except Exception as exc:  # noqa: BLE001 — 安装失败必须如实呈现给页面
+        except Exception as exc:  # 安装失败必须如实呈现给页面
+            log.warning("浏览器组件安装失败", exc_info=True)
             with self._lock:
                 self.status, self.error = "failed", f"无法安装浏览器组件：{exc}"
         finally:

@@ -411,7 +411,8 @@ def settings_router(runtime: RuntimeConfig, store: Store) -> APIRouter:
                     "matches_index": identity == active["spec"]["space"],
                     "identity": identity,
                 }
-            except Exception as exc:  # noqa: BLE001 — 身份探测失败必须如实呈现而非 500
+            except Exception as exc:  # 身份探测失败必须如实呈现而非 500
+                log.warning("嵌入身份探测失败", exc_info=True)
                 embedding_status = {
                     "active_index_id": active["id"],
                     "matches_index": False,
@@ -508,7 +509,8 @@ def settings_router(runtime: RuntimeConfig, store: Store) -> APIRouter:
                 try:
                     identity = make_embedder(runtime.current()).identity()
                     mismatch = identity != active["spec"]["space"]
-                except Exception as exc:  # noqa: BLE001 — 探测失败也要给出可读提示
+                except Exception as exc:  # 探测失败也要给出可读提示
+                    log.warning("激活后嵌入身份探测失败", exc_info=True)
                     mismatch, identity = True, None
                     active = {**active, "probe_error": str(exc)[:300]}
                 if mismatch:

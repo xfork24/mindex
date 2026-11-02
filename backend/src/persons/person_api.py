@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
@@ -37,6 +38,8 @@ from mindex.persons.profiling import profiled, stage
 from mindex.shared.config import StrictModel, fingerprint
 from mindex.shared.processing_lock import ProcessingLock
 from mindex.shared.storage import dumps
+
+log = logging.getLogger(__name__)
 
 
 class WorkAssignment(StrictModel):
@@ -419,7 +422,8 @@ def person_router(runtime, store):
             payload = {**image, "raw": store.resolve_media(image["path"]).read_bytes()}
             try:
                 parsed = parse_cast(runtime.current(), payload)
-            except Exception as exc:  # noqa: BLE001 — 单张失败保留已有条目，不阻塞其他图与手工流程
+            except Exception as exc:  # 单张失败保留已有条目，不阻塞其他图与手工流程
+                log.warning("演员表原图 %s 自动拆分失败", image_id, exc_info=True)
                 state[image_id] = {"status": "failed", "error": str(exc)[:300]}
                 warnings.append(f"原图 {number} 自动拆分失败，已有条目保留：{str(exc)[:200]}")
                 continue

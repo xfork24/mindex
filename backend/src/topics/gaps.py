@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import csv
 import io
+import logging
 from typing import Literal
 
 import numpy as np
@@ -21,6 +22,8 @@ from mindex.topics import cluster, profiles
 from mindex.topics.common import check_id, dumps, loads, new_id, now
 from mindex.topics.items import normalize_title
 from mindex.topics.scoring import jaccard_max
+
+log = logging.getLogger(__name__)
 
 MERGE_SIMILARITY = 0.85
 MERGE_JACCARD = 0.6
@@ -61,7 +64,8 @@ class Matcher:
             batch = list(cluster.embed(self.embedder, [*pending, *texts]))
             self._vectors.extend(batch[: len(pending)])
             return {text: batch[len(pending) + index] for index, text in enumerate(texts)}
-        except Exception:  # noqa: BLE001 — 嵌入不可用时按文字重合度合并
+        except Exception:  # 嵌入不可用时按文字重合度合并
+            log.warning("缺口合并嵌入不可用，按文字重合度合并", exc_info=True)
             self._failed = True
             self._vectors = []
             return {}

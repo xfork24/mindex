@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 
 import numpy as np
@@ -14,6 +15,8 @@ from pydantic import BaseModel, Field
 from mindex.topics.common import parse_time
 from mindex.topics.llm import PROFILE_HEADER, chat_json
 from mindex.topics.models import WEIGHT_KEYS
+
+log = logging.getLogger(__name__)
 
 HALF_LIFE_HOURS = 72
 WARMUP_DAYS = 7
@@ -83,7 +86,8 @@ def novelty_scores(texts: list[str], references: list[str], embedder) -> tuple[l
             theirs = embed(embedder, references)
             sims = mine @ theirs.T
             return [round(1 - max(0.0, float(np.max(row))), 4) for row in sims], None
-        except Exception as exc:  # noqa: BLE001 — 嵌入不可用时退化，不中断挖掘
+        except Exception as exc:  # 嵌入不可用时退化，不中断挖掘
+            log.warning("选题去重嵌入不可用，按文字重合度估算", exc_info=True)
             warning = f"嵌入不可用，去重按文字重合度估算：{exc}"
     else:
         warning = "未配置嵌入服务，去重按文字重合度估算"

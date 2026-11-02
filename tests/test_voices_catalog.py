@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from mindex.models import adapters
 from mindex.settings.runtime_settings import save_voice
 from mindex.settings.voices_catalog import QWEN3_TTS_CUSTOMVOICE, fetch_catalog
@@ -89,12 +91,15 @@ def test_minimax_catalog_groups_and_merges_library(config, monkeypatch):
     assert "mindex-clone-2" in library
 
 
-def test_catalog_upstream_error_degrades_to_static(config, monkeypatch):
+def test_catalog_upstream_error_degrades_to_static(config, monkeypatch, caplog):
     def fail(*args, **kwargs):
         raise adapters.ModelError("连接被拒绝")
 
     monkeypatch.setattr(adapters, "request", fail)
-    catalog = fetch_catalog(config, Store(config.data_dir))
+    with caplog.at_level(logging.WARNING, logger="mindex.settings.voices_catalog"):
+        catalog = fetch_catalog(config, Store(config.data_dir))
     assert catalog["error"]
     ids = {voice["voice_id"] for group in catalog["groups"] for voice in group["voices"]}
     assert "vivian" in ids  # 静态表兜底
+    # 降级给页面的提示之外，服务端日志必须留下 traceback 供排查。
+    assert any(r.exc_info for r in caplog.records)

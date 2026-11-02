@@ -5,12 +5,15 @@
 
 from __future__ import annotations
 
+import logging
 from typing import ClassVar
 
 from pydantic import Field
 
 from mindex.shared.config import StrictModel
 from mindex.topics.sources.base import FetchContext, Item, item, register
+
+log = logging.getLogger(__name__)
 
 
 class LocalConfig(StrictModel):
@@ -30,7 +33,8 @@ def made_videos(config) -> list[dict]:
             continue
         try:
             state = studio.load_job(config, directory.name)
-        except Exception:  # noqa: BLE001 — 损坏或旧格式的任务不影响选题
+        except Exception:  # 损坏或旧格式的任务不影响选题
+            log.warning("跳过无法读取的创作任务目录 %s", directory.name, exc_info=True)
             continue
         text = (state.get("outline") or state.get("input_text") or "").strip()
         found.append({"id": state["id"], "title": state.get("title") or "", "text": text[:600]})

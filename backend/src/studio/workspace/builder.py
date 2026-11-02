@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from uuid import uuid4
 
@@ -21,6 +22,9 @@ from .plans import board_snapshot, choose
 from .preflight import node_dependencies, preflight
 from .stages import RunContext, handler
 from .versions import add_version, file_info, persist, plan, root
+
+# 注意：run_build 内有局部变量 log（ExecutionLog），模块 logger 必须用别的名字。
+logger = logging.getLogger(__name__)
 
 
 class VersionDiagnostics:
@@ -188,9 +192,11 @@ def _run_build(config, job_id, build_id, log, *, speaker=None, storyboarder=None
                         force=build["force"],
                     )
                     node.update(status="complete", version=vid)
-            except Exception as exc:  # noqa: BLE001 — 失败节点不得阻断互不依赖的节点
+            except Exception as exc:  # 失败节点不得阻断互不依赖的节点
                 # 节点内部响应取消（生成画面轮询中）：记为已取消，其余未执行节点在下一轮统一阻塞。
                 interrupted = str(exc) == CANCELLED and cancel_check()
+                if not interrupted:
+                    logger.warning("构建节点失败：%s/%s", stage, sid, exc_info=True)
                 node.update(status="cancelled" if interrupted else "failed", error=str(exc)[:2000])
                 attempted = next(
                     (

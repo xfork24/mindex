@@ -89,7 +89,8 @@ def discover(config, store, profile_id: str, *, llm=None, embedder=None, options
     try:
         vectors = cluster.embed(embedder, [cluster.item_text(item) for item in candidates])
         groups = cluster.greedy(vectors, threshold)
-    except Exception as exc:  # noqa: BLE001 — 嵌入不可用时退化为按标题分组，不伪造向量
+    except Exception as exc:  # 嵌入不可用时退化为按标题分组，不伪造向量
+        log.warning("选题嵌入不可用，候选条目按标题分组", exc_info=True)
         warnings.append(f"嵌入不可用，候选条目按标题分组：{exc}")
         groups = cluster.by_title([item["title"] for item in candidates])
     groups = cluster.rank(groups, candidates, config.topics.cluster.max_clusters)

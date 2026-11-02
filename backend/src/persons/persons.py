@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import logging
 import math
 from collections import OrderedDict
 from contextlib import nullcontext
@@ -31,6 +32,8 @@ from mindex.persons.profiling import stage
 from mindex.shared.config import fingerprint
 from mindex.shared.person_schema import normalize_entity
 from mindex.shared.storage import Store, dumps
+
+log = logging.getLogger(__name__)
 
 # 检索热路径的已发布人物数据缓存：只保留最近使用的少数版本。
 PUBLISHED_CACHE_ENTRIES = 2
@@ -1506,7 +1509,8 @@ def _migrate_frames(config, store, source_id, apply):
                     if apply:
                         path.unlink()
                         _prune_empty_parents(path, base)
-        except Exception as exc:  # noqa: BLE001 — 按素材隔离失败，转换失败后绝不删除
+        except Exception as exc:  # 按素材隔离失败，转换失败后绝不删除
+            log.warning("人物素材 %s 帧布局转换失败", source, exc_info=True)
             report["error"] = str(exc)
     totals = {key: sum(r[key] for r in reports) for key in
               ("kept_frames", "reencoded", "unchanged", "deleted_files", "deleted_bytes",

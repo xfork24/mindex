@@ -107,7 +107,8 @@ def build_server(registry: ToolRegistry, client_factory, *, policy, agent_profil
             output = await spec.execute(args, ctx)
         except ToolError as exc:
             return error(str(exc))
-        except Exception as exc:  # noqa: BLE001 — 工具错误一律作为 isError 结果返回
+        except Exception as exc:  # 工具错误一律作为 isError 结果返回
+            logger.warning("MCP 工具 %s 执行出错", name, exc_info=True)
             return error(f"工具执行出错：{exc}")
         if publish is not None:
             for kind, data in (("mutation", output.mutation), ("focus", output.focus)):

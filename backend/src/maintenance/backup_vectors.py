@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import sys
+import traceback
 from pathlib import Path
 
 from mindex.maintenance.backup_db import raw_representation_ids, store_at
@@ -190,5 +191,6 @@ if __name__ == '__main__':
         result = run(json.loads(Path(sys.argv[1]).read_text(encoding="utf-8")))
         print(dumps({'result': result}))
     except Exception as exc:  # noqa: BLE001 — 子进程边界统一返回结构化失败，主进程拒绝发布
+        traceback.print_exc(file=sys.stderr)  # stdout 是结构化协议通道，诊断走 stderr
         print(dumps({'error': str(exc)}))
         sys.exit(1)

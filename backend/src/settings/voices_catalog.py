@@ -59,7 +59,8 @@ def _live_voices(tts) -> tuple[list[str], str | None]:
             "GET", tts.base_url.rstrip("/") + "/audio/voices",
             timeout=tts.timeout, attempts=CATALOG_ATTEMPTS,
         )
-    except Exception as exc:  # noqa: BLE001 — 目录拉取失败必须降级而不是 500
+    except Exception as exc:  # 目录拉取失败必须降级而不是 500
+        logger.warning("音色目录拉取失败", exc_info=True)
         return [], f"音色列表拉取失败：{str(exc)[:200]}"
     voices = payload.get("voices") if isinstance(payload, dict) else None
     if not isinstance(voices, list):
@@ -100,7 +101,8 @@ def _minimax_groups(tts) -> tuple[list[dict], list[dict], str | None]:
             timeout=tts.timeout, attempts=CATALOG_ATTEMPTS,
             headers=tts.headers(), json={"voice_type": "all"},
         )
-    except Exception as exc:  # noqa: BLE001 — 音色查询失败降级为提示，不让目录接口 500
+    except Exception as exc:  # 音色查询失败降级为提示，不让目录接口 500
+        logger.warning("MiniMax 音色查询失败", exc_info=True)
         return [], [], f"MiniMax 音色查询失败：{str(exc)[:200]}"
     if (payload.get("base_resp") or {}).get("status_code", 0) != 0:
         return [], [], f"MiniMax 音色查询失败：{payload.get('base_resp')}"
