@@ -177,7 +177,7 @@ async function editSettings() {
   body.append(beat.wrap, el("p", MindexI18n.msg("ui.plan_beat_align_help"), "muted"));
   api("/api/studio/brands").then((data) => {
     if ($("dialog-content") !== body) return;
-    fillSelect(brand.input, [["", MindexI18n.msg("ui.plan_brand_none")], ...data.items.map((item) => [item.id, item.name])], o.brand_id || "");
+    fillSelect(brand.input, [["", MindexI18n.msg("ui.plan_brand_none")], ...data.items.map((item) => [item.id, brandName(item)])], o.brand_id || "");
   }).catch(() => {});
   // 音色目录尚未就绪：先禁用音色相关控件与保存，待目录到达再回填与放开。
   fields.preset_voice.disabled = true;

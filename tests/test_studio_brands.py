@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import io
+import shutil
 
 import pytest
 from fastapi.testclient import TestClient
@@ -212,3 +213,28 @@ def test_build_with_intro_outro_and_watermark(client, tmp_path):
     body, intro = frame(1.3, "body.png"), frame(0.3, "intro.png")
     assert corner(body) > 150  # 正文左下角有白色水印
     assert corner(intro) < 120  # 片头（红色）不加水印
+
+
+# ---------------------------------------------------------------- 内置模板显示文字（中英双语）
+def test_builtin_brand_text_bilingual():
+    """内置风格模板的名称与说明走文案目录：中文与 YAML 原文一致，英文另有翻译。"""
+    import json
+    from pathlib import Path
+
+    catalog = json.loads((Path(__file__).resolve().parents[1] / "frontend" / "src" / "shared" / "messages.json")
+                         .read_text(encoding="utf-8"))
+    for brand_id, template in brands.builtins().items():
+        name = catalog[f"ui.brands_name_{brand_id}"]
+        desc = catalog[f"ui.brands_desc_{brand_id}"]
+        assert name["zh"] == template.name and desc["zh"] == template.description
+        assert name["en"] and desc["en"] and name["en"] != template.name
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="需要 Node 运行前端控制逻辑检查")
+def test_studio_brand_text_controls():
+    import subprocess
+    from pathlib import Path
+
+    result = subprocess.run(["node", "tests/studio_brand_text_unit.cjs"], cwd=Path(__file__).resolve().parents[1],
+                            capture_output=True, text=True, timeout=30, check=False)
+    assert result.returncode == 0, result.stdout + result.stderr

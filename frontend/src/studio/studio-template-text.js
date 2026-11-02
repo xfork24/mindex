@@ -1,4 +1,4 @@
-/* 创作 · 文案模板的显示文字（创作页与模板管理页共用）。经典脚本，顶层声明共享全局作用域；只依赖 MindexI18n。 */
+/* 创作 · 文案模板与风格模板的显示文字（创作页、模板管理页与风格模板页共用）。经典脚本，顶层声明共享全局作用域；只依赖 MindexI18n。 */
 "use strict";
 const TEMPLATE_CATEGORY = {
   general: "ui.template_category_general",
@@ -34,6 +34,20 @@ function templateKind(kind) {
 }
 function templateLabel(item) {
   return MindexI18n.msg("ui.script_template_option", { p0: templateCategory(item), p1: templateName(item) });
+}
+const BUILTIN_BRAND_TEXT = {
+  plain: ["ui.brands_name_plain", "ui.brands_desc_plain"],
+  news: ["ui.brands_name_news", "ui.brands_desc_news"],
+  tech: ["ui.brands_name_tech", "ui.brands_desc_tech"]
+};
+// 内置风格模板的名称与说明同样走文案目录（中英双语）；用户模板的名称、说明是用户内容，原样显示。
+function brandName(item) {
+  const text = item.builtin && BUILTIN_BRAND_TEXT[item.id];
+  return text ? MindexI18n.msg(text[0]) : item.name;
+}
+function brandDescription(item) {
+  const text = item.builtin && BUILTIN_BRAND_TEXT[item.id];
+  return text ? MindexI18n.msg(text[1]) : item.description || "";
 }
 // 模板管理页地址：带上要打开的模板与来源任务，便于从管理页回到原任务。
 function templatesPageUrl(templateId, jobId) {

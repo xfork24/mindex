@@ -11959,6 +11959,30 @@ window.MindexMessages = {
     "zh": "无片头片尾与水印",
     "en": "No intro, outro or watermark"
   },
+  "ui.brands_name_plain": {
+    "zh": "简洁",
+    "en": "Clean"
+  },
+  "ui.brands_name_news": {
+    "zh": "新闻资讯",
+    "en": "News"
+  },
+  "ui.brands_name_tech": {
+    "zh": "科技评测",
+    "en": "Tech review"
+  },
+  "ui.brands_desc_plain": {
+    "zh": "白字细描边字幕，文字层白字黑底；没有片头片尾与水印。复制后可上传自己的片头、片尾与水印。",
+    "en": "White subtitles with a thin outline and a white-on-black text layer; no intro, outro or watermark. Copy it to upload your own."
+  },
+  "ui.brands_desc_news": {
+    "zh": "半透明底条字幕，文字层深蓝底、红色强调，适合热点评论与资讯解读。",
+    "en": "Subtitles on a semi-transparent bar and a text layer with deep-blue background and red accents, suited to hot-topic commentary and news explainers."
+  },
+  "ui.brands_desc_tech": {
+    "zh": "粗描边字幕配青色高亮词，文字层深灰底、青色强调，适合产品发布与评测。",
+    "en": "Bold outlined subtitles with cyan highlighted words and a text layer with dark-grey background and cyan accents, suited to product launches and reviews."
+  },
   "ui.brands_builtin": {
     "zh": "内置 · 只读",
     "en": "Built-in · read-only"

@@ -41,7 +41,10 @@ def test_page_bundle_assets(config, page):
         ] if name == 'studio-templates' else [
             # 选题挖掘页：同为创作页子页面，推荐模板的显示文字与模板页共用。
             '/assets/studio/studio-template-text.js', '/assets/studio/topics.js'
-        ] if name == 'studio-topics' else ['/assets/studio/brands.js'] if name == 'studio-brands' else [
+        ] if name == 'studio-topics' else [
+            # 风格模板管理页：与创作页共用模板显示文字（内置模板名称与说明按语言显示）。
+            '/assets/studio/studio-template-text.js', '/assets/studio/brands.js'
+        ] if name == 'studio-brands' else [
             '/assets/admin/music.js'] if name == 'admin-music' else [
             # 设置页：第三方工具配置组的脚本在 settings.js 之后加载。
             '/assets/settings/settings.js', '/assets/settings/tools.js'] if name == 'settings' else [

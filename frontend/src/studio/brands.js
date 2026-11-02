@@ -1,5 +1,6 @@
 /* 创作 · 品牌模板管理页（/studio/brands）：浏览品牌模板、编辑自定义模板的字幕样式、文字层样式、片头片尾与水印。
-   经典脚本，依赖 shared/*（MindexI18n、MindexApi、MindexFeedback）。内置模板只读，复制为自定义模板后才能修改。
+   经典脚本，依赖 shared/*（MindexI18n、MindexApi、MindexFeedback）与 studio-template-text.js（内置模板的名称与说明按语言显示）。
+   内置模板只读，复制为自定义模板后才能修改。
    全部经 /api/studio/brands 与 /api/studio/brand-assets（与 CLI、智能助手、MCP 同一接口）；Web 与桌面版共用。 */
 "use strict";
 const query = new URLSearchParams(location.search);
@@ -72,7 +73,7 @@ function renderList() {
       entry.type = "button";
       entry.dataset.id = item.id;
       if (page.selected?.id === item.id) entry.classList.add("active");
-      entry.append(el("div", item.name, "job-title"));
+      entry.append(el("div", brandName(item), "job-title"));
       const marks = ["intro", "outro", "watermark"].filter((key) => item[key]).map((key) => MindexI18n.msg(`ui.brands_asset_${key}`));
       entry.append(el("div", marks.join(" · ") || MindexI18n.msg("ui.brands_no_assets"), "job-sub"));
       entry.addEventListener("click", () => select(item.id).catch(failed));
@@ -222,12 +223,13 @@ function renderDetail() {
   $("brand-empty").hidden = Boolean(item);
   $("brand-view").hidden = !item;
   if (!item) return;
-  MindexI18n.setText($("brand-title"), item.name);
+  MindexI18n.setText($("brand-title"), brandName(item));
   MindexI18n.setText($("brand-tags"), MindexI18n.msg(item.builtin ? "ui.brands_builtin" : "ui.brands_user"));
   MindexI18n.setText($("brand-note"), MindexI18n.msg(item.builtin ? "ui.brands_builtin_note" : "ui.brands_user_note"));
   $("brand-delete").hidden = item.builtin;
-  $("bf-name").value = page.draft.name;
-  $("bf-description").value = page.draft.description;
+  // 内置模板的名称与说明按当前语言显示（只读）；自定义模板显示用户填写的原文。
+  $("bf-name").value = item.builtin ? MindexI18n.render(brandName(item)) : page.draft.name;
+  $("bf-description").value = item.builtin ? MindexI18n.render(brandDescription(item)) : page.draft.description;
   for (const id of ["bf-name", "bf-description", "brand-save", "brand-revert"]) $(id).disabled = !editable();
   renderSubtitle();
   renderOverlay();
@@ -282,7 +284,7 @@ async function save(event) {
 // 复制后直接选中新模板并聚焦名称输入框（桌面版 Electron 不支持 window.prompt，不弹输入框）。
 async function copy() {
   if (!page.selected || !confirmDiscard()) return;
-  const name = MindexI18n.render(MindexI18n.msg("ui.brands_copy_name", { p0: page.selected.name })).slice(0, 40);
+  const name = MindexI18n.render(MindexI18n.msg("ui.brands_copy_name", { p0: brandName(page.selected) })).slice(0, 40);
   const item = await api(brandUrl(page.selected.id, "/copy"), "POST", { name });
   page.saved = null;
   await load(item.id);
@@ -291,7 +293,7 @@ async function copy() {
   $("bf-name").select();
 }
 async function remove() {
-  if (!window.confirm(MindexI18n.render(MindexI18n.msg("ui.brands_delete_confirm", { p0: page.selected.name })))) return;
+  if (!window.confirm(MindexI18n.render(MindexI18n.msg("ui.brands_delete_confirm", { p0: brandName(page.selected) })))) return;
   await api(brandUrl(page.selected.id), "DELETE");
   page.selected = page.draft = page.saved = null;
   await load();
