@@ -4,6 +4,9 @@
 - shared 最底层；models 只能用 shared；processing 只能用 models、shared（``ALLOWED``，严格）。
 - 其余上层包之间现存的互相引用冻结在 ``ALLOWED_UPPER``：这些是既有债务，不得新增边；
   去掉某条依赖后同步从白名单删除（白名单与实际不一致同样失败）。
+- 上层包之间的侧向依赖再冻结到模块级（``UPPER_MODULES``，2026-11）：已登记包对内新增模块导入
+  须显式登记，消除后同步删除。指向 shared/models/processing 的下层依赖随开发自然增长，不冻结；
+  app 是装配层、agent 另由 ``AGENT_EXTERNAL_MODULES`` 逐模块约束，均不入册。
 - maintenance 不得依赖 CLI 层（``app``）。
 - agent 只依赖 shared 与 ``AGENT_EXTERNAL_MODULES`` 中逐模块列出的少量接口。
 """
@@ -58,6 +61,63 @@ AGENT_EXTERNAL_MODULES = {
     "mindex.topics.models",
 }
 
+# 侧向依赖 = 源与目标都是上层包（shared/models/processing 是设计的下层，app 是装配层，
+# agent 另有逐模块约束）。从 ALLOWED_UPPER 推导，供 upper_module_edges 过滤。
+_LOWER_UNITS = {"shared", "models", "processing"}
+UPPER_PAIRS = {
+    (unit, target)
+    for unit, targets in ALLOWED_UPPER.items() if unit not in {APP, "agent"}
+    for target in targets if target not in _LOWER_UNITS
+}
+
+# 侧向包对内实际导入的模块全名（2026-11 冻结，共 22 对 33 条）：新增侧向模块导入须显式登记，
+# 消除后同步删除；与 ALLOWED_UPPER 同样做精确相等校验。已知局限：同一已登记模块被新文件导入
+# 不报警（广度冻结而非扇出冻结），需要时再收紧。
+UPPER_MODULES: dict[str, dict[str, frozenset[str]]] = {
+    "admin": {
+        "diagnostics": frozenset({"mindex.diagnostics.film"}),
+        "maintenance": frozenset({"mindex.maintenance.purge"}),
+        "persons": frozenset({"mindex.persons.person_names", "mindex.persons.persons"}),
+        "search": frozenset({"mindex.search.search", "mindex.search.warmup"}),
+    },
+    "diagnostics": {
+        "search": frozenset({"mindex.search.search"}),
+    },
+    "maintenance": {
+        "agent": frozenset({"mindex.agent.attachments"}),
+        "persons": frozenset({"mindex.persons.persons"}),
+    },
+    "persons": {
+        "admin": frozenset({"mindex.admin.source_tasks"}),
+        "maintenance": frozenset({"mindex.maintenance.clean"}),
+        "settings": frozenset({"mindex.settings.runtime_settings"}),
+    },
+    "search": {
+        "admin": frozenset({"mindex.admin.curation"}),
+        "persons": frozenset({"mindex.persons.person_names", "mindex.persons.person_processing",
+                              "mindex.persons.persons"}),
+        "settings": frozenset({"mindex.settings.runtime_settings"}),
+    },
+    "settings": {
+        "agent": frozenset({"mindex.agent.dsh_runtime", "mindex.agent.llm.factory",
+                            "mindex.agent.llm.types"}),
+        "persons": frozenset({"mindex.persons.person_processing"}),
+    },
+    "studio": {
+        "admin": frozenset({"mindex.admin.curation"}),
+        "persons": frozenset({"mindex.persons.person_names", "mindex.persons.person_processing",
+                              "mindex.persons.persons"}),
+        "search": frozenset({"mindex.search.search"}),
+        "settings": frozenset({"mindex.settings.runtime_settings"}),
+    },
+    "topics": {
+        "admin": frozenset({"mindex.admin.curation"}),
+        "search": frozenset({"mindex.search.search"}),
+        "studio": frozenset({"mindex.studio.material_digest", "mindex.studio.script_templates",
+                             "mindex.studio.studio", "mindex.studio.workspace"}),
+    },
+}
+
 
 def _source_unit(src: Path, path: Path) -> str:
     parts = path.relative_to(src).parts
@@ -102,8 +162,20 @@ def package_edges(src: Path) -> dict[str, set[str]]:
     return dict(edges)
 
 
+def upper_module_edges(src: Path, pairs: set[tuple[str, str]]) -> dict[tuple[str, str], set[str]]:
+    """每个（源包, 目标上层包）侧向对实际导入的模块全名。"""
+    edges: dict[tuple[str, str], set[str]] = defaultdict(set)
+    for path in sorted(src.rglob("*.py")):
+        unit = _source_unit(src, path)
+        for module in imported_modules(src, path):
+            target = _target_unit(src, module)
+            if target != unit and (unit, target) in pairs:
+                edges[(unit, target)].add(module)
+    return edges
+
+
 def violations(src: Path, allowed: dict[str, set[str]], forbidden: dict[str, set[str]],
-               agent_modules: set[str]) -> list[str]:
+               agent_modules: set[str], upper_modules: dict[str, dict[str, frozenset[str]]]) -> list[str]:
     """返回全部违规描述；空列表表示通过。"""
     problems = []
     for path in sorted(src.rglob("*.py")):
@@ -116,12 +188,16 @@ def violations(src: Path, allowed: dict[str, set[str]], forbidden: dict[str, set
             target = _target_unit(src, module)
             if target == unit:
                 continue
+            frozen = upper_modules.get(unit, {}).get(target)
             if target in forbidden.get(unit, set()):
                 problems.append(f"{rel} -> {module}：{unit} 禁止依赖 {target}")
             elif target not in allowed[unit]:
                 problems.append(f"{rel} -> {module}：新增了 {unit} -> {target} 的依赖")
             elif unit == "agent" and target != "shared" and module not in agent_modules:
                 problems.append(f"{rel} -> {module}：agent 只能导入 shared 与白名单模块")
+            elif frozen is not None and module not in frozen:
+                problems.append(f"{rel} -> {module}：新增了 {unit} -> {target} 的模块级侧向依赖，"
+                                f"请消除或在 UPPER_MODULES 登记")
     return problems
 
 
@@ -130,7 +206,7 @@ def _rules() -> dict[str, set[str]]:
 
 
 def test_package_dependencies_follow_rules():
-    problems = violations(SRC, _rules(), FORBIDDEN, AGENT_EXTERNAL_MODULES)
+    problems = violations(SRC, _rules(), FORBIDDEN, AGENT_EXTERNAL_MODULES, UPPER_MODULES)
     assert not problems, "\n".join(problems)
 
 
@@ -144,6 +220,18 @@ def test_upper_whitelist_matches_current_edges():
     for path in (SRC / "agent").rglob("*.py"):
         used |= {m for m in imported_modules(SRC, path) if _target_unit(SRC, m) not in {"agent", "shared"}}
     assert AGENT_EXTERNAL_MODULES == used, f"agent 白名单与实际不一致：{sorted(AGENT_EXTERNAL_MODULES ^ used)}"
+
+
+def test_upper_module_whitelist_matches_current_edges():
+    """侧向模块白名单与实际边精确相等：包对与模块都要双向一致。"""
+    actual = upper_module_edges(SRC, UPPER_PAIRS)
+    declared = {(unit, target) for unit, targets in UPPER_MODULES.items() for target in targets}
+    assert declared == set(actual), (
+        f"UPPER_MODULES 的包对与实际侧向边不一致：{sorted(declared ^ set(actual))}"
+    )
+    for (unit, target), modules in sorted(actual.items()):
+        difference = sorted(UPPER_MODULES[unit][target] ^ modules)
+        assert not difference, f"{unit} -> {target} 模块白名单与实际不一致：{difference}"
 
 
 def test_rules_cover_exactly_existing_packages():
@@ -171,14 +259,14 @@ def test_checker_reports_new_violations(tmp_path):
              "agent": {"shared", "studio"}, "studio": {"shared"}, APP: {"shared", "models"}}
     forbidden = {"maintenance": {APP}}
     _write(src, "models/ok.py", "from mindex.shared.util import x\n")
-    assert violations(src, rules, forbidden, {"mindex.studio.studio"}) == []
+    assert violations(src, rules, forbidden, {"mindex.studio.studio"}, {}) == []
 
     # 嵌套子包里的函数内导入也要被发现。
     _write(src, "models/deep/inner.py", "def f():\n    from mindex.studio import studio\n")
     _write(src, "maintenance/tool.py", "import mindex.cli\n")
     _write(src, "agent/tools/x.py", "from mindex.studio import studio, other\n")
     _write(src, "newpkg/mod.py", "")
-    problems = violations(src, rules, forbidden, {"mindex.studio.studio"})
+    problems = violations(src, rules, forbidden, {"mindex.studio.studio"}, {})
     assert any("models/deep/inner.py -> mindex.studio.studio" in p and "新增" in p for p in problems)
     assert any("maintenance/tool.py -> mindex.cli" in p and "禁止" in p for p in problems)
     assert any("agent/tools/x.py -> mindex.studio.other" in p for p in problems)
@@ -186,3 +274,23 @@ def test_checker_reports_new_violations(tmp_path):
     assert any("newpkg/mod.py" in p and "没有依赖规则" in p for p in problems)
     assert len(problems) == 4
     assert package_edges(src)["models"] == {"shared", "studio"}
+
+
+def test_checker_reports_new_lateral_module_imports(tmp_path):
+    """侧向包对内新增模块导入被单独报告；已登记模块与未冻结的包对不受影响。"""
+    src = tmp_path / "src"
+    for package in ("shared", "studio", "persons"):
+        _write(src, f"{package}/__init__.py")
+    _write(src, "persons/persons.py")
+    _write(src, "persons/other.py")
+    _write(src, "shared/util.py")
+    rules = {"shared": set(), "studio": {"shared", "persons"}, "persons": {"shared"}}
+    upper = {"studio": {"persons": frozenset({"mindex.persons.persons"})}}
+    _write(src, "studio/ok.py", "from mindex.persons import persons\n")
+    _write(src, "studio/downward.py", "from mindex.shared.util import x\n")
+    assert violations(src, rules, {}, set(), upper) == []
+
+    _write(src, "studio/extra.py", "import mindex.persons.other\n")
+    problems = violations(src, rules, {}, set(), upper)
+    assert any("studio/extra.py -> mindex.persons.other" in p and "模块级侧向依赖" in p for p in problems)
+    assert len(problems) == 1
