@@ -52,6 +52,15 @@ scenario("material_scope", async (page) => {
   await page.waitForFunction(() => document.querySelector("#notice").textContent.includes("素材范围已保存"));
   await page.locator("#topic-material-current-members summary").filter({hasText: "0"}).waitFor();
   assert.match(await page.locator("#topic-material-current").textContent(), /空素材组/);
+  // 已保存范围与筛选控件同一行，并靠行尾对齐。
+  const scopeRow = await page.evaluate(() => {
+    const scope = document.querySelector("#topic-material-scope").getBoundingClientRect();
+    const current = document.querySelector("#topic-material-current").getBoundingClientRect();
+    const reset = document.querySelector("#topic-material-reset").getBoundingClientRect();
+    return { sameRow: Math.abs(current.bottom - reset.bottom) < 2, atEnd: Math.abs(scope.right - current.right) < 2 && current.left > reset.right };
+  });
+  assert(scopeRow.sameRow, "已保存的素材范围应与筛选控件在同一行");
+  assert(scopeRow.atEnd, "已保存的素材范围应位于行尾");
   for (const width of [1280, 390, 320]) {
     await page.setViewportSize({width, height: 900});
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);

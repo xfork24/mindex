@@ -133,9 +133,11 @@
 .topic-material-scope{display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px;margin:16px 0}
 .topic-material-scope[hidden]{display:none}
 .topic-material-scope>.group-picker,.topic-material-scope>label{flex:0 1 auto;width:max-content;min-width:0;max-width:100%;margin:0}
-.topic-material-scope>p{flex-basis:100%;margin:0}
+/* 提示文字始终独占一行，排在已保存范围之后。 */
+.topic-material-scope>p{order:2;flex-basis:100%;margin:0}
 
-.topic-material-current{flex-basis:100%;min-width:0;padding:12px 16px;border:1px solid var(--line);border-radius:8px;background:var(--surface-2)}
+/* 已保存范围与筛选控件同一行，靠行尾对齐；空间不足时整体换到下一行。 */
+.topic-material-current{order:1;flex:0 1 auto;width:max-content;max-width:min(420px,100%);min-width:0;margin-left:auto;padding:10px 14px;border:1px solid var(--line);border-radius:8px;background:var(--surface-2)}
 .topic-material-current h3{font-size:14px;margin:0 0 8px}
 .topic-material-current p{display:flex;flex-wrap:wrap;gap:4px 8px;margin:6px 0;font-size:12px;overflow-wrap:anywhere}
 .topic-material-current summary{font-size:12px}

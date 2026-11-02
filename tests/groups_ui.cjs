@@ -61,6 +61,14 @@ const sourceGroup = process.env.MINDEX_GROUPS_SOURCE_GROUP;
         await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve)));
         await assertGroupText(`${name}-${language}-${width}`);
         assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `${name} ${language} ${width}: horizontal overflow`);
+        // 任务创建侧栏：素材组筛选与「可用素材」列表框上下相邻，应同宽。
+        assert(await page.evaluate(() => {
+          const form = document.getElementById('create-form');
+          const label = document.getElementById('create-sources')?.closest('label');
+          const picker = form?.querySelector(':scope > .group-picker');
+          if (!picker || !label) return true;
+          return Math.abs(picker.getBoundingClientRect().width - label.getBoundingClientRect().width) < 1;
+        }), `${name} ${language} ${width}: 素材组筛选应与可用素材列表框同宽`);
       }
     }
     await page.screenshot({path:process.env.MINDEX_GROUPS_OUTPUT + '/' + name + '.png',fullPage:true});
@@ -91,8 +99,9 @@ const sourceGroup = process.env.MINDEX_GROUPS_SOURCE_GROUP;
     await page.locator('#groups-add').click();
     await page.locator('#groups-list button', {hasText:'浏览器原文 Browser (2)'}).waitFor();
     const group = await page.evaluate(() => MindexGroupContext.group_id);
-    const fields = await page.locator('#groups-form>label').evaluateAll((nodes) => nodes.map((node) => { const r = node.getBoundingClientRect(); return {x:r.x,right:r.right,bottom:r.bottom}; }));
-    assert(fields[1].x >= fields[0].right && Math.abs(fields[0].bottom - fields[1].bottom) < 2, '组信息默认紧凑排列在同一行');
+    // 组信息首行按顶部对齐：两个字段横向并排且标签行齐平（说明多行时不再下沉）。
+    const fields = await page.locator('#groups-form>label').evaluateAll((nodes) => nodes.map((node) => { const r = node.getBoundingClientRect(); return {x:r.x,right:r.right,top:r.top}; }));
+    assert(fields[1].x >= fields[0].right && Math.abs(fields[0].top - fields[1].top) < 2, '组信息默认紧凑排列在同一行且顶部对齐');
     await audit('groups-management');
     assert((await page.locator('#groups-member-title').textContent()).includes('（2）'), '语言切换后仍显示当前组的成员数量');
     assert.equal(await page.locator('#groups-description').inputValue(), '说明保持原文');

@@ -423,8 +423,12 @@ textarea.code-editor { width: 100%; min-height: 360px; font-family: ui-monospace
 .material-scope-controls>.form-field,.recall-scope-options .form-field{flex:0 1 auto;width:max-content;max-width:100%;min-width:0;margin:0}
 .material-scope-controls>button{flex:0 0 auto;align-self:flex-end;max-width:100%;height:auto;white-space:normal}
 .material-scope-controls>.source-warning{flex-basis:100%}
-/* 素材组筛选与「可用素材」多选框同宽（侧栏整列），长组名在列表内换行。 */
-#create-form>.group-picker{margin:12px 0;width:100%;max-width:100%}
+/* 素材组筛选与「可用素材」多选框同宽（侧栏整列），长组名在列表内换行。
+   control-layout.js 会给字段写 .content-field（宽度取内容宽度且带 !important），
+   这里必须同优先级覆盖，才不会被压窄成内容宽度。 */
+#create-form>.group-picker{margin:12px 0;width:100%!important;max-width:100%!important;flex:0 0 auto!important}
+/* 「可用素材」字段同样占满侧栏整列，与素材组筛选保持同宽。 */
+#create-form>label:has(#create-sources){width:100%!important;max-width:100%!important;flex:0 0 auto!important}
 #create-form>.group-picker .multi-select{width:100%}
 #create-form .multi-list>select{min-width:0!important}
 .music-library-picker>.group-picker{width:240px;max-width:100%}

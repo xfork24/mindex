@@ -1,6 +1,7 @@
 .groups-page .segment-panel{padding:16px;background:var(--surface);border:1px solid var(--line);border-radius:var(--panel-radius)}
 .groups-page .group-fields,.groups-page .group-actions,.groups-page .group-member-columns{display:flex;flex-wrap:wrap;gap:12px;min-width:0}
-.groups-page .group-fields{align-items:flex-end;margin-bottom:24px}
+/* 组信息首行控件按顶部对齐：标签行齐平，说明多行时不会再被压到底部。 */
+.groups-page .group-fields{align-items:flex-start;margin-bottom:24px}
 .groups-page .group-fields>label{flex:0 1 210px;max-width:100%;min-width:0}
 .groups-page .group-fields>.group-description-field{flex-basis:300px}
 .groups-page .group-fields input,.groups-page .group-fields textarea{width:100%;min-width:0}
