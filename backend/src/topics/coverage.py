@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
+
 from mindex.models.adapters import ModelError
 from mindex.topics import coverage_verify
 from mindex.topics.llm import make_llm, profile_of
@@ -57,40 +59,43 @@ def report(config, store, visuals: list[str], *, embedder=None, engine=None, fil
         engine = SearchEngine(config, embedder, index_id=active["id"])
     limits = limits or config.topics.coverage
     rows, degraded, pending, targets = [], False, [], {}
-    for visual in visuals:
-        try:
-            result = engine.text(TextSearch(text=visual[:400], granularity=config.studio.recall.granularity,
-                                            limit=limits.limit, filters=filters.model_copy(update={
-                                                "min_duration": max(filters.min_duration, limits.min_duration)})))
-        except ModelError as exc:
-            return {**empty(visuals, "unavailable", f"检索不可用：{exc}"), "index_id": active and active["id"]}
-        except ValueError as exc:
-            rows.append({"visual": visual, "hit": False, "similarity": None, "clips": [], "error": str(exc)})
-            continue
-        candidates = []
-        lowered = bool(result.get("degraded"))
-        degraded = degraded or lowered
-        for candidate in result.get("results") or []:
-            if scope is not None and candidate.get("source_id") not in scope:
+    # 多条关键画面共用一次 recall_scope（同检索语义）：只做一次前置身份探测，逐条查询不再前后复探。
+    recall = getattr(embedder, "recall_scope", None)
+    with recall() if recall else nullcontext():
+        for visual in visuals:
+            try:
+                result = engine.text(TextSearch(text=visual[:400], granularity=config.studio.recall.granularity,
+                                                limit=limits.limit, filters=filters.model_copy(update={
+                                                    "min_duration": max(filters.min_duration, limits.min_duration)})))
+            except ModelError as exc:
+                return {**empty(visuals, "unavailable", f"检索不可用：{exc}"), "index_id": active and active["id"]}
+            except ValueError as exc:
+                rows.append({"visual": visual, "hit": False, "similarity": None, "clips": [], "error": str(exc)})
                 continue
-            clip = clip_view(candidate)
-            candidates.append(clip)
-            duration = float(clip.get("end") or 0) - float(clip.get("start") or 0)
-            evidence = coverage_verify.evidence_of(candidate)
-            if duration < limits.min_duration:
-                decision = {"verdict": "rejected", "reason": "片段时长不足，不能作为可用画面", "quote": ""}
-            elif not lowered and (clip["similarity"] is None or clip["similarity"] < limits.min_similarity):
-                decision = {"verdict": "rejected", "reason": "相似度低于候选粗筛阈值", "quote": ""}
-            elif not evidence:
-                decision = {"verdict": "uncertain", "reason": "缺少镜头画面分析，无法确认内容", "quote": ""}
-            else:
-                identifier = len(pending) + 1
-                pending.append({"candidate": identifier, "visual": visual, "evidence": evidence,
-                                "duration": round(duration, 3)})
-                targets[identifier] = clip
-                decision = None
-            clip["verification"] = decision
-        rows.append({"visual": visual, "hit": False, "similarity": None, "clips": [], "candidates": candidates})
+            candidates = []
+            lowered = bool(result.get("degraded"))
+            degraded = degraded or lowered
+            for candidate in result.get("results") or []:
+                if scope is not None and candidate.get("source_id") not in scope:
+                    continue
+                clip = clip_view(candidate)
+                candidates.append(clip)
+                duration = float(clip.get("end") or 0) - float(clip.get("start") or 0)
+                evidence = coverage_verify.evidence_of(candidate)
+                if duration < limits.min_duration:
+                    decision = {"verdict": "rejected", "reason": "片段时长不足，不能作为可用画面", "quote": ""}
+                elif not lowered and (clip["similarity"] is None or clip["similarity"] < limits.min_similarity):
+                    decision = {"verdict": "rejected", "reason": "相似度低于候选粗筛阈值", "quote": ""}
+                elif not evidence:
+                    decision = {"verdict": "uncertain", "reason": "缺少镜头画面分析，无法确认内容", "quote": ""}
+                else:
+                    identifier = len(pending) + 1
+                    pending.append({"candidate": identifier, "visual": visual, "evidence": evidence,
+                                    "duration": round(duration, 3)})
+                    targets[identifier] = clip
+                    decision = None
+                clip["verification"] = decision
+            rows.append({"visual": visual, "hit": False, "similarity": None, "clips": [], "candidates": candidates})
     if pending:
         decisions = coverage_verify.verify(llm or make_llm(config), pending, title=title, angle=angle,
                                            retries=profile_of(config).split_retries)

@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
+
 import numpy as np
 
 from mindex.topics.items import normalize_title
@@ -17,9 +19,12 @@ def item_text(item: dict) -> str:
 
 
 def embed(embedder, texts: list[str]) -> np.ndarray:
-    vectors = []
-    for start in range(0, len(texts), EMBED_BATCH):
-        vectors.extend(embedder.text(texts[start : start + EMBED_BATCH], role="document"))
+    """整批嵌入共用一次 recall_scope（同检索语义）：只做一次前置身份探测，逐条推理不再前后复探。"""
+    scope = getattr(embedder, "recall_scope", None)
+    with scope() if scope else nullcontext():
+        vectors = []
+        for start in range(0, len(texts), EMBED_BATCH):
+            vectors.extend(embedder.text(texts[start : start + EMBED_BATCH], role="document"))
     matrix = np.asarray(vectors, dtype=np.float32)
     if matrix.ndim != 2 or len(matrix) != len(texts):
         raise ValueError("嵌入服务返回的向量数量不符")

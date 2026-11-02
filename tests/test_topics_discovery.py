@@ -9,6 +9,7 @@ import asyncio
 import json
 import threading
 import time
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 
 import numpy as np
@@ -44,6 +45,39 @@ def test_greedy_cluster_and_fallbacks():
     assert cluster.by_title(["央行降息！", "央行 降息", "芯片发布"]) == [[0, 1], [2]]
     items = [{"hot": 1}, {"hot": 50}, {"hot": None}]
     assert cluster.rank([[0], [1], [2, 0]], items, 2) == [[2, 0], [1]]
+
+
+def test_cluster_embed_shares_one_recall_scope():
+    """cluster.embed 整批共用一次 recall_scope：llama_cpp 嵌入器逐批会做 /health /props /v1/models 探测，这里一次身份探测覆盖全批。"""
+    class ScopedEmbedder:
+        def __init__(self):
+            self.scopes = 0
+            self.batches = 0
+
+        @contextmanager
+        def recall_scope(self):
+            self.scopes += 1
+            yield
+
+        def text(self, texts, role="document"):
+            self.batches += 1
+            return [[1.0, 0.0] for _ in texts]
+
+    class PlainEmbedder:
+        def __init__(self):
+            self.batches = 0
+
+        def text(self, texts, role="document"):
+            self.batches += 1
+            return [[0.0, 1.0] for _ in texts]
+
+    scoped = ScopedEmbedder()
+    total = cluster.EMBED_BATCH * 3 + 1
+    vectors = cluster.embed(scoped, ["选题"] * total)
+    assert len(vectors) == total and scoped.batches == 4 and scoped.scopes == 1
+
+    plain = PlainEmbedder()
+    assert len(cluster.embed(plain, ["a", "b"])) == 2 and plain.batches == 1
 
 
 def test_timeliness_cost_total():
