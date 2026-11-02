@@ -159,9 +159,9 @@ header .language-switch{display:flex;align-items:center;gap:5px;white-space:nowr
 .theme-toggle[data-mode=light]::before{content:'☀'}
 .theme-toggle[data-mode=dark]::before{content:'☾'}
 
-.language-switch [data-language][aria-current="true"]{color:var(--on-accent);font-weight:700}
+.language-switch [data-language][aria-current="true"]{color:inherit;font-weight:600}
 .language-switch [data-language]{color:var(--muted)}
-.language-switch .language-divider{color:var(--muted)}
+.language-switch .language-divider{color:var(--line-strong)}
 
 header #refresh,header #reload{margin-left:auto}
 
@@ -310,14 +310,12 @@ textarea{resize:both;min-width:min(140px,100%);max-width:100%}
 #entity-filters>label{flex:1 1 240px;max-width:none}
 @media(max-width:540px){#person-controls label:has(.multi-select),#person-controls label:not(:has(.multi-select)){width:100%}#capture-form>label,#process-form>label,#capture-form>label:has(input[type=number]),#process-form>label:has(input[type=number]){flex-basis:100%}}
 
-button.language-switch{position:relative;isolation:isolate;overflow:hidden;width:80px;height:var(--control-size);min-height:var(--control-size);padding:0;border-radius:var(--control-radius);background:var(--surface)}
-button.language-switch::before{content:"";position:absolute;inset:0;z-index:-1;background:var(--green);pointer-events:none;clip-path:polygon(0 0,58% 0,42% 100%,0 100%)}
-button.language-switch:has([data-language="en"][aria-current="true"])::before{clip-path:polygon(58% 0,100% 0,100% 100%,42% 100%)}
-button.language-switch [data-language]{position:absolute;top:0;bottom:0;display:flex;align-items:center;justify-content:center;width:40%}
-button.language-switch [data-language="zh"]{left:0}
-button.language-switch [data-language="en"]{right:0}
-button.language-switch .language-divider{position:absolute;inset:0;font-size:0;pointer-events:none}
-button.language-switch .language-divider::after{content:"";position:absolute;inset:0;background:var(--line);clip-path:polygon(57.3% 0,58.7% 0,42.7% 100%,41.3% 100%)}
+/* 语言切换：与主题切换同款的图标按钮——只显示当前语言的单个字形（文 / En），
+   点击循环 zh↔en；两种语言的完整说明保留在 aria-label（i18n.js 绑定 language.switch）。 */
+button.language-switch{width:var(--control-size);min-width:var(--control-size);height:var(--control-size);min-height:var(--control-size);padding:0;background:transparent}
+button.language-switch [data-language]{display:none;position:static;width:auto}
+button.language-switch [data-language][aria-current="true"]{display:flex;font-size:12px;font-weight:600}
+button.language-switch .language-divider{display:none}
 
 /* Shared shot player: direct preview playback and a single aligned control row. */
 .shot-player-media{position:relative;background:#15231e;overflow:hidden}
