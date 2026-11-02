@@ -61,6 +61,29 @@ def test_record_merges_and_counts_once_per_card(seeded):
     assert remaining == {"紫色天空": 1, "央行发布会现场": 1}
 
 
+def test_matcher_shares_open_gap_vectors_across_cards(seeded):
+    """Matcher 跨卡片共享缺口向量：嵌入文本数 = 开放缺口 + 各卡新画面，不再随卡片数 × 历史缺口数相乘。"""
+    config, store, pid, (a, b) = seeded
+    embedder = topic_embedder(config)
+    counted = {"texts": 0}
+    inner = embedder.text
+
+    def counting_text(texts, role="document"):
+        counted["texts"] += len(texts)
+        return inner(texts, role=role)
+
+    embedder.text = counting_text
+    gaps.record(store, pid, a, ["紫色天空"], embedder=embedder)  # 预置 1 条开放缺口（1 次嵌入）
+    matcher = gaps.Matcher(store, pid, embedder)
+    assert matcher.record(b, ["紫色夜空"]) == 0  # 余弦合并进预置缺口（快照 1 + 画面 1 = 2 次嵌入）
+    assert matcher.record(b, ["全新的画面"]) == 1  # 新建缺口即时进入比对集（1 次）
+    assert matcher.record(a, ["全新的画面"]) == 0  # 同运行内后续卡片可合并新缺口（1 次，不重嵌快照）
+    assert matcher.record(a, ["紫色 天空！"]) == 0  # 规范化标题精确匹配（1 次）
+    listed = {g["visual"]: g["count"] for g in gaps.list_gaps(store, pid)}
+    assert listed == {"紫色天空": 2, "全新的画面": 2}
+    assert counted["texts"] == 6  # 旧行为同场景嵌入 8 次文本，且每次调用随开放缺口数线性膨胀
+
+
 def test_export_csv(seeded):
     _, store, pid, (a, _) = seeded
     gaps.record(store, pid, a, ["=HYPERLINK(\"http://x\")", "红色画面"], embedder=None)

@@ -201,6 +201,7 @@ def evaluate(config, store, profile_id: str, card_ids: list[str], *, llm, embedd
     if warning:
         warnings.append(warning)
     stamp = now()
+    gap_matcher = topic_gaps.Matcher(store, profile_id, embedder)
     for index, (row, body) in enumerate(zip(rows, bodies, strict=True)):
         if progress:
             progress({"stage": "score", "message": f"打分与素材覆盖 {index + 1}/{len(rows)}", "done": index,
@@ -219,7 +220,7 @@ def evaluate(config, store, profile_id: str, card_ids: list[str], *, llm, embedd
         body.update(scores=scores, coverage=report, scored_at=stamp)
         save_body(store, row["id"], body, total=scoring.total(scores, weights))
         if report["status"] == "ok":
-            topic_gaps.record(store, profile_id, row["id"], topic_coverage.gaps(report), embedder=embedder)
+            gap_matcher.record(row["id"], topic_coverage.gaps(report))
     return warnings
 
 
