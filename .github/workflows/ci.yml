@@ -45,6 +45,9 @@ jobs:
       - name: ruff
         run: uv run ruff check backend/src tests
 
+      - name: mypy（shared+models 基线）
+        run: bash scripts/typecheck.sh
+
       - name: 文档链接
         run: uv run python scripts/check-doc-links.py
 

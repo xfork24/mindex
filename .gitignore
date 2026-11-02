@@ -31,3 +31,4 @@ clean.js
 desktop/node_modules/
 desktop/build/
 desktop/dist/
+.mypy-shim/

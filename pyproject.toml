@@ -20,7 +20,15 @@ dependencies = [
 
 [project.optional-dependencies]
 # 人物帧采样维护测试需要 PyAV；无需为测试安装整个人物推理环境。
-dev = ["pytest>=8,<10", "ruff>=0.11", "mcp==1.30.0", "hypothesis==6.170.9", "av>=14,<17"]
+dev = [
+    "pytest>=8,<10",
+    "ruff>=0.11",
+    "mcp==1.30.0",
+    "hypothesis==6.170.9",
+    "av>=14,<17",
+    "mypy==1.19.0",
+    "types-pyyaml>=6.0.12.20261030",
+]
 person = ["supervision>=0.27,<0.28", "av>=14,<17"]
 # 智能助手的 MCP 导出（streamable-http /mcp 与 `mindex mcp` stdio）；未安装时其余功能不受影响。
 mcp = ["mcp==1.30.0"]
@@ -93,3 +101,34 @@ ignore = [
 
 [tool.ruff.lint.isort]
 known-first-party = ["mindex"]
+
+# mypy 基线（2026-11 引入）：首批只查注解质量较好的 shared 与 models；起步豁免只许缩短
+# （棘轮），脏模块清完后逐包开 check_untyped_defs、再把 processing/search 等加入 packages。
+[tool.mypy]
+python_version = "3.11"
+mypy_path = [".mypy-shim"]
+files = [".mypy-shim/mindex/shared", ".mypy-shim/mindex/models"]
+plugins = ["pydantic.mypy"]
+ignore_missing_imports = true
+check_untyped_defs = false
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_unused_configs = true
+
+
+# 起步豁免（2026-11 基线：以下 17 个模块共 72 个错误，多为 Optional 未收窄与类型混用）。
+# 棘轮：只许缩短——清完一个模块的错误就把该模块从列表删除，不新增豁免模块。
+[[tool.mypy.overrides]]
+module = [
+  "mindex.shared.config", "mindex.shared.locks", "mindex.shared.process_ops",
+  "mindex.shared.shot_media", "mindex.shared.storage",
+  "mindex.models.animator", "mindex.models.compatibility", "mindex.models.deployment",
+  "mindex.models.detectors", "mindex.models.image_generators", "mindex.models.llama_cpp",
+  "mindex.models.model_server", "mindex.models.music_generators", "mindex.models.qwen",
+  "mindex.models.storyboard", "mindex.models.video_generators", "mindex.models.writer",
+]
+ignore_errors = true
+
+[dependency-groups]
+dev = []
