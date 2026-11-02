@@ -75,10 +75,11 @@ Mindex 定位为 **one-stop video creation agent**（一站式视频创作智能
 
 ## 审查报告
 
-2026-10 的全面审查报告（铺平在本目录，`review-2026-10-*`），取代关系：~~project-review-2026-10-22（已删除）~~ → 2026-10 专项审查 → [review-2026-10-26-project-analysis.md](review-2026-10-26-project-analysis.md)（综合分析，最新）。各报告的"当前可做"表已回填完成状态；其中 architecture 与 code-quality 报告仍含未解决的遗留项（A10/A11、Q21/Q22），以报告内标注为准：
+2026-10 的全面审查报告（铺平在本目录，`review-2026-10-*`），取代关系：~~project-review-2026-10-22（已删除）~~ → 2026-10 专项审查 → [review-2026-10-26-project-analysis.md](review-2026-10-26-project-analysis.md)（综合分析）→ [review-1102.md](review-1102.md)（综合分析，最新）。各报告的"当前可做"表已回填完成状态；其中 architecture 与 code-quality 报告仍含未解决的遗留项（A10/A11、Q21/Q22），以报告内标注为准：
 
 | 文档 | 内容 |
 |---|---|
+| [review-1102.md](review-1102.md) | 综合项目分析（2026-11-02：规模实测、架构与规范评价、13 条潜在问题） |
 | [review-2026-10-26-project-analysis.md](review-2026-10-26-project-analysis.md) | 综合项目分析（规模、功能全览、演进与 7 条建议） |
 | [features-roadmap.md](review-2026-10-features-roadmap.md) | 功能集缺口与本期（M1）创作能力扩展 |
 | [architecture.md](review-2026-10-architecture.md) | 仓库结构与架构审查（runner、迁移、锁、执行器、拆包） |
