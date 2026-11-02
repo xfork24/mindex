@@ -968,10 +968,15 @@ async function loadCards(profile) {
   const keep = [cards.selected?.id, page.card].find((id) => id && cards.items.some((item) => item.id === id));
   if (keep) await selectCard(keep, { force: !cardDirty() });
   else if (!cardDirty()) {
-    cards.selected = cards.saved = null;
-    page.card = null;
-    renderCard();
-    syncUrl();
+    // 未指定选题时默认选中评分最高的一条，右侧直接展示其细节。
+    const best = [...cards.items].sort((a, b) => (b.total ?? -Infinity) - (a.total ?? -Infinity))[0];
+    if (best) await selectCard(best.id, { force: true });
+    else {
+      cards.selected = cards.saved = null;
+      page.card = null;
+      renderCard();
+      syncUrl();
+    }
   }
   renderCards();
 }

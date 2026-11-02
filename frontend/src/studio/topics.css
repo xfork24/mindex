@@ -19,6 +19,8 @@
 .danger{color:var(--danger-text)}
 /* 折叠分区：数据源、候选条目、素材采集清单 */
 .topics-section{background:var(--surface);border:1px solid var(--line);border-radius:var(--panel-radius);padding:10px 16px;margin:0 0 14px}
+/* 底部素材采集清单与上方控件留出呼吸空间。 */
+#gaps-section{margin-top:18px}
 .topics-section>summary{display:flex;align-items:baseline;gap:12px;font-size:14px;font-weight:550;color:var(--control-text);padding:4px 0}
 .topics-section>summary .muted{font-size:12px;font-weight:400}
 .topics-section-hint{font-size:12px;line-height:1.7;margin:6px 0 10px}

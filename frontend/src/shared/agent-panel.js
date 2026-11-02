@@ -253,7 +253,9 @@
     document.querySelectorAll('[data-agent-focus]').forEach((n) => delete n.dataset.agentFocus);
   }
   async function applyFocus(focus, options = {}) {
-    if (typeof window.MindexAgentFocus !== 'function') return true;
+    // 本脚本先于页面脚本（defer 顺序）执行，挂载时目标页可能还没定义定位钩子：
+    // 视为未就绪返回 false，交给 resumeFocus 的有限重试，避免跨页定位被静默丢弃。
+    if (typeof window.MindexAgentFocus !== 'function') return false;
     try { return await window.MindexAgentFocus(focus, options); } catch (error) { console.warn(error); return true; }
   }
   function urlFor(focus) {

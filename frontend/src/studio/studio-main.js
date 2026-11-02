@@ -191,8 +191,21 @@ window.addEventListener("mindex:agent-mutation", (event) => {
     $("no-job").hidden = false;
     return;
   }
-  if (state.id && (!detail.job_id || detail.job_id === state.id)) agentRefresh = refresh().catch(fail);
+  if (state.id && (!detail.job_id || detail.job_id === state.id))
+    agentRefresh = refresh().catch(fail).then(() => { if (agentFocusMark) markAgentShots(agentFocusMark.shots); });
 });
+// 最近一次助手定位的分镜标记：分镜板因 agent mutation 重渲染会替换卡片元素，
+// 渲染完成后重放高亮，避免跨页定位被随后的刷新冲掉。
+let agentFocusMark = null;
+function markAgentShots(shots, scroll = false) {
+  const cards = shots.map((sid) => state.shotCards.get(sid)?.card).filter(Boolean);
+  if (!cards.length) return false;
+  cards.forEach((card, index) => {
+    if (scroll && index === 0) card.scrollIntoView({ block: "nearest", inline: "nearest" });
+    window.MindexAgent?.highlight(card, { scroll: scroll && index === 0 });
+  });
+  return true;
+}
 const AGENT_SECTIONS = {
   jobs: "#job-list", script: "#script-section", plan: ".plan-bar", storyboard: "#storyboard-section",
   log: ".execution-log-section", final: "#result-section", artifacts: "#artifacts-section"
@@ -226,13 +239,11 @@ window.MindexAgentFocus = async (focus, { passive = false } = {}) => {
       if (barStages(sid).includes(stage)) state.selection.set(scopeKey(), { sid, stage });
       render();
     }
-    shots.forEach((sid, index) => {
-      const card = state.shotCards.get(sid)?.card;
-      if (index === 0) card?.scrollIntoView({ block: "nearest", inline: "nearest" });
-      mark(card, { scroll: index === 0 });
-    });
+    if (!markAgentShots(shots, true)) return false;
+    agentFocusMark = { shots };
     return true;
   }
+  agentFocusMark = null;
   const target = document.querySelector(AGENT_SECTIONS[focus.section] || AGENT_SECTIONS.storyboard);
   if (target?.tagName === "DETAILS") target.open = true;
   mark(target);

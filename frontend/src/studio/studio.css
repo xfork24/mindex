@@ -405,7 +405,7 @@ textarea.code-editor { width: 100%; min-height: 360px; font-family: ui-monospace
 .delivery-management { margin-bottom:28px; padding:16px; border:1px solid var(--line); border-radius:10px; }
 .delivery-platform-list { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0; }
 .delivery-platform-form { min-width:0; }
-.delivery-platform-form input, .delivery-platform-form select { width:100%; min-width:0; box-sizing:border-box; }
+.delivery-platform-form input:not([type=checkbox], [type=radio]), .delivery-platform-form select { width:100%; min-width:0; box-sizing:border-box; }
 @media(max-width:480px) { .delivery-fields { grid-template-columns:minmax(0,1fr) } }
 
 /* Workflow fields adapt to panel width rather than a fixed number of columns. */
@@ -423,7 +423,10 @@ textarea.code-editor { width: 100%; min-height: 360px; font-family: ui-monospace
 .material-scope-controls>.form-field,.recall-scope-options .form-field{flex:0 1 auto;width:max-content;max-width:100%;min-width:0;margin:0}
 .material-scope-controls>button{flex:0 0 auto;align-self:flex-end;max-width:100%;height:auto;white-space:normal}
 .material-scope-controls>.source-warning{flex-basis:100%}
-#create-form>.group-picker{margin:12px 0;max-width:100%}
+/* 素材组筛选与「可用素材」多选框同宽（侧栏整列），长组名在列表内换行。 */
+#create-form>.group-picker{margin:12px 0;width:100%;max-width:100%}
+#create-form>.group-picker .multi-select{width:100%}
+#create-form .multi-list>select{min-width:0!important}
 .music-library-picker>.group-picker{width:240px;max-width:100%}
 /* 文案与查询：组、素材、演员、角色及两个人物条件共用紧凑间距，宽屏可在同一行。 */
 .recall-scope-options{gap:12px}

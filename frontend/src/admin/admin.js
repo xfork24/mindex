@@ -383,6 +383,7 @@ function renderWork(source, target) {
     // 行布局：一行一个处理卡；左侧描述与操作按钮，右侧各任务进度。
     const body = node('div', undefined, 'work-card-body'),progressCol = node('div', undefined, 'work-card-progress');card.append(body, progressCol);
     const processBusy = work.task && ['queued', 'running'].includes(work.task.status),blocked = source.enforce_gpu_lock && busy;
+    let sceneNote = null, personsNote = null;
     const heading = node('div', undefined, 'work-heading');heading.append(node('h4', label), node('span', workStatus[work.status] || MindexI18n.msg("ui.59a9eb4e6574"), 'work-status'));body.append(heading);
     let summary = '';
     if (name === 'shots') summary = MindexI18n.msg("ui.234493832eb5", { p0: result.shots || 0, p1: result.moments || 0, p2: result.missing_artifacts || 0 });
@@ -449,10 +450,10 @@ function renderWork(source, target) {
         await post(`/api/admin/sources/${source.id}/publish`, { work: name, scope: 'scene' });await refreshWork(source.id);
       }));scene.disabled = blocked || rows[2].running || !work.can_publish_scene;controls.append(scene);
       const coverage = work.scene_search || {};
-      body.append(node('p', MindexI18n.msg("ui.scene_search_coverage", {done: coverage.indexed_segments || 0, total: coverage.expected_segments || 0}), 'muted'));
+      sceneNote = node('p', MindexI18n.msg("ui.scene_search_coverage", {done: coverage.indexed_segments || 0, total: coverage.expected_segments || 0}), 'muted');
     }
     if (['shots', 'dialogue', 'analysis'].includes(name) && source.shot_count) controls.append(action(MindexI18n.msg("ui.0ef38438801b"), async () => {state.kind = 'shot';state.parent = null;state.segmentPage = 1;await loadSegments();$('segment-list').scrollIntoView({ block: 'start', behavior: 'smooth' });if (name !== 'shots') notify(MindexI18n.msg("ui.1844d03ed5e7"));}));
-    if (name === 'persons') {const link = node('a', MindexI18n.msg("ui.8face9a73c34"), 'quiet nav-link');link.href = `/persons?source=${encodeURIComponent(source.id)}#review`;controls.append(link);body.append(node('p', MindexI18n.msg("ui.4e65b9bde907"), 'muted'));}
+    if (name === 'persons') {const link = node('a', MindexI18n.msg("ui.8face9a73c34"), 'quiet nav-link');link.href = `/persons?source=${encodeURIComponent(source.id)}#review`;controls.append(link);personsNote = node('p', MindexI18n.msg("ui.4e65b9bde907"), 'muted');}
     progressCol.append(controls);
     for (const row of rows) appendWorkProgress(progressCol, label, row);
     const processEndpoint = ['shots', 'analysis'].includes(name) ? '/api/admin/source-tasks' : name === 'dialogue' ? '/api/admin/dialogue-tasks' : '/api/persons/tasks';
@@ -480,8 +481,11 @@ function renderWork(source, target) {
         const retry = action(MindexI18n.msg("ui.23e1269c0ea7"), perform('process', async () => {await post(`${processEndpoint}/${task.id}/retry`, {});await refreshWork(source.id);}));retry.disabled = blocked || processBusy;progressCol.append(retry);
       }
     }
-    if (MindexI18n.system(work.start_reason)) body.append(node('p', MindexI18n.system(work.start_reason), 'muted'));
-    if (name === 'persons' && work.setup?.missing?.length) {body.append(node('p', work.setup.missing.map(MindexI18n.system).join('；'), 'muted'));const link = node('a', MindexI18n.msg("ui.8af96795e1d4"));link.href = '/persons';body.append(link);}
+    if (MindexI18n.system(work.start_reason)) progressCol.append(node('p', MindexI18n.system(work.start_reason), 'muted'));
+    if (name === 'persons' && work.setup?.missing?.length) {progressCol.append(node('p', work.setup.missing.map(MindexI18n.system).join('；'), 'muted'));const link = node('a', MindexI18n.msg("ui.8af96795e1d4"));link.href = '/persons';progressCol.append(link);}
+    // 勾选框以下的说明文字归右栏，置于按钮与进度之后。
+    if (sceneNote) progressCol.append(sceneNote);
+    if (personsNote) progressCol.append(personsNote);
     grid.append(card);
   }
   if (!cachePrefs.refreshingCache && (busy || source.work_refreshing)) workPoll = setTimeout(() => run(() => refreshWork(source.id)), 2000);
