@@ -163,7 +163,9 @@ header .language-switch{display:flex;align-items:center;gap:5px;white-space:nowr
 .language-switch [data-language]{color:var(--muted)}
 .language-switch .language-divider{color:var(--line-strong)}
 
-header #refresh,header #reload{margin-left:auto}
+/* 刷新：与主题/语言切换同款的图标按钮（↻），完整说明在 aria-label（i18n 绑定同键）。 */
+header #refresh,header #reload{margin-left:auto;width:var(--control-size);min-width:var(--control-size);padding:0;font-size:0;background:transparent}
+header #refresh::before,header #reload::before{content:'↻';font-size:14px}
 
 .page-nav{display:flex;align-items:center;flex-wrap:wrap;gap:8px;max-width:100%;min-width:0}
 
