@@ -30,6 +30,8 @@ uv run pytest tests/test_pipeline.py::test_name   # 单个测试
 
 UI 回归由对应的 `test_*.py` 以子进程运行 `node`（无 node 自动跳过），Playwright 驱动**真实页面**：`tests/serve_fixture.py` 起一个隔离素材库（临时 data_dir + 真实 `mindex serve`），页面行为在真实 HTTP 与 DOM 上断言。Playwright 模块路径可用 `MINDEX_PLAYWRIGHT_MODULE` 指定。
 
+- 顶栏布局与语言切换：`tests/test_header_ui.py` 驱动 `tests/header_navigation_ui.cjs`（顶栏导航顺序、选中态、按钮组靠右与间距）与 `tests/i18n_ui.cjs`（语言切换不丢输入、不触发额外请求、窄屏不溢出），两个用例标记 slow，夜间完整回归执行。
+
 ### 全页面布局回归（复现方法）
 
 全页面控件布局测量使用专用种子与脚本：
