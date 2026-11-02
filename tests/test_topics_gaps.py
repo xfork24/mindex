@@ -73,15 +73,60 @@ def test_matcher_shares_open_gap_vectors_across_cards(seeded):
         return inner(texts, role=role)
 
     embedder.text = counting_text
-    gaps.record(store, pid, a, ["紫色天空"], embedder=embedder)  # 预置 1 条开放缺口（1 次嵌入）
+    gaps.record(store, pid, a, ["紫色天空"], embedder=embedder)  # 预置 1 条开放缺口（1 次嵌入，已持久化）
     matcher = gaps.Matcher(store, pid, embedder)
-    assert matcher.record(b, ["紫色夜空"]) == 0  # 余弦合并进预置缺口（快照 1 + 画面 1 = 2 次嵌入）
+    assert matcher.record(b, ["紫色夜空"]) == 0  # 余弦合并进预置缺口（快照命中缓存，只嵌本画面 1 次）
     assert matcher.record(b, ["全新的画面"]) == 1  # 新建缺口即时进入比对集（1 次）
     assert matcher.record(a, ["全新的画面"]) == 0  # 同运行内后续卡片可合并新缺口（1 次，不重嵌快照）
     assert matcher.record(a, ["紫色 天空！"]) == 0  # 规范化标题精确匹配（1 次）
     listed = {g["visual"]: g["count"] for g in gaps.list_gaps(store, pid)}
     assert listed == {"紫色天空": 2, "全新的画面": 2}
-    assert counted["texts"] == 6  # 旧行为同场景嵌入 8 次文本，且每次调用随开放缺口数线性膨胀
+    assert counted["texts"] == 5  # 旧行为同场景嵌入 8 次文本，且每次调用随开放缺口数线性膨胀
+
+
+def test_matcher_persists_and_reuses_gap_vectors(seeded):
+    """缺口向量持久化：新 Matcher 实例直接复用库内向量，开放缺口不再逐次重嵌。"""
+    config, store, pid, (a, b) = seeded
+    embedder = topic_embedder(config)
+    counted = {"texts": 0}
+    inner = embedder.text
+
+    def counting_text(texts, role="document"):
+        counted["texts"] += len(texts)
+        return inner(texts, role=role)
+
+    embedder.text = counting_text
+    gaps.record(store, pid, a, ["紫色天空", "全新的画面"], embedder=embedder)
+    after_seed = counted["texts"]  # 空快照：两条新画面各嵌一次
+    fresh = gaps.Matcher(store, pid, embedder)  # 新实例：向量来自持久化缓存
+    assert fresh.record(b, ["紫色夜空"]) == 0  # 只嵌入本画面，紫色天空不重嵌
+    assert counted["texts"] == after_seed + 1
+    listed = {g["visual"]: g["count"] for g in gaps.list_gaps(store, pid)}
+    assert listed == {"紫色天空": 2, "全新的画面": 1}
+    row = store.one("SELECT embedding IS NOT NULL AS cached FROM topic_gaps WHERE visual='紫色天空'")
+    assert row["cached"] == 1
+
+
+def test_matcher_reembeds_when_embedding_space_changes(seeded):
+    """嵌入空间身份变化后持久化向量失效重嵌，绝不跨空间比较。"""
+    config, store, pid, (a, b) = seeded
+    first = topic_embedder(config)
+    gaps.record(store, pid, a, ["紫色天空"], embedder=first)
+    config.embedding.model = "another-embedder"
+    second = topic_embedder(config)
+    counted = {"texts": 0}
+    inner = second.text
+
+    def counting_text(texts, role="document"):
+        counted["texts"] += len(texts)
+        return inner(texts, role=role)
+
+    second.text = counting_text
+    matcher = gaps.Matcher(store, pid, second)
+    assert matcher.record(b, ["紫色夜空"]) == 0  # 指纹不符触发重嵌，合并结果仍正确
+    assert counted["texts"] == 2  # 快照 1 + 本画面 1
+    row = store.one("SELECT embedding_space FROM topic_gaps WHERE visual='紫色天空'")
+    assert row["embedding_space"]  # 已用新身份覆写
 
 
 def test_export_csv(seeded):

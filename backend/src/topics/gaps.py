@@ -2,8 +2,9 @@
 
 - 合并：与本档案未完成缺口的描述相近（规范化后相同、文本向量余弦 ≥ ``MERGE_SIMILARITY``，或嵌入不可用时字符
   二元组 Jaccard ≥ ``MERGE_JACCARD``）时并入，``card_ids`` 记录涉及的选题，出现次数为其长度（同一选题重复打分不重复计数）。
-- 批量：``Matcher`` 让一次打分运行只嵌入开放缺口一遍（新缺口即时并入比对集）；逐条登记的 ``record``
-  是它的一次性包装。嵌入量是 O(开放缺口 + 新画面)，不随卡片数 × 历史缺口数相乘。
+- 批量：``Matcher`` 让缺口向量持久化在 ``topic_gaps``（``embedding``/``embedding_space`` 列，按嵌入空间
+  身份指纹失效），每次打分只嵌入没有可用向量的缺口；逐条登记的 ``record`` 是它的一次性包装。
+  嵌入量是 O(新增缺口 + 新画面)，不随卡片数 × 历史缺口数相乘。
 - 状态：open（待采集）/ done（已采集）。导出 CSV 带 UTF-8 BOM，Windows 上用 Excel 打开不乱码。
 """
 
@@ -17,7 +18,7 @@ from typing import Literal
 import numpy as np
 
 from mindex.admin.curation import EntityNotFound
-from mindex.shared.config import StrictModel
+from mindex.shared.config import StrictModel, fingerprint
 from mindex.topics import cluster, profiles
 from mindex.topics.common import check_id, dumps, loads, new_id, now
 from mindex.topics.items import normalize_title
@@ -34,41 +35,72 @@ class GapChanges(StrictModel):
 
 
 class Matcher:
-    """打分循环共用的缺口匹配器：开放缺口向量每次运行只嵌入一次，新缺口即时并入比对集。
+    """打分循环共用的缺口匹配器：缺口向量持久化在库里，未命中缓存才嵌入。
 
     合并判定与一次性 ``record`` 一致：规范化标题精确匹配 → 文本向量余弦最大且 ≥ ``MERGE_SIMILARITY``
-    → 嵌入不可用时字符二元组 Jaccard 最大且 ≥ ``MERGE_JACCARD``。运行中嵌入一旦失败即整体退化为
-    文字重合度合并（不重试），与旧行为同样不中断挖掘。
+    → 嵌入不可用时字符二元组 Jaccard 最大且 ≥ ``MERGE_JACCARD``。向量按嵌入空间身份指纹
+    （``embedding_space``）缓存与失效，切换嵌入模型后指纹不符的行自动重嵌，绝不跨空间比较。
+    运行中嵌入一旦失败即整体退化为文字重合度合并（不重试），与旧行为同样不中断挖掘。
     """
 
     def __init__(self, store, profile_id: str, embedder=None):
         self.store, self.profile_id, self.embedder = store, profile_id, embedder
         self._rows: list[dict] = []
-        self._vectors: list[np.ndarray] = []
-        self._loaded, self._failed = False, False
+        self._vectors: dict[str, np.ndarray] = {}
+        self._matrix: np.ndarray | None = None
+        self._loaded = self._failed = self._identity_ready = False
+        self._space: str | None = None
+
+    def _identity(self) -> str | None:
+        """嵌入空间身份指纹；取不到（无 identity 的嵌入器或服务未就绪）时返回 None，只做会话内缓存。"""
+        if not self._identity_ready:
+            self._identity_ready = True
+            fn = getattr(self.embedder, "identity", None)
+            try:
+                self._space = fingerprint(fn()) if fn is not None else None
+            except Exception:  # noqa: BLE001 — 身份不可得时不持久化，成败交给嵌入本身
+                self._space = None
+        return self._space
 
     def _load(self) -> None:
         if self._loaded:
             return
         self._loaded = True
         self._rows = self.store.rows("SELECT * FROM topic_gaps WHERE profile_id=? AND status='open'", (self.profile_id,))
+        space = self._identity()
+        if not space:
+            return
+        for gap in self._rows:
+            if gap["embedding_space"] == space and gap["embedding"] is not None:
+                self._vectors[gap["id"]] = np.frombuffer(gap["embedding"], dtype=np.float32)
+
+    def _matrix_of(self) -> np.ndarray | None:
+        """全部缺口都有向量时返回按 ``_rows`` 顺序堆叠的矩阵，否则 None（余弦退化为不可用）。"""
+        if self._matrix is None and self._rows and all(g["id"] in self._vectors for g in self._rows):
+            self._matrix = np.stack([self._vectors[g["id"]] for g in self._rows])
+        return self._matrix
 
     def _vectors_for(self, texts: list[str]) -> dict[str, np.ndarray]:
-        """把尚无向量的缺口与本批画面合并成一次嵌入；失败时整体退化为文字比对。"""
+        """把缓存未命中的缺口与本批画面合并成一次嵌入并回写数据库；失败时整体退化为文字比对。"""
         if self.embedder is None or self._failed:
             return {}
-        pending = [g["visual"] for g in self._rows[len(self._vectors) :]]
-        if not pending and not texts:
+        missing = [g for g in self._rows if g["id"] not in self._vectors]
+        if not missing and not texts:
             return {}
         try:
-            batch = list(cluster.embed(self.embedder, [*pending, *texts]))
-            self._vectors.extend(batch[: len(pending)])
-            return {text: batch[len(pending) + index] for index, text in enumerate(texts)}
+            batch = list(cluster.embed(self.embedder, [*[g["visual"] for g in missing], *texts]))
         except Exception:  # 嵌入不可用时按文字重合度合并
             log.warning("缺口合并嵌入不可用，按文字重合度合并", exc_info=True)
             self._failed = True
-            self._vectors = []
             return {}
+        space = self._identity()
+        for gap, vector in zip(missing, batch[: len(missing)], strict=True):
+            self._vectors[gap["id"]] = vector
+            self._matrix = None
+            if space:
+                self.store.execute("UPDATE topic_gaps SET embedding=?,embedding_space=? WHERE id=?",
+                                   (np.asarray(vector, dtype=np.float32).tobytes(), space, gap["id"]))
+        return {text: batch[len(missing) + index] for index, text in enumerate(texts)}
 
     def _match(self, visual: str, vector) -> dict | None:
         key = normalize_title(visual)
@@ -77,8 +109,9 @@ class Matcher:
                 return gap
         if not self._rows:
             return None
-        if vector is not None and len(self._vectors) == len(self._rows):
-            sims = np.asarray(self._vectors) @ vector
+        matrix = self._matrix_of() if vector is not None else None
+        if matrix is not None:
+            sims = matrix @ vector
             best = int(np.argmax(sims))
             return self._rows[best] if float(sims[best]) >= MERGE_SIMILARITY else None
         best = max(self._rows, key=lambda g: jaccard_max(visual, [g["visual"]]))
@@ -87,14 +120,19 @@ class Matcher:
     def _create(self, card_id: str, visual: str, vector) -> None:
         stamp = now()
         gap_id = new_id("tg")
-        self.store.execute("INSERT INTO topic_gaps(id,profile_id,card_id,card_ids,visual,count,status,created_at,updated_at) "
-                           "VALUES(?,?,?,?,?,?,?,?,?)",
-                           (gap_id, self.profile_id, card_id, dumps([card_id]), visual, 1, "open", stamp, stamp))
+        space = self._identity() if vector is not None else None
+        blob = np.asarray(vector, dtype=np.float32).tobytes() if (vector is not None and space) else None
+        self.store.execute("INSERT INTO topic_gaps(id,profile_id,card_id,card_ids,visual,count,status,"
+                           "embedding,embedding_space,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                           (gap_id, self.profile_id, card_id, dumps([card_id]), visual, 1, "open",
+                            blob, space if blob else None, stamp, stamp))
         row = {"id": gap_id, "profile_id": self.profile_id, "card_id": card_id, "card_ids": dumps([card_id]),
-               "visual": visual, "count": 1, "status": "open", "created_at": stamp, "updated_at": stamp}
+               "visual": visual, "count": 1, "status": "open", "embedding": blob,
+               "embedding_space": space if blob else None, "created_at": stamp, "updated_at": stamp}
         self._rows.append(row)
-        if vector is not None and len(self._vectors) == len(self._rows) - 1:
-            self._vectors.append(vector)
+        self._matrix = None  # 追加了行，矩阵按 _rows 顺序缓存必须失效
+        if vector is not None:
+            self._vectors[gap_id] = vector
 
     def record(self, card_id: str, visuals: list[str]) -> int:
         """登记一张卡片的缺口；返回新建条数。同一 Matcher 的多次调用共享缺口快照与向量。"""

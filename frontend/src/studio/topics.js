@@ -743,7 +743,11 @@ function renderRun() {
     MindexI18n.setText(status, MindexI18n.msg("ui.topics_run_failed", { p0: MindexI18n.msg(`ui.topics_run_status_${run.status}`),
       p1: MindexI18n.system(run.error || "") }));
   }
-  for (const warning of result.warnings || []) warnings.append(el("li", MindexI18n.system(warning)));
+  // 已完成的运行不再常驻展示历史诊断：结果已由状态行概括，残留诊断会把过时的建议
+  // （如“请重新打分”）挂在页面上。运行失败时仍要看到原因。
+  if (run.status !== "complete") {
+    for (const warning of result.warnings || []) warnings.append(el("li", MindexI18n.system(warning)));
+  }
   warnings.hidden = !warnings.children.length;
 }
 function pollRun() {

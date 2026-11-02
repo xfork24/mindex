@@ -312,8 +312,17 @@ def _metadata_v10(db):
         db.execute("UPDATE media_groups SET name=? WHERE id=?", (name, row["id"]))
 
 
+def _metadata_v11(db):
+    # 选题缺口向量缓存：按嵌入空间身份指纹失效，避免每次打分重嵌全部开放缺口。
+    # 用 _add_missing_columns 保证幂等：user_version 被重置的旧库重跑迁移不会因列已存在而失败。
+    _add_missing_columns(db, (
+        ("topic_gaps", "embedding", "BLOB"),
+        ("topic_gaps", "embedding_space", "TEXT"),
+    ))
+
+
 # metadata.sqlite3 的有序迁移：只追加，不修改已发布的步骤（见 shared/migrations.py）。
-METADATA_STEPS = (_metadata_v1, _metadata_v2, _metadata_v3, _metadata_v4, _metadata_v5, _metadata_v6, _metadata_v7, _metadata_v8, _metadata_v9, _metadata_v10)
+METADATA_STEPS = (_metadata_v1, _metadata_v2, _metadata_v3, _metadata_v4, _metadata_v5, _metadata_v6, _metadata_v7, _metadata_v8, _metadata_v9, _metadata_v10, _metadata_v11)
 
 
 def migrate_metadata(db) -> int:
