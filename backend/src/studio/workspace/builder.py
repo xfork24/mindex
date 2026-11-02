@@ -38,7 +38,7 @@ class VersionDiagnostics:
 
 def execute(config, job_id, w, p, stage, sid=None, *, speaker=None, storyboarder=None, embedder=None,
             writer=None, video_generator=None, animator=None, animation_capture=None, cancelled=None,
-            image_generator=None, music_generator=None):
+            image_generator=None, music_generator=None, force=False):
     stage_handler = handler(stage)
     stage_handler.prepare(config, w, p, sid)
     spec = signatures.specification(config, job_id, w, p, stage, sid)
@@ -55,7 +55,7 @@ def execute(config, job_id, w, p, stage, sid=None, *, speaker=None, storyboarder
             services={"speaker": speaker, "storyboarder": storyboarder, "embedder": embedder, "writer": writer,
                       "video_generator": video_generator, "animator": animator,
                       "animation_capture": animation_capture, "cancelled": cancelled,
-                      "image_generator": image_generator, "music_generator": music_generator},
+                      "image_generator": image_generator, "music_generator": music_generator, "force": force},
         ))
         add_version(config, job_id, w, stage, sid, data=data, files=files, version_id=vid, **spec)
         if stage_handler.selects:
@@ -185,6 +185,7 @@ def _run_build(config, job_id, build_id, log, *, speaker=None, storyboarder=None
                         cancelled=cancel_check,
                         image_generator=image_generator,
                         music_generator=music_generator,
+                        force=build["force"],
                     )
                     node.update(status="complete", version=vid)
             except Exception as exc:  # noqa: BLE001 — 失败节点不得阻断互不依赖的节点

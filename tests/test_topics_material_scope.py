@@ -45,8 +45,8 @@ def test_coverage_union_intersection_empty_and_deleted(config, materials):
     engine = Engine()
     report = coverage.report(config, store, ['画面'], engine=engine,
                              filters=Filters(source_group_ids=[first, second], source_ids=['b', 'c']))
-    assert report['ratio'] == 1
-    assert [clip['source_id'] for clip in report['visuals'][0]['clips']] == ['b', 'c']
+    assert report['ratio'] == 0  # BM25 返回候选不再代表核验通过。
+    assert [clip['source_id'] for clip in report['visuals'][0]['candidates']] == ['b', 'c']
     report = coverage.report(config, store, ['画面'], engine=engine, filters=Filters(source_group_ids=[empty]))
     assert report['ratio'] == 0 and engine.calls == 1
     groups.delete(first)
@@ -67,6 +67,7 @@ def test_scope_saved_stale_and_job_inherits(config, materials):
     row = store.one('SELECT body FROM topic_cards WHERE id=?', (cid,))
     card_body = json.loads(row['body'])
     card_body['coverage'] = {'status': 'ok', 'ratio': 1, 'visuals': [],
+                             'verification_version': coverage.coverage_verify.VERSION,
                              'material_scope': profiles.material_signature(store, body)}
     cards.save_body(store, cid, card_body)
     task = create_job.create_from_card(config, store, cid)

@@ -86,6 +86,30 @@ def test_profile_rest_crud_and_validation(client):
     assert client.get(f"/api/topics/profiles/{pid}").status_code == 404
 
 
+def test_coverage_profile_settings_rest_and_agent(config):
+    app = create_app(config)
+    with TestClient(app) as client:
+        config.topics.coverage.min_similarity = 0.45
+        payload = client.get('/api/topics/profiles').json()
+        assert payload['coverage_defaults']['min_similarity'] == 0.45
+        response = client.post('/api/topics/profiles', json={**BODY, 'coverage': {
+            'min_similarity': 0.6, 'limit': 5, 'min_duration': 2}})
+        assert response.status_code == 201, response.text
+        profile = response.json()
+        pid = profile['id']
+        for value in ({'min_similarity': 1.1}, {'min_similarity': -1}, {'limit': 11}, {'min_duration': 0}):
+            assert client.patch(f'/api/topics/profiles/{pid}', json={'coverage': value}).status_code == 422
+        assert client.get(f'/api/topics/profiles/{pid}').json()['coverage'] == {
+            'min_similarity': 0.6, 'limit': 5, 'min_duration': 2}
+    preview, output = run_tool(app, 'save_topic_profile', {'topic_profile_id': pid, 'coverage': {'min_similarity': 0.7}})
+    assert output.value['coverage']['min_similarity'] == 0.7
+    assert any(change['label'] == '素材覆盖核验' for change in preview.changes)
+    with TestClient(app) as client:
+        reset = client.patch(f'/api/topics/profiles/{pid}', json={'coverage': {}}).json()
+        assert all(v is None for v in reset['coverage'].values())
+    assert profiles.get_profile(Store(config.data_dir), pid)['hash'] == profile['hash']
+
+
 def test_delete_cascades_and_refuses_running(config):
     store = Store(config.data_dir)
     pid = profiles.create_profile(store, ProfileBody(name="历史号", domain="历史"))["id"]

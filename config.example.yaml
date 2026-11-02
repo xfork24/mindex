@@ -268,7 +268,8 @@ agent:
     model: deepseek-chat
     api_key_env: MINDEX_AGENT_API_KEY
     timeout: 180
-    max_tokens: 4096
+    max_tokens: 4096         # 单次回复的输出上限，不是上下文容量
+    context_window: null    # 模型总上下文容量（dsh）；如 1048576，留空沿用 max_context_tokens
     vision: false            # 模型支持图片输入时开启：附件图片与工具抽取的画面会一并发给模型（受 max_images 限制）
   mcp:
     http_enabled: false      # 开启后挂载 streamable-http /mcp，需设置 MINDEX_MCP_TOKEN
@@ -289,6 +290,7 @@ topics:
     max_bytes: 2097152       # 单次响应上限
     item_days: 30            # 候选条目保留天数
   coverage:
-    min_similarity: 0.3      # 关键画面检索结果的向量余弦相似度达到该值记为素材命中
+    min_similarity: 0.3      # 候选粗筛；通过镜头分析相关性核验后才计为覆盖
+    min_duration: 1.0        # 可用候选的最小时长（秒），排除极短转场
   brave:
     max_queries: 10          # 每次挖掘调用 Brave Search 的次数上限（计费保护）

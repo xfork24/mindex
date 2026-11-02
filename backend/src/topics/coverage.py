@@ -1,13 +1,14 @@
 """素材覆盖：用选题的关键画面描述查询活动索引（与创作召回同一条检索路径），给出命中片段与缺口。
 
-命中判定：首个结果的向量路由余弦相似度不低于 ``topics.coverage.min_similarity``；
-嵌入不可用而降级为 BM25 时，有结果即记为命中并标注 ``degraded``。没有活动索引时覆盖率为 0 并给出原因，
-不伪造向量或结果。
+相似度与 BM25 仅召回候选；可用时长、镜头画面分析和模型相关性核验均通过后才计为覆盖。
+核验失败或证据不足时保守不计命中，保留候选和原因。
 """
 
 from __future__ import annotations
 
 from mindex.models.adapters import ModelError
+from mindex.topics import coverage_verify
+from mindex.topics.llm import make_llm, profile_of
 
 
 def best_similarity(hit: dict) -> float | None:
@@ -29,12 +30,14 @@ def clip_view(hit: dict) -> dict:
 
 
 def empty(visuals: list[str], status: str, reason: str) -> dict:
-    return {"status": status, "reason": reason, "index_id": None, "degraded": False,
+    return {"verification_version": coverage_verify.VERSION,
+            "status": status, "reason": reason, "index_id": None, "degraded": False,
             "visuals": [{"visual": v, "hit": False, "similarity": None, "clips": []} for v in visuals],
             "hits": 0, "total": len(visuals), "ratio": 0.0}
 
 
-def report(config, store, visuals: list[str], *, embedder=None, engine=None, filters=None) -> dict:
+def report(config, store, visuals: list[str], *, embedder=None, engine=None, filters=None,
+           llm=None, title: str = "", angle: str = "", limits=None) -> dict:
     """``engine`` 供测试注入（需有 ``text(TextSearch)``）；缺省按活动索引构造 ``SearchEngine``。"""
     from mindex.shared.types import Filters, TextSearch
 
@@ -52,26 +55,62 @@ def report(config, store, visuals: list[str], *, embedder=None, engine=None, fil
         from mindex.search.search import SearchEngine
 
         engine = SearchEngine(config, embedder, index_id=active["id"])
-    limits = config.topics.coverage
-    rows, degraded = [], False
+    limits = limits or config.topics.coverage
+    rows, degraded, pending, targets = [], False, [], {}
     for visual in visuals:
         try:
             result = engine.text(TextSearch(text=visual[:400], granularity=config.studio.recall.granularity,
-                                            limit=limits.limit, filters=filters))
+                                            limit=limits.limit, filters=filters.model_copy(update={
+                                                "min_duration": max(filters.min_duration, limits.min_duration)})))
         except ModelError as exc:
             return {**empty(visuals, "unavailable", f"检索不可用：{exc}"), "index_id": active and active["id"]}
         except ValueError as exc:
             rows.append({"visual": visual, "hit": False, "similarity": None, "clips": [], "error": str(exc)})
             continue
-        clips = [clip_view(hit) for hit in result.get("results") or []
-                 if scope is None or hit.get("source_id") in scope]
-        top = clips[0]["similarity"] if clips else None
+        candidates = []
         lowered = bool(result.get("degraded"))
         degraded = degraded or lowered
-        hit = bool(clips) and (lowered or (top is not None and top >= limits.min_similarity))
-        rows.append({"visual": visual, "hit": hit, "similarity": top, "clips": clips})
+        for candidate in result.get("results") or []:
+            if scope is not None and candidate.get("source_id") not in scope:
+                continue
+            clip = clip_view(candidate)
+            candidates.append(clip)
+            duration = float(clip.get("end") or 0) - float(clip.get("start") or 0)
+            evidence = coverage_verify.evidence_of(candidate)
+            if duration < limits.min_duration:
+                decision = {"verdict": "rejected", "reason": "片段时长不足，不能作为可用画面", "quote": ""}
+            elif not lowered and (clip["similarity"] is None or clip["similarity"] < limits.min_similarity):
+                decision = {"verdict": "rejected", "reason": "相似度低于候选粗筛阈值", "quote": ""}
+            elif not evidence:
+                decision = {"verdict": "uncertain", "reason": "缺少镜头画面分析，无法确认内容", "quote": ""}
+            else:
+                identifier = len(pending) + 1
+                pending.append({"candidate": identifier, "visual": visual, "evidence": evidence,
+                                "duration": round(duration, 3)})
+                targets[identifier] = clip
+                decision = None
+            clip["verification"] = decision
+        rows.append({"visual": visual, "hit": False, "similarity": None, "clips": [], "candidates": candidates})
+    if pending:
+        decisions = coverage_verify.verify(llm or make_llm(config), pending, title=title, angle=angle,
+                                           retries=profile_of(config).split_retries)
+        for identifier, decision in decisions.items():
+            targets[identifier]["verification"] = decision
+    failed = any(row.get("error") for row in rows)
+    for row in rows:
+        candidates = row.get("candidates", [])
+        row["clips"] = [c for c in candidates if c["verification"]["verdict"] == "matched"]
+        row["hit"] = bool(row["clips"])
+        row["similarity"] = row["clips"][0]["similarity"] if row["clips"] else None
+        failed = failed or any(c["verification"]["verdict"] == "error" for c in candidates)
     hits = sum(1 for row in rows if row["hit"])
-    return {"status": "ok", "reason": "嵌入不可用，按 BM25 文本检索判断" if degraded else None,
+    reasons = []
+    if degraded:
+        reasons.append("嵌入不可用，BM25 仅用于召回候选，覆盖仍须通过相关性核验")
+    if failed:
+        reasons.append("部分候选核验未完成，未计入覆盖，请重新打分")
+    return {"verification_version": coverage_verify.VERSION,
+            "status": "unverified" if failed else "ok", "reason": "；".join(reasons) or None,
             "index_id": active["id"] if active else None, "degraded": degraded, "visuals": rows,
             "hits": hits, "total": len(rows), "ratio": round(hits / len(rows), 4)}
 

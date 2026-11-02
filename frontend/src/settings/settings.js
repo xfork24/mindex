@@ -113,7 +113,8 @@ const ROLE_EXTRA = {
   { key: 'max_capture_seconds', label: MindexI18n.msg("ui.animator_max_capture_seconds"), type: 'number', min: 1, max: 3600 }],
 
   agent: [
-  { key: 'max_tokens', label: 'max_tokens', type: 'number', min: 256 },
+  { key: 'context_window', label: MindexI18n.msg("ui.agent_context_window"), type: 'number', min: 4000 },
+  { key: 'max_tokens', label: MindexI18n.msg("ui.agent_output_tokens"), type: 'number', min: 256 },
   { key: 'vision', label: MindexI18n.msg("ui.agent_vision"), hint: MindexI18n.msg("ui.agent_vision_hint"), type: 'checkbox' }]
 };
 for (const role of Object.keys(ROLE_EXTRA)) ROLE_EXTRA[role].unshift(timeoutField(role));

@@ -54,7 +54,7 @@ chroma 的元数据段每笔提交，HNSW 向量段仅在累计 `sync_threshold`
 ## 空间身份与跨空间禁令
 
 - 自定义 `mindex` 嵌入服务在 `/health` 返回 space，客户端逐字段核对（model/dims/quantization/normalized/fps/max_frames/max_pixels/revision/implementation），每次向量响应带 `space_id`（= `fingerprint(space)`），不一致即拒绝。
-- `llama_cpp` 后端没有服务端 space：身份来自**部署清单**（`e2e pin` 固定权重/mmproj 哈希 + 量化 + 池化 + 可观察运行指纹），每次请求前后重核运行身份；适配器把这套身份组装成等价 space。
+- `llama_cpp` 后端没有服务端 space：身份来自**部署清单**（`e2e pin` 固定权重/mmproj 哈希 + 量化 + 池化 + 可观察运行指纹），建索引、smoke 与直接推理仍执行请求前后校验。在线召回仅在开始时核验一次身份与权重文件，不请求 `/health`，不执行推理后探测；`/props` 与 `/v1/models` 各请求一次，索引匹配、能力门槛和推理共享这份结果。适配器把身份组装成等价 space。
 - `tokenhub` 后端同样没有服务端 space：身份纯由配置构造（model/revision/quantization/dimensions + video 预处理 + `implementation="tokenhub-multimodal-1"`），直接进入索引指纹；换模型名或维度即新空间。
 - 在线查询时活动索引的 `spec.space` 必须等于当前嵌入服务身份，`spec.preprocessing` 必须等于当前 video 配置，否则 503。**禁止跨空间比较向量**；同维度不等于同空间。
 

@@ -11204,8 +11204,8 @@
     "en": "Missing"
   },
   "ui.topics_coverage_clip_aria": {
-    "zh": "在素材管理中查看「{p0}」的命中片段 {p1}",
-    "en": "Open the matching clip {p1} for “{p0}” in Library"
+    "zh": "在素材管理中查看「{p0}」的候选片段 {p1}",
+    "en": "View candidate clip {p1} for “{p0}” in the media library"
   },
   "ui.topics_outline_title": {
     "zh": "大纲",
@@ -13986,5 +13986,61 @@
   "ui.footer_delivery_hint": {
     "zh": "交付模板与平台规则管理",
     "en": "Delivery templates and platform rules"
+  },
+  "ui.agent_context_window": {
+    "zh": "模型上下文容量（context_window；留空沿用全局上限）",
+    "en": "Model context capacity (context_window; blank uses global limit)"
+  },
+  "ui.agent_output_tokens": {
+    "zh": "单次回复输出上限（max_tokens）",
+    "en": "Maximum output tokens per reply (max_tokens)"
+  },
+  "ui.topics_verification_matched": {
+    "zh": "核验通过",
+    "en": "Verified"
+  },
+  "ui.topics_verification_rejected": {
+    "zh": "核验不通过",
+    "en": "Rejected"
+  },
+  "ui.topics_verification_uncertain": {
+    "zh": "证据不足",
+    "en": "Insufficient evidence"
+  },
+  "ui.topics_verification_error": {
+    "zh": "核验未完成",
+    "en": "Verification incomplete"
+  },
+  "ui.topics_field_coverage": {
+    "zh": "素材覆盖核验",
+    "en": "Material coverage verification"
+  },
+  "ui.topics_coverage_threshold": {
+    "zh": "候选相似度阈值",
+    "en": "Candidate similarity threshold"
+  },
+  "ui.topics_coverage_limit": {
+    "zh": "每条画面候选数",
+    "en": "Candidates per visual"
+  },
+  "ui.topics_coverage_duration": {
+    "zh": "最小片段时长（秒）",
+    "en": "Minimum clip duration (seconds)"
+  },
+  "ui.topics_coverage_settings_hint": {
+    "zh": "留空继承全局配置，输入框提示当前全局值。相似度仅用于粗筛，候选仍须通过镜头内容核验才计为覆盖；修改后需重新打分。",
+    "en": "Leave blank to inherit global settings shown as placeholders. Similarity only filters candidates; content verification is required for coverage. Rescore after changes."
+  },
+  "ui.studio_model_http_request": {
+    "zh": "调用模型服务：{p0} {p1}，第 {p2} 次尝试",
+    "en": "Model request: {p0} {p1}, attempt {p2}"
+  },
+  "ui.studio_query_vector_reused": {
+    "zh": "复用查询向量缓存",
+    "en": "Reusing cached query embedding"
+  },
+  "ui.studio_query_vector_generate": {
+    "zh": "生成查询向量",
+    "en": "Generating query embedding"
   }
 }

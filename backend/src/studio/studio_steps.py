@@ -114,6 +114,7 @@ def run_recall(config: Config, job_id: str, state: dict, embedder: MultimodalEmb
             if cached.get("status") == "empty":
                 empty.append(shot.id)
             continue
+        engine.force_embedding = bool(session and session.forced(logical))
         result = engine.text(
             TextSearch(
                 text=shot.query,

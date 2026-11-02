@@ -17,13 +17,14 @@ from mindex.agent.registry import Preview, ToolContext, ToolError, ToolOutput, T
 from mindex.agent.tools.common import check, clip
 from mindex.shared.config import StrictModel
 from mindex.topics.common import ID_PATTERN
-from mindex.topics.models import Schedule, Weights
+from mindex.topics.models import CoverageSettings, Schedule, Weights
 
 # 参数名带 topic_ 前缀，避免与设置页模型档案的 profile_id、素材的 source_id 混淆。
 ProfileId = Field(pattern=ID_PATTERN, description="领域档案 ID（tp_ 开头，list_topic_profiles 列出）")
 PROFILE_LABELS = {"source_ids": "素材范围", "source_group_ids": "素材组", "name": "名称", "domain": "领域", "subtopics": "子方向", "audience": "目标受众",
                   "positioning": "账号定位", "taboos": "禁区", "keywords": "关键词", "language": "搜索语言",
-                  "region": "搜索地区", "canvas": "默认画幅", "weights": "打分权重", "schedule": "每日定时"}
+                  "region": "搜索地区", "canvas": "默认画幅", "weights": "打分权重", "schedule": "每日定时",
+                  "coverage": "素材覆盖核验"}
 
 
 def focus(profile_id: str | None = None, section: str = "profiles", **extra) -> dict:
@@ -91,6 +92,7 @@ class SaveTopicProfile(StrictModel):
     source_group_ids: list[str] | None = Field(default=None, max_length=200, description="素材组 ID 多选取并集；与素材范围取交集，空组无候选")
     canvas: Literal["16:9", "9:16", "1:1"] | None = Field(default=None, description="从选题建任务时的默认画幅")
     weights: Weights | None = Field(default=None, description="五项打分权重，和为 1（需整体给出）")
+    coverage: CoverageSettings | None = Field(default=None, description="素材候选粗筛阈值、数量与最小时长；需整体给出，空字段继承全局配置")
     schedule: Schedule | None = Field(default=None, description="每日定时：enabled、time（HH:MM）、count（前 N 名写大纲）")
 
     def changes(self) -> dict:
@@ -521,7 +523,7 @@ async def preview_score_topic(args: ScoreTopic, ctx: ToolContext) -> Preview:
     card = check(await ctx.client.get(f"/api/topics/cards/{args.card_id}"), "读取选题")
     return Preview(f"重新为选题「{card['title']}」打分", [{"label": "当前总分", "before": f"{card['total']:.2f}",
                                                        "after": "重新计算"}],
-                   warnings=["受众匹配会调用文案模型；素材覆盖按当前活动索引重新检索"],
+                   warnings=["受众匹配与素材候选相关性核验会调用选题模型；素材覆盖按当前活动索引重新检索"],
                    focus=focus(card["profile_id"], "card", card_id=card["id"]))
 
 
@@ -552,7 +554,11 @@ async def topic_coverage(args: TopicCoverage, ctx: ToolContext) -> ToolOutput:
                                  for c in row["clips"][:3])
             lines.append(f"- 命中：{row['visual']} → {clip_line}")
         else:
-            lines.append(f"- 缺口：{row['visual']}")
+            lines.append(f"- 缺口或待核验：{row['visual']}")
+        for candidate in row.get("candidates", []):
+            decision = candidate.get("verification") or {}
+            lines.append(f"  候选 {candidate['segment_id']}：{decision.get('verdict', 'uncertain')}；"
+                         f"{decision.get('reason', '')}" + (f"；依据：{decision['quote']}" if decision.get('quote') else ""))
     from mindex.agent.tools.media import clean, item
 
     media = clean([item("image", c["thumbnail_url"], row["visual"])
@@ -790,10 +796,10 @@ def specs() -> list[ToolSpec]:
         ToolSpec("get_topic", "topics", "读取一张选题卡片：分项分数、角度、理由、关键画面、推荐模板、大纲与来源条目。",
                  GetTopic, "read", get_topic),
         ToolSpec("score_topic", "topics",
-                 "重新为一张选题打分（时效、受众匹配、素材覆盖、去重、制作成本）；受众匹配调用模型，覆盖按当前索引重新检索。",
+                 "重新为一张选题打分；受众匹配与素材候选相关性核验调用选题模型，覆盖按领域档案配置重新检索。",
                  ScoreTopic, "write", score_topic, preview_score_topic),
         ToolSpec("topic_coverage", "topics",
-                 "查看选题的素材覆盖报告：每条关键画面命中的片段（片段 ID、素材、时间、相似度）与缺口。",
+                 "查看素材覆盖报告：核验通过的命中片段、候选的相关性结论、理由与原文依据，以及缺口。",
                  TopicCoverage, "read", topic_coverage),
         ToolSpec("draft_topic_outline", "topics", "为选题生成（或重新生成）视频大纲与推荐文案模板。",
                  DraftTopicOutline, "write", draft_topic_outline, preview_draft_topic_outline),

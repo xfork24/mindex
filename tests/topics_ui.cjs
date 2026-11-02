@@ -9,7 +9,10 @@ const scenarios = [];
 const scenario = (name, run) => scenarios.push({ name, run });
 
 async function createProfile(page, { name, domain, taboos = [] }) {
-  await page.locator(await page.locator("#profile-new").isVisible() ? "#profile-new" : "#profile-new-empty").click();
+  await page.waitForFunction(() => !document.querySelector("#topics-empty").hidden
+    || !document.querySelector("#topics-workspace").hidden);
+  // 初次加载完成后入口可能从顶部按钮切换到空态按钮；点击时重新匹配可见入口。
+  await page.locator("#profile-new:visible, #profile-new-empty:visible").first().click();
   assert.equal(await page.locator("#pf-language,#pf-region").count(), 0, "领域档案不提供语言地区限制");
   await page.fill("#pf-name", name);
   await page.fill("#pf-domain", domain);
@@ -83,6 +86,11 @@ scenario("profiles", async (page) => {
   assert.match(await page.textContent("#profile-summary"), /未开启每日定时/);
   // 编辑：权重和不为 1 时拒绝，改正后保存；定时摘要更新
   await page.click("#profile-edit");
+  assert.equal(await page.inputValue("#pf-coverage-min_similarity"), "");
+  assert.equal(await page.locator("#pf-coverage-min_similarity").getAttribute("placeholder"), "0.3");
+  await page.fill("#pf-coverage-min_similarity", "0.55");
+  await page.fill("#pf-coverage-limit", "5");
+  await page.fill("#pf-coverage-min_duration", "1.5");
   assert.equal(await page.inputValue("#pf-taboos"), "不荐股\n不预测涨跌");
   await page.fill("#pf-w-timeliness", "0.5");
   assert.match(await page.textContent("#pf-weights-sum"), /1\.25/);
@@ -93,6 +101,11 @@ scenario("profiles", async (page) => {
   await page.fill("#pf-s-time", "07:30");
   await page.click("#pf-save");
   await page.waitForFunction(() => /07:30/.test(document.querySelector("#profile-summary").textContent));
+  await page.click("#profile-edit");
+  assert.equal(await page.inputValue("#pf-coverage-min_similarity"), "0.55");
+  assert.equal(await page.inputValue("#pf-coverage-limit"), "5");
+  assert.equal(await page.inputValue("#pf-coverage-min_duration"), "1.5");
+  await page.click("#profile-close");
   await page.locator("#schedule-status", { hasText: "没有运行定时调度" }).waitFor();  // 测试服务不启动调度器
   assert.doesNotMatch(await page.textContent("#schedule-status"), /后台运行中/);  // Web 端没有 MindexDesktop
   // 第二份档案，切换后刷新页面仍保持选择（localStorage 与地址栏）

@@ -90,6 +90,18 @@ class ScriptedTopicLlm:
         self.calls.append({"system": system, "text": text})
         if self.fail_next:
             return self.fail_next.pop(0)
+        if "素材候选相关性核验" in system:
+            payload = json.loads(parts[0]["text"].split("\n", 1)[1])
+            decisions = []
+            for candidate in payload["candidates"]:
+                evidence = candidate["evidence"]
+                color = next((c for c in ("红", "蓝", "绿", "紫") if c in candidate["visual"]), None)
+                matched = color is None or color in evidence
+                decisions.append({"candidate": candidate["candidate"],
+                                  "verdict": "matched" if matched else "rejected",
+                                  "reason": "画面主体相符" if matched else "画面颜色不符",
+                                  "quote": json.loads(evidence)["description"] if matched else ""})
+            return json.dumps({"decisions": decisions}, ensure_ascii=False)
         if "归纳为选题卡片" in system:
             clusters = re.findall(r"【候选簇 (\d+)】\n- (?:\[[^\]]*\] )?([^\n（]+)", text)
             cards = []

@@ -672,3 +672,23 @@ def test_concurrent_query_uploads_do_not_block_event_loop(studio_client, monkeyp
             assert any(r.status_code == 201 for r in responses[:2])
 
     asyncio.run(exercise())
+
+
+def test_single_shot_recall_force_reaches_embedding_cache(prepared):
+    config, embedder = prepared
+    jid, w, p = setup_workspace(config)
+    original = embedder.text
+    queries = []
+
+    def counted(texts, role='document'):
+        if role == 'query':
+            queries.extend(texts)
+        return original(texts, role=role)
+
+    embedder.text = counted
+    ws.execute(config, jid, w, p, 'recall', 'a', embedder=embedder)
+    assert len(queries) == 1
+    ws.execute(config, jid, w, p, 'recall', 'a', embedder=embedder)
+    assert len(queries) == 1
+    ws.execute(config, jid, w, p, 'recall', 'a', embedder=embedder, force=True)
+    assert len(queries) == 2

@@ -58,7 +58,8 @@ def topics_router(runtime, store, embedder=None, *, topic_llm=None, scheduler: b
     # ---------------------------------------------------------------- 领域档案
     @router.get("/profiles")
     def list_profiles():
-        return {"items": profiles.list_profiles(store)}
+        return {"items": profiles.list_profiles(store),
+                "coverage_defaults": runtime.current().topics.coverage.model_dump()}
 
     @router.post("/profiles", status_code=201)
     def create_profile(body: ProfileBody):

@@ -90,6 +90,7 @@ class FakeEngine:
 def hit(similarity, segment="seg-1", degraded=False):
     return {"degraded": degraded, "results": [{"id": segment, "source_id": "src", "start": 0, "end": 1, "score": 0.03,
                                                "thumbnail_url": f"/api/thumbnails/{segment}",
+                                               "annotation": {"description": "红色的测试画面"},
                                                "matches": [{"route": "visual", "rank_details": [
                                                    {"route": "semantic", "cosine_similarity": similarity}]}]}]}
 
@@ -99,7 +100,8 @@ def test_coverage_report_rules(config):
     assert coverage.report(config, store, ["红色画面"])["status"] == "no_index"
     engine = FakeEngine({"命中": hit(0.8), "太远": hit(0.1, "seg-2"), "降级": hit(None, "seg-3", degraded=True),
                          "空": {"results": []}})
-    report = coverage.report(config, store, ["命中", "太远", "降级", "空", " "], engine=engine)
+    report = coverage.report(config, store, ["命中", "太远", "降级", "空", " "], engine=engine,
+                             llm=ScriptedTopicLlm())
     assert [row["hit"] for row in report["visuals"]] == [True, False, True, False]
     assert report["hits"] == 2 and report["ratio"] == 0.5 and report["degraded"]
     assert report["visuals"][0]["clips"][0]["segment_id"] == "seg-1"
@@ -227,6 +229,26 @@ def test_card_edit_rescore_and_outline(library):
         gaps = Store(config.data_dir).rows("SELECT count FROM topic_gaps WHERE profile_id=?", (pid,))
         assert [g["count"] for g in gaps] == [2]
         assert client.get("/api/topics/cards/tc_000000000000").status_code == 404
+
+
+def test_domain_coverage_limits_apply_to_actual_search(library):
+    config, embedder, model, _ = library
+    with TestClient(create_app(config, embedder, topic_llm=model)) as client:
+        pid = setup(client)
+        wait(client, client.post(f"/api/topics/profiles/{pid}/runs", json={}).json()["id"])
+        card = client.get(f"/api/topics/profiles/{pid}/cards").json()["items"][0]
+        assert card['coverage']['hits'] == 2
+        settings = {'min_similarity': 0.8, 'limit': 1, 'min_duration': 10}
+        client.patch(f'/api/topics/profiles/{pid}', json={'coverage': settings}).raise_for_status()
+        assert client.get(f"/api/topics/cards/{card['id']}").json()['coverage']['status'] == 'stale'
+        scored = client.post(f"/api/topics/cards/{card['id']}/score").json()
+        assert scored['coverage']['hits'] == 0
+        assert scored['coverage']['coverage_overrides'] == settings
+        settings['min_duration'] = 1
+        client.patch(f'/api/topics/profiles/{pid}', json={'coverage': settings}).raise_for_status()
+        scored = client.post(f"/api/topics/cards/{card['id']}/score").json()
+        assert scored['coverage']['hits'] == 2
+        assert all(len(row['candidates']) <= 1 for row in scored['coverage']['visuals'])
 
 
 def test_template_fallback_and_embedding_fallback(config, monkeypatch):
@@ -387,7 +409,7 @@ def test_agent_run_and_card_tools(library):
     _, out = run_tool(app, "get_topic", {"card_id": card})
     assert "关键画面" in out.text and out.focus == {"page": "topics", "section": "card", "profile_id": pid, "card_id": card}
     _, out = run_tool(app, "topic_coverage", {"card_id": card})
-    assert "命中" in out.text and "缺口：紫色天空" in out.text and out.media and out.media[0]["url"].startswith("/api/")
+    assert "命中" in out.text and "缺口或待核验：紫色天空" in out.text and out.media and out.media[0]["url"].startswith("/api/")
     preview, out = run_tool(app, "score_topic", {"card_id": card})
     assert "重新计算" in preview.changes[0]["after"] and out.mutation["domain"] == "topics"
     preview, out = run_tool(app, "draft_topic_outline", {"card_id": card})

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
 import tempfile
 import threading
 from collections import Counter, OrderedDict, defaultdict
-from functools import lru_cache
+from contextlib import nullcontext
+from functools import lru_cache, wraps
 from pathlib import Path
 from time import perf_counter
 
@@ -17,8 +19,10 @@ from mindex.models.adapters import ModelError, MultimodalEmbedder, make_embedder
 from mindex.processing.indexing import VectorIndex
 from mindex.shared.config import Config, fingerprint
 from mindex.shared.images import image_png
-from mindex.shared.media import cut, probe, windows
+from mindex.shared.jsonio import save
+from mindex.shared.media import content_hash, cut, probe, windows
 from mindex.shared.storage import Store
+from mindex.shared.trace import record
 from mindex.shared.types import Filters, TextSearch
 
 jieba.setLogLevel(30)
@@ -29,6 +33,15 @@ DOCUMENT_TERMS_CACHE_SIZE = 50000
 QUERY_VECTOR_CACHE_SIZE = 128
 _QUERY_VECTORS: OrderedDict = OrderedDict()
 _QUERY_VECTOR_LOCK = threading.Lock()
+
+
+def recall_scope(method):
+    @wraps(method)
+    def wrapped(self, *args, **kwargs):
+        scope = getattr(self.embedder, "recall_scope", None)
+        with scope() if scope else nullcontext():
+            return method(self, *args, **kwargs)
+    return wrapped
 
 
 class SimilarUnavailable(Exception):
@@ -154,12 +167,14 @@ class SearchEngine:
     def __init__(
         self, config: Config, embedder: MultimodalEmbedder | None = None, *, index_id: str | None = None,
         release_id: str | None = None,
+        force_embedding: bool = False,
     ):
         self.config = config
         self.store = Store(config.data_dir)
         self._embedder = embedder
         self.index_id = index_id
         self.release_id = release_id
+        self.force_embedding = force_embedding
 
     @property
     def embedder(self):
@@ -187,19 +202,48 @@ class SearchEngine:
         space_id = getattr(self, "_space_id", None)
         if space_id is None:
             return self.embedder.text([text], role="query")[0]
-        key = (space_id, text)
-        with _QUERY_VECTOR_LOCK:
-            cached = _QUERY_VECTORS.get(key)
-            if cached is not None:
-                _QUERY_VECTORS.move_to_end(key)
-                return list(cached)
-        vector = self.embedder.text([text], role="query")[0]
+        return self._cached_vector("text", text, lambda: self.embedder.text([text], role="query")[0])
+
+    def _cached_vector(self, kind, content, compute):
+        """按空间与查询内容持久缓存；每次读取前仍须核验当前身份。"""
+        key = (self._space_id, kind, content)
+        identity = fingerprint(key)
+        path = self.store.root / "cache" / "query-vectors" / (identity + ".json")
+        if not self.force_embedding:
+            with _QUERY_VECTOR_LOCK:
+                cached = _QUERY_VECTORS.get(key)
+                if cached is not None:
+                    _QUERY_VECTORS.move_to_end(key)
+                    record("query-vector-cache", {"hit": True, "kind": kind})
+                    return list(cached)
+            try:
+                saved = json.loads(path.read_text())
+                vector = saved["vector"]
+                if (saved["key"] == identity and saved["checksum"] == fingerprint(vector)
+                    and len(vector) == self.config.embedding.dimensions
+                    and all(type(v) in (int, float) and math.isfinite(v) for v in vector)
+                    and sum(v * v for v in vector) > 1e-12):
+                    self._remember_vector(key, vector)
+                    record("query-vector-cache", {"hit": True, "kind": kind})
+                    return vector
+            except (OSError, ValueError, KeyError, TypeError):
+                pass
+        record("query-vector-cache", {"hit": False, "kind": kind})
+        vector = compute()
+        try:
+            save(path, {"key": identity, "vector": vector, "checksum": fingerprint(vector)})
+        except OSError:
+            pass  # 缓存写入失败不影响本次有效召回。
+        self._remember_vector(key, vector)
+        return vector
+
+    @staticmethod
+    def _remember_vector(key, vector):
         with _QUERY_VECTOR_LOCK:
             _QUERY_VECTORS[key] = tuple(vector)
             _QUERY_VECTORS.move_to_end(key)
             while len(_QUERY_VECTORS) > QUERY_VECTOR_CACHE_SIZE:
                 _QUERY_VECTORS.popitem(last=False)
-        return vector
 
     def _active(self) -> dict:
         """当前检索使用的索引版本：固定索引优先，否则为活动索引；必须已就绪。"""
@@ -282,6 +326,7 @@ class SearchEngine:
             "eligible_segments": len(snapshots),
         }
 
+    @recall_scope
     def text(self, query: TextSearch) -> dict:
         from mindex.persons.person_names import overlaps_for, resolve_names
         from mindex.persons.persons import Persons
@@ -492,6 +537,7 @@ class SearchEngine:
             "warnings": ["嵌入不可用，已降级为所选文本渠道的 BM25 检索：" + warning] if warning else [],
         }
 
+    @recall_scope
     def video(self, path: Path, granularity="moment", limit=20, filters: Filters | None = None, *, target_duration: float | None = None) -> dict:
         started = perf_counter()
         info = probe(path)
@@ -504,15 +550,20 @@ class SearchEngine:
             return self._result(active, snapshots, {}, limit, started, target_duration=target_duration)
         v = self.config.video
         pieces = windows(0, info["duration"], v.window_seconds, v.stride_seconds)
+        query_hash = content_hash(path)
         routes = {}
         for index, (start, end) in enumerate(pieces):
             if len(pieces) == 1:
-                embedding = self.embedder.video(path)
+                embedding = self._cached_vector("video", query_hash, lambda: self.embedder.video(path))
             else:
-                with tempfile.TemporaryDirectory(prefix="query-window-", dir=self.store.root) as directory:
-                    window = Path(directory) / "window.mp4"
-                    cut(path, start, end, window)
-                    embedding = self.embedder.video(window)
+                def compute(start=start, end=end):
+                    with tempfile.TemporaryDirectory(prefix="query-window-", dir=self.store.root) as directory:
+                        window = Path(directory) / "window.mp4"
+                        cut(path, start, end, window)
+                        return self.embedder.video(window)
+
+                embedding = self._cached_vector("video", fingerprint({
+                    "sha256": query_hash, "start": start, "end": end}), compute)
             routes[f"video_{index}"] = vectors.query(
                 embedding, "video", [s["id"] for s in snapshots], self.config.search.candidates
             )
@@ -524,6 +575,7 @@ class SearchEngine:
                 match["route"] = "video"
         return self._result(active, snapshots, {}, limit, started, ranked=fused, target_duration=target_duration)
 
+    @recall_scope
     def image(self, path: Path, granularity="moment", limit=20, filters: Filters | None = None, *, target_duration: float | None = None) -> dict:
         started = perf_counter()
         png = image_png(path, self.config.video.max_pixels)
@@ -537,12 +589,14 @@ class SearchEngine:
         with tempfile.TemporaryDirectory(prefix="query-image-", dir=self.store.root) as directory:
             normalized = Path(directory) / "query.png"
             normalized.write_bytes(png)
-            embedding = self.embedder.image(normalized)
+            embedding = self._cached_vector("image", hashlib.sha256(png).hexdigest(),
+                                            lambda: self.embedder.image(normalized))
         hits = vectors.query(embedding, "video", [s["id"] for s in snapshots], self.config.search.candidates)
         # Image queries compare only with video vectors, independent of text-fusion weights.
         ranked = fuse({"video": hits}, {"video": 1}, self.config.search.rrf_k)
         return self._result(active, snapshots, {}, limit, started, ranked=ranked, target_duration=target_duration)
 
+    @recall_scope
     def similar(
         self, segment_id: str, granularity: str | None = None, limit: int = 20, filters: Filters | None = None
     ) -> dict:

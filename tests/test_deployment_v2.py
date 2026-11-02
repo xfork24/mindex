@@ -929,3 +929,56 @@ def test_warmup_uses_relocated_model_files(native, tmp_path, monkeypatch, change
         _warm_model_files(config)
         assert len(baselines) == 1
     assert manifest_path.read_bytes() == manifest_bytes
+
+
+def test_recall_checks_identity_once_without_health_or_postflight(native, video_file, monkeypatch):
+    from mindex.processing.pipeline import Pipeline
+    from mindex.search import search as search_module
+
+    client, _ = establish(native)
+    config = native['config']
+    Pipeline(config).prepare(video_file)
+    IndexBuilder(config, client).build(mode='visual', kinds=('shot',), activate=True)
+    original = adapters.request
+    requests = []
+
+    def counted(method, url, **kwargs):
+        requests.append((method, url.rsplit('/', 1)[-1]))
+        return original(method, url, **kwargs)
+
+    monkeypatch.setattr(adapters, 'request', counted)
+    search_module._QUERY_VECTORS.clear()
+    query = TextSearch(text='召回专用测试查询', granularity='shot', channels=['visual'])
+    first = SearchEngine(config, client).text(query)
+    assert first['results']
+    assert requests == [('GET', 'props'), ('GET', 'models'), ('POST', 'embeddings')]
+    requests.clear()
+    second = SearchEngine(config, LlamaEmbedder(config)).text(query)
+    assert requests == [('GET', 'props'), ('GET', 'models')]
+    assert second['results'] == first['results']
+    # 模拟服务重启丢失进程缓存，磁盘缓存仍可使用。
+    requests.clear()
+    search_module._QUERY_VECTORS.clear()
+    SearchEngine(config, LlamaEmbedder(config)).text(query)
+    assert requests == [('GET', 'props'), ('GET', 'models')]
+    requests.clear()
+    SearchEngine(config, LlamaEmbedder(config), force_embedding=True).text(query)
+    assert requests == [('GET', 'props'), ('GET', 'models'), ('POST', 'embeddings')]
+    # 损坏的落盘缓存不可直接复用，清空进程缓存后应重新推理并修复。
+    cached = next((config.data_dir / 'cache' / 'query-vectors').glob('*.json'))
+    payload = json.loads(cached.read_text())
+    payload['vector'][0] += 1
+    save(cached, payload)
+    search_module._QUERY_VECTORS.clear()
+    requests.clear()
+    SearchEngine(config, LlamaEmbedder(config)).text(query)
+    assert requests == [('GET', 'props'), ('GET', 'models'), ('POST', 'embeddings')]
+    # 新查询仍须推理；权重变化后即使有缓存也不能继续使用旧空间。
+    requests.clear()
+    SearchEngine(config, LlamaEmbedder(config)).text(query.model_copy(update={'text': '另一条查询'}))
+    assert requests[-1] == ('POST', 'embeddings')
+    requests.clear()
+    native['weights'].write_bytes(b'TEST-ONLY-changed-weights')
+    with pytest.raises(adapters.ModelError):
+        SearchEngine(config, LlamaEmbedder(config)).text(query)
+    assert not any(method == 'POST' for method, _ in requests)

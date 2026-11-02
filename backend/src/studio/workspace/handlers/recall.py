@@ -104,6 +104,7 @@ class RecallHandler(StageHandler):
         engine = SearchEngine(
             config, ctx.services.get("embedder"), index_id=params["index_id"],
             release_id=params["person_release"],
+            force_embedding=ctx.services.get("force", False),
         )
         mode = recall.mode if recall else "text"
         meta = {}

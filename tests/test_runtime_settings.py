@@ -94,6 +94,21 @@ def test_profile_unique_name_per_role(store):
         _tokenhub_profile(store)
 
 
+def test_agent_context_capacity_profile_roundtrip(store, config):
+    profile = save_profile(store, role="agent", provider="custom", name="百万上下文",
+                           config={"context_window": 1048576, "max_tokens": 4096})
+    activate_profile(store, profile["id"])
+    current = RuntimeConfig(config, store).current()
+    assert current.agent.llm.context_window == 1048576
+    assert current.agent.llm.max_tokens == 4096
+    assert current.agent.max_context_tokens == config.agent.max_context_tokens
+    profile = save_profile(store, profile_id=profile["id"], role="agent", provider="custom", name="百万上下文",
+                           config={"context_window": None, "max_tokens": 4096})
+    assert RuntimeConfig(config, store).current().agent.llm.context_window is None
+    with pytest.raises(ValueError):
+        save_profile(store, role="agent", provider="custom", name="无效上下文", config={"context_window": 0})
+
+
 def test_role_and_provider_validation(store):
     with pytest.raises(ValueError, match="角色"):
         save_profile(store, role="detector", provider="custom", name="x", config={})

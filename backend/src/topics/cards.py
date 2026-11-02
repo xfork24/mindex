@@ -49,10 +49,19 @@ def _coverage_summary(report: dict | None) -> dict | None:
 def view(row: dict, *, detail: bool = False, store=None) -> dict:
     body = loads(row["body"], {})
     if store is not None and body.get("coverage"):
-        current = profiles.material_signature(store, profiles.body_of(store, row["profile_id"]))
+        profile = profiles.body_of(store, row["profile_id"])
+        current = profiles.material_signature(store, profile)
         previous = body["coverage"].get("material_scope", {"source_ids": [], "groups": []})
         if current != previous:
             body["coverage"] = {"status": "stale", "reason": "素材范围或组成员已变化，请重新打分",
+                                "visuals": [], "hits": 0, "total": 0, "ratio": 0}
+            body["scores"] = {}
+        elif body["coverage"].get("verification_version") != topic_coverage.coverage_verify.VERSION:
+            body["coverage"] = {"status": "stale", "reason": "旧报告未进行候选相关性核验，请重新打分",
+                                "visuals": [], "hits": 0, "total": 0, "ratio": 0}
+            body["scores"] = {}
+        elif body["coverage"].get("coverage_overrides", {}) != profile.coverage.model_dump(exclude_none=True):
+            body["coverage"] = {"status": "stale", "reason": "素材覆盖核验配置已变化，请重新打分",
                                 "visuals": [], "hits": 0, "total": 0, "ratio": 0}
             body["scores"] = {}
     result = {"id": row["id"], "profile_id": row["profile_id"], "run_id": row["run_id"], "title": row["title"],
@@ -196,8 +205,12 @@ def evaluate(config, store, profile_id: str, card_ids: list[str], *, llm, embedd
         if progress:
             progress({"stage": "score", "message": f"打分与素材覆盖 {index + 1}/{len(rows)}", "done": index,
                       "total": len(rows)})
-        report = topic_coverage.report(config, store, body.get("visuals") or [], embedder=embedder, filters=filters)
+        report = topic_coverage.report(config, store, body.get("visuals") or [], embedder=embedder, filters=filters,
+                                       llm=llm, title=row["title"], angle=body.get("angle", ""),
+                                       limits=config.topics.coverage.model_copy(
+                                           update=profile.coverage.model_dump(exclude_none=True)))
         report["material_scope"] = profiles.material_signature(store, profile)
+        report["coverage_overrides"] = profile.coverage.model_dump(exclude_none=True)
         if report["status"] != "ok" and report["reason"] and report["reason"] not in warnings:
             warnings.append(report["reason"])
         members = topic_items.items_by_id(store, body.get("item_ids") or [])

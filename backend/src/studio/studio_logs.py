@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from contextvars import ContextVar
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from mindex.shared.i18n import add_message_metadata, message_metadata
 from mindex.studio import studio
@@ -75,7 +76,10 @@ def diagnostic_event(kind, value):
     if log is None:
         return
     if kind == "model-request":
-        log.emit(f"调用模型服务，第 {value.get('attempt', 0) + 1} 次尝试")
+        path = urlsplit(value.get("url", "")).path
+        log.emit(f"调用模型服务：{value.get('method', '')} {path}，第 {value.get('attempt', 0) + 1} 次尝试")
+    elif kind == "query-vector-cache":
+        log.emit("复用查询向量缓存" if value.get("hit") else "生成查询向量")
     elif kind in ("model-response", "tts-response"):
         log.emit(f"模型服务响应：HTTP {value.get('status', '未知')}")
     elif kind == "split-validation":

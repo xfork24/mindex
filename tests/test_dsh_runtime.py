@@ -10,7 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 from pydantic import BaseModel
 
-from mindex.agent.dsh_runtime import DshRuntime, readiness
+from mindex.agent.dsh_runtime import DshRuntime, patch, readiness
 from mindex.agent.registry import ToolOutput, ToolRegistry, ToolSpec
 from mindex.agent.session_store import SessionStore
 from mindex.agent.tools import meta
@@ -71,6 +71,14 @@ def test_frozen_uses_bundled_executable(monkeypatch):
 
 class Empty(BaseModel):
     pass
+
+
+@pytest.mark.parametrize("capacity", [None, 1048576])
+def test_model_context_capacity_is_separate_from_output_budget(capacity):
+    settings = AgentConfig(max_context_tokens=60000, llm={"context_window": capacity, "max_tokens": 4096})
+    model = patch(settings, "http://localhost/mcp")[-1]["insert"][0]["config"]["providers"]["mindex"]["models"][0]
+    assert model["contextWindow"] == (capacity or 60000)
+    assert model["maxTokens"] == 4096
 
 
 @pytest.fixture
@@ -179,6 +187,8 @@ def model_server():
                 {
                     "id": "completion",
                     "choices": [{"index": 0, "delta": {}, "finish_reason": "stop" if used else "tool_calls"}],
+                    **({"usage": {"prompt_tokens": 66000, "completion_tokens": 10, "total_tokens": 66010}}
+                       if body["model"] == "million-context" else {}),
                 },
             ]:
                 self.wfile.write(("data: " + json.dumps(chunk) + "\n\n").encode())
@@ -235,10 +245,40 @@ def test_real_dsh_tool_and_resume(tmp_path, model_server, backend):
         names = [t.get("function", t)["name"] for t in requests[0]["tools"]]
         assert names and all(n.startswith("mcp__mindex__") for n in names), names
         assert "fixture completed" in json.dumps(store.events(sid))
+        user_events = [e for e in store.events(sid) if e["type"] == "user/message"]
+        assert len([e for e in user_events if e["data"]["source"]["kind"] == "user"]) == 2
+        assert any(e["data"]["source"]["kind"] == "runtime-context" for e in user_events)
         assert "fixture-key" not in json.dumps(store.events(sid))
         assert "fixture-key" not in (tmp_path / "dsh" / sid / "managed.patch.yml").read_text()
         seq = [e["seq"] for e in store.events(sid)]
         assert seq == list(range(len(seq)))
+
+    asyncio.run(run())
+
+
+def test_real_dsh_million_context(tmp_path, model_server):
+    url, requests = model_server
+    settings = AgentConfig(llm={"base_url": url, "model": "million-context", "api_key": "fixture",
+                                "context_window": 1048576, "max_tokens": 4096})
+    if not readiness(settings)["ready"]:
+        pytest.skip("uv sync --extra dsh")
+    store = SessionStore(tmp_path)
+    sid = store.create(runtime="dsh")["id"]
+
+    async def execute(args, ctx):
+        return ToolOutput({"ok": True})
+
+    runtime = DshRuntime(store, registry=ToolRegistry([ToolSpec("probe", "meta", "probe", Empty, "read", execute)]),
+                         llm_factory=lambda: None, client_factory=lambda _: None, settings=lambda: settings)
+
+    async def run():
+        await runtime.prompt(sid, [{"type": "text", "text": "run probe"}])
+        await runtime.wait_idle(sid)
+        events = store.events(sid)
+        assert events[-1]["type"] == "turn/end"
+        assert events[-1]["data"]["reason"]["kind"] == "completed", events
+        assert len(requests) == 2
+        assert requests[-1].get("max_tokens", requests[-1].get("max_completion_tokens")) == 4096
 
     asyncio.run(run())
 

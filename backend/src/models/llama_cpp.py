@@ -9,6 +9,7 @@ import math
 import re
 import tempfile
 from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 
 from mindex.models import adapters, deployment
@@ -27,13 +28,14 @@ from mindex.shared.config import Config, Service, fingerprint
 from mindex.shared.media import MediaError, atomic_media, content_hash, probe
 
 ADAPTER_VERSION = deployment.ADAPTER_VERSION
+_RECALL_CHECKS: ContextVar[dict | None] = ContextVar("llama_recall_checks", default=None)
 
 
 def root(service: Service) -> str:
     return service.base_url.rstrip("/").removesuffix("/v1")
 
 
-def inspect_service(service: Service) -> dict:
+def inspect_service(service: Service, *, check_health: bool = True) -> dict:
     """只探测；完整报告包含原始响应、结构元数据、能力与部署观测，不执行推理。"""
 
     def get(route):
@@ -41,8 +43,8 @@ def inspect_service(service: Service) -> dict:
             "GET", root(service) + route, timeout=service.timeout, attempts=1, headers=service.headers()
         )
 
-    health = get("/health")
-    if not isinstance(health, dict) or health.get("status") != "ok":
+    health = get("/health") if check_health else None
+    if check_health and (not isinstance(health, dict) or health.get("status") != "ok"):
         raise ModelError(f"llama.cpp 未就绪：{health}")
     props, models = copy.deepcopy(get("/props")), copy.deepcopy(get("/v1/models"))
     if not isinstance(props, dict) or not isinstance(models, dict):
@@ -131,9 +133,9 @@ def manifest(service: Service, role: str) -> dict:
     return read_manifest(path, service, role)
 
 
-def checked_runtime(service: Service, pinned: dict) -> dict:
+def checked_runtime(service: Service, pinned: dict, *, check_health: bool = True) -> dict:
     """统一返回完整报告；v1 固定旧 runtime_id，v2 固定部署观测并核验本地内容。"""
-    observed = inspect_service(service)
+    observed = inspect_service(service, check_health=check_health)
     if pinned["schema"] == 1:
         if observed["runtime_id"] != pinned["runtime_id"]:
             raise ModelError("llama.cpp 运行身份发生变化，请核对权重并重新 pin/smoke 或切回原服务")
@@ -225,6 +227,19 @@ def prepare_video(path: Path, output: Path, config: Config):
 
 class LlamaEmbedder(HTTPEmbedder):
     @contextmanager
+    def recall_scope(self):
+        """一次召回只获取一次前置身份，不请求健康状态，也不做推理后探测。"""
+        checks = _RECALL_CHECKS.get() or {}
+        if id(self) in checks:
+            yield
+            return
+        token = _RECALL_CHECKS.set({**checks, id(self): None})
+        try:
+            yield
+        finally:
+            _RECALL_CHECKS.reset(token)
+
+    @contextmanager
     def validating(self):
         """仅供 smoke 建立/对照基线；普通建索引、检索和直接推理必须经过门槛。"""
         previous = getattr(self, "_validating", False)
@@ -235,8 +250,13 @@ class LlamaEmbedder(HTTPEmbedder):
             self._validating = previous
 
     def identity(self) -> dict:
+        checks = _RECALL_CHECKS.get()
+        recalling = checks is not None and id(self) in checks
+        if recalling and checks[id(self)] is not None:
+            self._identity, self._pinned, self._runtime = checks[id(self)]
+            return self._identity
         pinned = manifest(self.profile, "embedding")
-        observed = checked_runtime(self.profile, pinned)
+        observed = checked_runtime(self.profile, pinned, check_health=not recalling)
         if pinned["schema"] == 2:
             spec = space_contract(self.config, pinned["file_identity"])
             if pinned["space_contract"] != spec:
@@ -275,6 +295,8 @@ class LlamaEmbedder(HTTPEmbedder):
             raise ModelError("推理过程中部署清单发生变化，已拒绝向量")
         self._identity = spec
         self._pinned, self._runtime = pinned, observed
+        if recalling:
+            checks[id(self)] = (spec, pinned, observed)
         return spec
 
     def _embed(self, content: list[dict]) -> list[float]:
@@ -296,9 +318,10 @@ class LlamaEmbedder(HTTPEmbedder):
                 "input": [{"content": content}],
             },
         )
-        after = check_after(self.profile, pinned, before)
-        if gated:
-            self._require_gate(self._identity, after)
+        if id(self) not in (_RECALL_CHECKS.get() or {}):
+            after = check_after(self.profile, pinned, before)
+            if gated:
+                self._require_gate(self._identity, after)
         try:
             data = payload["data"]
             if len(data) != 1 or data[0]["index"] != 0:
@@ -331,16 +354,25 @@ class LlamaEmbedder(HTTPEmbedder):
             )
 
     def _require_gate(self, space: dict, report: dict):
+        checks = _RECALL_CHECKS.get()
+        recalling = checks is not None and id(self) in checks
+        key = (id(self), "gate")
+        if recalling and checks.get(key):
+            return
         if space.get("schema") == 2:
             from mindex.models.compatibility import require_gate
 
             require_gate(self.config, space, report)
+            if recalling:
+                checks[key] = True
             return
         path = self.config.data_dir / "capabilities" / (fingerprint(space) + ".json")
         try:
             gate = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
             if not gate.get("passed") or gate.get("space") != space:
                 raise ValueError("未通过")
+            if recalling:
+                checks[key] = True
         except (OSError, ValueError, TypeError) as exc:
             raise ModelError("尚未通过六片段能力门槛；请先执行 e2e smoke，再建索引或检索") from exc
 

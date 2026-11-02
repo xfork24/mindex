@@ -75,7 +75,8 @@ def patch(settings, url):
                                     {
                                         "id": llm.model,
                                         "input": ["text", "image"] if llm.vision else ["text"],
-                                        "contextWindow": settings.max_context_tokens,
+                                        # 总容量与单次输出预算分开；兼容未配置容量的旧档案。
+                                        "contextWindow": llm.context_window or settings.max_context_tokens,
                                         "maxTokens": llm.max_tokens,
                                     }
                                 ],
@@ -364,7 +365,8 @@ class DshRuntime(RuntimeSupport):
                         event = note.payload["event"]
                         upstream = event["seq"]
                         data = safe_event(event["data"], (env["MINDEX_DSH_MODEL_KEY"], token))
-                        if event["type"] == "user/message":
+                        # dsh 的工作目录快照也是 user/message，必须保留 source，避免重复显示用户原话。
+                        if event["type"] == "user/message" and data.get("source", {}).get("kind") == "user":
                             data = message  # references and attachment metadata stay in Mindex's format
                         if event["type"] == "tool/result":
                             details = self.bridge_results.pop((sid, data["message"]["toolCallId"]), None)

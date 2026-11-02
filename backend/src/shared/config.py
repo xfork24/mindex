@@ -499,6 +499,8 @@ class AgentLlmConfig(Service):
     revision: str = "main"
     api_key_env: str = "MINDEX_AGENT_API_KEY"
     max_tokens: int = Field(default=4096, gt=0)
+    # 模型总上下文容量；未填写时 dsh 沿用 agent.max_context_tokens。
+    context_window: int | None = Field(default=None, ge=4000)
     # 模型是否接受图片输入；开启后助手会把图片附件与工具抽取的画面一并发给模型（最多 agent.max_images 张）。
     vision: bool = False
 
@@ -613,9 +615,10 @@ class TopicsClusterConfig(StrictModel):
 
 
 class TopicsCoverageConfig(StrictModel):
-    # 关键画面的首个检索结果中，向量路由的余弦相似度达到该值才记为命中。
+    # 候选粗筛阈值；还须通过基于镜头画面分析的相关性核验才能计为覆盖。
     min_similarity: float = Field(default=0.3, ge=0, le=1)
     limit: int = Field(default=3, ge=1, le=10)
+    min_duration: float = Field(default=1.0, gt=0)
 
 
 class TopicsBraveConfig(StrictModel):

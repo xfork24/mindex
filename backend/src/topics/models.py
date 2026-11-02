@@ -39,6 +39,14 @@ class Schedule(StrictModel):
     count: int = Field(default=10, ge=1, le=50)
 
 
+class CoverageSettings(StrictModel):
+    """留空的字段继承全局 topics.coverage；领域配置优先。"""
+
+    min_similarity: float | None = Field(default=None, ge=0, le=1)
+    limit: int | None = Field(default=None, ge=1, le=10)
+    min_duration: float | None = Field(default=None, gt=0)
+
+
 def _clean_list(values: list[str]) -> list[str]:
     seen, result = set(), []
     for value in values:
@@ -65,6 +73,7 @@ class ProfileBody(StrictModel):
     source_group_ids: list[str] = Field(default_factory=list, max_length=200)
     canvas: Canvas = "16:9"
     weights: Weights = Field(default_factory=Weights)
+    coverage: CoverageSettings = Field(default_factory=CoverageSettings)
     schedule: Schedule = Field(default_factory=Schedule)
 
     @field_validator("name", "domain")
@@ -98,7 +107,7 @@ class ProfileBody(StrictModel):
 
 
 class ProfileChanges(StrictModel):
-    """部分修改档案：只给出要改的字段；weights/schedule 需整体给出。"""
+    """部分修改档案：只给出要改的字段；weights/coverage/schedule 需整体给出。"""
 
     name: str | None = Field(default=None, min_length=1, max_length=40)
     domain: str | None = Field(default=None, min_length=1, max_length=40)
@@ -113,6 +122,7 @@ class ProfileChanges(StrictModel):
     source_group_ids: list[str] | None = Field(default=None, max_length=200)
     canvas: Canvas | None = None
     weights: Weights | None = None
+    coverage: CoverageSettings | None = None
     schedule: Schedule | None = None
 
     def values(self) -> dict:

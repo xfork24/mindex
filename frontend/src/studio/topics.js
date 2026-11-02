@@ -222,6 +222,7 @@ async function profileChanged() {
 async function loadProfiles(preferred) {
   const data = await api("/api/topics/profiles");
   page.profiles = data.items;
+  page.coverageDefaults = data.coverage_defaults || {};
   const wanted = [preferred, page.profile?.id, topicsQuery.get("profile"), storedProfile()]
     .find((id) => id && page.profiles.some((item) => item.id === id));
   await selectProfile(wanted || page.profiles[0]?.id || null);
@@ -250,6 +251,11 @@ function fillProfileForm(item) {
   $("pf-keywords").value = value.keywords.join("，");
   $("pf-canvas").value = value.canvas;
   for (const key of WEIGHT_KEYS) $(`pf-w-${key}`).value = value.weights[key];
+  for (const key of ["min_similarity", "limit", "min_duration"]) {
+    const input = $(`pf-coverage-${key}`);
+    input.value = value.coverage?.[key] ?? "";
+    input.placeholder = page.coverageDefaults?.[key] ?? "";
+  }
   $("pf-s-enabled").checked = value.schedule.enabled;
   $("pf-s-time").value = value.schedule.time;
   $("pf-s-count").value = value.schedule.count;
@@ -267,6 +273,10 @@ function profileFormValues() {
     keywords: splitList($("pf-keywords").value),
     canvas: $("pf-canvas").value,
     weights,
+    coverage: Object.fromEntries(["min_similarity", "limit", "min_duration"].map((key) => {
+      const value = $(`pf-coverage-${key}`).value.trim();
+      return [key, value === "" ? null : Number(value)];
+    })),
     schedule: { enabled: $("pf-s-enabled").checked, time: $("pf-s-time").value || "08:00",
       count: Number($("pf-s-count").value || 10) }
   };
@@ -859,12 +869,16 @@ function renderCoverage(card) {
   for (const row of report.visuals || []) {
     const li = el("li", null, "coverage-row" + (row.hit ? " is-hit" : " is-gap"));
     const head = el("div", null, "coverage-head");
-    head.append(el("span", MindexI18n.msg(row.hit ? "ui.topics_coverage_hit" : "ui.topics_coverage_gap"), "coverage-mark"),
+    const unresolved = !row.hit && (row.candidates || []).some((c) => ["uncertain", "error"].includes(c.verification?.verdict));
+    head.append(el("span", MindexI18n.msg(row.hit ? "ui.topics_coverage_hit" : unresolved
+      ? "ui.topics_verification_uncertain" : "ui.topics_coverage_gap"), "coverage-mark"),
       content("span", row.visual, "coverage-visual"));
     li.append(head);
-    if (row.hit) {
+    const candidates = [...(row.candidates || row.clips || [])].sort((a, b) =>
+      Number(b.verification?.verdict === "matched") - Number(a.verification?.verdict === "matched"));
+    if (candidates.length) {
       const clips = el("div", null, "coverage-clips");
-      for (const clip of row.clips.slice(0, 3)) {
+      for (const clip of candidates) {
         const link = document.createElement("a");
         link.className = "coverage-clip";
         link.href = `/admin?source=${enc(clip.source_id)}&segment=${enc(clip.segment_id)}`;
@@ -878,6 +892,12 @@ function renderCoverage(card) {
         const caption = content("span", `${clip.source_name || ""} ${Number(clip.start).toFixed(1)}–${Number(clip.end).toFixed(1)}s`
           + (clip.similarity != null ? ` · ${Number(clip.similarity).toFixed(2)}` : ""), "coverage-caption");
         link.append(image, caption);
+        if (clip.verification) {
+          const verdict = clip.verification.verdict;
+          link.append(el("span", MindexI18n.msg(`ui.topics_verification_${verdict}`), "coverage-verdict"),
+            content("span", clip.verification.reason, "coverage-caption"));
+          if (clip.verification.quote) link.append(content("span", clip.verification.quote, "coverage-caption"));
+        }
         MindexI18n.setAttr(link, "aria-label", MindexI18n.msg("ui.topics_coverage_clip_aria", { p0: row.visual, p1: clip.segment_id }));
         clips.append(link);
       }

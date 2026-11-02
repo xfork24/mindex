@@ -66,7 +66,7 @@ PROFILE_FIELDS = {
     },
     "generator": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "llama_template", "max_tokens"},
     "writer": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "llama_template", "max_tokens"},
-    "agent": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "max_tokens", "vision"},
+    "agent": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "max_tokens", "context_window", "vision"},
     # deployment_manifest：llama_cpp 部署清单（e2e pin 生成）；相对路径按数据目录解析。
     "embedding": {
         "backend", "base_url", "model", "revision", "timeout", "api_key_env", "quantization", "dimensions",

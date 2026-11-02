@@ -414,7 +414,7 @@ curl -s -H "Authorization: Bearer $MINDEX_MCP_TOKEN" -F file=@shot.png http://12
 | `list_topics` | read | 是 | 按总分列出选题卡片 |
 | `get_topic` | read | 是 | 卡片详情：分项分数、关键画面、大纲、推荐模板与来源条目 |
 | `score_topic` | write | 是 | 重新打分（受众匹配调用模型，覆盖按当前索引检索） |
-| `topic_coverage` | read | 是 | 素材覆盖报告：命中片段（附缩略图）与缺口 |
+| `topic_coverage` | read | 是 | 素材覆盖报告：核验通过的命中片段（附缩略图）、候选核验理由与缺口 |
 | `draft_topic_outline` | write | 是 | 生成或重新生成大纲与推荐模板 |
 | `update_topic` | write | 是 | 修改标题、大纲、推荐模板，或忽略/恢复 |
 | `create_job_from_topic` | write | 是 | 从选题建创作任务（模板、画幅、来源资料与档案快照预先设好） |
@@ -480,6 +480,7 @@ curl -s -H "Authorization: Bearer $MINDEX_MCP_TOKEN" -F file=@shot.png http://12
 | `llm.backend` | `openai` | `openai`（OpenAI 兼容 tools 协议）或 `anthropic`（原生 Messages 协议） |
 | `llm.base_url` / `llm.model` / `llm.api_key_env` / `llm.timeout` / `llm.max_tokens` | DeepSeek | 设置页「智能助手」档案可覆盖 |
 | `llm.vision` | `false` | 模型是否接受图片输入；开启后附件图片与工具抽取的画面会发给模型（最多 `max_images` 张）。设置页「智能助手」档案可覆盖，保存后热生效 |
+| `llm.context_window` | `null` | dsh 使用的模型总上下文容量，设置页「智能助手」档案可覆盖；留空沿用 `max_context_tokens`。百万上下文可填 `1048576`；`llm.max_tokens` 仅限制单次回复输出，不会扩大上下文 |
 | `mcp.http_enabled` | `false` | 挂载 streamable-http `/mcp` |
 | `mcp.policy` | `read` | MCP 调用方允许的最高风险级别：`read`、`write`、`all` |
 | `mcp.token_env` | `MINDEX_MCP_TOKEN` | `/mcp` 与附件端点的 Bearer 令牌所在环境变量；开启 HTTP 但未设置令牌时服务拒绝启动 |
