@@ -4,7 +4,7 @@
 
 ## 自动连播图（gallery-*.gif）
 
-GitHub 渲染 README 时剥离 `<script>` 与 `style`，无法放置轮播控件；动画 WebP 多数场景只显示首帧，GIF 才是 README 内保证播放的动画格式。同一组截图因此合成为一张循环播放的 GIF，README 中以单图展示自动连播，并在下方用 `<details>` 列出逐张原图链接。分组、帧顺序、每帧秒数与中英文标题在 `scripts/build-readme-gallery.py` 维护，源图与产物的 SHA-256 记录在 `gallery.json`。
+GitHub 渲染 README 时剥离 `<script>` 与 `style`，无法放置轮播控件；动画 WebP 多数场景只显示首帧，GIF 才是 README 内保证播放的动画格式。同一组截图因此合成为一张循环播放的 GIF；README 中**所有截图（单图与分组动图）都放进默认折叠的 `<details>`**，展开分组动图后自动连播，并在块内列出逐张原图链接。分组、帧顺序、每帧秒数与中英文标题在 `scripts/build-readme-gallery.py` 维护，源图与产物的 SHA-256 记录在 `gallery.json`。
 
 ```bash
 python scripts/build-readme-gallery.py                # 源图变化后重新生成

@@ -39,22 +39,34 @@ The local application handles media processing, storage, API, and UI on your own
 
 ## Features in Depth
 
-Screenshots play automatically one after another; open the list under each slideshow to view any screenshot full size.
+All screenshots are collapsed by default — expand a title to view it. Grouped screenshots play in sequence when expanded, and each group lists its full-size originals.
 
 ### Media Library, AI Analysis, and Person Management
 
 Every imported source is decomposed locally: shot detection (adaptive by default, TransNetV2 optional), cutting, thumbnails, and checkpointed processing. Dialogue, visual analysis, and person recognition run as independent stages — you can use the library before all of them complete, and resume any failed stage by re-running the same command.
 
+<details>
+<summary>Media library with staged processing status per source</summary>
+
 ![Media library with staged processing status per source](docs/assets/admin-preprocess.png)
+
+</details>
 
 Shots are the working unit of the library: browse them per source, inspect time ranges and boundaries, and read the AI analysis of each — action, scene, emotion, shot type, and more — without triggering new inference.
 
+<details>
+<summary>Shot management: shot grid with thumbnails, time ranges, and boundaries</summary>
+
 ![Shot management: shot grid with thumbnails, time ranges, and boundaries](docs/assets/admin-shots.png)
+
+</details>
+
+<details>
+<summary>Per-shot AI analysis, background music library, and source groups — 3 screenshots, auto-playing</summary>
 
 ![Auto-playing screenshots: per-shot AI analysis, background music library, and source groups](docs/assets/gallery-admin.gif)
 
-<details>
-<summary>View each screenshot (3)</summary>
+Full-size images:
 
 1. [Per-shot AI analysis result](docs/assets/admin-shot-analysis.png)
 2. [Background music library](docs/assets/admin-music.png)
@@ -64,12 +76,19 @@ Shots are the working unit of the library: browse them per source, inspect time 
 
 **Person management is a first-class subsystem.** Actors and roles are separate identities — a role can appear across multiple titles, and person data is never bound to one source. Import cast tables from images, capture reference frames directly from the source video, run person detection over shots, then review the evidence shot by shot before publishing. Published evidence forms recoverable release combinations with the content index, and stays queryable even when the person model is offline.
 
+<details>
+<summary>Person library: actor and role cards, reference images, and works</summary>
+
 ![Person library: actor and role cards, reference images, and works](docs/assets/persons-actors-roles.png)
+
+</details>
+
+<details>
+<summary>Appearance detection and cast-table import — 2 screenshots, auto-playing</summary>
 
 ![Auto-playing screenshots: appearance detection and cast-table import](docs/assets/gallery-persons.gif)
 
-<details>
-<summary>View each screenshot (2)</summary>
+Full-size images:
 
 1. [Appearance detection with per-shot evidence review](docs/assets/persons-appearance-detection.png)
 2. [Cast-table import with entry review](docs/assets/persons-cast-import.png)
@@ -80,12 +99,19 @@ Shots are the working unit of the library: browse them per source, inspect time 
 
 Text queries run over three channels — visual, dialogue, and analysis — each fusing semantic vectors with BM25, then merged with RRF under configurable channel weights. Queries can describe actions, objects, scenes, emotions, and shot types ("a sad close-up", "riding a white horse"), optionally constrained to selected people, with a clear distinction between a person **appearing on screen** and being **mentioned in dialogue**.
 
+<details>
+<summary>Text search combined with a person filter</summary>
+
 ![Text search combined with a person filter](docs/assets/search-text-and-person.png)
+
+</details>
+
+<details>
+<summary>Object, scene, and emotion queries, similar-scene lookup, image or video search — 4 screenshots, auto-playing</summary>
 
 ![Auto-playing screenshots: object, scene, and emotion queries, similar-scene lookup, image or video search](docs/assets/gallery-search.gif)
 
-<details>
-<summary>View each screenshot (4)</summary>
+Full-size images:
 
 1. [Semantic query for objects and scenes](docs/assets/search-text-and-object.png)
 2. [Emotion and shot-type queries](docs/assets/search-emotion-closeup.png)
@@ -104,13 +130,28 @@ Studio turns an idea into a finished video using your library as raw material. T
 
 **AI-assisted topic mining.** Configure sources (RSS, hot lists, Brave search, calendars, local items), let the pipeline cluster, summarize, and score candidates — timeliness, audience fit, material coverage, novelty, and production cost, with weights you tune per domain profile — then push a selected topic straight into a creation job with outline and references attached.
 
+<details>
+<summary>Topic mining: topic cards with scores from multiple sources</summary>
+
 ![Topic mining: topic cards with scores from multiple sources](docs/assets/topics-mining.png)
+
+</details>
+
+<details>
+<summary>Topic sources and scoring weights per domain profile</summary>
 
 ![Topic sources and scoring weights per domain profile](docs/assets/topics-settings.png)
 
+</details>
+
 **Scripted, storyboarded, shot-by-shot production.** The writer model drafts a script from your outline using a script template (built-in or your own, with optional reference documents), then the storyboard split produces one row per shot.
 
+<details>
+<summary>Storyboard rows with narration, duration, source, and stage status</summary>
+
 ![Storyboard rows with narration, duration, source, and stage status](docs/assets/studio-storyboard.png)
+
+</details>
 
 Each shot picks its own visual source:
 
@@ -126,18 +167,30 @@ Each shot picks its own visual source:
 
 **Narration, alignment, render.** TTS voices (with a voice library and cloning) narrate each shot; the timeline editor aligns narration audio against the source video with a fixed-length selection window, frame thumbnails, shot boundaries, and anchors. Renders respect the plan canvas (16:9, 9:16, 1:1), burn or attach subtitles (libass), mix original audio, insert BGM with beat alignment, and compose the final cut.
 
+<details>
+<summary>Timeline alignment of narration audio with the video track</summary>
+
 ![Timeline alignment of narration audio with the video track](docs/assets/studio-timeline-alignment.png)
+
+</details>
 
 **Versioned builds with full dependency trees.** Every plan keeps versions per node; edit one shot and only its downstream invalidates. Builds run preflight dependency checks, reuse verified artifacts, and leave failed builds non-destructive. The dependency tree traces each shot of the final video back to its inputs.
 
+<details>
+<summary>Dependency tree of a final build, tracing every shot to its input versions</summary>
+
 ![Dependency tree of a final build, tracing every shot to its input versions](docs/assets/studio-build-dependencies.png)
+
+</details>
 
 Creation jobs are directories with plan records, versions, builds, and inputs — managed from a single task list. Three template families shape output without touching the pipeline: **script templates** control writing style and structure, **style templates** (brands) encode visual style presets, and **delivery templates** snapshot platform rules for multi-aspect export and publish packages.
 
+<details>
+<summary>Creation task list, script templates, delivery templates, and style templates — 4 screenshots, auto-playing</summary>
+
 ![Auto-playing screenshots: creation task list, script templates, delivery templates, and style templates](docs/assets/gallery-studio.gif)
 
-<details>
-<summary>View each screenshot (4)</summary>
+Full-size images:
 
 1. [Creation task list](docs/assets/studio-jobs.png)
 2. [Script template management](docs/assets/studio-script-templates.png)
@@ -150,14 +203,21 @@ Creation jobs are directories with plan records, versions, builds, and inputs �
 
 The agent panel is available on every page. It drives search, library curation, person review, creation, and settings through natural language, using the same REST API as the UI. Tools are organized into domains and loaded on demand; write operations present a preview for confirmation before anything changes, and task watchers report back when background builds and processing jobs finish.
 
+<details>
+<summary>Agent conversation creating a video from the library end to end</summary>
+
 ![Agent conversation creating a video from the library end to end](docs/assets/agent-create-video-1.png)
+
+</details>
 
 The session above continues through scripting, per-shot production, and the final build; clip retrieval works the same way.
 
+<details>
+<summary>Agent session through scripting, per-shot production, final build, and clip retrieval — 4 screenshots, auto-playing</summary>
+
 ![Auto-playing screenshots: agent session through scripting, per-shot production, final build, and clip retrieval](docs/assets/gallery-agent.gif)
 
-<details>
-<summary>View each screenshot (4)</summary>
+Full-size images:
 
 1. [Agent session: scripting and storyboard](docs/assets/agent-create-video-2.png)
 2. [Agent session: per-shot production and narration](docs/assets/agent-create-video-3.png)
@@ -172,12 +232,19 @@ The agent layer is harness-compatible: it runs on the **built-in harness** or on
 
 Twelve model roles are configured independently — multimodal understanding, script writing, storyboard splitting, embedding, ASR, TTS, image, video, and music generation, animation, person recognition, and the agent itself. Each role holds multiple named profiles with one active; profiles connect to self-hosted HTTP services or adapted cloud providers (Zhipu AI, DeepSeek, Alibaba Cloud, Tencent Cloud TokenHub, MiniMax, Anthropic), and saving takes effect immediately for the web app and CLI alike.
 
+<details>
+<summary>Settings page with model role cards and harness selector</summary>
+
 ![Settings page with model role cards and harness selector](docs/assets/settings-models-harness.png)
+
+</details>
+
+<details>
+<summary>Recall weights and services, model profile card, custom profile configuration — 3 screenshots, auto-playing</summary>
 
 ![Auto-playing screenshots: recall weights and services, model profile card, custom profile configuration](docs/assets/gallery-settings.gif)
 
-<details>
-<summary>View each screenshot (3)</summary>
+Full-size images:
 
 1. [Recall weights, voice library, local services, and tool management](docs/assets/settings-weights-voices-services.png)
 2. [Model profile card](docs/assets/settings-model-card.png)
@@ -189,7 +256,12 @@ Retrieval behavior is tunable at runtime: channel weights for the visual / dialo
 
 The UI ships bilingual (Chinese/English) with a dark theme.
 
+<details>
+<summary>Dark theme with Chinese/English language toggle</summary>
+
 ![Dark theme with Chinese/English language toggle](docs/assets/settings-dark-theme-i18n.png)
+
+</details>
 
 ## Quick Start
 

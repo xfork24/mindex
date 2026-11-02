@@ -38,22 +38,34 @@ Mindex 把海量视频的管理、理解、检索与再创作连接在同一个�
 
 ## 功能详细介绍
 
-截图自动连播展示；展开每组下方的清单可单独查看某张原图。
+所有截图默认折叠，点击标题展开；分组截图展开后自动连播，并附逐张原图链接。
 
 ### 素材库、AI 分析与人物管理
 
 每个导入的素材在本地完成分解：镜头检测（默认本地 AdaptiveDetector，可选 TransNetV2）、切片、缩略图与检查点化处理。对白、视觉分析与人物识别是相互独立的阶段——不必等全部完成就能开始使用素材库，失败阶段重跑同一命令即可恢复。
 
+<details>
+<summary>素材库：每个素材的分阶段处理状态</summary>
+
 ![素材库：每个素材的分阶段处理状态](docs/assets/admin-preprocess.png)
+
+</details>
 
 镜头是素材库的工作单元：按素材浏览镜头、查看时间区间与边界、阅读每个镜头的 AI 分析（动作、场景、情绪、景别等）——查看内容不会触发新的模型推理。
 
+<details>
+<summary>镜头管理：缩略图、时间区间与边界</summary>
+
 ![镜头管理：缩略图、时间区间与边界](docs/assets/admin-shots.png)
+
+</details>
+
+<details>
+<summary>镜头 AI 分析、背景音乐曲库与素材分组 —— 3 张，自动连播</summary>
 
 ![自动连播：镜头 AI 分析、背景音乐曲库与素材分组](docs/assets/gallery-admin.gif)
 
-<details>
-<summary>逐张查看原图（3 张）</summary>
+逐张原图：
 
 1. [镜头的 AI 分析结果](docs/assets/admin-shot-analysis.png)
 2. [背景音乐曲库管理](docs/assets/admin-music.png)
@@ -63,12 +75,19 @@ Mindex 把海量视频的管理、理解、检索与再创作连接在同一个�
 
 **人物管理是一等公民子系统。** 演员与角色分别建模——角色可跨作品复用，人物资料不绑定具体素材。从图片导入演员表、直接在原片中截取参考帧、对镜头跑人物识别，再逐镜审核出镜证据后发布。已发布证据与内容索引组成可恢复的发布组合，人物模型离线时仍能查询。
 
+<details>
+<summary>人物库：演员/角色卡片、参考图与作品</summary>
+
 ![人物库：演员/角色卡片、参考图与作品](docs/assets/persons-actors-roles.png)
+
+</details>
+
+<details>
+<summary>出镜识别与演员表导入 —— 2 张，自动连播</summary>
 
 ![自动连播：出镜识别与演员表导入](docs/assets/gallery-persons.gif)
 
-<details>
-<summary>逐张查看原图（2 张）</summary>
+逐张原图：
 
 1. [出镜识别与逐镜证据审核](docs/assets/persons-appearance-detection.png)
 2. [演员表导入与条目核对](docs/assets/persons-cast-import.png)
@@ -79,12 +98,19 @@ Mindex 把海量视频的管理、理解、检索与再创作连接在同一个�
 
 文字查询按画面、对白、分析三渠道独立召回——各渠道内部融合语义向量与 BM25，再按可配置的渠道权重做 RRF 合并。查询可以描述动作、物体、场景、情绪与景别（"悲伤的特写"、"骑白马"），可限定所选人物，并明确区分**人物实际出镜**与**对白中被提及**。
 
+<details>
+<summary>文字检索结合人物筛选</summary>
+
 ![文字检索结合人物筛选](docs/assets/search-text-and-person.png)
+
+</details>
+
+<details>
+<summary>物体与场景、情绪与景别、相似场景、以图片或视频检索 —— 4 张，自动连播</summary>
 
 ![自动连播：物体与场景、情绪与景别、相似场景、以图片或视频检索](docs/assets/gallery-search.gif)
 
-<details>
-<summary>逐张查看原图（4 张）</summary>
+逐张原图：
 
 1. [物体与场景语义查询](docs/assets/search-text-and-object.png)
 2. [情绪与景别查询](docs/assets/search-emotion-closeup.png)
@@ -103,13 +129,28 @@ Studio 用你自己的素材库把一个想法变成成片。工作流为选题�
 
 **AI 辅助选题。** 配置选题来源（RSS、热榜、Brave 搜索、日历、本地条目），管线自动聚类、摘要并为候选打分——时效、受众匹配、素材覆盖、去重、制作成本五个维度，权重按领域档案自行调整——选定主题即可带着大纲和参考文稿一键创建创作任务。
 
+<details>
+<summary>选题挖掘：多来源选题卡片与评分</summary>
+
 ![选题挖掘：多来源选题卡片与评分](docs/assets/topics-mining.png)
+
+</details>
+
+<details>
+<summary>选题来源与打分权重设置</summary>
 
 ![选题来源与打分权重设置](docs/assets/topics-settings.png)
 
+</details>
+
 **从文案到逐镜生产。** 文案创作模型按所选文案模板（内置或自建，可附参考文稿）从大纲写出可编辑的文案，拆分镜后每镜一行。
 
+<details>
+<summary>分镜编辑：旁白、时长、来源与阶段状态</summary>
+
 ![分镜编辑：旁白、时长、来源与阶段状态](docs/assets/studio-storyboard.png)
+
+</details>
 
 每个分镜独立选择画面来源：
 
@@ -125,18 +166,30 @@ Studio 用你自己的素材库把一个想法变成成片。工作流为选题�
 
 **配音、对齐、渲染。** TTS 音色（含音色库与克隆）为每镜配音；时间轴编辑器以定长选片窗口在原片上对齐配音与画面，带帧缩略图、镜头边界与参考锚点。渲染遵循方案画幅（16:9、9:16、1:1），烧录或挂载字幕（libass）、混入原声、按提示点插入 BGM 并支持节拍对齐，最后合成成片。
 
+<details>
+<summary>时间轴上对齐配音音频与视频轨道</summary>
+
 ![时间轴上对齐配音音频与视频轨道](docs/assets/studio-timeline-alignment.png)
+
+</details>
 
 **版本化构建与完整依赖树。** 每个方案的每个节点都有版本；改一镜只作废其下游闭包。构建前做依赖预检，复用校验一致的产物，失败构建不破坏已有成片。依赖树把成片的每个分镜追溯回它的输入版本。
 
+<details>
+<summary>成片构建的依赖树，逐镜追溯输入版本</summary>
+
 ![成片构建的依赖树，逐镜追溯输入版本](docs/assets/studio-build-dependencies.png)
+
+</details>
 
 创作任务是独立目录（方案记录、版本、构建与输入素材），在统一的任务列表中管理。三类模板从外部塑造产出而不改动管线：**文案模板**控制写作风格与结构，**风格模板**（品牌）沉淀视觉风格预设，**交付模板**固化平台规则快照，用于多画幅导出与发布包。
 
+<details>
+<summary>创作任务列表与文案、交付、风格三类模板管理 —— 4 张，自动连播</summary>
+
 ![自动连播：创作任务列表与文案、交付、风格三类模板管理](docs/assets/gallery-studio.gif)
 
-<details>
-<summary>逐张查看原图（4 张）</summary>
+逐张原图：
 
 1. [创作任务列表](docs/assets/studio-jobs.png)
 2. [文案模板管理](docs/assets/studio-script-templates.png)
@@ -149,14 +202,21 @@ Studio 用你自己的素材库把一个想法变成成片。工作流为选题�
 
 Agent 面板出现在每个页面。它用自然语言驱动检索、素材整理、人物审核、创作与设置，底层走与页面相同的 REST API。工具按领域组织、按需加载；写操作先给出预览、确认后才生效；任务看护器在后台构建与处理任务到达终态时主动回报。
 
+<details>
+<summary>Agent 对话：端到端地从素材库制作一支视频</summary>
+
 ![Agent 对话：端到端地从素材库制作一支视频](docs/assets/agent-create-video-1.png)
+
+</details>
 
 上面的会话接下来会经历写文案、拆分镜、逐镜生产与最终构建；片段检索的工作方式相同。
 
+<details>
+<summary>Agent 会话从写文案、逐镜生产到成片预览，以及片段检索 —— 4 张，自动连播</summary>
+
 ![自动连播：Agent 会话从写文案、逐镜生产到成片预览，以及片段检索](docs/assets/gallery-agent.gif)
 
-<details>
-<summary>逐张查看原图（4 张）</summary>
+逐张原图：
 
 1. [Agent 会话：写文案并拆分镜](docs/assets/agent-create-video-2.png)
 2. [Agent 会话：逐镜生产与配音](docs/assets/agent-create-video-3.png)
@@ -171,12 +231,19 @@ Agent 层与 harness 兼容：可运行在**内置 harness** 或 **DeepSeek Harn
 
 十二个模型角色独立配置——多模态理解、文案创作、拆分镜、嵌入、ASR、TTS、图片/视频/音乐生成、动画生成、人物识别与智能助手。每个角色可保存多张命名档案卡、激活其一；档案可连接自建 HTTP 服务或已适配的线上厂商（智谱、DeepSeek、阿里云、腾讯 TokenHub、MiniMax、Anthropic），保存即对 Web 与 CLI 同时热生效。
 
+<details>
+<summary>设置页：模型角色卡片与 harness 选择器</summary>
+
 ![设置页：模型角色卡片与 harness 选择器](docs/assets/settings-models-harness.png)
+
+</details>
+
+<details>
+<summary>召回权重与服务管理、模型档案卡、自定义档案配置 —— 3 张，自动连播</summary>
 
 ![自动连播：召回权重与服务管理、模型档案卡、自定义档案配置](docs/assets/gallery-settings.gif)
 
-<details>
-<summary>逐张查看原图（3 张）</summary>
+逐张原图：
 
 1. [召回权重、音色库、本地服务与工具管理](docs/assets/settings-weights-voices-services.png)
 2. [模型档案卡](docs/assets/settings-model-card.png)
@@ -188,7 +255,12 @@ Agent 层与 harness 兼容：可运行在**内置 harness** 或 **DeepSeek Harn
 
 界面为中英双语并提供暗色主题。
 
+<details>
+<summary>暗色主题与中英文切换</summary>
+
 ![暗色主题与中英文切换](docs/assets/settings-dark-theme-i18n.png)
+
+</details>
 
 ## 快速开始
 
