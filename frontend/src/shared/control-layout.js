@@ -24,8 +24,10 @@
   }
   function resize() {
     pending = false;
-    for (const node of document.querySelectorAll(flows)) if (!node.classList.contains('content-flow')) node.classList.add('content-flow');
+    // 逐镜编辑区自行按比例分栏，避免内容测量重新把字段压回固定宽度。
+    for (const node of document.querySelectorAll(flows)) if (!node.closest('.editor-stretch-row') && !node.classList.contains('content-flow')) node.classList.add('content-flow');
     for (const control of document.querySelectorAll('main select,dialog select,main input,dialog input')) {
+      if (control.closest('.editor-stretch-row')) continue;
       if (control.closest('.agent-drawer') || ['checkbox', 'radio', 'hidden', 'range', 'file', 'color'].includes(control.type)) continue;
       if (!control.getClientRects().length) continue;
       const multi = control.closest('.multi-select');

@@ -40,11 +40,34 @@ class Groups:
         )["n"]
         return value
 
-    def list(self, kind):
-        return [
-            self.get(row["id"])
-            for row in self.store.rows("SELECT id FROM media_groups WHERE type=? ORDER BY name,id", (kind,))
-        ] + [self.get(UNGROUPED[kind])]
+    def list(self, kind, *, include_members=False):
+        # 筛选目录一次读取成员关系，避免逐组开连接；前端可直接取并集。
+        column = "source_id" if kind == "source" else "music_id"
+        table = "sources" if kind == "source" else "music_tracks"
+        with self.store.connect() as db:
+            rows = [dict(row) for row in db.execute(
+                "SELECT g.*,count(m.id) AS member_count FROM media_groups g "
+                "LEFT JOIN media_group_members m ON m.group_id=g.id "
+                "WHERE g.type=? GROUP BY g.id ORDER BY g.name,g.id", (kind,)
+            )]
+            ungrouped = [row[0] for row in db.execute(
+                f"SELECT t.id FROM {table} t WHERE NOT EXISTS "
+                f"(SELECT 1 FROM media_group_members m WHERE m.{column}=t.id) ORDER BY t.id"
+            )]
+            system = {"id": UNGROUPED[kind], "type": kind, "name": "未分类",
+                      "description": "自动包含未加入其他组的成员", "system": True,
+                      "updated_at": now(), "member_count": len(ungrouped)}
+            if include_members:
+                members = {row["id"]: [] for row in rows}
+                for row in db.execute(
+                    f"SELECT m.group_id,m.{column} FROM media_group_members m "
+                    "JOIN media_groups g ON g.id=m.group_id WHERE g.type=?", (kind,)
+                ):
+                    members[row[0]].append(row[1])
+                for row in rows:
+                    row["member_ids"] = members[row["id"]]
+                system["member_ids"] = ungrouped
+        return rows + [system]
 
     def save(self, kind, name, description="", group_id=None):
         if group_id in UNGROUPED.values():

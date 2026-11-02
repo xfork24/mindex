@@ -12,6 +12,8 @@ const sourceGroup = process.env.MINDEX_GROUPS_SOURCE_GROUP;
   const browser = await chromium.launch({headless:true});
   const page = await browser.newPage({viewport:{width:1280,height:1000}});
   const errors = [];
+  const resolutions = [];
+  page.on('request', (request) => { if (request.url().endsWith('/api/admin/groups/resolve')) resolutions.push(request.url()); });
   page.on('pageerror', (error) => errors.push(error.message));
   await page.route('**/api/settings/voices/catalog*', (route) => route.fulfill({json:{groups:[],library:[],default_voice:null,clone:{supported:false},error:null}}));
   async function go(path) { await page.goto(base + path); await page.waitForLoadState('networkidle'); }
@@ -162,6 +164,7 @@ const sourceGroup = process.env.MINDEX_GROUPS_SOURCE_GROUP;
     await (await filteredTracks).json();
     await page.waitForFunction(() => document.querySelectorAll('#music-list .job-item').length === 1);
     await audit('groups-music-detail');
+    resolutions.length = 0;
     await go('/search');
     // 检索页组筛选默认全选：值为空（不限），素材联动列出全部素材。
     const searchFilter = page.locator('.material-filters .group-picker');
@@ -189,6 +192,18 @@ const sourceGroup = process.env.MINDEX_GROUPS_SOURCE_GROUP;
     assert(search.results.length > 0);
     assert(search.results.every((r) => r.source_id === source));
     assert.deepEqual(await page.locator('.group-picker select option:checked').evaluateAll((nodes) => nodes.map((node) => node.value)), [group]);
+    assert.equal(resolutions.length, 0, '切换、组合和重选素材组均应使用目录缓存');
+    // 外部改动使缓存失效；新成员范围不能继续沿用旧结果。
+    await page.evaluate(async ({group, source}) => {
+      await MindexApi.json(`/api/admin/groups/${group}/members/remove`, 'POST', {member_ids:[source]});
+      window.dispatchEvent(new CustomEvent('mindex:agent-mutation', {detail:{groups:true}}));
+    }, {group, source});
+    await page.waitForFunction(() => document.getElementById('source').disabled && document.getElementById('source').options.length === 1);
+    await page.evaluate(async ({group, source}) => {
+      await MindexApi.json(`/api/admin/groups/${group}/members`, 'POST', {member_ids:[source]});
+      window.dispatchEvent(new CustomEvent('mindex:groups-changed'));
+    }, {group, source});
+    await page.waitForFunction(() => !document.getElementById('source').disabled && document.getElementById('source').options.length === 2);
     await audit('groups-search');
     await page.locator('#filter-reset').click();
     // 重置回到默认全选（=不限），而不是清空勾选。
@@ -207,28 +222,48 @@ const sourceGroup = process.env.MINDEX_GROUPS_SOURCE_GROUP;
     await page.waitForFunction(() => !document.getElementById('create-sources').disabled);
     await page.locator('#job-meta > summary').click();
     assert.equal(await page.locator('#job-meta-body select, #job-meta-body .group-picker, #job-meta-body button').count(), 0, '元信息只读');
+    assert.equal(resolutions.length, 0, '任务创建切换素材组也应使用目录缓存');
     await audit('groups-studio');
     await page.evaluate(() => openStage(order()[0], 'content'));
     assert.equal(await page.locator('#stage-panel .recall-editor .group-picker').count(), 0, '文案与查询不显示素材组筛选');
     await page.locator('#stage-panel [data-recall-filter=source_ids]').waitFor();
     for (const language of ['zh', 'en']) {
       await page.evaluate((lang) => MindexI18n.setLanguage(lang), language);
-      // 控件宽度由 control-layout 在 rAF 中按内容测量写入，先等测量落定再断言。
-      await page.waitForFunction(() => {
-        const row = document.querySelector('#stage-panel .recall-scope-options');
-        if (!row) return false;
-        const nodes = [...row.querySelectorAll(':scope>.group-picker,:scope>.recall-material-field,.recall-person-list,.recall-person-choice')];
-        return nodes.length > 0 && nodes.every((node) => node.style.getPropertyValue('--control-content-width'));
-      }, null, {timeout: 15000});
-      const fields = await page.locator('#stage-panel .recall-scope-options').evaluate((row) => {
-        const nodes = [...row.querySelectorAll(':scope>.group-picker,:scope>.recall-material-field,.recall-person-list,.recall-person-choice')];
-        return nodes.map((node) => { const r = node.getBoundingClientRect(); return {top:r.top,left:r.left,right:r.right,width:r.width,wanted:parseFloat(node.style.getPropertyValue("--control-content-width")),available:row.clientWidth}; });
-      });
-      assert.equal(fields.length, 5);
-      for (const field of fields) assert(Math.abs(field.width - Math.min(field.wanted, field.available)) < 3, `${language}: 多选框应按内容宽度并受容器约束 ${JSON.stringify(field)}`);
-      for (let i=1;i<fields.length;i++) if (Math.abs(fields[i].top-fields[i-1].top)<2) assert(fields[i].left-fields[i-1].right<=13, "同行控件应保持统一间距");
+      await page.setViewportSize({width:1920,height:1000});
+      await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve)));
+      const rows = await page.locator('#stage-panel .editor-stretch-row').evaluateAll((rows) => rows.map((row) => {
+        const nodes = [...row.querySelectorAll(':scope>.form-field,:scope>.recall-person-options>.form-field,:scope>.recall-return-options>.form-field,:scope>.visual-rewrite')];
+        const r = row.getBoundingClientRect();
+        return {name:row.className,left:r.left,right:r.right,width:r.width,scrollWidth:row.scrollWidth,
+          fields:nodes.map((node) => {const r=node.getBoundingClientRect();return {top:r.top,left:r.left,right:r.right,width:r.width};})};
+      }));
+      assert.equal(rows.length, 4);
+      for (const row of rows) {
+        assert(row.fields.length >= 3);
+        assert(row.scrollWidth <= row.width + 1, `${language}: 宽屏不应出现行内滚动 ${row.name}`);
+        assert(Math.abs(row.fields[0].left-row.left)<2 && Math.abs(row.fields.at(-1).right-row.right)<2, `${language}: 控件应伸展填满整行 ${row.name}`);
+        const fields=row.fields.filter((_,i)=>!row.name.includes('shot-editor-fields')||i<4);
+        assert(fields.every((field)=>Math.abs(field.top-fields[0].top)<2), `${language}: 控件应保持同行 ${row.name}`);
+      }
+      if (language === 'zh') await page.locator('#stage-panel').screenshot({path:process.env.MINDEX_GROUPS_OUTPUT+'/editor-wide.png'});
+      await page.setViewportSize({width:1280,height:1000});
     }
     await audit('groups-shot-recall');
+    for (const kind of ['aigc', 'tool']) {
+      await page.locator('[data-shot-source=kind]').selectOption(kind);
+      const selector = kind === 'aigc' ? '.aigc-prompt-row' : '.tool-upload-options';
+      await page.locator(selector).waitFor();
+      await page.setViewportSize({width:1920,height:1000});
+      const layout = await page.locator(selector).evaluate((row) => {
+        const r=row.getBoundingClientRect();
+        return {width:r.width,scrollWidth:row.scrollWidth,fields:[...row.children].map((node)=>{const r=node.getBoundingClientRect();return {top:r.top,left:r.left,right:r.right};})};
+      });
+      assert.equal(layout.fields.length, kind === 'aigc' ? 3 : 2);
+      assert(layout.fields.every((f)=>Math.abs(f.top-layout.fields[0].top)<2), `${kind}: 控件应同行`);
+      assert(layout.scrollWidth<=layout.width+1);
+      await page.locator('#stage-panel').screenshot({path:process.env.MINDEX_GROUPS_OUTPUT+'/source-'+kind+'-wide.png'});
+      await audit('groups-source-'+kind);
+    }
     await page.evaluate(() => { state.drafts.delete(draftKey(order()[0])); openStage(order()[0], 'tts'); });
     await page.locator('.music-editor > label select').first().selectOption('library');
     // 分镜选曲的音乐组筛选（复选框样式）同样默认全选。

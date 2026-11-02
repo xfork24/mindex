@@ -438,3 +438,19 @@ textarea.code-editor { width: 100%; min-height: 360px; font-family: ui-monospace
 .recall-scope-options>.group-picker,.recall-scope-options>.recall-material-field{flex:0 1 auto;width:max-content;max-width:100%}
 .recall-scope-options .recall-person-list{flex:0 1 auto;width:max-content;max-width:100%}
 .recall-scope-options .recall-person-choice{flex:0 1 auto;width:max-content;max-width:100%}
+
+/* 逐镜编辑的整行字段按比例分配全部宽度；窄面板仅在行内滚动，保持控件同行。 */
+.editor-stretch-row{display:grid;grid-auto-flow:column;gap:12px;width:100%;min-width:0;max-width:100%;flex-basis:100%;align-items:start;overflow-x:auto;padding-bottom:4px}
+.editor-stretch-row .form-field{width:100%;min-width:0;max-width:100%;margin:0}
+.editor-stretch-row :is(input,select,textarea,.multi-select){box-sizing:border-box;width:100%;min-width:0;max-width:100%}
+.shot-editor-fields.editor-stretch-row{grid-template-columns:repeat(3,minmax(160px,1fr)) minmax(100px,.55fr) minmax(110px,.55fr)}
+.shot-editor-fields .visual-rewrite{align-self:end;min-width:0}
+.shot-editor-fields .visual-rewrite button{width:100%;white-space:normal}
+.recall-primary-options.editor-stretch-row{grid-template-columns:repeat(3,minmax(150px,1fr))}
+.recall-scope-options.editor-stretch-row{grid-template-columns:minmax(160px,1.5fr) repeat(2,minmax(140px,1.2fr)) repeat(2,minmax(130px,1fr))}
+.recall-filters.editor-stretch-row{grid-template-columns:repeat(3,minmax(140px,1.2fr)) repeat(2,minmax(110px,1fr))}
+.aigc-prompt-row.editor-stretch-row{grid-template-columns:repeat(2,minmax(200px,2fr)) minmax(120px,1fr)}
+.tool-upload-options.editor-stretch-row{grid-template-columns:repeat(2,minmax(280px,1fr))}
+.tool-upload-options .media-slot{min-width:0}
+.tool-upload-options .recall-upload-row{flex-wrap:nowrap}
+.tool-upload-options .recall-file-field{flex:1;min-width:0}

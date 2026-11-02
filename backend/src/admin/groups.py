@@ -49,8 +49,8 @@ def groups_router(store):
             raise HTTPException(422, str(exc)) from exc
 
     @router.get("/groups")
-    def list_groups(type: GroupType):
-        return {"items": groups.list(type)}
+    def list_groups(type: GroupType, include_members: bool = False):
+        return {"items": groups.list(type, include_members=include_members)}
 
     @router.post("/groups", status_code=201)
     def create(body: GroupBody):

@@ -444,3 +444,35 @@ def test_uncategorized_reserved_name_migration(data):
     assert groups.get(group_id)['name'] == '未分类（自定义）'
     assert groups.resolve('source', [group_id]) == {'a'}
     assert len([group for group in groups.list('source') if group['name'] == '未分类']) == 1
+
+
+@pytest.mark.parametrize("kind", ["source", "music"])
+def test_filter_catalogue_members_are_bulk_loaded_and_current(data, monkeypatch, kind):
+    config, store, groups = data
+    first = groups.save(kind, "目录一")["id"]
+    empty = groups.save(kind, "目录空组")["id"]
+    member = "a" if kind == "source" else "1" * 64
+    groups.change_members(first, [member])
+    connect = store.connect
+    calls = []
+
+    def counted():
+        calls.append(True)
+        return connect()
+
+    monkeypatch.setattr(store, "connect", counted)
+    rows = {row["id"]: row for row in groups.list(kind, include_members=True)}
+    assert len(calls) == 1  # 组数增长不增加连接数，也不读取源媒体的完整元信息。
+    assert rows[first]["member_ids"] == [member]
+    assert rows[empty]["member_ids"] == []
+    assert member not in rows[f"ungrouped-{kind}"]["member_ids"]
+    assert all(row["member_count"] == len(row["member_ids"]) for row in rows.values())
+    assert all("member_ids" not in row for row in groups.list(kind))
+
+    client = TestClient(create_app(config))
+    url = f"/api/admin/groups?type={kind}&include_members=true"
+    assert client.get(url).status_code == 200
+    groups.change_members(first, [member], remove=True)
+    fresh = {row["id"]: row for row in client.get(url).json()["items"]}
+    assert fresh[first]["member_ids"] == []
+    assert member in fresh[f"ungrouped-{kind}"]["member_ids"]

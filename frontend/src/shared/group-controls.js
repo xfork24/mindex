@@ -1,6 +1,25 @@
 (function () {
   'use strict';
   const api = (...args) => window.MindexApi.json(...args);
+  // 同页共享目录与在途请求。成员随目录加载，筛选切换不再等待解析接口。
+  const catalogues = new Map();
+  function catalogue(kind, fresh = false) {
+    if (fresh && !catalogues.get(kind)?.pending) catalogues.delete(kind);
+    const cached = catalogues.get(kind);
+    if (cached && (cached.pending || Date.now() - cached.time < 15000)) return cached.request;
+    const entry = {pending: true, time: 0};
+    entry.request = api(`/api/admin/groups?type=${kind}${kind === 'source' ? '&include_members=true' : ''}`)
+      .then((result) => { entry.pending = false; entry.time = Date.now(); return result; })
+      .catch((error) => { if (catalogues.get(kind) === entry) catalogues.delete(kind); throw error; });
+    catalogues.set(kind, entry);
+    return entry.request;
+  }
+  for (const event of ['mindex:groups-changed', 'mindex:agent-mutation']) {
+    window.addEventListener(event, (e) => {
+      if (event === 'mindex:agent-mutation' && !e.detail?.groups) return;
+      catalogues.clear();
+    });
+  }
   // defaultAll：筛选类控件默认全选；全选视为“不限”（values 返回空，不写入筛选/保存值），
   // 与任务创建“全选=不限”的既有约定一致。归属编辑（membership）不传该选项。
   function picker(kind, selected = [], changed = () => {}, key, {listbox = false, includeSystem = true, defaultAll = false} = {}) {
@@ -24,7 +43,7 @@
       MindexMultiSearch.attach(select);
     }
     const listeners = new Set();
-    let selectedIds = [...new Set(selected)], items = [], disabled = false, loading = true, loaded = false;
+    let selectedIds = [...new Set(selected)], items = [], disabled = false, loading = true, loaded = false, refreshGeneration = 0;
     const coversAll = (ids) => defaultAll && items.length > 0 && items.every((group) => ids.includes(group.id));
     const values = () => coversAll(selectedIds) ? [] : [...selectedIds];
     function syncDisabled() {
@@ -116,22 +135,38 @@
       if (select) MindexMultiSearch.refilter(select);
       syncDisabled();
     }
-    async function refresh() {
+    async function refresh({fresh = true} = {}) {
+      const current = ++refreshGeneration;
       loading = true; syncDisabled();
       // defaultAll：从未选择过则取全选默认；原选择已覆盖全部组时刷新后保持全选（新增组不改变“不限”）。
       const keepAll = defaultAll && items.length > 0 && items.every((group) => selectedIds.includes(group.id));
       try {
-        const result = await api(`/api/admin/groups?type=${kind}`);
+        const result = await catalogue(kind, fresh);
+        if (current !== refreshGeneration) return;
         items = result.items.filter((group) => includeSystem || !group.system); loaded = true;
         if (defaultAll && (keepAll || selectedIds.length === 0)) selectedIds = items.map((group) => group.id);
         MindexI18n.setText(status, '');
       } catch (error) {
+        if (current !== refreshGeneration) return;
+        loaded = false;
         MindexI18n.setText(status, MindexI18n.system(error.message));
-      } finally { loading = false; draw(); }
+      } finally { if (current === refreshGeneration) { loading = false; draw(); } }
     }
     draw();
-    const ready = refresh();
-    return {wrap, ready, values, refresh, onChange: (listener) => listeners.add(listener), setDisabled: (value) => {
+    const ready = refresh({fresh: false});
+    return {wrap, ready, values, refresh, resolveSources: () => {
+      if (!loaded) throw new Error(MindexI18n.msg('ui.groups_loading'));
+      const ids = values();
+      if (!ids.length) return null;
+      const allowed = new Set();
+      for (const id of ids) {
+        const group = items.find((item) => item.id === id);
+        // 已删除的选择不能扩大为全库。
+        if (!group) throw new Error(MindexI18n.msg('ui.groups_missing_choice'));
+        for (const member of group.member_ids || []) allowed.add(member);
+      }
+      return allowed;
+    }, onChange: (listener) => listeners.add(listener), setDisabled: (value) => {
       disabled = value; syncDisabled();
     }, setValues: (ids) => {
       const next = [...new Set(ids)];
@@ -182,7 +217,9 @@
       const current = ++generation;
       select.disabled = true;
       try {
-        const allowed = await resolveSources(control.values());
+        // 目录未就绪时只等首个请求；后续切换同步使用缓存的成员关系。
+        await control.ready;
+        const allowed = control.resolveSources ? control.resolveSources() : await resolveSources(control.values());
         if (current !== generation || !select.isConnected) return;
         onScope(allowed);
         const choices = entries().filter((item) => allowed === null || allowed.has(item.id));
@@ -197,7 +234,21 @@
       }
     }
     control.onChange(refresh);
-    return {refresh};
+    async function reload({fresh = true} = {}) {
+      if (!select.isConnected) return;
+      if (control.refresh) await control.refresh({fresh});
+      await refresh();
+    }
+    if (control.refresh) {
+      window.addEventListener('mindex:groups-changed', () => { void reload(); });
+      window.addEventListener('mindex:agent-mutation', (event) => {
+        if (event.detail?.groups) void reload();
+      });
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') void reload();
+      });
+    }
+    return {refresh: reload};
   }
   window.MindexGroups = {picker, membership, resolveSources, linkSources};
 })();

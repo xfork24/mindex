@@ -222,9 +222,13 @@ function renderToolEditor(section, sid, draft, markDirty, redraw) {
     list.append(row);
   });
   section.append(el("h4", MindexI18n.msg("ui.tool_uploads", { p0: uploads.length })), list);
-  if (uploads.length < 4) for (const kind of ["image", "video"])
-  section.append(mediaSlot(sid, draft, "tool", kind, MindexI18n.msg("ui.video_ref_add_" + kind), null,
-    (id) => setSource({ uploads: [...(draft.data.source.uploads || []), { kind, media_id: id }] }), redraw));
+  if (uploads.length < 4) {
+    const uploadRow = el("div", "", "tool-upload-options editor-stretch-row");
+    for (const kind of ["image", "video"])
+    uploadRow.append(mediaSlot(sid, draft, "tool", kind, MindexI18n.msg("ui.video_ref_add_" + kind), null,
+      (id) => setSource({ uploads: [...(draft.data.source.uploads || []), { kind, media_id: id }] }), redraw));
+    section.append(uploadRow);
+  }
   if (value.output === "image") section.append(motionOptions(draft, markDirty));
 }
 // AIGC 来源：提示词（缺省用画面意象，再缺省用召回查询）、反向提示词、种子与可选的首帧参考图。
@@ -262,7 +266,7 @@ function renderAigcEditor(section, sid, draft, markDirty, redraw) {
     draft.data.source.seed = raw === "" || !Number.isInteger(number) || number < 0 ? null : number;
     markDirty();
   });
-  const promptRow = el("div", "", "source-options");
+  const promptRow = el("div", "", "source-options aigc-prompt-row editor-stretch-row");
   promptRow.append(prompt.wrap, negative.wrap, seed.wrap);
   section.append(promptRow);
   const setSource = (patch) => {
@@ -600,7 +604,7 @@ function renderRecallEditor(body, sid, draft, overrides) {
       commit(next);
       draw();
     });
-    const primaryOptions = el("div", "", "recall-primary-options");
+    const primaryOptions = el("div", "", "recall-primary-options editor-stretch-row");
     primaryOptions.append(modeField.wrap, overrides);
     section.append(primaryOptions);
     const personOptions = el("div", "", "recall-person-options");
@@ -730,7 +734,7 @@ function renderRecallEditor(body, sid, draft, overrides) {
       refreshPersons(next);
       commit(next);
     });
-    const scopeOptions = el("div", "", "recall-scope-options");
+    const scopeOptions = el("div", "", "recall-scope-options editor-stretch-row");
     scopeOptions.append(sourceField.wrap, personOptions);
     // 历史分镜已保存的组限制仍参与范围解析，此处仅提供素材范围控件。
     const sourceLink = MindexGroups.linkSources({
@@ -746,7 +750,7 @@ function renderRecallEditor(body, sid, draft, overrides) {
     });
     queueMicrotask(() => { if (scopeOptions.isConnected) void sourceLink.refresh(); });
     section.append(scopeOptions);
-    const filters = el("div", "", "recall-filters");
+    const filters = el("div", "", "recall-filters editor-stretch-row");
     for (const [key, label, placeholder, type] of [
       ["scene", "ui.625b392c7b8a", "ui.722889427cbf", "text"],
       ["emotion", "ui.61fe61644a75", "ui.d637fe8494d8", "text"],
@@ -792,7 +796,7 @@ function renderShotEditor(body, sid) {
     };
     state.drafts.set(draftKey(sid), draft);
   }
-  const fields = el("div", "", "shot-editor-fields");
+  const fields = el("div", "", "shot-editor-fields editor-stretch-row");
   const inputs = {};
   for (const [name, label, type] of [
   ["text", MindexI18n.msg("ui.58c9fb9115f5"), "textarea"],

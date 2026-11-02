@@ -25,8 +25,11 @@ const sources = [
   {id: 's1', name: '素材一', work_id: 'w1'}, {id: 's1b', name: '素材一第二集', work_id: 'w1'},
   {id: 's2', name: '素材二', work_id: 'w2'}, {id: 'empty', name: '空素材', work_id: 'empty'},
 ];
+let groupSelection = [], groupRefreshes = 0;
 const context = vm.createContext({
-  $: get, registeredPeople: people, registeredSources: sources, sourceScope: null, mode: 'text',
+  $: get, registeredPeople: people, registeredSources: sources, sourceScope: null, groupSourceScope: null, mode: 'text',
+  searchGroups: {values: () => groupSelection, setValues: ids => {groupSelection = [...ids];}},
+  searchGroupLink: {refresh: async () => {groupRefreshes++;}},
   element: () => ({selected: false}),
   MindexI18n: {msg: k => k, setText() {}},
   MindexMultiSearch: {sort: e => e, attach() {}, refilter() {}},
@@ -40,7 +43,13 @@ function choose(id, ids) {
   for (const o of get(id).options) o.selected = ids.includes(o.value);
   get(id).listeners.change();
 }
-function reset() {get('filter-reset').onclick();}
+function reset() {
+  const previousRefreshes = groupRefreshes;
+  get('filter-reset').onclick();
+  assert.deepEqual(groupSelection, [], 'reset clears the group filter');
+  assert.equal(context.groupSourceScope, null, 'reset clears the resolved group scope');
+  assert.equal(groupRefreshes, previousRefreshes + 1, 'reset refreshes the linked source options');
+}
 reset();
 assert.deepEqual(picked('source'), ['empty', 's1', 's1b', 's2']);
 assert.deepEqual(values('actor-select'), ['a', 'b', 'c', 'unused']);
@@ -102,7 +111,15 @@ choose('actor-select', ['c']);
 context.mode = 'image';
 context.fillSearchFilters();
 assert.deepEqual(values('source'), ['empty', 's1', 's1b', 's2'], 'hidden person controls do not narrow image/video materials');
-console.log('Search cascading filter checks passed');
+groupSelection = ['group-two'];
+context.mode = 'text';
+context.groupSourceScope = new Set(['s2']);
+context.fillSearchFilters();
+assert.deepEqual(values('source'), ['s2'], 'group membership narrows available materials');
+assert.deepEqual(values('actor-select'), ['b', 'c'], 'people follow the selected group scope');
+assert.deepEqual(values('role-select'), ['r2']);
+reset();
+assert.deepEqual(values('source'), ['empty', 's1', 's1b', 's2'], 'reset restores materials outside the previous group');
 
 reset();
 choose('source', []);
@@ -128,4 +145,5 @@ choose('source', []);
   assert.equal(prevented, true);
   assert.equal(notices.at(-1).message, 'ui.search_source_required');
   assert.equal(notices.at(-1).kind, 'error');
+  console.log('Search cascading filter checks passed');
 })().catch(error => {console.error(error);process.exitCode = 1;});
