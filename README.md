@@ -39,6 +39,8 @@ The local application handles media processing, storage, API, and UI on your own
 
 ## Features in Depth
 
+Screenshots are shown one at a time; click any thumbnail to open the full-size image.
+
 ### Media Library, AI Analysis, and Person Management
 
 Every imported source is decomposed locally: shot detection (adaptive by default, TransNetV2 optional), cutting, thumbnails, and checkpointed processing. Dialogue, visual analysis, and person recognition run as independent stages — you can use the library before all of them complete, and resume any failed stage by re-running the same command.
@@ -47,70 +49,37 @@ Every imported source is decomposed locally: shot detection (adaptive by default
 
 Shots are the working unit of the library: browse them per source, inspect time ranges and boundaries, and read the AI analysis of each — action, scene, emotion, shot type, and more — without triggering new inference.
 
-<table>
-<tr><th>Shot management</th><th>Per-shot AI analysis</th></tr>
-<tr>
-<td width="50%"><a href="docs/assets/admin-shots.png"><img src="docs/assets/admin-shots.png" alt="Shot grid with thumbnails, time ranges, and boundaries"></a></td>
-<td width="50%"><a href="docs/assets/admin-shot-analysis.png"><img src="docs/assets/admin-shot-analysis.png" alt="Structured visual analysis of a single shot"></a></td>
-</tr>
-</table>
+![Shot management: shot grid with thumbnails, time ranges, and boundaries](docs/assets/admin-shots.png)
 
-<details>
-<summary>Background music library and source groups</summary>
-
-![Background music library management](docs/assets/admin-music.png)
-
-![Source group management](docs/assets/admin-groups.png)
-
-</details>
+<p align="center">
+<a href="docs/assets/admin-shot-analysis.png"><img src="docs/assets/admin-shot-analysis.png" width="150" alt="Per-shot AI analysis result"></a>
+<a href="docs/assets/admin-music.png"><img src="docs/assets/admin-music.png" width="150" alt="Background music library"></a>
+<a href="docs/assets/admin-groups.png"><img src="docs/assets/admin-groups.png" width="150" alt="Source group management"></a>
+</p>
 
 **Person management is a first-class subsystem.** Actors and roles are separate identities — a role can appear across multiple titles, and person data is never bound to one source. Import cast tables from images, capture reference frames directly from the source video, run person detection over shots, then review the evidence shot by shot before publishing. Published evidence forms recoverable release combinations with the content index, and stays queryable even when the person model is offline.
 
-<table>
-<tr><th>Actors and roles</th><th>Appearance detection and evidence review</th></tr>
-<tr>
-<td width="50%"><a href="docs/assets/persons-actors-roles.png"><img src="docs/assets/persons-actors-roles.png" alt="Person library with actor and role cards, reference images, and works"></a></td>
-<td width="50%"><a href="docs/assets/persons-appearance-detection.png"><img src="docs/assets/persons-appearance-detection.png" alt="Automatic person appearance detection with evidence per shot"></a></td>
-</tr>
-</table>
+![Person library: actor and role cards, reference images, and works](docs/assets/persons-actors-roles.png)
 
-<details>
-<summary>Cast-table import</summary>
-
-Cast-list images are decomposed into actor and role entries; you verify names, reference boxes, and identity matches before anything enters the library.
-
-![Cast table import with entry review](docs/assets/persons-cast-import.png)
-
-</details>
+<p align="center">
+<a href="docs/assets/persons-appearance-detection.png"><img src="docs/assets/persons-appearance-detection.png" width="150" alt="Appearance detection with per-shot evidence review"></a>
+<a href="docs/assets/persons-cast-import.png"><img src="docs/assets/persons-cast-import.png" width="150" alt="Cast-table import with entry review"></a>
+</p>
 
 ### Multimodal Retrieval
 
 Text queries run over three channels — visual, dialogue, and analysis — each fusing semantic vectors with BM25, then merged with RRF under configurable channel weights. Queries can describe actions, objects, scenes, emotions, and shot types ("a sad close-up", "riding a white horse"), optionally constrained to selected people, with a clear distinction between a person **appearing on screen** and being **mentioned in dialogue**.
 
-<table>
-<tr><th>Text query with person filter</th><th>Semantic query for objects and scenes</th></tr>
-<tr>
-<td width="50%"><a href="docs/assets/search-text-and-person.png"><img src="docs/assets/search-text-and-person.png" alt="Text search combined with selected people"></a></td>
-<td width="50%"><a href="docs/assets/search-text-and-object.png"><img src="docs/assets/search-text-and-object.png" alt="Text search matching objects and scenes"></a></td>
-</tr>
-</table>
+![Text search combined with a person filter](docs/assets/search-text-and-person.png)
+
+<p align="center">
+<a href="docs/assets/search-text-and-object.png"><img src="docs/assets/search-text-and-object.png" width="150" alt="Semantic query for objects and scenes"></a>
+<a href="docs/assets/search-emotion-closeup.png"><img src="docs/assets/search-emotion-closeup.png" width="150" alt="Emotion and shot-type queries"></a>
+<a href="docs/assets/search-similar-scenes.png"><img src="docs/assets/search-similar-scenes.png" width="150" alt="Similar-scene lookup across sources"></a>
+<a href="docs/assets/search-by-image-or-video.png"><img src="docs/assets/search-by-image-or-video.png" width="150" alt="Image or video similarity search"></a>
+</p>
 
 Image and video queries retrieve visually similar footage from the visual channel alone; query media is never indexed and temporary files are cleaned up.
-
-<table>
-<tr><th>Emotion and shot-type queries</th><th>Image or video similarity search</th></tr>
-<tr>
-<td width="50%"><a href="docs/assets/search-emotion-closeup.png"><img src="docs/assets/search-emotion-closeup.png" alt="Finding emotional close-up shots via text"></a></td>
-<td width="50%"><a href="docs/assets/search-by-image-or-video.png"><img src="docs/assets/search-by-image-or-video.png" alt="Uploading an image or short video to find similar shots"></a></td>
-</tr>
-</table>
-
-<details>
-<summary>Similar-scene lookup</summary>
-
-![Similar scene retrieval across sources](docs/assets/search-similar-scenes.png)
-
-</details>
 
 Results keep their position in the original source, the reason they matched, and person evidence — playable inline or traceable back to the media library. See [retrieval design](docs/search.md) for filter and ranking semantics.
 
@@ -120,15 +89,17 @@ Studio turns an idea into a finished video using your library as raw material. T
 
 **AI-assisted topic mining.** Configure sources (RSS, hot lists, Brave search, calendars, local items), let the pipeline cluster, summarize, and score candidates — timeliness, audience fit, material coverage, novelty, and production cost, with weights you tune per domain profile — then push a selected topic straight into a creation job with outline and references attached.
 
-<table>
-<tr><th>Topic mining</th><th>Topic sources and scoring weights</th></tr>
-<tr>
-<td width="50%"><a href="docs/assets/topics-mining.png"><img src="docs/assets/topics-mining.png" alt="Topic cards with scores from multiple sources"></a></td>
-<td width="50%"><a href="docs/assets/topics-settings.png"><img src="docs/assets/topics-settings.png" alt="Domain profiles with sources and scoring weight settings"></a></td>
-</tr>
-</table>
+![Topic mining: topic cards with scores from multiple sources](docs/assets/topics-mining.png)
 
-**Scripted, storyboarded, shot-by-shot production.** The writer model drafts a script from your outline using a script template (built-in or your own, with optional reference documents), then the storyboard split produces one row per shot. Each shot picks its own visual source:
+<p align="center">
+<a href="docs/assets/topics-settings.png"><img src="docs/assets/topics-settings.png" width="150" alt="Topic sources and scoring weights per domain profile"></a>
+</p>
+
+**Scripted, storyboarded, shot-by-shot production.** The writer model drafts a script from your outline using a script template (built-in or your own, with optional reference documents), then the storyboard split produces one row per shot.
+
+![Storyboard rows with narration, duration, source, and stage status](docs/assets/studio-storyboard.png)
+
+Each shot picks its own visual source:
 
 | Shot source | What it provides |
 | :--- | :--- |
@@ -140,41 +111,22 @@ Studio turns an idea into a finished video using your library as raw material. T
 | AI animation | LLM-authored animation code, recorded frame-by-frame in a sandbox |
 | Third-party tool | Media artifacts fetched from registered HTTP or MCP tools |
 
-![Per-shot source picker covering recall, uploads, and AI generation](docs/assets/studio-shot-sources.png)
-
 **Narration, alignment, render.** TTS voices (with a voice library and cloning) narrate each shot; the timeline editor aligns narration audio against the source video with a fixed-length selection window, frame thumbnails, shot boundaries, and anchors. Renders respect the plan canvas (16:9, 9:16, 1:1), burn or attach subtitles (libass), mix original audio, insert BGM with beat alignment, and compose the final cut.
 
-<table>
-<tr><th>Storyboard editing</th><th>Narration and video alignment</th></tr>
-<tr>
-<td width="50%"><a href="docs/assets/studio-storyboard.png"><img src="docs/assets/studio-storyboard.png" alt="Storyboard rows with narration, duration, source, and stage status"></a></td>
-<td width="50%"><a href="docs/assets/studio-timeline-alignment.png"><img src="docs/assets/studio-timeline-alignment.png" alt="Timeline alignment of narration audio with the video track"></a></td>
-</tr>
-</table>
+![Timeline alignment of narration audio with the video track](docs/assets/studio-timeline-alignment.png)
 
 **Versioned builds with full dependency trees.** Every plan keeps versions per node; edit one shot and only its downstream invalidates. Builds run preflight dependency checks, reuse verified artifacts, and leave failed builds non-destructive. The dependency tree traces each shot of the final video back to its inputs.
 
 ![Dependency tree of a final build, tracing every shot to its input versions](docs/assets/studio-build-dependencies.png)
 
-<details>
-<summary>Creation tasks and the template system</summary>
+Creation jobs are directories with plan records, versions, builds, and inputs — managed from a single task list. Three template families shape output without touching the pipeline: **script templates** control writing style and structure, **style templates** (brands) encode visual style presets, and **delivery templates** snapshot platform rules for multi-aspect export and publish packages.
 
-Creation jobs are directories with plan records, versions, builds, and inputs — managed from a single task list.
-
-![Studio creation task list](docs/assets/studio-jobs.png)
-
-Three template families shape output without touching the pipeline: **script templates** control writing style and structure, **style templates** (brands) encode visual style presets, and **delivery templates** snapshot platform rules for multi-aspect export and publish packages.
-
-<table>
-<tr><th>Script templates</th><th>Delivery templates</th><th>Style templates</th></tr>
-<tr>
-<td width="33%"><a href="docs/assets/studio-script-templates.png"><img src="docs/assets/studio-script-templates.png" alt="Script template management"></a></td>
-<td width="33%"><a href="docs/assets/studio-delivery-templates.png"><img src="docs/assets/studio-delivery-templates.png" alt="Delivery template management with platform rules"></a></td>
-<td width="34%"><a href="docs/assets/studio-style-templates.png"><img src="docs/assets/studio-style-templates.png" alt="Style template settings"></a></td>
-</tr>
-</table>
-
-</details>
+<p align="center">
+<a href="docs/assets/studio-jobs.png"><img src="docs/assets/studio-jobs.png" width="150" alt="Creation task list"></a>
+<a href="docs/assets/studio-script-templates.png"><img src="docs/assets/studio-script-templates.png" width="150" alt="Script template management"></a>
+<a href="docs/assets/studio-delivery-templates.png"><img src="docs/assets/studio-delivery-templates.png" width="150" alt="Delivery template management"></a>
+<a href="docs/assets/studio-style-templates.png"><img src="docs/assets/studio-style-templates.png" width="150" alt="Style template settings"></a>
+</p>
 
 ### Agent Panel
 
@@ -182,20 +134,14 @@ The agent panel is available on every page. It drives search, library curation, 
 
 ![Agent conversation creating a video from the library end to end](docs/assets/agent-create-video-1.png)
 
-<details>
-<summary>Full agent-driven creation session and clip retrieval</summary>
+The session above continues through scripting, per-shot production, and the final build; clip retrieval works the same way.
 
-![Agent session: scripting and storyboard of a new video](docs/assets/agent-create-video-2.png)
-
-![Agent session: per-shot production and narration](docs/assets/agent-create-video-3.png)
-
-![Agent session: final build with video preview](docs/assets/agent-create-video-4.png)
-
-Natural-language clip retrieval with the agent panel.
-
-![Agent retrieving specific video clips](docs/assets/agent-search-clips.png)
-
-</details>
+<p align="center">
+<a href="docs/assets/agent-create-video-2.png"><img src="docs/assets/agent-create-video-2.png" width="150" alt="Agent session: scripting and storyboard"></a>
+<a href="docs/assets/agent-create-video-3.png"><img src="docs/assets/agent-create-video-3.png" width="150" alt="Agent session: per-shot production and narration"></a>
+<a href="docs/assets/agent-create-video-4.png"><img src="docs/assets/agent-create-video-4.png" width="150" alt="Agent session: final build with video preview"></a>
+<a href="docs/assets/agent-search-clips.png"><img src="docs/assets/agent-search-clips.png" width="150" alt="Agent retrieving specific video clips"></a>
+</p>
 
 The agent layer is harness-compatible: it runs on the **built-in harness** or on **DeepSeek Harness** (`uv sync --extra dsh`), and exports its tools via MCP for external harnesses — see [API and Agent](#api-and-agent).
 
@@ -203,24 +149,15 @@ The agent layer is harness-compatible: it runs on the **built-in harness** or on
 
 Twelve model roles are configured independently — multimodal understanding, script writing, storyboard splitting, embedding, ASR, TTS, image, video, and music generation, animation, person recognition, and the agent itself. Each role holds multiple named profiles with one active; profiles connect to self-hosted HTTP services or adapted cloud providers (Zhipu AI, DeepSeek, Alibaba Cloud, Tencent Cloud TokenHub, MiniMax, Anthropic), and saving takes effect immediately for the web app and CLI alike.
 
-<table>
-<tr><th>Model roles and agent harness</th><th>Recall weights, voices, services, tools</th></tr>
-<tr>
-<td width="50%"><a href="docs/assets/settings-models-harness.png"><img src="docs/assets/settings-models-harness.png" alt="Settings page with model role cards and harness selector"></a></td>
-<td width="50%"><a href="docs/assets/settings-weights-voices-services.png"><img src="docs/assets/settings-weights-voices-services.png" alt="Recall weights, voice library, local services, and tool management"></a></td>
-</tr>
-</table>
+![Settings page with model role cards and harness selector](docs/assets/settings-models-harness.png)
+
+<p align="center">
+<a href="docs/assets/settings-weights-voices-services.png"><img src="docs/assets/settings-weights-voices-services.png" width="150" alt="Recall weights, voice library, local services, and tool management"></a>
+<a href="docs/assets/settings-model-card.png"><img src="docs/assets/settings-model-card.png" width="150" alt="Model profile card"></a>
+<a href="docs/assets/settings-model-config.png"><img src="docs/assets/settings-model-config.png" width="150" alt="Custom model profile configuration"></a>
+</p>
 
 Retrieval behavior is tunable at runtime: channel weights for the visual / dialogue / analysis fusion (default 0.35 : 0.15 : 0.5), RRF parameters, and candidate counts — applied per request without rebuilding the index. Topic scoring weights and coverage verification thresholds are set per domain profile.
-
-<details>
-<summary>Model profile cards and configuration</summary>
-
-![Model profile card with provider and connection fields](docs/assets/settings-model-card.png)
-
-![Custom model profile configuration](docs/assets/settings-model-config.png)
-
-</details>
 
 The UI ships bilingual (Chinese/English) with a dark theme.
 

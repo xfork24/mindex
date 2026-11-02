@@ -19,7 +19,6 @@
 | `persons-appearance-detection.png` | 2.8-自动识别人物出镜.png |
 | `studio-jobs.png` | 3.1-视频创作任务.png |
 | `studio-storyboard.png` | 3.2-管理视频创作分镜.png |
-| `studio-shot-sources.png` | 3.3-支持多种视频分镜来源方式.png |
 | `studio-timeline-alignment.png` | 3.4-文案、音频与视频对齐.png |
 | `studio-build-dependencies.png` | 3.5-最终成片版本依赖细节.png |
 | `topics-mining.png` | 3.6-AI辅助选题.png |

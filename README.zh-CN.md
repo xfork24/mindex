@@ -38,6 +38,8 @@ Mindex 把海量视频的管理、理解、检索与再创作连接在同一个�
 
 ## 功能详细介绍
 
+截图均为单张展示；点击缩略图可查看大图。
+
 ### 素材库、AI 分析与人物管理
 
 每个导入的素材在本地完成分解：镜头检测（默认本地 AdaptiveDetector，可选 TransNetV2）、切片、缩略图与检查点化处理。对白、视觉分析与人物识别是相互独立的阶段——不必等全部完成就能开始使用素材库，失败阶段重跑同一命令即可恢复。
@@ -46,70 +48,37 @@ Mindex 把海量视频的管理、理解、检索与再创作连接在同一个�
 
 镜头是素材库的工作单元：按素材浏览镜头、查看时间区间与边界、阅读每个镜头的 AI 分析（动作、场景、情绪、景别等）——查看内容不会触发新的模型推理。
 
-<table>
-<tr><th>镜头管理</th><th>镜头 AI 分析结果</th></tr>
-<tr>
-<td width="50%"><a href="docs/assets/admin-shots.png"><img src="docs/assets/admin-shots.png" alt="镜头网格：缩略图、时间区间与边界"></a></td>
-<td width="50%"><a href="docs/assets/admin-shot-analysis.png"><img src="docs/assets/admin-shot-analysis.png" alt="单个镜头的结构化视觉分析"></a></td>
-</tr>
-</table>
+![镜头管理：缩略图、时间区间与边界](docs/assets/admin-shots.png)
 
-<details>
-<summary>背景音乐曲库与素材分组</summary>
-
-![背景音乐曲库管理](docs/assets/admin-music.png)
-
-![素材分组管理](docs/assets/admin-groups.png)
-
-</details>
+<p align="center">
+<a href="docs/assets/admin-shot-analysis.png"><img src="docs/assets/admin-shot-analysis.png" width="150" alt="镜头 AI 分析结果"></a>
+<a href="docs/assets/admin-music.png"><img src="docs/assets/admin-music.png" width="150" alt="背景音乐曲库管理"></a>
+<a href="docs/assets/admin-groups.png"><img src="docs/assets/admin-groups.png" width="150" alt="素材分组管理"></a>
+</p>
 
 **人物管理是一等公民子系统。** 演员与角色分别建模——角色可跨作品复用，人物资料不绑定具体素材。从图片导入演员表、直接在原片中截取参考帧、对镜头跑人物识别，再逐镜审核出镜证据后发布。已发布证据与内容索引组成可恢复的发布组合，人物模型离线时仍能查询。
 
-<table>
-<tr><th>演员与角色管理</th><th>出镜识别与证据审核</th></tr>
-<tr>
-<td width="50%"><a href="docs/assets/persons-actors-roles.png"><img src="docs/assets/persons-actors-roles.png" alt="人物库：演员/角色卡片、参考图与作品"></a></td>
-<td width="50%"><a href="docs/assets/persons-appearance-detection.png"><img src="docs/assets/persons-appearance-detection.png" alt="自动人物出镜识别与逐镜证据"></a></td>
-</tr>
-</table>
+![人物库：演员/角色卡片、参考图与作品](docs/assets/persons-actors-roles.png)
 
-<details>
-<summary>演员表导入</summary>
-
-从 cast 表图片拆出演员与角色条目，核对姓名、参考框与身份匹配后才入库。
-
-![演员表导入与条目核对](docs/assets/persons-cast-import.png)
-
-</details>
+<p align="center">
+<a href="docs/assets/persons-appearance-detection.png"><img src="docs/assets/persons-appearance-detection.png" width="150" alt="出镜识别与逐镜证据审核"></a>
+<a href="docs/assets/persons-cast-import.png"><img src="docs/assets/persons-cast-import.png" width="150" alt="演员表导入与条目核对"></a>
+</p>
 
 ### 多模态检索
 
 文字查询按画面、对白、分析三渠道独立召回——各渠道内部融合语义向量与 BM25，再按可配置的渠道权重做 RRF 合并。查询可以描述动作、物体、场景、情绪与景别（"悲伤的特写"、"骑白马"），可限定所选人物，并明确区分**人物实际出镜**与**对白中被提及**。
 
-<table>
-<tr><th>文字查询 + 人物筛选</th><th>物体与场景语义查询</th></tr>
-<tr>
-<td width="50%"><a href="docs/assets/search-text-and-person.png"><img src="docs/assets/search-text-and-person.png" alt="文字检索结合人物筛选"></a></td>
-<td width="50%"><a href="docs/assets/search-text-and-object.png"><img src="docs/assets/search-text-and-object.png" alt="文字检索匹配物体与场景"></a></td>
-</tr>
-</table>
+![文字检索结合人物筛选](docs/assets/search-text-and-person.png)
+
+<p align="center">
+<a href="docs/assets/search-text-and-object.png"><img src="docs/assets/search-text-and-object.png" width="150" alt="物体与场景语义查询"></a>
+<a href="docs/assets/search-emotion-closeup.png"><img src="docs/assets/search-emotion-closeup.png" width="150" alt="情绪与景别查询"></a>
+<a href="docs/assets/search-similar-scenes.png"><img src="docs/assets/search-similar-scenes.png" width="150" alt="跨素材的相似场景检索"></a>
+<a href="docs/assets/search-by-image-or-video.png"><img src="docs/assets/search-by-image-or-video.png" width="150" alt="以图片或视频检索"></a>
+</p>
 
 图片与视频查询只走画面渠道检索相似画面；查询媒体不入库，临时文件即时清理。
-
-<table>
-<tr><th>情绪与景别查询</th><th>以图片或视频检索</th></tr>
-<tr>
-<td width="50%"><a href="docs/assets/search-emotion-closeup.png"><img src="docs/assets/search-emotion-closeup.png" alt="用一句话找到情绪特写镜头"></a></td>
-<td width="50%"><a href="docs/assets/search-by-image-or-video.png"><img src="docs/assets/search-by-image-or-video.png" alt="上传图片或短视频查找相似镜头"></a></td>
-</tr>
-</table>
-
-<details>
-<summary>相似场景查找</summary>
-
-![跨素材的相似场景检索](docs/assets/search-similar-scenes.png)
-
-</details>
 
 结果保留原片位置、命中原因与人物证据——可直接播放，也可回到素材库继续整理。筛选与排名语义见[检索设计](docs/search.md)。
 
@@ -119,15 +88,17 @@ Studio 用你自己的素材库把一个想法变成成片。工作流为选题�
 
 **AI 辅助选题。** 配置选题来源（RSS、热榜、Brave 搜索、日历、本地条目），管线自动聚类、摘要并为候选打分——时效、受众匹配、素材覆盖、去重、制作成本五个维度，权重按领域档案自行调整——选定主题即可带着大纲和参考文稿一键创建创作任务。
 
-<table>
-<tr><th>选题挖掘</th><th>选题来源与打分权重</th></tr>
-<tr>
-<td width="50%"><a href="docs/assets/topics-mining.png"><img src="docs/assets/topics-mining.png" alt="多来源选题卡片与评分"></a></td>
-<td width="50%"><a href="docs/assets/topics-settings.png"><img src="docs/assets/topics-settings.png" alt="领域档案的来源与打分权重设置"></a></td>
-</tr>
-</table>
+![选题挖掘：多来源选题卡片与评分](docs/assets/topics-mining.png)
 
-**从文案到逐镜生产。** 文案创作模型按所选文案模板（内置或自建，可附参考文稿）从大纲写出可编辑的文案，拆分镜后每镜一行。每个分镜独立选择画面来源：
+<p align="center">
+<a href="docs/assets/topics-settings.png"><img src="docs/assets/topics-settings.png" width="150" alt="选题来源与打分权重设置"></a>
+</p>
+
+**从文案到逐镜生产。** 文案创作模型按所选文案模板（内置或自建，可附参考文稿）从大纲写出可编辑的文案，拆分镜后每镜一行。
+
+![分镜编辑：旁白、时长、来源与阶段状态](docs/assets/studio-storyboard.png)
+
+每个分镜独立选择画面来源：
 
 | 分镜来源 | 提供什么 |
 | :--- | :--- |
@@ -139,41 +110,22 @@ Studio 用你自己的素材库把一个想法变成成片。工作流为选题�
 | AI 动画 | LLM 编写动画代码，沙箱逐帧录制 |
 | 第三方工具 | 从登记的 HTTP 或 MCP 工具获取媒体产物 |
 
-![逐镜画面来源选择：召回、上传与多种 AI 生成方式](docs/assets/studio-shot-sources.png)
-
 **配音、对齐、渲染。** TTS 音色（含音色库与克隆）为每镜配音；时间轴编辑器以定长选片窗口在原片上对齐配音与画面，带帧缩略图、镜头边界与参考锚点。渲染遵循方案画幅（16:9、9:16、1:1），烧录或挂载字幕（libass）、混入原声、按提示点插入 BGM 并支持节拍对齐，最后合成成片。
 
-<table>
-<tr><th>分镜编辑</th><th>文案配音与画面对齐</th></tr>
-<tr>
-<td width="50%"><a href="docs/assets/studio-storyboard.png"><img src="docs/assets/studio-storyboard.png" alt="分镜行：旁白、时长、来源与阶段状态"></a></td>
-<td width="50%"><a href="docs/assets/studio-timeline-alignment.png"><img src="docs/assets/studio-timeline-alignment.png" alt="时间轴上对齐配音音频与视频轨道"></a></td>
-</tr>
-</table>
+![时间轴上对齐配音音频与视频轨道](docs/assets/studio-timeline-alignment.png)
 
 **版本化构建与完整依赖树。** 每个方案的每个节点都有版本；改一镜只作废其下游闭包。构建前做依赖预检，复用校验一致的产物，失败构建不破坏已有成片。依赖树把成片的每个分镜追溯回它的输入版本。
 
 ![成片构建的依赖树，逐镜追溯输入版本](docs/assets/studio-build-dependencies.png)
 
-<details>
-<summary>创作任务与模板体系</summary>
+创作任务是独立目录（方案记录、版本、构建与输入素材），在统一的任务列表中管理。三类模板从外部塑造产出而不改动管线：**文案模板**控制写作风格与结构，**风格模板**（品牌）沉淀视觉风格预设，**交付模板**固化平台规则快照，用于多画幅导出与发布包。
 
-创作任务是独立目录（方案记录、版本、构建与输入素材），在统一的任务列表中管理。
-
-![Studio 创作任务列表](docs/assets/studio-jobs.png)
-
-三类模板从外部塑造产出而不改动管线：**文案模板**控制写作风格与结构，**风格模板**（品牌）沉淀视觉风格预设，**交付模板**固化平台规则快照，用于多画幅导出与发布包。
-
-<table>
-<tr><th>文案模板</th><th>交付模板</th><th>风格模板</th></tr>
-<tr>
-<td width="33%"><a href="docs/assets/studio-script-templates.png"><img src="docs/assets/studio-script-templates.png" alt="文案模板管理"></a></td>
-<td width="33%"><a href="docs/assets/studio-delivery-templates.png"><img src="docs/assets/studio-delivery-templates.png" alt="交付模板与平台规则管理"></a></td>
-<td width="34%"><a href="docs/assets/studio-style-templates.png"><img src="docs/assets/studio-style-templates.png" alt="风格模板设置"></a></td>
-</tr>
-</table>
-
-</details>
+<p align="center">
+<a href="docs/assets/studio-jobs.png"><img src="docs/assets/studio-jobs.png" width="150" alt="创作任务列表"></a>
+<a href="docs/assets/studio-script-templates.png"><img src="docs/assets/studio-script-templates.png" width="150" alt="文案模板管理"></a>
+<a href="docs/assets/studio-delivery-templates.png"><img src="docs/assets/studio-delivery-templates.png" width="150" alt="交付模板与平台规则管理"></a>
+<a href="docs/assets/studio-style-templates.png"><img src="docs/assets/studio-style-templates.png" width="150" alt="风格模板设置"></a>
+</p>
 
 ### Agent 面板
 
@@ -181,20 +133,14 @@ Agent 面板出现在每个页面。它用自然语言驱动检索、素材整�
 
 ![Agent 对话：端到端地从素材库制作一支视频](docs/assets/agent-create-video-1.png)
 
-<details>
-<summary>完整的 Agent 创作会话与片段检索</summary>
+上面的会话接下来会经历写文案、拆分镜、逐镜生产与最终构建；片段检索的工作方式相同。
 
-![Agent 会话：为新视频写文案并拆分镜](docs/assets/agent-create-video-2.png)
-
-![Agent 会话：逐镜生产与配音](docs/assets/agent-create-video-3.png)
-
-![Agent 会话：最终构建与成片预览](docs/assets/agent-create-video-4.png)
-
-用自然语言让 Agent 检索特定视频片段。
-
-![Agent 检索特定视频片段](docs/assets/agent-search-clips.png)
-
-</details>
+<p align="center">
+<a href="docs/assets/agent-create-video-2.png"><img src="docs/assets/agent-create-video-2.png" width="150" alt="Agent 会话：写文案并拆分镜"></a>
+<a href="docs/assets/agent-create-video-3.png"><img src="docs/assets/agent-create-video-3.png" width="150" alt="Agent 会话：逐镜生产与配音"></a>
+<a href="docs/assets/agent-create-video-4.png"><img src="docs/assets/agent-create-video-4.png" width="150" alt="Agent 会话：最终构建与成片预览"></a>
+<a href="docs/assets/agent-search-clips.png"><img src="docs/assets/agent-search-clips.png" width="150" alt="Agent 检索特定视频片段"></a>
+</p>
 
 Agent 层与 harness 兼容：可运行在**内置 harness** 或 **DeepSeek Harness**（`uv sync --extra dsh`）上，并经 MCP 把工具导出给外部 harness——见 [API 与 Agent](#api-与-agent)。
 
@@ -202,24 +148,15 @@ Agent 层与 harness 兼容：可运行在**内置 harness** 或 **DeepSeek Harn
 
 十二个模型角色独立配置——多模态理解、文案创作、拆分镜、嵌入、ASR、TTS、图片/视频/音乐生成、动画生成、人物识别与智能助手。每个角色可保存多张命名档案卡、激活其一；档案可连接自建 HTTP 服务或已适配的线上厂商（智谱、DeepSeek、阿里云、腾讯 TokenHub、MiniMax、Anthropic），保存即对 Web 与 CLI 同时热生效。
 
-<table>
-<tr><th>模型角色与 agent harness</th><th>召回权重、音色、本地服务与工具</th></tr>
-<tr>
-<td width="50%"><a href="docs/assets/settings-models-harness.png"><img src="docs/assets/settings-models-harness.png" alt="设置页：模型角色卡片与 harness 选择器"></a></td>
-<td width="50%"><a href="docs/assets/settings-weights-voices-services.png"><img src="docs/assets/settings-weights-voices-services.png" alt="召回权重、音色库、本地服务与工具管理"></a></td>
-</tr>
-</table>
+![设置页：模型角色卡片与 harness 选择器](docs/assets/settings-models-harness.png)
+
+<p align="center">
+<a href="docs/assets/settings-weights-voices-services.png"><img src="docs/assets/settings-weights-voices-services.png" width="150" alt="召回权重、音色库、本地服务与工具管理"></a>
+<a href="docs/assets/settings-model-card.png"><img src="docs/assets/settings-model-card.png" width="150" alt="模型档案卡"></a>
+<a href="docs/assets/settings-model-config.png"><img src="docs/assets/settings-model-config.png" width="150" alt="自定义模型档案配置"></a>
+</p>
 
 检索行为运行时可调：画面/对白/分析三渠道融合权重（默认 0.35 : 0.15 : 0.5）、RRF 参数与候选数量——按请求生效，无需重建索引。选题打分权重与覆盖核验阈值按领域档案设置。
-
-<details>
-<summary>模型档案卡与自定义配置</summary>
-
-![模型档案卡：厂商与连接字段](docs/assets/settings-model-card.png)
-
-![自定义模型档案配置](docs/assets/settings-model-config.png)
-
-</details>
 
 界面为中英双语并提供暗色主题。
 
