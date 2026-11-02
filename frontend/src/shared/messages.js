@@ -13936,8 +13936,8 @@ window.MindexMessages = {
     "en": "Runtime"
   },
   "ui.09ceea7644dc": {
-    "zh": "内置",
-    "en": "Built-in"
+    "zh": "内置Harness",
+    "en": "Built-in Harness"
   },
   "ui.f61b5478e34f": {
     "zh": "保存运行时",
