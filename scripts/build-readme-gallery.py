@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""把 README 中同组截图合成为一张自动连播的动画图（动画 WebP，可回退 GIF）。
+"""把 README 中同组截图合成为一张自动连播的动画图（默认 GIF）。
 
-GitHub 渲染 README 时会剥离 ``<script>`` 与 ``style``，无法放置真正的轮播控件；
-一组截图改为一张循环播放的动画图，配合 ``<details>`` 逐张原图清单，兼顾自动连播与
-手动查看高清原图。分组、每帧秒数与标题在此文件维护，产物写到 ``docs/assets/``。
+GitHub 渲染 README 时会剥离 ``<script>`` 与 ``style``，无法放置真正的轮播控件；GIF 是
+GitHub 唯一保证在 README 内播放的动画格式（动画 WebP 多数场景只显示首帧）。一组截图因此
+合成为一张循环播放的 GIF，配合 ``<details>`` 逐张原图清单，兼顾自动连播与手动查看高清原图。
+分组、每帧秒数与标题在此文件维护，产物写到 ``docs/assets/``。
 
 源图与产物的 SHA-256 记录在 ``docs/assets/gallery.json``：源图或参数变化后须重新生成，
 ``--check`` 据此判断产物是否过期（供测试调用）。
@@ -11,7 +12,7 @@ GitHub 渲染 README 时会剥离 ``<script>`` 与 ``style``，无法放置真�
 用法：
     python scripts/build-readme-gallery.py                     # 重新生成
     python scripts/build-readme-gallery.py --check             # 仅检查，过期时以退出码 1 结束
-    python scripts/build-readme-gallery.py --format gif        # 回退为 GIF
+    python scripts/build-readme-gallery.py --format webp       # 体积优先时改用动画 WebP
 """
 
 from __future__ import annotations
@@ -29,10 +30,11 @@ ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / "docs" / "assets"
 MANIFEST = ASSETS / "gallery.json"
 
-WIDTH = 1200
+WIDTH = 1000
 FRAME_MS = 3000
 QUALITY = 82
 METHOD = 6
+COLORS = 256
 
 
 @dataclass(frozen=True)
@@ -177,14 +179,15 @@ def build(fmt: str) -> dict:
                 method=METHOD,
             )
         else:
-            canvas[0].save(
+            # GIF 每帧单独量化（局部调色板），256 色足以还原界面截图。
+            paletted = [frame.quantize(colors=COLORS, method=Image.Quantize.MEDIANCUT) for frame in canvas]
+            paletted[0].save(
                 target,
                 save_all=True,
-                append_images=canvas[1:],
+                append_images=paletted[1:],
                 duration=FRAME_MS,
                 loop=0,
                 optimize=True,
-                disposal=2,
             )
         payload["groups"].append(
             {
@@ -239,7 +242,7 @@ def check(fmt: str) -> list[str]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="生成 README 自动连播截图并检查产物是否过期。")
     parser.add_argument("--check", action="store_true", help="只检查，不写文件")
-    parser.add_argument("--format", choices=("webp", "gif"), default="webp", help="产物格式（默认 webp）")
+    parser.add_argument("--format", choices=("gif", "webp"), default="gif", help="产物格式（默认 gif）")
     args = parser.parse_args(argv)
 
     if args.check:

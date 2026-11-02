@@ -2,17 +2,17 @@
 
 以下图片复制自用户 2026-11-02 提供的 `~/Desktop/functions` 截图集（1.1–5.5，共 33 张），界面语言为英文，保留原始画面与尺寸。图片反映对应版本的界面；当前功能行为以实现和使用文档为准。
 
-## 自动连播图（gallery-*.webp）
+## 自动连播图（gallery-*.gif）
 
-GitHub 渲染 README 时剥离 `<script>` 与 `style`，无法放置轮播控件。同一组截图因此合成为一张循环播放的动画 WebP，README 中以单图展示自动连播，并在下方用 `<details>` 列出逐张原图链接。分组、帧顺序、每帧秒数与中英文标题在 `scripts/build-readme-gallery.py` 维护，源图与产物的 SHA-256 记录在 `gallery.json`。
+GitHub 渲染 README 时剥离 `<script>` 与 `style`，无法放置轮播控件；动画 WebP 多数场景只显示首帧，GIF 才是 README 内保证播放的动画格式。同一组截图因此合成为一张循环播放的 GIF，README 中以单图展示自动连播，并在下方用 `<details>` 列出逐张原图链接。分组、帧顺序、每帧秒数与中英文标题在 `scripts/build-readme-gallery.py` 维护，源图与产物的 SHA-256 记录在 `gallery.json`。
 
 ```bash
-python scripts/build-readme-gallery.py            # 源图变化后重新生成
-python scripts/build-readme-gallery.py --check    # 仅检查产物是否过期（测试调用）
-python scripts/build-readme-gallery.py --format gif   # 若目标环境不支持动画 WebP，回退 GIF
+python scripts/build-readme-gallery.py                # 源图变化后重新生成
+python scripts/build-readme-gallery.py --check        # 仅检查产物是否过期（测试调用）
+python scripts/build-readme-gallery.py --format webp  # 体积优先时可改用动画 WebP
 ```
 
-产物为 1200px 宽、每帧 3 秒、无限循环；不同宽高比的截图按组内最宽帧的白底画布居中显示。
+产物为 1000px 宽、每帧 3 秒、无限循环；不同宽高比的截图按组内最宽帧的白底画布居中显示。
 
 | 资源 | 原始文件 |
 | --- | --- |

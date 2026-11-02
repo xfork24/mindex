@@ -32,7 +32,7 @@ def test_readme_references_existing_images():
 
 def test_gallery_groups_listed_in_both_readmes():
     manifest = json.loads((ASSETS / "gallery.json").read_text(encoding="utf-8"))
-    assert manifest["format"] == "webp"
+    assert manifest["format"] == "gif"
     assert manifest["groups"]
     for readme in READMES:
         text = readme.read_text(encoding="utf-8")

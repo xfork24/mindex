@@ -51,7 +51,7 @@ Shots are the working unit of the library: browse them per source, inspect time 
 
 ![Shot management: shot grid with thumbnails, time ranges, and boundaries](docs/assets/admin-shots.png)
 
-![Auto-playing screenshots: per-shot AI analysis, background music library, and source groups](docs/assets/gallery-admin.webp)
+![Auto-playing screenshots: per-shot AI analysis, background music library, and source groups](docs/assets/gallery-admin.gif)
 
 <details>
 <summary>View each screenshot (3)</summary>
@@ -66,7 +66,7 @@ Shots are the working unit of the library: browse them per source, inspect time 
 
 ![Person library: actor and role cards, reference images, and works](docs/assets/persons-actors-roles.png)
 
-![Auto-playing screenshots: appearance detection and cast-table import](docs/assets/gallery-persons.webp)
+![Auto-playing screenshots: appearance detection and cast-table import](docs/assets/gallery-persons.gif)
 
 <details>
 <summary>View each screenshot (2)</summary>
@@ -82,7 +82,7 @@ Text queries run over three channels — visual, dialogue, and analysis — each
 
 ![Text search combined with a person filter](docs/assets/search-text-and-person.png)
 
-![Auto-playing screenshots: object, scene, and emotion queries, similar-scene lookup, image or video search](docs/assets/gallery-search.webp)
+![Auto-playing screenshots: object, scene, and emotion queries, similar-scene lookup, image or video search](docs/assets/gallery-search.gif)
 
 <details>
 <summary>View each screenshot (4)</summary>
@@ -134,7 +134,7 @@ Each shot picks its own visual source:
 
 Creation jobs are directories with plan records, versions, builds, and inputs — managed from a single task list. Three template families shape output without touching the pipeline: **script templates** control writing style and structure, **style templates** (brands) encode visual style presets, and **delivery templates** snapshot platform rules for multi-aspect export and publish packages.
 
-![Auto-playing screenshots: creation task list, script templates, delivery templates, and style templates](docs/assets/gallery-studio.webp)
+![Auto-playing screenshots: creation task list, script templates, delivery templates, and style templates](docs/assets/gallery-studio.gif)
 
 <details>
 <summary>View each screenshot (4)</summary>
@@ -154,7 +154,7 @@ The agent panel is available on every page. It drives search, library curation, 
 
 The session above continues through scripting, per-shot production, and the final build; clip retrieval works the same way.
 
-![Auto-playing screenshots: agent session through scripting, per-shot production, final build, and clip retrieval](docs/assets/gallery-agent.webp)
+![Auto-playing screenshots: agent session through scripting, per-shot production, final build, and clip retrieval](docs/assets/gallery-agent.gif)
 
 <details>
 <summary>View each screenshot (4)</summary>
@@ -174,7 +174,7 @@ Twelve model roles are configured independently — multimodal understanding, sc
 
 ![Settings page with model role cards and harness selector](docs/assets/settings-models-harness.png)
 
-![Auto-playing screenshots: recall weights and services, model profile card, custom profile configuration](docs/assets/gallery-settings.webp)
+![Auto-playing screenshots: recall weights and services, model profile card, custom profile configuration](docs/assets/gallery-settings.gif)
 
 <details>
 <summary>View each screenshot (3)</summary>

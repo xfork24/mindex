@@ -50,7 +50,7 @@ Mindex 把海量视频的管理、理解、检索与再创作连接在同一个�
 
 ![镜头管理：缩略图、时间区间与边界](docs/assets/admin-shots.png)
 
-![自动连播：镜头 AI 分析、背景音乐曲库与素材分组](docs/assets/gallery-admin.webp)
+![自动连播：镜头 AI 分析、背景音乐曲库与素材分组](docs/assets/gallery-admin.gif)
 
 <details>
 <summary>逐张查看原图（3 张）</summary>
@@ -65,7 +65,7 @@ Mindex 把海量视频的管理、理解、检索与再创作连接在同一个�
 
 ![人物库：演员/角色卡片、参考图与作品](docs/assets/persons-actors-roles.png)
 
-![自动连播：出镜识别与演员表导入](docs/assets/gallery-persons.webp)
+![自动连播：出镜识别与演员表导入](docs/assets/gallery-persons.gif)
 
 <details>
 <summary>逐张查看原图（2 张）</summary>
@@ -81,7 +81,7 @@ Mindex 把海量视频的管理、理解、检索与再创作连接在同一个�
 
 ![文字检索结合人物筛选](docs/assets/search-text-and-person.png)
 
-![自动连播：物体与场景、情绪与景别、相似场景、以图片或视频检索](docs/assets/gallery-search.webp)
+![自动连播：物体与场景、情绪与景别、相似场景、以图片或视频检索](docs/assets/gallery-search.gif)
 
 <details>
 <summary>逐张查看原图（4 张）</summary>
@@ -133,7 +133,7 @@ Studio 用你自己的素材库把一个想法变成成片。工作流为选题�
 
 创作任务是独立目录（方案记录、版本、构建与输入素材），在统一的任务列表中管理。三类模板从外部塑造产出而不改动管线：**文案模板**控制写作风格与结构，**风格模板**（品牌）沉淀视觉风格预设，**交付模板**固化平台规则快照，用于多画幅导出与发布包。
 
-![自动连播：创作任务列表与文案、交付、风格三类模板管理](docs/assets/gallery-studio.webp)
+![自动连播：创作任务列表与文案、交付、风格三类模板管理](docs/assets/gallery-studio.gif)
 
 <details>
 <summary>逐张查看原图（4 张）</summary>
@@ -153,7 +153,7 @@ Agent 面板出现在每个页面。它用自然语言驱动检索、素材整�
 
 上面的会话接下来会经历写文案、拆分镜、逐镜生产与最终构建；片段检索的工作方式相同。
 
-![自动连播：Agent 会话从写文案、逐镜生产到成片预览，以及片段检索](docs/assets/gallery-agent.webp)
+![自动连播：Agent 会话从写文案、逐镜生产到成片预览，以及片段检索](docs/assets/gallery-agent.gif)
 
 <details>
 <summary>逐张查看原图（4 张）</summary>
@@ -173,7 +173,7 @@ Agent 层与 harness 兼容：可运行在**内置 harness** 或 **DeepSeek Harn
 
 ![设置页：模型角色卡片与 harness 选择器](docs/assets/settings-models-harness.png)
 
-![自动连播：召回权重与服务管理、模型档案卡、自定义档案配置](docs/assets/gallery-settings.webp)
+![自动连播：召回权重与服务管理、模型档案卡、自定义档案配置](docs/assets/gallery-settings.gif)
 
 <details>
 <summary>逐张查看原图（3 张）</summary>

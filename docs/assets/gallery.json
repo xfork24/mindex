@@ -1,12 +1,12 @@
 {
-  "width": 1200,
+  "width": 1000,
   "frame_ms": 3000,
-  "format": "webp",
+  "format": "gif",
   "groups": [
     {
       "key": "admin",
-      "output": "gallery-admin.webp",
-      "output_sha256": "d87222704b35cd6d158e88c357a7915b86cd57ddc4a36c01753c73f6a1056e18",
+      "output": "gallery-admin.gif",
+      "output_sha256": "66934ea7045689a1e18cd7cec1e4ae1b7cbd7a1fcdfaa45f8d258f7eefa4194d",
       "sources": [
         {
           "file": "admin-shot-analysis.png",
@@ -30,8 +30,8 @@
     },
     {
       "key": "persons",
-      "output": "gallery-persons.webp",
-      "output_sha256": "84c213645d44afe5fe01a52ee2b6fdb1fbbd82b1325c35b1f97663ac8ccd2611",
+      "output": "gallery-persons.gif",
+      "output_sha256": "bf032085b8c756143843121ebf4ee56fe3b8114efa40bcdc6b9d74765c322ea4",
       "sources": [
         {
           "file": "persons-appearance-detection.png",
@@ -49,8 +49,8 @@
     },
     {
       "key": "search",
-      "output": "gallery-search.webp",
-      "output_sha256": "51899941e904ff695f3d39a635e2ad9a0032fac42fc67ee456d6d0cd0bdf9789",
+      "output": "gallery-search.gif",
+      "output_sha256": "c400498dfbec3117dff8c85e2abb14a051f982324186cc4cc9ec3bdbbc4e7e2e",
       "sources": [
         {
           "file": "search-text-and-object.png",
@@ -80,8 +80,8 @@
     },
     {
       "key": "studio",
-      "output": "gallery-studio.webp",
-      "output_sha256": "9c57bc21a40305dd7136b56572f49db7595ab668c16425d5d6df74d4e942b59f",
+      "output": "gallery-studio.gif",
+      "output_sha256": "b445197ed43c2ed68c431e4d2711cfece90e4f25fbf812d1d0c7a96bf211f779",
       "sources": [
         {
           "file": "studio-jobs.png",
@@ -111,8 +111,8 @@
     },
     {
       "key": "agent",
-      "output": "gallery-agent.webp",
-      "output_sha256": "64897a908e6649f027f7cbba4aeb073875da0d7487488128a09a929a3bf37607",
+      "output": "gallery-agent.gif",
+      "output_sha256": "4812b55475e1c2a9ac7f7de0f58d50cf73cf0699d182d1ca32bcee9ee3962b84",
       "sources": [
         {
           "file": "agent-create-video-2.png",
@@ -142,8 +142,8 @@
     },
     {
       "key": "settings",
-      "output": "gallery-settings.webp",
-      "output_sha256": "2f2a387340e9a7803f7188e2cd6eb322786fb9a62527e0d9fd1cf6268f68c00b",
+      "output": "gallery-settings.gif",
+      "output_sha256": "c5dd84344aba55d99f88c5c5efe11745e3cced358e4e2d20ce1e3c5d477d99bb",
       "sources": [
         {
           "file": "settings-weights-voices-services.png",
