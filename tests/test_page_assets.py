@@ -7,8 +7,8 @@ from fastapi.testclient import TestClient
 from mindex.api import create_app
 
 
-@pytest.mark.parametrize("page", ["/", "/index.html", "/studio/templates", "/studio/templates/", "/studio/topics",
-                                  "/studio/topics/", "/studio/brands", "/admin/music", "/admin/music/", *[
+@pytest.mark.parametrize("page", ["/", "/search", "/search/", "/search.html", "/studio/templates", "/studio/templates/",
+                                  "/studio/topics", "/studio/topics/", "/studio/brands", "/admin/music", "/admin/music/", *[
     url for name in ("admin", "persons", "studio", "settings")
     for url in (f"/{name}", f"/{name}/", f"/{name}.html")
 ]])
@@ -22,7 +22,8 @@ def test_page_bundle_assets(config, page):
         # 版本参数由 scripts/build-assets.py 写成内容哈希（见 test_build_assets.py），这里只核对资源与顺序。
         assert all(re.search(r"\?v=[0-9a-f]{10}$", asset) for asset in assets), assets
         paths = [asset.split("?", 1)[0] for asset in assets]
-        name = 'search' if page in {'/', '/index.html'} else page.strip('/').split('.')[0].replace('/', '-')
+        # 主页（/）是创作页；视频检索页在 /search。
+        name = 'studio' if page == '/' else 'search' if page.startswith('/search') else page.strip('/').split('.')[0].replace('/', '-')
         assert '/assets/shared/feedback.js' in paths
         # 全局智能助手面板在每个页面都可唤起，且须在 i18n.js 之后加载。
         assert '/assets/shared/agent-panel.js' in paths and '/assets/shared/agent-panel.css' in paths
@@ -57,9 +58,10 @@ def test_page_bundle_assets(config, page):
 @pytest.mark.parametrize(("old", "new"), [
     ("/studio/music", "/admin/music"), ("/studio/music/?id=abc&job=j1", "/admin/music?id=abc"),
     ("/studio/tools", "/settings#tools"), ("/studio/tools?id=my-tool&job=j1", "/settings?tool=my-tool#tools"),
+    ("/index.html", "/search"),
 ])
 def test_moved_pages_redirect(config, old, new):
-    """音乐库移到素材管理页、第三方工具移到设置页：旧地址重定向到新位置。"""
+    """音乐库移到素材管理页、第三方工具移到设置页、视频检索移到 /search：旧地址重定向到新位置。"""
     with TestClient(create_app(config)) as client:
         response = client.get(old, follow_redirects=False)
         assert response.status_code == 308

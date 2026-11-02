@@ -153,9 +153,12 @@ def create_app(
         for url in urls:
             app.add_api_route(url, page, methods=["GET"], include_in_schema=False)
 
-    register_page("search", "index.html", ("/", "/index.html"))
-    for group in ("admin", "persons", "studio", "settings"):
+    # 主页（/）是创作页；视频检索移到 /search，旧的 /index.html 由 moved 重定向过去。
+    register_page("search", "index.html", ("/search", "/search/", "/search.html"))
+    for group in ("admin", "persons", "settings"):
         register_page(group, f"{group}.html", (f"/{group}", f"/{group}/", f"/{group}.html"))
+    # 创作页同时挂在 / 与 /studio：前者是主页，后者是站内固定链接。
+    register_page("studio", "studio.html", ("/", "/studio", "/studio/", "/studio.html"))
     # 文案模板管理是创作页的子页面（与创作任务并列的分区标签），资源仍在 /assets/studio/ 下。
     register_page("studio", "templates.html", ("/studio/templates", "/studio/templates/"))
     # 选题挖掘同为创作页子页面（标签位于创作任务与文案模板之间）。
@@ -182,6 +185,8 @@ def create_app(
         app.add_api_route(url, moved("/admin/music"), methods=["GET"], include_in_schema=False)
     for url in ("/studio/tools", "/studio/tools/"):
         app.add_api_route(url, moved("/settings#tools", {"id": "tool"}), methods=["GET"], include_in_schema=False)
+    # 视频检索页改址到 /search：旧的 /index.html 重定向过去，保留查询参数。
+    app.add_api_route("/index.html", moved("/search"), methods=["GET"], include_in_schema=False)
     for group in ("search", "admin", "persons", "studio", "settings", "shared"):
         app.mount(f"/assets/{group}", StaticFiles(directory=assets_root / group), name=f"assets-{group}")
 

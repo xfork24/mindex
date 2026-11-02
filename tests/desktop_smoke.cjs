@@ -72,7 +72,7 @@ async function waitFor(predicate, timeout, message) {
     }
     // 选题挖掘页与 Web 端同一套前端：标签顺序一致，档案接口经外壳认证可用。
     const tabs = await win.$$eval(".studio-tabs a", (links) => links.map((a) => a.getAttribute("href")));
-    assert.deepEqual(tabs, ["/studio", "/studio/topics", "/studio/templates", "/studio/brands", "/studio/delivery-templates"]);
+    assert.deepEqual(tabs, ["/", "/studio/topics", "/studio/templates", "/studio/brands", "/studio/delivery-templates"]);
     await win.locator("#topics-empty").waitFor({ timeout: 15000 });
     const profiles = await win.evaluate(async () => (await fetch("/api/topics/profiles")).status);
     assert.equal(profiles, 200);

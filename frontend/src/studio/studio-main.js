@@ -53,7 +53,7 @@ $("delete-job").addEventListener("click", async () => {
       $("play-dialog").close();
       $("job-workspace").hidden = true;
       $("no-job").hidden = false;
-      history.replaceState(null, "", "/studio");
+      history.replaceState(null, "", "/");
     }
     await loadJobs();
     notice(MindexI18n.msg("ui.job_deleted"));

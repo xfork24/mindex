@@ -5,7 +5,7 @@
   const api = (url, method = "GET", body) => MindexApi.json(url, method, body);
   const base = "/api/studio/delivery-templates";
   const job = new URLSearchParams(location.search).get("job");
-  if (job && $("studio-jobs-tab")) $("studio-jobs-tab").href = `/studio?job=${encodeURIComponent(job)}`;
+  if (job && $("studio-jobs-tab")) $("studio-jobs-tab").href = `/?job=${encodeURIComponent(job)}`;
   let items = [], selected, read;
   const report = error => {$("notice").textContent = error.message;};
   function select(item) {

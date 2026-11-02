@@ -7,7 +7,7 @@
   --ok:#3f8a5f;--warn:#b9811d;--danger:#b3402a;--info:#3b74c4;
   --danger-text:#a83e2a;--danger-bg:#fcf1e9;--danger-line:#efd4c5;
   --info-text:#486345;--info-bg:#e8f1e2;--warn-text:#8a5a2b;--warn-bg:#f6ecda;
-  --control-size:28px;--control-font:12px;--control-radius:6px;--panel-radius:10px;--card-radius:8px;--dialog-width-m:720px;--dialog-width-l:900px;--space:8px;--dialog-padding:24px}
+  --control-size:28px;--control-font:12px;--control-radius:6px;--panel-radius:10px;--card-radius:8px;--dialog-width-m:720px;--dialog-width-l:900px;--space:8px;--dialog-padding:24px;--page-gutter:28px}
 /* 深色主题：theme.js 依据偏好或系统偏好设置 <html data-theme="dark">。 */
 [data-theme=dark]{color-scheme:dark;
   --bg:#15181b;--surface:#1d2125;--surface-2:#262b30;--line:#343b41;--line-soft:#2b3237;
@@ -29,7 +29,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,
 .brand i{height:6px;width:6px;background:#b6ca88;border-radius:50%;margin:9px 0 0 5px}
 .quiet{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:var(--control-size);padding:0 12px;border:1px solid var(--line);background:transparent;border-radius:var(--control-radius);font-size:var(--control-font);line-height:18px;color:var(--control-text);text-decoration:none}
 #refresh{margin-left:0}
-main{margin:auto;padding:24px 28px 32px}
+main{margin:auto;padding:24px var(--page-gutter) 32px}
 .eyebrow{font-size:12px;letter-spacing:2px;color:var(--accent-soft)}
 :is(.intro,.studio-intro,.admin-intro){display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 14px;margin:0 0 16px}
 :is(.intro,.studio-intro,.admin-intro) h1{font-size:18px;font-weight:600;letter-spacing:-.2px;margin:0}
@@ -92,7 +92,7 @@ h2{font-size:15px;font-weight:600}
 .library-status{border-top:1px solid var(--line);margin-top:36px;padding-top:22px;font-size:12px;color:var(--muted)}
 #library-summary{margin-left:10px;color:var(--accent-soft)}
 #library-detail{line-height:1.9;padding:16px 0;overflow-wrap:anywhere}
-footer{margin:0 auto;padding:22px 24px 30px;display:flex;justify-content:space-between;gap:12px;font-size:10px;color:var(--muted)}
+footer{margin:0 auto;padding:22px var(--page-gutter) 30px;display:flex;justify-content:space-between;gap:12px;font-size:10px;color:var(--muted)}
 dialog{position:fixed;border:1px solid var(--line);border-radius:var(--panel-radius);max-width:min(var(--dialog-width-l),calc(100vw - 24px));width:calc(100% - 24px);max-height:calc(100dvh - 24px);overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable;padding:var(--dialog-padding);color:var(--text)}
 dialog::backdrop{background:var(--backdrop);backdrop-filter:blur(3px)}
 .close{position:absolute;top:16px;right:16px;float:none;width:var(--control-size);height:var(--control-size);min-height:var(--control-size);padding:0;z-index:1}
@@ -148,7 +148,7 @@ footer{flex-direction:column}
 }
 
 /* Shared language control; wrap complete controls on smaller screens. */
-header{height:auto;min-height:52px;display:flex;align-items:center;flex-wrap:wrap;border-bottom:1px solid var(--line);padding:10px max(4vw,24px);gap:10px 20px}
+header{height:auto;min-height:52px;display:flex;align-items:center;flex-wrap:wrap;border-bottom:1px solid var(--line);padding:10px var(--page-gutter);gap:10px 20px}
 
 header .language-switch{display:flex;align-items:center;gap:5px;white-space:nowrap}
 
@@ -164,8 +164,11 @@ header .language-switch{display:flex;align-items:center;gap:5px;white-space:nowr
 .language-switch .language-divider{color:var(--line-strong)}
 
 /* 刷新：与主题/语言切换同款的图标按钮（↻），完整说明在 aria-label（i18n 绑定同键）。 */
-header #refresh,header #reload{margin-left:auto;width:var(--control-size);min-width:var(--control-size);padding:0;font-size:0;background:transparent}
+header #refresh,header #reload{width:var(--control-size);min-width:var(--control-size);padding:0;font-size:0;background:transparent}
 header #refresh::before,header #reload::before{content:'↻';font-size:14px}
+
+/* 右上角三枚按钮收成一组：整体靠右，组内间距与左侧导航标签一致（8px）。 */
+.header-actions{margin-left:auto;display:flex;align-items:center;gap:8px}
 
 .page-nav{display:flex;align-items:center;flex-wrap:wrap;gap:8px;max-width:100%;min-width:0}
 
@@ -182,14 +185,13 @@ label,button,summary{overflow-wrap:break-word}
 
 .card-actions{flex-wrap:wrap;gap:10px}
 
-@media(max-width:800px){header{gap:10px;padding:14px 20px}
+@media(max-width:800px){header{gap:10px;padding:14px var(--page-gutter)}
 header a.nav-link{font-size:12px}
 }
 
 @media(max-width:540px){header{height:auto;min-height:70px}
-header .language-switch,header .theme-toggle{order:1}
+.header-actions{order:3}
 header .page-nav{order:2;width:100%}
-header #reload,header #refresh{order:3}
 header .brand{margin-right:auto}
 .tabs{gap:18px}
 .tab{white-space:normal;max-width:180px}
@@ -269,11 +271,11 @@ dialog video{display:block;width:100%;max-height:50dvh}
 dialog audio{width:100%}
 
 @media(max-width:540px){
- :root{--dialog-padding:16px}
+ :root{--dialog-padding:16px;--page-gutter:16px}
 
- main{padding:20px 16px 24px}
+ main{padding:20px var(--page-gutter) 24px}
 
- header{padding:14px 16px}
+ header{padding:14px var(--page-gutter)}
 
  button,.quiet{height:auto;min-height:var(--control-size);padding:6px 12px;white-space:normal;overflow-wrap:anywhere}
 

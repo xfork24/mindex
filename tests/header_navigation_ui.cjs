@@ -5,7 +5,7 @@ const {chromium} = require(process.env.MINDEX_PLAYWRIGHT_MODULE || 'playwright')
 const base = process.env.MINDEX_HEADER_URL || 'http://127.0.0.1:18341';
 assert.match(base, /^http:\/\/127\.0\.0\.1:/);
 const out = 'artifacts/header-navigation';
-const paths = ['/', '/studio', '/admin', '/persons', '/settings'];
+const paths = ['/search', '/', '/admin', '/persons', '/settings'];
 const labels = {zh:['视频检索','创作','素材管理','人物库','设置'], en:['Video search','Studio','Media library','People','Settings']};
 fs.mkdirSync(out, {recursive:true});
 let browser, page;
@@ -17,7 +17,7 @@ let browser, page;
   // Click through every tab in both languages, including the current tab.
   for (const lang of ['zh','en']) {
     await page.goto(base);
-    await page.locator(`[data-language=${lang}]`).click();
+    await page.evaluate(l => window.MindexI18n.setLanguage(l), lang);
     for (const current of paths) {
       await page.locator(`.page-nav a[href="${current}"]`).click();
       await page.waitForURL(base + current);
@@ -30,7 +30,14 @@ let browser, page;
           const tabs = [...document.querySelectorAll('.page-nav a')].map(n => ({href:n.getAttribute('href'),text:n.textContent,selected:n.getAttribute('aria-current'),color:getComputedStyle(n).color,bg:getComputedStyle(n).backgroundColor,...rect(n)}));
           const refresh = document.querySelector('header #reload,header #refresh');
           const controls = [...document.querySelectorAll('header .brand,header .page-nav a,header button')].map(rect);
-          return {tabs,controls,refresh:{id:refresh?.id,margin:refresh&&getComputedStyle(refresh).marginLeft,...(refresh?rect(refresh):{})},notes:document.querySelectorAll('.header-note').length,overflow:document.documentElement.scrollWidth>innerWidth+1,svg:document.querySelectorAll('.language-switch button svg').length};
+          // 右上角三枚按钮收在 .header-actions 组里：整体靠右，组内间距与左侧标签一致。
+          const actions = [...document.querySelectorAll('.header-actions button')];
+          const gaps = list => list.slice(1).map((b,i)=>+(rect(b).x-rect(list[i]).right).toFixed(1));
+          const group = document.querySelector('.header-actions');
+          return {tabs,controls,refresh:{id:refresh?.id,margin:refresh&&getComputedStyle(refresh).marginLeft,...(refresh?rect(refresh):{})},notes:document.querySelectorAll('.header-note').length,overflow:document.documentElement.scrollWidth>innerWidth+1,svg:document.querySelectorAll('.language-switch button svg').length,
+            navGaps:gaps([...document.querySelectorAll('.page-nav a')]),actGaps:gaps(actions),
+            actHeights:actions.map(n=>rect(n).h),actRight:group?+rect(group).right.toFixed(1):null,
+            headerPadRight:parseFloat(getComputedStyle(document.querySelector('header')).paddingRight)};
         });
         assert.deepEqual(r.tabs.map(t=>t.href), paths);
         assert.deepEqual(r.tabs.map(t=>t.text), labels[lang]);
@@ -38,23 +45,32 @@ let browser, page;
         assert.equal(r.tabs.find(t=>t.selected).href, current);
         assert.equal(r.tabs.find(t=>t.selected).bg, 'rgb(32, 91, 68)');
         assert.equal(r.tabs.find(t=>t.selected).color, 'rgb(255, 255, 255)');
-        assert.equal(r.notes, 0);assert.equal(r.overflow, false);assert.equal(r.svg, 2);
+        assert.equal(r.notes, 0);assert.equal(r.overflow, false);assert.equal(r.svg, 0);
         assert.ok(r.refresh.id);assert.equal(r.refresh.margin, '0px');
         for (const c of r.controls) assert.ok(c.w>0 && c.h>0 && c.x>=0 && c.right<=width+1);
-        for (const t of r.tabs) assert.equal(t.h,32);
+        const rowHeight = r.tabs[0].h;
+        for (const t of r.tabs) assert.equal(t.h,rowHeight);
+        // 三枚按钮同高、同一行，组内间距与左侧标签一致，整组靠右贴住页边距。
+        assert.equal(r.actHeights.length,3);
+        for (const h of r.actHeights) assert.equal(h,rowHeight);
+        // 导航换行成多行时横向间距无意义，只在单行时比对组内间距。
+        const navSingleRow = r.tabs.every(t=>Math.abs(t.y-r.tabs[0].y)<2);
+        assert.ok(r.actGaps.every(g=>g===r.actGaps[0]));
+        if(navSingleRow) assert.ok(r.actGaps.every(g=>g===r.navGaps[0]));
+        assert.equal(r.actRight,+(width-r.headerPadRight).toFixed(1));
         for(let i=0;i<r.controls.length;i++)for(let j=i+1;j<r.controls.length;j++) {
           const a=r.controls[i],b=r.controls[j];
           assert.ok(a.right<=b.x+1 || b.right<=a.x+1 || a.bottom<=b.y+1 || b.bottom<=a.y+1, 'header controls overlap');
-          if(Math.abs(a.y-b.y)<16 && a.h===32 && b.h===32) assert.ok(Math.abs(a.y-b.y)<=1, 'header row alignment');
+          if(Math.abs(a.y-b.y)<16 && a.h===rowHeight && b.h===rowHeight) assert.ok(Math.abs(a.y-b.y)<=1, 'header row alignment');
         }
         records.push({current,lang,width,...r});
-        if([1440,320].includes(width)) await page.screenshot({path:`${out}/${current.slice(1)||'search'}-${lang}-${width}.png`});
+        if([1440,320].includes(width)) await page.screenshot({path:`${out}/${current.slice(1).replace('/','-')||'home'}-${lang}-${width}.png`});
       }
     }
   }
   // Refresh lists, refresh a selected source, delayed/error responses and retry.
   await page.setViewportSize({width:1440,height:1000});await page.goto(base+'/admin');
-  await page.locator('[data-language=zh]').click();await page.locator('.source-item').first().waitFor();
+  await page.evaluate(() => window.MindexI18n.setLanguage('zh'));await page.locator('.source-item').first().waitFor();
   let response=page.waitForResponse(r=>r.url().includes('/api/admin/sources?') && r.request().method()==='GET');
   await page.locator('#reload').click();assert.equal((await response).status(),200);
   await page.waitForFunction(()=>!document.querySelector('#reload').disabled);

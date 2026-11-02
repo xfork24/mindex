@@ -1037,7 +1037,7 @@ function renderJobBar(card) {
   const adopted = card.status === "adopted" && card.job_id;
   const link = $("card-job-link");
   link.hidden = !adopted;
-  if (adopted) link.href = `/studio?job=${enc(card.job_id)}`;
+  if (adopted) link.href = `/?job=${enc(card.job_id)}`;
   MindexI18n.setText($("card-job"), MindexI18n.msg(adopted ? "ui.topics_card_create_job_again" : "ui.topics_card_create_job"));
   $("card-job").className = adopted ? "quiet" : "submit";
   MindexI18n.setText($("card-job-note"), adopted ? MindexI18n.msg("ui.topics_card_job_note", { p0: card.job_id })
@@ -1054,7 +1054,7 @@ async function createJob() {
   $("card-job").disabled = true;
   try {
     const result = await api(cardUrl(card.id, "/job"), "POST", { force: again, language: MindexI18n.language });
-    location.href = `/studio?job=${enc(result.job_id)}`;
+    location.href = `/?job=${enc(result.job_id)}`;
   } finally {
     $("card-job").disabled = false;
   }
@@ -1230,7 +1230,7 @@ window.MindexAgentContext = () => ({ page: "topics", profile_id: page.profile?.i
 // 助手定位：切换档案、打开卡片并高亮对应分区；建出创作任务时回到创作页。
 window.MindexAgentFocus = async (focus, { passive = false } = {}) => {
   if (focus.page === "studio" && focus.job_id) {
-    if (!passive) location.href = `/studio?job=${enc(focus.job_id)}`;
+    if (!passive) location.href = `/?job=${enc(focus.job_id)}`;
     return true;
   }
   if (focus.profile_id && focus.profile_id !== page.profile?.id && !passive) {
@@ -1243,7 +1243,7 @@ window.MindexAgentFocus = async (focus, { passive = false } = {}) => {
   return true;
 };
 if (page.job) {
-  $("studio-jobs-tab").href = `/studio?job=${enc(page.job)}`;
+  $("studio-jobs-tab").href = `/?job=${enc(page.job)}`;
   $("studio-templates-tab").href = `/studio/templates?job=${enc(page.job)}`;
 }
 loadProfiles().catch(failed);

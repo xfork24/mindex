@@ -269,7 +269,7 @@ data/
 
 ## 在线服务
 
-- `uv run mindex serve` 启动 <http://127.0.0.1:8000>：检索页 `/`、后台 `/admin`、人物库 `/persons`、创作页 `/studio`、设置页 `/settings`、OpenAPI 文档 `/docs`。
+- `uv run mindex serve` 启动 <http://127.0.0.1:8000>：主页创作页 `/`、检索页 `/search`、后台 `/admin`、人物库 `/persons`、设置页 `/settings`、OpenAPI 文档 `/docs`。
 - 接口前缀：`/api/search`、`/api/admin`、`/api/indexes`、`/api/persons`、`/api/studio`、`/api/settings`、`/api/agent`；`agent.mcp.http_enabled` 时挂载 `/mcp`（Bearer `MINDEX_MCP_TOKEN`）。
 - 设置 `MINDEX_WEB_TOKEN` 后启用访问令牌：页面在 `/login` 登录（`next` 只接受站内相对路径），`/logout` 只接受 POST，脚本用 `Authorization: Bearer`。监听非回环地址而未设置令牌时 `serve` 拒绝启动，除非传 `--allow-insecure`。
 - 页面与 API 在无素材或服务未就绪时显示明确未就绪状态，**不用模拟向量冒充真实检索**。

@@ -162,7 +162,7 @@ const sourceGroup = process.env.MINDEX_GROUPS_SOURCE_GROUP;
     await (await filteredTracks).json();
     await page.waitForFunction(() => document.querySelectorAll('#music-list .job-item').length === 1);
     await audit('groups-music-detail');
-    await go('/');
+    await go('/search');
     // 检索页组筛选默认全选：值为空（不限），素材联动列出全部素材。
     const searchFilter = page.locator('.material-filters .group-picker');
     await assertAllSelected('.material-filters .group-picker select[multiple]', '检索页组筛选');

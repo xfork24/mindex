@@ -75,7 +75,7 @@ scenario("profiles", async (page) => {
   await page.goto(`${base}/studio/topics`);
   // 标签顺序：创作任务 → 选题挖掘 → 文案模板 → 风格模板 → 交付模板，当前页高亮
   const tabs = await page.$$eval(".studio-tabs a", (links) => links.map((a) => [a.getAttribute("href"), a.getAttribute("aria-current")]));
-  assert.deepEqual(tabs, [["/studio", null], ["/studio/topics", "page"], ["/studio/templates", null], ["/studio/brands", null], ["/studio/delivery-templates", null]]);
+  assert.deepEqual(tabs, [["/", null], ["/studio/topics", "page"], ["/studio/templates", null], ["/studio/brands", null], ["/studio/delivery-templates", null]]);
   await page.locator("#topics-empty").waitFor();
   assert.equal(await page.isVisible("#topics-bar"), false);
   await createProfile(page, { name: "财经号", domain: "金融", taboos: ["不荐股", "不预测涨跌"] });
@@ -306,7 +306,7 @@ scenario("job", async (page) => {
   await page.locator("#card-view:not([hidden])").waitFor();
   const title = await page.textContent("#card-title");
   assert.match(await page.textContent("#card-job-note"), /参考文稿/);
-  await Promise.all([page.waitForURL(/\/studio\?job=/), page.click("#card-job")]);
+  await Promise.all([page.waitForURL(/\/\?job=/), page.click("#card-job")]);
   const job = new URL(page.url()).searchParams.get("job");
   await page.locator("#job-topic:not([hidden])").waitFor();
   await page.locator("#job-topic", { hasText: "档案：财经号" }).waitFor();
@@ -319,7 +319,7 @@ scenario("job", async (page) => {
   await page.selectOption("#card-status", "adopted");
   await page.locator("#card-list .topic-item").first().click();
   await page.locator("#card-job-link:not([hidden])").waitFor();
-  assert.equal(await page.getAttribute("#card-job-link", "href"), `/studio?job=${job}`);
+  assert.equal(await page.getAttribute("#card-job-link", "href"), `/?job=${job}`);
   assert.equal(await page.textContent("#card-job"), "再建一份任务");
   // 改档案禁区 → 任务页提示"档案已更新"，同步后消失
   await page.click("#profile-edit");

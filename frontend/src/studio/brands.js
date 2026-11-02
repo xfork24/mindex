@@ -325,8 +325,8 @@ window.addEventListener("mindex:agent-mutation", (event) => {
 });
 window.MindexAgentContext = () => ({ page: "studio", section: "brands", brand_id: page.selected?.id || null });
 window.MindexAgentFocus = async (focus, { passive = false } = {}) => {
-  if (focus.job_id && !passive) location.href = `/studio?job=${encodeURIComponent(focus.job_id)}`;
+  if (focus.job_id && !passive) location.href = `/?job=${encodeURIComponent(focus.job_id)}`;
   return true;
 };
-if (page.job) $("studio-jobs-tab").href = `/studio?job=${encodeURIComponent(page.job)}`;
+if (page.job) $("studio-jobs-tab").href = `/?job=${encodeURIComponent(page.job)}`;
 load(query.get("id") || "plain").catch(failed);

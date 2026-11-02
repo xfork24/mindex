@@ -37,7 +37,7 @@ async function selectJob(id, { reloadJobs = true } = {}) {
   state.finalUrl = null;
   state.boardScope = null; // 下一次渲染时重置分镜条与详情区
   state.persons = state.inputs = state.materialDigest = null; // 素材摘要在 renderJobMeta 中按任务重新获取
-  history.replaceState(null, "", `/studio?job=${id}`);
+  history.replaceState(null, "", `/?job=${id}`);
   closeDialog();
   loadRecallOptions().catch((error) => notice(MindexI18n.msg("ui.867f562167d6", { p0: error.message }), true));
   try {

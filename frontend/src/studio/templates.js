@@ -390,11 +390,11 @@ window.addEventListener("mindex:agent-mutation", (event) => {
 window.MindexAgentContext = () => ({ page: "studio", section: "templates", template_id: page.selected?.id || null });
 // 助手要定位到某个创作任务时回到创作页；模板页本身没有可定位的区块。
 window.MindexAgentFocus = async (focus, { passive = false } = {}) => {
-  if (focus.job_id && !passive) location.href = `/studio?job=${encodeURIComponent(focus.job_id)}`;
+  if (focus.job_id && !passive) location.href = `/?job=${encodeURIComponent(focus.job_id)}`;
   return true;
 };
 if (page.job) {
-  $("studio-jobs-tab").href = `/studio?job=${encodeURIComponent(page.job)}`;
+  $("studio-jobs-tab").href = `/?job=${encodeURIComponent(page.job)}`;
   $("studio-topics-tab").href = `/studio/topics?job=${encodeURIComponent(page.job)}`;
 }
 restorePreview();

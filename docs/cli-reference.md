@@ -166,7 +166,7 @@ uv run mindex search '雨夜，一个人强忍眼泪，镜头慢慢推近' --gra
 
 ### `mindex serve [--host 127.0.0.1] [--port 8000] [--index-id INDEX_ID] [--allow-insecure]`
 
-启动页面与检索 API。`/` 检索页、`/admin` 素材后台、`/persons` 人物库、`/studio` 创作页（含 `/studio/topics` 选题挖掘与 `/studio/templates` 文案模板）、`/settings` 设置页、`/docs` OpenAPI。`topics.scheduler.enabled` 为真时随服务运行每日选题挖掘，并在启动时补跑当天错过的定时（见[选题挖掘](topics.md#每日定时)）。
+启动页面与检索 API。`/` 创作页（主页）、`/search` 检索页、`/admin` 素材后台、`/persons` 人物库、`/studio` 创作页别名（含 `/studio/topics` 选题挖掘与 `/studio/templates` 文案模板）、`/settings` 设置页、`/docs` OpenAPI。`topics.scheduler.enabled` 为真时随服务运行每日选题挖掘，并在启动时补跑当天错过的定时（见[选题挖掘](topics.md#每日定时)）。
 
 `--index-id` 将查询、片段媒体和上下文绑定到指定 ready 索引，用于独立版本验证；不会修改活动索引。
 

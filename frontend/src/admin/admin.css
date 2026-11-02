@@ -1,6 +1,6 @@
 .nav-link{text-decoration:none;text-align:center}
 
-.admin-main{padding:24px 28px}
+.admin-main{padding:24px var(--page-gutter)}
 /* 分区标签统一定义在 style.css（.studio-tabs）。 */
 .admin .notice{margin:0 0 18px}
 .admin .notice:empty{display:none}
@@ -69,7 +69,7 @@
 }
 @media(max-width:750px){.workspace{grid-template-columns:1fr}
 .source-panel{position:static}
-.admin-main{padding:20px 16px}
+.admin-main{padding:20px var(--page-gutter)}
 #source-list{max-height:270px;overflow:auto}
 .source-heading h2{font-size:18px}
 .admin header .nav-link{font-size:12px}

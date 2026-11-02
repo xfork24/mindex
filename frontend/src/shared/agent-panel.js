@@ -15,7 +15,7 @@
   const ALWAYS_ALLOW_KEY = 'mindex.agent.alwaysAllow';
   const WIDTH_KEY = 'mindex.agent.width';
   const DEFAULT_WIDTH = 440, MIN_WIDTH = 320, WIDTH_STEP = 24;
-  const PAGES = { '': 'search', 'index.html': 'search', studio: 'studio', settings: 'settings', admin: 'admin', persons: 'persons' };
+  const PAGES = { '': 'studio', 'index.html': 'studio', search: 'search', studio: 'studio', settings: 'settings', admin: 'admin', persons: 'persons' };
   // 疑似密钥：常见前缀，或 32 位以上、含数字且含非十六进制字母的串（排除版本 ID 这类纯十六进制）。
   const KEY_PATTERN = /\b(?:sk-[A-Za-z0-9_-]{12,}|AKIA[0-9A-Z]{16}|(?=[A-Za-z0-9_-]*\d)(?=[A-Za-z0-9_-]*[g-zG-Z])[A-Za-z0-9_-]{32,})\b/;
   const i18n = () => window.MindexI18n;
@@ -52,7 +52,7 @@
     if (path === 'admin/groups') return 'groups';
     if (path === 'admin/music') return 'music'; // 音乐库是素材管理页子页面，曲库工具在 studio_post 领域
     const segment = path.split('/')[0];
-    return PAGES[segment] || PAGES[segment + '.html'] || segment || 'search';
+    return PAGES[segment] || PAGES[segment + '.html'] || segment || 'studio';
   }
 
   function node(tag, cls, text) {
@@ -259,8 +259,8 @@
     try { return await window.MindexAgentFocus(focus, options); } catch (error) { console.warn(error); return true; }
   }
   function urlFor(focus) {
-    if (focus.page === 'studio') return focus.job_id ? `/studio?job=${encodeURIComponent(focus.job_id)}` : '/studio';
-    if (focus.page === 'search') return '/';
+    if (focus.page === 'studio') return focus.job_id ? `/?job=${encodeURIComponent(focus.job_id)}` : '/';
+    if (focus.page === 'search') return '/search';
     if (focus.page === 'music') return '/admin/music';
     if (focus.page === 'groups') return '/admin/groups';
     if (focus.page === 'topics') {
@@ -762,7 +762,7 @@
     status.setAttribute('role', 'status');
     const lines = node('pre', 'agent-build-log');
     const link = node('a', 'quiet nav-link', t('ui.agent_open_studio'));
-    link.href = `/studio?job=${encodeURIComponent(data.job_id)}`;
+    link.href = `/?job=${encodeURIComponent(data.job_id)}`;
     card.append(heading, status, lines, link);
     log.append(card);
     scroll();

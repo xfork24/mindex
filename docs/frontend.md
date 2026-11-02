@@ -6,14 +6,16 @@
 
 | 目录 | 页面 |
 |---|---|
-| `search/` | `/` 视频检索 |
+| `search/` | `/search` 视频检索（旧的 `/index.html` 308 重定向到 `/search`） |
 | `admin/` | `/admin` 素材处理工作台（子页面 `/admin/music` 曲库） |
-| `studio/` | `/studio` 创作（子页面 `/studio/topics` 选题挖掘、`/studio/templates` 文案模板、`/studio/brands` 风格模板、`/studio/delivery-templates` 交付模板） |
+| `studio/` | `/`（主页）创作（同时挂在 `/studio`；子页面 `/studio/topics` 选题挖掘、`/studio/templates` 文案模板、`/studio/brands` 风格模板、`/studio/delivery-templates` 交付模板） |
 | `persons/` | `/persons` 人物库 |
 | `settings/` | `/settings` 设置 |
 | `shared/` | 公共资源：api.js、i18n.js、messages.json/js、agent-panel.js、multiselect.js、样式等 |
 
-顶部导航固定顺序：**视频检索、创作、素材管理、人物库、设置**；当前页绿色选中并标记 `aria-current`。创作页内的标签顺序为：创作任务、选题挖掘、文案模板、风格模板、交付模板。
+主页（`/`）是创作页：顶栏 logo 与「创作」标签都指向 `/`，桌面版启动即落在创作页。
+
+顶部导航固定顺序：**视频检索、创作、素材管理、人物库、设置**；当前页绿色选中并标记 `aria-current`。创作页内的标签顺序为：创作任务、选题挖掘、文案模板、风格模板、交付模板。顶栏右上角的刷新、主题、语言三枚按钮收在 `.header-actions` 组里：整体靠右，组内间距与左侧导航标签一致（8px）。
 
 ## 请求封装（shared/api.js）
 

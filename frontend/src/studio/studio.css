@@ -1,5 +1,5 @@
 .nav-link{text-decoration:none;text-align:center}
-.studio-main{padding:24px 28px}
+.studio-main{padding:24px var(--page-gutter)}
 .studio .notice{margin:0 0 18px}
 .studio .notice:empty{display:none}
 .workspace{display:grid;--sidebar-width:280px;grid-template-columns:var(--sidebar-width) minmax(0,1fr);gap:24px;align-items:start}
@@ -124,7 +124,7 @@ summary{cursor:pointer}
 #artifacts-section{border-top:1px solid var(--line);padding-top:12px}
 @media(max-width:900px){.workspace{grid-template-columns:1fr}
 .job-panel{position:static;max-height:400px}
-.studio-main{padding:20px 12px}
+.studio-main{padding:20px var(--page-gutter)}
 }
 
 .execution-log-section{margin:16px 0 20px}

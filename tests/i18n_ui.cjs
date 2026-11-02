@@ -17,7 +17,7 @@ const base = process.env.MINDEX_I18N_TEST_URL || 'http://127.0.0.1:8027';
       await toggle('en'); await toggle('zh');
       assert.ok(await page.evaluate(selector => window.kept === document.querySelector(selector), selector), selector);
     }
-    await page.goto(base + '/');
+    await page.goto(base + '/search');
     assert.equal(await page.locator('html').getAttribute('lang'),'zh-CN');
     await page.locator('#query').fill('中文素材与未提交输入');
     await page.locator('#actor-select').waitFor();
@@ -100,7 +100,7 @@ const base = process.env.MINDEX_I18N_TEST_URL || 'http://127.0.0.1:8027';
     await page.locator('#plan-settings').click();await page.locator('#dialog-content select').first().waitFor();await preserve('#dialog-content select');
     assert.ok(await page.locator('#dialog-content select').count()>0);await page.locator('#dialog-close').click();
     // No switch-related fetches or reloads; long English labels fit narrow viewport.
-    for (const path of ['/','/admin','/persons','/settings','/studio']) {
+    for (const path of ['/search','/admin','/persons','/settings','/studio']) {
       await page.goto(base+path);await page.waitForTimeout(300);let requests=0;const count=()=>requests++;
       page.on('request',count);await toggle('en');await toggle('zh');page.off('request',count);assert.equal(requests,0,path);
       await toggle('en');await page.setViewportSize({width:390,height:844});
@@ -110,7 +110,7 @@ const base = process.env.MINDEX_I18N_TEST_URL || 'http://127.0.0.1:8027';
     }
     const unavailable = await browser.newContext();
     await unavailable.addInitScript(()=>{Object.defineProperty(window,'localStorage',{get(){throw Error('storage unavailable')}})});
-    const fallback = await unavailable.newPage();await fallback.goto(base+'/');
+    const fallback = await unavailable.newPage();await fallback.goto(base+'/search');
     await fallback.locator('[data-language=en]').click();assert.equal(await fallback.locator('html').getAttribute('lang'),'en');
     await fallback.locator('[data-language=zh]').click();assert.equal(await fallback.locator('html').getAttribute('lang'),'zh-CN');
     assert.deepEqual(errors,[]);console.log('PASS: five pages; dynamic search/storyboard/settings; unchanged content; node/input/file/focus/playback retention; no switch requests; delayed response; persistence; cross-tab sync; blocked storage; narrow layout.');

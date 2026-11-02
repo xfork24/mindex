@@ -170,8 +170,8 @@ def test_topics_page_served_with_tabs_in_order(client):
     for url in ("/studio/topics", "/studio/topics/"):
         page = client.get(url)
         assert page.status_code == 200 and 'id="profile-form"' in page.text
-    for url in ("/studio", "/studio/templates", "/studio/topics"):
+    for url in ("/", "/studio", "/studio/templates", "/studio/topics"):
         html = client.get(url).text
         tabs = [html.index(f'href="{href}"', html.index('class="studio-tabs"'))
-                for href in ("/studio", "/studio/topics", "/studio/templates")]
+                for href in ("/", "/studio/topics", "/studio/templates")]
         assert tabs == sorted(tabs), url

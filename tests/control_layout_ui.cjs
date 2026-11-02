@@ -62,7 +62,7 @@ const {chromium}=require(process.env.MINDEX_PLAYWRIGHT_MODULE || 'playwright');
  }
  async function go(route){await page.goto(base+route);await page.waitForLoadState('networkidle');}
  try{
-  await go('/');await audit('search');
+  await go('/search');await audit('search');
   await page.setViewportSize({width:1440,height:1000});
   await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
   const pair=await page.locator('#person-mode,#person-relation').evaluateAll(nodes=>nodes.map(n=>n.getBoundingClientRect().top));

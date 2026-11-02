@@ -33,7 +33,7 @@ const {chromium}=require(process.env.MINDEX_PLAYWRIGHT_MODULE || 'playwright');
   await page.locator(`[data-segment-id="${process.env.MINDEX_ANALYSIS_LEGACY}"] .organization-actions button`).first().click();
   await admin.locator('[data-analysis-text]').first().waitFor();
   for(const language of ['en','zh']){await choose(language);assert((await admin.textContent()).includes(language==='en'?'Legacy Chinese description':'旧版中文描述'));}
-  await page.goto(base+'/');
+  await page.goto(base+'/search');
   await page.locator('#query').fill('walking');await page.locator('#search-button').click();
   await page.locator('#results .card').first().waitFor();
   // Compact English actions must remain readable at normal and narrow card widths.
