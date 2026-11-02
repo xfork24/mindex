@@ -401,3 +401,7 @@ MCP exports are filtered by domain (`agent.mcp.domains` / `--domain`) and by pol
 | Roadmap | [Roadmap](plans/roadmap.md) |
 
 Everything else — mechanisms, runbooks, and verification records — is in the [documentation center](docs/README.md). Agent collaboration conventions live in [AGENT.md](AGENT.md); the Claude Code technical map in [CLAUDE.md](CLAUDE.md).
+
+## License
+
+Released under the [MIT License](LICENSE). Components bundled with desktop installers (such as ffmpeg) carry their own licenses — see the [third-party notices](docs/third-party-notices.md).

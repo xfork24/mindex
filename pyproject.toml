@@ -1,11 +1,13 @@
 [build-system]
-requires = ["setuptools>=69"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "mindex"
 version = "0.1.0"
 description = "视频素材管理、多模态检索、人物库与 AI 视频创作工作台"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11,<3.14"
 dependencies = [
   "fastapi>=0.115,<1", "uvicorn>=0.34,<1", "python-multipart>=0.0.20",

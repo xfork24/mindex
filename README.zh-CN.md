@@ -400,3 +400,7 @@ MCP 导出可按领域过滤（`agent.mcp.domains` / `--domain`），并受策�
 | 路线图 | [功能路线图](plans/roadmap.md) |
 
 更多机制说明、操作手册与验收记录见[文档中心](docs/README.md)。代理协作约定见 [AGENT.md](AGENT.md)，Claude Code 技术导航见 [CLAUDE.md](CLAUDE.md)。
+
+## 许可证
+
+以 [MIT 许可证](LICENSE) 发布。桌面安装包内的随包组件（如 ffmpeg）另有许可，见[第三方组件声明](docs/third-party-notices.md)。
