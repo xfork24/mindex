@@ -1,10 +1,12 @@
 // 表单字段按内容确定宽度；同组字段横向排列，空间不足时自然换行。
 (function () {
   'use strict';
+  // .runtime-row 同样不在列：.content-flow 会给 p 施加 flex-basis:100%，
+  // 状态文字被迫独占整行，把按钮挤到下一行。
   // .weight-grid/.tuning-row 不在列：settings.css 已用 display:contents 把两者拍平进
   // .tuning-controls；若在此纳管，.content-flow 的 display:flex!important 会把它们反转成
   // 独立 flex 盒，换行落在容器边界而非内容宽度（settings_tuning_ui 的正当换行断言会失败）。
-  const flows = '.form-grid,.filter-grid,.fields,.template-fields,.preview-inputs,.source-fields,.tool-fields,.topics-weights,.search-scope-row,.search-filter-row,.person-search-options,.material-scope-controls,.recall-scope-options,.source-options,.recall-primary-options,.recall-filters,.shot-editor-fields,.post-row,.delivery-fields,.delivery-export-grid,.delivery-platform-form,.tuning-controls,.voice-default-row,.work-controls,.topic-material-scope,.source-filters,.segment-filters,.calendar-row,.group-fields,.card-filters,.form-bottom,.coordinates,.cast-entry-row .work-row,.clone-fields,.profile-connection-fields,#capture-form,#process-form,#entity-form,#create-form,.dialogue-row,.runtime-row';
+  const flows = '.form-grid,.filter-grid,.fields,.template-fields,.preview-inputs,.source-fields,.tool-fields,.topics-weights,.search-scope-row,.search-filter-row,.person-search-options,.material-scope-controls,.recall-scope-options,.source-options,.recall-primary-options,.recall-filters,.shot-editor-fields,.post-row,.delivery-fields,.delivery-export-grid,.delivery-platform-form,.tuning-controls,.voice-default-row,.work-controls,.topic-material-scope,.source-filters,.segment-filters,.calendar-row,.group-fields,.card-filters,.form-bottom,.coordinates,.cast-entry-row .work-row,.clone-fields,.profile-connection-fields,#capture-form,#process-form,#entity-form,#create-form,.dialogue-row';
   const canvas = document.createElement('canvas'), context = canvas.getContext('2d');
   let pending = false;
   function width(text, style) {

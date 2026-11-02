@@ -363,8 +363,9 @@ function renderWork(source, target) {
     status.setAttribute('role', 'status');panel.insertBefore(status, grid);
     for (const [name, label] of Object.entries(workNames)) {
       const card = node('section', undefined, 'work-card');card.dataset.work = name;
+      const body = node('div', undefined, 'work-card-body');card.append(body);
       const start = node('button', MindexI18n.msg("ui.ab2f669c1a01"), 'quiet');start.type = 'button';start.disabled = true;
-      card.append(node('h4', label), start);grid.append(card);
+      body.append(node('h4', label), start);grid.append(card);
     }
     if (source.statusError) panel.append(action(MindexI18n.msg("ui.e2d53a6d3a6a"), () => refreshWork(source.id)));
     return;
@@ -379,8 +380,10 @@ function renderWork(source, target) {
   }
   for (const [name, label] of Object.entries(workNames)) {
     const work = source.work?.[name] || {},result = work.result || {},card = node('section', undefined, 'work-card');card.dataset.work = name;
+    // 行布局：一行一个处理卡；左侧描述与操作按钮，右侧各任务进度。
+    const body = node('div', undefined, 'work-card-body'),progressCol = node('div', undefined, 'work-card-progress');card.append(body, progressCol);
     const processBusy = work.task && ['queued', 'running'].includes(work.task.status),blocked = source.enforce_gpu_lock && busy;
-    const heading = node('div', undefined, 'work-heading');heading.append(node('h4', label), node('span', workStatus[work.status] || MindexI18n.msg("ui.59a9eb4e6574"), 'work-status'));card.append(heading);
+    const heading = node('div', undefined, 'work-heading');heading.append(node('h4', label), node('span', workStatus[work.status] || MindexI18n.msg("ui.59a9eb4e6574"), 'work-status'));body.append(heading);
     let summary = '';
     if (name === 'shots') summary = MindexI18n.msg("ui.234493832eb5", { p0: result.shots || 0, p1: result.moments || 0, p2: result.missing_artifacts || 0 });
     if (name === 'dialogue') {
@@ -392,16 +395,16 @@ function renderWork(source, target) {
     if (name === 'persons') summary = MindexI18n.msg("ui.1e1649402d6a", { p0: result.covered_shots || 0, p1: result.total_shots || 0, p2: result.people || 0, p3: result.accepted || 0, p4: result.candidate || 0, p5: result.rejected || 0 });
     const rows = workProgressRows(name, work);
     for (const row of rows) row.localError = prefs.errors?.[`${name}:${row.type}`];
-    card.append(node('p', rows.flatMap(row => row.coverage?.by_kind && Object.keys(row.coverage.by_kind).length > 1 ? Object.entries(row.coverage.by_kind).map(([kind, counts]) => MindexI18n.msg(`ui.work_${kind}_index_coverage`, {done: counts.embedded_segments ?? counts.indexed_segments, total: counts.expected_segments})) : [row.text || MindexI18n.msg(row.key, {done: Math.min(row.done, row.total), total: row.total})]).join('，'), 'work-summary'));
-    card.append(node('p', summary, 'muted'));const search = work.search || {};
-    card.append(node('p', MindexI18n.msg(name === 'persons' ? "ui.13e6dc8c4328" : "ui.shot_moment_search_coverage", { p0: search.current ? MindexI18n.msg("ui.112f98675ee2") : search.indexed_segments ? MindexI18n.msg("ui.53122735b7e9") : MindexI18n.msg("ui.30e81c8167e5"), p1: search.indexed_segments || 0, p2: search.expected_segments || 0, p3: name === 'persons' ? MindexI18n.msg("ui.313083c877dc") : MindexI18n.msg("ui.32145468cf4f") }), 'muted'));
-    if (MindexI18n.system(result.fallback_reason)) card.append(node('p', MindexI18n.system(result.fallback_reason), 'muted'));
+    body.append(node('p', rows.flatMap(row => row.coverage?.by_kind && Object.keys(row.coverage.by_kind).length > 1 ? Object.entries(row.coverage.by_kind).map(([kind, counts]) => MindexI18n.msg(`ui.work_${kind}_index_coverage`, {done: counts.embedded_segments ?? counts.indexed_segments, total: counts.expected_segments})) : [row.text || MindexI18n.msg(row.key, {done: Math.min(row.done, row.total), total: row.total})]).join('，'), 'work-summary'));
+    body.append(node('p', summary, 'muted'));const search = work.search || {};
+    body.append(node('p', MindexI18n.msg(name === 'persons' ? "ui.13e6dc8c4328" : "ui.shot_moment_search_coverage", { p0: search.current ? MindexI18n.msg("ui.112f98675ee2") : search.indexed_segments ? MindexI18n.msg("ui.53122735b7e9") : MindexI18n.msg("ui.30e81c8167e5"), p1: search.indexed_segments || 0, p2: search.expected_segments || 0, p3: name === 'persons' ? MindexI18n.msg("ui.313083c877dc") : MindexI18n.msg("ui.32145468cf4f") }), 'muted'));
+    if (MindexI18n.system(result.fallback_reason)) body.append(node('p', MindexI18n.system(result.fallback_reason), 'muted'));
     if (name === 'dialogue') {
       // 处理方式：标签与下拉同一行左对齐（style.css 的 label:has(>select) 默认竖排，行内覆盖为横排）。
       const methodRow = node('div', undefined, 'dialogue-row');
       const methodLabel = node('label', MindexI18n.msg("ui.faaa367f81c6"), 'method-field'),method = node('select');MindexI18n.setAttr(method, 'aria-label', MindexI18n.msg("ui.0883552d2a0f"));
       for (const [v, t] of [['auto', MindexI18n.msg("ui.4d56c25d87cf")], ['subtitle', MindexI18n.msg("ui.93dc9c700cf9")], ['asr', 'ASR']]) {const o = node('option', t);o.value = v;method.append(o);}
-      method.value = prefs.method;methodLabel.append(method);methodRow.append(methodLabel);card.append(methodRow);
+      method.value = prefs.method;methodLabel.append(method);methodRow.append(methodLabel);body.append(methodRow);
       // 文本字幕与上传控件同一行；上传仅在未选定字幕（占位项）时出现，选定轨道或已上传文件后收起。
       const subtitleRow = node('div', undefined, 'dialogue-row');
       const trackLabel = node('label', MindexI18n.msg("ui.541d33dd3e02"), 'track-field'),track = node('select');MindexI18n.setAttr(track, 'aria-label', MindexI18n.msg("ui.6918e72a515e"));const empty = node('option', MindexI18n.msg("ui.6fddde6cab67"));empty.value = '';track.append(empty);
@@ -412,7 +415,7 @@ function renderWork(source, target) {
       upload.type = 'file';upload.accept = '.srt,.ass,.ssa,.vtt,.sub,.smi,.sami';upload.disabled = blocked || prefs.uploadingSubtitle;
       MindexI18n.setAttr(upload, 'aria-label', MindexI18n.msg("ui.3a3ecaeab3dd"));uploadLabel.append(upload);subtitleRow.append(uploadLabel);
       const uploadStatus = node('p', prefs.uploadingSubtitle ? MindexI18n.msg("ui.1e7bdf1f5af6") : MindexI18n.msg("ui.48eb829eca06"), 'muted');uploadStatus.setAttribute('role', 'status');
-      subtitleRow.append(uploadStatus);card.append(subtitleRow);
+      subtitleRow.append(uploadStatus);body.append(subtitleRow);
       const syncDialogueRows = () => {
         subtitleRow.hidden = method.value !== 'subtitle';
         uploadLabel.hidden = uploadStatus.hidden = !!track.value;
@@ -431,7 +434,7 @@ function renderWork(source, target) {
       };
       method.onchange = () => {prefs.method = method.value;syncDialogueRows();};track.onchange = () => {prefs.track = track.value;syncDialogueRows();};
     }
-    const checkLabel = node('label', undefined, 'check'),check = node('input');check.type = 'checkbox';check.checked = prefs.publish[name];check.onchange = () => {prefs.publish[name] = check.checked;};checkLabel.append(check, MindexI18n.textNode(MindexI18n.msg("ui.036fd74aa103")));card.append(checkLabel);
+    const checkLabel = node('label', undefined, 'check'),check = node('input');check.type = 'checkbox';check.checked = prefs.publish[name];check.onchange = () => {prefs.publish[name] = check.checked;};checkLabel.append(check, MindexI18n.textNode(MindexI18n.msg("ui.036fd74aa103")));body.append(checkLabel);
     const perform = (type, fn) => async () => {const key = `${name}:${type}`;delete prefs.errors[key];try {await fn();} catch (e) {prefs.errors[key] = e.message;renderSource(state.source);}};
     const controls = node('div', undefined, 'work-controls');
     const start = action(name === 'persons' ? MindexI18n.msg("ui.123bbda48a5d") : name === 'dialogue' ? MindexI18n.msg("ui.941fe1a3c3c2") : work.status === 'not_processed' ? MindexI18n.msg("ui.ab2f669c1a01") : name === 'shots' ? MindexI18n.msg("ui.705c3cbac14d") : name === 'analysis' ? MindexI18n.msg("ui.b3d17c0db3dd") : MindexI18n.msg("ui.941fe1a3c3c2"), perform('process', async () => {
@@ -446,12 +449,12 @@ function renderWork(source, target) {
         await post(`/api/admin/sources/${source.id}/publish`, { work: name, scope: 'scene' });await refreshWork(source.id);
       }));scene.disabled = blocked || rows[2].running || !work.can_publish_scene;controls.append(scene);
       const coverage = work.scene_search || {};
-      card.append(node('p', MindexI18n.msg("ui.scene_search_coverage", {done: coverage.indexed_segments || 0, total: coverage.expected_segments || 0}), 'muted'));
+      body.append(node('p', MindexI18n.msg("ui.scene_search_coverage", {done: coverage.indexed_segments || 0, total: coverage.expected_segments || 0}), 'muted'));
     }
     if (['shots', 'dialogue', 'analysis'].includes(name) && source.shot_count) controls.append(action(MindexI18n.msg("ui.0ef38438801b"), async () => {state.kind = 'shot';state.parent = null;state.segmentPage = 1;await loadSegments();$('segment-list').scrollIntoView({ block: 'start', behavior: 'smooth' });if (name !== 'shots') notify(MindexI18n.msg("ui.1844d03ed5e7"));}));
-    if (name === 'persons') {const link = node('a', MindexI18n.msg("ui.8face9a73c34"), 'quiet nav-link');link.href = `/persons?source=${encodeURIComponent(source.id)}#review`;controls.append(link);card.append(node('p', MindexI18n.msg("ui.4e65b9bde907"), 'muted'));}
-    card.append(controls);
-    for (const row of rows) appendWorkProgress(card, label, row);
+    if (name === 'persons') {const link = node('a', MindexI18n.msg("ui.8face9a73c34"), 'quiet nav-link');link.href = `/persons?source=${encodeURIComponent(source.id)}#review`;controls.append(link);body.append(node('p', MindexI18n.msg("ui.4e65b9bde907"), 'muted'));}
+    progressCol.append(controls);
+    for (const row of rows) appendWorkProgress(progressCol, label, row);
     const processEndpoint = ['shots', 'analysis'].includes(name) ? '/api/admin/source-tasks' : name === 'dialogue' ? '/api/admin/dialogue-tasks' : '/api/persons/tasks';
     // 取消：排队中或运行中的处理/发布任务各一个按钮。自动发布阶段的发布行指向处理任务本身，
     // 独立发布任务都是素材任务。运行中的任务要到下一个检查点才停，期间按钮保持「正在取消…」。
@@ -470,15 +473,15 @@ function renderWork(source, target) {
       }));
       cancel.classList.add('work-cancel');cancel.dataset.phase = row.type;cancel.disabled = requested;
       MindexI18n.setAttr(cancel, 'aria-label', MindexI18n.msg('ui.4d0b4688c787') + ' · ' + label + ' · ' + (row.text || MindexI18n.msg(row.key, {done: Math.min(row.done, row.total), total: row.total})));
-      card.append(cancel);
+      progressCol.append(cancel);
     }
     for (const {type, task} of rows) if (type === 'process' && task) {
       if (['failed', 'interrupted', 'cancelled'].includes(task.status)) {
-        const retry = action(MindexI18n.msg("ui.23e1269c0ea7"), perform('process', async () => {await post(`${processEndpoint}/${task.id}/retry`, {});await refreshWork(source.id);}));retry.disabled = blocked || processBusy;card.append(retry);
+        const retry = action(MindexI18n.msg("ui.23e1269c0ea7"), perform('process', async () => {await post(`${processEndpoint}/${task.id}/retry`, {});await refreshWork(source.id);}));retry.disabled = blocked || processBusy;progressCol.append(retry);
       }
     }
-    if (MindexI18n.system(work.start_reason)) card.append(node('p', MindexI18n.system(work.start_reason), 'muted'));
-    if (name === 'persons' && work.setup?.missing?.length) {card.append(node('p', work.setup.missing.map(MindexI18n.system).join('；'), 'muted'));const link = node('a', MindexI18n.msg("ui.8af96795e1d4"));link.href = '/persons';card.append(link);}
+    if (MindexI18n.system(work.start_reason)) body.append(node('p', MindexI18n.system(work.start_reason), 'muted'));
+    if (name === 'persons' && work.setup?.missing?.length) {body.append(node('p', work.setup.missing.map(MindexI18n.system).join('；'), 'muted'));const link = node('a', MindexI18n.msg("ui.8af96795e1d4"));link.href = '/persons';body.append(link);}
     grid.append(card);
   }
   if (!cachePrefs.refreshingCache && (busy || source.work_refreshing)) workPoll = setTimeout(() => run(() => refreshWork(source.id)), 2000);

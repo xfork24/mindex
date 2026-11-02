@@ -99,15 +99,22 @@
 
 .admin-intro .submit{margin-left:auto;flex:0 0 auto;align-self:center}
 .work-panel{margin-top:24px}
-.work-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr));gap:14px}
-.work-card{padding:16px;background:var(--surface);border:1px solid var(--line);border-radius:var(--card-radius);min-width:0}
+/* 处理任务：一行一个卡片纵向排列；左侧描述与操作，右侧各任务进度。 */
+.work-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:10px}
+.work-card{display:flex;flex-wrap:wrap;align-items:flex-start;gap:4px 28px;padding:14px 16px;background:var(--surface);border:1px solid var(--line);border-radius:var(--card-radius);min-width:0}
+.work-card-body{flex:1 1 380px;min-width:0}
+.work-card-progress{flex:1 1 420px;max-width:620px;min-width:300px;display:flex;flex-direction:column;justify-content:flex-start;gap:0}
+.work-card-progress .work-controls{margin:0 0 10px;order:-1}
+.work-card-progress .work-task-progress{margin:0 0 2px;white-space:normal}
+.work-card-progress .work-progress{display:block;width:100%;height:10px;margin:2px 0 8px}
+.work-card-progress .work-latest-log{margin:0 0 10px;min-height:0;white-space:normal}
 .work-heading{display:flex;justify-content:space-between;align-items:start;gap:12px}
 .work-heading h4{margin:0;font-size:13px}
 .work-status{font-size:12px;color:var(--green);white-space:nowrap}
 .work-summary{font-size:13px;line-height:1.7;overflow-wrap:anywhere}
-.work-card>label{display:flex;align-items:center;gap:8px;font-size:12px;margin:12px 0}
+.work-card-body>label{display:flex;align-items:center;gap:8px;font-size:12px;margin:12px 0}
 .work-card select{min-width:0;max-width:100%;font-size:12px}
-.work-card>label[hidden]{display:none}
+.work-card-body>label[hidden]{display:none}
 .work-controls{display:flex;gap:7px;flex-wrap:wrap;margin:14px 0}
 .work-card .source-warning{overflow-wrap:anywhere;line-height:1.7}
 .upload-drop{display:flex;flex-direction:column;align-items:center;gap:16px;border:2px dashed var(--focus);border-radius:12px;background:var(--surface-2);padding:32px 14px;cursor:pointer}
@@ -121,7 +128,8 @@
 #person-setup p{font-size:13px;line-height:1.7}
 @media(max-width:600px){
 .admin header{height:auto;min-height:72px;flex-wrap:wrap;padding-top:14px;padding-bottom:14px}
-.work-card{padding:14px}
+.work-card{padding:12px}
+.work-card-progress{max-width:none;min-width:0;flex:1 1 100%}
 }
 
 /* 对白处理控件行：标签与下拉/文件选择同一行左对齐；窄屏时在字段间换行。 */
@@ -148,7 +156,7 @@
 .relationship{flex-wrap:wrap}
 .relationship button{margin:0}
 .work-heading{flex-wrap:wrap;align-items:center}
-.work-card>label{flex-wrap:wrap}
+.work-card-body>label{flex-wrap:wrap}
 .work-status{white-space:normal}
 .segment-summary{flex-wrap:wrap;gap:8px}
 .source-heading{align-items:center}
