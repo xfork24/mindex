@@ -1,442 +1,478 @@
 <div align="center">
 
-![Mindex：管理海量视频素材，连接每一次创作](docs/assets/hero.svg)
+![Mindex — Manage massive video libraries, connect every creation](docs/assets/hero-en.svg)
 
-<h1>Mindex</h1>
+# Mindex
 
-**海量素材，有序管理。创作灵感，即刻成片。**
+**A local-first workbench for video asset management, multimodal retrieval, and AI-assisted video creation.**
 
-集视频资产管理、多模态检索与 AI 视频创作于一体的工作台。<br>
-从整片、镜头、片段到人物与画面，从素材入库到配音、剪辑与成片，让视频资产持续产生价值。
+From full films down to shots, clips, and faces; from ingest and understanding to search, scripting,
+and final render — one workspace where a growing video library keeps producing new work.
 
 ![Python 3.11–3.13](https://img.shields.io/badge/Python-3.11%E2%80%933.13-365c49?style=flat-square)
 ![FastAPI](https://img.shields.io/badge/API-FastAPI-365c49?style=flat-square)
 ![SQLite + Chroma](https://img.shields.io/badge/Storage-SQLite%20%2B%20Chroma-365c49?style=flat-square)
+![Platforms](https://img.shields.io/badge/Desktop-macOS%20%C2%B7%20Windows%20%C2%B7%20Linux-365c49?style=flat-square)
 
-[功能概览](#功能概览) · [快速开始](#快速开始) · [功能实景](#功能实景) · [工作原理](#工作原理) · [文档](#文档)
+**English** | [简体中文](README.zh-CN.md)
+
+[Overview](#overview) · [Features in Depth](#features-in-depth) · [Quick Start](#quick-start) · [How It Works](#how-it-works) · [API and Agent](#api-and-agent) · [Documentation](#documentation)
 
 </div>
 
 ---
 
-Mindex 将海量视频的管理、理解、检索与再创作连接在同一个工作流中。批量导入素材，建立从原片到镜头、片段与帧的内容组织；通过画面、台词、人物与语义组合定位素材；再把文案转成分镜，完成配音、选片、音画对齐和视频合成。
+Mindex connects the management, understanding, retrieval, and re-creation of large video collections in a single workflow. Batch-ingest sources, build a content hierarchy from sources to shots, moments, and frames; locate footage through text, image, or video queries combined with people, dialogue, scene, emotion, and shot-type filters; then turn an outline into a scripted, narrated, rendered video — with the library doing the heavy lifting.
 
-无论是持续积累的视频资产库、影视与长视频整理，还是解说、主题混剪和内容再创作，都可以从同一套素材与人物资料出发。
+The local application handles media processing, storage, API, and UI on your own machine (CPU is enough). AI models plug in as independent HTTP services — self-hosted on a GPU box or subscribed from adapted cloud providers — and can be rotated stage by stage on a single GPU. Media, metadata, indexes, and creation artifacts stay on local disk. The UI is bilingual (Chinese/English) with a dark theme, and runs both as a web app and as native desktop applications for macOS, Windows, and Linux.
 
-素材、元数据、索引和创作产物保存在本地；模型通过独立 HTTP 服务接入，支持自建部署与已适配的线上服务。使用线上服务时，对应的文本、图像或音频会发送给所配置的服务。
+## Overview
 
-## 功能概览
-
-| | 能做什么 |
+| Capability | What it does |
 | :--- | :--- |
-| **🎞️ 视频资产管理** | 批量导入与预处理，按原片、镜头、片段和帧浏览素材；搜索、备注、收藏、隐藏，按需播放与下载。 |
-| **🔎 多模态与复合检索** | 文字、图片、视频查询，结合人物、台词、场景、情绪、景别与时长筛选，在素材库中定位可用画面。 |
-| **👥 人物与角色管理** | 导入演员表，管理演员、角色、作品与参考图；处理人物识别，审核出镜证据并发布、回溯。 |
-| **✍️ AI 视频创作** | 按大纲与文案模板写文案（可附参考文稿），自动拆分镜；每镜可用素材召回、上传片段、静态图片、AI 生成图片、AI 生成视频、AI 动画或第三方工具作画面，配音（可从任一分镜起铺背景音乐并自动顺延）、对齐后按所选画幅渲染带字幕的成片。 |
-| **🧩 构建与产物管理** | 多方案创作、逐节点重做、历史版本复用、完整依赖树，以及分镜、音频、字幕、成片的统一留档。 |
-| **⚙️ 模型与声音配置** | 十二类模型角色独立配置，连接自建或线上服务；调整检索权重、管理音色与声音克隆。 |
-| **🤖 智能助手与 MCP** | 每个页面右侧的助手面板用自然语言完成检索、整理、人物审核、创作与设置，写操作先预览确认；同一套工具可经 MCP 导出给 Claude Code、Codex 等外部代理。 |
+| **Video asset management** | Batch import and staged preprocessing; browse by source, shot, moment, and frame; rename, note, favorite, hide, group; play and download on demand. |
+| **Comprehensive AI analysis** | Per-shot visual understanding (action, scene, emotion, shot type), dialogue extraction from subtitles or ASR with word-level alignment, and background-music library management — each channel processed and indexed independently. |
+| **Person and cast management** | Actors and roles modeled as separate identities reusable across titles; cast-table import from images, person detection over shots, evidence review, versioned publishing, and rollback. |
+| **Multimodal retrieval** | Text, image, and video queries over visual, dialogue, and analysis channels, fused from semantic vectors and BM25; filter by people (appearing vs. mentioned), duration, granularity, and source scope. |
+| **End-to-end creation workflow** | Topic mining from configurable sources with weighted scoring; outline-to-script writing with templates and reference documents; storyboard splitting; per-shot visuals from library recall, uploads, AI generation, animation, or third-party tools; TTS narration; timeline alignment; canvas-aware render and compose. |
+| **Templates and versioned builds** | Script templates, style templates, and delivery templates; versioned plans with full dependency trees, per-node rebuilds, artifact reuse, and multi-aspect export with publish packages. |
+| **Agent, CLI, and API** | A built-in agent panel drives the whole product in natural language with preview-before-write; the same capability set is exposed via a complete CLI, REST API, MCP server, and selectable agent harnesses (built-in, DeepSeek Harness, and MCP-compatible external harnesses). |
+| **Model and parameter customization** | Twelve independently configured model roles across self-hosted and cloud providers; runtime-adjustable recall channel weights and topic scoring weights; voice library with cloning. |
 
-## 快速开始
+## Features in Depth
 
-### 1. 启动本地工作台
+### Media Library, AI Analysis, and Person Management
 
-需要 **Python 3.11–3.13、uv、FFmpeg 与 ffprobe**。本地应用负责媒体处理、数据库、API 和页面；模型服务另行配置。
+Every imported source is decomposed locally: shot detection (adaptive by default, TransNetV2 optional), cutting, thumbnails, and checkpointed processing. Dialogue, visual analysis, and person recognition run as independent stages — you can use the library before all of them complete, and resume any failed stage by re-running the same command.
+
+![Media library with staged processing status per source](docs/assets/admin-preprocess.png)
+
+Shots are the working unit of the library: browse them per source, inspect time ranges and boundaries, and read the AI analysis of each — action, scene, emotion, shot type, and more — without triggering new inference.
+
+<table>
+<tr><th>Shot management</th><th>Per-shot AI analysis</th></tr>
+<tr>
+<td width="50%"><a href="docs/assets/admin-shots.png"><img src="docs/assets/admin-shots.png" alt="Shot grid with thumbnails, time ranges, and boundaries"></a></td>
+<td width="50%"><a href="docs/assets/admin-shot-analysis.png"><img src="docs/assets/admin-shot-analysis.png" alt="Structured visual analysis of a single shot"></a></td>
+</tr>
+</table>
+
+<details>
+<summary>Background music library and source groups</summary>
+
+![Background music library management](docs/assets/admin-music.png)
+
+![Source group management](docs/assets/admin-groups.png)
+
+</details>
+
+**Person management is a first-class subsystem.** Actors and roles are separate identities — a role can appear across multiple titles, and person data is never bound to one source. Import cast tables from images, capture reference frames directly from the source video, run person detection over shots, then review the evidence shot by shot before publishing. Published evidence forms recoverable release combinations with the content index, and stays queryable even when the person model is offline.
+
+<table>
+<tr><th>Actors and roles</th><th>Appearance detection and evidence review</th></tr>
+<tr>
+<td width="50%"><a href="docs/assets/persons-actors-roles.png"><img src="docs/assets/persons-actors-roles.png" alt="Person library with actor and role cards, reference images, and works"></a></td>
+<td width="50%"><a href="docs/assets/persons-appearance-detection.png"><img src="docs/assets/persons-appearance-detection.png" alt="Automatic person appearance detection with evidence per shot"></a></td>
+</tr>
+</table>
+
+<details>
+<summary>Cast-table import</summary>
+
+Cast-list images are decomposed into actor and role entries; you verify names, reference boxes, and identity matches before anything enters the library.
+
+![Cast table import with entry review](docs/assets/persons-cast-import.png)
+
+</details>
+
+### Multimodal Retrieval
+
+Text queries run over three channels — visual, dialogue, and analysis — each fusing semantic vectors with BM25, then merged with RRF under configurable channel weights. Queries can describe actions, objects, scenes, emotions, and shot types ("a sad close-up", "riding a white horse"), optionally constrained to selected people, with a clear distinction between a person **appearing on screen** and being **mentioned in dialogue**.
+
+<table>
+<tr><th>Text query with person filter</th><th>Semantic query for objects and scenes</th></tr>
+<tr>
+<td width="50%"><a href="docs/assets/search-text-and-person.png"><img src="docs/assets/search-text-and-person.png" alt="Text search combined with selected people"></a></td>
+<td width="50%"><a href="docs/assets/search-text-and-object.png"><img src="docs/assets/search-text-and-object.png" alt="Text search matching objects and scenes"></a></td>
+</tr>
+</table>
+
+Image and video queries retrieve visually similar footage from the visual channel alone; query media is never indexed and temporary files are cleaned up.
+
+<table>
+<tr><th>Emotion and shot-type queries</th><th>Image or video similarity search</th></tr>
+<tr>
+<td width="50%"><a href="docs/assets/search-emotion-closeup.png"><img src="docs/assets/search-emotion-closeup.png" alt="Finding emotional close-up shots via text"></a></td>
+<td width="50%"><a href="docs/assets/search-by-image-or-video.png"><img src="docs/assets/search-by-image-or-video.png" alt="Uploading an image or short video to find similar shots"></a></td>
+</tr>
+</table>
+
+<details>
+<summary>Similar-scene lookup</summary>
+
+![Similar scene retrieval across sources](docs/assets/search-similar-scenes.png)
+
+</details>
+
+Results keep their position in the original source, the reason they matched, and person evidence — playable inline or traceable back to the media library. See [retrieval design](docs/search.md) for filter and ranking semantics.
+
+### End-to-End Creation Workflow
+
+Studio turns an idea into a finished video using your library as raw material. The workflow runs topic mining → script → storyboard → per-shot production → render → compose, with every stage versioned and every artifact traceable.
+
+**AI-assisted topic mining.** Configure sources (RSS, hot lists, Brave search, calendars, local items), let the pipeline cluster, summarize, and score candidates — timeliness, audience fit, material coverage, novelty, and production cost, with weights you tune per domain profile — then push a selected topic straight into a creation job with outline and references attached.
+
+<table>
+<tr><th>Topic mining</th><th>Topic sources and scoring weights</th></tr>
+<tr>
+<td width="50%"><a href="docs/assets/topics-mining.png"><img src="docs/assets/topics-mining.png" alt="Topic cards with scores from multiple sources"></a></td>
+<td width="50%"><a href="docs/assets/topics-settings.png"><img src="docs/assets/topics-settings.png" alt="Domain profiles with sources and scoring weight settings"></a></td>
+</tr>
+</table>
+
+**Scripted, storyboarded, shot-by-shot production.** The writer model drafts a script from your outline using a script template (built-in or your own, with optional reference documents), then the storyboard split produces one row per shot. Each shot picks its own visual source:
+
+| Shot source | What it provides |
+| :--- | :--- |
+| Library recall | Text / person, image, or video retrieval from your indexed library |
+| Uploaded clip | Your own footage file |
+| Static image | A still image |
+| AI image | Generated by MiniMax image-01 or local ComfyUI |
+| AI video | Generated by MiniMax H3 / Hailuo, Alibaba Wanxiang, or local ComfyUI |
+| AI animation | LLM-authored animation code, recorded frame-by-frame in a sandbox |
+| Third-party tool | Media artifacts fetched from registered HTTP or MCP tools |
+
+![Per-shot source picker covering recall, uploads, and AI generation](docs/assets/studio-shot-sources.png)
+
+**Narration, alignment, render.** TTS voices (with a voice library and cloning) narrate each shot; the timeline editor aligns narration audio against the source video with a fixed-length selection window, frame thumbnails, shot boundaries, and anchors. Renders respect the plan canvas (16:9, 9:16, 1:1), burn or attach subtitles (libass), mix original audio, insert BGM with beat alignment, and compose the final cut.
+
+<table>
+<tr><th>Storyboard editing</th><th>Narration and video alignment</th></tr>
+<tr>
+<td width="50%"><a href="docs/assets/studio-storyboard.png"><img src="docs/assets/studio-storyboard.png" alt="Storyboard rows with narration, duration, source, and stage status"></a></td>
+<td width="50%"><a href="docs/assets/studio-timeline-alignment.png"><img src="docs/assets/studio-timeline-alignment.png" alt="Timeline alignment of narration audio with the video track"></a></td>
+</tr>
+</table>
+
+**Versioned builds with full dependency trees.** Every plan keeps versions per node; edit one shot and only its downstream invalidates. Builds run preflight dependency checks, reuse verified artifacts, and leave failed builds non-destructive. The dependency tree traces each shot of the final video back to its inputs.
+
+![Dependency tree of a final build, tracing every shot to its input versions](docs/assets/studio-build-dependencies.png)
+
+<details>
+<summary>Creation tasks and the template system</summary>
+
+Creation jobs are directories with plan records, versions, builds, and inputs — managed from a single task list.
+
+![Studio creation task list](docs/assets/studio-jobs.png)
+
+Three template families shape output without touching the pipeline: **script templates** control writing style and structure, **style templates** (brands) encode visual style presets, and **delivery templates** snapshot platform rules for multi-aspect export and publish packages.
+
+<table>
+<tr><th>Script templates</th><th>Delivery templates</th><th>Style templates</th></tr>
+<tr>
+<td width="33%"><a href="docs/assets/studio-script-templates.png"><img src="docs/assets/studio-script-templates.png" alt="Script template management"></a></td>
+<td width="33%"><a href="docs/assets/studio-delivery-templates.png"><img src="docs/assets/studio-delivery-templates.png" alt="Delivery template management with platform rules"></a></td>
+<td width="34%"><a href="docs/assets/studio-style-templates.png"><img src="docs/assets/studio-style-templates.png" alt="Style template settings"></a></td>
+</tr>
+</table>
+
+</details>
+
+### Agent Panel
+
+The agent panel is available on every page. It drives search, library curation, person review, creation, and settings through natural language, using the same REST API as the UI. Tools are organized into domains and loaded on demand; write operations present a preview for confirmation before anything changes, and task watchers report back when background builds and processing jobs finish.
+
+![Agent conversation creating a video from the library end to end](docs/assets/agent-create-video-1.png)
+
+<details>
+<summary>Full agent-driven creation session and clip retrieval</summary>
+
+![Agent session: scripting and storyboard of a new video](docs/assets/agent-create-video-2.png)
+
+![Agent session: per-shot production and narration](docs/assets/agent-create-video-3.png)
+
+![Agent session: final build with video preview](docs/assets/agent-create-video-4.png)
+
+Natural-language clip retrieval with the agent panel.
+
+![Agent retrieving specific video clips](docs/assets/agent-search-clips.png)
+
+</details>
+
+The agent layer is harness-compatible: it runs on the **built-in harness** or on **DeepSeek Harness** (`uv sync --extra dsh`), and exports its tools via MCP for external harnesses — see [API and Agent](#api-and-agent).
+
+### Settings and Customization
+
+Twelve model roles are configured independently — multimodal understanding, script writing, storyboard splitting, embedding, ASR, TTS, image, video, and music generation, animation, person recognition, and the agent itself. Each role holds multiple named profiles with one active; profiles connect to self-hosted HTTP services or adapted cloud providers (Zhipu AI, DeepSeek, Alibaba Cloud, Tencent Cloud TokenHub, MiniMax, Anthropic), and saving takes effect immediately for the web app and CLI alike.
+
+<table>
+<tr><th>Model roles and agent harness</th><th>Recall weights, voices, services, tools</th></tr>
+<tr>
+<td width="50%"><a href="docs/assets/settings-models-harness.png"><img src="docs/assets/settings-models-harness.png" alt="Settings page with model role cards and harness selector"></a></td>
+<td width="50%"><a href="docs/assets/settings-weights-voices-services.png"><img src="docs/assets/settings-weights-voices-services.png" alt="Recall weights, voice library, local services, and tool management"></a></td>
+</tr>
+</table>
+
+Retrieval behavior is tunable at runtime: channel weights for the visual / dialogue / analysis fusion (default 0.35 : 0.15 : 0.5), RRF parameters, and candidate counts — applied per request without rebuilding the index. Topic scoring weights and coverage verification thresholds are set per domain profile.
+
+<details>
+<summary>Model profile cards and configuration</summary>
+
+![Model profile card with provider and connection fields](docs/assets/settings-model-card.png)
+
+![Custom model profile configuration](docs/assets/settings-model-config.png)
+
+</details>
+
+The UI ships bilingual (Chinese/English) with a dark theme.
+
+![Dark theme with Chinese/English language toggle](docs/assets/settings-dark-theme-i18n.png)
+
+## Quick Start
+
+### Run the web workbench
+
+Requires **Python 3.11–3.13, uv, FFmpeg, and ffprobe**. The local app handles media, database, API, and pages; model services are configured separately.
 
 ```bash
 git clone https://github.com/xfork24/mindex.git
 cd mindex
 
-uv sync                      # 开发或运行测试时改用 uv sync --extra dev
-# 可选：受管 DeepSeek Harness 助手运行时（随后在设置页选择）
+uv sync                      # use uv sync --extra dev for development and tests
+# optional: managed DeepSeek Harness agent runtime (select it on the Settings page)
 # uv sync --extra dsh
 cp config.example.yaml config.local.yaml
 uv run mindex serve
 ```
 
-打开 **<http://127.0.0.1:8000>**。
+Open **<http://127.0.0.1:8000>**.
 
-| 页面 | 地址 | 用途 |
+| Page | Path | Purpose |
 | :--- | :--- | :--- |
-| 创作 | `/` | 文案、分镜、配音与成片（主页） |
-| 视频检索 | `/search` | 文字、图片、视频查询 |
-| 素材管理 | `/admin` | 上传、处理、整理素材 |
-| 人物库 | `/persons` | 身份、参考图、出镜审核与发布 |
-| 设置 | `/settings` | 模型档案、音色、检索参数 |
-| API 文档 | `/docs` | FastAPI 交互式接口文档 |
+| Studio | `/` | Creation tasks, topics, and templates (home) |
+| Video search | `/search` | Text, image, and video queries |
+| Media library | `/admin` | Ingest, processing, curation (music library at `/admin/music`) |
+| Persons | `/persons` | Identities, reference images, review, publishing |
+| Settings | `/settings` | Model profiles, weights, voices, services |
+| API docs | `/docs` | Interactive FastAPI documentation |
 
-> **安全提示：** Web 与 API 默认没有登录认证，设置页还可以修改模型服务地址和密钥。`serve` 默认只监听 `127.0.0.1`；监听非回环地址（如 `--host 0.0.0.0`）而未设置令牌时会拒绝启动，确认风险后可传 `--allow-insecure`，此时向整个网络开放全部读写功能。需要网络访问时，设置环境变量 `MINDEX_WEB_TOKEN` 启用访问令牌（页面在 `/login` 登录，脚本用 `Authorization: Bearer`），或放在带认证的反向代理之后，并只在可信网络中使用。
->
-> `config.example.yaml` 中的局域网地址仅是部署示例。首次使用请修改 `config.local.yaml`，或在设置页配置并激活自己的模型服务。没有素材、索引或可用模型时，页面会显示真实的未就绪状态。
->
-> **桌面版（macOS arm64 / Windows x64 / Linux x64）：** 安装后双击即用，不需要 Python、uv、FFmpeg，也不需要手动运行 `mindex serve`；功能与 Web 版相同，并可在设置页启停本机模型服务。见 [Mindex 桌面版](docs/desktop.md)。
+> **Security note.** The web app and API have no authentication by default, and the Settings page can change model service addresses and keys. `serve` binds to `127.0.0.1` only; binding a non-loopback address without a token is refused (override with `--allow-insecure` at your own risk). For network access, set `MINDEX_WEB_TOKEN` (login at `/login`, scripts use `Authorization: Bearer`) or place the app behind an authenticated reverse proxy. Details: [web authentication](docs/web-auth.md).
 
-### 2. 导入素材，先跑通画面检索
+### Ingest footage and get search running
 
-最短路径只需要**嵌入服务**，无需先运行 ASR、LLM 分析或 TTS。默认主模型配置为 **WeMM-Embedding-9B / 4096 维**；部署方式见[模型部署指南](docs/deployment.md)。
+The shortest path needs only an **embedding service** — no ASR, LLM analysis, or TTS first. The default model is WeMM-Embedding-9B (4096-dim); see the [deployment guide](docs/deployment.md).
 
 ```bash
-# 本地 CPU：导入、检测镜头、生成片段。支持 FFmpeg 可解码的 MP4、MKV 等。
-uv run mindex prepare '/绝对路径/素材.mp4'
+# Local CPU: import, detect shots, cut clips. Supports anything FFmpeg decodes (MP4, MKV, ...).
+uv run mindex prepare '/absolute/path/footage.mp4'
 
-# 记下上一条命令输出的 SOURCE_ID；确认嵌入服务就绪后执行。
+# Note the SOURCE_ID printed above; run once the embedding service is up.
 uv run mindex index --mode visual --source SOURCE_ID --kind moment --kind shot --activate
 uv run mindex check
 
-# 用一句描述找片段。
-uv run mindex search '一个人在雨夜街道上奔跑'
+# Find clips with one sentence.
+uv run mindex search 'a person running through a rainy street at night'
 ```
 
-也可以全程使用素材管理页：**添加新素材 → 分镜处理 → 更新嵌入 / 检索 → 视频检索**。示例显式包含 `moment` 与 `shot`，方便同时用于精细片段检索和 Studio 默认的镜头召回。
+The same flow works entirely from the media library page: **add source → shot processing → update embeddings / retrieval → video search**. Shot detection defaults to a local adaptive detector (TransNetV2 optional); shots longer than six seconds also produce fine-grained 4 s / 3 s-step moments. Full walkthrough: [film workflow](docs/film-workflow.md).
 
-默认分镜使用本地 AdaptiveDetector，也可配置 TransNetV2；两者均需抽检。默认保留不超过 6 秒的短镜头，长镜头按 4 秒窗口、3 秒步长生成精细片段。详细步骤见[电影处理指南](docs/film-workflow.md)。
+### Add dialogue, analysis, and persons as needed
 
-### 3. 按需补全对白、分析和人物
-
-画面、对白与分析是独立渠道，可以先用、再补全；补充对白不会自动触发 LLM 分析。
+Visual, dialogue, and analysis are independent channels — use what is ready, fill in the rest later.
 
 ```bash
-# 优先提取可用文本字幕，否则使用已配置的 ASR；此步暂不发布索引。
+# Prefer text subtitle tracks; otherwise the configured ASR. Does not publish yet.
 uv run mindex enrich-dialogue SOURCE_ID --no-publish
 
-# 可选：配置并启动视觉理解服务后，生成动作、场景、情绪等分析。
+# Optional: with a vision model service configured, generate action/scene/emotion analysis.
 uv run mindex analyze --source SOURCE_ID
 
-# 嵌入服务就绪后，发布已完成的渠道，复用兼容的已有向量。
+# With the embedding service up, publish completed channels, reusing compatible vectors.
 uv run mindex index --mode auto --source SOURCE_ID --activate
 uv run mindex check
 ```
 
-素材管理页还支持指定对白处理方式、选择字幕轨道和上传外部字幕。人物功能需要 `uv sync --extra person --extra dev`、独立人物服务和参考图；按**登记 / 导入 → 处理 → 审核 → 发布**的顺序操作，见[人物库指南](docs/persons.md)。
+Person features need `uv sync --extra person --extra dev`, the person service, and reference images; work in the order **register / import → process → review → publish** ([persons guide](docs/persons.md)).
 
-### 4. 用素材库创作新视频
+### Create a video from your library
 
-在 `/studio` 输入视频大纲并限定可用素材，创建任务后由文案创作模型按所选文案模板写出文案（可附参考文稿改写，可编辑、可重新生成），再拆分镜、逐镜准备画面与生成旁白，最后选片、预览并按方案画幅（16:9、9:16、1:1）构建成片。可导出 **MP4、SRT、WebVTT、时间轴 JSON**，也可打包下载任务产物。
+In `/studio`, enter an outline and restrict which sources may be used. The writer model drafts the script from the selected template (editable, regenerable, reference documents supported), the storyboard splits automatically, then each shot goes through recall / narration / selection / render, and the plan composes into a final cut. Export **MP4, SRT, WebVTT, and timeline JSON**, or download the whole job as an archive.
 
-| 环节 | 所需能力 |
+| Stage | Requires |
 | :--- | :--- |
-| 写文案 | 文本 LLM（文案创作模型，默认与拆分镜共用同一模型） |
-| 拆分镜 | 文本 LLM |
-| 画面语义召回 | 活动内容索引 + 匹配的嵌入服务 |
-| 配音 | TTS + 可用音色 |
-| 选片、渲染、合成 | 本地 FFmpeg；烧录字幕另需 libass 与可用字体 |
-| AI 生成图片分镜（可选） | 图片生成服务（默认 MiniMax image-01，或本地 ComfyUI） |
-| AI 生成视频分镜（可选） | 视频生成服务（默认 MiniMax H3，或 MiniMax 海螺、阿里通义万相、本地 ComfyUI） |
-| 背景音乐（可选） | 音乐生成服务（默认 MiniMax music-3.0，含翻唱与歌词生成，或本地 ComfyUI） |
-| AI 动画分镜（可选） | 动画生成 LLM（默认智谱 GLM-5.3-Flash）+ `uv sync --extra animation` 与 Chromium |
+| Script, storyboard | A text LLM |
+| Semantic recall | Active content index + matching embedding service |
+| Narration | TTS + available voices |
+| Selection, render, compose | Local FFmpeg (burned subtitles additionally need libass and fonts) |
+| AI image shots (optional) | Image generation (MiniMax image-01 or local ComfyUI) |
+| AI video shots (optional) | Video generation (MiniMax H3 / Hailuo, Alibaba Wanxiang, or ComfyUI) |
+| Background music (optional) | Music generation (MiniMax music-3.0 or ComfyUI) |
+| AI animation shots (optional) | Animation LLM + `uv sync --extra animation` and Chromium |
 
-上传片段与静态图片分镜不需要索引和召回。召回与配音可以分阶段执行，适合单 GPU 轮换模型服务。Studio 从已有素材中选片与合成，选片的叙事效果仍需人工审阅。完整操作见[Studio 指南](docs/studio.md)。
+Uploaded clips and static images need no index at all. Recall and narration run in either order — suited to rotating model services on a single GPU. Full manual: [Studio guide](docs/studio.md).
 
-### 常见问题
+### Desktop applications
 
-| 现象 | 原因与处理 |
-| :--- | :--- |
-| 页面或接口显示"未就绪" | 还没有素材、活动索引或可用的模型服务。按上文第 2 步导入并发布索引，再运行 `uv run mindex status --health` 查看缺少什么。 |
-| 检索返回 503 | 当前嵌入配置与活动索引的模型空间不一致，系统拒绝跨空间比较向量。恢复原模型服务和配置，或新建索引并激活，见[索引版本](docs/index-versions.md)。 |
-| 同时运行多个任务被拒绝 | 处理任务按素材与类型互斥，GPU 模型按阶段轮换。等待当前任务结束，或在设置页关闭 GPU 互斥后再并行。 |
-| 烧录字幕失败 | FFmpeg 缺少 libass 或可用字体。安装后重试，或改用软字幕轨道。 |
+Native builds for **macOS (Apple Silicon), Windows, and Linux** bundle the backend, an FFmpeg build, and the DeepSeek Harness runtime — no Python, uv, or FFmpeg to install, and the app can start and stop local model services from its Settings page. Feature parity with the web version is maintained by sharing the same codebase. See [the desktop guide](docs/desktop.md).
 
-## 功能实景
-
-### 01 · 管理视频资产，从整片深入到每一个镜头
-
-把不断增长的素材集中入库，按显示名称或原文件名查找，结合收藏与可见性筛选。原片、镜头、精细片段和帧各有对应的浏览与处理入口；可从镜头进入子片段，也可以回到原片位置，播放、下载和整理所需内容。
-
-![视频资产管理：素材列表、镜头预览、片段入口与整理操作](docs/assets/media-library.png)
-
-**处理按需推进。** 分镜、对白、视觉分析与人物识别分别执行，独立查看进度与结果；完成分镜即可管理镜头，再按需要更新检索。任务支持检查点复用与失败重试，处理完成和已进入检索的覆盖分别显示。
-
-<details>
-<summary>查看素材预处理与镜头详情</summary>
-
-![素材预处理：分镜、对白、分析与人物处理状态](docs/assets/media-processing.png)
-
-镜头详情汇集已有的对白、字幕、视觉分析与人物处理信息，查看内容不触发新一轮模型推理。
-
-![镜头详情：对白、字幕、分析与人物信息](docs/assets/shot-details.png)
-
-</details>
-
-### 02 · 组合画面、人物与台词，精准定位素材
-
-用描述寻找动作、场景、情绪和镜头，也可以上传参考图片或短视频查询相似画面。选择演员与角色后，还能区分**人物实际出镜**和**对白中被提及**，按多人同时出现或任一人物筛选，并限定素材范围、时长与检索粒度。
-
-<table>
-<tr><th>人物 + 台词复合检索</th><th>直接输入台词检索</th></tr>
-<tr>
-<td width="50%"><a href="docs/assets/person-dialogue-search.png"><img src="docs/assets/person-dialogue-search.png" alt="选择人物并结合台词召回片段"></a></td>
-<td width="50%"><a href="docs/assets/dialogue-search.png"><img src="docs/assets/dialogue-search.png" alt="输入台词并浏览命中的视频片段"></a></td>
-</tr>
-</table>
-
-结果保留原片位置、命中说明和人物证据，可直接播放或进入素材管理继续整理。详见[检索机制](docs/search.md)。
-
-### 03 · 建立人物资产，让演员、角色与作品相互关联
-
-演员与角色分别管理，维护作品关系、别名和多张参考图。可以从演员表图片批量导入，人工调整识别框与配对关系，也可以直接从视频原片截取并框选人物参考图。人物资料可复用于检索与 Studio 逐镜选片。
-
-![人物资产管理：演员、角色、参考图与作品关系](docs/assets/people-library.png)
-
-<details>
-<summary>查看演员表导入、原片取参考图与出镜审核</summary>
-
-**演员表导入。** 从图片拆出演员与角色条目，核对姓名、参考框和已有身份后确认入库。
-
-![演员表导入与条目核对](docs/assets/cast-import.png)
-
-**从原片补充参考。** 定位视频帧，框选人物，为角色追加参考图。
-
-![从原片框选人物并添加角色参考图](docs/assets/reference-capture.png)
-
-**出镜审核。** 按分镜浏览识别证据，对候选进行确认或纠错；已发布证据用于人物检索。
-
-![逐镜审核人物识别与出镜证据](docs/assets/appearance-review.png)
-
-**发布与回溯。** 人物证据与内容索引组成可恢复的发布组合，人物模型离线时仍能查询已发布证据。
-
-![人物证据发布与历史版本回溯](docs/assets/person-releases.png)
-
-</details>
-
-### 04 · 文案驱动创作，把素材组织成新故事
-
-输入视频大纲并选定可用素材，文案创作模型在任务内写出可编辑的文案，AI 再自动拆成分镜。每镜分别保存旁白、画面查询和预计时长；召回、配音、选片与渲染在同一张工作台中推进，支持人工修改、插入、合并和调整分镜顺序。
-
-![AI 根据文案生成分镜，并在工作台中逐镜执行后续阶段](docs/assets/storyboard.png)
-
-**逐镜寻找合适的画面。** 每个分镜可选择文字与人物、图片或视频召回，限定素材范围。浏览候选及其人物证据，预览画面并指定参考锚点，或交由自动选片综合匹配。
-
-![逐镜浏览召回的视频候选与人物证据](docs/assets/shot-candidates.png)
-
-**让画面与旁白对齐。** 以实际配音时长为依据，在原片上下文中拖动定长选片窗口；时间轴展示缩略帧、镜头边界与参考锚点，支持逐帧微调和音画试听。
-
-![在视频时间轴拖动选片窗口，使画面与配音对齐](docs/assets/timeline-alignment.png)
-
-**从分镜到完整作品。** 分镜独立渲染视频、配音和字幕轨道，再合成为成片。支持原声混音、字幕配置，以及 MP4、SRT、WebVTT 和时间轴 JSON 导出。
-
-![最终视频预览与视频、字幕、时间轴下载](docs/assets/final-video.png)
-
-<details>
-<summary>查看逐镜查询设置、配音试听与分镜渲染预览</summary>
-
-![分镜的旁白、画面查询、人物与素材范围设置](docs/assets/shot-query.png)
-
-![生成的分镜配音与音频试听](docs/assets/narration.png)
-
-![分镜渲染产物的视频与音轨预览](docs/assets/shot-preview.png)
-
-</details>
-
-### 05 · 保留每次创作的版本，改一镜也能继续构建
-
-一个任务可以新建、复制和切换多个方案。召回、配音、选片、渲染分别记录版本，既能选用历史产物，也能只重做某个节点。构建前检查依赖与兼容性，复用可用结果；新构建失败时保留已有成片。
-
-<table>
-<tr><th>成片的完整依赖树</th><th>历史构建与产物</th></tr>
-<tr>
-<td width="50%"><a href="docs/assets/build-dependencies.png"><img src="docs/assets/build-dependencies.png" alt="成片依赖树，追溯各分镜及输入版本"></a></td>
-<td width="50%"><a href="docs/assets/build-history.png"><img src="docs/assets/build-history.png" alt="浏览全部历史构建与对应产物"></a></td>
-</tr>
-</table>
-
-<details>
-<summary>查看当前构建的产物清单</summary>
-
-统一浏览候选、音频、分镜视频、字幕、时间轴与诊断文件，也可导出任务 ZIP。
-
-![当前构建的全部产物与调试记录](docs/assets/build-artifacts.png)
-
-</details>
-
-### 06 · 自由组合模型，配置检索与创作能力
-
-多模态理解、文案创作、文本拆分镜、嵌入、语音识别、语音合成、图片生成、视频生成、音乐生成、动画生成、人物识别和智能助手分别配置模型档案（图片/视频/音乐/动画生成首次启动即有默认档案卡，另备本地 ComfyUI 卡），可连接已适配的线上服务与自建服务。检索权重、默认音色等设置对后续请求或任务生效，支持音色管理与声音克隆。
-
-<details>
-<summary>查看模型服务、召回权重与音色克隆配置</summary>
-
-![模型服务与处理、检索、语音合成设置](docs/assets/model-settings.png)
-
-![调整各渠道的检索融合权重](docs/assets/retrieval-weights.png)
-
-![添加克隆音色并上传参考样本](docs/assets/voice-cloning.png)
-
-</details>
-
-完整用法见[素材管理](docs/admin.md)、[人物库](docs/persons.md)、[Studio](docs/studio.md)和[设置](docs/settings.md)。
-
-## 工作原理
+## How It Works
 
 ```mermaid
 flowchart LR
-    A[视频素材] --> B[本地分镜与切片]
-    B --> C[画面嵌入]
-    B --> D[字幕 / ASR 对白]
-    B --> E[LLM 视觉分析]
-    C --> F[(版本化内容索引)]
+    A[Video sources] --> B[Local shot detection and cutting]
+    B --> C[Visual embeddings]
+    B --> D[Subtitles / ASR dialogue]
+    B --> E[LLM visual analysis]
+    C --> F[(Versioned content index)]
     D --> F
     E --> F
-    B --> P[人物处理与人工审核]
-    P --> Q[发布人物证据]
-    F --> G[文字 / 图片 / 视频检索]
+    B --> P[Person processing and review]
+    P --> Q[Published person evidence]
+    F --> G[Text / image / video search]
     Q --> G
-    G --> H[Studio 逐镜选片]
-    T[大纲 + 文案模板 + 参考文稿] --> I[文案创作]
-    I --> J[拆分镜]
-    J -->|素材召回| G
-    J -->|上传片段 / 静态图片| H
-    J -->|AI 生成图片| P[图片生成]
-    P --> L
-    J -->|AI 生成视频| V[视频生成]
-    J -->|AI 动画| N[动画源码 + 沙箱录制]
-    V --> H
-    J --> K[TTS 配音]
+    G --> H[Studio per-shot selection]
+    T[Outline + script template + references] --> I[Script writing]
+    I --> J[Storyboard split]
+    J -->|Library recall| G
+    J -->|Uploaded clip / image| H
+    J -->|AI image| IG[Image generation]
+    J -->|AI video| VG[Video generation]
+    J -->|AI animation| AN[Animation code + sandbox recording]
+    J -->|Third-party tool| TL[Tool artifacts]
+    J --> K[TTS narration]
+    K -->|BGM cues| MG[Music generation]
     K --> H
-    K -.背景音乐.-> B[音乐生成]
-    B --> L
-    H --> L[FFmpeg 按画幅渲染与字幕合成]
-    N --> L
-    L --> M[成片与可追溯产物]
-    X[智能助手面板 / MCP] -.调用同一套 API.-> G
+    IG --> H
+    VG --> H
+    TL --> H
+    AN --> H
+    H --> L[FFmpeg render per canvas + subtitles]
+    MG --> L
+    L --> M[Final video and traceable artifacts]
+    X[Agent panel / MCP] -.->|same REST API| G
     X -.-> I
 ```
 
-**三渠道召回。** 新版文字查询分别检索画面、对白和分析。对白与分析内部结合语义向量和 BM25，再按默认 1:1:1 的渠道权重做 RRF 融合，并去除同源重叠片段。图片与视频查询只走画面渠道；在线查询无需实时 LLM 描述或重排。嵌入服务不可用且有文本渠道时，可明确降级为 BM25。
+**Three-channel retrieval.** Text queries search the visual, dialogue, and analysis channels separately. Each channel fuses semantic vectors with BM25; channels merge through RRF under configurable weights (default 0.35 : 0.15 : 0.5), then same-source overlaps deduplicate. Image and video queries use the visual channel only. No live LLM reranking is involved — scores are ranking signals, not probabilities. If the embedding service is down but text channels exist, search degrades explicitly to BM25 with warnings rather than comparing vectors across spaces.
 
-**本地数据与独立模型。** FastAPI 提供 API，原生 HTML / CSS / JavaScript 提供界面；SQLite 保存业务数据，Chroma 保存向量，FFmpeg 处理媒体。自建模型可在本机或另一台机器运行，按阶段安排资源，不要求全部模型同时常驻。
+**Local data, independent models.** FastAPI serves the API; the UI is native HTML/CSS/JS with no build step. SQLite holds all business data; Chroma holds explicit vectors only; FFmpeg handles media. Model services run wherever you choose — same machine, a GPU box, or cloud subscriptions — and the design never assumes more than one is available at a time.
 
-**版本与证据可追溯。** 内容索引、人物发布和 Studio 执行产物保留版本。更新分析不会改写旧索引快照；构建新方案可复用输入与文件校验均匹配的成功产物。查询会检查嵌入空间身份，禁止跨模型空间比较向量。
+**Traceable versions and evidence.** Content indexes, person releases, and Studio artifacts are immutable versions. Updated analysis never rewrites a published index; new model or preprocessing configurations produce a new index that is checked before activation, and rollback is `mindex indexes activate <old-id>` after restoring the matching service. Embedding services carry a space identity (model, revision, quantization, dimensions, preprocessing); queries against a mismatched index fail with 503 instead of comparing incompatible vectors.
 
 <details>
-<summary><strong>模型切换、配置与数据存储</strong></summary>
+<summary><strong>Storage layout and index management</strong></summary>
 
-配置从 `config.local.yaml` 读取；可用 `MINDEX_CONFIG`，或在子命令前指定 `--config`。设置页激活的模型档案与业务参数会覆盖对应配置，Web 与普通 CLI 共用覆盖层。
+Configuration is read from `config.local.yaml` (override with `MINDEX_CONFIG` or `--config` before the subcommand); profiles activated on the Settings page override it at runtime for both web and CLI.
+
+```text
+data/
+├── sources/              original media
+├── plans/                shot-detection plans
+├── clips/                clip / media archives
+├── thumbnails/           thumbnails
+├── transcripts/          transcripts and checkpoints
+├── persons/              reference images, evidence frames, task records
+├── studio/               jobs, plans, versions, builds
+├── voices/               cloned voice samples
+├── chroma/               vector data
+├── locks/                processing locks and cancel sentinels
+├── agent-attachments/    agent attachments (not backed up)
+├── agent.sqlite3         agent sessions (not backed up)
+└── metadata.sqlite3      metadata and runtime settings
+```
 
 ```bash
 uv run mindex --config profiles/custom.yaml status --health
 
-# 更换嵌入模型或预处理后，新建索引；先检查，再激活。
+# After changing embedding model or preprocessing: create a new index, check, activate.
 uv run mindex index
 uv run mindex indexes list
 uv run mindex check --index-id NEW_INDEX_ID
 uv run mindex indexes activate NEW_INDEX_ID
 
-# 回退前先恢复旧模型服务 / 配置。
+# Rollback: restore the old model service / config first, then activate the old index.
 uv run mindex indexes activate OLD_INDEX_ID
 ```
 
-切换嵌入档案不会自动转换旧向量；空间不匹配时，向量查询拒绝比较并提示修复。切分布局参数变更应使用新的 `data_dir`。详见[索引版本](docs/index-versions.md)和[配置参考](docs/config-reference.md)。
-
-```text
-data/
-├── sources/              原素材
-├── plans/                分镜计划
-├── clips/                片段 / 媒体归档
-├── thumbnails/           缩略图
-├── transcripts/          转写与检查点
-├── persons/              人物参考图、证据帧与任务记录
-├── studio/               创作任务、方案、版本与成片
-├── voices/               克隆音色样本
-├── chroma/               向量数据
-├── locks/                处理锁与取消标记
-├── agent-attachments/    智能助手附件（不进备份）
-├── agent.sqlite3         智能助手会话（不进备份）
-└── metadata.sqlite3      元数据与运行设置
-```
-
-隐藏在召回前过滤并向下继承，收藏不改变相关性排名。需要回收磁盘时先运行 `uv run mindex clean` 预览，确认后再加 `--apply`，见[清理指南](docs/cleanup.md)。
+Disk reclamation previews first and deletes only with `--apply` (`mindex clean`, [cleanup guide](docs/cleanup.md)). Library-wide backup and migration uses `mindex backup` ([backup guide](docs/backup.md)).
 
 </details>
 
-## API 与开发
+## API and Agent
 
-除了网页，Mindex 也提供 CLI 与 HTTP API。服务启动后，可在 <http://127.0.0.1:8000/docs> 查看完整接口。
+Beyond the web UI, Mindex exposes a complete CLI, a REST API, and an MCP server. With `mindex serve` running, full interactive docs are at <http://127.0.0.1:8000/docs>.
 
 ```bash
 curl -X POST http://127.0.0.1:8000/api/search/text \
   -H 'Content-Type: application/json' \
-  -d '{"text":"雨夜，一个人强忍眼泪","granularity":"moment","limit":10}'
+  -d '{"text":"rainy night, someone holding back tears","granularity":"moment","limit":10}'
 ```
 
-| 接口 | 用途 |
+| Endpoint | Purpose |
 | :--- | :--- |
-| `POST /api/search/text` | 文字查询、渠道选择、人物与素材筛选 |
-| `POST /api/search/image` | 图片找视频；默认最大 20MB，支持静态 JPEG / PNG / WebP |
-| `POST /api/search/video` | 视频找相似；默认最长 30 秒、最大 100MB |
-| `GET /api/admin/sources` | 浏览素材；不依赖活动索引 |
-| `GET /api/persons` | 人物、参考图、覆盖与发布记录 |
-| `GET /api/studio/jobs` | 创作任务；方案、构建与版本接口见 Studio 文档 |
-| `/api/agent/*` | 智能助手会话与事件流，见[智能助手](docs/agent.md#api) |
-| `GET /api/status?health=true` | 索引与模型健康状态 |
+| `POST /api/search/text` | Text queries: channel selection, person and source filters |
+| `POST /api/search/image` | Image-to-video search; JPEG / PNG / WebP up to 20 MB |
+| `POST /api/search/video` | Video similarity search; up to 30 s and 100 MB |
+| `GET /api/admin/sources` | Browse sources and processing state (no active index needed) |
+| `GET /api/persons` | People, reference images, coverage, and releases |
+| `GET /api/studio/jobs` | Creation jobs; plan / build / version endpoints in the Studio docs |
+| `/api/agent/*` | Agent sessions and event streams ([agent docs](docs/agent.md#api)) |
+| `GET /api/status?health=true` | Index and model health |
 
-`granularity` 支持 `moment`（精细片段）、`shot`（镜头）、`scene`（已分析的连续场景）；所选粒度需要已建库。返回数量为 1–50。详细筛选与排名语义见[检索指南](docs/search.md)。
+`granularity` accepts `moment` (fine clip), `shot`, or `scene`; the chosen granularity must be indexed. Results are capped at 1–50 per query.
 
-### 源码与协作
+### CLI
 
-```text
-backend/src/      Python 后端；安装后的导入命名空间为 mindex
-frontend/src/     原生 HTML / CSS / JavaScript；shared/ 为公共资源
-scripts/          模型服务安装、启动及维护脚本
-deploy/           人物与本地分镜检测服务的独立环境依赖
-tests/            Python 测试、Node 断言与浏览器回归
-docs/             使用指南、架构与验证记录
-```
+The `mindex` command mirrors the entire product: `prepare` / `detect` / `split` (ingest and cutting), `enrich-dialogue` / `transcribe` / `align` / `analyze` (dialogue and analysis), `index` / `indexes` (versioned indexing and activation), `search`, `persons`, `topics`, `studio` (jobs, builds, and post-production subgroups), `backup`, `clips`, `e2e` (evaluation framework), `agent tools`, `clean`, and `serve`. Full reference: [CLI docs](docs/cli-reference.md).
 
-前后端均按 `search`、`admin`、`persons`、`studio`、`settings` 功能组织。
+### Agent harnesses
 
-- `uv run mindex serve` 同时提供页面和 API，无需构建前端。静态资源经 `/assets/<功能模块>/<文件名>` 提供，打包后随 `mindex.web` 安装。
-- 从旧目录结构的检出更新后，执行 `uv sync --extra dev` 刷新可编辑安装。
-- 完整目录、模块职责与打包映射见[架构文档](docs/architecture.md#模块职责)。
+The agent layer separates tools from runtimes, and interops with external harnesses:
 
-代理协作约定见 [AGENT.md](AGENT.md)，Claude Code 技术导航见 [CLAUDE.md](CLAUDE.md)。
-
-<details>
-<summary><strong>开发检查与真实模型评测</strong></summary>
+| Runtime | What it is |
+| :--- | :--- |
+| **Built-in harness** | In-process agent loop with streaming tool calls, previews, confirmations, attachments, and vision. Default; no extra dependencies. |
+| **DeepSeek Harness (dsh)** | Managed runtime using the official DeepSeek Harness SDK (`uv sync --extra dsh`; bundled with the desktop apps). Select it in Settings or via `agent.runtime`; applies to new sessions. |
+| **External harnesses** | Any MCP-capable client — DeepSeek Harness MCP client, Claude Code, Codex — connects to the exported MCP server and drives 144 of the 148 tools. |
 
 ```bash
-uv sync --extra person --extra dev
-uv run ruff check backend/src tests
-python scripts/check-doc-links.py
-python scripts/build-messages.py --check
-python scripts/build-assets.py --check
-for f in frontend/src/*/*.js; do node --check "$f"; done
-uv run pytest -m "not slow" -q   # 快速回归；完整回归去掉 -m
+# stdio MCP server (in-process app, or attach to a running server)
+uv run mindex mcp
+uv run mindex mcp --base-url http://127.0.0.1:8000
+
+# streamable HTTP endpoint (requires MINDEX_MCP_TOKEN)
+# enabled with agent.mcp.http_enabled, mounted at /mcp
 ```
 
-CI（`.github/workflows/ci.yml`）在推送与合并请求时运行上述检查与快速回归，每晚运行完整测试。
+MCP exports are filtered by domain (`agent.mcp.domains` / `--domain`) and by policy (`read` / `write` / `all`, enforced server-side). Model protocols are OpenAI tool-calling and Anthropic Messages compatible. Connection examples for Claude Code, Codex, and dsh clients are in the [agent guide](docs/agent.md).
 
-UI 回归另需 Node.js、Playwright 及其浏览器；可用 `MINDEX_PLAYWRIGHT_MODULE` 指定模块路径。完整 `pytest` 的通过数量随测试增加而变化，以本次实际运行为准。自动化测试使用真实媒体处理、数据库与 HTTP 链路，模型部分使用明确标记的确定性测试适配器；它们验证工程行为，不证明真实模型的检索或人物识别准确率（测试约定见[文档](docs/testing.md)）。
+## Documentation
 
-真实质量评测需要人工标注查询并固定模型、预处理与索引版本。流程见[端到端操作手册](docs/e2e-runbook.md)、[e2e 框架](docs/e2e-framework.md)及[评测标注说明](eval/README.md)。检索分数是排序依据，不是匹配概率。
-
-</details>
-
-## 文档
-
-| 我想…… | 从这里开始 |
+| Task | Start here |
 | :--- | :--- |
-| 跑通一部电影的导入与画面索引 | [电影处理指南](docs/film-workflow.md) |
-| 部署模型、接入自建服务 | [部署与服务协议](docs/deployment.md) |
-| 了解处理阶段、恢复与增量建库 | [离线管线](docs/pipeline.md) · [三渠道独立处理](docs/recall-enhancement.md) |
-| 管理素材、字幕与处理任务 | [素材后台](docs/admin.md) |
-| 管理人物并按出镜查找片段 | [人物库与证据审核](docs/persons.md) |
-| 从文案制作视频、调整方案 | [Studio 工作台](docs/studio.md) |
-| 用助手面板或 MCP 操作 Mindex | [智能助手](docs/agent.md) |
-| 安装桌面版（macOS/Windows/Linux）、启停本机模型服务 | [Mindex 桌面版](docs/desktop.md) |
-| 配置服务、音色和检索参数 | [设置页](docs/settings.md) · [配置参考](docs/config-reference.md) |
-| 备份素材、迁移合并或在新机器恢复 | [数据备份与迁移](docs/backup.md) |
-| 查看命令、模块和数据流 | [CLI 参考](docs/cli-reference.md) · [架构](docs/architecture.md) |
-| 评测模型或切换索引版本 | [端到端验证](docs/e2e-runbook.md) · [索引版本与回退](docs/index-versions.md) |
-| 了解后续规划 | [功能路线图](plans/roadmap.md) · [2026-10 审查报告](docs/review-2026-10-features-roadmap.md) |
+| Ingest a full film and index visuals | [Film workflow](docs/film-workflow.md) |
+| Deploy model services, use the HTTP protocol | [Deployment guide](docs/deployment.md) |
+| Understand processing stages, resume, incremental indexing | [Pipeline](docs/pipeline.md) · [Channel processing](docs/recall-enhancement.md) |
+| Manage sources, subtitles, processing tasks | [Media library](docs/admin.md) |
+| Manage people, review evidence | [Persons guide](docs/persons.md) |
+| Build videos, edit plans, rebuild selectively | [Studio guide](docs/studio.md) |
+| Mine topics and tune scoring | [Topics guide](docs/topics.md) |
+| Drive Mindex from the agent panel or MCP | [Agent guide](docs/agent.md) |
+| Install desktop apps, manage local services | [Desktop guide](docs/desktop.md) |
+| Configure services, voices, retrieval weights | [Settings](docs/settings.md) · [Config reference](docs/config-reference.md) |
+| Back up, migrate, or restore a library | [Backup and migration](docs/backup.md) |
+| Browse commands, modules, data flow | [CLI reference](docs/cli-reference.md) · [Architecture](docs/architecture.md) |
+| Evaluate retrieval quality, switch index versions | [E2E verification](docs/e2e-runbook.md) · [Index versions](docs/index-versions.md) |
+| Roadmap | [Roadmap](plans/roadmap.md) |
 
-更多机制说明、操作手册与历史验收记录见 **[文档中心](docs/README.md)**。
+Everything else — mechanisms, runbooks, and verification records — is in the [documentation center](docs/README.md). Agent collaboration conventions live in [AGENT.md](AGENT.md); the Claude Code technical map in [CLAUDE.md](CLAUDE.md).
 
 ---
 
 <div align="center">
 
-**从海量素材，到每一次创作。**
+**From a growing library to every creation.**
 
-[开始使用](#快速开始) · [阅读文档](docs/README.md) · [反馈问题](https://github.com/xfork24/mindex/issues)
+[Get started](#quick-start) · [Read the docs](docs/README.md) · [Report an issue](https://github.com/xfork24/mindex/issues)
 
 </div>
