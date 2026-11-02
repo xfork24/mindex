@@ -352,9 +352,10 @@ textarea.code-editor { width: 100%; min-height: 360px; font-family: ui-monospace
 .render-subtitle[hidden]{display:none}
 /* 分镜后期（转场等）：类型与时长并排，窄屏换行。 */
 .post-editor{margin-top:12px}
-.post-row{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:flex-end}
-.post-row .form-field{margin:0;flex:1 1 180px;min-width:0}
-.post-row .form-field:last-child{flex:0 1 120px}
+.post-transitions{display:flex;flex-wrap:wrap;gap:12px 20px;align-items:flex-end}
+.post-row{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:flex-end;max-width:100%}
+.post-row .form-field{margin:0;flex:0 1 180px;width:180px;min-width:0}
+.post-row .form-field:last-child{flex:0 1 120px;width:120px}
 .overlay-editor{margin-top:10px}
 .overlay-item{border:1px solid var(--line);border-radius:6px;padding:8px;margin:8px 0}
 .cover-candidates{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}

@@ -63,11 +63,13 @@ function renderPostSection(body, sid) {
   }
   const value = draft.data;
   const edgeLabel = (kind) => MindexI18n.msg(`ui.post_edge_${kind}`);
-  section.append(
+  const transitions = el("div", "", "post-transitions");
+  transitions.append(
     transitionRow(MindexI18n.msg("ui.post_enter"), EDGE_KINDS, value.enter, edgeLabel, (edge) => {value.enter = edge;}),
     transitionRow(MindexI18n.msg("ui.post_leave"), EDGE_KINDS, value.leave, edgeLabel, (edge) => {value.leave = edge;}),
     transitionRow(MindexI18n.msg("ui.post_next"), OVERLAP_KINDS, value.next, (kind) => kind, (edge) => {value.next = edge;})
   );
+  section.append(transitions);
   section.append(el("p", MindexI18n.msg("ui.post_help"), "muted"));
   const words = field(MindexI18n.msg("ui.post_highlights"), draft.highlights.join("，"));
   words.input.dataset.postHighlights = sid;
