@@ -12,7 +12,7 @@
 |---|---|---|---|
 | `data_dir` | Path | `data` | 素材库根目录。切分参数变化须换新目录 |
 | `runtime_overrides` | bool | true | false 固定 YAML，CLI 和验收 Web 每次读取都禁用动态覆盖；也可全局传 `--no-runtime-overrides` |
-| `enforce_gpu_lock` | bool | false | 强加 GPU 锁；开启后处理任务互斥、处理期间素材删除返回 409。关闭时允许不同素材/不同类型并行，同类重复任务和删除正在处理素材仍受保护；设置页可热更新 |
+| `enforce_gpu_lock` | bool | false | 强加 GPU 锁。false 时 pipeline 锁为共享锁（`shared/locks.py` 的 `SHAREABLE`），/admin 后台任务与手工 CLI 可同时使用 GPU 服务，单 GPU 部署存在争用风险；true 时处理任务互斥，任务启动/重试拿不到锁直接 409，发布子任务经 0.1 秒轮询排队等待 GPU 准入（`PublicationLock.admit`），处理期间素材删除返回 409。同类重复任务和删除正在处理素材不受该开关影响、始终受保护；设置页可热更新。单 GPU 部署建议显式开启 |
 
 ## `embedding` — WeMM 嵌入服务
 

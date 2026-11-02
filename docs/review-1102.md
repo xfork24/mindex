@@ -66,7 +66,7 @@
 
 **既有审查已记录在案的**（`docs/review-2026-10-26-project-analysis.md` 第 15 节，按风险排序）：
 
-1. **`enforce_gpu_lock` 默认 False**——单 GPU 互斥目前靠操作纪律，`/admin` 后台任务与手工 CLI 并行可能同时打 GPU 服务。这是最可能造成实际生产事故的一个。
+1. **`enforce_gpu_lock` 默认 False**——单 GPU 互斥目前靠操作纪律，`/admin` 后台任务与手工 CLI 并行可能同时打 GPU 服务。这是最可能造成实际生产事故的一个。**【2026-11-02 决策：保持默认 False，仅补文档说明（config-reference.md、admin.md）】**
 2. **密钥明文存 SQLite**——本机场景已用随机 token + 接口掩码缓解，但若走向多用户/服务器部署必须换系统密钥库。
 3. **无 LICENSE**——法律状态悬空。
 4. **studio 领域 28 个工具已触及自定上限**，模型选用准确率会先于工具数量见顶。
