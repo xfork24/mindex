@@ -1,5 +1,7 @@
 .venv*/
 .kiro/
+.zcode/
+.claude/
 __pycache__/
 *.pyc
 .pytest_cache/
