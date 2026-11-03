@@ -25,9 +25,9 @@ from mindex.persons import profiling
 from mindex.search.api import search_router
 from mindex.settings.runtime_settings import RuntimeConfig
 from mindex.settings.settings_api import settings_router
+from mindex.shared.backends import open_context
 from mindex.shared.config import Config, load_config
 from mindex.shared.shot_media import file_response as FileResponse
-from mindex.shared.storage import Store
 from mindex.shared.web_assets import frontend_root
 from mindex.shared.web_auth import install_web_auth
 from mindex.studio.studio_api import studio_router
@@ -65,7 +65,10 @@ def create_app(
     """``topic_llm`` 供测试注入选题挖掘的脚本化模型；``scheduler`` 为真时随应用启停每日选题调度器
     （``mindex serve`` 按 ``topics.scheduler.enabled`` 传入，测试与内嵌应用缺省关闭）。"""
     config = config or load_config()
-    store = Store(config.data_dir)
+    # 运行后端（db/media/locks/vectors/queue）经 BackendContext 构造：阶段 0 恒为
+    # local 形态，store 即 metadata.sqlite3 的 Store；集群形态（阶段 1 起）由此切换。
+    backends = open_context(config)
+    store = backends.store
     runtime = RuntimeConfig(config, store)  # 设置页保存后经覆盖层热生效，无需重启
     app = FastAPI(title="Mindex 视频素材检索", version="0.1.0")
     from mindex.agent.loopback import ensure_internal_token
@@ -132,7 +135,7 @@ def create_app(
 
     # 智能助手：同一工具注册表经回环调用上面的 REST 路由；agent_llm 供测试注入脚本化模型。
     app.state.agent_runtime = build_runtime(app, runtime, store, agent_llm=agent_llm)
-    app.state.runtime_config, app.state.store = runtime, store
+    app.state.runtime_config, app.state.store, app.state.backends = runtime, store, backends
     app.include_router(agent_router(app.state.agent_runtime, runtime, injected=agent_llm is not None))
     if config.agent.mcp.http_enabled:
         try:

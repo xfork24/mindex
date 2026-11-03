@@ -56,6 +56,7 @@ packages = [
   "mindex.search",
   "mindex.settings",
   "mindex.shared",
+  "mindex.shared.backends",
   "mindex.studio",
   "mindex.studio.workspace",
   "mindex.studio.workspace.handlers",

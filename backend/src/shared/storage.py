@@ -331,6 +331,18 @@ def migrate_metadata(db) -> int:
 
 
 class Store:
+    @classmethod
+    def open(cls, config) -> Store:
+        """经 BackendContext 构造（plans/horizontal-scaling-plan.md §5）。
+
+        阶段 0 恒等于 ``Store(config.data_dir)``；阶段 1 起按部署形态返回 SQLite 或
+        PostgreSQL 元数据库的统一 Store。集群调用链（API/worker）必须经此入口或
+        显式传入 BackendContext；``Store(root)`` 只服务本地工具、测试与暂存 SQLite。
+        """
+        from mindex.shared.backends import open_context
+
+        return open_context(config).store
+
     def __init__(self, root: Path):
         self.root = root.resolve()
         self.root.mkdir(parents=True, exist_ok=True)
