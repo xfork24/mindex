@@ -448,9 +448,14 @@ def check_index(store: Store, index_id: str) -> list[str]:
     # 探测缓存绑定文件路径、大小及纳秒 mtime；有效文件不必每次启动 ffprobe。
     media = ShotMedia(store, reuse_checks=True)
     archives = {}
+    # SELECT 列里的 json_extract 不在受控改写范围（plans §5），按后端显式双方言。
+    source_id_probe = (
+        "(SELECT DISTINCT snapshot::jsonb->>'source_id' FROM index_members WHERE index_id=%s)"
+        if store.pg else
+        "(SELECT DISTINCT json_extract(snapshot,'$.source_id') FROM index_members WHERE index_id=?)")
     references = {r['path']: r for r in store.rows(
-        "SELECT path,source_id,start,end FROM media_references WHERE source_id IN "
-        "(SELECT DISTINCT json_extract(snapshot,'$.source_id') FROM index_members WHERE index_id=?)", (index_id,))}
+        "SELECT path,source_id,start,end FROM media_references WHERE source_id IN " + source_id_probe,
+        (index_id,))}
     for member in members:
         if not member["complete"]:
             issues.append(f"片段未完成：{member['segment_id']}")

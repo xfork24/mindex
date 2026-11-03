@@ -59,6 +59,8 @@ FORMAT_VERSION = 1
 
 def build_bundle(config, output, *, selected, include_secrets, config_path, allow_legacy_representations=False,
                  verification='full'):
+    from mindex.shared.storage import require_sqlite
+    require_sqlite(config, "业务备份导出（PostgreSQL 一致性导出在阶段 5 交付）")
     root = config.data_dir.resolve()
     payload = output / 'data'
     payload.mkdir(parents=True)
@@ -521,6 +523,8 @@ def _switch(stage, root, config_path, config_text, *, work=None):
 def import_backup(config, bundle, *, all_sources=False, sources=None, skip_existing=False,
                   restore_config=False, dry_run=False, config_path=None, progress=None, verification='full'):
     verification_mode(verification)
+    from mindex.shared.storage import require_sqlite
+    require_sqlite(config, "业务备份导入（PostgreSQL 装载在阶段 5 交付）")
     bundle, root = bundle.resolve(), config.data_dir.resolve()
     config_path = (config_path or Path('config.local.yaml')).resolve()
     if bundle.is_relative_to(root) or root.is_relative_to(bundle):

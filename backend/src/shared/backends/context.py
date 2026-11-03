@@ -52,16 +52,24 @@ class BackendContext:
 def open_context(config: Config) -> BackendContext:
     """按配置构造运行后端。
 
-    阶段 0 恒为 local 形态，等价于现有 ``Store(config.data_dir)`` 加本地包装，
-    零行为变化。阶段 1 起读取部署形态配置：cluster 缺任何共享后端即在此抛出
-    中文修复提示并启动失败，绝不静默落回本地 SQLite。
+    阶段 1 支持 local（缺省，零行为变化）与 pg-single（database.backend=postgres，
+    单主机过渡测试形态，媒体/向量/锁仍为本地实现，禁止多机写入）。后续阶段的
+    cluster 形态缺任何共享后端时在此抛出中文修复提示并启动失败，绝不静默落回
+    本地 SQLite。
     """
-    from mindex.shared.storage import Store
+    from mindex.shared.storage import PgStore, Store
 
-    store = Store(config.data_dir)
+    if config.database.backend == "postgres":
+        store = PgStore(config)
+        library_id = store.library_id
+        form = "pg-single"
+    else:
+        store = Store(config.data_dir)
+        library_id = _library_id(store)
+        form = "local"
     return BackendContext(
-        form="local",
-        library_id=_library_id(store),
+        form=form,
+        library_id=library_id,
         data_dir=store.root,
         db=store,
         media=LocalMediaStore(store.root),

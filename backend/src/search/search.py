@@ -14,7 +14,7 @@ from time import perf_counter
 
 import jieba
 
-from mindex.admin.curation import SOURCE_SQL, EntityNotFound, Library, source_public
+from mindex.admin.curation import EntityNotFound, Library, source_public, source_sql
 from mindex.models.adapters import ModelError, MultimodalEmbedder, make_embedder
 from mindex.processing.indexing import VectorIndex
 from mindex.shared.config import Config, fingerprint
@@ -666,7 +666,7 @@ def status(
         "active_index": active,
         "sources": [
             source_public(s)
-            for s in store.rows(SOURCE_SQL + " WHERE COALESCE(c.hidden,0)=0 ORDER BY s.name,s.id")
+            for s in store.rows(source_sql(store) + " WHERE COALESCE(c.hidden,0)=0 ORDER BY s.name,s.id")
         ],
         "segment_counts": store.rows("SELECT kind,count(*) AS count FROM segments GROUP BY kind"),
         "runs": store.rows("SELECT * FROM runs ORDER BY id DESC LIMIT 15"),

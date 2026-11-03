@@ -35,6 +35,10 @@ mcp = ["mcp==1.30.0"]
 dsh = ["deepseek-harness-sdk==0.2.1rc2", "deepseek-harness-runtime-bin==0.2.1rc2", "mcp==1.30.0"]
 # AI 动画分镜的沙箱录制（无头 Chromium 逐帧截图）；安装后还需 `uv run playwright install chromium`。
 animation = ["playwright==1.64.1"]
+cluster = [
+    "psycopg-pool>=3.2,<4",
+    "psycopg[binary]>=3.2,<4",
+]
 
 [project.scripts]
 mindex = "mindex.cli:app"
@@ -57,6 +61,7 @@ packages = [
   "mindex.settings",
   "mindex.shared",
   "mindex.shared.backends",
+  "mindex.shared.db",
   "mindex.studio",
   "mindex.studio.workspace",
   "mindex.studio.workspace.handlers",
@@ -85,6 +90,9 @@ packages = [
 testpaths = ["tests"]
 markers = [
   "slow: 完整 ffmpeg 管线、创作构建、备份迁移与浏览器 UI 等重媒体用例；CI 快速回归用 -m \"not slow\" 跳过，每晚完整运行",
+  "requires_postgres: 真实 PostgreSQL 后端矩阵（MINDEX_TEST_POSTGRES_DSN 门控；缺 DSN 时 skip，集群实现必须在 CI 专项启用，plans §12）",
+  "requires_s3: 真实 S3 兼容对象存储（MINDEX_TEST_S3_ENDPOINT 门控）",
+  "requires_chroma_server: 独立 Chroma 服务（MINDEX_TEST_CHROMA_SERVER 门控）",
 ]
 
 [tool.ruff]

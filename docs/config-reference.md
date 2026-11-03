@@ -14,6 +14,17 @@
 | `runtime_overrides` | bool | true | false 固定 YAML，CLI 和验收 Web 每次读取都禁用动态覆盖；也可全局传 `--no-runtime-overrides` |
 | `enforce_gpu_lock` | bool | false | 强加 GPU 锁。false 时 pipeline 锁为共享锁（`shared/locks.py` 的 `SHAREABLE`），/admin 后台任务与手工 CLI 可同时使用 GPU 服务，单 GPU 部署存在争用风险；true 时处理任务互斥，任务启动/重试拿不到锁直接 409，发布子任务经 0.1 秒轮询排队等待 GPU 准入（`PublicationLock.admit`），处理期间素材删除返回 409。同类重复任务和删除正在处理素材不受该开关影响、始终受保护；设置页可热更新。单 GPU 部署建议显式开启 |
 
+## `database` — 元数据库后端（水平扩展）
+
+| 键 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `backend` | `sqlite` \| `postgres` | `sqlite` | 元数据库选择。`sqlite` 为本地 `metadata.sqlite3`（零依赖缺省）；`postgres` 为 pg-single 过渡形态（[水平扩展方案](../plans/horizontal-scaling-plan.md) §4：单主机单 API，媒体/向量/锁仍为本地实现，禁止多机写入）。切换需重启进程；写入新后端前可切回，开放写入后按 runbook 走停写/逆向迁移 |
+| `postgres.dsn_env` | str | `MINDEX_DATABASE_DSN` | DSN 只从环境变量读取（凭据不落配置文件/日志/任务快照）；远程 PG 使用校验证书的 TLS |
+| `postgres.pool_min` / `postgres.pool_max` | int | `0` / `8` | 查询连接池（进程内按 DSN 共享）；总连接预算按「API 副本 × 池 + worker + 维护余量」规划 |
+| `postgres.control_pool_max` | int | `2` | 心跳/控制小池（阶段 3 租约用），只跑短事务 |
+
+pg-single 使用步骤：`MINDEX_DATABASE_DSN=postgres://… mindex migrate` 建库（唯一 DDL 入口，API/worker 启动只校验版本）→ 以 `database.backend: postgres` 启动。设置页「部署后端」分区只读展示当前形态与 library_id。备份导出/导入、切片迁移/清理与镜头边界修复在该形态下显式拒绝（阶段 5 交付 PG 一致性导出）。
+
 ## `embedding` — WeMM 嵌入服务
 
 | 键 | 类型 | 默认 | 说明 |
