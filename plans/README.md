@@ -9,8 +9,9 @@
 | 文件 | 主题 |
 |---|---|
 | [retrieval-design-plan.md](retrieval-design-plan.md) | 视频片段检索的实施计划与设计决策（原 `PLAN.md`） |
-| [roadmap.md](roadmap.md) | 功能路线图（M1–M4）；对应审查报告见 [docs/review-2026-10-features-roadmap.md](../docs/review-2026-10-features-roadmap.md) |
+| [roadmap.md](roadmap.md) | 功能路线图（M1–M5）；对应审查报告见 [docs/review-2026-10-features-roadmap.md](../docs/review-2026-10-features-roadmap.md) |
 | [e2e-acceptance-test-plan.md](e2e-acceptance-test-plan.md) | 端到端验收测试计划 |
+| [horizontal-scaling-plan.md](horizontal-scaling-plan.md) | 素材容量水平扩展：瓶颈评估与 PostgreSQL/多后端存储/分布式锁队列的分阶段方案（已设计、未实施） |
 
 ## 检索与索引
 
