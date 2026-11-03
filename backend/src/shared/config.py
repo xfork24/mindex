@@ -638,11 +638,36 @@ class TopicsConfig(StrictModel):
     brave: TopicsBraveConfig = Field(default_factory=TopicsBraveConfig)
 
 
+class PostgresConfig(StrictModel):
+    """PostgreSQL 元数据库连接（阶段 1 的 pg-single 形态；plans §4）。
+
+    DSN 只从环境变量读取（dsn_env），不落配置文件/日志/任务快照；远程 PG 应使用
+    校验证书的 TLS（本地开发可用 sslmode=disable 的显式例外）。
+    """
+
+    dsn_env: str = "MINDEX_DATABASE_DSN"
+    pool_min: int = Field(default=0, ge=0)
+    pool_max: int = Field(default=8, ge=1)
+    control_pool_max: int = Field(default=2, ge=1)
+
+
+class DatabaseConfig(StrictModel):
+    """元数据库后端选择；其余后端（vector/storage/queue/locks）随阶段 2–4 加入。
+
+    pg-single 为过渡测试形态：单主机单 API、媒体/向量/锁仍为本地实现，禁止多机写入
+    （plans §4 运行形态表）。切换 backend 需重启进程，不做运行时热切换。
+    """
+
+    backend: Literal["sqlite", "postgres"] = "sqlite"
+    postgres: PostgresConfig = Field(default_factory=PostgresConfig)
+
+
 class Config(StrictModel):
     data_dir: Path = Path("data")
     source_upload_max_bytes: int = Field(default=20 * 1024**3, ge=1)
     runtime_overrides: bool = True
     enforce_gpu_lock: bool = False
+    database: DatabaseConfig = Field(default_factory=DatabaseConfig, exclude=True)
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
     analyzer: AnalyzerConfig = Field(default_factory=AnalyzerConfig)
     person: PersonConfig = Field(default_factory=PersonConfig)

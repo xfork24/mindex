@@ -521,6 +521,42 @@ def status(
 
 
 @app.command()
+def migrate(ctx: typer.Context):
+    """把配置选定的元数据库升级到当前 schema（集群形态的唯一 DDL 入口）。
+
+    local 形态沿用 SQLite 构造即迁移；pg-single/cluster 形态下 API 与 worker 启动只校验版本、
+    不执行 DDL，必须先运行本命令（plans §4：避免多个版本同时改表）。
+
+    示例：
+
+    \b
+      MINDEX_DATABASE_DSN=postgres://… mindex migrate
+    """
+    import os
+
+    config = ctx.obj
+    if config.database.backend == "postgres":
+        section = config.database.postgres
+        dsn = os.environ.get(section.dsn_env, "").strip()
+        if not dsn:
+            raise typer.BadParameter(f"缺少环境变量 {section.dsn_env}（PostgreSQL DSN）")
+        try:
+            import psycopg
+        except ImportError as exc:  # pragma: no cover - 依赖缺失时给出明确指引
+            raise typer.BadParameter("PostgreSQL 后端需要 psycopg：uv sync --extra cluster") from exc
+        from mindex.shared.db.migrate_pg import migrate_pg
+
+        with psycopg.connect(dsn) as conn:
+            version = migrate_pg(conn)
+        print_json({"backend": "postgres", "schema_version": version})
+    else:
+        from mindex.shared.storage import Store
+
+        Store(config.data_dir)
+        print_json({"backend": "sqlite", "schema_version": "latest"})
+
+
+@app.command()
 def check(
     ctx: typer.Context,
     index_id: Annotated[str | None, typer.Option(help="内容索引版本 ID；省略使用活动索引。")] = None,

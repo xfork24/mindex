@@ -16,14 +16,14 @@
 - 改动任何被页面引用的 JS/CSS 后运行 `python scripts/build-assets.py`，把 HTML 中 `/assets/` 地址的 `?v=` 更新为内容哈希（`--check` 仅校验；文案改动先运行 build-messages.py）。
 - API 装配在 `backend/src/api.py`；CLI 入口在 `backend/src/cli.py`（全局选项、核心命令与 `indexes`），`e2e`、`persons`、`clips`、`topics`、`agent` 命令组在 `cli_e2e.py`、`cli_persons.py`、`cli_clips.py`、`cli_topics.py`、`cli_agent.py`（顶层 `mcp` 也在后者），`backup` 在 `maintenance/backup_cli.py`；重依赖保留在命令函数内延迟导入。
 - 静态资源统一通过 `shared/web_assets.py` 定位；同时考虑源码目录与 wheel 中的 `mindex.web`，打包规则在 `pyproject.toml`、`MANIFEST.in`。
-- 后端抽象位于 `shared/backends/`（`BackendContext` 与 db/media/locks/vectors/queue 协议，本地实现即现有 SQLite/chroma 本地/文件锁/进程内执行）；API 装配经 `open_context` 构造，集群调用链用 `Store.open(config)` 取统一 Store，不得绕过上下文直构远端连接。SQL 语义基线在 `tests/test_sql_characteristics.py`（水平扩展分阶段改造见 plans/horizontal-scaling-plan.md 与盘点文档）。
+- 后端抽象位于 `shared/backends/`（`BackendContext` 与 db/media/locks/vectors/queue 协议，本地实现即现有 SQLite/chroma 本地/文件锁/进程内执行）；PG 适配与受控方言翻译在 `shared/db/`（REPLACE/rowid/json_extract/CURRENT_TIMESTAMP 等语义改写，复杂语句用 `DualSQL`/方言函数显式登记）。API 装配经 `open_context` 构造，集群调用链用 `Store.open(config)` 取统一 Store，不得绕过上下文直构远端连接。SQL 语义基线在 `tests/test_sql_characteristics.py` 与 `tests/test_pg_backend.py`（`MINDEX_TEST_POSTGRES_DSN` 门控；水平扩展分阶段改造见 plans/horizontal-scaling-plan.md 与盘点文档）。
 - UI 文案只改 `frontend/src/shared/messages.json`，然后运行 `python scripts/build-messages.py` 生成 `messages.js`（`--check` 仅校验）。保留语言切换前的输入和页面状态。
 - 新模型通过 `models/adapters.py` 的协议与 `make_*` 工厂接入，具体后端各在一个模块（`embedders`、`qwen`、`speech`、`storyboard`、`writer`、`transcribers`、`detectors`、`video_generators`、`image_generators`、`music_generators`、`animator`）；模型依赖使用独立环境，不混入应用环境。单 GPU 按阶段轮换服务，不假设全部服务同时在线。
 - 桌面版（`desktop/`，Electron 外壳 + 冻结的 `mindex serve`）与 Web 版共用全部前后端代码：`desktop/` 只放外壳与打包，业务一律在后端经 REST 访问；桌面专属能力只经 preload 的 `window.MindexDesktop`，前端在没有它时保持 Web 行为。ffmpeg/ffprobe 调用一律经 `shared/media.py` 的 `command()`、`ffmpeg_bin()`、`ffprobe_bin()`；以自身源码哈希作指纹的模块登记在 `desktop/sidecar/mindex.spec` 的 `SOURCE_MODULES`，只经 `mindex -m` 运行的入口加进 `hiddenimports`；新增 package-data 后运行 `python scripts/check-desktop-sidecar.py`。详见 `docs/desktop.md`。
 
 ## 必须保持的行为
 
-- SQLite 是业务事实来源；Chroma 只保存显式向量，通过稳定 ID 关联元数据。
+- 配置选定的元数据库是业务事实来源（`database.backend`：缺省 sqlite 本地 metadata.sqlite3；postgres 为 pg-single 过渡形态，先 `mindex migrate` 再启动）；Chroma 只保存显式向量，通过稳定 ID 关联元数据。
 - 嵌入模型、预处理与空间身份必须匹配，禁止跨空间比较向量。新版文本查询允许有明确告警的 BM25 降级，图片与视频查询仍需可用的匹配嵌入服务。
 - 发布索引保留不可变快照；更换空间或分析配置建立新版本。切分布局参数变化使用新 `data_dir`。
 - 业务读取镜头媒体经 `shared/shot_media.py`，避免直接依赖历史切片路径。保留检查点、输入指纹、文件哈希、原子写入与任务互斥语义。

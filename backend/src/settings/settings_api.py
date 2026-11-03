@@ -211,6 +211,25 @@ def _silence_wav(path: Path, seconds: float = 0.5) -> None:
         handle.writeframes(b"\x00\x00" * int(16000 * seconds))
 
 
+def _deployment_status(store: Store) -> dict:
+    """部署形态与后端概览（只读；后端选择经 config 文件配置，修改后需重启进程）。
+
+    plans/horizontal-scaling-plan.md §4/§13：设置页可诊断后端身份与形态；写回式
+    配置界面随阶段 5 集群装配交付。
+    """
+    library_id = store.library_id if getattr(store, "library_id", None) else get_setting(store, "library.id")
+    return {
+        "form": "pg-single" if store.pg else "local",
+        "database": store.backend.backend,
+        "media": "local",
+        "vectors": "chroma_local",
+        "locks": "file",
+        "queue": "inline",
+        "library_id": library_id or "",
+        "schema_ready": True,
+    }
+
+
 ECHO_TOOL = {
     "name": "echo",
     "description": "连接测试工具：原样返回 text。",
@@ -456,6 +475,7 @@ def settings_router(runtime: RuntimeConfig, store: Store) -> APIRouter:
             "providers": PROVIDER_LABELS,
             "presets": _presets(current),
             "embedding_status": embedding_status,
+            "deployment": _deployment_status(store),
             "voices": voices,
             "business": {
                 "enforce_gpu_lock": current.enforce_gpu_lock,

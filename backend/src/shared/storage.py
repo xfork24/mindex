@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 import threading
 import uuid
 from collections import OrderedDict
-from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+from mindex.shared.db.sqlite_backend import SqliteBackend
 from mindex.shared.migrations import execute_script, migrate
 
 # 检索热路径的整索引快照缓存（活动索引 + 一个固定预览索引足够）。
@@ -26,6 +25,16 @@ def bump_snapshot_revision(db) -> None:
 
 def dumps(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
+def require_sqlite(config, action: str) -> None:
+    """维护能力在 PG 元数据库下的显式拒绝（plans §11 阶段 1：未支持时不静默跳过）。"""
+    if config.database.backend == "postgres":
+        from mindex.shared.db.errors import UnsupportedOperation
+
+        raise UnsupportedOperation(
+            f"{action} 暂不支持 PostgreSQL 元数据库（备份迁移与 SQLite 专属维护在阶段 5 交付）；"
+            "local 形态可继续使用该能力")
 
 
 METADATA_SCHEMA_V1 = """
@@ -347,6 +356,7 @@ class Store:
         self.root = root.resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         self.path = self.root / "metadata.sqlite3"
+        self.backend = SqliteBackend(self.path)
         with self.connect() as db:
             db.execute("PRAGMA journal_mode=WAL")
             migrate(db, METADATA_STEPS)
@@ -354,6 +364,11 @@ class Store:
         # 会重复开关 sqlite 连接。缓存只影响冲突展示，构建仍在锁内用新读校验签名。
         self._hot_cache: dict[str, tuple[float, object]] = {}
         self._hot_cache_lock = threading.Lock()
+
+    @property
+    def pg(self) -> bool:
+        """元数据库是否为 PostgreSQL（pg-single/cluster 形态）。"""
+        return self.backend.backend == "postgres"
 
     def _hot_cached(self, key: str, ttl: float, producer):
         import time
@@ -373,18 +388,10 @@ class Store:
         return self._hot_cached("active_index", ttl, self.active_index)
 
     @contextmanager
-    def connect(self) -> Iterator[sqlite3.Connection]:
-        db = sqlite3.connect(self.path, timeout=30)
-        db.row_factory = sqlite3.Row
-        db.execute("PRAGMA foreign_keys=ON")
-        try:
+    def connect(self):
+        """一个事务：正常退出提交、异常回滚（SQLite 为每调用新连接；PG 为池检出）。"""
+        with self.backend.connect() as db:
             yield db
-            db.commit()
-        except Exception:
-            db.rollback()
-            raise
-        finally:
-            db.close()
 
     def rows(self, sql: str, args=()) -> list[dict]:
         with self.connect() as db:
@@ -610,3 +617,40 @@ class Store:
                 return ShotMedia(self).materialize(reference['source_id'], reference['start'], reference['end'])
             raise FileNotFoundError(relative)
         return path
+
+
+class PgStore(Store):
+    """PostgreSQL 元数据库的统一 Store（阶段 1 的 pg-single 形态）。
+
+    与 ``Store(root)`` 共用全部业务方法；差别只在连接层：池化 PG 连接 + 受控方言
+    翻译（shared/db）。``root`` 在此形态仅为节点缓存/临时目录（plans §4），媒体/
+    向量/锁仍走本地实现。构造**不执行任何 DDL**——启动只校验 schema 版本，集群
+    迁移由 ``mindex migrate`` 独立执行（plans §4）。
+    """
+
+    def __init__(self, config):
+        import os
+
+        from mindex.shared.db.pg_backend import PgBackend
+
+        self.root = config.data_dir.resolve()
+        self.root.mkdir(parents=True, exist_ok=True)
+        self.path = self.root / "metadata.sqlite3"  # 兼容属性；该形态不读写此文件
+        self._hot_cache: dict[str, tuple[float, object]] = {}
+        self._hot_cache_lock = threading.Lock()
+        section = config.database.postgres
+        dsn = os.environ.get(section.dsn_env, "").strip()
+        if not dsn:
+            raise RuntimeError(
+                f"database.backend=postgres 需要在环境变量 {section.dsn_env} 提供 DSN"
+                "（凭据只从环境变量读取，不写入配置文件）")
+        # 先用一次引导连接完成版本校验并读取 library_id；锁键/缓存租户键都用它（plans §2）。
+        from mindex.shared.db.migrate_pg import check_schema
+
+        with PgBackend(dsn, library_id="bootstrap", pool_max=section.pool_max).connect() as db:
+            check_schema(db)
+            row = db.execute("SELECT value FROM settings WHERE key=?", ("library.id",)).fetchone()
+        if row is None:  # 基线迁移未跑或未建库：给出唯一修复入口
+            raise RuntimeError("PostgreSQL 元数据库缺少 library.id；请先执行 mindex migrate")
+        self.library_id = row[0]
+        self.backend = PgBackend(dsn, library_id=self.library_id, pool_max=section.pool_max)

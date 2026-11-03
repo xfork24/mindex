@@ -41,6 +41,19 @@ LEFT JOIN (SELECT source_id, SUM(kind='shot') AS shot_count, SUM(kind='moment') 
            FROM segments GROUP BY source_id) n ON n.source_id=s.id
 """
 
+# PG 变体：数值 OR 真值与 SUM(kind='shot') 布尔聚合显式改写为 CASE（plans §5，不做通用转译）。
+SOURCE_SQL_PG = """
+SELECT s.*, c.display_name AS custom_name, COALESCE(c.notes,'') AS notes,
+       COALESCE(c.favorite,0) AS favorite, COALESCE(c.hidden,0) AS hidden, c.updated_at,
+       COALESCE(n.shot_count,0) AS shot_count, COALESCE(n.moment_count,0) AS moment_count,
+       COALESCE(n.scene_count,0) AS scene_count
+FROM sources s LEFT JOIN source_curation c ON c.id=s.id
+LEFT JOIN (SELECT source_id, SUM(CASE WHEN kind='shot' THEN 1 ELSE 0 END) AS shot_count,
+                  SUM(CASE WHEN kind='moment' THEN 1 ELSE 0 END) AS moment_count,
+                  SUM(CASE WHEN kind='scene' THEN 1 ELSE 0 END) AS scene_count
+           FROM segments GROUP BY source_id) n ON n.source_id=s.id
+"""
+
 SEGMENT_SQL = """
 SELECT g.*, s.name AS original_source_name, sc.display_name AS custom_source_name,
        c.display_name AS custom_name, COALESCE(c.notes,'') AS notes,
@@ -55,6 +68,38 @@ LEFT JOIN segment_curation c ON c.id=g.id
 LEFT JOIN source_curation sc ON sc.id=s.id
 LEFT JOIN segment_curation pc ON pc.id=g.parent_id
 """
+
+SEGMENT_SQL_PG = """
+SELECT g.*, s.name AS original_source_name, sc.display_name AS custom_source_name,
+       c.display_name AS custom_name, COALESCE(c.notes,'') AS notes,
+       COALESCE(c.favorite,0) AS favorite, COALESCE(c.hidden,0) AS hidden, c.updated_at,
+       (CASE WHEN COALESCE(sc.hidden,0)<>0 OR COALESCE(pc.hidden,0)<>0 THEN 1 ELSE 0 END) AS inherited_hidden,
+       (CASE WHEN COALESCE(c.hidden,0)<>0 OR COALESCE(sc.hidden,0)<>0 OR COALESCE(pc.hidden,0)<>0
+             THEN 1 ELSE 0 END) AS effective_hidden,
+       (SELECT COUNT(*) FROM segments child WHERE child.parent_id=g.id) AS child_count,
+       (SELECT COUNT(*)+1 FROM segments prior WHERE prior.source_id=g.source_id AND prior.kind=g.kind
+          AND (prior.start,prior.end,prior.id)<(g.start,g.end,g.id)) AS position
+FROM segments g JOIN sources s ON s.id=g.source_id
+LEFT JOIN segment_curation c ON c.id=g.id
+LEFT JOIN source_curation sc ON sc.id=s.id
+LEFT JOIN segment_curation pc ON pc.id=g.parent_id
+"""
+
+# 有效隐藏过滤的双方言片段：SQLite 数值 OR 真值 / PG 布尔化 CASE（结果同为 0/1 整数）。
+HIDDEN_FILTER = {
+    "sqlite": "(COALESCE(c.hidden,0) OR COALESCE(sc.hidden,0) OR COALESCE(pc.hidden,0))=?",
+    "pg": ("(CASE WHEN COALESCE(c.hidden,0)<>0 OR COALESCE(sc.hidden,0)<>0 OR COALESCE(pc.hidden,0)<>0"
+           " THEN 1 ELSE 0 END)=%s"),
+}
+
+
+def source_sql(store: Store) -> str:
+    """按元数据库后端选择素材组织视图的方言版本。"""
+    return SOURCE_SQL_PG if store.pg else SOURCE_SQL
+
+
+def segment_sql(store: Store) -> str:
+    return SEGMENT_SQL_PG if store.pg else SEGMENT_SQL
 
 
 def organization(row: dict) -> dict:
@@ -113,13 +158,13 @@ class Library:
         self.store = store
 
     def source_row(self, identifier: str) -> dict:
-        row = self.store.one(SOURCE_SQL + " WHERE s.id=?", (identifier,))
+        row = self.store.one(source_sql(self.store) + " WHERE s.id=?", (identifier,))
         if row is None:
             raise EntityNotFound("找不到素材")
         return row
 
     def segment_row(self, identifier: str) -> dict:
-        row = self.store.one(SEGMENT_SQL + " WHERE g.id=?", (identifier,))
+        row = self.store.one(segment_sql(self.store) + " WHERE g.id=?", (identifier,))
         if row is None:
             raise EntityNotFound("找不到片段")
         return row
@@ -317,9 +362,9 @@ class Library:
         if favorite_only:
             clauses.append("COALESCE(c.favorite,0)=1")
         where = " WHERE " + " AND ".join(clauses) if clauses else ""
-        total = self.store.one("SELECT COUNT(*) AS n FROM (" + SOURCE_SQL + where + ")", args)["n"]
+        total = self.store.one("SELECT COUNT(*) AS n FROM (" + source_sql(self.store) + where + ")", args)["n"]
         rows = self.store.rows(
-            SOURCE_SQL + where + " ORDER BY LOWER(COALESCE(c.display_name,s.name)),s.id LIMIT ? OFFSET ?",
+            source_sql(self.store) + where + " ORDER BY LOWER(COALESCE(c.display_name,s.name)),s.id LIMIT ? OFFSET ?",
             [*args, page_size, (page - 1) * page_size],
         )
         return {
@@ -348,14 +393,14 @@ class Library:
             clauses.append("g.parent_id=?")
             args.append(parent_id)
         if visibility != "all":
-            clauses.append("(COALESCE(c.hidden,0) OR COALESCE(sc.hidden,0) OR COALESCE(pc.hidden,0))=?")
+            clauses.append(HIDDEN_FILTER["pg" if self.store.pg else "sqlite"])
             args.append(int(visibility == "hidden"))
         if favorite_only:
             clauses.append("COALESCE(c.favorite,0)=1")
         where = " WHERE " + " AND ".join(clauses)
-        total = self.store.one("SELECT COUNT(*) AS n FROM (" + SEGMENT_SQL + where + ")", args)["n"]
+        total = self.store.one("SELECT COUNT(*) AS n FROM (" + segment_sql(self.store) + where + ")", args)["n"]
         rows = self.store.rows(
-            SEGMENT_SQL + where + " ORDER BY g.start,g.end,g.id LIMIT ? OFFSET ?",
+            segment_sql(self.store) + where + " ORDER BY g.start,g.end,g.id LIMIT ? OFFSET ?",
             [*args, page_size, (page - 1) * page_size],
         )
         return {

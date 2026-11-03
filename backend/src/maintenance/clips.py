@@ -108,6 +108,10 @@ def migrate(config, source_id=None, *, apply=False, verify=False):
     store.path = store.root / 'metadata.sqlite3'
     if not store.path.is_file():
         raise FileNotFoundError(store.path)
+    from mindex.shared.db.sqlite_backend import SqliteBackend
+    from mindex.shared.storage import require_sqlite
+    store.backend = SqliteBackend(store.path)
+    require_sqlite(config, "切片迁移（含迁移前的元数据库备份）")
     plans = inventory(store, source_id)
     if source_id and not plans:
         raise ValueError('Unknown source')
@@ -234,6 +238,8 @@ def prune(config, migration_report, *, apply=False):
     from mindex.shared import locks
 
     store = Store(config.data_dir)
+    from mindex.shared.storage import require_sqlite
+    require_sqlite(config, "切片清理（含清理前的元数据库备份）")
     report_path = Path(migration_report)
     migration = json.loads(report_path.read_text(encoding="utf-8"))
     stamp = datetime.now(UTC).strftime('%Y%m%dT%H%M%S%fZ')

@@ -53,6 +53,8 @@ def store_at(root: Path) -> Store:
         raise ValueError('数据库不能是符号链接')
     if not store.path.is_file():
         raise ValueError(f'找不到数据库：{store.path}')
+    from mindex.shared.db.sqlite_backend import SqliteBackend
+    store.backend = SqliteBackend(store.path)
     return store
 
 

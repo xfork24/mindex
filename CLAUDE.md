@@ -74,7 +74,7 @@ uv run mindex clean [--apply]                    # 磁盘清理：默认预览�
 - **嵌入空间身份**：服务必须在 `/health` 和每次向量响应中携带身份（model/revision/quantization/dims/预处理/implementation 指纹，`config.fingerprint` 计算）；查询身份与活动索引不符返回 503，禁止跨空间比较向量。
 - **索引不可变**：换模型、量化、维度、预处理或分析配置 → 新建独立索引版本，从不覆盖；发布前 `check`，激活在 SQLite 事务内完成。回退 = 先切回旧模型服务/配置，再 `indexes activate 旧索引ID`。索引冻结描述与对白快照，后续分析更新不影响已发布索引。
 - **切分布局不可变**：detector/video 切分参数变化须使用新 `data_dir`，不覆盖已有布局。
-- **SQLite 是事实来源**：Chroma 只存显式向量（`embedding_function=None`），业务数据通过 segment/representation ID 关联回 SQLite。
+- **配置选定的元数据库是事实来源**（`database.backend`，缺省 sqlite；postgres 为 pg-single 过渡形态，`mindex migrate` 是唯一 DDL 入口）：Chroma 只存显式向量（`embedding_function=None`），业务数据通过 segment/representation ID 关联回元数据库；SQL 语义基线在 `tests/test_sql_characteristics.py`，PG 适配的受控翻译在 `shared/db/`。
 - **对齐环境隔离**：强制对齐用独立 CPU venv `.venv-align`（依赖安装在该独立环境中，仓库已不提供对齐依赖清单），`processing/align_worker.py` 以独立子进程运行，绝不装入应用环境；`mindex align .venv-align/bin/python`（解释器为位置参数，`--python` 选项属于 `mindex e2e phase align`）。
 
 ### 存储布局（data_dir）

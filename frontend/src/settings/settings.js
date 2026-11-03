@@ -266,6 +266,19 @@ function renderRoles(data) {
   $('roles').replaceChildren(...ROLE_ORDER.map((role) => renderRole(byRole[role])));
 }
 
+// 部署后端概览（只读）：后端选择经 config 文件配置，修改后需重启进程生效。
+function renderDeployment(data) {
+  const info = data.deployment;
+  if (!info) return;
+  $('deploy-form').textContent = info.form;
+  $('deploy-database').textContent = info.database;
+  $('deploy-media').textContent = info.media;
+  $('deploy-vectors').textContent = info.vectors;
+  $('deploy-locks').textContent = info.locks;
+  $('deploy-queue').textContent = info.queue;
+  $('deploy-library').textContent = info.library_id || '—';
+}
+
 function normalizedWeights(values) {
   const scale = Math.max(...Object.values(values), 0) || 1;
   const total = Object.values(values).reduce((sum, value) => sum + value / scale, 0) || 1;
@@ -514,6 +527,7 @@ async function loadSettings() {
     $('index-banner').append(node('div', error.message, 'index-banner-error'));
   });
   renderRoles(data);
+  renderDeployment(data);
   loadAgentRuntime().catch((error) => notify(error.message, true));
   renderTuning(data);
   renderVoices(data, state.voiceCatalog);

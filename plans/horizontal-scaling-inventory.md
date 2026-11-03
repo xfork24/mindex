@@ -145,3 +145,25 @@
 - settings 新键 `library.id`（建库生成 UUID，锁/缓存租户键；plans §2）。
 - pyproject packages 增加 `mindex.shared.backends`。
 - 无行为变化：本地路径全部等价旧实现；新抽象不触发网络。
+
+## 9. 阶段 1 变更清单（pg-single）
+
+- 新增 `shared/db/`：统一异常（挂 sqlite3 异常体系）、统一行对象、受控方言翻译器
+  （占位符/保留字 end+trigger/INSERT OR REPLACE→ON CONFLICT 忠实改写含 rowid=DEFAULT
+  与默认列重置/无列名 INSERT 补列/json_extract 文本等值+json_type/CURRENT_TIMESTAMP
+  同形化/CASE-END 深度识别）、SQLite/PG 后端（进程内按 DSN 共享池）、PG 基线 DDL
+  （43+1 表，显式 rowid identity 列）、基线迁移器（schema_migrations+迁移锁+library.id
+  种子）、SQLite↔PG 往返装载内核（transfer.py）。
+- Store 拆出 `backend` 注入（SqliteBackend 行为等价搬移）；新增 `PgStore`（启动仅
+  check_schema，不执行 DDL）；`open_context` 支持 pg-single 形态。
+- 方言化：curation 的 SOURCE_SQL/SEGMENT_SQL/隐藏过滤（OR 真值/SUM 布尔聚合 →
+  CASE）、indexing check_index 的 json_extract 子查询；维护路径（备份导出/导入、切片
+  迁移/清理、镜头边界修复）在 PG 下显式拒绝（UnsupportedOperation）。
+- 配置：`database` 节（postgres dsn_env/池参数，exclude 序列化）；`mindex migrate`
+  命令；设置页「部署后端」只读分区；config.example.yaml/docs 同步。
+- 依赖：psycopg[binary]+psycopg-pool 放可选 `cluster` extra；markers
+  requires_postgres/requires_s3/requires_chroma_server。
+- 验收：tests/test_pg_backend.py（真实 PG16：迁移幂等/SQL 特征对照/rowid 序列/
+  租约互斥/往返/create_app 冒烟）；SQLite 全量回归无行为变化。
+- **未支持（阶段 2/3 交付）**：persons 证据路径的数值 json 比较/json_each（PG 上
+  响亮失败）；检索热路径仍全快照装载（阶段 2 投影改造）；多 API/多机（阶段 3+）。

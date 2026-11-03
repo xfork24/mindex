@@ -2,6 +2,16 @@
 # 下列 192.168.1.86 等局域网地址仅为示例，请替换为自己的部署，或在设置页配置并激活模型档案。
 # 完整键说明见 docs/config-reference.md；未知键会使配置校验失败。
 data_dir: ./data
+# 元数据库后端（水平扩展，见 docs/config-reference.md 与 plans/horizontal-scaling-plan.md）。
+# 缺省 sqlite 即本地 metadata.sqlite3；postgres 为 pg-single 过渡形态（单主机单 API；
+# 先运行 MINDEX_DATABASE_DSN=… mindex migrate，DSN 只从环境变量读取）。
+database:
+  backend: sqlite
+  # postgres:
+  #   dsn_env: MINDEX_DATABASE_DSN
+  #   pool_min: 0
+  #   pool_max: 8
+  #   control_pool_max: 2
 # 关闭时允许不同素材/不同类型处理并行；开启时沿用全局管线互斥。
 enforce_gpu_lock: false
 # 素材上传每文件 20 GiB，独立于 search.max_upload_mb（检索查询视频）。

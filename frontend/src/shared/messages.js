@@ -14066,5 +14066,45 @@ window.MindexMessages = {
   "ui.studio_query_vector_generate": {
     "zh": "生成查询向量",
     "en": "Generating query embedding"
+  },
+  "ui.0047e561269f": {
+    "zh": "部署后端",
+    "en": "Deployment backends"
+  },
+  "ui.e34a940790fb": {
+    "zh": "元数据库、媒体、向量、锁与队列的运行后端（只读）",
+    "en": "Runtime backends for the metadata database, media, vectors, locks and queue (read-only)"
+  },
+  "ui.948b21de1dd6": {
+    "zh": "运行形态",
+    "en": "Form"
+  },
+  "ui.d3f0693c30e1": {
+    "zh": "元数据库",
+    "en": "Metadata DB"
+  },
+  "ui.c38b9b8eda92": {
+    "zh": "媒体存储",
+    "en": "Media storage"
+  },
+  "ui.fae158475ede": {
+    "zh": "向量",
+    "en": "Vectors"
+  },
+  "ui.a9e2a2864404": {
+    "zh": "锁",
+    "en": "Locks"
+  },
+  "ui.cd35413f05e7": {
+    "zh": "队列",
+    "en": "Queue"
+  },
+  "ui.4c7d6d34bfcf": {
+    "zh": "素材库 ID",
+    "en": "Library ID"
+  },
+  "ui.e7fad659532e": {
+    "zh": "后端选择在 config 文件中配置（database.backend 等），修改后需重启进程生效。",
+    "en": "Backends are selected in the config file (database.backend, …); changes take effect after a process restart."
   }
 };
