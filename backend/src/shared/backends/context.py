@@ -37,6 +37,7 @@ class BackendContext:
     locks: LockProvider
     vectors: VectorStores
     queue: TaskQueue
+    staging: object | None = None  # StagingArea；未配置预算时为 None
 
     @property
     def store(self):
@@ -97,6 +98,7 @@ def open_context(config: Config) -> BackendContext:
         locks: LockProvider = PgLockProvider(store.backend, library_id=library_id)
     else:
         locks = FileLockProvider(store.root)
+    staging = _staging(config, store.root)
     return BackendContext(
         form=form,
         library_id=library_id,
@@ -106,7 +108,24 @@ def open_context(config: Config) -> BackendContext:
         locks=locks,
         vectors=vectors,
         queue=queue,
+        staging=staging,
     )
+
+
+def _staging(config: Config, root: Path):
+    """按配置构建节点 staging 工作集（plans §8）：local 用 storage.staging_quota_gb
+    （0 = 不限，保持零行为变化）；s3 形态固定启用（s3.staging_quota_gb/min_free_gb）。"""
+    from mindex.shared.backends.staging import StagingArea
+
+    if config.storage.backend == "s3":
+        section = config.storage.s3
+        return StagingArea(root / "cache" / "staging",
+                           quota_bytes=int(section.staging_quota_gb * 1024**3),
+                           min_free_bytes=int(section.min_free_gb * 1024**3))
+    if config.storage.staging_quota_gb > 0:
+        return StagingArea(root / "cache" / "staging",
+                           quota_bytes=int(config.storage.staging_quota_gb * 1024**3))
+    return None
 
 
 class PgQueueAdapter:

@@ -689,6 +689,31 @@ class LocksConfig(StrictModel):
     backend: Literal["file", "postgres"] = "file"
 
 
+class S3Config(StrictModel):
+    """S3 兼容对象存储（阶段 4B；plans §8）。凭据只从环境变量读取；具体产品的
+    multipart/checksum/version 能力需逐项验证，不默认等同 AWS。"""
+
+    endpoint_url: str = "http://127.0.0.1:9000"
+    bucket: str = "mindex"
+    prefix: str = ""
+    region: str = ""
+    access_key_id_env: str = "MINDEX_S3_ACCESS_KEY"
+    secret_access_key_env: str = "MINDEX_S3_SECRET_KEY"
+    staging_quota_gb: float = Field(default=100, gt=0)
+    min_free_gb: float = Field(default=20, ge=0)
+    presign_expire_seconds: int = Field(default=900, ge=60)
+
+
+class StorageConfig(StrictModel):
+    """媒体存储后端（阶段 4）：local 为单机文件系统（现有行为）；s3 为对象存储
+    （阶段 4B 交付实现；NFS 为后续可选共享媒体后端，须实测 rename/同步语义）。"""
+
+    backend: Literal["local", "s3"] = "local"
+    s3: S3Config = Field(default_factory=S3Config)
+    # 本地形态同样可用 staging 预算约束缓存/临时工作区（plans §8）；0 表示不限。
+    staging_quota_gb: float = Field(default=0, ge=0)
+
+
 class DatabaseConfig(StrictModel):
     """元数据库后端选择；其余后端（vector/storage/queue/locks）随阶段 2–4 加入。
 
@@ -709,6 +734,7 @@ class Config(StrictModel):
     vector: VectorConfig = Field(default_factory=VectorConfig, exclude=True)
     queue: QueueConfig = Field(default_factory=QueueConfig, exclude=True)
     locks: LocksConfig = Field(default_factory=LocksConfig, exclude=True)
+    storage: StorageConfig = Field(default_factory=StorageConfig, exclude=True)
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
     analyzer: AnalyzerConfig = Field(default_factory=AnalyzerConfig)
     person: PersonConfig = Field(default_factory=PersonConfig)
