@@ -9,7 +9,7 @@ for command in uv ffmpeg ffprobe; do
   fi
 done
 if [[ ! -x .venv-detector/bin/python ]]; then
-  uv venv .venv-detector --python 3.11
+  uv venv .venv-detector --python 3.12
 fi
 uv pip install --python .venv-detector/bin/python -r deploy/detector-local.txt
 # 仅安装服务所需依赖，不向此环境引入 Chroma、ASR 或人物依赖。
