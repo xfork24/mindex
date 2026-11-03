@@ -143,13 +143,13 @@
     {
       "key": "settings",
       "output": "gallery-settings.gif",
-      "output_sha256": "8ff778955fd7b249f153236a2655c0b3040b8d00219b924d2b170800025793d4",
+      "output_sha256": "2d062236fc5d6843db095c60e30b08bd399d8e554dc0cfe161069d335b4930f7",
       "sources": [
         {
           "file": "settings-weights-voices-services.png",
           "zh": "召回权重、音色库、本地服务与工具管理",
           "en": "Recall weights, voice library, local services, and tool management",
-          "sha256": "8896096af15942821a78009fc5f6f026c19cf3443b2b23da353700c98f543ec5"
+          "sha256": "ed6f2a4ad755572ea6df743d24c43e00c3901117c4d719e14de98eab470ad5f0"
         },
         {
           "file": "settings-model-card.png",

@@ -228,8 +228,28 @@ const RECIPES = [
       await page.addStyleTag({ content: 'body{zoom:.7}' });
       await page.fill('#query', 'boy and girl');
       await page.selectOption('#source', [data.dearYou.id]);
-      const roles = await page.locator('#role-select option').all();
-      if (roles.length > 1) await page.selectOption('#role-select', [await roles[1].getAttribute('value')]);
+      // 用户指定人物过滤：郑木生 + 叶淑柔（青年）——两个都是角色，按全名精确匹配。
+      const picks = await page.evaluate(() => {
+        const want = ['郑木生', '叶淑柔（青年）'];
+        const out = { actor: [], role: [], missed: [] };
+        for (const [sel, key] of [['#actor-select', 'actor'], ['#role-select', 'role']]) {
+          for (const o of document.querySelectorAll(sel + ' option')) {
+            const t = (o.textContent || '').split(' ·')[0].trim();
+            if (want.includes(t)) out[key].push(o.value);
+          }
+        }
+        const selected = new Set([...out.actor, ...out.role]);
+        out.missed = want.filter((w) => {
+          const opts = [...document.querySelectorAll('#actor-select option, #role-select option')];
+          const match = opts.find((o) => (o.textContent || '').split(' ·')[0].trim() === w);
+          return !match || !selected.has(match.value);
+        });
+        return out;
+      });
+      if (picks.missed.length) console.log(`  ⚠ 未命中: ${picks.missed.join(', ')}`);
+      console.log(`  人物过滤: 演员 ${picks.actor.length} 项, 角色 ${picks.role.length} 项`);
+      if (picks.actor.length) await page.selectOption('#actor-select', picks.actor);
+      if (picks.role.length) await page.selectOption('#role-select', picks.role);
       await page.click('#search-button');
       await page.waitForSelector('#results article.card');
       await page.waitForFunction(() => !document.querySelector('#search-button[disabled]'));
@@ -352,6 +372,16 @@ const RECIPES = [
     name: 'admin-shots',
     run: async (page) => {
       await open(page, `/admin?source=${data.botanic.id}`, '#segment-list .segment-card');
+      // 用户要求：右侧显示 Media processing workspace（预处理面板）之下的部分。
+      await page.click('details.work-panel > summary.work-toolbar');
+      await page.waitForSelector('.work-card[data-work]');
+      await sleep(800);
+      await page.evaluate(() => {
+        const el = document.querySelector('details.work-panel');
+        el.open = true;
+        el.scrollIntoView({ block: 'start' });
+      });
+      await sleep(400);
       await snap(page, 'admin-shots');
     },
   },
@@ -584,16 +614,30 @@ const RECIPES = [
         }
       });
       await sleep(600);
+      // 用户要求：截取下方的“检索调参/音色库/本地服务/工具”分区，而非顶部模型角色区。
+      await page.evaluate(() => {
+        const head = document.querySelector('.role-row-head[data-section="tuning"]');
+        if (head) {
+          head.scrollIntoView({ block: 'start' });
+          window.scrollBy(0, -70);
+        }
+      });
+      await sleep(400);
       await snap(page, 'settings-weights-voices-services');
     },
   },
   {
     name: 'settings-dark-theme-i18n',
     run: async (page) => {
+      // 用户要求：这张保持浅色主题 + 中文界面（演示“暗色风格和中英文切换”的能力本身）。
+      // 页面级 init 在上下文级之后执行，覆盖默认的 dark/en。
+      await page.addInitScript(() => {
+        try {
+          localStorage.setItem('mindex.theme', 'light');
+          localStorage.setItem('mindex.language', 'zh');
+        } catch {}
+      });
       await open(page, '/settings', '#roles .role-row');
-      // 原图主题即暗色：本批全部为暗色，这里打开语言切换菜单呼应“中英文切换”。
-      await page.click('[data-language-toggle]').catch(() => {});
-      await sleep(500);
       await snap(page, 'settings-dark-theme-i18n');
     },
   },
@@ -603,7 +647,8 @@ const RECIPES = [
     ['agent-create-video-1', async (page) => {
       await open(page, `/?job=${data.job.id}`, '#job-workspace:not([hidden])');
       await waitDrawer(page);
-      await drawerScrollToTool(page, 'create_job', 0, true);
+      // 用户要求：右侧展示最初的提示词（生成视频的那条请求）。
+      await drawerScrollToText(page, 'travel introduction video');
       await snap(page, 'agent-create-video-1');
     }],
     ['agent-create-video-2', async (page) => {
