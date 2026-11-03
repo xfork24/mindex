@@ -166,6 +166,9 @@ def delete_index_version(store, index_id: str) -> dict:
     with store.connect() as db:
         db.execute("DELETE FROM representations WHERE index_id=?", (index_id,))
         db.execute("DELETE FROM index_members WHERE index_id=?", (index_id,))
+        # 该版本的派生词法索引一并删除（plans §6.1：派生数据随所属索引生命周期）。
+        for table in ("lexical_terms", "lexical_docs", "search_segments", "lexical_index_meta"):
+            db.execute(f"DELETE FROM {table} WHERE index_id=?", (index_id,))
         db.execute("DELETE FROM settings WHERE key=?", ("index_report." + index_id,))
         for row in db.execute(
             "SELECT id, person_id FROM search_releases WHERE content_id=?", (index_id,)

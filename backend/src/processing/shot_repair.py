@@ -117,7 +117,7 @@ def apply(config, report, *, progress=None, video_encoder="libx264"):
         raise ValueError('Unsupported repair video encoder')
     encoder_args = (['-c:v', 'libx264', '-threads', '4', '-preset', 'fast', '-crf', '20']
                     if video_encoder == 'libx264' else ['-c:v', 'h264_videotoolbox', '-q:v', '65'])
-    store = Store(config.data_dir)
+    store = Store.open(config)
     stamp = report.setdefault('run_id', datetime.now(UTC).strftime('%Y%m%dT%H%M%S%fZ'))
     journal = store.root / 'shot-repairs' / stamp / 'report.json'
     from mindex.shared.storage import require_sqlite
@@ -213,6 +213,12 @@ def apply(config, report, *, progress=None, video_encoder="libx264"):
                         snapshots_changed += 1
                 if snapshots_changed:
                     bump_snapshot_revision(db)
+                    # 改写了快照边界：派生词法索引的 search_segments 投影随之失效，
+                    # 删除后检索回退 Python 路径（下次发布/回填重建）。
+                    for stale in db.execute('SELECT DISTINCT index_id FROM lexical_index_meta').fetchall():
+                        for table in ('lexical_terms', 'lexical_docs', 'search_segments',
+                                      'lexical_index_meta'):
+                            db.execute(f'DELETE FROM {table} WHERE index_id=?', (stale['index_id'],))
                 service = ShotMedia(store)
                 for path, (a, b) in paths.items():
                     # References must see this same transaction's corrected shots.

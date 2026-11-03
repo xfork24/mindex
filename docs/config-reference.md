@@ -25,6 +25,16 @@
 
 pg-single 使用步骤：`MINDEX_DATABASE_DSN=postgres://… mindex migrate` 建库（唯一 DDL 入口，API/worker 启动只校验版本）→ 以 `database.backend: postgres` 启动。设置页「部署后端」分区只读展示当前形态与 library_id。备份导出/导入、切片迁移/清理与镜头边界修复在该形态下显式拒绝（阶段 5 交付 PG 一致性导出）。
 
+## `vector` — 向量后端（水平扩展阶段 2）
+
+| 键 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `backend` | `chroma_local` \| `chroma_server` | `chroma_local` | `chroma_local` 为本地嵌入 chroma（`<data_dir>/chroma`，零依赖缺省）；`chroma_server` 为独立 Chroma 服务（`chromadb.HttpClient`，集合名/余弦空间/embedding_function=None 与本地一致）。属共享后端：需 `database.backend=postgres`，与 sqlite 单机形态的组合在启动时拒绝 |
+| `chroma_server.url` | str | `http://127.0.0.1:8000` | 服务地址（http/https）；服务器镜像版本/digest 与 HNSW 参数由部署固定 |
+| `chroma_server.token_env` | str | `MINDEX_CHROMA_TOKEN` | Bearer 凭据只从环境变量读取，不落配置文件/日志 |
+
+派生词法索引（`mindex indexes lexical` 回填；发布时自动构建）让文字检索的统计与 BM25 评分在 SQL 内完成；旧索引或分词器版本不一致时自动回退 Python 参考路径并告警。
+
 ## `embedding` — WeMM 嵌入服务
 
 | 键 | 类型 | 默认 | 说明 |

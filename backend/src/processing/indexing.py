@@ -47,11 +47,24 @@ def retain_representation_maps(root: Path, keep: set[str]) -> int:
     return len(stale)
 
 
+def vector_client(config) -> chromadb.ClientAPI | None:
+    """按配置返回向量客户端：缺省 None = 本地 PersistentClient；chroma_server 形态
+    返回进程内共享的 HttpClient（显式配置选择，不做路径发现；plans §6.2）。"""
+    if getattr(config, "vector", None) is None or config.vector.backend != "chroma_server":
+        return None
+    from mindex.shared.backends.vectors import chroma_http_client
+
+    return chroma_http_client(config.vector.chroma_server)
+
+
 class VectorIndex:
-    def __init__(self, root: Path, index_id: str, create=False):
-        self.client = chromadb.PersistentClient(
-            path=str(root / "chroma"), settings=Settings(anonymized_telemetry=False)
-        )
+    def __init__(self, root: Path, index_id: str, create=False, *, client=None):
+        if client is not None:  # chroma_server：集合在远端，root 仅用于本地缓存放置
+            self.client = client
+        else:
+            self.client = chromadb.PersistentClient(
+                path=str(root / "chroma"), settings=Settings(anonymized_telemetry=False)
+            )
         self.root, self.index_id = Path(root), index_id
         self._raw_memo: OrderedDict = OrderedDict()
         name = "idx-" + index_id
@@ -282,7 +295,7 @@ class VectorIndex:
 class IndexBuilder:
     def __init__(self, config: Config, embedder: MultimodalEmbedder | None = None):
         self.config = config
-        self.store = Store(config.data_dir)
+        self.store = Store.open(config)
         self._embedder = embedder
 
     @property
@@ -351,7 +364,7 @@ class IndexBuilder:
             "INSERT OR IGNORE INTO index_versions(id,spec,status) VALUES(?,?,'building')",
             (index_id, dumps(spec)),
         )
-        vectors = VectorIndex(self.store.root, index_id, create=True)
+        vectors = VectorIndex(self.store.root, index_id, create=True, client=vector_client(self.config))
         existing = vectors.ids()
         with self.store.run("index"):
             for number, segment in enumerate(snapshots, 1):
@@ -395,7 +408,7 @@ class IndexBuilder:
                 )
             # 冲过 chroma HNSW 落盘阈值，避免尾部向量只存于内存与 WAL（详见 VectorIndex.flush）。
             vectors.flush()
-            issues = check_index(self.store, index_id)
+            issues = check_index(self.store, index_id, config=self.config)
             if issues:
                 raise ModelError("索引一致性检查失败：" + "; ".join(issues[:5]))
             if self.embedder.identity() != identity:
@@ -427,7 +440,9 @@ class IndexBuilder:
         return result
 
 
-def check_index(store: Store, index_id: str) -> list[str]:
+def check_index(store: Store, index_id: str, *, config=None) -> list[str]:
+    """索引一致性检查。``config`` 提供时按其选择向量客户端（chroma_server 形态）。"""
+    client = vector_client(config) if config is not None else None
     issues = []
     row = store.one("SELECT * FROM index_versions WHERE id=?", (index_id,))
     if row is None:
@@ -440,7 +455,7 @@ def check_index(store: Store, index_id: str) -> list[str]:
     for representation in representations:
         member_views[representation['segment_id']].add(representation['view'])
         member_ids[representation['segment_id']].add(representation['id'])
-    actual = VectorIndex(store.root, index_id).ids()
+    actual = VectorIndex(store.root, index_id, client=client).ids()
     if expected != actual:
         issues.append(f"向量与元数据不一致：缺少 {len(expected - actual)}，多出 {len(actual - expected)}")
     members = store.rows("SELECT * FROM index_members WHERE index_id=?", (index_id,))

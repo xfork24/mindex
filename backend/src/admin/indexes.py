@@ -67,7 +67,7 @@ def indexes_router(runtime, store, embedder: MultimodalEmbedder | None = None) -
         from mindex.processing.indexing import check_index
 
         _require_version(store, index_id)
-        issues = check_index(store, index_id)
+        issues = check_index(store, index_id, config=runtime.current())
         return {"index_id": index_id, "ok": not issues, "issues": issues}
 
     @router.post("/{index_id}/activate")
@@ -88,7 +88,7 @@ def indexes_router(runtime, store, embedder: MultimodalEmbedder | None = None) -
             except Timeout as exc:
                 raise HTTPException(409, "索引正在写入，请稍后再激活索引") from exc
             try:
-                issues = check_index(store, index_id)
+                issues = check_index(store, index_id, config=config)
                 if issues:
                     raise HTTPException(422, {"message": "索引检查失败", "issues": issues})
                 spec = store.index_version(index_id)["spec"]

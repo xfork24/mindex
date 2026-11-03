@@ -67,6 +67,16 @@ def open_context(config: Config) -> BackendContext:
         store = Store(config.data_dir)
         library_id = _library_id(store)
         form = "local"
+    if config.vector.backend == "chroma_server":
+        if config.database.backend != "postgres":
+            raise RuntimeError(
+                "vector.backend=chroma_server 属共享向量后端，与 sqlite 单机形态的组合未定义；"
+                "请将 database.backend 设为 postgres（plans §4 运行形态表）")
+        from mindex.shared.backends.vectors import ChromaServerVectorStores
+
+        vectors: VectorStores = ChromaServerVectorStores(config.vector.chroma_server)
+    else:
+        vectors = LocalVectorStores(store.root)
     return BackendContext(
         form=form,
         library_id=library_id,
@@ -74,7 +84,7 @@ def open_context(config: Config) -> BackendContext:
         db=store,
         media=LocalMediaStore(store.root),
         locks=FileLockProvider(store.root),
-        vectors=LocalVectorStores(store.root),
+        vectors=vectors,
         queue=InlineTaskQueue(),
     )
 

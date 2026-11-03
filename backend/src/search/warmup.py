@@ -88,6 +88,13 @@ def warm_up(config: Config, index_id: str | None = None, *, startup: bool = True
     def corpus():
         if active["spec"].get("format", 1) < 2:
             return
+        # SQL 词法路径直接读派生倒排表，不再需要进程内全量分词（plans §6.1）；
+        # 派生索引缺失/版本不一致时保留参考路径的语料预热。
+        from mindex.shared.lexical_store import lexical_ready
+
+        if lexical_ready(store, active["id"]):
+            log.info("派生词法索引可用，跳过 BM25 语料分词预热")
+            return
         for channel in ("dialogue", "analysis"):
             documents = [
                 {**s, "views": {channel: s["views"][channel]} if channel in s.get("views", {}) else {}}
@@ -96,7 +103,9 @@ def warm_up(config: Config, index_id: str | None = None, *, startup: bool = True
             lexical_search("预热", documents, 1)
 
     def vectors():
-        index = VectorIndex(store.root, active["id"])
+        from mindex.processing.indexing import vector_client
+
+        index = VectorIndex(store.root, active["id"], client=vector_client(config))
         index._representation_map()  # 向量 id → (segment_id, view) 映射，供无过滤查询后过滤
         collection = index.collection
         if collection.count():

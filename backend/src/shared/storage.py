@@ -330,8 +330,42 @@ def _metadata_v11(db):
     ))
 
 
+def _metadata_v12(db):
+    """派生词法索引（plans/horizontal-scaling-plan.md §6.1）：SQL 内统计与评分的投影表。
+
+    以冻结快照重建（search/lexical_store.py），不改变已发布内容；绑定 index_id。
+    ``search_segments`` 是 eligible 关系的小投影（隐藏/时长/分析字段过滤下推 SQL）；
+    ``lexical_docs`` 每个 segment 为 dialogue/analysis 各建行、缺文档长度计 0（分母）；
+    ``lexical_terms`` 为精确 token 倒排（term 逐字节相等，不做模糊/大小写归一 collation）；
+    ``lexical_index_meta`` 持久化分词器版本，版本不一致禁止构建/查询新派生索引。
+    """
+    execute_script(db, """
+CREATE TABLE IF NOT EXISTS search_segments (
+  index_id TEXT NOT NULL, segment_id TEXT NOT NULL, source_id TEXT NOT NULL,
+  parent_id TEXT, kind TEXT NOT NULL, start REAL NOT NULL, end REAL NOT NULL,
+  annotation_projection TEXT NOT NULL, indexed_views TEXT NOT NULL,
+  PRIMARY KEY(index_id, segment_id)
+);
+CREATE INDEX IF NOT EXISTS search_segments_source ON search_segments(index_id, source_id);
+CREATE TABLE IF NOT EXISTS lexical_docs (
+  index_id TEXT NOT NULL, segment_id TEXT NOT NULL, channel TEXT NOT NULL,
+  doc_length INTEGER NOT NULL, PRIMARY KEY(index_id, segment_id, channel)
+);
+CREATE TABLE IF NOT EXISTS lexical_terms (
+  index_id TEXT NOT NULL, channel TEXT NOT NULL, term TEXT NOT NULL,
+  segment_id TEXT NOT NULL, tf INTEGER NOT NULL, PRIMARY KEY(index_id, channel, term, segment_id)
+);
+CREATE INDEX IF NOT EXISTS lexical_terms_lookup ON lexical_terms(index_id, channel, term);
+CREATE TABLE IF NOT EXISTS lexical_index_meta (
+  index_id TEXT PRIMARY KEY, tokenizer_version TEXT NOT NULL,
+  segments INTEGER NOT NULL, docs INTEGER NOT NULL, terms INTEGER NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+""")
+
+
 # metadata.sqlite3 的有序迁移：只追加，不修改已发布的步骤（见 shared/migrations.py）。
-METADATA_STEPS = (_metadata_v1, _metadata_v2, _metadata_v3, _metadata_v4, _metadata_v5, _metadata_v6, _metadata_v7, _metadata_v8, _metadata_v9, _metadata_v10, _metadata_v11)
+METADATA_STEPS = (_metadata_v1, _metadata_v2, _metadata_v3, _metadata_v4, _metadata_v5, _metadata_v6, _metadata_v7, _metadata_v8, _metadata_v9, _metadata_v10, _metadata_v11, _metadata_v12)
 
 
 def migrate_metadata(db) -> int:

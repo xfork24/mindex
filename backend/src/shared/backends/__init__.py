@@ -13,10 +13,17 @@ from mindex.shared.backends.db import DatabaseConnection, RelationalDatabase
 from mindex.shared.backends.locks import FileLockProvider, LockProvider
 from mindex.shared.backends.media import LocalMediaStore, MediaObject, MediaStore
 from mindex.shared.backends.queue import InlineTaskQueue, TaskQueue, TaskReceipt
-from mindex.shared.backends.vectors import LocalVectorStore, LocalVectorStores, VectorStore, VectorStores
+from mindex.shared.backends.vectors import (
+    ChromaServerVectorStores,
+    LocalVectorStore,
+    LocalVectorStores,
+    VectorStore,
+    VectorStores,
+)
 
 __all__ = [
     "BackendContext",
+    "ChromaServerVectorStores",
     "DatabaseConnection",
     "FileLockProvider",
     "InlineTaskQueue",

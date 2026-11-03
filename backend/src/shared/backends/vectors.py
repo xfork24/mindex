@@ -179,3 +179,52 @@ class LocalVectorStores:
         else:
             collection = client.get_collection(name, embedding_function=None)
         return LocalVectorStore(collection)
+
+
+_HTTP_CLIENTS: dict[tuple[str, str], object] = {}
+
+
+def chroma_http_client(section):
+    """进程内按 (url, token) 共享的 Chroma HttpClient（阶段 2 的最小改动路径：
+    独立服务 + 显式配置；集合读写与本地完全一致，检索过滤策略随后续阶段下推）。"""
+    import os
+    from urllib.parse import urlparse
+
+    import chromadb
+    from chromadb.config import Settings
+
+    token = os.environ.get(section.token_env, "").strip()
+    key = (section.url, token)
+    client = _HTTP_CLIENTS.get(key)
+    if client is None:
+        parsed = urlparse(section.url if "//" in section.url else f"http://{section.url}")
+        headers = {"Authorization": f"Bearer {token}"} if token else None
+        client = chromadb.HttpClient(
+            host=parsed.hostname or "127.0.0.1",
+            port=parsed.port or (443 if parsed.scheme == "https" else 8000),
+            ssl=parsed.scheme == "https",
+            headers=headers,
+            settings=Settings(anonymized_telemetry=False),
+        )
+        _HTTP_CLIENTS[key] = client
+    return client
+
+
+class ChromaServerVectorStores:
+    """独立 Chroma 服务实现工厂：集合名 ``idx-<index_id>``，与本地实现同协议。"""
+
+    backend = "chroma_server"
+
+    def __init__(self, section):
+        self.section = section
+
+    def open(self, index_id: str, *, create: bool = False):
+        client = chroma_http_client(self.section)
+        name = "idx-" + index_id
+        if create:
+            collection = client.get_or_create_collection(
+                name, metadata={"hnsw:space": "cosine"}, embedding_function=None
+            )
+        else:
+            collection = client.get_collection(name, embedding_function=None)
+        return LocalVectorStore(collection)

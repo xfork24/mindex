@@ -167,3 +167,29 @@
   租约互斥/往返/create_app 冒烟）；SQLite 全量回归无行为变化。
 - **未支持（阶段 2/3 交付）**：persons 证据路径的数值 json 比较/json_each（PG 上
   响亮失败）；检索热路径仍全快照装载（阶段 2 投影改造）；多 API/多机（阶段 3+）。
+
+## 10. 阶段 2 变更清单（检索与服务端向量）
+
+- 派生词法索引（plans §6.1）：`search_segments`/`lexical_docs`/`lexical_terms`/
+  `lexical_index_meta`（迁移 v12，SQLite 与 PG 基线同步）；`shared/tokenizer.py`
+  下沉唯一分词实现并定义分词器版本指纹；`shared/lexical_store.py` 发布时构建
+  （channel_index check 后、ready 前，幂等）+ `mindex indexes lexical` 回填/重建；
+  purge/shot_repair/clean_index/备份裁剪同步失效派生行。
+- SQL 检索路径（`search/lexical_query.py`）：eligible 投影（隐藏/时长/粒度/素材
+  下推 SQL，分析字段 Python casefold；OR 真值按方言 CASE）+ 请求级临时表 +
+  SQL 内 Okapi BM25（N/df/mean 同口径；空文档计入分母）+ 边界候选按参考公式精确
+  重排（容差 1e-10，测试锚定与 `lexical_search` 逐分一致）。
+- 检索路径改造：无人物条件的文字检索与 video/image/similar 走投影 + 融合后
+  `_hydrate` 批量水合命中快照（不再全量快照常驻）；人物/旧索引/分词器版本不一致
+  自动回退全快照参考路径；warmup 在派生索引可用时跳过全量分词预热。
+- chroma_server（plans §6.2）：`VectorConfig`（url/token_env，凭据只走 env）；
+  `chroma_http_client` 进程内共享 HttpClient；`VectorIndex` 支持注入 client；
+  构建器/check_index/warmup/检索全部按配置选择客户端；open_context 校验
+  chroma_server 需 postgres。
+- 方言补齐：`IS ?`→`IS NOT DISTINCT FROM`、INSERT 列清单保留字加引号；
+  pipeline segments 命名参数改位置参数；processing/search 构造链切 `Store.open`。
+- 验收：`tests/test_lexical_query.py`（eligible/BM25 与参考实现逐分一致 21 用例）、
+  `tests/test_chroma_server.py`（独立服务门控）、`tests/test_pg_chroma_e2e.py`
+  （PG+chroma_server 全链路：管线→发布→检索→一致性校验）。
+- **未验证/后续**：百万段容量与 p95/p99 闸门（需容量基准工装）；检索过滤策略的
+  服务端下推深化（当前 HttpClient 复用本地查询策略）；persons 数值 json 路径。

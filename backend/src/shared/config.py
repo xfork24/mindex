@@ -651,6 +651,28 @@ class PostgresConfig(StrictModel):
     control_pool_max: int = Field(default=2, ge=1)
 
 
+class ChromaServerConfig(StrictModel):
+    """独立 Chroma 服务（阶段 2；plans §4/§6.2）。
+
+    向量仍在元数据库登记 representations、embedding_function=None 与空间身份不变；
+    服务器版本/镜像 digest 与 HNSW 参数由部署固定。凭据只从环境变量读取。
+    """
+
+    url: str = "http://127.0.0.1:8000"
+    token_env: str = "MINDEX_CHROMA_TOKEN"
+
+
+class VectorConfig(StrictModel):
+    """向量后端选择：本地嵌入 chroma 或独立 Chroma 服务。
+
+    chroma_server 属共享后端：与 sqlite 单机形态的组合未定义，需 database.backend
+    为 postgres（pg-single 过渡形态即可使用；多 API 副本在阶段 5 集群装配后开放）。
+    """
+
+    backend: Literal["chroma_local", "chroma_server"] = "chroma_local"
+    chroma_server: ChromaServerConfig = Field(default_factory=ChromaServerConfig)
+
+
 class DatabaseConfig(StrictModel):
     """元数据库后端选择；其余后端（vector/storage/queue/locks）随阶段 2–4 加入。
 
@@ -668,6 +690,7 @@ class Config(StrictModel):
     runtime_overrides: bool = True
     enforce_gpu_lock: bool = False
     database: DatabaseConfig = Field(default_factory=DatabaseConfig, exclude=True)
+    vector: VectorConfig = Field(default_factory=VectorConfig, exclude=True)
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
     analyzer: AnalyzerConfig = Field(default_factory=AnalyzerConfig)
     person: PersonConfig = Field(default_factory=PersonConfig)

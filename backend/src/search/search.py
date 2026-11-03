@@ -3,12 +3,11 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import re
 import tempfile
 import threading
 from collections import Counter, OrderedDict, defaultdict
 from contextlib import nullcontext
-from functools import lru_cache, wraps
+from functools import wraps
 from pathlib import Path
 from time import perf_counter
 
@@ -22,13 +21,12 @@ from mindex.shared.images import image_png
 from mindex.shared.jsonio import save
 from mindex.shared.media import content_hash, cut, probe, windows
 from mindex.shared.storage import Store
+from mindex.shared.tokenizer import document_terms, tokens
 from mindex.shared.trace import record
 from mindex.shared.types import Filters, TextSearch
 
 jieba.setLogLevel(30)
 
-# 文档词频缓存条目上限：三个渠道 × 数千片段，每条是一篇文档的 Counter。
-DOCUMENT_TERMS_CACHE_SIZE = 50000
 # 查询向量缓存条目上限（每条 4096 维 float，约 100 KB）。
 QUERY_VECTOR_CACHE_SIZE = 128
 _QUERY_VECTORS: OrderedDict = OrderedDict()
@@ -49,17 +47,6 @@ class SimilarUnavailable(Exception):
 
     刻意不继承 ValueError，以免被通用的 422 处理器吞掉。
     """
-
-
-def tokens(text: str) -> list[str]:
-    return [t.lower() for t in jieba.cut_for_search(text) if re.search(r"[\w\u4e00-\u9fff]", t)]
-
-
-@lru_cache(maxsize=DOCUMENT_TERMS_CACHE_SIZE)
-def document_terms(text: str) -> tuple[Counter, int]:
-    """文档的词频与总词数。按文本内容缓存，文本变了自然是新键；返回值只读，调用方不得修改。"""
-    terms = Counter(tokens(text))
-    return terms, sum(terms.values())
 
 
 def lexical_search(text: str, snapshots: list[dict], count: int, exclude=()) -> list[dict]:
@@ -170,7 +157,7 @@ class SearchEngine:
         force_embedding: bool = False,
     ):
         self.config = config
-        self.store = Store(config.data_dir)
+        self.store = Store.open(config)
         self._embedder = embedder
         self.index_id = index_id
         self.release_id = release_id
@@ -181,6 +168,12 @@ class SearchEngine:
         if self._embedder is None:
             self._embedder = make_embedder(self.config)
         return self._embedder
+
+    def _vectors(self, index_id: str, *, create: bool = False) -> VectorIndex:
+        """按配置选择向量客户端：缺省本地嵌入；chroma_server 形态走共享 HttpClient（plans §6.2）。"""
+        from mindex.processing.indexing import vector_client
+
+        return VectorIndex(self.store.root, index_id, create, client=vector_client(self.config))
 
     def _validate_space(self, active):
         self._space_id = None
@@ -259,7 +252,7 @@ class SearchEngine:
         if not text or (active["spec"].get("format", 1) == 1 and not person):
             self._validate_space(active)
         snapshots = self._snapshots(active, granularity, filters)
-        return active, snapshots, VectorIndex(self.store.root, active["id"])
+        return active, snapshots, self._vectors(active["id"])
 
     def _snapshots(self, active: dict, granularity: str, filters: Filters) -> list[dict]:
         """按隐藏、粒度、素材、时长与分析字段过滤后的候选快照；不做向量空间校验。"""
@@ -302,10 +295,13 @@ class SearchEngine:
         started: float,
         ranked: list[dict] | None = None,
         target_duration: float | None = None,
+        *,
+        lookup: dict[str, dict] | None = None,
+        eligible_count: int | None = None,
     ):
         if ranked is None:
             ranked = fuse(routes, self.config.search.weights, self.config.search.rrf_k)
-        lookup = {s["id"]: s for s in snapshots}
+        lookup = lookup if lookup is not None else {s["id"]: s for s in snapshots}
         ranked = duration_rank(ranked, lookup, target_duration, self.config.search)
         selected, results = [], []
         for hit in ranked:
@@ -323,8 +319,37 @@ class SearchEngine:
             "results": results,
             "elapsed_ms": round((perf_counter() - started) * 1000),
             "score_type": "duration_blend" if target_duration and self.config.search.duration_weight else "weighted_rrf",
-            "eligible_segments": len(snapshots),
+            "eligible_segments": len(snapshots) if eligible_count is None else eligible_count,
         }
+
+    def _hydrate(self, active: dict, ids: list[str]) -> dict[str, dict]:
+        """按命中批量读取完整快照并 decorate；投影路径只在这一步接触全快照（plans §6.1）。"""
+        if not ids:
+            return {}
+        placeholders = ",".join("?" * len(ids))
+        library = Library(self.store)
+        sources, segments = library.overlays()
+        lookup = {}
+        for row in self.store.rows(
+            "SELECT segment_id,snapshot FROM index_members WHERE index_id=? "
+            f"AND segment_id IN ({placeholders})", [active["id"], *ids]
+        ):
+            lookup[row["segment_id"]] = library.decorate(
+                json.loads(row["snapshot"]), sources, segments)
+        return lookup
+
+    def _text_projection(self, query, active: dict, started: float):
+        """format 2 且派生词法索引可用的文字检索快路径；不可用时返回 None 回退。"""
+        from mindex.search.lexical_query import eligible_projection
+        from mindex.shared.lexical_store import lexical_ready
+
+        if active["spec"].get("format", 1) < 2 or not lexical_ready(self.store, active["id"]):
+            return None
+        selected_sources = query.filters.effective_sources(self.store)
+        rows = eligible_projection(
+            self.store, active["id"], query.granularity, query.filters, selected_sources)
+        vectors = self._vectors(active["id"])
+        return self._channel_text(query, active, rows, vectors, started, projection=True)
 
     @recall_scope
     def text(self, query: TextSearch) -> dict:
@@ -334,9 +359,23 @@ class SearchEngine:
         started = perf_counter()
         catalogue = Persons(self.store)
         preliminary_ids, _, _, _ = resolve_names(query, catalogue.entities())
+        person = bool(preliminary_ids and query.person_mode != 'mentioned')
+        if not person and query.person_mode != 'mentioned':
+            # 无人物条件的文字检索走投影 + SQL 词法路径（format 2 且派生索引可用；
+            # 否则返回 None 回退全快照参考路径，行为与旧实现一致）。
+            active = self._active()
+            fast = self._text_projection(query, active, started)
+            if fast is not None:
+                release = catalogue.release_for(
+                    active['id'], pinned=self.index_id is not None,
+                    release_id=self.release_id or active.get('search_release_id'))
+                meta = {'person_mode': query.person_mode, 'person_ids': [],
+                        'recognized_people': [],
+                        'release_id': release['id'] if release else None,
+                        'person_version': release['person_id'] if release else None}
+                return {**fast, **meta}
         active, snapshots, vectors = self._context(
-            query.granularity, query.filters, text=True,
-            person=bool(preliminary_ids and query.person_mode != 'mentioned'))
+            query.granularity, query.filters, text=True, person=person)
         release = catalogue.release_for(active['id'], pinned=self.index_id is not None, release_id=self.release_id or active.get('search_release_id'))
         # 只取实体（几 KB）；数十 MB 的证据与覆盖区间只在出镜检索时才加载。
         published = catalogue.published_entities(release)
@@ -460,7 +499,11 @@ class SearchEngine:
             )
         return self._result(active, snapshots, routes, query.limit, started, target_duration=query.target_duration)
 
-    def _channel_text(self, query, active, snapshots, vectors, started):
+    def _channel_text(self, query, active, snapshots, vectors, started, *, projection=False):
+        """format 2 文字检索。``projection=True`` 时 ``snapshots`` 是 eligible 投影行
+        （无 views/dialogue 全文）：词法走 SQL 倒排，融合后按命中批量水合快照。"""
+        from mindex.search.lexical_query import sql_bm25
+
         selected = set(query.channels or ("visual", "dialogue", "analysis"))
         selected = {c for c in selected if self.config.search.channel_weights[c] > 0}
         count, k = self.config.search.candidates, self.config.search.rrf_k
@@ -472,11 +515,15 @@ class SearchEngine:
         ids = [s["id"] for s in snapshots]
         lexical = {}
         for channel in selected - {"visual"}:
-            documents = [
-                {**s, "views": {channel: s["views"][channel]} if channel in s["views"] else {}}
-                for s in snapshots
-            ]
-            lexical[channel] = lexical_search(query.text, documents, count)
+            if projection:
+                # SQL 倒排：N/df/mean 都在该 eligible 上统计，参考公式精确重排（plans §6.1）
+                lexical[channel] = sql_bm25(self.store, active["id"], channel, query.text, ids, count)
+            else:
+                documents = [
+                    {**s, "views": {channel: s["views"][channel]} if channel in s["views"] else {}}
+                    for s in snapshots
+                ]
+                lexical[channel] = lexical_search(query.text, documents, count)
         vector, warning = None, None
         try:
             self._validate_space(active)
@@ -497,7 +544,11 @@ class SearchEngine:
             routes[channel] = inner
             details[channel] = {h["id"]: h["matches"] for h in inner}
         ranked = fuse(routes, self.config.search.channel_weights, k)
-        lookup = {s["id"]: s for s in snapshots}
+        if projection:
+            # 只对融合后的候选命中读取完整快照（时长排序/IoU 去重/证据展示需要）。
+            lookup = self._hydrate(active, [hit["id"] for hit in ranked])
+        else:
+            lookup = {s["id"]: s for s in snapshots}
         query_terms = set(tokens(query.text))
         for hit in ranked:
             segment = lookup[hit["id"]]
@@ -529,7 +580,9 @@ class SearchEngine:
                     match["route"] = "video"
                     match["matched_text"] = None
                     match["evidence"] = [{"start": segment["start"], "end": segment["end"]}]
-        result = self._result(active, snapshots, {}, query.limit, started, ranked=ranked, target_duration=query.target_duration)
+        result = self._result(active, snapshots, {}, query.limit, started, ranked=ranked,
+                              target_duration=query.target_duration, lookup=lookup,
+                              eligible_count=len(snapshots))
         return {
             **result,
             "channels": sorted(selected),
@@ -537,13 +590,31 @@ class SearchEngine:
             "warnings": ["嵌入不可用，已降级为所选文本渠道的 BM25 检索：" + warning] if warning else [],
         }
 
+    def _eligible_rows(self, active: dict, granularity: str, filters: Filters):
+        """向量检索的候选行：优先投影（format 2 且派生索引可用），否则全快照过滤。"""
+        projection = None
+        if active["spec"].get("format", 1) >= 2:
+            from mindex.shared.lexical_store import lexical_ready
+
+            if lexical_ready(self.store, active["id"]):
+                from mindex.search.lexical_query import eligible_projection
+
+                projection = eligible_projection(
+                    self.store, active["id"], granularity, filters, filters.effective_sources(self.store))
+        if projection is not None:
+            return projection, True
+        return self._snapshots(active, granularity, filters), False
+
     @recall_scope
     def video(self, path: Path, granularity="moment", limit=20, filters: Filters | None = None, *, target_duration: float | None = None) -> dict:
         started = perf_counter()
         info = probe(path)
         if info["duration"] > self.config.search.max_query_seconds + 0.05:
             raise ValueError(f"查询视频不能超过 {self.config.search.max_query_seconds:g} 秒")
-        active, snapshots, vectors = self._context(granularity, filters or Filters())
+        active = self._active()
+        self._validate_space(active)
+        snapshots, projected = self._eligible_rows(active, granularity, filters or Filters())
+        vectors = self._vectors(active["id"])
         if active["spec"].get("format", 1) >= 2:
             snapshots = [s for s in snapshots if "video" in s.get("indexed_views", [])]
         if not snapshots:
@@ -573,13 +644,18 @@ class SearchEngine:
         for hit in fused:
             for match in hit["matches"]:
                 match["route"] = "video"
-        return self._result(active, snapshots, {}, limit, started, ranked=fused, target_duration=target_duration)
+        lookup = self._hydrate(active, [hit["id"] for hit in fused]) if projected else None
+        return self._result(active, snapshots, {}, limit, started, ranked=fused,
+                            target_duration=target_duration, lookup=lookup, eligible_count=len(snapshots))
 
     @recall_scope
     def image(self, path: Path, granularity="moment", limit=20, filters: Filters | None = None, *, target_duration: float | None = None) -> dict:
         started = perf_counter()
         png = image_png(path, self.config.video.max_pixels)
-        active, snapshots, vectors = self._context(granularity, filters or Filters())
+        active = self._active()
+        self._validate_space(active)
+        snapshots, projected = self._eligible_rows(active, granularity, filters or Filters())
+        vectors = self._vectors(active["id"])
         if active["spec"].get("format", 1) >= 2:
             snapshots = [s for s in snapshots if "video" in s.get("indexed_views", [])]
         if not snapshots:
@@ -592,9 +668,11 @@ class SearchEngine:
             embedding = self._cached_vector("image", hashlib.sha256(png).hexdigest(),
                                             lambda: self.embedder.image(normalized))
         hits = vectors.query(embedding, "video", [s["id"] for s in snapshots], self.config.search.candidates)
-        # Image queries compare only with video vectors, independent of text-fusion weights.
+        # Image queries compare only with video vectors, independent from text-fusion weights.
         ranked = fuse({"video": hits}, {"video": 1}, self.config.search.rrf_k)
-        return self._result(active, snapshots, {}, limit, started, ranked=ranked, target_duration=target_duration)
+        lookup = self._hydrate(active, [hit["id"] for hit in ranked]) if projected else None
+        return self._result(active, snapshots, {}, limit, started, ranked=ranked,
+                            target_duration=target_duration, lookup=lookup, eligible_count=len(snapshots))
 
     @recall_scope
     def similar(
@@ -624,14 +702,15 @@ class SearchEngine:
                 (active["id"], segment_id),
             )
         ]
-        vectors = VectorIndex(self.store.root, active["id"])
+        vectors = self._vectors(active["id"])
         found = vectors.vectors(ids) if ids else {}
         embeddings = [found[i] for i in ids if i in found]
         if not embeddings:
             raise SimilarUnavailable("该片段的画面向量缺失，请重建索引后再试")
+        candidates, projected = self._eligible_rows(active, granularity or seed["kind"], filters or Filters())
         snapshots = [
             s
-            for s in self._snapshots(active, granularity or seed["kind"], filters or Filters())
+            for s in candidates
             if (not visual_only or "video" in s.get("indexed_views", []))
             and s["id"] != seed["id"]
             and not (
@@ -652,7 +731,9 @@ class SearchEngine:
         for hit in fused:
             for match in hit["matches"]:
                 match["route"] = "video"
-        result = self._result(active, snapshots, {}, limit, started, ranked=fused)
+        lookup = self._hydrate(active, [hit["id"] for hit in fused]) if projected else None
+        result = self._result(active, snapshots, {}, limit, started, ranked=fused,
+                              lookup=lookup, eligible_count=len(snapshots))
         return {**result, "seed_segment_id": segment_id}
 
 
@@ -660,7 +741,7 @@ def status(
     config: Config, *, health=False, summary=False,
     embedder: MultimodalEmbedder | None = None, index_id: str | None = None
 ) -> dict:
-    store = Store(config.data_dir)
+    store = Store.open(config)
     active = store.index_version(index_id) if index_id else store.active_index()
     result = {
         "active_index": active,
