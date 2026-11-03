@@ -193,3 +193,30 @@
   （PG+chroma_server 全链路：管线→发布→检索→一致性校验）。
 - **未验证/后续**：百万段容量与 p95/p99 闸门（需容量基准工装）；检索过滤策略的
   服务端下推深化（当前 HttpClient 复用本地查询策略）；persons 数值 json 路径。
+
+## 11. 阶段 3 变更清单（租约/队列/worker）
+
+- PgLockProvider（`shared/db/locks_pg.py`，plans §7.1）：lock_resources/lock_holders
+  （epoch 永不归零、counter 单调分配 fencing token；TTL 90s/心跳 20s；clock_timestamp
+  短事务；持有者每次租约唯一 owner——与 flock 按 open-file 计锁语义一致）；acquire/
+  acquire_ordered 与本地文件锁同形状（自动心跳 CM）；旧 token 续期/释放/提交校验拒绝。
+- PgTaskQueue（`shared/db/queue_pg.py`，plans §7.2）：task_queue 表（dedupe 唯一、
+  attempt_id/fencing_token、expires_at、cancel_requested）；claim = 回收 + FOR UPDATE
+  SKIP LOCKED（priority→run_after→id）；complete/fail/renew 校验 owner+attempt+token
+  **且未过期**（暂停过 TTL 的旧 worker 不得提交，DB 级强制）；失败有上限指数退避+
+  抖动、failed 可人工重试；pending 原子取消、running 持久化取消意图。
+- Worker（`worker_runtime.py` + `mindex worker` CLI）：claim 循环 + 心跳线程 + 取消
+  轮询 + 槽位并发；处理器注册表映射 kind → 账本 runner（worker_handlers：冻结配置
+  不含部署后端选择，worker 配置覆盖防回落 sqlite）；dispatch 分叉
+  （background_tasks.launch → postgres 入队/inline 线程）+ enqueue_backlog 补偿扫描
+  （账本已落未入队窗口，幂等）。
+- TopicScheduler leader 租约（locks=postgres 时注入；本地维持文件锁互斥）。
+- 配置：queue/locks 节（需 postgres，open_context 校验组合并接线）；设置页
+  locks/queue 按配置展示；config.example/docs 同步。
+- 验收：test_pg_locks 8/8（多线程争用串行化、暂停过 TTL 旧 token 拒绝）、
+  test_pg_queue 8/8（claim 不相交、回收重派、退避/上限/人工重试、取消语义）、
+  test_worker 6/6（引擎至少一次、失联不提交、失败重试、补偿扫描、API→worker
+  端到端、调度 leader 互斥）。
+- **未支持/后续**：队列与账本严格同事务（现为账本先落+补偿扫描，阶段 5 outbox）；
+  GPU 声明式容量表与模型服务真实并发限制；外部模型调用幂等键（未知结果人工核对
+  策略待接入真实付费调用）；多 worker 容量与吞吐基准（1.5× 闸门）。

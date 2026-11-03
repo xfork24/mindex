@@ -223,8 +223,8 @@ def _deployment_status(store: Store, config: Config) -> dict:
         "database": store.backend.backend,
         "media": "local",
         "vectors": config.vector.backend,
-        "locks": "file",
-        "queue": "inline",
+        "locks": config.locks.backend,
+        "queue": config.queue.backend,
         "library_id": library_id or "",
         "schema_ready": True,
     }

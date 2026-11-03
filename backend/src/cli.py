@@ -557,6 +557,38 @@ def migrate(ctx: typer.Context):
 
 
 @app.command()
+def worker(
+    ctx: typer.Context,
+    queues: Annotated[str, typer.Option(help="消费的任务类别（逗号分隔：source,dialogue,person,topic）。")] = "source,dialogue,person,topic",
+    concurrency: Annotated[int, typer.Option(min=1, help="并行执行槽位；起步建议 1，容量验证后增加。")] = 1,
+    once: Annotated[bool, typer.Option(help="领取并执行一个任务后退出（验证/测试用）。")] = False,
+    idle_exit: Annotated[float | None, typer.Option(help="空闲指定秒数后退出（测试用）。")] = None,
+):
+    """启动 worker 消费持久队列（plans §7.2；需要 queue.backend=postgres）。
+
+    至少一次交付：claim 带心跳续期与 fencing token，暂停超过 TTL 的旧执行不得提交；
+    取消意图在执行间轮询传播。起步用小并发，完成容量与 GPU 准入测试后增加。
+
+    示例：
+
+    \b
+      MINDEX_DATABASE_DSN=postgres://… mindex worker --queues source,dialogue --concurrency 2
+    """
+    import logging as _logging
+
+    from mindex.worker_runtime import Worker
+
+    _logging.basicConfig(level=_logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    try:
+        runner = Worker(ctx.obj, queues=[q.strip() for q in queues.split(",") if q.strip()],
+                        concurrency=concurrency, once=once, idle_exit=idle_exit)
+    except RuntimeError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    executed = runner.run()
+    print_json({"worker": runner.identity, "executed": executed})
+
+
+@app.command()
 def check(
     ctx: typer.Context,
     index_id: Annotated[str | None, typer.Option(help="内容索引版本 ID；省略使用活动索引。")] = None,

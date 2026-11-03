@@ -35,6 +35,15 @@ pg-single 使用步骤：`MINDEX_DATABASE_DSN=postgres://… mindex migrate` 建
 
 派生词法索引（`mindex indexes lexical` 回填；发布时自动构建）让文字检索的统计与 BM25 评分在 SQL 内完成；旧索引或分词器版本不一致时自动回退 Python 参考路径并告警。
 
+## `queue` / `locks` — 任务分发与具名锁（水平扩展阶段 3）
+
+| 键 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `queue.backend` | `inline` \| `postgres` | `inline` | `inline` 为 API 进程内立即执行（现有行为）；`postgres` 为持久队列（claim 用 `FOR UPDATE SKIP LOCKED`、dedupe 幂等、attempt/fencing token、超时回收、有上限指数退避），由 `mindex worker --queues source,dialogue,… --concurrency N` 消费，至少一次交付。需要 `database.backend=postgres`；补偿扫描兜底「账本已落、入队前崩溃」窗口 |
+| `locks.backend` | `file` \| `postgres` | `file` | `file` 为 data_dir 文件锁（跨进程，现有行为）；`postgres` 为 PG 租约锁（epoch 永不归零、fencing token 单调不复用、TTL 90s + 心跳 20s；失去租约即停止提交）。需要 `database.backend=postgres`；选题调度器在该形态下以 leader 租约保证单实例触发 |
+
+worker 使用：`MINDEX_DATABASE_DSN=… mindex worker`。GPU 任务按 worker 并发槽位排队（`--concurrency`，起步 1；声明式容量表随阶段 5 集群装配）。
+
 ## `embedding` — WeMM 嵌入服务
 
 | 键 | 类型 | 默认 | 说明 |

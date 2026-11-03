@@ -673,6 +673,22 @@ class VectorConfig(StrictModel):
     chroma_server: ChromaServerConfig = Field(default_factory=ChromaServerConfig)
 
 
+class QueueConfig(StrictModel):
+    """任务分发后端（阶段 3）：inline 为进程内立即执行（现有行为）；postgres 为
+    持久队列 + worker（``mindex worker``），至少一次交付。需要 database.backend
+    为 postgres。切换需重启。"""
+
+    backend: Literal["inline", "postgres"] = "inline"
+
+
+class LocksConfig(StrictModel):
+    """具名锁后端（阶段 3）：file 为 data_dir 文件锁（现有行为，跨进程）；postgres
+    为 PG 租约锁（epoch/fencing token、TTL+心跳，plans §7.1）。需要
+    database.backend 为 postgres。多 API 副本在阶段 5 集群装配后开放。"""
+
+    backend: Literal["file", "postgres"] = "file"
+
+
 class DatabaseConfig(StrictModel):
     """元数据库后端选择；其余后端（vector/storage/queue/locks）随阶段 2–4 加入。
 
@@ -691,6 +707,8 @@ class Config(StrictModel):
     enforce_gpu_lock: bool = False
     database: DatabaseConfig = Field(default_factory=DatabaseConfig, exclude=True)
     vector: VectorConfig = Field(default_factory=VectorConfig, exclude=True)
+    queue: QueueConfig = Field(default_factory=QueueConfig, exclude=True)
+    locks: LocksConfig = Field(default_factory=LocksConfig, exclude=True)
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
     analyzer: AnalyzerConfig = Field(default_factory=AnalyzerConfig)
     person: PersonConfig = Field(default_factory=PersonConfig)

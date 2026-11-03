@@ -364,8 +364,13 @@ CREATE TABLE IF NOT EXISTS lexical_index_meta (
 """)
 
 
+def _metadata_v13(db):
+    """分布式锁租约表（plans §7.1，阶段 3）：仅 PostgreSQL 形态使用（schema_pg 基线
+    中的 lock_resources/lock_holders）；本地形态用 data_dir 文件锁，此步为空操作。"""
+
+
 # metadata.sqlite3 的有序迁移：只追加，不修改已发布的步骤（见 shared/migrations.py）。
-METADATA_STEPS = (_metadata_v1, _metadata_v2, _metadata_v3, _metadata_v4, _metadata_v5, _metadata_v6, _metadata_v7, _metadata_v8, _metadata_v9, _metadata_v10, _metadata_v11, _metadata_v12)
+METADATA_STEPS = (_metadata_v1, _metadata_v2, _metadata_v3, _metadata_v4, _metadata_v5, _metadata_v6, _metadata_v7, _metadata_v8, _metadata_v9, _metadata_v10, _metadata_v11, _metadata_v12, _metadata_v13)
 
 
 def migrate_metadata(db) -> int:

@@ -77,16 +77,46 @@ def open_context(config: Config) -> BackendContext:
         vectors: VectorStores = ChromaServerVectorStores(config.vector.chroma_server)
     else:
         vectors = LocalVectorStores(store.root)
+    if config.queue.backend == "postgres":
+        if config.database.backend != "postgres":
+            raise RuntimeError(
+                "queue.backend=postgres 属共享队列，与 sqlite 单机形态的组合未定义；"
+                "请将 database.backend 设为 postgres，并用 mindex worker 消费（plans §4）")
+        # 队列实现按需绑定 PG 连接（shared/db/queue_pg.PgTaskQueue），上下文只登记形态。
+
+        queue: TaskQueue = PgQueueAdapter(store.library_id)
+    else:
+        queue = InlineTaskQueue()
+    if config.locks.backend == "postgres":
+        if config.database.backend != "postgres":
+            raise RuntimeError(
+                "locks.backend=postgres 属共享租约锁，与 sqlite 单机形态的组合未定义；"
+                "请将 database.backend 设为 postgres（plans §4 运行形态表）")
+        from mindex.shared.db.locks_pg import PgLockProvider
+
+        locks: LockProvider = PgLockProvider(store.backend, library_id=library_id)
+    else:
+        locks = FileLockProvider(store.root)
     return BackendContext(
         form=form,
         library_id=library_id,
         data_dir=store.root,
         db=store,
         media=LocalMediaStore(store.root),
-        locks=FileLockProvider(store.root),
+        locks=locks,
         vectors=vectors,
-        queue=InlineTaskQueue(),
+        queue=queue,
     )
+
+
+class PgQueueAdapter:
+    """postgres 队列的上下文占位：真正的 claim/complete 由 worker 与 dispatch 使用
+    shared/db/queue_pg.PgTaskQueue（持有 library_id 即可共享语义）。"""
+
+    backend = "postgres"
+
+    def __init__(self, library_id: str):
+        self.library_id = library_id
 
 
 def _library_id(store) -> str:
