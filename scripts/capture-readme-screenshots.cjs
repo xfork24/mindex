@@ -68,6 +68,46 @@ async function snap(page, name) {
   logShot(name, file);
 }
 
+// 文字检索截图的通用收尾：强制结果图全部加载（防行高漂移）、查询框锚定视口顶，
+// 底部被切半的行“补全（查询文字仍可见时）或整行移出”，循环修正到稳定。
+async function searchKeywordBottomRows(page) {
+  await page.evaluate(() => {
+    for (const img of document.querySelectorAll('#results article.card img')) {
+      img.loading = 'eager';
+      if (!img.complete) img.src = img.currentSrc || img.src;
+    }
+  });
+  await page.waitForFunction(() => {
+    const imgs = [...document.querySelectorAll('#results article.card img')];
+    return imgs.length > 0 && imgs.every((i) => i.complete && (i.naturalWidth > 0 || i.getBoundingClientRect().height === 0));
+  }, undefined, { timeout: 15000 }).catch(() => {});
+  await page.evaluate(() => {
+    const q = document.querySelector('#query');
+    window.scrollTo(0, Math.max(0, q.getBoundingClientRect().top + window.scrollY - 8));
+  });
+  for (let round = 0; round < 4; round++) {
+    const acted = await page.evaluate(() => {
+      const vh = window.innerHeight;
+      const q = document.querySelector('#query');
+      const rows = [];
+      for (const c of document.querySelectorAll('#results article.card')) {
+        const top = c.getBoundingClientRect().top;
+        const last = rows[rows.length - 1];
+        if (last && Math.abs(last.top - top) < 24) last.bottom = Math.max(last.bottom, c.getBoundingClientRect().bottom);
+        else rows.push({ top, bottom: c.getBoundingClientRect().bottom });
+      }
+      const cut = rows.find((r) => r.bottom > vh - 4 && r.top < vh - 4);
+      if (!cut) return false;
+      const need = cut.bottom - (vh - 8);
+      if (need <= q.getBoundingClientRect().top + 40) window.scrollBy(need);
+      else window.scrollBy(cut.top - (vh - 8)); // 整行移出视口（向上滚），末行完整收尾
+      return true;
+    }).catch(() => false);
+    if (!acted) break;
+    await sleep(250);
+  }
+}
+
 // 70% 缩放截图（用户要求：一屏装下更多内容）。
 async function zoom70(page) {
   await page.addStyleTag({ content: 'body{zoom:.7}' });
@@ -253,7 +293,7 @@ const RECIPES = [
       await page.click('#search-button');
       await page.waitForSelector('#results article.card');
       await page.waitForFunction(() => !document.querySelector('#search-button[disabled]'));
-      await revealBottomRow(page, '#results article.card');
+      await searchKeywordBottomRows(page);
       await snap(page, 'search-text-and-person');
     },
   },
@@ -268,44 +308,7 @@ const RECIPES = [
       await page.waitForFunction(() => !document.querySelector('#search-button[disabled]'));
       await waitImagesLoaded(page, '#results article.card img');
       // 用户要求：搜索关键字必须可见；底部最后一行要么完整、要么整行移出。
-      // 结果图是懒加载，滚动会触发新图加载并撑高卡片 → 先强制全部立即加载，再循环修正到稳定。
-      await page.evaluate(() => {
-        for (const img of document.querySelectorAll('#results article.card img')) {
-          img.loading = 'eager';
-          if (!img.complete) img.src = img.currentSrc || img.src;
-        }
-      });
-      await page.waitForFunction(() => {
-        const imgs = [...document.querySelectorAll('#results article.card img')];
-        return imgs.length > 0 && imgs.every((i) => i.complete && (i.naturalWidth > 0 || i.getBoundingClientRect().height === 0));
-      }, undefined, { timeout: 15000 }).catch(() => {});
-      // 先把查询框锚定到视口顶
-      await page.evaluate(() => {
-        const q = document.querySelector('#query');
-        window.scrollTo(0, Math.max(0, q.getBoundingClientRect().top + window.scrollY - 8));
-      });
-      // 再循环修正底部行：补全（查询文字行仍可见时）或整行移出
-      for (let round = 0; round < 4; round++) {
-        const acted = await page.evaluate(() => {
-          const vh = window.innerHeight;
-          const q = document.querySelector('#query');
-          const rows = [];
-          for (const c of document.querySelectorAll('#results article.card')) {
-            const top = c.getBoundingClientRect().top;
-            const last = rows[rows.length - 1];
-            if (last && Math.abs(last.top - top) < 24) last.bottom = Math.max(last.bottom, c.getBoundingClientRect().bottom);
-            else rows.push({ top, bottom: c.getBoundingClientRect().bottom });
-          }
-          const cut = rows.find((r) => r.bottom > vh - 4 && r.top < vh - 4);
-          if (!cut) return false;
-          const need = cut.bottom - (vh - 8);
-          if (need <= q.getBoundingClientRect().top + 40) window.scrollBy(need);
-          else window.scrollBy(cut.top - (vh - 8)); // 整行移出视口（向上滚），末行完整收尾
-          return true;
-        }).catch(() => false);
-        if (!acted) break;
-        await sleep(250);
-      }
+      await searchKeywordBottomRows(page);
       await snap(page, 'search-text-and-object');
     },
   },
@@ -462,6 +465,19 @@ const RECIPES = [
       await snap(page, 'studio-storyboard');
     },
   },
+
+  // ---------- 同一分镜的五个阶段（用户要求：5 张连播 GIF 的源图）
+  ...['content', 'picture', 'tts', 'select', 'render'].map((stage) => ({
+    name: `studio-stage-${stage}`,
+    run: async (page) => {
+      await open(page, `/?job=${data.job.id}`, '#shot-strip .shot-card');
+      await openShotStage(page, 8 % data.shotCount, stage);
+      // 用户要求：顶部到分镜卡片条刚显示即可，尽量多显示下方阶段详情。
+      await page.evaluate(() => document.querySelector('#shot-strip').scrollIntoView({ block: 'start' }));
+      await sleep(600);
+      await snap(page, `studio-stage-${stage}`);
+    },
+  })),
   {
     name: 'studio-timeline-alignment',
     run: async (page) => {

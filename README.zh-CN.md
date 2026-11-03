@@ -146,9 +146,18 @@ Studio 用你自己的素材库把一个想法变成成片。工作流为选题�
 **从文案到逐镜生产。** 文案创作模型按所选文案模板（内置或自建，可附参考文稿）从大纲写出可编辑的文案，拆分镜后每镜一行。
 
 <details>
-<summary>分镜编辑：旁白、时长、来源与阶段状态</summary>
+<summary>分镜编辑：旁白、时长、来源与阶段状态；同一分镜的五个阶段 —— 5 张阶段图自动连播</summary>
 
-![分镜编辑：旁白、时长、来源与阶段状态](docs/assets/studio-storyboard.png)
+![自动连播：分镜工作台与同一分镜的五个阶段（文案与查询、召回、配音、选片与对齐、渲染）](docs/assets/gallery-storyboard.gif)
+
+逐张原图：
+
+1. [分镜工作台总览](docs/assets/studio-storyboard.png)
+2. [阶段：文案与查询](docs/assets/studio-stage-content.png)
+3. [阶段：召回](docs/assets/studio-stage-picture.png)
+4. [阶段：配音](docs/assets/studio-stage-tts.png)
+5. [阶段：选片与对齐](docs/assets/studio-stage-select.png)
+6. [阶段：渲染](docs/assets/studio-stage-render.png)
 
 </details>
 

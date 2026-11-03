@@ -110,6 +110,43 @@
       ]
     },
     {
+      "key": "storyboard",
+      "output": "gallery-storyboard.gif",
+      "output_sha256": "95a35e0e81f44bf403a300cbd68e6001b315225972b83e7f11faae66050f52a3",
+      "sources": [
+        {
+          "file": "studio-stage-content.png",
+          "zh": "阶段：文案与查询",
+          "en": "Stage: script and query",
+          "sha256": "0154cc3114bb0513778d4595335e0afbab03c84e90bc3760acd55b7587027e0f"
+        },
+        {
+          "file": "studio-stage-picture.png",
+          "zh": "阶段：召回",
+          "en": "Stage: recall",
+          "sha256": "51ab22e6ea9fc3ae29202e8c21f0c275366f2385c9b1ade04d5be32a2d17f308"
+        },
+        {
+          "file": "studio-stage-tts.png",
+          "zh": "阶段：配音",
+          "en": "Stage: narration TTS",
+          "sha256": "489e32edcc0da92ad41bf25d96ca1616098ebb404f8aabbee43c0880e1b7f6b1"
+        },
+        {
+          "file": "studio-stage-select.png",
+          "zh": "阶段：选片与对齐",
+          "en": "Stage: selection and alignment",
+          "sha256": "657c787fda8ea4a7e82a4b9d5355f54ea8f7a45307b6e93aca65bc6b0bd16d05"
+        },
+        {
+          "file": "studio-stage-render.png",
+          "zh": "阶段：渲染",
+          "en": "Stage: render",
+          "sha256": "446f49bff0fc7c79d5250eb9f5d7bd4e565e2fff9967e91c10e9944ee9d4e8e9"
+        }
+      ]
+    },
+    {
       "key": "agent",
       "output": "gallery-agent.gif",
       "output_sha256": "396281f1b68128ed7e8dbf4278c8700c80685edb4922ee9a442345ad89f2650a",

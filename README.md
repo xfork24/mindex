@@ -147,9 +147,18 @@ Studio turns an idea into a finished video using your library as raw material. T
 **Scripted, storyboarded, shot-by-shot production.** The writer model drafts a script from your outline using a script template (built-in or your own, with optional reference documents), then the storyboard split produces one row per shot.
 
 <details>
-<summary>Storyboard rows with narration, duration, source, and stage status</summary>
+<summary>Storyboard rows with narration, duration, source, and stage status; five stages of one shot — 5 stage screenshots, auto-playing</summary>
 
-![Storyboard rows with narration, duration, source, and stage status](docs/assets/studio-storyboard.png)
+![Auto-playing screenshots: storyboard workspace and the five stages of one shot (script & query, recall, narration, selection & alignment, render)](docs/assets/gallery-storyboard.gif)
+
+Full-size images:
+
+1. [Storyboard workspace overview](docs/assets/studio-storyboard.png)
+2. [Stage: script and query](docs/assets/studio-stage-content.png)
+3. [Stage: recall](docs/assets/studio-stage-picture.png)
+4. [Stage: narration TTS](docs/assets/studio-stage-tts.png)
+5. [Stage: selection and alignment](docs/assets/studio-stage-select.png)
+6. [Stage: render](docs/assets/studio-stage-render.png)
 
 </details>
 

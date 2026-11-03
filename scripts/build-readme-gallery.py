@@ -101,6 +101,18 @@ GROUPS: tuple[Group, ...] = (
         ),
     ),
     Group(
+        key="storyboard",
+        zh="分镜工作台：同一分镜的五个阶段",
+        en="Storyboard workspace: five stages of one shot",
+        frames=(
+            Frame("studio-stage-content.png", "阶段：文案与查询", "Stage: script and query"),
+            Frame("studio-stage-picture.png", "阶段：召回", "Stage: recall"),
+            Frame("studio-stage-tts.png", "阶段：配音", "Stage: narration TTS"),
+            Frame("studio-stage-select.png", "阶段：选片与对齐", "Stage: selection and alignment"),
+            Frame("studio-stage-render.png", "阶段：渲染", "Stage: render"),
+        ),
+    ),
+    Group(
         key="agent",
         zh="Agent 会话：文案、逐镜生产、成片预览与分镜合并",
         en="Agent session: scripting, production, build preview, shot merging",
