@@ -112,7 +112,7 @@
     {
       "key": "agent",
       "output": "gallery-agent.gif",
-      "output_sha256": "05f641cb18a33611372b10dab74837c88bc9c857ce648ed9499148d0133505b6",
+      "output_sha256": "396281f1b68128ed7e8dbf4278c8700c80685edb4922ee9a442345ad89f2650a",
       "sources": [
         {
           "file": "agent-create-video-2.png",
@@ -133,10 +133,10 @@
           "sha256": "e8c46dc80318261d0406b6534b596908ee9433fda948ecb16d5064c17b04c38d"
         },
         {
-          "file": "agent-search-clips.png",
-          "zh": "Agent 检索特定视频片段",
-          "en": "Agent retrieving specific video clips",
-          "sha256": "8cba3319544d915447a10e2ece9009c369d2bec91081c8a3395532a29e49375f"
+          "file": "agent-merge-shots.png",
+          "zh": "Agent 会话：合并分镜 1+2",
+          "en": "Agent session: merging shots 1 and 2",
+          "sha256": "c4a6da950428f2798d799763d25da98327b9404369f0eaf7043e692ff613f426"
         }
       ]
     },

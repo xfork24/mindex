@@ -42,7 +42,7 @@ python scripts/build-readme-gallery.py --format webp  # 体积优先时可改用
 | `agent-create-video-2.png` | 4.2-使用Agent自动从素材库制作视频2.png |
 | `agent-create-video-3.png` | 4.3-使用Agent自动从素材库制作视频3.png |
 | `agent-create-video-4.png` | 4.4-使用Agent自动从素材库制作视频4.png |
-| `agent-search-clips.png` | 4.5-使用Agent检索特定视频片段.png |
+| `agent-merge-shots.png` | 无原版对应（替代 4.5-使用Agent检索特定视频片段.png，展示合并分镜指令） |
 | `settings-models-harness.png` | 5.1-模型与harness设置.png |
 | `settings-model-card.png` | 5.2-自定义模型卡片.png |
 | `settings-model-config.png` | 5.3-自定义模型配置.png |

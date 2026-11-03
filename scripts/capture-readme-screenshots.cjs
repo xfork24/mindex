@@ -372,16 +372,9 @@ const RECIPES = [
     name: 'admin-shots',
     run: async (page) => {
       await open(page, `/admin?source=${data.botanic.id}`, '#segment-list .segment-card');
-      // 用户要求：右侧显示 Media processing workspace（预处理面板）之下的部分。
-      await page.click('details.work-panel > summary.work-toolbar');
-      await page.waitForSelector('.work-card[data-work]');
-      await sleep(800);
-      await page.evaluate(() => {
-        const el = document.querySelector('details.work-panel');
-        el.open = true;
-        el.scrollIntoView({ block: 'start' });
-      });
-      await sleep(400);
+      // 用户要求：右侧显示 Media processing workspace 之下的分镜缩略图网格。
+      await page.evaluate(() => document.querySelector('#segment-list').scrollIntoView({ block: 'start' }));
+      await sleep(600);
       await snap(page, 'admin-shots');
     },
   },
@@ -678,31 +671,14 @@ const RECIPES = [
       await drawerScrollBottom(page);
       await snap(page, 'agent-create-video-4');
     }],
-    ['agent-search-clips', async (page) => {
-      // 原图在检索页执行查询后会话里展示片段检索结果；现会话对应时刻为 resolve_shots 的分镜媒体块。
-      const init = () => {
-        sessionStorage.setItem('mindex.agent.open', '1');
-        try { localStorage.setItem('mindex.agent.followScroll', '1'); } catch {}
-      };
-      const page2 = await newPage(init);
-      await open(page2, '/search', '#source[data-initialized="1"]');
-      await page2.fill('#query', 'delicious food');
-      await page2.selectOption('#source', data.singaporeSourceIds);
-      await page2.click('#search-button');
-      await page2.waitForSelector('#results article.card');
-      await page2.waitForFunction(() => !document.querySelector('#search-button[disabled]'));
-      await waitDrawer(page2);
-      await drawerScrollToTool(page2, 'resolve_shots', 0, true);
-      // 用户要求：视频封面要显示出来——展开媒体块，滚到封面网格并等图片加载完。
-      await page2.evaluate(() => {
-        const drawer = document.querySelector('#agent-drawer');
-        for (const d of drawer.querySelectorAll('details.agent-player')) d.open = true;
-        const grid = drawer.querySelector('.agent-media-grid');
-        if (grid) grid.scrollIntoView({ block: 'center' });
-      });
-      await waitImagesLoaded(page2, '#agent-drawer .agent-media-grid img');
-      await revealBottomRow(page2, '#results article.card');
-      await snap(page2, 'agent-search-clips');
+    ['agent-merge-shots', async (page) => {
+      // 用户指定：替代原“Agent 检索片段”——右侧展示“将分镜1和2合并”命令，
+      // 左侧展示合并后第一个分镜的召回详情。
+      await open(page, `/?job=${data.job.id}`, '#shot-strip .shot-card');
+      await openShotStage(page, 0, 'picture');
+      await waitDrawer(page);
+      await drawerScrollToText(page, '将分镜1和2合并');
+      await snap(page, 'agent-merge-shots');
     }],
   ].map(([name, run]) => ({ name, run })),
 ];
@@ -766,7 +742,7 @@ const RECIPES = [
   }, { sid: data.session?.id || '', width: '760' });
   // agent 系列截图需要自动展开抽屉。
   for (const r of RECIPES) {
-    if (r.name.startsWith('agent-create-video') && !r.run.toString().includes('mindex.agent.open')) {
+    if (r.name.startsWith('agent-') && !r.run.toString().includes('mindex.agent.open')) {
       const inner = r.run;
       r.run = async (page) => {
         await page.addInitScript(() => { try { sessionStorage.setItem('mindex.agent.open', '1'); } catch {} });

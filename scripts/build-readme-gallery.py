@@ -102,8 +102,8 @@ GROUPS: tuple[Group, ...] = (
     ),
     Group(
         key="agent",
-        zh="Agent 会话：文案、逐镜生产、成片预览与片段检索",
-        en="Agent session: scripting, production, build preview, clip retrieval",
+        zh="Agent 会话：文案、逐镜生产、成片预览与分镜合并",
+        en="Agent session: scripting, production, build preview, shot merging",
         frames=(
             Frame("agent-create-video-2.png", "Agent 会话：写文案并拆分镜", "Agent session: scripting and storyboard"),
             Frame(
@@ -116,7 +116,7 @@ GROUPS: tuple[Group, ...] = (
                 "Agent 会话：最终构建与成片预览",
                 "Agent session: final build with video preview",
             ),
-            Frame("agent-search-clips.png", "Agent 检索特定视频片段", "Agent retrieving specific video clips"),
+            Frame("agent-merge-shots.png", "Agent 会话：合并分镜 1+2", "Agent session: merging shots 1 and 2"),
         ),
     ),
     Group(

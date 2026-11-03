@@ -209,19 +209,19 @@ Agent 面板出现在每个页面。它用自然语言驱动检索、素材整�
 
 </details>
 
-上面的会话接下来会经历写文案、拆分镜、逐镜生产与最终构建；片段检索的工作方式相同。
+上面的会话接下来会经历写文案、拆分镜、逐镜生产与最终构建；后续指令（如合并分镜）也在同一会话里完成。
 
 <details>
-<summary>Agent 会话从写文案、逐镜生产到成片预览，以及片段检索 —— 4 张，自动连播</summary>
+<summary>Agent 会话从写文案、逐镜生产到成片预览，以及合并分镜 —— 4 张，自动连播</summary>
 
-![自动连播：Agent 会话从写文案、逐镜生产到成片预览，以及片段检索](docs/assets/gallery-agent.gif)
+![自动连播：Agent 会话从写文案、逐镜生产到成片预览，以及合并分镜](docs/assets/gallery-agent.gif)
 
 逐张原图：
 
 1. [Agent 会话：写文案并拆分镜](docs/assets/agent-create-video-2.png)
 2. [Agent 会话：逐镜生产与配音](docs/assets/agent-create-video-3.png)
 3. [Agent 会话：最终构建与成片预览](docs/assets/agent-create-video-4.png)
-4. [Agent 检索特定视频片段](docs/assets/agent-search-clips.png)
+4. [Agent 会话：合并分镜 1+2](docs/assets/agent-merge-shots.png)
 
 </details>
 

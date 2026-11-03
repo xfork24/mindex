@@ -210,19 +210,19 @@ The agent panel is available on every page. It drives search, library curation, 
 
 </details>
 
-The session above continues through scripting, per-shot production, and the final build; clip retrieval works the same way.
+The session above continues through scripting, per-shot production, and the final build; later requests (e.g. merging shots) reuse the same session.
 
 <details>
-<summary>Agent session through scripting, per-shot production, final build, and clip retrieval — 4 screenshots, auto-playing</summary>
+<summary>Agent session through scripting, per-shot production, final build, and shot merging — 4 screenshots, auto-playing</summary>
 
-![Auto-playing screenshots: agent session through scripting, per-shot production, final build, and clip retrieval](docs/assets/gallery-agent.gif)
+![Auto-playing screenshots: agent session through scripting, per-shot production, final build, and shot merging](docs/assets/gallery-agent.gif)
 
 Full-size images:
 
 1. [Agent session: scripting and storyboard](docs/assets/agent-create-video-2.png)
 2. [Agent session: per-shot production and narration](docs/assets/agent-create-video-3.png)
 3. [Agent session: final build with video preview](docs/assets/agent-create-video-4.png)
-4. [Agent retrieving specific video clips](docs/assets/agent-search-clips.png)
+4. [Agent session: merging shots 1 and 2](docs/assets/agent-merge-shots.png)
 
 </details>
 
