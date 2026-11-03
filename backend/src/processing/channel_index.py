@@ -8,8 +8,9 @@ from time import perf_counter
 
 from mindex.models.adapters import ModelError
 from mindex.processing.dialogue import CHANNELS, current_dialogue, indexed_dialogue, relative_dialogue
-from mindex.processing.indexing import VectorIndex, check_index
+from mindex.processing.indexing import VectorIndex, check_index, vector_client
 from mindex.shared.config import fingerprint
+from mindex.shared.lexical_store import build_lexical_index
 from mindex.shared.scene_plans import current_segments
 from mindex.shared.storage import dumps
 from mindex.shared.types import Annotation
@@ -304,7 +305,7 @@ def build_channels(builder, *, activate=False, mode="auto", source_id=None, kind
         completed.update(targets)
         notify("index_check")
         log.info("复用已就绪索引 %s；开始一致性校验", index_id)
-        issues = check_index(store, index_id)
+        issues = check_index(store, index_id, config=builder.config)
         if issues:
             raise ModelError("索引一致性检查失败：" + "; ".join(issues[:5]))
         if activate:
@@ -317,7 +318,8 @@ def build_channels(builder, *, activate=False, mode="auto", source_id=None, kind
     store.execute(
         "INSERT OR IGNORE INTO index_versions(id,spec,status) VALUES(?,?,'building')", (index_id, dumps(spec))
     )
-    vectors = VectorIndex(store.root, index_id, create=True)
+    vectors = VectorIndex(store.root, index_id, create=True,
+                            client=vector_client(builder.config))
     existing = vectors.ids()
     # Count durable vectors and metadata, including checkpoints from an earlier
     # attempt. Other sources retained in the incremental index are not this task.
@@ -388,7 +390,7 @@ def build_channels(builder, *, activate=False, mode="auto", source_id=None, kind
         log.info("开始复制可复用向量 · 共 %d 项", copy_total)
         for version, entries in copies.items():
             if version not in opened:
-                opened[version] = VectorIndex(store.root, version)
+                opened[version] = VectorIndex(store.root, version, client=vector_client(builder.config))
             for offset in range(0, len(entries), 256):
                 batch = entries[offset:offset + 256]
                 saved = opened[version].vectors([entry[0] for entry in batch])
@@ -441,7 +443,7 @@ def build_channels(builder, *, activate=False, mode="auto", source_id=None, kind
                     if key in cache:
                         version, identifier = cache[key]
                         if version not in opened:
-                            opened[version] = VectorIndex(store.root, version)
+                            opened[version] = VectorIndex(store.root, version, client=vector_client(builder.config))
                         vector = opened[version].vector(identifier)
                     if vector is not None:
                         reused += 1
@@ -485,7 +487,7 @@ def build_channels(builder, *, activate=False, mode="auto", source_id=None, kind
         vectors.flush()
         notify("index_check")
         log.info("向量落盘完成；开始索引一致性校验 %s", index_id)
-        issues = check_index(store, index_id)
+        issues = check_index(store, index_id, config=builder.config)
         if issues:
             raise ModelError("索引一致性检查失败：" + "; ".join(issues[:5]))
         log.info("索引一致性校验通过；重新核验嵌入模型身份")
@@ -493,6 +495,9 @@ def build_channels(builder, *, activate=False, mode="auto", source_id=None, kind
             raise ModelError("索引完成前模型空间发生变化，拒绝发布")
         if hasattr(builder.embedder, "require_gate"):
             builder.embedder.require_gate()
+        # 派生词法索引：以刚冻结的快照构建（SQL 统计与评分用，plans §6.1）。
+        # 幂等：断点续跑时版本一致则跳过。
+        build_lexical_index(store, index_id)
         store.execute("UPDATE index_versions SET status='ready' WHERE id=?", (index_id,))
         report = {
             "elapsed_seconds": round(perf_counter() - started, 3),

@@ -12,6 +12,13 @@ database:
   #   pool_min: 0
   #   pool_max: 8
   #   control_pool_max: 2
+# 向量后端：缺省本地嵌入 chroma（<data_dir>/chroma）；chroma_server 为独立 Chroma
+# 服务（需 database.backend=postgres；凭据只从环境变量读取，镜像版本由部署固定）。
+vector:
+  backend: chroma_local
+  # chroma_server:
+  #   url: http://127.0.0.1:8000
+  #   token_env: MINDEX_CHROMA_TOKEN
 # 关闭时允许不同素材/不同类型处理并行；开启时沿用全局管线互斥。
 enforce_gpu_lock: false
 # 素材上传每文件 20 GiB，独立于 search.max_upload_mb（检索查询视频）。

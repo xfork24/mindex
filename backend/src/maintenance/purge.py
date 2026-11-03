@@ -105,6 +105,16 @@ def purge_source(store: Store, source_id: str) -> dict:
             db.execute(f"DELETE FROM representations WHERE segment_id IN ({placeholders})", segment_ids)
             db.execute(f"DELETE FROM index_members WHERE segment_id IN ({placeholders})", segment_ids)
             bump_snapshot_revision(db)
+            # 删除了 index_members 的派生词法索引一并清掉（受影响版本检索回退
+            # Python 路径；下次发布该版本或回填命令时重建）。
+            affected = db.execute(
+                "SELECT DISTINCT index_id FROM lexical_index_meta"
+            ).fetchall()
+            db.execute(f"DELETE FROM search_segments WHERE segment_id IN ({placeholders})", segment_ids)
+            db.execute(f"DELETE FROM lexical_docs WHERE segment_id IN ({placeholders})", segment_ids)
+            db.execute(f"DELETE FROM lexical_terms WHERE segment_id IN ({placeholders})", segment_ids)
+            for row in affected:
+                db.execute("DELETE FROM lexical_index_meta WHERE index_id=?", (row["index_id"],))
             db.execute(f"DELETE FROM annotations WHERE segment_id IN ({placeholders})", segment_ids)
             db.execute(f"DELETE FROM segment_curation WHERE id IN ({placeholders})", segment_ids)
             db.execute("DELETE FROM segments WHERE source_id=?", (source_id,))

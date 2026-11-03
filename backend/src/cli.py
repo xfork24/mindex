@@ -578,7 +578,7 @@ def check(
     selected = index_id or (active["id"] if active else None)
     if not selected:
         raise typer.BadParameter("请指定索引 ID，或先发布索引")
-    issues = check_index(store, selected)
+    issues = check_index(store, selected, config=ctx.obj)
     print_json({"index_id": selected, "ok": not issues, "issues": issues})
     if issues:
         raise typer.Exit(1)
@@ -606,6 +606,40 @@ def list_indexes(ctx: typer.Context):
     )
 
 
+@indexes.command("lexical")
+def lexical(
+    ctx: typer.Context,
+    index_id: Annotated[str | None, typer.Option(help="目标索引版本 ID；省略重建全部 ready 版本。")] = None,
+    replace: Annotated[bool, typer.Option("--replace", help="已存在也强制重建（分词器版本变化后使用）。")] = False,
+):
+    """构建/回填派生词法索引（SQL 统计与评分用，可随时重建）。
+
+    新发布索引自动构建；旧索引（水平扩展阶段 2 之前）与本命令用于回填。分词器版本不一致时
+    检索自动回退 Python 参考路径，重建后恢复 SQL 路径。需要 index-write 锁。
+
+    示例：
+
+    \b
+      mindex indexes lexical
+      mindex indexes lexical --index-id INDEX_ID --replace
+    """
+    from mindex.shared.lexical_store import build_lexical_index
+    from mindex.shared.processing_lock import index_write_lock
+    from mindex.shared.storage import Store
+
+    store = Store(ctx.obj.data_dir)
+    with index_write_lock(store.root):
+        if index_id:
+            versions = store.rows("SELECT id FROM index_versions WHERE id=? AND status='ready'", (index_id,))
+            if not versions:
+                raise typer.BadParameter(f"索引不存在或未就绪：{index_id}")
+        else:
+            versions = store.rows("SELECT id FROM index_versions WHERE status='ready' ORDER BY created_at")
+        results = [build_lexical_index(store, row["id"], replace=replace) for row in versions]
+    print_json({"rebuilt": [r for r in results if not r.get("skipped")],
+                "skipped": [r for r in results if r.get("skipped")]})
+
+
 @indexes.command("activate")
 def activate_index(
     ctx: typer.Context, index_id: Annotated[str, typer.Argument(help="内容索引版本 ID；省略使用活动索引。")]
@@ -625,7 +659,7 @@ def activate_index(
 
     store = Store(ctx.obj.data_dir)
     with Pipeline(ctx.obj).lock():
-        issues = check_index(store, index_id)
+        issues = check_index(store, index_id, config=ctx.obj)
         if issues:
             raise typer.BadParameter("索引检查失败：" + "; ".join(issues[:5]))
         version = store.index_version(index_id)

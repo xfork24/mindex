@@ -767,7 +767,7 @@ def apply_runtime_overrides(config: Config) -> Config:
     """CLI 入口：data_dir 已有元数据库时合并覆盖层，否则原样返回。"""
     if not config.runtime_overrides or not (config.data_dir / "metadata.sqlite3").is_file():
         return config
-    store = Store(config.data_dir)
+    store = Store.open(config)
     ensure_writer_profile(store)
     ensure_default_profiles(store)
     return apply_overrides(config, store)

@@ -38,7 +38,7 @@ class Pipeline:
         transcriber: Transcriber | None = None,
     ):
         self.config = config
-        self.store = Store(config.data_dir)
+        self.store = Store.open(config)
         self._detector = detector
         self._analyzer = analyzer
         self._transcriber = transcriber
@@ -117,8 +117,10 @@ class Pipeline:
         self.store.execute(
             """INSERT OR IGNORE INTO segments
           (id,source_id,kind,start,end,path,thumbnail,generation,parent_id,reason)
-          VALUES(:id,:source_id,:kind,:start,:end,:path,:thumbnail,:generation,:parent_id,:reason)""",
-            segment,
+          VALUES(?,?,?,?,?,?,?,?,?,?)""",
+            tuple(segment[key] for key in (
+                "id", "source_id", "kind", "start", "end", "path",
+                "thumbnail", "generation", "parent_id", "reason")),
         )
         return segment
 

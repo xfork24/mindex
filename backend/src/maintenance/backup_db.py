@@ -20,6 +20,8 @@ TABLES = {
     'person_tasks', 'person_versions', 'search_releases', 'script_templates',
     'topic_profiles', 'topic_sources', 'topic_items', 'topic_runs', 'topic_cards', 'topic_gaps',
     'topic_calendar_events', 'brand_templates', 'delivery_templates', 'delivery_platforms', 'music_tracks', 'tool_sources',
+    # 派生词法索引：按 index_id 绑定内容索引，可重建；随所属索引整体进出备份。
+    'search_segments', 'lexical_docs', 'lexical_terms', 'lexical_index_meta',
 }
 # 这些表的 source_id 指向选题档案/选题数据源，而不是素材库 sources；
 # 部分备份不按素材裁剪它们，也不做素材依赖校验（与 script_templates 一样整体保留）。
@@ -287,6 +289,14 @@ def filter_database(path, selected: set[str] | None, *, allow_legacy_representat
         db.execute("DELETE FROM index_members WHERE json_extract(snapshot,'$.source_id') NOT IN chosen")
         db.execute('DELETE FROM representations WHERE NOT EXISTS (SELECT 1 FROM index_members m '
                    'WHERE m.index_id=representations.index_id AND m.segment_id=representations.segment_id)')
+        # 派生词法索引与幸存成员对齐；被裁剪版本/片段的派生行不再保留（可重建）。
+        db.execute('DELETE FROM search_segments WHERE NOT EXISTS (SELECT 1 FROM index_members m '
+                   'WHERE m.index_id=search_segments.index_id AND m.segment_id=search_segments.segment_id)')
+        db.execute('DELETE FROM lexical_docs WHERE NOT EXISTS (SELECT 1 FROM index_members m '
+                   'WHERE m.index_id=lexical_docs.index_id AND m.segment_id=lexical_docs.segment_id)')
+        db.execute('DELETE FROM lexical_terms WHERE NOT EXISTS (SELECT 1 FROM lexical_docs d '
+                   'WHERE d.index_id=lexical_terms.index_id AND d.segment_id=lexical_terms.segment_id)')
+        db.execute('DELETE FROM lexical_index_meta WHERE index_id NOT IN (SELECT id FROM index_versions)')
         for row in db.execute('SELECT * FROM person_imports').fetchall():
             if any(s in row['data'] for s in removed):
                 db.execute('DELETE FROM person_imports WHERE id=?', (row['id'],))
@@ -295,6 +305,8 @@ def filter_database(path, selected: set[str] | None, *, allow_legacy_representat
             members = db.execute('SELECT * FROM index_members WHERE index_id=? ORDER BY segment_id', (old,)).fetchall()
             if not members:
                 db.execute('DELETE FROM index_versions WHERE id=?', (old,))
+                for table in ('lexical_terms', 'lexical_docs', 'search_segments', 'lexical_index_meta'):
+                    db.execute(f'DELETE FROM {table} WHERE index_id=?', (old,))
                 continue
             spec = json.loads(version['spec'])
             prepared = []

@@ -218,6 +218,16 @@ def convert_current_timestamp(sql: str) -> str:
     return _map_code(sql, lambda code: _CURRENT_TIMESTAMP.sub(_PG_NOW_UTC, code))
 
 
+# SQLite 的 ``x IS ?`` 是 NULL 安全等值；PG 的 IS 只接受 NULL/TRUE/FALSE，等价改写为
+# IS NOT DISTINCT FROM。需在占位符转换之后应用（匹配 %s）。
+_IS_PARAM = re.compile(r"\bIS\s+%s\b")
+
+
+def convert_is_param(sql: str) -> str:
+    """``IS %s`` → ``IS NOT DISTINCT FROM %s``（登记过的唯一形状；``IS NULL`` 不受影响）。"""
+    return _map_code(sql, lambda code: _IS_PARAM.sub("IS NOT DISTINCT FROM %s", code))
+
+
 # ---------------------------- INSERT 改写 ----------------------------
 
 _INSERT_RE = re.compile(
@@ -275,7 +285,7 @@ def rewrite_for_postgres(sql: str) -> str:
     if match := _INSERT_RE.match(sql):
         return _rewrite_insert(match, sql)
     text = convert_json_functions(convert_placeholders(sql))
-    text = quote_reserved(convert_current_timestamp(text))
+    text = quote_reserved(convert_is_param(convert_current_timestamp(text)))
     return _expand_positional_insert(text)
 
 
@@ -289,17 +299,23 @@ def _expand_positional_insert(sql: str) -> str:
     columns = _baseline_columns().get(table)
     if not columns:
         return sql
-    listed = [column for column in columns if column != "rowid"]
+    spec = TABLE_SPECS.get(table)
+    if spec:  # 有登记列序的表按登记（与 REPLACE 改写一致）
+        listed = [column for column in spec.columns if column != "rowid"]
+    else:
+        listed = [column for column in columns if column != "rowid"]
     names = ",".join(_quote_column(column) for column in listed)
     return f"INSERT INTO {table} ({names}) {match.group('rest')}"
 
 
 def _rewrite_insert(match: re.Match, original: str) -> str:
     verb, table = match.group(1).upper(), match.group("table").lower()
-    rest = convert_json_functions(convert_placeholders(quote_reserved(match.group("rest")))).rstrip().rstrip(";")
+    rest = convert_is_param(convert_json_functions(
+        convert_placeholders(quote_reserved(match.group("rest"))))).rstrip().rstrip(";")
     raw_columns = match.group("cols")
     if raw_columns:
-        columns_sql = f"({raw_columns.strip()})"
+        listed = _columns(raw_columns, TABLE_SPECS.get(table) or _baseline_columns().get(table, ()))
+        columns_sql = "(" + ",".join(_quote_column(column) for column in listed) + ")"
     else:  # 无列名：按登记列序补出（SQLite 语义：除隐式 rowid 外按表序取值）
         spec = TABLE_SPECS.get(table)
         columns = spec.columns if spec else _baseline_columns().get(table, ())
