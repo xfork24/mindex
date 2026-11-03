@@ -6,162 +6,162 @@
     {
       "key": "admin",
       "output": "gallery-admin.gif",
-      "output_sha256": "66934ea7045689a1e18cd7cec1e4ae1b7cbd7a1fcdfaa45f8d258f7eefa4194d",
+      "output_sha256": "1bc53b5fd588119792501e3111747e544ef18713323cce1659dad988b7654509",
       "sources": [
         {
           "file": "admin-shot-analysis.png",
           "zh": "镜头的 AI 分析结果",
           "en": "Per-shot AI analysis result",
-          "sha256": "0f234d4950ccb2dc628876436c9ce98350ad5b85626234a33f656b808abe25bf"
+          "sha256": "66125ed4a7add0c87d81e98faccc4bfd94d0d76bd829bb8f2a1dd750c3627f73"
         },
         {
           "file": "admin-music.png",
           "zh": "背景音乐曲库管理",
           "en": "Background music library",
-          "sha256": "90799f925ef46cac9b3a32c688aee94ac58df32da15e90e809a6d4b5f801d67d"
+          "sha256": "b715607538193f0ca4610382b513b55c4629188830939938f59ebd2fd550b656"
         },
         {
           "file": "admin-groups.png",
           "zh": "素材分组管理",
           "en": "Source group management",
-          "sha256": "e3bc049d9a3b1452252857f4ab94e5f31d8007c980ee8009fa1d315323cb8e65"
+          "sha256": "9c304b0015069cdd1b12337dcfe26002478c572dc075694331d6a7542284bca5"
         }
       ]
     },
     {
       "key": "persons",
       "output": "gallery-persons.gif",
-      "output_sha256": "bf032085b8c756143843121ebf4ee56fe3b8114efa40bcdc6b9d74765c322ea4",
+      "output_sha256": "e4acb31e111dc1f8b596bb7e8b41c506debee49a47f452fe6650e0b565a4b548",
       "sources": [
         {
           "file": "persons-appearance-detection.png",
           "zh": "出镜识别与逐镜证据审核",
           "en": "Appearance detection with per-shot evidence review",
-          "sha256": "ff9a2cd9b42ed60964d03328b9ee418affc39dfac462f6bbcdb75cd6db2207d5"
+          "sha256": "79c621f4f45a788c90670115d8a66658c83486cdac7b25cb8fc372deaff9d80c"
         },
         {
           "file": "persons-cast-import.png",
           "zh": "演员表导入与条目核对",
           "en": "Cast-table import with entry review",
-          "sha256": "9e35142c75111a506daa40be5c69751aa799b3ceeeae9167a3c12260ee9cb43f"
+          "sha256": "cf3c06d76a231b32c5ce65b255febfd70e0ad061d9d557c12331c1d9f32666b6"
         }
       ]
     },
     {
       "key": "search",
       "output": "gallery-search.gif",
-      "output_sha256": "c400498dfbec3117dff8c85e2abb14a051f982324186cc4cc9ec3bdbbc4e7e2e",
+      "output_sha256": "4e82866080edc0395c37706fea089a84abc171eac59dd47c509a100fb239dae0",
       "sources": [
         {
           "file": "search-text-and-object.png",
           "zh": "物体与场景语义查询",
           "en": "Semantic query for objects and scenes",
-          "sha256": "dc6b8a4b0ea85b81a1bedd538209440745981ba64167b7fa9030c3dc31449091"
+          "sha256": "a92a4eb4d76f73140be41cdb6b6c37f3010ca3089a71e532b3a620781f55522d"
         },
         {
           "file": "search-emotion-closeup.png",
           "zh": "情绪与景别查询",
           "en": "Emotion and shot-type queries",
-          "sha256": "206896f91b091e9fba983e5576b292524723a91118fbffd43918aa4f233e627b"
+          "sha256": "09ce2c92726eced07d4cf0b5a517617b65488afbdb082193471dba6b2426a822"
         },
         {
           "file": "search-similar-scenes.png",
           "zh": "跨素材的相似场景检索",
           "en": "Similar-scene lookup across sources",
-          "sha256": "3419c3befc04b38ead9544fd8e629c7e508d38db553a44dff386721c65a72336"
+          "sha256": "077a893573e91ccf3ae367ec659ff95bb69d1604279b138da8b8b6771fcbda3e"
         },
         {
           "file": "search-by-image-or-video.png",
           "zh": "以图片或视频检索",
           "en": "Image or video similarity search",
-          "sha256": "1827a428194ddf086e015491773dc7e78f4cd3e565f6c794ccf1f00eaff15733"
+          "sha256": "3e62db8d3f0ab7fd18ec734302101cbfdf3974937cea8fae06290a7a196e0f8a"
         }
       ]
     },
     {
       "key": "studio",
       "output": "gallery-studio.gif",
-      "output_sha256": "b445197ed43c2ed68c431e4d2711cfece90e4f25fbf812d1d0c7a96bf211f779",
+      "output_sha256": "d9b19205365a61a9342ea5eb2c98e9a42871eb8a5e2c3b9b157f51133d6d9f98",
       "sources": [
         {
           "file": "studio-jobs.png",
           "zh": "创作任务列表",
           "en": "Creation task list",
-          "sha256": "cfbd5e5f224f99dfc4fca8cc22ea8813ebc27b5150a36b8064fb11f562376b65"
+          "sha256": "df59edc4db5b8a03166a8075fbb4af36b9ee0cb6f57c2c8fffb787c78b6bd269"
         },
         {
           "file": "studio-script-templates.png",
           "zh": "文案模板管理",
           "en": "Script template management",
-          "sha256": "01fb75f16f8db985b1987970327819eae7ed501d72be988e0b319d28bff57fb8"
+          "sha256": "069c64c0daa23269118b3468709819cb0c2abbcc838420232fe5df238c2ae875"
         },
         {
           "file": "studio-delivery-templates.png",
           "zh": "交付模板与平台规则管理",
           "en": "Delivery template management",
-          "sha256": "944c8b64082b0f4d991b792d907055cf79a2619bf8c15a9fb50e5e0f80b9e05f"
+          "sha256": "edf532618baab7167cc5669203222ca5144417fbf4b4ff2901f4b33ef010649f"
         },
         {
           "file": "studio-style-templates.png",
           "zh": "风格模板设置",
           "en": "Style template settings",
-          "sha256": "d53217ed3d5ad63509cc48df958004eb1b9fc674c7f1041bbccb23d1498c80e7"
+          "sha256": "7a58021679fe0afe3518e570e64b1ac148cedc603da78f57c26693101b9d2521"
         }
       ]
     },
     {
       "key": "agent",
       "output": "gallery-agent.gif",
-      "output_sha256": "4812b55475e1c2a9ac7f7de0f58d50cf73cf0699d182d1ca32bcee9ee3962b84",
+      "output_sha256": "05f641cb18a33611372b10dab74837c88bc9c857ce648ed9499148d0133505b6",
       "sources": [
         {
           "file": "agent-create-video-2.png",
           "zh": "Agent 会话：写文案并拆分镜",
           "en": "Agent session: scripting and storyboard",
-          "sha256": "4f81dda304b6588f8ae191b0c792a8c85d013471c1489a1e2c35cd27b66f5ad7"
+          "sha256": "52c670f23b2fc743983c9eca5c9305062d1cb189759db85f7748ac2e8b2a3801"
         },
         {
           "file": "agent-create-video-3.png",
           "zh": "Agent 会话：逐镜生产与配音",
           "en": "Agent session: per-shot production and narration",
-          "sha256": "06b352092386dcbf0b1af27b74980eaf3f49d7681946ac7717b88d687eadbd0d"
+          "sha256": "6fb5226ebc33138e22f85aadbdef315462b7b3a615feb5f6116457b0fa56fd0a"
         },
         {
           "file": "agent-create-video-4.png",
           "zh": "Agent 会话：最终构建与成片预览",
           "en": "Agent session: final build with video preview",
-          "sha256": "fdfd9c31e77cf5a725ba0778b0de9b34edfc5eed530b50bd55174db2774e959e"
+          "sha256": "e8c46dc80318261d0406b6534b596908ee9433fda948ecb16d5064c17b04c38d"
         },
         {
           "file": "agent-search-clips.png",
           "zh": "Agent 检索特定视频片段",
           "en": "Agent retrieving specific video clips",
-          "sha256": "89aa64a99489e2c81a72d8125ed6c585ef4d88e890c29ae9006159d72831d8e9"
+          "sha256": "8cba3319544d915447a10e2ece9009c369d2bec91081c8a3395532a29e49375f"
         }
       ]
     },
     {
       "key": "settings",
       "output": "gallery-settings.gif",
-      "output_sha256": "c5dd84344aba55d99f88c5c5efe11745e3cced358e4e2d20ce1e3c5d477d99bb",
+      "output_sha256": "8ff778955fd7b249f153236a2655c0b3040b8d00219b924d2b170800025793d4",
       "sources": [
         {
           "file": "settings-weights-voices-services.png",
           "zh": "召回权重、音色库、本地服务与工具管理",
           "en": "Recall weights, voice library, local services, and tool management",
-          "sha256": "7e083832503a15eb78fe23bf6f2853ade3da58860bccf931972525d7d280357a"
+          "sha256": "8896096af15942821a78009fc5f6f026c19cf3443b2b23da353700c98f543ec5"
         },
         {
           "file": "settings-model-card.png",
           "zh": "模型档案卡",
           "en": "Model profile card",
-          "sha256": "c4887013d6ad4f24da0cd965c9c3126b98d86dde9913557bd8f2ebc876e3b9a8"
+          "sha256": "8896096af15942821a78009fc5f6f026c19cf3443b2b23da353700c98f543ec5"
         },
         {
           "file": "settings-model-config.png",
           "zh": "自定义模型档案配置",
           "en": "Custom model profile configuration",
-          "sha256": "e3da848f426c344b5ccbc4a7b299eaf6a0864e5b409c354cc27a770059993fc3"
+          "sha256": "2547238f844c31b13455bfaacc1d8401a62bad758883bcd6d5ccb1c3e58db078"
         }
       ]
     }

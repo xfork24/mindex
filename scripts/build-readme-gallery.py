@@ -35,6 +35,8 @@ FRAME_MS = 3000
 QUALITY = 82
 METHOD = 6
 COLORS = 256
+# 画布底色用前端暗色主题的 --bg（frontend/src/shared/style.css），同比例帧的留边与页面融为一体。
+CANVAS_BG = "#15181b"
 
 
 @dataclass(frozen=True)
@@ -143,7 +145,7 @@ def output_path(group: Group, fmt: str) -> Path:
 
 
 def render(group: Group) -> list[Image.Image]:
-    """统一画布为组内最宽帧的宽高比；每帧等比缩放后白底居中，保证各帧尺寸一致。"""
+    """统一画布为组内最宽帧的宽高比；每帧等比缩放后深色底居中，保证各帧尺寸一致。"""
     loaded: list[Image.Image] = []
     for frame in group.frames:
         source = ASSETS / frame.file
@@ -157,7 +159,7 @@ def render(group: Group) -> list[Image.Image]:
         scale = min(WIDTH / image.width, height / image.height)
         size = (max(1, round(image.width * scale)), max(1, round(image.height * scale)))
         thumb = image.resize(size, Image.LANCZOS)
-        target = Image.new("RGB", (WIDTH, height), "white")
+        target = Image.new("RGB", (WIDTH, height), CANVAS_BG)
         target.paste(thumb, ((WIDTH - size[0]) // 2, (height - size[1]) // 2))
         canvas.append(target)
     return canvas
