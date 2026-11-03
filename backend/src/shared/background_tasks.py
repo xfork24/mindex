@@ -152,12 +152,30 @@ class BackgroundTaskRunner:
         return self.get(task_id)
 
     def launch(self, task_id, config, lock):
+        from mindex.shared.queue_dispatch import queue_backend
+
+        if queue_backend(self.runtime) == "postgres":
+            self._enqueue(task_id, lock)
+            return
         thread = threading.Thread(
             target=self.run, args=(task_id, config, lock), daemon=True,
             name=f"{self.thread_prefix}-{task_id[:8]}",
         )
         self.threads[task_id] = thread
         thread.start()
+
+    def _enqueue(self, task_id, lock):
+        """postgres 队列形态：入队（dedupe 幂等）后释放工作锁，由 worker 领取执行。
+
+        账本先落、队列后入：崩溃窗口由 ``enqueue_backlog`` 补偿扫描兜底
+        （plans §7.2 durable outbox 的简化变体；阶段 5 收紧为同事务）。
+        """
+        from mindex.shared.queue_dispatch import enqueue_task
+
+        try:
+            enqueue_task(self.runtime, self.table, task_id)
+        finally:
+            lock.release()
 
     def save(self, task_id, field, value):
         if field == "progress":

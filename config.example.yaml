@@ -19,6 +19,14 @@ vector:
   # chroma_server:
   #   url: http://127.0.0.1:8000
   #   token_env: MINDEX_CHROMA_TOKEN
+# 任务分发：缺省 inline（API 进程内执行，现有行为）；postgres 为持久队列 +
+# mindex worker 消费（至少一次交付；需要 database.backend=postgres）。
+queue:
+  backend: inline
+# 具名锁：缺省 file（data_dir 文件锁，跨进程）；postgres 为 PG 租约锁
+# （epoch/fencing token、TTL 90s + 心跳 20s；需要 database.backend=postgres）。
+locks:
+  backend: file
 # 关闭时允许不同素材/不同类型处理并行；开启时沿用全局管线互斥。
 enforce_gpu_lock: false
 # 素材上传每文件 20 GiB，独立于 search.max_upload_mb（检索查询视频）。

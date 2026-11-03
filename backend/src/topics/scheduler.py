@@ -75,9 +75,13 @@ def status(store, *, now: datetime | None = None, enabled: bool = True) -> dict:
 
 
 class TopicScheduler:
-    def __init__(self, store, runs, *, interval: float = 60, clock=None):
+    def __init__(self, store, runs, *, interval: float = 60, clock=None, leader=None):
         self.store, self.runs, self.interval = store, runs, interval
         self.clock = clock or (lambda: datetime.now().astimezone())
+        # leader 租约（locks.backend=postgres 时注入）：同一时刻只有一个调度角色
+        # 真正触发，避免多副本重复提交（plans §7.2）；本地形态为 None（topics 文件
+        # 锁已互斥）。租约以调度间隔为 TTL，拿不到即跳过本轮。
+        self._leader = leader
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._first = True
@@ -87,18 +91,30 @@ class TopicScheduler:
         startup, self._first = self._first, False
         now = self.clock()
         submitted = []
-        for profile in profiles.list_profiles(self.store):
-            try:
-                body = profiles.body_of(self.store, profile["id"])
-                trigger = due(body.schedule, now, runs_on(self.store, profile["id"], now.date()), startup=startup)
-                if trigger is None:
-                    continue
-                run = self.runs.start(profile["id"], trigger=trigger)
-                submitted.append(run["id"])
-                log.info("定时选题挖掘已启动：档案 %s（%s），任务 %s", profile["name"], trigger, run["id"])
-            except Exception as exc:  # noqa: BLE001 — 调度失败只记日志，下次检查再试
-                detail = getattr(exc, "detail", None) or exc
-                log.info("定时选题挖掘暂未启动：档案 %s：%s", profile["name"], detail)
+        lease = None
+        if self._leader is not None:
+            lease = self._leader.lease("topics", mode="exclusive",
+                                       ttl=max(self.interval * 2, 60), wait=0)
+            if lease is None:
+                log.info("调度 leader 租约被其他实例持有，本轮跳过")
+                return submitted
+        try:
+            for profile in profiles.list_profiles(self.store):
+                try:
+                    body = profiles.body_of(self.store, profile["id"])
+                    trigger = due(body.schedule, now,
+                                  runs_on(self.store, profile["id"], now.date()), startup=startup)
+                    if trigger is None:
+                        continue
+                    run = self.runs.start(profile["id"], trigger=trigger)
+                    submitted.append(run["id"])
+                    log.info("定时选题挖掘已启动：档案 %s（%s），任务 %s", profile["name"], trigger, run["id"])
+                except Exception as exc:  # noqa: BLE001 — 调度失败只记日志，下次检查再试
+                    detail = getattr(exc, "detail", None) or exc
+                    log.info("定时选题挖掘暂未启动：档案 %s：%s", profile["name"], detail)
+        finally:
+            if lease is not None:
+                lease.release()
         return submitted
 
     def _loop(self):
@@ -126,7 +142,15 @@ def install(app, store, runs, config) -> TopicScheduler:
     """随应用启停调度器（包装 ``app.router.lifespan_context``）。"""
     import contextlib
 
-    scheduler = TopicScheduler(store, runs, interval=config.topics.scheduler.interval_seconds)
+    leader = None
+    if getattr(config, "locks", None) and config.locks.backend == "postgres":
+        from mindex.shared.db.locks_pg import PgLockProvider
+
+        library_id = getattr(store, "library_id", None) or (
+            store.one("SELECT value FROM settings WHERE key='library.id'") or {"value": ""})["value"]
+        leader = PgLockProvider(store.backend, library_id=library_id)
+    scheduler = TopicScheduler(store, runs, interval=config.topics.scheduler.interval_seconds,
+                               leader=leader)
     previous = app.router.lifespan_context
 
     @contextlib.asynccontextmanager
