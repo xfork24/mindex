@@ -22,7 +22,7 @@ TABLES = {
     'topic_calendar_events', 'brand_templates', 'delivery_templates', 'delivery_platforms', 'music_tracks', 'tool_sources',
     # 派生词法索引：按 index_id 绑定内容索引，可重建；随所属索引整体进出备份。
     'search_segments', 'lexical_docs', 'lexical_terms', 'lexical_index_meta',
-    'shared_files',
+    'shared_files', 'index_tasks', 'scheduled_runs',
 }
 # 这些表的 source_id 指向选题档案/选题数据源，而不是素材库 sources；
 # 部分备份不按素材裁剪它们，也不做素材依赖校验（与 script_templates 一样整体保留）。
@@ -272,6 +272,8 @@ def filter_database(path, selected: set[str] | None, *, allow_legacy_representat
     with database(path) as db:
         db.row_factory = sqlite3.Row
         tables = schema(db)
+        # 裁剪会重写版本 ID，全库构建/激活的历史任务无法安全重放。
+        db.execute('DELETE FROM index_tasks')
         known = {r[0] for r in db.execute('SELECT id FROM sources')}
         removed = known - selected
         db.execute('PRAGMA foreign_keys=OFF')
@@ -370,7 +372,7 @@ def filter_database(path, selected: set[str] | None, *, allow_legacy_representat
 
 def interrupt_tasks(path):
     with database(path) as db:
-        for table in ('dialogue_tasks', 'source_tasks', 'person_tasks'):
+        for table in ('dialogue_tasks', 'source_tasks', 'person_tasks', 'index_tasks'):
             db.execute(f"UPDATE {table} SET status='interrupted',error='迁移时任务已中断；请手动重试' "
                        "WHERE status IN ('queued','running')")
         db.execute("UPDATE runs SET status='interrupted' WHERE status IN ('queued','running')")

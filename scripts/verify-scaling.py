@@ -38,6 +38,7 @@ TESTS = [
     "test_persons_pg.py", "test_media_delivery.py",
     "test_backend_identity.py",
     "test_maintenance_and_gateway.py", "test_sql_characteristics.py",
+    "test_scaling_execution.py",
 ]
 
 

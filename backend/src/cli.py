@@ -142,7 +142,7 @@ def configure(
     if no_runtime_overrides:
         ctx.obj.runtime_overrides = False
     # 设置页保存的覆盖层对 CLI 同样生效（Web 与 CLI 行为一致）；e2e 验证框架保持 yaml 原值。
-    if ctx.invoked_subcommand not in {"e2e", "clips", "backup", "migrate", "migration", "doctor"}:
+    if ctx.invoked_subcommand not in {"e2e", "clips", "backup", "migrate", "migration", "doctor", "mcp"}:
         from mindex.settings.runtime_settings import apply_runtime_overrides
 
         ctx.obj = apply_runtime_overrides(ctx.obj)
@@ -432,7 +432,10 @@ def build_index(
                                          ",".join(channel or (["visual"] if mode == IndexMode.visual else ["visual", "dialogue", "analysis"])),
                                          ",".join(kind or (["moment", "shot"] if mode == IndexMode.visual else ["moment", "shot", "scene"])), activate)
         progress.update({"stage": "lock_wait"})
-        with Pipeline(ctx.obj).lock(source, "publish"):
+        from contextlib import nullcontext
+
+        # 持久任务由 worker 拿处理锁，调用端等待期间不能持有同一把锁。
+        with (nullcontext() if ctx.obj.queue.backend == "postgres" else Pipeline(ctx.obj).lock(source, "publish")):
             progress.update({"stage": "index_prepare", "message": "初始化索引构建器"})
             result = IndexBuilder(ctx.obj).build(
                 activate=activate, mode=mode.value, source_id=source,
@@ -466,7 +469,7 @@ def ingest(
         for path in videos:
             pipeline.prepare(path)
         pipeline.enrich_dialogue()
-        typer.echo(IndexBuilder(ctx.obj).build(activate=activate))
+    typer.echo(IndexBuilder(ctx.obj).build(activate=activate))
 
 
 @app.command()
@@ -788,6 +791,48 @@ def list_indexes(ctx: typer.Context):
     )
 
 
+index_tasks_app = typer.Typer(cls=HelpAwareGroup, help="查询、重试或取消持久索引任务。\n\n"
+    "示例：mindex indexes tasks list；mindex indexes tasks show TASK_ID。", no_args_is_help=True)
+indexes.add_typer(index_tasks_app, name="tasks")
+
+
+def _index_tasks(config):
+    from mindex.admin.source_tasks import IndexTasks
+    from mindex.settings.runtime_settings import RuntimeConfig
+    from mindex.shared.storage import Store
+
+    store = Store.open(config)
+    return IndexTasks(RuntimeConfig(config, store), store)
+
+
+@index_tasks_app.command("list")
+def list_index_tasks(ctx: typer.Context, limit: Annotated[int, typer.Option(min=1, max=200, help="最多返回的任务数。")] = 50):
+    """列出最近的索引任务。\n\n示例：mindex indexes tasks list --limit 20。"""
+    from mindex.shared.background_tasks import public_task
+
+    runner = _index_tasks(ctx.obj)
+    print_json({"items": [public_task(row) for row in runner.store.rows(
+        "SELECT * FROM index_tasks ORDER BY created_at DESC,rowid DESC LIMIT ?", (limit,))]})
+
+
+@index_tasks_app.command("show")
+def show_index_task(ctx: typer.Context, task_id: Annotated[str, typer.Argument(help="索引任务 ID。")]):
+    """查询索引任务进度与结果。\n\n示例：mindex indexes tasks show TASK_ID。"""
+    print_json(_index_tasks(ctx.obj).get(task_id))
+
+
+@index_tasks_app.command("retry")
+def retry_index_task(ctx: typer.Context, task_id: Annotated[str, typer.Argument(help="索引任务 ID。")]):
+    """重试失败、中断或已取消的索引任务。\n\n示例：mindex indexes tasks retry TASK_ID。"""
+    print_json(_index_tasks(ctx.obj).retry(task_id))
+
+
+@index_tasks_app.command("cancel")
+def cancel_index_task(ctx: typer.Context, task_id: Annotated[str, typer.Argument(help="索引任务 ID。")]):
+    """取消索引任务。\n\n示例：mindex indexes tasks cancel TASK_ID。"""
+    print_json(_index_tasks(ctx.obj).cancel(task_id))
+
+
 @indexes.command("lexical")
 def lexical(
     ctx: typer.Context,
@@ -810,6 +855,15 @@ def lexical(
     from mindex.shared.storage import Store
 
     store = Store.open(ctx.obj)
+    if ctx.obj.queue.backend == "postgres":
+        from mindex.admin.source_tasks import IndexTasks
+        from mindex.settings.runtime_settings import RuntimeConfig
+
+        results = IndexTasks(RuntimeConfig(ctx.obj, store), store).run_here(
+            {"action": "lexical", "index_id": index_id, "replace": replace})["indexes"]
+        print_json({"rebuilt": [r for r in results if not r.get("skipped")],
+                    "skipped": [r for r in results if r.get("skipped")]})
+        return
     with index_write_lock(store.root, config=ctx.obj):
         if index_id:
             versions = store.rows("SELECT id FROM index_versions WHERE id=? AND status='ready'", (index_id,))
@@ -828,7 +882,7 @@ def activate_index(
 ):
     """检查并激活指定内容索引，可用于发布或回退。
 
-    通过一致性检查后在 SQLite 中切换活动版本；schema 2 空间还会校验当前嵌入身份与能力门槛。回退前先恢复该版本对应的模型服务及配置，不会转换已有向量。
+    通过一致性检查后切换活动版本；持久队列由 worker 执行并等待终态。schema 2 空间还会校验当前嵌入身份与能力门槛。回退前先恢复该版本对应的模型服务及配置，不会转换已有向量。
 
     示例：
 
@@ -840,6 +894,13 @@ def activate_index(
     from mindex.shared.storage import Store
 
     store = Store.open(ctx.obj)
+    if ctx.obj.queue.backend == "postgres":
+        from mindex.admin.source_tasks import IndexTasks
+        from mindex.settings.runtime_settings import RuntimeConfig
+
+        IndexTasks(RuntimeConfig(ctx.obj, store), store).run_here({"action": "activate", "index_id": index_id})
+        typer.echo(f"已发布索引 {index_id}；检索模型须使用该版本对应的配置")
+        return
     with Pipeline(ctx.obj).lock():
         issues = check_index(store, index_id, config=ctx.obj)
         if issues:

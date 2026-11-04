@@ -669,6 +669,10 @@ def person_router(runtime, store):
 
     @router.post("/publish")
     def publish(body: Publish):
+        if runtime.current().queue.backend == "postgres":
+            from mindex.admin.source_tasks import IndexTasks
+
+            return IndexTasks(runtime, store).run_here({"action": "person-publish", "index_id": body.content_id})
         with release_write():
             return catalogue.publish(body.content_id)
 
@@ -677,6 +681,11 @@ def person_router(runtime, store):
         row = store.one("SELECT * FROM search_releases WHERE id=?", (identifier,))
         if not row:
             raise ValueError("找不到检索发布记录")
+        if runtime.current().queue.backend == "postgres":
+            from mindex.admin.source_tasks import IndexTasks
+
+            IndexTasks(runtime, store).run_here({"action": "activate-release", "release_id": identifier})
+            return row
         with release_write():
             store.activate_release(identifier)
         return row

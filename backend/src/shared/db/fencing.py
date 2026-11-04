@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from threading import RLock
 
 from mindex.shared.db.locks_pg import LeaseLost
 
@@ -19,13 +20,70 @@ class Attempt:
     task: object
     lost: object
     cancelled: object
+    publications: dict = field(default_factory=dict)
+    _contexts: ExitStack = field(default_factory=ExitStack, repr=False)
+    _held: set = field(default_factory=set, repr=False)
+    _publication_leases: dict = field(default_factory=dict, repr=False)
+    _closed: bool = False
+    _guard: object = field(default_factory=RLock, repr=False)
 
     def check(self):
-        if self.lost.is_set():
+        if self._closed or self.lost.is_set():
             raise LeaseLost("任务租约已失联，停止提交")
         if self.cancelled.is_set():
             from mindex.shared.task_cancel import TaskCancelled
             raise TaskCancelled()
+
+    def retain(self, key, context):
+        """发布串行区持续到队列/账本/指针共同提交；同一 attempt 内不重复拿锁。"""
+        with self._guard:
+            self.check()
+            if key not in self._held:
+                previous = {id(lease) for lease in _LEASES.get()}
+                self._contexts.enter_context(context)
+                self._held.add(key)
+                self._publication_leases.update((id(lease), lease) for lease in _LEASES.get()
+                                                if id(lease) not in previous)
+
+    def defer(self, key, publish):
+        with self._guard:
+            self.check()
+            self.publications[key] = publish
+
+    def publication_fence(self):
+        # 资源锁可能由子线程获取；终态事务显式复验，不依赖结束线程的 ContextVar。
+        return ExecutionFence(leases=tuple(self._publication_leases.values()))
+
+    def close(self):
+        self._closed = True
+        try:
+            self._contexts.close()
+        finally:
+            self.publications.clear()
+            self._held.clear()
+            self._publication_leases.clear()
+
+
+@contextmanager
+def publication_scope(store, *, config=None, check=None, only_attempt=False):
+    """持久任务把索引锁交给当前 attempt；本地/inline 保持原临界区。"""
+    from mindex.shared.processing_lock import index_write_lock
+
+    attempt = current_attempt()
+    if only_attempt and (not store.pg or attempt is None):
+        yield
+        return
+    lock = index_write_lock(store.root, config=config, check=check) if config is not None else None
+    if lock is None:
+        from mindex.shared import lock_backend
+
+        lock = lock_backend.named(store, "index-write", exclusive=True, timeout=None)
+    if store.pg and attempt is not None:
+        attempt.retain((store.library_id, "index-write"), lock)
+        yield
+    else:
+        with lock:
+            yield
 
 
 def current_attempt():
@@ -97,9 +155,9 @@ def verify_transaction(connection, backend, *, execution=None):
         if row[0]:
             attempt.cancelled.set()
             attempt.check()
-        from mindex.shared.db.scaling_schema import LEDGER_TABLES
+        from mindex.shared.db.scaling_schema import ALL_LEDGER_TABLES
 
-        if task.ledger_table in LEDGER_TABLES and task.ledger_id:
+        if task.ledger_table in ALL_LEDGER_TABLES and task.ledger_id:
             bound = connection.execute(
                 f"SELECT 1 FROM {task.ledger_table} WHERE id=%s AND queue_attempt_id=%s"
                 " AND queue_fencing_token=%s", (task.ledger_id, task.attempt_id, task.fencing_token)).fetchone()

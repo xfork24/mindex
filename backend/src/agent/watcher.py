@@ -27,6 +27,7 @@ TASK_KINDS = {
     "source": ("/api/admin/source-tasks/{}", "素材任务"),
     "dialogue": ("/api/admin/dialogue-tasks/{}", "对白任务"),
     "person": ("/api/persons/tasks/{}", "人物任务"),
+    "index": ("/api/index-tasks/{}", "索引任务"),
     "topics": ("/api/topics/runs/{}", "选题挖掘任务"),
 }
 WATCH_KINDS = ("build", *TASK_KINDS)

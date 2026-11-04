@@ -120,7 +120,7 @@ def create_app(
     if index_id and store.index_version(index_id)["status"] != "ready":
         raise ValueError("固定预览只允许就绪索引")
     from mindex.admin.dialogue_tasks import dialogue_router
-    from mindex.admin.indexes import indexes_router
+    from mindex.admin.indexes import index_tasks_router, indexes_router
     from mindex.admin.source_tasks import source_tasks_router
     from mindex.persons.person_api import person_router
 
@@ -128,6 +128,7 @@ def create_app(
     app.include_router(dialogue_router(runtime, store, embedder))
     app.include_router(source_tasks_router(runtime, store, embedder))
     app.include_router(indexes_router(runtime, store, embedder))
+    app.include_router(index_tasks_router(runtime, store, embedder))
     from mindex.admin.groups import groups_router
     app.include_router(groups_router(store))
     app.include_router(admin_router(store, runtime, backends=backends))

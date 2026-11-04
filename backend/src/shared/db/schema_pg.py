@@ -35,7 +35,7 @@ BASELINE_TABLES = (
     "person_features", "person_evidence", "person_coverage", "person_tasks",
     "person_versions", "search_releases",
     "search_segments", "lexical_docs", "lexical_terms", "lexical_index_meta",
-    "shared_files",
+    "shared_files", "index_tasks", "scheduled_runs",
 )
 
 BASELINE_DDL = f"""

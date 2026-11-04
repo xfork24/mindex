@@ -22,8 +22,8 @@ from pydantic import Field
 from mindex.models.adapters import ModelError
 from mindex.shared import lock_backend
 from mindex.shared.background_tasks import BackgroundTaskRunner, public_task
-from mindex.shared.config import StrictModel
-from mindex.shared.queue_dispatch import insert_ledger
+from mindex.shared.config import StrictModel, fingerprint
+from mindex.shared.queue_dispatch import insert_ledger, ledger_transaction
 from mindex.topics import cards as topic_cards
 from mindex.topics import cluster, datasources, profiles
 from mindex.topics.common import RUN_ID_PATTERN, TopicConflict, now, parse_time
@@ -190,6 +190,52 @@ class TopicRuns(BackgroundTaskRunner):
             return task_id, self.runtime.current()
 
         return self.submit(self.lock(), create)
+
+    def start_scheduled(self, profile_id, *, period, ordinal, trigger, created_at):
+        """周期占位、账本与入队同事务；leader 重放返回既有任务，不重新执行终态任务。"""
+        from mindex.topics.scheduler import AUTO_TRIGGERS, MAX_ATTEMPTS, library_timezone, runs_on
+
+        if trigger not in AUTO_TRIGGERS or not 1 <= ordinal <= MAX_ATTEMPTS:
+            raise ValueError("无效的定时触发或周期尝试编号")
+        moment = datetime.fromisoformat(created_at)
+        if moment.tzinfo is None:
+            raise ValueError("定时周期必须与带时区的触发时间一致")
+        tz = library_timezone(self.store)
+        if tz is not None:
+            moment = moment.astimezone(tz)
+        if moment.date().isoformat() != period:
+            raise ValueError("定时周期必须与素材库时区中的触发日期一致")
+        key = fingerprint(["topic-period-v1", profile_id, period, ordinal])
+        task_id = key[:32]
+        lock = self.lock()
+        self.acquire(lock, "调度")
+        try:
+            profiles.get_profile(self.store, profile_id)
+            existing = self.store.one("SELECT run_id FROM scheduled_runs WHERE profile_id=? AND period=? AND ordinal=?",
+                                      (profile_id, period, ordinal))
+            if existing:
+                lock.release()
+                return self.get(existing["run_id"])
+            today = runs_on(self.store, profile_id, moment.date(), tz=moment.tzinfo)
+            automatic = [row for row in today if row["trigger"] in AUTO_TRIGGERS]
+            active = next((row for row in automatic if row["status"] in {"queued", "running", "complete"}), None)
+            if active:
+                lock.release()
+                return self.get(active["id"])
+            if ordinal != len(automatic) + 1:
+                raise ValueError("定时尝试编号已变化，请重新检查周期")
+            config = self.runtime.current()
+            with ledger_transaction(self.store, self.table, task_id) as db:
+                db.execute("BEGIN IMMEDIATE")
+                db.execute("INSERT INTO topic_runs(id,source_id,trigger,status,config,options,created_at) "
+                           "VALUES(?,?,?,'queued','{}','{}',?)", (task_id, profile_id, trigger, created_at))
+                db.execute("INSERT INTO scheduled_runs(period_key,profile_id,period,ordinal,run_id) VALUES(?,?,?,?,?)",
+                           (key, profile_id, period, ordinal, task_id))
+            self.launch(task_id, config, lock)
+            return self.get(task_id)
+        except BaseException:
+            lock.release()
+            raise
 
     def run_here(self, profile_id: str, options: RunOptions | None = None, *, trigger: str = "manual") -> dict:
         """在当前线程同步执行（CLI ``--wait``）；拿不到锁时抛 ``TopicConflict``。"""

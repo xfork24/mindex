@@ -142,10 +142,10 @@ class PgTaskQueue:
 
     # ------------------------------------------------------------ 持有者操作
     def _ledger(self, db, row, status, *, error=None, clear=False, attempt=None, token=None):
-        from mindex.shared.db.scaling_schema import LEDGER_TABLES
+        from mindex.shared.db.scaling_schema import ALL_LEDGER_TABLES
 
         table, identifier = row["ledger_table"], row["ledger_id"]
-        if table not in LEDGER_TABLES or not identifier:
+        if table not in ALL_LEDGER_TABLES or not identifier:
             return
         bindings = ",queue_attempt_id=NULL" if clear else ""
         args = [status, error]

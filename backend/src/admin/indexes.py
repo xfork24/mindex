@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException
 from filelock import Timeout
 
 from mindex.admin.curation import EntityNotFound
+from mindex.admin.source_tasks import IndexOptions, IndexTasks
 from mindex.models.adapters import ModelError, MultimodalEmbedder
 from mindex.shared.processing_lock import ProcessingLock, index_write_lock
 
@@ -76,6 +77,12 @@ def indexes_router(runtime, store, embedder: MultimodalEmbedder | None = None) -
 
         config = runtime.current()
         _require_version(store, index_id)
+        if config.queue.backend == "postgres":
+            from mindex.admin.source_tasks import IndexTasks
+
+            IndexTasks(runtime, store, embedder).run_here({"action": "activate", "index_id": index_id})
+            active = _active(store) or {}
+            return {"active": active.get("content_id"), "release_id": active.get("release_id")}
         processing = ProcessingLock(config)
         try:
             processing.acquire()
@@ -110,5 +117,35 @@ def indexes_router(runtime, store, embedder: MultimodalEmbedder | None = None) -
         _warm_in_background(config)
         active = _active(store) or {}
         return {"active": active.get("content_id"), "release_id": active.get("release_id")}
+
+    return router
+
+
+def index_tasks_router(runtime, store, embedder=None) -> APIRouter:
+    runner = IndexTasks(runtime, store, embedder)
+    router = APIRouter(prefix="/api/index-tasks", tags=["索引任务"])
+
+    @router.post("", status_code=202)
+    def start(options: IndexOptions):
+        return runner.start(options.model_dump())
+
+    @router.get("")
+    def tasks(limit: int = 50):
+        from mindex.shared.background_tasks import public_task
+
+        return {"items": [public_task(row) for row in store.rows(
+            "SELECT * FROM index_tasks ORDER BY created_at DESC,rowid DESC LIMIT ?", (max(1, min(limit, 200)),))]}
+
+    @router.get("/{task_id}")
+    def get(task_id: str):
+        return runner.get(task_id)
+
+    @router.post("/{task_id}/cancel")
+    def cancel(task_id: str):
+        return runner.cancel(task_id)
+
+    @router.post("/{task_id}/retry", status_code=202)
+    def retry(task_id: str):
+        return runner.retry(task_id)
 
     return router
