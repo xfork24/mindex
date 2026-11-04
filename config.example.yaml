@@ -27,6 +27,22 @@ queue:
 # （epoch/fencing token、TTL 90s + 心跳 20s；需要 database.backend=postgres）。
 locks:
   backend: file
+# 媒体存储：缺省 local（单机文件系统）；s3 为对象存储（阶段 4B 核心已交付，
+# 媒体出口/检查点迁移随阶段 5 集群装配；需 database.backend=postgres）。
+# staging_quota_gb>0 时本地形态也启用节点工作集预算（缺省 0 不限）。
+storage:
+  backend: local
+  staging_quota_gb: 0
+  # s3:
+  #   endpoint_url: http://127.0.0.1:9000
+  #   bucket: mindex
+  #   prefix: "libraries/<library_id>/"
+  #   region: ""
+  #   access_key_id_env: MINDEX_S3_ACCESS_KEY
+  #   secret_access_key_env: MINDEX_S3_SECRET_KEY
+  #   staging_quota_gb: 100
+  #   min_free_gb: 20
+  #   presign_expire_seconds: 900
 # 关闭时允许不同素材/不同类型处理并行；开启时沿用全局管线互斥。
 enforce_gpu_lock: false
 # 素材上传每文件 20 GiB，独立于 search.max_upload_mb（检索查询视频）。

@@ -392,3 +392,15 @@ local_services:
 原尺寸模型输入不受影响，references/imports 仍存 PNG。详见 [人物库](persons.md)。
 
 人物配置 `person.frame_interval`（设置页“间隔帧数”）：整数且 ≥1，默认 15。每个分镜从首个有效帧开始每隔该帧数抽取，保留实际 PTS；1 表示逐帧。旧 `person.fps` 仅兼容旧配置，不叠加抽帧限制。
+
+## `storage` — 媒体存储后端（水平扩展阶段 4）
+
+| 键 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `backend` | `local` \| `s3` | `local` | `local` 为单机文件系统（现有行为）；`s3` 为 S3 兼容对象存储（`S3MediaStore`：不可变键 + sha256 元数据、multipart 大文件、版本命名空间 `versions/<v>/<key>`、物化到节点 staging 并 pin、presign 短期读 URL）。需要 `database.backend=postgres`；媒体出口与检查点迁移随阶段 5 交付，当前为单节点验证形态 |
+| `staging_quota_gb` | float | `0` | 本地形态的节点工作集预算（0=不限，保持现有行为）；`reserve`/`pin`/LRU 语义见 `shared/backends/staging.py` |
+| `s3.endpoint_url` / `s3.bucket` / `s3.prefix` | str | — | 服务地址与命名空间（prefix 建议 `libraries/<library_id>/`）；凭据只从环境变量读取 |
+| `s3.staging_quota_gb` / `s3.min_free_gb` | float | `100` / `20` | s3 形态固定启用的工作集预算与磁盘最低余量（超限明确拒绝） |
+| `s3.presign_expire_seconds` | int | `900` | 预签名读 URL 有效期（可转交能力，过期前无法靠登出撤销） |
+
+NFS 为后续可选共享媒体后端，不能存放 SQLite/嵌入式 Chroma 或作为分布式锁依据；启用前须实测 rename/同步/错误恢复语义（plans §4）。

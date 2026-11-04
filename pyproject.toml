@@ -36,6 +36,7 @@ dsh = ["deepseek-harness-sdk==0.2.1rc2", "deepseek-harness-runtime-bin==0.2.1rc2
 # AI 动画分镜的沙箱录制（无头 Chromium 逐帧截图）；安装后还需 `uv run playwright install chromium`。
 animation = ["playwright==1.64.1"]
 cluster = [
+    "boto3>=1.35,<2",
     "psycopg-pool>=3.2,<4",
     "psycopg[binary]>=3.2,<4",
 ]

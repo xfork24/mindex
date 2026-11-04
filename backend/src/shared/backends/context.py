@@ -98,13 +98,28 @@ def open_context(config: Config) -> BackendContext:
         locks: LockProvider = PgLockProvider(store.backend, library_id=library_id)
     else:
         locks = FileLockProvider(store.root)
-    staging = _staging(config, store.root)
+    if config.storage.backend == "s3":
+        if config.database.backend != "postgres":
+            raise RuntimeError(
+                "storage.backend=s3 属共享媒体后端，与 sqlite 单机形态的组合未定义；"
+                "请将 database.backend 设为 postgres（plans §4；媒体出口与检查点迁移"
+                "随阶段 5 集群装配交付，当前仅单节点验证）")
+        from mindex.shared.backends.s3 import S3MediaStore
+
+        staging = _staging(config, store.root)
+        media = S3MediaStore(
+            config.storage.s3,
+            staging=staging,
+            cache_dir=store.root / "cache" / "s3")
+    else:
+        staging = _staging(config, store.root)
+        media = LocalMediaStore(store.root)
     return BackendContext(
         form=form,
         library_id=library_id,
         data_dir=store.root,
         db=store,
-        media=LocalMediaStore(store.root),
+        media=media,
         locks=locks,
         vectors=vectors,
         queue=queue,
