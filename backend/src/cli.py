@@ -556,6 +556,101 @@ def migrate(ctx: typer.Context):
         print_json({"backend": "sqlite", "schema_version": "latest"})
 
 
+migration = typer.Typer(help="local↔cluster 数据迁移（plans §10；仅同版本程序，先停写）。")
+app.add_typer(migration, name="migration")
+
+
+@migration.command("export")
+def migration_export(
+    ctx: typer.Context,
+    target: Annotated[Path, typer.Option(help="导出目标目录（生成 metadata.sqlite3 与 manifest.json）。")],
+):
+    """PG 元数据库一致性导出到暂存 SQLite（REPEATABLE READ 只读快照 + 逐表清单）。
+
+    媒体/向量对象按同一清单另行复制（阶段 5 收尾交付封装）；导出期间业务可继续运行，
+    正式 cutover 仍须停写后做最终差量。
+
+    示例：
+
+    \\b
+      MINDEX_DATABASE_DSN=postgres://… mindex migration export --target /backup/run1
+    """
+    from mindex.maintenance.pg_export import export_pg_to_sqlite
+    from mindex.shared.storage import PgStore
+
+    if ctx.obj.database.backend != "postgres":
+        raise typer.BadParameter("migration export 从 PostgreSQL 导出；请在配置中选择 database.backend=postgres")
+    store = PgStore(ctx.obj)
+    target.mkdir(parents=True, exist_ok=True)
+    manifest = export_pg_to_sqlite(store, target)
+    (target / "manifest.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    print_json({"target": str(target), "total_rows": manifest["total_rows"],
+                "tables": len(manifest["tables"])})
+
+
+@migration.command("load")
+def migration_load(
+    ctx: typer.Context,
+    source: Annotated[Path, typer.Option(help="装载来源目录（migration export 的输出）。")],
+):
+    """把暂存 SQLite 装载回 PostgreSQL（幂等：非空目标拒绝，须先清库）。
+
+    示例：
+
+    \\b
+      MINDEX_DATABASE_DSN=postgres://… mindex migration load --source /backup/run1
+    """
+    import psycopg
+
+    from mindex.shared.db.migrate_pg import migrate_pg
+    from mindex.shared.db.transfer import copy_sqlite_to_pg
+    from mindex.shared.storage import PgStore, Store
+
+    database = source / "metadata.sqlite3"
+    if not database.is_file():
+        raise typer.BadParameter(f"缺少 {database}（先用 migration export 生成）")
+    config = ctx.obj
+    if config.database.backend != "postgres":
+        raise typer.BadParameter("migration load 装载到 PostgreSQL；请配置 database.backend=postgres")
+    with psycopg.connect(_pg_dsn(config), autocommit=True) as conn:  # 装载目标是空库
+        conn.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
+    with psycopg.connect(_pg_dsn(config)) as conn:
+        migrate_pg(conn)
+    pg = PgStore(config)
+    counts = copy_sqlite_to_pg(Store(source), pg)
+    print_json({"loaded_tables": sum(1 for n in counts.values() if n),
+                "total_rows": sum(counts.values()), "counts": counts})
+
+
+@migration.command("verify")
+def migration_verify(
+    ctx: typer.Context,
+    source: Annotated[Path, typer.Option(help="migration export 输出目录（与当前 PG 对账）。")],
+):
+    """逐表比对暂存 SQLite 与当前 PG 的行内容摘要；差异列表为空即一致。"""
+    from mindex.shared.db.transfer import table_digests
+    from mindex.shared.storage import PgStore, Store
+
+    pg = PgStore(ctx.obj)
+    origin = Store(source)
+    before, after = table_digests(origin), table_digests(pg)
+    differences = [
+        {"table": table, "source_rows": len(before[table]), "target_rows": len(after[table])}
+        for table in before if before[table] != after[table]
+    ]
+    print_json({"consistent": not differences, "differences": differences})
+
+
+def _pg_dsn(config) -> str:
+    import os
+
+    dsn = os.environ.get(config.database.postgres.dsn_env, "").strip()
+    if not dsn:
+        raise typer.BadParameter(f"缺少环境变量 {config.database.postgres.dsn_env}（PostgreSQL DSN）")
+    return dsn
+
+
 @app.command()
 def doctor(ctx: typer.Context):
     """部署诊断：后端组合校验与逐项连通检查（plans §11；启动前运行）。

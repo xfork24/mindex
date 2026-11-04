@@ -66,7 +66,16 @@ def copy_sqlite_to_pg(sqlite_store, pg_store, *, tables=BASELINE_TABLES) -> dict
             counts[table] = len(batch)
         from mindex.shared.db.migrate_pg import fix_sequences
 
+        # 先把 identity 序列推进到导入最大值，再补库身份（否则新行会与显式
+        # 导入的 rowid 撞车）。
         fix_sequences(db, [t for t in tables if t not in _ROWID_IS_ID])
+        # 库身份：清空重灌会移除基线种子行；源库没有 library.id 时补建
+        # （锁与缓存按它隔离，plans §2；正式切换应保持源库同一身份）。
+        if db.execute("SELECT value FROM settings WHERE key='library.id'").fetchone() is None:
+            import uuid
+
+            db.execute("INSERT INTO settings(key,value) VALUES(?,?)",
+                       ("library.id", str(uuid.uuid4())))
     return counts
 
 
