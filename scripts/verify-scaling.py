@@ -37,6 +37,7 @@ TESTS = [
     "test_doctor.py", "test_pg_chroma_e2e.py", "test_migration_cli.py", "test_worker.py",
     "test_persons_pg.py", "test_media_delivery.py",
     "test_backend_identity.py",
+    "test_maintenance_and_gateway.py", "test_sql_characteristics.py",
 ]
 
 
@@ -99,7 +100,8 @@ def main():
     args = parser.parse_args()
     if not args.minio_binary or not shutil.which("docker"):
         parser.error("需要 Docker 与 MinIO 可执行文件；环境不足不能标记验收通过")
-    markers = ("requires_postgres", "requires_s3", "requires_chroma_server")
+    markers = ("requires_postgres", "requires_s3", "requires_chroma_server",
+               "MINDEX_TEST_POSTGRES_DSN", "MINDEX_TEST_S3_ENDPOINT", "MINDEX_TEST_CHROMA_SERVER")
     marked_files = {path.name for path in (ROOT / "tests").glob("test_*.py")
                     if any(marker in path.read_text(encoding="utf-8") for marker in markers)}
     missing = marked_files - set(TESTS)
