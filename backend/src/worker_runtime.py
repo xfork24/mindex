@@ -21,6 +21,8 @@ import uuid
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
+from filelock import Timeout
+
 from mindex.shared.backends import open_context
 
 if TYPE_CHECKING:
@@ -95,8 +97,10 @@ class Worker:
         self._stop.set()
 
     def run(self) -> int:
-        signal.signal(signal.SIGTERM, self.stop)
-        signal.signal(signal.SIGINT, self.stop)
+        # 仅主线程可安装信号处理器；测试/嵌入场景在工作线程运行 worker 时跳过。
+        if threading.current_thread() is threading.main_thread():
+            signal.signal(signal.SIGTERM, self.stop)
+            signal.signal(signal.SIGINT, self.stop)
         log.info("worker 启动 · %s · queues=%s · concurrency=%d",
                  self.identity[:8], ",".join(self.queues), self.concurrency)
         executed = 0
@@ -120,6 +124,31 @@ class Worker:
                 break
         log.info("worker 退出 · 执行 %d 个任务", executed)
         return executed
+
+    # ------------------------------------------------------------ GPU 准入
+    def _acquire_gpu_slot(self):
+        """按 ``gpu.capacity`` 声明申请一个槽位；容量 0 或非 GPU 类别返回 None。
+
+        槽位是资源租约（locks=postgres 时跨节点互斥、TTL 到期才释放），失联 worker
+        不会立即释放槽位造成超卖；等待期间响应停止信号。
+        """
+        capacity = self.config.gpu.capacity
+        if capacity <= 0:
+            return None
+        from mindex.shared import lock_backend
+
+        source = self.context.store
+        while not self._stop.is_set():
+            for index in range(capacity):
+                try:
+                    handle = lock_backend.resource(
+                        source, f"gpu-slot:{index}", exclusive=True, timeout=0)
+                    handle.acquire(timeout=0)
+                    return handle
+                except Timeout:
+                    continue
+            self._stop.wait(0.2)
+        return None
 
     # ------------------------------------------------------------ 执行
     def _claim_one(self):
@@ -152,7 +181,10 @@ class Worker:
         beat = threading.Thread(target=heartbeat, daemon=True, name=f"beat-{task.id}")
         beat.start()
         self._slots.acquire()
+        gpu_slot = None
         try:
+            if task.kind in self.config.gpu.queues:
+                gpu_slot = self._acquire_gpu_slot()
             if lost.is_set() or self._cancel_requested(task):
                 self._finish_cancelled(task, lost)
                 return
@@ -170,6 +202,8 @@ class Worker:
                 with self.context.db.connect() as db:
                     self.queue.fail(db, task, f"{type(exc).__name__}: {exc}")
         finally:
+            if gpu_slot is not None:
+                gpu_slot.release()
             self._slots.release()
             stop.set()
 

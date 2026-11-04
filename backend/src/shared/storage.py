@@ -369,13 +369,18 @@ def _metadata_v13(db):
     中的 lock_resources/lock_holders）；本地形态用 data_dir 文件锁，此步为空操作。"""
 
 
+def _metadata_v15(db):
+    """智能助手变更 outbox（plans §9 阶段 5）：仅 PostgreSQL 形态使用（schema_pg 基线
+    的 agent_outbox）；本地形态由 agent 进程内的 ChangeFeed 直接承担。"""
+
+
 def _metadata_v14(db):
     """预签名下载保留记录（plans §8 阶段 5）：仅 PostgreSQL 形态使用（schema_pg 基线
     中的 download_pins）；本地形态无预签名，此步为空操作。"""
 
 
 # metadata.sqlite3 的有序迁移：只追加，不修改已发布的步骤（见 shared/migrations.py）。
-METADATA_STEPS = (_metadata_v1, _metadata_v2, _metadata_v3, _metadata_v4, _metadata_v5, _metadata_v6, _metadata_v7, _metadata_v8, _metadata_v9, _metadata_v10, _metadata_v11, _metadata_v12, _metadata_v13, _metadata_v14)
+METADATA_STEPS = (_metadata_v1, _metadata_v2, _metadata_v3, _metadata_v4, _metadata_v5, _metadata_v6, _metadata_v7, _metadata_v8, _metadata_v9, _metadata_v10, _metadata_v11, _metadata_v12, _metadata_v13, _metadata_v14, _metadata_v15)
 
 
 def migrate_metadata(db) -> int:
@@ -401,6 +406,10 @@ class Store:
         self.root.mkdir(parents=True, exist_ok=True)
         self.path = self.root / "metadata.sqlite3"
         self.backend = SqliteBackend(self.path)
+        # 具名锁后端（open_context 按配置覆盖；直构 Store 视为本地文件锁）。
+        self.locks_backend = "file"
+        # 媒体后端（open_context 注入；直构 Store 为 None，按本地文件系统解析）。
+        self.media = None
         with self.connect() as db:
             db.execute("PRAGMA journal_mode=WAL")
             migrate(db, METADATA_STEPS)
@@ -620,6 +629,15 @@ class Store:
         return loaded
 
     def media_available(self, relative: str) -> bool:
+        media = getattr(self, "media", None)
+        if media is not None and getattr(media, "backend", "local") == "s3":
+            try:
+                media.stat(relative)
+                return True
+            except FileNotFoundError:
+                return False
+            except Exception:  # noqa: BLE001 — 远端不可达按不可用处理，由上层给出诊断
+                return False
         path = (self.root / relative).resolve()
         if not path.is_relative_to(self.root):
             return False
@@ -639,6 +657,18 @@ class Store:
         return False
 
     def resolve_media(self, relative: str) -> Path:
+        media = getattr(self, "media", None)
+        if media is not None and getattr(media, "backend", "local") == "s3":
+            local = (self.root / relative).resolve()
+            if local.is_file():
+                return local  # 节点本地产物（切片/缩略图等）优先，尚未远端化
+            # 对象存储形态：按需物化到节点缓存（内容寻址；staging 负责 LRU/pin）。
+            # 对象不存在时继续走下方虚拟媒体（moment/scene）合成逻辑。
+            try:
+                with media.materialize(relative) as cached:
+                    return Path(cached)
+            except FileNotFoundError:
+                pass
         path = (self.root / relative).resolve()
         if not path.is_relative_to(self.root):
             raise FileNotFoundError(relative)
@@ -698,3 +728,4 @@ class PgStore(Store):
             raise RuntimeError("PostgreSQL 元数据库缺少 library.id；请先执行 mindex migrate")
         self.library_id = row[0]
         self.backend = PgBackend(dsn, library_id=self.library_id, pool_max=section.pool_max)
+        self.locks_backend = config.locks.backend

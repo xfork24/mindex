@@ -82,7 +82,7 @@ def indexes_router(runtime, store, embedder: MultimodalEmbedder | None = None) -
         except Timeout as exc:
             raise HTTPException(409, "处理锁被占用，请稍后再激活索引") from exc
         try:
-            writer = index_write_lock(store.root)
+            writer = index_write_lock(store.root, config=config)
             try:
                 writer.acquire(timeout=INDEX_LOCK_TIMEOUT_SECONDS)
             except Timeout as exc:

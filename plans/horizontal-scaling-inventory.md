@@ -310,3 +310,41 @@
 6. persons 证据/发布路径的 SQLite 专有 JSON 查询（`json_each`、`json_group_array`、
    `json_object`、数值 json 比较，约 20 条）在 PG 形态尚未适配，会显式报错。适配需要
    逐条双方言改写 + 双后端 persons 测试矩阵，作为独立工单；NFS 后端未评估。
+
+
+## 16. 缺口修复（单机可验证项，1/3/4/5/6/7/8/9/10）
+
+逐项按 `tests/test_scaling_remaining_verification.py` 验证（每项先断言当前行为，
+能力交付后相应 xfail 分支已改为通过断言）：
+
+1. **锁接线**：新增 `shared/lock_backend.py`；`ProcessingLock`/`PublicationLock`/
+   `index_write_lock`/`recover_tasks`/register/studio/topics/person 审核路径按
+   `locks.backend` 选择文件锁或 PG 租约（资源锁 key 与文件形态同源）；实测同一 PG
+   库不同 data_dir 的独占 pipeline、同素材资源锁、index-write 互斥，以及无活跃
+   租约时任务恢复标记中断。
+3. **Studio 条件发布**：`workspace.persist(expected_revision=)` 在资源锁内读-比对-
+   写（CAS），`RevisionConflict` → 409；`GET /workspace` 返回 `workspace_revision`；
+   `POST /plans`、`activate`、`delete` 支持 `If-Match`；并发两写者恰好一个成功。
+4. **检查点远端化**：`shared/checkpoints.py` 写穿透（plans/transcripts/analysis）+
+   本地优先回读；新节点（不同 data_dir）从 S3 读回分镜计划，本地无副本亦可续跑。
+5. **uploads 远端化**：`Pipeline.register` 在 S3 形态直写内容寻址不可变对象并跳过
+   本地副本；`Store.resolve_media` 优先本地产物、缺失时按需物化远端；重复上传幂等。
+6. **S3 孤对象回收**：`clean` 增加 S3 规则——引用闭包（与本地备份同口径）+ 宽限
+   （`clean.s3_orphan_grace_hours`）+ 下载 pin 复验后条件删除；被引用/pin/未过宽限
+   对象保留。
+7. **persons PG 双方言**：JSON 方言扩展（通用 json_extract 文本/数值/布尔、嵌套路径、
+   json_each→jsonb_array_elements、json_type 归一 number→real、value 文本比较、
+   `length(CAST(x AS BLOB))`→octet_length）；审核临时表、确认人聚合、紧凑证据、
+   发布快照与版本过滤显式 PG 变体；`SELECT *`/`alias.*` 展开为显式列（排除 rowid）
+   保持两后端结果形状一致；numeric→float/memoryview→bytes 行值归一。双后端一致性
+   测试覆盖审核摘要/列表、发布快照、版本图像索引。
+8. **agent 变更 outbox**：PG `agent_outbox` 表（运行态），cluster 业务 API 的
+   `POST /api/agent/changes` 写入 outbox（201），单实例网关 `OutboxBridge` 轮询并
+   幂等转入 ChangeFeed（drain 单事务标记消费，重复 drain 为空）。
+9. **指标**：`/api/health` 与新增 `/api/metrics` 暴露连接池等待、租约到期/持有数、
+   队列深度、staging 水位；修复 psycopg_pool 3.3 指标 API（`get_stats`）。
+10. **GPU 容量**：`gpu.capacity`/`gpu.queues` 声明式准入，槽位为资源租约（跨节点、
+    TTL 到期回收）；实测 capacity=1 时两个 worker 实际并发不超过 1。
+
+**仍不在单机可验证范围**：跨两台主机的故障注入、百万级容量基准与 p95/p99、
+RTO/RPO 演练记录、Windows/Linux 桌面打包冒烟、真实模型质量评测。

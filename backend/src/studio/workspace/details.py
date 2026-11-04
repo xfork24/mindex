@@ -156,6 +156,7 @@ def detail(config, job_id, w, *, store=None, compact=False):
     result["job"] = studio.load_job(config, job_id)
     result["material_scope"] = studio.scope_status(result["job"], context.database(config))
     result["revision"] = revision(p)
+    result["workspace_revision"] = revision(w)
     result["script_stale"] = script_stale(p)
     # 所选文案模板（或提示词）与当前文案生成时不同：只提示可重新生成，不自动重写。
     result["script_template_changed"] = template_changed(config, w, p, store=context.database(config))

@@ -439,3 +439,21 @@ def test_preview_manual_interval_and_hidden_context(studio_client):
             ).status_code
             == 422
         )
+
+
+def test_workspace_conditional_publish(studio_client):
+    """If-Match 条件发布：陈旧修订 409、当前修订成功、成功后旧修订再冲突。"""
+    _, client = studio_client
+    job_id = create_job(client, "条件发布：并发编辑必须显式冲突。")
+    workspace = client.get(f"/api/studio/jobs/{job_id}/workspace").json()
+    revision = workspace["workspace_revision"]
+    assert revision
+    stale = client.post(f"/api/studio/jobs/{job_id}/plans", json={"name": "并发副本"},
+                        headers={"If-Match": "stale-revision"})
+    assert stale.status_code == 409, stale.text
+    fresh = client.post(f"/api/studio/jobs/{job_id}/plans", json={"name": "并发副本"},
+                        headers={"If-Match": revision})
+    assert fresh.status_code == 201, fresh.text
+    reused = client.post(f"/api/studio/jobs/{job_id}/plans", json={"name": "再次并发"},
+                         headers={"If-Match": revision})
+    assert reused.status_code == 409  # 修订已推进，旧值不能再用

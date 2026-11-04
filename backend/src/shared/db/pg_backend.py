@@ -60,7 +60,16 @@ class CursorView:
         return [self._wrap(values) for values in self._cursor.fetchall()]
 
     def _wrap(self, values) -> Row:
-        return Row.from_description(self._cursor.description, values)
+        # 与 SQLite 的类型面保持一致：numeric → float、memoryview → bytes，
+        # 避免 Decimal/内存视图漏到业务层与 JSON 响应里。
+        from decimal import Decimal
+
+        normalized = tuple(
+            float(value) if isinstance(value, Decimal)
+            else bytes(value) if isinstance(value, memoryview)
+            else value
+            for value in values)
+        return Row.from_description(self._cursor.description, normalized)
 
     def __iter__(self):
         while (values := self._cursor.fetchone()) is not None:
@@ -193,6 +202,14 @@ class PgBackend:
             yield PgConnection(conn, self.library_key)
 
     def metrics(self) -> dict:
-        """池等待/使用指标（plans §12 监控）；池未建时为空。"""
+        """池等待/使用指标（plans §12 监控）；池未建时为空。
+
+        psycopg_pool 3.3+ 用 ``get_stats()``（返回 requests_waiting 等计数）。
+        """
         pool = _POOLS.get(self.dsn)
-        return dict(pool.metrics._asdict()) if pool is not None else {}
+        if pool is None:
+            return {}
+        try:
+            return {key: int(value) for key, value in pool.get_stats().items()}
+        except Exception:  # noqa: BLE001 — 指标缺失不改变就绪语义
+            return {}

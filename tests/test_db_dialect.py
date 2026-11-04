@@ -91,17 +91,36 @@ def test_json_extract_text_equality_and_json_type():
     assert rewrite_for_postgres(sql) == (
         "SELECT a.segment_id,a.data FROM annotations a JOIN segments s ON s.id=a.segment_id "
         "WHERE s.source_id=%s AND (a.data::jsonb->>'status')='skipped' "
-        "AND (jsonb_typeof(a.data::jsonb->'annotation')='object' OR (a.data::jsonb->>'status')=%s) "
+        "AND ((CASE jsonb_typeof(a.data::jsonb->'annotation') WHEN 'number' THEN 'real'"
+        " ELSE jsonb_typeof(a.data::jsonb->'annotation') END)='object'"
+        " OR (a.data::jsonb->>'status')=%s) "
         "AND a.rowid=(SELECT MAX(b.rowid) FROM annotations b WHERE b.segment_id=a.segment_id)"
     )
 
 
-def test_json_extract_numeric_and_select_list_left_untouched():
-    # 数值比较与 SELECT 列形状不匹配文本等值规则 → 原文（PG 上显式失败，不静默改写）
-    numeric = "SELECT 1 FROM person_evidence WHERE json_extract(data,'$.shot_excluded')=1"
-    assert "json_extract(data,'$.shot_excluded')" in rewrite_for_postgres(numeric)
-    select_list = "SELECT DISTINCT json_extract(snapshot,'$.source_id') FROM index_members WHERE index_id=?"
-    assert "json_extract(snapshot,'$.source_id')" in rewrite_for_postgres(select_list)
+def test_json_extract_boolean_numeric_and_select_list():
+    # 布尔键 → 1/0（SQLite 对 JSON true 返回 1，比较语义不变）
+    flag = rewrite_for_postgres(
+        "SELECT 1 FROM person_evidence WHERE json_extract(data,'$.shot_excluded')=1")
+    assert "(CASE WHEN (data::jsonb->'shot_excluded')='true'::jsonb THEN 1 WHEN" in flag
+    assert "json_extract" not in flag
+    # 数值键 → 带格式守卫的 numeric（非数字值为 NULL，与 SQLite 同义）
+    numeric = rewrite_for_postgres("SELECT json_extract(data,'$.score') FROM person_evidence")
+    assert "::numeric" in numeric and "regex" not in numeric and "json_extract" not in numeric
+    # SELECT 列中的文本键同样改写（persons 版本/覆盖查询依赖）
+    select_list = rewrite_for_postgres(
+        "SELECT DISTINCT json_extract(snapshot,'$.source_id') FROM index_members WHERE index_id=?")
+    assert select_list == ("SELECT DISTINCT (snapshot::jsonb->>'source_id') FROM index_members"
+                           " WHERE index_id=%s")
+
+
+def test_json_each_becomes_array_elements():
+    sql = ("SELECT 1 FROM person_entities role, json_each(role.data,'$.work_ids') "
+           "WHERE role.kind='role' AND value=ps.work_id")
+    rewritten = rewrite_for_postgres(sql)
+    assert "jsonb_array_elements(role.data::jsonb->'work_ids')" in rewritten
+    assert "(value #>> '{}')" in rewritten
+    assert "json_each" not in rewritten
 
 
 def test_case_end_terminator_is_not_quoted():

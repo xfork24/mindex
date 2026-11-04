@@ -181,32 +181,83 @@ def quote_reserved(sql: str) -> str:
     return _map_code(sql, convert_code)
 
 
-# json_extract 的**文本等值**形状（值是字符串：source_id/status/work/scope 等）：
-# `json_extract(expr,'$.key') = ? / '字面量'` → `(expr::jsonb->>'key') = ...`。
-# 数值比较、SELECT 列、嵌套路径、json_each/json_object 等形状不匹配 → 保持原文，
-# 在 PG 上以「函数不存在」响亮失败（persons 证据路径的阶段 2/3 交付，不静默改写）。
-_JSON_EXTRACT_EQ = re.compile(
-    r"json_extract\(\s*(?P<expr>[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?)\s*,"
-    r"\s*'\$\.(?P<key>[A-Za-z_]\w*)'\s*\)(?P<cmp>\s*=\s*(?:%s|'[^']*'))",
+# json_extract / json_type / json_each 的受控改写（plans §5：不做通用转译）：
+# - 文本键 → `(expr::jsonb->>'k')`（返回文本，与 SQLite 的字符串值一致）；
+# - 数值键（score/original_score/format/count/hot/duration）→ 带格式守卫的 numeric，
+#   非数字值返回 NULL（与 SQLite 对非数值 JSON 返回 NULL 同义）；
+# - 布尔键（shot_excluded/removed_confirmation/reviewed）→ 1/0（SQLite 对 JSON true
+#   也返回 1），因此既有 `=1` 比较语义不变；
+# - 嵌套路径 `$.a.b` → `->'a'->>'b'`；
+# - `json_each(X,'$.path')` → `jsonb_array_elements(X::jsonb->'path')`，元素比较
+#   `value=…` 改写为 `(value #>> '{}')=…`（jsonb 元素按文本比较）。
+# json_object / json_group_array 等聚合形状不做隐式改写：persons 的发布聚合语句
+# 在调用点显式双方言（避免嵌套括号的脆弱替换）。
+_BLOB_LENGTH = re.compile(
+    r"length\(\s*CAST\((?P<expr>[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?)\s+AS\s+BLOB\s*\)\s*\)",
     re.IGNORECASE,
 )
-# json_type(expr,'$.key') → jsonb_typeof：返回 'object'/'integer'/… 与 SQLite 同为文本。
+_JSON_EXTRACT_ANY = re.compile(
+    r"json_extract\(\s*(?P<expr>[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?)\s*,"
+    r"\s*'\$\.(?P<path>[A-Za-z_][\w.]*)'\s*\)",
+    re.IGNORECASE,
+)
 _JSON_TYPE = re.compile(
     r"json_type\(\s*(?P<expr>[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?)\s*,"
-    r"\s*'\$\.(?P<key>[A-Za-z_]\w*)'\s*\)",
+    r"\s*'\$\.(?P<key>[A-Za-z_][\w.]*)'\s*\)",
     re.IGNORECASE,
 )
+_JSON_EACH = re.compile(
+    r"json_each\(\s*(?P<expr>[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?)\s*,"
+    r"\s*'\$\.(?P<path>[A-Za-z_][\w.]*)'\s*\)",
+    re.IGNORECASE,
+)
+_NUMERIC_KEYS = {"score", "original_score", "format", "count", "hot", "duration"}
+_BOOL_KEYS = {"shot_excluded", "removed_confirmation", "reviewed"}
+_NUMERIC_TEXT = r"^-?[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?$"
+
+
+def _json_inner(expr: str, path: str, *, as_text: bool) -> str:
+    parts = path.split(".")
+    access = "".join(f"->'{part}'" for part in parts[:-1])
+    last = f"->>'{parts[-1]}'" if as_text else f"->'{parts[-1]}'"
+    return f"{expr}::jsonb{access}{last}"
+
+
+def _json_path(expr: str, path: str, *, as_text: bool) -> str:
+    return f"({_json_inner(expr, path, as_text=as_text)})"
 
 
 def convert_json_functions(sql: str) -> str:
     def extract_replacement(match: re.Match) -> str:
-        expr, key = match.group("expr"), match.group("key")
-        return f"({expr}::jsonb->>'{key}'){match.group('cmp')}"
+        expr, path = match.group("expr"), match.group("path")
+        key = path.split(".")[-1]
+        if key in _BOOL_KEYS:
+            jsonb = _json_path(expr, path, as_text=False)
+            return f"(CASE WHEN {jsonb}='true'::jsonb THEN 1 WHEN {jsonb}='false'::jsonb THEN 0 ELSE 0 END)"
+        if key in _NUMERIC_KEYS:
+            text_expr = _json_path(expr, path, as_text=True)
+            return f"(CASE WHEN {text_expr} ~ '{_NUMERIC_TEXT}' THEN {text_expr}::numeric END)"
+        return _json_path(expr, path, as_text=True)
 
     def type_replacement(match: re.Match) -> str:
-        return f"jsonb_typeof({match.group('expr')}::jsonb->'{match.group('key')}')"
+        # SQLite json_type 用 integer/real 区分数字；PG 只有 number。归一为 real，
+        # 使既有 `IN ('integer','real')` 判断与 `IS NOT NULL` 语义一致。
+        expr = _json_inner(match.group("expr"), match.group("key"), as_text=False)
+        return f"(CASE jsonb_typeof({expr}) WHEN 'number' THEN 'real' ELSE jsonb_typeof({expr}) END)"
 
-    return _JSON_TYPE.sub(type_replacement, _JSON_EXTRACT_EQ.sub(extract_replacement, sql))
+    def each_replacement(match: re.Match) -> str:
+        return f"jsonb_array_elements({_json_inner(match.group('expr'), match.group('path'), as_text=False)})"
+
+    converted = _BLOB_LENGTH.sub(lambda m: f"octet_length({m.group('expr')})", sql)
+    converted = _JSON_EXTRACT_ANY.sub(extract_replacement, converted)
+    converted = _JSON_TYPE.sub(type_replacement, converted)
+    if "json_each" in converted.lower():
+        converted = _JSON_EACH.sub(each_replacement, converted)
+        # 元素按文本比较（jsonb 元素不能直接与文本列比较）；只改 value 比较点，
+        # 不误伤 json_each.value 这类限定名（先处理限定名，再处理裸 value）。
+        converted = re.sub(r"\b(\w+)\.value\s*=", r"(\1.value #>> '{}')=", converted)
+        converted = re.sub(r"(?<![\w.])value\s*=", "(value #>> '{}')=", converted)
+    return converted
 
 
 _CURRENT_TIMESTAMP = re.compile(r"\bCURRENT_TIMESTAMP\b")
@@ -280,12 +331,92 @@ def _baseline_columns() -> dict[str, tuple[str, ...]]:
     return _parse_baseline_tables()
 
 
+_STAR_FROM = re.compile(
+    r"(?i)\bSELECT\s+(?P<distinct>DISTINCT\s+)?\*\s+FROM\s+(?P<table>[a-z_][a-z0-9_]*)"
+    r"(?:\s+(?:AS\s+)?(?P<alias>[a-z_][a-z0-9_]*))?"
+)
+_FROM_TABLE = re.compile(
+    r"\b(?:FROM|JOIN)\s+([a-z_][a-z0-9_]*)"
+    r"(?:\s+(?:AS\s+)?([a-z_][a-z0-9_]*))?",
+    re.IGNORECASE,
+)
+_ALIAS_STOP = {
+    "where", "join", "left", "right", "inner", "outer", "cross", "on", "group", "order",
+    "limit", "offset", "union", "except", "intersect", "set", "using", "returning", "as",
+    "and", "or", "select", "values", "having", "window", "fetch", "for", "from", "into",
+}
+
+
+def _table_aliases(sql: str) -> dict[str, str]:
+    aliases: dict[str, str] = {}
+    for match in _FROM_TABLE.finditer(sql):
+        table = match.group(1).lower()
+        alias = (match.group(2) or "").lower()
+        if alias in _ALIAS_STOP:
+            alias = ""
+        aliases[alias or table] = table
+        aliases.setdefault(table, table)
+    return aliases
+
+
+def _visible_columns(table: str) -> tuple[str, ...] | None:
+    columns = _baseline_columns().get(table)
+    if not columns:
+        return None
+    return tuple(column for column in columns if column != "rowid")
+
+
+def _expand_select_star(sql: str) -> str:
+    """``SELECT *`` / ``alias.*`` → 显式列（排除 rowid），与 SQLite 的结果形状一致。
+
+    SQLite 的 ``rowid`` 是隐式列、``SELECT *`` 不会返回它；PG 基线把它建成真实列，
+    不展开会让 API 响应多出字段（且两后端结果对账不一致）。
+    """
+    aliases = _table_aliases(sql)
+    if not aliases:
+        return sql
+
+    def replace_alias(match: re.Match) -> str:
+        alias = match.group("alias").lower()
+        table = aliases.get(alias)
+        columns = _visible_columns(table) if table else None
+        if not columns:
+            return match.group(0)
+        return ",".join(f"{match.group('alias')}.{_quote_column(column)}" for column in columns)
+
+    expanded = re.sub(r"(?<![\w.])(?P<alias>[A-Za-z_]\w*)\.\*(?!\w)", replace_alias, sql)
+
+    def replace_bare(match: re.Match) -> str:
+        table = match.group("table").lower()
+        alias = (match.group("alias") or "").lower()
+        if alias in _ALIAS_STOP:
+            alias = ""
+        # 只展开单表 SELECT *：紧跟 JOIN 时 SQLite 会返回多表列，保持原样交给人工核对。
+        following = sql[match.end():match.end() + 24].lstrip().lower()
+        if any(following.startswith(word) for word in
+               ("join", "left", "right", "inner", "cross", "natural", "full", "outer")):
+            return match.group(0)
+        columns = _visible_columns(table)
+        if not columns:
+            return match.group(0)
+        qualifier = alias or table
+        prefix = "SELECT " + (match.group("distinct") or "")
+        from_clause = f" FROM {match.group('table')}"
+        if match.group("alias"):
+            from_clause += f" {match.group('alias')}"
+        return prefix + ",".join(
+            f"{qualifier}.{_quote_column(column)}" for column in columns) + from_clause
+
+    return _STAR_FROM.sub(replace_bare, expanded)
+
+
 def rewrite_for_postgres(sql: str) -> str:
     """受控改写入口：占位符、JSON 函数、时间戳、保留字与登记过的 INSERT 改写。"""
     if match := _INSERT_RE.match(sql):
         return _rewrite_insert(match, sql)
     text = convert_json_functions(convert_placeholders(sql))
     text = quote_reserved(convert_is_param(convert_current_timestamp(text)))
+    text = _expand_select_star(text)
     return _expand_positional_insert(text)
 
 

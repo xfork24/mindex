@@ -42,7 +42,16 @@ pg-single 使用步骤：`MINDEX_DATABASE_DSN=postgres://… mindex migrate` 建
 | `queue.backend` | `inline` \| `postgres` | `inline` | `inline` 为 API 进程内立即执行（现有行为）；`postgres` 为持久队列（claim 用 `FOR UPDATE SKIP LOCKED`、dedupe 幂等、attempt/fencing token、超时回收、有上限指数退避），由 `mindex worker --queues source,dialogue,… --concurrency N` 消费，至少一次交付。需要 `database.backend=postgres`；补偿扫描兜底「账本已落、入队前崩溃」窗口 |
 | `locks.backend` | `file` \| `postgres` | `file` | `file` 为 data_dir 文件锁（跨进程，现有行为）；`postgres` 为 PG 租约锁（epoch 永不归零、fencing token 单调不复用、TTL 90s + 心跳 20s；失去租约即停止提交）。需要 `database.backend=postgres`；选题调度器在该形态下以 leader 租约保证单实例触发 |
 
-worker 使用：`MINDEX_DATABASE_DSN=… mindex worker`。GPU 任务按 worker 并发槽位排队（`--concurrency`，起步 1；声明式容量表随阶段 5 集群装配）。
+worker 使用：`MINDEX_DATABASE_DSN=… mindex worker`。
+
+## `gpu` — GPU 准入容量（阶段 3/5）
+
+| 键 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `gpu.capacity` | int | `0` | GPU 并发槽位数；0 不限制（现有行为）。槽位是资源租约：`locks.backend=postgres` 时跨节点互斥，失联 worker 的槽位到期才回收（避免 GPU 超卖）；等待期间响应停止信号 |
+| `gpu.queues` | list[str] | `["source","dialogue","person"]` | 受容量约束的任务类别 |
+
+GPU 任务同时受 `mindex worker --concurrency` 进程内槽位与 `gpu.capacity` 跨进程准入两道限制；模型服务自身仍需限制真实执行并发。
 
 ## `embedding` — WeMM 嵌入服务
 

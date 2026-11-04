@@ -17,7 +17,7 @@ from mindex.models.adapters import (
     make_detector,
     make_transcriber,
 )
-from mindex.shared import locks
+from mindex.shared import checkpoints, lock_backend
 from mindex.shared.config import Config, fingerprint
 from mindex.shared.jsonio import save_text
 from mindex.shared.media import content_hash, cut, probe, thumbnail, windows
@@ -144,10 +144,26 @@ class Pipeline:
         destination = self.store.root / (existing["path"] if existing else f"sources/{identifier}/{name}")
         destination.parent.mkdir(parents=True, exist_ok=True)
         # Registration has its own short lease; uploads need not wait for a running model.
-        with locks.named(self.store.root, "register", timeout=None):
+        with lock_backend.named(self.config, "register", timeout=None):
             existing = self.store.one("SELECT * FROM sources WHERE id=?", (identifier,))
             if existing:
                 destination = self.store.root / existing["path"]
+            media = getattr(self.store, "media", None)
+            if media is not None and getattr(media, "backend", "local") == "s3":
+                # 对象存储形态：内容寻址的不可变对象即原片事实来源（不落节点本地）；
+                # 处理时由 Store.resolve_media 按需物化到节点缓存。
+                key = existing["path"] if existing else f"sources/{identifier}/{name}"
+                media.put_immutable(key, path, sha256=identifier)
+                self.store.execute(
+                    "INSERT OR IGNORE INTO sources(id,name,path,media,layout_key,layout_config) "
+                    "VALUES(?,?,?,?,?,?)",
+                    (identifier, name, key, dumps(info), self.config.layout_key,
+                     dumps({"detector": self.config.detector.model_dump(),
+                            "video": self.config.video.model_dump()})),
+                )
+                if move:
+                    path.unlink(missing_ok=True)
+                return {"source_id": identifier, "duplicate": bool(existing)}
             created = not destination.exists()
             partial = None
             try:
@@ -207,7 +223,7 @@ class Pipeline:
                     "detector": self.config.detector.backend,
                     "shots": [{"start": a, "end": b} for a, b in ranges],
                 }
-                save_text(plan_path, dumps(plan))
+                checkpoints.save_text(self.store, plan_path, dumps(plan))
             else:
                 self._read_plan(source)
         log.info("Cut plan ready: %s", plan_path)
@@ -229,9 +245,10 @@ class Pipeline:
 
     def _read_plan(self, source: dict) -> list[tuple[float, float]]:
         path = self.store.root / "plans" / f"{source['id']}.json"
-        if not path.exists():
+        raw = checkpoints.read_text(self.store, path)  # 本地优先，缺失时回读对象存储
+        if raw is None:
             raise ValueError("没有分镜计划，请先执行 detect 或 prepare")
-        plan = json.loads(path.read_text(encoding="utf-8"))
+        plan = json.loads(raw)
         if plan["source_id"] != source["id"] or plan["layout_key"] != self.config.layout_key:
             raise ValueError("分镜计划与当前配置不符，请使用原配置或新的 data_dir")
         ranges = [(s["start"], s["end"]) for s in plan["shots"]]
@@ -471,8 +488,9 @@ class Pipeline:
                         result = self.transcriber.raw(audio)
                     if self.config.asr_key != profile:
                         raise ValueError("转写过程中部署清单发生变化")
-                    save_text(target, dumps({**result, "start": start, "duration": duration,
-                                             "model_identity": self.config.asr.model_dump()}))
+                    checkpoints.save_text(self.store, target, dumps(
+                        {**result, "start": start, "duration": duration,
+                         "model_identity": self.config.asr.model_dump()}))
                     (cache.parent / f"aligned-{number}.json").unlink(missing_ok=True)
                 identities = {}
                 for raw_path in cache.glob('*.json'):
@@ -753,6 +771,7 @@ class Pipeline:
                                 groups = saved_groups
                                 if candidate != checkpoint:
                                     atomic_json(checkpoint, groups)
+                                    checkpoints.sync(self.store, checkpoint)
                                 break
                         if groups is not None:
                             log.info("场景分组检查点命中 %s %.2f–%.2fs", sid, current[0]["start"], current[-1]["end"])
@@ -765,6 +784,7 @@ class Pipeline:
                                             current[0]["start"], current[-1]["end"], exc)
                                 groups = []
                             atomic_json(checkpoint, groups)
+                            checkpoints.sync(self.store, checkpoint)
                         grouped_units += len(current)
                         if progress:
                             notify({"stage": "scene_grouping", "completed": grouped_units,

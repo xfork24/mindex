@@ -122,7 +122,7 @@ def apply(config, report, *, progress=None, video_encoder="libx264"):
     journal = store.root / 'shot-repairs' / stamp / 'report.json'
     from mindex.shared.storage import require_sqlite
     require_sqlite(config, "镜头边界修复（含修复前的元数据库备份）")
-    with ProcessingLock(config, deleting=True), index_write_lock(store.root):
+    with ProcessingLock(config, deleting=True), index_write_lock(store.root, config=config):
         if all(s.get('status') == 'verified' for s in report['sources']):
             for source in report['sources']:
                 ShotMedia(store).references(source['source_id'])

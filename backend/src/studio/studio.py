@@ -20,7 +20,7 @@ from pydantic import Discriminator, Field, Tag, field_validator, model_serialize
 
 from mindex.admin.curation import EntityNotFound
 from mindex.models.storyboard import coverage_warning
-from mindex.shared import jsonio, locks
+from mindex.shared import jsonio, lock_backend
 from mindex.shared.config import Config, StrictModel, fingerprint, portable_parameters
 from mindex.shared.trace import record as trace_record
 from mindex.shared.types import Filters, Granularity
@@ -1027,7 +1027,7 @@ def list_jobs(config: Config, *, recover: bool = False) -> list[dict]:
         return []
     lock = None
     if recover:
-        lock = locks.named(config.data_dir, "studio")
+        lock = lock_backend.named(config, "studio")
         try:
             lock.acquire()
         except Timeout:
@@ -1153,7 +1153,7 @@ def recover_stale(config: Config):
     root = studio_root(config)
     if not root.is_dir():
         return
-    lock = locks.named(config.data_dir, "studio")
+    lock = lock_backend.named(config, "studio")
     try:
         lock.acquire()
     except Timeout:

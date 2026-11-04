@@ -118,8 +118,9 @@ class PgLockProvider:
         """
         if mode not in ("shared", "exclusive"):
             raise ValueError(f"未知的锁模式：{mode}")
-        if name not in file_locks.ORDER:
-            raise ValueError(f"未知的锁名称：{name}（可用：{'、'.join(file_locks.ORDER)}）")
+        if not name:
+            raise ValueError("锁名称不能为空")
+        # ORDER 校验仅约束规范化具名锁（acquire_ordered）；resource:* 是合法的细粒度资源。
         owner = owner_id or f"{self.owner_id}:{uuid.uuid4().hex[:12]}"
         deadline = None if wait is None or wait < 0 else time.monotonic() + wait
         while True:

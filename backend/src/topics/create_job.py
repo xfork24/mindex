@@ -17,7 +17,7 @@ import json
 import shutil
 
 from mindex.admin.curation import EntityNotFound
-from mindex.shared import locks
+from mindex.shared import lock_backend
 from mindex.studio import script_templates, studio
 from mindex.topics import cards as topic_cards
 from mindex.topics import items as topic_items
@@ -78,7 +78,7 @@ def reference_text(card: dict, items: list[dict]) -> str:
 
 
 def studio_lock(config):
-    lock = locks.named(config.data_dir, "studio")
+    lock = lock_backend.named(config, "studio")
     try:
         return lock.acquire()
     except Exception as exc:  # filelock.Timeout

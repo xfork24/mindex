@@ -76,14 +76,27 @@ class S3MediaStore:
         return self.cache_dir / f"{digest}.obj"
 
     # ------------------------------------------------------------ 协议
+    def _head(self, key: str, version: str | None):
+        try:
+            return self.client.head_object(Bucket=self.bucket, Key=self._object_key(key, version))
+        except self.client.exceptions.ClientError as exc:
+            if exc.response["Error"]["Code"] in ("404", "NoSuchKey", "NotFound"):
+                raise FileNotFoundError(key) from exc
+            raise
+
     def stat(self, key: str, *, version: str | None = None, with_sha256: bool = False) -> MediaObject:
-        head = self.client.head_object(Bucket=self.bucket, Key=self._object_key(key, version))
+        head = self._head(key, version)
         sha256 = _meta(head.get("Metadata", {}), "sha256")
         return MediaObject(key=key, size=int(head["ContentLength"]), backend_version=version,
                            etag=head.get("ETag", "").strip('"'), sha256=sha256 or None)
 
     def open_read(self, key: str, *, version: str | None = None):
-        response = self.client.get_object(Bucket=self.bucket, Key=self._object_key(key, version))
+        try:
+            response = self.client.get_object(Bucket=self.bucket, Key=self._object_key(key, version))
+        except self.client.exceptions.ClientError as exc:
+            if exc.response["Error"]["Code"] in ("404", "NoSuchKey", "NotFound"):
+                raise FileNotFoundError(key) from exc
+            raise
         return _Body(response["Body"])
 
     @contextmanager
@@ -133,6 +146,19 @@ class S3MediaStore:
     def delete_version(self, key: str, *, version: str | None = None) -> None:
         """删除主对象（version=None）或某个不可变内容版本；精确到 key，不做前缀删除。"""
         self.client.delete_object(Bucket=self.bucket, Key=self._object_key(key, version))
+
+    def objects(self, prefix: str = "") -> dict[str, dict]:
+        """列出对象元数据（key → size/last_modified），供 GC 宽限判断。"""
+        body = f"{self.prefix}/" if self.prefix else ""
+        found: dict[str, dict] = {}
+        paginator = self.client.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=self.bucket, Prefix=body + prefix):
+            for item in page.get("Contents", []):
+                found[item["Key"][len(body):]] = {
+                    "size": int(item["Size"]),
+                    "last_modified": item["LastModified"].timestamp(),
+                }
+        return found
 
     def iter_prefix(self, prefix: str) -> Iterator[str]:
         body = f"{self.prefix}/" if self.prefix else ""

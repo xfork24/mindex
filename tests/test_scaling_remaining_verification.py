@@ -8,8 +8,6 @@
 
 from __future__ import annotations
 
-import inspect
-import json
 import os
 import subprocess
 import time
@@ -87,10 +85,11 @@ def test_item01_processing_lock_coordinates_via_pg(pg, tmp_path):
 
     from mindex.shared.processing_lock import ProcessingLock
 
+    # 默认 pipeline 锁是共享的（并行处理），互斥语义要用 GPU 独占模式验证。
     first_config = Config(data_dir=tmp_path / "a", database={"backend": "postgres"},
-                          locks={"backend": "postgres"})
+                          locks={"backend": "postgres"}, enforce_gpu_lock=True)
     second_config = Config(data_dir=tmp_path / "b", database={"backend": "postgres"},
-                           locks={"backend": "postgres"})
+                           locks={"backend": "postgres"}, enforce_gpu_lock=True)
     first = ProcessingLock(first_config)
     first.acquire()
     second = ProcessingLock(second_config)
@@ -103,6 +102,61 @@ def test_item01_processing_lock_coordinates_via_pg(pg, tmp_path):
         pytest.xfail("ProcessingLock 仍按 data_dir 文件锁互斥；locks.backend=postgres 未接线")
     finally:
         first.release()
+
+
+def test_item01b_resource_locks_and_index_write_coordinate_via_pg(pg, tmp_path):
+    """同素材+同工作的资源锁与 index-write 锁在 PG 形态跨 data_dir 互斥。"""
+    from filelock import Timeout
+
+    from mindex.shared.processing_lock import ProcessingLock, index_write_lock
+
+    base = {"backend": "postgres"}
+    first_config = Config(data_dir=tmp_path / "a", database=base, locks={"backend": "postgres"})
+    second_config = Config(data_dir=tmp_path / "b", database=base, locks={"backend": "postgres"})
+    first = ProcessingLock(first_config, source_id="s1", work="detect")
+    first.acquire()
+    second = ProcessingLock(second_config, source_id="s1", work="detect")
+    try:
+        with pytest.raises(Timeout):
+            second.acquire(blocking=False)
+    finally:
+        first.release()
+    # 不同工作可并行（资源锁按 source+work 区分，不是整库串行）
+    other = ProcessingLock(second_config, source_id="s1", work="transcribe")
+    other.acquire()
+    other.release()
+    # index-write 跨 data_dir 互斥
+    writer = index_write_lock(tmp_path / "a", config=first_config)
+    writer.acquire()
+    try:
+        blocked = index_write_lock(tmp_path / "b", config=second_config)
+        with pytest.raises(Timeout):
+            blocked.acquire(timeout=0.2)
+    finally:
+        writer.release()
+
+
+def test_item01c_recover_tasks_respects_pg_leases(pg, tmp_path):
+    """任务恢复：无活跃租约的 queued/running 标记中断；被租约占用的保持原状。"""
+    from mindex.shared.backends import open_context
+    from mindex.shared.processing_lock import ProcessingLock, recover_tasks
+
+    config = Config(data_dir=tmp_path / "data", database={"backend": "postgres"},
+                    locks={"backend": "postgres"})
+    store = open_context(config).store
+    store.execute("INSERT INTO source_tasks(id,source_id,work,status,config,options) "
+                  "VALUES('t-free','s1','detect','queued','{}','{}')")
+    store.execute("INSERT INTO source_tasks(id,source_id,work,status,config,options) "
+                  "VALUES('t-held','s2','detect','running','{}','{}')")
+    holder = ProcessingLock(config, source_id="s2", work="detect")
+    holder.acquire()  # 模拟活跃 worker 持有资源租约
+    try:
+        recover_tasks(store, "source_tasks")
+    finally:
+        holder.release()
+    rows = {row["id"]: row["status"] for row in store.rows("SELECT id,status FROM source_tasks")}
+    assert rows["t-free"] == "interrupted"  # 无活跃租约 → 标记中断
+    assert rows["t-held"] == "running"      # 有活跃租约 → 不动
 
 
 # ---------------------------------------------------------------- 2. 队列/账本补偿
@@ -131,13 +185,43 @@ def test_item02_ledger_enqueue_compensation_is_idempotent(pg, tmp_path):
 # ---------------------------------------------------------------- 3. Studio 条件发布
 
 
-def test_item03_studio_workspace_publish_revision_guard():
+def test_item03_studio_workspace_conditional_publish(tmp_path):
+    """条件发布：陈旧 expected_revision 被拒；并发写者不丢更新；无 expected 兼容旧调用。"""
+    from mindex.shared.config import Config as _Config
     from mindex.studio.workspace import versions
 
-    assert callable(versions.require_revision)  # 方案预检已有修订校验
-    assert "expected" in inspect.signature(versions.require_revision).parameters
-    if "expected_revision" not in inspect.signature(versions.persist).parameters:
-        pytest.xfail("workspace persist 无 expected_revision：并发写者可覆盖（条件发布未交付）")
+    config = _Config(data_dir=tmp_path / "data")
+    job = "20260101-120000-abcdef"
+    base = {"plans": {}, "versions": {}, "builds": {}, "active_plan": None, "updated_at": ""}
+    versions.persist(config, job, dict(base))
+    first = versions.current_revision(config, job)
+    assert first
+    with pytest.raises(versions.RevisionConflict):
+        versions.persist(config, job, {**base, "active_plan": "stale"}, expected_revision="not-current")
+    versions.persist(config, job, {**base, "active_plan": "p1"}, expected_revision=first)
+    assert versions.current_revision(config, job) != first
+    # 并发写者：只有携带当前修订的那个能成功（另一个收到 RevisionConflict）
+    current = versions.current_revision(config, job)
+    results = []
+
+    def writer(name):
+        try:
+            versions.persist(config, job, {**base, "active_plan": name}, expected_revision=current)
+            results.append(("ok", name))
+        except versions.RevisionConflict:
+            results.append(("conflict", name))
+
+    import threading
+
+    threads = [threading.Thread(target=writer, args=(f"w{i}",)) for i in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(5)
+    assert [kind for kind, _ in results].count("ok") == 1, results  # 恰好一个成功
+    assert [kind for kind, _ in results].count("conflict") == 1
+    # 旧调用（不带 expected）仍可用
+    versions.persist(config, job, dict(base))
 
 
 # ---------------------------------------------------------------- 4. 检查点远端化
@@ -156,16 +240,29 @@ def test_item04_checkpoints_stay_on_node(pg, tmp_path, video_file, monkeypatch, 
         pipeline.analyze(source)
     local_analysis = list((config.data_dir / "analysis").rglob("*"))
     local_plans = list((config.data_dir / "plans").rglob("*"))
-    assert local_analysis and local_plans  # 当前：本地检查点存在、可断点续跑
-    remote = set(context.media.iter_prefix("analysis/")) | set(context.media.iter_prefix("plans/"))
-    if not remote:
-        pytest.xfail("检查点（analysis/plans/transcripts）仍写节点本地目录，未进对象存储")
+    assert local_analysis and local_plans  # 本地快速路径仍在（写穿透）
+    remote = (set(context.media.iter_prefix("analysis/"))
+              | set(context.media.iter_prefix("plans/"))
+              | set(context.media.iter_prefix("transcripts/")))
+    assert remote  # 检查点已镜像到对象存储（权威副本）
+    # 新节点（不同 data_dir、同一 PG+S3）无需共享目录即可读回分镜计划
+    other = Config(data_dir=tmp_path / "other-node", database={"backend": "postgres"},
+                   storage=config.storage.model_copy(deep=True))
+    other.embedding.dimensions = 8
+    other.asr.aligner_revision = "test-revision"
+    from mindex.processing.pipeline import Pipeline as _Pipeline
+
+    node = _Pipeline(other)
+    source_row = node.store.one("SELECT * FROM sources WHERE id=?", (source,))
+    assert node._read_plan(source_row)  # 从 S3 物化检查点
+    assert not (other.data_dir / "plans").exists()  # 没有本地副本也能读
 
 
 # ---------------------------------------------------------------- 5. uploads 远端化
 
 
-def test_item05_upload_lands_locally(pg, tmp_path, video_file, monkeypatch, s3_env):
+def test_item05_upload_lands_in_object_storage(pg, tmp_path, video_file, monkeypatch, s3_env):
+    """S3 形态：上传直接写内容寻址的不可变对象，不落节点本地；重复上传幂等。"""
     from fastapi.testclient import TestClient
 
     from mindex.api import create_app
@@ -173,14 +270,20 @@ def test_item05_upload_lands_locally(pg, tmp_path, video_file, monkeypatch, s3_e
     config, context, _ = _bucket_store(tmp_path, monkeypatch, bucket="mindex-verify-uploads")
     app = create_app(config)
     client = TestClient(app)
-    with video_file.open("rb") as handle:
-        response = client.post("/api/admin/sources/upload",
-                               files={"file": ("clip.mp4", handle, "video/mp4")})
-    assert response.status_code == 201, response.text
-    assert (config.data_dir / "sources").is_dir()  # 当前：原片落在节点本地 sources/
+    for _ in range(2):  # 重复上传同一内容：幂等（键已存在且摘要一致）
+        with video_file.open("rb") as handle:
+            response = client.post("/api/admin/sources/upload",
+                                   files={"file": ("clip.mp4", handle, "video/mp4")})
+        assert response.status_code == 201, response.text
     uploaded = list(context.media.iter_prefix("sources/"))
-    if not uploaded:
-        pytest.xfail("上传仍写本地 sources/ 与 .uploads/，未走 S3 上传协议（multipart/complete/不可变 key）")
+    assert len(uploaded) == 1 and uploaded[0].endswith("/clip.mp4")
+    assert context.store.one("SELECT id,path FROM sources")["path"] == uploaded[0]
+    # 原片不落节点本地；临时上传目录已清理
+    assert not (config.data_dir / "sources").exists() or not any(
+        (config.data_dir / "sources").rglob("*.mp4"))
+    # 处理入口仍可经 media 物化读取（resolve_media 走远端）
+    local = context.store.resolve_media(uploaded[0])
+    assert local.is_file() and local.stat().st_size == video_file.stat().st_size
 
 
 # ---------------------------------------------------------------- 6. GC pin
@@ -206,20 +309,37 @@ def test_item06_download_pin_blocks_purge(pg, tmp_path, monkeypatch, s3_env):
     assert "clips/s1/shot/a.mp4" in set(media.iter_prefix("clips/"))  # 下载保留期内不删
 
 
-def test_item06_clean_does_not_collect_s3_orphans(pg, tmp_path, monkeypatch, s3_env):
+def test_item06_clean_collects_s3_orphans_respecting_pins(pg, tmp_path, monkeypatch, s3_env):
+    """S3 孤儿回收：未引用且过宽限的对象被删；被引用/被 pin/未过宽限的保留。"""
     import hashlib
     import io
 
     from mindex.maintenance.clean import clean_library
+    from mindex.shared.media_delivery import DownloadPins
 
     config, context, _ = _bucket_store(tmp_path, monkeypatch, bucket="mindex-verify-clean")
-    payload = b"orphan"
-    context.media.put_immutable("clips/orphan/x.mp4", io.BytesIO(payload),
-                                sha256=hashlib.sha256(payload).hexdigest())
-    clean_library(config, apply=True)
-    leftover = set(context.media.iter_prefix("clips/"))
-    if "clips/orphan/x.mp4" in leftover:
-        pytest.xfail("clean 只扫描本地目录，S3 孤立对象未被回收（GC 远端化未交付）")
+    config.clean.s3_orphan_grace_hours = 0  # 测试不等待宽限
+
+    def put(key: str, payload: bytes):
+        context.media.put_immutable(key, io.BytesIO(payload),
+                                    sha256=hashlib.sha256(payload).hexdigest())
+
+    put("clips/orphan/x.mp4", b"orphan")
+    put("clips/s1/shot/kept.mp4", b"kept")
+    put("clips/s1/shot/pinned.mp4", b"pinned")
+    context.store.execute("INSERT INTO sources(id,name,path,media,layout_key) "
+                          "VALUES('s1','素材','sources/s1/a.mp4','{}','k')")
+    context.store.execute(
+        "INSERT INTO segments(id,source_id,kind,start,end,path,thumbnail,generation,reason) "
+        "VALUES('seg1','s1','shot',0,5,'clips/s1/shot/kept.mp4','thumbnails/a.jpg','g','r')")
+    pins = DownloadPins(context.store, context.library_id)
+    pins.pin("clips/s1/shot/pinned.mp4", 900)
+    report = clean_library(config, apply=True)
+    keys = set(context.media.iter_prefix(""))
+    assert "clips/orphan/x.mp4" not in keys          # 未引用 + 过宽限 → 回收
+    assert "clips/s1/shot/kept.mp4" in keys          # 被 segments 引用 → 保留
+    assert "clips/s1/shot/pinned.mp4" in keys        # 下载 pin → 保留
+    assert report["s3_orphans"]["deleted"] >= 1
 
 
 # ---------------------------------------------------------------- 7. persons PG
@@ -249,11 +369,31 @@ def test_item08_agent_changes_route_on_cluster(pg, tmp_path, monkeypatch, s3_env
     monkeypatch.setenv("MINDEX_CHROMA_TOKEN", "")
     app = create_app(config)
     client = TestClient(app)
-    assert client.get("/api/agent/status").status_code == 503  # 当前：网关指引
-    response = client.get("/api/agent/changes")
-    if response.status_code >= 500:
-        pytest.xfail("cluster 业务 API 无变更流/outbox：agent 路由整体指向网关（outbox 未交付）")
-    assert response.status_code == 200
+    assert client.get("/api/agent/status").status_code == 503  # 会话/SSE 仍由网关提供
+    # 变更上报：写入共享 outbox，由网关幂等转入 SSE（plans §9）
+    posted = client.post("/api/agent/changes", json={
+        "kind": "mutation", "data": {"domain": "search", "segment_id": "seg1"}})
+    assert posted.status_code == 201, posted.text
+    assert posted.json()["forwarded"] is True
+    invalid = client.post("/api/agent/changes", json={"kind": "unknown", "data": {}})
+    assert invalid.status_code == 422
+
+    from mindex.agent.outbox_bridge import OutboxBridge
+    from mindex.shared.db.agent_outbox import drain
+
+    class Feed:
+        def __init__(self):
+            self.items = []
+
+        def publish(self, kind, data, *, source="agent", session_id=None, tab=None):
+            self.items.append((kind, source, data))
+
+    feed = Feed()
+    bridge = OutboxBridge(app.state.store, feed)
+    assert bridge.drain_once() == 1  # 网关转入 ChangeFeed
+    assert feed.items == [("mutation", "mcp", {"domain": "search", "segment_id": "seg1"})]
+    assert bridge.drain_once() == 0  # 幂等：已消费不再重放
+    assert drain(app.state.store) == []
 
 
 # ---------------------------------------------------------------- 9. 指标
@@ -267,24 +407,60 @@ def test_item09_health_metrics_surface(pg, tmp_path, monkeypatch, s3_env):
     config, _, _ = _bucket_store(tmp_path, monkeypatch, bucket="mindex-verify-metrics",
                                  queue="postgres")
     app = create_app(config)
-    health = TestClient(app).get("/api/health").json()
+    client = TestClient(app)
+    health = client.get("/api/health").json()
     assert health["backends"]["form"] == "pg-single"
     assert health["backends"]["queue"] == "postgres"
-    assert "queue_stats" in health  # 队列深度/最老 pending 已暴露
-    missing = [key for key in ("pool", "pool_wait", "lease_expired", "staging")
-               if key not in json.dumps(health)]
-    if missing:
-        pytest.xfail(f"未暴露指标：{missing}（PG 池等待/租约到期/staging 水位）")
+    assert "queue_stats" in health  # 队列深度/最老 pending
+    metrics = health["metrics"]
+    assert {"pool", "pool_wait", "lease_expired"} <= set(metrics)  # PG 池等待/租约到期
+    assert metrics["lease_expired"] == 0 and metrics["lease_holders"] == 0
+    # s3 存储形态固定启用 staging 预算：水位可见
+    assert metrics["staging"]["quota"] > 0
+    assert set(client.get("/api/metrics").json()) >= {"form", "pool", "queue"}
 
 
 # ---------------------------------------------------------------- 10. GPU 容量
 
 
-def test_item10_gpu_capacity_declaration():
-    try:
-        Config(gpu={"capacity": 1})
-    except Exception as exc:  # noqa: BLE001 — 当前无 gpu 配置节
-        pytest.xfail(f"无声明式 GPU 容量/准入配置（{type(exc).__name__}）；只有 worker --concurrency 槽位")
+def test_item10_gpu_capacity_admission(pg, tmp_path):
+    """capacity=1 时两个 worker 并发执行 GPU 类别任务：实际并发不超过 1。"""
+    import threading
+    import time as _time
+
+    from mindex.shared.backends import open_context
+    from mindex.shared.db.queue_pg import PgTaskQueue
+    from mindex.worker_runtime import Worker
+
+    config = Config(data_dir=tmp_path / "data", database={"backend": "postgres"},
+                    queue={"backend": "postgres"}, gpu={"capacity": 1, "queues": ["selftest"]})
+    context = open_context(config)
+    queue = PgTaskQueue(context.library_id)
+    with context.db.connect() as db:
+        for index in range(2):
+            queue.enqueue(db, "selftest", {"i": index}, dedupe_key=f"gpu-{index}")
+
+    active = {"now": 0, "max": 0}
+    lock = threading.Lock()
+
+    def handler(_config, task):
+        with lock:
+            active["now"] += 1
+            active["max"] = max(active["max"], active["now"])
+        _time.sleep(0.5)
+        with lock:
+            active["now"] -= 1
+
+    workers = [Worker(config, queues=["selftest"], once=True,
+                      extra_handlers={"selftest": handler}) for _ in range(2)]
+    threads = [threading.Thread(target=worker.run) for worker in workers]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(30)
+    assert active["max"] == 1  # 容量 1：第二个任务等槽位释放
+    with context.db.connect() as db:
+        assert queue.stats(db)["succeeded"]["count"] == 2
 
 
 # ---------------------------------------------------------------- 11. 恢复演练（小规模）

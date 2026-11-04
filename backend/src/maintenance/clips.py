@@ -121,7 +121,7 @@ def migrate(config, source_id=None, *, apply=False, verify=False):
         return report
     from mindex.shared.processing_lock import ProcessingLock, index_write_lock
 
-    with ProcessingLock(config, deleting=True), index_write_lock(store.root):
+    with ProcessingLock(config, deleting=True), index_write_lock(store.root, config=config):
         stamp = datetime.now(UTC).strftime('%Y%m%dT%H%M%S%fZ')
         backup = store.root / 'backups' / f'clips-{stamp}.sqlite3'
         backup.parent.mkdir(parents=True, exist_ok=True)

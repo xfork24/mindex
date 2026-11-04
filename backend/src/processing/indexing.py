@@ -310,7 +310,7 @@ class IndexBuilder:
         if progress:
             progress({"stage": "index_wait", "phase": "publish"})
         check_wait = (lambda: progress({"stage": "index_wait", "phase": "publish"})) if progress else None
-        with index_write_lock(self.store.root, check=check_wait):
+        with index_write_lock(self.store.root, check=check_wait, config=self.config):
             if progress:
                 progress({"stage": "index_prepare", "phase": "publish"})
             if mode == "enriched":
