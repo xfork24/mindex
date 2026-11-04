@@ -43,8 +43,10 @@ def test_gate_mutual_exclusion_on_pg(tmp_path, monkeypatch):
         pass
 
 
-def test_cluster_api_stubs_agent_routes(tmp_path, monkeypatch):
-    """cluster 业务 API 的 /api/agent 指向单实例网关，明确 503 而非假数据降级。"""
+def test_cluster_api_proxies_agent_without_local_session_state(tmp_path, monkeypatch):
+    """业务 API 转发给单实例网关，保留用户认证并剥离本机内部凭证。"""
+    import httpx
+
     dsn = os.environ.get("MINDEX_TEST_POSTGRES_DSN", "")
     if not dsn:
         pytest.skip("需要 MINDEX_TEST_POSTGRES_DSN")
@@ -52,6 +54,20 @@ def test_cluster_api_stubs_agent_routes(tmp_path, monkeypatch):
     monkeypatch.setenv("MINDEX_S3_ACCESS_KEY", "mindex")
     monkeypatch.setenv("MINDEX_S3_SECRET_KEY", "mindex-test")
     from mindex.api import create_app
+
+    received = []
+
+    class Body(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            yield b'{"via":"gateway","path":"/api/agent/status"}'
+
+    def gateway(request):
+        received.append(request)
+        return httpx.Response(200, stream=Body(), headers={"content-type": "application/json"})
+
+    original_client = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: original_client(
+        **kwargs, transport=httpx.MockTransport(gateway)))
 
     config = Config(
         data_dir=tmp_path / "data",
@@ -62,9 +78,13 @@ def test_cluster_api_stubs_agent_routes(tmp_path, monkeypatch):
     app = create_app(config)
     assert getattr(app.state, "agent_runtime", None) is None  # 不建独立会话运行时
     with TestClient(app) as client:
-        response = client.get("/api/agent/status")
-        assert response.status_code == 503
-        assert "agent-gateway" in response.json()["detail"]
-        assert response.json()["gateway_url"] == "https://agent.internal"
+        response = client.get("/api/agent/status", headers={
+            "Authorization": "Bearer user-token", "X-Mindex-Internal": "local-only"})
+        assert response.status_code == 200
+        assert response.json() == {"via": "gateway", "path": "/api/agent/status"}
+        assert received[0].headers["authorization"] == "Bearer user-token"
+        assert "x-mindex-internal" not in received[0].headers
+        assert received[0].headers["x-mindex-gateway-hop"] == "1"
         health = client.get("/api/health").json()
         assert health["backends"]["form"] == "cluster"
+    assert not (config.data_dir / "agent.sqlite3").exists()
