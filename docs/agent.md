@@ -314,7 +314,7 @@ curl -s -H "Authorization: Bearer $MINDEX_MCP_TOKEN" -F file=@shot.png http://12
 | `list_segments` | read | 是 | 分页列出镜头或精细片段，附缩略图 |
 | `get_segment_details` | read | 是 | 片段的 ASR、字幕、LLM 分析与人物结果（长文本截断） |
 | `get_source_report` | read | 是 | 素材报告：计划镜头数、时长统计、缺失文件、布局一致性、运行记录 |
-| `get_task_status` | read | 是 | 查询素材、对白或人物任务 |
+| `get_task_status` | read | 是 | 查询素材、对白、人物或独立索引任务（`kind=index`） |
 | `update_curation` | write | 是 | 修改显示名、备注、收藏、隐藏（只提交给出的字段） |
 | `retry_task` | write | 是 | 从断点重试失败、中断、已取消或发布失败的任务 |
 | `cancel_task` | write | 是 | 取消排队中或运行中的任务 |

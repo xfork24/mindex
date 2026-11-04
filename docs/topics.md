@@ -86,13 +86,15 @@ flowchart LR
 
 ## 每日定时
 
-在档案里开启定时并设好本地时刻后，`mindex serve` 运行期间每分钟检查一次（间隔由 `topics.scheduler.interval_seconds` 配置）。满足以下条件时自动挖掘：
+在档案里开启定时并设好时刻后，`mindex serve` 运行期间每分钟检查一次（间隔由 `topics.scheduler.interval_seconds` 配置）。本地缺省使用系统时区；PG 库缺省 UTC，可用 `topics.scheduler.timezone: Asia/Shanghai` 显式绑定库时区，所有节点须一致。满足以下条件时自动挖掘：
 
 - 已过当天的定时时刻；
 - 当天还没有成功或进行中的定时任务；
 - 当天的自动尝试少于 3 次。
 
 服务启动后的第一次检查会补跑当天错过的定时，触发方式记为 `catchup`。有挖掘任务在运行时本次跳过，下一分钟再试。`topics.scheduler.enabled: false` 时不启动调度器；测试与内嵌的 `create_app` 缺省也不启动。
+
+自动任务按档案、库内日期和尝试序号持久去重；周期占位、挖掘账本及队列同事务提交。leader 切换或重复提交会返回已有任务；失败后的下一次自动尝试使用新的序号，当天最多三次。
 
 桌面版关闭窗口后，应用留在菜单栏（Windows 为系统托盘）继续运行，定时照常执行，详见 [macOS 桌面版](desktop.md#后台运行与每日选题)。Web 端需要服务常驻；也可以改用系统计划任务，每天运行一次 `mindex topics discover`。
 

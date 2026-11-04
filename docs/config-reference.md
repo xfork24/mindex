@@ -337,6 +337,7 @@ local_services:
 | `llm` | 同 `studio.writer` \| null | null | 选题模型（归纳、受众匹配、大纲）；null 时复用 `studio.writer`（含设置页「文案创作」档案） |
 | `scheduler.enabled` | bool | true | `mindex serve` 运行时按档案定时每天挖掘，启动时补跑当天错过的定时 |
 | `scheduler.interval_seconds` | int 5–3600 | 60 | 定时检查间隔 |
+| `scheduler.timezone` | IANA 时区名 \| null | null | 本地缺省系统时区；PG 缺省 UTC，首次启动调度器时绑定到库。显式配置与库绑定不一致时拒绝启动；省略配置继承库时区。变更需重启并核对当日周期 |
 | `fetch.timeout` | float | 15 | 单次请求超时（秒） |
 | `fetch.max_bytes` | int | 2097152 | 单次响应与日历上传上限 |
 | `fetch.item_days` | int 1–365 | 30 | 候选条目保留天数（被卡片引用的不清理） |
