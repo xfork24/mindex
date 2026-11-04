@@ -48,9 +48,12 @@ def _pinned_versions(store, *, task_cutoff=None):
                         stack.append(item)
             elif isinstance(value, list):
                 stack.extend(item for item in value if isinstance(item, (dict, list)))
+    # SQLite 允许直接比较无名参数与 NULL；PG 需要显式类型才能推断 $1。
+    cutoff_clause = ("(?::text IS NULL OR updated_at>=?)" if store.pg
+                     else "(? IS NULL OR updated_at>=?)")
     for row in store.rows(
         "SELECT progress FROM source_tasks WHERE status IN ('queued','running') OR "
-        "(status IN ('failed','interrupted','cancelled') AND (? IS NULL OR updated_at>=?))",
+        "(status IN ('failed','interrupted','cancelled') AND " + cutoff_clause + ")",
         (task_cutoff, task_cutoff),
     ):
         try:
