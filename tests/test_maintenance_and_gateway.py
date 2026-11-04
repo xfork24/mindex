@@ -19,14 +19,14 @@ def test_gate_is_noop_on_local_form(tmp_path):
 
 
 def test_gate_mutual_exclusion_on_pg(tmp_path, monkeypatch):
+    dsn = os.environ.get("MINDEX_TEST_POSTGRES_DSN", "")
+    if not dsn:
+        pytest.skip("需要 MINDEX_TEST_POSTGRES_DSN")
     import psycopg
 
     from mindex.shared.db.migrate_pg import migrate_pg
     from mindex.shared.storage import PgStore
 
-    dsn = os.environ.get("MINDEX_TEST_POSTGRES_DSN", "")
-    if not dsn:
-        pytest.skip("需要 MINDEX_TEST_POSTGRES_DSN")
     with psycopg.connect(dsn, autocommit=True) as conn:
         conn.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
     with psycopg.connect(dsn) as conn:

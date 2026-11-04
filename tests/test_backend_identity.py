@@ -39,14 +39,14 @@ def test_same_index_in_two_libraries_has_independent_vectors():
 
 @pytest.mark.requires_s3
 def test_same_media_key_and_cache_directory_are_isolated_by_library(tmp_path, monkeypatch):
+    endpoint = os.environ.get("MINDEX_TEST_S3_ENDPOINT")
+    if not endpoint:
+        pytest.skip("需要隔离 MinIO 服务")
     import boto3
 
     from mindex.shared.backends.s3 import S3MediaStore
     from mindex.shared.config import S3Config
 
-    endpoint = os.environ.get("MINDEX_TEST_S3_ENDPOINT")
-    if not endpoint:
-        pytest.skip("需要隔离 MinIO 服务")
     access = os.environ.get("MINDEX_TEST_S3_KEY", "mindex")
     secret = os.environ.get("MINDEX_TEST_S3_SECRET_KEY", "mindex-test")
     monkeypatch.setenv("MINDEX_S3_ACCESS_KEY", access)
@@ -76,6 +76,10 @@ def test_same_media_key_and_cache_directory_are_isolated_by_library(tmp_path, mo
 @pytest.mark.requires_chroma_server
 @pytest.mark.parametrize("legacy_namespace", [False, True])
 def test_bundle_roundtrip_rebinds_resources_before_copying(tmp_path, monkeypatch, legacy_namespace):
+    dsn, endpoint, chroma = [os.environ.get(key) for key in (
+        "MINDEX_TEST_POSTGRES_DSN", "MINDEX_TEST_S3_ENDPOINT", "MINDEX_TEST_CHROMA_SERVER")]
+    if not all((dsn, endpoint, chroma)):
+        pytest.skip("需要隔离 PG、MinIO 和 Chroma 服务")
     import boto3
     import psycopg
 
@@ -84,10 +88,6 @@ def test_bundle_roundtrip_rebinds_resources_before_copying(tmp_path, monkeypatch
     from mindex.shared.db.migrate_pg import migrate_pg
     from mindex.shared.storage import dumps
 
-    dsn, endpoint, chroma = [os.environ.get(key) for key in (
-        "MINDEX_TEST_POSTGRES_DSN", "MINDEX_TEST_S3_ENDPOINT", "MINDEX_TEST_CHROMA_SERVER")]
-    if not all((dsn, endpoint, chroma)):
-        pytest.skip("需要隔离 PG、MinIO 和 Chroma 服务")
     access = os.environ.get("MINDEX_TEST_S3_KEY", "mindex")
     secret = os.environ.get("MINDEX_TEST_S3_SECRET_KEY", "mindex-test")
     monkeypatch.setenv("MINDEX_DATABASE_DSN", dsn)
