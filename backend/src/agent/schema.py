@@ -60,7 +60,12 @@ def _v3(db) -> None:
     db.execute("CREATE UNIQUE INDEX agent_upstream ON agent_events(session_id, upstream_seq)")
 
 
-STEPS = (_v1, _v2, _v3)
+def _v4(db) -> None:
+    db.execute("CREATE TABLE agent_outbox_receipts (library_id TEXT NOT NULL, outbox_id INTEGER NOT NULL,"
+               " change_seq INTEGER NOT NULL, PRIMARY KEY(library_id,outbox_id))")
+
+
+STEPS = (_v1, _v2, _v3, _v4)
 
 
 def initialize(database) -> int:

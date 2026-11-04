@@ -19,7 +19,7 @@ log = logging.getLogger(__name__)
 KINDS = ("mutation", "focus")
 SOURCES = ("agent", "mcp")
 
-__all__ = ["drain", "publish"]
+__all__ = ["acknowledge", "drain", "publish"]
 
 
 def publish(store, kind: str, data: dict, *, source: str = "mcp",
@@ -40,17 +40,23 @@ def publish(store, kind: str, data: dict, *, source: str = "mcp",
         return int(row[0])
 
 
-def drain(store, *, limit: int = 200) -> list[dict]:
+def drain(store, *, limit: int = 200, consume: bool = True) -> list[dict]:
     """取走未消费的改动（单事务标记 consumed）；返回按 id 升序的条目。"""
     library_id = getattr(store, "library_id", None) or (
         store.one("SELECT value FROM settings WHERE key='library.id'") or {"value": ""})["value"]
     with store.connect() as db:
-        rows = db.execute(
+        if not consume:
+            rows = db.execute(
+                "SELECT id,kind,source,session_id,tab,data FROM agent_outbox"
+                " WHERE library_id=? AND consumed_at IS NULL ORDER BY id LIMIT ?",
+                (library_id, limit)).fetchall()
+        else:
+            rows = db.execute(
             "WITH picked AS (SELECT id FROM agent_outbox WHERE library_id=? AND consumed_at IS NULL"
             " ORDER BY id LIMIT ? FOR UPDATE SKIP LOCKED)"
             " UPDATE agent_outbox o SET consumed_at=clock_timestamp() FROM picked"
             " WHERE o.id=picked.id RETURNING o.id,o.kind,o.source,o.session_id,o.tab,o.data",
-            (library_id, limit)).fetchall()
+                (library_id, limit)).fetchall()
     items = []
     for row in rows:
         data = row["data"]
@@ -61,3 +67,8 @@ def drain(store, *, limit: int = 200) -> list[dict]:
         })
     items.sort(key=lambda item: item["outbox_id"])
     return items
+
+
+def acknowledge(store, outbox_id):
+    store.execute("UPDATE agent_outbox SET consumed_at=clock_timestamp() WHERE library_id=? AND id=?",
+                  (store.library_id, outbox_id))
