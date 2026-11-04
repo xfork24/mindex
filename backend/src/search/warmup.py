@@ -63,7 +63,7 @@ def warm_up(config: Config, index_id: str | None = None, *, startup: bool = True
     from mindex.search.search import lexical_search, tokens
     from mindex.shared.storage import Store
 
-    store = Store(config.data_dir)
+    store = Store.open(config)
     active = store.index_version(index_id) if index_id else store.active_index()
     state: dict = {}
 
@@ -105,16 +105,19 @@ def warm_up(config: Config, index_id: str | None = None, *, startup: bool = True
     def vectors():
         from mindex.processing.indexing import vector_client
 
-        index = VectorIndex(store.root, active["id"], client=vector_client(config))
-        index._representation_map()  # 向量 id → (segment_id, view) 映射，供无过滤查询后过滤
+        index = VectorIndex(store.root, active["id"],
+                            client=vector_client(config, library_id=store.library_id))
+        if not store.pg:
+            index._representation_map()
         collection = index.collection
         if collection.count():
             vector = [1.0] + [0.0] * (config.embedding.dimensions - 1)
             collection.query(query_embeddings=[vector], n_results=1)
 
-    _step("索引快照", snapshots)
-    _step("人物实体与证据索引", people)
-    _step("BM25 语料分词", corpus)
+    if not store.pg:
+        _step("索引快照", snapshots)
+        _step("人物实体与证据索引", people)
+        _step("BM25 语料分词", corpus)
     _step("向量索引加载", vectors)
     _step("淘汰已被取代的旧版本缓存", lambda: retire_superseded(store, active, index_id))
 
@@ -186,7 +189,7 @@ def watch_and_rewarm(
     from mindex.settings.runtime_settings import RuntimeConfig
     from mindex.shared.storage import Store
 
-    store = Store(config.data_dir)
+    store = Store.open(config)
     warm = warm or warm_up
     while not stop.wait(interval):
         try:
@@ -216,7 +219,7 @@ def warm_up_in_background(
     stop = threading.Event()
 
     def run():
-        store = Store(config.data_dir)
+        store = Store.open(config)
         try:
             baseline = serving_signature(store, index_id)  # 先于预热取得：预热期间的发布会触发再次预热
         except Exception as exc:  # noqa: BLE001 — 读不到基线只影响再预热判断，线程继续

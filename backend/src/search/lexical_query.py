@@ -175,6 +175,19 @@ def sql_bm25(
         return results[:count]
 
 
+def dialogue_projection(store: Store, index_id: str, identifiers: list[str]) -> dict[str, str]:
+    """姓名提及匹配只读对白文本，保持 Unicode/词边界的参考语义。"""
+    result = {}
+    for offset in range(0, len(identifiers), _CHUNK):
+        batch = identifiers[offset:offset + _CHUNK]
+        marks = ",".join("?" * len(batch))
+        for row in store.rows(
+            "SELECT segment_id,json_extract(snapshot,'$.views.dialogue') AS dialogue "
+            f"FROM index_members WHERE index_id=? AND segment_id IN ({marks})", [index_id, *batch]):
+            result[row["segment_id"]] = row["dialogue"] or ""
+    return result
+
+
 def _populate_eligible(db, store: Store, eligible_ids: list[str]) -> None:
     """请求级临时表：同一事务内建、灌、查、消亡（PG 用 ON COMMIT DROP 归还池连接）。"""
     db.execute("DROP TABLE IF EXISTS _eligible")

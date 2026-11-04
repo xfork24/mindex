@@ -1476,6 +1476,46 @@ def publish_content(p, config, identifier="content1", dialogues=None):
     return identifier
 
 
+@pytest.mark.parametrize("query", [
+    TextSearch(text="演员甲", granularity="shot"),
+    TextSearch(text="演员甲快回来", granularity="shot"),
+    TextSearch(text="演员甲", person_mode="mentioned", granularity="shot"),
+    TextSearch(text="快回来", granularity="shot"),
+    TextSearch(text="演员甲", granularity="shot", target_duration=1.1),
+])
+def test_person_projection_matches_reference_without_full_snapshots(catalogue, config, monkeypatch, query):
+    from mindex.admin.curation import Library
+    from mindex.search.search import SearchEngine
+    from mindex.shared.lexical_store import build_lexical_index
+
+    p, work, actor = catalogue
+    role = p.save(Entity(kind="role", name="角色甲", work_ids=[work], actor_ids=[actor["id"]]))
+    version = publish_content(p, config)
+    p.store.execute("INSERT INTO person_evidence VALUES(?,?,?,?,?,?,?,?,?,?)",
+                    ("visible", "source", "shot0", actor["id"], role["id"], None, 0., 1.,
+                     "accepted", dumps({"score": .9})))
+    p.publish()
+
+    class Offline:
+        def identity(self):
+            raise ModelError("离线，使用词法检索")
+
+    expected = SearchEngine(config, Offline()).text(query)
+    build_lexical_index(p.store, version)
+    original_overlays = Library.overlays
+
+    def bounded_overlays(self, *, snapshots=None):
+        assert snapshots is not None, "投影查询不能建立全库 curation map"
+        return original_overlays(self, snapshots=snapshots)
+
+    monkeypatch.setattr(Library, "overlays", bounded_overlays)
+    monkeypatch.setattr(Store, "snapshots_shared", lambda *a: pytest.fail("投影查询读取全量快照"))
+    actual = SearchEngine(config, Offline()).text(query)
+    for result in (expected, actual):
+        result.pop("elapsed_ms")
+    assert actual == expected
+
+
 def test_mentioned_role_variants_union_and_latin_name_boundaries(catalogue, config):
     from mindex.search.search import SearchEngine
 

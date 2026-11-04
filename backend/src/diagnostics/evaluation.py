@@ -72,7 +72,7 @@ def evaluate(
         "no_dialogue": {**config.search.weights, "dialogue": 0},
         "no_style": {**config.search.weights, "style": 0},
     }
-    store = Store(config.data_dir)
+    store = Store.open(config)
     active = store.index_version(index_id) if index_id else store.active_index()
     if not active:
         raise ValueError("请先发布待评测索引")
@@ -119,7 +119,7 @@ def evaluate(
             "no_style": ["style"],
         }.get(name, [])
         current.search.lexical_exclude = list(dict.fromkeys([*config.search.lexical_exclude, *excluded]))
-        engine = SearchEngine(current, index_id=active["id"])
+        engine = SearchEngine(current, index_id=active["id"], force_embedding=True)
         rows = []
         for entry in entries:
             if "text" in entry:

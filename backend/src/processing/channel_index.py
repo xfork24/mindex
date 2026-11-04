@@ -319,7 +319,7 @@ def build_channels(builder, *, activate=False, mode="auto", source_id=None, kind
         "INSERT OR IGNORE INTO index_versions(id,spec,status) VALUES(?,?,'building')", (index_id, dumps(spec))
     )
     vectors = VectorIndex(store.root, index_id, create=True,
-                            client=vector_client(builder.config))
+                            client=vector_client(builder.config, library_id=store.library_id))
     existing = vectors.ids()
     # Count durable vectors and metadata, including checkpoints from an earlier
     # attempt. Other sources retained in the incremental index are not this task.
@@ -390,7 +390,8 @@ def build_channels(builder, *, activate=False, mode="auto", source_id=None, kind
         log.info("开始复制可复用向量 · 共 %d 项", copy_total)
         for version, entries in copies.items():
             if version not in opened:
-                opened[version] = VectorIndex(store.root, version, client=vector_client(builder.config))
+                opened[version] = VectorIndex(store.root, version,
+                                              client=vector_client(builder.config, library_id=store.library_id))
             for offset in range(0, len(entries), 256):
                 batch = entries[offset:offset + 256]
                 saved = opened[version].vectors([entry[0] for entry in batch])
@@ -443,7 +444,8 @@ def build_channels(builder, *, activate=False, mode="auto", source_id=None, kind
                     if key in cache:
                         version, identifier = cache[key]
                         if version not in opened:
-                            opened[version] = VectorIndex(store.root, version, client=vector_client(builder.config))
+                            opened[version] = VectorIndex(store.root, version,
+                                                          client=vector_client(builder.config, library_id=store.library_id))
                         vector = opened[version].vector(identifier)
                     if vector is not None:
                         reused += 1

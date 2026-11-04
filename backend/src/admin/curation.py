@@ -426,7 +426,27 @@ class Library:
             )
         return self.source(identifier) if kind == "source" else segment_public(self.segment_row(identifier))
 
-    def overlays(self) -> tuple[dict, dict]:
+    def overlays(self, *, snapshots=None) -> tuple[dict, dict]:
+        if snapshots is not None:
+            # 命中水合只需命中素材、片段及其父镜头，不能构建全库 curation map。
+            sources, segments = {}, {}
+            source_ids = sorted({s["source_id"] for s in snapshots})
+            segment_ids = sorted({s["id"] for s in snapshots} | {
+                s["parent_id"] for s in snapshots if s.get("parent_id")})
+            for offset in range(0, len(source_ids), 400):
+                ids = source_ids[offset:offset + 400]
+                marks = ",".join("?" * len(ids))
+                sources.update((r["id"], r) for r in self.store.rows(
+                    "SELECT s.id,s.name,c.display_name,c.hidden FROM sources s "
+                    f"LEFT JOIN source_curation c ON c.id=s.id WHERE s.id IN ({marks})", ids))
+            for offset in range(0, len(segment_ids), 400):
+                ids = segment_ids[offset:offset + 400]
+                marks = ",".join("?" * len(ids))
+                segments.update((r["id"], r) for r in self.store.rows(
+                    "SELECT g.id,g.parent_id,c.display_name,c.favorite,c.hidden FROM segments g "
+                    f"LEFT JOIN segment_curation c ON c.id=g.id WHERE g.id IN ({marks}) "
+                    f"OR g.id IN (SELECT parent_id FROM segments WHERE id IN ({marks}))", [*ids, *ids]))
+            return sources, segments
         sources = {
             r["id"]: r
             for r in self.store.rows(
