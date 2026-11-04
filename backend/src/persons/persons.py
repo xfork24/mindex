@@ -869,14 +869,19 @@ class Persons:
             " AND " + column + "=?" for column, value in (("s.source_id", source_id), ("s.id", shot_id)) if value
         )
         coverage_args = list(args)
-        db.execute(
+        review_ev_sql = (
             "CREATE TEMP TABLE review_ev AS SELECT id,source_id,shot_id,actor_id,role_id,status,start,"
             "json_extract(data,'$.confirmation') AS confirmation,json_extract(data,'$.shot_excluded') AS excluded,"
             "json_type(data,'$.score') AS score_type,json_extract(data,'$.score') AS score_value,"
-            "json_extract(data,'$.reviewed_at') AS reviewed_at FROM person_evidence" + ev_where, args,
-        )
-        db.execute("CREATE INDEX temp.review_ev_shot ON review_ev(source_id,shot_id)")
-        db.execute(
+            "json_extract(data,'$.reviewed_at') AS reviewed_at FROM person_evidence" + ev_where)
+        if self.store.pg:
+            # 连接池复用连接：临时表以 ON COMMIT DROP 在事务结束时消失，并清掉任何残留。
+            db.execute("DROP TABLE IF EXISTS review_ev")
+            db.execute(review_ev_sql.replace(
+                "CREATE TEMP TABLE review_ev AS", "CREATE TEMP TABLE review_ev ON COMMIT DROP AS"), args)
+        else:
+            db.execute(review_ev_sql, args)
+        review_states_sql = (
             "CREATE TEMP TABLE review_states AS WITH "
             "valid_pairs AS (SELECT DISTINCT ps.source_id,role.id AS role_id,performer.value AS actor_id "
             "FROM person_sources ps JOIN person_entities role ON role.kind='role' "
@@ -900,9 +905,38 @@ class Persons:
             "UNION ALL SELECT DISTINCT s.id,s.source_id,0,0,0 FROM person_coverage c "
             "JOIN segments s ON s.id=json_extract(c.data,'$.shot_id') AND s.source_id=c.source_id "
             "WHERE s.kind='shot' AND NOT EXISTS (SELECT 1 FROM person_evidence e "
-            "WHERE e.shot_id=s.id AND e.source_id=s.source_id)" + coverage_where, coverage_args,
+            "WHERE e.shot_id=s.id AND e.source_id=s.source_id)" + coverage_where
         )
-        db.execute("CREATE INDEX temp.review_states_shot ON review_states(source_id,shot_id)")
+        if self.store.pg:
+            # PG：临时索引不能写 temp. 前缀；jsonb 元素按文本比较；布尔 SUM 显式 CASE。
+            db.execute("CREATE INDEX review_ev_shot ON review_ev(source_id,shot_id)")
+            db.execute("DROP TABLE IF EXISTS review_states")
+            db.execute(
+                review_states_sql
+                .replace("CREATE TEMP TABLE review_states AS WITH",
+                         "CREATE TEMP TABLE review_states ON COMMIT DROP AS WITH")
+                .replace("JOIN json_each(role.data,'$.actor_ids') performer",
+                         "CROSS JOIN jsonb_array_elements(role.data::jsonb->'actor_ids') performer")
+                .replace("JOIN json_each(role.data,'$.work_ids')",
+                         "CROSS JOIN jsonb_array_elements(role.data::jsonb->'work_ids')")
+                .replace("performer.value AS actor_id", "(performer.value #>> '{}') AS actor_id")
+                .replace("actor.id=performer.value", "actor.id=(performer.value #>> '{}')")
+                .replace("value=ps.work_id", "(value #>> '{}')=ps.work_id")
+                .replace("json_extract(data,'$.removed_confirmation')=1",
+                         "(CASE WHEN (data::jsonb->'removed_confirmation')='true'::jsonb THEN 1"
+                         " WHEN (data::jsonb->'removed_confirmation')='false'::jsonb THEN 0 ELSE 0 END)=1")
+                .replace("SUM(e.status='accepted' AND pair.role_id IS NOT NULL)",
+                         "SUM(CASE WHEN e.status='accepted' AND pair.role_id IS NOT NULL THEN 1 ELSE 0 END)")
+                .replace("SUM(e.status='candidate' AND pair.role_id IS NOT NULL)",
+                         "SUM(CASE WHEN e.status='candidate' AND pair.role_id IS NOT NULL THEN 1 ELSE 0 END)")
+                .replace("s.id=json_extract(c.data,'$.shot_id')", "s.id=(c.data::jsonb->>'shot_id')"),
+                coverage_args,
+            )
+            db.execute("CREATE INDEX review_states_shot ON review_states(source_id,shot_id)")
+        else:
+            db.execute("CREATE INDEX temp.review_ev_shot ON review_ev(source_id,shot_id)")
+            db.execute(review_states_sql, coverage_args)
+            db.execute("CREATE INDEX temp.review_states_shot ON review_states(source_id,shot_id)")
 
     def review_summary(self):
         """每个素材的分镜级状态计数；分类规则与审核列表完全一致。"""
@@ -1017,10 +1051,19 @@ class Persons:
             )
         else:
             total = scope_total
-        confirmed_people = ("'[]'" if status == "rejected" else
-            "(SELECT json_group_array(json_object('actor_id',actor_id,'role_id',role_id)) "
-            "FROM (SELECT actor_id,role_id FROM confirmed c "
-            "WHERE c.source_id=s.source_id AND c.shot_id=s.shot_id ORDER BY actor_id,role_id))")
+        if status == "rejected":
+            confirmed_people = "'[]'"
+        elif self.store.pg:
+            confirmed_people = (
+                "(SELECT COALESCE(jsonb_agg(jsonb_build_object("
+                "'actor_id',actor_id,'role_id',role_id) ORDER BY actor_id,role_id),'[]'::jsonb)::text "
+                "FROM (SELECT actor_id,role_id FROM confirmed c "
+                "WHERE c.source_id=s.source_id AND c.shot_id=s.shot_id) q)")
+        else:
+            confirmed_people = (
+                "(SELECT json_group_array(json_object('actor_id',actor_id,'role_id',role_id)) "
+                "FROM (SELECT actor_id,role_id FROM confirmed c "
+                "WHERE c.source_id=s.source_id AND c.shot_id=s.shot_id ORDER BY actor_id,role_id))")
         with stage("page_sql"):
             shots = self._rows(
                 db, query + "SELECT s.*," + confirmed_people + " AS confirmed_people FROM classified s" + pair_where
@@ -1029,15 +1072,29 @@ class Persons:
             )
         items = []
         for shot in shots:
-            evidence_sql = (
-                "SELECT id,actor_id,role_id,status,json_object("
-                "'score',json_extract(data,'$.score'),'original_score',json_extract(data,'$.original_score'),"
-                "'evidence_type',json_extract(data,'$.evidence_type'),'confirmation',json_extract(data,'$.confirmation'),"
-                "'image_path',json_extract(data,'$.image_path')) "
-                "AS data,json_type(data,'$.original_score') IS NOT NULL AS original_recorded "
-                "FROM person_evidence e WHERE source_id=? AND shot_id=? AND " + self.VALID_ROLE + " ORDER BY start,id" if compact else
-                "SELECT * FROM person_evidence e WHERE source_id=? AND shot_id=? AND " + self.VALID_ROLE + " ORDER BY start,id"
-            )
+            if not compact:
+                evidence_sql = ("SELECT * FROM person_evidence e WHERE source_id=? AND shot_id=? AND "
+                                + self.VALID_ROLE + " ORDER BY start,id")
+            elif self.store.pg:
+                score = "(CASE WHEN (data::jsonb->>'score') ~ '^-?[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?$' THEN (data::jsonb->>'score')::numeric END)"
+                original = "(CASE WHEN (data::jsonb->>'original_score') ~ '^-?[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?$' THEN (data::jsonb->>'original_score')::numeric END)"
+                evidence_sql = (
+                    "SELECT id,actor_id,role_id,status,jsonb_build_object("
+                    "'score'," + score + ",'original_score'," + original + ","
+                    "'evidence_type',(data::jsonb->>'evidence_type'),"
+                    "'confirmation',(data::jsonb->>'confirmation'),"
+                    "'image_path',(data::jsonb->>'image_path'))::text "
+                    "AS data,jsonb_typeof(data::jsonb->'original_score') IS NOT NULL AS original_recorded "
+                    "FROM person_evidence e WHERE source_id=? AND shot_id=? AND " + self.VALID_ROLE
+                    + " ORDER BY start,id")
+            else:
+                evidence_sql = (
+                    "SELECT id,actor_id,role_id,status,json_object("
+                    "'score',json_extract(data,'$.score'),'original_score',json_extract(data,'$.original_score'),"
+                    "'evidence_type',json_extract(data,'$.evidence_type'),'confirmation',json_extract(data,'$.confirmation'),"
+                    "'image_path',json_extract(data,'$.image_path')) "
+                    "AS data,json_type(data,'$.original_score') IS NOT NULL AS original_recorded "
+                    "FROM person_evidence e WHERE source_id=? AND shot_id=? AND " + self.VALID_ROLE + " ORDER BY start,id")
             raw_rows = []
             with stage("evidence_sql"):
                 fetched = self._rows(db, evidence_sql, (shot["source_id"], shot["shot_id"]))
@@ -1282,17 +1339,25 @@ class Persons:
 
     def published(self, content_id, *, pinned=False, release_id=None, source_id=None):
         release = self.release_for(content_id, pinned=pinned, release_id=release_id)
-        row = (
-            self.store.one(
+        if source_id and release and release["person_id"] and self.store.pg:
+            # PG 聚合变体：jsonb 聚合 + 文本化（调用方 json.loads）。
+            row = self.store.one(
+                "SELECT jsonb_build_object("
+                "'entities','[]'::jsonb,"
+                "'evidence',COALESCE((SELECT jsonb_agg(value) FROM jsonb_array_elements(data::jsonb->'evidence') "
+                "WHERE (value::jsonb->>'source_id')=?),'[]'::jsonb),"
+                "'coverage',COALESCE((SELECT jsonb_agg(value) FROM jsonb_array_elements(data::jsonb->'coverage') "
+                "WHERE (value::jsonb->>'source_id')=?),'[]'::jsonb))::text AS data "
+                "FROM person_versions WHERE id=?", (source_id, source_id, release["person_id"]))
+        elif source_id and release and release["person_id"]:
+            row = self.store.one(
                 "SELECT json_object('entities',json('[]'),'evidence',"
                 "(SELECT json_group_array(json(value)) FROM json_each(data,'$.evidence') WHERE json_extract(value,'$.source_id')=?),"
                 "'coverage',(SELECT json_group_array(json(value)) FROM json_each(data,'$.coverage') WHERE json_extract(value,'$.source_id')=?)) AS data "
-                "FROM person_versions WHERE id=?", (source_id, source_id, release['person_id']))
-            if source_id and release and release['person_id'] else
-            self.store.one("SELECT data FROM person_versions WHERE id=?", (release["person_id"],))
-            if release and release["person_id"]
-            else None
-        )
+                "FROM person_versions WHERE id=?", (source_id, source_id, release["person_id"]))
+        else:
+            row = (self.store.one("SELECT data FROM person_versions WHERE id=?", (release["person_id"],))
+                   if release and release["person_id"] else None)
         value = json.loads(row["data"]) if row else {"entities": [], "evidence": [], "coverage": []}
         lookup = {e["id"]: e for e in value["entities"]}
         value["entities"] = [normalize_entity(e, lookup) for e in value["entities"]]

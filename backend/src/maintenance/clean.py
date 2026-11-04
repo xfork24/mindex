@@ -1115,6 +1115,8 @@ def clean_library(config: Config, *, apply: bool = False, now: datetime | None =
         with maintenance_gate(store, name="clean"), store.run("clean"):
             _apply(config, store, actions, say)
     report = _report(store, actions, applied=apply, scanned_at=scan.now)
+    if config.storage.backend == "s3":
+        report["s3_orphans"] = _clean_s3_orphans(config, store, apply=apply, say=say)
     if vacuum:
         report["vacuum"] = _vacuum_databases(store, applied=apply, say=say)
     total = report["total"]
@@ -1281,3 +1283,46 @@ def _notes(store: Store) -> list[dict]:
                       "拿不到人物空间身份，无法安全判定，删除请人工决定；删除代价是人物重扫全量 GPU 推理",
         })
     return notes
+
+
+def _clean_s3_orphans(config: Config, store: Store, *, apply: bool, say: Progress) -> dict:
+    """S3 孤立对象回收（plans §8）：标记 → 宽限 → 复验引用与下载 pin → 条件删除。
+
+    引用集用既有 ``referenced_files`` 口径（临时导出一致性快照到暂存 SQLite 后求闭包），
+    因此与本地清理规则使用同一套依赖语义；未过宽限、被引用或被 pin 的对象一律保留。
+    """
+    import tempfile
+    from datetime import datetime as _datetime
+
+    from mindex.maintenance.backup_files import referenced_files
+    from mindex.maintenance.pg_export import export_pg_to_sqlite
+    from mindex.shared.backends import open_context
+    from mindex.shared.media_delivery import DownloadPins
+
+    context = open_context(config)
+    media = context.media
+    objects = media.objects("")
+    with tempfile.TemporaryDirectory(prefix="mindex-s3-gc-") as work:
+        export_pg_to_sqlite(context.store, Path(work))
+        referenced = referenced_files(
+            store.root, Path(work) / "metadata.sqlite3", available_files=set(objects))
+    pins = DownloadPins(context.store, context.library_id)
+    cutoff = _datetime.now(UTC).timestamp() - config.clean.s3_orphan_grace_hours * 3600
+    orphans = [
+        {"key": key, "bytes": meta["size"]}
+        for key, meta in objects.items()
+        if key not in referenced and meta["last_modified"] < cutoff and not pins.pinned(key)
+    ]
+    say(f"S3 孤对象：{len(orphans)} 项 / {_fmt_bytes(sum(item['bytes'] for item in orphans))}"
+        f"（引用 {len(referenced)}，宽限 {config.clean.s3_orphan_grace_hours:g} 小时，"
+        f"{'执行删除' if apply else '仅预览'}）")
+    deleted = 0
+    if apply:
+        for item in orphans:
+            try:
+                media.delete_version(item["key"])
+                deleted += 1
+            except Exception as exc:  # noqa: BLE001 — 单个对象失败不阻塞整体回收
+                log.warning("删除 S3 孤对象失败 %s：%s", item["key"], exc)
+    return {"applied": apply, "orphans": orphans, "deleted": deleted,
+            "referenced": len(referenced)}

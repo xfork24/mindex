@@ -25,7 +25,7 @@ from typing import Literal
 from fastapi import HTTPException
 from filelock import Timeout
 
-from mindex.shared import locks
+from mindex.shared import lock_backend, locks
 from mindex.studio import studio
 from mindex.studio.studio_artifacts import safe_path
 
@@ -123,7 +123,7 @@ class StudioExecutor:
 
     def file_lock(self) -> locks.SharedFileLock:
         """非阻塞获取跨进程 studio 锁；已被占用时返回 409。"""
-        lock = locks.named(self.base.data_dir, "studio")
+        lock = lock_backend.named(self.base, "studio")
         try:
             return lock.acquire()
         except Timeout:

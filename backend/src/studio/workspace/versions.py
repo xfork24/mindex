@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json
 from uuid import uuid4
 
 from mindex.shared.config import fingerprint
@@ -24,9 +25,36 @@ def path(config, job_id):
     return root(config, job_id) / "workspace.json"
 
 
-def persist(config, job_id, workspace):
-    workspace["updated_at"] = studio.now()
-    studio.save(path(config, job_id), workspace)
+class RevisionConflict(studio.StudioError):
+    """工作区/方案已被其他操作修改（条件发布失败，映射为 409）。"""
+
+
+def current_revision(config, job_id):
+    """磁盘上工作区的当前修订；不存在或损坏返回 None。"""
+    file = path(config, job_id)
+    if not file.is_file():
+        return None
+    try:
+        return revision(json.loads(file.read_text(encoding="utf-8")))
+    except (OSError, ValueError):
+        return None
+
+
+def persist(config, job_id, workspace, *, expected_revision=None):
+    """条件写入工作区：``expected_revision`` 与磁盘当前修订不符时抛 RevisionConflict。
+
+    读-比对-写在进程内与跨进程资源锁内完成（``workspace:<job_id>``），因此并发
+    写者不会把旧快照覆盖到新状态；调用方已持 studio 锁时也不会自锁（不同资源）。
+    """
+    from mindex.shared import lock_backend
+
+    with lock_backend.resource(config, f"workspace:{job_id}", timeout=None):
+        if expected_revision is not None:
+            current = current_revision(config, job_id)
+            if current != expected_revision:
+                raise RevisionConflict("工作区已被其他操作修改，请刷新后重试")
+        workspace["updated_at"] = studio.now()
+        studio.save(path(config, job_id), workspace)
 
 
 def version(workspace, version_id):
@@ -50,6 +78,12 @@ def revision(p):
 def require_revision(p, expected):
     if expected != revision(p):
         raise studio.StudioError("方案已变化，请刷新后重新预检或提交")
+
+
+def require_workspace_revision(w, expected):
+    """条件发布（If-Match）：``expected`` 为 None 时不校验；不符抛 RevisionConflict（409）。"""
+    if expected is not None and expected != revision(w):
+        raise RevisionConflict("工作区已被其他操作修改，请刷新后重试")
 
 
 def add_version(

@@ -79,6 +79,7 @@ def open_context(config: Config) -> BackendContext:
         vectors: VectorStores = ChromaServerVectorStores(config.vector.chroma_server)
     else:
         vectors = LocalVectorStores(store.root)
+    store.locks_backend = config.locks.backend  # 供只拿 Store 的调用点选择锁后端
     if config.queue.backend == "postgres":
         if config.database.backend != "postgres":
             raise RuntimeError(
@@ -118,6 +119,7 @@ def open_context(config: Config) -> BackendContext:
     else:
         staging = _staging(config, store.root)
         media = LocalMediaStore(store.root)
+    store.media = media  # Store.resolve_media/media_available 按存储后端解析
     return BackendContext(
         form=form,
         library_id=library_id,

@@ -79,6 +79,14 @@ log = logging.getLogger(__name__)
 
 
 
+def _if_match(request: Request | None) -> str | None:
+    """条件发布：客户端把 ``GET /jobs/{id}`` 返回的 workspace_revision 经 If-Match 带回。"""
+    if request is None:
+        return None
+    value = request.headers.get("if-match")
+    return value.strip().strip('"') if value else None
+
+
 def studio_router(
     config: Config | RuntimeConfig,
     store: Store,
@@ -394,12 +402,13 @@ def studio_router(
         return state
 
     @router.post("/jobs/{job_id}/plans", status_code=201)
-    def create_plan(job_id: str, body: PlanBody):
+    def create_plan(job_id: str, body: PlanBody, request: Request):
         import copy
         from uuid import uuid4
 
         with mutation_lock():
             w = workspace.load(current(), job_id)
+            workspace.require_workspace_revision(w, _if_match(request))
             if body.copy_from and body.from_final:
                 raise studio.StudioError("复制方案与恢复成片不能同时指定")
             if body.from_final:
@@ -430,19 +439,21 @@ def studio_router(
         return workspace.detail(current(), job_id, w)
 
     @router.post("/jobs/{job_id}/plans/{plan_id}/activate")
-    def activate_plan(job_id: str, plan_id: str):
+    def activate_plan(job_id: str, plan_id: str, request: Request):
         with mutation_lock():
             w = workspace.load(current(), job_id)
+            workspace.require_workspace_revision(w, _if_match(request))
             workspace.plan(w, plan_id)
             w["active_plan"] = plan_id
             workspace.persist(base, job_id, w)
         return workspace.detail(current(), job_id, w)
 
     @router.delete("/jobs/{job_id}/plans/{plan_id}")
-    def delete_plan(job_id: str, plan_id: str):
+    def delete_plan(job_id: str, plan_id: str, request: Request):
         """只删除方案记录：版本、构建记录与文件全部保留，未被引用的产物由 mindex clean 回收。"""
         with mutation_lock():
             w = workspace.load(current(), job_id)
+            workspace.require_workspace_revision(w, _if_match(request))
             workspace.plan(w, plan_id)  # 不存在 → "找不到构建方案"
             if any(b["status"] == "running" for b in w["builds"]):
                 raise HTTPException(409, "有构建正在执行，请等待完成或取消后再删除方案")

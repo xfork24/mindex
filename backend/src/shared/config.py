@@ -483,6 +483,8 @@ class CleanConfig(StrictModel):
     # studio 旧 attempt 目录（未被检查点或当前 attempt 引用）与导出 zip
     studio_attempt_max_age_days: int = Field(default=30, ge=1)
     studio_export_max_age_days: int = Field(default=60, ge=1)
+    # S3 孤立对象（未被元数据引用）的回收宽限小时数：先标记、过宽限再复验引用与 pin
+    s3_orphan_grace_hours: float = Field(default=24, ge=0)
     # reports 导出产物 / 字幕解析缓存（不含 uploads 用户原件）
     reports_max_age_days: int = Field(default=60, ge=1)
     subtitles_max_age_days: int = Field(default=30, ge=1)
@@ -684,6 +686,18 @@ class QueueConfig(StrictModel):
     backend: Literal["inline", "postgres"] = "inline"
 
 
+class GpuConfig(StrictModel):
+    """GPU 准入容量（plans §7.2 阶段 3/5）：按物理资源/共驻模型组声明并发槽位。
+
+    ``capacity=0``（缺省）不限制，保持现有行为；``queues`` 为受容量约束的任务类别。
+    槽位经租约持有（locks=postgres 时跨节点、TTL 到期才回收），失联 worker 不会
+    立即释放槽位造成 GPU 超卖。模型服务自身仍需限制真实执行并发。
+    """
+
+    capacity: int = Field(default=0, ge=0)
+    queues: list[str] = Field(default_factory=lambda: ["source", "dialogue", "person"])
+
+
 class LocksConfig(StrictModel):
     """具名锁后端（阶段 3）：file 为 data_dir 文件锁（现有行为，跨进程）；postgres
     为 PG 租约锁（epoch/fencing token、TTL+心跳，plans §7.1）。需要
@@ -745,6 +759,7 @@ class Config(StrictModel):
     vector: VectorConfig = Field(default_factory=VectorConfig, exclude=True)
     queue: QueueConfig = Field(default_factory=QueueConfig, exclude=True)
     locks: LocksConfig = Field(default_factory=LocksConfig, exclude=True)
+    gpu: GpuConfig = Field(default_factory=GpuConfig, exclude=True)
     storage: StorageConfig = Field(default_factory=StorageConfig, exclude=True)
     server: ServerConfig = Field(default_factory=ServerConfig, exclude=True)
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)

@@ -181,7 +181,7 @@ def admin_router(store: Store, runtime=None, backends=None) -> APIRouter:
             raise HTTPException(409, "GPU 独占锁或该素材正在处理，请完成后再删除") from exc
         try:
             try:
-                with index_write_lock(store.root):
+                with index_write_lock(store.root, config=config):
                     return purge_source(store, source_id, media=media, pins=pins)
             except KeyError as exc:
                 raise HTTPException(404, "素材不存在") from exc

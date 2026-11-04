@@ -32,12 +32,19 @@
 
 - 检索：文字检索的 eligible/BM25 已下推 SQL（派生词法索引，`mindex indexes lexical` 回填）；
   persons 证据路径的数值 json 查询尚未 PG 化（会在该形态明确报错）。
-- 媒体：`storage.backend=s3` 为单节点验证形态；媒体 HTTP 出口的 presign/代理回退、
-  uploads/检查点/Studio 工作文件远端化与 GC 随集群装配交付——在此之前**不发布为多机支持**。
-- 备份：业务 bundle 的 PG 一致性导出/导入随集群装配交付；该形态下备份/切片迁移/镜头修复
-  显式拒绝（`UnsupportedOperation`）。
+- 媒体：`storage.backend=s3` 已覆盖媒体出口（预签名 + Range 代理 + 下载 pin）、上传
+  直写不可变对象、检查点写穿透与跨节点回读、S3 孤对象回收（引用闭包 + 宽限 + pin）；
+  Studio 工作文件的 expected_revision 条件发布已交付（If-Match → 409）。仍为单节点
+  验证形态：媒体出口的 CORS/独立 endpoint、Studio attempt 产物远端化与完整 GC pin
+  生命周期未完成，暂不发布为多机支持。
+- 备份：业务 bundle 的 PG 一致性导出/导入已交付（`mindex migration export|load|verify`，
+  含 `--with-media`/`--with-vectors`）；切片迁移/镜头修复等 SQLite 专属维护仍显式拒绝。
 - 队列：账本先落、入队后补（崩溃窗口由补偿扫描兜底）；外部付费调用的未知结果一律
   人工核对，不自动重试。
+- 智能助手：cluster 业务 API 的变更上报写入共享 outbox（POST /api/agent/changes），
+  由单实例网关幂等转入 SSE；会话/SSE 仍需网关，网关故障时助手明确不可用。
+- persons：审核/发布路径的 JSON 查询已完成 SQLite/PostgreSQL 双方言适配（含双后端
+  一致性测试）；`json_each/json_group_array` 等不再在 PG 上失败。
 
 ## 集群 runbook（装配中；正式版随双机验收记录补全）
 

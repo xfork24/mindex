@@ -44,6 +44,21 @@ def app_version() -> str:
         return "0+unknown"
 
 
+def _with_bridge(previous, bridge):
+    """包装 lifespan：应用关闭时停止 outbox 轮询线程。"""
+    import contextlib
+
+    @contextlib.asynccontextmanager
+    async def lifespan(application):
+        try:
+            async with previous(application) as state:
+                yield state
+        finally:
+            bridge.stop()
+
+    return lifespan
+
+
 def create_app(
     config: Config | None = None,
     embedder: MultimodalEmbedder | None = None,
@@ -146,7 +161,23 @@ def create_app(
                 "detail": f"智能助手由单实例 agent-gateway 提供：{gateway}",
                 "gateway_url": config.agent.gateway_url})
 
+        async def _report_change(request: Request):
+            """变更上报写入共享 outbox，由网关幂等转入 SSE（plans §9）。"""
+            from mindex.agent.changes import KINDS
+            from mindex.shared.db.agent_outbox import publish
+
+            try:
+                body = await request.json()
+            except ValueError:
+                return _JSON(status_code=422, content={"detail": "请求体必须是 JSON"})
+            kind = body.get("kind") if isinstance(body, dict) else None
+            if kind not in KINDS:
+                return _JSON(status_code=422, content={"detail": f"未知改动类型 {kind}"})
+            outbox_id = publish(store, kind, body.get("data") or {}, source="mcp")
+            return _JSON(status_code=201, content={"outbox_id": outbox_id, "forwarded": True})
+
         stub = _APIRouter(prefix="/api/agent")
+        stub.add_api_route("/changes", _report_change, methods=["POST"], include_in_schema=False)
         stub.add_api_route("/{path:path}", _agent_redirect,
                            methods=["GET", "POST", "PUT", "DELETE"], include_in_schema=False)
         app.include_router(stub)
@@ -154,6 +185,13 @@ def create_app(
         app.state.agent_runtime = build_runtime(app, runtime, store, agent_llm=agent_llm)
         app.include_router(agent_router(app.state.agent_runtime, runtime, injected=agent_llm is not None))
     app.state.runtime_config, app.state.store, app.state.backends = runtime, store, backends
+    if config.server.role == "agent-gateway" and config.database.backend == "postgres":
+        # 网关把共享 outbox 幂等转入本地 ChangeFeed（plans §9）。
+        from mindex.agent.outbox_bridge import OutboxBridge
+
+        bridge = OutboxBridge(store, app.state.agent_runtime.feed).start()
+        app.state.outbox_bridge = bridge
+        app.router.lifespan_context = _with_bridge(app.router.lifespan_context, bridge)
     # /mcp（streamable-http）与独立 `mindex mcp` 一样都依赖本进程的会话运行时：
     # cluster 业务 API 上同样只由 agent-gateway 提供（plans §9）。
     if config.agent.mcp.http_enabled and not (config.server.role == "api" and backends.form == "cluster"):
@@ -220,6 +258,13 @@ def create_app(
     async def value_error(_, exc):
         return JSONResponse(status_code=422, content={"detail": str(exc)})
 
+    from mindex.studio.workspace.versions import RevisionConflict as _RevisionConflict
+
+    @app.exception_handler(_RevisionConflict)
+    async def revision_conflict(_, exc):
+        """条件发布失败（If-Match 不符）：409，客户端应刷新后重试。"""
+        return JSONResponse(status_code=409, content={"detail": str(exc)})
+
     app.include_router(search_router(config, runtime, store, embedder, index_id=index_id,
                                   backends=backends))
 
@@ -239,15 +284,22 @@ def create_app(
                                    "storage": backends.media.backend,
                                    "locks": backends.locks.backend,
                                    "queue": backends.queue.backend}
-            if config.queue.backend == "postgres":  # 队列深度与最老 pending（plans §12）
-                from mindex.shared.db.queue_pg import PgTaskQueue
+            from mindex.shared.metrics import metrics_snapshot
 
-                try:
-                    with store.backend.connect() as db:
-                        payload["queue_stats"] = PgTaskQueue(backends.library_id).stats(db)
-                except Exception:  # noqa: BLE001 — 指标缺失不拖垮就绪检查
-                    payload["queue_stats"] = {"unavailable": True}
+            snapshot = metrics_snapshot(backends, config)
+            payload["queue_stats"] = snapshot.get("queue", {})
+            payload["metrics"] = snapshot
         return payload
+
+    @app.get("/api/metrics")
+    def metrics():
+        """运行指标（plans §12）：连接池等待/租约到期/队列深度/staging 水位。"""
+        backends = getattr(app.state, "backends", None)
+        if backends is None:
+            return {"form": "local"}
+        from mindex.shared.metrics import metrics_snapshot
+
+        return metrics_snapshot(backends, config)
 
     # 设置 MINDEX_WEB_TOKEN（或传入 web_token）后才启用访问令牌；未设置时行为不变。
     install_web_auth(app, web_token)

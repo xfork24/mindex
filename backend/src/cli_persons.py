@@ -201,7 +201,7 @@ def persons_publish(
     from mindex.shared.storage import Store
 
     store = Store(ctx.obj.data_dir)
-    with ProcessingLock(ctx.obj), index_write_lock(store.root):
+    with ProcessingLock(ctx.obj), index_write_lock(store.root, config=ctx.obj):
         print_json(Persons(store).publish(content))
 
 

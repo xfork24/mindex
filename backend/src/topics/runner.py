@@ -20,7 +20,7 @@ from filelock import Timeout
 from pydantic import Field
 
 from mindex.models.adapters import ModelError
-from mindex.shared import locks
+from mindex.shared import lock_backend
 from mindex.shared.background_tasks import BackgroundTaskRunner, public_task
 from mindex.shared.config import StrictModel
 from mindex.topics import cards as topic_cards
@@ -146,7 +146,7 @@ class TopicRuns(BackgroundTaskRunner):
         super().__init__(runtime, store, embedder)
 
     def lock(self, *args, **kwargs):
-        return locks.named(self.store.root, "topics")
+        return lock_backend.named(self.store, "topics")
 
     def row_lock(self, row):
         return self.lock()

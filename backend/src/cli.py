@@ -809,7 +809,7 @@ def lexical(
     from mindex.shared.storage import Store
 
     store = Store(ctx.obj.data_dir)
-    with index_write_lock(store.root):
+    with index_write_lock(store.root, config=ctx.obj):
         if index_id:
             versions = store.rows("SELECT id FROM index_versions WHERE id=? AND status='ready'", (index_id,))
             if not versions:
