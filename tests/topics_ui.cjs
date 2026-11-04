@@ -257,6 +257,9 @@ scenario("cards", async (page) => {
   assert.match(await page.textContent(".coverage-row.is-gap"), /紫色天空/);
   const clip = page.locator(".coverage-row.is-hit .coverage-clip").first();
   assert.match(await clip.getAttribute("href"), /^\/admin\?source=.+&segment=.+/);
+  // 素材覆盖是折叠的分区，缩略图用 loading=lazy：先展开（等价用户查看覆盖详情），
+  // 否则折叠状态下浏览器不会请求图片，naturalWidth 永远为 0。
+  await page.locator("#card-coverage > summary").click();
   await page.waitForFunction(() => [...document.querySelectorAll(".coverage-clip img")].every((img) => img.complete && img.naturalWidth > 0));
   assert.match(await page.inputValue("#card-outline"), /^开场：/);
   assert.equal(await page.inputValue("#card-template"), "hot");
