@@ -570,11 +570,14 @@ app.add_typer(migration, name="migration")
 def migration_export(
     ctx: typer.Context,
     target: Annotated[Path, typer.Option(help="导出目标目录（生成 metadata.sqlite3 与 manifest.json）。")],
+    with_media: Annotated[bool, typer.Option("--with-media", help="同时复制引用到的全部媒体（推荐）。")] = False,
 ):
     """PG 元数据库一致性导出到暂存 SQLite（REPEATABLE READ 只读快照 + 逐表清单）。
 
-    媒体/向量对象按同一清单另行复制（阶段 5 收尾交付封装）；导出期间业务可继续运行，
-    正式 cutover 仍须停写后做最终差量。
+    ``--with-media`` 按既有可达性口径把正文/缩略图/分镜/人物帧/Studio 输入复制进
+    ``data/``（S3 逐 key 物化，本地直接复制）并生成 media_manifest.json。向量集合
+    按原 ID/embedding 导出仍待交付（恢复时可重嵌入，质量见评测）。导出期间业务可
+    继续运行，正式 cutover 仍需停写后做最终差量。
 
     示例：
 
@@ -591,8 +594,15 @@ def migration_export(
     manifest = export_pg_to_sqlite(store, target)
     (target / "manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-    print_json({"target": str(target), "total_rows": manifest["total_rows"],
-                "tables": len(manifest["tables"])})
+    payload = {"target": str(target), "total_rows": manifest["total_rows"],
+               "tables": len(manifest["tables"])}
+    if with_media:
+        from mindex.maintenance.pg_export import export_media_bundle
+        from mindex.shared.backends import open_context
+        from mindex.shared.storage import Store
+
+        payload["media"] = export_media_bundle(Store(target), open_context(ctx.obj).media, target)
+    print_json(payload)
 
 
 @migration.command("load")

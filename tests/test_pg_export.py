@@ -90,3 +90,31 @@ def test_repeatable_read_snapshot_excludes_later_writes(pg_store):
     finally:
         pool.putconn(connection)
     assert pg_store.one("SELECT value FROM settings WHERE key='late-write'") is not None  # 写确实已落库
+
+
+def test_media_bundle_copies_referenced_files(pg_store, tmp_path):
+    """--with-media：按可达性复制正文/缩略图，生成 media_manifest 且摘要可校验。"""
+    import hashlib
+
+    from mindex.maintenance.pg_export import export_media_bundle, export_pg_to_sqlite
+    from mindex.shared.backends import LocalMediaStore
+
+    root = pg_store.root
+    for key in ("sources/s1/a.mp4", "thumbnails/s1.jpg", "clips/s1/shot/x.mp4"):
+        path = root / key
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(key.encode())
+    pg_store.execute("INSERT INTO sources(id,name,path,media,layout_key) "
+                     "VALUES('s1','素材','sources/s1/a.mp4','{}','k')")
+    pg_store.execute("INSERT INTO segments(id,source_id,kind,start,end,path,thumbnail,generation,reason) "
+                     "VALUES('seg1','s1','shot',0,5,'clips/s1/shot/x.mp4','thumbnails/s1.jpg','g','r')")
+    target = tmp_path / "bundle-media"
+    export_pg_to_sqlite(pg_store, target)
+    stats = export_media_bundle(pg_store, LocalMediaStore(root), target)
+    assert stats["objects"] == 3
+    import json as _json
+
+    manifest = _json.loads((target / "media_manifest.json").read_text())
+    assert set(manifest) == {"sources/s1/a.mp4", "thumbnails/s1.jpg", "clips/s1/shot/x.mp4"}
+    assert (target / "data" / "sources/s1/a.mp4").read_bytes() == b"sources/s1/a.mp4"
+    assert manifest["sources/s1/a.mp4"]["sha256"] == hashlib.sha256(b"sources/s1/a.mp4").hexdigest()
