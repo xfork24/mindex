@@ -4,7 +4,7 @@
 const childProcess = require("node:child_process");
 const path = require("node:path");
 
-const { app, BrowserWindow, Menu, Notification, Tray, dialog, nativeImage, session, shell } = require("electron");
+const { app, BrowserWindow, Menu, Notification, Tray, dialog, nativeImage, safeStorage, session, shell } = require("electron");
 
 const { COOKIE, newToken, sessionValue } = require("./lib/auth");
 const { dataDirProblem, ensureConfig, ensureFonts } = require("./lib/firstrun");
@@ -53,7 +53,7 @@ const backend = {
     // 远程 API 客户端模式（plans §9 阶段 6）：不启动 sidecar，直接连接服务端。
     // 连接信息可在菜单「Mindex → 连接远程服务…」中维护（remote.json，0600）。
     // 远程数据处理与存储留在服务端；终端只持有用户凭据。
-    const remote = remoteConfig({ userData: paths.userData });
+    const remote = remoteConfig({ userData: paths.userData, storage: safeStorage });
     if (remote) {
       this.child = null;
       this.token = remote.token;
@@ -365,25 +365,31 @@ async function openRemoteSettings() {
     modal: Boolean(mainWindow), show: false, resizable: false, minimizable: false, maximizable: false,
     webPreferences: { preload: path.join(__dirname, "remote-preload.js"), contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
-  const current = remoteConfig({ userData: paths.userData });
+  let current, connectionError, connectionErrorCode;
+  try { current = remoteConfig({ userData: paths.userData, storage: safeStorage }); }
+  catch (error) { connectionError = error.message; connectionErrorCode = error.code; }
   const { ipcMain } = require("electron");
   const handlers = {
-    "remote:get": () => current ? { url: current.url, source: current.source } : null,
+    "remote:get": () => connectionError ? { error: connectionError, code: connectionErrorCode } : current ? { url: current.url, source: current.source } : null,
     "remote:save": (_event, value) => {
       try {
         const { saveRemote } = require("./lib/remote");
-        saveRemote(value, { userData: paths.userData });
+        saveRemote(value, { userData: paths.userData, storage: safeStorage });
         setImmediate(() => restartAfterRemoteChange());
         return { ok: true };
       } catch (error) {
-        return { ok: false, error: error.message === "invalid-url" ? "URL 无效" : error.message === "invalid-token" ? "令牌不能为空" : error.message };
+        return { ok: false, error: error.message, code: error.code };
       }
     },
     "remote:clear": () => {
-      const { clearRemote } = require("./lib/remote");
-      clearRemote({ userData: paths.userData });
-      setImmediate(() => restartAfterRemoteChange());
-      return { ok: true };
+      try {
+        const { clearRemote } = require("./lib/remote");
+        clearRemote({ userData: paths.userData });
+        setImmediate(() => restartAfterRemoteChange());
+        return { ok: true };
+      } catch (error) {
+        return { ok: false, error: error.message, code: error.code };
+      }
     },
     "remote:close": () => remoteWindow?.close(),
   };

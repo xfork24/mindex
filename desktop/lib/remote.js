@@ -1,72 +1,99 @@
 "use strict";
-// 远程 API 客户端模式（plans §9 阶段 6）：桌面直接连接远程服务，不启动 sidecar。
-// 远程数据处理/存储留在服务端，终端只持有用户凭据；不向终端分发 PG/S3 管理凭据。
-//
-// 配置来源（按优先级）：
-//   1. 环境变量 MINDEX_DESKTOP_REMOTE_URL + MINDEX_DESKTOP_REMOTE_TOKEN（自动化/受管终端）
-//   2. <userData>/remote.json：{ "url": "https://mindex.internal", "token": "..." }
-// 缺失或非法时返回 null（回落到本地 sidecar 模式）。
+// 远程模式凭据经系统安全存储加密；无配置才进入本地模式，损坏配置必须报错。
 const fs = require("node:fs");
 const path = require("node:path");
+const { randomUUID } = require("node:crypto");
 
 const ENV_URL = "MINDEX_DESKTOP_REMOTE_URL";
 const ENV_TOKEN = "MINDEX_DESKTOP_REMOTE_TOKEN";
+const ERRORS = {
+  "invalid-url": "远程服务地址无效：请填写不含路径、凭据或查询参数的 http(s) 地址",
+  "invalid-token": "远程访问令牌不能为空",
+  "invalid-config": "远程连接配置损坏；请在连接设置中重新保存或清除",
+  "storage-unavailable": "系统安全凭据存储不可用；请解锁系统密钥环，或通过环境变量提供远程凭据",
+  "decrypt-failed": "无法解密远程凭据；请在连接设置中重新保存",
+};
+
+function problem(code) {
+  const error = new Error(ERRORS[code]);
+  error.code = code;
+  return error;
+}
 
 function normalizeUrl(raw) {
   const value = String(raw || "").trim().replace(/\/+$/, "");
   if (!value) return null;
   let parsed;
-  try {
-    parsed = new URL(value);
-  } catch {
-    return null;
-  }
-  if (!["http:", "https:"].includes(parsed.protocol)) return null;
-  return `${parsed.protocol}//${parsed.host}`;
+  try { parsed = new URL(value); } catch { return null; }
+  if (!["http:", "https:"].includes(parsed.protocol) || parsed.username || parsed.password ||
+      parsed.search || parsed.hash || !["", "/"].includes(parsed.pathname)) return null;
+  return parsed.origin;
 }
 
-// 远程凭据：只接受非空字符串；不做任何持久化写回（用户自行管理来源）。
-function remoteConfig({ env = process.env, userData, readFile = (file) => fs.readFileSync(file, "utf8") } = {}) {
-  const envUrl = normalizeUrl(env[ENV_URL]);
-  const envToken = String(env[ENV_TOKEN] || "").trim();
-  if (envUrl && envToken) return { url: envUrl, token: envToken, source: "env" };
+function requireStorage(storage) {
+  if (!storage?.isEncryptionAvailable() ||
+      (process.platform === "linux" && ["basic_text", "unknown"].includes(storage.getSelectedStorageBackend()))) {
+    throw problem("storage-unavailable");
+  }
+  return storage;
+}
+
+function remoteConfig({ env = process.env, userData, storage,
+  readFile = (file) => fs.readFileSync(file, "utf8") } = {}) {
+  if (env[ENV_URL] !== undefined || env[ENV_TOKEN] !== undefined) {
+    const url = normalizeUrl(env[ENV_URL]);
+    const token = String(env[ENV_TOKEN] || "").trim();
+    if (!url) throw problem("invalid-url");
+    if (!token) throw problem("invalid-token");
+    return { url, token, source: "env" };
+  }
   if (!userData) return null;
   const file = path.join(userData, "remote.json");
   let body;
-  try {
-    body = JSON.parse(readFile(file));
-  } catch {
-    return null;
+  try { body = JSON.parse(readFile(file)); } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw problem("invalid-config");
   }
   const url = normalizeUrl(body?.url);
-  const token = String(body?.token || "").trim();
-  if (!url || !token) return null;
+  if (!url) throw problem("invalid-url");
+  // 旧明文只在加密存储可用且原子替换成功后迁移；失败保留原件并明确报错。
+  if (typeof body.token === "string") return saveRemote({ url, token: body.token }, { userData, storage });
+  if (body.credential?.version !== 1 || typeof body.credential?.ciphertext !== "string") {
+    throw problem("invalid-config");
+  }
+  const secure = requireStorage(storage);
+  let token;
+  try { token = secure.decryptString(Buffer.from(body.credential.ciphertext, "base64")); }
+  catch { throw problem("decrypt-failed"); }
+  if (typeof token !== "string" || !token.trim()) throw problem("decrypt-failed");
   return { url, token, source: file };
 }
 
-// 保存用户输入的远程连接（URL + 用户凭据）：写入 remote.json（0600、原子替换）。
-// 凭据只存在用户数据目录，不进入任何日志或打包产物。
-function saveRemote({ url, token }, { userData, writeFile = (file, body, options) => fs.writeFileSync(file, body, options),
+function saveRemote({ url, token }, { userData, storage,
+  writeFile = (file, body, options) => fs.writeFileSync(file, body, options),
   rename = (from, to) => fs.renameSync(from, to) } = {}) {
   const normalized = normalizeUrl(url);
   const value = String(token || "").trim();
-  if (!normalized) throw new Error("invalid-url");
-  if (!value) throw new Error("invalid-token");
+  if (!normalized) throw problem("invalid-url");
+  if (!value) throw problem("invalid-token");
+  const secure = requireStorage(storage);
+  let encrypted;
+  try { encrypted = secure.encryptString(value).toString("base64"); }
+  catch { throw problem("storage-unavailable"); }
   const file = path.join(userData, "remote.json");
-  const temporary = `${file}.${process.pid}.partial`;
-  writeFile(temporary, JSON.stringify({ url: normalized, token: value }, null, 2), { mode: 0o600 });
-  rename(temporary, file);
+  const temporary = `${file}.${randomUUID()}.partial`;
   try {
-    fs.chmodSync(file, 0o600);
-  } catch {
-    // Windows 无 POSIX 权限位；文件仍只落在用户数据目录。
+    writeFile(temporary, JSON.stringify({ url: normalized, credential: { version: 1, ciphertext: encrypted } }, null, 2),
+      { mode: 0o600, flag: "wx" });
+    rename(temporary, file);
+  } finally {
+    fs.rmSync(temporary, { force: true });
   }
   return { url: normalized, token: value, source: file };
 }
 
 function clearRemote({ userData, unlink = (file) => fs.rmSync(file, { force: true }) } = {}) {
-  const file = path.join(userData, "remote.json");
-  unlink(file);
+  unlink(path.join(userData, "remote.json"));
   return true;
 }
 
