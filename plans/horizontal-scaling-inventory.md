@@ -240,3 +240,19 @@
   （Range/HEAD/ETag）与下载保留记录；uploads/检查点/Studio 工作文件的远端化与
   expected_revision 发布；GC/purge/clean/备份的 S3 适配；MinIO+ffmpeg 的
   source→index→studio 全链路闸门。S3 在此之前仅单节点验证（plans §11）。
+
+
+## 13. 阶段 5 第一批变更（形态装配与诊断）
+
+- server 配置节（role: api|agent-gateway，plans §9）；共享后端齐备
+  （postgres+chroma_server+s3+postgres 队列+postgres 锁）时 open_context 形态
+  推导为 cluster（缺项保持过渡形态并禁多副本）。
+- `mindex doctor`（backend/src/doctor.py）：组合校验 + database/vector/storage/
+  queue/locks 逐项只读检查，中文修复提示，退出码语义（0/1）；空异常消息取类型名。
+- /api/health 携带部署形态与后端概览（plans §12 就绪检查）。
+- docs/scaling.md：形态/组合表、pg-single 部署步骤、诚实边界清单、集群 runbook 骨架。
+- 测试 test_doctor 5/5（缺省通过、非法组合、chroma 连不通 fail-closed、缺 DSN、
+  pg-single 实测）。
+- **阶段 5 剩余**：agent-gateway 代理路由与变更 outbox、maintenance gate、PG 一致性
+  bundle 导出/导入与迁移 CLI、cutover/reverse runbook 实测记录、监控指标面板化、
+  双机故障注入与容量闸门；4B 收尾（媒体出口/检查点/Studio revision/GC）。

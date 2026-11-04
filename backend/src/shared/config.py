@@ -714,6 +714,14 @@ class StorageConfig(StrictModel):
     staging_quota_gb: float = Field(default=0, ge=0)
 
 
+class ServerConfig(StrictModel):
+    """进程角色（plans §4/§9 阶段 5）：api 为业务 API；agent-gateway 为单实例
+    智能助手网关（agent.sqlite3/附件留在网关持久卷，其余 API 不建独立运行时）。
+    worker 是独立 CLI（``mindex worker``），不经此配置。"""
+
+    role: Literal["api", "agent-gateway"] = "api"
+
+
 class DatabaseConfig(StrictModel):
     """元数据库后端选择；其余后端（vector/storage/queue/locks）随阶段 2–4 加入。
 
@@ -735,6 +743,7 @@ class Config(StrictModel):
     queue: QueueConfig = Field(default_factory=QueueConfig, exclude=True)
     locks: LocksConfig = Field(default_factory=LocksConfig, exclude=True)
     storage: StorageConfig = Field(default_factory=StorageConfig, exclude=True)
+    server: ServerConfig = Field(default_factory=ServerConfig, exclude=True)
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
     analyzer: AnalyzerConfig = Field(default_factory=AnalyzerConfig)
     person: PersonConfig = Field(default_factory=PersonConfig)

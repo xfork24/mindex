@@ -210,8 +210,16 @@ def create_app(
         from mindex.studio.executor import busy_executors
 
         tasks = (["studio"] if busy_executors(config.data_dir) else []) + busy_categories(config.data_dir)
-        return {"version": app_version(), "pid": os.getpid(), "data_dir": str(config.data_dir),
-                "busy": bool(tasks), "tasks": tasks}
+        payload = {"version": app_version(), "pid": os.getpid(), "data_dir": str(config.data_dir),
+                   "busy": bool(tasks), "tasks": tasks}
+        backends = getattr(app.state, "backends", None)
+        if backends is not None:  # 部署形态概览（plans §12 监控；doctor 提供完整诊断）
+            payload["backends"] = {"form": backends.form, "database": backends.db.backend.backend,
+                                   "vectors": backends.vectors.backend,
+                                   "storage": backends.media.backend,
+                                   "locks": backends.locks.backend,
+                                   "queue": backends.queue.backend}
+        return payload
 
     # 设置 MINDEX_WEB_TOKEN（或传入 web_token）后才启用访问令牌；未设置时行为不变。
     install_web_auth(app, web_token)
