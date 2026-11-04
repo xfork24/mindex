@@ -571,6 +571,7 @@ def migration_export(
     ctx: typer.Context,
     target: Annotated[Path, typer.Option(help="导出目标目录（生成 metadata.sqlite3 与 manifest.json）。")],
     with_media: Annotated[bool, typer.Option("--with-media", help="同时复制引用到的全部媒体（推荐）。")] = False,
+    with_vectors: Annotated[bool, typer.Option("--with-vectors", help="同时导出全部 ready 索引的向量集合（原 ID/embedding）。")] = False,
 ):
     """PG 元数据库一致性导出到暂存 SQLite（REPEATABLE READ 只读快照 + 逐表清单）。
 
@@ -602,6 +603,12 @@ def migration_export(
         from mindex.shared.storage import Store
 
         payload["media"] = export_media_bundle(Store(target), open_context(ctx.obj).media, target)
+    if with_vectors:
+        from mindex.maintenance.vector_bundle import export_vectors
+
+        exported = export_vectors(store, target, config=ctx.obj)
+        payload["vectors"] = {"collections": len(exported),
+                              "vectors": sum(item.get("vectors", 0) for item in exported.values())}
     print_json(payload)
 
 
@@ -609,6 +616,7 @@ def migration_export(
 def migration_load(
     ctx: typer.Context,
     source: Annotated[Path, typer.Option(help="装载来源目录（migration export 的输出）。")],
+    with_vectors: Annotated[bool, typer.Option("--with-vectors", help="同时装载向量集合（原 ID/embedding，不重新嵌入）。")] = False,
 ):
     """把暂存 SQLite 装载回 PostgreSQL（幂等：非空目标拒绝，须先清库）。
 
@@ -635,8 +643,13 @@ def migration_load(
         migrate_pg(conn)
     pg = PgStore(config)
     counts = copy_sqlite_to_pg(Store(source), pg)
-    print_json({"loaded_tables": sum(1 for n in counts.values() if n),
-                "total_rows": sum(counts.values()), "counts": counts})
+    payload = {"loaded_tables": sum(1 for n in counts.values() if n),
+               "total_rows": sum(counts.values()), "counts": counts}
+    if with_vectors:
+        from mindex.maintenance.vector_bundle import load_vectors
+
+        payload["vectors"] = load_vectors(pg, source, config=config)
+    print_json(payload)
 
 
 @migration.command("verify")
