@@ -1171,6 +1171,12 @@ class Persons:
         ]
 
     def publish(self, content_id=None, *, source_id=None, progress=None):
+        from mindex.shared.db.fencing import publication_scope
+
+        with publication_scope(self.store, only_attempt=True):
+            return self._publish(content_id, source_id=source_id, progress=progress)
+
+    def _publish(self, content_id=None, *, source_id=None, progress=None):
         requested_content_id = content_id
         active = self.store.active_index()
         content_id = content_id or (active["id"] if active else None)
@@ -1223,8 +1229,10 @@ class Persons:
                 "SELECT 1 FROM index_members WHERE index_id=? AND complete=0", (content_id,)
             ).fetchone():
                 raise ValueError("内容索引仍有未完成片段")
-            db.execute("INSERT OR REPLACE INTO settings VALUES('active',?)", (content_id,))
-            db.execute("INSERT OR REPLACE INTO settings VALUES('active.release',?)", (release,))
+            deferred = self.store._defer_publication("release", release)
+            if not deferred:
+                db.execute("INSERT OR REPLACE INTO settings VALUES('active',?)", (content_id,))
+                db.execute("INSERT OR REPLACE INTO settings VALUES('active.release',?)", (release,))
         if progress:
             progress({"stage": "published", "completed": count, "total": count, "unit": "shots"})
         return {"release_id": release, "content_id": content_id, "person_version": version}

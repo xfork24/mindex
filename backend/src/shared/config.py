@@ -601,6 +601,19 @@ class TopicsSchedulerConfig(StrictModel):
     # mindex serve 内置的每日定时挖掘；各档案的时刻与条数在档案里设置。
     enabled: bool = True
     interval_seconds: int = Field(default=60, ge=5, le=3600)
+    timezone: str | None = None
+
+    @field_validator("timezone")
+    @classmethod
+    def valid_timezone(cls, value):
+        if value is not None:
+            from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+            try:
+                ZoneInfo(value)
+            except (ZoneInfoNotFoundError, ValueError) as exc:
+                raise ValueError("调度时区必须是有效的 IANA 名称，例如 Asia/Shanghai 或 UTC") from exc
+        return value
 
 
 class TopicsFetchConfig(StrictModel):

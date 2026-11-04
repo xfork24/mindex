@@ -310,12 +310,21 @@ class IndexBuilder:
         return self._embedder
 
     def build(self, *, activate=False, mode="auto", source_id=None, kinds=None, channels=None, progress=None):
-        from mindex.shared.processing_lock import index_write_lock
+        from mindex.shared.db.fencing import current_attempt, publication_scope
+
+        if self.config.queue.backend == "postgres" and current_attempt() is None:
+            from mindex.shared.queue_dispatch import run_index_task
+
+            if self._embedder is not None:
+                raise RuntimeError("持久索引任务不能传递进程内嵌入适配器；请在 worker 中注入")
+            return run_index_task(self.config, self.store,
+                {"activate": activate, "mode": mode, "source_id": source_id,
+                 "kinds": kinds, "channels": channels}, progress=progress)["index_id"]
 
         if progress:
             progress({"stage": "index_wait", "phase": "publish"})
         check_wait = (lambda: progress({"stage": "index_wait", "phase": "publish"})) if progress else None
-        with index_write_lock(self.store.root, check=check_wait, config=self.config):
+        with publication_scope(self.store, check=check_wait, config=self.config):
             if progress:
                 progress({"stage": "index_prepare", "phase": "publish"})
             if mode == "enriched":

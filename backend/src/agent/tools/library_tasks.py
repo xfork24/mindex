@@ -24,7 +24,7 @@ from mindex.agent.tools.search import ATTACHMENT_PREFIX, upload_check
 from mindex.shared.config import StrictModel
 from mindex.shared.task_progress import RETRYABLE
 
-TaskKind = Literal["source", "dialogue", "person"]
+TaskKind = Literal["source", "dialogue", "person", "index"]
 Work = Literal["shots", "analysis", "dialogue", "persons", "publish"]
 PublishTarget = Literal["shots", "dialogue", "analysis", "persons"]
 # 任务类别 → (任务接口前缀, 中文名)。
@@ -32,6 +32,7 @@ TASK_PATHS = {
     "source": ("/api/admin/source-tasks", "素材任务"),
     "dialogue": ("/api/admin/dialogue-tasks", "对白任务"),
     "person": ("/api/persons/tasks", "人物任务"),
+    "index": ("/api/index-tasks", "索引任务"),
 }
 WORK_LABELS = {**WORK_NAMES, "publish": "发布检索"}
 # 工作 → (发起接口模板, 任务类别)。
@@ -239,7 +240,7 @@ async def start_source_task(args: StartSourceTask, ctx: ToolContext) -> ToolOutp
 # ---------- get_task_status / retry_task / cancel_task ----------
 
 class TaskRef(StrictModel):
-    kind: TaskKind = Field(description="source 分镜/分析/发布任务；dialogue 对白任务；person 人物任务")
+    kind: TaskKind = Field(description="source 分镜/分析/发布任务；dialogue 对白任务；person 人物任务；index 独立索引任务")
     task_id: str = Field(min_length=1, max_length=200)
 
 

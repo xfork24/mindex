@@ -10,12 +10,20 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException
 
 from mindex.processing.pipeline import Pipeline
+from mindex.shared import lock_backend
 from mindex.shared.background_tasks import BackgroundTaskRunner, public_task
-from mindex.shared.config import Config, StrictModel, absolutize_config_paths, relativize_config_paths
+from mindex.shared.config import StrictModel
+from mindex.shared.db.fencing import publication_scope
 from mindex.shared.processing_lock import ProcessingLock
-from mindex.shared.queue_dispatch import insert_ledger
-from mindex.shared.storage import dumps
+from mindex.shared.queue_dispatch import (
+    insert_index_task,
+    insert_ledger,
+    validate_index_options,
+    wait_index_task,
+)
 from mindex.shared.task_cancel import TaskCancelled
+from mindex.shared.task_config import IndexOptions, freeze_config, restore_config
+from mindex.shared.task_config import preserve_numbers as preserve_numbers
 
 log = logging.getLogger(__name__)
 
@@ -39,53 +47,6 @@ PUBLISH_KINDS = {
     "moment": ("moment",),
     "extra": ("shot", "scene"),
 }
-
-
-def freeze_config(config, store):
-    # Python mode preserves integers used by historical index fingerprints.
-    snapshot = config.model_dump()
-    snapshot["data_dir"] = str(config.data_dir)
-    # 数据目录内部的路径相对 data_dir.parent 存储，使目录移动/改名后仍可解析；
-    # 外部路径（model_root、外部清单）保持绝对，由 restore_config 回读时还原。
-    snapshot = relativize_config_paths(config.data_dir, snapshot)
-    snapshot["_credential_profiles"] = {
-        role: row["value"] if row else None
-        for role in ("asr", "embedding", "analyzer", "person")
-        for row in [store.one("SELECT value FROM settings WHERE key=?", ("active.profile." + role,))]
-    }
-    return dumps(snapshot)
-
-
-def restore_config(raw, runtime, store):
-    snapshot = json.loads(raw)
-    profiles = snapshot.pop("_credential_profiles", {})
-    # 快照里的可移植路径按当前 data_dir 还原为绝对路径（镜像 load_config 的 rebase），
-    # 使历史任务在数据目录移动/改名后仍能解析 data_dir / 部署清单 / 字幕字体。
-    snapshot = absolutize_config_paths(runtime.base.data_dir, snapshot)
-    config = Config.model_validate(snapshot)
-    preserve_numbers(config, snapshot)
-    # 部署后端不进入冻结快照；恢复任务必须使用当前节点的配置和目录。
-    for key in ("database", "vector", "storage", "queue", "locks", "gpu", "server", "data_dir"):
-        setattr(config, key, getattr(runtime.base, key))
-    for role in ("asr", "embedding", "analyzer", "person"):
-        reference = profiles.get(role)
-        profile = (
-            store.one("SELECT api_key FROM model_profiles WHERE id=?", (reference,)) if reference else None
-        )
-        getattr(config, role).api_key = (
-            profile["api_key"] or "" if profile else getattr(runtime.base, role).api_key
-        )
-    return config
-
-
-def preserve_numbers(model, snapshot):
-    # 历史指纹区分 4 与 4.0；校验后的浮点转换不能改变冻结配置身份。
-    for key, value in snapshot.items():
-        current = getattr(model, key, None)
-        if isinstance(value, dict) and isinstance(current, StrictModel):
-            preserve_numbers(current, value)
-        elif isinstance(value, (int, float)) and not isinstance(value, bool):
-            setattr(model, key, value)
 
 
 def publish_work(config, source_id, work, embedder=None, *, progress=None, scope="shot_moment"):
@@ -360,3 +321,101 @@ def source_tasks_router(runtime, store, embedder=None):
         return person_setup(store, source_id, work_id)
 
     return router
+
+
+def activate_checked(config, store, index_id, *, embedder=None):
+    from mindex.models.adapters import ModelError, make_embedder
+    from mindex.processing.indexing import check_index
+
+    issues = check_index(store, index_id, config=config)
+    if issues:
+        raise ValueError("索引检查失败：" + "; ".join(issues[:5]))
+    spec = store.index_version(index_id)["spec"]
+    if spec["space"].get("schema") == 2:
+        client = embedder or make_embedder(config)
+        if client.identity() != spec["space"]:
+            raise ModelError("当前模型空间与待发布索引不同")
+        if hasattr(client, "require_gate"):
+            client.require_gate()
+    if config.video.model_dump() != spec.get("preprocessing"):
+        raise ModelError("视频预处理配置与索引不一致")
+    store.activate(index_id)
+
+
+class IndexTasks(BackgroundTaskRunner):
+    table = "index_tasks"
+    label = "索引任务"
+    busy = "索引任务正在提交"
+    not_retryable = "只有失败、中断或已取消的索引任务可以重试"
+    thread_prefix = "index"
+
+    def recover(self):
+        # 集群回收完全由队列负责；本地每条账本按自己的执行锁恢复。
+        if getattr(self.store, "queue_backend", "inline") == "postgres":
+            return
+        from filelock import Timeout
+
+        for row in self.store.rows("SELECT * FROM index_tasks WHERE status IN ('queued','running')"):
+            try:
+                with self.row_lock(row):
+                    self.store.execute("UPDATE index_tasks SET status='interrupted',error='进程已中断；请重试' "
+                                       "WHERE id=? AND status IN ('queued','running')", (row["id"],))
+            except Timeout:
+                pass
+
+    def row_lock(self, row):
+        return lock_backend.resource(self.store, "index-task:" + row["id"], timeout=0)
+
+    def restore(self, row):
+        return restore_config(row["config"], self.runtime, self.store)
+
+    def start(self, options=None):
+        parsed = validate_index_options(self.store, options)
+        config = self.runtime.current()
+        task_id = uuid.uuid4().hex
+        lock = self.row_lock({"id": task_id})
+
+        def create():
+            insert_index_task(self.store, task_id, config, parsed)
+            return task_id, config
+
+        return self.submit(lock, create)
+
+    def execute(self, task_id, row, config, save):
+        from mindex.processing.indexing import IndexBuilder
+        from mindex.processing.pipeline import Pipeline
+
+        options = IndexOptions.model_validate(json.loads(row["options"]))
+        progress = lambda value: save("progress", value)
+        with Pipeline(config).lock(options.source_id, "publish"):
+            if options.action == "build":
+                index_id = IndexBuilder(config, self.embedder).build(
+                    activate=options.activate, mode=options.mode, source_id=options.source_id,
+                    kinds=tuple(options.kinds) if options.kinds else None, channels=options.channels, progress=progress)
+                result = {"index_id": index_id}
+            else:
+                with publication_scope(self.store, config=config, check=lambda: progress({"stage": "index_wait"})):
+                    if options.action == "activate":
+                        activate_checked(config, self.store, options.index_id, embedder=self.embedder)
+                        result = {"index_id": options.index_id}
+                    elif options.action == "activate-release":
+                        self.store.activate_release(options.release_id)
+                        result = {"release_id": options.release_id}
+                    elif options.action == "person-publish":
+                        from mindex.persons.persons import Persons
+
+                        result = Persons(self.store).publish(options.index_id, source_id=options.source_id,
+                                                             progress=progress)
+                    else:
+                        from mindex.shared.lexical_store import build_lexical_index
+
+                        versions = self.store.rows(
+                            "SELECT id FROM index_versions WHERE status='ready'"
+                            + (" AND id=?" if options.index_id else "") + " ORDER BY created_at,id",
+                            (options.index_id,) if options.index_id else ())
+                        result = {"indexes": [build_lexical_index(self.store, item["id"], replace=options.replace)
+                                              for item in versions]}
+            save("result", result)
+
+    def run_here(self, options=None, *, progress=None):
+        return wait_index_task(self.store, self.start(options)["id"], progress=progress)

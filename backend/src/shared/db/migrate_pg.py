@@ -13,7 +13,7 @@ import hashlib
 import uuid
 
 from mindex.shared.db.errors import SchemaMismatch
-from mindex.shared.db.scaling_schema import PG_EXECUTION, PG_FILES, PG_QUEUE
+from mindex.shared.db.scaling_schema import PG_DURABLE_INDEX, PG_EXECUTION, PG_FILES, PG_QUEUE
 from mindex.shared.db.schema_pg import BASELINE_DDL, DELIVERY_PLATFORMS_SEED
 
 __all__ = ["check_schema", "migrate_pg", "pg_schema_version"]
@@ -23,7 +23,7 @@ _MIGRATION_LOCK_KEY = (0x4D49_4E44, 0x4D49_4752)  # "MIND"/"MIGR"
 
 # v15 为已发布基线；之后只追加，禁止升级时重跑基线覆盖已有表定义。
 BASELINE_VERSION = 15
-PG_STEPS = ((16, PG_FILES + PG_QUEUE), (17, PG_EXECUTION), (18, "SELECT 1;"))
+PG_STEPS = ((16, PG_FILES + PG_QUEUE), (17, PG_EXECUTION), (18, "SELECT 1;"), (19, PG_DURABLE_INDEX))
 
 
 def _logical_version() -> int:

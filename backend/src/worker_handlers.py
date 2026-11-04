@@ -1,6 +1,6 @@
 """Worker 任务处理器：队列任务 → 账本执行链（plans §7.2）。
 
-账本（source_tasks/dialogue_tasks/person_tasks/topic_runs）是用户可见状态来源；
+账本（source_tasks/dialogue_tasks/person_tasks/topic_runs/index_tasks）是用户可见状态来源；
 worker 领取队列任务后经对应 ``BackgroundTaskRunner`` 子类在当前线程执行（含工作
 锁、准入、进度、终态），队列状态随后由 ``Worker`` 按原 owner+attempt 提交。
 队列运行期间由 task_progress 将账本终态与队列终态同事务提交，并校验当前 attempt；
@@ -10,6 +10,9 @@ worker 领取队列任务后经对应 ``BackgroundTaskRunner`` 子类在当前�
 from __future__ import annotations
 
 import logging
+import time
+
+from filelock import Timeout
 
 log = logging.getLogger(__name__)
 
@@ -22,13 +25,13 @@ _KIND_TABLES = {
     "dialogue": ("dialogue_tasks", "mindex.admin.dialogue_tasks", "DialogueTasks"),
     "person": ("person_tasks", "mindex.persons.person_processing", "PersonTasks"),
     "topic": ("topic_runs", "mindex.topics.runner", "TopicRuns"),
+    "index": ("index_tasks", "mindex.admin.source_tasks", "IndexTasks"),
 }
 
 
 def _build_runner(kind: str, config):
     import importlib
 
-    from mindex.models.adapters import make_embedder
     from mindex.settings.runtime_settings import RuntimeConfig
     from mindex.shared.storage import Store
 
@@ -36,9 +39,9 @@ def _build_runner(kind: str, config):
     store = Store.open(config)
     runtime = RuntimeConfig(config, store)
     runner_class = getattr(importlib.import_module(module_name), class_name)
-    # 四类账本 runner 均为 BackgroundTaskRunner(runtime, store, embedder) 形状；
+    # 各类账本 runner 均为 BackgroundTaskRunner(runtime, store, embedder) 形状；
     # TopicRuns 的 llm 缺省复用 writer（与 API 装配的缺省一致）。
-    return runner_class(runtime, store, make_embedder(runtime.current()))
+    return runner_class(runtime, store)
 
 
 def register_ledger_handlers(handlers, config) -> None:
@@ -56,8 +59,20 @@ def _make_handler(kind: str):
         restored = restored.model_copy(update={
             key: getattr(config, key) for key in
             ("database", "vector", "storage", "locks", "queue", "gpu", "server", "data_dir")})
+        # 先恢复账本中的模型空间，再创建客户端；排队后热更新不能悄悄替换任务模型。
+        if runner.embedder is None:
+            from mindex.models.adapters import make_embedder
+
+            runner.embedder = make_embedder(restored)
         lock = runner.row_lock(row)
-        lock.acquire()
+        while True:
+            task.execution.attempt.check()
+            try:
+                lock.acquire(timeout=0)
+                break
+            except Timeout:
+                # 入队事务已可见，API 的提交锁可能还在释放；保持心跳等待，避免制造失败重试。
+                time.sleep(.05)
         log.info("worker 执行 %s 任务 %s（attempt %s）", kind, task.ledger_id, task.attempt_id[:8])
         runner.run(task.ledger_id, restored, lock)
 

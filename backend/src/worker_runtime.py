@@ -171,13 +171,20 @@ class Worker:
 
     def _execute(self, task) -> None:
         """执行归属进入所有业务事务；队列与账本终态在同一事务提交。"""
-        from mindex.shared.db.fencing import Attempt, ExecutionFence, executing
-        from mindex.shared.db.locks_pg import LeaseLost
-        from mindex.shared.task_cancel import TaskCancelled, registry_for
+        from mindex.shared.db.fencing import Attempt, ExecutionFence
 
         stop, lost, cancelled = threading.Event(), threading.Event(), threading.Event()
         attempt = Attempt(self.context.store.backend, self.context.library_id, task, lost, cancelled)
         task = replace(task, execution=ExecutionFence(attempt))
+        try:
+            self._execute_attempt(task, attempt, stop, lost, cancelled)
+        finally:
+            attempt.close()
+
+    def _execute_attempt(self, task, attempt, stop, lost, cancelled):
+        from mindex.shared.db.fencing import executing
+        from mindex.shared.db.locks_pg import LeaseLost
+        from mindex.shared.task_cancel import TaskCancelled, registry_for
 
         def heartbeat():
             from mindex.shared.db.queue_pg import TASK_TTL_SECONDS
@@ -225,15 +232,26 @@ class Worker:
                 gpu_slot.release()
             stop.set()
             beat.join(timeout=5)
-        if not lost.is_set():
-            self._finish(task, outcome, error)
+        try:
+            if not lost.is_set():
+                self._finish(task, outcome, error)
+        except LeaseLost:
+            log.warning("任务 %d 终态提交期间租约失效，发布与终态一并回滚", task.id)
+        except Exception as exc:
+            # 指针发布失败必须先回滚，再记录失败/重试；不能让部分发布成为成功。
+            log.exception("任务 %d 发布事务失败", task.id)
+            self._finish(task, "failed", f"{type(exc).__name__}: {exc}")
 
     def _cancel_requested(self, task) -> bool:
         with self.context.store.backend.connect(control=True) as db:
             return self.queue.cancel_requested(db, task)
 
     def _finish(self, task, outcome, error=None):
-        with self.context.store.backend.connect() as db:
+        from mindex.shared.db.locks_pg import LeaseLost
+        from mindex.shared.db.scaling_schema import ALL_LEDGER_TABLES
+
+        attempt = task.execution.attempt if task.execution is not None else None
+        with self.context.store.backend.connect(execution=attempt.publication_fence() if attempt else None) as db:
             row = db.execute(
                 "SELECT cancel_requested FROM task_queue WHERE library_id=%s AND id=%s"
                 " AND status='running' AND owner=%s AND attempt_id=%s AND fencing_token=%s"
@@ -242,9 +260,19 @@ class Worker:
             if row is None:
                 log.warning("任务 %d 终态被拒：attempt 已过期或易主", task.id)
                 return
+            if task.ledger_table in ALL_LEDGER_TABLES and task.ledger_id:
+                bound = db.execute(
+                    f"SELECT 1 FROM {task.ledger_table} WHERE id=%s AND queue_attempt_id=%s"
+                    " AND queue_fencing_token=%s FOR UPDATE",
+                    (task.ledger_id, task.attempt_id, task.fencing_token)).fetchone()
+                if bound is None:
+                    raise LeaseLost("账本绑定已变化，拒绝旧 attempt 发布及终态提交")
             if row["cancel_requested"] or outcome == "cancelled":
                 self.queue.finish_cancelled(db, task)
             elif outcome == "failed":
                 self.queue.fail(db, task, error)
             else:
-                self.queue.complete(db, task)
+                for publish in (attempt.publications.values() if attempt else ()):
+                    publish(db)
+                if not self.queue.complete(db, task):
+                    raise LeaseLost("发布期间任务 attempt 已到期，拒绝提交")

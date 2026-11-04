@@ -137,6 +137,8 @@ def build_server(registry: ToolRegistry, client_factory, *, policy, agent_profil
 def server_for_app(app, runtime_config, store, *, policy: str | None = None,
                    domains: list[str] | None = None) -> Server:
     """进程内 MCP 服务；``domains`` 显式给出时覆盖 ``agent.mcp.domains``（否则每次调用读取最新配置）。"""
+    if store.pg and runtime_config.base.server.role == "api":
+        raise RuntimeError("业务 API 不创建本机 MCP 会话；请使用 mindex mcp --base-url 或 agent.gateway_url 连接网关")
     from mindex.agent.session_store import SessionStore
     from mindex.agent.tools import build_registry
     from mindex.settings.runtime_settings import get_setting

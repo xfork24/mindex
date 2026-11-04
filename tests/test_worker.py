@@ -173,7 +173,7 @@ def test_topic_scheduler_leader_lease_gates_ticks(pg_config):
 
     from mindex.shared.backends import open_context
     from mindex.shared.db.locks_pg import PgLockProvider
-    from mindex.topics.scheduler import TopicScheduler
+    from mindex.topics.scheduler import LEADER_NAME, TopicScheduler
 
     ctx = open_context(pg_config)
     provider_a = PgLockProvider(ctx.db.backend, library_id=ctx.library_id)
@@ -192,7 +192,7 @@ def test_topic_scheduler_leader_lease_gates_ticks(pg_config):
             self.provider = provider
 
         def __enter__(self):
-            self.lease = self.provider.lease("topics", mode="exclusive", ttl=30, wait=0)
+            self.lease = self.provider.lease(LEADER_NAME, mode="exclusive", ttl=30, wait=0)
             return self.lease
 
         def __exit__(self, *_):

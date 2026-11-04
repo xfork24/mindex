@@ -296,12 +296,12 @@ _PLAIN_INSERT_RE = re.compile(
 
 def _parse_baseline_tables() -> dict[str, tuple[str, ...]]:
     """从 PG 基线 DDL 解析全表列序（单一事实来源；供无列名 INSERT 补列）。"""
-    from mindex.shared.db.scaling_schema import PG_FILES
+    from mindex.shared.db.scaling_schema import PG_DURABLE_INDEX, PG_FILES
     from mindex.shared.db.schema_pg import BASELINE_DDL
 
     tables: dict[str, tuple[str, ...]] = {}
     for match in re.finditer(
-            r"CREATE TABLE IF NOT EXISTS\s+(\w+)\s*\((.*?)\n\);", BASELINE_DDL + PG_FILES, re.DOTALL):
+            r"CREATE TABLE IF NOT EXISTS\s+(\w+)\s*\((.*?)\n\);", BASELINE_DDL + PG_FILES + PG_DURABLE_INDEX, re.DOTALL):
         name, body = match.group(1).lower(), match.group(2)
         columns, depth, current = [], 0, ""
         for char in body:

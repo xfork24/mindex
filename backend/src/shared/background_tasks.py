@@ -168,8 +168,8 @@ class BackgroundTaskRunner:
     def _enqueue(self, task_id, lock):
         """postgres 队列形态：入队（dedupe 幂等）后释放工作锁，由 worker 领取执行。
 
-        账本先落、队列后入：崩溃窗口由 ``enqueue_backlog`` 补偿扫描兜底
-        （plans §7.2 durable outbox 的简化变体；阶段 5 收紧为同事务）。
+        正常创建/重试已在 ledger_transaction 中原子入队；这里幂等确认后释放锁。
+        enqueue_backlog 仅修复历史数据和异常滞留。
         """
         from mindex.shared.queue_dispatch import enqueue_task
 

@@ -7,7 +7,7 @@ from mindex.shared.task_cancel import CANCEL_MESSAGE, TaskCancelled, registry_fo
 
 # 索引已激活（或已就绪）后的进度事件；此后取消已无回退意义。
 POST_COMMIT_STAGES = frozenset({"published", "indexed"})
-TASK_TABLES = frozenset({"source_tasks", "dialogue_tasks", "person_tasks", "topic_runs"})
+TASK_TABLES = frozenset({"source_tasks", "dialogue_tasks", "person_tasks", "topic_runs", "index_tasks"})
 CANCELLABLE = frozenset({"queued", "running"})
 # 可重试的任务终态；cancelled 与失败、中断一样复用已有检查点。
 RETRYABLE = frozenset({"failed", "interrupted", "cancelled"})

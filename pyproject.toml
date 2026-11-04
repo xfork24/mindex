@@ -16,6 +16,7 @@ dependencies = [
   "scenedetect[opencv]>=0.6.6,<0.7", "typer>=0.15,<1", "filelock>=3.16",
   "Pillow>=11,<13",
   "charset-normalizer>=3,<4",
+  "tzdata>=2025.1",
 ]
 
 [project.optional-dependencies]

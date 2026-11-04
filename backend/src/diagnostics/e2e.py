@@ -437,7 +437,7 @@ def run_phase(
             elif phase in {"visual", "enriched"}:
                 from mindex.processing.indexing import IndexBuilder
 
-                with Pipeline(config).lock():
+                with (nullcontext() if config.queue.backend == "postgres" else Pipeline(config).lock()):
                     index_id = IndexBuilder(config).build(
                         mode="visual" if phase == "visual" else "enriched",
                         source_id=state["source_id"],

@@ -214,6 +214,13 @@ def persons_publish(
     from mindex.shared.storage import Store
 
     store = Store.open(ctx.obj)
+    if ctx.obj.queue.backend == "postgres":
+        from mindex.admin.source_tasks import IndexTasks
+        from mindex.settings.runtime_settings import RuntimeConfig
+
+        print_json(IndexTasks(RuntimeConfig(ctx.obj, store), store).run_here(
+            {"action": "person-publish", "index_id": content}))
+        return
     with ProcessingLock(ctx.obj), index_write_lock(store.root, config=ctx.obj):
         print_json(Persons(store).publish(content))
 
@@ -258,7 +265,13 @@ def persons_activate(
     from mindex.shared.storage import Store
 
     store = Store.open(ctx.obj)
-    store.activate_release(release)
+    if ctx.obj.queue.backend == "postgres":
+        from mindex.admin.source_tasks import IndexTasks
+        from mindex.settings.runtime_settings import RuntimeConfig
+
+        IndexTasks(RuntimeConfig(ctx.obj, store), store).run_here({"action": "activate-release", "release_id": release})
+    else:
+        store.activate_release(release)
     print_json({"release_id": release})
 
 

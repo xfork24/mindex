@@ -408,7 +408,13 @@ def _metadata_v18(db):
                "status TEXT NOT NULL,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")
 
 
-METADATA_STEPS = (_metadata_v1, _metadata_v2, _metadata_v3, _metadata_v4, _metadata_v5, _metadata_v6, _metadata_v7, _metadata_v8, _metadata_v9, _metadata_v10, _metadata_v11, _metadata_v12, _metadata_v13, _metadata_v14, _metadata_v15, _metadata_v16, _metadata_v17, _metadata_v18)
+def _metadata_v19(db):
+    from mindex.shared.db.scaling_schema import SQLITE_DURABLE_INDEX
+
+    execute_script(db, SQLITE_DURABLE_INDEX)
+
+
+METADATA_STEPS = (_metadata_v1, _metadata_v2, _metadata_v3, _metadata_v4, _metadata_v5, _metadata_v6, _metadata_v7, _metadata_v8, _metadata_v9, _metadata_v10, _metadata_v11, _metadata_v12, _metadata_v13, _metadata_v14, _metadata_v15, _metadata_v16, _metadata_v17, _metadata_v18, _metadata_v19)
 
 
 def migrate_metadata(db) -> int:
@@ -575,44 +581,77 @@ class Store:
         row["spec"] = json.loads(row["spec"])
         return row
 
-    def activate(self, index_id: str):
+    def activate(self, index_id: str, *, execution=None):
+        if self._defer_publication("index", index_id, execution=execution):
+            return
         with self.connect() as db:
-            db.execute("BEGIN IMMEDIATE")
-            version = db.execute("SELECT status FROM index_versions WHERE id=?", (index_id,)).fetchone()
-            if not version or version["status"] != "ready":
-                raise ValueError("Only a ready index can be activated")
-            pending = db.execute(
-                "SELECT count(*) FROM index_members WHERE index_id=? AND complete=0", (index_id,)
-            ).fetchone()[0]
-            if pending:
-                raise ValueError("Index has unfinished segments")
-            db.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('active',?)", (index_id,))
-            release = db.execute(
-                "SELECT id FROM search_releases WHERE content_id=? ORDER BY rowid DESC LIMIT 1", (index_id,)
-            ).fetchone()
-            if release:
-                db.execute("INSERT OR REPLACE INTO settings VALUES('active.release',?)", (release['id'],))
-            else:
-                current = db.execute(
-                    "SELECT r.person_id FROM search_releases r JOIN settings s ON s.value=r.id WHERE s.key='active.release'"
-                ).fetchone()
-                from mindex.shared.config import fingerprint
-                person_id = current['person_id'] if current else None
-                release_id = fingerprint([index_id, person_id])
-                db.execute("INSERT OR IGNORE INTO search_releases(id,content_id,person_id) VALUES(?,?,?)",
-                           (release_id, index_id, person_id))
-                db.execute("INSERT OR REPLACE INTO settings VALUES('active.release',?)", (release_id,))
+            self._activate_in_db(db, index_id)
 
-    def activate_release(self, release_id: str):
-        with self.connect() as db:
-            db.execute("BEGIN IMMEDIATE")
-            row = db.execute("SELECT r.*,i.status FROM search_releases r JOIN index_versions i ON i.id=r.content_id WHERE r.id=?", (release_id,)).fetchone()
-            if not row or row['status'] != 'ready':
-                raise ValueError("检索组合不存在或内容索引未就绪")
-            if db.execute("SELECT 1 FROM index_members WHERE index_id=? AND complete=0", (row['content_id'],)).fetchone():
-                raise ValueError("内容索引有未完成片段")
-            db.execute("INSERT OR REPLACE INTO settings VALUES('active',?)", (row['content_id'],))
+    def _defer_publication(self, kind, identifier, *, execution=None):
+        from mindex.shared.db.fencing import current_attempt, publication_scope
+
+        attempt = execution.attempt if execution is not None else current_attempt()
+        if not self.pg or attempt is None:
+            return False
+        if attempt.library_id != self.library_id or attempt.backend.dsn != self.backend.dsn:
+            from mindex.shared.db.locks_pg import LeaseLost
+
+            raise LeaseLost("发布目标与任务所属素材库不一致")
+        attempt.check()
+        method = self._activate_in_db if kind == "index" else self._activate_release_in_db
+
+        def defer():
+            with publication_scope(self, only_attempt=True):
+                attempt.defer((self.library_id, "active"), lambda db: method(db, identifier))
+
+        if execution is not None:
+            execution.run(defer)
+        else:
+            defer()
+        return True
+
+    def _activate_in_db(self, db, index_id):
+        db.execute("BEGIN IMMEDIATE")
+        version = db.execute("SELECT status FROM index_versions WHERE id=?", (index_id,)).fetchone()
+        if not version or version["status"] != "ready":
+            raise ValueError("Only a ready index can be activated")
+        pending = db.execute(
+            "SELECT count(*) FROM index_members WHERE index_id=? AND complete=0", (index_id,)
+        ).fetchone()[0]
+        if pending:
+            raise ValueError("Index has unfinished segments")
+        db.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('active',?)", (index_id,))
+        release = db.execute(
+            "SELECT id FROM search_releases WHERE content_id=? ORDER BY rowid DESC LIMIT 1", (index_id,)
+        ).fetchone()
+        if release:
+            db.execute("INSERT OR REPLACE INTO settings VALUES('active.release',?)", (release['id'],))
+        else:
+            current = db.execute(
+                "SELECT r.person_id FROM search_releases r JOIN settings s ON s.value=r.id WHERE s.key='active.release'"
+            ).fetchone()
+            from mindex.shared.config import fingerprint
+            person_id = current['person_id'] if current else None
+            release_id = fingerprint([index_id, person_id])
+            db.execute("INSERT OR IGNORE INTO search_releases(id,content_id,person_id) VALUES(?,?,?)",
+                       (release_id, index_id, person_id))
             db.execute("INSERT OR REPLACE INTO settings VALUES('active.release',?)", (release_id,))
+
+    def activate_release(self, release_id: str, *, execution=None):
+        if self._defer_publication("release", release_id, execution=execution):
+            return
+        with self.connect() as db:
+            self._activate_release_in_db(db, release_id)
+
+    def _activate_release_in_db(self, db, release_id):
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute("SELECT r.*,i.status FROM search_releases r JOIN index_versions i ON i.id=r.content_id WHERE r.id=?", (release_id,)).fetchone()
+        if not row or row['status'] != 'ready':
+            raise ValueError("检索组合不存在或内容索引未就绪")
+        if db.execute("SELECT 1 FROM index_members WHERE index_id=? AND complete=0", (row['content_id'],)).fetchone():
+            raise ValueError("内容索引有未完成片段")
+        db.execute("INSERT OR REPLACE INTO settings VALUES('active',?)", (row['content_id'],))
+        db.execute("INSERT OR REPLACE INTO settings VALUES('active.release',?)", (release_id,))
 
     def snapshots(self, index_id: str, source_id: str | None = None) -> list[dict]:
         rows = self.rows("SELECT snapshot FROM index_members WHERE index_id=? AND complete=1"

@@ -333,6 +333,7 @@ topics:
   # llm: 缺省复用 studio.writer；需要单独的选题模型时按 studio.writer 的字段填写。
   scheduler:
     enabled: true            # mindex serve 运行时按档案定时每天挖掘；错过的定时在启动时补跑
+    timezone: null           # IANA 时区；本地缺省用系统时区，PG 缺省 UTC，首次启动绑定到库，所有节点必须一致
   fetch:
     timeout: 15              # 单次请求超时（秒）；数据源只请求你配置的地址，不内置爬虫
     max_bytes: 2097152       # 单次响应上限
