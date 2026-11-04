@@ -8,6 +8,7 @@ const {chromium}=require(process.env.MINDEX_PLAYWRIGHT_MODULE || 'playwright');
   await page.goto(process.env.MINDEX_TUNING_URL+'/settings');
   await page.locator('[data-section=tuning]').click();
   await page.locator('#duration-weight').waitFor();
+  await page.waitForFunction(()=>document.querySelector('#duration-weight').value !== '');
   for(const lang of ['en','zh']) {
    await page.evaluate(value=>MindexI18n.setLanguage(value),lang);
    for(const width of [1280,768,390]) {
@@ -31,6 +32,7 @@ const {chromium}=require(process.env.MINDEX_PLAYWRIGHT_MODULE || 'playwright');
   const response=page.waitForResponse(r=>r.url().endsWith('/api/settings/business')&&r.request().method()==='PUT');
   await page.locator('#tuning-save').click();assert.equal((await response).status(),200);
   await page.reload();await page.locator('[data-section=tuning]').click();
+  await page.waitForFunction(()=>document.querySelector('#duration-weight').value === '0.2');
   assert.equal(await page.locator('#duration-weight').inputValue(),'0.2');
   assert.equal(await page.locator('#duration-exponent').inputValue(),'3');
   const settings=await (await page.request.get(process.env.MINDEX_TUNING_URL+'/api/settings')).json();

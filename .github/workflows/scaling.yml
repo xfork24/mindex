@@ -1,0 +1,73 @@
+name: 集群后端验收
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: scaling-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  cluster:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.10"
+          cache: false
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: 安装测试依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg fonts-noto-cjk
+          uv sync --extra dev --extra person --extra cluster
+
+      - name: 从固定源码构建 MinIO
+        # 社区版源码提交与本地验收使用的 MinIO commit-id 一致；不依赖可变 latest 下载地址。
+        # https://github.com/minio/minio/commit/9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a
+        env:
+          MINIO_REVISION: 9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a
+          CGO_ENABLED: "0"
+          GOFLAGS: -mod=readonly
+        run: |
+          mkdir "$RUNNER_TEMP/minio-source"
+          cd "$RUNNER_TEMP/minio-source"
+          git init
+          git remote add origin https://github.com/minio/minio.git
+          git fetch --depth=1 origin "$MINIO_REVISION"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$MINIO_REVISION"
+          go build -trimpath -o "$RUNNER_TEMP/minio" .
+
+      - name: 数据库构造边界
+        run: uv run python scripts/check-scaling-boundaries.py
+
+      - name: 隔离真实后端与四进程验收（任何跳过均失败）
+        run: uv run python scripts/verify-scaling.py --minio-binary "$RUNNER_TEMP/minio"
+
+      - name: 保存原始验收证据
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scaling-verification-${{ github.run_id }}
+          path: artifacts/scaling/
+          if-no-files-found: error
+          retention-days: 14

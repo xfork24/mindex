@@ -14,6 +14,30 @@ from mindex.shared.media import command
 from mindex.shared.types import Annotation, ShotDraft
 
 
+@pytest.fixture(autouse=True)
+def offline_model_network(monkeypatch):
+    """默认测试只访问本机隔离服务，禁止落到 Config 示例地址上的真实模型。"""
+    import httpx
+
+    original = httpx.HTTPTransport.handle_request
+    original_async = httpx.AsyncHTTPTransport.handle_async_request
+
+    def check(request):
+        if request.url.host not in {"127.0.0.1", "localhost", "::1"}:
+            raise httpx.ConnectError("离线测试禁止访问非本机服务；请使用隔离替身", request=request)
+
+    def handle(self, request):
+        check(request)
+        return original(self, request)
+
+    async def handle_async(self, request):
+        check(request)
+        return await original_async(self, request)
+
+    monkeypatch.setattr(httpx.HTTPTransport, "handle_request", handle)
+    monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", handle_async)
+
+
 @pytest.fixture(scope="session")
 def video_file(tmp_path_factory):
     root = tmp_path_factory.mktemp("media")
