@@ -12,9 +12,12 @@ from __future__ import annotations
 import json
 import logging
 
-from mindex.agent.changes import KINDS, SOURCES
-
 log = logging.getLogger(__name__)
+
+# 与 agent.changes.KINDS/SOURCES 保持一致。shared 不得反向依赖 agent 包
+# （tests/test_import_boundaries.py 的包边界规则）；漂移由 agent 侧测试兜底。
+KINDS = ("mutation", "focus")
+SOURCES = ("agent", "mcp")
 
 __all__ = ["drain", "publish"]
 
