@@ -238,6 +238,14 @@ def create_app(
                                    "storage": backends.media.backend,
                                    "locks": backends.locks.backend,
                                    "queue": backends.queue.backend}
+            if config.queue.backend == "postgres":  # 队列深度与最老 pending（plans §12）
+                from mindex.shared.db.queue_pg import PgTaskQueue
+
+                try:
+                    with store.backend.connect() as db:
+                        payload["queue_stats"] = PgTaskQueue(backends.library_id).stats(db)
+                except Exception:  # noqa: BLE001 — 指标缺失不拖垮就绪检查
+                    payload["queue_stats"] = {"unavailable": True}
         return payload
 
     # 设置 MINDEX_WEB_TOKEN（或传入 web_token）后才启用访问令牌；未设置时行为不变。

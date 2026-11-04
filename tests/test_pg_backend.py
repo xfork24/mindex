@@ -230,16 +230,20 @@ def _seed_sqlite(store: Store):
 
 
 def test_roundtrip_sqlite_pg_sqlite(tmp_path, fresh_pg, monkeypatch):
+    from mindex.shared.backends import open_context as _open_context
     from mindex.shared.config import Config
+    from mindex.shared.config import Config as _Config
     from mindex.shared.db.transfer import copy_pg_to_sqlite, copy_sqlite_to_pg, table_digests
     from mindex.shared.storage import PgStore
 
-    origin = Store(tmp_path / "sqlite-origin")
+    origin_dir = tmp_path / "sqlite-origin"
+    origin = _open_context(_Config(data_dir=origin_dir)).store  # 铸 library.id（装载后身份随行）
     _seed_sqlite(origin)
     before = table_digests(origin)
 
     monkeypatch.setenv("MINDEX_DATABASE_DSN", fresh_pg)
     pg = PgStore(Config(data_dir=tmp_path / "pg-cache"))
+    assert origin.one("SELECT value FROM settings WHERE key='library.id'") is not None
     counts = copy_sqlite_to_pg(origin, pg)
     assert counts["sources"] == 1 and counts["segments"] == 1 and counts["topic_gaps"] == 1
 
