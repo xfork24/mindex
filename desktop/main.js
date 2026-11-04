@@ -51,6 +51,7 @@ const backend = {
 
   async start() {
     // 远程 API 客户端模式（plans §9 阶段 6）：不启动 sidecar，直接连接服务端。
+    // 连接信息可在菜单「Mindex → 连接远程服务…」中维护（remote.json，0600）。
     // 远程数据处理与存储留在服务端；终端只持有用户凭据。
     const remote = remoteConfig({ userData: paths.userData });
     if (remote) {
@@ -349,6 +350,56 @@ function dataDirectory() {
   return loadState(paths.stateFile).data_dir || path.join(paths.userData, "data");
 }
 
+// ---------------------------------------------------------------- 远程连接设置
+
+let remoteWindow = null;
+
+async function openRemoteSettings() {
+  const { remoteConfig } = require("./lib/remote");
+  if (remoteWindow) {
+    remoteWindow.focus();
+    return;
+  }
+  remoteWindow = new BrowserWindow({
+    width: 520, height: 360, title: text.remoteSettings, parent: mainWindow || undefined,
+    modal: Boolean(mainWindow), show: false, resizable: false, minimizable: false, maximizable: false,
+    webPreferences: { preload: path.join(__dirname, "remote-preload.js"), contextIsolation: true, nodeIntegration: false, sandbox: true },
+  });
+  const current = remoteConfig({ userData: paths.userData });
+  const { ipcMain } = require("electron");
+  const handlers = {
+    "remote:get": () => current ? { url: current.url, source: current.source } : null,
+    "remote:save": (_event, value) => {
+      try {
+        const { saveRemote } = require("./lib/remote");
+        saveRemote(value, { userData: paths.userData });
+        setImmediate(() => restartAfterRemoteChange());
+        return { ok: true };
+      } catch (error) {
+        return { ok: false, error: error.message === "invalid-url" ? "URL 无效" : error.message === "invalid-token" ? "令牌不能为空" : error.message };
+      }
+    },
+    "remote:clear": () => {
+      const { clearRemote } = require("./lib/remote");
+      clearRemote({ userData: paths.userData });
+      setImmediate(() => restartAfterRemoteChange());
+      return { ok: true };
+    },
+    "remote:close": () => remoteWindow?.close(),
+  };
+  for (const [channel, handler] of Object.entries(handlers)) ipcMain.handle(channel, handler);
+  remoteWindow.on("closed", () => {
+    for (const channel of Object.keys(handlers)) ipcMain.removeHandler(channel);
+    remoteWindow = null;
+  });
+  await remoteWindow.loadFile(path.join(paths.pages, "remote.html"));
+  remoteWindow.show();
+}
+
+function restartAfterRemoteChange() {
+  restart().catch((error) => showError(error.message, backend.log?.tail()));
+}
+
 function buildMenu() {
   const template = [
     { role: "appMenu" },
@@ -366,6 +417,7 @@ function buildMenu() {
       { label: text.chooseData, click: () => chooseDataDir().catch((error) => showError(error.message)) },
       { type: "separator" },
       { label: text.openConfig, click: () => shell.openPath(path.join(paths.userData, "config.yaml")) },
+      { label: text.remoteSettings, click: () => openRemoteSettings().catch((error) => showError(error.message)) },
       { label: text.restartBackend, click: () => restart().catch((error) => showError(error.message, backend.log?.tail())) },
       { type: "separator" },
       { label: text.openLogs, click: () => shell.openPath(paths.logs) },

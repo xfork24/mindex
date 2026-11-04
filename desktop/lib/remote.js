@@ -44,4 +44,30 @@ function remoteConfig({ env = process.env, userData, readFile = (file) => fs.rea
   return { url, token, source: file };
 }
 
-module.exports = { ENV_URL, ENV_TOKEN, normalizeUrl, remoteConfig };
+// 保存用户输入的远程连接（URL + 用户凭据）：写入 remote.json（0600、原子替换）。
+// 凭据只存在用户数据目录，不进入任何日志或打包产物。
+function saveRemote({ url, token }, { userData, writeFile = (file, body, options) => fs.writeFileSync(file, body, options),
+  rename = (from, to) => fs.renameSync(from, to) } = {}) {
+  const normalized = normalizeUrl(url);
+  const value = String(token || "").trim();
+  if (!normalized) throw new Error("invalid-url");
+  if (!value) throw new Error("invalid-token");
+  const file = path.join(userData, "remote.json");
+  const temporary = `${file}.${process.pid}.partial`;
+  writeFile(temporary, JSON.stringify({ url: normalized, token: value }, null, 2), { mode: 0o600 });
+  rename(temporary, file);
+  try {
+    fs.chmodSync(file, 0o600);
+  } catch {
+    // Windows 无 POSIX 权限位；文件仍只落在用户数据目录。
+  }
+  return { url: normalized, token: value, source: file };
+}
+
+function clearRemote({ userData, unlink = (file) => fs.rmSync(file, { force: true }) } = {}) {
+  const file = path.join(userData, "remote.json");
+  unlink(file);
+  return true;
+}
+
+module.exports = { ENV_URL, ENV_TOKEN, normalizeUrl, remoteConfig, saveRemote, clearRemote };

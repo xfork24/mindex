@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>远程服务连接</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font: 13px/1.5 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; margin: 0; padding: 18px; }
+    h1 { font-size: 15px; margin: 0 0 4px; }
+    p.hint { margin: 0 0 14px; opacity: .7; }
+    label { display: block; margin: 10px 0 4px; }
+    input { width: 100%; box-sizing: border-box; padding: 6px 8px; font: inherit; }
+    .row { display: flex; gap: 8px; margin-top: 16px; }
+    button { font: inherit; padding: 6px 14px; }
+    #status { margin-top: 10px; min-height: 18px; }
+    #status.error { color: #c0392b; }
+    #status.ok { color: #1e8449; }
+  </style>
+</head>
+<body>
+  <h1 data-i18n="title">连接远程服务</h1>
+  <p class="hint" data-i18n="hint">填写服务地址与用户访问令牌；远程数据处理与存储留在服务端，本机只保存连接信息。保存后需重启应用。</p>
+  <label for="url" data-i18n="url">服务地址</label>
+  <input id="url" type="url" placeholder="https://mindex.internal" autocomplete="off" spellcheck="false">
+  <label for="token" data-i18n="token">用户访问令牌</label>
+  <input id="token" type="password" autocomplete="off" spellcheck="false">
+  <div class="row">
+    <button id="save" data-i18n="save">保存并重启</button>
+    <button id="clear" data-i18n="clear">清除远程配置</button>
+    <button id="cancel" data-i18n="cancel">取消</button>
+  </div>
+  <div id="status" role="status" aria-live="polite"></div>
+  <script src="remote.js"></script>
+</body>
+</html>
