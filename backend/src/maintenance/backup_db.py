@@ -22,10 +22,12 @@ TABLES = {
     'topic_calendar_events', 'brand_templates', 'delivery_templates', 'delivery_platforms', 'music_tracks', 'tool_sources',
     # 派生词法索引：按 index_id 绑定内容索引，可重建；随所属索引整体进出备份。
     'search_segments', 'lexical_docs', 'lexical_terms', 'lexical_index_meta',
+    'shared_files',
 }
 # 这些表的 source_id 指向选题档案/选题数据源，而不是素材库 sources；
 # 部分备份不按素材裁剪它们，也不做素材依赖校验（与 script_templates 一样整体保留）。
 NON_LIBRARY_SOURCE_ID = frozenset({'topic_items', 'topic_runs', 'topic_calendar_events'})
+OPERATIONAL_TABLES = frozenset({'migration_runs'})
 
 
 def library_source_id(table, columns):
@@ -62,7 +64,7 @@ def store_at(root: Path) -> Store:
 
 def schema(db, *, require_current=True):
     names = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    unknown = names - TABLES - {'sqlite_sequence'}
+    unknown = names - TABLES - OPERATIONAL_TABLES - {'sqlite_sequence'}
     missing = TABLES - names
     if unknown or (missing if require_current else not {'sources', 'settings', 'index_versions'} <= names):
         raise ValueError(f'不支持的数据库结构（请先升级应用）：未知表 {sorted(unknown)}，缺少表 {sorted(missing)}')
@@ -159,6 +161,8 @@ def rewrite_database(path, transform, *, secrets=False):
     with database(path) as db:
         db.row_factory = sqlite3.Row
         db.execute('PRAGMA secure_delete=ON')
+        if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='migration_runs'").fetchone():
+            db.execute("DELETE FROM migration_runs")
         for table in sorted(schema(db)):
             columns = [r['name'] for r in db.execute(f'PRAGMA table_info({table})')]
             for row in db.execute(f'SELECT rowid AS _rowid_,* FROM {table}').fetchall():

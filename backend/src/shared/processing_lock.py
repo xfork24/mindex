@@ -120,7 +120,8 @@ class PublicationLock(ProcessingLock):
 
 def recover_tasks(store, table):
     """A live task owns its work lock even when GPU exclusivity is disabled."""
-    _recover_tasks(store, table)
+    if getattr(store, "queue_backend", "inline") != "postgres":
+        _recover_tasks(store, table)
 
 
 def task_lock_work(work, options=None):

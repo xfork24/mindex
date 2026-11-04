@@ -211,15 +211,22 @@ def chroma_http_client(section):
 
 
 class ChromaServerVectorStores:
-    """独立 Chroma 服务实现工厂：集合名 ``idx-<index_id>``，与本地实现同协议。"""
+    """共享集合按库 UUID 隔离；未绑定的工厂只供旧集合迁移工具使用。"""
 
     backend = "chroma_server"
 
-    def __init__(self, section):
+    def __init__(self, section, *, library_id: str | None = None):
         self.section = section
+        if library_id is not None:
+            from uuid import UUID
+
+            library_id = str(UUID(library_id))
+        self.library_id = library_id
 
     def open(self, index_id: str, *, create: bool = False):
         client = chroma_http_client(self.section)
+        if self.library_id is not None:
+            client = LibraryVectorClient(client, self.library_id)
         name = "idx-" + index_id
         if create:
             collection = client.get_or_create_collection(
@@ -228,3 +235,20 @@ class ChromaServerVectorStores:
         else:
             collection = client.get_collection(name, embedding_function=None)
         return LocalVectorStore(collection)
+
+
+class LibraryVectorClient:
+    """向量业务连接只暴露本库集合；原始 HttpClient 仍按 endpoint/token 复用。"""
+
+    def __init__(self, client, library_id: str):
+        from uuid import UUID
+
+        self.client = client
+        self.library_id = str(UUID(library_id))
+        self.prefix = "lib-" + UUID(library_id).hex + "-"
+
+    def get_collection(self, name: str, **kwargs):
+        return self.client.get_collection(self.prefix + name, **kwargs)
+
+    def get_or_create_collection(self, name: str, **kwargs):
+        return self.client.get_or_create_collection(self.prefix + name, **kwargs)

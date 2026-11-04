@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import atexit
 import hashlib
 import re
 import threading
@@ -29,9 +30,9 @@ from mindex.shared.db.statements import DualSQL
 
 __all__ = ["PgBackend"]
 
-_CHECKOUT_TIMEOUT = 30.0
 # 进程内共享池：同一 DSN 一个池，与 Store 实例的生命周期无关。
-_POOLS: dict[str, Any] = {}
+_POOLS: dict[tuple[str, bool], Any] = {}
+_POOL_SETTINGS: dict[str, tuple] = {}
 _POOLS_LOCK = threading.Lock()
 
 _INSERT_TABLE_RE = re.compile(r"^\s*INSERT\s+INTO\s+([A-Za-z_][A-Za-z0-9_]*)", re.IGNORECASE)
@@ -91,11 +92,44 @@ class CursorView:
 class PgConnection:
     """业务代码在 ``store.connect()`` 里拿到的统一连接。"""
 
-    def __init__(self, connection, library_key: tuple[int, int]):
+    def __init__(self, connection, library_key: tuple[int, int], library_id=None, scope=None,
+                 backend=None, execution=None, control=False):
         self._connection = connection
         self._library_key = library_key
+        self._library_id = library_id
+        self._scope = scope
+        self._backend = backend
+        self._execution = execution
+        self._control = control
+
+    def _guard_write(self, sql):
+        # 包含写 CTE；只读 SELECT 不受维护影响。字符串/注释使用同一词法扫描器排除。
+        from mindex.shared.db.dialect import _segments
+        from mindex.shared.db.maintenance_gate import guard_write
+
+        code = " ".join(text for is_code, text in _segments(str(sql)) if is_code or text.startswith('"'))
+        if self._control:
+            # 控制连接只能维护调度与租约，不提供业务写入的 fencing/维护绕过入口。
+            targets = re.findall(
+                r"\b(?:INSERT(?:\s+OR\s+(?:REPLACE|IGNORE))?\s+INTO|UPDATE|DELETE\s+FROM|ALTER\s+TABLE|DROP\s+TABLE|TRUNCATE(?:\s+TABLE)?)"
+                r'\s+(?!SET\b)([\w"]+)', code, re.I)
+            if (any(target.lower().strip('"') not in {"task_queue", "lock_resources", "lock_holders"}
+                    for target in targets)
+                    or re.search(r"\b(CREATE|ALTER|DROP|TRUNCATE|CALL|COPY)\b", code, re.I)
+                    or re.match(r"\s*DO\b", code, re.I)):
+                raise RuntimeError("控制连接只允许队列和租约维护，业务写入必须使用普通事务")
+        if self._library_id and re.search(r"\b(INSERT|UPDATE|DELETE|ALTER|DROP|TRUNCATE|CREATE)\b", code, re.I):
+            guard_write(self._connection, self._library_id, self._scope)
+            self._verify()
+
+    def _verify(self):
+        if self._backend is not None and not self._control:
+            from mindex.shared.db.fencing import verify_transaction
+
+            verify_transaction(self._connection, self._backend, execution=self._execution)
 
     def execute(self, sql, args: Sequence[Any] = ()) -> CursorView:
+        self._guard_write(sql.pg if isinstance(sql, DualSQL) else sql)
         if isinstance(sql, DualSQL):
             text = sql.pg  # 已是 PG 原生写法（%s 占位符），不再改写
             column = None
@@ -120,6 +154,7 @@ class PgConnection:
         return CursorView(cursor, lastrowid)
 
     def executemany(self, sql, args) -> CursorView:
+        self._guard_write(sql.pg if isinstance(sql, DualSQL) else sql)
         text = sql.pg if isinstance(sql, DualSQL) else _prepare(sql)
         cursor = self._connection.cursor()
         try:
@@ -129,6 +164,7 @@ class PgConnection:
         return CursorView(cursor)
 
     def commit(self) -> None:
+        self._verify()
         self._connection.commit()
 
     def rollback(self) -> None:
@@ -171,9 +207,22 @@ def _translate(exc: Exception) -> Exception:
 class PgBackend:
     backend = "postgres"
 
-    def __init__(self, dsn: str, *, library_id: str, pool_max: int = 8):
+    def __init__(self, dsn: str, *, library_id: str, pool_max: int = 8, pool_min: int = 0,
+                 control_pool_max: int = 2, connection_budget: int = 10,
+                 checkout_timeout: float = 30, control_checkout_timeout: float = 5,
+                 queue_backend: str = "inline"):
+        if not 0 <= pool_min <= pool_max or control_pool_max < 1:
+            raise ValueError("PostgreSQL 连接池容量无效")
+        if pool_max + control_pool_max > connection_budget:
+            raise ValueError("PostgreSQL 查询池与控制池超过总连接预算")
         self.dsn = dsn
         self.pool_max = pool_max
+        self.pool_min = pool_min
+        self.control_pool_max = control_pool_max
+        self.checkout_timeout = checkout_timeout
+        self.control_checkout_timeout = control_checkout_timeout
+        self.queue_backend = queue_backend
+        self.library_id = library_id
         digest = hashlib.sha256(library_id.encode("utf-8")).digest()
         # advisory lock 的 int4 对：取 library_id 摘要前 8 字节拆两个有符号 32 位。
         self.library_key = (
@@ -181,35 +230,62 @@ class PgBackend:
             int.from_bytes(digest[4:8], "big", signed=True),
         )
 
-    def pool(self):
+    def pool(self, *, control=False):
+        key = (self.dsn, control)
+        settings = (self.pool_min, self.pool_max, self.control_pool_max,
+                    self.checkout_timeout, self.control_checkout_timeout)
         with _POOLS_LOCK:
-            pool = _POOLS.get(self.dsn)
+            if self.dsn in _POOL_SETTINGS and _POOL_SETTINGS[self.dsn] != settings:
+                raise RuntimeError("同一 PostgreSQL 连接的池配置不一致；修改连接预算后请重启进程")
+            pool = _POOLS.get(key)
             if pool is None:
                 try:
                     from psycopg_pool import ConnectionPool
                 except ImportError as exc:  # pragma: no cover - 依赖缺失时给出明确指引
                     raise RuntimeError("PostgreSQL 后端需要 psycopg：uv sync --extra cluster") from exc
                 pool = ConnectionPool(
-                    self.dsn, min_size=0, max_size=self.pool_max,
-                    timeout=_CHECKOUT_TIMEOUT, open=True,
+                    self.dsn, min_size=0 if control else self.pool_min,
+                    max_size=self.control_pool_max if control else self.pool_max,
+                    timeout=self.control_checkout_timeout if control else self.checkout_timeout, open=True,
                 )
-                _POOLS[self.dsn] = pool
+                _POOLS[key] = pool
+                _POOL_SETTINGS[self.dsn] = settings
             return pool
 
     @contextmanager
-    def connect(self) -> Iterator[PgConnection]:
-        with self.pool().connection() as conn:  # 正常退出提交、异常回滚并归还
-            yield PgConnection(conn, self.library_key)
+    def connect(self, *, control=False, execution=None) -> Iterator[PgConnection]:
+        from mindex.shared.db.fencing import ExecutionFence
+
+        fence = execution if execution is not None else ExecutionFence.capture()
+        with self.pool(control=control).connection() as conn:  # 正常退出提交、异常回滚并归还
+            view = PgConnection(conn, self.library_key, None if control else self.library_id, self.dsn,
+                                backend=self, execution=fence, control=control)
+            view._verify()
+            yield view
+            view._verify()
 
     def metrics(self) -> dict:
         """池等待/使用指标（plans §12 监控）；池未建时为空。
 
         psycopg_pool 3.3+ 用 ``get_stats()``（返回 requests_waiting 等计数）。
         """
-        pool = _POOLS.get(self.dsn)
+        pool = _POOLS.get((self.dsn, False))
         if pool is None:
             return {}
         try:
             return {key: int(value) for key, value in pool.get_stats().items()}
         except Exception:  # noqa: BLE001 — 指标缺失不改变就绪语义
             return {}
+
+
+def close_pools() -> None:
+    """仅由进程退出或独立测试环境调用；短生命周期 Store 不关闭共享池。"""
+    with _POOLS_LOCK:
+        pools = list(_POOLS.values())
+        _POOLS.clear()
+        _POOL_SETTINGS.clear()
+    for pool in pools:
+        pool.close()
+
+
+atexit.register(close_pools)

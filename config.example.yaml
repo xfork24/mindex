@@ -2,6 +2,10 @@
 # 下列 192.168.1.86 等局域网地址仅为示例，请替换为自己的部署，或在设置页配置并激活模型档案。
 # 完整键说明见 docs/config-reference.md；未知键会使配置校验失败。
 data_dir: ./data
+server:
+  role: api
+  form: auto  # 正式集群设为 cluster；共享后端不齐时拒绝启动
+  library_id: null  # 可填写期望的库 UUID，防止连错数据库
 # 元数据库后端（水平扩展，见 docs/config-reference.md 与 plans/horizontal-scaling-plan.md）。
 # 缺省 sqlite 即本地 metadata.sqlite3；postgres 为 pg-single 过渡形态（单主机单 API；
 # 先运行 MINDEX_DATABASE_DSN=… mindex migrate，DSN 只从环境变量读取）。
@@ -12,6 +16,9 @@ database:
   #   pool_min: 0
   #   pool_max: 8
   #   control_pool_max: 2
+  #   connection_budget: 10  # 当前进程查询池 + 控制池的总连接上限
+  #   checkout_timeout: 30
+  #   control_checkout_timeout: 5
 # 向量后端：缺省本地嵌入 chroma（<data_dir>/chroma）；chroma_server 为独立 Chroma
 # 服务（需 database.backend=postgres；凭据只从环境变量读取，镜像版本由部署固定）。
 vector:

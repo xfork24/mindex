@@ -1,17 +1,23 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import threading
 import uuid
 from collections import OrderedDict
 from contextlib import contextmanager
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from mindex.shared.backends.vectors import VectorStores
 
 from mindex.shared.db.sqlite_backend import SqliteBackend
 from mindex.shared.migrations import execute_script, migrate
 
 # 检索热路径的整索引快照缓存（活动索引 + 一个固定预览索引足够）。
 SNAPSHOT_CACHE_ENTRIES = 2
+SNAPSHOT_CACHE_TOTAL_ENTRIES = 8
 # 原地改写或删除 index_members 的维护操作用它显式使缓存失效。
 SNAPSHOT_REVISION_KEY = "snapshots.rev"
 _SNAPSHOT_CACHE: OrderedDict = OrderedDict()
@@ -379,8 +385,30 @@ def _metadata_v14(db):
     中的 download_pins）；本地形态无预签名，此步为空操作。"""
 
 
+def _metadata_v16(db):
+    from mindex.shared.db.scaling_schema import SQLITE_FILES
+
+    execute_script(db, SQLITE_FILES)
+
+
 # metadata.sqlite3 的有序迁移：只追加，不修改已发布的步骤（见 shared/migrations.py）。
-METADATA_STEPS = (_metadata_v1, _metadata_v2, _metadata_v3, _metadata_v4, _metadata_v5, _metadata_v6, _metadata_v7, _metadata_v8, _metadata_v9, _metadata_v10, _metadata_v11, _metadata_v12, _metadata_v13, _metadata_v14, _metadata_v15)
+def _metadata_v17(db):
+    from mindex.shared.db.scaling_schema import LEDGER_TABLES
+
+    for table in LEDGER_TABLES:
+        columns = {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
+        if "queue_attempt_id" not in columns:
+            db.execute(f"ALTER TABLE {table} ADD COLUMN queue_attempt_id TEXT")
+        if "queue_fencing_token" not in columns:
+            db.execute(f"ALTER TABLE {table} ADD COLUMN queue_fencing_token INTEGER NOT NULL DEFAULT 0")
+
+
+def _metadata_v18(db):
+    db.execute("CREATE TABLE IF NOT EXISTS migration_runs (migration_id TEXT PRIMARY KEY,source_sha256 TEXT NOT NULL,"
+               "status TEXT NOT NULL,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")
+
+
+METADATA_STEPS = (_metadata_v1, _metadata_v2, _metadata_v3, _metadata_v4, _metadata_v5, _metadata_v6, _metadata_v7, _metadata_v8, _metadata_v9, _metadata_v10, _metadata_v11, _metadata_v12, _metadata_v13, _metadata_v14, _metadata_v15, _metadata_v16, _metadata_v17, _metadata_v18)
 
 
 def migrate_metadata(db) -> int:
@@ -389,6 +417,10 @@ def migrate_metadata(db) -> int:
 
 
 class Store:
+    # 直构 Store 仅用于本地暂存；open_context 为业务入口绑定库身份。
+    library_id: str = ""
+    vectors: VectorStores | None = None
+
     @classmethod
     def open(cls, config) -> Store:
         """经 BackendContext 构造（plans/horizontal-scaling-plan.md §5）。
@@ -599,12 +631,15 @@ class Store:
 
     def retain_snapshots(self, keep: set[str]) -> int:
         """淘汰本库快照缓存中不在 keep 里的索引版本（活动指针移走后，旧版本不会再被默认路径用到）。返回淘汰条数。"""
-        path = str(self.path)
+        path = self._snapshot_cache_scope()
         with _SNAPSHOT_LOCK:
             stale = [key for key in _SNAPSHOT_CACHE if key[0] == path and key[1] not in keep]
             for key in stale:
                 del _SNAPSHOT_CACHE[key]
         return len(stale)
+
+    def _snapshot_cache_scope(self):
+        return (str(self.path), self.library_id) if self.pg else str(self.path)
 
     def snapshots_shared(self, index_id: str) -> list[dict]:
         """进程内共享的整索引快照，供只读的检索热路径使用；调用方不得修改返回的列表及其中的字典。
@@ -612,7 +647,7 @@ class Store:
         签名先于加载取得：加载期间若有写入，缓存里是较新数据却挂着旧签名，下次比对不一致会重新加载。
         """
         signature = self.snapshot_signature(index_id)
-        key = (str(self.path), index_id)
+        key = (self._snapshot_cache_scope(), index_id)
         with _SNAPSHOT_LOCK:
             cached = _SNAPSHOT_CACHE.get(key)
             if cached is not None and cached[0] == signature:
@@ -626,22 +661,29 @@ class Store:
             siblings = [k for k in _SNAPSHOT_CACHE if k[0] == key[0]]
             for stale in siblings[: max(0, len(siblings) - SNAPSHOT_CACHE_ENTRIES)]:
                 del _SNAPSHOT_CACHE[stale]
+            while len(_SNAPSHOT_CACHE) > SNAPSHOT_CACHE_TOTAL_ENTRIES:
+                _SNAPSHOT_CACHE.popitem(last=False)
         return loaded
 
     def media_available(self, relative: str) -> bool:
         media = getattr(self, "media", None)
         if media is not None and getattr(media, "backend", "local") == "s3":
             try:
-                media.stat(relative)
-                return True
+                from mindex.shared import files
+
+                entry = files.pointer(self, relative)
+                if entry is not None and entry["size"] < 0:
+                    return False
+                obj = media.stat(entry["object_key"] if entry is not None else relative)
+                return entry is None or (obj.size == entry["size"] and obj.sha256 == entry["sha256"])
             except FileNotFoundError:
-                return False
+                pass
             except Exception:  # noqa: BLE001 — 远端不可达按不可用处理，由上层给出诊断
                 return False
         path = (self.root / relative).resolve()
         if not path.is_relative_to(self.root):
             return False
-        if path.is_file():
+        if path.is_file() and getattr(media, "backend", "local") != "s3":
             return True
         reference = self.one("SELECT source_id,start,end FROM media_references WHERE path=?", (relative,))
         if reference is None:
@@ -657,18 +699,55 @@ class Store:
         return False
 
     def resolve_media(self, relative: str) -> Path:
+        """兼容 Path 入口；长期处理和响应应使用 materialize_media 持有整个上下文。"""
+        with self.materialize_media(relative) as path:
+            return path
+
+    @contextmanager
+    def materialize_media(self, relative: str):
+        """解析权威文件指针，物化 pin 覆盖调用方的完整使用期。"""
+        local = (self.root / relative).resolve()
+        if not local.is_relative_to(self.root):
+            raise FileNotFoundError(relative)
         media = getattr(self, "media", None)
         if media is not None and getattr(media, "backend", "local") == "s3":
-            local = (self.root / relative).resolve()
-            if local.is_file():
-                return local  # 节点本地产物（切片/缩略图等）优先，尚未远端化
-            # 对象存储形态：按需物化到节点缓存（内容寻址；staging 负责 LRU/pin）。
-            # 对象不存在时继续走下方虚拟媒体（moment/scene）合成逻辑。
+            from mindex.shared import files
+
+            entry = files.pointer(self, relative)
+            if entry is not None and entry["size"] < 0:
+                raise FileNotFoundError(relative)
+            key = entry["object_key"] if entry is not None else relative
             try:
-                with media.materialize(relative) as cached:
-                    return Path(cached)
+                context = media.materialize(key)
+                cached = context.__enter__()
             except FileNotFoundError:
-                pass
+                if entry is not None:
+                    raise  # 权威对象缺失，不能以旧的节点缓存掩盖损坏或删除。
+            else:
+                try:
+                    if entry is not None:
+                        with Path(cached).open("rb") as handle:
+                            digest = hashlib.file_digest(handle, "sha256").hexdigest()
+                        if Path(cached).stat().st_size != entry["size"] or digest != entry["sha256"]:
+                            raise ValueError(f"共享媒体摘要与元数据库指针不一致：{relative}")
+                    yield Path(cached)
+                finally:
+                    context.__exit__(None, None, None)
+                return
+            reference = self.one("SELECT source_id,start,end FROM media_references WHERE path=?", (relative,))
+            if reference is None:
+                reference = self.one("SELECT source_id,start,end FROM segments WHERE path=? "
+                                     "AND kind IN ('moment','scene')", (relative,))
+            if reference:
+                from mindex.shared.shot_media import ShotMedia
+
+                with ShotMedia(self).materialized(reference['source_id'], reference['start'], reference['end']) as path:
+                    yield path
+                return
+            raise FileNotFoundError(relative)
+        yield self._resolve_local_media(relative)
+
+    def _resolve_local_media(self, relative: str) -> Path:
         path = (self.root / relative).resolve()
         if not path.is_relative_to(self.root):
             raise FileNotFoundError(relative)
@@ -721,11 +800,16 @@ class PgStore(Store):
         # 先用一次引导连接完成版本校验并读取 library_id；锁键/缓存租户键都用它（plans §2）。
         from mindex.shared.db.migrate_pg import check_schema
 
-        with PgBackend(dsn, library_id="bootstrap", pool_max=section.pool_max).connect() as db:
+        pool_options = {key: getattr(section, key) for key in (
+            "pool_min", "pool_max", "control_pool_max", "connection_budget",
+            "checkout_timeout", "control_checkout_timeout")}
+        with PgBackend(dsn, library_id="bootstrap", **pool_options).connect() as db:
             check_schema(db)
             row = db.execute("SELECT value FROM settings WHERE key=?", ("library.id",)).fetchone()
         if row is None:  # 基线迁移未跑或未建库：给出唯一修复入口
             raise RuntimeError("PostgreSQL 元数据库缺少 library.id；请先执行 mindex migrate")
         self.library_id = row[0]
-        self.backend = PgBackend(dsn, library_id=self.library_id, pool_max=section.pool_max)
+        self.backend = PgBackend(dsn, library_id=self.library_id, **pool_options,
+                                 queue_backend=config.queue.backend)
         self.locks_backend = config.locks.backend
+        self.queue_backend = config.queue.backend

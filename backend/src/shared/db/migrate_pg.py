@@ -13,12 +13,17 @@ import hashlib
 import uuid
 
 from mindex.shared.db.errors import SchemaMismatch
+from mindex.shared.db.scaling_schema import PG_EXECUTION, PG_FILES, PG_QUEUE
 from mindex.shared.db.schema_pg import BASELINE_DDL, DELIVERY_PLATFORMS_SEED
 
 __all__ = ["check_schema", "migrate_pg", "pg_schema_version"]
 
 # 迁移锁键（固定值）：与 library 无关，防止两个迁移进程同时改表。
 _MIGRATION_LOCK_KEY = (0x4D49_4E44, 0x4D49_4752)  # "MIND"/"MIGR"
+
+# v15 为已发布基线；之后只追加，禁止升级时重跑基线覆盖已有表定义。
+BASELINE_VERSION = 15
+PG_STEPS = ((16, PG_FILES + PG_QUEUE), (17, PG_EXECUTION), (18, "SELECT 1;"))
 
 
 def _logical_version() -> int:
@@ -50,10 +55,14 @@ def check_schema(conn) -> None:
         raise SchemaMismatch(
             f"PostgreSQL 元数据库 schema 版本 {current} 高于程序要求 {expected}；"
             "请升级程序后再连接")
+    for version, ddl in PG_STEPS:
+        row = conn.execute("SELECT checksum FROM schema_migrations WHERE version=%s", (version,)).fetchone()
+        if row is None or row[0] != hashlib.sha256(ddl.encode()).hexdigest():
+            raise SchemaMismatch(f"PostgreSQL 追加迁移 v{version} 校验值不一致；请核对迁移历史")
 
 
 def migrate_pg(conn) -> int:
-    """把基线应用到空库并登记版本；已有同版本则幂等跳过。返回最终版本。"""
+    """空库建立 v15 基线，旧库按顺序执行追加迁移；版本与 DDL 同事务提交。"""
     expected = _logical_version()
     with conn.transaction():
         conn.execute("SELECT pg_advisory_xact_lock(%s, %s)", _MIGRATION_LOCK_KEY)
@@ -63,27 +72,43 @@ def migrate_pg(conn) -> int:
             "applied_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'utc','YYYY-MM-DD HH24:MI:SS'))"
         )
         current = pg_schema_version(conn)
-        if current >= expected:
-            return current
+        if current > expected:
+            raise SchemaMismatch("PostgreSQL schema 高于程序要求；请升级程序，不执行降级迁移")
+        if 0 < current < BASELINE_VERSION:
+            raise SchemaMismatch("不支持的 PostgreSQL 基线版本；请先用对应版本导出再迁移")
         if current == 0 and not _database_is_empty(conn):
             raise SchemaMismatch("目标库非空且没有迁移记录；装载已有数据请使用备份/迁移工具，不在启动路径改表")
-        conn.execute(BASELINE_DDL)
-        from mindex.shared.storage import dumps
+        if current == 0:
+            conn.execute(BASELINE_DDL)
+            from mindex.shared.storage import dumps
 
-        conn.cursor().executemany(
-            "INSERT INTO delivery_platforms(id,body,created_at,updated_at) VALUES(%s,%s,%s,%s)"
-            " ON CONFLICT (id) DO NOTHING",
-            DELIVERY_PLATFORMS_SEED(dumps),
-        )
-        checksum = hashlib.sha256(BASELINE_DDL.encode("utf-8")).hexdigest()
-        conn.execute(
-            "INSERT INTO schema_migrations(version,checksum) VALUES(%s,%s)", (expected, checksum)
-        )
-        # 建库生成 library UUID（锁与缓存按它隔离，plans §2；不用路径 hash 当租户键）。
-        conn.execute(
-            "INSERT INTO settings(key,value) VALUES('library.id',%s) ON CONFLICT (key) DO NOTHING",
-            (str(uuid.uuid4()),),
-        )
+            conn.cursor().executemany(
+                "INSERT INTO delivery_platforms(id,body,created_at,updated_at) VALUES(%s,%s,%s,%s)"
+                " ON CONFLICT (id) DO NOTHING",
+                DELIVERY_PLATFORMS_SEED(dumps),
+            )
+            conn.execute(
+                "INSERT INTO schema_migrations(version,checksum) VALUES(%s,%s)",
+                (BASELINE_VERSION, hashlib.sha256(BASELINE_DDL.encode()).hexdigest()))
+            conn.execute(
+                "INSERT INTO settings(key,value) VALUES('library.id',%s) ON CONFLICT (key) DO NOTHING",
+                (str(uuid.uuid4()),),
+            )
+            current = BASELINE_VERSION
+        for version, ddl in PG_STEPS:
+            checksum = hashlib.sha256(ddl.encode()).hexdigest()
+            if version <= current:
+                row = conn.execute("SELECT checksum FROM schema_migrations WHERE version=%s", (version,)).fetchone()
+                if row is None or row[0] != checksum:
+                    raise SchemaMismatch(f"PostgreSQL 追加迁移 v{version} 校验值不一致；拒绝改写迁移历史")
+                continue
+            if version != current + 1:
+                raise SchemaMismatch("PostgreSQL 追加迁移不连续，拒绝启动迁移")
+            conn.execute(ddl)
+            conn.execute("INSERT INTO schema_migrations(version,checksum) VALUES(%s,%s)", (version, checksum))
+            current = version
+        if current != expected:
+            raise SchemaMismatch("PostgreSQL 与 SQLite 的迁移版本不一致")
         return expected
 
 
@@ -101,7 +126,8 @@ def fix_sequences(conn, tables: list[str]) -> None:
     ``conn`` 接受 PgConnection 包装或原生 psycopg 连接（仅位置参数取值）。
     """
     for table in tables:
+        column = "id" if table in {"model_profiles", "voices", "runs"} else "rowid"
         conn.execute(
-            "SELECT setval(pg_get_serial_sequence(%s, 'rowid'),"
-            " COALESCE((SELECT max(rowid) FROM " + table + "), 0) + 1, false)", (table,)
+            "SELECT setval(pg_get_serial_sequence(%s, %s),"
+            f" COALESCE((SELECT max({column}) FROM {table}), 0) + 1, false)", (table, column)
         )

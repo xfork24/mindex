@@ -1,52 +1,63 @@
-"""分布式维护门闩（plans §8/§11 阶段 5）。
+"""PG 维护门闩：正常写事务持共享锁，维护持独占 session 锁。
 
-破坏性维护（clean/purge/备份导出）在集群形态下必须全局互斥：与处理任务、其它
-维护进程、GC 相互排除。实现为 PG **事务级 advisory lock**（专用键 = library_id
-摘要 + "MAINT" 常量）：持有期内其它维护请求快速失败（MaintenanceBusy，中文提示
-稍后再试）；事务结束自动释放，崩溃不留残留。
-
-本地/pg-single 过渡形态沿用 data_dir 文件锁语义（clean/purge 已持 pipeline+
-library 独占锁），本门闩只在 ``database.backend=postgres`` 时生效——与
-ProcessingLock 的「同库事务互斥」不同键，互不阻塞正常处理（维护另行独占
-pipeline/library 文件锁的既有行为不变，多机文件的替代随 locks=postgres 的
-全面接线在阶段 5 后续完成）。
+专用连接保证异常/断连时锁被服务器释放，不把 session 锁遗留在连接池中。
 """
-
 from __future__ import annotations
 
 import hashlib
 from contextlib import contextmanager
+from contextvars import ContextVar
+
+_ACTIVE = ContextVar("mindex_maintenance", default=None)
 
 __all__ = ["MaintenanceBusy", "maintenance_gate"]
 
 
 class MaintenanceBusy(RuntimeError):
-    """已有维护进程在运行；稍后再试（不排队等待，避免长时间占住 API 线程）。"""
+    pass
 
 
-def _keys(library_id: str) -> tuple[int, int]:
-    digest = hashlib.sha256(f"maintenance:{library_id}".encode()).digest()
+def _keys(library_id):
+    # PG advisory 锁本身按 database 隔离；迁移更换 library.id 时仍必须持同一门闩。
+    digest = hashlib.sha256(b"maintenance:mindex").digest()
     return (int.from_bytes(digest[:4], "big", signed=True),
             int.from_bytes(digest[4:8], "big", signed=True))
 
 
-@contextmanager
-def maintenance_gate(store, *, name: str, wait: float = 0):
-    """进入破坏性维护临界区；拿不到抛 ``MaintenanceBusy``。
+def guard_write(connection, library_id, scope):
+    if _ACTIVE.get() == scope:
+        return
+    row = connection.execute("SELECT pg_try_advisory_xact_lock_shared(%s,%s)", _keys(library_id)).fetchone()
+    if not row[0]:
+        raise MaintenanceBusy("素材库正在维护，暂不接受写入；请稍后重试")
 
-    ``name`` 仅用于诊断信息。必须在 store 的事务连接上进入（调用方随后的维护
-    写入与门闩同一事务，提交即释放）。
-    """
+
+@contextmanager
+def maintenance_gate(store, *, name, wait=0):
     if not store.pg:
         yield {"mode": "file-locks", "name": name}
         return
-    with store.connect() as db:
-        row = db.execute(
-            "SELECT pg_try_advisory_lock(%s, %s) AS got", _keys(store.library_id)
-        ).fetchone()
-        if not row["got"]:
-            raise MaintenanceBusy(f"已有维护进程在运行（{name}）；请稍后再试")
-        try:
-            yield {"mode": "pg-advisory", "name": name}
-        finally:
-            db.execute("SELECT pg_advisory_unlock(%s, %s)", _keys(store.library_id))
+    if _ACTIVE.get() == store.backend.dsn:
+        raise MaintenanceBusy(f"已有维护进程在运行（{name}）；请稍后再试")
+    import psycopg
+    from filelock import Timeout
+
+    from mindex.shared import lock_backend
+
+    try:
+        # 排空长任务与发布；同线程内后续维护事务豁免共享门闩。
+        with lock_backend.acquire_ordered(store, ["pipeline", "index-write", "library", "studio", "topics"],
+                                          exclusive=True, timeout=wait):
+            with psycopg.connect(store.backend.dsn, autocommit=True) as db:
+                got = db.execute("SELECT pg_try_advisory_lock(%s,%s)", _keys(store.library_id)).fetchone()[0]
+                if not got:
+                    raise MaintenanceBusy(f"已有写入或维护进程在运行（{name}）；请稍后重试")
+                token = _ACTIVE.set(store.backend.dsn)
+                try:
+                    yield {"mode": "pg-advisory", "name": name}
+                finally:
+                    _ACTIVE.reset(token)
+                    # 无论业务事务是否 aborted，此独立连接均可解锁；关闭连接再次兜底。
+                    db.execute("SELECT pg_advisory_unlock(%s,%s)", _keys(store.library_id))
+    except Timeout as exc:
+        raise MaintenanceBusy(f"有处理或发布任务正在运行（{name}）；请稍后重试") from exc

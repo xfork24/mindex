@@ -13,6 +13,7 @@ from mindex.processing.pipeline import Pipeline
 from mindex.shared.background_tasks import BackgroundTaskRunner, public_task
 from mindex.shared.config import Config, StrictModel, absolutize_config_paths, relativize_config_paths
 from mindex.shared.processing_lock import ProcessingLock
+from mindex.shared.queue_dispatch import insert_ledger
 from mindex.shared.storage import dumps
 from mindex.shared.task_cancel import TaskCancelled
 
@@ -63,6 +64,9 @@ def restore_config(raw, runtime, store):
     snapshot = absolutize_config_paths(runtime.base.data_dir, snapshot)
     config = Config.model_validate(snapshot)
     preserve_numbers(config, snapshot)
+    # 部署后端不进入冻结快照；恢复任务必须使用当前节点的配置和目录。
+    for key in ("database", "vector", "storage", "queue", "locks", "gpu", "server", "data_dir"):
+        setattr(config, key, getattr(runtime.base, key))
     for role in ("asr", "embedding", "analyzer", "person"):
         reference = profiles.get(role)
         profile = (
@@ -238,7 +242,7 @@ class SourceTasks(BackgroundTaskRunner):
                     type(config.video).model_validate(layout["video"]).model_copy(update=layout["video"])
                 )
             task_id = uuid.uuid4().hex
-            self.store.execute(
+            insert_ledger(self.store, self.table, task_id,
                 "INSERT INTO source_tasks(id,source_id,work,status,config,options) VALUES(?,?,?,?,?,?)",
                 (
                     task_id,

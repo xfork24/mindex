@@ -5,12 +5,12 @@ import json
 import re
 import sqlite3
 import subprocess
-from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 
 import numpy as np
 
 from mindex.models.model_server import refine_cut_frame
+from mindex.shared.db.fencing import FencedThreadPoolExecutor as ThreadPoolExecutor
 from mindex.shared.media import MediaError, atomic_media, command, ffmpeg_bin, probe
 from mindex.shared.storage import Store, bump_snapshot_revision
 

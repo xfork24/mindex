@@ -15,11 +15,31 @@ PG 形态下用 ``resource:<key>`` 的具名租约，key 与文件形态同源�
 
 from __future__ import annotations
 
+from contextlib import ExitStack, contextmanager
+
 from filelock import Timeout
 
 from mindex.shared import locks
 
-__all__ = ["LeaseHandle", "named", "provider_for", "resource", "uses_pg"]
+__all__ = ["LeaseHandle", "acquire_ordered", "named", "provider_for", "resource", "uses_pg"]
+
+
+@contextmanager
+def acquire_ordered(source, names, *, exclusive=True, timeout=0):
+    names = list(names)
+    order = [locks.ORDER.index(name) for name in names]
+    if order != sorted(order) or len(set(names)) != len(names):
+        raise ValueError("必须按规范顺序获取锁，且不得重复")
+    if getattr(source, "pg", False):
+        from mindex.shared.db.maintenance_gate import _ACTIVE
+        if _ACTIVE.get() is not None and _ACTIVE.get() == getattr(getattr(source, "backend", None), "dsn", None):
+            yield
+            return
+    with ExitStack() as stack:
+        for name in names:
+            wait = timeout.get(name, 0) if isinstance(timeout, dict) else timeout
+            stack.enter_context(named(source, name, exclusive=exclusive, timeout=wait))
+        yield
 
 
 def uses_pg(source) -> bool:
@@ -55,7 +75,7 @@ class LeaseHandle:
 
     @property
     def is_locked(self) -> bool:
-        return self.lease is not None
+        return self.lease is not None and self.lease.verify()
 
     def acquire(self, timeout=...):
         if self.lease is not None:
@@ -66,10 +86,14 @@ class LeaseHandle:
             raise Timeout(f"postgres-lease:{self.name}")
         lease.start_heartbeat()
         self.lease = lease
+        from mindex.shared.db.fencing import add_lease
+        add_lease(lease)
         return self
 
     def release(self):
         if self.lease is not None:
+            from mindex.shared.db.fencing import remove_lease
+            remove_lease(self.lease)
             self.lease.stop_heartbeat()
             self.lease.release()
             self.lease = None

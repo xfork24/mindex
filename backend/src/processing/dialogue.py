@@ -11,7 +11,6 @@ import json
 import math
 import re
 import tempfile
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from time import perf_counter
 
@@ -19,6 +18,7 @@ from mindex.models.adapters import make_transcriber
 from mindex.models.transcribers import parse_minimax_words
 from mindex.shared import jsonio
 from mindex.shared.config import Config, fingerprint
+from mindex.shared.db.fencing import FencedThreadPoolExecutor as ThreadPoolExecutor
 from mindex.shared.media import MediaError, command
 from mindex.shared.storage import Store, dumps
 
@@ -215,7 +215,7 @@ def relative_dialogue(data: dict, start: float, end: float) -> list[dict]:
 
 class DialogueProcessor:
     def __init__(self, config: Config, transcriber=None):
-        self.config, self.store, self.transcriber = config, Store(config.data_dir), transcriber
+        self.config, self.store, self.transcriber = config, Store.open(config), transcriber
 
     def save(self, source_id, profile, data):
         if data["status"] not in READY:

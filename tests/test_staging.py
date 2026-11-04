@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import select
+import subprocess
+import sys
 import threading
 
 import pytest
@@ -124,3 +127,62 @@ def test_threaded_reservations_stay_within_quota(tmp_path):
     # 任意时刻并发预约之和不超过预算（40*2 > 100 → 至多两个同时在册）
     assert len(allowed) >= 1
     assert staging.usage()["reserved"] == 0
+
+
+def test_independent_instances_share_budget_and_cannot_release_each_others_reservation(tmp_path):
+    first = StagingArea(tmp_path, quota_bytes=100)
+    second = StagingArea(tmp_path, quota_bytes=100)
+    try:
+        first.reserve(70)
+        assert second.usage()["reserved"] == 70
+        second.release(70)
+        assert first.usage()["reserved"] == 70
+        with pytest.raises(StagingFull):
+            second.reserve(40)
+        first.release(70)
+        second.reserve(100)
+        assert first.usage()["reserved"] == 100
+    finally:
+        first.close()
+        second.close()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="select 管道与 SIGKILL 验收在 POSIX 执行")
+def test_process_pin_survives_peer_eviction_and_crash_reclaims_owner(tmp_path):
+    script = """
+import sys
+from pathlib import Path
+from mindex.shared.backends.staging import StagingArea
+root = Path(sys.argv[1])
+area = StagingArea(root, quota_bytes=100)
+target = root / 'active.bin'
+target.write_bytes(b'x' * 80)
+area.adopt(target)
+area.pin(target)
+area.reserve(10)
+print('ready', flush=True)
+sys.stdin.read(1)
+"""
+    child = subprocess.Popen([sys.executable, "-c", script, str(tmp_path)],
+                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    peer = None
+    try:
+        assert select.select([child.stdout], [], [], 10)[0], "子进程 staging 未就绪"
+        assert child.stdout.readline().strip() == "ready"
+        peer = StagingArea(tmp_path, quota_bytes=100)
+        assert peer.usage()["reserved"] == 10
+        assert peer.usage()["pinned"] == 80
+        assert peer.evict(100) == 0
+        with pytest.raises(StagingFull):
+            peer.reserve(20)
+        child.kill()
+        child.communicate(timeout=5)
+        assert peer.usage()["reserved"] == 0
+        assert peer.usage()["pinned"] == 0
+        assert peer.evict(100) == 80
+    finally:
+        if child.poll() is None:
+            child.kill()
+        child.communicate(timeout=5)
+        if peer is not None:
+            peer.close()

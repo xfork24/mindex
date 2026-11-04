@@ -33,7 +33,7 @@ def persons_list(ctx: typer.Context):
     from mindex.persons.persons import Persons
     from mindex.shared.storage import Store
 
-    catalogue = Persons(Store(ctx.obj.data_dir))
+    catalogue = Persons(Store.open(ctx.obj))
     print_json({"entities": catalogue.entities(), "references": catalogue.references()})
 
 
@@ -59,7 +59,7 @@ def persons_save(
     from mindex.shared.storage import Store
 
     print_json(
-        Persons(Store(ctx.obj.data_dir)).save(Entity.model_validate_json(file.read_text(encoding="utf-8")), identifier)
+        Persons(Store.open(ctx.obj)).save(Entity.model_validate_json(file.read_text(encoding="utf-8")), identifier)
     )
 
 
@@ -83,7 +83,7 @@ def persons_reference(
     from mindex.shared.storage import Store
 
     config = ctx.obj
-    store = Store(config.data_dir)
+    store = Store.open(config)
     catalogue = Persons(store)
     client, space = PersonClient(config), None
 
@@ -121,8 +121,21 @@ def persons_process(
     from mindex.shared.processing_lock import ProcessingLock
     from mindex.shared.storage import Store, dumps
 
-    store = Store(ctx.obj.data_dir)
+    store = Store.open(ctx.obj)
     options = PersonOptions(start=start, end=end, publish=publish)
+    if ctx.obj.queue.backend == "postgres":
+        from mindex.persons.person_processing import PersonTasks
+        from mindex.settings.runtime_settings import RuntimeConfig
+
+        runner = PersonTasks(RuntimeConfig(ctx.obj, store), store)
+        if retry:
+            if runner.row(retry)["source_id"] != source:
+                raise typer.BadParameter("重试任务必须归属该素材")
+            task = runner.retry(retry)
+        else:
+            task = runner.start(source, options)
+        print_json({"task_id": task["id"], "status": task["status"], "log": None})
+        return
     if not store.one("SELECT id FROM sources WHERE id=?", (source,)):
         raise typer.BadParameter("找不到素材")
     with ProcessingLock(ctx.obj, source_id=source, work="persons"):
@@ -178,7 +191,7 @@ def persons_status(
     from mindex.shared.storage import Store
 
     manager = PersonTasks.__new__(PersonTasks)
-    manager.store = Store(ctx.obj.data_dir)
+    manager.store = Store.open(ctx.obj)
     print_json(manager.get(task))
 
 
@@ -200,7 +213,7 @@ def persons_publish(
     from mindex.shared.processing_lock import ProcessingLock, index_write_lock
     from mindex.shared.storage import Store
 
-    store = Store(ctx.obj.data_dir)
+    store = Store.open(ctx.obj)
     with ProcessingLock(ctx.obj), index_write_lock(store.root, config=ctx.obj):
         print_json(Persons(store).publish(content))
 
@@ -225,7 +238,7 @@ def persons_review(
     from mindex.persons.persons import Persons
     from mindex.shared.storage import Store
 
-    print_json(Persons(Store(ctx.obj.data_dir)).shot_review(ShotReview.model_validate_json(file.read_text(encoding="utf-8"))))
+    print_json(Persons(Store.open(ctx.obj)).shot_review(ShotReview.model_validate_json(file.read_text(encoding="utf-8"))))
 
 
 @app.command("activate")
@@ -244,7 +257,7 @@ def persons_activate(
     """
     from mindex.shared.storage import Store
 
-    store = Store(ctx.obj.data_dir)
+    store = Store.open(ctx.obj)
     store.activate_release(release)
     print_json({"release_id": release})
 

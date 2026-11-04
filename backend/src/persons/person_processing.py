@@ -20,6 +20,7 @@ from mindex.persons.persons import Persons
 from mindex.shared.background_tasks import BackgroundTaskRunner, public_task
 from mindex.shared.config import StrictModel, fingerprint
 from mindex.shared.processing_lock import ProcessingLock
+from mindex.shared.queue_dispatch import insert_ledger
 from mindex.shared.storage import Store, dumps
 from mindex.shared.task_progress import RETRYABLE
 
@@ -520,7 +521,7 @@ def attribute_frames(
 
 class PersonProcessor:
     def __init__(self, config, client=None, tracker_factory=ShotTracker):
-        self.config, self.store = config, Store(config.data_dir)
+        self.config, self.store = config, Store.open(config)
         self.catalogue = Persons(self.store)
         self.client = client or PersonClient(config)
         self.tracker_factory = tracker_factory
@@ -907,7 +908,7 @@ class PersonTasks(BackgroundTaskRunner):
             if options.work_id:
                 Persons(self.store).assign_work(source_id, options.work_id)
             identifier = uid()
-            self.store.execute(
+            insert_ledger(self.store, self.table, identifier,
                 "INSERT INTO person_tasks(id,source_id,status,config,options) VALUES(?,?,?,?,?)",
                 (identifier, source_id, "queued", freeze_config(config, self.store), options.model_dump_json()),
             )

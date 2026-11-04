@@ -9,13 +9,13 @@ import os
 import tempfile
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from filelock import FileLock
 
+from mindex.shared.db.fencing import FencedThreadPoolExecutor as ThreadPoolExecutor
 from mindex.shared.jsonio import save
 from mindex.shared.media import MediaError, atomic_media, probe
 
@@ -52,11 +52,16 @@ class ShotMedia:
         self._shots = {}
         self._paths = {}
         self._shot_ends = {}
+        self._materializations = None
 
     def _path(self, relative):
+        if self._materializations is not None:
+            if relative not in self._paths:
+                self._paths[relative] = self._materializations.enter_context(self.store.materialize_media(relative))
+            return self._paths[relative]
         if self.reuse_checks and relative in self._paths:
             return self._paths[relative]
-        if self.cache_probes and not self.reuse_checks:
+        if self.cache_probes and not self.reuse_checks or getattr(getattr(self.store, "media", None), "backend", "local") == "s3":
             path = self.store.resolve_media(relative)
             self._paths[relative] = path
             return path
@@ -347,6 +352,24 @@ class ShotMedia:
             os.utime(output, ns=(time.time_ns(), stat.st_mtime_ns))
             self._prune_if_due()
         return output
+
+    @contextmanager
+    def materialized(self, source_id: str, start=0, end=None):
+        """HTTP/长处理入口：保留所有远端镜头 pin 和合成缓存租约至使用结束。"""
+        previous = self._materializations
+        with ExitStack() as stack:
+            self._materializations = stack
+            self._paths = {}
+            try:
+                path = self.materialize(source_id, start, end)
+                if path.parent.name == 'shot-media':
+                    stack.enter_context(FileLock(str(path) + '.lock', thread_local=False))
+                if not path.is_file():
+                    raise FileNotFoundError(path)
+                yield path
+            finally:
+                self._materializations = previous
+                self._paths = {}
 
     def _prune_if_due(self):
         if not _PRUNE_LOCK.acquire(blocking=False):

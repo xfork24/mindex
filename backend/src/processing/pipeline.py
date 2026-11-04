@@ -114,6 +114,11 @@ class Pipeline:
             "parent_id": parent,
             "reason": reason,
         }
+        if self.config.storage.backend == "s3":
+            from mindex.shared import files
+            for file in (output, self.store.root / image):
+                if file.is_file():
+                    files.publish(self.store, file)
         self.store.execute(
             """INSERT OR IGNORE INTO segments
           (id,source_id,kind,start,end,path,thumbnail,generation,parent_id,reason)

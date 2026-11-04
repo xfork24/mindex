@@ -19,6 +19,8 @@ import threading
 import time
 import uuid
 from collections.abc import Callable
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from filelock import Timeout
@@ -104,29 +106,39 @@ class Worker:
         log.info("worker 启动 · %s · queues=%s · concurrency=%d",
                  self.identity[:8], ",".join(self.queues), self.concurrency)
         executed = 0
-        idle_since: float | None = None
-        while not self._stop.is_set():
-            task = self._claim_one()
-            if task is None:
+        idle_since = None
+        futures = set()
+        with ThreadPoolExecutor(max_workers=self.concurrency, thread_name_prefix="worker") as executor:
+            while not self._stop.is_set():
+                done = {future for future in futures if future.done()}
+                for future in done:
+                    future.result()
+                futures -= done
+                if len(futures) >= self.concurrency:
+                    wait(futures, timeout=POLL_SECONDS, return_when=FIRST_COMPLETED)
+                    continue
+                task = self._claim_one()
+                if task is None:
+                    if self.once:
+                        break
+                    if not futures:
+                        idle_since = idle_since or time.monotonic()
+                        if self.idle_exit is not None and time.monotonic() - idle_since >= self.idle_exit:
+                            break
+                    self._stop.wait(POLL_SECONDS)
+                    continue
+                idle_since = None
+                executed += 1
+                futures.add(executor.submit(self._execute, task))
                 if self.once:
                     break
-                if self.idle_exit is not None:
-                    idle_since = idle_since or time.monotonic()
-                    if time.monotonic() - idle_since >= self.idle_exit:
-                        log.info("空闲 %.0fs，按 --idle-exit 退出", self.idle_exit)
-                        break
-                time.sleep(POLL_SECONDS)
-                continue
-            idle_since = None
-            executed += 1
-            self._execute(task)
-            if self.once:
-                break
+            for future in futures:
+                future.result()
         log.info("worker 退出 · 执行 %d 个任务", executed)
         return executed
 
     # ------------------------------------------------------------ GPU 准入
-    def _acquire_gpu_slot(self):
+    def _acquire_gpu_slot(self, check=lambda: None):
         """按 ``gpu.capacity`` 声明申请一个槽位；容量 0 或非 GPU 类别返回 None。
 
         槽位是资源租约（locks=postgres 时跨节点互斥、TTL 到期才释放），失联 worker
@@ -139,6 +151,7 @@ class Worker:
 
         source = self.context.store
         while not self._stop.is_set():
+            check()
             for index in range(capacity):
                 try:
                     handle = lock_backend.resource(
@@ -157,22 +170,29 @@ class Worker:
             return self.queue.claim(db, self.identity, self.queues, **claim_kwargs)
 
     def _execute(self, task) -> None:
-        """单任务执行：心跳续期 + 取消轮询 + 终态提交（仅原 owner+attempt 可提交）。"""
-        stop = threading.Event()
-        lost = threading.Event()
+        """执行归属进入所有业务事务；队列与账本终态在同一事务提交。"""
+        from mindex.shared.db.fencing import Attempt, ExecutionFence, executing
+        from mindex.shared.db.locks_pg import LeaseLost
+        from mindex.shared.task_cancel import TaskCancelled, registry_for
+
+        stop, lost, cancelled = threading.Event(), threading.Event(), threading.Event()
+        attempt = Attempt(self.context.store.backend, self.context.library_id, task, lost, cancelled)
+        task = replace(task, execution=ExecutionFence(attempt))
 
         def heartbeat():
             from mindex.shared.db.queue_pg import TASK_TTL_SECONDS
-
             interval = self.renew_interval if self.renew_interval is not None else RENEW_SECONDS
             ttl = self.task_ttl if self.task_ttl is not None else TASK_TTL_SECONDS
             while not stop.wait(interval):
                 try:
-                    with self.context.db.connect() as db:
+                    with self.context.store.backend.connect(control=True) as db:
                         if not self.queue.renew(db, task, ttl=ttl):
                             lost.set()
-                            log.warning("任务 %d 心跳续期失败：租约已失效，停止执行", task.id)
                             return
+                        if self.queue.cancel_requested(db, task):
+                            cancelled.set()
+                            if task.ledger_id:
+                                registry_for(self.context.store.root).request(task.ledger_id)
                 except Exception:
                     lost.set()
                     log.exception("任务 %d 心跳异常，按失联处理", task.id)
@@ -180,48 +200,51 @@ class Worker:
 
         beat = threading.Thread(target=heartbeat, daemon=True, name=f"beat-{task.id}")
         beat.start()
-        self._slots.acquire()
         gpu_slot = None
+        outcome, error = "succeeded", None
         try:
-            if task.kind in self.config.gpu.queues:
-                gpu_slot = self._acquire_gpu_slot()
-            if lost.is_set() or self._cancel_requested(task):
-                self._finish_cancelled(task, lost)
-                return
-            handler = self.handlers.get(task.kind)
-            handler(self.config, task)
-            if lost.is_set():
-                log.warning("任务 %d 执行完成但租约已失联：不提交（回收重派）", task.id)
-                return
-            with self.context.db.connect() as db:
-                if not self.queue.complete(db, task):
-                    log.warning("任务 %d 完成提交被拒（attempt 已易主）", task.id)
+            with executing(attempt):
+                if self._cancel_requested(task):
+                    cancelled.set()
+                attempt.check()
+                if task.kind in self.config.gpu.queues:
+                    gpu_slot = self._acquire_gpu_slot(attempt.check)
+                attempt.check()
+                self.handlers.get(task.kind)(self.config, task)
+                attempt.check()
+        except TaskCancelled:
+            outcome = "cancelled"
+        except LeaseLost:
+            lost.set()
+            log.warning("任务 %d 的执行租约已失效，禁止提交", task.id)
         except Exception as exc:
+            outcome, error = "failed", f"{type(exc).__name__}: {exc}"
             log.exception("任务 %d（%s）执行失败", task.id, task.kind)
-            if not lost.is_set():
-                with self.context.db.connect() as db:
-                    self.queue.fail(db, task, f"{type(exc).__name__}: {exc}")
         finally:
             if gpu_slot is not None:
                 gpu_slot.release()
-            self._slots.release()
             stop.set()
+            beat.join(timeout=5)
+        if not lost.is_set():
+            self._finish(task, outcome, error)
 
     def _cancel_requested(self, task) -> bool:
-        try:
-            with self.context.db.connect() as db:
-                return self.queue.cancel_requested(db, task)
-        except Exception:  # noqa: BLE001
-            return False
+        with self.context.store.backend.connect(control=True) as db:
+            return self.queue.cancel_requested(db, task)
 
-    def _finish_cancelled(self, task, lost) -> None:
-        if lost.is_set():
-            log.warning("任务 %d 租约失联且收到取消：留给回收重派", task.id)
-            return
-        with self.context.db.connect() as db:
-            db.execute(
-                "UPDATE task_queue SET status='cancelled', expires_at=NULL,"
-                " updated_at=clock_timestamp() WHERE library_id=%s AND id=%s"
-                " AND status='running' AND owner=%s AND attempt_id=%s",
-                (self.queue.library_id, task.id, task.owner, task.attempt_id))
-        log.info("任务 %d 已按取消意图终止", task.id)
+    def _finish(self, task, outcome, error=None):
+        with self.context.store.backend.connect() as db:
+            row = db.execute(
+                "SELECT cancel_requested FROM task_queue WHERE library_id=%s AND id=%s"
+                " AND status='running' AND owner=%s AND attempt_id=%s AND fencing_token=%s"
+                " AND expires_at >= clock_timestamp() FOR UPDATE",
+                (self.queue.library_id, task.id, task.owner, task.attempt_id, task.fencing_token)).fetchone()
+            if row is None:
+                log.warning("任务 %d 终态被拒：attempt 已过期或易主", task.id)
+                return
+            if row["cancel_requested"] or outcome == "cancelled":
+                self.queue.finish_cancelled(db, task)
+            elif outcome == "failed":
+                self.queue.fail(db, task, error)
+            else:
+                self.queue.complete(db, task)
