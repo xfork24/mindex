@@ -556,7 +556,13 @@ def migrate(ctx: typer.Context):
         print_json({"backend": "sqlite", "schema_version": "latest"})
 
 
-migration = typer.Typer(help="local↔cluster 数据迁移（plans §10；仅同版本程序，先停写）。")
+migration = typer.Typer(
+    cls=HelpAwareGroup,
+    help="local↔cluster 数据迁移（plans §10；仅同版本程序，先停写）。\n\n"
+    "export 从 PG 一致性快照导出，load 装载回空库，verify 逐表对账。\n\n"
+    "示例：mindex migration export --target /backup/run1。",
+    no_args_is_help=True,
+)
 app.add_typer(migration, name="migration")
 
 
@@ -628,7 +634,13 @@ def migration_verify(
     ctx: typer.Context,
     source: Annotated[Path, typer.Option(help="migration export 输出目录（与当前 PG 对账）。")],
 ):
-    """逐表比对暂存 SQLite 与当前 PG 的行内容摘要；差异列表为空即一致。"""
+    """逐表比对暂存 SQLite 与当前 PG 的行内容摘要；差异列表为空即一致。
+
+    示例：
+
+    \b
+      mindex migration verify --source /backup/run1
+    """
     from mindex.shared.db.transfer import table_digests
     from mindex.shared.storage import PgStore, Store
 
