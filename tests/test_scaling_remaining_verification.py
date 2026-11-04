@@ -28,12 +28,12 @@ pytestmark = pytest.mark.requires_postgres
 @pytest.fixture
 def pg(tmp_path, monkeypatch):
     """空库基线（每个用例独立 schema）。"""
+    if not PG:
+        pytest.skip("需要 MINDEX_TEST_POSTGRES_DSN")
     import psycopg
 
     from mindex.shared.db.migrate_pg import migrate_pg
 
-    if not PG:
-        pytest.skip("需要 MINDEX_TEST_POSTGRES_DSN")
     monkeypatch.setenv("MINDEX_DATABASE_DSN", PG)
     with psycopg.connect(PG, autocommit=True) as conn:
         conn.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")

@@ -23,12 +23,12 @@ def runner():
 
 @pytest.fixture
 def pg_config(tmp_path, monkeypatch):
+    if not DSN:
+        pytest.skip("需要 MINDEX_TEST_POSTGRES_DSN")
     import psycopg
 
     from mindex.shared.db.migrate_pg import migrate_pg
 
-    if not DSN:
-        pytest.skip("需要 MINDEX_TEST_POSTGRES_DSN")
     monkeypatch.setenv("MINDEX_DATABASE_DSN", DSN)
     with psycopg.connect(DSN, autocommit=True) as conn:
         conn.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
