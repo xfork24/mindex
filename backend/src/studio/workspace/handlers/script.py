@@ -37,7 +37,7 @@ def template_id(p) -> str:
 
 
 def plan_template(config, p, store=None):
-    return script_templates.get_template(store or Store(config.data_dir), template_id(p))
+    return script_templates.get_template(store or Store.open(config), template_id(p))
 
 
 def profile_changed(w, p) -> bool:

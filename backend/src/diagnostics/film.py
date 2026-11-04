@@ -18,7 +18,7 @@ from mindex.shared.storage import Store, dumps
 
 
 def source_report(config: Config, source_id: str) -> dict:
-    store = Store(config.data_dir)
+    store = Store.open(config)
     source = store.one("SELECT * FROM sources WHERE id=?", (source_id,))
     if source is None:
         raise ValueError("找不到素材 ID")
@@ -68,7 +68,7 @@ def source_report(config: Config, source_id: str) -> dict:
 
 
 def export_source(config: Config, source_id: str, output: Path | None = None) -> dict:
-    store = Store(config.data_dir)
+    store = Store.open(config)
     report = source_report(config, source_id)
     output = (output or store.root / "reports" / source_id).resolve()
     output.mkdir(parents=True, exist_ok=True)

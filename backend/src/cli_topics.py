@@ -41,7 +41,7 @@ app.add_typer(sources_app, name="sources")
 def _store(ctx: typer.Context):
     from mindex.shared.storage import Store
 
-    return Store(ctx.obj.data_dir)
+    return Store.open(ctx.obj)
 
 
 def run(action):

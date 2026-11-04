@@ -151,7 +151,7 @@ def complete_validation(
         fixed_samples = []
         for number, (sample, prepared) in enumerate(zip(samples, prepared_hashes), 1):
             from mindex.shared.storage import Store
-            source = Store(config.data_dir).resolve_media(sample["path"])
+            source = Store.open(config).resolve_media(sample["path"])
             verified_file(source, sample["sha256"])
             target = directory / "samples" / f"{number:02}.mp4"
             target.parent.mkdir(parents=True, exist_ok=True)

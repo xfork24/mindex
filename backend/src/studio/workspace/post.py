@@ -57,7 +57,7 @@ def brand_effect(config, p, store=None) -> dict | None:
     if store is None:
         from mindex.shared.storage import Store
 
-        store = Store(config.data_dir)
+        store = Store.open(config)
     return brands.resolve(store, options)
 
 

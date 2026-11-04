@@ -108,7 +108,7 @@ def clips_repair_boundaries(
     from mindex.processing.shot_repair import audit
     from mindex.shared.storage import Store
 
-    report = json.loads(audit_file.read_text(encoding="utf-8")) if audit_file else audit(Store(ctx.obj.data_dir), source)
+    report = json.loads(audit_file.read_text(encoding="utf-8")) if audit_file else audit(Store.open(ctx.obj), source)
     print_json(repair(ctx.obj, report) if apply else report)
 
 

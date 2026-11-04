@@ -258,7 +258,7 @@ def build_digest(config: Config, store=None, state: dict | None = None, *, langu
     from mindex.shared.storage import Store
     from mindex.shared.types import Filters
 
-    store = store or Store(config.data_dir)
+    store = store or Store.open(config)
     state = state or {}
     scope = Filters(source_ids=state.get("source_ids") or [],
                     source_group_ids=state.get("source_group_ids") or []).effective_sources(store)
@@ -269,7 +269,7 @@ def build_digest(config: Config, store=None, state: dict | None = None, *, langu
     budget = config.studio.material_digest_chars
     if budget == 0:
         return MaterialDigest.empty_of(EMPTY_BUDGET)
-    store = store or Store(config.data_dir)
+    store = store or Store.open(config)
     active = store.active_index()
     if active is None:
         return MaterialDigest.empty_of(EMPTY_INDEX)
@@ -320,7 +320,7 @@ def safe_digest(
     from mindex.studio.studio import load_job
 
     state = load_job(config, job_id)
-    store = store or Store(config.data_dir)
+    store = store or Store.open(config)
     # 用户范围错误不能作为基础设施故障吞掉，否则会掩盖已删除的组。
     Filters(source_ids=state.get("source_ids") or [],
             source_group_ids=state.get("source_group_ids") or []).effective_sources(store)

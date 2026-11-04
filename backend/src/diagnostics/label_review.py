@@ -14,7 +14,7 @@ from mindex.shared.storage import Store
 
 
 def render_review(config: Config, run: Path, queries: Path) -> Path:
-    store = Store(config.data_dir)
+    store = Store.open(config)
     state = json.loads((run / "run.json").read_text(encoding="utf-8"))
     entries = [json.loads(line) for line in queries.read_text(encoding="utf-8").splitlines() if line.strip()]
     if any(not entry.get("text", "").strip() for entry in entries):
