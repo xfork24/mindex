@@ -146,10 +146,14 @@ pg-single/cluster 形态。
    `MINDEX_DESKTOP_REMOTE_TOKEN=<用户访问令牌>`（自动化/受管终端，优先于文件）；
 2. 菜单 **Mindex → 连接远程服务…**：填写服务地址与用户访问令牌，保存到
    `~/Library/Application Support/mindex/remote.json`（Windows：`%APPDATA%/mindex/remote.json`，
-   POSIX 下 0600、临时文件原子替换），保存后自动重启后端生效；同一对话框可清除配置
-   回到本地模式。也可手工编辑该文件：`{ "url": "https://mindex.internal", "token": "..." }`。
+   Linux：`~/.config/mindex/remote.json`，POSIX 下 0600、临时文件原子替换）。令牌使用
+   Electron `safeStorage` 调用系统支持的凭据加密，文件仅保存密文。保存后自动重启连接；
+   同一对话框可清除文件配置回到本地模式。旧明文文件首次读取时自动加密迁移；安全存储
+   不可用或迁移失败时保留原件并报错。Linux 的 `basic_text` 后端不用于保存令牌，可改用环境变量。
 
 行为：启动跳过 sidecar 与本地数据目录检查，直接健康检查并注入令牌（与本地模式相同的
-请求头/Cookie 授权）；退出时不调用服务端的本机服务停止接口。配置缺失或非法时回落到
-本地 sidecar 模式（零行为变化）。版本不一致不阻止连接（服务端滚动升级期间），但
+请求头/Cookie 授权）；退出时不调用服务端的本机服务停止接口。只有未配置远程连接时启动
+本地 sidecar。配置损坏、地址非法、缺少令牌或无法解密时明确报错，可从菜单重新保存或清除，
+不会静默连接其他本地库。地址不允许携带路径、URL 凭据、查询参数或 fragment。
+版本不一致不阻止连接（服务端滚动升级期间），但
 `/api/health` 的 `backends` 字段可诊断形态。

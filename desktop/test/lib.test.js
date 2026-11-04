@@ -323,7 +323,19 @@ test("父 pid 与命令行查询（Windows 缺省走 PowerShell）——reapStal
 
 // ------------------------------------------------------------------ 远程 API 客户端模式
 
-test("远程配置：环境变量优先、URL 归一化、非法值回落 null", () => {
+// 系统密钥环替身，仅核对调用与文件格式；三平台真实安全存储需安装包验收。
+const remoteStorage = {
+  isEncryptionAvailable: () => true,
+  getSelectedStorageBackend: () => "gnome_libsecret",
+  encryptString: (value) => Buffer.from(`test-only:${value}`),
+  decryptString: (value) => {
+    const text = value.toString();
+    if (!text.startsWith("test-only:")) throw new Error("bad ciphertext");
+    return text.slice(10);
+  },
+};
+
+test("远程配置：环境变量优先、URL 归一化、非法配置明确报错", () => {
   const { remoteConfig, normalizeUrl } = require("../lib/remote");
   assert.equal(normalizeUrl("https://mindex.internal/"), "https://mindex.internal");
   assert.equal(normalizeUrl("https://mindex.internal:8443//"), "https://mindex.internal:8443");
@@ -331,25 +343,28 @@ test("远程配置：环境变量优先、URL 归一化、非法值回落 null",
   assert.equal(normalizeUrl("not a url"), null);
   const env = { MINDEX_DESKTOP_REMOTE_URL: "https://api.example/", MINDEX_DESKTOP_REMOTE_TOKEN: " tok " };
   assert.deepEqual(remoteConfig({ env }), { url: "https://api.example", token: "tok", source: "env" });
-  // 环境变量缺令牌：不使用
-  assert.equal(remoteConfig({ env: { MINDEX_DESKTOP_REMOTE_URL: "https://api.example" } }), null);
-  // 非法 URL：不使用
-  assert.equal(remoteConfig({ env: { MINDEX_DESKTOP_REMOTE_URL: "ftp://x", MINDEX_DESKTOP_REMOTE_TOKEN: "t" } }), null);
+  assert.throws(() => remoteConfig({ env: { MINDEX_DESKTOP_REMOTE_URL: "https://api.example" } }), { code: "invalid-token" });
+  assert.throws(() => remoteConfig({ env: { MINDEX_DESKTOP_REMOTE_URL: "ftp://x", MINDEX_DESKTOP_REMOTE_TOKEN: "t" } }), { code: "invalid-url" });
+  for (const url of ["https://user:password@host", "https://host/api", "https://host?token=t", "https://host/#t"]) {
+    assert.equal(normalizeUrl(url), null);
+  }
 });
 
-test("远程配置：userData/remote.json 回落与损坏容忍", () => {
+test("远程配置：缺失配置、本地凭据迁移与损坏拒绝", () => {
   const { remoteConfig } = require("../lib/remote");
   const dir = temp();
   const file = path.join(dir, "remote.json");
   const read = () => fs.readFileSync(file, "utf8");
   assert.equal(remoteConfig({ env: {}, userData: dir, readFile: read }), null);  // 文件缺失
   fs.writeFileSync(file, "{ not json");
-  assert.equal(remoteConfig({ env: {}, userData: dir, readFile: read }), null);  // 损坏
+  assert.throws(() => remoteConfig({ env: {}, userData: dir, readFile: read }), { code: "invalid-config" });
   fs.writeFileSync(file, JSON.stringify({ url: "https://remote.example/", token: "abc" }));
-  assert.deepEqual(remoteConfig({ env: {}, userData: dir, readFile: read }),
+  assert.deepEqual(remoteConfig({ env: {}, userData: dir, storage: remoteStorage, readFile: read }),
     { url: "https://remote.example", token: "abc", source: file });
+  assert.equal(JSON.parse(read()).token, undefined);
+  assert.equal(JSON.parse(read()).credential.version, 1);
   fs.writeFileSync(file, JSON.stringify({ url: "https://remote.example/" }));  // 缺令牌
-  assert.equal(remoteConfig({ env: {}, userData: dir, readFile: read }), null);
+  assert.throws(() => remoteConfig({ env: {}, userData: dir, readFile: read }), { code: "invalid-config" });
 });
 
 // ------------------------------------------------------------------ 远程凭据保存
@@ -357,16 +372,17 @@ test("远程配置：userData/remote.json 回落与损坏容忍", () => {
 test("远程配置保存：0600 原子写入、校验、清除", () => {
   const { saveRemote, clearRemote, remoteConfig } = require("../lib/remote");
   const dir = temp();
-  const saved = saveRemote({ url: "https://remote.example/", token: " secret " }, { userData: dir });
+  const saved = saveRemote({ url: "https://remote.example/", token: " secret " }, { userData: dir, storage: remoteStorage });
   assert.equal(saved.url, "https://remote.example");
   assert.equal(saved.token, "secret");
   const file = path.join(dir, "remote.json");
   assert.ok(fs.existsSync(file));
   if (process.platform !== "win32") assert.equal(fs.statSync(file).mode & 0o777, 0o600);
-  assert.deepEqual(remoteConfig({ env: {}, userData: dir }),
+  assert.equal(fs.readFileSync(file, "utf8").includes("secret"), false);
+  assert.deepEqual(remoteConfig({ env: {}, userData: dir, storage: remoteStorage }),
     { url: "https://remote.example", token: "secret", source: file });
-  assert.throws(() => saveRemote({ url: "ftp://x", token: "t" }, { userData: dir }), /invalid-url/);
-  assert.throws(() => saveRemote({ url: "https://x", token: "  " }, { userData: dir }), /invalid-token/);
+  assert.throws(() => saveRemote({ url: "ftp://x", token: "t" }, { userData: dir }), { code: "invalid-url" });
+  assert.throws(() => saveRemote({ url: "https://x", token: "  " }, { userData: dir }), { code: "invalid-token" });
   assert.equal(clearRemote({ userData: dir }), true);
   assert.equal(fs.existsSync(file), false);
   assert.equal(clearRemote({ userData: dir }), true);  // 幂等
@@ -375,10 +391,31 @@ test("远程配置保存：0600 原子写入、校验、清除", () => {
 test("远程配置保存：写入失败不破坏既有文件（临时文件 + rename）", () => {
   const { saveRemote } = require("../lib/remote");
   const dir = temp();
-  saveRemote({ url: "https://ok.example", token: "keep" }, { userData: dir });
+  saveRemote({ url: "https://ok.example", token: "keep" }, { userData: dir, storage: remoteStorage });
   const before = fs.readFileSync(path.join(dir, "remote.json"), "utf8");
   const failing = () => { throw new Error("disk full"); };
   assert.throws(() => saveRemote({ url: "https://new.example", token: "x" },
-    { userData: dir, writeFile: failing }), /disk full/);
+    { userData: dir, storage: remoteStorage, writeFile: failing }), /disk full/);
   assert.equal(fs.readFileSync(path.join(dir, "remote.json"), "utf8"), before);
+});
+
+test("远程凭据：安全存储不可用或解密失败不回落本地，不覆盖既有配置", () => {
+  const { remoteConfig, saveRemote } = require("../lib/remote");
+  const dir = temp();
+  const file = path.join(dir, "remote.json");
+  const legacy = JSON.stringify({ url: "https://ok.example", token: "keep" });
+  fs.writeFileSync(file, legacy);
+  assert.throws(() => remoteConfig({ env: {}, userData: dir }), { code: "storage-unavailable" });
+  assert.equal(fs.readFileSync(file, "utf8"), legacy);
+  saveRemote({ url: "https://ok.example", token: "keep" }, { userData: dir, storage: remoteStorage });
+  const broken = { ...remoteStorage, decryptString: () => { throw new Error("secret error"); } };
+  assert.throws(() => remoteConfig({ env: {}, userData: dir, storage: broken }), { code: "decrypt-failed" });
+  const unavailable = { ...remoteStorage, isEncryptionAvailable: () => false };
+  assert.throws(() => saveRemote({ url: "https://ok.example", token: "x" },
+    { userData: dir, storage: unavailable }), { code: "storage-unavailable" });
+  if (process.platform === "linux") {
+    assert.throws(() => saveRemote({ url: "https://ok.example", token: "x" },
+      { userData: dir, storage: { ...remoteStorage, getSelectedStorageBackend: () => "basic_text" } }),
+    { code: "storage-unavailable" });
+  }
 });
