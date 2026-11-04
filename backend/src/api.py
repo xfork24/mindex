@@ -114,7 +114,7 @@ def create_app(
     app.include_router(indexes_router(runtime, store, embedder))
     from mindex.admin.groups import groups_router
     app.include_router(groups_router(store))
-    app.include_router(admin_router(store, runtime))
+    app.include_router(admin_router(store, runtime, backends=backends))
     app.include_router(settings_router(runtime, store))
     app.include_router(studio_router(
         runtime, store, embedder=embedder, storyboarder=storyboarder, speaker=speaker, writer=writer,
@@ -220,7 +220,8 @@ def create_app(
     async def value_error(_, exc):
         return JSONResponse(status_code=422, content={"detail": str(exc)})
 
-    app.include_router(search_router(config, runtime, store, embedder, index_id=index_id))
+    app.include_router(search_router(config, runtime, store, embedder, index_id=index_id,
+                                  backends=backends))
 
     @app.get("/api/health")
     def health():

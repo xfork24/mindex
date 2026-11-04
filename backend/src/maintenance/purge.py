@@ -66,8 +66,12 @@ def _remove_file(path: Path) -> int:
     return 0
 
 
-def purge_source(store: Store, source_id: str) -> dict:
+def purge_source(store: Store, source_id: str, *, media=None, pins=None) -> dict:
     """物理删除素材（保留源视频文件）；返回删除统计。
+
+    ``media`` 为对象存储后端（S3 形态）时按前缀删除远端对象并跳过本地文件操作；
+    ``pins`` 提供预签名下载保留记录（仍在有效期内的 key 跳过删除）。缺省为现有
+    本地文件系统行为。
 
     破坏性删除经 maintenance gate 全局互斥（PG 形态；本地沿用调用方持有的
     pipeline/library/index-write 文件锁）。
@@ -75,10 +79,10 @@ def purge_source(store: Store, source_id: str) -> dict:
     from mindex.shared.db.maintenance_gate import maintenance_gate
 
     with maintenance_gate(store, name=f"purge:{source_id}"):
-        return _purge_source_locked(store, source_id)
+        return _purge_source_locked(store, source_id, media=media, pins=pins)
 
 
-def _purge_source_locked(store: Store, source_id: str) -> dict:
+def _purge_source_locked(store: Store, source_id: str, *, media=None, pins=None) -> dict:
     source = store.one("SELECT * FROM sources WHERE id=?", (source_id,))
     if source is None:
         raise KeyError(source_id)
@@ -143,23 +147,54 @@ def _purge_source_locked(store: Store, source_id: str) -> dict:
                    "(SELECT group_id FROM media_group_members WHERE source_id=?)", (source_id,))
         db.execute("DELETE FROM sources WHERE id=?", (source_id,))
 
-    files = 0
-    files += _remove_tree(store.root / "clips" / source_id)
-    files += _remove_tree(store.root / "transcripts" / source_id)
-    files += _remove_tree(store.root / "dialogue" / source_id)
-    files += _remove_tree(store.root / "analysis" / source_id)
-    files += _remove_tree(store.root / "subtitles" / source_id)
-    files += _remove_tree(store.root / "persons" / "frames" / source_id)
-    files += _remove_tree(store.root / "reports" / source_id)
-    files += _remove_file(store.root / "plans" / f"{source_id}.json")
-    for segment in segments:
-        files += _remove_file(store.root / "context" / f"{segment['id']}.mp4")
-        try:
-            files += _remove_file(store.resolve_media(segment["thumbnail"]))
-        except (FileNotFoundError, ValueError):
-            pass  # 缩略图路径异常不阻塞删除
+    if media is not None and getattr(media, "backend", "local") == "s3":
+        files = _purge_objects(media, source_id, segments, pins)
+    else:
+        files = 0
+        files += _remove_tree(store.root / "clips" / source_id)
+        files += _remove_tree(store.root / "transcripts" / source_id)
+        files += _remove_tree(store.root / "dialogue" / source_id)
+        files += _remove_tree(store.root / "analysis" / source_id)
+        files += _remove_tree(store.root / "subtitles" / source_id)
+        files += _remove_tree(store.root / "persons" / "frames" / source_id)
+        files += _remove_tree(store.root / "reports" / source_id)
+        files += _remove_file(store.root / "plans" / f"{source_id}.json")
+        for segment in segments:
+            files += _remove_file(store.root / "context" / f"{segment['id']}.mp4")
+            try:
+                files += _remove_file(store.resolve_media(segment["thumbnail"]))
+            except (FileNotFoundError, ValueError):
+                pass  # 缩略图路径异常不阻塞删除
 
     return {
         "deleted": {"segments": len(segments), "vectors": vectors, "files": files},
         "kept": {"source_file": Path(source["path"]).name},
     }
+
+
+# 素材在对象存储中的前缀（与本地布局同一 key 约定）。
+_SOURCE_PREFIXES = ("clips", "transcripts", "dialogue", "analysis", "subtitles", "plans")
+
+
+def _purge_objects(media, source_id: str, segments: list[dict], pins) -> int:
+    """按前缀列出对象并逐 key 删除；仍在下载保留期内的 key 跳过（plans §8：签发后
+    不得立即删除）。返回删除对象数。"""
+    keys: set[str] = set()
+    for prefix in _SOURCE_PREFIXES:
+        keys.update(media.iter_prefix(f"{prefix}/{source_id}"))
+    keys.update(media.iter_prefix(f"persons/frames/{source_id}"))
+    keys.update(media.iter_prefix(f"reports/{source_id}"))
+    keys.add(f"plans/{source_id}.json")
+    for segment in segments:
+        keys.add(f"context/{segment['id']}.mp4")
+        keys.add(segment["thumbnail"])
+    deleted = 0
+    for key in sorted(keys):
+        if pins is not None and pins.pinned(key):
+            continue
+        try:
+            media.delete_version(key)
+            deleted += 1
+        except Exception:  # noqa: BLE001 — 对象可能不存在或已被清理
+            continue
+    return deleted

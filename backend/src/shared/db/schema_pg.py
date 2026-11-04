@@ -387,6 +387,12 @@ CREATE INDEX IF NOT EXISTS task_queue_pending ON task_queue(priority, run_after)
   WHERE status = 'pending';
 CREATE INDEX IF NOT EXISTS task_queue_expiry ON task_queue(expires_at)
   WHERE status = 'running';
+-- 预签名下载保留记录（plans §8）：运行态，不参与业务备份/往返复制。
+CREATE TABLE IF NOT EXISTS download_pins (
+  library_id TEXT NOT NULL, key TEXT NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL, PRIMARY KEY(library_id, key)
+);
+CREATE INDEX IF NOT EXISTS download_pins_expiry ON download_pins(expires_at);
 """
 
 # delivery_platforms 的种子数据沿用 _metadata_v8：只在基线迁移时写入（幂等）。

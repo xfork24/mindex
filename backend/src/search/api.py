@@ -5,7 +5,7 @@ import tempfile
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
 
@@ -16,9 +16,14 @@ from mindex.shared.types import Filters, Granularity, SimilarSearch, TextSearch
 from mindex.shared.uploads import save_upload
 
 
-def search_router(config, runtime, store, embedder=None, *, index_id=None):
-    """检索与已发布媒体路由。"""
+def search_router(config, runtime, store, embedder=None, *, index_id=None, backends=None):
+    """检索与已发布媒体路由。``backends`` 提供媒体后端（S3 时出口走预签名/代理）。"""
     router = APIRouter()
+    pins = None
+    if backends is not None and backends.media.backend == "s3":
+        from mindex.shared.media_delivery import DownloadPins
+
+        pins = DownloadPins(store, backends.library_id)
 
     @router.get("/api/status")
     def get_status(health: bool = False, summary: bool = False):
@@ -95,7 +100,12 @@ def search_router(config, runtime, store, embedder=None, *, index_id=None):
             raise HTTPException(404, "找不到片段")
         return json.loads(row["snapshot"])
 
-    def media_response(relative: str, media_type: str):
+    def media_response(relative: str, media_type: str, request: Request | None = None):
+        if pins is not None:  # S3 形态：先鉴权/索引校验已由路由完成，再签发或代理
+            from mindex.shared.media_delivery import deliver_media
+
+            return deliver_media(backends.media, relative, media_type, request,
+                                 config=config, pins=pins)
         try:
             return FileResponse(store.resolve_media(relative), media_type=media_type)
         except FileNotFoundError as exc:
@@ -107,12 +117,12 @@ def search_router(config, runtime, store, embedder=None, *, index_id=None):
         return public_segment(library.decorate(get_snapshot(segment_id), *library.overlays()))
 
     @router.api_route("/api/media/{segment_id}", methods=["GET", "HEAD"])
-    def get_media(segment_id: str):
-        return media_response(get_snapshot(segment_id)["path"], "video/mp4")
+    def get_media(segment_id: str, request: Request):
+        return media_response(get_snapshot(segment_id)["path"], "video/mp4", request)
 
     @router.api_route("/api/thumbnails/{segment_id}", methods=["GET", "HEAD"])
-    def get_thumbnail(segment_id: str):
-        return media_response(get_snapshot(segment_id)["thumbnail"], "image/jpeg")
+    def get_thumbnail(segment_id: str, request: Request):
+        return media_response(get_snapshot(segment_id)["thumbnail"], "image/jpeg", request)
 
     @router.api_route("/api/context/{segment_id}", methods=["GET", "HEAD"])
     def get_context(segment_id: str):
@@ -147,11 +157,11 @@ def search_router(config, runtime, store, embedder=None, *, index_id=None):
         return ShotMedia(store).playlist(segment["source_id"], segment["start"], segment["end"])
 
     @router.api_route("/api/shots/{shot_id}/media", methods=["GET", "HEAD"])
-    def shot_media(shot_id: str):
+    def shot_media(shot_id: str, request: Request):
         shot = store.one("SELECT * FROM segments WHERE id=? AND kind='shot'", (shot_id,))
         active = store.index_version(index_id) if index_id else store.active_index()
         if not shot or not active or not any(s['source_id'] == shot['source_id'] for s in store.snapshots(active['id'])):
             raise HTTPException(404, "找不到已发布镜头")
-        return media_response(shot['path'], "video/mp4")
+        return media_response(shot['path'], "video/mp4", request)
 
     return router

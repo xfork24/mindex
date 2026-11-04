@@ -253,6 +253,16 @@
 - docs/scaling.md：形态/组合表、pg-single 部署步骤、诚实边界清单、集群 runbook 骨架。
 - 测试 test_doctor 5/5（缺省通过、非法组合、chroma 连不通 fail-closed、缺 DSN、
   pg-single 实测）。
-- **阶段 5 剩余**：agent-gateway 代理路由与变更 outbox、maintenance gate、PG 一致性
-  bundle 导出/导入与迁移 CLI、cutover/reverse runbook 实测记录、监控指标面板化、
-  双机故障注入与容量闸门；4B 收尾（媒体出口/检查点/Studio revision/GC）。
+- **阶段 5 第二批**：maintenance gate（PG advisory 全局互斥，clean/purge 接入）；
+  cluster 业务 API 的 /api/agent 与 /mcp 改为网关指引（503+gateway_url）。
+- **阶段 5 第三/四批**：PG 一致性导出内核（REPEATABLE READ + 逐表 manifest）与
+  `mindex migration export|load|verify`（空库装载、rowid 保序、identity 序列先行、
+  对账闭环）；/api/health 队列指标；migration 命令组帮助约定。
+- **阶段 5 第五批（媒体出口）**：`shared/media_delivery.py` —— S3 形态 GET 无
+  Range → 307 预签名（浏览器直连），Range/HEAD → 代理物化（206 断点/seek）；
+  下载保留 pin（PG download_pins，URL 生命周期 + 300s 宽限，防签发后即删）；
+  /api/media、/api/thumbnails、/api/shots/*/media 接入；MinIO 实测 5/5。
+- **阶段 5 剩余**：agent 变更 outbox、PG bundle 的媒体/向量清单复制与打包、迁移
+  CLI 的 preflight/activate 与断点、cutover/reverse runbook 实测记录、监控指标
+  面板化、双机故障注入与容量闸门；4B 剩余（检查点远端化、Studio revision 发布、
+  S3 purge/clean GC 适配、uploads 远端化）。
