@@ -546,6 +546,9 @@ class AgentConfig(StrictModel):
     attachment_max_mb: int = Field(default=500, ge=1, le=20480)
     # 单次模型请求最多携带的图片数（只保留最近的）。
     max_images: int = Field(default=8, ge=0, le=32)
+    # cluster 形态下业务 API 的 /api/agent 由单实例网关提供；此处的网关基址用于
+    # 拒绝响应中给出明确指引（plans §9；本地/pg-single 形态不使用）。
+    gateway_url: str | None = None
     llm: AgentLlmConfig = Field(default_factory=AgentLlmConfig)
     mcp: AgentMcpConfig = Field(default_factory=AgentMcpConfig)
 

@@ -67,7 +67,18 @@ def _remove_file(path: Path) -> int:
 
 
 def purge_source(store: Store, source_id: str) -> dict:
-    """物理删除素材（保留源视频文件）；返回删除统计。"""
+    """物理删除素材（保留源视频文件）；返回删除统计。
+
+    破坏性删除经 maintenance gate 全局互斥（PG 形态；本地沿用调用方持有的
+    pipeline/library/index-write 文件锁）。
+    """
+    from mindex.shared.db.maintenance_gate import maintenance_gate
+
+    with maintenance_gate(store, name=f"purge:{source_id}"):
+        return _purge_source_locked(store, source_id)
+
+
+def _purge_source_locked(store: Store, source_id: str) -> dict:
     source = store.one("SELECT * FROM sources WHERE id=?", (source_id,))
     if source is None:
         raise KeyError(source_id)
