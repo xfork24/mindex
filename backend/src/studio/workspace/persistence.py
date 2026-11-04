@@ -67,6 +67,14 @@ def normalize_script(config, job_id, w):
 def load(config, job_id):
     """Call under mutation lock for first migration; subsequent reads do not modify files."""
     studio.load_job(config, job_id)
+    if config.storage.backend == "s3":
+        from mindex.shared import files
+        from mindex.shared.storage import Store
+        store = Store.open(config)
+        files.read_bytes(store, path(config, job_id))
+        for row in files.entries(store, f"studio/{job_id}/"):
+            if row["path"].endswith(".json") or "/inputs/" in row["path"]:
+                files.hydrate(store, store.root / row["path"])
     if path(config, job_id).is_file():
         w = json.loads(path(config, job_id).read_text(encoding="utf-8"))
         for p in w["plans"].values():

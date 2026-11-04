@@ -32,6 +32,11 @@ class RevisionConflict(studio.StudioError):
 def current_revision(config, job_id):
     """磁盘上工作区的当前修订；不存在或损坏返回 None。"""
     file = path(config, job_id)
+    if config.storage.backend == "s3":
+        from mindex.shared import files
+        from mindex.shared.storage import Store
+        payload = files.read_bytes(Store.open(config), file)
+        return revision(json.loads(payload)) if payload is not None else None
     if not file.is_file():
         return None
     try:
@@ -54,7 +59,15 @@ def persist(config, job_id, workspace, *, expected_revision=None):
             if current != expected_revision:
                 raise RevisionConflict("工作区已被其他操作修改，请刷新后重试")
         workspace["updated_at"] = studio.now()
-        studio.save(path(config, job_id), workspace)
+        if config.storage.backend == "s3":
+            from mindex.shared import files
+            from mindex.shared.storage import Store
+            store = Store.open(config)
+            # 先发布所有不可变依赖，最后发布可变工作区指针。
+            for file in root(config, job_id).rglob("*"):
+                if file.is_file() and file != path(config, job_id) and file.suffix not in {".lock", ".partial"}:
+                    files.publish(store, file)
+        studio.save(path(config, job_id), workspace, config=config)
 
 
 def version(workspace, version_id):
@@ -121,7 +134,7 @@ def add_version(
     target = root(config, job_id) / "versions" / vid / "version.json"
     if target.exists():
         raise studio.StudioError("不可变版本已存在")
-    studio.save(target, item)
+    studio.save(target, item, config=config)
     w["versions"][vid] = item
     return vid
 
@@ -140,6 +153,10 @@ def file_path(config, job_id, item, name):
     if not metadata:
         raise studio.StudioError(f"版本 {item['id']} 缺少 {name}")
     target = safe_path(root(config, job_id), metadata["path"])
+    if config.storage.backend == "s3":
+        from mindex.shared import files
+        from mindex.shared.storage import Store
+        files.hydrate(Store.open(config), target)
     if not target.is_file() or digest(target) != metadata["sha256"]:
         raise studio.StudioError(f"版本 {item['id']} 文件损坏或缺失")
     return target
