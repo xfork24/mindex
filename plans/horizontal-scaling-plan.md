@@ -1,6 +1,6 @@
 # 素材容量水平扩展：评审结论与实施方案
 
-状态：分阶段实施中（2026-11 起；进度见 [盘点文档](horizontal-scaling-inventory.md) 的各阶段变更清单）。不代表当前程序已支持全部新配置、新命令或集群部署。各阶段通过验收后才能进入下一部署形态，不能直接照示例修改生产配置。
+状态：分阶段实施中（2026-11 起；分支状态与完成/未完成清单见 §14，逐调用点进度见 [盘点文档](horizontal-scaling-inventory.md)）。不代表当前程序已支持全部新配置、新命令或集群部署；按 §13 的完成定义，双机链路、故障注入、容量与恢复演练尚未取得可复现记录，不宣称集群就绪。各阶段通过验收后才能进入下一部署形态，不能直接照示例修改生产配置。
 
 ## 0. 执行约定（2026-11 补充，随实施立项确认）
 
@@ -291,3 +291,68 @@ agent PG 化作为后续独立阶段：包含事件 seq 原子分配、session �
 实现时同步 AGENT.md、CLAUDE.md、docs/architecture.md、config-reference.md、backup.md、web-auth.md、deployment.md、desktop.md 和 config.example.yaml；新增 docs/scaling.md 与部署/故障恢复 runbook；plans/roadmap.md 对齐依赖和实际交付状态。涉及 UI 则修改 messages.json 后生成资源；涉及新包/可选依赖则核对 wheel 与 sidecar 打包。
 
 本方案完成设计评审后可以从阶段 0 执行；完成开发的定义是阶段 5 的双机链路、故障注入、容量与恢复演练均有可复现记录。阶段 6 单独验收，不阻塞服务端首期交付。未经这些验收，不把“有 PostgreSQL 连接和两个 worker”视为水平扩展完成。
+
+## 14. 实施进展（2026-11-04，分支 `scaling-refactor`）
+
+本节是分支状态快照；逐调用点细节见 [盘点文档](horizontal-scaling-inventory.md) §8–17。
+范围：`main..scaling-refactor` 共 20 个提交、129 个文件（+10838/−399）。
+
+### 14.1 基线验证
+
+- `uv run pytest -m "not slow" -q`：**2184 通过 / 0 失败 / 15 跳过**（跳过项为 PG/S3/Chroma
+  门控，需 `MINDEX_TEST_POSTGRES_DSN` / `MINDEX_TEST_S3_ENDPOINT` / `MINDEX_TEST_CHROMA_SERVER`）；
+  本地矩阵使用 PostgreSQL 16、Chroma 1.5.9、MinIO。
+- 桌面外壳 `node --test desktop/test/*.test.js`：31/31；ruff、文档链接、文案/资源哈希检查通过。
+- 唯一曾长期失败的 `tests/test_topics_ui.py::test_topics_discovery_page[cards]` 已修复：
+  素材覆盖分区默认折叠、缩略图 `loading="lazy"`，折叠状态下图片不会加载；测试改为先展开
+  分区再断言（`b2abf5d`）。
+
+### 14.2 已完成（按阶段）
+
+| 阶段 | 交付 | 关键验证 |
+|---|---|---|
+| 0 | `shared/backends/`：db/media/locks/vectors/queue 协议 + 本地实现；`BackendContext`；`Store.open(config)`；`library.id`；SQL 语义特征基线 | 本地路径零行为变化；新抽象不触发网络 |
+| 1 | `shared/db/`：统一异常/行对象、受控方言翻译（REPLACE→UPSERT、rowid、json_extract、`IS ?`、CURRENT_TIMESTAMP、`SELECT *` 展开排除 rowid、BLOB 长度）、PG 基线 schema + `mindex migrate`、`PgStore`、pg-single 形态 | 真实 PG16 schema/JSON/BLOB/排序/约束/并发；SQLite→PG→SQLite 往返；`create_app` 冒烟 |
+| 2 | 派生词法索引（发布时构建、`indexes lexical` 回填、分词器版本指纹）、SQL BM25、eligible 投影 + 候选水合、chroma_server | SQL BM25 与参考实现逐分一致；PG+chroma_server 全链路 e2e |
+| 3 | PG 租约锁（epoch/fencing、TTL+心跳）、持久队列（SKIP LOCKED/回收/退避/取消）、`mindex worker`、调度 leader 租约 | 多线程互斥、暂停超 TTL 旧 token 拒绝、claim 不相交、API→worker 端到端 |
+| 4A | `StagingArea`：工作集预约、磁盘余量、pin、LRU、超限拒绝 | 8 用例（含多线程预算） |
+| 4B | `S3MediaStore`（不可变键/multipart/版本/presign）、媒体出口（307 预签名、Range 206 代理、下载 pin）、purge 远端化、检查点写穿透与回读、uploads 直写、S3 孤对象回收 | MinIO 实测：幂等/冲突、20MiB multipart、出口 307/206/HEAD、跨节点读回计划、孤儿回收尊重引用与 pin |
+| 5 | cluster 形态推导、`mindex doctor`、maintenance gate、agent-gateway 路由与变更 outbox、PG 一致性导出 + `migration export|load|verify`（`--with-media`/`--with-vectors`）、`/api/metrics`、GPU 容量准入、`docs/scaling.md` | PG 一致性快照与 rowid 保序、迁移闭环对账、outbox 幂等转入、metrics 字段、capacity=1 并发上限 |
+| 6 | 桌面远程 API 客户端（env/`remote.json`，0600 原子写）+ 「连接远程服务…」设置窗口；退出不触碰服务端本机服务 | 桌面 31/31；远程模式逻辑与凭据保存失败不破坏原文件 |
+
+另有 12 项“剩余项”功能/连通性验证套件（`tests/test_scaling_remaining_verification.py`）：
+9 项缺口已修复并将原 `xfail` 改为通过断言，3 项原本通过（队列补偿、恢复演练、桌面逻辑）。
+
+### 14.3 未完成（按 §11 阶段闸门与 §13 完成定义）
+
+以下均**尚未取得可复现记录**，因此按 §13 不宣称集群就绪：
+
+1. **双机链路与故障注入**：跨两台主机的 kill -9、SIGSTOP 超 TTL、PG/S3/Chroma 断连、
+   两个 API 同时编辑、跨主机重复全链路；当前仅单机多进程验证。
+2. **容量基准**：10万/100万 segments、100万/300万 vectors、每库 3 个索引版本；
+   20 并发下热检索 p95≤2s/p99≤5s、1%/0.1% eligible 过滤、每 API RSS≤2 GiB、
+   2 worker 相对 1 worker CPU 任务吞吐≥1.5×、冷启动时间。
+3. **恢复与灾备演练**：按真实容量的 RTO≤8h/RPO≤24h 记录；bundle 恢复进空白目标并
+   核对元数据/媒体/向量/Studio 版本；PG 物理备份/WAL 与对象版本保护另层方案。
+4. **桌面三平台打包冒烟**：macOS GUI 冒烟、Windows/Linux 安装包与 sidecar 打包复跑
+   （本环境无 GUI，仅逻辑测试）。
+5. **真实模型质量评测**：`mindex e2e` 与 40 条评测集（Hit@5≥85%）需确认评测集版本与
+   模型服务；工程测试不代表模型质量。
+6. **工程收尾（代码可做但未做）**：
+   - GC pin 全生命周期：目前覆盖下载 pin 与引用闭包；运行 attempt、发布版本、备份 pin
+     的协调未实现，Studio attempt 产物未远端化。
+   - 上传协议：当前为临时文件 + 不可变 PUT；大文件 multipart 的 pending/complete/
+     abort 幂等与配额预约未实现。
+   - 媒体出口：浏览器直连所需的独立 endpoint、CORS 与 Content-Type 配置未接入。
+   - 维护锁：`clean`/`clips`/`backup_files` 的 `acquire_ordered` 仍用文件锁（由 PG
+     maintenance gate 兜底互斥），未全部迁移到 `LockProvider`。
+   - agent PG 化与会话恢复（计划 §9 明确为后续独立工单）；NFS 共享媒体后端未评估。
+   - 检索容量路径：百万段下的候选/缓存上限、超时与诊断未压测；高频词最坏 O(N) 未验证。
+
+### 14.4 分支与回退
+
+- 分支 `scaling-refactor`，从 `main` 分叉；每阶段一个提交，均可单独 revert。
+- 本地缺省形态（sqlite + 本地 chroma + 单机文件 + inline 队列 + 文件锁）保持零行为变化；
+  分布式后端均为配置选定的可选能力。
+- 回退边界遵循 §10：写入新后端前可直接切回；一旦目标产生写入，必须停写后按备份恢复或
+  逆向装载，禁止直接改回 sqlite/local/file/inline。
