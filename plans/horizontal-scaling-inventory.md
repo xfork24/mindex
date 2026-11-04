@@ -273,8 +273,9 @@
 - `migration export --with-media`：按既有可达性口径（referenced_files，与本地备份
   同一口径）复制正文/缩略图/分镜/人物帧/Studio 输入；S3 逐 key 物化、本地直接复制；
   生成 media_manifest.json（size/sha256）供装载后校验。测试含本地媒体闭包 3 对象。
-- **向量集合按原 ID/embedding 导出仍未交付**：恢复时可重嵌入（质量以真实模型评测
-  为准），已在此登记为剩余项。
+- 向量集合原样导出与装载已交付（`maintenance/vector_bundle.py` +
+  `migration export|load --with-vectors`）：float32 原字节 base64、id/文档/元数据
+  逐项保真，装载不重新嵌入；测试 3/3。
 - 阶段 6 首块（桌面远程模式）见 §13 提交说明；三平台打包冒烟与用户凭据管理 UI
   为剩余项（当前为环境变量/remote.json 配置）。
 
@@ -295,8 +296,8 @@
   health 指标。
 
 剩余（未交付或未验证，按计划闸门尚不能宣称集群就绪）：
-1. PG bundle 的向量集合按原 ID 导出/导入与校验；媒体版本清单与 cutover pin 的完整
-   生命周期（现为导出快照 + 媒体闭包，缺 pin/GC 协调与在线差量）。
+1. 媒体版本清单与 cutover pin 的完整生命周期（现为导出快照 + 媒体/向量闭包，
+   缺 pin/GC 协调与在线差量）。
 2. Studio expected_revision 条件发布、检查点/transcripts/plans 远端化、uploads 远端化
    与 GC pin 全链路（当前 S3 为单节点验证：媒体出口与 purge 已接，其余按 plans §8 待办）。
 3. maintenance gate 与处理任务的全面互斥：现为 PG 维护互斥 + 既有文件锁；locks=postgres
@@ -306,4 +307,6 @@
    备份恢复演练与 RTO/RPO 记录。
 5. 桌面三平台打包冒烟与用户凭据管理 UI（现为环境变量/remote.json）；agent PG 化与
    会话恢复（plans §9 明确为后续独立工单）。
-6. persons 证据路径的数值 json 查询在 PG 形态尚未适配（会显式报错）；NFS 后端未评估。
+6. persons 证据/发布路径的 SQLite 专有 JSON 查询（`json_each`、`json_group_array`、
+   `json_object`、数值 json 比较，约 20 条）在 PG 形态尚未适配，会显式报错。适配需要
+   逐条双方言改写 + 双后端 persons 测试矩阵，作为独立工单；NFS 后端未评估。
