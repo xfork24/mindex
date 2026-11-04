@@ -22,14 +22,26 @@
 | `postgres.dsn_env` | str | `MINDEX_DATABASE_DSN` | DSN 只从环境变量读取（凭据不落配置文件/日志/任务快照）；远程 PG 使用校验证书的 TLS |
 | `postgres.pool_min` / `postgres.pool_max` | int | `0` / `8` | 查询连接池（进程内按 DSN 共享）；总连接预算按「API 副本 × 池 + worker + 维护余量」规划 |
 | `postgres.control_pool_max` | int | `2` | 心跳/控制小池（阶段 3 租约用），只跑短事务 |
+| `postgres.connection_budget` | int | `10` | 单进程查询池与控制池的总上限，必须 ≥ `pool_max + control_pool_max` |
+| `postgres.checkout_timeout` | float | `30` | 查询池检出超时（秒） |
+| `postgres.control_checkout_timeout` | float | `5` | 控制池检出超时（秒），查询池耗尽不占用控制池 |
 
-pg-single 使用步骤：`MINDEX_DATABASE_DSN=postgres://… mindex migrate` 建库（唯一 DDL 入口，API/worker 启动只校验版本）→ 以 `database.backend: postgres` 启动。设置页「部署后端」分区只读展示当前形态与 library_id。备份导出/导入、切片迁移/清理与镜头边界修复在该形态下显式拒绝（阶段 5 交付 PG 一致性导出）。
+`pool_min` 必须 ≤ `pool_max`。同一进程对同一 DSN 共享连接池，配置冲突时明确报错，
+修改容量后需重启；短生命周期 Store 不新建或关闭池，进程退出统一释放。
+控制连接只允许队列和租约维护，业务事务不能通过它绕过维护和 fencing。
+
+`server.role` 为 `api`（缺省）或 `agent-gateway`；`server.form` 为 `auto`（缺省）、
+`local`、`pg-single` 或 `cluster`。显式形态与后端组合不符时，程序在连接或创建本地库前拒绝启动。
+`server.library_id` 缺省为 `null`，可填写期望的库 UUID；不匹配时拒绝连接。
+这些字段属于节点部署配置，不进入业务任务快照，变更需重启。
+
+pg-single 使用步骤：`MINDEX_DATABASE_DSN=postgres://… mindex migrate` 建库（唯一 DDL 入口，API/worker 启动只校验版本）→ 以 `database.backend: postgres` 启动。设置页「部署后端」分区只读展示当前形态与 library_id。PG 备份迁移使用 `mindex migration`；切片迁移与镜头边界修复的 SQLite 专属操作仍显式拒绝。集群剩余限制见 [scaling.md](scaling.md)。
 
 ## `vector` — 向量后端（水平扩展阶段 2）
 
 | 键 | 类型 | 默认 | 说明 |
 |---|---|---|---|
-| `backend` | `chroma_local` \| `chroma_server` | `chroma_local` | `chroma_local` 为本地嵌入 chroma（`<data_dir>/chroma`，零依赖缺省）；`chroma_server` 为独立 Chroma 服务（`chromadb.HttpClient`，集合名/余弦空间/embedding_function=None 与本地一致）。属共享后端：需 `database.backend=postgres`，与 sqlite 单机形态的组合在启动时拒绝 |
+| `backend` | `chroma_local` \| `chroma_server` | `chroma_local` | 本地为 `<data_dir>/chroma` 下的 `idx-<索引ID>`；共享 Chroma 的集合名为 `lib-<库UUID无连字符>-idx-<索引ID>`，余弦空间且 `embedding_function=None`。共享后端需 `database.backend=postgres`，与 sqlite 的组合在启动时拒绝 |
 | `chroma_server.url` | str | `http://127.0.0.1:8000` | 服务地址（http/https）；服务器镜像版本/digest 与 HNSW 参数由部署固定 |
 | `chroma_server.token_env` | str | `MINDEX_CHROMA_TOKEN` | Bearer 凭据只从环境变量读取，不落配置文件/日志 |
 
@@ -39,7 +51,7 @@ pg-single 使用步骤：`MINDEX_DATABASE_DSN=postgres://… mindex migrate` 建
 
 | 键 | 类型 | 默认 | 说明 |
 |---|---|---|---|
-| `queue.backend` | `inline` \| `postgres` | `inline` | `inline` 为 API 进程内立即执行（现有行为）；`postgres` 为持久队列（claim 用 `FOR UPDATE SKIP LOCKED`、dedupe 幂等、attempt/fencing token、超时回收、有上限指数退避），由 `mindex worker --queues source,dialogue,… --concurrency N` 消费，至少一次交付。需要 `database.backend=postgres`；补偿扫描兜底「账本已落、入队前崩溃」窗口 |
+| `queue.backend` | `inline` \| `postgres` | `inline` | `inline` 为 API 进程内立即执行；`postgres` 为持久队列（`SKIP LOCKED`、dedupe、attempt/fencing token、回收与退避），由 `mindex worker --queues source,dialogue,… --concurrency N` 消费。四类现有账本创建/重试与入队同事务，补偿扫描修复历史滞留。需要 `database.backend=postgres` |
 | `locks.backend` | `file` \| `postgres` | `file` | `file` 为 data_dir 文件锁（跨进程，现有行为）；`postgres` 为 PG 租约锁（epoch 永不归零、fencing token 单调不复用、TTL 90s + 心跳 20s；失去租约即停止提交）。需要 `database.backend=postgres`；选题调度器在该形态下以 leader 租约保证单实例触发 |
 
 worker 使用：`MINDEX_DATABASE_DSN=… mindex worker`。
@@ -408,7 +420,7 @@ local_services:
 |---|---|---|---|
 | `backend` | `local` \| `s3` | `local` | `local` 为单机文件系统（现有行为）；`s3` 为 S3 兼容对象存储（`S3MediaStore`：不可变键 + sha256 元数据、multipart 大文件、版本命名空间 `versions/<v>/<key>`、物化到节点 staging 并 pin、presign 短期读 URL）。需要 `database.backend=postgres`；媒体出口与检查点迁移随阶段 5 交付，当前为单节点验证形态 |
 | `staging_quota_gb` | float | `0` | 本地形态的节点工作集预算（0=不限，保持现有行为）；`reserve`/`pin`/LRU 语义见 `shared/backends/staging.py` |
-| `s3.endpoint_url` / `s3.bucket` / `s3.prefix` | str | — | 服务地址与命名空间（prefix 建议 `libraries/<library_id>/`）；凭据只从环境变量读取 |
+| `s3.endpoint_url` / `s3.bucket` / `s3.prefix` | str | — | 服务地址、桶与部署前缀；程序自动追加 `libraries/<库UUID无连字符>/`，不需在 prefix 中重复填写库 UUID。凭据只从环境变量读取 |
 | `s3.staging_quota_gb` / `s3.min_free_gb` | float | `100` / `20` | s3 形态固定启用的工作集预算与磁盘最低余量（超限明确拒绝） |
 | `s3.presign_expire_seconds` | int | `900` | 预签名读 URL 有效期（可转交能力，过期前无法靠登出撤销） |
 

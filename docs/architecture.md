@@ -2,6 +2,12 @@
 
 Mindex 是中文视频片段检索系统：文字找视频优先，支持视频找相似片段。本机 CPU 只运行切片、SQLite、FastAPI 和页面；大模型以独立 HTTP 服务运行在 GPU 机器上。单 GPU 分阶段互斥执行，**不能假设多个模型服务同时可用**。
 
+下面的数据流以缺省本地模式为主。可选共享后端通过 `BackendContext` 装配，业务入口使用
+`Store.open(config)`；PG 的 schema 由独立迁移命令维护，任务执行由持久队列与 worker 承担，
+S3 文件通过不可变对象和数据库指针读取，媒体上下文负责使用期 pin。
+当前集群仍有未完成实现与验收，部署组合及边界见 [水平扩展指南](scaling.md)，
+实际证据见 [增强验证记录](scaling-enhancement-verification.md)。
+
 ## 总体数据流
 
 ```
