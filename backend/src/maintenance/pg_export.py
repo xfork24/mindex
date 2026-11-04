@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-__all__ = ["export_pg_to_sqlite"]
+__all__ = ["export_media_bundle", "export_pg_to_sqlite"]
 
 _BATCH = 500
 # rowid 即 id 的表（PG 侧无独立 rowid 列；按 id 排序即 SQLite 语义序）。
@@ -75,3 +75,48 @@ def export_pg_to_sqlite(pg_store: PgStore, target: Path, *, tables=BASELINE_TABL
     log.info("PG 一致性导出完成：%d 行 / %d 表 → %s", total, len(tables), target)
     return {"tables": manifest, "total_rows": total,
             "metadata": {"isolation": "repeatable-read-read-only", "dialect": "pg-export-v1"}}
+
+
+def export_media_bundle(store: Store, media, target: Path) -> dict:
+    """把暂存 SQLite 引用到的全部媒体复制进 bundle（plans §10）。
+
+    可达性由既有 ``referenced_files`` 计算（与本地备份同一口径）：给定 S3 的 key
+    清单或本地文件清单，闭包出正文/缩略图/分镜/人物帧/Studio 输入等全部依赖。
+    S3 形态逐 key 物化后复制（保持相对 key 布局）；本地形态直接复制文件。
+    返回清单（key → size/sha256），供装载后逐项校验。
+    """
+    import hashlib
+    import shutil
+
+    from mindex.maintenance.backup_files import referenced_files
+
+    target = Path(target)
+    payload = target / "data"
+    payload.mkdir(parents=True, exist_ok=True)
+    if getattr(media, "backend", "local") == "s3":
+        keys = referenced_files(target, target / "metadata.sqlite3",
+                                available_files=set(media.iter_prefix("")))
+        for key in sorted(keys):
+            destination = payload / key
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with media.materialize(key) as path:
+                shutil.copy2(path, destination)
+    else:
+
+        keys = referenced_files(media.root, target / "metadata.sqlite3")
+        for key in sorted(keys):
+            destination = payload / key
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(media.root / key, destination)
+    manifest = {}
+    for key in sorted(keys):
+        path = payload / key
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            while chunk := handle.read(1024 * 1024):
+                digest.update(chunk)
+        manifest[key] = {"size": path.stat().st_size, "sha256": digest.hexdigest()}
+    (target / "media_manifest.json").write_text(
+        __import__("json").dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    log.info("媒体 bundle 复制完成：%d 个对象 → %s", len(manifest), payload)
+    return {"objects": len(manifest), "bytes": sum(item["size"] for item in manifest.values())}

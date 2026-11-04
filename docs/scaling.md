@@ -46,7 +46,9 @@
 2. **agent**：单实例 `server.role: agent-gateway`（agent.sqlite3/附件留在网关持久卷）；
    其余 API 的 `/api/agent` 指向网关。内部回环令牌不跨集群共享。
 3. **维护**：破坏性维护（clean/purge/备份）经 maintenance gate 串行（装配中）。
-4. **cutover**：迁移 CLI（preflight/export/load/verify/activate）与 runbook 随
-   PG 一致性导出交付；在此之前 local↔cluster 只承诺同版本程序间的备份导入导出。
+4. **cutover**：`mindex migration export --with-media`（PG 一致性快照 + 媒体闭包复制 +
+   manifest）、`migration load`（空库装载，rowid/序列保序）、`migration verify`
+   （逐表对账）已交付；preflight/activate 与向量按原 ID 导出、双机演练记录为剩余项。
+   local↔cluster 只承诺同版本程序间的导入导出。
 5. **回退**：写入新后端前可直接切回旧配置；一旦在目标产生写入，必须停写后按
    备份恢复或逆向装载，禁止直接改回 sqlite/local/file/inline。

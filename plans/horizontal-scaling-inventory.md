@@ -266,3 +266,44 @@
   CLI 的 preflight/activate 与断点、cutover/reverse runbook 实测记录、监控指标
   面板化、双机故障注入与容量闸门；4B 剩余（检查点远端化、Studio revision 发布、
   S3 purge/clean GC 适配、uploads 远端化）。
+
+
+## 14. 阶段 5 第六批 / 阶段 6 首块（本次提交）
+
+- `migration export --with-media`：按既有可达性口径（referenced_files，与本地备份
+  同一口径）复制正文/缩略图/分镜/人物帧/Studio 输入；S3 逐 key 物化、本地直接复制；
+  生成 media_manifest.json（size/sha256）供装载后校验。测试含本地媒体闭包 3 对象。
+- **向量集合按原 ID/embedding 导出仍未交付**：恢复时可重嵌入（质量以真实模型评测
+  为准），已在此登记为剩余项。
+- 阶段 6 首块（桌面远程模式）见 §13 提交说明；三平台打包冒烟与用户凭据管理 UI
+  为剩余项（当前为环境变量/remote.json 配置）。
+
+## 15. 完成度与剩余工单（截至本次提交）
+
+已达到（有可复现验证）：
+- 本地形态零行为变化（完整快速回归通过；预存在失败仅 topics_ui cards，main 基线复现）。
+- pg-single：PG16 实测 schema/JSON/BLOB/排序/约束/并发语义；SQLite→PG→SQLite 往返；
+  create_app 冒烟；doctor；migration 闭环。
+- 检索扩容：派生词法索引 + SQL BM25 与参考实现逐分一致；投影 + 候选水合；旧索引回退；
+  chroma_server 实测；PG+chroma_server 全链路 e2e。
+- 租约/队列/worker：多线程争用串行化、暂停过 TTL 旧 token 拒绝、claim 不相交、
+  回收重派、退避/上限/人工重试、取消语义、API→worker 真实任务端到端、调度 leader 互斥。
+- staging：预约/pin/LRU/磁盘余量/单文件超限/多线程预算。
+- S3：MinIO 实测 put 幂等/冲突、20MiB multipart、物化缓存、版本删除、presign 可取、
+  媒体出口 307/206/HEAD、purge 前缀删除与 pin 跳过。
+- 集群装配与诊断：cluster 形态推导、agent-gateway 路由 503、maintenance gate 互斥、
+  health 指标。
+
+剩余（未交付或未验证，按计划闸门尚不能宣称集群就绪）：
+1. PG bundle 的向量集合按原 ID 导出/导入与校验；媒体版本清单与 cutover pin 的完整
+   生命周期（现为导出快照 + 媒体闭包，缺 pin/GC 协调与在线差量）。
+2. Studio expected_revision 条件发布、检查点/transcripts/plans 远端化、uploads 远端化
+   与 GC pin 全链路（当前 S3 为单节点验证：媒体出口与 purge 已接，其余按 plans §8 待办）。
+3. maintenance gate 与处理任务的全面互斥：现为 PG 维护互斥 + 既有文件锁；locks=postgres
+   尚未替换 ProcessingLock/index_write_lock 的全部路径（多机互斥依赖阶段 3 租约的接线面）。
+4. 双机跨主机故障注入（kill -9/SIGSTOP 超 TTL/断连/双 API 同时编辑）、容量基准
+   （10万/100万 segments、1%/0.1% 过滤、p95/p99、2 worker 吞吐 1.5×）、
+   备份恢复演练与 RTO/RPO 记录。
+5. 桌面三平台打包冒烟与用户凭据管理 UI（现为环境变量/remote.json）；agent PG 化与
+   会话恢复（plans §9 明确为后续独立工单）。
+6. persons 证据路径的数值 json 查询在 PG 形态尚未适配（会显式报错）；NFS 后端未评估。
