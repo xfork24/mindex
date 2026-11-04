@@ -134,10 +134,29 @@ def create_app(
     from mindex.agent.api import agent_router, build_runtime
 
     # 智能助手：同一工具注册表经回环调用上面的 REST 路由；agent_llm 供测试注入脚本化模型。
-    app.state.agent_runtime = build_runtime(app, runtime, store, agent_llm=agent_llm)
+    # cluster 形态的业务 API 不建独立会话运行时：/api/agent 固定由单实例
+    # agent-gateway 提供（plans §9；网关故障时助手明确不可用，不假数据降级）。
+    if config.server.role == "api" and backends.form == "cluster":
+        from fastapi import APIRouter as _APIRouter
+        from fastapi.responses import JSONResponse as _JSON
+
+        def _agent_redirect(request: Request):
+            gateway = config.agent.gateway_url or "(未配置 agent.gateway_url)"
+            return _JSON(status_code=503, content={
+                "detail": f"智能助手由单实例 agent-gateway 提供：{gateway}",
+                "gateway_url": config.agent.gateway_url})
+
+        stub = _APIRouter(prefix="/api/agent")
+        stub.add_api_route("/{path:path}", _agent_redirect,
+                           methods=["GET", "POST", "PUT", "DELETE"], include_in_schema=False)
+        app.include_router(stub)
+    else:
+        app.state.agent_runtime = build_runtime(app, runtime, store, agent_llm=agent_llm)
+        app.include_router(agent_router(app.state.agent_runtime, runtime, injected=agent_llm is not None))
     app.state.runtime_config, app.state.store, app.state.backends = runtime, store, backends
-    app.include_router(agent_router(app.state.agent_runtime, runtime, injected=agent_llm is not None))
-    if config.agent.mcp.http_enabled:
+    # /mcp（streamable-http）与独立 `mindex mcp` 一样都依赖本进程的会话运行时：
+    # cluster 业务 API 上同样只由 agent-gateway 提供（plans §9）。
+    if config.agent.mcp.http_enabled and not (config.server.role == "api" and backends.form == "cluster"):
         try:
             from mindex.agent.mcp_server import install_http
         except ImportError as exc:  # pragma: no cover - 依赖缺失时给出明确指引

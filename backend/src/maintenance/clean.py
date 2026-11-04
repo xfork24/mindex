@@ -1083,7 +1083,7 @@ def clean_library(config: Config, *, apply: bool = False, now: datetime | None =
     started = _monotonic()
     if days is not None:
         config = _with_days(config, days)
-    store = Store(config.data_dir)
+    store = Store.open(config)
     scan = Scan(config, store, now or datetime.now(UTC))
     say(f"开始清理：数据目录 {store.root}"
         f"（{'执行删除' if apply else '仅预览'}"
@@ -1110,7 +1110,9 @@ def clean_library(config: Config, *, apply: bool = False, now: datetime | None =
         say(f"扫描 {index}/{len(rules)} {name} 完成：{len(action.items)} 项 / "
             f"{_fmt_bytes(action.total_bytes)}（{_elapsed(rule_started)}）")
     if apply:
-        with store.run("clean"):
+        from mindex.shared.db.maintenance_gate import maintenance_gate
+
+        with maintenance_gate(store, name="clean"), store.run("clean"):
             _apply(config, store, actions, say)
     report = _report(store, actions, applied=apply, scanned_at=scan.now)
     if vacuum:
