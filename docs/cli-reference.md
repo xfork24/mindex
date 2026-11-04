@@ -20,7 +20,7 @@ uv run mindex e2e phase -h
 
 | 命令组 | 子命令 |
 | --- | --- |
-| `indexes` | `list`、`activate` |
+| `indexes` | `list`、`activate`、`lexical`、`tasks list/show/retry/cancel` |
 | `persons` | `list`、`save`、`reference`、`process`、`status`、`publish`、`review`、`activate`、`migrate-frames` |
 | `clips` | `migrate`、`materialize`、`verify-archives`、`repair-boundaries`、`prune` |
 | `backup` | `list`、`inspect`、`export`、`import`、`recover` |
@@ -182,9 +182,22 @@ uv run mindex search '雨夜，一个人强忍眼泪，镜头慢慢推近' --gra
 
 列出全部索引版本与当前活动索引。
 
+### `mindex indexes tasks list/show/retry/cancel`
+
+查询、重试或取消独立索引任务；`show`、`retry`、`cancel` 接受任务 ID，`list --limit 20` 限定返回数量。
+`queue.backend: postgres` 时，`index`、`indexes activate/lexical`、`persons publish/activate`
+经持久账本入队并等待 worker 终态；须启动消费 `index` 队列的 worker。
+后台客户端可使用 `POST /api/index-tasks` 异步提交，再按 ID 查询或取消。
+
+### `mindex indexes lexical`
+
+为 ready 索引回填派生词法索引；`--index-id ID` 指定版本，`--replace` 强制重建。
+默认处理全部 ready 版本；集群模式经同一索引账本执行。
+
 ### `mindex indexes activate INDEX_ID`
 
-检查通过后在 SQLite 事务内发布。回退 = 先切回旧模型服务/配置，再激活旧索引。
+检查通过后在选定元数据库事务内发布；PG 队列由 worker 将发布指针与队列/账本终态共同提交。
+回退前先切回旧模型服务/配置，再激活旧索引。
 
 ## 磁盘清理
 

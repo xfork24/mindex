@@ -21,15 +21,18 @@
 
 1. 准备 PostgreSQL 16（校验证书的 TLS；本地开发可 `docker run postgres:16-alpine`）。DSN 放入环境变量。
 2. `mindex migrate` —— 唯一 DDL 入口（API/worker 启动只校验版本，不做迁移）。
-   PG v15 为冻结基线，后续 v16–18 按序追加；已有库升级不会重跑基线 DDL。
+   PG v15 为冻结基线，后续 v16–19 按序追加；v19 增加索引任务账本及定时周期占位，已有库升级不会重跑基线 DDL。
 3. `mindex doctor` —— 组合校验与逐后端连通检查（退出码 1 = 需修复；不执行 DDL、只读）。
 4. 以 `database.backend: postgres` 启动 `mindex serve`。可选 `vector.backend: chroma_server`
    （独立 Chroma 服务，镜像 digest 与 HNSW 参数由部署固定）、`storage.backend: s3`
    （媒体出口与检查点迁移随集群装配交付，当前单节点验证）。
 5. 队列形态（`queue.backend: postgres`）：后台任务入队，`mindex worker --queues source,dialogue --concurrency 1`
-   消费；四类现有账本的创建/重试与入队在应用层同事务，补偿扫描只修复历史滞留。
+   消费；source/dialogue/person/topic/index 五类账本的创建/重试与入队在应用层同事务，补偿扫描只修复历史滞留。
 6. 租约锁（`locks.backend: postgres`）：fencing token 单调不复用，TTL 90s/心跳 20s；
    失去租约的执行不得提交（DB 级校验）。选题调度器在该形态以 leader 租约单实例触发。
+
+升级 v19 时先停止旧版 API/worker 与调度器，再执行 `mindex migrate`，随后用同一版本启动所有节点。
+当前不支持新旧版本节点滚动混跑；缺少系统 IANA 数据的环境由基础依赖 `tzdata` 提供命名时区数据。
 
 ## 已知边界（诚实清单）
 
@@ -48,9 +51,11 @@
   生命周期未完成，暂不发布为多机支持。
 - 备份：业务 bundle 的 PG 一致性导出/导入已交付（`mindex migration export|load|verify`，
   含 `--with-media`/`--with-vectors`）；切片迁移/镜头修复等 SQLite 专属维护仍显式拒绝。
-- 队列：source/dialogue/person/topic 创建、重试、领取、回收、取消与终态同步；
-  事务及处理子线程执行 fencing。Studio/index 持久调度、稳定周期去重键、外部调用的
-  幂等登记与未知结果人工核对状态仍未实现，不据组件测试声明完整执行链完成。
+- 队列：source/dialogue/person/topic/index 创建、重试、领取、回收、取消与终态同步；
+  事务及处理子线程执行 fencing。索引构建、词法回填、人物发布与检索组合激活复用
+  index 账本；发布指针在队列/账本终态事务中切换，发布锁保持到提交结束。
+  调度周期占位、选题账本及入队同事务。Studio 持久调度、外部调用幂等登记与未知结果
+  人工核对状态仍未实现，不据组件测试声明完整执行链完成。
 - staging：同一节点跨进程共享预约/pin，活动进程持 OS owner 锁；崩溃后回收，不按 TTL
   淘汰暂停进程的文件。业务输出/临时空间的全部预约调用点仍需覆盖。
 - 迁移：`preflight/export/load/verify/activate` 可用。本地与 PG 的元数据和恢复日志同事务；
@@ -60,6 +65,22 @@
   由单实例网关幂等转入 SSE；会话/SSE 仍需网关，网关故障时助手明确不可用。
 - persons：审核/发布路径的 JSON 查询已完成 SQLite/PostgreSQL 双方言适配（含双后端
   一致性测试）；`json_each/json_group_array` 等不再在 PG 上失败。
+
+## 索引任务与调度时区
+
+`queue.backend: postgres` 时，`mindex index`、`indexes lexical/activate`、`persons publish/activate`
+先持久入队，再等待 worker 终态；必须启动消费 `index` 队列的 worker。调用端等待期间不持有处理锁。
+`POST /api/index-tasks` 接受 `build`、`lexical`、`activate`、`person-publish`、`activate-release`，
+返回 202 与任务 ID；`GET /api/index-tasks` 及 `GET /api/index-tasks/{id}` 查询进度和结果，
+`POST /api/index-tasks/{id}/cancel` 或 `/retry` 操作任务。
+原同步激活和人物发布接口保留原入口，经同一账本执行。
+CLI 使用 `mindex indexes tasks list/show/retry/cancel`；助手的任务查询、重试、取消使用 `kind=index`。
+
+`topics.scheduler.timezone` 使用 IANA 名称，例如 `Asia/Shanghai`。本地缺省沿用系统时区；
+PG 缺省为 UTC，首次初始化调度器时绑定到共享 settings。后续节点显式时区与库不一致时拒绝启动调度器；
+省略配置则继承库时区。leader 租约 `scheduler:topics` 与选题工作锁分离。
+周期键由档案、库时区中的日期及当天尝试序号确定；重复提交返回已有任务，失败后最多三个自动尝试。
+时区属于部署配置，修改需重启；已有库的时区变更应先停调度并核对当日周期，不能仅修改一个节点。
 
 ## 集群 runbook（装配中；正式版随双机验收记录补全）
 

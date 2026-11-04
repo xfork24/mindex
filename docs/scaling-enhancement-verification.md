@@ -111,7 +111,7 @@ Studio 性能测试的 Store 替身改为统一 `Store.open(config)` 接口，�
 保留 `overlays≤40`、`ffprobe=0`、`rows≤4` 的原约束；对应范围与可见性测试通过。
 
 源码与 wheel 构建成功，已核对新增集群模块实际进入 wheel 且内容与构建时源码一致。
-最新 wheel 的 308 个 Python 模块逐字节与冻结源码一致，清单与摘要见
+上一批（`6c0e12a`）wheel 的 308 个 Python 模块逐字节与该批冻结源码一致，清单与摘要见
 `artifacts/scaling-wheel-final.json`。
 macOS arm64 冻结 sidecar 已在独立构建环境生成并通过
 `check-desktop-sidecar.py`：冻结自检、原生 dsh/rg、package-data、真实视频 prepare、
@@ -119,24 +119,98 @@ macOS arm64 冻结 sidecar 已在独立构建环境生成并通过
 `artifacts/sidecar-enhancement-macos/`，没有覆盖原有 `desktop/build/backend`。
 最新源码已重建并通过同一检查，证据及归档在 `artifacts/sidecar-enhancement-macos-final/`；
 `backend-macos-arm64.zip` 与构建记录均带 SHA256，构建时的全树摘要保留在记录中。
-后续只调整了测试覆盖/fixture 门控，构建记录另外核对应用源码树与当前版本一致，
+在 `6c0e12a` 之前后续只调整了测试覆盖/fixture 门控，构建记录另外核对应用源码树与该版本一致，
 `backend/src`、`frontend/src`、`desktop` 的 Git 树均未变化。
 此结果不等同于三平台安装包或远程完整工作流验收。
 ruff、文档链接、文案镜像、资源版本参数、前端/桌面 JS 语法与 `git diff --check` 通过。
 mypy 83 个模块通过。初次检查发现的 17 项错误已按真实协议、生成器返回类型与后端类型修复，
 没有新增类型豁免或缩小检查范围。
 
+## 2026-11-05 续批：持久索引发布、周期去重与远程 MCP
+
+本批实现提交为 `c0c213c`、`eedcd31`、`400f598`。原始报告的 code_version 是起测时的
+`6c0e12a`；以冻结源码摘要绑定最终实现树，打包规则另有独立摘要。
+
+本批追加 v19，保留 v15–18 的 DDL 与历史校验值。新增 index_tasks 账本，
+CLI、REST、内部 IndexBuilder 及人物/检索组合发布均接入持久调度。
+冻结配置与提交参数放在 `shared/task_config.py`，`shared/queue_dispatch.py` 统一入队；
+执行器为 `admin/source_tasks.py::IndexTasks`。处理层不依赖管理/设置层，依赖白名单保持原约束。
+活动指针在队列和账本终态事务中切换；失败、取消、任务过期及资源租约丢失均禁止发布。
+索引串行区保持至终态提交，子线程获取的发布租约也由显式凭证在终态事务复验。
+本地 inline 行为继续保留，增加 REST `/api/index-tasks` 与 CLI `indexes tasks`。
+
+定时调度以独立 leader 锁和库绑定时区运行；周期占位、挖掘账本和入队同事务。
+跨节点重放返回同一任务，失败后的自动尝试以序号递增，每天最多三次。
+远程 stdio CLI 跳过本地覆盖层读取；PG 业务 API 在构造会话前拒绝本机 MCP 会话模式。
+
+本批真实后端选集扩至 24 文件，新增用例在 `tests/test_scaling_execution.py`：
+
+- 首轮：`artifacts/scaling/20261104T215527Z-dfb7b58b3180/`，172 通过、0 跳过。
+- 中间检查：`artifacts/scaling/20261104T215931Z-c3be9559be9b/`，177 通过、0 跳过；之后继续补强账本绑定与冻结模型恢复。
+- 本批最终后端专项：`artifacts/scaling/20261104T232126Z-d4c310ceaa62/`，180 通过、0 跳过；
+  源码摘要 `dfcd97d21c5ce3808d567cea82a6d6fded262a5a8632c4541fb3336ac01a004f` 前后一致。
+- 覆盖真实视频入队构建、跨目录 worker 词法回填、取消/重试、发布登记后失败/取消/超 TTL、
+  子线程、账本重新绑定与资源租约丢失、两个 worker 的增量发布串行继承、人物与检索组合发布、
+  调度 leader 切换/重放/事务内崩溃、v18→19 历史校验值及非空新表导出。
+  排队后模型配置变化仍使用账本冻结模型；worker 等待 API 提交锁，不把释放竞争误记为失败。
+- 新 wheel 位于 `/tmp/mindex-scaling-execution-wheel/`，309 个 Python 模块与本批源码逐字节一致，
+  无多余模块；摘要与清单见 `artifacts/scaling-execution-wheel.json`。
+- 该 wheel 在不含 PG/S3/人物扩展的临时环境中验证：366 通过、25 个明确的外部后端跳过，
+  `artifacts/scaling-execution-delivery-lean/` 保存安装清单、依赖探测、JUnit 与原始日志。
+  环境结束后清理；基础依赖含 `tzdata`，无系统 IANA 数据时的命名时区测试通过。
+- Python 3.13.11 的动画录制及真实 SDK/runtime 补充检查 34 通过、0 跳过，
+  `artifacts/scaling-execution-delivery-extras/` 保存固定依赖、版本、JUnit 与源码摘要。
+  与最终后端专项和 wheel 为同一源码摘要，临时环境已清理。
+- 最终完整离线回归：`artifacts/local/20261104T232125Z-8371fcf5b1e4/`，
+  2967 个节点全部恰好执行一次，2823 通过、144 个环境跳过、0 失败、0 错误，应用/测试源码摘要前后一致。
+  合并真实后端与可选运行时后，2965 个不同节点通过；仅两个 Windows 进程分支未在本机执行。
+  汇总与剩余节点见 `artifacts/scaling-execution-delivery.json`。
+
+过程中的失败和中断均保留：`artifacts/local/20261104T220008Z-7f88498c2e77/`
+发现新增 CLI 帮助缺少示例；`20261104T220858Z-085407dec216/` 和
+`20261104T221120Z-16108140c6b8/` 为补强归属与冻结模型恢复主动中断，均有独立 interruption.json。
+`artifacts/scaling/20261104T220900Z-968357f4464e/` 虽 178 项无断言失败，源码变化导致验收失败；
+`20261104T221122Z-870ec8c12d76/` 的 179 项通过为中间版本。
+`20261104T221456Z-906a53b67062/` 有 1 项失败，捕获 API 提交锁释放前 worker 立即领取的竞争；
+修复为可取消且受任务租约约束的等待，再通过最终 180 项专项，未放宽断言。
+`artifacts/local/20261104T221914Z-cde3e763b5b4/` 发现包依赖违规后中断；
+抽离共享提交协议后，包依赖、CLI、配置与设置页定向检查 385 通过、15 个环境跳过，
+日志在 `artifacts/scaling-execution-boundaries.log`。mypy 检查范围增至 84 个模块并通过。
+首个 wheel 校验还发现已删除模块残留于构建缓存，已归档本批残留并从干净临时目录重建；
+`artifacts/scaling-execution-wheel-stale-build.json` 保留失败清单，最终 wheel 无多余模块。
+
+完整回归 `artifacts/local/20261104T223437Z-866d35fe7f4d/` 为 2821 通过、1 失败、144 跳过，
+源码摘要前后一致，不能计作全绿。失败任务的 `split` 被误标为“服务重启中断”；
+后台标题线程原先只用进程内 guard，会与步骤完成写回交错，把旧状态写入 job.json。
+修复后模型调用仍在锁外，标题合并等待 Studio 写锁，并在取得锁后重新读取状态。
+`test_studio_title_race.py` 在修复前 wheel 上确定失败，修复后通过；原始证据为
+`artifacts/scaling-execution-title-before.xml` 与 `artifacts/scaling-execution-studio-fix-final.xml`（34 通过）。
+线程启动失败用例先等待独立标题任务结束再注入启动异常，仍检查启动失败后能立即获取执行锁。
+首次修复检查中这两个独立写锁持有者的时序干扰也保留在 `artifacts/scaling-execution-studio-fix.xml`。
+
+本批 macOS arm64 sidecar 已重新构建并验证，最终归档和日志在
+`artifacts/sidecar-scaling-execution-macos-delivery/`。通过冻结自检、原生 dsh/rg、package-data、
+真实视频 prepare、服务就绪/页面/模板与 SIGTERM 退出检查；额外验证 schema 19、新账本及命名时区。
+首包在禁用系统时区数据后失败，缺失的 tzdata 资源已显式加入 PyInstaller 规则；
+重建后 `PYTHONTZPATH=''` 的同一探针通过，`timezone-check.json` 保留结果。
+初包日志与失败探针保留在 `artifacts/sidecar-scaling-execution-macos/`。
+先完成应用回归，再补充冻结包资源规则并单独记录 SHA256；提交前清理新文件末尾空行后，
+重新冻结执行上述最终完整回归、后端专项、安装环境与原生构建。
+并补跑桌面配置 3 项、桌面外壳 32 项及原生冻结检查。
+归档摘要与精确 spec 副本随产物保存，原有 `desktop/build` 未被覆盖。
+以上仍是单机隔离组件/集成证据，双机故障、容量、模型与三平台安装的最终门槛保持不变。
+
 ## 尚未交付或验收
 
 | 批次 | 尚未关闭的项目 |
 |---|---|
 | A | 全上下文生命周期、全部节点缓存的身份隔离、混合版本准入与升级演练 |
-| B | Studio/index 持久执行链、周期去重键、外部调用幂等与未知结果恢复、真实 GPU 资源分组 |
+| B | Studio 持久执行链、CLI 前台直接处理入口的持久化覆盖、外部调用幂等与未知结果恢复、真实 GPU 资源分组；索引/周期的双机故障演练 |
 | C | Studio 目录 manifest/CAS、全部权威文件、全部媒体使用期 pin、完整输出/临时空间预约、统一远端 pins/GC |
 | D | 上传会话族、浏览器 endpoint/CORS、断点与配额、媒体完整协议矩阵 |
 | E | 仍有 eligible 全列表和缺派生表时的全快照回退；候选/缓存字节/请求体/查询预算、原定容量/尾延迟与 Hit@5 门槛 |
 | F | 分阶段/分对象续跑、完整媒体/向量闭包与秘密审计、业务激活 gate、运行中身份切换、目标写入后的全量逆向迁移与灾备 RPO/RTO 实测 |
 | G | 四进程素材链路已验证；其他真实业务全链路、网关所有入口/断流/恢复、共享服务故障与双机演练仍待完成 |
-| H | 三平台安全存储、远程检索/上传/SSE/创作/断网恢复、安装包与本地 sidecar 回归 |
+| H | 三平台安全存储、远程检索/上传/SSE/创作/断网恢复、安装包与其余平台 sidecar 回归 |
 
 本次没有双机、规定容量、真实模型或三平台安装环境的执行证据，整体交付保持待完成。
