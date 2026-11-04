@@ -20,6 +20,9 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from mindex.maintenance.backup_files import digest as file_digest
+from mindex.maintenance.backup_files import safe_path
+
 if TYPE_CHECKING:
     from mindex.shared.storage import Store
 
@@ -30,14 +33,18 @@ __all__ = ["export_vectors", "load_vectors"]
 _BATCH = 500
 
 
-def _collection(store: Store, index_id: str, *, create: bool, config=None):
+def _collection(store: Store, index_id: str, *, create: bool, config=None, legacy_namespace=False):
     from mindex.processing.indexing import VectorIndex, vector_client
 
-    client = vector_client(config) if config is not None else None
+    client = vector_client(config, library_id=store.library_id or None) if config is not None else None
+    if legacy_namespace and config is not None and config.vector.backend == "chroma_server":
+        from mindex.shared.backends.vectors import chroma_http_client
+
+        client = chroma_http_client(config.vector.chroma_server)
     return VectorIndex(store.root, index_id, create=create, client=client).collection
 
 
-def export_vectors(store: Store, target: Path, *, config=None) -> dict:
+def export_vectors(store: Store, target: Path, *, config=None, legacy_namespace=False) -> dict:
     """把全部 ready 索引版本的向量原样导出到 ``target/vectors/``；返回逐集合清单。"""
     directory = Path(target) / "vectors"
     directory.mkdir(parents=True, exist_ok=True)
@@ -45,12 +52,11 @@ def export_vectors(store: Store, target: Path, *, config=None) -> dict:
     for row in store.rows("SELECT id FROM index_versions WHERE status='ready' ORDER BY id"):
         index_id = row["id"]
         try:
-            collection = _collection(store, index_id, create=False, config=config)
+            collection = _collection(store, index_id, create=False, config=config,
+                                     legacy_namespace=legacy_namespace)
             total = collection.count()
-        except Exception as exc:  # noqa: BLE001 — 集合缺失（被清理）时跳过并记录
-            log.warning("索引 %s 的向量集合不可用，跳过导出：%s", index_id, exc)
-            manifest[index_id] = {"vectors": 0, "skipped": str(exc).splitlines()[0]}
-            continue
+        except Exception as exc:
+            raise ValueError(f"就绪索引 {index_id} 的向量集合不可用，不能生成完整备份") from exc
         digest = hashlib.sha256()
         written = 0
         path = directory / f"{index_id}.jsonl"
@@ -72,10 +78,12 @@ def export_vectors(store: Store, target: Path, *, config=None) -> dict:
                         "metadata": metadata,
                     }, ensure_ascii=False, sort_keys=True)
                     handle.write(line + "\n")
-                    digest.update(line.encode())
+                    digest.update((line + "\n").encode())
                     written += 1
+        if written != total or collection.count() != total:
+            raise ValueError(f"向量集合 {index_id} 在导出期间变化或缺少 embedding")
         manifest[index_id] = {"vectors": written, "sha256": digest.hexdigest(),
-                              "file": path.name}
+                              "file": path.name, "metadata": collection.metadata}
     (Path(target) / "vectors_manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     log.info("向量导出完成：%d 个集合 → %s", len(manifest), directory)
@@ -84,33 +92,105 @@ def export_vectors(store: Store, target: Path, *, config=None) -> dict:
 
 def load_vectors(store: Store, source: Path, *, config=None) -> dict[str, int]:
     """从 ``source/vectors/*.jsonl`` 重建集合；返回逐集合写入条数（不重新嵌入）。"""
-    directory = Path(source) / "vectors"
-    counts: dict[str, int] = {}
-    if not directory.is_dir():
-        return counts
-    import chromadb  # noqa: F401 — 确保依赖就绪（错误信息更直接）
-
-    for path in sorted(directory.glob("*.jsonl")):
-        index_id = path.stem
+    manifest = validate_vectors(source)
+    counts = {}
+    # 全部文件校验通过后才接触目标集合。
+    for index_id, entry in manifest.items():
+        path = safe_path(Path(source) / "vectors", entry["file"])
         collection = _collection(store, index_id, create=True, config=config)
-        ids, embeddings, documents, metadatas = [], [], [], []
-        for line in path.read_text(encoding="utf-8").splitlines():
-            if not line.strip():
-                continue
-            item = json.loads(line)
-            ids.append(item["id"])
-            embeddings.append(list(_from_float32(item["embedding"])))
-            documents.append(item.get("document"))
-            metadatas.append(item.get("metadata"))
-            if len(ids) >= _BATCH:
-                _upsert(collection, ids, embeddings, documents, metadatas)
-                counts[index_id] = counts.get(index_id, 0) + len(ids)
-                ids, embeddings, documents, metadatas = [], [], [], []
-        if ids:
-            _upsert(collection, ids, embeddings, documents, metadatas)
-            counts[index_id] = counts.get(index_id, 0) + len(ids)
-    log.info("向量装载完成：%s", counts)
+        if entry.get("metadata") != collection.metadata:
+            raise ValueError(f"目标向量集合身份不一致：{index_id}")
+        for batch in _batches(path):
+            ids = [item["id"] for item in batch]
+            existing = collection.get(ids=ids, include=["embeddings", "documents", "metadatas"])
+            if existing["ids"]:
+                _compare_batch(index_id, batch, existing, require_all=False)
+            _upsert(collection, ids, [_from_float32(item["embedding"]) for item in batch],
+                    [item.get("document") for item in batch], [item.get("metadata") for item in batch])
+        if collection.count() != entry["vectors"]:
+            raise ValueError(f"目标向量集合存在清单外数据：{index_id}")
+        counts[index_id] = entry["vectors"]
     return counts
+
+
+def _batches(path):
+    batch = []
+    with path.open(encoding="utf-8") as handle:
+        for line in handle:
+            item = json.loads(line)
+            batch.append(item)
+            if len(batch) == _BATCH:
+                yield batch
+                batch = []
+    if batch:
+        yield batch
+
+
+def validate_vectors(source):
+    source = Path(source)
+    manifest_path = source / "vectors_manifest.json"
+    if not manifest_path.is_file():
+        if (source / "vectors").exists():
+            raise ValueError("缺少 vectors_manifest.json")
+        return {}
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    for index_id, entry in manifest.items():
+        if "skipped" in entry:
+            raise ValueError(f"向量备份不完整：{index_id}")
+        path = safe_path(source / "vectors", entry["file"])
+        if not path.is_file() or file_digest(path) != entry["sha256"]:
+            raise ValueError(f"向量文件摘要不一致：{index_id}")
+        identifiers, dimensions = set(), None
+        for batch in _batches(path):
+            for item in batch:
+                identifier = item["id"]
+                if identifier in identifiers:
+                    raise ValueError(f"向量备份含重复 ID：{identifier}")
+                identifiers.add(identifier)
+                embedding = _from_float32(item["embedding"])
+                if not embedding or (dimensions is not None and len(embedding) != dimensions):
+                    raise ValueError(f"向量维数不一致：{index_id}")
+                import math
+                if not all(math.isfinite(value) for value in embedding):
+                    raise ValueError(f"向量含非有限值：{identifier}")
+                dimensions = len(embedding)
+        if len(identifiers) != entry["vectors"]:
+            raise ValueError(f"向量条数与清单不一致：{index_id}")
+    return manifest
+
+
+def _compare_batch(index_id, batch, actual, *, require_all=True):
+    import numpy as np
+    by_id = {identifier: (vector, document, metadata)
+             for identifier, vector, document, metadata in zip(
+                 actual["ids"], actual["embeddings"], actual["documents"], actual["metadatas"])}
+    for item in batch:
+        if item["id"] not in by_id:
+            if require_all:
+                raise ValueError(f"目标缺少向量：{index_id}/{item['id']}")
+            continue
+        vector, document, metadata = by_id[item["id"]]
+        expected = _from_float32(item["embedding"])
+        if (document != item.get("document") or metadata != item.get("metadata")
+                or len(vector) != len(expected) or not np.allclose(vector, expected, atol=1e-6, rtol=0)):
+            raise ValueError(f"目标向量存在异值：{index_id}/{item['id']}")
+
+
+def verify_vectors(store, source, *, config=None):
+    manifest = validate_vectors(source)
+    differences = []
+    for index_id, entry in manifest.items():
+        try:
+            collection = _collection(store, index_id, create=False, config=config)
+            if collection.count() != entry["vectors"] or collection.metadata != entry.get("metadata"):
+                raise ValueError("集合身份或条数不一致")
+            for batch in _batches(safe_path(Path(source) / "vectors", entry["file"])):
+                actual = collection.get(ids=[item["id"] for item in batch],
+                                        include=["embeddings", "documents", "metadatas"])
+                _compare_batch(index_id, batch, actual)
+        except Exception:  # noqa: BLE001 — 对账收集差异，由 CLI 以非零退出
+            differences.append(f"vectors:{index_id}")
+    return differences
 
 
 def _upsert(collection, ids, embeddings, documents, metadatas) -> None:
@@ -120,11 +200,11 @@ def _upsert(collection, ids, embeddings, documents, metadatas) -> None:
 def _float32_bytes(embedding) -> bytes:
     import numpy as np
 
-    return np.asarray(embedding, dtype=np.float32).tobytes()
+    return np.asarray(embedding, dtype="<f4").tobytes()
 
 
 def _from_float32(encoded: str) -> list[float]:
     import numpy as np
 
     # chroma 只接受 Python float 或 numpy.ndarray：转成 float 列表（值仍是 float32 精度）。
-    return np.frombuffer(base64.b64decode(encoded), dtype=np.float32).astype("float64").tolist()
+    return np.frombuffer(base64.b64decode(encoded, validate=True), dtype="<f4").astype("float64").tolist()
