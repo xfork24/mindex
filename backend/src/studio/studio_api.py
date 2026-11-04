@@ -11,6 +11,7 @@ import json
 import logging
 import tempfile
 import threading
+import time
 from pathlib import Path
 from typing import Annotated, Literal
 from urllib.parse import quote
@@ -1321,8 +1322,8 @@ def studio_router(
     def generate_title_async(job_id: str, text: str):
         """后台补全标题：失败不影响任务，占位标题继续可用。
 
-        仅用进程内 ``runner.guard`` 串行化（标题生成只发生在创建任务的 Web 进程），
-        不持有跨进程文件锁，避免阻塞步骤执行或让紧随其后的运行请求误报 409。
+        模型调用不持锁；合并标题时使用与步骤相同的写锁，执行期间延后读取状态，
+        避免把旧的 running 状态写回。等待在 guard 外进行，防止阻塞执行线程释放锁。
         """
 
         def worker():
@@ -1334,15 +1335,22 @@ def studio_router(
                 log.warning("创作任务 %s 的标题生成失败，保留占位标题", job_id, exc_info=True)
                 title = None
             try:
-                with runner.guard:  # 与 patch_title/其它 job.json 写入串行，避免丢更新
-                    state = studio.load_job(base, job_id)
-                    if not state.get("title_pending"):
-                        return  # 用户已手动改名，尊重用户输入
-                    if title and title.strip():
-                        state["title"] = title.strip()[:60]
-                    state["title_pending"] = False
-                    state["updated_at"] = studio.now()
-                    studio.save(studio.job_path(base, job_id), state, config=base)
+                while True:
+                    try:
+                        with runner.mutation():
+                            state = studio.load_job(base, job_id)
+                            if not state.get("title_pending"):
+                                return  # 用户已手动改名，尊重用户输入
+                            if title and title.strip():
+                                state["title"] = title.strip()[:60]
+                            state["title_pending"] = False
+                            state["updated_at"] = studio.now()
+                            studio.save(studio.job_path(base, job_id), state, config=base)
+                        return
+                    except HTTPException as exc:
+                        if exc.status_code != 409:
+                            raise
+                        time.sleep(.05)
             except EntityNotFound:
                 return  # 任务已被删除，无需更新标题
             except Exception:

@@ -384,6 +384,11 @@ def test_thread_start_failure_is_terminal_and_unlocks(config, monkeypatch):
     client = TestClient(create_app(config, storyboarder=FixtureStoryboarder(config)))
     client.config = config
     job_id = create_legacy_job(client, "线程启动失败测试。")
+    # 此用例只验证步骤启动失败的锁释放；先完成独立的后台标题写回。
+    deadline = time.monotonic() + 3
+    while studio.load_job(config, job_id).get("title_pending") and time.monotonic() < deadline:
+        time.sleep(.01)
+    assert not studio.load_job(config, job_id).get("title_pending")
     original = threading.Thread.start
 
     def start(thread):
