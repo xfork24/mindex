@@ -90,7 +90,9 @@ TABLE_SPECS: dict[str, TableSpec] = {
 
 def _segments(sql: str):
     """把 SQL 切成 (is_code, text) 片段：字符串/标识符/注释原样保留、顺序不变。"""
-    out, buffer, i, n = [], [], 0, len(sql)
+    out: list[tuple[bool, str]] = []
+    buffer: list[str] = []
+    i, n = 0, len(sql)
 
     def flush():
         if buffer:
@@ -294,11 +296,12 @@ _PLAIN_INSERT_RE = re.compile(
 
 def _parse_baseline_tables() -> dict[str, tuple[str, ...]]:
     """从 PG 基线 DDL 解析全表列序（单一事实来源；供无列名 INSERT 补列）。"""
+    from mindex.shared.db.scaling_schema import PG_FILES
     from mindex.shared.db.schema_pg import BASELINE_DDL
 
     tables: dict[str, tuple[str, ...]] = {}
     for match in re.finditer(
-            r"CREATE TABLE IF NOT EXISTS\s+(\w+)\s*\((.*?)\n\);", BASELINE_DDL, re.DOTALL):
+            r"CREATE TABLE IF NOT EXISTS\s+(\w+)\s*\((.*?)\n\);", BASELINE_DDL + PG_FILES, re.DOTALL):
         name, body = match.group(1).lower(), match.group(2)
         columns, depth, current = [], 0, ""
         for char in body:
@@ -328,7 +331,12 @@ def _parse_baseline_tables() -> dict[str, tuple[str, ...]]:
 
 @cache
 def _baseline_columns() -> dict[str, tuple[str, ...]]:
-    return _parse_baseline_tables()
+    from mindex.shared.db.scaling_schema import LEDGER_ATTEMPT_COLUMNS, LEDGER_TABLES
+
+    tables = _parse_baseline_tables()
+    for table in LEDGER_TABLES:
+        tables[table] = (*tables[table], *LEDGER_ATTEMPT_COLUMNS)
+    return tables
 
 
 _STAR_FROM = re.compile(
@@ -445,12 +453,12 @@ def _rewrite_insert(match: re.Match, original: str) -> str:
         convert_placeholders(quote_reserved(match.group("rest"))))).rstrip().rstrip(";")
     raw_columns = match.group("cols")
     if raw_columns:
-        listed = _columns(raw_columns, TABLE_SPECS.get(table) or _baseline_columns().get(table, ()))
+        listed = _columns(raw_columns, TABLE_SPECS.get(table, TableSpec(columns=(), conflict=())))
         columns_sql = "(" + ",".join(_quote_column(column) for column in listed) + ")"
     else:  # 无列名：按登记列序补出（SQLite 语义：除隐式 rowid 外按表序取值）
         spec = TABLE_SPECS.get(table)
         columns = spec.columns if spec else _baseline_columns().get(table, ())
-        listed = [column for column in columns if column != "rowid"]
+        listed = tuple(column for column in columns if column != "rowid")
         columns_sql = f"({','.join(_quote_column(column) for column in listed)})"
     if verb == "IGNORE":  # 无冲突目标的 DO NOTHING 不需要表元数据
         return f"INSERT INTO {table}{columns_sql} {rest} ON CONFLICT DO NOTHING"

@@ -128,7 +128,7 @@ def migrate(config, source_id=None, *, apply=False, verify=False):
         with store.connect() as db, sqlite3.connect(backup) as target:
             db.backup(target)
         report['backup'] = str(backup)
-        store = Store(config.data_dir)
+        store = Store.open(config)
         before = protected_digest(store)
         service = ShotMedia(store)
         for plan in report['sources']:
@@ -184,7 +184,7 @@ def migrate(config, source_id=None, *, apply=False, verify=False):
 
 
 def materialize_all(config):
-    store = Store(config.data_dir)
+    store = Store.open(config)
     from mindex.shared.processing_lock import ProcessingLock
 
     restored = []
@@ -235,9 +235,9 @@ def prune(config, migration_report, *, apply=False):
     """Delete only freshly verified, reconstructible moment/scene entities after acceptance."""
     import os
 
-    from mindex.shared import locks
+    from mindex.shared import lock_backend
 
-    store = Store(config.data_dir)
+    store = Store.open(config)
     from mindex.shared.storage import require_sqlite
     require_sqlite(config, "切片清理（含清理前的元数据库备份）")
     report_path = Path(migration_report)
@@ -249,7 +249,7 @@ def prune(config, migration_report, *, apply=False):
               'deleted_files': 0, 'deleted_logical_bytes': 0, 'released_allocated_bytes': 0,
               'report': str(destination), 'journal': str(journal)}
     # Explicit pipeline exclusivity also covers installations without enforce_gpu_lock.
-    with locks.acquire_ordered(store.root, ["pipeline", "index-write", "library"], exclusive=True,
+    with lock_backend.acquire_ordered(store, ["pipeline", "index-write", "library"], exclusive=True,
                                timeout={"index-write": None}):
         before = protected_digest(store)
         result['protected_before'] = before

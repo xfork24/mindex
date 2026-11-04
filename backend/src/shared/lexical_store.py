@@ -61,7 +61,8 @@ def build_lexical_index(store: Store, index_id: str, *, replace: bool = False) -
                 "派生词法索引分词器版本与当前节点不一致；需 replace=True 强制重建")
         return {"index_id": index_id, "skipped": True, "segments": meta["segments"]}
 
-    segments, docs, terms = [], [], []
+    segments, docs = [], []
+    terms: list[tuple[str, str, str, str, int]] = []
     for snapshot in store.snapshots(index_id):
         annotation = snapshot.get("annotation") or {}
         segments.append((

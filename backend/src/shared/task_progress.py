@@ -52,11 +52,19 @@ def request_task_cancel(store, table, task_id):
         return None
     if row["status"] in CANCELLABLE:
         registry_for(store.root).request(task_id)
-        store.execute(
-            f"UPDATE {table} SET status='cancelled',error=?,updated_at=CURRENT_TIMESTAMP "
-            "WHERE id=? AND status='queued'",
-            (CANCEL_MESSAGE, task_id),
-        )
+        with store.connect() as db:
+            if getattr(store, "queue_backend", "inline") == "postgres":
+                from mindex.shared.db.queue_pg import PgTaskQueue
+
+                queue = PgTaskQueue(store.library_id)
+                queued = db.execute(
+                    "SELECT id FROM task_queue WHERE library_id=? AND ledger_table=? AND ledger_id=?",
+                    (store.library_id, table, task_id)).fetchone()
+                if queued:
+                    queue.cancel(db, queued["id"])
+            db.execute(
+                f"UPDATE {table} SET status='cancelled',error=?,updated_at=CURRENT_TIMESTAMP "
+                "WHERE id=? AND status='queued'", (CANCEL_MESSAGE, task_id))
     return row["status"]
 
 
@@ -134,7 +142,9 @@ def reset_task_attempt(store, table, task_id):
         clean = {key: value for key, value in processing.items()
                  if key not in {'latest_log', 'message', 'message_key', 'message_params', 'error', 'error_message'}}
         progress = {'phase': 'publish', 'processing_progress': clean}
-    store.execute(
-        f"UPDATE {table} SET status='queued',error=NULL,progress=?,publication='{{}}',updated_at=CURRENT_TIMESTAMP WHERE id=?",
-        (dumps(progress), task_id),
-    )
+    from mindex.shared.queue_dispatch import ledger_transaction
+
+    with ledger_transaction(store, table, task_id, restart=True) as db:
+        db.execute(
+            f"UPDATE {table} SET status='queued',error=NULL,progress=?,publication='{{}}',"
+            "queue_attempt_id=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?", (dumps(progress), task_id))

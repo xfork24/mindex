@@ -107,7 +107,8 @@ def _purge_source_locked(store: Store, source_id: str, *, media=None, pins=None)
     vectors = 0
     for index_id, rep_ids in by_index.items():
         try:
-            index = VectorIndex(store.root, index_id)
+            factory = getattr(store, "vectors", None)
+            index = factory.open(index_id) if factory else VectorIndex(store.root, index_id)
         except Exception as exc:  # noqa: BLE001 — 旧版本集合可能已被清理，向量天然不存在
             logger.warning("索引 %s 的向量集合不可用，跳过其中 %d 条向量的删除：%s", index_id, len(rep_ids), exc)
             continue

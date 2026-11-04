@@ -7,7 +7,9 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
+
+from mindex.shared.db.pg_backend import PgBackend
 
 if TYPE_CHECKING:
     from mindex.shared.backends import BackendContext
@@ -21,14 +23,15 @@ __all__ = ["metrics_snapshot"]
 def metrics_snapshot(backends: BackendContext, config: Config) -> dict:
     out: dict = {"form": backends.form}
     if config.database.backend == "postgres":
+        backend = cast(PgBackend, backends.store.backend)
         try:
-            pool = backends.db.backend.metrics()
+            pool = backend.metrics()
             out["pool"] = pool
             out["pool_wait"] = int(pool.get("requests_waiting", 0) or 0)
         except Exception as exc:  # noqa: BLE001 — 指标缺失不改变就绪语义
             log.debug("连接池指标不可用：%s", exc)
         try:
-            with backends.db.backend.connect() as db:
+            with backend.connect() as db:
                 row = db.execute(
                     "SELECT count(*) AS total,"
                     " count(*) FILTER (WHERE expires_at < clock_timestamp()) AS expired"
@@ -41,7 +44,7 @@ def metrics_snapshot(backends: BackendContext, config: Config) -> dict:
             try:
                 from mindex.shared.db.queue_pg import PgTaskQueue
 
-                with backends.db.backend.connect() as db:
+                with backend.connect() as db:
                     out["queue"] = PgTaskQueue(backends.library_id).stats(db)
             except Exception as exc:  # noqa: BLE001
                 log.debug("队列指标不可用：%s", exc)

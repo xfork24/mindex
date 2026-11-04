@@ -46,7 +46,8 @@ def busy_categories(data_dir) -> list[str]:
 
 def public_task(row):
     """任务行 → 接口形状：去掉冻结配置，解码 JSON 列。"""
-    return {k: json.loads(v) if v and k in JSON_COLUMNS else v for k, v in row.items() if k != "config"}
+    return {k: json.loads(v) if v and k in JSON_COLUMNS else v for k, v in row.items()
+            if k not in {"config", "queue_attempt_id", "queue_fencing_token"}}
 
 
 class BackgroundTaskRunner:
@@ -191,18 +192,26 @@ class BackgroundTaskRunner:
         return task_logs(self.table)(BackgroundTaskRunner._run)(self, task_id, config, lock)
 
     def _run(self, task_id, config, lock):
+        from mindex.shared.db.fencing import current_attempt
+
+        attempt = current_attempt()
         cancels = registry_for(self.store.root)
         try:
             row = self.store.one(f"SELECT * FROM {self.table} WHERE id=?", (task_id,))
             self.admit(row, lock, cancels)
             begin_task(self.store, self.table, task_id)
             self.execute(task_id, row, config, lambda field, value: self.save(task_id, field, value))
-            self.store.execute(
-                f"UPDATE {self.table} SET status='complete',updated_at=CURRENT_TIMESTAMP WHERE id=?", (task_id,)
-            )
+            if attempt is None:
+                self.store.execute(
+                    f"UPDATE {self.table} SET status='complete',updated_at=CURRENT_TIMESTAMP WHERE id=?", (task_id,)
+                )
         except TaskCancelled:
+            if attempt is not None:
+                raise
             mark_cancelled(self.store, self.table, task_id)
         except BaseException as exc:  # 后台任务必须记录终态并释放锁
+            if attempt is not None:
+                raise
             self.log.exception("%s %s 失败：%s", self.label, task_id, exc)
             self.store.execute(
                 f"UPDATE {self.table} SET status='failed',error=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",

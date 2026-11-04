@@ -14,7 +14,7 @@ import shutil
 import threading
 import time
 from collections.abc import Callable, Iterable, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -1116,7 +1116,9 @@ def clean_library(config: Config, *, apply: bool = False, now: datetime | None =
             _apply(config, store, actions, say)
     report = _report(store, actions, applied=apply, scanned_at=scan.now)
     if config.storage.backend == "s3":
-        report["s3_orphans"] = _clean_s3_orphans(config, store, apply=apply, say=say)
+        from mindex.shared.db.maintenance_gate import maintenance_gate
+        with maintenance_gate(store, name="s3-gc") if apply else nullcontext():
+            report["s3_orphans"] = _clean_s3_orphans(config, store, apply=apply, say=say)
     if vacuum:
         report["vacuum"] = _vacuum_databases(store, applied=apply, say=say)
     total = report["total"]
@@ -1186,7 +1188,7 @@ def _apply(config: Config, store: Store, actions: list[CleanAction], say: Progre
     """两段持锁执行：管线+索引段 → 释放 → studio 段；锁冲突抛 CleanBusy 或标记 skipped。"""
     from filelock import Timeout
 
-    from mindex.shared import locks
+    from mindex.shared import lock_backend
 
     pipeline_actions = [action for action in actions if action.stage == "pipeline"]
     studio_actions = [action for action in actions if action.stage == "studio"]
@@ -1195,32 +1197,30 @@ def _apply(config: Config, store: Store, actions: list[CleanAction], say: Progre
     # 未走 ProcessingLock 的写入方。
     say("等待并获取管线与索引写锁（pipeline + index-write，独占）…")
     try:
-        held = locks.acquire_ordered(store.root, ["pipeline", "index-write"], exclusive=True,
-                                     timeout={"index-write": 10})
+        with lock_backend.acquire_ordered(store, ["pipeline", "index-write"], exclusive=True,
+                                           timeout={"index-write": 10}):
+            say(f"已获取锁，执行 {len(pipeline_actions)} 个管线/索引类清理")
+            for action in pipeline_actions:
+                _execute(action, say)
     except Timeout as exc:
         if Path(exc.lock_file).name == "index-write.lock":
             raise CleanBusy("索引正在构建或发布（index-write.lock 被持有），请稍后重试") from None
         raise CleanBusy("有离线处理任务正在运行，无法安全清理；请等待管线空闲后重试") from None
-    with held:
-        say(f"已获取锁，执行 {len(pipeline_actions)} 个管线/索引类清理")
-        for action in pipeline_actions:
-            _execute(action, say)
     say("管线/索引类清理完成，已释放锁")
 
     if not studio_actions:
         return
     say("获取创作锁（studio）…")
     try:
-        studio_lock = locks.acquire_ordered(store.root, ["studio"])
+        with lock_backend.acquire_ordered(store, ["studio"]):
+            say(f"已获取创作锁，执行 {len(studio_actions)} 个 studio 类清理")
+            for action in studio_actions:
+                _execute(action, say)
     except Timeout:
         for action in studio_actions:
             action.skipped = "创作任务正在执行，已跳过 studio 清理"
         say(f"创作任务正在执行：跳过 {len(studio_actions)} 个 studio 类清理")
         return
-    with studio_lock:
-        say(f"已获取创作锁，执行 {len(studio_actions)} 个 studio 类清理")
-        for action in studio_actions:
-            _execute(action, say)
     say("studio 类清理完成，已释放锁")
 
 
@@ -1307,6 +1307,7 @@ def _clean_s3_orphans(config: Config, store: Store, *, apply: bool, say: Progres
         referenced = referenced_files(
             store.root, Path(work) / "metadata.sqlite3", available_files=set(objects))
     pins = DownloadPins(context.store, context.library_id)
+    referenced.update(row["object_key"] for row in store.rows("SELECT object_key FROM shared_files WHERE size>=0"))
     cutoff = _datetime.now(UTC).timestamp() - config.clean.s3_orphan_grace_hours * 3600
     orphans = [
         {"key": key, "bytes": meta["size"]}
@@ -1320,6 +1321,8 @@ def _clean_s3_orphans(config: Config, store: Store, *, apply: bool, say: Progres
     if apply:
         for item in orphans:
             try:
+                if pins.pinned(item["key"]):
+                    continue
                 media.delete_version(item["key"])
                 deleted += 1
             except Exception as exc:  # noqa: BLE001 — 单个对象失败不阻塞整体回收

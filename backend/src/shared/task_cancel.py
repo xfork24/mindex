@@ -50,6 +50,11 @@ class CancelRegistry:
         return bool(event and event.is_set()) or path.exists()
 
     def check(self, key: str) -> None:
+        from mindex.shared.db.fencing import current_attempt
+
+        attempt = current_attempt()
+        if attempt is not None:
+            attempt.check()
         if self.requested(key):
             raise TaskCancelled()
 

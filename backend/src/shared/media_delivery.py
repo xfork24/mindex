@@ -47,7 +47,8 @@ class DownloadPins:
             with self.store.connect() as db:
                 db.execute(
                     "INSERT INTO download_pins(library_id,key,expires_at) VALUES(?,?,to_timestamp(?))"
-                    " ON CONFLICT (library_id,key) DO UPDATE SET expires_at=excluded.expires_at",
+                    " ON CONFLICT (library_id,key) DO UPDATE SET"
+                    " expires_at=GREATEST(download_pins.expires_at,excluded.expires_at)",
                     (self.library_id, key, deadline))
         else:
             self._memory[key] = deadline
@@ -79,6 +80,12 @@ def deliver_media(media, key: str, media_type: str, request, *, config: Config,
     if getattr(media, "backend", "local") != "s3":
         raise HTTPException(500, "deliver_media 只用于对象存储后端；本地形态走 FileResponse")
     expires = config.storage.s3.presign_expire_seconds
+    from mindex.shared import files
+    entry = files.pointer(pins.store, key)
+    if entry is not None:
+        if entry["size"] < 0:
+            raise HTTPException(404, "素材文件缺失")
+        key = entry["object_key"]
     range_header = request.headers.get("range") if request is not None else None
     wants_head = request is not None and request.method == "HEAD"
     pins.pin(key, expires)
@@ -88,7 +95,24 @@ def deliver_media(media, key: str, media_type: str, request, *, config: Config,
             # 307 保留方法与 Range 语义；浏览器直连对象存储
             return RedirectResponse(url, status_code=307)
     try:
-        with media.materialize(key) as path:
-            return FileResponse(Path(path), media_type=media_type)
+        return materialized_response(media.materialize(key), media_type=media_type)
     except FileNotFoundError as exc:
         raise HTTPException(404, "素材文件缺失") from exc
+
+
+def materialized_response(context, **kwargs):
+    """物化上下文由 ASGI 响应最终释放，包括断流和读取异常。"""
+    path = context.__enter__()
+
+    class PinnedResponse(FileResponse):
+        async def __call__(self, scope, receive, send):
+            try:
+                await super().__call__(scope, receive, send)
+            finally:
+                context.__exit__(None, None, None)
+
+    try:
+        return PinnedResponse(Path(path), **kwargs)
+    except BaseException:
+        context.__exit__(None, None, None)
+        raise

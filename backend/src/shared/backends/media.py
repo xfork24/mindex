@@ -146,7 +146,7 @@ class LocalMediaStore:
         return None
 
 
-def _open_source(source: MediaSource) -> BinaryIO:
+def _open_source(source: MediaSource) -> IO[bytes]:
     if isinstance(source, (str, os.PathLike)):
         return Path(source).open("rb")
     return source

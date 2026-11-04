@@ -258,7 +258,7 @@ def manager_for(store: Store) -> LocalServiceManager:
 
 def autostart_in_background(config: Config) -> threading.Thread | None:
     """``mindex serve`` 启动时在后台拉起 autostart 服务（不阻塞监听）。未开启或没有服务时不做任何事。"""
-    if not config.local_services.enabled or not config.local_services.services:
+    if config.database.backend != "sqlite" or not config.local_services.enabled or not config.local_services.services:
         return None
     manager = manager_for(Store(config.data_dir))
     thread = threading.Thread(target=manager.autostart, args=(config,), daemon=True, name="local-services-autostart")
@@ -268,6 +268,6 @@ def autostart_in_background(config: Config) -> threading.Thread | None:
 
 def stop_on_exit(config: Config) -> list[str]:
     """``mindex serve`` 退出时停止标记为退出时停止的服务。"""
-    if not config.local_services.enabled or not config.local_services.services:
+    if config.database.backend != "sqlite" or not config.local_services.enabled or not config.local_services.services:
         return []
     return manager_for(Store(config.data_dir)).stop_on_exit(config)

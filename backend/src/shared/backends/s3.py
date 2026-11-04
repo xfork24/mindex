@@ -17,7 +17,9 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import mimetypes
 import os
+import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -37,7 +39,7 @@ _MULTIPART_THRESHOLD = 8 * 1024 * 1024
 class S3MediaStore:
     backend = "s3"
 
-    def __init__(self, section, *, staging=None, cache_dir: Path | None = None):
+    def __init__(self, section, *, library_id: str | None = None, staging=None, cache_dir: Path | None = None):
         import boto3
         from boto3.s3.transfer import TransferConfig
         from botocore.config import Config
@@ -51,6 +53,12 @@ class S3MediaStore:
         self.section = section
         self.bucket = section.bucket
         self.prefix = (section.prefix or "").strip("/")
+        self.library_id = library_id
+        if library_id is not None:
+            from uuid import UUID
+
+            identity = UUID(library_id).hex
+            self.prefix = "/".join(filter(None, (self.prefix, "libraries", identity)))
         self.staging = staging
         self.cache_dir = Path(cache_dir or (staging.root if staging else Path("data/cache/s3")))
         self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -72,7 +80,8 @@ class S3MediaStore:
         return f"{body}versions/{version}/{key}"
 
     def _cache_path(self, key: str, version: str | None) -> Path:
-        digest = hashlib.sha256(f"{key}@{version or '-'}".encode()).hexdigest()
+        digest = hashlib.sha256(
+            repr((self.section.endpoint_url, self.bucket, self.prefix, key, version)).encode()).hexdigest()
         return self.cache_dir / f"{digest}.obj"
 
     # ------------------------------------------------------------ 协议
@@ -102,22 +111,42 @@ class S3MediaStore:
     @contextmanager
     def materialize(self, key: str, *, version: str | None = None) -> Iterator[Path]:
         """下载到节点缓存并 pin；使用期内不被 LRU 淘汰，摘要不符立即失败。"""
+        from filelock import FileLock
+
         path = self._cache_path(key, version)
-        if not path.is_file():
-            expected = self.stat(key, version=version).sha256
-            path.parent.mkdir(parents=True, exist_ok=True)
-            partial = path.with_name(f".{path.name}.partial")
-            try:
-                self.client.download_file(self.bucket, self._object_key(key, version), str(partial))
-                if expected and _file_digest(partial) != expected:
-                    raise ValueError(f"对象 {key} 下载摘要与元数据不一致（传输损坏）")
-                os.replace(partial, path)
-            finally:
-                partial.unlink(missing_ok=True)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with FileLock(str(path.with_name(f".{path.name}.download.lock"))):
+            obj = self.stat(key, version=version)
+            reserved = 0
             if self.staging is not None:
-                self.staging.adopt(path)
-        if self.staging is not None:
-            self.staging.pin(path)
+                self.staging.pin(path)
+            try:
+                if path.is_file() and (path.stat().st_size != obj.size
+                                       or (obj.sha256 and _file_digest(path) != obj.sha256)):
+                    path.unlink()
+                if not path.is_file():
+                    if self.staging is not None:
+                        self.staging.reserve(obj.size, purpose=f"物化 {key}")
+                        reserved = obj.size
+                    partial = path.with_name(f".{path.name}.partial")
+                    try:
+                        self.client.download_file(self.bucket, self._object_key(key, version), str(partial))
+                        if partial.stat().st_size != obj.size or (obj.sha256 and _file_digest(partial) != obj.sha256):
+                            raise ValueError(f"对象 {key} 下载长度或摘要与元数据不一致")
+                        with partial.open("rb") as handle:
+                            os.fsync(handle.fileno())
+                        os.replace(partial, path)
+                    finally:
+                        partial.unlink(missing_ok=True)
+                if self.staging is not None:
+                    self.staging.adopt(path)
+            except BaseException:
+                if self.staging is not None:
+                    self.staging.unpin(path)
+                raise
+            finally:
+                if reserved:
+                    self.staging.release(reserved)
         try:
             yield path
         finally:
@@ -126,22 +155,60 @@ class S3MediaStore:
 
     def put_immutable(self, key: str, source: MediaSource, *, sha256: str,
                        version: str | None = None) -> MediaObject:
+        """服务端条件创建；摘要由实际输入复算，失败的 multipart 必须 abort。
+
+        条件写入见 https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-writes.html
+        """
         object_key = self._object_key(key, version)
-        try:
-            existing = self.client.head_object(Bucket=self.bucket, Key=object_key)
-            if _meta(existing.get("Metadata", {}), "sha256") == sha256:
-                return MediaObject(key=key, size=int(existing["ContentLength"]),
-                                   backend_version=None, etag=existing.get("ETag", "").strip('"'),
-                                   sha256=sha256)
-            raise ValueError(f"不可变键已存在且内容不同：{key}")
-        except self.client.exceptions.ClientError as exc:
-            if exc.response["Error"]["Code"] not in ("404", "NoSuchKey", "404 Not Found"):
-                raise
-        with _source_stream(source) as stream:
-            self.client.upload_fileobj(
-                stream, self.bucket, object_key, Config=self._transfer,
-                ExtraArgs={"Metadata": {"sha256": sha256}})
-        return MediaObject(key=key, size=None, backend_version=version, etag=None, sha256=sha256)
+        # 流式暂存使非 seekable 输入也能校验与重试；不把大媒体装进内存。
+        with tempfile.TemporaryFile() as staged, _source_stream(source) as stream:
+            digest, size = hashlib.sha256(), 0
+            while chunk := stream.read(_READ_CHUNK):
+                digest.update(chunk)
+                size += len(chunk)
+                staged.write(chunk)
+            if digest.hexdigest() != sha256:
+                raise ValueError(f"对象 {key} 的输入摘要与声明不一致")
+            staged.seek(0)
+            try:
+                existing = self.stat(key, version=version)
+            except FileNotFoundError:
+                existing = None
+            if existing is not None:
+                if existing.sha256 != sha256 or existing.size != size:
+                    raise ValueError(f"不可变键已存在且内容不同：{key}")
+                return existing
+            content_type = mimetypes.guess_type(key)[0] or "application/octet-stream"
+            try:
+                if size < _MULTIPART_THRESHOLD:
+                    self.client.put_object(Bucket=self.bucket, Key=object_key, Body=staged,
+                        ContentLength=size, Metadata={"sha256": sha256},
+                        ContentType=content_type, IfNoneMatch="*")
+                else:
+                    upload = self.client.create_multipart_upload(
+                        Bucket=self.bucket, Key=object_key, Metadata={"sha256": sha256},
+                        ContentType=content_type)["UploadId"]
+                    try:
+                        parts: list[dict] = []
+                        # 不超过 S3 的 10000 part 上限，part 至少 8MiB。
+                        part_size = max(_MULTIPART_THRESHOLD, (size + 9999) // 10000)
+                        while chunk := staged.read(part_size):
+                            number = len(parts) + 1
+                            response = self.client.upload_part(Bucket=self.bucket, Key=object_key,
+                                UploadId=upload, PartNumber=number, Body=chunk)
+                            parts.append({"PartNumber": number, "ETag": response["ETag"]})
+                        self.client.complete_multipart_upload(Bucket=self.bucket, Key=object_key,
+                            UploadId=upload, MultipartUpload={"Parts": parts}, IfNoneMatch="*")
+                    except BaseException:
+                        self.client.abort_multipart_upload(Bucket=self.bucket, Key=object_key, UploadId=upload)
+                        raise
+            except self.client.exceptions.ClientError as exc:
+                if exc.response["Error"]["Code"] not in ("PreconditionFailed", "412", "ConditionalRequestConflict", "409"):
+                    raise
+                existing = self.stat(key, version=version)
+                if existing.sha256 != sha256 or existing.size != size:
+                    raise ValueError(f"不可变键已存在且内容不同：{key}") from exc
+            return self.stat(key, version=version)
 
     def delete_version(self, key: str, *, version: str | None = None) -> None:
         """删除主对象（version=None）或某个不可变内容版本；精确到 key，不做前缀删除。"""

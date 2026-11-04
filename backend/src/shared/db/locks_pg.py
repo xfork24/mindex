@@ -105,7 +105,7 @@ class PgLockProvider:
     # ------------------------------------------------------------ 原语
     @contextmanager
     def connect(self):
-        with self.backend_pool.connect() as db:
+        with self.backend_pool.connect(control=True) as db:
             yield db
 
     def lease(self, name: str, *, mode: str = "exclusive", ttl: float = LEASE_TTL_SECONDS,
@@ -127,7 +127,7 @@ class PgLockProvider:
             got = self._try_lease(name, mode, ttl, owner)
             if got is not None:
                 return got
-            if deadline is None or time.monotonic() >= deadline:
+            if deadline is not None and time.monotonic() >= deadline:
                 return None
             time.sleep(_POLL_SECONDS)
 

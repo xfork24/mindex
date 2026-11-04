@@ -3,8 +3,8 @@
 账本（source_tasks/dialogue_tasks/person_tasks/topic_runs）是用户可见状态来源；
 worker 领取队列任务后经对应 ``BackgroundTaskRunner`` 子类在当前线程执行（含工作
 锁、准入、进度、终态），队列状态随后由 ``Worker`` 按原 owner+attempt 提交。
-账本先完成、队列后完成：该窗口内崩溃会重派一个账本已完成的任务，执行体的
-检查点/幂等语义保证至少一次交付下的正确性（阶段 5 以 outbox 收紧为同事务）。
+队列运行期间由 task_progress 将账本终态与队列终态同事务提交，并校验当前 attempt；
+中间业务写事务与处理线程同样携带 fencing 凭证。
 """
 
 from __future__ import annotations
@@ -54,8 +54,10 @@ def _make_handler(kind: str):
         # 冻结的任务配置不含部署后端选择（database/vector/queue 为 exclude 字段，
         # 属节点级关注点）：以 worker 自身配置覆盖，防止回落本地 sqlite。
         restored = restored.model_copy(update={
-            "database": config.database, "vector": config.vector, "queue": config.queue})
+            key: getattr(config, key) for key in
+            ("database", "vector", "storage", "locks", "queue", "gpu", "server", "data_dir")})
         lock = runner.row_lock(row)
+        lock.acquire()
         log.info("worker 执行 %s 任务 %s（attempt %s）", kind, task.ledger_id, task.attempt_id[:8])
         runner.run(task.ledger_id, restored, lock)
 

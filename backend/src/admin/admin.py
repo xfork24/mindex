@@ -96,6 +96,10 @@ def admin_router(store: Store, runtime=None, backends=None) -> APIRouter:
         library.source_row(source_id)
         try:
             from mindex.shared.shot_media import ShotMedia
+            if pins is not None:
+                from mindex.shared.media_delivery import materialized_response
+
+                return materialized_response(ShotMedia(store).materialized(source_id), media_type="video/mp4")
             return FileResponse(ShotMedia(store).materialize(source_id), media_type="video/mp4")
         except FileNotFoundError as exc:
             raise HTTPException(404, "原片文件缺失") from exc
@@ -218,7 +222,7 @@ def admin_router(store: Store, runtime=None, backends=None) -> APIRouter:
     def response(segment_id: str, field: str, download: bool = False):
         row = library.segment_row(segment_id)
         try:
-            path = store.resolve_media(row[field])
+            path = None if pins is not None else store.resolve_media(row[field])
         except FileNotFoundError as exc:
             raise HTTPException(404, "素材文件缺失，请通过 split 命令修复") from exc
         filename = None
@@ -226,6 +230,14 @@ def admin_router(store: Store, runtime=None, backends=None) -> APIRouter:
             name = row["custom_name"] or row["custom_source_name"] or row["original_source_name"]
             name = name.replace("/", "_").replace("\\", "_")
             filename = f"{name}_{row['kind']}_{row['start']:.3f}-{row['end']:.3f}.mp4"
+        if pins is not None:
+            from mindex.shared.media_delivery import materialized_response
+
+            try:
+                return materialized_response(store.materialize_media(row[field]),
+                    media_type="video/mp4" if field == "path" else "image/jpeg", filename=filename)
+            except FileNotFoundError as exc:
+                raise HTTPException(404, "素材文件缺失，请通过 split 命令修复") from exc
         return FileResponse(
             path, media_type="video/mp4" if field == "path" else "image/jpeg", filename=filename
         )

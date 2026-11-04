@@ -8,7 +8,7 @@ register → studio → topics``。分布式实现（阶段 3 的 PgLockProvider
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from contextlib import AbstractContextManager as ContextManager
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
@@ -45,7 +45,7 @@ class FileLockProvider:
 
     @contextmanager
     def acquire_ordered(self, names: Sequence[str], *, exclusive: bool | dict[str, bool] | None = None,
-                        timeout: float | dict[str, float | None] | None = 0) -> ContextManager[ExitStack]:
+                        timeout: float | dict[str, float | None] | None = 0) -> Iterator[ExitStack]:
         stack = locks.acquire_ordered(self.root, names, exclusive=exclusive, timeout=timeout)
         try:
             yield stack

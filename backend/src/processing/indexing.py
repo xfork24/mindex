@@ -47,14 +47,16 @@ def retain_representation_maps(root: Path, keep: set[str]) -> int:
     return len(stale)
 
 
-def vector_client(config) -> chromadb.ClientAPI | None:
+def vector_client(config, *, library_id: str | None = None):
     """按配置返回向量客户端：缺省 None = 本地 PersistentClient；chroma_server 形态
     返回进程内共享的 HttpClient（显式配置选择，不做路径发现；plans §6.2）。"""
     if getattr(config, "vector", None) is None or config.vector.backend != "chroma_server":
         return None
-    from mindex.shared.backends.vectors import chroma_http_client
+    from mindex.shared.backends.vectors import LibraryVectorClient, chroma_http_client
 
-    return chroma_http_client(config.vector.chroma_server)
+    if library_id is None:
+        library_id = Store.open(config).library_id
+    return LibraryVectorClient(chroma_http_client(config.vector.chroma_server), library_id)
 
 
 class VectorIndex:
@@ -185,6 +187,9 @@ class VectorIndex:
 
         读不到（例如没有元数据库的独立向量集合）时返回空映射，调用方改用 chroma 自带的元数据。
         """
+        # 远端连接不读取节点上偶然残留的 SQLite，也不构建全库 map。
+        if getattr(self.client, "library_id", None) is not None:
+            return {}
         key = (str(self.root.resolve()), self.index_id)
         with _REPRESENTATION_LOCK:
             cached = _REPRESENTATION_MAPS.get(key)
@@ -364,7 +369,8 @@ class IndexBuilder:
             "INSERT OR IGNORE INTO index_versions(id,spec,status) VALUES(?,?,'building')",
             (index_id, dumps(spec)),
         )
-        vectors = VectorIndex(self.store.root, index_id, create=True, client=vector_client(self.config))
+        vectors = VectorIndex(self.store.root, index_id, create=True,
+                              client=vector_client(self.config, library_id=self.store.library_id))
         existing = vectors.ids()
         with self.store.run("index"):
             for number, segment in enumerate(snapshots, 1):
@@ -442,7 +448,7 @@ class IndexBuilder:
 
 def check_index(store: Store, index_id: str, *, config=None) -> list[str]:
     """索引一致性检查。``config`` 提供时按其选择向量客户端（chroma_server 形态）。"""
-    client = vector_client(config) if config is not None else None
+    client = vector_client(config, library_id=store.library_id) if config is not None else None
     issues = []
     row = store.one("SELECT * FROM index_versions WHERE id=?", (index_id,))
     if row is None:

@@ -46,7 +46,7 @@ def read_snapshot(config, job_id: str) -> dict | None:
 def write_snapshot(config, job_id: str, profile_id: str, name: str, snapshot: dict) -> dict:
     value = {"profile_id": profile_id, "name": name, "hash": profiles.profile_hash(snapshot), "snapshot": snapshot,
              "synced_at": now()}
-    studio.save(profile_path(config, job_id), value)
+    studio.save(profile_path(config, job_id), value, config=config)
     return value
 
 
@@ -119,7 +119,7 @@ def create_from_card(config, store, card_id: str, *, force: bool = False, langua
             job = studio.load_job(config, job_id)
             job["topic"] = {"card_id": card_id, "profile_id": card["profile_id"], "profile_hash": saved["hash"],
                             "title": card["title"]}
-            studio.save(studio.job_path(config, job_id), job)
+            studio.save(studio.job_path(config, job_id), job, config=config)
         finally:
             lock.release()
         row_body = loads(store.one("SELECT body FROM topic_cards WHERE id=?", (card_id,))["body"], {})
@@ -172,7 +172,7 @@ def sync_job_profile(config, store, job_id: str) -> dict:
         ws.persist(config, job_id, w)
         job = studio.load_job(config, job_id)
         job["topic"] = {**job["topic"], "profile_hash": saved["hash"]}
-        studio.save(studio.job_path(config, job_id), job)
+        studio.save(studio.job_path(config, job_id), job, config=config)
     finally:
         lock.release()
     return job_profile(config, store, job_id)

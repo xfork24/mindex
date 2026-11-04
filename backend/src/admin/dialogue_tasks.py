@@ -19,6 +19,7 @@ from mindex.processing.pipeline import Pipeline
 from mindex.shared.background_tasks import BackgroundTaskRunner
 from mindex.shared.config import Config, StrictModel, absolutize_config_paths, relativize_config_paths
 from mindex.shared.processing_lock import ProcessingLock
+from mindex.shared.queue_dispatch import insert_ledger
 from mindex.shared.storage import dumps
 
 
@@ -99,7 +100,7 @@ class DialogueTasks(BackgroundTaskRunner):
                     raise HTTPException(422, str(exc)) from exc
             config = self.runtime.current().model_copy(deep=True)
             task_id = uuid.uuid4().hex
-            self.store.execute(
+            insert_ledger(self.store, self.table, task_id,
                 "INSERT INTO dialogue_tasks(id,source_id,status,config,options) VALUES(?,?,?,?,?)",
                 (task_id, source_id, "queued", self.freeze(config), options.model_dump_json()),
             )

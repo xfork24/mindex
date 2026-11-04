@@ -654,6 +654,17 @@ class PostgresConfig(StrictModel):
     pool_min: int = Field(default=0, ge=0)
     pool_max: int = Field(default=8, ge=1)
     control_pool_max: int = Field(default=2, ge=1)
+    connection_budget: int = Field(default=10, ge=2)
+    checkout_timeout: float = Field(default=30, gt=0)
+    control_checkout_timeout: float = Field(default=5, gt=0)
+
+    @model_validator(mode="after")
+    def validate_pools(self):
+        if self.pool_min > self.pool_max:
+            raise ValueError("postgres.pool_min 不能大于 pool_max")
+        if self.pool_max + self.control_pool_max > self.connection_budget:
+            raise ValueError("查询池与控制池的总连接数不能超过 postgres.connection_budget")
+        return self
 
 
 class ChromaServerConfig(StrictModel):
@@ -737,6 +748,8 @@ class ServerConfig(StrictModel):
     worker 是独立 CLI（``mindex worker``），不经此配置。"""
 
     role: Literal["api", "agent-gateway"] = "api"
+    form: Literal["auto", "local", "pg-single", "cluster"] = "auto"
+    library_id: str | None = None
 
 
 class DatabaseConfig(StrictModel):

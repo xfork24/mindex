@@ -56,13 +56,22 @@ def test_server_store_roundtrip_and_query(server):
     assert reopen.count() == 5
 
 
-def test_http_client_shared_per_url_token():
+def test_http_client_shared_per_url_token(monkeypatch):
+    import chromadb
+
     from mindex.shared.backends.vectors import chroma_http_client
     from mindex.shared.config import ChromaServerConfig
 
     section = ChromaServerConfig(url=URL or "http://127.0.0.1:59999", token_env="MINDEX_NO_TOKEN")
-    os.environ.pop("MINDEX_NO_TOKEN", None)
+    monkeypatch.delenv("MINDEX_NO_TOKEN", raising=False)
+    calls = []
+    def client(**kwargs):
+        calls.append(kwargs)
+        return object()
+    monkeypatch.setattr(chromadb, "HttpClient", client)
+    monkeypatch.setattr("mindex.shared.backends.vectors._HTTP_CLIENTS", {})
     assert chroma_http_client(section) is chroma_http_client(section)  # 进程内共享
+    assert len(calls) == 1
 
 
 def test_chroma_server_requires_postgres(tmp_path):

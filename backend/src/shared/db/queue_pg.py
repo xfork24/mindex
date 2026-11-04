@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 import random
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -51,6 +51,7 @@ class ClaimedTask:
     attempt_id: str
     fencing_token: int
     cancel_requested: bool
+    execution: object | None = field(default=None, compare=False, repr=False)
 
 
 class PgTaskQueue:
@@ -65,9 +66,15 @@ class PgTaskQueue:
     def enqueue(self, db: PgConnection, kind: str, payload: dict, *,
                 ledger_table: str | None = None, ledger_id: str | None = None,
                 dedupe_key: str | None = None, priority: int = 100,
-                max_attempts: int = 3) -> int | None:
+                max_attempts: int = 3, restart: bool = False) -> int | None:
         """在调用方事务内入队；dedupe 冲突返回已有任务 id（重复提交只产生一个有效工作）。"""
         key = dedupe_key or f"{kind}:{ledger_table}:{ledger_id}:{uuid.uuid4().hex[:8]}"
+        if restart:
+            db.execute(
+                "UPDATE task_queue SET status='pending',owner=NULL,attempt_id=NULL,expires_at=NULL,"
+                " cancel_requested=FALSE,error=NULL,attempts=0,run_after=clock_timestamp(),"
+                " updated_at=clock_timestamp() WHERE library_id=%s AND dedupe_key=%s"
+                " AND status IN ('failed','cancelled','succeeded')", (self.library_id, key))
         row = db.execute(
             "INSERT INTO task_queue(library_id,kind,payload,ledger_table,ledger_id,"
             "dedupe_key,priority,max_attempts) VALUES(%s,%s,%s::jsonb,%s,%s,%s,%s,%s)"
@@ -86,13 +93,22 @@ class PgTaskQueue:
         重排时刻以**过期时刻**为基准加抖动：久死的任务立即可领，刚过期的任务
         留出短暂缓冲，同一批回收不会同时唤醒。
         """
-        cursor = db.execute(
-            "UPDATE task_queue SET status='pending', owner=NULL, attempt_id=NULL,"
+        rows = db.execute(
+            "WITH expired AS (SELECT id FROM task_queue WHERE library_id=%s AND status='running'"
+            " AND expires_at < clock_timestamp() FOR UPDATE SKIP LOCKED)"
+            "UPDATE task_queue SET status=CASE WHEN cancel_requested THEN 'cancelled'"
+            " WHEN attempts >= max_attempts THEN 'failed' ELSE 'pending' END,"
+            " owner=NULL, attempt_id=NULL,expires_at=NULL,"
             " run_after=expires_at + make_interval(secs => %s * (0.5 + random())),"
+            " error=CASE WHEN cancel_requested THEN '用户已取消任务' ELSE '任务租约已到期，执行已中断' END,"
             " updated_at=clock_timestamp()"
-            " WHERE library_id=%s AND status='running' AND expires_at < clock_timestamp()",
-            (_RECLAIM_DELAY_SECONDS, self.library_id))
-        return cursor.rowcount
+            " WHERE id IN (SELECT id FROM expired)"
+            " RETURNING ledger_table,ledger_id,status,error",
+            (self.library_id, _RECLAIM_DELAY_SECONDS)).fetchall()
+        for row in rows:
+            self._ledger(db, row, {"pending": "queued"}.get(row["status"], row["status"]),
+                         error=row["error"], clear=True)
+        return len(rows)
 
     def claim(self, db: PgConnection, worker: str, kinds: list[str], *,
               ttl: float = TASK_TTL_SECONDS) -> ClaimedTask | None:
@@ -115,6 +131,7 @@ class PgTaskQueue:
              self.library_id)).fetchone()
         if row is None:
             return None
+        self._ledger(db, row, "running", attempt=row["attempt_id"], token=row["fencing_token"])
         return ClaimedTask(
             id=int(row["id"]), kind=row["kind"], owner=worker,
             ledger_table=row["ledger_table"], ledger_id=row["ledger_id"],
@@ -124,24 +141,53 @@ class PgTaskQueue:
             cancel_requested=bool(row["cancel_requested"]))
 
     # ------------------------------------------------------------ 持有者操作
+    def _ledger(self, db, row, status, *, error=None, clear=False, attempt=None, token=None):
+        from mindex.shared.db.scaling_schema import LEDGER_TABLES
+
+        table, identifier = row["ledger_table"], row["ledger_id"]
+        if table not in LEDGER_TABLES or not identifier:
+            return
+        bindings = ",queue_attempt_id=NULL" if clear else ""
+        args = [status, error]
+        if attempt is not None:
+            bindings += ",queue_attempt_id=%s,queue_fencing_token=%s"
+            args.extend((attempt, token))
+        args.append(identifier)
+        db.execute(f"UPDATE {table} SET status=%s,error=%s,updated_at=CURRENT_TIMESTAMP{bindings} WHERE id=%s", args)
+
     def renew(self, db: PgConnection, task: ClaimedTask, *, ttl: float = TASK_TTL_SECONDS) -> bool:
         """续期心跳；owner/attempt/token 不匹配或非 running 返回 False。"""
         cursor = db.execute(
             "UPDATE task_queue SET expires_at=clock_timestamp() + make_interval(secs => %s),"
             " updated_at=clock_timestamp()"
             " WHERE library_id=%s AND id=%s AND status='running' AND owner=%s"
-            " AND attempt_id=%s AND fencing_token=%s",
+            " AND attempt_id=%s AND fencing_token=%s AND expires_at >= clock_timestamp()",
             (ttl, self.library_id, task.id, task.owner, task.attempt_id, task.fencing_token))
         return cursor.rowcount > 0
 
     def complete(self, db: PgConnection, task: ClaimedTask) -> bool:
         """只有原 owner+attempt 能完成；队列与账本完成由调用方放同一事务。"""
-        cursor = db.execute(
-            "UPDATE task_queue SET status='succeeded', expires_at=NULL, updated_at=clock_timestamp()"
+        row = db.execute(
+            "UPDATE task_queue SET status=CASE WHEN cancel_requested THEN 'cancelled' ELSE 'succeeded' END,"
+            " expires_at=NULL, updated_at=clock_timestamp()"
             " WHERE library_id=%s AND id=%s AND status='running' AND owner=%s"
-            " AND attempt_id=%s AND fencing_token=%s AND expires_at >= clock_timestamp()",
-            (self.library_id, task.id, task.owner, task.attempt_id, task.fencing_token))
-        return cursor.rowcount > 0
+            " AND attempt_id=%s AND fencing_token=%s AND expires_at >= clock_timestamp()"
+            " RETURNING ledger_table,ledger_id,status",
+            (self.library_id, task.id, task.owner, task.attempt_id, task.fencing_token)).fetchone()
+        if row:
+            self._ledger(db, row, "complete" if row["status"] == "succeeded" else "cancelled")
+        return row is not None
+
+    def finish_cancelled(self, db: PgConnection, task: ClaimedTask) -> bool:
+        row = db.execute(
+            "UPDATE task_queue SET status='cancelled', expires_at=NULL, updated_at=clock_timestamp()"
+            " WHERE library_id=%s AND id=%s AND status='running' AND owner=%s"
+            " AND attempt_id=%s AND fencing_token=%s AND expires_at >= clock_timestamp()"
+            " RETURNING ledger_table,ledger_id",
+            (self.library_id, task.id, task.owner, task.attempt_id, task.fencing_token)).fetchone()
+        if row:
+            self._ledger(db, row, "cancelled")
+        return row is not None
 
     def fail(self, db: PgConnection, task: ClaimedTask, error: str, *,
              backoff: float | None = None) -> str:
@@ -150,27 +196,30 @@ class PgTaskQueue:
         ``backoff`` 缺省为有上限指数退避 + 抖动（plans §7.2）。
         """
         delay = backoff if backoff is not None else _backoff(task.attempts)
-        cursor = db.execute(
+        row = db.execute(
             "UPDATE task_queue SET status='failed', error=%s, expires_at=NULL,"
             " updated_at=clock_timestamp()"
             " WHERE library_id=%s AND id=%s AND status='running' AND owner=%s"
             " AND attempt_id=%s AND fencing_token=%s AND expires_at >= clock_timestamp()"
             " AND attempts >= max_attempts"
-            " RETURNING id",
+            " RETURNING ledger_table,ledger_id",
             (str(error)[:2000], self.library_id, task.id, task.owner,
-             task.attempt_id, task.fencing_token))
-        if cursor.rowcount:
+             task.attempt_id, task.fencing_token)).fetchone()
+        if row:
+            self._ledger(db, row, "failed", error=str(error)[:2000])
             return "failed"
-        cursor = db.execute(
+        row = db.execute(
             "UPDATE task_queue SET status='pending', error=%s, owner=NULL, attempt_id=NULL,"
             " run_after=clock_timestamp() + make_interval(secs => %s),"
             " updated_at=clock_timestamp()"
             " WHERE library_id=%s AND id=%s AND status='running' AND owner=%s"
-            " AND attempt_id=%s AND fencing_token=%s AND expires_at >= clock_timestamp()",
+            " AND attempt_id=%s AND fencing_token=%s AND expires_at >= clock_timestamp()"
+            " RETURNING ledger_table,ledger_id",
             (str(error)[:2000], delay, self.library_id, task.id,
-             task.owner, task.attempt_id, task.fencing_token))
-        if cursor.rowcount == 0:
+             task.owner, task.attempt_id, task.fencing_token)).fetchone()
+        if row is None:
             raise RuntimeError("任务不属于当前 attempt（旧 worker 不得提交他人重派的任务）")
+        self._ledger(db, row, "queued", error=str(error)[:2000], clear=True)
         return "pending"
 
     # ------------------------------------------------------------ 取消
@@ -179,8 +228,9 @@ class PgTaskQueue:
         row = db.execute(
             "UPDATE task_queue SET status='cancelled', updated_at=clock_timestamp()"
             " WHERE library_id=%s AND id=%s AND status='pending'"
-            " RETURNING id", (self.library_id, task_id)).fetchone()
+            " RETURNING ledger_table,ledger_id", (self.library_id, task_id)).fetchone()
         if row:
+            self._ledger(db, row, "cancelled", clear=True)
             return "cancelled"
         row = db.execute(
             "UPDATE task_queue SET cancel_requested=TRUE, updated_at=clock_timestamp()"
@@ -201,12 +251,15 @@ class PgTaskQueue:
 
     def retry(self, db: PgConnection, task_id: int) -> bool:
         """人工重试 failed：清错误重排（attempts 保留历史）。"""
-        cursor = db.execute(
+        row = db.execute(
             "UPDATE task_queue SET status='pending', error=NULL, attempts=0,"
             " run_after=clock_timestamp(), updated_at=clock_timestamp()"
-            " WHERE library_id=%s AND id=%s AND status='failed'",
-            (self.library_id, task_id))
-        return cursor.rowcount > 0
+            " WHERE library_id=%s AND id=%s AND status='failed'"
+            " RETURNING ledger_table,ledger_id",
+            (self.library_id, task_id)).fetchone()
+        if row:
+            self._ledger(db, row, "queued", clear=True)
+        return row is not None
 
     # ------------------------------------------------------------ 观测
     def stats(self, db: PgConnection) -> dict:

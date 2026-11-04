@@ -8,9 +8,11 @@ UUID（settings 键 ``library.id``），锁与缓存按它隔离；不用路径 
 
 from __future__ import annotations
 
+import threading
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 from mindex.shared.backends.db import RelationalDatabase
 from mindex.shared.backends.locks import FileLockProvider, LockProvider
@@ -18,25 +20,27 @@ from mindex.shared.backends.media import LocalMediaStore, MediaStore
 from mindex.shared.backends.queue import InlineTaskQueue, TaskQueue
 from mindex.shared.backends.vectors import LocalVectorStores, VectorStores
 from mindex.shared.config import Config
+from mindex.shared.db.pg_backend import PgBackend
 
 __all__ = ["BackendContext", "open_context"]
 
 LIBRARY_ID_KEY = "library.id"
+_STAGING = {}
+_STAGING_LOCK = threading.Lock()
 
 
 @dataclass(frozen=True)
 class BackendContext:
-    """阶段 0 只有 local 形态：db 即 Store（metadata.sqlite3）、媒体为单机文件、
-    锁为 data_dir 文件锁、向量为本地嵌入 chroma、队列为进程内立即执行。"""
+    """统一库身份与节点后端；local、pg-single、cluster 共用业务 Store 门面。"""
 
-    form: str  # local / pg-single / cluster（plans §4；阶段 0 恒为 local）
+    form: str  # local / pg-single / cluster
     library_id: str
     data_dir: Path  # local 为事实存储；cluster 仅节点缓存/临时目录
     db: RelationalDatabase
     media: MediaStore
     locks: LockProvider
     vectors: VectorStores
-    queue: TaskQueue
+    queue: TaskQueue | PgQueueAdapter
     staging: object | None = None  # StagingArea；未配置预算时为 None
 
     @property
@@ -61,14 +65,18 @@ def open_context(config: Config) -> BackendContext:
     """
     from mindex.shared.storage import PgStore, Store
 
+    form = deployment_form(config)
+    store: Store
     if config.database.backend == "postgres":
-        store = PgStore(config)
-        library_id = store.library_id
-        form = "pg-single"
+        pg_store = PgStore(config)
+        store = pg_store
+        library_id = pg_store.library_id
     else:
         store = Store(config.data_dir)
         library_id = _library_id(store)
-        form = "local"
+    if config.server.library_id is not None and config.server.library_id != library_id:
+        raise RuntimeError("素材库 library_id 与 server.library_id 不一致；拒绝连接其他素材库")
+    store.library_id = library_id
     if config.vector.backend == "chroma_server":
         if config.database.backend != "postgres":
             raise RuntimeError(
@@ -76,7 +84,7 @@ def open_context(config: Config) -> BackendContext:
                 "请将 database.backend 设为 postgres（plans §4 运行形态表）")
         from mindex.shared.backends.vectors import ChromaServerVectorStores
 
-        vectors: VectorStores = ChromaServerVectorStores(config.vector.chroma_server)
+        vectors: VectorStores = ChromaServerVectorStores(config.vector.chroma_server, library_id=library_id)
     else:
         vectors = LocalVectorStores(store.root)
     store.locks_backend = config.locks.backend  # 供只拿 Store 的调用点选择锁后端
@@ -87,7 +95,7 @@ def open_context(config: Config) -> BackendContext:
                 "请将 database.backend 设为 postgres，并用 mindex worker 消费（plans §4）")
         # 队列实现按需绑定 PG 连接（shared/db/queue_pg.PgTaskQueue），上下文只登记形态。
 
-        queue: TaskQueue = PgQueueAdapter(store.library_id)
+        queue: TaskQueue | PgQueueAdapter = PgQueueAdapter(library_id)
     else:
         queue = InlineTaskQueue()
     if config.locks.backend == "postgres":
@@ -97,9 +105,10 @@ def open_context(config: Config) -> BackendContext:
                 "请将 database.backend 设为 postgres（plans §4 运行形态表）")
         from mindex.shared.db.locks_pg import PgLockProvider
 
-        locks: LockProvider = PgLockProvider(store.backend, library_id=library_id)
+        locks: LockProvider = PgLockProvider(cast(PgBackend, store.backend), library_id=library_id)
     else:
         locks = FileLockProvider(store.root)
+    media: MediaStore
     if config.storage.backend == "s3":
         if config.database.backend != "postgres":
             raise RuntimeError(
@@ -111,8 +120,9 @@ def open_context(config: Config) -> BackendContext:
         staging = _staging(config, store.root)
         media = S3MediaStore(
             config.storage.s3,
+            library_id=library_id,
             staging=staging,
-            cache_dir=store.root / "cache" / "s3")
+            cache_dir=staging.root / "libraries" / library_id / "s3")
         if (config.vector.backend == "chroma_server" and config.queue.backend == "postgres"
                 and config.locks.backend == "postgres"):
             form = "cluster"  # 共享后端齐备（plans §4；准入与 runbook 见 docs/scaling.md）
@@ -120,6 +130,7 @@ def open_context(config: Config) -> BackendContext:
         staging = _staging(config, store.root)
         media = LocalMediaStore(store.root)
     store.media = media  # Store.resolve_media/media_available 按存储后端解析
+    store.vectors = vectors
     return BackendContext(
         form=form,
         library_id=library_id,
@@ -133,6 +144,26 @@ def open_context(config: Config) -> BackendContext:
     )
 
 
+def deployment_form(config: Config) -> str:
+    """打开连接或创建目录前检查部署组合；显式 cluster 不允许降级。"""
+    shared = {
+        "database": config.database.backend == "postgres",
+        "vector": config.vector.backend == "chroma_server",
+        "storage": config.storage.backend == "s3",
+        "queue": config.queue.backend == "postgres",
+        "locks": config.locks.backend == "postgres",
+    }
+    if not shared["database"] and any(shared.values()):
+        names = "、".join(name for name, enabled in shared.items() if enabled)
+        raise RuntimeError(f"共享后端 {names} 需要 database.backend=postgres；与 sqlite 单机形态的组合未定义")
+    actual = "cluster" if all(shared.values()) else "pg-single" if shared["database"] else "local"
+    requested = config.server.form
+    if requested != "auto" and requested != actual:
+        missing = "、".join(name for name, enabled in shared.items() if not enabled)
+        raise RuntimeError(f"server.form={requested} 与部署后端组合 {actual} 不一致；缺少共享后端：{missing}")
+    return actual
+
+
 def _staging(config: Config, root: Path):
     """按配置构建节点 staging 工作集（plans §8）：local 用 storage.staging_quota_gb
     （0 = 不限，保持零行为变化）；s3 形态固定启用（s3.staging_quota_gb/min_free_gb）。"""
@@ -140,18 +171,24 @@ def _staging(config: Config, root: Path):
 
     if config.storage.backend == "s3":
         section = config.storage.s3
-        return StagingArea(root / "cache" / "staging",
-                           quota_bytes=int(section.staging_quota_gb * 1024**3),
-                           min_free_bytes=int(section.min_free_gb * 1024**3))
-    if config.storage.staging_quota_gb > 0:
-        return StagingArea(root / "cache" / "staging",
-                           quota_bytes=int(config.storage.staging_quota_gb * 1024**3))
-    return None
+        quota, minimum = int(section.staging_quota_gb * 1024**3), int(section.min_free_gb * 1024**3)
+    elif config.storage.staging_quota_gb > 0:
+        quota, minimum = int(config.storage.staging_quota_gb * 1024**3), 0
+    else:
+        return None
+    key = (root.resolve(), quota, minimum)
+    with _STAGING_LOCK:
+        if key not in _STAGING:
+            _STAGING[key] = StagingArea(root / "cache" / "staging", quota_bytes=quota,
+                                        min_free_bytes=minimum)
+        return _STAGING[key]
 
 
 class PgQueueAdapter:
-    """postgres 队列的上下文占位：真正的 claim/complete 由 worker 与 dispatch 使用
-    shared/db/queue_pg.PgTaskQueue（持有 library_id 即可共享语义）。"""
+    """持久队列描述符。账本必须通过 ledger_transaction 原子入队，不能传入进程内 callable。
+
+    claim/续期/完成由 worker 使用 PgTaskQueue 和显式连接执行。
+    """
 
     backend = "postgres"
 

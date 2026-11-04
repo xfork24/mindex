@@ -23,6 +23,7 @@ from mindex.models.adapters import ModelError
 from mindex.shared import lock_backend
 from mindex.shared.background_tasks import BackgroundTaskRunner, public_task
 from mindex.shared.config import StrictModel
+from mindex.shared.queue_dispatch import insert_ledger
 from mindex.topics import cards as topic_cards
 from mindex.topics import cluster, datasources, profiles
 from mindex.topics.common import RUN_ID_PATTERN, TopicConflict, now, parse_time
@@ -152,6 +153,8 @@ class TopicRuns(BackgroundTaskRunner):
         return self.lock()
 
     def recover(self):
+        if getattr(self.store, "queue_backend", "inline") == "postgres":
+            return
         lock = self.lock()
         try:
             lock.acquire()
@@ -181,7 +184,7 @@ class TopicRuns(BackgroundTaskRunner):
         def create():
             profiles.get_profile(self.store, profile_id)
             task_id = uuid.uuid4().hex
-            self.store.execute(
+            insert_ledger(self.store, self.table, task_id,
                 "INSERT INTO topic_runs(id,source_id,trigger,status,config,options,created_at) VALUES(?,?,?,?,?,?,?)",
                 (task_id, profile_id, trigger, "queued", "{}", options.model_dump_json(), now()))
             return task_id, self.runtime.current()
@@ -190,6 +193,14 @@ class TopicRuns(BackgroundTaskRunner):
 
     def run_here(self, profile_id: str, options: RunOptions | None = None, *, trigger: str = "manual") -> dict:
         """在当前线程同步执行（CLI ``--wait``）；拿不到锁时抛 ``TopicConflict``。"""
+        if getattr(self.store, "queue_backend", "inline") == "postgres":
+            import time
+
+            task = self.start(profile_id, options, trigger=trigger)
+            while task["status"] in {"queued", "running"}:
+                time.sleep(.5)
+                task = self.get(task["id"])
+            return task
         lock = self.lock()
         try:
             lock.acquire()
