@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from pathlib import Path
 
 from mindex.shared.db.schema_pg import BASELINE_TABLES
@@ -35,14 +36,20 @@ def _pg_rows(pg_store, table: str):
     return pg_store.rows(f"SELECT {rowid_expr},{names} FROM {table} ORDER BY _rowid_")
 
 
-def copy_sqlite_to_pg(sqlite_store, pg_store, *, tables=BASELINE_TABLES) -> dict[str, int]:
+def copy_sqlite_to_pg(sqlite_store, pg_store, *, tables=BASELINE_TABLES, connection=None) -> dict[str, int]:
     """把 SQLite 全表复制到 PG 库；返回每表行数。
 
     目标应为刚完成基线迁移的库（delivery_platforms 已有种子里，先按子表→父表
     逆序清空再装载，保证以源库内容——含删除墓碑——为准）。
     """
     counts: dict[str, int] = {}
-    with pg_store.connect() as db:
+    with pg_store.connect() if connection is None else nullcontext(connection) as db:
+        # 数据恢复不是合并；仅允许初始化种子，禁止清空已有业务数据。
+        for table in tables:
+            if table in {"settings", "delivery_platforms"}:
+                continue
+            if db.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone():
+                raise ValueError("迁移目标非空，拒绝覆盖已有数据")
         for table in reversed(tables):
             db.execute(f"DELETE FROM {table}")
         for table in tables:
@@ -68,7 +75,7 @@ def copy_sqlite_to_pg(sqlite_store, pg_store, *, tables=BASELINE_TABLES) -> dict
 
         # 先把 identity 序列推进到导入最大值，再补库身份（否则新行会与显式
         # 导入的 rowid 撞车）。
-        fix_sequences(db, [t for t in tables if t not in _ROWID_IS_ID])
+        fix_sequences(db, list(tables))
         # 库身份：清空重灌会移除基线种子行；源库没有 library.id 时补建
         # （锁与缓存按它隔离，plans §2；正式切换应保持源库同一身份）。
         if db.execute("SELECT value FROM settings WHERE key='library.id'").fetchone() is None:
@@ -107,6 +114,29 @@ def copy_pg_to_sqlite(pg_store, target: Path, *, tables=BASELINE_TABLES) -> dict
                                batch[offset:offset + _BATCH])
         counts[table] = len(batch)
     return counts
+
+
+def copy_sqlite_to_sqlite(origin, target, *, connection):
+    """在目标事务中复制业务表，调用方可把恢复日志一起提交。
+
+    ATTACH 后以 INSERT SELECT 复制，避免全库行对象驻留内存；保留 SQLite rowid。
+    只接受同版本已校验 bundle，迁移的空目标与维护门闩由调用方负责。
+    """
+    from mindex.shared.db.dialect import _baseline_columns
+
+    db = connection
+    db.execute("BEGIN IMMEDIATE")
+    db.execute("PRAGMA defer_foreign_keys=ON")
+    db.execute("ATTACH DATABASE ? AS migration_source", (str(origin.path),))
+    columns = _baseline_columns()
+    for table in reversed(BASELINE_TABLES):
+        db.execute(f'DELETE FROM "{table}"')
+    for table in BASELINE_TABLES:
+        names = [column for column in columns[table] if column != "rowid"]
+        if table not in _ROWID_IS_ID:
+            names.insert(0, "rowid")
+        listed = ",".join(f'"{name}"' for name in names)
+        db.execute(f'INSERT INTO "{table}" ({listed}) SELECT {listed} FROM migration_source."{table}"')
 
 
 def table_digests(store, tables=BASELINE_TABLES) -> dict[str, list[tuple]]:

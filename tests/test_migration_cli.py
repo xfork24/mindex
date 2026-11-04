@@ -64,9 +64,9 @@ def test_export_load_verify_roundtrip(runner, pg_config, tmp_path, monkeypatch):
         encoding="utf-8")
     common = ["--config", str(config_path)]
 
-    # 1) load：种子 SQLite 需在 export 目录形状（metadata.sqlite3）
-    export_dir.mkdir()
-    (export_dir / "metadata.sqlite3").write_bytes((tmp_path / "sqlite-seed" / "metadata.sqlite3").read_bytes())
+    # 1) 所有装载必须有经校验的清单；裸 SQLite 不再绕过身份/摘要检查。
+    from mindex.maintenance.migration import export_bundle
+    export_bundle(Config(data_dir=origin.root), export_dir)
     result = runner.invoke(cli_app, [*common, "migration", "load", "--source", str(export_dir)],
                            env={"MINDEX_DATABASE_DSN": DSN})
     assert result.exit_code == 0, result.output
@@ -90,6 +90,7 @@ def test_export_load_verify_roundtrip(runner, pg_config, tmp_path, monkeypatch):
     result = runner.invoke(cli_app, [*common, "migration", "verify", "--source", str(bundle2)],
                            env={"MINDEX_DATABASE_DSN": DSN})
     assert '"consistent": false' in result.output
+    assert result.exit_code == 1
     assert any("settings" in line for line in result.output.splitlines())
 
 
@@ -101,10 +102,10 @@ def test_load_rejects_missing_database(runner, pg_config, tmp_path):
     assert result.exit_code != 0  # 错误面板含缺失文件提示（渲染格式随 typer 版本）
 
 
-def test_export_requires_postgres_backend(runner, tmp_path):
-    from mindex.shared.config import Config
-
-    result = runner.invoke(cli_app, ["migration", "export", "--target", str(tmp_path / "x")],
-                           obj=Config(data_dir=tmp_path / "data"))
-    assert result.exit_code != 0
-    assert result.exit_code != 0
+def test_export_local_backend(runner, tmp_path):
+    config_path = tmp_path / "local.yaml"
+    config_path.write_text(f"data_dir: {tmp_path / 'data'}\n", encoding="utf-8")
+    result = runner.invoke(cli_app, ["--config", str(config_path), "migration", "export",
+                                     "--target", str(tmp_path / "x")])
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "x" / "manifest.json").is_file()

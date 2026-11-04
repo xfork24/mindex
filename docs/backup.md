@@ -2,6 +2,35 @@
 
 `mindex backup` 用于完整备份、选择素材迁移、空库恢复及已有库合并。迁移直接保存和恢复既有向量，不调用嵌入、转写、人物识别或分析模型。
 
+本页主要说明本地素材库的 `backup` 工作流。local↔PG/S3 的同版本迁移使用
+`mindex migration preflight/export/load/verify/activate`，见 [集群切换边界](scaling.md#集群-runbook装配中正式版随双机验收记录补全)。
+该入口拒绝覆盖非空/异值目标，将元数据与恢复日志同事务提交；缺少必要媒体或向量的
+元数据 bundle 不能激活。完整媒体闭包、分对象续跑和灾备实测仍未交付，不据小规模往返
+测试声明可正式迁移大库。
+
+## 旧共享命名空间升级
+
+共享资源现按库 UUID 隔离：Chroma 为 `lib-<UUID无连字符>-idx-<索引ID>`，
+S3 为 `<prefix>/libraries/<UUID无连字符>/`。本地文件及本地 Chroma 集合名称不变。
+程序不会因新命名空间为空而自动读取旧资源，以免把其他库的同名索引或媒体当成本库数据。
+
+旧 PG 部署使用未隔离的 `idx-<索引ID>` 和 `<prefix>/<key>` 时，先停止所有写入节点，
+使用原数据库与原资源配置执行显式导出，再使用新的空数据库和节点目录恢复：
+
+```bash
+mindex --config old-cluster.yaml migration export --target /backup/namespace-upgrade \
+  --legacy-namespace --with-media --with-vectors
+mindex --config new-cluster.yaml migration preflight --source /backup/namespace-upgrade
+mindex --config new-cluster.yaml migration load --source /backup/namespace-upgrade --with-vectors
+mindex --config new-cluster.yaml migration verify --source /backup/namespace-upgrade
+mindex --config new-cluster.yaml migration activate --source /backup/namespace-upgrade
+```
+
+`--legacy-namespace` 只影响导出读取，不改变原数据库或移动/删除旧对象；仅在确认旧共享资源
+属于该库时使用。装载从第一份对象开始使用 bundle 的源库 UUID，元数据库提交后身份保持一致。
+集群回到本地时同时恢复对象与逻辑文件视图。原库保持停写，切换应用连接前应完成自己的
+媒体/向量闭包对账；当前仍有未交付的闭包与续跑项目，见[验证记录](scaling-enhancement-verification.md)。
+
 ## 操作前
 
 停止 Web、CLI 处理管线、创作任务以及全部后台写入进程，再开始导出或导入。迁移会依次取得管线独占锁、素材生命周期锁、原片登记锁、索引锁和创作锁，锁被占用立即失败。锁不能替代停机：设置修改等短事务没有持有整个服务生命周期的锁。

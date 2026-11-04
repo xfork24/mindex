@@ -142,7 +142,7 @@ def configure(
     if no_runtime_overrides:
         ctx.obj.runtime_overrides = False
     # 设置页保存的覆盖层对 CLI 同样生效（Web 与 CLI 行为一致）；e2e 验证框架保持 yaml 原值。
-    if ctx.invoked_subcommand not in {"e2e", "clips", "backup"}:
+    if ctx.invoked_subcommand not in {"e2e", "clips", "backup", "migrate", "migration", "doctor"}:
         from mindex.settings.runtime_settings import apply_runtime_overrides
 
         ctx.obj = apply_runtime_overrides(ctx.obj)
@@ -552,14 +552,14 @@ def migrate(ctx: typer.Context):
     else:
         from mindex.shared.storage import Store
 
-        Store(config.data_dir)
+        Store.open(config)
         print_json({"backend": "sqlite", "schema_version": "latest"})
 
 
 migration = typer.Typer(
     cls=HelpAwareGroup,
     help="local↔cluster 数据迁移（plans §10；仅同版本程序，先停写）。\n\n"
-    "export 从 PG 一致性快照导出，load 装载回空库，verify 逐表对账。\n\n"
+    "preflight 校验；export 停写导出；load 空库装载/续跑；verify 对账；activate 记录切换边界。\n\n"
     "示例：mindex migration export --target /backup/run1。",
     no_args_is_help=True,
 )
@@ -569,112 +569,113 @@ app.add_typer(migration, name="migration")
 @migration.command("export")
 def migration_export(
     ctx: typer.Context,
-    target: Annotated[Path, typer.Option(help="导出目标目录（生成 metadata.sqlite3 与 manifest.json）。")],
-    with_media: Annotated[bool, typer.Option("--with-media", help="同时复制引用到的全部媒体（推荐）。")] = False,
-    with_vectors: Annotated[bool, typer.Option("--with-vectors", help="同时导出全部 ready 索引的向量集合（原 ID/embedding）。")] = False,
+    target: Annotated[Path, typer.Option(help="新建空目录，输出带摘要的迁移 bundle。")],
+    with_media: Annotated[bool, typer.Option("--with-media", help="复制全部引用媒体与权威工作文件。")] = False,
+    with_vectors: Annotated[bool, typer.Option("--with-vectors", help="按原 ID/embedding 导出全部 ready 集合。")] = False,
+    legacy_namespace: Annotated[bool, typer.Option("--legacy-namespace", help="显式读取旧版未按库 UUID 隔离的共享资源，仅用于迁移导出。")] = False,
 ):
-    """PG 元数据库一致性导出到暂存 SQLite（REPEATABLE READ 只读快照 + 逐表清单）。
-
-    ``--with-media`` 按既有可达性口径把正文/缩略图/分镜/人物帧/Studio 输入复制进
-    ``data/``（S3 逐 key 物化，本地直接复制）并生成 media_manifest.json。向量集合
-    按原 ID/embedding 导出仍待交付（恢复时可重嵌入，质量见评测）。导出期间业务可
-    继续运行，正式 cutover 仍需停写后做最终差量。
+    """停写导出 local/PG 业务库、媒体与向量；自动裁剪秘密。
 
     示例：
 
-    \\b
-      MINDEX_DATABASE_DSN=postgres://… mindex migration export --target /backup/run1
+    \b
+      mindex migration export --target /backup/run1 --with-media --with-vectors
     """
-    from mindex.maintenance.pg_export import export_pg_to_sqlite
-    from mindex.shared.storage import PgStore
+    from mindex.maintenance.migration import export_bundle
 
-    if ctx.obj.database.backend != "postgres":
-        raise typer.BadParameter("migration export 从 PostgreSQL 导出；请在配置中选择 database.backend=postgres")
-    store = PgStore(ctx.obj)
-    target.mkdir(parents=True, exist_ok=True)
-    manifest = export_pg_to_sqlite(store, target)
-    (target / "manifest.json").write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-    payload = {"target": str(target), "total_rows": manifest["total_rows"],
-               "tables": len(manifest["tables"])}
-    if with_media:
-        from mindex.maintenance.pg_export import export_media_bundle
-        from mindex.shared.backends import open_context
-        from mindex.shared.storage import Store
+    try:
+        print_json(export_bundle(ctx.obj, target, with_media=with_media, with_vectors=with_vectors,
+                                 legacy_namespace=legacy_namespace))
+    except (ValueError, RuntimeError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
 
-        payload["media"] = export_media_bundle(Store(target), open_context(ctx.obj).media, target)
-    if with_vectors:
-        from mindex.maintenance.vector_bundle import export_vectors
 
-        exported = export_vectors(store, target, config=ctx.obj)
-        payload["vectors"] = {"collections": len(exported),
-                              "vectors": sum(item.get("vectors", 0) for item in exported.values())}
-    print_json(payload)
+@migration.command("preflight")
+def migration_preflight(
+    ctx: typer.Context,
+    source: Annotated[Path, typer.Option(help="迁移 bundle 目录。")],
+):
+    """校验 bundle、目标空库与同 migration_id 续跑条件，不写业务数据。
+
+    示例：
+
+    \b
+      mindex migration preflight --source /backup/run1
+    """
+    from mindex.maintenance.migration import preflight
+
+    try:
+        print_json(preflight(ctx.obj, source))
+    except (ValueError, RuntimeError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
 
 
 @migration.command("load")
 def migration_load(
     ctx: typer.Context,
-    source: Annotated[Path, typer.Option(help="装载来源目录（migration export 的输出）。")],
-    with_vectors: Annotated[bool, typer.Option("--with-vectors", help="同时装载向量集合（原 ID/embedding，不重新嵌入）。")] = False,
+    source: Annotated[Path, typer.Option(help="带 manifest.json 的迁移 bundle 目录。")],
+    with_vectors: Annotated[bool, typer.Option("--with-vectors", help="装载清单中的向量集合，不重新嵌入。")] = False,
 ):
-    """把暂存 SQLite 装载回 PostgreSQL（幂等：非空目标拒绝，须先清库）。
+    """装载到空目标或续跑同 migration_id；非空目标及异值冲突一律拒绝。
+
+    PostgreSQL 目标先运行 mindex migrate；不会删除 schema。媒体自动随清单装载。
 
     示例：
 
-    \\b
-      MINDEX_DATABASE_DSN=postgres://… mindex migration load --source /backup/run1
+    \b
+      mindex migration load --source /backup/run1 --with-vectors
     """
-    import psycopg
+    from mindex.maintenance.migration import load_bundle
 
-    from mindex.shared.db.migrate_pg import migrate_pg
-    from mindex.shared.db.transfer import copy_sqlite_to_pg
-    from mindex.shared.storage import PgStore, Store
-
-    database = source / "metadata.sqlite3"
-    if not database.is_file():
-        raise typer.BadParameter(f"缺少 {database}（先用 migration export 生成）")
-    config = ctx.obj
-    if config.database.backend != "postgres":
-        raise typer.BadParameter("migration load 装载到 PostgreSQL；请配置 database.backend=postgres")
-    with psycopg.connect(_pg_dsn(config), autocommit=True) as conn:  # 装载目标是空库
-        conn.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
-    with psycopg.connect(_pg_dsn(config)) as conn:
-        migrate_pg(conn)
-    pg = PgStore(config)
-    counts = copy_sqlite_to_pg(Store(source), pg)
-    payload = {"loaded_tables": sum(1 for n in counts.values() if n),
-               "total_rows": sum(counts.values()), "counts": counts}
-    if with_vectors:
-        from mindex.maintenance.vector_bundle import load_vectors
-
-        payload["vectors"] = load_vectors(pg, source, config=config)
-    print_json(payload)
+    try:
+        print_json(load_bundle(ctx.obj, source, with_vectors=with_vectors))
+    except (ValueError, RuntimeError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
 
 
 @migration.command("verify")
 def migration_verify(
     ctx: typer.Context,
-    source: Annotated[Path, typer.Option(help="migration export 输出目录（与当前 PG 对账）。")],
+    source: Annotated[Path, typer.Option(help="迁移 bundle 目录，与当前目标逐项对账。")],
 ):
-    """逐表比对暂存 SQLite 与当前 PG 的行内容摘要；差异列表为空即一致。
+    """核对元数据、媒体摘要和向量内容；存在差异以退出码 1 返回。
 
     示例：
 
     \b
       mindex migration verify --source /backup/run1
     """
-    from mindex.shared.db.transfer import table_digests
-    from mindex.shared.storage import PgStore, Store
+    from mindex.maintenance.migration import verify_bundle
 
-    pg = PgStore(ctx.obj)
-    origin = Store(source)
-    before, after = table_digests(origin), table_digests(pg)
-    differences = [
-        {"table": table, "source_rows": len(before[table]), "target_rows": len(after[table])}
-        for table in before if before[table] != after[table]
-    ]
-    print_json({"consistent": not differences, "differences": differences})
+    try:
+        result = verify_bundle(ctx.obj, source)
+    except (ValueError, RuntimeError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    print_json(result)
+    if not result["consistent"]:
+        raise typer.Exit(1)
+
+
+@migration.command("activate")
+def migration_activate(
+    ctx: typer.Context,
+    source: Annotated[Path, typer.Option(help="已装载的迁移 bundle 目录。")],
+):
+    """重新全量对账并记录激活边界，之后禁止重放旧 bundle。
+
+    激活记录不会修改流量路由；停掉源写入并按部署 runbook 切换服务。
+
+    示例：
+
+    \b
+      mindex migration activate --source /backup/run1
+    """
+    from mindex.maintenance.migration import activate_bundle
+
+    try:
+        print_json(activate_bundle(ctx.obj, source))
+    except (ValueError, RuntimeError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
 
 
 def _pg_dsn(config) -> str:
@@ -754,7 +755,7 @@ def check(
     from mindex.processing.indexing import check_index
     from mindex.shared.storage import Store
 
-    store = Store(ctx.obj.data_dir)
+    store = Store.open(ctx.obj)
     active = store.active_index()
     selected = index_id or (active["id"] if active else None)
     if not selected:
@@ -778,7 +779,7 @@ def list_indexes(ctx: typer.Context):
     """
     from mindex.shared.storage import Store
 
-    store = Store(ctx.obj.data_dir)
+    store = Store.open(ctx.obj)
     print_json(
         {
             "active": store.active_index(),
@@ -808,7 +809,7 @@ def lexical(
     from mindex.shared.processing_lock import index_write_lock
     from mindex.shared.storage import Store
 
-    store = Store(ctx.obj.data_dir)
+    store = Store.open(ctx.obj)
     with index_write_lock(store.root, config=ctx.obj):
         if index_id:
             versions = store.rows("SELECT id FROM index_versions WHERE id=? AND status='ready'", (index_id,))
@@ -838,7 +839,7 @@ def activate_index(
     from mindex.processing.pipeline import Pipeline
     from mindex.shared.storage import Store
 
-    store = Store(ctx.obj.data_dir)
+    store = Store.open(ctx.obj)
     with Pipeline(ctx.obj).lock():
         issues = check_index(store, index_id, config=ctx.obj)
         if issues:
@@ -1000,11 +1001,13 @@ def serve(
     # 每日选题挖掘调度随服务启停（桌面版 sidecar 同样经这里启动）。
     app = create_app(ctx.obj, index_id=index_id, scheduler=ctx.obj.topics.scheduler.enabled)
     warm_up_in_background(ctx.obj, index_id)  # 后台线程，不阻塞监听；失败只记日志
-    local_services.autostart_in_background(ctx.obj)  # 只在开启本机服务管理且有 autostart 服务时生效
+    if ctx.obj.database.backend == "sqlite":
+        local_services.autostart_in_background(ctx.obj)
     try:
         uvicorn.run(app, host=host, port=port)
     finally:
-        local_services.stop_on_exit(ctx.obj)
+        if ctx.obj.database.backend == "sqlite":
+            local_services.stop_on_exit(ctx.obj)
 
 
 @app.command()

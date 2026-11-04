@@ -75,13 +75,13 @@ def test_export_load_roundtrip_preserves_ids_vectors_metadata(tmp_path):
             assert abs(a - b) <= 1e-6  # 归一化 + float32 舍入容差（远小于 ANN 容差）
 
 
-def test_missing_collection_is_skipped_with_reason(tmp_path):
+def test_missing_ready_collection_fails_export(tmp_path):
+    import pytest
     config = Config(data_dir=tmp_path / "origin")
     store = Store(config.data_dir)
     store.execute("INSERT INTO index_versions(id,spec,status) VALUES('gone','{}','ready')")
-    manifest = export_vectors(store, tmp_path / "bundle")
-    assert manifest["gone"]["vectors"] == 0
-    assert "skipped" in manifest["gone"]  # 集合已被清理：跳过并记录原因，不中断导出
+    with pytest.raises(ValueError, match="不能生成完整备份"):
+        export_vectors(store, tmp_path / "bundle")
 
 
 def test_load_without_vectors_directory_is_noop(tmp_path):

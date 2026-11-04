@@ -41,37 +41,35 @@ def export_pg_to_sqlite(pg_store: PgStore, target: Path, *, tables=BASELINE_TABL
     staging = Store(target)
     manifest: dict[str, dict] = {}
     total = 0
-    pool = pg_store.backend.pool()
-    connection = pool.getconn()
-    try:
-        connection.autocommit = False
-        with connection.cursor() as cursor, staging.connect() as db:
-            cursor.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
-            db.execute("PRAGMA foreign_keys=OFF")  # 按清单序装载；装载完由校验步骤整体核验
-            for table in tables:  # 先清空目标，保证内容与快照一一对应
-                db.execute(f"DELETE FROM {table}")
+    from mindex.shared.db.dialect import _baseline_columns
+
+    columns_by_table = _baseline_columns()
+    with pg_store.backend.pool().connection() as connection:
+        connection.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+        with staging.connect() as db:
+            db.execute("PRAGMA foreign_keys=OFF")
             for table in tables:
-                if table in _ROWID_IS_ID:
-                    cursor.execute(f'SELECT * FROM "{table}" ORDER BY id')
-                else:  # rowid 列显式随行导出（SQLite 侧按同值回灌保序）
-                    cursor.execute(f'SELECT rowid, * FROM "{table}" ORDER BY rowid')
-                columns = tuple(column.name for column in cursor.description)
-                names = ",".join(f'"{c}"' if c in ("end", "trigger", "start") else c for c in columns)
+                db.execute(f'DELETE FROM "{table}"')
+            for table in tables:
+                columns = list(columns_by_table[table])
+                names = ",".join(f'"{column}"' for column in columns)
+                order = "id" if table in _ROWID_IS_ID else "rowid"
                 placeholders = ",".join("?" * len(columns))
                 insert = f'INSERT INTO "{table}" ({names}) VALUES ({placeholders})'
-                table_digest = hashlib.sha256()
-                count = 0
-                while chunk := cursor.fetchmany(_BATCH):
-                    rows = [tuple(row) for row in chunk]
-                    db.executemany(insert, rows)
-                    for row in rows:
-                        table_digest.update(repr(row).encode())
-                    count += len(rows)
+                table_digest, count = hashlib.sha256(), 0
+                # server-side cursor：fetchmany 不会先把整表装进客户端内存。
+                with connection.cursor(name=f"export_{table}") as cursor:
+                    cursor.execute(f'SELECT {names} FROM "{table}" ORDER BY {order}')
+                    while chunk := cursor.fetchmany(_BATCH):
+                        rows = [tuple(row) for row in chunk]
+                        db.executemany(insert, rows)
+                        for row in rows:
+                            table_digest.update(repr(row).encode())
+                        count += len(rows)
                 manifest[table] = {"rows": count, "sha256": table_digest.hexdigest()}
                 total += count
-            connection.rollback()  # 只读事务结束，快照释放
-    finally:
-        pool.putconn(connection)
+            if db.execute("PRAGMA foreign_key_check").fetchone():
+                raise ValueError("PG 导出存在悬空外键引用")
     log.info("PG 一致性导出完成：%d 行 / %d 表 → %s", total, len(tables), target)
     return {"tables": manifest, "total_rows": total,
             "metadata": {"isolation": "repeatable-read-read-only", "dialect": "pg-export-v1"}}
@@ -88,7 +86,7 @@ def export_media_bundle(store: Store, media, target: Path) -> dict:
     import hashlib
     import shutil
 
-    from mindex.maintenance.backup_files import referenced_files
+    from mindex.maintenance.backup_files import referenced_files, safe_path
 
     target = Path(target)
     payload = target / "data"
@@ -96,8 +94,9 @@ def export_media_bundle(store: Store, media, target: Path) -> dict:
     if getattr(media, "backend", "local") == "s3":
         keys = referenced_files(target, target / "metadata.sqlite3",
                                 available_files=set(media.iter_prefix("")))
+        keys.update(row["object_key"] for row in store.rows("SELECT object_key FROM shared_files WHERE size>=0"))
         for key in sorted(keys):
-            destination = payload / key
+            destination = safe_path(payload, key)
             destination.parent.mkdir(parents=True, exist_ok=True)
             with media.materialize(key) as path:
                 shutil.copy2(path, destination)
@@ -105,7 +104,7 @@ def export_media_bundle(store: Store, media, target: Path) -> dict:
 
         keys = referenced_files(media.root, target / "metadata.sqlite3")
         for key in sorted(keys):
-            destination = payload / key
+            destination = safe_path(payload, key)
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(media.root / key, destination)
     manifest = {}
