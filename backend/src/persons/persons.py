@@ -1076,8 +1076,8 @@ class Persons:
                 evidence_sql = ("SELECT * FROM person_evidence e WHERE source_id=? AND shot_id=? AND "
                                 + self.VALID_ROLE + " ORDER BY start,id")
             elif self.store.pg:
-                score = "(CASE WHEN (data::jsonb->>'score') ~ '^-?[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?$' THEN (data::jsonb->>'score')::numeric END)"
-                original = "(CASE WHEN (data::jsonb->>'original_score') ~ '^-?[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?$' THEN (data::jsonb->>'original_score')::numeric END)"
+                score = r"(CASE WHEN (data::jsonb->>'score') ~ '^-?[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?$' THEN (data::jsonb->>'score')::numeric END)"
+                original = r"(CASE WHEN (data::jsonb->>'original_score') ~ '^-?[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?$' THEN (data::jsonb->>'original_score')::numeric END)"
                 evidence_sql = (
                     "SELECT id,actor_id,role_id,status,jsonb_build_object("
                     "'score'," + score + ",'original_score'," + original + ","
@@ -1258,7 +1258,7 @@ class Persons:
     def _version_key(self, person_id):
         """person_versions 行按内容寻址、写入后不可变；长度进键，防同 id 被离线迁移改写后读到旧缓存。"""
         row = self.store.one("SELECT length(CAST(data AS BLOB)) AS n FROM person_versions WHERE id=?", (person_id,))
-        return (str(self.store.path), person_id, row["n"]) if row else None
+        return (self.store.library_id or str(self.store.path), person_id, row["n"]) if row else None
 
     def _version_image_index(self, version_id):
         """某个历史版本里 证据 id -> [{shot_id, source_id, data:{image_path}}]。
@@ -1336,6 +1336,33 @@ class Persons:
             "evidence": data["evidence"], "coverage": data["coverage"],
             "evidence_index": EvidenceIndex(data["evidence"]),  # 区间索引随版本缓存，查询时不再逐条扫描
         })
+
+    def evidence_for(self, release, *, sources, identifiers):
+        """PG 人物查询按候选素材与身份投影，避免下载和缓存整版人物证据。"""
+        if not self.store.pg:
+            return self.published_evidence(release)
+        from mindex.persons.person_names import EvidenceIndex
+
+        version_id = release["person_id"] if release else None
+        sources, identifiers = sorted(set(sources)), sorted(set(identifiers))
+        if not version_id or not sources or not identifiers:
+            return {"evidence": [], "coverage": [], "evidence_index": EvidenceIndex([])}
+        evidence = [json.loads(row["item"]) for row in self.store.rows(
+            "SELECT (e.value #- '{data,body_feature}')::text AS item FROM person_versions p "
+            "CROSS JOIN LATERAL jsonb_array_elements(p.data::jsonb->'evidence') "
+            "WITH ORDINALITY AS e(value,position) WHERE p.id=? "
+            "AND e.value->>'source_id'=ANY(?::text[]) "
+            "AND (e.value->>'actor_id'=ANY(?::text[]) "
+            "OR COALESCE(e.value->>'stage_id',e.value->>'role_id')=ANY(?::text[])) ORDER BY e.position",
+            (version_id, sources, identifiers, identifiers))]
+        for item in evidence:
+            item["role_id"] = item.pop("stage_id", None) or item["role_id"]
+        coverage = [json.loads(row["item"]) for row in self.store.rows(
+            "SELECT c.value::text AS item FROM person_versions p "
+            "CROSS JOIN LATERAL jsonb_array_elements(p.data::jsonb->'coverage') "
+            "WITH ORDINALITY AS c(value,position) WHERE p.id=? "
+            "AND c.value->>'source_id'=ANY(?::text[]) ORDER BY c.position", (version_id, sources))]
+        return {"evidence": evidence, "coverage": coverage, "evidence_index": EvidenceIndex(evidence)}
 
     def published(self, content_id, *, pinned=False, release_id=None, source_id=None):
         release = self.release_for(content_id, pinned=pinned, release_id=release_id)
@@ -1486,11 +1513,11 @@ def migrate_frames(config, *, source_id=None, apply=False):
     """Migrate display assets only. Feature vectors, cache IDs and releases stay intact."""
     from filelock import Timeout
 
-    from mindex.shared import locks
+    from mindex.shared import lock_backend
 
-    store = Store(config.data_dir)
+    store = Store.open(config)
     try:
-        with locks.acquire_ordered(store.root, ["pipeline", "index-write"], exclusive=True,
+        with lock_backend.acquire_ordered(store, ["pipeline", "index-write"], exclusive=True,
                                    timeout={"index-write": 10}), \
                 store.run("persons-migrate-frames") if apply else nullcontext():
             return _migrate_frames(config, store, source_id, apply)

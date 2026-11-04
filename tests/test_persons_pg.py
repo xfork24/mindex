@@ -109,3 +109,19 @@ def test_released_entities_and_version_images_match(stores):
             == Persons(postgres).published_entities(pg_release))
     assert (Persons(sqlite)._version_image_index("v1")
             == Persons(postgres)._version_image_index("v1"))
+
+
+@pytest.mark.parametrize("sources,identifiers,expected", [
+    (["s1"], ["a1"], ["e1"]), (["s1"], ["r1"], ["e1"]),
+    (["other-source"], ["a1"], []), (["s1"], ["other-person"], []),
+])
+def test_query_evidence_projection_respects_sources_and_identities(stores, sources, identifiers, expected):
+    _, pg = stores
+    catalogue = Persons(pg)
+    release = catalogue.release_for("i1", pinned=True)
+    result = catalogue.evidence_for(release, sources=sources, identifiers=identifiers)
+    assert [e["id"] for e in result["evidence"]] == expected
+    if expected:
+        reference = catalogue.published_evidence(release)
+        assert result["evidence"] == reference["evidence"]
+        assert result["coverage"] == reference["coverage"]

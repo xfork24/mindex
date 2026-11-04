@@ -173,7 +173,8 @@ class SearchEngine:
         """按配置选择向量客户端：缺省本地嵌入；chroma_server 形态走共享 HttpClient（plans §6.2）。"""
         from mindex.processing.indexing import vector_client
 
-        return VectorIndex(self.store.root, index_id, create, client=vector_client(self.config))
+        return VectorIndex(self.store.root, index_id, create,
+                           client=vector_client(self.config, library_id=self.store.library_id))
 
     def _validate_space(self, active):
         self._space_id = None
@@ -199,7 +200,7 @@ class SearchEngine:
 
     def _cached_vector(self, kind, content, compute):
         """按空间与查询内容持久缓存；每次读取前仍须核验当前身份。"""
-        key = (self._space_id, kind, content)
+        key = (self.store.library_id, self._space_id, kind, content)
         identity = fingerprint(key)
         path = self.store.root / "cache" / "query-vectors" / (identity + ".json")
         if not self.force_embedding:
@@ -298,21 +299,29 @@ class SearchEngine:
         *,
         lookup: dict[str, dict] | None = None,
         eligible_count: int | None = None,
+        projected: bool = False,
     ):
         if ranked is None:
             ranked = fuse(routes, self.config.search.weights, self.config.search.rrf_k)
         lookup = lookup if lookup is not None else {s["id"]: s for s in snapshots}
         ranked = duration_rank(ranked, lookup, target_duration, self.config.search)
-        selected, results = [], []
+        selected, chosen = [], []
         for hit in ranked:
             segment = lookup[hit["id"]]
             if any(time_iou(segment, prior) > 0.5 for prior in selected):
                 continue
             selected.append(segment)
-            results.append({**public_segment(segment), **{key: hit[key] for key in
-                            ("score", "matches", "relevance_score", "duration_score", "target_duration") if key in hit}})
-            if len(results) >= limit:
+            chosen.append(hit)
+            if len(chosen) >= limit:
                 break
+        if projected:
+            hydrated = self._hydrate(active, [hit["id"] for hit in chosen])
+            lookup = {key: {**value, **({"person_evidence": lookup[key]["person_evidence"]}
+                                       if "person_evidence" in lookup[key] else {})}
+                      for key, value in hydrated.items()}
+        results = [{**public_segment(lookup[hit["id"]]), **{key: hit[key] for key in
+                    ("score", "matches", "relevance_score", "duration_score", "target_duration") if key in hit}}
+                   for hit in chosen]
         return {
             "index_id": active["id"],
             "index_mode": active["spec"].get("mode", "enriched"),
@@ -326,16 +335,18 @@ class SearchEngine:
         """按命中批量读取完整快照并 decorate；投影路径只在这一步接触全快照（plans §6.1）。"""
         if not ids:
             return {}
-        placeholders = ",".join("?" * len(ids))
         library = Library(self.store)
-        sources, segments = library.overlays()
+        snapshots = []
+        for offset in range(0, len(ids), 400):
+            batch = ids[offset:offset + 400]
+            placeholders = ",".join("?" * len(batch))
+            snapshots.extend(json.loads(row["snapshot"]) for row in self.store.rows(
+                "SELECT snapshot FROM index_members WHERE index_id=? "
+                f"AND segment_id IN ({placeholders})", [active["id"], *batch]))
+        sources, segments = library.overlays(snapshots=snapshots)
         lookup = {}
-        for row in self.store.rows(
-            "SELECT segment_id,snapshot FROM index_members WHERE index_id=? "
-            f"AND segment_id IN ({placeholders})", [active["id"], *ids]
-        ):
-            lookup[row["segment_id"]] = library.decorate(
-                json.loads(row["snapshot"]), sources, segments)
+        for snapshot in snapshots:
+            lookup[snapshot["id"]] = library.decorate(snapshot, sources, segments)
         return lookup
 
     def _text_projection(self, query, active: dict, started: float):
@@ -374,8 +385,11 @@ class SearchEngine:
                         'release_id': release['id'] if release else None,
                         'person_version': release['person_id'] if release else None}
                 return {**fast, **meta}
-        active, snapshots, vectors = self._context(
-            query.granularity, query.filters, text=True, person=person)
+        active = self._active()
+        if active["spec"].get("format", 1) == 1 and not person:
+            self._validate_space(active)
+        snapshots, projected = self._eligible_rows(active, query.granularity, query.filters)
+        vectors = self._vectors(active["id"])
         release = catalogue.release_for(active['id'], pinned=self.index_id is not None, release_id=self.release_id or active.get('search_release_id'))
         # 只取实体（几 KB）；数十 MB 的证据与覆盖区间只在出镜检索时才加载。
         published = catalogue.published_entities(release)
@@ -395,9 +409,7 @@ class SearchEngine:
         if mode == 'onscreen':
             from mindex.persons.person_names import coverage_missing
             from mindex.persons.person_processing import EvidenceReferences
-            published = {**published, **catalogue.published_evidence(release)}
             reference_images = EvidenceReferences(self.config, self.store)
-            meta['person_coverage_missing'] = coverage_missing(snapshots, published['coverage'])
             if published.get('format', 1) >= 2:
                 # Actor searches expand through the immutable release cast, not live edits.
                 cast_roles = {}
@@ -408,6 +420,10 @@ class SearchEngine:
                 variant_groups = [list(dict.fromkeys(
                     role for identifier in group for role in cast_roles.get(identifier, [identifier])
                 )) for group in variant_groups]
+            published = {**published, **catalogue.evidence_for(
+                release, sources={s['source_id'] for s in snapshots},
+                identifiers={identifier for group in variant_groups for identifier in group})}
+            meta['person_coverage_missing'] = coverage_missing(snapshots, published['coverage'])
             eligible = []
             names = {e['id']: e['name'] for e in entities}
             # reference_url 要读特征缓存、较贵，只为最终返回的少数结果计算（见 finish_references）。
@@ -444,7 +460,8 @@ class SearchEngine:
                     return total + quality * 0.001
                 ranked = [{'id': s['id'], 'score': score(s), 'matches': [{'route': 'person', 'rank': i+1}]}
                           for i, s in enumerate(sorted(snapshots, key=lambda s: (-score(s), s['id'])))]
-                result = finish_references(self._result(active, snapshots, {}, query.limit, started, ranked=ranked, target_duration=query.target_duration))
+                result = finish_references(self._result(active, snapshots, {}, query.limit, started, ranked=ranked,
+                                                       target_duration=query.target_duration, projected=projected))
                 result['score_type'] = 'duration_blend' if query.target_duration and self.config.search.duration_weight else 'person_coverage_quality'
                 return {**result, **meta}
             query = query.model_copy(update={'text': remaining})
@@ -454,22 +471,27 @@ class SearchEngine:
 
             names = {e['id']: [e['name'], *e.get('aliases', [])] for e in entities}
             if ids:
+                if projected:
+                    from mindex.search.lexical_query import dialogue_projection
+
+                    dialogue = dialogue_projection(self.store, active['id'], [s['id'] for s in snapshots])
+                    snapshots = [{**s, 'views': {'dialogue': dialogue.get(s['id'], '')}} for s in snapshots]
                 def mentions(s):
                     text = s.get('views', {}).get('dialogue', '')
                     checks = [any(_occurrences(n, text) for i in group for n in names[i]) for group in variant_groups]
                     return any(checks) if query.person_relation == 'any' else all(checks)
                 snapshots = [s for s in snapshots if mentions(s)]
             query = query.model_copy(update={'channels': ['dialogue'], 'text': query.text or ' '.join(names[i][0] for i in ids)})
-        result = self._text_query(query, active, snapshots, vectors, started)
+        result = self._text_query(query, active, snapshots, vectors, started, projection=projected)
         if mode == 'onscreen':
             finish_references(result)
         return {**result, **meta}
 
-    def _text_query(self, query, active, snapshots, vectors, started):
+    def _text_query(self, query, active, snapshots, vectors, started, *, projection=False):
         if not snapshots:
             return self._result(active, snapshots, {}, query.limit, started, target_duration=query.target_duration)
         if active["spec"].get("format", 1) >= 2:
-            return self._channel_text(query, active, snapshots, vectors, started)
+            return self._channel_text(query, active, snapshots, vectors, started, projection=projection)
         self._validate_space(active)
         vector = self._query_vector(query.text)
         ids = [s["id"] for s in snapshots]
@@ -547,6 +569,9 @@ class SearchEngine:
         if projection:
             # 只对融合后的候选命中读取完整快照（时长排序/IoU 去重/证据展示需要）。
             lookup = self._hydrate(active, [hit["id"] for hit in ranked])
+            evidence = {s["id"]: s["person_evidence"] for s in snapshots if "person_evidence" in s}
+            for identifier in evidence.keys() & lookup.keys():
+                lookup[identifier] = {**lookup[identifier], "person_evidence": evidence[identifier]}
         else:
             lookup = {s["id"]: s for s in snapshots}
         query_terms = set(tokens(query.text))
@@ -674,7 +699,6 @@ class SearchEngine:
         return self._result(active, snapshots, {}, limit, started, ranked=ranked,
                             target_duration=target_duration, lookup=lookup, eligible_count=len(snapshots))
 
-    @recall_scope
     def similar(
         self, segment_id: str, granularity: str | None = None, limit: int = 20, filters: Filters | None = None
     ) -> dict:

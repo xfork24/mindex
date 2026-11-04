@@ -39,7 +39,7 @@ PHASES = (
 
 def progress(config: Config, directory: Path) -> dict:
     state = json.loads((directory / "run.json").read_text(encoding="utf-8"))
-    store = Store(config.data_dir)
+    store = Store.open(config)
     counts = store.rows(
         "SELECT s.kind,count(*) AS count FROM annotations a JOIN segments s ON s.id=a.segment_id "
         "WHERE a.profile=? AND s.source_id=? GROUP BY s.kind",
@@ -75,7 +75,7 @@ def initialize(config: Config, source_id: str, directory: Path):
     directory = directory.resolve()
     if (directory / "run.json").exists():
         raise ValueError("实验已存在，请继续 phase；新实验使用新的目录")
-    store = Store(config.data_dir)
+    store = Store.open(config)
     report = source_report(config, source_id)
     if not report["prepared"] or not report["configuration_matches"] or report["missing_artifacts"]:
         raise ValueError("素材未完成切片、配置不符或文件缺失")
@@ -273,7 +273,7 @@ def _smoke(config: Config, directory: Path) -> dict:
     if len(unique) < 6:
         raise ValueError("至少需要六个不同的实际视频文件")
     samples = [unique[int(i)] for i in np.linspace(0, len(unique) - 1, 6)]
-    embedder, store = make_embedder(config), Store(config.data_dir)
+    embedder, store = make_embedder(config), Store.open(config)
     space = embedder.identity()
     v2 = space.get("schema") == 2 and space.get("implementation") == ADAPTER_VERSION
     deployment = embedder._runtime if v2 else None
@@ -391,7 +391,7 @@ def run_phase(
     with FileLock(str(directory / "run.lock"), timeout=0):
         state_path = directory / "run.json"
         state = json.loads(state_path.read_text(encoding="utf-8"))
-        store = Store(config.data_dir)
+        store = Store.open(config)
         selected_index = index_id
         if selected_index is None:
             for mode in ("enriched", "visual"):
