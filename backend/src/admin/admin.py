@@ -20,9 +20,16 @@ def etag_matches(header: str | None, etag: str) -> bool:
     return "*" in values or etag in values
 
 
-def admin_router(store: Store, runtime=None) -> APIRouter:
+def admin_router(store: Store, runtime=None, backends=None) -> APIRouter:
     router = APIRouter(prefix="/api/admin", tags=["素材管理"])
     library = Library(store)
+    # 对象存储形态：删除素材时清理远端对象；预签名下载保留期内跳过（plans §8）。
+    media = backends.media if backends is not None else None
+    pins = None
+    if media is not None and getattr(media, "backend", "local") == "s3":
+        from mindex.shared.media_delivery import DownloadPins
+
+        pins = DownloadPins(store, backends.library_id)
     from mindex.admin.work_cache import WorkCache
     work_cache = WorkCache(library)
 
@@ -175,7 +182,7 @@ def admin_router(store: Store, runtime=None) -> APIRouter:
         try:
             try:
                 with index_write_lock(store.root):
-                    return purge_source(store, source_id)
+                    return purge_source(store, source_id, media=media, pins=pins)
             except KeyError as exc:
                 raise HTTPException(404, "素材不存在") from exc
             except PurgeRefused as exc:

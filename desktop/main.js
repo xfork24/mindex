@@ -9,6 +9,7 @@ const { app, BrowserWindow, Menu, Notification, Tray, dialog, nativeImage, sessi
 const { COOKIE, newToken, sessionValue } = require("./lib/auth");
 const { dataDirProblem, ensureConfig, ensureFonts } = require("./lib/firstrun");
 const { layout } = require("./lib/paths");
+const { remoteConfig } = require("./lib/remote");
 const { choosePort, HOST } = require("./lib/ports");
 const security = require("./lib/security");
 const sidecarLib = require("./lib/sidecar");
@@ -49,6 +50,24 @@ const backend = {
   },
 
   async start() {
+    // 远程 API 客户端模式（plans §9 阶段 6）：不启动 sidecar，直接连接服务端。
+    // 远程数据处理与存储留在服务端；终端只持有用户凭据。
+    const remote = remoteConfig({ userData: paths.userData });
+    if (remote) {
+      this.child = null;
+      this.token = remote.token;
+      this.origin = remote.url;
+      this.log = this.log || new sidecarLib.RotatingLog(paths.backendLog);
+      this.log.write(`\n===== ${new Date().toISOString()} 远程 API 模式：${remote.url}（凭据来源 ${remote.source}）\n`);
+      this.remote = true;
+      const health = await sidecarLib.waitForHealth({
+        url: `${this.origin}/api/health`, token: this.token, version: null, timeoutMs: 30000,
+        pidMatches: () => true,  // 远程进程不在本机：以令牌接受为准（启动即校验）
+      });
+      await this.authorize();
+      return { health, changed: false };
+    }
+    this.remote = false;
     const state = loadState(paths.stateFile);
     if (state.sidecar?.pid) await sidecarLib.reapStale(state.sidecar.pid);
     const { port, changed } = await choosePort(state.port);
@@ -114,7 +133,7 @@ const backend = {
   },
 
   async request(pathname, { method = "GET", timeoutMs = 3000 } = {}) {
-    if (!this.origin || !this.child) return null;
+    if (!this.origin || (!this.child && !this.remote)) return null;
     try {
       const response = await fetch(`${this.origin}${pathname}`, {
         method, headers: { Authorization: `Bearer ${this.token}` }, signal: AbortSignal.timeout(timeoutMs),
@@ -126,6 +145,10 @@ const backend = {
   },
 
   async stop() {
+    if (this.remote) {  // 远程模式：没有本机副作用需要清理
+      this.stopping = true;
+      return;
+    }
     this.stopping = true;
     const child = this.child;
     if (child?.pid) {
@@ -365,7 +388,10 @@ async function shutdown() {
     if (answer.response !== 0) return false;
   }
   // 先停“退出时停止”的本机模型服务（未开启本机服务管理时接口返回 403/404，忽略）。
-  await backend.request("/api/settings/local-services/stop-on-exit", { method: "POST", timeoutMs: 20000 });
+  // 远程模式不触碰服务端的本机服务（那是服务端主机的资源，不属于本终端）。
+  if (!backend.remote) {
+    await backend.request("/api/settings/local-services/stop-on-exit", { method: "POST", timeoutMs: 20000 });
+  }
   for (const window of BrowserWindow.getAllWindows()) window.destroy();
   await backend.stop();
   return true;

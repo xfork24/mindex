@@ -131,8 +131,7 @@ class S3MediaStore:
         return MediaObject(key=key, size=None, backend_version=version, etag=None, sha256=sha256)
 
     def delete_version(self, key: str, *, version: str | None = None) -> None:
-        if version is None:
-            raise ValueError("S3 实现要求显式 version（内容不可变，删除须精确到版本）")
+        """删除主对象（version=None）或某个不可变内容版本；精确到 key，不做前缀删除。"""
         self.client.delete_object(Bucket=self.bucket, Key=self._object_key(key, version))
 
     def iter_prefix(self, prefix: str) -> Iterator[str]:

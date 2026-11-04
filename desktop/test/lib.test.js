@@ -320,3 +320,34 @@ test("父 pid 与命令行查询（Windows 缺省走 PowerShell）——reapStal
   assert.equal(sidecar.parentPid(7, { platform: "win32", exec: () => { throw new Error("x"); } }), 0);
   assert.equal(sidecar.processCommand(7, { platform: "win32", exec: () => { throw new Error("x"); } }), "");
 });
+
+// ------------------------------------------------------------------ 远程 API 客户端模式
+
+test("远程配置：环境变量优先、URL 归一化、非法值回落 null", () => {
+  const { remoteConfig, normalizeUrl } = require("../lib/remote");
+  assert.equal(normalizeUrl("https://mindex.internal/"), "https://mindex.internal");
+  assert.equal(normalizeUrl("https://mindex.internal:8443//"), "https://mindex.internal:8443");
+  assert.equal(normalizeUrl("ftp://x"), null);
+  assert.equal(normalizeUrl("not a url"), null);
+  const env = { MINDEX_DESKTOP_REMOTE_URL: "https://api.example/", MINDEX_DESKTOP_REMOTE_TOKEN: " tok " };
+  assert.deepEqual(remoteConfig({ env }), { url: "https://api.example", token: "tok", source: "env" });
+  // 环境变量缺令牌：不使用
+  assert.equal(remoteConfig({ env: { MINDEX_DESKTOP_REMOTE_URL: "https://api.example" } }), null);
+  // 非法 URL：不使用
+  assert.equal(remoteConfig({ env: { MINDEX_DESKTOP_REMOTE_URL: "ftp://x", MINDEX_DESKTOP_REMOTE_TOKEN: "t" } }), null);
+});
+
+test("远程配置：userData/remote.json 回落与损坏容忍", () => {
+  const { remoteConfig } = require("../lib/remote");
+  const dir = temp();
+  const file = path.join(dir, "remote.json");
+  const read = () => fs.readFileSync(file, "utf8");
+  assert.equal(remoteConfig({ env: {}, userData: dir, readFile: read }), null);  // 文件缺失
+  fs.writeFileSync(file, "{ not json");
+  assert.equal(remoteConfig({ env: {}, userData: dir, readFile: read }), null);  // 损坏
+  fs.writeFileSync(file, JSON.stringify({ url: "https://remote.example/", token: "abc" }));
+  assert.deepEqual(remoteConfig({ env: {}, userData: dir, readFile: read }),
+    { url: "https://remote.example", token: "abc", source: file });
+  fs.writeFileSync(file, JSON.stringify({ url: "https://remote.example/" }));  // 缺令牌
+  assert.equal(remoteConfig({ env: {}, userData: dir, readFile: read }), null);
+});

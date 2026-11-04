@@ -133,3 +133,21 @@ CI（`.github/workflows/ci.yml`）的 `desktop-package` 任务在定时/手动�
 - 强制对齐仍需要用户自备的 `.venv-align` 解释器（与 Web 版相同）。
 - 没有随包的 `mindex` 命令行；需要 CLI 时使用源码安装。
 - macOS 只出 Apple Silicon；Windows/Linux 只出 x64（arm64 未排期）。
+
+## 远程 API 客户端模式（阶段 6）
+
+桌面可直接连接远程服务，不启动本机 sidecar：远程数据处理与存储留在服务端，终端只持有
+用户凭据（不向终端分发 PG/S3 管理凭据）。适用于服务端按 [scaling.md](scaling.md) 部署的
+pg-single/cluster 形态。
+
+配置（二选一，按优先级）：
+
+1. 环境变量：`MINDEX_DESKTOP_REMOTE_URL=https://mindex.internal` +
+   `MINDEX_DESKTOP_REMOTE_TOKEN=<用户访问令牌>`（自动化/受管终端）；
+2. `~/Library/Application Support/mindex/remote.json`（Windows：`%APPDATA%/mindex/remote.json`）：
+   `{ "url": "https://mindex.internal", "token": "..." }`。
+
+行为：启动跳过 sidecar 与本地数据目录检查，直接健康检查并注入令牌（与本地模式相同的
+请求头/Cookie 授权）；退出时不调用服务端的本机服务停止接口。配置缺失或非法时回落到
+本地 sidecar 模式（零行为变化）。版本不一致不阻止连接（服务端滚动升级期间），但
+`/api/health` 的 `backends` 字段可诊断形态。
