@@ -557,6 +557,25 @@ def migrate(ctx: typer.Context):
 
 
 @app.command()
+def doctor(ctx: typer.Context):
+    """部署诊断：后端组合校验与逐项连通检查（plans §11；启动前运行）。
+
+    输出 JSON（checks/summary），全部通过退出码 0，否则 1。只读检查，不执行 DDL、不触碰数据。
+
+    示例：
+
+    \b
+      MINDEX_DATABASE_DSN=postgres://… mindex doctor
+    """
+    from mindex.doctor import doctor
+
+    report = doctor(ctx.obj)
+    print_json(report)
+    if not report["ok"]:
+        raise typer.Exit(1)
+
+
+@app.command()
 def worker(
     ctx: typer.Context,
     queues: Annotated[str, typer.Option(help="消费的任务类别（逗号分隔：source,dialogue,person,topic）。")] = "source,dialogue,person,topic",

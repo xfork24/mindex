@@ -54,9 +54,10 @@ def open_context(config: Config) -> BackendContext:
     """按配置构造运行后端。
 
     阶段 1 支持 local（缺省，零行为变化）与 pg-single（database.backend=postgres，
-    单主机过渡测试形态，媒体/向量/锁仍为本地实现，禁止多机写入）。后续阶段的
-    cluster 形态缺任何共享后端时在此抛出中文修复提示并启动失败，绝不静默落回
-    本地 SQLite。
+    单主机过渡测试形态）。阶段 5 起组合完整共享后端（postgres + chroma_server +
+    s3 + postgres 队列 + postgres 锁）时形态为 **cluster**；任一后端组合缺共享
+    能力则保持过渡形态并禁止多副本。形态缺共享后端时抛中文修复提示，绝不静默
+    落回本地 SQLite。
     """
     from mindex.shared.storage import PgStore, Store
 
@@ -111,6 +112,9 @@ def open_context(config: Config) -> BackendContext:
             config.storage.s3,
             staging=staging,
             cache_dir=store.root / "cache" / "s3")
+        if (config.vector.backend == "chroma_server" and config.queue.backend == "postgres"
+                and config.locks.backend == "postgres"):
+            form = "cluster"  # 共享后端齐备（plans §4；准入与 runbook 见 docs/scaling.md）
     else:
         staging = _staging(config, store.root)
         media = LocalMediaStore(store.root)
