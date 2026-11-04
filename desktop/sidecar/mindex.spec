@@ -37,6 +37,9 @@ hiddenimports += collect_submodules("deepseek_harness_runtime")
 datas += collect_data_files("mindex")
 datas += copy_metadata("mindex")
 datas += collect_data_files("jieba")
+# 命名时区在没有系统 IANA 数据的环境中依赖 tzdata；importlib 动态读取须显式收集。
+hiddenimports += collect_submodules("tzdata")
+datas += collect_data_files("tzdata")
 for package in ("chromadb", "scenedetect"):
     package_datas, package_binaries, package_hidden = collect_all(package)
     datas += package_datas
@@ -44,7 +47,7 @@ for package in ("chromadb", "scenedetect"):
     hiddenimports += package_hidden
 # importlib.metadata 查询的依赖版本（uvicorn、fastapi 等启动时读取）。
 for package in ("fastapi", "uvicorn", "pydantic", "chromadb", "httpx", "playwright", "mcp",
-                "deepseek-harness-sdk", "deepseek-harness-runtime-bin"):
+                "deepseek-harness-sdk", "deepseek-harness-runtime-bin", "tzdata"):
     datas += copy_metadata(package)
 
 analysis = Analysis(
