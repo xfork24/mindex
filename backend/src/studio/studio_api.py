@@ -161,7 +161,7 @@ def studio_router(
                 outcome["status"] = "failed"
                 fresh = studio.load_job(cfg, job_id)
                 fresh["execution"]["error"] = str(exc)
-                studio.save(studio.job_path(cfg, job_id), fresh)
+                studio.save(studio.job_path(cfg, job_id), fresh, config=cfg)
 
             def finish():
                 try:
@@ -387,7 +387,7 @@ def studio_router(
             state["source_ids"] = sorted(set(parsed.source_ids)) if parsed.source_ids else None
             state["source_group_ids"] = sorted(set(parsed.source_group_ids))
             state["updated_at"] = studio.now()
-            studio.save(studio.job_path(base, job_id), state)
+            studio.save(studio.job_path(base, job_id), state, config=base)
             return {**studio.scope_status(state, store), "source_group_ids": state["source_group_ids"]}
 
     @router.patch("/jobs/{job_id}/title")
@@ -398,7 +398,7 @@ def studio_router(
                 raise studio.StudioError("标题不能为空")
             # 用户手动命名即视为最终标题，关闭待生成态，后台线程不再覆盖。
             state.update(title=body.title.strip(), title_pending=False, updated_at=studio.now())
-            studio.save(studio.job_path(base, job_id), state)
+            studio.save(studio.job_path(base, job_id), state, config=base)
         return state
 
     @router.post("/jobs/{job_id}/plans", status_code=201)
@@ -893,7 +893,7 @@ def studio_router(
 
     @router.get("/sources/{source_id}/shots")
     def source_shots(source_id: str):
-        return {"items": workspace.source_shots(current(), source_id)}
+        return {"items": workspace.source_shots(current(), source_id, store=store)}
 
     def require_recall_shot(w, p, shot_id):
         """候选、锚点与人工区间只属于素材召回来源的分镜。"""
@@ -1342,7 +1342,7 @@ def studio_router(
                         state["title"] = title.strip()[:60]
                     state["title_pending"] = False
                     state["updated_at"] = studio.now()
-                    studio.save(studio.job_path(base, job_id), state)
+                    studio.save(studio.job_path(base, job_id), state, config=base)
             except EntityNotFound:
                 return  # 任务已被删除，无需更新标题
             except Exception:
@@ -1433,7 +1433,7 @@ def studio_router(
             if body.title is not None:
                 state = studio.load_job(base, job_id)
                 state["title"] = body.title.strip()[:60] or state["title"]
-                studio.save(studio.job_path(base, job_id), state)
+                studio.save(studio.job_path(base, job_id), state, config=base)
         return job_detail(job_id)
 
     @router.patch("/jobs/{job_id}/timeline")

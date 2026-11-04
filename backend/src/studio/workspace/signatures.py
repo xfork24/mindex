@@ -34,7 +34,7 @@ class DetailContext:
 
     def database(self, config):
         if self.store is None:
-            self.store = Store(config.data_dir)
+            self.store = Store.open(config)
         return self.store
 
     def media(self, config):
@@ -63,7 +63,7 @@ def settings(config, p, stage, *, context=None):
 def _settings(config, p, stage, *, store=None, display=False):
     item = handler(stage)
     if item.uses_store:
-        store = store or Store(config.data_dir)
+        store = store or Store.open(config)
     return item.settings(config, p, store=store, display=display)
 
 
@@ -74,7 +74,7 @@ class _Resources:
         self.config, self.context = config, context
 
     def database(self):
-        return self.context.database(self.config) if self.context is not None else Store(self.config.data_dir)
+        return self.context.database(self.config) if self.context is not None else Store.open(self.config)
 
     def media(self, store):
         return self.context.media(self.config) if self.context is not None else ShotMedia(store)

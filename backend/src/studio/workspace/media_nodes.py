@@ -22,26 +22,25 @@ from .versions import file_info, file_path, version
 log = logging.getLogger(__name__)
 
 
-def source_shots(config, source_id, *, overlays=None):
+def source_shots(config, source_id, *, overlays=None, store=None):
     """源内全部镜头及可见性；overlays 可由调用方预先取好，避免逐镜头全表扫描。"""
     from mindex.admin.curation import Library
 
-    store = Store(config.data_dir)
+    store = store if store is not None else Store.open(config)
     if overlays is None:
         overlays = Library(store).overlays()
     # 可见性一次性预查后逐行内存比对，避免每个镜头一次区间查询。
     source_hidden = bool(overlays[0].get(source_id, {}).get("hidden"))
-    hidden = studio_steps.hidden_intervals(store, source_id, overlays=overlays)
+    rows = store.rows("SELECT id,source_id,parent_id,kind,start,end FROM segments WHERE source_id=? ORDER BY start",
+                      (source_id,))
+    hidden = studio_steps.hidden_intervals(store, source_id, overlays=overlays, rows=rows)
     return [
         {
-            **row,
+            **{key: row[key] for key in ("id", "source_id", "start", "end")},
             "visible": not source_hidden
             and studio_steps.range_visible(hidden, row["start"], row["end"]),
         }
-        for row in store.rows(
-            "SELECT id,source_id,start,end FROM segments WHERE source_id=? AND kind='shot' ORDER BY start",
-            (source_id,),
-        )
+        for row in rows if row["kind"] == "shot"
     ]
 
 
@@ -52,10 +51,10 @@ def validate_range(config, selected_range, *, overlays=None):
     start, end = selected_range["start"], selected_range["end"]
     if not all(math.isfinite(v) for v in (start, end)) or end - start < 0.04:
         raise studio.StudioError("所选区间不足一帧或边界无效")
-    store = Store(config.data_dir)
+    store = Store.open(config)
     if overlays is None:
         overlays = Library(store).overlays()
-    rows = source_shots(config, source_id, overlays=overlays)
+    rows = source_shots(config, source_id, overlays=overlays, store=store)
     ids = selected_range.get("segment_ids")
     if ids:
         chosen = [row for row in rows if row["id"] in ids]
@@ -102,7 +101,7 @@ def alignment(config, job_id, w, p, sid, selected_range=None):
         raise studio.StudioError("缺少成功配音")
     file_path(config, job_id, speech, "audio")
     shot = version(w, selected["content"])["data"]
-    store = Store(config.data_dir)
+    store = Store.open(config)
     duration, nxt, prev, covered = studio_steps._selection_callbacks(store)
     if selected_range:
         selected_range = validate_range(config, selected_range)
@@ -573,7 +572,7 @@ def render_node(config, job_id, w, p, sid, directory, *, capture=None):
             extract_ambient(media, event, cfg, ambient)
     else:
         validate_range(config, selection["data"]["range"])
-        store = Store(config.data_dir)
+        store = Store.open(config)
         absolute_event = event.model_copy(deep=True)
         media = ShotMedia(store).materialize(event.video.source_id, event.video.start, event.video.end)
         picture_media = media

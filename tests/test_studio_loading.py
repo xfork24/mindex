@@ -6,6 +6,7 @@ import shutil
 import subprocess
 from collections import Counter
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from conftest import legacy_job
@@ -72,7 +73,7 @@ def test_detail_reuses_database_settings_and_dependency_checks_per_request(confi
         spec_calls[(stage, sid)] += 1
         return original_specification(cfg, jid, workspace, selected_plan, stage, sid, **kw)
 
-    monkeypatch.setattr(signatures, "Store", tracked_store)
+    monkeypatch.setattr(signatures, "Store", SimpleNamespace(open=tracked_store))
     monkeypatch.setattr(signatures, "_settings", tracked_settings)
     monkeypatch.setattr(signatures, "specification", tracked_specification)
     detail = ws.detail(config, job_id, w)

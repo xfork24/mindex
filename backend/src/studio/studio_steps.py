@@ -79,7 +79,7 @@ def run_recall(config: Config, job_id: str, state: dict, embedder: MultimodalEmb
     from mindex.shared.storage import Store
 
     storyboard = studio.load_storyboard(config, job_id)
-    store = Store(config.data_dir)
+    store = Store.open(config)
     active = store.active_index()
     if active is None:
         raise studio.StudioError("尚未发布索引，请先完成离线处理并执行 index --activate")
@@ -295,7 +295,7 @@ def run_select(config: Config, job_id: str, state: dict) -> dict:
     if missing_candidates:
         raise studio.StudioError(f"分镜 {'、'.join(missing_candidates)} 缺少召回候选，请重跑语义召回")
 
-    store = Store(config.data_dir)
+    store = Store.open(config)
     from mindex.admin.curation import Library
 
     overlays = Library(store).overlays()
@@ -337,7 +337,7 @@ def run_select(config: Config, job_id: str, state: dict) -> dict:
                     "candidates": candidates,
                     "audio": manifest,
                     "selection": config.studio.selection.model_dump(),
-                    "visibility": visibility_key(Store(config.data_dir)),
+                    "visibility": visibility_key(Store.open(config)),
                 }
             ),
         )
@@ -369,7 +369,7 @@ def apply_timeline_patch(
     if patch_ids != sorted(shot.id for shot in storyboard.shots):
         raise studio.StudioError("换选必须覆盖全部分镜，每个分镜恰好一次")
 
-    source_duration, extend_next, extend_prev, covered_shots = _selection_callbacks(Store(config.data_dir))
+    source_duration, extend_next, extend_prev, covered_shots = _selection_callbacks(Store.open(config))
     selection = config.studio.selection
     text_by_id = {shot.id: shot.text for shot in storyboard.shots}
     events: list[studio.TimelineEvent] = []
@@ -381,7 +381,7 @@ def apply_timeline_patch(
         prior = next(e for e in current_timeline.events if e.shot_id == shot_id)
         if video.get("segment_id") == prior.video.segment_id:
             if not interval_visible(
-                Store(config.data_dir), prior.video.source_id, prior.video.start, prior.video.end
+                Store.open(config), prior.video.source_id, prior.video.start, prior.video.end
             ):
                 raise studio.StudioError("所选区间包含隐藏素材，请重新选片")
             events.append(prior.model_copy(update={"order": order}))
@@ -418,12 +418,12 @@ def apply_timeline_patch(
             plan["anchor"] = {
                 **plan["anchor"],
                 "segment_id": f"{source_id}@{start:.3f}-{end:.3f}",
-                "source_name": Store(config.data_dir).source_names()[source_id],
+                "source_name": Store.open(config).source_names()[source_id],
                 "score": 0.0,
                 "rank": 0,
             }
             override = "manual"
-        if not interval_visible(Store(config.data_dir), plan["source_id"], plan["start"], plan["end"]):
+        if not interval_visible(Store.open(config), plan["source_id"], plan["start"], plan["end"]):
             raise studio.StudioError("所选区间包含隐藏素材，请选择其他区间")
         events.append(
             studio_select.build_event(
@@ -454,7 +454,7 @@ def run_render(config: Config, job_id: str, state: dict) -> dict:
     from mindex.studio import studio_render
 
     timeline = studio.load_timeline(config, job_id)
-    store = Store(config.data_dir)
+    store = Store.open(config)
 
     def voice_lookup(shot_id: str) -> Path:
         path = studio.job_dir(config, job_id) / "audio" / f"{shot_id}.wav"
@@ -567,7 +567,7 @@ def interval_visible(store, source_id, start, end, *, overlays=None):
     return True
 
 
-def hidden_intervals(store, source_id, *, overlays=None):
+def hidden_intervals(store, source_id, *, overlays=None, rows=None):
     """该源内全部不可见区间的列表，判定规则与 interval_visible 逐点一致。
 
     segment 自身或其 parent 被隐藏即整段不可见；parent 可能属于别的源，隐藏状态
@@ -576,9 +576,11 @@ def hidden_intervals(store, source_id, *, overlays=None):
     from mindex.admin.curation import Library
 
     _, segments = overlays if overlays is not None else Library(store).overlays()
+    rows = rows if rows is not None else store.rows(
+        "SELECT id,parent_id,start,end FROM segments WHERE source_id=?", (source_id,))
     return [
         (row["start"], row["end"])
-        for row in store.rows("SELECT id,parent_id,start,end FROM segments WHERE source_id=?", (source_id,))
+        for row in rows
         if segments.get(row["id"], {}).get("hidden") or segments.get(row["parent_id"], {}).get("hidden")
     ]
 

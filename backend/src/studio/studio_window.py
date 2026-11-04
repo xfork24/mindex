@@ -61,7 +61,7 @@ def candidates(config, w, p, sid):
         or recall["status"] != "complete"
     ):
         raise studio.StudioError("缺少属于此分镜的成功召回")
-    store = Store(config.data_dir)
+    store = Store.open(config)
     overlays = Library(store).overlays()
     result = [
         c
@@ -82,7 +82,7 @@ def resolve_anchor(config, w, p, sid, target):
         return pool[0]
     if target is None:
         return None  # Automatic scoring needs the actual voice duration.
-    duration, nxt, prev, covered = studio_steps._selection_callbacks(Store(config.data_dir))
+    duration, nxt, prev, covered = studio_steps._selection_callbacks(Store.open(config))
     shot = w["versions"][p["shots"][sid]["content"]]["data"]
     events, _ = studio_select.select_events(
         [shot],
@@ -183,7 +183,7 @@ def context(config, job_id, w, p, sid):
         "reason": "等待成功配音后启用定长窗口",
     }
     if anchor:
-        store = Store(config.data_dir)
+        store = Store.open(config)
         source = store.one("SELECT * FROM sources WHERE id=?", (anchor["source_id"],))
         if not source:
             raise studio.StudioError("候选素材不存在")
@@ -192,7 +192,7 @@ def context(config, job_id, w, p, sid):
         info = json.loads(source["media"])
         timeline = [
             {**r, "end": min(r["end"], info["duration"])}
-            for r in ws.source_shots(config, anchor["source_id"])
+            for r in ws.source_shots(config, anchor["source_id"], store=store)
             if r["start"] < info["duration"]
         ]
         rows, default, extension = neighborhood(timeline, anchor, length)
@@ -240,7 +240,7 @@ def resources(config, job_id, ctx):
     directory.mkdir(parents=True, exist_ok=True)
     lo, hi = ctx["context_range"]["start"], ctx["context_range"]["end"]
     from mindex.shared.shot_media import ShotMedia
-    source = str(ShotMedia(Store(config.data_dir)).materialize(ctx["source_id"], lo, hi))
+    source = str(ShotMedia(Store.open(config)).materialize(ctx["source_id"], lo, hi))
     output = directory / "context.mp4"
     count = min(80, max(5, math.ceil((hi - lo) / 2)))
     with FileLock(str(directory / "resources.lock"), timeout=0):
@@ -347,7 +347,7 @@ def alignment(config, job_id, w, p, sid, selected, *, _context=None):
             raise studio.StudioError("配音、速度或素材上下文已变化，请重新调整定长窗口")
     speech = ws.version(w, ctx["tts_version"])
     shot = ws.version(w, p["shots"][sid]["content"])["data"]
-    _, _, _, covered = studio_steps._selection_callbacks(Store(config.data_dir))
+    _, _, _, covered = studio_steps._selection_callbacks(Store.open(config))
     plan = {
         "anchor": ctx["anchor"],
         "start": selected["start"],

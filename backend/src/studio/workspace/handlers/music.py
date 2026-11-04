@@ -53,7 +53,7 @@ def library_blocker(config, track_id: str, *, check_file: bool = True, store=Non
     from mindex.shared.storage import Store
     from mindex.studio import music_library
 
-    store = store or Store(config.data_dir)
+    store = store or Store.open(config)
     try:
         track = music_library.get_track(store, track_id)
     except EntityNotFound:
@@ -145,7 +145,7 @@ class MusicHandler(StageHandler):
         from mindex.shared.storage import Store
         from mindex.studio import music_library
 
-        store = Store(ctx.config.data_dir)
+        store = Store.open(ctx.config)
         if reason := library_blocker(ctx.config, cue["track_id"], store=store):
             raise studio.StudioError(reason)
         track = music_library.get_track(store, cue["track_id"])

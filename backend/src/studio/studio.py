@@ -98,9 +98,14 @@ def now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def save(path: Path, value):
+def save(path: Path, value, *, config=None):
     """原子写入 JSON；实现见 ``shared/jsonio``。"""
-    jsonio.save(path, value)
+    if config is not None and config.storage.backend == "s3":
+        from mindex.shared import files
+        from mindex.shared.storage import Store
+        files.save_bytes(Store.open(config), path, json.dumps(value, ensure_ascii=False, indent=2).encode("utf-8"))
+    else:
+        jsonio.save(path, value)
 
 
 def save_bytes(path: Path, payload: bytes):
@@ -949,7 +954,7 @@ def create_job(config: Config, text: str, title: str | None = None, options: dic
     if store is None:
         from mindex.shared.storage import Store
 
-        store = Store(config.data_dir)
+        store = Store.open(config)
     if parsed.source_group_ids:
         material_scope(parsed.model_dump(), store)
     known = store.source_ids() if parsed.source_ids else set()
@@ -998,12 +1003,18 @@ def create_job(config: Config, text: str, title: str | None = None, options: dic
     from mindex.shared.storage import Store
     from mindex.studio.delivery_templates import apply, default_snapshot
     state["language"] = language
-    state["options"] = apply(state["options"], default_snapshot(store or Store(config.data_dir)))
-    save(job_path(config, job_id), state)
+    state["options"] = apply(state["options"], default_snapshot(store or Store.open(config)))
+    save(job_path(config, job_id), state, config=config)
     return state
 
 
 def load_job(config: Config, job_id: str) -> dict:
+    if config.storage.backend == "s3":
+        from mindex.shared import files
+        from mindex.shared.storage import Store
+        payload = files.read_bytes(Store.open(config), job_path(config, job_id))
+        if payload is None:
+            raise EntityNotFound("找不到创作任务")
     state = _read_json(job_path(config, job_id), "找不到创作任务")
     if state.get("schema") != 1:
         raise StudioError("任务状态 schema 版本不受支持")
@@ -1023,6 +1034,13 @@ def list_jobs(config: Config, *, recover: bool = False) -> list[dict]:
     只有拿到空闲锁时才会改写被中断的 running 状态，语义与原先一致。
     """
     root = studio_root(config)
+    if config.storage.backend == "s3":
+        from mindex.shared import files
+        from mindex.shared.storage import Store
+        store = Store.open(config)
+        for row in files.entries(store, "studio/"):
+            if row["path"].endswith("/job.json"):
+                files.hydrate(store, store.root / row["path"])
     if not root.is_dir():
         return []
     lock = None
@@ -1060,6 +1078,10 @@ def delete_job(config: Config, job_id: str):
     directory = job_dir(config, job_id)
     if not directory.is_dir():
         raise EntityNotFound("找不到创作任务")
+    if config.storage.backend == "s3":
+        from mindex.shared import files
+        from mindex.shared.storage import Store
+        files.delete_tree(Store.open(config), f"studio/{job_id}/")
     shutil.rmtree(directory)
 
 
@@ -1112,11 +1134,11 @@ def begin_step(config: Config, job_id: str, step: str) -> dict:
         "configuration": step_configuration(config, state, step),
     }
     state["updated_at"] = timestamp
-    save(job_path(config, job_id), state)
+    save(job_path(config, job_id), state, config=config)
     save(
         attempts_dir(config, job_id) / f"{step}-{state['steps'][step]['attempt']}.json",
         {"step": step, **state["steps"][step]},
-    )
+        config=config)
     return state
 
 
@@ -1135,8 +1157,8 @@ def _finish_step(config: Config, job_id: str, step: str, status: str, **fields):
     info.update(status=status, finished_at=timestamp, elapsed_ms=round(elapsed * 1000), **fields)
     state["updated_at"] = timestamp
     record = {"step": step, **info}
-    save(attempts_dir(config, job_id) / f"{step}-{info['attempt']}.json", record)
-    save(job_path(config, job_id), state)
+    save(attempts_dir(config, job_id) / f"{step}-{info['attempt']}.json", record, config=config)
+    save(job_path(config, job_id), state, config=config)
     return state
 
 
@@ -1209,10 +1231,10 @@ def save_storyboard(config: Config, job_id: str, storyboard: Storyboard) -> dict
     if registry.is_file():
         checkpoints = json.loads(registry.read_text(encoding="utf-8"))
         checkpoints.pop("storyboard.json", None)
-        save(registry, checkpoints)
+        save(registry, checkpoints, config=config)
     state["updated_at"] = now()
     write_storyboard(config, job_id, storyboard)
-    save(job_path(config, job_id), state)
+    save(job_path(config, job_id), state, config=config)
     return state
 
 
@@ -1233,7 +1255,7 @@ def save_timeline(config: Config, job_id: str, timeline: Timeline) -> dict:
     archive_edit(config, job_id, "timeline", timeline_path(config, job_id))
     state["updated_at"] = now()
     write_timeline(config, job_id, timeline)
-    save(job_path(config, job_id), state)
+    save(job_path(config, job_id), state, config=config)
     return state
 
 
@@ -1260,7 +1282,7 @@ def set_execution(config, job_id, status, current_step, remaining_steps):
     if status == "failed" and error:
         state["execution"]["error"] = error
     state["updated_at"] = now()
-    save(job_path(config, job_id), state)
+    save(job_path(config, job_id), state, config=config)
     return state
 
 
@@ -1276,7 +1298,7 @@ def step_configuration(config, state, step):
         "limit": state["options"]["recall_limit"],
     }
     # 只在有限制时加键，保证不限任务的指纹与历史检查点逐字节一致。
-    if scope := material_scope(state, Store(config.data_dir)):
+    if scope := material_scope(state, Store.open(config)):
         recall["sources"] = sorted(scope)
     values = {
         "split": {"generator": portable_parameters(config, studio.generator.model_dump()), "version": SPLIT_VERSION},
@@ -1307,5 +1329,5 @@ def reconcile(config, job_id):
             changed = True
     if changed:
         state["updated_at"] = now()
-        save(job_path(config, job_id), state)
+        save(job_path(config, job_id), state, config=config)
     return state
