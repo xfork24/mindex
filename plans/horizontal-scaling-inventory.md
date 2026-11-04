@@ -220,3 +220,23 @@
 - **未支持/后续**：队列与账本严格同事务（现为账本先落+补偿扫描，阶段 5 outbox）；
   GPU 声明式容量表与模型服务真实并发限制；外部模型调用幂等键（未知结果人工核对
   策略待接入真实付费调用）；多 worker 容量与吞吐基准（1.5× 闸门）。
+
+## 12. 阶段 4A/4B 变更清单（staging 与 S3 核心）
+
+- StagingArea（`shared/backends/staging.py`，plans §8）：工作集预约（并发预算 +
+  磁盘最低余量双检查，超限 StagingFull 明确拒绝）、活动 pin（引用计数）、LRU
+  淘汰（pin 不参与）、崩溃残留重扫、单文件超总预算拒绝；多线程预算安全。
+- S3MediaStore（`shared/backends/s3.py`）：MediaStore 协议的 S3 兼容实现——
+  不可变键 + sha256 元数据（幂等/键冲突）、boto3 传输管理器 multipart、版本
+  命名空间 versions/&lt;v&gt;/&lt;key&gt;、materialize 到节点缓存（内容寻址 +
+  .partial→rename + 摘要校验 + staging pin）、presign_get、iter_prefix；
+  ETag 与内容 SHA256 严格区分；元数据键大小写规范化。
+- 配置 storage 节（local/s3 + staging_quota_gb + s3.* 全字段）；open_context
+  校验 s3 需 postgres 并装配 S3MediaStore + staging；设置页 storage 展示。
+- 依赖 boto3 进 cluster extra；requires_s3 门控测试（真实 MinIO）。
+- 验收：test_staging 8/8；test_s3_store 5/5（真实 MinIO：幂等/冲突、20MiB
+  multipart、etag≠sha256、物化缓存命中与 pin、版本删除、presign 可取、缺失键）。
+- **阶段 4B 剩余（并入阶段 5 集群装配）**：媒体 HTTP 出口的 presign/代理回退
+  （Range/HEAD/ETag）与下载保留记录；uploads/检查点/Studio 工作文件的远端化与
+  expected_revision 发布；GC/purge/clean/备份的 S3 适配；MinIO+ffmpeg 的
+  source→index→studio 全链路闸门。S3 在此之前仅单节点验证（plans §11）。
