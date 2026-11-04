@@ -96,7 +96,7 @@ const focused = (page, selector) => page.locator(`${selector}[data-agent-focus]`
       await page.locator('.agent-approval[data-outcome="allowed-once"]').waitFor();
       await waitShots(page, 2);
       await waitShots(other, 2);
-      assert.equal(new URL(other.url()).pathname, '/studio');
+      assert.equal(new URL(other.url()).pathname, '/');
       await other.close();
     }
 
@@ -105,7 +105,7 @@ const focused = (page, selector) => page.locator(`${selector}[data-agent-focus]`
       await page.goto(`${base}/settings`);
       await openPanel(page);
       await say(page, '合并 a1daad59 和 925281d5');
-      await page.waitForURL(/\/studio\?job=/, {timeout: 15000});
+      await page.waitForURL(/\/\?job=/, {timeout: 15000});
       await page.locator('#agent-drawer:not([hidden])').waitFor();
       const card = page.locator('.agent-approval:not([data-outcome])');
       await card.waitFor({timeout: 15000});
@@ -127,7 +127,7 @@ const focused = (page, selector) => page.locator(`${selector}[data-agent-focus]`
         const row = document.querySelector('.shot-card[data-agent-focus] .shot-card-id');
         return row && row.textContent.includes('925281d5');
       }, null, {timeout: 15000});
-      assert.equal(new URL(page.url()).pathname, '/studio');
+      assert.equal(new URL(page.url()).pathname, '/');
     }
 
     if (scenario === 'external') {
@@ -143,7 +143,7 @@ const focused = (page, selector) => page.locator(`${selector}[data-agent-focus]`
       await page.request.post(`${base}/api/agent/changes`, {data: {kind: 'focus', data: {page: 'settings', role: 'agent'}}});
       await waitShots(page, 2);
       await page.waitForTimeout(1500);
-      assert.equal(new URL(page.url()).pathname, '/studio');  // 外部来源的跨页定位不跳转
+      assert.equal(new URL(page.url()).pathname, '/');  // 外部来源的跨页定位不跳转
     }
 
     if (scenario === 'nofollow') {
@@ -493,7 +493,7 @@ const focused = (page, selector) => page.locator(`${selector}[data-agent-focus]`
       // 检索结果：片段缩略图网格；检索工具带检索页定位，面板（跟随助手）在本轮结束后跳到检索页。
       await say(page, '找绿色素材');
       await page.locator('.agent-media').last().locator('.agent-media-tile[data-kind="video"]').first().waitFor({timeout: 15000});
-      await page.waitForURL(`${base}/`, {timeout: 15000});
+      await page.waitForURL(`${base}/search`, {timeout: 15000});
       await page.goto(studioUrl);
       await page.locator('#agent-drawer:not([hidden])').waitFor();
       await page.locator('.agent-media-tile[data-kind="video"]').first().waitFor({timeout: 15000});  // 历史重放
