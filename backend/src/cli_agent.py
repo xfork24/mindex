@@ -96,6 +96,10 @@ def mcp_command(
     from mindex.agent.tools import build_registry
 
     config = ctx.obj
+    if not base_url and config.database.backend == "postgres" and config.server.role == "api":
+        base_url = config.agent.gateway_url
+        if not base_url:
+            raise typer.BadParameter("共享数据库模式的 mindex mcp 需要 --base-url 或 agent.gateway_url，不能在本机创建会话库")
     chosen = policy or config.agent.mcp.policy
     if chosen not in {"read", "write", "all"}:
         raise typer.BadParameter("policy 只能是 read、write 或 all")

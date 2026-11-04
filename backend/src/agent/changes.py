@@ -50,6 +50,25 @@ class ChangeFeed:
         rows = self.db.rows("SELECT * FROM agent_changes WHERE seq>? ORDER BY seq LIMIT ?", (seq, limit))
         return [{**row, "data": json.loads(row["data"])} for row in rows]
 
+    def publish_outbox(self, library_id, item):
+        """事件与去重回执同一个 SQLite 事务，PG ack 失败可安全重放。"""
+        with self.db.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            with db:
+                receipt = db.execute(
+                    "SELECT change_seq FROM agent_outbox_receipts WHERE library_id=? AND outbox_id=?",
+                    (library_id, item["outbox_id"])).fetchone()
+                if receipt:
+                    return receipt[0]
+                cursor = db.execute(
+                    "INSERT INTO agent_changes(time,kind,source,session_id,tab,data) VALUES(?,?,?,?,?,?)",
+                    (now_ms(), item["kind"], item["source"], item.get("session_id"), item.get("tab"),
+                     json.dumps(item["data"], ensure_ascii=False)))
+                seq = cursor.lastrowid
+                db.execute("INSERT INTO agent_outbox_receipts(library_id,outbox_id,change_seq) VALUES(?,?,?)",
+                           (library_id, item["outbox_id"], seq))
+                return seq
+
     def latest(self) -> int:
         row = self.db.one("SELECT COALESCE(MAX(seq), 0) AS seq FROM agent_changes")
         return int(row["seq"])

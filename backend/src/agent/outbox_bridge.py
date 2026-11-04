@@ -24,16 +24,19 @@ class OutboxBridge:
         self._thread: threading.Thread | None = None
 
     def drain_once(self) -> int:
-        from mindex.shared.db.agent_outbox import drain
+        from mindex.shared.db.agent_outbox import acknowledge, drain
 
-        items = drain(self.store)
+        items = drain(self.store, consume=False)
+        delivered = 0
         for item in items:
             try:
-                self.feed.publish(item["kind"], item["data"], source=item["source"],
-                                  session_id=item.get("session_id"), tab=item.get("tab"))
+                self.feed.publish_outbox(self.store.library_id, item)
+                acknowledge(self.store, item["outbox_id"])
+                delivered += 1
             except Exception:
                 log.exception("outbox 条目 %s 转入 ChangeFeed 失败", item.get("outbox_id"))
-        return len(items)
+                break
+        return delivered
 
     def _loop(self):
         while not self._stop.wait(self.poll_seconds):

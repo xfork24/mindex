@@ -241,9 +241,8 @@ def test_item04_checkpoints_stay_on_node(pg, tmp_path, video_file, monkeypatch, 
     local_analysis = list((config.data_dir / "analysis").rglob("*"))
     local_plans = list((config.data_dir / "plans").rglob("*"))
     assert local_analysis and local_plans  # 本地快速路径仍在（写穿透）
-    remote = (set(context.media.iter_prefix("analysis/"))
-              | set(context.media.iter_prefix("plans/"))
-              | set(context.media.iter_prefix("transcripts/")))
+    remote = {row["object_key"] for row in context.store.rows(
+        "SELECT path,object_key FROM shared_files") if row["path"].startswith(("analysis/", "plans/", "transcripts/"))}
     assert remote  # 检查点已镜像到对象存储（权威副本）
     # 新节点（不同 data_dir、同一 PG+S3）无需共享目录即可读回分镜计划
     other = Config(data_dir=tmp_path / "other-node", database={"backend": "postgres"},
@@ -255,7 +254,7 @@ def test_item04_checkpoints_stay_on_node(pg, tmp_path, video_file, monkeypatch, 
     node = _Pipeline(other)
     source_row = node.store.one("SELECT * FROM sources WHERE id=?", (source,))
     assert node._read_plan(source_row)  # 从 S3 物化检查点
-    assert not (other.data_dir / "plans").exists()  # 没有本地副本也能读
+    assert (other.data_dir / "plans").exists()  # 新节点从权威指针读取后形成可丢弃缓存
 
 
 # ---------------------------------------------------------------- 5. uploads 远端化
@@ -378,20 +377,14 @@ def test_item08_agent_changes_route_on_cluster(pg, tmp_path, monkeypatch, s3_env
     invalid = client.post("/api/agent/changes", json={"kind": "unknown", "data": {}})
     assert invalid.status_code == 422
 
+    from mindex.agent.changes import ChangeFeed
     from mindex.agent.outbox_bridge import OutboxBridge
     from mindex.shared.db.agent_outbox import drain
-
-    class Feed:
-        def __init__(self):
-            self.items = []
-
-        def publish(self, kind, data, *, source="agent", session_id=None, tab=None):
-            self.items.append((kind, source, data))
-
-    feed = Feed()
+    feed = ChangeFeed(tmp_path / "gateway")
     bridge = OutboxBridge(app.state.store, feed)
     assert bridge.drain_once() == 1  # 网关转入 ChangeFeed
-    assert feed.items == [("mutation", "mcp", {"domain": "search", "segment_id": "seg1"})]
+    assert [(item["kind"], item["source"], item["data"]) for item in feed.after(0)] == [
+        ("mutation", "mcp", {"domain": "search", "segment_id": "seg1"})]
     assert bridge.drain_once() == 0  # 幂等：已消费不再重放
     assert drain(app.state.store) == []
 

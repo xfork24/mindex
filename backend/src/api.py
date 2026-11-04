@@ -51,6 +51,7 @@ def _with_bridge(previous, bridge):
     @contextlib.asynccontextmanager
     async def lifespan(application):
         try:
+            bridge.start()
             async with previous(application) as state:
                 yield state
         finally:
@@ -155,11 +156,9 @@ def create_app(
         from fastapi import APIRouter as _APIRouter
         from fastapi.responses import JSONResponse as _JSON
 
-        def _agent_redirect(request: Request):
-            gateway = config.agent.gateway_url or "(未配置 agent.gateway_url)"
-            return _JSON(status_code=503, content={
-                "detail": f"智能助手由单实例 agent-gateway 提供：{gateway}",
-                "gateway_url": config.agent.gateway_url})
+        async def _agent_redirect(request: Request):
+            from mindex.gateway import forward
+            return await forward(request, config.agent.gateway_url)
 
         async def _report_change(request: Request):
             """变更上报写入共享 outbox，由网关幂等转入 SSE（plans §9）。"""
@@ -179,8 +178,10 @@ def create_app(
         stub = _APIRouter(prefix="/api/agent")
         stub.add_api_route("/changes", _report_change, methods=["POST"], include_in_schema=False)
         stub.add_api_route("/{path:path}", _agent_redirect,
-                           methods=["GET", "POST", "PUT", "DELETE"], include_in_schema=False)
+                           methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"], include_in_schema=False)
         app.include_router(stub)
+        app.add_api_route("/mcp", _agent_redirect,
+                          methods=["GET", "POST", "DELETE"], include_in_schema=False)
     else:
         app.state.agent_runtime = build_runtime(app, runtime, store, agent_llm=agent_llm)
         app.include_router(agent_router(app.state.agent_runtime, runtime, injected=agent_llm is not None))
@@ -189,7 +190,7 @@ def create_app(
         # 网关把共享 outbox 幂等转入本地 ChangeFeed（plans §9）。
         from mindex.agent.outbox_bridge import OutboxBridge
 
-        bridge = OutboxBridge(store, app.state.agent_runtime.feed).start()
+        bridge = OutboxBridge(store, app.state.agent_runtime.feed)
         app.state.outbox_bridge = bridge
         app.router.lifespan_context = _with_bridge(app.router.lifespan_context, bridge)
     # /mcp（streamable-http）与独立 `mindex mcp` 一样都依赖本进程的会话运行时：
@@ -300,6 +301,24 @@ def create_app(
         from mindex.shared.metrics import metrics_snapshot
 
         return metrics_snapshot(backends, config)
+
+    @app.get("/api/live")
+    def live():
+        return {"alive": True}
+
+    @app.get("/api/ready")
+    def ready():
+        from mindex.doctor import doctor
+        report = doctor(config)
+        return JSONResponse(report, status_code=200 if report["ok"] else 503)
+
+    from mindex.shared.db.locks_pg import LeaseLost
+    from mindex.shared.db.maintenance_gate import MaintenanceBusy
+
+    @app.exception_handler(MaintenanceBusy)
+    @app.exception_handler(LeaseLost)
+    async def write_unavailable(_, exc):
+        return JSONResponse({"detail": str(exc)}, status_code=409)
 
     # 设置 MINDEX_WEB_TOKEN（或传入 web_token）后才启用访问令牌；未设置时行为不变。
     install_web_auth(app, web_token)
