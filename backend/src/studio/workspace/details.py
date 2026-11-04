@@ -127,7 +127,7 @@ def detail(config, job_id, w, *, store=None, compact=False):
                     continue
                 if references is None:
                     from mindex.persons.person_processing import EvidenceReferences
-                    references = EvidenceReferences(config, store or Store(config.data_dir))
+                    references = EvidenceReferences(config, store or Store.open(config))
                 results.append({
                     **candidate,
                     "person_evidence": [

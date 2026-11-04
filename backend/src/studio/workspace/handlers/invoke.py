@@ -158,7 +158,7 @@ def _matches(item, output: str) -> bool:
 def _store(config):
     from mindex.shared.storage import Store
 
-    return Store(config.data_dir)
+    return Store.open(config)
 
 
 register(InvokeHandler())

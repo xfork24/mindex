@@ -186,7 +186,7 @@ def build_plan(config: Config, job_id, w, p) -> dict:
 
 
 def diagnostics(config: Config, job_id, w, p, *, store: Store | None = None) -> dict:
-    store = store or Store(config.data_dir)
+    store = store or Store.open(config)
     context = workspace.DetailContext(store=store, display=True)
     running = next((b["id"] for b in w["builds"] if b["status"] == "running"), None)
     return {

@@ -112,7 +112,7 @@ class RecallHandler(StageHandler):
         limit = content.get("recall_limit") or params["limit"]
         granularity = content.get("granularity") or config.studio.recall.granularity
         # 任务素材范围是硬上限，回显的 recall 仍是用户原始设置。
-        scope = studio.material_scope(studio.load_job(config, job_id), Store(config.data_dir))
+        scope = studio.material_scope(studio.load_job(config, job_id), Store.open(config))
         if mode == "text":
             result = engine.text(
                 TextSearch(
