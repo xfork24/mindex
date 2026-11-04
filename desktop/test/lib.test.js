@@ -351,3 +351,34 @@ test("远程配置：userData/remote.json 回落与损坏容忍", () => {
   fs.writeFileSync(file, JSON.stringify({ url: "https://remote.example/" }));  // 缺令牌
   assert.equal(remoteConfig({ env: {}, userData: dir, readFile: read }), null);
 });
+
+// ------------------------------------------------------------------ 远程凭据保存
+
+test("远程配置保存：0600 原子写入、校验、清除", () => {
+  const { saveRemote, clearRemote, remoteConfig } = require("../lib/remote");
+  const dir = temp();
+  const saved = saveRemote({ url: "https://remote.example/", token: " secret " }, { userData: dir });
+  assert.equal(saved.url, "https://remote.example");
+  assert.equal(saved.token, "secret");
+  const file = path.join(dir, "remote.json");
+  assert.ok(fs.existsSync(file));
+  if (process.platform !== "win32") assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  assert.deepEqual(remoteConfig({ env: {}, userData: dir }),
+    { url: "https://remote.example", token: "secret", source: file });
+  assert.throws(() => saveRemote({ url: "ftp://x", token: "t" }, { userData: dir }), /invalid-url/);
+  assert.throws(() => saveRemote({ url: "https://x", token: "  " }, { userData: dir }), /invalid-token/);
+  assert.equal(clearRemote({ userData: dir }), true);
+  assert.equal(fs.existsSync(file), false);
+  assert.equal(clearRemote({ userData: dir }), true);  // 幂等
+});
+
+test("远程配置保存：写入失败不破坏既有文件（临时文件 + rename）", () => {
+  const { saveRemote } = require("../lib/remote");
+  const dir = temp();
+  saveRemote({ url: "https://ok.example", token: "keep" }, { userData: dir });
+  const before = fs.readFileSync(path.join(dir, "remote.json"), "utf8");
+  const failing = () => { throw new Error("disk full"); };
+  assert.throws(() => saveRemote({ url: "https://new.example", token: "x" },
+    { userData: dir, writeFile: failing }), /disk full/);
+  assert.equal(fs.readFileSync(path.join(dir, "remote.json"), "utf8"), before);
+});

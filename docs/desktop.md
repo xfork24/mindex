@@ -143,9 +143,11 @@ pg-single/cluster 形态。
 配置（二选一，按优先级）：
 
 1. 环境变量：`MINDEX_DESKTOP_REMOTE_URL=https://mindex.internal` +
-   `MINDEX_DESKTOP_REMOTE_TOKEN=<用户访问令牌>`（自动化/受管终端）；
-2. `~/Library/Application Support/mindex/remote.json`（Windows：`%APPDATA%/mindex/remote.json`）：
-   `{ "url": "https://mindex.internal", "token": "..." }`。
+   `MINDEX_DESKTOP_REMOTE_TOKEN=<用户访问令牌>`（自动化/受管终端，优先于文件）；
+2. 菜单 **Mindex → 连接远程服务…**：填写服务地址与用户访问令牌，保存到
+   `~/Library/Application Support/mindex/remote.json`（Windows：`%APPDATA%/mindex/remote.json`，
+   POSIX 下 0600、临时文件原子替换），保存后自动重启后端生效；同一对话框可清除配置
+   回到本地模式。也可手工编辑该文件：`{ "url": "https://mindex.internal", "token": "..." }`。
 
 行为：启动跳过 sidecar 与本地数据目录检查，直接健康检查并注入令牌（与本地模式相同的
 请求头/Cookie 授权）；退出时不调用服务端的本机服务停止接口。配置缺失或非法时回落到
