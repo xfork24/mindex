@@ -106,7 +106,7 @@ def test_materialize_uses_local_cache_and_versions(store):
         store.put_immutable("studio/job-1/render.mp4", io.BytesIO(v2),
                             sha256=hashlib.sha256(v2).hexdigest())
     store.delete_version("studio/job-1/render.mp4", version="v2")
-    with pytest.raises(Exception, match="NoSuchKey|404|Not Found"):
+    with pytest.raises(FileNotFoundError):
         store.stat("studio/job-1/render.mp4", version="v2")
 
 
@@ -125,8 +125,8 @@ def test_presigned_url_is_fetchable(store):
 
 
 def test_missing_key_raises_cleanly(store):
-    with pytest.raises(Exception, match="NoSuchKey|404|Not Found"):
+    with pytest.raises(FileNotFoundError):
         store.stat("does/not/exist.bin")
-    with pytest.raises(Exception, match="NoSuchKey|404|Not Found"):
+    with pytest.raises(FileNotFoundError):
         with store.materialize("does/not/exist.bin"):
             pass
