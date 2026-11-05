@@ -554,12 +554,12 @@ $('upload-files').onchange = (event) => {enqueueUploads(event.target.files);even
 for (const event of ['dragenter', 'dragover']) $('upload-drop').addEventListener(event, (e) => {e.preventDefault();$('upload-drop').classList.add('dragging');});
 $('upload-drop').addEventListener('dragleave', () => $('upload-drop').classList.remove('dragging'));
 $('upload-drop').addEventListener('drop', (e) => {e.preventDefault();$('upload-drop').classList.remove('dragging');enqueueUploads(e.dataTransfer.files);});
-function uploadOne(item) {return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest(),form = new FormData();form.append('file', item.file);xhr.open('POST', '/api/admin/sources/upload');
-    xhr.upload.onprogress = (event) => {if (event.lengthComputable) {item.progress.value = Math.round(event.loaded / event.total * 100);MindexI18n.setText(item.text, `${item.file.name} · ${item.progress.value === 100 ? MindexI18n.msg("ui.3f7ffbaff114") : item.progress.value + '%'}`);}};
-    xhr.onload = () => {let data;try {data = JSON.parse(xhr.responseText);} catch {reject(Error(MindexI18n.msg("ui.8f0490c7377a")));return;}if (xhr.status >= 200 && xhr.status < 300) resolve(data);else reject(Error(MindexI18n.system(data.detail || data)));};
-    xhr.onerror = () => reject(Error(MindexI18n.msg("ui.c41417a8d5c1")));xhr.onabort = () => reject(Error(MindexI18n.msg("ui.85ac88b57c72")));xhr.send(form);
-  });}
+function uploadOne(item) {
+  return MindexApi.uploadSource(item.file, value => {
+    item.progress.value = value;
+    MindexI18n.setText(item.text, `${item.file.name} · ${value}%`);
+  });
+}
 async function processUploads() {
   if (uploading) return;uploading = true;
   try {while (uploadQueue.length) {const item = uploadQueue.shift();try {

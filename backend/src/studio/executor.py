@@ -59,6 +59,11 @@ def cancel_sentinel(config, kind: Kind, job_id: str, key: str | None = None) -> 
 
 
 def request_cancel(config, kind: Kind, job_id: str, key: str | None = None) -> None:
+    if config.queue.backend == "postgres":
+        from mindex.studio.tasks import cancel
+
+        cancel(config, kind, job_id, key)
+        return
     path = cancel_sentinel(config, kind, job_id, key)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.touch()
@@ -67,6 +72,11 @@ def request_cancel(config, kind: Kind, job_id: str, key: str | None = None) -> N
 def cancel_requested(config, kind: Kind, job_id: str, key: str | None = None,
                      event: threading.Event | None = None) -> bool:
     """进程内事件已置位，或哨兵文件存在，即视为已请求取消。"""
+    from mindex.shared.db.fencing import current_attempt
+
+    attempt = current_attempt()
+    if attempt is not None:
+        attempt.check()
     return bool(event is not None and event.is_set()) or cancel_sentinel(config, kind, job_id, key).exists()
 
 
@@ -159,6 +169,9 @@ class StudioExecutor:
             except BaseException:
                 lock.release()
                 raise
+            finally:
+                if self.base.queue.backend == "postgres":
+                    lock.release()
 
     def start(self, name: str, target: Callable[[], object], *,
               lock: locks.SharedFileLock | None = None,

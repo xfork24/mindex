@@ -1044,7 +1044,7 @@ def list_jobs(config: Config, *, recover: bool = False) -> list[dict]:
     if not root.is_dir():
         return []
     lock = None
-    if recover:
+    if recover and config.queue.backend != "postgres":
         lock = lock_backend.named(config, "studio")
         try:
             lock.acquire()
@@ -1075,6 +1075,12 @@ def list_jobs(config: Config, *, recover: bool = False) -> list[dict]:
 
 
 def delete_job(config: Config, job_id: str):
+    if config.queue.backend == "postgres":
+        from mindex.shared.storage import Store
+
+        if Store.open(config).one("SELECT id FROM studio_tasks WHERE job_id=? AND status IN ('queued','running') LIMIT 1",
+                                  (job_id,)):
+            raise StudioError("创作任务仍在排队或执行，请先取消再删除")
     directory = job_dir(config, job_id)
     if not directory.is_dir():
         raise EntityNotFound("找不到创作任务")
@@ -1172,6 +1178,8 @@ def fail_step(config: Config, job_id: str, step: str, exc: Exception) -> dict:
 
 def recover_stale(config: Config):
     """启动恢复：锁空闲却仍有步骤 running，说明服务重启中断了执行。"""
+    if config.queue.backend == "postgres":
+        return  # 租约回收和账本负责恢复；API 本机锁不能证明其他 worker 已停止。
     root = studio_root(config)
     if not root.is_dir():
         return
@@ -1206,7 +1214,19 @@ def write_storyboard(config: Config, job_id: str, storyboard: Storyboard):
     _write_model(storyboard_path(config, job_id), storyboard, updated_at=now())
 
 
+def _hydrate_document(config, path):
+    if config.storage.backend == "s3":
+        from mindex.shared import files
+        from mindex.shared.storage import Store
+
+        try:
+            files.hydrate(Store.open(config), path)
+        except FileNotFoundError:
+            raise EntityNotFound("找不到创作产物") from None
+
+
 def load_storyboard(config: Config, job_id: str) -> Storyboard:
+    _hydrate_document(config, storyboard_path(config, job_id))
     return _read_model(storyboard_path(config, job_id), Storyboard, "尚未生成分镜，请先执行文本拆分镜")
 
 
@@ -1243,6 +1263,7 @@ def write_timeline(config: Config, job_id: str, timeline: Timeline):
 
 
 def load_timeline(config: Config, job_id: str) -> Timeline:
+    _hydrate_document(config, timeline_path(config, job_id))
     return _read_model(timeline_path(config, job_id), Timeline, "尚未生成时间线，请先完成选片对齐")
 
 

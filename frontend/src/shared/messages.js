@@ -14106,5 +14106,129 @@ window.MindexMessages = {
   "ui.e7fad659532e": {
     "zh": "后端选择在 config 文件中配置（database.backend 等），修改后需重启进程生效。",
     "en": "Backends are selected in the config file (database.backend, …); changes take effect after a process restart."
+  },
+  "ui.external_review_required": {
+    "zh": "待核对外部结果",
+    "en": "External result needs review"
+  },
+  "ui.external_review_open": {
+    "zh": "核对外部调用",
+    "en": "Review external calls"
+  },
+  "ui.external_review_explanation": {
+    "zh": "请先在提供商处核对结果。已知任务编号可恢复查询；未知结果不能重复提交。",
+    "en": "Check the provider before continuing. A known request ID can resume polling; unknown results cannot be submitted again."
+  },
+  "ui.external_review_outcome": {
+    "zh": "核对结果",
+    "en": "Verified outcome"
+  },
+  "ui.external_review_known_request": {
+    "zh": "已确认任务编号（异步 submit）",
+    "en": "Verified request ID (asynchronous submit)"
+  },
+  "ui.external_review_not_submitted": {
+    "zh": "已确认未提交",
+    "en": "Confirmed not submitted"
+  },
+  "ui.external_review_failed": {
+    "zh": "已确认失败且没有可恢复产物",
+    "en": "Confirmed failed with no recoverable output"
+  },
+  "ui.external_review_evidence": {
+    "zh": "核对依据",
+    "en": "Verification evidence"
+  },
+  "ui.external_review_save": {
+    "zh": "保存核对结果",
+    "en": "Save verified result"
+  },
+  "ui.external_review_resume": {
+    "zh": "恢复原构建",
+    "en": "Resume original build"
+  },
+  "ui.studio_precondition_required": {
+    "zh": "共享工作区修改需要 If-Match 修订，请先读取任务",
+    "en": "Shared workspace edits require an If-Match revision. Read the job first."
+  },
+  "ui.upload_invalid_declaration": {
+    "zh": "文件大小或 SHA256 声明无效",
+    "en": "Invalid file size or SHA256 declaration"
+  },
+  "ui.upload_missing_session": {
+    "zh": "找不到上传会话或访问凭据无效",
+    "en": "Upload session not found or credentials are invalid"
+  },
+  "ui.upload_expired_session": {
+    "zh": "上传会话已结束或过期",
+    "en": "The upload session has ended or expired"
+  },
+  "ui.upload_incomplete_parts": {
+    "zh": "上传分片尚未齐全",
+    "en": "Upload parts are incomplete"
+  },
+  "ui.upload_pending_quota": {
+    "zh": "未完成上传占用已超过配额，请完成、取消或回收过期会话",
+    "en": "Pending uploads exceed the quota. Complete or cancel uploads, or reclaim expired sessions."
+  },
+  "ui.upload_session_quota": {
+    "zh": "未完成上传会话数已达到上限",
+    "en": "The pending upload session limit has been reached"
+  },
+  "ui.upload_invalid_part": {
+    "zh": "分片编号、大小或摘要无效",
+    "en": "Invalid part number, size, or digest"
+  },
+  "ui.upload_part_conflict": {
+    "zh": "同一分片已登记不同内容",
+    "en": "Different content has already been registered for this part"
+  },
+  "ui.upload_part_corrupt": {
+    "zh": "上传分片已损坏，请重新上传",
+    "en": "An upload part is corrupt. Upload it again."
+  },
+  "ui.upload_missing_asset": {
+    "zh": "找不到已完成的上传素材",
+    "en": "Completed upload asset not found"
+  },
+  "ui.upload_large_part": {
+    "zh": "上传分片过大",
+    "en": "The upload part is too large"
+  },
+  "ui.external_call_unknown": {
+    "zh": "外部调用结果未知，禁止重复提交，请核对回执：{id}",
+    "en": "The external result is unknown. Do not submit again. Review receipt: {id}"
+  },
+  "ui.external_call_disconnected": {
+    "zh": "外部调用可能已提交，须人工核对后继续：{id}",
+    "en": "The external call may have been submitted. Review it before continuing: {id}"
+  },
+  "ui.external_review_bad_evidence": {
+    "zh": "请填写外部系统核对依据（最多 4000 字）",
+    "en": "Provide verification evidence from the external system (up to 4,000 characters)"
+  },
+  "ui.external_review_pending": {
+    "zh": "存在未知外部调用结果，请先核对所有调用回执",
+    "en": "Some external results are unknown. Review all call receipts first"
+  },
+  "ui.external_review_conflict": {
+    "zh": "调用状态已变化，请刷新后核对",
+    "en": "The call state changed. Refresh before reviewing"
+  },
+  "ui.studio_plan_changed_after_submit": {
+    "zh": "提交后的方案已变化，请重新预检并提交，旧构建不会调用模型",
+    "en": "The plan changed after submission. Run preflight and submit again; this build will not call the model."
+  },
+  "ui.studio_refresh_keep_inputs": {
+    "zh": "刷新版本并保留输入",
+    "en": "Refresh revision and keep edits"
+  },
+  "ui.studio_refreshed_keep_inputs": {
+    "zh": "版本已刷新，输入已保留，请检查后再次保存",
+    "en": "The revision was refreshed and your edits were kept. Review them before saving again."
+  },
+  "ui.staging_insufficient_space": {
+    "zh": "节点暂存空间不足，请完成其他上传或稍后重试",
+    "en": "Node staging space is insufficient. Finish other uploads or try again later."
   }
 };

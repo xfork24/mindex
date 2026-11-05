@@ -502,6 +502,14 @@ def run_step(
     shot_ids: list[str] | None = None,
     started: bool = False,
 ) -> dict:
+    from mindex.shared.db.fencing import current_attempt
+
+    if config.queue.backend == "postgres" and current_attempt() is None:
+        from mindex.studio.tasks import publication, submit, wait
+
+        with publication(config, job_id):
+            task_id = submit(config, job_id, "steps", {"steps": [step], "mode": mode, "shot_ids": shot_ids})
+        return wait(config, task_id)
     state = studio.load_job(config, job_id) if started else studio.begin_step(config, job_id, step)
     session = None
     token = None

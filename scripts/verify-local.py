@@ -6,6 +6,7 @@ import argparse
 import importlib.util
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -92,7 +93,14 @@ def main():
                       source_unchanged=unchanged, finished_at=datetime.now(UTC).isoformat())
         print(json.dumps({"status": report["status"], "source_unchanged": unchanged, **counts}), flush=True)
         return 0 if passed else 1
+    except KeyboardInterrupt:
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+        report.update(status="interrupted", source_unchanged=verifier.source_identity() == fingerprint,
+                      finished_at=datetime.now(UTC).isoformat())
+        return 130
     finally:
+        # uv 与子进程可能同时收到 SIGINT；收尾期间忽略重复信号，确保子进程和证据落盘。
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
         for process in processes.values():
             verifier.stop_process(process)
         for log in logs:

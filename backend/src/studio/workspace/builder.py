@@ -52,21 +52,31 @@ def execute(config, job_id, w, p, stage, sid=None, *, speaker=None, storyboarder
     diagnostics = VersionDiagnostics(directory)
     diagnostics.record("inputs", {"stage": stage, "shot_id": sid, **spec})
     token = current.set(diagnostics)
+    from mindex.shared.external_calls import guard_service, scope
+    from mindex.shared.storage import Store
+
+    services = {"speaker": speaker, "storyboarder": storyboarder, "embedder": embedder, "writer": writer,
+                "video_generator": video_generator, "animator": animator,
+                "image_generator": image_generator, "music_generator": music_generator}
+    services = {name: guard_service(service, name) for name, service in services.items()}
     try:
-        data, files = stage_handler.run(RunContext(
+        with scope(Store.open(config), [job_id, stage, sid, spec["signature"]]):
+            data, files = stage_handler.run(RunContext(
             config=config, job_id=job_id, w=w, p=p, sid=sid, spec=spec, directory=directory,
             version_id=vid, diagnostics=diagnostics,
-            services={"speaker": speaker, "storyboarder": storyboarder, "embedder": embedder, "writer": writer,
-                      "video_generator": video_generator, "animator": animator,
-                      "animation_capture": animation_capture, "cancelled": cancelled,
-                      "image_generator": image_generator, "music_generator": music_generator, "force": force},
-        ))
+                services={**services, "animation_capture": animation_capture, "cancelled": cancelled, "force": force},
+            ))
         add_version(config, job_id, w, stage, sid, data=data, files=files, version_id=vid, **spec)
         if stage_handler.selects:
             choose(w, p, stage, sid, vid)
         persist(config, job_id, w)
         return vid
     except Exception as exc:
+        from mindex.shared.db.locks_pg import LeaseLost
+        from mindex.shared.task_cancel import TaskCancelled
+
+        if isinstance(exc, (LeaseLost, TaskCancelled)):
+            raise
         # Preserve partial files and diagnostics, but never select a failed version.
         diagnostics.record("error", {"type": type(exc).__name__, "message": str(exc)})
         partial = {
@@ -108,6 +118,14 @@ def cancel_remaining(nodes):
 def run_build(config, job_id, build_id, *, speaker=None, storyboarder=None, embedder=None, writer=None,
               video_generator=None, animator=None, animation_capture=None, cancel_event=None,
               image_generator=None, music_generator=None):
+    from mindex.shared.db.fencing import current_attempt
+
+    if config.queue.backend == "postgres" and current_attempt() is None:
+        from mindex.studio.tasks import publication, submit, wait
+
+        with publication(config, job_id):
+            task_id = submit(config, job_id, "build", {}, build_id=build_id)
+        return wait(config, task_id)
     log = ExecutionLog(config, job_id, build_id)
     token = active_log.set(log)
     try:
@@ -164,6 +182,8 @@ def _run_build(config, job_id, build_id, log, *, speaker=None, storyboarder=None
             failed.add(scoped(node_plan, node["key"].split("/", 1)[-1]))
         else:
             node.update(status="running", started_at=studio.now())
+            node.pop("error", None)
+            node.pop("finished_at", None)
             persist(config, job_id, w)
             log.emit(f"开始{label}")
             try:
@@ -193,6 +213,11 @@ def _run_build(config, job_id, build_id, log, *, speaker=None, storyboarder=None
                     )
                     node.update(status="complete", version=vid)
             except Exception as exc:  # 失败节点不得阻断互不依赖的节点
+                from mindex.shared.db.locks_pg import LeaseLost
+                from mindex.shared.task_cancel import TaskCancelled
+
+                if isinstance(exc, (LeaseLost, TaskCancelled)):
+                    raise
                 # 节点内部响应取消（生成画面轮询中）：记为已取消，其余未执行节点在下一轮统一阻塞。
                 interrupted = str(exc) == CANCELLED and cancel_check()
                 if not interrupted:
@@ -306,6 +331,13 @@ def recover(config, job_id, w):
                 continue
     for build in w["builds"]:
         if build["status"] == "running":
+            if config.queue.backend == "postgres":
+                from mindex.shared.storage import Store
+
+                task = Store.open(config).one("SELECT status FROM studio_tasks WHERE job_id=? AND build_id=? "
+                                              "ORDER BY created_at DESC LIMIT 1", (job_id, build["id"]))
+                if task and task["status"] in {"queued", "running"}:
+                    continue
             for node in build["nodes"]:
                 if node.get("status") in ("pending", "running"):
                     node.update(status="blocked", error="服务重启中断，请重新预检续建")

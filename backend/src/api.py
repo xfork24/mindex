@@ -87,6 +87,9 @@ def create_app(
     store = backends.store
     runtime = RuntimeConfig(config, store)  # 设置页保存后经覆盖层热生效，无需重启
     app = FastAPI(title="Mindex 视频素材检索", version="0.1.0")
+    from mindex.studio.revisions import install as install_studio_revisions
+
+    install_studio_revisions(app, config, store)
     from mindex.agent.loopback import ensure_internal_token
 
     ensure_internal_token(app)  # 智能助手回环请求的进程内凭证，须在认证中间件生效前就绪
@@ -130,6 +133,10 @@ def create_app(
     app.include_router(indexes_router(runtime, store, embedder))
     app.include_router(index_tasks_router(runtime, store, embedder))
     from mindex.admin.groups import groups_router
+    from mindex.upload_api import install_reaper, upload_router
+
+    app.include_router(upload_router(store, runtime))
+    install_reaper(app, store, runtime)
     app.include_router(groups_router(store))
     app.include_router(admin_router(store, runtime, backends=backends))
     app.include_router(settings_router(runtime, store))
@@ -313,6 +320,7 @@ def create_app(
         report = doctor(config)
         return JSONResponse(report, status_code=200 if report["ok"] else 503)
 
+    from mindex.shared.backends.staging import StagingFull
     from mindex.shared.db.locks_pg import LeaseLost
     from mindex.shared.db.maintenance_gate import MaintenanceBusy
 
@@ -320,6 +328,10 @@ def create_app(
     @app.exception_handler(LeaseLost)
     async def write_unavailable(_, exc):
         return JSONResponse({"detail": str(exc)}, status_code=409)
+
+    @app.exception_handler(StagingFull)
+    async def insufficient_staging(_, exc):
+        return JSONResponse({"detail": "节点暂存空间不足，请完成其他上传或稍后重试", "diagnostic": str(exc)}, status_code=507)
 
     # 设置 MINDEX_WEB_TOKEN（或传入 web_token）后才启用访问令牌；未设置时行为不变。
     install_web_auth(app, web_token)

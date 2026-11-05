@@ -130,7 +130,12 @@ class InvokeHandler(StageHandler):
                 log.emit(f"第三方工具任务状态：{status}")
 
         try:
-            found, task = adapter(record).call(tool["name"], values, uploads, timeout=tool["timeout"],
+            from mindex.shared.external_calls import guard_service
+
+            client = adapter(record)
+            if record["protocol"] != "http":
+                client = guard_service(client, "tool")
+            found, task = client.call(tool["name"], values, uploads, timeout=tool["timeout"],
                                                cancelled=cancelled, notify=notify)
             wanted = next((item for item in found if _matches(item, tool["output"])), found[0])
             raw = artifacts.download(wanted, ctx.directory / "download.bin", hosts=registry.allowed_hosts(record),

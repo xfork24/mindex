@@ -45,6 +45,7 @@ def sanitized(value):
 
 class ArtifactSession:
     def __init__(self, config, job_id: str, step: str, state: dict, *, mode="resume", shot_ids=None):
+        self.config = config
         self.root = studio.job_dir(config, job_id)
         self.step, self.mode, self.shot_ids = step, mode, shot_ids
         self.attempt = state["steps"][step]["attempt"]
@@ -74,7 +75,7 @@ class ArtifactSession:
         self.sequence += 1
         studio.save(
             self.directory / "debug" / f"{self.sequence:04d}-{kind}.json",
-            {"at": studio.now(), "data": sanitized(value)},
+            {"at": studio.now(), "data": sanitized(value)}, config=self.config,
         )
 
     def forced(self, logical: str) -> bool:
@@ -130,9 +131,16 @@ class ArtifactSession:
             **metadata,
         }
         self._alias(logical, target)
+        if self.config.storage.backend == "s3":
+            from mindex.shared import files
+            from mindex.shared.storage import Store
+
+            store = Store.open(self.config)
+            files.publish(store, target)
+            files.publish(store, safe_path(self.root, logical))
         self.registry[logical] = item
         self.outputs[logical] = item
-        studio.save(self.registry_path, self.registry)
+        studio.save(self.registry_path, self.registry, config=self.config)
         self.record("output", {"logical": logical, **item})
         return target
 
@@ -144,7 +152,7 @@ class ArtifactSession:
     def finish(self):
         studio.save(
             self.directory / "manifest.json",
-            {"step": self.step, "attempt": self.attempt, "outputs": self.outputs},
+            {"step": self.step, "attempt": self.attempt, "outputs": self.outputs}, config=self.config,
         )
 
 

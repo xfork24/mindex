@@ -131,6 +131,7 @@ const GRANULARITY_LABEL = {
   scene: MindexI18n.msg("ui.337ba7da75d2")
 };
 const STATUS = {
+  needs_review: MindexI18n.msg("ui.external_review_required"),
   running: MindexI18n.msg("ui.1f425b6bf0a4"),
   partial: MindexI18n.msg("ui.53951802211e"),
   failed: MindexI18n.msg("ui.3e3c8068bb0e"),
@@ -213,6 +214,14 @@ function fail(error) {
     const message = el("p", shortIds(error.message), "warn-text");
     message.id = "dialog-error";
     message.setAttribute("role", "alert");
+    if ([409, 428].includes(error.status)) message.append(button(MindexI18n.msg('ui.studio_refresh_keep_inputs'), async () => {
+      const controls = [...$('dialog-content').querySelectorAll('input,textarea,select')].map(node =>
+        ({node, value:node.value, checked:node.checked}));
+      await refresh();
+      for (const item of controls) if (item.node.isConnected) {item.node.value=item.value;item.node.checked=item.checked;}
+      MindexI18n.setText(message, MindexI18n.msg('ui.studio_refreshed_keep_inputs'));
+      $('dialog-content').prepend(message);
+    }));
     $("dialog-content").prepend(message);
     return;
   }

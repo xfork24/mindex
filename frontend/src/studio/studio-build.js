@@ -255,8 +255,37 @@ function renderBuilds() {
         shortIds(`${LABEL[node.stage]} ${node.shot_id || ""} · ${statusText(node.status)}${node.error ? ` · ${MindexI18n.system(node.error)}` : ""}`)
       )
     );
+    if (b.status === 'needs_review') d.append(button(MindexI18n.msg('ui.external_review_open'), () => reviewExternalCalls(b)));
     view.append(d);
   }
+}
+async function reviewExternalCalls(build) {
+  const body = showDialog(MindexI18n.msg('ui.external_review_open'));
+  body.append(el('p', MindexI18n.msg('ui.external_review_explanation')));
+  const data = await api(`${base()}/external-calls`);
+  const unknown = data.items.filter(item => ['dispatching', 'needs_review'].includes(item.state));
+  for (const call of unknown) {
+    const card = el('section');
+    card.append(el('p', `${call.operation} · ${call.id}`));
+    const outcome = field(MindexI18n.msg('ui.external_review_outcome'), 'request_id', 'text', [
+      ['request_id', MindexI18n.msg('ui.external_review_known_request')],
+      ['not_submitted', MindexI18n.msg('ui.external_review_not_submitted')],
+      ['failed', MindexI18n.msg('ui.external_review_failed')]
+    ]);
+    const requestId = field('request_id', call.request_id || '');
+    const evidence = field(MindexI18n.msg('ui.external_review_evidence'), '', 'textarea');
+    card.append(outcome.wrap, requestId.wrap, evidence.wrap, button(MindexI18n.msg('ui.external_review_save'), async () => {
+      await api(`${base()}/external-calls/${call.id}/resolve`, 'POST', {expected_state:call.state,
+        outcome:outcome.input.value, evidence:evidence.input.value,
+        ...(outcome.input.value==='request_id' ? {request_id:requestId.input.value} : {})});
+      await reviewExternalCalls(build);
+    }));
+    body.append(card);
+  }
+  if (!unknown.length && build.task_id) body.append(button(MindexI18n.msg('ui.external_review_resume'), async () => {
+    await api(`${base()}/tasks/${build.task_id}/retry`, 'POST');
+    closeDialog();await refresh();
+  }));
 }
 function currentVersionEntries() {
   const p = plan();

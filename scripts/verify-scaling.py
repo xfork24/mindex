@@ -38,8 +38,11 @@ TESTS = [
     "test_persons_pg.py", "test_media_delivery.py",
     "test_backend_identity.py",
     "test_maintenance_and_gateway.py", "test_sql_characteristics.py",
-    "test_scaling_execution.py",
+    "test_scaling_execution.py", "test_scaling_delivery_core.py",
 ]
+
+
+CPU_TESTS = ["test_scaling_cpu_acceptance.py"]
 
 
 def stop_process(process):
@@ -94,7 +97,10 @@ def source_identity():
     return hashed.hexdigest()
 
 
-def main():
+def main(*, suite="integration"):
+    if suite not in {"integration", "cpu"}:
+        raise ValueError("未知验收专项")
+    test_files = TESTS if suite == "integration" else CPU_TESTS
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--minio-binary", default=shutil.which("minio"), help="MinIO 可执行文件（记录其摘要）")
     parser.add_argument("--output", type=Path, help="空证据目录；默认 artifacts/scaling/<时间与随机 ID>")
@@ -105,7 +111,7 @@ def main():
                "MINDEX_TEST_POSTGRES_DSN", "MINDEX_TEST_S3_ENDPOINT", "MINDEX_TEST_CHROMA_SERVER")
     marked_files = {path.name for path in (ROOT / "tests").glob("test_*.py")
                     if any(marker in path.read_text(encoding="utf-8") for marker in markers)}
-    missing = marked_files - set(TESTS)
+    missing = marked_files - set(TESTS) - set(CPU_TESTS)
     if missing:
         parser.error(f"验收入口漏掉外部后端测试文件：{sorted(missing)}")
     import psycopg
@@ -163,9 +169,10 @@ def main():
                             "MINDEX_TEST_S3_KEY": "mindex", "MINDEX_TEST_S3_SECRET": password,
                             "MINDEX_TEST_S3_SECRET_KEY": password, "MINDEX_TEST_CHROMA_SERVER": chroma})
                 test_command = [sys.executable, "-m", "pytest", "-q", "--tb=short",
-                                f"--junitxml={output / 'junit.xml'}", *(f"tests/{name}" for name in TESTS)]
-                report["tests"] = TESTS
-                print(f"独立验收环境已就绪；执行 {len(TESTS)} 个测试文件；证据：{output}", flush=True)
+                                f"--junitxml={output / 'junit.xml'}", *(f"tests/{name}" for name in test_files)]
+                report["tests"] = test_files
+                report["suite"] = suite
+                print(f"独立验收环境已就绪；执行 {len(test_files)} 个测试文件；证据：{output}", flush=True)
                 with (output / "pytest.log").open("w") as test_log:
                     result = subprocess.run(test_command, cwd=ROOT, env=env, stdout=test_log,
                                             stderr=subprocess.STDOUT, check=False)

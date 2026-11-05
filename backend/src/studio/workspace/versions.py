@@ -25,6 +25,10 @@ def path(config, job_id):
     return root(config, job_id) / "workspace.json"
 
 
+class WorkspaceState(dict):
+    loaded_revision = None
+
+
 class RevisionConflict(studio.StudioError):
     """工作区/方案已被其他操作修改（条件发布失败，映射为 409）。"""
 
@@ -54,6 +58,7 @@ def persist(config, job_id, workspace, *, expected_revision=None):
     from mindex.shared import lock_backend
 
     with lock_backend.resource(config, f"workspace:{job_id}", timeout=None):
+        expected_revision = expected_revision or getattr(workspace, "loaded_revision", None)
         if expected_revision is not None:
             current = current_revision(config, job_id)
             if current != expected_revision:
@@ -61,13 +66,40 @@ def persist(config, job_id, workspace, *, expected_revision=None):
         workspace["updated_at"] = studio.now()
         if config.storage.backend == "s3":
             from mindex.shared import files
+            from mindex.shared.directory_files import snapshot
             from mindex.shared.storage import Store
             store = Store.open(config)
-            # 先发布所有不可变依赖，最后发布可变工作区指针。
-            for file in root(config, job_id).rglob("*"):
-                if file.is_file() and file != path(config, job_id) and file.suffix not in {".lock", ".partial"}:
-                    files.publish(store, file)
+            prefix = f"studio/{job_id}/"
+            view = snapshot(store, prefix)
+            # 只发布工作区显式引用的依赖，禁止递归发布节点旧缓存。
+            for vid, item in workspace["versions"].items():
+                metadata = root(config, job_id) / "versions" / vid / "version.json"
+                key = files.key_for(store, metadata)
+                if key not in view.entries:
+                    view.put_path(key, metadata)
+                for info in item.get("files", {}).values():
+                    target = safe_path(root(config, job_id), info["path"])
+                    key = files.key_for(store, target)
+                    entry = view.entries.get(key)
+                    if entry and entry["sha256"] == info["sha256"]:
+                        continue
+                    view.put_path(key, target, digest=info["sha256"])
+            for p in workspace["plans"].values():
+                for reference in p.get("options", {}).get("references", []):
+                    key = prefix + "inputs/" + reference["id"] + ".txt"
+                    if key not in view.entries:
+                        view.put_path(key, store.root / key, digest=reference["id"])
+            view.put(prefix + "workspace.json", json.dumps(workspace, ensure_ascii=False, indent=2).encode())
+            view.publish()
+            from mindex.shared import jsonio
+
+            jsonio.save(path(config, job_id), workspace)
+            if isinstance(workspace, WorkspaceState):
+                workspace.loaded_revision = revision(workspace)
+            return
         studio.save(path(config, job_id), workspace, config=config)
+        if isinstance(workspace, WorkspaceState):
+            workspace.loaded_revision = revision(workspace)
 
 
 def version(workspace, version_id):
@@ -134,7 +166,8 @@ def add_version(
     target = root(config, job_id) / "versions" / vid / "version.json"
     if target.exists():
         raise studio.StudioError("不可变版本已存在")
-    studio.save(target, item, config=config)
+    # 版本描述随 workspace manifest 一起发布，之前仅是本机不可见的候选文件。
+    studio.save(target, item)
     w["versions"][vid] = item
     return vid
 

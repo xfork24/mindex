@@ -16,6 +16,7 @@ Mindex 定位为 **one-stop video creation agent**（一站式视频创作智能
 | 管理素材（改名/收藏/隐藏/上传/处理任务） | [素材后台指南](admin.md) | — |
 | 回收磁盘空间、清退旧切片 | [磁盘清理](cleanup.md) | [旧切片维护](clips-maintenance.md) |
 | 备份、迁移合并或全新 clone 恢复 | [数据备份与迁移](backup.md) | [CLI 参考](cli-reference.md#数据备份与迁移) |
+| 部署持久 worker、跨节点创作或可恢复上传 | [持久创作、目录发布与上传会话](scaling-durable-delivery.md) | [水平扩展交付矩阵](../plans/horizontal-scaling-delivery-matrix.md)、[验证记录](scaling-enhancement-verification.md) |
 | 切换线上/自建模型、克隆音色、调检索权重 | [设置页指南](settings.md) | [配置参考](config-reference.md) |
 | 按领域发现选题、打分并建成创作任务 | [选题挖掘](topics.md) | [创作工作流](studio.md) |
 | 从文案生成视频（创作工作台） | [创作工作流](studio.md) | [设置页：视频生成与动画生成角色](settings.md) / [部署：ComfyUI 与动画录制](deployment.md#comfyui可选的-aigc-视频生成服务) |
@@ -65,6 +66,7 @@ Mindex 定位为 **one-stop video creation agent**（一站式视频创作智能
 - [web-auth.md](web-auth.md) — Web/API 访问鉴权：令牌、会话 Cookie、MCP 令牌、桌面与回环凭证
 - [testing.md](testing.md) — 测试约定：集成式哲学、分层与标记、浏览器回归与布局回归复现、快照与 parity 测试
 - [shared-infrastructure.md](shared-infrastructure.md) — 共享基础设施：具名文件锁与顺序、SQLite 版本化迁移、后台任务三件套
+- [scaling-durable-delivery.md](scaling-durable-delivery.md) — Studio 持久账本、目录 manifest、修订冲突、外部调用核对和上传会话
 
 **参考记录**：
 

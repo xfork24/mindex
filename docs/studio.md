@@ -4,7 +4,12 @@
 
 网页创建任务时会保存当前界面语言：中文任务的初始构建方案名为“默认方案”，英文任务为“Default Plan”；自动分镜的画面意象与召回关键词也使用任务创建语言，旁白原文保持原语言。之后切换界面不会重命名方案或翻译已保存的分镜。旧任务默认中文，可重新拆分镜生成新版结果。任务信息中的“可用素材摘要”独立跟随当前界面语言，选择双语分析中对应语言的故事线与画面词；旧的单语言分析保留原文。素材的自定义名称也保留原文。
 
-入口 `/studio`。设计依据为 [studio-version-workbench-plan.md](../plans/studio-version-workbench-plan.md)。保留 Python、文件存储和原生前端；首次进入任务工作台时接入版本模型，原文件和执行历史保留。
+入口 `/studio`。设计依据为 [studio-version-workbench-plan.md](../plans/studio-version-workbench-plan.md)。后端使用 Python，前端使用原生 HTML/JS；首次进入任务工作台时接入版本模型，原文件和执行历史保留。
+
+本地模式保留文件存储和 inline 执行。共享模式将步骤、节点、整列和整体构建提交到持久
+worker，使用不可变目录 manifest 与 PG 当前 revision 指针；`job.json` / `workspace.json`
+作为逻辑视图保留。人工修改携带修订，冲突后可显式刷新并保留输入；外部调用结果未知时
+先核对回执，再恢复原构建。部署、协议及核对入口见[持久创作与目录发布](scaling-durable-delivery.md)。
 
 创作页有三个分区标签：「创作任务」（`/studio`）、「选题挖掘」（`/studio/topics`，见[选题挖掘](topics.md)）与「文案模板」（`/studio/templates`）。从选题建出的任务在任务详情顶部显示来源选题与账号档案；档案更新后可以「同步」，同步后文案区提示可重新生成文案（`script_profile_changed`），不会自动重写。
 
