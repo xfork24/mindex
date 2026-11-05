@@ -193,3 +193,26 @@ ALTER TABLE upload_sessions ADD COLUMN completion_error TEXT;
 ALTER TABLE upload_parts ADD COLUMN etag TEXT;
 """
 PG_MULTIPART = SQLITE_MULTIPART
+
+
+# v25：首写前绑定、分阶段/对象/向量批次恢复与原子激活。
+SQLITE_MIGRATION = """
+ALTER TABLE migration_runs ADD COLUMN source_library_id TEXT;
+ALTER TABLE migration_runs ADD COLUMN manifest_sha256 TEXT;
+ALTER TABLE migration_runs ADD COLUMN phase TEXT;
+ALTER TABLE migration_runs ADD COLUMN source_tables TEXT;
+ALTER TABLE migration_runs ADD COLUMN restored_tables TEXT;
+CREATE TABLE IF NOT EXISTS migration_stages (
+  migration_id TEXT NOT NULL REFERENCES migration_runs(migration_id),stage TEXT NOT NULL,
+  state TEXT NOT NULL,details TEXT NOT NULL DEFAULT '{}',PRIMARY KEY(migration_id,stage)
+);
+CREATE TABLE IF NOT EXISTS migration_objects (
+  migration_id TEXT NOT NULL REFERENCES migration_runs(migration_id),kind TEXT NOT NULL,
+  object_key TEXT NOT NULL,sha256 TEXT NOT NULL,state TEXT NOT NULL,
+  PRIMARY KEY(migration_id,kind,object_key)
+);
+"""
+PG_MIGRATION = SQLITE_MIGRATION + """
+SELECT setval(pg_get_serial_sequence('studio_events','id'),
+              COALESCE((SELECT max(id) FROM studio_events),0)+1,false);
+"""

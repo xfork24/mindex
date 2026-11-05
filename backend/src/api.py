@@ -103,9 +103,19 @@ def create_app(
     async def request_work_budget(request, call_next):
         from contextlib import nullcontext
 
+        from starlette.concurrency import run_in_threadpool
+
+        from mindex.shared.db.maintenance_gate import MaintenanceBusy
+        from mindex.shared.migration_state import writable
         from mindex.shared.query_budget import deadline
         from mindex.shared.work_budget import scope
 
+        if (request.url.path.startswith('/api/') and not request.url.path.startswith('/api/search/')
+                and request.method not in {'GET', 'HEAD', 'OPTIONS'}):
+            try:
+                await run_in_threadpool(writable, store)
+            except MaintenanceBusy as exc:
+                return JSONResponse({'detail': str(exc)}, status_code=409)
         with scope(store), deadline(config.search.query_timeout_seconds, check_exit=False) if store.pg and request.url.path.startswith("/api/search/") else nullcontext():
             return await call_next(request)
 

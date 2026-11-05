@@ -309,7 +309,7 @@ def test_local_migration_resume_activate_and_reject_nonempty(tmp_path):
 
 @pytest.mark.requires_postgres
 def test_pg_migration_roundtrip_and_nonempty_protection(pg_config, tmp_path):
-    from mindex.maintenance.migration import export_bundle, load_bundle
+    from mindex.maintenance.migration import activate_bundle, export_bundle, load_bundle
     origin = Config(data_dir=tmp_path / "origin")
     store = open_context(origin).store
     store.execute("INSERT INTO runs(id,stage,status) VALUES(42,'test','complete')")
@@ -317,10 +317,11 @@ def test_pg_migration_roundtrip_and_nonempty_protection(pg_config, tmp_path):
     export_bundle(origin, bundle)
     assert load_bundle(pg_config, bundle)["consistent"]
     assert load_bundle(pg_config, bundle)["consistent"]
+    assert activate_bundle(pg_config, bundle)["activated"]
     target = open_context(pg_config).store
     with target.connect() as db:
         assert db.execute("INSERT INTO runs(stage,status) VALUES('new','complete')").lastrowid == 43
-    with pytest.raises(ValueError, match="已变化"):
+    with pytest.raises(ValueError, match="已激活"):
         load_bundle(pg_config, bundle)
     assert target.one("SELECT count(*) AS n FROM runs")["n"] == 2
 

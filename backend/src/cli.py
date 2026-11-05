@@ -154,6 +154,10 @@ def configure(
         from mindex.settings.runtime_settings import apply_runtime_overrides
 
         ctx.obj = apply_runtime_overrides(ctx.obj)
+    if ctx.invoked_subcommand not in {'migration', 'migrate', 'doctor', 'backup', 'serve', 'worker', 'mcp', 'agent', 'gpu', 'calls'}:
+        from mindex.shared.migration_state import writable_config
+
+        writable_config(ctx.obj)
 
 
 def _persistent_foreground(config, source, work, *, operation=None, **options):

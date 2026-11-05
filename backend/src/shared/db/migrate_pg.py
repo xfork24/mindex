@@ -20,6 +20,7 @@ from mindex.shared.db.scaling_schema import (
     PG_DURABLE_INDEX,
     PG_EXECUTION,
     PG_FILES,
+    PG_MIGRATION,
     PG_MULTIPART,
     PG_OBJECTS,
     PG_QUEUE,
@@ -33,7 +34,7 @@ _MIGRATION_LOCK_KEY = (0x4D49_4E44, 0x4D49_4752)  # "MIND"/"MIGR"
 
 # v15 为已发布基线；之后只追加，禁止升级时重跑基线覆盖已有表定义。
 BASELINE_VERSION = 15
-PG_STEPS = ((16, PG_FILES + PG_QUEUE), (17, PG_EXECUTION), (18, "SELECT 1;"), (19, PG_DURABLE_INDEX), (20, PG_DIRECTORIES), (21, PG_DELIVERY), (22, PG_ADMISSION), (23, PG_OBJECTS), (24, PG_MULTIPART))
+PG_STEPS = ((16, PG_FILES + PG_QUEUE), (17, PG_EXECUTION), (18, "SELECT 1;"), (19, PG_DURABLE_INDEX), (20, PG_DIRECTORIES), (21, PG_DELIVERY), (22, PG_ADMISSION), (23, PG_OBJECTS), (24, PG_MULTIPART), (25, PG_MIGRATION))
 
 
 def _logical_version() -> int:
@@ -136,7 +137,7 @@ def fix_sequences(conn, tables: list[str]) -> None:
     ``conn`` 接受 PgConnection 包装或原生 psycopg 连接（仅位置参数取值）。
     """
     for table in tables:
-        column = "id" if table in {"model_profiles", "voices", "runs"} else "rowid"
+        column = "id" if table in {"model_profiles", "voices", "runs", "studio_events"} else "rowid"
         conn.execute(
             "SELECT setval(pg_get_serial_sequence(%s, %s),"
             f" COALESCE((SELECT max({column}) FROM {table}), 0) + 1, false)", (table, column)

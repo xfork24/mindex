@@ -188,7 +188,7 @@ class UploadSessions:
 
     def _clean_parts(self, task_id):
         row = self.store.one("SELECT * FROM upload_sessions WHERE id=?", (task_id,))
-        if row and row["transport"] == "s3":
+        if row and row["transport"] == "s3" and getattr(self.store.media, "backend", "local") == "s3":
             from mindex.shared.s3_multipart import S3Multipart
 
             S3Multipart(self.store).abort(row)

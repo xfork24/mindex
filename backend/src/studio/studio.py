@@ -101,6 +101,10 @@ def now() -> str:
 
 def save(path: Path, value, *, config=None):
     """原子写入 JSON；实现见 ``shared/jsonio``。"""
+    if config is not None:
+        from mindex.shared.migration_state import writable_config
+
+        writable_config(config)
     if config is not None and config.storage.backend == "s3":
         from mindex.shared import files
         from mindex.shared.storage import Store
@@ -930,6 +934,19 @@ def scoped_filters(filters: Filters, scope: set[str] | None) -> Filters:
     return Filters.model_validate(values)
 
 
+def _migration_writable(method):
+    from functools import wraps
+
+    @wraps(method)
+    def wrapped(config, *args, **kwargs):
+        from mindex.shared.migration_state import writable_config
+
+        writable_config(config)
+        return method(config, *args, **kwargs)
+    return wrapped
+
+
+@_migration_writable
 def create_job(config: Config, text: str, title: str | None = None, options: dict | None = None,
                *, store=None, defer_title: bool = False, original_input: str | None = None, language: str = "zh") -> dict:
     """创建创作任务。``text`` 是视频大纲，文案在任务内由文案创作模型生成。

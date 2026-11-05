@@ -32,7 +32,7 @@ TESTS = [
     "test_scaling_remaining_verification.py", "test_pg_backend.py", "test_pg_queue.py",
     "test_pg_locks.py", "test_pg_export.py", "test_s3_store.py", "test_s3_purge.py",
     "test_chroma_server.py", "test_staging.py",
-    "test_migration_crash_recovery.py",
+    "test_migration_crash_recovery.py", "test_migration_stages.py",
     "test_cluster_process_flow.py",
     "test_doctor.py", "test_pg_chroma_e2e.py", "test_migration_cli.py", "test_worker.py",
     "test_persons_pg.py", "test_media_delivery.py",

@@ -50,6 +50,9 @@ def current_revision(config, job_id):
 
 
 def persist(config, job_id, workspace, *, expected_revision=None):
+    from mindex.shared.migration_state import writable_config
+
+    writable_config(config)
     """条件写入工作区：``expected_revision`` 与磁盘当前修订不符时抛 RevisionConflict。
 
     读-比对-写在进程内与跨进程资源锁内完成（``workspace:<job_id>``），因此并发

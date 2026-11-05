@@ -31,7 +31,7 @@ __all__ = ["export_media_bundle", "export_pg_to_sqlite"]
 
 _BATCH = 500
 # rowid 即 id 的表（PG 侧无独立 rowid 列；按 id 排序即 SQLite 语义序）。
-_ROWID_IS_ID = {"model_profiles", "voices", "runs"}
+_ROWID_IS_ID = {"model_profiles", "voices", "runs", "studio_events"}
 
 
 def export_pg_to_sqlite(pg_store: PgStore, target: Path, *, tables=BASELINE_TABLES) -> dict:
@@ -52,7 +52,8 @@ def export_pg_to_sqlite(pg_store: PgStore, target: Path, *, tables=BASELINE_TABL
             for table in tables:
                 db.execute(f'DELETE FROM "{table}"')
             for table in tables:
-                columns = list(columns_by_table[table])
+                columns = [column for column in columns_by_table[table]
+                           if column != "rowid" or table not in _ROWID_IS_ID]
                 names = ",".join(f'"{column}"' for column in columns)
                 order = "id" if table in _ROWID_IS_ID else "rowid"
                 placeholders = ",".join("?" * len(columns))
@@ -95,10 +96,11 @@ def export_media_bundle(store: Store, media, target: Path) -> dict:
     if getattr(media, "backend", "local") == "s3":
         keys = referenced_files(target, target / "metadata.sqlite3",
                                 available_files=set(media.iter_prefix("")))
-        from mindex.shared.resource_registry import referenced_objects
+        from mindex.shared.resource_registry import referenced_objects, required_objects
 
         available = set(media.iter_prefix(""))
         keys.update(key for key in referenced_objects(store) if key in available)
+        keys.update(required_objects(store))
         for key in sorted(keys):
             destination = safe_path(payload, key)
             destination.parent.mkdir(parents=True, exist_ok=True)
@@ -109,6 +111,9 @@ def export_media_bundle(store: Store, media, target: Path) -> dict:
     else:
 
         keys = referenced_files(media.root, target / "metadata.sqlite3")
+        from mindex.shared.resource_registry import required_objects
+
+        keys.update(required_objects(store))
         for key in sorted(keys):
             destination = safe_path(payload, key)
             destination.parent.mkdir(parents=True, exist_ok=True)

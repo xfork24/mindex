@@ -33,7 +33,7 @@ def path_values(value, *, field=None):
 
 def _rows(db, table, fields, *, page=256):
     cursor = 0
-    sequence = "id" if table in {"voices", "model_profiles", "runs"} else "rowid"
+    sequence = "id" if table in {"voices", "model_profiles", "runs", "studio_events"} else "rowid"
     while True:
         rows = db.execute(f"SELECT {sequence} AS sequence,{','.join(fields)} FROM {table} "
                           f"WHERE {sequence}>? ORDER BY {sequence} LIMIT ?", (cursor, page)).fetchall()
@@ -98,3 +98,23 @@ def referenced_objects(store, *, connection=None):
 
 def referenced(store, key, *, connection=None):
     return any(value == key for value in referenced_objects(store, connection=connection))
+
+
+def required_objects(store):
+    """正式迁移/备份必须存在的权威资源；归档原片与可重建片段单独保留可选语义。"""
+    for key in referenced_objects(store):
+        if key.startswith(("objects/", "uploads/", "external/", "pending/", "persons/", "music/", "voices/")):
+            yield key
+    with store.connect() as db:
+        def authority(key):
+            pointer = db.execute("SELECT object_key,size FROM shared_files WHERE path=?", (key,)).fetchone()
+            return pointer["object_key"] if pointer and pointer["size"] >= 0 else key
+
+        for row in _rows(db, "sources", ("id", "path", "prepared")):
+            if not row["prepared"] or not db.execute("SELECT 1 FROM segments WHERE source_id=? AND kind='shot' LIMIT 1", (row["id"],)).fetchone():
+                yield authority(row["path"])
+        for row in _rows(db, "segments", ("path", "thumbnail", "kind")):
+            if row["kind"] == "shot":
+                yield authority(row["path"])
+                if row["thumbnail"]:
+                    yield authority(row["thumbnail"])

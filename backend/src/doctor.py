@@ -43,6 +43,12 @@ def doctor(config: Config, *, serving=False) -> dict:
         version = store.one("SELECT value FROM settings WHERE key='library.id'")
         record("database.identity", version is not None,
                "" if version else "缺少 library.id（先 mindex migrate）")
+        from mindex.shared.migration_state import pending
+
+        with store.connect() as db:
+            migration = pending(db)
+        record("database.migration", migration is None,
+               "迁移未激活，请继续 load/verify/activate" if migration else "业务已开放")
     except Exception as exc:  # noqa: BLE001
         record("database.identity", False, first_line(exc))
 
