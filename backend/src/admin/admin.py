@@ -59,12 +59,25 @@ def admin_router(store: Store, runtime=None, backends=None) -> APIRouter:
         try:
             await save_upload(file, path, config.source_upload_max_bytes)
             try:
+                from mindex.shared.upload_sessions import adopt_path
+
+                await run_in_threadpool(adopt_path, store, config, path, name)
                 return await run_in_threadpool(Pipeline(config).register, path, original_name=name, move=True)
             except (MediaError, ValueError) as exc:
                 raise HTTPException(422, str(exc)) from exc
         finally:
             # 取消路径上不能再 await（可能被再次取消而留下临时文件）；单次 unlink 开销可忽略。
             path.unlink(missing_ok=True)
+
+    @router.post("/sources/import-upload/{asset_id}", status_code=201)
+    def import_uploaded_source(asset_id: str):
+        from mindex.processing.pipeline import Pipeline
+
+        row = store.one("SELECT * FROM uploaded_assets WHERE id=?", (asset_id,))
+        if row is None:
+            raise HTTPException(404, "找不到已完成的上传素材")
+        with store.media.materialize(row["object_key"]) as path:
+            return Pipeline(runtime.current()).register(path, original_name=row["filename"], move=False)
 
     @router.get("/sources")
     def sources(

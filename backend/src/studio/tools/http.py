@@ -88,8 +88,12 @@ class HttpAdapter:
         body = {"tool": tool, "arguments": arguments, "uploads": uploads}
         try:
             with self._client(min(timeout, 120)) as client:
-                result = self._json(client.post(self.base + cfg["submit_path"].replace("{tool}", quote(tool, safe="")),
-                                                json=body), "提交工具任务")
+                from mindex.shared.external_calls import call_once
+
+                result = call_once("tool.submit", [self.base, cfg["submit_path"], body],
+                    lambda: self._json(client.post(self.base + cfg["submit_path"].replace("{tool}", quote(tool, safe="")),
+                                                  json=body), "提交工具任务"),
+                    request_id=lambda value: str(dig(value, cfg["id_field"])) if cfg.get("id_field") else None)
                 status = dig(result, cfg["status_field"])
                 if cfg.get("poll_path") and str(status) not in cfg["done"]:
                     task = dig(result, cfg["id_field"])

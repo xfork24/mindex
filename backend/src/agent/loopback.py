@@ -136,6 +136,7 @@ class MindexClient:
             headers = {"Authorization": f"Bearer {token}"} if token else {}
             self.http = httpx.AsyncClient(base_url=base_url or "http://127.0.0.1:8000", headers=headers,
                                           timeout=timeout)
+        self.studio_revisions = {}
         self.resolve_secret = resolve_secret
         self.resolve_attachment = resolve_attachment
 
@@ -165,6 +166,27 @@ class MindexClient:
             return [self._deref(v) for v in value]
         return value
 
+    async def _send(self, method, path, **kwargs):
+        match = re.match(r"^/api/studio/jobs/([^/?]+)", path)
+        job = match[1] if match else None
+        modifying = method.upper() not in {"GET", "HEAD", "OPTIONS"}
+        headers = {"If-Match": self.studio_revisions[job]} if job in self.studio_revisions and modifying else {}
+        response = await self.http.request(method, path, headers=headers, **kwargs)
+        # 428 尚未执行任何修改；先获取前置条件再提交。409 始终原样返回，不覆盖新状态。
+        if response.status_code == 428 and job and not headers:
+            current = await self.http.get(f"/api/studio/jobs/{job}")
+            revision = current.headers.get("X-Studio-Revision") if current.is_success else None
+            if revision:
+                self.studio_revisions[job] = revision
+                for _, (_, content, _) in kwargs.get("files", []):
+                    if hasattr(content, "seek"):
+                        content.seek(0)
+                response = await self.http.request(method, path, headers={"If-Match": revision}, **kwargs)
+        revision = response.headers.get("X-Studio-Revision")
+        if job and revision and response.is_success:
+            self.studio_revisions[job] = revision
+        return response
+
     async def request(self, method: str, path: str, *, json: Any = None, params: dict | None = None) -> dict:
         problem = unsafe_path(path)
         if problem:
@@ -173,7 +195,7 @@ class MindexClient:
             body = self._deref(json) if json is not None else None
         except SecretError as exc:
             return {"ok": False, "status": 400, "error": str(exc)}
-        response = await self.http.request(
+        response = await self._send(
             method, path, json=body, params={k: v for k, v in (params or {}).items() if v is not None}
         )
         return _normalize(response)
@@ -233,7 +255,7 @@ class MindexClient:
                 else:
                     body = content
                 parts.append((field, (filename, body, ctype)))
-            response = await self.http.request(
+            response = await self._send(
                 method, path, files=parts, data=fields,
                 params={k: v for k, v in (params or {}).items() if v is not None})
         return _normalize(response)

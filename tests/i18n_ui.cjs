@@ -60,9 +60,14 @@ const base = process.env.MINDEX_I18N_TEST_URL || 'http://127.0.0.1:8027';
     if (!await page.locator('details.work-panel').evaluate(node => node.open)) await page.locator('.work-toolbar').click();
     await page.locator('.work-card').last().waitFor();
     await page.locator('#add-source').click();
-    let finishUpload;
-    await page.route('**/api/admin/sources/upload',async route=>{await new Promise(resolve=>{finishUpload=resolve});await route.fulfill({status:422,contentType:'application/json',body:JSON.stringify({detail:'无效的文件名'})});});
+    let finishUpload, markUploadStarted;
+    const uploadStarted = new Promise(resolve => {markUploadStarted=resolve;});
+    await page.route('**/api/uploads',async route=>{
+      await new Promise(release=>{finishUpload=release;markUploadStarted();});
+      await route.fulfill({status:422,contentType:'application/json',body:JSON.stringify({detail:'无效的文件名'})});
+    });
     await page.locator('#upload-files').setInputFiles({name:'中文文件.mp4',mimeType:'video/mp4',buffer:Buffer.from('fixture')});
+    await uploadStarted;
     await page.locator('.upload-row').waitFor();await preserve('#upload-files');
     assert.match(await page.locator('.upload-row').innerText(),/中文文件.mp4/);finishUpload();
     await page.locator('.upload-row .source-warning').waitFor();
@@ -98,7 +103,21 @@ const base = process.env.MINDEX_I18N_TEST_URL || 'http://127.0.0.1:8027';
     assert.ok(await page.evaluate(()=>window.keptNarration.isConnected));
     await toggle('zh');await page.getByRole('button',{name:'取消修改',exact:true}).click();
     await page.locator('#plan-settings').click();await page.locator('#dialog-content select').first().waitFor();await preserve('#dialog-content select');
-    assert.ok(await page.locator('#dialog-content select').count()>0);await page.locator('#dialog-close').click();
+    assert.ok(await page.locator('#dialog-content select').count()>0);
+    // 冲突后显式刷新：保留输入，并在通用按钮移除旧错误后重新显示确认。
+    const recallLimit = page.locator('#dialog-content input[type=number]').first();
+    await recallLimit.fill('7');
+    const planUrl = await page.evaluate(()=>location.origin+planBase());
+    await page.route(planUrl, route=>route.request().method()==='PATCH'
+      ? route.fulfill({status:409,contentType:'application/json',body:JSON.stringify({detail:'工作区已被其他操作修改，请刷新后重试'})})
+      : route.continue());
+    const conflict = page.waitForResponse(response=>response.url()===planUrl && response.status()===409);
+    await page.getByRole('button',{name:'保存参数',exact:true}).click();await conflict;
+    await page.getByRole('button',{name:'刷新版本并保留输入',exact:true}).click();
+    await page.locator('#dialog-error').getByText('版本已刷新，输入已保留，请检查后再次保存',{exact:true}).waitFor();
+    assert.equal(await recallLimit.inputValue(),'7');
+    assert.equal(await page.locator('#work-dialog').evaluate(node=>node.open),true);
+    await page.unroute(planUrl);await page.locator('#dialog-close').click();
     // No switch-related fetches or reloads; long English labels fit narrow viewport.
     for (const path of ['/search','/admin','/persons','/settings','/']) {
       await page.goto(base+path);await page.waitForTimeout(300);let requests=0;const count=()=>requests++;

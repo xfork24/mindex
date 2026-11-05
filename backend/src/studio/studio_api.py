@@ -75,6 +75,7 @@ from mindex.studio.studio_models import (
 from mindex.studio.studio_music_api import music_routes
 from mindex.studio.studio_templates_api import template_routes
 from mindex.studio.studio_tools_api import tool_routes
+from mindex.studio.tasks import publication, submit
 
 log = logging.getLogger(__name__)
 
@@ -82,7 +83,7 @@ log = logging.getLogger(__name__)
 
 def _if_match(request: Request | None) -> str | None:
     """条件发布：客户端把 ``GET /jobs/{id}`` 返回的 workspace_revision 经 If-Match 带回。"""
-    if request is None:
+    if request is None or getattr(request.state, "directory_revision_checked", False):
         return None
     value = request.headers.get("if-match")
     return value.strip().strip('"') if value else None
@@ -113,7 +114,7 @@ def studio_router(
         return config.current() if isinstance(config, RuntimeConfig) else config
 
     def launch(job_id: str, requested_step: str | None, body: RunStepBody):
-        with runner.reserve() as file_lock:
+        with runner.reserve() as file_lock, publication(current(), job_id):
             cfg = current()  # 一次任务运行绑定同一份生效配置；运行中改设置下次生效
             reject_legacy_mutation(job_id)
             state = studio.reconcile(cfg, job_id)
@@ -135,6 +136,10 @@ def studio_router(
             runner.cancel_event("steps", job_id)
             studio.begin_step(cfg, job_id, steps[0])
             response = studio.set_execution(cfg, job_id, "running", steps[0], steps[1:])
+            if cfg.queue.backend == "postgres":
+                task_id = submit(cfg, job_id, "steps", {"steps": steps, "mode": body.mode, "shot_ids": body.shot_ids})
+                return {"task_id": task_id, "steps": {n: i["status"] for n, i in response["steps"].items()},
+                        "execution": response["execution"]}
             outcome = {"status": "complete"}
 
             def run_steps():
@@ -230,6 +235,13 @@ def studio_router(
 
     def job_detail(job_id: str) -> dict:
         state = studio.load_job(base, job_id)
+        if base.storage.backend == "s3":
+            from mindex.shared import files
+
+            for entry in files.entries(store, f"studio/{job_id}/"):
+                relative = entry["path"].removeprefix(f"studio/{job_id}/")
+                if relative in {"audio.json", "timeline.json", "checkpoints.json"} or relative.startswith("candidates/"):
+                    files.hydrate(store, store.root / entry["path"])
         detail = {"job": state, "storyboard": None, "shots": [], "timeline": None, "render": None}
         try:
             storyboard = studio.load_storyboard(base, job_id)
@@ -252,7 +264,8 @@ def studio_router(
         except EntityNotFound:
             pass
         final = studio.render_dir(base, job_id) / "final.mp4"
-        if final.is_file():
+        if (store.media_available(f"studio/{job_id}/render/final.mp4")
+                if base.storage.backend == "s3" else final.is_file()):
             published = state.get("published_render", {})
             version = published.get("version", "legacy")
             files = published.get("files", {})
@@ -282,6 +295,8 @@ def studio_router(
             with mutation_lock():
                 return workspace.load(current(), job_id)
         w = workspace.load(base, job_id)
+        if base.queue.backend == "postgres":
+            return w
         if any(b["status"] == "running" for b in w["builds"]):
             try:
                 with mutation_lock():
@@ -609,7 +624,13 @@ def studio_router(
                     )
                     target = existing or inputs / f"{media_id}{suffix}"
                     if not target.exists() or digest(target) != media_id:
-                        studio.save_bytes(target, staged.read_bytes())
+                        import shutil
+
+                        shutil.copyfile(staged, target)
+                    if base.storage.backend == "s3":
+                        from mindex.shared import files
+
+                        files.publish(store, target)
                     return {
                         "media_id": media_id,
                         "kind": kind,
@@ -760,7 +781,7 @@ def studio_router(
     def launch_build(job_id, plan_id, *, body=None, node=None, column=None):
         from uuid import uuid4
 
-        with runner.reserve() as file_lock:
+        with runner.reserve() as file_lock, publication(current(), job_id):
             cfg = current()
             w = workspace.load(cfg, job_id)
             workspace.recover(cfg, job_id, w)
@@ -814,6 +835,9 @@ def studio_router(
             w["builds"].append(build)
             workspace.persist(cfg, job_id, w)
             ExecutionLog(cfg, job_id, bid).emit(f"已提交执行，共 {len(nodes)} 项")
+            if cfg.queue.backend == "postgres":
+                task_id = submit(cfg, job_id, "build", {}, build_id=bid)
+                return {**build, "task_id": task_id}
             cancel_event = runner.cancel_event("build", job_id, bid)
 
             def run():
@@ -848,6 +872,38 @@ def studio_router(
 
             runner.start(f"studio-build-{job_id}", worker, lock=file_lock, on_failure=start_failed)
             return build
+
+    @router.get("/jobs/{job_id}/tasks/{task_id}")
+    def execution_task(job_id: str, task_id: str):
+        from mindex.shared.background_tasks import public_task
+
+        row = store.one("SELECT * FROM studio_tasks WHERE id=? AND job_id=?", (task_id, job_id))
+        if row is None:
+            raise EntityNotFound("找不到创作执行账本")
+        return public_task(row)
+
+    @router.post("/jobs/{job_id}/tasks/{task_id}/retry", status_code=202)
+    def retry_execution(job_id: str, task_id: str):
+        from mindex.studio.tasks import retry
+
+        return retry(current(), job_id, task_id)
+
+    @router.get("/jobs/{job_id}/external-calls")
+    def external_calls(job_id: str):
+        studio.load_job(base, job_id)
+        return {"items": store.rows("SELECT e.id,e.operation,e.state,e.request_id,e.error FROM external_calls e "
+                 "JOIN studio_tasks t ON e.task_id=t.id WHERE t.job_id=? ORDER BY e.created_at", (job_id,))}
+
+    @router.post("/jobs/{job_id}/external-calls/{call_id}/resolve")
+    def resolve_call(job_id: str, call_id: str, body: dict):
+        from mindex.shared.external_calls import resolve
+
+        if not store.one("SELECT e.id FROM external_calls e JOIN studio_tasks t ON t.id=e.task_id "
+                         "WHERE e.id=? AND t.job_id=?", (call_id, job_id)):
+            raise EntityNotFound("找不到此外部调用")
+        resolve(store, call_id, expected_state=body.get("expected_state"), outcome=body.get("outcome"),
+                evidence=str(body.get("evidence", "")), request_id=body.get("request_id"))
+        return {"status": "resolved"}
 
     @router.post("/jobs/{job_id}/plans/{plan_id}/build", status_code=202)
     def submit_build(job_id: str, plan_id: str, body: BuildBody):

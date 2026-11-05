@@ -157,3 +157,7 @@ pg-single/cluster 形态。
 不会静默连接其他本地库。地址不允许携带路径、URL 凭据、查询参数或 fragment。
 版本不一致不阻止连接（服务端滚动升级期间），但
 `/api/health` 的 `backends` 字段可诊断形态。
+
+本机 macOS arm64 应用、DMG 隔离安装副本及远程工作流的当前实测范围见
+[增强验证记录](scaling-enhancement-verification.md)。环境变量凭据的通过结果不代表
+三平台系统密钥环、Windows/Linux 安装或 Gatekeeper 公证已经验收。

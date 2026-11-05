@@ -379,7 +379,19 @@ local_services:
 
 ## 素材上传限额
 
-顶层 `source_upload_max_bytes` 默认 `21474836480`（20 GiB，每文件），适用于 `/api/admin/sources/upload`。独立于 `search.max_upload_mb` 的检索查询视频限额。
+顶层 `source_upload_max_bytes` 默认 `21474836480`（20 GiB，每文件），适用于素材上传会话和兼容的一次性上传接口。独立于 `search.max_upload_mb` 的检索查询视频限额。
+
+`uploads` 控制持久上传会话；这些字段修改后需重启节点。所有节点应使用相同预算。
+
+| 键 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `max_sessions` | int 1–10000 | 256 | 全库同时处于 pending 的会话上限 |
+| `pending_bytes` | int ≥1 | 107374182400 | 全库 pending 会话声明字节总量上限（100 GiB） |
+| `part_bytes` | int 1–67108864 | 8388608 | 单片字节数（8 MiB），每会话最多 10000 片 |
+| `ttl_seconds` | int 1–604800 | 86400 | 会话有效期，最长 7 天；API 每分钟回收过期会话 |
+
+服务端复算分片与完整 SHA256，完成后才登记正式素材。磁盘或 staging 预算不足返回 507。
+续传、会话凭据及 CLI 操作见[上传会话协议](scaling-durable-delivery.md#上传会话)。
 
 
 ## `person` — 人物服务

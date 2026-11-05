@@ -45,6 +45,9 @@ def _build_runner(kind: str, config):
 
 
 def register_ledger_handlers(handlers, config) -> None:
+    from mindex.studio.tasks import handle
+
+    handlers.register("studio", handle)
     for kind in _KIND_TABLES:
         handlers.register(kind, _make_handler(kind))
 

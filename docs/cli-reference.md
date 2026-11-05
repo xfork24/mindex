@@ -226,6 +226,24 @@ uv run mindex clean --apply               # 实际删除
 
 以 stdio 传输运行 MCP 服务（服务名 `mindex`），供 deepseek-harness、Claude Code、Codex 等调用；标准输出只用于协议。省略 `--base-url` 时在本进程内装配应用，否则连接已运行的服务。写操作与高风险操作受 `agent.mcp.policy`（默认 `read`）限制。`--domain` 可重复，只导出这些领域（`report_capability_gap` 始终导出），覆盖 `agent.mcp.domains`；未知领域启动失败。需要 `uv sync --extra mcp`。配置示例见 [智能助手](agent.md#mcp-导出与外部-harness)。
 
+## 上传会话
+
+`mindex uploads` 与 Web/REST 共用持久上传状态机。全局 `--config` 放在子命令前。
+
+| 命令 | 用途 |
+|---|---|
+| `mindex uploads create FILENAME SIZE SHA256` | 声明完整字节数与摘要，返回会话及凭据 |
+| `mindex uploads part SESSION_ID NUMBER PATH` | 提交一个分片文件，编号从 1 开始 |
+| `mindex uploads show SESSION_ID` | 读取状态与已登记分片，用于续传 |
+| `mindex uploads complete SESSION_ID` | 服务端复算摘要并登记正式上传素材；可幂等重试 |
+| `mindex uploads abort SESSION_ID` | 取消未完成会话并回收 pending 分片 |
+| `mindex uploads reap` | 回收过期会话及残留分片 |
+
+除 create/reap 外，从环境变量 `MINDEX_UPLOAD_TOKEN` 读取会话凭据；可用
+`--token-env NAME` 指定变量名。不要将凭据放在 URL 或提交到仓库。
+complete 返回的资产尚需素材导入验证；协议及 REST 导入入口见
+[上传会话](scaling-durable-delivery.md#上传会话)。
+
 ## 选题挖掘
 
 `mindex topics` 命令组与创作页「选题挖掘」、`/api/topics`、智能助手 `topics` 领域共用同一服务层。命令直接读写数据目录，不需要服务在运行，输出均为 JSON；失败时错误写到标准错误，退出码为 1。机制与示例见[选题挖掘](topics.md)。
