@@ -10,23 +10,23 @@ HAN = re.compile(r"[\u3400-\u9fff]")
 
 
 @lru_cache(maxsize=2)
-def _load(path: str, mtime: int) -> dict[str, str]:
+def _load(path: str, mtime: int, namespace=None) -> dict[str, str]:
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     return {k: v for k, v in data.items()
             if isinstance(k, str) and isinstance(v, str) and v.strip() and not HAN.search(v)}
 
 
-def load_translations(root: Path) -> dict[str, str]:
+def load_translations(root: Path, *, namespace=None) -> dict[str, str]:
     path = Path(root) / "analysis-translations.en.json"
     try:
-        return _load(str(path), path.stat().st_mtime_ns)
+        return _load(str(path), path.stat().st_mtime_ns, namespace)
     except FileNotFoundError:
         return {}
 
 
-def display_metadata(data, root: Path):
+def display_metadata(data, root: Path, *, namespace=None):
     """只附带本次响应用到的翻译，由分析专用显示器选择，不改用户文本。"""
-    translations = load_translations(root)
+    translations = load_translations(root, namespace=namespace)
     if not translations or not isinstance(data, dict):
         return data
     used = {}

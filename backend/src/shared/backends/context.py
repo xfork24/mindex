@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import threading
 import uuid
-from dataclasses import dataclass
+from contextlib import ExitStack, contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 from mindex.shared.backends.db import RelationalDatabase
 from mindex.shared.backends.locks import FileLockProvider, LockProvider
@@ -25,8 +27,20 @@ from mindex.shared.db.pg_backend import PgBackend
 __all__ = ["BackendContext", "open_context"]
 
 LIBRARY_ID_KEY = "library.id"
-_STAGING = {}
-_STAGING_LOCK = threading.Lock()
+_RESOURCE_SCOPE: ContextVar[ExitStack | None] = ContextVar("backend_resource_scope", default=None)
+
+
+@contextmanager
+def resource_scope(*, close_on_success=True):
+    """CLI/诊断的调用级资源边界；异常退出也关闭该调用打开的上下文。"""
+    with ExitStack() as stack:
+        token = _RESOURCE_SCOPE.set(stack)
+        try:
+            yield
+            if not close_on_success:
+                stack.pop_all()
+        finally:
+            _RESOURCE_SCOPE.reset(token)
 
 
 @dataclass(frozen=True)
@@ -42,6 +56,27 @@ class BackendContext:
     vectors: VectorStores
     queue: TaskQueue | PgQueueAdapter
     staging: object | None = None  # StagingArea；未配置预算时为 None
+
+    _resources: ExitStack = field(default_factory=ExitStack, repr=False, compare=False)
+    _closed: threading.Event = field(default_factory=threading.Event, repr=False, compare=False)
+
+    @property
+    def closed(self) -> bool:
+        return self._closed.is_set()
+
+    def close(self):
+        """幂等释放本上下文资源；不关闭其他上下文持有的共享连接池。"""
+        if not self.closed:
+            self._closed.set()
+            self._resources.close()
+
+    def __enter__(self):
+        if self.closed:
+            raise RuntimeError("后端上下文已关闭")
+        return self
+
+    def __exit__(self, *_):
+        self.close()
 
     @property
     def store(self):
@@ -63,6 +98,25 @@ def open_context(config: Config) -> BackendContext:
     能力则保持过渡形态并禁止多副本。形态缺共享后端时抛中文修复提示，绝不静默
     落回本地 SQLite。
     """
+    resources = ExitStack()
+    try:
+        context = _open_context(config, resources)
+        # 借出任一组件都保留上下文；自动回收由各资源自身的 finalizer 负责，
+        # 不能用捕获组件的 context finalizer（会形成全局强引用环）。
+        for component in (context.store, context.store.backend, context.media, context.vectors,
+                          context.locks, context.queue, context.staging):
+            if component is not None:
+                cast(Any, component)._backend_context = context
+        scope = _RESOURCE_SCOPE.get()
+        if scope is not None:
+            scope.callback(context.close)
+        return context
+    except BaseException:
+        resources.close()
+        raise
+
+
+def _open_context(config: Config, resources: ExitStack) -> BackendContext:
     from mindex.shared.storage import PgStore, Store
 
     form = deployment_form(config)
@@ -70,6 +124,7 @@ def open_context(config: Config) -> BackendContext:
     if config.database.backend == "postgres":
         pg_store = PgStore(config)
         store = pg_store
+        resources.callback(cast(PgBackend, pg_store.backend).close)
         library_id = pg_store.library_id
     else:
         store = Store(config.data_dir)
@@ -77,6 +132,11 @@ def open_context(config: Config) -> BackendContext:
     if config.server.library_id is not None and config.server.library_id != library_id:
         raise RuntimeError("素材库 library_id 与 server.library_id 不一致；拒绝连接其他素材库")
     store.library_id = library_id
+    if form != "local":
+        cast(PgBackend, store.backend).enforce_identity = True
+        from mindex.shared.admission import validate_protocol
+
+        validate_protocol(store)
     if config.vector.backend == "chroma_server":
         if config.database.backend != "postgres":
             raise RuntimeError(
@@ -85,6 +145,7 @@ def open_context(config: Config) -> BackendContext:
         from mindex.shared.backends.vectors import ChromaServerVectorStores
 
         vectors: VectorStores = ChromaServerVectorStores(config.vector.chroma_server, library_id=library_id)
+        resources.callback(cast(ChromaServerVectorStores, vectors).close)
     else:
         vectors = LocalVectorStores(store.root)
     store.locks_backend = config.locks.backend  # 供只拿 Store 的调用点选择锁后端
@@ -118,17 +179,30 @@ def open_context(config: Config) -> BackendContext:
         from mindex.shared.backends.s3 import S3MediaStore
 
         staging = _staging(config, store.root)
+        if staging is not None:
+            resources.callback(staging.close)
         media = S3MediaStore(
             config.storage.s3,
             library_id=library_id,
             staging=staging,
             cache_dir=staging.root / "libraries" / library_id / "s3")
+        resources.callback(media.close)
         if (config.vector.backend == "chroma_server" and config.queue.backend == "postgres"
                 and config.locks.backend == "postgres"):
             form = "cluster"  # 共享后端齐备（plans §4；准入与 runbook 见 docs/scaling.md）
     else:
         staging = _staging(config, store.root)
+        if staging is not None:
+            resources.callback(staging.close)
         media = LocalMediaStore(store.root)
+    from mindex.shared.config import fingerprint
+
+    store.deployment_form = form
+    store.backend_identity = fingerprint({
+        "database": config.database.backend,
+        "vector": config.vector.model_dump(), "storage": config.storage.model_dump(),
+    }) if form != "local" else ""
+    store.deployment_config = config
     store.media = media  # Store.resolve_media/media_available 按存储后端解析
     store.vectors = vectors
     return BackendContext(
@@ -141,6 +215,7 @@ def open_context(config: Config) -> BackendContext:
         vectors=vectors,
         queue=queue,
         staging=staging,
+        _resources=resources,
     )
 
 
@@ -176,12 +251,9 @@ def _staging(config: Config, root: Path):
         quota, minimum = int(config.storage.staging_quota_gb * 1024**3), 0
     else:
         return None
-    key = (root.resolve(), quota, minimum)
-    with _STAGING_LOCK:
-        if key not in _STAGING:
-            _STAGING[key] = StagingArea(root / "cache" / "staging", quota_bytes=quota,
-                                        min_free_bytes=minimum)
-        return _STAGING[key]
+    # 账本在文件系统中跨实例协调；每个上下文独占 owner，关闭互不影响。
+    return StagingArea(root / "cache" / "staging", quota_bytes=quota,
+                       min_free_bytes=minimum)
 
 
 class PgQueueAdapter:

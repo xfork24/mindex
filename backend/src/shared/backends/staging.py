@@ -21,6 +21,7 @@ import logging
 import os
 import shutil
 import threading
+import weakref
 from collections import OrderedDict
 from contextlib import contextmanager
 from pathlib import Path
@@ -59,6 +60,9 @@ class StagingArea:
         self._owner = uuid4().hex
         self._owner_lock = FileLock(str(self._coordination / f"{self._owner}.lock"), thread_local=False)
         self._owner_lock.acquire()
+        # 回收可能发生在其他实例持有 ledger.lock 的同一线程中；只释放 owner 锁，
+        # 下一次账本操作按崩溃回收协议清理预约，避免 finalizer 重入账本。
+        self._finalizer = weakref.finalize(self, self._owner_lock.release)
         self._closed = False
         self._reserved = 0  # 活动预约（尚未落盘的输出/临时空间）
         self._pins: dict[str, int] = {}  # key → 引用计数
@@ -117,10 +121,8 @@ class StagingArea:
     def close(self):
         if self._closed:
             return
-        with self._accounting():
-            self._state["owners"].pop(self._owner, None)
         self._closed = True
-        self._owner_lock.release()
+        self._finalizer()
 
     # ------------------------------------------------------------ 盘点
     def _rescan(self) -> None:

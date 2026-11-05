@@ -37,6 +37,24 @@ def _pg_rows(pg_store, table: str):
 
 
 def copy_sqlite_to_pg(sqlite_store, pg_store, *, tables=BASELINE_TABLES, connection=None) -> dict[str, int]:
+    if connection is not None:
+        return _copy_sqlite_to_pg(sqlite_store, pg_store, tables=tables, connection=connection)
+    from mindex.shared.db.maintenance_gate import maintenance_gate
+
+    with maintenance_gate(pg_store, name="metadata-transfer"):
+        counts = _copy_sqlite_to_pg(sqlite_store, pg_store, tables=tables)
+        row = pg_store.one("SELECT value FROM settings WHERE key='library.id'")
+        pg_store.library_id = row["value"]
+        pg_store.backend.library_id = row["value"]
+        import hashlib
+
+        digest = hashlib.sha256(row["value"].encode()).digest()
+        pg_store.backend.library_key = (int.from_bytes(digest[:4], "big", signed=True),
+                                        int.from_bytes(digest[4:8], "big", signed=True))
+        return counts
+
+
+def _copy_sqlite_to_pg(sqlite_store, pg_store, *, tables=BASELINE_TABLES, connection=None) -> dict[str, int]:
     """把 SQLite 全表复制到 PG 库；返回每表行数。
 
     目标应为刚完成基线迁移的库（delivery_platforms 已有种子里，先按子表→父表

@@ -66,6 +66,7 @@ def test_library_id_concurrent_first_open_wins(tmp_path):
         thread.start()
     for thread in threads:
         thread.join()
+    assert len(results) == 4  # 所有线程都必须成功，不能把线程异常当作通过
     assert len(set(results)) == 1  # 并发首次建库以先写者为准
 
 

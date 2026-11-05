@@ -26,6 +26,7 @@ from mindex.search.api import search_router
 from mindex.settings.runtime_settings import RuntimeConfig
 from mindex.settings.settings_api import settings_router
 from mindex.shared.backends import open_context
+from mindex.shared.backends.context import resource_scope
 from mindex.shared.config import Config, load_config
 from mindex.shared.shot_media import file_response as FileResponse
 from mindex.shared.web_assets import frontend_root
@@ -60,6 +61,7 @@ def _with_bridge(previous, bridge):
     return lifespan
 
 
+@resource_scope(close_on_success=False)
 def create_app(
     config: Config | None = None,
     embedder: MultimodalEmbedder | None = None,
@@ -84,6 +86,9 @@ def create_app(
     # 运行后端（db/media/locks/vectors/queue）经 BackendContext 构造：阶段 0 恒为
     # local 形态，store 即 metadata.sqlite3 的 Store；集群形态（阶段 1 起）由此切换。
     backends = open_context(config)
+    from mindex.shared.admission import validate_serving
+
+    validate_serving(backends)
     store = backends.store
     runtime = RuntimeConfig(config, store)  # 设置页保存后经覆盖层热生效，无需重启
     app = FastAPI(title="Mindex 视频素材检索", version="0.1.0")
@@ -107,7 +112,7 @@ def create_app(
         try:
             from mindex.shared.analysis_translations import display_metadata
 
-            data = display_metadata(add_message_metadata(json.loads(payload)), store.root)
+            data = display_metadata(add_message_metadata(json.loads(payload)), store.root, namespace=store.cache_identity)
         except (ValueError, UnicodeDecodeError):
             from starlette.responses import Response
             return Response(payload, status_code=response.status_code, headers=dict(response.headers))
@@ -336,4 +341,21 @@ def create_app(
     # 设置 MINDEX_WEB_TOKEN（或传入 web_token）后才启用访问令牌；未设置时行为不变。
     install_web_auth(app, web_token)
 
+    # 最外层退出，等待调度器、上传回收与网关线程先停止。
+    import contextlib
+
+    previous = app.router.lifespan_context
+
+    @contextlib.asynccontextmanager
+    async def backend_lifespan(application):
+        try:
+            async with previous(application) as state:
+                yield state
+        finally:
+            from mindex.shared.background_tasks import close_runners
+
+            close_runners(store)
+            backends.close()
+
+    app.router.lifespan_context = backend_lifespan
     return app

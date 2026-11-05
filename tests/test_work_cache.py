@@ -14,7 +14,7 @@ def cache(tmp_path, monkeypatch):
     progress = {'completed': 1}
     monkeypatch.setattr(module, 'attach_tasks', lambda store, source, work: work.update(task=dict(progress)))
     # 详情接口实时读取所属组；本夹具只验证工作缓存，成员查询为空。
-    store = SimpleNamespace(root=tmp_path, path=tmp_path / 'metadata.sqlite3',
+    store = SimpleNamespace(root=tmp_path, path=tmp_path / 'metadata.sqlite3', cache_identity=('test-library', 'sqlite', 'test-backend', ''),
                             rows=lambda sql, args=(): [], one=lambda sql, args=(): None)
     store.path.write_text('initial')
     class Library:
@@ -32,7 +32,7 @@ def cache(tmp_path, monkeypatch):
     library = Library()
     library.store = store
     with ThreadPoolExecutor(max_workers=1) as executor:
-        monkeypatch.setattr(module, '_executor', executor)
+        monkeypatch.setattr(module, 'ThreadPoolExecutor', lambda **kwargs: executor)
         yield WorkCache(library), library, progress, executor
 
 

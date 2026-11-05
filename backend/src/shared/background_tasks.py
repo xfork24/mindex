@@ -44,6 +44,15 @@ def busy_categories(data_dir) -> list[str]:
     return sorted(found)
 
 
+def close_runners(store):
+    """API 退出先等待本库前台线程结束，再释放它们借用的后端。"""
+    for runner in list(_RUNNERS):
+        if runner.store is store:
+            for thread in list(runner.threads.values()):
+                if thread is not threading.current_thread():
+                    thread.join()
+
+
 def public_task(row):
     """任务行 → 接口形状：去掉冻结配置，解码 JSON 列。"""
     return {k: json.loads(v) if v and k in JSON_COLUMNS else v for k, v in row.items()

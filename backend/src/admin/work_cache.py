@@ -11,9 +11,9 @@ from concurrent.futures import ThreadPoolExecutor
 
 from mindex.admin.curation import source_public
 from mindex.admin.source_work import attach_tasks
+from mindex.shared.config import fingerprint
 
 log = logging.getLogger(__name__)
-_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="work-summary")
 
 
 class WorkCache:
@@ -24,11 +24,18 @@ class WorkCache:
     def __init__(self, library):
         self.library = library
         self.store = library.store
-        self.directory = self.store.root / "cache" / "admin-work"
+        self.directory = self.store.root / "cache" / "admin-work" / fingerprint(self.store.cache_identity)
         self.lock = threading.Lock()
         self.compute_lock = threading.Lock()
         self.cold_lock = threading.Lock()
         self.pending = set()
+        self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="work-summary")
+        context = getattr(self.store, "_backend_context", None)
+        if context is not None:
+            context._resources.callback(self.close)
+
+    def close(self):
+        self.executor.shutdown(wait=True, cancel_futures=True)
 
     def token(self):
         result = []
@@ -93,7 +100,7 @@ class WorkCache:
             with self.lock:
                 if sid not in self.pending:
                     self.pending.add(sid)
-                    _executor.submit(self.background, sid)
+                    self.executor.submit(self.background, sid)
         value = {**entry["value"], **source, "work_refreshing": stale}
         # Progress/log messages already live in the task tables. Keep these fresh
         # even while coverage and publication comparisons refresh in the background.

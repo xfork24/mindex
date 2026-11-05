@@ -710,16 +710,32 @@ class QueueConfig(StrictModel):
     backend: Literal["inline", "postgres"] = "inline"
 
 
-class GpuConfig(StrictModel):
-    """GPU 准入容量（plans §7.2 阶段 3/5）：按物理资源/共驻模型组声明并发槽位。
+class GpuResourceGroup(StrictModel):
+    capacity: int = Field(ge=1, le=1024)
+    queues: list[Literal["source", "dialogue", "person", "topic", "studio", "index"]] = Field(min_length=1)
+    services: list[str] = Field(default_factory=list)
 
-    ``capacity=0``（缺省）不限制，保持现有行为；``queues`` 为受容量约束的任务类别。
-    槽位经租约持有（locks=postgres 时跨节点、TTL 到期才回收），失联 worker 不会
-    立即释放槽位造成 GPU 超卖。模型服务自身仍需限制真实执行并发。
+
+class GpuConfig(StrictModel):
+    """物理资源组按任务声明；同组内多个模型服务共享容量。
+
+    cluster 必须为每类任务声明资源组或 cpu_queues；capacity/queues 仅兼容本地旧配置。
     """
 
     capacity: int = Field(default=0, ge=0)
     queues: list[str] = Field(default_factory=lambda: ["source", "dialogue", "person"])
+    groups: dict[str, GpuResourceGroup] = Field(default_factory=dict)
+    cpu_queues: list[Literal["source", "dialogue", "person", "topic", "studio", "index"]] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def valid_groups(self):
+        import re
+
+        if any(not re.fullmatch(r"[a-zA-Z0-9_.:-]{1,128}", name) for name in self.groups):
+            raise ValueError("GPU 物理资源组名称只能含字母、数字、下划线、点、冒号与连字符")
+        if any(kind in self.cpu_queues for group in self.groups.values() for kind in group.queues):
+            raise ValueError("同一任务类别不能同时声明为 CPU 与 GPU 资源组")
+        return self
 
 
 class LocksConfig(StrictModel):

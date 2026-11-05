@@ -53,17 +53,17 @@ def command(args: list[str], *, timeout: float = 600) -> bytes:
 
 
 _PROBE_CACHE_LIMIT = 32
-_probe_cache: OrderedDict[tuple[str, int, int], dict] = OrderedDict()
+_probe_cache: OrderedDict[tuple, dict] = OrderedDict()
 _probe_lock = threading.Lock()
 
 
-def _probe_key(path: Path) -> tuple[str, int, int] | None:
+def _probe_key(path: Path) -> tuple | None:
     """缓存身份沿用库内素材指纹约定（字节 + mtime）；所有媒体写入均为原子替换，mtime 必变。"""
     try:
         stat = path.stat()
     except OSError:
         return None  # 文件缺失时不缓存，交给 ffprobe 抛出原有 MediaError。
-    return (str(path), stat.st_size, stat.st_mtime_ns)
+    return (str(path), stat.st_size, stat.st_mtime_ns, stat.st_dev, stat.st_ino, stat.st_ctime_ns)
 
 
 def probe(path: Path) -> dict:

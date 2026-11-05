@@ -79,7 +79,7 @@ class ShotMedia:
         if self.reuse_checks and path in self._probes:
             return self._probes[path]
         stat = path.stat()
-        identity = [str(path), stat.st_size, stat.st_mtime_ns]
+        identity = [hashlib.sha256(repr(self.store.cache_identity).encode()).hexdigest(), str(path), stat.st_size, stat.st_mtime_ns, stat.st_ino, stat.st_ctime_ns]
         key = hashlib.sha256(json.dumps(identity).encode()).hexdigest()
         directory = self.store.root / 'cache' / 'shot-media' / 'probes'
         directory.mkdir(parents=True, exist_ok=True)

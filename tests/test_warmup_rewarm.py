@@ -194,11 +194,13 @@ def test_no_watch_runs_a_single_warmup(store, monkeypatch):
 
 def test_rewarm_after_activation_loads_new_index_into_caches(store):
     config = Config(data_dir=store.root)
+    with Store.open(config):
+        pass
     storage._SNAPSHOT_CACHE.clear()
     thread = warmup.warm_up_in_background(config, None, interval=0.05)
-    path = str(store.path)
+    path = store._snapshot_cache_scope()
     try:
-        assert wait_for(lambda: (path, "A") in storage._SNAPSHOT_CACHE)
+        assert wait_for(lambda: (store._snapshot_cache_scope(), "A") in storage._SNAPSHOT_CACHE)
         assert (path, "B") not in storage._SNAPSHOT_CACHE
 
         store.activate("B")
@@ -221,11 +223,11 @@ def test_retain_snapshots_only_touches_this_store_and_non_kept_versions(store, t
     for target in (store, other):
         target.snapshots_shared("A")
         target.snapshots_shared("B") if target is store else None
-    assert {k[1] for k in storage._SNAPSHOT_CACHE if k[0] == str(store.path)} == {"A", "B"}
+    assert {k[1] for k in storage._SNAPSHOT_CACHE if k[0] == store._snapshot_cache_scope()} == {"A", "B"}
 
     assert store.retain_snapshots({"B"}) == 1
-    assert {k[1] for k in storage._SNAPSHOT_CACHE if k[0] == str(store.path)} == {"B"}
-    assert (str(other.path), "A") in storage._SNAPSHOT_CACHE  # 别的数据目录不受影响
+    assert {k[1] for k in storage._SNAPSHOT_CACHE if k[0] == store._snapshot_cache_scope()} == {"B"}
+    assert (other._snapshot_cache_scope(), "A") in storage._SNAPSHOT_CACHE  # 别的数据目录不受影响
     assert store.retain_snapshots({"B"}) == 0
 
 
@@ -239,9 +241,9 @@ def test_retain_representation_maps(tmp_path):
                       (f"rep-{index_id}", index_id, f"{index_id}-seg0", "video", "doc"))
         VectorIndex(store.root, index_id)._representation_map()
     resolved = str(store.root.resolve())
-    assert {(resolved, "old"), (resolved, "new")} <= set(indexing._REPRESENTATION_MAPS)
+    assert {(resolved, "old", ""), (resolved, "new", "")} <= set(indexing._REPRESENTATION_MAPS)
     assert indexing.retain_representation_maps(store.root, {"new"}) == 1
-    assert (resolved, "old") not in indexing._REPRESENTATION_MAPS and (resolved, "new") in indexing._REPRESENTATION_MAPS
+    assert (resolved, "old", "") not in indexing._REPRESENTATION_MAPS and (resolved, "new", "") in indexing._REPRESENTATION_MAPS
 
 
 def test_retain_published_person_versions(tmp_path):
@@ -256,7 +258,7 @@ def test_retain_published_person_versions(tmp_path):
         release = catalogue.release_for(f"ix{number}", pinned=True)
         catalogue.published_entities(release)
         catalogue.published_evidence(release)
-    path = str(store.path)
+    path = store._snapshot_cache_scope()
     names = lambda cache: {k[1] for k in cache if k[0] == path}
     assert names(_ENTITY_CACHE) == names(_EVIDENCE_CACHE) == {"pv1", "pv2"}
     assert catalogue.retain_published({"pv2"}) == 2
@@ -265,7 +267,7 @@ def test_retain_published_person_versions(tmp_path):
 
 def test_retire_superseded_keeps_only_active_in_normal_mode(store):
     storage._SNAPSHOT_CACHE.clear()
-    path = str(store.path)
+    path = store._snapshot_cache_scope()
     store.snapshots_shared("A")
     store.snapshots_shared("B")
     assert {k[1] for k in storage._SNAPSHOT_CACHE if k[0] == path} == {"A", "B"}
@@ -276,7 +278,7 @@ def test_retire_superseded_keeps_only_active_in_normal_mode(store):
 
 def test_retire_superseded_keeps_pinned_target_and_active_pointer(store):
     storage._SNAPSHOT_CACHE.clear()
-    path = str(store.path)
+    path = store._snapshot_cache_scope()
     add_index(store, "C")
     # 缓存容量按数据目录算 2 个，所以分两步放入，覆盖「固定 C，活动指针在 A」的情形
     store.snapshots_shared("A")

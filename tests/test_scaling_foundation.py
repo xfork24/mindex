@@ -82,11 +82,18 @@ def test_snapshot_cache_isolates_library_identity_at_the_same_node_path(pg):
     first.execute("INSERT INTO index_members VALUES('same','segment',?,1)", (dumps({"id": "first"}),))
     assert first.snapshots_shared("same") == [{"id": "first"}]
     # 同一节点目录连接另一库，行数与文本长度完全一致，签名不能替代库身份。
-    first.execute("UPDATE settings SET value=? WHERE key='library.id'", (str(uuid4()),))
-    first.execute("UPDATE index_members SET snapshot=? WHERE index_id='same'", (dumps({"id": "other"}),))
+    signature = first.snapshot_signature("same")
+    import psycopg
+
+    # 模拟受控迁移在外部更换库身份；业务旧上下文必须拒绝继续访问。
+    with psycopg.connect(os.environ["MINDEX_TEST_POSTGRES_DSN"]) as db:
+        db.execute("UPDATE settings SET value=%s WHERE key='library.id'", (str(uuid4()),))
+        db.execute("UPDATE index_members SET snapshot=%s WHERE index_id='same'", (dumps({"id": "other"}),))
+    with pytest.raises(RuntimeError, match="身份已变化"):
+        first.one("SELECT 1")
     second = Store.open(pg)
     assert second.path == first.path and second.library_id != first.library_id
-    assert second.snapshot_signature("same") == first.snapshot_signature("same")
+    assert second.snapshot_signature("same") == signature
     assert second.snapshots_shared("same") == [{"id": "other"}]
 
 
@@ -125,8 +132,8 @@ def test_append_upgrade_preserves_v15_data_and_identity(pg):
         db.execute("INSERT INTO settings(key,value) VALUES('library.id','old-library'),('preserve','value')")
         # 基线若被重跑，会尝试创建此索引并撞上同名表。
         db.execute("DROP INDEX segments_source; CREATE TABLE segments_source(marker TEXT)")
-        assert migrate_pg(db) == 21
-        assert migrate_pg(db) == 21
+        assert migrate_pg(db) == 22
+        assert migrate_pg(db) == 22
         assert db.execute("SELECT value FROM settings WHERE key='library.id'").fetchone()[0] == "old-library"
         assert db.execute("SELECT value FROM settings WHERE key='preserve'").fetchone()[0] == "value"
         assert db.execute("SELECT count(*) FROM shared_files").fetchone()[0] == 0

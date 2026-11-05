@@ -20,6 +20,7 @@ import logging
 import mimetypes
 import os
 import tempfile
+import weakref
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -69,8 +70,13 @@ class S3MediaStore:
             config=Config(signature_version="s3v4",
                           s3={"addressing_style": "path"}, retries={"max_attempts": 3}),
         )
+        self._finalizer = weakref.finalize(self, self.client.close)
         self._transfer = TransferConfig(multipart_threshold=_MULTIPART_THRESHOLD,
                                         multipart_chunksize=_MULTIPART_THRESHOLD)
+
+    def close(self):
+        """释放本上下文的 HTTP 连接。"""
+        self._finalizer()
 
     # ------------------------------------------------------------ key 约定
     def _object_key(self, key: str, version: str | None) -> str:

@@ -1253,10 +1253,10 @@ class Persons:
 
     def retain_published(self, keep_person_ids: set) -> int:
         """淘汰缓存中不在 keep_person_ids 里的已发布人物版本（实体与证据索引）。返回淘汰条数。"""
-        path = str(self.store.path)
+        path = self.store.cache_identity
         removed = 0
         with _CACHE_LOCK:
-            for cache in (_ENTITY_CACHE, _EVIDENCE_CACHE):
+            for cache in (_ENTITY_CACHE, _EVIDENCE_CACHE, _VERSION_IMAGE_CACHE):
                 stale = [key for key in cache if key[0] == path and key[1] not in keep_person_ids]
                 for key in stale:
                     del cache[key]
@@ -1266,7 +1266,7 @@ class Persons:
     def _version_key(self, person_id):
         """person_versions 行按内容寻址、写入后不可变；长度进键，防同 id 被离线迁移改写后读到旧缓存。"""
         row = self.store.one("SELECT length(CAST(data AS BLOB)) AS n FROM person_versions WHERE id=?", (person_id,))
-        return (self.store.library_id or str(self.store.path), person_id, row["n"]) if row else None
+        return ((self.store.cache_identity), person_id, row["n"]) if row else None
 
     def _version_image_index(self, version_id):
         """某个历史版本里 证据 id -> [{shot_id, source_id, data:{image_path}}]。

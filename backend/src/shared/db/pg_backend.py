@@ -19,6 +19,7 @@ import atexit
 import hashlib
 import re
 import threading
+import weakref
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from typing import Any
@@ -34,6 +35,7 @@ __all__ = ["PgBackend"]
 _POOLS: dict[tuple[str, bool], Any] = {}
 _POOL_SETTINGS: dict[str, tuple] = {}
 _POOLS_LOCK = threading.Lock()
+_POOL_OWNERS: dict[str, int] = {}
 
 _INSERT_TABLE_RE = re.compile(r"^\s*INSERT\s+INTO\s+([A-Za-z_][A-Za-z0-9_]*)", re.IGNORECASE)
 
@@ -113,7 +115,7 @@ class PgConnection:
             targets = re.findall(
                 r"\b(?:INSERT(?:\s+OR\s+(?:REPLACE|IGNORE))?\s+INTO|UPDATE|DELETE\s+FROM|ALTER\s+TABLE|DROP\s+TABLE|TRUNCATE(?:\s+TABLE)?)"
                 r'\s+(?!SET\b)([\w"]+)', code, re.I)
-            if (any(target.lower().strip('"') not in {"task_queue", "lock_resources", "lock_holders"}
+            if (any(target.lower().strip('"') not in {"task_queue", "lock_resources", "lock_holders", "gpu_resource_groups", "gpu_allocations"}
                     for target in targets)
                     or re.search(r"\b(CREATE|ALTER|DROP|TRUNCATE|CALL|COPY)\b", code, re.I)
                     or re.match(r"\s*DO\b", code, re.I)):
@@ -125,7 +127,12 @@ class PgConnection:
     def _verify(self):
         if self._backend is not None and not self._control:
             from mindex.shared.db.fencing import verify_transaction
+            from mindex.shared.db.maintenance_gate import _ACTIVE
 
+            if getattr(self._backend, "enforce_identity", False) and _ACTIVE.get() != self._backend.dsn:
+                identity = self._connection.execute("SELECT value FROM settings WHERE key='library.id'").fetchone()
+                if identity is None or identity[0] != self._backend.library_id:
+                    raise RuntimeError("运行中素材库身份已变化；拒绝使用旧上下文，请停止节点并完成迁移激活")
             verify_transaction(self._connection, self._backend, execution=self._execution)
 
     def execute(self, sql, args: Sequence[Any] = ()) -> CursorView:
@@ -206,6 +213,7 @@ def _translate(exc: Exception) -> Exception:
 
 class PgBackend:
     backend = "postgres"
+    enforce_identity = False
 
     def __init__(self, dsn: str, *, library_id: str, pool_max: int = 8, pool_min: int = 0,
                  control_pool_max: int = 2, connection_budget: int = 10,
@@ -216,6 +224,9 @@ class PgBackend:
         if pool_max + control_pool_max > connection_budget:
             raise ValueError("PostgreSQL 查询池与控制池超过总连接预算")
         self.dsn = dsn
+        with _POOLS_LOCK:
+            _POOL_OWNERS[dsn] = _POOL_OWNERS.get(dsn, 0) + 1
+        self._finalizer = weakref.finalize(self, _release_pools, dsn)
         self.pool_max = pool_max
         self.pool_min = pool_min
         self.control_pool_max = control_pool_max
@@ -230,7 +241,12 @@ class PgBackend:
             int.from_bytes(digest[4:8], "big", signed=True),
         )
 
+    def close(self):
+        self._finalizer()
+
     def pool(self, *, control=False):
+        if not self._finalizer.alive:
+            raise RuntimeError("PostgreSQL 后端已关闭")
         key = (self.dsn, control)
         settings = (self.pool_min, self.pool_max, self.control_pool_max,
                     self.checkout_timeout, self.control_checkout_timeout)
@@ -276,6 +292,19 @@ class PgBackend:
             return {key: int(value) for key, value in pool.get_stats().items()}
         except Exception:  # noqa: BLE001 — 指标缺失不改变就绪语义
             return {}
+
+
+def _release_pools(dsn: str) -> None:
+    with _POOLS_LOCK:
+        remaining = _POOL_OWNERS.get(dsn, 1) - 1
+        if remaining:
+            _POOL_OWNERS[dsn] = remaining
+            return
+        _POOL_OWNERS.pop(dsn, None)
+        pools = [_POOLS.pop(key) for key in list(_POOLS) if key[0] == dsn]
+        _POOL_SETTINGS.pop(dsn, None)
+    for pool in pools:
+        pool.close()
 
 
 def close_pools() -> None:

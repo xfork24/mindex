@@ -48,9 +48,7 @@ def doctor(config: Config) -> dict:
 
     if config.vector.backend == "chroma_server":
         try:
-            from mindex.shared.backends.vectors import chroma_http_client
-
-            client = chroma_http_client(config.vector.chroma_server)
+            client = context.vectors.client
             client.heartbeat()
             record("vectors.server", True, config.vector.chroma_server.url)
         except Exception as exc:  # noqa: BLE001
@@ -83,6 +81,21 @@ def doctor(config: Config) -> dict:
         except Exception as exc:  # noqa: BLE001
             record("locks.table", False, f"先 mindex migrate：{first_line(exc)}")
 
+    if context.form == "cluster":
+        try:
+            from mindex.shared.admission import validate_serving
+
+            validate_serving(context)
+            record("runtime.admission", True, "运行协议、库身份与派生索引一致")
+        except Exception as exc:  # noqa: BLE001 — 诊断必须汇总故障
+            record("runtime.admission", False, first_line(exc))
+        try:
+            with store.backend.connect(control=True) as db:
+                db.execute("SELECT 1").fetchone()
+            record("database.control", True, "控制通道可用")
+        except Exception as exc:  # noqa: BLE001 — 诊断必须汇总故障
+            record("database.control", False, first_line(exc))
+    context.close()
     failed = [item for item in checks if not item["ok"]]
     return {"ok": not failed, "checks": checks,
             "summary": "全部检查通过" if not failed else f"{len(failed)} 项需要修复"}

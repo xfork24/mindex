@@ -200,7 +200,7 @@ class SearchEngine:
 
     def _cached_vector(self, kind, content, compute):
         """按空间与查询内容持久缓存；每次读取前仍须核验当前身份。"""
-        key = (self.store.library_id, self._space_id, kind, content)
+        key = (self.store.cache_identity, self._space_id, kind, content)
         identity = fingerprint(key)
         path = self.store.root / "cache" / "query-vectors" / (identity + ".json")
         if not self.force_embedding:
@@ -246,6 +246,10 @@ class SearchEngine:
             raise ValueError("尚未发布索引，请先完成离线处理并执行 index --activate")
         if active["status"] != "ready":
             raise ModelError("当前索引未就绪")
+        if getattr(self.store, "deployment_form", None) == "cluster":
+            from mindex.shared.admission import validate_index
+
+            validate_index(self.store, active)
         return active
 
     def _context(self, granularity: str, filters: Filters, *, text=False, person=False):

@@ -58,6 +58,12 @@ def insert_index_task(store, task_id, config, options):
 
 
 def wait_index_task(store, task_id, *, progress=None):
+    return wait_ledger_task(store, "index_tasks", task_id, progress=progress)
+
+
+def wait_ledger_task(store, table, task_id, *, progress=None):
+    if table not in QUEUE_KINDS:
+        raise ValueError("无效的任务表")
     import time
 
     from fastapi import HTTPException
@@ -65,7 +71,7 @@ def wait_index_task(store, task_id, *, progress=None):
     from mindex.shared.background_tasks import public_task
 
     while True:
-        row = store.one("SELECT * FROM index_tasks WHERE id=?", (task_id,))
+        row = store.one(f"SELECT * FROM {table} WHERE id=?", (task_id,))
         if row is None:
             raise HTTPException(404, "找不到索引任务")
         task = public_task(row)
@@ -99,6 +105,11 @@ def ledger_transaction(store, table, task_id, *, restart=False):
     """账本创建/重试与调度同事务；本地形态只执行账本写入。"""
     if table not in QUEUE_KINDS:
         raise ValueError("无效的任务表")
+    config = getattr(store, "deployment_config", None)
+    if getattr(store, "deployment_form", None) == "cluster" and config is not None:
+        from mindex.shared.gpu_resources import required_groups
+
+        required_groups(config, QUEUE_KINDS[table], cluster=True)
     with store.connect() as db:
         yield db
         if getattr(store, "queue_backend", "inline") == "postgres":

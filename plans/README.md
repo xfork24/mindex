@@ -12,6 +12,7 @@
 | [roadmap.md](roadmap.md) | 功能路线图（M1–M5）；对应审查报告见 [docs/review-2026-10-features-roadmap.md](../docs/review-2026-10-features-roadmap.md) |
 | [e2e-acceptance-test-plan.md](e2e-acceptance-test-plan.md) | 端到端验收测试计划 |
 | [horizontal-scaling-plan.md](horizontal-scaling-plan.md) | 素材容量水平扩展：瓶颈评估与 PostgreSQL/多后端存储/分布式锁队列的分阶段方案（已设计、未实施） |
+| [horizontal-scaling-completion-plan.md](horizontal-scaling-completion-plan.md) | 以 e54b645 为基线的剩余能力闭合与单机故障验收；六批实施，外部验收独立记录 |
 
 ## 检索与索引
 
