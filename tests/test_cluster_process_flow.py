@@ -71,13 +71,15 @@ def test_two_apis_two_workers_share_real_source_tasks(tmp_path, video_file):
                 resources.callback(stop, process)
                 return process
 
-            for index in range(4):
+            gateway_port = free_port()
+            for index in range(5):
                 node = tmp_path / f"node-{index}"
                 config = tmp_path / f"node-{index}.yaml"
                 config.write_text(yaml.safe_dump({
                     "data_dir": str(node), "runtime_overrides": False,
                     "gpu": {"cpu_queues": ["source", "index"]},
-                    "server": {"form": "cluster"}, "database": {"backend": "postgres"},
+                    "agent": {"gateway_url": f"http://127.0.0.1:{gateway_port}"},
+                    "server": {"form": "cluster", "role": "agent-gateway" if index == 4 else "api"}, "database": {"backend": "postgres"},
                     "queue": {"backend": "postgres"}, "locks": {"backend": "postgres"},
                     "vector": {"backend": "chroma_server", "chroma_server": {"url": chroma}},
                     "storage": {"backend": "s3", "s3": {"endpoint_url": endpoint, "bucket": bucket,
@@ -86,6 +88,8 @@ def test_two_apis_two_workers_share_real_source_tasks(tmp_path, video_file):
                     "embedding": {"base_url": "http://127.0.0.1:9", "dimensions": 8},
                 }), encoding="utf-8")
                 configs.append(config)
+                if index == 4:
+                    launch(config, "serve", "--port", str(gateway_port))
                 if index < 2:
                     port = free_port()
                     launch(config, "serve", "--port", str(port))
@@ -114,7 +118,7 @@ def test_two_apis_two_workers_share_real_source_tasks(tmp_path, video_file):
                     task = http.post(urls[index] + f"/api/admin/sources/{source_id}/shots", json={"publish": False})
                     assert task.status_code == 202, task.text
                     tasks.append(task.json()["id"])
-                workers = [launch(config, "worker", "--queues", "source", "--once") for config in configs[2:]]
+                workers = [launch(config, "worker", "--queues", "source", "--once") for config in configs[2:4]]
                 for worker in workers:
                     worker.wait(timeout=60)
                     assert worker.returncode == 0
@@ -142,7 +146,7 @@ def test_two_apis_two_workers_share_real_source_tasks(tmp_path, video_file):
                 assert len({row[1] for row in rows}) == 2
                 assert all(row[2] and row[3] > 0 for row in rows)
                 assert db.execute("SELECT count(*) FROM shared_files").fetchone()[0] > 0
-            for index in range(4):
+            for index in range(5):
                 assert not (tmp_path / f"node-{index}/metadata.sqlite3").exists()
     except BaseException:
         for log in logs:

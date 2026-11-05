@@ -14072,8 +14072,8 @@ window.MindexMessages = {
     "en": "Deployment backends"
   },
   "ui.e34a940790fb": {
-    "zh": "元数据库、媒体、向量、锁与队列的运行后端（只读）",
-    "en": "Runtime backends for the metadata database, media, vectors, locks and queue (read-only)"
+    "zh": "元数据库、媒体、向量、锁与队列的运行后端",
+    "en": "Runtime backends for metadata, media, vectors, locks and queues"
   },
   "ui.948b21de1dd6": {
     "zh": "运行形态",
@@ -14262,5 +14262,65 @@ window.MindexMessages = {
   "ui.upload_restart": {
     "zh": "重新上传",
     "en": "Restart upload"
+  },
+  "ui.deployment_edit_help": {
+    "zh": "部署字段保存后重启生效；模型与检索调参继续热更新。凭据仅填写已存在的环境变量引用。",
+    "en": "Deployment changes require a restart. Model and search tuning still apply live. Use existing environment variable references for credentials."
+  },
+  "ui.deployment_discard": {
+    "zh": "重新读取会丢弃当前未保存的部署输入，是否继续？",
+    "en": "Reload and discard unsaved deployment input?"
+  },
+  "ui.deployment_readonly": {
+    "zh": "当前部署没有可写配置文件，请通过部署环境修改。",
+    "en": "This deployment has no writable configuration file. Update it in the deployment environment."
+  },
+  "ui.deployment_restart": {
+    "zh": "部署配置已保存，重启当前节点后生效。",
+    "en": "Deployment configuration saved. Restart this node to apply it."
+  },
+  "ui.deployment_field_locked": {
+    "zh": "只读",
+    "en": "Read only"
+  },
+  "ui.deployment_field_migration": {
+    "zh": "更换目标必须先迁移并保持库身份；保存后重启",
+    "en": "Migrate the target with the same library identity before switching; restart after saving"
+  },
+  "ui.deployment_field_restart": {
+    "zh": "保存后重启",
+    "en": "Restart after saving"
+  },
+  "ui.deployment_saved": {
+    "zh": "部署配置已保存。",
+    "en": "Deployment configuration saved."
+  },
+  "ui.deployment_migration": {
+    "zh": "校验通过。后端或连接目标变更需先完成迁移与激活，并在重启时校验同一库身份。",
+    "en": "Valid. Backend or connection target changes require migration and activation; the same library identity is checked at restart."
+  },
+  "ui.deployment_valid": {
+    "zh": "部署配置校验通过；保存后重启生效。",
+    "en": "Deployment configuration is valid. Save and restart to apply it."
+  },
+  "ui.deployment_editor": {
+    "zh": "部署配置",
+    "en": "Deployment configuration"
+  },
+  "ui.deployment_validate": {
+    "zh": "校验部署配置",
+    "en": "Validate deployment"
+  },
+  "ui.deployment_save": {
+    "zh": "保存部署配置",
+    "en": "Save deployment"
+  },
+  "ui.deployment_reload": {
+    "zh": "重新读取部署配置",
+    "en": "Reload deployment"
+  },
+  "ui.deployment_rules": {
+    "zh": "字段生效规则",
+    "en": "Field application rules"
   }
 };

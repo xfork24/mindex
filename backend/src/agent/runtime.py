@@ -751,4 +751,5 @@ class BuiltinRuntime(RuntimeSupport):
 
 
 def frame_sse(frame: dict) -> str:
-    return f"event: {frame['event']}\ndata: {json.dumps(frame['data'], ensure_ascii=False)}\n\n"
+    identity = f"id: {frame['data']['seq']}\n" if frame["event"] == "session.event" else ""
+    return identity + f"event: {frame['event']}\ndata: {json.dumps(frame['data'], ensure_ascii=False)}\n\n"

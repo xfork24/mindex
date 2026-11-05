@@ -65,7 +65,11 @@ def _v4(db) -> None:
                " change_seq INTEGER NOT NULL, PRIMARY KEY(library_id,outbox_id))")
 
 
-STEPS = (_v1, _v2, _v3, _v4)
+def _v5(db) -> None:
+    db.execute("CREATE TABLE agent_outbox_cursors (library_id TEXT PRIMARY KEY, outbox_id INTEGER NOT NULL, change_seq INTEGER NOT NULL)")
+
+
+STEPS = (_v1, _v2, _v3, _v4, _v5)
 
 
 def initialize(database) -> int:

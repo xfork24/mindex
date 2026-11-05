@@ -91,6 +91,11 @@ def redact_error(text: str, known_secrets: list[str] | tuple[str, ...] = ()) -> 
     return _KEY_LIKE.sub(lambda m: f"{m.group(1)}-{_REDACTED}", text)
 
 
+class DeploymentBody(StrictModel):
+    config: dict
+    revision: str | None = None
+
+
 class ProfileBody(StrictModel):
     role: str
     name: str = Field(min_length=1, max_length=60)
@@ -219,9 +224,9 @@ def _deployment_status(store: Store, config: Config) -> dict:
     """
     library_id = store.library_id if getattr(store, "library_id", None) else get_setting(store, "library.id")
     return {
-        "form": "pg-single" if store.pg else "local",
+        "form": getattr(store, "deployment_form", "pg-single" if store.pg else "local"),
         "database": store.backend.backend,
-        "media": "local",
+        "media": config.storage.backend,
         "vectors": config.vector.backend,
         "storage": config.storage.backend,
         "locks": config.locks.backend,
@@ -384,6 +389,20 @@ def _probe(config: Config, role: str, *, store: Store | None = None, profile_nam
 
 def settings_router(runtime: RuntimeConfig, store: Store) -> APIRouter:
     router = APIRouter(prefix="/api/settings", tags=["设置"])
+
+    from mindex.settings import deployment_config
+
+    @router.get("/deployment")
+    def get_deployment():
+        return deployment_config.view(runtime.base, store)
+
+    @router.post("/deployment/validate")
+    def validate_deployment(body: DeploymentBody):
+        return deployment_config.validate(runtime.base, store, body.config)[1]
+
+    @router.put("/deployment")
+    def save_deployment(body: DeploymentBody):
+        return deployment_config.save(runtime.base, store, body.config, body.revision)
 
     @router.get("/agent-runtime")
     def get_agent_runtime():

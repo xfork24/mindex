@@ -119,7 +119,7 @@ def export_bundle(config, target, *, with_media=False, with_vectors=False, legac
                 raise ValueError("--legacy-namespace 仅用于显式导出旧 PG 共享后端；本地库不需要此参数")
             if config.storage.backend == "s3":
                 from mindex.shared.backends.s3 import S3MediaStore
-    
+
                 media = S3MediaStore(config.storage.s3, staging=context.staging,
                                      cache_dir=context.staging.root / "legacy-export")
         if with_media and context.store.one("SELECT 1 FROM upload_sessions WHERE transport='s3' "
@@ -140,7 +140,7 @@ def export_bundle(config, target, *, with_media=False, with_vectors=False, legac
                 snapshot(context.store.path, target / "metadata.sqlite3")
             from mindex.maintenance.migration_runtime import export_execution
             from mindex.maintenance.migration_secrets import redact_metadata
-    
+
             export_execution(context.store, target)
             redact_metadata(target / "metadata.sqlite3")
             frozen = store_at(target)
@@ -158,7 +158,7 @@ def export_bundle(config, target, *, with_media=False, with_vectors=False, legac
                 if present:
                     manifest[f"{kind}_manifest_sha256"] = digest(target / f"{kind}_manifest.json")
             from mindex.maintenance.migration_secrets import scan_bundle
-    
+
             manifest['execution_manifest_sha256'] = digest(target / 'execution_manifest.json')
             manifest['unknown_secret_locations'] = scan_bundle(target)
             jsonio.save(target / "manifest.json", manifest)

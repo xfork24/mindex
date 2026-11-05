@@ -74,6 +74,18 @@ class AnswersBody(StrictModel):
     answers: list[AnswerItem]
 
 
+def resume_cursor(request, after):
+    if 'after' in request.query_params or not request.headers.get('last-event-id'):
+        return after
+    try:
+        cursor = int(request.headers['last-event-id'])
+        if cursor < -1:
+            raise ValueError('负数游标')
+        return cursor
+    except ValueError as exc:
+        raise HTTPException(422, 'Last-Event-ID 必须是有效的非负事件游标') from exc
+
+
 def build_runtime(app, runtime_config, store, *, agent_llm=None, registry=None) -> AgentRuntime:
     from mindex.agent.llm.factory import make_agent_llm
     from mindex.agent.tools import build_registry
@@ -313,7 +325,8 @@ def agent_router(runtime: AgentRuntime, runtime_config, *, injected: bool = Fals
         return {"items": store.events(sid, after), "status": runtime.status(sid), "pending": runtime.pending(sid)}
 
     @router.get("/sessions/{sid}/events")
-    async def stream_events(sid: str, after: int = Query(default=-1, ge=-1), follow: bool = True):
+    async def stream_events(sid: str, request: Request, after: int = Query(default=-1, ge=-1), follow: bool = True):
+        after = resume_cursor(request, after)
         await runtime.start()
         session_or_404(sid)
 
@@ -382,8 +395,9 @@ def agent_router(runtime: AgentRuntime, runtime_config, *, injected: bool = Fals
         return runtime.feed.publish(body.kind, body.data, source="mcp")
 
     @router.get("/changes")
-    async def stream_changes(after: int = Query(default=-1, ge=-1), follow: bool = True):
+    async def stream_changes(request: Request, after: int = Query(default=-1, ge=-1), follow: bool = True):
         """全局改动与定位通道。after=-1 从当前最新开始（不回放历史）；断线后用最后收到的 seq 续传。"""
+        after = resume_cursor(request, after)
         feed = runtime.feed
 
         async def body():
@@ -394,7 +408,7 @@ def agent_router(runtime: AgentRuntime, runtime_config, *, injected: bool = Fals
                 items = feed.after(last)
                 for item in items:
                     last = item["seq"]
-                    yield f"event: change\ndata: {json.dumps(item, ensure_ascii=False)}\n\n"
+                    yield f"id: {last}\nevent: change\ndata: {json.dumps(item, ensure_ascii=False)}\n\n"
                 if not follow:
                     return
                 if items:

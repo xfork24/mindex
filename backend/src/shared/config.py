@@ -798,6 +798,7 @@ class ServerConfig(StrictModel):
     智能助手网关（agent.sqlite3/附件留在网关持久卷，其余 API 不建独立运行时）。
     worker 是独立 CLI（``mindex worker``），不经此配置。"""
 
+    readiness_timeout_seconds: float = Field(default=5, gt=0, le=30)
     role: Literal["api", "agent-gateway"] = "api"
     form: Literal["auto", "local", "pg-single", "cluster"] = "auto"
     library_id: str | None = None
@@ -823,6 +824,7 @@ class UploadConfig(StrictModel):
 
 
 class Config(StrictModel):
+    _source_path: Path | None = PrivateAttr(default=None)
     data_dir: Path = Path("data")
     uploads: UploadConfig = Field(default_factory=UploadConfig, exclude=True)
     source_upload_max_bytes: int = Field(default=20 * 1024**3, ge=1)
@@ -929,6 +931,7 @@ def load_config(path: str | Path | None = None) -> Config:
         raise FileNotFoundError(selected)
     values = (yaml.safe_load(selected.read_text(encoding="utf-8")) or {}) if selected.exists() else {}
     config = Config.model_validate(values)
+    config._source_path = selected.resolve() if selected.exists() else None
     # Preserve existing layout IDs when a full YAML spells default 4 as 4.0.
     # Pydantic validates explicit floats, but leaves numeric defaults as declared.
     for name, defaults in (("video", VideoConfig()), ("detector", DetectorConfig())):

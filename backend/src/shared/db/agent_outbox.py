@@ -3,8 +3,8 @@
 - 业务 API（cluster 形态）或 `mindex mcp --base-url` 报告改动时写 outbox；
 - 单实例 agent-gateway 轮询 outbox，按 id 顺序幂等转入本地 ChangeFeed（SSE 推送），
   避免每个 API 各自维护 SSE 事件流导致分裂；
-- 至少一次：drain 在单事务内标记 consumed 并返回行；网关随后发布到 ChangeFeed，
-  崩溃窗口可能丢失一次提示（SSE 属提示性通道，业务状态仍以元数据库为准）。
+- 网关先在本地事务持久化事件、回执和游标，再 acknowledge；崩溃重放保留同一可见事件 seq。
+  consume=True 仅保留底层诊断兼容，网关必须使用 consume=False。
 """
 
 from __future__ import annotations
