@@ -200,13 +200,22 @@ def chroma_http_client(section, *, shared=True):
     if client is None:
         parsed = urlparse(section.url if "//" in section.url else f"http://{section.url}")
         headers = {"Authorization": f"Bearer {token}"} if token else None
-        client = chromadb.HttpClient(
-            host=parsed.hostname or "127.0.0.1",
-            port=parsed.port or (443 if parsed.scheme == "https" else 8000),
-            ssl=parsed.scheme == "https",
-            headers=headers,
-            settings=Settings(anonymized_telemetry=False),
-        )
+        if shared:
+            client = chromadb.HttpClient(
+                host=parsed.hostname or "127.0.0.1",
+                port=parsed.port or (443 if parsed.scheme == "https" else 8000),
+                ssl=parsed.scheme == "https",
+                headers=headers,
+                settings=Settings(anonymized_telemetry=False),
+            )
+        else:
+            from mindex.shared.backends.chroma_client import ChromaClient
+
+            settings = Settings(anonymized_telemetry=False, chroma_api_impl="chromadb.api.fastapi.FastAPI",
+                chroma_server_host=parsed.hostname or "127.0.0.1",
+                chroma_server_http_port=parsed.port or (443 if parsed.scheme == "https" else 8000),
+                chroma_server_ssl_enabled=parsed.scheme == "https", chroma_server_headers=headers)
+            client = ChromaClient(settings, section.request_timeout_seconds)
         if shared:
             _HTTP_CLIENTS[key] = client
     return client

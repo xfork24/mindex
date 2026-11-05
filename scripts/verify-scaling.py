@@ -36,7 +36,7 @@ TESTS = [
     "test_cluster_process_flow.py",
     "test_doctor.py", "test_pg_chroma_e2e.py", "test_migration_cli.py", "test_worker.py",
     "test_persons_pg.py", "test_media_delivery.py",
-    "test_s3_multipart.py", "test_backend_identity.py", "test_backend_lifecycle.py", "test_scaling_completion.py", "test_object_coordination.py",
+    "test_capacity_tool.py", "test_query_budget.py", "test_s3_multipart.py", "test_backend_identity.py", "test_backend_lifecycle.py", "test_scaling_completion.py", "test_object_coordination.py",
     "test_maintenance_and_gateway.py", "test_sql_characteristics.py",
     "test_scaling_execution.py", "test_scaling_delivery_core.py",
 ]

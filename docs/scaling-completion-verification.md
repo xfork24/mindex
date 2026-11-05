@@ -134,3 +134,38 @@ S3 提前拒绝后发生 BrokenPipe，不能作为凭据拒绝证据。改以同
 `uploads-fifth/` 最终 239 通过、零失败/错误/跳过，源码摘要一致；错误签名及超声明 Content-Length
 均得到真实 S3 403，完成边界恢复、摘要错误、到期清理、过期 URL、HEAD/Range/If-Range/ETag
 与两条上传路径通过。既有失败证据继续保留，统一故障矩阵及最终冻结回归仍待执行。
+
+## 第四批进行中：分页关系、总期限和容量工装
+
+集群查询在同一 PG repeatable-read 事务内建立临时 eligible 关系；SQL 聚合统计、
+BM25、人物范围与排序共用它，ID 默认 512 条分页。annotation 保持 Unicode casefold，
+人物证据只取当前页重叠区间，候选水合不读取整版快照；集群禁止全快照回退。
+可表达的素材/粒度条件下推 Chroma，窄范围回退逐页查询后合并全局排序。
+查询默认 5 秒，覆盖池等待、SQL、嵌入/Chroma HTTP、媒体命令及水合；503 明确可重试。
+Chroma 使用上下文所有的 SDK ServerAPI/集合与有界传输，避免 SDK 构造期无限网络等待。
+查询向量内存/磁盘缓存均限制条目和字节；默认 64 MiB、128 项。词法回填也已按页构建。
+
+原始证据 `artifacts/scaling-completion-batch4/`：
+
+- `query-first/`：239 通过、零跳过；现有集成回归。
+- `query-second/`：248 通过、2 失败、零跳过；新增参考对照发现人物时长混排浮点顺序、
+  空提及查询返回字段差异，按参考行为修复。
+- `query-third/`：250 通过、零跳过；分页/参考评分、PG 快照、SQL/池/慢速分块总期限和缓存预算通过。
+- `query-fourth/`：251 通过、1 失败、零跳过；容量工装误依赖未声明 psutil，改为系统 RSS 及 API OS 峰值指标。
+- `query-fifth/`：静态检查发现缺失 sys 导入，主动中断本轮 pytest 并清理本轮服务；记录为 interrupted。
+- `query-sixth/`：252 通过、零失败/错误/跳过，源码摘要一致。小样本容量工装完整创建三个集合、
+  工程嵌入服务与两个独立 API 进程，44 请求零失败，两个 API 峰值 RSS 约 288/287 MB；
+  此结果明确标为 smoke_passed_not_acceptance，capacity_passed=false，不代替原规模或真实模型质量。
+
+`scaling-capacity.py` 固定 10万/100万 segments、每版本 100万/300万向量、三个版本、4096维、
+20 并发与 1%/0.1% 范围，错误请求计入失败和延迟分布。使用独立空库生成并验证实际集合规模、
+两个 API 真实 PID、RSS、指标及源码摘要；说明见 [容量工装](scaling-capacity.md)。
+`capacity-100k-preflight.json`、`capacity-1m-preflight.json` 保留本机磁盘不足的原始证据。
+原规模裸向量分别为 49,152,000,000 / 147,456,000,000 字节，尚未包含 HNSW、PG、WAL 和备份；
+本机 16 GiB 内存、约 32 GiB 可用盘不能容纳，正式容量、尾延迟及真实模型 Hit@5 仍待外部实测。
+
+`query-seventh/` 最终源码复验：254 通过、零失败/错误/跳过，源码摘要一致。
+API 查询池耗尽在期限内返回带重试标记的 503，liveness 继续 200；窄范围不能在过采样预算后
+扩大到全库，逐页 ID 回退得到全局结果。纯人物排序按全 eligible 计算排名，并逐候选页做 IoU
+去重，候选页为 1 也不能截断 eligible 或改变参考结果。类型、Ruff、构造边界与链接检查通过。
+后续第五、六批与最终冻结回归继续执行。

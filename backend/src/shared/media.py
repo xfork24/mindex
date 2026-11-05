@@ -37,6 +37,9 @@ def resolve_tool(args: list[str]) -> list[str]:
 
 
 def command(args: list[str], *, timeout: float = 600) -> bytes:
+    from mindex.shared.query_budget import remaining
+
+    timeout = remaining(timeout)
     args = resolve_tool(args)
     record("command", {"args": args, "timeout": timeout})
     from mindex.shared.work_budget import current, stream_command
@@ -53,6 +56,9 @@ def command(args: list[str], *, timeout: float = 600) -> bytes:
     except FileNotFoundError as exc:
         raise MediaError(f"Missing executable: {args[0]}") from exc
     except subprocess.TimeoutExpired as exc:
+        from mindex.shared.query_budget import check
+
+        check()
         raise MediaError(f"{args[0]} timed out") from exc
     except subprocess.CalledProcessError as exc:
         record("command-error", {"returncode": exc.returncode, "stderr": exc.stderr.decode(errors="replace")})

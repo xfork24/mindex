@@ -101,9 +101,12 @@ def create_app(
 
     @app.middleware("http")
     async def request_work_budget(request, call_next):
+        from contextlib import nullcontext
+
+        from mindex.shared.query_budget import deadline
         from mindex.shared.work_budget import scope
 
-        with scope(store):
+        with scope(store), deadline(config.search.query_timeout_seconds, check_exit=False) if store.pg and request.url.path.startswith("/api/search/") else nullcontext():
             return await call_next(request)
 
     @app.middleware("http")
@@ -342,6 +345,13 @@ def create_app(
     @app.exception_handler(LeaseLost)
     async def write_unavailable(_, exc):
         return JSONResponse({"detail": str(exc)}, status_code=409)
+
+    from mindex.shared.query_budget import QueryBudgetExceeded
+
+    @app.exception_handler(QueryBudgetExceeded)
+    async def query_budget_exhausted(_, exc):
+        return JSONResponse({"detail": str(exc), "retryable": True, "code": "query_budget_exhausted"},
+                            status_code=503, headers={"Retry-After": "1"})
 
     @app.exception_handler(StagingFull)
     async def insufficient_staging(_, exc):

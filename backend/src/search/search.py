@@ -18,7 +18,7 @@ from mindex.models.adapters import ModelError, MultimodalEmbedder, make_embedder
 from mindex.processing.indexing import VectorIndex
 from mindex.shared.config import Config, fingerprint
 from mindex.shared.images import image_png
-from mindex.shared.jsonio import save
+from mindex.shared.jsonio import save, save_bytes
 from mindex.shared.media import content_hash, cut, probe, windows
 from mindex.shared.storage import Store
 from mindex.shared.tokenizer import document_terms, tokens
@@ -31,14 +31,18 @@ jieba.setLogLevel(30)
 QUERY_VECTOR_CACHE_SIZE = 128
 _QUERY_VECTORS: OrderedDict = OrderedDict()
 _QUERY_VECTOR_LOCK = threading.Lock()
+_QUERY_VECTOR_SIZES: dict = {}
 
 
 def recall_scope(method):
     @wraps(method)
     def wrapped(self, *args, **kwargs):
-        scope = getattr(self.embedder, "recall_scope", None)
-        with scope() if scope else nullcontext():
-            return method(self, *args, **kwargs)
+        from mindex.shared.query_budget import scope as query_scope
+
+        with query_scope(self.store, self.config.search.query_timeout_seconds) if self.store.pg else nullcontext():
+            scope = None if method.__name__ == "similar" else getattr(self.embedder, "recall_scope", None)
+            with scope() if scope else nullcontext():
+                return method(self, *args, **kwargs)
     return wrapped
 
 
@@ -200,10 +204,13 @@ class SearchEngine:
 
     def _cached_vector(self, kind, content, compute):
         """按空间与查询内容持久缓存；每次读取前仍须核验当前身份。"""
+        self._prune_vector_cache()
         key = (self.store.cache_identity, self._space_id, kind, content)
         identity = fingerprint(key)
         path = self.store.root / "cache" / "query-vectors" / (identity + ".json")
-        if not self.force_embedding:
+        self._prune_disk_vectors(path.parent)
+        cache_enabled = self.config.search.query_cache_entries > 0 and self.config.search.query_cache_bytes > 0
+        if not self.force_embedding and cache_enabled:
             with _QUERY_VECTOR_LOCK:
                 cached = _QUERY_VECTORS.get(key)
                 if cached is not None:
@@ -225,19 +232,62 @@ class SearchEngine:
         record("query-vector-cache", {"hit": False, "kind": kind})
         vector = compute()
         try:
-            save(path, {"key": identity, "vector": vector, "checksum": fingerprint(vector)})
+            if cache_enabled:
+                save(path, {"key": identity, "vector": vector, "checksum": fingerprint(vector)})
+                self._prune_disk_vectors(path.parent)
         except OSError:
             pass  # 缓存写入失败不影响本次有效召回。
         self._remember_vector(key, vector)
         return vector
 
     @staticmethod
-    def _remember_vector(key, vector):
+    def _cache_size(value):
+        import sys
+
+        if isinstance(value, (tuple, list)):
+            return sys.getsizeof(value) + sum(SearchEngine._cache_size(item) for item in value)
+        return sys.getsizeof(value)
+
+    def _prune_vector_cache(self):
+        limits = self.config.search
+        with _QUERY_VECTOR_LOCK:
+            for key in list(_QUERY_VECTOR_SIZES):
+                if key not in _QUERY_VECTORS:
+                    del _QUERY_VECTOR_SIZES[key]
+            while (len(_QUERY_VECTORS) > min(QUERY_VECTOR_CACHE_SIZE, limits.query_cache_entries)
+                   or sum(_QUERY_VECTOR_SIZES.values()) > limits.query_cache_bytes):
+                key, _ = _QUERY_VECTORS.popitem(last=False)
+                _QUERY_VECTOR_SIZES.pop(key, None)
+
+    def _remember_vector(self, key, vector):
         with _QUERY_VECTOR_LOCK:
             _QUERY_VECTORS[key] = tuple(vector)
+            _QUERY_VECTOR_SIZES[key] = self._cache_size(key) + self._cache_size(_QUERY_VECTORS[key])
             _QUERY_VECTORS.move_to_end(key)
-            while len(_QUERY_VECTORS) > QUERY_VECTOR_CACHE_SIZE:
-                _QUERY_VECTORS.popitem(last=False)
+        self._prune_vector_cache()
+
+    def _prune_disk_vectors(self, directory):
+        import heapq
+
+        from mindex.shared.query_budget import check
+
+        limits = self.config.search
+        kept = []
+        for path in directory.glob("*.json"):
+            check()
+            try:
+                stat = path.stat()
+                heapq.heappush(kept, (stat.st_mtime_ns, path, stat.st_size))
+                if len(kept) > limits.query_cache_entries:
+                    _, victim, _ = heapq.heappop(kept)
+                    victim.unlink(missing_ok=True)
+            except FileNotFoundError:
+                continue
+        total = sum(item[2] for item in kept)
+        while total > limits.query_cache_bytes:
+            _, victim, size = heapq.heappop(kept)
+            victim.unlink(missing_ok=True)
+            total -= size
 
     def _active(self) -> dict:
         """当前检索使用的索引版本：固定索引优先，否则为活动索引；必须已就绪。"""
@@ -261,6 +311,8 @@ class SearchEngine:
 
     def _snapshots(self, active: dict, granularity: str, filters: Filters) -> list[dict]:
         """按隐藏、粒度、素材、时长与分析字段过滤后的候选快照；不做向量空间校验。"""
+        if getattr(self.store, "deployment_form", None) == "cluster":
+            raise ModelError("集群不允许全快照回退；请回填派生数据")
         snapshots = []
         library = Library(self.store)
         sources, segments = library.overlays()
@@ -372,6 +424,10 @@ class SearchEngine:
         from mindex.persons.persons import Persons
 
         started = perf_counter()
+        if self._paged(self._active()):
+            from mindex.search.paged_search import text
+
+            return text(self, query, started)
         catalogue = Persons(self.store)
         preliminary_ids, _, _, _ = resolve_names(query, catalogue.entities())
         person = bool(preliminary_ids and query.person_mode != 'mentioned')
@@ -498,7 +554,7 @@ class SearchEngine:
             return self._channel_text(query, active, snapshots, vectors, started, projection=projection)
         self._validate_space(active)
         vector = self._query_vector(query.text)
-        ids = [s["id"] for s in snapshots]
+        ids = snapshots.ids if hasattr(snapshots, "ids") else [s["id"] for s in snapshots]
         count = self.config.search.candidates
         available = {"video", *(view for s in snapshots for view in s["views"])}
         channels = set(query.channels or ("visual", "dialogue", "analysis"))
@@ -533,12 +589,12 @@ class SearchEngine:
         selected = set(query.channels or ("visual", "dialogue", "analysis"))
         selected = {c for c in selected if self.config.search.channel_weights[c] > 0}
         count, k = self.config.search.candidates, self.config.search.rrf_k
-        available = {v for s in snapshots for v in s.get("indexed_views", [])}
+        available = snapshots.available() if hasattr(snapshots, "available") else {v for s in snapshots for v in s.get("indexed_views", [])}
         selected = {c for c in selected if ("video" if c == "visual" else c) in available}
         if not selected:
             result = self._result(active, snapshots, {}, query.limit, started, target_duration=query.target_duration)
             return {**result, "channels": [], "degraded": False, "warnings": []}
-        ids = [s["id"] for s in snapshots]
+        ids = snapshots.ids if hasattr(snapshots, "ids") else [s["id"] for s in snapshots]
         lexical = {}
         for channel in selected - {"visual"}:
             if projection:
@@ -573,7 +629,8 @@ class SearchEngine:
         if projection:
             # 只对融合后的候选命中读取完整快照（时长排序/IoU 去重/证据展示需要）。
             lookup = self._hydrate(active, [hit["id"] for hit in ranked])
-            evidence = {s["id"]: s["person_evidence"] for s in snapshots if "person_evidence" in s}
+            candidates = snapshots.lookup([hit["id"] for hit in ranked]).values() if hasattr(snapshots, "lookup") else snapshots
+            evidence = {s["id"]: s["person_evidence"] for s in candidates if "person_evidence" in s}
             for identifier in evidence.keys() & lookup.keys():
                 lookup[identifier] = {**lookup[identifier], "person_evidence": evidence[identifier]}
         else:
@@ -619,8 +676,25 @@ class SearchEngine:
             "warnings": ["嵌入不可用，已降级为所选文本渠道的 BM25 检索：" + warning] if warning else [],
         }
 
+    def _paged(self, active):
+        if not self.store.pg:
+            return False
+        if getattr(self.store, "deployment_form", None) == "cluster":
+            return True
+        from mindex.shared.lexical_store import lexical_ready
+
+        return active["spec"].get("format", 1) >= 2 and lexical_ready(self.store, active["id"])
+
     def _eligible_rows(self, active: dict, granularity: str, filters: Filters):
         """向量检索的候选行：优先投影（format 2 且派生索引可用），否则全快照过滤。"""
+        if self._paged(active):
+            from mindex.search.eligible_set import EligibleSet
+            from mindex.shared.admission import validate_index
+
+            validate_index(self.store, active)
+            return EligibleSet.build(self.store, active["id"], granularity, filters,
+                                     filters.effective_sources(self.store),
+                                     page_size=self.config.search.id_page_size), True
         projection = None
         if active["spec"].get("format", 1) >= 2:
             from mindex.shared.lexical_store import lexical_ready
@@ -645,7 +719,7 @@ class SearchEngine:
         snapshots, projected = self._eligible_rows(active, granularity, filters or Filters())
         vectors = self._vectors(active["id"])
         if active["spec"].get("format", 1) >= 2:
-            snapshots = [s for s in snapshots if "video" in s.get("indexed_views", [])]
+            snapshots = snapshots.select(lambda s: "video" in s.get("indexed_views", [])) if hasattr(snapshots, "select") else [s for s in snapshots if "video" in s.get("indexed_views", [])]
         if not snapshots:
             return self._result(active, snapshots, {}, limit, started, target_duration=target_duration)
         v = self.config.video
@@ -665,7 +739,7 @@ class SearchEngine:
                 embedding = self._cached_vector("video", fingerprint({
                     "sha256": query_hash, "start": start, "end": end}), compute)
             routes[f"video_{index}"] = vectors.query(
-                embedding, "video", [s["id"] for s in snapshots], self.config.search.candidates
+                embedding, "video", snapshots.ids if hasattr(snapshots, "ids") else [s["id"] for s in snapshots], self.config.search.candidates
             )
         # Query windows are equal votes; the number of windows must not change scale.
         weights = {key: 1 / len(routes) for key in routes}
@@ -686,23 +760,24 @@ class SearchEngine:
         snapshots, projected = self._eligible_rows(active, granularity, filters or Filters())
         vectors = self._vectors(active["id"])
         if active["spec"].get("format", 1) >= 2:
-            snapshots = [s for s in snapshots if "video" in s.get("indexed_views", [])]
+            snapshots = snapshots.select(lambda s: "video" in s.get("indexed_views", [])) if hasattr(snapshots, "select") else [s for s in snapshots if "video" in s.get("indexed_views", [])]
         if not snapshots:
             return self._result(active, snapshots, {}, limit, started, target_duration=target_duration)
         if not hasattr(self.embedder, "image"):
             raise ModelError("当前嵌入适配器尚不支持图片输入，请切换支持图片的模型服务")
         with tempfile.TemporaryDirectory(prefix="query-image-", dir=self.store.root) as directory:
             normalized = Path(directory) / "query.png"
-            normalized.write_bytes(png)
+            save_bytes(normalized, png)
             embedding = self._cached_vector("image", hashlib.sha256(png).hexdigest(),
                                             lambda: self.embedder.image(normalized))
-        hits = vectors.query(embedding, "video", [s["id"] for s in snapshots], self.config.search.candidates)
+        hits = vectors.query(embedding, "video", snapshots.ids if hasattr(snapshots, "ids") else [s["id"] for s in snapshots], self.config.search.candidates)
         # Image queries compare only with video vectors, independent from text-fusion weights.
         ranked = fuse({"video": hits}, {"video": 1}, self.config.search.rrf_k)
         lookup = self._hydrate(active, [hit["id"] for hit in ranked]) if projected else None
         return self._result(active, snapshots, {}, limit, started, ranked=ranked,
                             target_duration=target_duration, lookup=lookup, eligible_count=len(snapshots))
 
+    @recall_scope
     def similar(
         self, segment_id: str, granularity: str | None = None, limit: int = 20, filters: Filters | None = None
     ) -> dict:
@@ -736,20 +811,15 @@ class SearchEngine:
         if not embeddings:
             raise SimilarUnavailable("该片段的画面向量缺失，请重建索引后再试")
         candidates, projected = self._eligible_rows(active, granularity or seed["kind"], filters or Filters())
-        snapshots = [
-            s
-            for s in candidates
-            if (not visual_only or "video" in s.get("indexed_views", []))
-            and s["id"] != seed["id"]
-            and not (
-                s["source_id"] == seed["source_id"]
-                and min(s["end"], seed["end"]) - max(s["start"], seed["start"]) > 0
-            )
-        ]
+        def accepted(s):
+            return ((not visual_only or "video" in s.get("indexed_views", []))
+                    and s["id"] != seed["id"] and not (s["source_id"] == seed["source_id"]
+                    and min(s["end"], seed["end"]) - max(s["start"], seed["start"]) > 0))
+        snapshots = candidates.select(accepted) if hasattr(candidates, "select") else [s for s in candidates if accepted(s)]
         if not snapshots:
             result = self._result(active, snapshots, {}, limit, started)
             return {**result, "seed_segment_id": segment_id}
-        eligible = [s["id"] for s in snapshots]
+        eligible = snapshots.ids if hasattr(snapshots, "ids") else [s["id"] for s in snapshots]
         routes = {
             f"video_{index}": vectors.query(embedding, "video", eligible, self.config.search.candidates)
             for index, embedding in enumerate(embeddings)

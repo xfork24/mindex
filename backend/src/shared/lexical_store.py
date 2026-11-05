@@ -61,46 +61,46 @@ def build_lexical_index(store: Store, index_id: str, *, replace: bool = False) -
                 "派生词法索引分词器版本与当前节点不一致；需 replace=True 强制重建")
         return {"index_id": index_id, "skipped": True, "segments": meta["segments"]}
 
-    segments, docs = [], []
-    terms: list[tuple[str, str, str, str, int]] = []
-    for snapshot in store.snapshots(index_id):
-        annotation = snapshot.get("annotation") or {}
-        segments.append((
-            index_id, snapshot["id"], snapshot["source_id"], snapshot.get("parent_id"),
-            snapshot["kind"], snapshot["start"], snapshot["end"],
-            dumps({field: list(annotation.get(field) or []) for field in _ANNOTATION_FIELDS}),
-            dumps(sorted(snapshot.get("indexed_views") or [])),
-        ))
-        views = snapshot.get("views") or {}
-        for channel in LEXICAL_CHANNELS:
-            counter, total = document_terms("\n".join(
-                value for key, value in views.items() if key == channel))
-            docs.append((index_id, snapshot["id"], channel, total))
-            terms.extend(
-                (index_id, channel, term, snapshot["id"], tf) for term, tf in counter.items())
-
+    counts = {"segments": 0, "docs": 0, "terms": 0}
     with store.connect() as db:
         db.execute("BEGIN IMMEDIATE")
         for table in ("lexical_terms", "lexical_docs", "search_segments", "lexical_index_meta"):
             db.execute(f"DELETE FROM {table} WHERE index_id=?", (index_id,))
-        for offset in range(0, len(segments), _BATCH):
-            db.executemany(
-                "INSERT INTO search_segments(index_id,segment_id,source_id,parent_id,kind,"
-                'start,"end",annotation_projection,indexed_views) VALUES(?,?,?,?,?,?,?,?,?)',
-                segments[offset:offset + _BATCH])
-        for offset in range(0, len(docs), _BATCH):
-            db.executemany(
-                "INSERT INTO lexical_docs(index_id,segment_id,channel,doc_length) VALUES(?,?,?,?)",
-                docs[offset:offset + _BATCH])
-        for offset in range(0, len(terms), _BATCH):
-            db.executemany(
-                "INSERT INTO lexical_terms(index_id,channel,term,segment_id,tf) VALUES(?,?,?,?,?)",
-                terms[offset:offset + _BATCH])
-        db.execute(
-            "INSERT INTO lexical_index_meta(index_id,tokenizer_version,segments,docs,terms) "
-            "VALUES(?,?,?,?,?)", (index_id, version, len(segments), len(docs), len(terms)))
-    log.info("派生词法索引构建完成 · %s · %d segments · %d terms", index_id, len(segments), len(terms))
-    return {"index_id": index_id, "segments": len(segments), "docs": len(docs), "terms": len(terms)}
+        cursor = None
+        while True:
+            boundary, args = ("", ()) if cursor is None else (" AND segment_id>?", (cursor,))
+            rows = db.execute("SELECT segment_id,snapshot FROM index_members WHERE index_id=? AND complete=1" +
+                              boundary + " ORDER BY segment_id LIMIT ?", (index_id, *args, _BATCH)).fetchall()
+            if not rows:
+                break
+            segments, docs, terms = [], [], []
+            for row in rows:
+                import json
+
+                snapshot = json.loads(row["snapshot"])
+                annotation = snapshot.get("annotation") or {}
+                segments.append((index_id, snapshot["id"], snapshot["source_id"], snapshot.get("parent_id"),
+                    snapshot["kind"], snapshot["start"], snapshot["end"],
+                    dumps({field: list(annotation.get(field) or []) for field in _ANNOTATION_FIELDS}),
+                    dumps(sorted(snapshot.get("indexed_views") or []))))
+                views = snapshot.get("views") or {}
+                for channel in LEXICAL_CHANNELS:
+                    counter, total = document_terms("\n".join(value for key, value in views.items() if key == channel))
+                    docs.append((index_id, snapshot["id"], channel, total))
+                    terms.extend((index_id, channel, term, snapshot["id"], tf) for term, tf in counter.items())
+            db.executemany("INSERT INTO search_segments(index_id,segment_id,source_id,parent_id,kind,"
+                           'start,"end",annotation_projection,indexed_views) VALUES(?,?,?,?,?,?,?,?,?)', segments)
+            db.executemany("INSERT INTO lexical_docs(index_id,segment_id,channel,doc_length) VALUES(?,?,?,?)", docs)
+            for offset in range(0, len(terms), _BATCH):
+                db.executemany("INSERT INTO lexical_terms(index_id,channel,term,segment_id,tf) VALUES(?,?,?,?,?)",
+                               terms[offset:offset + _BATCH])
+            for key, values in (("segments", segments), ("docs", docs), ("terms", terms)):
+                counts[key] += len(values)
+            cursor = rows[-1]["segment_id"]
+        db.execute("INSERT INTO lexical_index_meta(index_id,tokenizer_version,segments,docs,terms) VALUES(?,?,?,?,?)",
+                   (index_id, version, counts["segments"], counts["docs"], counts["terms"]))
+    log.info("派生词法索引构建完成 · %s · %d segments · %d terms", index_id, counts["segments"], counts["terms"])
+    return {"index_id": index_id, **counts}
 
 
 def drop_lexical_index(store: Store, index_id: str) -> None:

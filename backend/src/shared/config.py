@@ -446,6 +446,10 @@ class SearchConfig(StrictModel):
             "lexical": 0.1,
         }
     )
+    query_timeout_seconds: float = Field(default=5, gt=0, le=300)
+    id_page_size: int = Field(default=512, ge=1, le=4096)
+    query_cache_bytes: int = Field(default=64 * 1024**2, ge=0)
+    query_cache_entries: int = Field(default=128, ge=0)
     max_upload_mb: int = Field(default=100, ge=1)
     max_image_upload_mb: int = Field(default=20, ge=1, le=100)
     max_query_seconds: float = Field(default=30, gt=0)
@@ -689,6 +693,7 @@ class ChromaServerConfig(StrictModel):
 
     url: str = "http://127.0.0.1:8000"
     token_env: str = "MINDEX_CHROMA_TOKEN"
+    request_timeout_seconds: float = Field(default=30, gt=0)
 
 
 class VectorConfig(StrictModel):
