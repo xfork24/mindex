@@ -4,6 +4,70 @@
 本页区分实现、接入与实测；没有执行证据的条目不标记完成。
 逐项需求与调用点见[交付矩阵](../plans/horizontal-scaling-delivery-matrix.md)。
 
+## 持久创作与上传核心批次（2026-11-05）
+
+本批交付 B04、B07、C02、D01，并补齐 D02 以及修订、产物、日志、字幕归档和媒体使用期接入。
+运行与恢复协议见[持久创作、目录发布与上传会话](scaling-durable-delivery.md)。schema 追加到 21。
+
+实现提交：`bef02b8`（共享底座）与 `e47e706`（业务接入与验收入口）。报告的 code_version
+为起测时 HEAD `d6b44db`；下列源码摘要覆盖测试时工作区，与这两次实现提交一致。
+
+冻结源码摘要：`118c24909fe529f9a28ca82bafdf4cd53ec357ce5c22df3e7e857fcfe17868c0`。
+
+| 验证 | 本次结果 | 原始证据 |
+| --- | --- | --- |
+| 隔离 PG / MinIO / Chroma 专项 | 205 通过，0 失败、0 错误、0 跳过；源码未变化 | `artifacts/scaling-core-118c24909fe5/backends/` |
+| 真实 CPU source 吞吐 | 单 worker 53.43 秒、双 worker 28.49 秒，8 个任务分别生成 88 个 segments；吞吐 1.8757 倍，门槛 1.5 倍通过 | `artifacts/scaling-core-118c24909fe5/cpu/`：环境、镜像、JUnit、逐 worker 日志、配置、原始结果、ffmpeg 版本 |
+| wheel 模块及资源 | 316 个模块、69 个前端资源逐字节匹配，无遗漏或多余模块；时区依赖进入 wheel | `artifacts/scaling-core-118c24909fe5/wheel.json` |
+| 可选 SDK / 动画运行时 | Python 3.13.11 隔离 wheel 环境 34 通过，0 跳过；环境已清理 | `artifacts/scaling-core-118c24909fe5/extras/` |
+| 默认依赖负向检查 | Python 3.11.16 无 PG/S3/person 可选驱动的隔离 wheel 环境，381 通过、25 个后端用例预期跳过；环境已清理 | `artifacts/scaling-core-118c24909fe5/lean/` |
+| macOS arm64 冻结 sidecar | 构建、自检、资源、真实视频 prepare、API 启动和 SIGTERM 退出通过 | `artifacts/scaling-core-118c24909fe5/sidecar/` |
+| Electron 外壳 | 32 通过，0 跳过 | `artifacts/scaling-core-118c24909fe5/desktop-shell.log` |
+| 完整本地冻结回归 | 3009 节点全部执行：2853 通过、156 环境跳过，0 失败/错误；源码未变化 | `artifacts/scaling-core-118c24909fe5/local/` |
+| 浏览器完整素材工作流 | 上传失败/重复、四类处理、人物、发布、检索、重载、桌面/窄屏布局通过；确定性模型 | `artifacts/scaling-core-118c24909fe5/browser/` |
+| 实际 macOS 应用远程工作流 | 带认证上传/处理/检索、SSE 与重连、创作工作区编辑、409 后保留输入、断网恢复、菜单重启通过；未生成本机元数据库，退出不停止服务端 | `artifacts/scaling-core-118c24909fe5/macos/remote-report.json`、`studio-report.json`、日志与截图 |
+| DMG / ZIP 与隔离安装副本 | macOS arm64 ad-hoc 产物、DMG 挂载、复制、签名校验及安装副本远程工作流通过；临时副本已清理 | 同目录 `distribution.json`、`install-report.json`、`installed/` |
+
+同一冻结源码的逐节点合并结果：**3007 个不同节点通过，仅两个 Windows 进程分支未执行**。
+本地 156 个跳过项中，133 项由真实后端专项覆盖，20 项由可选运行时覆盖，1 项由独立 CPU
+专项覆盖；另外两项只能在 Windows 执行。清单见 `artifacts/scaling-core-118c24909fe5/coverage.json`。
+这些是功能节点覆盖，不替代本节后列出的容量、模型、双机或安装验收。
+
+ruff、mypy（87 个模块）、数据库构造边界、文案镜像、资源哈希、JS 语法和仓库文档链接通过。
+源码包的 385 个 Python/前端文件与当前代码逐字节一致，不含用户数据、`artifacts/` 或本地配置；
+记录见同目录 `sdist.json`。
+
+CPU 验收没有使用并发 sleep 或模拟媒体处理。使用真实 30 秒 480×270 / 12fps 视频，
+分别预热后执行 8 个独立 source 任务；每 worker 的 OpenCV / BLAS、ffmpeg 解码及编码各
+限制为一个线程，不调用 GPU 或模型，不包含索引发布；双 worker 使用独立节点目录。
+核对不同 worker owner、账本终态、S3 产物大小与摘要。这只验证单机 CPU 横向处理能力。
+
+实际应用测试使用临时库和环境变量凭据。原生 SSE 与编辑/保存经过真实服务端；目录 409
+响应在浏览器侧注入以检查保留输入路径，真实 PG 双 API CAS 由后端专项验证，两项证据
+分别记录。macOS 系统密钥环、Gatekeeper 公证、Windows/Linux 安装尚未实测。
+
+资源预检见 `artifacts/scaling-core-capacity-preflight.json`：本机 8 CPU、16 GiB 内存；
+默认 4096 维、300 万向量、三个版本的 float32 向量本体需要 147456000000 字节，
+已超过本轮可用磁盘，尚未计入索引、PG、备份与媒体。规定容量、尾延迟及真实模型质量
+保留“环境不足 / 待验收”，没有通过降低维度、规模或门槛替代验收。
+
+保留开发期失败记录：早期分镜 fixture 镜头数断言与 TTL 设置不当、回执类型恢复错误、
+模型工厂在非持久场景被无条件包装、旧浏览器脚本的折叠工作台/按钮/角色参考图假设、
+新事件表的 PG AUTOINCREMENT 方言错误，以及语言切换脚本仍拦截旧上传接口。
+实际应用验收另外发现通用按钮移除了自身错误容器，导致刷新后确认不可见；已修复并把
+409 刷新、输入保留和确认文字纳入 `test_i18n_language_and_layout`。
+`scaling-core-completion-local` 保留旧上传拦截的失败记录，`scaling-core-verified-local`
+保留修复冲突提示前主动中断的记录；这些轮次不作为最终冻结通过证据。
+另以隔离用例复现了人工核对后重试与旧连接迟到响应的竞争，修复前成功/错误两场景均失败；
+每次实际 dispatch 现以独立回执凭证条件更新，SQLite 与 PG 四个场景通过。原始复现保留在
+`artifacts/external-dispatch-generation-before.log`。此前的 `scaling-core-final-local` 因此主动
+中断；`scaling-core-release-local` 保留另一项浏览器检索等待超时及中断记录（单独复跑通过），
+这些轮次均不计入本次完整通过。最终完整回归在打包和其他验收结束后单独执行。
+首次冻结后端离线安装因缓存缺包失败，保留日志；后续构建使用锁定版本联网安装。
+工作区原有的 `config.example.yaml` 改动 不纳入本批实现提交。
+
+以下“当前批次”保留此前增强实现的历史证据；本批状态优先以本节及交付矩阵为准。
+
 ## 当前批次
 
 | 内容 | 实现 | 接入 | 验证依据 |
@@ -31,6 +95,8 @@ uv sync --extra dev --extra cluster
 uv run python scripts/check-scaling-boundaries.py
 uv run python scripts/verify-scaling.py --minio-binary /path/to/minio
 uv run python scripts/verify-local.py --workers 4
+# 在没有其他验收负载时单独执行；--output 指向尚不存在的目录
+uv run python scripts/verify-scaling-cpu.py --minio-binary /path/to/minio --output artifacts/cpu-YYYYMMDD
 ```
 
 脚本创建独立 PostgreSQL 和 Chroma 容器、临时 MinIO 数据目录及随机凭据/端口，

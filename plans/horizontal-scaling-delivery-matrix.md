@@ -14,26 +14,26 @@
 | A03 | PG/S3/Chroma namespace：`shared/backends/s3.py`、`vectors.py`、`processing/indexing.py` | 已实现 / 已接入 / 已验证 | `test_backend_identity.py`：相同资源键跨库隔离；旧 namespace 显式导出；无自动回落 |
 | A04 | 全部缓存身份与上下文生命周期 | 部分 / 部分 / 部分 | 下载、查询向量、人物版本和 PG 快照已绑定库身份；其余节点文件与上下文退出逐项核查 |
 | A05 | 查询/控制池与总连接预算：`shared/db/pg_backend.py` | 已实现 / 已接入 / 已验证 | 查询池耗尽时控制池仍可用；控制连接拒绝普通写入；全节点连接预算需部署核算 |
-| A06 | 追加迁移、协议与启动能力检查：`shared/db/migrate_pg.py`、`doctor.py` | 部分 / 部分 / 部分 | v15→19、v18→19 数据/历史校验值通过；混合版本、分词器/模型/后端能力的统一启动准入待闭合 |
-| A07 | 源码、wheel、冻结产物 | 已实现 / 已接入 / 部分 | 当前 wheel 309 模块逐字节核对；当前 macOS arm64 sidecar 已重建，schema 19、无系统时区数据的资源探针通过；其他平台和混合版本仍待验收 |
+| A06 | 追加迁移、协议与启动能力检查：`shared/db/migrate_pg.py`、`doctor.py` | 部分 / 部分 / 部分 | v15→21、v18→21 数据/历史校验值通过；混合版本、分词器/模型/后端能力的统一启动准入待闭合 |
+| A07 | 源码、wheel、冻结产物 | 已实现 / 已接入 / 部分 | 本批源码包 385 个代码/前端文件、wheel 316 模块与 69 个前端资源逐字节核对；macOS arm64 sidecar 构建和自检通过，schema 21、无系统时区数据的资源探针通过；其他平台和混合版本仍待验收 |
 | B01 | source/dialogue/person/topic 账本与入队同事务：`shared/queue_dispatch.py` | 已实现 / 已接入 / 已验证 | `test_scaling_correctness.py`、`test_scaling_foundation.py`；触发器已被显式事务替代。范围为账本路径，CLI 前台直接处理入口仍须单独审计持久化覆盖 |
 | B02 | attempt 绑定、取消、回收与终态原子提交：`queue_pg.py`、`task_progress.py` | 已实现 / 已接入 / 已验证 | TTL 回收、失败上限、跨目录取消、人工重试、账本/队列终态用例 |
 | B03 | 显式凭证、线程和提交 fencing：`db/fencing.py`、`pg_backend.py` | 已实现 / 已接入 / 部分 | 显式 commit、处理线程池和过期写入拒绝已测；双机 SIGSTOP/控制失败仍待演练 |
-| B04 | Studio 持久执行链：`studio/executor.py`、`studio_api.py` | 待实现 / 待接入 / 待验证 | 所有步骤、节点、列、构建进入持久队列；文件发布受同一 attempt 保护 |
-| B05 | index 持久执行链：`cli.py`、`admin/source_tasks.py::IndexTasks`、`shared/queue_dispatch.py`、`processing/indexing.py` | 已实现 / 已接入 / 已验证 | `test_scaling_execution.py`：真实视频构建、词法回填、人物/组合发布、取消重试、终态事务与指针原子发布；发布锁持续至提交，双 worker 跨目录串行继承；冻结模型恢复与提交锁竞争；单机隔离后端 180 项通过 |
+| B04 | Studio 持久执行链：`studio/tasks.py`、`studio_api.py`、`studio_logs.py` | 已实现 / 已接入 / 已验证（单机） | 步骤/节点/整列/构建共用 `studio_tasks`；提交与入队、终态与 manifest 同事务；PG 事件日志、空缓存产物读取、跨节点取消、过期拒绝与回执重放通过。双机故障仍见 G06 |
+| B05 | index 持久执行链：`cli.py`、`admin/source_tasks.py::IndexTasks`、`shared/queue_dispatch.py`、`processing/indexing.py` | 已实现 / 已接入 / 已验证 | `test_scaling_execution.py`：真实视频构建、词法回填、人物/组合发布、取消重试、终态事务与指针原子发布；发布锁持续至提交，双 worker 跨目录串行继承；冻结模型恢复与提交锁竞争；本批隔离后端 205 项通过 |
 | B06 | 稳定周期去重：`topics/scheduler.py`、`topics/runner.py` | 已实现 / 已接入 / 已验证 | 库时区、周期/账本/入队同事务；leader 切换/重复提交只生成一个周期任务，失败上限三次；跨目录重放及崩溃回滚已测，双机故障仍见 G06 |
-| B07 | 外部副作用幂等与未知结果恢复：模型 submit/poll、Studio 处理器 | 待实现 / 待接入 / 待验证 | 稳定幂等键、request_id、恢复状态；未知结果禁止盲目重试 |
+| B07 | 持久创作外部副作用幂等与未知结果恢复：`shared/external_calls.py`、模型工厂、工具 submit | 已实现 / 已接入 / 已验证（单机） | 稳定调用 ID、独立回执、request_id 续查、二进制对象与类型恢复；未知结果阻断、核对依据、原账本重试及双语核对入口；提供商真实幂等/限流仍待实测 |
 | B08 | GPU 物理资源组与真实模型服务并发 | 部分 / 部分 / 待实测 | 现有槽位不足以证明物理资源组隔离；需真实模型限流与并发验收 |
 | C01 | 小检查点不可变对象与 PG 指针：`shared/checkpoints.py`、`files.py` | 已实现 / 部分 / 部分 | 跨节点修订读取已测；全部权威文件登记尚未完成 |
-| C02 | Studio 不可变目录 manifest + 当前 revision 指针 | 待实现 / 待接入 / 待验证 | `workspace/versions.py` 仍逐文件递归发布，不能作为目录原子提交；必须消除旧节点文件覆盖 |
-| C03 | 所有人为修改携带修订：Studio 写接口与前端 | 部分 / 部分 / 部分 | 部分 If-Match/CAS 已有；后台标题遵守 Studio 写锁，避免旧步骤状态写回；缺前置条件 428、全写接口覆盖、刷新保留编辑内容仍待实现 |
-| C04 | 权威文件闭包：字幕/归档、转写/分析、人物、音乐、声音、选题、Studio | 部分 / 部分 / 部分 | `processing/subtitle_archive.py` 等调用点仍须登记；清空任意节点缓存后全业务续跑验收 |
-| C05 | 全使用期媒体 pin：`Store.materialize_media`、`ShotMedia.materialized`、HTTP 响应 | 已实现 / 部分 / 部分 | 管理端响应、镜头合成与 PG 指针摘要已测；其他裸 `resolve_media` 消费仍待改造 |
-| C06 | 跨进程 staging 预算/活动 pin：`shared/backends/staging.py` | 已实现 / 部分 / 部分 | 多进程 pin、预约、崩溃 owner 回收通过；输出和临时工作空间预约尚未全覆盖 |
+| C02 | Studio 不可变目录 manifest + 当前 revision 指针：`shared/directory_files.py` | 已实现 / 已接入 / 已验证（单机） | 显式依赖先上传、目录 CAS 原子切换；读取绑定 snapshot；旧缓存不能回写 job.json；历史清单及产物 bundle 往返通过 |
+| C03 | 所有人为修改携带修订：`studio/revisions.py` 与共享 Web/CLI/MCP 客户端 | 已实现 / 已接入 / 部分 | 共享 Studio 人工写入缺 If-Match 返回 428、冲突 409，单次请求原子发布；客户端传递目录修订且不自动重试 409。浏览器已覆盖显式刷新、输入保留及确认；实际 PG 双 API 与浏览器合并故障矩阵仍待完成 |
+| C04 | 权威文件闭包：字幕/归档、转写/分析、人物、音乐、声音、选题、Studio | 部分 / 部分 / 部分 | 新增字幕归档共享指针、Studio 版本/参考文稿与旧步骤产物、外部回执、上传资产；冷节点读取及 Studio bundle 恢复通过，其他业务引用仍须逐项闭合 |
+| C05 | 全使用期媒体 pin：`Store.materialize_media`、attempt 保留、HTTP 响应 | 已实现 / 部分 / 部分 | 人物提取、分析、分镜检测、Studio 预览/下载/归档改用上下文；持久 worker 兼容 Path 入口保留到 attempt 结束。诊断等其他裸 Path 消费仍待改造 |
+| C06 | 跨进程 staging 预算/活动 pin：`shared/backends/staging.py` | 已实现 / 部分 / 部分 | 多进程 pin/预约/崩溃回收已有验证；新增上传分片输入与 S3 上传/合并暂存预算。其余输出和临时工作区预约尚未全覆盖 |
 | C07 | attempt/发布/备份/下载统一远端 pin 与 GC 协调 | 部分 / 部分 / 部分 | 下载 pin 和宽限基础用例通过；统一标记、引用复验、条件删除与下载竞争仍待闭合 |
-| D01 | pending/multipart/complete/abort 上传会话 | 待实现 / 待接入 / 待验证 | `shared/uploads.py` 仍是流式临时落盘 helper；必须有持久会话与 pending key 归属 |
-| D02 | 上传摘要、配额、幂等完成、过期回收 | 部分 / 部分 / 部分 | S3 不可变上传复算 SHA256/条件创建已测；客户端会话配额与恢复协议尚未实现 |
-| D03 | 浏览器独立 endpoint、CORS、Content-Type 与访问协议 | 部分 / 部分 / 待实测 | 跨 API 媒体读取通过；HEAD/Range/ETag/过期 URL/长视频 seek 需完整协议矩阵 |
+| D01 | pending/multipart/complete/abort 上传会话：`shared/upload_sessions.py`、`upload_api.py` | 已实现 / 已接入 / 已验证（单机） | PG/SQLite 持久会话、独立凭据、pending 分片、跨 API 续传、完成登记、abort；Web/旧上传/agent 与 CLI 共用状态机。浏览器直连 S3 的预签名 multipart 不计入本项完成 |
+| D02 | 上传摘要、配额、幂等完成、过期回收 | 已实现 / 已接入 / 已验证（单机） | 分片及完整 SHA256 服务端复算；字节/会话/分片数预算；重复完成、错误归属、摘要不符、过期回收；API 生命周期回收及显式 CLI 接入 |
+| D03 | 浏览器独立 endpoint、CORS、Content-Type 与访问协议 | 部分 / 部分 / 部分 | 已完成上传素材与 Studio 产物的跨 API 读取、HEAD/Range/ETag 基础用例；独立浏览器 S3 endpoint/CORS、过期 URL 与长视频 seek 全矩阵仍待实测 |
 | E01 | 可见性、annotation、素材范围的 eligible 统计快照：`search/lexical_query.py` | 已实现 / 已接入 / 已验证 | SQL BM25 与 Python 参考分数/排序、人物投影五类查询逐项一致 |
 | E02 | 人物证据投影与候选水合：`persons/persons.py`、`SearchEngine._hydrate` | 已实现 / 已接入 / 已验证 | PG 按素材/身份取证据；命中只水合所需片段/父镜头/整理信息 |
 | E03 | 去掉集群预热全快照和 representation map：`search/warmup.py` | 已实现 / 已接入 / 已验证 | 禁止全快照/人物大缓存/map 的预热用例通过；缺派生表的查询回退仍未去除 |
@@ -42,7 +42,7 @@
 | F01 | 统一 CLI 校验与激活记录：`maintenance/migration.py` 的 preflight/export/load/verify/activate | 已实现 / 已接入 / 已验证 | 拒绝非空/异值目标；CLI 拒绝激活缺必要媒体或向量的诊断 bundle |
 | F02 | migration_id、源清单身份、元数据/日志原子提交：`db/transfer.py` | 已实现 / 已接入 / 已验证 | 真子进程 `os._exit` 崩溃与提交后失败续跑；消除本地 JSON 日志窗口 |
 | F03 | 分阶段/分对象/分集合续跑与恢复账本 | 部分 / 部分 / 待验证 | 当前只能对已提交元数据续跑；部分对象写入、旧 running attempt 的完整重建策略待闭合 |
-| F04 | 媒体/向量/Studio 历史闭包与秘密裁剪 | 部分 / 部分 / 部分 | 样本媒体/向量/逻辑视图往返通过；所有业务引用闭包和所有秘密载体尚未验证 |
+| F04 | 媒体/向量/Studio 历史闭包与秘密裁剪 | 部分 / 部分 / 部分 | 新增真实 S3 bundle 恢复 Studio 历史、目录历史、外部二进制回执与上传素材；其他业务媒体闭包和全部秘密载体仍待闭合 |
 | F05 | 身份切换、激活 gate、目标写入后的逆向迁移 | 部分 / 部分 / 部分 | 资源自首份写入绑定源 UUID、小样本双向通过；业务节点加载/激活准入、运行中身份切换与完整逆向数据待闭合 |
 | F06 | PG/WAL、对象保护与实测灾备 | 待实测 / 待实测 / 待实测 | 记录停写边界与吞吐；RPO≤24h、RTO≤8h 必须实测，不以组件恢复代替 |
 | G01 | 两 API/两 worker、独立目录的真实素材处理 | 已实现 / 已接入 / 已验证 | `test_cluster_process_flow.py`：四个进程上传/执行/跨节点读媒体、摘要与 worker owner 对账 |
@@ -50,16 +50,24 @@
 | G03 | outbox 先落事件后 ack、持久去重与生命周期 | 已实现 / 已接入 / 部分 | 持久回执与重放组件测试通过；真实网关 kill/restart/SSE 重连待验收 |
 | G04 | 业务 API/远程 stdio MCP 不创建本机 agent 状态 | 已实现 / 已接入 / 已验证 | `test_scaling_execution.py`：远程 CLI 禁止 Store.open/覆盖层读取，未创建节点目录；PG 业务 API 在 SessionStore 构造前拒绝本机会话模式 |
 | G05 | live/ready、监控、部署和故障 runbook | 部分 / 部分 / 部分 | `/api/live`、`/api/ready` 与池/队列/staging 指标已接入；共享服务故障及运维演练待验收 |
-| G06 | 双机故障与真实 CPU 吞吐 ≥1.5 倍 | 待实测 / 待实测 / 待实测 | 两主机重复 kill/SIGSTOP/断连/取消/发布/备份-purge/网关恢复；不能用并发睡眠任务代替 |
+| G06 | 双机故障与真实 CPU 吞吐 ≥1.5 倍 | 已实现 / 已接入 / 部分 | 单机真实 source 处理：8 任务，单 worker 53.43s、双 worker 28.49s，吞吐 1.8757 倍通过；`verify-scaling-cpu.py`。两主机 kill/SIGSTOP/断连/取消/发布/备份-purge/网关恢复仍待实测 |
 | H01 | 系统加密凭据、明文迁移、错误配置不静默回落 | 已实现 / 已接入 / 部分 | 桌面外壳 32 项通过；三平台实际密钥环尚未实测 |
-| H02 | 远程检索/上传/SSE/创作/重启/断网/清除 | 部分 / 部分 / 待实测 | 真实安装应用中逐项执行并保存日志，不能用外壳 mock 代替 |
-| H03 | 三平台安装包与本地 sidecar 回归 | 部分 / 部分 / 部分 | 本批 macOS arm64 冻结 sidecar、命名时区资源、32 项外壳测试通过；三平台安装包、安装与远程完整流程待执行 |
+| H02 | 远程检索/上传/SSE/创作/重启/断网/清除 | 部分 / 部分 / 部分 | 本机实际 macOS 应用和 DMG 隔离安装副本已验证带认证上传/检索、SSE、工作区编辑、断网恢复和重启；完整模型创作、凭据清除及其他平台仍待实测 |
+| H03 | 三平台安装包与本地 sidecar 回归 | 部分 / 部分 / 部分 | 本批 macOS arm64 冻结 sidecar、DMG/ZIP、隔离安装副本及远程工作流、32 项外壳测试通过；Windows/Linux 和公证分发仍待执行 |
 | H04 | 部署设置校验、热更新/重启边界与双语文案 | 部分 / 部分 / 部分 | 现有设置读展示与桌面双语错误已接入；全部字段的编辑/校验与凭据引用待闭合 |
 
-本批实现提交：`c0c213c`、`eedcd31`、`400f598`。最终本地完整回归 2823 通过、144 个环境跳过；
+上一批实现提交：`c0c213c`、`eedcd31`、`400f598`。该批本地完整回归 2823 通过、144 个环境跳过；
 真实后端 180 通过且无跳过，可选运行时 34 通过且无跳过。合并后 2965 个不同测试节点通过，
 仅两个 Windows 进程分支未在本机执行。其余性能、双机及安装包需求仍以表中状态为准。
 
 共同验收约束：默认本地测试离线；真实后端专项缺依赖或任何 skip 均失败；
 所有证据保留源码摘要、配置/版本、测试选择和原始日志。失败、环境不足、中断的记录均保留，
 不算作通过。agent 多实例、NFS、存储 HA/分片不纳入必交付。
+
+本批核心能力的运行说明见[持久创作、目录发布与上传会话](../docs/scaling-durable-delivery.md)。
+本次冻结源码摘要：`118c24909fe529f9a28ca82bafdf4cd53ec357ce5c22df3e7e857fcfe17868c0`。
+真实后端专项 205 通过、0 跳过（`artifacts/scaling-core-118c24909fe5/backends/`）；
+真实 CPU source 吞吐 1.8757 倍，超过 1.5 倍门槛（`artifacts/scaling-core-118c24909fe5/cpu/`）。
+本批完整回归 2853 通过、156 环境跳过、零失败/错误；合并后端、可选运行时与 CPU 专项后，
+3007 个不同节点通过，仅两个 Windows 分支未执行，详见 `artifacts/scaling-core-118c24909fe5/coverage.json`。
+浏览器、macOS DMG/ZIP、隔离安装副本与实际远程工作流通过；完整范围见验证记录。
