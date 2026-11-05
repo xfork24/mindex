@@ -100,3 +100,37 @@ HTTP 响应的物化上下文保留；HTML 导出复制引用媒体到导出目�
 `stage2-pin-local2.log` 为离线定向 32 通过、6 环境跳过；外部节点随后由真实后端专项覆盖，
 不把跳过作为通过。核心新增模块 Mypy、全树 Ruff、构造边界、文档链接与 diff 检查通过。
 单机统一故障矩阵和最终冻结回归仍需在后续批次完成后执行。
+
+## 第三批进行中：双路径上传
+
+追加 v24（上传 transport、原生 multipart 身份、完成阶段/错误与分片 ETag），
+同步 PG 方言的追加列映射。默认 API 路径兼容，S3 直传对会话 pending key 签名；
+浏览器使用独立 endpoint，内部数据客户端不变。Content-Length 纳入分片签名，
+完整 SHA256 在服务器复算，不能使用 multipart ETag 替代。
+
+原生 multipart 创建后 UploadId 未落账、未登记分片、远端完成后未记账与正式对象
+写入后未登记资产均有恢复入口。会话处于 completing 时仍占配额，可再次 complete；
+abort/reap 清理应用分片和原生 multipart。浏览器保留会话，提供续传和显式重新上传。
+部署说明见 [双路径上传配置](scaling-upload.md)。doctor 核验实际 endpoint/签名/CORS，
+仅操作独立随机探针；readiness 不执行这些写入探针。
+
+`artifacts/scaling-completion-batch3/uploads-first/`：228 通过、10 失败、零跳过；
+新增列未被 PG SELECT * 展开，导致所有上传入口一致失败，已修复方言映射。
+`local.xml`：SQL、上传兼容、摘要和界面文案 40 项通过，11 个外部节点由真实后端专项执行。
+本节仍为进行中，不代表第三批或全部计划完成。
+
+`uploads-second/`：237 通过、1 失败、零跳过；新增测试把 `Store.one()` 的字典当作位置行访问，
+已修正测试。`uploads-third/`：239 通过、零失败/错误/跳过，源码摘要一致。
+真实 Chromium 通过独立 endpoint/CORS，PUT 被 S3 接收后代理切断响应，显式续传恢复分片且
+未重新 PUT；75 秒 H.264/AAC 视频实际 seek 到第 60 秒，截图为 `s3-browser-upload.png`。
+
+补查隐藏临时文件崩溃后计费缺口：staging 预约按文件路径登记，预约与可见文件在同一账本锁内
+原子交接；owner 失效后的隐藏残留重新计入缓存并可淘汰。`staging-final.xml` 24 项通过。
+浏览器“重新上传”先取消旧会话释放配额；兼容、摘要、直传凭据不发往应用以外地址及双语文案
+回归 10 项通过（`compatibility-final.log`）。核心新增模块 Mypy 与全树 Ruff 通过。
+
+`uploads-fourth/`：238 通过、1 失败、零跳过；负向签名测试向代理发送大请求体时，隔离代理在
+S3 提前拒绝后发生 BrokenPipe，不能作为凭据拒绝证据。改以同一会话末尾小分片检验后，
+`uploads-fifth/` 最终 239 通过、零失败/错误/跳过，源码摘要一致；错误签名及超声明 Content-Length
+均得到真实 S3 403，完成边界恢复、摘要错误、到期清理、过期 URL、HEAD/Range/If-Range/ETag
+与两条上传路径通过。既有失败证据继续保留，统一故障矩阵及最终冻结回归仍待执行。

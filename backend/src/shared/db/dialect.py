@@ -331,11 +331,13 @@ def _parse_baseline_tables() -> dict[str, tuple[str, ...]]:
 
 @cache
 def _baseline_columns() -> dict[str, tuple[str, ...]]:
-    from mindex.shared.db.scaling_schema import LEDGER_ATTEMPT_COLUMNS, LEDGER_TABLES
+    from mindex.shared.db.scaling_schema import LEDGER_ATTEMPT_COLUMNS, LEDGER_TABLES, MULTIPART_COLUMNS
 
     tables = _parse_baseline_tables()
     for table in LEDGER_TABLES:
         tables[table] = (*tables[table], *LEDGER_ATTEMPT_COLUMNS)
+    for table, columns in MULTIPART_COLUMNS.items():
+        tables[table] = (*tables[table], *columns)
     return tables
 
 

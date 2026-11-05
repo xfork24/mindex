@@ -87,6 +87,9 @@ def referenced_objects(store, *, connection=None):
             yield from path_values(json.loads(row["receipt"]))
     for row in _rows(db, "uploaded_assets", ("object_key",)):
         yield row["object_key"]
+    for row in db.execute("SELECT pending_key FROM upload_sessions WHERE state IN ('pending','completing') "
+                          "AND pending_key IS NOT NULL").fetchall():
+        yield row["pending_key"]
     rows = db.execute("SELECT p.object_key FROM upload_parts p JOIN upload_sessions s ON s.id=p.session_id "
                       "WHERE s.state IN ('pending','completing')").fetchall()
     for row in rows:

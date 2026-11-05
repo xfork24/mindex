@@ -109,3 +109,5 @@ Mindex 定位为 **one-stop video creation agent**（一站式视频创作智能
 | [studio-initial-plan.md](../plans/studio-initial-plan.md) / [studio-refinement-plan.md](../plans/studio-refinement-plan.md) | 创作工作流初始设计与修订 |
 | [roadmap.md](../plans/roadmap.md) | 功能路线图（M1–M4：创作能力、选题与 agent、后期、桌面分发） |
 | [model-identity-rehash-plan.md](../plans/model-identity-rehash-plan.md) | 模型身份与索引兼容性重构（三层身份模型） |
+
+双路径上传与浏览器 S3 endpoint/CORS 配置见 [scaling-upload.md](scaling-upload.md)。

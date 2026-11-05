@@ -751,6 +751,8 @@ class S3Config(StrictModel):
     multipart/checksum/version 能力需逐项验证，不默认等同 AWS。"""
 
     endpoint_url: str = "http://127.0.0.1:9000"
+    browser_endpoint_url: str = ""
+    browser_origins: list[str] = Field(default_factory=list)
     bucket: str = "mindex"
     prefix: str = ""
     region: str = ""
@@ -759,6 +761,21 @@ class S3Config(StrictModel):
     staging_quota_gb: float = Field(default=100, gt=0)
     min_free_gb: float = Field(default=20, ge=0)
     presign_expire_seconds: int = Field(default=900, ge=60)
+
+    @model_validator(mode="after")
+    def browser_access(self):
+        from urllib.parse import urlsplit
+
+        for value in [self.endpoint_url, self.browser_endpoint_url, *self.browser_origins]:
+            if not value:
+                continue
+            parsed = urlsplit(value)
+            if (parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username
+                    or parsed.password or parsed.query or parsed.fragment):
+                raise ValueError("S3 endpoint/origin 必须是无凭据、查询参数和片段的 HTTP(S) 地址")
+            if value in self.browser_origins and parsed.path not in {"", "/"}:
+                raise ValueError("浏览器 origin 不能包含路径")
+        return self
 
 
 class StorageConfig(StrictModel):
@@ -793,6 +810,7 @@ class DatabaseConfig(StrictModel):
 
 
 class UploadConfig(StrictModel):
+    default_transport: Literal["api", "s3"] = "api"
     max_sessions: int = Field(default=256, ge=1, le=10000)
     pending_bytes: int = Field(default=100 * 1024**3, ge=1)
     part_bytes: int = Field(default=8 * 1024**2, ge=1, le=64 * 1024**2)
@@ -830,6 +848,8 @@ class Config(StrictModel):
     @model_validator(mode="after")
     def animator_defaults_to_agent(self):
         """yaml 未写 ``studio.animator`` 时复制 ``agent.llm`` 的连接字段（含 api_key_env），其余取动画生成默认值。"""
+        if self.uploads.default_transport == "s3" and self.storage.backend != "s3":
+            raise ValueError("uploads.default_transport=s3 需要 storage.backend=s3")
         if "animator" not in self.studio.model_fields_set:
             llm = self.agent.llm
             inherited = AnimatorConfig(**{key: getattr(llm, key) for key in ANIMATOR_INHERITED})

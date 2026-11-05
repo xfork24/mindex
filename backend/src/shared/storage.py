@@ -440,7 +440,13 @@ def _metadata_v23(db):
     execute_script(db, SQLITE_OBJECTS)
 
 
-METADATA_STEPS = (_metadata_v1, _metadata_v2, _metadata_v3, _metadata_v4, _metadata_v5, _metadata_v6, _metadata_v7, _metadata_v8, _metadata_v9, _metadata_v10, _metadata_v11, _metadata_v12, _metadata_v13, _metadata_v14, _metadata_v15, _metadata_v16, _metadata_v17, _metadata_v18, _metadata_v19, _metadata_v20, _metadata_v21, _metadata_v22, _metadata_v23)
+def _metadata_v24(db):
+    from mindex.shared.db.scaling_schema import SQLITE_MULTIPART
+
+    execute_script(db, SQLITE_MULTIPART)
+
+
+METADATA_STEPS = (_metadata_v1, _metadata_v2, _metadata_v3, _metadata_v4, _metadata_v5, _metadata_v6, _metadata_v7, _metadata_v8, _metadata_v9, _metadata_v10, _metadata_v11, _metadata_v12, _metadata_v13, _metadata_v14, _metadata_v15, _metadata_v16, _metadata_v17, _metadata_v18, _metadata_v19, _metadata_v20, _metadata_v21, _metadata_v22, _metadata_v23, _metadata_v24)
 
 
 def migrate_metadata(db) -> int:

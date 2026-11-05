@@ -179,7 +179,7 @@ def windows(start: float, end: float, size: float = 4, stride: float = 3) -> lis
 def atomic_media(args: list[str], output: Path, *, timeout: float = 600):
     output.parent.mkdir(parents=True, exist_ok=True)
     partial = output.with_name("." + output.stem + ".partial" + output.suffix)
-    from mindex.shared.work_budget import current
+    from mindex.shared.work_budget import commit_file, current
 
     budget = current()
     if budget is not None:
@@ -187,7 +187,7 @@ def atomic_media(args: list[str], output: Path, *, timeout: float = 600):
         budget.retain(partial)
     try:
         command(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", *args, str(partial)], timeout=timeout)
-        partial.replace(output)
+        commit_file(partial, output)
         if budget is not None:
             budget.committed(partial)
     finally:

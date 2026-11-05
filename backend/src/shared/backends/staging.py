@@ -128,10 +128,13 @@ class StagingArea:
     def _rescan(self) -> None:
         """启动时把既有文件按访问时间登记进 LRU（崩溃残留按可淘汰处理）。"""
         self._entries.clear()
+        covered = {key for owner in self._state["owners"].values()
+                   for key, size in owner.get("reservations", {}).items() if size > 0}
         found = []
         for path in self.root.rglob("*"):
-            if (path.is_file() and not any(part.startswith(".") or part in {"locks", "models", "chroma"}
+            if (path.is_file() and not any(part in {".staging-state", "locks", "models", "chroma"}
                                            for part in path.relative_to(self.root).parts)
+                    and self._key_of(path) not in covered
                     and not path.name.endswith((".lock", ".sqlite3", "-wal", "-shm"))):
                 try:
                     stat = path.stat()
@@ -158,7 +161,7 @@ class StagingArea:
         return str(path.resolve())
 
     # ------------------------------------------------------------ 预约
-    def reserve(self, size: int, *, purpose: str = "") -> None:
+    def reserve(self, size: int, *, purpose: str = "", path=None) -> None:
         """预约工作集字节（输入物化 + 输出 + 临时空间的总和）。超限拒绝。"""
         if size < 0:
             raise ValueError("staging 预约字节数不能为负")
@@ -169,7 +172,14 @@ class StagingArea:
                 " 或拆分任务")
         with self._accounting():
             self._evict_locked(size - max(0, self.quota - self._reserved - self._used_locked()))
-            free_needed = self._reserved + size + self.min_free
+            written = 0
+            for owner in self._state["owners"].values():
+                for key, amount in owner.get("reservations", {}).items():
+                    try:
+                        written += min(amount, self._path(key).stat().st_size)
+                    except FileNotFoundError:
+                        pass
+            free_needed = max(0, self._reserved - written) + size + self.min_free
             usage = self._disk(self.root)
             if self._reserved + size + self._used_locked() > self.quota:
                 raise StagingFull(
@@ -182,14 +192,38 @@ class StagingArea:
                     raise StagingFull(
                         f"磁盘剩余 {usage.free} 字节不足（预约 {size} + 最低余量 "
                         f"{self.min_free}）；请清理节点磁盘或下调并发")
-            self._state["owners"][self._owner]["reserved"] += size
+            owner = self._state["owners"][self._owner]
+            owner["reserved"] += size
+            if path is not None:
+                key = self._key_of(self._path(path))
+                reservations = owner.setdefault("reservations", {})
+                reservations[key] = reservations.get(key, 0) + size
 
-    def release(self, size: int) -> None:
+    def release(self, size: int, *, path=None) -> None:
         if size < 0:
             raise ValueError("staging 释放字节数不能为负")
         with self._accounting():
             owner = self._state["owners"][self._owner]
             owner["reserved"] = max(0, owner["reserved"] - size)
+            if path is not None:
+                key = self._key_of(self._path(path))
+                reservations = owner.setdefault("reservations", {})
+                reservations[key] = max(0, reservations.get(key, 0) - size)
+                if not reservations[key]:
+                    reservations.pop(key, None)
+
+    def commit_path(self, partial, target, reserved):
+        """预约到可见文件在同一账本锁内交接，避免并发重复计算或淘汰。"""
+        partial, target = self._path(partial), self._path(target)
+        with self._accounting():
+            owner = self._state["owners"][self._owner]
+            reservations = owner.setdefault("reservations", {})
+            key = self._key_of(partial)
+            if reservations.get(key, 0) != reserved:
+                raise RuntimeError("工作集提交预约与文件不一致")
+            os.replace(partial, target)
+            owner["reserved"] -= reserved
+            reservations.pop(key, None)
 
     # ------------------------------------------------------------ 登记
     def adopt(self, path: Path, *, touch: bool = True) -> int:

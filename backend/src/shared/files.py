@@ -165,9 +165,9 @@ def hydrate(store, path):
         budget = current()
         if budget is not None:
             budget.retain(path)
-        temporary.replace(path)
-        if budget is not None:
-            budget.committed(temporary)
+        from mindex.shared.work_budget import commit_file
+
+        commit_file(temporary, path)
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)

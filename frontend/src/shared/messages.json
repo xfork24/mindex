@@ -14230,5 +14230,37 @@
   "ui.staging_insufficient_space": {
     "zh": "节点暂存空间不足，请完成其他上传或稍后重试",
     "en": "Node staging space is insufficient. Finish other uploads or try again later."
+  },
+  "ui.upload_transport": {
+    "zh": "上传方式",
+    "en": "Upload transport"
+  },
+  "ui.upload_transport_api": {
+    "zh": "通过服务器上传",
+    "en": "Upload through server"
+  },
+  "ui.upload_transport_s3": {
+    "zh": "直传对象存储",
+    "en": "Upload directly to object storage"
+  },
+  "ui.upload_restart_required": {
+    "zh": "上传会话已过期，请显式重新上传",
+    "en": "The upload session has expired. Choose Restart upload to start again."
+  },
+  "ui.upload_direct_failed": {
+    "zh": "S3 上传失败：HTTP {p0}，可重选文件续传",
+    "en": "S3 upload failed: HTTP {p0}. Select the file again to resume."
+  },
+  "ui.upload_cors_etag": {
+    "zh": "S3 CORS 未暴露 ETag，请修复部署后续传",
+    "en": "S3 CORS does not expose ETag. Fix the deployment, then resume."
+  },
+  "ui.upload_resume": {
+    "zh": "续传",
+    "en": "Resume"
+  },
+  "ui.upload_restart": {
+    "zh": "重新上传",
+    "en": "Restart upload"
   }
 }

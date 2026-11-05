@@ -545,9 +545,12 @@ $('person-start').onclick = async () => {const context = personContext;$('person
   } catch (e) {MindexI18n.setText($('person-error'), e.message);$('person-start').disabled = false;}};
 $('person-close').onclick = () => $('person-dialog').close();
 const uploadQueue = [];let uploading = false;
-$('add-source').onclick = () => $('upload-dialog').showModal();$('upload-close').onclick = () => $('upload-dialog').close();
+$('add-source').onclick = () => {
+  $('upload-dialog').showModal();
+  run(async () => {const cap=await api('/api/uploads/capabilities');$('upload-transport').querySelector('[value=s3]').disabled=!cap.transports.includes('s3');$('upload-transport').value=cap.default_transport;});
+};$('upload-close').onclick = () => $('upload-dialog').close();
 function enqueueUploads(files) {
-  for (const file of files) {const row = node('section', undefined, 'upload-row'),text = node('p', MindexI18n.msg("ui.89f295632114", { p0: file.name })),progress = node('progress');progress.max = 100;progress.value = 0;MindexI18n.setAttr(progress, 'aria-label', file.name + MindexI18n.msg("ui.33d774c4d765"));row.append(text, progress);$('upload-results').append(row);uploadQueue.push({ file, row, text, progress });}
+  for (const file of files) {const row = node('section', undefined, 'upload-row'),text = node('p', MindexI18n.msg("ui.89f295632114", { p0: file.name })),progress = node('progress');progress.max = 100;progress.value = 0;MindexI18n.setAttr(progress, 'aria-label', file.name + MindexI18n.msg("ui.33d774c4d765"));row.append(text, progress);$('upload-results').append(row);uploadQueue.push({ file, row, text, progress, transport: $('upload-transport').value });}
   processUploads();
 }
 $('upload-files').onchange = (event) => {enqueueUploads(event.target.files);event.target.value = '';};
@@ -558,14 +561,18 @@ function uploadOne(item) {
   return MindexApi.uploadSource(item.file, value => {
     item.progress.value = value;
     MindexI18n.setText(item.text, `${item.file.name} · ${value}%`);
-  });
+  }, {transport:item.transport, restart:item.restart});
 }
 async function processUploads() {
   if (uploading) return;uploading = true;
   try {while (uploadQueue.length) {const item = uploadQueue.shift();try {
         const data = await uploadOne(item);item.progress.value = 100;MindexI18n.setText(item.text, `${item.file.name} · ${data.duplicate ? MindexI18n.msg("ui.a01610e03608") : MindexI18n.msg("ui.3d5e6fbea765")}`);
         item.row.append(action(MindexI18n.msg("ui.f4efeeaf3d65"), async () => {$('upload-dialog').close();await selectSource(data.source_id);}));await loadSources();await selectSource(data.source_id);
-      } catch (e) {MindexI18n.setText(item.text, MindexI18n.msg("ui.b6917a629c7d", { p0: item.file.name, p1: e.message }));item.text.className = 'source-warning';}}} finally {uploading = false;}
+      } catch (e) {MindexI18n.setText(item.text, MindexI18n.msg("ui.b6917a629c7d", { p0: item.file.name, p1: e.message }));item.text.className = 'source-warning';
+        if(item.transport==='s3') for(const [label,restart] of [['ui.upload_resume',false],['ui.upload_restart',true]]) {
+          const button=action(MindexI18n.msg(label),()=>{button.remove();uploadQueue.push({...item,restart});processUploads();});item.row.append(button);
+        }
+      }}} finally {uploading = false;}
 }
 
 let analysisRequest = 0;

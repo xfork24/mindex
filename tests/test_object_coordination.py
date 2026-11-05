@@ -189,3 +189,24 @@ def test_pg_publication_and_download_cannot_race_conditional_delete(pg_store):
     assert not pg_store.rows("SELECT * FROM resource_pins WHERE expires_at>0")
     # 普通用户内容不作为对象引用拦截。
     pg_store.execute("INSERT INTO settings(key,value) VALUES('user-note','objects/key')")
+
+
+def test_hidden_partial_is_counted_after_owner_disappears(tmp_path):
+    from mindex.shared.backends.staging import StagingArea
+
+    writer = StagingArea(tmp_path, quota_bytes=100)
+    partial = tmp_path / ".result.partial"
+    writer.pin(partial)
+    writer.reserve(100, path=partial)
+    partial.write_bytes(b"x" * 100)
+    # 已写字节仍由预约覆盖，不重复计算。
+    assert writer.usage()["reserved"] == 100
+    assert writer.usage()["cached"] == 0
+    writer.close()  # 与进程崩溃相同：owner 锁释放，下一次访问回收账本。
+    with_area = StagingArea(tmp_path, quota_bytes=100)
+    try:
+        usage = with_area.usage()
+        assert usage["reserved"] == 0 and usage["cached"] == 100
+        assert with_area.evict(100) == 100
+    finally:
+        with_area.close()

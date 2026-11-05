@@ -89,7 +89,7 @@ class GrowingReservation:
 
     def grow(self, size):
         if self.budget is not None:
-            self.budget.staging.reserve(size, purpose="输出与临时工作集增长")
+            self.budget.staging.reserve(size, purpose="输出与临时工作集增长", path=self.path)
             self.reserved += size
 
     def defer(self):
@@ -97,11 +97,23 @@ class GrowingReservation:
             self.deferred = True
             self.budget.pending[self.path] = self
 
+    def commit(self, target):
+        import os
+
+        if self.budget is None:
+            os.replace(self.path, target)
+            return
+        self.budget.retain(target)
+        self.budget.staging.commit_path(self.path, target, self.reserved)
+        self.reserved = 0
+        self.deferred = False
+        self.budget.pending.pop(self.path, None)
+
     def close(self):
         if self.deferred:
             return
         if self.budget is not None and self.reserved:
-            self.budget.staging.release(self.reserved)
+            self.budget.staging.release(self.reserved, path=self.path)
             self.reserved = 0
 
     def __enter__(self):
@@ -209,7 +221,6 @@ def configured(method):
 
 def copy_file(source, target):
     """有界复制；临时文件隐藏并按块预约，原子提交后计入可见工作集。"""
-    import os
     import shutil
     import tempfile
 
@@ -231,8 +242,19 @@ def copy_file(source, target):
                     sink.write(chunk)
                 sink.flush()
                 shutil.copystat(source, temporary)
-                os.replace(temporary, target)
+                reservation.commit(target)
         return target
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
+
+
+def commit_file(partial, target):
+    import os
+
+    budget = current()
+    reservation = budget.pending.get(Path(partial).resolve()) if budget is not None else None
+    if reservation is not None:
+        reservation.commit(target)
+    else:
+        os.replace(partial, target)

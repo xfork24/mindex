@@ -71,7 +71,16 @@ class S3MediaStore:
             config=Config(signature_version="s3v4",
                           s3={"addressing_style": "path"}, retries={"max_attempts": 3}),
         )
-        self._finalizer = weakref.finalize(self, self.client.close)
+        self.browser_client = self.client
+        if section.browser_endpoint_url and section.browser_endpoint_url != section.endpoint_url:
+            self.browser_client = boto3.client(
+                "s3", endpoint_url=section.browser_endpoint_url,
+                aws_access_key_id=access, aws_secret_access_key=secret,
+                region_name=section.region or None,
+                config=Config(signature_version="s3v4", s3={"addressing_style": "path"},
+                              retries={"max_attempts": 3}))
+        clients = [self.client] if self.browser_client is self.client else [self.client, self.browser_client]
+        self._finalizer = weakref.finalize(self, lambda: [client.close() for client in clients])
         self._transfer = TransferConfig(multipart_threshold=_MULTIPART_THRESHOLD,
                                         multipart_chunksize=_MULTIPART_THRESHOLD)
 
@@ -137,6 +146,7 @@ class S3MediaStore:
         with FileLock(str(path.with_name(f".{path.name}.download.lock"))):
             obj = self.stat(key, version=version)
             reserved = 0
+            partial = path.with_name(f".{path.name}.partial")
             if self.staging is not None:
                 self.staging.pin(path)
             try:
@@ -145,16 +155,34 @@ class S3MediaStore:
                     path.unlink()
                 if not path.is_file():
                     if self.staging is not None:
-                        self.staging.reserve(obj.size, purpose=f"物化 {key}")
+                        self.staging.reserve(obj.size, purpose=f"物化 {key}", path=partial)
                         reserved = obj.size
-                    partial = path.with_name(f".{path.name}.partial")
                     try:
-                        self.client.download_file(self.bucket, self._object_key(key, version), str(partial))
+                        args = {"Bucket": self.bucket, "Key": self._object_key(key, version)}
+                        if obj.version_id:
+                            args["VersionId"] = obj.version_id
+                        elif obj.etag:
+                            args["IfMatch"] = obj.etag
+                        body = self.client.get_object(**args)["Body"]
+                        try:
+                            copied = 0
+                            with partial.open("wb") as output:
+                                while chunk := body.read(_READ_CHUNK):
+                                    copied += len(chunk)
+                                    if copied > obj.size:
+                                        raise ValueError("物化对象超过已预约大小，停止下载")
+                                    output.write(chunk)
+                        finally:
+                            body.close()
                         if partial.stat().st_size != obj.size or (obj.sha256 and _file_digest(partial) != obj.sha256):
                             raise ValueError(f"对象 {key} 下载长度或摘要与元数据不一致")
                         with partial.open("rb") as handle:
                             os.fsync(handle.fileno())
-                        os.replace(partial, path)
+                        if self.staging is not None:
+                            self.staging.commit_path(partial, path, reserved)
+                            reserved = 0
+                        else:
+                            os.replace(partial, path)
                     finally:
                         partial.unlink(missing_ok=True)
                 if self.staging is not None:
@@ -165,7 +193,7 @@ class S3MediaStore:
                 raise
             finally:
                 if reserved:
-                    self.staging.release(reserved)
+                    self.staging.release(reserved, path=partial)
         try:
             yield path
         finally:
@@ -362,7 +390,7 @@ class S3MediaStore:
     def presign_get(self, key: str, *, version: str | None = None, expires: int) -> str | None:
         if self.coordinator is not None:
             self.coordinator.download(key, ttl=expires + 300)
-        return self.client.generate_presigned_url(
+        return self.browser_client.generate_presigned_url(
             "get_object", Params={"Bucket": self.bucket, "Key": self._object_key(key, version)},
             ExpiresIn=expires)
 
