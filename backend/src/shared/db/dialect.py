@@ -80,6 +80,9 @@ TABLE_SPECS: dict[str, TableSpec] = {
         columns=("id", "name", "kind", "provider", "voice_id", "sample_path", "status", "notes",
                  "created_at"),
         conflict=("id",), returning="id", has_rowid=False, extra_unique=(("name",),)),
+    "studio_events": TableSpec(
+        columns=("id", "job_id", "build_id", "attempt_id", "data", "created_at"),
+        conflict=("id",), has_rowid=False),
     "runs": TableSpec(
         columns=("id", "stage", "source_id", "status", "message", "started_at", "finished_at"),
         conflict=("id",), returning="id", has_rowid=False),

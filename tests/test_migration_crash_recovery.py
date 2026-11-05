@@ -23,7 +23,7 @@ def seed(tmp_path):
     return bundle, target
 
 
-def test_process_death_after_copy_before_journal_rolls_back_both(tmp_path):
+def test_process_death_before_metadata_commit_keeps_prewrite_binding(tmp_path):
     bundle, target = seed(tmp_path)
     script = """
 import os, sys
@@ -43,7 +43,8 @@ load_bundle(Config(data_dir=Path(sys.argv[1])), Path(sys.argv[2]))
     assert result.returncode == 23, result.stderr
     store = open_context(target).store
     assert store.one("SELECT 1 FROM runs") is None
-    assert store.one("SELECT 1 FROM migration_runs") is None
+    assert store.one("SELECT status FROM migration_runs")["status"] == "preparing"
+    assert store.one("SELECT source_library_id FROM migration_runs")["source_library_id"] == store.library_id
     assert load_bundle(target, bundle)["consistent"]
     assert store.one("SELECT id FROM runs")["id"] == 42
 
@@ -89,7 +90,15 @@ def test_resume_rejects_changed_database_before_recopying_media(tmp_path):
     export_bundle(origin, bundle, with_media=True)
     target = Config(data_dir=tmp_path / "target")
     assert load_bundle(target, bundle)["consistent"]
-    open_context(target).store.execute("INSERT INTO settings(key,value) VALUES('new-write','keep')")
+    from mindex.shared.db.maintenance_gate import MaintenanceBusy
+    from mindex.shared.migration_state import access
+
+    target_store = open_context(target).store
+    with pytest.raises(MaintenanceBusy):
+        target_store.execute("INSERT INTO settings(key,value) VALUES('new-write','keep')")
+    # 显式模拟数据库管理员绕过业务准入后的异值，恢复仍须拒绝覆盖。
+    with access(target_store):
+        target_store.execute("INSERT INTO settings(key,value) VALUES('new-write','keep')")
     (target.data_dir / key).unlink()
     with pytest.raises(ValueError, match="已变化"):
         load_bundle(target, bundle)

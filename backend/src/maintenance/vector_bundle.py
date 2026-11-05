@@ -90,25 +90,47 @@ def export_vectors(store: Store, target: Path, *, config=None, legacy_namespace=
     return manifest
 
 
-def load_vectors(store: Store, source: Path, *, config=None) -> dict[str, int]:
+def load_vectors(store: Store, source: Path, *, config=None, journal=None) -> dict[str, int]:
     """从 ``source/vectors/*.jsonl`` 重建集合；返回逐集合写入条数（不重新嵌入）。"""
     manifest = validate_vectors(source)
     counts = {}
     # 全部文件校验通过后才接触目标集合。
     for index_id, entry in manifest.items():
         path = safe_path(Path(source) / "vectors", entry["file"])
+        if journal:
+            journal.object('collection', index_id, entry['sha256'], state='pending')
         collection = _collection(store, index_id, create=True, config=config)
         if entry.get("metadata") != collection.metadata:
             raise ValueError(f"目标向量集合身份不一致：{index_id}")
+        # 先验证全部已有值与集合闭包，再追加缺失 ID，绝不盲目 upsert 已有值。
+        before, matched = collection.count(), 0
         for batch in _batches(path):
+            existing = collection.get(ids=[item['id'] for item in batch], include=["embeddings", "documents", "metadatas"])
+            _compare_batch(index_id, batch, existing, require_all=False)
+            matched += len(existing['ids'])
+        if matched != before:
+            raise ValueError(f"目标向量集合存在清单外数据，拒绝写入：{index_id}")
+        for number, batch in enumerate(_batches(path)):
+            batch_sha = hashlib.sha256(json.dumps(batch, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+            batch_key = f'{index_id}/{number}'
+            if journal:
+                journal.object('vector-batch', batch_key, batch_sha, state='pending')
             ids = [item["id"] for item in batch]
             existing = collection.get(ids=ids, include=["embeddings", "documents", "metadatas"])
-            if existing["ids"]:
-                _compare_batch(index_id, batch, existing, require_all=False)
-            _upsert(collection, ids, [_from_float32(item["embedding"]) for item in batch],
-                    [item.get("document") for item in batch], [item.get("metadata") for item in batch])
-        if collection.count() != entry["vectors"]:
-            raise ValueError(f"目标向量集合存在清单外数据：{index_id}")
+            _compare_batch(index_id, batch, existing, require_all=False)
+            present = set(existing['ids'])
+            missing = [item for item in batch if item['id'] not in present]
+            if missing:
+                _upsert(collection, [item['id'] for item in missing], [_from_float32(item['embedding']) for item in missing],
+                        [item.get('document') for item in missing], [item.get('metadata') for item in missing])
+            actual = collection.get(ids=ids, include=["embeddings", "documents", "metadatas"])
+            _compare_batch(index_id, batch, actual)
+            if journal:
+                journal.object('vector-batch', batch_key, batch_sha, state='verified')
+        if collection.count() != entry["vectors"] or collection.metadata != entry.get('metadata'):
+            raise ValueError(f"目标向量集合存在清单外数据或身份变化：{index_id}")
+        if journal:
+            journal.object('collection', index_id, entry['sha256'], state='verified')
         counts[index_id] = entry["vectors"]
     return counts
 

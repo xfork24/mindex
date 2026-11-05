@@ -1,6 +1,6 @@
 # 水平扩展需求—调用点—证据矩阵
 
-更新：2026-11-05（北京时间）。需求以[增强交付方案](horizontal-scaling-enhancement-plan.md)为准。
+更新：2026-11-06（北京时间）。需求以[增强交付方案](horizontal-scaling-enhancement-plan.md)为准。
 当前结果和原始产物见[实施验证记录](../docs/scaling-enhancement-verification.md)。
 
 状态为三个独立维度：实现 / 接入 / 验证。`部分` 表示仍有必交付调用点未闭合；
@@ -16,7 +16,7 @@
 | 二：资源闭包、staging、pins 与 GC | C01、C02、C04、C05、C06、C07 | `resource_registry.py`、`object_coordination.py`、`work_budget.py`；`test_object_coordination.py`；`artifacts/scaling-completion-batch2/coordination-fifth/`（232 通过、零跳过）与 `media-directed.xml`（102 通过）；保留失败重跑，统一故障矩阵待执行 |
 | 三：上传与媒体访问 | D01、D02、D03 | `artifacts/scaling-completion-batch3/uploads-fifth/`：239 通过、零跳过；真实 Chromium 独立 endpoint/CORS、断流续传与 75 秒视频 seek |
 | 四：查询预算与容量 | E01、E02、E03、E04、E05 | `artifacts/scaling-completion-batch4/query-seventh/`：254 通过、零跳过；原规模容量/质量仍独立待实测 |
-| 五：迁移、激活与灾备 | F01、F02、F03、F04、F05、F06 | 持久卷灾备不使用组件 tmpfs 结论 |
+| 五：迁移、激活与灾备 | F01、F02、F03、F04、F05、F06 | `artifacts/scaling-completion-batch5/migration-third/`：271 通过、零跳过；`recovery-second/` 持久卷 8 MiB/WAL 恢复通过，正式 RPO/RTO 待代表性规模实测 |
 | 六：网关、设置、桌面与发布 | A07、B04、B05、B06、B07、C03、G01、G02、G03、G04、G05、G06、H01、H02、H03、H04 | 网关/浏览器/macOS 与最终冻结回归分别记录 |
 
 双机、规定大容量、真实模型、Windows/Linux 安装和实际系统密钥环仍按原门槛独立验收；
@@ -56,10 +56,10 @@
 | E05 | 10万/100万 segments、100万/300万 vectors、20并发与质量 | 待实测 / 待实测 / 待实测 | 原门槛 p95≤2s、p99≤5s、每 API RSS≤2GiB、Hit@5≥85% 保持不变；scaling-capacity.py 工装已交付并完成独立双 API 小样本验证，原规模磁盘不足证据见第四批记录 |
 | F01 | 统一 CLI 校验与激活记录：`maintenance/migration.py` 的 preflight/export/load/verify/activate | 已实现 / 已接入 / 已验证 | 拒绝非空/异值目标；CLI 拒绝激活缺必要媒体或向量的诊断 bundle |
 | F02 | migration_id、源清单身份、元数据/日志原子提交：`db/transfer.py` | 已实现 / 已接入 / 已验证 | 真子进程 `os._exit` 崩溃与提交后失败续跑；消除本地 JSON 日志窗口 |
-| F03 | 分阶段/分对象/分集合续跑与恢复账本 | 部分 / 部分 / 待验证 | 当前只能对已提交元数据续跑；部分对象写入、旧 running attempt 的完整重建策略待闭合 |
-| F04 | 媒体/向量/Studio 历史闭包与秘密裁剪 | 部分 / 部分 / 部分 | 新增真实 S3 bundle 恢复 Studio 历史、目录历史、外部二进制回执与上传素材；其他业务媒体闭包和全部秘密载体仍待闭合 |
-| F05 | 身份切换、激活 gate、目标写入后的逆向迁移 | 部分 / 部分 / 部分 | 资源自首份写入绑定源 UUID、小样本双向通过；业务节点加载/激活准入、运行中身份切换与完整逆向数据待闭合 |
-| F06 | PG/WAL、对象保护与实测灾备 | 待实测 / 待实测 / 待实测 | 记录停写边界与吞吐；RPO≤24h、RTO≤8h 必须实测，不以组件恢复代替 |
+| F03 | 分阶段/分对象/分集合续跑与恢复账本 | 已实现 / 已接入 / 已验证（单机） | v25 阶段/对象/集合/批次账本；九个阶段 SIGKILL、真实 S3/Chroma 写入未落账续跑不重复写入；旧 attempt 重建/未知执行保留核对。test_migration_stages.py |
+| F04 | 媒体/向量/Studio 历史闭包与秘密裁剪 | 已实现 / 已接入 / 已验证（单机） | 统一 required_objects 核对必要媒体闭包；登记配置裁剪并清除旧页，未知秘密载体不改用户内容并阻止激活；Studio 历史/上传/回执往返及字幕/人物等统一登记 |
+| F05 | 身份切换、激活 gate、目标写入后的逆向迁移 | 已实现 / 已接入 / 已验证（单机） | 首份目标对象之前绑定源清单和 UUID；PG/SQLite/API/CLI/领取拒绝未激活目标，完整验证后原子开放；已激活新写入禁止旧包重放，local→PG→local 含事件序列/媒体一致 |
+| F06 | PG/WAL、对象保护与实测灾备 | 已实现 / 已接入 / 部分 | verify-scaling-recovery.py：独立持久 PG 卷、basebackup 后提交经 WAL 恢复、切断源后从对象保护副本恢复；8 MiB 约 1.901s，逐表/对象摘要一致。代表性规模 RPO≤24h、RTO≤8h 仍独立待实测 |
 | G01 | 两 API/两 worker、独立目录的真实素材处理 | 已实现 / 已接入 / 已验证 | `test_cluster_process_flow.py`：四个进程上传/执行/跨节点读媒体、摘要与 worker owner 对账 |
 | G02 | 单实例网关 SSE/附件/取消/重连/MCP 完整代理 | 部分 / 部分 / 部分 | 流式代理与循环检测已接入；全入口、断流关闭、认证与恢复仍需完整故障矩阵 |
 | G03 | outbox 先落事件后 ack、持久去重与生命周期 | 已实现 / 已接入 / 部分 | 持久回执与重放组件测试通过；真实网关 kill/restart/SSE 重连待验收 |

@@ -446,7 +446,13 @@ def _metadata_v24(db):
     execute_script(db, SQLITE_MULTIPART)
 
 
-METADATA_STEPS = (_metadata_v1, _metadata_v2, _metadata_v3, _metadata_v4, _metadata_v5, _metadata_v6, _metadata_v7, _metadata_v8, _metadata_v9, _metadata_v10, _metadata_v11, _metadata_v12, _metadata_v13, _metadata_v14, _metadata_v15, _metadata_v16, _metadata_v17, _metadata_v18, _metadata_v19, _metadata_v20, _metadata_v21, _metadata_v22, _metadata_v23, _metadata_v24)
+def _metadata_v25(db):
+    from mindex.shared.db.scaling_schema import SQLITE_MIGRATION
+
+    execute_script(db, SQLITE_MIGRATION)
+
+
+METADATA_STEPS = (_metadata_v1, _metadata_v2, _metadata_v3, _metadata_v4, _metadata_v5, _metadata_v6, _metadata_v7, _metadata_v8, _metadata_v9, _metadata_v10, _metadata_v11, _metadata_v12, _metadata_v13, _metadata_v14, _metadata_v15, _metadata_v16, _metadata_v17, _metadata_v18, _metadata_v19, _metadata_v20, _metadata_v21, _metadata_v22, _metadata_v23, _metadata_v24, _metadata_v25)
 
 
 def migrate_metadata(db) -> int:
@@ -501,7 +507,9 @@ class Store:
         from filelock import FileLock
 
         # 首次建库的 WAL 切换不总遵循 SQLite busy_timeout；跨线程/进程串行初始化。
-        with FileLock(str(self.root / ".metadata-init.lock"), timeout=30):
+        from mindex.shared.migration_state import access
+
+        with FileLock(str(self.root / ".metadata-init.lock"), timeout=30), access(self):
             with self.connect() as db:
                 db.execute("PRAGMA journal_mode=WAL")
                 migrate(db, METADATA_STEPS)
@@ -547,7 +555,12 @@ class Store:
             check()
             return
         with self.backend.connect() as db:
-            yield db
+            if self.pg:
+                yield db
+            else:
+                from mindex.shared.migration_state import LocalConnection
+
+                yield LocalConnection(db, str(self.path.resolve()))
         check()
 
     def rows(self, sql: str, args=()) -> list[dict]:

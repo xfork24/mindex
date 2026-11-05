@@ -491,10 +491,16 @@ def test_item11_small_restore_drill(pg, tmp_path, monkeypatch):
         documents=["doc"], metadatas=[{"segment_id": "seg1", "view": "visual"}])
     bundle = tmp_path / "bundle"
     export_pg_to_sqlite(store, bundle)
+    original = config.data_dir / 'sources/s1/a.mp4'
+    original.parent.mkdir(parents=True)
+    original.write_bytes(b'original-bytes')
+    thumbnail = config.data_dir / 'thumbnails/a.jpg'
+    thumbnail.parent.mkdir(parents=True)
+    thumbnail.write_bytes(b'thumbnail-bytes')
     media_stats = export_media_bundle(store, LocalMediaStore(config.data_dir), bundle)
     vector_manifest = export_vectors(store, bundle, config=config)
     exported_seconds = time.perf_counter() - started
-    assert media_stats["objects"] == 1 and vector_manifest["i1"]["vectors"] == 1
+    assert media_stats["objects"] == 3 and vector_manifest["i1"]["vectors"] == 1
     # 清空目标并回灌
     import psycopg
 

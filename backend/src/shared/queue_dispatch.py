@@ -161,6 +161,10 @@ def enqueue_backlog(runtime_or_config) -> dict[str, int]:
     queue = PgTaskQueue(_library_id(store))
     counts: dict[str, int] = {}
     with cast(PgBackend, store.backend).connect() as db:
+        from mindex.shared.migration_state import pending
+
+        if pending(db):
+            return {}
         for table, kind in QUEUE_KINDS.items():
             rows = db.execute(f"SELECT id FROM {table} WHERE status='queued'").fetchall()
             for row in rows:

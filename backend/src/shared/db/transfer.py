@@ -16,7 +16,7 @@ from mindex.shared.db.schema_pg import BASELINE_TABLES
 __all__ = ["copy_pg_to_sqlite", "copy_sqlite_to_pg"]
 
 # rowid 即 id 的表（SQLite AUTOINCREMENT；PG 侧只有 id identity 列）。
-_ROWID_IS_ID = {"model_profiles", "voices", "runs"}
+_ROWID_IS_ID = {"model_profiles", "voices", "runs", "studio_events"}
 _BATCH = 500
 
 

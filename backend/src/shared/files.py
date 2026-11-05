@@ -42,6 +42,9 @@ def pointer(store, key):
 
 
 def publish(store, path, *, expected=UNCONDITIONAL):
+    from mindex.shared.migration_state import writable
+
+    writable(store)
     if not remote(store):
         return None
     path = Path(path)
@@ -76,6 +79,9 @@ def publish(store, path, *, expected=UNCONDITIONAL):
 
 @resource_write
 def save_bytes(store, path, payload, *, expected=UNCONDITIONAL):
+    from mindex.shared.migration_state import writable
+
+    writable(store)
     if not remote(store):
         jsonio.save_bytes(path, payload)
         return

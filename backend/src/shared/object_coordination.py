@@ -200,6 +200,9 @@ class ObjectCoordinator:
     @contextmanager
     def writing(self, key):
         with self.locked(key, writing=True) as db:
+            from mindex.shared.migration_state import backend_scope, guard
+
+            guard(db, backend_scope(self.store))
             self.ensure_live(db, key, writing=True)
             yield
             from mindex.shared.db.fencing import current_attempt

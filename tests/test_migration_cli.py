@@ -86,7 +86,10 @@ def test_export_load_verify_roundtrip(runner, pg_config, tmp_path, monkeypatch):
     assert result.exit_code == 0 and '"consistent": true' in result.output
 
     # 4) 追加写入后对账出现差异（verify 真的在比对）
-    pg.store.execute("INSERT INTO settings(key,value) VALUES('drift','1')")
+    from mindex.shared.migration_state import access
+
+    with access(pg.store):  # 显式模拟准入之外的管理员漂移。
+        pg.store.execute("INSERT INTO settings(key,value) VALUES('drift','1')")
     result = runner.invoke(cli_app, [*common, "migration", "verify", "--source", str(bundle2)],
                            env={"MINDEX_DATABASE_DSN": DSN})
     assert '"consistent": false' in result.output

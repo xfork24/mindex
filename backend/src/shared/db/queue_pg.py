@@ -113,6 +113,10 @@ class PgTaskQueue:
     def claim(self, db: PgConnection, worker: str, kinds: list[str], *,
               ttl: float = TASK_TTL_SECONDS) -> ClaimedTask | None:
         """领取一个任务（优先级→到期时间→id）；没有可用任务返回 None。"""
+        from mindex.shared.migration_state import pending
+
+        if pending(db):
+            return None
         self.reclaim_expired(db)
         row = db.execute(
             "WITH picked AS ("

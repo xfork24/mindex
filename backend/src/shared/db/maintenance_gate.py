@@ -27,6 +27,9 @@ def _keys(library_id):
 def guard_write(connection, library_id, scope):
     if _ACTIVE.get() == scope:
         return
+    from mindex.shared.migration_state import guard
+
+    guard(connection, scope)
     row = connection.execute("SELECT pg_try_advisory_xact_lock_shared(%s,%s)", _keys(library_id)).fetchone()
     if not row[0]:
         raise MaintenanceBusy("素材库正在维护，暂不接受写入；请稍后重试")

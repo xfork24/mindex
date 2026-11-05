@@ -708,6 +708,13 @@ def apply_overrides(config: Config, store: Store) -> Config:
     return config
 
 
+def _migration_pending(store):
+    from mindex.shared.migration_state import pending
+
+    with store.connect() as db:
+        return pending(db) is not None
+
+
 WRITER_MIGRATION_KEY = "migration.writer_profile"
 
 
@@ -718,7 +725,7 @@ def ensure_writer_profile(store: Store) -> dict | None:
     改动文案档案都不会被重新覆盖。没有激活的拆分镜档案时，文案配置沿用 yaml
     （未配置 studio.writer 时即复制 studio.generator）。
     """
-    if get_setting(store, WRITER_MIGRATION_KEY):
+    if _migration_pending(store) or get_setting(store, WRITER_MIGRATION_KEY):
         return None
     created = None
     source = _active_profile(store, "generator")
@@ -748,7 +755,7 @@ def seed_default_profiles(store: Store) -> list[dict]:
     """一次性：为动画/视频/图片/音乐生成建默认档案卡（MiniMax 或 GLM 默认激活，本地 ComfyUI 备用）。
 
     已有档案的角色不建；角色没有激活档案时才激活第一张。完成后写标记，之后删除或改动不会被重新覆盖。"""
-    if get_setting(store, DEFAULT_PROFILES_KEY):
+    if _migration_pending(store) or get_setting(store, DEFAULT_PROFILES_KEY):
         return []
     created = []
     for role, entries in DEFAULT_PROFILES.items():
