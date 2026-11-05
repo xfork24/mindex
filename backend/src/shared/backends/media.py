@@ -37,6 +37,7 @@ class MediaObject:
     backend_version: str | None
     etag: str | None
     sha256: str | None = None
+    version_id: str | None = None
 
 
 class MediaStore(Protocol):

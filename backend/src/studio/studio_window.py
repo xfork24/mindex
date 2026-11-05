@@ -11,6 +11,7 @@ from filelock import FileLock
 from mindex.shared.config import fingerprint
 from mindex.shared.media import atomic_media
 from mindex.shared.storage import Store
+from mindex.shared.work_budget import configured
 from mindex.studio import studio, studio_select, studio_steps
 from mindex.studio.studio_artifacts import visibility_key
 
@@ -230,6 +231,7 @@ def context(config, job_id, w, p, sid):
     return result
 
 
+@configured
 def resources(config, job_id, ctx):
     """Shared low-resolution continuous video and a bounded thumbnail strip, cached by source identity."""
     from mindex.studio import workspace as ws

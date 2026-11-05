@@ -61,6 +61,9 @@ def doctor(config: Config) -> dict:
             media = context.media
             media.client.head_bucket(Bucket=media.bucket)
             record("storage.bucket", True, f"{media.section.endpoint_url}/{media.bucket}")
+            supported = "IfMatch" in media.client.meta.service_model.operation_model("DeleteObject").input_shape.members
+            record("storage.conditional_delete", supported,
+                   "SDK 支持条件删除；执行 GC 前仍会以隔离探针核验服务端行为" if supported else "SDK 不支持安全条件删除，自动 GC 已禁用")
         except Exception as exc:  # noqa: BLE001
             record("storage.bucket", False, first_line(exc))
     else:

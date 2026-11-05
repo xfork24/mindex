@@ -39,6 +39,13 @@ def resolve_tool(args: list[str]) -> list[str]:
 def command(args: list[str], *, timeout: float = 600) -> bytes:
     args = resolve_tool(args)
     record("command", {"args": args, "timeout": timeout})
+    from mindex.shared.work_budget import current, stream_command
+
+    budget = current()
+    if (budget is not None and args and Path(args[0]).name.startswith("ffmpeg")
+            and args[-1] not in {"-", "pipe:1"} and not args[-1].startswith("-")
+            and budget.owns(Path(args[-1]))):
+        return stream_command(args, Path(args[-1]), timeout=timeout)
     try:
         result = subprocess.run(args, check=True, capture_output=True, timeout=timeout)
         record("command-result", {"returncode": result.returncode, "stderr": result.stderr.decode(errors="replace")})
@@ -171,10 +178,18 @@ def windows(start: float, end: float, size: float = 4, stride: float = 3) -> lis
 
 def atomic_media(args: list[str], output: Path, *, timeout: float = 600):
     output.parent.mkdir(parents=True, exist_ok=True)
-    partial = output.with_name(output.stem + ".partial" + output.suffix)
+    partial = output.with_name("." + output.stem + ".partial" + output.suffix)
+    from mindex.shared.work_budget import current
+
+    budget = current()
+    if budget is not None:
+        budget.retain(output)
+        budget.retain(partial)
     try:
         command(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", *args, str(partial)], timeout=timeout)
         partial.replace(output)
+        if budget is not None:
+            budget.committed(partial)
     finally:
         partial.unlink(missing_ok=True)
 

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import shutil
 from contextlib import nullcontext
 from datetime import UTC, datetime
 from pathlib import Path
@@ -21,6 +20,7 @@ from mindex.shared.config import Config, fingerprint
 from mindex.shared.jsonio import save
 from mindex.shared.media import atomic_media, content_hash, cut, probe
 from mindex.shared.storage import Store
+from mindex.shared.work_budget import configured, copy_file, resource_write
 
 PHASES = (
     "smoke",
@@ -71,6 +71,7 @@ def curation(store: Store):
     }
 
 
+@configured
 def initialize(config: Config, source_id: str, directory: Path):
     directory = directory.resolve()
     if (directory / "run.json").exists():
@@ -162,6 +163,7 @@ def initialize(config: Config, source_id: str, directory: Path):
     return state
 
 
+@resource_write
 def make_video_queries(store: Store, source_id: str, segments: list[dict], directory: Path):
     candidates = [s for s in segments if s["end"] - s["start"] >= 1]
     chosen = [candidates[int(i)] for i in np.linspace(0, len(candidates) - 2, 4)]
@@ -175,7 +177,7 @@ def make_video_queries(store: Store, source_id: str, segments: list[dict], direc
         start, end = segment["start"], segment["end"]
         kind = "self" if number < 4 else "crop" if number < 6 else "crosscut" if number < 8 else "codec"
         if kind == "self":
-            shutil.copyfile(store.resolve_media(segment["path"]), output)
+            copy_file(store.resolve_media(segment["path"]), output)
         elif kind == "crop":
             margin = (end - start) * 0.2
             start, end = start + margin, end - margin
@@ -264,6 +266,7 @@ def smoke(config: Config, directory: Path) -> dict:
         return _smoke(config, directory)
 
 
+@configured
 def _smoke(config: Config, directory: Path) -> dict:
     from mindex.models import compatibility
     from mindex.models.deployment import ADAPTER_VERSION
@@ -374,6 +377,7 @@ def _smoke(config: Config, directory: Path) -> dict:
     return report
 
 
+@configured
 def run_phase(
     config: Config,
     directory: Path,

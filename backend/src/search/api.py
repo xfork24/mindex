@@ -127,10 +127,12 @@ def search_router(config, runtime, store, embedder=None, *, index_id=None, backe
     @router.api_route("/api/context/{segment_id}", methods=["GET", "HEAD"])
     def get_context(segment_id: str):
         segment = get_snapshot(segment_id)
+        from mindex.shared.media_delivery import materialized_response
         from mindex.shared.shot_media import ShotMedia
-        path = ShotMedia(store).materialize(segment["source_id"], max(0, segment["start"] - 3),
-                                           min(segment["source_duration"], segment["end"] + 3))
-        return FileResponse(path, media_type="video/mp4")
+
+        return materialized_response(ShotMedia(store).materialized(
+            segment["source_id"], max(0, segment["start"] - 3),
+            min(segment["source_duration"], segment["end"] + 3)), media_type="video/mp4")
 
     @router.api_route("/api/sources/{source_id}/media", methods=["GET", "HEAD"])
     def source_media(source_id: str):
@@ -139,8 +141,10 @@ def search_router(config, runtime, store, embedder=None, *, index_id=None, backe
         selected = next((s for s in snapshots if s["source_id"] == source_id), None)
         if selected is None:
             raise HTTPException(404, "找不到已发布的素材")
+        from mindex.shared.media_delivery import materialized_response
         from mindex.shared.shot_media import ShotMedia
-        return FileResponse(ShotMedia(store).materialize(source_id), media_type="video/mp4")
+
+        return materialized_response(ShotMedia(store).materialized(source_id), media_type="video/mp4")
 
     @router.get("/api/sources/{source_id}/playlist")
     def source_playlist(source_id: str):

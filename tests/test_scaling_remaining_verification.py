@@ -280,9 +280,9 @@ def test_item05_upload_lands_in_object_storage(pg, tmp_path, video_file, monkeyp
     # 原片不落节点本地；临时上传目录已清理
     assert not (config.data_dir / "sources").exists() or not any(
         (config.data_dir / "sources").rglob("*.mp4"))
-    # 处理入口仍可经 media 物化读取（resolve_media 走远端）
-    local = context.store.resolve_media(uploaded[0])
-    assert local.is_file() and local.stat().st_size == video_file.stat().st_size
+    # 消费期间持有 pin，不能返回已释放物化上下文的裸 Path。
+    with context.store.materialize_media(uploaded[0]) as local:
+        assert local.is_file() and local.stat().st_size == video_file.stat().st_size
 
 
 # ---------------------------------------------------------------- 6. GC pin
@@ -318,6 +318,8 @@ def test_item06_clean_collects_s3_orphans_respecting_pins(pg, tmp_path, monkeypa
 
     config, context, _ = _bucket_store(tmp_path, monkeypatch, bucket="mindex-verify-clean")
     config.clean.s3_orphan_grace_hours = 0  # 测试不等待宽限
+    # 隔离测试桶显式启用版本化；生产配置不会由应用修改。
+    context.media.client.put_bucket_versioning(Bucket=context.media.bucket, VersioningConfiguration={"Status": "Enabled"})
 
     def put(key: str, payload: bytes):
         context.media.put_immutable(key, io.BytesIO(payload),
@@ -333,6 +335,8 @@ def test_item06_clean_collects_s3_orphans_respecting_pins(pg, tmp_path, monkeypa
         "VALUES('seg1','s1','shot',0,5,'clips/s1/shot/kept.mp4','thumbnails/a.jpg','g','r')")
     pins = DownloadPins(context.store, context.library_id)
     pins.pin("clips/s1/shot/pinned.mp4", 900)
+    # 模拟旧的完成写入；新的 write/attempt pin 不能被 GC 忽略。
+    context.store.execute("UPDATE resource_pins SET expires_at=0 WHERE kind='write'")
     report = clean_library(config, apply=True)
     keys = set(context.media.iter_prefix(""))
     assert "clips/orphan/x.mp4" not in keys          # 未引用 + 过宽限 → 回收

@@ -13,6 +13,7 @@ from fractions import Fraction
 from pathlib import Path
 
 from mindex.shared.media import atomic_media
+from mindex.shared.work_budget import copy_file
 from mindex.studio import studio
 
 from .plans import canvas_of, canvas_render
@@ -585,10 +586,9 @@ def compose(config, job_id, w, p, directory):
     video, audio, bookends = add_bookends(config, w, p, assembly, video, audio, directory)
     clean = None
     if needs_clean(p):
-        import shutil
 
         clean = directory / "clean.mp4"
-        shutil.copyfile(video, clean)
+        copy_file(video, clean)
     srt, vtt = write_subtitles(p, timeline, assembly, directory)
     ass_path, ass_subtitles = write_ass(config, w, p, assembly, directory)
     final = finish(config, p, video, audio, srt, timeline, assembly, directory / "final.mp4", ass_path=ass_path,

@@ -100,6 +100,13 @@ def create_app(
     ensure_internal_token(app)  # 智能助手回环请求的进程内凭证，须在认证中间件生效前就绪
 
     @app.middleware("http")
+    async def request_work_budget(request, call_next):
+        from mindex.shared.work_budget import scope
+
+        with scope(store):
+            return await call_next(request)
+
+    @app.middleware("http")
     async def localized_messages(request, call_next):
         # Additive metadata on JSON API responses; HTTP status and diagnostics stay intact.
         response = await call_next(request)
@@ -328,7 +335,9 @@ def create_app(
     from mindex.shared.backends.staging import StagingFull
     from mindex.shared.db.locks_pg import LeaseLost
     from mindex.shared.db.maintenance_gate import MaintenanceBusy
+    from mindex.shared.object_coordination import ObjectDeleting
 
+    @app.exception_handler(ObjectDeleting)
     @app.exception_handler(MaintenanceBusy)
     @app.exception_handler(LeaseLost)
     async def write_unavailable(_, exc):

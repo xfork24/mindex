@@ -269,7 +269,9 @@ class Persons:
         relative = f"persons/{namespace}/{digest}.{extension}"
         path = self.store.root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(content)
+        from mindex.shared import files
+
+        files.save_bytes(self.store, path, content)
         return {"path": relative, "digest": digest, "width": width, "height": height}
 
     def pairing_actor(self, actor_id, role_id, actor_ids=None):
@@ -483,7 +485,7 @@ class Persons:
         for index, entry in enumerate(kept):
             if entry.image_id not in images:
                 raise ValueError("原图不属于此草稿")
-            with Image.open(self.store.resolve_media(images[entry.image_id]["path"])) as image:
+            with self.store.materialize_media(images[entry.image_id]["path"]) as materialized, Image.open(materialized) as image:
                 box = checked_box(entry.bbox, *image.size) if entry.bbox is not None else None
                 buffer = io.BytesIO()
                 if box:
@@ -519,6 +521,8 @@ class Persons:
 
             class TransactionStore:
                 root = self.store.root
+                path = self.store.path
+                media = self.store.media
                 resolve_media = self.store.resolve_media
 
                 def connect(_):
@@ -1463,7 +1467,7 @@ def frame_rank(row):
 def existing_frame(store, rows, fallback):
     for row in sorted(rows, key=frame_rank):
         path = row["data"].get("image_path")
-        if path and (store.root / path).is_file():
+        if path and store.media_available(path):
             return path
     return fallback
 

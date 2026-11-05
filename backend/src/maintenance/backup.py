@@ -53,6 +53,7 @@ from mindex.maintenance.backup_files import (
 )
 from mindex.shared.config import Config, fingerprint
 from mindex.shared.storage import dumps
+from mindex.shared.work_budget import copy_file
 
 FORMAT_VERSION = 1
 
@@ -123,7 +124,7 @@ def build_bundle(config, output, *, selected, include_secrets, config_path, allo
                 value = json.loads(text)
                 if redact(value) != value or any(secret in text for secret in secrets):
                     raise ValueError(f'兼容性证据含凭据，不能脱敏后沿用验证：{relative}')
-            shutil.copy2(origin, destination)
+            copy_file(origin, destination)
             continue
         _copy_payload_file(origin, payload / relative, transform=transform, include_secrets=include_secrets,
                            secrets=secrets, selected=selected,
@@ -356,7 +357,7 @@ def _filter_payload(bundle, incoming, selected, manifest):
                 continue
         target = safe_path(incoming, relative)
         target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(safe_path(bundle, item['path']), target)
+        copy_file(safe_path(bundle, item['path']), target)
     return maps, omitted
 
 
@@ -491,7 +492,7 @@ def _switch(stage, root, config_path, config_text, *, work=None):
     try:
         if config_text is not None:
             if config_path.exists():
-                shutil.copy2(config_path, config_old)
+                copy_file(config_path, config_old)
                 with config_old.open('rb') as stream:
                     os.fsync(stream.fileno())
             with config_new.open('w', encoding='utf-8') as stream:
@@ -609,7 +610,7 @@ def import_backup(config, bundle, *, all_sources=False, sources=None, skip_exist
                         continue
                     destination = stage / relative
                     destination.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(path, destination)
+                    copy_file(path, destination)
                 target_vectors = work / 'target-vectors'
                 target_vectors.mkdir()
                 collections = vector_worker('dump', stage, target_vectors, origin=str(root),
@@ -637,7 +638,7 @@ def import_backup(config, bundle, *, all_sources=False, sources=None, skip_exist
                             raise ValueError(f'文件内容冲突：{relative}')
                     else:
                         destination.parent.mkdir(parents=True, exist_ok=True)
-                        shutil.copy2(path, destination)
+                        copy_file(path, destination)
             else:
                 if root.exists() and any(p for p in files_under(root) if p.suffix != '.lock'):
                     raise ValueError('目标不是空数据目录且没有有效数据库')

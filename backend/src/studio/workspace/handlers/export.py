@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import copy
 
+from mindex.shared.work_budget import copy_file
 from mindex.studio import studio
 
 from ..plans import canvas_render
@@ -96,7 +97,6 @@ class ExportHandler(StageHandler):
         return self.run_derive(ctx, item)
 
     def run_rerender(self, ctx, item):
-        import shutil
 
         from .. import variants
 
@@ -110,7 +110,7 @@ class ExportHandler(StageHandler):
         for name in ("mp4", "srt", "vtt"):
             if name in final["files"]:
                 target = ctx.directory / f"export.{name}"
-                shutil.copyfile(file_path(ctx.config, ctx.job_id, final, name), target)
+                copy_file(file_path(ctx.config, ctx.job_id, final, name), target)
                 files[name] = file_info(ctx.config, ctx.job_id, target)
         data = {"mode": "rerender", "canvas": ctx.sid, "fit": item["fit"], "plan": child["id"],
                 "final": final["id"], "total_seconds": final["data"].get("total_seconds"),

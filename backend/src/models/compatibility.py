@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from mindex.shared.work_budget import copy_file
+
 import hashlib
 import json
 import shutil
@@ -155,7 +157,7 @@ def complete_validation(
             verified_file(source, sample["sha256"])
             target = directory / "samples" / f"{number:02}.mp4"
             target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(source, target)
+            copy_file(source, target)
             verified_file(target, sample["sha256"])
             fixed_samples.append(
                 {

@@ -42,6 +42,9 @@ class DownloadPins:
         self._memory: dict[str, float] = {}
 
     def pin(self, key: str, expires: float) -> None:
+        from mindex.shared.object_coordination import ObjectCoordinator
+
+        ObjectCoordinator(self.store).download(key, ttl=expires + _PIN_GRACE_SECONDS)
         deadline = time.time() + expires + _PIN_GRACE_SECONDS
         if self.store.pg:
             with self.store.connect() as db:
@@ -62,6 +65,9 @@ class DownloadPins:
         return self._memory.get(key, 0) > time.time()
 
     def prune(self) -> int:
+        from mindex.shared.object_coordination import ObjectCoordinator
+
+        ObjectCoordinator(self.store).prune()
         if self.store.pg:
             with self.store.connect() as db:
                 return db.execute(

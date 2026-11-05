@@ -134,6 +134,7 @@ def _open_context(config: Config, resources: ExitStack) -> BackendContext:
     store.library_id = library_id
     if form != "local":
         cast(PgBackend, store.backend).enforce_identity = True
+        cast(PgBackend, store.backend).object_coordination = True
         from mindex.shared.admission import validate_protocol
 
         validate_protocol(store)
@@ -205,6 +206,10 @@ def _open_context(config: Config, resources: ExitStack) -> BackendContext:
     store.deployment_config = config
     store.media = media  # Store.resolve_media/media_available 按存储后端解析
     store.vectors = vectors
+    if config.storage.backend == "s3":
+        from mindex.shared.object_coordination import ObjectCoordinator
+
+        cast(Any, media).coordinator = ObjectCoordinator(store)
     return BackendContext(
         form=form,
         library_id=library_id,
@@ -252,8 +257,8 @@ def _staging(config: Config, root: Path):
     else:
         return None
     # 账本在文件系统中跨实例协调；每个上下文独占 owner，关闭互不影响。
-    return StagingArea(root / "cache" / "staging", quota_bytes=quota,
-                       min_free_bytes=minimum)
+    staging_root = root if config.storage.backend == "s3" else root / "cache" / "staging"
+    return StagingArea(staging_root, quota_bytes=quota, min_free_bytes=minimum)
 
 
 class PgQueueAdapter:

@@ -132,8 +132,8 @@ def test_append_upgrade_preserves_v15_data_and_identity(pg):
         db.execute("INSERT INTO settings(key,value) VALUES('library.id','old-library'),('preserve','value')")
         # 基线若被重跑，会尝试创建此索引并撞上同名表。
         db.execute("DROP INDEX segments_source; CREATE TABLE segments_source(marker TEXT)")
-        assert migrate_pg(db) == 22
-        assert migrate_pg(db) == 22
+        assert migrate_pg(db) == 23
+        assert migrate_pg(db) == 23
         assert db.execute("SELECT value FROM settings WHERE key='library.id'").fetchone()[0] == "old-library"
         assert db.execute("SELECT value FROM settings WHERE key='preserve'").fetchone()[0] == "value"
         assert db.execute("SELECT count(*) FROM shared_files").fetchone()[0] == 0

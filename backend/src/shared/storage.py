@@ -434,7 +434,13 @@ def _metadata_v22(db):
     execute_script(db, SQLITE_ADMISSION)
 
 
-METADATA_STEPS = (_metadata_v1, _metadata_v2, _metadata_v3, _metadata_v4, _metadata_v5, _metadata_v6, _metadata_v7, _metadata_v8, _metadata_v9, _metadata_v10, _metadata_v11, _metadata_v12, _metadata_v13, _metadata_v14, _metadata_v15, _metadata_v16, _metadata_v17, _metadata_v18, _metadata_v19, _metadata_v20, _metadata_v21, _metadata_v22)
+def _metadata_v23(db):
+    from mindex.shared.db.scaling_schema import SQLITE_OBJECTS
+
+    execute_script(db, SQLITE_OBJECTS)
+
+
+METADATA_STEPS = (_metadata_v1, _metadata_v2, _metadata_v3, _metadata_v4, _metadata_v5, _metadata_v6, _metadata_v7, _metadata_v8, _metadata_v9, _metadata_v10, _metadata_v11, _metadata_v12, _metadata_v13, _metadata_v14, _metadata_v15, _metadata_v16, _metadata_v17, _metadata_v18, _metadata_v19, _metadata_v20, _metadata_v21, _metadata_v22, _metadata_v23)
 
 
 def migrate_metadata(db) -> int:
@@ -804,6 +810,13 @@ class Store:
             if attempt.library_id != self.library_id or attempt.backend.dsn != self.backend.dsn:
                 raise ValueError("媒体与任务所属素材库不一致")
             return attempt.retain((self.library_id, "media", relative), self.materialize_media(relative))
+        from mindex.shared.work_budget import current
+
+        budget = current()
+        if budget is not None and budget.store.cache_identity == self.cache_identity:
+            return budget.materialize((self.cache_identity, "media", relative), self.materialize_media(relative))
+        if getattr(getattr(self, "media", None), "backend", "local") == "s3":
+            raise RuntimeError("远端媒体需要显式 materialize_media 上下文或工作集作用域")
         with self.materialize_media(relative) as path:
             return path
 

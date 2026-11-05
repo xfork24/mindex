@@ -1286,50 +1286,28 @@ def _notes(store: Store) -> list[dict]:
 
 
 def _clean_s3_orphans(config: Config, store: Store, *, apply: bool, say: Progress) -> dict:
-    """S3 孤立对象回收（plans §8）：标记 → 宽限 → 复验引用与下载 pin → 条件删除。
+    """标记候选、等待宽限、当前引用复验及条件删除；删除意图可恢复。"""
+    import time
 
-    引用集用既有 ``referenced_files`` 口径（临时导出一致性快照到暂存 SQLite 后求闭包），
-    因此与本地清理规则使用同一套依赖语义；未过宽限、被引用或被 pin 的对象一律保留。
-    """
-    import tempfile
-    from datetime import datetime as _datetime
+    from mindex.shared.resource_registry import referenced_objects
 
-    from mindex.maintenance.backup_files import referenced_files
-    from mindex.maintenance.pg_export import export_pg_to_sqlite
-    from mindex.shared.backends import open_context
-    from mindex.shared.media_delivery import DownloadPins
-
-    context = open_context(config)
-    media = context.media
+    media = store.media
+    if not media.verify_conditional_delete():
+        raise ValueError("对象存储缺少安全条件删除能力，已停止自动 GC；请运行 doctor 检查")
     objects = media.objects("")
-    with tempfile.TemporaryDirectory(prefix="mindex-s3-gc-") as work:
-        export_pg_to_sqlite(context.store, Path(work))
-        referenced = referenced_files(
-            store.root, Path(work) / "metadata.sqlite3", available_files=set(objects))
-    pins = DownloadPins(context.store, context.library_id)
-    referenced.update(row["object_key"] for row in store.rows("SELECT object_key FROM shared_files WHERE size>=0"))
-    from mindex.shared.directory_files import referenced_objects
-    referenced.update(referenced_objects(store))
-    from mindex.shared.external_calls import referenced_objects as execution_objects
-    referenced.update(execution_objects(store))
-    cutoff = _datetime.now(UTC).timestamp() - config.clean.s3_orphan_grace_hours * 3600
-    orphans = [
-        {"key": key, "bytes": meta["size"]}
-        for key, meta in objects.items()
-        if key not in referenced and meta["last_modified"] < cutoff and not pins.pinned(key)
-    ]
-    say(f"S3 孤对象：{len(orphans)} 项 / {_fmt_bytes(sum(item['bytes'] for item in orphans))}"
-        f"（引用 {len(referenced)}，宽限 {config.clean.s3_orphan_grace_hours:g} 小时，"
-        f"{'执行删除' if apply else '仅预览'}）")
+    referenced = set(referenced_objects(store))
+    grace = config.clean.s3_orphan_grace_hours * 3600
+    cutoff = time.time() - grace
+    orphans = [{"key": key, "bytes": meta["size"]} for key, meta in objects.items()
+               if key not in referenced and meta["last_modified"] <= cutoff]
+    say(f"S3 孤对象：{len(orphans)} 项；{'执行带复验的回收' if apply else '仅预览'}")
     deleted = 0
     if apply:
         for item in orphans:
-            try:
-                if pins.pinned(item["key"]):
-                    continue
-                media.delete_version(item["key"])
+            if media.coordinator.collect(media, item["key"], grace=grace):
                 deleted += 1
-            except Exception as exc:  # noqa: BLE001 — 单个对象失败不阻塞整体回收
-                log.warning("删除 S3 孤对象失败 %s：%s", item["key"], exc)
-    return {"applied": apply, "orphans": orphans, "deleted": deleted,
-            "referenced": len(referenced)}
+        # 意图已落盘但进程在网络删除边界退出的对象，也必须幂等恢复。
+        for row in store.rows("SELECT object_key FROM resource_objects WHERE state='deleting'"):
+            if row["object_key"] not in {item["key"] for item in orphans}:
+                deleted += int(media.coordinator.collect(media, row["object_key"], grace=grace))
+    return {"applied": apply, "orphans": orphans, "deleted": deleted, "referenced": len(referenced)}

@@ -22,6 +22,7 @@ import threading
 import weakref
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any
 
 from mindex.shared.db.dialect import TABLE_SPECS, UnsupportedSql, rewrite_for_postgres
@@ -34,7 +35,8 @@ __all__ = ["PgBackend"]
 # 进程内共享池：同一 DSN 一个池，与 Store 实例的生命周期无关。
 _POOLS: dict[tuple[str, bool], Any] = {}
 _POOL_SETTINGS: dict[str, tuple] = {}
-_POOLS_LOCK = threading.Lock()
+_POOLS_LOCK = threading.RLock()
+BUSINESS_CONNECTION: ContextVar[object] = ContextVar("business_connection", default=None)
 _POOL_OWNERS: dict[str, int] = {}
 
 _INSERT_TABLE_RE = re.compile(r"^\s*INSERT\s+INTO\s+([A-Za-z_][A-Za-z0-9_]*)", re.IGNORECASE)
@@ -104,7 +106,7 @@ class PgConnection:
         self._execution = execution
         self._control = control
 
-    def _guard_write(self, sql):
+    def _guard_write(self, sql, values=(), *, batches=None):
         # 包含写 CTE；只读 SELECT 不受维护影响。字符串/注释使用同一词法扫描器排除。
         from mindex.shared.db.dialect import _segments
         from mindex.shared.db.maintenance_gate import guard_write
@@ -115,7 +117,7 @@ class PgConnection:
             targets = re.findall(
                 r"\b(?:INSERT(?:\s+OR\s+(?:REPLACE|IGNORE))?\s+INTO|UPDATE|DELETE\s+FROM|ALTER\s+TABLE|DROP\s+TABLE|TRUNCATE(?:\s+TABLE)?)"
                 r'\s+(?!SET\b)([\w"]+)', code, re.I)
-            if (any(target.lower().strip('"') not in {"task_queue", "lock_resources", "lock_holders", "gpu_resource_groups", "gpu_allocations"}
+            if (any(target.lower().strip('"') not in {"task_queue", "lock_resources", "lock_holders", "gpu_resource_groups", "gpu_allocations", "resource_objects", "resource_pins"}
                     for target in targets)
                     or re.search(r"\b(CREATE|ALTER|DROP|TRUNCATE|CALL|COPY)\b", code, re.I)
                     or re.match(r"\s*DO\b", code, re.I)):
@@ -123,6 +125,13 @@ class PgConnection:
         if self._library_id and re.search(r"\b(INSERT|UPDATE|DELETE|ALTER|DROP|TRUNCATE|CREATE)\b", code, re.I):
             guard_write(self._connection, self._library_id, self._scope)
             self._verify()
+            if (self._backend is not None and getattr(self._backend, "object_coordination", False)
+                    and not re.match(r"\s*(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+resource_(?:objects|pins)\b", code, re.I)):
+                from mindex.shared.object_coordination import publication_guard, reference_arguments
+
+                reference_values = reference_arguments(str(sql), values) if batches is None else (
+                    value for row in batches for value in reference_arguments(str(sql), row))
+                publication_guard(self._connection, self._library_id, reference_values)
 
     def _verify(self):
         if self._backend is not None and not self._control:
@@ -136,7 +145,7 @@ class PgConnection:
             verify_transaction(self._connection, self._backend, execution=self._execution)
 
     def execute(self, sql, args: Sequence[Any] = ()) -> CursorView:
-        self._guard_write(sql.pg if isinstance(sql, DualSQL) else sql)
+        self._guard_write(sql.pg if isinstance(sql, DualSQL) else sql, args)
         if isinstance(sql, DualSQL):
             text = sql.pg  # 已是 PG 原生写法（%s 占位符），不再改写
             column = None
@@ -161,7 +170,8 @@ class PgConnection:
         return CursorView(cursor, lastrowid)
 
     def executemany(self, sql, args) -> CursorView:
-        self._guard_write(sql.pg if isinstance(sql, DualSQL) else sql)
+        args = list(args)
+        self._guard_write(sql.pg if isinstance(sql, DualSQL) else sql, batches=args)
         text = sql.pg if isinstance(sql, DualSQL) else _prepare(sql)
         cursor = self._connection.cursor()
         try:
@@ -214,6 +224,7 @@ def _translate(exc: Exception) -> Exception:
 class PgBackend:
     backend = "postgres"
     enforce_identity = False
+    object_coordination = False
 
     def __init__(self, dsn: str, *, library_id: str, pool_max: int = 8, pool_min: int = 0,
                  control_pool_max: int = 2, connection_budget: int = 10,
@@ -277,8 +288,13 @@ class PgBackend:
             view = PgConnection(conn, self.library_key, None if control else self.library_id, self.dsn,
                                 backend=self, execution=fence, control=control)
             view._verify()
-            yield view
-            view._verify()
+            token = BUSINESS_CONNECTION.set(view) if not control else None
+            try:
+                yield view
+                view._verify()
+            finally:
+                if token is not None:
+                    BUSINESS_CONNECTION.reset(token)
 
     def metrics(self) -> dict:
         """池等待/使用指标（plans §12 监控）；池未建时为空。

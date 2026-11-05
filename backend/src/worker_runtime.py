@@ -100,10 +100,16 @@ class Worker:
         self._stop.set()
 
     def run(self) -> int:
+        previous = {sig: signal.getsignal(sig) for sig in (signal.SIGTERM, signal.SIGINT)} if (
+            threading.current_thread() is threading.main_thread()) else {}
         try:
             return self._run()
         finally:
-            self.context.close()
+            try:
+                self.context.close()
+            finally:
+                for sig, handler in previous.items():
+                    signal.signal(sig, handler)
 
     def _run(self) -> int:
         # 仅主线程可安装信号处理器；测试/嵌入场景在工作线程运行 worker 时跳过。
@@ -196,6 +202,12 @@ class Worker:
                     registry_for(self.context.store.root).clear(task.ledger_id)
 
     def _execute_attempt(self, task, attempt, stop, lost, cancelled):
+        from mindex.shared.work_budget import scope
+
+        with scope(self.context.store):
+            return self._execute_budgeted(task, attempt, stop, lost, cancelled)
+
+    def _execute_budgeted(self, task, attempt, stop, lost, cancelled):
         from mindex.shared.db.fencing import executing
         from mindex.shared.db.locks_pg import LeaseLost
         from mindex.shared.task_cancel import TaskCancelled, registry_for
@@ -210,6 +222,13 @@ class Worker:
                         if not self.queue.renew(db, task, ttl=ttl):
                             lost.set()
                             return
+                        from mindex.shared.object_coordination import coordination_keys
+
+                        db.execute("SELECT pg_advisory_xact_lock_shared(?,?)", coordination_keys(self.context.library_id))
+                        db.execute("UPDATE resource_pins SET expires_at=extract(epoch from clock_timestamp())+900 "
+                                   "WHERE owner=? AND kind='attempt' AND NOT EXISTS (SELECT 1 FROM resource_objects o "
+                                   "WHERE o.object_key=resource_pins.object_key AND o.state IN ('deleting','deleted'))",
+                                   (task.attempt_id,))
                         if self.queue.cancel_requested(db, task):
                             cancelled.set()
                             if task.ledger_id:

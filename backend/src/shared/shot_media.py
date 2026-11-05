@@ -18,6 +18,7 @@ from filelock import FileLock
 from mindex.shared.db.fencing import FencedThreadPoolExecutor as ThreadPoolExecutor
 from mindex.shared.jsonio import save
 from mindex.shared.media import MediaError, atomic_media, probe
+from mindex.shared.work_budget import budgeted
 
 VERSION = 'shot-media-v1'
 EPSILON = 0.000001
@@ -108,6 +109,7 @@ class ShotMedia:
             self._probes[path] = info
             return info
 
+    @budgeted
     def references(self, source_id: str, start: float = 0, end: float | None = None):
         if (self.reuse_checks or not self.cache_probes) and source_id in self._sources:
             source = self._sources[source_id]
@@ -159,12 +161,14 @@ class ShotMedia:
             raise MediaError('Incomplete shot coverage')
         return result
 
+    @budgeted
     def identity(self, source_id, start=0, end=None):
         refs = self.references(source_id, start, end)
         return {"version": VERSION, "refs": [asdict(r) for r in refs],
                 "files": [[r.path, self._path(r.path).stat().st_size,
                            self._path(r.path).stat().st_mtime_ns] for r in refs]}
 
+    @budgeted
     def prewarm(self, intervals, *, workers=8):
         """Probe all shot files for the given ``(source_id, start, end)`` intervals in
         parallel, populating the shared probe cache. Read-only callers (workspace
@@ -198,17 +202,20 @@ class ShotMedia:
         with ThreadPoolExecutor(max_workers=min(workers, len(relatives))) as pool:
             list(pool.map(warm, relatives))
 
+    @budgeted
     def playlist(self, source_id, start=0, end=None, prefix="/api/shots"):
         refs = self.references(source_id, start, end)
         return {"version": VERSION, "duration": sum(r.end - r.start for r in refs),
                 "items": [{**asdict(r), "url": f"{prefix}/{r.shot_id}/media?v={self.file_revision(r.path)}"}
                           for r in refs]}
 
+    @budgeted
     def file_revision(self, relative):
         path = self._path(relative)
         stat = path.stat()
         return hashlib.sha256(f'{relative}:{stat.st_size}:{stat.st_mtime_ns}'.encode()).hexdigest()[:20]
 
+    @budgeted
     def register(self, path: str, source_id: str, start: float, end: float, *, db=None):
         refs = self.references(source_id, start, end)
         execute = db.execute if db is not None else self.store.execute
@@ -243,12 +250,14 @@ class ShotMedia:
             local = timestamps[max(0, bisect_right(timestamps, ref.start + EPSILON) - 1)]
         return ref, local
 
+    @budgeted
     def frame_revision(self, source_id: str, timestamp: float) -> str:
         """Revision of the shot file a frame at ``timestamp`` is decoded from; cheap
         enough to validate HTTP caches before any FFmpeg decode."""
         ref, _ = self._frame_shot(source_id, timestamp)
         return self.file_revision(ref.path)
 
+    @budgeted
     def frame_bytes(self, source_id, timestamp):
         from mindex.shared.media import command
 
@@ -260,6 +269,7 @@ class ShotMedia:
             raise MediaError('Shot frame decode failed')
         return raw
 
+    @budgeted
     def frame_jpeg(self, source_id: str, timestamp: float, width: int = 768) -> tuple[bytes, str]:
         """Decode the nearest real frame at or before ``timestamp`` as a scaled JPEG.
 
@@ -275,6 +285,7 @@ class ShotMedia:
             raise MediaError('Shot frame decode failed')
         return raw, self.file_revision(ref.path)
 
+    @budgeted
     def frame(self, source_id: str, timestamp: float, output: Path):
         ref, local = self._frame_reference(source_id, timestamp)
         atomic_media(['-ss', str(local), '-i', str(self._path(ref.path)),
@@ -307,6 +318,7 @@ class ShotMedia:
                        + ('[a]' if audio_only else '[v][a]' if include_audio else '[v]'))
         return args + ['-filter_complex', ';'.join(filters)]
 
+    @budgeted
     def audio(self, source_id: str, output: Path, start=0, duration=None):
         refs = self.references(source_id, start, None if duration is None else start + duration)
         atomic_media(self._inputs(refs, audio_only=True) +
@@ -329,6 +341,12 @@ class ShotMedia:
             yield output
 
     def materialize(self, source_id: str, start=0, end=None) -> Path:
+        from mindex.shared.work_budget import current
+
+        budget = current()
+        if self._materializations is None and budget is not None:
+            return budget.materialize((self.store.cache_identity, "shot", source_id, start, end),
+                                      self.materialized(source_id, start, end))
         refs = self.references(source_id, start, end)
         if len(refs) == 1:
             ref = refs[0]
@@ -362,6 +380,16 @@ class ShotMedia:
             self._paths = {}
             try:
                 path = self.materialize(source_id, start, end)
+                from mindex.shared.work_budget import current
+
+                budget = current()
+                if budget is not None:
+                    budget.retain(path)
+                else:
+                    staging = getattr(getattr(self.store, "_backend_context", None), "staging", None)
+                    if staging is not None and path.is_relative_to(staging.root):
+                        staging.pin(path)
+                        stack.callback(staging.unpin, path)
                 if path.parent.name == 'shot-media':
                     stack.enter_context(FileLock(str(path) + '.lock', thread_local=False))
                 if not path.is_file():
@@ -415,6 +443,7 @@ class ShotMedia:
                 continue
         return removed
 
+    @budgeted
     def frames(self, source_id, start=0, end=None, count=12):
         """Sample actual shot PTS, returning absolute source times and JPEG data URLs."""
         import base64

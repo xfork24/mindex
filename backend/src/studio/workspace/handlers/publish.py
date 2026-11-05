@@ -18,6 +18,7 @@ import zipfile
 from uuid import uuid4
 
 from mindex.shared.config import fingerprint
+from mindex.shared.work_budget import copy_file
 from mindex.studio import studio
 from mindex.studio.platforms import for_plan
 from mindex.studio.studio_logs import active_log
@@ -253,7 +254,7 @@ class CoverHandler(StageHandler):
             path = find_input(ctx.config, ctx.job_id, options["media_id"])
             if path is None:
                 raise studio.StudioError("上传的封面图片缺失或已损坏，请重新上传")
-            shutil.copyfile(path, background)
+            copy_file(path, background)
         title = options.get("title") or ((meta or {}).get("data") or {}).get("title")
         font = publish.cover_font(ctx.config) if options.get("text", True) and title else None
         suffix = "png" if spec.cover.format == "png" else "jpg"
@@ -336,7 +337,7 @@ class PackageHandler(StageHandler):
                     "files": [], "notes": notes}
         for name, source in entries:
             target = folder / name
-            shutil.copyfile(source, target)
+            copy_file(source, target)
             manifest["files"].append({"name": name, **{k: v for k, v in file_info(ctx.config, ctx.job_id, target).items()
                                                         if k in ("sha256", "bytes")}})
         studio.save_bytes(folder / "manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2).encode())

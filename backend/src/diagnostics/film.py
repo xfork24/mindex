@@ -5,13 +5,13 @@ from __future__ import annotations
 import csv
 import html
 import json
-import os
 from collections import Counter
 from pathlib import Path
 from statistics import median
 from urllib.parse import quote
 
 from mindex.shared.config import Config
+from mindex.shared.export_media import copy_for_export
 from mindex.shared.media import windows
 from mindex.shared.review_style import review_style
 from mindex.shared.storage import Store, dumps
@@ -23,7 +23,10 @@ def source_report(config: Config, source_id: str) -> dict:
     if source is None:
         raise ValueError("找不到素材 ID")
     plan_path = store.root / "plans" / f"{source_id}.json"
-    plan = json.loads(plan_path.read_text(encoding="utf-8")) if plan_path.exists() else None
+    from mindex.shared.checkpoints import read_text
+
+    plan_text = read_text(store, plan_path)
+    plan = json.loads(plan_text) if plan_text else None
     media = json.loads(source["media"])
     segments = store.segments(source_id)
     shots = plan["shots"] if plan else [s for s in segments if s["kind"] == "shot"]
@@ -98,7 +101,7 @@ def export_source(config: Config, source_id: str, output: Path | None = None) ->
             )
 
     def url(relative):
-        return html.escape(quote(os.path.relpath(store.resolve_media(relative), output), safe="/"), quote=True)
+        return html.escape(quote(copy_for_export(store, relative, output), safe="/"), quote=True)
 
     cards = []
     for s in segments:
