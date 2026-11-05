@@ -3,20 +3,27 @@ from __future__ import annotations
 
 import hashlib
 import tempfile
+from typing import Literal
 
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
-from mindex.shared.media_delivery import materialized_response
+from mindex.shared.media_delivery import conditional_response, materialized_response
 from mindex.shared.upload_sessions import UploadError, UploadSessions
 
 
 class UploadBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    transport: Literal["api", "s3"] = "api"
     filename: str = Field(min_length=1, max_length=255)
     size: int = Field(gt=0)
     sha256: str = Field(pattern="^[a-f0-9]{64}$")
+
+
+class PartReceipt(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    etag: str = Field(min_length=1, max_length=256)
 
 
 def upload_router(store, runtime):
@@ -33,7 +40,22 @@ def upload_router(store, runtime):
 
     @router.post("", status_code=201)
     def create(body: UploadBody):
-        return call(sessions().create, body.filename, body.size, body.sha256)
+        return call(sessions().create, body.filename, body.size, body.sha256, body.transport)
+
+    @router.get("/capabilities")
+    def capabilities():
+        cfg = runtime.current()
+        transports = ["api", "s3"] if getattr(store.media, "backend", "local") == "s3" else ["api"]
+        return {"transports": transports, "default_transport": cfg.uploads.default_transport,
+                "library_id": store.library_id}
+
+    @router.post("/{session_id}/parts/{number}/sign")
+    def sign_part(session_id: str, number: int, x_upload_token: str = Header(default="")):
+        return call(sessions().sign_part, session_id, x_upload_token, number)
+
+    @router.post("/{session_id}/parts/{number}/receipt")
+    def receipt(session_id: str, number: int, body: PartReceipt, x_upload_token: str = Header(default="")):
+        return call(sessions().register_part, session_id, x_upload_token, number, body.etag)
 
     @router.get("/{session_id}")
     def status(session_id: str, x_upload_token: str = Header(default="")):
@@ -77,12 +99,16 @@ def upload_router(store, runtime):
         return call(sessions().abort, session_id, x_upload_token)
 
     @router.api_route("/{session_id}/content", methods=["GET", "HEAD"])
-    def content(session_id: str):
+    def content(session_id: str, request: Request):
         row = store.one("SELECT * FROM uploaded_assets WHERE id=?", (session_id,))
         if row is None:
             raise HTTPException(404, "找不到已完成的上传素材")
+        etag = '"' + row["sha256"] + '"'
+        conditional = conditional_response(request, etag)
+        if conditional is not None:
+            return conditional
         return materialized_response(store.media.materialize(row["object_key"]),
-                                     filename=row["filename"], headers={"ETag": '"' + row["sha256"] + '"'})
+                                     filename=row["filename"], headers={"ETag": etag})
 
     return router
 

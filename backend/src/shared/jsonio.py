@@ -32,7 +32,7 @@ def save_bytes(path: Path, payload: bytes) -> None:
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temporary, path)
+        reservation.commit(path)
     except BaseException:
         with contextlib.suppress(OSError):
             temporary.unlink()

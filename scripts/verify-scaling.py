@@ -36,7 +36,7 @@ TESTS = [
     "test_cluster_process_flow.py",
     "test_doctor.py", "test_pg_chroma_e2e.py", "test_migration_cli.py", "test_worker.py",
     "test_persons_pg.py", "test_media_delivery.py",
-    "test_backend_identity.py", "test_backend_lifecycle.py", "test_scaling_completion.py", "test_object_coordination.py",
+    "test_s3_multipart.py", "test_backend_identity.py", "test_backend_lifecycle.py", "test_scaling_completion.py", "test_object_coordination.py",
     "test_maintenance_and_gateway.py", "test_sql_characteristics.py",
     "test_scaling_execution.py", "test_scaling_delivery_core.py",
 ]
@@ -166,6 +166,7 @@ def main(*, suite="integration"):
                 chroma = f"http://127.0.0.1:{report['ports']['chroma']}"
                 wait_for(lambda: http_ready(f"{chroma}/api/v2/heartbeat"), "Chroma")
                 env.update({"MINDEX_TEST_POSTGRES_DSN": dsn, "MINDEX_TEST_S3_ENDPOINT": endpoint,
+                            "MINDEX_TEST_EVIDENCE_DIR": str(output),
                             "MINDEX_TEST_S3_KEY": "mindex", "MINDEX_TEST_S3_SECRET": password,
                             "MINDEX_TEST_S3_SECRET_KEY": password, "MINDEX_TEST_CHROMA_SERVER": chroma})
                 test_command = [sys.executable, "-m", "pytest", "-q", "--tb=short", "-o", "faulthandler_timeout=60",

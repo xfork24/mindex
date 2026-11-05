@@ -14,7 +14,7 @@
 |---|---|---|
 | 一：上下文、准入、任务与 GPU | A04、A05、A06、B01、B02、B03、B08 | `tests/test_backend_lifecycle.py`；`artifacts/scaling-completion-batch1/`（含失败及重跑记录；尚非整批完成） |
 | 二：资源闭包、staging、pins 与 GC | C01、C02、C04、C05、C06、C07 | `resource_registry.py`、`object_coordination.py`、`work_budget.py`；`test_object_coordination.py`；`artifacts/scaling-completion-batch2/coordination-fifth/`（232 通过、零跳过）与 `media-directed.xml`（102 通过）；保留失败重跑，统一故障矩阵待执行 |
-| 三：上传与媒体访问 | D01、D02、D03 | API 兼容与 S3 直传分别验收 |
+| 三：上传与媒体访问 | D01、D02、D03 | `artifacts/scaling-completion-batch3/uploads-fifth/`：239 通过、零跳过；真实 Chromium 独立 endpoint/CORS、断流续传与 75 秒视频 seek |
 | 四：查询预算与容量 | E01、E02、E03、E04、E05 | 规定容量及质量门槛独立待实测 |
 | 五：迁移、激活与灾备 | F01、F02、F03、F04、F05、F06 | 持久卷灾备不使用组件 tmpfs 结论 |
 | 六：网关、设置、桌面与发布 | A07、B04、B05、B06、B07、C03、G01、G02、G03、G04、G05、G06、H01、H02、H03、H04 | 网关/浏览器/macOS 与最终冻结回归分别记录 |
@@ -46,9 +46,9 @@
 | C05 | 全使用期媒体 pin：`Store.materialize_media`、attempt 保留、HTTP 响应 | 已实现 / 部分 / 部分 | 人物提取、分析、分镜检测、Studio 预览/下载/归档改用上下文；持久 worker 兼容 Path 入口保留到 attempt 结束。诊断/修复/Studio 兼容 Path 入口纳入工作集物化保留；远端无作用域的裸 Path 读取明确拒绝；HTTP 响应持有独立物化上下文至结束 |
 | C06 | 跨进程 staging 预算/活动 pin：`shared/backends/staging.py` | 已实现 / 部分 / 部分 | 多进程 pin/预约/崩溃回收已有验证；新增上传分片输入与 S3 上传/合并暂存预算。JSON、复制/物化、产物下载及 FFmpeg 输出写前预约并逐块增长；本轮真实后端 232 通过，媒体定向 102 通过，完整故障矩阵待执行 |
 | C07 | attempt/发布/备份/下载统一远端 pin 与 GC 协调 | 部分 / 部分 / 部分 | v23 统一远端 pin 与持久删除意图；引用/签名/删除共用协调锁，删除前重读引用及 pins；条件删除不可靠且未启用版本化时停止自动 GC；真实 PG 删除/签名/发布竞争通过，完整故障矩阵待执行 |
-| D01 | pending/multipart/complete/abort 上传会话：`shared/upload_sessions.py`、`upload_api.py` | 已实现 / 已接入 / 已验证（单机） | PG/SQLite 持久会话、独立凭据、pending 分片、跨 API 续传、完成登记、abort；Web/旧上传/agent 与 CLI 共用状态机。浏览器直连 S3 的预签名 multipart 不计入本项完成 |
+| D01 | pending/multipart/complete/abort 上传会话：`shared/upload_sessions.py`、`upload_api.py` | 已实现 / 已接入 / 已验证（单机） | PG/SQLite 持久会话、独立凭据、pending 分片、跨 API 续传、完成登记、abort；Web/旧上传/agent 与 CLI 共用状态机。v24 增加 S3 原生 multipart、预签名 Content-Length、真实分片核对与未登记 UploadId 恢复；两路径真实后端复验通过 |
 | D02 | 上传摘要、配额、幂等完成、过期回收 | 已实现 / 已接入 / 已验证（单机） | 分片及完整 SHA256 服务端复算；字节/会话/分片数预算；重复完成、错误归属、摘要不符、过期回收；API 生命周期回收及显式 CLI 接入 |
-| D03 | 浏览器独立 endpoint、CORS、Content-Type 与访问协议 | 部分 / 部分 / 部分 | 已完成上传素材与 Studio 产物的跨 API 读取、HEAD/Range/ETag 基础用例；独立浏览器 S3 endpoint/CORS、过期 URL 与长视频 seek 全矩阵仍待实测 |
+| D03 | 浏览器独立 endpoint、CORS、Content-Type 与访问协议 | 部分 / 部分 / 部分 | 已完成上传素材与 Studio 产物的跨 API 读取、HEAD/Range/ETag 基础用例；独立浏览器 endpoint/CORS、错误签名/大小、过期 URL 和 75 秒视频实际 seek 已通过；原始截图与日志见第三批记录 |
 | E01 | 可见性、annotation、素材范围的 eligible 统计快照：`search/lexical_query.py` | 已实现 / 已接入 / 已验证 | SQL BM25 与 Python 参考分数/排序、人物投影五类查询逐项一致 |
 | E02 | 人物证据投影与候选水合：`persons/persons.py`、`SearchEngine._hydrate` | 已实现 / 已接入 / 已验证 | PG 按素材/身份取证据；命中只水合所需片段/父镜头/整理信息 |
 | E03 | 去掉集群预热全快照和 representation map：`search/warmup.py` | 已实现 / 已接入 / 已验证 | 禁止全快照/人物大缓存/map 的预热用例通过；缺派生表的查询回退仍未去除 |

@@ -329,7 +329,7 @@ def create_app(
     @app.get("/api/ready")
     def ready():
         from mindex.doctor import doctor
-        report = doctor(config)
+        report = doctor(config, serving=True)
         return JSONResponse(report, status_code=200 if report["ok"] else 503)
 
     from mindex.shared.backends.staging import StagingFull

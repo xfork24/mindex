@@ -92,6 +92,14 @@ def deliver_media(media, key: str, media_type: str, request, *, config: Config,
         if entry["size"] < 0:
             raise HTTPException(404, "素材文件缺失")
         key = entry["object_key"]
+    try:
+        obj = media.stat(key)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, "素材文件缺失") from exc
+    etag = '"' + (obj.etag or obj.sha256 or "") + '"'
+    conditional = conditional_response(request, etag)
+    if conditional is not None:
+        return conditional
     range_header = request.headers.get("range") if request is not None else None
     wants_head = request is not None and request.method == "HEAD"
     pins.pin(key, expires)
@@ -101,7 +109,7 @@ def deliver_media(media, key: str, media_type: str, request, *, config: Config,
             # 307 保留方法与 Range 语义；浏览器直连对象存储
             return RedirectResponse(url, status_code=307)
     try:
-        return materialized_response(media.materialize(key), media_type=media_type)
+        return materialized_response(media.materialize(key), media_type=media_type, headers={"ETag": etag})
     except FileNotFoundError as exc:
         raise HTTPException(404, "素材文件缺失") from exc
 
@@ -122,3 +130,19 @@ def materialized_response(context, **kwargs):
     except BaseException:
         context.__exit__(None, None, None)
         raise
+
+
+def conditional_response(request, etag, *, headers=None):
+    """GET/HEAD 实体条件；Range/If-Range 继续交给 FileResponse。"""
+    from starlette.responses import Response
+
+    if request is None:
+        return None
+    values = {"ETag": etag, **(headers or {})}
+    match = request.headers.get("if-match")
+    if match and match != "*" and etag not in {x.strip() for x in match.split(",")}:
+        return Response(status_code=412, headers=values)
+    none = request.headers.get("if-none-match")
+    if none and (none == "*" or etag in {x.strip().removeprefix("W/") for x in none.split(",")}):
+        return Response(status_code=304, headers=values)
+    return None

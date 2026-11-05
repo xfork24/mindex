@@ -70,7 +70,7 @@ def download(artifact: Artifact, target: Path, *, hosts: set[str], max_bytes: in
                         budget = current()
                         if budget is not None:
                             budget.retain(target)
-                        partial.replace(target)
+                        reservation.commit(target)
                     return target
             raise studio.StudioError("产物地址重定向次数过多")
     except httpx.HTTPError as exc:

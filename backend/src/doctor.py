@@ -1,7 +1,7 @@
 """部署诊断（plans §11/§13 阶段 5）：启动前拒绝不完整组合，逐后端连通与身份检查。
 
 ``mindex doctor`` 输出 JSON 概览并按退出码判定（0 可用 / 1 需修复）；API 的
-``/api/health`` 携带同一概览的轻量版本。检查项只读、不执行 DDL、不触碰用户数据。
+``/api/health`` 携带同一概览的轻量版本。不执行 DDL；S3 能力检查仅创建并清理独立随机探针，不修改 bucket 配置或业务对象。
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ log = logging.getLogger(__name__)
 __all__ = ["doctor"]
 
 
-def doctor(config: Config) -> dict:
+def doctor(config: Config, *, serving=False) -> dict:
     """逐项检查并汇总；任何一项失败都给出中文修复提示。"""
     checks: list[dict] = []
 
@@ -61,9 +61,19 @@ def doctor(config: Config) -> dict:
             media = context.media
             media.client.head_bucket(Bucket=media.bucket)
             record("storage.bucket", True, f"{media.section.endpoint_url}/{media.bucket}")
-            supported = "IfMatch" in media.client.meta.service_model.operation_model("DeleteObject").input_shape.members
+            supported = True if serving else media.verify_conditional_delete()
             record("storage.conditional_delete", supported,
-                   "SDK 支持条件删除；执行 GC 前仍会以隔离探针核验服务端行为" if supported else "SDK 不支持安全条件删除，自动 GC 已禁用")
+                   ("readiness 不执行写入探针；GC 独立核验能力" if serving else "安全删除能力探针通过") if supported else "后端未通过条件删除/版本删除核验，自动 GC 已停止")
+            if config.storage.s3.browser_origins and not serving:
+                from mindex.shared.s3_multipart import probe_browser
+
+                try:
+                    record("storage.browser", True, probe_browser(media, config.storage.s3.browser_origins))
+                except Exception as exc:  # noqa: BLE001 — 每项故障独立报告
+                    record("storage.browser", False, first_line(exc))
+            elif not serving:
+                record("storage.browser", config.uploads.default_transport != "s3",
+                       "未配置 browser_origins；浏览器直传须显式配置允许的 origin 并核验 CORS")
         except Exception as exc:  # noqa: BLE001
             record("storage.bucket", False, first_line(exc))
     else:

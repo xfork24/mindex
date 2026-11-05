@@ -177,3 +177,19 @@ CREATE TABLE IF NOT EXISTS resource_pins (
 CREATE INDEX IF NOT EXISTS resource_pins_key ON resource_pins(object_key,expires_at);
 """
 PG_OBJECTS = SQLITE_OBJECTS.replace(" INTEGER", " BIGINT").replace(" REAL", " DOUBLE PRECISION")
+
+
+# v24：双传输上传会话与可恢复完成状态。
+MULTIPART_COLUMNS = {
+    "upload_sessions": ("transport", "multipart_id", "pending_key", "completion_phase", "completion_error"),
+    "upload_parts": ("etag",),
+}
+SQLITE_MULTIPART = """
+ALTER TABLE upload_sessions ADD COLUMN transport TEXT NOT NULL DEFAULT 'api';
+ALTER TABLE upload_sessions ADD COLUMN multipart_id TEXT;
+ALTER TABLE upload_sessions ADD COLUMN pending_key TEXT;
+ALTER TABLE upload_sessions ADD COLUMN completion_phase TEXT;
+ALTER TABLE upload_sessions ADD COLUMN completion_error TEXT;
+ALTER TABLE upload_parts ADD COLUMN etag TEXT;
+"""
+PG_MULTIPART = SQLITE_MULTIPART
