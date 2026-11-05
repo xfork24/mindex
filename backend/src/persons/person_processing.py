@@ -196,7 +196,8 @@ def ensure_reference_quality(store, config, client, item, space=None):
     row = store.one("SELECT data FROM person_features WHERE id=?", (key,))
     extracted = json.loads(row["data"]) if row else None
     if extracted is None or stale_reference_features(client, extracted):
-        extracted = client.image(store.resolve_media(item["path"]))
+        with store.materialize_media(item["path"]) as path:
+            extracted = client.image(path)
         if extracted.get("space") != space:
             raise ModelError("特征提取响应空间与任务固定空间不符")
         store.execute(
@@ -581,7 +582,8 @@ class PersonProcessor:
             key = fingerprint(["reference-v1", ref["digest"], space])
             extracted = self.feature(key)
             if extracted is None or stale_reference_features(self.client, extracted):
-                extracted = self.client.image(self.store.resolve_media(ref["path"]))
+                with self.store.materialize_media(ref["path"]) as path:
+                    extracted = self.client.image(path)
                 self.validate_space(extracted, space)
                 self.cache(key, None, space, "reference", extracted)
             detections = extracted["observations"]
@@ -668,12 +670,9 @@ class PersonProcessor:
                             "shot_id": shot["id"],
                         }
                     )
-                extracted = self.client.video(
-                    self.store.resolve_media(shot["path"]),
-                    shot["start"] - shot["media_start"],
-                    shot["end"] - shot["media_start"],
-                    self.config.person.frame_interval,
-                )
+                with self.store.materialize_media(shot["path"]) as path:
+                    extracted = self.client.video(path, shot["start"] - shot["media_start"],
+                                                  shot["end"] - shot["media_start"], self.config.person.frame_interval)
                 self.validate_space(extracted, space)
                 frames = extracted["frames"]
                 for frame in frames:

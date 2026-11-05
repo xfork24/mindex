@@ -161,13 +161,8 @@ class S3MediaStore:
         """
         object_key = self._object_key(key, version)
         # 流式暂存使非 seekable 输入也能校验与重试；不把大媒体装进内存。
-        with tempfile.TemporaryFile() as staged, _source_stream(source) as stream:
-            digest, size = hashlib.sha256(), 0
-            while chunk := stream.read(_READ_CHUNK):
-                digest.update(chunk)
-                size += len(chunk)
-                staged.write(chunk)
-            if digest.hexdigest() != sha256:
+        with self._staged_upload(source) as (staged, actual, size):
+            if actual != sha256:
                 raise ValueError(f"对象 {key} 的输入摘要与声明不一致")
             staged.seek(0)
             try:
@@ -209,6 +204,25 @@ class S3MediaStore:
                 if existing.sha256 != sha256 or existing.size != size:
                     raise ValueError(f"不可变键已存在且内容不同：{key}") from exc
             return self.stat(key, version=version)
+
+    @contextmanager
+    def _staged_upload(self, source):
+        reserved = 0
+        try:
+            directory = self.staging.root if self.staging is not None else None
+            with tempfile.TemporaryFile(dir=directory) as staged, _source_stream(source) as stream:
+                digest, size = hashlib.sha256(), 0
+                while chunk := stream.read(_READ_CHUNK):
+                    if self.staging is not None:
+                        self.staging.reserve(len(chunk), purpose="对象上传暂存")
+                        reserved += len(chunk)
+                    digest.update(chunk)
+                    size += len(chunk)
+                    staged.write(chunk)
+                yield staged, digest.hexdigest(), size
+        finally:
+            if reserved:
+                self.staging.release(reserved)
 
     def delete_version(self, key: str, *, version: str | None = None) -> None:
         """删除主对象（version=None）或某个不可变内容版本；精确到 key，不做前缀删除。"""

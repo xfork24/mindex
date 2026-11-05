@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+from mindex.shared.external_calls import journaled_factory
+
 import json
 import logging
 import re
@@ -318,6 +320,7 @@ def make_analyzer(config: Config) -> VisualAnalyzer:
     return QwenAnalyzer(config)
 
 
+@journaled_factory
 def make_speaker(config: Config) -> Speaker:
     from mindex.models.speech import DashScopeSpeaker, MiniMaxSpeaker, OpenAISpeaker
 
@@ -328,18 +331,21 @@ def make_speaker(config: Config) -> Speaker:
     return OpenAISpeaker(config)
 
 
+@journaled_factory
 def make_storyboarder(config: Config) -> Storyboarder:
     from mindex.models.storyboard import QwenStoryboarder
 
     return QwenStoryboarder(config)
 
 
+@journaled_factory
 def make_writer(config: Config) -> Writer:
     from mindex.models.writer import QwenWriter
 
     return QwenWriter(config)
 
 
+@journaled_factory
 def make_video_generator(config: Config) -> VideoGenerator:
     from mindex.models.video_generators import (
         ComfyUIVideoGenerator,
@@ -358,6 +364,7 @@ def make_video_generator(config: Config) -> VideoGenerator:
     return ComfyUIVideoGenerator(config)
 
 
+@journaled_factory
 def make_image_generator(config: Config) -> ImageGenerator:
     from mindex.models.image_generators import ComfyUIImageGenerator, MiniMaxImageGenerator
 
@@ -366,6 +373,7 @@ def make_image_generator(config: Config) -> ImageGenerator:
     return MiniMaxImageGenerator(config)
 
 
+@journaled_factory
 def make_music_generator(config: Config) -> MusicGenerator:
     from mindex.models.music_generators import (
         AudioCppMusicGenerator,
@@ -380,6 +388,7 @@ def make_music_generator(config: Config) -> MusicGenerator:
     return MiniMaxMusicGenerator(config)
 
 
+@journaled_factory
 def make_animator(config: Config) -> Animator:
     from mindex.models.animator import LlmAnimator
 

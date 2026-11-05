@@ -26,6 +26,7 @@ QUEUE_KINDS = {
     "person_tasks": "person",
     "topic_runs": "topic",
     "index_tasks": "index",
+    "studio_tasks": "studio",
 }
 
 

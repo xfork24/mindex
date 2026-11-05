@@ -1308,6 +1308,10 @@ def _clean_s3_orphans(config: Config, store: Store, *, apply: bool, say: Progres
             store.root, Path(work) / "metadata.sqlite3", available_files=set(objects))
     pins = DownloadPins(context.store, context.library_id)
     referenced.update(row["object_key"] for row in store.rows("SELECT object_key FROM shared_files WHERE size>=0"))
+    from mindex.shared.directory_files import referenced_objects
+    referenced.update(referenced_objects(store))
+    from mindex.shared.external_calls import referenced_objects as execution_objects
+    referenced.update(execution_objects(store))
     cutoff = _datetime.now(UTC).timestamp() - config.clean.s3_orphan_grace_hours * 3600
     orphans = [
         {"key": key, "bytes": meta["size"]}

@@ -147,6 +147,12 @@ class PgTaskQueue:
         table, identifier = row["ledger_table"], row["ledger_id"]
         if table not in ALL_LEDGER_TABLES or not identifier:
             return
+        if table == "studio_tasks" and status == "complete":
+            saved = db.execute("SELECT result FROM studio_tasks WHERE id=%s", (identifier,)).fetchone()
+            if saved and saved[0]:
+                import json
+
+                status = json.loads(saved[0]).get("status", status)
         bindings = ",queue_attempt_id=NULL" if clear else ""
         args = [status, error]
         if attempt is not None:
@@ -167,15 +173,25 @@ class PgTaskQueue:
 
     def complete(self, db: PgConnection, task: ClaimedTask) -> bool:
         """只有原 owner+attempt 能完成；队列与账本完成由调用方放同一事务。"""
+        result_status = "complete"
+        if task.ledger_table == "studio_tasks" and task.ledger_id:
+            saved = db.execute("SELECT result FROM studio_tasks WHERE id=%s", (task.ledger_id,)).fetchone()
+            if saved and saved[0]:
+                import json
+
+                result_status = json.loads(saved[0]).get("status", "complete")
+            if result_status not in {"complete", "failed", "partial", "needs_review", "cancelled"}:
+                raise ValueError("创作执行结果终态无效")
+        queue_status = "succeeded" if result_status == "complete" else "cancelled" if result_status == "cancelled" else "failed"
         row = db.execute(
-            "UPDATE task_queue SET status=CASE WHEN cancel_requested THEN 'cancelled' ELSE 'succeeded' END,"
+            "UPDATE task_queue SET status=CASE WHEN cancel_requested THEN 'cancelled' ELSE %s END,"
             " expires_at=NULL, updated_at=clock_timestamp()"
             " WHERE library_id=%s AND id=%s AND status='running' AND owner=%s"
             " AND attempt_id=%s AND fencing_token=%s AND expires_at >= clock_timestamp()"
             " RETURNING ledger_table,ledger_id,status",
-            (self.library_id, task.id, task.owner, task.attempt_id, task.fencing_token)).fetchone()
+            (queue_status, self.library_id, task.id, task.owner, task.attempt_id, task.fencing_token)).fetchone()
         if row:
-            self._ledger(db, row, "complete" if row["status"] == "succeeded" else "cancelled")
+            self._ledger(db, row, "cancelled" if row["status"] == "cancelled" else result_status)
         return row is not None
 
     def finish_cancelled(self, db: PgConnection, task: ClaimedTask) -> bool:

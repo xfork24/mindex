@@ -21,9 +21,12 @@ class Attempt:
     lost: object
     cancelled: object
     publications: dict = field(default_factory=dict)
+    terminals: dict = field(default_factory=dict)
     _contexts: ExitStack = field(default_factory=ExitStack, repr=False)
     _held: set = field(default_factory=set, repr=False)
+    _held_values: dict = field(default_factory=dict, repr=False)
     _publication_leases: dict = field(default_factory=dict, repr=False)
+    _states: dict = field(default_factory=dict, repr=False)
     _closed: bool = False
     _guard: object = field(default_factory=RLock, repr=False)
 
@@ -40,15 +43,23 @@ class Attempt:
             self.check()
             if key not in self._held:
                 previous = {id(lease) for lease in _LEASES.get()}
-                self._contexts.enter_context(context)
+                self._held_values[key] = self._contexts.enter_context(context)
                 self._held.add(key)
                 self._publication_leases.update((id(lease), lease) for lease in _LEASES.get()
                                                 if id(lease) not in previous)
+            return self._held_values[key]
 
     def defer(self, key, publish):
         with self._guard:
             self.check()
             self.publications[key] = publish
+
+    def state(self, key, factory):
+        with self._guard:
+            self.check()
+            if key not in self._states:
+                self._states[key] = factory()
+            return self._states[key]
 
     def publication_fence(self):
         # 资源锁可能由子线程获取；终态事务显式复验，不依赖结束线程的 ContextVar。
@@ -60,8 +71,11 @@ class Attempt:
             self._contexts.close()
         finally:
             self.publications.clear()
+            self.terminals.clear()
             self._held.clear()
+            self._held_values.clear()
             self._publication_leases.clear()
+            self._states.clear()
 
 
 @contextmanager
