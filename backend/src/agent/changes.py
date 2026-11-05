@@ -67,7 +67,13 @@ class ChangeFeed:
                 seq = cursor.lastrowid
                 db.execute("INSERT INTO agent_outbox_receipts(library_id,outbox_id,change_seq) VALUES(?,?,?)",
                            (library_id, item["outbox_id"], seq))
+                db.execute("INSERT INTO agent_outbox_cursors(library_id,outbox_id,change_seq) VALUES(?,?,?) "
+                           "ON CONFLICT(library_id) DO UPDATE SET outbox_id=excluded.outbox_id,change_seq=excluded.change_seq "
+                           "WHERE excluded.outbox_id>agent_outbox_cursors.outbox_id", (library_id, item['outbox_id'], seq))
                 return seq
+
+    def cursor(self, library_id):
+        return self.db.one('SELECT outbox_id,change_seq FROM agent_outbox_cursors WHERE library_id=?', (library_id,))
 
     def latest(self) -> int:
         row = self.db.one("SELECT COALESCE(MAX(seq), 0) AS seq FROM agent_changes")

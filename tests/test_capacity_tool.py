@@ -52,6 +52,7 @@ def test_capacity_seed_embedder_two_api_smoke(s3_config, tmp_path):
     raw = s3_config.model_dump(mode='json')
     for field in ('database', 'vector', 'storage', 'queue', 'locks', 'gpu', 'server', 'uploads', 'agent', 'topics', 'local_services'):
         raw[field] = getattr(s3_config, field).model_dump(mode='json')
+    raw['agent']['enabled'] = False
     raw['topics']['scheduler']['enabled'] = False
     raw['local_services']['enabled'] = False
     config = tmp_path / 'capacity.yaml'

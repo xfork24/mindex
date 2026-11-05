@@ -341,8 +341,8 @@ def create_app(
 
     @app.get("/api/ready")
     def ready():
-        from mindex.doctor import doctor
-        report = doctor(config, serving=True)
+        from mindex.shared.readiness import readiness
+        report = readiness(backends, config, gateway_token=app.state.web_auth_token)
         return JSONResponse(report, status_code=200 if report["ok"] else 503)
 
     from mindex.shared.backends.staging import StagingFull

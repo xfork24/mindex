@@ -1,55 +1,67 @@
-# 配置模板：复制为 config.local.yaml 后修改。此文件只配置服务地址，不启动任何模型服务。
+# 配置模板：复制为 config.local.yaml 后修改。此文件配置部署后端与模型服务连接，不启动任何模型服务。
 # 下列 192.168.1.86 等局域网地址仅为示例，请替换为自己的部署，或在设置页配置并激活模型档案。
 # 完整键说明见 docs/config-reference.md；未知键会使配置校验失败。
+# 部署后端请在实际使用的 config.local.yaml 中始终显式填写当前值，不依赖省略后的默认值。
+# 加载优先级：--config 指定文件 > MINDEX_CONFIG > 当前目录 config.local.yaml（不合并多个文件）。
+# 下方为本地模式；部署后端不能在设置页修改，修改后须重启 API、worker 等相关进程。
+# 切换已有库的数据库/媒体/向量后端需先迁移数据，修改 backend 不会自动搬迁现有数据。
 data_dir: ./data
 server:
-  role: api
-  form: auto  # 正式集群设为 cluster；共享后端不齐时拒绝启动
-  library_id: null  # 可填写期望的库 UUID，防止连错数据库
-# 元数据库后端（水平扩展，见 docs/config-reference.md 与 plans/horizontal-scaling-plan.md）。
-# 缺省 sqlite 即本地 metadata.sqlite3；postgres 为 pg-single 过渡形态（单主机单 API；
-# 先运行 MINDEX_DATABASE_DSN=… mindex migrate，DSN 只从环境变量读取）。
+  role: api  # api：业务 API；agent-gateway：单实例智能助手网关；worker 用 mindex worker 启动
+  form: local  # local | pg-single | cluster | auto；显式形态与后端组合不一致时拒绝启动
+  # local：下方五个本地 backend；pg-single：postgres 数据库 + 未全部共享的其余后端，单机过渡用。
+  # cluster：database/queue/locks=postgres、vector=chroma_server、storage=s3，必须全部配置。
+  # auto：按上述后端组合推断形态；部署时建议显式指定 local/pg-single/cluster。
+  library_id: null  # null 不预先指定；填写已有库 UUID 可阻止连接错误的库，不用于创建/更改库身份
+# 元数据库 backend 选项：sqlite（本地 <data_dir>/metadata.sqlite3）| postgres（PostgreSQL）。
+# 选择 postgres：取消下方 postgres 段的注释，在环境变量中设置 DSN，先运行
+# mindex --config config.local.yaml migrate 初始化/升级 schema，再启动服务。
+# DSN 示例：postgresql://用户:密码@数据库主机:5432/数据库名?sslmode=verify-full；凭据不写入 YAML。
+# 多 API/多机还需同时切换其余四个共享后端并设 server.form=cluster；仅换数据库不构成集群。
 database:
   backend: sqlite
   # postgres:
-  #   dsn_env: MINDEX_DATABASE_DSN
-  #   pool_min: 0
-  #   pool_max: 8
-  #   control_pool_max: 2
+  #   dsn_env: MINDEX_DATABASE_DSN  # 保存 DSN 的环境变量名，API/worker/迁移进程均需设置
+  #   pool_min: 0  # 查询池最小连接数，必须 <= pool_max
+  #   pool_max: 8  # 每进程查询池最大连接数；数据库总预算还需乘副本数并计入 worker/维护连接
+  #   control_pool_max: 2  # 每进程独立控制池上限，用于心跳和租约维护
   #   connection_budget: 10  # 当前进程查询池 + 控制池的总连接上限
-  #   checkout_timeout: 30
-  #   control_checkout_timeout: 5
-# 向量后端：缺省本地嵌入 chroma（<data_dir>/chroma）；chroma_server 为独立 Chroma
-# 服务（需 database.backend=postgres；凭据只从环境变量读取，镜像版本由部署固定）。
+  #   checkout_timeout: 30  # 查询池等待连接超时（秒，>0）
+  #   control_checkout_timeout: 5  # 控制池等待连接超时（秒，>0）
+# 向量 backend 选项：chroma_local（<data_dir>/chroma）| chroma_server（独立 Chroma 服务）。
+# 选择 chroma_server：需 database.backend=postgres，取消连接段注释并填写服务地址；
+# 若服务启用认证，在 token_env 指定的环境变量中设置令牌，YAML 不填写令牌明文。
 vector:
   backend: chroma_local
   # chroma_server:
-  #   url: http://127.0.0.1:8000
-  #   token_env: MINDEX_CHROMA_TOKEN
-# 任务分发：缺省 inline（API 进程内执行，现有行为）；postgres 为持久队列 +
-# mindex worker 消费（至少一次交付；需要 database.backend=postgres）。
+  #   url: http://127.0.0.1:8000  # 替换为各节点可访问的 http/https 地址
+  #   token_env: MINDEX_CHROMA_TOKEN  # 保存 Bearer 令牌的环境变量名
+# 任务分发 backend 选项：inline（API 进程内执行）| postgres（PG 持久队列，至少一次交付）。
+# 选择 postgres：需 database.backend=postgres，另启动 mindex --config config.local.yaml worker；
+# worker 与 API 使用同一逻辑库的部署配置和连接凭据；只启动 API 不会消费持久队列。
 queue:
   backend: inline
-# 具名锁：缺省 file（data_dir 文件锁，跨进程）；postgres 为 PG 租约锁
-# （epoch/fencing token、TTL 90s + 心跳 20s；需要 database.backend=postgres）。
+# 具名锁 backend 选项：file（本机 data_dir 文件锁，跨进程）| postgres（跨节点 PG 租约锁）。
+# 选择 postgres：需 database.backend=postgres，复用 database.postgres 连接，无额外连接段。
 locks:
   backend: file
-# 媒体存储：缺省 local（单机文件系统）；s3 为对象存储（阶段 4B 核心已交付，
-# 媒体出口/检查点迁移随阶段 5 集群装配；需 database.backend=postgres）。
-# staging_quota_gb>0 时本地形态也启用节点工作集预算（缺省 0 不限）。
+# 媒体 backend 选项：local（data_dir 本机文件系统）| s3（S3 兼容对象存储）。
+# 选择 s3：需 database.backend=postgres，取消下方 s3 段注释并配置已有 bucket、服务地址和凭据环境变量。
+# prefix 是可选的部署前缀；程序自动追加 libraries/<库UUID无连字符>/，不要重复填写库 UUID。
+# S3 模式仍需各节点本地暂存目录；其预算用 s3.staging_quota_gb/min_free_gb 配置。
 storage:
   backend: local
-  staging_quota_gb: 0
+  staging_quota_gb: 0  # 本地模式节点工作集预算（GiB）；0 不限，>0 启用预算
   # s3:
-  #   endpoint_url: http://127.0.0.1:9000
-  #   bucket: mindex
-  #   prefix: "libraries/<library_id>/"
-  #   region: ""
+  #   endpoint_url: http://127.0.0.1:9000  # 替换为各节点可访问的 S3/MinIO 服务地址
+  #   bucket: mindex  # 已创建的桶名
+  #   prefix: ""  # 例如 mindex-prod；空字符串表示只使用程序追加的库前缀
+  #   region: ""  # 按对象存储要求填写，例如 us-east-1；兼容服务可留空
   #   access_key_id_env: MINDEX_S3_ACCESS_KEY
   #   secret_access_key_env: MINDEX_S3_SECRET_KEY
-  #   staging_quota_gb: 100
-  #   min_free_gb: 20
-  #   presign_expire_seconds: 900
+  #   staging_quota_gb: 100  # 每节点暂存预算（GiB，>0）
+  #   min_free_gb: 20  # 暂存磁盘最小剩余空间（GiB，>=0）
+  #   presign_expire_seconds: 900  # 预签名 URL 有效期（秒，>=60）
 # 关闭时允许不同素材/不同类型处理并行；开启时沿用全局管线互斥。
 enforce_gpu_lock: false
 # 素材上传每文件 20 GiB，独立于 search.max_upload_mb（检索查询视频）。
