@@ -15,7 +15,7 @@
 | 一：上下文、准入、任务与 GPU | A04、A05、A06、B01、B02、B03、B08 | `tests/test_backend_lifecycle.py`；`artifacts/scaling-completion-batch1/`（含失败及重跑记录；尚非整批完成） |
 | 二：资源闭包、staging、pins 与 GC | C01、C02、C04、C05、C06、C07 | `resource_registry.py`、`object_coordination.py`、`work_budget.py`；`test_object_coordination.py`；`artifacts/scaling-completion-batch2/coordination-fifth/`（232 通过、零跳过）与 `media-directed.xml`（102 通过）；保留失败重跑，统一故障矩阵待执行 |
 | 三：上传与媒体访问 | D01、D02、D03 | `artifacts/scaling-completion-batch3/uploads-fifth/`：239 通过、零跳过；真实 Chromium 独立 endpoint/CORS、断流续传与 75 秒视频 seek |
-| 四：查询预算与容量 | E01、E02、E03、E04、E05 | 规定容量及质量门槛独立待实测 |
+| 四：查询预算与容量 | E01、E02、E03、E04、E05 | `artifacts/scaling-completion-batch4/query-seventh/`：254 通过、零跳过；原规模容量/质量仍独立待实测 |
 | 五：迁移、激活与灾备 | F01、F02、F03、F04、F05、F06 | 持久卷灾备不使用组件 tmpfs 结论 |
 | 六：网关、设置、桌面与发布 | A07、B04、B05、B06、B07、C03、G01、G02、G03、G04、G05、G06、H01、H02、H03、H04 | 网关/浏览器/macOS 与最终冻结回归分别记录 |
 
@@ -51,9 +51,9 @@
 | D03 | 浏览器独立 endpoint、CORS、Content-Type 与访问协议 | 部分 / 部分 / 部分 | 已完成上传素材与 Studio 产物的跨 API 读取、HEAD/Range/ETag 基础用例；独立浏览器 endpoint/CORS、错误签名/大小、过期 URL 和 75 秒视频实际 seek 已通过；原始截图与日志见第三批记录 |
 | E01 | 可见性、annotation、素材范围的 eligible 统计快照：`search/lexical_query.py` | 已实现 / 已接入 / 已验证 | SQL BM25 与 Python 参考分数/排序、人物投影五类查询逐项一致 |
 | E02 | 人物证据投影与候选水合：`persons/persons.py`、`SearchEngine._hydrate` | 已实现 / 已接入 / 已验证 | PG 按素材/身份取证据；命中只水合所需片段/父镜头/整理信息 |
-| E03 | 去掉集群预热全快照和 representation map：`search/warmup.py` | 已实现 / 已接入 / 已验证 | 禁止全快照/人物大缓存/map 的预热用例通过；缺派生表的查询回退仍未去除 |
-| E04 | eligible/候选/缓存字节/请求体/查询时间预算 | 部分 / 部分 / 待验证 | 当前仍将 eligible 全列表带入内存；不能据小样本查询通过宣称满足 RSS/尾延迟闸门 |
-| E05 | 10万/100万 segments、100万/300万 vectors、20并发与质量 | 待实测 / 待实测 / 待实测 | 原门槛 p95≤2s、p99≤5s、每 API RSS≤2GiB、Hit@5≥85% 保持不变 |
+| E03 | 去掉集群预热全快照和 representation map：`search/warmup.py` | 已实现 / 已接入 / 已验证 | 禁止全快照/人物大缓存/map 的预热用例通过；集群缺派生表/旧分词器拒绝全快照回退，提示回填；本地与过渡模式兼容路径保留 |
+| E04 | eligible/候选/缓存字节/请求体/查询时间预算 | 已实现 / 已接入 / 已验证（单机） | SQL 请求级关系、512 ID 分页、候选水合、64 MiB/128 项缓存、5s 总期限及可重试 503；池/SQL/慢分块/人物参考/窄范围回退通过。容量工装与小样本执行不代替原规模 RSS/尾延迟闸门 |
+| E05 | 10万/100万 segments、100万/300万 vectors、20并发与质量 | 待实测 / 待实测 / 待实测 | 原门槛 p95≤2s、p99≤5s、每 API RSS≤2GiB、Hit@5≥85% 保持不变；scaling-capacity.py 工装已交付并完成独立双 API 小样本验证，原规模磁盘不足证据见第四批记录 |
 | F01 | 统一 CLI 校验与激活记录：`maintenance/migration.py` 的 preflight/export/load/verify/activate | 已实现 / 已接入 / 已验证 | 拒绝非空/异值目标；CLI 拒绝激活缺必要媒体或向量的诊断 bundle |
 | F02 | migration_id、源清单身份、元数据/日志原子提交：`db/transfer.py` | 已实现 / 已接入 / 已验证 | 真子进程 `os._exit` 崩溃与提交后失败续跑；消除本地 JSON 日志窗口 |
 | F03 | 分阶段/分对象/分集合续跑与恢复账本 | 部分 / 部分 / 待验证 | 当前只能对已提交元数据续跑；部分对象写入、旧 running attempt 的完整重建策略待闭合 |

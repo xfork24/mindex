@@ -1349,7 +1349,7 @@ class Persons:
             "evidence_index": EvidenceIndex(data["evidence"]),  # 区间索引随版本缓存，查询时不再逐条扫描
         })
 
-    def evidence_for(self, release, *, sources, identifiers):
+    def evidence_for(self, release, *, sources, identifiers, intervals=None):
         """PG 人物查询按候选素材与身份投影，避免下载和缓存整版人物证据。"""
         if not self.store.pg:
             return self.published_evidence(release)
@@ -1359,21 +1359,39 @@ class Persons:
         sources, identifiers = sorted(set(sources)), sorted(set(identifiers))
         if not version_id or not sources or not identifiers:
             return {"evidence": [], "coverage": [], "evidence_index": EvidenceIndex([])}
+        ranges = dumps([{"source_id": s["source_id"], "begin_time": s["start"], "end_time": s["end"]}
+                        for s in intervals]) if intervals is not None else None
+
+        def window_filter(alias, *, coverage=False):
+            if ranges is None:
+                return "", ()
+            begin = f"{alias}.value->'data'->>'start'" if coverage else f"{alias}.value->>'start'"
+            end = f"{alias}.value->'data'->>'end'" if coverage else f"{alias}.value->>'end'"
+            tolerance = " + 0.000001" if coverage else ""
+            return (" AND EXISTS (SELECT 1 FROM jsonb_to_recordset(?::jsonb) "
+                    "AS w(source_id text,begin_time double precision,end_time double precision) "
+                    f"WHERE w.source_id={alias}.value->>'source_id' "
+                    f"AND ({begin})::double precision < w.end_time{tolerance} "
+                    f"AND ({end})::double precision{tolerance} > w.begin_time)", (ranges,))
+
+        evidence_filter, evidence_args = window_filter("e")
         evidence = [json.loads(row["item"]) for row in self.store.rows(
             "SELECT (e.value #- '{data,body_feature}')::text AS item FROM person_versions p "
             "CROSS JOIN LATERAL jsonb_array_elements(p.data::jsonb->'evidence') "
             "WITH ORDINALITY AS e(value,position) WHERE p.id=? "
             "AND e.value->>'source_id'=ANY(?::text[]) "
             "AND (e.value->>'actor_id'=ANY(?::text[]) "
-            "OR COALESCE(e.value->>'stage_id',e.value->>'role_id')=ANY(?::text[])) ORDER BY e.position",
-            (version_id, sources, identifiers, identifiers))]
+            "OR COALESCE(e.value->>'stage_id',e.value->>'role_id')=ANY(?::text[]))" + evidence_filter + " ORDER BY e.position",
+            (version_id, sources, identifiers, identifiers, *evidence_args))]
         for item in evidence:
             item["role_id"] = item.pop("stage_id", None) or item["role_id"]
+        coverage_filter, coverage_args = window_filter("c", coverage=True)
         coverage = [json.loads(row["item"]) for row in self.store.rows(
             "SELECT c.value::text AS item FROM person_versions p "
             "CROSS JOIN LATERAL jsonb_array_elements(p.data::jsonb->'coverage') "
             "WITH ORDINALITY AS c(value,position) WHERE p.id=? "
-            "AND c.value->>'source_id'=ANY(?::text[]) ORDER BY c.position", (version_id, sources))]
+            "AND c.value->>'source_id'=ANY(?::text[])" + coverage_filter + " ORDER BY c.position",
+            (version_id, sources, *coverage_args))]
         return {"evidence": evidence, "coverage": coverage, "evidence_index": EvidenceIndex(evidence)}
 
     def published(self, content_id, *, pinned=False, release_id=None, source_id=None):

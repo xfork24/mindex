@@ -538,8 +538,17 @@ class Store:
         context = getattr(self, "_backend_context", None)
         if context is not None and context.closed:
             raise RuntimeError("后端上下文已关闭")
+        from mindex.shared.query_budget import check, connection_for
+
+        check()
+        active = connection_for(self)
+        if active is not None:
+            yield active
+            check()
+            return
         with self.backend.connect() as db:
             yield db
+        check()
 
     def rows(self, sql: str, args=()) -> list[dict]:
         with self.connect() as db:

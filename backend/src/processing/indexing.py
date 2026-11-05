@@ -171,6 +171,8 @@ class VectorIndex:
             offset += 1000
 
     def query(self, vector: list[float], view: str, eligible: list[str], count: int) -> list[dict]:
+        if hasattr(eligible, "pages"):
+            return self._query_relation(vector, view, eligible, count)
         total = self.collection.count() if eligible else 0
         if total == 0:
             return []
@@ -181,6 +183,37 @@ class VectorIndex:
         if hits is None:
             hits = self._query_filtered(vector, view, eligible, count, total)
         return self._best_per_segment(hits, count)
+
+    def _query_relation(self, vector, view, eligible, count):
+        from mindex.shared.query_budget import check
+
+        if not eligible:
+            return []
+        total = self.collection.count()
+        if not total:
+            return []
+        # 直接下推可表达的粒度/素材范围；其他条件在请求 SQL 关系中核对。
+        where = {"$and": [{"view": view}, eligible.where]} if eligible.where else {"view": view}
+        size = min(total, max(count * 4, 64))
+        while size <= POSTFILTER_MAX_CANDIDATES:
+            check()
+            raw = self.collection.query(query_embeddings=[vector], n_results=size, where=where,
+                                        include=["metadatas", "distances"])
+            allowed = eligible.matching([item["segment_id"] for item in raw["metadatas"][0]])
+            hits = [{"id": metadata["segment_id"], "distance": distance}
+                    for metadata, distance in zip(raw["metadatas"][0], raw["distances"][0])
+                    if metadata["segment_id"] in allowed]
+            if len({item["id"] for item in hits}) >= count or size >= total or len(raw["ids"][0]) < size:
+                return self._best_per_segment(hits, count)
+            size = min(size * POSTFILTER_GROWTH, total)
+        # 窄范围不能截断 eligible 或扩大到全库；分页过滤并合并全局最优。
+        best = []
+        for page in eligible.pages():
+            check()
+            hits = self._query_filtered(vector, view, page, count, total)
+            best = self._best_per_segment([*best, *hits], count)
+        check()
+        return best
 
     def _representation_map(self) -> dict[str, tuple[str, str]]:
         """向量 id → (segment_id, view)。representations 行按内容寻址、写入后不可变，可进程内缓存。
@@ -285,13 +318,12 @@ class VectorIndex:
                     query_embeddings=[vector], n_results=size, where=where, include=["metadatas", "distances"]
                 )
                 unique = {m["segment_id"] for m in raw["metadatas"][0]}
-                if len(unique) >= count or len(raw["ids"][0]) < size or size == total:
+                if len(unique) >= min(count, len(eligible[offset:offset + 500])) or len(raw["ids"][0]) < size or size == total:
                     break
                 size = min(size * 2, total)
-            hits.extend(
+            hits = self._best_per_segment([*hits, *(
                 {"id": metadata["segment_id"], "distance": distance}
-                for metadata, distance in zip(raw["metadatas"][0], raw["distances"][0])
-            )
+                for metadata, distance in zip(raw["metadatas"][0], raw["distances"][0]))], count)
         return hits
 
     @staticmethod

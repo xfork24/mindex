@@ -133,7 +133,16 @@ class PgConnection:
                     value for row in batches for value in reference_arguments(str(sql), row))
                 publication_guard(self._connection, self._library_id, reference_values)
 
+    def _deadline(self):
+        from mindex.shared.query_budget import remaining
+
+        seconds = remaining()
+        if seconds is not None:
+            self._connection.execute("SELECT set_config('statement_timeout',%s,true)",
+                                     (str(max(1, int(seconds * 1000))),))
+
     def _verify(self):
+        self._deadline()
         if self._backend is not None and not self._control:
             from mindex.shared.db.fencing import verify_transaction
             from mindex.shared.db.maintenance_gate import _ACTIVE
@@ -145,6 +154,7 @@ class PgConnection:
             verify_transaction(self._connection, self._backend, execution=self._execution)
 
     def execute(self, sql, args: Sequence[Any] = ()) -> CursorView:
+        self._deadline()
         self._guard_write(sql.pg if isinstance(sql, DualSQL) else sql, args)
         if isinstance(sql, DualSQL):
             text = sql.pg  # 已是 PG 原生写法（%s 占位符），不再改写
@@ -170,6 +180,7 @@ class PgConnection:
         return CursorView(cursor, lastrowid)
 
     def executemany(self, sql, args) -> CursorView:
+        self._deadline()
         args = list(args)
         self._guard_write(sql.pg if isinstance(sql, DualSQL) else sql, batches=args)
         text = sql.pg if isinstance(sql, DualSQL) else _prepare(sql)
@@ -211,6 +222,10 @@ def _returning_column(sql) -> str | None:
 def _translate(exc: Exception) -> Exception:
     from psycopg import errors as pg_errors
 
+    from mindex.shared.query_budget import QueryBudgetExceeded, remaining
+
+    if isinstance(exc, pg_errors.QueryCanceled) and remaining(default=None) is not None:
+        return QueryBudgetExceeded("查询 SQL 已超过总期限，请缩小范围或稍后重试")
     if isinstance(exc, pg_errors.UniqueViolation | pg_errors.NotNullViolation
                   | pg_errors.CheckViolation | pg_errors.ForeignKeyViolation):
         return IntegrityViolation(str(exc).splitlines()[0] if str(exc) else type(exc).__name__)
@@ -280,21 +295,33 @@ class PgBackend:
             return pool
 
     @contextmanager
-    def connect(self, *, control=False, execution=None) -> Iterator[PgConnection]:
+    def connect(self, *, control=False, execution=None, snapshot=False) -> Iterator[PgConnection]:
         from mindex.shared.db.fencing import ExecutionFence
 
         fence = execution if execution is not None else ExecutionFence.capture()
-        with self.pool(control=control).connection() as conn:  # 正常退出提交、异常回滚并归还
-            view = PgConnection(conn, self.library_key, None if control else self.library_id, self.dsn,
-                                backend=self, execution=fence, control=control)
-            view._verify()
-            token = BUSINESS_CONNECTION.set(view) if not control else None
-            try:
-                yield view
+        from psycopg_pool import PoolTimeout
+
+        from mindex.shared.query_budget import QueryBudgetExceeded, active, remaining
+
+        try:
+            timeout = remaining(self.control_checkout_timeout if control else self.checkout_timeout)
+            with self.pool(control=control).connection(timeout=timeout) as conn:  # 正常退出提交、异常回滚并归还
+                if snapshot:
+                    conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+                view = PgConnection(conn, self.library_key, None if control else self.library_id, self.dsn,
+                                    backend=self, execution=fence, control=control)
                 view._verify()
-            finally:
-                if token is not None:
-                    BUSINESS_CONNECTION.reset(token)
+                token = BUSINESS_CONNECTION.set(view) if not control else None
+                try:
+                    yield view
+                    view._verify()
+                finally:
+                    if token is not None:
+                        BUSINESS_CONNECTION.reset(token)
+        except PoolTimeout as exc:
+            if active():
+                raise QueryBudgetExceeded("查询连接池等待预算已耗尽，请稍后重试") from exc
+            raise
 
     def metrics(self) -> dict:
         """池等待/使用指标（plans §12 监控）；池未建时为空。

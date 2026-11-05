@@ -26,7 +26,6 @@ from mindex.shared.tokenizer import document_terms
 
 if TYPE_CHECKING:
     from mindex.shared.storage import Store
-    from mindex.shared.types import Filters
 
 log = logging.getLogger(__name__)
 
@@ -47,53 +46,44 @@ def _dialect(store: Store) -> str:
     return "pg" if store.pg else "sqlite"
 
 
-def eligible_projection(
-    store: Store, index_id: str, granularity: str, filters: Filters, selected_sources
-) -> list[dict]:
-    """eligible 片段的轻量投影行（id/kind/start/end/parent/annotation/indexed_views）。
-
-    ``selected_sources`` 为 ``None`` 表示不限素材（空集合语义由调用方提前判定为无候选）。
-    """
+def eligible_sql(store, index_id, granularity, filters, selected_sources):
     hidden = _HIDDEN[_dialect(store)]
     clauses = ["g.index_id=?", "g.kind=?", f"{hidden}=0", "g.end - g.start >= ?"]
-    args: list = [index_id, granularity, filters.min_duration]
+    args = [index_id, granularity, filters.min_duration]
     if filters.max_duration is not None:
         clauses.append("g.end - g.start <= ?")
         args.append(filters.max_duration)
     if selected_sources is not None:
         sources = sorted(selected_sources)
         if not sources:
-            return []
-        clauses.append("g.source_id IN (" + ",".join("?" * len(sources)) + ")")
-        args.extend(sources)
-    rows = store.rows(
-        "SELECT g.segment_id AS id, g.source_id, g.parent_id, g.kind, g.start, g.end, "
-        "g.annotation_projection, g.indexed_views "
-        "FROM search_segments g "
-        "JOIN sources s ON s.id=g.source_id "
-        "LEFT JOIN segment_curation c ON c.id=g.segment_id "
-        "LEFT JOIN source_curation sc ON sc.id=g.source_id "
-        "LEFT JOIN segment_curation pc ON pc.id=g.parent_id "
-        "WHERE " + " AND ".join(clauses),
-        args,
-    )
-    projection = []
-    for row in rows:
-        item = {**row, "annotation": json.loads(row["annotation_projection"]),
-                "indexed_views": json.loads(row["indexed_views"])}
-        # 分析字段过滤（小投影上 Python casefold，plans §6.1 首版口径）
-        annotation = item["annotation"]
-        if any(
-            value and not any(value.casefold() in entry.casefold() for entry in annotation.get(field) or [])
-            for field, value in [
-                ("scene", filters.scene),
-                ("emotions", filters.emotion),
-                ("shot_size", filters.shot_size),
-            ]
-        ):
-            continue
-        projection.append(item)
-    return projection
+            clauses.append("1=0")
+        else:
+            clauses.append("g.source_id IN (" + ",".join("?" for _ in sources) + ")")
+            args.extend(sources)
+    return ("FROM search_segments g JOIN sources s ON s.id=g.source_id "
+            "LEFT JOIN segment_curation c ON c.id=g.segment_id "
+            "LEFT JOIN source_curation sc ON sc.id=g.source_id "
+            "LEFT JOIN segment_curation pc ON pc.id=g.parent_id WHERE " + " AND ".join(clauses), args)
+
+
+def projected_row(row, filters):
+    item = dict(row)
+    if "annotation" not in item:
+        item["annotation"] = json.loads(item["annotation_projection"])
+        item["indexed_views"] = json.loads(item["indexed_views"])
+    annotation = item["annotation"]
+    if any(value and not any(value.casefold() in entry.casefold() for entry in annotation.get(field) or [])
+           for field, value in [("scene", filters.scene), ("emotions", filters.emotion), ("shot_size", filters.shot_size)]):
+        return None
+    return item
+
+
+def eligible_projection(store, index_id, granularity, filters, selected_sources) -> list[dict]:
+    """本地参考路径；集群使用相同定义的 EligibleSet 分页 SQL 关系。"""
+    query, args = eligible_sql(store, index_id, granularity, filters, selected_sources)
+    rows = store.rows("SELECT g.segment_id AS id,g.source_id,g.parent_id,g.kind,g.start,g.end,"
+                      "g.annotation_projection,g.indexed_views " + query, args)
+    return [item for row in rows if (item := projected_row(row, filters)) is not None]
 
 
 def sql_bm25(
@@ -104,8 +94,14 @@ def sql_bm25(
     if not terms or not eligible_ids:
         return []
     with store.connect() as db:
-        _populate_eligible(db, store, eligible_ids)
-        stats = db.execute(
+        relation = getattr(eligible_ids, "relation", None)
+        table = relation.table if relation is not None else "_eligible"
+        if relation is None:
+            _populate_eligible(db, store, eligible_ids)
+
+        def execute(sql, args=()):
+            return db.execute(sql.replace("_eligible", table), args)
+        stats = execute(
             "SELECT count(*) AS n, CASE WHEN COALESCE(avg(d.doc_length),0)>0 "
             "THEN avg(d.doc_length) ELSE 1 END AS mean_length "
             "FROM lexical_docs d JOIN _eligible e ON e.segment_id=d.segment_id "
@@ -117,7 +113,7 @@ def sql_bm25(
         # SQL 内累计同一 Okapi BM25（k1=1.5、b=0.75、+1 内 IDF）用于候选选取；
         # N/mean/df 全部来自同一 eligible 临时表，与参考统计口径一致。
         query_terms_sql = ",".join("?" * len(terms))
-        candidates = db.execute(
+        candidates = execute(
             "WITH dfs AS ("
             " SELECT tx.term AS term, count(*) AS df FROM lexical_terms tx"
             " JOIN _eligible ex ON ex.segment_id=tx.segment_id"
@@ -140,7 +136,7 @@ def sql_bm25(
         ).fetchall()
         if not candidates:
             return []
-        df_rows = db.execute(
+        df_rows = execute(
             "SELECT t.term, count(*) AS df FROM lexical_terms t "
             "JOIN _eligible e ON e.segment_id=t.segment_id "
             f"WHERE t.index_id=? AND t.channel=? AND t.term IN ({query_terms_sql}) GROUP BY t.term",
@@ -151,7 +147,7 @@ def sql_bm25(
         candidate_ids = [row["id"] for row in candidates]
         id_sql = ",".join("?" * len(candidate_ids))
         postings: dict[str, dict] = {}
-        for row in db.execute(
+        for row in execute(
             "SELECT t.segment_id AS id, t.term, t.tf, d.doc_length FROM lexical_terms t "
             "JOIN lexical_docs d ON d.index_id=t.index_id AND d.segment_id=t.segment_id AND d.channel=t.channel "
             f"WHERE t.index_id=? AND t.channel=? AND t.term IN ({query_terms_sql}) "

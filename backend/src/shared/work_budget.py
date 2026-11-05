@@ -188,6 +188,9 @@ def stream_command(args, output, *, timeout):
             process.wait()
             reader.join()
             if timed_out.is_set():
+                from mindex.shared.query_budget import check
+
+                check()
                 raise MediaError("媒体处理超过期限，已终止")
             if process.returncode:
                 raise MediaError(b"".join(error).decode(errors="replace")[-2000:])

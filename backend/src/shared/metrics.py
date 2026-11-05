@@ -21,7 +21,16 @@ __all__ = ["metrics_snapshot"]
 
 
 def metrics_snapshot(backends: BackendContext, config: Config) -> dict:
-    out: dict = {"form": backends.form}
+    import os
+
+    out: dict = {"form": backends.form, "pid": os.getpid()}
+    try:
+        import resource
+        import sys
+
+        out["peak_rss_bytes"] = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss) * (1 if sys.platform == "darwin" else 1024)
+    except ImportError:  # Windows 的实际安装验收使用平台专用进程指标
+        out["peak_rss_bytes"] = None
     if config.database.backend == "postgres":
         backend = cast(PgBackend, backends.store.backend)
         try:

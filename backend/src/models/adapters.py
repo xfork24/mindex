@@ -107,7 +107,9 @@ def request(method: str, url: str, *, timeout: float = 180, attempts: int = 3, a
         record("model-request", {"method": method, "url": url, "attempt": attempt,
                                  "json": kwargs.get("json") if audit is None else audit})
         try:
-            response = httpx.request(method, url, timeout=timeout, trust_env=False, **kwargs)
+            from mindex.shared.query_budget import http_request, remaining
+
+            response = http_request(method, url, timeout=remaining(timeout), trust_env=False, **kwargs)
             record(
                 "model-response",
                 {"status": response.status_code, "body": response.text[:AUDIT_BODY_LIMIT]},
@@ -115,6 +117,9 @@ def request(method: str, url: str, *, timeout: float = 180, attempts: int = 3, a
             response.raise_for_status()
             return response.json()
         except (httpx.TransportError, httpx.HTTPStatusError) as exc:
+            from mindex.shared.query_budget import check
+
+            check()
             retry = not isinstance(exc, httpx.HTTPStatusError) or exc.response.status_code in {
                 429,
                 502,
@@ -136,7 +141,9 @@ def request(method: str, url: str, *, timeout: float = 180, attempts: int = 3, a
             delay = 0.25 * (2**attempt)
             status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else type(exc).__name__
             log.warning("模型 HTTP 请求准备重试 %d/%d · %s · 等待 %.2f 秒", attempt + 2, attempts, status, delay)
-            time.sleep(delay)
+            from mindex.shared.query_budget import remaining
+
+            time.sleep(remaining(delay))
         except (ValueError, KeyError) as exc:
             raise ModelError(f"模型服务返回了无效 JSON: {url}") from exc
     raise AssertionError("unreachable")
@@ -148,7 +155,9 @@ def request_bytes(method: str, url: str, *, timeout: float = 180, attempts: int 
         record("model-request", {"method": method, "url": url, "attempt": attempt,
                                  "json": kwargs.get("json")})
         try:
-            response = httpx.request(method, url, timeout=timeout, trust_env=False, **kwargs)
+            from mindex.shared.query_budget import http_request, remaining
+
+            response = http_request(method, url, timeout=remaining(timeout), trust_env=False, **kwargs)
             record("tts-response", {"status": response.status_code,
                                     "content_type": response.headers.get("content-type"),
                                     "bytes": len(response.content),
@@ -156,6 +165,9 @@ def request_bytes(method: str, url: str, *, timeout: float = 180, attempts: int 
             response.raise_for_status()
             return response.content
         except (httpx.TransportError, httpx.HTTPStatusError) as exc:
+            from mindex.shared.query_budget import check
+
+            check()
             retry = not isinstance(exc, httpx.HTTPStatusError) or exc.response.status_code in {
                 429,
                 502,
@@ -172,7 +184,9 @@ def request_bytes(method: str, url: str, *, timeout: float = 180, attempts: int 
             delay = 0.25 * (2**attempt)
             status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else type(exc).__name__
             log.warning("模型 HTTP 请求准备重试 %d/%d · %s · 等待 %.2f 秒", attempt + 2, attempts, status, delay)
-            time.sleep(delay)
+            from mindex.shared.query_budget import remaining
+
+            time.sleep(remaining(delay))
     raise AssertionError("unreachable")
 
 
