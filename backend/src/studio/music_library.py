@@ -198,6 +198,10 @@ def require_file(config, store, track_id: str) -> Path:
 
     row = _row(store, track_id)
     path = track_path(config, track_id, row["suffix"])
+    from mindex.shared import files
+
+    if files.remote(store):
+        files.hydrate(store, path)
     if not path.is_file() or brands.digest_file(path) != track_id:
         raise studio.StudioError(f"曲目「{row['title']}」的音频文件缺失或已损坏，请重新导入")
     return path
@@ -225,6 +229,9 @@ def import_track(config, store, staged: Path, suffix: str, meta: TrackMeta, *, n
     if not target.is_file() or brands.digest_file(target) != sha:
         target.parent.mkdir(parents=True, exist_ok=True)
         studio.save_bytes(target, staged.read_bytes())
+    from mindex.shared import files
+
+    files.publish(store, target)
     if existing:
         return view(existing), True
     store.execute(
@@ -287,7 +294,11 @@ def delete_track(config, store, track_id: str) -> None:
         db.execute("UPDATE media_groups SET updated_at=CURRENT_TIMESTAMP WHERE id IN "
                    "(SELECT group_id FROM media_group_members WHERE music_id=?)", (track_id,))
         db.execute("DELETE FROM music_tracks WHERE id=?", (track_id,))
-    track_path(config, track_id, row["suffix"]).unlink(missing_ok=True)
+    from mindex.shared import files
+
+    path = track_path(config, track_id, row["suffix"])
+    files.delete_tree(store, path.relative_to(store.root).as_posix())
+    path.unlink(missing_ok=True)
 
 
 # ---------------------------------------------------------------- 分析与情绪标签

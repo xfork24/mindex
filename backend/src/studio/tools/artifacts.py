@@ -11,6 +11,7 @@ from pathlib import Path
 from urllib.parse import urljoin, urlsplit
 
 from mindex.shared.media import MediaError, atomic_media, probe
+from mindex.shared.work_budget import GrowingReservation, current
 from mindex.studio import studio
 
 MAX_REDIRECTS = 3
@@ -43,7 +44,7 @@ def download(artifact: Artifact, target: Path, *, hosts: set[str], max_bytes: in
         studio.save_bytes(target, artifact.data)
         return target
     url = artifact.url or ""
-    partial = target.with_suffix(target.suffix + ".partial")
+    partial = target.with_name("." + target.name + ".partial")
     try:
         with httpx.Client(timeout=timeout, follow_redirects=False) as client:
             for _ in range(MAX_REDIRECTS + 1):
@@ -58,13 +59,18 @@ def download(artifact: Artifact, target: Path, *, hosts: set[str], max_bytes: in
                     if length and length.isdigit() and int(length) > max_bytes:
                         raise studio.StudioError(f"产物超过大小上限 {max_bytes // (1024 * 1024)} MB")
                     size = 0
-                    with partial.open("wb") as handle:
+                    with GrowingReservation(partial) as reservation, partial.open("wb") as handle:
                         for chunk in response.iter_bytes(1024 * 1024):
                             size += len(chunk)
                             if size > max_bytes:
                                 raise studio.StudioError(f"产物超过大小上限 {max_bytes // (1024 * 1024)} MB")
+                            reservation.grow(len(chunk))
                             handle.write(chunk)
-                    partial.replace(target)
+                        handle.flush()
+                        budget = current()
+                        if budget is not None:
+                            budget.retain(target)
+                        partial.replace(target)
                     return target
             raise studio.StudioError("产物地址重定向次数过多")
     except httpx.HTTPError as exc:

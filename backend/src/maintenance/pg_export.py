@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 
 from mindex.shared.db.schema_pg import BASELINE_TABLES
 from mindex.shared.storage import Store
+from mindex.shared.work_budget import copy_file
 
 if TYPE_CHECKING:
     from mindex.shared.storage import PgStore
@@ -84,7 +85,7 @@ def export_media_bundle(store: Store, media, target: Path) -> dict:
     返回清单（key → size/sha256），供装载后逐项校验。
     """
     import hashlib
-    import shutil
+    from contextlib import nullcontext
 
     from mindex.maintenance.backup_files import referenced_files, safe_path
 
@@ -94,23 +95,24 @@ def export_media_bundle(store: Store, media, target: Path) -> dict:
     if getattr(media, "backend", "local") == "s3":
         keys = referenced_files(target, target / "metadata.sqlite3",
                                 available_files=set(media.iter_prefix("")))
-        keys.update(row["object_key"] for row in store.rows("SELECT object_key FROM shared_files WHERE size>=0"))
-        from mindex.shared.directory_files import referenced_objects
-        keys.update(referenced_objects(store))
-        from mindex.shared.external_calls import referenced_objects as execution_objects
-        keys.update(execution_objects(store))
+        from mindex.shared.resource_registry import referenced_objects
+
+        available = set(media.iter_prefix(""))
+        keys.update(key for key in referenced_objects(store) if key in available)
         for key in sorted(keys):
             destination = safe_path(payload, key)
             destination.parent.mkdir(parents=True, exist_ok=True)
-            with media.materialize(key) as path:
-                shutil.copy2(path, destination)
+            coordinator = getattr(media, "coordinator", None)
+            with coordinator.retained(key, kind="backup") if coordinator else nullcontext():
+                with media.materialize(key) as path:
+                    copy_file(path, destination)
     else:
 
         keys = referenced_files(media.root, target / "metadata.sqlite3")
         for key in sorted(keys):
             destination = safe_path(payload, key)
             destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(media.root / key, destination)
+            copy_file(media.root / key, destination)
     manifest = {}
     for key in sorted(keys):
         path = payload / key

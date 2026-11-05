@@ -161,3 +161,19 @@ PG_ADMISSION = SQLITE_ADMISSION.replace(
     "INSERT OR IGNORE INTO settings(key,value) VALUES('runtime.protocol','2');",
     "INSERT INTO settings(key,value) VALUES('runtime.protocol','2') ON CONFLICT(key) DO NOTHING;"
 ).replace(" INTEGER", " BIGINT")
+
+
+# v23：远端 pin 与可恢复删除意图。目录历史的保留策略不变。
+SQLITE_OBJECTS = """
+CREATE TABLE IF NOT EXISTS resource_objects (
+  object_key TEXT PRIMARY KEY, state TEXT NOT NULL, etag TEXT, size INTEGER, version_id TEXT,
+  marked_at REAL, delete_intent TEXT,
+  CHECK(state IN ('live','candidate','deleting','deleted'))
+);
+CREATE TABLE IF NOT EXISTS resource_pins (
+  id TEXT PRIMARY KEY, object_key TEXT NOT NULL, owner TEXT NOT NULL, kind TEXT NOT NULL,
+  expires_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS resource_pins_key ON resource_pins(object_key,expires_at);
+"""
+PG_OBJECTS = SQLITE_OBJECTS.replace(" INTEGER", " BIGINT").replace(" REAL", " DOUBLE PRECISION")

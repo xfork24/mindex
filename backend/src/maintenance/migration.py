@@ -4,7 +4,6 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
-import shutil
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
@@ -17,6 +16,7 @@ from mindex.shared.backends import open_context
 from mindex.shared.db.maintenance_gate import maintenance_gate
 from mindex.shared.db.schema_pg import BASELINE_TABLES
 from mindex.shared.storage import METADATA_STEPS
+from mindex.shared.work_budget import copy_file
 
 
 @contextmanager
@@ -232,7 +232,7 @@ def load_bundle(config, source, *, with_vectors=False):
                     if destination.exists() and digest(destination) != entry["sha256"]:
                         raise ValueError(f"目标媒体存在异值：{key}")
                     destination.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(file, destination)
+                    copy_file(file, destination)
             if media.backend != "s3":
                 # 远端对象是权威内容；回到本地时还要恢复 job.json/检查点等逻辑视图。
                 # 只复制 manifest 中已校验的对象，拒绝缓存或节点旧文件作为来源。
@@ -244,7 +244,7 @@ def load_bundle(config, source, *, with_vectors=False):
                     if destination.exists() and digest(destination) != entry["sha256"]:
                         raise ValueError(f"目标权威文件存在异值：{entry['path']}")
                     destination.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(file, destination)
+                    copy_file(file, destination)
         if manifest["vectors"]:
             if not with_vectors:
                 raise ValueError("bundle 包含向量，请传 --with-vectors，避免恢复后缺向量")

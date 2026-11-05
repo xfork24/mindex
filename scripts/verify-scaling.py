@@ -36,7 +36,7 @@ TESTS = [
     "test_cluster_process_flow.py",
     "test_doctor.py", "test_pg_chroma_e2e.py", "test_migration_cli.py", "test_worker.py",
     "test_persons_pg.py", "test_media_delivery.py",
-    "test_backend_identity.py", "test_backend_lifecycle.py", "test_scaling_completion.py",
+    "test_backend_identity.py", "test_backend_lifecycle.py", "test_scaling_completion.py", "test_object_coordination.py",
     "test_maintenance_and_gateway.py", "test_sql_characteristics.py",
     "test_scaling_execution.py", "test_scaling_delivery_core.py",
 ]
@@ -168,7 +168,7 @@ def main(*, suite="integration"):
                 env.update({"MINDEX_TEST_POSTGRES_DSN": dsn, "MINDEX_TEST_S3_ENDPOINT": endpoint,
                             "MINDEX_TEST_S3_KEY": "mindex", "MINDEX_TEST_S3_SECRET": password,
                             "MINDEX_TEST_S3_SECRET_KEY": password, "MINDEX_TEST_CHROMA_SERVER": chroma})
-                test_command = [sys.executable, "-m", "pytest", "-q", "--tb=short",
+                test_command = [sys.executable, "-m", "pytest", "-q", "--tb=short", "-o", "faulthandler_timeout=60",
                                 "-W", "error::pytest.PytestUnhandledThreadExceptionWarning",
                                 "-W", "error::pytest.PytestUnraisableExceptionWarning",
                                 f"--junitxml={output / 'junit.xml'}", *(f"tests/{name}" for name in test_files)]
@@ -179,6 +179,10 @@ def main(*, suite="integration"):
                     result = subprocess.run(test_command, cwd=ROOT, env=env, stdout=test_log,
                                             stderr=subprocess.STDOUT, check=False)
                 result_code = result.returncode
+                if result_code < 0 or result_code == 2:
+                    report["status"] = "interrupted"
+                    report["returncode"] = result_code
+                    return result_code if result_code > 0 else 1
                 suites = ET.parse(output / "junit.xml").getroot().iter("testsuite")
                 report["counts"] = {key: 0 for key in ("tests", "failures", "errors", "skipped")}
                 for suite in suites:

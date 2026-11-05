@@ -38,6 +38,7 @@ from mindex.shared.images import image_png
 from mindex.shared.shot_media import ShotMedia
 from mindex.shared.storage import Store
 from mindex.shared.uploads import save_upload
+from mindex.shared.work_budget import copy_file
 from mindex.studio import brands, script_templates, studio, studio_steps
 from mindex.studio import workspace as workspace
 from mindex.studio.executor import StudioExecutor
@@ -624,9 +625,8 @@ def studio_router(
                     )
                     target = existing or inputs / f"{media_id}{suffix}"
                     if not target.exists() or digest(target) != media_id:
-                        import shutil
 
-                        shutil.copyfile(staged, target)
+                        copy_file(staged, target)
                     if base.storage.backend == "s3":
                         from mindex.shared import files
 

@@ -6,10 +6,10 @@
 from __future__ import annotations
 
 import json
-import shutil
 from pathlib import Path
 
 from mindex.shared.media import audio_info, probe
+from mindex.shared.work_budget import copy_file
 from mindex.studio import studio
 from mindex.studio.studio_artifacts import digest, safe_path
 
@@ -100,7 +100,7 @@ def _load(config, job_id):
     for name in ("job.json", "storyboard.json", "timeline.json", "audio.json", "checkpoints.json"):
         source = directory / name
         if source.is_file() and not (snapshot / name).exists():
-            shutil.copy2(source, snapshot / name)
+            copy_file(source, snapshot / name)
     state = studio.load_job(config, job_id)
     p = new_plan(
         "Default Plan" if state.get("language") == "en" else "默认方案",
@@ -254,7 +254,7 @@ def _load(config, job_id):
                 copied = snapshot / subdir / source.name
                 copied.parent.mkdir(exist_ok=True)
                 if not copied.exists():
-                    shutil.copy2(source, copied)
+                    copy_file(source, copied)
                 try:
                     data = audio_info(copied) if stage == "tts" else json.loads(copied.read_text(encoding="utf-8"))
                     selection[stage] = add_version(
@@ -321,7 +321,7 @@ def _load(config, job_id):
             if source.is_file():
                 copied = snapshot / source.name
                 if not copied.exists():
-                    shutil.copy2(source, copied)
+                    copy_file(source, copied)
                 final_groups["alias"][ext] = copied
     for group in final_groups.values():
         if "mp4" in group:

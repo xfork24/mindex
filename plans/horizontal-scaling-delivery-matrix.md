@@ -13,7 +13,7 @@
 | 批次 | 矩阵条目（含仍需补充验收的条目） | 本轮证据 |
 |---|---|---|
 | 一：上下文、准入、任务与 GPU | A04、A05、A06、B01、B02、B03、B08 | `tests/test_backend_lifecycle.py`；`artifacts/scaling-completion-batch1/`（含失败及重跑记录；尚非整批完成） |
-| 二：资源闭包、staging、pins 与 GC | C01、C02、C04、C05、C06、C07 | 待实现及验收 |
+| 二：资源闭包、staging、pins 与 GC | C01、C02、C04、C05、C06、C07 | `resource_registry.py`、`object_coordination.py`、`work_budget.py`；`test_object_coordination.py`；`artifacts/scaling-completion-batch2/coordination-fifth/`（232 通过、零跳过）与 `media-directed.xml`（102 通过）；保留失败重跑，统一故障矩阵待执行 |
 | 三：上传与媒体访问 | D01、D02、D03 | API 兼容与 S3 直传分别验收 |
 | 四：查询预算与容量 | E01、E02、E03、E04、E05 | 规定容量及质量门槛独立待实测 |
 | 五：迁移、激活与灾备 | F01、F02、F03、F04、F05、F06 | 持久卷灾备不使用组件 tmpfs 结论 |
@@ -42,10 +42,10 @@
 | C01 | 小检查点不可变对象与 PG 指针：`shared/checkpoints.py`、`files.py` | 已实现 / 部分 / 部分 | 跨节点修订读取已测；全部权威文件登记尚未完成 |
 | C02 | Studio 不可变目录 manifest + 当前 revision 指针：`shared/directory_files.py` | 已实现 / 已接入 / 已验证（单机） | 显式依赖先上传、目录 CAS 原子切换；读取绑定 snapshot；旧缓存不能回写 job.json；历史清单及产物 bundle 往返通过 |
 | C03 | 所有人为修改携带修订：`studio/revisions.py` 与共享 Web/CLI/MCP 客户端 | 已实现 / 已接入 / 部分 | 共享 Studio 人工写入缺 If-Match 返回 428、冲突 409，单次请求原子发布；客户端传递目录修订且不自动重试 409。浏览器已覆盖显式刷新、输入保留及确认；实际 PG 双 API 与浏览器合并故障矩阵仍待完成 |
-| C04 | 权威文件闭包：字幕/归档、转写/分析、人物、音乐、声音、选题、Studio | 部分 / 部分 / 部分 | 新增字幕归档共享指针、Studio 版本/参考文稿与旧步骤产物、外部回执、上传资产；冷节点读取及 Studio bundle 恢复通过，其他业务引用仍须逐项闭合 |
-| C05 | 全使用期媒体 pin：`Store.materialize_media`、attempt 保留、HTTP 响应 | 已实现 / 部分 / 部分 | 人物提取、分析、分镜检测、Studio 预览/下载/归档改用上下文；持久 worker 兼容 Path 入口保留到 attempt 结束。诊断等其他裸 Path 消费仍待改造 |
-| C06 | 跨进程 staging 预算/活动 pin：`shared/backends/staging.py` | 已实现 / 部分 / 部分 | 多进程 pin/预约/崩溃回收已有验证；新增上传分片输入与 S3 上传/合并暂存预算。其余输出和临时工作区预约尚未全覆盖 |
-| C07 | attempt/发布/备份/下载统一远端 pin 与 GC 协调 | 部分 / 部分 / 部分 | 下载 pin 和宽限基础用例通过；统一标记、引用复验、条件删除与下载竞争仍待闭合 |
+| C04 | 权威文件闭包：字幕/归档、转写/分析、人物、音乐、声音、选题、Studio | 已实现 / 已接入 / 部分 | 统一资源引用登记与分页遍历供备份/GC 共用；补齐人物图像、音乐导入与声音样本发布，目录历史保守保留；本轮真实后端 232 通过，媒体定向 102 通过，完整故障矩阵待执行 |
+| C05 | 全使用期媒体 pin：`Store.materialize_media`、attempt 保留、HTTP 响应 | 已实现 / 部分 / 部分 | 人物提取、分析、分镜检测、Studio 预览/下载/归档改用上下文；持久 worker 兼容 Path 入口保留到 attempt 结束。诊断/修复/Studio 兼容 Path 入口纳入工作集物化保留；远端无作用域的裸 Path 读取明确拒绝；HTTP 响应持有独立物化上下文至结束 |
+| C06 | 跨进程 staging 预算/活动 pin：`shared/backends/staging.py` | 已实现 / 部分 / 部分 | 多进程 pin/预约/崩溃回收已有验证；新增上传分片输入与 S3 上传/合并暂存预算。JSON、复制/物化、产物下载及 FFmpeg 输出写前预约并逐块增长；本轮真实后端 232 通过，媒体定向 102 通过，完整故障矩阵待执行 |
+| C07 | attempt/发布/备份/下载统一远端 pin 与 GC 协调 | 部分 / 部分 / 部分 | v23 统一远端 pin 与持久删除意图；引用/签名/删除共用协调锁，删除前重读引用及 pins；条件删除不可靠且未启用版本化时停止自动 GC；真实 PG 删除/签名/发布竞争通过，完整故障矩阵待执行 |
 | D01 | pending/multipart/complete/abort 上传会话：`shared/upload_sessions.py`、`upload_api.py` | 已实现 / 已接入 / 已验证（单机） | PG/SQLite 持久会话、独立凭据、pending 分片、跨 API 续传、完成登记、abort；Web/旧上传/agent 与 CLI 共用状态机。浏览器直连 S3 的预签名 multipart 不计入本项完成 |
 | D02 | 上传摘要、配额、幂等完成、过期回收 | 已实现 / 已接入 / 已验证（单机） | 分片及完整 SHA256 服务端复算；字节/会话/分片数预算；重复完成、错误归属、摘要不符、过期回收；API 生命周期回收及显式 CLI 接入 |
 | D03 | 浏览器独立 endpoint、CORS、Content-Type 与访问协议 | 部分 / 部分 / 部分 | 已完成上传素材与 Studio 产物的跨 API 读取、HEAD/Range/ETag 基础用例；独立浏览器 S3 endpoint/CORS、过期 URL 与长视频 seek 全矩阵仍待实测 |

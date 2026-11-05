@@ -12,6 +12,7 @@ from fractions import Fraction
 from mindex.shared.media import atomic_media, probe
 from mindex.shared.shot_media import ShotMedia
 from mindex.shared.storage import Store
+from mindex.shared.work_budget import configured
 from mindex.studio import studio, studio_select, studio_steps
 
 from . import transitions
@@ -540,6 +541,7 @@ def animation_render(config, job_id, w, p, sid, directory, capture=None):
     return data, files
 
 
+@configured
 def render_node(config, job_id, w, p, sid, directory, *, capture=None):
     from mindex.studio.studio_render import cut_shot, extract_ambient
 

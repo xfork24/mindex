@@ -128,10 +128,16 @@ class UploadSessions:
     def _clean_parts(self, task_id):
         # 仅处理本会话 pending 前缀；中断后再次执行仍能清理孤分片。
         for key in self.store.media.iter_prefix(f"pending/uploads/{task_id}/"):
-            self.store.media.delete_version(key)
+            if hasattr(self.store.media, "delete_pending"):
+                self.store.media.delete_pending(key, task_id)
+            else:
+                self.store.media.delete_version(key)
         self.store.execute("DELETE FROM upload_parts WHERE session_id=?", (task_id,))
 
     def reap(self):
+        from mindex.shared.object_coordination import ObjectCoordinator
+
+        ObjectCoordinator(self.store).prune()
         ids = self.store.rows("SELECT id FROM upload_sessions WHERE expires_at<=? "
                               "AND state IN ('pending','expired','aborted','complete')", (time.time(),))
         for row in ids:

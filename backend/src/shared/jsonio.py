@@ -18,10 +18,17 @@ def save_bytes(path: Path, payload: bytes) -> None:
     """原子写入字节内容；失败时删除临时文件并重新抛出原异常。"""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, name = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=".partial")
+    descriptor, name = tempfile.mkstemp(dir=path.parent, prefix="." + path.name + ".", suffix=".partial")
     temporary = Path(name)
+    from mindex.shared.work_budget import GrowingReservation, current
+
+    budget = current()
+    if budget is not None:
+        budget.retain(path)
+    reservation = GrowingReservation(temporary)
     try:
         with os.fdopen(descriptor, "wb") as handle:
+            reservation.grow(len(payload))
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
@@ -30,6 +37,8 @@ def save_bytes(path: Path, payload: bytes) -> None:
         with contextlib.suppress(OSError):
             temporary.unlink()
         raise
+    finally:
+        reservation.close()
 
 
 def save_text(path: Path, text: str) -> None:

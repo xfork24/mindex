@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from mindex.admin.curation import source_public
 from mindex.admin.source_work import attach_tasks
 from mindex.shared.config import fingerprint
+from mindex.shared.work_budget import budgeted
 
 log = logging.getLogger(__name__)
 
@@ -54,6 +55,7 @@ class WorkCache:
         with self.compute_lock:
             return self._refresh(sid)
 
+    @budgeted
     def _refresh(self, sid):
         try:
             token = self.token()
@@ -63,7 +65,9 @@ class WorkCache:
             path = self.path(sid)
             temporary = path.with_suffix(f".{os.getpid()}.{threading.get_ident()}.tmp")
             try:
-                temporary.write_text(json.dumps(entry, ensure_ascii=False), encoding="utf-8")
+                from mindex.shared.jsonio import save
+
+                save(temporary, entry)
                 temporary.replace(path)
             finally:
                 temporary.unlink(missing_ok=True)

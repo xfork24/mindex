@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack, contextmanager
-from contextvars import ContextVar
+from contextvars import ContextVar, copy_context
 from dataclasses import dataclass, field
 from threading import RLock
 
@@ -131,7 +131,7 @@ class FencedThreadPoolExecutor(ThreadPoolExecutor):
     """每个提交显式携带 attempt 和资源租约，防止子线程脱离发布约束。"""
 
     def submit(self, fn, /, *args, **kwargs):
-        return super().submit(ExecutionFence.capture().run, fn, *args, **kwargs)
+        return super().submit(copy_context().run, ExecutionFence.capture().run, fn, *args, **kwargs)
 
 
 @contextmanager

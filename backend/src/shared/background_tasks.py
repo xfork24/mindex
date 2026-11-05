@@ -28,6 +28,7 @@ from mindex.shared.task_progress import (
     save_task_progress,
     task_logs,
 )
+from mindex.shared.work_budget import budgeted
 
 JSON_COLUMNS = frozenset({"options", "progress", "result", "publication"})
 # 进程内全部 runner（弱引用）：健康接口据此报告哪些类别的后台任务在运行。
@@ -200,6 +201,7 @@ class BackgroundTaskRunner:
         """在当前线程执行任务（调用方已持锁）；只保留本线程最新一条日志到进度。"""
         return task_logs(self.table)(BackgroundTaskRunner._run)(self, task_id, config, lock)
 
+    @budgeted
     def _run(self, task_id, config, lock):
         from mindex.shared.db.fencing import current_attempt
 

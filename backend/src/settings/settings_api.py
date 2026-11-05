@@ -412,7 +412,7 @@ def settings_router(runtime: RuntimeConfig, store: Store) -> APIRouter:
         return {
             **voice,
             "sample_present": bool(
-                voice.get("sample_path") and (store.root / voice["sample_path"]).is_file()
+                voice.get("sample_path") and store.media_available(voice["sample_path"])
             ),
         }
 
@@ -805,9 +805,12 @@ def settings_router(runtime: RuntimeConfig, store: Store) -> APIRouter:
             final_sample = directory / f"{voice['id']}{suffix}"
 
             def finish():
+                from mindex.shared import files
+
                 sample.replace(final_sample)
+                files.publish(store, final_sample)
                 if preview:
-                    (directory / f"{voice['id']}-preview.wav").write_bytes(preview)
+                    files.save_bytes(store, directory / f"{voice['id']}-preview.wav", preview)
 
             await run_in_threadpool(finish)
             return _with_sample(

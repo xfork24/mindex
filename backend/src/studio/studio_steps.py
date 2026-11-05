@@ -15,6 +15,7 @@ from mindex.shared.media import MediaError, audio_info
 from mindex.shared.shot_media import ShotMedia
 from mindex.shared.trace import current
 from mindex.shared.types import Filters, ShotDraft, TextSearch
+from mindex.shared.work_budget import configured
 from mindex.studio import studio
 from mindex.studio.studio_artifacts import ArtifactSession, digest, visibility_key
 
@@ -448,6 +449,7 @@ def apply_timeline_patch(
     return timeline
 
 
+@configured
 def run_render(config: Config, job_id: str, state: dict) -> dict:
     """三轨合成：timeline 是纯函数输入，重渲染不依赖任何模型服务。"""
     from mindex.shared.storage import Store

@@ -22,7 +22,7 @@ import os
 import tempfile
 import weakref
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -39,6 +39,7 @@ _MULTIPART_THRESHOLD = 8 * 1024 * 1024
 
 class S3MediaStore:
     backend = "s3"
+    coordinator = None
 
     def __init__(self, section, *, library_id: str | None = None, staging=None, cache_dir: Path | None = None):
         import boto3
@@ -103,19 +104,31 @@ class S3MediaStore:
         head = self._head(key, version)
         sha256 = _meta(head.get("Metadata", {}), "sha256")
         return MediaObject(key=key, size=int(head["ContentLength"]), backend_version=version,
-                           etag=head.get("ETag", "").strip('"'), sha256=sha256 or None)
+                           etag=head.get("ETag", "").strip('"'), sha256=sha256 or None, version_id=head.get("VersionId"))
 
     def open_read(self, key: str, *, version: str | None = None):
+        pin = self.coordinator.retained(key, kind="read") if self.coordinator is not None else nullcontext()
+        pin.__enter__()
         try:
             response = self.client.get_object(Bucket=self.bucket, Key=self._object_key(key, version))
         except self.client.exceptions.ClientError as exc:
-            if exc.response["Error"]["Code"] in ("404", "NoSuchKey", "NotFound"):
+            pin.__exit__(None, None, None)
+            if exc.response["Error"]["Code"] in {"404", "NoSuchKey", "NotFound"}:
                 raise FileNotFoundError(key) from exc
             raise
-        return _Body(response["Body"])
+        except BaseException:
+            pin.__exit__(None, None, None)
+            raise
+        return _Body(response["Body"], pin=pin)
 
     @contextmanager
     def materialize(self, key: str, *, version: str | None = None) -> Iterator[Path]:
+        with self.coordinator.retained(key) if self.coordinator is not None else nullcontext():
+            with self._materialize(key, version=version) as path:
+                yield path
+
+    @contextmanager
+    def _materialize(self, key: str, *, version: str | None = None) -> Iterator[Path]:
         """下载到节点缓存并 pin；使用期内不被 LRU 淘汰，摘要不符立即失败。"""
         from filelock import FileLock
 
@@ -160,6 +173,11 @@ class S3MediaStore:
                 self.staging.unpin(path)
 
     def put_immutable(self, key: str, source: MediaSource, *, sha256: str,
+                       version: str | None = None) -> MediaObject:
+        with self.coordinator.writing(key) if self.coordinator is not None else nullcontext():
+            return self._put_immutable(key, source, sha256=sha256, version=version)
+
+    def _put_immutable(self, key: str, source: MediaSource, *, sha256: str,
                        version: str | None = None) -> MediaObject:
         """服务端条件创建；摘要由实际输入复算，失败的 multipart 必须 abort。
 
@@ -232,7 +250,94 @@ class S3MediaStore:
 
     def delete_version(self, key: str, *, version: str | None = None) -> None:
         """删除主对象（version=None）或某个不可变内容版本；精确到 key，不做前缀删除。"""
+        if self.coordinator is not None and version is None:
+            return self.coordinator.collect(self, key, grace=0)
         self.client.delete_object(Bucket=self.bucket, Key=self._object_key(key, version))
+
+    def delete_if_match(self, key, *, etag, size, version_id=None):
+        if not self.verify_conditional_delete():
+            raise RuntimeError("S3 后端未通过条件删除能力检查，已停止自动 GC；请查看 doctor")
+        try:
+            current = self.stat(key)
+        except FileNotFoundError:
+            return
+        if current.etag != etag or current.size != size:
+            raise RuntimeError("对象身份已经变化，拒绝删除")
+        if getattr(self, "_conditional_delete_mode", None) == "version":
+            if not version_id or current.version_id != version_id:
+                raise RuntimeError("对象版本身份缺失或已经变化，拒绝删除")
+            self.client.delete_object(Bucket=self.bucket, Key=self._object_key(key, None), VersionId=version_id)
+        else:
+            self.client.delete_object(Bucket=self.bucket, Key=self._object_key(key, None), IfMatch=etag)
+
+    def verify_conditional_delete(self):
+        if hasattr(self, "_conditional_delete_verified"):
+            return self._conditional_delete_verified
+        from uuid import uuid4
+
+        key = self._object_key("pending/capability-probe/" + uuid4().hex, None)
+        self._conditional_delete_verified = False
+        try:
+            self.client.put_object(Bucket=self.bucket, Key=key, Body=b"conditional-delete-probe")
+            try:
+                self.client.delete_object(Bucket=self.bucket, Key=key, IfMatch="00000000000000000000000000000000")
+            except self.client.exceptions.ClientError as exc:
+                if exc.response["Error"]["Code"] in {"PreconditionFailed", "412"}:
+                    head = self.client.head_object(Bucket=self.bucket, Key=key)
+                    self.client.delete_object(Bucket=self.bucket, Key=key, IfMatch=head["ETag"])
+                    self._conditional_delete_mode = "if-match"
+                    self._conditional_delete_verified = True
+                    return True
+            # 只有既有 bucket 已开启版本化时，才核验精确版本删除；不自动修改 bucket。
+            if self.client.get_bucket_versioning(Bucket=self.bucket).get("Status") != "Enabled":
+                return False
+            first = self.client.put_object(Bucket=self.bucket, Key=key, Body=b"version-one").get("VersionId")
+            second = self.client.put_object(Bucket=self.bucket, Key=key, Body=b"version-two").get("VersionId")
+            if not first or not second or first == second or first == "null":
+                return False
+            self.client.delete_object(Bucket=self.bucket, Key=key, VersionId=first)
+            if self.client.head_object(Bucket=self.bucket, Key=key).get("VersionId") != second:
+                return False
+            self._conditional_delete_mode = "version"
+            self._conditional_delete_verified = True
+            return True
+        except Exception:
+            log.exception("S3 安全删除能力检查失败，停止自动 GC")
+            return False
+        finally:
+            try:
+                versions = self.client.list_object_versions(Bucket=self.bucket, Prefix=key)
+                ids = [{"Key": entry["Key"], "VersionId": entry["VersionId"]}
+                       for entry in [*versions.get("Versions", []), *versions.get("DeleteMarkers", [])]
+                       if entry["Key"] == key]
+                if ids:
+                    self.client.delete_objects(Bucket=self.bucket, Delete={"Objects": ids})
+                else:
+                    self.client.delete_object(Bucket=self.bucket, Key=key)
+            except Exception:
+                log.exception("安全删除探针清理失败：%s", key)
+
+    def delete_pending(self, key, session_id):
+        if not key.startswith(f"pending/uploads/{session_id}/"):
+            raise ValueError("只能清理该上传会话的 pending 对象")
+        if self.coordinator is None:
+            return self.delete_version(key)
+        with self.coordinator.locked(key, deleting=True) as db:
+            from mindex.shared.resource_registry import referenced
+
+            if referenced(self.coordinator.store, key, connection=db):
+                raise RuntimeError("pending 对象仍被活动会话引用，拒绝清理")
+            try:
+                obj = self.stat(key)
+            except FileNotFoundError:
+                return
+            # 私有 pending key 已确认不再被会话引用，清理不需要开放通用孤对象 GC。
+            if self.verify_conditional_delete():
+                self.delete_if_match(key, etag=obj.etag, size=obj.size, version_id=obj.version_id)
+            else:
+                self.client.delete_object(Bucket=self.bucket, Key=self._object_key(key, None))
+            db.execute("DELETE FROM resource_pins WHERE object_key=?", (key,))
+            db.execute("UPDATE resource_objects SET state='deleted' WHERE object_key=?", (key,))
 
     def objects(self, prefix: str = "") -> dict[str, dict]:
         """列出对象元数据（key → size/last_modified），供 GC 宽限判断。"""
@@ -255,6 +360,8 @@ class S3MediaStore:
                 yield item["Key"][len(body):]
 
     def presign_get(self, key: str, *, version: str | None = None, expires: int) -> str | None:
+        if self.coordinator is not None:
+            self.coordinator.download(key, ttl=expires + 300)
         return self.client.generate_presigned_url(
             "get_object", Params={"Bucket": self.bucket, "Key": self._object_key(key, version)},
             ExpiresIn=expires)
@@ -263,14 +370,20 @@ class S3MediaStore:
 class _Body:
     """get_object 响应体的最小 BinaryIO 适配（read/close/上下文）。"""
 
-    def __init__(self, body):
+    def __init__(self, body, *, pin=None):
         self._body = body
+        self._pin = pin
 
     def read(self, size: int = -1):
         return self._body.read(size if size and size > 0 else None)
 
     def close(self):
-        self._body.close()
+        try:
+            self._body.close()
+        finally:
+            if self._pin is not None:
+                pin, self._pin = self._pin, None
+                pin.__exit__(None, None, None)
 
     def __enter__(self):
         return self

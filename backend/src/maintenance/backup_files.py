@@ -33,6 +33,7 @@ from mindex.maintenance.backup_db import (
 from mindex.shared import locks
 from mindex.shared.config import Config, fingerprint
 from mindex.shared.storage import Store, dumps
+from mindex.shared.work_budget import copy_file
 
 # 向量备份/恢复子进程的超时：大库也足够宽裕，只防止进程挂死后永远等待。
 VECTOR_PROCESS_TIMEOUT_SECONDS = 6 * 3600
@@ -443,7 +444,7 @@ def _copy_payload_file(origin, destination, *, transform, include_secrets, secre
                 text = text.replace(secret, '[已移除密钥]')
         destination.write_text(text, encoding='utf-8')
     else:
-        shutil.copy2(origin, destination)
+        copy_file(origin, destination)
 
 
 def _resolve_dependency(item, base_dir, data_root):

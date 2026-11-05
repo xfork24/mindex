@@ -13,6 +13,7 @@ from pathlib import Path
 from mindex.processing.subtitle_archive import archive_subtitles, load_archive
 from mindex.shared.shot_media import VERSION, ShotMedia
 from mindex.shared.storage import Store
+from mindex.shared.work_budget import configured, copy_file
 
 
 def protected_digest(store):
@@ -102,6 +103,7 @@ def original_unavailable(store, source):
         yield
 
 
+@configured
 def migrate(config, source_id=None, *, apply=False, verify=False):
     store = Store.__new__(Store)
     store.root = Path(config.data_dir).resolve()
@@ -183,6 +185,7 @@ def migrate(config, source_id=None, *, apply=False, verify=False):
     return report
 
 
+@configured
 def materialize_all(config):
     store = Store.open(config)
     from mindex.shared.processing_lock import ProcessingLock
@@ -204,7 +207,7 @@ def materialize_all(config):
             with tempfile.NamedTemporaryFile(dir=destination.parent, suffix='.mp4', delete=False) as handle:
                 partial = Path(handle.name)
             try:
-                shutil.copyfile(media, partial)
+                copy_file(media, partial)
                 partial.replace(destination)
             finally:
                 partial.unlink(missing_ok=True)
@@ -212,6 +215,7 @@ def materialize_all(config):
     return {'restored': restored}
 
 
+@configured
 def verify_archives(config, source_id=None):
     """Explicit archive maintenance; business validation never calls this."""
     from mindex.shared.media import content_hash

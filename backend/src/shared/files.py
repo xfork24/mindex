@@ -10,6 +10,7 @@ from pathlib import Path, PurePosixPath
 from uuid import uuid4
 
 from mindex.shared import jsonio
+from mindex.shared.work_budget import resource_write
 
 UNCONDITIONAL = object()
 
@@ -73,6 +74,7 @@ def publish(store, path, *, expected=UNCONDITIONAL):
     return digest
 
 
+@resource_write
 def save_bytes(store, path, payload, *, expected=UNCONDITIONAL):
     if not remote(store):
         jsonio.save_bytes(path, payload)
@@ -105,6 +107,7 @@ def save_bytes(store, path, payload, *, expected=UNCONDITIONAL):
     jsonio.save_bytes(path, payload)
 
 
+@resource_write
 def read_bytes(store, path):
     path = Path(path)
     if not remote(store):
@@ -128,11 +131,13 @@ def read_bytes(store, path):
     return payload
 
 
+@resource_write
 def hydrate(store, path):
     if not remote(store):
         return Path(path)
-    import shutil
     import tempfile
+
+    from mindex.shared.work_budget import GrowingReservation, current
 
     path = Path(path)
     entry = pointer(store, key_for(store, path))
@@ -146,14 +151,23 @@ def hydrate(store, path):
     temporary = None
     try:
         with store.media.materialize(entry["object_key"]) as cached:
-            with tempfile.NamedTemporaryFile(dir=path.parent, suffix=".partial", delete=False) as target:
+            with tempfile.NamedTemporaryFile(dir=path.parent, prefix=".hydrate-", suffix=".partial", delete=False) as target:
                 temporary = Path(target.name)
-                with cached.open("rb") as source:
-                    shutil.copyfileobj(source, target, 1024 * 1024)
+                with GrowingReservation(temporary) as reservation, cached.open("rb") as source:
+                    while chunk := source.read(1024 * 1024):
+                        reservation.grow(len(chunk))
+                        target.write(chunk)
+                    target.flush()
+                    reservation.defer()
         with temporary.open("rb") as source:
             if temporary.stat().st_size != entry["size"] or hashlib.file_digest(source, "sha256").hexdigest() != entry["sha256"]:
                 raise ValueError("共享文件摘要不符")
+        budget = current()
+        if budget is not None:
+            budget.retain(path)
         temporary.replace(path)
+        if budget is not None:
+            budget.committed(temporary)
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)

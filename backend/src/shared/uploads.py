@@ -14,6 +14,8 @@ async def save_upload(upload: UploadFile, path: Path, max_bytes: int):
 
     任何失败（413、422、读写异常或请求取消）都会先删除已写入的半成品再重新抛出。
     """
+    from mindex.shared.work_budget import GrowingReservation
+
     try:
         size = 0
         handle = await run_in_threadpool(path.open, "wb")
@@ -22,7 +24,10 @@ async def save_upload(upload: UploadFile, path: Path, max_bytes: int):
                 size += len(chunk)
                 if size > max_bytes:
                     raise HTTPException(413, "上传文件过大")
-                await run_in_threadpool(handle.write, chunk)
+                with GrowingReservation(path) as reservation:
+                    await run_in_threadpool(reservation.grow, len(chunk))
+                    await run_in_threadpool(handle.write, chunk)
+                    await run_in_threadpool(handle.flush)
         if not size:
             raise HTTPException(422, "上传文件为空")
     except BaseException:

@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import logging
 import math
-import shutil
 import tempfile
 from pathlib import Path
 from time import perf_counter
@@ -24,6 +23,7 @@ from mindex.shared.media import content_hash, cut, probe, thumbnail, windows
 from mindex.shared.shot_media import ShotMedia
 from mindex.shared.storage import Store, dumps
 from mindex.shared.types import Annotation
+from mindex.shared.work_budget import copy_file
 
 log = logging.getLogger(__name__)
 
@@ -180,7 +180,7 @@ class Pipeline:
                     else:
                         with tempfile.NamedTemporaryFile(dir=destination.parent, delete=False) as handle:
                             partial = Path(handle.name)
-                        shutil.copyfile(path, partial)
+                        copy_file(path, partial)
                         partial.replace(destination)
                 self.store.execute(
                     "INSERT OR IGNORE INTO sources(id,name,path,media,layout_key,layout_config) VALUES(?,?,?,?,?,?)",

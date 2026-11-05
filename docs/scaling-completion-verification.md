@@ -70,3 +70,33 @@ CLI 的 prepare/detect/split/transcribe/align/analyze/enrich-dialogue/ingest 在
 `admission-fourth/`（223 通过，零跳过，源码摘要一致）。
 单独定向：391 项准入/CLI 帮助/缓存测试通过；54 项工作摘要、生命周期、预热、素材与对白回归通过。
 类型检查、Ruff 和数据库构造边界通过。后续仍须在全部批次闭合后冻结源码执行完整回归。
+
+## 第二批进行中：资源登记、工作集及删除协调
+
+追加 v23 登记对象状态与远端 pins；v22 和以前的已发布迁移保持不变。
+`resource_registry.referenced_objects` 供 GC 与媒体导出共用，保留全部目录历史，
+覆盖检查点、人物、音乐、声音样本、选题配置、外部回执和上传资产。
+PG 引用发布、pin 与 GC 使用同一库级协调锁；GC 独立提交删除意图，删除前再次读取
+当前引用和 pins，并核对对象身份。删除意图崩溃后可恢复，删除中的对象拒绝新签名/发布。
+
+S3 安全删除通过独立探针核验。当前隔离 MinIO 忽略 DELETE If-Match；未启用可靠条件删除
+或版本化时自动 GC 明确停止。已启用版本化的 bucket 可验证指定 VersionId 删除能力后使用；
+程序不自动更改生产 bucket 版本化。验收仅为本轮隔离测试 bucket 显式启用版本化。
+
+节点工作集预算涵盖输入缓存、输出和临时文件；JSON/上传/物化复制与 FFmpeg 输出在写入前
+预约，未知输出逐块增长，拒绝时停止编码器并清理半成品。活动输入由工作集/attempt 或
+HTTP 响应的物化上下文保留；HTML 导出复制引用媒体到导出目录。
+
+原始证据：`artifacts/scaling-completion-batch2/`。
+`coordination-first/` 因 PG 池 finalizer 重入非重入锁而中断，保留采样及日志；已改为重入锁并增加回归。
+`coordination-second/` 为 228 通过、1 失败、零跳过，暴露 MinIO 条件删除不安全并停止 GC；
+`coordination-third/` 为 228 通过、1 失败、零跳过，暴露声音表分页使用错误 rowid；已改用整数 id。
+本节为进行中记录，尚不能将整批或全部计划标为完成。
+
+`coordination-fourth/`：230 通过、1 失败、零跳过；旧测试仍使用已释放的裸 Path，
+改为显式物化上下文后复验。`coordination-fifth/`：232 通过、零失败/错误/跳过，源码摘要一致；
+包含真实 PG 删除期间的下载签名与引用发布竞争，以及既有跨进程 staging/恢复、冷节点、bundle/purge 用例。
+`media-directed.xml`/`.log`：Studio 产物、工具、音乐、声音、渲染、窗口、媒体和管线 102 项通过。
+`stage2-pin-local2.log` 为离线定向 32 通过、6 环境跳过；外部节点随后由真实后端专项覆盖，
+不把跳过作为通过。核心新增模块 Mypy、全树 Ruff、构造边界、文档链接与 diff 检查通过。
+单机统一故障矩阵和最终冻结回归仍需在后续批次完成后执行。

@@ -130,7 +130,9 @@ class StagingArea:
         self._entries.clear()
         found = []
         for path in self.root.rglob("*"):
-            if path.is_file() and not any(part.startswith(".") for part in path.relative_to(self.root).parts):
+            if (path.is_file() and not any(part.startswith(".") or part in {"locks", "models", "chroma"}
+                                           for part in path.relative_to(self.root).parts)
+                    and not path.name.endswith((".lock", ".sqlite3", "-wal", "-shm"))):
                 try:
                     stat = path.stat()
                     found.append((stat.st_mtime_ns, path, stat.st_size))

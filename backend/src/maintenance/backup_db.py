@@ -28,7 +28,7 @@ TABLES = {
 # 这些表的 source_id 指向选题档案/选题数据源，而不是素材库 sources；
 # 部分备份不按素材裁剪它们，也不做素材依赖校验（与 script_templates 一样整体保留）。
 NON_LIBRARY_SOURCE_ID = frozenset({'topic_items', 'topic_runs', 'topic_calendar_events'})
-OPERATIONAL_TABLES = frozenset({'migration_runs', 'gpu_allocations', 'gpu_resource_groups'})
+OPERATIONAL_TABLES = frozenset({'migration_runs', 'gpu_allocations', 'gpu_resource_groups', 'resource_objects', 'resource_pins'})
 
 
 def library_source_id(table, columns):

@@ -24,6 +24,7 @@ from mindex.shared import jsonio, lock_backend
 from mindex.shared.config import Config, StrictModel, fingerprint, portable_parameters
 from mindex.shared.trace import record as trace_record
 from mindex.shared.types import Filters, Granularity
+from mindex.shared.work_budget import copy_file
 
 STEPS = ("split", "recall", "tts", "select", "render")
 SPLIT_VERSION = 8  # 8: 创建语言决定 visual/query；7: 具体意象单独成镜、抽象列举不拆、最短长度、visual 字段与召回词公共规则
@@ -1293,7 +1294,7 @@ def archive_edit(config, job_id, name, path):
     if path.is_file():
         directory = attempts_dir(config, job_id) / f"edit-{name}-{uuid4().hex[:12]}"
         directory.mkdir(parents=True)
-        shutil.copy2(path, directory / path.name)
+        copy_file(path, directory / path.name)
 
 
 def set_execution(config, job_id, status, current_step, remaining_steps):

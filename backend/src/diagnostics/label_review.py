@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from urllib.parse import quote
 
 from mindex.shared.config import Config
+from mindex.shared.export_media import copy_for_export
 from mindex.shared.jsonio import save
 from mindex.shared.review_style import review_style
 from mindex.shared.storage import Store
@@ -25,8 +25,8 @@ def render_review(config: Config, run: Path, queries: Path) -> Path:
             "id": row["id"],
             "start": row["start"],
             "end": row["end"],
-            "video": quote(os.path.relpath(store.resolve_media(row["path"]), run)),
-            "thumbnail": quote(os.path.relpath(store.resolve_media(row["thumbnail"]), run)),
+            "video": quote(copy_for_export(store, row["path"], run)),
+            "thumbnail": quote(copy_for_export(store, row["thumbnail"], run)),
         }
         for row in segments
     ]

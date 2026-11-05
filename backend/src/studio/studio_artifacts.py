@@ -5,12 +5,12 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import shutil
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
 from mindex.shared.config import fingerprint, portable_parameters
+from mindex.shared.work_budget import copy_file
 from mindex.studio import studio
 
 
@@ -112,7 +112,7 @@ class ArtifactSession:
             try:
                 os.link(path, temporary)
             except OSError:
-                shutil.copy2(path, temporary)
+                copy_file(path, temporary)
             temporary.replace(alias)
         finally:
             temporary.unlink(missing_ok=True)
@@ -120,7 +120,7 @@ class ArtifactSession:
     def publish(self, logical: str, path: Path, key: str, **metadata) -> Path:
         target = self.target(logical)
         if path.resolve() != target.resolve():
-            shutil.copy2(path, target)
+            copy_file(path, target)
         item = {
             "key": key,
             "path": target.relative_to(self.root).as_posix(),

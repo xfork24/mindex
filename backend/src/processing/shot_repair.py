@@ -13,6 +13,7 @@ from mindex.models.model_server import refine_cut_frame
 from mindex.shared.db.fencing import FencedThreadPoolExecutor as ThreadPoolExecutor
 from mindex.shared.media import MediaError, atomic_media, command, ffmpeg_bin, probe
 from mindex.shared.storage import Store, bump_snapshot_revision
+from mindex.shared.work_budget import configured, resource_write
 
 VERSION = 'shot-boundary-v1'
 
@@ -53,6 +54,7 @@ def inspect_boundary(path, timestamp, origin=0., *, include_rgb=False):
     return result
 
 
+@resource_write
 def audit(store, source_id=None, *, workers=4, progress=None):
     sources = [s for s in store.sources() if not source_id or s['id'] == source_id]
     if not sources:
@@ -108,6 +110,7 @@ def _write_json(path, data):
     save_text(path, json.dumps(data, ensure_ascii=False, indent=2) + '\n')
 
 
+@configured
 def apply(config, report, *, progress=None, video_encoder="libx264"):
     """Stage new shots first, then atomically commit source metadata. Old paths survive."""
     from mindex.shared.processing_lock import ProcessingLock, index_write_lock
