@@ -94,7 +94,8 @@ class Pipeline:
         output = self.store.root / relative
         if kind == "shot":
             if not output.is_file() or not output.stat().st_size:
-                cut(self.store.resolve_media(source["path"]), start, end, output)
+                with self.store.materialize_media(source["path"]) as source_path:
+                    cut(source_path, start, end, output)
             if not (self.store.root / image).is_file() or not (self.store.root / image).stat().st_size:
                 thumbnail(output, self.store.root / image)
         else:
@@ -210,7 +211,6 @@ class Pipeline:
             return
         if source["layout_key"] != self.config.layout_key:
             raise ValueError("素材切分配置不符，请使用原配置或新的 data_dir")
-        destination = self.store.resolve_media(source["path"])
         info = json.loads(source["media"])
         plan_path = self.store.root / "plans" / f"{identifier}.json"
         plan_path.parent.mkdir(parents=True, exist_ok=True)
@@ -219,7 +219,8 @@ class Pipeline:
                 if progress:
                     progress({"stage": "detect", "message": "正在检测分镜"})
                 log.info("Detect shots: %s (%.1f minutes)", source["name"], info["duration"] / 60)
-                ranges = self.detector.detect(destination)
+                with self.store.materialize_media(source["path"]) as destination:
+                    ranges = self.detector.detect(destination)
                 self._validate_ranges(ranges, info["duration"])
                 plan = {
                     "source_id": identifier,
@@ -641,7 +642,8 @@ class Pipeline:
                 return saved
         dialogue = self._dialogue(segment["source_id"], segment["start"], segment["end"])
         try:
-            annotation = self.analyzer.analyze(self.store.resolve_media(segment["path"]), dialogue)
+            with self.store.materialize_media(segment["path"]) as path:
+                annotation = self.analyzer.analyze(path, dialogue)
             output = {"annotation": annotation.model_dump(), "content_version": fingerprint(annotation.model_dump())}
         except AnalysisContentRejected as exc:
             log.warning("LLM 跳过敏感片段 %s %s %.3f–%.3f：%s", segment["source_id"],

@@ -28,6 +28,15 @@ def remote(store):
 
 
 def pointer(store, key):
+    if remote(store):
+        from mindex.shared.directory_files import directory_for, snapshot
+
+        prefix = directory_for(key)
+        if prefix:
+            view = snapshot(store, prefix)
+            entry = view.entries.get(key)
+            return ({"path": key, **entry} if entry else
+                    {"path": key, "size": -1, "revision": view.revision} if view.revision is not None else None)
     return store.one("SELECT * FROM shared_files WHERE path=?", (key,))
 
 
@@ -36,6 +45,17 @@ def publish(store, path, *, expected=UNCONDITIONAL):
         return None
     path = Path(path)
     key = key_for(store, path)
+    from mindex.shared.directory_files import directory_for, snapshot
+
+    prefix = directory_for(key)
+    if prefix:
+        view = snapshot(store, prefix)
+        current = view.entries.get(key)
+        if expected is not UNCONDITIONAL and (current["revision"] if current else None) != expected:
+            raise FileRevisionConflict("文件已被其他操作修改，请刷新后重试")
+        result = view.put_path(key, path)
+        view.publish()
+        return result
     with path.open("rb") as source:
         digest = hashlib.file_digest(source, "sha256").hexdigest()
     object_key = f"objects/{digest}/{key}"
@@ -58,6 +78,18 @@ def save_bytes(store, path, payload, *, expected=UNCONDITIONAL):
         jsonio.save_bytes(path, payload)
         return
     key = key_for(store, path)
+    from mindex.shared.directory_files import directory_for, snapshot
+
+    prefix = directory_for(key)
+    if prefix:
+        view = snapshot(store, prefix)
+        current = view.entries.get(key)
+        if expected is not UNCONDITIONAL and (current["revision"] if current else None) != expected:
+            raise FileRevisionConflict("文件已被其他操作修改，请刷新后重试")
+        view.put(key, payload)
+        view.publish()
+        jsonio.save_bytes(path, payload)
+        return
     digest = hashlib.sha256(payload).hexdigest()
     object_key = f"objects/{digest}/{key}"
     store.media.put_immutable(object_key, io.BytesIO(payload), sha256=digest)
@@ -86,7 +118,8 @@ def read_bytes(store, path):
     if path.is_file():
         with path.open("rb") as source:
             if hashlib.file_digest(source, "sha256").hexdigest() == entry["sha256"]:
-                return path.read_bytes()
+                source.seek(0)
+                return source.read()
     with store.media.materialize(entry["object_key"]) as cached:
         payload = cached.read_bytes()
     if hashlib.sha256(payload).hexdigest() != entry["sha256"]:
@@ -98,12 +131,42 @@ def read_bytes(store, path):
 def hydrate(store, path):
     if not remote(store):
         return Path(path)
-    if read_bytes(store, path) is None:
+    import shutil
+    import tempfile
+
+    path = Path(path)
+    entry = pointer(store, key_for(store, path))
+    if entry is None or entry["size"] < 0:
         raise FileNotFoundError(key_for(store, path))
-    return Path(path)
+    if path.is_file():
+        with path.open("rb") as source:
+            if hashlib.file_digest(source, "sha256").hexdigest() == entry["sha256"]:
+                return path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with store.media.materialize(entry["object_key"]) as cached:
+            with tempfile.NamedTemporaryFile(dir=path.parent, suffix=".partial", delete=False) as target:
+                temporary = Path(target.name)
+                with cached.open("rb") as source:
+                    shutil.copyfileobj(source, target, 1024 * 1024)
+        with temporary.open("rb") as source:
+            if temporary.stat().st_size != entry["size"] or hashlib.file_digest(source, "sha256").hexdigest() != entry["sha256"]:
+                raise ValueError("共享文件摘要不符")
+        temporary.replace(path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+    return path
 
 
 def entries(store, prefix):
+    from mindex.shared.directory_files import directory_for, snapshot
+
+    directory = directory_for(prefix + "__entry__") if remote(store) else None
+    if directory:
+        return [{"path": key, **entry} for key, entry in sorted(snapshot(store, directory).entries.items())
+                if key.startswith(prefix)]
     # 前缀通过比较而非 LIKE，避免文件名中的 %/_ 改变匹配范围。
     return [row for row in store.rows("SELECT * FROM shared_files ORDER BY path")
             if row["path"].startswith(prefix) and row["size"] >= 0]
@@ -118,6 +181,15 @@ def hydrate_tree(store, prefix):
 
 
 def delete_tree(store, prefix):
+    from mindex.shared.directory_files import directory_for, snapshot
+
+    directory = directory_for(prefix + "__entry__") if remote(store) else None
+    if directory:
+        view = snapshot(store, directory)
+        view.entries = {k: v for k, v in view.entries.items() if not k.startswith(prefix)}
+        view.dirty = True
+        view.publish()
+        return
     with store.connect() as db:
         for row in entries(store, prefix):
             db.execute("UPDATE shared_files SET object_key='',sha256='',size=-1,revision=? WHERE path=?",

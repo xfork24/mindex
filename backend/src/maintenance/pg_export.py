@@ -95,6 +95,10 @@ def export_media_bundle(store: Store, media, target: Path) -> dict:
         keys = referenced_files(target, target / "metadata.sqlite3",
                                 available_files=set(media.iter_prefix("")))
         keys.update(row["object_key"] for row in store.rows("SELECT object_key FROM shared_files WHERE size>=0"))
+        from mindex.shared.directory_files import referenced_objects
+        keys.update(referenced_objects(store))
+        from mindex.shared.external_calls import referenced_objects as execution_objects
+        keys.update(execution_objects(store))
         for key in sorted(keys):
             destination = safe_path(payload, key)
             destination.parent.mkdir(parents=True, exist_ok=True)

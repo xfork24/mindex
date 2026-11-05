@@ -329,7 +329,9 @@ def person_router(runtime, store):
 
     def media(path, headers=None):
         try:
-            return FileResponse(store.resolve_media(path), headers=headers)
+            from mindex.shared.media_delivery import materialized_response
+
+            return materialized_response(store.materialize_media(path), headers=headers)
         except FileNotFoundError as exc:
             raise HTTPException(404, "图片缺失") from exc
 
@@ -419,7 +421,8 @@ def person_router(runtime, store):
         for image_id in wanted:
             image = images[image_id]
             number = next(i for i, im in enumerate(draft["images"], 1) if im["id"] == image_id)
-            payload = {**image, "raw": store.resolve_media(image["path"]).read_bytes()}
+            with store.materialize_media(image["path"]) as path:
+                payload = {**image, "raw": path.read_bytes()}
             try:
                 parsed = parse_cast(runtime.current(), payload)
             except Exception as exc:  # 单张失败保留已有条目，不阻塞其他图与手工流程

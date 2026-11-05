@@ -179,7 +179,13 @@ class Worker:
         try:
             self._execute_attempt(task, attempt, stop, lost, cancelled)
         finally:
-            attempt.close()
+            try:
+                attempt.close()
+            finally:
+                if task.ledger_id:
+                    from mindex.shared.task_cancel import registry_for
+
+                    registry_for(self.context.store.root).clear(task.ledger_id)
 
     def _execute_attempt(self, task, attempt, stop, lost, cancelled):
         from mindex.shared.db.fencing import executing
@@ -225,7 +231,9 @@ class Worker:
             lost.set()
             log.warning("任务 %d 的执行租约已失效，禁止提交", task.id)
         except Exception as exc:
-            outcome, error = "failed", f"{type(exc).__name__}: {exc}"
+            from mindex.shared.external_calls import ReviewRequired
+
+            outcome, error = "needs_review" if isinstance(exc, ReviewRequired) else "failed", f"{type(exc).__name__}: {exc}"
             log.exception("任务 %d（%s）执行失败", task.id, task.kind)
         finally:
             if gpu_slot is not None:
@@ -253,7 +261,7 @@ class Worker:
         attempt = task.execution.attempt if task.execution is not None else None
         with self.context.store.backend.connect(execution=attempt.publication_fence() if attempt else None) as db:
             row = db.execute(
-                "SELECT cancel_requested FROM task_queue WHERE library_id=%s AND id=%s"
+                "SELECT cancel_requested,expires_at FROM task_queue WHERE library_id=%s AND id=%s"
                 " AND status='running' AND owner=%s AND attempt_id=%s AND fencing_token=%s"
                 " AND expires_at >= clock_timestamp() FOR UPDATE",
                 (self.queue.library_id, task.id, task.owner, task.attempt_id, task.fencing_token)).fetchone()
@@ -267,8 +275,15 @@ class Worker:
                     (task.ledger_id, task.attempt_id, task.fencing_token)).fetchone()
                 if bound is None:
                     raise LeaseLost("账本绑定已变化，拒绝旧 attempt 发布及终态提交")
+            final_outcome = "cancelled" if row["cancel_requested"] else outcome
+            for terminal in (attempt.terminals.values() if attempt else ()):
+                terminal(db, final_outcome, error)
             if row["cancel_requested"] or outcome == "cancelled":
                 self.queue.finish_cancelled(db, task)
+            elif outcome == "needs_review":
+                db.execute("UPDATE task_queue SET status='failed',error=%s,expires_at=NULL WHERE id=%s", (error, task.id))
+                self.queue._ledger(db, {"ledger_table": task.ledger_table, "ledger_id": task.ledger_id},
+                                   "needs_review", error=error)
             elif outcome == "failed":
                 self.queue.fail(db, task, error)
             else:
@@ -276,3 +291,5 @@ class Worker:
                     publish(db)
                 if not self.queue.complete(db, task):
                     raise LeaseLost("发布期间任务 attempt 已到期，拒绝提交")
+            if not db.execute("SELECT 1 WHERE clock_timestamp()<=%s", (row["expires_at"],)).fetchone():
+                raise LeaseLost("终态提交期间任务 attempt 已到期，拒绝提交")

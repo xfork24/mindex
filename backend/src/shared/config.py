@@ -776,8 +776,16 @@ class DatabaseConfig(StrictModel):
     postgres: PostgresConfig = Field(default_factory=PostgresConfig)
 
 
+class UploadConfig(StrictModel):
+    max_sessions: int = Field(default=256, ge=1, le=10000)
+    pending_bytes: int = Field(default=100 * 1024**3, ge=1)
+    part_bytes: int = Field(default=8 * 1024**2, ge=1, le=64 * 1024**2)
+    ttl_seconds: int = Field(default=86400, ge=1, le=604800)
+
+
 class Config(StrictModel):
     data_dir: Path = Path("data")
+    uploads: UploadConfig = Field(default_factory=UploadConfig, exclude=True)
     source_upload_max_bytes: int = Field(default=20 * 1024**3, ge=1)
     runtime_overrides: bool = True
     enforce_gpu_lock: bool = False

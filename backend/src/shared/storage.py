@@ -414,7 +414,19 @@ def _metadata_v19(db):
     execute_script(db, SQLITE_DURABLE_INDEX)
 
 
-METADATA_STEPS = (_metadata_v1, _metadata_v2, _metadata_v3, _metadata_v4, _metadata_v5, _metadata_v6, _metadata_v7, _metadata_v8, _metadata_v9, _metadata_v10, _metadata_v11, _metadata_v12, _metadata_v13, _metadata_v14, _metadata_v15, _metadata_v16, _metadata_v17, _metadata_v18, _metadata_v19)
+def _metadata_v20(db):
+    from mindex.shared.db.scaling_schema import SQLITE_DIRECTORIES
+
+    execute_script(db, SQLITE_DIRECTORIES)
+
+
+def _metadata_v21(db):
+    from mindex.shared.db.scaling_schema import SQLITE_DELIVERY
+
+    execute_script(db, SQLITE_DELIVERY)
+
+
+METADATA_STEPS = (_metadata_v1, _metadata_v2, _metadata_v3, _metadata_v4, _metadata_v5, _metadata_v6, _metadata_v7, _metadata_v8, _metadata_v9, _metadata_v10, _metadata_v11, _metadata_v12, _metadata_v13, _metadata_v14, _metadata_v15, _metadata_v16, _metadata_v17, _metadata_v18, _metadata_v19, _metadata_v20, _metadata_v21)
 
 
 def migrate_metadata(db) -> int:
@@ -739,6 +751,13 @@ class Store:
 
     def resolve_media(self, relative: str) -> Path:
         """兼容 Path 入口；长期处理和响应应使用 materialize_media 持有整个上下文。"""
+        from mindex.shared.db.fencing import current_attempt
+
+        attempt = current_attempt()
+        if self.pg and attempt is not None:
+            if attempt.library_id != self.library_id or attempt.backend.dsn != self.backend.dsn:
+                raise ValueError("媒体与任务所属素材库不一致")
+            return attempt.retain((self.library_id, "media", relative), self.materialize_media(relative))
         with self.materialize_media(relative) as path:
             return path
 

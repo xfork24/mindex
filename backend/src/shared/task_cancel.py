@@ -38,12 +38,23 @@ class CancelRegistry:
         return self.directory / _safe_key(key)
 
     def request(self, key: str) -> None:
+        from mindex.shared.db.fencing import current_attempt
+
+        attempt = current_attempt()
+        if attempt is not None and getattr(attempt.task, "ledger_id", None) == key:
+            attempt.cancelled.set()
         path = self.sentinel(key)
         self._event(key).set()
         path.parent.mkdir(parents=True, exist_ok=True)
         path.touch()
 
     def requested(self, key: str) -> bool:
+        from mindex.shared.db.fencing import current_attempt
+
+        attempt = current_attempt()
+        if attempt is not None and getattr(attempt.task, "ledger_id", None) == key:
+            # PG 当前 attempt 的取消由共享队列控制；节点旧哨兵不能取消重派后的新 attempt。
+            return attempt.cancelled.is_set() or attempt.lost.is_set()
         path = self.sentinel(key)
         with self._guard:
             event = self._events.get(key)
