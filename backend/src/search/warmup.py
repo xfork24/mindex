@@ -18,6 +18,7 @@ from collections.abc import Callable
 from pathlib import Path
 from time import perf_counter
 
+from mindex.shared.backends.context import resource_scope
 from mindex.shared.config import Config
 
 log = logging.getLogger(__name__)
@@ -54,6 +55,7 @@ def _warm_model_files(config: Config) -> None:
             verified_file(Path(record["path"]))
 
 
+@resource_scope()
 def warm_up(config: Config, index_id: str | None = None, *, startup: bool = True) -> None:
     """config 须是已合并设置页覆盖的生效配置。startup=False 为重新预热：跳过词典与模型文件校验。"""
     import jieba
@@ -172,6 +174,7 @@ def serving_signature(store, index_id: str | None = None) -> tuple:
     return (settings, target, version["status"] if version else None, releases["n"], releases["latest"])
 
 
+@resource_scope()
 def watch_and_rewarm(
     config: Config,
     index_id: str | None,
@@ -218,6 +221,7 @@ def warm_up_in_background(
 
     stop = threading.Event()
 
+    @resource_scope()
     def run():
         store = Store.open(config)
         try:

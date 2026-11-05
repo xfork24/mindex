@@ -15,6 +15,7 @@ processing，shared 也不得反向导入上层包。
 from __future__ import annotations
 
 import logging
+import weakref
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Protocol
@@ -184,7 +185,7 @@ class LocalVectorStores:
 _HTTP_CLIENTS: dict[tuple[str, str], object] = {}
 
 
-def chroma_http_client(section):
+def chroma_http_client(section, *, shared=True):
     """进程内按 (url, token) 共享的 Chroma HttpClient（阶段 2 的最小改动路径：
     独立服务 + 显式配置；集合读写与本地完全一致，检索过滤策略随后续阶段下推）。"""
     import os
@@ -195,7 +196,7 @@ def chroma_http_client(section):
 
     token = os.environ.get(section.token_env, "").strip()
     key = (section.url, token)
-    client = _HTTP_CLIENTS.get(key)
+    client = _HTTP_CLIENTS.get(key) if shared else None
     if client is None:
         parsed = urlparse(section.url if "//" in section.url else f"http://{section.url}")
         headers = {"Authorization": f"Bearer {token}"} if token else None
@@ -206,7 +207,8 @@ def chroma_http_client(section):
             headers=headers,
             settings=Settings(anonymized_telemetry=False),
         )
-        _HTTP_CLIENTS[key] = client
+        if shared:
+            _HTTP_CLIENTS[key] = client
     return client
 
 
@@ -217,16 +219,36 @@ class ChromaServerVectorStores:
 
     def __init__(self, section, *, library_id: str | None = None):
         self.section = section
+        self._client = None
+        self._closed = False
+        self._client_finalizer = None
         if library_id is not None:
             from uuid import UUID
 
             library_id = str(UUID(library_id))
         self.library_id = library_id
 
+    @property
+    def client(self):
+        if self._closed:
+            raise RuntimeError("Chroma 后端已关闭")
+        if self._client is None:
+            self._client = chroma_http_client(self.section, shared=False)
+            self._client_finalizer = weakref.finalize(self, self._client.close)
+        return self._client
+
+    def close(self):
+        self._closed = True
+        if self._client_finalizer is not None:
+            self._client_finalizer()
+
+    def as_client(self):
+        if self.library_id is None:
+            return self.client
+        return LibraryVectorClient(self.client, self.library_id, owner=self)
+
     def open(self, index_id: str, *, create: bool = False):
-        client = chroma_http_client(self.section)
-        if self.library_id is not None:
-            client = LibraryVectorClient(client, self.library_id)
+        client = self.as_client()
         name = "idx-" + index_id
         if create:
             collection = client.get_or_create_collection(
@@ -234,21 +256,28 @@ class ChromaServerVectorStores:
             )
         else:
             collection = client.get_collection(name, embedding_function=None)
-        return LocalVectorStore(collection)
+        result = LocalVectorStore(collection)
+        result._owner = self
+        return result
 
 
 class LibraryVectorClient:
     """向量业务连接只暴露本库集合；原始 HttpClient 仍按 endpoint/token 复用。"""
 
-    def __init__(self, client, library_id: str):
+    def __init__(self, client, library_id: str, *, owner=None):
         from uuid import UUID
 
         self.client = client
+        self._owner = owner
         self.library_id = str(UUID(library_id))
         self.prefix = "lib-" + UUID(library_id).hex + "-"
 
     def get_collection(self, name: str, **kwargs):
-        return self.client.get_collection(self.prefix + name, **kwargs)
+        collection = self.client.get_collection(self.prefix + name, **kwargs)
+        object.__setattr__(collection, "_mindex_owner", self)
+        return collection
 
     def get_or_create_collection(self, name: str, **kwargs):
-        return self.client.get_or_create_collection(self.prefix + name, **kwargs)
+        collection = self.client.get_or_create_collection(self.prefix + name, **kwargs)
+        object.__setattr__(collection, "_mindex_owner", self)
+        return collection

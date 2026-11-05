@@ -162,7 +162,7 @@ def _record(store, manifest, status):
 def _empty(store):
     for table in BASELINE_TABLES:
         if table == "settings":
-            seeds = {"migration.person-roles-v2": "complete", "migration.person-role-only-v3": "complete"}
+            seeds = {"runtime.protocol": "2", "migration.person-roles-v2": "complete", "migration.person-role-only-v3": "complete"}
             if any(row["key"] != "library.id" and seeds.get(row["key"]) != row["value"]
                    for row in store.rows("SELECT key,value FROM settings")):
                 return False

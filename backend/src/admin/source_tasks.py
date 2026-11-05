@@ -32,6 +32,9 @@ Work = Literal["shots", "dialogue", "analysis", "persons"]
 
 class WorkOptions(StrictModel):
     publish: bool = False
+    operation: Literal["detect", "split", "transcribe", "align", "analyze"] | None = None
+    force: bool = False
+    aligner_python: str | None = None
 
 
 class PublishOptions(StrictModel):
@@ -245,7 +248,20 @@ class SourceTasks(BackgroundTaskRunner):
             return
         result = json.loads(row["result"]) if row["result"] else None
         if result is None:
-            if row["work"] == "shots":
+            operation = options.get("operation")
+            if operation:
+                kwargs = {}
+                if operation in {"transcribe", "analyze"}:
+                    kwargs["force"] = options.get("force", False)
+                if operation == "align":
+                    from pathlib import Path
+
+                    if not options.get("aligner_python"):
+                        raise ValueError("对齐任务缺少独立环境解释器")
+                    pipeline.align(Path(options["aligner_python"]), row["source_id"])
+                else:
+                    getattr(pipeline, "detect_source" if operation == "detect" else operation)(row["source_id"], **kwargs)
+            elif row["work"] == "shots":
                 pipeline.detect_source(row["source_id"], lambda v: save("progress", v))
                 pipeline.split(row["source_id"], lambda v: save("progress", v))
             else:

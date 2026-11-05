@@ -14,6 +14,7 @@ import uuid
 
 from mindex.shared.db.errors import SchemaMismatch
 from mindex.shared.db.scaling_schema import (
+    PG_ADMISSION,
     PG_DELIVERY,
     PG_DIRECTORIES,
     PG_DURABLE_INDEX,
@@ -30,7 +31,7 @@ _MIGRATION_LOCK_KEY = (0x4D49_4E44, 0x4D49_4752)  # "MIND"/"MIGR"
 
 # v15 为已发布基线；之后只追加，禁止升级时重跑基线覆盖已有表定义。
 BASELINE_VERSION = 15
-PG_STEPS = ((16, PG_FILES + PG_QUEUE), (17, PG_EXECUTION), (18, "SELECT 1;"), (19, PG_DURABLE_INDEX), (20, PG_DIRECTORIES), (21, PG_DELIVERY))
+PG_STEPS = ((16, PG_FILES + PG_QUEUE), (17, PG_EXECUTION), (18, "SELECT 1;"), (19, PG_DURABLE_INDEX), (20, PG_DIRECTORIES), (21, PG_DELIVERY), (22, PG_ADMISSION))
 
 
 def _logical_version() -> int:

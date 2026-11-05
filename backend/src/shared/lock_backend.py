@@ -58,11 +58,16 @@ def provider_for(source):
     from mindex.shared.db.locks_pg import PgLockProvider
 
     if hasattr(source, "backend") and hasattr(source, "library_id"):
-        return PgLockProvider(source.backend, library_id=source.library_id)
+        provider = PgLockProvider(source.backend, library_id=source.library_id)
+        provider._store_owner = source
+        return provider
     from mindex.shared.storage import Store
 
     store = Store.open(source)
-    return PgLockProvider(store.backend, library_id=store.library_id)
+    provider = PgLockProvider(store.backend, library_id=store.library_id)
+    # 租约/心跳仍使用连接；必须持有完整上下文至锁释放。
+    provider._store_owner = store
+    return provider
 
 
 class LeaseHandle:

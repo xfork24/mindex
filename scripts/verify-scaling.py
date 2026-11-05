@@ -36,7 +36,7 @@ TESTS = [
     "test_cluster_process_flow.py",
     "test_doctor.py", "test_pg_chroma_e2e.py", "test_migration_cli.py", "test_worker.py",
     "test_persons_pg.py", "test_media_delivery.py",
-    "test_backend_identity.py",
+    "test_backend_identity.py", "test_backend_lifecycle.py", "test_scaling_completion.py",
     "test_maintenance_and_gateway.py", "test_sql_characteristics.py",
     "test_scaling_execution.py", "test_scaling_delivery_core.py",
 ]
@@ -169,6 +169,8 @@ def main(*, suite="integration"):
                             "MINDEX_TEST_S3_KEY": "mindex", "MINDEX_TEST_S3_SECRET": password,
                             "MINDEX_TEST_S3_SECRET_KEY": password, "MINDEX_TEST_CHROMA_SERVER": chroma})
                 test_command = [sys.executable, "-m", "pytest", "-q", "--tb=short",
+                                "-W", "error::pytest.PytestUnhandledThreadExceptionWarning",
+                                "-W", "error::pytest.PytestUnraisableExceptionWarning",
                                 f"--junitxml={output / 'junit.xml'}", *(f"tests/{name}" for name in test_files)]
                 report["tests"] = test_files
                 report["suite"] = suite

@@ -52,11 +52,11 @@ def vector_client(config, *, library_id: str | None = None):
     返回进程内共享的 HttpClient（显式配置选择，不做路径发现；plans §6.2）。"""
     if getattr(config, "vector", None) is None or config.vector.backend != "chroma_server":
         return None
-    from mindex.shared.backends.vectors import LibraryVectorClient, chroma_http_client
+    from mindex.shared.backends.vectors import ChromaServerVectorStores
 
     if library_id is None:
         library_id = Store.open(config).library_id
-    return LibraryVectorClient(chroma_http_client(config.vector.chroma_server), library_id)
+    return ChromaServerVectorStores(config.vector.chroma_server, library_id=library_id).as_client()
 
 
 class VectorIndex:
@@ -190,7 +190,13 @@ class VectorIndex:
         # 远端连接不读取节点上偶然残留的 SQLite，也不构建全库 map。
         if getattr(self.client, "library_id", None) is not None:
             return {}
-        key = (str(self.root.resolve()), self.index_id)
+        identity = ""
+        database = self.root / "metadata.sqlite3"
+        if database.is_file():
+            with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as identity_db:
+                row = identity_db.execute("SELECT value FROM settings WHERE key='library.id'").fetchone()
+                identity = row[0] if row else ""
+        key = (str(self.root.resolve()), self.index_id, identity)
         with _REPRESENTATION_LOCK:
             cached = _REPRESENTATION_MAPS.get(key)
             if cached is not None:

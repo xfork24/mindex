@@ -41,6 +41,12 @@ rich_utils.highlighter = WrappingOptionHighlighter()
 class HelpAwareGroup(SortedGroup):
     """Parse descendant help before Click invokes the configuration callback."""
 
+    def invoke(self, ctx):
+        from mindex.shared.backends.context import resource_scope
+
+        with resource_scope():
+            return super().invoke(ctx)
+
     def resolve_command(self, ctx, args):
         name, command, remaining = super().resolve_command(ctx, args)
         options = remaining[: remaining.index("--")] if "--" in remaining else remaining
@@ -150,6 +156,29 @@ def configure(
         ctx.obj = apply_runtime_overrides(ctx.obj)
 
 
+def _persistent_foreground(config, source, work, *, operation=None, **options):
+    from mindex.admin.dialogue_tasks import DialogueOptions, DialogueTasks
+    from mindex.admin.source_tasks import SourceTasks, WorkOptions
+    from mindex.settings.runtime_settings import RuntimeConfig
+    from mindex.shared.queue_dispatch import wait_ledger_task
+    from mindex.shared.storage import Store
+
+    store = Store.open(config)
+    runtime = RuntimeConfig(config, store)
+    results = []
+    sources = [item for item in store.sources() if source is None or item["id"] == source]
+    if source is not None and not sources:
+        raise typer.BadParameter("找不到素材 ID")
+    runner = DialogueTasks(runtime, store) if work == "dialogue" and operation is None else SourceTasks(runtime, store)
+    for item in sources:
+        if isinstance(runner, DialogueTasks):
+            task = runner.start(item["id"], DialogueOptions(**options))
+        else:
+            task = runner.start(item["id"], work, WorkOptions(operation=operation, **options))
+        results.append(wait_ledger_task(store, runner.table, task["id"]))
+    return results
+
+
 @app.command()
 def register(
     ctx: typer.Context,
@@ -192,6 +221,12 @@ def prepare(
     from mindex.processing.pipeline import Pipeline
 
     pipeline = Pipeline(ctx.obj)
+    if ctx.obj.queue.backend == "postgres":
+        for path in videos:
+            identifier = pipeline.register(path)["source_id"]
+            _persistent_foreground(ctx.obj, identifier, "shots")
+            typer.echo(identifier)
+        return
     with pipeline.lock():
         for path in videos:
             typer.echo(pipeline.prepare(path))
@@ -211,6 +246,11 @@ def detect(ctx: typer.Context, video: Annotated[Path, typer.Argument(help="本�
     from mindex.processing.pipeline import Pipeline
 
     pipeline = Pipeline(ctx.obj)
+    if ctx.obj.queue.backend == "postgres":
+        identifier = pipeline.register(video)["source_id"]
+        _persistent_foreground(ctx.obj, identifier, "shots", operation="detect")
+        typer.echo(identifier)
+        return
     with pipeline.lock():
         typer.echo(pipeline.detect(video))
 
@@ -232,6 +272,10 @@ def split(
     from mindex.processing.pipeline import Pipeline
 
     pipeline = Pipeline(ctx.obj)
+    if ctx.obj.queue.backend == "postgres":
+        _persistent_foreground(ctx.obj, source, "shots", operation="split")
+        typer.echo(source)
+        return
     with pipeline.lock(source, "shots"):
         pipeline.split(source)
     typer.echo(source)
@@ -293,6 +337,9 @@ def transcribe(
     from mindex.processing.pipeline import Pipeline
 
     pipeline = Pipeline(ctx.obj)
+    if ctx.obj.queue.backend == "postgres":
+        _persistent_foreground(ctx.obj, source, "dialogue", operation="transcribe", force=force)
+        return
     with pipeline.lock(source, "dialogue"):
         pipeline.transcribe(source, **({"force": True} if force else {}))
 
@@ -326,6 +373,10 @@ def enrich_dialogue(
     from mindex.admin.dialogue_tasks import execute_dialogue
     from mindex.processing.pipeline import Pipeline
 
+    if ctx.obj.queue.backend == "postgres":
+        print_json(_persistent_foreground(ctx.obj, source, "dialogue", method=method,
+                   subtitle_stream=subtitle_stream, publish=not no_publish, workers=workers, force=force))
+        return
     with Pipeline(ctx.obj).lock(source, "dialogue"):
         print_json(
             execute_dialogue(
@@ -361,6 +412,9 @@ def align(
     from mindex.processing.pipeline import Pipeline
 
     pipeline = Pipeline(ctx.obj)
+    if ctx.obj.queue.backend == "postgres":
+        _persistent_foreground(ctx.obj, source, "dialogue", operation="align", aligner_python=str(python.resolve()))
+        return
     with pipeline.lock(source, "dialogue"):
         pipeline.align(python, source)
 
@@ -383,6 +437,9 @@ def analyze(
     from mindex.processing.pipeline import Pipeline
     from mindex.shared.command_progress import CommandProgress
 
+    if ctx.obj.queue.backend == "postgres":
+        _persistent_foreground(ctx.obj, source, "analysis", operation="analyze", force=force)
+        return
     with CommandProgress("LLM 分析") as progress:
         pipeline = Pipeline(ctx.obj)
         logging.getLogger(__name__).info("分析模型：%s / %s；范围：%s", ctx.obj.analyzer.backend, ctx.obj.analyzer.model, source or "全部素材")
@@ -467,6 +524,13 @@ def ingest(
     from mindex.processing.pipeline import Pipeline
 
     pipeline = Pipeline(ctx.obj)
+    if ctx.obj.queue.backend == "postgres":
+        for path in videos:
+            identifier = pipeline.register(path)["source_id"]
+            _persistent_foreground(ctx.obj, identifier, "shots")
+        _persistent_foreground(ctx.obj, None, "dialogue", publish=False)
+        typer.echo(IndexBuilder(ctx.obj).build(activate=activate))
+        return
     with pipeline.lock():
         for path in videos:
             pipeline.prepare(path)
@@ -1063,12 +1127,16 @@ def serve(
 
     # 每日选题挖掘调度随服务启停（桌面版 sidecar 同样经这里启动）。
     app = create_app(ctx.obj, index_id=index_id, scheduler=ctx.obj.topics.scheduler.enabled)
-    warm_up_in_background(ctx.obj, index_id)  # 后台线程，不阻塞监听；失败只记日志
+    warmup_thread = warm_up_in_background(ctx.obj, index_id)  # 后台线程，不阻塞监听；失败只记日志
     if ctx.obj.database.backend == "sqlite":
         local_services.autostart_in_background(ctx.obj)
     try:
         uvicorn.run(app, host=host, port=port)
     finally:
+        if warmup_thread is not None:
+            warmup_thread.stop_event.set()
+            warmup_thread.join(timeout=5)
+        app.state.backends.close()
         if ctx.obj.database.backend == "sqlite":
             local_services.stop_on_exit(ctx.obj)
 
@@ -1128,6 +1196,30 @@ def check_model(
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print_json(report)
+
+
+gpu_commands = typer.Typer(cls=HelpAwareGroup, help="核对物理 GPU 资源组的未知执行占用。示例：mindex gpu list。", no_args_is_help=True)
+app.add_typer(gpu_commands, name="gpu")
+
+
+@gpu_commands.command("list")
+def list_gpu_allocations(ctx: typer.Context):
+    """列出尚在执行或等待人工核对的物理资源占用。示例：mindex gpu list。"""
+    from mindex.shared.gpu_resources import GpuResources
+    from mindex.shared.storage import Store
+
+    print_json(GpuResources(Store.open(ctx.obj)).pending())
+
+
+@gpu_commands.command("resolve")
+def resolve_gpu_allocation(ctx: typer.Context, allocation_id: Annotated[str, typer.Argument(help="gpu list 返回的占用 ID。")],
+                           evidence: Annotated[str, typer.Option(help="远端请求已经停止的核对依据。")]):
+    """确认远端模型请求已停止后释放指定未知占用。示例：mindex gpu resolve ID --evidence 已核对服务日志。"""
+    from mindex.shared.gpu_resources import GpuResources
+    from mindex.shared.storage import Store
+
+    GpuResources(Store.open(ctx.obj)).resolve(allocation_id, evidence=evidence)
+    print_json({"id": allocation_id, "state": "released"})
 
 
 if __name__ == "__main__":

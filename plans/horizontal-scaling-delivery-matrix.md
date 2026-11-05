@@ -7,23 +7,38 @@
 `待实测` 表示没有执行证据，不能据脚本或组件测试标记完成。
 此表保留未完成需求，不表示缩小交付范围。
 
+后续执行以[剩余能力闭合计划](horizontal-scaling-completion-plan.md)为准；基线 `e54b645`。
+下表中的既有验证不等于本轮复验。全部剩余调用点按以下批次推进，状态只有在对应证据落盘后更新：
+
+| 批次 | 矩阵条目（含仍需补充验收的条目） | 本轮证据 |
+|---|---|---|
+| 一：上下文、准入、任务与 GPU | A04、A05、A06、B01、B02、B03、B08 | `tests/test_backend_lifecycle.py`；`artifacts/scaling-completion-batch1/`（含失败及重跑记录；尚非整批完成） |
+| 二：资源闭包、staging、pins 与 GC | C01、C02、C04、C05、C06、C07 | 待实现及验收 |
+| 三：上传与媒体访问 | D01、D02、D03 | API 兼容与 S3 直传分别验收 |
+| 四：查询预算与容量 | E01、E02、E03、E04、E05 | 规定容量及质量门槛独立待实测 |
+| 五：迁移、激活与灾备 | F01、F02、F03、F04、F05、F06 | 持久卷灾备不使用组件 tmpfs 结论 |
+| 六：网关、设置、桌面与发布 | A07、B04、B05、B06、B07、C03、G01、G02、G03、G04、G05、G06、H01、H02、H03、H04 | 网关/浏览器/macOS 与最终冻结回归分别记录 |
+
+双机、规定大容量、真实模型、Windows/Linux 安装和实际系统密钥环仍按原门槛独立验收；
+脚本交付、小样本和组件验证均不能代替这些实测。
+
 | ID | 需求与主要调用点 | 实现 / 接入 / 验证 | 证据或下一项关闭条件 |
 |---|---|---|---|
 | A01 | 后端入口与拒绝 SQLite 回落：`shared/backends/context.py`、业务 `Store.open` | 已实现 / 已接入 / 已验证 | `test_scaling_foundation.py`；构造边界静态检查；白名单分支仍须保持运行期拒绝越界 |
 | A02 | 显式部署组合、期望库身份：`shared/config.py`、`open_context` | 已实现 / 已接入 / 已验证 | 无效组合在创建节点目录/SQLite 前拒绝；期望 UUID 不匹配拒绝 |
 | A03 | PG/S3/Chroma namespace：`shared/backends/s3.py`、`vectors.py`、`processing/indexing.py` | 已实现 / 已接入 / 已验证 | `test_backend_identity.py`：相同资源键跨库隔离；旧 namespace 显式导出；无自动回落 |
-| A04 | 全部缓存身份与上下文生命周期 | 部分 / 部分 / 部分 | 下载、查询向量、人物版本和 PG 快照已绑定库身份；其余节点文件与上下文退出逐项核查 |
+| A04 | 全部缓存身份与上下文生命周期 | 部分 / 部分 / 部分 | 上下文/Store 显式关闭、命令级退出、API 生命周期、worker/doctor 和预热线程清理已接入；借出组件保留上下文，PG 共享池持有者计数，staging owner 独立。`test_backend_lifecycle.py` 11 项通过；[本轮记录](../docs/scaling-completion-verification.md)。快照/人物/查询/工作摘要/译文绑定库与后端，Chroma 业务客户端关闭已接入；续作真实后端 223 项通过。依赖探测的总期限在第六批闭合 |
 | A05 | 查询/控制池与总连接预算：`shared/db/pg_backend.py` | 已实现 / 已接入 / 已验证 | 查询池耗尽时控制池仍可用；控制连接拒绝普通写入；全节点连接预算需部署核算 |
-| A06 | 追加迁移、协议与启动能力检查：`shared/db/migrate_pg.py`、`doctor.py` | 部分 / 部分 / 部分 | v15→21、v18→21 数据/历史校验值通过；混合版本、分词器/模型/后端能力的统一启动准入待闭合 |
+| A06 | 追加迁移、协议与启动能力检查：`shared/db/migrate_pg.py`、`doctor.py` | 部分 / 部分 / 部分 | v15→21、v18→21 数据/历史校验值通过；追加 v22 与运行协议 2；混合协议拒绝、库身份和派生数据准入已接入；依赖能力有界探测在第六批补齐 |
 | A07 | 源码、wheel、冻结产物 | 已实现 / 已接入 / 部分 | 本批源码包 385 个代码/前端文件、wheel 316 模块与 69 个前端资源逐字节核对；macOS arm64 sidecar 构建和自检通过，schema 21、无系统时区数据的资源探针通过；其他平台和混合版本仍待验收 |
-| B01 | source/dialogue/person/topic 账本与入队同事务：`shared/queue_dispatch.py` | 已实现 / 已接入 / 已验证 | `test_scaling_correctness.py`、`test_scaling_foundation.py`；触发器已被显式事务替代。范围为账本路径，CLI 前台直接处理入口仍须单独审计持久化覆盖 |
+| B01 | source/dialogue/person/topic 账本与入队同事务：`shared/queue_dispatch.py` | 已实现 / 已接入 / 已验证 | `test_scaling_correctness.py`、`test_scaling_foundation.py`；触发器已被显式事务替代。范围为账本路径，CLI 前台八类处理入口已接入 source/dialogue 账本，真实 PG+FFmpeg prepare 一致性通过（test_scaling_completion.py） |
 | B02 | attempt 绑定、取消、回收与终态原子提交：`queue_pg.py`、`task_progress.py` | 已实现 / 已接入 / 已验证 | TTL 回收、失败上限、跨目录取消、人工重试、账本/队列终态用例 |
 | B03 | 显式凭证、线程和提交 fencing：`db/fencing.py`、`pg_backend.py` | 已实现 / 已接入 / 部分 | 显式 commit、处理线程池和过期写入拒绝已测；双机 SIGSTOP/控制失败仍待演练 |
 | B04 | Studio 持久执行链：`studio/tasks.py`、`studio_api.py`、`studio_logs.py` | 已实现 / 已接入 / 已验证（单机） | 步骤/节点/整列/构建共用 `studio_tasks`；提交与入队、终态与 manifest 同事务；PG 事件日志、空缓存产物读取、跨节点取消、过期拒绝与回执重放通过。双机故障仍见 G06 |
 | B05 | index 持久执行链：`cli.py`、`admin/source_tasks.py::IndexTasks`、`shared/queue_dispatch.py`、`processing/indexing.py` | 已实现 / 已接入 / 已验证 | `test_scaling_execution.py`：真实视频构建、词法回填、人物/组合发布、取消重试、终态事务与指针原子发布；发布锁持续至提交，双 worker 跨目录串行继承；冻结模型恢复与提交锁竞争；本批隔离后端 205 项通过 |
 | B06 | 稳定周期去重：`topics/scheduler.py`、`topics/runner.py` | 已实现 / 已接入 / 已验证 | 库时区、周期/账本/入队同事务；leader 切换/重复提交只生成一个周期任务，失败上限三次；跨目录重放及崩溃回滚已测，双机故障仍见 G06 |
 | B07 | 持久创作外部副作用幂等与未知结果恢复：`shared/external_calls.py`、模型工厂、工具 submit | 已实现 / 已接入 / 已验证（单机） | 稳定调用 ID、独立回执、request_id 续查、二进制对象与类型恢复；未知结果阻断、核对依据、原账本重试及双语核对入口；提供商真实幂等/限流仍待实测 |
-| B08 | GPU 物理资源组与真实模型服务并发 | 部分 / 部分 / 待实测 | 现有槽位不足以证明物理资源组隔离；需真实模型限流与并发验收 |
+| B08 | GPU 物理资源组与真实模型服务并发 | 部分 / 部分 / 待实测 | 已接入 gpu.groups/cpu_queues、持久占用与附依据核对；PG TTL/回收不释放未知占用已测。真实模型限流与并发仍独立待实测 |
 | C01 | 小检查点不可变对象与 PG 指针：`shared/checkpoints.py`、`files.py` | 已实现 / 部分 / 部分 | 跨节点修订读取已测；全部权威文件登记尚未完成 |
 | C02 | Studio 不可变目录 manifest + 当前 revision 指针：`shared/directory_files.py` | 已实现 / 已接入 / 已验证（单机） | 显式依赖先上传、目录 CAS 原子切换；读取绑定 snapshot；旧缓存不能回写 job.json；历史清单及产物 bundle 往返通过 |
 | C03 | 所有人为修改携带修订：`studio/revisions.py` 与共享 Web/CLI/MCP 客户端 | 已实现 / 已接入 / 部分 | 共享 Studio 人工写入缺 If-Match 返回 428、冲突 409，单次请求原子发布；客户端传递目录修订且不自动重试 409。浏览器已覆盖显式刷新、输入保留及确认；实际 PG 双 API 与浏览器合并故障矩阵仍待完成 |

@@ -445,7 +445,7 @@ def test_v18_upgrade_and_nonempty_execution_tables_export(pg_config, tmp_path):
         before = db.execute("SELECT version,checksum FROM schema_migrations WHERE version<=18 ORDER BY version").fetchall()
         db.execute("DROP TABLE studio_events; DROP TABLE uploaded_assets; DROP TABLE upload_parts; DROP TABLE upload_sessions; DROP TABLE external_calls; DROP TABLE studio_tasks; DROP TABLE directory_heads; DROP TABLE directory_manifests; DROP TABLE scheduled_runs; DROP TABLE index_tasks; DELETE FROM schema_migrations WHERE version>=19")
         db.execute("INSERT INTO settings(key,value) VALUES('upgrade-marker','preserve')")
-        assert migrate_pg(db) == 21
+        assert migrate_pg(db) == 22
         assert db.execute("SELECT version,checksum FROM schema_migrations WHERE version<=18 ORDER BY version").fetchall() == before
     store = Store.open(pg_config)
     assert store.one("SELECT value FROM settings WHERE key='upgrade-marker'")["value"] == "preserve"

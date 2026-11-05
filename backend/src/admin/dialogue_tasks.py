@@ -24,6 +24,7 @@ from mindex.shared.storage import dumps
 
 
 class DialogueOptions(StrictModel):
+    force: bool = False
     method: Literal["auto", "subtitle", "asr"] = "auto"
     subtitle_stream: int | None = Field(default=None, ge=0)
     subtitle_file: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")

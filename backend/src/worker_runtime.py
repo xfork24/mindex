@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING
 from filelock import Timeout
 
 from mindex.shared.backends import open_context
+from mindex.shared.backends.context import resource_scope
 
 if TYPE_CHECKING:
     from mindex.shared.config import Config
@@ -99,6 +100,12 @@ class Worker:
         self._stop.set()
 
     def run(self) -> int:
+        try:
+            return self._run()
+        finally:
+            self.context.close()
+
+    def _run(self) -> int:
         # 仅主线程可安装信号处理器；测试/嵌入场景在工作线程运行 worker 时跳过。
         if threading.current_thread() is threading.main_thread():
             signal.signal(signal.SIGTERM, self.stop)
@@ -169,6 +176,7 @@ class Worker:
         with self.context.db.connect() as db:
             return self.queue.claim(db, self.identity, self.queues, **claim_kwargs)
 
+    @resource_scope()
     def _execute(self, task) -> None:
         """执行归属进入所有业务事务；队列与账本终态在同一事务提交。"""
         from mindex.shared.db.fencing import Attempt, ExecutionFence
@@ -214,13 +222,22 @@ class Worker:
         beat = threading.Thread(target=heartbeat, daemon=True, name=f"beat-{task.id}")
         beat.start()
         gpu_slot = None
+        from mindex.shared.gpu_resources import GpuResources
+
+        resources = GpuResources(self.context.store)
+        persistent_gpu = bool(self.config.gpu.groups) or self.context.form == "cluster"
         outcome, error = "succeeded", None
         try:
             with executing(attempt):
                 if self._cancel_requested(task):
                     cancelled.set()
                 attempt.check()
-                if task.kind in self.config.gpu.queues:
+                if persistent_gpu:
+                    while not resources.acquire(self.config, task):
+                        attempt.check()
+                        if self._stop.wait(0.2):
+                            raise TaskCancelled()
+                elif task.kind in self.config.gpu.queues:
                     gpu_slot = self._acquire_gpu_slot(attempt.check)
                 attempt.check()
                 self.handlers.get(task.kind)(self.config, task)
@@ -236,6 +253,13 @@ class Worker:
             outcome, error = "needs_review" if isinstance(exc, ReviewRequired) else "failed", f"{type(exc).__name__}: {exc}"
             log.exception("任务 %d（%s）执行失败", task.id, task.kind)
         finally:
+            if persistent_gpu:
+                try:
+                    resources.finish(task, certain=outcome == "succeeded" and not lost.is_set())
+                except Exception:
+                    # 控制通道失败时保留持久 active 占用，恢复后核对，不推断远端请求结束。
+                    lost.set()
+                    log.exception("任务 %s 的物理资源占用未能核对，保留占用", task.id)
             if gpu_slot is not None:
                 gpu_slot.release()
             stop.set()

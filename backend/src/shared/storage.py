@@ -10,7 +10,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from mindex.shared.backends.media import MediaStore
     from mindex.shared.backends.vectors import VectorStores
+    from mindex.shared.config import Config
 
 from mindex.shared.db.sqlite_backend import SqliteBackend
 from mindex.shared.migrations import execute_script, migrate
@@ -426,7 +428,13 @@ def _metadata_v21(db):
     execute_script(db, SQLITE_DELIVERY)
 
 
-METADATA_STEPS = (_metadata_v1, _metadata_v2, _metadata_v3, _metadata_v4, _metadata_v5, _metadata_v6, _metadata_v7, _metadata_v8, _metadata_v9, _metadata_v10, _metadata_v11, _metadata_v12, _metadata_v13, _metadata_v14, _metadata_v15, _metadata_v16, _metadata_v17, _metadata_v18, _metadata_v19, _metadata_v20, _metadata_v21)
+def _metadata_v22(db):
+    from mindex.shared.db.scaling_schema import SQLITE_ADMISSION
+
+    execute_script(db, SQLITE_ADMISSION)
+
+
+METADATA_STEPS = (_metadata_v1, _metadata_v2, _metadata_v3, _metadata_v4, _metadata_v5, _metadata_v6, _metadata_v7, _metadata_v8, _metadata_v9, _metadata_v10, _metadata_v11, _metadata_v12, _metadata_v13, _metadata_v14, _metadata_v15, _metadata_v16, _metadata_v17, _metadata_v18, _metadata_v19, _metadata_v20, _metadata_v21, _metadata_v22)
 
 
 def migrate_metadata(db) -> int:
@@ -437,7 +445,11 @@ def migrate_metadata(db) -> int:
 class Store:
     # 直构 Store 仅用于本地暂存；open_context 为业务入口绑定库身份。
     library_id: str = ""
+    deployment_form: str = "local"
+    backend_identity: str = ""
+    deployment_config: Config | None = None
     vectors: VectorStores | None = None
+    media: MediaStore | None = None
 
     @classmethod
     def open(cls, config) -> Store:
@@ -451,6 +463,20 @@ class Store:
 
         return open_context(config).store
 
+    def close(self):
+        context = getattr(self, "_backend_context", None)
+        if context is not None:
+            context.close()
+
+    def __enter__(self):
+        context = getattr(self, "_backend_context", None)
+        if context is not None and context.closed:
+            raise RuntimeError("后端上下文已关闭")
+        return self
+
+    def __exit__(self, *_):
+        self.close()
+
     def __init__(self, root: Path):
         self.root = root.resolve()
         self.root.mkdir(parents=True, exist_ok=True)
@@ -460,9 +486,13 @@ class Store:
         self.locks_backend = "file"
         # 媒体后端（open_context 注入；直构 Store 为 None，按本地文件系统解析）。
         self.media = None
-        with self.connect() as db:
-            db.execute("PRAGMA journal_mode=WAL")
-            migrate(db, METADATA_STEPS)
+        from filelock import FileLock
+
+        # 首次建库的 WAL 切换不总遵循 SQLite busy_timeout；跨线程/进程串行初始化。
+        with FileLock(str(self.root / ".metadata-init.lock"), timeout=30):
+            with self.connect() as db:
+                db.execute("PRAGMA journal_mode=WAL")
+                migrate(db, METADATA_STEPS)
         # 创作详情热路径的短 TTL 缓存：同一轮 UI 交互里反复读 active_index / visibility_key
         # 会重复开关 sqlite 连接。缓存只影响冲突展示，构建仍在锁内用新读校验签名。
         self._hot_cache: dict[str, tuple[float, object]] = {}
@@ -493,6 +523,9 @@ class Store:
     @contextmanager
     def connect(self):
         """一个事务：正常退出提交、异常回滚（SQLite 为每调用新连接；PG 为池检出）。"""
+        context = getattr(self, "_backend_context", None)
+        if context is not None and context.closed:
+            raise RuntimeError("后端上下文已关闭")
         with self.backend.connect() as db:
             yield db
 
@@ -689,8 +722,21 @@ class Store:
                 del _SNAPSHOT_CACHE[key]
         return len(stale)
 
+    @property
+    def cache_identity(self):
+        from mindex.shared.config import fingerprint
+
+        if not self.library_id and not self.pg:
+            row = self.one("SELECT value FROM settings WHERE key='library.id'")
+            identity = row["value"] if row else ""
+        else:
+            identity = self.library_id
+        return (identity, self.backend.backend,
+                fingerprint(getattr(self.backend, "dsn", str(self.path))),
+                getattr(self, "backend_identity", ""))
+
     def _snapshot_cache_scope(self):
-        return (str(self.path), self.library_id) if self.pg else str(self.path)
+        return self.cache_identity
 
     def snapshots_shared(self, index_id: str) -> list[dict]:
         """进程内共享的整索引快照，供只读的检索热路径使用；调用方不得修改返回的列表及其中的字典。

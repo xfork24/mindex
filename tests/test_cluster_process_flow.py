@@ -76,6 +76,7 @@ def test_two_apis_two_workers_share_real_source_tasks(tmp_path, video_file):
                 config = tmp_path / f"node-{index}.yaml"
                 config.write_text(yaml.safe_dump({
                     "data_dir": str(node), "runtime_overrides": False,
+                    "gpu": {"cpu_queues": ["source", "index"]},
                     "server": {"form": "cluster"}, "database": {"backend": "postgres"},
                     "queue": {"backend": "postgres"}, "locks": {"backend": "postgres"},
                     "vector": {"backend": "chroma_server", "chroma_server": {"url": chroma}},
