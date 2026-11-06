@@ -12,7 +12,7 @@ const sourceGroup = process.env.MINDEX_GROUPS_SOURCE_GROUP;
   const browser = await chromium.launch({headless:true});
   const page = await browser.newPage({viewport:{width:1280,height:1000}});
   // 四路并行回归时页面与模型服务争用 CPU：默认等待按满载情况设置，显式 timeout 的断言不受影响。
-  page.setDefaultTimeout(90000);
+  page.setDefaultTimeout(45000);
   const errors = [];
   const resolutions = [];
   page.on('request', (request) => { if (request.url().endsWith('/api/admin/groups/resolve')) resolutions.push(request.url()); });

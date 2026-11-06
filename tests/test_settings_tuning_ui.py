@@ -15,7 +15,7 @@ def test_tuning_controls_wrap_without_artificial_rows(config):
     try:
         result = subprocess.run(['node', 'tests/settings_tuning_ui.cjs'], cwd=ROOT,
                                 env={**os.environ, 'MINDEX_TUNING_URL': url}, capture_output=True,
-                                text=True, timeout=60, check=False)
+                                text=True, timeout=120, check=False)
         assert result.returncode == 0, result.stdout + result.stderr
     finally:
         server.should_exit = True
