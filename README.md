@@ -9,7 +9,7 @@ and final render — one workspace where a growing video library keeps producing
 
 ![Python 3.11–3.13](https://img.shields.io/badge/Python-3.11%E2%80%933.13-365c49?style=flat-square)
 ![FastAPI](https://img.shields.io/badge/API-FastAPI-365c49?style=flat-square)
-![SQLite + Chroma](https://img.shields.io/badge/Storage-SQLite%20%2B%20Chroma-365c49?style=flat-square)
+![Storage](https://img.shields.io/badge/Storage-SQLite%20%7C%20PostgreSQL%20%C2%B7%20Chroma%20%7C%20S3-365c49?style=flat-square)
 ![Platforms](https://img.shields.io/badge/Desktop-macOS%20%C2%B7%20Windows%20%C2%B7%20Linux-365c49?style=flat-square)
 
 **English** | [简体中文](README.zh-CN.md)
@@ -36,6 +36,7 @@ The local application handles media processing, storage, API, and UI on your own
 | **Templates and versioned builds** | Script templates, style templates, and delivery templates; versioned plans with full dependency trees, per-node rebuilds, artifact reuse, and multi-aspect export with publish packages. |
 | **Agent, CLI, and API** | A built-in agent panel drives the whole product in natural language with preview-before-write; the same capability set is exposed via a complete CLI, REST API, MCP server, and selectable agent harnesses (built-in, DeepSeek Harness, and MCP-compatible external harnesses). |
 | **Model and parameter customization** | Twelve independently configured model roles across self-hosted and cloud providers; runtime-adjustable recall channel weights and topic scoring weights; voice library with cloning. |
+| **Deployment options** | The same product runs as a single machine (SQLite, local Chroma, local files) or on shared backends (PostgreSQL metadata, S3-compatible object storage, Chroma server, PostgreSQL queue and leases) with multiple APIs and workers; browser uploads go either through the API or directly to S3 with presigned multipart. |
 
 ## Features in Depth
 
@@ -359,6 +360,30 @@ Uploaded clips and static images need no index at all. Recall and narration run 
 
 Native builds for **macOS (Apple Silicon), Windows, and Linux** bundle the backend, an FFmpeg build, and the DeepSeek Harness runtime — no Python, uv, or FFmpeg to install, and the app can start and stop local model services from its Settings page. Feature parity with the web version is maintained by sharing the same codebase. See [the desktop guide](docs/desktop.md).
 
+## Deployment Options
+
+The default single-machine form needs nothing beyond Python, uv, and FFmpeg. The same codebase also runs against shared backends when one machine is no longer enough — nothing changes for clients, and the local form stays the default.
+
+| Form | Metadata | Media | Vectors | Queue / locks | Processes |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `local` (default) | SQLite | local files | embedded Chroma | in-process / file locks | one API, optional CLI and desktop |
+| `pg-single` | PostgreSQL | local or S3 | embedded or server Chroma | in-process or PostgreSQL | one API, optional worker |
+| `cluster` | PostgreSQL | S3 | Chroma server | PostgreSQL | several APIs, several workers, one agent gateway |
+
+```bash
+# Shared backends: create the schema once, verify capabilities, then start API and workers.
+MINDEX_DATABASE_DSN=postgres://… uv run mindex migrate
+uv run mindex doctor                 # combination, identity, readiness of every backend
+uv run mindex serve                  # any number of API nodes, separate data_dir per node
+uv run mindex worker --queues source,dialogue --concurrency 1
+```
+
+What the shared-backend form adds: versioned schema upgrades with an explicit runtime protocol (no mixed-version rolling runs); job ledgers for source/dialogue/person/topic/index/studio work with heartbeats, fencing, cancellation, and atomic publication; authoritative file registration with reference-closure garbage collection and object-coordination pins; upload sessions with resumable S3 multipart; paged eligibility and SQL BM25 for retrieval with a bounded query deadline; and `migration preflight/export/load/verify/activate` with a staged, resumable ledger that refuses non-empty or divergent targets and keeps an unactivated target closed to business writes.
+
+Health is split: `/api/live` only asserts the process is alive, while `/api/ready` probes database (query and control pools), object storage, vectors, migration state, admission, and the agent gateway within a bounded deadline. The Settings page gains a **Deployment** section that reads, validates, and saves the current node's config file (credentials only as environment-variable references, revision-checked, restart required for identity/backends). The desktop app can also run as a remote client of a shared deployment, keeping credentials in the system key store.
+
+Cluster, capacity, migration, and disaster-recovery acceptance are tracked separately — see [horizontal scaling](docs/scaling.md), [dual-path uploads](docs/scaling-upload.md), [library migration](docs/scaling-migration.md), and [capacity tooling](docs/scaling-capacity.md).
+
 ## How It Works
 
 ```mermaid
@@ -399,7 +424,7 @@ flowchart LR
 
 **Three-channel retrieval.** Text queries search the visual, dialogue, and analysis channels separately. Each channel fuses semantic vectors with BM25; channels merge through RRF under configurable weights (default 0.35 : 0.15 : 0.5), then same-source overlaps deduplicate. Image and video queries use the visual channel only. No live LLM reranking is involved — scores are ranking signals, not probabilities. If the embedding service is down but text channels exist, search degrades explicitly to BM25 with warnings rather than comparing vectors across spaces.
 
-**Local data, independent models.** FastAPI serves the API; the UI is native HTML/CSS/JS with no build step. SQLite holds all business data; Chroma holds explicit vectors only; FFmpeg handles media. Model services run wherever you choose — same machine, a GPU box, or cloud subscriptions — and the design never assumes more than one is available at a time.
+**Local data, independent models.** FastAPI serves the API; the UI is native HTML/CSS/JS with no build step. SQLite (or PostgreSQL in shared-backend forms) holds all business data; Chroma holds explicit vectors only; FFmpeg handles media. Model services run wherever you choose — same machine, a GPU box, or cloud subscriptions — and the design never assumes more than one is available at a time.
 
 **Traceable versions and evidence.** Content indexes, person releases, and Studio artifacts are immutable versions. Updated analysis never rewrites a published index; new model or preprocessing configurations produce a new index that is checked before activation, and rollback is `mindex indexes activate <old-id>` after restoring the matching service. Embedding services carry a space identity (model, revision, quantization, dimensions, preprocessing); queries against a mismatched index fail with 503 instead of comparing incompatible vectors.
 
@@ -407,6 +432,8 @@ flowchart LR
 <summary><strong>Storage layout and index management</strong></summary>
 
 Configuration is read from `config.local.yaml` (override with `MINDEX_CONFIG` or `--config` before the subcommand); profiles activated on the Settings page override it at runtime for both web and CLI.
+
+In shared-backend forms this `data_dir` holds node-local caches, staging, and logs only: metadata lives in PostgreSQL, media in S3, vectors in the Chroma server, and every node uses its own directory.
 
 ```text
 data/
@@ -462,12 +489,15 @@ curl -X POST http://127.0.0.1:8000/api/search/text \
 | `GET /api/studio/jobs` | Creation jobs; plan / build / version endpoints in the Studio docs |
 | `/api/agent/*` | Agent sessions and event streams ([agent docs](docs/agent.md#api)) |
 | `GET /api/status?health=true` | Index and model health |
+| `GET /api/live` · `/api/ready` | Process liveness; bounded per-dependency readiness (database, storage, vectors, migration, admission, gateway) |
+| `GET/PUT /api/settings/deployment` · `POST …/validate` | Read, validate, and save this node's deployment config (revision-checked, read-only when no writable file) |
+| `POST /api/uploads` · `PUT …/parts/{n}` · `POST …/complete` | Upload sessions: API chunk relay (default) or browser direct-to-S3 multipart with per-part signing; server-side digest recomputation |
 
 `granularity` accepts `moment` (fine clip), `shot`, or `scene`; the chosen granularity must be indexed. Results are capped at 1–50 per query.
 
 ### CLI
 
-The `mindex` command mirrors the entire product: `prepare` / `detect` / `split` (ingest and cutting), `enrich-dialogue` / `transcribe` / `align` / `analyze` (dialogue and analysis), `index` / `indexes` (versioned indexing and activation), `search`, `persons`, `topics`, `studio` (jobs, builds, and post-production subgroups), `backup`, `clips`, `e2e` (evaluation framework), `agent tools`, `clean`, and `serve`. Full reference: [CLI docs](docs/cli-reference.md).
+The `mindex` command mirrors the entire product: `prepare` / `detect` / `split` (ingest and cutting), `enrich-dialogue` / `transcribe` / `align` / `analyze` (dialogue and analysis), `index` / `indexes` (versioned indexing and activation, including `indexes tasks` and `indexes lexical`), `search`, `persons`, `topics`, `studio` (jobs, builds, and post-production subgroups), `backup`, `clips`, `e2e` (evaluation framework), `agent tools`, `clean`, and `serve`. Shared-backend forms add `migrate` (the only DDL entry point), `doctor`, `worker`, `gpu list/resolve`, and `migration preflight/export/load/verify/activate`. Full reference: [CLI docs](docs/cli-reference.md).
 
 ### Agent harnesses
 
@@ -505,6 +535,9 @@ MCP exports are filtered by domain (`agent.mcp.domains` / `--domain`) and by pol
 | Install desktop apps, manage local services | [Desktop guide](docs/desktop.md) |
 | Configure services, voices, retrieval weights | [Settings](docs/settings.md) · [Config reference](docs/config-reference.md) |
 | Back up, migrate, or restore a library | [Backup and migration](docs/backup.md) |
+| Run shared backends (PostgreSQL, S3, Chroma, workers) | [Horizontal scaling](docs/scaling.md) · [Dual-path uploads](docs/scaling-upload.md) |
+| Switch a library between local and shared backends | [Library migration](docs/scaling-migration.md) |
+| Run capacity and fault acceptance | [Capacity tooling](docs/scaling-capacity.md) · [Completion verification](docs/scaling-completion-verification.md) |
 | Browse commands, modules, data flow | [CLI reference](docs/cli-reference.md) · [Architecture](docs/architecture.md) |
 | Evaluate retrieval quality, switch index versions | [E2E verification](docs/e2e-runbook.md) · [Index versions](docs/index-versions.md) |
 | Roadmap | [Roadmap](plans/roadmap.md) |

@@ -16,7 +16,10 @@ Mindex 定位为 **one-stop video creation agent**（一站式视频创作智能
 | 管理素材（改名/收藏/隐藏/上传/处理任务） | [素材后台指南](admin.md) | — |
 | 回收磁盘空间、清退旧切片 | [磁盘清理](cleanup.md) | [旧切片维护](clips-maintenance.md) |
 | 备份、迁移合并或全新 clone 恢复 | [数据备份与迁移](backup.md) | [CLI 参考](cli-reference.md#数据备份与迁移) |
-| 部署持久 worker、跨节点创作或可恢复上传 | [持久创作、目录发布与上传会话](scaling-durable-delivery.md) | [水平扩展交付矩阵](../plans/horizontal-scaling-delivery-matrix.md)、[验证记录](scaling-enhancement-verification.md) |
+| 接共享后端（PostgreSQL、S3、Chroma、worker）或检查就绪/部署设置 | [水平扩展](scaling.md) | [部署设置](settings.md#部署配置设置页)、[配置参考](config-reference.md) |
+| 浏览器直连 S3 上传、独立 endpoint 与 CORS | [双路径上传](scaling-upload.md) | [持久创作、目录发布与上传会话](scaling-durable-delivery.md) |
+| 单机与共享后端之间切换、断点续跑与灾备 | [素材库迁移](scaling-migration.md) | [水平扩展交付矩阵](../plans/horizontal-scaling-delivery-matrix.md) |
+| 执行容量、故障矩阵与断连演练 | [容量工装](scaling-capacity.md) | [剩余能力验收记录](scaling-completion-verification.md) |
 | 切换线上/自建模型、克隆音色、调检索权重 | [设置页指南](settings.md) | [配置参考](config-reference.md) |
 | 按领域发现选题、打分并建成创作任务 | [选题挖掘](topics.md) | [创作工作流](studio.md) |
 | 从文案生成视频（创作工作台） | [创作工作流](studio.md) | [设置页：视频生成与动画生成角色](settings.md) / [部署：ComfyUI 与动画录制](deployment.md#comfyui可选的-aigc-视频生成服务) |
@@ -66,6 +69,11 @@ Mindex 定位为 **one-stop video creation agent**（一站式视频创作智能
 - [web-auth.md](web-auth.md) — Web/API 访问鉴权：令牌、会话 Cookie、MCP 令牌、桌面与回环凭证
 - [testing.md](testing.md) — 测试约定：集成式哲学、分层与标记、浏览器回归与布局回归复现、快照与 parity 测试
 - [shared-infrastructure.md](shared-infrastructure.md) — 共享基础设施：具名文件锁与顺序、SQLite 版本化迁移、后台任务三件套
+- [scaling.md](scaling.md) — 共享后端部署：形态表、迁移与协议、就绪检查、runbook 与已知边界
+- [scaling-upload.md](scaling-upload.md) — 双路径上传：API 分片中转与浏览器直连 S3 multipart、独立 endpoint 与 CORS
+- [scaling-migration.md](scaling-migration.md) — 素材库迁移：九阶段账本、身份绑定、激活门禁与灾备演练
+- [scaling-capacity.md](scaling-capacity.md) — 容量工装：规定规模、并发与质量门槛、证据格式
+- [scaling-completion-verification.md](scaling-completion-verification.md) — 剩余能力闭合的执行记录与失败轮次
 - [scaling-durable-delivery.md](scaling-durable-delivery.md) — Studio 持久账本、目录 manifest、修订冲突、外部调用核对和上传会话
 
 **参考记录**：

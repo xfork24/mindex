@@ -1,10 +1,14 @@
 # CLAUDE.md
 
-共享后端与水平扩展的当前范围见 [增强交付方案](plans/horizontal-scaling-enhancement-plan.md)，
-实现、接入、验证和未完成项目见 [验证记录](docs/scaling-enhancement-verification.md)。
-集群尚未完整交付；组件通过不代表双机、容量、灾备、真实模型或三平台安装验收通过。
+共享后端与水平扩展的范围见 [增强交付方案](plans/horizontal-scaling-enhancement-plan.md) 与
+[剩余能力闭合计划](plans/horizontal-scaling-completion-plan.md)；实现、接入与单机验收的当前状态见
+[剩余能力执行记录](docs/scaling-completion-verification.md) 与[交付矩阵](plans/horizontal-scaling-delivery-matrix.md)，
+更早的分阶段记录见 [增强验证记录](docs/scaling-enhancement-verification.md)。
+实现与单机验收已闭合，但双机、规定容量、真实模型、灾备 RPO/RTO 与三平台安装仍属独立实测，
+组件或小样本通过不能替代这些门槛。
 数据库构造静态检查与隔离验收入口为 `scripts/check-scaling-boundaries.py`、
-`scripts/verify-scaling.py` 和 `scripts/verify-local.py`。
+`scripts/verify-scaling.py`（`--suite integration|cpu|faults`）、`scripts/verify-scaling-recovery.py`
+和 `scripts/verify-local.py`。
 
 本文件为 Claude Code 提供项目技术导航。修改前先阅读 [AGENT.md](AGENT.md) 的通用协作约定；安装与用户操作见 [README.md](README.md)。历史验证记录不代表本次检查结果。
 
