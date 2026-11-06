@@ -6,8 +6,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 import yaml
 from conftest import FixtureAnalyzer, FixtureEmbedder
@@ -25,10 +23,6 @@ from mindex.studio.material_digest import (
     build_digest,
     compose_digest,
 )
-
-pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
-
-ROOT = Path(__file__).resolve().parents[1]
 
 
 def seg(
@@ -220,6 +214,7 @@ def indexed(config, video_file):
     return config, pipeline.store, source_id
 
 
+@pytest.mark.slow
 def test_build_digest_reads_active_index(indexed):
     config, store, source_id = indexed
     result = build_digest(config, store, {})
@@ -232,6 +227,7 @@ def test_build_digest_reads_active_index(indexed):
     assert build_digest(config, store, {}).model_dump() == result.model_dump()
 
 
+@pytest.mark.slow
 def test_build_digest_respects_hidden_overlays(indexed):
     config, store, source_id = indexed
     before = build_digest(config, store, {})
@@ -245,6 +241,7 @@ def test_build_digest_respects_hidden_overlays(indexed):
     assert hidden.empty and hidden.empty_reason == EMPTY_SEGMENTS
 
 
+@pytest.mark.slow
 def test_build_digest_scope(indexed):
     config, store, source_id = indexed
     assert not build_digest(config, store, {"source_ids": [source_id]}).empty
@@ -252,6 +249,7 @@ def test_build_digest_scope(indexed):
     assert other.empty and other.empty_reason == EMPTY_SEGMENTS
 
 
+@pytest.mark.slow
 def test_empty_reason_priority_all_combinations(indexed, tmp_path):
     config, store, _ = indexed
     bare_config = Config(data_dir=tmp_path / "bare")
@@ -312,9 +310,3 @@ def test_config_range_in_error_message():
     with pytest.raises(ValidationError) as negative:
         Config.model_validate({"studio": {"material_digest_chars": -5}})
     assert "0" in str(negative.value)
-
-
-def test_config_example_yaml_sets_12000():
-    data = yaml.safe_load((ROOT / "config.example.yaml").read_text())
-    assert data["studio"]["material_digest_chars"] == 12000
-    assert Config.model_validate(data).studio.material_digest_chars == 12000

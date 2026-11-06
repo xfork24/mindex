@@ -35,7 +35,7 @@
 
 ## 开发与验证
 
-要求 Python 3.11–3.13、uv、ffmpeg/ffprobe。CI（`.github/workflows/ci.yml`）在推送与合并请求时运行下面的检查和 `pytest -m "not slow"`，每晚与手动触发时运行完整测试；提交前仍应在本地运行：
+要求 Python 3.11–3.13、uv、ffmpeg/ffprobe。CI（`.github/workflows/ci.yml`）在推送与合并请求时运行静态检查和 `pytest --ci-suite fast` 的两个分片；每晚及手动启用 full 时追加媒体三片、备份两片。安装包仅手动启用 package 时构建。测试取舍与命令见 [docs/testing.md](docs/testing.md)；提交前仍应在本地运行：
 
 ```bash
 uv sync --extra dev
@@ -47,7 +47,7 @@ for f in frontend/src/*/*.js; do node --check "$f"; done   # 前端 JS 语法
 (cd desktop && npm ci && node --test test/*.test.js)    # 桌面外壳（改动 desktop/ 时）
 uv run mindex --help
 uv run pytest tests/test_pipeline.py -q             # 按改动范围选择测试
-uv run pytest -m "not slow" -q                      # 快速回归，约 10 分钟（跳过重媒体用例）
+uv run pytest --ci-suite fast -x -q --timeout=120    # 常规离线回归
 uv run pytest -q                                    # 完整回归（含 slow 用例，耗时随用例数增长）
 ```
 
@@ -59,7 +59,7 @@ uv run pytest -q                                    # 完整回归（含 slow �
 | --- | --- |
 | 管线、索引、检索 | 对应 `test_pipeline.py`、`test_vector_index.py`、`test_channel_recall.py` 等用例 |
 | 页面、静态资源、文案 | `test_page_assets.py`、`test_i18n.py`、改动 JS 的语法检查及对应 UI 回归 |
-| Studio、人物、备份 | 对应功能测试，必要时覆盖媒体与跨进程恢复链路；Studio 签名变化检查 `test_studio_signature_snapshot.py` |
+| Studio、人物、备份 | 对应功能测试，必要时覆盖媒体与跨进程恢复链路；Studio 版本复用检查 `test_studio_portable_paths.py` 与阶段行为测试 |
 | 智能助手工具 | `tests/test_agent_*.py`（含工具数量断言与 `agent_scenarios.py` 场景），同步 `docs/agent.md` 工具表 |
 | 选题挖掘 | `tests/test_topics_*.py`（含入口一致性 `test_topics_parity.py`）；新能力同时提供页面、CLI、REST 与智能助手工具，并登记 `topics/capabilities.py` |
 | 目录、导入或打包 | CLI、资源加载、独立服务入口及 wheel/源码包内容 |
@@ -67,6 +67,6 @@ uv run pytest -q                                    # 完整回归（含 slow �
 
 UI 回归使用 Node.js 与 Playwright，可通过 `MINDEX_PLAYWRIGHT_MODULE` 指定模块路径。模型测试使用明确标记的确定性适配器；工程测试通过不代表真实模型质量，真实验收使用 `mindex e2e` 并记录模型与索引版本。
 
-完整 `pytest` 目前应全部通过（数量随测试增加而变化，以本次实际运行为准；有意保留的过期基线断言见 [docs/verification.md](docs/verification.md)）。遇到失败应说明是否与本次修改相关，不为得到全绿结果随意跳过或修改测试。
+完整 `pytest` 目前应全部通过（数量随测试增加而变化，以本次实际运行为准）。遇到失败应说明是否与本次修改相关，不为得到全绿结果随意跳过或修改测试。
 
 交付时简述改动、实际运行的验证与尚未验证的范围。行为、配置或命令变化时同步相关文档。

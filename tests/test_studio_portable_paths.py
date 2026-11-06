@@ -4,6 +4,23 @@ from mindex.shared.config import portable_parameters
 from mindex.studio import workspace as ws
 
 
+def test_timeout_changes_keep_versions_reusable_and_layout(config):
+    """验证版本复用行为，不再构建视频并比对历史不透明哈希。"""
+    config.studio.tts.timeout = 300
+    layout = config.layout_key
+    config.detector.timeout = 60
+    assert config.layout_key == layout
+    jid, w, p = setup_workspace(config)
+    spec = ws.specification(config, jid, w, p, "tts", "a")
+    vid = ws.add_version(config, jid, w, "tts", "a", **spec)
+    p["shots"]["a"]["tts"] = vid
+    config.studio.tts.timeout = 42
+    changed = ws.specification(config, jid, w, p, "tts", "a")
+    assert changed["signature"] != spec["signature"]
+    assert ws.match(config, jid, w, p, "tts", "a", verify=False) == vid
+    assert ws.conflicts(config, jid, w, p, "tts", "a", vid) == []
+
+
 def test_historical_absolute_manifest_reuses_version_after_move(config):
     jid, w, p = setup_workspace(config)
     relative = 'data/config-dependencies/release/model.json'

@@ -13,6 +13,40 @@ from mindex.shared.config import Config
 from mindex.shared.media import command
 from mindex.shared.types import Annotation, ShotDraft
 
+pytest_plugins = ["ci_selection"]
+
+
+@pytest.fixture(autouse=True)
+def close_local_vector_clients(monkeypatch, tmp_path):
+    """用例结束释放其临时向量库，避免长套件耗尽 SQLite 句柄与后台线程。
+
+    只管理函数级 tmp_path 下的客户端；模块/会话级共享库保留原有生命周期。
+    """
+    import chromadb
+
+    original = chromadb.PersistentClient
+    clients = []
+
+    def persistent_client(*args, **kwargs):
+        path = kwargs.get("path", args[0] if args else "./chroma")
+        client = original(*args, **kwargs)
+        if Path(path).resolve().is_relative_to(tmp_path.resolve()):
+            clients.append(client)
+        return client
+
+    monkeypatch.setattr(chromadb, "PersistentClient", persistent_client)
+    yield
+    for client in reversed(clients):
+        client.close()
+
+
+@pytest.fixture(scope="session")
+def backup_seed(tmp_path_factory, video_file):
+    """只构建一次备份种子；每个备份测试复制到独立目录后再修改。"""
+    from test_backup import seed
+
+    return seed(tmp_path_factory.mktemp("backup-seed") / "origin", video_file)
+
 
 @pytest.fixture(autouse=True)
 def offline_model_network(monkeypatch):

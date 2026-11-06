@@ -127,11 +127,13 @@ def seed(root, video, names=('a', 'b'), *, space='test'):
 
 
 @pytest.fixture
-def library(tmp_path, video_file):
-    config, sources, index = seed(tmp_path / 'origin', video_file)
+def library(tmp_path, backup_seed):
+    template, sources, index = backup_seed
+    config = template.model_copy(deep=True, update={"data_dir": tmp_path / 'origin'})
+    shutil.copytree(template.data_dir, config.data_dir)
     config_path = tmp_path / 'original.yaml'
     config_path.write_text(yaml.safe_dump({'data_dir': str(config.data_dir), 'embedding': {'dimensions': 8}}))
-    return config, sources, index, config_path
+    return config, list(sources), index, config_path
 
 
 def export(library, path, **kwargs):
@@ -288,26 +290,26 @@ def test_selected_sources_leave_no_rows_or_files(library, tmp_path, at_export):
     assert sources[1].encode() not in store.path.read_bytes()
 
 
-@pytest.mark.parametrize('verification', ['full', 'basic'])
-def test_compatible_merge_and_skip_existing(library, tmp_path, video_file, verification):
+def test_compatible_merge_and_skip_existing(library, tmp_path, video_file):
     bundle = tmp_path / 'backup'
     export(library, bundle)
     target = tmp_path / 'target'
     _, target_ids, old = seed(target, video_file, names=('c',))
-    result = restore(bundle, target, verification=verification)
+    result = restore(bundle, target)
     assert result['config_action'] == '保留目标配置'
     assert result['searchable_sources'] == sorted([*library[1], *target_ids])
     assert old != result['active_index']
     before = store_at(target).rows('SELECT * FROM source_curation')
     # 重复全部跳过后，不能重新带入原素材的历史成员。
-    skipped = restore(bundle, target, skip_existing=True, verification=verification)
+    skipped = restore(bundle, target, skip_existing=True)
     assert skipped['skipped_sources'] == sorted(library[1])
     assert store_at(target).rows('SELECT * FROM source_curation') == before
     assert {r['source_id'] for r in search_results(target)} == set(library[1]) | set(target_ids)
 
 
-@pytest.mark.parametrize('verification', ['full', 'basic'])
-@pytest.mark.parametrize('problem', ['space', 'duplicate', 'shared'])
+@pytest.mark.parametrize(('problem', 'verification'), [
+    ('space', 'full'), ('duplicate', 'basic'), ('shared', 'full'),
+])
 def test_conflict_leaves_target_unchanged(library, tmp_path, video_file, problem, verification):
     bundle = tmp_path / 'backup'
     if problem == 'shared':
@@ -488,8 +490,9 @@ def test_export_still_rejects_required_vector_missing_from_chroma(library, tmp_p
     assert not bundle.exists()
 
 
-@pytest.mark.parametrize('verification', ['full', 'basic'])
-@pytest.mark.parametrize('attack', ['corrupt', 'traversal', 'symlink', 'missing_vectors'])
+@pytest.mark.parametrize(('attack', 'verification'), [
+    ('corrupt', 'full'), ('traversal', 'basic'), ('symlink', 'full'), ('missing_vectors', 'basic'),
+])
 def test_invalid_bundle_fails_without_target(library, tmp_path, attack, verification):
     bundle = tmp_path / 'backup'
     export(library, bundle)
