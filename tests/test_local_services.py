@@ -18,7 +18,7 @@ from mindex.shared.storage import Store
 
 # 测试服务：/health 返回 200；--crash 立即退出；同时拉起一个孙进程，验证停止时整个进程组都被结束。
 SERVER = r'''
-import http.server, os, subprocess, sys
+import http.server, os, socketserver, subprocess, sys
 if "--crash" in sys.argv:
     print("boom", flush=True)
     sys.exit(3)
@@ -32,8 +32,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(b"ok")
     def log_message(self, *args):
         print("request", self.path, flush=True)
-print("listening", port, flush=True)
-http.server.HTTPServer(("127.0.0.1", port), Handler).serve_forever()
+class LoopbackServer(http.server.HTTPServer):
+    def server_bind(self):
+        # macOS runner 的 getfqdn 可能阻塞数十秒；回环测试无需解析主机名。
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
+with LoopbackServer(("127.0.0.1", port), Handler) as server:
+    print("listening", port, flush=True)
+    server.serve_forever()
 '''
 
 
@@ -103,6 +109,25 @@ def test_crash_and_missing_executable_are_reported(services):
     missing = client.post("/api/settings/local-services/missing/start")
     assert missing.status_code == 422 and "找不到可执行文件" in missing.json()["detail"]
     assert client.post("/api/settings/local-services/nope/start").status_code == 404
+
+
+def test_service_fixture_does_not_resolve_hostname(services, monkeypatch):
+    """真实子进程禁用 getfqdn，防止 macOS runner 的慢解析再次阻塞监听。"""
+    client, _config, tmp_path = services
+    startup = tmp_path / "startup"
+    startup.mkdir()
+    (startup / "sitecustomize.py").write_text(
+        "import socket\n"
+        "def reject_lookup(*args, **kwargs):\n"
+        "    raise RuntimeError('回环测试服务不应调用 getfqdn')\n"
+        "socket.getfqdn = reject_lookup\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("PYTHONPATH", str(startup))
+    started = client.post("/api/settings/local-services/fake/start")
+    assert started.status_code == 200, started.text
+    assert started.json()["healthy"], started.text
+    assert "listening" in client.get("/api/settings/local-services/fake/logs").json()["text"]
 
 
 @pytest.mark.parametrize("proxy_source", ["environment", "system"])
