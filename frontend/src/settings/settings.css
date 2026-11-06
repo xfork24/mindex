@@ -134,15 +134,12 @@ dl.runtime-row>div{display:flex;flex-direction:column;align-items:flex-end;min-w
 dl.runtime-row dt{margin:0;font-size:12px;color:var(--muted)}
 dl.runtime-row dd{margin:0;text-align:right;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
 
-/* 部署后端整区可折叠：标题本身作为 summary，右侧三角随展开状态旋转。 */
-summary.section-heading{list-style:none;cursor:pointer}
-summary.section-heading::-webkit-details-marker{display:none}
-summary.section-heading::before{content:'▸';display:inline-block;font-size:12px;color:var(--muted);transition:transform .15s}
-details.deployment-panel[open]>summary.section-heading::before{transform:rotate(90deg)}
-details.deployment-panel:not([open])>summary.section-heading{margin-bottom:0}
-/* 子级折叠项（后端概要、字段生效规则）沿用浏览器默认三角与字号，两者样式一致。 */
-.deployment-summary>summary,.deployment-rules>summary{cursor:pointer}
-.deployment-summary[open]>summary,.deployment-rules[open]>summary{margin-bottom:8px}
+/* 子级折叠项（部署配置、字段生效规则）沿用浏览器默认三角与字号，两者样式一致。 */
+.deployment-config>summary,.deployment-rules>summary{cursor:pointer}
+.deployment-config[open]>summary,.deployment-rules[open]>summary{margin-bottom:8px}
+/* 后端概要常显（不折叠）：标题字体与可折叠项一致，数据表紧随其后。 */
+.deployment-label{margin:0 0 8px;font-size:16px;color:inherit}
+#deployment-status{margin-bottom:14px}
 
 .voice-list{list-style:none;margin:0 0 16px;padding:0;display:flex;flex-direction:column;gap:8px}
 

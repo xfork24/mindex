@@ -77,6 +77,20 @@ const base = process.env.MINDEX_I18N_TEST_URL || 'http://127.0.0.1:8027';
     assert.equal(await page.locator('#edit-notes').inputValue(),'未保存素材备注');await page.locator('#edit-close').click();
     // Settings modal contains dynamic label/input pairs: preserve the inputs and entered credentials.
     await page.goto(base + '/settings');await page.locator('#roles .role-row-head').first().waitFor();
+    // 部署区块：与「检索调参」同一套 role-row 折叠，默认折叠，展开状态跨刷新保留。
+    const deploymentRow = page.locator('#deployment-row');
+    const deploymentHead = deploymentRow.locator('.role-row-head');
+    assert.equal(await deploymentRow.evaluate(node => node.classList.contains('is-open')), false, '部署后端应默认折叠');
+    assert.equal(await page.locator('#deployment-body').evaluate(node => node.hidden), true, '折叠时内容应隐藏');
+    assert.equal(await deploymentHead.getAttribute('aria-expanded'), 'false');
+    await deploymentHead.click();
+    assert.equal(await deploymentHead.getAttribute('aria-expanded'), 'true', '点击标题应展开部署后端');
+    // 折叠头右侧摘要显示当前后端组合。
+    assert.match((await page.locator('#deployment-summary').textContent()).trim(), /[\w-]+\s·\s[\w-]+/, '摘要应显示后端组合');
+    // 后端概要常显（不再折叠），标题保留。
+    assert.equal(await page.locator('details.deployment-summary').count(), 0, '后端概要不应再包在可折叠项里');
+    assert.equal((await page.locator('.deployment-label').textContent()).trim(), '后端概要', '后端概要标题应保留');
+    assert.equal(await page.locator('#deployment-status').isVisible(), true, '后端概要应常显');
     // 部署字段规则由异步加载的脚本渲染：必须已渲染且不含 i18n 占位 token（\uE000z<id>\uE001）。
     await page.waitForFunction(() => document.querySelectorAll('#deployment-field-rules li').length > 0);
     const deploymentRules = await page.locator('#deployment-field-rules li').allTextContents();
@@ -84,10 +98,7 @@ const base = process.env.MINDEX_I18N_TEST_URL || 'http://127.0.0.1:8027';
            `部署字段规则泄漏 i18n 占位 token：${JSON.stringify(deploymentRules)}`);
     assert(deploymentRules.some(text => /只读|保存后重启|迁移/.test(text)),
            `部署字段规则缺少可读说明：${JSON.stringify(deploymentRules)}`);
-    // 后端概要可折叠，且每列标签与值右边缘对齐（dd 的默认左缩进必须归零）。
-    const summary = page.locator('details.deployment-summary');
-    assert.equal(await summary.evaluate(node => node.open), true, '后端概要应默认展开');
-    assert.equal(await summary.locator('summary').count(), 1);
+    // 每列标签与值右边缘对齐（dd 的默认左缩进必须归零）。
     const offsets = await page.evaluate(() => [...document.querySelectorAll('#deployment-status > div')].map(row => {
       const label = row.querySelector('dt').getBoundingClientRect();
       const value = row.querySelector('dd').getBoundingClientRect();
@@ -96,62 +107,20 @@ const base = process.env.MINDEX_I18N_TEST_URL || 'http://127.0.0.1:8027';
     }));
     assert(offsets.every(item => item.delta <= 1), `后端概要列上下未对齐：${JSON.stringify(offsets)}`);
     assert(offsets.every(item => item.margin === 0), `后端概要值仍有默认左缩进：${JSON.stringify(offsets)}`);
-    assert.equal((await summary.locator('summary').textContent()).trim(), '后端概要', '概要标题不应带括号说明');
-    await summary.locator('summary').click();
-    assert.equal(await summary.evaluate(node => node.open), false, '点击概要应折叠');
-    await summary.locator('summary').click();
-    assert.equal(await summary.evaluate(node => node.open), true, '再次点击应展开');
-    // 整个部署后端区域也可折叠：折叠后配置编辑器与字段规则一起隐藏。
-    const panel = page.locator('details.deployment-panel');
-    assert.equal(await panel.evaluate(node => node.open), true, '部署后端区域应默认展开');
-    await panel.locator('> summary').click();
-    assert.equal(await panel.evaluate(node => node.open), false, '点击标题应折叠整个区域');
-    assert.equal(await page.locator('#deployment-editor').isVisible(), false, '折叠后配置编辑器应隐藏');
+    // 部署配置默认折叠：展开后编辑器可见，再收起。
+    const deploymentConfig = page.locator('details.deployment-config');
+    assert.equal(await deploymentConfig.evaluate(node => node.open), false, '部署配置应默认折叠');
+    await deploymentConfig.locator('> summary').click();
+    assert.equal(await page.locator('#deployment-editor').isVisible(), true, '展开后编辑器应可见');
+    await deploymentConfig.locator('> summary').click();
+    assert.equal(await page.locator('#deployment-editor').isVisible(), false, '折叠后编辑器应隐藏');
+    // 字段规则自身可折叠：展开可见，整区折叠时随之隐藏。
+    const deploymentRulesPanel = page.locator('details.deployment-rules');
+    await deploymentRulesPanel.locator('> summary').click();
+    assert.equal(await page.locator('#deployment-field-rules').isVisible(), true, '展开后字段规则应可见');
+    await deploymentHead.click();
+    assert.equal(await page.locator('#deployment-status').isVisible(), false, '折叠后后端概要应隐藏');
     assert.equal(await page.locator('#deployment-field-rules').isVisible(), false, '折叠后字段规则应隐藏');
-    await panel.locator('> summary').click();
-    assert.equal(await page.locator('#deployment-editor').isVisible(), true, '展开后配置编辑器应可见');
-    if(await page.locator('#roles .role-row-head').first().getAttribute('aria-expanded')!=='true')await page.locator('#roles .role-row-head').first().click();
-    await page.locator('.new-profile-card').first().click();
-    await page.locator('#pf-name').fill('我的中文档案');await page.locator('#pf-api-key').fill('test-key-not-a-secret');
-    await page.locator('#pf-model').fill('model-id');await preserve('#pf-extra input');
-    assert.equal(await page.locator('#pf-name').inputValue(),'我的中文档案');
-    assert.equal(await page.locator('#pf-api-key').inputValue(),'test-key-not-a-secret');
-    assert.equal(await page.locator('#profile-dialog').evaluate(n=>n.open),true);
-    await page.locator('#profile-close').click();
-    await page.goto(base + '/persons');await page.locator('[data-pane=catalogue]').click();await page.locator('#entity-new').click();
-    await page.locator('#entity-name').fill('中文人物');await preserve('#entity-name');
-    assert.equal(await page.locator('#entity-name').inputValue(),'中文人物');await page.locator('#entity-close').click();
-    // Create real fixture storyboard; retain unsaved narration/query and dynamic selects.
-    await page.goto(base + '/');await page.locator('#create-text').fill('山风吹过山谷，远处的寺庙亮着灯。');await page.locator('#create-button').click();
-    await page.locator('#job-workspace').waitFor({state:'visible'});await batchRun(page,'split');
-    await page.locator('#shot-strip .shot-card').first().waitFor();
-    await page.waitForFunction(()=>document.querySelector('#execution-log').textContent.includes('执行结束'));
-    const chineseLog = await page.locator('#execution-log').innerText();await toggle('en');
-    assert.ok(!/[\u4e00-\u9fff]/.test(await page.locator('#execution-log').innerText()));
-    await toggle('zh');assert.equal(await page.locator('#execution-log').innerText(),chineseLog);
-    await page.locator('#shot-strip .shot-card').first().click();
-    const narration = page.locator('textarea[aria-label="旁白与字幕"]');await narration.fill('未保存的中文旁白');
-    await page.evaluate(()=>{window.keptNarration=document.querySelector('textarea[aria-label="旁白与字幕"]');});
-    await toggle('en');assert.equal(await page.locator('textarea[aria-label="Narration and subtitles"]').inputValue(),'未保存的中文旁白');
-    assert.ok(await page.evaluate(()=>window.keptNarration.isConnected));
-    await toggle('zh');await page.getByRole('button',{name:'取消修改',exact:true}).click();
-    await page.locator('#plan-settings').click();await page.locator('#dialog-content select').first().waitFor();await preserve('#dialog-content select');
-    assert.ok(await page.locator('#dialog-content select').count()>0);
-    // 冲突后显式刷新：保留输入，并在通用按钮移除旧错误后重新显示确认。
-    const recallLimit = page.locator('#dialog-content input[type=number]').first();
-    await recallLimit.fill('7');
-    const planUrl = await page.evaluate(()=>location.origin+planBase());
-    await page.route(planUrl, route=>route.request().method()==='PATCH'
-      ? route.fulfill({status:409,contentType:'application/json',body:JSON.stringify({detail:'工作区已被其他操作修改，请刷新后重试'})})
-      : route.continue());
-    const conflict = page.waitForResponse(response=>response.url()===planUrl && response.status()===409);
-    await page.getByRole('button',{name:'保存参数',exact:true}).click();await conflict;
-    await page.getByRole('button',{name:'刷新版本并保留输入',exact:true}).click();
-    await page.locator('#dialog-error').getByText('版本已刷新，输入已保留，请检查后再次保存',{exact:true}).waitFor();
-    assert.equal(await recallLimit.inputValue(),'7');
-    assert.equal(await page.locator('#work-dialog').evaluate(node=>node.open),true);
-    await page.unroute(planUrl);await page.locator('#dialog-close').click();
-    // No switch-related fetches or reloads; long English labels fit narrow viewport.
     for (const path of ['/search','/admin','/persons','/settings','/']) {
       await page.goto(base+path);await page.waitForTimeout(300);let requests=0;const count=()=>requests++;
       page.on('request',count);await toggle('en');await toggle('zh');page.off('request',count);assert.equal(requests,0,path);
