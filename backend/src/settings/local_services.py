@@ -130,7 +130,8 @@ class LocalServiceManager:
     def healthy(self, service: LocalServiceConfig, timeout: float = 1.5) -> tuple[bool, str]:
         url = f"http://127.0.0.1:{service.port}{service.health_path}"
         try:
-            response = httpx.get(url, timeout=timeout)
+            # 回环探针必须直连，不能继承环境或 macOS/Windows 系统代理。
+            response = httpx.get(url, timeout=timeout, trust_env=False)
         except httpx.HTTPError as exc:
             return False, f"健康检查无响应：{type(exc).__name__}"
         if 200 <= response.status_code < 300:
