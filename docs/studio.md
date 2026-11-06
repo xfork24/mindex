@@ -104,7 +104,7 @@ worker，使用不可变目录 manifest 与 PG 当前 revision 指针；`job.jso
 | `animation` | 可选 `brief`（画面说明，≤2000 字） | 配音 → 生成动画 → 分镜渲染 | 动画生成 LLM 写自包含 HTML/JS 动画，渲染时在离线沙箱里逐帧录制；源码可人工修改；见 [AI 动画](#ai-动画) |
 | `tool` | `tool_id`（工具源）、`tool`（白名单工具名）、`arguments`（JSON，≤8000 字符）、可选 `uploads`（≤4 个任务素材）、`output`（video/image）；图片产物另有 `motion`、`strength` | 视频：配音 → 调用第三方工具 → 选片对齐 → 分镜渲染；图片：配音 → 调用第三方工具 → 分镜渲染 | 调用登记的 HTTP 或 MCP 工具生成画面；见 [第三方工具](#第三方工具) |
 
-`source` 为空即素材召回，dump 时省略该键；显式提交 `{"kind": "recall"}` 也规范化为空。因此没有设置来源的分镜内容版本号与签名都不变（`tests/test_studio_signature_snapshot.py`）。来源表在阶段注册表的 `SHOT_SOURCES`，预检、依赖与执行按每个分镜的序列展开：clip 与 image 没有召回节点，不需要发布索引，纯 clip/image 任务在没有活动索引时也能完整构建；混合来源的分镜在成片合成里按分镜顺序拼接。改变来源时，新来源没有的阶段选用（例如改为图片后的召回与选片）以及人工区间、参考锚点从方案中移除；候选、锚点与人工选片接口对非召回分镜返回 422“该分镜的画面来源不是素材召回，不能选择候选或人工选片”。
+`source` 为空即素材召回，dump 时省略该键；显式提交 `{"kind": "recall"}` 也规范化为空。因此没有设置来源的分镜内容版本号与签名都不变（`tests/test_studio_sources.py`）。来源表在阶段注册表的 `SHOT_SOURCES`，预检、依赖与执行按每个分镜的序列展开：clip 与 image 没有召回节点，不需要发布索引，纯 clip/image 任务在没有活动索引时也能完整构建；混合来源的分镜在成片合成里按分镜顺序拼接。改变来源时，新来源没有的阶段选用（例如改为图片后的召回与选片）以及人工区间、参考锚点从方案中移除；候选、锚点与人工选片接口对非召回分镜返回 422“该分镜的画面来源不是素材召回，不能选择候选或人工选片”。
 
 来源文件复用查询文件通道上传（`POST …/query-media`，`purpose=source`），按内容 SHA-256 存为任务 `inputs/<sha256>.<suffix>`：视频受 `studio.max_clip_seconds`（默认 300 秒）与 `studio.max_clip_mb`（默认 500 MB）限制，图片与查询图片相同。保存分镜时校验文件已上传且类型匹配（clip 须为视频、image 须为图片），预检在文件缺失时把节点阻塞为“画面文件缺失或已损坏，请重新上传”，执行前按文件名中的摘要复验，文件被改动时节点失败并给出同样的原因。来源文件与查询媒体、参考文稿一样随任务目录保留、纳入任务 ZIP 与 `mindex backup`，`mindex clean` 不回收 `inputs/`。
 
@@ -486,7 +486,7 @@ data/studio/<job_id>/
 
 ## 验证
 
-工作台代码位于 `studio/workspace/` 包：`versions`（任务目录、`workspace.json` 落盘、不可变版本与文件校验）、`plans`（方案选项、文案与分镜编辑、版本选用、分镜快照还原）、`persistence`（读取与旧任务迁移）、`signatures`（阶段参数、签名、冲突与复用）、`preflight`（预检与列重生成节点）、`media_nodes`（区间校验、选片对齐、分镜渲染）、`post`（成片后期管线：拼接、背景音乐、字幕、封装）、`builder`（节点执行、整次构建、取消与重启恢复）、`details`（详情视图）、`stages` 与 `handlers/`（阶段注册表，见下）。`tests/test_studio_signature_snapshot.py` 以 `tests/fixtures/studio_signatures.json` 冻结各阶段签名、预检结果与固定 fixture 的成片时间线结构；只有签名变化是有意为之时才用 `MINDEX_UPDATE_SNAPSHOTS=1` 重新生成。
+工作台代码位于 `studio/workspace/` 包：`versions`（任务目录、`workspace.json` 落盘、不可变版本与文件校验）、`plans`（方案选项、文案与分镜编辑、版本选用、分镜快照还原）、`persistence`（读取与旧任务迁移）、`signatures`（阶段参数、签名、冲突与复用）、`preflight`（预检与列重生成节点）、`media_nodes`（区间校验、选片对齐、分镜渲染）、`post`（成片后期管线：拼接、背景音乐、字幕、封装）、`builder`（节点执行、整次构建、取消与重启恢复）、`details`（详情视图）、`stages` 与 `handlers/`（阶段注册表，见下）。阶段签名以路径迁移、参数变化与历史版本复用的行为测试验证，见 `tests/test_studio_portable_paths.py`；旧逐字节黄金快照已移除，测试分层见 [测试约定](testing.md)。
 
 阶段注册表：每个阶段一个 `StageHandler`（`studio/workspace/stages.py`），处理器位于 `handlers/`（`script`、`split`、`recall`、`tts`、`music`、`draw`、`generate`、`animate`、`invoke`、`select`、`overlay`、`render`、`compose`、`export`、`publish`），导入时经 `register()` 按 plan → shot → final 顺序登记到 `REGISTRY`。处理器提供显示名 `label`、作用域 `scope`、阶段参数 `settings`、签名载荷 `specification`（签名外壳仍在 `signatures.specification`，与历史版本逐字节一致）、依赖 `dependencies`、预检钩子 `preflight`、执行 `run` 与冲突说明 `conflict_labels`；`builder.execute`、预检、列重生成、冲突与复用都按注册表分派，请求体（`NodeBody`、`ColumnBody`、`VersionChoiceBody`）的阶段取值也由注册表生成。每个分镜的阶段序列由镜头来源决定（`shot_stages`，来源表 `SHOT_SOURCES`）：recall 为 `recall → tts → select → render`（即 `ws.STAGES`），clip 为 `tts → select → render`，image 为 `tts → render`，aigc_image 为 `tts → draw → render`，aigc 为 `tts → generate → select → render`，animation 为 `tts → animate → render`，tool 为 `tts → invoke → select → render`（图片产物 `tts → invoke → render`）；带 generate/cover/library 背景音乐提示点的分镜在配音后多一个 `music`（见[分镜画面来源](#分镜画面来源)；来源文件的定位与复验在 `workspace/sources.py`）。新增阶段或来源只需实现处理器并登记，不改预检与执行（`tests/test_studio_stages.py`）。
 

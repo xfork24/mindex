@@ -167,8 +167,15 @@ sys.stdin.read(1)
                              stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     peer = None
     try:
-        assert select.select([child.stdout], [], [], 10)[0], "子进程 staging 未就绪"
-        assert child.stdout.readline().strip() == "ready"
+        if not select.select([child.stdout], [], [], 10)[0]:
+            child.kill()
+            stdout, stderr = child.communicate(timeout=5)
+            pytest.fail(f"子进程 staging 未就绪：exit={child.returncode} stdout={stdout!r} stderr={stderr!r}")
+        line = child.stdout.readline().strip()
+        if line != "ready":
+            child.kill()
+            stdout, stderr = child.communicate(timeout=5)
+            pytest.fail(f"子进程 staging 启动失败：line={line!r} stdout={stdout!r} stderr={stderr!r}")
         peer = StagingArea(tmp_path, quota_bytes=100)
         assert peer.usage()["reserved"] == 10
         assert peer.usage()["pinned"] == 80

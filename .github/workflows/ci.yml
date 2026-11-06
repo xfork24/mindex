@@ -1,5 +1,4 @@
-# 统一检查：推送与合并请求运行快速回归（跳过 slow 标记的重媒体用例）；
-# 每晚定时与手动触发（workflow_dispatch）运行完整测试。
+# 静态检查与离线测试分离；重媒体、备份按需运行，各组独立分片、失败即停并保留日志。
 name: CI
 
 on:
@@ -11,9 +10,13 @@ on:
   workflow_dispatch:
     inputs:
       full:
-        description: "运行完整测试（含 slow 用例）"
+        description: "运行完整代码回归（追加媒体与备份专项）"
         type: boolean
-        default: true
+        default: false
+      package:
+        description: "构建三平台安装包（耗时，发布前手动启用）"
+        type: boolean
+        default: false
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -21,13 +24,10 @@ concurrency:
 
 jobs:
   checks:
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-
-      - name: 安装 ffmpeg 与中文字体
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg fonts-noto-cjk
 
       - uses: actions/setup-node@v4
         with:
@@ -39,8 +39,7 @@ jobs:
           enable-cache: true
 
       - name: 安装依赖
-        # person extra（supervision/av）供完整回归的人物库端到端用例使用（docs/persons.md）
-        run: uv sync --extra dev --extra person
+        run: uv sync --extra dev
 
       - name: ruff
         run: uv run ruff check backend/src tests
@@ -63,13 +62,92 @@ jobs:
       - name: CLI 入口
         run: uv run mindex --help
 
-      - name: 快速回归（跳过 slow）
-        if: github.event_name == 'push' || github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && !inputs.full)
-        run: uv run pytest -m "not slow" -q
+  fast-tests:
+    name: 常规回归 (${{ matrix.shard }}/2)
+    needs: checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - name: 安装测试依赖
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg fonts-noto-cjk
+          uv sync --extra dev --extra person
+      - name: 常规回归（首次失败立即报告）
+        run: |
+          mkdir -p artifacts/tests
+          set -o pipefail
+          uv run pytest -q -x --tb=short --durations=15 --timeout=120 \
+            --ci-suite=fast --ci-shard=${{ matrix.shard }}/2 \
+            --ci-plan=artifacts/tests/fast-${{ matrix.shard }}.json \
+            --junitxml=artifacts/tests/fast-${{ matrix.shard }}.xml 2>&1 | tee artifacts/tests/fast-${{ matrix.shard }}.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tests-fast-${{ matrix.shard }}
+          path: artifacts/tests/
+          retention-days: 14
 
-      - name: 完整回归
-        if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.full)
-        run: uv run pytest -q
+  full-tests:
+    name: 专项回归 (${{ matrix.suite }} ${{ matrix.shard }}/${{ matrix.parts }})
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.full)
+    needs: checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { suite: media, shard: 1, parts: 3 }
+          - { suite: media, shard: 2, parts: 3 }
+          - { suite: media, shard: 3, parts: 3 }
+          - { suite: backup, shard: 1, parts: 2 }
+          - { suite: backup, shard: 2, parts: 2 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - name: 安装测试依赖
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg fonts-noto-cjk
+          uv sync --extra dev --extra person
+      - name: 浏览器功能回归依赖
+        if: matrix.suite == 'media'
+        run: |
+          version="$(node -p 'require("./desktop/package.json").devDependencies["playwright-core"]')"
+          npm install --prefix "$RUNNER_TEMP/browser" --no-save --package-lock=false "playwright-core@$version"
+          node "$RUNNER_TEMP/browser/node_modules/playwright-core/cli.js" install --with-deps chromium
+          echo "MINDEX_PLAYWRIGHT_MODULE=$RUNNER_TEMP/browser/node_modules/playwright-core" >> "$GITHUB_ENV"
+      - name: 专项回归（单用例超时输出线程栈）
+        run: |
+          mkdir -p artifacts/tests
+          set -o pipefail
+          uv run pytest -q -x --tb=short --durations=15 --timeout=240 \
+            --ci-suite=${{ matrix.suite }} --ci-shard=${{ matrix.shard }}/${{ matrix.parts }} \
+            --ci-plan=artifacts/tests/${{ matrix.suite }}-${{ matrix.shard }}.json \
+            --junitxml=artifacts/tests/${{ matrix.suite }}-${{ matrix.shard }}.xml 2>&1 | tee artifacts/tests/${{ matrix.suite }}-${{ matrix.shard }}.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tests-${{ matrix.suite }}-${{ matrix.shard }}
+          path: artifacts/tests/
+          retention-days: 14
 
   # 桌面版（三平台矩阵）：外壳纯逻辑、桌面相关后端测试与 Electron 开发模式冒烟。
   desktop:
@@ -153,9 +231,9 @@ jobs:
           if [ "$RUNNER_OS" = "Linux" ]; then xvfb-run -a node tests/desktop_smoke.cjs
           else node tests/desktop_smoke.cjs; fi
 
-  # 定时与手动触发：从源码构建 GPL ffmpeg（按构建脚本缓存）、冻结后端与安装包，安装后冒烟，产物保留 14 天。
+  # 发布前显式启用：构建安装包并冒烟，避免每次完整代码回归都重复执行昂贵打包。
   desktop-package:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && inputs.package
     needs: desktop
     strategy:
       fail-fast: false

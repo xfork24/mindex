@@ -178,7 +178,8 @@ const focused = (page, selector) => page.locator(`${selector}[data-agent-focus]`
       await page.goto(studioUrl);
       await openPanel(page);
       await say(page, '列出所有分镜');
-      const reply = page.locator('.agent-assistant .agent-text').last();
+      // 表格可能在流式输出首行时就出现；等消息完成后再校验完整 Markdown。
+      const reply = page.locator('.agent-assistant:not(.is-streaming) .agent-text').last();
       await reply.locator('table').waitFor({timeout: 15000});
       assert.equal(await reply.locator('h2').textContent(), '分镜');
       assert.equal(await reply.locator('tbody tr').count(), 2);

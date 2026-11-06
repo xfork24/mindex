@@ -23,6 +23,7 @@ dependencies = [
 # 人物帧采样维护测试需要 PyAV；无需为测试安装整个人物推理环境。
 dev = [
     "pytest>=8,<10",
+    "pytest-timeout==2.4.0",
     "ruff>=0.11",
     "mcp==1.30.0",
     "hypothesis==6.170.9",

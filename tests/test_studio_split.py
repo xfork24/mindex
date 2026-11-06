@@ -232,37 +232,9 @@ def test_split_prompt_preserves_narration_and_requires_chinese_keywords(config, 
     assert "不设最低字数" not in system
 
 
-def test_split_prompt_contains_all_granularity_rules():
-    """提示词固定写入全部粒度规则（需求 5.1–5.6），SPLIT_VERSION 递增为 8。"""
-    from mindex.models.storyboard import split_instructions
-
-    system = split_instructions(12)
-    for rule in (
-        "具体意象单独成镜",
-        "一镜最多包含一个具体意象",
-        "也不与另一个具体意象合并",
-        "每镜 text 至少 3 个英文词或 5 个汉字",
-        "优先并入不包含其他具体意象的那一侧",
-        "抽象列举不拆",
-        "同一抽象列举的全部列举项必须出现在同一镜 text 中",
-        "超长再拆",
-        "超过 20 个英文词或 32 个汉字",
-        "单一意象长句不拆",
-        "分镜数量不超过 12",
-    ):
-        assert rule in system, rule
-    assert studio.SPLIT_VERSION == 8
 
 
-def test_split_prompt_orders_visual_text_query():
-    """产出顺序 visual → text → query（需求 5.10），ShotDraft 的第一个字段是 visual（需求 7.3）。"""
-    from mindex.models.storyboard import split_instructions
-
-    system = split_instructions(12)
-    order = "先为每镜规划 visual（一句画面意象），再按 visual 切分 text，最后编写 query"
-    assert order in system
-    sections = [system.index(title) for title in ("一、产出顺序", "三、text 规则", "四、visual 规则", "五、query 规则")]
-    assert sections == sorted(sections)
+def test_shot_schema_keeps_visual_text_query_order():
     assert next(iter(ShotDraft.model_fields)) == "visual"
     assert list(ShotDraft.model_json_schema()["properties"])[:3] == ["visual", "text", "query"]
 

@@ -24,7 +24,7 @@ Mindex：中文视频片段检索（文字找视频优先，支持视频/图片�
 uv sync --extra dev                              # 安装依赖（Python 3.11–3.13 + uv，需 ffmpeg/ffprobe；UI 回归另需 node）
 uv sync --extra dev --extra person               # 追加人物检测/特征依赖（supervision、av）
 uv run pytest -q                                 # 全部测试
-uv run pytest -m "not slow" -q                   # 快速回归（跳过 slow 标记的重媒体用例，CI 默认）
+uv run pytest --ci-suite fast -x -q --timeout=120 # 常规离线回归（CI 默认，分片运行）
 uv run pytest tests/test_pipeline.py -q          # 单个文件
 uv run pytest tests/test_pipeline.py::test_name  # 单个测试
 uv run ruff check backend/src tests                      # lint（line-length 110，target py311）
