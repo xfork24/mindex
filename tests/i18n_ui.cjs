@@ -77,6 +77,13 @@ const base = process.env.MINDEX_I18N_TEST_URL || 'http://127.0.0.1:8027';
     assert.equal(await page.locator('#edit-notes').inputValue(),'未保存素材备注');await page.locator('#edit-close').click();
     // Settings modal contains dynamic label/input pairs: preserve the inputs and entered credentials.
     await page.goto(base + '/settings');await page.locator('#roles .role-row-head').first().waitFor();
+    // 部署字段规则由异步加载的脚本渲染：必须已渲染且不含 i18n 占位 token（\uE000z<id>\uE001）。
+    await page.waitForFunction(() => document.querySelectorAll('#deployment-field-rules li').length > 0);
+    const deploymentRules = await page.locator('#deployment-field-rules li').allTextContents();
+    assert(deploymentRules.every(text => !text.includes('\uE000')),
+           `部署字段规则泄漏 i18n 占位 token：${JSON.stringify(deploymentRules)}`);
+    assert(deploymentRules.some(text => /只读|保存后重启|迁移/.test(text)),
+           `部署字段规则缺少可读说明：${JSON.stringify(deploymentRules)}`);
     if(await page.locator('#roles .role-row-head').first().getAttribute('aria-expanded')!=='true')await page.locator('#roles .role-row-head').first().click();
     await page.locator('.new-profile-card').first().click();
     await page.locator('#pf-name').fill('我的中文档案');await page.locator('#pf-api-key').fill('test-key-not-a-secret');
@@ -123,6 +130,9 @@ const base = process.env.MINDEX_I18N_TEST_URL || 'http://127.0.0.1:8027';
       await page.goto(base+path);await page.waitForTimeout(300);let requests=0;const count=()=>requests++;
       page.on('request',count);await toggle('en');await toggle('zh');page.off('request',count);assert.equal(requests,0,path);
       await toggle('en');await page.setViewportSize({width:390,height:844});
+      // 任何页面都不得把 i18n 占位 token 泄漏到可见文本（用户会看到 z201 这类代号）。
+      assert.ok(!(await page.evaluate(() => document.body.textContent.includes('\uE000'))),
+                `${path} 泄漏 i18n 占位 token`);
       assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),path);
       await page.screenshot({path:`/tmp/mindex-i18n-${path.slice(1)||'search'}-mobile.png`,fullPage:true});
       await page.setViewportSize({width:1440,height:1000});
