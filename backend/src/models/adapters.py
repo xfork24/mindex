@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Protocol
 import httpx
 
 from mindex.shared.config import Config
+from mindex.shared.errors import ModelError
 from mindex.shared.trace import record
 from mindex.shared.types import Annotation, MaterialDigest, ScriptTemplate, ShotDraft, Utterance
 
@@ -27,10 +28,6 @@ if TYPE_CHECKING:
     from mindex.models.image_generators import ImageRequest
     from mindex.models.music_generators import Lyrics, MusicRequest
     from mindex.models.video_generators import VideoRequest, VideoStatus
-
-
-class ModelError(RuntimeError):
-    pass
 
 
 class AnalysisContentRejected(ModelError):

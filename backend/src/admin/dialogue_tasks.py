@@ -199,6 +199,9 @@ def dialogue_router(runtime, store, embedder=None):
 
     @router.post("/sources/{source_id}/dialogue", status_code=202)
     def start(source_id: str, options: DialogueOptions | None = None):
+        # force 只属于显式 CLI 重算；API/页面入口不接受（复用按实际输入判断）。
+        if options is not None and options.force:
+            raise HTTPException(422, "强制重算属于 CLI 显式操作，页面任务按复用规则跳过已完成结果")
         return manager.start(source_id, options or DialogueOptions())
 
     @router.get("/dialogue-tasks/{task_id}")

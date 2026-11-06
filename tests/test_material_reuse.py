@@ -130,14 +130,20 @@ def test_cli_asr_force_is_explicit(config, monkeypatch, command, force):
     assert calls == [('source', force)]
 
 
-def test_ui_options_reject_force():
-    from mindex.admin.dialogue_tasks import DialogueOptions
-    from mindex.admin.source_tasks import WorkOptions
+def test_ui_options_reject_force(config):
+    """force 只属于显式 CLI 重算：API/页面入口拒绝，人物选项仍在模型层拒绝。"""
+    from fastapi.testclient import TestClient
+
+    from mindex.api import create_app
     from mindex.persons.person_processing import PersonOptions
 
-    for options in (DialogueOptions, WorkOptions, PersonOptions):
-        with pytest.raises(ValueError):
-            options.model_validate({'force': True})
+    with pytest.raises(ValueError):
+        PersonOptions.model_validate({'force': True})
+    with TestClient(create_app(config)) as client:
+        for path in ('/api/admin/sources/source/shots', '/api/admin/sources/source/analysis',
+                     '/api/admin/sources/source/dialogue'):
+            response = client.post(path, json={'force': True})
+            assert response.status_code == 422, (path, response.text)
 
 
 def test_analysis_provenance_does_not_change_content_version(config):

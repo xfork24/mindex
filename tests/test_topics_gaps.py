@@ -157,33 +157,34 @@ def test_gaps_rest_cli_and_tools(seeded, tmp_path):
         assert "attachment" in exported.headers["content-disposition"] and "UTF-8''" in exported.headers["content-disposition"]
         assert exported.content.startswith("\ufeff".encode()) and "已采集" in exported.content.decode("utf-8-sig")
         assert client.get("/api/topics/profiles/tp_000000000000/gaps").status_code == 404
-    runner = CliRunner()
-    yaml_path = tmp_path / "config.yaml"
-    yaml_path.write_text(f"data_dir: {config.data_dir}\n", encoding="utf-8")
-    base = ["--config", str(yaml_path), "topics", "gaps"]
-    assert [g["visual"] for g in json.loads(runner.invoke(cli.app, [*base, "list", pid]).output)["items"]] == ["蓝色海面"]
-    assert json.loads(runner.invoke(cli.app, [*base, "reopen", gid]).output)["status"] == "open"
-    assert json.loads(runner.invoke(cli.app, [*base, "done", gid]).output)["status"] == "done"
-    target = tmp_path / "gaps.csv"
-    out = json.loads(runner.invoke(cli.app, [*base, "export", pid, "--output", str(target)]).output)
-    assert out["bytes"] == target.stat().st_size and target.read_bytes().startswith("\ufeff".encode())
-    assert "蓝色海面" in runner.invoke(cli.app, [*base, "export", pid]).output
+        # CLI 用独立配置文件，工具调用经进程内回环：全部在同一应用生命周期内按序执行。
+        runner = CliRunner()
+        yaml_path = tmp_path / "config.yaml"
+        yaml_path.write_text(f"data_dir: {config.data_dir}\n", encoding="utf-8")
+        base = ["--config", str(yaml_path), "topics", "gaps"]
+        assert [g["visual"] for g in json.loads(runner.invoke(cli.app, [*base, "list", pid]).output)["items"]] == ["蓝色海面"]
+        assert json.loads(runner.invoke(cli.app, [*base, "reopen", gid]).output)["status"] == "open"
+        assert json.loads(runner.invoke(cli.app, [*base, "done", gid]).output)["status"] == "done"
+        target = tmp_path / "gaps.csv"
+        out = json.loads(runner.invoke(cli.app, [*base, "export", pid, "--output", str(target)]).output)
+        assert out["bytes"] == target.stat().st_size and target.read_bytes().startswith("\ufeff".encode())
+        assert "蓝色海面" in runner.invoke(cli.app, [*base, "export", pid]).output
 
-    registry = build_registry()
+        registry = build_registry()
 
-    async def call(name, arguments):
-        mindex = MindexClient(app)
-        try:
-            spec = registry.get(name)
-            args = spec.parse(arguments)
-            ctx = ToolContext(client=mindex)
-            if spec.preview:
-                await spec.preview(args, ctx)
-            return await spec.execute(args, ctx)
-        finally:
-            await mindex.aclose()
+        async def call(name, arguments):
+            mindex = MindexClient(app)
+            try:
+                spec = registry.get(name)
+                args = spec.parse(arguments)
+                ctx = ToolContext(client=mindex)
+                if spec.preview:
+                    await spec.preview(args, ctx)
+                return await spec.execute(args, ctx)
+            finally:
+                await mindex.aclose()
 
-    out = asyncio.run(call("topic_gaps", {"topic_profile_id": pid, "status": "all"}))
-    assert "紫色天空 | 出现 2 次 | 已采集" in out.text and "gaps.csv" in out.text and out.focus["section"] == "gaps"
-    out = asyncio.run(call("update_topic_gap", {"gap_id": gid, "status": "open"}))
-    assert out.value["status"] == "open" and out.mutation == {"domain": "topics", "profile_id": pid}
+        out = asyncio.run(call("topic_gaps", {"topic_profile_id": pid, "status": "all"}))
+        assert "紫色天空 | 出现 2 次 | 已采集" in out.text and "gaps.csv" in out.text and out.focus["section"] == "gaps"
+        out = asyncio.run(call("update_topic_gap", {"gap_id": gid, "status": "open"}))
+        assert out.value["status"] == "open" and out.mutation == {"domain": "topics", "profile_id": pid}

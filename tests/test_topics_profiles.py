@@ -101,10 +101,10 @@ def test_coverage_profile_settings_rest_and_agent(config):
             assert client.patch(f'/api/topics/profiles/{pid}', json={'coverage': value}).status_code == 422
         assert client.get(f'/api/topics/profiles/{pid}').json()['coverage'] == {
             'min_similarity': 0.6, 'limit': 5, 'min_duration': 2}
-    preview, output = run_tool(app, 'save_topic_profile', {'topic_profile_id': pid, 'coverage': {'min_similarity': 0.7}})
-    assert output.value['coverage']['min_similarity'] == 0.7
-    assert any(change['label'] == '素材覆盖核验' for change in preview.changes)
-    with TestClient(app) as client:
+        # 工具调用经进程内回环访问应用：必须持有打开的应用上下文（lifespan 退出即关闭后端）。
+        preview, output = run_tool(app, 'save_topic_profile', {'topic_profile_id': pid, 'coverage': {'min_similarity': 0.7}})
+        assert output.value['coverage']['min_similarity'] == 0.7
+        assert any(change['label'] == '素材覆盖核验' for change in preview.changes)
         reset = client.patch(f'/api/topics/profiles/{pid}', json={'coverage': {}}).json()
         assert all(v is None for v in reset['coverage'].values())
     assert profiles.get_profile(Store(config.data_dir), pid)['hash'] == profile['hash']

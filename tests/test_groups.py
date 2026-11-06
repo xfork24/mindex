@@ -213,15 +213,16 @@ def test_rest_and_agent_mcp_crud(data):
         finally:
             await client.aclose()
 
-    group = asyncio.run(call("create_group", {"type": "source", "name": "城市"})).value
-    gid = group["id"]
-    asyncio.run(call("add_group_members", {"group_id": gid, "member_ids": ["a", "b"]}))
-    assert asyncio.run(call("get_group", {"group_id": gid})).value["member_count"] == 2
-    assert asyncio.run(
-        call("resolve_material_scope", {"source_group_ids": [gid], "source_ids": ["b", "c"]})
-    ).value["source_ids"] == ["b"]
-    asyncio.run(call("update_group", {"group_id": gid, "description": "保留原文"}))
+    # 工具调用经进程内回环访问应用：与 REST 断言共用同一个打开的应用上下文。
     with TestClient(app) as client:
+        group = asyncio.run(call("create_group", {"type": "source", "name": "城市"})).value
+        gid = group["id"]
+        asyncio.run(call("add_group_members", {"group_id": gid, "member_ids": ["a", "b"]}))
+        assert asyncio.run(call("get_group", {"group_id": gid})).value["member_count"] == 2
+        assert asyncio.run(
+            call("resolve_material_scope", {"source_group_ids": [gid], "source_ids": ["b", "c"]})
+        ).value["source_ids"] == ["b"]
+        asyncio.run(call("update_group", {"group_id": gid, "description": "保留原文"}))
         assert (
             client.get("/api/admin/groups", params={"type": "source"}).json()["items"][0]["description"]
             == "保留原文"
@@ -234,13 +235,13 @@ def test_rest_and_agent_mcp_crud(data):
         assert (
             client.patch(f"/api/admin/groups/{gid}", json={"name": "  新名称  "}).json()["name"] == "新名称"
         )
-    asyncio.run(call("remove_group_members", {"group_id": gid, "member_ids": ["a", "b", "c"]}))
-    with pytest.raises(ToolError, match="没有成员"):
-        asyncio.run(call("resolve_material_scope", {"source_group_ids": [gid]}))
-    asyncio.run(call("set_member_groups", {"type": "source", "member_id": "a", "group_ids": [gid]}))
-    asyncio.run(call("delete_group", {"group_id": gid}))
-    with pytest.raises(ToolError, match="已删除"):
-        asyncio.run(call("get_group", {"group_id": gid}))
+        asyncio.run(call("remove_group_members", {"group_id": gid, "member_ids": ["a", "b", "c"]}))
+        with pytest.raises(ToolError, match="没有成员"):
+            asyncio.run(call("resolve_material_scope", {"source_group_ids": [gid]}))
+        asyncio.run(call("set_member_groups", {"type": "source", "member_id": "a", "group_ids": [gid]}))
+        asyncio.run(call("delete_group", {"group_id": gid}))
+        with pytest.raises(ToolError, match="已删除"):
+            asyncio.run(call("get_group", {"group_id": gid}))
 
 
 def test_backup_partial_empty_groups_and_name_mapping(data, tmp_path):

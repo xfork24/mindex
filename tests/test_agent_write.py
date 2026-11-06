@@ -204,8 +204,9 @@ def test_no_approval_channel_fails_closed(config, job):
         sid = new_session(client)
         send(client, sid, "合并", context=page(job))
         events = wait_idle(client, sid)
-    assert results(events)[0]["error"]["code"] == "unavailable"
-    assert order(TestClient(app).get(f"/api/studio/jobs/{job}/workspace").json()) == SHOTS
+        assert results(events)[0]["error"]["code"] == "unavailable"
+        # API lifespan 退出即关闭后端上下文；终态核对须在同一应用生命周期内。
+        assert order(client.get(f"/api/studio/jobs/{job}/workspace").json()) == SHOTS
 
 
 def test_other_write_tools(agent):

@@ -7,6 +7,8 @@ assert.match(base, /^http:\/\/127\.0\.0\.1:/);
 (async () => {
   const browser = await chromium.launch({headless: true});
   const page = await browser.newPage();
+  // 四路并行回归时页面与模型服务争用 CPU：默认等待按满载情况设置，显式 timeout 的断言不受影响。
+  page.setDefaultTimeout(90000);
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
   page.on('dialog', (d) => { errors.push('dialog: ' + d.message()); d.dismiss(); });

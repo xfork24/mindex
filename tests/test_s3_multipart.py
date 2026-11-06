@@ -186,8 +186,9 @@ def test_signed_url_expires_and_media_conditions(s3_config, browser_endpoint):
         session = service.create("clip.mp4", 3, sha(b"abc"))
         service.part(session["id"], session["upload_token"], 1, io.BytesIO(b"abc"), 3, sha(b"abc"))
         asset = service.complete(session["id"], session["upload_token"])
+        # 可用性断言用宽限期签名（满载时签名到请求可能超过 1 秒）；1 秒签名只用于过期断言。
+        assert httpx.get(store.media.presign_get(asset["object_key"], expires=30)).status_code == 200
         url = store.media.presign_get(asset["object_key"], expires=1)
-        assert httpx.get(url).status_code == 200
         time.sleep(2.1)
         assert httpx.get(url).status_code == 403
         head = client.head(asset["url"])

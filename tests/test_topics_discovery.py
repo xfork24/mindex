@@ -425,36 +425,35 @@ def run_tool(app, name, arguments):
 def test_agent_run_and_card_tools(library):
     config, embedder, model, _ = library
     app = create_app(config, embedder, topic_llm=model)
+    # 工具调用经进程内回环访问应用：全部断言在打开的应用上下文内完成。
     with TestClient(app) as client:
         pid = setup(client)
-    preview, out = run_tool(app, "discover_topics", {"topic_profile_id": pid, "outline_count": 1})
-    assert "前 1 名" in preview.changes[2]["after"] and preview.warnings
-    assert out.watch_task == {"kind": "topics", "task_id": out.value["id"]}
-    assert build_registry().get("discover_topics").risk == "danger"
-    with TestClient(app) as client:
+        preview, out = run_tool(app, "discover_topics", {"topic_profile_id": pid, "outline_count": 1})
+        assert "前 1 名" in preview.changes[2]["after"] and preview.warnings
+        assert out.watch_task == {"kind": "topics", "task_id": out.value["id"]}
+        assert build_registry().get("discover_topics").risk == "danger"
         wait(client, out.value["id"])
-    _, out = run_tool(app, "get_topic_run", {"run_id": out.value["id"]})
-    assert "complete" in out.text
-    _, out = run_tool(app, "get_topic_run", {"topic_profile_id": pid})
-    assert "最近的挖掘任务" in out.text
-    _, out = run_tool(app, "list_topics", {"topic_profile_id": pid})
-    assert "新 2" in out.text and out.focus["section"] == "cards"
-    card = out.value["items"][0]["id"]
-    _, out = run_tool(app, "get_topic", {"card_id": card})
-    assert "关键画面" in out.text and out.focus == {"page": "topics", "section": "card", "profile_id": pid, "card_id": card}
-    _, out = run_tool(app, "topic_coverage", {"card_id": card})
-    assert "命中" in out.text and "缺口或待核验：紫色天空" in out.text and out.media and out.media[0]["url"].startswith("/api/")
-    preview, out = run_tool(app, "score_topic", {"card_id": card})
-    assert "重新计算" in preview.changes[0]["after"] and out.mutation["domain"] == "topics"
-    preview, out = run_tool(app, "draft_topic_outline", {"card_id": card})
-    assert out.value["outline"]
-    preview, out = run_tool(app, "update_topic", {"card_id": card, "status": "dismissed"})
-    assert preview.changes[0]["after"] == "dismissed" and out.value["status"] == "dismissed"
-    from mindex.agent.registry import ToolError
+        _, out = run_tool(app, "get_topic_run", {"run_id": out.value["id"]})
+        assert "complete" in out.text
+        _, out = run_tool(app, "get_topic_run", {"topic_profile_id": pid})
+        assert "最近的挖掘任务" in out.text
+        _, out = run_tool(app, "list_topics", {"topic_profile_id": pid})
+        assert "新 2" in out.text and out.focus["section"] == "cards"
+        card = out.value["items"][0]["id"]
+        _, out = run_tool(app, "get_topic", {"card_id": card})
+        assert "关键画面" in out.text and out.focus == {"page": "topics", "section": "card", "profile_id": pid, "card_id": card}
+        _, out = run_tool(app, "topic_coverage", {"card_id": card})
+        assert "命中" in out.text and "缺口或待核验：紫色天空" in out.text and out.media and out.media[0]["url"].startswith("/api/")
+        preview, out = run_tool(app, "score_topic", {"card_id": card})
+        assert "重新计算" in preview.changes[0]["after"] and out.mutation["domain"] == "topics"
+        preview, out = run_tool(app, "draft_topic_outline", {"card_id": card})
+        assert out.value["outline"]
+        preview, out = run_tool(app, "update_topic", {"card_id": card, "status": "dismissed"})
+        assert preview.changes[0]["after"] == "dismissed" and out.value["status"] == "dismissed"
+        from mindex.agent.registry import ToolError
 
-    with pytest.raises(ToolError, match="只有失败、中断或已取消"):
-        run_tool(app, "manage_topic_run", {"run_id": out.value["run_id"], "action": "retry"})
-
+        with pytest.raises(ToolError, match="只有失败、中断或已取消"):
+            run_tool(app, "manage_topic_run", {"run_id": out.value["run_id"], "action": "retry"})
 
 def test_watcher_topics_followup():
     from mindex.agent.watcher import TaskWatcher, watch_target

@@ -33,9 +33,10 @@
 `server.role` 为 `api`（缺省）或 `agent-gateway`；`server.form` 为 `auto`（缺省）、
 `local`、`pg-single` 或 `cluster`。显式形态与后端组合不符时，程序在连接或创建本地库前拒绝启动。
 `server.library_id` 缺省为 `null`，可填写期望的库 UUID；不匹配时拒绝连接。
-这些字段属于节点部署配置，不进入业务任务快照，变更需重启。
+`server.readiness_timeout_seconds`（缺省 5 秒）为 `/api/ready` 全部依赖探测的总期限；
+`/api/live` 只表示进程存活，不探测依赖。这些字段属于节点部署配置，不进入业务任务快照，变更需重启。
 
-pg-single 使用步骤：`MINDEX_DATABASE_DSN=postgres://… mindex migrate` 建库（唯一 DDL 入口，API/worker 启动只校验版本）→ 以 `database.backend: postgres` 启动。设置页「部署后端」分区只读展示当前形态与 library_id。PG 备份迁移使用 `mindex migration`；切片迁移与镜头边界修复的 SQLite 专属操作仍显式拒绝。集群剩余限制见 [scaling.md](scaling.md)。
+pg-single 使用步骤：`MINDEX_DATABASE_DSN=postgres://… mindex migrate` 建库（唯一 DDL 入口，API/worker 启动只校验版本）→ 以 `database.backend: postgres` 启动。设置页「部署配置」分区可读取/校验/保存当前节点配置文件（凭据只使用环境变量引用，需修订校验，身份与后端变更需重启，切库必须走迁移）；只读或无可写文件时明确返回只读状态。PG 备份迁移使用 `mindex migration`；切片迁移与镜头边界修复的 SQLite 专属操作仍显式拒绝。集群剩余限制见 [scaling.md](scaling.md)。
 
 ## `vector` — 向量后端（水平扩展阶段 2）
 
