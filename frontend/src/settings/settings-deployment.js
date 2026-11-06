@@ -8,11 +8,14 @@
   const reload = document.getElementById('deployment-reload');
   let revision = null;
   let dirty = false;
+  // msg() 返回待渲染的占位 token：写 DOM、confirm 之前必须经 setText/render，
+  // 否则用户会看到 z201 这类内部代号。
   const msg = (key) => MindexI18n.msg(`ui.${key}`);
-  const display = (text) => MindexI18n.setText(status, text);
+  const text = (key) => MindexI18n.render(msg(key));
+  const display = (value) => MindexI18n.setText(status, value);
   const report = (error) => display(MindexI18n.system(error.message));
   async function load() {
-    if (dirty && !window.confirm(msg('deployment_discard'))) return;
+    if (dirty && !window.confirm(text('deployment_discard'))) return;
     const data = await MindexApi.request('/api/settings/deployment');
     revision = data.revision;
     editor.value = JSON.stringify(data.config, null, 2);
@@ -24,7 +27,9 @@
     fields.replaceChildren();
     for (const [path, rule] of Object.entries(data.fields)) {
       const row = document.createElement('li');
-      row.textContent = `${path}: ${!rule.editable ? msg('deployment_field_locked') : rule.migration_required ? msg('deployment_field_migration') : msg('deployment_field_restart')}`;
+      const ruleText = !rule.editable ? 'deployment_field_locked'
+        : rule.migration_required ? 'deployment_field_migration' : 'deployment_field_restart';
+      MindexI18n.setText(row, `${path}: ${msg(ruleText)}`);
       fields.append(row);
     }
   }

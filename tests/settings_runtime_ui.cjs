@@ -51,6 +51,18 @@ const {chromium} = require(process.env.MINDEX_PLAYWRIGHT_MODULE || 'playwright')
   await page.reload();
   await page.waitForFunction(() => document.querySelector('#agent-runtime-status').textContent.includes('uv sync --extra dsh'));
   assert.equal(await page.locator('#agent-runtime').inputValue(), 'dsh');
+  // 部署字段规则必须显示可读文本：i18n 占位 token（如 z201）不得泄漏到页面上。
+  await page.waitForFunction(() => document.querySelectorAll('#deployment-field-rules li').length > 0);
+  const rules = await page.locator('#deployment-field-rules li').allTextContents();
+  assert(rules.every(text => !/z\d{2,}/.test(text)), `字段规则含 i18n 代号：${JSON.stringify(rules)}`);
+  assert(rules.some(text => /只读|保存后重启|迁移|Read only|Restart after saving|Migrate/.test(text)),
+         `字段规则缺少可读说明：${JSON.stringify(rules)}`);
+  await page.evaluate(() => MindexI18n.setLanguage('en'));
+  const english = await page.locator('#deployment-field-rules li').allTextContents();
+  assert(english.every(text => !/z\d{2,}/.test(text)), `英文切换后字段规则含 i18n 代号：${JSON.stringify(english)}`);
+  assert(english.some(text => /Read only|Restart after saving|Migrate/.test(text)),
+         `英文切换后字段规则未重渲染：${JSON.stringify(english)}`);
+  await page.evaluate(() => MindexI18n.setLanguage('zh'));
   assert.deepEqual(errors, []);
  } finally { await browser.close(); }
 })().catch(e => {console.error(e); process.exit(1);});
