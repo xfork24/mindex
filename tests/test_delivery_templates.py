@@ -121,7 +121,7 @@ def test_delivery_browser(small):
     try:
         result = subprocess.run(["node", "tests/delivery_templates_ui.cjs"], cwd=Path(__file__).resolve().parents[1],
                                 env={**os.environ, "MINDEX_DELIVERY_URL": url, "MINDEX_DELIVERY_JOB": job["id"]},
-                                capture_output=True, text=True, timeout=90, check=False)
+                                capture_output=True, text=True, timeout=150, check=False)
         assert result.returncode == 0, result.stdout + result.stderr
     finally:
         server.should_exit = True

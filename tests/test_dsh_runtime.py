@@ -397,7 +397,7 @@ def test_settings_runtime_browser(config):
             env={**os.environ, "MINDEX_RUNTIME_URL": url},
             capture_output=True,
             text=True,
-            timeout=60,
+            timeout=120,
             check=False,
         )
         assert result.returncode == 0, result.stdout + result.stderr

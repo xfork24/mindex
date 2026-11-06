@@ -11,7 +11,7 @@ const {chromium}=require(process.env.MINDEX_PLAYWRIGHT_MODULE || 'playwright');
  const browser=await chromium.launch({headless:true});
  const page=await browser.newPage({viewport:{width:1440,height:1000}});
  // 四路并行回归时页面与模型服务争用 CPU：默认等待按满载情况设置，显式 timeout 的断言不受影响。
- page.setDefaultTimeout(90000);
+ page.setDefaultTimeout(45000);
  const errors=[], records=[], issues=[];
  page.on('pageerror',error=>errors.push(error.message));
  await page.route('**/api/settings/voices/catalog*',route=>route.fulfill({json:{groups:[],library:[],default_voice:null,clone:{supported:false},error:null}}));

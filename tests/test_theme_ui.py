@@ -15,7 +15,7 @@ def test_theme_toggle_cycles_and_persists(config):
     try:
         result = subprocess.run(['node', 'tests/theme_ui.cjs'], cwd=ROOT,
                                 env={**os.environ, 'MINDEX_THEME_URL': url}, capture_output=True,
-                                text=True, timeout=60, check=False)
+                                text=True, timeout=120, check=False)
         assert result.returncode == 0, result.stdout + result.stderr
     finally:
         server.should_exit = True

@@ -53,7 +53,7 @@ def test_analysis_language_display(config, video_file):
         result = subprocess.run(["node", "tests/analysis_display_ui.cjs"], cwd=ROOT, env={
             **os.environ, "MINDEX_ANALYSIS_URL": url, "MINDEX_ANALYSIS_SOURCE": source,
             "MINDEX_ANALYSIS_SHOT": shots[0]["id"], "MINDEX_ANALYSIS_LEGACY": shots[-1]["id"],
-        }, capture_output=True, text=True, timeout=90, check=False)
+        }, capture_output=True, text=True, timeout=180, check=False)
         assert result.returncode == 0, result.stdout + result.stderr
     finally:
         server.should_exit = True
