@@ -6,7 +6,7 @@
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title data-i18n="[[0,&quot;ui.5e9681d20f56&quot;]]">Mindex · 设置</title><link rel="icon" href="/assets/shared/favicon.svg?v=8d7f9242de" type="image/svg+xml">
   <link rel="stylesheet" href="/assets/shared/style.css?v=87b28bc99b"><link rel="stylesheet" href="/assets/shared/agent-panel.css?v=4284eb0eb0"><link rel="stylesheet" href="/assets/settings/settings.css?v=fc2643e8cc">
-  <script src="/assets/shared/messages.js?v=2f770f7021" defer></script><script src="/assets/shared/i18n.js?v=e981ac227d" defer></script><script src="/assets/shared/api.js?v=f9ecd754db" defer></script><script src="/assets/shared/control-layout.js?v=8295190463" defer></script><script src="/assets/shared/marked.umd.js?v=b82b933440" defer></script><script src="/assets/shared/purify.min.js?v=cd37898f97" defer></script><script src="/assets/shared/agent-markdown.js?v=8f0018e90a" defer></script><script src="/assets/shared/agent-panel.js?v=2e639588c0" defer></script><script src="/assets/shared/feedback.js?v=4630718c9e" defer></script><script src="/assets/settings/settings.js?v=7d7186e77e" defer></script><script src="/assets/settings/tools.js?v=6cceb98ba7" defer></script>
+  <script src="/assets/shared/messages.js?v=6a8ef772ae" defer></script><script src="/assets/shared/i18n.js?v=e981ac227d" defer></script><script src="/assets/shared/api.js?v=f9ecd754db" defer></script><script src="/assets/shared/control-layout.js?v=8295190463" defer></script><script src="/assets/shared/marked.umd.js?v=b82b933440" defer></script><script src="/assets/shared/purify.min.js?v=cd37898f97" defer></script><script src="/assets/shared/agent-markdown.js?v=8f0018e90a" defer></script><script src="/assets/shared/agent-panel.js?v=2e639588c0" defer></script><script src="/assets/shared/feedback.js?v=4630718c9e" defer></script><script src="/assets/settings/settings.js?v=7d7186e77e" defer></script><script src="/assets/settings/tools.js?v=6cceb98ba7" defer></script>
 </head>
 <body class="settings">
   <header><a class="brand" href="/">m<span>index</span><i></i></a><nav class="page-nav" aria-label="页面导航" data-i18n-aria-label="ui.main_navigation"><a class="quiet nav-link" href="/search" data-i18n="[[0,&quot;ui.c9b1e68e3537&quot;]]">视频检索</a><a class="quiet nav-link" href="/" data-i18n="[[0,&quot;ui.b6fc3cef0bd0&quot;]]">创作</a><a class="quiet nav-link" href="/admin" data-i18n="[[0,&quot;ui.f517302fec0d&quot;]]">素材管理</a><a class="quiet nav-link" href="/persons" data-i18n="[[0,&quot;ui.0973ef28d791&quot;]]">人物库</a><a class="quiet nav-link" href="/settings" aria-current="page" data-i18n="[[0,&quot;ui.7debf9cb0372&quot;]]">设置</a></nav><div class="header-actions"><button class="quiet" id="reload" data-i18n="[[0,&quot;ui.c3147ba1672a&quot;]]" data-i18n-aria-label="ui.c3147ba1672a">刷新设置</button><button type="button" class="quiet theme-toggle" data-theme-toggle></button><button type="button" class="quiet language-switch" data-language-toggle aria-label="中文 / English"><span data-language="zh" lang="zh-CN">文</span><span class="language-divider" aria-hidden="true">/</span><span data-language="en" lang="en">En</span></button></div></header>
@@ -34,39 +34,6 @@
     <section aria-label="模型服务" data-i18n-aria-label="ui.bc56f948bb75">
       <div class="section-heading"><h2 data-i18n="[[0,&quot;ui.bc56f948bb75&quot;]]">模型服务</h2><span data-i18n="[[0,&quot;ui.fc130556f9a4&quot;]]">激活的档案立即对检索、分析与创作生效</span></div>
       <div id="roles" class="role-grid"></div>
-    </section>
-    <section aria-label="部署后端" data-i18n-aria-label="ui.0047e561269f">
-      <div class="role-row" id="deployment-row">
-        <button type="button" class="role-row-head" data-section="deployment" aria-controls="deployment-body" aria-expanded="false">
-          <span class="chevron">▸</span>
-          <strong class="role-row-title" data-i18n="[[0,&quot;ui.0047e561269f&quot;]]">部署后端</strong>
-          <span class="role-row-summary"><span class="role-row-effective" id="deployment-summary"></span></span>
-        </button>
-        <div class="role-row-body" id="deployment-body" hidden>
-          <p class="role-desc" data-i18n="[[0,&quot;ui.e34a940790fb&quot;]]">元数据库、媒体、向量、锁与队列的运行后端</p>
-          <p class="deployment-label" data-i18n="[[0,&quot;ui.deployment_summary&quot;]]">后端概要</p>
-          <dl id="deployment-status" class="runtime-row tuning-panel">
-            <div><dt data-i18n="[[0,&quot;ui.948b21de1dd6&quot;]]">运行形态</dt><dd id="deploy-form"></dd></div>
-            <div><dt data-i18n="[[0,&quot;ui.d3f0693c30e1&quot;]]">元数据库</dt><dd id="deploy-database"></dd></div>
-            <div><dt data-i18n="[[0,&quot;ui.c38b9b8eda92&quot;]]">媒体存储</dt><dd id="deploy-media"></dd></div>
-            <div><dt data-i18n="[[0,&quot;ui.fae158475ede&quot;]]">向量</dt><dd id="deploy-vectors"></dd></div>
-            <div><dt data-i18n="[[0,&quot;ui.a9e2a2864404&quot;]]">锁</dt><dd id="deploy-locks"></dd></div>
-            <div><dt data-i18n="[[0,&quot;ui.cd35413f05e7&quot;]]">队列</dt><dd id="deploy-queue"></dd></div>
-            <div><dt data-i18n="[[0,&quot;ui.4c7d6d34bfcf&quot;]]">素材库 ID</dt><dd id="deploy-library"></dd></div>
-          </dl>
-        <details class="deployment-config">
-          <summary id="deployment-editor-label" data-i18n="[[0,&quot;ui.deployment_editor&quot;]]">部署配置</summary>
-          <textarea id="deployment-editor" rows="16" spellcheck="false" style="width:100%;font-family:monospace" aria-describedby="deployment-editor-status" aria-labelledby="deployment-editor-label"></textarea>
-          <p id="deployment-editor-status" role="status"></p>
-          <button id="deployment-validate" type="button" data-i18n="[[0,&quot;ui.deployment_validate&quot;]]">校验部署配置</button>
-          <button id="deployment-save" type="button" data-i18n="[[0,&quot;ui.deployment_save&quot;]]">保存部署配置</button>
-          <button id="deployment-reload" type="button" data-i18n="[[0,&quot;ui.deployment_reload&quot;]]">重新读取部署配置</button>
-        </details>
-        <details class="deployment-rules"><summary data-i18n="[[0,&quot;ui.deployment_rules&quot;]]">字段生效规则</summary><ul id="deployment-field-rules"></ul></details>
-
-        <p class="muted" data-i18n="[[0,&quot;ui.e7fad659532e&quot;]]">后端选择在 config 文件中配置（database.backend 等），修改后需重启进程生效。</p>
-        </div>
-      </div>
     </section>
     <section aria-label="检索设置" data-i18n-aria-label="ui.3ac7159dd146">
       <div class="section-heading"><h2 data-i18n="[[0,&quot;ui.3ac7159dd146&quot;]]">检索设置</h2><span data-i18n="[[0,&quot;ui.eed5eb211ebd&quot;]]">独立渠道与旧版融合参数，保存即影响文字检索排序</span></div>
@@ -137,6 +104,40 @@
             </div>
             <div id="release-notice" class="notice" role="status" aria-live="polite"></div>
           </div>
+        </div>
+      </div>
+    </section>
+    <section aria-label="部署设置" data-i18n-aria-label="ui.deployment_section">
+      <div class="section-heading"><h2 data-i18n="[[0,&quot;ui.deployment_section&quot;]]">部署设置</h2><span data-i18n="[[0,&quot;ui.deployment_section_desc&quot;]]">元数据库、媒体、向量、锁与队列的运行后端，以及当前节点的配置文件</span></div>
+      <div class="role-row" id="deployment-row">
+        <button type="button" class="role-row-head" data-section="deployment" aria-controls="deployment-body" aria-expanded="false">
+          <span class="chevron">▸</span>
+          <strong class="role-row-title" data-i18n="[[0,&quot;ui.0047e561269f&quot;]]">部署后端</strong>
+          <span class="role-row-summary"><span class="role-row-effective" id="deployment-summary"></span></span>
+        </button>
+        <div class="role-row-body" id="deployment-body" hidden>
+          <p class="role-desc" data-i18n="[[0,&quot;ui.e34a940790fb&quot;]]">元数据库、媒体、向量、锁与队列的运行后端</p>
+          <p class="deployment-label" data-i18n="[[0,&quot;ui.deployment_summary&quot;]]">后端概要</p>
+          <dl id="deployment-status" class="runtime-row tuning-panel">
+            <div><dt data-i18n="[[0,&quot;ui.948b21de1dd6&quot;]]">运行形态</dt><dd id="deploy-form"></dd></div>
+            <div><dt data-i18n="[[0,&quot;ui.d3f0693c30e1&quot;]]">元数据库</dt><dd id="deploy-database"></dd></div>
+            <div><dt data-i18n="[[0,&quot;ui.c38b9b8eda92&quot;]]">媒体存储</dt><dd id="deploy-media"></dd></div>
+            <div><dt data-i18n="[[0,&quot;ui.fae158475ede&quot;]]">向量</dt><dd id="deploy-vectors"></dd></div>
+            <div><dt data-i18n="[[0,&quot;ui.a9e2a2864404&quot;]]">锁</dt><dd id="deploy-locks"></dd></div>
+            <div><dt data-i18n="[[0,&quot;ui.cd35413f05e7&quot;]]">队列</dt><dd id="deploy-queue"></dd></div>
+            <div><dt data-i18n="[[0,&quot;ui.4c7d6d34bfcf&quot;]]">素材库 ID</dt><dd id="deploy-library"></dd></div>
+          </dl>
+        <details class="deployment-config">
+          <summary id="deployment-editor-label" data-i18n="[[0,&quot;ui.deployment_editor&quot;]]">部署配置</summary>
+          <textarea id="deployment-editor" rows="16" spellcheck="false" style="width:100%;font-family:monospace" aria-describedby="deployment-editor-status" aria-labelledby="deployment-editor-label"></textarea>
+          <p id="deployment-editor-status" role="status"></p>
+          <button id="deployment-validate" type="button" data-i18n="[[0,&quot;ui.deployment_validate&quot;]]">校验部署配置</button>
+          <button id="deployment-save" type="button" data-i18n="[[0,&quot;ui.deployment_save&quot;]]">保存部署配置</button>
+          <button id="deployment-reload" type="button" data-i18n="[[0,&quot;ui.deployment_reload&quot;]]">重新读取部署配置</button>
+        </details>
+        <details class="deployment-rules"><summary data-i18n="[[0,&quot;ui.deployment_rules&quot;]]">字段生效规则</summary><ul id="deployment-field-rules"></ul></details>
+
+        <p class="muted" data-i18n="[[0,&quot;ui.e7fad659532e&quot;]]">后端选择在 config 文件中配置（database.backend 等），修改后需重启进程生效。</p>
         </div>
       </div>
     </section>
