@@ -14326,5 +14326,13 @@
   "ui.deployment_summary": {
     "zh": "后端概要",
     "en": "Backend summary"
+  },
+  "ui.deployment_section": {
+    "zh": "部署设置",
+    "en": "Deployment"
+  },
+  "ui.deployment_section_desc": {
+    "zh": "元数据库、媒体、向量、锁与队列的运行后端，以及当前节点的配置文件；后端与连接变更需重启进程",
+    "en": "Runtime backends for metadata, media, vectors, locks, and queues, plus this node's config file; backend and connection changes need a restart"
   }
 }

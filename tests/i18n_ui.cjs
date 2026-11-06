@@ -77,7 +77,9 @@ const base = process.env.MINDEX_I18N_TEST_URL || 'http://127.0.0.1:8027';
     assert.equal(await page.locator('#edit-notes').inputValue(),'未保存素材备注');await page.locator('#edit-close').click();
     // Settings modal contains dynamic label/input pairs: preserve the inputs and entered credentials.
     await page.goto(base + '/settings');await page.locator('#roles .role-row-head').first().waitFor();
-    // 部署区块：与「检索调参」同一套 role-row 折叠，默认折叠，展开状态跨刷新保留。
+    // 部署设置章节：与「检索调参」同一套 role-row 折叠，默认折叠，展开状态跨刷新保留。
+    assert.equal((await page.locator('section[aria-label="部署设置"] .section-heading h2').textContent()).trim(),
+                 '部署设置', '章节标题应为部署设置');
     const deploymentRow = page.locator('#deployment-row');
     const deploymentHead = deploymentRow.locator('.role-row-head');
     assert.equal(await deploymentRow.evaluate(node => node.classList.contains('is-open')), false, '部署后端应默认折叠');
