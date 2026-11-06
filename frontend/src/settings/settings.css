@@ -128,6 +128,14 @@
 .runtime-row p:empty{display:none}
 .runtime-row button{margin:0 0 0 auto;flex:0 0 auto}
 
+/* 部署后端概要：标签列与值列上下对齐，两行都贴列的右边缘；
+   dd 的浏览器默认 margin-inline-start 会把值推到标签右侧，这里归零。 */
+dl.runtime-row>div{display:flex;flex-direction:column;align-items:flex-end;min-width:0;gap:2px}
+dl.runtime-row dt{margin:0;font-size:12px;color:var(--muted)}
+dl.runtime-row dd{margin:0;text-align:right;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+details.deployment-summary>summary{cursor:pointer;font-size:12px;color:var(--muted);margin-bottom:8px}
+details.deployment-summary[open]>summary{margin-bottom:10px}
+
 .voice-list{list-style:none;margin:0 0 16px;padding:0;display:flex;flex-direction:column;gap:8px}
 
 .voice-item{border:1px solid var(--line-soft);border-radius:10px;padding:11px 13px;display:flex;flex-direction:column;gap:8px}
