@@ -277,6 +277,9 @@ function renderDeployment(data) {
   $('deploy-locks').textContent = info.locks;
   $('deploy-queue').textContent = info.queue;
   $('deploy-library').textContent = info.library_id || '—';
+  // 折叠时也能看到当前后端组合（与检索调参的摘要同一位置）。
+  $('deployment-summary').textContent = [info.form, info.database, info.media, info.vectors, info.locks, info.queue]
+    .filter(Boolean).join(' · ');
 }
 
 function normalizedWeights(values) {

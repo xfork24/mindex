@@ -101,7 +101,7 @@ const {chromium}=require(process.env.MINDEX_PLAYWRIGHT_MODULE || 'playwright');
    const row=page.locator('#roles .role-row').nth(i), head=row.locator('.role-row-head');if(await head.getAttribute('aria-expanded')!=='true')await head.click();
    await row.locator('.new-profile-card').click();await audit('model-profile-'+i);for(const provider of await page.locator('#pf-provider option').evaluateAll(nodes=>nodes.map(n=>n.value))){await page.locator('#pf-provider').selectOption(provider);await audit('model-profile-'+i+'-'+provider);}await page.locator('#profile-close').click();
   }
-  for(const section of ['tuning','voices','releases','services','browser','tools']){await page.locator(`[data-section=${section}]`).click();await audit('settings-'+section);}
+  for(const section of ['deployment','tuning','voices','releases','services','browser','tools']){await page.locator(`[data-section=${section}]`).click();await audit('settings-'+section);}
   await page.locator('#tool-new').click();await audit('settings-tool-editor');
   await page.locator('[data-section=voices]').click();
   if(!await page.locator('#voice-register').isVisible())await page.locator('[data-section=voices]').click();
