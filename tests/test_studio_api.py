@@ -6,10 +6,12 @@ import time
 import pytest
 from conftest import FixtureEmbedder, FixtureSpeaker, FixtureStoryboarder
 from fastapi.testclient import TestClient
+from filelock import Timeout
 
 from mindex.api import create_app
 from mindex.processing.indexing import IndexBuilder
 from mindex.processing.pipeline import Pipeline
+from mindex.shared import lock_backend
 from mindex.shared.storage import Store
 from mindex.studio import studio
 
@@ -40,7 +42,12 @@ def wait_step(client: TestClient, job_id: str, step: str, timeout: float = 30.0)
         detail = client.get(f"/api/studio/jobs/{job_id}").json()
         status = detail["job"]["steps"][step]["status"]
         if status in {"complete", "failed"}:
-            return detail
+            # 步骤终态先于 worker 收尾落盘；下一步须等执行槽与创作锁都释放。
+            try:
+                with lock_backend.named(client.config, "studio"):
+                    return detail
+            except Timeout:
+                pass
         time.sleep(0.02)
     raise AssertionError(f"步骤 {step} 在 {timeout}s 内未结束")
 
@@ -61,7 +68,8 @@ def make_legacy(client: TestClient, job_id: str) -> str:
 
 
 def create_legacy_job(client: TestClient, text: str, **body) -> str:
-    response = client.post("/api/studio/jobs", json={"text": text, **body})
+    # 老任务用固定标题，不启动新大纲任务的异步标题生成，避免争用步骤测试的创作锁。
+    response = client.post("/api/studio/jobs", json={"text": text, "title": "测试任务", **body})
     assert response.status_code == 201
     return make_legacy(client, response.json()["id"])
 

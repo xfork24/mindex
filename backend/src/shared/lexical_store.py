@@ -73,7 +73,8 @@ def build_lexical_index(store: Store, index_id: str, *, replace: bool = False) -
                               boundary + " ORDER BY segment_id LIMIT ?", (index_id, *args, _BATCH)).fetchall()
             if not rows:
                 break
-            segments, docs, terms = [], [], []
+            segments, docs = [], []
+            terms: list[tuple[str, str, str, str, int]] = []
             for row in rows:
                 import json
 

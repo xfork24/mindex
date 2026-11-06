@@ -65,8 +65,9 @@ class LocalVectorStore:
 
     backend = "chroma_local"
 
-    def __init__(self, collection):
+    def __init__(self, collection, *, owner: ChromaServerVectorStores | None = None):
         self.collection = collection
+        self._owner = owner
 
     def count(self) -> int:
         return self.collection.count()
@@ -265,9 +266,7 @@ class ChromaServerVectorStores:
             )
         else:
             collection = client.get_collection(name, embedding_function=None)
-        result = LocalVectorStore(collection)
-        result._owner = self
-        return result
+        return LocalVectorStore(collection, owner=self)
 
 
 class LibraryVectorClient:
