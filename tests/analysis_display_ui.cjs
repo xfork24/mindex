@@ -12,6 +12,25 @@ const {chromium}=require(process.env.MINDEX_PLAYWRIGHT_MODULE || 'playwright');
   page.on('pageerror',error=>errors.push(error.message));
   page.on('request',request=>{if(/\/api\/admin\/segments\/[^/]+\/details$/.test(request.url()))detailsRequests++;if(request.url().endsWith('/api/search/text'))searchRequests++;});
   async function choose(language){await page.evaluate(lang=>MindexI18n.setLanguage(lang),language);}
+  // 检索有 5 秒总预算，满载并行时可能返回可重试的 503：按产品语义重试一次，
+  // 仍失败时把响应状态与页面提示一起抛出，避免在空结果页干等。
+  async function search(query){
+   for(let attempt=1;attempt<=2;attempt+=1){
+    await page.locator('#query').fill(query);
+    const answered=page.waitForResponse(r=>r.url().endsWith('/api/search/text'),{timeout:45000}).catch(()=>null);
+    await page.locator('#search-button').click();
+    const response=await answered;
+    if(response&&response.ok()){
+     const shown=await page.locator('#results .card').first().waitFor({timeout:20000}).then(()=>true,()=>false);
+     if(shown) return response;
+    }
+    if(attempt===2){
+     const notice=(await page.locator('main').allTextContents()).join(' ').replace(/\s+/g,' ').slice(0,400);
+     throw new Error('搜索未返回结果（状态 '+(response?response.status():'无响应')+'）：'+notice);
+    }
+    await page.waitForTimeout(500);
+   }
+  }
   async function assertSelected(root,language){
    const text=(await root.locator('[data-analysis-text]').allTextContents()).join('\n');
    assert(text.length>0);
@@ -36,12 +55,7 @@ const {chromium}=require(process.env.MINDEX_PLAYWRIGHT_MODULE || 'playwright');
   await admin.locator('[data-analysis-text]').first().waitFor();
   for(const language of ['en','zh']){await choose(language);assert((await admin.textContent()).includes(language==='en'?'Legacy Chinese description':'旧版中文描述'));}
   await page.goto(base+'/search');
-  await page.locator('#query').fill('walking');await page.locator('#search-button').click();
-  // 等搜索响应落地（失败时优先显示请求错误，而不是在无卡片的页面上干等）。
-  const searchResponse=await page.waitForResponse(
-    response=>response.url().endsWith('/api/search/text'),{timeout:45000}).catch(()=>null);
-  assert(!searchResponse||searchResponse.ok(),'搜索请求失败');
-  await page.locator('#results .card').first().waitFor({timeout:45000});
+  await search('walking');
   // Compact English actions must remain readable at normal and narrow card widths.
   const resultCard=page.locator('#results .card').first();
   for(const language of ['en','zh']){
@@ -78,12 +92,7 @@ const {chromium}=require(process.env.MINDEX_PLAYWRIGHT_MODULE || 'playwright');
   }
   assert.equal(searchRequests,requestCount,'Language switching must not rerun search');
   await choose('en');await page.reload();
-  await page.locator('#query').fill('walking');await page.locator('#search-button').click();
-  // 等搜索响应落地（失败时优先显示请求错误，而不是在无卡片的页面上干等）。
-  const reloadedSearch=await page.waitForResponse(
-    response=>response.url().endsWith('/api/search/text'),{timeout:45000}).catch(()=>null);
-  assert(!searchResponse||searchResponse.ok(),'搜索请求失败');
-  await page.locator('#results .card').first().waitFor({timeout:45000});
+  await search('walking');
   await page.locator('#results .card').first().locator('.card-actions button').first().click();
   await details.locator('[data-analysis-text]').first().waitFor();await assertSelected(details,'en');
   // Default moment names, including details, follow the active language without renaming data.
