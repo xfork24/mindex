@@ -11,7 +11,9 @@ function save(){fs.writeFileSync(path.join(output,'browser-report.json'),JSON.st
 (async()=>{
  const browser=await chromium.launch({headless:true});
  try {
-  const page=await browser.newPage({viewport:{width:1440,height:1000}});report.errors=[];report.failedAssets=[];
+  const page=await browser.newPage({viewport:{width:1440,height:1000}});
+  // 四路并行回归时页面与模型服务争用 CPU：默认等待按满载情况设置，显式 timeout 的断言不受影响。
+  page.setDefaultTimeout(90000);report.errors=[];report.failedAssets=[];
   page.on('pageerror',e=>{report.errors.push(e.message);save()});
   page.on('response',r=>{if(r.url().includes('/assets/')&&r.status()!==200)report.failedAssets.push([r.url(),r.status()]);});
   await page.goto(base+'/admin');await page.locator('#add-source').click();

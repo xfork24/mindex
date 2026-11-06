@@ -120,5 +120,5 @@ def test_ui_regeneration_always_resumes_after_model_switch(config, video_file, m
     manager = SourceTasks(RuntimeConfig(changed, pipeline.store), pipeline.store)
     task = finished(manager, manager.start(sid, 'analysis', WorkOptions()))
     assert task['status'] == 'complete', task
-    with pytest.raises(ValueError):
-        WorkOptions.model_validate({'force': True})
+    # force 拒绝已前移到 API 边界（test_material_reuse::test_ui_options_reject_force）：
+    # 页面任务不再能在选项里表达强制重算，CLI 显式 --force 仍经同一账本。

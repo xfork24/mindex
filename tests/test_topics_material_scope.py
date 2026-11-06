@@ -114,14 +114,15 @@ def test_material_scope_rest_cli_and_agent(config, materials, tmp_path):
 
     store, _, first, _, _ = materials
     app = create_app(config)
+    # 工具调用经进程内回环访问应用：与 REST 断言共用同一个打开的应用上下文。
     with TestClient(app) as client:
         response = client.post('/api/topics/profiles', json={
             'name': '范围档案', 'domain': '科技', 'source_ids': ['b'], 'source_group_ids': [first]})
         assert response.status_code == 201, response.text
         pid = response.json()['id']
-    preview, out = run_tool(app, 'save_topic_profile', {'topic_profile_id': pid, 'source_ids': ['a']})
-    assert out.value['source_ids'] == ['a'] and out.value['source_group_ids'] == [first]
-    assert any(row['label'] == '素材范围' for row in preview.changes)
+        preview, out = run_tool(app, 'save_topic_profile', {'topic_profile_id': pid, 'source_ids': ['a']})
+        assert out.value['source_ids'] == ['a'] and out.value['source_group_ids'] == [first]
+        assert any(row['label'] == '素材范围' for row in preview.changes)
     config_path = tmp_path / 'scope.yaml'
     config_path.write_text(f'data_dir: {config.data_dir}\n')
     result = CliRunner().invoke(cli.app, ['--config', str(config_path), 'topics', 'profiles', 'update', pid,

@@ -6,6 +6,8 @@ const {chromium}=require(process.env.MINDEX_PLAYWRIGHT_MODULE || 'playwright');
  const browser=await chromium.launch({headless:true});
  try{
   const page=await browser.newPage();
+  // 四路并行回归时页面与模型服务争用 CPU：等待窗口按满载情况设置，不放宽任何断言。
+  page.setDefaultTimeout(90000);
   const errors=[];let detailsRequests=0,searchRequests=0;
   page.on('pageerror',error=>errors.push(error.message));
   page.on('request',request=>{if(/\/api\/admin\/segments\/[^/]+\/details$/.test(request.url()))detailsRequests++;if(request.url().endsWith('/api/search/text'))searchRequests++;});
@@ -35,7 +37,11 @@ const {chromium}=require(process.env.MINDEX_PLAYWRIGHT_MODULE || 'playwright');
   for(const language of ['en','zh']){await choose(language);assert((await admin.textContent()).includes(language==='en'?'Legacy Chinese description':'旧版中文描述'));}
   await page.goto(base+'/search');
   await page.locator('#query').fill('walking');await page.locator('#search-button').click();
-  await page.locator('#results .card').first().waitFor();
+  // 等搜索响应落地（失败时优先显示请求错误，而不是在无卡片的页面上干等）。
+  const searchResponse=await page.waitForResponse(
+    response=>response.url().endsWith('/api/search/text'),{timeout:90000}).catch(()=>null);
+  assert(!searchResponse||searchResponse.ok(),'搜索请求失败');
+  await page.locator('#results .card').first().waitFor({timeout:90000});
   // Compact English actions must remain readable at normal and narrow card widths.
   const resultCard=page.locator('#results .card').first();
   for(const language of ['en','zh']){
@@ -73,7 +79,11 @@ const {chromium}=require(process.env.MINDEX_PLAYWRIGHT_MODULE || 'playwright');
   assert.equal(searchRequests,requestCount,'Language switching must not rerun search');
   await choose('en');await page.reload();
   await page.locator('#query').fill('walking');await page.locator('#search-button').click();
-  await page.locator('#results .card').first().waitFor();
+  // 等搜索响应落地（失败时优先显示请求错误，而不是在无卡片的页面上干等）。
+  const reloadedSearch=await page.waitForResponse(
+    response=>response.url().endsWith('/api/search/text'),{timeout:90000}).catch(()=>null);
+  assert(!searchResponse||searchResponse.ok(),'搜索请求失败');
+  await page.locator('#results .card').first().waitFor({timeout:90000});
   await page.locator('#results .card').first().locator('.card-actions button').first().click();
   await details.locator('[data-analysis-text]').first().waitFor();await assertSelected(details,'en');
   // Default moment names, including details, follow the active language without renaming data.

@@ -371,7 +371,10 @@ def test_resolve_refs_consistent_with_resolve_shot(data):
 
 
 # Feature: agent-storyboard-detail-access, Property 7: 按引用读取与按列表读取结果相同
-@settings(max_examples=100, deadline=None)
+# data_too_large 是生成器体积的健康检查：本用例输入上限固定（max_shots=5），
+# 满载运行时偶发的体积告警不应中断属性验证。
+@settings(max_examples=100, deadline=None,
+          suppress_health_check=[HealthCheck.data_too_large, HealthCheck.too_slow])
 @given(data=st.data())
 def test_ref_details_equal_list_details(data):
     """**Validates: Requirements 2.6**"""

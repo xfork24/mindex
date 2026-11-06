@@ -531,7 +531,12 @@ def check_index(store: Store, index_id: str, *, config=None) -> list[str]:
         # Validate references against physical shots without materializing media.
         reference = references.get(snapshot['path'])
         thumbnail = (store.root / snapshot["thumbnail"]).resolve()
-        if not thumbnail.is_relative_to(store.root) or not thumbnail.is_file():
+        # 集群形态下本节点可能只有元数据：缩略图按权威登记判断存在，不强制本地缓存。
+        from mindex.shared import files
+
+        record = None if thumbnail.is_file() else files.pointer(store, snapshot["thumbnail"])
+        if (not thumbnail.is_relative_to(store.root)
+                or not (thumbnail.is_file() or (record is not None and record.get("size", 0) > 0))):
             issues.append(f"文件缺失：{snapshot['thumbnail']}")
         if reference and (reference['source_id'] != snapshot['source_id'] or
                           abs(reference['start'] - snapshot['start']) > 1e-6 or

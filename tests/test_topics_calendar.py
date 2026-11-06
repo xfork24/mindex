@@ -151,32 +151,33 @@ def test_calendar_cli_and_agent(config, tmp_path):
     with TestClient(app) as client:
         pid = client.post("/api/topics/profiles", json={"name": "科技号", "domain": "科技"}).json()["id"]
         sid = client.post(f"/api/topics/profiles/{pid}/sources", json={"kind": "calendar", "name": "日程"}).json()["id"]
-    yaml_path = tmp_path / "config.yaml"
-    yaml_path.write_text(f"data_dir: {config.data_dir}\n", encoding="utf-8")
-    runner = CliRunner()
-    base = ["--config", str(yaml_path), "topics", "sources", "import-calendar", sid]
-    events = tmp_path / "events.ics"
-    events.write_text(ics(vevent("发布会", f":{soon(1).replace('-', '')}")), encoding="utf-8")
-    assert json.loads(runner.invoke(cli.app, [*base, str(events)]).output)["total"] == 1
-    assert json.loads(runner.invoke(cli.app, [*base, "--sample", "tech", "--append"]).output)["total"] > 1
-    assert runner.invoke(cli.app, base).exit_code != 0  # 文件与样例二选一
+        # CLI 用独立配置文件，工具调用经进程内回环：在同一应用生命周期内按序执行。
+        yaml_path = tmp_path / "config.yaml"
+        yaml_path.write_text(f"data_dir: {config.data_dir}\n", encoding="utf-8")
+        runner = CliRunner()
+        base = ["--config", str(yaml_path), "topics", "sources", "import-calendar", sid]
+        events = tmp_path / "events.ics"
+        events.write_text(ics(vevent("发布会", f":{soon(1).replace('-', '')}")), encoding="utf-8")
+        assert json.loads(runner.invoke(cli.app, [*base, str(events)]).output)["total"] == 1
+        assert json.loads(runner.invoke(cli.app, [*base, "--sample", "tech", "--append"]).output)["total"] > 1
+        assert runner.invoke(cli.app, base).exit_code != 0  # 文件与样例二选一
 
-    registry = build_registry()
+        registry = build_registry()
 
-    async def call(arguments):
-        mindex = MindexClient(app)
-        try:
-            spec = registry.get("import_topic_calendar")
-            args = spec.parse(arguments)
-            ctx = ToolContext(client=mindex)
-            preview = await spec.preview(args, ctx)
-            return preview, await spec.execute(args, ctx)
-        finally:
-            await mindex.aclose()
+        async def call(arguments):
+            mindex = MindexClient(app)
+            try:
+                spec = registry.get("import_topic_calendar")
+                args = spec.parse(arguments)
+                ctx = ToolContext(client=mindex)
+                preview = await spec.preview(args, ctx)
+                return preview, await spec.execute(args, ctx)
+            finally:
+                await mindex.aclose()
 
-    preview, out = asyncio.run(call({"topic_source_id": sid, "sample": "history"}))
-    assert preview.changes[1]["after"] == "替换" and "已导入" in out.text and out.focus["section"] == "sources"
-    _, out = asyncio.run(call({"topic_source_id": sid, "text": f"date,title\n{soon(2)},智能助手导入", "append": True}))
-    assert out.value["imported"] == 1
+        preview, out = asyncio.run(call({"topic_source_id": sid, "sample": "history"}))
+        assert preview.changes[1]["after"] == "替换" and "已导入" in out.text and out.focus["section"] == "sources"
+        _, out = asyncio.run(call({"topic_source_id": sid, "text": f"date,title\n{soon(2)},智能助手导入", "append": True}))
+        assert out.value["imported"] == 1
     with pytest.raises(Exception, match="二选一"):
         registry.get("import_topic_calendar").parse({"topic_source_id": sid})

@@ -308,10 +308,15 @@ def source_tasks_router(runtime, store, embedder=None):
 
     @router.post("/sources/{source_id}/shots", status_code=202)
     def shots(source_id: str, options: WorkOptions | None = None):
+        # force 只属于显式 CLI 重算；API/页面入口不接受（复用按实际输入判断）。
+        if options is not None and options.force:
+            raise HTTPException(422, "强制重算属于 CLI 显式操作，页面任务按复用规则跳过已完成结果")
         return manager.start(source_id, "shots", options or WorkOptions())
 
     @router.post("/sources/{source_id}/analysis", status_code=202)
     def analysis(source_id: str, options: WorkOptions | None = None):
+        if options is not None and options.force:
+            raise HTTPException(422, "强制重算属于 CLI 显式操作，页面任务按复用规则跳过已完成结果")
         return manager.start(source_id, "analysis", options or WorkOptions())
 
     @router.post("/sources/{source_id}/publish", status_code=202)

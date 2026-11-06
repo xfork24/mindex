@@ -103,6 +103,22 @@
 
 同一区块下的“AI 动画录制组件”检查 Playwright 的 Chromium headless shell 是否已安装（目录取 `PLAYWRIGHT_BROWSERS_PATH`，桌面版为用户数据目录的 `browsers/`），未安装时可一键安装（后台运行 `python -m playwright install --only-shell chromium`，显示进度与结果）。创作页 AI 动画阶段的详情提供“管理 AI 动画录制组件”入口（`/settings#browser`）。
 
+## 部署配置（设置页）
+
+设置页的「部署配置」编辑器直接读取/校验/保存**当前节点的配置文件**（`server`、`database`、
+`vector`、`storage`、`queue`、`locks`、`gpu`、`uploads` 与 `agent.gateway_url`）。模型与检索
+调参继续走原设置接口热更新；部署字段保存后需重启节点生效。
+
+- 返回配置内容、文件修订（sha256）、字段可编辑性与重启/迁移要求；`server.library_id`
+  固定为当前库身份，不能经设置页切库——切换必须走迁移、验证与激活流程。
+- 凭据只接受**已存在的环境变量引用**（如 `database.postgres.dsn_env`、
+  `storage.s3.access_key_id_env`）；不接受明文凭据、带用户名/密码/查询串的 URL，
+  保存与回显都不会带出管理凭据明文。
+- 保存使用修订校验（先 `POST /api/settings/deployment/validate` 预检，再带修订 `PUT`）；
+- 无配置文件（如内存配置/托管环境）或文件只读时返回明确只读状态，保存返回 409。
+- 部署组合变更会做完整 Config 校验与 `deployment_form` 组合校验（连接池总预算、
+  资源组声明等），后端/连接目标变更标记 `migration_required`。
+
 ## 密钥安全
 
 - API Key 明文存 `metadata.sqlite3` 的 `model_profiles.api_key`（本机单用户工具的务实选择）。
@@ -132,7 +148,11 @@
 | PATCH | `/api/settings/local-services/{name}` | 只接受 `autostart`、`stop_on_exit` |
 | POST | `/api/settings/local-services/stop-on-exit` | 停止所有“退出时停止”且由本应用启动的服务（桌面版退出前调用） |
 | GET / POST | `/api/settings/animation-browser` · `/install` | AI 动画录制组件的安装状态 / 后台安装（安装中再次请求 409） |
+| GET | `/api/settings/deployment` | 部署配置视图：内容、修订、字段可编辑性/重启/迁移要求、只读原因 |
+| POST | `/api/settings/deployment/validate` | 校验部署补丁（组合、凭据引用、连接预算）；返回变更字段与边界，不写盘 |
+| PUT | `/api/settings/deployment` | 修订校验后原子保存（临时文件 + rename）；修订冲突 409 |
 | GET | `/api/health` | 轻量就绪检查 `{version, pid, data_dir, busy, tasks}`（桌面外壳轮询；受访问令牌保护，不读素材表、不探测模型服务） |
+| GET | `/api/live` · `/api/ready` | liveness 仅进程存活；readiness 有界逐项探测数据库/存储/向量/迁移/准入/网关，失败 503 并列出检查项 |
 
 人物配置 `person.frame_interval`（设置页“间隔帧数”）：整数且 ≥1，默认 15。每个分镜从首个有效帧开始每隔该帧数抽取，保留实际 PTS；1 表示逐帧。旧 `person.fps` 仅兼容旧配置，不叠加抽帧限制。
 

@@ -1,29 +1,31 @@
 # 水平扩展改造盘点
 
-## 当前事实（2026-11-05，北京时间）
+## 当前事实（2026-11-06，北京时间）
 
 需求依据：[原方案](horizontal-scaling-plan.md)、[备份迁移方案](backup-migration-plan.md)、
-[增强交付方案](horizontal-scaling-enhancement-plan.md)。下文阶段记录保留为历史，不能作为当前验收结论。
+[增强交付方案](horizontal-scaling-enhancement-plan.md)。剩余实现与接入按
+[剩余能力闭合计划](horizontal-scaling-completion-plan.md) 逐批关闭；当前状态以
+[需求矩阵](horizontal-scaling-delivery-matrix.md) 与
+[实施验证记录](../docs/scaling-completion-verification.md) 为准。下文阶段记录保留为历史，不能作为当前验收结论。
 
 | 调用点 | 当前实现/集成事实 | 验证入口 | 剩余约束 |
 |---|---|---|---|
-| 业务 Store 构造 | `Store.open(config)`；Studio 音乐复制已修正；PG 不自动启动本机服务 | `scripts/check-scaling-boundaries.py`、`test_scaling_boundaries.py` | 静态白名单仅覆盖数据库构造，媒体权威性另验 |
-| 部署组合/身份 | 显式拒绝降级；S3/Chroma namespace、下载/查询/人物/PG 快照缓存绑定库身份 | `test_scaling_foundation.py`、`test_backend_identity.py` | 全上下文生命周期和全部节点文件缓存仍须收敛 |
-| 连接池 | 查询/控制容量与超时独立生效，校验总预算，进程退出关池 | `test_scaling_foundation.py` | 多节点总连接数仍须按部署副本数规划 |
-| PG 升级 | v15 基线只用于空库；v16–18 追加、校验值与连续性检查 | `test_scaling_foundation.py`、`test_pg_backend.py` | 新旧 API/worker 混合版本与滚动升级仍待演练 |
-| source/dialogue/person/topic | 创建/重试显式原子入队，领取绑定 attempt，取消/回收/终态同步账本 | `test_scaling_correctness.py`、`test_scaling_foundation.py` | Studio/index 持久队列、周期键、外部副作用恢复仍待完成 |
-| 执行 fencing | 事务前/写入/显式 commit/退出复验，处理线程池携带执行凭证 | `test_scaling_foundation.py` | 真正双机 SIGSTOP 与控制通道故障仍待验收 |
-| 节点 staging | 文件锁协调跨进程预约与 pin；OS owner 锁释放后回收 | `test_staging.py` | 全部业务输出与临时空间预约尚未覆盖 |
-| 共享媒体读取 | 解析 `shared_files` 指针；管理端响应与镜头合成全程持 pin；墓碑拒绝旧缓存 | `test_cluster_process_flow.py`、`test_scaling_correctness.py` | 其他长处理与 HTTP 入口尚待逐项接入上下文 |
-| Studio/权威文件 | 现有 shared_files/CAS 保留 | `test_scaling_correctness.py` | 目录 manifest 原子发布与全调用点闭包仍待实现 |
-| 检索投影 | 人物条件复用 eligible 投影/统计；PG 人物证据按身份和素材读取；命中水合只读所需 curation；PG 预热跳过全快照/map | `test_persons.py`、`test_persons_pg.py`、`test_scaling_foundation.py` | eligible 全列表、缺派生表回退、缓存字节预算与规定容量闸门仍未解决 |
-| 迁移 | 元数据与日志原子提交；资源按源库 UUID 装载；显式旧 namespace 导出；回本地恢复逻辑视图 | `test_migration_crash_recovery.py`、`test_backend_identity.py` | 样本 local→共享→local 已验证；分对象断点、完整闭包、运行中身份切换及灾备仍待完成 |
-| 桌面远程 | 系统加密存储与明文迁移；非法配置明确报错；菜单可修复/清除 | `desktop/test/lib.test.js` | 三平台实际密钥环与安装包远程全流程待验收 |
-| 四进程集成 | 两 API、两 worker、不同节点目录实际上传/分镜处理/跨 API 读取，镜头摘要核对 | `test_cluster_process_flow.py` | 仍是一台主机的工程验收，不替代双机与吞吐门槛 |
+| 业务 Store 构造 | `Store.open(config)`；集群路径经 `open_context`；白名单外的数据库构造被静态与运行期拒绝 | `scripts/check-scaling-boundaries.py`、`test_scaling_boundaries.py` | 无（静态与运行期双重拒绝已接入） |
+| 部署组合/身份 | 显式拒绝降级；全部缓存绑定库 UUID 与后端身份；上下文/借出组件显式关闭 | `test_scaling_foundation.py`、`test_backend_identity.py`、`test_backend_lifecycle.py` | 部署侧按副本数核算连接预算 |
+| 连接池 | 查询/控制容量与超时独立生效，校验总预算，进程退出关池；池耗尽时 readiness 区分两池 | `test_scaling_foundation.py`、`test_readiness_budget.py` | 部署核算多节点总连接数 |
+| PG 升级 | v15 基线只用于空库；v16–25 按序追加；运行协议与库身份准入 | `test_scaling_foundation.py`、`test_pg_backend.py` | 混合协议版本不支持滚动运行（停机统一升级） |
+| 六类持久任务 | 创建/重试显式原子入队，领取绑定 attempt，取消/回收/终态同步账本；前台 CLI 入口共用账本 | `test_scaling_correctness.py`、`test_scaling_completion.py` | 提供商真实幂等/限流独立实测 |
+| 执行 fencing | 事务前/写入/显式 commit/退出复验；真实进程 kill -9/SIGSTOP 超租约与旧进程恢复经故障矩阵验证 | `test_scaling_foundation.py`、`test_scaling_fault_matrix.py` | 双机 SIGSTOP/断连仍待实测 |
+| 节点 staging | 跨进程预约/pin、输出与临时空间写前预约、隐藏残留回收 | `test_staging.py`、`test_object_coordination.py` | 无 |
+| 共享媒体读取 | 解析 `shared_files` 指针；全部长处理与 HTTP 入口经物化上下文持 pin | `test_cluster_process_flow.py`、`test_media_delivery.py` | 无 |
+| Studio/权威文件 | 目录 manifest 原子发布（If-Match → 409）、统一权威资源登记、pin/GC 协调删除 | `test_scaling_correctness.py`、`test_object_coordination.py`、`test_scaling_fault_matrix.py` | 无 |
+| 检索投影 | eligible 分页关系与 SQL 聚合；条件可下推即下推；缓存与查询总期限预算 | `test_persons_pg.py`、`test_query_budget.py`、`test_sql_characteristics.py` | 规定容量/尾延迟/真实模型质量独立实测 |
+| 迁移 | 九阶段持久账本、身份绑定、激活门禁、秘密裁剪与闭包核对；local→cluster→local 往返一致 | `test_migration_stages.py`、`test_migration_crash_recovery.py` | 代表性规模 RPO/RTO 独立实测 |
+| 桌面远程 | 系统加密存储与明文迁移；非法配置明确报错；菜单可修复/清除；实际应用凭据清除演练 | `desktop/test/lib.test.js`、`artifacts/run-credential-clear-macos-acceptance.py` | Windows/Linux 密钥环与安装包独立实测 |
+| 多进程集成 | 两 API、两 worker、单网关真实进程；上传→执行→跨节点读取、故障与恢复矩阵 | `test_cluster_process_flow.py`、`test_scaling_fault_matrix.py`、`scripts/verify-scaling.py --suite faults` | 双机与吞吐门槛独立实测 |
 
-本机隔离环境的原始结果由 `scripts/verify-scaling.py` 写入 `artifacts/scaling/`，任何跳过即失败。
-该脚本不替代双机、容量、模型质量和安装包实测。最新记录见
-[增强实施验证记录](../docs/scaling-enhancement-verification.md)。
+本机隔离环境的原始结果由 `scripts/verify-scaling.py` 写入 `artifacts/scaling/`，任何跳过即失败；
+依赖断连演练经 `--suite faults` 执行。该脚本不替代双机、容量、模型质量和安装包实测。
 
 ## 历史：阶段 0 盘点（2026-11-03）
 

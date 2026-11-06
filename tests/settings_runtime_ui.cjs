@@ -4,6 +4,8 @@ const {chromium} = require(process.env.MINDEX_PLAYWRIGHT_MODULE || 'playwright')
  const browser = await chromium.launch({headless: true});
  try {
   const page = await browser.newPage();
+  // 四路并行回归时页面与模型服务争用 CPU：默认等待按满载情况设置，显式 timeout 的断言不受影响。
+  page.setDefaultTimeout(90000);
   const errors = [];
   page.on('pageerror', e => errors.push(e.message));
   const base = process.env.MINDEX_RUNTIME_URL;

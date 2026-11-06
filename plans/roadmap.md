@@ -135,7 +135,7 @@ flowchart LR
 
 ## M5 素材容量水平扩展
 
-状态：实现与集成继续推进，尚未完成集群交付。共享后端、四类持久任务、四进程素材链路与桌面远程基础已接入并有组件证据；Studio/index 持久执行、目录 manifest、上传会话、完整权威文件/GC、检索容量和迁移闭包等代码项目仍未关闭。当前范围以 [增强交付方案](horizontal-scaling-enhancement-plan.md) 为准；事实与证据见 [盘点](horizontal-scaling-inventory.md) 和 [验证记录](../docs/scaling-enhancement-verification.md)。
+状态：剩余实现与接入已按[剩余能力闭合计划](horizontal-scaling-completion-plan.md)逐批关闭（生命周期与准入、权威资源与 GC、双路径上传、检索预算、持久迁移、网关/设置/桌面与文档）；单机可执行的功能、并发、恢复与故障验收见[实施验证记录](../docs/scaling-completion-verification.md)。双机、规定大容量、真实模型、Windows/Linux 安装与系统密钥环实测保持独立验收状态，不以组件或小样本证据标记完成。事实与证据见 [盘点](horizontal-scaling-inventory.md) 与 [需求矩阵](horizontal-scaling-delivery-matrix.md)。
 
 **目标**：把「单机单进程 + 本地 data_dir」扩展为可多机部署的集群形态——PostgreSQL 元数据、S3 兼容媒体、分布式锁与 PG 队列多 worker、Chroma 服务；桌面保留本地模式并支持远程 API 客户端，不分发 PG/S3 管理凭据。agent 保留单实例网关，NFS、存储分片/HA 与 agent 多实例不纳入本轮必交付。
 
@@ -146,6 +146,6 @@ flowchart LR
 ```text
 M1（已完成） ──► M3 后期（已完成；依赖文件型画面、画幅）
      └──────► M2 选题（已完成，依赖文案模板）
-M4 桌面端：macOS 已完成；Windows/Linux 已完成（锁跨平台、二进制定位、用户数据目录、冻结兼容等前置条件均已落地）
-M5 水平扩展（实现/集成/验收均有未关闭项目）：抽象底座 → PG 元数据 ∥ 共享媒体 → 检索 / 分布式执行 → 集群与恢复 → 桌面远程与最终验收
+M4 桌面端：macOS 实测完成；Windows/Linux 代码与构建就绪，安装包实测保持独立验收
+M5 水平扩展（实现/接入已关闭；单机故障验收完成）：双机、容量、真实模型与跨平台安装按原门槛独立验收
 ```

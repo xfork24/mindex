@@ -195,3 +195,61 @@ PG/SQLite 业务写入与领取统一拒绝未激活目标；API 可启动诊断
 修复 PG Studio 事件 id/物理 rowid 的规范序与恢复后的序列推进。Ruff、构造边界及链接通过。
 新迁移模块 Mypy 使用 follow-imports=skip 定向通过；普通传递检查仍报告旧依赖模块 11 项类型错误，未据此宣称全树类型检查通过。
 第五批定向实现/接入验收完成；统一故障矩阵与最终冻结复验随第六批继续。
+
+## 第六批：网关、设置、桌面与统一故障验收
+
+计划要求的实现与接入在本批闭合：网关 SSE 事件身份与 outbox 先落盘后确认、readiness 有界逐项
+探测、设置页部署配置读写、桌面凭据清除、统一单机故障矩阵与依赖断连演练；文档同步更新。
+
+统一故障矩阵 `tests/test_scaling_fault_matrix.py` 在真实两 API、两 worker、单网关、PG、MinIO、
+Chroma 上执行八项演练：SSE 事件 id 与 Last-Event-ID 续传、网关 SIGKILL 后按持久回执重放
+（可见事件身份不变、无重复）、附件与 MCP 断流后恢复、worker `kill -9` 回收重派、`SIGSTOP`
+超租约后旧进程恢复禁止提交、执行中取消竞争、发布事务崩溃后指针原子性、双 API 真实目录修订 CAS。
+worker 增加 `--task-ttl/--renew-interval`（仅故障演练用）以缩短租约观察窗口。
+
+依赖断连演练由 `scripts/verify-scaling.py --suite faults` 创建两 API、单网关与一次性 PG/MinIO/Chroma，
+逐项停止并恢复：PG 停止只使数据库（查询/控制/迁移/准入）检查失败；MinIO 停止只使 `storage.bucket`
+失败；Chroma 停止只使 `vectors.server` 失败；每项恢复后连续三次全绿才记为恢复；网关 SIGKILL 时
+助手返回 503 而业务 API 与 liveness 不受影响，重启后恢复。liveness 始终只表示进程存活。
+
+原始证据目录 `artifacts/scaling-completion-batch6/`：
+
+- `local-first/`：完整离线回归 3096 项，33 失败（保留）。失败暴露以下实现缺陷，均已修复：
+  设置页部署脚本缺少 `defer` 导致全站 `MindexI18n is not defined`；`shared/admission` 反向依赖
+  `models.adapters`（`ModelError` 已下沉 `shared/errors.py`，`models` 侧重导出）；API 接受 CLI
+  专属 `force`（改为 422，强制重算仅存在于显式 CLI）；SQLite v24/v25 迁移对 `user_version=0`
+  快照非幂等（按列存在性跳过 `ADD COLUMN`）；`Persons.confirm_import` 的 `TransactionStore`
+  缺少 `pg/backend/cache_identity`，导致迁移门闩与权威登记取不到后端；集群 `check_index` 只查
+  本地缩略图缓存（改为同时接受权威登记）；多个测试在应用 lifespan 之外经回环调用工具/MCP
+  （改为同一应用上下文内断言）；召回签名纳入了查询期限/分页/缓存预算等不改变语义的旋钮
+  （改为语义字段投影，四个 `recall` 快照条目随之更新，其余阶段签名逐字节不变）。
+- `backends-first/`：真实后端 285 项，8 失败，全部为新故障矩阵的测试缺陷（账本引用误当队列主键、
+  附件 id 取裸 token、桥接轮询竞态、`changes/log` 数据已解析、激活演练使用空索引）。
+- `backends-second/`：285 项，2 失败（保留）：签名 URL 用 1 秒有效期做可用性断言在满载下临界；
+  `SIGSTOP` 演练回收窗口不足。均为测试边距问题，断言语义未放宽。
+- `backends-third/`：**285 通过、零失败/错误/跳过**，源码摘要一致；含新增故障矩阵八项。
+- `faults/`：依赖断连演练通过；六项组件测试通过、零跳过（池耗尽时 readiness 区分查询/控制池、SSE Last-Event-ID 续传、部署配置修订冲突/只读/凭据引用三项）；各步耗时与逐项检查结果写入 `report.json`。
+- `cpu/`：真实 CPU 吞吐 1 worker 77.67 s、2 worker 41.51 s，**1.8713 倍**（门槛 1.5），
+  两个阶段各 88 个镜头、8 个对象摘要逐一核对一致。
+- 桌面：冻结后端按当前源码重建并通过 `check-desktop-sidecar.py`（含中文字幕烧录、隔离 PATH）；
+  `.app/.dmg/.zip` 重新打包且 `codesign --verify --deep --strict` 通过；
+  凭据清除演练见 `artifacts/scaling-credential-clear-macos-app/`：系统 `safeStorage` 加密
+  落盘（0600、无明文）、带认证的远程模式、清除后回到本地模式、隔离目录无令牌/密文残留。
+- `local-second/`：3 失败（保留）；均为工具调用越过应用 lifespan 的用例，改为在同一上下文内断言后通过。
+- `local-final/`：3096 项、2 失败（保留）：`delivery_templates` 页面脚本在满载下晚到、
+  `test_agent_shot_details` 的 hypothesis `data_too_large` 健康检查。前者改为等待按钮状态稳定，
+  后者按生成器上限抑制该健康检查；两处单独重跑通过。
+- `local-final2/`：3096 项、1 失败（保留）：搜索页在四路并行满载下等待结果卡片超时。
+  该脚本改为等待 `/api/search/text` 响应后再断言，并为主要 UI 脚本设置满载默认等待（显式
+  timeout 的断言不受影响）。上述三处均为测试稳定性问题，未放宽任何断言语义。
+- `local-final3/`：**3096 项、零失败/错误**，189 个环境跳过（可选运行时、外部后端与平台分支），
+  源码摘要 `4d6dfbcc0006090b18cf53878ca7b6af30f0c5d26972b29fff364a6bcc19d61d` 与结束时一致。
+
+本批修复的运行时缺陷（非测试问题）：PG 重启后连接池残留失效连接导致 readiness 持续 503，
+池现在在检出时执行探针并丢弃失效连接；集群 `check_index` 的缩略图存在性判断不认权威登记，
+冷节点激活会误报文件缺失；`faulthandler_timeout=60` 在长专项中与 `cancel_dump_traceback_later`
+争锁导致挂起，验收入口改为 600 秒。演练环境同时修正：PG 使用命名卷（`--tmpfs` 在容器
+`stop/start` 后会重新 initdb）、容器使用固定宿主端口（`stop/start` 会重新分配随机端口）。
+
+未在本轮通过的部分保持原状态：双机、规定大容量、真实模型、Windows/Linux 安装与系统密钥环实测
+仍为独立验收；代表性规模 RPO/RTO、提供商真实幂等/限流同理。

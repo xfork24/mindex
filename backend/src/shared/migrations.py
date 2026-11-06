@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import sqlite3
 from collections.abc import Callable, Sequence
 
@@ -28,14 +29,25 @@ def user_version(conn: sqlite3.Connection) -> int:
     return int(conn.execute("PRAGMA user_version").fetchone()[0])
 
 
-def execute_script(conn: sqlite3.Connection, script: str) -> None:
-    """在当前事务内逐条执行多语句脚本（替代会隐式提交的 ``executescript``）。"""
+def execute_script(conn: sqlite3.Connection, script: str, *, skip_existing_columns: bool = False) -> None:
+    """在当前事务内逐条执行多语句脚本（替代会隐式提交的 ``executescript``）。
+
+    ``skip_existing_columns`` 时按列存在性跳过 ``ALTER TABLE … ADD COLUMN``：备份/装载等
+    路径会把快照的 ``user_version`` 重置为 0 重跑迁移，无条件补列会因重复列名失败。
+    """
     statement = ""
     for piece in script.split(";"):
         statement += piece + ";"
         if sqlite3.complete_statement(statement):
-            if statement.strip(" \t\r\n;"):
-                conn.execute(statement)
+            body = statement.strip(" \t\r\n;")
+            if body:
+                skip = False
+                if skip_existing_columns:
+                    match = re.fullmatch(r"ALTER TABLE (\w+) ADD COLUMN (\w+) .+", body, re.S)
+                    if match and match[2] in {row[1] for row in conn.execute(f"PRAGMA table_info({match[1]})")}:
+                        skip = True
+                if not skip:
+                    conn.execute(statement)
             statement = ""
     if statement.strip(" \t\r\n;"):
         raise ValueError("迁移脚本末尾有不完整的 SQL 语句")

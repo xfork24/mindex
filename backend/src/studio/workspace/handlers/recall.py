@@ -11,6 +11,12 @@ from ..plans import needs_recall
 from ..stages import StageHandler, register, shot_content
 from ..versions import file_info
 
+# 不影响召回语义的检索旋钮：预算与上传上限只在执行时读取，不进入历史版本签名。
+_RECALL_SIGNATURE_EXCLUDED = frozenset({
+    "query_timeout_seconds", "id_page_size", "query_cache_bytes", "query_cache_entries",
+    "max_upload_mb", "max_image_upload_mb", "max_query_seconds",
+})
+
 
 class RecallHandler(StageHandler):
     name, label, scope = "recall", "召回", "shot"
@@ -32,7 +38,11 @@ class RecallHandler(StageHandler):
             "person_release": active.get("search_release_id") if active else None,
             "limit": o["recall_limit"],
             "recall": {**config.studio.recall.model_dump(), "limit": o["recall_limit"]},
-            "search": config.search.model_dump(),
+            # 只排除不影响召回语义的预算/上限旋钮：查询期限、ID 分页、缓存字节/条目与上传上限。
+            # 用排除表而非白名单，新增语义字段默认进入签名（宁可多失效，不可复用错误版本）；
+            # 执行路径读的是活配置（见 run()），这些旋钮无需使历史召回版本失效。
+            "search": {key: value for key, value in config.search.model_dump().items()
+                       if key not in _RECALL_SIGNATURE_EXCLUDED},
             "embedding": sanitized(config.embedding.model_dump()),
             "visibility": visibility,
         }

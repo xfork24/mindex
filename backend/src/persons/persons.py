@@ -524,6 +524,10 @@ class Persons:
                 path = self.store.path
                 media = self.store.media
                 resolve_media = self.store.resolve_media
+                # 写准入与缓存身份沿用外层库：迁移门闩和媒体登记按同一后端语义判断。
+                pg = self.store.pg
+                backend = self.store.backend
+                cache_identity = self.store.cache_identity
 
                 def connect(_):
                     return nullcontext(db)

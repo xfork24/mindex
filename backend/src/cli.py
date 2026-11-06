@@ -786,6 +786,8 @@ def worker(
     concurrency: Annotated[int, typer.Option(min=1, help="并行执行槽位；起步建议 1，容量验证后增加。")] = 1,
     once: Annotated[bool, typer.Option(help="领取并执行一个任务后退出（验证/测试用）。")] = False,
     idle_exit: Annotated[float | None, typer.Option(help="空闲指定秒数后退出（测试用）。")] = None,
+    task_ttl: Annotated[float | None, typer.Option(min=2, help="任务租约秒数（故障验收演练用；缺省 120）。")] = None,
+    renew_interval: Annotated[float | None, typer.Option(min=0.5, help="心跳续期间隔秒数（故障验收演练用；缺省 20）。")] = None,
 ):
     """启动 worker 消费持久队列（plans §7.2；需要 queue.backend=postgres）。
 
@@ -804,7 +806,8 @@ def worker(
     _logging.basicConfig(level=_logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     try:
         runner = Worker(ctx.obj, queues=[q.strip() for q in queues.split(",") if q.strip()],
-                        concurrency=concurrency, once=once, idle_exit=idle_exit)
+                        concurrency=concurrency, once=once, idle_exit=idle_exit, task_ttl=task_ttl,
+                        renew_interval=renew_interval)
     except RuntimeError as exc:
         raise typer.BadParameter(str(exc)) from exc
     executed = runner.run()

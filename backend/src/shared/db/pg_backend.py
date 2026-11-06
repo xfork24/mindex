@@ -288,7 +288,11 @@ class PgBackend:
                 pool = ConnectionPool(
                     self.dsn, min_size=0 if control else self.pool_min,
                     max_size=self.control_pool_max if control else self.pool_max,
-                    timeout=self.control_checkout_timeout if control else self.checkout_timeout, open=True,
+                    timeout=self.control_checkout_timeout if control else self.checkout_timeout,
+                    # PG 重启/网络中断会让池中连接变成失效 TCP：checkout 时先做一次空查询探针，
+                    # 失效连接被丢弃并换新，业务请求不因残留坏连接失败。
+                    check=ConnectionPool.check_connection,
+                    open=True,
                 )
                 _POOLS[key] = pool
                 _POOL_SETTINGS[self.dsn] = settings
