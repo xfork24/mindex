@@ -227,9 +227,9 @@ worker 增加 `--task-ttl/--renew-interval`（仅故障演练用）以缩短租�
   附件 id 取裸 token、桥接轮询竞态、`changes/log` 数据已解析、激活演练使用空索引）。
 - `backends-second/`：285 项，2 失败（保留）：签名 URL 用 1 秒有效期做可用性断言在满载下临界；
   `SIGSTOP` 演练回收窗口不足。均为测试边距问题，断言语义未放宽。
-- `backends-third/`：**285 通过、零失败/错误/跳过**，源码摘要一致；含新增故障矩阵八项。
-- `faults/`：依赖断连演练通过；六项组件测试通过、零跳过（池耗尽时 readiness 区分查询/控制池、SSE Last-Event-ID 续传、部署配置修订冲突/只读/凭据引用三项）；各步耗时与逐项检查结果写入 `report.json`。
-- `cpu/`：真实 CPU 吞吐 1 worker 77.67 s、2 worker 41.51 s，**1.8713 倍**（门槛 1.5），
+- `backends-third/`：285 通过、零失败/错误/跳过，源码摘要一致；含新增故障矩阵八项。`backends-final/` 为提交后同摘要复验，同样 **285 通过、零失败/错误/跳过**，以下表为准。
+- `faults/`：依赖断连演练通过；六项组件测试通过、零跳过（池耗尽时 readiness 区分查询/控制池、SSE Last-Event-ID 续传、部署配置修订冲突/只读/凭据引用三项）；各步耗时与逐项检查结果写入 `report.json`（PG 停止 7.2 s / 恢复 2.5 s，MinIO 恢复 1.3 s，Chroma 恢复 1.3 s，网关 kill→restart 2.3 s）。
+- `cpu/`：真实 CPU 吞吐 1 worker 85.72 s、2 worker 44.13 s，**1.9426 倍**（门槛 1.5），
   两个阶段各 88 个镜头、8 个对象摘要逐一核对一致。
 - 桌面：冻结后端按当前源码重建并通过 `check-desktop-sidecar.py`（含中文字幕烧录、隔离 PATH）；
   `.app/.dmg/.zip` 重新打包且 `codesign --verify --deep --strict` 通过；
@@ -253,3 +253,23 @@ worker 增加 `--task-ttl/--renew-interval`（仅故障演练用）以缩短租�
 
 未在本轮通过的部分保持原状态：双机、规定大容量、真实模型、Windows/Linux 安装与系统密钥环实测
 仍为独立验收；代表性规模 RPO/RTO、提供商真实幂等/限流同理。
+
+### 提交后复验（源码摘要 `4d6dfbcc0006090b18cf53878ca7b6af30f0c5d26972b29fff364a6bcc19d61d`）
+
+代码提交 `e667ab2` 后在**同一源码摘要**上重跑全部真实后端验收与桌面演练，避免"证据来自提交前工作区"：
+
+| 专项 | 结果 | 证据 |
+|---|---|---|
+| 完整离线回归 | 3096 项，零失败/错误，189 环境跳过 | `local-final3/` |
+| 真实后端 integration | 285 项，零失败/错误/跳过 | `backends-final/` |
+| 依赖断连演练 | 通过，六项组件测试零跳过 | `faults/` |
+| CPU 吞吐 | 1.9426 倍（85.72 s → 44.13 s） | `cpu/`、`artifacts/scaling-cpu-throughput-result.json` |
+| macOS 凭据清除 | 通过（真实应用、真实 Keychain） | `artifacts/scaling-credential-clear-macos-app/` |
+
+期间两次 integration 运行因**环境**失败并保留：Docker 虚拟机磁盘写满（overlay 7.8 GiB 用尽，
+PG 报 `No space left on device`）后清理未使用镜像/卷恢复；另一次为 chromadb 本地 Rust 绑定偶发挂起，
+清理环境后复跑通过。二者都不是代码失败，也不计入"通过"。
+
+macOS `.app` 构建自 `backend/src`、`frontend/src`、`desktop` 的当前内容；此后这些目录未再修改
+（提交只涉及测试、脚本与文档），因此应用内后端与提交源码一致。
+
