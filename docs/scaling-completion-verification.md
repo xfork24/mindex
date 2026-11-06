@@ -265,6 +265,7 @@ worker 增加 `--task-ttl/--renew-interval`（仅故障演练用）以缩短租�
 | 依赖断连演练 | 通过，六项组件测试零跳过 | `faults/` |
 | CPU 吞吐 | 1.9426 倍（85.72 s → 44.13 s） | `cpu/`、`artifacts/scaling-cpu-throughput-result.json` |
 | macOS 凭据清除 | 通过（真实应用、真实 Keychain） | `artifacts/scaling-credential-clear-macos-app/` |
+| PG/WAL 与对象保护恢复 | 通过：8 对象/8 MiB，basebackup 后写入经 WAL 恢复，恢复 2.978 s，零提交丢失 | `recovery/`（RPO/RTO 门槛保持 false） |
 
 期间两次 integration 运行因**环境**失败并保留：Docker 虚拟机磁盘写满（overlay 7.8 GiB 用尽，
 PG 报 `No space left on device`）后清理未使用镜像/卷恢复；另一次为 chromadb 本地 Rust 绑定偶发挂起，
