@@ -236,18 +236,22 @@ def copy_file(source, target):
     budget.retain(source)
     budget.retain(target)
     temporary = None
+    reservation = None
     try:
         with tempfile.NamedTemporaryFile(dir=target.parent, prefix=".copy-", delete=False) as sink:
             temporary = Path(sink.name)
-            with GrowingReservation(temporary) as reservation, source.open("rb") as origin:
+            reservation = GrowingReservation(temporary)
+            with source.open("rb") as origin:
                 while chunk := origin.read(1024 * 1024):
                     reservation.grow(len(chunk))
                     sink.write(chunk)
-                sink.flush()
-                shutil.copystat(source, temporary)
-                reservation.commit(target)
+        # 先关闭 NamedTemporaryFile，Windows 才允许修改属性和原子替换。
+        shutil.copystat(source, temporary)
+        reservation.commit(target)
         return target
     finally:
+        if reservation is not None:
+            reservation.close()
         if temporary is not None:
             temporary.unlink(missing_ok=True)
 

@@ -59,14 +59,15 @@ def download(artifact: Artifact, target: Path, *, hosts: set[str], max_bytes: in
                     if length and length.isdigit() and int(length) > max_bytes:
                         raise studio.StudioError(f"产物超过大小上限 {max_bytes // (1024 * 1024)} MB")
                     size = 0
-                    with GrowingReservation(partial) as reservation, partial.open("wb") as handle:
-                        for chunk in response.iter_bytes(1024 * 1024):
-                            size += len(chunk)
-                            if size > max_bytes:
-                                raise studio.StudioError(f"产物超过大小上限 {max_bytes // (1024 * 1024)} MB")
-                            reservation.grow(len(chunk))
-                            handle.write(chunk)
-                        handle.flush()
+                    with GrowingReservation(partial) as reservation:
+                        with partial.open("wb") as handle:
+                            for chunk in response.iter_bytes(1024 * 1024):
+                                size += len(chunk)
+                                if size > max_bytes:
+                                    raise studio.StudioError(f"产物超过大小上限 {max_bytes // (1024 * 1024)} MB")
+                                reservation.grow(len(chunk))
+                                handle.write(chunk)
+                        # Windows 不允许替换仍有写句柄的临时文件；关闭文件后再交接预算。
                         budget = current()
                         if budget is not None:
                             budget.retain(target)

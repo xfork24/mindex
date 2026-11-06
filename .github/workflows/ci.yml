@@ -127,6 +127,7 @@ jobs:
           uv run pytest -q tests/test_desktop_health.py tests/test_desktop_frozen.py tests/test_desktop_config.py
           tests/test_media_binaries.py tests/test_local_services.py tests/test_browser_install.py
           tests/test_settings_local_services_ui.py tests/test_process_ops.py
+          tests/test_work_budget.py
 
       - name: 冻结后端（含目标平台原生 dsh）
         shell: bash
