@@ -8,7 +8,7 @@
 
 ![Python 3.11–3.13](https://img.shields.io/badge/Python-3.11%E2%80%933.13-365c49?style=flat-square)
 ![FastAPI](https://img.shields.io/badge/API-FastAPI-365c49?style=flat-square)
-![SQLite + Chroma](https://img.shields.io/badge/Storage-SQLite%20%2B%20Chroma-365c49?style=flat-square)
+![存储](https://img.shields.io/badge/Storage-SQLite%20%7C%20PostgreSQL%20%C2%B7%20Chroma%20%7C%20S3-365c49?style=flat-square)
 ![Platforms](https://img.shields.io/badge/Desktop-macOS%20%C2%B7%20Windows%20%C2%B7%20Linux-365c49?style=flat-square)
 
 [English](README.md) | **简体中文**
@@ -35,6 +35,7 @@ Mindex 把海量视频的管理、理解、检索与再创作连接在同一个�
 | **模板与版本化构建** | 文案模板、风格模板、交付模板三类模板体系；方案级版本管理、完整依赖树、逐节点重建、产物复用、多画幅导出与发布包。 |
 | **Agent、CLI 与 API** | 内置助手面板用自然语言驱动整个产品，写操作先预览确认；同一套能力完整暴露为 CLI、REST API、MCP 服务，并支持可选 agent harness（内置、DeepSeek Harness 与经 MCP 兼容的其他 harness）。 |
 | **模型与参数自定义** | 十二类模型角色独立配置，覆盖自建与多家线上厂商；召回渠道权重与选题打分权重运行时可调；音色库与声音克隆。 |
+| **部署形态** | 同一套产品既可单机运行（SQLite、本地 Chroma、本地文件），也可接共享后端（PostgreSQL 元数据、S3 兼容对象存储、Chroma 服务、PostgreSQL 队列与租约），支持多 API 与多 worker；浏览器上传可走 API 分片中转或直连 S3 预签名 multipart。 |
 
 ## 功能详细介绍
 
@@ -358,6 +359,30 @@ uv run mindex check
 
 **macOS（Apple Silicon）、Windows、Linux** 原生安装包内置后端、FFmpeg 与 DeepSeek Harness 运行时——无需安装 Python、uv 或 FFmpeg，还能在设置页启停本机模型服务。桌面版与 Web 版共享同一套代码，功能同步演进。见[桌面版指南](docs/desktop.md)。
 
+## 部署形态
+
+缺省的单机形态只需 Python、uv 与 FFmpeg。同一套代码也能接共享后端，客户端行为不变，单机仍是缺省。
+
+| 形态 | 元数据 | 媒体 | 向量 | 队列 / 锁 | 进程 |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `local`（缺省） | SQLite | 本地文件 | 内嵌 Chroma | 进程内 / 文件锁 | 单 API，可选 CLI 与桌面版 |
+| `pg-single` | PostgreSQL | 本地或 S3 | 内嵌或服务版 Chroma | 进程内或 PostgreSQL | 单 API，可选 worker |
+| `cluster` | PostgreSQL | S3 | Chroma 服务 | PostgreSQL | 多 API、多 worker、单智能助手网关 |
+
+```bash
+# 共享后端：先建 schema 并校验能力，再启动 API 与 worker。
+MINDEX_DATABASE_DSN=postgres://… uv run mindex migrate
+uv run mindex doctor                 # 组合、身份与各后端就绪情况
+uv run mindex serve                  # 任意多个 API 节点，每个节点使用独立 data_dir
+uv run mindex worker --queues source,dialogue --concurrency 1
+```
+
+共享后端形态额外提供：带运行协议的追加式 schema 升级（不支持混版滚动运行）；source/dialogue/person/topic/index/studio 六类任务的持久账本，含心跳、执行凭证、取消与原子发布；权威文件登记、引用闭包 GC 与对象协调 pin；可续传的 S3 multipart 上传会话；分页 eligible 与 SQL BM25 检索，受查询总期限约束；以及 `migration preflight/export/load/verify/activate`——按阶段可续跑，拒绝非空或异值目标，未激活的目标对业务写入保持关闭。
+
+健康检查分开：`/api/live` 只表示进程存活，`/api/ready` 在有界期限内逐项探测数据库（查询与控制池）、对象存储、向量、迁移状态、运行准入与智能助手网关。设置页新增「部署设置」章节，可读取、校验并保存当前节点的配置文件（凭据只能填环境变量引用；保存做修订校验；身份与后端变更需重启）。桌面版也可作为共享部署的远程客户端，凭据保存在系统安全存储中。
+
+集群、容量、迁移与灾备验收分别跟踪，详见[水平扩展](docs/scaling.md)、[双路径上传](docs/scaling-upload.md)、[素材库迁移](docs/scaling-migration.md)与[容量工装](docs/scaling-capacity.md)。
+
 ## 工作原理
 
 ```mermaid
@@ -398,7 +423,7 @@ flowchart LR
 
 **三渠道召回。** 文字查询分别检索画面、对白、分析渠道；各渠道内部融合语义向量与 BM25，再按可配置权重（默认 0.35 : 0.15 : 0.5）做 RRF 合并，并去除同源重叠。图片与视频查询只走画面渠道。在线查询没有实时 LLM 重排——分数是排序信号，不是概率。嵌入服务不可用但有文本渠道时，检索会显式降级为 BM25 并给出警告，绝不跨空间比较向量。
 
-**本地数据、独立模型。** FastAPI 提供 API；界面是无构建步骤的原生 HTML/CSS/JS。SQLite 保存全部业务数据；Chroma 只保存显式向量；FFmpeg 处理媒体。模型服务部署位置自由——本机、GPU 机器或线上订阅——设计上从不假设多个模型同时可用。
+**本地数据、独立模型。** FastAPI 提供 API；界面是无构建步骤的原生 HTML/CSS/JS。SQLite（共享后端形态下为 PostgreSQL）保存全部业务数据；Chroma 只保存显式向量；FFmpeg 处理媒体。模型服务部署位置自由——本机、GPU 机器或线上订阅——设计上从不假设多个模型同时可用。
 
 **版本与证据可追溯。** 内容索引、人物发布与 Studio 产物都是不可变版本。更新分析不会改写已发布索引；更换模型或预处理会生成新索引，先检查再激活，回退就是先恢复旧模型服务再 `mindex indexes activate <旧ID>`。嵌入服务携带空间身份（模型、版本、量化、维度、预处理）；对不匹配索引的查询返回 503，而不是比较不兼容的向量。
 
@@ -406,6 +431,8 @@ flowchart LR
 <summary><strong>存储布局与索引管理</strong></summary>
 
 配置从 `config.local.yaml` 读取（可用 `MINDEX_CONFIG` 或子命令前的 `--config` 覆盖）；设置页激活的档案在运行时覆盖它，Web 与 CLI 共用覆盖层。
+
+共享后端形态下该 `data_dir` 只保存节点缓存、暂存与日志：元数据在 PostgreSQL、媒体在 S3、向量在 Chroma 服务，每个节点使用自己的目录。
 
 ```text
 data/
@@ -461,12 +488,15 @@ curl -X POST http://127.0.0.1:8000/api/search/text \
 | `GET /api/studio/jobs` | 创作任务；方案 / 构建 / 版本接口见 Studio 文档 |
 | `/api/agent/*` | 助手会话与事件流（[智能助手](docs/agent.md#api)） |
 | `GET /api/status?health=true` | 索引与模型健康状态 |
+| `GET /api/live` · `/api/ready` | 进程存活；有界逐项就绪探测（数据库、存储、向量、迁移、准入、网关） |
+| `GET/PUT /api/settings/deployment` · `POST …/validate` | 读取、校验与保存当前节点的部署配置（修订校验；无可写文件时只读） |
+| `POST /api/uploads` · `PUT …/parts/{n}` · `POST …/complete` | 上传会话：API 分片中转（缺省）或浏览器直连 S3 multipart（逐片签名）；服务端复算完整摘要 |
 
 `granularity` 支持 `moment`（精细片段）、`shot`（镜头）、`scene`（场景）；所选粒度需已建库。单次返回 1–50 条。
 
 ### CLI
 
-`mindex` 命令覆盖整个产品：`prepare` / `detect` / `split`（导入与切片）、`enrich-dialogue` / `transcribe` / `align` / `analyze`（对白与分析）、`index` / `indexes`（版本化索引与激活）、`search`、`persons`、`topics`、`studio`（任务、构建与后期子命令组）、`backup`、`clips`、`e2e`（评测框架）、`agent tools`、`clean` 与 `serve`。完整参考见 [CLI 文档](docs/cli-reference.md)。
+`mindex` 命令覆盖整个产品：`prepare` / `detect` / `split`（导入与切片）、`enrich-dialogue` / `transcribe` / `align` / `analyze`（对白与分析）、`index` / `indexes`（版本化索引与激活，含 `indexes tasks` 与 `indexes lexical`）、`search`、`persons`、`topics`、`studio`（任务、构建与后期子命令组）、`backup`、`clips`、`e2e`（评测框架）、`agent tools`、`clean` 与 `serve`。共享后端形态另有 `migrate`（唯一 DDL 入口）、`doctor`、`worker`、`gpu list/resolve` 与 `migration preflight/export/load/verify/activate`。完整参考见 [CLI 文档](docs/cli-reference.md)。
 
 ### Agent harness
 
@@ -504,6 +534,9 @@ MCP 导出可按领域过滤（`agent.mcp.domains` / `--domain`），并受策�
 | 安装桌面版、管理本机服务 | [桌面版指南](docs/desktop.md) |
 | 配置服务、音色与检索权重 | [设置](docs/settings.md) · [配置参考](docs/config-reference.md) |
 | 备份、迁移或恢复素材库 | [备份与迁移](docs/backup.md) |
+| 接共享后端（PostgreSQL、S3、Chroma、worker） | [水平扩展](docs/scaling.md) · [双路径上传](docs/scaling-upload.md) |
+| 素材库在单机与共享后端之间切换 | [素材库迁移](docs/scaling-migration.md) |
+| 执行容量与故障验收 | [容量工装](docs/scaling-capacity.md) · [剩余能力验收记录](docs/scaling-completion-verification.md) |
 | 查阅命令、模块与数据流 | [CLI 参考](docs/cli-reference.md) · [架构](docs/architecture.md) |
 | 评测检索质量、切换索引版本 | [端到端验证](docs/e2e-runbook.md) · [索引版本](docs/index-versions.md) |
 | 路线图 | [功能路线图](plans/roadmap.md) |
