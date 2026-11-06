@@ -84,6 +84,22 @@ const base = process.env.MINDEX_I18N_TEST_URL || 'http://127.0.0.1:8027';
            `部署字段规则泄漏 i18n 占位 token：${JSON.stringify(deploymentRules)}`);
     assert(deploymentRules.some(text => /只读|保存后重启|迁移/.test(text)),
            `部署字段规则缺少可读说明：${JSON.stringify(deploymentRules)}`);
+    // 后端概要可折叠，且每列标签与值右边缘对齐（dd 的默认左缩进必须归零）。
+    const summary = page.locator('details.deployment-summary');
+    assert.equal(await summary.evaluate(node => node.open), true, '后端概要应默认展开');
+    assert.equal(await summary.locator('summary').count(), 1);
+    const offsets = await page.evaluate(() => [...document.querySelectorAll('#deployment-status > div')].map(row => {
+      const label = row.querySelector('dt').getBoundingClientRect();
+      const value = row.querySelector('dd').getBoundingClientRect();
+      return {delta: Math.round(Math.abs(label.right - value.right)),
+              margin: Math.round(parseFloat(getComputedStyle(row.querySelector('dd')).marginInlineStart) || 0)};
+    }));
+    assert(offsets.every(item => item.delta <= 1), `后端概要列上下未对齐：${JSON.stringify(offsets)}`);
+    assert(offsets.every(item => item.margin === 0), `后端概要值仍有默认左缩进：${JSON.stringify(offsets)}`);
+    await summary.locator('summary').click();
+    assert.equal(await summary.evaluate(node => node.open), false, '点击概要应折叠');
+    await summary.locator('summary').click();
+    assert.equal(await summary.evaluate(node => node.open), true, '再次点击应展开');
     if(await page.locator('#roles .role-row-head').first().getAttribute('aria-expanded')!=='true')await page.locator('#roles .role-row-head').first().click();
     await page.locator('.new-profile-card').first().click();
     await page.locator('#pf-name').fill('我的中文档案');await page.locator('#pf-api-key').fill('test-key-not-a-secret');

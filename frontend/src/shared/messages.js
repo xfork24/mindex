@@ -14322,5 +14322,9 @@ window.MindexMessages = {
   "ui.deployment_rules": {
     "zh": "字段生效规则",
     "en": "Field application rules"
+  },
+  "ui.deployment_summary": {
+    "zh": "后端概要（运行形态、数据库、媒体、向量、锁与队列）",
+    "en": "Backend summary (form, database, media, vectors, locks, and queue)"
   }
 };
