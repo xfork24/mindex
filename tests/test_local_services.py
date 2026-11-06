@@ -79,7 +79,10 @@ def test_start_health_logs_and_stop_kills_process_group(services):
     started = client.post("/api/settings/local-services/fake/start")
     assert started.status_code == 200, started.text
     pid = started.json()["pid"]
-    assert wait(lambda: client.get("/api/settings/local-services").json()["items"][0]["healthy"])
+    assert wait(lambda: client.get("/api/settings/local-services").json()["items"][0]["healthy"]), (
+        client.get("/api/settings/local-services").text,
+        client.get("/api/settings/local-services/fake/logs").text,
+    )
     grandchild = int((tmp_path / "grandchild.pid").read_text())
     assert _alive(grandchild)
     # 重复启动是幂等的。
@@ -100,6 +103,29 @@ def test_crash_and_missing_executable_are_reported(services):
     missing = client.post("/api/settings/local-services/missing/start")
     assert missing.status_code == 422 and "找不到可执行文件" in missing.json()["detail"]
     assert client.post("/api/settings/local-services/nope/start").status_code == 404
+
+
+@pytest.mark.parametrize("proxy_source", ["environment", "system"])
+def test_local_health_ignores_proxies(services, monkeypatch, proxy_source):
+    """回环探针直连本机服务，不经环境代理或 macOS/Windows 系统代理。"""
+    client, _config, _tmp = services
+    for name in ("http_proxy", "https_proxy", "all_proxy", "no_proxy"):
+        monkeypatch.delenv(name, raising=False)
+        monkeypatch.delenv(name.upper(), raising=False)
+    proxy = "http://127.0.0.1:9"
+    if proxy_source == "environment":
+        monkeypatch.setenv("HTTP_PROXY", proxy)
+        monkeypatch.setenv("HTTPS_PROXY", proxy)
+        monkeypatch.setenv("ALL_PROXY", proxy)
+    else:
+        monkeypatch.setattr("httpx._utils.getproxies", lambda: {"http": proxy, "https": proxy})
+    started = client.post("/api/settings/local-services/fake/start")
+    assert started.status_code == 200, started.text
+    assert wait(lambda: client.get("/api/settings/local-services").json()["items"][0]["healthy"]), (
+        client.get("/api/settings/local-services").text,
+        client.get("/api/settings/local-services/fake/logs").text,
+    )
+    assert client.post("/api/settings/local-services/fake/start").json()["pid"] == started.json()["pid"]
 
 
 def test_flags_persist_and_command_cannot_be_changed(services):
@@ -132,7 +158,7 @@ def test_external_service_on_port_is_not_started_or_stopped(services):
     other.start(service)
     (config.data_dir / "locks" / "services" / "fake.json").unlink()  # 本应用没有它的记录
     try:
-        assert wait(lambda: other.healthy(service)[0])
+        assert wait(lambda: other.healthy(service)[0]), (other.healthy(service), other.log_tail(service))
         item = client.get("/api/settings/local-services").json()["items"][0]
         assert (item["running"], item["healthy"], item["external"]) == (False, True, True)
         assert client.post("/api/settings/local-services/fake/start").status_code == 409
