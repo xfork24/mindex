@@ -17,7 +17,7 @@
 | 三：上传与媒体访问 | D01、D02、D03 | `artifacts/scaling-completion-batch3/uploads-fifth/`：239 通过、零跳过；真实 Chromium 独立 endpoint/CORS、断流续传与 75 秒视频 seek |
 | 四：查询预算与容量 | E01、E02、E03、E04、E05 | `artifacts/scaling-completion-batch4/query-seventh/`：254 通过、零跳过；原规模容量/质量仍独立待实测 |
 | 五：迁移、激活与灾备 | F01、F02、F03、F04、F05、F06 | `artifacts/scaling-completion-batch5/migration-third/`：271 通过、零跳过；`recovery-second/` 持久卷 8 MiB/WAL 恢复通过，正式 RPO/RTO 待代表性规模实测 |
-| 六：网关、设置、桌面与发布 | A07、B04、B05、B06、B07、C03、G01、G02、G03、G04、G05、G06、H01、H02、H03、H04 | `artifacts/scaling-completion-batch6/`：`backends-third/` 285 通过零跳过；`faults/` 断连演练通过；`cpu/` 1.8713 倍；macOS 重建应用与凭据清除演练通过；`local-final/` 冻结回归 |
+| 六：网关、设置、桌面与发布 | A07、B04、B05、B06、B07、C03、G01、G02、G03、G04、G05、G06、H01、H02、H03、H04 | `artifacts/scaling-completion-batch6/`：提交后同摘要复验 `backends-final/` 285 通过零跳过、`faults/` 断连演练通过、`cpu/` 1.9426 倍、`local-final3/` 3096 项零失败；macOS 重建应用与凭据清除演练通过 |
 
 双机、规定大容量、真实模型、Windows/Linux 安装和实际系统密钥环仍按原门槛独立验收；
 脚本交付、小样本和组件验证均不能代替这些实测。
@@ -85,7 +85,7 @@
 真实后端专项 **285 通过、0 失败/错误/跳过**（`backends-third/`，含新增八项故障矩阵）；
 依赖断连演练 **通过**（`faults/`：PG/MinIO/Chroma 各自只影响对应检查、恢复连续三次全绿、
 网关 SIGKILL 后助手 503 而业务与 liveness 不受影响）；真实 CPU source 吞吐
-**1.8713 倍**（`cpu/`，1 worker 77.67 s、2 worker 41.51 s，各 88 镜头与 8 对象摘要一致）；
+**1.9426 倍**（`cpu/`，1 worker 85.72 s、2 worker 44.13 s，各 88 镜头与 8 对象摘要一致）；
 macOS 按当前源码重建冻结后端与 `.app/.dmg/.zip`，真实应用凭据清除演练通过
 （`artifacts/scaling-credential-clear-macos-app/`：Keychain 加密落盘、清除回本地、零残留）。
 失败与中间轮次（`local-first/` 33 失败、`local-second/` 3 失败、`backends-first/` 8 失败、
