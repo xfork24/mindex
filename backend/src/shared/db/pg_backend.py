@@ -184,19 +184,27 @@ class PgConnection:
             )
 
     def _verify(self):
-        self._deadline()
-        if self._backend is not None and not self._control:
-            # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
-            from shared.db.fencing import verify_transaction
-            from shared.db.maintenance_gate import _ACTIVE
+        # 延迟导入：PG 是可选后端，仅在实际借出连接时加载驱动。
+        from psycopg.errors import IdleInTransactionSessionTimeout
 
-            if getattr(self._backend, "enforce_identity", False) and _ACTIVE.get() != self._backend.dsn:
-                identity = self._connection.execute(
-                    "SELECT value FROM settings WHERE key='library.id'"
-                ).fetchone()
-                if identity is None or identity[0] != self._backend.library_id:
-                    raise RuntimeError("运行中素材库身份已变化；拒绝使用旧上下文，请停止节点并完成迁移激活")
-            verify_transaction(self._connection, self._backend, execution=self._execution)
+        try:
+            self._deadline()
+            if self._backend is not None and not self._control:
+                # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+                from shared.db.fencing import verify_transaction
+                from shared.db.maintenance_gate import _ACTIVE
+
+                if getattr(self._backend, "enforce_identity", False) and _ACTIVE.get() != self._backend.dsn:
+                    identity = self._connection.execute(
+                        "SELECT value FROM settings WHERE key='library.id'"
+                    ).fetchone()
+                    if identity is None or identity[0] != self._backend.library_id:
+                        raise RuntimeError(
+                            "运行中素材库身份已变化；拒绝使用旧上下文，请停止节点并完成迁移激活"
+                        )
+                verify_transaction(self._connection, self._backend, execution=self._execution)
+        except IdleInTransactionSessionTimeout as exc:
+            raise _translate(exc, execution=self._execution) from exc
 
     def execute(self, sql, args: Sequence[Any] = ()) -> CursorView:
         self._deadline()
@@ -217,7 +225,7 @@ class PgConnection:
         try:
             cursor = self._connection.execute(text, tuple(args))
         except Exception as exc:
-            raise _translate(exc) from exc
+            raise _translate(exc, execution=self._execution) from exc
         lastrowid = None
         if column and cursor.description is not None:
             # INSERT ... RETURNING 的行在此取走；业务代码对 INSERT 语句不再 fetch。
@@ -234,7 +242,7 @@ class PgConnection:
         try:
             cursor.executemany(text, list(args))
         except Exception as exc:
-            raise _translate(exc) from exc
+            raise _translate(exc, execution=self._execution) from exc
         return CursorView(cursor)
 
     def commit(self) -> None:
@@ -265,10 +273,21 @@ def _returning_column(sql) -> str | None:
     return spec.returning if spec else None
 
 
-def _translate(exc: Exception) -> Exception:
+def _translate(exc: Exception, *, execution=None) -> Exception:
     # 延迟导入：独立模型或扩展功能使用可选依赖，仅在实际调用时加载。
     from psycopg import errors as pg_errors
 
+    if (
+        isinstance(exc, pg_errors.IdleInTransactionSessionTimeout)
+        and execution is not None
+        and (execution.attempt is not None or execution.leases)
+    ):
+        # 延迟导入：租约模块依赖 PG 后端；在驱动报错时才转换为执行层的失联语义。
+        from shared.db.locks_pg import LeaseLost
+
+        if execution.attempt is not None:
+            execution.attempt.lost.set()
+        return LeaseLost("执行事务超过租约空闲期限，已由数据库回滚；旧执行不得继续提交")
     if isinstance(exc, pg_errors.QueryCanceled) and remaining(default=None) is not None:
         return QueryBudgetExceeded("查询 SQL 已超过总期限，请缩小范围或稍后重试")
     if isinstance(
@@ -371,6 +390,7 @@ class PgBackend:
 
         fence = execution if execution is not None else ExecutionFence.capture()
         # 延迟导入：独立模型或扩展功能使用可选依赖，仅在实际调用时加载。
+        from psycopg.errors import IdleInTransactionSessionTimeout
         from psycopg_pool import PoolTimeout
 
         try:
@@ -397,6 +417,8 @@ class PgBackend:
                 finally:
                     if token is not None:
                         BUSINESS_CONNECTION.reset(token)
+        except IdleInTransactionSessionTimeout as exc:
+            raise _translate(exc, execution=fence) from exc
         except PoolTimeout as exc:
             if active():
                 raise QueryBudgetExceeded("查询连接池等待预算已耗尽，请稍后重试") from exc

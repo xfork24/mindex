@@ -195,6 +195,7 @@ class FaultCluster:
         from shared.db.migrate_pg import migrate_pg
 
         self.root, self.video, self.logs = root, video, []
+        self.processes = []
         self.dsn = os.environ["MINDEX_TEST_POSTGRES_DSN"]
         self.endpoint = os.environ["MINDEX_TEST_S3_ENDPOINT"]
         self.chroma = os.environ["MINDEX_TEST_CHROMA_SERVER"]
@@ -289,6 +290,7 @@ class FaultCluster:
             stdout=log,
             stderr=subprocess.STDOUT,
         )
+        self.processes.append(process)
         return process, log
 
     def launch_worker(self, index, queues="source", once=False):
@@ -443,6 +445,8 @@ def cluster(tmp_path_factory, video_file):
         cluster.dump_logs()
         raise
     finally:
+        for process in reversed(cluster.processes):
+            stop(process)
         cluster.dump_logs()
         cluster.embedder.stop()
         for page in cluster.s3.get_paginator("list_objects_v2").paginate(Bucket=cluster.bucket):

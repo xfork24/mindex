@@ -262,6 +262,28 @@ def summary(rows):
     }
 
 
+def classify_run(report, *, smoke):
+    """冒烟核对工装功能，正式容量额外要求原定延迟与 RSS 门槛；两项结果分别保留。"""
+    functional = (
+        not any(key.endswith("metrics_error") for key in report)
+        and report["source_unchanged"]
+        and not report["all_requests"]["failures"]
+        and all(0 < value < 2**63 for value in report["api_peak_rss_bytes"].values())
+    )
+    performance = all(value <= 2 * 1024**3 for value in report["api_peak_rss_bytes"].values()) and all(
+        value["p95_ms"] <= 2000 and value["p99_ms"] <= 5000 for value in report["profiles"].values()
+    )
+    report["functional_passed"] = bool(functional)
+    report["performance_passed"] = bool(performance)
+    report["capacity_passed"] = bool(functional and performance and not smoke)
+    passed = functional and (smoke or performance)
+    report["status"] = (
+        ("smoke_passed_not_acceptance" if smoke else "engineering_passed_quality_pending")
+        if passed
+        else "failed"
+    )
+
+
 def run(args):
     from shared.config import load_config
     from shared.storage import Store
@@ -407,19 +429,7 @@ def run(args):
         report["api_peak_rss_bytes"] = peaks
         report["source_unchanged"] = verifier.source_identity() == report["source_sha256"]
         report["engineering_nearest_hit_at5"] = sum(row["hit_at5"] for row in rows) / len(rows)
-        passed = (
-            not any(key.endswith("metrics_error") for key in report)
-            and report["source_unchanged"]
-            and not report["all_requests"]["failures"]
-            and all(v <= 2 * 1024**3 for v in peaks.values())
-            and all(v["p95_ms"] <= 2000 and v["p99_ms"] <= 5000 for v in report["profiles"].values())
-        )
-        report["capacity_passed"] = passed and not args.smoke
-        report["status"] = (
-            ("smoke_passed_not_acceptance" if args.smoke else "engineering_passed_quality_pending")
-            if passed
-            else "failed"
-        )
+        classify_run(report, smoke=args.smoke)
     finally:
         stop.set()
         sampler.join(5)

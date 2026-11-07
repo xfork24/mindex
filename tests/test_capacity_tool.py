@@ -36,6 +36,35 @@ def test_failed_queries_are_included_in_latency_quantiles():
     assert result["p95_ms"] > 4000 and result["p99_ms"] > 4900
 
 
+@pytest.mark.parametrize("smoke", [True, False])
+def test_smoke_and_capacity_record_performance_separately(smoke):
+    report = {
+        "source_unchanged": True,
+        "all_requests": {"failures": 0},
+        "api_peak_rss_bytes": {"1": 512 * 1024**2, "2": 512 * 1024**2},
+        "profiles": {"0.01": {"p95_ms": 2309, "p99_ms": 2400}},
+    }
+    module().classify_run(report, smoke=smoke)
+    assert report["functional_passed"] and not report["performance_passed"]
+    assert not report["capacity_passed"]
+    assert report["status"] == ("smoke_passed_not_acceptance" if smoke else "failed")
+
+
+@pytest.mark.parametrize("problem", ["request", "source", "metrics", "rss"])
+def test_smoke_still_rejects_failures_and_invalid_measurements(problem):
+    report = {
+        "source_unchanged": problem != "source",
+        "all_requests": {"failures": 1 if problem == "request" else 0},
+        "api_peak_rss_bytes": {"1": 2**63 if problem == "rss" else 512 * 1024**2},
+        "profiles": {"0.01": {"p95_ms": 100, "p99_ms": 200}},
+    }
+    if problem == "metrics":
+        report["api_0_metrics_error"] = "隔离测试：指标不可读"
+    module().classify_run(report, smoke=True)
+    assert report["status"] == "failed" and not report["functional_passed"]
+    assert not report["capacity_passed"]
+
+
 @pytest.mark.requires_postgres
 @pytest.mark.requires_s3
 @pytest.mark.requires_chroma_server

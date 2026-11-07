@@ -15,6 +15,14 @@ from shared.processing_lock import index_write_lock
 
 _ATTEMPT = ContextVar("mindex_attempt", default=None)
 _LEASES = ContextVar("mindex_leases", default=())
+# 与行锁同一条 SQL 设置超时：客户端可能在任意两条 SQL 之间被 SIGSTOP。
+# 尊重更短的服务端超时；0 表示关闭时，以剩余租约预算为准。
+_IDLE_TIMEOUT_SQL = (
+    "set_config('idle_in_transaction_session_timeout', LEAST("
+    "GREATEST(1, floor(extract(epoch from expires_at-clock_timestamp())*1000)::bigint),"
+    "COALESCE(NULLIF((SELECT setting::bigint FROM pg_settings WHERE "
+    "name='idle_in_transaction_session_timeout'),0),2147483647))::text,true)"
+)
 
 
 @dataclass
@@ -156,14 +164,15 @@ def remove_lease(lease):
 
 
 def verify_transaction(connection, backend, *, execution=None):
-    """在事务开始与提交前复验，并持共享行锁直至提交，阻止并发回收/重派。"""
+    """复验并持共享行锁至提交；按剩余租约限制空闲事务，防止暂停进程无限阻塞接管。"""
     fence = execution if execution is not None else ExecutionFence.capture()
     attempt = fence.attempt
     if attempt is not None and attempt.backend.dsn == backend.dsn:
         attempt.check()
         task = attempt.task
         row = connection.execute(
-            "SELECT cancel_requested FROM task_queue WHERE library_id=%s AND id=%s AND owner=%s"
+            f"SELECT cancel_requested, {_IDLE_TIMEOUT_SQL}"
+            " FROM task_queue WHERE library_id=%s AND id=%s AND owner=%s"
             " AND attempt_id=%s AND fencing_token=%s AND status='running'"
             " AND expires_at >= clock_timestamp() FOR SHARE",
             (attempt.library_id, task.id, task.owner, task.attempt_id, task.fencing_token),
@@ -188,7 +197,8 @@ def verify_transaction(connection, backend, *, execution=None):
         if lease.provider.backend_pool.dsn != backend.dsn:
             continue
         row = connection.execute(
-            "SELECT 1 FROM lock_holders WHERE library_id=%s AND name=%s AND owner_id=%s"
+            f"SELECT {_IDLE_TIMEOUT_SQL} FROM lock_holders"
+            " WHERE library_id=%s AND name=%s AND owner_id=%s"
             " AND fencing_token=%s AND expires_at >= clock_timestamp() FOR SHARE",
             (lease.provider.library_id, lease.name, lease.owner_id, lease.token),
         ).fetchone()
