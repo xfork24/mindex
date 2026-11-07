@@ -9,10 +9,9 @@ from __future__ import annotations
 
 import hashlib
 
-from mindex.studio import studio
-from mindex.studio.studio_artifacts import digest
-
-from .versions import root
+from studio import studio
+from studio.artifacts import digest
+from studio.workspace.versions import root
 
 TEXT_SUFFIXES = {".txt", ".md", ".markdown", ".text"}
 MISSING = "参考文稿缺失或已损坏，请重新上传"

@@ -83,7 +83,9 @@ GROUPS: tuple[Group, ...] = (
         zh="物体、场景、情绪与以图/以视频检索",
         en="Object, scene, emotion, and image/video queries",
         frames=(
-            Frame("search-text-and-object.png", "物体与场景语义查询", "Semantic query for objects and scenes"),
+            Frame(
+                "search-text-and-object.png", "物体与场景语义查询", "Semantic query for objects and scenes"
+            ),
             Frame("search-emotion-closeup.png", "情绪与景别查询", "Emotion and shot-type queries"),
             Frame("search-similar-scenes.png", "跨素材的相似场景检索", "Similar-scene lookup across sources"),
             Frame("search-by-image-or-video.png", "以图片或视频检索", "Image or video similarity search"),
@@ -117,7 +119,11 @@ GROUPS: tuple[Group, ...] = (
         zh="Agent 会话：文案、逐镜生产、成片预览与分镜合并",
         en="Agent session: scripting, production, build preview, shot merging",
         frames=(
-            Frame("agent-create-video-2.png", "Agent 会话：写文案并拆分镜", "Agent session: scripting and storyboard"),
+            Frame(
+                "agent-create-video-2.png",
+                "Agent 会话：写文案并拆分镜",
+                "Agent session: scripting and storyboard",
+            ),
             Frame(
                 "agent-create-video-3.png",
                 "Agent 会话：逐镜生产与配音",
@@ -128,7 +134,9 @@ GROUPS: tuple[Group, ...] = (
                 "Agent 会话：最终构建与成片预览",
                 "Agent session: final build with video preview",
             ),
-            Frame("agent-merge-shots.png", "Agent 会话：合并分镜 1+2", "Agent session: merging shots 1 and 2"),
+            Frame(
+                "agent-merge-shots.png", "Agent 会话：合并分镜 1+2", "Agent session: merging shots 1 and 2"
+            ),
         ),
     ),
     Group(
@@ -209,7 +217,12 @@ def build(fmt: str) -> dict:
                 "output": target.name,
                 "output_sha256": sha256(target),
                 "sources": [
-                    {"file": frame.file, "zh": frame.zh, "en": frame.en, "sha256": sha256(ASSETS / frame.file)}
+                    {
+                        "file": frame.file,
+                        "zh": frame.zh,
+                        "en": frame.en,
+                        "sha256": sha256(ASSETS / frame.file),
+                    }
                     for frame in group.frames
                 ],
             }

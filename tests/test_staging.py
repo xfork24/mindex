@@ -9,7 +9,7 @@ import threading
 
 import pytest
 
-from mindex.shared.backends.staging import StagingArea, StagingFull
+from shared.backends.staging import StagingArea, StagingFull
 
 
 class FakeDisk:
@@ -151,8 +151,9 @@ def test_independent_instances_share_budget_and_cannot_release_each_others_reser
 def test_process_pin_survives_peer_eviction_and_crash_reclaims_owner(tmp_path):
     script = """
 import sys
+import mindex  # 自举:包目录加入 sys.path,后续短名导入
 from pathlib import Path
-from mindex.shared.backends.staging import StagingArea
+from shared.backends.staging import StagingArea
 root = Path(sys.argv[1])
 area = StagingArea(root, quota_bytes=100)
 target = root / 'active.bin'
@@ -163,8 +164,13 @@ area.reserve(10)
 print('ready', flush=True)
 sys.stdin.read(1)
 """
-    child = subprocess.Popen([sys.executable, "-c", script, str(tmp_path)],
-                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    child = subprocess.Popen(
+        [sys.executable, "-c", script, str(tmp_path)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
     peer = None
     try:
         if not select.select([child.stdout], [], [], 10)[0]:

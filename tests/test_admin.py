@@ -1,19 +1,23 @@
+"""素材后台管理与处理接口回归。"""
+
 from __future__ import annotations
 
 import json
+import shutil
+import sqlite3
 
 import pytest
-from conftest import FixtureEmbedder
 from fastapi.testclient import TestClient
 
-from mindex.admin.curation import CurationPatch, Library
-from mindex.api import create_app
-from mindex.processing.indexing import IndexBuilder, VectorIndex
-from mindex.processing.pipeline import Pipeline
-from mindex.search.search import SearchEngine
-from mindex.shared.media import cut
-from mindex.shared.storage import Store
-from mindex.shared.types import TextSearch
+from admin.curation import CurationPatch, Library
+from api import create_app
+from conftest import FixtureEmbedder
+from processing.indexing import IndexBuilder, VectorIndex
+from processing.pipeline import Pipeline
+from search.search import SearchEngine
+from shared.media import cut
+from shared.storage import Store
+from shared.types import TextSearch
 
 
 @pytest.fixture
@@ -178,13 +182,13 @@ def test_live_curation_filters_text_video_without_mutating_index(library, config
 
 
 def test_existing_database_migration_preserves_sources(tmp_path):
-    import sqlite3
 
     root = tmp_path / "old"
     root.mkdir()
     with sqlite3.connect(root / "metadata.sqlite3") as db:
         db.execute(
-            "CREATE TABLE sources(id TEXT PRIMARY KEY, name TEXT NOT NULL,path TEXT NOT NULL,media TEXT NOT NULL,layout_key TEXT NOT NULL,prepared INTEGER NOT NULL DEFAULT 0)"
+            "CREATE TABLE sources(id TEXT PRIMARY KEY, name TEXT NOT NULL,path TEXT NOT NULL,media TEXT NOT "
+            "NULL,layout_key TEXT NOT NULL,prepared INTEGER NOT NULL DEFAULT 0)"
         )
         db.execute(
             "INSERT INTO sources(id,name,path,media,layout_key,prepared) VALUES(?,?,?,?,?,?)",
@@ -198,7 +202,6 @@ def test_existing_database_migration_preserves_sources(tmp_path):
 
 def test_delete_source_purges_all_but_source_file(library):
     """删除素材：向量/库行/派生文件全清，唯独保留源视频；studio 任务引用时拒绝。"""
-    import shutil
 
     pipeline, source, client = library
     store = pipeline.store
@@ -206,9 +209,7 @@ def test_delete_source_purges_all_but_source_file(library):
     assert segments
 
     index_id = "ix-del-test"
-    store.execute(
-        "INSERT INTO index_versions(id,spec,status) VALUES(?,?,?)", (index_id, "{}", "active")
-    )
+    store.execute("INSERT INTO index_versions(id,spec,status) VALUES(?,?,?)", (index_id, "{}", "active"))
     vector_index = VectorIndex(store.root, index_id, create=True)
     rep_ids = []
     for segment in segments:

@@ -5,8 +5,8 @@ from __future__ import annotations
 import base64
 from pathlib import Path
 
-from mindex.models.llama_cpp import PREFIX, SUFFIX, LlamaEmbedder
-from mindex.shared.images import image_png
+from models.llama_cpp import PREFIX, SUFFIX, LlamaEmbedder
+from shared.images import image_png
 
 
 class LlamaImageEmbedder(LlamaEmbedder):

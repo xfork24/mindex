@@ -11,7 +11,7 @@ from filelock import FileLock, Timeout
 from hypothesis import given
 from hypothesis import strategies as st
 
-from mindex.shared import locks
+from shared import locks
 
 
 def test_reverse_order_is_rejected(tmp_path):

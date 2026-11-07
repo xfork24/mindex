@@ -17,9 +17,9 @@ from typing import ClassVar
 
 import pytest
 
-from mindex.shared.media import MediaError
-from mindex.studio import animation_capture
-from mindex.studio.animation_capture import INSTALL_HINT, capture
+from shared.media import MediaError
+from studio import animation_capture
+from studio.animation_capture import INSTALL_HINT, capture
 
 slow = pytest.mark.slow
 
@@ -64,15 +64,38 @@ needs_browser = pytest.mark.skipif("not chromium_ready()", reason="未安装 ani
 
 
 def frame_hashes(path: Path) -> list[str]:
-    output = subprocess.run(["ffmpeg", "-v", "error", "-i", str(path), "-f", "framemd5", "-"],
-                            capture_output=True, text=True, check=True).stdout
+    output = subprocess.run(
+        ["ffmpeg", "-v", "error", "-i", str(path), "-f", "framemd5", "-"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
     return [line.rsplit(",", 1)[-1].strip() for line in output.splitlines() if not line.startswith("#")]
 
 
 def probe(path: Path) -> tuple[int, int, int]:
-    raw = subprocess.run(["ffprobe", "-v", "error", "-count_frames", "-select_streams", "v:0", "-show_entries",
-                          "stream=nb_read_frames,width,height", "-of", "csv=p=0", str(path)],
-                         capture_output=True, text=True, check=True).stdout.strip().split(",")
+    raw = (
+        subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-count_frames",
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "stream=nb_read_frames,width,height",
+                "-of",
+                "csv=p=0",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        .stdout.strip()
+        .split(",")
+    )
     width, height, frames = (int(value) for value in raw)
     return frames, width, height
 
@@ -106,7 +129,9 @@ def test_two_captures_are_frame_identical_with_exact_size_and_count(tmp_path):
     assert hashes == frame_hashes(second)
     assert len(set(hashes)) > 20  # 动画确实在动（CSS 动画、rAF、定时器与 Date 都由虚拟时钟推进）
     # 显式帧数优先于 seconds × fps；奇数时长同样精确。
-    capture(ANIMATED, seconds=9, width=96, height=64, fps=10, target=tmp_path / "c.mp4", max_seconds=60, frames=7)
+    capture(
+        ANIMATED, seconds=9, width=96, height=64, fps=10, target=tmp_path / "c.mp4", max_seconds=60, frames=7
+    )
     assert probe(tmp_path / "c.mp4") == (7, 96, 64)
 
 
@@ -143,7 +168,9 @@ navigator.sendBeacon("{base}/beacon", "x");
 const i = new Image(); i.src = "{base}/late.png";
 </script></body></html>"""
     try:
-        stats = capture(html, seconds=0.5, width=64, height=48, fps=10, target=tmp_path / "n.mp4", max_seconds=60)
+        stats = capture(
+            html, seconds=0.5, width=64, height=48, fps=10, target=tmp_path / "n.mp4", max_seconds=60
+        )
     finally:
         server.shutdown()
     assert Recorder.hits == []
@@ -152,11 +179,14 @@ const i = new Image(); i.src = "{base}/late.png";
 
 @slow
 @needs_browser
-@pytest.mark.parametrize("script", [
-    "while (true) {}",
-    "requestAnimationFrame(function spin() { for (;;) {} });",
-    "setTimeout(function again() { setTimeout(again, 0); }, 0);",
-])
+@pytest.mark.parametrize(
+    "script",
+    [
+        "while (true) {}",
+        "requestAnimationFrame(function spin() { for (;;) {} });",
+        "setTimeout(function again() { setTimeout(again, 0); }, 0);",
+    ],
+)
 def test_runaway_scripts_time_out_with_chinese_error(tmp_path, script):
     html = f"<!DOCTYPE html><html><body><script>{script}</script></body></html>"
     target = tmp_path / "loop.mp4"
@@ -169,7 +199,9 @@ def test_runaway_scripts_time_out_with_chinese_error(tmp_path, script):
 @needs_browser
 def test_wall_clock_limit(tmp_path):
     with pytest.raises(MediaError, match="超过 0.5 秒上限"):
-        capture(ANIMATED, seconds=20, width=160, height=120, fps=25, target=tmp_path / "w.mp4", max_seconds=0.5)
+        capture(
+            ANIMATED, seconds=20, width=160, height=120, fps=25, target=tmp_path / "w.mp4", max_seconds=0.5
+        )
 
 
 @slow
@@ -177,19 +209,27 @@ def test_wall_clock_limit(tmp_path):
 def test_studio_render_uses_real_sandbox(config):
     """animation 分镜经真实沙箱录制：渲染帧数与配音采样一致，成片帧数等于各镜之和。"""
     from conftest import FixtureSpeaker
+    from studio import workspace as ws
     from test_studio_animation import FakeAnimator, anim_shot, page
     from test_studio_sources import frame_count, setup
-
-    from mindex.studio import workspace as ws
 
     config.studio.render.width, config.studio.render.height = 160, 120
     config.studio.render.preset, config.studio.render.fps = "ultrafast", 25
     job_id, w, p = setup(config, [anim_shot()])
     checked = ws.preflight(config, job_id, w, p)
-    w["builds"].append({"id": "real", "plan_id": p["id"], "status": "running", "force": False,
-                        "nodes": [{**n, "status": "pending"} for n in checked["nodes"]]})
+    w["builds"].append(
+        {
+            "id": "real",
+            "plan_id": p["id"],
+            "status": "running",
+            "force": False,
+            "nodes": [{**n, "status": "pending"} for n in checked["nodes"]],
+        }
+    )
     ws.persist(config, job_id, w)
-    ws.run_build(config, job_id, "real", speaker=FixtureSpeaker(config), animator=FakeAnimator(html=page("真")))
+    ws.run_build(
+        config, job_id, "real", speaker=FixtureSpeaker(config), animator=FakeAnimator(html=page("真"))
+    )
     w = ws.load(config, job_id)
     p = ws.plan(w, p["id"])
     assert w["builds"][-1]["status"] == "complete", w["builds"][-1]
@@ -197,4 +237,8 @@ def test_studio_render_uses_real_sandbox(config):
     assert render["data"]["capture"]["frames"] == render["data"]["frames"]
     assert frame_count(ws.file_path(config, job_id, render, "animation"))[0] == render["data"]["frames"]
     final = ws.version(w, p["final"])
-    assert frame_count(ws.file_path(config, job_id, final, "mp4")) == (final["data"]["total_frames"], 160, 120)
+    assert frame_count(ws.file_path(config, job_id, final, "mp4")) == (
+        final["data"]["total_frames"],
+        160,
+        120,
+    )

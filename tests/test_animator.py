@@ -9,9 +9,9 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from mindex.models import animator as module
-from mindex.models.adapters import ModelError, make_animator
-from mindex.models.animator import (
+from models import animator as module
+from models.adapters import ModelError, make_animator
+from models.animator import (
     ANIMATOR_PROMPT_VERSION,
     SYSTEM_PROMPT,
     AnimationRejected,
@@ -68,12 +68,15 @@ def test_prompt_version_and_rules():
         assert rule in SYSTEM_PROMPT
 
 
-@pytest.mark.parametrize("text", [
-    "```html\n" + CLEAN + "\n```",
-    "好的，下面是动画：\n```\n" + CLEAN + "\n```\n希望满意。",
-    "说明文字\n" + CLEAN + "\n以上。",
-    CLEAN,
-])
+@pytest.mark.parametrize(
+    "text",
+    [
+        "```html\n" + CLEAN + "\n```",
+        "好的，下面是动画：\n```\n" + CLEAN + "\n```\n希望满意。",
+        "说明文字\n" + CLEAN + "\n以上。",
+        CLEAN,
+    ],
+)
 def test_extract_html_strips_fences_and_chatter(text):
     assert extract_html(text) == CLEAN
 
@@ -99,8 +102,11 @@ def test_size_limit_and_document_shape():
 
 
 @settings(max_examples=60, deadline=None)
-@given(snippet=st.sampled_from(sorted(FORBIDDEN_SNIPPETS)), position=st.floats(min_value=0, max_value=1),
-       case=st.booleans())
+@given(
+    snippet=st.sampled_from(sorted(FORBIDDEN_SNIPPETS)),
+    position=st.floats(min_value=0, max_value=1),
+    case=st.booleans(),
+)
 def test_forbidden_constructs_rejected_anywhere(snippet, position, case):
     """性质：把任一违禁构造插到干净文档的任意位置（大小写不同），校验都不通过。"""
     cut = int(len(CLEAN) * position)
@@ -164,17 +170,29 @@ def test_anthropic_backend_request_shape(config, monkeypatch):
     stub = Stub({"content": [{"type": "text", "text": CLEAN}], "stop_reason": "end_turn"})
     monkeypatch.setattr(module.adapters, "request", stub)
     cfg = config.studio.animator
-    cfg.backend, cfg.base_url, cfg.model, cfg.api_key = "anthropic", "https://api.anthropic.com", "claude-x", "sk-a"
-    assert LlmAnimator(config).animate("示意图", seconds=1, width=320, height=180, fps=30,
-                                       previous="<html></html>", feedback="字号更大") == CLEAN
+    cfg.backend, cfg.base_url, cfg.model, cfg.api_key = (
+        "anthropic",
+        "https://api.anthropic.com",
+        "claude-x",
+        "sk-a",
+    )
+    assert (
+        LlmAnimator(config).animate(
+            "示意图", seconds=1, width=320, height=180, fps=30, previous="<html></html>", feedback="字号更大"
+        )
+        == CLEAN
+    )
     call = stub.calls[0]
     assert call["url"] == "https://api.anthropic.com/v1/messages"
     assert call["headers"]["x-api-key"] == "sk-a" and call["headers"]["anthropic-version"] == "2023-06-01"
     assert call["json"]["system"] == SYSTEM_PROMPT and call["json"]["model"] == "claude-x"
     content = call["json"]["messages"][0]["content"]
     assert "【当前源码】" in content and "字号更大" in content
-    monkeypatch.setattr(module.adapters, "request",
-                        Stub({"content": [{"type": "text", "text": "..."}], "stop_reason": "max_tokens"}))
+    monkeypatch.setattr(
+        module.adapters,
+        "request",
+        Stub({"content": [{"type": "text", "text": "..."}], "stop_reason": "max_tokens"}),
+    )
     with pytest.raises(ModelError, match="max_tokens"):
         LlmAnimator(config).animate("x", seconds=1, width=10, height=10, fps=10)
 

@@ -12,9 +12,9 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from mindex.agent import attachments as att
-from mindex.agent.attachments import AttachmentError, AttachmentStore
-from mindex.agent.loopback import MindexClient
+from agent import attachments as att
+from agent.attachments import AttachmentError, AttachmentStore
+from agent.loopback import MindexClient
 
 T0 = 1_700_000_000_000
 HOUR = 3600 * 1000
@@ -42,12 +42,23 @@ def world():
             incoming = root / "incoming" / f"{name}.bin"
             incoming.parent.mkdir(parents=True, exist_ok=True)
             incoming.write_bytes(f"content-{name}".encode())
-            meta = store.put(incoming, filename=f"{name}.bin", content_type="application/octet-stream",
-                             owner=owner, session_id=sid, ttl_hours=ttl)
+            meta = store.put(
+                incoming,
+                filename=f"{name}.bin",
+                content_type="application/octet-stream",
+                owner=owner,
+                session_id=sid,
+                ttl_hours=ttl,
+            )
             if missing:
                 store.path(store._row(meta["id"])).unlink()
-            rows[meta["id"]] = {"owner": owner, "session_id": sid, "expires_at": meta["expires_at"],
-                                "missing": missing, "content": f"content-{name}".encode()}
+            rows[meta["id"]] = {
+                "owner": owner,
+                "session_id": sid,
+                "expires_at": meta["expires_at"],
+                "missing": missing,
+                "content": f"content-{name}".encode(),
+            }
     finally:
         att.now_ms = original
     yield store, rows
@@ -56,18 +67,25 @@ def world():
 
 def expected_ok(rows: dict, ref: str, owner: str, session_id: str | None, now: int) -> bool:
     row = rows.get(ref)
-    return (row is not None
-            and row["owner"] == owner
-            and (owner != "session" or row["session_id"] == session_id)
-            and now < row["expires_at"]
-            and not row["missing"])
+    return (
+        row is not None
+        and row["owner"] == owner
+        and (owner != "session" or row["session_id"] == session_id)
+        and now < row["expires_at"]
+        and not row["missing"]
+    )
 
 
 KNOWN = st.sampled_from(range(len(SPECS))).map(lambda i: ("known", i))
 # 已登记引用加权出现，保证成功分支也被充分覆盖。
 REF_KINDS = st.one_of(
-    KNOWN, KNOWN, KNOWN, KNOWN,
-    st.text(alphabet="0123456789abcdef", min_size=32, max_size=32).map(lambda t: ("ref", f"attachment://{t}")),
+    KNOWN,
+    KNOWN,
+    KNOWN,
+    KNOWN,
+    st.text(alphabet="0123456789abcdef", min_size=32, max_size=32).map(
+        lambda t: ("ref", f"attachment://{t}")
+    ),
     st.text(max_size=40).map(lambda t: ("ref", t)),
     st.text(max_size=40).map(lambda t: ("ref", f"attachment://{t}")),
 )

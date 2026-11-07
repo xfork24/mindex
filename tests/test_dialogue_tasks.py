@@ -1,14 +1,16 @@
+"""对白后台任务生命周期与进度回归。"""
+
 import threading
 import time
 
 import pytest
-from conftest import FixtureEmbedder
 from fastapi.testclient import TestClient
 
-from mindex.admin.dialogue_tasks import DialogueOptions, DialogueTasks
-from mindex.api import create_app
-from mindex.processing.pipeline import Pipeline
-from mindex.settings.runtime_settings import RuntimeConfig, activate_profile, save_profile
+from admin.dialogue_tasks import DialogueOptions, DialogueTasks
+from api import create_app
+from conftest import FixtureEmbedder
+from processing.pipeline import Pipeline
+from settings.runtime_settings import RuntimeConfig, activate_profile, save_profile
 
 
 def eventually(callback):
@@ -35,7 +37,7 @@ def test_http_returns_task_id_immediately_polls_after_refresh_and_excludes_delet
         assert release.wait(5)
         return {"index_id": None}
 
-    monkeypatch.setattr("mindex.admin.dialogue_tasks.execute_dialogue", run)
+    monkeypatch.setattr("admin.dialogue_tasks.execute_dialogue", run)
     client = TestClient(create_app(config, FixtureEmbedder(config)))
     response = client.post(f"/api/admin/sources/{sid}/dialogue", json={"publish": False})
     assert response.status_code == 202
@@ -82,7 +84,7 @@ def test_frozen_runtime_config_retry_credentials_and_restart(config, video_file,
             raise RuntimeError("interrupted upstream")
         return {"index_id": None}
 
-    monkeypatch.setattr("mindex.admin.dialogue_tasks.execute_dialogue", run)
+    monkeypatch.setattr("admin.dialogue_tasks.execute_dialogue", run)
     task = manager.start(sid, DialogueOptions(publish=False))
     task_id = task["id"]
     eventually(lambda: manager.get(task_id)["status"] == "failed")
@@ -107,13 +109,13 @@ def test_frozen_runtime_config_retry_credentials_and_restart(config, video_file,
 def test_no_publish_cli_only_acquires_dialogue_data(config, video_file, monkeypatch, tmp_path):
     from typer.testing import CliRunner
 
-    from mindex.cli import app
+    from cli import app
 
     pipeline = Pipeline(config)
     sid = pipeline.prepare(video_file)
     path = tmp_path / "config.yaml"
     path.write_text("data_dir: " + str(config.data_dir) + "\n")
-    monkeypatch.setattr("mindex.processing.indexing.make_embedder", lambda *_: pytest.fail("no embedding"))
+    monkeypatch.setattr("processing.indexing.make_embedder", lambda *_: pytest.fail("no embedding"))
     response = CliRunner().invoke(app, ["-c", str(path), "enrich-dialogue", sid, "--no-publish"])
     assert response.exit_code == 0, response.output
     assert pipeline.store.active_index() is None
@@ -121,7 +123,7 @@ def test_no_publish_cli_only_acquires_dialogue_data(config, video_file, monkeypa
 
 
 def test_web_dialogue_job_skips_automatic_embedding_when_no_audio(config, video_file):
-    from mindex.processing.indexing import IndexBuilder, check_index
+    from processing.indexing import IndexBuilder, check_index
 
     pipeline = Pipeline(config)
     sid = pipeline.prepare(video_file)
@@ -138,7 +140,7 @@ def test_web_dialogue_job_skips_automatic_embedding_when_no_audio(config, video_
     task = client.get(f"/api/admin/dialogue-tasks/{task_id}").json()
     assert task["status"] == "complete", task.get("error")
     assert task["result"]["index_id"] is None
-    assert task["publication"] == {"status":"complete", "task_ids":[]}
+    assert task["publication"] == {"status": "complete", "task_ids": []}
     assert pipeline.store.active_index()["id"] == old
     assert not check_index(pipeline.store, old)
     assert embedder.calls == calls  # no audio and no changed media require zero new inference

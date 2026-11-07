@@ -2,20 +2,19 @@
 
 from __future__ import annotations
 
-from mindex.shared.work_budget import copy_file
-
 import hashlib
 import json
-import shutil
 from pathlib import Path
 
 import numpy as np
 
-from mindex.models.adapters import ModelError
-from mindex.models.deployment import verified_file
-from mindex.shared.config import Config, fingerprint
-from mindex.shared.jsonio import save
-from mindex.shared.media import content_hash
+from models.adapters import ModelError
+from models.deployment import verified_file
+from shared.config import Config, fingerprint
+from shared.jsonio import save
+from shared.media import content_hash
+from shared.storage import Store
+from shared.work_budget import copy_file
 
 THRESHOLD = 0.999
 CHECKS = {
@@ -152,7 +151,6 @@ def complete_validation(
     if baseline is None and checks_passed:
         fixed_samples = []
         for number, (sample, prepared) in enumerate(zip(samples, prepared_hashes), 1):
-            from mindex.shared.storage import Store
             source = Store.open(config).resolve_media(sample["path"])
             verified_file(source, sample["sha256"])
             target = directory / "samples" / f"{number:02}.mp4"

@@ -41,8 +41,17 @@ jobs:
       - name: 安装依赖
         run: uv sync --extra dev
 
+      - name: 安装代码规范工具
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
       - name: ruff
-        run: uv run ruff check backend/src tests
+        run: uv run ruff check backend/src tests scripts eval
+
+      - name: ruff format
+        run: uv run ruff format --check backend/src tests scripts eval
+
+      - name: 导入与 HTML 结构
+        run: uv run python scripts/check-code-style.py
 
       - name: mypy（shared+models 基线）
         run: bash scripts/typecheck.sh
@@ -58,6 +67,15 @@ jobs:
 
       - name: 前端 JS 语法
         run: for f in frontend/src/*/*.js desktop/*.js desktop/lib/*.js desktop/scripts/*.js; do node --check "$f"; done
+
+      - name: 前端 Prettier 格式
+        run: npm run format:check
+
+      - name: JS 与 CSS 规范
+        run: npm run lint:js && npm run lint:css
+
+      - name: 前端逻辑回归
+        run: npm run test:js
 
       - name: CLI 入口
         run: uv run mindex --help
@@ -220,9 +238,9 @@ jobs:
           work="$(mktemp -d)/dsh check"
           if [ "$RUNNER_OS" = "Windows" ]; then
             env PATH="$(cygpath -u -p "$SYSTEMROOT\\System32;$SYSTEMROOT")" \
-              desktop/build/backend/mindex.exe -m mindex.desktop_check "$(cygpath -w "$work")" --dsh-only
+              desktop/build/backend/mindex.exe -m mindex.diagnostics.desktop_check "$(cygpath -w "$work")" --dsh-only
           else
-            env PATH="/usr/bin:/bin" desktop/build/backend/mindex -m mindex.desktop_check "$work" --dsh-only
+            env PATH="/usr/bin:/bin" desktop/build/backend/mindex -m mindex.diagnostics.desktop_check "$work" --dsh-only
           fi
 
       - name: Electron 开发模式冒烟
@@ -326,14 +344,14 @@ jobs:
             hdiutil detach "$mount"
             codesign --verify --deep --strict "$RUNNER_TEMP/Mindex.app"
             env PATH="/usr/bin:/bin" "$RUNNER_TEMP/Mindex.app/Contents/Resources/backend/mindex" \
-              -m mindex.desktop_check "$RUNNER_TEMP/dsh installed check" --dsh-only
+              -m mindex.diagnostics.desktop_check "$RUNNER_TEMP/dsh installed check" --dsh-only
             env PATH="/usr/bin:/bin:$(dirname "$(command -v node)")" \
               MINDEX_SMOKE_APP="$RUNNER_TEMP/Mindex.app/Contents/MacOS/Mindex" node tests/desktop_smoke.cjs
           elif [ "$RUNNER_OS" = "Linux" ]; then
             executable="$(node -p 'require("./desktop/package.json").build.linux.executableName')"
             test -x "desktop/dist/linux-unpacked/$executable"
             env PATH="/usr/bin:/bin" desktop/dist/linux-unpacked/resources/backend/mindex \
-              -m mindex.desktop_check "$RUNNER_TEMP/dsh installed check" --dsh-only
+              -m mindex.diagnostics.desktop_check "$RUNNER_TEMP/dsh installed check" --dsh-only
             env PATH="/usr/bin:/bin:$(dirname "$(command -v node)")" \
               MINDEX_SMOKE_APP="$PWD/desktop/dist/linux-unpacked/$executable" xvfb-run -a node tests/desktop_smoke.cjs
           else
@@ -343,7 +361,7 @@ jobs:
             # 保留 WindowsPowerShell\v1.0：外壳查进程父子关系（reapStale）要调 powershell。
             env PATH="$(cygpath -u -p "$SYSTEMROOT\\System32;$SYSTEMROOT")" \
               desktop/dist/win-unpacked/resources/backend/mindex.exe \
-              -m mindex.desktop_check "$(cygpath -w "$RUNNER_TEMP/dsh installed check")" --dsh-only
+              -m mindex.diagnostics.desktop_check "$(cygpath -w "$RUNNER_TEMP/dsh installed check")" --dsh-only
             env PATH="$(cygpath -u -p "$SYSTEMROOT\\System32;$SYSTEMROOT;$SYSTEMROOT\\System32\\WindowsPowerShell\\v1.0"):$(dirname "$(cygpath -u "$(command -v node)")")" \
               MINDEX_SMOKE_APP="$(cygpath -w "$PWD/desktop/dist/win-unpacked/Mindex.exe")" node tests/desktop_smoke.cjs
           fi

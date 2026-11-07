@@ -3,23 +3,25 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 import pytest
 from fastapi.testclient import TestClient
+from PIL import Image
 
-from mindex.agent.loopback import MindexClient
-from mindex.agent.mcp_server import exported
-from mindex.agent.registry import ToolContext, ToolError
-from mindex.agent.tools import build_registry
-from mindex.api import create_app
-from mindex.maintenance.backup_db import filter_database, merge_database, snapshot, validate_database
-from mindex.maintenance.backup_files import referenced_files
-from mindex.search.search import SearchEngine
-from mindex.shared.media_groups import Groups
-from mindex.shared.storage import Store, dumps
-from mindex.shared.types import Filters
-from mindex.studio import music_library, studio
-from mindex.studio import workspace as ws
+from agent.loopback import MindexClient
+from agent.mcp_server import exported
+from agent.registry import ToolContext, ToolError
+from agent.tools import build_registry
+from api import create_app
+from maintenance.backup_db import filter_database, merge_database, snapshot, validate_database
+from maintenance.backup_files import referenced_files
+from search.search import SearchEngine
+from shared.media_groups import Groups
+from shared.storage import Store, dumps
+from shared.types import Filters
+from studio import music_library, studio
+from studio import workspace as ws
 
 
 @pytest.fixture
@@ -38,7 +40,8 @@ def data(config):
         )
     for i, track_id in enumerate(("1" * 64, "2" * 64, "3" * 64)):
         store.execute(
-            "INSERT INTO music_tracks(id,suffix,title,source,license,attribution,duration,created_at,updated_at,"
+            "INSERT INTO "
+            "music_tracks(id,suffix,title,source,license,attribution,duration,created_at,updated_at,"
             "expires_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
             (
                 track_id,
@@ -295,13 +298,12 @@ def test_backup_partial_empty_groups_and_name_mapping(data, tmp_path):
 
 @pytest.mark.slow
 def test_every_search_mode_stays_inside_groups(config, video_file, tmp_path):
-    from conftest import FixtureEmbedder
-    from PIL import Image
 
-    from mindex.processing.indexing import IndexBuilder
-    from mindex.processing.pipeline import Pipeline
-    from mindex.shared.media import cut
-    from mindex.shared.types import TextSearch
+    from conftest import FixtureEmbedder
+    from processing.indexing import IndexBuilder
+    from processing.pipeline import Pipeline
+    from shared.media import cut
+    from shared.types import TextSearch
 
     pipeline = Pipeline(config)
     first = pipeline.prepare(video_file)
@@ -347,11 +349,10 @@ def test_every_search_mode_stays_inside_groups(config, video_file, tmp_path):
 
 
 def test_mcp_group_lifecycle_and_music_filter(data):
-    import json
 
     from mcp.shared.memory import create_connected_server_and_client_session
 
-    from mindex.agent.mcp_server import server_for_app
+    from agent.mcp_server import server_for_app
 
     config, _, _ = data
     app = create_app(config)
@@ -393,58 +394,62 @@ def test_legacy_unversioned_snapshot_keeps_existing_groups(data):
 
 
 def test_automatic_uncategorized_groups(data):
-    from mindex.shared.media_groups import UNGROUPED
+    from shared.media_groups import UNGROUPED
 
     _, store, groups = data
-    source_default, music_default = UNGROUPED['source'], UNGROUPED['music']
-    assert groups.get(source_default)['system']
-    assert groups.resolve('source', [source_default]) == {'a', 'b', 'c'}
-    assert groups.get(music_default)['member_count'] == 3
-    assert [row['id'] for row in groups.members(source_default, 2, 1)['items']] == ['b']
-    first = groups.save('source', '分类一')['id']
-    second = groups.save('source', '分类二')['id']
-    before = groups.state('source', [source_default])
-    groups.change_members(first, ['a'])
-    groups.change_members(second, ['a'])
-    assert groups.resolve('source', [source_default]) == {'b', 'c'}
-    assert before != groups.state('source', [source_default])
-    groups.change_members(first, ['a'], remove=True)
-    assert groups.resolve('source', [source_default]) == {'b', 'c'}
+    source_default, music_default = UNGROUPED["source"], UNGROUPED["music"]
+    assert groups.get(source_default)["system"]
+    assert groups.resolve("source", [source_default]) == {"a", "b", "c"}
+    assert groups.get(music_default)["member_count"] == 3
+    assert [row["id"] for row in groups.members(source_default, 2, 1)["items"]] == ["b"]
+    first = groups.save("source", "分类一")["id"]
+    second = groups.save("source", "分类二")["id"]
+    before = groups.state("source", [source_default])
+    groups.change_members(first, ["a"])
+    groups.change_members(second, ["a"])
+    assert groups.resolve("source", [source_default]) == {"b", "c"}
+    assert before != groups.state("source", [source_default])
+    groups.change_members(first, ["a"], remove=True)
+    assert groups.resolve("source", [source_default]) == {"b", "c"}
     groups.delete(second)
-    assert groups.for_member('source', 'a')[0]['id'] == source_default
-    groups.set_groups('source', 'a', [first, source_default])
-    assert groups.for_member('source', 'a')[0]['id'] == first
-    groups.set_groups('source', 'a', [source_default])
-    assert groups.for_member('source', 'a')[0]['id'] == source_default
-    music_group = groups.save('music', '音乐分类')['id']
-    groups.change_members(music_group, ['1' * 64])
-    assert groups.resolve('music', [music_default]) == {'2' * 64, '3' * 64}
-    assert groups.resolve('music', [music_default, music_group]) == {'1' * 64, '2' * 64, '3' * 64}
-    with pytest.raises(ValueError, match='类型'):
-        groups.resolve('source', [music_default])
-    for action in (lambda: groups.delete(source_default),
-                   lambda: groups.save('source', '改名', group_id=source_default),
-                   lambda: groups.change_members(source_default, ['a'])):
-        with pytest.raises(ValueError, match='系统自动管理'):
+    assert groups.for_member("source", "a")[0]["id"] == source_default
+    groups.set_groups("source", "a", [first, source_default])
+    assert groups.for_member("source", "a")[0]["id"] == first
+    groups.set_groups("source", "a", [source_default])
+    assert groups.for_member("source", "a")[0]["id"] == source_default
+    music_group = groups.save("music", "音乐分类")["id"]
+    groups.change_members(music_group, ["1" * 64])
+    assert groups.resolve("music", [music_default]) == {"2" * 64, "3" * 64}
+    assert groups.resolve("music", [music_default, music_group]) == {"1" * 64, "2" * 64, "3" * 64}
+    with pytest.raises(ValueError, match="类型"):
+        groups.resolve("source", [music_default])
+    for action in (
+        lambda: groups.delete(source_default),
+        lambda: groups.save("source", "改名", group_id=source_default),
+        lambda: groups.change_members(source_default, ["a"]),
+    ):
+        with pytest.raises(ValueError, match="系统自动管理"):
             action()
     # 新导入的素材也即时归入，备份不需要额外保存派生成员。
-    store.execute('INSERT INTO sources(id,name,path,media,layout_key) VALUES(?,?,?,?,?)',
-                  ('d', 'd', 'sources/d.mp4', '{}', 'layout'))
-    assert 'd' in groups.resolve('source', [source_default])
+    store.execute(
+        "INSERT INTO sources(id,name,path,media,layout_key) VALUES(?,?,?,?,?)",
+        ("d", "d", "sources/d.mp4", "{}", "layout"),
+    )
+    assert "d" in groups.resolve("source", [source_default])
 
 
 def test_uncategorized_reserved_name_migration(data):
-    from mindex.shared.storage import _metadata_v10
+    from shared.storage import _metadata_v10
 
     _, store, groups = data
-    group_id = groups.save('source', '历史分组')['id']
-    groups.change_members(group_id, ['a'])
+    group_id = groups.save("source", "历史分组")["id"]
+    groups.change_members(group_id, ["a"])
     store.execute("UPDATE media_groups SET name='未分类' WHERE id=?", (group_id,))
     with store.connect() as db:
         _metadata_v10(db)
-    assert groups.get(group_id)['name'] == '未分类（自定义）'
-    assert groups.resolve('source', [group_id]) == {'a'}
-    assert len([group for group in groups.list('source') if group['name'] == '未分类']) == 1
+    assert groups.get(group_id)["name"] == "未分类（自定义）"
+    assert groups.resolve("source", [group_id]) == {"a"}
+    assert len([group for group in groups.list("source") if group["name"] == "未分类"]) == 1
 
 
 @pytest.mark.parametrize("kind", ["source", "music"])

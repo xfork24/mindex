@@ -13,9 +13,10 @@ import contextlib
 import re
 from datetime import timedelta
 
-from mindex.studio import studio
+import anyio
 
-from .artifacts import Artifact
+from studio import studio
+from studio.tools.artifacts import Artifact
 
 INSTALL_HINT = "第三方 MCP 工具需要 mcp 组件：在源码环境运行 uv sync --extra mcp（桌面版已内置）"
 URL = re.compile(r"https?://[^\s\"'<>]+")
@@ -23,6 +24,7 @@ URL = re.compile(r"https?://[^\s\"'<>]+")
 
 def unavailable() -> str | None:
     try:
+        # 延迟导入：保留可选依赖探测或异常捕获时的降级行为。
         import mcp  # noqa: F401
     except ImportError:
         return INSTALL_HINT
@@ -37,16 +39,22 @@ class McpAdapter:
         if reason := unavailable():
             raise studio.StudioError(reason)
         if self.protocol == "mcp-stdio":
+            # 延迟导入：独立模型或扩展功能使用可选依赖，仅在实际调用时加载。
             from mcp import StdioServerParameters
             from mcp.client.stdio import stdio_client
 
-            params = StdioServerParameters(command=self.cfg["command"], args=list(self.cfg.get("args") or []),
-                                           env=dict(self.cfg.get("env") or {}) or None, cwd=self.cfg.get("cwd"))
+            params = StdioServerParameters(
+                command=self.cfg["command"],
+                args=list(self.cfg.get("args") or []),
+                env=dict(self.cfg.get("env") or {}) or None,
+                cwd=self.cfg.get("cwd"),
+            )
             return stdio_client(params)
         return self._http()
 
     @contextlib.asynccontextmanager
     async def _http(self):
+        # 延迟导入：独立模型或扩展功能使用可选依赖，仅在实际调用时加载。
         from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
 
         async with create_mcp_http_client(headers=self.cfg.get("headers") or None) as client:
@@ -54,7 +62,8 @@ class McpAdapter:
                 yield streams
 
     async def _session(self, work, limit: float):
-        import anyio
+
+        # 延迟导入：独立模型或扩展功能使用可选依赖，仅在实际调用时加载。
         from mcp import ClientSession
 
         with anyio.fail_after(limit):
@@ -65,7 +74,6 @@ class McpAdapter:
                     return await work(session)
 
     def _run(self, work, timeout: float):
-        import anyio
 
         try:
             return anyio.run(self._session, work, timeout)
@@ -83,8 +91,16 @@ class McpAdapter:
 
         return self._run(work, timeout)
 
-    def call(self, tool: str, arguments: dict, uploads: list[dict], *, timeout: float,
-             cancelled=lambda: False, notify=lambda status: None) -> tuple[list[Artifact], dict]:
+    def call(
+        self,
+        tool: str,
+        arguments: dict,
+        uploads: list[dict],
+        *,
+        timeout: float,
+        cancelled=lambda: False,
+        notify=lambda status: None,
+    ) -> tuple[list[Artifact], dict]:
         payload = {**arguments, **({"uploads": uploads} if uploads else {})}
 
         async def work(session):
@@ -97,8 +113,10 @@ class McpAdapter:
         found = artifacts(result)
         if not found:
             raise studio.StudioError("MCP 工具结果中没有图片、视频或产物地址")
-        return found, {"content": [getattr(item, "type", "?") for item in result.content],
-                       "text": " ".join(texts)[:500] or None}
+        return found, {
+            "content": [getattr(item, "type", "?") for item in result.content],
+            "text": " ".join(texts)[:500] or None,
+        }
 
 
 def _message(exc: BaseException) -> str:

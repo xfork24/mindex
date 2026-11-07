@@ -1,21 +1,31 @@
+"""创作工作区节点、版本与依赖失效回归。"""
+
 from __future__ import annotations
 
 import copy
+import hashlib
+import io
 import json
+import math
+import struct
+import threading
 import time
 import wave
+from threading import Event
+from unittest.mock import patch
 
 import pytest
-from conftest import FixtureEmbedder, FixtureSpeaker, FixtureStoryboarder, convert_to_legacy, legacy_job
 from fastapi.testclient import TestClient
+from filelock import FileLock
 
-from mindex.api import create_app
-from mindex.processing.indexing import IndexBuilder
-from mindex.processing.pipeline import Pipeline
-from mindex.shared.media import command
-from mindex.shared.storage import Store
-from mindex.studio import studio
-from mindex.studio import workspace as ws
+from api import create_app
+from conftest import FixtureEmbedder, FixtureSpeaker, FixtureStoryboarder, convert_to_legacy, legacy_job
+from processing.indexing import IndexBuilder
+from processing.pipeline import Pipeline
+from shared.media import command
+from shared.storage import Store
+from studio import studio
+from studio import workspace as ws
 
 pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
 
@@ -293,9 +303,10 @@ def test_workspace_reports_retrieval_combination_dependency(prepared):
     # 成片合成版本沿 渲染 → 选片 → 召回 依赖链用到的组合。
     composes = [vid for vid, item in data["versions"].items() if item["stage"] == "compose"]
     assert composes and set(retrieval["compose"]) == set(composes)
-    assert [(g["content_id"], g["release_id"], g["shots"], g["current"]) for g in retrieval["compose"][composes[0]]] == [
-        (parameters["index_id"], parameters["person_release"], len(recalled), True)
-    ]
+    assert [
+        (g["content_id"], g["release_id"], g["shots"], g["current"])
+        for g in retrieval["compose"][composes[0]]
+    ] == [(parameters["index_id"], parameters["person_release"], len(recalled), True)]
 
     # 激活另一个内容索引后，生效组合改变，已有召回仍显示它们生成时依赖的组合。
     store = Store(config.data_dir)
@@ -306,7 +317,9 @@ def test_workspace_reports_retrieval_combination_dependency(prepared):
     assert changed["active"]["content_id"] == "other-index"
     assert changed["active"]["release_id"] != parameters["person_release"]
     assert [(g["content_id"], g["current"]) for g in changed["used"]] == [(parameters["index_id"], False)]
-    assert [(g["content_id"], g["current"]) for g in changed["compose"][composes[0]]] == [(parameters["index_id"], False)]
+    assert [(g["content_id"], g["current"]) for g in changed["compose"][composes[0]]] == [
+        (parameters["index_id"], False)
+    ]
     assert client.get(f"{base}/workspace?compact=true").json()["retrieval"] == changed
 
 
@@ -426,7 +439,6 @@ def test_workspace_api_title_plans_preview_confirmation_and_stale_binding(prepar
     assert client.get(artifact, headers={"Range": "bytes=0-127"}).status_code == 206
     download = client.get(f"{artifact}?download=true")
     assert download.status_code == 200 and "attachment" in download.headers["content-disposition"]
-    import hashlib
 
     assert hashlib.sha256(download.content).hexdigest() == data["versions"][final]["files"]["mp4"]["sha256"]
 
@@ -453,7 +465,7 @@ def test_migration_snapshots_and_unknown_dependencies_are_honest(config):
 
 
 def test_legacy_render_versions_are_imported_without_inventing_edges(prepared):
-    from mindex.studio import studio_steps
+    from studio import steps as studio_steps
 
     config, embedder = prepared
     jid = legacy_job(config, "历史红色文案。", options={"burn": False})["id"]
@@ -482,10 +494,6 @@ def test_legacy_render_versions_are_imported_without_inventing_edges(prepared):
 
 
 def test_api_execution_lock_and_recovery(config):
-    import threading
-    from threading import Event
-
-    from filelock import FileLock
 
     entered, release = Event(), Event()
 
@@ -538,8 +546,6 @@ def test_api_execution_lock_and_recovery(config):
             raise RuntimeError("worker startup failed")
         return original(thread)
 
-    from unittest.mock import patch
-
     fresh = client.get(f"{base}/workspace").json()
     body["revision"] = fresh["revision"]
     with patch.object(threading.Thread, "start", start), pytest.raises(RuntimeError, match="startup"):
@@ -551,9 +557,6 @@ def test_api_execution_lock_and_recovery(config):
 
 @pytest.mark.parametrize("burn", [False, True])
 def test_mixed_render_picture_audio_and_subtitle_match_bound_versions(prepared, burn):
-    import io
-    import math
-    import struct
 
     config, embedder = prepared
     jid, w, p = setup_workspace(config)
@@ -664,7 +667,9 @@ def test_build_without_storyboard_runs_full_pipeline(prepared, legacy):
     client = TestClient(
         create_app(config, embedder, speaker=FixtureSpeaker(config), storyboarder=FixtureStoryboarder(config))
     )
-    jid = client.post("/api/studio/jobs", json={"text": "红色开场。蓝色结尾。", "options": {"burn": False}}).json()["id"]
+    jid = client.post(
+        "/api/studio/jobs", json={"text": "红色开场。蓝色结尾。", "options": {"burn": False}}
+    ).json()["id"]
     if legacy:
         convert_to_legacy(config, jid)
     base = f"/api/studio/jobs/{jid}"
@@ -683,6 +688,8 @@ def test_build_without_storyboard_runs_full_pipeline(prepared, legacy):
     assert build["status"] == "complete", build
     stages = [n["stage"] for n in build["nodes"]]
     expected = ["split", "recall", "tts", "select", "render", "compose"]
-    assert list(dict.fromkeys(stages)) == (expected if legacy else ["script", *expected, "export", "metadata", "cover", "package"])
+    assert list(dict.fromkeys(stages)) == (
+        expected if legacy else ["script", *expected, "export", "metadata", "cover", "package"]
+    )
     assert all(n["status"] in ("complete", "reused") for n in build["nodes"])
     assert data["plans"][pid]["final"]

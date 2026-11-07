@@ -15,8 +15,8 @@ from urllib.parse import urlparse
 import httpx
 from pydantic import ValidationError
 
-from mindex.models import adapters
-from mindex.models.adapters import (
+from models import adapters
+from models.adapters import (
     AnalysisContentRejected,
     InvalidAnalysisResponse,
     InvalidAnalysisStructure,
@@ -25,11 +25,11 @@ from mindex.models.adapters import (
     analysis_content_rejection,
     parse_json,
 )
-from mindex.shared.analysis_text import select_analysis
-from mindex.shared.config import Config
-from mindex.shared.media import frame_data
-from mindex.shared.trace import record
-from mindex.shared.types import Annotation
+from shared.analysis_text import select_analysis
+from shared.config import Config
+from shared.media import frame_data
+from shared.trace import record
+from shared.types import Annotation
 
 log = logging.getLogger(__name__)
 
@@ -87,25 +87,44 @@ class QwenAnalyzer:
                     ) from exc
                 if isinstance(exc, InvalidAnalysisStructure):
                     retry_instructions = (
-                        instructions + "\n上次响应未通过结构校验：" + str(exc)
+                        instructions
+                        + "\n上次响应未通过结构校验："
+                        + str(exc)
                         + "。请根据原始输入重新生成符合上述字段类型和约束的完整 JSON，"
                         "逐项检查类型；不要解释错误或输出 JSON 之外的任何文字。"
                     )
                 budget = min(budget * 2, self.profile.max_output_tokens)
-                delay = min(2 ** attempt, 8)
+                delay = min(2**attempt, 8)
                 log.warning(
                     "分析模型 %s 响应无效（%d/%d）：%s；%s 秒后重试，max_tokens=%d",
-                    self.profile.model, attempt + 1, attempts, exc, delay, budget,
+                    self.profile.model,
+                    attempt + 1,
+                    attempts,
+                    exc,
+                    delay,
+                    budget,
                 )
-                record("analysis-retry", {
-                    "model": self.profile.model, "attempt": attempt + 1,
-                    "attempts": attempts, "delay_seconds": delay, "error": str(exc), "max_tokens": budget,
-                })
+                record(
+                    "analysis-retry",
+                    {
+                        "model": self.profile.model,
+                        "attempt": attempt + 1,
+                        "attempts": attempts,
+                        "delay_seconds": delay,
+                        "error": str(exc),
+                        "max_tokens": budget,
+                    },
+                )
                 time.sleep(delay)
         raise AssertionError("unreachable")
 
     def _chat_once(
-        self, content: list[dict], instructions: str, max_tokens: int, *, validate: Callable | None = None,
+        self,
+        content: list[dict],
+        instructions: str,
+        max_tokens: int,
+        *,
+        validate: Callable | None = None,
     ):
         try:
             return self._chat_response(content, instructions, max_tokens, validate=validate)
@@ -119,17 +138,30 @@ class QwenAnalyzer:
                         raise AnalysisContentRejected(reason) from exc
                 if isinstance(exc.__cause__, json.JSONDecodeError):
                     raise InvalidAnalysisResponse("分析服务响应不是有效 JSON") from exc
-                if isinstance(exc.__cause__, httpx.HTTPStatusError) and exc.__cause__.response.status_code == 500:
+                if (
+                    isinstance(exc.__cause__, httpx.HTTPStatusError)
+                    and exc.__cause__.response.status_code == 500
+                ):
                     raise InvalidAnalysisResponse(str(exc)) from exc
             raise
 
     def _chat_response(
-        self, content: list[dict], instructions: str, max_tokens: int, *, validate: Callable | None = None,
+        self,
+        content: list[dict],
+        instructions: str,
+        max_tokens: int,
+        *,
+        validate: Callable | None = None,
     ):
         started = perf_counter()
         text_only = all(item.get("type") == "text" for item in content)
-        log.info("LLM 请求开始 %s · %s · max_tokens=%d · timeout=%gs",
-                 self.profile.model, "场景分组/文本任务" if text_only else "视频分析", max_tokens, self.profile.timeout)
+        log.info(
+            "LLM 请求开始 %s · %s · max_tokens=%d · timeout=%gs",
+            self.profile.model,
+            "场景分组/文本任务" if text_only else "视频分析",
+            max_tokens,
+            self.profile.timeout,
+        )
         payload = adapters.request(
             "POST",
             self.profile.base_url.rstrip("/") + "/chat/completions",
@@ -152,9 +184,12 @@ class QwenAnalyzer:
         details = details if isinstance(details, dict) else {}
         log.info(
             "LLM %s %.2f 秒 · 输入 %s token · 输出 %s token · 思考 %s token · 模式 %s",
-            self.profile.model, perf_counter() - started,
-            usage.get("prompt_tokens", "未知"), usage.get("completion_tokens", "未知"),
-            details.get("reasoning_tokens", "未知"), self.profile.thinking_mode,
+            self.profile.model,
+            perf_counter() - started,
+            usage.get("prompt_tokens", "未知"),
+            usage.get("completion_tokens", "未知"),
+            details.get("reasoning_tokens", "未知"),
+            self.profile.thinking_mode,
         )
         try:
             choice = payload["choices"][0]
@@ -177,7 +212,9 @@ class QwenAnalyzer:
         except (InvalidAnalysisResponse, KeyError, TypeError, IndexError, AttributeError) as exc:
             log.warning(
                 "分析模型 %s 返回无效响应（max_tokens=%d）：\n%s\n—— 模型返回结束 ——",
-                self.profile.model, max_tokens, json.dumps(payload, ensure_ascii=False, indent=2),
+                self.profile.model,
+                max_tokens,
+                json.dumps(payload, ensure_ascii=False, indent=2),
             )
             if isinstance(exc, InvalidAnalysisResponse):
                 raise
@@ -187,17 +224,21 @@ class QwenAnalyzer:
     def _validate_annotation(result) -> Annotation:
         try:
             annotation = Annotation.model_validate(result)
-            values = [(field if isinstance(value, str) else f"{field}.{i}", text)
-                      for field, value in annotation.model_dump().items()
-                      for i, text in enumerate([value] if isinstance(value, str) else value)]
+            values = [
+                (field if isinstance(value, str) else f"{field}.{i}", text)
+                for field, value in annotation.model_dump().items()
+                for i, text in enumerate([value] if isinstance(value, str) else value)
+            ]
             # 单语旧适配器仍兼容；双语响应必须逐项分隔且英文中不再混入汉字。
-            if any(re.search(r"[\u3400-\u9fff]", text) and re.search(r"[A-Za-z]", text)
-                   for _, text in values):
+            if any(
+                re.search(r"[\u3400-\u9fff]", text) and re.search(r"[A-Za-z]", text) for _, text in values
+            ):
                 for field, text in values:
                     english = select_analysis(text, "en")
                     if english == text or re.search(r"[\u3400-\u9fff]", english):
                         raise InvalidAnalysisStructure(
-                            f"{field}: 双语分析必须使用中文 / English，英文部分不得含汉字")
+                            f"{field}: 双语分析必须使用中文 / English，英文部分不得含汉字"
+                        )
             return annotation
         except ValidationError as exc:
             # Feed back field paths and expected types, not untrusted model text.
@@ -221,35 +262,35 @@ class QwenAnalyzer:
                 {"type": "image_url", "image_url": {"url": uri}},
             ]
         instructions = (
-            "为影视片段同时生成简洁、客观、可检索的中文和英文分析。"
-            "中英文必须在同一次响应中同时输出，不能只选一种语言。"
-            "保持下述字段名和类型不变，不增加 zh、en、translations 或任何新字段。"
-            "每个字符串统一使用『中文 / English』格式：先中文，再用空格、斜杠、空格分隔，后接自然英文。"
-            "description 的中文描述后必须紧跟含义一致的英文描述；所有数组中的每一项也必须是中英对照短语。"
-            "英文用常见、具体的视频检索词和规范镜头术语，不用拼音，不照抄中文冒充英文。"
-            "英文部分不得含任何汉字；画面文字、字幕引用和人名也须翻译或转写为英文。"
-            "禁止省略中英文之间的空格斜杠空格分隔符，例如必须写仰视 / low-angle view，不能写仰视 low-angle view。"
-            "两种语言描述同一组事实，英文不得增加画面中不存在的细节、人物身份、声音或事件。"
-            "输出只能是一个合法 JSON 对象，从 { 开始到 } 结束。"
-            "禁止 Markdown、代码块、前言、总结、分析过程、字段说明及 JSON 之外的任何文字。"
-            "仅使用以下字段，description 必填，其余仅有明确依据时输出，未知或空列表省略："
-            "description（字符串，中文1到2句、尽量不超过120字，英文1到2句、尽量不超过60词；概括主体、关键动作和环境）；"
-            "actions（动作顺序）、people（可见人物外观）、objects（主要物品）、scene（地点与环境）、"
-            "emotions（可观察情绪）、atmosphere（氛围）、shot_size（景别）、angle（角度）、"
-            "camera_motion（镜头运动）、visual_evidence（关键画面依据）、"
-            "dialogue_inference（仅对白支持的推断）、uncertainty（影响理解的重要不确定项）。"
-            "除 description 外字段都是字符串数组，每项是一对中英文短语，不要把两种语言拆成两个数组元素，通常每字段最多3项；"
-            "这些字段即使只有一项也必须写成数组，不能写成字符串、对象或 null；"
-            '例如 scene 正确为 ["夜间城市滨水区 / urban waterfront at night"]，不能写成 "夜间城市滨水区"；'
-            'shot_size 正确为 ["远景 / wide shot"]，不能写成 "远景"。'
-            '格式示例：{"description":"城市滨水区的灯光倒映在水面。 / City waterfront lights reflect on the water.",'
-            '"scene":["夜间城市滨水区 / urban waterfront at night","水面倒映灯光 / lights reflected on water"],"shot_size":["远景 / wide shot"]}。'
-            "示例仅说明格式，内容须以当前画面为准。输出前检查 description 是非空字符串，"
-            "其余已输出字段均为数组且每个元素都是字符串，并检查每个字符串都有中文及含义一致的英文；未知字段省略，不用 null 或空字符串占位。"
-            "visual_evidence、dialogue_inference、uncertainty 各最多2项，不重复复述描述。"
-            "只保留有区分度且有依据的信息，不列无关细节，不逐帧复述。"
-            "情绪须有表情或行为依据；人物仅描述外观，不识别真实身份。"
-            "禁止虚构声音、姓名、身份或画面外事件。"
+            "为影视片段同时生成简洁、客观、可检索的中文和英文分析。中英文必须在同一次响应中同"
+            "时输出，不能只选一种语言。保持下述字段名和类型不变，不增加 zh、en、translations "
+            "或任何新字段。每个字符串统一使用『中文 / English』格式：先中文，再用空格、斜杠、"
+            "空格分隔，后接自然英文。description 的中文描述后必须紧跟含义一致的英文描述；所有"
+            "数组中的每一项也必须是中英对照短语。英文用常见、具体的视频检索词和规范镜头术语，"
+            "不用拼音，不照抄中文冒充英文。英文部分不得含任何汉字；画面文字、字幕引用和人名也"
+            "须翻译或转写为英文。禁止省略中英文之间的空格斜杠空格分隔符，例如必须写仰视 / low"
+            "-angle view，不能写仰视 low-angle view。两种语言描述同一组事实，英文不得增加画面"
+            "中不存在的细节、人物身份、声音或事件。输出只能是一个合法 JSON 对象，从 { 开始到 "
+            "} 结束。禁止 Markdown、代码块、前言、总结、分析过程、字段说明及 JSON 之外的任何"
+            "文字。仅使用以下字段，description 必填，其余仅有明确依据时输出，未知或空列表省略"
+            "：description（字符串，中文1到2句、尽量不超过120字，英文1到2句、尽量不超过60词；"
+            "概括主体、关键动作和环境）；actions（动作顺序）、people（可见人物外观）、objects"
+            "（主要物品）、scene（地点与环境）、emotions（可观察情绪）、atmosphere（氛围）、s"
+            "hot_size（景别）、angle（角度）、camera_motion（镜头运动）、visual_evidence（关"
+            "键画面依据）、dialogue_inference（仅对白支持的推断）、uncertainty（影响理解的重"
+            "要不确定项）。除 description 外字段都是字符串数组，每项是一对中英文短语，不要把"
+            "两种语言拆成两个数组元素，通常每字段最多3项；这些字段即使只有一项也必须写成数组"
+            '，不能写成字符串、对象或 null；例如 scene 正确为 ["夜间城市滨水区 / urban waterf'
+            'ront at night"]，不能写成 "夜间城市滨水区"；shot_size 正确为 ["远景 / wide shot"'
+            ']，不能写成 "远景"。格式示例：{"description":"城市滨水区的灯光倒映在水面。 / Cit'
+            'y waterfront lights reflect on the water.","scene":["夜间城市滨水区 / urban wate'
+            'rfront at night","水面倒映灯光 / lights reflected on water"],"shot_size":["远景 '
+            '/ wide shot"]}。示例仅说明格式，内容须以当前画面为准。输出前检查 description 是'
+            "非空字符串，其余已输出字段均为数组且每个元素都是字符串，并检查每个字符串都有中文"
+            "及含义一致的英文；未知字段省略，不用 null 或空字符串占位。visual_evidence、dialo"
+            "gue_inference、uncertainty 各最多2项，不重复复述描述。只保留有区分度且有依据的信"
+            "息，不列无关细节，不逐帧复述。情绪须有表情或行为依据；人物仅描述外观，不识别真实"
+            "身份。禁止虚构声音、姓名、身份或画面外事件。"
         )
         return self._chat(content, instructions, validate=self._validate_annotation)
 
@@ -257,9 +298,13 @@ class QwenAnalyzer:
         if not units:
             return []
         compact = [
-            {"index": index, "start": round(unit["start"], 3), "end": round(unit["end"], 3),
-             **({"description": unit["description"][:160]} if "description" in unit else {}),
-             **({"scene": unit["scene"][:3]} if unit.get("scene") else {})}
+            {
+                "index": index,
+                "start": round(unit["start"], 3),
+                "end": round(unit["end"], 3),
+                **({"description": unit["description"][:160]} if "description" in unit else {}),
+                **({"scene": unit["scene"][:3]} if unit.get("scene") else {}),
+            }
             for index, unit in enumerate(units)
         ]
         content = [{"type": "text", "text": json.dumps(compact, ensure_ascii=False, separators=(",", ":"))}]
@@ -269,7 +314,7 @@ class QwenAnalyzer:
             (
                 "将连续影视片段按场景、对白和事件组织成连续场景。"
                 "只选择场景边界，由程序展开为完整分组。"
-                '输出只能是一个 JSON 对象，唯一字段为 scene_starts，表示每个场景的起始片段 index。'
+                "输出只能是一个 JSON 对象，唯一字段为 scene_starts，表示每个场景的起始片段 index。"
                 f"本批共有 {len(units)} 个片段，index 为 0 到 {len(units) - 1}；"
                 f"格式示例：{json.dumps(example, separators=(',', ':'))}。示例仅说明格式。"
                 "从 { 开始到 } 结束，禁止代码块、分组说明、理由、标题、总结、"

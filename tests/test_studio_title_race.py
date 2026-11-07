@@ -1,12 +1,13 @@
 """后台标题与执行线程共享 job.json；不得用旧状态覆盖已完成步骤。"""
+
 import threading
 import time
 
 from fastapi.testclient import TestClient
 
-from mindex.api import create_app
-from mindex.shared import locks
-from mindex.studio import studio
+from api import create_app
+from shared import locks
+from studio import studio
 
 
 def test_title_waits_for_execution_lock_before_reading_and_merging(config, monkeypatch):
@@ -31,7 +32,7 @@ def test_title_waits_for_execution_lock_before_reading_and_merging(config, monke
             assert response.status_code == 201, response.text
             job_id = response.json()["id"]
             assert generated.wait(3)
-            assert not read.wait(.2)  # 执行持锁期间不能先读出一份将要过期的状态。
+            assert not read.wait(0.2)  # 执行持锁期间不能先读出一份将要过期的状态。
             state = load_job(config, job_id)
             state["steps"]["split"]["status"] = "complete"
             studio.save(studio.job_path(config, job_id), state, config=config)
@@ -40,7 +41,7 @@ def test_title_waits_for_execution_lock_before_reading_and_merging(config, monke
             state = load_job(config, job_id)
             if not state["title_pending"]:
                 break
-            time.sleep(.02)
+            time.sleep(0.02)
         assert state["title_pending"] is False
         assert state["title"] == "后台生成的标题"
         assert state["steps"]["split"]["status"] == "complete"

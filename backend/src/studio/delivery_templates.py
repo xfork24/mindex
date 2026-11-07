@@ -1,4 +1,5 @@
 """Reusable delivery settings. Plans own snapshots, never live template references."""
+
 from __future__ import annotations
 
 import json
@@ -6,11 +7,13 @@ import re
 from typing import Literal
 from uuid import uuid4
 
+from fastapi import HTTPException
 from pydantic import Field, field_validator
 
-from mindex.shared.config import StrictModel
-from mindex.studio import brands, platforms, studio
-from mindex.studio.delivery_models import PublishOptions
+from admin.curation import EntityNotFound
+from shared.config import StrictModel
+from studio import brands, platforms, studio
+from studio.delivery_models import PublishOptions
 
 CANVASES = ("16:9", "9:16", "1:1")
 
@@ -52,8 +55,12 @@ class DeliveryChecks(StrictModel):
 
 
 class DeliveryConfig(StrictModel):
-    exports: list[DeliveryExport] = Field(default_factory=lambda: [DeliveryExport(canvas=c) for c in CANVASES], max_length=3)
-    publish: PublishOptions | None = Field(default_factory=lambda: PublishOptions(platforms=list(platforms.BUILTIN_ORDER)))
+    exports: list[DeliveryExport] = Field(
+        default_factory=lambda: [DeliveryExport(canvas=c) for c in CANVASES], max_length=3
+    )
+    publish: PublishOptions | None = Field(
+        default_factory=lambda: PublishOptions(platforms=list(platforms.BUILTIN_ORDER))
+    )
     cover_asset: brands.AssetRef | None = None
     rules: dict[platforms.PlatformId, MetadataRule] = Field(default_factory=dict)
     package: PackageOptions = Field(default_factory=PackageOptions)
@@ -95,7 +102,11 @@ class TemplateBody(StrictModel):
 def default_config(store):
     config = DeliveryConfig()
     keys = [item["id"] for item in platforms.catalogue(store) if item["id"] in platforms.BUILTIN_ORDER]
-    config.publish = PublishOptions.model_validate(platforms.snapshot_publish({"platforms": keys}, store)) if keys else None
+    config.publish = (
+        PublishOptions.model_validate(platforms.snapshot_publish({"platforms": keys}, store))
+        if keys
+        else None
+    )
     return config
 
 
@@ -105,28 +116,47 @@ def default_snapshot(store):
 
 def freeze_config(config, store=None, *, legacy=False):
     if config.publish:
-        config.publish = PublishOptions.model_validate(platforms.snapshot_publish(config.publish.model_dump(), store, legacy=legacy))
+        config.publish = PublishOptions.model_validate(
+            platforms.snapshot_publish(config.publish.model_dump(), store, legacy=legacy)
+        )
     return config
 
 
 def get(store, template_id):
     if template_id == "base":
-        return {"id": "base", "name": "基本模板", "builtin": True, "config": default_config(store).model_dump()}
+        return {
+            "id": "base",
+            "name": "基本模板",
+            "builtin": True,
+            "config": default_config(store).model_dump(),
+        }
     row = store.one("SELECT * FROM delivery_templates WHERE id=?", (template_id,))
     if not row:
-        from mindex.admin.curation import EntityNotFound
         raise EntityNotFound("找不到交付模板")
-    return {"id": row["id"], "name": row["name"], "builtin": False,
-            "config": freeze_config(DeliveryConfig.model_validate(json.loads(row["body"])), legacy=True).model_dump()}
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "builtin": False,
+        "config": freeze_config(
+            DeliveryConfig.model_validate(json.loads(row["body"])), legacy=True
+        ).model_dump(),
+    }
 
 
 def apply(options, snapshot):
     """Translate the complete snapshot to existing execution options, excluding the master canvas."""
-    data = snapshot.model_dump() if isinstance(snapshot, DeliverySnapshot) else DeliverySnapshot.model_validate(snapshot).model_dump()
+    data = (
+        snapshot.model_dump()
+        if isinstance(snapshot, DeliverySnapshot)
+        else DeliverySnapshot.model_validate(snapshot).model_dump()
+    )
     cfg = data["config"]
-    return {**options, "delivery": data,
-            "exports": [x for x in cfg["exports"] if x["canvas"] != options.get("canvas", "16:9")] or None,
-            "publish": cfg["publish"]}
+    return {
+        **options,
+        "delivery": data,
+        "exports": [x for x in cfg["exports"] if x["canvas"] != options.get("canvas", "16:9")] or None,
+        "publish": cfg["publish"],
+    }
 
 
 def copy_cover(config, job_id, snapshot):
@@ -144,11 +174,17 @@ def asset_paths(config):
 
 
 def delivery_routes(router, store, mutation_lock, *, current):
-    from fastapi import HTTPException
 
     @router.get("/delivery-templates")
     def listing():
-        return {"items": [get(store, "base")] + [get(store, r["id"]) for r in store.rows("SELECT id FROM delivery_templates ORDER BY created_at,id")], "default": "base"}
+        return {
+            "items": [get(store, "base")]
+            + [
+                get(store, r["id"])
+                for r in store.rows("SELECT id FROM delivery_templates ORDER BY created_at,id")
+            ],
+            "default": "base",
+        }
 
     @router.get("/delivery-templates/{template_id}")
     def detail(template_id: str):
@@ -160,8 +196,18 @@ def delivery_routes(router, store, mutation_lock, *, current):
             source = get(store, template_id)
             key = "user-" + uuid4().hex[:16]
             now = studio.now()
-            store.execute("INSERT INTO delivery_templates(id,name,body,asset_paths,created_at,updated_at) VALUES(?,?,?,?,?,?)",
-                          (key, body.name, json.dumps(source["config"], ensure_ascii=False), asset_paths(DeliveryConfig.model_validate(source["config"])), now, now))
+            store.execute(
+                "INSERT INTO delivery_templates(id,name,body,asset_paths,created_at,updated_at) "
+                "VALUES(?,?,?,?,?,?)",
+                (
+                    key,
+                    body.name,
+                    json.dumps(source["config"], ensure_ascii=False),
+                    asset_paths(DeliveryConfig.model_validate(source["config"])),
+                    now,
+                    now,
+                ),
+            )
             return get(store, key)
 
     @router.put("/delivery-templates/{template_id}")
@@ -173,8 +219,16 @@ def delivery_routes(router, store, mutation_lock, *, current):
             freeze_config(body.config, store)
             if body.config.cover_asset:
                 brands.require_asset(current(), body.config.cover_asset)
-            store.execute("UPDATE delivery_templates SET name=?,body=?,asset_paths=?,updated_at=? WHERE id=?",
-                          (body.name, body.config.model_dump_json(), asset_paths(body.config), studio.now(), template_id))
+            store.execute(
+                "UPDATE delivery_templates SET name=?,body=?,asset_paths=?,updated_at=? WHERE id=?",
+                (
+                    body.name,
+                    body.config.model_dump_json(),
+                    asset_paths(body.config),
+                    studio.now(),
+                    template_id,
+                ),
+            )
             return get(store, template_id)
 
     @router.delete("/delivery-templates/{template_id}")

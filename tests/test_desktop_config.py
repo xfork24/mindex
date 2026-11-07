@@ -7,7 +7,7 @@ import re
 import shutil
 from pathlib import Path
 
-from mindex.shared.config import load_config
+from shared.config import load_config
 
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE = ROOT / "desktop" / "config.template.yaml"
@@ -29,6 +29,7 @@ def test_template_validates_and_resolves_inside_user_data(tmp_path):
 
 def test_template_ports_match_run_scripts():
     """模板里的本机端口与 scripts/run-*.sh 的默认端口一致。"""
+
     def default_port(script, variable):
         text = (ROOT / "scripts" / script).read_text(encoding="utf-8")
         return int(re.search(rf"\${{{variable}:-(\d+)}}", text).group(1))

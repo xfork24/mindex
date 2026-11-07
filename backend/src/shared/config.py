@@ -1,17 +1,22 @@
+"""严格配置模型、配置加载与模型身份指纹。"""
+
 from __future__ import annotations
 
 import hashlib
 import json
 import math
 import os
+import re
 from pathlib import Path
 from typing import Annotated, Literal
+from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
-from mindex.shared.agent_domains import LOADABLE_DOMAINS
-from mindex.shared.comfyui import IMAGE_MAPPING_FIELDS, MUSIC_MAPPING_FIELDS, validate_workflow, workflow_hash
+from shared.agent_domains import LOADABLE_DOMAINS
+from shared.comfyui import IMAGE_MAPPING_FIELDS, MUSIC_MAPPING_FIELDS, validate_workflow, workflow_hash
 
 
 def fingerprint(value: object) -> str:
@@ -114,7 +119,9 @@ class GeneratorConfig(Service):
 
 
 class SpeakerConfig(Service):
-    """TTS 语音合成服务（llama-server GGUF，OpenAI /audio/speech 风格端点；线上为 minimax/dashscope 专用协议）。"""
+    """TTS 语音合成服务（llama-server GGUF，OpenAI /audio/speech 风格端点；线上为
+    minimax/dashscope 专用协议）。
+    """
 
     backend: Literal["openai", "minimax", "dashscope"] = "openai"
     base_url: str = "http://192.168.1.86:4030/v1"
@@ -126,7 +133,8 @@ class SpeakerConfig(Service):
 
 
 class VideoGeneratorConfig(Service):
-    """AIGC 视频生成服务（aigc 分镜的 generate 阶段）：MiniMax H3（V2 多模态）/ MiniMax 海螺 / 阿里通义万相 / 自建 ComfyUI。
+    """AIGC 视频生成服务（aigc 分镜的 generate 阶段）：MiniMax H3（V2 多模态）/ MiniMax 海螺 /
+    阿里通义万相 / 自建 ComfyUI。
 
     缺省关闭：设置页激活「视频生成」档案或 yaml 设 enabled: true 后才会提交生成任务；
     测试连接只做鉴权/可达性探测，从不发起付费生成。``minimax_h3`` 后端在设置页只需配置 endpoint 与密钥，
@@ -141,7 +149,9 @@ class VideoGeneratorConfig(Service):
     poll_interval: float = Field(default=5, gt=0, le=300)  # 首次轮询间隔（秒），之后按 1.5 倍退避
     max_wait: float = Field(default=900, gt=0, le=86400)  # 单个分镜从提交到完成的总等待上限（秒）
     # 后端允许的生成时长（秒）：配音时长向上取整到最近的允许值，超过最大值时取最大值（不足部分冻结帧兜底）。
-    durations: list[Annotated[float, Field(gt=0, le=120)]] = Field(default_factory=lambda: [5.0], min_length=1)
+    durations: list[Annotated[float, Field(gt=0, le=120)]] = Field(
+        default_factory=lambda: [5.0], min_length=1
+    )
     fps: int = Field(default=16, ge=1, le=60)  # ComfyUI 帧数映射 = 时长 × fps
     comfyui_workflow: dict | None = None  # ComfyUI「导出（API）」格式工作流
     comfyui_mapping: dict[str, str] | None = None  # 请求字段 → "节点ID.inputs.输入名"
@@ -160,8 +170,11 @@ class VideoGeneratorConfig(Service):
         """影响生成画面的字段（无密钥、超时与轮询参数）；工作流以内容摘要代替全文。"""
         value = {"backend": self.backend, "model": self.model, "durations": list(self.durations)}
         if self.backend == "comfyui":
-            value.update(fps=self.fps, workflow=workflow_hash(self.comfyui_workflow),
-                         mapping=dict(sorted((self.comfyui_mapping or {}).items())))
+            value.update(
+                fps=self.fps,
+                workflow=workflow_hash(self.comfyui_workflow),
+                mapping=dict(sorted((self.comfyui_mapping or {}).items())),
+            )
         return value
 
 
@@ -186,16 +199,20 @@ class _ComfyUIMixin(StrictModel):
 
     def _comfy_signature(self, value: dict) -> dict:
         if self.backend == "comfyui":
-            value.update(workflow=workflow_hash(self.comfyui_workflow),
-                         mapping=dict(sorted((self.comfyui_mapping or {}).items())))
+            value.update(
+                workflow=workflow_hash(self.comfyui_workflow),
+                mapping=dict(sorted((self.comfyui_mapping or {}).items())),
+            )
         return value
 
 
 class ImageGeneratorConfig(_ComfyUIMixin, Service):
-    """AI 生成图片服务（aigc_image 分镜的 draw 阶段）：MiniMax image-01（文生图 / 主体参考图生图）或本地 ComfyUI。
+    """AI 生成图片服务（aigc_image 分镜的 draw 阶段）：MiniMax image-01（文生图 / 主体参考图生图）
+    或本地 ComfyUI。
 
-    缺省关闭：设置页激活「图片生成」档案或 yaml 设 enabled: true 后才会调用；测试连接只做鉴权探测，不生成图片。
-    生成的图片按静态图片的方式（推拉/平移）渲染成分镜画面。
+        缺省关闭：设置页激活「图片生成」档案或 yaml 设 enabled: true 后才会调用；测试连接只做鉴权探测，
+    不生成图片。
+        生成的图片按静态图片的方式（推拉/平移）渲染成分镜画面。
     """
 
     backend: Literal["minimax", "comfyui"] = "minimax"
@@ -215,10 +232,12 @@ class ImageGeneratorConfig(_ComfyUIMixin, Service):
 
 class MusicGeneratorConfig(_ComfyUIMixin, Service):
     """背景音乐生成服务（分镜工作台配音列的背景音乐 music 阶段）：MiniMax music-3.0（音乐生成）、
-    music-cover（翻唱）与歌词生成（lyrics_generation），或本地 ComfyUI 工作流（不含歌词生成）。
+        music-cover（翻唱）与歌词生成（lyrics_generation），或本地 ComfyUI 工作流（不含歌词生成）。
 
-    缺省关闭：设置页激活「音乐生成」档案或 yaml 设 enabled: true 后才会调用；测试连接只做鉴权探测，不生成音乐。
-    ``audiocpp`` 后端对接本地 audio.cpp 服务（``audiocpp_server`` 上的 MiniMax-Music3-GGUF），见 scripts/run-music3.sh。
+        缺省关闭：设置页激活「音乐生成」档案或 yaml 设 enabled: true 后才会调用；测试连接只做鉴权探测，
+    不生成音乐。
+        ``audiocpp`` 后端对接本地 audio.cpp 服务（``audiocpp_server`` 上的 MiniMax-Music3-GGUF），见
+    scripts/run-music3.sh。
     """
 
     backend: Literal["minimax", "comfyui", "audiocpp"] = "minimax"
@@ -331,9 +350,9 @@ class RenderConfig(StrictModel):
     # 方案画幅 → 输出分辨率。16:9 始终取 width/height（保持旧配置与旧签名不变），这里给出时必须一致；
     # 未给出的画幅用 DEFAULT_CANVASES。exclude=True：不进入任何 model_dump，因此既有渲染签名、
     # 配置指纹与任务快照逐字节不变；非默认画幅的尺寸由 render/compose 阶段显式写入签名参数。
-    canvases: dict[CanvasName, tuple[Annotated[int, Field(gt=0, strict=True)],
-                                     Annotated[int, Field(gt=0, strict=True)]]] = Field(
-        default_factory=dict, exclude=True)
+    canvases: dict[
+        CanvasName, tuple[Annotated[int, Field(gt=0, strict=True)], Annotated[int, Field(gt=0, strict=True)]]
+    ] = Field(default_factory=dict, exclude=True)
 
     @model_validator(mode="after")
     def valid_canvas(self):
@@ -366,7 +385,8 @@ class StudioConfig(StrictModel):
     material_digest_chars: int = Field(default=12000, ge=0, le=100000, strict=True)
     # 每个方案登记的参考文稿总字符数上限（按 Unicode 字符计，规范化后统计）；超限返回 422。
     max_reference_chars: int = Field(default=30000, ge=1, le=1000000, strict=True)
-    # 分镜画面来源（clip/image）上传上限：片段时长（秒）与文件大小（MB）；图片沿用 search.max_image_upload_mb。
+    # 分镜画面来源（clip/image）上传上限：片段时长（秒）与文件大小（MB）；
+    # 图片沿用 search.max_image_upload_mb。
     max_clip_seconds: float = Field(default=300, gt=0, le=3600)
     max_clip_mb: int = Field(default=500, ge=1, le=10000)
     generator: GeneratorConfig = Field(default_factory=GeneratorConfig)
@@ -391,7 +411,10 @@ class StudioConfig(StrictModel):
     def writer_defaults_to_generator(cls, value):
         if isinstance(value, dict) and "writer" not in value and "generator" in value:
             generator = value["generator"]
-            value = {**value, "writer": generator.model_dump() if isinstance(generator, BaseModel) else generator}
+            value = {
+                **value,
+                "writer": generator.model_dump() if isinstance(generator, BaseModel) else generator,
+            }
         return value
 
 
@@ -532,8 +555,7 @@ class AgentMcpConfig(StrictModel):
         unknown = [item for item in value if item not in LOADABLE_DOMAINS]
         if unknown:
             raise ValueError(
-                f"agent.mcp.domains 包含未知领域：{'、'.join(unknown)}；"
-                f"可选：{'、'.join(LOADABLE_DOMAINS)}"
+                f"agent.mcp.domains 包含未知领域：{'、'.join(unknown)}；可选：{'、'.join(LOADABLE_DOMAINS)}"
             )
         return list(dict.fromkeys(value))
 
@@ -573,7 +595,9 @@ class LocalServiceConfig(StrictModel):
 
     name: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{0,31}$")
     label: str = Field(default="", max_length=60)
-    role: str = Field(default="", max_length=32)  # 用途说明，例如 embedding、asr、tts、music、detector、person
+    role: str = Field(
+        default="", max_length=32
+    )  # 用途说明，例如 embedding、asr、tts、music、detector、person
     argv: list[str] = Field(min_length=1)
     cwd: str | None = None  # 相对路径按配置文件所在目录解析
     env: dict[str, str] = Field(default_factory=dict)
@@ -611,8 +635,6 @@ class TopicsSchedulerConfig(StrictModel):
     @classmethod
     def valid_timezone(cls, value):
         if value is not None:
-            from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
-
             try:
                 ZoneInfo(value)
             except (ZoneInfoNotFoundError, ValueError) as exc:
@@ -730,11 +752,12 @@ class GpuConfig(StrictModel):
     capacity: int = Field(default=0, ge=0)
     queues: list[str] = Field(default_factory=lambda: ["source", "dialogue", "person"])
     groups: dict[str, GpuResourceGroup] = Field(default_factory=dict)
-    cpu_queues: list[Literal["source", "dialogue", "person", "topic", "studio", "index"]] = Field(default_factory=list)
+    cpu_queues: list[Literal["source", "dialogue", "person", "topic", "studio", "index"]] = Field(
+        default_factory=list
+    )
 
     @model_validator(mode="after")
     def valid_groups(self):
-        import re
 
         if any(not re.fullmatch(r"[a-zA-Z0-9_.:-]{1,128}", name) for name in self.groups):
             raise ValueError("GPU 物理资源组名称只能含字母、数字、下划线、点、冒号与连字符")
@@ -769,14 +792,19 @@ class S3Config(StrictModel):
 
     @model_validator(mode="after")
     def browser_access(self):
-        from urllib.parse import urlsplit
 
         for value in [self.endpoint_url, self.browser_endpoint_url, *self.browser_origins]:
             if not value:
                 continue
             parsed = urlsplit(value)
-            if (parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username
-                    or parsed.password or parsed.query or parsed.fragment):
+            if (
+                parsed.scheme not in {"http", "https"}
+                or not parsed.hostname
+                or parsed.username
+                or parsed.password
+                or parsed.query
+                or parsed.fragment
+            ):
                 raise ValueError("S3 endpoint/origin 必须是无凭据、查询参数和片段的 HTTP(S) 地址")
             if value in self.browser_origins and parsed.path not in {"", "/"}:
                 raise ValueError("浏览器 origin 不能包含路径")
@@ -847,14 +875,17 @@ class Config(StrictModel):
     search: SearchConfig = Field(default_factory=SearchConfig)
     clean: CleanConfig = Field(default_factory=CleanConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
-    # 本机模型服务管理（桌面版缺省开启）。exclude=True：不进入任何 model_dump，任务快照、备份配置与指纹逐字节不变。
+    # 本机模型服务管理（桌面版缺省开启）。
+    # exclude=True：不进入任何 model_dump，任务快照、备份配置与指纹逐字节不变。
     local_services: LocalServicesConfig = Field(default_factory=LocalServicesConfig, exclude=True)
     # 选题挖掘；exclude=True 同上：不进入任务快照、备份配置与任何指纹。
     topics: TopicsConfig = Field(default_factory=TopicsConfig, exclude=True)
 
     @model_validator(mode="after")
     def animator_defaults_to_agent(self):
-        """yaml 未写 ``studio.animator`` 时复制 ``agent.llm`` 的连接字段（含 api_key_env），其余取动画生成默认值。"""
+        """yaml 未写 ``studio.animator`` 时复制 ``agent.llm`` 的连接字段（含 api_key_env），
+        其余取动画生成默认值。
+        """
         if self.uploads.default_transport == "s3" and self.storage.backend != "s3":
             raise ValueError("uploads.default_transport=s3 需要 storage.backend=s3")
         if "animator" not in self.studio.model_fields_set:
@@ -870,7 +901,11 @@ class Config(StrictModel):
     def layout_key(self) -> str:
         # 超时只影响请求等待，不影响切分结果；排除它使切分布局（及片段 ID）与加入 timeout 字段之前一致。
         return fingerprint(
-            {"schema": 1, "detector": self.detector.model_dump(exclude={"timeout"}), "video": self.video.model_dump()}
+            {
+                "schema": 1,
+                "detector": self.detector.model_dump(exclude={"timeout"}),
+                "video": self.video.model_dump(),
+            }
         )
 
     @property
@@ -879,7 +914,14 @@ class Config(StrictModel):
             {
                 "prompt": 2,  # Chinese / English paired analysis; do not reuse monolingual checkpoints.
                 "model": self.analyzer.model_dump(
-                    exclude={"timeout", "api_key_env", "response_retries", "initial_output_tokens", "max_output_tokens", "thinking_mode"}
+                    exclude={
+                        "timeout",
+                        "api_key_env",
+                        "response_retries",
+                        "initial_output_tokens",
+                        "max_output_tokens",
+                        "thinking_mode",
+                    }
                 ),
                 "deployment": self.analyzer_deployment,
                 "layout": self.layout_key,
@@ -890,7 +932,9 @@ class Config(StrictModel):
     def analyzer_deployment(self):
         path = Path(self.analyzer.deployment_manifest or "")
         return (
-            json.loads(path.read_text(encoding="utf-8")) if self.analyzer.backend == "llama_cpp" and path.is_file() else None
+            json.loads(path.read_text(encoding="utf-8"))
+            if self.analyzer.backend == "llama_cpp" and path.is_file()
+            else None
         )
 
     @property
@@ -898,7 +942,9 @@ class Config(StrictModel):
         value = self.asr.model_dump(exclude={"timeout", "api_key_env", "max_tokens"})
         if self.asr.backend == "llama_cpp":
             path = Path(self.asr.deployment_manifest or "")
-            value["deployment"] = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else "missing"
+            value["deployment"] = (
+                json.loads(path.read_text(encoding="utf-8")) if path.is_file() else "missing"
+            )
         return fingerprint(value)
 
     @property
@@ -915,12 +961,21 @@ class Config(StrictModel):
                 "subtitle": self.studio.subtitle.model_dump(),
                 "render": self.studio.render.model_dump(),
                 # 视频生成只在启用时加键：未启用的配置指纹与旧版逐字节一致。
-                **({"video_generator": self.studio.video_generator.signature()}
-                   if self.studio.video_generator.enabled else {}),
-                **({"image_generator": self.studio.image_generator.signature()}
-                   if self.studio.image_generator.enabled else {}),
-                **({"music_generator": self.studio.music_generator.signature()}
-                   if self.studio.music_generator.enabled else {}),
+                **(
+                    {"video_generator": self.studio.video_generator.signature()}
+                    if self.studio.video_generator.enabled
+                    else {}
+                ),
+                **(
+                    {"image_generator": self.studio.image_generator.signature()}
+                    if self.studio.image_generator.enabled
+                    else {}
+                ),
+                **(
+                    {"music_generator": self.studio.music_generator.signature()}
+                    if self.studio.music_generator.enabled
+                    else {}
+                ),
             }
         )
 
@@ -945,7 +1000,9 @@ def load_config(path: str | Path | None = None) -> Config:
         if service.deployment_manifest:
             service.deployment_manifest = str((base / service.deployment_manifest).resolve())
     if config.studio.subtitle.font_file:
-        config.studio.subtitle.font_file = str((base / Path(config.studio.subtitle.font_file).expanduser()).resolve())
+        config.studio.subtitle.font_file = str(
+            (base / Path(config.studio.subtitle.font_file).expanduser()).resolve()
+        )
     for service in config.local_services.services:
         if service.cwd:
             service.cwd = str((base / Path(service.cwd).expanduser()).resolve())

@@ -1,10 +1,11 @@
 """便携 HTML 的媒体必须随导出复制，不能引用可淘汰的节点缓存。"""
+
 from __future__ import annotations
 
 import hashlib
 from pathlib import Path
 
-from mindex.shared.work_budget import copy_file
+from shared.work_budget import copy_file
 
 
 def copy_for_export(store, relative, directory):

@@ -13,17 +13,16 @@ from __future__ import annotations
 
 import time
 
-from mindex.models.adapters import ModelError, make_video_generator
-from mindex.models.video_generators import VideoContentRejected, VideoRequest, allowed_seconds
-from mindex.shared.media import MediaError, atomic_media, probe
-from mindex.studio import studio
-from mindex.studio.studio_artifacts import sanitized
-from mindex.studio.studio_logs import active_log
-
-from .. import sources
-from ..plans import canvas_render
-from ..stages import StageHandler, register, shot_content
-from ..versions import file_info
+from models.adapters import ModelError, make_video_generator
+from models.video_generators import VideoContentRejected, VideoRequest, allowed_seconds
+from shared.media import MediaError, atomic_media, probe
+from studio import studio
+from studio.artifacts import sanitized
+from studio.logs import active_log
+from studio.workspace import sources
+from studio.workspace.plans import canvas_render
+from studio.workspace.stages import StageHandler, register, shot_content
+from studio.workspace.versions import file_info
 
 GENERATE_VERSION = 1
 CANCELLED = "已取消"
@@ -32,8 +31,13 @@ POLL_ERRORS = 3  # 轮询连续失败（网络抖动等）的容忍次数；审�
 STATE_LABELS = {"queued": "排队中", "running": "生成中", "succeeded": "已完成", "failed": "失败"}
 
 
-MODE_LABELS = {"text": "文生视频", "first_frame": "首帧图生视频", "last_frame": "尾帧图生视频",
-               "first_last": "首尾帧生视频", "reference": "主体参考生视频"}
+MODE_LABELS = {
+    "text": "文生视频",
+    "first_frame": "首帧图生视频",
+    "last_frame": "尾帧图生视频",
+    "first_last": "首尾帧生视频",
+    "reference": "主体参考生视频",
+}
 # 只有 MiniMax H3（V2 多模态）支持尾帧、首尾帧与主体参考；其余后端只支持文生与首帧图生。
 BASIC_MODES = ("text", "first_frame")
 
@@ -55,8 +59,10 @@ def unavailable(config, source=None) -> str | None:
     elif not cfg.model.strip() and cfg.backend != "minimax_h3":
         return "视频生成档案未填写模型名，请在设置页补全"
     if source is not None and cfg.backend != "minimax_h3" and source_mode(source) not in BASIC_MODES:
-        return (f"当前视频生成档案（{cfg.backend}）不支持{MODE_LABELS[source_mode(source)]}，"
-                "请在设置页激活 MiniMax H3 视频生成档案，或把生成方式改为文生/首帧图生视频")
+        return (
+            f"当前视频生成档案（{cfg.backend}）不支持{MODE_LABELS[source_mode(source)]}，"
+            "请在设置页激活 MiniMax H3 视频生成档案，或把生成方式改为文生/首帧图生视频"
+        )
     return None
 
 
@@ -83,10 +89,14 @@ def generation_request(config, w, p, sid) -> dict:
         "height": render.height,
     }
     # MiniMax H3 的逐镜选项只在设置时加键：老 aigc 分镜的签名与旧版逐字节一致。
-    for key, value in (("mode", source.get("mode")), ("last_image", source.get("last_image_id")),
-                       ("references", [[item["kind"], item["media_id"]] for item in source.get("references") or []]),
-                       ("model", source.get("model")), ("resolution", source.get("resolution")),
-                       ("ratio", source.get("ratio"))):
+    for key, value in (
+        ("mode", source.get("mode")),
+        ("last_image", source.get("last_image_id")),
+        ("references", [[item["kind"], item["media_id"]] for item in source.get("references") or []]),
+        ("model", source.get("model")),
+        ("resolution", source.get("resolution")),
+        ("ratio", source.get("ratio")),
+    ):
         if value:
             request[key] = value
     return request
@@ -144,8 +154,26 @@ def normalize(download, target):
     try:
         atomic_media(["-i", str(download), *maps, "-c", "copy", "-movflags", "+faststart"], target)
     except MediaError:
-        atomic_media(["-i", str(download), *maps, "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast",
-                      "-crf", "18", "-c:a", "aac", "-movflags", "+faststart"], target)
+        atomic_media(
+            [
+                "-i",
+                str(download),
+                *maps,
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                "-preset",
+                "veryfast",
+                "-crf",
+                "18",
+                "-c:a",
+                "aac",
+                "-movflags",
+                "+faststart",
+            ],
+            target,
+        )
 
 
 class GenerateHandler(StageHandler):
@@ -187,24 +215,44 @@ class GenerateHandler(StageHandler):
             raise studio.StudioError("缺少成功配音，无法确定生成时长")
         image = sources.reference_image(ctx.config, ctx.job_id, source)
         last_image = sources.reference_image(ctx.config, ctx.job_id, source, "last_image_id")
-        references = tuple((item["kind"], sources.reference_file(ctx.config, ctx.job_id, item["kind"], item["media_id"]))
-                           for item in source.get("references") or [])
+        references = tuple(
+            (item["kind"], sources.reference_file(ctx.config, ctx.job_id, item["kind"], item["media_id"]))
+            for item in source.get("references") or []
+        )
         log = active_log.get()
         record_path = ctx.directory / "request.json"
-        record = {"request": request, "generator": ctx.spec["parameters"].get("generator"),
-                  "task_id": None, "status": None, "polls": 0, "submitted_at": None, "finished_at": None}
+        record = {
+            "request": request,
+            "generator": ctx.spec["parameters"].get("generator"),
+            "task_id": None,
+            "status": None,
+            "polls": 0,
+            "submitted_at": None,
+            "finished_at": None,
+        }
 
         def save(**update):
             record.update(update)
             studio.save(record_path, sanitized(record))
 
         save()
-        task_id = generator.submit(VideoRequest(
-            prompt=request["prompt"], negative_prompt=request["negative"], image=image,
-            seconds=request["seconds"], width=request["width"], height=request["height"], seed=request["seed"],
-            mode=source.get("mode"), last_image=last_image, references=references, model=source.get("model"),
-            resolution=source.get("resolution"), ratio=source.get("ratio"),
-        ))
+        task_id = generator.submit(
+            VideoRequest(
+                prompt=request["prompt"],
+                negative_prompt=request["negative"],
+                image=image,
+                seconds=request["seconds"],
+                width=request["width"],
+                height=request["height"],
+                seed=request["seed"],
+                mode=source.get("mode"),
+                last_image=last_image,
+                references=references,
+                model=source.get("model"),
+                resolution=source.get("resolution"),
+                ratio=source.get("ratio"),
+            )
+        )
         save(task_id=task_id, submitted_at=studio.now())
         if log:
             log.emit(f"已提交视频生成任务（{request['seconds']:g} 秒）")
@@ -246,8 +294,10 @@ class GenerateHandler(StageHandler):
             "audio": info["audio"],
             "polls": polls,
         }
-        files = {"generated": file_info(ctx.config, ctx.job_id, target),
-                 "request": file_info(ctx.config, ctx.job_id, record_path)}
+        files = {
+            "generated": file_info(ctx.config, ctx.job_id, target),
+            "request": file_info(ctx.config, ctx.job_id, record_path),
+        }
         return data, files
 
     def conflict_labels(self, config, w, item, expected, messages):
@@ -256,7 +306,9 @@ class GenerateHandler(StageHandler):
         after = expected["parameters"].get("generator") or {}
         for field, label in (("backend", "生成服务"), ("model", "生成模型")):
             if before.get(field) != after.get(field):
-                found.append(f"{label}已变化：{before.get(field) or '未记录'} → {after.get(field) or '未设置'}")
+                found.append(
+                    f"{label}已变化：{before.get(field) or '未记录'} → {after.get(field) or '未设置'}"
+                )
         if before.get("workflow") != after.get("workflow"):
             found.append("ComfyUI 工作流已变化")
         return found

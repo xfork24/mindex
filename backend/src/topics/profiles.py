@@ -9,18 +9,25 @@
 
 from __future__ import annotations
 
-from mindex.admin.curation import EntityNotFound
-from mindex.shared.writing_profile import WRITING_KEYS, profile_hash
-from mindex.topics.common import TopicConflict, check_id, dumps, loads, new_id, now
-from mindex.topics.models import ProfileBody, ProfileChanges
+from admin.curation import EntityNotFound
+from shared.media_groups import Groups
+from shared.types import Filters
+from shared.writing_profile import WRITING_KEYS, profile_hash
+from topics.common import TopicConflict, check_id, dumps, loads, new_id, now
+from topics.models import ProfileBody, ProfileChanges
 
 CHILD_TABLES = ("topic_sources", "topic_items", "topic_cards", "topic_gaps")
 
 
 def _view(row: dict) -> dict:
     body = ProfileBody.model_validate(loads(row["body"], {}))
-    return {"id": row["id"], **body.model_dump(), "hash": profile_hash(snapshot_body(body)),
-            "created_at": row["created_at"], "updated_at": row["updated_at"]}
+    return {
+        "id": row["id"],
+        **body.model_dump(),
+        "hash": profile_hash(snapshot_body(body)),
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
 
 
 def _row(store, profile_id: str) -> dict:
@@ -74,9 +81,13 @@ def delete_profile(store, profile_id: str) -> dict:
         ).fetchone()
         if busy:
             raise TopicConflict("该档案有挖掘任务正在运行，请等待完成或取消后再删除")
-        counts = {"topic_calendar_events": db.execute(
-            "DELETE FROM topic_calendar_events WHERE source_id IN (SELECT id FROM topic_sources WHERE profile_id=?)",
-            (profile_id,)).rowcount}
+        counts = {
+            "topic_calendar_events": db.execute(
+                "DELETE FROM topic_calendar_events WHERE source_id IN (SELECT id FROM topic_sources WHERE "
+                "profile_id=?)",
+                (profile_id,),
+            ).rowcount
+        }
         for table in CHILD_TABLES:
             counts[table] = db.execute(f"DELETE FROM {table} WHERE profile_id=?", (profile_id,)).rowcount
         counts["topic_runs"] = db.execute("DELETE FROM topic_runs WHERE source_id=?", (profile_id,)).rowcount
@@ -94,7 +105,6 @@ def snapshot_body(body: ProfileBody) -> dict:
 
 def material_filters(body: ProfileBody):
     """素材组并集与手动素材取交集；空列表沿用不限语义。"""
-    from mindex.shared.types import Filters
 
     return Filters(source_ids=body.source_ids, source_group_ids=body.source_group_ids)
 
@@ -111,13 +121,19 @@ def material_state(body: ProfileBody) -> dict:
 
 
 def material_signature(store, body: ProfileBody) -> dict:
-    from mindex.shared.media_groups import Groups
 
-    return {"source_ids": sorted(set(body.source_ids)),
-            "groups": Groups(store).state("source", body.source_group_ids)}
+    return {
+        "source_ids": sorted(set(body.source_ids)),
+        "groups": Groups(store).state("source", body.source_group_ids),
+    }
 
 
 def scoped_items(store, body: ProfileBody, items: list[dict]) -> list[dict]:
     scope = material_filters(body).effective_sources(store)
-    return [item for item in items if scope is None or not item.get("dedup_key", "").startswith("local:source:")
-            or item["dedup_key"].removeprefix("local:source:") in scope]
+    return [
+        item
+        for item in items
+        if scope is None
+        or not item.get("dedup_key", "").startswith("local:source:")
+        or item["dedup_key"].removeprefix("local:source:") in scope
+    ]

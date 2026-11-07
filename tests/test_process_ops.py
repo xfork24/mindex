@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from mindex.shared import process_ops
+from shared import process_ops
 
 windows_only = pytest.mark.skipif(sys.platform != "win32", reason="Windows 分支用例")
 posix_only = pytest.mark.skipif(sys.platform == "win32", reason="POSIX 分支用例")
@@ -41,8 +41,11 @@ def spawn_parent(tmp_path: Path, script: str = PARENT_SCRIPT):
     LocalServiceManager 的用法一致：自己启动的进程持有 Popen，poll 判断退出并回收）。"""
     marker = tmp_path / "pids"
     child = process_ops.spawn_detached(
-        [sys.executable, "-c", script, str(marker)], cwd=None, env=None,
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        [sys.executable, "-c", script, str(marker)],
+        cwd=None,
+        env=None,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
     for _ in range(100):
         if marker.is_file() and marker.read_text().strip():
@@ -82,8 +85,11 @@ def test_spawn_detached_starts_new_session_and_writes_stdout(tmp_path):
     marker = tmp_path / "out.txt"
     with marker.open("wb") as handle:
         child = process_ops.spawn_detached(
-            ["bash", "-c", "echo $$; sleep 30"], cwd=None, env=None,
-            stdout=handle, stderr=subprocess.DEVNULL,
+            ["bash", "-c", "echo $$; sleep 30"],
+            cwd=None,
+            env=None,
+            stdout=handle,
+            stderr=subprocess.DEVNULL,
         )
     try:
         for _ in range(100):

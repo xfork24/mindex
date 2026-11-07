@@ -12,11 +12,11 @@ from __future__ import annotations
 
 import logging
 
-from mindex.models import adapters
-from mindex.settings.runtime_settings import get_setting, list_voices
-from mindex.settings.voice_clone import qwentts_register
-from mindex.shared.config import Config
-from mindex.shared.storage import Store
+from models import adapters
+from settings.runtime_settings import get_setting, list_voices
+from settings.voice_clone import qwentts_register
+from shared.config import Config
+from shared.storage import Store
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,12 @@ QWEN3_TTS_CUSTOMVOICE: list[dict] = [
     {"voice_id": "serena", "name": "Serena", "description": "温暖柔和的年轻女声", "language": "中文"},
     {"voice_id": "uncle_fu", "name": "Uncle_Fu", "description": "沉稳低沉的醇厚男声", "language": "中文"},
     {"voice_id": "dylan", "name": "Dylan", "description": "清亮自然的北京男声", "language": "中文（京腔）"},
-    {"voice_id": "eric", "name": "Eric", "description": "活泼微哑、带亮度的成都男声", "language": "中文（四川话）"},
+    {
+        "voice_id": "eric",
+        "name": "Eric",
+        "description": "活泼微哑、带亮度的成都男声",
+        "language": "中文（四川话）",
+    },
     {"voice_id": "ryan", "name": "Ryan", "description": "节奏感强的活力男声", "language": "英语"},
     {"voice_id": "aiden", "name": "Aiden", "description": "明朗的美式男声", "language": "英语"},
     {"voice_id": "ono_anna", "name": "Ono_Anna", "description": "轻快俏皮的日语女声", "language": "日语"},
@@ -56,8 +61,10 @@ def _label_for(voice_id: str) -> str:
 def _live_voices(tts) -> tuple[list[str], str | None]:
     try:
         payload = adapters.request(
-            "GET", tts.base_url.rstrip("/") + "/audio/voices",
-            timeout=tts.timeout, attempts=CATALOG_ATTEMPTS,
+            "GET",
+            tts.base_url.rstrip("/") + "/audio/voices",
+            timeout=tts.timeout,
+            attempts=CATALOG_ATTEMPTS,
         )
     except Exception as exc:  # 目录拉取失败必须降级而不是 500
         logger.warning("音色目录拉取失败", exc_info=True)
@@ -97,9 +104,12 @@ def _heal_local_clones(store: Store, tts, live: list[str]) -> list[str]:
 def _minimax_groups(tts) -> tuple[list[dict], list[dict], str | None]:
     try:
         payload = adapters.request(
-            "POST", tts.base_url.rstrip("/") + "/get_voice",
-            timeout=tts.timeout, attempts=CATALOG_ATTEMPTS,
-            headers=tts.headers(), json={"voice_type": "all"},
+            "POST",
+            tts.base_url.rstrip("/") + "/get_voice",
+            timeout=tts.timeout,
+            attempts=CATALOG_ATTEMPTS,
+            headers=tts.headers(),
+            json={"voice_type": "all"},
         )
     except Exception as exc:  # 音色查询失败降级为提示，不让目录接口 500
         logger.warning("MiniMax 音色查询失败", exc_info=True)
@@ -118,7 +128,10 @@ def _minimax_groups(tts) -> tuple[list[dict], list[dict], str | None]:
         prefix = voice_id.split("_", 1)[0] if "_" in voice_id and "(" in voice_id.split("_", 1)[0] else None
         key = prefix or "经典音色"
         grouped.setdefault(key, []).append(
-            {"voice_id": voice_id, "label": f"{name}（{voice_id}）" if hint == "" else f"{name} · {hint}（{voice_id}）"}
+            {
+                "voice_id": voice_id,
+                "label": f"{name}（{voice_id}）" if hint == "" else f"{name} · {hint}（{voice_id}）",
+            }
         )
     groups = [{"label": label, "voices": entries} for label, entries in grouped.items()]
 
@@ -127,7 +140,9 @@ def _minimax_groups(tts) -> tuple[list[dict], list[dict], str | None]:
         for item in payload.get(field) or []:
             voice_id = item.get("voice_id")
             if isinstance(voice_id, str):
-                library.append({"voice_id": voice_id, "name": voice_id, "kind": kind, "sample_present": False})
+                library.append(
+                    {"voice_id": voice_id, "name": voice_id, "kind": kind, "sample_present": False}
+                )
     return groups, library, None
 
 
@@ -142,9 +157,7 @@ def _local_library(store: Store, backend: str) -> list[dict]:
                 "voice_id": row["voice_id"],
                 "name": row["name"],
                 "kind": row["kind"],
-                "sample_present": bool(
-                    row["sample_path"] and (store.root / row["sample_path"]).is_file()
-                ),
+                "sample_present": bool(row["sample_path"] and (store.root / row["sample_path"]).is_file()),
             }
         )
     return entries
@@ -173,7 +186,9 @@ def fetch_catalog(config: Config, store: Store) -> dict:
         live, live_error = _live_voices(tts)
         error = live_error
         healed = _heal_local_clones(store, tts, live) if live_error is None else []
-        merged_ids = list(dict.fromkeys([*live, *healed, *[item["voice_id"] for item in QWEN3_TTS_CUSTOMVOICE]]))
+        merged_ids = list(
+            dict.fromkeys([*live, *healed, *[item["voice_id"] for item in QWEN3_TTS_CUSTOMVOICE]])
+        )
         voices = [{"voice_id": identifier, "label": _label_for(identifier)} for identifier in merged_ids]
         groups = [{"label": "系统音色 · Qwen3-TTS", "voices": voices}]
     elif backend == "minimax":

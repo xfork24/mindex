@@ -15,10 +15,13 @@ processing，shared 也不得反向导入上层包。
 from __future__ import annotations
 
 import logging
+import os
 import weakref
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Protocol
+from urllib.parse import urlparse
+from uuid import UUID
 
 log = logging.getLogger(__name__)
 
@@ -47,8 +50,7 @@ class VectorStore(Protocol):
 
     def ids(self) -> set[str]: ...
 
-    def query(self, vector: Sequence[float], *, count: int,
-              where: dict | None = None) -> list[dict]: ...
+    def query(self, vector: Sequence[float], *, count: int, where: dict | None = None) -> list[dict]: ...
 
     def delete(self, identifiers: Sequence[str]) -> None: ...
 
@@ -79,9 +81,15 @@ class LocalVectorStore:
             ids=[entry[0] for entry in entries],
             embeddings=[entry[1] for entry in entries],
             documents=[entry[4] or entry[3] for entry in entries],
-            metadatas=[{"segment_id": segment["id"], "source_id": segment["source_id"],
-                        "granularity": segment["kind"], "view": view}
-                       for _, _, segment, view, _ in entries],
+            metadatas=[
+                {
+                    "segment_id": segment["id"],
+                    "source_id": segment["source_id"],
+                    "granularity": segment["kind"],
+                    "view": view,
+                }
+                for _, _, segment, view, _ in entries
+            ],
         )
 
     def vector(self, identifier: str) -> list[float] | None:
@@ -101,10 +109,12 @@ class LocalVectorStore:
         except Exception as exc:
             if "Error finding id" not in str(exc):
                 raise
-            return {identifier: vector for identifier in identifiers
-                    if (vector := self.vector(identifier)) is not None}
-        return {identifier: vector.tolist()
-                for identifier, vector in zip(raw["ids"], raw["embeddings"])}
+            return {
+                identifier: vector
+                for identifier in identifiers
+                if (vector := self.vector(identifier)) is not None
+            }
+        return {identifier: vector.tolist() for identifier, vector in zip(raw["ids"], raw["embeddings"])}
 
     def ids(self) -> set[str]:
         result: set[str] = set()
@@ -116,10 +126,11 @@ class LocalVectorStore:
                 return result
             offset += _PAGE
 
-    def query(self, vector: Sequence[float], *, count: int,
-              where: dict | None = None) -> list[dict]:
+    def query(self, vector: Sequence[float], *, count: int, where: dict | None = None) -> list[dict]:
         raw = self.collection.query(
-            query_embeddings=[list(vector)], n_results=count, where=where,
+            query_embeddings=[list(vector)],
+            n_results=count,
+            where=where,
             include=["metadatas", "distances"],
         )
         return [
@@ -167,6 +178,7 @@ class LocalVectorStores:
         self.root = Path(root)
 
     def open(self, index_id: str, *, create: bool = False) -> LocalVectorStore:
+        # 延迟导入：媒体、数值或服务运行依赖仅在实际执行该功能时加载。
         import chromadb
         from chromadb.config import Settings
 
@@ -189,9 +201,8 @@ _HTTP_CLIENTS: dict[tuple[str, str], object] = {}
 def chroma_http_client(section, *, shared=True):
     """进程内按 (url, token) 共享的 Chroma HttpClient（阶段 2 的最小改动路径：
     独立服务 + 显式配置；集合读写与本地完全一致，检索过滤策略随后续阶段下推）。"""
-    import os
-    from urllib.parse import urlparse
 
+    # 延迟导入：媒体、数值或服务运行依赖仅在实际执行该功能时加载。
     import chromadb
     from chromadb.config import Settings
 
@@ -210,12 +221,17 @@ def chroma_http_client(section, *, shared=True):
                 settings=Settings(anonymized_telemetry=False),
             )
         else:
-            from mindex.shared.backends.chroma_client import ChromaClient
+            # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+            from shared.backends.chroma_client import ChromaClient
 
-            settings = Settings(anonymized_telemetry=False, chroma_api_impl="chromadb.api.fastapi.FastAPI",
+            settings = Settings(
+                anonymized_telemetry=False,
+                chroma_api_impl="chromadb.api.fastapi.FastAPI",
                 chroma_server_host=parsed.hostname or "127.0.0.1",
                 chroma_server_http_port=parsed.port or (443 if parsed.scheme == "https" else 8000),
-                chroma_server_ssl_enabled=parsed.scheme == "https", chroma_server_headers=headers)
+                chroma_server_ssl_enabled=parsed.scheme == "https",
+                chroma_server_headers=headers,
+            )
             client = ChromaClient(settings, section.request_timeout_seconds)
         if shared:
             _HTTP_CLIENTS[key] = client
@@ -233,8 +249,6 @@ class ChromaServerVectorStores:
         self._closed = False
         self._client_finalizer = None
         if library_id is not None:
-            from uuid import UUID
-
             library_id = str(UUID(library_id))
         self.library_id = library_id
 
@@ -273,7 +287,6 @@ class LibraryVectorClient:
     """向量业务连接只暴露本库集合；原始 HttpClient 仍按 endpoint/token 复用。"""
 
     def __init__(self, client, library_id: str, *, owner=None):
-        from uuid import UUID
 
         self.client = client
         self._owner = owner

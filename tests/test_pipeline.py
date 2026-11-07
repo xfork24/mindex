@@ -1,20 +1,24 @@
+"""素材处理管线与分镜分析回归。"""
+
 from __future__ import annotations
 
+import io
 import json
 
 import pytest
-from conftest import FixtureAnalyzer, FixtureEmbedder
 from fastapi.testclient import TestClient
+from PIL import Image
 
-from mindex.api import create_app
-from mindex.diagnostics.evaluation import evaluate
-from mindex.models.adapters import ModelError
-from mindex.models.detectors import AdaptiveShotDetector
-from mindex.processing.indexing import IndexBuilder, VectorIndex, check_index
-from mindex.processing.pipeline import Pipeline
-from mindex.search.search import SearchEngine, fuse
-from mindex.shared.media import command, cut, frame_data, probe, thumbnail, windows
-from mindex.shared.types import Filters, TextSearch
+from api import create_app
+from conftest import FixtureAnalyzer, FixtureEmbedder
+from diagnostics.evaluation import evaluate
+from models.adapters import ModelError
+from models.detectors import AdaptiveShotDetector
+from processing.indexing import IndexBuilder, VectorIndex, check_index
+from processing.pipeline import Pipeline
+from search.search import SearchEngine, fuse
+from shared.media import command, cut, frame_data, probe, thumbnail, windows
+from shared.types import Filters, TextSearch
 
 pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
 
@@ -41,9 +45,6 @@ def test_detector_preserves_one_second_shots(config, video_file):
 
 
 def test_multi_source_filters_in_text_image_and_video_search(processed, config, video_file, tmp_path):
-    import io
-
-    from PIL import Image
 
     pipeline, embedder, _analyzer, first, _version = processed
     second_video = tmp_path / "second.mp4"
@@ -247,7 +248,7 @@ def test_evaluation_isolates_qwen_from_asr_in_vectors_and_lexical(processed, con
         value["dialogue"] = [{"start": segment["start"], "end": segment["end"], "text": "再见"}]
         store.put_json("annotations", "segment_id", segment["id"], config.analysis_key, value)
     version = IndexBuilder(config, embedder).build(mode="enriched", kinds=("moment",), activate=False)
-    monkeypatch.setattr("mindex.search.search.make_embedder", lambda config: embedder)
+    monkeypatch.setattr("search.search.make_embedder", lambda config: embedder)
     queries = tmp_path / "labels.jsonl"
     queries.write_text(
         "\n".join(
@@ -310,9 +311,6 @@ def test_no_index_returns_actionable_message(config):
 
 
 def test_image_query_retrieves_video_and_cleans_uploads(processed, config, tmp_path, monkeypatch):
-    import io
-
-    from PIL import Image
 
     pipeline, embedder, _, _, version = processed
     client = TestClient(create_app(config, embedder, index_id=version))
@@ -349,7 +347,7 @@ def test_image_query_retrieves_video_and_cleans_uploads(processed, config, tmp_p
             }
         )
     )
-    monkeypatch.setattr("mindex.search.search.make_embedder", lambda config: embedder)
+    monkeypatch.setattr("search.search.make_embedder", lambda config: embedder)
     report = evaluate(config, labels, "image", index_id=version)
     assert report["profiles"]["video_only"]["hit_at_1"] == 1
     assert report["profiles"]["video_only"]["details"][0]["modality"] == "image"
@@ -426,16 +424,19 @@ def test_final_identity_drift_cannot_publish_completed_vectors(processed, config
 
 
 def test_check_validates_shot_references_without_materializing(processed, monkeypatch):
-    from mindex.shared.shot_media import ShotMedia
+    from shared.shot_media import ShotMedia
 
     pipeline, _, _, _, version = processed
-    snapshot = next(s for s in pipeline.store.snapshots(version)
-                    if pipeline.store.one('SELECT path FROM media_references WHERE path=?', (s['path'],)))
+    snapshot = next(
+        s
+        for s in pipeline.store.snapshots(version)
+        if pipeline.store.one("SELECT path FROM media_references WHERE path=?", (s["path"],))
+    )
 
     def forbidden(*args, **kwargs):
-        raise AssertionError('Index check must not materialize legacy media')
+        raise AssertionError("Index check must not materialize legacy media")
 
-    monkeypatch.setattr(ShotMedia, 'materialize', forbidden)
+    monkeypatch.setattr(ShotMedia, "materialize", forbidden)
     assert check_index(pipeline.store, version) == []
-    pipeline.store.execute('UPDATE media_references SET start=start+0.1 WHERE path=?', (snapshot['path'],))
-    assert any('媒体引用区间不一致' in issue for issue in check_index(pipeline.store, version))
+    pipeline.store.execute("UPDATE media_references SET start=start+0.1 WHERE path=?", (snapshot["path"],))
+    assert any("媒体引用区间不一致" in issue for issue in check_index(pipeline.store, version))

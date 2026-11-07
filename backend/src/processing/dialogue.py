@@ -11,16 +11,19 @@ import json
 import math
 import re
 import tempfile
+from bisect import bisect_left, bisect_right
 from pathlib import Path
 from time import perf_counter
 
-from mindex.models.adapters import make_transcriber
-from mindex.models.transcribers import parse_minimax_words
-from mindex.shared import jsonio
-from mindex.shared.config import Config, fingerprint
-from mindex.shared.db.fencing import FencedThreadPoolExecutor as ThreadPoolExecutor
-from mindex.shared.media import MediaError, command
-from mindex.shared.storage import Store, dumps
+from models.adapters import make_transcriber
+from models.transcribers import parse_minimax_words
+from processing import subtitle_archive
+from shared import jsonio
+from shared.config import Config, fingerprint
+from shared.db.fencing import FencedThreadPoolExecutor as ThreadPoolExecutor
+from shared.media import MediaError, command
+from shared.shot_media import ShotMedia
+from shared.storage import Store, dumps
 
 CHANNELS = ("visual", "dialogue", "analysis")
 TEXT_CODECS = {"subrip", "srt", "ass", "ssa", "mov_text", "webvtt", "text", "ttml", "microdvd"}
@@ -68,8 +71,14 @@ def choose_subtitle(tracks: list[dict], stream: int | None = None) -> dict | Non
     return min(candidates, key=priority, default=None)
 
 
-def extract_subtitles(path: Path, track: dict, duration: float, *, input_format: str | None = None,
-                      subtitle_fps: float | None = None) -> list[dict]:
+def extract_subtitles(
+    path: Path,
+    track: dict,
+    duration: float,
+    *,
+    input_format: str | None = None,
+    subtitle_fps: float | None = None,
+) -> list[dict]:
     # ffmpeg preserves source timestamps when no seek is applied. SRT conversion
     # removes ASS drawing/style sections; clean residual HTML and override tags.
     raw = command(
@@ -175,24 +184,28 @@ def indexed_dialogue(data):
     """Request-local interval lookup; retain overlapping utterances and input order."""
     if not data:
         return data
-    from bisect import bisect_left, bisect_right
-    utterances = data.get('utterances', [])
-    ordered = sorted(enumerate(utterances), key=lambda pair: pair[1]['start'])
+
+    utterances = data.get("utterances", [])
+    ordered = sorted(enumerate(utterances), key=lambda pair: pair[1]["start"])
     starts, ends = [], []
-    maximum = float('-inf')
+    maximum = float("-inf")
     for _, utterance in ordered:
-        starts.append(utterance['start'])
-        maximum = max(maximum, utterance['end'])
+        starts.append(utterance["start"])
+        maximum = max(maximum, utterance["end"])
         ends.append(maximum)
+
     def lookup(start, end):
-        selected = ordered[bisect_right(ends, start):bisect_left(starts, end)]
+        selected = ordered[bisect_right(ends, start) : bisect_left(starts, end)]
         return [u for _, u in sorted(selected)]
-    return {**data, '_interval_lookup': lookup}
+
+    return {**data, "_interval_lookup": lookup}
 
 
 def relative_dialogue(data: dict, start: float, end: float) -> list[dict]:
     result = []
-    utterances = data["_interval_lookup"](start, end) if "_interval_lookup" in data else data.get("utterances", [])
+    utterances = (
+        data["_interval_lookup"](start, end) if "_interval_lookup" in data else data.get("utterances", [])
+    )
     for u in utterances:
         if u["start"] >= end or u["end"] <= start:
             continue
@@ -228,14 +241,15 @@ class DialogueProcessor:
             "content_version": fingerprint([profile, data.get("utterances", []), data.get("status")]),
         }
         self.store.execute(
-            "INSERT OR REPLACE INTO channel_data(source_id,channel,profile,status,data) VALUES(?,'dialogue',?,?,?)",
+            "INSERT OR REPLACE INTO channel_data(source_id,channel,profile,status,data) "
+            "VALUES(?,'dialogue',?,?,?)",
             (source_id, profile, data["status"], dumps(data)),
         )
         return data
 
     def _reuse_chunks(self, sid, cache, total, duration, previous):
-        previous_data = json.loads(previous['data']) if previous else {}
-        for path in (self.store.root / 'dialogue' / sid).glob('*/*.json'):
+        previous_data = json.loads(previous["data"]) if previous else {}
+        for path in (self.store.root / "dialogue" / sid).glob("*/*.json"):
             if path.parent == cache or not path.stem.isdigit():
                 continue
             number = int(path.stem)
@@ -243,28 +257,55 @@ class DialogueProcessor:
             if number >= total or target.exists():
                 continue
             try:
-                saved = json.loads(path.read_text(encoding='utf-8'))
+                saved = json.loads(path.read_text(encoding="utf-8"))
                 a, b = number * 30, min((number + 1) * 30, duration)
                 bounds = (a, b, max(0, a - 1), min(duration, b + 1))
-                if any(abs(saved[key] - expected) > 1e-6 for key, expected in zip(
-                        ('core_start', 'core_end', 'context_start', 'context_end'), bounds)):
+                if any(
+                    abs(saved[key] - expected) > 1e-6
+                    for key, expected in zip(
+                        ("core_start", "core_end", "context_start", "context_end"), bounds
+                    )
+                ):
                     continue
-                if not isinstance(saved['words'], list) or any(
-                    not isinstance(w.get('text'), str) or not w['text'].strip()
-                    or not all(math.isfinite(w[k]) for k in ('start', 'end'))
-                    or not (bounds[2] <= w['start'] < w['end'] <= bounds[3])
-                    or not (a <= (w['start'] + w['end']) / 2 < b)
-                    for w in saved['words']
+                if not isinstance(saved["words"], list) or any(
+                    not isinstance(w.get("text"), str)
+                    or not w["text"].strip()
+                    or not all(math.isfinite(w[k]) for k in ("start", "end"))
+                    or not (bounds[2] <= w["start"] < w["end"] <= bounds[3])
+                    or not (a <= (w["start"] + w["end"]) / 2 < b)
+                    for w in saved["words"]
                 ):
                     continue
             except (OSError, ValueError, KeyError, TypeError, AttributeError):
                 continue
-            identity = previous_data.get('model_identity') if previous and path.parent.name == previous['profile'] else None
-            atomic_json(target, {**saved, 'model_identity': saved.get('model_identity') or identity or
-                                 {'profile': path.parent.name}})
+            identity = (
+                previous_data.get("model_identity")
+                if previous and path.parent.name == previous["profile"]
+                else None
+            )
+            atomic_json(
+                target,
+                {
+                    **saved,
+                    "model_identity": saved.get("model_identity")
+                    or identity
+                    or {"profile": path.parent.name},
+                },
+            )
 
-    def process(self, source_id=None, *, method="auto", subtitle_stream=None, subtitle_file=None, start=0, end=None,
-                progress=None, workers=1, force=False):
+    def process(
+        self,
+        source_id=None,
+        *,
+        method="auto",
+        subtitle_stream=None,
+        subtitle_file=None,
+        start=0,
+        end=None,
+        progress=None,
+        workers=1,
+        force=False,
+    ):
         if method not in {"auto", "subtitle", "asr"}:
             raise ValueError("对白方式必须是 auto、subtitle 或 asr")
         if subtitle_file and (method != "subtitle" or subtitle_stream is not None or source_id is None):
@@ -276,48 +317,92 @@ class DialogueProcessor:
         results = []
         for source in sources:
             with self.store.run("dialogue", source["id"]):
-                results.append(self._source(source, subtitle_stream, start, end, progress, workers, method,
-                                            subtitle_file, force=force))
+                results.append(
+                    self._source(
+                        source,
+                        subtitle_stream,
+                        start,
+                        end,
+                        progress,
+                        workers,
+                        method,
+                        subtitle_file,
+                        force=force,
+                    )
+                )
         return {"sources": results, "elapsed_seconds": round(perf_counter() - started, 3)}
 
-    def _source(self, source, stream, start, end, progress, workers, method, subtitle_file=None, *, force=False):
+    def _source(
+        self, source, stream, start, end, progress, workers, method, subtitle_file=None, *, force=False
+    ):
         sid = source["id"]
         previous_complete = current_dialogue(self.store, sid) if not force else None
-        if (not subtitle_file and stream is None and previous_complete
-                and previous_complete.get('status') in {'complete', 'empty', 'no_audio'}
-                and method == 'asr' and previous_complete.get('source') in {'asr', 'legacy_asr'}):
+        if (
+            not subtitle_file
+            and stream is None
+            and previous_complete
+            and previous_complete.get("status") in {"complete", "empty", "no_audio"}
+            and method == "asr"
+            and previous_complete.get("source") in {"asr", "legacy_asr"}
+        ):
             if progress:
-                progress({'stage': 'asr' if previous_complete.get('source') in {'asr', 'legacy_asr'} else 'subtitle',
-                          'message': '复用已完成对白，不重新转写', 'completed': 1, 'total': 1})
-            return {'source_id': sid, **previous_complete, 'reused': True}
+                progress(
+                    {
+                        "stage": "asr"
+                        if previous_complete.get("source") in {"asr", "legacy_asr"}
+                        else "subtitle",
+                        "message": "复用已完成对白，不重新转写",
+                        "completed": 1,
+                        "total": 1,
+                    }
+                )
+            return {"source_id": sid, **previous_complete, "reused": True}
         if subtitle_file:
-            from mindex.processing.subtitle_uploads import parse_subtitle_file, resolve_subtitle
+            # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+            from processing.subtitle_uploads import parse_subtitle_file, resolve_subtitle
 
             path, metadata = resolve_subtitle(self.store, sid, subtitle_file)
             profile = fingerprint(["uploaded-subtitle-v1", sid, subtitle_file])
-            previous = self.store.one("SELECT * FROM channel_data WHERE source_id=? AND channel='dialogue'", (sid,))
+            previous = self.store.one(
+                "SELECT * FROM channel_data WHERE source_id=? AND channel='dialogue'", (sid,)
+            )
             if not force and previous and previous["profile"] == profile and previous["status"] in READY:
                 if progress:
                     progress({"stage": "subtitle", "completed": 1, "total": 1, "unit": "files"})
                 return {"source_id": sid, **json.loads(previous["data"]), "reused": True}
             if progress:
-                progress({"stage": "subtitle", "completed": 0, "total": 1, "unit": "files",
-                          "message": "正在解析上传字幕文件"})
+                progress(
+                    {
+                        "stage": "subtitle",
+                        "completed": 0,
+                        "total": 1,
+                        "unit": "files",
+                        "message": "正在解析上传字幕文件",
+                    }
+                )
             media = json.loads(source["media"])
             rows = parse_subtitle_file(path, "." + metadata["format"], media["duration"], fps=media["fps"])
-            data = self.save(sid, profile, {
-                "source": "subtitle", "subtitle_file": metadata, "selected_track": None,
-                "status": "complete", "utterances": rows, "words": [], "language": "und",
-                "model_identity": {"extractor": "ffmpeg-srt-v1"}, "fallback_reason": None,
-            })
+            data = self.save(
+                sid,
+                profile,
+                {
+                    "source": "subtitle",
+                    "subtitle_file": metadata,
+                    "selected_track": None,
+                    "status": "complete",
+                    "utterances": rows,
+                    "words": [],
+                    "language": "und",
+                    "model_identity": {"extractor": "ffmpeg-srt-v1"},
+                    "fallback_reason": None,
+                },
+            )
             if progress:
                 progress({"stage": "subtitle", "completed": 1, "total": 1, "unit": "files"})
             return {"source_id": sid, **data}
-        from mindex.processing.subtitle_archive import load_archive
-        from mindex.shared.shot_media import ShotMedia
 
         info = json.loads(source["media"])
-        archive = load_archive(self.store, sid) if method != "asr" else None
+        archive = subtitle_archive.load_archive(self.store, sid) if method != "asr" else None
         tracks = archive["tracks"] if archive else []
         selected = choose_subtitle(tracks, stream) if method != "asr" else None
         manual_subtitle = method == "subtitle"
@@ -329,14 +414,25 @@ class DialogueProcessor:
         reason = "没有可用的完整文本字幕（forced/位图字幕不自动选用；烧录字幕不做 OCR）"
         if selected and selected["text"]:
             if progress:
-                progress({"stage": "subtitle", "completed": 0, "total": 1, "unit": "tracks",
-                          "message": "正在提取文本字幕"})
+                progress(
+                    {
+                        "stage": "subtitle",
+                        "completed": 0,
+                        "total": 1,
+                        "unit": "tracks",
+                        "message": "正在提取文本字幕",
+                    }
+                )
             profile = fingerprint(["subtitle-srt-v1", sid, selected])
             previous = self.store.one(
                 "SELECT * FROM channel_data WHERE source_id=? AND channel='dialogue'", (sid,)
             )
-            if not force and previous and previous["profile"] == profile and previous["status"] in READY and (
-                manual_subtitle or json.loads(previous["data"]).get("utterances")
+            if (
+                not force
+                and previous
+                and previous["profile"] == profile
+                and previous["status"] in READY
+                and (manual_subtitle or json.loads(previous["data"]).get("utterances"))
             ):
                 if progress:
                     progress({"stage": "subtitle", "completed": 1, "total": 1, "unit": "tracks"})
@@ -368,14 +464,27 @@ class DialogueProcessor:
                 reason = "字幕提取失败：" + str(exc)
         elif selected:
             reason = "指定字幕为位图字幕，无法提取文本"
-        if (not force and previous_complete and previous_complete.get('source') in {'asr', 'legacy_asr'}
-                and previous_complete.get('status') in {'complete', 'empty', 'no_audio'}):
+        if (
+            not force
+            and previous_complete
+            and previous_complete.get("source") in {"asr", "legacy_asr"}
+            and previous_complete.get("status") in {"complete", "empty", "no_audio"}
+        ):
             if progress:
-                progress({'stage': 'asr', 'completed': 1, 'total': 1, 'message': '复用已完成对白，不重新转写'})
-            return {'source_id': sid, **previous_complete, 'reused': True}
+                progress(
+                    {"stage": "asr", "completed": 1, "total": 1, "message": "复用已完成对白，不重新转写"}
+                )
+            return {"source_id": sid, **previous_complete, "reused": True}
         # The ASR profile deliberately excludes local aligner and subtitle identity.
         model = self.config.asr.model_dump(
-            exclude={"timeout", "api_key_env", "max_tokens", "aligner_model", "aligner_revision", "deployment_manifest"}
+            exclude={
+                "timeout",
+                "api_key_env",
+                "max_tokens",
+                "aligner_model",
+                "aligner_revision",
+                "deployment_manifest",
+            }
         )
         profile = fingerprint(["asr-words-context1-v1", sid, model])
         common.update(source="asr", fallback_reason=reason if method != "asr" else None, model_identity=model)
@@ -383,8 +492,14 @@ class DialogueProcessor:
         if not force and old and old["profile"] == profile and old["status"] in READY:
             if progress:
                 previous = json.loads(old["data"])
-                progress({"stage": "asr", "completed_chunks": previous.get("completed_chunks", 0),
-                          "total_chunks": previous.get("total_chunks", 0), "unit": "chunks"})
+                progress(
+                    {
+                        "stage": "asr",
+                        "completed_chunks": previous.get("completed_chunks", 0),
+                        "total_chunks": previous.get("total_chunks", 0),
+                        "unit": "chunks",
+                    }
+                )
             return {"source_id": sid, **json.loads(old["data"]), "reused": True}
         if not info["audio"] or not self.config.asr.enabled:
             data = self.save(
@@ -452,8 +567,14 @@ class DialogueProcessor:
             if min((n + 1) * 30, info["duration"]) > start and (end is None or n * 30 < end)
         ]
         if progress:
-            progress({"stage": "asr", "completed_chunks": sum((cache / f"{n}.json").exists() for n in range(total)),
-                      "total_chunks": total, "unit": "chunks"})
+            progress(
+                {
+                    "stage": "asr",
+                    "completed_chunks": sum((cache / f"{n}.json").exists() for n in range(total)),
+                    "total_chunks": total,
+                    "unit": "chunks",
+                }
+            )
         if self.transcriber is None and any(not (cache / f"{n}.json").exists() for n in selected):
             self.transcriber = make_transcriber(self.config)
         try:
@@ -480,7 +601,7 @@ class DialogueProcessor:
                 if target.exists():
                     saved = json.loads(target.read_text(encoding="utf-8"))
                     words.extend(saved["words"])
-                    chunk_models[str(number)] = saved.get('model_identity', model)
+                    chunk_models[str(number)] = saved.get("model_identity", model)
                     completed += 1
             state = "partial" if completed < total else "complete" if words else "empty"
             data = self.save(
@@ -494,8 +615,12 @@ class DialogueProcessor:
                     "completed_chunks": completed,
                     "total_chunks": total,
                     "chunk_model_identities": chunk_models,
-                    "model_identity": model if all(value == model for value in chunk_models.values()) else
-                        {"source": "mixed_asr_chunks", "models": list({fingerprint(v): v for v in chunk_models.values()}.values())},
+                    "model_identity": model
+                    if all(value == model for value in chunk_models.values())
+                    else {
+                        "source": "mixed_asr_chunks",
+                        "models": list({fingerprint(v): v for v in chunk_models.values()}.values()),
+                    },
                 },
             )
             return {"source_id": sid, **data}

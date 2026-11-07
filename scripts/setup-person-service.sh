@@ -16,8 +16,9 @@ from pathlib import Path
 
 import numpy as np
 
-from mindex.shared.config import Config
-from mindex.persons.person_server import PersonEngine
+import mindex  # 自举包内短导入
+from shared.config import Config
+from persons.person_server import PersonEngine
 
 config = Config(data_dir=Path(tempfile.mkdtemp(prefix="mindex-person-setup-")))
 engine = PersonEngine(config)

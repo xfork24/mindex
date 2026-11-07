@@ -7,10 +7,10 @@ from pathlib import Path
 
 from filelock import Timeout
 
-from mindex.persons.person_processing import PersonTasks
-from mindex.settings.runtime_settings import RuntimeConfig
-from mindex.shared.config import Config
-from mindex.shared.storage import Store
+from persons.person_processing import PersonTasks
+from settings.runtime_settings import RuntimeConfig
+from shared.config import Config
+from shared.storage import Store
 
 
 def main():

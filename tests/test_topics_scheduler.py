@@ -1,4 +1,6 @@
-"""选题挖掘 · 每日定时与启动补跑：纯函数、注入时钟的调度、跨进程锁、随应用启停、状态接口、CLI 与智能助手工具。"""
+"""选题挖掘 · 每日定时与启动补跑：纯函数、注入时钟的调度、跨进程锁、随应用启停、状态接口、CLI
+与智能助手工具。
+"""
 
 from __future__ import annotations
 
@@ -11,19 +13,19 @@ from datetime import datetime, timedelta
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
-from topics_fixtures import RSS, ScriptedTopicLlm, install, topic_embedder
 from typer.testing import CliRunner
 
-from mindex import cli
-from mindex.agent.loopback import MindexClient
-from mindex.agent.registry import ToolContext
-from mindex.agent.tools import build_registry
-from mindex.api import create_app
-from mindex.shared import locks
-from mindex.shared.storage import Store
-from mindex.topics import profiles, scheduler
-from mindex.topics.models import ProfileBody, Schedule
-from mindex.topics.runner import TopicRuns
+import cli
+from agent.loopback import MindexClient
+from agent.registry import ToolContext
+from agent.tools import build_registry
+from api import create_app
+from shared import locks
+from shared.storage import Store
+from topics import profiles, scheduler
+from topics.models import ProfileBody, Schedule
+from topics.runner import TopicRuns
+from topics_fixtures import RSS, ScriptedTopicLlm, install, topic_embedder
 
 FEED = "https://news.example.com/feed.xml"
 DAY = datetime(2026, 10, 26, 0, 0).astimezone()
@@ -62,17 +64,20 @@ class FakeRuns:
         if self.busy:
             raise HTTPException(409, "已有选题挖掘任务在运行，请稍后启动")
         run_id = uuid.uuid4().hex
-        self.store.execute("INSERT INTO topic_runs(id,source_id,trigger,status,config,options,created_at) "
-                           "VALUES(?,?,?,?,?,?,?)", (run_id, profile_id, trigger, "complete", "{}", "{}",
-                                                     self.now().isoformat()))
+        self.store.execute(
+            "INSERT INTO topic_runs(id,source_id,trigger,status,config,options,created_at) "
+            "VALUES(?,?,?,?,?,?,?)",
+            (run_id, profile_id, trigger, "complete", "{}", "{}", self.now().isoformat()),
+        )
         self.started.append((profile_id, trigger))
         return {"id": run_id}
 
 
 def test_tick_with_injected_clock(config):
     store = Store(config.data_dir)
-    on = profiles.create_profile(store, ProfileBody(name="财经", domain="金融",
-                                                    schedule=Schedule(enabled=True, time="08:00")))["id"]
+    on = profiles.create_profile(
+        store, ProfileBody(name="财经", domain="金融", schedule=Schedule(enabled=True, time="08:00"))
+    )["id"]
     profiles.create_profile(store, ProfileBody(name="关闭", domain="历史"))
     clock = {"now": at(9)}
     runs = FakeRuns(store, busy=True)
@@ -96,11 +101,14 @@ def test_tick_with_injected_clock(config):
 def test_scheduler_runs_with_app_and_respects_lock(config, monkeypatch):
     install(monkeypatch, {FEED: RSS})
     store = Store(config.data_dir)
-    pid = profiles.create_profile(store, ProfileBody(name="财经", domain="金融",
-                                                    schedule=Schedule(enabled=True, time="00:00", count=1)))["id"]
-    from mindex.topics import datasources
+    pid = profiles.create_profile(
+        store, ProfileBody(name="财经", domain="金融", schedule=Schedule(enabled=True, time="00:00", count=1))
+    )["id"]
+    from topics import datasources
 
-    datasources.create_source(store, pid, datasources.SourceBody(kind="rss", name="要闻", config={"url": FEED}))
+    datasources.create_source(
+        store, pid, datasources.SourceBody(kind="rss", name="要闻", config={"url": FEED})
+    )
     config.topics.scheduler.interval_seconds = 5
     app = create_app(config, topic_embedder(config), topic_llm=ScriptedTopicLlm(), scheduler=True)
     with locks.named(config.data_dir, "topics"):  # 另一进程正在挖掘：启动补跑跳过
@@ -133,11 +141,15 @@ def test_scheduler_runs_with_app_and_respects_lock(config, monkeypatch):
 
 def test_schedule_cli_and_tool(config, tmp_path):
     store = Store(config.data_dir)
-    profiles.create_profile(store, ProfileBody(name="财经", domain="金融", schedule=Schedule(enabled=True, time="23:59")))
+    profiles.create_profile(
+        store, ProfileBody(name="财经", domain="金融", schedule=Schedule(enabled=True, time="23:59"))
+    )
     profiles.create_profile(store, ProfileBody(name="关闭", domain="历史"))
     yaml_path = tmp_path / "config.yaml"
     yaml_path.write_text(f"data_dir: {config.data_dir}\n", encoding="utf-8")
-    result = json.loads(CliRunner().invoke(cli.app, ["--config", str(yaml_path), "topics", "schedule", "status"]).output)
+    result = json.loads(
+        CliRunner().invoke(cli.app, ["--config", str(yaml_path), "topics", "schedule", "status"]).output
+    )
     assert result["scheduler"] is True and "mindex serve" in result["note"]
     assert [i["enabled"] for i in result["items"]] == [True, False]
     app = create_app(config)

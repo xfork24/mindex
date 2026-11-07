@@ -27,8 +27,10 @@ from contextlib import AbstractContextManager as ContextManager
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
-from mindex.shared import locks as file_locks
-from mindex.shared.db.pg_backend import PgBackend
+from filelock import Timeout
+
+from shared import locks as file_locks
+from shared.db.pg_backend import PgBackend
 
 if TYPE_CHECKING:
     pass
@@ -37,7 +39,7 @@ log = logging.getLogger(__name__)
 
 __all__ = ["HEARTBEAT_SECONDS", "LEASE_TTL_SECONDS", "Lease", "LeaseLost", "PgLockProvider"]
 
-LEASE_TTL_SECONDS = 90.0   # plans §7.1 初始值；恢复 = TTL + 回收周期 + 调度等待
+LEASE_TTL_SECONDS = 90.0  # plans §7.1 初始值；恢复 = TTL + 回收周期 + 调度等待
 HEARTBEAT_SECONDS = 20.0
 _POLL_SECONDS = 0.05
 
@@ -49,8 +51,9 @@ class LeaseLost(RuntimeError):
 class Lease:
     """一次持有的租约：token 单调、续期/释放必须匹配 owner+token 且未过期。"""
 
-    def __init__(self, provider: PgLockProvider, name: str, owner_id: str,
-                 mode: str, token: int, expires_at: float):
+    def __init__(
+        self, provider: PgLockProvider, name: str, owner_id: str, mode: str, token: int, expires_at: float
+    ):
         self.provider, self.name, self.owner_id = provider, name, owner_id
         self.mode, self.token = mode, token
         self.expires_at = expires_at  # epoch 秒（本进程时钟，仅供诊断）
@@ -66,14 +69,17 @@ class Lease:
             while not self._stop.wait(interval):
                 try:
                     if not self.renew(ttl):
-                        log.warning("租约 %s（%s/%s）续期失败：已失联，停止心跳", self.name, self.owner_id, self.token)
+                        log.warning(
+                            "租约 %s（%s/%s）续期失败：已失联，停止心跳", self.name, self.owner_id, self.token
+                        )
                         return
                 except Exception:
                     log.exception("租约 %s 心跳异常，停止心跳", self.name)
                     return
 
-        self._heartbeat = threading.Thread(target=beat, daemon=True,
-                                           name=f"lease-{self.name}-{self.owner_id[:8]}")
+        self._heartbeat = threading.Thread(
+            target=beat, daemon=True, name=f"lease-{self.name}-{self.owner_id[:8]}"
+        )
         self._heartbeat.start()
 
     def stop_heartbeat(self):
@@ -108,8 +114,15 @@ class PgLockProvider:
         with self.backend_pool.connect(control=True) as db:
             yield db
 
-    def lease(self, name: str, *, mode: str = "exclusive", ttl: float = LEASE_TTL_SECONDS,
-              wait: float | None = 0, owner_id: str | None = None) -> Lease | None:
+    def lease(
+        self,
+        name: str,
+        *,
+        mode: str = "exclusive",
+        ttl: float = LEASE_TTL_SECONDS,
+        wait: float | None = 0,
+        owner_id: str | None = None,
+    ) -> Lease | None:
         """获取租约；``wait`` 为有界等待秒数（None 一直等）。拿不到返回 None。
 
         持有者身份默认**每次租约唯一**（进程 UUID + 租约序号）：与 flock 按 open-file
@@ -135,17 +148,21 @@ class PgLockProvider:
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")  # 同库事务互斥（阶段 3 保守；后续按资源收窄）
             db.execute(
-                "DELETE FROM lock_holders WHERE library_id=%s AND name=%s"
-                " AND expires_at < clock_timestamp()", (self.library_id, name))
+                "DELETE FROM lock_holders WHERE library_id=%s AND name=%s AND expires_at < clock_timestamp()",
+                (self.library_id, name),
+            )
             db.execute(
-                "INSERT INTO lock_resources(library_id,name) VALUES(%s,%s)"
-                " ON CONFLICT DO NOTHING", (self.library_id, name))
+                "INSERT INTO lock_resources(library_id,name) VALUES(%s,%s) ON CONFLICT DO NOTHING",
+                (self.library_id, name),
+            )
             resource = db.execute(
-                "SELECT epoch, counter FROM lock_resources WHERE library_id=%s AND name=%s"
-                " FOR UPDATE", (self.library_id, name)).fetchone()
+                "SELECT epoch, counter FROM lock_resources WHERE library_id=%s AND name=%s FOR UPDATE",
+                (self.library_id, name),
+            ).fetchone()
             holders = db.execute(
                 "SELECT owner_id, mode FROM lock_holders WHERE library_id=%s AND name=%s",
-                (self.library_id, name)).fetchall()
+                (self.library_id, name),
+            ).fetchall()
             if mode == "exclusive":
                 if any(row["owner_id"] != owner for row in holders):
                     return None  # 存在其他有效持有（共享或独占）
@@ -156,7 +173,8 @@ class PgLockProvider:
             epoch = int(resource["epoch"]) + (1 if mode == "exclusive" else 0)
             db.execute(
                 "UPDATE lock_resources SET epoch=%s, counter=%s WHERE library_id=%s AND name=%s",
-                (epoch, token, self.library_id, name))
+                (epoch, token, self.library_id, name),
+            )
             row = db.execute(
                 "INSERT INTO lock_holders(library_id,name,owner_id,mode,fencing_token,expires_at)"
                 " VALUES(%s,%s,%s,%s,%s,clock_timestamp() + make_interval(secs => %s))"
@@ -164,7 +182,8 @@ class PgLockProvider:
                 " mode=excluded.mode, fencing_token=excluded.fencing_token,"
                 " expires_at=excluded.expires_at"
                 " RETURNING extract(epoch from expires_at) AS expires_at",
-                (self.library_id, name, owner, mode, token, ttl)).fetchone()
+                (self.library_id, name, owner, mode, token, ttl),
+            ).fetchone()
             return Lease(self, name, owner, mode, token, float(row["expires_at"]))
 
     def renew(self, name: str, owner_id: str, token: int, ttl: float) -> bool:
@@ -174,7 +193,8 @@ class PgLockProvider:
                 " WHERE library_id=%s AND name=%s AND owner_id=%s AND fencing_token=%s"
                 " AND expires_at >= clock_timestamp()"
                 " RETURNING extract(epoch from expires_at) AS expires_at",
-                (ttl, self.library_id, name, owner_id, token)).fetchone()
+                (ttl, self.library_id, name, owner_id, token),
+            ).fetchone()
             return row is not None
 
     def release(self, name: str, owner_id: str, token: int) -> bool:
@@ -182,27 +202,36 @@ class PgLockProvider:
             cursor = db.execute(
                 "DELETE FROM lock_holders WHERE library_id=%s AND name=%s AND owner_id=%s"
                 " AND fencing_token=%s AND expires_at >= clock_timestamp()",
-                (self.library_id, name, owner_id, token))
+                (self.library_id, name, owner_id, token),
+            )
             return cursor.rowcount > 0
 
     def holds(self, name: str, owner_id: str, token: int) -> bool:
         with self.connect() as db:
-            return db.execute(
-                "SELECT 1 FROM lock_holders WHERE library_id=%s AND name=%s AND owner_id=%s"
-                " AND fencing_token=%s AND expires_at >= clock_timestamp()",
-                (self.library_id, name, owner_id, token)).fetchone() is not None
+            return (
+                db.execute(
+                    "SELECT 1 FROM lock_holders WHERE library_id=%s AND name=%s AND owner_id=%s"
+                    " AND fencing_token=%s AND expires_at >= clock_timestamp()",
+                    (self.library_id, name, owner_id, token),
+                ).fetchone()
+                is not None
+            )
 
     # ------------------------------------------------------------ LockProvider 兼容
-    def acquire(self, name: str, *, exclusive: bool | None = None,
-                timeout: float | None = 0) -> ContextManager[Lease]:
+    def acquire(
+        self, name: str, *, exclusive: bool | None = None, timeout: float | None = 0
+    ) -> ContextManager[Lease]:
         """``LockProvider.acquire`` 语义：进入时获取（自动心跳），退出时释放。
 
         本地文件锁的默认模式沿用 ``locks.named``：pipeline/library 缺省共享，
         其余独占；拿不到在 timeout 后抛 ``filelock.Timeout``（与既有调用方一致）。
         """
-        from filelock import Timeout
 
-        mode = "exclusive" if (exclusive if exclusive is not None else name not in file_locks.SHAREABLE) else "shared"
+        mode = (
+            "exclusive"
+            if (exclusive if exclusive is not None else name not in file_locks.SHAREABLE)
+            else "shared"
+        )
         lease: Lease | None = None
 
         @contextmanager
@@ -229,14 +258,18 @@ class PgLockProvider:
 
         @contextmanager
         def held_all():
-            from filelock import Timeout
 
             try:
                 for name in names:
-                    mode = "exclusive" if (
-                        exclusive.get(name) if isinstance(exclusive, dict) else
-                        (exclusive if exclusive is not None else name not in file_locks.SHAREABLE)
-                    ) else "shared"
+                    mode = (
+                        "exclusive"
+                        if (
+                            exclusive.get(name)
+                            if isinstance(exclusive, dict)
+                            else (exclusive if exclusive is not None else name not in file_locks.SHAREABLE)
+                        )
+                        else "shared"
+                    )
                     wait = timeout.get(name, 0) if isinstance(timeout, dict) else timeout
                     got = self.lease(name, mode=mode, wait=wait if wait else 0)
                     if got is None:

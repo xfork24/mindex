@@ -10,9 +10,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
 
-from mindex.shared.media import MediaError, atomic_media, probe
-from mindex.shared.work_budget import GrowingReservation, current
-from mindex.studio import studio
+import httpx
+from PIL import Image
+
+from shared.images import image_png
+from shared.media import MediaError, atomic_media, probe
+from shared.work_budget import GrowingReservation, current
+from studio import studio
 
 MAX_REDIRECTS = 3
 
@@ -32,10 +36,16 @@ def check_host(url: str, hosts: set[str]) -> None:
         raise studio.StudioError(f"产物主机 {parts.netloc} 不在该工具源的下载主机白名单中")
 
 
-def download(artifact: Artifact, target: Path, *, hosts: set[str], max_bytes: int, timeout: float,
-             headers: dict | None = None) -> Path:
+def download(
+    artifact: Artifact,
+    target: Path,
+    *,
+    hosts: set[str],
+    max_bytes: int,
+    timeout: float,
+    headers: dict | None = None,
+) -> Path:
     """把产物写到 ``target``；超过大小上限、主机不在白名单或下载失败时报中文错误（不留半截文件）。"""
-    import httpx
 
     target.parent.mkdir(parents=True, exist_ok=True)
     if artifact.data is not None:
@@ -64,7 +74,9 @@ def download(artifact: Artifact, target: Path, *, hosts: set[str], max_bytes: in
                             for chunk in response.iter_bytes(1024 * 1024):
                                 size += len(chunk)
                                 if size > max_bytes:
-                                    raise studio.StudioError(f"产物超过大小上限 {max_bytes // (1024 * 1024)} MB")
+                                    raise studio.StudioError(
+                                        f"产物超过大小上限 {max_bytes // (1024 * 1024)} MB"
+                                    )
                                 reservation.grow(len(chunk))
                                 handle.write(chunk)
                         # Windows 不允许替换仍有写句柄的临时文件；关闭文件后再交接预算。
@@ -81,11 +93,11 @@ def download(artifact: Artifact, target: Path, *, hosts: set[str], max_bytes: in
 
 
 def normalize(download_path: Path, directory: Path, output: str, max_pixels: int) -> tuple[Path, dict]:
-    """校验并规整产物：视频 → ``artifact.mp4``（返回时长、尺寸、帧率），图片 → ``artifact.png``（返回尺寸）。"""
+    """校验并规整产物：视频 → ``artifact.mp4``（返回时长、尺寸、帧率），图片 →
+    ``artifact.png``（返回尺寸）。
+    """
     if output == "image":
-        from PIL import Image
-
-        from mindex.shared.images import image_png
+        # 延迟导入：媒体、数值或服务运行依赖仅在实际执行该功能时加载。
 
         try:
             payload = image_png(download_path, max_pixels)
@@ -101,8 +113,26 @@ def normalize(download_path: Path, directory: Path, output: str, max_pixels: int
         try:
             atomic_media(["-i", str(download_path), *maps, "-c", "copy", "-movflags", "+faststart"], target)
         except MediaError:
-            atomic_media(["-i", str(download_path), *maps, "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset",
-                          "veryfast", "-crf", "18", "-c:a", "aac", "-movflags", "+faststart"], target)
+            atomic_media(
+                [
+                    "-i",
+                    str(download_path),
+                    *maps,
+                    "-c:v",
+                    "libx264",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-preset",
+                    "veryfast",
+                    "-crf",
+                    "18",
+                    "-c:a",
+                    "aac",
+                    "-movflags",
+                    "+faststart",
+                ],
+                target,
+            )
         info = probe(target)
     except MediaError as exc:
         target.unlink(missing_ok=True)

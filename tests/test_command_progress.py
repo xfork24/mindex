@@ -1,4 +1,5 @@
 """Long offline CLI commands expose progress without changing output or checkpoint semantics."""
+
 import logging
 import threading
 from contextlib import nullcontext
@@ -6,8 +7,8 @@ from contextlib import nullcontext
 import pytest
 from typer.testing import CliRunner
 
-from mindex import cli
-from mindex.shared.command_progress import CommandProgress, duration
+import cli
+from shared.command_progress import CommandProgress, duration
 
 
 def test_heartbeat_during_blocked_work_and_cleanup(caplog):
@@ -22,11 +23,27 @@ def test_heartbeat_during_blocked_work_and_cleanup(caplog):
     handler = Heartbeat()
     root.addHandler(handler)
     try:
-        with caplog.at_level(logging.INFO), CommandProgress("测试", interval=.01) as reporter:
-            reporter.update({"stage": "analyze", "completed": 12, "total": 100, "source_name": "素材A",
-                             "source_number": 2, "source_total": 5, "source_id": "source-a",
-                             "kind": "moment", "start": 3., "end": 7., "segment_id": "segment-a"})
-            logging.getLogger("mindex.models.qwen").info("LLM 请求开始 test-model")
+        with caplog.at_level(logging.INFO), CommandProgress("测试", interval=0.01) as reporter:
+            reporter.update(
+                {
+                    "stage": "analyze",
+                    "completed": 12,
+                    "total": 100,
+                    "source_name": "素材A",
+                    "source_number": 2,
+                    "source_total": 5,
+                    "source_id": "source-a",
+                    "kind": "moment",
+                    "start": 3.0,
+                    "end": 7.0,
+                    "segment_id": "segment-a",
+                }
+            )
+            logging.getLogger("models.qwen").info("LLM 请求开始 test-model")
+            assert reporter._latest == "LLM 请求开始 test-model"
+            logging.getLogger("httpx").info("第三方日志")
+            logging.getLogger("models_external").info("名称前缀相似的第三方日志")
+            assert reporter._latest == "LLM 请求开始 test-model"
             assert pulse.wait(2), "Heartbeat must continue while the work thread waits"
         assert not reporter._thread.is_alive()
         text = caplog.text
@@ -39,7 +56,7 @@ def test_heartbeat_during_blocked_work_and_cleanup(caplog):
 
 def test_failure_preserves_exception_and_stops_heartbeat(caplog):
     with caplog.at_level(logging.INFO), pytest.raises(RuntimeError, match="timeout"):
-        with CommandProgress("索引更新", interval=.01) as reporter:
+        with CommandProgress("索引更新", interval=0.01) as reporter:
             reporter.update({"stage": "embedding", "index_id": "index-a", "completed": 2, "total": 9})
             raise RuntimeError("timeout")
     assert not reporter._thread.is_alive()
@@ -52,7 +69,7 @@ def test_duration_handles_multiday_runs():
 
 @pytest.mark.parametrize("command,force", [("analyze", False), ("analyze", True), ("index", False)])
 def test_cli_wires_progress_and_keeps_index_stdout(config, monkeypatch, caplog, command, force):
-    from mindex.processing import indexing, pipeline
+    from processing import indexing, pipeline
 
     calls = []
 
@@ -78,7 +95,7 @@ def test_cli_wires_progress_and_keeps_index_stdout(config, monkeypatch, caplog, 
             return "index-fixture"
 
     monkeypatch.setattr(cli, "load_config", lambda *_: config)
-    monkeypatch.setattr("mindex.settings.runtime_settings.apply_runtime_overrides", lambda c: c)
+    monkeypatch.setattr("settings.runtime_settings.apply_runtime_overrides", lambda c: c)
     monkeypatch.setattr(pipeline, "Pipeline", Pipeline)
     monkeypatch.setattr(indexing, "IndexBuilder", IndexBuilder)
     args = [command] if command == "analyze" else ["index", "--channel", "analysis", "--activate"]
@@ -98,7 +115,7 @@ def test_cli_wires_progress_and_keeps_index_stdout(config, monkeypatch, caplog, 
 
 def test_interrupt_is_not_reported_as_success(caplog):
     with caplog.at_level(logging.INFO), pytest.raises(KeyboardInterrupt):
-        with CommandProgress("分析", interval=.01) as reporter:
+        with CommandProgress("分析", interval=0.01) as reporter:
             reporter.update({"stage": "scene_grouping", "completed": 32, "total": 100})
             raise KeyboardInterrupt()
     assert "已中断" in caplog.text and "组织连续场景" in caplog.text
@@ -108,14 +125,13 @@ def test_interrupt_is_not_reported_as_success(caplog):
 @pytest.mark.slow
 def test_real_cli_analysis_reports_checkpoints_and_resume(config, video_file, monkeypatch, caplog):
     from conftest import FixtureAnalyzer, FixtureEmbedder
-
-    from mindex.processing import pipeline
+    from processing import pipeline
 
     analyzer = FixtureAnalyzer(FixtureEmbedder(config))
     pipeline.Pipeline(config).prepare(video_file)
     monkeypatch.setattr(pipeline, "make_analyzer", lambda *_: analyzer)
     monkeypatch.setattr(cli, "load_config", lambda *_: config)
-    monkeypatch.setattr("mindex.settings.runtime_settings.apply_runtime_overrides", lambda c: c)
+    monkeypatch.setattr("settings.runtime_settings.apply_runtime_overrides", lambda c: c)
     runner = CliRunner()
     with caplog.at_level(logging.INFO):
         first = runner.invoke(cli.app, ["analyze"])

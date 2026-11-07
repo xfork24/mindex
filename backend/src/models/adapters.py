@@ -1,11 +1,10 @@
 """模型适配层公共部分：错误类型、带重试的 HTTP 请求、各角色 Protocol 与按配置构造的工厂。
 
-具体后端见 embedders、qwen、speech、storyboard、transcribers、detectors、video_generators、animator；工厂在调用时才导入它们。
+具体后端见 embedders、qwen、speech、storyboard、transcribers、detectors、
+video_generators、animator；工厂在调用时才导入它们。
 """
 
 from __future__ import annotations
-
-from mindex.shared.external_calls import journaled_factory
 
 import json
 import logging
@@ -17,17 +16,18 @@ from typing import TYPE_CHECKING, Protocol
 
 import httpx
 
-from mindex.shared.config import Config
-from mindex.shared.errors import ModelError
-from mindex.shared.trace import record
-from mindex.shared.types import Annotation, MaterialDigest, ScriptTemplate, ShotDraft, Utterance
+from shared.config import Config
+from shared.errors import ModelError
+from shared.external_calls import journaled_factory
+from shared.trace import record
+from shared.types import Annotation, MaterialDigest, ScriptTemplate, ShotDraft, Utterance
 
 log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from mindex.models.image_generators import ImageRequest
-    from mindex.models.music_generators import Lyrics, MusicRequest
-    from mindex.models.video_generators import VideoRequest, VideoStatus
+    from models.image_generators import ImageRequest
+    from models.music_generators import Lyrics, MusicRequest
+    from models.video_generators import VideoRequest, VideoStatus
 
 
 class AnalysisContentRejected(ModelError):
@@ -43,15 +43,21 @@ def analysis_content_rejection(response) -> str | None:
     except (ValueError, AttributeError):
         payload = {}
     error = payload.get("error", {}) if isinstance(payload, dict) else {}
-    codes = {str(error.get(key, "")).lower() for key in ("code", "type")} if isinstance(error, dict) else set()
+    codes = (
+        {str(error.get(key, "")).lower() for key in ("code", "type")} if isinstance(error, dict) else set()
+    )
     detail = _error_detail(response)
     explicit = re.search(
         r"不安全或敏感内容|内容安全审核未通过|内容审核不通过|违反.{0,12}内容.{0,8}(?:政策|策略)|"
         r"content[_ ](?:filter|policy[_ ]violation)|responsibleaipolicyviolation|"
         r"(?:unsafe|sensitive) content|content.{0,30}(?:blocked|rejected).{0,30}(?:safety|policy)",
-        detail, re.IGNORECASE,
+        detail,
+        re.IGNORECASE,
     )
-    if codes & {"1301", "content_filter", "content_policy_violation", "responsibleaipolicyviolation"} or explicit:
+    if (
+        codes & {"1301", "content_filter", "content_policy_violation", "responsibleaipolicyviolation"}
+        or explicit
+    ):
         return detail or "模型内容安全策略拒绝此片段"
     return None
 
@@ -101,10 +107,18 @@ def request(method: str, url: str, *, timeout: float = 180, attempts: int = 3, a
     """带重试的 JSON 请求。诊断只记录方法、URL 与请求体（``audit`` 给出时记录它代替请求体，
     用于省略内联图片等大字段）；请求头（含鉴权）永不记录。"""
     for attempt in range(attempts):
-        record("model-request", {"method": method, "url": url, "attempt": attempt,
-                                 "json": kwargs.get("json") if audit is None else audit})
+        record(
+            "model-request",
+            {
+                "method": method,
+                "url": url,
+                "attempt": attempt,
+                "json": kwargs.get("json") if audit is None else audit,
+            },
+        )
         try:
-            from mindex.shared.query_budget import http_request, remaining
+            # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
+            from shared.query_budget import http_request, remaining
 
             response = http_request(method, url, timeout=remaining(timeout), trust_env=False, **kwargs)
             record(
@@ -114,7 +128,8 @@ def request(method: str, url: str, *, timeout: float = 180, attempts: int = 3, a
             response.raise_for_status()
             return response.json()
         except (httpx.TransportError, httpx.HTTPStatusError) as exc:
-            from mindex.shared.query_budget import check
+            # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
+            from shared.query_budget import check
 
             check()
             retry = not isinstance(exc, httpx.HTTPStatusError) or exc.response.status_code in {
@@ -124,11 +139,7 @@ def request(method: str, url: str, *, timeout: float = 180, attempts: int = 3, a
                 504,
             }
             if not retry or attempt == attempts - 1:
-                detail = (
-                    f"：{_error_detail(exc.response)}"
-                    if isinstance(exc, httpx.HTTPStatusError)
-                    else ""
-                )
+                detail = f"：{_error_detail(exc.response)}" if isinstance(exc, httpx.HTTPStatusError) else ""
                 raise ModelError(f"模型服务调用失败 {url}: {exc}{detail}") from exc
             # Rewind uploads before retrying a request.
             for value in kwargs.get("files", {}).values():
@@ -136,9 +147,14 @@ def request(method: str, url: str, *, timeout: float = 180, attempts: int = 3, a
                 if hasattr(handle, "seek"):
                     handle.seek(0)
             delay = 0.25 * (2**attempt)
-            status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else type(exc).__name__
-            log.warning("模型 HTTP 请求准备重试 %d/%d · %s · 等待 %.2f 秒", attempt + 2, attempts, status, delay)
-            from mindex.shared.query_budget import remaining
+            status = (
+                exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else type(exc).__name__
+            )
+            log.warning(
+                "模型 HTTP 请求准备重试 %d/%d · %s · 等待 %.2f 秒", attempt + 2, attempts, status, delay
+            )
+            # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
+            from shared.query_budget import remaining
 
             time.sleep(remaining(delay))
         except (ValueError, KeyError) as exc:
@@ -149,20 +165,30 @@ def request(method: str, url: str, *, timeout: float = 180, attempts: int = 3, a
 def request_bytes(method: str, url: str, *, timeout: float = 180, attempts: int = 3, **kwargs) -> bytes:
     """同 request() 的重试语义，但返回原始字节（/audio/speech 等二进制端点）。"""
     for attempt in range(attempts):
-        record("model-request", {"method": method, "url": url, "attempt": attempt,
-                                 "json": kwargs.get("json")})
+        record(
+            "model-request", {"method": method, "url": url, "attempt": attempt, "json": kwargs.get("json")}
+        )
         try:
-            from mindex.shared.query_budget import http_request, remaining
+            # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
+            from shared.query_budget import http_request, remaining
 
             response = http_request(method, url, timeout=remaining(timeout), trust_env=False, **kwargs)
-            record("tts-response", {"status": response.status_code,
-                                    "content_type": response.headers.get("content-type"),
-                                    "bytes": len(response.content),
-                                    "body": response.text[:AUDIT_BODY_LIMIT] if response.headers.get("content-type", "").startswith("application/json") else None})
+            record(
+                "tts-response",
+                {
+                    "status": response.status_code,
+                    "content_type": response.headers.get("content-type"),
+                    "bytes": len(response.content),
+                    "body": response.text[:AUDIT_BODY_LIMIT]
+                    if response.headers.get("content-type", "").startswith("application/json")
+                    else None,
+                },
+            )
             response.raise_for_status()
             return response.content
         except (httpx.TransportError, httpx.HTTPStatusError) as exc:
-            from mindex.shared.query_budget import check
+            # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
+            from shared.query_budget import check
 
             check()
             retry = not isinstance(exc, httpx.HTTPStatusError) or exc.response.status_code in {
@@ -172,16 +198,17 @@ def request_bytes(method: str, url: str, *, timeout: float = 180, attempts: int 
                 504,
             }
             if not retry or attempt == attempts - 1:
-                detail = (
-                    f"：{_error_detail(exc.response)}"
-                    if isinstance(exc, httpx.HTTPStatusError)
-                    else ""
-                )
+                detail = f"：{_error_detail(exc.response)}" if isinstance(exc, httpx.HTTPStatusError) else ""
                 raise ModelError(f"模型服务调用失败 {url}: {exc}{detail}") from exc
             delay = 0.25 * (2**attempt)
-            status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else type(exc).__name__
-            log.warning("模型 HTTP 请求准备重试 %d/%d · %s · 等待 %.2f 秒", attempt + 2, attempts, status, delay)
-            from mindex.shared.query_budget import remaining
+            status = (
+                exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else type(exc).__name__
+            )
+            log.warning(
+                "模型 HTTP 请求准备重试 %d/%d · %s · 等待 %.2f 秒", attempt + 2, attempts, status, delay
+            )
+            # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
+            from shared.query_budget import remaining
 
             time.sleep(remaining(delay))
     raise AssertionError("unreachable")
@@ -218,10 +245,18 @@ class Speaker(Protocol):
 class Storyboarder(Protocol):
     def title(self, text: str) -> str: ...
 
-    def split(self, text: str, vocabulary: list[str] | None = None, *, language: str = "zh") -> list[ShotDraft]: ...
+    def split(
+        self, text: str, vocabulary: list[str] | None = None, *, language: str = "zh"
+    ) -> list[ShotDraft]: ...
 
     def suggest_query(
-        self, text: str, visual: str, context: tuple[str, str], vocabulary: list[str] | None, *, language: str = "zh"
+        self,
+        text: str,
+        visual: str,
+        context: tuple[str, str],
+        vocabulary: list[str] | None,
+        *,
+        language: str = "zh",
     ) -> str: ...
 
 
@@ -266,8 +301,14 @@ class MusicGenerator(Protocol):
 
     def generate(self, request: MusicRequest) -> tuple[bytes, dict]: ...
 
-    def lyrics(self, prompt: str, *, mode: str = "write_full_song", lyrics: str | None = None,
-               title: str | None = None) -> Lyrics: ...
+    def lyrics(
+        self,
+        prompt: str,
+        *,
+        mode: str = "write_full_song",
+        lyrics: str | None = None,
+        title: str | None = None,
+    ) -> Lyrics: ...
 
     def health(self) -> dict: ...  # 鉴权/可达性探测，绝不生成音乐
 
@@ -275,8 +316,17 @@ class MusicGenerator(Protocol):
 class Animator(Protocol):
     """AI 动画：按画面说明生成自包含 HTML/JS 动画源码（已通过静态校验）。"""
 
-    def animate(self, brief: str, *, seconds: float, width: int, height: int, fps: float,
-                previous: str | None = None, feedback: str | None = None) -> str: ...
+    def animate(
+        self,
+        brief: str,
+        *,
+        seconds: float,
+        width: int,
+        height: int,
+        fps: float,
+        previous: str | None = None,
+        feedback: str | None = None,
+    ) -> str: ...
 
     def ping(self) -> dict: ...  # 设置页测试连接：一次最小对话
 
@@ -290,16 +340,19 @@ def parse_json(content: str):
 
 
 def make_detector(config: Config) -> ShotDetector:
-    from mindex.models.detectors import AdaptiveShotDetector, HTTPShotDetector
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+    from models.detectors import AdaptiveShotDetector, HTTPShotDetector
 
     return HTTPShotDetector(config) if config.detector.backend == "transnet" else AdaptiveShotDetector(config)
 
 
 def make_embedder(config: Config) -> MultimodalEmbedder:
-    from mindex.models.embedders import HTTPEmbedder, TokenHubEmbedder
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+    from models.embedders import HTTPEmbedder, TokenHubEmbedder
 
     if config.embedding.backend == "llama_cpp":
-        from mindex.models.image_embedding import LlamaImageEmbedder
+        # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+        from models.image_embedding import LlamaImageEmbedder
 
         return LlamaImageEmbedder(config)
     if config.embedding.backend == "tokenhub":
@@ -308,10 +361,12 @@ def make_embedder(config: Config) -> MultimodalEmbedder:
 
 
 def make_transcriber(config: Config) -> Transcriber:
-    from mindex.models.transcribers import HTTPTranscriber, MiniMaxTranscriber, OpenAIChatTranscriber
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+    from models.transcribers import HTTPTranscriber, MiniMaxTranscriber, OpenAIChatTranscriber
 
     if config.asr.backend == "llama_cpp":
-        from mindex.models.llama_cpp import LlamaTranscriber
+        # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+        from models.llama_cpp import LlamaTranscriber
 
         return LlamaTranscriber(config)
     if config.asr.backend == "openai":
@@ -322,10 +377,12 @@ def make_transcriber(config: Config) -> Transcriber:
 
 
 def make_analyzer(config: Config) -> VisualAnalyzer:
-    from mindex.models.qwen import QwenAnalyzer
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+    from models.qwen import QwenAnalyzer
 
     if config.analyzer.backend == "llama_cpp":
-        from mindex.models.analyzers import PinnedQwenAnalyzer
+        # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+        from models.analyzers import PinnedQwenAnalyzer
 
         return PinnedQwenAnalyzer(config)
     return QwenAnalyzer(config)
@@ -333,7 +390,8 @@ def make_analyzer(config: Config) -> VisualAnalyzer:
 
 @journaled_factory
 def make_speaker(config: Config) -> Speaker:
-    from mindex.models.speech import DashScopeSpeaker, MiniMaxSpeaker, OpenAISpeaker
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+    from models.speech import DashScopeSpeaker, MiniMaxSpeaker, OpenAISpeaker
 
     if config.studio.tts.backend == "minimax":
         return MiniMaxSpeaker(config)
@@ -344,21 +402,24 @@ def make_speaker(config: Config) -> Speaker:
 
 @journaled_factory
 def make_storyboarder(config: Config) -> Storyboarder:
-    from mindex.models.storyboard import QwenStoryboarder
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+    from models.storyboard import QwenStoryboarder
 
     return QwenStoryboarder(config)
 
 
 @journaled_factory
 def make_writer(config: Config) -> Writer:
-    from mindex.models.writer import QwenWriter
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+    from models.writer import QwenWriter
 
     return QwenWriter(config)
 
 
 @journaled_factory
 def make_video_generator(config: Config) -> VideoGenerator:
-    from mindex.models.video_generators import (
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+    from models.video_generators import (
         ComfyUIVideoGenerator,
         DashScopeVideoGenerator,
         MiniMaxH3VideoGenerator,
@@ -377,7 +438,8 @@ def make_video_generator(config: Config) -> VideoGenerator:
 
 @journaled_factory
 def make_image_generator(config: Config) -> ImageGenerator:
-    from mindex.models.image_generators import ComfyUIImageGenerator, MiniMaxImageGenerator
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+    from models.image_generators import ComfyUIImageGenerator, MiniMaxImageGenerator
 
     if config.studio.image_generator.backend == "comfyui":
         return ComfyUIImageGenerator(config)
@@ -386,11 +448,8 @@ def make_image_generator(config: Config) -> ImageGenerator:
 
 @journaled_factory
 def make_music_generator(config: Config) -> MusicGenerator:
-    from mindex.models.music_generators import (
-        AudioCppMusicGenerator,
-        ComfyUIMusicGenerator,
-        MiniMaxMusicGenerator,
-    )
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+    from models.music_generators import AudioCppMusicGenerator, ComfyUIMusicGenerator, MiniMaxMusicGenerator
 
     if config.studio.music_generator.backend == "comfyui":
         return ComfyUIMusicGenerator(config)
@@ -401,6 +460,7 @@ def make_music_generator(config: Config) -> MusicGenerator:
 
 @journaled_factory
 def make_animator(config: Config) -> Animator:
-    from mindex.models.animator import LlmAnimator
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+    from models.animator import LlmAnimator
 
     return LlmAnimator(config)

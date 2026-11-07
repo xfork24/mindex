@@ -7,21 +7,27 @@ import json
 
 import pytest
 from fastapi.testclient import TestClient
+from typer.testing import CliRunner
+
+import cli.studio as cli_studio
+from agent.mcp_server import exported
+from agent.registry import ToolError
+from agent.tools import build_registry
+from api import create_app
+from studio import workspace as ws
 from test_agent_aigc import read
 from test_agent_studio_recall import attachment, run
 from test_studio_beats import metronome
 from test_studio_sources import setup, shot, small  # noqa: F401 — small 是夹具
-from typer.testing import CliRunner
 
-from mindex import cli_studio
-from mindex.agent.mcp_server import exported
-from mindex.agent.registry import ToolError
-from mindex.agent.tools import build_registry
-from mindex.api import create_app
-from mindex.studio import workspace as ws
-
-NAMES = ("list_music_tracks", "get_music_track", "import_music_track", "update_music_track", "analyze_music_track",
-         "recommend_music")
+NAMES = (
+    "list_music_tracks",
+    "get_music_track",
+    "import_music_track",
+    "update_music_track",
+    "analyze_music_track",
+    "recommend_music",
+)
 LICENSE = {"source": "自制", "license": "CC0", "attribution": "测试作者"}
 
 
@@ -40,14 +46,18 @@ def agent(small):  # noqa: F811
 def test_music_tools_are_in_studio_post_and_exported():
     registry = build_registry()
     assert {registry.get(name).domain for name in NAMES} == {"studio_post"}
-    assert registry.get("recommend_music").risk == "read" and registry.get("import_music_track").risk == "write"
+    assert (
+        registry.get("recommend_music").risk == "read" and registry.get("import_music_track").risk == "write"
+    )
     assert set(NAMES) <= {spec.name for spec in exported(registry)}
 
 
 def test_import_recommend_and_select_with_edit_shots(agent):
     config, client, job_id = agent
     ref = attachment(client, metronome(90, 6), "calm.wav", "audio/wav")
-    preview, output, _ = run(client, config, "import_music_track", {"attachment": ref, **LICENSE, "title": "夜曲"})
+    preview, output, _ = run(
+        client, config, "import_music_track", {"attachment": ref, **LICENSE, "title": "夜曲"}
+    )
     assert "CC0" in preview.changes[1]["after"]
     track = output.value
     assert track["title"] == "夜曲" and track["analysis_status"] == "ready" and "beats" not in track
@@ -60,14 +70,34 @@ def test_import_recommend_and_select_with_edit_shots(agent):
     recommended = read(client, config, "recommend_music", {"job_id": job_id, "shot": "#1"})[1]
     assert recommended.value["moods"] == ["calm"] and recommended.value["items"][0]["id"] == track["id"]
     assert "edit_shots" in recommended.text
-    preview, _, _ = run(client, config, "edit_shots", {"job_id": job_id, "operations": [
-        {"op": "update", "shot": "#1", "fields": {"music": {"kind": "library", "track_id": track["id"], "volume": 0.3}}}]})
+    preview, _, _ = run(
+        client,
+        config,
+        "edit_shots",
+        {
+            "job_id": job_id,
+            "operations": [
+                {
+                    "op": "update",
+                    "shot": "#1",
+                    "fields": {"music": {"kind": "library", "track_id": track["id"], "volume": 0.3}},
+                }
+            ],
+        },
+    )
     assert any("曲库音乐" in warning for warning in preview.warnings)
     w = ws.load(config, job_id)
     p = ws.plan(w, w["active_plan"])
     cue = ws.version(w, p["shots"]["a"]["content"])["data"]["music"]
-    assert cue == {"kind": "library", "prompt": None, "lyrics": None, "instrumental": True, "audio_id": None,
-                   "track_id": track["id"], "volume": 0.3}
+    assert cue == {
+        "kind": "library",
+        "prompt": None,
+        "lyrics": None,
+        "instrumental": True,
+        "audio_id": None,
+        "track_id": track["id"],
+        "volume": 0.3,
+    }
     analyzed = run(client, config, "analyze_music_track", {"track_id": track["id"], "retag": False})[1].value
     assert analyzed["moods"] == track["moods"]
 
@@ -83,8 +113,21 @@ def test_cli_music_commands(agent, monkeypatch, tmp_path):
     path.write_bytes(metronome(120, 6))
     missing = invoke("music", "import", str(path), "--source", "x", "--license", "y")
     assert missing.exit_code != 0
-    imported = invoke("music", "import", str(path), "--source", "自制", "--license", "CC0", "--attribution", "作者",
-                      "--tag", "电子", "--no-ai", "--json")
+    imported = invoke(
+        "music",
+        "import",
+        str(path),
+        "--source",
+        "自制",
+        "--license",
+        "CC0",
+        "--attribution",
+        "作者",
+        "--tag",
+        "电子",
+        "--no-ai",
+        "--json",
+    )
     assert imported.exit_code == 0, imported.output
     track = json.loads(imported.stdout)
     assert track["mood_source"] == "features" and track["tags"] == ["电子"]

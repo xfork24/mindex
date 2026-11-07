@@ -11,6 +11,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+
 from test_agent_panel_ui import playwright_available, serve
 
 pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
@@ -35,8 +36,12 @@ def test_storyboard_strip_in_browser(built_studio, tmp_path):
     result = subprocess.run(
         ["node", "tests/studio_board_ui.cjs"],
         cwd=ROOT,
-        env={**os.environ, "MINDEX_STUDIO_URL": url, "MINDEX_STUDIO_JOB": job_id,
-             "MINDEX_BOARD_OUTPUT": os.environ.get("MINDEX_BOARD_OUTPUT", str(tmp_path / "screens"))},
+        env={
+            **os.environ,
+            "MINDEX_STUDIO_URL": url,
+            "MINDEX_STUDIO_JOB": job_id,
+            "MINDEX_BOARD_OUTPUT": os.environ.get("MINDEX_BOARD_OUTPUT", str(tmp_path / "screens")),
+        },
         capture_output=True,
         text=True,
         timeout=180,

@@ -5,17 +5,17 @@ import subprocess
 import wave
 
 import pytest
-from conftest import FixtureEmbedder, FixtureWriter
-from test_agent_panel_ui import ROOT, playwright_available, serve
 
-from mindex.api import create_app
-from mindex.processing.indexing import IndexBuilder
-from mindex.processing.pipeline import Pipeline
-from mindex.shared.media import cut
-from mindex.shared.media_groups import Groups
-from mindex.shared.storage import Store
-from mindex.studio import music_library, studio
-from mindex.studio import workspace as ws
+from api import create_app
+from conftest import FixtureEmbedder, FixtureWriter
+from processing.indexing import IndexBuilder
+from processing.pipeline import Pipeline
+from shared.media import cut
+from shared.media_groups import Groups
+from shared.storage import Store
+from studio import music_library, studio
+from studio import workspace as ws
+from test_agent_panel_ui import ROOT, playwright_available, serve
 
 
 @pytest.mark.slow
@@ -23,7 +23,7 @@ from mindex.studio import workspace as ws
 def test_group_management_and_filters_in_browser(config, video_file, tmp_path):
     pipeline = Pipeline(config)
     source_id = pipeline.prepare(video_file)
-    second_video = tmp_path / '第二份素材.mp4'
+    second_video = tmp_path / "第二份素材.mp4"
     cut(video_file, 1, 3, second_video)
     second_id = pipeline.prepare(second_video)
     embedder = FixtureEmbedder(config)
@@ -34,10 +34,11 @@ def test_group_management_and_filters_in_browser(config, video_file, tmp_path):
     source_group = groups.save("source", "素材原文 Source")["id"]
     groups.change_members(source_group, [source_id])
     empty_group = None
-    for kind in ('source', 'music'):
-        extra = groups.save(kind, '长组名称用于验证自然换行 ' + 'LongGroupNameWithoutSpaces' * 5)
-        if kind == 'source': empty_group = extra['id']
-    second_group = groups.save('source', '附加素材组')['id']
+    for kind in ("source", "music"):
+        extra = groups.save(kind, "长组名称用于验证自然换行 " + "LongGroupNameWithoutSpaces" * 5)
+        if kind == "source":
+            empty_group = extra["id"]
+    second_group = groups.save("source", "附加素材组")["id"]
     groups.change_members(second_group, [second_id])
     audio = tmp_path / "music.wav"
     with wave.open(str(audio), "wb") as stream:

@@ -6,11 +6,16 @@ from typing import Literal
 
 from pydantic import Field, field_validator, model_validator
 
-from mindex.shared.config import StrictModel
+from shared.config import StrictModel
 
 WEIGHT_KEYS = ("timeliness", "audience", "coverage", "novelty", "cost")
-WEIGHT_LABELS = {"timeliness": "时效", "audience": "受众匹配", "coverage": "素材覆盖", "novelty": "去重",
-                 "cost": "制作成本"}
+WEIGHT_LABELS = {
+    "timeliness": "时效",
+    "audience": "受众匹配",
+    "coverage": "素材覆盖",
+    "novelty": "去重",
+    "cost": "制作成本",
+}
 Canvas = Literal["16:9", "9:16", "1:1"]
 
 

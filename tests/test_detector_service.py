@@ -7,10 +7,10 @@ import pytest
 from fastapi.testclient import TestClient
 from filelock import FileLock
 
-from mindex.models import adapters
-from mindex.models.detectors import HTTPShotDetector
-from mindex.models.model_server import TransNetEngine, create_model_app
-from mindex.shared.media import command, frame_timestamps
+from models import adapters
+from models.detectors import HTTPShotDetector
+from models.model_server import TransNetEngine, create_model_app
+from shared.media import command, frame_timestamps
 
 
 @pytest.mark.parametrize("frames", [1, 49, 50, 51, 75, 99, 100, 101, 150])
@@ -106,29 +106,60 @@ def test_local_cpu_service_auth_upload_and_client(config, video_file, monkeypatc
 
 
 def test_hard_cut_starts_on_incoming_frame(tmp_path):
-    from mindex.models.model_server import refine_cut_frame
-    from mindex.shared.media import cut
+    from models.model_server import refine_cut_frame
+    from shared.media import cut
 
-    assert refine_cut_frame(24, [0.] * 25 + [9000.] + [0.] * 10) == 25
-    assert refine_cut_frame(24, [0.] * 36) == 24
-    video = tmp_path / 'hard-cut.mp4'
-    command(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=red:s=48x28:r=25:d=1',
-             '-f', 'lavfi', '-i', 'color=c=blue:s=48x28:r=25:d=1',
-             '-filter_complex', '[0:v][1:v]concat=n=2:v=1:a=0[v]', '-map', '[v]', str(video)])
+    assert refine_cut_frame(24, [0.0] * 25 + [9000.0] + [0.0] * 10) == 25
+    assert refine_cut_frame(24, [0.0] * 36) == 24
+    video = tmp_path / "hard-cut.mp4"
+    command(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=red:s=48x28:r=25:d=1",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=blue:s=48x28:r=25:d=1",
+            "-filter_complex",
+            "[0:v][1:v]concat=n=2:v=1:a=0[v]",
+            "-map",
+            "[v]",
+            str(video),
+        ]
+    )
 
     class OutgoingFrameModel:
         def predict_raw(self, frames):
             # Simulate the model marking the last outgoing frame, as in the stored library.
             output = np.zeros((1, 100, 1), dtype=np.float32)
-            output[0, :-1, 0] = (np.mean(np.abs(np.diff(frames[0].astype(float), axis=0)), axis=(1, 2, 3)) > 20)
+            output[0, :-1, 0] = np.mean(np.abs(np.diff(frames[0].astype(float), axis=0)), axis=(1, 2, 3)) > 20
             return output, output
 
     engine = TransNetEngine.__new__(TransNetEngine)
     engine.model, engine.lock = OutgoingFrameModel(), threading.Lock()
-    assert engine.detect(video, .5)['cut_frames'] == [25]
-    incoming = tmp_path / 'incoming.mp4'
+    assert engine.detect(video, 0.5)["cut_frames"] == [25]
+    incoming = tmp_path / "incoming.mp4"
     cut(video, frame_timestamps(video)[25], 2, incoming)
-    pixels = command(['ffmpeg', '-v', 'error', '-i', str(incoming), '-frames:v', '1',
-                      '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'])
+    pixels = command(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-i",
+            str(incoming),
+            "-frames:v",
+            "1",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgb24",
+            "-",
+        ]
+    )
     rgb = np.frombuffer(pixels, dtype=np.uint8).reshape(-1, 3).mean(axis=0)
     assert rgb[2] > 200 and rgb[0] < 20

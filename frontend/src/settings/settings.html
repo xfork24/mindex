@@ -1,278 +1,780 @@
 <!doctype html>
 <html lang="zh-CN">
-<head>
-  <script src="/assets/shared/i18n-boot.js?v=bf7e8b3c7c"></script>
-  <script src="/assets/shared/theme.js?v=ba2154c954"></script>
-  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <title data-i18n="[[0,&quot;ui.5e9681d20f56&quot;]]">Mindex · 设置</title><link rel="icon" href="/assets/shared/favicon.svg?v=8d7f9242de" type="image/svg+xml">
-  <link rel="stylesheet" href="/assets/shared/style.css?v=87b28bc99b"><link rel="stylesheet" href="/assets/shared/agent-panel.css?v=4284eb0eb0"><link rel="stylesheet" href="/assets/settings/settings.css?v=fc2643e8cc">
-  <script src="/assets/shared/messages.js?v=6a8ef772ae" defer></script><script src="/assets/shared/i18n.js?v=e981ac227d" defer></script><script src="/assets/shared/api.js?v=f9ecd754db" defer></script><script src="/assets/shared/control-layout.js?v=8295190463" defer></script><script src="/assets/shared/marked.umd.js?v=b82b933440" defer></script><script src="/assets/shared/purify.min.js?v=cd37898f97" defer></script><script src="/assets/shared/agent-markdown.js?v=8f0018e90a" defer></script><script src="/assets/shared/agent-panel.js?v=2e639588c0" defer></script><script src="/assets/shared/feedback.js?v=4630718c9e" defer></script><script src="/assets/settings/settings.js?v=7d7186e77e" defer></script><script src="/assets/settings/tools.js?v=6cceb98ba7" defer></script>
-</head>
-<body class="settings">
-  <header><a class="brand" href="/">m<span>index</span><i></i></a><nav class="page-nav" aria-label="页面导航" data-i18n-aria-label="ui.main_navigation"><a class="quiet nav-link" href="/search" data-i18n="[[0,&quot;ui.c9b1e68e3537&quot;]]">视频检索</a><a class="quiet nav-link" href="/" data-i18n="[[0,&quot;ui.b6fc3cef0bd0&quot;]]">创作</a><a class="quiet nav-link" href="/admin" data-i18n="[[0,&quot;ui.f517302fec0d&quot;]]">素材管理</a><a class="quiet nav-link" href="/persons" data-i18n="[[0,&quot;ui.0973ef28d791&quot;]]">人物库</a><a class="quiet nav-link" href="/settings" aria-current="page" data-i18n="[[0,&quot;ui.7debf9cb0372&quot;]]">设置</a></nav><div class="header-actions"><button class="quiet" id="reload" data-i18n="[[0,&quot;ui.c3147ba1672a&quot;]]" data-i18n-aria-label="ui.c3147ba1672a">刷新设置</button><button type="button" class="quiet theme-toggle" data-theme-toggle></button><button type="button" class="quiet language-switch" data-language-toggle aria-label="中文 / English"><span data-language="zh" lang="zh-CN">文</span><span class="language-divider" aria-hidden="true">/</span><span data-language="en" lang="en">En</span></button></div></header>
-  <main>
-    <section class="intro"><h1 data-i18n="[[0,&quot;ui.81c5690759cb&quot;]]">设置</h1><p data-i18n="[[0,&quot;ui.39e1d87be0f0&quot;]]">配置模型服务、检索参数、音色与运行时，保存即生效，密钥仅存本地。</p></section>
-    <div id="notice" class="notice" role="status" aria-live="polite"></div>
-    <div id="index-banner"></div>
-    <section aria-label="智能助手运行时" data-i18n-aria-label="ui.47012aad511c">
-      <div class="section-heading"><h2 data-i18n="[[0,&quot;ui.47012aad511c&quot;]]">智能助手运行时</h2><span data-i18n="[[0,&quot;ui.3bce263f4420&quot;]]">切换仅影响新会话，已有会话继续使用原运行时</span></div>
-      <form id="agent-runtime-form" class="tuning-panel">
-        <div class="runtime-row">
-          <label for="agent-runtime" data-i18n="[[0,&quot;ui.cef8154370fc&quot;]]">运行时</label>
-          <select id="agent-runtime"><option value="builtin" data-i18n="[[0,&quot;ui.09ceea7644dc&quot;]]">内置Harness</option><option value="dsh">DeepSeek Harness (dsh)</option></select>
-          <p id="agent-runtime-status" role="status"></p>
-          <button type="submit" data-i18n="[[0,&quot;ui.f61b5478e34f&quot;]]">保存运行时</button>
-        </div>
-      </form>
-    </section>
-    <section aria-label="处理设置" data-i18n-aria-label="ui.95630f7c78ef">
-      <div class="section-heading"><h2 data-i18n="[[0,&quot;ui.95630f7c78ef&quot;]]">处理设置</h2><span data-i18n="[[0,&quot;ui.5c3c785f368b&quot;]]">不同类型任务的并行策略</span></div>
-      <form id="processing-settings" class="tuning-panel">
-        <label class="check" data-i18n="[[1,&quot;ui.6ea06a743fc3&quot;]]"><input type="checkbox" id="enforce-gpu-lock"> 强加 GPU 锁 <span class="muted" data-i18n="[[0,&quot;ui.5f92736efb18&quot;]]">允许不同素材及不同类型的处理并行</span></label>
-      </form>
-    </section>
-    <section aria-label="模型服务" data-i18n-aria-label="ui.bc56f948bb75">
-      <div class="section-heading"><h2 data-i18n="[[0,&quot;ui.bc56f948bb75&quot;]]">模型服务</h2><span data-i18n="[[0,&quot;ui.fc130556f9a4&quot;]]">激活的档案立即对检索、分析与创作生效</span></div>
-      <div id="roles" class="role-grid"></div>
-    </section>
-    <section aria-label="检索设置" data-i18n-aria-label="ui.3ac7159dd146">
-      <div class="section-heading"><h2 data-i18n="[[0,&quot;ui.3ac7159dd146&quot;]]">检索设置</h2><span data-i18n="[[0,&quot;ui.eed5eb211ebd&quot;]]">独立渠道与旧版融合参数，保存即影响文字检索排序</span></div>
-      <div class="role-row" id="tuning-row">
-        <button type="button" class="role-row-head" data-section="tuning" aria-controls="tuning-body" aria-expanded="false">
-          <span class="chevron">▸</span>
-          <strong class="role-row-title" data-i18n="[[0,&quot;ui.f51b8e1e5f27&quot;]]">检索调参</strong>
-          <span class="role-row-summary"><span class="role-row-effective" id="tuning-summary"></span></span>
+  <head>
+    <meta charset="utf-8" />
+    <script src="/assets/shared/i18n-boot.js?v=fe186b697e"></script>
+    <script src="/assets/shared/theme.js?v=141acbb105"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title data-i18n='[[0,"ui.5e9681d20f56"]]'>Mindex · 设置</title>
+    <link rel="icon" href="/assets/shared/favicon.svg?v=8d7f9242de" type="image/svg+xml" />
+    <link rel="stylesheet" href="/assets/shared/style.css?v=7303c8f392" />
+    <link rel="stylesheet" href="/assets/shared/agent-panel.css?v=4402a24df2" />
+    <link rel="stylesheet" href="/assets/settings/settings.css?v=1a5b1767b3" />
+    <script src="/assets/shared/messages.js?v=6a8ef772ae" defer></script>
+    <script src="/assets/shared/i18n.js?v=2be07a7051" defer></script>
+    <script src="/assets/shared/api.js?v=cf9a280b89" defer></script>
+    <script src="/assets/shared/control-layout.js?v=3f10d71f9d" defer></script>
+    <script src="/assets/shared/marked.umd.js?v=b82b933440" defer></script>
+    <script src="/assets/shared/purify.min.js?v=cd37898f97" defer></script>
+    <script src="/assets/shared/agent-markdown.js?v=47dc4beb6a" defer></script>
+    <script src="/assets/shared/agent-panel.js?v=c6708885f2" defer></script>
+    <script src="/assets/shared/feedback.js?v=3492ab4005" defer></script>
+    <script src="/assets/settings/settings.js?v=d519a61c6e" defer></script>
+    <script src="/assets/settings/tools.js?v=696e9410b3" defer></script>
+  </head>
+  <body class="settings">
+    <header>
+      <a class="brand" href="/">m<span>index</span><i></i></a>
+      <nav class="page-nav" aria-label="页面导航" data-i18n-aria-label="ui.main_navigation">
+        <a class="quiet nav-link" href="/search" data-i18n='[[0,"ui.c9b1e68e3537"]]'>视频检索</a
+        ><a class="quiet nav-link" href="/" data-i18n='[[0,"ui.b6fc3cef0bd0"]]'>创作</a
+        ><a class="quiet nav-link" href="/admin" data-i18n='[[0,"ui.f517302fec0d"]]'>素材管理</a
+        ><a class="quiet nav-link" href="/persons" data-i18n='[[0,"ui.0973ef28d791"]]'>人物库</a
+        ><a
+          class="quiet nav-link"
+          href="/settings"
+          aria-current="page"
+          data-i18n='[[0,"ui.7debf9cb0372"]]'
+          >设置</a
+        >
+      </nav>
+      <div class="header-actions">
+        <button
+          class="quiet"
+          id="reload"
+          data-i18n='[[0,"ui.c3147ba1672a"]]'
+          data-i18n-aria-label="ui.c3147ba1672a"
+        >
+          刷新设置</button
+        ><button type="button" class="quiet theme-toggle" data-theme-toggle></button
+        ><button
+          type="button"
+          class="quiet language-switch"
+          data-language-toggle
+          aria-label="中文 / English"
+        >
+          <span data-language="zh" lang="zh-CN">文</span
+          ><span class="language-divider" aria-hidden="true">/</span
+          ><span data-language="en" lang="en">En</span>
         </button>
-        <div class="role-row-body" id="tuning-body" hidden>
-          <p class="role-desc" data-i18n="[[0,&quot;ui.cbf76d66b8c4&quot;]]">新版三渠道权重与旧版五路权重，保存即热生效</p>
-          <form id="search-tuning" class="tuning-panel">
-            <div class="tuning-controls"><div class="weight-grid" id="weight-grid"></div>
-            <div class="tuning-row">
-              <label>RRF k<input id="rrf-k" type="number" min="1" step="1"></label>
-              <label data-i18n="[[0,&quot;ui.f630f9dfa637&quot;]]">候选数<input id="candidates" type="number" min="1" max="1000" step="1"></label>
-            </div>
-              <label><span data-i18n='[[0,"ui.duration_weight"]]'>时长匹配权重</span><input id="duration-weight" type="number" min="0" max="0.5" step="0.05"></label>
-              <label><span data-i18n='[[0,"ui.duration_exponent"]]'>时长不足惩罚指数</span><input id="duration-exponent" type="number" min="0.1" max="8" step="0.1"></label>
-            </div>
-            <p class="role-desc" data-i18n='[[0,"ui.tuning_normalized_help"]]'>各渠道按相对权重归一化；时长充足得 1 分，不足时按时长比例的指数次方计分，仅影响任务分镜召回。</p>
-            <div class="tuning-actions"><button class="quiet" type="button" id="tuning-reset" data-i18n="[[0,&quot;ui.a191935bc678&quot;]]">恢复默认</button><button class="submit" type="submit" id="tuning-save" data-i18n="[[0,&quot;ui.865d4c5c2e91&quot;]]">保存调参 <span>↗</span></button></div>
-          </form>
-        </div>
       </div>
-    </section>
-    <section aria-label="语音合成设置" data-i18n-aria-label="ui.3401af34627a">
-      <div class="section-heading"><h2 data-i18n="[[0,&quot;ui.3401af34627a&quot;]]">语音合成设置</h2><span data-i18n="[[0,&quot;ui.9af210fec713&quot;]]">音色库与默认音色，用于创作工作流配音</span></div>
-      <div class="role-row" id="voices-row">
-        <button type="button" class="role-row-head" data-section="voices" aria-controls="voices-body" aria-expanded="false">
-          <span class="chevron">▸</span>
-          <strong class="role-row-title" data-i18n="[[0,&quot;ui.b1a9b628cdf8&quot;]]">音色库</strong>
-          <span class="role-row-summary"><span class="role-row-effective" id="voices-summary"></span></span>
-        </button>
-        <div class="role-row-body" id="voices-body" hidden>
-          <p class="role-desc" data-i18n="[[0,&quot;ui.df4cd9dc92df&quot;]]">预定义音色与克隆音色；默认音色用于创作配音</p>
-          <div class="tuning-panel">
-            <div class="voice-default-row">
-              <label for="default-voice" data-i18n="[[0,&quot;ui.cbc02d6165c4&quot;]]">默认配音音色</label>
-              <select id="default-voice"></select>
-              <span class="muted" id="voice-backend-hint"></span>
-            </div>
-            <ul id="voice-list" class="voice-list"></ul>
-            <div class="voice-actions">
-              <button class="quiet" type="button" id="voice-register" data-i18n="[[0,&quot;ui.a890acccfa32&quot;]]">+ 录入已有音色</button>
-              <button class="submit" type="button" id="voice-clone" data-i18n="[[0,&quot;ui.e640fb281933&quot;]]">克隆我的声音 <span>↗</span></button>
+    </header>
+    <main>
+      <section class="intro">
+        <h1 data-i18n='[[0,"ui.81c5690759cb"]]'>设置</h1>
+        <p data-i18n='[[0,"ui.39e1d87be0f0"]]'>
+          配置模型服务、检索参数、音色与运行时，保存即生效，密钥仅存本地。
+        </p>
+      </section>
+      <div id="notice" class="notice" role="status" aria-live="polite"></div>
+      <div id="index-banner"></div>
+      <section aria-label="智能助手运行时" data-i18n-aria-label="ui.47012aad511c">
+        <div class="section-heading">
+          <h2 data-i18n='[[0,"ui.47012aad511c"]]'>智能助手运行时</h2>
+          <span data-i18n='[[0,"ui.3bce263f4420"]]'
+            >切换仅影响新会话，已有会话继续使用原运行时</span
+          >
+        </div>
+        <form id="agent-runtime-form" class="tuning-panel">
+          <div class="runtime-row">
+            <label for="agent-runtime" data-i18n='[[0,"ui.cef8154370fc"]]'>运行时</label>
+            <select id="agent-runtime">
+              <option value="builtin" data-i18n='[[0,"ui.09ceea7644dc"]]'>内置Harness</option>
+              <option value="dsh">DeepSeek Harness (dsh)</option>
+            </select>
+            <p id="agent-runtime-status" role="status"></p>
+            <button type="submit" data-i18n='[[0,"ui.f61b5478e34f"]]'>保存运行时</button>
+          </div>
+        </form>
+      </section>
+      <section aria-label="处理设置" data-i18n-aria-label="ui.95630f7c78ef">
+        <div class="section-heading">
+          <h2 data-i18n='[[0,"ui.95630f7c78ef"]]'>处理设置</h2>
+          <span data-i18n='[[0,"ui.5c3c785f368b"]]'>不同类型任务的并行策略</span>
+        </div>
+        <form id="processing-settings" class="tuning-panel">
+          <label class="check" data-i18n='[[1,"ui.6ea06a743fc3"]]'
+            ><input type="checkbox" id="enforce-gpu-lock" /> 强加 GPU 锁
+            <span class="muted" data-i18n='[[0,"ui.5f92736efb18"]]'
+              >允许不同素材及不同类型的处理并行</span
+            ></label
+          >
+        </form>
+      </section>
+      <section aria-label="模型服务" data-i18n-aria-label="ui.bc56f948bb75">
+        <div class="section-heading">
+          <h2 data-i18n='[[0,"ui.bc56f948bb75"]]'>模型服务</h2>
+          <span data-i18n='[[0,"ui.fc130556f9a4"]]'>激活的档案立即对检索、分析与创作生效</span>
+        </div>
+        <div id="roles" class="role-grid"></div>
+      </section>
+      <section aria-label="检索设置" data-i18n-aria-label="ui.3ac7159dd146">
+        <div class="section-heading">
+          <h2 data-i18n='[[0,"ui.3ac7159dd146"]]'>检索设置</h2>
+          <span data-i18n='[[0,"ui.eed5eb211ebd"]]'
+            >独立渠道与旧版融合参数，保存即影响文字检索排序</span
+          >
+        </div>
+        <div class="role-row" id="tuning-row">
+          <button
+            type="button"
+            class="role-row-head"
+            data-section="tuning"
+            aria-controls="tuning-body"
+            aria-expanded="false"
+          >
+            <span class="chevron">▸</span>
+            <strong class="role-row-title" data-i18n='[[0,"ui.f51b8e1e5f27"]]'>检索调参</strong>
+            <span class="role-row-summary"
+              ><span class="role-row-effective" id="tuning-summary"></span
+            ></span>
+          </button>
+          <div class="role-row-body" id="tuning-body" hidden>
+            <p class="role-desc" data-i18n='[[0,"ui.cbf76d66b8c4"]]'>
+              新版三渠道权重与旧版五路权重，保存即热生效
+            </p>
+            <form id="search-tuning" class="tuning-panel">
+              <div class="tuning-controls">
+                <div class="weight-grid" id="weight-grid"></div>
+                <div class="tuning-row">
+                  <label>RRF k<input id="rrf-k" type="number" min="1" step="1" /></label>
+                  <label data-i18n='[[0,"ui.f630f9dfa637"]]'
+                    >候选数<input id="candidates" type="number" min="1" max="1000" step="1"
+                  /></label>
+                </div>
+                <label
+                  ><span data-i18n='[[0,"ui.duration_weight"]]'>时长匹配权重</span
+                  ><input id="duration-weight" type="number" min="0" max="0.5" step="0.05"
+                /></label>
+                <label
+                  ><span data-i18n='[[0,"ui.duration_exponent"]]'>时长不足惩罚指数</span
+                  ><input id="duration-exponent" type="number" min="0.1" max="8" step="0.1"
+                /></label>
+              </div>
+              <p class="role-desc" data-i18n='[[0,"ui.tuning_normalized_help"]]'>
+                各渠道按相对权重归一化；时长充足得 1
+                分，不足时按时长比例的指数次方计分，仅影响任务分镜召回。
+              </p>
+              <div class="tuning-actions">
+                <button
+                  class="quiet"
+                  type="button"
+                  id="tuning-reset"
+                  data-i18n='[[0,"ui.a191935bc678"]]'
+                >
+                  恢复默认</button
+                ><button
+                  class="submit"
+                  type="submit"
+                  id="tuning-save"
+                  data-i18n='[[0,"ui.865d4c5c2e91"]]'
+                >
+                  保存调参 <span>↗</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </section>
+      <section aria-label="语音合成设置" data-i18n-aria-label="ui.3401af34627a">
+        <div class="section-heading">
+          <h2 data-i18n='[[0,"ui.3401af34627a"]]'>语音合成设置</h2>
+          <span data-i18n='[[0,"ui.9af210fec713"]]'>音色库与默认音色，用于创作工作流配音</span>
+        </div>
+        <div class="role-row" id="voices-row">
+          <button
+            type="button"
+            class="role-row-head"
+            data-section="voices"
+            aria-controls="voices-body"
+            aria-expanded="false"
+          >
+            <span class="chevron">▸</span>
+            <strong class="role-row-title" data-i18n='[[0,"ui.b1a9b628cdf8"]]'>音色库</strong>
+            <span class="role-row-summary"
+              ><span class="role-row-effective" id="voices-summary"></span
+            ></span>
+          </button>
+          <div class="role-row-body" id="voices-body" hidden>
+            <p class="role-desc" data-i18n='[[0,"ui.df4cd9dc92df"]]'>
+              预定义音色与克隆音色；默认音色用于创作配音
+            </p>
+            <div class="tuning-panel">
+              <div class="voice-default-row">
+                <label for="default-voice" data-i18n='[[0,"ui.cbc02d6165c4"]]'>默认配音音色</label>
+                <select id="default-voice"></select>
+                <span class="muted" id="voice-backend-hint"></span>
+              </div>
+              <ul id="voice-list" class="voice-list"></ul>
+              <div class="voice-actions">
+                <button
+                  class="quiet"
+                  type="button"
+                  id="voice-register"
+                  data-i18n='[[0,"ui.a890acccfa32"]]'
+                >
+                  + 录入已有音色
+                </button>
+                <button
+                  class="submit"
+                  type="button"
+                  id="voice-clone"
+                  data-i18n='[[0,"ui.e640fb281933"]]'
+                >
+                  克隆我的声音 <span>↗</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
-      </div>
-    </section>
-    <section aria-label="索引版本" data-i18n-aria-label="ui.index_versions">
-      <div class="section-heading"><h2 data-i18n="[[0,&quot;ui.index_versions&quot;]]">索引版本</h2><span data-i18n="[[0,&quot;ui.index_versions_desc&quot;]]">内容索引与人物证据组成的检索组合，可发布、回退或删除</span></div>
-      <div class="role-row" id="releases-row">
-        <button type="button" class="role-row-head" data-section="releases" aria-controls="releases-body" aria-expanded="false">
-          <span class="chevron">▸</span>
-          <strong class="role-row-title" data-i18n="[[0,&quot;ui.index_release_title&quot;]]">检索组合</strong>
-          <span class="role-row-summary"><span class="role-row-effective" id="releases-summary"></span></span>
-        </button>
-        <div class="role-row-body" id="releases-body" hidden>
-          <p class="role-desc" data-i18n="[[0,&quot;ui.index_versions_hint&quot;]]">创作召回版本会记录并校验两项：内容索引 ID 与检索发布版 ID。检索发布版由内容索引加人物快照决定，任一变化，已有召回节点都会提示不兼容。</p>
-          <div class="tuning-panel">
-            <p id="release-current" class="release-current"></p>
-            <ul id="releases" class="release-list"></ul>
-            <div class="release-publish">
-              <button class="quiet" type="button" id="publish" data-i18n="[[0,&quot;ui.f69976398866&quot;]]">发布当前检索组合</button>
-              <span class="muted" data-i18n="[[0,&quot;ui.04a8ed2659fc&quot;]]">绑定当前内容索引；只发布已接受的证据。已发布检索无需人物服务在线。</span>
+      </section>
+      <section aria-label="索引版本" data-i18n-aria-label="ui.index_versions">
+        <div class="section-heading">
+          <h2 data-i18n='[[0,"ui.index_versions"]]'>索引版本</h2>
+          <span data-i18n='[[0,"ui.index_versions_desc"]]'
+            >内容索引与人物证据组成的检索组合，可发布、回退或删除</span
+          >
+        </div>
+        <div class="role-row" id="releases-row">
+          <button
+            type="button"
+            class="role-row-head"
+            data-section="releases"
+            aria-controls="releases-body"
+            aria-expanded="false"
+          >
+            <span class="chevron">▸</span>
+            <strong class="role-row-title" data-i18n='[[0,"ui.index_release_title"]]'
+              >检索组合</strong
+            >
+            <span class="role-row-summary"
+              ><span class="role-row-effective" id="releases-summary"></span
+            ></span>
+          </button>
+          <div class="role-row-body" id="releases-body" hidden>
+            <p class="role-desc" data-i18n='[[0,"ui.index_versions_hint"]]'>
+              创作召回版本会记录并校验两项：内容索引 ID 与检索发布版
+              ID。检索发布版由内容索引加人物快照决定，任一变化，已有召回节点都会提示不兼容。
+            </p>
+            <div class="tuning-panel">
+              <p id="release-current" class="release-current"></p>
+              <ul id="releases" class="release-list"></ul>
+              <div class="release-publish">
+                <button
+                  class="quiet"
+                  type="button"
+                  id="publish"
+                  data-i18n='[[0,"ui.f69976398866"]]'
+                >
+                  发布当前检索组合
+                </button>
+                <span class="muted" data-i18n='[[0,"ui.04a8ed2659fc"]]'
+                  >绑定当前内容索引；只发布已接受的证据。已发布检索无需人物服务在线。</span
+                >
+              </div>
+              <div id="release-notice" class="notice" role="status" aria-live="polite"></div>
             </div>
-            <div id="release-notice" class="notice" role="status" aria-live="polite"></div>
           </div>
         </div>
-      </div>
-    </section>
-    <section aria-label="部署设置" data-i18n-aria-label="ui.deployment_section">
-      <div class="section-heading"><h2 data-i18n="[[0,&quot;ui.deployment_section&quot;]]">部署设置</h2><span data-i18n="[[0,&quot;ui.deployment_section_desc&quot;]]">元数据库、媒体、向量、锁与队列的运行后端，以及当前节点的配置文件</span></div>
-      <div class="role-row" id="deployment-row">
-        <button type="button" class="role-row-head" data-section="deployment" aria-controls="deployment-body" aria-expanded="false">
-          <span class="chevron">▸</span>
-          <strong class="role-row-title" data-i18n="[[0,&quot;ui.0047e561269f&quot;]]">部署后端</strong>
-          <span class="role-row-summary"><span class="role-row-effective" id="deployment-summary"></span></span>
-        </button>
-        <div class="role-row-body" id="deployment-body" hidden>
-          <p class="role-desc" data-i18n="[[0,&quot;ui.e34a940790fb&quot;]]">元数据库、媒体、向量、锁与队列的运行后端</p>
-          <p class="deployment-label" data-i18n="[[0,&quot;ui.deployment_summary&quot;]]">后端概要</p>
-          <dl id="deployment-status" class="runtime-row tuning-panel">
-            <div><dt data-i18n="[[0,&quot;ui.948b21de1dd6&quot;]]">运行形态</dt><dd id="deploy-form"></dd></div>
-            <div><dt data-i18n="[[0,&quot;ui.d3f0693c30e1&quot;]]">元数据库</dt><dd id="deploy-database"></dd></div>
-            <div><dt data-i18n="[[0,&quot;ui.c38b9b8eda92&quot;]]">媒体存储</dt><dd id="deploy-media"></dd></div>
-            <div><dt data-i18n="[[0,&quot;ui.fae158475ede&quot;]]">向量</dt><dd id="deploy-vectors"></dd></div>
-            <div><dt data-i18n="[[0,&quot;ui.a9e2a2864404&quot;]]">锁</dt><dd id="deploy-locks"></dd></div>
-            <div><dt data-i18n="[[0,&quot;ui.cd35413f05e7&quot;]]">队列</dt><dd id="deploy-queue"></dd></div>
-            <div><dt data-i18n="[[0,&quot;ui.4c7d6d34bfcf&quot;]]">素材库 ID</dt><dd id="deploy-library"></dd></div>
-          </dl>
-        <details class="deployment-config">
-          <summary id="deployment-editor-label" data-i18n="[[0,&quot;ui.deployment_editor&quot;]]">部署配置</summary>
-          <textarea id="deployment-editor" rows="16" spellcheck="false" style="width:100%;font-family:monospace" aria-describedby="deployment-editor-status" aria-labelledby="deployment-editor-label"></textarea>
-          <p id="deployment-editor-status" role="status"></p>
-          <button id="deployment-validate" type="button" data-i18n="[[0,&quot;ui.deployment_validate&quot;]]">校验部署配置</button>
-          <button id="deployment-save" type="button" data-i18n="[[0,&quot;ui.deployment_save&quot;]]">保存部署配置</button>
-          <button id="deployment-reload" type="button" data-i18n="[[0,&quot;ui.deployment_reload&quot;]]">重新读取部署配置</button>
-        </details>
-        <details class="deployment-rules"><summary data-i18n="[[0,&quot;ui.deployment_rules&quot;]]">字段生效规则</summary><ul id="deployment-field-rules"></ul></details>
+      </section>
+      <section aria-label="部署设置" data-i18n-aria-label="ui.deployment_section">
+        <div class="section-heading">
+          <h2 data-i18n='[[0,"ui.deployment_section"]]'>部署设置</h2>
+          <span data-i18n='[[0,"ui.deployment_section_desc"]]'
+            >元数据库、媒体、向量、锁与队列的运行后端，以及当前节点的配置文件</span
+          >
+        </div>
+        <div class="role-row" id="deployment-row">
+          <button
+            type="button"
+            class="role-row-head"
+            data-section="deployment"
+            aria-controls="deployment-body"
+            aria-expanded="false"
+          >
+            <span class="chevron">▸</span>
+            <strong class="role-row-title" data-i18n='[[0,"ui.0047e561269f"]]'>部署后端</strong>
+            <span class="role-row-summary"
+              ><span class="role-row-effective" id="deployment-summary"></span
+            ></span>
+          </button>
+          <div class="role-row-body" id="deployment-body" hidden>
+            <p class="role-desc" data-i18n='[[0,"ui.e34a940790fb"]]'>
+              元数据库、媒体、向量、锁与队列的运行后端
+            </p>
+            <p class="deployment-label" data-i18n='[[0,"ui.deployment_summary"]]'>后端概要</p>
+            <dl id="deployment-status" class="runtime-row tuning-panel">
+              <div>
+                <dt data-i18n='[[0,"ui.948b21de1dd6"]]'>运行形态</dt>
+                <dd id="deploy-form"></dd>
+              </div>
+              <div>
+                <dt data-i18n='[[0,"ui.d3f0693c30e1"]]'>元数据库</dt>
+                <dd id="deploy-database"></dd>
+              </div>
+              <div>
+                <dt data-i18n='[[0,"ui.c38b9b8eda92"]]'>媒体存储</dt>
+                <dd id="deploy-media"></dd>
+              </div>
+              <div>
+                <dt data-i18n='[[0,"ui.fae158475ede"]]'>向量</dt>
+                <dd id="deploy-vectors"></dd>
+              </div>
+              <div>
+                <dt data-i18n='[[0,"ui.a9e2a2864404"]]'>锁</dt>
+                <dd id="deploy-locks"></dd>
+              </div>
+              <div>
+                <dt data-i18n='[[0,"ui.cd35413f05e7"]]'>队列</dt>
+                <dd id="deploy-queue"></dd>
+              </div>
+              <div>
+                <dt data-i18n='[[0,"ui.4c7d6d34bfcf"]]'>素材库 ID</dt>
+                <dd id="deploy-library"></dd>
+              </div>
+            </dl>
+            <details class="deployment-config">
+              <summary id="deployment-editor-label" data-i18n='[[0,"ui.deployment_editor"]]'>
+                部署配置
+              </summary>
+              <textarea
+                id="deployment-editor"
+                rows="16"
+                spellcheck="false"
+                class="code-editor-wide"
+                aria-describedby="deployment-editor-status"
+                aria-labelledby="deployment-editor-label"
+              ></textarea>
+              <p id="deployment-editor-status" role="status"></p>
+              <button
+                id="deployment-validate"
+                type="button"
+                data-i18n='[[0,"ui.deployment_validate"]]'
+              >
+                校验部署配置
+              </button>
+              <button id="deployment-save" type="button" data-i18n='[[0,"ui.deployment_save"]]'>
+                保存部署配置
+              </button>
+              <button id="deployment-reload" type="button" data-i18n='[[0,"ui.deployment_reload"]]'>
+                重新读取部署配置
+              </button>
+            </details>
+            <details class="deployment-rules">
+              <summary data-i18n='[[0,"ui.deployment_rules"]]'>字段生效规则</summary>
+              <ul id="deployment-field-rules"></ul>
+            </details>
 
-        <p class="muted" data-i18n="[[0,&quot;ui.e7fad659532e&quot;]]">后端选择在 config 文件中配置（database.backend 等），修改后需重启进程生效。</p>
-        </div>
-      </div>
-    </section>
-    <section aria-label="本机服务" data-i18n-aria-label="ui.local_services">
-      <div class="section-heading"><h2 data-i18n="[[0,&quot;ui.local_services&quot;]]">本机服务</h2><span data-i18n="[[0,&quot;ui.local_services_desc&quot;]]">启停本机已安装的模型服务（配置文件 local_services 中定义）</span></div>
-      <div class="role-row" id="services-row">
-        <button type="button" class="role-row-head" data-section="services" aria-controls="services-body" aria-expanded="false">
-          <span class="chevron">▸</span>
-          <strong class="role-row-title" data-i18n="[[0,&quot;ui.local_services_title&quot;]]">本机模型服务</strong>
-          <span class="role-row-summary"><span class="role-row-effective" id="services-summary"></span></span>
-        </button>
-        <div class="role-row-body" id="services-body" hidden>
-          <p class="role-desc" data-i18n="[[0,&quot;ui.local_services_hint&quot;]]">只能启停配置文件里定义的服务；命令、端口与工作目录请在配置文件中修改（桌面版：菜单“Mindex → 打开配置文件”）。单 GPU 环境不要同时启动多个大模型服务。</p>
-          <div class="tuning-panel">
-            <ul id="services" class="release-list service-list"></ul>
-            <div class="release-publish">
-              <button class="quiet" type="button" id="services-refresh" data-i18n="[[0,&quot;ui.local_services_refresh&quot;]]">刷新状态</button>
-            </div>
-            <div id="services-notice" class="notice" role="status" aria-live="polite"></div>
+            <p class="muted" data-i18n='[[0,"ui.e7fad659532e"]]'>
+              后端选择在 config 文件中配置（database.backend 等），修改后需重启进程生效。
+            </p>
           </div>
         </div>
-      </div>
-      <div class="role-row" id="browser-row">
-        <button type="button" class="role-row-head" data-section="browser" aria-controls="browser-body" aria-expanded="false">
-          <span class="chevron">▸</span>
-          <strong class="role-row-title" data-i18n="[[0,&quot;ui.animation_browser_title&quot;]]">AI 动画录制组件</strong>
-          <span class="role-row-summary"><span class="role-row-effective" id="browser-summary"></span></span>
-        </button>
-        <div class="role-row-body" id="browser-body" hidden>
-          <p class="role-desc" data-i18n="[[0,&quot;ui.animation_browser_hint&quot;]]">AI 动画分镜在无头 Chromium 里逐帧录制。首次使用前安装浏览器组件（约 100 MB，需要联网）。</p>
-          <div class="tuning-panel">
-            <p id="browser-state" class="release-current"></p>
-            <div class="release-publish">
-              <button class="quiet" type="button" id="browser-install" data-i18n="[[0,&quot;ui.animation_browser_install&quot;]]">安装浏览器组件</button>
-              <span class="muted" id="browser-path"></span>
+      </section>
+      <section aria-label="本机服务" data-i18n-aria-label="ui.local_services">
+        <div class="section-heading">
+          <h2 data-i18n='[[0,"ui.local_services"]]'>本机服务</h2>
+          <span data-i18n='[[0,"ui.local_services_desc"]]'
+            >启停本机已安装的模型服务（配置文件 local_services 中定义）</span
+          >
+        </div>
+        <div class="role-row" id="services-row">
+          <button
+            type="button"
+            class="role-row-head"
+            data-section="services"
+            aria-controls="services-body"
+            aria-expanded="false"
+          >
+            <span class="chevron">▸</span>
+            <strong class="role-row-title" data-i18n='[[0,"ui.local_services_title"]]'
+              >本机模型服务</strong
+            >
+            <span class="role-row-summary"
+              ><span class="role-row-effective" id="services-summary"></span
+            ></span>
+          </button>
+          <div class="role-row-body" id="services-body" hidden>
+            <p class="role-desc" data-i18n='[[0,"ui.local_services_hint"]]'>
+              只能启停配置文件里定义的服务；命令、端口与工作目录请在配置文件中修改（桌面版：菜单“Mindex
+              → 打开配置文件”）。单 GPU 环境不要同时启动多个大模型服务。
+            </p>
+            <div class="tuning-panel">
+              <ul id="services" class="release-list service-list"></ul>
+              <div class="release-publish">
+                <button
+                  class="quiet"
+                  type="button"
+                  id="services-refresh"
+                  data-i18n='[[0,"ui.local_services_refresh"]]'
+                >
+                  刷新状态
+                </button>
+              </div>
+              <div id="services-notice" class="notice" role="status" aria-live="polite"></div>
             </div>
-            <pre id="browser-log" class="service-log" hidden></pre>
-            <div id="browser-notice" class="notice" role="status" aria-live="polite"></div>
           </div>
         </div>
-      </div>
-    </section>
-    <section aria-label="第三方工具" data-i18n-aria-label="ui.studio_tab_tools">
-      <div class="section-heading"><h2 data-i18n="[[0,&quot;ui.studio_tab_tools&quot;]]">第三方工具</h2><span data-i18n="[[0,&quot;ui.tools_eyebrow&quot;]]">HTTP · MCP · 白名单 · 上传授权</span></div>
-      <div class="role-row" id="tools-row">
-        <button type="button" class="role-row-head" data-section="tools" aria-controls="tools-body" aria-expanded="false">
-          <span class="chevron">▸</span>
-          <strong class="role-row-title" data-i18n="[[0,&quot;ui.tools_settings_title&quot;]]">工具源</strong>
-          <span class="role-row-summary"><span class="role-row-effective" id="tools-summary"></span></span>
-        </button>
-        <div class="role-row-body" id="tools-body" hidden>
-          <p class="role-desc" data-i18n="[[0,&quot;ui.tools_intro&quot;]]">登记 HTTP 服务或 MCP 服务器，列出允许调用的工具、产物类型与是否允许携带素材上传；在分镜的画面来源里选择“第三方工具”即可调用。密钥只写不读。</p>
-          <div class="tuning-panel tools-layout">
-            <aside class="tools-list-panel" aria-label="工具源列表" data-i18n-aria-label="ui.tools_list_aria">
-              <div class="detail-actions"><button id="tool-new" class="quiet" type="button" data-i18n="[[0,&quot;ui.tools_new&quot;]]">登记工具源</button></div>
-              <div id="tool-list"></div>
-            </aside>
-            <div class="tools-detail" aria-label="工具源详情" data-i18n-aria-label="ui.tools_detail_aria" role="region">
-              <div id="tool-empty" class="empty"><h3 data-i18n="[[0,&quot;ui.tools_select_title&quot;]]">选择或登记一个工具源</h3><p data-i18n="[[0,&quot;ui.tools_select_hint&quot;]]">登记后测试连接，确认白名单中的工具都能被服务端找到。</p></div>
-              <form id="tool-form" class="tool-form" novalidate hidden>
-                <div class="tool-title-row">
-                  <h3 id="tool-title"></h3>
-                  <div class="head-actions"><button id="tool-test" class="quiet" type="button" data-i18n="[[0,&quot;ui.tools_test&quot;]]">测试连接</button><button id="tool-delete" class="quiet danger" type="button" data-i18n="[[0,&quot;ui.tools_delete&quot;]]">删除</button></div>
+        <div class="role-row" id="browser-row">
+          <button
+            type="button"
+            class="role-row-head"
+            data-section="browser"
+            aria-controls="browser-body"
+            aria-expanded="false"
+          >
+            <span class="chevron">▸</span>
+            <strong class="role-row-title" data-i18n='[[0,"ui.animation_browser_title"]]'
+              >AI 动画录制组件</strong
+            >
+            <span class="role-row-summary"
+              ><span class="role-row-effective" id="browser-summary"></span
+            ></span>
+          </button>
+          <div class="role-row-body" id="browser-body" hidden>
+            <p class="role-desc" data-i18n='[[0,"ui.animation_browser_hint"]]'>
+              AI 动画分镜在无头 Chromium 里逐帧录制。首次使用前安装浏览器组件（约 100
+              MB，需要联网）。
+            </p>
+            <div class="tuning-panel">
+              <p id="browser-state" class="release-current"></p>
+              <div class="release-publish">
+                <button
+                  class="quiet"
+                  type="button"
+                  id="browser-install"
+                  data-i18n='[[0,"ui.animation_browser_install"]]'
+                >
+                  安装浏览器组件
+                </button>
+                <span class="muted" id="browser-path"></span>
+              </div>
+              <pre id="browser-log" class="service-log" hidden></pre>
+              <div id="browser-notice" class="notice" role="status" aria-live="polite"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section aria-label="第三方工具" data-i18n-aria-label="ui.studio_tab_tools">
+        <div class="section-heading">
+          <h2 data-i18n='[[0,"ui.studio_tab_tools"]]'>第三方工具</h2>
+          <span data-i18n='[[0,"ui.tools_eyebrow"]]'>HTTP · MCP · 白名单 · 上传授权</span>
+        </div>
+        <div class="role-row" id="tools-row">
+          <button
+            type="button"
+            class="role-row-head"
+            data-section="tools"
+            aria-controls="tools-body"
+            aria-expanded="false"
+          >
+            <span class="chevron">▸</span>
+            <strong class="role-row-title" data-i18n='[[0,"ui.tools_settings_title"]]'
+              >工具源</strong
+            >
+            <span class="role-row-summary"
+              ><span class="role-row-effective" id="tools-summary"></span
+            ></span>
+          </button>
+          <div class="role-row-body" id="tools-body" hidden>
+            <p class="role-desc" data-i18n='[[0,"ui.tools_intro"]]'>
+              登记 HTTP 服务或 MCP
+              服务器，列出允许调用的工具、产物类型与是否允许携带素材上传；在分镜的画面来源里选择“第三方工具”即可调用。密钥只写不读。
+            </p>
+            <div class="tuning-panel tools-layout">
+              <aside
+                class="tools-list-panel"
+                aria-label="工具源列表"
+                data-i18n-aria-label="ui.tools_list_aria"
+              >
+                <div class="detail-actions">
+                  <button
+                    id="tool-new"
+                    class="quiet"
+                    type="button"
+                    data-i18n='[[0,"ui.tools_new"]]'
+                  >
+                    登记工具源
+                  </button>
                 </div>
-                <div class="tool-fields">
-                  <label class="form-field" data-i18n="[[0,&quot;ui.tools_field_id&quot;]]">工具源 ID<input id="tf-id" maxlength="40" pattern="[a-z0-9][a-z0-9-]*" required></label>
-                  <label class="form-field" data-i18n="[[0,&quot;ui.tools_field_name&quot;]]">名称<input id="tf-name" maxlength="60" required></label>
-                  <label class="form-field" data-i18n="[[0,&quot;ui.tools_field_protocol&quot;]]">协议<select id="tf-protocol"><option value="http">HTTP</option><option value="mcp-http">MCP (streamable-http)</option><option value="mcp-stdio">MCP (stdio)</option></select></label>
-                  <label class="form-field" data-i18n="[[0,&quot;ui.tools_field_hosts&quot;]]">产物下载主机（逗号分隔）<input id="tf-hosts" maxlength="1000"></label>
+                <div id="tool-list"></div>
+              </aside>
+              <div
+                class="tools-detail"
+                aria-label="工具源详情"
+                data-i18n-aria-label="ui.tools_detail_aria"
+                role="region"
+              >
+                <div id="tool-empty" class="empty">
+                  <h3 data-i18n='[[0,"ui.tools_select_title"]]'>选择或登记一个工具源</h3>
+                  <p data-i18n='[[0,"ui.tools_select_hint"]]'>
+                    登记后测试连接，确认白名单中的工具都能被服务端找到。
+                  </p>
                 </div>
-                <label class="form-field" data-i18n="[[0,&quot;ui.tools_field_connection&quot;]]">连接设置（JSON）<textarea id="tf-connection" class="tool-connection" rows="10" spellcheck="false"></textarea></label>
-                <p id="tf-connection-help" class="muted"></p>
-                <div id="tool-entries" class="tool-section"></div>
-                <div id="tool-secrets" class="tool-section"></div>
-                <div class="tuning-actions"><button id="tool-save" class="submit" type="submit" data-i18n="[[0,&quot;ui.tools_save&quot;]]">保存工具源</button></div>
-                <p id="tool-error" class="tool-warn" role="alert" hidden></p>
-                <div id="tool-test-result" class="muted" role="status"></div>
-              </form>
+                <form id="tool-form" class="tool-form" novalidate hidden>
+                  <div class="tool-title-row">
+                    <h3 id="tool-title"></h3>
+                    <div class="head-actions">
+                      <button
+                        id="tool-test"
+                        class="quiet"
+                        type="button"
+                        data-i18n='[[0,"ui.tools_test"]]'
+                      >
+                        测试连接</button
+                      ><button
+                        id="tool-delete"
+                        class="quiet danger"
+                        type="button"
+                        data-i18n='[[0,"ui.tools_delete"]]'
+                      >
+                        删除
+                      </button>
+                    </div>
+                  </div>
+                  <div class="tool-fields">
+                    <label class="form-field" data-i18n='[[0,"ui.tools_field_id"]]'
+                      >工具源 ID<input
+                        id="tf-id"
+                        maxlength="40"
+                        pattern="[a-z0-9][a-z0-9-]*"
+                        required
+                    /></label>
+                    <label class="form-field" data-i18n='[[0,"ui.tools_field_name"]]'
+                      >名称<input id="tf-name" maxlength="60" required
+                    /></label>
+                    <label class="form-field" data-i18n='[[0,"ui.tools_field_protocol"]]'
+                      >协议<select id="tf-protocol">
+                        <option value="http">HTTP</option>
+                        <option value="mcp-http">MCP (streamable-http)</option>
+                        <option value="mcp-stdio">MCP (stdio)</option>
+                      </select></label
+                    >
+                    <label class="form-field" data-i18n='[[0,"ui.tools_field_hosts"]]'
+                      >产物下载主机（逗号分隔）<input id="tf-hosts" maxlength="1000"
+                    /></label>
+                  </div>
+                  <label class="form-field" data-i18n='[[0,"ui.tools_field_connection"]]'
+                    >连接设置（JSON）<textarea
+                      id="tf-connection"
+                      class="tool-connection"
+                      rows="10"
+                      spellcheck="false"
+                    ></textarea>
+                  </label>
+                  <p id="tf-connection-help" class="muted"></p>
+                  <div id="tool-entries" class="tool-section"></div>
+                  <div id="tool-secrets" class="tool-section"></div>
+                  <div class="tuning-actions">
+                    <button
+                      id="tool-save"
+                      class="submit"
+                      type="submit"
+                      data-i18n='[[0,"ui.tools_save"]]'
+                    >
+                      保存工具源
+                    </button>
+                  </div>
+                  <p id="tool-error" class="tool-warn" role="alert" hidden></p>
+                  <div id="tool-test-result" class="muted" role="status"></div>
+                </form>
+              </div>
             </div>
           </div>
         </div>
+      </section>
+    </main>
+    <dialog id="profile-dialog" aria-labelledby="profile-title">
+      <button
+        id="profile-close"
+        type="button"
+        class="quiet close"
+        aria-label="关闭编辑"
+        data-i18n-aria-label="ui.173f9e565a28"
+      >
+        ✕
+      </button>
+      <h2 id="profile-title" data-i18n='[[0,"ui.19e6fbd32c16"]]'>新建配置档案</h2>
+      <form id="profile-form">
+        <input type="hidden" id="pf-role" /><input type="hidden" id="pf-id" />
+        <div class="form-grid">
+          <label data-i18n='[[0,"ui.7ea2991885c7"]]'
+            >厂商模板<select id="pf-provider"></select
+          ></label>
+          <label data-i18n='[[0,"ui.6b863e8f9805"]]'
+            >档案名称<input
+              id="pf-name"
+              maxlength="60"
+              required
+              placeholder="例如：DeepSeek 拆分镜"
+              data-i18n-placeholder="ui.5bd5015baefc"
+          /></label>
+        </div>
+        <div class="form-grid">
+          <label data-i18n='[[0,"ui.3204871e247f"]]'
+            >协议后端<select id="pf-backend"></select
+          ></label>
+          <label
+            >Revision<input
+              id="pf-revision"
+              placeholder="main，一般无需修改"
+              data-i18n-placeholder="ui.9b6fc5273b15"
+          /></label>
+        </div>
+        <div class="form-grid profile-connection-fields">
+          <label
+            >Base URL<input id="pf-base-url" required placeholder="https://api.example.com/v1"
+          /></label>
+          <label data-i18n='[[0,"ui.38719c9968ae"]]'
+            >模型名称<input
+              id="pf-model"
+              required
+              placeholder="以平台模型列表为准"
+              data-i18n-placeholder="ui.1518aa06d176"
+          /></label>
+          <label
+            >API Key<input
+              id="pf-api-key"
+              type="password"
+              autocomplete="off"
+              placeholder="仅存本地数据库；编辑时留空表示保留"
+              data-i18n-placeholder="ui.4cc5f16575fd"
+          /></label>
+        </div>
+        <p class="muted" id="pf-key-hint"></p>
+        <label class="check" id="pf-clear-key-wrap" hidden data-i18n='[[1,"ui.17320e9c57f7"]]'
+          ><input type="checkbox" id="pf-clear-key" /> 清除已保存的密钥</label
+        >
+        <label class="check" id="pf-template-wrap" hidden data-i18n='[[1,"ui.6a95fe9c3e0e"]]'
+          ><input type="checkbox" id="pf-llama-template" /> llama-server
+          扩展（chat_template_kwargs，仅本地服务需要）</label
+        >
+        <div class="form-grid" id="pf-extra"></div>
+        <div id="pf-comfyui" class="comfyui-editor" hidden></div>
+        <p id="pf-error" role="alert"></p>
+        <button class="submit" type="submit" id="pf-save" data-i18n='[[0,"ui.0ed56570afb7"]]'>
+          保存档案 <span>↗</span>
+        </button>
+      </form>
+    </dialog>
+    <dialog id="clone-dialog" aria-labelledby="clone-title">
+      <button
+        id="clone-close"
+        type="button"
+        class="quiet close"
+        aria-label="关闭"
+        data-i18n-aria-label="ui.6c14bd7f6f9e"
+      >
+        ✕
+      </button>
+      <h2 id="clone-title" data-i18n='[[0,"ui.d1c1d46824e7"]]'>添加音色</h2>
+      <div
+        class="clone-modes"
+        role="tablist"
+        aria-label="添加方式"
+        data-i18n-aria-label="ui.be40d4bfb5c3"
+      >
+        <button
+          type="button"
+          class="clone-mode active"
+          data-mode="upload"
+          role="tab"
+          aria-selected="true"
+          data-i18n='[[0,"ui.6b8930cfcd4f"]]'
+        >
+          上传样本克隆
+        </button>
+        <button
+          type="button"
+          class="clone-mode"
+          data-mode="url"
+          role="tab"
+          aria-selected="false"
+          data-i18n='[[0,"ui.1aed25617c57"]]'
+        >
+          URL 复刻
+        </button>
+        <button
+          type="button"
+          class="clone-mode"
+          data-mode="register"
+          role="tab"
+          aria-selected="false"
+          data-i18n='[[0,"ui.d8226b4b89e1"]]'
+        >
+          录入已有
+        </button>
       </div>
-    </section>
-  </main>
-  <dialog id="profile-dialog" aria-labelledby="profile-title">
-    <button id="profile-close" type="button" class="quiet close" aria-label="关闭编辑" data-i18n-aria-label="ui.173f9e565a28">✕</button>
-    <h2 id="profile-title" data-i18n="[[0,&quot;ui.19e6fbd32c16&quot;]]">新建配置档案</h2>
-    <form id="profile-form">
-      <input type="hidden" id="pf-role"><input type="hidden" id="pf-id">
-      <div class="form-grid">
-        <label data-i18n="[[0,&quot;ui.7ea2991885c7&quot;]]">厂商模板<select id="pf-provider"></select></label>
-        <label data-i18n="[[0,&quot;ui.6b863e8f9805&quot;]]">档案名称<input id="pf-name" maxlength="60" required placeholder="例如：DeepSeek 拆分镜" data-i18n-placeholder="ui.5bd5015baefc"></label>
-      </div>
-      <div class="form-grid">
-        <label data-i18n="[[0,&quot;ui.3204871e247f&quot;]]">协议后端<select id="pf-backend"></select></label>
-        <label>Revision<input id="pf-revision" placeholder="main，一般无需修改" data-i18n-placeholder="ui.9b6fc5273b15"></label>
-      </div>
-      <div class="form-grid profile-connection-fields">
-      <label>Base URL<input id="pf-base-url" required placeholder="https://api.example.com/v1"></label>
-      <label data-i18n="[[0,&quot;ui.38719c9968ae&quot;]]">模型名称<input id="pf-model" required placeholder="以平台模型列表为准" data-i18n-placeholder="ui.1518aa06d176"></label>
-      <label>API Key<input id="pf-api-key" type="password" autocomplete="off" placeholder="仅存本地数据库；编辑时留空表示保留" data-i18n-placeholder="ui.4cc5f16575fd"></label>
-      </div>
-      <p class="muted" id="pf-key-hint"></p>
-      <label class="check" id="pf-clear-key-wrap" hidden data-i18n="[[1,&quot;ui.17320e9c57f7&quot;]]"><input type="checkbox" id="pf-clear-key"> 清除已保存的密钥</label>
-      <label class="check" id="pf-template-wrap" hidden data-i18n="[[1,&quot;ui.6a95fe9c3e0e&quot;]]"><input type="checkbox" id="pf-llama-template"> llama-server 扩展（chat_template_kwargs，仅本地服务需要）</label>
-      <div class="form-grid" id="pf-extra"></div>
-      <div id="pf-comfyui" class="comfyui-editor" hidden></div>
-      <p id="pf-error" role="alert"></p>
-      <button class="submit" type="submit" id="pf-save" data-i18n="[[0,&quot;ui.0ed56570afb7&quot;]]">保存档案 <span>↗</span></button>
-    </form>
-  </dialog>
-  <dialog id="clone-dialog" aria-labelledby="clone-title">
-    <button id="clone-close" type="button" class="quiet close" aria-label="关闭" data-i18n-aria-label="ui.6c14bd7f6f9e">✕</button>
-    <h2 id="clone-title" data-i18n="[[0,&quot;ui.d1c1d46824e7&quot;]]">添加音色</h2>
-    <div class="clone-modes" role="tablist" aria-label="添加方式" data-i18n-aria-label="ui.be40d4bfb5c3">
-      <button type="button" class="clone-mode active" data-mode="upload" role="tab" aria-selected="true" data-i18n="[[0,&quot;ui.6b8930cfcd4f&quot;]]">上传样本克隆</button>
-      <button type="button" class="clone-mode" data-mode="url" role="tab" aria-selected="false" data-i18n="[[0,&quot;ui.1aed25617c57&quot;]]">URL 复刻</button>
-      <button type="button" class="clone-mode" data-mode="register" role="tab" aria-selected="false" data-i18n="[[0,&quot;ui.d8226b4b89e1&quot;]]">录入已有</button>
-    </div>
-    <form id="clone-form">
-      <label data-i18n="[[0,&quot;ui.ba037516abcf&quot;]]">音色名称<input id="clone-name" maxlength="60" required placeholder="例如：我的旁白" data-i18n-placeholder="ui.45df89c8b43f"></label>
-      <div id="clone-upload-field"><label class="upload" for="clone-file"><span class="upload-symbol">↥</span><strong data-i18n="[[0,&quot;ui.611d7fa2b8e5&quot;]]">选择声音样本</strong><span data-i18n="[[0,&quot;ui.497e657ffaa9&quot;]]">wav / mp3 / m4a · 10 秒到 5 分钟 · 安静环境单人朗读</span><input id="clone-file" type="file" accept=".wav,.mp3,.m4a,audio/*"></label></div>
-      <div id="clone-reftext-field" hidden><label data-i18n="[[0,&quot;ui.9ac39e0645c0&quot;]]">参考文本（本地克隆可选）<input id="clone-reftext" maxlength="400" placeholder="样本朗读的文字内容，可提升克隆效果" data-i18n-placeholder="ui.22481147e295"></label></div>
-      <div id="clone-url-field" hidden><label data-i18n="[[0,&quot;ui.d381dbd770bd&quot;]]">样本公网 URL<input id="clone-url" type="url" placeholder="https://…（wav/mp3/m4a，10~20 秒，需公网可访问）" data-i18n-placeholder="ui.101d4ddfad17"></label></div>
-      <div id="clone-register-fields" hidden>
-        <label data-i18n="[[0,&quot;ui.18b544b62f9f&quot;]]">音色厂商<select id="clone-provider"><option value="self" data-i18n="[[0,&quot;ui.d4d31613eca7&quot;]]">自建服务</option><option value="openai" data-i18n="[[0,&quot;ui.54928be09e5b&quot;]]">OpenAI 协议</option><option value="minimax">MiniMax</option><option value="dashscope" data-i18n="[[0,&quot;ui.cece8acb4495&quot;]]">阿里 DashScope</option></select></label>
-        <label>voice_id<input id="clone-voice-id" maxlength="200" placeholder="平台已生成的音色 ID" data-i18n-placeholder="ui.e1291ccd5e85"></label>
-      </div>
-      <label class="check clone-consent" id="clone-consent-wrap" data-i18n="[[1,&quot;ui.da16fcee79ec&quot;]]"><input type="checkbox" id="clone-consent"> 我确认拥有该声音的合法使用授权</label>
-      <p class="muted" id="clone-mode-note"></p>
-      <p id="clone-error" role="alert"></p>
-      <button class="submit" type="submit" id="clone-save" data-i18n="[[0,&quot;ui.640a6c8095ea&quot;]]">保存音色 <span>↗</span></button>
-    </form>
-  </dialog>
-  <footer><span data-i18n="[[0,&quot;ui.3bc5815c152a&quot;]]">Mindex / 设置</span><span data-i18n="[[0,&quot;ui.a88e519ee448&quot;]]">配置保存即生效 · 密钥仅存本地</span></footer>
-<script src="/assets/settings/settings-deployment.js?v=37c9e71b7e" defer></script>
-</body>
+      <form id="clone-form">
+        <label data-i18n='[[0,"ui.ba037516abcf"]]'
+          >音色名称<input
+            id="clone-name"
+            maxlength="60"
+            required
+            placeholder="例如：我的旁白"
+            data-i18n-placeholder="ui.45df89c8b43f"
+        /></label>
+        <div id="clone-upload-field">
+          <label class="upload" for="clone-file"
+            ><span class="upload-symbol">↥</span
+            ><strong data-i18n='[[0,"ui.611d7fa2b8e5"]]'>选择声音样本</strong
+            ><span data-i18n='[[0,"ui.497e657ffaa9"]]'
+              >wav / mp3 / m4a · 10 秒到 5 分钟 · 安静环境单人朗读</span
+            ><input id="clone-file" type="file" accept=".wav,.mp3,.m4a,audio/*"
+          /></label>
+        </div>
+        <div id="clone-reftext-field" hidden>
+          <label data-i18n='[[0,"ui.9ac39e0645c0"]]'
+            >参考文本（本地克隆可选）<input
+              id="clone-reftext"
+              maxlength="400"
+              placeholder="样本朗读的文字内容，可提升克隆效果"
+              data-i18n-placeholder="ui.22481147e295"
+          /></label>
+        </div>
+        <div id="clone-url-field" hidden>
+          <label data-i18n='[[0,"ui.d381dbd770bd"]]'
+            >样本公网 URL<input
+              id="clone-url"
+              type="url"
+              placeholder="https://…（wav/mp3/m4a，10~20 秒，需公网可访问）"
+              data-i18n-placeholder="ui.101d4ddfad17"
+          /></label>
+        </div>
+        <div id="clone-register-fields" hidden>
+          <label data-i18n='[[0,"ui.18b544b62f9f"]]'
+            >音色厂商<select id="clone-provider">
+              <option value="self" data-i18n='[[0,"ui.d4d31613eca7"]]'>自建服务</option>
+              <option value="openai" data-i18n='[[0,"ui.54928be09e5b"]]'>OpenAI 协议</option>
+              <option value="minimax">MiniMax</option>
+              <option value="dashscope" data-i18n='[[0,"ui.cece8acb4495"]]'>阿里 DashScope</option>
+            </select></label
+          >
+          <label
+            >voice_id<input
+              id="clone-voice-id"
+              maxlength="200"
+              placeholder="平台已生成的音色 ID"
+              data-i18n-placeholder="ui.e1291ccd5e85"
+          /></label>
+        </div>
+        <label
+          class="check clone-consent"
+          id="clone-consent-wrap"
+          data-i18n='[[1,"ui.da16fcee79ec"]]'
+          ><input type="checkbox" id="clone-consent" /> 我确认拥有该声音的合法使用授权</label
+        >
+        <p class="muted" id="clone-mode-note"></p>
+        <p id="clone-error" role="alert"></p>
+        <button class="submit" type="submit" id="clone-save" data-i18n='[[0,"ui.640a6c8095ea"]]'>
+          保存音色 <span>↗</span>
+        </button>
+      </form>
+    </dialog>
+    <footer>
+      <span data-i18n='[[0,"ui.3bc5815c152a"]]'>Mindex / 设置</span
+      ><span data-i18n='[[0,"ui.a88e519ee448"]]'>配置保存即生效 · 密钥仅存本地</span>
+    </footer>
+    <script src="/assets/settings/settings-deployment.js?v=e1cb46bc06" defer></script>
+  </body>
 </html>

@@ -17,14 +17,13 @@ artifacts/
 .data.migration.lock
 .python-version
 clean.js
-models
 
 # 计划执行台账（本地暂存）
 .superpowers/
 
 /node_modules/
 /build/
-/models/
+/models
 /tools/
 /logs/
 

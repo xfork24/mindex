@@ -3,15 +3,17 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
-from conftest import FixtureSpeaker
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
-from test_studio_sources import build, frame_count, make_image, setup, shot, small, store_input  # noqa: F401
 
-from mindex.api import create_app
-from mindex.studio import studio
-from mindex.studio import workspace as ws
+from api import create_app
+from conftest import FixtureSpeaker
+from studio import studio
+from studio import workspace as ws
+from test_studio_sources import build, frame_count, make_image, setup, shot, small, store_input  # noqa: F401
 
 slow = pytest.mark.slow
 
@@ -25,8 +27,13 @@ def canvases(small):  # noqa: F811
 def image_plan(config, tmp_path, **options):
     job_id, w, p = setup(config, [shot("a", "红色开场。")])
     image = store_input(config, job_id, make_image(tmp_path / "i.png"))
-    ws.set_board(config, job_id, w, p, [shot("a", "红色开场画面。", source={"kind": "image", "media_id": image},
-                                             highlights=["红色"])])
+    ws.set_board(
+        config,
+        job_id,
+        w,
+        p,
+        [shot("a", "红色开场画面。", source={"kind": "image", "media_id": image}, highlights=["红色"])],
+    )
     p["options"].update(options)
     ws.persist(config, job_id, w)
     return job_id, w, p
@@ -54,13 +61,20 @@ def test_compose_signature_gains_clean_only_with_derive(canvases, tmp_path):
     p["options"]["exports"] = [{"canvas": "9:16", "fit": "crop", "mode": "derive"}]
     assert payload()["clean"] is True
     nodes = {n["key"]: n for n in ws.preflight(canvases, job_id, w, p)["nodes"]}
-    assert nodes["export:9:16"]["shot_id"] == "9:16" and ws.node_dependencies(w, p, "export", "9:16") == ["compose"]
+    assert nodes["export:9:16"]["shot_id"] == "9:16" and ws.node_dependencies(w, p, "export", "9:16") == [
+        "compose"
+    ]
 
 
 @slow
 def test_derive_export_build(canvases, tmp_path):
-    job_id, w, p = image_plan(canvases, tmp_path, burn=True, subtitle_style="box",
-                              exports=[{"canvas": "9:16", "fit": "crop", "mode": "derive"}])
+    job_id, w, p = image_plan(
+        canvases,
+        tmp_path,
+        burn=True,
+        subtitle_style="box",
+        exports=[{"canvas": "9:16", "fit": "crop", "mode": "derive"}],
+    )
     w, p = build(canvases, job_id, w, p)
     assert w["builds"][-1]["status"] == "complete", w["builds"][-1]
     final = ws.version(w, p["final"])
@@ -86,8 +100,13 @@ def test_rerender_child_plan_and_build_all(canvases, tmp_path):
     with TestClient(create_app(canvases, speaker=FixtureSpeaker(canvases))) as client:
         base = f"/api/studio/jobs/{job_id}"
         data = client.get(f"{base}/workspace").json()
-        options = {**data["plans"][p["id"]]["options"], "exports": [{"canvas": "1:1", "fit": "pad", "mode": "rerender"}]}
-        saved = client.patch(f"{base}/plans/{p['id']}", json={"revision": data["revision"], "options": options}).json()
+        options = {
+            **data["plans"][p["id"]]["options"],
+            "exports": [{"canvas": "1:1", "fit": "pad", "mode": "rerender"}],
+        }
+        saved = client.patch(
+            f"{base}/plans/{p['id']}", json={"revision": data["revision"], "options": options}
+        ).json()
         child = next(item for item in saved["plans"].values() if item.get("variant_of"))
         assert child["variant_of"] == {"plan": p["id"], "canvas": "1:1"}
         assert child["options"]["canvas"] == "1:1" and child["options"]["exports"] is None
@@ -98,7 +117,9 @@ def test_rerender_child_plan_and_build_all(canvases, tmp_path):
         checked = client.get(f"{base}/plans/{p['id']}/preflight", params={"all_canvases": "true"}).json()
         keys = [n["key"] for n in checked["nodes"]]
         assert f"{child['id']}/render:a" in keys and keys[-1] == "export:1:1"
-        built = client.post(f"{base}/plans/{p['id']}/build", json={"token": checked["token"], "all_canvases": True})
+        built = client.post(
+            f"{base}/plans/{p['id']}/build", json={"token": checked["token"], "all_canvases": True}
+        )
         assert built.status_code == 202, built.text
         from test_studio_workspace import wait_build
 
@@ -110,7 +131,10 @@ def test_rerender_child_plan_and_build_all(canvases, tmp_path):
         exported = data["versions"][main["finals"]["export:1:1"]]
         assert exported["data"]["final"] == sub["final"] and exported["data"]["plan"] == child["id"]
         w = ws.load(canvases, job_id)
-        assert frame_count(ws.file_path(canvases, job_id, ws.version(w, exported["id"]), "mp4"))[1:] == (120, 120)
+        assert frame_count(ws.file_path(canvases, job_id, ws.version(w, exported["id"]), "mp4"))[1:] == (
+            120,
+            120,
+        )
         # 子方案被主方案引用时不能删除。
         refused = client.delete(f"{base}/plans/{child['id']}")
         assert refused.status_code == 422 and "子方案" in refused.json()["detail"]
@@ -120,12 +144,11 @@ def test_rerender_child_plan_and_build_all(canvases, tmp_path):
 
 @slow
 def test_export_entry_points_cli_and_agent(canvases, tmp_path, monkeypatch):
-    import json
 
-    from test_agent_studio_recall import run as run_tool
     from typer.testing import CliRunner
 
-    from mindex import cli_studio
+    import cli.studio as cli_studio
+    from test_agent_studio_recall import run as run_tool
 
     job_id, _, _ = image_plan(canvases, tmp_path)
     monkeypatch.setattr(cli_studio, "make_app", lambda cfg: create_app(cfg, speaker=FixtureSpeaker(cfg)))
@@ -135,7 +158,9 @@ def test_export_entry_points_cli_and_agent(canvases, tmp_path, monkeypatch):
         return runner.invoke(cli_studio.app, list(args), obj=canvases)
 
     saved = json.loads(invoke("export", "set", job_id, "9:16", "--json").stdout)
-    assert saved["exports"] == [{"canvas": "9:16", "fit": "crop", "mode": "derive"}] and saved["children"] == []
+    assert (
+        saved["exports"] == [{"canvas": "9:16", "fit": "crop", "mode": "derive"}] and saved["children"] == []
+    )
     assert invoke("export", "set", job_id, "16:9").exit_code == 1  # 与方案画幅相同（422）
     built = invoke("build", job_id, "--json")
     assert built.exit_code == 0, built.output
@@ -144,11 +169,16 @@ def test_export_entry_points_cli_and_agent(canvases, tmp_path, monkeypatch):
     assert frame_count(target)[1:] == (90, 160)
     assert invoke("download", job_id, "--export", "1:1").exit_code == 1
     with TestClient(create_app(canvases, speaker=FixtureSpeaker(canvases))) as client:
-        preview, output, _ = run_tool(client, canvases, "set_exports", {"job_id": job_id, "exports": [
-            {"canvas": "1:1", "mode": "rerender"}]})
+        preview, output, _ = run_tool(
+            client,
+            canvases,
+            "set_exports",
+            {"job_id": job_id, "exports": [{"canvas": "1:1", "mode": "rerender"}]},
+        )
         assert "重新渲染" in preview.changes[0]["after"] and output.value["children"]
-        preview, _, _ = run_tool(client, canvases, "run_build", {"job_id": job_id, "all_canvases": True},
-                                 execute=False)
+        preview, _, _ = run_tool(
+            client, canvases, "run_build", {"job_id": job_id, "all_canvases": True}, execute=False
+        )
         assert preview.value["counts"]
     listed = json.loads(invoke("export", "list", job_id, "--json").stdout)
     assert listed["exports"][0]["mode"] == "rerender"

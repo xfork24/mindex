@@ -15,7 +15,7 @@ import asyncio
 import copy
 import json
 
-from mindex.agent.llm.types import LlmError, LlmRequest, StreamEmitter, new_id, text_block, tool_call_block
+from agent.llm.types import LlmError, LlmRequest, StreamEmitter, new_id, text_block, tool_call_block
 
 
 def say(text: str) -> dict:
@@ -53,7 +53,7 @@ class ScriptedLlm:
             key = f"b{position}"
             if block["type"] in ("text", "reasoning"):
                 text = block["text"]
-                pieces = [text[i:i + 8] for i in range(0, len(text), 8)] or [""]
+                pieces = [text[i : i + 8] for i in range(0, len(text), 8)] or [""]
                 for piece in pieces:
                     for chunk in emitter.text(key, piece, block["type"]):
                         yield chunk
@@ -62,8 +62,9 @@ class ScriptedLlm:
                 args = block["arguments"]
                 half = len(args) // 2
                 for index, piece in enumerate((args[:half], args[half:])):
-                    for chunk in emitter.tool(key, call_id=block["id"], name=block["name"] if index == 0 else None,
-                                              delta=piece):
+                    for chunk in emitter.tool(
+                        key, call_id=block["id"], name=block["name"] if index == 0 else None, delta=piece
+                    ):
                         yield chunk
             for chunk in emitter.close(key):
                 yield chunk

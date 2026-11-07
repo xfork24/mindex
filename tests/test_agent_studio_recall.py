@@ -1,4 +1,5 @@
-"""创作写工具扩展：分镜召回字段（recall / granularity / recall_limit / clear）、rename_job、attach_query_media。
+"""创作写工具扩展：分镜召回字段（recall / granularity / recall_limit / clear）、
+rename_job、attach_query_media。
 
 经进程内回环调用真实创作接口；附件经真实附件存储解析（owner=mcp）。
 """
@@ -11,31 +12,38 @@ import json
 import os
 
 import pytest
-from conftest import legacy_job
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from mindex.agent.attachments import AttachmentStore
-from mindex.agent.loopback import MindexClient
-from mindex.agent.registry import ToolContext, ToolError
-from mindex.agent.tools import build_registry
-from mindex.agent.tools.common import PlanView
-from mindex.agent.tools.studio_write import (
-    RECALL_REBUILD,
-    ShotFields,
-    ShotOperation,
-    ShotRecallArgs,
-    plan_shots,
-)
-from mindex.api import create_app
-from mindex.studio import studio
-from mindex.studio import workspace as ws
+from agent.attachments import AttachmentStore
+from agent.loopback import MindexClient
+from agent.registry import ToolContext, ToolError
+from agent.tools import build_registry
+from agent.tools.common import PlanView
+from agent.tools.studio_write import RECALL_REBUILD, ShotFields, ShotOperation, ShotRecallArgs, plan_shots
+from api import create_app
+from conftest import legacy_job
+from studio import studio
+from studio import workspace as ws
 
 SHOTS = ["shot-a1daad59aa", "shot-925281d5bb", "shot-77f0c3e1cc"]
-PERSON_RECALL = {"mode": "text", "person_ids": ["p1"], "person_mode": "onscreen", "person_relation": "any",
-                 "filters": {"source_id": None, "source_ids": [], "min_duration": 2.0, "max_duration": None,
-                             "scene": None, "emotion": None, "shot_size": None},
-                 "media_id": None, "media_kind": None}
+PERSON_RECALL = {
+    "mode": "text",
+    "person_ids": ["p1"],
+    "person_mode": "onscreen",
+    "person_relation": "any",
+    "filters": {
+        "source_id": None,
+        "source_ids": [],
+        "min_duration": 2.0,
+        "max_duration": None,
+        "scene": None,
+        "emotion": None,
+        "shot_size": None,
+    },
+    "media_id": None,
+    "media_kind": None,
+}
 
 
 @pytest.fixture
@@ -43,12 +51,24 @@ def job(config):
     job_id = legacy_job(config, "红色开场。蓝色中段。绿色结尾。", options={"burn": False})["id"]
     w = ws.load(config, job_id)
     p = ws.plan(w, w["active_plan"])
-    ws.set_board(config, job_id, w, p, [
-        studio.Shot(id=SHOTS[0], text="红色开场。", query="红色", estimated_seconds=1.5),
-        studio.Shot(id=SHOTS[1], text="蓝色中段。", query="蓝色", estimated_seconds=2.0, granularity="scene",
-                    recall_limit=5),
-        studio.Shot(id=SHOTS[2], text="绿色结尾。", query="绿色", estimated_seconds=1.0),
-    ])
+    ws.set_board(
+        config,
+        job_id,
+        w,
+        p,
+        [
+            studio.Shot(id=SHOTS[0], text="红色开场。", query="红色", estimated_seconds=1.5),
+            studio.Shot(
+                id=SHOTS[1],
+                text="蓝色中段。",
+                query="蓝色",
+                estimated_seconds=2.0,
+                granularity="scene",
+                recall_limit=5,
+            ),
+            studio.Shot(id=SHOTS[2], text="绿色结尾。", query="绿色", estimated_seconds=1.0),
+        ],
+    )
     p["board_script"] = p["script"]
     ws.persist(config, job_id, w)
     return job_id
@@ -122,10 +142,12 @@ def test_specs_risk_and_domain():
 
 def test_plan_shots_sets_and_clears_recall_fields(client, job):
     view = PlanView(workspace(client, job))
-    recall = ShotRecallArgs(person_ids=["p1"], person_mode="onscreen", person_relation="any",
-                            filters={"min_duration": 2})
-    update = ShotOperation(op="update", shot="#1",
-                           fields=ShotFields(recall=recall, granularity="shot", recall_limit=12))
+    recall = ShotRecallArgs(
+        person_ids=["p1"], person_mode="onscreen", person_relation="any", filters={"min_duration": 2}
+    )
+    update = ShotOperation(
+        op="update", shot="#1", fields=ShotFields(recall=recall, granularity="shot", recall_limit=12)
+    )
     clear = ShotOperation(op="update", shot="#2", clear=["granularity", "recall_limit", "visual"])
     shots, changes, touched = plan_shots(view, [update, clear])
     assert shots[0]["recall"] == PERSON_RECALL
@@ -142,8 +164,9 @@ def test_plan_shots_sets_and_clears_recall_fields(client, job):
     # clear recall → None；image 召回缺省 media_kind 取 mode。
     reset = ShotOperation(op="update", shot="#1", clear=["recall"])
     assert plan_shots(view, [update, reset])[0][0]["recall"] is None
-    image = ShotOperation(op="update", shot="#1", fields=ShotFields(recall=ShotRecallArgs(mode="image",
-                                                                                          media_id="a" * 64)))
+    image = ShotOperation(
+        op="update", shot="#1", fields=ShotFields(recall=ShotRecallArgs(mode="image", media_id="a" * 64))
+    )
     assert plan_shots(view, [image])[0][0]["recall"]["media_kind"] == "image"
 
 
@@ -163,22 +186,35 @@ def test_plan_shots_rejects_invalid_recall_operations(client, job):
 
 
 def test_edit_shots_recall_preview_warns_and_persists(client, config, job):
-    args = {"job_id": job, "operations": [{"op": "update", "shot": "#3",
-                                           "fields": {"granularity": "moment", "recall_limit": 9}}]}
+    args = {
+        "job_id": job,
+        "operations": [
+            {"op": "update", "shot": "#3", "fields": {"granularity": "moment", "recall_limit": 9}}
+        ],
+    }
     preview, _output, _ = run(client, config, "edit_shots", args)
-    assert preview.warnings and "#3" in preview.warnings[0] and "召回、选片、渲染及成片" in preview.warnings[0]
+    assert (
+        preview.warnings and "#3" in preview.warnings[0] and "召回、选片、渲染及成片" in preview.warnings[0]
+    )
     saved = content(workspace(client, job), SHOTS[2])
     assert saved["granularity"] == "moment" and saved["recall_limit"] == 9
     # 只改旁白不提示召回重建。
-    text_only = {"job_id": job, "operations": [{"op": "update", "shot": "#1", "fields": {"query": "红色 幕布"}}]}
+    text_only = {
+        "job_id": job,
+        "operations": [{"op": "update", "shot": "#1", "fields": {"query": "红色 幕布"}}],
+    }
     preview, _, _ = run(client, config, "edit_shots", text_only, execute=False)
     assert preview.warnings == []
 
 
 def test_edit_shots_relays_server_recall_rejection(client, config, job):
     before = workspace(client, job)["revision"]
-    args = {"job_id": job, "operations": [{"op": "update", "shot": "#1",
-                                           "fields": {"recall": {"person_ids": ["no-such-person"]}}}]}
+    args = {
+        "job_id": job,
+        "operations": [
+            {"op": "update", "shot": "#1", "fields": {"recall": {"person_ids": ["no-such-person"]}}}
+        ],
+    }
     with pytest.raises(ToolError) as exc:
         run(client, config, "edit_shots", args)
     assert "找不到对应人物" in str(exc.value)
@@ -187,7 +223,10 @@ def test_edit_shots_relays_server_recall_rejection(client, config, job):
 
 def test_rename_job(client, config, job):
     preview, output, sent = run(client, config, "rename_job", {"job_id": job, "title": "  秋天短片  "})
-    assert preview.changes[0]["after"] == "秋天短片" and preview.changes[0]["before"] not in (None, "（未命名）")
+    assert preview.changes[0]["after"] == "秋天短片" and preview.changes[0]["before"] not in (
+        None,
+        "（未命名）",
+    )
     assert output.value == {"job_id": job, "title": "秋天短片"} and output.mutation["job_id"] == job
     assert ("PATCH", f"/api/studio/jobs/{job}/title") in sent
     assert client.get(f"/api/studio/jobs/{job}").json()["job"]["title"] == "秋天短片"
@@ -197,13 +236,17 @@ def test_attach_query_media_uploads_then_sets_recall(client, config, job):
     ref = attachment(client, png(), "红色.png", "image/png")
     data = workspace(client, job)
     pid = data["active_plan"]
-    preview, output, sent = run(client, config, "attach_query_media", {"job_id": job, "shot": "#2", "attachment": ref})
+    preview, output, sent = run(
+        client, config, "attach_query_media", {"job_id": job, "shot": "#2", "attachment": ref}
+    )
     assert "图片召回" in preview.summary and "一次确认" in preview.summary
     assert preview.changes[0]["label"] == "上传查询文件" and "红色.png" in preview.changes[0]["after"]
     assert "红色.png" in preview.changes[1]["after"] and preview.warnings
     writes = [entry for entry in sent if entry[0] != "GET"]
-    assert writes == [("POST", f"/api/studio/jobs/{job}/plans/{pid}/query-media"),
-                      ("PATCH", f"/api/studio/jobs/{job}/plans/{pid}")]
+    assert writes == [
+        ("POST", f"/api/studio/jobs/{job}/plans/{pid}/query-media"),
+        ("PATCH", f"/api/studio/jobs/{job}/plans/{pid}"),
+    ]
     media_id = output.value["media_id"]
     after = workspace(client, job)
     recall = content(after, SHOTS[1])["recall"]
@@ -215,8 +258,12 @@ def test_attach_query_media_uploads_then_sets_recall(client, config, job):
 def test_attach_query_media_errors(client, config, job):
     before = workspace(client, job)["revision"]
     with pytest.raises(ToolError) as exc:
-        run(client, config, "attach_query_media",
-            {"job_id": job, "shot": "#1", "attachment": "attachment://" + "0" * 32})
+        run(
+            client,
+            config,
+            "attach_query_media",
+            {"job_id": job, "shot": "#1", "attachment": "attachment://" + "0" * 32},
+        )
     assert exc.value.code == "attachment_invalid"
     # 类型无法推断时要求显式 kind；显式 kind 与文件不符时转述上传端点的 422。
     ref = attachment(client, b"not an image", "a.bin", "application/octet-stream")
@@ -224,7 +271,12 @@ def test_attach_query_media_errors(client, config, job):
         run(client, config, "attach_query_media", {"job_id": job, "shot": "#1", "attachment": ref})
     assert exc.value.code == "invalid_arguments"
     with pytest.raises(ToolError) as exc:
-        run(client, config, "attach_query_media", {"job_id": job, "shot": "#1", "attachment": ref, "kind": "image"})
+        run(
+            client,
+            config,
+            "attach_query_media",
+            {"job_id": job, "shot": "#1", "attachment": ref, "kind": "image"},
+        )
     assert exc.value.code == "http_422" and "查询文件无法解码" in str(exc.value)
     assert workspace(client, job)["revision"] == before
 
@@ -281,8 +333,18 @@ def test_edit_shots_relays_person_rejections(client, config, job):
     # 图片/视频召回不支持人物：本地校验即拒绝，不发 PATCH。
     before = workspace(client, job)["revision"]
     with pytest.raises(ToolError) as exc:
-        edit(client, config, job, [{"op": "update", "shot": "#1", "fields": {"recall": {
-            "mode": "image", "media_id": "a" * 64, "person_ids": [ok]}}}])
+        edit(
+            client,
+            config,
+            job,
+            [
+                {
+                    "op": "update",
+                    "shot": "#1",
+                    "fields": {"recall": {"mode": "image", "media_id": "a" * 64, "person_ids": [ok]}},
+                }
+            ],
+        )
     assert exc.value.code == "invalid_recall" and "图片/视频召回不支持人物设置" in str(exc.value)
     assert workspace(client, job)["revision"] == before
     # onscreen / mentioned 模式下已登记演员被接受并原样保存。
@@ -311,8 +373,18 @@ def test_edit_shots_relays_query_media_rejections(client, config, job):
     # media_kind 与 mode 不符：本地校验拒绝，不发 PATCH。
     before = workspace(client, job)["revision"]
     with pytest.raises(ToolError) as exc:
-        edit(client, config, job, [{"op": "update", "shot": "#1", "fields": {"recall": {
-            "mode": "image", "media_id": "f" * 64, "media_kind": "video"}}}])
+        edit(
+            client,
+            config,
+            job,
+            [
+                {
+                    "op": "update",
+                    "shot": "#1",
+                    "fields": {"recall": {"mode": "image", "media_id": "f" * 64, "media_kind": "video"}},
+                }
+            ],
+        )
     assert exc.value.code == "invalid_recall" and "对应类型的查询文件" in str(exc.value)
     assert workspace(client, job)["revision"] == before
 
@@ -322,7 +394,12 @@ def test_attach_query_media_relays_upload_rejections(client, config, job, video_
 
     def attach(ref, **extra):
         with pytest.raises(ToolError) as exc:
-            run(client, config, "attach_query_media", {"job_id": job, "shot": "#1", "attachment": ref, **extra})
+            run(
+                client,
+                config,
+                "attach_query_media",
+                {"job_id": job, "shot": "#1", "attachment": ref, **extra},
+            )
         return exc.value
 
     video = attachment(client, video_file.read_bytes(), "片段.mp4", "video/mp4")
@@ -351,7 +428,9 @@ def test_attach_query_media_relays_upload_rejections(client, config, job, video_
 # ------------------------------------------------------------ 16.3 集成：attach_query_media 完整链路
 def test_attach_query_media_video_path(client, config, job, video_file):
     ref = attachment(client, video_file.read_bytes(), "片段.mp4", "video/mp4")
-    preview, output, sent = run(client, config, "attach_query_media", {"job_id": job, "shot": "#3", "attachment": ref})
+    preview, output, sent = run(
+        client, config, "attach_query_media", {"job_id": job, "shot": "#3", "attachment": ref}
+    )
     assert "上传视频查询文件" in preview.summary and "视频召回" in preview.summary
     assert "视频" in preview.changes[0]["after"] and preview.changes[1]["after"].startswith("视频召回")
     assert len(patches(sent)) == 1
@@ -365,9 +444,13 @@ def test_attach_query_media_video_path(client, config, job, video_file):
 def test_attach_query_media_drops_persons_keeps_filters(client, config, job):
     person = actor(client)
     filters = {"source_ids": ["src-a"], "min_duration": 2, "max_duration": 8, "scene": "室内"}
-    set_recall(client, config, job, "#1", {"person_ids": [person], "person_mode": "onscreen", "filters": filters})
+    set_recall(
+        client, config, job, "#1", {"person_ids": [person], "person_mode": "onscreen", "filters": filters}
+    )
     ref = attachment(client, png(), "红色.png", "image/png")
-    preview, output, _ = run(client, config, "attach_query_media", {"job_id": job, "shot": "#1", "attachment": ref})
+    preview, output, _ = run(
+        client, config, "attach_query_media", {"job_id": job, "shot": "#1", "attachment": ref}
+    )
     assert any("原有人物条件会被移除" in warning for warning in preview.warnings)
     change = preview.changes[1]
     assert f"人物 {person}" in change["before"]
@@ -376,12 +459,15 @@ def test_attach_query_media_drops_persons_keeps_filters(client, config, job):
         assert part in change["after"]
     recall = content(workspace(client, job), SHOTS[0])["recall"]
     assert recall["mode"] == "image" and recall["media_id"] == output.value["media_id"]
-    assert recall["person_ids"] == [] and recall["person_mode"] == "auto" and recall["person_relation"] == "all"
+    assert (
+        recall["person_ids"] == [] and recall["person_mode"] == "auto" and recall["person_relation"] == "all"
+    )
     assert recall["filters"]["source_ids"] == ["src-a"] and recall["filters"]["scene"] == "室内"
     assert recall["filters"]["min_duration"] == 2 and recall["filters"]["max_duration"] == 8
     # 无人物条件的分镜不出现该提示。
-    preview, _, _ = run(client, config, "attach_query_media",
-                        {"job_id": job, "shot": "#2", "attachment": ref}, execute=False)
+    preview, _, _ = run(
+        client, config, "attach_query_media", {"job_id": job, "shot": "#2", "attachment": ref}, execute=False
+    )
     assert not any("人物" in warning for warning in preview.warnings)
 
 
@@ -400,8 +486,13 @@ def test_attach_query_media_patch_conflict_reports_media_id(client, config, job)
         ws.persist(config, job, w)
 
     with pytest.raises(ToolError) as exc:
-        run(client, config, "attach_query_media", {"job_id": job, "shot": "#1", "attachment": ref},
-            between=concurrent_edit)
+        run(
+            client,
+            config,
+            "attach_query_media",
+            {"job_id": job, "shot": "#1", "attachment": ref},
+            between=concurrent_edit,
+        )
     media_id = exc.value.value["media_id"]
     assert exc.value.code == "http_422" and "方案已变化" in str(exc.value)
     assert f"media_id={media_id}" in str(exc.value) and "edit_shots" in str(exc.value)
@@ -416,15 +507,27 @@ def test_attach_query_media_patch_conflict_reports_media_id(client, config, job)
 
 def test_attach_query_media_dedupes_same_file(client, config, job):
     data = png()
-    first = run(client, config, "attach_query_media",
-                {"job_id": job, "shot": "#1", "attachment": attachment(client, data, "a.png", "image/png")})[1]
-    second = run(client, config, "attach_query_media",
-                 {"job_id": job, "shot": "#3", "attachment": attachment(client, data, "b.png", "image/png")})[1]
+    first = run(
+        client,
+        config,
+        "attach_query_media",
+        {"job_id": job, "shot": "#1", "attachment": attachment(client, data, "a.png", "image/png")},
+    )[1]
+    second = run(
+        client,
+        config,
+        "attach_query_media",
+        {"job_id": job, "shot": "#3", "attachment": attachment(client, data, "b.png", "image/png")},
+    )[1]
     media_id = first.value["media_id"]
     assert second.value["media_id"] == media_id
     assert len(list((ws.root(config, job) / "inputs").glob(media_id + ".*"))) == 1
     after = workspace(client, job)
-    assert content(after, SHOTS[0])["recall"]["media_id"] == content(after, SHOTS[2])["recall"]["media_id"] == media_id
+    assert (
+        content(after, SHOTS[0])["recall"]["media_id"]
+        == content(after, SHOTS[2])["recall"]["media_id"]
+        == media_id
+    )
 
 
 # ------------------------------------------------------------ 16.3 集成：clear 语义
@@ -444,8 +547,9 @@ def test_clear_recall_restores_default_text_recall(client, config, job):
 
 def test_clear_granularity_and_limit_follow_defaults(client, config, job):
     original = recall_signature(config, job, SHOTS[1])
-    preview, _, _ = edit(client, config, job, [{"op": "update", "shot": "#2",
-                                                "clear": ["granularity", "recall_limit"]}])
+    preview, _, _ = edit(
+        client, config, job, [{"op": "update", "shot": "#2", "clear": ["granularity", "recall_limit"]}]
+    )
     changes = {c["label"].rsplit("的", 1)[1]: c for c in preview.changes}
     assert changes["召回粒度"]["before"] == "场景" and changes["召回粒度"]["after"] == "跟随服务配置"
     assert changes["召回数量"]["before"] == 5 and changes["召回数量"]["after"] == "跟随方案"
@@ -455,7 +559,12 @@ def test_clear_granularity_and_limit_follow_defaults(client, config, job):
     # 召回节点签名变化 → 下次构建需重建召回；改回原值后签名复原。
     cleared = recall_signature(config, job, SHOTS[1])
     assert cleared != original
-    edit(client, config, job, [{"op": "update", "shot": "#2", "fields": {"granularity": "scene", "recall_limit": 5}}])
+    edit(
+        client,
+        config,
+        job,
+        [{"op": "update", "shot": "#2", "fields": {"granularity": "scene", "recall_limit": 5}}],
+    )
     assert recall_signature(config, job, SHOTS[1]) == original
     # 对未设置覆盖的分镜 clear：值不变，签名不变，不提示重建。
     third = recall_signature(config, job, SHOTS[2])
@@ -467,17 +576,30 @@ def test_clear_visual_removes_key(client, config, job):
     edit(client, config, job, [{"op": "update", "shot": "#1", "fields": {"visual": "红色幕布缓缓拉开"}}])
     assert content(workspace(client, job), SHOTS[0])["visual"] == "红色幕布缓缓拉开"
     preview, _, _ = edit(client, config, job, [{"op": "update", "shot": "#1", "clear": ["visual"]}])
-    assert preview.changes[0]["label"].startswith("清空") and preview.changes[0]["before"] == "红色幕布缓缓拉开"
+    assert (
+        preview.changes[0]["label"].startswith("清空") and preview.changes[0]["before"] == "红色幕布缓缓拉开"
+    )
     assert preview.changes[0]["after"] is None and preview.warnings == []
     assert "visual" not in content(workspace(client, job), SHOTS[0])
 
 
 def test_split_inherits_unset_recall_fields(client, config, job):
     set_recall(client, config, job, "#2", {"filters": {"min_duration": 1}})
-    edit(client, config, job, [{"op": "split", "shot": "#2", "parts": [
-        {"text": "蓝色", "recall_limit": 8},
-        {"text": "中段。", "recall": {"filters": {"max_duration": 6}}},
-    ]}])
+    edit(
+        client,
+        config,
+        job,
+        [
+            {
+                "op": "split",
+                "shot": "#2",
+                "parts": [
+                    {"text": "蓝色", "recall_limit": 8},
+                    {"text": "中段。", "recall": {"filters": {"max_duration": 6}}},
+                ],
+            }
+        ],
+    )
     data = workspace(client, job)
     order = PlanView(data).order
     assert len(order) == 4 and order[1] == SHOTS[1]
@@ -486,7 +608,9 @@ def test_split_inherits_unset_recall_fields(client, config, job):
     assert first["recall"]["filters"]["min_duration"] == 1
     assert second["granularity"] == "scene" and second["recall_limit"] == 5
     # recall 整体替换：第二段只有 max_duration，不保留原镜的 min_duration。
-    assert second["recall"]["filters"]["max_duration"] == 6 and second["recall"]["filters"]["min_duration"] == 0
+    assert (
+        second["recall"]["filters"]["max_duration"] == 6 and second["recall"]["filters"]["min_duration"] == 0
+    )
 
 
 def test_merge_inherits_recall_when_previous_is_default(client, config, job):
@@ -498,6 +622,10 @@ def test_merge_inherits_recall_when_previous_is_default(client, config, job):
     assert merged["text"] == "红色开场。蓝色中段。" and merged["recall"]["filters"]["min_duration"] == 3
     # 前一镜已有非默认召回：保留前一镜。
     set_recall(client, config, job, "#2", {"filters": {"max_duration": 9}})
-    shots, _, _ = plan_shots(PlanView(workspace(client, job)),
-                             [ShotOperation(op="merge", shots=["#1", "#2"])])
-    assert shots[0]["recall"]["filters"]["min_duration"] == 3 and shots[0]["recall"]["filters"]["max_duration"] is None
+    shots, _, _ = plan_shots(
+        PlanView(workspace(client, job)), [ShotOperation(op="merge", shots=["#1", "#2"])]
+    )
+    assert (
+        shots[0]["recall"]["filters"]["min_duration"] == 3
+        and shots[0]["recall"]["filters"]["max_duration"] is None
+    )

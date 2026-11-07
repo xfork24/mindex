@@ -67,14 +67,34 @@ def agent_server(tmp_path):
 
 
 @pytest.mark.skipif(not playwright_available(), reason="需要 node 与 Playwright")
-@pytest.mark.parametrize("scenario", ["basic", "approval", "cross", "query", "external", "nofollow", "navigate", "markdown",
-                                      "resize", "attach", "history", "history-session"])
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        "basic",
+        "approval",
+        "cross",
+        "query",
+        "external",
+        "nofollow",
+        "navigate",
+        "markdown",
+        "resize",
+        "attach",
+        "history",
+        "history-session",
+    ],
+)
 def test_agent_panel(agent_server, scenario):
     url, job_id = agent_server
     result = subprocess.run(
         ["node", "tests/agent_panel_ui.cjs"],
         cwd=ROOT,
-        env={**os.environ, "MINDEX_AGENT_URL": url, "MINDEX_AGENT_JOB": job_id, "MINDEX_AGENT_SCENARIO": scenario},
+        env={
+            **os.environ,
+            "MINDEX_AGENT_URL": url,
+            "MINDEX_AGENT_JOB": job_id,
+            "MINDEX_AGENT_SCENARIO": scenario,
+        },
         capture_output=True,
         text=True,
         timeout=120,
@@ -104,7 +124,12 @@ def test_agent_media(media_server):
     result = subprocess.run(
         ["node", "tests/agent_panel_ui.cjs"],
         cwd=ROOT,
-        env={**os.environ, "MINDEX_AGENT_URL": url, "MINDEX_AGENT_JOB": job_id, "MINDEX_AGENT_SCENARIO": "media"},
+        env={
+            **os.environ,
+            "MINDEX_AGENT_URL": url,
+            "MINDEX_AGENT_JOB": job_id,
+            "MINDEX_AGENT_SCENARIO": "media",
+        },
         capture_output=True,
         text=True,
         timeout=180,

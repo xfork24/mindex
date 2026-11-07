@@ -21,6 +21,7 @@
     python scripts/migrate-portable-paths.py --config config.local.yaml [--apply]
 默认仅预览（dry-run）；--apply 才落盘。落盘前自动备份数据库。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -30,9 +31,10 @@ import shutil
 import sqlite3
 from pathlib import Path
 
+import mindex  # noqa: F401 — 安装根包自举，后续使用包内短导入
 import yaml
 
-from mindex.shared.config import PORTABLE_PATH_KEYS, load_config
+from shared.config import PORTABLE_PATH_KEYS, load_config
 
 TABLES = ("dialogue_tasks", "source_tasks", "person_tasks", "model_profiles")
 MARKER = "config-dependencies/"
@@ -45,7 +47,7 @@ def _relocate_stale(item: str, data_root: Path) -> str:
         return item
     posix = expanded.as_posix()
     if MARKER in posix:
-        candidate = (data_root / posix[posix.index(MARKER):]).resolve()
+        candidate = (data_root / posix[posix.index(MARKER) :]).resolve()
         if candidate.is_file():
             return str(candidate)
     return item
@@ -146,7 +148,9 @@ def migrate_yaml(path: Path, data_dir: Path, apply: bool) -> list:
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("--config", default="config.local.yaml", help="YAML 配置路径")
     parser.add_argument("--apply", action="store_true", help="实际写入；缺省仅预览")
     args = parser.parse_args()
@@ -166,8 +170,10 @@ def main():
     yaml_report = migrate_yaml(Path(args.config), data_dir, args.apply)
 
     total = sum(len(r["changes"]) for r in db_report + studio_report + yaml_report)
-    print(f"{'已应用' if args.apply else '预览'}：数据库 {len(db_report)} 行、"
-          f"studio {len(studio_report)} 文件、YAML {len(yaml_report)} 文件，共 {total} 处路径改写。")
+    print(
+        f"{'已应用' if args.apply else '预览'}：数据库 {len(db_report)} 行、"
+        f"studio {len(studio_report)} 文件、YAML {len(yaml_report)} 文件，共 {total} 处路径改写。"
+    )
     for section, items in (("数据库", db_report), ("studio", studio_report), ("YAML", yaml_report)):
         for item in items:
             label = item.get("file") or f"{item['table']}#{item['id']}"

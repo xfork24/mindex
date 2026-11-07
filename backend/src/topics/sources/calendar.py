@@ -1,6 +1,8 @@
-"""日历来源：导入的 ICS/CSV 事件（存 ``topic_calendar_events``）或 ICS 订阅地址；只取今天起 ``days`` 天内的事件。
+"""日历来源：导入的 ICS/CSV 事件（存 ``topic_calendar_events``）或 ICS 订阅地址；
+只取今天起 ``days`` 天内的事件。
 
-- ICS：VEVENT 的 SUMMARY、DTSTART（日期、日期时间、UTC ``Z`` 或 ``TZID``；不带时区的按本地时区）、DESCRIPTION、
+- ICS：VEVENT 的 SUMMARY、DTSTART（日期、日期时间、UTC ``Z`` 或 ``TZID``；不带时区的按本地时区）、
+DESCRIPTION、
   ``RRULE:FREQ=YEARLY``（每年重复，适合纪念日与"历史上的今天"）；支持折行与转义。拒绝含 DOCTYPE 的内容。
 - CSV：表头至少有 ``date``、``title``，可选 ``desc``、``kind``、``recurring``（yearly/true/1/是）。
   ``date`` 为 ``YYYY-MM-DD``，或 ``MM-DD``（视为每年重复、没有起始年份）。
@@ -13,26 +15,30 @@ from __future__ import annotations
 import csv
 import io
 import re
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import ClassVar
 
 from pydantic import Field
 
-from mindex.shared.config import StrictModel
-from mindex.topics.common import new_id
-from mindex.topics.sources.base import FetchContext, Item, SourceError, http_get, item, register
+from shared.config import StrictModel
+from topics.common import new_id
+from topics.sources.base import FetchContext, Item, SourceError, http_get, item, register
 
 SAMPLES_DIR = Path(__file__).resolve().parent.parent / "samples"
-SAMPLES = {"finance": "金融：消费节点与数据发布（示例日期）", "tech": "科技：节日与发布会（示例日期）",
-           "history": "历史：重大事件纪念日"}
+SAMPLES = {
+    "finance": "金融：消费节点与数据发布（示例日期）",
+    "tech": "科技：节日与发布会（示例日期）",
+    "history": "历史：重大事件纪念日",
+}
 MAX_EVENTS = 5000
 TRUE = {"yearly", "true", "1", "yes", "y", "是", "每年"}
 
 
 class CalendarConfig(StrictModel):
-    url: str | None = Field(default=None, pattern=r"^https?://", max_length=2000,
-                            description="ICS 订阅地址；留空时使用导入的事件")
+    url: str | None = Field(
+        default=None, pattern=r"^https?://", max_length=2000, description="ICS 订阅地址；留空时使用导入的事件"
+    )
     days: int = Field(default=14, ge=1, le=60, description="取今天起多少天内的事件")
 
 
@@ -71,8 +77,6 @@ def _ics_date(value: str, params: str) -> date | None:
         if found:
             moment = datetime.strptime(found.group(1), "%Y%m%dT%H%M%S")
             if found.group(2):
-                from datetime import UTC
-
                 return moment.replace(tzinfo=UTC).astimezone().date()
             return moment.date()  # 本地时间或 TZID：按日期取
     except ValueError:
@@ -93,8 +97,14 @@ def parse_ics(text: str) -> list[Event]:
             continue
         if upper == "END:VEVENT":
             if current and current.get("title") and current.get("date"):
-                events.append(Event(date=current["date"].isoformat(), title=current["title"][:200],
-                                    summary=current.get("summary", "")[:1000], recurring=current.get("recurring", False)))
+                events.append(
+                    Event(
+                        date=current["date"].isoformat(),
+                        title=current["title"][:200],
+                        summary=current.get("summary", "")[:1000],
+                        recurring=current.get("recurring", False),
+                    )
+                )
             current = None
             continue
         if current is None or ":" not in line:
@@ -139,8 +149,16 @@ def parse_csv(text: str) -> tuple[list[Event], list[str]]:
         if not title:
             errors.append(f"第 {number} 行缺少标题")
             continue
-        events.append(Event(date=parsed.isoformat(), title=title[:200], summary=row.get("desc", "")[:1000],
-                            kind=row.get("kind", "")[:40], recurring=recurring, has_year=has_year))
+        events.append(
+            Event(
+                date=parsed.isoformat(),
+                title=title[:200],
+                summary=row.get("desc", "")[:1000],
+                kind=row.get("kind", "")[:40],
+                recurring=recurring,
+                has_year=has_year,
+            )
+        )
         if len(events) >= MAX_EVENTS:
             break
     return events, errors
@@ -176,12 +194,18 @@ def to_items(events: list[Event], today: date, days: int, source_key: str) -> li
     items = []
     for event in events:
         for moment in occurrences(event, today, days):
-            years = moment.year - date.fromisoformat(event.date).year if event.recurring and event.has_year else 0
+            years = (
+                moment.year - date.fromisoformat(event.date).year if event.recurring and event.has_year else 0
+            )
             title = f"{event.title}（{years} 周年）" if years > 0 else event.title
             when = datetime.combine(moment, datetime.min.time()).astimezone().isoformat(timespec="seconds")
             label = f"{event.kind}：" if event.kind else ""
-            found = item(title, label + event.summary, event_at=when,
-                         extra={"dedup": f"cal:{source_key}:{moment.isoformat()}:{event.title}"[:300]})
+            found = item(
+                title,
+                label + event.summary,
+                event_at=when,
+                extra={"dedup": f"cal:{source_key}:{moment.isoformat()}:{event.title}"[:300]},
+            )
             if found:
                 items.append(found)
     items.sort(key=lambda value: value.event_at)
@@ -196,17 +220,40 @@ def replace_events(store, source_id: str, events: list[Event], *, append: bool =
         if not append:
             db.execute("DELETE FROM topic_calendar_events WHERE source_id=?", (source_id,))
         for event in events:
-            db.execute("INSERT INTO topic_calendar_events(id,source_id,date,title,summary,kind,recurring,has_year) "
-                       "VALUES(?,?,?,?,?,?,?,?)",
-                       (new_id("ti"), source_id, event.date, event.title, event.summary, event.kind,
-                        int(event.recurring), int(event.has_year)))
-        return db.execute("SELECT COUNT(*) FROM topic_calendar_events WHERE source_id=?", (source_id,)).fetchone()[0]
+            db.execute(
+                "INSERT INTO topic_calendar_events(id,source_id,date,title,summary,kind,recurring,has_year) "
+                "VALUES(?,?,?,?,?,?,?,?)",
+                (
+                    new_id("ti"),
+                    source_id,
+                    event.date,
+                    event.title,
+                    event.summary,
+                    event.kind,
+                    int(event.recurring),
+                    int(event.has_year),
+                ),
+            )
+        return db.execute(
+            "SELECT COUNT(*) FROM topic_calendar_events WHERE source_id=?", (source_id,)
+        ).fetchone()[0]
 
 
 def stored_events(store, source_id: str) -> list[Event]:
-    rows = store.rows("SELECT * FROM topic_calendar_events WHERE source_id=? ORDER BY date, rowid", (source_id,))
-    return [Event(date=r["date"], title=r["title"], summary=r["summary"], kind=r["kind"], recurring=bool(r["recurring"]),
-                  has_year=bool(r["has_year"])) for r in rows]
+    rows = store.rows(
+        "SELECT * FROM topic_calendar_events WHERE source_id=? ORDER BY date, rowid", (source_id,)
+    )
+    return [
+        Event(
+            date=r["date"],
+            title=r["title"],
+            summary=r["summary"],
+            kind=r["kind"],
+            recurring=bool(r["recurring"]),
+            has_year=bool(r["has_year"]),
+        )
+        for r in rows
+    ]
 
 
 def sample_list() -> list[dict]:
@@ -249,4 +296,3 @@ class CalendarSource:
 
 
 register(CalendarSource())
-

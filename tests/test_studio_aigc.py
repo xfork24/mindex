@@ -11,15 +11,15 @@ import time
 from pathlib import Path
 
 import pytest
-from conftest import FixtureSpeaker
 from fastapi.testclient import TestClient
-from test_studio_sources import frame_count, make_clip, make_image, setup, store_input
 
-from mindex.api import create_app
-from mindex.models.video_generators import VideoStatus, allowed_seconds
-from mindex.studio import studio
-from mindex.studio import workspace as ws
-from mindex.studio.workspace.handlers import generate
+from api import create_app
+from conftest import FixtureSpeaker
+from models.video_generators import VideoStatus, allowed_seconds
+from studio import studio
+from studio import workspace as ws
+from studio.workspace.handlers import generate
+from test_studio_sources import frame_count, make_clip, make_image, setup, store_input
 
 slow = pytest.mark.slow
 SECRET = "sk-video-secret-1234567890"
@@ -93,11 +93,24 @@ def aigc_shot(sid="a", text="红色开场。", **source):
 def run(config, job_id, w, p, generator, *, force=False, cancel_event=None):
     checked = ws.preflight(config, job_id, w, p, force=force)
     bid = str(len(w["builds"]))
-    w["builds"].append({"id": bid, "plan_id": p["id"], "status": "running", "force": force,
-                        "nodes": [{**n, "status": "pending"} for n in checked["nodes"]]})
+    w["builds"].append(
+        {
+            "id": bid,
+            "plan_id": p["id"],
+            "status": "running",
+            "force": force,
+            "nodes": [{**n, "status": "pending"} for n in checked["nodes"]],
+        }
+    )
     ws.persist(config, job_id, w)
-    ws.run_build(config, job_id, bid, speaker=FixtureSpeaker(config), video_generator=generator,
-                 cancel_event=cancel_event)
+    ws.run_build(
+        config,
+        job_id,
+        bid,
+        speaker=FixtureSpeaker(config),
+        video_generator=generator,
+        cancel_event=cancel_event,
+    )
     fresh = ws.load(config, job_id)
     return fresh, ws.plan(fresh, p["id"])
 
@@ -109,7 +122,8 @@ def nodes_of(w):
 def job_text(config, job_id) -> str:
     return "\n".join(
         path.read_text(encoding="utf-8", errors="replace")
-        for path in studio.job_dir(config, job_id).rglob("*") if path.is_file() and path.suffix in (".json", ".jsonl")
+        for path in studio.job_dir(config, job_id).rglob("*")
+        if path.is_file() and path.suffix in (".json", ".jsonl")
     )
 
 
@@ -148,7 +162,9 @@ def test_preflight_blocks_when_generator_not_configured_or_reference_missing(aig
     aigc.studio.video_generator.backend = "minimax"
     image_id = store_input(aigc, job_id, make_image(tmp_path / "ref.png"))
     ws.set_board(aigc, job_id, w, p, [aigc_shot(image_id=image_id)])
-    assert {n["key"]: n for n in ws.preflight(aigc, job_id, w, p)["nodes"]}["generate:a"]["action"] == "rebuild"
+    assert {n["key"]: n for n in ws.preflight(aigc, job_id, w, p)["nodes"]}["generate:a"][
+        "action"
+    ] == "rebuild"
     for path in (studio.job_dir(aigc, job_id) / "inputs").glob(image_id + ".*"):
         path.unlink()
     nodes = {n["key"]: n for n in ws.preflight(aigc, job_id, w, p)["nodes"]}
@@ -156,7 +172,7 @@ def test_preflight_blocks_when_generator_not_configured_or_reference_missing(aig
 
 
 def test_patch_rejects_missing_reference_image(aigc):
-    from mindex.studio.studio_models import validate_source_references
+    from studio.models import validate_source_references
 
     job_id, _, _ = setup(aigc, [aigc_shot()])
     validate_source_references(aigc, job_id, [aigc_shot()])
@@ -168,8 +184,9 @@ def test_signature_covers_prompt_model_seed_and_reference(aigc, tmp_path):
     job_id, w, p = setup(aigc, [aigc_shot()])
     base = ws.specification(aigc, job_id, w, p, "generate", "a")
     assert base["inputs"] == {"content": p["shots"]["a"]["content"], "tts": None}
-    assert base["parameters"] == {"generator": {"backend": "minimax", "model": "fake-hailuo",
-                                                "durations": [1.0, 2.0, 3.0]}}
+    assert base["parameters"] == {
+        "generator": {"backend": "minimax", "model": "fake-hailuo", "durations": [1.0, 2.0, 3.0]}
+    }
     assert SECRET not in json.dumps(base)
     image_id = store_input(aigc, job_id, make_image(tmp_path / "ref.png"))
     signatures = {base["signature"]}
@@ -208,7 +225,9 @@ def test_wait_for_backs_off_and_times_out():
 
     fake = FakeVideoGenerator(states=("running",))
     with pytest.raises(studio.StudioError, match="视频生成超时"):
-        generate.wait_for(fake, "t", Cfg, lambda: False, lambda *_: None, clock=lambda: clock["now"], sleep=sleep)
+        generate.wait_for(
+            fake, "t", Cfg, lambda: False, lambda *_: None, clock=lambda: clock["now"], sleep=sleep
+        )
     assert fake.cancelled == ["t"]
     assert clock["now"] == pytest.approx(6.0)
     assert fake.polls == 5  # 0, 1, 2.5, 4.75, 6（间隔 1 → 1.5 → 2.25 → 余下 1.25）
@@ -224,7 +243,13 @@ def test_aigc_build_without_index_reuses_generation_and_keeps_no_secret(aigc):
     w, p = run(aigc, job_id, w, p, fake)
     build_record = w["builds"][-1]
     assert build_record["status"] == "complete", build_record
-    assert [n["key"] for n in build_record["nodes"]] == ["tts:a", "generate:a", "select:a", "render:a", "compose"]
+    assert [n["key"] for n in build_record["nodes"]] == [
+        "tts:a",
+        "generate:a",
+        "select:a",
+        "render:a",
+        "compose",
+    ]
     [request] = fake.requests
     assert request.prompt == "霓虹灯下的街道"  # 缺省用画面意象
     assert request.seconds == 1.0  # 配音 0.9 秒 → 允许时长 1 秒
@@ -243,7 +268,8 @@ def test_aigc_build_without_index_reuses_generation_and_keeps_no_secret(aigc):
     text = job_text(aigc, job_id)
     assert SECRET not in text and "Signature=abc" not in text
     events = (studio.job_dir(aigc, job_id) / "builds" / w["builds"][-1]["id"] / "events.jsonl").read_text(
-        encoding="utf-8")
+        encoding="utf-8"
+    )
     assert "视频生成：排队中" in events and "视频生成：生成中" in events
     detail = ws.detail(aigc, job_id, w)
     assert detail["shot_stages"] == {"a": ["tts", "generate", "select", "render"]}
@@ -309,7 +335,9 @@ def test_generation_failure_keeps_diagnostics_and_never_selects(aigc):
     assert "内容审核未通过" in nodes["generate:a"]["error"]
     assert nodes["select:a"]["status"] == "blocked" and nodes["compose"]["status"] == "blocked"
     failed = ws.version(w, nodes["generate:a"]["version"])
-    record = json.loads((ws.root(aigc, job_id) / failed["files"]["request.json"]["path"]).read_text(encoding="utf-8"))
+    record = json.loads(
+        (ws.root(aigc, job_id) / failed["files"]["request.json"]["path"]).read_text(encoding="utf-8")
+    )
     assert record["status"]["state"] == "failed" and "内容审核" in record["error"]
     assert any(name.startswith("debug/") for name in failed["files"])
     assert p["shots"]["a"].get("generate") is None
@@ -330,27 +358,45 @@ def test_generation_timeout_fails_with_chinese_reason(aigc):
 @slow
 def test_mixed_aigc_clip_recall_compose(aigc, tmp_path, video_file):
     from conftest import FixtureEmbedder
-
-    from mindex.processing.indexing import IndexBuilder
-    from mindex.processing.pipeline import Pipeline
+    from processing.indexing import IndexBuilder
+    from processing.pipeline import Pipeline
 
     Pipeline(aigc).prepare(video_file)
     embedder = FixtureEmbedder(aigc)
     IndexBuilder(aigc, embedder).build(mode="visual", kinds=("shot",), activate=True)
     job_id, w, p = setup(aigc, [shot("r", "红色开场。")])
     clip_id = store_input(aigc, job_id, make_clip(tmp_path / "c.mp4", 2.0))
-    ws.set_board(aigc, job_id, w, p, [
-        studio.Shot(id="r", text="红色开场。", query="红色", estimated_seconds=1),
-        aigc_shot("g", "生成的中段。"),
-        shot("c", "片段结尾。", source={"kind": "clip", "media_id": clip_id}),
-    ])
+    ws.set_board(
+        aigc,
+        job_id,
+        w,
+        p,
+        [
+            studio.Shot(id="r", text="红色开场。", query="红色", estimated_seconds=1),
+            aigc_shot("g", "生成的中段。"),
+            shot("c", "片段结尾。", source={"kind": "clip", "media_id": clip_id}),
+        ],
+    )
     checked = ws.preflight(aigc, job_id, w, p)
     bid = "mixed"
-    w["builds"].append({"id": bid, "plan_id": p["id"], "status": "running", "force": False,
-                        "nodes": [{**n, "status": "pending"} for n in checked["nodes"]]})
+    w["builds"].append(
+        {
+            "id": bid,
+            "plan_id": p["id"],
+            "status": "running",
+            "force": False,
+            "nodes": [{**n, "status": "pending"} for n in checked["nodes"]],
+        }
+    )
     ws.persist(aigc, job_id, w)
-    ws.run_build(aigc, job_id, bid, speaker=FixtureSpeaker(aigc), embedder=embedder,
-                 video_generator=FakeVideoGenerator())
+    ws.run_build(
+        aigc,
+        job_id,
+        bid,
+        speaker=FixtureSpeaker(aigc),
+        embedder=embedder,
+        video_generator=FakeVideoGenerator(),
+    )
     w = ws.load(aigc, job_id)
     p = ws.plan(w, p["id"])
     assert w["builds"][-1]["status"] == "complete", w["builds"][-1]
@@ -358,8 +404,10 @@ def test_mixed_aigc_clip_recall_compose(aigc, tmp_path, video_file):
     frames = [ws.version(w, p["shots"][sid]["render"])["data"]["frames"] for sid in ("r", "g", "c")]
     assert final["data"]["total_frames"] == sum(frames)
     assert frame_count(ws.file_path(aigc, job_id, final, "mp4"))[0] == sum(frames)
-    kinds = [ws.version(w, p["shots"][sid]["select"])["data"]["event"]["video"].get("kind", "library")
-             for sid in ("r", "g", "c")]
+    kinds = [
+        ws.version(w, p["shots"][sid]["select"])["data"]["event"]["video"].get("kind", "library")
+        for sid in ("r", "g", "c")
+    ]
     assert kinds == ["library", "file", "file"]
     assert ws.detail(aigc, job_id, w)["shot_stages"]["g"] == ["tts", "generate", "select", "render"]
 

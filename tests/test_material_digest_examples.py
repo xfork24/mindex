@@ -8,21 +8,15 @@ from __future__ import annotations
 
 import pytest
 import yaml
-from conftest import FixtureAnalyzer, FixtureEmbedder
 from pydantic import ValidationError
 
-from mindex.admin.curation import CurationPatch, Library
-from mindex.processing.indexing import IndexBuilder
-from mindex.processing.pipeline import Pipeline
-from mindex.shared.config import Config, load_config
-from mindex.shared.storage import Store
-from mindex.studio.material_digest import (
-    EMPTY_BUDGET,
-    EMPTY_INDEX,
-    EMPTY_SEGMENTS,
-    build_digest,
-    compose_digest,
-)
+from admin.curation import CurationPatch, Library
+from conftest import FixtureAnalyzer, FixtureEmbedder
+from processing.indexing import IndexBuilder
+from processing.pipeline import Pipeline
+from shared.config import Config, load_config
+from shared.storage import Store
+from studio.material_digest import EMPTY_BUDGET, EMPTY_INDEX, EMPTY_SEGMENTS, build_digest, compose_digest
 
 
 def seg(
@@ -287,7 +281,10 @@ def test_config_default_is_12000():
 
 @pytest.mark.parametrize("value", [0, 1, 100000])
 def test_config_accepts_bounds(value):
-    assert Config.model_validate({"studio": {"material_digest_chars": value}}).studio.material_digest_chars == value
+    assert (
+        Config.model_validate({"studio": {"material_digest_chars": value}}).studio.material_digest_chars
+        == value
+    )
 
 
 @pytest.mark.parametrize("value", [-1, 1.5, "12000", 100001, True])
@@ -297,7 +294,9 @@ def test_config_rejects_invalid_values(value, tmp_path):
     assert "studio.material_digest_chars" in str(caught.value)
     # 通过 load_config 加载 YAML 时走同一条校验路径。
     path = tmp_path / "bad.yaml"
-    path.write_text(yaml.safe_dump({"data_dir": str(tmp_path / "data"), "studio": {"material_digest_chars": value}}))
+    path.write_text(
+        yaml.safe_dump({"data_dir": str(tmp_path / "data"), "studio": {"material_digest_chars": value}})
+    )
     with pytest.raises(ValidationError) as loaded:
         load_config(path)
     assert "studio.material_digest_chars" in str(loaded.value)

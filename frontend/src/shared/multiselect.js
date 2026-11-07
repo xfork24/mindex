@@ -4,52 +4,65 @@
 //   MindexMultiSearch.attach(select)       —— 首次挂搜索框（幂等）
 //   MindexMultiSearch.refilter(select)     —— 重填选项后重放当前过滤
 (function () {
-  'use strict';
-  var ALL_VALUE = '__all__';
-  var serial = 0;
+  "use strict";
+  const ALL_VALUE = "__all__";
+  let serial = 0;
   function matches(option, query) {
     return option.value === ALL_VALUE || !query || option.textContent.toLowerCase().includes(query);
   }
-  var api = {
+  const api = {
     sort: function (entries) {
       return entries.slice().sort(function (a, b) {
-        return (a.name || '').localeCompare(b.name || '', 'zh') || (a.id || '').localeCompare(b.id || '');
+        return (
+          (a.name || "").localeCompare(b.name || "", "zh") || (a.id || "").localeCompare(b.id || "")
+        );
       });
     },
     attach: function (select) {
-      if (!select || !select.multiple || select.dataset.searchable) return;
-      select.dataset.searchable = '1';
-      if (!select.id) select.id = 'multi-select-' + (++serial);
-      var label = select.closest('label');
-      if (label) label.htmlFor = select.id;
-      var control = document.createElement('div');
-      control.className = 'multi-select';
-      var list = document.createElement('div');
-      list.className = 'multi-list';
-      var input = document.createElement('input');
-      input.type = 'search';
-      input.className = 'multi-search';
+      if (!select || !select.multiple || select.dataset.searchable) {
+        return;
+      }
+      select.dataset.searchable = "1";
+      if (!select.id) {
+        select.id = "multi-select-" + ++serial;
+      }
+      const label = select.closest("label");
+      if (label) {
+        label.htmlFor = select.id;
+      }
+      const control = document.createElement("div");
+      control.className = "multi-select";
+      const list = document.createElement("div");
+      list.className = "multi-list";
+      const input = document.createElement("input");
+      input.type = "search";
+      input.className = "multi-search";
       MindexI18n.setAttr(input, "placeholder", MindexI18n.msg("ui.73702e17a417"));
-      MindexI18n.setAttr(input, 'aria-label', MindexI18n.msg("ui.78c0a3251da4"));
-      input.addEventListener('input', function () {
-        var query = input.value.trim().toLowerCase();
+      MindexI18n.setAttr(input, "aria-label", MindexI18n.msg("ui.78c0a3251da4"));
+      input.addEventListener("input", function () {
+        const query = input.value.trim().toLowerCase();
         select.dataset.query = query;
-        for (var i = 0; i < select.options.length; i++)
-        select.options[i].hidden = !matches(select.options[i], query);
+        for (let i = 0; i < select.options.length; i++) {
+          select.options[i].hidden = !matches(select.options[i], query);
+        }
       });
       select.parentNode.insertBefore(control, select);
       control.append(input, list);
       list.append(select);
     },
     refilter: function (select) {
-      if (!select || !select.multiple || !select.dataset.searchable) return;
-      var query = (select.dataset.query || '').toLowerCase();
-      for (var j = 0; j < select.options.length; j++)
-      {select.options[j].hidden = !matches(select.options[j], query);select.options[j].title = select.options[j].textContent;}
-    }
+      if (!select || !select.multiple || !select.dataset.searchable) {
+        return;
+      }
+      const query = (select.dataset.query || "").toLowerCase();
+      for (let j = 0; j < select.options.length; j++) {
+        select.options[j].hidden = !matches(select.options[j], query);
+        select.options[j].title = select.options[j].textContent;
+      }
+    },
   };
-  window.addEventListener('mindex:languagechange', function () {
-    document.querySelectorAll('select[multiple][data-searchable]').forEach(api.refilter);
+  window.addEventListener("mindex:languagechange", function () {
+    document.querySelectorAll("select[multiple][data-searchable]").forEach(api.refilter);
   });
   window.MindexMultiSearch = api;
 })();

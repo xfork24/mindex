@@ -9,12 +9,12 @@ from __future__ import annotations
 
 import pytest
 
-from mindex.search.lexical_query import eligible_projection, sql_bm25
-from mindex.search.search import lexical_search
-from mindex.shared.lexical_store import build_lexical_index, lexical_ready
-from mindex.shared.storage import Store, dumps
-from mindex.shared.tokenizer import tokenizer_version
-from mindex.shared.types import Filters
+from search.lexical_query import eligible_projection, sql_bm25
+from search.search import lexical_search
+from shared.lexical_store import build_lexical_index, lexical_ready
+from shared.storage import Store, dumps
+from shared.tokenizer import tokenizer_version
+from shared.types import Filters
 
 
 @pytest.fixture
@@ -27,12 +27,18 @@ def _seed(store: Store, index_id="i" * 12):
     store.execute("INSERT INTO sources(id,name,path,media,layout_key) VALUES('src2','素材2','p2','{}','k')")
     # eligible_projection 与 curation 的外键链需要 segments 行（快照来自 index_members）。
     for sid, source, kind, start, end in [
-        ("seg1", "src", "shot", 0, 5), ("seg2", "src", "shot", 0, 5),
-        ("seg3", "src", "shot", 5, 12.5), ("seg4", "src", "moment", 0, 8),
-        ("seg5", "src2", "shot", 0, 3), ("seg6", "src", "shot", 10, 30),
+        ("seg1", "src", "shot", 0, 5),
+        ("seg2", "src", "shot", 0, 5),
+        ("seg3", "src", "shot", 5, 12.5),
+        ("seg4", "src", "moment", 0, 8),
+        ("seg5", "src2", "shot", 0, 3),
+        ("seg6", "src", "shot", 10, 30),
     ]:
-        store.execute("INSERT INTO segments(id,source_id,kind,start,end,path,thumbnail,generation,reason) "
-                      "VALUES(?,?,?,?,?,'p','t','g','r')", (sid, source, kind, start, end))
+        store.execute(
+            "INSERT INTO segments(id,source_id,kind,start,end,path,thumbnail,generation,reason) "
+            "VALUES(?,?,?,?,?,'p','t','g','r')",
+            (sid, source, kind, start, end),
+        )
     docs = {
         "seg1": ("镜头一：城市夜景下的车流。", "他说：今天天气不错，我们去城里。", "shot", 0, 5, "src"),
         "seg2": ("", "", "shot", 0, 5, "src"),  # 双渠道全空：长度 0 计入分母
@@ -49,15 +55,36 @@ def _seed(store: Store, index_id="i" * 12):
             views["dialogue"] = dialogue
         store.execute(
             "INSERT INTO index_members(index_id,segment_id,snapshot,complete) VALUES(?,?,?,1)",
-            (index_id, sid, dumps({
-                "id": sid, "source_id": source, "kind": kind, "start": start, "end": end,
-                "views": views, "indexed_views": sorted(
-                    ["video", *(["analysis"] if analysis else []), *(["dialogue"] if dialogue else [])]),
-                "annotation": {"scene": ["夜景"] if "夜景" in analysis else [],
-                               "emotions": [], "shot_size": ["远景"] if sid == "seg6" else []},
-            })))
-    store.execute("INSERT INTO index_versions(id,spec,status) VALUES(?,?,?)",
-                  (index_id, dumps({"format": 2}), "ready"))
+            (
+                index_id,
+                sid,
+                dumps(
+                    {
+                        "id": sid,
+                        "source_id": source,
+                        "kind": kind,
+                        "start": start,
+                        "end": end,
+                        "views": views,
+                        "indexed_views": sorted(
+                            [
+                                "video",
+                                *(["analysis"] if analysis else []),
+                                *(["dialogue"] if dialogue else []),
+                            ]
+                        ),
+                        "annotation": {
+                            "scene": ["夜景"] if "夜景" in analysis else [],
+                            "emotions": [],
+                            "shot_size": ["远景"] if sid == "seg6" else [],
+                        },
+                    }
+                ),
+            ),
+        )
+    store.execute(
+        "INSERT INTO index_versions(id,spec,status) VALUES(?,?,?)", (index_id, dumps({"format": 2}), "ready")
+    )
     build_lexical_index(store, index_id)
     return index_id
 
@@ -78,8 +105,12 @@ def test_build_populates_projection_and_terms(store):
     meta = store.one("SELECT * FROM lexical_index_meta WHERE index_id=?", (index_id,))
     assert meta["segments"] == 6 and meta["tokenizer_version"] == tokenizer_version()
     # 每个 segment 都有双渠道文档行（空文档长度 0）
-    assert store.one("SELECT count(*) AS n FROM lexical_docs WHERE index_id=? AND doc_length=0",
-                     (index_id,))["n"] >= 2
+    assert (
+        store.one("SELECT count(*) AS n FROM lexical_docs WHERE index_id=? AND doc_length=0", (index_id,))[
+            "n"
+        ]
+        >= 2
+    )
     # 空 snapshot 全字段投影存在
     projection = eligible_projection(store, index_id, "shot", Filters(), None)
     assert {row["id"] for row in projection} == {"seg1", "seg2", "seg3", "seg5", "seg6"}
@@ -94,8 +125,11 @@ def test_eligible_projection_matches_legacy_filters(store):
     got = {row["id"] for row in eligible_projection(store, index_id, "shot", filters, {"src"})}
     # 参考路径：时长边界为开区间（==20 保留）；seg3 无「夜」；seg5 素材不在集合；seg2 自身隐藏
     assert got == {"seg1", "seg6"}
-    assert {row["id"] for row in eligible_projection(store, index_id, "shot", Filters(), None)} \
-        == {"seg1", "seg3", "seg6"}  # seg2 自身隐藏、seg5 素材(src2)隐藏被排除
+    assert {row["id"] for row in eligible_projection(store, index_id, "shot", Filters(), None)} == {
+        "seg1",
+        "seg3",
+        "seg6",
+    }  # seg2 自身隐藏、seg5 素材(src2)隐藏被排除
     assert eligible_projection(store, index_id, "shot", Filters(), set()) == []  # 空交集直接空
 
 
@@ -128,7 +162,8 @@ def test_sql_bm25_empty_inputs(store):
 def test_stale_tokenizer_version_disables_sql_path(store, monkeypatch):
     index_id = _seed(store)
     assert lexical_ready(store, index_id)
-    from mindex.shared import lexical_store
+    from shared import lexical_store
+
     monkeypatch.setattr(lexical_store, "tokenizer_version", lambda: "stale")
     assert not lexical_ready(store, index_id)  # 版本不一致 → 回退 Python 参考路径
     with pytest.raises(ValueError, match="不一致"):

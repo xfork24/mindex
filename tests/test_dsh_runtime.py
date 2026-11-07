@@ -3,26 +3,33 @@
 from __future__ import annotations
 
 import asyncio
+import importlib.metadata
+import io
 import json
+import os
+import subprocess
 import threading
+import types
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from types import SimpleNamespace
 
 import pytest
+from fastapi.testclient import TestClient
+from PIL import Image
 from pydantic import BaseModel
 
-from mindex.agent.dsh_runtime import DshRuntime, patch, readiness
-from mindex.agent.registry import ToolOutput, ToolRegistry, ToolSpec
-from mindex.agent.session_store import SessionStore
-from mindex.agent.tools import meta
-from mindex.shared.config import AgentConfig
+from agent.dsh_runtime import DshRuntime, patch, readiness
+from agent.registry import ToolOutput, ToolRegistry, ToolSpec
+from agent.session_store import SessionStore
+from agent.tools import meta
+from shared.config import AgentConfig
 
 
 @pytest.mark.parametrize("frozen", [False, True])
 @pytest.mark.parametrize("failure", ["missing", "version", "files"])
 def test_dependency_repair_matches_installation(monkeypatch, frozen, failure):
-    import importlib.metadata
 
-    import mindex.agent.dsh_runtime as module
+    import agent.dsh_runtime as module
 
     monkeypatch.setattr(module.sys, "frozen", frozen, raising=False)
 
@@ -36,14 +43,16 @@ def test_dependency_repair_matches_installation(monkeypatch, frozen, failure):
 
     monkeypatch.setattr(importlib.metadata, "version", version)
     if failure == "files":
-        import types
 
         def resolve(mode=None):
             assert mode == ("exe" if frozen else None)
             raise FileNotFoundError("missing runtime")
 
-        monkeypatch.setitem(module.sys.modules, "deepseek_harness_runtime",
-                            types.SimpleNamespace(resolve_bundled_launch_args=resolve))
+        monkeypatch.setitem(
+            module.sys.modules,
+            "deepseek_harness_runtime",
+            types.SimpleNamespace(resolve_bundled_launch_args=resolve),
+        )
     result = readiness(AgentConfig(llm={"model": "test", "base_url": "http://localhost/v1"}))
     assert not result["ready"]
     message = "；".join([*result["errors"], result["install"]])
@@ -55,14 +64,18 @@ def test_dependency_repair_matches_installation(monkeypatch, frozen, failure):
 
 
 def test_frozen_uses_bundled_executable(monkeypatch):
-    import types
 
-    import mindex.agent.dsh_runtime as module
+    import agent.dsh_runtime as module
 
     monkeypatch.setattr(module.sys, "frozen", True, raising=False)
     modes = []
-    monkeypatch.setitem(module.sys.modules, "deepseek_harness_runtime", types.SimpleNamespace(
-        resolve_bundled_launch_args=lambda mode: (modes.append(mode) or "/bundled/dsh",)))
+    monkeypatch.setitem(
+        module.sys.modules,
+        "deepseek_harness_runtime",
+        types.SimpleNamespace(
+            resolve_bundled_launch_args=lambda mode: (modes.append(mode) or "/bundled/dsh",)
+        ),
+    )
     assert DshRuntime._bundled_executable() == "/bundled/dsh"
     assert modes == ["exe"]
     monkeypatch.setattr(module.sys, "frozen", False)
@@ -76,7 +89,9 @@ class Empty(BaseModel):
 @pytest.mark.parametrize("capacity", [None, 1048576])
 def test_model_context_capacity_is_separate_from_output_budget(capacity):
     settings = AgentConfig(max_context_tokens=60000, llm={"context_window": capacity, "max_tokens": 4096})
-    model = patch(settings, "http://localhost/mcp")[-1]["insert"][0]["config"]["providers"]["mindex"]["models"][0]
+    model = patch(settings, "http://localhost/mcp")[-1]["insert"][0]["config"]["providers"]["mindex"][
+        "models"
+    ][0]
     assert model["contextWindow"] == (capacity or 60000)
     assert model["maxTokens"] == 4096
 
@@ -187,8 +202,11 @@ def model_server():
                 {
                     "id": "completion",
                     "choices": [{"index": 0, "delta": {}, "finish_reason": "stop" if used else "tool_calls"}],
-                    **({"usage": {"prompt_tokens": 66000, "completion_tokens": 10, "total_tokens": 66010}}
-                       if body["model"] == "million-context" else {}),
+                    **(
+                        {"usage": {"prompt_tokens": 66000, "completion_tokens": 10, "total_tokens": 66010}}
+                        if body["model"] == "million-context"
+                        else {}
+                    ),
                 },
             ]:
                 self.wfile.write(("data: " + json.dumps(chunk) + "\n\n").encode())
@@ -258,8 +276,15 @@ def test_real_dsh_tool_and_resume(tmp_path, model_server, backend):
 
 def test_real_dsh_million_context(tmp_path, model_server):
     url, requests = model_server
-    settings = AgentConfig(llm={"base_url": url, "model": "million-context", "api_key": "fixture",
-                                "context_window": 1048576, "max_tokens": 4096})
+    settings = AgentConfig(
+        llm={
+            "base_url": url,
+            "model": "million-context",
+            "api_key": "fixture",
+            "context_window": 1048576,
+            "max_tokens": 4096,
+        }
+    )
     if not readiness(settings)["ready"]:
         pytest.skip("uv sync --extra dsh")
     store = SessionStore(tmp_path)
@@ -268,8 +293,13 @@ def test_real_dsh_million_context(tmp_path, model_server):
     async def execute(args, ctx):
         return ToolOutput({"ok": True})
 
-    runtime = DshRuntime(store, registry=ToolRegistry([ToolSpec("probe", "meta", "probe", Empty, "read", execute)]),
-                         llm_factory=lambda: None, client_factory=lambda _: None, settings=lambda: settings)
+    runtime = DshRuntime(
+        store,
+        registry=ToolRegistry([ToolSpec("probe", "meta", "probe", Empty, "read", execute)]),
+        llm_factory=lambda: None,
+        client_factory=lambda _: None,
+        settings=lambda: settings,
+    )
 
     async def run():
         await runtime.prompt(sid, [{"type": "text", "text": "run probe"}])
@@ -284,10 +314,9 @@ def test_real_dsh_million_context(tmp_path, model_server):
 
 
 def test_runtime_setting_keeps_existing_owner(config):
-    from fastapi.testclient import TestClient
 
-    from mindex.agent.llm.scripted import ScriptedLlm, say
-    from mindex.api import create_app
+    from agent.llm.scripted import ScriptedLlm, say
+    from api import create_app
 
     app = create_app(config, agent_llm=ScriptedLlm([[say("builtin")]]))
     with TestClient(app) as http:
@@ -308,8 +337,8 @@ def test_runtime_setting_keeps_existing_owner(config):
 
 
 def test_old_schema_and_atomic_upstream_dedup(tmp_path):
-    from mindex.agent.schema import _v1, _v2
-    from mindex.agent.session_store import Database
+    from agent.schema import _v1, _v2
+    from agent.session_store import Database
 
     db = Database(tmp_path / "agent.sqlite3")
     with db.connect() as connection:
@@ -380,12 +409,9 @@ def test_real_dsh_approval_and_exit(tmp_path, model_server, decision):
 
 
 def test_settings_runtime_browser(config):
-    import os
-    import subprocess
 
+    from api import create_app
     from test_agent_panel_ui import ROOT, playwright_available, serve
-
-    from mindex.api import create_app
 
     if not playwright_available() or not readiness(config.agent)["ready"]:
         pytest.skip("Requires Playwright and dsh extra")
@@ -407,12 +433,11 @@ def test_settings_runtime_browser(config):
 
 
 def test_missing_dsh_keeps_preference(config, monkeypatch):
-    from fastapi.testclient import TestClient
 
-    import mindex.agent.dsh_runtime as module
-    from mindex.api import create_app
-    from mindex.settings.runtime_settings import put_setting
-    from mindex.shared.storage import Store
+    import agent.dsh_runtime as module
+    from api import create_app
+    from settings.runtime_settings import put_setting
+    from shared.storage import Store
 
     store = Store(config.data_dir)
     put_setting(store, "agent.runtime", "dsh")
@@ -431,9 +456,6 @@ def test_missing_dsh_keeps_preference(config, monkeypatch):
 
 @pytest.mark.parametrize("vision", [False, True])
 def test_real_dsh_image_boundary(tmp_path, model_server, vision):
-    import io
-
-    from PIL import Image
 
     url, requests = model_server
     settings = AgentConfig(
@@ -457,7 +479,7 @@ def test_real_dsh_image_boundary(tmp_path, model_server, vision):
         client_factory=lambda _: None,
         settings=lambda: settings,
     )
-    from mindex.agent.attachments import AttachmentError, AttachmentStore
+    from agent.attachments import AttachmentError, AttachmentStore
 
     attachments = AttachmentStore(tmp_path)
     source = tmp_path / "image.png"
@@ -469,7 +491,7 @@ def test_real_dsh_image_boundary(tmp_path, model_server, vision):
     other = store.create(runtime="dsh")["id"]
     with pytest.raises(AttachmentError):
         asyncio.run(runtime._image_loader(other)(item["id"]))
-    from mindex.agent.llm.types import image_block, user_message
+    from agent.llm.types import image_block, user_message
 
     message = user_message("look at image", "user")
     message["content"].append(image_block(item["id"], "image/png"))
@@ -527,7 +549,6 @@ def test_failed_sdk_start_releases_workers(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("method", ["approval/request", "user-question/ask"])
 def test_native_requests_map_to_existing_cards(tmp_path, method):
-    from types import SimpleNamespace
 
     store = SessionStore(tmp_path)
     sid = store.create(runtime="dsh")["id"]

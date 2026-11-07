@@ -1,14 +1,16 @@
 """Shared platform delivery option types."""
+
 from typing import Literal
 
 from pydantic import Field, field_validator, model_serializer, model_validator
 
-from mindex.shared.config import StrictModel
-from mindex.studio.platforms import PlatformId, PlatformPreset
+from shared.config import StrictModel
+from studio.platforms import PlatformId, PlatformPreset
 
 
 class CoverOptions(StrictModel):
-    """封面：frame 从成片挑一帧（``time`` 为成片秒数，None = 自动挑清晰度最高的镜头中点）；aigc 用图片生成模型按
+    """封面：frame 从成片挑一帧（``time`` 为成片秒数，None = 自动挑清晰度最高的镜头中点）；
+    aigc 用图片生成模型按
     ``prompt`` 生成；upload 用任务 inputs 中上传的图片（``media_id``）。``title``/``subtitle`` 叠加在封面上，
     None = 用发布元数据的标题（不叠副标题）。"""
 
@@ -46,7 +48,6 @@ class PublishOptions(StrictModel):
         if not data.get("platform_specs"):
             data.pop("platform_specs", None)
         return data
-
 
     @field_validator("platforms", mode="after")
     @classmethod

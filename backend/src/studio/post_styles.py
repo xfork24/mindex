@@ -1,7 +1,8 @@
 """成片后期的样式模型：字幕样式与文字层样式。
 
 放在 workspace 包之外，供方案参数（``workspace/plans.py``）、品牌模板（``studio/brands.py``）与 ASS 生成
-（``workspace/ass.py``）共用而不产生循环导入。尺寸以 288 线短边为单位（与 ``SubtitleConfig.font_size`` 一致）。
+（``workspace/ass.py``）共用而不产生循环导入。尺寸以 288 线短边为单位（与 ``SubtitleConfig.font_size`` 一致）
+。
 """
 
 from __future__ import annotations
@@ -10,7 +11,7 @@ from typing import Literal
 
 from pydantic import Field
 
-from mindex.shared.config import StrictModel
+from shared.config import StrictModel
 
 HEX_COLOR = r"^#[0-9A-Fa-f]{6}$"
 

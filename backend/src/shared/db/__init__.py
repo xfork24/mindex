@@ -5,12 +5,12 @@
 实现层，与 ``shared/backends`` 的协议（RelationalDatabase）对接。
 """
 
-from mindex.shared.db.dialect import TABLE_SPECS, UnsupportedSql, rewrite_for_postgres
-from mindex.shared.db.errors import BackendError, IntegrityViolation, SchemaMismatch, UnsupportedOperation
-from mindex.shared.db.pg_backend import PgBackend
-from mindex.shared.db.rows import Row
-from mindex.shared.db.sqlite_backend import SqliteBackend
-from mindex.shared.db.statements import DualSQL, dual
+from shared.db.dialect import TABLE_SPECS, UnsupportedSql, rewrite_for_postgres
+from shared.db.errors import BackendError, IntegrityViolation, SchemaMismatch, UnsupportedOperation
+from shared.db.pg_backend import PgBackend
+from shared.db.rows import Row
+from shared.db.sqlite_backend import SqliteBackend
+from shared.db.statements import DualSQL, dual
 
 __all__ = [
     "TABLE_SPECS",

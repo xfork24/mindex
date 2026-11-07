@@ -11,20 +11,20 @@ import asyncio
 import time
 
 import pytest
-from agent_helpers import new_session, send, wait_idle, wait_pending
-from conftest import FixtureEmbedder
 from fastapi.testclient import TestClient
 
-from mindex.agent.llm.scripted import ScriptedLlm, call, say
-from mindex.agent.loopback import MindexClient
-from mindex.agent.registry import ToolContext, ToolError
-from mindex.agent.tools import build_registry
-from mindex.api import create_app
-from mindex.processing.indexing import IndexBuilder
-from mindex.processing.pipeline import Pipeline
-from mindex.shared.locks import SharedFileLock
-from mindex.shared.processing_lock import ProcessingLock
-from mindex.shared.storage import Store
+from agent.llm.scripted import ScriptedLlm, call, say
+from agent.loopback import MindexClient
+from agent.registry import ToolContext, ToolError
+from agent.tools import build_registry
+from agent_helpers import new_session, send, wait_idle, wait_pending
+from api import create_app
+from conftest import FixtureEmbedder
+from processing.indexing import IndexBuilder
+from processing.pipeline import Pipeline
+from shared.locks import SharedFileLock
+from shared.processing_lock import ProcessingLock
+from shared.storage import Store
 
 pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
 
@@ -90,14 +90,16 @@ def retry_when_unlocked(app, kind, task_id, timeout=10):
 
 # ---------- 字段透传与隐藏过滤 ----------
 
+
 def test_browse_fields_pass_through(prepared):
     config, source_id = prepared
     app = create_app(config)
     with TestClient(app) as client:
         rest = client.get(f"/api/admin/sources/{source_id}", params={"detail": "work"}).json()
         source = run_tool(app, "get_source", {"source_id": source_id})
-        assert {k: source.value[k] for k in ("id", "name", "media", "hidden", "favorite", "notes")} == \
-            {k: rest[k] for k in ("id", "name", "media", "hidden", "favorite", "notes")}
+        assert {k: source.value[k] for k in ("id", "name", "media", "hidden", "favorite", "notes")} == {
+            k: rest[k] for k in ("id", "name", "media", "hidden", "favorite", "notes")
+        }
         assert set(source.value["work"]) == {"shots", "dialogue", "analysis", "persons"}
         for name, work in source.value["work"].items():
             for key in ("status", "can_start", "start_reason", "can_publish", "result"):
@@ -105,8 +107,9 @@ def test_browse_fields_pass_through(prepared):
                     assert work[key] == rest["work"][name][key], (name, key)
 
         # list_segments 的 kind / visibility / 分页参数原样透传。
-        rest_shots = client.get(f"/api/admin/sources/{source_id}/segments",
-                                params={"kind": "shot", "page": 1, "page_size": 50}).json()
+        rest_shots = client.get(
+            f"/api/admin/sources/{source_id}/segments", params={"kind": "shot", "page": 1, "page_size": 50}
+        ).json()
         shots = run_tool(app, "list_segments", {"source_id": source_id, "page_size": 50})
         assert [r["id"] for r in shots.value["items"]] == [s["id"] for s in rest_shots["items"]]
         assert shots.value["total"] == rest_shots["total"] >= 1
@@ -128,8 +131,11 @@ def test_browse_fields_pass_through(prepared):
         assert details.value["truncated"] is False
 
         # parent_id 只列出该镜头下的精细片段。
-        children = run_tool(app, "list_segments",
-                            {"source_id": source_id, "kind": "moment", "parent_id": parent, "page_size": 50})
+        children = run_tool(
+            app,
+            "list_segments",
+            {"source_id": source_id, "kind": "moment", "parent_id": parent, "page_size": 50},
+        )
         assert first in {r["id"] for r in children.value["items"]}
         assert children.value["total"] <= moments.value["total"]
         for row in children.value["items"][:3]:
@@ -137,12 +143,24 @@ def test_browse_fields_pass_through(prepared):
 
         # update_curation 字段到 REST：显示名、备注生效；空显示名恢复原名。
         original = rest["name"]
-        out = run_tool(app, "update_curation",
-                       {"target": "source", "id": source_id, "display_name": "测试显示名", "notes": "备注一"})
+        out = run_tool(
+            app,
+            "update_curation",
+            {"target": "source", "id": source_id, "display_name": "测试显示名", "notes": "备注一"},
+        )
         assert out.value["changed"] == {"display_name": "测试显示名", "notes": "备注一"}
-        assert out.mutation == {"domain": "library", "source_id": source_id, "target": "source", "id": source_id}
+        assert out.mutation == {
+            "domain": "library",
+            "source_id": source_id,
+            "target": "source",
+            "id": source_id,
+        }
         after = client.get(f"/api/admin/sources/{source_id}").json()
-        assert after["name"] == "测试显示名" and after["custom_name"] == "测试显示名" and after["notes"] == "备注一"
+        assert (
+            after["name"] == "测试显示名"
+            and after["custom_name"] == "测试显示名"
+            and after["notes"] == "备注一"
+        )
         assert after["favorite"] is False and after["hidden"] is False
         assert run_tool(app, "get_source", {"source_id": source_id}).value["notes"] == "备注一"
         run_tool(app, "update_curation", {"target": "source", "id": source_id, "display_name": ""})
@@ -160,7 +178,9 @@ def test_hidden_segment_filtered_from_search(indexed):
         assert ids, before.text
         target = ids[0]
 
-        preview = run_tool(app, "update_curation", {"target": "segment", "id": target, "hidden": True}, preview=True)
+        preview = run_tool(
+            app, "update_curation", {"target": "segment", "id": target, "hidden": True}, preview=True
+        )
         assert "隐藏后该内容不会出现在检索结果中" in preview.warnings
         run_tool(app, "update_curation", {"target": "segment", "id": target, "hidden": True})
         assert client.get(f"/api/admin/segments/{target}").json()["hidden"] is True
@@ -170,7 +190,9 @@ def test_hidden_segment_filtered_from_search(indexed):
         assert target not in after.text
         # 片段列表按 visibility 区分。
         visible = run_tool(app, "list_segments", {"source_id": source_id, "page_size": 50})
-        hidden = run_tool(app, "list_segments", {"source_id": source_id, "visibility": "hidden", "page_size": 50})
+        hidden = run_tool(
+            app, "list_segments", {"source_id": source_id, "visibility": "hidden", "page_size": 50}
+        )
         assert target not in {r["id"] for r in visible.value["items"]}
         assert [r["id"] for r in hidden.value["items"]] == [target] and hidden.value["items"][0]["hidden"]
         assert "隐藏" in hidden.text
@@ -183,17 +205,36 @@ def test_hidden_segment_filtered_from_search(indexed):
 
 # ---------- 素材报告 ----------
 
+
 def test_source_report_structure(prepared):
     config, source_id = prepared
     app = create_app(config)
     with TestClient(app) as client:
         rest = client.get(f"/api/admin/sources/{source_id}/report").json()
         report = run_tool(app, "get_source_report", {"source_id": source_id})
-        assert set(report.value) == {"source_id", "name", "prepared", "planned_shots", "planned_moments",
-                                     "materialized", "shot_seconds", "configuration_matches", "missing_count",
-                                     "missing", "runs"}
-        for key in ("source_id", "name", "prepared", "planned_shots", "planned_moments", "materialized",
-                    "shot_seconds", "configuration_matches"):
+        assert set(report.value) == {
+            "source_id",
+            "name",
+            "prepared",
+            "planned_shots",
+            "planned_moments",
+            "materialized",
+            "shot_seconds",
+            "configuration_matches",
+            "missing_count",
+            "missing",
+            "runs",
+        }
+        for key in (
+            "source_id",
+            "name",
+            "prepared",
+            "planned_shots",
+            "planned_moments",
+            "materialized",
+            "shot_seconds",
+            "configuration_matches",
+        ):
             assert report.value[key] == rest[key], key
         stats = report.value["shot_seconds"]
         assert set(stats) == {"min", "median", "p95", "max", "under_one_second"}
@@ -209,7 +250,10 @@ def test_source_report_structure(prepared):
         store.resolve_media(segment["thumbnail"]).unlink()
         broken = run_tool(app, "get_source_report", {"source_id": source_id})
         assert broken.value["missing_count"] == 1
-        assert broken.value["missing"][0]["id"] == segment["id"] and broken.value["missing"][0]["field"] == "thumbnail"
+        assert (
+            broken.value["missing"][0]["id"] == segment["id"]
+            and broken.value["missing"][0]["field"] == "thumbnail"
+        )
         assert f"缺失文件 1 个：{segment['id']} thumbnail" in broken.text
 
         with pytest.raises(ToolError) as exc:
@@ -218,6 +262,7 @@ def test_source_report_structure(prepared):
 
 
 # ---------- GPU 锁冲突 ----------
+
 
 def test_gpu_lock_conflict_is_relayed(prepared):
     config, source_id = prepared
@@ -249,6 +294,7 @@ def test_gpu_lock_conflict_is_relayed(prepared):
 
 # ---------- 重试状态限制 ----------
 
+
 def test_retry_status_rules(prepared):
     config, source_id = prepared
     app = create_app(config, FixtureEmbedder(config))
@@ -256,10 +302,16 @@ def test_retry_status_rules(prepared):
         # 持有 GPU 锁：发布任务停在等待准入（queued），此时可以取消。
         held = gpu_held(config)
         try:
-            started = run_tool(app, "start_source_task", {"source_id": source_id, "work": "publish", "target": "shots"})
+            started = run_tool(
+                app, "start_source_task", {"source_id": source_id, "work": "publish", "target": "shots"}
+            )
             task_id = started.value["id"]
-            assert started.watch_task == {"kind": "source", "task_id": task_id, "source_id": source_id,
-                                          "work": "publish"}
+            assert started.watch_task == {
+                "kind": "source",
+                "task_id": task_id,
+                "source_id": source_id,
+                "work": "publish",
+            }
             assert started.value["status"] == "queued"
             cancelled = run_tool(app, "cancel_task", {"kind": "source", "task_id": task_id})
             assert cancelled.value["status"] == "cancelled"
@@ -284,10 +336,16 @@ def test_retry_status_rules(prepared):
 
         # 对白、人物任务按类别路由到各自的重试接口。
         store = Store(config.data_dir)
-        store.execute("INSERT INTO dialogue_tasks(id,source_id,status,config,options) VALUES('dc',?,'complete','{}','{}')",
-                      (source_id,))
-        store.execute("INSERT INTO person_tasks(id,source_id,status,config,options) VALUES('pc',?,'complete','{}','{}')",
-                      (source_id,))
+        store.execute(
+            "INSERT INTO dialogue_tasks(id,source_id,status,config,options) "
+            "VALUES('dc',?,'complete','{}','{}')",
+            (source_id,),
+        )
+        store.execute(
+            "INSERT INTO person_tasks(id,source_id,status,config,options) "
+            "VALUES('pc',?,'complete','{}','{}')",
+            (source_id,),
+        )
         with pytest.raises(ToolError) as exc:
             run_tool(app, "retry_task", {"kind": "dialogue", "task_id": "dc"})
         assert exc.value.code == "http_409" and "只有失败或中断的任务可以重试" in str(exc.value)
@@ -301,6 +359,7 @@ def test_retry_status_rules(prepared):
 
 # ---------- 运行时端到端：终态 followup ----------
 
+
 def finished_events(client, sid, timeout=60):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -313,8 +372,13 @@ def finished_events(client, sid, timeout=60):
 
 def test_start_source_task_followup_on_completion(prepared):
     config, source_id = prepared
-    llm = ScriptedLlm([[call("start_source_task", source_id=source_id, work="publish", target="shots")],
-                       [say("已提交发布任务，完成后告诉你。")], [say("发布完成，可以检索了。")]])
+    llm = ScriptedLlm(
+        [
+            [call("start_source_task", source_id=source_id, work="publish", target="shots")],
+            [say("已提交发布任务，完成后告诉你。")],
+            [say("发布完成，可以检索了。")],
+        ]
+    )
     app = create_app(config, FixtureEmbedder(config), agent_llm=llm)
     app.state.agent_runtime.watcher.interval = 0.05
     with TestClient(app) as client:
@@ -322,7 +386,9 @@ def test_start_source_task_followup_on_completion(prepared):
         send(client, sid, "把分镜发布到检索", context={"page": "admin", "source_id": source_id})
         pending = wait_pending(client, sid, "approval")
         assert pending["name"] == "start_source_task" and pending["risk"] == "danger"
-        client.post(f"/api/agent/sessions/{sid}/approvals/{pending['requestId']}", json={"outcome": "allowed-once"})
+        client.post(
+            f"/api/agent/sessions/{sid}/approvals/{pending['requestId']}", json={"outcome": "allowed-once"}
+        )
         finished_events(client, sid)
         events = wait_idle(client, sid, timeout=60)
         task_id = next(e for e in events if e["type"] == "plugin:mindex/task-watch")["data"]["task_id"]
@@ -333,8 +399,11 @@ def test_start_source_task_followup_on_completion(prepared):
     assert watch == {"kind": "source", "task_id": task_id, "source_id": source_id, "work": "publish"}
     finished = [e["data"] for e in events if e["type"] == "plugin:mindex/task-finished"]
     assert len(finished) == 1 and finished[0]["status"] == "complete" and finished[0]["task_id"] == task_id
-    followups = [e["data"]["content"][0]["text"] for e in events
-                 if e["type"] == "user/message" and e["data"]["source"]["kind"] == "followup"]
+    followups = [
+        e["data"]["content"][0]["text"]
+        for e in events
+        if e["type"] == "user/message" and e["data"]["source"]["kind"] == "followup"
+    ]
     assert len(followups) == 1
     assert f"素材任务 {task_id}（素材 {source_id}" in followups[0] and "状态：complete" in followups[0]
     # followup 触发了第二轮，模型收到了通知文本。
@@ -343,6 +412,7 @@ def test_start_source_task_followup_on_completion(prepared):
 
 
 # ---------- 上传的后缀与大小限制 ----------
+
 
 def test_upload_suffix_and_size_limits(prepared, video_file, monkeypatch):
     monkeypatch.delenv("MINDEX_WEB_TOKEN", raising=False)
@@ -353,44 +423,72 @@ def test_upload_suffix_and_size_limits(prepared, video_file, monkeypatch):
         store = Store(config.data_dir)
         # 素材：非视频内容被探测拒绝（422），不登记。
         with pytest.raises(ToolError) as exc:
-            run_tool(app, "upload_source", {"attachment": REF}, attachment=("notes.txt", b"not a video", "text/plain"))
+            run_tool(
+                app,
+                "upload_source",
+                {"attachment": REF},
+                attachment=("notes.txt", b"not a video", "text/plain"),
+            )
         assert exc.value.code == "http_422"
         assert len(store.sources()) == 1
 
         # 素材：超过 source_upload_max_bytes 返回 413，临时文件被清理。
         config.source_upload_max_bytes = 10
         with pytest.raises(ToolError) as exc:
-            run_tool(app, "upload_source", {"attachment": REF}, attachment=(video_file.name, video_file, "video/mp4"))
+            run_tool(
+                app,
+                "upload_source",
+                {"attachment": REF},
+                attachment=(video_file.name, video_file, "video/mp4"),
+            )
         assert exc.value.code == "http_413" and "上传文件过大" in str(exc.value)
         assert not list((config.data_dir / "sources" / ".uploads").iterdir())
         assert len(store.sources()) == 1
 
         # 字幕：不支持的后缀在预览阶段即拒绝（预览读取真实附件元数据）；执行时服务端 422 转述。
         for name in ("notes.txt", "subtitle", "movie.srt.mp4"):
-            ref = client.post("/api/agent/attachments", files={"file": (name, SRT, "text/plain")}).json()["id"]
+            ref = client.post("/api/agent/attachments", files={"file": (name, SRT, "text/plain")}).json()[
+                "id"
+            ]
             with pytest.raises(ToolError) as exc:
                 run_tool(app, "upload_subtitle", {"source_id": source_id, "attachment": ref}, preview=True)
             assert exc.value.code == "invalid_arguments" and "不是支持的字幕格式" in str(exc.value)
-        ref = client.post("/api/agent/attachments", files={"file": ("ep1.ASS", SRT, "text/plain")}).json()["id"]
+        ref = client.post("/api/agent/attachments", files={"file": ("ep1.ASS", SRT, "text/plain")}).json()[
+            "id"
+        ]
         preview = run_tool(app, "upload_subtitle", {"source_id": source_id, "attachment": ref}, preview=True)
         assert preview.changes[0]["after"] == "ep1.ASS"
-        from mindex.agent.tools.library_tasks import subtitle_suffix_error
+        from agent.tools.library_tasks import subtitle_suffix_error
 
         assert subtitle_suffix_error("notes.txt") and subtitle_suffix_error(None)
-        assert all(subtitle_suffix_error(f"ep1{s}") is None for s in (".srt", ".ASS", ".ssa", ".vtt", ".sub", ".smi",
-                                                                       ".sami"))
+        assert all(
+            subtitle_suffix_error(f"ep1{s}") is None
+            for s in (".srt", ".ASS", ".ssa", ".vtt", ".sub", ".smi", ".sami")
+        )
         with pytest.raises(ToolError) as exc:
-            run_tool(app, "upload_subtitle", {"source_id": source_id, "attachment": REF},
-                     attachment=("ep1.doc", SRT, "application/msword"))
+            run_tool(
+                app,
+                "upload_subtitle",
+                {"source_id": source_id, "attachment": REF},
+                attachment=("ep1.doc", SRT, "application/msword"),
+            )
         assert exc.value.code == "http_422" and "不支持的字幕文件格式" in str(exc.value)
 
         # 字幕：超过上限返回 413。
         with monkeypatch.context() as patch:
-            patch.setattr("mindex.processing.subtitle_uploads.SUBTITLE_MAX_BYTES", 10)
+            patch.setattr("processing.subtitle_uploads.SUBTITLE_MAX_BYTES", 10)
             with pytest.raises(ToolError) as exc:
-                run_tool(app, "upload_subtitle", {"source_id": source_id, "attachment": REF},
-                         attachment=("ep1.srt", SRT, "application/x-subrip"))
+                run_tool(
+                    app,
+                    "upload_subtitle",
+                    {"source_id": source_id, "attachment": REF},
+                    attachment=("ep1.srt", SRT, "application/x-subrip"),
+                )
         assert exc.value.code == "http_413" and "上传文件过大" in str(exc.value)
-        ok = run_tool(app, "upload_subtitle", {"source_id": source_id, "attachment": REF},
-                      attachment=("ep1.vtt", "WEBVTT\n\n00:00.000 --> 00:01.000\n你好\n".encode(), "text/vtt"))
+        ok = run_tool(
+            app,
+            "upload_subtitle",
+            {"source_id": source_id, "attachment": REF},
+            attachment=("ep1.vtt", "WEBVTT\n\n00:00.000 --> 00:01.000\n你好\n".encode(), "text/vtt"),
+        )
         assert len(ok.value["id"]) == 64

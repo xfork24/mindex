@@ -1,15 +1,17 @@
+"""原片帧读取与人物证据定位回归。"""
+
 from __future__ import annotations
 
 import io
 import json
 
 import pytest
-from conftest import FixtureEmbedder
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from mindex.api import create_app
-from mindex.processing.pipeline import Pipeline
+from api import create_app
+from conftest import FixtureEmbedder
+from processing.pipeline import Pipeline
 
 
 @pytest.fixture
@@ -40,7 +42,9 @@ def test_frame_returns_jpeg_with_requested_width(frame):
     largest = client.get(url, params={"t": 0.5, "width": 1024})
     assert decode(largest).width == 1024
     # 红 → 蓝 → 绿：中点画面应以绿色为主，证明确实按时间点抽帧。
-    red, green, blue = decode(client.get(url, params={"t": 5, "width": 32})).convert("RGB").resize((1, 1)).getpixel((0, 0))
+    red, green, blue = (
+        decode(client.get(url, params={"t": 5, "width": 32})).convert("RGB").resize((1, 1)).getpixel((0, 0))
+    )
     assert green > red and green > blue
 
 

@@ -8,12 +8,12 @@ chroma_server、s3 等）在后续阶段加入，经 shared/config.py 的部署�
 本地 SQLite。
 """
 
-from mindex.shared.backends.context import BackendContext, open_context
-from mindex.shared.backends.db import DatabaseConnection, RelationalDatabase
-from mindex.shared.backends.locks import FileLockProvider, LockProvider
-from mindex.shared.backends.media import LocalMediaStore, MediaObject, MediaStore
-from mindex.shared.backends.queue import InlineTaskQueue, TaskQueue, TaskReceipt
-from mindex.shared.backends.vectors import (
+from shared.backends.context import BackendContext, open_context
+from shared.backends.db import DatabaseConnection, RelationalDatabase
+from shared.backends.locks import FileLockProvider, LockProvider
+from shared.backends.media import LocalMediaStore, MediaObject, MediaStore
+from shared.backends.queue import InlineTaskQueue, TaskQueue, TaskReceipt
+from shared.backends.vectors import (
     ChromaServerVectorStores,
     LocalVectorStore,
     LocalVectorStores,

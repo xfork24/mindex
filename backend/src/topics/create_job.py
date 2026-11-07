@@ -7,7 +7,8 @@
 3. 任务目录写 ``profile.json``（档案快照），``job.json`` 写 ``topic``（卡片、档案与哈希）；
 4. 卡片置为 adopted 并记录 job_id。任一步失败删除刚建的任务目录，卡片保持原状。
 
-同步：用当前档案重写 ``profile.json`` 并更新该任务全部方案的 ``profile_hash``；已有文案按现有机制提示参数变化，
+同步：用当前档案重写 ``profile.json`` 并更新该任务全部方案的 ``profile_hash``；
+已有文案按现有机制提示参数变化，
 不自动重写。
 """
 
@@ -16,13 +17,13 @@ from __future__ import annotations
 import json
 import shutil
 
-from mindex.admin.curation import EntityNotFound
-from mindex.shared import lock_backend
-from mindex.studio import script_templates, studio
-from mindex.topics import cards as topic_cards
-from mindex.topics import items as topic_items
-from mindex.topics import profiles
-from mindex.topics.common import TopicConflict, loads, now
+from admin.curation import EntityNotFound
+from shared import lock_backend
+from studio import script_templates, studio
+from topics import cards as topic_cards
+from topics import items as topic_items
+from topics import profiles
+from topics.common import TopicConflict, loads, now
 
 PROFILE_FILE = "profile.json"
 REFERENCE_NAME = "选题来源资料"
@@ -44,8 +45,13 @@ def read_snapshot(config, job_id: str) -> dict | None:
 
 
 def write_snapshot(config, job_id: str, profile_id: str, name: str, snapshot: dict) -> dict:
-    value = {"profile_id": profile_id, "name": name, "hash": profiles.profile_hash(snapshot), "snapshot": snapshot,
-             "synced_at": now()}
+    value = {
+        "profile_id": profile_id,
+        "name": name,
+        "hash": profiles.profile_hash(snapshot),
+        "snapshot": snapshot,
+        "synced_at": now(),
+    }
     studio.save(profile_path(config, job_id), value, config=config)
     return value
 
@@ -86,7 +92,8 @@ def studio_lock(config):
 
 
 def create_from_card(config, store, card_id: str, *, force: bool = False, language: str = "zh") -> dict:
-    from mindex.studio import workspace as ws
+    # 延迟导入：保持工作区阶段处理器的注册顺序。
+    from studio import workspace as ws
 
     card = topic_cards.get_card(store, card_id)
     if card["status"] == "adopted" and not force:
@@ -99,17 +106,24 @@ def create_from_card(config, store, card_id: str, *, force: bool = False, langua
     outline = outline[: config.studio.max_input_chars]
     profiles.validate_materials(store, body)
     items = profiles.scoped_items(store, body, topic_items.items_by_id(store, card["item_ids"]))
-    state = studio.create_job(config, outline, card["title"][:60], store=store,
-                              original_input=f"来自选题：{card['title']}", language=language,
-                              options=profiles.material_state(body))
+    state = studio.create_job(
+        config,
+        outline,
+        card["title"][:60],
+        store=store,
+        original_input=f"来自选题：{card['title']}",
+        language=language,
+        options=profiles.material_state(body),
+    )
     job_id = state["id"]
     try:
         lock = studio_lock(config)
         try:
             w = ws.load(config, job_id)
             p = ws.plan(w, w["active_plan"])
-            options = ws.PlanOptions.model_validate({**p["options"], "template_id": card["template_id"],
-                                                     "canvas": body.canvas}).model_dump()
+            options = ws.PlanOptions.model_validate(
+                {**p["options"], "template_id": card["template_id"], "canvas": body.canvas}
+            ).model_dump()
             p["options"] = {**options, "references": ws.references.references(p)}
             if items or card.get("angle"):
                 ws.references.register(config, job_id, p, REFERENCE_NAME, reference_text(card, items))
@@ -117,8 +131,12 @@ def create_from_card(config, store, card_id: str, *, force: bool = False, langua
             p["profile_hash"] = saved["hash"]
             ws.persist(config, job_id, w)
             job = studio.load_job(config, job_id)
-            job["topic"] = {"card_id": card_id, "profile_id": card["profile_id"], "profile_hash": saved["hash"],
-                            "title": card["title"]}
+            job["topic"] = {
+                "card_id": card_id,
+                "profile_id": card["profile_id"],
+                "profile_hash": saved["hash"],
+                "title": card["title"],
+            }
             studio.save(studio.job_path(config, job_id), job, config=config)
         finally:
             lock.release()
@@ -127,7 +145,11 @@ def create_from_card(config, store, card_id: str, *, force: bool = False, langua
     except BaseException:
         shutil.rmtree(studio.job_dir(config, job_id), ignore_errors=True)
         raise
-    return {"job_id": job_id, "card": topic_cards.get_card(store, card_id), "job": studio.load_job(config, job_id)}
+    return {
+        "job_id": job_id,
+        "card": topic_cards.get_card(store, card_id),
+        "job": studio.load_job(config, job_id),
+    }
 
 
 # ---------------------------------------------------------------- 任务档案
@@ -138,8 +160,17 @@ def job_profile(config, store, job_id: str) -> dict:
     topic = job.get("topic")
     saved = read_snapshot(config, job_id)
     if not topic or saved is None:
-        return {"job_id": job_id, "topic": None, "snapshot": None, "hash": None, "current_hash": None,
-                "outdated": False, "profile_exists": False, "profile_name": None, "card": None}
+        return {
+            "job_id": job_id,
+            "topic": None,
+            "snapshot": None,
+            "hash": None,
+            "current_hash": None,
+            "outdated": False,
+            "profile_exists": False,
+            "profile_name": None,
+            "card": None,
+        }
     current_hash, exists, name = None, True, saved.get("name")
     try:
         current = profiles.get_profile(store, saved["profile_id"])
@@ -147,14 +178,23 @@ def job_profile(config, store, job_id: str) -> dict:
     except EntityNotFound:
         exists = False
     card_row = store.one("SELECT id,title,status FROM topic_cards WHERE id=?", (topic.get("card_id"),))
-    return {"job_id": job_id, "topic": topic, "snapshot": saved["snapshot"], "hash": saved["hash"],
-            "synced_at": saved.get("synced_at"), "current_hash": current_hash,
-            "outdated": exists and current_hash != saved["hash"], "profile_exists": exists, "profile_name": name,
-            "card": dict(card_row) if card_row else None}
+    return {
+        "job_id": job_id,
+        "topic": topic,
+        "snapshot": saved["snapshot"],
+        "hash": saved["hash"],
+        "synced_at": saved.get("synced_at"),
+        "current_hash": current_hash,
+        "outdated": exists and current_hash != saved["hash"],
+        "profile_exists": exists,
+        "profile_name": name,
+        "card": dict(card_row) if card_row else None,
+    }
 
 
 def sync_job_profile(config, store, job_id: str) -> dict:
-    from mindex.studio import workspace as ws
+    # 延迟导入：保持工作区阶段处理器的注册顺序。
+    from studio import workspace as ws
 
     view = job_profile(config, store, job_id)
     if not view["topic"]:

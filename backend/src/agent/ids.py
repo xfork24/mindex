@@ -34,20 +34,30 @@ def resolve_shot(order: list[str], ref: str) -> dict:
         return {"ref": ref, "status": "ok", "shot_id": token, "index": order.index(token) + 1}
     bare = token[5:] if token.lower().startswith("shot-") else token
     bare = bare.lower()
-    hits = [sid for sid in order
-            if sid.lower().startswith(token.lower()) or (sid.startswith("shot-") and sid[5:].lower().startswith(bare))]
+    hits = [
+        sid
+        for sid in order
+        if sid.lower().startswith(token.lower())
+        or (sid.startswith("shot-") and sid[5:].lower().startswith(bare))
+    ]
     if len(hits) == 1:
         return {"ref": ref, "status": "ok", "shot_id": hits[0], "index": order.index(hits[0]) + 1}
     if hits:
-        return {"ref": ref, "status": "ambiguous",
-                "candidates": [{"shot_id": sid, "index": order.index(sid) + 1} for sid in hits]}
+        return {
+            "ref": ref,
+            "status": "ambiguous",
+            "candidates": [{"shot_id": sid, "index": order.index(sid) + 1} for sid in hits],
+        }
     return {"ref": ref, "status": "missing", "candidates": []}
 
 
-def resolve_version(versions: dict, ref: str, *, stage: str | None = None, shot_id: str | None = None) -> dict:
+def resolve_version(
+    versions: dict, ref: str, *, stage: str | None = None, shot_id: str | None = None
+) -> dict:
     token = str(ref).strip().lower()
     hits = [
-        vid for vid, item in versions.items()
+        vid
+        for vid, item in versions.items()
         if vid.startswith(token)
         and (stage is None or item.get("stage") == stage)
         and (shot_id is None or item.get("shot_id") == shot_id)

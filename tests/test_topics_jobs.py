@@ -7,23 +7,23 @@ import json
 import time
 
 import pytest
-from conftest import FixtureWriter
 from fastapi.testclient import TestClient
-from topics_fixtures import RSS, ScriptedTopicLlm, install, topic_embedder
 from typer.testing import CliRunner
 
-from mindex import cli
-from mindex.agent.loopback import MindexClient
-from mindex.agent.registry import ToolContext, ToolError
-from mindex.agent.tools import build_registry
-from mindex.api import create_app
-from mindex.models.writer import PROFILE_HEADER, QwenWriter
-from mindex.shared import locks
-from mindex.shared.storage import Store
-from mindex.studio import script_templates as st
-from mindex.studio import studio
-from mindex.studio import workspace as ws
-from mindex.topics import create_job as topic_jobs
+import cli
+from agent.loopback import MindexClient
+from agent.registry import ToolContext, ToolError
+from agent.tools import build_registry
+from api import create_app
+from conftest import FixtureWriter
+from models.writer import PROFILE_HEADER, QwenWriter
+from shared import locks
+from shared.storage import Store
+from studio import script_templates as st
+from studio import studio
+from studio import workspace as ws
+from topics import create_job as topic_jobs
+from topics_fixtures import RSS, ScriptedTopicLlm, install, topic_embedder
 
 FEED = "https://news.example.com/feed.xml"
 
@@ -34,10 +34,21 @@ def env(config, monkeypatch):
     writer = FixtureWriter(config, vary=True)
     app = create_app(config, topic_embedder(config), writer=writer, topic_llm=ScriptedTopicLlm())
     with TestClient(app) as client:
-        pid = client.post("/api/topics/profiles", json={
-            "name": "财经号", "domain": "金融", "audience": "上班族", "positioning": "大白话", "taboos": ["不荐股"],
-            "canvas": "9:16"}).json()["id"]
-        client.post(f"/api/topics/profiles/{pid}/sources", json={"kind": "rss", "name": "要闻", "config": {"url": FEED}})
+        pid = client.post(
+            "/api/topics/profiles",
+            json={
+                "name": "财经号",
+                "domain": "金融",
+                "audience": "上班族",
+                "positioning": "大白话",
+                "taboos": ["不荐股"],
+                "canvas": "9:16",
+            },
+        ).json()["id"]
+        client.post(
+            f"/api/topics/profiles/{pid}/sources",
+            json={"kind": "rss", "name": "要闻", "config": {"url": FEED}},
+        )
         run = client.post(f"/api/topics/profiles/{pid}/runs", json={}).json()
         for _ in range(600):
             if client.get(f"/api/topics/runs/{run['id']}").json()["status"] not in ("queued", "running"):
@@ -49,8 +60,10 @@ def env(config, monkeypatch):
 
 def run_script(client, jid):
     data = client.get(f"/api/studio/jobs/{jid}/workspace").json()
-    response = client.post(f"/api/studio/jobs/{jid}/plans/{data['active_plan']}/nodes",
-                           json={"revision": data["revision"], "inputs": {}, "stage": "script", "force": True})
+    response = client.post(
+        f"/api/studio/jobs/{jid}/plans/{data['active_plan']}/nodes",
+        json={"revision": data["revision"], "inputs": {}, "stage": "script", "force": True},
+    )
     assert response.status_code == 202, response.text
     for _ in range(2000):
         data = client.get(f"/api/studio/jobs/{jid}/workspace").json()
@@ -103,6 +116,7 @@ def test_create_job_from_card(env):
 
 def test_create_job_rolls_back_on_failure(env, monkeypatch):
     config, _, client, _, _, cards = env
+
     def jobs():
         root = studio.studio_root(config)
         return {p.name for p in root.iterdir() if p.is_dir()} if root.is_dir() else set()
@@ -135,7 +149,11 @@ def test_profile_sync_and_signature(env):
     jid = client.post(f"/api/topics/cards/{cards[0]['id']}/job", json={}).json()["job_id"]
     run_script(client, jid)
     view = client.get(f"/api/topics/jobs/{jid}/profile").json()
-    assert view["outdated"] is False and view["profile_name"] == "财经号" and view["card"]["id"] == cards[0]["id"]
+    assert (
+        view["outdated"] is False
+        and view["profile_name"] == "财经号"
+        and view["card"]["id"] == cards[0]["id"]
+    )
     # 改名称与关键词不影响写作哈希；改禁区才提示已更新
     client.patch(f"/api/topics/profiles/{pid}", json={"name": "财经号2", "keywords": ["CPI"]})
     assert client.get(f"/api/topics/jobs/{jid}/profile").json()["outdated"] is False
@@ -183,7 +201,7 @@ def test_qwen_writer_profile_block(config, monkeypatch):
         seen.append(instructions)
         return "文案正文"
 
-    monkeypatch.setattr("mindex.models.writer.chat_completion", fake)
+    monkeypatch.setattr("models.writer.chat_completion", fake)
     writer = QwenWriter(config)
     template = st.builtins()["base"]
     writer.write("大纲", template=template)
@@ -222,7 +240,10 @@ def test_cli_and_agent_create_job(env, tmp_path):
             await mindex.aclose()
 
     preview, out = asyncio.run(call("create_job_from_topic", {"card_id": cards[1]["id"]}))
-    assert preview.changes[3]["after"] == "9:16" and out.focus == {"page": "studio", "job_id": out.value["job_id"]}
+    assert preview.changes[3]["after"] == "9:16" and out.focus == {
+        "page": "studio",
+        "job_id": out.value["job_id"],
+    }
     assert out.mutation["domain"] == "studio"
     _, out = asyncio.run(call("get_job_profile", {}, page={"page": "studio", "job_id": jid}))
     assert "快照与当前档案一致" in out.text

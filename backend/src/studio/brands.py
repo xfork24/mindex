@@ -21,9 +21,12 @@ from uuid import uuid4
 import yaml
 from pydantic import Field, ValidationError, model_validator
 
-from mindex.admin.curation import EntityNotFound
-from mindex.shared.config import StrictModel, fingerprint
-from mindex.studio.post_styles import OverlayStyle, SubtitleStyle
+from admin.curation import EntityNotFound
+from shared import media
+from shared.config import StrictModel, fingerprint
+from shared.images import image_png
+from studio import studio
+from studio.post_styles import OverlayStyle, SubtitleStyle
 
 BUILTIN_DIR = Path(__file__).resolve().parent / "brands"
 BUILTIN_ORDER = ("plain", "news", "tech")
@@ -130,8 +133,9 @@ class BrandOverrides(StrictModel):
 
     @property
     def empty(self) -> bool:
-        return not self.disable and all(getattr(self, key) is None for key in (
-            "subtitle", "overlay", "intro", "outro", "watermark"))
+        return not self.disable and all(
+            getattr(self, key) is None for key in ("subtitle", "overlay", "intro", "outro", "watermark")
+        )
 
 
 EFFECT_FIELDS = ("subtitle", "overlay", "intro", "outro", "watermark")
@@ -159,8 +163,10 @@ def builtins() -> dict[str, BrandTemplate]:
 
 def effect(template: BrandTemplate) -> dict:
     """影响成片的品牌内容（字幕样式、文字层样式、片头片尾、水印）。"""
-    return {key: (value.model_dump() if (value := getattr(template, key)) is not None else None)
-            for key in EFFECT_FIELDS}
+    return {
+        key: (value.model_dump() if (value := getattr(template, key)) is not None else None)
+        for key in EFFECT_FIELDS
+    }
 
 
 def content_hash(template: BrandTemplate) -> str:
@@ -225,7 +231,8 @@ def copy_brand(store, from_id: str, name: str, *, now: str) -> dict:
     row = _user_row(store, source.id)
     base_id = (row["base_id"] or source.id) if row else source.id
     template = BrandTemplate.model_validate(
-        {**source.model_dump(), "id": USER_PREFIX + uuid4().hex[:12], "name": name, "version": 1})
+        {**source.model_dump(), "id": USER_PREFIX + uuid4().hex[:12], "name": name, "version": 1}
+    )
     store.execute(
         "INSERT INTO brand_templates(id,name,base_id,body,created_at,updated_at) VALUES(?,?,?,?,?,?)",
         (template.id, template.name, base_id, _body(template), now, now),
@@ -252,14 +259,15 @@ def update_brand(config, store, brand_id: str, changes: BrandChanges, *, now: st
             require_asset(config, clip.asset)
     if content_hash(template) != content_hash(current):
         template = template.model_copy(update={"version": current.version + 1})
-    store.execute("UPDATE brand_templates SET name=?,body=?,updated_at=? WHERE id=?",
-                  (template.name, _body(template), now, brand_id))
+    store.execute(
+        "UPDATE brand_templates SET name=?,body=?,updated_at=? WHERE id=?",
+        (template.name, _body(template), now, brand_id),
+    )
     return brand_view(store, brand_id)
 
 
 def references(config, brand_id: str) -> list[dict]:
     """引用某品牌模板的方案（扫描全部创作任务的 workspace.json，只读）。"""
-    from mindex.studio import studio
 
     root = studio.studio_root(config)
     found = []
@@ -272,7 +280,9 @@ def references(config, brand_id: str) -> list[dict]:
             continue
         for plan in (w.get("plans") or {}).values():
             if (plan.get("options") or {}).get("brand_id") == brand_id:
-                found.append({"job_id": path.parent.name, "plan_id": plan.get("id"), "plan_name": plan.get("name")})
+                found.append(
+                    {"job_id": path.parent.name, "plan_id": plan.get("id"), "plan_name": plan.get("name")}
+                )
     return found
 
 
@@ -282,8 +292,11 @@ def delete_brand(config, store, brand_id: str) -> None:
     used = references(config, brand_id)
     if used:
         first = used[0]
-        raise BrandInUse(f"品牌模板正被 {len(used)} 个方案引用（如任务 {first['job_id']} 的方案「{first['plan_name']}」），"
-                         "请先为这些方案换用其他品牌模板")
+        raise BrandInUse(
+            f"品牌模板正被 {len(used)} 个方案引用（如任务 {first['job_id']} "
+            f"的方案「{first['plan_name']}」），"
+            "请先为这些方案换用其他品牌模板"
+        )
     store.execute("DELETE FROM brand_templates WHERE id=?", (brand_id,))
 
 
@@ -297,7 +310,6 @@ def asset_path(config, asset: AssetRef | dict) -> Path:
 
 def require_asset(config, asset: AssetRef | dict) -> Path:
     """定位品牌素材并复验 sha256；缺失或被改动时报错（预检阻塞、合成失败）。"""
-    from mindex.studio import studio
 
     path = asset_path(config, asset)
     sha = asset["sha256"] if isinstance(asset, dict) else asset.sha256
@@ -316,9 +328,6 @@ def digest_file(path: Path) -> str:
 
 def store_asset(config, staged: Path, suffix: str, name: str | None) -> dict:
     """校验并按内容寻址保存一个品牌素材，返回 ``AssetRef`` 视图（含时长、尺寸）。"""
-    from mindex.shared.images import image_png
-    from mindex.shared.media import probe
-    from mindex.studio import studio
 
     suffix = suffix.lower()
     if suffix not in IMAGE_SUFFIXES + VIDEO_SUFFIXES:
@@ -327,17 +336,22 @@ def store_asset(config, staged: Path, suffix: str, name: str | None) -> dict:
     info = {}
     try:
         if kind == "image":
+            # 延迟导入：保留可选依赖探测或异常捕获时的降级行为。
             from PIL import Image
 
             image_png(staged, config.video.max_pixels)
             with Image.open(staged) as image:
                 info = {"width": image.width, "height": image.height, "alpha": "A" in image.getbands()}
         else:
-            found = probe(staged)
+            found = media.probe(staged)
             if found["duration"] > MAX_BOOKEND_SECONDS + 0.05:
                 raise ValueError(f"片头片尾不能超过 {MAX_BOOKEND_SECONDS} 秒")
-            info = {"duration": found["duration"], "width": found.get("width"), "height": found.get("height"),
-                    "audio": bool(found.get("audio"))}
+            info = {
+                "duration": found["duration"],
+                "width": found.get("width"),
+                "height": found.get("height"),
+                "audio": bool(found.get("audio")),
+            }
     except studio.StudioError:
         raise
     except Exception as exc:

@@ -10,8 +10,8 @@ from pathlib import Path
 
 from charset_normalizer import from_bytes
 
-from mindex.processing.dialogue import atomic_json, extract_subtitles
-from mindex.shared.media import MediaError
+from processing.dialogue import atomic_json, extract_subtitles
+from shared.media import MediaError
 
 SUBTITLE_EXTENSIONS = {".srt", ".ass", ".ssa", ".vtt", ".sub", ".smi", ".sami"}
 SUBTITLE_MAX_BYTES = 20 * 1024 * 1024
@@ -19,7 +19,11 @@ SUBTITLE_MAX_BYTES = 20 * 1024 * 1024
 
 def decode_subtitle(payload: bytes) -> str:
     try:
-        text = payload.decode("utf-8-sig") if not payload.startswith((b"\xff\xfe", b"\xfe\xff")) else payload.decode("utf-16")
+        text = (
+            payload.decode("utf-8-sig")
+            if not payload.startswith((b"\xff\xfe", b"\xfe\xff"))
+            else payload.decode("utf-16")
+        )
         if "\x00" not in text:
             return text
     except UnicodeError:
@@ -29,8 +33,14 @@ def decode_subtitle(payload: bytes) -> str:
         text = str(guessed)
         if "\x00" not in text:
             return text
-    encodings = ("utf-16",) if payload.startswith((b"\xff\xfe", b"\xfe\xff")) else (
-        "utf-8-sig", "gb18030", "big5",
+    encodings = (
+        ("utf-16",)
+        if payload.startswith((b"\xff\xfe", b"\xfe\xff"))
+        else (
+            "utf-8-sig",
+            "gb18030",
+            "big5",
+        )
     )
     for encoding in encodings:
         try:
@@ -50,8 +60,13 @@ def parse_subtitle_file(path: Path, suffix: str, duration: float, *, fps: float 
         normalized.write_text(text, encoding="utf-8")
         try:
             input_format = "microdvd" if suffix == ".sub" and re.match(r"\s*\{\d+\}\{\d+\}", text) else None
-            rows = extract_subtitles(normalized, {"index": 0, "language": "und"}, duration,
-                                     input_format=input_format, subtitle_fps=fps)
+            rows = extract_subtitles(
+                normalized,
+                {"index": 0, "language": "und"},
+                duration,
+                input_format=input_format,
+                subtitle_fps=fps,
+            )
         except MediaError as exc:
             raise ValueError("字幕文件格式无效或不受支持，请检查字幕内容与扩展名") from exc
     if not rows:
@@ -92,7 +107,9 @@ def register_subtitle(store, source_id: str, path: Path, name: str) -> dict:
 
 
 def uploaded_subtitles(store, source_id: str) -> list[dict]:
-    paths = sorted(upload_root(store, source_id).glob("*/manifest.json"), key=lambda path: path.stat().st_mtime_ns)
+    paths = sorted(
+        upload_root(store, source_id).glob("*/manifest.json"), key=lambda path: path.stat().st_mtime_ns
+    )
     return [json.loads(path.read_text(encoding="utf-8")) for path in paths]
 
 

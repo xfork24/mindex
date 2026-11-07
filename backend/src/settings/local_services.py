@@ -1,6 +1,7 @@
 """本机模型服务管理：启停配置文件里定义的本机服务（WeMM、ASR、TTS、音乐生成等），查看状态、健康与日志。
 
-- 服务只能在配置文件 ``local_services.services`` 里定义；接口只能启停、看状态与日志、改 autostart/stop_on_exit，
+- 服务只能在配置文件 ``local_services.services`` 里定义；接口只能启停、看状态与日志、改
+autostart/stop_on_exit，
   不能修改命令、工作目录或环境变量，因此不会成为远程执行任意命令的入口。``local_services.enabled`` 为 false 时
   所有操作被拒绝（桌面版配置缺省开启）。
 - 进程以独立会话（进程组）启动，日志写入 ``data_dir/logs/services/<name>.log``；pid 文件
@@ -25,10 +26,10 @@ from pathlib import Path
 
 import httpx
 
-from mindex.settings.runtime_settings import get_setting, put_setting
-from mindex.shared import process_ops
-from mindex.shared.config import Config, LocalServiceConfig
-from mindex.shared.storage import Store
+from settings.runtime_settings import get_setting, put_setting
+from shared import process_ops
+from shared.config import Config, LocalServiceConfig
+from shared.storage import Store
 
 log = logging.getLogger(__name__)
 
@@ -78,8 +79,10 @@ class LocalServiceManager:
 
     def flags(self, service: LocalServiceConfig) -> dict:
         saved = self._saved_flags().get(service.name, {})
-        return {"autostart": bool(saved.get("autostart", service.autostart)),
-                "stop_on_exit": bool(saved.get("stop_on_exit", service.stop_on_exit))}
+        return {
+            "autostart": bool(saved.get("autostart", service.autostart)),
+            "stop_on_exit": bool(saved.get("stop_on_exit", service.stop_on_exit)),
+        }
 
     def _saved_flags(self) -> dict:
         raw = get_setting(self.store, FLAGS_KEY)
@@ -92,7 +95,10 @@ class LocalServiceManager:
     def set_flags(self, service: LocalServiceConfig, **changes) -> dict:
         with self._lock:
             saved = self._saved_flags()
-            entry = {**saved.get(service.name, {}), **{k: bool(v) for k, v in changes.items() if v is not None}}
+            entry = {
+                **saved.get(service.name, {}),
+                **{k: bool(v) for k, v in changes.items() if v is not None},
+            }
             saved[service.name] = entry
             put_setting(self.store, FLAGS_KEY, json.dumps(saved, ensure_ascii=False, sort_keys=True))
         return self.flags(service)
@@ -149,10 +155,18 @@ class LocalServiceManager:
         elif pid is None:
             detail = ""
         return {
-            "name": service.name, "label": service.label or service.name, "role": service.role,
-            "port": service.port, "health_path": service.health_path, "command": service.argv[0],
-            **self.flags(service), "running": pid is not None, "pid": pid, "healthy": healthy,
-            "external": pid is None and healthy, "detail": detail,
+            "name": service.name,
+            "label": service.label or service.name,
+            "role": service.role,
+            "port": service.port,
+            "health_path": service.health_path,
+            "command": service.argv[0],
+            **self.flags(service),
+            "running": pid is not None,
+            "pid": pid,
+            "healthy": healthy,
+            "external": pid is None and healthy,
+            "detail": detail,
         }
 
     def log_path(self, service: LocalServiceConfig) -> Path:
@@ -174,7 +188,9 @@ class LocalServiceManager:
             if self._running_pid(service) is not None:
                 return self.status(service)
             if self.healthy(service)[0]:
-                raise ServiceConflict(f"端口 {service.port} 上已有服务在运行（不是由本应用启动的），请先停止它")
+                raise ServiceConflict(
+                    f"端口 {service.port} 上已有服务在运行（不是由本应用启动的），请先停止它"
+                )
             if service.cwd and not Path(service.cwd).is_dir():
                 raise ServiceError(f"工作目录不存在：{service.cwd}")
             if _executable(service) is None:
@@ -185,19 +201,33 @@ class LocalServiceManager:
             if path.is_file() and path.stat().st_size > LOG_LIMIT:
                 path.replace(path.with_suffix(".log.1"))
             with path.open("ab") as handle:
-                handle.write(f"\n===== {datetime.now(UTC).isoformat()} 启动：{' '.join(service.argv)}\n".encode())
+                handle.write(
+                    f"\n===== {datetime.now(UTC).isoformat()} 启动：{' '.join(service.argv)}\n".encode()
+                )
                 handle.flush()
                 try:
                     child = process_ops.spawn_detached(
-                        service.argv, cwd=service.cwd or None, env={**os.environ, **service.env},
-                        stdout=handle, stderr=subprocess.STDOUT,
+                        service.argv,
+                        cwd=service.cwd or None,
+                        env={**os.environ, **service.env},
+                        stdout=handle,
+                        stderr=subprocess.STDOUT,
                     )
                 except OSError as exc:
                     raise ServiceError(f"无法启动 {service.name}：{exc}") from exc
             self._children[service.name] = child
-            self._pid_file(service.name).write_text(json.dumps(
-                {"pid": child.pid, "started": _process_start(child.pid), "argv": service.argv,
-                 "at": datetime.now(UTC).isoformat()}, ensure_ascii=False), encoding="utf-8")
+            self._pid_file(service.name).write_text(
+                json.dumps(
+                    {
+                        "pid": child.pid,
+                        "started": _process_start(child.pid),
+                        "argv": service.argv,
+                        "at": datetime.now(UTC).isoformat(),
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
         deadline = time.monotonic() + START_CHECK_SECONDS
         while time.monotonic() < deadline and child.poll() is None:
             time.sleep(0.05)
@@ -206,7 +236,9 @@ class LocalServiceManager:
                 self._children.pop(service.name, None)
                 self._pid_file(service.name).unlink(missing_ok=True)
             tail = self.log_tail(service, 20)
-            raise ServiceError(f"{service.label or service.name} 启动后立即退出（退出码 {child.returncode}）：{tail[-800:]}")
+            raise ServiceError(
+                f"{service.label or service.name} 启动后立即退出（退出码 {child.returncode}）：{tail[-800:]}"
+            )
         log.info("本机服务 %s 已启动，pid=%s", service.name, child.pid)
         return self.status(service)
 
@@ -259,16 +291,26 @@ def manager_for(store: Store) -> LocalServiceManager:
 
 def autostart_in_background(config: Config) -> threading.Thread | None:
     """``mindex serve`` 启动时在后台拉起 autostart 服务（不阻塞监听）。未开启或没有服务时不做任何事。"""
-    if config.database.backend != "sqlite" or not config.local_services.enabled or not config.local_services.services:
+    if (
+        config.database.backend != "sqlite"
+        or not config.local_services.enabled
+        or not config.local_services.services
+    ):
         return None
     manager = manager_for(Store(config.data_dir))
-    thread = threading.Thread(target=manager.autostart, args=(config,), daemon=True, name="local-services-autostart")
+    thread = threading.Thread(
+        target=manager.autostart, args=(config,), daemon=True, name="local-services-autostart"
+    )
     thread.start()
     return thread
 
 
 def stop_on_exit(config: Config) -> list[str]:
     """``mindex serve`` 退出时停止标记为退出时停止的服务。"""
-    if config.database.backend != "sqlite" or not config.local_services.enabled or not config.local_services.services:
+    if (
+        config.database.backend != "sqlite"
+        or not config.local_services.enabled
+        or not config.local_services.services
+    ):
         return []
     return manager_for(Store(config.data_dir)).stop_on_exit(config)

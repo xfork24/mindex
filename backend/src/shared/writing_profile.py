@@ -7,7 +7,7 @@ studio 因此不依赖 topics 包。
 
 from __future__ import annotations
 
-from mindex.shared.config import fingerprint
+from shared.config import fingerprint
 
 # 进入写作约束与快照哈希的字段。
 WRITING_KEYS = ("domain", "subtopics", "audience", "positioning", "taboos")

@@ -1,17 +1,28 @@
 """Timestamped CLI progress and a local-process heartbeat for long offline commands."""
+
 from __future__ import annotations
 
 import logging
 import threading
 import time
 
+from shared.logging_utils import is_application_logger
+
 log = logging.getLogger(__name__)
 
 STAGES = {
-    "starting": "初始化", "lock_wait": "获取处理锁", "analyze": "分析 moment/shot",
-    "scene_grouping": "组织连续场景", "scenes": "分析 scene", "index_wait": "等待索引写锁",
-    "index_prepare": "准备索引/校验模型", "embedding": "更新嵌入", "index_check": "校验索引",
-    "publish": "发布索引", "published": "索引已发布", "indexed": "索引已就绪",
+    "starting": "初始化",
+    "lock_wait": "获取处理锁",
+    "analyze": "分析 moment/shot",
+    "scene_grouping": "组织连续场景",
+    "scenes": "分析 scene",
+    "index_wait": "等待索引写锁",
+    "index_prepare": "准备索引/校验模型",
+    "embedding": "更新嵌入",
+    "index_check": "校验索引",
+    "publish": "发布索引",
+    "published": "索引已发布",
+    "indexed": "索引已就绪",
 }
 
 
@@ -45,7 +56,7 @@ class CommandProgress:
             def emit(self, record):
                 if record.thread != owner or record.levelno < logging.INFO:
                     return
-                if not record.name.startswith("mindex.") or record.name == __name__:
+                if not is_application_logger(record.name) or record.name == __name__:
                     return
                 lines = record.getMessage().splitlines()
                 with reporter._lock:
@@ -72,11 +83,17 @@ class CommandProgress:
         state = self._state
         fields = [STAGES.get(state.get("stage"), state.get("stage", "处理中"))]
         if state.get("source_name"):
-            fields.append(f"素材 {state.get('source_number', '?')}/{state.get('source_total', '?')} {state['source_name']} [{state.get('source_id', '')}]")
+            fields.append(
+                f"素材 {state.get('source_number', '?')}/{state.get('source_total', '?')} "
+                f"{state['source_name']} [{state.get('source_id', '')}]"
+            )
         if "completed" in state and "total" in state:
             fields.append(f"{state['completed']}/{state['total']} {state.get('unit', '')}")
         if state.get("kind"):
-            fields.append(f"{state['kind']} {state.get('start', 0):.2f}–{state.get('end', 0):.2f}s [{state.get('segment_id', '')}]")
+            fields.append(
+                f"{state['kind']} {state.get('start', 0):.2f}–{state.get('end', 0):.2f}s "
+                f"[{state.get('segment_id', '')}]"
+            )
         if state.get("skipped"):
             fields.append(f"已跳过 {state['skipped']}")
         if state.get("index_id"):
@@ -90,8 +107,14 @@ class CommandProgress:
             now = time.monotonic()
             text, latest = self._describe(), self._latest
             elapsed, idle = duration(now - self._started), duration(now - self._changed)
-        log.info("%s 进程心跳 · 总用时 %s · %s · 距最近工作日志/进度 %s · 最近：%s",
-                 self.name, elapsed, text, idle, latest)
+        log.info(
+            "%s 进程心跳 · 总用时 %s · %s · 距最近工作日志/进度 %s · 最近：%s",
+            self.name,
+            elapsed,
+            text,
+            idle,
+            latest,
+        )
 
     def _heartbeat(self):
         while not self._stop.wait(self.interval):
@@ -107,6 +130,12 @@ class CommandProgress:
         else:
             with self._lock:
                 current = self._describe()
-            log.error("%s %s · 总用时 %s · %s · %s；已写入的检查点保留，可重试继续",
-                      self.name, "已中断" if issubclass(exc_type, KeyboardInterrupt) else "失败", elapsed, current, exc)
+            log.error(
+                "%s %s · 总用时 %s · %s · %s；已写入的检查点保留，可重试继续",
+                self.name,
+                "已中断" if issubclass(exc_type, KeyboardInterrupt) else "失败",
+                elapsed,
+                current,
+                exc,
+            )
         return False

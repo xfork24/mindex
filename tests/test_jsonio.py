@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
+import io
 import json
 import threading
 
 import pytest
+from fastapi import HTTPException
+from starlette.datastructures import UploadFile
 
-from mindex.shared import jsonio
-from mindex.studio import studio
+from shared import jsonio
+from studio import studio
 
 
 def test_concurrent_writes_to_same_file_stay_valid(tmp_path):
@@ -75,13 +79,8 @@ def test_failed_write_removes_temporary_and_keeps_old_content(tmp_path, monkeypa
 
 
 def test_save_upload_removes_partial_file_on_failure(tmp_path):
-    import asyncio
-    import io
 
-    from fastapi import HTTPException
-    from starlette.datastructures import UploadFile
-
-    from mindex.shared.uploads import save_upload
+    from shared.uploads import save_upload
 
     target = tmp_path / "upload.bin"
     with pytest.raises(HTTPException) as too_big:

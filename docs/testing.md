@@ -15,6 +15,7 @@ uv run pytest tests/test_pipeline.py::test_name   # 单个测试
 - 推送、PR 和默认手动触发：静态检查、两个常规回归分片和三平台桌面冒烟。
 - 每晚或手动启用 `full`：额外运行媒体三片、备份两片；每个测试 job 上限 20 分钟。手动启用 `package` 才构建三平台安装包；代码完整回归不再自动重复打包。
 - `slow` 用例及依赖 `video_file` 的集成测试进入媒体组；备份文件和备份行为优先进入备份组；其余离线用例进入常规组。PG/S3/Chroma 环境门控用例交给 `scaling.yml` 真实后端专项。
+- 集群后端验收与 CI 是独立工作流，可以同时运行。`scripts/verify-scaling.py` 按 Python 语法识别外部后端标记与环境门控，核对专项是否漏收测试，不把分组规则测试中的示例字符串当作后端依赖。预检失败仍会在 `artifacts/scaling/` 下保存诊断报告，供工作流上传。
 - 分组在 `tests/ci_selection.py` 定义，历史模块平均耗时 `tests/ci-durations.json` 只用于均衡分片，不控制用例去留。新测试没有时间记录时仍会执行。`--ci-plan` 可保存实际选择清单。
 - 首次失败立即输出；常规组单用例上限 120 秒，媒体/备份为 240 秒，超时输出线程栈。每个分片保存选择清单、JUnit、日志与最慢 15 项；不再等全部测试结束才看到首个失败。
 - UI 回归需要 Node.js 与 Playwright；桌面外壳纯逻辑用 `node --test desktop/test`，Electron 冒烟用 `tests/desktop_smoke.cjs`。

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """静态检查业务数据库构造边界；允许项均为本地入口、暂存库或底层实现。"""
+
 from __future__ import annotations
 
 import ast
@@ -34,8 +35,13 @@ def violations(root=ROOT / "backend/src"):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         stores, sqlite, raw_connects = set(), set(), set()
         for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom) and node.module == "mindex.shared.storage":
-                stores.update(item.asname or item.name for item in node.names if item.name in {"Store", "PgStore"})
+            if isinstance(node, ast.ImportFrom) and node.module in {
+                "shared.storage",
+                "mindex.shared.storage",
+            }:
+                stores.update(
+                    item.asname or item.name for item in node.names if item.name in {"Store", "PgStore"}
+                )
             if isinstance(node, ast.Import):
                 sqlite.update(item.asname or item.name for item in node.names if item.name == "sqlite3")
             if isinstance(node, ast.ImportFrom) and node.module == "sqlite3":
@@ -44,10 +50,17 @@ def violations(root=ROOT / "backend/src"):
             if not isinstance(node, ast.Call):
                 continue
             if isinstance(node.func, ast.Name) and node.func.id in stores and relative not in LOCAL_STORES:
-                errors.append(f"{relative}:{node.lineno}：业务入口直构 {node.func.id}；请使用 Store.open(config)")
-            raw = (isinstance(node.func, ast.Name) and node.func.id in raw_connects or
-                   isinstance(node.func, ast.Attribute) and node.func.attr == "connect" and
-                   isinstance(node.func.value, ast.Name) and node.func.value.id in sqlite)
+                errors.append(
+                    f"{relative}:{node.lineno}：业务入口直构 {node.func.id}；请使用 Store.open(config)"
+                )
+            raw = (
+                isinstance(node.func, ast.Name)
+                and node.func.id in raw_connects
+                or isinstance(node.func, ast.Attribute)
+                and node.func.attr == "connect"
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id in sqlite
+            )
             if raw and relative not in RAW_SQLITE:
                 errors.append(f"{relative}:{node.lineno}：未登记的 SQLite 直连")
     return errors

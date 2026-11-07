@@ -36,7 +36,10 @@ def main() -> int:
     current = TARGET.read_text(encoding="utf-8") if TARGET.exists() else None
     if args.check:
         if current != expected:
-            print("messages.js 与 messages.json 不一致，请运行 python scripts/build-messages.py", file=sys.stderr)
+            print(
+                "messages.js 与 messages.json 不一致，请运行 python scripts/build-messages.py",
+                file=sys.stderr,
+            )
             return 1
         print("messages.js 与 messages.json 一致")
         return 0

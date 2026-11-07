@@ -13,7 +13,7 @@ import random
 
 import pytest
 
-from mindex.shared.backends.vectors import ChromaServerVectorStores as ServerStores
+from shared.backends.vectors import ChromaServerVectorStores as ServerStores
 
 pytestmark = pytest.mark.requires_chroma_server
 
@@ -24,7 +24,7 @@ URL = os.environ.get("MINDEX_TEST_CHROMA_SERVER", "")
 def server():
     if not URL:
         pytest.skip("需要 MINDEX_TEST_CHROMA_SERVER（独立 Chroma 服务）")
-    from mindex.shared.config import ChromaServerConfig
+    from shared.config import ChromaServerConfig
 
     return ServerStores(ChromaServerConfig(url=URL, token_env="MINDEX_TEST_CHROMA_TOKEN_UNUSED"))
 
@@ -35,8 +35,13 @@ def test_server_store_roundtrip_and_query(server):
     assert store.count() == 0
     rng = random.Random(3)
     entries = [
-        (f"rep{j}", [rng.random() for _ in range(8)],
-         {"id": f"seg{j}", "source_id": "src", "kind": "shot"}, "visual", f"doc{j}")
+        (
+            f"rep{j}",
+            [rng.random() for _ in range(8)],
+            {"id": f"seg{j}", "source_id": "src", "kind": "shot"},
+            "visual",
+            f"doc{j}",
+        )
         for j in range(6)
     ]
     store.upsert_many(entries)
@@ -59,24 +64,26 @@ def test_server_store_roundtrip_and_query(server):
 def test_http_client_shared_per_url_token(monkeypatch):
     import chromadb
 
-    from mindex.shared.backends.vectors import chroma_http_client
-    from mindex.shared.config import ChromaServerConfig
+    from shared.backends.vectors import chroma_http_client
+    from shared.config import ChromaServerConfig
 
     section = ChromaServerConfig(url=URL or "http://127.0.0.1:59999", token_env="MINDEX_NO_TOKEN")
     monkeypatch.delenv("MINDEX_NO_TOKEN", raising=False)
     calls = []
+
     def client(**kwargs):
         calls.append(kwargs)
         return object()
+
     monkeypatch.setattr(chromadb, "HttpClient", client)
-    monkeypatch.setattr("mindex.shared.backends.vectors._HTTP_CLIENTS", {})
+    monkeypatch.setattr("shared.backends.vectors._HTTP_CLIENTS", {})
     assert chroma_http_client(section) is chroma_http_client(section)  # 进程内共享
     assert len(calls) == 1
 
 
 def test_chroma_server_requires_postgres(tmp_path):
-    from mindex.shared.backends import open_context
-    from mindex.shared.config import Config
+    from shared.backends import open_context
+    from shared.config import Config
 
     config = Config(data_dir=tmp_path / "data", vector={"backend": "chroma_server"})
     with pytest.raises(RuntimeError, match="postgres"):

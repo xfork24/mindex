@@ -1,47 +1,67 @@
 """人物库的 SQLite 表结构、迁移与实体规范化。
 
-放在 shared 层，使 `Store` 的 v1 迁移（`storage.METADATA_STEPS`）不必依赖 persons 包；人物业务逻辑仍在 `persons/persons.py`。
+放在 shared 层，使 `Store` 的 v1 迁移（`storage.METADATA_STEPS`）不必依赖 persons 包；人物业务逻辑仍在
+`persons/persons.py`。
 """
 
 from __future__ import annotations
 
 import json
 
-from mindex.shared.config import fingerprint
-from mindex.shared.migrations import execute_script
-from mindex.shared.storage import dumps
+from shared.config import fingerprint
+from shared.migrations import execute_script
+from shared.storage import dumps
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS person_entities(id TEXT PRIMARY KEY, kind TEXT NOT NULL, data TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS person_sources(source_id TEXT PRIMARY KEY REFERENCES sources(id), work_id TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS person_references(id TEXT PRIMARY KEY, actor_id TEXT NOT NULL, stage_id TEXT,
- path TEXT NOT NULL, digest TEXT NOT NULL, data TEXT NOT NULL, role_id TEXT);
-CREATE TABLE IF NOT EXISTS person_imports(id TEXT PRIMARY KEY, data TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'draft');
-CREATE TABLE IF NOT EXISTS person_features(id TEXT PRIMARY KEY, source_id TEXT, space TEXT NOT NULL,
- kind TEXT NOT NULL, data TEXT NOT NULL);
-CREATE INDEX IF NOT EXISTS person_features_source ON person_features(source_id,kind,space);
-CREATE TABLE IF NOT EXISTS person_evidence(id TEXT PRIMARY KEY, source_id TEXT NOT NULL,
- shot_id TEXT NOT NULL, actor_id TEXT, role_id TEXT, stage_id TEXT, start REAL NOT NULL, end REAL NOT NULL,
- status TEXT NOT NULL, data TEXT NOT NULL);
-CREATE INDEX IF NOT EXISTS person_evidence_source ON person_evidence(source_id,status,start,end);
-CREATE INDEX IF NOT EXISTS person_evidence_shot ON person_evidence(source_id,shot_id);
--- 出镜审核列表只需要证据行的少数 JSON 字段。data 平均近 7 KB（含 body_feature），读它会触发溢出页 I/O，
--- 这个覆盖索引让审核列表的状态聚合与排名完全不读 data 列。
-CREATE INDEX IF NOT EXISTS person_evidence_review ON person_evidence(
- source_id,shot_id,status,actor_id,role_id,start,id,
- json_extract(data,'$.confirmation'),json_extract(data,'$.shot_excluded'),
- json_type(data,'$.score'),json_extract(data,'$.score'),json_extract(data,'$.reviewed_at'));
-CREATE TABLE IF NOT EXISTS person_coverage(source_id TEXT NOT NULL, cache_id TEXT PRIMARY KEY, data TEXT NOT NULL);
-CREATE INDEX IF NOT EXISTS person_coverage_shot
- ON person_coverage(source_id,json_extract(data,'$.shot_id'));
-CREATE TABLE IF NOT EXISTS person_tasks(id TEXT PRIMARY KEY, source_id TEXT NOT NULL, status TEXT NOT NULL,
- config TEXT NOT NULL, options TEXT NOT NULL, progress TEXT NOT NULL DEFAULT '{}', error TEXT, result TEXT,
- created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
-CREATE TABLE IF NOT EXISTS person_versions(id TEXT PRIMARY KEY, data TEXT NOT NULL,
- created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
-CREATE TABLE IF NOT EXISTS search_releases(id TEXT PRIMARY KEY, content_id TEXT NOT NULL,
- person_id TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
-"""
+SCHEMA = (
+    "\n"
+    "CREATE TABLE IF NOT EXISTS person_entities(id TEXT PRIMARY KEY, kind TEXT NOT "
+    "NULL, data TEXT NOT NULL);\n"
+    "CREATE TABLE IF NOT EXISTS person_sources(source_id TEXT PRIMARY KEY "
+    "REFERENCES sources(id), work_id TEXT NOT NULL);\n"
+    "CREATE TABLE IF NOT EXISTS person_references(id TEXT PRIMARY KEY, actor_id "
+    "TEXT NOT NULL, stage_id TEXT,\n"
+    " path TEXT NOT NULL, digest TEXT NOT NULL, data TEXT NOT NULL, role_id TEXT);\n"
+    "CREATE TABLE IF NOT EXISTS person_imports(id TEXT PRIMARY KEY, data TEXT NOT "
+    "NULL, status TEXT NOT NULL DEFAULT 'draft');\n"
+    "CREATE TABLE IF NOT EXISTS person_features(id TEXT PRIMARY KEY, source_id "
+    "TEXT, space TEXT NOT NULL,\n"
+    " kind TEXT NOT NULL, data TEXT NOT NULL);\n"
+    "CREATE INDEX IF NOT EXISTS person_features_source ON "
+    "person_features(source_id,kind,space);\n"
+    "CREATE TABLE IF NOT EXISTS person_evidence(id TEXT PRIMARY KEY, source_id "
+    "TEXT NOT NULL,\n"
+    " shot_id TEXT NOT NULL, actor_id TEXT, role_id TEXT, stage_id TEXT, start "
+    "REAL NOT NULL, end REAL NOT NULL,\n"
+    " status TEXT NOT NULL, data TEXT NOT NULL);\n"
+    "CREATE INDEX IF NOT EXISTS person_evidence_source ON "
+    "person_evidence(source_id,status,start,end);\n"
+    "CREATE INDEX IF NOT EXISTS person_evidence_shot ON "
+    "person_evidence(source_id,shot_id);\n"
+    "-- 出镜审核列表只需要证据行的少数 JSON 字段。data 平均近 7 KB（含 "
+    "body_feature），读它会触发溢出页 I/O，\n"
+    "-- 这个覆盖索引让审核列表的状态聚合与排名完全不读 data 列。\n"
+    "CREATE INDEX IF NOT EXISTS person_evidence_review ON person_evidence(\n"
+    " source_id,shot_id,status,actor_id,role_id,start,id,\n"
+    " json_extract(data,'$.confirmation'),json_extract(data,'$.shot_excluded'),\n"
+    " json_type(data,'$.score'),json_extract(data,'$.score')"
+    ",json_extract(data,'$.reviewed_at'));\n"
+    "CREATE TABLE IF NOT EXISTS person_coverage(source_id TEXT NOT NULL, cache_id "
+    "TEXT PRIMARY KEY, data TEXT NOT NULL);\n"
+    "CREATE INDEX IF NOT EXISTS person_coverage_shot\n"
+    " ON person_coverage(source_id,json_extract(data,'$.shot_id'));\n"
+    "CREATE TABLE IF NOT EXISTS person_tasks(id TEXT PRIMARY KEY, source_id TEXT "
+    "NOT NULL, status TEXT NOT NULL,\n"
+    " config TEXT NOT NULL, options TEXT NOT NULL, progress TEXT NOT NULL DEFAULT "
+    "'{}', error TEXT, result TEXT,\n"
+    " created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL "
+    "DEFAULT CURRENT_TIMESTAMP);\n"
+    "CREATE TABLE IF NOT EXISTS person_versions(id TEXT PRIMARY KEY, data TEXT NOT "
+    "NULL,\n"
+    " created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);\n"
+    "CREATE TABLE IF NOT EXISTS search_releases(id TEXT PRIMARY KEY, content_id "
+    "TEXT NOT NULL,\n"
+    " person_id TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);\n"
+)
 
 
 def init_person_schema(db):
@@ -71,7 +91,8 @@ def init_person_schema(db):
             ),
         )
     db.execute(
-        "UPDATE person_evidence SET role_id=COALESCE(stage_id,role_id),stage_id=NULL WHERE stage_id IS NOT NULL"
+        "UPDATE person_evidence SET role_id=COALESCE(stage_id,role_id),stage_id=NULL WHERE stage_id IS NOT "
+        "NULL"
     )
     db.execute("UPDATE person_references SET stage_id=NULL WHERE stage_id IS NOT NULL")
     db.execute("INSERT INTO settings(key,value) VALUES(?, 'complete')", (marker,))
@@ -92,15 +113,25 @@ def migrate_actor_only_evidence(db):
     for row in db.execute(
         "SELECT source_id,shot_id,MIN(start) AS start,MAX(end) AS end, "
         "MAX(status='accepted' AND COALESCE(json_extract(data,'$.confirmation'),'')='shot_review') "
-        "AS removed_confirmation FROM person_evidence WHERE "
-        + predicate + " GROUP BY source_id,shot_id"
+        "AS removed_confirmation FROM person_evidence WHERE " + predicate + " GROUP BY source_id,shot_id"
     ).fetchall():
         key = fingerprint([marker, row["source_id"], row["shot_id"]])
-        db.execute("INSERT OR IGNORE INTO person_coverage VALUES(?,?,?)", (
-            row["source_id"], key, dumps({"shot_id": row["shot_id"], "start": row["start"],
-                                        "end": row["end"], "migration": marker,
-                                        "removed_confirmation": bool(row["removed_confirmation"])}),
-        ))
+        db.execute(
+            "INSERT OR IGNORE INTO person_coverage VALUES(?,?,?)",
+            (
+                row["source_id"],
+                key,
+                dumps(
+                    {
+                        "shot_id": row["shot_id"],
+                        "start": row["start"],
+                        "end": row["end"],
+                        "migration": marker,
+                        "removed_confirmation": bool(row["removed_confirmation"]),
+                    }
+                ),
+            ),
+        )
     db.execute("DELETE FROM person_evidence WHERE " + predicate)
     db.execute("INSERT INTO settings(key,value) VALUES(?, 'complete')", (marker,))
 

@@ -1,10 +1,12 @@
+"""创作任务标题与标题更新回归。"""
+
 import time
 
 from fastapi.testclient import TestClient
 
-from mindex.api import create_app
-from mindex.models import adapters
-from mindex.studio import studio
+from api import create_app
+from models import adapters
+from studio import studio
 
 
 def _await_title(config, job_id, timeout=5.0):
@@ -52,9 +54,9 @@ def test_create_generates_title_with_configured_generator(config, monkeypatch):
 
 def test_bad_generated_title_keeps_placeholder(config, monkeypatch):
     # 生成服务返回空标题时，创建不再失败：占位标题继续可用，任务照常建立。
-    monkeypatch.setattr(adapters, "request", lambda *a, **kw: {
-        "choices": [{"message": {"content": '{"title":"  "}'}}]
-    })
+    monkeypatch.setattr(
+        adapters, "request", lambda *a, **kw: {"choices": [{"message": {"content": '{"title":"  "}'}}]}
+    )
     response = TestClient(create_app(config)).post("/api/studio/jobs", json={"text": "视频文案"})
     assert response.status_code == 201, response.text
     job_id = response.json()["id"]

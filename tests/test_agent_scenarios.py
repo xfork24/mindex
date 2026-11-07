@@ -6,10 +6,10 @@
 from __future__ import annotations
 
 import pytest
-from agent_scenarios import SCENARIOS, drive, prepare
 from fastapi.testclient import TestClient
 
-from mindex.agent.llm.scripted import ScriptedLlm
+from agent.llm.scripted import ScriptedLlm
+from agent_scenarios import SCENARIOS, drive, prepare
 
 pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
 
@@ -28,6 +28,8 @@ def test_scenario(config, video_file, monkeypatch, scenario):
     llm = ScriptedLlm(scenario.script(world))
     with TestClient(world.app(llm)) as client:
         events = drive(client, scenario, world)
-        assert events[-1]["type"] == "turn/end" and events[-1]["data"]["reason"]["kind"] == "completed", events[-1]
+        assert events[-1]["type"] == "turn/end" and events[-1]["data"]["reason"]["kind"] == "completed", (
+            events[-1]
+        )
         scenario.check(world, client, events)
     assert not llm.script, f"脚本未用完：{llm.script}"

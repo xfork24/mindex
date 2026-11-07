@@ -9,16 +9,16 @@ import hashlib
 from pathlib import Path
 
 import pytest
-from conftest import FixtureAnalyzer, FixtureEmbedder
 from fastapi.testclient import TestClient
 from filelock import FileLock
 
-from mindex.admin.curation import CurationPatch, Library
-from mindex.api import create_app
-from mindex.processing.indexing import IndexBuilder
-from mindex.processing.pipeline import Pipeline
-from mindex.studio import studio
-from mindex.studio.material_digest import EMPTY_BUDGET, EMPTY_INDEX, EMPTY_SEGMENTS, build_digest
+from admin.curation import CurationPatch, Library
+from api import create_app
+from conftest import FixtureAnalyzer, FixtureEmbedder
+from processing.indexing import IndexBuilder
+from processing.pipeline import Pipeline
+from studio import studio
+from studio.material_digest import EMPTY_BUDGET, EMPTY_INDEX, EMPTY_SEGMENTS, build_digest
 
 pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
 

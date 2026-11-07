@@ -3,21 +3,23 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import json
+import pkgutil
 
 import pytest
-from conftest import legacy_job
 from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
-from mindex import cli
-from mindex.agent.ids import resolve_shot, resolve_version, short
-from mindex.agent.loopback import MindexClient
-from mindex.agent.registry import NAME_PATTERN, ToolContext, ToolError
-from mindex.agent.tools import build_registry
-from mindex.api import create_app
-from mindex.studio import studio
-from mindex.studio import workspace as ws
+import cli
+from agent.ids import resolve_shot, resolve_version, short
+from agent.loopback import MindexClient
+from agent.registry import NAME_PATTERN, ToolContext, ToolError
+from agent.tools import build_registry
+from api import create_app
+from conftest import legacy_job
+from studio import studio
+from studio import workspace as ws
 
 SHOTS = ["shot-a1daad59aa", "shot-925281d5bb", "shot-925281d6cc"]
 
@@ -28,9 +30,16 @@ def board(config):
     w = ws.load(config, job_id)
     p = ws.plan(w, w["active_plan"])
     texts = ["红色开场。", "蓝色中段。", "绿色结尾。"]
-    ws.set_board(config, job_id, w, p, [
-        studio.Shot(id=sid, text=text, query=text[:2], estimated_seconds=1.5) for sid, text in zip(SHOTS, texts)
-    ])
+    ws.set_board(
+        config,
+        job_id,
+        w,
+        p,
+        [
+            studio.Shot(id=sid, text=text, query=text[:2], estimated_seconds=1.5)
+            for sid, text in zip(SHOTS, texts)
+        ],
+    )
     p["board_script"] = p["script"]
     ws.persist(config, job_id, w)
     return job_id
@@ -52,10 +61,8 @@ def run_tool(app, name, arguments, page=None):
 
 def module_spec_count() -> int:
     """各工具模块 ``specs()`` 的总数（自动发现 mindex.agent.tools 下声明了 specs 的模块）。"""
-    import importlib
-    import pkgutil
 
-    from mindex.agent import tools as package
+    from agent import tools as package
 
     total = 0
     for info in pkgutil.iter_modules(package.__path__):
@@ -71,7 +78,9 @@ def test_registry_names_and_schemas():
     assert len(registry) == len(registry.all()) == module_spec_count()
     shot_details = [s for s in registry.all() if s.name == "get_shot_details"]
     assert len(shot_details) == 1
-    assert shot_details[0].domain == "studio" and shot_details[0].risk == "read" and shot_details[0].mcp is True
+    assert (
+        shot_details[0].domain == "studio" and shot_details[0].risk == "read" and shot_details[0].mcp is True
+    )
     for spec in registry.all():
         assert NAME_PATTERN.match(spec.name) and len(f"mcp__mindex__{spec.name}") <= 64
         schema = spec.schema()
@@ -82,9 +91,9 @@ def test_registry_names_and_schemas():
 
 
 def test_registry_domain_filter_and_domain_tools():
-    from mindex.agent.domains import DOMAIN_INFO, PAGE_DOMAIN
-    from mindex.agent.registry import ToolSpec
-    from mindex.shared.agent_domains import AGENT_DOMAINS, LOADABLE_DOMAINS
+    from agent.domains import DOMAIN_INFO, PAGE_DOMAIN
+    from agent.registry import ToolSpec
+    from shared.agent_domains import AGENT_DOMAINS, LOADABLE_DOMAINS
 
     assert LOADABLE_DOMAINS == AGENT_DOMAINS[1:] and "meta" not in LOADABLE_DOMAINS
     assert set(DOMAIN_INFO) == set(LOADABLE_DOMAINS)
@@ -92,8 +101,14 @@ def test_registry_domain_filter_and_domain_tools():
     registry = build_registry()
     spec = registry.all()[0]
     with pytest.raises(ValueError):
-        ToolSpec(name="x", domain="unknown", description="", input_model=spec.input_model,
-                 risk="read", execute=spec.execute)
+        ToolSpec(
+            name="x",
+            domain="unknown",
+            description="",
+            input_model=spec.input_model,
+            risk="read",
+            execute=spec.execute,
+        )
     grouped = registry.domain_tools()
     assert sorted(n for names in grouped.values() for n in names) == sorted(s.name for s in registry.all())
     for domain, names in grouped.items():
@@ -124,7 +139,10 @@ def test_id_resolution():
     ambiguous = resolve_shot(SHOTS, "925281d")
     assert ambiguous["status"] == "ambiguous" and len(ambiguous["candidates"]) == 2
     assert resolve_shot(SHOTS, "ffff")["status"] == "missing"
-    versions = {"abcdef12" + "0" * 24: {"stage": "tts", "shot_id": "x"}, "abcdef13" + "0" * 24: {"stage": "recall"}}
+    versions = {
+        "abcdef12" + "0" * 24: {"stage": "tts", "shot_id": "x"},
+        "abcdef13" + "0" * 24: {"stage": "recall"},
+    }
     assert resolve_version(versions, "abcdef1")["status"] == "ambiguous"
     assert resolve_version(versions, "abcdef1", stage="tts")["status"] == "ok"
     assert short("shot-a1daad59aa") == "shot-a1daad59" and short("a" * 32) == "a" * 8
@@ -156,8 +174,10 @@ def test_studio_read_tools(config, board):
     text = summary.render()
     assert "shot-a1daad59" in text and SHOTS[0] in text and "revision=" in text
     assert summary.value["shots"][1]["shot_id"] == SHOTS[1]
-    assert summary.value["plan"]["revision"] == TestClient(app).get(
-        f"/api/studio/jobs/{board}/workspace").json()["revision"]
+    assert (
+        summary.value["plan"]["revision"]
+        == TestClient(app).get(f"/api/studio/jobs/{board}/workspace").json()["revision"]
+    )
 
     resolved = run_tool(app, "resolve_shots", {"job_id": board, "refs": ["a1daad59", "925281d", "#3"]})
     statuses = [r["status"] for r in resolved.value["results"]]
@@ -185,18 +205,26 @@ TRUNCATION_NOTE = "（旁白与画面意象截断到 60 字、查询截断到 30
 
 def test_system_prompt_requires_reading_full_narration():
     """Validates: Requirements 6.1, 6.6"""
-    from mindex.agent.prompts import SYSTEM_PROMPT
+    from agent.prompts import SYSTEM_PROMPT
 
     assert "get_shot_details" in SYSTEM_PROMPT
-    for phrase in ["拆分（split）", "合并（merge）", "update 修改旁白（text）", "完整旁白",
-                   "截断摘要", "get_workspace_summary", "resolve_shots", "按顺序切分",
-                   "重新调用 get_shot_details 读取当前旁白后再提交"]:
+    for phrase in [
+        "拆分（split）",
+        "合并（merge）",
+        "update 修改旁白（text）",
+        "完整旁白",
+        "截断摘要",
+        "get_workspace_summary",
+        "resolve_shots",
+        "按顺序切分",
+        "重新调用 get_shot_details 读取当前旁白后再提交",
+    ]:
         assert phrase in SYSTEM_PROMPT, phrase
 
 
 def test_tool_descriptions_mention_truncation_and_detail_tool():
     """Validates: Requirements 6.2, 6.3"""
-    from mindex.agent.tools.studio_write import ShotOperation
+    from agent.tools.studio_write import ShotOperation
 
     registry = build_registry()
     summary = registry.get("get_workspace_summary").description
@@ -210,9 +238,13 @@ def test_tool_descriptions_mention_truncation_and_detail_tool():
 
 def test_board_text_truncation_note(config, board):
     """Validates: Requirements 6.2"""
-    from mindex.agent.tools.common import PlanView, board_text
+    from agent.tools.common import PlanView, board_text
 
-    data = TestClient(create_app(config)).get(f"/api/studio/jobs/{board}/workspace", params={"compact": "true"}).json()
+    data = (
+        TestClient(create_app(config))
+        .get(f"/api/studio/jobs/{board}/workspace", params={"compact": "true"})
+        .json()
+    )
     text = board_text(PlanView(data))
     assert "get_shot_details" in text
     assert text.splitlines()[-1] == TRUNCATION_NOTE

@@ -29,6 +29,7 @@ Mindex 定位为 **one-stop video creation agent**（一站式视频创作智能
 | 新增或修改界面文案 | [界面文案与多语言](i18n.md) | [前端结构](frontend.md#资源版本) |
 | 了解鉴权（访问令牌、MCP 令牌、桌面注入） | [Web/API 访问鉴权](web-auth.md) | — |
 | 写测试、跑回归、更新快照 | [测试约定](testing.md) | — |
+| 统一代码风格、理解导入例外与检查工具 | [代码规范与检查](code-style.md) | [代理开发约定](../AGENT.md) |
 | 了解锁、迁移与后台任务机制 | [共享基础设施](shared-infrastructure.md) | [架构](architecture.md) |
 | 标注评测查询 | [评测标注说明](../eval/README.md) | [e2e 实验框架](e2e-framework.md) |
 | 了解后续规划与最近一次审查 | [功能路线图](../plans/roadmap.md) | [审查报告](#审查报告) |

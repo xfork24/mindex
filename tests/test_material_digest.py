@@ -12,7 +12,7 @@ import copy
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from mindex.studio.material_digest import (
+from studio.material_digest import (
     MIN_SOURCE_CHARS,
     SKIP_LABELS,
     STORY_ITEM_CHARS,

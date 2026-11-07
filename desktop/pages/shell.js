@@ -13,10 +13,14 @@
   text("message", params.get("message"));
   document.getElementById("spinner").hidden = error;
   const detail = params.get("detail");
-  if (detail) text("detail", detail).hidden = false;
+  if (detail) {
+    text("detail", detail).hidden = false;
+  }
   if (error) {
     document.getElementById("actions").hidden = false;
-    for (const id of ["retry", "logs", "quit"]) text(id, params.get(id));
+    for (const id of ["retry", "logs", "quit"]) {
+      text(id, params.get(id));
+    }
     document.getElementById("retry").focus();
   }
   document.querySelectorAll("[data-command]").forEach((button) => {

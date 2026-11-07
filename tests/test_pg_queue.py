@@ -10,11 +10,12 @@ from __future__ import annotations
 import os
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from mindex.shared.db.pg_backend import PgBackend
-from mindex.shared.db.queue_pg import PgTaskQueue
+from shared.db.pg_backend import PgBackend
+from shared.db.queue_pg import PgTaskQueue
 
 pytestmark = pytest.mark.requires_postgres
 
@@ -27,7 +28,7 @@ def queue():
         pytest.skip("需要 MINDEX_TEST_POSTGRES_DSN")
     import psycopg
 
-    from mindex.shared.db.migrate_pg import migrate_pg
+    from shared.db.migrate_pg import migrate_pg
 
     with psycopg.connect(DSN, autocommit=True) as conn:
         conn.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
@@ -89,6 +90,72 @@ def test_only_holder_can_complete_and_stale_attempt_rejected(queue, backend):
         with pytest.raises(RuntimeError, match="旧 worker"):
             queue.fail(db, first, "stale worker")
         assert queue.complete(db, reclaimed)  # 新持有者正常完成
+
+
+def test_paused_fenced_transaction_cannot_block_takeover(queue, backend):
+    """旧进程停在持共享行锁的事务内时，PG 自行终止空闲事务，接管不依赖旧进程恢复。"""
+    from shared.db.fencing import Attempt, ExecutionFence
+    from shared.db.locks_pg import LeaseLost
+
+    _enqueue(queue, backend)
+    with backend.connect() as db:
+        first = queue.claim(db, "paused-worker", ["source"], ttl=1)
+    attempt = Attempt(backend, backend.library_id, first, threading.Event(), threading.Event())
+    stop = threading.Event()
+    reclaimed = None
+
+    def takeover():
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and not stop.is_set():
+            with backend.connect() as db:
+                task = queue.claim(db, "new-worker", ["source"])
+            if task is not None:
+                return task
+            stop.wait(0.05)
+        return None
+
+    try:
+        with ThreadPoolExecutor(max_workers=1) as executor, pytest.raises(LeaseLost):
+            with backend.connect(execution=ExecutionFence(attempt)) as db:
+                db.execute("INSERT INTO settings(key,value) VALUES('idle-fence-rollback','old-worker')")
+                # 模拟 SIGSTOP：旧连接保持打开且不发送任何 SQL，新 worker 必须能独立接管。
+                reclaimed = executor.submit(takeover).result(timeout=6)
+                assert reclaimed is not None, "暂停事务持有的行锁阻止了到期回收"
+                assert reclaimed.owner == "new-worker" and reclaimed.fencing_token > first.fencing_token
+                db.execute("INSERT INTO settings(key,value) VALUES('idle-fence-late','stale')")
+    finally:
+        stop.set()
+        attempt.close()
+    assert attempt.lost.is_set()
+    with backend.connect() as db:
+        assert db.execute("SELECT 1 FROM settings WHERE key LIKE ?", ("idle-fence-%",)).fetchone() is None
+        assert not queue.complete(db, first)
+        assert queue.complete(db, reclaimed)
+
+
+def test_fence_idle_timeout_does_not_leak_to_next_transaction(queue, backend):
+    from shared.db.fencing import Attempt, ExecutionFence
+
+    _enqueue(queue, backend)
+    with backend.connect() as db:
+        original = db.execute(
+            "SELECT setting FROM pg_settings WHERE name='idle_in_transaction_session_timeout'"
+        ).fetchone()[0]
+        task = queue.claim(db, "worker", ["source"], ttl=10)
+    attempt = Attempt(backend, backend.library_id, task, threading.Event(), threading.Event())
+    try:
+        with backend.connect(execution=ExecutionFence(attempt)) as db:
+            timeout = db.execute(
+                "SELECT setting FROM pg_settings WHERE name='idle_in_transaction_session_timeout'"
+            ).fetchone()[0]
+            assert 0 < int(timeout) <= 10_000
+        with backend.connect() as db:
+            restored = db.execute(
+                "SELECT setting FROM pg_settings WHERE name='idle_in_transaction_session_timeout'"
+            ).fetchone()[0]
+            assert restored == original
+    finally:
+        attempt.close()
 
 
 def test_expiry_reclaims_and_requeues(queue, backend):

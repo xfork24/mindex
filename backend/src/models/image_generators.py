@@ -14,18 +14,15 @@
 from __future__ import annotations
 
 import base64
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from mindex.models import adapters
-from mindex.models.adapters import ModelError
-from mindex.models.video_generators import (
-    MINIMAX_AUTH,
-    _error_body,
-    _redact_images,
-    data_url,
-)
-from mindex.shared.config import Config
+from models import adapters
+from models.adapters import ModelError
+from models.video_generators import MINIMAX_AUTH, ComfyUIVideoGenerator, _error_body, _redact_images, data_url
+from shared.comfyui import IMAGE_MAPPING_FIELDS
+from shared.config import Config
 
 IMAGE_RATIOS = ("1:1", "16:9", "4:3", "3:2", "2:3", "3:4", "9:16", "21:9")
 
@@ -81,9 +78,15 @@ class MiniMaxImageGenerator:
 
     def _call(self, body: dict, *, attempts: int = 3) -> dict:
         try:
-            payload = adapters.request("POST", self._url(), timeout=self.profile.timeout,
-                                       headers=self.profile.headers(), json=body, audit=_redact_images(body),
-                                       attempts=attempts)
+            payload = adapters.request(
+                "POST",
+                self._url(),
+                timeout=self.profile.timeout,
+                headers=self.profile.headers(),
+                json=body,
+                audit=_redact_images(body),
+                attempts=attempts,
+            )
         except ModelError as exc:
             status, error = _error_body(exc)
             code = (error.get("base_resp") or {}).get("status_code")
@@ -95,8 +98,14 @@ class MiniMaxImageGenerator:
         return payload
 
     def request_body(self, request: ImageRequest) -> dict:
-        body = {"model": self.profile.model, "prompt": request.prompt, "aspect_ratio": request.aspect_ratio,
-                "response_format": "base64", "n": 1, "prompt_optimizer": request.prompt_optimizer}
+        body = {
+            "model": self.profile.model,
+            "prompt": request.prompt,
+            "aspect_ratio": request.aspect_ratio,
+            "response_format": "base64",
+            "n": 1,
+            "prompt_optimizer": request.prompt_optimizer,
+        }
         if request.seed is not None:
             body["seed"] = request.seed
         if request.reference is not None:
@@ -121,15 +130,21 @@ class MiniMaxImageGenerator:
             raise ModelError("MiniMax 图片生成返回的图片无法解码") from exc
 
     def health(self) -> dict:
-        return minimax_health(self._url(), self.profile, {"model": self.profile.model},
-                              "鉴权通过：图片生成接口可用（未生成图片）", "图片生成")
+        return minimax_health(
+            self._url(),
+            self.profile,
+            {"model": self.profile.model},
+            "鉴权通过：图片生成接口可用（未生成图片）",
+            "图片生成",
+        )
 
 
 def minimax_health(url: str, profile, body: dict, reply: str, noun: str) -> dict:
     """不计费的鉴权探测：发送缺少必填参数的请求，只有鉴权类错误（401/403、1004/2049）与网络不可达判为失败。"""
     try:
-        payload = adapters.request("POST", url, timeout=profile.timeout, headers=profile.headers(),
-                                   json=body, attempts=1)
+        payload = adapters.request(
+            "POST", url, timeout=profile.timeout, headers=profile.headers(), json=body, attempts=1
+        )
     except ModelError as exc:
         status, error = _error_body(exc)
         code = int((error.get("base_resp") or {}).get("status_code") or 0)
@@ -149,8 +164,6 @@ class ComfyUIImageGenerator:
     完成后从历史记录取第一张输出图片。"""
 
     def __init__(self, config: Config):
-        from mindex.models.video_generators import ComfyUIVideoGenerator
-        from mindex.shared.comfyui import IMAGE_MAPPING_FIELDS
 
         class Runner(ComfyUIVideoGenerator):
             label, noun, role = "ComfyUI 图片生成", "图片", "图片生成"
@@ -162,13 +175,19 @@ class ComfyUIImageGenerator:
         self.runner = Runner(config, self.profile)
 
     def generate(self, request: ImageRequest) -> bytes:
-        import tempfile
 
         mapping = self.profile.comfyui_mapping or {}
         if request.reference is not None and "image" not in mapping:
-            raise ModelError("分镜带有主体参考图，但 ComfyUI 节点映射没有 image 字段；请映射加载图片节点的 image 输入")
-        values = {"prompt": request.prompt, "negative": request.negative_prompt, "seed": request.seed,
-                  "width": request.width, "height": request.height}
+            raise ModelError(
+                "分镜带有主体参考图，但 ComfyUI 节点映射没有 image 字段；请映射加载图片节点的 image 输入"
+            )
+        values = {
+            "prompt": request.prompt,
+            "negative": request.negative_prompt,
+            "seed": request.seed,
+            "width": request.width,
+            "height": request.height,
+        }
         if request.reference is not None:
             values["image"] = self.runner._upload(request.reference)
         with tempfile.TemporaryDirectory(prefix="comfyui-image-") as directory:

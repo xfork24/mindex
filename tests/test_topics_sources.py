@@ -8,20 +8,20 @@ import json
 import httpx
 import pytest
 from fastapi.testclient import TestClient
-from topics_fixtures import ATOM, PUB_1, PUB_2, RDF, RSS, XXE, analyzed_library, install
 from typer.testing import CliRunner
 
-from mindex import cli
-from mindex.agent.loopback import MindexClient
-from mindex.agent.registry import ToolContext
-from mindex.agent.tools import build_registry
-from mindex.api import create_app
-from mindex.shared.storage import Store
-from mindex.topics import datasources, items, profiles
-from mindex.topics.models import ProfileBody
-from mindex.topics.sources import base
-from mindex.topics.sources.base import Item, SourceError
-from mindex.topics.sources.rss import parse_feed
+import cli
+from agent.loopback import MindexClient
+from agent.registry import ToolContext
+from agent.tools import build_registry
+from api import create_app
+from shared.storage import Store
+from topics import datasources, items, profiles
+from topics.models import ProfileBody
+from topics.sources import base
+from topics.sources.base import Item, SourceError
+from topics.sources.rss import parse_feed
+from topics_fixtures import ATOM, PUB_1, PUB_2, RDF, RSS, XXE, analyzed_library, install
 
 FEED = "https://news.example.com/feed.xml"
 
@@ -42,7 +42,9 @@ def test_parse_rss_atom_rdf():
     assert rss[0].summary == "央行今日宣布下调政策利率，市场反应积极。"
     assert rss[0].published_at == PUB_1.isoformat() and rss[1].published_at == PUB_2.isoformat()
     atom = parse_feed(ATOM)
-    assert atom[0].url == "https://tech.example.com/chip" and atom[0].published_at.startswith("2026-10-24T09:30:00")
+    assert atom[0].url == "https://tech.example.com/chip" and atom[0].published_at.startswith(
+        "2026-10-24T09:30:00"
+    )
     rdf = parse_feed(RDF)
     assert rdf[0].title == "考古新发现" and rdf[0].url == "https://history.example.com/x"
     assert len(parse_feed(RSS, limit=1)) == 1
@@ -56,12 +58,17 @@ def test_parse_rss_atom_rdf():
 
 def test_http_limits(config, monkeypatch):
     config.topics.fetch.max_bytes = 2048
-    install(monkeypatch, {
-        "https://big.example.com/": b"x" * 5000,
-        "https://slow.example.com/": lambda request: (_ for _ in ()).throw(httpx.ReadTimeout("slow")),
-        "https://redirect.example.com/": httpx.Response(302, headers={"location": "https://news.example.com/ok"}),
-        "https://news.example.com/ok": b"ok",
-    })
+    install(
+        monkeypatch,
+        {
+            "https://big.example.com/": b"x" * 5000,
+            "https://slow.example.com/": lambda request: (_ for _ in ()).throw(httpx.ReadTimeout("slow")),
+            "https://redirect.example.com/": httpx.Response(
+                302, headers={"location": "https://news.example.com/ok"}
+            ),
+            "https://news.example.com/ok": b"ok",
+        },
+    )
     with pytest.raises(SourceError, match="超过 2 KB"):
         base.http_get(config, "https://big.example.com/")
     with pytest.raises(SourceError, match="超时"):
@@ -90,8 +97,10 @@ def test_dedup_keys_and_store(config):
     # 过期清理：未被卡片引用的旧条目删除，被引用的保留
     store.execute("UPDATE topic_items SET fetched_at='2020-01-01T00:00:00+00:00'")
     kept = listed[0]["id"]
-    store.execute("INSERT INTO topic_cards(id,profile_id,title,body,created_at,updated_at) VALUES(?,?,?,?,?,?)",
-                  ("tc_000000000001", pid, "题", json.dumps({"item_ids": [kept]}), "t", "t"))
+    store.execute(
+        "INSERT INTO topic_cards(id,profile_id,title,body,created_at,updated_at) VALUES(?,?,?,?,?,?)",
+        ("tc_000000000001", pid, "题", json.dumps({"item_ids": [kept]}), "t", "t"),
+    )
     assert items.purge(store, pid, 30) == 1
     assert [i["id"] for i in items.list_items(store, pid)] == [kept]
 
@@ -103,17 +112,28 @@ def test_source_rest_crud_test_and_fetch(client, monkeypatch):
     assert listed["items"] == [] and {"rss", "local"} <= {k["kind"] for k in listed["kinds"]}
     bad = client.post(f"/api/topics/profiles/{pid}/sources", json={"kind": "rss", "name": "x", "config": {}})
     assert bad.status_code == 422 and "配置无效" in bad.json()["detail"]
-    assert client.post(f"/api/topics/profiles/{pid}/sources",
-                       json={"kind": "rss", "name": "x", "config": {"url": "ftp://x"}}).status_code == 422
-    rss = client.post(f"/api/topics/profiles/{pid}/sources",
-                      json={"kind": "rss", "name": "财经要闻", "config": {"url": FEED}, "secret": "sk-1234567890"})
+    assert (
+        client.post(
+            f"/api/topics/profiles/{pid}/sources",
+            json={"kind": "rss", "name": "x", "config": {"url": "ftp://x"}},
+        ).status_code
+        == 422
+    )
+    rss = client.post(
+        f"/api/topics/profiles/{pid}/sources",
+        json={"kind": "rss", "name": "财经要闻", "config": {"url": FEED}, "secret": "sk-1234567890"},
+    )
     assert rss.status_code == 201, rss.text
     source = rss.json()
     assert source["has_secret"] and source["secret_mask"] == "••••7890" and "sk-" not in json.dumps(source)
-    atom = client.post(f"/api/topics/profiles/{pid}/sources",
-                       json={"kind": "rss", "name": "科技", "config": {"url": "https://tech.example.com/atom"}}).json()
-    broken = client.post(f"/api/topics/profiles/{pid}/sources",
-                         json={"kind": "rss", "name": "坏地址", "config": {"url": "https://down.example.com/"}}).json()
+    atom = client.post(
+        f"/api/topics/profiles/{pid}/sources",
+        json={"kind": "rss", "name": "科技", "config": {"url": "https://tech.example.com/atom"}},
+    ).json()
+    broken = client.post(
+        f"/api/topics/profiles/{pid}/sources",
+        json={"kind": "rss", "name": "坏地址", "config": {"url": "https://down.example.com/"}},
+    ).json()
     # 试抓：不入库
     tried = client.post(f"/api/topics/sources/{source['id']}/test").json()
     assert tried["ok"] and tried["count"] == 2 and tried["items"][0]["title"].startswith("央行")
@@ -132,7 +152,10 @@ def test_source_rest_crud_test_and_fetch(client, monkeypatch):
     only = client.post(f"/api/topics/profiles/{pid}/fetch", params={"source_id": atom["id"]}).json()
     assert only["new"] == 1 and [s["name"] for s in only["sources"]] == ["科技"]
     assert len(client.get(f"/api/topics/profiles/{pid}/items").json()["items"]) == 3
-    assert client.post(f"/api/topics/profiles/{pid}/fetch", params={"source_id": "ts_000000000000"}).status_code == 404
+    assert (
+        client.post(f"/api/topics/profiles/{pid}/fetch", params={"source_id": "ts_000000000000"}).status_code
+        == 404
+    )
     # 修改：config 整体替换、空串清除密钥、不能改类型
     patched = client.patch(f"/api/topics/sources/{source['id']}", json={"secret": ""}).json()
     assert not patched["has_secret"]
@@ -155,7 +178,9 @@ def test_local_source_without_and_with_library(config, video_file):
     result = datasources.fetch_profile(config, store, pid)
     assert result["new"] == 1
     assert datasources.fetch_profile(config, store, pid)["new"] == 0  # 本地素材按素材 ID 去重
-    disabled = datasources.update_source(store, local["id"], datasources.SourceChanges(config={"library": False}))
+    disabled = datasources.update_source(
+        store, local["id"], datasources.SourceChanges(config={"library": False})
+    )
     assert disabled["config"] == {"library": False}
     assert datasources.try_source(config, store, local["id"])["count"] == 0
 
@@ -166,10 +191,29 @@ def test_cli_sources_and_fetch(config, tmp_path, monkeypatch):
     yaml_path.write_text(f"data_dir: {config.data_dir}\n", encoding="utf-8")
     runner = CliRunner()
     base_args = ["--config", str(yaml_path), "topics"]
-    pid = json.loads(runner.invoke(cli.app, [*base_args, "profiles", "create", "--name", "财经", "--domain", "金融"]).output)["id"]
+    pid = json.loads(
+        runner.invoke(
+            cli.app, [*base_args, "profiles", "create", "--name", "财经", "--domain", "金融"]
+        ).output
+    )["id"]
     monkeypatch.setenv("TOPIC_TEST_KEY", "secret-abcdefgh")
-    added = runner.invoke(cli.app, [*base_args, "sources", "add", pid, "--kind", "rss", "--name", "要闻", "--url", FEED,
-                                    "--secret-env", "TOPIC_TEST_KEY"])
+    added = runner.invoke(
+        cli.app,
+        [
+            *base_args,
+            "sources",
+            "add",
+            pid,
+            "--kind",
+            "rss",
+            "--name",
+            "要闻",
+            "--url",
+            FEED,
+            "--secret-env",
+            "TOPIC_TEST_KEY",
+        ],
+    )
     assert added.exit_code == 0, added.output
     source = json.loads(added.output)
     assert source["secret_mask"] == "••••efgh" and "secret-abc" not in added.output
@@ -179,9 +223,13 @@ def test_cli_sources_and_fetch(config, tmp_path, monkeypatch):
     assert fetched["new"] == 2
     listed = json.loads(runner.invoke(cli.app, [*base_args, "items", pid, "--limit", "1"]).output)
     assert len(listed["items"]) == 1
-    updated = runner.invoke(cli.app, [*base_args, "sources", "update", source["id"], "--disable", "--clear-secret"])
+    updated = runner.invoke(
+        cli.app, [*base_args, "sources", "update", source["id"], "--disable", "--clear-secret"]
+    )
     assert updated.exit_code == 0 and not json.loads(updated.output)["enabled"]
-    bad = runner.invoke(cli.app, [*base_args, "sources", "add", pid, "--kind", "rss", "--name", "坏", "--url", "ftp://x"])
+    bad = runner.invoke(
+        cli.app, [*base_args, "sources", "add", pid, "--kind", "rss", "--name", "坏", "--url", "ftp://x"]
+    )
     assert bad.exit_code == 1 and "配置无效" in bad.output
     assert runner.invoke(cli.app, [*base_args, "sources", "remove", source["id"]]).exit_code != 0
     assert runner.invoke(cli.app, [*base_args, "sources", "remove", source["id"], "--yes"]).exit_code == 0
@@ -210,8 +258,11 @@ def test_agent_source_tools(config, monkeypatch):
     app = create_app(config)
     _, out = run_tool(app, "save_topic_profile", {"name": "财经号", "domain": "金融"})
     pid = out.value["id"]
-    preview, out = run_tool(app, "save_topic_source", {"topic_profile_id": pid, "kind": "rss", "name": "要闻",
-                                                       "config": {"url": FEED}})
+    preview, out = run_tool(
+        app,
+        "save_topic_source",
+        {"topic_profile_id": pid, "kind": "rss", "name": "要闻", "config": {"url": FEED}},
+    )
     assert preview.summary == "新建数据源" and preview.warnings
     sid = out.value["id"]
     assert out.mutation == {"domain": "topics", "profile_id": pid} and out.focus["section"] == "sources"

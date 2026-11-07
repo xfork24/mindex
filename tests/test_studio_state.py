@@ -1,21 +1,22 @@
+"""创作任务状态、方案与版本持久化回归。"""
+
 from __future__ import annotations
 
 import json
 
 import pytest
-from conftest import legacy_job
 from filelock import FileLock
 
-from mindex.admin.curation import EntityNotFound
-from mindex.shared.config import RenderConfig, SelectionConfig
-from mindex.studio import studio
-from mindex.studio.studio import Shot, Storyboard
+from admin.curation import EntityNotFound
+from conftest import legacy_job
+from shared.config import RenderConfig, SelectionConfig
+from studio import studio
+from studio.studio import Shot, Storyboard
 
 
 def complete(config, job_id, step, result=None):
     studio.begin_step(config, job_id, step)
     studio.complete_step(config, job_id, step, result or {})
-
 
 
 def job_options_with_default_delivery(state):
@@ -82,7 +83,12 @@ def test_create_job_options_override_defaults(config):
         "带选项的文案。",
         options={"audio_mode": "ducking", "recall_limit": 10, "burn": False, "voice": "Ethan"},
     )
-    assert job_options_with_default_delivery(state) == {"voice": "Ethan", "audio_mode": "ducking", "recall_limit": 10, "burn": False}
+    assert job_options_with_default_delivery(state) == {
+        "voice": "Ethan",
+        "audio_mode": "ducking",
+        "recall_limit": 10,
+        "burn": False,
+    }
     with pytest.raises(studio.StudioError):
         studio.create_job(config, "非法选项。", options={"audio_mode": "invalid"})
 

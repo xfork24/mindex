@@ -36,6 +36,7 @@ def main():
         parser.add_argument("--" + name, required=True)
     args = parser.parse_args()
     os.environ["CUDA_VISIBLE_DEVICES"] = ""
+    # 延迟导入：独立模型或扩展功能使用可选依赖，仅在实际调用时加载。
     import torch
     from huggingface_hub import snapshot_download
     from huggingface_hub.errors import LocalEntryNotFoundError
@@ -68,7 +69,8 @@ def main():
                     "revision": args.revision,
                 },
                 ensure_ascii=False,
-            ), encoding="utf-8"
+            ),
+            encoding="utf-8",
         )
         temporary.replace(target)
     finally:

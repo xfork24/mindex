@@ -1,6 +1,7 @@
 /* 创作页 · 任务列表与切换、召回与音色目录、素材范围、任务元信息与素材摘要。按 studio.html 中的顺序以经典脚本加载，顶层声明共享全局作用域。 */
 "use strict";
-let createSourceSelection = null, createGroupLink = null;
+let createSourceSelection = null;
+let createGroupLink = null;
 async function loadJobs() {
   const data = await api("/api/studio/jobs");
   state.jobs = data.items;
@@ -9,9 +10,7 @@ async function loadJobs() {
   for (const job of data.items) {
     const b = button(job.title, () => selectJob(job.id));
     b.className = `job-item${job.id === state.id ? " active" : ""}`;
-    b.append(
-      el("div", MindexI18n.date(new Date(job.created_at), false), "job-sub")
-    );
+    b.append(el("div", MindexI18n.date(new Date(job.created_at), false), "job-sub"));
     list.append(b);
   }
   // 标题后台生成：有待生成任务时轻量轮询刷新，完成后自动替换占位标题。
@@ -39,58 +38,95 @@ async function selectJob(id, { reloadJobs = true } = {}) {
   state.persons = state.inputs = state.materialDigest = null; // 素材摘要在 renderJobMeta 中按任务重新获取
   history.replaceState(null, "", `/?job=${id}`);
   closeDialog();
-  loadRecallOptions().catch((error) => notice(MindexI18n.msg("ui.867f562167d6", { p0: error.message }), true));
+  loadRecallOptions().catch((error) =>
+    notice(MindexI18n.msg("ui.867f562167d6", { p0: error.message }), true),
+  );
   try {
     await refresh();
   } catch (error) {
     // 旧任务步骤执行期间工作台被锁（409）：改为显示执行状态与“取消执行”。
-    if (id === state.id && await legacyRunView(id)) {
-      if (reloadJobs) loadJobs().catch(fail);
+    if (id === state.id && (await legacyRunView(id))) {
+      if (reloadJobs) {
+        loadJobs().catch(fail);
+      }
       return;
     }
     throw error;
   }
-  if (id !== state.id) return;
-  if (reloadJobs) loadJobs().catch(fail);
+  if (id !== state.id) {
+    return;
+  }
+  if (reloadJobs) {
+    loadJobs().catch(fail);
+  }
   loadArtifacts().catch(fail);
 }
-let recallCatalogue = null, recallCatalogueTime = 0, recallCatalogueRequest = null;
+let recallCatalogue = null;
+let recallCatalogueTime = 0;
+let recallCatalogueRequest = null;
 async function loadCatalogue() {
-  if (recallCatalogue && Date.now() - recallCatalogueTime < 15000) return recallCatalogue;
+  if (recallCatalogue && Date.now() - recallCatalogueTime < 15000) {
+    return recallCatalogue;
+  }
   if (!recallCatalogueRequest) {
-    recallCatalogueRequest = api("/api/persons/filters").then((data) => {
-      recallCatalogue = data;recallCatalogueTime = Date.now();return data;
-    }).finally(() => {recallCatalogueRequest = null;});
+    recallCatalogueRequest = api("/api/persons/filters")
+      .then((data) => {
+        recallCatalogue = data;
+        recallCatalogueTime = Date.now();
+        return data;
+      })
+      .finally(() => {
+        recallCatalogueRequest = null;
+      });
   }
   return recallCatalogueRequest;
 }
 // 音色目录需要实时查询 TTS 服务，开销大；短 TTL 缓存 + 合并在途请求，避免每次开“方案参数”都阻塞一次往返。
-let voiceCatalogue = null, voiceCatalogueTime = 0, voiceCatalogueRequest = null;
+let voiceCatalogue = null;
+let voiceCatalogueTime = 0;
+let voiceCatalogueRequest = null;
 function loadVoiceCatalogue({ fresh = false } = {}) {
-  if (!fresh && voiceCatalogue && Date.now() - voiceCatalogueTime < 30000)
+  if (!fresh && voiceCatalogue && Date.now() - voiceCatalogueTime < 30000) {
     return Promise.resolve(voiceCatalogue);
+  }
   if (!voiceCatalogueRequest) {
-    voiceCatalogueRequest = api("/api/settings/voices/catalog").then((data) => {
-      voiceCatalogue = data;voiceCatalogueTime = Date.now();return data;
-    }).finally(() => {voiceCatalogueRequest = null;});
+    voiceCatalogueRequest = api("/api/settings/voices/catalog")
+      .then((data) => {
+        voiceCatalogue = data;
+        voiceCatalogueTime = Date.now();
+        return data;
+      })
+      .finally(() => {
+        voiceCatalogueRequest = null;
+      });
   }
   return voiceCatalogueRequest;
 }
 async function loadRecallOptions() {
   const id = state.id;
   const persons = await loadCatalogue();
-  if (id !== state.id) return;
+  if (id !== state.id) {
+    return;
+  }
   state.persons = persons.entities;
   state.personSources = persons.sources;
   applySources(persons.sources);
   invalidatePanel();
-  if (state.data) renderMatrix();
+  if (state.data) {
+    renderMatrix();
+  }
 }
 // Shared by the creation form and per-shot recall editors.
 function applySources(sources) {
   state.sources = sources;
-  if (createGroupLink) void createGroupLink.refresh(); else fillCreateSources();
-  if (state.data) renderJobMeta();
+  if (createGroupLink) {
+    void createGroupLink.refresh();
+  } else {
+    fillCreateSources();
+  }
+  if (state.data) {
+    renderJobMeta();
+  }
 }
 async function loadSources() {
   const catalogue = await loadCatalogue();
@@ -99,8 +135,17 @@ async function loadSources() {
 }
 function fillCreateSources(sources = state.sources || [], chosen = null) {
   const select = $("create-sources");
-  if (!select) return;
-  fillAllSelect(select, sources, chosen || new Set(createSourceSelection === null ? sources.map((item) => item.id) : createSourceSelection));
+  if (!select) {
+    return;
+  }
+  fillAllSelect(
+    select,
+    sources,
+    chosen ||
+      new Set(
+        createSourceSelection === null ? sources.map((item) => item.id) : createSourceSelection,
+      ),
+  );
   select.disabled = sources.length === 0;
   $("create-sources-empty").hidden = sources.length > 0;
   MindexI18n.setText($("create-sources-empty"), MindexI18n.msg("ui.groups_no_sources"));
@@ -108,14 +153,20 @@ function fillCreateSources(sources = state.sources || [], chosen = null) {
 // 创建时选中的素材；全选等价于「不限」，因此不传 source_ids。
 function createSourceScope() {
   // 自动联动展示的全选不是额外的手动限制；保留组 ID 即可保证不会扩大到全库。
-  if (createSourceSelection === null) return null;
+  if (createSourceSelection === null) {
+    return null;
+  }
   const sources = state.sources || [];
-  return createSourceSelection.length === sources.length && !createGroups.values().length ? null : [...createSourceSelection];
+  return createSourceSelection.length === sources.length && !createGroups.values().length
+    ? null
+    : [...createSourceSelection];
 }
 // 任务级素材范围：null 表示不限。逐镜编辑器只能在这个范围内二次选择。
 function jobScope() {
   const effective = state.data?.material_scope;
-  if (effective) return effective.source_ids === null ? null : new Set(effective.source_ids);
+  if (effective) {
+    return effective.source_ids === null ? null : new Set(effective.source_ids);
+  }
   const ids = state.data?.job?.source_ids;
   return ids?.length ? new Set(ids) : null;
 }
@@ -132,51 +183,96 @@ function sourceName(id, fallback) {
 // 任务元信息只读：只摊开创建后不可变的输入（文案、素材范围）；
 // 音轨/字幕/召回数量属于方案参数，可在方案参数里动态调整，不在此重复展示。
 function renderJobMeta() {
-  const job = state.data.job, body = $("job-meta-body");
+  const job = state.data.job;
+  const body = $("job-meta-body");
   // 新任务显示用户的原始输入（智能助手创建时为用户原话；视频大纲在下方“文案创作”里显示）；
   // 早于原始输入字段的任务没有原话，退回显示大纲。老任务的 input_text 就是创建时填写的文案。
   const legacyText = !job.outline && job.input_text;
   const effectiveSources = state.data.material_scope?.source_ids ?? job.source_ids;
-  const materialNames = (effectiveSources ?? (state.sources || []).map((s) => s.id)).map(sourceName).join("\n");
+  const materialNames = (effectiveSources ?? (state.sources || []).map((s) => s.id))
+    .map(sourceName)
+    .join("\n");
   const rows = [
     // 原始输入/文案保留非空行，素材列表独占整行并逐项展示。
-    [legacyText ? "ui.7407393d52c7" : "ui.job_original_input_label",
-    (job.original_input || job.outline || job.input_text || "").split(/\r?\n/).filter((line) => line.trim()).join("\n"), true],
+    [
+      legacyText ? "ui.7407393d52c7" : "ui.job_original_input_label",
+      (job.original_input || job.outline || job.input_text || "")
+        .split(/\r?\n/)
+        .filter((line) => line.trim())
+        .join("\n"),
+      true,
+    ],
     ["ui.84e3802f60a7", MindexI18n.date(job.created_at)],
-    ["ui.f711792f098b", materialNames || MindexI18n.msg(effectiveSources?.length === 0 ? "ui.groups_no_sources" : "ui.0a9eab1a4d36"), true]
+    [
+      "ui.f711792f098b",
+      materialNames ||
+        MindexI18n.msg(effectiveSources?.length === 0 ? "ui.groups_no_sources" : "ui.0a9eab1a4d36"),
+      true,
+    ],
   ];
   body.replaceChildren();
   for (const [label, value, wide] of rows) {
-    const row = el("div", undefined, wide ? "job-meta-row wide" : "job-meta-row"),
-      term = el("dt", MindexI18n.msg(label)),
-      detail = el("dd", value == null ? "—" : String(value));
+    const row = el("div", undefined, wide ? "job-meta-row wide" : "job-meta-row");
+    const term = el("dt", MindexI18n.msg(label));
+    const detail = el("dd", value == null ? "—" : String(value));
     row.append(term, detail);
     body.append(row);
   }
-  if (state.data.material_scope?.error) body.append(el("p", MindexI18n.system(state.data.material_scope.error), "source-warning"));
-  const digestMatches = state.materialDigest?.jobId === job.id && state.materialDigest.language === MindexI18n.language
-    && state.materialDigest.scopeKey === materialDigestScopeKey();
+  if (state.data.material_scope?.error) {
+    body.append(el("p", MindexI18n.system(state.data.material_scope.error), "source-warning"));
+  }
+  const digestMatches =
+    state.materialDigest?.jobId === job.id &&
+    state.materialDigest.language === MindexI18n.language &&
+    state.materialDigest.scopeKey === materialDigestScopeKey();
   body.append(materialDigestNode(digestMatches ? state.materialDigest : null));
-  if (!digestMatches) void loadMaterialDigest(job.id);
+  if (!digestMatches) {
+    void loadMaterialDigest(job.id);
+  }
 }
 // 可用素材摘要：只读预览，按任务缓存；切换任务或构建结束刷新工作台时重新获取。
 // 接口返回的为空原因是固定的中文取值，界面按条目翻译，不直接显示原文。
 const DIGEST_EMPTY_REASON = {
   "预算为 0": "ui.material_digest_empty_budget",
   "无生效索引": "ui.material_digest_empty_index",
-  "无已分析镜头": "ui.material_digest_empty_segments"
+  "无已分析镜头": "ui.material_digest_empty_segments",
 };
-function materialDigestScopeKey() { return JSON.stringify(state.data?.material_scope || null); }
+function materialDigestScopeKey() {
+  return JSON.stringify(state.data?.material_scope || null);
+}
 function loadMaterialDigest(jobId, { fresh = false } = {}) {
   const cached = state.materialDigest;
-  if (!fresh && cached?.jobId === jobId && cached.language === MindexI18n.language && cached.scopeKey === materialDigestScopeKey()) return cached.request;
-  const entry = { jobId, scopeKey: materialDigestScopeKey(), language: MindexI18n.language, status: "loading", data: null, open: cached?.jobId === jobId && cached.open };
-  entry.request = api(`/api/studio/jobs/${jobId}/material-digest?language=${entry.language}`).then(
-    (data) => {entry.status = "ok";entry.data = data;},
-    () => {entry.status = "error";}
-  ).then(() => {
-    if (state.materialDigest === entry && state.id === jobId && state.data) renderJobMeta();
-  });
+  if (
+    !fresh &&
+    cached?.jobId === jobId &&
+    cached.language === MindexI18n.language &&
+    cached.scopeKey === materialDigestScopeKey()
+  ) {
+    return cached.request;
+  }
+  const entry = {
+    jobId,
+    scopeKey: materialDigestScopeKey(),
+    language: MindexI18n.language,
+    status: "loading",
+    data: null,
+    open: cached?.jobId === jobId && cached.open,
+  };
+  entry.request = api(`/api/studio/jobs/${jobId}/material-digest?language=${entry.language}`)
+    .then(
+      (data) => {
+        entry.status = "ok";
+        entry.data = data;
+      },
+      () => {
+        entry.status = "error";
+      },
+    )
+    .then(() => {
+      if (state.materialDigest === entry && state.id === jobId && state.data) {
+        renderJobMeta();
+      }
+    });
   state.materialDigest = entry;
   return entry.request;
 }
@@ -185,7 +281,11 @@ function materialDigestNode(entry) {
   const box = document.createElement("details");
   box.className = "material-digest";
   box.open = Boolean(entry?.open);
-  box.addEventListener("toggle", () => {if (entry) entry.open = box.open;});
+  box.addEventListener("toggle", () => {
+    if (entry) {
+      entry.open = box.open;
+    }
+  });
   const summary = el("summary", MindexI18n.msg("ui.material_digest_title"));
   const status = el("span", undefined, "material-digest-status");
   summary.append(" · ", status);
@@ -200,10 +300,20 @@ function materialDigestNode(entry) {
     MindexI18n.setText(status, key ? MindexI18n.msg(key) : String(entry.data.empty_reason || "—"));
   } else {
     const stats = entry.data.stats || {};
-    MindexI18n.setText(status, MindexI18n.msg("ui.material_digest_counts", { p0: stats.sources ?? 0, p1: stats.segments ?? 0 }));
+    MindexI18n.setText(
+      status,
+      MindexI18n.msg("ui.material_digest_counts", {
+        p0: stats.sources ?? 0,
+        p1: stats.segments ?? 0,
+      }),
+    );
     box.append(el("pre", entry.data.text, "material-digest-text"));
   }
   return box;
 }
 
-window.addEventListener("mindex:languagechange", () => {if (state.data) renderJobMeta();});
+window.addEventListener("mindex:languagechange", () => {
+  if (state.data) {
+    renderJobMeta();
+  }
+});

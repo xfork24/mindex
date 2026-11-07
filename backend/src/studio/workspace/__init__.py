@@ -2,7 +2,7 @@
 
 所有修改由 studio_api 在全局 Studio 锁内完成。旧任务文件只在迁移时读取，并继续经产物接口可访问。
 
-本包按职责分模块（见 docs/studio.md），这里显式导出公共入口，调用方统一 ``from mindex.studio import
+本包按职责分模块（见 docs/studio.md），这里显式导出公共入口，调用方统一 ``from studio import
 workspace as ws`` 后使用 ``ws.xxx``。测试替换函数时按"在哪里查找就在哪里替换"：外部调用方（如
 studio_api 调用 ``ws.run_build``、``ws.load``）替换本包属性；包内调用替换定义模块的属性，例如
 ``builder.execute``、``signatures.match``、``signatures.specification``；阶段专属的常量替换处理器模块，
@@ -12,7 +12,9 @@ studio_api 调用 ``ws.run_build``、``ws.load``）替换本包属性；包内�
 逐镜阶段序列；``sources`` 定位并复验 clip/image 来源文件。
 """
 
-from . import (
+# 阶段注册与公共导出的装配顺序有语义，保持原顺序。
+# isort: off
+from studio.workspace import (
     handlers,  # noqa: F401 — 导入即登记全部阶段处理器
     music,
     post,
@@ -23,14 +25,21 @@ from . import (
     transitions,
     variants,
 )
-from .builder import CANCELLED, VersionDiagnostics, cancel_remaining, execute, recover, run_build
-from .details import compact_version, detail, recall_closure, retrieval_dependencies
-from .handlers.animate import save_manual as save_animation
-from .handlers.overlay import save_manual as save_overlay
-from .handlers.publish import save_metadata
-from .media_nodes import alignment, clip_alignment, render_node, source_shots, validate_range
-from .persistence import load, normalize_script
-from .plans import (
+from studio.workspace.builder import (
+    CANCELLED,
+    VersionDiagnostics,
+    cancel_remaining,
+    execute,
+    recover,
+    run_build,
+)
+from studio.workspace.details import compact_version, detail, recall_closure, retrieval_dependencies
+from studio.workspace.handlers.animate import save_manual as save_animation
+from studio.workspace.handlers.overlay import save_manual as save_overlay
+from studio.workspace.handlers.publish import save_metadata
+from studio.workspace.media_nodes import alignment, clip_alignment, render_node, source_shots, validate_range
+from studio.workspace.persistence import load, normalize_script
+from studio.workspace.plans import (
     BOARD_FIELDS,
     PlanOptions,
     ReferenceRef,
@@ -51,9 +60,9 @@ from .plans import (
     script_text,
     set_board,
 )
-from .post import compose
-from .preflight import column_nodes, node_dependencies, preflight
-from .signatures import (
+from studio.workspace.post import compose
+from studio.workspace.preflight import column_nodes, node_dependencies, preflight
+from studio.workspace.signatures import (
     DetailContext,
     conflicts,
     match,
@@ -63,8 +72,8 @@ from .signatures import (
     signature_matches,
     specification,
 )
-from .stages import REGISTRY, SHOT_SOURCES, RunContext, StageHandler, register, shot_stages
-from .versions import (
+from studio.workspace.stages import REGISTRY, SHOT_SOURCES, RunContext, StageHandler, register, shot_stages
+from studio.workspace.versions import (
     SCRIPT_ORIGINS,
     STAGES,
     RevisionConflict,
@@ -83,6 +92,7 @@ from .versions import (
     valid_files,
     version,
 )
+# isort: on
 
 __all__ = [
     "BOARD_FIELDS",

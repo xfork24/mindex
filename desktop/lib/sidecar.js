@@ -9,16 +9,31 @@ const { HOST } = require("./ports");
 // 全局选项（--config、--data-dir）必须放在子命令 serve 之前（见 backend/src/cli.py 的 configure）。
 function serveArguments({ configPath, dataDir, port }) {
   const args = ["--config", configPath];
-  if (dataDir) args.push("--data-dir", dataDir);
+  if (dataDir) {
+    args.push("--data-dir", dataDir);
+  }
   args.push("serve", "--host", HOST, "--port", String(port));
   return args;
 }
 
 // dev：仓库里 `uv run mindex`；packaged：冻结后端可执行文件。返回 {command, args, cwd}。
-function buildCommand({ mode, repoRoot, backendExecutable, uv = "uv", configPath, dataDir, port, cwd }) {
+function buildCommand({
+  mode,
+  repoRoot,
+  backendExecutable,
+  uv = "uv",
+  configPath,
+  dataDir,
+  port,
+  cwd,
+}) {
   const args = serveArguments({ configPath, dataDir, port });
-  if (mode === "dev") return { command: uv, args: ["run", "--project", repoRoot, "mindex", ...args], cwd: repoRoot };
-  if (mode === "packaged") return { command: backendExecutable, args, cwd: cwd || path.dirname(configPath) };
+  if (mode === "dev") {
+    return { command: uv, args: ["run", "--project", repoRoot, "mindex", ...args], cwd: repoRoot };
+  }
+  if (mode === "packaged") {
+    return { command: backendExecutable, args, cwd: cwd || path.dirname(configPath) };
+  }
   throw new Error(`未知的后端模式：${mode}`);
 }
 
@@ -26,13 +41,25 @@ function buildCommand({ mode, repoRoot, backendExecutable, uv = "uv", configPath
 function buildEnv(base, { token, ffmpeg, ffprobe, browsersPath, extra = {} }) {
   // PYTHONUTF8：Windows 的 Python 缺省按控制台代码页（charmap/GBK）编码输出，中文日志会
   // UnicodeEncodeError；强制 UTF-8 模式（macOS/Linux 本就是 UTF-8，无影响）。
-  const env = { ...base, ...extra, MINDEX_WEB_TOKEN: token, PYTHONUNBUFFERED: "1", PYTHONUTF8: "1" };
+  const env = {
+    ...base,
+    ...extra,
+    MINDEX_WEB_TOKEN: token,
+    PYTHONUNBUFFERED: "1",
+    PYTHONUTF8: "1",
+  };
   delete env.MINDEX_CONFIG;
   // Electron 自身的变量不应传给 Python 后端。
   delete env.ELECTRON_RUN_AS_NODE;
-  if (ffmpeg) env.MINDEX_FFMPEG = ffmpeg;
-  if (ffprobe) env.MINDEX_FFPROBE = ffprobe;
-  if (browsersPath) env.PLAYWRIGHT_BROWSERS_PATH = browsersPath;
+  if (ffmpeg) {
+    env.MINDEX_FFMPEG = ffmpeg;
+  }
+  if (ffprobe) {
+    env.MINDEX_FFPROBE = ffprobe;
+  }
+  if (browsersPath) {
+    env.PLAYWRIGHT_BROWSERS_PATH = browsersPath;
+  }
   return env;
 }
 
@@ -49,14 +76,18 @@ class RotatingLog {
   rotate() {
     for (let index = this.keep - 1; index >= 1; index -= 1) {
       const from = index === 1 ? this.file : `${this.file}.${index - 1}`;
-      if (fs.existsSync(from)) fs.renameSync(from, `${this.file}.${index}`);
+      if (fs.existsSync(from)) {
+        fs.renameSync(from, `${this.file}.${index}`);
+      }
     }
     this.size = 0;
   }
 
   write(chunk) {
     const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
-    if (this.size + data.length > this.maxBytes && this.size > 0) this.rotate();
+    if (this.size + data.length > this.maxBytes && this.size > 0) {
+      this.rotate();
+    }
     fs.appendFileSync(this.file, data);
     this.size += data.length;
   }
@@ -81,25 +112,48 @@ class StartupError extends Error {
 }
 
 // 轮询 /api/health 直到就绪。pidMatches(healthPid) 判断响应是否来自自己启动的进程（防止连到端口上的其他后端）。
-async function waitForHealth({ url, token, version, timeoutMs = 60000, intervalMs = 250, fetchImpl = fetch,
-  isRunning = () => true, pidMatches = () => true }) {
+async function waitForHealth({
+  url,
+  token,
+  version,
+  timeoutMs = 60000,
+  intervalMs = 250,
+  fetchImpl = fetch,
+  isRunning = () => true,
+  pidMatches = () => true,
+}) {
   const deadline = Date.now() + timeoutMs;
   let last = "后端尚未响应";
   while (Date.now() < deadline) {
-    if (!isRunning()) throw new StartupError("exited", "后端进程在就绪前退出");
+    if (!isRunning()) {
+      throw new StartupError("exited", "后端进程在就绪前退出");
+    }
     try {
-      const response = await fetchImpl(url, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(2000) });
+      const response = await fetchImpl(url, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(2000),
+      });
       if (response.status === 200) {
         const body = await response.json();
-        if (!(await pidMatches(body.pid))) throw new StartupError("pid-mismatch", "端口上响应的不是本应用启动的后端");
-        if (version && body.version !== version)
-          throw new StartupError("version-mismatch", `后端版本 ${body.version} 与应用版本 ${version} 不一致`);
+        if (!(await pidMatches(body.pid))) {
+          throw new StartupError("pid-mismatch", "端口上响应的不是本应用启动的后端");
+        }
+        if (version && body.version !== version) {
+          throw new StartupError(
+            "version-mismatch",
+            `后端版本 ${body.version} 与应用版本 ${version} 不一致`,
+          );
+        }
         return body;
       }
       last = `健康检查返回 HTTP ${response.status}`;
-      if (response.status === 401) throw new StartupError("pid-mismatch", "端口上响应的后端不接受本应用的令牌");
+      if (response.status === 401) {
+        throw new StartupError("pid-mismatch", "端口上响应的后端不接受本应用的令牌");
+      }
     } catch (error) {
-      if (error instanceof StartupError) throw error;
+      if (error instanceof StartupError) {
+        throw error;
+      }
       last = error.message;
     }
     await sleep(intervalMs);
@@ -111,7 +165,9 @@ async function waitForHealth({ url, token, version, timeoutMs = 60000, intervalM
 function isDescendant(pid, root, readParent = parentPid) {
   let current = pid;
   for (let depth = 0; depth < 8 && current && current > 1; depth += 1) {
-    if (current === root) return true;
+    if (current === root) {
+      return true;
+    }
     current = readParent(current);
   }
   return false;
@@ -126,7 +182,9 @@ function processInfo(pid, { platform = process.platform, exec = childProcess.exe
   if (platform === "win32") {
     try {
       const script = `(Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}') | ConvertTo-Json -Compress`;
-      const output = exec("powershell", ["-NoProfile", "-NonInteractive", "-Command", script], { encoding: "utf8" });
+      const output = exec("powershell", ["-NoProfile", "-NonInteractive", "-Command", script], {
+        encoding: "utf8",
+      });
       const info = JSON.parse(String(output).trim());
       return { parent: Number(info.ParentProcessId) || 0, command: String(info.CommandLine ?? "") };
     } catch {
@@ -137,7 +195,9 @@ function processInfo(pid, { platform = process.platform, exec = childProcess.exe
 }
 
 function parentPid(pid, { platform = process.platform, exec = childProcess.execFileSync } = {}) {
-  if (platform === "win32") return processInfo(pid, { platform, exec }).parent;
+  if (platform === "win32") {
+    return processInfo(pid, { platform, exec }).parent;
+  }
   try {
     return Number(exec("ps", ["-o", "ppid=", "-p", String(pid)], { encoding: "utf8" }).trim()) || 0;
   } catch {
@@ -145,8 +205,13 @@ function parentPid(pid, { platform = process.platform, exec = childProcess.execF
   }
 }
 
-function processCommand(pid, { platform = process.platform, exec = childProcess.execFileSync } = {}) {
-  if (platform === "win32") return processInfo(pid, { platform, exec }).command;
+function processCommand(
+  pid,
+  { platform = process.platform, exec = childProcess.execFileSync } = {},
+) {
+  if (platform === "win32") {
+    return processInfo(pid, { platform, exec }).command;
+  }
   try {
     return exec("ps", ["-o", "command=", "-p", String(pid)], { encoding: "utf8" }).trim();
   } catch {
@@ -166,16 +231,29 @@ function alive(pid) {
 // 停止进程组（detached 启动，pgid = pid）：SIGTERM，graceMs 后仍存活则 SIGKILL。返回是否被强制结束。
 // Windows：无跨进程 SIGTERM，先 taskkill /T 软停（对无窗进程基本无效），宽限后 taskkill /T /F 杀整树；
 // 优雅停止由退出前的 REST stop-on-exit 承担（与后端 shared/process_ops 的停止语义一致）。
-async function stopGroup(pid, { graceMs = 10000, pollMs = 100, isAlive = alive, kill = process.kill.bind(process),
-  platform = process.platform, exec = childProcess.execFileSync } = {}) {
-  if (!pid || !isAlive(pid)) return false;
+async function stopGroup(
+  pid,
+  {
+    graceMs = 10000,
+    pollMs = 100,
+    isAlive = alive,
+    kill = process.kill.bind(process),
+    platform = process.platform,
+    exec = childProcess.execFileSync,
+  } = {},
+) {
+  if (!pid || !isAlive(pid)) {
+    return false;
+  }
   if (platform === "win32") {
     try {
       exec("taskkill", ["/PID", String(pid), "/T"], { stdio: "ignore" });
     } catch {}
     const deadline = Date.now() + graceMs;
     while (Date.now() < deadline) {
-      if (!isAlive(pid)) return false;
+      if (!isAlive(pid)) {
+        return false;
+      }
       await sleep(pollMs);
     }
     try {
@@ -190,7 +268,9 @@ async function stopGroup(pid, { graceMs = 10000, pollMs = 100, isAlive = alive, 
   }
   const deadline = Date.now() + graceMs;
   while (Date.now() < deadline) {
-    if (!isAlive(pid)) return false;
+    if (!isAlive(pid)) {
+      return false;
+    }
     await sleep(pollMs);
   }
   try {
@@ -200,15 +280,33 @@ async function stopGroup(pid, { graceMs = 10000, pollMs = 100, isAlive = alive, 
 }
 
 // 上次外壳异常退出遗留的后端：确认命令行仍是 mindex 后再结束，避免误杀复用了该 pid 的其他进程。
-async function reapStale(pid, { isAlive = alive, command = processCommand, stop = stopGroup } = {}) {
-  if (!pid || !isAlive(pid)) return false;
+async function reapStale(
+  pid,
+  { isAlive = alive, command = processCommand, stop = stopGroup } = {},
+) {
+  if (!pid || !isAlive(pid)) {
+    return false;
+  }
   const line = command(pid);
-  if (!/mindex/.test(line) || !/\bserve\b/.test(line)) return false;
+  if (!/mindex/.test(line) || !/\bserve\b/.test(line)) {
+    return false;
+  }
   await stop(pid, { graceMs: 5000 });
   return true;
 }
 
 module.exports = {
-  serveArguments, buildCommand, buildEnv, RotatingLog, StartupError, waitForHealth,
-  isDescendant, processInfo, parentPid, processCommand, alive, stopGroup, reapStale,
+  serveArguments,
+  buildCommand,
+  buildEnv,
+  RotatingLog,
+  StartupError,
+  waitForHealth,
+  isDescendant,
+  processInfo,
+  parentPid,
+  processCommand,
+  alive,
+  stopGroup,
+  reapStale,
 };

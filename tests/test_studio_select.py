@@ -1,9 +1,11 @@
+"""分镜选片、时长对齐与时间线回归。"""
+
 from __future__ import annotations
 
 import pytest
 
-from mindex.shared.config import SelectionConfig
-from mindex.studio.studio_select import SelectionError, select_events
+from shared.config import SelectionConfig
+from studio.select import SelectionError, select_events
 
 
 def make_library(ranges: list[tuple[float, float]]):
@@ -199,7 +201,7 @@ def test_extended_then_padded_is_a_valid_event():
 
 
 def test_anchor_clamped_and_manual_eof_rejected():
-    from mindex.studio.studio_select import plan_anchor, plan_explicit
+    from studio.select import plan_anchor, plan_explicit
 
     selection = SelectionConfig()
     plan = plan_anchor(

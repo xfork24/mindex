@@ -9,17 +9,17 @@ import time
 from datetime import UTC, datetime
 
 import pytest
-from conftest import FixtureWriter
 from fastapi.testclient import TestClient
 
-from mindex.agent.attachments import AttachmentStore
-from mindex.agent.loopback import MindexClient
-from mindex.agent.registry import ToolContext, ToolError
-from mindex.agent.tools import build_registry
-from mindex.api import create_app
-from mindex.maintenance.clean import clean_library
-from mindex.studio import studio
-from mindex.studio import workspace as ws
+from agent.attachments import AttachmentStore
+from agent.loopback import MindexClient
+from agent.registry import ToolContext, ToolError
+from agent.tools import build_registry
+from api import create_app
+from conftest import FixtureWriter
+from maintenance.clean import clean_library
+from studio import studio
+from studio import workspace as ws
 
 OUTLINE = "讲讲一位老匠人的一天。"
 INTERVIEW = "\ufeff问：您做这行多久了？\r\n答：三十年了。\r\n"
@@ -54,8 +54,9 @@ def add_text(c, jid, text, name="文稿"):
 
 def add_file(c, jid, content: bytes, filename="访谈.txt", ctype="text/plain"):
     data = workspace(c, jid)
-    return c.post(refs_path(jid, data), files={"file": (filename, content, ctype)},
-                  data={"revision": data["revision"]})
+    return c.post(
+        refs_path(jid, data), files={"file": (filename, content, ctype)}, data={"revision": data["revision"]}
+    )
 
 
 def options(data):
@@ -64,16 +65,20 @@ def options(data):
 
 def set_template(c, jid, template_id):
     data = workspace(c, jid)
-    response = c.patch(f"/api/studio/jobs/{jid}/plans/{data['active_plan']}",
-                       json={"revision": data["revision"], "options": {**options(data), "template_id": template_id}})
+    response = c.patch(
+        f"/api/studio/jobs/{jid}/plans/{data['active_plan']}",
+        json={"revision": data["revision"], "options": {**options(data), "template_id": template_id}},
+    )
     assert response.status_code == 200, response.text
     return response.json()
 
 
 def run_script(c, jid):
     data = workspace(c, jid)
-    response = c.post(f"/api/studio/jobs/{jid}/plans/{data['active_plan']}/nodes",
-                      json={"revision": data["revision"], "inputs": {}, "stage": "script", "force": True})
+    response = c.post(
+        f"/api/studio/jobs/{jid}/plans/{data['active_plan']}/nodes",
+        json={"revision": data["revision"], "inputs": {}, "stage": "script", "force": True},
+    )
     assert response.status_code == 202, response.text
     for _ in range(2000):
         data = workspace(c, jid)
@@ -109,8 +114,10 @@ def test_upload_file_and_paste_text_register_normalized_content(client, config):
     assert data["reference_limit"] == config.studio.max_reference_chars
     # PATCH 方案参数（即使带着伪造的登记）不改变参考文稿登记。
     forged = {**options(data), "references": [{"id": "0" * 64, "name": "x", "chars": 1}]}
-    patched = c.patch(f"/api/studio/jobs/{jid}/plans/{data['active_plan']}",
-                      json={"revision": data["revision"], "options": forged}).json()
+    patched = c.patch(
+        f"/api/studio/jobs/{jid}/plans/{data['active_plan']}",
+        json={"revision": data["revision"], "options": forged},
+    ).json()
     assert options(patched)["references"] == options(data)["references"]
 
 
@@ -135,7 +142,10 @@ def test_rejects_binary_bad_type_stale_revision_and_over_limit(client, config):
     assert over.json()["detail"] == "参考文稿总字数超过 10 字上限（登记后共 11 字），请删减后再试"
     assert over.json()["message_key"] == "ui.reference_over_limit_error"
     assert len(options(workspace(c, jid))["references"]) == 1
-    assert c.post(refs_path(jid, data), json={"revision": data["revision"], "text": "x", "extra": 1}).status_code == 422
+    assert (
+        c.post(refs_path(jid, data), json={"revision": data["revision"], "text": "x", "extra": 1}).status_code
+        == 422
+    )
 
 
 def test_delete_removes_registration_only(client, config):
@@ -223,8 +233,9 @@ def test_script_signature_tracks_reference_ids(config):
     ws.references.unregister(p, second["id"])
     assert ws.specification(config, jid, w, p, "script")["signature"] == one["signature"]
     # 其他阶段与参考文稿无关。
-    assert ws.settings(config, p, "tts") == ws.settings(config, {**p, "options": {**p["options"],
-                                                                                   "references": []}}, "tts")
+    assert ws.settings(config, p, "tts") == ws.settings(
+        config, {**p, "options": {**p["options"], "references": []}}, "tts"
+    )
 
 
 # ---------------------------------------------------------------- 智能助手
@@ -258,7 +269,9 @@ def test_agent_reference_tools_with_attachment_and_text(client, config):
     assert registry.get("add_reference_text").risk == "write"
     assert registry.get("remove_reference_text").risk == "danger"  # 只删记录的删除工具一律 danger
     assert {registry.get(n).domain for n in ("add_reference_text", "remove_reference_text")} == {"studio"}
-    uploaded = c.post("/api/agent/attachments", files={"file": ("采访稿.md", INTERVIEW.encode(), "text/markdown")})
+    uploaded = c.post(
+        "/api/agent/attachments", files={"file": ("采访稿.md", INTERVIEW.encode(), "text/markdown")}
+    )
     assert uploaded.status_code == 201, uploaded.text
     ref = uploaded.json()["id"]
     preview, output, sent = run_tool(c, config, "add_reference_text", {"job_id": jid, "attachment": ref})
@@ -268,15 +281,21 @@ def test_agent_reference_tools_with_attachment_and_text(client, config):
     assert [e for e in sent if e[0] != "GET"] == [("POST", f"/api/studio/jobs/{jid}/plans/{pid}/references")]
     rid = output.value["reference"]["id"]
     assert rid == hashlib.sha256(NORMALIZED.encode()).hexdigest()
-    _, pasted, _ = run_tool(c, config, "add_reference_text", {"job_id": jid, "text": "粘贴的补充。", "name": "补充"})
+    _, pasted, _ = run_tool(
+        c, config, "add_reference_text", {"job_id": jid, "text": "粘贴的补充。", "name": "补充"}
+    )
     assert [r["name"] for r in pasted.value["references"]] == ["采访稿", "补充"]
     with pytest.raises(ToolError, match="必须且只能提供一个"):
         build_registry().get("add_reference_text").parse({"job_id": jid})
-    bad = c.post("/api/agent/attachments", files={"file": ("x.txt", b"\xff\xfe\x00", "text/plain")}).json()["id"]
+    bad = c.post("/api/agent/attachments", files={"file": ("x.txt", b"\xff\xfe\x00", "text/plain")}).json()[
+        "id"
+    ]
     with pytest.raises(ToolError) as exc:
         run_tool(c, config, "add_reference_text", {"job_id": jid, "attachment": bad})
     assert "UTF-8" in str(exc.value)
-    preview, removed, sent = run_tool(c, config, "remove_reference_text", {"job_id": jid, "reference": rid[:8]})
+    preview, removed, sent = run_tool(
+        c, config, "remove_reference_text", {"job_id": jid, "reference": rid[:8]}
+    )
     assert "采访稿" in preview.changes[0]["before"]
     assert ("DELETE", f"/api/studio/jobs/{jid}/plans/{pid}/references/{rid}") in sent
     assert [r["name"] for r in removed.value["references"]] == ["补充"]

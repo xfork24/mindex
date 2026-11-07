@@ -1,6 +1,9 @@
+"""人物库、出镜证据与处理任务的 REST 接口。"""
+
 from __future__ import annotations
 
 import base64
+import io
 import json
 import logging
 import tempfile
@@ -11,11 +14,14 @@ from typing import Annotated
 from fastapi import APIRouter, File, Form, HTTPException, Query, Response, UploadFile
 from fastapi.responses import FileResponse
 from filelock import Timeout
+from PIL import Image
 from pydantic import Field, model_validator
+from starlette.concurrency import run_in_threadpool
 
-from mindex.models.adapters import ModelError, request
-from mindex.models.qwen import analysis_options
-from mindex.persons.person_models import (
+from admin.source_tasks import IndexTasks
+from models.adapters import ModelError, request
+from models.qwen import analysis_options
+from persons.person_models import (
     CastConfirm,
     CastEntry,
     Entity,
@@ -23,7 +29,7 @@ from mindex.persons.person_models import (
     ShotReview,
     checked_box,
 )
-from mindex.persons.person_processing import (
+from persons.person_processing import (
     EvidenceReferences,
     PersonClient,
     PersonOptions,
@@ -32,12 +38,16 @@ from mindex.persons.person_processing import (
     ensure_reference_quality,
     face_match,
 )
-from mindex.persons.persons import Persons
-from mindex.persons.profiling import note as profiling_note
-from mindex.persons.profiling import profiled, stage
-from mindex.shared.config import StrictModel, fingerprint
-from mindex.shared.processing_lock import ProcessingLock
-from mindex.shared.storage import dumps
+from persons.person_thumbnails import import_thumbnail
+from persons.persons import Persons
+from persons.profiling import note as profiling_note
+from persons.profiling import profiled, stage
+from shared.config import StrictModel, fingerprint
+from shared.images import image_png
+from shared.processing_lock import ProcessingLock
+from shared.shot_media import ShotMedia
+from shared.storage import dumps
+from shared.uploads import save_upload
 
 log = logging.getLogger(__name__)
 
@@ -148,7 +158,11 @@ def _ranked(observation, references, key, person_config):
             continue
         score = cosine(observation.get("face_feature"), reference.get("face_feature"))
         current = best.get(identifier)
-        if current is None or score > current[0] or (score == current[0] and reference["id"] < current[1]["id"]):
+        if (
+            current is None
+            or score > current[0]
+            or (score == current[0] and reference["id"] < current[1]["id"])
+        ):
             best[identifier] = (score, reference)
     return sorted(((s, i, r) for i, (s, r) in best.items()), key=lambda x: (x[0], x[1]), reverse=True)
 
@@ -171,24 +185,27 @@ def identify_faces(observations, references, entities, person_config, top_k):
             for index, (score, identifier, reference) in enumerate(ranked[:top_k]):
                 runner = max((s for j, (s, _, _) in enumerate(ranked) if j != index), default=-1.0)
                 entity = entities.get(identifier) or {}
-                candidates.append({
-                    "id": identifier,
-                    "name": entity.get("name"),
-                    "kind": entity.get("kind", "role" if key == "role_id" else "actor"),
-                    "score": round(score, 4),
-                    "accepted": bool(
-                        quality >= person_config.min_face_quality
-                        and score >= person_config.face_threshold
-                        and score - runner >= person_config.face_margin
-                    ),
-                    "reference_id": reference["id"],
-                    "reference_url": f"/api/persons/references/{reference['id']}/image",
-                })
+                candidates.append(
+                    {
+                        "id": identifier,
+                        "name": entity.get("name"),
+                        "kind": entity.get("kind", "role" if key == "role_id" else "actor"),
+                        "score": round(score, 4),
+                        "accepted": bool(
+                            quality >= person_config.min_face_quality
+                            and score >= person_config.face_threshold
+                            and score - runner >= person_config.face_margin
+                        ),
+                        "reference_id": reference["id"],
+                        "reference_url": f"/api/persons/references/{reference['id']}/image",
+                    }
+                )
             face[field] = candidates
         role, score, accepted = face_match(observation, references, person_config)
         face["accepted_role"] = (
             {"id": role, "name": (entities.get(role) or {}).get("name"), "score": round(score, 4)}
-            if accepted else None
+            if accepted
+            else None
         )
         faces.append(face)
     return faces
@@ -219,9 +236,13 @@ def person_router(runtime, store):
     def listing(compact: bool = False):
         names = store.source_names()
         # 一次取齐素材→作品映射；只有尚未登记作品的素材才走 work_for（会创建默认作品）。
-        works = {r["source_id"]: r["work_id"] for r in store.rows("SELECT source_id,work_id FROM person_sources")}
-        sources = [{**s, "name": names[s["id"]], "work_id": works.get(s["id"]) or catalogue.work_for(s["id"])}
-                   for s in store.sources()]
+        works = {
+            r["source_id"]: r["work_id"] for r in store.rows("SELECT source_id,work_id FROM person_sources")
+        }
+        sources = [
+            {**s, "name": names[s["id"]], "work_id": works.get(s["id"]) or catalogue.work_for(s["id"])}
+            for s in store.sources()
+        ]
         # 待核对数量以分镜为单位，且与审核列表同一套分类规则。
         return {
             "entities": catalogue.entities(),
@@ -229,12 +250,23 @@ def person_router(runtime, store):
             "sources": [{"id": s["id"], "name": s["name"], "work_id": s["work_id"]} for s in sources],
             "review_shots": catalogue.review_summary() if not compact else {},
             # 精简模式只给每个素材的覆盖分镜数（页面只显示计数），不逐行下发覆盖记录。
-            **({"coverage_counts": {
-                r["source_id"]: r["n"]
-                for r in store.rows("SELECT source_id,COUNT(*) AS n FROM person_coverage GROUP BY source_id")
-            }} if compact else {"coverage": [
-                {**r, "data": json.loads(r["data"])} for r in store.rows("SELECT * FROM person_coverage")
-            ]}),
+            **(
+                {
+                    "coverage_counts": {
+                        r["source_id"]: r["n"]
+                        for r in store.rows(
+                            "SELECT source_id,COUNT(*) AS n FROM person_coverage GROUP BY source_id"
+                        )
+                    }
+                }
+                if compact
+                else {
+                    "coverage": [
+                        {**r, "data": json.loads(r["data"])}
+                        for r in store.rows("SELECT * FROM person_coverage")
+                    ]
+                }
+            ),
             "tasks": tasks.recent(30),
         }
 
@@ -252,7 +284,9 @@ def person_router(runtime, store):
                 "content_id": active["id"],
                 "release_id": active.get("search_release_id"),
                 "person_id": active.get("person_version"),
-            } if active else None,
+            }
+            if active
+            else None,
             "releases": store.rows("SELECT * FROM search_releases ORDER BY rowid DESC LIMIT 30"),
         }
 
@@ -308,7 +342,6 @@ def person_router(runtime, store):
         actor_id: Annotated[str | None, Form()] = None,
         role_id: Annotated[str | None, Form()] = None,
     ):
-        from mindex.shared.uploads import save_upload
 
         with tempfile.TemporaryDirectory(dir=store.root) as directory:
             path = Path(directory) / "image"
@@ -329,7 +362,8 @@ def person_router(runtime, store):
 
     def media(path, headers=None):
         try:
-            from mindex.shared.media_delivery import materialized_response
+            # 延迟导入：保持异常捕获范围，依赖加载失败时仍走原有降级路径。
+            from shared.media_delivery import materialized_response
 
             return materialized_response(store.materialize_media(path), headers=headers)
         except FileNotFoundError as exc:
@@ -345,14 +379,15 @@ def person_router(runtime, store):
         if not source or body.timestamp >= json.loads(source["media"])["duration"]:
             raise ValueError("素材或截图时间无效")
         actor_id = catalogue.pairing_actor(body.actor_id, body.role_id)
-        if body.role_id and catalogue.work_for(body.source_id) not in catalogue.entity(body.role_id)["work_ids"]:
+        if (
+            body.role_id
+            and catalogue.work_for(body.source_id) not in catalogue.entity(body.role_id)["work_ids"]
+        ):
             raise ValueError("截图角色不属于素材的作品")
-        from mindex.shared.shot_media import ShotMedia
+
         raw = ShotMedia(store).frame_bytes(body.source_id, body.timestamp)
         if body.bbox:
-            import io
-
-            from PIL import Image
+            # 延迟导入：媒体、数值或服务运行依赖仅在实际执行该功能时加载。
 
             with Image.open(io.BytesIO(raw)) as image:
                 buffer = io.BytesIO()
@@ -368,7 +403,6 @@ def person_router(runtime, store):
 
     @router.post("/imports", status_code=201)
     async def upload_import(files: Annotated[list[UploadFile], File()]):
-        from mindex.shared.uploads import save_upload
 
         if not 1 <= len(files) <= 12:
             raise ValueError("一次上传 1–12 张截图")
@@ -390,7 +424,6 @@ def person_router(runtime, store):
 
     @router.post("/imports/{identifier}/images")
     async def append_import_images(identifier: str, files: Annotated[list[UploadFile], File()]):
-        from mindex.shared.uploads import save_upload
 
         if not 1 <= len(files) <= 12:
             raise ValueError("一次追加 1–12 张截图")
@@ -457,12 +490,13 @@ def person_router(runtime, store):
         if not image:
             raise HTTPException(404, "找不到原图")
         if thumbnail:
-            from mindex.persons.person_thumbnails import import_thumbnail
             try:
                 path = import_thumbnail(store, image)
             except FileNotFoundError as exc:
                 raise HTTPException(404, "图片缺失") from exc
-            return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
+            return FileResponse(
+                path, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"}
+            )
         return media(image["path"])
 
     @router.post("/sources/{source_id}/process", status_code=202)
@@ -470,9 +504,6 @@ def person_router(runtime, store):
         return tasks.start(source_id, options)
 
     def identify_image(path, top_k):
-        from PIL import Image
-
-        from mindex.shared.images import image_png
 
         config = runtime.current()
         raw = image_png(path, config.video.max_pixels)
@@ -506,9 +537,6 @@ def person_router(runtime, store):
         top_k: Annotated[int, Form(ge=1, le=20)] = 5,
     ):
         """上传一张图片识别画面中的演员与角色；只读，只比对已缓存的参考图特征。"""
-        from starlette.concurrency import run_in_threadpool
-
-        from mindex.shared.uploads import save_upload
 
         with tempfile.TemporaryDirectory(dir=store.root) as directory:
             path = Path(directory) / "upload"
@@ -555,7 +583,9 @@ def person_router(runtime, store):
 
     @router.get("/evidence/{identifier}")
     def one_evidence(identifier: str):
-        row = store.one("SELECT * FROM person_evidence e WHERE id=? AND " + catalogue.VALID_ROLE, (identifier,))
+        row = store.one(
+            "SELECT * FROM person_evidence e WHERE id=? AND " + catalogue.VALID_ROLE, (identifier,)
+        )
         if not row:
             raise HTTPException(404, "找不到出镜证据")
         row["data"] = {k: v for k, v in json.loads(row["data"]).items() if k not in {"body_feature", "space"}}
@@ -572,7 +602,8 @@ def person_router(runtime, store):
                 profile.apply(result)
             return result
 
-    # 同一证据 id 的截图在复核后可能换帧，所以只缓存很短时间，既省掉翻页回看时的重复请求，又不会长时间显示旧图。
+    # 同一证据 id 的截图在复核后可能换帧，所以只缓存很短时间，
+    # 既省掉翻页回看时的重复请求，又不会长时间显示旧图。
     EVIDENCE_IMAGE_HEADERS = {"Cache-Control": "private, max-age=300"}
 
     def evidence_media(path):
@@ -619,8 +650,10 @@ def person_router(runtime, store):
                             raise
         with stage("thumbnail_fallback"):
             for evidence in candidates:
-                shot = store.one("SELECT thumbnail FROM segments WHERE id=? AND source_id=?",
-                                 (evidence.get("shot_id"), evidence.get("source_id")))
+                shot = store.one(
+                    "SELECT thumbnail FROM segments WHERE id=? AND source_id=?",
+                    (evidence.get("shot_id"), evidence.get("source_id")),
+                )
                 if shot and shot["thumbnail"]:
                     try:
                         result = media(shot["thumbnail"], EVIDENCE_IMAGE_HEADERS)
@@ -646,8 +679,14 @@ def person_router(runtime, store):
     ):
         with profiled("review_shots", response):
             return catalogue.review_shots(
-                source_id, status, limit=limit, offset=offset,
-                actor_id=actor_id, role_id=role_id, no_candidate=no_candidate, compact=compact,
+                source_id,
+                status,
+                limit=limit,
+                offset=offset,
+                actor_id=actor_id,
+                role_id=role_id,
+                no_candidate=no_candidate,
+                compact=compact,
             )
 
     @router.get("/review/shots/{shot_id}")
@@ -673,9 +712,9 @@ def person_router(runtime, store):
     @router.post("/publish")
     def publish(body: Publish):
         if runtime.current().queue.backend == "postgres":
-            from mindex.admin.source_tasks import IndexTasks
-
-            return IndexTasks(runtime, store).run_here({"action": "person-publish", "index_id": body.content_id})
+            return IndexTasks(runtime, store).run_here(
+                {"action": "person-publish", "index_id": body.content_id}
+            )
         with release_write():
             return catalogue.publish(body.content_id)
 
@@ -685,8 +724,6 @@ def person_router(runtime, store):
         if not row:
             raise ValueError("找不到检索发布记录")
         if runtime.current().queue.backend == "postgres":
-            from mindex.admin.source_tasks import IndexTasks
-
             IndexTasks(runtime, store).run_here({"action": "activate-release", "release_id": identifier})
             return row
         with release_write():

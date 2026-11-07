@@ -4,13 +4,12 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from mindex.models.adapters import make_storyboarder
-from mindex.studio import studio
-from mindex.studio.material_digest import merged_vocabulary, safe_digest, scope_parameters
-from mindex.studio.studio_artifacts import sanitized
-
-from ..plans import script_stale, script_text, set_board
-from ..stages import StageHandler, register
+from models.adapters import make_storyboarder
+from studio import studio
+from studio.artifacts import sanitized
+from studio.material_digest import merged_vocabulary, safe_digest, scope_parameters
+from studio.workspace.plans import script_stale, script_text, set_board
+from studio.workspace.stages import StageHandler, register
 
 
 class SplitHandler(StageHandler):
@@ -27,8 +26,11 @@ class SplitHandler(StageHandler):
         }
 
     def specification(self, config, job_id, w, p, sid, params, resources):
-        return {"text": script_text(w, p), "language": w.get("job_language", "zh")}, {"script": p.get("script")}, {
-            **params, **scope_parameters(config, job_id, resources.database())}
+        return (
+            {"text": script_text(w, p), "language": w.get("job_language", "zh")},
+            {"script": p.get("script")},
+            {**params, **scope_parameters(config, job_id, resources.database())},
+        )
 
     def dependencies(self, w, p, sid, *, resplit=False):
         return ["script"] if not p.get("script") else []
@@ -61,14 +63,21 @@ class SplitHandler(StageHandler):
         if not text:
             raise studio.StudioError("请先生成文案，再拆分镜")
         # 拆分镜同样参照素材摘要的画面词表；摘要出错或为空时不传词表，不影响拆分。
-        vocabulary = merged_vocabulary(safe_digest(
-            config,
-            ctx.job_id,
-            on_error=lambda message: ctx.diagnostics.record("material-digest-error", {"message": message}),
-        ))
+        vocabulary = merged_vocabulary(
+            safe_digest(
+                config,
+                ctx.job_id,
+                on_error=lambda message: ctx.diagnostics.record(
+                    "material-digest-error", {"message": message}
+                ),
+            )
+        )
         storyboarder = ctx.services.get("storyboarder") or make_storyboarder(config)
-        drafts = storyboarder.split(text, vocabulary=vocabulary,
-                                    **({"language": w.get("job_language", "zh")} if w.get("job_language") == "en" else {}))
+        drafts = storyboarder.split(
+            text,
+            vocabulary=vocabulary,
+            **({"language": w.get("job_language", "zh")} if w.get("job_language") == "en" else {}),
+        )
         if studio.coverage_warning(text, [s.text for s in drafts]):
             raise studio.StudioError("自动分镜未完整覆盖原文")
         # New identities avoid aliasing an old shot after a structural re-split.

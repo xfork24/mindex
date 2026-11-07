@@ -16,9 +16,10 @@ from contextlib import nullcontext
 from datetime import UTC, datetime
 from threading import Lock
 
+from filelock import Timeout
 from PIL import Image, ImageOps, UnidentifiedImageError
 
-from mindex.persons.person_models import (
+from persons.person_models import (
     CastConfirm,
     Entity,
     PersonHasLinkedShots,
@@ -28,10 +29,13 @@ from mindex.persons.person_models import (
     frame_review_lock,
     uid,
 )
-from mindex.persons.profiling import stage
-from mindex.shared.config import fingerprint
-from mindex.shared.person_schema import normalize_entity
-from mindex.shared.storage import Store, dumps
+from persons.person_names import EvidenceIndex
+from persons.profiling import stage
+from shared import files, lock_backend
+from shared.config import fingerprint
+from shared.db.fencing import publication_scope
+from shared.person_schema import normalize_entity
+from shared.storage import Store, dumps
 
 log = logging.getLogger(__name__)
 
@@ -88,8 +92,7 @@ class Persons:
         return {
             fingerprint(["work", s["id"]]): (s["name"], s["display_name"] or s["name"])
             for s in self.store.rows(
-                "SELECT s.id,s.name,c.display_name FROM sources s "
-                "LEFT JOIN source_curation c ON c.id=s.id"
+                "SELECT s.id,s.name,c.display_name FROM sources s LEFT JOIN source_curation c ON c.id=s.id"
             )
         }
 
@@ -139,10 +142,8 @@ class Persons:
                         )
                     }
                     if sources and self.store.one(
-                        "SELECT 1 FROM person_evidence WHERE role_id=? AND status='accepted' AND source_id IN "
-                        + "("
-                        + ",".join("?" * len(sources))
-                        + ") LIMIT 1",
+                        "SELECT 1 FROM person_evidence WHERE role_id=? AND status='accepted' AND source_id "
+                        "IN " + "(" + ",".join("?" * len(sources)) + ") LIMIT 1",
                         (identifier, *sources),
                     ):
                         raise ValueError("该作品下仍有已接受的出镜证据；请先重新核对或删除")
@@ -169,9 +170,12 @@ class Persons:
             if active and active["value"] == identifier:
                 raise ValueError("这是当前生效的检索组合；请先恢复到其他组合再删除")
             db.execute("DELETE FROM search_releases WHERE id=?", (identifier,))
-            if row["person_id"] and not db.execute(
-                "SELECT 1 FROM search_releases WHERE person_id=?", (row["person_id"],)
-            ).fetchone():
+            if (
+                row["person_id"]
+                and not db.execute(
+                    "SELECT 1 FROM search_releases WHERE person_id=?", (row["person_id"],)
+                ).fetchone()
+            ):
                 db.execute("DELETE FROM person_versions WHERE id=?", (row["person_id"],))
         return {"deleted": identifier}
 
@@ -197,13 +201,17 @@ class Persons:
         )
         with nullcontext(db) if db is not None else self.store.connect() as connection:
             total = connection.execute(
-                "SELECT COUNT(*) AS n FROM (SELECT s.id " + query + ")", (identifier,),
+                "SELECT COUNT(*) AS n FROM (SELECT s.id " + query + ")",
+                (identifier,),
             ).fetchone()["n"]
             items = [
-                dict(row) for row in connection.execute(
-                    "SELECT s.id AS shot_id,s.source_id,COALESCE(sc.display_name,src.name) AS source_name,s.start,s.end,"
+                dict(row)
+                for row in connection.execute(
+                    "SELECT s.id AS shot_id,s.source_id,COALESCE(sc.display_name,src.name) AS "
+                    "source_name,s.start,s.end,"
                     "SUM(e.status='accepted') AS accepted,SUM(e.status='candidate') AS candidate "
-                    + query + " ORDER BY s.source_id,s.start,s.id LIMIT ? OFFSET ?",
+                    + query
+                    + " ORDER BY s.source_id,s.start,s.id LIMIT ? OFFSET ?",
                     (identifier, limit, offset),
                 )
             ]
@@ -228,7 +236,9 @@ class Persons:
                     value = Entity.model_validate({k: v for k, v in role.items() if k != "id"}).model_copy(
                         update={"actor_ids": [a for a in role["actor_ids"] if a != identifier]}
                     )
-                    db.execute("UPDATE person_entities SET data=? WHERE id=?", (value.model_dump_json(), role["id"]))
+                    db.execute(
+                        "UPDATE person_entities SET data=? WHERE id=?", (value.model_dump_json(), role["id"])
+                    )
             removed = db.execute(f"DELETE FROM person_references WHERE {column}=?", (identifier,)).rowcount
             db.execute("DELETE FROM person_entities WHERE id=?", (identifier,))
         return {"deleted": identifier, "removed_references": removed}
@@ -262,14 +272,14 @@ class Persons:
             prune_default_work(db, source_id)
 
     def image(self, raw, namespace="references", *, max_edge=0, image_format="PNG", jpeg_quality=85):
-        content, width, height = encode_frame(raw, max_edge=max_edge, image_format=image_format,
-                                             jpeg_quality=jpeg_quality)
+        content, width, height = encode_frame(
+            raw, max_edge=max_edge, image_format=image_format, jpeg_quality=jpeg_quality
+        )
         digest = hashlib.sha256(content).hexdigest()
         extension = "jpg" if image_format == "JPEG" else "png"
         relative = f"persons/{namespace}/{digest}.{extension}"
         path = self.store.root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
-        from mindex.shared import files
 
         files.save_bytes(self.store, path, content)
         return {"path": relative, "digest": digest, "width": width, "height": height}
@@ -325,7 +335,9 @@ class Persons:
 
     def references(self):
         # 一次查询取全部参考图，避免逐条 reference() 的 N+1 查询（人物库首屏会调用）。
-        return [_reference_value(r) for r in self.store.rows("SELECT * FROM person_references ORDER BY rowid")]
+        return [
+            _reference_value(r) for r in self.store.rows("SELECT * FROM person_references ORDER BY rowid")
+        ]
 
     def update_reference(self, identifier, actor_id=None, entity=None, role_id=None):
         """Save reference pairing and the selected identity's metadata atomically."""
@@ -358,7 +370,8 @@ class Persons:
                 identifier = duplicate["id"]
             else:
                 db.execute(
-                    "UPDATE person_references SET actor_id=?,role_id=? WHERE id=?", (actor_id, role_id, identifier)
+                    "UPDATE person_references SET actor_id=?,role_id=? WHERE id=?",
+                    (actor_id, role_id, identifier),
                 )
         return self.reference(identifier)
 
@@ -485,7 +498,10 @@ class Persons:
         for index, entry in enumerate(kept):
             if entry.image_id not in images:
                 raise ValueError("原图不属于此草稿")
-            with self.store.materialize_media(images[entry.image_id]["path"]) as materialized, Image.open(materialized) as image:
+            with (
+                self.store.materialize_media(images[entry.image_id]["path"]) as materialized,
+                Image.open(materialized) as image,
+            ):
                 box = checked_box(entry.bbox, *image.size) if entry.bbox is not None else None
                 buffer = io.BytesIO()
                 if box:
@@ -598,7 +614,8 @@ class Persons:
                     )["id"]
                 reference = None
                 if crop:
-                    # 与 add_reference 同口径（演员级参考图，role_id 为 NULL）：按内容寻址 digest 判断是否已存在。
+                    # 与 add_reference 同口径（演员级参考图，role_id 为 NULL）：
+                    # 按内容寻址 digest 判断是否已存在。
                     digest = tx.image(crop)["digest"]
                     exists = db.execute(
                         "SELECT id FROM person_references WHERE actor_id=? AND role_id IS NULL AND digest=? "
@@ -622,9 +639,7 @@ class Persons:
             db.execute(
                 "UPDATE person_imports SET status='confirmed',data=? WHERE id=? AND status='draft'",
                 (
-                    dumps(
-                        {**draft, "confirmed": confirmed, "entries": [e.model_dump() for e in kept]}
-                    ),
+                    dumps({**draft, "confirmed": confirmed, "entries": [e.model_dump() for e in kept]}),
                     identifier,
                 ),
             )
@@ -652,10 +667,7 @@ class Persons:
             if not body.role_id:
                 raise ValueError("出镜审核必须指定角色")
             role = self.entity(body.role_id, "role")
-            if (
-                self.work_for(row["source_id"]) not in role["work_ids"]
-                or actor_id not in role["actor_ids"]
-            ):
+            if self.work_for(row["source_id"]) not in role["work_ids"] or actor_id not in role["actor_ids"]:
                 raise ValueError("演员与作品角色关系不符")
         data = json.loads(row["data"]) | {
             "evidence_type": "manual",
@@ -710,13 +722,21 @@ class Persons:
                     "INSERT INTO person_evidence VALUES(?,?,?,?,?,?,?,?,?,?)",
                     (
                         fingerprint(["shot-review-empty-v1", body.source_id, body.shot_id]),
-                        body.source_id, body.shot_id, None, None, None,
-                        shot["start"], shot["end"], "rejected",
+                        body.source_id,
+                        body.shot_id,
+                        None,
+                        None,
+                        None,
+                        shot["start"],
+                        shot["end"],
+                        "rejected",
                         dumps({"evidence_type": "manual", "confirmation": "shot_review", "reviewed": True}),
                     ),
                 )
             for (actor_id, role_id), identifier in marks.items():
-                image = existing_frame(self.store, [r for r in decoded_rows if r["actor_id"] == actor_id], fallback)
+                image = existing_frame(
+                    self.store, [r for r in decoded_rows if r["actor_id"] == actor_id], fallback
+                )
                 original_score = self.original_score(decoded_rows, actor_id, role_id)
                 db.execute(
                     "INSERT OR REPLACE INTO person_evidence VALUES(?,?,?,?,?,?,?,?,?,?)",
@@ -751,7 +771,14 @@ class Persons:
                 db.execute(
                     "UPDATE person_evidence SET status='rejected',data=? WHERE id=?",
                     (
-                        dumps(json.loads(row["data"]) | {"reviewed": True, "confirmation": "shot_review", "shot_excluded": not body.selections}),
+                        dumps(
+                            json.loads(row["data"])
+                            | {
+                                "reviewed": True,
+                                "confirmation": "shot_review",
+                                "shot_excluded": not body.selections,
+                            }
+                        ),
                         row["id"],
                     ),
                 )
@@ -763,7 +790,11 @@ class Persons:
 
     @staticmethod
     def evidence_score(value):
-        return value if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) else None
+        return (
+            value
+            if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+            else None
+        )
 
     @classmethod
     def original_score(cls, rows, actor_id, role_id):
@@ -788,19 +819,36 @@ class Persons:
         """补充每位确认人物的分数与来源；旧人工记录从保留的原始帧恢复分数。"""
         result = []
         for person in people:
-            matching = [r for r in rows if r["status"] == "accepted" and r["actor_id"] == person["actor_id"]
-                        and r["role_id"] == person["role_id"]]
+            matching = [
+                r
+                for r in rows
+                if r["status"] == "accepted"
+                and r["actor_id"] == person["actor_id"]
+                and r["role_id"] == person["role_id"]
+            ]
             manual_rows = [r for r in matching if r["data"].get("evidence_type") == "manual"]
             if manual_rows:
-                recorded = [cls.evidence_score(r["data"].get("original_score")) for r in manual_rows
-                            if "original_score" in r["data"]]
-                original = max((s for s in recorded if s is not None), default=None) if recorded else cls.original_score(
-                    rows, person["actor_id"], person["role_id"],
+                recorded = [
+                    cls.evidence_score(r["data"].get("original_score"))
+                    for r in manual_rows
+                    if "original_score" in r["data"]
+                ]
+                original = (
+                    max((s for s in recorded if s is not None), default=None)
+                    if recorded
+                    else cls.original_score(
+                        rows,
+                        person["actor_id"],
+                        person["role_id"],
+                    )
                 )
                 score = original
             else:
                 original = None
-                score = max((s for r in matching if (s := cls.evidence_score(r["data"].get("score"))) is not None), default=None)
+                score = max(
+                    (s for r in matching if (s := cls.evidence_score(r["data"].get("score"))) is not None),
+                    default=None,
+                )
             result.append({**person, "score": score, "original_score": original, "manual": bool(manual_rows)})
         return result
 
@@ -837,7 +885,8 @@ class Persons:
         "AND (json_extract(e.data,'$.shot_excluded')=1 OR removed.shot_id IS NULL) "
         "THEN 1 ELSE 0 END) AS rejected "
         "FROM person_evidence e JOIN segments s ON s.id=e.shot_id AND s.source_id=e.source_id "
-        "LEFT JOIN valid_pairs pair ON pair.source_id=e.source_id AND pair.role_id=e.role_id AND pair.actor_id=e.actor_id "
+        "LEFT JOIN valid_pairs pair ON pair.source_id=e.source_id AND pair.role_id=e.role_id AND "
+        "pair.actor_id=e.actor_id "
         "LEFT JOIN (SELECT source_id,shot_id FROM person_evidence WHERE status='accepted' "
         "AND json_extract(data,'$.confirmation')='shot_review' GROUP BY source_id,shot_id) marks "
         "ON marks.source_id=e.source_id AND marks.shot_id=e.shot_id "
@@ -861,11 +910,13 @@ class Persons:
     def _build_review_tables(self, db, source_id=None, shot_id=None):
         """在当前连接里建两张临时表，供审核列表的多条语句共用：
 
-        review_ev      证据行及其用到的 JSON 字段（经 person_evidence_review 覆盖索引读取，不碰 data 溢出页）。
-        review_states  分镜级 accepted/candidate/rejected 计数，语义与 SHOT_STATES 相同。
+                review_ev      证据行及其用到的 JSON 字段（经 person_evidence_review 覆盖索引读取，
+                不碰 data 溢出页）
+        。
+                review_states  分镜级 accepted/candidate/rejected 计数，语义与 SHOT_STATES 相同。
 
-        分镜状态只取决于该分镜自己的证据行，所以素材/分镜过滤直接下推到 review_ev。
-        临时表只存在于本连接，不写主库；SHOT_STATES 保持原样，流水线按单个分镜调用它。
+                分镜状态只取决于该分镜自己的证据行，所以素材/分镜过滤直接下推到 review_ev。
+                临时表只存在于本连接，不写主库；SHOT_STATES 保持原样，流水线按单个分镜调用它。
         """
         conditions, args = [], []
         for column, value in (("source_id", source_id), ("shot_id", shot_id)):
@@ -874,19 +925,27 @@ class Persons:
                 args.append(value)
         ev_where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
         coverage_where = "".join(
-            " AND " + column + "=?" for column, value in (("s.source_id", source_id), ("s.id", shot_id)) if value
+            " AND " + column + "=?"
+            for column, value in (("s.source_id", source_id), ("s.id", shot_id))
+            if value
         )
         coverage_args = list(args)
         review_ev_sql = (
             "CREATE TEMP TABLE review_ev AS SELECT id,source_id,shot_id,actor_id,role_id,status,start,"
-            "json_extract(data,'$.confirmation') AS confirmation,json_extract(data,'$.shot_excluded') AS excluded,"
+            "json_extract(data,'$.confirmation') AS confirmation,json_extract(data,'$.shot_excluded') AS "
+            "excluded,"
             "json_type(data,'$.score') AS score_type,json_extract(data,'$.score') AS score_value,"
-            "json_extract(data,'$.reviewed_at') AS reviewed_at FROM person_evidence" + ev_where)
+            "json_extract(data,'$.reviewed_at') AS reviewed_at FROM person_evidence" + ev_where
+        )
         if self.store.pg:
             # 连接池复用连接：临时表以 ON COMMIT DROP 在事务结束时消失，并清掉任何残留。
             db.execute("DROP TABLE IF EXISTS review_ev")
-            db.execute(review_ev_sql.replace(
-                "CREATE TEMP TABLE review_ev AS", "CREATE TEMP TABLE review_ev ON COMMIT DROP AS"), args)
+            db.execute(
+                review_ev_sql.replace(
+                    "CREATE TEMP TABLE review_ev AS", "CREATE TEMP TABLE review_ev ON COMMIT DROP AS"
+                ),
+                args,
+            )
         else:
             db.execute(review_ev_sql, args)
         review_states_sql = (
@@ -906,7 +965,8 @@ class Persons:
             "SUM(CASE WHEN e.status='rejected' AND e.confirmation='shot_review' AND marks.shot_id IS NULL "
             "AND (e.excluded=1 OR removed.shot_id IS NULL) THEN 1 ELSE 0 END) AS rejected "
             "FROM review_ev e JOIN segments s ON s.id=e.shot_id AND s.source_id=e.source_id "
-            "LEFT JOIN valid_pairs pair ON pair.source_id=e.source_id AND pair.role_id=e.role_id AND pair.actor_id=e.actor_id "
+            "LEFT JOIN valid_pairs pair ON pair.source_id=e.source_id AND pair.role_id=e.role_id AND "
+            "pair.actor_id=e.actor_id "
             "LEFT JOIN marks ON marks.source_id=e.source_id AND marks.shot_id=e.shot_id "
             "LEFT JOIN removed ON removed.source_id=e.source_id AND removed.shot_id=e.shot_id "
             "WHERE s.kind='shot' GROUP BY e.shot_id,e.source_id "
@@ -920,23 +980,34 @@ class Persons:
             db.execute("CREATE INDEX review_ev_shot ON review_ev(source_id,shot_id)")
             db.execute("DROP TABLE IF EXISTS review_states")
             db.execute(
-                review_states_sql
-                .replace("CREATE TEMP TABLE review_states AS WITH",
-                         "CREATE TEMP TABLE review_states ON COMMIT DROP AS WITH")
-                .replace("JOIN json_each(role.data,'$.actor_ids') performer",
-                         "CROSS JOIN jsonb_array_elements(role.data::jsonb->'actor_ids') performer")
-                .replace("JOIN json_each(role.data,'$.work_ids')",
-                         "CROSS JOIN jsonb_array_elements(role.data::jsonb->'work_ids')")
+                review_states_sql.replace(
+                    "CREATE TEMP TABLE review_states AS WITH",
+                    "CREATE TEMP TABLE review_states ON COMMIT DROP AS WITH",
+                )
+                .replace(
+                    "JOIN json_each(role.data,'$.actor_ids') performer",
+                    "CROSS JOIN jsonb_array_elements(role.data::jsonb->'actor_ids') performer",
+                )
+                .replace(
+                    "JOIN json_each(role.data,'$.work_ids')",
+                    "CROSS JOIN jsonb_array_elements(role.data::jsonb->'work_ids')",
+                )
                 .replace("performer.value AS actor_id", "(performer.value #>> '{}') AS actor_id")
                 .replace("actor.id=performer.value", "actor.id=(performer.value #>> '{}')")
                 .replace("value=ps.work_id", "(value #>> '{}')=ps.work_id")
-                .replace("json_extract(data,'$.removed_confirmation')=1",
-                         "(CASE WHEN (data::jsonb->'removed_confirmation')='true'::jsonb THEN 1"
-                         " WHEN (data::jsonb->'removed_confirmation')='false'::jsonb THEN 0 ELSE 0 END)=1")
-                .replace("SUM(e.status='accepted' AND pair.role_id IS NOT NULL)",
-                         "SUM(CASE WHEN e.status='accepted' AND pair.role_id IS NOT NULL THEN 1 ELSE 0 END)")
-                .replace("SUM(e.status='candidate' AND pair.role_id IS NOT NULL)",
-                         "SUM(CASE WHEN e.status='candidate' AND pair.role_id IS NOT NULL THEN 1 ELSE 0 END)")
+                .replace(
+                    "json_extract(data,'$.removed_confirmation')=1",
+                    "(CASE WHEN (data::jsonb->'removed_confirmation')='true'::jsonb THEN 1"
+                    " WHEN (data::jsonb->'removed_confirmation')='false'::jsonb THEN 0 ELSE 0 END)=1",
+                )
+                .replace(
+                    "SUM(e.status='accepted' AND pair.role_id IS NOT NULL)",
+                    "SUM(CASE WHEN e.status='accepted' AND pair.role_id IS NOT NULL THEN 1 ELSE 0 END)",
+                )
+                .replace(
+                    "SUM(e.status='candidate' AND pair.role_id IS NOT NULL)",
+                    "SUM(CASE WHEN e.status='candidate' AND pair.role_id IS NOT NULL THEN 1 ELSE 0 END)",
+                )
                 .replace("s.id=json_extract(c.data,'$.shot_id')", "s.id=(c.data::jsonb->>'shot_id')"),
                 coverage_args,
             )
@@ -965,21 +1036,50 @@ class Persons:
         return summary
 
     def review_shots(
-        self, source_id=None, status=None, *, limit=50, offset=0, shot_id=None,
-        actor_id=None, role_id=None, no_candidate=False, compact=False,
+        self,
+        source_id=None,
+        status=None,
+        *,
+        limit=50,
+        offset=0,
+        shot_id=None,
+        actor_id=None,
+        role_id=None,
+        no_candidate=False,
+        compact=False,
     ):
-        """按分镜分组返回证据；规则见 _review_shots。临时表在本连接内建一次，三条聚合语句与逐镜证据查询共用。"""
+        """按分镜分组返回证据；规则见 _review_shots。临时表在本连接内建一次，
+        三条聚合语句与逐镜证据查询共用。
+        """
         with self.store.connect() as db:
             with stage("states_build"):
                 self._build_review_tables(db, source_id, shot_id)
             return self._review_shots(
-                db, source_id, status, limit=limit, offset=offset, shot_id=shot_id,
-                actor_id=actor_id, role_id=role_id, no_candidate=no_candidate, compact=compact,
+                db,
+                source_id,
+                status,
+                limit=limit,
+                offset=offset,
+                shot_id=shot_id,
+                actor_id=actor_id,
+                role_id=role_id,
+                no_candidate=no_candidate,
+                compact=compact,
             )
 
     def _review_shots(
-        self, db, source_id=None, status=None, *, limit=50, offset=0, shot_id=None,
-        actor_id=None, role_id=None, no_candidate=False, compact=False,
+        self,
+        db,
+        source_id=None,
+        status=None,
+        *,
+        limit=50,
+        offset=0,
+        shot_id=None,
+        actor_id=None,
+        role_id=None,
+        no_candidate=False,
+        compact=False,
     ):
         """按分镜分组返回证据。
 
@@ -1023,21 +1123,26 @@ class Persons:
                 "(e.status='accepted') DESC,COALESCE(e.reviewed_at,'') DESC,"
                 "e.start,e.id) AS rank "
                 "FROM review_ev e JOIN scoped s ON s.shot_id=e.shot_id AND s.source_id=e.source_id "
-                "JOIN person_entities a ON a.id=e.actor_id AND a.kind='actor' WHERE " + self.VALID_ROLE + "), "
+                "JOIN person_entities a ON a.id=e.actor_id AND a.kind='actor' WHERE "
+                + self.VALID_ROLE
+                + "), "
                 "classified AS (SELECT s.*,r.actor_id,r.role_id,r.score FROM scoped s "
                 "LEFT JOIN ranked r ON r.source_id=s.source_id AND r.shot_id=s.shot_id AND r.rank=1), "
-                "confirmed AS (SELECT DISTINCT e.source_id,e.shot_id,e.actor_id,e.role_id FROM person_evidence e "
+                "confirmed AS (SELECT DISTINCT e.source_id,e.shot_id,e.actor_id,e.role_id FROM "
+                "person_evidence e "
                 "JOIN scoped s ON s.source_id=e.source_id AND s.shot_id=e.shot_id "
                 "WHERE e.status='accepted' AND " + self.VALID_ROLE + "), "
                 "memberships AS (SELECT * FROM confirmed UNION ALL "
                 "SELECT source_id,shot_id,actor_id,role_id FROM classified "
                 "WHERE accepted=0 AND (candidate>0 OR rejected=0) UNION ALL "
                 "SELECT s.source_id,s.shot_id,NULL,NULL FROM classified s WHERE s.accepted>0 "
-                "AND NOT EXISTS (SELECT 1 FROM confirmed c WHERE c.source_id=s.source_id AND c.shot_id=s.shot_id)) "
+                "AND NOT EXISTS (SELECT 1 FROM confirmed c WHERE c.source_id=s.source_id AND "
+                "c.shot_id=s.shot_id)) "
             )
             with stage("filters_sql"):
                 filters = self._rows(
-                    db, query + "SELECT actor_id,role_id,COUNT(*) AS count FROM memberships "
+                    db,
+                    query + "SELECT actor_id,role_id,COUNT(*) AS count FROM memberships "
                     "GROUP BY actor_id,role_id ORDER BY actor_id,role_id",
                     args,
                 )
@@ -1049,14 +1154,20 @@ class Persons:
         if status == "rejected":
             total = scope_total
         elif no_candidate:
-            pair_where = " WHERE EXISTS (SELECT 1 FROM memberships m WHERE " + membership_match + " AND m.actor_id IS NULL)"
+            pair_where = (
+                " WHERE EXISTS (SELECT 1 FROM memberships m WHERE "
+                + membership_match
+                + " AND m.actor_id IS NULL)"
+            )
             total = sum(f["count"] for f in filters if f["actor_id"] is None)
         elif actor_id:
-            pair_where = " WHERE EXISTS (SELECT 1 FROM memberships m WHERE " + membership_match + " AND m.actor_id=? AND m.role_id IS ?)"
-            pair_args.extend([actor_id, role_id])
-            total = sum(
-                f["count"] for f in filters if f["actor_id"] == actor_id and f["role_id"] == role_id
+            pair_where = (
+                " WHERE EXISTS (SELECT 1 FROM memberships m WHERE "
+                + membership_match
+                + " AND m.actor_id=? AND m.role_id IS ?)"
             )
+            pair_args.extend([actor_id, role_id])
+            total = sum(f["count"] for f in filters if f["actor_id"] == actor_id and f["role_id"] == role_id)
         else:
             total = scope_total
         if status == "rejected":
@@ -1066,26 +1177,43 @@ class Persons:
                 "(SELECT COALESCE(jsonb_agg(jsonb_build_object("
                 "'actor_id',actor_id,'role_id',role_id) ORDER BY actor_id,role_id),'[]'::jsonb)::text "
                 "FROM (SELECT actor_id,role_id FROM confirmed c "
-                "WHERE c.source_id=s.source_id AND c.shot_id=s.shot_id) q)")
+                "WHERE c.source_id=s.source_id AND c.shot_id=s.shot_id) q)"
+            )
         else:
             confirmed_people = (
                 "(SELECT json_group_array(json_object('actor_id',actor_id,'role_id',role_id)) "
                 "FROM (SELECT actor_id,role_id FROM confirmed c "
-                "WHERE c.source_id=s.source_id AND c.shot_id=s.shot_id ORDER BY actor_id,role_id))")
+                "WHERE c.source_id=s.source_id AND c.shot_id=s.shot_id ORDER BY actor_id,role_id))"
+            )
         with stage("page_sql"):
             shots = self._rows(
-                db, query + "SELECT s.*," + confirmed_people + " AS confirmed_people FROM classified s" + pair_where
+                db,
+                query
+                + "SELECT s.*,"
+                + confirmed_people
+                + " AS confirmed_people FROM classified s"
+                + pair_where
                 + " ORDER BY s.source_id,s.start,s.shot_id LIMIT ? OFFSET ?",
                 [*pair_args, limit, offset],
             )
         items = []
         for shot in shots:
             if not compact:
-                evidence_sql = ("SELECT * FROM person_evidence e WHERE source_id=? AND shot_id=? AND "
-                                + self.VALID_ROLE + " ORDER BY start,id")
+                evidence_sql = (
+                    "SELECT * FROM person_evidence e WHERE source_id=? AND shot_id=? AND "
+                    + self.VALID_ROLE
+                    + " ORDER BY start,id"
+                )
             elif self.store.pg:
-                score = r"(CASE WHEN (data::jsonb->>'score') ~ '^-?[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?$' THEN (data::jsonb->>'score')::numeric END)"
-                original = r"(CASE WHEN (data::jsonb->>'original_score') ~ '^-?[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?$' THEN (data::jsonb->>'original_score')::numeric END)"
+                score = (
+                    r"(CASE WHEN (data::jsonb->>'score') ~ '^-?[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?$'"
+                    r" THEN (data::jsonb->>'score')::numeric END)"
+                )
+                original = (
+                    r"(CASE WHEN (data::jsonb->>'original_score') ~"
+                    r" '^-?[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?$'"
+                    r" THEN (data::jsonb->>'original_score')::numeric END)"
+                )
                 evidence_sql = (
                     "SELECT id,actor_id,role_id,status,jsonb_build_object("
                     "'score'," + score + ",'original_score'," + original + ","
@@ -1093,22 +1221,32 @@ class Persons:
                     "'confirmation',(data::jsonb->>'confirmation'),"
                     "'image_path',(data::jsonb->>'image_path'))::text "
                     "AS data,jsonb_typeof(data::jsonb->'original_score') IS NOT NULL AS original_recorded "
-                    "FROM person_evidence e WHERE source_id=? AND shot_id=? AND " + self.VALID_ROLE
-                    + " ORDER BY start,id")
+                    "FROM person_evidence e WHERE source_id=? AND shot_id=? AND "
+                    + self.VALID_ROLE
+                    + " ORDER BY start,id"
+                )
             else:
                 evidence_sql = (
-                    "SELECT id,actor_id,role_id,status,json_object("
-                    "'score',json_extract(data,'$.score'),'original_score',json_extract(data,'$.original_score'),"
-                    "'evidence_type',json_extract(data,'$.evidence_type'),'confirmation',json_extract(data,'$.confirmation'),"
-                    "'image_path',json_extract(data,'$.image_path')) "
-                    "AS data,json_type(data,'$.original_score') IS NOT NULL AS original_recorded "
-                    "FROM person_evidence e WHERE source_id=? AND shot_id=? AND " + self.VALID_ROLE + " ORDER BY start,id")
+                    (
+                        "SELECT id,actor_id,role_id,status,json_object('score',json_extract(data,'$.score')"
+                        ",'original_score',json_extract(data,'$.original_score')"
+                        ",'evidence_type',json_extract(data,'$.evidence_type')"
+                        ",'confirmation',json_extract(data,'$.confirmation')"
+                        ",'image_path',json_extract(data,'$.image_path')) AS "
+                        "data,json_type(data,'$.original_score') IS NOT NULL AS original_recorded FROM "
+                        "person_evidence e WHERE source_id=? AND shot_id=? AND "
+                    )
+                    + self.VALID_ROLE
+                    + " ORDER BY start,id"
+                )
             raw_rows = []
             with stage("evidence_sql"):
                 fetched = self._rows(db, evidence_sql, (shot["source_id"], shot["shot_id"]))
             with stage("json_decode"):
                 for row in fetched:
-                    data = {k: v for k, v in json.loads(row["data"]).items() if k not in {"body_feature", "space"}}
+                    data = {
+                        k: v for k, v in json.loads(row["data"]).items() if k not in {"body_feature", "space"}
+                    }
                     if compact and not row["original_recorded"]:
                         data.pop("original_score", None)
                     raw_rows.append({**row, "data": data})
@@ -1118,7 +1256,9 @@ class Persons:
                 if not row["actor_id"] or row["data"].get("evidence_type") == "manual":
                     continue
                 key = (row["actor_id"], row["role_id"])
-                person = recognized.setdefault(key, {"actor_id": key[0], "role_id": key[1], "score": None, "observations": 0})
+                person = recognized.setdefault(
+                    key, {"actor_id": key[0], "role_id": key[1], "score": None, "observations": 0}
+                )
                 person["observations"] += 1
                 score = self.evidence_score(row["data"].get("score"))
                 if score is not None:
@@ -1135,17 +1275,21 @@ class Persons:
                 {
                     **{k: shot[k] for k in ("shot_id", "source_id", "start", "end")},
                     "candidate": {
-                        "actor_id": shot["actor_id"], "role_id": shot["role_id"], "score": shot["score"],
-                    } if shot["actor_id"] else None,
+                        "actor_id": shot["actor_id"],
+                        "role_id": shot["role_id"],
+                        "score": shot["score"],
+                    }
+                    if shot["actor_id"]
+                    else None,
                     "confirmed_people": people,
                     "recognized_people": list(recognized.values()),
-                    "counts": {
-                        key: shot[key]
-                        for key in ("accepted", "candidate", "rejected")
-                    },
+                    "counts": {key: shot[key] for key in ("accepted", "candidate", "rejected")},
                     "image_url": next(
-                        (f"/api/persons/evidence/{r['id']}/image" for r in sorted(raw_rows, key=frame_rank)
-                         if r.get("data", {}).get("image_path")),
+                        (
+                            f"/api/persons/evidence/{r['id']}/image"
+                            for r in sorted(raw_rows, key=frame_rank)
+                            if r.get("data", {}).get("image_path")
+                        ),
                         f"/api/admin/segments/{shot['shot_id']}/thumbnail",
                     ),
                     "evidence": rows,
@@ -1179,7 +1323,6 @@ class Persons:
         ]
 
     def publish(self, content_id=None, *, source_id=None, progress=None):
-        from mindex.shared.db.fencing import publication_scope
 
         with publication_scope(self.store, only_attempt=True):
             return self._publish(content_id, source_id=source_id, progress=progress)
@@ -1209,7 +1352,7 @@ class Persons:
                 current = db.execute("SELECT value FROM settings WHERE key='active'").fetchone()
                 if not current:
                     raise ValueError("请先发布内容索引")
-                content_id = current['value']
+                content_id = current["value"]
             ready = db.execute("SELECT status FROM index_versions WHERE id=?", (content_id,)).fetchone()
             if not ready or ready["status"] != "ready":
                 raise ValueError("内容索引尚未就绪")
@@ -1219,7 +1362,11 @@ class Persons:
             ]
             evidence = [
                 {**dict(r), "data": json.loads(r["data"])}
-                for r in db.execute("SELECT * FROM person_evidence e WHERE status='accepted' AND " + self.VALID_ROLE + " ORDER BY id")
+                for r in db.execute(
+                    "SELECT * FROM person_evidence e WHERE status='accepted' AND "
+                    + self.VALID_ROLE
+                    + " ORDER BY id"
+                )
             ]
             coverage = [
                 dict(r) | {"data": json.loads(r["data"])}
@@ -1255,7 +1402,8 @@ class Persons:
                 "SELECT * FROM search_releases WHERE content_id=? ORDER BY rowid DESC LIMIT 1", (content_id,)
             )
         return self.store.one(
-            "SELECT r.* FROM search_releases r JOIN settings s ON s.value=r.id WHERE s.key='active.release' AND r.content_id=?",
+            "SELECT r.* FROM search_releases r JOIN settings s ON s.value=r.id WHERE s.key='active.release' "
+            "AND r.content_id=?",
             (content_id,),
         )
 
@@ -1273,7 +1421,9 @@ class Persons:
 
     def _version_key(self, person_id):
         """person_versions 行按内容寻址、写入后不可变；长度进键，防同 id 被离线迁移改写后读到旧缓存。"""
-        row = self.store.one("SELECT length(CAST(data AS BLOB)) AS n FROM person_versions WHERE id=?", (person_id,))
+        row = self.store.one(
+            "SELECT length(CAST(data AS BLOB)) AS n FROM person_versions WHERE id=?", (person_id,)
+        )
         return ((self.store.cache_identity), person_id, row["n"]) if row else None
 
     def _version_image_index(self, version_id):
@@ -1291,12 +1441,18 @@ class Persons:
         index: dict = {}
         for row in self.store.rows(
             "SELECT json_extract(e.value,'$.id') AS id,json_extract(e.value,'$.shot_id') AS shot_id,"
-            "json_extract(e.value,'$.source_id') AS source_id,json_extract(e.value,'$.data.image_path') AS image_path "
-            "FROM person_versions v,json_each(v.data,'$.evidence') e WHERE v.id=?", (version_id,),
+            "json_extract(e.value,'$.source_id') AS source_id,json_extract(e.value,'$.data.image_path') AS "
+            "image_path "
+            "FROM person_versions v,json_each(v.data,'$.evidence') e WHERE v.id=?",
+            (version_id,),
         ):
-            index.setdefault(row["id"], []).append({
-                "shot_id": row["shot_id"], "source_id": row["source_id"], "data": {"image_path": row["image_path"]},
-            })
+            index.setdefault(row["id"], []).append(
+                {
+                    "shot_id": row["shot_id"],
+                    "source_id": row["source_id"],
+                    "data": {"image_path": row["image_path"]},
+                }
+            )
         return _cache_put(_VERSION_IMAGE_CACHE, key, index, VERSION_IMAGE_CACHE_ENTRIES)
 
     def version_evidence(self, evidence_id):
@@ -1315,7 +1471,9 @@ class Persons:
             return cached
         row = self.store.one(
             "SELECT json_extract(data,'$.entities') AS entities, json_extract(data,'$.format') AS format "
-            "FROM person_versions WHERE id=?", (person_id,))
+            "FROM person_versions WHERE id=?",
+            (person_id,),
+        )
         entities = json.loads(row["entities"] or "[]")
         lookup = {e["id"]: e for e in entities}
         value = {"entities": [normalize_entity(e, lookup) for e in entities]}
@@ -1346,25 +1504,36 @@ class Persons:
                 detail.pop("body_feature", None)
                 if detail.get("space") is not None:
                     detail["space"] = spaces.setdefault(dumps(detail["space"]), detail["space"])
-        from mindex.persons.person_names import EvidenceIndex
 
-        return _cache_put(_EVIDENCE_CACHE, key, {
-            "evidence": data["evidence"], "coverage": data["coverage"],
-            "evidence_index": EvidenceIndex(data["evidence"]),  # 区间索引随版本缓存，查询时不再逐条扫描
-        })
+        return _cache_put(
+            _EVIDENCE_CACHE,
+            key,
+            {
+                "evidence": data["evidence"],
+                "coverage": data["coverage"],
+                "evidence_index": EvidenceIndex(data["evidence"]),  # 区间索引随版本缓存，查询时不再逐条扫描
+            },
+        )
 
     def evidence_for(self, release, *, sources, identifiers, intervals=None):
         """PG 人物查询按候选素材与身份投影，避免下载和缓存整版人物证据。"""
         if not self.store.pg:
             return self.published_evidence(release)
-        from mindex.persons.person_names import EvidenceIndex
 
         version_id = release["person_id"] if release else None
         sources, identifiers = sorted(set(sources)), sorted(set(identifiers))
         if not version_id or not sources or not identifiers:
             return {"evidence": [], "coverage": [], "evidence_index": EvidenceIndex([])}
-        ranges = dumps([{"source_id": s["source_id"], "begin_time": s["start"], "end_time": s["end"]}
-                        for s in intervals]) if intervals is not None else None
+        ranges = (
+            dumps(
+                [
+                    {"source_id": s["source_id"], "begin_time": s["start"], "end_time": s["end"]}
+                    for s in intervals
+                ]
+            )
+            if intervals is not None
+            else None
+        )
 
         def window_filter(alias, *, coverage=False):
             if ranges is None:
@@ -1372,30 +1541,43 @@ class Persons:
             begin = f"{alias}.value->'data'->>'start'" if coverage else f"{alias}.value->>'start'"
             end = f"{alias}.value->'data'->>'end'" if coverage else f"{alias}.value->>'end'"
             tolerance = " + 0.000001" if coverage else ""
-            return (" AND EXISTS (SELECT 1 FROM jsonb_to_recordset(?::jsonb) "
-                    "AS w(source_id text,begin_time double precision,end_time double precision) "
-                    f"WHERE w.source_id={alias}.value->>'source_id' "
-                    f"AND ({begin})::double precision < w.end_time{tolerance} "
-                    f"AND ({end})::double precision{tolerance} > w.begin_time)", (ranges,))
+            return (
+                " AND EXISTS (SELECT 1 FROM jsonb_to_recordset(?::jsonb) "
+                "AS w(source_id text,begin_time double precision,end_time double precision) "
+                f"WHERE w.source_id={alias}.value->>'source_id' "
+                f"AND ({begin})::double precision < w.end_time{tolerance} "
+                f"AND ({end})::double precision{tolerance} > w.begin_time)",
+                (ranges,),
+            )
 
         evidence_filter, evidence_args = window_filter("e")
-        evidence = [json.loads(row["item"]) for row in self.store.rows(
-            "SELECT (e.value #- '{data,body_feature}')::text AS item FROM person_versions p "
-            "CROSS JOIN LATERAL jsonb_array_elements(p.data::jsonb->'evidence') "
-            "WITH ORDINALITY AS e(value,position) WHERE p.id=? "
-            "AND e.value->>'source_id'=ANY(?::text[]) "
-            "AND (e.value->>'actor_id'=ANY(?::text[]) "
-            "OR COALESCE(e.value->>'stage_id',e.value->>'role_id')=ANY(?::text[]))" + evidence_filter + " ORDER BY e.position",
-            (version_id, sources, identifiers, identifiers, *evidence_args))]
+        evidence = [
+            json.loads(row["item"])
+            for row in self.store.rows(
+                "SELECT (e.value #- '{data,body_feature}')::text AS item FROM person_versions p "
+                "CROSS JOIN LATERAL jsonb_array_elements(p.data::jsonb->'evidence') "
+                "WITH ORDINALITY AS e(value,position) WHERE p.id=? "
+                "AND e.value->>'source_id'=ANY(?::text[]) "
+                "AND (e.value->>'actor_id'=ANY(?::text[]) "
+                "OR COALESCE(e.value->>'stage_id',e.value->>'role_id')=ANY(?::text[]))"
+                + evidence_filter
+                + " ORDER BY e.position",
+                (version_id, sources, identifiers, identifiers, *evidence_args),
+            )
+        ]
         for item in evidence:
             item["role_id"] = item.pop("stage_id", None) or item["role_id"]
         coverage_filter, coverage_args = window_filter("c", coverage=True)
-        coverage = [json.loads(row["item"]) for row in self.store.rows(
-            "SELECT c.value::text AS item FROM person_versions p "
-            "CROSS JOIN LATERAL jsonb_array_elements(p.data::jsonb->'coverage') "
-            "WITH ORDINALITY AS c(value,position) WHERE p.id=? "
-            "AND c.value->>'source_id'=ANY(?::text[])" + coverage_filter + " ORDER BY c.position",
-            (version_id, sources, *coverage_args))]
+        coverage = [
+            json.loads(row["item"])
+            for row in self.store.rows(
+                "SELECT c.value::text AS item FROM person_versions p "
+                "CROSS JOIN LATERAL jsonb_array_elements(p.data::jsonb->'coverage') "
+                "WITH ORDINALITY AS c(value,position) WHERE p.id=? "
+                "AND c.value->>'source_id'=ANY(?::text[])" + coverage_filter + " ORDER BY c.position",
+                (version_id, sources, *coverage_args),
+            )
+        ]
         return {"evidence": evidence, "coverage": coverage, "evidence_index": EvidenceIndex(evidence)}
 
     def published(self, content_id, *, pinned=False, release_id=None, source_id=None):
@@ -1405,20 +1587,31 @@ class Persons:
             row = self.store.one(
                 "SELECT jsonb_build_object("
                 "'entities','[]'::jsonb,"
-                "'evidence',COALESCE((SELECT jsonb_agg(value) FROM jsonb_array_elements(data::jsonb->'evidence') "
+                "'evidence',COALESCE((SELECT jsonb_agg(value) FROM "
+                "jsonb_array_elements(data::jsonb->'evidence') "
                 "WHERE (value::jsonb->>'source_id')=?),'[]'::jsonb),"
-                "'coverage',COALESCE((SELECT jsonb_agg(value) FROM jsonb_array_elements(data::jsonb->'coverage') "
+                "'coverage',COALESCE((SELECT jsonb_agg(value) FROM "
+                "jsonb_array_elements(data::jsonb->'coverage') "
                 "WHERE (value::jsonb->>'source_id')=?),'[]'::jsonb))::text AS data "
-                "FROM person_versions WHERE id=?", (source_id, source_id, release["person_id"]))
+                "FROM person_versions WHERE id=?",
+                (source_id, source_id, release["person_id"]),
+            )
         elif source_id and release and release["person_id"]:
             row = self.store.one(
                 "SELECT json_object('entities',json('[]'),'evidence',"
-                "(SELECT json_group_array(json(value)) FROM json_each(data,'$.evidence') WHERE json_extract(value,'$.source_id')=?),"
-                "'coverage',(SELECT json_group_array(json(value)) FROM json_each(data,'$.coverage') WHERE json_extract(value,'$.source_id')=?)) AS data "
-                "FROM person_versions WHERE id=?", (source_id, source_id, release["person_id"]))
+                "(SELECT json_group_array(json(value)) FROM json_each(data,'$.evidence') WHERE "
+                "json_extract(value,'$.source_id')=?),"
+                "'coverage',(SELECT json_group_array(json(value)) FROM json_each(data,'$.coverage') WHERE "
+                "json_extract(value,'$.source_id')=?)) AS data "
+                "FROM person_versions WHERE id=?",
+                (source_id, source_id, release["person_id"]),
+            )
         else:
-            row = (self.store.one("SELECT data FROM person_versions WHERE id=?", (release["person_id"],))
-                   if release and release["person_id"] else None)
+            row = (
+                self.store.one("SELECT data FROM person_versions WHERE id=?", (release["person_id"],))
+                if release and release["person_id"]
+                else None
+            )
         value = json.loads(row["data"]) if row else {"entities": [], "evidence": [], "coverage": []}
         lookup = {e["id"]: e for e in value["entities"]}
         value["entities"] = [normalize_entity(e, lookup) for e in value["entities"]]
@@ -1441,11 +1634,13 @@ def prune_default_work(db, source_id):
         return
     if db.execute(
         "SELECT 1 FROM person_entities, json_each(person_entities.data,'$.work_ids') "
-        "WHERE person_entities.kind='role' AND json_each.value=?", (work_id,),
+        "WHERE person_entities.kind='role' AND json_each.value=?",
+        (work_id,),
     ).fetchone():
         return
     if db.execute(
-        "SELECT 1 FROM person_imports WHERE json_extract(data,'$.work_id')=?", (work_id,),
+        "SELECT 1 FROM person_imports WHERE json_extract(data,'$.work_id')=?",
+        (work_id,),
     ).fetchone():
         return
     db.execute("DELETE FROM person_entities WHERE id=?", (work_id,))
@@ -1482,8 +1677,13 @@ def frame_rank(row):
     data = row["data"]
     synthetic = data.get("evidence_type") == "manual" and data.get("confirmation") == "shot_review"
     score = Persons.evidence_score(data.get("original_score") if synthetic else data.get("score"))
-    return (row.get("status") != "accepted", data.get("evidence_type") == "track",
-            score is None, -(score or 0), row["id"])
+    return (
+        row.get("status") != "accepted",
+        data.get("evidence_type") == "track",
+        score is None,
+        -(score or 0),
+        row["id"],
+    )
 
 
 def existing_frame(store, rows, fallback):
@@ -1497,21 +1697,25 @@ def existing_frame(store, rows, fallback):
 def published_frame_paths(store, source_id=None):
     """不可变人物发布快照仍引用的展示文件不能作为任务垃圾删除。"""
     result = {}
-    sql = ("SELECT DISTINCT json_extract(e.value,'$.source_id') AS source_id, "
-           "json_extract(e.value,'$.data.image_path') AS path "
-           "FROM person_versions v,json_each(v.data,'$.evidence') e "
-           "WHERE json_type(e.value,'$.data.image_path')='text'")
+    sql = (
+        "SELECT DISTINCT json_extract(e.value,'$.source_id') AS source_id, "
+        "json_extract(e.value,'$.data.image_path') AS path "
+        "FROM person_versions v,json_each(v.data,'$.evidence') e "
+        "WHERE json_type(e.value,'$.data.image_path')='text'"
+    )
     if source_id is not None:
         sql += " AND json_extract(e.value,'$.source_id')=?"
     for row in store.rows(sql, (source_id,) if source_id is not None else ()):
-        result.setdefault(row['source_id'], set()).add(row['path'])
+        result.setdefault(row["source_id"], set()).add(row["path"])
     return result
 
 
 def retained_frame_paths(store, source_id=None, *, include_published=True):
     groups, result = {}, {}
-    for row in store.rows("SELECT * FROM person_evidence" + (" WHERE source_id=?" if source_id else ""),
-                          (source_id,) if source_id else ()):
+    for row in store.rows(
+        "SELECT * FROM person_evidence" + (" WHERE source_id=?" if source_id else ""),
+        (source_id,) if source_id else (),
+    ):
         row["data"] = json.loads(row["data"])
         groups.setdefault((row["source_id"], row["shot_id"]), []).append(row)
     for (source, _), rows in groups.items():
@@ -1527,16 +1731,18 @@ def retained_frame_paths(store, source_id=None, *, include_published=True):
                 paths.add(path)
                 identities.add(identity)
     # 没有匹配证据的帧同样可能属于待审核镜头，不能只从 evidence 行推导保留集。
-    sql = ("SELECT DISTINCT c.source_id,json_extract(f.value,'$.image_path') AS path "
-           "FROM person_coverage c JOIN person_features p ON p.id=c.cache_id, "
-           "json_each(p.data,'$.frames') f WHERE p.kind='shot' "
-           "AND json_type(f.value,'$.image_path')='text' AND NOT EXISTS "
-           "(SELECT 1 FROM person_evidence e WHERE e.source_id=c.source_id "
-           "AND e.shot_id=json_extract(c.data,'$.shot_id') AND e.status='accepted')")
+    sql = (
+        "SELECT DISTINCT c.source_id,json_extract(f.value,'$.image_path') AS path "
+        "FROM person_coverage c JOIN person_features p ON p.id=c.cache_id, "
+        "json_each(p.data,'$.frames') f WHERE p.kind='shot' "
+        "AND json_type(f.value,'$.image_path')='text' AND NOT EXISTS "
+        "(SELECT 1 FROM person_evidence e WHERE e.source_id=c.source_id "
+        "AND e.shot_id=json_extract(c.data,'$.shot_id') AND e.status='accepted')"
+    )
     if source_id is not None:
-        sql += ' AND c.source_id=?'
+        sql += " AND c.source_id=?"
     for row in store.rows(sql, (source_id,) if source_id is not None else ()):
-        result.setdefault(row['source_id'], set()).add(row['path'])
+        result.setdefault(row["source_id"], set()).add(row["path"])
     if include_published:
         for source, paths in published_frame_paths(store, source_id).items():
             result.setdefault(source, set()).update(paths)
@@ -1545,15 +1751,15 @@ def retained_frame_paths(store, source_id=None, *, include_published=True):
 
 def migrate_frames(config, *, source_id=None, apply=False):
     """Migrate display assets only. Feature vectors, cache IDs and releases stay intact."""
-    from filelock import Timeout
-
-    from mindex.shared import lock_backend
 
     store = Store.open(config)
     try:
-        with lock_backend.acquire_ordered(store, ["pipeline", "index-write"], exclusive=True,
-                                   timeout={"index-write": 10}), \
-                store.run("persons-migrate-frames") if apply else nullcontext():
+        with (
+            lock_backend.acquire_ordered(
+                store, ["pipeline", "index-write"], exclusive=True, timeout={"index-write": 10}
+            ),
+            store.run("persons-migrate-frames") if apply else nullcontext(),
+        ):
             return _migrate_frames(config, store, source_id, apply)
     except Timeout:
         raise ValueError("有离线处理任务或索引发布正在运行，请稍后重试") from None
@@ -1570,8 +1776,17 @@ def _migrate_frames(config, store, source_id, apply):
         sources = {source_id}
     reports = []
     for source in sorted(sources):
-        report = {"source_id": source, "kept_frames": 0, "reencoded": 0, "unchanged": 0,
-                      "deleted_files": 0, "deleted_bytes": 0, "rewritten_evidence": 0, "rewritten_features": 0, "error": None}
+        report = {
+            "source_id": source,
+            "kept_frames": 0,
+            "reencoded": 0,
+            "unchanged": 0,
+            "deleted_files": 0,
+            "deleted_bytes": 0,
+            "rewritten_evidence": 0,
+            "rewritten_features": 0,
+            "error": None,
+        }
         reports.append(report)
         try:
             directory = (base / source).resolve()
@@ -1580,28 +1795,47 @@ def _migrate_frames(config, store, source_id, apply):
             # Defensive protection for imported/cross-source references during a scoped migration.
             prefix = f"persons/frames/{source}/"
             mapping = {}
-            keep = {path for owner, paths in retained.items() if owner != source
-                    for path in paths if path.startswith(prefix)}
+            keep = {
+                path
+                for owner, paths in retained.items()
+                if owner != source
+                for path in paths
+                if path.startswith(prefix)
+            }
             keep.update(path for paths in published.values() for path in paths if path.startswith(prefix))
             for relative in sorted(retained.get(source, set())):
                 path = (store.root / relative).resolve()
                 if not path.is_relative_to(directory):
                     continue  # thumbnails and external namespaces are never migrated or deleted
                 with Image.open(path) as image:
-                    unchanged = (image.format == "JPEG" and path.suffix == ".jpg" and
-                                 (not config.person.frames_max_edge or max(image.size) <= config.person.frames_max_edge))
+                    unchanged = (
+                        image.format == "JPEG"
+                        and path.suffix == ".jpg"
+                        and (
+                            not config.person.frames_max_edge
+                            or max(image.size) <= config.person.frames_max_edge
+                        )
+                    )
                 if unchanged:
                     target = relative
                     report["unchanged"] += 1
                 else:
                     # Preview encodes in memory only; no directories/files/DB writes.
                     if apply:
-                        target = Persons(store).image(path.read_bytes(), "frames/" + source,
-                            max_edge=config.person.frames_max_edge, image_format="JPEG",
-                            jpeg_quality=config.person.frames_jpeg_quality)["path"]
+                        target = Persons(store).image(
+                            path.read_bytes(),
+                            "frames/" + source,
+                            max_edge=config.person.frames_max_edge,
+                            image_format="JPEG",
+                            jpeg_quality=config.person.frames_jpeg_quality,
+                        )["path"]
                     else:
-                        content, _, _ = encode_frame(path.read_bytes(), max_edge=config.person.frames_max_edge,
-                                                     image_format="JPEG", jpeg_quality=config.person.frames_jpeg_quality)
+                        content, _, _ = encode_frame(
+                            path.read_bytes(),
+                            max_edge=config.person.frames_max_edge,
+                            image_format="JPEG",
+                            jpeg_quality=config.person.frames_jpeg_quality,
+                        )
                         target = f"persons/frames/{source}/{hashlib.sha256(content).hexdigest()}.jpg"
                     report["reencoded"] += 1
                 mapping[relative] = target
@@ -1611,9 +1845,13 @@ def _migrate_frames(config, store, source_id, apply):
             with store.connect() as db:
                 if apply:
                     db.execute("BEGIN IMMEDIATE")
-                for table, kind, counter in (("person_evidence", "", "rewritten_evidence"),
-                                             ("person_features", " AND kind='shot'", "rewritten_features")):
-                    for row in db.execute(f"SELECT id,data FROM {table} WHERE source_id=?{kind}", (source,)).fetchall():
+                for table, kind, counter in (
+                    ("person_evidence", "", "rewritten_evidence"),
+                    ("person_features", " AND kind='shot'", "rewritten_features"),
+                ):
+                    for row in db.execute(
+                        f"SELECT id,data FROM {table} WHERE source_id=?{kind}", (source,)
+                    ).fetchall():
                         data = json.loads(row["data"])
                         frames = [data] if table == "person_evidence" else data.get("frames", [])
                         changed = False
@@ -1627,7 +1865,9 @@ def _migrate_frames(config, store, source_id, apply):
                             if apply:
                                 db.execute(f"UPDATE {table} SET data=? WHERE id=?", (dumps(data), row["id"]))
             # Only after commit; a failed/missing retained image aborts deletion for this source.
-            from mindex.maintenance.clean import _iter_files, _prune_empty_parents
+            # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+            from maintenance.clean import _iter_files, _prune_empty_parents
+
             for path in _iter_files(directory):
                 if path.relative_to(store.root).as_posix() not in keep:
                     report["deleted_files"] += 1
@@ -1638,9 +1878,18 @@ def _migrate_frames(config, store, source_id, apply):
         except Exception as exc:  # 按素材隔离失败，转换失败后绝不删除
             log.warning("人物素材 %s 帧布局转换失败", source, exc_info=True)
             report["error"] = str(exc)
-    totals = {key: sum(r[key] for r in reports) for key in
-              ("kept_frames", "reencoded", "unchanged", "deleted_files", "deleted_bytes",
-               "rewritten_evidence", "rewritten_features")}
+    totals = {
+        key: sum(r[key] for r in reports)
+        for key in (
+            "kept_frames",
+            "reencoded",
+            "unchanged",
+            "deleted_files",
+            "deleted_bytes",
+            "rewritten_evidence",
+            "rewritten_features",
+        )
+    }
     return {"applied": apply, "sources": reports, "total": totals}
 
 
@@ -1660,5 +1909,7 @@ def encode_frame(raw, *, max_edge=0, image_format="PNG", jpeg_quality=85):
         if max_edge and max(image.size) > max_edge:
             image = ImageOps.contain(image, (max_edge, max_edge))
         buffer = io.BytesIO()
-        image.save(buffer, format=image_format, **({"quality": jpeg_quality} if image_format == "JPEG" else {}))
+        image.save(
+            buffer, format=image_format, **({"quality": jpeg_quality} if image_format == "JPEG" else {})
+        )
     return buffer.getvalue(), image.width, image.height

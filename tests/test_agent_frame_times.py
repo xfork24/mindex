@@ -7,11 +7,13 @@ import itertools
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from mindex.agent.tools.search import MAX_FRAMES, frame_times, frame_url
+from agent.tools.search import MAX_FRAMES, frame_times, frame_url
 
 # 素材时长范围内的秒数（最长 10 小时）；区间长度包含 0（单帧镜头 / 退化区间）。
 SECONDS = st.floats(min_value=0, max_value=36_000, allow_nan=False, allow_infinity=False)
-LENGTHS = st.one_of(st.just(0.0), st.floats(min_value=0, max_value=7_200, allow_nan=False, allow_infinity=False))
+LENGTHS = st.one_of(
+    st.just(0.0), st.floats(min_value=0, max_value=7_200, allow_nan=False, allow_infinity=False)
+)
 
 
 # Feature: agent-capability-expansion, Property 9: 抽帧时间点

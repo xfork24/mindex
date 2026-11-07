@@ -6,15 +6,15 @@ import asyncio
 import time
 
 import pytest
-from agent_helpers import new_session, send, wait_idle
-from agent_scenarios import build_world
 from fastapi.testclient import TestClient
 
-from mindex.agent.llm.scripted import ScriptedLlm, call, say
-from mindex.agent.loopback import MindexClient
-from mindex.agent.registry import ToolContext
-from mindex.agent.tools import build_registry
-from mindex.agent.tools.media import clean, item, safe
+from agent.llm.scripted import ScriptedLlm, call, say
+from agent.loopback import MindexClient
+from agent.registry import ToolContext
+from agent.tools import build_registry
+from agent.tools.media import clean, item, safe
+from agent_helpers import new_session, send, wait_idle
+from agent_scenarios import build_world
 
 pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
 
@@ -30,7 +30,10 @@ def built(config, video_file):
         token = client.get(f"/api/studio/jobs/{world.job}/plans/{pid}/preflight").json()["token"]
         build = client.post(f"/api/studio/jobs/{world.job}/plans/{pid}/build", json={"token": token}).json()
         deadline = time.monotonic() + 120
-        while client.get(f"/api/studio/jobs/{world.job}/builds/{build['id']}/logs").json()["status"] == "running":
+        while (
+            client.get(f"/api/studio/jobs/{world.job}/builds/{build['id']}/logs").json()["status"]
+            == "running"
+        ):
             assert time.monotonic() < deadline
             time.sleep(0.1)
         yield world, app, client, llm, build["id"]
@@ -61,14 +64,26 @@ def assert_loadable(client, media):
 
 
 def test_safe_urls():
-    for bad in ("https://evil.example/x.png", "//evil/x", "/api/../etc/passwd", "javascript:alert(1)",
-                "/assets/shared/x.png", "/api//evil", "", None):
+    for bad in (
+        "https://evil.example/x.png",
+        "//evil/x",
+        "/api/../etc/passwd",
+        "javascript:alert(1)",
+        "/assets/shared/x.png",
+        "/api//evil",
+        "",
+        None,
+    ):
         assert not safe(bad), bad
     assert safe("/api/studio/jobs/x/artifacts/versions/abc/audio.wav")
     assert item("image", "https://x/y.png", "外链") is None
     assert item("video", "/api/a", "x", poster="https://x/p.jpg") is None
-    duplicated = [item("image", "/api/a", "a"), item("image", "/api/a", "a2"), None,
-                  {"kind": "image", "url": "http://x", "title": "x", "collapsed": False}]
+    duplicated = [
+        item("image", "/api/a", "a"),
+        item("image", "/api/a", "a2"),
+        None,
+        {"kind": "image", "url": "http://x", "title": "x", "collapsed": False},
+    ]
     assert clean(duplicated) == [item("image", "/api/a", "a")]
 
 
@@ -100,8 +115,9 @@ def test_studio_tool_media(built):
 def test_library_tool_media(built):
     _, app, client, _, _ = built
     search = run(app, "search_media", {"text": "绿色 画面", "limit": 3}).media
-    assert search and all(m["kind"] == "video" and m["playlist"] and m["poster"] and not m["collapsed"]
-                          for m in search)
+    assert search and all(
+        m["kind"] == "video" and m["playlist"] and m["poster"] and not m["collapsed"] for m in search
+    )
     assert all(m["url"].startswith("/api/playlists/") for m in search)
     assert_loadable(client, search)
     sources = run(app, "list_sources", {}).media

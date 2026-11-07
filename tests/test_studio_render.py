@@ -1,14 +1,21 @@
+"""分镜渲染、时间线与成片产物回归。"""
+
 from __future__ import annotations
 
+import json
+import json as json_module
 import math
 import struct
 import wave
+from types import SimpleNamespace
 
 import pytest
 
-from mindex.processing.pipeline import Pipeline
-from mindex.shared.media import MediaError, audio_info, command, probe
-from mindex.studio import studio, studio_render, studio_steps
+from processing.pipeline import Pipeline
+from shared.media import MediaError, audio_info, command, probe
+from studio import render as studio_render
+from studio import steps as studio_steps
+from studio import studio
 
 pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
 
@@ -119,9 +126,8 @@ def test_render_soft_subtitle_outputs_video_srt_and_audio(config, video_file):
 
 
 def probe_streams(path):
-    import json as json_module
 
-    from mindex.shared.media import command
+    from shared.media import command
 
     return json_module.loads(
         command(["ffprobe", "-v", "error", "-show_streams", "-of", "json", str(path)], timeout=30)
@@ -216,7 +222,6 @@ def rgb_at(path, seconds):
 
 
 def test_padding_never_reads_picture_after_selected_end(config, video_file, tmp_path):
-    from types import SimpleNamespace
 
     event = SimpleNamespace(audio=SimpleNamespace(render_duration=2), video=SimpleNamespace(start=0, end=0.5))
     config.studio.render.width, config.studio.render.height = 160, 120
@@ -227,7 +232,6 @@ def test_padding_never_reads_picture_after_selected_end(config, video_file, tmp_
 
 
 def test_reselect_changes_picture_and_failed_mux_preserves_previous_final(config, video_file, monkeypatch):
-    import json
 
     config.studio.render.width, config.studio.render.height = 160, 120
     job_id, timeline = build_job(config, video_file, [("shot-01", 0, 1, 1)], burn=False)
@@ -255,7 +259,6 @@ def test_reselect_changes_picture_and_failed_mux_preserves_previous_final(config
 
 @pytest.mark.parametrize("fps,count", [(25, 60), (29.97, 4)])
 def test_frame_sample_boundaries_do_not_accumulate_drift(config, video_file, fps, count):
-    import json
 
     config.studio.render.width, config.studio.render.height = 160, 120
     config.studio.render.preset = "ultrafast"

@@ -9,32 +9,51 @@ from __future__ import annotations
 import asyncio
 import copy
 import itertools
+import json
+import re
 from typing import ClassVar
 from uuid import uuid4
 
 import pytest
-from agent_helpers import new_session, result_text, results, send, wait_idle
-from conftest import legacy_job
 from fastapi.testclient import TestClient
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from mindex.agent.ids import short
-from mindex.agent.llm.scripted import ScriptedLlm, call, say
-from mindex.agent.loopback import MindexClient
-from mindex.agent.registry import ToolContext, ToolError
-from mindex.agent.tools import build_registry
-from mindex.agent.tools.common import STAGES, PlanView
-from mindex.agent.tools.shot_details import page_details, speech_info, subtitle_info
-from mindex.api import create_app
-from mindex.studio import studio
-from mindex.studio import workspace as ws
+from agent.ids import short
+from agent.llm.scripted import ScriptedLlm, call, say
+from agent.loopback import MindexClient
+from agent.registry import ToolContext, ToolError
+from agent.tools import build_registry
+from agent.tools.common import STAGES, PlanView
+from agent.tools.shot_details import page_details, speech_info, subtitle_info
+from agent_helpers import new_session, result_text, results, send, wait_idle
+from api import create_app
+from conftest import legacy_job
+from studio import studio
+from studio import workspace as ws
 
 HEX = "0123456789abcdef"
 STATUSES = ("complete", "failed", "running", "pending")
 DETAIL_KEYS = {
-    "index", "short_id", "shot_id", "text", "query", "visual", "estimated_seconds", "granularity",
-    "recall_limit", "recall", "source", "manual_range", "stages", "subtitle", "speech", "generation", "animation", "drawing", "music",
+    "index",
+    "short_id",
+    "shot_id",
+    "text",
+    "query",
+    "visual",
+    "estimated_seconds",
+    "granularity",
+    "recall_limit",
+    "recall",
+    "source",
+    "manual_range",
+    "stages",
+    "subtitle",
+    "speech",
+    "generation",
+    "animation",
+    "drawing",
+    "music",
 }
 
 # 旁白/查询等自由文本：含换行、全角空格、连续空白、标点与 emoji
@@ -79,12 +98,19 @@ def contents(draw) -> dict:
     if draw(st.booleans()):
         body["recall_limit"] = draw(st.integers(1, 50))
     if draw(st.booleans()):
-        body["recall"] = draw(st.one_of(
-            st.just({}),
-            st.fixed_dictionaries({}, optional={"sources": st.lists(hex_str(8), max_size=3),
-                                                "persons": st.lists(st.text(max_size=6), max_size=2),
-                                                "min_score": st.floats(0, 1, allow_nan=False)}),
-        ))
+        body["recall"] = draw(
+            st.one_of(
+                st.just({}),
+                st.fixed_dictionaries(
+                    {},
+                    optional={
+                        "sources": st.lists(hex_str(8), max_size=3),
+                        "persons": st.lists(st.text(max_size=6), max_size=2),
+                        "min_score": st.floats(0, 1, allow_nan=False),
+                    },
+                ),
+            )
+        )
     return body
 
 
@@ -158,10 +184,17 @@ def workspace(draw, min_shots: int = 0, max_shots: int = 8) -> dict:
     for sid in ids:
         for stage in STAGES:
             if draw(st.integers(0, 4)) == 0:
-                conflicts[f"{stage}:{sid}"] = draw(st.lists(st.sampled_from(["content", "tts", "recall"]),
-                                                            min_size=1, max_size=2))
-    return {"job": {"id": "job-" + draw(hex_str(8))}, "active_plan": "p1", "plans": plans_out,
-            "versions": all_versions, "conflicts": conflicts, "revision": "rev-" + draw(hex_str(8))}
+                conflicts[f"{stage}:{sid}"] = draw(
+                    st.lists(st.sampled_from(["content", "tts", "recall"]), min_size=1, max_size=2)
+                )
+    return {
+        "job": {"id": "job-" + draw(hex_str(8))},
+        "active_plan": "p1",
+        "plans": plans_out,
+        "versions": all_versions,
+        "conflicts": conflicts,
+        "revision": "rev-" + draw(hex_str(8)),
+    }
 
 
 @st.composite
@@ -175,7 +208,7 @@ def refs(draw, order: list[str], max_size: int = 10) -> list[str]:
             return draw(st.sampled_from(order))
         if kind == "prefix":
             bare = draw(st.sampled_from(order))[5:]
-            cut = bare[:draw(st.integers(1, len(bare)))]
+            cut = bare[: draw(st.integers(1, len(bare)))]
             cut = "".join(c.upper() if draw(st.booleans()) else c for c in cut)
             return ("shot-" if draw(st.booleans()) else "") + cut
         if kind == "index":
@@ -229,15 +262,26 @@ def test_subtitle_info_availability_and_stale(data):
     narration = data.draw(free_text(1, 200))
     item = data.draw(versions("select", sid, narration))
     entry = {"content": "c" * 32}
-    all_versions = {"b" * 32: {"stage": "board", "status": "complete", "data": {"order": [sid]}},
-                    "c" * 32: {"stage": "content", "shot_id": sid, "status": "complete",
-                               "data": {"text": narration, "query": "q", "estimated_seconds": 1.0}}}
+    all_versions = {
+        "b" * 32: {"stage": "board", "status": "complete", "data": {"order": [sid]}},
+        "c" * 32: {
+            "stage": "content",
+            "shot_id": sid,
+            "status": "complete",
+            "data": {"text": narration, "query": "q", "estimated_seconds": 1.0},
+        },
+    }
     if item is not None:
         all_versions["s" * 32] = item
         entry["select"] = "s" * 32
-    w = {"job": {"id": "job-1"}, "active_plan": "p1", "versions": all_versions, "conflicts": {},
-         "plans": {"p1": {"name": "p", "board": "b" * 32, "shots": {sid: entry}, "ranges": {}}},
-         "revision": "rev-1"}
+    w = {
+        "job": {"id": "job-1"},
+        "active_plan": "p1",
+        "versions": all_versions,
+        "conflicts": {},
+        "plans": {"p1": {"name": "p", "board": "b" * 32, "shots": {sid: entry}, "ranges": {}}},
+        "revision": "rev-1",
+    }
     view = PlanView(w, "p1")
 
     info = subtitle_info(view, sid, narration)
@@ -263,15 +307,26 @@ def test_speech_info_availability(data):
     item = data.draw(versions("tts", sid))
     tts_vid = data.draw(hex_str(32).filter(lambda v: v not in ("b" * 32, "c" * 32)))
     entry = {"content": "c" * 32}
-    all_versions = {"b" * 32: {"stage": "board", "status": "complete", "data": {"order": [sid]}},
-                    "c" * 32: {"stage": "content", "shot_id": sid, "status": "complete",
-                               "data": {"text": "t", "query": "q", "estimated_seconds": 1.0}}}
+    all_versions = {
+        "b" * 32: {"stage": "board", "status": "complete", "data": {"order": [sid]}},
+        "c" * 32: {
+            "stage": "content",
+            "shot_id": sid,
+            "status": "complete",
+            "data": {"text": "t", "query": "q", "estimated_seconds": 1.0},
+        },
+    }
     if item is not None:
         all_versions[tts_vid] = item
         entry["tts"] = tts_vid
-    w = {"job": {"id": "job-1"}, "active_plan": "p1", "versions": all_versions, "conflicts": {},
-         "plans": {"p1": {"name": "p", "board": "b" * 32, "shots": {sid: entry}, "ranges": {}}},
-         "revision": "rev-1"}
+    w = {
+        "job": {"id": "job-1"},
+        "active_plan": "p1",
+        "versions": all_versions,
+        "conflicts": {},
+        "plans": {"p1": {"name": "p", "board": "b" * 32, "shots": {sid: entry}, "ranges": {}}},
+        "revision": "rev-1",
+    }
     view = PlanView(w, "p1")
 
     info = speech_info(view, sid)
@@ -302,10 +357,9 @@ class _WorkspaceClient:
 @given(data=st.data())
 def test_list_mode_paging_window_and_header(data):
     """**Validates: Requirements 1.7, 4.6, 7.3, 7.4**"""
-    import asyncio
 
-    from mindex.agent.registry import ToolContext
-    from mindex.agent.tools.studio_read import ShotDetailsArgs, get_shot_details
+    from agent.registry import ToolContext
+    from agent.tools.studio_read import ShotDetailsArgs, get_shot_details
 
     w = data.draw(workspace(max_shots=6))
     plan_id = data.draw(st.sampled_from(sorted(w["plans"])))
@@ -323,8 +377,8 @@ def test_list_mode_paging_window_and_header(data):
     assert value["revision"] == view.revision
     assert value["active"] is (plan_id == w["active_plan"])
     ids = [shot["shot_id"] for shot in value["shots"]]
-    window = order[offset:offset + limit]
-    assert ids == window[:len(ids)]
+    window = order[offset : offset + limit]
+    assert ids == window[: len(ids)]
     assert value["returned"] == len(value["shots"])
     assert value["has_more"] is (offset + value["returned"] < value["total"])
     if offset >= len(order):
@@ -337,10 +391,9 @@ def test_list_mode_paging_window_and_header(data):
 @given(data=st.data())
 def test_resolve_refs_consistent_with_resolve_shot(data):
     """**Validates: Requirements 2.1, 2.2, 2.3, 2.4, 2.5**"""
-    import re
 
-    from mindex.agent.ids import resolve_shot
-    from mindex.agent.tools.shot_details import resolve_refs
+    from agent.ids import resolve_shot
+    from agent.tools.shot_details import resolve_refs
 
     view = data.draw(view_with_plan(max_shots=5))
     order = view.order
@@ -373,12 +426,13 @@ def test_resolve_refs_consistent_with_resolve_shot(data):
 # Feature: agent-storyboard-detail-access, Property 7: 按引用读取与按列表读取结果相同
 # data_too_large 是生成器体积的健康检查：本用例输入上限固定（max_shots=5），
 # 满载运行时偶发的体积告警不应中断属性验证。
-@settings(max_examples=100, deadline=None,
-          suppress_health_check=[HealthCheck.data_too_large, HealthCheck.too_slow])
+@settings(
+    max_examples=100, deadline=None, suppress_health_check=[HealthCheck.data_too_large, HealthCheck.too_slow]
+)
 @given(data=st.data())
 def test_ref_details_equal_list_details(data):
     """**Validates: Requirements 2.6**"""
-    from mindex.agent.tools.shot_details import resolve_refs
+    from agent.tools.shot_details import resolve_refs
 
     view = data.draw(view_with_plan(max_shots=5))
     order = view.order
@@ -399,12 +453,13 @@ def test_ref_details_equal_list_details(data):
 
 # Feature: agent-storyboard-detail-access, Property 9: 页面定位
 # 本属性有意生成大方案与长引用列表（越过 20 个分镜的定位上限），数据量大是设计使然。
-@settings(max_examples=100, deadline=None,
-          suppress_health_check=[HealthCheck.data_too_large, HealthCheck.too_slow])
+@settings(
+    max_examples=100, deadline=None, suppress_health_check=[HealthCheck.data_too_large, HealthCheck.too_slow]
+)
 @given(data=st.data())
 def test_details_focus_page_location(data):
     """**Validates: Requirements 7.1, 7.2**"""
-    from mindex.agent.tools.shot_details import details_focus, resolve_refs
+    from agent.tools.shot_details import details_focus, resolve_refs
 
     # 大方案（最多 25 个分镜）+ 长引用列表（最多 50 条），可越过 20 个分镜的定位上限
     view = data.draw(st.one_of(view_with_plan(max_shots=5), view_with_plan(min_shots=18, max_shots=25)))
@@ -441,9 +496,8 @@ def test_details_focus_page_location(data):
 @given(view=view_with_plan(min_shots=1, max_shots=3))
 def test_render_detail_verbatim_and_complete(view: PlanView):
     """**Validates: Requirements 1.3, 1.4, 3.7**"""
-    import json
 
-    from mindex.agent.tools.shot_details import render_detail
+    from agent.tools.shot_details import render_detail
 
     def compact(value) -> str:
         return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
@@ -504,47 +558,65 @@ def budget_workspace(draw) -> dict:
     def text_of(i: int, max_len: int) -> str:
         seed = seeds[i % len(seeds)]
         length = max_len - (i % 7 if near_max else (i * 37) % max_len)
-        return (seed * (max_len // len(seed) + 1))[:max(length, 1)]
+        return (seed * (max_len // len(seed) + 1))[: max(length, 1)]
 
     order = [f"shot-{i:010x}" for i in range(count)]
     versions_out: dict = {"b" * 32: {"stage": "board", "status": "complete", "data": {"order": order}}}
     shots: dict = {}
     for i, sid in enumerate(order):
         cid = f"{i:032x}"
-        body = {"text": text_of(i, 200), "query": text_of(i + 1, 400), "visual": text_of(i + 2, 120),
-                "estimated_seconds": 1.5 + i}
+        body = {
+            "text": text_of(i, 200),
+            "query": text_of(i + 1, 400),
+            "visual": text_of(i + 2, 120),
+            "estimated_seconds": 1.5 + i,
+        }
         versions_out[cid] = {"stage": "content", "shot_id": sid, "status": "complete", "data": body}
         entry = {"content": cid}
         if i % 2 == 0:
             tid = f"{i:031x}t"
-            versions_out[tid] = {"stage": "tts", "shot_id": sid, "status": "complete",
-                                 "data": {"duration": 2.25 + i}}
+            versions_out[tid] = {
+                "stage": "tts",
+                "shot_id": sid,
+                "status": "complete",
+                "data": {"duration": 2.25 + i},
+            }
             entry["tts"] = tid
         if i % 3 == 0:
             sel = f"{i:031x}s"
             cue_text = body["text"] if i % 2 else text_of(i + 3, 200)
-            versions_out[sel] = {"stage": "select", "shot_id": sid, "status": "complete",
-                                 "data": {"event": {"start": 0.0,
-                                                    "subtitle": {"text": cue_text, "start": 0.5, "end": 3.5}}}}
+            versions_out[sel] = {
+                "stage": "select",
+                "shot_id": sid,
+                "status": "complete",
+                "data": {"event": {"start": 0.0, "subtitle": {"text": cue_text, "start": 0.5, "end": 3.5}}},
+            }
             entry["select"] = sel
         shots[sid] = entry
     plan = {"name": "预算方案", "board": "b" * 32, "shots": shots, "ranges": {}}
-    return {"job": {"id": "job-budget01"}, "active_plan": "p1", "plans": {"p1": plan},
-            "versions": versions_out, "conflicts": {}, "revision": "rev-budget01"}
+    return {
+        "job": {"id": "job-budget01"},
+        "active_plan": "p1",
+        "plans": {"p1": plan},
+        "versions": versions_out,
+        "conflicts": {},
+        "revision": "rev-budget01",
+    }
 
 
 # Feature: agent-storyboard-detail-access, Property 10: 渲染预算与结构化结果一一对应
 # 每个样例最多 100 个接近长度上限的分镜，最小样例天然较大，故关闭 large_base_example / too_slow 健康检查
-@settings(max_examples=100, deadline=None,
-          suppress_health_check=[HealthCheck.large_base_example, HealthCheck.too_slow])
+@settings(
+    max_examples=100,
+    deadline=None,
+    suppress_health_check=[HealthCheck.large_base_example, HealthCheck.too_slow],
+)
 @given(data=st.data())
 def test_list_render_budget_matches_structured(data):
     """**Validates: Requirements 7.6, 7.7, 1.4**"""
-    import asyncio
-    import re
 
-    from mindex.agent.registry import MAX_TEXT, ToolContext
-    from mindex.agent.tools.studio_read import ShotDetailsArgs, get_shot_details
+    from agent.registry import MAX_TEXT, ToolContext
+    from agent.tools.studio_read import ShotDetailsArgs, get_shot_details
 
     w = data.draw(budget_workspace())
     total = len(w["plans"]["p1"]["shots"])
@@ -579,7 +651,8 @@ GOOD_OFFSET = st.integers(min_value=0, max_value=10_000)
 GOOD_LIMIT = st.integers(min_value=1, max_value=100)
 NON_INT = st.one_of(
     st.floats(allow_nan=False, allow_infinity=False).filter(lambda x: x != int(x)),
-    st.booleans(), st.text(max_size=5),
+    st.booleans(),
+    st.text(max_size=5),
 )
 BAD_OFFSET = st.one_of(st.integers(max_value=-1), NON_INT)
 BAD_LIMIT = st.one_of(st.integers(max_value=0), st.integers(min_value=101), NON_INT)
@@ -653,8 +726,10 @@ OTHER_PLAN_NAME = "备选方案"
 
 
 def _shots(texts):
-    return [studio.Shot(id=sid, text=text, query=text[:2], estimated_seconds=1.5)
-            for sid, text in zip(BOARD_SHOTS, texts)]
+    return [
+        studio.Shot(id=sid, text=text, query=text[:2], estimated_seconds=1.5)
+        for sid, text in zip(BOARD_SHOTS, texts)
+    ]
 
 
 @pytest.fixture
@@ -668,9 +743,11 @@ def board(config):
     first, second = BOARD_SHOTS[0], BOARD_SHOTS[1]
     p["shots"][first]["tts"] = ws.add_version(config, job_id, w, "tts", first, data={"duration": DURATION})
     p["shots"][first]["select"] = ws.add_version(
-        config, job_id, w, "select", first, data={"event": {"start": 0.0, "subtitle": dict(SUBTITLE)}})
-    p["shots"][second]["tts"] = ws.add_version(config, job_id, w, "tts", second, status="failed",
-                                               error="配音失败")
+        config, job_id, w, "select", first, data={"event": {"start": 0.0, "subtitle": dict(SUBTITLE)}}
+    )
+    p["shots"][second]["tts"] = ws.add_version(
+        config, job_id, w, "tts", second, status="failed", error="配音失败"
+    )
     other = copy.deepcopy(p)
     other.update(id=uuid4().hex[:12], name=OTHER_PLAN_NAME, created_at=studio.now())
     ws.set_board(config, job_id, w, other, _shots(["备选一。", "备选二。"]))
@@ -730,7 +807,12 @@ def test_list_mode_reads_all_shots(app, board):
     assert value["revision"] == TestClient(app).get(f"/api/studio/jobs/{board}/workspace").json()["revision"]
     for i, sid in enumerate(BOARD_SHOTS, 1):
         assert f"## #{i} {short(sid)}（完整ID {sid}）" in text
-    assert out.focus == {"page": "studio", "job_id": board, "plan_id": value["plan_id"], "section": "storyboard"}
+    assert out.focus == {
+        "page": "studio",
+        "job_id": board,
+        "plan_id": value["plan_id"],
+        "section": "storyboard",
+    }
 
 
 def test_refs_mode_ok_ambiguous_not_found(app, board):
@@ -793,7 +875,9 @@ def test_job_and_plan_location(app, board):
     assert [s["text"] for s in same.value["shots"]] == ["备选一。", "备选二。"]
 
     # 页面是其他任务 → 使用目标任务的激活方案（不沿用页面 plan_id）
-    elsewhere = run_detail(app, {"job_id": board}, page={"page": "studio", "job_id": "other-job", "plan_id": other})
+    elsewhere = run_detail(
+        app, {"job_id": board}, page={"page": "studio", "job_id": "other-job", "plan_id": other}
+    )
     assert elsewhere.value["plan_id"] == active and elsewhere.value["active"] is True
 
     # 页面无 plan → 激活方案
@@ -823,8 +907,11 @@ def test_request_counts(app, board):
     assert info.value.code == "missing_job" and "list_jobs" in str(info.value)
     assert RecordingClient.calls == []
 
-    for bad in ({"job_id": board, "refs": []}, {"job_id": board, "refs": ["#1"], "offset": 0},
-                {"job_id": board, "limit": 0}):
+    for bad in (
+        {"job_id": board, "refs": []},
+        {"job_id": board, "refs": ["#1"], "offset": 0},
+        {"job_id": board, "limit": 0},
+    ):
         with pytest.raises(ToolError) as info:
             run_detail(app, bad, client_cls=RecordingClient)
         assert info.value.code == "invalid_arguments"
@@ -838,8 +925,11 @@ def test_request_counts(app, board):
 def test_read_only_invariance(app, board):
     """Validates: Requirements 4.7, 5.6"""
     before = workspace_state(app, board)
-    for arguments in ({"job_id": board}, {"job_id": board, "refs": ["#1", "925281d", "#9"]},
-                      {"job_id": board, "offset": 1, "limit": 1}):
+    for arguments in (
+        {"job_id": board},
+        {"job_id": board, "refs": ["#1", "925281d", "#9"]},
+        {"job_id": board, "offset": 1, "limit": 1},
+    ):
         out = run_detail(app, arguments)
         assert out.mutation is None
     for arguments in ({"job_id": board, "plan_id": "nope"}, {"job_id": "20990101-000000-abcdef"}):
@@ -878,14 +968,24 @@ def split_case(draw) -> tuple[PlanView, str, str, list[str]]:
     versions_out: dict = {"board": {"stage": "board", "status": "complete", "data": {"order": list(ids)}}}
     shots: dict = {}
     for n, sid in enumerate(ids):
-        body = {"id": sid, "text": narration if sid == target else f"第{n}镜旁白。", "query": f"查询{n}",
-                "estimated_seconds": 3.0}
+        body = {
+            "id": sid,
+            "text": narration if sid == target else f"第{n}镜旁白。",
+            "query": f"查询{n}",
+            "estimated_seconds": 3.0,
+        }
         if draw(st.booleans()):
             body["visual"] = f"画面{n}"
         versions_out[f"c{n}"] = {"stage": "content", "shot_id": sid, "status": "complete", "data": body}
         shots[sid] = {"content": f"c{n}"}
-    w = {"job": {"id": "job-1"}, "active_plan": "p1", "versions": versions_out, "conflicts": {},
-         "plans": {"p1": {"name": "方案", "board": "board", "shots": shots, "ranges": {}}}, "revision": "rev-1"}
+    w = {
+        "job": {"id": "job-1"},
+        "active_plan": "p1",
+        "versions": versions_out,
+        "conflicts": {},
+        "plans": {"p1": {"name": "方案", "board": "board", "shots": shots, "ranges": {}}},
+        "revision": "rev-1",
+    }
     return PlanView(w, "p1"), target, narration, segments
 
 
@@ -894,7 +994,7 @@ def split_case(draw) -> tuple[PlanView, str, str, list[str]]:
 @given(split_case())
 def test_split_by_full_narration_round_trip(case):
     """**Validates: Requirements 6.4**"""
-    from mindex.agent.tools.studio_write import ShotFields, ShotOperation, plan_shots
+    from agent.tools.studio_write import ShotFields, ShotOperation, plan_shots
 
     view, target, narration, segments = case
     assert all(segments) and "".join(segments) == narration
@@ -905,13 +1005,13 @@ def test_split_by_full_narration_round_trip(case):
     shots, _changes, _touched = plan_shots(view, [op])
 
     assert len(shots) == len(before) + len(segments) - 1
-    new = shots[index:index + len(segments)]
+    new = shots[index : index + len(segments)]
     assert [s["text"] for s in new] == segments
     assert "".join(s["text"] for s in new) == narration
     assert new[0]["id"] == target and all("id" not in s for s in new[1:])
     # 其他分镜不变（顺序与内容）
     assert shots[:index] == before[:index]
-    assert shots[index + len(segments):] == before[index + 1:]
+    assert shots[index + len(segments) :] == before[index + 1 :]
     assert view.shots() == before  # 不修改输入
 
 
@@ -944,17 +1044,22 @@ def mismatched_split_case(draw) -> tuple[PlanView, str, list[str]]:
             parts[i] = parts[i][:pos] + draw(non_space) + parts[i][pos:]
         return parts
 
-    parts = draw(st.sampled_from(["free", "drop", "dup", "insert"]).map(perturb)
-                 .filter(lambda p: len(p) >= 2 and squash("".join(p)) != squash(narration)))
+    parts = draw(
+        st.sampled_from(["free", "drop", "dup", "insert"])
+        .map(perturb)
+        .filter(lambda p: len(p) >= 2 and squash("".join(p)) != squash(narration))
+    )
     return view, target, parts
 
 
 # Feature: agent-storyboard-detail-access, Property 12: 旁白不一致的 split 被拒绝
-@settings(max_examples=100, deadline=None, suppress_health_check=[HealthCheck.too_slow, HealthCheck.filter_too_much])
+@settings(
+    max_examples=100, deadline=None, suppress_health_check=[HealthCheck.too_slow, HealthCheck.filter_too_much]
+)
 @given(mismatched_split_case())
 def test_split_with_mismatched_narration_rejected(case):
     """**Validates: Requirements 6.5**"""
-    from mindex.agent.tools.studio_write import ShotFields, ShotOperation, plan_shots
+    from agent.tools.studio_write import ShotFields, ShotOperation, plan_shots
 
     view, target, parts = case
     before = copy.deepcopy(view.w)

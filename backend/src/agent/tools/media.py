@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 
-from mindex.agent.ids import short
+from agent.ids import short
 
 SAFE_URL = re.compile(r"^/api/[^\s]*$")
 VIDEO = (".mp4", ".mov", ".webm", ".mkv")
@@ -22,12 +22,23 @@ def safe(url: str | None) -> bool:
     return bool(url) and bool(SAFE_URL.match(url)) and "//" not in url and ".." not in url
 
 
-def item(kind: str, url: str, title: str, *, poster: str | None = None, playlist: bool = False,
-         collapsed: bool | None = None) -> dict | None:
+def item(
+    kind: str,
+    url: str,
+    title: str,
+    *,
+    poster: str | None = None,
+    playlist: bool = False,
+    collapsed: bool | None = None,
+) -> dict | None:
     if not safe(url) or (poster is not None and not safe(poster)):
         return None
-    value = {"kind": kind, "url": url, "title": title,
-             "collapsed": collapsed if collapsed is not None else kind == "audio"}
+    value = {
+        "kind": kind,
+        "url": url,
+        "title": title,
+        "collapsed": collapsed if collapsed is not None else kind == "audio",
+    }
     if poster:
         value["poster"] = poster
     if playlist:
@@ -58,8 +69,14 @@ def version_media(version: dict | None, title: str, *, collapsed: bool = True) -
     for name, meta in (version.get("files") or {}).items():
         url, path = meta.get("url"), (meta.get("path") or "").lower()
         if path.endswith(VIDEO):
-            found.append(item("video", url, f"{title} · {name}" if name not in ("mp4", "video", "generated") else title,
-                              collapsed=collapsed))
+            found.append(
+                item(
+                    "video",
+                    url,
+                    f"{title} · {name}" if name not in ("mp4", "video", "generated") else title,
+                    collapsed=collapsed,
+                )
+            )
         elif path.endswith(AUDIO):
             found.append(item("audio", url, title, collapsed=True))
         elif path.endswith(IMAGE):
@@ -81,9 +98,16 @@ def candidate_media(version: dict | None, label: str, limit: int = 6) -> list[di
         segment = candidate.get("id")
         if not segment:
             continue
-        found.append(item("video", f"/api/admin/segments/{segment}/playlist", f"{label} 候选 {rank}",
-                          poster=candidate.get("thumbnail_url") or f"/api/admin/segments/{segment}/thumbnail",
-                          playlist=True, collapsed=False))
+        found.append(
+            item(
+                "video",
+                f"/api/admin/segments/{segment}/playlist",
+                f"{label} 候选 {rank}",
+                poster=candidate.get("thumbnail_url") or f"/api/admin/segments/{segment}/thumbnail",
+                playlist=True,
+                collapsed=False,
+            )
+        )
     return [f for f in found if f]
 
 
@@ -91,10 +115,12 @@ def shot_media(view, sid: str) -> list[dict]:
     index = view.order.index(sid) + 1 if sid in view.order else "?"
     label = f"#{index} {short(sid)}"
     selected = view.plan["shots"].get(sid, {})
-    return (version_media(view.version(selected.get("tts")), f"{label} 配音")
-            + generated_media(view, sid)
-            + version_media(view.version(selected.get("render")), f"{label} 渲染")
-            + candidate_media(view.version(selected.get("recall")), label))
+    return (
+        version_media(view.version(selected.get("tts")), f"{label} 配音")
+        + generated_media(view, sid)
+        + version_media(view.version(selected.get("render")), f"{label} 渲染")
+        + candidate_media(view.version(selected.get("recall")), label)
+    )
 
 
 def generated_media(view, sid: str) -> list[dict]:
@@ -123,5 +149,11 @@ def final_media(view, version_id: str | None = None) -> list[dict]:
 
 def segment_media(result: dict, title: str) -> dict | None:
     segment = result.get("segment_id") or result.get("id")
-    return item("video", f"/api/playlists/{segment}", title,
-                poster=result.get("thumbnail_url") or f"/api/thumbnails/{segment}", playlist=True, collapsed=False)
+    return item(
+        "video",
+        f"/api/playlists/{segment}",
+        title,
+        poster=result.get("thumbnail_url") or f"/api/thumbnails/{segment}",
+        playlist=True,
+        collapsed=False,
+    )

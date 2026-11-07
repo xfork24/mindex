@@ -2,7 +2,8 @@
 
 - 通用：``url`` 返回 JSON，``items_path`` 指向条目数组（点分路径，如 ``data`` 或 ``data.list``），
   ``fields`` 把条目字段映射到标题、摘要、链接、热度与时间。
-- DailyHotApi：``base_url`` + 榜单名（``weibo``、``zhihu``、``36kr``、``history`` 等），逐个请求 ``{base_url}/{榜单}``，
+- DailyHotApi：``base_url`` + 榜单名（``weibo``、``zhihu``、``36kr``、``history`` 等），逐个请求
+``{base_url}/{榜单}``，
   响应为 ``{code, title, data: [{title, desc, url, hot, timestamp}]}``。
 时间接受秒或毫秒时间戳与 ISO 字符串；热度接受数字或"123万"这类文字。
 """
@@ -16,9 +17,9 @@ from typing import ClassVar, Literal
 
 from pydantic import Field, model_validator
 
-from mindex.shared.config import StrictModel
-from mindex.topics.common import parse_time
-from mindex.topics.sources.base import FetchContext, Item, SourceError, http_get, item, register
+from shared.config import StrictModel
+from topics.common import parse_time
+from topics.sources.base import FetchContext, Item, SourceError, http_get, item, register
 
 BOARD = r"^[a-z0-9][a-z0-9-]{0,40}$"
 _NUMBER = re.compile(r"^\s*([0-9]+(?:\.[0-9]+)?)\s*(万|亿|w|k|m)?", re.IGNORECASE)
@@ -34,11 +35,19 @@ class HotFields(StrictModel):
 
 
 class HotlistConfig(StrictModel):
-    preset: Literal["custom", "dailyhot"] = Field(default="custom", description="custom=通用 JSON；dailyhot=DailyHotApi")
+    preset: Literal["custom", "dailyhot"] = Field(
+        default="custom", description="custom=通用 JSON；dailyhot=DailyHotApi"
+    )
     url: str | None = Field(default=None, pattern=r"^https?://", max_length=2000, description="通用接口地址")
-    base_url: str | None = Field(default=None, pattern=r"^https?://", max_length=2000,
-                                 description="DailyHotApi 服务地址，如 http://127.0.0.1:6688")
-    boards: list[str] = Field(default_factory=list, max_length=20, description="DailyHotApi 榜单名，如 weibo、zhihu、36kr")
+    base_url: str | None = Field(
+        default=None,
+        pattern=r"^https?://",
+        max_length=2000,
+        description="DailyHotApi 服务地址，如 http://127.0.0.1:6688",
+    )
+    boards: list[str] = Field(
+        default_factory=list, max_length=20, description="DailyHotApi 榜单名，如 weibo、zhihu、36kr"
+    )
     items_path: str = Field(default="data", max_length=120, description="条目数组的点分路径")
     fields: HotFields = Field(default_factory=HotFields)
     limit: int = Field(default=30, ge=1, le=100, description="每个榜单最多取几条")
@@ -113,9 +122,13 @@ def parse(data: bytes, cfg: HotlistConfig, label: str, limit: int) -> list[Item]
         if not isinstance(row, dict):
             continue
         url = pick(row, fields.url)
-        found = item(pick(row, fields.title) or "", str(pick(row, fields.desc) or ""),
-                     url=url if isinstance(url, str) and url.startswith(("http://", "https://")) else None,
-                     published_at=time_value(pick(row, fields.time)), hot=hot_value(pick(row, fields.hot)))
+        found = item(
+            pick(row, fields.title) or "",
+            str(pick(row, fields.desc) or ""),
+            url=url if isinstance(url, str) and url.startswith(("http://", "https://")) else None,
+            published_at=time_value(pick(row, fields.time)),
+            hot=hot_value(pick(row, fields.hot)),
+        )
         if found:
             items.append(found)
         if len(items) >= limit:
@@ -145,8 +158,13 @@ class HotlistSource:
         preset = cfg.model_copy(update={"items_path": "data", "fields": HotFields()})
         for board in cfg.boards:
             try:
-                _, _, body = http_get(ctx.config, f"{base}/{board}", params={"limit": limit}, headers=headers,
-                                      label=f"榜单 {board}")
+                _, _, body = http_get(
+                    ctx.config,
+                    f"{base}/{board}",
+                    params={"limit": limit},
+                    headers=headers,
+                    label=f"榜单 {board}",
+                )
                 items.extend(parse(body, preset, f"榜单 {board}", limit))
             except SourceError as exc:
                 errors.append(str(exc))

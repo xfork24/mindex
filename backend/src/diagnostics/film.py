@@ -10,11 +10,12 @@ from pathlib import Path
 from statistics import median
 from urllib.parse import quote
 
-from mindex.shared.config import Config
-from mindex.shared.export_media import copy_for_export
-from mindex.shared.media import windows
-from mindex.shared.review_style import review_style
-from mindex.shared.storage import Store, dumps
+from shared.checkpoints import read_text
+from shared.config import Config
+from shared.export_media import copy_for_export
+from shared.media import windows
+from shared.review_style import review_style
+from shared.storage import Store, dumps
 
 
 def source_report(config: Config, source_id: str) -> dict:
@@ -23,7 +24,6 @@ def source_report(config: Config, source_id: str) -> dict:
     if source is None:
         raise ValueError("找不到素材 ID")
     plan_path = store.root / "plans" / f"{source_id}.json"
-    from mindex.shared.checkpoints import read_text
 
     plan_text = read_text(store, plan_path)
     plan = json.loads(plan_text) if plan_text else None
@@ -118,23 +118,44 @@ def export_source(config: Config, source_id: str, output: Path | None = None) ->
 <style>__STYLE__</style>
 <h1>"""
         + title
-        + f"""</h1><p>计划 {report["planned_shots"]} 个镜头 · {report["planned_moments"]} 个精细片段
- · 已落盘 {len(segments)} 个单元。时间为原片秒数；此页用于人工检查切点，不包含模型描述。</p>
-<nav><button data-filter="shot">镜头</button><button data-filter="moment">精细片段</button>
-<button data-filter="scene">场景</button><button data-filter="all">全部</button></nav>
-<div class="pagination"><button id="previous">上一页</button><span id="page"></span><button id="next">下一页</button></div>
-<main></main><template id="cards">"""
+        + (
+            "</h1><p>计划 "
+            f"{report['planned_shots']}"
+            " 个镜头 · "
+            f"{report['planned_moments']}"
+            " 个精细片段\n"
+            " · 已落盘 "
+            f"{len(segments)}"
+            " 个单元。时间为原片秒数；此页用于人工检查切点，不包含模型描述。</p>\n"
+            '<nav><button data-filter="shot">镜头</button><button data-filter="moment">'
+            "精细片段</button>\n"
+            '<button data-filter="scene">场景</button><button data-filter="all">'
+            "全部</button></nav>\n"
+            '<div class="pagination"><button id="previous">上一页</button><span id="page">'
+            '</span><button id="next">下一页</button></div>\n'
+            '<main></main><template id="cards">'
+        )
         + "".join(cards)
-        + """</template>
-<script>const cards=[...document.querySelector('#cards').content.children];let selected=[],page=0;
-function render(){document.querySelectorAll('main video').forEach(v=>v.pause());
-document.querySelector('main').replaceChildren(...selected.slice(page*48,(page+1)*48).map(a=>a.cloneNode(true)));
-document.querySelector('#page').textContent=`${page+1} / ${Math.max(1,Math.ceil(selected.length/48))} 页 · ${selected.length} 个单元`;
-document.querySelector('#previous').disabled=page===0;document.querySelector('#next').disabled=(page+1)*48>=selected.length}
-function filter(kind){selected=cards.filter(a=>kind==='all'||a.dataset.kind===kind);page=0;render()}
-document.querySelectorAll('[data-filter]').forEach(b=>b.onclick=()=>filter(b.dataset.filter));
-document.querySelector('#previous').onclick=()=>{page--;render()};document.querySelector('#next').onclick=()=>{page++;render()};
-filter('shot');</script></html>"""
+        + (
+            "</template>\n"
+            "<script>const cards=[...document.querySelector('#cards').content.children];"
+            "let selected=[],page=0;\n"
+            "function render(){document.querySelectorAll('main video').forEach(v=>v.pause()"
+            ");\n"
+            "document.querySelector('main').replaceChildren(...selected.slice(page*48,(page"
+            "+1)*48).map(a=>a.cloneNode(true)));\n"
+            "document.querySelector('#page').textContent=`${page+1} / "
+            "${Math.max(1,Math.ceil(selected.length/48))} 页 · ${selected.length} 个单元`;\n"
+            "document.querySelector('#previous').disabled=page===0;"
+            "document.querySelector('#next').disabled=(page+1)*48>=selected.length}\n"
+            "function filter(kind){selected=cards.filter(a=>"
+            "kind==='all'||a.dataset.kind===kind);page=0;render()}\n"
+            "document.querySelectorAll('[data-filter]').forEach(b=>b.onclick=()=>"
+            "filter(b.dataset.filter));\n"
+            "document.querySelector('#previous').onclick=()=>{page--;render()};"
+            "document.querySelector('#next').onclick=()=>{page++;render()};\n"
+            "filter('shot');</script></html>"
+        )
     )
     (output / "review.html").write_text(page.replace("__STYLE__", review_style()), encoding="utf-8")
     return {

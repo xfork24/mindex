@@ -1,11 +1,12 @@
 """Stable UI message metadata. Original diagnostics and content remain untouched."""
+
 from __future__ import annotations
 
 import json
 import re
 from functools import lru_cache
 
-from mindex.shared.web_assets import frontend_root
+from shared.web_assets import frontend_root
 
 
 @lru_cache(maxsize=1)
@@ -43,12 +44,26 @@ def message_metadata(message):
 
 
 STAGE_MESSAGES = {
-    "detect": "检测分镜", "split": "生成切片", "repair": "修复文件", "subtitle": "提取字幕",
-    "asr": "ASR 转写", "analyze": "片段分析", "scene_grouping": "场景分组", "scenes": "场景分析",
-    "matching": "人物匹配", "extracting": "提取人物特征", "publish": "发布检索",
-    "embedding": "嵌入片段", "index_check": "检查索引", "published": "检索已更新", "indexed": "索引已完成",
-    "index_wait": "等待检索更新", "index_prepare": "准备检索数据", "person_index": "更新人物检索",
+    "detect": "检测分镜",
+    "split": "生成切片",
+    "repair": "修复文件",
+    "subtitle": "提取字幕",
+    "asr": "ASR 转写",
+    "analyze": "片段分析",
+    "scene_grouping": "场景分组",
+    "scenes": "场景分析",
+    "matching": "人物匹配",
+    "extracting": "提取人物特征",
+    "publish": "发布检索",
+    "embedding": "嵌入片段",
+    "index_check": "检查索引",
+    "published": "检索已更新",
+    "indexed": "索引已完成",
+    "index_wait": "等待检索更新",
+    "index_prepare": "准备检索数据",
+    "person_index": "更新人物检索",
 }
+
 
 def add_message_metadata(value):
     """Annotate system fields only, never name/text/annotation/script/subtitle fields.
@@ -60,7 +75,19 @@ def add_message_metadata(value):
         return [add_message_metadata(item) for item in value]
     if not isinstance(value, dict):
         return value
-    content_fields = {"annotation", "annotations", "input_text", "outline", "script", "text", "query", "notes", "name", "message_key", "message_params"}
+    content_fields = {
+        "annotation",
+        "annotations",
+        "input_text",
+        "outline",
+        "script",
+        "text",
+        "query",
+        "notes",
+        "name",
+        "message_key",
+        "message_params",
+    }
     result = {
         key: item if key.endswith("_message") or key in content_fields else add_message_metadata(item)
         for key, item in value.items()
@@ -73,11 +100,15 @@ def add_message_metadata(value):
                 result.update(meta)
             else:
                 result[field + "_message"] = {"message": text, **meta}
-    if "message" not in value and value.get("stage") in STAGE_MESSAGES and (
-        len(value) == 1 or any(key.startswith(("completed", "total")) for key in value)
+    if (
+        "message" not in value
+        and value.get("stage") in STAGE_MESSAGES
+        and (len(value) == 1 or any(key.startswith(("completed", "total")) for key in value))
     ):
         result.update(message_metadata(STAGE_MESSAGES[value["stage"]]))
     for field in ("warnings", "missing"):
         if isinstance(value.get(field), list) and all(isinstance(item, str) for item in value[field]):
-            result[field + "_messages"] = [{"message": item, **message_metadata(item)} for item in value[field]]
+            result[field + "_messages"] = [
+                {"message": item, **message_metadata(item)} for item in value[field]
+            ]
     return result

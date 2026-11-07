@@ -1,7 +1,9 @@
-"""顶栏导航与界面语言的浏览器回归：进程内启动隔离服务（真实素材、索引与 fixture 模型），再用 Playwright 驱动真实页面。
+"""顶栏导航与界面语言的浏览器回归：进程内启动隔离服务（真实素材、索引与 fixture 模型），
+再用 Playwright 驱动真实页面。
 
 两个脚本都直接驱动真实页面：header_navigation_ui.cjs 检查顶栏五个页面 × 两种语言 × 桌面/窄屏的
-导航顺序、选中态与可见性（完整像素布局矩阵手动执行）；i18n_ui.cjs 检查语言切换不丢输入、不触发额外请求、窄屏不溢出。
+导航顺序、选中态与可见性（完整像素布局矩阵手动执行）；i18n_ui.cjs 检查语言切换不丢输入、不触发额外请求、
+窄屏不溢出。
 
 需要 node 与 Playwright（可用 MINDEX_PLAYWRIGHT_MODULE 指定模块路径），缺失时跳过。
 """
@@ -15,6 +17,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
+
 from test_agent_panel_ui import ROOT, playwright_available, serve
 
 needs_browser = pytest.mark.skipif(not playwright_available(), reason="需要 node 与 Playwright")
@@ -44,10 +47,15 @@ def header_server(ui_tmpdir):
 @pytest.mark.slow
 def test_header_navigation_layout(header_server):
     url, tmpdir = header_server
-    result = subprocess.run(["node", "tests/header_navigation_ui.cjs"], cwd=ROOT,
-                            env={**os.environ, "MINDEX_HEADER_URL": url,
-                                 "MINDEX_HEADER_OUTPUT": str(tmpdir / "header")},
-                            capture_output=True, text=True, timeout=300, check=False)
+    result = subprocess.run(
+        ["node", "tests/header_navigation_ui.cjs"],
+        cwd=ROOT,
+        env={**os.environ, "MINDEX_HEADER_URL": url, "MINDEX_HEADER_OUTPUT": str(tmpdir / "header")},
+        capture_output=True,
+        text=True,
+        timeout=300,
+        check=False,
+    )
     assert result.returncode == 0, result.stdout + result.stderr
 
 
@@ -55,7 +63,13 @@ def test_header_navigation_layout(header_server):
 @pytest.mark.slow
 def test_i18n_language_and_layout(header_server):
     url, _tmpdir = header_server
-    result = subprocess.run(["node", "tests/i18n_ui.cjs"], cwd=ROOT,
-                            env={**os.environ, "MINDEX_I18N_TEST_URL": url},
-                            capture_output=True, text=True, timeout=300, check=False)
+    result = subprocess.run(
+        ["node", "tests/i18n_ui.cjs"],
+        cwd=ROOT,
+        env={**os.environ, "MINDEX_I18N_TEST_URL": url},
+        capture_output=True,
+        text=True,
+        timeout=300,
+        check=False,
+    )
     assert result.returncode == 0, result.stdout + result.stderr

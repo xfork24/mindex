@@ -5,12 +5,12 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from test_person_identify import StubPersonClient, face, photo, seed_library
 
-from mindex.agent.loopback import MindexClient
-from mindex.agent.registry import ToolContext, ToolError
-from mindex.agent.tools import build_registry
-from mindex.shared.storage import Store
+from agent.loopback import MindexClient
+from agent.registry import ToolContext, ToolError
+from agent.tools import build_registry
+from shared.storage import Store
+from test_person_identify import StubPersonClient, face, photo, seed_library
 
 REF = "attachment://" + "a" * 32
 
@@ -38,12 +38,27 @@ def call(client, name, arguments, *, preview=False, attachment=None, client_clas
 
 def test_specs_risk_and_domain():
     registry = build_registry()
-    risks = {name: registry.get(name).risk for name in (
-        "get_person", "save_person", "delete_person", "assign_source_work", "add_person_reference",
-        "remove_person_reference", "identify_person")}
-    assert risks == {"get_person": "read", "save_person": "write", "delete_person": "danger",
-                     "assign_source_work": "write", "add_person_reference": "write",
-                     "remove_person_reference": "danger", "identify_person": "read"}
+    risks = {
+        name: registry.get(name).risk
+        for name in (
+            "get_person",
+            "save_person",
+            "delete_person",
+            "assign_source_work",
+            "add_person_reference",
+            "remove_person_reference",
+            "identify_person",
+        )
+    }
+    assert risks == {
+        "get_person": "read",
+        "save_person": "write",
+        "delete_person": "danger",
+        "assign_source_work": "write",
+        "add_person_reference": "write",
+        "remove_person_reference": "danger",
+        "identify_person": "read",
+    }
     for name in risks:
         spec = registry.get(name)
         assert spec.domain == "persons"
@@ -176,8 +191,12 @@ def test_add_reference_from_attachment_and_quality_failure(library):
     # 质检不合格（没有人脸）：服务端中文原因原样转述并附处理建议。
     StubPersonClient.observations = []
     with pytest.raises(ToolError, match="恰好一张清晰人脸") as excinfo:
-        call(client, "add_person_reference", {"actor_id": ids["bob"], "attachment": REF},
-             attachment=("x.png", photo("navy"), "image/png"))
+        call(
+            client,
+            "add_person_reference",
+            {"actor_id": ids["bob"], "attachment": REF},
+            attachment=("x.png", photo("navy"), "image/png"),
+        )
     assert excinfo.value.code == "http_422"
     # 附件引用无法解析：不发送请求，转为 attachment_invalid。
     with pytest.raises(ToolError) as excinfo:
@@ -191,8 +210,12 @@ def test_reference_quality_failures_relayed(library, config):
     before = len(client.get("/api/persons").json()["references"])
 
     def add(color):
-        return call(client, "add_person_reference", {"actor_id": ids["bob"], "attachment": REF},
-                    attachment=(f"{color}.png", photo(color), "image/png"))
+        return call(
+            client,
+            "add_person_reference",
+            {"actor_id": ids["bob"], "attachment": REF},
+            attachment=(f"{color}.png", photo(color), "image/png"),
+        )
 
     StubPersonClient.observations = [face([1, 0, 0]), face([0, 1, 0], box=(50, 10, 80, 40))]
     with pytest.raises(ToolError) as excinfo:
@@ -218,8 +241,9 @@ def test_reference_quality_failures_relayed(library, config):
 def test_identify_person(library):
     client, ids, _refs = library
     StubPersonClient.observations = [face([1, 0, 0])]
-    out = call(client, "identify_person", {"attachment": REF, "top_k": 2},
-               attachment=("q.png", photo(), "image/png"))
+    out = call(
+        client, "identify_person", {"attachment": REF, "top_k": 2}, attachment=("q.png", photo(), "image/png")
+    )
     assert out.value["faces"][0]["accepted_role"]["id"] == ids["young"]
     assert len(out.value["faces"][0]["roles"]) == 2
     assert "青年叶淑柔" in out.text and out.value["images"][0] == REF

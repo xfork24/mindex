@@ -10,27 +10,36 @@ from __future__ import annotations
 
 import random
 
-from mindex.maintenance.vector_bundle import export_vectors, load_vectors
-from mindex.shared.config import Config
-from mindex.shared.storage import Store, dumps
+from maintenance.vector_bundle import export_vectors, load_vectors
+from shared.config import Config
+from shared.storage import Store, dumps
 
 
 def _seed(config: Config, index_id: str = "idx-vectors"):
-    from mindex.processing.indexing import VectorIndex
+    from processing.indexing import VectorIndex
 
     store = Store(config.data_dir)
-    store.execute("INSERT INTO index_versions(id,spec,status) VALUES(?,?,'ready')",
-                  (index_id, dumps({"format": 2, "space": {}, "preprocessing": {}})))
+    store.execute(
+        "INSERT INTO index_versions(id,spec,status) VALUES(?,?,'ready')",
+        (index_id, dumps({"format": 2, "space": {}, "preprocessing": {}})),
+    )
     collection = VectorIndex(store.root, index_id, create=True).collection
     rng = random.Random(11)
     rows = [
-        (f"rep{j}", [rng.random() for _ in range(8)], f"doc{j}",
-         {"segment_id": f"seg{j}", "source_id": "src", "granularity": "shot", "view": "visual"})
+        (
+            f"rep{j}",
+            [rng.random() for _ in range(8)],
+            f"doc{j}",
+            {"segment_id": f"seg{j}", "source_id": "src", "granularity": "shot", "view": "visual"},
+        )
         for j in range(7)
     ]
     collection.upsert(
-        ids=[r[0] for r in rows], embeddings=[r[1] for r in rows],
-        documents=[r[2] for r in rows], metadatas=[r[3] for r in rows])
+        ids=[r[0] for r in rows],
+        embeddings=[r[1] for r in rows],
+        documents=[r[2] for r in rows],
+        metadatas=[r[3] for r in rows],
+    )
     return store, index_id, rows
 
 
@@ -50,23 +59,28 @@ def test_export_load_roundtrip_preserves_ids_vectors_metadata(tmp_path):
     counts = load_vectors(target_store, tmp_path / "bundle")
     assert counts == {index_id: 7}
 
-    from mindex.processing.indexing import VectorIndex
+    from processing.indexing import VectorIndex
 
     # 不变量：导出端「已存储的 float32 向量」经 base64 往返后逐位不变
     # （chroma 在 cosine 空间会归一化存储，故基准取源集合实际返回值，而非原始输入）。
     origin_collection = VectorIndex(store.root, index_id).collection
-    source = origin_collection.get(ids=[r[0] for r in rows],
-                                   include=["embeddings", "documents", "metadatas"])
-    baseline = {identifier: (embedding.tolist(), document, metadata)
-                for identifier, embedding, document, metadata
-                in zip(source["ids"], source["embeddings"], source["documents"], source["metadatas"])}
+    source = origin_collection.get(ids=[r[0] for r in rows], include=["embeddings", "documents", "metadatas"])
+    baseline = {
+        identifier: (embedding.tolist(), document, metadata)
+        for identifier, embedding, document, metadata in zip(
+            source["ids"], source["embeddings"], source["documents"], source["metadatas"]
+        )
+    }
 
     collection = VectorIndex(target_store.root, index_id).collection
     assert collection.count() == 7
     got = collection.get(ids=[r[0] for r in rows], include=["embeddings", "documents", "metadatas"])
-    by_id = {identifier: (embedding.tolist(), document, metadata)
-             for identifier, embedding, document, metadata
-             in zip(got["ids"], got["embeddings"], got["documents"], got["metadatas"])}
+    by_id = {
+        identifier: (embedding.tolist(), document, metadata)
+        for identifier, embedding, document, metadata in zip(
+            got["ids"], got["embeddings"], got["documents"], got["metadatas"]
+        )
+    }
     for identifier, (source_embedding, document, metadata) in baseline.items():
         stored_embedding, stored_document, stored_metadata = by_id[identifier]
         assert stored_document == document
@@ -77,6 +91,7 @@ def test_export_load_roundtrip_preserves_ids_vectors_metadata(tmp_path):
 
 def test_missing_ready_collection_fails_export(tmp_path):
     import pytest
+
     config = Config(data_dir=tmp_path / "origin")
     store = Store(config.data_dir)
     store.execute("INSERT INTO index_versions(id,spec,status) VALUES('gone','{}','ready')")

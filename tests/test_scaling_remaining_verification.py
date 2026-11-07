@@ -8,14 +8,20 @@
 
 from __future__ import annotations
 
+import hashlib
+import io
 import os
 import subprocess
+import threading
 import time
+import time as _time
 
 import pytest
+from fastapi.testclient import TestClient
+from filelock import Timeout
 
-from mindex.shared.config import Config
-from mindex.shared.storage import Store
+from shared.config import Config
+from shared.storage import Store
 
 PG = os.environ.get("MINDEX_TEST_POSTGRES_DSN", "")
 S3 = os.environ.get("MINDEX_TEST_S3_ENDPOINT", "")
@@ -32,7 +38,7 @@ def pg(tmp_path, monkeypatch):
         pytest.skip("需要 MINDEX_TEST_POSTGRES_DSN")
     import psycopg
 
-    from mindex.shared.db.migrate_pg import migrate_pg
+    from shared.db.migrate_pg import migrate_pg
 
     monkeypatch.setenv("MINDEX_DATABASE_DSN", PG)
     with psycopg.connect(PG, autocommit=True) as conn:
@@ -52,10 +58,11 @@ def s3_env(monkeypatch):
 def _bucket_store(tmp_path, monkeypatch, *, bucket, queue="inline", locks="file"):
     import boto3
 
-    from mindex.shared.backends import open_context
+    from shared.backends import open_context
 
-    client = boto3.client("s3", endpoint_url=S3, aws_access_key_id=ACCESS,
-                          aws_secret_access_key=SECRET, region_name="us-east-1")
+    client = boto3.client(
+        "s3", endpoint_url=S3, aws_access_key_id=ACCESS, aws_secret_access_key=SECRET, region_name="us-east-1"
+    )
     try:
         client.create_bucket(Bucket=bucket)
     except client.exceptions.BucketAlreadyOwnedByYou:
@@ -67,8 +74,7 @@ def _bucket_store(tmp_path, monkeypatch, *, bucket, queue="inline", locks="file"
     config = Config(
         data_dir=tmp_path / "data",
         database={"backend": "postgres"},
-        storage={"backend": "s3", "s3": {"endpoint_url": S3, "bucket": bucket,
-                                         "prefix": "libs/"}},
+        storage={"backend": "s3", "s3": {"endpoint_url": S3, "bucket": bucket, "prefix": "libs/"}},
         queue={"backend": queue},
         locks={"backend": locks},
     )
@@ -81,15 +87,22 @@ def _bucket_store(tmp_path, monkeypatch, *, bucket, queue="inline", locks="file"
 
 
 def test_item01_processing_lock_coordinates_via_pg(pg, tmp_path):
-    from filelock import Timeout
 
-    from mindex.shared.processing_lock import ProcessingLock
+    from shared.processing_lock import ProcessingLock
 
     # 默认 pipeline 锁是共享的（并行处理），互斥语义要用 GPU 独占模式验证。
-    first_config = Config(data_dir=tmp_path / "a", database={"backend": "postgres"},
-                          locks={"backend": "postgres"}, enforce_gpu_lock=True)
-    second_config = Config(data_dir=tmp_path / "b", database={"backend": "postgres"},
-                           locks={"backend": "postgres"}, enforce_gpu_lock=True)
+    first_config = Config(
+        data_dir=tmp_path / "a",
+        database={"backend": "postgres"},
+        locks={"backend": "postgres"},
+        enforce_gpu_lock=True,
+    )
+    second_config = Config(
+        data_dir=tmp_path / "b",
+        database={"backend": "postgres"},
+        locks={"backend": "postgres"},
+        enforce_gpu_lock=True,
+    )
     first = ProcessingLock(first_config)
     first.acquire()
     second = ProcessingLock(second_config)
@@ -106,9 +119,8 @@ def test_item01_processing_lock_coordinates_via_pg(pg, tmp_path):
 
 def test_item01b_resource_locks_and_index_write_coordinate_via_pg(pg, tmp_path):
     """同素材+同工作的资源锁与 index-write 锁在 PG 形态跨 data_dir 互斥。"""
-    from filelock import Timeout
 
-    from mindex.shared.processing_lock import ProcessingLock, index_write_lock
+    from shared.processing_lock import ProcessingLock, index_write_lock
 
     base = {"backend": "postgres"}
     first_config = Config(data_dir=tmp_path / "a", database=base, locks={"backend": "postgres"})
@@ -138,16 +150,21 @@ def test_item01b_resource_locks_and_index_write_coordinate_via_pg(pg, tmp_path):
 
 def test_item01c_recover_tasks_respects_pg_leases(pg, tmp_path):
     """任务恢复：无活跃租约的 queued/running 标记中断；被租约占用的保持原状。"""
-    from mindex.shared.backends import open_context
-    from mindex.shared.processing_lock import ProcessingLock, recover_tasks
+    from shared.backends import open_context
+    from shared.processing_lock import ProcessingLock, recover_tasks
 
-    config = Config(data_dir=tmp_path / "data", database={"backend": "postgres"},
-                    locks={"backend": "postgres"})
+    config = Config(
+        data_dir=tmp_path / "data", database={"backend": "postgres"}, locks={"backend": "postgres"}
+    )
     store = open_context(config).store
-    store.execute("INSERT INTO source_tasks(id,source_id,work,status,config,options) "
-                  "VALUES('t-free','s1','detect','queued','{}','{}')")
-    store.execute("INSERT INTO source_tasks(id,source_id,work,status,config,options) "
-                  "VALUES('t-held','s2','detect','running','{}','{}')")
+    store.execute(
+        "INSERT INTO source_tasks(id,source_id,work,status,config,options) "
+        "VALUES('t-free','s1','detect','queued','{}','{}')"
+    )
+    store.execute(
+        "INSERT INTO source_tasks(id,source_id,work,status,config,options) "
+        "VALUES('t-held','s2','detect','running','{}','{}')"
+    )
     holder = ProcessingLock(config, source_id="s2", work="detect")
     holder.acquire()  # 模拟活跃 worker 持有资源租约
     try:
@@ -156,23 +173,25 @@ def test_item01c_recover_tasks_respects_pg_leases(pg, tmp_path):
         holder.release()
     rows = {row["id"]: row["status"] for row in store.rows("SELECT id,status FROM source_tasks")}
     assert rows["t-free"] == "interrupted"  # 无活跃租约 → 标记中断
-    assert rows["t-held"] == "running"      # 有活跃租约 → 不动
+    assert rows["t-held"] == "running"  # 有活跃租约 → 不动
 
 
 # ---------------------------------------------------------------- 2. 队列/账本补偿
 
 
 def test_item02_ledger_enqueue_compensation_is_idempotent(pg, tmp_path):
-    from mindex.shared.backends import open_context
-    from mindex.shared.db.queue_pg import PgTaskQueue
-    from mindex.shared.queue_dispatch import enqueue_backlog
+    from shared.backends import open_context
+    from shared.db.queue_pg import PgTaskQueue
+    from shared.queue_dispatch import enqueue_backlog
 
-    config = Config(data_dir=tmp_path / "data", database={"backend": "postgres"},
-                    queue={"backend": "postgres"})
+    config = Config(
+        data_dir=tmp_path / "data", database={"backend": "postgres"}, queue={"backend": "postgres"}
+    )
     context = open_context(config)
     context.store.execute(
         "INSERT INTO source_tasks(id,source_id,work,status,config,options) "
-        "VALUES('t-strand','s1','detect','queued','{}','{}')")
+        "VALUES('t-strand','s1','detect','queued','{}','{}')"
+    )
     assert enqueue_backlog(config) == {"source_tasks": 1}  # 账本先落、入队前崩溃的补偿
     assert enqueue_backlog(config) == {"source_tasks": 1}  # 幂等：dedupe 命中
     queue = PgTaskQueue(context.library_id)
@@ -187,8 +206,8 @@ def test_item02_ledger_enqueue_compensation_is_idempotent(pg, tmp_path):
 
 def test_item03_studio_workspace_conditional_publish(tmp_path):
     """条件发布：陈旧 expected_revision 被拒；并发写者不丢更新；无 expected 兼容旧调用。"""
-    from mindex.shared.config import Config as _Config
-    from mindex.studio.workspace import versions
+    from shared.config import Config as _Config
+    from studio.workspace import versions
 
     config = _Config(data_dir=tmp_path / "data")
     job = "20260101-120000-abcdef"
@@ -211,8 +230,6 @@ def test_item03_studio_workspace_conditional_publish(tmp_path):
         except versions.RevisionConflict:
             results.append(("conflict", name))
 
-    import threading
-
     threads = [threading.Thread(target=writer, args=(f"w{i}",)) for i in range(2)]
     for thread in threads:
         thread.start()
@@ -229,8 +246,7 @@ def test_item03_studio_workspace_conditional_publish(tmp_path):
 
 def test_item04_checkpoints_stay_on_node(pg, tmp_path, video_file, monkeypatch, s3_env):
     from conftest import FixtureAnalyzer, FixtureEmbedder
-
-    from mindex.processing.pipeline import Pipeline
+    from processing.pipeline import Pipeline
 
     config, context, _ = _bucket_store(tmp_path, monkeypatch, bucket="mindex-verify-checkpoints")
     pipeline = Pipeline(config, analyzer=FixtureAnalyzer(FixtureEmbedder(config)))
@@ -241,15 +257,21 @@ def test_item04_checkpoints_stay_on_node(pg, tmp_path, video_file, monkeypatch, 
     local_analysis = list((config.data_dir / "analysis").rglob("*"))
     local_plans = list((config.data_dir / "plans").rglob("*"))
     assert local_analysis and local_plans  # 本地快速路径仍在（写穿透）
-    remote = {row["object_key"] for row in context.store.rows(
-        "SELECT path,object_key FROM shared_files") if row["path"].startswith(("analysis/", "plans/", "transcripts/"))}
+    remote = {
+        row["object_key"]
+        for row in context.store.rows("SELECT path,object_key FROM shared_files")
+        if row["path"].startswith(("analysis/", "plans/", "transcripts/"))
+    }
     assert remote  # 检查点已镜像到对象存储（权威副本）
     # 新节点（不同 data_dir、同一 PG+S3）无需共享目录即可读回分镜计划
-    other = Config(data_dir=tmp_path / "other-node", database={"backend": "postgres"},
-                   storage=config.storage.model_copy(deep=True))
+    other = Config(
+        data_dir=tmp_path / "other-node",
+        database={"backend": "postgres"},
+        storage=config.storage.model_copy(deep=True),
+    )
     other.embedding.dimensions = 8
     other.asr.aligner_revision = "test-revision"
-    from mindex.processing.pipeline import Pipeline as _Pipeline
+    from processing.pipeline import Pipeline as _Pipeline
 
     node = _Pipeline(other)
     source_row = node.store.one("SELECT * FROM sources WHERE id=?", (source,))
@@ -262,24 +284,23 @@ def test_item04_checkpoints_stay_on_node(pg, tmp_path, video_file, monkeypatch, 
 
 def test_item05_upload_lands_in_object_storage(pg, tmp_path, video_file, monkeypatch, s3_env):
     """S3 形态：上传直接写内容寻址的不可变对象，不落节点本地；重复上传幂等。"""
-    from fastapi.testclient import TestClient
 
-    from mindex.api import create_app
+    from api import create_app
 
     config, context, _ = _bucket_store(tmp_path, monkeypatch, bucket="mindex-verify-uploads")
     app = create_app(config)
     client = TestClient(app)
     for _ in range(2):  # 重复上传同一内容：幂等（键已存在且摘要一致）
         with video_file.open("rb") as handle:
-            response = client.post("/api/admin/sources/upload",
-                                   files={"file": ("clip.mp4", handle, "video/mp4")})
+            response = client.post(
+                "/api/admin/sources/upload", files={"file": ("clip.mp4", handle, "video/mp4")}
+            )
         assert response.status_code == 201, response.text
     uploaded = list(context.media.iter_prefix("sources/"))
     assert len(uploaded) == 1 and uploaded[0].endswith("/clip.mp4")
     assert context.store.one("SELECT id,path FROM sources")["path"] == uploaded[0]
     # 原片不落节点本地；临时上传目录已清理
-    assert not (config.data_dir / "sources").exists() or not any(
-        (config.data_dir / "sources").rglob("*.mp4"))
+    assert not (config.data_dir / "sources").exists() or not any((config.data_dir / "sources").rglob("*.mp4"))
     # 消费期间持有 pin，不能返回已释放物化上下文的裸 Path。
     with context.store.materialize_media(uploaded[0]) as local:
         assert local.is_file() and local.stat().st_size == video_file.stat().st_size
@@ -289,19 +310,19 @@ def test_item05_upload_lands_in_object_storage(pg, tmp_path, video_file, monkeyp
 
 
 def test_item06_download_pin_blocks_purge(pg, tmp_path, monkeypatch, s3_env):
-    import hashlib
-    import io
 
-    from mindex.maintenance.purge import purge_source
-    from mindex.shared.media_delivery import DownloadPins
+    from maintenance.purge import purge_source
+    from shared.media_delivery import DownloadPins
 
     _, context, _ = _bucket_store(tmp_path, monkeypatch, bucket="mindex-verify-gc")
     media = context.media
     payload = b"clip-bytes"
-    media.put_immutable("clips/s1/shot/a.mp4", io.BytesIO(payload),
-                        sha256=hashlib.sha256(payload).hexdigest())
-    context.store.execute("INSERT INTO sources(id,name,path,media,layout_key) "
-                          "VALUES('s1','素材','sources/s1/a.mp4','{}','k')")
+    media.put_immutable(
+        "clips/s1/shot/a.mp4", io.BytesIO(payload), sha256=hashlib.sha256(payload).hexdigest()
+    )
+    context.store.execute(
+        "INSERT INTO sources(id,name,path,media,layout_key) VALUES('s1','素材','sources/s1/a.mp4','{}','k')"
+    )
     pins = DownloadPins(context.store, context.library_id)
     pins.pin("clips/s1/shot/a.mp4", 900)  # 预签名下载仍有效
     purge_source(context.store, "s1", media=media, pins=pins)
@@ -310,38 +331,39 @@ def test_item06_download_pin_blocks_purge(pg, tmp_path, monkeypatch, s3_env):
 
 def test_item06_clean_collects_s3_orphans_respecting_pins(pg, tmp_path, monkeypatch, s3_env):
     """S3 孤儿回收：未引用且过宽限的对象被删；被引用/被 pin/未过宽限的保留。"""
-    import hashlib
-    import io
 
-    from mindex.maintenance.clean import clean_library
-    from mindex.shared.media_delivery import DownloadPins
+    from maintenance.clean import clean_library
+    from shared.media_delivery import DownloadPins
 
     config, context, _ = _bucket_store(tmp_path, monkeypatch, bucket="mindex-verify-clean")
     config.clean.s3_orphan_grace_hours = 0  # 测试不等待宽限
     # 隔离测试桶显式启用版本化；生产配置不会由应用修改。
-    context.media.client.put_bucket_versioning(Bucket=context.media.bucket, VersioningConfiguration={"Status": "Enabled"})
+    context.media.client.put_bucket_versioning(
+        Bucket=context.media.bucket, VersioningConfiguration={"Status": "Enabled"}
+    )
 
     def put(key: str, payload: bytes):
-        context.media.put_immutable(key, io.BytesIO(payload),
-                                    sha256=hashlib.sha256(payload).hexdigest())
+        context.media.put_immutable(key, io.BytesIO(payload), sha256=hashlib.sha256(payload).hexdigest())
 
     put("clips/orphan/x.mp4", b"orphan")
     put("clips/s1/shot/kept.mp4", b"kept")
     put("clips/s1/shot/pinned.mp4", b"pinned")
-    context.store.execute("INSERT INTO sources(id,name,path,media,layout_key) "
-                          "VALUES('s1','素材','sources/s1/a.mp4','{}','k')")
+    context.store.execute(
+        "INSERT INTO sources(id,name,path,media,layout_key) VALUES('s1','素材','sources/s1/a.mp4','{}','k')"
+    )
     context.store.execute(
         "INSERT INTO segments(id,source_id,kind,start,end,path,thumbnail,generation,reason) "
-        "VALUES('seg1','s1','shot',0,5,'clips/s1/shot/kept.mp4','thumbnails/a.jpg','g','r')")
+        "VALUES('seg1','s1','shot',0,5,'clips/s1/shot/kept.mp4','thumbnails/a.jpg','g','r')"
+    )
     pins = DownloadPins(context.store, context.library_id)
     pins.pin("clips/s1/shot/pinned.mp4", 900)
     # 模拟旧的完成写入；新的 write/attempt pin 不能被 GC 忽略。
     context.store.execute("UPDATE resource_pins SET expires_at=0 WHERE kind='write'")
     report = clean_library(config, apply=True)
     keys = set(context.media.iter_prefix(""))
-    assert "clips/orphan/x.mp4" not in keys          # 未引用 + 过宽限 → 回收
-    assert "clips/s1/shot/kept.mp4" in keys          # 被 segments 引用 → 保留
-    assert "clips/s1/shot/pinned.mp4" in keys        # 下载 pin → 保留
+    assert "clips/orphan/x.mp4" not in keys  # 未引用 + 过宽限 → 回收
+    assert "clips/s1/shot/kept.mp4" in keys  # 被 segments 引用 → 保留
+    assert "clips/s1/shot/pinned.mp4" in keys  # 下载 pin → 保留
     assert report["s3_orphans"]["deleted"] >= 1
 
 
@@ -349,7 +371,7 @@ def test_item06_clean_collects_s3_orphans_respecting_pins(pg, tmp_path, monkeypa
 
 
 def test_item07_persons_review_queries_on_pg(pg, tmp_path):
-    from mindex.persons.persons import Persons
+    from persons.persons import Persons
 
     store = Store.open(Config(data_dir=tmp_path / "data", database={"backend": "postgres"}))
     try:
@@ -362,33 +384,36 @@ def test_item07_persons_review_queries_on_pg(pg, tmp_path):
 
 
 def test_item08_agent_changes_route_on_cluster(pg, tmp_path, monkeypatch, s3_env):
-    from fastapi.testclient import TestClient
 
-    from mindex.api import create_app
+    from api import create_app
 
-    config, _, _ = _bucket_store(tmp_path, monkeypatch, bucket="mindex-verify-agent",
-                                 queue="postgres", locks="postgres")
+    config, _, _ = _bucket_store(
+        tmp_path, monkeypatch, bucket="mindex-verify-agent", queue="postgres", locks="postgres"
+    )
     config.vector.backend = "chroma_server"
     monkeypatch.setenv("MINDEX_CHROMA_TOKEN", "")
     app = create_app(config)
     client = TestClient(app)
     assert client.get("/api/agent/status").status_code == 503  # 会话/SSE 仍由网关提供
     # 变更上报：写入共享 outbox，由网关幂等转入 SSE（plans §9）
-    posted = client.post("/api/agent/changes", json={
-        "kind": "mutation", "data": {"domain": "search", "segment_id": "seg1"}})
+    posted = client.post(
+        "/api/agent/changes", json={"kind": "mutation", "data": {"domain": "search", "segment_id": "seg1"}}
+    )
     assert posted.status_code == 201, posted.text
     assert posted.json()["forwarded"] is True
     invalid = client.post("/api/agent/changes", json={"kind": "unknown", "data": {}})
     assert invalid.status_code == 422
 
-    from mindex.agent.changes import ChangeFeed
-    from mindex.agent.outbox_bridge import OutboxBridge
-    from mindex.shared.db.agent_outbox import drain
+    from agent.changes import ChangeFeed
+    from agent.outbox_bridge import OutboxBridge
+    from shared.db.agent_outbox import drain
+
     feed = ChangeFeed(tmp_path / "gateway")
     bridge = OutboxBridge(app.state.store, feed)
     assert bridge.drain_once() == 1  # 网关转入 ChangeFeed
     assert [(item["kind"], item["source"], item["data"]) for item in feed.after(0)] == [
-        ("mutation", "mcp", {"domain": "search", "segment_id": "seg1"})]
+        ("mutation", "mcp", {"domain": "search", "segment_id": "seg1"})
+    ]
     assert bridge.drain_once() == 0  # 幂等：已消费不再重放
     assert drain(app.state.store) == []
 
@@ -397,12 +422,10 @@ def test_item08_agent_changes_route_on_cluster(pg, tmp_path, monkeypatch, s3_env
 
 
 def test_item09_health_metrics_surface(pg, tmp_path, monkeypatch, s3_env):
-    from fastapi.testclient import TestClient
 
-    from mindex.api import create_app
+    from api import create_app
 
-    config, _, _ = _bucket_store(tmp_path, monkeypatch, bucket="mindex-verify-metrics",
-                                 queue="postgres")
+    config, _, _ = _bucket_store(tmp_path, monkeypatch, bucket="mindex-verify-metrics", queue="postgres")
     app = create_app(config)
     client = TestClient(app)
     health = client.get("/api/health").json()
@@ -422,15 +445,17 @@ def test_item09_health_metrics_surface(pg, tmp_path, monkeypatch, s3_env):
 
 def test_item10_gpu_capacity_admission(pg, tmp_path):
     """capacity=1 时两个 worker 并发执行 GPU 类别任务：实际并发不超过 1。"""
-    import threading
-    import time as _time
 
-    from mindex.shared.backends import open_context
-    from mindex.shared.db.queue_pg import PgTaskQueue
-    from mindex.worker_runtime import Worker
+    from shared.backends import open_context
+    from shared.db.queue_pg import PgTaskQueue
+    from worker.runtime import Worker
 
-    config = Config(data_dir=tmp_path / "data", database={"backend": "postgres"},
-                    queue={"backend": "postgres"}, gpu={"capacity": 1, "queues": ["selftest"]})
+    config = Config(
+        data_dir=tmp_path / "data",
+        database={"backend": "postgres"},
+        queue={"backend": "postgres"},
+        gpu={"capacity": 1, "queues": ["selftest"]},
+    )
     context = open_context(config)
     queue = PgTaskQueue(context.library_id)
     with context.db.connect() as db:
@@ -448,8 +473,9 @@ def test_item10_gpu_capacity_admission(pg, tmp_path):
         with lock:
             active["now"] -= 1
 
-    workers = [Worker(config, queues=["selftest"], once=True,
-                      extra_handlers={"selftest": handler}) for _ in range(2)]
+    workers = [
+        Worker(config, queues=["selftest"], once=True, extra_handlers={"selftest": handler}) for _ in range(2)
+    ]
     threads = [threading.Thread(target=worker.run) for worker in workers]
     for thread in threads:
         thread.start()
@@ -465,11 +491,11 @@ def test_item10_gpu_capacity_admission(pg, tmp_path):
 
 def test_item11_small_restore_drill(pg, tmp_path, monkeypatch):
 
-    from mindex.maintenance.pg_export import export_media_bundle, export_pg_to_sqlite
-    from mindex.maintenance.vector_bundle import export_vectors, load_vectors
-    from mindex.shared.backends import LocalMediaStore
-    from mindex.shared.db.transfer import copy_sqlite_to_pg, table_digests
-    from mindex.shared.storage import PgStore
+    from maintenance.pg_export import export_media_bundle, export_pg_to_sqlite
+    from maintenance.vector_bundle import export_vectors, load_vectors
+    from shared.backends import LocalMediaStore
+    from shared.db.transfer import copy_sqlite_to_pg, table_digests
+    from shared.storage import PgStore
 
     started = time.perf_counter()
     config = Config(data_dir=tmp_path / "data", database={"backend": "postgres"})
@@ -479,24 +505,30 @@ def test_item11_small_restore_drill(pg, tmp_path, monkeypatch):
     clip = config.data_dir / "clips" / "s1" / "shot" / "a.mp4"
     clip.parent.mkdir(parents=True, exist_ok=True)
     clip.write_bytes(b"clip-bytes")
-    store.execute("INSERT INTO sources(id,name,path,media,layout_key) "
-                  "VALUES('s1','素材','sources/s1/a.mp4','{}','k')")
-    store.execute("INSERT INTO segments(id,source_id,kind,start,end,path,thumbnail,generation,reason) "
-                  "VALUES('seg1','s1','shot',0,5,'clips/s1/shot/a.mp4','thumbnails/a.jpg','g','r')")
+    store.execute(
+        "INSERT INTO sources(id,name,path,media,layout_key) VALUES('s1','素材','sources/s1/a.mp4','{}','k')"
+    )
+    store.execute(
+        "INSERT INTO segments(id,source_id,kind,start,end,path,thumbnail,generation,reason) "
+        "VALUES('seg1','s1','shot',0,5,'clips/s1/shot/a.mp4','thumbnails/a.jpg','g','r')"
+    )
     store.execute("INSERT INTO index_versions(id,spec,status) VALUES('i1','{\"format\":2}','ready')")
-    from mindex.processing.indexing import VectorIndex
+    from processing.indexing import VectorIndex
 
     VectorIndex(config.data_dir, "i1", create=True).collection.upsert(
-        ids=["rep1"], embeddings=[[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]],
-        documents=["doc"], metadatas=[{"segment_id": "seg1", "view": "visual"}])
+        ids=["rep1"],
+        embeddings=[[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]],
+        documents=["doc"],
+        metadatas=[{"segment_id": "seg1", "view": "visual"}],
+    )
     bundle = tmp_path / "bundle"
     export_pg_to_sqlite(store, bundle)
-    original = config.data_dir / 'sources/s1/a.mp4'
+    original = config.data_dir / "sources/s1/a.mp4"
     original.parent.mkdir(parents=True)
-    original.write_bytes(b'original-bytes')
-    thumbnail = config.data_dir / 'thumbnails/a.jpg'
+    original.write_bytes(b"original-bytes")
+    thumbnail = config.data_dir / "thumbnails/a.jpg"
     thumbnail.parent.mkdir(parents=True)
-    thumbnail.write_bytes(b'thumbnail-bytes')
+    thumbnail.write_bytes(b"thumbnail-bytes")
     media_stats = export_media_bundle(store, LocalMediaStore(config.data_dir), bundle)
     vector_manifest = export_vectors(store, bundle, config=config)
     exported_seconds = time.perf_counter() - started
@@ -504,7 +536,7 @@ def test_item11_small_restore_drill(pg, tmp_path, monkeypatch):
     # 清空目标并回灌
     import psycopg
 
-    from mindex.shared.db.migrate_pg import migrate_pg
+    from shared.db.migrate_pg import migrate_pg
 
     with psycopg.connect(PG, autocommit=True) as conn:
         conn.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
@@ -515,7 +547,7 @@ def test_item11_small_restore_drill(pg, tmp_path, monkeypatch):
     assert load_vectors(restored, bundle, config=config) == {"i1": 1}
     assert restored.one("SELECT id FROM sources WHERE id='s1'") is not None
     assert table_digests(Store(bundle))["sources"] == table_digests(restored)["sources"]
-    from mindex.processing.indexing import VectorIndex as _VI
+    from processing.indexing import VectorIndex as _VI
 
     assert _VI(config.data_dir, "i1").collection.count() == 1
     total_seconds = time.perf_counter() - started
@@ -527,7 +559,13 @@ def test_item11_small_restore_drill(pg, tmp_path, monkeypatch):
 
 def test_item12_desktop_logic_and_remote_config():
     root = os.path.dirname(os.path.dirname(__file__))
-    result = subprocess.run(["node", "--test", "test/lib.test.js"], cwd=os.path.join(root, "desktop"),
-                            capture_output=True, text=True, timeout=120, check=False)
+    result = subprocess.run(
+        ["node", "--test", "test/lib.test.js"],
+        cwd=os.path.join(root, "desktop"),
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "fail 0" in result.stdout

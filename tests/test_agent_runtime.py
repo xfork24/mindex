@@ -5,17 +5,25 @@ from __future__ import annotations
 from threading import Event
 
 import pytest
-from agent_helpers import final_text, new_session, parse_sse, result_text, results, send, wait_idle
 from fastapi.testclient import TestClient
 
-from mindex.agent.llm.scripted import ScriptedLlm, call, say
-from mindex.agent.llm.types import assistant_message, tool_calls, tool_message, user_message
-from mindex.agent.session_store import OMITTED, SessionStore, derive_messages
-from mindex.api import create_app
-from mindex.shared.config import AgentConfig
+from agent.llm.scripted import ScriptedLlm, call, say
+from agent.llm.types import assistant_message, tool_calls, tool_message, user_message
+from agent.session_store import OMITTED, SessionStore, derive_messages
+from agent_helpers import final_text, new_session, parse_sse, result_text, results, send, wait_idle
+from api import create_app
+from shared.config import AgentConfig
 
-CORE = {"turn/start", "turn/end", "step/start", "step/end", "user/message", "assistant/message", "tool/call",
-        "tool/result"}
+CORE = {
+    "turn/start",
+    "turn/end",
+    "step/start",
+    "step/end",
+    "user/message",
+    "assistant/message",
+    "tool/call",
+    "tool/result",
+}
 
 
 @pytest.fixture
@@ -40,15 +48,27 @@ def test_multi_step_tool_call_and_replay(agent):
     sources = [e["data"]["source"]["kind"] for e in events if e["type"] == "user/message"]
     assert sources == ["context", "user"]
     call_event = next(e for e in events if e["type"] == "tool/call")
-    assert call_event["data"] == {"turn": 1, "step": 1, "callId": "c1", "name": "list_jobs", "arguments": "{}"}
+    assert call_event["data"] == {
+        "turn": 1,
+        "step": 1,
+        "callId": "c1",
+        "name": "list_jobs",
+        "arguments": "{}",
+    }
     result = results(events)[0]
     assert result["message"]["toolCallId"] == "c1" and "共 0 个任务" in result_text(result)
     assert final_text(events) == "目前没有创作任务。"
     usage = next(e for e in events if e["type"] == "assistant/message")["data"]["usage"]
     assert set(usage) == {"inputTokens", "outputTokens"}
     # 发给模型的历史 = 由日志派生：第二次请求的 messages 与从日志重新派生的结果完全一致。
-    replay = derive_messages([e for e in events if e["seq"] < next(
-        x["seq"] for x in events if x["type"] == "step/start" and x["data"]["step"] == 2)])
+    replay = derive_messages(
+        [
+            e
+            for e in events
+            if e["seq"]
+            < next(x["seq"] for x in events if x["type"] == "step/start" and x["data"]["step"] == 2)
+        ]
+    )
     assert llm.requests[1].messages == replay
     assert {t["name"] for t in llm.requests[0].tools} >= {"list_jobs", "get_workspace_summary"}
     assert client.get("/api/agent/sessions").json()["items"][0]["title"] == "列出我的创作任务"
@@ -57,7 +77,10 @@ def test_multi_step_tool_call_and_replay(agent):
     llm.extend([say("好")], [say("好")])
     send(client, sid, "再说一次", context={"page": "studio"})
     events = wait_idle(client, sid)
-    assert sum(1 for e in events if e["type"] == "user/message" and e["data"]["source"]["kind"] == "context") == 1
+    assert (
+        sum(1 for e in events if e["type"] == "user/message" and e["data"]["source"]["kind"] == "context")
+        == 1
+    )
 
 
 def test_sse_resume_and_status(agent):
@@ -92,9 +115,11 @@ def test_cancel_and_busy(agent):
 def test_llm_error_unknown_tool_and_bad_arguments(agent):
     client, llm = agent
     llm.extend(
-        [{"type": "tool-call", "id": "x1", "name": "no_such_tool", "arguments": "{}"},
-         {"type": "tool-call", "id": "x2", "name": "list_jobs", "arguments": "{bad"},
-         {"type": "tool-call", "id": "x3", "name": "list_jobs", "arguments": "{\"limit\": 0}"}],
+        [
+            {"type": "tool-call", "id": "x1", "name": "no_such_tool", "arguments": "{}"},
+            {"type": "tool-call", "id": "x2", "name": "list_jobs", "arguments": "{bad"},
+            {"type": "tool-call", "id": "x3", "name": "list_jobs", "arguments": '{"limit": 0}'},
+        ],
         {"blocks": [], "error": "上游 500"},
     )
     sid = new_session(client)
@@ -148,16 +173,27 @@ def test_rolling_window_across_turns_and_reopen(tmp_path):
     reopened = SessionStore(tmp_path)
     history = derive_messages(reopened.model_events(sid, window_steps=2))
     assert [m["content"][0]["text"] for m in history if m["role"] == "user"] == [
-        "页面 A", "当前任务", "页面 B", "继续"]
+        "页面 A",
+        "当前任务",
+        "页面 B",
+        "继续",
+    ]
     assert [c["id"] for m in history if m["role"] == "assistant" for c in tool_calls(m)] == [
-        "c1-0", "c1-1", "c2-0", "c2-1"]
-    assert [m["toolCallId"] for m in history if m["role"] == "tool"] == [
-        "c1-0", "c1-1", "c2-0", "c2-1"]
+        "c1-0",
+        "c1-1",
+        "c2-0",
+        "c2-1",
+    ]
+    assert [m["toolCallId"] for m in history if m["role"] == "tool"] == ["c1-0", "c1-1", "c2-0", "c2-1"]
     # 新轮次的回复把上轮最后一步留在窗口内，之前的任务指令仍可解释该步。
     store.append(sid, "assistant/message", {"message": assistant_message([say("完成")], "p", "m")})
     history = derive_messages(store.model_events(sid, window_steps=2))
     assert [m["content"][0]["text"] for m in history if m["role"] == "user"] == [
-        "页面 A", "当前任务", "页面 B", "继续"]
+        "页面 A",
+        "当前任务",
+        "页面 B",
+        "继续",
+    ]
     history = derive_messages(store.model_events(sid, window_steps=1))
     assert [m["content"][0]["text"] for m in history if m["role"] == "user"] == ["页面 B", "继续"]
     assert history[-1]["content"][0]["text"] == "完成"
@@ -176,8 +212,7 @@ def test_cancel_after_window_rollover(config):
         sid = new_session(client)
         send(client, sid, "处理长任务", context={"page": "studio"})
         assert reached.wait(timeout=10)
-        assert [m["toolCallId"] for m in llm.requests[-1].messages if m["role"] == "tool"] == [
-            "c18", "c19"]
+        assert [m["toolCallId"] for m in llm.requests[-1].messages if m["role"] == "tool"] == ["c18", "c19"]
         response = client.post(f"/api/agent/sessions/{sid}/cancel")
         assert response.json()["status"] == "idle"
         events = wait_idle(client, sid)
@@ -202,32 +237,64 @@ def test_restart_closes_open_turn(config):
     sid = session["id"]
     store.append(sid, "turn/start", {"turn": 1})
     store.append(sid, "user/message", user_message("做点事"))
-    store.append(sid, "assistant/message", {"turn": 1, "step": 1, "message": {
-        "id": "m", "role": "assistant", "source": {"kind": "model", "provider": "p", "model": "m"},
-        "content": [{"type": "tool-call", "id": "c9", "name": "list_jobs", "arguments": "{}"}]}})
-    store.append(sid, "tool/call", {"turn": 1, "step": 1, "callId": "c9", "name": "list_jobs", "arguments": "{}"})
+    store.append(
+        sid,
+        "assistant/message",
+        {
+            "turn": 1,
+            "step": 1,
+            "message": {
+                "id": "m",
+                "role": "assistant",
+                "source": {"kind": "model", "provider": "p", "model": "m"},
+                "content": [{"type": "tool-call", "id": "c9", "name": "list_jobs", "arguments": "{}"}],
+            },
+        },
+    )
+    store.append(
+        sid, "tool/call", {"turn": 1, "step": 1, "callId": "c9", "name": "list_jobs", "arguments": "{}"}
+    )
     store.update(sid, status="running")
     with TestClient(create_app(config, agent_llm=ScriptedLlm())) as client:
         data = client.get(f"/api/agent/sessions/{sid}").json()
         assert data["status"] == "idle"
         events = client.get(f"/api/agent/sessions/{sid}/log").json()["items"]
-    assert events[-1] == {**events[-1], "type": "turn/end", "data": {"turn": 1, "reason": {"kind": "interrupted"}}}
+    assert events[-1] == {
+        **events[-1],
+        "type": "turn/end",
+        "data": {"turn": 1, "reason": {"kind": "interrupted"}},
+    }
     closed = results(events)[0]
     assert closed["message"]["toolCallId"] == "c9" and closed["error"]["code"] == "interrupted"
 
 
 def test_derive_messages_budget_and_missing_results():
-    assistant = {"id": "a", "role": "assistant", "source": {"kind": "model"},
-                 "content": [{"type": "tool-call", "id": "c1", "name": "t", "arguments": "{}"}]}
-    events = [{"type": "user/message", "data": user_message("q")},
-              {"type": "assistant/message", "data": {"message": assistant}}]
+    assistant = {
+        "id": "a",
+        "role": "assistant",
+        "source": {"kind": "model"},
+        "content": [{"type": "tool-call", "id": "c1", "name": "t", "arguments": "{}"}],
+    }
+    events = [
+        {"type": "user/message", "data": user_message("q")},
+        {"type": "assistant/message", "data": {"message": assistant}},
+    ]
     derived = derive_messages(events)
     assert derived[-1]["role"] == "tool" and derived[-1]["isError"]
     big = [{"type": "user/message", "data": user_message("q")}]
     for index in range(10):
         call_id = f"c{index}"
-        big.append({"type": "assistant/message", "data": {"message": {**assistant, "content": [
-            {"type": "tool-call", "id": call_id, "name": "t", "arguments": "{}"}]}}})
+        big.append(
+            {
+                "type": "assistant/message",
+                "data": {
+                    "message": {
+                        **assistant,
+                        "content": [{"type": "tool-call", "id": call_id, "name": "t", "arguments": "{}"}],
+                    }
+                },
+            }
+        )
         big.append({"type": "tool/result", "data": {"message": tool_message(call_id, "x" * 3000)}})
     trimmed = derive_messages(big, budget=4000, keep_recent_results=2)
     tools = [m for m in trimmed if m["role"] == "tool"]

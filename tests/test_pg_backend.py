@@ -15,10 +15,11 @@ import json
 import os
 
 import pytest
+from fastapi.testclient import TestClient
 
-from mindex.shared.db.errors import IntegrityViolation, SchemaMismatch
-from mindex.shared.db.migrate_pg import migrate_pg
-from mindex.shared.storage import Store
+from shared.db.errors import IntegrityViolation, SchemaMismatch
+from shared.db.migrate_pg import migrate_pg
+from shared.storage import Store
 
 pytestmark = pytest.mark.requires_postgres
 
@@ -51,8 +52,8 @@ def fresh_pg(pg_dsn):
 
 @pytest.fixture
 def pg_store(fresh_pg, tmp_path, monkeypatch):
-    from mindex.shared.config import Config
-    from mindex.shared.storage import PgStore
+    from shared.config import Config
+    from shared.storage import PgStore
 
     config = Config(data_dir=tmp_path / "data")
     monkeypatch.setenv("MINDEX_DATABASE_DSN", fresh_pg)
@@ -76,8 +77,8 @@ def test_store_rejects_unmigrated_database(pg_dsn, tmp_path, monkeypatch):
     psycopg = _psycopg()
     with psycopg.connect(pg_dsn, autocommit=True) as conn:
         conn.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
-    from mindex.shared.config import Config
-    from mindex.shared.storage import PgStore
+    from shared.config import Config
+    from shared.storage import PgStore
 
     monkeypatch.setenv("MINDEX_DATABASE_DSN", pg_dsn)
     config = Config(data_dir=tmp_path / "data")
@@ -86,8 +87,8 @@ def test_store_rejects_unmigrated_database(pg_dsn, tmp_path, monkeypatch):
 
 
 def test_missing_dsn_is_a_clear_error(fresh_pg, tmp_path, monkeypatch):
-    from mindex.shared.config import Config
-    from mindex.shared.storage import PgStore
+    from shared.config import Config
+    from shared.storage import PgStore
 
     monkeypatch.delenv("MINDEX_DATABASE_DSN", raising=False)
     with pytest.raises(RuntimeError, match="MINDEX_DATABASE_DSN"):
@@ -99,19 +100,26 @@ def test_missing_dsn_is_a_clear_error(fresh_pg, tmp_path, monkeypatch):
 
 def test_pg_replace_resets_defaults_and_moves_rowid(pg_store):
     db = pg_store
-    db.execute("INSERT INTO model_profiles(role,name,provider,config,api_key) "
-               "VALUES('writer','a','http','{}','secret')")
+    db.execute(
+        "INSERT INTO model_profiles(role,name,provider,config,api_key) "
+        "VALUES('writer','a','http','{}','secret')"
+    )
     first = db.one("SELECT id FROM model_profiles WHERE name='a'")["id"]
-    db.execute("INSERT OR REPLACE INTO model_profiles(id,role,name,provider,config) "
-               "VALUES(?, 'writer','a','http','{\"v\":2}')", (first,))
+    db.execute(
+        "INSERT OR REPLACE INTO model_profiles(id,role,name,provider,config) "
+        "VALUES(?, 'writer','a','http','{\"v\":2}')",
+        (first,),
+    )
     row = db.one("SELECT * FROM model_profiles WHERE name='a'")
     assert row["api_key"] is None  # 未列出列重置为默认（与 SQLite REPLACE 一致）
     assert row["id"] == first
     # 登记的次要约束语义：无 id 的 REPLACE 命中 UNIQUE(role,name) 时 PG 报统一冲突
     # 异常（SQLite 会删旧插新）；runtime_settings 已按 IntegrityError 转用户错误。
     with pytest.raises(IntegrityViolation):
-        db.execute("INSERT OR REPLACE INTO model_profiles(role,name,provider,config) "
-                   "VALUES('writer','a','http','{\"v\":3}')")
+        db.execute(
+            "INSERT OR REPLACE INTO model_profiles(role,name,provider,config) "
+            "VALUES('writer','a','http','{\"v\":3}')"
+        )
     kept = db.one("SELECT * FROM model_profiles WHERE name='a'")
     assert kept["id"] == first and kept["api_key"] is None
     assert db.one("SELECT count(*) AS n FROM model_profiles")["n"] == 1
@@ -128,7 +136,7 @@ def test_pg_rowid_identity_and_latest_ordering(pg_store):
     latest = db.one("SELECT id FROM search_releases WHERE content_id=? ORDER BY rowid DESC LIMIT 1", ("idx",))
     assert latest["id"] == "r0"
     # 显式 rowid 导入（装载器路径）后必须推进序列：下一条默认 rowid 不回卷
-    from mindex.shared.db.migrate_pg import fix_sequences
+    from shared.db.migrate_pg import fix_sequences
 
     with db.connect() as conn:
         conn.execute("INSERT INTO search_releases(rowid,id,content_id) VALUES(100,'r100','idx')")
@@ -157,8 +165,11 @@ def test_pg_current_timestamp_shape(pg_store):
 def test_pg_row_access_and_types(pg_store):
     db = pg_store
     db.execute("INSERT INTO media_references VALUES('m','s',5.5,6.25,'v','[]')")
-    db.execute("INSERT INTO topic_gaps(id,profile_id,visual,embedding,embedding_space,created_at,updated_at) "
-               "VALUES('g','p','v',?,'space','2026-01-01 00:00:00','2026-01-01 00:00:00')", (b"\x00\x01\xff",))
+    db.execute(
+        "INSERT INTO topic_gaps(id,profile_id,visual,embedding,embedding_space,created_at,updated_at) "
+        "VALUES('g','p','v',?,'space','2026-01-01 00:00:00','2026-01-01 00:00:00')",
+        (b"\x00\x01\xff",),
+    )
     row = db.one("SELECT path,start,end FROM media_references")
     assert row["start"] == 5.5 and isinstance(row["start"], float)
     blob = db.one("SELECT embedding FROM topic_gaps WHERE id='g'")["embedding"]
@@ -177,7 +188,8 @@ def test_pg_begin_immediate_serializes_same_library(pg_store):
         psycopg = _psycopg()
         with psycopg.connect(db.backend.dsn, autocommit=True) as other:
             held = other.execute(
-                "SELECT count(*) FROM pg_locks WHERE locktype='advisory' AND granted").fetchone()[0]
+                "SELECT count(*) FROM pg_locks WHERE locktype='advisory' AND granted"
+            ).fetchone()[0]
         assert held >= 1  # advisory lock 可见；事务提交后自动释放
     assert pg_store.one("SELECT value FROM settings WHERE key='hold'")["value"] == "1"
 
@@ -186,13 +198,15 @@ def test_pg_snapshot_json_text_filter(pg_store):
     db = pg_store
     db.execute("INSERT INTO index_members VALUES('i','s1','{\"source_id\":\"src1\"}',1)")
     db.execute("INSERT INTO index_members VALUES('i','s2','{}',1)")
-    rows = db.rows("SELECT snapshot FROM index_members WHERE json_extract(snapshot,'$.source_id')=?", ("src1",))
+    rows = db.rows(
+        "SELECT snapshot FROM index_members WHERE json_extract(snapshot,'$.source_id')=?", ("src1",)
+    )
     assert len(rows) == 1 and json.loads(rows[0]["snapshot"])["source_id"] == "src1"
 
 
 def test_pg_curation_boolean_truth(pg_store, tmp_path):
     """curation 的 PG 方言（CASE 化）与 SQLite 数值 OR 真值结果一致。"""
-    from mindex.admin.curation import segment_sql
+    from admin.curation import segment_sql
 
     db = pg_store
     db.execute("INSERT INTO sources VALUES('src','名','p','{}','k',0,NULL)")
@@ -203,8 +217,11 @@ def test_pg_curation_boolean_truth(pg_store, tmp_path):
     sql = segment_sql(db) + " WHERE g.source_id=?"
     rows = {r["id"]: r for r in db.rows(sql, ("src",))}
     assert rows["seg1"]["effective_hidden"] == 1 and rows["seg2"]["effective_hidden"] == 1
-    visible = db.rows(sql + " AND (CASE WHEN COALESCE(c.hidden,0)<>0 OR COALESCE(sc.hidden,0)<>0 "
-                      "OR COALESCE(pc.hidden,0)<>0 THEN 1 ELSE 0 END)=%s", ("src", 0))
+    visible = db.rows(
+        sql + " AND (CASE WHEN COALESCE(c.hidden,0)<>0 OR COALESCE(sc.hidden,0)<>0 "
+        "OR COALESCE(pc.hidden,0)<>0 THEN 1 ELSE 0 END)=%s",
+        ("src", 0),
+    )
     assert visible == []
 
 
@@ -219,22 +236,26 @@ def _seed_sqlite(store: Store):
     store.execute("INSERT OR REPLACE INTO representations VALUES('rep1','idx','seg1','visual','doc','ck')")
     store.execute("INSERT INTO settings VALUES('active','idx')")
     store.execute("INSERT INTO media_references VALUES('clips/x','s1',0.25,0.75,'shot-boundary-v1','[]')")
-    store.execute("INSERT INTO topic_gaps(id,profile_id,visual,embedding,embedding_space,created_at,updated_at) "
-                  "VALUES('g1','p1','v',?,'space','2026-01-01 00:00:00','2026-01-01 00:00:00')",
-                  (b"\x89PNG\r\n",))
+    store.execute(
+        "INSERT INTO topic_gaps(id,profile_id,visual,embedding,embedding_space,created_at,updated_at) "
+        "VALUES('g1','p1','v',?,'space','2026-01-01 00:00:00','2026-01-01 00:00:00')",
+        (b"\x89PNG\r\n",),
+    )
     store.execute("INSERT INTO model_profiles(role,name,provider,config) VALUES('writer','默认','p','{}')")
     with store.connect() as db:
-        run_id = db.execute("INSERT INTO runs(stage,source_id,status) VALUES('detect','s1','complete')").lastrowid
+        run_id = db.execute(
+            "INSERT INTO runs(stage,source_id,status) VALUES('detect','s1','complete')"
+        ).lastrowid
     assert run_id == 1
     store.execute("INSERT INTO search_releases(id,content_id) VALUES('rel','idx')")
 
 
 def test_roundtrip_sqlite_pg_sqlite(tmp_path, fresh_pg, monkeypatch):
-    from mindex.shared.backends import open_context as _open_context
-    from mindex.shared.config import Config
-    from mindex.shared.config import Config as _Config
-    from mindex.shared.db.transfer import copy_pg_to_sqlite, copy_sqlite_to_pg, table_digests
-    from mindex.shared.storage import PgStore
+    from shared.backends import open_context as _open_context
+    from shared.config import Config
+    from shared.config import Config as _Config
+    from shared.db.transfer import copy_pg_to_sqlite, copy_sqlite_to_pg, table_digests
+    from shared.storage import PgStore
 
     origin_dir = tmp_path / "sqlite-origin"
     origin = _open_context(_Config(data_dir=origin_dir)).store  # 铸 library.id（装载后身份随行）
@@ -267,9 +288,9 @@ def test_roundtrip_sqlite_pg_sqlite(tmp_path, fresh_pg, monkeypatch):
 
 
 def test_open_context_pg_single_form(fresh_pg, tmp_path, monkeypatch):
-    from mindex.shared.backends import open_context
-    from mindex.shared.config import Config
-    from mindex.shared.storage import PgStore
+    from shared.backends import open_context
+    from shared.config import Config
+    from shared.storage import PgStore
 
     monkeypatch.setenv("MINDEX_DATABASE_DSN", fresh_pg)
     config = Config(data_dir=tmp_path / "data", database={"backend": "postgres"})
@@ -284,9 +305,9 @@ def test_open_context_pg_single_form(fresh_pg, tmp_path, monkeypatch):
 
 
 def test_maintenance_refusal_on_pg(fresh_pg, tmp_path, monkeypatch):
-    from mindex.shared.config import Config
-    from mindex.shared.db.errors import UnsupportedOperation
-    from mindex.shared.storage import PgStore, require_sqlite
+    from shared.config import Config
+    from shared.db.errors import UnsupportedOperation
+    from shared.storage import PgStore, require_sqlite
 
     monkeypatch.setenv("MINDEX_DATABASE_DSN", fresh_pg)
     config = Config(data_dir=tmp_path / "data", database={"backend": "postgres"})
@@ -297,10 +318,9 @@ def test_maintenance_refusal_on_pg(fresh_pg, tmp_path, monkeypatch):
 
 def test_create_app_boots_on_pg_single(fresh_pg, tmp_path, monkeypatch, video_file):
     """pg-single 冒烟：API 装配、健康检查、覆盖层 settings 读写与管理路由全部走 PG。"""
-    from fastapi.testclient import TestClient
 
-    from mindex.api import create_app
-    from mindex.shared.config import Config
+    from api import create_app
+    from shared.config import Config
 
     monkeypatch.setenv("MINDEX_DATABASE_DSN", fresh_pg)
     config = Config(data_dir=tmp_path / "data", database={"backend": "postgres"})

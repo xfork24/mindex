@@ -23,12 +23,14 @@ import weakref
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
+from decimal import Decimal
 from typing import Any
 
-from mindex.shared.db.dialect import TABLE_SPECS, UnsupportedSql, rewrite_for_postgres
-from mindex.shared.db.errors import BackendError, IntegrityViolation
-from mindex.shared.db.rows import Row
-from mindex.shared.db.statements import DualSQL
+from shared.db.dialect import TABLE_SPECS, UnsupportedSql, rewrite_for_postgres
+from shared.db.errors import BackendError, IntegrityViolation
+from shared.db.rows import Row
+from shared.db.statements import DualSQL
+from shared.query_budget import QueryBudgetExceeded, active, remaining
 
 __all__ = ["PgBackend"]
 
@@ -67,13 +69,15 @@ class CursorView:
     def _wrap(self, values) -> Row:
         # 与 SQLite 的类型面保持一致：numeric → float、memoryview → bytes，
         # 避免 Decimal/内存视图漏到业务层与 JSON 响应里。
-        from decimal import Decimal
 
         normalized = tuple(
-            float(value) if isinstance(value, Decimal)
-            else bytes(value) if isinstance(value, memoryview)
+            float(value)
+            if isinstance(value, Decimal)
+            else bytes(value)
+            if isinstance(value, memoryview)
             else value
-            for value in values)
+            for value in values
+        )
         return Row.from_description(self._cursor.description, normalized)
 
     def __iter__(self):
@@ -96,8 +100,16 @@ class CursorView:
 class PgConnection:
     """业务代码在 ``store.connect()`` 里拿到的统一连接。"""
 
-    def __init__(self, connection, library_key: tuple[int, int], library_id=None, scope=None,
-                 backend=None, execution=None, control=False):
+    def __init__(
+        self,
+        connection,
+        library_key: tuple[int, int],
+        library_id=None,
+        scope=None,
+        backend=None,
+        execution=None,
+        control=False,
+    ):
         self._connection = connection
         self._library_key = library_key
         self._library_id = library_id
@@ -108,50 +120,91 @@ class PgConnection:
 
     def _guard_write(self, sql, values=(), *, batches=None):
         # 包含写 CTE；只读 SELECT 不受维护影响。字符串/注释使用同一词法扫描器排除。
-        from mindex.shared.db.dialect import _segments
-        from mindex.shared.db.maintenance_gate import guard_write
+        # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+        from shared.db.dialect import _segments
+        from shared.db.maintenance_gate import guard_write
 
         code = " ".join(text for is_code, text in _segments(str(sql)) if is_code or text.startswith('"'))
         if self._control:
             # 控制连接只能维护调度与租约，不提供业务写入的 fencing/维护绕过入口。
             targets = re.findall(
-                r"\b(?:INSERT(?:\s+OR\s+(?:REPLACE|IGNORE))?\s+INTO|UPDATE|DELETE\s+FROM|ALTER\s+TABLE|DROP\s+TABLE|TRUNCATE(?:\s+TABLE)?)"
-                r'\s+(?!SET\b)([\w"]+)', code, re.I)
-            if (any(target.lower().strip('"') not in {"task_queue", "lock_resources", "lock_holders", "gpu_resource_groups", "gpu_allocations", "resource_objects", "resource_pins"}
-                    for target in targets)
-                    or re.search(r"\b(CREATE|ALTER|DROP|TRUNCATE|CALL|COPY)\b", code, re.I)
-                    or re.match(r"\s*DO\b", code, re.I)):
+                (
+                    "\\b(?:INSERT(?:\\s+OR\\s+(?:REPLACE|IGNORE))?\\s+INTO|UPDATE|DELETE\\s+FROM|ALTER\\s+T"
+                    'ABLE|DROP\\s+TABLE|TRUNCATE(?:\\s+TABLE)?)\\s+(?!SET\\b)([\\w"]+)'
+                ),
+                code,
+                re.I,
+            )
+            if (
+                any(
+                    target.lower().strip('"')
+                    not in {
+                        "task_queue",
+                        "lock_resources",
+                        "lock_holders",
+                        "gpu_resource_groups",
+                        "gpu_allocations",
+                        "resource_objects",
+                        "resource_pins",
+                    }
+                    for target in targets
+                )
+                or re.search(r"\b(CREATE|ALTER|DROP|TRUNCATE|CALL|COPY)\b", code, re.I)
+                or re.match(r"\s*DO\b", code, re.I)
+            ):
                 raise RuntimeError("控制连接只允许队列和租约维护，业务写入必须使用普通事务")
-        if self._library_id and re.search(r"\b(INSERT|UPDATE|DELETE|ALTER|DROP|TRUNCATE|CREATE)\b", code, re.I):
+        if self._library_id and re.search(
+            r"\b(INSERT|UPDATE|DELETE|ALTER|DROP|TRUNCATE|CREATE)\b", code, re.I
+        ):
             guard_write(self._connection, self._library_id, self._scope)
             self._verify()
-            if (self._backend is not None and getattr(self._backend, "object_coordination", False)
-                    and not re.match(r"\s*(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+resource_(?:objects|pins)\b", code, re.I)):
-                from mindex.shared.object_coordination import publication_guard, reference_arguments
+            if (
+                self._backend is not None
+                and getattr(self._backend, "object_coordination", False)
+                and not re.match(
+                    r"\s*(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+resource_(?:objects|pins)\b", code, re.I
+                )
+            ):
+                # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+                from shared.object_coordination import publication_guard, reference_arguments
 
-                reference_values = reference_arguments(str(sql), values) if batches is None else (
-                    value for row in batches for value in reference_arguments(str(sql), row))
+                reference_values = (
+                    reference_arguments(str(sql), values)
+                    if batches is None
+                    else (value for row in batches for value in reference_arguments(str(sql), row))
+                )
                 publication_guard(self._connection, self._library_id, reference_values)
 
     def _deadline(self):
-        from mindex.shared.query_budget import remaining
 
         seconds = remaining()
         if seconds is not None:
-            self._connection.execute("SELECT set_config('statement_timeout',%s,true)",
-                                     (str(max(1, int(seconds * 1000))),))
+            self._connection.execute(
+                "SELECT set_config('statement_timeout',%s,true)", (str(max(1, int(seconds * 1000))),)
+            )
 
     def _verify(self):
-        self._deadline()
-        if self._backend is not None and not self._control:
-            from mindex.shared.db.fencing import verify_transaction
-            from mindex.shared.db.maintenance_gate import _ACTIVE
+        # 延迟导入：PG 是可选后端，仅在实际借出连接时加载驱动。
+        from psycopg.errors import IdleInTransactionSessionTimeout
 
-            if getattr(self._backend, "enforce_identity", False) and _ACTIVE.get() != self._backend.dsn:
-                identity = self._connection.execute("SELECT value FROM settings WHERE key='library.id'").fetchone()
-                if identity is None or identity[0] != self._backend.library_id:
-                    raise RuntimeError("运行中素材库身份已变化；拒绝使用旧上下文，请停止节点并完成迁移激活")
-            verify_transaction(self._connection, self._backend, execution=self._execution)
+        try:
+            self._deadline()
+            if self._backend is not None and not self._control:
+                # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+                from shared.db.fencing import verify_transaction
+                from shared.db.maintenance_gate import _ACTIVE
+
+                if getattr(self._backend, "enforce_identity", False) and _ACTIVE.get() != self._backend.dsn:
+                    identity = self._connection.execute(
+                        "SELECT value FROM settings WHERE key='library.id'"
+                    ).fetchone()
+                    if identity is None or identity[0] != self._backend.library_id:
+                        raise RuntimeError(
+                            "运行中素材库身份已变化；拒绝使用旧上下文，请停止节点并完成迁移激活"
+                        )
+                verify_transaction(self._connection, self._backend, execution=self._execution)
+        except IdleInTransactionSessionTimeout as exc:
+            raise _translate(exc, execution=self._execution) from exc
 
     def execute(self, sql, args: Sequence[Any] = ()) -> CursorView:
         self._deadline()
@@ -162,8 +215,9 @@ class PgConnection:
         else:
             if sql.strip().upper() == "BEGIN IMMEDIATE":
                 # 同库互斥：事务级 advisory lock，随事务提交/回滚自动释放。
-                return CursorView(self._connection.execute(
-                    "SELECT pg_advisory_xact_lock(%s, %s)", self._library_key))
+                return CursorView(
+                    self._connection.execute("SELECT pg_advisory_xact_lock(%s, %s)", self._library_key)
+                )
             text = _prepare(sql)
             column = _returning_column(sql)
         if column and "RETURNING" not in text.upper():
@@ -171,7 +225,7 @@ class PgConnection:
         try:
             cursor = self._connection.execute(text, tuple(args))
         except Exception as exc:
-            raise _translate(exc) from exc
+            raise _translate(exc, execution=self._execution) from exc
         lastrowid = None
         if column and cursor.description is not None:
             # INSERT ... RETURNING 的行在此取走；业务代码对 INSERT 语句不再 fetch。
@@ -188,7 +242,7 @@ class PgConnection:
         try:
             cursor.executemany(text, list(args))
         except Exception as exc:
-            raise _translate(exc) from exc
+            raise _translate(exc, execution=self._execution) from exc
         return CursorView(cursor)
 
     def commit(self) -> None:
@@ -219,15 +273,30 @@ def _returning_column(sql) -> str | None:
     return spec.returning if spec else None
 
 
-def _translate(exc: Exception) -> Exception:
+def _translate(exc: Exception, *, execution=None) -> Exception:
+    # 延迟导入：独立模型或扩展功能使用可选依赖，仅在实际调用时加载。
     from psycopg import errors as pg_errors
 
-    from mindex.shared.query_budget import QueryBudgetExceeded, remaining
+    if (
+        isinstance(exc, pg_errors.IdleInTransactionSessionTimeout)
+        and execution is not None
+        and (execution.attempt is not None or execution.leases)
+    ):
+        # 延迟导入：租约模块依赖 PG 后端；在驱动报错时才转换为执行层的失联语义。
+        from shared.db.locks_pg import LeaseLost
 
+        if execution.attempt is not None:
+            execution.attempt.lost.set()
+        return LeaseLost("执行事务超过租约空闲期限，已由数据库回滚；旧执行不得继续提交")
     if isinstance(exc, pg_errors.QueryCanceled) and remaining(default=None) is not None:
         return QueryBudgetExceeded("查询 SQL 已超过总期限，请缩小范围或稍后重试")
-    if isinstance(exc, pg_errors.UniqueViolation | pg_errors.NotNullViolation
-                  | pg_errors.CheckViolation | pg_errors.ForeignKeyViolation):
+    if isinstance(
+        exc,
+        pg_errors.UniqueViolation
+        | pg_errors.NotNullViolation
+        | pg_errors.CheckViolation
+        | pg_errors.ForeignKeyViolation,
+    ):
         return IntegrityViolation(str(exc).splitlines()[0] if str(exc) else type(exc).__name__)
     if isinstance(exc, pg_errors.Error):
         # 其余驱动错误包装成 sqlite3.OperationalError 体系，业务 except 分支仍成立；
@@ -241,10 +310,19 @@ class PgBackend:
     enforce_identity = False
     object_coordination = False
 
-    def __init__(self, dsn: str, *, library_id: str, pool_max: int = 8, pool_min: int = 0,
-                 control_pool_max: int = 2, connection_budget: int = 10,
-                 checkout_timeout: float = 30, control_checkout_timeout: float = 5,
-                 queue_backend: str = "inline"):
+    def __init__(
+        self,
+        dsn: str,
+        *,
+        library_id: str,
+        pool_max: int = 8,
+        pool_min: int = 0,
+        control_pool_max: int = 2,
+        connection_budget: int = 10,
+        checkout_timeout: float = 30,
+        control_checkout_timeout: float = 5,
+        queue_backend: str = "inline",
+    ):
         if not 0 <= pool_min <= pool_max or control_pool_max < 1:
             raise ValueError("PostgreSQL 连接池容量无效")
         if pool_max + control_pool_max > connection_budget:
@@ -274,19 +352,26 @@ class PgBackend:
         if not self._finalizer.alive:
             raise RuntimeError("PostgreSQL 后端已关闭")
         key = (self.dsn, control)
-        settings = (self.pool_min, self.pool_max, self.control_pool_max,
-                    self.checkout_timeout, self.control_checkout_timeout)
+        settings = (
+            self.pool_min,
+            self.pool_max,
+            self.control_pool_max,
+            self.checkout_timeout,
+            self.control_checkout_timeout,
+        )
         with _POOLS_LOCK:
             if self.dsn in _POOL_SETTINGS and _POOL_SETTINGS[self.dsn] != settings:
                 raise RuntimeError("同一 PostgreSQL 连接的池配置不一致；修改连接预算后请重启进程")
             pool = _POOLS.get(key)
             if pool is None:
                 try:
+                    # 延迟导入：保留可选依赖探测或异常捕获时的降级行为。
                     from psycopg_pool import ConnectionPool
                 except ImportError as exc:  # pragma: no cover - 依赖缺失时给出明确指引
                     raise RuntimeError("PostgreSQL 后端需要 psycopg：uv sync --extra cluster") from exc
                 pool = ConnectionPool(
-                    self.dsn, min_size=0 if control else self.pool_min,
+                    self.dsn,
+                    min_size=0 if control else self.pool_min,
                     max_size=self.control_pool_max if control else self.pool_max,
                     timeout=self.control_checkout_timeout if control else self.checkout_timeout,
                     # PG 重启/网络中断会让池中连接变成失效 TCP：checkout 时先做一次空查询探针，
@@ -300,20 +385,30 @@ class PgBackend:
 
     @contextmanager
     def connect(self, *, control=False, execution=None, snapshot=False) -> Iterator[PgConnection]:
-        from mindex.shared.db.fencing import ExecutionFence
+        # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+        from shared.db.fencing import ExecutionFence
 
         fence = execution if execution is not None else ExecutionFence.capture()
+        # 延迟导入：独立模型或扩展功能使用可选依赖，仅在实际调用时加载。
+        from psycopg.errors import IdleInTransactionSessionTimeout
         from psycopg_pool import PoolTimeout
-
-        from mindex.shared.query_budget import QueryBudgetExceeded, active, remaining
 
         try:
             timeout = remaining(self.control_checkout_timeout if control else self.checkout_timeout)
-            with self.pool(control=control).connection(timeout=timeout) as conn:  # 正常退出提交、异常回滚并归还
+            with self.pool(control=control).connection(
+                timeout=timeout
+            ) as conn:  # 正常退出提交、异常回滚并归还
                 if snapshot:
                     conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
-                view = PgConnection(conn, self.library_key, None if control else self.library_id, self.dsn,
-                                    backend=self, execution=fence, control=control)
+                view = PgConnection(
+                    conn,
+                    self.library_key,
+                    None if control else self.library_id,
+                    self.dsn,
+                    backend=self,
+                    execution=fence,
+                    control=control,
+                )
                 view._verify()
                 token = BUSINESS_CONNECTION.set(view) if not control else None
                 try:
@@ -322,6 +417,8 @@ class PgBackend:
                 finally:
                     if token is not None:
                         BUSINESS_CONNECTION.reset(token)
+        except IdleInTransactionSessionTimeout as exc:
+            raise _translate(exc, execution=fence) from exc
         except PoolTimeout as exc:
             if active():
                 raise QueryBudgetExceeded("查询连接池等待预算已耗尽，请稍后重试") from exc

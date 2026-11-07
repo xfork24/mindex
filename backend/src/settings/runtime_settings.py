@@ -15,8 +15,8 @@ import os
 import sqlite3
 from pathlib import Path
 
-from mindex.shared.comfyui import validate_workflow
-from mindex.shared.config import (
+from shared.comfyui import validate_workflow
+from shared.config import (
     ANIMATOR_INHERITED,
     H3_DURATIONS,
     AgentLlmConfig,
@@ -33,11 +33,22 @@ from mindex.shared.config import (
     SpeakerConfig,
     VideoGeneratorConfig,
 )
-from mindex.shared.storage import Store
+from shared.migration_state import pending
+from shared.storage import Store
 
 ROLES = (
-    "analyzer", "writer", "generator", "embedding", "asr", "tts", "image_generator", "video_generator",
-    "music_generator", "animator", "person", "agent",
+    "analyzer",
+    "writer",
+    "generator",
+    "embedding",
+    "asr",
+    "tts",
+    "image_generator",
+    "video_generator",
+    "music_generator",
+    "animator",
+    "person",
+    "agent",
 )
 ROLE_LABELS = {
     "agent": "智能助手",
@@ -57,23 +68,87 @@ ROLE_LABELS = {
 # 各角色允许 profile 覆盖的字段；未列字段永远承袭 yaml 原值。
 PROFILE_FIELDS = {
     "person": {
-        "backend", "base_url", "model", "revision", "timeout", "api_key_env", "expected_space",
-        "fps", "frame_interval", "face_threshold", "face_margin", "min_face_quality", "min_reference_quality", "body_threshold",
+        "backend",
+        "base_url",
+        "model",
+        "revision",
+        "timeout",
+        "api_key_env",
+        "expected_space",
+        "fps",
+        "frame_interval",
+        "face_threshold",
+        "face_margin",
+        "min_face_quality",
+        "min_reference_quality",
+        "body_threshold",
     },
     "analyzer": {
-        "backend", "base_url", "model", "revision", "timeout", "api_key_env", "llama_template",
-        "response_retries", "initial_output_tokens", "max_output_tokens", "thinking_mode", "deployment_manifest",
+        "backend",
+        "base_url",
+        "model",
+        "revision",
+        "timeout",
+        "api_key_env",
+        "llama_template",
+        "response_retries",
+        "initial_output_tokens",
+        "max_output_tokens",
+        "thinking_mode",
+        "deployment_manifest",
     },
-    "generator": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "llama_template", "max_tokens"},
-    "writer": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "llama_template", "max_tokens"},
-    "agent": {"backend", "base_url", "model", "revision", "timeout", "api_key_env", "max_tokens", "context_window", "vision"},
+    "generator": {
+        "backend",
+        "base_url",
+        "model",
+        "revision",
+        "timeout",
+        "api_key_env",
+        "llama_template",
+        "max_tokens",
+    },
+    "writer": {
+        "backend",
+        "base_url",
+        "model",
+        "revision",
+        "timeout",
+        "api_key_env",
+        "llama_template",
+        "max_tokens",
+    },
+    "agent": {
+        "backend",
+        "base_url",
+        "model",
+        "revision",
+        "timeout",
+        "api_key_env",
+        "max_tokens",
+        "context_window",
+        "vision",
+    },
     # deployment_manifest：llama_cpp 部署清单（e2e pin 生成）；相对路径按数据目录解析。
     "embedding": {
-        "backend", "base_url", "model", "revision", "timeout", "api_key_env", "quantization", "dimensions",
+        "backend",
+        "base_url",
+        "model",
+        "revision",
+        "timeout",
+        "api_key_env",
+        "quantization",
+        "dimensions",
         "deployment_manifest",
     },
     "asr": {
-        "backend", "base_url", "model", "revision", "timeout", "api_key_env", "enabled", "max_tokens",
+        "backend",
+        "base_url",
+        "model",
+        "revision",
+        "timeout",
+        "api_key_env",
+        "enabled",
+        "max_tokens",
         "deployment_manifest",
     },
     "tts": {
@@ -89,22 +164,59 @@ PROFILE_FIELDS = {
     },
     # enabled 不在白名单：激活档案即启用视频生成（merge_profile 置 True）。
     "video_generator": {
-        "backend", "base_url", "model", "revision", "timeout", "api_key_env", "poll_interval", "max_wait",
-        "durations", "fps", "comfyui_workflow", "comfyui_mapping",
+        "backend",
+        "base_url",
+        "model",
+        "revision",
+        "timeout",
+        "api_key_env",
+        "poll_interval",
+        "max_wait",
+        "durations",
+        "fps",
+        "comfyui_workflow",
+        "comfyui_mapping",
     },
     # 图片/音乐生成同理：激活档案即启用。
     "image_generator": {
-        "backend", "base_url", "model", "revision", "timeout", "api_key_env", "poll_interval", "max_wait",
-        "comfyui_workflow", "comfyui_mapping",
+        "backend",
+        "base_url",
+        "model",
+        "revision",
+        "timeout",
+        "api_key_env",
+        "poll_interval",
+        "max_wait",
+        "comfyui_workflow",
+        "comfyui_mapping",
     },
     "music_generator": {
-        "backend", "base_url", "model", "cover_model", "revision", "timeout", "api_key_env", "poll_interval",
-        "max_wait", "comfyui_workflow", "comfyui_mapping", "num_inference_steps", "max_seconds",
+        "backend",
+        "base_url",
+        "model",
+        "cover_model",
+        "revision",
+        "timeout",
+        "api_key_env",
+        "poll_interval",
+        "max_wait",
+        "comfyui_workflow",
+        "comfyui_mapping",
+        "num_inference_steps",
+        "max_seconds",
     },
     # 同上：激活动画生成档案即启用（merge_profile 置 enabled=True）。
     "animator": {
-        "backend", "base_url", "model", "revision", "timeout", "api_key_env", "max_tokens", "retries",
-        "max_capture_seconds", "max_html_kb",
+        "backend",
+        "base_url",
+        "model",
+        "revision",
+        "timeout",
+        "api_key_env",
+        "max_tokens",
+        "retries",
+        "max_capture_seconds",
+        "max_html_kb",
     },
 }
 SECTION_TYPES = {
@@ -121,7 +233,15 @@ SECTION_TYPES = {
     "animator": AnimatorConfig,
     "agent": AgentLlmConfig,
 }
-_STUDIO_ROLES = {"generator", "writer", "tts", "video_generator", "image_generator", "music_generator", "animator"}
+_STUDIO_ROLES = {
+    "generator",
+    "writer",
+    "tts",
+    "video_generator",
+    "image_generator",
+    "music_generator",
+    "animator",
+}
 # 激活档案即启用的角色（无档案时沿用 yaml 的 enabled）。
 _ENABLING_ROLES = ("video_generator", "image_generator", "music_generator", "animator")
 
@@ -290,23 +410,32 @@ PROVIDER_PRESETS: dict[str, dict[str, dict]] = {
                 "durations": list(H3_DURATIONS),
             },
             "note": "MiniMax H3 视频生成 V2：设置页只需 endpoint 与 API Key；文生/首帧/尾帧/首尾帧/主体参考、"
-                    "模型档位、分辨率与时长在创作页逐镜设置",
+            "模型档位、分辨率与时长在创作页逐镜设置",
         },
         "image_generator": {
             "config": {"backend": "minimax", "base_url": "https://api.minimax.cn/v1", "model": "image-01"},
             "note": "image-01 文生图 / 主体参考图生图（/v1/image_generation）",
         },
         "music_generator": {
-            "config": {"backend": "minimax", "base_url": "https://api.minimax.cn/v1", "model": "music-3.0",
-                       "cover_model": "music-cover"},
+            "config": {
+                "backend": "minimax",
+                "base_url": "https://api.minimax.cn/v1",
+                "model": "music-3.0",
+                "cover_model": "music-cover",
+            },
             "note": "music-3.0 音乐生成、music-cover 翻唱与歌词生成；2026-08-20 起仅对历史付费用户开放",
         },
     },
 }
 # 本地 ComfyUI：导入「导出（API）」工作流与节点映射后可用（视频/图片/音乐生成）。
 COMFYUI_PRESETS = {
-    "video_generator": {"backend": "comfyui", "base_url": "http://127.0.0.1:8188", "model": "", "durations": [5.0],
-                        "fps": 16},
+    "video_generator": {
+        "backend": "comfyui",
+        "base_url": "http://127.0.0.1:8188",
+        "model": "",
+        "durations": [5.0],
+        "fps": 16,
+    },
     "image_generator": {"backend": "comfyui", "base_url": "http://127.0.0.1:8188", "model": ""},
     "music_generator": {"backend": "comfyui", "base_url": "http://127.0.0.1:8188", "model": ""},
 }
@@ -321,8 +450,16 @@ for _roles in PROVIDER_PRESETS.values():
 
 # 智能助手需要稳定的多轮工具调用：只为确认支持 function calling 的文本模型提供预设。
 _AGENT_PRESETS = {
-    "deepseek": ("https://api.deepseek.com/v1", "deepseek-chat", "OpenAI 兼容工具调用；名称以平台模型列表为准"),
-    "aliyun": ("https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen-plus", "Qwen 工具调用，OpenAI 兼容"),
+    "deepseek": (
+        "https://api.deepseek.com/v1",
+        "deepseek-chat",
+        "OpenAI 兼容工具调用；名称以平台模型列表为准",
+    ),
+    "aliyun": (
+        "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "qwen-plus",
+        "Qwen 工具调用，OpenAI 兼容",
+    ),
     "zhipu": ("https://open.bigmodel.cn/api/paas/v4", "glm-4.6", "GLM 工具调用，OpenAI 兼容"),
 }
 for _provider, (_url, _model, _note) in _AGENT_PRESETS.items():
@@ -332,12 +469,17 @@ for _provider, (_url, _model, _note) in _AGENT_PRESETS.items():
     }
 PROVIDER_PRESETS["anthropic"] = {
     "agent": {
-        "config": {"backend": "anthropic", "base_url": "https://api.anthropic.com", "model": "claude-sonnet-4-5"},
+        "config": {
+            "backend": "anthropic",
+            "base_url": "https://api.anthropic.com",
+            "model": "claude-sonnet-4-5",
+        },
         "note": "Anthropic 原生 Messages 协议；模型名以控制台列表为准",
     }
 }
 
-# 动画生成与智能助手同协议（OpenAI 兼容 / Anthropic Messages）：沿用智能助手的厂商预设，另需较大的 max_tokens。
+# 动画生成与智能助手同协议（OpenAI 兼容 / Anthropic Messages）：沿用智能助手的厂商预设，另需较大的
+# max_tokens。
 for _roles in PROVIDER_PRESETS.values():
     if "agent" in _roles:
         _roles["animator"] = {
@@ -347,20 +489,31 @@ for _roles in PROVIDER_PRESETS.values():
 
 # 动画生成的默认模型：智谱 GLM-5.3-Flash（OpenAI 兼容）；档案不填密钥时复用多模态理解里同名模型档案的密钥。
 PROVIDER_PRESETS["zhipu"]["animator"] = {
-    "config": {"backend": "openai", "base_url": "https://open.bigmodel.cn/api/paas/v4", "model": "glm-5.3-flash",
-               "max_tokens": 16000},
-    "note": "GLM-5.3-Flash 写 HTML/JS 动画源码（默认）；OpenAI 兼容协议；不填密钥时复用多模态理解里同名模型档案的密钥与地址",
+    "config": {
+        "backend": "openai",
+        "base_url": "https://open.bigmodel.cn/api/paas/v4",
+        "model": "glm-5.3-flash",
+        "max_tokens": 16000,
+    },
+    "note": "GLM-5.3-Flash 写 HTML/JS 动画源码（默认）；OpenAI 兼容协议；"
+    "不填密钥时复用多模态理解里同名模型档案的密钥与地址",
 }
 
 # 设置页的默认档案卡：首次启动时为下列角色各建一张（已有档案的角色不建），第一张激活为默认生效配置。
 DEFAULT_PROFILES = {
     "animator": [("GLM-5.3-Flash（默认）", "zhipu", PROVIDER_PRESETS["zhipu"]["animator"]["config"])],
-    "video_generator": [("MiniMax H3（默认）", "minimax", PROVIDER_PRESETS["minimax"]["video_generator"]["config"]),
-                        ("本地 ComfyUI", "self", COMFYUI_PRESETS["video_generator"])],
-    "image_generator": [("MiniMax image-01（默认）", "minimax", PROVIDER_PRESETS["minimax"]["image_generator"]["config"]),
-                        ("本地 ComfyUI", "self", COMFYUI_PRESETS["image_generator"])],
-    "music_generator": [("MiniMax music-3.0（默认）", "minimax", PROVIDER_PRESETS["minimax"]["music_generator"]["config"]),
-                        ("本地 ComfyUI", "self", COMFYUI_PRESETS["music_generator"])],
+    "video_generator": [
+        ("MiniMax H3（默认）", "minimax", PROVIDER_PRESETS["minimax"]["video_generator"]["config"]),
+        ("本地 ComfyUI", "self", COMFYUI_PRESETS["video_generator"]),
+    ],
+    "image_generator": [
+        ("MiniMax image-01（默认）", "minimax", PROVIDER_PRESETS["minimax"]["image_generator"]["config"]),
+        ("本地 ComfyUI", "self", COMFYUI_PRESETS["image_generator"]),
+    ],
+    "music_generator": [
+        ("MiniMax music-3.0（默认）", "minimax", PROVIDER_PRESETS["minimax"]["music_generator"]["config"]),
+        ("本地 ComfyUI", "self", COMFYUI_PRESETS["music_generator"]),
+    ],
 }
 
 # 显式清除已存密钥的哨兵值（空字符串视为未填、保留原值）。
@@ -457,7 +610,9 @@ def delete_voice(store: Store, voice_pk: int) -> None:
 def _validate_fields(role: str, fields: dict) -> None:
     unknown = set(fields) - PROFILE_FIELDS[role]
     if unknown:
-        raise ValueError(f"配置档案不支持字段 {sorted(unknown)}；角色 {role} 仅允许 {sorted(PROFILE_FIELDS[role])}")
+        raise ValueError(
+            f"配置档案不支持字段 {sorted(unknown)}；角色 {role} 仅允许 {sorted(PROFILE_FIELDS[role])}"
+        )
     if role == "video_generator" and (
         fields.get("comfyui_workflow") is not None or fields.get("comfyui_mapping") is not None
     ):
@@ -527,9 +682,10 @@ def save_profile(
                             profile_id,
                         ),
                     )
-                if db.total_changes == 0 or not db.execute(
-                    "SELECT 1 FROM model_profiles WHERE id=?", (profile_id,)
-                ).fetchone():
+                if (
+                    db.total_changes == 0
+                    or not db.execute("SELECT 1 FROM model_profiles WHERE id=?", (profile_id,)).fetchone()
+                ):
                     raise ValueError(f"配置档案 {profile_id} 不存在")
     except sqlite3.IntegrityError as exc:
         raise ValueError(f"角色 {ROLE_LABELS.get(role, role)} 已存在同名档案「{name}」") from exc
@@ -617,8 +773,9 @@ def _animator_follows_agent(config: Config, active: dict) -> Config:
     if agent is None or "animator" in active or not animator._inherited:
         return config
     llm = config.agent.llm
-    merged = animator.model_copy(update={**{key: getattr(llm, key) for key in ANIMATOR_INHERITED},
-                                         "api_key": llm.api_key})
+    merged = animator.model_copy(
+        update={**{key: getattr(llm, key) for key in ANIMATOR_INHERITED}, "api_key": llm.api_key}
+    )
     merged._inherited = True
     return config.model_copy(update={"studio": config.studio.model_copy(update={"animator": merged})})
 
@@ -628,10 +785,15 @@ def shared_analyzer_profile(store: Store, model: str) -> dict | None:
     if not model:
         return None
     pointer = get_setting(store, "active.profile.analyzer")
-    rows = store.rows("SELECT * FROM model_profiles WHERE role='analyzer' AND api_key IS NOT NULL AND api_key<>'' "
-                      "ORDER BY updated_at DESC, id DESC")
-    matches = [{**row, "config": json.loads(row["config"])} for row in rows
-               if str(json.loads(row["config"]).get("model") or "").lower() == model.lower()]
+    rows = store.rows(
+        "SELECT * FROM model_profiles WHERE role='analyzer' AND api_key IS NOT NULL AND api_key<>'' "
+        "ORDER BY updated_at DESC, id DESC"
+    )
+    matches = [
+        {**row, "config": json.loads(row["config"])}
+        for row in rows
+        if str(json.loads(row["config"]).get("model") or "").lower() == model.lower()
+    ]
     matches.sort(key=lambda row: str(row["id"]) != pointer)
     return matches[0] if matches else None
 
@@ -665,7 +827,9 @@ def apply_overrides(config: Config, store: Store) -> Config:
         return config
     selected_runtime = get_setting(store, "agent.runtime")
     if selected_runtime is not None:
-        config = config.model_copy(update={"agent": config.agent.model_copy(update={"runtime": selected_runtime})})
+        config = config.model_copy(
+            update={"agent": config.agent.model_copy(update={"runtime": selected_runtime})}
+        )
     active = {}
     for role in ROLES:
         profile = _active_profile(store, role)
@@ -681,7 +845,14 @@ def apply_overrides(config: Config, store: Store) -> Config:
             partial = json.loads(raw_search)
         except json.JSONDecodeError as exc:
             raise ValueError("override.search 不是有效 JSON") from exc
-        allowed = {"weights", "channel_weights", "rrf_k", "candidates", "duration_weight", "duration_exponent"}
+        allowed = {
+            "weights",
+            "channel_weights",
+            "rrf_k",
+            "candidates",
+            "duration_weight",
+            "duration_exponent",
+        }
         unknown = set(partial) - allowed
         if unknown:
             raise ValueError(f"检索调参不支持字段 {sorted(unknown)}；仅允许 {sorted(allowed)}")
@@ -709,7 +880,6 @@ def apply_overrides(config: Config, store: Store) -> Config:
 
 
 def _migration_pending(store):
-    from mindex.shared.migration_state import pending
 
     with store.connect() as db:
         return pending(db) is not None
@@ -772,8 +942,9 @@ def seed_default_profiles(store: Store) -> list[dict]:
 
 def apply_runtime_overrides(config: Config) -> Config:
     """CLI 入口：data_dir 已有元数据库时合并覆盖层，否则原样返回。"""
-    if not config.runtime_overrides or (config.database.backend == "sqlite"
-                                       and not (config.data_dir / "metadata.sqlite3").is_file()):
+    if not config.runtime_overrides or (
+        config.database.backend == "sqlite" and not (config.data_dir / "metadata.sqlite3").is_file()
+    ):
         return config
     store = Store.open(config)
     ensure_writer_profile(store)

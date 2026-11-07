@@ -5,15 +5,15 @@ from __future__ import annotations
 import time
 
 import pytest
-from conftest import FixtureEmbedder, FixtureSpeaker, FixtureStoryboarder, FixtureWriter, convert_to_legacy
 from fastapi.testclient import TestClient
 
-from mindex.api import create_app
-from mindex.models.adapters import ModelError
-from mindex.processing.indexing import IndexBuilder
-from mindex.processing.pipeline import Pipeline
-from mindex.studio import studio
-from mindex.studio import workspace as ws
+from api import create_app
+from conftest import FixtureEmbedder, FixtureSpeaker, FixtureStoryboarder, FixtureWriter, convert_to_legacy
+from models.adapters import ModelError
+from processing.indexing import IndexBuilder
+from processing.pipeline import Pipeline
+from studio import studio
+from studio import workspace as ws
 
 pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
 
@@ -31,7 +31,10 @@ def env(config, video_file):
     writer = FixtureWriter(config, vary=True)
     client = TestClient(
         create_app(
-            config, embedder, speaker=FixtureSpeaker(config), storyboarder=FixtureStoryboarder(config),
+            config,
+            embedder,
+            speaker=FixtureSpeaker(config),
+            storyboarder=FixtureStoryboarder(config),
             writer=writer,
         )
     )
@@ -166,8 +169,19 @@ def test_build_from_scratch_starts_with_script_and_depends_on_it(env):
     build = data["builds"][-1]
     assert build["status"] == "complete", build
     stages = [n["stage"] for n in build["nodes"]]
-    assert list(dict.fromkeys(stages)) == ["script", "split", "recall", "tts", "select", "render", "compose",
-                                          "export", "metadata", "cover", "package"]
+    assert list(dict.fromkeys(stages)) == [
+        "script",
+        "split",
+        "recall",
+        "tts",
+        "select",
+        "render",
+        "compose",
+        "export",
+        "metadata",
+        "cover",
+        "package",
+    ]
     assert stages.count("script") == stages.count("split") == 1
     plan = data["plans"][pid]
     assert plan["final"] and plan["board_script"] == plan["script"] and not data["script_stale"]

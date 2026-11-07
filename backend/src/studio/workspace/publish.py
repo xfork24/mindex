@@ -17,9 +17,12 @@ import re
 import subprocess
 from pathlib import Path
 
-from mindex.studio import studio
-from mindex.studio.delivery_models import CoverOptions, PublishOptions  # noqa: F401
-from mindex.studio.platforms import PlatformPreset, for_plan
+from PIL import Image, ImageDraw, ImageFont, ImageOps
+
+from shared import media
+from studio import studio
+from studio.delivery_models import CoverOptions, PublishOptions  # noqa: F401
+from studio.platforms import PlatformPreset, for_plan
 
 # 改动封面排版、元数据提示词或校验规则、发布包内容时递增：进入对应阶段签名。
 COVER_VERSION = 1
@@ -55,7 +58,8 @@ def film_version(w, p, platform: str) -> tuple[str, str | None]:
 
 def film_mismatch(p, platform: str) -> bool:
     return film_key(p, platform) == "compose" and (
-        ((p.get("options") or {}).get("canvas") or "16:9") != for_plan(p, platform).canvas)
+        ((p.get("options") or {}).get("canvas") or "16:9") != for_plan(p, platform).canvas
+    )
 
 
 # ---------------------------------------------------------------- 字体与封面
@@ -79,10 +83,18 @@ def cover_font(config) -> Path:
     if subtitle.font_file and Path(subtitle.font_file).is_file():
         return Path(subtitle.font_file)
     try:
-        found = subprocess.run(["fc-match", "-f", "%{file}", subtitle.font_family], capture_output=True, text=True,
-                               timeout=10, check=False).stdout.strip()
-        if found and Path(found).is_file() and re.search(r"cjk|hei|song|ming|gothic|hiragino|pingfang|yahei",
-                                                         found, re.IGNORECASE):
+        found = subprocess.run(
+            ["fc-match", "-f", "%{file}", subtitle.font_family],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        ).stdout.strip()
+        if (
+            found
+            and Path(found).is_file()
+            and re.search(r"cjk|hei|song|ming|gothic|hiragino|pingfang|yahei", found, re.IGNORECASE)
+        ):
             return Path(found)
     except (OSError, subprocess.SubprocessError):
         pass
@@ -108,14 +120,26 @@ def wrap_text(draw, text: str, font, width: int) -> list[str]:
     return lines
 
 
-def compose_cover(image_path: Path, spec, *, title: str | None, subtitle: str | None, font: Path | None,
-                  style: dict, output: Path) -> dict:
-    """背景图居中裁切到封面尺寸，底部叠半透明底条与标题、副标题（品牌文字层样式的颜色），按格式与大小上限保存。"""
-    from PIL import Image, ImageDraw, ImageFont, ImageOps
+def compose_cover(
+    image_path: Path,
+    spec,
+    *,
+    title: str | None,
+    subtitle: str | None,
+    font: Path | None,
+    style: dict,
+    output: Path,
+) -> dict:
+    """背景图居中裁切到封面尺寸，底部叠半透明底条与标题、副标题（品牌文字层样式的颜色），
+    按格式与大小上限保存。
+    """
 
     with Image.open(image_path) as source:
-        background = ImageOps.fit(ImageOps.exif_transpose(source).convert("RGB"), (spec.width, spec.height),
-                                  Image.Resampling.LANCZOS)
+        background = ImageOps.fit(
+            ImageOps.exif_transpose(source).convert("RGB"),
+            (spec.width, spec.height),
+            Image.Resampling.LANCZOS,
+        )
     lines = []
     if title and font:
         canvas = background.convert("RGBA")
@@ -128,20 +152,30 @@ def compose_cover(image_path: Path, spec, *, title: str | None, subtitle: str | 
         lines = wrap_text(draw, title, big, spec.width - 2 * margin)[:3]
         sub = wrap_text(draw, subtitle, small, spec.width - 2 * margin)[:2] if subtitle else []
         gap = round(short * 0.02)
-        heights = [big.getbbox(line)[3] + gap for line in lines] + [small.getbbox(line)[3] + gap for line in sub]
+        heights = [big.getbbox(line)[3] + gap for line in lines] + [
+            small.getbbox(line)[3] + gap for line in sub
+        ]
         block = sum(heights) + 2 * gap
         top = spec.height - block - round(spec.height * 0.06)
         color = style.get("background", "#000000")
         alpha = round(255 * min(0.85, style.get("background_opacity", 0.55) + 0.1))
-        red, green, blue = (int(color[i:i + 2], 16) for i in (1, 3, 5))
+        red, green, blue = (int(color[i : i + 2], 16) for i in (1, 3, 5))
         draw.rectangle([0, top - gap, spec.width, spec.height], fill=(red, green, blue, alpha))
         accent = style.get("accent", "#FFB000")
-        draw.rectangle([margin, top - gap, margin + round(short * 0.12), top - gap + max(4, round(short * 0.012))],
-                       fill=accent)
+        draw.rectangle(
+            [margin, top - gap, margin + round(short * 0.12), top - gap + max(4, round(short * 0.012))],
+            fill=accent,
+        )
         y = top + gap
         for line in lines:
-            draw.text((margin, y), line, font=big, fill=style.get("primary", "#FFFFFF"),
-                      stroke_width=max(1, round(short * 0.004)), stroke_fill=(0, 0, 0, 200))
+            draw.text(
+                (margin, y),
+                line,
+                font=big,
+                fill=style.get("primary", "#FFFFFF"),
+                stroke_width=max(1, round(short * 0.004)),
+                stroke_fill=(0, 0, 0, 200),
+            )
             y += big.getbbox(line)[3] + gap
         for line in sub:
             draw.text((margin, y), line, font=small, fill=accent)
@@ -161,13 +195,13 @@ def compose_cover(image_path: Path, spec, *, title: str | None, subtitle: str | 
 
 
 def extract_frame(film: Path, at: float, output: Path) -> Path:
-    from mindex.shared.media import atomic_media
 
-    atomic_media(["-ss", f"{max(0.0, at):.3f}", "-i", str(film), "-frames:v", "1", "-q:v", "2"], output)
+    media.atomic_media(["-ss", f"{max(0.0, at):.3f}", "-i", str(film), "-frames:v", "1", "-q:v", "2"], output)
     return output
 
 
 def sharpness(path: Path) -> float:
+    # 延迟导入：媒体、数值或服务运行依赖仅在实际执行该功能时加载。
     import cv2
 
     image = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
@@ -182,8 +216,9 @@ def frame_candidates(film: Path, boundaries: list[dict], directory: Path, limit:
         target = directory / f"{at:.3f}.jpg"
         if not target.is_file():
             extract_frame(film, at, target)
-        found.append({"time": at, "shot_id": item["shot_id"], "sharpness": round(sharpness(target), 2),
-                      "path": target})
+        found.append(
+            {"time": at, "shot_id": item["shot_id"], "sharpness": round(sharpness(target), 2), "path": target}
+        )
     found.sort(key=lambda item: item["sharpness"], reverse=True)
     return found[:limit]
 
@@ -202,11 +237,13 @@ METADATA_SYSTEM = """你是视频平台运营编辑，为一条解说视频撰�
 
 
 def chapter_list(w, p, final: dict, rule) -> list[dict]:
-    """章节：每个镜头的边界为候选点，按最短时长合并相邻镜头；第一章从 0 秒（含片头）开始。章节名取镜头画面意象或
+    """章节：每个镜头的边界为候选点，按最短时长合并相邻镜头；第一章从 0 秒（含片头）开始。
+    章节名取镜头画面意象或
     旁白前 16 字。规则不满足（章节太少）时返回空列表。"""
     if not rule.enabled:
         return []
-    from .versions import version
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+    from studio.workspace.versions import version
 
     bounds = final["data"].get("boundaries") or []
     plan = final["data"].get("plan") or p
@@ -237,10 +274,12 @@ def clip_chars(text: str, limit: int) -> str:
     text = (text or "").strip()
     if limit <= 0:
         return ""
-    return text if len(text) <= limit else text[:max(0, limit - 1)].rstrip() + "…"
+    return text if len(text) <= limit else text[: max(0, limit - 1)].rstrip() + "…"
 
 
-def normalize_metadata(raw: dict, spec: PlatformPreset, *, chapters: list[dict], credits: list[str], footer: str = "") -> tuple[dict, list]:
+def normalize_metadata(
+    raw: dict, spec: PlatformPreset, *, chapters: list[dict], credits: list[str], footer: str = ""
+) -> tuple[dict, list]:
     """按平台预设校验并修正：截断标题与简介、去重并截断标签、拼接章节与音乐署名。返回 (元数据, 修正说明)。"""
     notes = []
     title = str(raw.get("title") or "").strip()
@@ -254,12 +293,12 @@ def normalize_metadata(raw: dict, spec: PlatformPreset, *, chapters: list[dict],
             continue
         if len(tag) > spec.tags.max_chars_each:
             notes.append(f"标签「{tag}」超过 {spec.tags.max_chars_each} 字，已截断")
-            tag = tag[:spec.tags.max_chars_each]
+            tag = tag[: spec.tags.max_chars_each]
         seen.add(tag)
         tags.append(tag)
     if len(tags) > spec.tags.max_count:
         notes.append(f"标签超过 {spec.tags.max_count} 个，只保留前 {spec.tags.max_count} 个")
-        tags = tags[:spec.tags.max_count]
+        tags = tags[: spec.tags.max_count]
     if spec.tags.max_total_chars:
         while tags and sum(len(tag) for tag in tags) + len(tags) - 1 > spec.tags.max_total_chars:
             tags.pop()
@@ -290,8 +329,15 @@ def normalize_metadata(raw: dict, spec: PlatformPreset, *, chapters: list[dict],
         notes.append(f"简介超过 {spec.description.max_chars} 字，已截断")
         body = clip_chars(body, max(0, room))
     description = "\n\n".join(item for item in (body, tail) if item)
-    return {"title": title, "description": description, "body": body, "tags": tags, "chapters": chapters,
-            "credits": list(credits), **({"footer": footer} if footer else {})}, notes
+    return {
+        "title": title,
+        "description": description,
+        "body": body,
+        "tags": tags,
+        "chapters": chapters,
+        "credits": list(credits),
+        **({"footer": footer} if footer else {}),
+    }, notes
 
 
 def parse_metadata(text: str) -> dict:
@@ -300,7 +346,7 @@ def parse_metadata(text: str) -> dict:
     if start < 0 or end < start:
         raise studio.StudioError("发布元数据不是 JSON 对象")
     try:
-        data = json.loads(value[start:end + 1])
+        data = json.loads(value[start : end + 1])
     except ValueError as exc:
         raise studio.StudioError(f"发布元数据不是合法 JSON：{exc}") from exc
     if not isinstance(data, dict):

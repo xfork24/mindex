@@ -1,4 +1,5 @@
 """Responsive control layout across application pages and dynamic dialogs."""
+
 import os
 import shutil
 import subprocess
@@ -7,15 +8,15 @@ import wave
 from pathlib import Path
 
 import pytest
+
 from seed_layout_fixture import seed
 from serve_agent_fixture import build_app
+from shared.config import Config
+from shared.storage import Store
+from studio import music_library
 from test_agent_panel_ui import ROOT, playwright_available, serve
-
-from mindex.shared.config import Config
-from mindex.shared.storage import Store
-from mindex.studio import music_library
-from mindex.topics import profiles
-from mindex.topics.models import ProfileBody
+from topics import profiles
+from topics.models import ProfileBody
 
 
 @pytest.fixture
@@ -39,15 +40,33 @@ def test_all_page_control_layouts(ui_tmpdir):
     with wave.open(str(audio), "wb") as stream:
         stream.setparams((1, 2, 16000, 0, "NONE", "not compressed"))
         stream.writeframes(b"\x00\x00" * 32000)
-    music_library.import_track(config, store, audio, ".wav", music_library.TrackMeta(
-        title="布局检查音乐", source="Test fixture", license="Test only", attribution="Fixture"), now="2026-01-01T00:00:00")
+    music_library.import_track(
+        config,
+        store,
+        audio,
+        ".wav",
+        music_library.TrackMeta(
+            title="布局检查音乐", source="Test fixture", license="Test only", attribution="Fixture"
+        ),
+        now="2026-01-01T00:00:00",
+    )
     server, thread, url = serve(app)
     try:
-        result = subprocess.run(["node", "tests/control_layout_ui.cjs"], cwd=ROOT,
-                                env={**os.environ, "MINDEX_CONTROL_URL": url, "MINDEX_CONTROL_JOB": job_id,
-                                     "MINDEX_CONTROL_FIXTURE": str(root / "layout-fixture.json"),
-                                     "MINDEX_CONTROL_OUTPUT": str(ui_tmpdir / "layout")},
-                                capture_output=True, text=True, timeout=240, check=False)
+        result = subprocess.run(
+            ["node", "tests/control_layout_ui.cjs"],
+            cwd=ROOT,
+            env={
+                **os.environ,
+                "MINDEX_CONTROL_URL": url,
+                "MINDEX_CONTROL_JOB": job_id,
+                "MINDEX_CONTROL_FIXTURE": str(root / "layout-fixture.json"),
+                "MINDEX_CONTROL_OUTPUT": str(ui_tmpdir / "layout"),
+            },
+            capture_output=True,
+            text=True,
+            timeout=240,
+            check=False,
+        )
         assert result.returncode == 0, result.stdout + result.stderr
     finally:
         server.should_exit = True

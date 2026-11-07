@@ -1,18 +1,20 @@
+"""创作默认音色与方案音色覆盖回归。"""
+
 from __future__ import annotations
 
 import copy
 import json
 
 import pytest
-from conftest import FixtureSpeaker
 from fastapi.testclient import TestClient
-from test_studio_workspace import setup_workspace, wait_build
 
-from mindex.api import create_app
-from mindex.settings.runtime_settings import activate_profile, save_profile
-from mindex.shared.storage import Store
-from mindex.studio import studio
-from mindex.studio import workspace as ws
+from api import create_app
+from conftest import FixtureSpeaker
+from settings.runtime_settings import activate_profile, save_profile
+from shared.storage import Store
+from studio import studio
+from studio import workspace as ws
+from test_studio_workspace import setup_workspace, wait_build
 
 
 def test_new_and_legacy_plans_inherit_without_changing_history(config):

@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import shutil
+import sqlite3
 import threading
 import time
 from collections.abc import Callable, Iterable, Iterator
@@ -19,8 +20,16 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from mindex.shared.config import Config
-from mindex.shared.storage import Store
+from filelock import FileLock, Timeout
+
+from agent.attachments import DIRNAME, TOKEN_RE, AttachmentStore, token
+from persons.persons import retained_frame_paths
+from processing import pipeline as processing_pipeline
+from shared import lock_backend
+from shared.config import Config
+from shared.db.maintenance_gate import maintenance_gate
+from shared.resource_registry import referenced_objects
+from shared.storage import Store
 
 log = logging.getLogger(__name__)
 
@@ -35,12 +44,22 @@ VACUUM_HEARTBEAT_SECONDS = 5.0
 
 # TemporaryDirectory 写在 data 根下的已知前缀；正常退出自动消失，存在即崩溃残留。
 CRASH_TEMP_PREFIXES = (
-    "asr-", "align-", "embed-", "dialogue-", "query-", "query-window-", "query-image-",
+    "asr-",
+    "align-",
+    "embed-",
+    "dialogue-",
+    "query-",
+    "query-window-",
+    "query-image-",
 )
 
 # C 级子树：clean 只在 notes 中报告大小，绝不进入任何删除候选。
 PROTECTED_SUBTREES = (
-    "model-cache", "studio-verification", "e2e", "verification", "chroma",
+    "model-cache",
+    "studio-verification",
+    "e2e",
+    "verification",
+    "chroma",
 )
 
 PROTECTED_NOTES = (
@@ -118,11 +137,14 @@ class Scan:
         path/thumbnail；被保留快照引用的文件绝不判孤儿。
         """
         if self._media is None:
-            from mindex.maintenance.clean_index import retained_versions
+            # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+            from maintenance.clean_index import retained_versions
 
             retained = retained_versions(
-                self.store, self.config.clean.index_keep_versions,
-                building_max_age_days=self.config.clean.index_building_max_age_days, now=self.now,
+                self.store,
+                self.config.clean.index_keep_versions,
+                building_max_age_days=self.config.clean.index_building_max_age_days,
+                now=self.now,
             )
             references: set[str] = set()
             segment_ids: set[str] = set()
@@ -280,7 +302,7 @@ def temp_crash(scan: Scan) -> CleanAction | None:
     items, targets = [], []
 
     def query_within_grace(path):
-        if not path.name.startswith(('query-', 'query-image-', 'query-window-')):
+        if not path.name.startswith(("query-", "query-image-", "query-window-")):
             return False
         try:
             _, newest = _tree_stats(path)
@@ -307,29 +329,32 @@ def temp_crash(scan: Scan) -> CleanAction | None:
         targets.append(path)
         items.append(CleanItem(path.relative_to(scan.store.root).as_posix(), size))
 
-    references = set(scan.media_state[0]) | {r['path'] for r in scan.store.rows('SELECT path FROM sources')}
-    for name in ('plans', 'transcripts', 'dialogue', 'analysis', 'subtitle-archives', 'clips', 'thumbnails'):
+    references = set(scan.media_state[0]) | {r["path"] for r in scan.store.rows("SELECT path FROM sources")}
+    for name in ("plans", "transcripts", "dialogue", "analysis", "subtitle-archives", "clips", "thumbnails"):
         for path in _iter_files(scan.store.root / name):
-            if not (path.name.endswith('.partial') or '.partial.' in path.name):
+            if not (path.name.endswith(".partial") or ".partial." in path.name):
                 continue
             relative = path.relative_to(scan.store.root).as_posix()
             if relative not in references:
                 targets.append(path)
                 items.append(CleanItem(relative, path.stat().st_size))
-    items = [item for item in items if item.path not in references
-             and not any(ref.startswith(item.path + '/') for ref in references)]
+    items = [
+        item
+        for item in items
+        if item.path not in references and not any(ref.startswith(item.path + "/") for ref in references)
+    ]
     allowed = {item.path for item in items}
     targets = [path for path in targets if path.relative_to(scan.store.root).as_posix() in allowed]
 
     def execute() -> dict:
         current = set(Scan(scan.config, scan.store, scan.now).media_state[0])
-        current.update(r['path'] for r in scan.store.rows('SELECT path FROM sources'))
+        current.update(r["path"] for r in scan.store.rows("SELECT path FROM sources"))
         deleted = 0
         for path in targets:
             if not path.exists() or query_within_grace(path):
                 continue
             relative = path.relative_to(scan.store.root).as_posix()
-            if relative in current or any(ref.startswith(relative + '/') for ref in current):
+            if relative in current or any(ref.startswith(relative + "/") for ref in current):
                 continue
             if path.is_dir():
                 shutil.rmtree(path)
@@ -341,10 +366,13 @@ def temp_crash(scan: Scan) -> CleanAction | None:
     if not items:
         return None
     return CleanAction(
-        category="temp_crash", level="A", stage="pipeline",
+        category="temp_crash",
+        level="A",
+        stage="pipeline",
         description="崩溃残留的临时目录与未完成写入",
         policy="管线临时文件持独占锁回收；在线检索 query-* 不持管线锁，须超上传宽限期且执行前复核",
-        items=items, execute=execute,
+        items=items,
+        execute=execute,
     )
 
 
@@ -365,9 +393,13 @@ def ds_store(scan: Scan) -> CleanAction | None:
     if not items:
         return None
     return CleanAction(
-        category="ds_store", level="A", stage="pipeline",
+        category="ds_store",
+        level="A",
+        stage="pipeline",
         description="macOS Finder 产物 .DS_Store",
-        policy="无任何用途；C 级子树内的不触碰", items=items, execute=execute,
+        policy="无任何用途；C 级子树内的不触碰",
+        items=items,
+        execute=execute,
     )
 
 
@@ -402,10 +434,14 @@ def uploads_residue(scan: Scan) -> CleanAction | None:
     if not items:
         return None
     return CleanAction(
-        category="uploads_residue", level="A", stage="pipeline",
+        category="uploads_residue",
+        level="A",
+        stage="pipeline",
         description="上传暂存残留（sources/.uploads、subtitles/.uploads）",
         policy=f"上传失败/中断的残留；宽限 {scan.config.clean.temp_grace_hours} 小时内的文件视为进行中而保留",
-        items=items, kept={"within_grace": kept}, execute=execute,
+        items=items,
+        kept={"within_grace": kept},
+        execute=execute,
     )
 
 
@@ -415,16 +451,18 @@ def orphan_clips(scan: Scan) -> CleanAction | None:
         CleanItem(relative, size)
         for relative, size in _orphan_files(scan, scan.store.root / "clips", references)
     ]
-    return _orphan_action(scan, "orphan_clips", "无任何 segment 行或保留索引快照引用的切片",
-                          "clips", items)
+    return _orphan_action(scan, "orphan_clips", "无任何 segment 行或保留索引快照引用的切片", "clips", items)
 
 
 def orphan_thumbnails(scan: Scan) -> CleanAction | None:
     references, _, _ = scan.media_state
-    items = [CleanItem(relative, size) for relative, size in _orphan_files(
-        scan, scan.store.root / "thumbnails", references)]
-    return _orphan_action(scan, "orphan_thumbnails", "无任何 segment 行或保留索引快照引用的缩略图",
-                          "thumbnails", items)
+    items = [
+        CleanItem(relative, size)
+        for relative, size in _orphan_files(scan, scan.store.root / "thumbnails", references)
+    ]
+    return _orphan_action(
+        scan, "orphan_thumbnails", "无任何 segment 行或保留索引快照引用的缩略图", "thumbnails", items
+    )
 
 
 def orphan_context(scan: Scan) -> CleanAction | None:
@@ -452,10 +490,13 @@ def orphan_context(scan: Scan) -> CleanAction | None:
     if not items:
         return None
     return CleanAction(
-        category="orphan_context", level="A", stage="pipeline",
+        category="orphan_context",
+        level="A",
+        stage="pipeline",
         description="segment 已不存在的播放转码缓存",
         policy="文件名即 segment id，无对应行即孤儿；下次访问按需重转码",
-        items=items, execute=execute,
+        items=items,
+        execute=execute,
     )
 
 
@@ -468,8 +509,9 @@ def _orphan_files(scan: Scan, directory: Path, references: set[str]) -> list[tup
     return found
 
 
-def _orphan_action(scan: Scan, category: str, description: str, root_name: str,
-                   items: list[CleanItem]) -> CleanAction | None:
+def _orphan_action(
+    scan: Scan, category: str, description: str, root_name: str, items: list[CleanItem]
+) -> CleanAction | None:
     if not items:
         return None
     root = scan.store.root / root_name
@@ -487,22 +529,26 @@ def _orphan_action(scan: Scan, category: str, description: str, root_name: str,
         return {"deleted": deleted}
 
     return CleanAction(
-        category=category, level="A", stage="pipeline",
+        category=category,
+        level="A",
+        stage="pipeline",
         description=description,
         policy="引用集 = segments 行 + 保留索引版本（活动、building、最近 ready）快照，"
-               "与 check_index 校验同口径；切分布局不可变，正常文件不会被误判",
-        items=items, execute=execute,
+        "与 check_index 校验同口径；切分布局不可变，正常文件不会被误判",
+        items=items,
+        execute=execute,
     )
 
 
 def person_frames(scan: Scan) -> CleanAction | None:
-    from mindex.persons.persons import retained_frame_paths
 
     def collect():
         retained = set().union(*retained_frame_paths(scan.store).values(), set())
-        return [CleanItem(path.relative_to(scan.store.root).as_posix(), path.stat().st_size)
-                for path in _iter_files(scan.store.root / "persons/frames")
-                if path.name != ".DS_Store" and path.relative_to(scan.store.root).as_posix() not in retained]
+        return [
+            CleanItem(path.relative_to(scan.store.root).as_posix(), path.stat().st_size)
+            for path in _iter_files(scan.store.root / "persons/frames")
+            if path.name != ".DS_Store" and path.relative_to(scan.store.root).as_posix() not in retained
+        ]
 
     items = collect()
     if not items:
@@ -520,9 +566,16 @@ def person_frames(scan: Scan) -> CleanAction | None:
                 deleted += 1
         return {"deleted": deleted}
 
-    return CleanAction(category="person_frames", level="A", stage="pipeline",
-                       description="人物冗余展示帧", policy="已确认镜头每身份保留一帧；未确认镜头及发布快照引用的帧保留；"
-                       "旧库先运行 persons migrate-frames 获得压缩收益", items=items, execute=execute)
+    return CleanAction(
+        category="person_frames",
+        level="A",
+        stage="pipeline",
+        description="人物冗余展示帧",
+        policy="已确认镜头每身份保留一帧；未确认镜头及发布快照引用的帧保留；"
+        "旧库先运行 persons migrate-frames 获得压缩收益",
+        items=items,
+        execute=execute,
+    )
 
 
 def orphan_person_png(scan: Scan) -> CleanAction | None:
@@ -539,11 +592,10 @@ def orphan_person_png(scan: Scan) -> CleanAction | None:
         if not directory.is_dir():
             continue
         for path in sorted(directory.glob("*.png")):
-            if (path.stem not in digests and
-                    datetime.fromtimestamp(path.stat().st_mtime, UTC) <
-                    scan.now - timedelta(hours=scan.config.clean.temp_grace_hours)):
-                items.append(CleanItem(
-                    path.relative_to(scan.store.root).as_posix(), path.stat().st_size))
+            if path.stem not in digests and datetime.fromtimestamp(
+                path.stat().st_mtime, UTC
+            ) < scan.now - timedelta(hours=scan.config.clean.temp_grace_hours):
+                items.append(CleanItem(path.relative_to(scan.store.root).as_posix(), path.stat().st_size))
 
     def execute() -> dict:
         current = orphan_person_png(Scan(scan.config, scan.store, scan.now))
@@ -559,10 +611,14 @@ def orphan_person_png(scan: Scan) -> CleanAction | None:
     if not items:
         return None
     return CleanAction(
-        category="orphan_person_png", level="A", stage="pipeline",
+        category="orphan_person_png",
+        level="A",
+        stage="pipeline",
         description="无引用计数的人物参考图/导入图 PNG",
-        policy="引用集为 person_references.digest ∪ person_imports.images[].digest；上传宽限期内保留，执行时复核引用",
-        items=items, execute=execute,
+        policy="引用集为 person_references.digest ∪ "
+        "person_imports.images[].digest；上传宽限期内保留，执行时复核引用",
+        items=items,
+        execute=execute,
     )
 
 
@@ -587,12 +643,16 @@ def orphan_person_features(scan: Scan) -> CleanAction | None:
         return {"deleted": len(ids)}
 
     return CleanAction(
-        category="orphan_person_features", level="A", stage="pipeline",
+        category="orphan_person_features",
+        level="A",
+        stage="pipeline",
         description="人物特征缓存中源已删除的行",
         policy="source_id 不在 sources 表即源删除后的遗留；source_id 为空的 reference 行保留；"
-               "换模型产生的旧空间缓存因离线拿不到人物空间身份不自动清理（C 级 notes 报告）",
-        items=[CleanItem(f"person_features#{row['id']}", row["bytes"], {"source_id": row["source_id"]})
-               for row in rows],
+        "换模型产生的旧空间缓存因离线拿不到人物空间身份不自动清理（C 级 notes 报告）",
+        items=[
+            CleanItem(f"person_features#{row['id']}", row["bytes"], {"source_id": row["source_id"]})
+            for row in rows
+        ],
         execute=execute,
     )
 
@@ -602,15 +662,15 @@ def orphan_voices(scan: Scan) -> CleanAction | None:
     if not directory.is_dir():
         return None
     referenced = {
-        row["sample_path"] for row in scan.store.rows("SELECT sample_path FROM voices")
-        if row["sample_path"]
+        row["sample_path"] for row in scan.store.rows("SELECT sample_path FROM voices") if row["sample_path"]
     }
     items = [
         CleanItem(path.relative_to(scan.store.root).as_posix(), path.stat().st_size)
         for path in sorted(directory.iterdir())
-        if path.is_file() and path.relative_to(scan.store.root).as_posix() not in referenced
-        and datetime.fromtimestamp(path.stat().st_mtime, UTC) <
-        scan.now - timedelta(hours=scan.config.clean.temp_grace_hours)
+        if path.is_file()
+        and path.relative_to(scan.store.root).as_posix() not in referenced
+        and datetime.fromtimestamp(path.stat().st_mtime, UTC)
+        < scan.now - timedelta(hours=scan.config.clean.temp_grace_hours)
     ]
 
     def execute() -> dict:
@@ -627,9 +687,13 @@ def orphan_voices(scan: Scan) -> CleanAction | None:
     if not items:
         return None
     return CleanAction(
-        category="orphan_voices", level="A", stage="pipeline",
+        category="orphan_voices",
+        level="A",
+        stage="pipeline",
         description="无 voices 行引用的声音样本（pending 残留与试听文件）",
-        policy="voices.sample_path 为准；上传宽限期内保留，执行时复核引用；试听与失败残留可再生", items=items, execute=execute,
+        policy="voices.sample_path 为准；上传宽限期内保留，执行时复核引用；试听与失败残留可再生",
+        items=items,
+        execute=execute,
     )
 
 
@@ -662,11 +726,14 @@ def orphan_sources(scan: Scan) -> CleanAction | None:
     if not items:
         return None
     return CleanAction(
-        category="orphan_sources", level="A", stage="pipeline",
+        category="orphan_sources",
+        level="A",
+        stage="pipeline",
         description="sources 根下未注册且超过宽限期的文件",
-        policy=f"不在 sources 表且 mtime 超过 {scan.config.clean.temp_grace_hours} 小时；"
-               "已注册原片永不触碰",
-        items=items, kept={"within_grace": kept}, execute=execute,
+        policy=f"不在 sources 表且 mtime 超过 {scan.config.clean.temp_grace_hours} 小时；已注册原片永不触碰",
+        items=items,
+        kept={"within_grace": kept},
+        execute=execute,
     )
 
 
@@ -675,25 +742,35 @@ def orphan_sources(scan: Scan) -> CleanAction | None:
 
 def transcript_checkpoints(scan: Scan) -> CleanAction | None:
     current = scan.config.asr_key
-    return _profile_dirs(scan, scan.store.root / "transcripts", {current},
-                         scan.config.clean.transcripts_max_age_days,
-                         "transcript_checkpoints", "旧 asr_key 的转写块检查点",
-                         "当前 asr_key 永不删；旧指纹除非配置改回否则永不命中，删除代价 = ASR 重听")
+    return _profile_dirs(
+        scan,
+        scan.store.root / "transcripts",
+        {current},
+        scan.config.clean.transcripts_max_age_days,
+        "transcript_checkpoints",
+        "旧 asr_key 的转写块检查点",
+        "当前 asr_key 永不删；旧指纹除非配置改回否则永不命中，删除代价 = ASR 重听",
+    )
 
 
 def analysis_checkpoints(scan: Scan) -> CleanAction | None:
-    from mindex.processing.pipeline import Pipeline
 
-    pipeline = Pipeline(scan.config)
+    pipeline = processing_pipeline.Pipeline(scan.config)
     keep: dict[str, set[str]] = {}
     base = scan.store.root / "analysis"
     if base.is_dir():
         for source_dir in base.iterdir():
             if source_dir.is_dir():
                 keep[source_dir.name] = {pipeline.annotation_profile(source_dir.name)}
-    return _profile_dirs(scan, base, keep, scan.config.clean.analysis_max_age_days,
-                         "analysis_checkpoints", "旧分析 profile 的场景分组检查点",
-                         "当前 annotation_profile（分析配置 + 对白内容版本）永不删；旧 profile 删除代价 = LLM 重算")
+    return _profile_dirs(
+        scan,
+        base,
+        keep,
+        scan.config.clean.analysis_max_age_days,
+        "analysis_checkpoints",
+        "旧分析 profile 的场景分组检查点",
+        "当前 annotation_profile（分析配置 + 对白内容版本）永不删；旧 profile 删除代价 = LLM 重算",
+    )
 
 
 def dialogue_checkpoints(scan: Scan) -> CleanAction | None:
@@ -702,14 +779,26 @@ def dialogue_checkpoints(scan: Scan) -> CleanAction | None:
         "SELECT DISTINCT source_id, profile FROM channel_data WHERE channel='dialogue'"
     ):
         keep.setdefault(row["source_id"], set()).add(row["profile"])
-    return _profile_dirs(scan, scan.store.root / "dialogue", keep,
-                         scan.config.clean.dialogue_max_age_days,
-                         "dialogue_checkpoints", "旧对白 profile 的增强检查点",
-                         "保留集 = channel_data 现行 dialogue profile（含 processing 行，保护进行中任务）")
+    return _profile_dirs(
+        scan,
+        scan.store.root / "dialogue",
+        keep,
+        scan.config.clean.dialogue_max_age_days,
+        "dialogue_checkpoints",
+        "旧对白 profile 的增强检查点",
+        "保留集 = channel_data 现行 dialogue profile（含 processing 行，保护进行中任务）",
+    )
 
 
-def _profile_dirs(scan: Scan, base: Path, keep: str | dict[str, set[str]], days: int,
-                  category: str, description: str, policy: str) -> CleanAction | None:
+def _profile_dirs(
+    scan: Scan,
+    base: Path,
+    keep: str | dict[str, set[str]],
+    days: int,
+    category: str,
+    description: str,
+    policy: str,
+) -> CleanAction | None:
     """按 profile 目录过期；keep 为全局集合或 {source_id: profiles}。"""
     if not base.is_dir():
         return None
@@ -726,8 +815,7 @@ def _profile_dirs(scan: Scan, base: Path, keep: str | dict[str, set[str]], days:
                 continue
             size, _ = _tree_stats(profile_dir)
             targets.append(profile_dir)
-            items.append(CleanItem(
-                profile_dir.relative_to(scan.store.root).as_posix(), size))
+            items.append(CleanItem(profile_dir.relative_to(scan.store.root).as_posix(), size))
 
     def execute() -> dict:
         for path in targets:
@@ -737,11 +825,14 @@ def _profile_dirs(scan: Scan, base: Path, keep: str | dict[str, set[str]], days:
     if not items:
         return None
     return CleanAction(
-        category=category, level="B", stage="pipeline",
+        category=category,
+        level="B",
+        stage="pipeline",
         description=description,
-        policy=f"{policy}；树内最新文件早于 {days} 天才删除", items=items, execute=execute,
+        policy=f"{policy}；树内最新文件早于 {days} 天才删除",
+        items=items,
+        execute=execute,
     )
-
 
 
 def _cache_expired(path: Path, days: int, now: datetime) -> bool:
@@ -750,13 +841,12 @@ def _cache_expired(path: Path, days: int, now: datetime) -> bool:
 
 
 def _delete_cache_items(pairs, days, now):
-    from filelock import FileLock, Timeout
 
     deleted = skipped = 0
     for path, _ in pairs:
         try:
             # 预览和实际删除之间，读者可能刚获取租约或刷新访问时间。
-            with FileLock(str(path) + '.lock', timeout=0):
+            with FileLock(str(path) + ".lock", timeout=0):
                 if not path.is_file() or not _cache_expired(path, days, now):
                     skipped += 1
                     continue
@@ -765,11 +855,10 @@ def _delete_cache_items(pairs, days, now):
                 # 锁文件保留稳定 inode，避免后续读者锁住另一份同名文件。
         except (Timeout, FileNotFoundError):
             skipped += 1
-    return {'deleted': deleted, **({'skipped': skipped} if skipped else {})}
+    return {"deleted": deleted, **({"skipped": skipped} if skipped else {})}
 
 
 def context_cache(scan: Scan) -> CleanAction | None:
-    from filelock import FileLock, Timeout
 
     directory = scan.store.root / "context"
     if not directory.is_dir():
@@ -800,15 +889,18 @@ def context_cache(scan: Scan) -> CleanAction | None:
     if not items:
         return None
     return CleanAction(
-        category="context_cache", level="B", stage="pipeline",
+        category="context_cache",
+        level="B",
+        stage="pipeline",
         description="超过生命期的在线播放转码缓存",
         policy=f"最近访问或修改均早于 {days} 天；删除时重新检查租约，锁文件保留；可按需重转码",
-        items=items, kept={"locked": kept}, execute=execute,
+        items=items,
+        kept={"locked": kept},
+        execute=execute,
     )
 
 
 def shot_media_cache(scan: Scan) -> CleanAction | None:
-    from filelock import FileLock, Timeout
 
     directory = scan.store.root / "cache" / "shot-media"
     if not directory.is_dir():
@@ -839,10 +931,14 @@ def shot_media_cache(scan: Scan) -> CleanAction | None:
     if not items:
         return None
     return CleanAction(
-        category="shot_media_cache", level="B", stage="pipeline",
+        category="shot_media_cache",
+        level="B",
+        stage="pipeline",
         description="超过生命期的 shot 媒体合成与探测缓存（cache/shot-media）",
         policy=f"最近访问或修改均早于 {days} 天；按内容指纹可重建；删除时重新检查租约，锁文件保留",
-        items=items, kept={"locked": kept}, execute=execute,
+        items=items,
+        kept={"locked": kept},
+        execute=execute,
     )
 
 
@@ -873,9 +969,13 @@ def reports_exports(scan: Scan) -> CleanAction | None:
     if not items:
         return None
     return CleanAction(
-        category="reports_exports", level="B", stage="pipeline",
+        category="reports_exports",
+        level="B",
+        stage="pipeline",
         description="超过生命期的导出产物（reports/）",
-        policy=f"树内最新文件早于 {days} 天；可随时重新导出", items=items, execute=execute,
+        policy=f"树内最新文件早于 {days} 天；可随时重新导出",
+        items=items,
+        execute=execute,
     )
 
 
@@ -891,7 +991,8 @@ def subtitle_cache(scan: Scan) -> CleanAction | None:
             continue
         for path in source_dir.iterdir():
             if not path.is_file() or not (
-                path.name.endswith(".json") or path.name.endswith(".json.lock")
+                path.name.endswith(".json")
+                or path.name.endswith(".json.lock")
                 or path.name.endswith(".json.partial")
                 or (".json." in path.name and path.name.endswith(".partial"))  # jsonio 的唯一临时名
             ):
@@ -909,10 +1010,13 @@ def subtitle_cache(scan: Scan) -> CleanAction | None:
     if not items:
         return None
     return CleanAction(
-        category="subtitle_cache", level="B", stage="pipeline",
+        category="subtitle_cache",
+        level="B",
+        stage="pipeline",
         description="超过生命期的字幕轨道解析缓存",
         policy=f"mtime 早于 {days} 天；uploads/ 用户原件永不触碰；缓存键含原片字节与 mtime，按需重提取",
-        items=items, execute=execute,
+        items=items,
+        execute=execute,
     )
 
 
@@ -921,7 +1025,6 @@ def agent_attachments(scan: Scan) -> CleanAction | None:
 
     agent.sqlite3 不存在时不创建它：此时没有任何登记记录，只按宽限期回收孤儿与暂存残留。
     """
-    from mindex.agent.attachments import DIRNAME, TOKEN_RE, AttachmentStore, token
 
     root = scan.store.root / DIRNAME
     database = scan.store.root / "agent.sqlite3"
@@ -947,8 +1050,9 @@ def agent_attachments(scan: Scan) -> CleanAction | None:
         folder = root / token(meta["id"])
         size, _ = _tree_stats(folder)
         expired.append(meta["id"])
-        items.append(CleanItem(f"{DIRNAME}/{folder.name}", size,
-                               {"reason": "expired", "filename": meta["filename"]}))
+        items.append(
+            CleanItem(f"{DIRNAME}/{folder.name}", size, {"reason": "expired", "filename": meta["filename"]})
+        )
     registered = attachments.tokens() if attachments else set()
     if root.is_dir():
         for entry in sorted(os.scandir(root), key=lambda item: item.name):
@@ -970,8 +1074,11 @@ def agent_attachments(scan: Scan) -> CleanAction | None:
                         kept["within_grace"] += 1  # 进行中的上传
                         continue
                     staging.append(child)
-                    items.append(CleanItem(f"{DIRNAME}/.uploads/{child.name}", child.stat().st_size,
-                                           {"reason": "staging"}))
+                    items.append(
+                        CleanItem(
+                            f"{DIRNAME}/.uploads/{child.name}", child.stat().st_size, {"reason": "staging"}
+                        )
+                    )
 
     def execute() -> dict:
         deleted = 0
@@ -996,12 +1103,16 @@ def agent_attachments(scan: Scan) -> CleanAction | None:
     if not items:
         return None
     return CleanAction(
-        category="agent_attachments", level="B", stage="pipeline",
+        category="agent_attachments",
+        level="B",
+        stage="pipeline",
         description="过期助手附件",
         policy=f"记录超过 agent.attachment_ttl_hours（{scan.config.agent.attachment_ttl_hours} 小时）"
-               f"有效期即删除记录与文件；无记录的附件目录与 .uploads/ 暂存残留超过 "
-               f"{grace_hours} 小时宽限期才删除；agent.sqlite3 其余内容不触碰",
-        items=items, kept=kept, execute=execute,
+        f"有效期即删除记录与文件；无记录的附件目录与 .uploads/ 暂存残留超过 "
+        f"{grace_hours} 小时宽限期才删除；agent.sqlite3 其余内容不触碰",
+        items=items,
+        kept=kept,
+        execute=execute,
     )
 
 
@@ -1010,7 +1121,8 @@ def runs_history(scan: Scan) -> CleanAction | None:
     cutoff = (scan.now - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
     stale = scan.store.rows(
         "SELECT id FROM runs WHERE status IN ('complete','failed') "
-        "AND finished_at IS NOT NULL AND finished_at < ?", (cutoff,)
+        "AND finished_at IS NOT NULL AND finished_at < ?",
+        (cutoff,),
     )
     if not stale:
         return None
@@ -1022,10 +1134,13 @@ def runs_history(scan: Scan) -> CleanAction | None:
         return {"deleted": len(ids)}
 
     return CleanAction(
-        category="runs_history", level="B", stage="pipeline",
+        category="runs_history",
+        level="B",
+        stage="pipeline",
         description="runs 审计表中超期的已完成记录",
         policy=f"finished_at 早于 {days} 天且非 running；行删除不释放库文件空间，需 VACUUM（见 notes）",
-        items=[CleanItem(f"runs#{row}", 0) for row in ids], execute=execute,
+        items=[CleanItem(f"runs#{row}", 0) for row in ids],
+        execute=execute,
     )
 
 
@@ -1057,15 +1172,22 @@ RULES: list[Callable[[Scan], CleanAction | None]] = [
 
 
 def _all_rules() -> list[Callable[[Scan], CleanAction | None]]:
-    from mindex.maintenance.clean_index import RULES as index_rules
-    from mindex.maintenance.clean_studio import RULES as studio_rules
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+    from maintenance.clean_index import RULES as index_rules
+    from maintenance.clean_studio import RULES as studio_rules
 
     return RULES + index_rules + studio_rules
 
 
-def clean_library(config: Config, *, apply: bool = False, now: datetime | None = None,
-                  vacuum: bool = False, days: int | None = None,
-                  progress: Progress | None = None) -> dict:
+def clean_library(
+    config: Config,
+    *,
+    apply: bool = False,
+    now: datetime | None = None,
+    vacuum: bool = False,
+    days: int | None = None,
+    progress: Progress | None = None,
+) -> dict:
     """扫描（并可选执行）全部清理规则；返回统一 JSON 报告。
 
     progress 接收各阶段中文进度消息（入口、逐规则扫描、取锁/执行、VACUUM 与
@@ -1085,9 +1207,12 @@ def clean_library(config: Config, *, apply: bool = False, now: datetime | None =
         config = _with_days(config, days)
     store = Store.open(config)
     scan = Scan(config, store, now or datetime.now(UTC))
-    say(f"开始清理：数据目录 {store.root}"
+    say(
+        f"开始清理：数据目录 {store.root}"
         f"（{'执行删除' if apply else '仅预览'}"
-        + (f"，全部时间阈值临时覆盖为 {days} 天" if days is not None else "") + "）")
+        + (f"，全部时间阈值临时覆盖为 {days} 天" if days is not None else "")
+        + "）"
+    )
     say("正在构建媒体引用集（segments 行 + 保留索引快照）…")
     references, segment_ids, _ = scan.media_state
     say(f"媒体引用集就绪：{len(references)} 个引用文件 / {len(segment_ids)} 个 segment")
@@ -1107,24 +1232,25 @@ def clean_library(config: Config, *, apply: bool = False, now: datetime | None =
             say(f"扫描 {index}/{len(rules)} {name} 完成：无可回收项（{_elapsed(rule_started)}）")
             continue
         actions.append(action)
-        say(f"扫描 {index}/{len(rules)} {name} 完成：{len(action.items)} 项 / "
-            f"{_fmt_bytes(action.total_bytes)}（{_elapsed(rule_started)}）")
+        say(
+            f"扫描 {index}/{len(rules)} {name} 完成：{len(action.items)} 项 / "
+            f"{_fmt_bytes(action.total_bytes)}（{_elapsed(rule_started)}）"
+        )
     if apply:
-        from mindex.shared.db.maintenance_gate import maintenance_gate
-
         with maintenance_gate(store, name="clean"), store.run("clean"):
             _apply(config, store, actions, say)
     report = _report(store, actions, applied=apply, scanned_at=scan.now)
     if config.storage.backend == "s3":
-        from mindex.shared.db.maintenance_gate import maintenance_gate
         with maintenance_gate(store, name="s3-gc") if apply else nullcontext():
             report["s3_orphans"] = _clean_s3_orphans(config, store, apply=apply, say=say)
     if vacuum:
         report["vacuum"] = _vacuum_databases(store, applied=apply, say=say)
     total = report["total"]
-    say(f"清理完成：{total['categories']} 个类别 / {total['item_count']} 项 / "
+    say(
+        f"清理完成：{total['categories']} 个类别 / {total['item_count']} 项 / "
         f"{_fmt_bytes(total['bytes'])} 候选，{'已执行删除' if apply else '仅预览'}，"
-        f"总耗时 {_elapsed(started)}")
+        f"总耗时 {_elapsed(started)}"
+    )
     return report
 
 
@@ -1142,13 +1268,11 @@ def _with_days(config: Config, days: int) -> Config:
     clean_type = type(config.clean)
     overrides = {name: days for name in clean_type.model_fields if name.endswith("_days")}
     agent = config.agent.model_copy(update={"attachment_ttl_hours": days * 24})
-    return config.model_copy(update={
-        "clean": config.clean.model_copy(update=overrides), "agent": agent})
+    return config.model_copy(update={"clean": config.clean.model_copy(update=overrides), "agent": agent})
 
 
 def _vacuum_databases(store: Store, *, applied: bool, say: Progress) -> dict:
     """对库文件执行 VACUUM 回收已删行的空间；预览只报大小，被占用单库跳过。"""
-    import sqlite3
 
     databases = []
     for label in VACUUM_DATABASES:
@@ -1158,8 +1282,10 @@ def _vacuum_databases(store: Store, *, applied: bool, say: Progress) -> dict:
         entry: dict = {"path": label, "bytes_before": path.stat().st_size}
         if not applied:
             entry["advice"] = "预览不执行；--apply --vacuum 时收缩库文件（需无其他连接）"
-            say(f"VACUUM 预览：{label} 当前 {_fmt_bytes(entry['bytes_before'])}；"
-                "--apply --vacuum 时收缩（需无其他连接）")
+            say(
+                f"VACUUM 预览：{label} 当前 {_fmt_bytes(entry['bytes_before'])}；"
+                "--apply --vacuum 时收缩（需无其他连接）"
+            )
         else:
             say(f"VACUUM {label} 开始（当前 {_fmt_bytes(entry['bytes_before'])}，需独占库文件）…")
             started = _monotonic()
@@ -1171,24 +1297,24 @@ def _vacuum_databases(store: Store, *, applied: bool, say: Progress) -> dict:
                 finally:
                     db.close()
                 entry["bytes_after"] = path.stat().st_size
-                say(f"VACUUM {label} 完成：{_fmt_bytes(entry['bytes_before'])} → "
+                say(
+                    f"VACUUM {label} 完成：{_fmt_bytes(entry['bytes_before'])} → "
                     f"{_fmt_bytes(entry['bytes_after'])}（节省 "
-                    f"{_fmt_bytes(entry['bytes_before'] - entry['bytes_after'])}，{_elapsed(started)}）")
+                    f"{_fmt_bytes(entry['bytes_before'] - entry['bytes_after'])}，{_elapsed(started)}）"
+                )
             except sqlite3.Error as exc:
                 entry["error"] = str(exc)
-                entry["advice"] = ("库被其他连接占用（如 serve 运行中）：停服后重跑 "
-                                   "mindex clean --apply --vacuum 或手动执行 VACUUM")
-                say(f"VACUUM {label} 跳过：{exc}；库被其他连接占用（如 serve 运行中），"
-                    "可停服后重试")
+                entry["advice"] = (
+                    "库被其他连接占用（如 serve 运行中）：停服后重跑 "
+                    "mindex clean --apply --vacuum 或手动执行 VACUUM"
+                )
+                say(f"VACUUM {label} 跳过：{exc}；库被其他连接占用（如 serve 运行中），可停服后重试")
         databases.append(entry)
     return {"applied": applied, "databases": databases}
 
 
 def _apply(config: Config, store: Store, actions: list[CleanAction], say: Progress) -> None:
     """两段持锁执行：管线+索引段 → 释放 → studio 段；锁冲突抛 CleanBusy 或标记 skipped。"""
-    from filelock import Timeout
-
-    from mindex.shared import lock_backend
 
     pipeline_actions = [action for action in actions if action.stage == "pipeline"]
     studio_actions = [action for action in actions if action.stage == "studio"]
@@ -1197,8 +1323,9 @@ def _apply(config: Config, store: Store, actions: list[CleanAction], say: Progre
     # 未走 ProcessingLock 的写入方。
     say("等待并获取管线与索引写锁（pipeline + index-write，独占）…")
     try:
-        with lock_backend.acquire_ordered(store, ["pipeline", "index-write"], exclusive=True,
-                                           timeout={"index-write": 10}):
+        with lock_backend.acquire_ordered(
+            store, ["pipeline", "index-write"], exclusive=True, timeout={"index-write": 10}
+        ):
             say(f"已获取锁，执行 {len(pipeline_actions)} 个管线/索引类清理")
             for action in pipeline_actions:
                 _execute(action, say)
@@ -1238,8 +1365,7 @@ def _execute(action: CleanAction, say: Progress) -> None:
     say(f"执行 {action.category} 完成：{_result_brief(action.result)}（{_elapsed(started)}）")
 
 
-def _report(store: Store, actions: list[CleanAction], *, applied: bool,
-            scanned_at: datetime) -> dict:
+def _report(store: Store, actions: list[CleanAction], *, applied: bool, scanned_at: datetime) -> dict:
     return {
         "applied": applied,
         "scanned_at": scanned_at.isoformat(),
@@ -1264,32 +1390,38 @@ def _notes(store: Store) -> list[dict]:
         notes.append({"path": name, "bytes": size, "advice": advice})
     for path in sorted(store.root.glob("metadata.sqlite3.bak-*")):
         size, _ = _tree_stats(path)
-        notes.append({
-            "path": path.relative_to(store.root).as_posix(), "bytes": size,
-            "advice": "人工数据库备份（C 级待调整）：确认无需回退后可手动删除",
-        })
+        notes.append(
+            {
+                "path": path.relative_to(store.root).as_posix(),
+                "bytes": size,
+                "advice": "人工数据库备份（C 级待调整）：确认无需回退后可手动删除",
+            }
+        )
     if (store.root / "metadata.sqlite3").is_file():
-        notes.append({
-            "path": "metadata.sqlite3", "bytes": 0,
-            "advice": "大量删除后可用 mindex clean --apply --vacuum 回收库文件空间"
-                      "（需独占库，被 serve 占用时单库跳过并提示）",
-        })
+        notes.append(
+            {
+                "path": "metadata.sqlite3",
+                "bytes": 0,
+                "advice": "大量删除后可用 mindex clean --apply --vacuum 回收库文件空间"
+                "（需独占库，被 serve 占用时单库跳过并提示）",
+            }
+        )
     features = store.rows("SELECT kind, COUNT(*) AS n FROM person_features GROUP BY kind")
     if features:
         counts = " / ".join(f"{row['kind']} {row['n']}" for row in features)
-        notes.append({
-            "path": "person_features", "bytes": 0,
-            "advice": f"人物特征缓存（{counts}，C 级待调整）：换模型产生的旧空间缓存 clean 离线"
-                      "拿不到人物空间身份，无法安全判定，删除请人工决定；删除代价是人物重扫全量 GPU 推理",
-        })
+        notes.append(
+            {
+                "path": "person_features",
+                "bytes": 0,
+                "advice": f"人物特征缓存（{counts}，C 级待调整）：换模型产生的旧空间缓存 clean 离线"
+                "拿不到人物空间身份，无法安全判定，删除请人工决定；删除代价是人物重扫全量 GPU 推理",
+            }
+        )
     return notes
 
 
 def _clean_s3_orphans(config: Config, store: Store, *, apply: bool, say: Progress) -> dict:
     """标记候选、等待宽限、当前引用复验及条件删除；删除意图可恢复。"""
-    import time
-
-    from mindex.shared.resource_registry import referenced_objects
 
     media = store.media
     if not media.verify_conditional_delete():
@@ -1298,8 +1430,11 @@ def _clean_s3_orphans(config: Config, store: Store, *, apply: bool, say: Progres
     referenced = set(referenced_objects(store))
     grace = config.clean.s3_orphan_grace_hours * 3600
     cutoff = time.time() - grace
-    orphans = [{"key": key, "bytes": meta["size"]} for key, meta in objects.items()
-               if key not in referenced and meta["last_modified"] <= cutoff]
+    orphans = [
+        {"key": key, "bytes": meta["size"]}
+        for key, meta in objects.items()
+        if key not in referenced and meta["last_modified"] <= cutoff
+    ]
     say(f"S3 孤对象：{len(orphans)} 项；{'执行带复验的回收' if apply else '仅预览'}")
     deleted = 0
     if apply:

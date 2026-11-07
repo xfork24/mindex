@@ -4,17 +4,18 @@ import argparse
 import time
 from pathlib import Path
 
+import mindex  # noqa: F401 — 安装根包自举，后续使用包内短导入
 import uvicorn
-from conftest import FixtureAnalyzer, FixtureEmbedder
-from test_persons import FakeClient, Tracker
 
-from mindex.api import create_app
-from mindex.models.adapters import AnalysisContentRejected
-from mindex.persons import person_api, person_processing
-from mindex.persons.person_processing import PersonProcessor
-from mindex.processing import pipeline as pipeline_module
-from mindex.shared.config import Config
-from mindex.shared.media import command
+from api import create_app
+from conftest import FixtureAnalyzer, FixtureEmbedder
+from models.adapters import AnalysisContentRejected
+from persons import person_api, person_processing
+from persons.person_processing import PersonProcessor
+from processing import pipeline as pipeline_module
+from shared.config import Config
+from shared.media import command
+from test_persons import FakeClient, Tracker
 
 
 def main():
@@ -46,6 +47,7 @@ def main():
             return super().video(path)
 
     embedder = SlowEmbedder(config)
+
     class SlowAnalyzer(FixtureAnalyzer):
         def analyze(self, path, dialogue):
             time.sleep(args.analysis_delay)

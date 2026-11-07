@@ -11,9 +11,9 @@ import pytest
 from fastapi import HTTPException
 from filelock import Timeout
 
-from mindex.shared.background_tasks import BackgroundTaskRunner, public_task
-from mindex.shared.storage import Store
-from mindex.shared.task_cancel import registry_for
+from shared.background_tasks import BackgroundTaskRunner, public_task
+from shared.storage import Store
+from shared.task_cancel import registry_for
 
 HELD: set[str] = set()
 
@@ -36,8 +36,8 @@ class FakeLock:
 
 
 class FakeTasks(BackgroundTaskRunner):
-    # 记在 mindex.* 名下，使 task_logs 把失败日志写入进度。
-    __module__ = "mindex.fake_tasks"
+    # 使用业务包日志名，验证 task_logs 会把失败日志写入进度。
+    __module__ = "admin.fake_tasks"
     table = "dialogue_tasks"
     label = "示例任务"
     busy = "示例任务正在运行"
@@ -102,11 +102,11 @@ def test_failure_marks_failed_and_logs(store, caplog):
         raise RuntimeError("模拟崩溃")
 
     manager = FakeTasks(store, boom)
-    with caplog.at_level(logging.ERROR, logger="mindex.fake_tasks"):
+    with caplog.at_level(logging.ERROR, logger="admin.fake_tasks"):
         manager.start("s", "t2")
         value = settled(manager, "t2")
     assert value["status"] == "failed" and value["error"] == "模拟崩溃"
-    record = next(r for r in caplog.records if r.name == "mindex.fake_tasks")
+    record = next(r for r in caplog.records if r.name == "admin.fake_tasks")
     assert record.exc_info and "示例任务 t2 失败" in record.getMessage()
     assert "模拟崩溃" in value["progress"]["latest_log"]
     assert manager.threads == {} and not HELD
@@ -123,7 +123,9 @@ def test_long_error_is_truncated(store):
 
 def test_cancel_queued_never_executes(store):
     manager = FakeTasks(store, lambda task_id, save: None)
-    store.execute("INSERT INTO dialogue_tasks(id,source_id,status,config,options) VALUES('q','s','queued','{}','{}')")
+    store.execute(
+        "INSERT INTO dialogue_tasks(id,source_id,status,config,options) VALUES('q','s','queued','{}','{}')"
+    )
     assert manager.cancel("q")["status"] == "cancelled"
     lock = manager.lock("s").acquire()
     manager.run("q", {}, lock)
@@ -179,7 +181,9 @@ def test_retry_and_cancel_conflicts(store):
         assert missing.value.status_code == 404 and missing.value.detail == "找不到示例任务"
 
     # 检索更新失败的已完成任务可以重试；锁被占用时 409。
-    store.execute("UPDATE dialogue_tasks SET publication=? WHERE id='t5'", (json.dumps({"status": "failed"}),))
+    store.execute(
+        "UPDATE dialogue_tasks SET publication=? WHERE id='t5'", (json.dumps({"status": "failed"}),)
+    )
     HELD.add("s")
     with pytest.raises(HTTPException) as busy:
         manager.retry("t5")
@@ -190,13 +194,28 @@ def test_retry_and_cancel_conflicts(store):
 
 
 def test_init_recovers_live_rows(store):
-    store.execute("INSERT INTO dialogue_tasks(id,source_id,status,config,options) VALUES('r','s','running','{}','{}')")
+    store.execute(
+        "INSERT INTO dialogue_tasks(id,source_id,status,config,options) VALUES('r','s','running','{}','{}')"
+    )
     manager = FakeTasks(store, lambda task_id, save: None)
     assert manager.get("r")["status"] == "interrupted"
 
 
 def test_public_task_drops_config_and_decodes_json():
-    row = {"id": "a", "config": "{}", "options": '{"x": 1}', "progress": "{}", "result": None,
-           "publication": '{"status": "not_requested"}', "error": None}
-    assert public_task(row) == {"id": "a", "options": {"x": 1}, "progress": {}, "result": None,
-                                "publication": {"status": "not_requested"}, "error": None}
+    row = {
+        "id": "a",
+        "config": "{}",
+        "options": '{"x": 1}',
+        "progress": "{}",
+        "result": None,
+        "publication": '{"status": "not_requested"}',
+        "error": None,
+    }
+    assert public_task(row) == {
+        "id": "a",
+        "options": {"x": 1},
+        "progress": {},
+        "result": None,
+        "publication": {"status": "not_requested"},
+        "error": None,
+    }

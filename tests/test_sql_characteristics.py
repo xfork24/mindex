@@ -15,7 +15,7 @@ import threading
 
 import pytest
 
-from mindex.shared.storage import Store, dumps
+from shared.storage import Store, dumps
 
 # 复用业务表形状（storage.py METADATA_SCHEMA_V1 的子集 + persons 的 search_releases）：
 # 未列全列的写入必须暴露「REPLACE 重置默认列 / NOT NULL 失败」这类语义。
@@ -77,17 +77,24 @@ def test_insert_or_replace_resets_defaults_and_moves_rowid(db):
     admin/curation、channel_index、runtime_settings 等大量使用 INSERT OR REPLACE；
     PG 侧必须按表显式决定「更新现有行」还是「重置为新行」（plans §2）。
     """
-    db.execute("INSERT INTO model_profiles(role,name,provider,config,api_key) "
-               "VALUES('writer','a','http','{}','secret')")
+    db.execute(
+        "INSERT INTO model_profiles(role,name,provider,config,api_key) "
+        "VALUES('writer','a','http','{}','secret')"
+    )
     first_id = db.execute("SELECT id FROM model_profiles WHERE name='a'").fetchone()["id"]
-    db.execute("INSERT OR REPLACE INTO model_profiles(id,role,name,provider,config) "
-               "VALUES(?, 'writer','a','http','{\"v\":2}')", (first_id,))
+    db.execute(
+        "INSERT OR REPLACE INTO model_profiles(id,role,name,provider,config) "
+        "VALUES(?, 'writer','a','http','{\"v\":2}')",
+        (first_id,),
+    )
     row = db.execute("SELECT * FROM model_profiles WHERE name='a'").fetchone()
     assert json.loads(row["config"]) == {"v": 2}
     assert row["api_key"] is None  # 未列出的列回到默认（NULL），旧值不保留
     assert row["id"] == first_id  # 显式指定 PK 时保留；省略 PK 时会分配新 rowid
-    db.execute("INSERT OR REPLACE INTO model_profiles(role,name,provider,config) "
-               "VALUES('writer','a','http','{\"v\":3}')")
+    db.execute(
+        "INSERT OR REPLACE INTO model_profiles(role,name,provider,config) "
+        "VALUES('writer','a','http','{\"v\":3}')"
+    )
     replaced = db.execute("SELECT * FROM model_profiles WHERE name='a'").fetchone()
     assert replaced["id"] != first_id  # 省略 PK：旧行被删，新行拿新 rowid
     assert db.execute("SELECT count(*) AS n FROM model_profiles").fetchone()["n"] == 1
@@ -97,19 +104,25 @@ def test_insert_or_replace_without_required_column_fails(db):
     """REPLACE 不豁免 NOT NULL：media_groups.py 更新组描述时必须列出全部必填列。"""
     db.execute("INSERT INTO media_groups(id,type,name,updated_at) VALUES('g1','source','组','2026')")
     with pytest.raises(sqlite3.IntegrityError):
-        db.execute("INSERT OR REPLACE INTO media_groups(id,type,name,description) "
-                   "VALUES('g1','source','组','新描述')")
+        db.execute(
+            "INSERT OR REPLACE INTO media_groups(id,type,name,description) "
+            "VALUES('g1','source','组','新描述')"
+        )
     kept = db.execute("SELECT * FROM media_groups WHERE id='g1'").fetchone()
     assert kept["description"] == "" and kept["updated_at"] == "2026"  # 失败则旧行原样保留
 
 
 def test_on_conflict_update_preserves_row(db):
     """media_groups 的 ON CONFLICT(id) DO UPDATE 保留未更新列与行身份——与 REPLACE 不同。"""
-    db.execute("INSERT INTO media_groups(id,type,name,description,updated_at) "
-               "VALUES('g1','source','组','旧','2026-01')")
-    db.execute("INSERT INTO media_groups(id,type,name,description,updated_at) "
-               "VALUES('g1','source','组','新','2026-02') "
-               "ON CONFLICT(id) DO UPDATE SET description=excluded.description")
+    db.execute(
+        "INSERT INTO media_groups(id,type,name,description,updated_at) "
+        "VALUES('g1','source','组','旧','2026-01')"
+    )
+    db.execute(
+        "INSERT INTO media_groups(id,type,name,description,updated_at) "
+        "VALUES('g1','source','组','新','2026-02') "
+        "ON CONFLICT(id) DO UPDATE SET description=excluded.description"
+    )
     row = db.execute("SELECT * FROM media_groups WHERE id='g1'").fetchone()
     assert row["description"] == "新" and row["updated_at"] == "2026-01"  # 未提及列保留
 
@@ -117,14 +130,17 @@ def test_on_conflict_update_preserves_row(db):
 def test_insert_or_ignore_first_row_wins(db):
     """INSERT OR IGNORE：冲突保留先入行（UNIQUE(role,name) 与 PRIMARY KEY 都适用）。"""
     db.execute("INSERT INTO model_profiles(role,name,provider,config) VALUES('writer','a','p1','{}')")
-    db.execute("INSERT OR IGNORE INTO model_profiles(role,name,provider,config) "
-               "VALUES('writer','a','p2','{}')")
+    db.execute(
+        "INSERT OR IGNORE INTO model_profiles(role,name,provider,config) VALUES('writer','a','p2','{}')"
+    )
     row = db.execute("SELECT provider FROM model_profiles WHERE name='a'").fetchone()
     assert row["provider"] == "p1"
-    db.execute("INSERT OR IGNORE INTO index_members(index_id,segment_id,snapshot,complete) "
-               "VALUES('i','s1','{}',1)")
-    db.execute("INSERT OR IGNORE INTO index_members(index_id,segment_id,snapshot) "
-               "VALUES('i','s1','{\"v\":2}')")
+    db.execute(
+        "INSERT OR IGNORE INTO index_members(index_id,segment_id,snapshot,complete) VALUES('i','s1','{}',1)"
+    )
+    db.execute(
+        "INSERT OR IGNORE INTO index_members(index_id,segment_id,snapshot) VALUES('i','s1','{\"v\":2}')"
+    )
     kept = db.execute("SELECT snapshot FROM index_members WHERE segment_id='s1'").fetchone()
     assert json.loads(kept["snapshot"]) == {}  # pipeline 注册片段依赖「先到先得」
 
@@ -145,15 +161,18 @@ def test_numeric_or_truth_and_filter_equality(db):
     visible = db.execute(
         "SELECT seg.id FROM segments seg LEFT JOIN segment_curation sc ON sc.id=seg.id "
         "LEFT JOIN source_curation c ON c.id=seg.source_id "
-        "WHERE (COALESCE(sc.hidden,0) OR COALESCE(c.hidden,0)) = ?", (0,)
+        "WHERE (COALESCE(sc.hidden,0) OR COALESCE(c.hidden,0)) = ?",
+        (0,),
     ).fetchall()
     assert not visible  # 数值参数 0 与 OR 结果可直接比较（PG 侧需显式布尔化改写）
 
 
 def test_boolean_aggregation_sum(db):
     """``SUM(kind='shot')`` 式布尔聚合（curation/clean 统计口径）。"""
-    db.executemany("INSERT INTO segments VALUES(?,?,?,?,?)",
-                   [("a", "s", "shot", 0, 1), ("b", "s", "moment", 0, 2), ("c", "s", "shot", 1, 3)])
+    db.executemany(
+        "INSERT INTO segments VALUES(?,?,?,?,?)",
+        [("a", "s", "shot", 0, 1), ("b", "s", "moment", 0, 2), ("c", "s", "shot", 1, 3)],
+    )
     row = db.execute("SELECT count(*) AS n, SUM(kind='shot') AS shots FROM segments").fetchone()
     assert row["n"] == 3 and row["shots"] == 2
 
@@ -175,8 +194,9 @@ def test_rowid_latest_and_update_target(db):
     assert db.execute("SELECT person_id FROM search_releases WHERE id='r1'").fetchone()["person_id"] == "p"
     db.execute("DELETE FROM search_releases WHERE id='r2'")
     db.execute("INSERT INTO search_releases(id,content_id) VALUES('r3','idx')")
-    after = db.execute("SELECT id FROM search_releases WHERE content_id='idx' "
-                       "ORDER BY rowid DESC LIMIT 1").fetchone()
+    after = db.execute(
+        "SELECT id FROM search_releases WHERE content_id='idx' ORDER BY rowid DESC LIMIT 1"
+    ).fetchone()
     assert after["id"] == "r3"  # 无 AUTOINCREMENT 的表可能复用已删最大 rowid，顺序仍单调推进
 
 
@@ -192,11 +212,13 @@ def test_json_extract_semantics(db):
     """snapshots() 按 ``json_extract(snapshot,'$.source_id')`` 过滤：缺键得 NULL。"""
     db.execute("INSERT INTO index_members VALUES('i','s1','{\"source_id\":\"src1\"}',1)")
     db.execute("INSERT INTO index_members VALUES('i','s2','{}',1)")
-    hit = db.execute("SELECT segment_id FROM index_members WHERE json_extract(snapshot,'$.source_id')=?",
-                     ("src1",)).fetchall()
+    hit = db.execute(
+        "SELECT segment_id FROM index_members WHERE json_extract(snapshot,'$.source_id')=?", ("src1",)
+    ).fetchall()
     assert [row["segment_id"] for row in hit] == ["s1"]
-    nulls = db.execute("SELECT count(*) AS n FROM index_members "
-                       "WHERE json_extract(snapshot,'$.source_id') IS NULL").fetchone()
+    nulls = db.execute(
+        "SELECT count(*) AS n FROM index_members WHERE json_extract(snapshot,'$.source_id') IS NULL"
+    ).fetchone()
     assert nulls["n"] == 1  # 缺键/非 JSON 均为 NULL；PG 侧保留 TEXT 原文 + 受控 cast（plans §5）
 
 
@@ -242,10 +264,13 @@ def test_current_timestamp_format(db):
 def test_executemany_atomic_within_transaction(db):
     """executemany（channel_index 检查点、backup、clean 批量写）整体受事务保护。"""
     try:
-        db.executemany("INSERT INTO sources VALUES(?,?,?,?,?,?)", [
-            ("s1", "甲", "p", "{}", "k", 0),
-            ("s2", None, "p", "{}", "k", 0),  # NOT NULL 失败
-        ])
+        db.executemany(
+            "INSERT INTO sources VALUES(?,?,?,?,?,?)",
+            [
+                ("s1", "甲", "p", "{}", "k", 0),
+                ("s2", None, "p", "{}", "k", 0),  # NOT NULL 失败
+            ],
+        )
     except sqlite3.IntegrityError:
         pass
     db.rollback()  # Store.connect 异常路径统一回滚

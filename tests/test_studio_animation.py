@@ -12,25 +12,27 @@ import json
 import time
 
 import pytest
-from conftest import FixtureSpeaker
 from fastapi.testclient import TestClient
+
+from api import create_app
+from conftest import FixtureSpeaker
+from shared.media import command
+from studio import studio
+from studio import workspace as ws
 from test_studio_aigc import FakeVideoGenerator, aigc_shot
 from test_studio_sources import frame_count, make_clip, make_image, setup, store_input
-
-from mindex.api import create_app
-from mindex.shared.media import command
-from mindex.studio import studio
-from mindex.studio import workspace as ws
 
 slow = pytest.mark.slow
 SECRET = "sk-animator-secret-1234567890"
 
 
 def page(label: str, color: str = "#204080") -> str:
-    return (f"<!DOCTYPE html><html><head><style>html,body{{margin:0;overflow:hidden;background:{color}}}</style>"
-            f"</head><body><div id=t>{label}</div><script>requestAnimationFrame(function f(t){{"
-            "document.getElementById('t').style.opacity=Math.min(1,t/500);requestAnimationFrame(f)})</script>"
-            "</body></html>")
+    return (
+        f"<!DOCTYPE html><html><head><style>html,body{{margin:0;overflow:hidden;background:{color}}}</style>"
+        f"</head><body><div id=t>{label}</div><script>requestAnimationFrame(function f(t){{"
+        "document.getElementById('t').style.opacity=Math.min(1,t/500);requestAnimationFrame(f)})</script>"
+        "</body></html>"
+    )
 
 
 class FakeAnimator:
@@ -53,12 +55,34 @@ class FakeCapture:
     def __init__(self):
         self.calls = []
 
-    def __call__(self, html, *, seconds, width, height, fps, target, max_seconds, frame_timeout=5, frames=None):
+    def __call__(
+        self, html, *, seconds, width, height, fps, target, max_seconds, frame_timeout=5, frames=None
+    ):
         self.calls.append({"html": html, "frames": frames, "width": width, "height": height, "fps": fps})
         color = "0x" + hashlib.sha256(html.encode()).hexdigest()[:6]
-        command(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
-                 f"color=c={color}:s={width}x{height}:r={fps}", "-frames:v", str(frames), "-c:v", "libx264",
-                 "-preset", "ultrafast", "-pix_fmt", "yuv420p", str(target)], timeout=60)
+        command(
+            [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                f"color=c={color}:s={width}x{height}:r={fps}",
+                "-frames:v",
+                str(frames),
+                "-c:v",
+                "libx264",
+                "-preset",
+                "ultrafast",
+                "-pix_fmt",
+                "yuv420p",
+                str(target),
+            ],
+            timeout=60,
+        )
         return {"frames": frames, "fps": str(fps), "blocked_requests": [], "wall_seconds": 0.01}
 
 
@@ -84,11 +108,26 @@ def anim_shot(sid="a", text="增长曲线开场。", **source):
 def run(config, job_id, w, p, *, animator, capture, force=False, embedder=None, generator=None):
     checked = ws.preflight(config, job_id, w, p, force=force)
     bid = str(len(w["builds"]))
-    w["builds"].append({"id": bid, "plan_id": p["id"], "status": "running", "force": force,
-                        "nodes": [{**n, "status": "pending"} for n in checked["nodes"]]})
+    w["builds"].append(
+        {
+            "id": bid,
+            "plan_id": p["id"],
+            "status": "running",
+            "force": force,
+            "nodes": [{**n, "status": "pending"} for n in checked["nodes"]],
+        }
+    )
     ws.persist(config, job_id, w)
-    ws.run_build(config, job_id, bid, speaker=FixtureSpeaker(config), embedder=embedder, video_generator=generator,
-                 animator=animator, animation_capture=capture)
+    ws.run_build(
+        config,
+        job_id,
+        bid,
+        speaker=FixtureSpeaker(config),
+        embedder=embedder,
+        video_generator=generator,
+        animator=animator,
+        animation_capture=capture,
+    )
     fresh = ws.load(config, job_id)
     return fresh, ws.plan(fresh, p["id"])
 
@@ -130,8 +169,10 @@ def test_signature_covers_brief_model_and_canvas_but_not_secrets(anim):
     job_id, w, p = setup(anim, [anim_shot()])
     base = ws.specification(anim, job_id, w, p, "animate", "a")
     assert base["inputs"] == {"content": p["shots"]["a"]["content"], "tts": None}
-    assert base["parameters"] == {"animator": {"backend": "openai", "model": "fake-animator", "max_html_kb": 200},
-                                  "prompt_version": 1}
+    assert base["parameters"] == {
+        "animator": {"backend": "openai", "model": "fake-animator", "max_html_kb": 200},
+        "prompt_version": 1,
+    }
     assert SECRET not in json.dumps(base)
     signatures = {base["signature"]}
     ws.set_board(anim, job_id, w, p, [anim_shot(brief="柱状图")])
@@ -154,7 +195,9 @@ def test_manual_save_validates_and_requires_animation_source(anim):
     with pytest.raises(studio.StudioError, match="不是 AI 动画"):
         ws.save_animation(anim, job_id, w, p, "b", page("x"))
     with pytest.raises(studio.StudioError, match="未通过安全检查") as caught:
-        ws.save_animation(anim, job_id, w, p, "a", page("x").replace("</body>", "<script>fetch('/x')</script></body>"))
+        ws.save_animation(
+            anim, job_id, w, p, "a", page("x").replace("</body>", "<script>fetch('/x')</script></body>")
+        )
     assert "fetch" in str(caught.value)
     vid = ws.save_animation(anim, job_id, w, p, "a", page("手写"))
     item = ws.version(w, vid)
@@ -169,8 +212,11 @@ def test_manual_save_validates_and_requires_animation_source(anim):
 
 
 def test_api_rejects_invalid_source_with_chinese_422_and_dry_run(anim):
-    client = TestClient(create_app(anim, speaker=FixtureSpeaker(anim), animator=FakeAnimator(),
-                                   animation_capture=FakeCapture()))
+    client = TestClient(
+        create_app(
+            anim, speaker=FixtureSpeaker(anim), animator=FakeAnimator(), animation_capture=FakeCapture()
+        )
+    )
     job_id, _, p = setup(anim, [anim_shot()])
     revision = client.get(f"/api/studio/jobs/{job_id}/workspace").json()["revision"]
     url = f"/api/studio/jobs/{job_id}/plans/{p['id']}/shots/a/animation"
@@ -182,8 +228,13 @@ def test_api_rejects_invalid_source_with_chinese_422_and_dry_run(anim):
     assert checked["valid"] is False and len(checked["errors"]) == 2 and checked["max_kb"] == 200
     assert client.patch(url, json={"revision": revision, "html": page("ok"), "dry_run": True}).json()["valid"]
     assert client.patch(url, json={"revision": "stale", "html": page("ok")}).status_code == 422
-    assert client.patch(f"/api/studio/jobs/{job_id}/plans/{p['id']}/shots/zz/animation",
-                        json={"revision": revision, "html": page("ok")}).status_code == 404
+    assert (
+        client.patch(
+            f"/api/studio/jobs/{job_id}/plans/{p['id']}/shots/zz/animation",
+            json={"revision": revision, "html": page("ok")},
+        ).status_code
+        == 404
+    )
 
 
 # ---------------------------------------------------------------- 构建（ffmpeg）
@@ -193,15 +244,32 @@ def test_api_rejects_invalid_source_with_chinese_422_and_dry_run(anim):
 def test_build_without_index_manual_edit_rebuilds_only_that_shot(anim, tmp_path):
     job_id, w, p = setup(anim, [anim_shot()])
     image_id = store_input(anim, job_id, make_image(tmp_path / "still.png"))
-    ws.set_board(anim, job_id, w, p, [anim_shot(), shot("b", "静态结尾。", source={"kind": "image", "media_id": image_id})])
+    ws.set_board(
+        anim,
+        job_id,
+        w,
+        p,
+        [anim_shot(), shot("b", "静态结尾。", source={"kind": "image", "media_id": image_id})],
+    )
     ws.persist(anim, job_id, w)
     animator, capture = FakeAnimator(), FakeCapture()
     w, p = run(anim, job_id, w, p, animator=animator, capture=capture)
     build = w["builds"][-1]
     assert build["status"] == "complete", build
-    assert [n["key"] for n in build["nodes"]] == ["tts:a", "tts:b", "animate:a", "render:a", "render:b", "compose"]
+    assert [n["key"] for n in build["nodes"]] == [
+        "tts:a",
+        "tts:b",
+        "animate:a",
+        "render:a",
+        "render:b",
+        "compose",
+    ]
     [call] = animator.calls
-    assert call["brief"] == "折线图逐步上升" and (call["width"], call["height"], call["fps"]) == (160, 120, 25)
+    assert call["brief"] == "折线图逐步上升" and (call["width"], call["height"], call["fps"]) == (
+        160,
+        120,
+        25,
+    )
     generated = ws.version(w, p["shots"]["a"]["animate"])
     assert generated["data"]["origin"] == "generated" and set(generated["files"]) == {"animation"}
     render = ws.version(w, p["shots"]["a"]["render"])
@@ -212,9 +280,13 @@ def test_build_without_index_manual_edit_rebuilds_only_that_shot(anim, tmp_path)
     final = ws.version(w, p["final"])
     assert frame_count(ws.file_path(anim, job_id, final, "mp4"))[0] == final["data"]["total_frames"]
     detail = ws.detail(anim, job_id, w)
-    assert detail["shot_stages"]["a"] == ["tts", "animate", "render"] and detail["conflicts"]["animate:a"] == []
-    assert SECRET not in "\n".join(path.read_text(encoding="utf-8", errors="replace")
-                                   for path in studio.job_dir(anim, job_id).rglob("*.json"))
+    assert (
+        detail["shot_stages"]["a"] == ["tts", "animate", "render"] and detail["conflicts"]["animate:a"] == []
+    )
+    assert SECRET not in "\n".join(
+        path.read_text(encoding="utf-8", errors="replace")
+        for path in studio.job_dir(anim, job_id).rglob("*.json")
+    )
     first_b = p["shots"]["b"]["render"]
 
     # 人工修改：只重建该镜的渲染与成片；配音、另一镜渲染复用；不调用动画生成模型。
@@ -226,14 +298,32 @@ def test_build_without_index_manual_edit_rebuilds_only_that_shot(anim, tmp_path)
     assert nodes["render:a"]["action"] == "rebuild" and nodes["render:b"]["action"] == "reuse"
     w, p = run(anim, job_id, w, p, animator=animator, capture=capture)
     status = {key: n["status"] for key, n in nodes_of(w).items()}
-    assert status == {"tts:a": "reused", "tts:b": "reused", "animate:a": "reused", "render:a": "complete",
-                      "render:b": "reused", "compose": "complete"}
-    assert len(animator.calls) == 1 and p["shots"]["a"]["animate"] == manual and p["shots"]["b"]["render"] == first_b
+    assert status == {
+        "tts:a": "reused",
+        "tts:b": "reused",
+        "animate:a": "reused",
+        "render:a": "complete",
+        "render:b": "reused",
+        "compose": "complete",
+    }
+    assert (
+        len(animator.calls) == 1
+        and p["shots"]["a"]["animate"] == manual
+        and p["shots"]["b"]["render"] == first_b
+    )
     assert capture.calls[-1]["html"] == page("人工版", "#aa2200")
 
     # 改画面说明后普通构建仍保留人工源码（不被重新生成覆盖）。
-    ws.set_board(anim, job_id, w, p, [anim_shot(brief="柱状图对比"),
-                                       shot("b", "静态结尾。", source={"kind": "image", "media_id": image_id})])
+    ws.set_board(
+        anim,
+        job_id,
+        w,
+        p,
+        [
+            anim_shot(brief="柱状图对比"),
+            shot("b", "静态结尾。", source={"kind": "image", "media_id": image_id}),
+        ],
+    )
     ws.persist(anim, job_id, w)
     w, p = run(anim, job_id, w, p, animator=animator, capture=capture)
     assert nodes_of(w)["animate:a"]["status"] == "reused" and p["shots"]["a"]["animate"] == manual
@@ -247,7 +337,9 @@ def test_build_without_index_manual_edit_rebuilds_only_that_shot(anim, tmp_path)
 @slow
 def test_api_preview_headers_manual_patch_and_injection(anim):
     animator, capture = FakeAnimator(), FakeCapture()
-    client = TestClient(create_app(anim, speaker=FixtureSpeaker(anim), animator=animator, animation_capture=capture))
+    client = TestClient(
+        create_app(anim, speaker=FixtureSpeaker(anim), animator=animator, animation_capture=capture)
+    )
     job_id, _, p = setup(anim, [anim_shot()])
     base = f"/api/studio/jobs/{job_id}/plans/{p['id']}"
     checked = client.get(f"{base}/preflight").json()
@@ -265,7 +357,9 @@ def test_api_preview_headers_manual_patch_and_injection(anim):
     # 同一份源码经产物下载接口直接打开时同样带沙箱 CSP（不会在本站源里执行脚本）。
     path = data["versions"][vid]["files"]["animation"]["path"]
     artifact = client.get(f"/api/studio/jobs/{job_id}/artifacts/{path}")
-    assert artifact.status_code == 200 and "sandbox allow-scripts" in artifact.headers["content-security-policy"]
+    assert (
+        artifact.status_code == 200 and "sandbox allow-scripts" in artifact.headers["content-security-policy"]
+    )
     video = data["versions"][data["plans"][p["id"]]["shots"]["a"]["render"]]["files"]["video"]["path"]
     assert "content-security-policy" not in client.get(f"/api/studio/jobs/{job_id}/artifacts/{video}").headers
     render_vid = data["plans"][p["id"]]["shots"]["a"]["render"]
@@ -293,9 +387,8 @@ def wait(client, job_id, timeout=120):
 @slow
 def test_five_source_mixed_compose(anim, tmp_path, video_file):
     from conftest import FixtureEmbedder
-
-    from mindex.processing.indexing import IndexBuilder
-    from mindex.processing.pipeline import Pipeline
+    from processing.indexing import IndexBuilder
+    from processing.pipeline import Pipeline
 
     generator = anim.studio.video_generator
     generator.enabled, generator.backend, generator.model = True, "minimax", "fake-hailuo"
@@ -307,16 +400,30 @@ def test_five_source_mixed_compose(anim, tmp_path, video_file):
     clip_id = store_input(anim, job_id, make_clip(tmp_path / "c.mp4", 2.0))
     image_id = store_input(anim, job_id, make_image(tmp_path / "i.png"))
     order = ["r", "c", "i", "g", "n"]
-    ws.set_board(anim, job_id, w, p, [
-        studio.Shot(id="r", text="红色开场。", query="红色", estimated_seconds=1),
-        shot("c", "片段一段。", source={"kind": "clip", "media_id": clip_id}),
-        shot("i", "图片一张。", source={"kind": "image", "media_id": image_id, "motion": "pan-left"}),
-        aigc_shot("g", "生成的中段。"),
-        anim_shot("n", "动画收尾。"),
-    ])
+    ws.set_board(
+        anim,
+        job_id,
+        w,
+        p,
+        [
+            studio.Shot(id="r", text="红色开场。", query="红色", estimated_seconds=1),
+            shot("c", "片段一段。", source={"kind": "clip", "media_id": clip_id}),
+            shot("i", "图片一张。", source={"kind": "image", "media_id": image_id, "motion": "pan-left"}),
+            aigc_shot("g", "生成的中段。"),
+            anim_shot("n", "动画收尾。"),
+        ],
+    )
     ws.persist(anim, job_id, w)
-    w, p = run(anim, job_id, w, p, animator=FakeAnimator(), capture=FakeCapture(), embedder=embedder,
-               generator=FakeVideoGenerator())
+    w, p = run(
+        anim,
+        job_id,
+        w,
+        p,
+        animator=FakeAnimator(),
+        capture=FakeCapture(),
+        embedder=embedder,
+        generator=FakeVideoGenerator(),
+    )
     assert w["builds"][-1]["status"] == "complete", w["builds"][-1]
     final = ws.version(w, p["final"])
     frames = [ws.version(w, p["shots"][sid]["render"])["data"]["frames"] for sid in order]
@@ -325,16 +432,20 @@ def test_five_source_mixed_compose(anim, tmp_path, video_file):
     assert frame_count(ws.file_path(anim, job_id, final, "mp4")) == (sum(frames), 160, 120)
     stages = ws.detail(anim, job_id, w)["shot_stages"]
     assert [tuple(stages[sid]) for sid in order] == [
-        ("recall", "tts", "select", "render"), ("tts", "select", "render"), ("tts", "render"),
-        ("tts", "generate", "select", "render"), ("tts", "animate", "render")]
+        ("recall", "tts", "select", "render"),
+        ("tts", "select", "render"),
+        ("tts", "render"),
+        ("tts", "generate", "select", "render"),
+        ("tts", "animate", "render"),
+    ]
 
 
 # ---------------------------------------------------------------- 设置角色
 
 
 def test_settings_role_roundtrip_masks_key_and_follows_agent(config, monkeypatch):
-    from mindex.settings import runtime_settings as rs
-    from mindex.shared.storage import Store
+    from settings import runtime_settings as rs
+    from shared.storage import Store
 
     store = Store(config.data_dir)
     assert "animator" in rs.ROLES and rs.ROLE_LABELS["animator"] == "动画生成"
@@ -343,18 +454,35 @@ def test_settings_role_roundtrip_masks_key_and_follows_agent(config, monkeypatch
     assert rs.PROVIDER_PRESETS["deepseek"]["animator"]["config"]["max_tokens"] == 16000
 
     # 只激活智能助手档案：动画生成跟随它（含密钥）。
-    agent = rs.save_profile(store, role="agent", name="助手", provider="anthropic",
-                            config={"backend": "anthropic", "base_url": "https://api.anthropic.com",
-                                    "model": "claude-x"}, api_key="sk-agent-1234567890")
+    agent = rs.save_profile(
+        store,
+        role="agent",
+        name="助手",
+        provider="anthropic",
+        config={"backend": "anthropic", "base_url": "https://api.anthropic.com", "model": "claude-x"},
+        api_key="sk-agent-1234567890",
+    )
     rs.activate_profile(store, agent["id"])
     merged = rs.apply_overrides(config, store)
     assert (merged.studio.animator.backend, merged.studio.animator.model) == ("anthropic", "claude-x")
-    assert merged.studio.animator.api_key == "sk-agent-1234567890" and merged.studio.animator.max_tokens == 16000
+    assert (
+        merged.studio.animator.api_key == "sk-agent-1234567890" and merged.studio.animator.max_tokens == 16000
+    )
 
-    profile = rs.save_profile(store, role="animator", name="动画", provider="deepseek",
-                              config={"backend": "openai", "base_url": "https://api.deepseek.com/v1",
-                                      "model": "deepseek-chat", "max_tokens": 12000, "max_html_kb": 300},
-                              api_key=SECRET)
+    profile = rs.save_profile(
+        store,
+        role="animator",
+        name="动画",
+        provider="deepseek",
+        config={
+            "backend": "openai",
+            "base_url": "https://api.deepseek.com/v1",
+            "model": "deepseek-chat",
+            "max_tokens": 12000,
+            "max_html_kb": 300,
+        },
+        api_key=SECRET,
+    )
     assert profile["api_key"] == {"has_key": True, "hint": "…" + SECRET[-4:]}
     with pytest.raises(ValueError, match="不支持字段"):
         rs.save_profile(store, role="animator", name="坏", provider="custom", config={"enabled": False})
@@ -362,7 +490,11 @@ def test_settings_role_roundtrip_masks_key_and_follows_agent(config, monkeypatch
     merged = rs.apply_overrides(config, store)
     animator = merged.studio.animator
     assert (animator.model, animator.max_tokens, animator.max_html_kb, animator.enabled) == (
-        "deepseek-chat", 12000, 300, True)
+        "deepseek-chat",
+        12000,
+        300,
+        True,
+    )
     assert animator.api_key == SECRET and SECRET not in json.dumps(merged.model_dump(mode="json"))
 
     client = TestClient(create_app(config))
@@ -378,7 +510,7 @@ def test_settings_role_roundtrip_masks_key_and_follows_agent(config, monkeypatch
         sent.append((url, kwargs["json"], kwargs["headers"]))
         return {"choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]}
 
-    monkeypatch.setattr("mindex.models.animator.adapters.request", fake_request)
+    monkeypatch.setattr("models.animator.adapters.request", fake_request)
     result = client.post(f"/api/settings/profiles/{profile['id']}/test").json()
     assert result["ok"] is True and result["reply"] == "ok", result
     url, body, headers = sent[-1]
@@ -387,12 +519,25 @@ def test_settings_role_roundtrip_masks_key_and_follows_agent(config, monkeypatch
 
 
 def test_yaml_animator_section_is_not_inherited():
-    from mindex.shared.config import Config
+    from shared.config import Config
 
-    config = Config.model_validate({"agent": {"llm": {"backend": "anthropic", "base_url": "https://a.example",
-                                                      "model": "m1", "api_key_env": "AGENT_KEY"}}})
-    assert (config.studio.animator.backend, config.studio.animator.model,
-            config.studio.animator.api_key_env) == ("anthropic", "m1", "AGENT_KEY")
+    config = Config.model_validate(
+        {
+            "agent": {
+                "llm": {
+                    "backend": "anthropic",
+                    "base_url": "https://a.example",
+                    "model": "m1",
+                    "api_key_env": "AGENT_KEY",
+                }
+            }
+        }
+    )
+    assert (
+        config.studio.animator.backend,
+        config.studio.animator.model,
+        config.studio.animator.api_key_env,
+    ) == ("anthropic", "m1", "AGENT_KEY")
     explicit = Config.model_validate({"studio": {"animator": {"model": "own", "max_html_kb": 50}}})
     assert explicit.studio.animator.model == "own" and not explicit.studio.animator._inherited
     with pytest.raises(ValueError):
@@ -404,15 +549,30 @@ def test_picture_column_runs_each_shots_picture_stage(anim, tmp_path):
     上传图片的分镜没有画面阶段，不参与。"""
     job_id, w, p = setup(anim, [shot("r", "素材召回。")])
     image = store_input(anim, job_id, make_image(tmp_path / "still.png"))
-    ws.set_board(anim, job_id, w, p, [shot("r", "素材召回。"), anim_shot("a"), aigc_shot("g"),
-                                      shot("i", "上传图片。", source={"kind": "image", "media_id": image})])
+    ws.set_board(
+        anim,
+        job_id,
+        w,
+        p,
+        [
+            shot("r", "素材召回。"),
+            anim_shot("a"),
+            aigc_shot("g"),
+            shot("i", "上传图片。", source={"kind": "image", "media_id": image}),
+        ],
+    )
     ws.persist(anim, job_id, w)
     assert ws.stages.picture_stage(ws.stages.plan_shot_stages(w, p, "i")) is None
-    inputs = {sid: ws.specification(anim, job_id, w, p, stage, sid)["inputs"]
-              for sid, stage in (("r", "recall"), ("a", "animate"), ("g", "generate"))}
+    inputs = {
+        sid: ws.specification(anim, job_id, w, p, stage, sid)["inputs"]
+        for sid, stage in (("r", "recall"), ("a", "animate"), ("g", "generate"))
+    }
     nodes = ws.column_nodes(anim, job_id, w, p, "picture", inputs)
     assert [(n["key"], n["stage"], n["shot_id"]) for n in nodes] == [
-        ("recall:r", "recall", "r"), ("animate:a", "animate", "a"), ("generate:g", "generate", "g")]
+        ("recall:r", "recall", "r"),
+        ("animate:a", "animate", "a"),
+        ("generate:g", "generate", "g"),
+    ]
     # 生成视频/动画依赖配音：还没有配音时阻塞并说明原因；召回不依赖配音。
     assert nodes[0]["action"] == "rebuild"
     assert all(n["action"] == "blocked" and "tts" in n["reason"] for n in nodes[1:])
@@ -420,9 +580,23 @@ def test_picture_column_runs_each_shots_picture_stage(anim, tmp_path):
         ws.column_nodes(anim, job_id, w, p, "picture", {**inputs, "i": {"content": None}})
     with pytest.raises(studio.StudioError, match="全部分镜"):
         ws.column_nodes(anim, job_id, w, p, "picture", {"r": inputs["r"]})
-    client = TestClient(create_app(anim, speaker=FixtureSpeaker(anim), animator=FakeAnimator(),
-                                   animation_capture=FakeCapture(), video_generator=FakeVideoGenerator()))
+    client = TestClient(
+        create_app(
+            anim,
+            speaker=FixtureSpeaker(anim),
+            animator=FakeAnimator(),
+            animation_capture=FakeCapture(),
+            video_generator=FakeVideoGenerator(),
+        )
+    )
     base = f"/api/studio/jobs/{job_id}/plans/{p['id']}"
-    stale = client.post(f"{base}/execute-column", json={"revision": ws.revision(p), "stage": "picture", "force": False,
-                                                      "inputs_by_shot": {"r": inputs["r"]}})
+    stale = client.post(
+        f"{base}/execute-column",
+        json={
+            "revision": ws.revision(p),
+            "stage": "picture",
+            "force": False,
+            "inputs_by_shot": {"r": inputs["r"]},
+        },
+    )
     assert stale.status_code == 422 and "全部分镜" in stale.json()["detail"]

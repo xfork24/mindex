@@ -4,16 +4,24 @@ from __future__ import annotations
 
 import logging
 
-from mindex.models import adapters
-from mindex.settings.runtime_settings import save_voice
-from mindex.settings.voices_catalog import QWEN3_TTS_CUSTOMVOICE, fetch_catalog
-from mindex.shared.storage import Store
+from models import adapters
+from settings.runtime_settings import save_voice
+from settings.voices_catalog import QWEN3_TTS_CUSTOMVOICE, fetch_catalog
+from shared.storage import Store
 
 
 def test_static_qwen_table_complete():
     ids = [item["voice_id"] for item in QWEN3_TTS_CUSTOMVOICE]
     assert set(ids) == {
-        "vivian", "serena", "uncle_fu", "dylan", "eric", "ryan", "aiden", "ono_anna", "sohee",
+        "vivian",
+        "serena",
+        "uncle_fu",
+        "dylan",
+        "eric",
+        "ryan",
+        "aiden",
+        "ono_anna",
+        "sohee",
     }
     assert len(ids) == len(set(ids)) == 9
     labeled = {item["voice_id"]: item for item in QWEN3_TTS_CUSTOMVOICE}
@@ -42,8 +50,13 @@ def test_openai_catalog_heals_missing_clone_after_restart(config, monkeypatch):
     sample.parent.mkdir(parents=True)
     sample.write_bytes(b"RIFF-sample")
     save_voice(
-        store, name="我的旁白", provider="self", voice_id="mindex-clone-1",
-        kind="clone", sample_path=str(sample.relative_to(store.root)), notes="样本参考文本",
+        store,
+        name="我的旁白",
+        provider="self",
+        voice_id="mindex-clone-1",
+        kind="clone",
+        sample_path=str(sample.relative_to(store.root)),
+        notes="样本参考文本",
     )
     calls = []
 
@@ -72,7 +85,11 @@ def test_minimax_catalog_groups_and_merges_library(config, monkeypatch):
         return {
             "base_resp": {"status_code": 0},
             "system_voice": [
-                {"voice_id": "Chinese (Mandarin)_Reliable_Executive", "voice_name": "可靠高管", "description": ["成熟稳重"]},
+                {
+                    "voice_id": "Chinese (Mandarin)_Reliable_Executive",
+                    "voice_name": "可靠高管",
+                    "description": ["成熟稳重"],
+                },
                 {"voice_id": "female-yujie", "voice_name": "御姐", "description": ["成熟女性"]},
             ],
             "voice_cloning": [{"voice_id": "mindex-clone-2", "description": ["平台复刻"]}],
@@ -96,7 +113,7 @@ def test_catalog_upstream_error_degrades_to_static(config, monkeypatch, caplog):
         raise adapters.ModelError("连接被拒绝")
 
     monkeypatch.setattr(adapters, "request", fail)
-    with caplog.at_level(logging.WARNING, logger="mindex.settings.voices_catalog"):
+    with caplog.at_level(logging.WARNING, logger="settings.voices_catalog"):
         catalog = fetch_catalog(config, Store(config.data_dir))
     assert catalog["error"]
     ids = {voice["voice_id"] for group in catalog["groups"] for voice in group["voices"]}

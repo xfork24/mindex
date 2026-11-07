@@ -2,20 +2,31 @@
 
 from __future__ import annotations
 
-from mindex.shared.storage import Store
-from mindex.studio import studio
-from mindex.studio.studio_artifacts import sanitized, visibility_key
-
-from .. import signatures
-from ..plans import needs_recall
-from ..stages import StageHandler, register, shot_content
-from ..versions import file_info
+from persons import person_names
+from persons.person_names import AUTO_PERSON_QUERY_VERSION
+from search.search import SearchEngine
+from shared.media_groups import Groups
+from shared.storage import Store
+from shared.types import Filters, TextSearch
+from studio import studio
+from studio.artifacts import sanitized, visibility_key, visibility_key_cached
+from studio.workspace import signatures
+from studio.workspace.plans import needs_recall
+from studio.workspace.stages import StageHandler, register, shot_content
+from studio.workspace.versions import file_info
 
 # 不影响召回语义的检索旋钮：预算与上传上限只在执行时读取，不进入历史版本签名。
-_RECALL_SIGNATURE_EXCLUDED = frozenset({
-    "query_timeout_seconds", "id_page_size", "query_cache_bytes", "query_cache_entries",
-    "max_upload_mb", "max_image_upload_mb", "max_query_seconds",
-})
+_RECALL_SIGNATURE_EXCLUDED = frozenset(
+    {
+        "query_timeout_seconds",
+        "id_page_size",
+        "query_cache_bytes",
+        "query_cache_entries",
+        "max_upload_mb",
+        "max_image_upload_mb",
+        "max_query_seconds",
+    }
+)
 
 
 class RecallHandler(StageHandler):
@@ -26,7 +37,6 @@ class RecallHandler(StageHandler):
         o = p["options"]
         # 展示路径用短 TTL 缓存减少重复整表扫描；构建路径（display=False）始终读新值。
         if display:
-            from mindex.studio.studio_artifacts import visibility_key_cached
             active = store.active_index_cached()
             visibility = visibility_key_cached(store)
         else:
@@ -41,8 +51,11 @@ class RecallHandler(StageHandler):
             # 只排除不影响召回语义的预算/上限旋钮：查询期限、ID 分页、缓存字节/条目与上传上限。
             # 用排除表而非白名单，新增语义字段默认进入签名（宁可多失效，不可复用错误版本）；
             # 执行路径读的是活配置（见 run()），这些旋钮无需使历史召回版本失效。
-            "search": {key: value for key, value in config.search.model_dump().items()
-                       if key not in _RECALL_SIGNATURE_EXCLUDED},
+            "search": {
+                key: value
+                for key, value in config.search.model_dump().items()
+                if key not in _RECALL_SIGNATURE_EXCLUDED
+            },
             "embedding": sanitized(config.embedding.model_dump()),
             "visibility": visibility,
         }
@@ -50,7 +63,11 @@ class RecallHandler(StageHandler):
     def specification(self, config, job_id, w, p, sid, params, resources):
         selected, content = shot_content(w, p, sid)
         inputs = {"content": selected["content"]}
-        payload = {"query": content["query"], "target_duration": content["estimated_seconds"], "ranking_version": 2}
+        payload = {
+            "query": content["query"],
+            "target_duration": content["estimated_seconds"],
+            "ranking_version": 2,
+        }
         # 分镜级覆盖仅在实际设置时进签名，保证未覆盖分镜与历史版本签名逐字节一致。
         if content.get("granularity"):
             payload["granularity"] = content["granularity"]
@@ -60,37 +77,37 @@ class RecallHandler(StageHandler):
         database = resources.database()
         state = studio.load_job(config, job_id)
         status = studio.scope_status(state, database)
-        if status['source_ids'] is not None:
-            params = {**params, "sources": status['source_ids']}
+        if status["source_ids"] is not None:
+            params = {**params, "sources": status["source_ids"]}
         recall = signatures.recall_signature(content.get("recall"))
         shot_groups = ((content.get("recall") or {}).get("filters") or {}).get("source_group_ids")
         if shot_groups or state.get("source_group_ids"):
-            from mindex.shared.media_groups import Groups
-
             groups = Groups(database)
-            params = {**params, "source_groups": {
-                "job": groups.state("source", state.get("source_group_ids")),
-                "shot": groups.state("source", shot_groups),
-            }}
-            if status['error']:
-                params['scope_error'] = status['error']
+            params = {
+                **params,
+                "source_groups": {
+                    "job": groups.state("source", state.get("source_group_ids")),
+                    "shot": groups.state("source", shot_groups),
+                },
+            }
+            if status["error"]:
+                params["scope_error"] = status["error"]
         if recall is not None:
             payload["recall"] = recall
-        from mindex.persons.person_names import AUTO_PERSON_QUERY_VERSION, has_document_reference
 
         value = content.get("recall") or {}
         if (
             value.get("mode", "text") == "text"
             and value.get("person_mode", "auto") == "auto"
-            and has_document_reference(content["query"])
+            and person_names.has_document_reference(content["query"])
         ):
             payload["auto_person_query_version"] = AUTO_PERSON_QUERY_VERSION
         return payload, inputs, params
 
     def preflight(self, config, job_id, w, p, sid, spec, found, node):
-        error = spec['parameters'].get('scope_error')
-        for values in spec['parameters'].get('source_groups', {}).values():
-            if any(group.get('invalid') for group in values):
+        error = spec["parameters"].get("scope_error")
+        for values in spec["parameters"].get("source_groups", {}).values():
+            if any(group.get("invalid") for group in values):
                 error = "素材组已删除或类型不符，请重新选择"
         if error and needs_recall(p, sid):
             node.update(action="blocked", reason=error)
@@ -102,8 +119,6 @@ class RecallHandler(StageHandler):
             node.update(action="skip", reason="人工选片不依赖召回")
 
     def run(self, ctx):
-        from mindex.search.search import SearchEngine
-        from mindex.shared.types import Filters, TextSearch
 
         config, job_id = ctx.config, ctx.job_id
         params = ctx.spec["parameters"]
@@ -112,7 +127,9 @@ class RecallHandler(StageHandler):
         _, content = shot_content(ctx.w, ctx.p, ctx.sid)
         recall = studio.ShotRecall.model_validate(content["recall"]) if content.get("recall") else None
         engine = SearchEngine(
-            config, ctx.services.get("embedder"), index_id=params["index_id"],
+            config,
+            ctx.services.get("embedder"),
+            index_id=params["index_id"],
             release_id=params["person_release"],
             force_embedding=ctx.services.get("force", False),
         )

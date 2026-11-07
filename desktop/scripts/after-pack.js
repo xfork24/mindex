@@ -22,26 +22,41 @@ function isMachO(file) {
 function* files(dir) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
-    if (entry.isSymbolicLink()) continue;
-    if (entry.isDirectory()) yield* files(full);
-    else if (entry.isFile()) yield full;
+    if (entry.isSymbolicLink()) {
+      continue;
+    }
+    if (entry.isDirectory()) {
+      yield* files(full);
+    } else if (entry.isFile()) {
+      yield full;
+    }
   }
 }
 
 function sign(target, extra = []) {
-  childProcess.execFileSync("codesign", ["--force", "--sign", "-", "--timestamp=none", ...extra, target], { stdio: "pipe" });
+  childProcess.execFileSync(
+    "codesign",
+    ["--force", "--sign", "-", "--timestamp=none", ...extra, target],
+    { stdio: "pipe" },
+  );
 }
 
 exports.default = async function afterPack(context) {
-  if (context.electronPlatformName !== "darwin") return;
+  if (context.electronPlatformName !== "darwin") {
+    return;
+  }
   const app = path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`);
   const resources = path.join(app, "Contents", "Resources");
   let count = 0;
   for (const sub of ["backend", "bin"]) {
     const dir = path.join(resources, sub);
-    if (!fs.existsSync(dir)) throw new Error(`安装包缺少 Resources/${sub}`);
+    if (!fs.existsSync(dir)) {
+      throw new Error(`安装包缺少 Resources/${sub}`);
+    }
     for (const file of files(dir)) {
-      if (!isMachO(file)) continue;
+      if (!isMachO(file)) {
+        continue;
+      }
       sign(file);
       count += 1;
     }

@@ -12,15 +12,15 @@ from typing import ClassVar
 import numpy as np
 import pytest
 import uvicorn
-from conftest import FixtureEmbedder, FixtureStoryboarder
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from mindex.api import create_app
-from mindex.persons.person_server import create_person_app
-from mindex.processing.indexing import IndexBuilder
-from mindex.processing.pipeline import Pipeline
-from mindex.shared.media import command
+from api import create_app
+from conftest import FixtureEmbedder, FixtureStoryboarder
+from persons.person_server import create_person_app
+from processing.indexing import IndexBuilder
+from processing.pipeline import Pipeline
+from shared.media import command
 
 pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
 
@@ -80,11 +80,11 @@ def test_subtitle_person_task_publish_strict_mentions_and_studio_media(
     )
     config.studio.recall.granularity = "shot"
     monkeypatch.setattr(
-        "mindex.processing.pipeline.make_analyzer",
+        "processing.pipeline.make_analyzer",
         lambda *_: (_ for _ in ()).throw(AssertionError("LLM must stay offline")),
     )
     monkeypatch.setattr(
-        "mindex.processing.dialogue.make_transcriber",
+        "processing.dialogue.make_transcriber",
         lambda *_: (_ for _ in ()).throw(AssertionError("Subtitles must bypass ASR")),
     )
     monkeypatch.setenv("MINDEX_GPU_LOCK", str(tmp_path / "fixture-gpu.lock"))
@@ -140,8 +140,8 @@ def test_subtitle_person_task_publish_strict_mentions_and_studio_media(
                 assert actor_response.status_code == 201
                 actor = actor_response.json()["id"]
                 # 出镜证据必须绑定该素材作品中的角色，参考图也要带角色。
-                from mindex.persons.persons import Persons
-                from mindex.shared.storage import Store
+                from persons.persons import Persons
+                from shared.storage import Store
 
                 work = Persons(Store(config.data_dir)).work_for(source)
                 role_response = client.post(

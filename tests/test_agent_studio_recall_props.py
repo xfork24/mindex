@@ -13,28 +13,22 @@ import asyncio
 import io
 
 import pytest
-from conftest import legacy_job
 from fastapi.testclient import TestClient
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from PIL import Image
 
-from mindex.agent.loopback import MindexClient
-from mindex.agent.registry import ToolContext
-from mindex.agent.tools import build_registry
-from mindex.agent.tools.common import PlanView
-from mindex.agent.tools.studio_write import (
-    RecallFilterArgs,
-    ShotFields,
-    ShotOperation,
-    ShotRecallArgs,
-    plan_shots,
-)
-from mindex.api import create_app
-from mindex.shared.types import Filters
-from mindex.studio import studio
-from mindex.studio import workspace as ws
-from mindex.studio.studio_models import ShotBody
+from agent.loopback import MindexClient
+from agent.registry import ToolContext
+from agent.tools import build_registry
+from agent.tools.common import PlanView
+from agent.tools.studio_write import RecallFilterArgs, ShotFields, ShotOperation, ShotRecallArgs, plan_shots
+from api import create_app
+from conftest import legacy_job
+from shared.types import Filters
+from studio import studio
+from studio import workspace as ws
+from studio.models import ShotBody
 
 pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
 
@@ -57,8 +51,12 @@ MEDIA = st.tuples(st.sampled_from(["image", "video"]), st.text("0123456789abcdef
 def filters(draw, sources: st.SearchStrategy[str] = SOURCE_IDS) -> dict:
     """合法的 RecallFilterArgs：max_duration 为空或不小于 min_duration 且大于 0。"""
     minimum = draw(st.floats(min_value=0, max_value=600, allow_nan=False, allow_infinity=False))
-    maximum = draw(st.none() | st.floats(min_value=0, max_value=600, allow_nan=False, allow_infinity=False)
-                   .map(lambda delta: minimum + delta).filter(lambda value: value > 0))
+    maximum = draw(
+        st.none()
+        | st.floats(min_value=0, max_value=600, allow_nan=False, allow_infinity=False)
+        .map(lambda delta: minimum + delta)
+        .filter(lambda value: value > 0)
+    )
     return {
         "source_id": draw(st.none() | sources),
         "source_ids": draw(st.lists(sources, max_size=4)),
@@ -71,8 +69,9 @@ def filters(draw, sources: st.SearchStrategy[str] = SOURCE_IDS) -> dict:
 
 
 @st.composite
-def recalls(draw, persons: st.SearchStrategy[str] = PERSON_IDS,
-            media: st.SearchStrategy[tuple[str, str]] = MEDIA) -> dict:
+def recalls(
+    draw, persons: st.SearchStrategy[str] = PERSON_IDS, media: st.SearchStrategy[tuple[str, str]] = MEDIA
+) -> dict:
     """合法的 ShotRecallArgs 参数：text 模式随机人物/关系/筛选；image/video 模式带对应类型的查询文件。
 
     ``media`` 生成 (kind, media_id)；缺省为任意 64 位 hex 与任意类型（纯函数层不校验文件存在）。
@@ -109,12 +108,24 @@ def job(config):
     job_id = legacy_job(config, "红色开场。蓝色中段。绿色结尾。", options={"burn": False})["id"]
     w = ws.load(config, job_id)
     p = ws.plan(w, w["active_plan"])
-    ws.set_board(config, job_id, w, p, [
-        studio.Shot(id=SHOTS[0], text="红色开场。", query="红色", estimated_seconds=1.5),
-        studio.Shot(id=SHOTS[1], text="蓝色中段。", query="蓝色", estimated_seconds=2.0, granularity="scene",
-                    recall_limit=5),
-        studio.Shot(id=SHOTS[2], text="绿色结尾。", query="绿色", estimated_seconds=1.0),
-    ])
+    ws.set_board(
+        config,
+        job_id,
+        w,
+        p,
+        [
+            studio.Shot(id=SHOTS[0], text="红色开场。", query="红色", estimated_seconds=1.5),
+            studio.Shot(
+                id=SHOTS[1],
+                text="蓝色中段。",
+                query="蓝色",
+                estimated_seconds=2.0,
+                granularity="scene",
+                recall_limit=5,
+            ),
+            studio.Shot(id=SHOTS[2], text="绿色结尾。", query="绿色", estimated_seconds=1.0),
+        ],
+    )
     p["board_script"] = p["script"]
     ws.persist(config, job_id, w)
     return job_id
@@ -160,8 +171,11 @@ def png(color: str) -> bytes:
 
 def query_media(client, job, name: str, data: bytes, content_type: str, kind: str) -> str:
     pid = workspace(client, job)["active_plan"]
-    response = client.post(f"/api/studio/jobs/{job}/plans/{pid}/query-media",
-                           files={"file": (name, data, content_type)}, data={"kind": kind})
+    response = client.post(
+        f"/api/studio/jobs/{job}/plans/{pid}/query-media",
+        files={"file": (name, data, content_type)},
+        data={"kind": kind},
+    )
     assert response.status_code == 201, response.text
     return response.json()["media_id"]
 
@@ -169,11 +183,15 @@ def query_media(client, job, name: str, data: bytes, content_type: str, kind: st
 @pytest.fixture
 def references(client, job, video_file):
     """服务端 validate_recall_references 能接受的真实引用：已登记的演员与已上传的查询文件。"""
-    actors = [client.post("/api/persons/entities", json={"kind": "actor", "name": name}).json()["id"]
-              for name in ("演员甲", "演员乙")]
-    media = [("image", query_media(client, job, "红.png", png("red"), "image/png", "image")),
-             ("image", query_media(client, job, "蓝.png", png("blue"), "image/png", "image")),
-             ("video", query_media(client, job, "片段.mp4", video_file.read_bytes(), "video/mp4", "video"))]
+    actors = [
+        client.post("/api/persons/entities", json={"kind": "actor", "name": name}).json()["id"]
+        for name in ("演员甲", "演员乙")
+    ]
+    media = [
+        ("image", query_media(client, job, "红.png", png("red"), "image/png", "image")),
+        ("image", query_media(client, job, "蓝.png", png("blue"), "image/png", "image")),
+        ("video", query_media(client, job, "片段.mp4", video_file.read_bytes(), "video/mp4", "video")),
+    ]
     return actors, media
 
 
@@ -185,16 +203,22 @@ def test_recall_args_mirror_shot_recall():
 
 # Feature: agent-capability-expansion, Property 12: 召回设置往返
 @settings(max_examples=100, deadline=None, suppress_health_check=FIXTURE_CHECKS)
-@given(recall=recalls(), granularity=granularities, limit=limits, target=st.integers(0, 2),
-       insert=st.booleans())
+@given(
+    recall=recalls(), granularity=granularities, limit=limits, target=st.integers(0, 2), insert=st.booleans()
+)
 def test_plan_shots_recall_round_trip(client, job, recall, granularity, limit, target, insert):
     """**Validates: Requirements 14.1**"""
     view = PlanView(workspace(client, job))
     original = view.shots()
-    fields = ShotFields(recall=ShotRecallArgs.model_validate(recall), granularity=granularity, recall_limit=limit)
+    fields = ShotFields(
+        recall=ShotRecallArgs.model_validate(recall), granularity=granularity, recall_limit=limit
+    )
     if insert:
-        operation = ShotOperation(op="insert", after=f"#{target + 1}",
-                                  fields=fields.model_copy(update={"text": "新镜。", "query": "新镜"}))
+        operation = ShotOperation(
+            op="insert",
+            after=f"#{target + 1}",
+            fields=fields.model_copy(update={"text": "新镜。", "query": "新镜"}),
+        )
         index = target + 1
     else:
         operation = ShotOperation(op="update", shot=f"#{target + 1}", fields=fields)
@@ -220,15 +244,18 @@ def test_plan_shots_recall_round_trip(client, job, recall, granularity, limit, t
     cleared = plan_shots(view, [operation, clear])[0][index]
     assert all(cleared[key] is None for key in RECALL_KEYS)
     ShotBody.model_validate(cleared)
-    assert {k: v for k, v in cleared.items() if k not in RECALL_KEYS} == \
-        {k: v for k, v in original[target].items() if k not in RECALL_KEYS}
+    assert {k: v for k, v in cleared.items() if k not in RECALL_KEYS} == {
+        k: v for k, v in original[target].items() if k not in RECALL_KEYS
+    }
 
 
 # ------------------------------------------------------------ 端到端层
 # Feature: agent-capability-expansion, Property 12: 召回设置往返
 @settings(max_examples=100, deadline=None, suppress_health_check=FIXTURE_CHECKS)
 @given(data=st.data(), granularity=granularities, limit=limits, target=st.integers(0, 2))
-def test_edit_shots_recall_round_trip_through_workspace(client, job, references, data, granularity, limit, target):
+def test_edit_shots_recall_round_trip_through_workspace(
+    client, job, references, data, granularity, limit, target
+):
     """**Validates: Requirements 14.1**
 
     每个样例先写入再 clear，工作台回到等价状态，样例之间互不影响。
@@ -238,19 +265,37 @@ def test_edit_shots_recall_round_trip_through_workspace(client, job, references,
     sid = SHOTS[target]
     before = saved_shot(workspace(client, job), sid)
 
-    edit_shots(client, {"job_id": job, "operations": [{"op": "update", "shot": f"#{target + 1}", "fields": {
-        "recall": recall, "granularity": granularity, "recall_limit": limit}}]})
+    edit_shots(
+        client,
+        {
+            "job_id": job,
+            "operations": [
+                {
+                    "op": "update",
+                    "shot": f"#{target + 1}",
+                    "fields": {"recall": recall, "granularity": granularity, "recall_limit": limit},
+                }
+            ],
+        },
+    )
     after = workspace(client, job)
     shot = saved_shot(after, sid)
     assert shot["recall"] == expected_recall(recall)
     assert shot["granularity"] == granularity and shot["recall_limit"] == limit
-    assert {k: v for k, v in shot.items() if k not in RECALL_KEYS} == \
-        {k: v for k, v in before.items() if k not in RECALL_KEYS}
+    assert {k: v for k, v in shot.items() if k not in RECALL_KEYS} == {
+        k: v for k, v in before.items() if k not in RECALL_KEYS
+    }
     studio.Shot.model_validate(shot)
 
-    edit_shots(client, {"job_id": job, "operations": [{"op": "update", "shot": f"#{target + 1}",
-                                                       "clear": list(RECALL_KEYS)}]})
+    edit_shots(
+        client,
+        {
+            "job_id": job,
+            "operations": [{"op": "update", "shot": f"#{target + 1}", "clear": list(RECALL_KEYS)}],
+        },
+    )
     cleared = saved_shot(workspace(client, job), sid)
     assert all(cleared.get(key) is None for key in RECALL_KEYS)
-    assert {k: v for k, v in cleared.items() if k not in RECALL_KEYS} == \
-        {k: v for k, v in before.items() if k not in RECALL_KEYS}
+    assert {k: v for k, v in cleared.items() if k not in RECALL_KEYS} == {
+        k: v for k, v in before.items() if k not in RECALL_KEYS
+    }

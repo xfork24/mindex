@@ -5,15 +5,16 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import mindex  # noqa: F401 — 安装根包自举，后续使用包内短导入
 import uvicorn
-from conftest import FixtureAnalyzer, FixtureEmbedder, FixtureSpeaker, FixtureStoryboarder
 
-from mindex.api import create_app
-from mindex.processing.indexing import IndexBuilder
-from mindex.processing.pipeline import Pipeline
-from mindex.settings import settings_api
-from mindex.shared.config import Config
-from mindex.shared.media import command
+from api import create_app
+from conftest import FixtureAnalyzer, FixtureEmbedder, FixtureSpeaker, FixtureStoryboarder
+from processing.indexing import IndexBuilder
+from processing.pipeline import Pipeline
+from settings import api as settings_api
+from shared.config import Config
+from shared.media import command
 
 
 def main():

@@ -7,12 +7,11 @@ from __future__ import annotations
 
 import copy
 
-from mindex.shared.config import fingerprint
-from mindex.studio import studio
-
-from . import signatures, stages
-from .stages import handler, names
-from .versions import ordered_shots, revision, valid_files
+from shared.config import fingerprint
+from studio import studio
+from studio.workspace import signatures, stages
+from studio.workspace.stages import handler, names
+from studio.workspace.versions import ordered_shots, revision, valid_files
 
 
 def node_dependencies(w, p, stage, sid, *, resplit=False):
@@ -51,8 +50,11 @@ def preflight(config, job_id, w, p, *, force=False):
         stage_handler = handler(stage)
         for variant in stage_handler.variants(config, w, p):
             key = stages.final_key(stage, variant)
-            found = (None if force or not p["board"] or resplit
-                     else signatures.match(config, job_id, w, draft, stage, variant))
+            found = (
+                None
+                if force or not p["board"] or resplit
+                else signatures.match(config, job_id, w, draft, stage, variant)
+            )
             node = {
                 "key": key,
                 "stage": stage,
@@ -82,7 +84,9 @@ def preflight(config, job_id, w, p, *, force=False):
 def column_nodes(config, job_id, w, p, stage, inputs_by_shot):
     if stage == stages.PICTURE_COLUMN:
         # 画面列：每个分镜执行各自的画面阶段（召回 / 生成图片 / 生成视频 / 生成动画），合在一次构建里。
-        targets = [(sid, stages.picture_stage(stages.plan_shot_stages(w, p, sid))) for sid in ordered_shots(w, p)]
+        targets = [
+            (sid, stages.picture_stage(stages.plan_shot_stages(w, p, sid))) for sid in ordered_shots(w, p)
+        ]
         targets = [(sid, name) for sid, name in targets if name]
     else:
         stage_handler = handler(stage)

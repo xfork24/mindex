@@ -17,16 +17,17 @@
 from __future__ import annotations
 
 import copy
+import json
 
-from mindex.models import adapters
-from mindex.models.writer import WRITER_PROMPT_VERSION
-from mindex.shared.storage import Store
-from mindex.studio import script_templates, studio
-from mindex.studio.material_digest import safe_digest, scope_parameters
-from mindex.studio.studio_artifacts import sanitized
-
-from .. import references
-from ..stages import StageHandler, register
+from models import adapters
+from models.writer import WRITER_PROMPT_VERSION
+from shared.storage import Store
+from shared.writing_profile import profile_hash, writer_block
+from studio import script_templates, studio
+from studio.artifacts import sanitized
+from studio.material_digest import safe_digest, scope_parameters
+from studio.workspace import references
+from studio.workspace.stages import StageHandler, register
 
 REWRITE_NEEDS_REFERENCES = "访谈改写模板需要参考文稿"
 
@@ -55,9 +56,6 @@ def profile_block(config, job_id, p) -> str | None:
     expected = p.get("profile_hash")
     if not expected:
         return None
-    import json
-
-    from mindex.shared.writing_profile import profile_hash, writer_block
 
     path = studio.job_dir(config, job_id) / "profile.json"
     try:
@@ -83,10 +81,9 @@ def template_changed(config, w, p, *, store=None) -> bool:
     except studio.EntityNotFound:
         return True
     recorded = item["data"].get("template") or {}
-    return (
-        {"id": recorded.get("id"), "hash": recorded.get("hash")} != current
-        or item.get("parameters", {}).get("prompt_version") != WRITER_PROMPT_VERSION
-    )
+    return {"id": recorded.get("id"), "hash": recorded.get("hash")} != current or item.get(
+        "parameters", {}
+    ).get("prompt_version") != WRITER_PROMPT_VERSION
 
 
 class ScriptHandler(StageHandler):
@@ -108,8 +105,11 @@ class ScriptHandler(StageHandler):
         return result
 
     def specification(self, config, job_id, w, p, sid, params, resources):
-        return {"outline": studio.load_job(config, job_id)["outline"]}, {}, {
-            **params, **scope_parameters(config, job_id, resources.database())}
+        return (
+            {"outline": studio.load_job(config, job_id)["outline"]},
+            {},
+            {**params, **scope_parameters(config, job_id, resources.database())},
+        )
 
     def plan_node(self, config, job_id, w, p):
         # 已有文案时直接复用，绝不在构建中悄悄重写；只在缺少文案时先生成。
@@ -128,8 +128,11 @@ class ScriptHandler(StageHandler):
             reason = "根据参考文稿改写文案" if ready else REWRITE_NEEDS_REFERENCES
         else:
             ready = bool(outline) or has_references
-            reason = ("根据视频大纲生成文案" if outline else "根据参考文稿生成文案") if ready else (
-                "任务没有视频大纲，请手动编写文案")
+            reason = (
+                ("根据视频大纲生成文案" if outline else "根据参考文稿生成文案")
+                if ready
+                else ("任务没有视频大纲，请手动编写文案")
+            )
         return {
             "key": "script",
             "stage": "script",

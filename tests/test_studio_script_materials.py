@@ -10,19 +10,19 @@ import json
 import time
 
 import pytest
-from conftest import FixtureAnalyzer, FixtureEmbedder, FixtureSpeaker, FixtureStoryboarder, FixtureWriter
 from fastapi.testclient import TestClient
 
-from mindex.api import create_app
-from mindex.models import adapters
-from mindex.models.writer import MATERIAL_HEADER, MATERIAL_RULES, QwenWriter
-from mindex.processing.indexing import IndexBuilder
-from mindex.processing.pipeline import Pipeline
-from mindex.shared.storage import Store
-from mindex.studio import material_digest, studio
-from mindex.studio import workspace as ws
-from mindex.studio.script_templates import builtins
-from mindex.studio.workspace.handlers import script as script_handler
+from api import create_app
+from conftest import FixtureAnalyzer, FixtureEmbedder, FixtureSpeaker, FixtureStoryboarder, FixtureWriter
+from models import adapters
+from models.writer import MATERIAL_HEADER, MATERIAL_RULES, QwenWriter
+from processing.indexing import IndexBuilder
+from processing.pipeline import Pipeline
+from shared.storage import Store
+from studio import material_digest, studio
+from studio import workspace as ws
+from studio.script_templates import builtins
+from studio.workspace.handlers import script as script_handler
 
 pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
 
@@ -43,7 +43,10 @@ def env(config, video_file):
     writer = FixtureWriter(config, vary=True)
     client = TestClient(
         create_app(
-            config, embedder, speaker=FixtureSpeaker(config), storyboarder=FixtureStoryboarder(config),
+            config,
+            embedder,
+            speaker=FixtureSpeaker(config),
+            storyboarder=FixtureStoryboarder(config),
             writer=writer,
         )
     )
@@ -145,7 +148,9 @@ def test_digest_error_falls_back_to_empty_and_script_still_generated(env, monkey
     version = data["versions"][vid]
     assert version["status"] == "complete"
     assert {k: v for k, v in version["data"].items() if k != "template"} == {
-        "text": OUTLINE + "第1版。", "origin": "generated"}
+        "text": OUTLINE + "第1版。",
+        "origin": "generated",
+    }
     assert version["data"]["template"]["id"] == "base"
     assert writer.materials[0].empty
     records = debug_records(config, jid, vid)
@@ -191,26 +196,27 @@ def test_nonempty_digest_prompt_contains_material_rules(env, monkeypatch):
 
 
 def test_writer_uses_latest_group_scope_without_replacing_script(env):
-    from mindex.shared.media_groups import Groups
+    from shared.media_groups import Groups
 
     config, client, writer = env
     store = Store(config.data_dir)
     sid = next(iter(store.source_ids()))
     groups = Groups(store)
-    group_id = groups.save('source', '文案范围')['id']
+    group_id = groups.save("source", "文案范围")["id"]
     groups.change_members(group_id, [sid])
     jid, pid = new_job(client)
-    response = client.put(f'/api/studio/jobs/{jid}/material-scope',
-                          json={'source_ids': None, 'source_group_ids': [group_id]})
+    response = client.put(
+        f"/api/studio/jobs/{jid}/material-scope", json={"source_ids": None, "source_group_ids": [group_id]}
+    )
     assert response.status_code == 200, response.text
     data, first_version = run_script(client, jid, pid)
     assert {source.source_id for source in writer.materials[-1].sources} == {sid}
-    assert not data['script_material_scope_changed']
-    previous = data['versions'][first_version]['data']['text']
+    assert not data["script_material_scope_changed"]
+    previous = data["versions"][first_version]["data"]["text"]
     groups.change_members(group_id, [sid], remove=True)
     changed = workspace(client, jid)
-    assert changed['script_material_scope_changed']
-    assert changed['plans'][pid]['script'] == first_version
-    assert changed['versions'][first_version]['data']['text'] == previous
+    assert changed["script_material_scope_changed"]
+    assert changed["plans"][pid]["script"] == first_version
+    assert changed["versions"][first_version]["data"]["text"] == previous
     _, second_version = run_script(client, jid, pid)
     assert writer.materials[-1].empty and first_version != second_version

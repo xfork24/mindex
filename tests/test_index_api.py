@@ -6,22 +6,22 @@ import asyncio
 import threading
 
 import pytest
-from conftest import FixtureEmbedder
 from fastapi.testclient import TestClient
 
-from mindex.admin import indexes as indexes_api
-from mindex.agent.ids import short
-from mindex.agent.loopback import MindexClient
-from mindex.agent.registry import ToolContext, ToolError
-from mindex.agent.tools import build_registry
-from mindex.agent.tools.index import resolve_index
-from mindex.api import create_app
-from mindex.models.adapters import ModelError
-from mindex.processing.indexing import IndexBuilder
-from mindex.processing.pipeline import Pipeline
-from mindex.settings import settings_api
-from mindex.shared.processing_lock import ProcessingLock, index_write_lock
-from mindex.shared.storage import Store
+from admin import indexes as indexes_api
+from agent.ids import short
+from agent.loopback import MindexClient
+from agent.registry import ToolContext, ToolError
+from agent.tools import build_registry
+from agent.tools.index import resolve_index
+from api import create_app
+from conftest import FixtureEmbedder
+from models.adapters import ModelError
+from processing.indexing import IndexBuilder
+from processing.pipeline import Pipeline
+from settings import api as settings_api
+from shared.processing_lock import ProcessingLock, index_write_lock
+from shared.storage import Store
 
 pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
 
@@ -47,7 +47,7 @@ class GateFailEmbedder(SchemaEmbedder):
 def quiet_warmup(monkeypatch):
     """激活后的后台预热改为记录调用，避免测试线程触达真实模型。"""
     calls = threading.Event()
-    monkeypatch.setattr("mindex.search.warmup.warm_up", lambda config, startup=False: calls.set())
+    monkeypatch.setattr("search.warmup.warm_up", lambda config, startup=False: calls.set())
     return calls
 
 
@@ -101,10 +101,13 @@ def test_check_and_activate_rejects_inconsistent_index(config, video_file):
     assert client.post("/api/indexes/missing/activate").status_code == 404
 
 
-@pytest.mark.parametrize("embedder_cls,reason", [
-    (OtherSpaceEmbedder, "当前模型空间与待发布索引不同"),
-    (GateFailEmbedder, "能力门槛未通过"),
-])
+@pytest.mark.parametrize(
+    "embedder_cls,reason",
+    [
+        (OtherSpaceEmbedder, "当前模型空间与待发布索引不同"),
+        (GateFailEmbedder, "能力门槛未通过"),
+    ],
+)
 def test_activate_space_mismatch_or_gate_is_503(config, video_file, embedder_cls, reason):
     older, newer = build_two(config, video_file, SchemaEmbedder)
     response = TestClient(create_app(config, embedder_cls(config))).post(f"/api/indexes/{older}/activate")
@@ -155,7 +158,10 @@ def test_activate_rolls_back_and_search_uses_new_index(config, video_file, quiet
     assert response.status_code == 200
     body = response.json()
     assert body["active"] == older and body["release_id"]
-    assert client.get("/api/indexes").json()["active"] == {"content_id": older, "release_id": body["release_id"]}
+    assert client.get("/api/indexes").json()["active"] == {
+        "content_id": older,
+        "release_id": body["release_id"],
+    }
     assert quiet_warmup.wait(5), "激活成功后应在后台触发检索预热"
     after = client.post("/api/search/text", json={"text": "绿色", "granularity": "shot"}).json()
     assert after["index_id"] == older and after["results"]
@@ -189,7 +195,10 @@ def tool_app(config, video_file, monkeypatch):
 def test_tool_risks():
     registry = build_registry()
     assert {n: registry.get(n).risk for n in ("list_index_versions", "check_index", "activate_index")} == {
-        "list_index_versions": "read", "check_index": "read", "activate_index": "danger"}
+        "list_index_versions": "read",
+        "check_index": "read",
+        "activate_index": "danger",
+    }
     assert registry.get("activate_index").preview is not None
 
 
@@ -217,7 +226,10 @@ def test_index_prefix_resolution(tool_app):
     versions = [{"id": "abcdef01aa"}, {"id": "abcdef02bb"}]
     with pytest.raises(ToolError) as error:
         resolve_index(versions, "abcdef")
-    assert error.value.code == "ambiguous_index" and error.value.value["candidates"] == ["abcdef01aa", "abcdef02bb"]
+    assert error.value.code == "ambiguous_index" and error.value.value["candidates"] == [
+        "abcdef01aa",
+        "abcdef02bb",
+    ]
     assert resolve_index(versions, "ABCDEF02")["id"] == "abcdef02bb"
     assert resolve_index(versions, "abcdef01aa")["id"] == "abcdef01aa"
 

@@ -7,10 +7,10 @@ import os
 from itertools import pairwise
 from pathlib import Path
 
-from mindex.models import adapters
-from mindex.models.adapters import ModelError
-from mindex.shared.config import Config
-from mindex.shared.media import frame_timestamps, probe
+from models import adapters
+from models.adapters import ModelError
+from shared.config import Config
+from shared.media import frame_timestamps, probe
 
 log = logging.getLogger(__name__)
 
@@ -20,6 +20,7 @@ class AdaptiveShotDetector:
         self.config = config
 
     def detect(self, path: Path) -> list[tuple[float, float]]:
+        # 延迟导入：媒体、数值或服务运行依赖仅在实际执行该功能时加载。
         from scenedetect import SceneManager, open_video
         from scenedetect.detectors import AdaptiveDetector
 

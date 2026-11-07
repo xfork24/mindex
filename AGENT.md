@@ -11,10 +11,10 @@
 
 ## 代码位置与约定
 
-- 后端直接位于 `backend/src/`，由 Setuptools 映射为 `mindex`；例如 `from mindex.search.search import SearchEngine`。使用当前分包路径，不增加旧模块转发层。
+- 后端直接位于 `backend/src/`，由 Setuptools 映射为 `mindex`。包内统一短导入，例如 `from search.search import SearchEngine`；安装入口先经 `mindex` 根包自举，将包目录加入查询路径。测试由 conftest、独立脚本由各自入口引导。不要混用 `mindex.*` 子模块导入，以免类、注册表与单例出现双身份；独立进程的 `python -m mindex.<模块>` 可用于完成包自举。使用当前分包路径，不增加旧模块转发层。
 - 前端位于 `frontend/src/`，采用原生 HTML/JS/CSS，无打包步骤。两侧按 search/admin/persons/studio/settings 功能组织，共享资源位于各自的 shared/。请求统一经 `shared/api.js`（`window.MindexApi`），各页面 `api()` 只是薄封装。创作页由 `studio/studio-*.js` 多个经典脚本按 `studio.html` 中的顺序加载，顶层声明共享全局作用域；加载期执行的代码只放在最后的 `studio-main.js`。
 - 改动任何被页面引用的 JS/CSS 后运行 `python scripts/build-assets.py`，把 HTML 中 `/assets/` 地址的 `?v=` 更新为内容哈希（`--check` 仅校验；文案改动先运行 build-messages.py）。
-- API 装配在 `backend/src/api.py`；CLI 入口在 `backend/src/cli.py`（全局选项、核心命令与 `indexes`），`e2e`、`persons`、`clips`、`topics`、`agent` 命令组在 `cli_e2e.py`、`cli_persons.py`、`cli_clips.py`、`cli_topics.py`、`cli_agent.py`（顶层 `mcp` 也在后者），`backup` 在 `maintenance/backup_cli.py`；重依赖保留在命令函数内延迟导入。
+- API 装配在 `backend/src/api/__init__.py`，上传路由在 `api/uploads.py`；CLI 实现在 `backend/src/cli/__init__.py`（全局选项、核心命令与 `indexes`），安装入口为 `mindex:main`，自举后调用短名 `cli.app`。`e2e`、`persons`、`clips`、`topics`、`agent`、`studio`、`uploads` 命令组在 `cli/` 包，`backup` 在 `maintenance/backup_cli.py`。服务入口在 `server/`，Worker 在 `worker/`，诊断在 `diagnostics/`。import 优先置于文件顶部；可选依赖探测、经评估的重载依赖、循环依赖或注册顺序敏感的装配可保留延迟导入，并说明原因。
 - 静态资源统一通过 `shared/web_assets.py` 定位；同时考虑源码目录与 wheel 中的 `mindex.web`，打包规则在 `pyproject.toml`、`MANIFEST.in`。
 - 后端抽象位于 `shared/backends/`（`BackendContext` 与 db/media/locks/vectors/queue 协议，本地实现即现有 SQLite/chroma 本地/文件锁/进程内执行）；PG 适配与受控方言翻译在 `shared/db/`（REPLACE/rowid/json_extract/CURRENT_TIMESTAMP 等语义改写，复杂语句用 `DualSQL`/方言函数显式登记）。API 装配经 `open_context` 构造，集群调用链用 `Store.open(config)` 取统一 Store，不得绕过上下文直构远端连接。SQL 语义基线在 `tests/test_sql_characteristics.py` 与 `tests/test_pg_backend.py`（`MINDEX_TEST_POSTGRES_DSN` 门控；水平扩展分阶段改造见 plans/horizontal-scaling-plan.md 与盘点文档）。
 - 水平扩展范围见 `plans/horizontal-scaling-enhancement-plan.md` 与 `plans/horizontal-scaling-completion-plan.md`，当前状态与证据见 `docs/scaling-completion-verification.md` 与 `plans/horizontal-scaling-delivery-matrix.md`（更早的分阶段记录在 `docs/scaling-enhancement-verification.md`）；历史阶段自评不能当作当前验收。`scripts/check-scaling-boundaries.py` 检查数据库构造边界，`scripts/verify-scaling.py`（`--suite integration|cpu|faults`）自动创建隔离真实后端并拒绝测试跳过，`scripts/verify-scaling-recovery.py` 演练 PG/WAL 与对象保护恢复，`scripts/verify-local.py` 在冻结源码上完整分组回归。PG 升级只能追加迁移；账本创建/重试经 `ledger_transaction` 原子入队；长媒体处理与响应使用 `materialize_media`/`ShotMedia.materialized` 持有 pin。集群形态的 `/api/live` 只表示进程存活、`/api/ready` 逐项探测依赖；设置页「部署设置」只读写当前节点配置文件，凭据仅接受环境变量引用。
@@ -39,7 +39,13 @@
 
 ```bash
 uv sync --extra dev
-uv run ruff check backend/src tests                 # 代码规范（规则集见 pyproject.toml）
+uv run ruff check backend/src tests scripts eval    # 代码规范（规则集见 pyproject.toml）
+uv run ruff format --check backend/src tests scripts eval   # Python 格式（行宽 110、双引号）
+npm ci --ignore-scripts --no-audit --no-fund        # 固定版本的前端规范工具
+npm run format:check                              # 前端、桌面 JS/HTML/CSS 与工具配置格式
+npm run lint:js && npm run lint:css                # Prettier 不覆盖的语言与 CSS 有效性规则
+npm run test:js                                   # 前端源码片段逻辑回归
+python scripts/check-code-style.py                # 标准库导入位置、短导入与静态 HTML 结构
 python scripts/check-doc-links.py                   # Markdown 相对链接与锚点
 python scripts/build-messages.py --check            # messages.js 与 messages.json 一致
 python scripts/build-assets.py --check              # 页面资源 ?v= 与文件内容哈希一致

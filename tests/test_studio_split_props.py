@@ -13,10 +13,10 @@ import pytest
 from hypothesis import HealthCheck, assume, given, settings
 from hypothesis import strategies as st
 
-from mindex.models import adapters, storyboard
-from mindex.models.adapters import ModelError
-from mindex.models.storyboard import QwenStoryboarder, choose_attempt, hard_check, soft_issues
-from mindex.shared.types import ShotDraft
+from models import adapters, storyboard
+from models.adapters import ModelError
+from models.storyboard import QwenStoryboarder, choose_attempt, hard_check, soft_issues
+from shared.types import ShotDraft
 
 # ---- 共享生成器 ----
 
@@ -41,7 +41,11 @@ def partitions(draw, text: str, max_pieces: int = MAX_PIECES) -> list[str]:
     """把原文去空白后的字符串切成连续的非空段，每段两端随机补空白（段间空白可任意增减）。"""
     compact = "".join(text.split())
     k = draw(st.integers(1, min(max_pieces, len(compact))))
-    cuts = sorted(draw(st.sets(st.integers(1, len(compact) - 1), min_size=k - 1, max_size=k - 1))) if k > 1 else []
+    cuts = (
+        sorted(draw(st.sets(st.integers(1, len(compact) - 1), min_size=k - 1, max_size=k - 1)))
+        if k > 1
+        else []
+    )
     bounds = [0, *cuts, len(compact)]
     pieces = [compact[a:b] for a, b in pairwise(bounds)]
     return [draw(WHITESPACE) + piece + draw(WHITESPACE) for piece in pieces]
@@ -104,7 +108,7 @@ def test_hard_check_accepts_coverage_and_rejects_others(data, split, mutation):
         positions = [j for j, ch in enumerate(piece) if not ch.isspace()]
         j = data.draw(st.sampled_from(positions), label="char")
         new = data.draw(GLYPHS.filter(lambda ch: ch != piece[j]), label="new")
-        bad[i] = piece[:j] + new + piece[j + 1:]
+        bad[i] = piece[:j] + new + piece[j + 1 :]
     elif mutation == "empty":
         bad = []
     else:  # overflow：段数超过上限
@@ -124,10 +128,10 @@ HAN = "山水夜市面条灯塔村"
 TERMINALS = ".!?。！？…"
 CLOSERS = "\"'”’」』）)]】"
 SOFT_TOKENS = st.one_of(
-    st.text(alphabet=LATIN, min_size=1, max_size=5),              # 英文词
-    st.text(alphabet=HAN, min_size=1, max_size=4),                # 汉字串
+    st.text(alphabet=LATIN, min_size=1, max_size=5),  # 英文词
+    st.text(alphabet=HAN, min_size=1, max_size=4),  # 汉字串
     st.text(alphabet=LATIN + HAN + ",—", min_size=1, max_size=5),  # 混合词元
-    st.sampled_from([",", "—", "，", "、"]),                       # 不计数的纯标点
+    st.sampled_from([",", "—", "，", "、"]),  # 不计数的纯标点
 )
 
 
@@ -198,7 +202,7 @@ def test_soft_issues_count_per_shot(shots):
 # 固定原文：8 镜 × 3 个英文词，每镜都不"过短"，软问题只来自缺 visual，便于精确控制问题数。
 RETRY_WORDS = [f"w{i}" for i in range(24)]
 RETRY_TEXT = " ".join(RETRY_WORDS) + "."
-RETRY_PIECES = [" ".join(RETRY_WORDS[i:i + 3]) for i in range(0, 24, 3)]
+RETRY_PIECES = [" ".join(RETRY_WORDS[i : i + 3]) for i in range(0, 24, 3)]
 RETRY_PIECES[-1] += "."
 GARBAGE = "这不是 JSON 输出"
 
@@ -212,8 +216,12 @@ OUTCOMES = st.one_of(
 def _shots_json(pieces: list[str], missing: int, tag: int) -> str:
     """前 ``missing`` 镜缺 visual；``tag`` 写进 query，用来识别返回的是哪一次尝试。"""
     shots = [
-        {"visual": "" if i < missing else f"画面{i}", "text": piece, "query": f"尝试{tag} 画面",
-         "estimated_seconds": 1.5}
+        {
+            "visual": "" if i < missing else f"画面{i}",
+            "text": piece,
+            "query": f"尝试{tag} 画面",
+            "estimated_seconds": 1.5,
+        }
         for i, piece in enumerate(pieces)
     ]
     return json.dumps({"shots": shots}, ensure_ascii=False)
@@ -364,9 +372,15 @@ def test_vocabulary_only_enters_request_when_provided(config, vocabulary):
     segment = storyboard.VOCABULARY_HEADER + "、".join(words)
     calls = (
         (lambda s, v: s.split(VOCAB_TEXT, vocabulary=v), VOCAB_SPLIT_REPLY),
-        (lambda s, v: s.suggest_query("and quiet lakeside villages", "湖边安静的村落",
-                                      ("From misty mountain trails", "to bustling night markets"), v),
-         VOCAB_QUERY_REPLY),
+        (
+            lambda s, v: s.suggest_query(
+                "and quiet lakeside villages",
+                "湖边安静的村落",
+                ("From misty mountain trails", "to bustling night markets"),
+                v,
+            ),
+            VOCAB_QUERY_REPLY,
+        ),
     )
     for call, content in calls:
         system, user = _capture(config, lambda s, call=call: call(s, vocabulary), content)

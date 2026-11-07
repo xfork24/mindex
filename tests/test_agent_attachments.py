@@ -6,29 +6,32 @@ from __future__ import annotations
 
 import asyncio
 import json
+import tracemalloc
 
 import httpx
 import pytest
-from agent_helpers import new_session, result_text, results, send, wait_idle
+import yaml
 from fastapi import Request
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from starlette.datastructures import UploadFile as StarletteUpload
 
-from mindex.agent.llm.scripted import ScriptedLlm, call, say
-from mindex.agent.loopback import LoopbackError, MindexClient
-from mindex.agent.registry import ToolOutput, ToolRegistry, ToolSpec
-from mindex.agent.tools import meta
-from mindex.api import create_app
-from mindex.shared.config import StrictModel
+from agent.llm.scripted import ScriptedLlm, call, say
+from agent.loopback import LoopbackError, MindexClient
+from agent.registry import ToolOutput, ToolRegistry, ToolSpec
+from agent.tools import meta
+from agent_helpers import new_session, result_text, results, send, wait_idle
+from api import create_app
+from shared.config import StrictModel
 
 WEB, MCP = "web-secret", "mcp-secret"
 
 
 def upload(client, data: bytes, name="a.png", content_type="image/png", session_id=None, headers=None):
     form = {"session_id": session_id} if session_id else {}
-    return client.post("/api/agent/attachments", files={"file": (name, data, content_type)}, data=form,
-                       headers=headers or {})
+    return client.post(
+        "/api/agent/attachments", files={"file": (name, data, content_type)}, data=form, headers=headers or {}
+    )
 
 
 def tok(ref: str) -> str:
@@ -94,26 +97,37 @@ def test_message_attachments_validated_and_recorded(local):
     theirs = upload(client, b"img", session_id=other).json()
     mcp = upload(client, b"img").json()
     for ref in (theirs["id"], mcp["id"], "attachment://" + "0" * 32, "bogus"):
-        response = client.post(f"/api/agent/sessions/{sid}/messages", json={"content": "看图", "attachments": [ref]})
+        response = client.post(
+            f"/api/agent/sessions/{sid}/messages", json={"content": "看图", "attachments": [ref]}
+        )
         assert response.status_code == 422, ref
-    too_many = client.post(f"/api/agent/sessions/{sid}/messages",
-                           json={"content": "看图", "attachments": [mine["id"]] * 13})
+    too_many = client.post(
+        f"/api/agent/sessions/{sid}/messages", json={"content": "看图", "attachments": [mine["id"]] * 13}
+    )
     assert too_many.status_code == 422
 
     llm.extend([say("收到")])
-    response = client.post(f"/api/agent/sessions/{sid}/messages",
-                           json={"content": "看图", "attachments": [mine["id"], mine["id"]]})
+    response = client.post(
+        f"/api/agent/sessions/{sid}/messages",
+        json={"content": "看图", "attachments": [mine["id"], mine["id"]]},
+    )
     assert response.status_code == 202, response.text
     events = wait_idle(client, sid)
-    message = next(e["data"] for e in events if e["type"] == "user/message" and e["data"]["source"]["kind"] == "user")
-    assert message["attachments"] == [{"ref": mine["id"], "filename": "a.png", "content_type": "image/png",
-                                       "bytes": 3}]
+    message = next(
+        e["data"] for e in events if e["type"] == "user/message" and e["data"]["source"]["kind"] == "user"
+    )
+    assert message["attachments"] == [
+        {"ref": mine["id"], "filename": "a.png", "content_type": "image/png", "bytes": 3}
+    ]
     text = message["content"][0]["text"]
     assert text.startswith("看图") and f"附件：{mine['id']} a.png（image/png，3 B）" in text
     assert client.get(f"/api/agent/sessions/{sid}").json()["title"] == "看图"
     # 发给模型的就是该文本；附件元数据不影响协议转换。
-    assert any(f"附件：{mine['id']}" in m["content"][0]["text"] for m in llm.requests[0].messages
-               if m["role"] == "user")
+    assert any(
+        f"附件：{mine['id']}" in m["content"][0]["text"]
+        for m in llm.requests[0].messages
+        if m["role"] == "user"
+    )
 
     folder = config.data_dir / "agent-attachments" / tok(mine["id"])
     assert folder.is_dir()
@@ -140,7 +154,11 @@ def test_tokens_and_owner_rules(config, monkeypatch):
         assert upload(client, b"x", headers=web).status_code == 422  # 网页上传必须绑定会话
         assert upload(client, b"x", session_id=sid, headers=mcp).status_code == 401
         mcp_ref = upload(client, b"x", headers=mcp)
-        assert mcp_ref.status_code == 201 and mcp_ref.json()["owner"] == "mcp" and mcp_ref.json()["session_id"] is None
+        assert (
+            mcp_ref.status_code == 201
+            and mcp_ref.json()["owner"] == "mcp"
+            and mcp_ref.json()["session_id"] is None
+        )
 
         session_tok, mcp_tok = tok(session_ref.json()["id"]), tok(mcp_ref.json()["id"])
         assert client.get(f"/api/agent/attachments/{mcp_tok}").status_code == 401
@@ -188,17 +206,17 @@ def test_three_token_situations(config, monkeypatch, situation):
 
 def test_backup_export_excludes_agent_state(tmp_path, video_file):
     """真实导出：agent.sqlite3 与 agent-attachments/ 都列入排除清单，不出现在备份文件里。"""
-    import yaml
-    from test_backup import seed
 
-    from mindex.agent.attachments import AttachmentStore
-    from mindex.maintenance.backup import export_backup
+    from agent.attachments import AttachmentStore
+    from maintenance.backup import export_backup
+    from test_backup import seed
 
     config, _sources, _index = seed(tmp_path / "origin", video_file)
     staged = tmp_path / "photo.png"
     staged.write_bytes(b"\x89PNG-backup")
-    ref = AttachmentStore(config.data_dir).put(staged, filename="photo.png", content_type="image/png",
-                                               owner="mcp", session_id=None, ttl_hours=1)["id"]
+    ref = AttachmentStore(config.data_dir).put(
+        staged, filename="photo.png", content_type="image/png", owner="mcp", session_id=None, ttl_hours=1
+    )["id"]
     partial = config.data_dir / "agent-attachments" / ".uploads" / ("f" * 32)
     partial.parent.mkdir(parents=True, exist_ok=True)
     partial.write_bytes(b"partial")
@@ -246,7 +264,6 @@ def big_file(path, size: int):
 
 async def peak_mib(make):
     """``make()`` 执行期间 Python 堆的峰值（MiB）。"""
-    import tracemalloc
 
     tracemalloc.start()
     try:
@@ -266,10 +283,22 @@ def test_large_upload_memory_behaviour(local, tmp_path):
     store = app.state.agent_runtime.attachments
     sid = new_session(client)
     size = 24 * MIB
-    session_ref = store.put(big_file(tmp_path / "s.bin", size), filename="s.mp4", content_type="video/mp4",
-                            owner="session", session_id=sid, ttl_hours=1)["id"]
-    mcp_ref = store.put(big_file(tmp_path / "m.bin", size), filename="m.mp4", content_type="video/mp4",
-                        owner="mcp", session_id=None, ttl_hours=1)["id"]
+    session_ref = store.put(
+        big_file(tmp_path / "s.bin", size),
+        filename="s.mp4",
+        content_type="video/mp4",
+        owner="session",
+        session_id=sid,
+        ttl_hours=1,
+    )["id"]
+    mcp_ref = store.put(
+        big_file(tmp_path / "m.bin", size),
+        filename="m.mp4",
+        content_type="video/mp4",
+        owner="mcp",
+        session_id=None,
+        ttl_hours=1,
+    )["id"]
     source = store.resolve(session_ref, session_id=sid, owner="session")
 
     async def go():
@@ -281,8 +310,11 @@ def test_large_upload_memory_behaviour(local, tmp_path):
 
         async def panel_upload():  # 与浏览器 XHR 一样流式提交到附件端点本身
             with source.open("rb") as fh:
-                return await base.http.post("/api/agent/attachments", data={"session_id": sid},
-                                            files={"file": ("p.mp4", fh, "video/mp4")})
+                return await base.http.post(
+                    "/api/agent/attachments",
+                    data={"session_id": sid},
+                    files={"file": ("p.mp4", fh, "video/mp4")},
+                )
 
         try:
             forwarded = await peak_mib(lambda: loop.upload("/api/test/sink", files={"file": session_ref}))
@@ -318,8 +350,14 @@ def add_echo(app, hits: list) -> None:
         files, fields = [], {}
         for key, value in form.multi_items():
             if isinstance(value, StarletteUpload):
-                files.append({"field": key, "filename": value.filename, "content_type": value.content_type,
-                              "data": (await value.read()).decode()})
+                files.append(
+                    {
+                        "field": key,
+                        "filename": value.filename,
+                        "content_type": value.content_type,
+                        "data": (await value.read()).decode(),
+                    }
+                )
             else:
                 fields[key] = value
         return {"files": files, "fields": fields}
@@ -332,7 +370,9 @@ def probe_registry() -> ToolRegistry:
         result = await ctx.client.upload("/api/test/echo", files={"file": args.ref})
         return ToolOutput(result, text=json.dumps(result, ensure_ascii=False))
 
-    return ToolRegistry([*meta.specs(), ToolSpec("upload_probe", "meta", "回显上传", ProbeArgs, "read", execute)])
+    return ToolRegistry(
+        [*meta.specs(), ToolSpec("upload_probe", "meta", "回显上传", ProbeArgs, "read", execute)]
+    )
 
 
 def test_loopback_upload_resolves_session_attachments(local):
@@ -341,8 +381,13 @@ def test_loopback_upload_resolves_session_attachments(local):
     add_echo(app, hits)
     store = app.state.agent_runtime.attachments
     sid, other = new_session(client), new_session(client)
-    mine = upload(client, b"1\n00:00:00,000 --> 00:00:01,000\nhi\n", name="a.srt",
-                  content_type="application/x-subrip", session_id=sid).json()["id"]
+    mine = upload(
+        client,
+        b"1\n00:00:00,000 --> 00:00:01,000\nhi\n",
+        name="a.srt",
+        content_type="application/x-subrip",
+        session_id=sid,
+    ).json()["id"]
     theirs = upload(client, b"x", session_id=other).json()["id"]
     mcp_ref = upload(client, b"x").json()["id"]
 
@@ -350,10 +395,15 @@ def test_loopback_upload_resolves_session_attachments(local):
         base = MindexClient(app)
         loop = base.with_resolvers(attachment=store.resolver(session_id=sid, owner="session"))
         try:
-            ok = await loop.upload("/api/test/echo", files={"file": mine, "extra": [mine, mine]},
-                                   data={"kind": "image", "filters": {"a": 1}, "flag": True, "skip": None})
-            bad = [await loop.upload("/api/test/echo", files={"file": ref})
-                   for ref in (theirs, mcp_ref, "attachment://" + "0" * 32, "secret://x", "/etc/passwd")]
+            ok = await loop.upload(
+                "/api/test/echo",
+                files={"file": mine, "extra": [mine, mine]},
+                data={"kind": "image", "filters": {"a": 1}, "flag": True, "skip": None},
+            )
+            bad = [
+                await loop.upload("/api/test/echo", files={"file": ref})
+                for ref in (theirs, mcp_ref, "attachment://" + "0" * 32, "secret://x", "/etc/passwd")
+            ]
             mixed = await loop.upload("/api/test/echo", files={"file": [mine, theirs]})
             unresolved = await base.upload("/api/test/echo", files={"file": mine})
             return ok, bad, mixed, unresolved
@@ -364,12 +414,18 @@ def test_loopback_upload_resolves_session_attachments(local):
     ok, bad, mixed, unresolved = asyncio.run(go())
     assert ok["ok"], ok
     assert [f["field"] for f in ok["data"]["files"]] == ["file", "extra", "extra"]
-    assert ok["data"]["files"][0] == {"field": "file", "filename": "a.srt", "content_type": "application/x-subrip",
-                                      "data": "1\n00:00:00,000 --> 00:00:01,000\nhi\n"}
+    assert ok["data"]["files"][0] == {
+        "field": "file",
+        "filename": "a.srt",
+        "content_type": "application/x-subrip",
+        "data": "1\n00:00:00,000 --> 00:00:01,000\nhi\n",
+    }
     assert ok["data"]["fields"] == {"kind": "image", "filters": '{"a": 1}', "flag": "true"}
     # 越权、不存在、格式不对、只要有一个无法解析：都不向目标接口发送请求。
     for result in (*bad, mixed):
-        assert result["ok"] is False and result["status"] == 400 and result["code"] == "attachment_invalid", result
+        assert result["ok"] is False and result["status"] == 400 and result["code"] == "attachment_invalid", (
+            result
+        )
     assert "不属于当前会话" in bad[0]["error"] and "不属于当前会话" in bad[1]["error"]
     assert "当前环境不能使用附件引用" in unresolved["error"]
     assert len(hits) == before + 1
@@ -416,8 +472,9 @@ def test_remote_client_fetches_mcp_attachment_before_upload(local):
 
     ok, denied, missing, content, gone = asyncio.run(go())
     # 内容端点对 html 以下载方式返回，但上传时用元数据里的原始文件名与类型。
-    assert ok["ok"] and ok["data"]["files"] == [{"field": "file", "filename": "r.html", "content_type": "text/html",
-                                                 "data": "<b>remote</b>"}]
+    assert ok["ok"] and ok["data"]["files"] == [
+        {"field": "file", "filename": "r.html", "content_type": "text/html", "data": "<b>remote</b>"}
+    ]
     assert denied["status"] == 400 and denied["code"] == "attachment_invalid"
     assert missing["status"] == 400 and missing["code"] == "attachment_invalid"
     assert content == (b"<b>remote</b>", "application/octet-stream") and gone == 404
@@ -428,8 +485,8 @@ def test_inprocess_mcp_resolves_only_mcp_attachments(local, monkeypatch):
     pytest.importorskip("mcp")
     from mcp.shared.memory import create_connected_server_and_client_session
 
-    import mindex.agent.tools as tools
-    from mindex.agent.mcp_server import server_for_app
+    import agent.tools as tools
+    from agent.mcp_server import server_for_app
 
     client, _llm, _config = local
     app, hits = client.app, []

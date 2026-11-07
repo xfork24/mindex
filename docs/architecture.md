@@ -59,7 +59,7 @@ mindex/
 │   ├── settings/     # 设置 HTML/JS/CSS
 │   └── shared/       # 公共样式、国际化、请求封装 api.js、播放器、侧栏、多选组件、智能助手面板
 └── backend/src/
-    ├── api.py / cli.py / cli_*.py / __init__.py  # 应用装配、命令入口及 e2e/persons/clips/topics/agent 命令组、包信息
+    ├── api/ / cli/ / server/ / worker/ / __init__.py  # 应用装配、命令入口及 e2e/persons/clips/topics/agent 命令组、包信息
     ├── agent/        # 智能助手：工具注册表、运行时、模型协议、会话存储、MCP 导出
     ├── search/       # 视频检索、检索/媒体 API
     ├── admin/        # 素材管理、素材/对白任务、详情
@@ -74,8 +74,7 @@ mindex/
     └── diagnostics/  # e2e、评测、benchmark、报告与检查页
 ```
 
-源码直接位于 `backend/src/`，没有额外的 `mindex/` 目录；Python 的 `mindex` 命名空间由 `pyproject.toml` 的目录映射提供。各包保留原模块文件名，例如创作 API 从 `mindex.studio_api` 迁移到
-`mindex.studio.studio_api`。仓库统一使用新导入路径，不提供旧模块兼容层。
+源码直接位于 `backend/src/`，没有额外的 `mindex/` 目录；Python 的 `mindex` 命名空间由 `pyproject.toml` 的目录映射提供。包内统一使用短导入，例如 `from search.search import SearchEngine`。安装入口先导入 `mindex` 根包完成查询路径自举，随后只加载短名模块，避免同一模块出现两份类、注册表或单例。仓库不提供旧模块兼容层。
 `__init__.py` 不自动加载业务模块，保持 CLI 延迟加载与服务环境隔离。
 
 页面路径 `/`、`/admin`、`/persons`、`/studio`、`/settings` 与 `/api/*` 接口不变。前端请求统一经 `shared/api.js`（`window.MindexApi`）；创作页拆为 `studio/studio-*.js` 多个经典脚本，按 `studio.html` 中的顺序加载并共享全局作用域，启动代码在最后的 `studio-main.js`。
@@ -102,22 +101,22 @@ wheel 安装后读取随包的 `mindex/web/`。Setuptools 通过包目录映射�
 | `processing/pipeline.py` | 各阶段编排：导入去重、分镜、切片、转写、对齐、分析；`pipeline.lock` 文件锁 |
 | `processing/indexing.py` | `IndexBuilder`（建索引、发布前检查）与 `VectorIndex`（Chroma 封装） |
 | `search/search.py` | `SearchEngine`：新版三渠道召回与旧版五路召回、RRF 融合、去重、BM25 降级；`status()` |
-| `api.py` + `search/api.py` | FastAPI 应用装配、页面注册；检索 API、媒体/上下文播放 |
+| `api/__init__.py` + `search/api.py` | FastAPI 应用装配、页面注册；检索 API、媒体/上下文播放 |
 | `admin/admin.py` + `admin/curation.py` | 素材后台 API 与整理数据（显示名/备注/收藏/隐藏），独立于索引 |
 | `settings/runtime_settings.py` | 设置页数据层：模型配置档案（model_profiles）、音色库（voices）、业务覆盖键（settings KV）与 `apply_overrides` 热生效覆盖层 |
-| `settings/settings_api.py` | `/api/settings/*` 路由：档案 CRUD/激活/测试连接、业务调参、音色与克隆 |
+| `settings/api.py` | `/api/settings/*` 路由：档案 CRUD/激活/测试连接、业务调参、音色与克隆 |
 | `settings/voice_clone.py` | 厂商声音克隆客户端：MiniMax 上传克隆、阿里 DashScope URL 复刻 |
 | `studio/studio.py` | 创作任务与 job.json 持久化；旧任务的分步状态机（split/recall/tts/select/render，仅服务老任务） |
-| `studio/studio_api.py` | `/api/studio/*` 路由：任务创建、轮询、后台线程执行 |
+| `studio/api.py` | `/api/studio/*` 路由：任务创建、轮询、后台线程执行 |
 | `studio/executor.py` | `StudioExecutor`：进程内单执行线程与 studio 锁、取消事件与哨兵文件、后台 worker 异常与终态包装 |
-| `studio/studio_models.py` / `studio/studio_files.py` | 创作 API 的请求体模型与召回引用校验；产物下载、分镜预览、打包与任务删除路由 |
-| `studio/script_templates.py` / `studio/studio_templates_api.py` / `studio/templates/*.yaml` | 文案模板：内置模板（YAML 随包，package-data）与用户模板（`script_templates` 表）的加载、严格校验、内容哈希、复制/修改/删除与引用保护；`/api/studio/templates` 路由 |
-| `studio/studio_steps.py` / `studio/studio_select.py` / `studio/studio_render.py` | 旧任务的步骤编排、选片纯算法、ffmpeg 渲染合成（含图片 zoompan、画幅适配） |
-| `studio/studio_diagnostics.py` / `studio/material_digest.py` | 方案诊断（只读：分镜检查、字幕环境、已选节点状态与变化原因）；可用素材摘要 |
+| `studio/models.py` / `studio/files.py` | 创作 API 的请求体模型与召回引用校验；产物下载、分镜预览、打包与任务删除路由 |
+| `studio/script_templates.py` / `studio/templates_api.py` / `studio/templates/*.yaml` | 文案模板：内置模板（YAML 随包，package-data）与用户模板（`script_templates` 表）的加载、严格校验、内容哈希、复制/修改/删除与引用保护；`/api/studio/templates` 路由 |
+| `studio/steps.py` / `studio/select.py` / `studio/render.py` | 旧任务的步骤编排、选片纯算法、ffmpeg 渲染合成（含图片 zoompan、画幅适配） |
+| `studio/diagnostics.py` / `studio/material_digest.py` | 方案诊断（只读：分镜检查、字幕环境、已选节点状态与变化原因）；可用素材摘要 |
 | `studio/animation_capture.py` | AI 动画录制沙箱：无头 Chromium、虚拟时钟、网络拦截、逐帧截图经管道交给 ffmpeg（可选 extra `animation`） |
-| `studio/studio_artifacts.py` | 创作检查点/产物/诊断记录（attempt 不可变留档） |
-| `studio/music_library.py` / `studio/beats.py` / `studio/studio_music_api.py` | 曲库：导入（授权必填、内容去重）、纯 numpy 节奏分析（BPM、节拍、能量、亮度）、情绪标签与按段落文案推荐；`/api/studio/music-library` 路由 |
-| `studio/tools/` / `studio/studio_tools_api.py` | 第三方工具：工具源登记与白名单（`registry`）、HTTP manifest 与 MCP（stdio / streamable-http）适配器、产物下载与校验（`artifacts`）；`/api/studio/tool-sources` 路由 |
+| `studio/artifacts.py` | 创作检查点/产物/诊断记录（attempt 不可变留档） |
+| `studio/music_library.py` / `studio/beats.py` / `studio/music_api.py` | 曲库：导入（授权必填、内容去重）、纯 numpy 节奏分析（BPM、节拍、能量、亮度）、情绪标签与按段落文案推荐；`/api/studio/music-library` 路由 |
+| `studio/tools/` / `studio/tools_api.py` | 第三方工具：工具源登记与白名单（`registry`）、HTTP manifest 与 MCP（stdio / streamable-http）适配器、产物下载与校验（`artifacts`）；`/api/studio/tool-sources` 路由 |
 | `models/adapters.py` | 模型适配层公共部分：`ModelError` 等错误类型、带重试的 `request`、十二个 Protocol 与 `make_*` 工厂（见下）；工厂调用时才导入后端 |
 | `models/embedders.py` / `models/qwen.py` / `models/speech.py` / `models/storyboard.py` / `models/writer.py` / `models/transcribers.py` / `models/detectors.py` | 各角色的后端实现：嵌入、Qwen 分析、语音合成、拆分镜（含原文覆盖校验）、文案创作（按文案模板）、转写（含 MiniMax 词级时间戳解析）、分镜检测 |
 | `models/video_generators.py` / `shared/comfyui.py` | 视频生成后端（MiniMax H3 与海螺、阿里通义万相、自建 ComfyUI）；ComfyUI 工作流与节点映射的纯校验 |
@@ -145,7 +144,7 @@ wheel 安装后读取随包的 `mindex/web/`。Setuptools 通过包目录映射�
 | `persons/person_models.py` / `persons/person_names.py` | 人物请求/实体模型与小型校验；名称解析、文档提及识别与出镜区间查询辅助 |
 | `persons/person_processing.py` / `persons/person_worker.py` / `persons/person_frames.py` / `persons/person_thumbnails.py` | 人物扫描管线与后台 worker、展示帧布局、缩略图 |
 | `persons/person_server.py` | GPU 侧人物检测/特征服务（`mindex-person-server`） |
-| `studio/workspace/` / `studio/studio_window.py` / `studio/studio_logs.py` | 方案、构建与版本工作台（包内按职责分 `versions`、`plans`、`persistence`、`signatures`、`preflight`、`media_nodes`、`post`（成片后期管线）、`builder`、`details`、`references`（参考文稿）、`sources`（分镜画面来源文件），`stages` 阶段注册表与 `handlers/` 各阶段处理器 script/split/recall/tts/music/draw/generate/animate/invoke/select/overlay/render/compose/export/publish，`__init__` 导出公共入口），定长选片窗口，只追加的执行事件日志 |
+| `studio/workspace/` / `studio/window.py` / `studio/logs.py` | 方案、构建与版本工作台（包内按职责分 `versions`、`plans`、`persistence`、`signatures`、`preflight`、`media_nodes`、`post`（成片后期管线）、`builder`、`details`、`references`（参考文稿）、`sources`（分镜画面来源文件），`stages` 阶段注册表与 `handlers/` 各阶段处理器 script/split/recall/tts/music/draw/generate/animate/invoke/select/overlay/render/compose/export/publish，`__init__` 导出公共入口），定长选片窗口，只追加的执行事件日志 |
 | `settings/voices_catalog.py` | 语音合成音色目录：按当前合成后端聚合系统音色、本地音色库与克隆能力 |
 | `shared/shot_media.py` | 统一镜头媒体服务：时间基准转换、截图/抽帧、跨镜重建；业务读取不直读历史切片路径 |
 | `shared/locks.py` | 具名文件锁（pipeline/index-write/library/register/studio/topics）与 `acquire_ordered` 规范加锁顺序 |

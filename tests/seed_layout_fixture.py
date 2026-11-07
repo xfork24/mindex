@@ -7,14 +7,15 @@ import io
 import json
 from pathlib import Path
 
+import mindex  # noqa: F401 — 安装根包自举，后续使用包内短导入
 from PIL import Image
 
-from mindex.diagnostics.film import export_source
-from mindex.diagnostics.label_review import render_review
-from mindex.persons.person_models import CastEntry, Entity
-from mindex.persons.persons import Persons
-from mindex.shared.config import Config
-from mindex.shared.storage import Store, dumps
+from diagnostics.film import export_source
+from diagnostics.label_review import render_review
+from persons.person_models import CastEntry, Entity
+from persons.persons import Persons
+from shared.config import Config
+from shared.storage import Store, dumps
 
 
 def seed(root: Path):

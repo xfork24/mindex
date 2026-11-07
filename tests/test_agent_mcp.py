@@ -7,9 +7,11 @@ import json
 import re
 import sys
 
+import httpx
 import pytest
-from conftest import legacy_job
 from fastapi.testclient import TestClient
+
+from conftest import legacy_job
 
 pytest.importorskip("mcp")
 
@@ -17,13 +19,13 @@ from mcp.client.session import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.shared.memory import create_connected_server_and_client_session
 
-from mindex.agent.loopback import MindexClient
-from mindex.agent.mcp_server import build_server, exported, server_for_app
-from mindex.agent.registry import ToolContext
-from mindex.agent.tools import build_registry
-from mindex.api import create_app
-from mindex.studio import studio
-from mindex.studio import workspace as ws
+from agent.loopback import MindexClient
+from agent.mcp_server import build_server, exported, server_for_app
+from agent.registry import ToolContext
+from agent.tools import build_registry
+from api import create_app
+from studio import studio
+from studio import workspace as ws
 
 
 @pytest.fixture
@@ -31,10 +33,16 @@ def job(config):
     job_id = legacy_job(config, "红色开场。蓝色结尾。")["id"]
     w = ws.load(config, job_id)
     p = ws.plan(w, w["active_plan"])
-    ws.set_board(config, job_id, w, p, [
-        studio.Shot(id="shot-a1daad59aa", text="红色开场。", query="红色", estimated_seconds=1),
-        studio.Shot(id="shot-925281d5bb", text="蓝色结尾。", query="蓝色", estimated_seconds=1),
-    ])
+    ws.set_board(
+        config,
+        job_id,
+        w,
+        p,
+        [
+            studio.Shot(id="shot-a1daad59aa", text="红色开场。", query="红色", estimated_seconds=1),
+            studio.Shot(id="shot-925281d5bb", text="蓝色结尾。", query="蓝色", estimated_seconds=1),
+        ],
+    )
     p["board_script"] = p["script"]
     ws.persist(config, job_id, w)
     return job_id
@@ -58,10 +66,16 @@ def test_tools_annotations_and_read_policy(config, job):
     app = create_app(config)
     server = server_for_app(app, app.state.runtime_config, app.state.store)
     merge = {"job_id": job, "operations": [{"op": "merge", "shots": ["#1", "#2"]}]}
-    listing, (jobs, blocked, gap) = run(session_calls(server, [
-        ("list_jobs", {}), ("edit_shots", merge),
-        ("report_capability_gap", {"request": "调粗拆分粒度", "reason": "没有参数"}),
-    ]))
+    listing, (jobs, blocked, gap) = run(
+        session_calls(
+            server,
+            [
+                ("list_jobs", {}),
+                ("edit_shots", merge),
+                ("report_capability_gap", {"request": "调粗拆分粒度", "reason": "没有参数"}),
+            ],
+        )
+    )
     tools = {tool.name: tool for tool in listing.tools}
     # 导出集合等于注册表中 mcp=True 的工具；ask_user_question、navigate、load_tools 不导出。
     exported = {s.name for s in build_registry().all() if s.mcp}
@@ -72,7 +86,10 @@ def test_tools_annotations_and_read_policy(config, job):
         assert tool.inputSchema["type"] == "object"
     assert tools["list_jobs"].annotations.readOnlyHint is True
     assert tools["delete_job"].annotations.destructiveHint is True
-    assert tools["edit_shots"].annotations.readOnlyHint is False and not tools["edit_shots"].annotations.destructiveHint
+    assert (
+        tools["edit_shots"].annotations.readOnlyHint is False
+        and not tools["edit_shots"].annotations.destructiveHint
+    )
     assert not jobs.isError and job in text(jobs) and jobs.structuredContent["items"][0]["id"] == job
     assert blocked.isError and "agent.mcp.policy=read" in text(blocked)
     assert not gap.isError
@@ -106,13 +123,22 @@ def test_get_shot_details_mcp_matches_builtin(config, job):
     expected_structured = json.loads(json.dumps(expected.value, default=str))
     for policy in ("read", "write", "all"):
         published = []
-        server = build_server(registry, lambda: MindexClient(app), policy=policy,
-                              publish=lambda kind, data, sink=published: sink.append((kind, data)))
-        listing, (ok, bad, conflict) = run(session_calls(server, [
-            ("get_shot_details", arguments),
-            ("get_shot_details", {"job_id": job, "limit": 0}),
-            ("get_shot_details", {"job_id": job, "refs": ["#1"], "offset": 0}),
-        ]))
+        server = build_server(
+            registry,
+            lambda: MindexClient(app),
+            policy=policy,
+            publish=lambda kind, data, sink=published: sink.append((kind, data)),
+        )
+        listing, (ok, bad, conflict) = run(
+            session_calls(
+                server,
+                [
+                    ("get_shot_details", arguments),
+                    ("get_shot_details", {"job_id": job, "limit": 0}),
+                    ("get_shot_details", {"job_id": job, "refs": ["#1"], "offset": 0}),
+                ],
+            )
+        )
         tool = next(t for t in listing.tools if t.name == "get_shot_details")
         assert tool.inputSchema == spec.parameters()
         assert tool.annotations.readOnlyHint is True and tool.annotations.destructiveHint is False
@@ -128,14 +154,23 @@ def test_get_shot_details_mcp_matches_builtin(config, job):
 def test_get_shot_details_invalid_args_do_not_publish(config, job):
     app = create_app(config)
     published = []
-    server = build_server(build_registry(), lambda: MindexClient(app), policy="all",
-                          publish=lambda kind, data: published.append((kind, data)))
-    _, results = run(session_calls(server, [
-        ("get_shot_details", {"job_id": job, "refs": []}),
-        ("get_shot_details", {"job_id": job, "refs": ["  "]}),
-        ("get_shot_details", {"job_id": job, "unknown": 1}),
-        ("get_shot_details", {"job_id": job, "limit": 101}),
-    ]))
+    server = build_server(
+        build_registry(),
+        lambda: MindexClient(app),
+        policy="all",
+        publish=lambda kind, data: published.append((kind, data)),
+    )
+    _, results = run(
+        session_calls(
+            server,
+            [
+                ("get_shot_details", {"job_id": job, "refs": []}),
+                ("get_shot_details", {"job_id": job, "refs": ["  "]}),
+                ("get_shot_details", {"job_id": job, "unknown": 1}),
+                ("get_shot_details", {"job_id": job, "limit": 101}),
+            ],
+        )
+    )
     assert all(result.isError for result in results)
     assert published == []
 
@@ -144,11 +179,24 @@ def test_streamable_http_requires_token(config, job, monkeypatch):
     monkeypatch.setenv("MINDEX_MCP_TOKEN", "mcp-secret")
     config.agent.mcp.http_enabled = True
     headers = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json"}
-    initialize = {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
-        "protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "test", "version": "0"}}}
+    initialize = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": {"name": "test", "version": "0"},
+        },
+    }
     with TestClient(create_app(config, web_token="web-secret")) as client:
         assert client.post("/mcp", json=initialize, headers=headers).status_code == 401
-        assert client.post("/mcp", json=initialize, headers={**headers, "Authorization": "Bearer wrong"}).status_code == 401
+        assert (
+            client.post(
+                "/mcp", json=initialize, headers={**headers, "Authorization": "Bearer wrong"}
+            ).status_code
+            == 401
+        )
         auth = {**headers, "Authorization": "Bearer mcp-secret"}
         response = client.post("/mcp", json=initialize, headers=auth)
         assert response.status_code == 200, response.text
@@ -177,8 +225,14 @@ def test_domain_filter_hot_reload_and_async_hooks(config, job):
         gaps.append(request)
         return {"id": 7}
 
-    server = build_server(registry, lambda: MindexClient(app), policy="read", agent_profile=profile,
-                          record_gap=record, domains=lambda: holder["domains"])
+    server = build_server(
+        registry,
+        lambda: MindexClient(app),
+        policy="read",
+        agent_profile=profile,
+        record_gap=record,
+        domains=lambda: holder["domains"],
+    )
 
     async def go():
         async with create_connected_server_and_client_session(server) as client:
@@ -216,8 +270,15 @@ def test_stdio_roundtrip(config, job, tmp_path):
     isolated.write_text("{}\n")
     params = StdioServerParameters(
         command=sys.executable,
-        args=["-c", "from mindex.cli import app; app()", "--config", str(isolated),
-              "--data-dir", str(config.data_dir), "mcp"],
+        args=[
+            "-c",
+            "import mindex; from cli import app; app()",
+            "--config",
+            str(isolated),
+            "--data-dir",
+            str(config.data_dir),
+            "mcp",
+        ],
     )
 
     async def go():
@@ -232,8 +293,8 @@ def test_stdio_roundtrip(config, job, tmp_path):
 
 
 def test_remote_gap_endpoint_and_hooks(config, job):
-    from mindex.agent.mcp_server import RemoteAgentProfile, remote_gap_recorder
-    from mindex.settings.runtime_settings import put_setting
+    from agent.mcp_server import RemoteAgentProfile, remote_gap_recorder
+    from settings.runtime_settings import put_setting
 
     app = create_app(config)
     http = TestClient(app)
@@ -301,8 +362,16 @@ def test_stdio_domain_option_overrides_config(config, job, tmp_path):
     def params(*extra):
         return StdioServerParameters(
             command=sys.executable,
-            args=["-c", "from mindex.cli import app; app()", "--config", str(isolated),
-                  "--data-dir", str(config.data_dir), "mcp", *extra],
+            args=[
+                "-c",
+                "import mindex; from cli import app; app()",
+                "--config",
+                str(isolated),
+                "--data-dir",
+                str(config.data_dir),
+                "mcp",
+                *extra,
+            ],
         )
 
     async def go(server_params):
@@ -323,11 +392,16 @@ def test_stdio_domain_option_overrides_config(config, job, tmp_path):
 
 def remote_like_server(app):
     """远程 stdio 模式的服务组装（与 ``mindex mcp --base-url`` 相同）；回环客户端用进程内 app 代替 HTTP。"""
-    from mindex.agent.mcp_server import RemoteAgentProfile, remote_gap_recorder
+    from agent.mcp_server import RemoteAgentProfile, remote_gap_recorder
 
     client = MindexClient(app)
-    return build_server(build_registry(), lambda: client, policy="all",
-                        agent_profile=RemoteAgentProfile(client), record_gap=remote_gap_recorder(client))
+    return build_server(
+        build_registry(),
+        lambda: client,
+        policy="all",
+        agent_profile=RemoteAgentProfile(client),
+        record_gap=remote_gap_recorder(client),
+    )
 
 
 def test_remote_mode_protects_agent_own_profile(config):
@@ -335,9 +409,15 @@ def test_remote_mode_protects_agent_own_profile(config):
     http = TestClient(app)
 
     def create(role, name, model):
-        response = http.post("/api/settings/profiles", json={
-            "role": role, "name": name, "provider": "custom",
-            "config": {"backend": "openai", "base_url": "http://llm.test/v1", "model": model}})
+        response = http.post(
+            "/api/settings/profiles",
+            json={
+                "role": role,
+                "name": name,
+                "provider": "custom",
+                "config": {"backend": "openai", "base_url": "http://llm.test/v1", "model": model},
+            },
+        )
         assert response.status_code in (200, 201), response.text
         return response.json()["id"]
 
@@ -346,12 +426,17 @@ def test_remote_mode_protects_agent_own_profile(config):
     other_agent = create("agent", "助手 B", "b")
     writer = create("writer", "文案", "w")
 
-    _, (update_own, switch_agent, update_writer, activate_writer) = run(session_calls(remote_like_server(app), [
-        ("update_model_profile", {"profile_id": own, "config": {"model": "changed"}}),
-        ("activate_model_profile", {"profile_id": other_agent}),
-        ("update_model_profile", {"profile_id": writer, "name": "文案 2"}),
-        ("activate_model_profile", {"profile_id": writer}),
-    ]))
+    _, (update_own, switch_agent, update_writer, activate_writer) = run(
+        session_calls(
+            remote_like_server(app),
+            [
+                ("update_model_profile", {"profile_id": own, "config": {"model": "changed"}}),
+                ("activate_model_profile", {"profile_id": other_agent}),
+                ("update_model_profile", {"profile_id": writer, "name": "文案 2"}),
+                ("activate_model_profile", {"profile_id": writer}),
+            ],
+        )
+    )
     assert update_own.isError and "不能修改智能助手当前正在使用的档案" in text(update_own)
     assert switch_agent.isError and "不能在会话中切换智能助手自身的模型档案" in text(switch_agent)
     assert not update_writer.isError, text(update_writer)
@@ -366,9 +451,17 @@ def test_remote_mode_protects_agent_own_profile(config):
 
 def test_remote_mode_records_capability_gap(config):
     app = create_app(config)
-    _, (gap,) = run(session_calls(remote_like_server(app), [
-        ("report_capability_gap", {"request": "远程模式缺口", "reason": "没有对应工具", "suggestion": "新增工具"}),
-    ]))
+    _, (gap,) = run(
+        session_calls(
+            remote_like_server(app),
+            [
+                (
+                    "report_capability_gap",
+                    {"request": "远程模式缺口", "reason": "没有对应工具", "suggestion": "新增工具"},
+                ),
+            ],
+        )
+    )
     assert not gap.isError, text(gap)
     items = TestClient(app).get("/api/agent/gaps").json()["items"]
     item = next(i for i in items if i["request"] == "远程模式缺口")
@@ -379,33 +472,49 @@ def test_remote_mode_records_capability_gap(config):
 def test_mcp_cli_rejects_unknown_domain(config, tmp_path):
     from typer.testing import CliRunner
 
-    from mindex.cli import app as cli
+    from cli import app as cli
 
     isolated = tmp_path / "isolated.yaml"
     isolated.write_text("{}\n")
-    result = CliRunner().invoke(cli, ["--config", str(isolated), "--data-dir", str(config.data_dir),
-                                      "mcp", "--domain", "studio", "--domain", "nope"])
+    result = CliRunner().invoke(
+        cli,
+        [
+            "--config",
+            str(isolated),
+            "--data-dir",
+            str(config.data_dir),
+            "mcp",
+            "--domain",
+            "studio",
+            "--domain",
+            "nope",
+        ],
+    )
     assert result.exit_code != 0 and "未知领域：nope" in result.output
 
 
 def test_real_http_client_initializes_lists_and_reads(config, monkeypatch):
-    import httpx
     from mcp.client.streamable_http import streamablehttp_client
+
     from test_agent_panel_ui import serve
-    monkeypatch.setenv('MINDEX_MCP_TOKEN', 'http-fixture-token')
+
+    monkeypatch.setenv("MINDEX_MCP_TOKEN", "http-fixture-token")
     config.agent.mcp.http_enabled = True
     server, thread, url = serve(create_app(config))
 
     async def exercise():
-        async with streamablehttp_client(url + '/mcp', headers={'Authorization': 'Bearer http-fixture-token'}) as streams:
+        async with streamablehttp_client(
+            url + "/mcp", headers={"Authorization": "Bearer http-fixture-token"}
+        ) as streams:
             async with ClientSession(streams[0], streams[1]) as session:
                 await session.initialize()
                 names = {t.name for t in (await session.list_tools()).tools}
-                assert 'list_local_services' in names
-                result = await session.call_tool('list_local_services', {})
+                assert "list_local_services" in names
+                result = await session.call_tool("list_local_services", {})
                 assert not result.isError, result
         async with httpx.AsyncClient() as http:
-            assert (await http.post(url + '/mcp', json={})).status_code == 401
+            assert (await http.post(url + "/mcp", json={})).status_code == 401
+
     try:
         asyncio.run(exercise())
     finally:

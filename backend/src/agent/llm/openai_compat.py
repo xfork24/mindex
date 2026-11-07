@@ -16,7 +16,7 @@ import os
 
 import httpx
 
-from mindex.agent.llm.types import LlmError, LlmRequest, StreamEmitter, message_text, tool_calls
+from agent.llm.types import LlmError, LlmRequest, StreamEmitter, message_text, tool_calls
 
 RETRY_STATUS = {429, 500, 502, 503, 504}
 
@@ -37,8 +37,9 @@ def user_content(message: dict) -> str | list[dict]:
             parts.append({"type": "text", "text": block["text"]})
         elif block.get("type") == "image" and block.get("data"):
             media_type = block.get("mediaType") or "image/jpeg"
-            parts.append({"type": "image_url",
-                          "image_url": {"url": f"data:{media_type};base64,{block['data']}"}})
+            parts.append(
+                {"type": "image_url", "image_url": {"url": f"data:{media_type};base64,{block['data']}"}}
+            )
     return parts
 
 

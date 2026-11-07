@@ -28,6 +28,9 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
+import mindex  # noqa: F401 — 安装根包自举，后续使用包内短导入
+from fastapi.testclient import TestClient
+
 os.environ["MINDEX_PROFILE_PERSONS"] = "1"
 
 TIMING = re.compile(r'([A-Za-z_]+);dur=([\d.]+)(?:;desc="([^"]*)")?')
@@ -50,9 +53,9 @@ def fmt(values: list[float]) -> str:
 
 
 def build_app(data_dir: Path, traces: list[str]):
-    import mindex.api as api
-    from mindex.shared.config import Config
-    from mindex.shared.storage import Store
+    import api as api
+    from shared.config import Config
+    from shared.storage import Store
 
     class ReadOnlyStore(Store):
         def __init__(self, root):
@@ -88,8 +91,12 @@ def scale_section(store) -> list[str]:
         lines.append(f"| {table} 行数 | {one(f'SELECT count(*) AS n FROM {table}')['n']:,} |")
     size = one("SELECT avg(length(data)) AS a, max(length(data)) AS m FROM person_evidence")
     lines.append(f"| person_evidence.data 平均 / 最大字节 | {size['a']:.0f} / {size['m']} |")
-    versions = store.rows("SELECT id,length(CAST(data AS BLOB)) AS n FROM person_versions ORDER BY n DESC LIMIT 3")
-    lines.append("| person_versions 最大体积（字节） | " + (", ".join(f"{v['n']:,}" for v in versions) or "-") + " |")
+    versions = store.rows(
+        "SELECT id,length(CAST(data AS BLOB)) AS n FROM person_versions ORDER BY n DESC LIMIT 3"
+    )
+    lines.append(
+        "| person_versions 最大体积（字节） | " + (", ".join(f"{v['n']:,}" for v in versions) or "-") + " |"
+    )
     for row in store.rows("SELECT status,count(*) AS n FROM person_evidence GROUP BY status"):
         lines.append(f"| 证据状态 {row['status']} | {row['n']:,} |")
     return lines
@@ -98,14 +105,18 @@ def scale_section(store) -> list[str]:
 def pick_sources(store, limit=2) -> list[dict]:
     return store.rows(
         "SELECT source_id, count(*) AS rows_, count(DISTINCT shot_id) AS shots FROM person_evidence "
-        "GROUP BY source_id ORDER BY rows_ DESC LIMIT ?", (limit,),
+        "GROUP BY source_id ORDER BY rows_ DESC LIMIT ?",
+        (limit,),
     )
 
 
 def http_section(client, sources, repeat) -> tuple[list[str], list[str]]:
-    header = ["| 素材(证据行/分镜) | 状态 | 筛选 | p50 / p95 total ms | " + " | ".join(
-        s.replace("_sql", "") for s in SQL_STAGES) + " | assemble | middleware | 响应 KB |",
-        "| --- | --- | --- | --- | " + " | ".join("---" for _ in SQL_STAGES) + " | --- | --- | --- |"]
+    header = [
+        "| 素材(证据行/分镜) | 状态 | 筛选 | p50 / p95 total ms | "
+        + " | ".join(s.replace("_sql", "") for s in SQL_STAGES)
+        + " | assemble | middleware | 响应 KB |",
+        "| --- | --- | --- | --- | " + " | ".join("---" for _ in SQL_STAGES) + " | --- | --- | --- |",
+    ]
     rows, notes = list(header), []
     for src in sources:
         label = f"{src['source_id'][:6]}({src['rows_']}/{src['shots']})"
@@ -116,9 +127,14 @@ def http_section(client, sources, repeat) -> tuple[list[str], list[str]]:
             if status == "accepted":
                 data = client.get("/api/persons/review/shots", params=base).json()
                 if data["filters"]:
-                    top = max((f for f in data["filters"] if f["actor_id"]), key=lambda f: f["count"], default=None)
+                    top = max(
+                        (f for f in data["filters"] if f["actor_id"]), key=lambda f: f["count"], default=None
+                    )
                     if top:
-                        pair = {"actor_id": top["actor_id"], **({"role_id": top["role_id"]} if top["role_id"] else {})}
+                        pair = {
+                            "actor_id": top["actor_id"],
+                            **({"role_id": top["role_id"]} if top["role_id"] else {}),
+                        }
                         variants.append(("人物", {**base, **pair}))
             for name, params in variants:
                 client.get("/api/persons/review/shots", params=params)  # 预热 OS 页缓存与 SQLite
@@ -129,15 +145,23 @@ def http_section(client, sources, repeat) -> tuple[list[str], list[str]]:
                     wall = (time.perf_counter() - started) * 1000
                     timing = parse_timing(response.headers.get("server-timing", ""))
                     samples.append((wall, timing, len(response.content)))
-                cols = {s: [t.get(s, (0.0, ""))[0] for _, t, _ in samples] for s in (*SQL_STAGES, "middleware")}
+                cols = {
+                    s: [t.get(s, (0.0, ""))[0] for _, t, _ in samples] for s in (*SQL_STAGES, "middleware")
+                }
                 assemble = [
-                    max(0.0, t["total"][0] - sum(t.get(s, (0.0, ""))[0] for s in SQL_STAGES) - t.get("middleware", (0.0, ""))[0])
+                    max(
+                        0.0,
+                        t["total"][0]
+                        - sum(t.get(s, (0.0, ""))[0] for s in SQL_STAGES)
+                        - t.get("middleware", (0.0, ""))[0],
+                    )
                     for _, t, _ in samples
                 ]
                 n = [t.get("evidence_sql", (0, ""))[1] for _, t, _ in samples][-1]
                 rows.append(
                     f"| {label} | {status} | {name} | {fmt([w for w, _, _ in samples])} | "
-                    + " | ".join(fmt(cols[s]) for s in SQL_STAGES) + f" | {fmt(assemble)} | {fmt(cols['middleware'])} | "
+                    + " | ".join(fmt(cols[s]) for s in SQL_STAGES)
+                    + f" | {fmt(assemble)} | {fmt(cols['middleware'])} | "
                     f"{samples[-1][2] / 1024:.0f} |"
                 )
                 if n:
@@ -165,10 +189,16 @@ def explain_section(client, store, traces, sources) -> list[str]:
 
 def image_section(client, store, samples) -> list[str]:
     with_path = store.rows(
-        "SELECT id FROM person_evidence WHERE json_extract(data,'$.image_path') IS NOT NULL LIMIT ?", (samples,))
+        "SELECT id FROM person_evidence WHERE json_extract(data,'$.image_path') IS NOT NULL LIMIT ?",
+        (samples,),
+    )
     without = store.rows(
-        "SELECT id FROM person_evidence WHERE json_extract(data,'$.image_path') IS NULL LIMIT ?", (samples,))
-    lines = ["| 抽样 | 请求数 | 分支分布 | p50 / p95 ms | versions_scan p50 ms |", "| --- | --- | --- | --- | --- |"]
+        "SELECT id FROM person_evidence WHERE json_extract(data,'$.image_path') IS NULL LIMIT ?", (samples,)
+    )
+    lines = [
+        "| 抽样 | 请求数 | 分支分布 | p50 / p95 ms | versions_scan p50 ms |",
+        "| --- | --- | --- | --- | --- |",
+    ]
     for label, ids in (("有 image_path", with_path), ("无 image_path", without)):
         walls, scans, branches = [], [], {}
         for row in ids:
@@ -185,15 +215,15 @@ def image_section(client, store, samples) -> list[str]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("--data-dir", type=Path, default=Path("data"))
     parser.add_argument("--repeat", type=int, default=5)
     parser.add_argument("--image-samples", type=int, default=20)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--title", default="人物库出镜审核读取耗时基线")
     args = parser.parse_args()
-
-    from fastapi.testclient import TestClient
 
     data_dir = args.data_dir.resolve()
     db_file = data_dir / "metadata.sqlite3"
@@ -209,16 +239,32 @@ def main() -> int:
     out = [
         f"# {args.title}",
         "",
-        f"- 数据目录：`{data_dir}`；每组 1 次预热 + {args.repeat} 次计时；单位毫秒；进程内 TestClient，不含网络与浏览器。",
+        f"- 数据目录：`{data_dir}`；每组 1 次预热 + {args.repeat} 次计时；单位毫秒；进程内 "
+        f"TestClient，不含网络与浏览器。",
         "- 单元格为 p50 / p95。`assemble` 为 Python 端组装（总耗时减去各阶段与 middleware）。",
         "",
-        "## 数据规模", "", *scale_section(store), "",
-        "## 审核列表 `GET /api/persons/review/shots`（limit=50）", "", *http_rows, "",
-        "## 抽样 SQL 的 EXPLAIN QUERY PLAN（accepted、最大素材）", "", *explain_section(client, store, traces, sources), "",
-        "## 证据图片 `GET /api/persons/evidence/{id}/image`", "", *image_section(client, store, args.image_samples), "",
+        "## 数据规模",
+        "",
+        *scale_section(store),
+        "",
+        "## 审核列表 `GET /api/persons/review/shots`（limit=50）",
+        "",
+        *http_rows,
+        "",
+        "## 抽样 SQL 的 EXPLAIN QUERY PLAN（accepted、最大素材）",
+        "",
+        *explain_section(client, store, traces, sources),
+        "",
+        "## 证据图片 `GET /api/persons/evidence/{id}/image`",
+        "",
+        *image_section(client, store, args.image_samples),
+        "",
     ]
     after = file_state(db_file)
-    out.append(f"只读校验：主库大小与修改时间{'未变化' if before == after else '发生变化（请检查是否有其他进程在写入）'}。")
+    out.append(
+        f"只读校验：主库大小与修改时间"
+        f"{'未变化' if before == after else '发生变化（请检查是否有其他进程在写入）'}。"
+    )
     text = "\n".join(out) + "\n"
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)

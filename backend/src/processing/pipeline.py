@@ -1,3 +1,5 @@
+"""素材准备、分镜、分析与检查点复用管线。"""
+
 from __future__ import annotations
 
 import json
@@ -7,7 +9,7 @@ import tempfile
 from pathlib import Path
 from time import perf_counter
 
-from mindex.models.adapters import (
+from models.adapters import (
     AnalysisContentRejected,
     ShotDetector,
     Transcriber,
@@ -16,14 +18,21 @@ from mindex.models.adapters import (
     make_detector,
     make_transcriber,
 )
-from mindex.shared import checkpoints, lock_backend
-from mindex.shared.config import Config, fingerprint
-from mindex.shared.jsonio import save_text
-from mindex.shared.media import content_hash, cut, probe, thumbnail, windows
-from mindex.shared.shot_media import ShotMedia
-from mindex.shared.storage import Store, dumps
-from mindex.shared.types import Annotation
-from mindex.shared.work_budget import copy_file
+from models.llama_cpp import checked_runtime, manifest
+from processing.align_worker import coalesce_alignment
+from processing.dialogue import DialogueProcessor, atomic_json, current_dialogue, relative_dialogue
+from processing.subtitle_archive import archive_subtitles
+from shared import checkpoints, files, lock_backend
+from shared import media as shared_media
+from shared.config import Config, fingerprint
+from shared.jsonio import save, save_text
+from shared.media import content_hash, cut, probe, thumbnail, windows
+from shared.processing_lock import ProcessingLock
+from shared.scene_plans import select_scenes
+from shared.shot_media import ShotMedia
+from shared.storage import Store, dumps
+from shared.types import Annotation, Utterance
+from shared.work_budget import copy_file
 
 log = logging.getLogger(__name__)
 
@@ -62,12 +71,10 @@ class Pipeline:
         return self._transcriber
 
     def enrich_dialogue(self, source_id=None, **options):
-        from mindex.processing.dialogue import DialogueProcessor
 
         return DialogueProcessor(self.config, transcriber=self._transcriber).process(source_id, **options)
 
     def lock(self, source_id=None, work=None):
-        from mindex.shared.processing_lock import ProcessingLock
 
         return ProcessingLock(self.config, source_id=source_id, work=work)
 
@@ -83,12 +90,20 @@ class Pipeline:
         *,
         segment_id: str | None = None,
     ) -> dict:
-        existing = self.store.one("SELECT * FROM segments WHERE id=?", (segment_id,)) if segment_id else self.store.one(
-            "SELECT * FROM segments WHERE source_id=? AND kind=? AND generation=? "
-            "AND ABS(start-?)<0.000001 AND ABS(end-?)<0.000001 AND parent_id IS ?",
-            (source["id"], kind, generation, start, end, parent))
-        identifier = existing["id"] if existing else segment_id or fingerprint(
-            [source["id"], kind, round(start, 6), round(end, 6), generation])
+        existing = (
+            self.store.one("SELECT * FROM segments WHERE id=?", (segment_id,))
+            if segment_id
+            else self.store.one(
+                "SELECT * FROM segments WHERE source_id=? AND kind=? AND generation=? "
+                "AND ABS(start-?)<0.000001 AND ABS(end-?)<0.000001 AND parent_id IS ?",
+                (source["id"], kind, generation, start, end, parent),
+            )
+        )
+        identifier = (
+            existing["id"]
+            if existing
+            else segment_id or fingerprint([source["id"], kind, round(start, 6), round(end, 6), generation])
+        )
         relative = existing["path"] if existing else f"clips/{source['id']}/{kind}/{identifier}.mp4"
         image = existing["thumbnail"] if existing else f"thumbnails/{identifier}.jpg"
         output = self.store.root / relative
@@ -116,7 +131,6 @@ class Pipeline:
             "reason": reason,
         }
         if self.config.storage.backend == "s3":
-            from mindex.shared import files
             for file in (output, self.store.root / image):
                 if file.is_file():
                     files.publish(self.store, file)
@@ -124,9 +138,21 @@ class Pipeline:
             """INSERT OR IGNORE INTO segments
           (id,source_id,kind,start,end,path,thumbnail,generation,parent_id,reason)
           VALUES(?,?,?,?,?,?,?,?,?,?)""",
-            tuple(segment[key] for key in (
-                "id", "source_id", "kind", "start", "end", "path",
-                "thumbnail", "generation", "parent_id", "reason")),
+            tuple(
+                segment[key]
+                for key in (
+                    "id",
+                    "source_id",
+                    "kind",
+                    "start",
+                    "end",
+                    "path",
+                    "thumbnail",
+                    "generation",
+                    "parent_id",
+                    "reason",
+                )
+            ),
         )
         return segment
 
@@ -163,9 +189,19 @@ class Pipeline:
                 self.store.execute(
                     "INSERT OR IGNORE INTO sources(id,name,path,media,layout_key,layout_config) "
                     "VALUES(?,?,?,?,?,?)",
-                    (identifier, name, key, dumps(info), self.config.layout_key,
-                     dumps({"detector": self.config.detector.model_dump(),
-                            "video": self.config.video.model_dump()})),
+                    (
+                        identifier,
+                        name,
+                        key,
+                        dumps(info),
+                        self.config.layout_key,
+                        dumps(
+                            {
+                                "detector": self.config.detector.model_dump(),
+                                "video": self.config.video.model_dump(),
+                            }
+                        ),
+                    ),
                 )
                 if move:
                     path.unlink(missing_ok=True)
@@ -183,10 +219,21 @@ class Pipeline:
                         copy_file(path, partial)
                         partial.replace(destination)
                 self.store.execute(
-                    "INSERT OR IGNORE INTO sources(id,name,path,media,layout_key,layout_config) VALUES(?,?,?,?,?,?)",
-                    (identifier, name, str(destination.relative_to(self.store.root)), dumps(info),
-                     self.config.layout_key, dumps({"detector": self.config.detector.model_dump(),
-                                                   "video": self.config.video.model_dump()})),
+                    "INSERT OR IGNORE INTO sources(id,name,path,media,layout_key,layout_config) "
+                    "VALUES(?,?,?,?,?,?)",
+                    (
+                        identifier,
+                        name,
+                        str(destination.relative_to(self.store.root)),
+                        dumps(info),
+                        self.config.layout_key,
+                        dumps(
+                            {
+                                "detector": self.config.detector.model_dump(),
+                                "video": self.config.video.model_dump(),
+                            }
+                        ),
+                    ),
                 )
             except BaseException:
                 if created:
@@ -268,7 +315,7 @@ class Pipeline:
         if not source["prepared"] and source["layout_key"] != self.config.layout_key:
             raise ValueError("素材切分配置不符，请使用原配置或新的 data_dir")
         ranges = self._read_plan(source) if not source["prepared"] else []
-        from mindex.processing.subtitle_archive import archive_subtitles
+
         archive_subtitles(self.store, source)
         with self.store.run("prepare", source_id):
             if not source["prepared"]:
@@ -296,11 +343,15 @@ class Pipeline:
                             "whole_shot" if len(pieces) == 1 else "sliding_window",
                         )
                     if progress:
-                        progress({"stage": "split", "completed": number, "total": len(ranges), "unit": "shots"})
+                        progress(
+                            {"stage": "split", "completed": number, "total": len(ranges), "unit": "shots"}
+                        )
                 self.store.execute("UPDATE sources SET prepared=1 WHERE id=?", (source_id,))
             else:
                 # Resume also repairs missing physical artifacts without redetecting shots.
-                segments = sorted(self.store.segments(source_id), key=lambda s: (s["kind"] != "shot", s["start"]))
+                segments = sorted(
+                    self.store.segments(source_id), key=lambda s: (s["kind"] != "shot", s["start"])
+                )
                 if progress:
                     progress({"stage": "repair", "completed": 0, "total": len(segments), "unit": "segments"})
                 for number, segment in enumerate(segments, 1):
@@ -315,7 +366,14 @@ class Pipeline:
                         segment_id=segment["id"],
                     )
                     if progress:
-                        progress({"stage": "repair", "completed": number, "total": len(segments), "unit": "segments"})
+                        progress(
+                            {
+                                "stage": "repair",
+                                "completed": number,
+                                "total": len(segments),
+                                "unit": "segments",
+                            }
+                        )
 
     def visual_snapshots(self, source_id: str | None = None, kinds=("moment",)) -> list[dict]:
         """Native video embeddings need neither ASR nor generated descriptions."""
@@ -351,16 +409,24 @@ class Pipeline:
         return sources
 
     def _reuse_transcript(self, source_id):
-        from mindex.processing.dialogue import current_dialogue
 
         data = current_dialogue(self.store, source_id)
-        if not data or data.get('source') not in {'asr', 'legacy_asr'} or data.get('status') not in {'complete', 'empty', 'no_audio'}:
+        if (
+            not data
+            or data.get("source") not in {"asr", "legacy_asr"}
+            or data.get("status") not in {"complete", "empty", "no_audio"}
+        ):
             return False
-        current = self.store.json_value('transcripts', 'source_id', source_id, self.config.asr_key)
-        if current is None or current.get('status') not in {'complete', 'empty', 'no_audio'}:
-            self.store.put_json('transcripts', 'source_id', source_id, self.config.asr_key,
-                                {**data, 'reused_from_profile': data.get('input_fingerprint') or data.get('profile')})
-        log.info('复用已完成转写 %s，不重新调用 ASR', source_id)
+        current = self.store.json_value("transcripts", "source_id", source_id, self.config.asr_key)
+        if current is None or current.get("status") not in {"complete", "empty", "no_audio"}:
+            self.store.put_json(
+                "transcripts",
+                "source_id",
+                source_id,
+                self.config.asr_key,
+                {**data, "reused_from_profile": data.get("input_fingerprint") or data.get("profile")},
+            )
+        log.info("复用已完成转写 %s，不重新调用 ASR", source_id)
         return True
 
     def transcribe(self, source_id: str | None = None, *, force=False):
@@ -389,8 +455,7 @@ class Pipeline:
                         else:
                             with tempfile.TemporaryDirectory(prefix="asr-", dir=self.store.root) as directory:
                                 audio = Path(directory) / "audio.wav"
-                                ShotMedia(self.store).audio(source["id"], audio, start, duration
-                                )
+                                ShotMedia(self.store).audio(source["id"], audio, start, duration)
                                 results = self.transcriber.transcribe(audio)
                             chunk = []
                             for item in results:
@@ -421,31 +486,40 @@ class Pipeline:
                 )
 
     def _reuse_raw_chunk(self, source_id, cache, number, start, duration):
-        from mindex.shared.jsonio import save
 
-        for path in (self.store.root / 'transcripts' / source_id).glob(f'*/raw/{number}.json'):
+        for path in (self.store.root / "transcripts" / source_id).glob(f"*/raw/{number}.json"):
             if path.parent == cache:
                 continue
             try:
-                value = json.loads(path.read_text(encoding='utf-8'))
-                if (not all(math.isfinite(value[k]) for k in ('start', 'duration'))
-                        or abs(value['start'] - start) > 1e-6 or abs(value['duration'] - duration) > 1e-6
-                        or not isinstance(value['text'], str) or not isinstance(value['language'], str)):
+                value = json.loads(path.read_text(encoding="utf-8"))
+                if (
+                    not all(math.isfinite(value[k]) for k in ("start", "duration"))
+                    or abs(value["start"] - start) > 1e-6
+                    or abs(value["duration"] - duration) > 1e-6
+                    or not isinstance(value["text"], str)
+                    or not isinstance(value["language"], str)
+                ):
                     continue
             except (OSError, ValueError, KeyError, TypeError):
                 continue
-            save(cache / path.name, {**value, 'reused_from_profile': path.parent.parent.name})
-            aligned_path = path.parent.parent / ('aligned-' + path.name)
+            save(cache / path.name, {**value, "reused_from_profile": path.parent.parent.name})
+            aligned_path = path.parent.parent / ("aligned-" + path.name)
             try:
-                aligned = json.loads(aligned_path.read_text(encoding='utf-8'))
-                if (isinstance(aligned, dict) and aligned.get('revision') == self.config.asr.aligner_revision
-                        and isinstance(aligned.get('utterances'), list)
-                        and (not value['text'].strip() or aligned['utterances'])):
-                    from mindex.processing.align_worker import coalesce_alignment
-                    from mindex.shared.types import Utterance
+                aligned = json.loads(aligned_path.read_text(encoding="utf-8"))
+                if (
+                    isinstance(aligned, dict)
+                    and aligned.get("revision") == self.config.asr.aligner_revision
+                    and isinstance(aligned.get("utterances"), list)
+                    and (not value["text"].strip() or aligned["utterances"])
+                ):
+                    # 延迟导入：保持异常捕获范围，依赖加载失败时仍走原有降级路径。
+                    from processing.align_worker import coalesce_alignment
+                    from shared.types import Utterance
 
-                    rows = [Utterance.model_validate(row) for row in coalesce_alignment(aligned['utterances'])]
-                    if all(row.end <= duration + .2 for row in rows):
+                    rows = [
+                        Utterance.model_validate(row) for row in coalesce_alignment(aligned["utterances"])
+                    ]
+                    if all(row.end <= duration + 0.2 for row in rows):
                         save(cache.parent / aligned_path.name, aligned)
             except (OSError, ValueError, TypeError, KeyError):
                 pass
@@ -453,14 +527,15 @@ class Pipeline:
 
     def transcribe_raw(self, source_id: str | None = None, *, force=False):
         """Checkpoint raw GGUF ASR output independently from CPU alignment."""
-        from mindex.models.llama_cpp import checked_runtime, manifest
 
         profile = self.config.asr_key
         checked = False
         for source in self.selected_sources(source_id):
             current = self.store.json_value("transcripts", "source_id", source["id"], profile)
-            if not force and ((current and current["status"] in {"complete", "no_audio"})
-                              or self._reuse_transcript(source["id"])):
+            if not force and (
+                (current and current["status"] in {"complete", "no_audio"})
+                or self._reuse_transcript(source["id"])
+            ):
                 continue
             info = json.loads(source["media"])
             if not info["audio"]:
@@ -478,8 +553,9 @@ class Pipeline:
                 for number, start in enumerate(range(0, math.ceil(info["duration"]), 30)):
                     target = cache / f"{number}.json"
                     if not force and not target.exists():
-                        self._reuse_raw_chunk(source["id"], cache, number, start,
-                                              min(30, info["duration"] - start))
+                        self._reuse_raw_chunk(
+                            source["id"], cache, number, start, min(30, info["duration"] - start)
+                        )
                     if target.exists() and not force:
                         continue
                     if not checked:
@@ -494,25 +570,35 @@ class Pipeline:
                         result = self.transcriber.raw(audio)
                     if self.config.asr_key != profile:
                         raise ValueError("转写过程中部署清单发生变化")
-                    checkpoints.save_text(self.store, target, dumps(
-                        {**result, "start": start, "duration": duration,
-                         "model_identity": self.config.asr.model_dump()}))
+                    checkpoints.save_text(
+                        self.store,
+                        target,
+                        dumps(
+                            {
+                                **result,
+                                "start": start,
+                                "duration": duration,
+                                "model_identity": self.config.asr.model_dump(),
+                            }
+                        ),
+                    )
                     (cache.parent / f"aligned-{number}.json").unlink(missing_ok=True)
                 identities = {}
-                for raw_path in cache.glob('*.json'):
-                    raw_value = json.loads(raw_path.read_text(encoding='utf-8'))
-                    identities[raw_path.stem] = raw_value.get('model_identity') or {
-                        'profile': raw_value.get('reused_from_profile', profile)}
+                for raw_path in cache.glob("*.json"):
+                    raw_value = json.loads(raw_path.read_text(encoding="utf-8"))
+                    identities[raw_path.stem] = raw_value.get("model_identity") or {
+                        "profile": raw_value.get("reused_from_profile", profile)
+                    }
                 self.store.put_json(
-                    "transcripts", "source_id", source["id"], profile,
+                    "transcripts",
+                    "source_id",
+                    source["id"],
+                    profile,
                     {"utterances": [], "status": "pending_alignment", "chunk_model_identities": identities},
                 )
 
     def align(self, python: Path, source_id: str | None = None):
         """Run optional ForcedAligner in a separate CPU-only Python environment."""
-        from mindex.processing.align_worker import coalesce_alignment
-        from mindex.shared.media import command
-        from mindex.shared.types import Utterance
 
         if self.config.asr.aligner_revision == "main":
             raise ValueError("请先在配置中固定 asr.aligner_revision 为实际模型 commit")
@@ -533,9 +619,8 @@ class Pipeline:
                     if not target.exists():
                         with tempfile.TemporaryDirectory(prefix="align-", dir=self.store.root) as directory:
                             audio = Path(directory) / "audio.wav"
-                            ShotMedia(self.store).audio(source["id"], audio, raw["start"], raw["duration"]
-                            )
-                            command(
+                            ShotMedia(self.store).audio(source["id"], audio, raw["start"], raw["duration"])
+                            shared_media.command(
                                 [
                                     str(python.absolute()),
                                     "-I",
@@ -571,16 +656,19 @@ class Pipeline:
                         )
                 if not list((cache / "raw").glob("*.json")):
                     raise ValueError("缺少原始转写检查点")
-                data = {**record, "utterances": utterances, "status": "complete", "source": "asr",
-                        "alignment_model": self.config.asr.aligner_model,
-                        "alignment_revision": self.config.asr.aligner_revision}
-                from mindex.processing.dialogue import DialogueProcessor
+                data = {
+                    **record,
+                    "utterances": utterances,
+                    "status": "complete",
+                    "source": "asr",
+                    "alignment_model": self.config.asr.aligner_model,
+                    "alignment_revision": self.config.asr.aligner_revision,
+                }
 
                 data = DialogueProcessor(self.config).save(source["id"], profile, data)
                 self.store.put_json("transcripts", "source_id", source["id"], profile, data)
 
     def _dialogue(self, source_id: str, start: float, end: float) -> list[dict]:
-        from mindex.processing.dialogue import current_dialogue, relative_dialogue
 
         current = current_dialogue(self.store, source_id)
         if current is not None:
@@ -597,14 +685,12 @@ class Pipeline:
         ]
 
     def annotation_profile(self, source_id):
-        from mindex.processing.dialogue import current_dialogue
 
         transcript = current_dialogue(self.store, source_id)
         version = transcript.get("content_version") if transcript and transcript.get("utterances") else None
         return fingerprint([self.config.analysis_key, version]) if version else self.config.analysis_key
 
     def _annotate(self, segment: dict, *, force: bool = False, reuse_completed: bool = False):
-        from mindex.processing.dialogue import current_dialogue
 
         transcript = current_dialogue(self.store, segment["source_id"])
         input_version = transcript.get("content_version") if transcript else None
@@ -612,16 +698,41 @@ class Pipeline:
         profile = self.annotation_profile(segment["source_id"])
         saved = self.store.json_value("annotations", "segment_id", segment["id"], profile)
         if saved is not None and not force and (reuse_completed or not saved.get("reused_from_profile")):
-            log.info("分析检查点命中 %s %s %.2f–%.2fs [%s]", segment["source_id"], segment["kind"], segment["start"], segment["end"], segment["id"])
+            log.info(
+                "分析检查点命中 %s %s %.2f–%.2fs [%s]",
+                segment["source_id"],
+                segment["kind"],
+                segment["start"],
+                segment["end"],
+                segment["id"],
+            )
             return saved
         same = self.store.one(
             "SELECT a.data FROM annotations a JOIN segments s ON s.id=a.segment_id "
             "WHERE a.profile=? AND s.source_id=? AND ((s.start=? AND s.end=?) OR "
             "(json_extract(a.data,'$.status')='skipped' AND s.start<=? AND s.end>=?)) LIMIT 1",
-            (profile, segment["source_id"], segment["start"], segment["end"], segment["start"], segment["end"]),
+            (
+                profile,
+                segment["source_id"],
+                segment["start"],
+                segment["end"],
+                segment["start"],
+                segment["end"],
+            ),
         )
-        if same and not force and (reuse_completed or not json.loads(same["data"]).get("reused_from_profile")):
-            log.info("复用相同时间范围的分析检查点 %s %s %.2f–%.2fs [%s]", segment["source_id"], segment["kind"], segment["start"], segment["end"], segment["id"])
+        if (
+            same
+            and not force
+            and (reuse_completed or not json.loads(same["data"]).get("reused_from_profile"))
+        ):
+            log.info(
+                "复用相同时间范围的分析检查点 %s %s %.2f–%.2fs [%s]",
+                segment["source_id"],
+                segment["kind"],
+                segment["start"],
+                segment["end"],
+                segment["id"],
+            )
             saved = json.loads(same["data"])
             self.store.put_json("annotations", "segment_id", segment["id"], profile, saved)
             return saved
@@ -630,7 +741,8 @@ class Pipeline:
             previous = self.store.one(
                 "SELECT a.profile,a.data FROM annotations a JOIN segments s ON s.id=a.segment_id "
                 "WHERE (a.segment_id=? OR (s.source_id=? AND s.kind=? AND s.start=? AND s.end=?)) "
-                "AND (json_type(a.data,'$.annotation')='object' OR json_extract(a.data,'$.status')='skipped') "
+                "AND (json_type(a.data,'$.annotation')='object' OR "
+                "json_extract(a.data,'$.status')='skipped') "
                 "ORDER BY a.rowid DESC LIMIT 1",
                 (segment["id"], segment["source_id"], segment["kind"], segment["start"], segment["end"]),
             )
@@ -644,11 +756,24 @@ class Pipeline:
         try:
             with self.store.materialize_media(segment["path"]) as path:
                 annotation = self.analyzer.analyze(path, dialogue)
-            output = {"annotation": annotation.model_dump(), "content_version": fingerprint(annotation.model_dump())}
+            output = {
+                "annotation": annotation.model_dump(),
+                "content_version": fingerprint(annotation.model_dump()),
+            }
         except AnalysisContentRejected as exc:
-            log.warning("LLM 跳过敏感片段 %s %s %.3f–%.3f：%s", segment["source_id"],
-                        segment["kind"], segment["start"], segment["end"], exc)
-            output = {"status": "skipped", "reason": str(exc), "message": "模型内容安全策略拒绝，已跳过此片段"}
+            log.warning(
+                "LLM 跳过敏感片段 %s %s %.3f–%.3f：%s",
+                segment["source_id"],
+                segment["kind"],
+                segment["start"],
+                segment["end"],
+                exc,
+            )
+            output = {
+                "status": "skipped",
+                "reason": str(exc),
+                "message": "模型内容安全策略拒绝，已跳过此片段",
+            }
             output["content_version"] = fingerprint(output)
         if self.config.analysis_key != base_profile:
             raise ValueError("分析过程中模型身份发生变化")
@@ -667,11 +792,18 @@ class Pipeline:
                 ),
             },
         )
-        log.info("分析检查点已保存 %s %s %.2f–%.2fs [%s] · %s", segment["source_id"], segment["kind"], segment["start"], segment["end"], segment["id"], "skipped" if output.get("status") == "skipped" else "complete")
+        log.info(
+            "分析检查点已保存 %s %s %.2f–%.2fs [%s] · %s",
+            segment["source_id"],
+            segment["kind"],
+            segment["start"],
+            segment["end"],
+            segment["id"],
+            "skipped" if output.get("status") == "skipped" else "complete",
+        )
         return output
 
     def analyze(self, source_id: str | None = None, progress=None, *, force: bool = False):
-        from mindex.processing.dialogue import atomic_json
 
         sources = self.selected_sources(source_id)
         log.info("LLM 分析范围：%d 个素材", len(sources))
@@ -683,14 +815,31 @@ class Pipeline:
 
             def notify(value, counts=counts, source=source, source_number=source_number):
                 if progress:
-                    progress({**value, **counts, "source_name": source["name"], "source_id": source["id"],
-                              "source_number": source_number, "source_total": len(sources)})
+                    progress(
+                        {
+                            **value,
+                            **counts,
+                            "source_name": source["name"],
+                            "source_id": source["id"],
+                            "source_number": source_number,
+                            "source_total": len(sources),
+                        }
+                    )
 
             with self.store.run("analyze", source["id"]):
                 base = [s for s in self.store.segments(source["id"]) if s["kind"] != "scene"]
                 for number, segment in enumerate(base, 1):
                     if progress:
-                        notify({"stage": "analyze", "completed": number - 1, "total": len(base), "unit": "segments", **{k: segment[k] for k in ("kind", "start", "end")}, "segment_id": segment["id"]})
+                        notify(
+                            {
+                                "stage": "analyze",
+                                "completed": number - 1,
+                                "total": len(base),
+                                "unit": "segments",
+                                **{k: segment[k] for k in ("kind", "start", "end")},
+                                "segment_id": segment["id"],
+                            }
+                        )
                     log.info(
                         "Analyze %s %s %.2f–%.2f",
                         source["name"],
@@ -701,21 +850,43 @@ class Pipeline:
                     saved = self._annotate(segment, force=force, reuse_completed=True)
                     counts["skipped"] += saved.get("status") == "skipped"
                     if progress:
-                        notify({"stage": "analyze", "completed": number, "total": len(base), "unit": "segments", **{k: segment[k] for k in ("kind", "start", "end")}, "segment_id": segment["id"]})
-                plan = None if force else self.store.json_value("scene_plans", "source_id", source["id"], profile)
+                        notify(
+                            {
+                                "stage": "analyze",
+                                "completed": number,
+                                "total": len(base),
+                                "unit": "segments",
+                                **{k: segment[k] for k in ("kind", "start", "end")},
+                                "segment_id": segment["id"],
+                            }
+                        )
+                plan = (
+                    None
+                    if force
+                    else self.store.json_value("scene_plans", "source_id", source["id"], profile)
+                )
                 if plan is None and not force:
                     # 仅沿用覆盖当前全部基础片段的旧计划；新增/重切的片段需重新分组。
                     for previous in self.store.rows(
-                        "SELECT profile,data FROM scene_plans WHERE source_id=? ORDER BY rowid DESC", (source["id"],)
+                        "SELECT profile,data FROM scene_plans WHERE source_id=? ORDER BY rowid DESC",
+                        (source["id"],),
                     ):
-                        completed = {(r["kind"], round(r["start"], 6), round(r["end"], 6)) for r in self.store.rows(
-                            "SELECT s.kind,s.start,s.end FROM annotations a JOIN segments s ON s.id=a.segment_id "
-                            "WHERE s.source_id=? AND a.profile=? AND "
-                            "(json_type(a.data,'$.annotation')='object' OR json_extract(a.data,'$.status')='skipped')",
-                            (source["id"], previous["profile"]),
-                        )}
-                        if all((segment["kind"], round(segment["start"], 6), round(segment["end"], 6)) in completed
-                               for segment in base):
+                        completed = {
+                            (r["kind"], round(r["start"], 6), round(r["end"], 6))
+                            for r in self.store.rows(
+                                "SELECT s.kind,s.start,s.end FROM annotations a JOIN segments s ON "
+                                "s.id=a.segment_id "
+                                "WHERE s.source_id=? AND a.profile=? AND "
+                                "(json_type(a.data,'$.annotation')='object' OR "
+                                "json_extract(a.data,'$.status')='skipped')",
+                                (source["id"], previous["profile"]),
+                            )
+                        }
+                        if all(
+                            (segment["kind"], round(segment["start"], 6), round(segment["end"], 6))
+                            in completed
+                            for segment in base
+                        ):
                             plan = json.loads(previous["data"])
                             self.store.put_json("scene_plans", "source_id", source["id"], profile, plan)
                             break
@@ -725,9 +896,12 @@ class Pipeline:
                     # Turn overlapping moments into contiguous units, while retaining
                     # their descriptions and original boundaries for semantic grouping.
                     moments = [s for s in base if s["kind"] == "moment"]
-                    rejected = [s for s in base if self.store.json_value(
-                        "annotations", "segment_id", s["id"], profile
-                    ).get("status") == "skipped"]
+                    rejected = [
+                        s
+                        for s in base
+                        if self.store.json_value("annotations", "segment_id", s["id"], profile).get("status")
+                        == "skipped"
+                    ]
                     units = []
                     for index, segment in enumerate(moments):
                         end = moments[index + 1]["start"] if index + 1 < len(moments) else segment["end"]
@@ -753,21 +927,31 @@ class Pipeline:
                         if not current:
                             return []
                         if progress:
-                            notify({
-                                "stage": "scene_grouping", "completed": grouped_units, "total": total_units,
-                                "unit": "segments",
-                                "message": f"正在组织场景 {current[0]['start']:.2f}–{current[-1]['end']:.2f} 秒",
-                            })
+                            notify(
+                                {
+                                    "stage": "scene_grouping",
+                                    "completed": grouped_units,
+                                    "total": total_units,
+                                    "unit": "segments",
+                                    "message"
+                                    "": f"正在组织场景 {current[0]['start']:.2f}–{current[-1]['end']:.2f} 秒",
+                                }
+                            )
                         checkpoint = checkpoint_root / (fingerprint(current) + ".json")
                         groups = None
                         if not force:
-                            candidates = [checkpoint, *(self.store.root / 'analysis' / sid).glob('*/' + checkpoint.name)]
+                            candidates = [
+                                checkpoint,
+                                *(self.store.root / "analysis" / sid).glob("*/" + checkpoint.name),
+                            ]
                             for candidate in candidates:
                                 try:
-                                    saved_groups = json.loads(candidate.read_text(encoding='utf-8'))
+                                    saved_groups = json.loads(candidate.read_text(encoding="utf-8"))
                                     if not isinstance(saved_groups, list) or any(
-                                        not isinstance(group, list) or not group
-                                        or any(type(index) is not int for index in group) for group in saved_groups
+                                        not isinstance(group, list)
+                                        or not group
+                                        or any(type(index) is not int for index in group)
+                                        for group in saved_groups
                                     ):
                                         continue
                                     flattened = [index for group in saved_groups for index in group]
@@ -781,27 +965,52 @@ class Pipeline:
                                     checkpoints.sync(self.store, checkpoint)
                                 break
                         if groups is not None:
-                            log.info("场景分组检查点命中 %s %.2f–%.2fs", sid, current[0]["start"], current[-1]["end"])
+                            log.info(
+                                "场景分组检查点命中 %s %.2f–%.2fs",
+                                sid,
+                                current[0]["start"],
+                                current[-1]["end"],
+                            )
                         else:
-                            log.info("场景分组开始 %s · %d 个片段 · %.2f–%.2fs", sid, len(current), current[0]["start"], current[-1]["end"])
+                            log.info(
+                                "场景分组开始 %s · %d 个片段 · %.2f–%.2fs",
+                                sid,
+                                len(current),
+                                current[0]["start"],
+                                current[-1]["end"],
+                            )
                             try:
                                 groups = self.analyzer.group_scenes(current)
                             except AnalysisContentRejected as exc:
-                                log.warning("LLM 跳过敏感场景分组 %s %.3f–%.3f：%s", sid,
-                                            current[0]["start"], current[-1]["end"], exc)
+                                log.warning(
+                                    "LLM 跳过敏感场景分组 %s %.3f–%.3f：%s",
+                                    sid,
+                                    current[0]["start"],
+                                    current[-1]["end"],
+                                    exc,
+                                )
                                 groups = []
                             atomic_json(checkpoint, groups)
                             checkpoints.sync(self.store, checkpoint)
                         grouped_units += len(current)
                         if progress:
-                            notify({"stage": "scene_grouping", "completed": grouped_units,
-                                      "total": total_units, "unit": "segments"})
+                            notify(
+                                {
+                                    "stage": "scene_grouping",
+                                    "completed": grouped_units,
+                                    "total": total_units,
+                                    "unit": "segments",
+                                }
+                            )
                         return [[current[group[0]]["start"], current[group[-1]]["end"]] for group in groups]
 
                     checkpoint_root = self.store.root / "analysis" / source["id"] / profile
                     for unit in units:
-                        if batch and (unit["end"] - batch[0]["start"] > 45 or len(batch) >= 32
-                                      or unit["start"] > batch[-1]["end"] + 1e-6):
+                        if batch and (
+                            unit["end"] - batch[0]["start"] > 45
+                            or len(batch) >= 32
+                            or unit["start"] > batch[-1]["end"] + 1e-6
+                        ):
                             plan.extend(grouped(batch, len(units), checkpoint_root))
                             batch = []
                         batch.append(unit)
@@ -810,28 +1019,74 @@ class Pipeline:
                 log.info("场景计划就绪 %s · %d 个场景", source["name"], len(plan))
                 if not plan and progress:
                     notify({"stage": "scenes", "completed": 0, "total": 0, "unit": "scenes"})
-                from mindex.shared.scene_plans import select_scenes
 
                 existing_scenes = select_scenes(self.store.segments(source["id"], "scene"), plan, profile)
                 for scene_number, (start, end) in enumerate(plan, 1):
                     if progress:
-                        notify({"stage": "scenes", "completed": scene_number - 1, "total": len(plan),
-                                  "unit": "scenes", "kind": "scene", "start": start, "end": end,
-                                  "message": "正在生成场景分析"})
-                    existing = next((s for s in existing_scenes if abs(s["start"] - start) < 1e-6
-                                     and abs(s["end"] - end) < 1e-6), None)
-                    scene = self._segment(source, "scene", start, end,
-                                          existing["generation"] if existing else profile, None, "semantic_grouping",
-                                          segment_id=existing["id"] if existing else None)
-                    log.info("分析场景 %s %d/%d %.2f–%.2fs [%s]", source["name"], scene_number, len(plan), start, end, scene["id"])
+                        notify(
+                            {
+                                "stage": "scenes",
+                                "completed": scene_number - 1,
+                                "total": len(plan),
+                                "unit": "scenes",
+                                "kind": "scene",
+                                "start": start,
+                                "end": end,
+                                "message": "正在生成场景分析",
+                            }
+                        )
+                    existing = next(
+                        (
+                            s
+                            for s in existing_scenes
+                            if abs(s["start"] - start) < 1e-6 and abs(s["end"] - end) < 1e-6
+                        ),
+                        None,
+                    )
+                    scene = self._segment(
+                        source,
+                        "scene",
+                        start,
+                        end,
+                        existing["generation"] if existing else profile,
+                        None,
+                        "semantic_grouping",
+                        segment_id=existing["id"] if existing else None,
+                    )
+                    log.info(
+                        "分析场景 %s %d/%d %.2f–%.2fs [%s]",
+                        source["name"],
+                        scene_number,
+                        len(plan),
+                        start,
+                        end,
+                        scene["id"],
+                    )
                     saved = self._annotate(scene, force=force, reuse_completed=True)
                     counts["skipped"] += saved.get("status") == "skipped"
                     if progress:
-                        notify({"stage": "scenes", "completed": scene_number, "total": len(plan), "unit": "scenes",
-                                "kind": "scene", "start": start, "end": end, "segment_id": scene["id"]})
+                        notify(
+                            {
+                                "stage": "scenes",
+                                "completed": scene_number,
+                                "total": len(plan),
+                                "unit": "scenes",
+                                "kind": "scene",
+                                "start": start,
+                                "end": end,
+                                "segment_id": scene["id"],
+                            }
+                        )
 
-            log.info("素材完成 %d/%d %s [%s] · 用时 %.2f 秒 · 跳过 %d 个片段",
-                     source_number, len(sources), source["name"], source["id"], perf_counter() - source_started, counts["skipped"])
+            log.info(
+                "素材完成 %d/%d %s [%s] · 用时 %.2f 秒 · 跳过 %d 个片段",
+                source_number,
+                len(sources),
+                source["name"],
+                source["id"],
+                perf_counter() - source_started,
+                counts["skipped"],
+            )
 
     def snapshots(self, source_id: str | None = None) -> list[dict]:
         result = []
@@ -840,7 +1095,6 @@ class Pipeline:
             if self.store.json_value("scene_plans", "source_id", source["id"], profile) is None:
                 raise ValueError(f"{source['name']} 尚未完成当前配置的分析阶段")
             transcript = self.store.json_value("transcripts", "source_id", source["id"], self.config.asr_key)
-            from mindex.shared.scene_plans import select_scenes
 
             plan = self.store.json_value("scene_plans", "source_id", source["id"], profile)
             scenes = select_scenes(self.store.segments(source["id"], "scene"), plan, profile)

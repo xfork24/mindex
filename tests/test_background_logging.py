@@ -7,10 +7,10 @@ import time
 
 import pytest
 
-from mindex.admin.dialogue_tasks import DialogueOptions, DialogueTasks
-from mindex.admin.source_tasks import SourceTasks, WorkOptions
-from mindex.processing.pipeline import Pipeline
-from mindex.settings.runtime_settings import RuntimeConfig
+from admin.dialogue_tasks import DialogueOptions, DialogueTasks
+from admin.source_tasks import SourceTasks, WorkOptions
+from processing.pipeline import Pipeline
+from settings.runtime_settings import RuntimeConfig
 
 
 def finished(manager, task):
@@ -38,12 +38,13 @@ def test_failing_source_task_logs_traceback(config, video_file, monkeypatch, cap
 
     monkeypatch.setattr(Pipeline, "analyze", analyze)
     manager = SourceTasks(RuntimeConfig(config, pipeline.store), pipeline.store)
-    with caplog.at_level(logging.ERROR, logger="mindex.admin.source_tasks"):
+    with caplog.at_level(logging.ERROR, logger="admin.source_tasks"):
         task = finished(manager, manager.start(sid, "analysis", WorkOptions(publish=False)))
     assert task["status"] == "failed" and "模拟分析崩溃" in task["error"]
-    record = traceback_record(caplog, "mindex.admin.source_tasks", "模拟分析崩溃")
+    record = traceback_record(caplog, "admin.source_tasks", "模拟分析崩溃")
     assert record is not None and record.levelno == logging.ERROR
     assert record.exc_info[2] is not None  # 带 traceback
+    assert "模拟分析崩溃" in task["progress"]["latest_log"]
 
 
 def test_failing_dialogue_task_logs_traceback(config, video_file, monkeypatch, caplog):
@@ -53,10 +54,11 @@ def test_failing_dialogue_task_logs_traceback(config, video_file, monkeypatch, c
     def explode(*args, **kwargs):
         raise RuntimeError("模拟对白崩溃")
 
-    monkeypatch.setattr("mindex.admin.dialogue_tasks.execute_dialogue", explode)
+    monkeypatch.setattr("admin.dialogue_tasks.execute_dialogue", explode)
     manager = DialogueTasks(RuntimeConfig(config, pipeline.store), pipeline.store)
-    with caplog.at_level(logging.ERROR, logger="mindex.admin.dialogue_tasks"):
+    with caplog.at_level(logging.ERROR, logger="admin.dialogue_tasks"):
         task = finished(manager, manager.start(sid, DialogueOptions(publish=False)))
     assert task["status"] == "failed" and "模拟对白崩溃" in task["error"]
-    record = traceback_record(caplog, "mindex.admin.dialogue_tasks", "模拟对白崩溃")
+    record = traceback_record(caplog, "admin.dialogue_tasks", "模拟对白崩溃")
     assert record is not None and record.exc_info[2] is not None
+    assert "模拟对白崩溃" in task["progress"]["latest_log"]

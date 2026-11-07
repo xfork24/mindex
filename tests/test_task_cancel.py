@@ -1,12 +1,14 @@
+"""后台任务取消、检查点与重试回归。"""
+
 import json
 
 import pytest
 
-from mindex.shared.config import Config
-from mindex.shared.processing_lock import PublicationLock
-from mindex.shared.storage import Store
-from mindex.shared.task_cancel import CancelRegistry, TaskCancelled, registry_for
-from mindex.shared.task_progress import reset_task_attempt, save_task_progress
+from shared.config import Config
+from shared.processing_lock import PublicationLock
+from shared.storage import Store
+from shared.task_cancel import CancelRegistry, TaskCancelled, registry_for
+from shared.task_progress import reset_task_attempt, save_task_progress
 
 
 def test_request_check_clear(tmp_path):
@@ -51,7 +53,7 @@ def test_key_is_sanitized(tmp_path):
 
 
 def test_registry_for_is_singleton_per_data_dir(tmp_path):
-    assert registry_for(tmp_path) is registry_for(tmp_path / "." )
+    assert registry_for(tmp_path) is registry_for(tmp_path / ".")
     assert registry_for(tmp_path) is not registry_for(tmp_path / "other")
     assert not issubclass(TaskCancelled, ValueError)
 
@@ -60,10 +62,14 @@ def test_registry_for_is_singleton_per_data_dir(tmp_path):
 def test_save_task_progress_raises_after_persisting(tmp_path, table):
     store = Store(tmp_path)
     if table == "source_tasks":
-        store.execute("INSERT INTO source_tasks(id,source_id,work,status,config,options) "
-                      "VALUES('t','s','analysis','running','{}','{}')")
+        store.execute(
+            "INSERT INTO source_tasks(id,source_id,work,status,config,options) "
+            "VALUES('t','s','analysis','running','{}','{}')"
+        )
     else:
-        store.execute(f"INSERT INTO {table}(id,source_id,status,config,options) VALUES('t','s','running','{{}}','{{}}')")
+        store.execute(
+            f"INSERT INTO {table}(id,source_id,status,config,options) VALUES('t','s','running','{{}}','{{}}')"
+        )
     save_task_progress(store, table, "t", {"stage": "analyze", "completed": 1, "total": 3})
     registry = registry_for(store.root)
     registry.request("t")
@@ -114,7 +120,10 @@ from fastapi.testclient import TestClient  # noqa: E402
 def settled(manager, task_id):
     for _ in range(1000):
         value = manager.get(task_id)
-        if value["status"] in {"complete", "failed", "interrupted", "cancelled"} and task_id not in manager.threads:
+        if (
+            value["status"] in {"complete", "failed", "interrupted", "cancelled"}
+            and task_id not in manager.threads
+        ):
             return value
         time.sleep(0.01)
     pytest.fail("后台任务未结束")
@@ -122,29 +131,39 @@ def settled(manager, task_id):
 
 def insert_task(store, table, task_id, status):
     if table == "source_tasks":
-        store.execute("INSERT INTO source_tasks(id,source_id,work,status,config,options) "
-                      "VALUES(?,'s','analysis',?,'{}','{}')", (task_id, status))
+        store.execute(
+            "INSERT INTO source_tasks(id,source_id,work,status,config,options) "
+            "VALUES(?,'s','analysis',?,'{}','{}')",
+            (task_id, status),
+        )
     else:
-        store.execute(f"INSERT INTO {table}(id,source_id,status,config,options) VALUES(?,'s',?,'{{}}','{{}}')",
-                      (task_id, status))
+        store.execute(
+            f"INSERT INTO {table}(id,source_id,status,config,options) VALUES(?,'s',?,'{{}}','{{}}')",
+            (task_id, status),
+        )
 
 
 def test_cancel_endpoints_queued_terminal_and_unknown(config):
-    from mindex.admin.dialogue_tasks import dialogue_router
-    from mindex.admin.source_tasks import source_tasks_router
-    from mindex.persons.person_api import person_router
-    from mindex.settings.runtime_settings import RuntimeConfig
+    from admin.dialogue_tasks import dialogue_router
+    from admin.source_tasks import source_tasks_router
+    from persons.person_api import person_router
+    from settings.runtime_settings import RuntimeConfig
 
     store = Store(config.data_dir)
     runtime = RuntimeConfig(config, store)
     app = FastAPI()
-    for router in (source_tasks_router(runtime, store), dialogue_router(runtime, store),
-                   person_router(runtime, store)):
+    for router in (
+        source_tasks_router(runtime, store),
+        dialogue_router(runtime, store),
+        person_router(runtime, store),
+    ):
         app.include_router(router)
     client = TestClient(app)
-    routes = {"source_tasks": "/api/admin/source-tasks/{}/cancel",
-              "dialogue_tasks": "/api/admin/dialogue-tasks/{}/cancel",
-              "person_tasks": "/api/persons/tasks/{}/cancel"}
+    routes = {
+        "source_tasks": "/api/admin/source-tasks/{}/cancel",
+        "dialogue_tasks": "/api/admin/dialogue-tasks/{}/cancel",
+        "person_tasks": "/api/persons/tasks/{}/cancel",
+    }
     registry = registry_for(store.root)
     for table, route in routes.items():
         insert_task(store, table, table + "-q", "queued")
@@ -164,9 +183,9 @@ def test_cancel_endpoints_queued_terminal_and_unknown(config):
 
 def test_cancelled_while_queued_never_starts_work(config):
     """排队时取消：线程启动后既不置 running 也不执行，锁全部释放。"""
-    from mindex.admin.dialogue_tasks import DialogueTasks
-    from mindex.persons.person_processing import PersonTasks
-    from mindex.settings.runtime_settings import RuntimeConfig
+    from admin.dialogue_tasks import DialogueTasks
+    from persons.person_processing import PersonTasks
+    from settings.runtime_settings import RuntimeConfig
 
     store = Store(config.data_dir)
     runtime = RuntimeConfig(config, store)
@@ -190,9 +209,9 @@ def test_cancelled_while_queued_never_starts_work(config):
 
 
 def test_running_publication_cancels_at_next_progress_then_retries(config, video_file, monkeypatch):
-    from mindex.admin.source_tasks import PublishOptions, SourceTasks
-    from mindex.processing.pipeline import Pipeline
-    from mindex.settings.runtime_settings import RuntimeConfig
+    from admin.source_tasks import PublishOptions, SourceTasks
+    from processing.pipeline import Pipeline
+    from settings.runtime_settings import RuntimeConfig
 
     pipeline = Pipeline(config)
     sid = pipeline.prepare(video_file)
@@ -208,7 +227,7 @@ def test_running_publication_cancels_at_next_progress_then_retries(config, video
         progress({"stage": "embedding", "completed": 1, "total": 2})
         return {"index_id": "fixture"}
 
-    monkeypatch.setattr("mindex.admin.source_tasks.publish_work", publish)
+    monkeypatch.setattr("admin.source_tasks.publish_work", publish)
     manager = SourceTasks(RuntimeConfig(config, pipeline.store), pipeline.store)
     task = manager.start(sid, "publish", PublishOptions(work="shots"))
     try:
@@ -235,16 +254,17 @@ def test_running_publication_cancels_at_next_progress_then_retries(config, video
 
 
 def test_publication_waiting_for_gpu_can_be_cancelled(config, video_file, monkeypatch):
-    from mindex.admin.source_tasks import PublishOptions, SourceTasks
-    from mindex.processing.pipeline import Pipeline
-    from mindex.settings.runtime_settings import RuntimeConfig
-    from mindex.shared.processing_lock import ProcessingLock
+    from admin.source_tasks import PublishOptions, SourceTasks
+    from processing.pipeline import Pipeline
+    from settings.runtime_settings import RuntimeConfig
+    from shared.processing_lock import ProcessingLock
 
     config.enforce_gpu_lock = True
     pipeline = Pipeline(config)
     sid = pipeline.prepare(video_file)
-    monkeypatch.setattr("mindex.admin.source_tasks.publish_work",
-                        lambda *a, **k: pytest.fail("取消的排队任务不应开始发布"))
+    monkeypatch.setattr(
+        "admin.source_tasks.publish_work", lambda *a, **k: pytest.fail("取消的排队任务不应开始发布")
+    )
     manager = SourceTasks(RuntimeConfig(config, pipeline.store), pipeline.store)
     with ProcessingLock(config):  # 占住 GPU，发布子任务停在准入等待
         task = manager.start(sid, "publish", PublishOptions(work="shots"))
@@ -308,9 +328,9 @@ class CheckpointWorker:
 
 
 def test_running_analysis_cancels_between_progress_and_resumes(config, video_file, monkeypatch):
-    from mindex.admin.source_tasks import SourceTasks, WorkOptions
-    from mindex.processing.pipeline import Pipeline
-    from mindex.settings.runtime_settings import RuntimeConfig
+    from admin.source_tasks import SourceTasks, WorkOptions
+    from processing.pipeline import Pipeline
+    from settings.runtime_settings import RuntimeConfig
 
     pipeline = Pipeline(config)
     sid = pipeline.prepare(video_file)
@@ -328,9 +348,9 @@ def test_running_analysis_cancels_between_progress_and_resumes(config, video_fil
 
 
 def test_running_dialogue_cancels_between_progress_and_resumes(config, video_file, monkeypatch):
-    from mindex.admin.dialogue_tasks import DialogueOptions, DialogueTasks
-    from mindex.processing.pipeline import Pipeline
-    from mindex.settings.runtime_settings import RuntimeConfig
+    from admin.dialogue_tasks import DialogueOptions, DialogueTasks
+    from processing.pipeline import Pipeline
+    from settings.runtime_settings import RuntimeConfig
 
     pipeline = Pipeline(config)
     sid = pipeline.prepare(video_file)
@@ -351,9 +371,9 @@ def test_running_dialogue_cancels_between_progress_and_resumes(config, video_fil
 
 
 def test_running_person_task_cancels_between_progress_and_resumes(config, video_file, monkeypatch):
-    from mindex.persons.person_processing import PersonOptions, PersonProcessor, PersonTasks
-    from mindex.processing.pipeline import Pipeline
-    from mindex.settings.runtime_settings import RuntimeConfig
+    from persons.person_processing import PersonOptions, PersonProcessor, PersonTasks
+    from processing.pipeline import Pipeline
+    from settings.runtime_settings import RuntimeConfig
 
     pipeline = Pipeline(config)
     sid = pipeline.prepare(video_file)
@@ -375,18 +395,19 @@ def test_running_person_task_cancels_between_progress_and_resumes(config, video_
 @pytest.mark.slow
 def test_index_build_cancelled_keeps_active_index_and_resumes(config, video_file, tmp_path):
     """发布中途取消：活动索引不变、候选版本保持 building 可续建，重试复用已写向量。"""
+    from admin.source_tasks import PublishOptions, SourceTasks
     from conftest import FixtureEmbedder
-
-    from mindex.admin.source_tasks import PublishOptions, SourceTasks
-    from mindex.processing.indexing import IndexBuilder, check_index
-    from mindex.processing.pipeline import Pipeline
-    from mindex.settings.runtime_settings import RuntimeConfig
-    from mindex.shared.media import cut
+    from processing.indexing import IndexBuilder, check_index
+    from processing.pipeline import Pipeline
+    from settings.runtime_settings import RuntimeConfig
+    from shared.media import cut
 
     pipeline = Pipeline(config)
     other = tmp_path / "other.mp4"
     cut(video_file, 0, 1, other)
-    old = IndexBuilder(config, FixtureEmbedder(config)).build(source_id=pipeline.prepare(other), activate=True)
+    old = IndexBuilder(config, FixtureEmbedder(config)).build(
+        source_id=pipeline.prepare(other), activate=True
+    )
     sid = pipeline.prepare(video_file)
     total = len(pipeline.store.segments(sid, "moment"))
     assert total > 1
@@ -420,7 +441,8 @@ def test_index_build_cancelled_keeps_active_index_and_resumes(config, video_file
     assert version["status"] == "building"
     durable = pipeline.store.one(
         "SELECT count(*) AS n FROM index_members WHERE index_id=? AND complete=1 "
-        "AND json_extract(snapshot,'$.source_id')=?", (candidate, sid),
+        "AND json_extract(snapshot,'$.source_id')=?",
+        (candidate, sid),
     )["n"]
     assert durable == value["progress"]["completed"]
     # 索引写锁已释放，重试从检查点续建同一候选版本并激活。
@@ -430,17 +452,18 @@ def test_index_build_cancelled_keeps_active_index_and_resumes(config, video_file
     assert value["publication"]["index_id"] == candidate
     assert pipeline.store.active_index()["id"] == candidate
     assert not check_index(pipeline.store, candidate)
-    report = json.loads(pipeline.store.one(
-        "SELECT value FROM settings WHERE key=?", ("index_report." + candidate,))["value"])
+    report = json.loads(
+        pipeline.store.one("SELECT value FROM settings WHERE key=?", ("index_report." + candidate,))["value"]
+    )
     assert report["resumed_vectors"] >= 1
 
 
 def test_restart_recovery_interrupts_live_rows_and_keeps_cancelled(config):
     """重启恢复只把 queued/running 置为 interrupted；cancelled 终态保持原样。"""
-    from mindex.admin.dialogue_tasks import DialogueTasks
-    from mindex.admin.source_tasks import SourceTasks
-    from mindex.persons.person_processing import PersonTasks
-    from mindex.settings.runtime_settings import RuntimeConfig
+    from admin.dialogue_tasks import DialogueTasks
+    from admin.source_tasks import SourceTasks
+    from persons.person_processing import PersonTasks
+    from settings.runtime_settings import RuntimeConfig
 
     store = Store(config.data_dir)
     runtime = RuntimeConfig(config, store)
@@ -452,8 +475,12 @@ def test_restart_recovery_interrupts_live_rows_and_keeps_cancelled(config):
     # 运行中被请求取消、但进程在检查点前退出：恢复仍按中断处理，重试会清掉遗留标记。
     registry_for(store.root).request("source_tasks-running")
     try:
-        managers = dict(zip(tables, (SourceTasks(runtime, store), DialogueTasks(runtime, store),
-                                     PersonTasks(runtime, store))))
+        managers = dict(
+            zip(
+                tables,
+                (SourceTasks(runtime, store), DialogueTasks(runtime, store), PersonTasks(runtime, store)),
+            )
+        )
         for table, manager in managers.items():
             for status in ("queued", "running"):
                 row = manager.get(f"{table}-{status}")
@@ -469,6 +496,8 @@ def test_restart_recovery_interrupts_live_rows_and_keeps_cancelled(config):
         # 重试前重置尝试会清掉遗留的取消标记，新执行不会被立即中断。
         reset_task_attempt(store, "source_tasks", "source_tasks-running")
         assert not registry_for(store.root).requested("source_tasks-running")
-        assert store.one("SELECT status FROM source_tasks WHERE id='source_tasks-running'")["status"] == "queued"
+        assert (
+            store.one("SELECT status FROM source_tasks WHERE id='source_tasks-running'")["status"] == "queued"
+        )
     finally:
         registry_for(store.root).clear("source_tasks-running")

@@ -2,15 +2,21 @@
 
 from __future__ import annotations
 
+import asyncio
+import base64
+import io
 import json
+import wave
+from threading import Event
 
+import httpx
 import pytest
-from conftest import FixtureStoryboarder
 from fastapi.testclient import TestClient
 
-from mindex.api import create_app
-from mindex.models import adapters
-from mindex.shared.storage import Store
+from api import create_app
+from conftest import FixtureStoryboarder
+from models import adapters
+from shared.storage import Store
 
 
 def minimax_profile(client, name="Minimax TTS"):
@@ -20,15 +26,17 @@ def minimax_profile(client, name="Minimax TTS"):
             "role": "tts",
             "provider": "minimax",
             "name": name,
-            "config": {"backend": "minimax", "base_url": "https://api.minimax.cn/v1", "model": "speech-2.8-hd"},
+            "config": {
+                "backend": "minimax",
+                "base_url": "https://api.minimax.cn/v1",
+                "model": "speech-2.8-hd",
+            },
             "api_key": "sk-minimax-key-1234",
         },
     ).json()
 
 
 def sample_wav() -> bytes:
-    import io
-    import wave
 
     buffer = io.BytesIO()
     with wave.open(buffer, "wb") as handle:
@@ -60,7 +68,12 @@ def test_register_and_default_voice_flow(config):
     assert job.json()["options"]["voice"] == "Cherry"
 
     # 重复名称 422；删除后清默认
-    assert client.post("/api/settings/voices", json={"name": "本地男声", "provider": "self", "voice_id": "x"}).status_code == 422
+    assert (
+        client.post(
+            "/api/settings/voices", json={"name": "本地男声", "provider": "self", "voice_id": "x"}
+        ).status_code
+        == 422
+    )
     assert client.delete(f"/api/settings/voices/{voice['id']}").status_code == 204
     data = client.get("/api/settings").json()
     assert data["business"]["default_voice"] is None
@@ -138,7 +151,11 @@ def test_aliyun_clone_url_mode(config, monkeypatch):
             "role": "tts",
             "provider": "aliyun",
             "name": "阿里 TTS",
-            "config": {"backend": "dashscope", "base_url": "https://dashscope.aliyuncs.com", "model": "qwen3-tts-flash"},
+            "config": {
+                "backend": "dashscope",
+                "base_url": "https://dashscope.aliyuncs.com",
+                "model": "qwen3-tts-flash",
+            },
         },
     ).json()
     client.post(f"/api/settings/profiles/{profile['id']}/activate")
@@ -196,7 +213,7 @@ def test_get_settings_includes_voices(config):
 
 
 def test_qwentts_register_contract(monkeypatch, tmp_path):
-    from mindex.settings.voice_clone import qwentts_register
+    from settings.voice_clone import qwentts_register
 
     captured = {}
 
@@ -208,7 +225,6 @@ def test_qwentts_register_contract(monkeypatch, tmp_path):
     sample = tmp_path / "s.wav"
     sample.write_bytes(b"RIFF-x")
     qwentts_register("http://127.0.0.1:8890/v1", sample, "mindex-clone-9", "参考文本", timeout=123)
-    import base64
 
     assert captured["timeout"] == 123
 
@@ -243,7 +259,6 @@ def test_clone_local_qwentts_flow(config, monkeypatch):
     assert voice["provider"] == "self" and voice["kind"] == "clone" and voice["status"] == "ready"
     assert voice["notes"] == "这是参考文本"
     assert registers and registers[0]["name"] == voice["voice_id"]
-    import base64
 
     assert base64.b64decode(registers[0]["wav_b64"]) == sample_wav()
     store = Store(config.data_dir)
@@ -253,7 +268,11 @@ def test_clone_local_qwentts_flow(config, monkeypatch):
 
     # 重启自愈：目录接口对缺失克隆重注册（服务端列表为空时）
     monkeypatch.setattr(
-        adapters, "request", lambda method, url, **kw: {"voices": []} if url.endswith("/audio/voices") else (_ for _ in ()).throw(AssertionError(url))
+        adapters,
+        "request",
+        lambda method, url, **kw: (
+            {"voices": []} if url.endswith("/audio/voices") else (_ for _ in ()).throw(AssertionError(url))
+        ),
     )
     catalog = client.get("/api/settings/voices/catalog").json()
     ids = {v["voice_id"] for g in catalog["groups"] for v in g["voices"]}
@@ -263,9 +282,7 @@ def test_clone_local_qwentts_flow(config, monkeypatch):
 def test_business_default_voice_literal(config, monkeypatch):
     """默认音色支持 voice_id 字面量：目录内合法，未知/跨厂商拒绝。"""
     client = TestClient(create_app(config))
-    monkeypatch.setattr(
-        adapters, "request", lambda method, url, **kw: {"voices": ["vivian", "serena"]}
-    )
+    monkeypatch.setattr(adapters, "request", lambda method, url, **kw: {"voices": ["vivian", "serena"]})
     ok = client.put("/api/settings/business", json={"default_voice": "vivian"})
     assert ok.status_code == 200
     assert ok.json()["default_voice"] == "vivian"
@@ -284,9 +301,7 @@ def test_business_default_voice_literal(config, monkeypatch):
 
 def test_catalog_route_reports_backend_and_groups(config, monkeypatch):
     client = TestClient(create_app(config))
-    monkeypatch.setattr(
-        adapters, "request", lambda method, url, **kw: {"voices": ["vivian"]}
-    )
+    monkeypatch.setattr(adapters, "request", lambda method, url, **kw: {"voices": ["vivian"]})
     catalog = client.get("/api/settings/voices/catalog").json()
     assert catalog["backend"] == "openai"
     assert catalog["default_voice"] is None
@@ -347,8 +362,16 @@ def test_catalog_preview_voiceclone_profile_drops_system_groups(config, monkeypa
     client = TestClient(create_app(config))
     profile = client.post(
         "/api/settings/profiles",
-        json={"role": "tts", "provider": "self", "name": "LocalMac-Qwen3-TTS-VoiceClone",
-              "config": {"backend": "openai", "base_url": "http://127.0.0.1:8890/v1", "model": "Qwen3-TTS-VoiceClone"}},
+        json={
+            "role": "tts",
+            "provider": "self",
+            "name": "LocalMac-Qwen3-TTS-VoiceClone",
+            "config": {
+                "backend": "openai",
+                "base_url": "http://127.0.0.1:8890/v1",
+                "model": "Qwen3-TTS-VoiceClone",
+            },
+        },
     ).json()
     client.post(
         "/api/settings/voices",
@@ -367,8 +390,12 @@ def test_catalog_preview_customvoice_local_lists_system(config, monkeypatch):
     monkeypatch.setattr(adapters, "request", lambda *a, **kw: {"voices": ["vivian", "uncle_fu"]})
     catalog = client.post(
         "/api/settings/voices/catalog/preview",
-        json={"name": "LocalMac-Qwen3-TTS-CustomVoice", "backend": "openai",
-              "base_url": "http://127.0.0.1:8890/v1", "model": "Qwen3-TTS-CustomVoice"},
+        json={
+            "name": "LocalMac-Qwen3-TTS-CustomVoice",
+            "backend": "openai",
+            "base_url": "http://127.0.0.1:8890/v1",
+            "model": "Qwen3-TTS-CustomVoice",
+        },
     ).json()
     assert catalog["voice_kind"] == "system"
     ids = {v["voice_id"] for g in catalog["groups"] for v in g["voices"]}
@@ -381,16 +408,26 @@ def test_catalog_preview_minimax_clone_kind_by_name(config, monkeypatch):
     profile = client.post(
         "/api/settings/profiles",
         json={
-            "role": "tts", "provider": "minimax", "name": "MiniMax-Speech-2.8-HD-VoiceClone",
-            "config": {"backend": "minimax", "base_url": "https://api.minimax.cn/v1", "model": "speech-2.8-hd"},
+            "role": "tts",
+            "provider": "minimax",
+            "name": "MiniMax-Speech-2.8-HD-VoiceClone",
+            "config": {
+                "backend": "minimax",
+                "base_url": "https://api.minimax.cn/v1",
+                "model": "speech-2.8-hd",
+            },
             "api_key": "sk-minimax-key-1234",
         },
     ).json()
     monkeypatch.setattr(
-        adapters, "request",
-        lambda *a, **kw: {"base_resp": {"status_code": 0}, "system_voice": [
-            {"voice_id": "female-yujie", "voice_name": "御姐", "description": []}],
-            "voice_cloning": [], "voice_generation": []},
+        adapters,
+        "request",
+        lambda *a, **kw: {
+            "base_resp": {"status_code": 0},
+            "system_voice": [{"voice_id": "female-yujie", "voice_name": "御姐", "description": []}],
+            "voice_cloning": [],
+            "voice_generation": [],
+        },
     )
     catalog = client.post("/api/settings/voices/catalog/preview", json={"profile_id": profile["id"]}).json()
     assert catalog["voice_kind"] == "clone"
@@ -398,7 +435,7 @@ def test_catalog_preview_minimax_clone_kind_by_name(config, monkeypatch):
 
 
 def test_clone_sample_over_limit_returns_413_and_leaves_no_file(config, monkeypatch):
-    from mindex.settings import settings_api
+    from settings import api as settings_api
 
     monkeypatch.setattr(settings_api, "MAX_VOICE_SAMPLE_BYTES", 1024)
     monkeypatch.setattr(settings_api, "qwentts_register", lambda *a, **kw: pytest.fail("超限样本不应克隆"))
@@ -414,7 +451,7 @@ def test_clone_sample_over_limit_returns_413_and_leaves_no_file(config, monkeypa
 
 
 def test_clone_failure_removes_pending_sample_local(config, monkeypatch):
-    from mindex.settings import settings_api
+    from settings import api as settings_api
 
     def fail(*args, **kwargs):
         raise adapters.ModelError("服务不可用")
@@ -433,15 +470,20 @@ def test_clone_failure_removes_pending_sample_local(config, monkeypatch):
 
 
 def test_dashscope_failed_records_have_unique_voice_ids(config, monkeypatch):
-    from mindex.settings import settings_api
+    from settings import api as settings_api
 
     client = TestClient(create_app(config))
     profile = client.post(
         "/api/settings/profiles",
         json={
-            "role": "tts", "provider": "aliyun", "name": "阿里",
-            "config": {"backend": "dashscope", "base_url": "https://dashscope.aliyuncs.com/api/v1",
-                       "model": "cosyvoice-v2"},
+            "role": "tts",
+            "provider": "aliyun",
+            "name": "阿里",
+            "config": {
+                "backend": "dashscope",
+                "base_url": "https://dashscope.aliyuncs.com/api/v1",
+                "model": "cosyvoice-v2",
+            },
             "api_key": "sk-aliyun-key-1234",
         },
     )
@@ -466,12 +508,8 @@ def test_dashscope_failed_records_have_unique_voice_ids(config, monkeypatch):
 
 
 def test_clone_does_not_block_event_loop(config, monkeypatch):
-    import asyncio
-    from threading import Event
 
-    import httpx
-
-    from mindex.settings import settings_api
+    from settings import api as settings_api
 
     entered, release = Event(), Event()
 
@@ -487,11 +525,13 @@ def test_clone_does_not_block_event_loop(config, monkeypatch):
     async def scenario():
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-            clone = asyncio.create_task(client.post(
-                "/api/settings/voices/clone",
-                data={"name": "慢克隆", "consent": "true"},
-                files={"file": ("sample.wav", sample_wav(), "audio/wav")},
-            ))
+            clone = asyncio.create_task(
+                client.post(
+                    "/api/settings/voices/clone",
+                    data={"name": "慢克隆", "consent": "true"},
+                    files={"file": ("sample.wav", sample_wav(), "audio/wav")},
+                )
+            )
             try:
                 assert await asyncio.to_thread(entered.wait, 10), "克隆线程未启动"
                 # 状态请求必须在克隆线程被释放前完成，避免依赖 CI 机器上的固定耗时。

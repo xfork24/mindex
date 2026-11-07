@@ -2,27 +2,43 @@
 
 from __future__ import annotations
 
-from mindex.agent.ids import short
-from mindex.agent.registry import ToolContext, ToolError
+from agent.ids import short
+from agent.registry import ToolContext, ToolError
 
 STAGES = ("recall", "tts", "select", "render")
-STAGE_LABELS = {"script": "文案", "split": "拆分镜", "recall": "召回", "tts": "配音", "music": "背景音乐",
-                "draw": "生成图片", "generate": "生成画面",
-                "animate": "生成动画", "invoke": "调用第三方工具", "select": "选片", "overlay": "生成叠加层", "render": "渲染", "compose": "合成",
-                "content": "分镜内容"}
+STAGE_LABELS = {
+    "script": "文案",
+    "split": "拆分镜",
+    "recall": "召回",
+    "tts": "配音",
+    "music": "背景音乐",
+    "draw": "生成图片",
+    "generate": "生成画面",
+    "animate": "生成动画",
+    "invoke": "调用第三方工具",
+    "select": "选片",
+    "overlay": "生成叠加层",
+    "render": "渲染",
+    "compose": "合成",
+    "content": "分镜内容",
+}
 # 只属于部分来源的逐镜阶段：分镜表在四列之外另起一行显示。
 EXTRA_STAGES = {"aigc": "generate", "animation": "animate", "aigc_image": "draw", "tool": "invoke"}
 
 
 def shot_stage_names(content: dict) -> tuple[str, ...]:
-    """分镜表展示的阶段：素材召回四列；aigc 多一个生成画面，aigc_image 多一个生成图片，animation 多一个生成动画；
+    """分镜表展示的阶段：素材召回四列；aigc 多一个生成画面，aigc_image 多一个生成图片，
+    animation 多一个生成动画；
     背景音乐提示点（生成/翻唱）分镜另有背景音乐阶段。"""
     extra = EXTRA_STAGES.get(((content or {}).get("source") or {}).get("kind"))
     stages = ("recall", "tts", extra, "select", "render") if extra else STAGES
     music = (content or {}).get("music") or {}
     if music.get("kind") in ("generate", "cover", "library"):
         stages = (*stages, "music")
-    if any(isinstance(layer, dict) and layer.get("engine") == "html" for layer in (content or {}).get("overlays") or []):
+    if any(
+        isinstance(layer, dict) and layer.get("engine") == "html"
+        for layer in (content or {}).get("overlays") or []
+    ):
         stages = (*stages, "overlay")
     return stages
 
@@ -30,18 +46,28 @@ def shot_stage_names(content: dict) -> tuple[str, ...]:
 def source_line(source: dict) -> str:
     """分镜表里画面来源的一行摘要（不截断提示词以外的字段）。"""
     if source["kind"] == "aigc":
-        options = "、".join(f"{k}={v}" for k, v in source.items() if k not in ("kind", "prompt") and v is not None)
+        options = "、".join(
+            f"{k}={v}" for k, v in source.items() if k not in ("kind", "prompt") and v is not None
+        )
         prompt = clip(source.get("prompt"), 40) if source.get("prompt") else "（缺省用画面意象/查询）"
         return f"AI 生成视频 提示词 {prompt}" + (f"（{options}）" if options else "")
     if source["kind"] == "aigc_image":
-        options = "、".join(f"{k}={v}" for k, v in source.items() if k not in ("kind", "prompt") and v is not None)
+        options = "、".join(
+            f"{k}={v}" for k, v in source.items() if k not in ("kind", "prompt") and v is not None
+        )
         prompt = clip(source.get("prompt"), 40) if source.get("prompt") else "（缺省用画面意象/查询）"
         return f"AI 生成图片 提示词 {prompt}" + (f"（{options}）" if options else "")
     if source["kind"] == "tool":
-        return (f"第三方工具 {source['tool_id']}/{source['tool']}（{'图片' if source.get('output') == 'image' else '视频'}）"
-                + (f" 参数 {clip(str(source.get('arguments')), 40)}" if source.get("arguments") else ""))
+        return (
+            f"第三方工具 "
+            f"{source['tool_id']}/{source['tool']}（"
+            f"{'图片' if source.get('output') == 'image' else '视频'}）"
+            + (f" 参数 {clip(str(source.get('arguments')), 40)}" if source.get("arguments") else "")
+        )
     if source["kind"] == "animation":
-        return "AI 动画 画面说明 " + (clip(source.get("brief"), 40) if source.get("brief") else "（缺省用画面意象/旁白）")
+        return "AI 动画 画面说明 " + (
+            clip(source.get("brief"), 40) if source.get("brief") else "（缺省用画面意象/旁白）"
+        )
     options = "、".join(f"{k}={v}" for k, v in source.items() if k not in ("kind", "media_id"))
     return f"{'上传片段' if source['kind'] == 'clip' else '静态图片'} {source['media_id'][:8]}（{options}）"
 
@@ -55,8 +81,11 @@ def check(result: dict, what: str = "请求") -> object:
         hint = "（资源忙或数据已变化：稍后重试，或先重新读取工作台再操作）"
     elif status == 422 and "revision" in str(result.get("error", "")).lower():
         hint = "（方案已被修改：请重新读取工作台后重试）"
-    raise ToolError(f"{what}失败（HTTP {status}）：{result['error']}{hint}", code=f"http_{status}",
-                    value={"status": status, "error": result["error"]})
+    raise ToolError(
+        f"{what}失败（HTTP {status}）：{result['error']}{hint}",
+        code=f"http_{status}",
+        value={"status": status, "error": result["error"]},
+    )
 
 
 def clip(text: str | None, limit: int = 60) -> str:
@@ -83,7 +112,8 @@ class PlanView:
     def revision(self) -> str:
         if self.active and self.w.get("revision"):
             return self.w["revision"]
-        from mindex.studio.workspace import revision
+        # 延迟导入：保持工作区阶段处理器的注册顺序。
+        from studio.workspace import revision
 
         return revision(self.plan)
 
@@ -195,13 +225,15 @@ def board_text(view: PlanView, rows: list[dict] | None = None, limit: int = 60) 
                 text += f"（{stage_mark(row['stages']['music'])}）"
             lines.append(text + "；之后的分镜顺延")
         if row.get("transition"):
-            from mindex.studio import workspace as ws
+            # 延迟导入：保持工作区阶段处理器的注册顺序。
+            from studio import workspace as ws
 
             lines.append(f"  转场：{ws.transitions.describe(row['transition'])}")
         if row.get("highlights"):
             lines.append(f"  字幕高亮词：{'、'.join(row['highlights'])}")
         if row.get("overlays"):
-            from mindex.agent.tools.studio_write import overlays_text
+            # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+            from agent.tools.studio_write import overlays_text
 
             lines.append(f"  文字层：{overlays_text(row['overlays'])}")
     lines.append(f"（旁白与画面意象截断到 {limit} 字、查询截断到 30 字；完整内容请用 get_shot_details 读取）")

@@ -8,8 +8,8 @@ import re
 from functools import lru_cache
 from pathlib import Path
 
-from mindex.models.adapters import ModelError
-from mindex.shared.config import Config, fingerprint
+from models.adapters import ModelError
+from shared.config import Config, fingerprint
 
 ADAPTER_VERSION = "llama-native-wemm-2"
 PREFIX = "<|im_start|>user\n"
@@ -166,8 +166,7 @@ def check_local_files(pinned: dict, report: dict, *, allow_relocation: bool = Fa
             # 这里只定位候选文件，下面仍须核对清单中的内容摘要。
             paths["mmproj"] = resolved.parent / paths["mmproj"].name
     files = {
-        name: verified_file(path, pinned["file_identity"][name + "_sha256"])
-        for name, path in paths.items()
+        name: verified_file(path, pinned["file_identity"][name + "_sha256"]) for name, path in paths.items()
     }
     if resolved != Path(files["weights"]["resolved_path"]):
         raise ModelError("/props.model_path 解析结果与本地 weights 文件不同")

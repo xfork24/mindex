@@ -7,31 +7,41 @@ from types import SimpleNamespace
 
 import pytest
 
-from mindex.models import adapters, qwen
-from mindex.models.adapters import ModelError
-from mindex.models.qwen import QwenAnalyzer
-from mindex.processing.pipeline import Pipeline
+from models import adapters, qwen
+from models.adapters import ModelError
+from models.qwen import QwenAnalyzer
+from processing.pipeline import Pipeline
 
 
 def chat_response(result):
-    return {"choices": [{"finish_reason": "stop", "message": {
-        "content": json.dumps(result, ensure_ascii=False),
-    }}]}
+    return {
+        "choices": [
+            {
+                "finish_reason": "stop",
+                "message": {
+                    "content": json.dumps(result, ensure_ascii=False),
+                },
+            }
+        ]
+    }
 
 
-@pytest.mark.parametrize("invalid,field", [
-    ({"description": "夜景", "scene": "夜间城市滨水区，水面倒映灯光"}, "scene"),
-    ({"description": "夜景", "actions": "行走"}, "actions"),
-    ({"description": "夜景", "shot_size": "远景"}, "shot_size"),
-    ({"description": "夜景", "people": None}, "people"),
-    ({"description": "夜景", "objects": {"name": "灯"}}, "objects"),
-    ({"description": "夜景", "emotions": [42]}, "emotions.0"),
-    ({"description": ["夜景"]}, "description"),
-    ({"description": ""}, "description"),
-    ({"scene": ["滨水区"]}, "description"),
-    ([{"description": "夜景"}], "根对象"),
-    (None, "根对象"),
-])
+@pytest.mark.parametrize(
+    "invalid,field",
+    [
+        ({"description": "夜景", "scene": "夜间城市滨水区，水面倒映灯光"}, "scene"),
+        ({"description": "夜景", "actions": "行走"}, "actions"),
+        ({"description": "夜景", "shot_size": "远景"}, "shot_size"),
+        ({"description": "夜景", "people": None}, "people"),
+        ({"description": "夜景", "objects": {"name": "灯"}}, "objects"),
+        ({"description": "夜景", "emotions": [42]}, "emotions.0"),
+        ({"description": ["夜景"]}, "description"),
+        ({"description": ""}, "description"),
+        ({"scene": ["滨水区"]}, "description"),
+        ([{"description": "夜景"}], "根对象"),
+        (None, "根对象"),
+    ],
+)
 def test_annotation_validation_failure_retries_with_field_feedback(config, monkeypatch, invalid, field):
     config.analyzer.response_retries = 1
     config.analyzer.initial_output_tokens = 256
@@ -81,25 +91,33 @@ def test_annotation_validation_exhausts_configured_retries(config, monkeypatch, 
     monkeypatch.setattr(adapters, "request", reply)
     monkeypatch.setattr(qwen, "frame_data", lambda *args: [])
     monkeypatch.setattr(qwen, "time", SimpleNamespace(sleep=delays.append))
-    with caplog.at_level("WARNING", logger="mindex.models.adapters"), pytest.raises(
-        ModelError, match=rf"连续 {retries + 1} 次无效.*重试已耗尽.*scene: Input should be a valid list",
+    with (
+        caplog.at_level("WARNING", logger="models.adapters"),
+        pytest.raises(
+            ModelError,
+            match=rf"连续 {retries + 1} 次无效.*重试已耗尽.*scene: Input should be a valid list",
+        ),
     ):
         QwenAnalyzer(config).analyze(None, [])
     assert len(bodies) == retries + 1
-    assert delays == [min(2 ** i, 8) for i in range(retries)]
-    payload_logs = [record.getMessage() for record in caplog.records if "—— 模型返回结束 ——" in record.getMessage()]
+    assert delays == [min(2**i, 8) for i in range(retries)]
+    payload_logs = [
+        record.getMessage() for record in caplog.records if "—— 模型返回结束 ——" in record.getMessage()
+    ]
     assert len(payload_logs) == retries + 1
     assert all(json.dumps(invalid, ensure_ascii=False, indent=2) in message for message in payload_logs)
 
 
 def test_syntax_and_field_errors_share_one_retry_budget(config, monkeypatch):
     config.analyzer.response_retries = 2
-    responses = iter([
-        {"choices": [{"message": {"content": "{broken"}}]},
-        chat_response({"description": "夜景", "scene": "滨水区"}),
-        chat_response({"description": "夜景", "scene": None}),
-        chat_response({"description": "不应请求第四次"}),
-    ])
+    responses = iter(
+        [
+            {"choices": [{"message": {"content": "{broken"}}]},
+            chat_response({"description": "夜景", "scene": "滨水区"}),
+            chat_response({"description": "夜景", "scene": None}),
+            chat_response({"description": "不应请求第四次"}),
+        ]
+    )
     calls, delays = [], []
 
     def reply(*args, **kwargs):
@@ -114,20 +132,23 @@ def test_syntax_and_field_errors_share_one_retry_budget(config, monkeypatch):
     assert len(calls) == 3 and delays == [1, 2]
 
 
-@pytest.mark.parametrize("invalid,reason", [
-    ({}, "groups"),
-    ({"groups": "0,1"}, "groups"),
-    ({"groups": [0, 1]}, "groups"),
-    ({"groups": [[]]}, "groups"),
-    ({"groups": []}, "连续、完整且无重复"),
-    ({"groups": [["0", "1"]]}, "索引必须为整数"),
-    ({"groups": [[False, True]]}, "索引必须为整数"),
-    ({"groups": [[0, 0], [1]]}, "连续、完整且无重复"),
-    ({"groups": [[0]]}, "连续、完整且无重复"),
-    ({"groups": [[1], [0]]}, "连续、完整且无重复"),
-    ({"groups": [[0], [1], [2]]}, "连续、完整且无重复"),
-    ({"groups": [[0, 1]]}, "超过45秒"),
-])
+@pytest.mark.parametrize(
+    "invalid,reason",
+    [
+        ({}, "groups"),
+        ({"groups": "0,1"}, "groups"),
+        ({"groups": [0, 1]}, "groups"),
+        ({"groups": [[]]}, "groups"),
+        ({"groups": []}, "连续、完整且无重复"),
+        ({"groups": [["0", "1"]]}, "索引必须为整数"),
+        ({"groups": [[False, True]]}, "索引必须为整数"),
+        ({"groups": [[0, 0], [1]]}, "连续、完整且无重复"),
+        ({"groups": [[0]]}, "连续、完整且无重复"),
+        ({"groups": [[1], [0]]}, "连续、完整且无重复"),
+        ({"groups": [[0], [1], [2]]}, "连续、完整且无重复"),
+        ({"groups": [[0, 1]]}, "超过45秒"),
+    ],
+)
 def test_invalid_scene_grouping_uses_response_retries(config, monkeypatch, invalid, reason):
     config.analyzer.response_retries = 1
     responses = iter([chat_response(invalid), chat_response({"groups": [[0], [1]]})])
@@ -202,20 +223,23 @@ def test_scene_boundaries_cover_chinatown_dense_batch_through_final_clip(config,
     assert len(bodies) == 1
 
 
-@pytest.mark.parametrize("invalid,reason", [
-    ({"scene_starts": None}, "非空整数数组"),
-    ({"scene_starts": []}, "非空整数数组"),
-    ({"scene_starts": ["0", 1]}, "索引必须为整数"),
-    ({"scene_starts": [False, 1]}, "索引必须为整数"),
-    ({"scene_starts": [0, 1.0]}, "索引必须为整数"),
-    ({"scene_starts": [1]}, "首项必须为0"),
-    ({"scene_starts": [0, -1]}, "0到2之间"),
-    ({"scene_starts": [0, 3]}, "0到2之间"),
-    ({"scene_starts": [0, 1, 1]}, "严格递增且无重复"),
-    ({"scene_starts": [0, 2, 1]}, "严格递增且无重复"),
-    ({"scene_starts": [0], "groups": [[0, 1, 2]]}, "只能包含 scene_starts"),
-    ({"scene_starts": [0]}, "超过45秒"),
-])
+@pytest.mark.parametrize(
+    "invalid,reason",
+    [
+        ({"scene_starts": None}, "非空整数数组"),
+        ({"scene_starts": []}, "非空整数数组"),
+        ({"scene_starts": ["0", 1]}, "索引必须为整数"),
+        ({"scene_starts": [False, 1]}, "索引必须为整数"),
+        ({"scene_starts": [0, 1.0]}, "索引必须为整数"),
+        ({"scene_starts": [1]}, "首项必须为0"),
+        ({"scene_starts": [0, -1]}, "0到2之间"),
+        ({"scene_starts": [0, 3]}, "0到2之间"),
+        ({"scene_starts": [0, 1, 1]}, "严格递增且无重复"),
+        ({"scene_starts": [0, 2, 1]}, "严格递增且无重复"),
+        ({"scene_starts": [0], "groups": [[0, 1, 2]]}, "只能包含 scene_starts"),
+        ({"scene_starts": [0]}, "超过45秒"),
+    ],
+)
 def test_invalid_scene_boundaries_retry_with_specific_feedback(config, monkeypatch, invalid, reason):
     config.analyzer.response_retries = 1
     responses = iter([chat_response(invalid), chat_response({"scene_starts": [0, 1, 2]})])
@@ -236,10 +260,12 @@ def test_invalid_scene_boundaries_retry_with_specific_feedback(config, monkeypat
 
 def test_legacy_scene_grouping_reports_missing_chinatown_tail(config, monkeypatch):
     config.analyzer.response_retries = 1
-    responses = iter([
-        chat_response({"groups": [[0, 1], list(range(2, 28))]}),
-        chat_response({"scene_starts": [0, 2, 28]}),
-    ])
+    responses = iter(
+        [
+            chat_response({"groups": [[0, 1], list(range(2, 28))]}),
+            chat_response({"scene_starts": [0, 2, 28]}),
+        ]
+    )
     bodies = []
 
     def reply(*args, **kwargs):
@@ -272,8 +298,8 @@ def test_empty_scene_grouping_does_not_call_model(config, monkeypatch):
 
 
 def test_bilingual_annotation_prompt_and_searchable_text(config, monkeypatch):
-    from mindex.search.search import lexical_search
-    from mindex.shared.types import Annotation
+    from search.search import lexical_search
+    from shared.types import Annotation
 
     bilingual = {
         "description": "城市灯光倒映在水面。 / City lights reflect on the water.",
@@ -301,40 +327,51 @@ def test_bilingual_annotation_prompt_and_searchable_text(config, monkeypatch):
     assert "保持下述字段名和类型不变" in prompt
     assert "英文不得增加" in prompt and "不识别真实身份" in prompt
     analysis = "\n".join(result.views("").values())
-    docs = [{"id": "bilingual", "views": {"analysis": analysis}},
-            {"id": "other", "views": {"analysis": "山顶有积雪。 / Snow covers the mountain."}}]
+    docs = [
+        {"id": "bilingual", "views": {"analysis": analysis}},
+        {"id": "other", "views": {"analysis": "山顶有积雪。 / Snow covers the mountain."}},
+    ]
     for text in ("waterfront", "walking", "wide shot", "灯光", "平静"):
         assert lexical_search(text, docs, 2)[0]["id"] == "bilingual"
 
 
 def test_bilingual_prompt_changes_analysis_cache_identity(config):
-    from mindex.shared.config import fingerprint
+    from shared.config import fingerprint
 
-    old = fingerprint({
-        "prompt": 1,
-        "model": config.analyzer.model_dump(exclude={
-            "timeout", "api_key_env", "response_retries", "initial_output_tokens", "max_output_tokens", "thinking_mode",
-        }),
-        "deployment": config.analyzer_deployment,
-        "layout": config.layout_key,
-    })
+    old = fingerprint(
+        {
+            "prompt": 1,
+            "model": config.analyzer.model_dump(
+                exclude={
+                    "timeout",
+                    "api_key_env",
+                    "response_retries",
+                    "initial_output_tokens",
+                    "max_output_tokens",
+                    "thinking_mode",
+                }
+            ),
+            "deployment": config.analyzer_deployment,
+            "layout": config.layout_key,
+        }
+    )
     assert config.analysis_key != old
 
 
-@pytest.mark.parametrize('bad', ['仰视 low-angle view', '仰视 / 仰视 low-angle view', '仰视'])
+@pytest.mark.parametrize("bad", ["仰视 low-angle view", "仰视 / 仰视 low-angle view", "仰视"])
 def test_malformed_bilingual_values_are_retried(config, monkeypatch, bad):
     config.analyzer.response_retries = 1
-    valid = {'description': '树林。 / Woodland.', 'angle': ['仰视 / low-angle view']}
-    responses = iter([chat_response({**valid, 'angle': [bad]}), chat_response(valid)])
+    valid = {"description": "树林。 / Woodland.", "angle": ["仰视 / low-angle view"]}
+    responses = iter([chat_response({**valid, "angle": [bad]}), chat_response(valid)])
     bodies = []
 
     def reply(*args, **kwargs):
-        bodies.append(kwargs['json'])
+        bodies.append(kwargs["json"])
         return next(responses)
 
-    monkeypatch.setattr(adapters, 'request', reply)
-    monkeypatch.setattr(qwen, 'frame_data', lambda *args: [])
-    monkeypatch.setattr(qwen, 'time', SimpleNamespace(sleep=lambda _: None))
+    monkeypatch.setattr(adapters, "request", reply)
+    monkeypatch.setattr(qwen, "frame_data", lambda *args: [])
+    monkeypatch.setattr(qwen, "time", SimpleNamespace(sleep=lambda _: None))
     result = QwenAnalyzer(config).analyze(None, [])
-    assert result.angle == valid['angle']
-    assert 'angle.0: 双语分析' in bodies[1]['messages'][0]['content']
+    assert result.angle == valid["angle"]
+    assert "angle.0: 双语分析" in bodies[1]["messages"][0]["content"]

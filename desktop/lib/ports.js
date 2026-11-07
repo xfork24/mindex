@@ -27,7 +27,9 @@ function freePort(host = HOST) {
 
 // 返回 {port, changed}：changed 表示之前保存过端口但现在被占用、改用了新端口（界面偏好会重置）。
 async function choosePort(saved, { check = isPortFree, pick = freePort } = {}) {
-  if (saved && (await check(saved))) return { port: saved, changed: false };
+  if (saved && (await check(saved))) {
+    return { port: saved, changed: false };
+  }
   return { port: await pick(), changed: Boolean(saved) };
 }
 

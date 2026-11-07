@@ -3,11 +3,11 @@
 import wave
 
 import pytest
-from test_backup import export, library, restore  # noqa: F401 — library 是隔离夹具
 
-from mindex.shared.media_groups import Groups
-from mindex.shared.storage import Store
-from mindex.studio import music_library, studio
+from shared.media_groups import Groups
+from shared.storage import Store
+from studio import music_library, studio
+from test_backup import export, library, restore  # noqa: F401 — library 是隔离夹具
 
 
 @pytest.mark.slow

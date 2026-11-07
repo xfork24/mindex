@@ -6,20 +6,50 @@ const vm = require("node:vm");
 
 class Node {
   constructor(tag = "div") {
-    Object.assign(this, { tagName: tag, textContent: "", value: "", hidden: false, disabled: false, dataset: {}, attrs: {}, children: [] });
+    Object.assign(this, {
+      tagName: tag,
+      textContent: "",
+      value: "",
+      hidden: false,
+      disabled: false,
+      dataset: {},
+      attrs: {},
+      children: [],
+    });
   }
-  setAttribute(k, v) { this.attrs[k] = String(v); }
-  append(...children) { this.children.push(...children); }
-  replaceChildren(...children) { this.children = children; }
-  querySelector(sel) { return sel === "select" ? this.children.find(c => c.tagName === "select") || null : null; }
+  setAttribute(k, v) {
+    this.attrs[k] = String(v);
+  }
+  append(...children) {
+    this.children.push(...children);
+  }
+  replaceChildren(...children) {
+    this.children = children;
+  }
+  querySelector(sel) {
+    return sel === "select" ? this.children.find((c) => c.tagName === "select") || null : null;
+  }
   addEventListener() {}
 }
 const nodes = Object.fromEntries(
-  ["script-text", "script-generate", "script-counter", "script-outline", "script-stale", "script-error", "script-history"]
-    .map(id => [id, new Node(id === "script-text" ? "textarea" : "div")]),
+  [
+    "script-text",
+    "script-generate",
+    "script-counter",
+    "script-outline",
+    "script-stale",
+    "script-error",
+    "script-history",
+  ].map((id) => [id, new Node(id === "script-text" ? "textarea" : "div")]),
 );
-const requests = [], runs = [], confirms = [], accepted = [];
-let confirmAnswer = true, scope = "job/p1", busyNow = false, lastScriptNode = null;
+const requests = [];
+const runs = [];
+const confirms = [];
+const accepted = [];
+let confirmAnswer = true;
+let scope = "job/p1";
+let busyNow = false;
+let lastScriptNode = null;
 const job = { outline: "写一个新加坡旅游视频", title: "t" };
 const plans = {
   p1: { id: "p1", script: null, board: null, shots: {}, ranges: {} },
@@ -27,47 +57,107 @@ const plans = {
 const versions = {};
 const sandbox = {
   MindexI18n: require("./i18n_adapter.cjs"),
-  console, Map, Promise, Error, JSON, String, Boolean, Object, Date, Array, Number, RegExp,
-  window: { confirm: message => { confirms.push(message); return confirmAnswer; } },
-  document: { createElement: tag => new Node(tag) },
-  state: { data: { job, builds: [], script_stale: false, revision: "r1", plans, active_plan: "p1", versions } },
-  $: id => nodes[id],
-  el: (tag, text = "", cls = "") => { const n = new Node(tag); n.textContent = text; n.className = cls; return n; },
-  button: (text, action) => { const n = new Node("button"); n.textContent = text; n.onclick = action; return n; },
-  mutationButton: (text, action) => { const n = new Node("button"); n.textContent = text; n.onclick = action; return n; },
+  console,
+  Map,
+  Promise,
+  Error,
+  JSON,
+  String,
+  Boolean,
+  Object,
+  Date,
+  Array,
+  Number,
+  RegExp,
+  window: {
+    confirm: (message) => {
+      confirms.push(message);
+      return confirmAnswer;
+    },
+  },
+  document: { createElement: (tag) => new Node(tag) },
+  state: {
+    data: {
+      job,
+      builds: [],
+      script_stale: false,
+      revision: "r1",
+      plans,
+      active_plan: "p1",
+      versions,
+    },
+  },
+  $: (id) => nodes[id],
+  el: (tag, text = "", cls = "") => {
+    const n = new Node(tag);
+    n.textContent = text;
+    n.className = cls;
+    return n;
+  },
+  button: (text, action) => {
+    const n = new Node("button");
+    n.textContent = text;
+    n.onclick = action;
+    return n;
+  },
+  mutationButton: (text, action) => {
+    const n = new Node("button");
+    n.textContent = text;
+    n.onclick = action;
+    return n;
+  },
   selectionWithin: () => false,
   showVersion: () => {},
   hasDirtyDraft: () => false,
   updateLocks: () => {},
   plan: () => plans.p1,
-  ver: id => versions[id],
+  ver: (id) => versions[id],
   scopeKey: () => scope,
   planBase: () => "/plan",
   busy: () => busyNow,
-  shortId: id => String(id).slice(0, 8),
-  shortIds: value => String(value),
+  shortId: (id) => String(id).slice(0, 8),
+  shortIds: (value) => String(value),
   latestNode: (stage, sid) => (stage === "script" && sid === null ? lastScriptNode : undefined),
   notice: () => {},
-  runNode: async (...args) => { runs.push(args); },
-  api: async (url, method, body) => { requests.push({ url, method, body }); return {}; },
-  accept: async data => { accepted.push(data); },
-  renderTemplateSelect: () => {},  // 模板下拉在 studio-templates.js，另有用例覆盖
-  renderReferences: () => {},  // 参考文稿面板同在 studio-templates.js
+  runNode: async (...args) => {
+    runs.push(args);
+  },
+  api: async (url, method, body) => {
+    requests.push({ url, method, body });
+    return {};
+  },
+  accept: async (data) => {
+    accepted.push(data);
+  },
+  renderTemplateSelect: () => {}, // 模板下拉在 studio-templates.js，另有用例覆盖
+  renderReferences: () => {}, // 参考文稿面板同在 studio-templates.js
   planReferences: () => plans.p1.options?.references || [],
 };
 vm.createContext(sandbox);
 const source = require("./studio_source.cjs").studioSource();
-vm.runInContext(source.slice(source.indexOf("const scriptDrafts"), source.indexOf("async function inputUrl(")), sandbox);
+vm.runInContext(
+  source.slice(source.indexOf("const scriptDrafts"), source.indexOf("async function inputUrl(")),
+  sandbox,
+);
 const area = nodes["script-text"];
 const view = () => vm.runInContext("renderScript()", sandbox);
 const sync = () => vm.runInContext("syncScriptControls()", sandbox);
-const type = value => {
+const type = (value) => {
   area.value = value;
-  vm.runInContext(`scriptDrafts.set(scopeKey(), { base: plan().script || "", value: ${JSON.stringify(value)} })`, sandbox);
+  vm.runInContext(
+    `scriptDrafts.set(scopeKey(), { base: plan().script || "", value: ${JSON.stringify(value)} })`,
+    sandbox,
+  );
   sync();
 };
 function setScript(id, text, origin = "generated") {
-  versions[id] = { id, stage: "script", shot_id: null, created_at: "2026-10-23T00:00:00", data: { text, origin } };
+  versions[id] = {
+    id,
+    stage: "script",
+    shot_id: null,
+    created_at: "2026-10-23T00:00:00",
+    data: { text, origin },
+  };
   plans.p1.script = id;
 }
 
@@ -107,8 +197,11 @@ function setScript(id, text, origin = "generated") {
   type("  第一版文案。改了一句。  ");
   await vm.runInContext("saveScript()", sandbox);
   // vm 内创建的对象原型不同，按 JSON 比较。
-  assert.deepEqual(JSON.parse(JSON.stringify(requests.pop())),
-    { url: "/plan", method: "PATCH", body: { revision: "r1", script: "第一版文案。改了一句。" } });
+  assert.deepEqual(JSON.parse(JSON.stringify(requests.pop())), {
+    url: "/plan",
+    method: "PATCH",
+    body: { revision: "r1", script: "第一版文案。改了一句。" },
+  });
   assert.equal(accepted.length, 1);
   // 服务端返回新版本后文本框重置为新版本内容，草稿被清掉。
   setScript("bbbbbbbb22222222", "第一版文案。改了一句。", "manual");
@@ -148,21 +241,26 @@ function setScript(id, text, origin = "generated") {
   // 6. 历史版本：列出全部文案版本，可切换（选为构建输入）。
   view();
   const history = nodes["script-history"];
-  const select = history.children.find(c => c.tagName === "select");
+  const select = history.children.find((c) => c.tagName === "select");
   assert.ok(select, "历史区应渲染一个下拉选择");
   assert.equal(select.children.length, 2); // 两个文案版本
-  const useButton = history.children.find(c => c.tagName === "button" && c.textContent === "选为构建输入");
+  const useButton = history.children.find(
+    (c) => c.tagName === "button" && c.textContent === "选为构建输入",
+  );
   assert.ok(useButton, "历史区应有“选为构建输入”按钮");
   // 切到第一版并选用：POST select-version，stage=script。
   select.value = "aaaaaaaa11111111";
   await useButton.onclick();
-  assert.deepEqual(JSON.parse(JSON.stringify(requests.pop())),
-    { url: "/plan/select-version", method: "POST", body: { revision: "r1", version_id: "aaaaaaaa11111111", stage: "script", shot_id: null } });
+  assert.deepEqual(JSON.parse(JSON.stringify(requests.pop())), {
+    url: "/plan/select-version",
+    method: "POST",
+    body: { revision: "r1", version_id: "aaaaaaaa11111111", stage: "script", shot_id: null },
+  });
 
   // 6b. 重新生成产生新版本并自动切为当前版本：历史下拉随之跳到新版本，即便之前手动选过旧版本。
   setScript("cccccccc33333333", "第三版文案。");
   view();
-  const afterRegen = nodes["script-history"].children.find(c => c.tagName === "select");
+  const afterRegen = nodes["script-history"].children.find((c) => c.tagName === "select");
   assert.equal(afterRegen.children.length, 3);
   assert.equal(afterRegen.value, "cccccccc33333333");
 
@@ -173,7 +271,9 @@ function setScript(id, text, origin = "generated") {
 
   // 8. 执行中：整体锁定（文本框与生成按钮禁用）。
   busyNow = true;
-  sandbox.state.data.builds = [{ status: "running", plan_id: "p1", nodes: [{ stage: "script", status: "running" }] }];
+  sandbox.state.data.builds = [
+    { status: "running", plan_id: "p1", nodes: [{ stage: "script", status: "running" }] },
+  ];
   view();
   assert.equal(area.disabled, true);
   assert.equal(nodes["script-generate"].disabled, true);
@@ -182,7 +282,11 @@ function setScript(id, text, origin = "generated") {
   sandbox.state.data.script_stale = false;
 
   // 8b. 最近一次生成失败：直接显示原因；有了更新的版本后不再显示。
-  lastScriptNode = { status: "failed", error: "文案服务不可用", finished_at: "2026-10-23T10:00:00" };
+  lastScriptNode = {
+    status: "failed",
+    error: "文案服务不可用",
+    finished_at: "2026-10-23T10:00:00",
+  };
   versions[plans.p1.script].created_at = "2026-10-23T09:00:00";
   view();
   assert.equal(nodes["script-error"].hidden, false);
@@ -213,5 +317,10 @@ function setScript(id, text, origin = "generated") {
   plans.p1 = savedPlan;
   view();
   assert.equal(area.value, "方案一的草稿");
-  console.log("Script section: keeps unsaved edits, auto-saves trimmed text, counts words, and switches history versions.");
-})().catch(error => { console.error(error); process.exitCode = 1; });
+  console.log(
+    "Script section: keeps unsaved edits, auto-saves trimmed text, counts words, and switches history versions.",
+  );
+})().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

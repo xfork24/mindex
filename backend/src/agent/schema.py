@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from mindex.shared.migrations import execute_script, migrate
+from shared.migrations import execute_script, migrate
 
 SCHEMA_V1 = """
 CREATE TABLE IF NOT EXISTS agent_sessions (
@@ -61,12 +61,17 @@ def _v3(db) -> None:
 
 
 def _v4(db) -> None:
-    db.execute("CREATE TABLE agent_outbox_receipts (library_id TEXT NOT NULL, outbox_id INTEGER NOT NULL,"
-               " change_seq INTEGER NOT NULL, PRIMARY KEY(library_id,outbox_id))")
+    db.execute(
+        "CREATE TABLE agent_outbox_receipts (library_id TEXT NOT NULL, outbox_id INTEGER NOT NULL,"
+        " change_seq INTEGER NOT NULL, PRIMARY KEY(library_id,outbox_id))"
+    )
 
 
 def _v5(db) -> None:
-    db.execute("CREATE TABLE agent_outbox_cursors (library_id TEXT PRIMARY KEY, outbox_id INTEGER NOT NULL, change_seq INTEGER NOT NULL)")
+    db.execute(
+        "CREATE TABLE agent_outbox_cursors (library_id TEXT PRIMARY KEY, outbox_id INTEGER NOT NULL, "
+        "change_seq INTEGER NOT NULL)"
+    )
 
 
 STEPS = (_v1, _v2, _v3, _v4, _v5)

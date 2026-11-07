@@ -5,9 +5,9 @@ from __future__ import annotations
 import base64
 import json
 
-from mindex.models import adapters
-from mindex.models.adapters import ModelError
-from mindex.shared.config import Config
+from models import adapters
+from models.adapters import ModelError
+from shared.config import Config
 
 
 def decode_audio(payload: bytes) -> bytes:

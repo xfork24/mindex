@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
-from mindex.doctor import doctor
-from mindex.shared.config import Config
+from diagnostics.doctor import doctor
+from shared.config import Config
 
 
 def test_local_defaults_pass(tmp_path):
@@ -22,18 +24,21 @@ def test_invalid_combination_reports_failure(tmp_path):
 
 
 def test_unreachable_chroma_server_fails_closed(tmp_path, monkeypatch):
-    import os
 
     if os.environ.get("MINDEX_TEST_POSTGRES_DSN"):
         monkeypatch.setenv("MINDEX_DATABASE_DSN", os.environ["MINDEX_TEST_POSTGRES_DSN"])
     else:
         pytest.skip("需要 MINDEX_TEST_POSTGRES_DSN（chroma_server 属共享后端组合）")
-    report = doctor(Config(
-        data_dir=tmp_path / "data",
-        database={"backend": "postgres"},
-        vector={"backend": "chroma_server",
-                "chroma_server": {"url": "http://127.0.0.1:59999", "token_env": "MINDEX_NO_TOKEN"}},
-    ))
+    report = doctor(
+        Config(
+            data_dir=tmp_path / "data",
+            database={"backend": "postgres"},
+            vector={
+                "backend": "chroma_server",
+                "chroma_server": {"url": "http://127.0.0.1:59999", "token_env": "MINDEX_NO_TOKEN"},
+            },
+        )
+    )
     assert not report["ok"]
     vector = next(item for item in report["checks"] if item["check"] == "vectors.server")
     assert not vector["ok"]  # 连不通明确失败，不假数据降级（plans §12）
@@ -48,7 +53,6 @@ def test_missing_dsn_is_actionable(tmp_path, monkeypatch):
 
 @pytest.mark.requires_postgres
 def test_pg_single_doctor_live(tmp_path, monkeypatch):
-    import os
 
     dsn = os.environ.get("MINDEX_TEST_POSTGRES_DSN", "")
     if not dsn:

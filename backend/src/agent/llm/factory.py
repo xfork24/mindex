@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from mindex.agent.llm.anthropic import AnthropicClient
-from mindex.agent.llm.openai_compat import OpenAICompatClient
+from agent.llm.anthropic import AnthropicClient
+from agent.llm.openai_compat import OpenAICompatClient
 
 
 def make_agent_llm(config, *, transport=None):

@@ -6,15 +6,19 @@ YAML 保留为首次初始化值及旧方案的固定兼容规则；可选平台
 
 from __future__ import annotations
 
+import copy
+import json
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Literal
 
 import yaml
+from fastapi import HTTPException
 from pydantic import Field, StringConstraints, ValidationError, field_validator
 
-from mindex.admin.curation import EntityNotFound
-from mindex.shared.config import StrictModel
+from admin.curation import EntityNotFound
+from shared.config import StrictModel
+from studio import studio
 
 BUILTIN_DIR = Path(__file__).resolve().parent / "platforms"
 BUILTIN_ORDER = ("bilibili", "douyin", "youtube")
@@ -94,14 +98,14 @@ def list_presets() -> list[dict]:
 
 def catalogue(store) -> list[dict]:
     """Persistent selectable platforms; deleted IDs remain reserved."""
-    import json
 
-    return [PlatformPreset.model_validate(json.loads(row["body"])).model_dump()
-            for row in store.rows("SELECT body FROM delivery_platforms WHERE deleted=0 ORDER BY created_at,id")]
+    return [
+        PlatformPreset.model_validate(json.loads(row["body"])).model_dump()
+        for row in store.rows("SELECT body FROM delivery_platforms WHERE deleted=0 ORDER BY created_at,id")
+    ]
 
 
 def registered(store, platform: str) -> PlatformPreset:
-    import json
 
     row = store.one("SELECT body FROM delivery_platforms WHERE id=? AND deleted=0", (platform,))
     if not row:
@@ -120,7 +124,6 @@ def snapshot_publish(value, store=None, *, previous=None, legacy=False):
     """Fill missing rules, preserving explicit snapshots and existing plan semantics."""
     if value is None:
         return None
-    import copy
 
     result = copy.deepcopy(value)
     before = previous or {}
@@ -141,9 +144,6 @@ def snapshot_publish(value, store=None, *, previous=None, legacy=False):
 
 
 def platform_routes(router, store, mutation_lock):
-    from fastapi import HTTPException
-
-    from mindex.studio import studio
 
     @router.get("/platforms")
     def listing():
@@ -159,8 +159,10 @@ def platform_routes(router, store, mutation_lock):
             if store.one("SELECT id FROM delivery_platforms WHERE id=?", (body.id,)):
                 raise HTTPException(409, "平台标识已使用，不可重复或复用")
             now = studio.now()
-            store.execute("INSERT INTO delivery_platforms(id,body,created_at,updated_at) VALUES(?,?,?,?)",
-                          (body.id, body.model_dump_json(), now, now))
+            store.execute(
+                "INSERT INTO delivery_platforms(id,body,created_at,updated_at) VALUES(?,?,?,?)",
+                (body.id, body.model_dump_json(), now, now),
+            )
             return body.model_dump()
 
     @router.put("/platforms/{platform_id}")
@@ -169,14 +171,17 @@ def platform_routes(router, store, mutation_lock):
             registered(store, platform_id)
             if body.id != platform_id:
                 raise HTTPException(422, "平台标识不能修改")
-            store.execute("UPDATE delivery_platforms SET body=?,updated_at=? WHERE id=?",
-                          (body.model_dump_json(), studio.now(), platform_id))
+            store.execute(
+                "UPDATE delivery_platforms SET body=?,updated_at=? WHERE id=?",
+                (body.model_dump_json(), studio.now(), platform_id),
+            )
             return body.model_dump()
 
     @router.delete("/platforms/{platform_id}")
     def remove(platform_id: str):
         with mutation_lock():
             registered(store, platform_id)
-            store.execute("UPDATE delivery_platforms SET deleted=1,updated_at=? WHERE id=?",
-                          (studio.now(), platform_id))
+            store.execute(
+                "UPDATE delivery_platforms SET deleted=1,updated_at=? WHERE id=?", (studio.now(), platform_id)
+            )
             return {"deleted": platform_id}

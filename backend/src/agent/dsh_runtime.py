@@ -9,10 +9,12 @@ import logging
 import os
 import sys
 import threading
+from uuid import uuid4
 
-from mindex.agent.dsh_bridge import bridge
-from mindex.agent.prompts import system_prompt
-from mindex.agent.runtime import RuntimeSupport, page_domain
+from agent.dsh_bridge import bridge
+from agent.llm.types import tool_message
+from agent.prompts import system_prompt
+from agent.runtime import RuntimeSupport, page_domain
 
 log = logging.getLogger(__name__)
 
@@ -33,7 +35,9 @@ DISABLED = (
 def readiness(settings):
     errors = []
     frozen = bool(getattr(sys, "frozen", False))
-    install = "请更新或重新安装 Mindex 桌面版；如仍异常，请反馈安装包问题" if frozen else "uv sync --extra dsh"
+    install = (
+        "请更新或重新安装 Mindex 桌面版；如仍异常，请反馈安装包问题" if frozen else "uv sync --extra dsh"
+    )
     repair = install if frozen else f"运行 {install}"
     for package in ("deepseek-harness-sdk", "deepseek-harness-runtime-bin", "mcp"):
         try:
@@ -44,6 +48,7 @@ def readiness(settings):
             errors.append(f"缺少 {package}；{repair}")
     if not errors:
         try:
+            # 延迟导入：保留可选依赖探测或异常捕获时的降级行为。
             from deepseek_harness_runtime import resolve_bundled_launch_args
 
             resolve_bundled_launch_args("exe" if frozen else None)
@@ -123,6 +128,7 @@ class DshRuntime(RuntimeSupport):
     @staticmethod
     def _bundled_executable():
         if getattr(sys, "frozen", False):
+            # 延迟导入：独立模型或扩展功能使用可选依赖，仅在实际调用时加载。
             from deepseek_harness_runtime import resolve_bundled_launch_args
 
             return resolve_bundled_launch_args("exe")[0]
@@ -135,7 +141,6 @@ class DshRuntime(RuntimeSupport):
         self.used_calls = set()
 
     def _result(self, sid, turn, step, call_id, text, *, error=None, meta=None, images=None):
-        from mindex.agent.llm.types import tool_message
 
         self.bridge_results[(sid, call_id)] = {
             "turn": turn,
@@ -151,7 +156,6 @@ class DshRuntime(RuntimeSupport):
             self._append(sid, "user/message", message)
 
     def _finish_interrupted_tools(self, sid):
-        from mindex.agent.llm.types import tool_message
 
         turn = self.store.last_turn(sid)
         events = [
@@ -177,8 +181,6 @@ class DshRuntime(RuntimeSupport):
 
     async def _native_request(self, sid, client, request):
         if request.method == "approval/request":
-            from uuid import uuid4
-
             rid = f"approval-{uuid4().hex}"
             data = {
                 "requestId": rid,
@@ -235,10 +237,12 @@ class DshRuntime(RuntimeSupport):
         handlers = set()
         try:
             async with bridge(self, sid) as (url, token):
+                # 延迟导入：保留可选依赖探测或异常捕获时的降级行为。
                 from deepseek_harness import HarnessClient, HarnessConfig
 
                 content = patch(settings, url)
                 # Secrets live only in the child environment; YAML carries an expression.
+                # 延迟导入：保留可选依赖探测或异常捕获时的降级行为。
                 import yaml
 
                 text = yaml.safe_dump(content, allow_unicode=True).replace(
@@ -281,7 +285,8 @@ class DshRuntime(RuntimeSupport):
                         if settings.max_images
                         else []
                     ):
-                        from mindex.agent.vision import encode_jpeg
+                        # 延迟导入：保持异常捕获范围，依赖加载失败时仍走原有降级路径。
+                        from agent.vision import encode_jpeg
 
                         raw = encode_jpeg(await self._image_loader(sid)(block["ref"]))
                         blocks.append(
@@ -301,6 +306,7 @@ class DshRuntime(RuntimeSupport):
                         client.start()
                         transport_ready = True
                         ready.set()
+                        # 延迟导入：保留可选依赖探测或异常捕获时的降级行为。
                         from deepseek_harness.models import InitializeResponse
 
                         client.request(
@@ -358,6 +364,7 @@ class DshRuntime(RuntimeSupport):
                         break
                     if isinstance(note, Exception):
                         raise note
+                    # 延迟导入：保留可选依赖探测或异常捕获时的降级行为。
                     from deepseek_harness.models import IncomingRequest
 
                     if isinstance(note, IncomingRequest):
@@ -420,7 +427,8 @@ class DshRuntime(RuntimeSupport):
                         "kind": "error",
                         "error": {
                             "code": "dsh_failed",
-                            "message": "dsh 进程或连接异常，当前轮次已结束；操作不会自动重试。请检查依赖和模型配置。",
+                            "message": "dsh 进程或连接异常，当前轮次已结束；操作不会自动重试。"
+                            "请检查依赖和模型配置。",
                         },
                     },
                 },

@@ -22,7 +22,8 @@ export TF_NUM_INTEROP_THREADS="${TF_NUM_INTEROP_THREADS:-2}"
 export TF_CPP_MIN_LOG_LEVEL=2
 .venv-detector/bin/python - <<'PY'
 import numpy as np
-from mindex.models.model_server import TransNetEngine
+import mindex  # 自举包内短导入
+from models.model_server import TransNetEngine
 engine = TransNetEngine()
 single, _ = engine.model.predict_raw(np.zeros((1, 100, 27, 48, 3), dtype=np.uint8))
 if tuple(single.shape) != (1, 100, 1) or not np.isfinite(np.asarray(single)).all():

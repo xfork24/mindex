@@ -1,10 +1,13 @@
 """开发环境和安装包共用的前端资源定位。"""
+
 from pathlib import Path
+
+import mindex
 
 
 def frontend_root() -> Path:
     """wheel 内使用随包资源，源码运行时使用仓库 frontend/src。"""
-    package_root = Path(__file__).resolve().parents[1]
+    package_root = Path(mindex.__file__).resolve().parent
     bundled = package_root / "web"
     if bundled.is_dir():
         return bundled

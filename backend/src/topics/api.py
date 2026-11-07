@@ -9,21 +9,26 @@ from __future__ import annotations
 import json
 from functools import wraps
 from typing import Annotated, Literal
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import Response
+from starlette.concurrency import run_in_threadpool
 
-from mindex.shared.config import StrictModel
-from mindex.topics import cards as topic_cards
-from mindex.topics import create_job as topic_jobs
-from mindex.topics import datasources, profiles
-from mindex.topics import gaps as topic_gaps
-from mindex.topics import items as topic_items
-from mindex.topics import runner as topic_runner
-from mindex.topics.common import TopicConflict
-from mindex.topics.llm import make_llm
-from mindex.topics.models import ProfileBody, ProfileChanges
-from mindex.topics.sources import base as source_base
+from models import adapters
+from shared.config import StrictModel
+from topics import cards as topic_cards
+from topics import create_job as topic_jobs
+from topics import datasources, profiles
+from topics import gaps as topic_gaps
+from topics import items as topic_items
+from topics import runner as topic_runner
+from topics import scheduler as topic_scheduler
+from topics.common import TopicConflict
+from topics.llm import make_llm
+from topics.models import ProfileBody, ProfileChanges
+from topics.sources import base as source_base
+from topics.sources import calendar
 
 
 class CreateJobBody(StrictModel):
@@ -51,15 +56,16 @@ def topics_router(runtime, store, embedder=None, *, topic_llm=None, scheduler: b
         config = runtime.current()
         if embedder is not None:
             return config, make_llm(config, topic_llm), embedder
-        from mindex.models.adapters import make_embedder
 
-        return config, make_llm(config, topic_llm), make_embedder(config)
+        return config, make_llm(config, topic_llm), adapters.make_embedder(config)
 
     # ---------------------------------------------------------------- 领域档案
     @router.get("/profiles")
     def list_profiles():
-        return {"items": profiles.list_profiles(store),
-                "coverage_defaults": runtime.current().topics.coverage.model_dump()}
+        return {
+            "items": profiles.list_profiles(store),
+            "coverage_defaults": runtime.current().topics.coverage.model_dump(),
+        }
 
     @router.post("/profiles", status_code=201)
     def create_profile(body: ProfileBody):
@@ -105,8 +111,9 @@ def topics_router(runtime, store, embedder=None, *, topic_llm=None, scheduler: b
 
     @router.post("/sources/{source_id}/calendar")
     async def import_calendar(source_id: str, request: Request, mode: str = "replace"):
-        """导入日历：multipart（``file``）或 JSON ``{text, format?, mode?}``；超过 ``topics.fetch.max_bytes`` 返回 413。"""
-        from starlette.concurrency import run_in_threadpool
+        """导入日历：multipart（``file``）或 JSON ``{text, format?, mode?}``；超过
+        ``topics.fetch.max_bytes`` 返回 413。
+        """
 
         limit = runtime.current().topics.fetch.max_bytes
         fmt = None
@@ -139,12 +146,12 @@ def topics_router(runtime, store, embedder=None, *, topic_llm=None, scheduler: b
             text = raw.decode("utf-8-sig")
         except UnicodeDecodeError as exc:
             raise HTTPException(422, "日历文件不是 UTF-8 文本") from exc
-        return await run_in_threadpool(datasources.import_calendar, store, source_id, text, fmt=fmt,
-                                       append=mode == "append")
+        return await run_in_threadpool(
+            datasources.import_calendar, store, source_id, text, fmt=fmt, append=mode == "append"
+        )
 
     @router.get("/calendar-samples")
     def calendar_samples():
-        from mindex.topics.sources import calendar
 
         return {"items": calendar.sample_list()}
 
@@ -159,7 +166,9 @@ def topics_router(runtime, store, embedder=None, *, topic_llm=None, scheduler: b
         return datasources.fetch_profile(runtime.current(), store, profile_id, source_ids=source_id)
 
     @router.get("/profiles/{profile_id}/items")
-    def list_items(profile_id: str, limit: Annotated[int, Query(ge=1, le=500)] = 50, source_id: str | None = None):
+    def list_items(
+        profile_id: str, limit: Annotated[int, Query(ge=1, le=500)] = 50, source_id: str | None = None
+    ):
         profiles.get_profile(store, profile_id)
         return {"items": topic_items.list_items(store, profile_id, limit=limit, source_id=source_id)}
 
@@ -192,8 +201,10 @@ def topics_router(runtime, store, embedder=None, *, topic_llm=None, scheduler: b
     # ---------------------------------------------------------------- 选题卡片
     @router.get("/profiles/{profile_id}/cards")
     def list_cards(profile_id: str, status: str = "new", limit: Annotated[int, Query(ge=1, le=500)] = 100):
-        return {"items": topic_cards.list_cards(store, profile_id, status=status, limit=limit),
-                "counts": topic_cards.counts(store, profile_id)}
+        return {
+            "items": topic_cards.list_cards(store, profile_id, status=status, limit=limit),
+            "counts": topic_cards.counts(store, profile_id),
+        }
 
     @router.get("/cards/{card_id}")
     def get_card(card_id: str):
@@ -222,8 +233,13 @@ def topics_router(runtime, store, embedder=None, *, topic_llm=None, scheduler: b
     @router.post("/cards/{card_id}/job", status_code=201)
     @conflicts
     def create_job(card_id: str, body: CreateJobBody | None = None):
-        return topic_jobs.create_from_card(runtime.current(), store, card_id, force=bool(body and body.force),
-                                           language=body.language if body else "zh")
+        return topic_jobs.create_from_card(
+            runtime.current(),
+            store,
+            card_id,
+            force=bool(body and body.force),
+            language=body.language if body else "zh",
+        )
 
     @router.get("/jobs/{job_id}/profile")
     def job_profile(job_id: str):
@@ -245,18 +261,19 @@ def topics_router(runtime, store, embedder=None, *, topic_llm=None, scheduler: b
 
     @router.get("/profiles/{profile_id}/gaps.csv")
     def export_gaps(profile_id: str, status: str = "all"):
-        from urllib.parse import quote
 
         name = profiles.get_profile(store, profile_id)["name"]
         data = topic_gaps.export_csv(store, profile_id, status=status)
         filename = quote(f"素材采集清单-{name}.csv")
-        return Response(data, media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": f"attachment; filename=gaps.csv; filename*=UTF-8''{filename}"})
+        return Response(
+            data,
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": f"attachment; filename=gaps.csv; filename*=UTF-8''{filename}"},
+        )
 
     # ---------------------------------------------------------------- 定时
     @router.get("/schedule")
     def schedule_status():
-        from mindex.topics import scheduler as topic_scheduler
 
         return topic_scheduler.status(store, enabled=scheduler)
 

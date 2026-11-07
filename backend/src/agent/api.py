@@ -15,6 +15,7 @@ import hmac
 import json
 import os
 import secrets
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 
@@ -24,13 +25,20 @@ from pydantic import Field
 from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile as StarletteUpload
 
-from mindex.agent.attachments import AttachmentError, AttachmentStore
-from mindex.agent.loopback import MindexClient
-from mindex.agent.runtime import AgentRuntime, BuiltinRuntime, RequestNotFound, RuntimeBusy, frame_sse
-from mindex.agent.session_store import SessionNotFound, SessionStore
-from mindex.shared.config import StrictModel
-from mindex.shared.uploads import save_upload
-from mindex.shared.web_auth import authorized, configured_token
+from agent import tools
+from agent.attachments import AttachmentError, AttachmentStore
+from agent.changes import ChangeFeed
+from agent.dsh_runtime import DshRuntime
+from agent.llm.factory import make_agent_llm
+from agent.loopback import MindexClient
+from agent.manager import RuntimeManager
+from agent.runtime import AgentRuntime, BuiltinRuntime, RequestNotFound, RuntimeBusy, frame_sse
+from agent.session_store import SessionNotFound, SessionStore
+from agent.watcher import TaskWatcher
+from settings.runtime_settings import get_setting
+from shared.config import StrictModel
+from shared.uploads import save_upload
+from shared.web_auth import authorized, configured_token
 
 MAX_ATTACHMENTS = 12
 # 附件内容只对这些类型按原类型内联返回（缩略图、预览）；其余一律以下载方式返回，避免同源执行上传的 HTML/SVG。
@@ -75,21 +83,18 @@ class AnswersBody(StrictModel):
 
 
 def resume_cursor(request, after):
-    if 'after' in request.query_params or not request.headers.get('last-event-id'):
+    if "after" in request.query_params or not request.headers.get("last-event-id"):
         return after
     try:
-        cursor = int(request.headers['last-event-id'])
+        cursor = int(request.headers["last-event-id"])
         if cursor < -1:
-            raise ValueError('负数游标')
+            raise ValueError("负数游标")
         return cursor
     except ValueError as exc:
-        raise HTTPException(422, 'Last-Event-ID 必须是有效的非负事件游标') from exc
+        raise HTTPException(422, "Last-Event-ID 必须是有效的非负事件游标") from exc
 
 
 def build_runtime(app, runtime_config, store, *, agent_llm=None, registry=None) -> AgentRuntime:
-    from mindex.agent.llm.factory import make_agent_llm
-    from mindex.agent.tools import build_registry
-    from mindex.settings.runtime_settings import get_setting
 
     holder: dict = {}
 
@@ -104,29 +109,33 @@ def build_runtime(app, runtime_config, store, *, agent_llm=None, registry=None) 
 
     runtime = BuiltinRuntime(
         SessionStore(store.root),
-        registry=registry or build_registry(),
-        llm_factory=(lambda: agent_llm) if agent_llm is not None else (lambda: make_agent_llm(runtime_config.current())),
+        registry=registry or tools.build_registry(),
+        llm_factory=(lambda: agent_llm)
+        if agent_llm is not None
+        else (lambda: make_agent_llm(runtime_config.current())),
         title_llm_factory=(lambda: make_agent_llm(runtime_config.current())) if agent_llm is None else None,
         client_factory=client_factory,
         settings=lambda: runtime_config.current().agent,
         agent_profile=agent_profile,
     )
-    from mindex.agent.watcher import TaskWatcher
 
     runtime.watcher = TaskWatcher(runtime, client_factory)
-    from mindex.agent.changes import ChangeFeed
 
     runtime.feed = ChangeFeed(store.root)
     runtime.attachments = AttachmentStore(store.root)
-    from mindex.agent.dsh_runtime import DshRuntime
-    from mindex.agent.manager import RuntimeManager
 
-    dsh = DshRuntime(runtime.store, registry=runtime.registry, llm_factory=runtime.llm_factory,
-                     client_factory=client_factory, settings=runtime.settings, agent_profile=agent_profile)
+    dsh = DshRuntime(
+        runtime.store,
+        registry=runtime.registry,
+        llm_factory=runtime.llm_factory,
+        client_factory=client_factory,
+        settings=runtime.settings,
+        agent_profile=agent_profile,
+    )
     dsh.feed, dsh.attachments, dsh.watcher = runtime.feed, runtime.attachments, runtime.watcher
     manager = RuntimeManager(runtime, dsh, runtime.settings)
     runtime.watcher.runtime = manager
-    from contextlib import asynccontextmanager
+
     previous = app.router.lifespan_context
 
     @asynccontextmanager
@@ -136,6 +145,7 @@ def build_runtime(app, runtime_config, store, *, agent_llm=None, registry=None) 
                 yield state
             finally:
                 await manager.close()
+
     app.router.lifespan_context = lifespan
     return manager
 
@@ -160,8 +170,11 @@ def attachment_caller(request: Request, mcp_token_env: str) -> dict:
     else:
         mcp = not web_secret
     if not (web or mcp):
-        raise HTTPException(401, "需要访问令牌：使用网页登录凭证，或发送 Authorization: Bearer <MCP 令牌>",
-                            headers={"WWW-Authenticate": "Bearer"})
+        raise HTTPException(
+            401,
+            "需要访问令牌：使用网页登录凭证，或发送 Authorization: Bearer <MCP 令牌>",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     return {"web": web, "mcp": mcp}
 
 
@@ -232,11 +245,18 @@ def agent_router(runtime: AgentRuntime, runtime_config, *, injected: bool = Fals
                 meta = attachments.get(ref)
             except AttachmentError as exc:
                 raise HTTPException(422, f"{exc}（{ref}）") from exc
-            items.append({"ref": meta["id"], "filename": meta["filename"], "content_type": meta["content_type"],
-                          "bytes": meta["bytes"]})
+            items.append(
+                {
+                    "ref": meta["id"],
+                    "filename": meta["filename"],
+                    "content_type": meta["content_type"],
+                    "bytes": meta["bytes"],
+                }
+            )
         try:
-            return await runtime.prompt(sid, [{"type": "text", "text": body.content}], context=body.context,
-                                        attachments=items)
+            return await runtime.prompt(
+                sid, [{"type": "text", "text": body.content}], context=body.context, attachments=items
+            )
         except RuntimeBusy as exc:
             raise HTTPException(409, str(exc)) from exc
 
@@ -288,8 +308,13 @@ def agent_router(runtime: AgentRuntime, runtime_config, *, injected: bool = Fals
             await save_upload(file, temp, limit)
             # 整文件 sha256 与移动是阻塞 IO，放进线程池以免冻结事件循环。
             return await run_in_threadpool(
-                attachments.put, temp, filename=file.filename, content_type=file.content_type, owner=owner,
-                session_id=session_id if owner == "session" else None, ttl_hours=cfg.attachment_ttl_hours,
+                attachments.put,
+                temp,
+                filename=file.filename,
+                content_type=file.content_type,
+                owner=owner,
+                session_id=session_id if owner == "session" else None,
+                ttl_hours=cfg.attachment_ttl_hours,
             )
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
@@ -304,9 +329,13 @@ def agent_router(runtime: AgentRuntime, runtime_config, *, injected: bool = Fals
     async def attachment_content(tok: str, request: Request):
         meta, path = attachment_or_404(tok, caller(request))
         inline = meta["content_type"].startswith(INLINE_TYPES)
-        return FileResponse(path, media_type=meta["content_type"] if inline else "application/octet-stream",
-                            filename=meta["filename"], content_disposition_type="inline" if inline else "attachment",
-                            headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store"})
+        return FileResponse(
+            path,
+            media_type=meta["content_type"] if inline else "application/octet-stream",
+            filename=meta["filename"],
+            content_disposition_type="inline" if inline else "attachment",
+            headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store"},
+        )
 
     @router.delete("/attachments/{tok}", status_code=204)
     async def delete_attachment(tok: str, request: Request):
@@ -322,10 +351,16 @@ def agent_router(runtime: AgentRuntime, runtime_config, *, injected: bool = Fals
     async def get_log(sid: str, after: int = Query(default=-1, ge=-1)):
         await runtime.start()
         session_or_404(sid)
-        return {"items": store.events(sid, after), "status": runtime.status(sid), "pending": runtime.pending(sid)}
+        return {
+            "items": store.events(sid, after),
+            "status": runtime.status(sid),
+            "pending": runtime.pending(sid),
+        }
 
     @router.get("/sessions/{sid}/events")
-    async def stream_events(sid: str, request: Request, after: int = Query(default=-1, ge=-1), follow: bool = True):
+    async def stream_events(
+        sid: str, request: Request, after: int = Query(default=-1, ge=-1), follow: bool = True
+    ):
         after = resume_cursor(request, after)
         await runtime.start()
         session_or_404(sid)
@@ -334,8 +369,11 @@ def agent_router(runtime: AgentRuntime, runtime_config, *, injected: bool = Fals
             async for frame in runtime.events(sid, after, follow=follow):
                 yield frame_sse(frame)
 
-        return StreamingResponse(body(), media_type="text/event-stream",
-                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+        return StreamingResponse(
+            body(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     @router.post("/sessions/{sid}/approvals/{rid}")
     async def answer_approval(sid: str, rid: str, body: ApprovalBody):
@@ -349,7 +387,9 @@ def agent_router(runtime: AgentRuntime, runtime_config, *, injected: bool = Fals
     @router.post("/sessions/{sid}/questions/{rid}")
     async def answer_question(sid: str, rid: str, body: AnswersBody):
         session_or_404(sid)
-        pending = next((p for p in runtime.pending(sid) if p["requestId"] == rid and p["kind"] == "question"), None)
+        pending = next(
+            (p for p in runtime.pending(sid) if p["requestId"] == rid and p["kind"] == "question"), None
+        )
         if pending is None:
             raise HTTPException(404, "找不到待回答的提问，可能已经处理或已取消")
         ttl = runtime_config.current().agent.secret_ttl_seconds
@@ -386,7 +426,9 @@ def agent_router(runtime: AgentRuntime, runtime_config, *, injected: bool = Fals
         return {"ok": True, "status": runtime.status(sid)}
 
     @router.get("/changes/log")
-    async def changes_log(after: int = Query(default=0, ge=0), limit: int = Query(default=200, ge=1, le=1000)):
+    async def changes_log(
+        after: int = Query(default=0, ge=0), limit: int = Query(default=200, ge=1, le=1000)
+    ):
         return {"items": runtime.feed.after(after, limit), "latest": runtime.feed.latest()}
 
     @router.post("/changes", status_code=201)
@@ -420,8 +462,11 @@ def agent_router(runtime: AgentRuntime, runtime_config, *, injected: bool = Fals
                     idle = 0.0
                     yield "event: ping\ndata: {}\n\n"
 
-        return StreamingResponse(body(), media_type="text/event-stream",
-                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+        return StreamingResponse(
+            body(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     @router.get("/gaps")
     async def gaps(limit: int = Query(default=200, ge=1, le=1000)):

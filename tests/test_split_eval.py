@@ -76,8 +76,14 @@ def case_result(draw):
     expected = [text for text, _, _ in shots]
     mode = draw(st.sampled_from(["same", "padded", "count", "content", "failed"]))
     if mode == "failed":
-        result = {"id": "c", "status": "failed", "error": "拆分镜调用失败：超时", "matched": False,
-                  "expected": expected, "actual": None}
+        result = {
+            "id": "c",
+            "status": "failed",
+            "error": "拆分镜调用失败：超时",
+            "matched": False,
+            "expected": expected,
+            "actual": None,
+        }
         return result, False, []
     measured = [(w, h) for _, w, h in shots]
     if mode == "same":
@@ -98,8 +104,14 @@ def case_result(draw):
         actual[i] = actual[i] + " " + word
         measured[i] = (measured[i][0] + 1, measured[i][1])
         matched = False
-    result = {"id": "c", "status": "ok", "error": None, "matched": matched, "expected": expected,
-              "actual": [{"text": t, "visual": "画面", "query": "查询"} for t in actual]}
+    result = {
+        "id": "c",
+        "status": "ok",
+        "error": None,
+        "matched": matched,
+        "expected": expected,
+        "actual": [{"text": t, "visual": "画面", "query": "查询"} for t in actual],
+    }
     return result, matched, measured
 
 
@@ -137,17 +149,22 @@ def test_property_21_metrics(cases):
 
 
 def ok_result(expected, actual):
-    return {"id": "c", "status": "ok", "error": None, "expected": expected,
-            "actual": [{"text": t, "visual": "画面", "query": "查询"} for t in actual]}
+    return {
+        "id": "c",
+        "status": "ok",
+        "error": None,
+        "expected": expected,
+        "actual": [{"text": t, "visual": "画面", "query": "查询"} for t in actual],
+    }
 
 
 @pytest.mark.parametrize(
     ("expected", "actual", "matched"),
     [
-        (["A b c,", "d e f."], ["A b c,", "d e f."], True),               # 完全一致
-        (["A b c,", "d e f."], ["  A b c,\n", "\td e f.  "], True),       # 仅首尾空白不同
-        (["A b c,", "d e f."], ["A b c, d e f."], False),                 # 镜数不同
-        (["A b c,", "d e f."], ["A b", "c, d e f."], False),              # 镜数相同但边界不同
+        (["A b c,", "d e f."], ["A b c,", "d e f."], True),  # 完全一致
+        (["A b c,", "d e f."], ["  A b c,\n", "\td e f.  "], True),  # 仅首尾空白不同
+        (["A b c,", "d e f."], ["A b c, d e f."], False),  # 镜数不同
+        (["A b c,", "d e f."], ["A b", "c, d e f."], False),  # 镜数相同但边界不同
     ],
     ids=["identical", "whitespace", "count", "boundary"],
 )
@@ -162,7 +179,13 @@ def test_match_rate_empty_case_set(evaluator):
 
 
 def test_failed_case_never_matches(evaluator):
-    failed = {"id": "c", "status": "failed", "error": "拆分镜调用失败：超时", "expected": ["a"], "actual": None}
+    failed = {
+        "id": "c",
+        "status": "failed",
+        "error": "拆分镜调用失败：超时",
+        "expected": ["a"],
+        "actual": None,
+    }
     assert evaluator.case_matches(["a"], None) is False
     assert evaluator.match_rate([failed, ok_result(["a b c"], ["a b c"])]) == 50.0
 
@@ -211,8 +234,14 @@ CASE_TEXT = "港口清晨的渔船靠岸了。山顶日出云海翻涌壮观。�
 
 def write_cases(tmp_path, cases=None):
     path = tmp_path / "cases.jsonl"
-    cases = cases or [{"id": "c1", "text": CASE_TEXT, "expected": [
-        "港口清晨的渔船靠岸了。", "山顶日出云海翻涌壮观。", "老街夜市灯火通明热闹。"], "note": "测试"}]
+    cases = cases or [
+        {
+            "id": "c1",
+            "text": CASE_TEXT,
+            "expected": ["港口清晨的渔船靠岸了。", "山顶日出云海翻涌壮观。", "老街夜市灯火通明热闹。"],
+            "note": "测试",
+        }
+    ]
     path.write_text("".join(json.dumps(c, ensure_ascii=False) + "\n" for c in cases), encoding="utf-8")
     return path
 
@@ -231,11 +260,17 @@ class CountingSearcher:
     def text(self, request):
         self.requests.append(request)
         n = self.counts[len(self.requests) - 1]
-        return {"results": [
-            {"source_name": f"素材{i}", "start": float(i), "end": float(i) + 1.5,
-             "annotation": {"description": f"画面描述{i}"}}
-            for i in range(n)
-        ]}
+        return {
+            "results": [
+                {
+                    "source_name": f"素材{i}",
+                    "start": float(i),
+                    "end": float(i) + 1.5,
+                    "annotation": {"description": f"画面描述{i}"},
+                }
+                for i in range(n)
+            ]
+        }
 
 
 def test_main_without_materials_writes_report_to_output(evaluator, config, tmp_path, capsys):
@@ -243,8 +278,9 @@ def test_main_without_materials_writes_report_to_output(evaluator, config, tmp_p
 
     boarder = FixtureStoryboarder(config)
     output = tmp_path / "out" / "report.json"
-    code = evaluator.main(["--cases", str(write_cases(tmp_path)), "--output", str(output)],
-                          config=config, storyboarder=boarder)
+    code = evaluator.main(
+        ["--cases", str(write_cases(tmp_path)), "--output", str(output)], config=config, storyboarder=boarder
+    )
     assert code == 0
     report = read_report(output)
     assert report["metrics"]["match_rate"] == 100.0
@@ -262,12 +298,21 @@ def test_main_recall_lists_top3_fewer_and_none(evaluator, config, tmp_path):
 
     searcher = CountingSearcher([5, 2, 0])
     output = tmp_path / "report.json"
-    code = evaluator.main(["--cases", str(write_cases(tmp_path)), "--recall", "--output", str(output)],
-                          config=config, storyboarder=FixtureStoryboarder(config), searcher=searcher)
+    code = evaluator.main(
+        ["--cases", str(write_cases(tmp_path)), "--recall", "--output", str(output)],
+        config=config,
+        storyboarder=FixtureStoryboarder(config),
+        searcher=searcher,
+    )
     assert code == 0
     shots = read_report(output)["cases"][0]["actual"]
     assert [len(s["recall"]) for s in shots] == [3, 2, 0]
-    assert shots[0]["recall"][0] == {"source_name": "素材0", "start": 0.0, "end": 1.5, "description": "画面描述0"}
+    assert shots[0]["recall"][0] == {
+        "source_name": "素材0",
+        "start": 0.0,
+        "end": 1.5,
+        "description": "画面描述0",
+    }
     assert "recall_note" not in shots[0] and "recall_note" not in shots[1]
     assert shots[2]["recall_note"] == evaluator.NO_RECALL == "该镜无召回结果"
     assert [r.text for r in searcher.requests] == [s["query"] for s in shots]
@@ -279,8 +324,11 @@ def test_main_missing_job_exits_nonzero_without_split(evaluator, config, tmp_pat
 
     boarder = FixtureStoryboarder(config)
     output = tmp_path / "report.json"
-    code = evaluator.main(["--cases", str(write_cases(tmp_path)), "--materials", "no-such-job",
-                           "--output", str(output)], config=config, storyboarder=boarder)
+    code = evaluator.main(
+        ["--cases", str(write_cases(tmp_path)), "--materials", "no-such-job", "--output", str(output)],
+        config=config,
+        storyboarder=boarder,
+    )
     assert code != 0
     assert boarder.calls == 0
     assert not output.exists()
@@ -289,16 +337,25 @@ def test_main_missing_job_exits_nonzero_without_split(evaluator, config, tmp_pat
 
 def test_main_empty_digest_logs_reason_and_splits_without_vocabulary(evaluator, config, tmp_path, capsys):
     from conftest import FixtureStoryboarder
-
-    from mindex.studio import studio
-    from mindex.studio.material_digest import EMPTY_INDEX
+    from studio import studio
+    from studio.material_digest import EMPTY_INDEX
 
     job = studio.create_job(config, "测试大纲")  # 临时数据目录中没有生效索引
     boarder = FixtureStoryboarder(config)
     output = tmp_path / "report.json"
     code = evaluator.main(
-        ["--cases", str(write_cases(tmp_path)), "--materials", job["id"], "--recall", "--output", str(output)],
-        config=config, storyboarder=boarder, searcher=CountingSearcher([1, 1, 1]),
+        [
+            "--cases",
+            str(write_cases(tmp_path)),
+            "--materials",
+            job["id"],
+            "--recall",
+            "--output",
+            str(output),
+        ],
+        config=config,
+        storyboarder=boarder,
+        searcher=CountingSearcher([1, 1, 1]),
     )
     assert code == 0
     assert boarder.vocabularies == [None]
@@ -310,9 +367,8 @@ def test_main_empty_digest_logs_reason_and_splits_without_vocabulary(evaluator, 
 @pytest.fixture
 def indexed(config, video_file):
     from conftest import FixtureAnalyzer, FixtureEmbedder
-
-    from mindex.processing.indexing import IndexBuilder
-    from mindex.processing.pipeline import Pipeline
+    from processing.indexing import IndexBuilder
+    from processing.pipeline import Pipeline
 
     embedder = FixtureEmbedder(config)
     pipeline = Pipeline(config, analyzer=FixtureAnalyzer(embedder))
@@ -324,9 +380,8 @@ def indexed(config, video_file):
 
 def test_run_materials_passes_vocabulary_to_storyboarder(evaluator, indexed, tmp_path):
     from conftest import FixtureStoryboarder
-
-    from mindex.studio import studio
-    from mindex.studio.material_digest import build_digest, merged_vocabulary
+    from studio import studio
+    from studio.material_digest import build_digest, merged_vocabulary
 
     config, store = indexed
     job = studio.create_job(config, "测试大纲", store=store)
@@ -338,8 +393,9 @@ def test_run_materials_passes_vocabulary_to_storyboarder(evaluator, indexed, tmp
     boarder = FixtureStoryboarder(config)
     logs = []
     cases = evaluator.load_cases(write_cases(tmp_path))
-    report = evaluator.run(config, cases + cases, job_id=job["id"], storyboarder=boarder, store=store,
-                           log=logs.append)
+    report = evaluator.run(
+        config, cases + cases, job_id=job["id"], storyboarder=boarder, store=store, log=logs.append
+    )
     assert boarder.vocabularies == [expected_vocabulary, expected_vocabulary]
     assert report["materials"]["empty_reason"] is None
     assert report["materials"]["stats"]["sources"] == 1

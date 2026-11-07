@@ -21,9 +21,9 @@ from contextlib import contextmanager
 from pathlib import Path
 from uuid import uuid4
 
-from mindex.agent.llm.types import tool_calls, tool_message
-from mindex.agent.schema import initialize
-from mindex.agent.vision import image_count
+from agent.llm.types import tool_calls, tool_message
+from agent.schema import initialize
+from agent.vision import image_count
 
 JSON_FIELDS = ("grants", "context", "loaded_domains")
 SECRET_PREFIX = "secret://"
@@ -35,8 +35,13 @@ def now_ms() -> int:
 
 
 def decode_event(row: dict) -> dict:
-    event = {"session_id": row["session_id"], "seq": row["seq"], "time": row["time"], "type": row["type"],
-             "data": json.loads(row["data"])}
+    event = {
+        "session_id": row["session_id"],
+        "seq": row["seq"],
+        "time": row["time"],
+        "type": row["type"],
+        "data": json.loads(row["data"]),
+    }
     if row.get("upstream_seq") is not None:
         event["upstream_seq"] = row["upstream_seq"]
     if row["ignorable"]:
@@ -94,11 +99,18 @@ class SessionStore:
         row = self.store.one("SELECT * FROM agent_sessions WHERE id=?", (sid,))
         if row is None:
             raise SessionNotFound("找不到助手会话")
-        return {**row, "grants": json.loads(row["grants"]), "context": json.loads(row["context"] or "null"),
-                "loaded_domains": json.loads(row["loaded_domains"] or "[]")}
+        return {
+            **row,
+            "grants": json.loads(row["grants"]),
+            "context": json.loads(row["context"] or "null"),
+            "loaded_domains": json.loads(row["loaded_domains"] or "[]"),
+        }
 
     def list(self) -> list[dict]:
-        rows = self.store.rows("SELECT id,title,status,created_at,updated_at,runtime FROM agent_sessions ORDER BY updated_at DESC")
+        rows = self.store.rows(
+            "SELECT id,title,status,created_at,updated_at,runtime FROM agent_sessions ORDER BY updated_at "
+            "DESC"
+        )
         return rows
 
     def update(self, sid: str, **fields) -> None:
@@ -119,20 +131,28 @@ class SessionStore:
             db.execute("COMMIT")
 
     # ------------------------------------------------------------ 事件
-    def append(self, sid: str, kind: str, data, *, ignorable: bool = False, upstream_seq: int | None = None) -> dict | None:
+    def append(
+        self, sid: str, kind: str, data, *, ignorable: bool = False, upstream_seq: int | None = None
+    ) -> dict | None:
         data = self.redact(sid, data)
         stamp = now_ms()
         with self.store.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            if upstream_seq is not None and db.execute(
-                "SELECT 1 FROM agent_events WHERE session_id=? AND upstream_seq=?", (sid, upstream_seq)
-            ).fetchone():
+            if (
+                upstream_seq is not None
+                and db.execute(
+                    "SELECT 1 FROM agent_events WHERE session_id=? AND upstream_seq=?", (sid, upstream_seq)
+                ).fetchone()
+            ):
                 db.execute("COMMIT")
                 return None
-            row = db.execute("SELECT COALESCE(MAX(seq), -1) FROM agent_events WHERE session_id=?", (sid,)).fetchone()
+            row = db.execute(
+                "SELECT COALESCE(MAX(seq), -1) FROM agent_events WHERE session_id=?", (sid,)
+            ).fetchone()
             seq = row[0] + 1
             db.execute(
-                "INSERT INTO agent_events(session_id,seq,time,type,data,ignorable,upstream_seq) VALUES(?,?,?,?,?,?,?)",
+                "INSERT INTO agent_events(session_id,seq,time,type,data,ignorable,upstream_seq) "
+                "VALUES(?,?,?,?,?,?,?)",
                 (sid, seq, stamp, kind, json.dumps(data, ensure_ascii=False), int(ignorable), upstream_seq),
             )
             db.execute("UPDATE agent_sessions SET updated_at=? WHERE id=?", (stamp, sid))
@@ -160,17 +180,20 @@ class SessionStore:
             raise ValueError("操作窗口步数必须在 1–256 之间")
         boundary = self.store.one(
             "SELECT seq FROM agent_events WHERE session_id=? AND type='assistant/message' "
-            "ORDER BY seq DESC LIMIT 1 OFFSET ?", (sid, window_steps - 1),
+            "ORDER BY seq DESC LIMIT 1 OFFSET ?",
+            (sid, window_steps - 1),
         )
         cutoff = boundary["seq"] if boundary else 0
         anchor = self.store.one(
             "SELECT seq FROM agent_events WHERE session_id=? AND type='user/message' AND seq<? "
-            "AND json_extract(data,'$.source.kind')!='context' ORDER BY seq DESC LIMIT 1", (sid, cutoff),
+            "AND json_extract(data,'$.source.kind')!='context' ORDER BY seq DESC LIMIT 1",
+            (sid, cutoff),
         )
         start = anchor["seq"] if anchor else cutoff
         context = self.store.one(
             "SELECT seq FROM agent_events WHERE session_id=? AND type='user/message' AND seq<? "
-            "AND json_extract(data,'$.source.kind')='context' ORDER BY seq DESC LIMIT 1", (sid, start),
+            "AND json_extract(data,'$.source.kind')='context' ORDER BY seq DESC LIMIT 1",
+            (sid, start),
         )
         rows = self.store.rows(
             "SELECT * FROM agent_events WHERE session_id=? AND seq>=? "
@@ -184,7 +207,8 @@ class SessionStore:
 
     def last_turn(self, sid: str) -> int:
         row = self.store.one(
-            "SELECT MAX(json_extract(data,'$.turn')) AS turn FROM agent_events WHERE session_id=? AND type='turn/start'",
+            "SELECT MAX(json_extract(data,'$.turn')) AS turn FROM agent_events WHERE session_id=? AND "
+            "type='turn/start'",
             (sid,),
         )
         return int(row["turn"]) if row and row["turn"] is not None else 0
@@ -208,12 +232,17 @@ class SessionStore:
         return row["value"]
 
     def redact(self, sid: str, data):
-        values = [r["value"] for r in self.store.rows(
-            "SELECT id, value FROM agent_secrets WHERE session_id=?", (sid,)) if len(r["value"]) >= 4]
+        values = [
+            r["value"]
+            for r in self.store.rows("SELECT id, value FROM agent_secrets WHERE session_id=?", (sid,))
+            if len(r["value"]) >= 4
+        ]
         if not values:
             return data
-        refs = {r["value"]: r["id"] for r in self.store.rows(
-            "SELECT id, value FROM agent_secrets WHERE session_id=?", (sid,))}
+        refs = {
+            r["value"]: r["id"]
+            for r in self.store.rows("SELECT id, value FROM agent_secrets WHERE session_id=?", (sid,))
+        }
 
         def scrub(value):
             if isinstance(value, str):
@@ -255,8 +284,14 @@ def estimate_tokens(value, *, image_tokens: int = 0, image_limit: int | None = N
     return total
 
 
-def derive_messages(events: list[dict], *, budget: int | None = None, keep_recent_results: int = 6,
-                    image_tokens: int = 0, image_limit: int | None = None) -> list[dict]:
+def derive_messages(
+    events: list[dict],
+    *,
+    budget: int | None = None,
+    keep_recent_results: int = 6,
+    image_tokens: int = 0,
+    image_limit: int | None = None,
+) -> list[dict]:
     """从日志派生发给模型的消息序列。
 
     每个工具调用都要有对应结果：日志里缺失的（例如进程被杀）补一条错误结果，保证协议合法。
@@ -283,10 +318,12 @@ def derive_messages(events: list[dict], *, budget: int | None = None, keep_recen
         result.append(message)
         if message["role"] != "assistant":
             continue
-        following = {m.get("toolCallId") for m in messages[index + 1:] if m["role"] == "tool"}
+        following = {m.get("toolCallId") for m in messages[index + 1 :] if m["role"] == "tool"}
         for call in tool_calls(message):
             if call["id"] not in following:
-                result.append(tool_message(call["id"], "Error: 该工具调用未完成（会话被中断）", is_error=True))
+                result.append(
+                    tool_message(call["id"], "Error: 该工具调用未完成（会话被中断）", is_error=True)
+                )
     # 工具结果必须紧跟其所属的 assistant 消息：中间插入的 user 消息（如页面上下文）移到结果之后。
     ordered: list[dict] = []
     pending_users: list[dict] = []
@@ -317,8 +354,10 @@ def derive_messages(events: list[dict], *, budget: int | None = None, keep_recen
         if estimate(ordered) <= budget:
             return ordered
     while estimate(ordered) > budget:
-        starts = [i for i, m in enumerate(ordered) if m["role"] == "user" and m["source"].get("kind") != "context"]
+        starts = [
+            i for i, m in enumerate(ordered) if m["role"] == "user" and m["source"].get("kind") != "context"
+        ]
         if len(starts) < 2:
             break
-        ordered = ordered[starts[1]:]
+        ordered = ordered[starts[1] :]
     return ordered

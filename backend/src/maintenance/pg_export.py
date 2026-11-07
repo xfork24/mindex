@@ -15,15 +15,19 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from contextlib import nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from mindex.shared.db.schema_pg import BASELINE_TABLES
-from mindex.shared.storage import Store
-from mindex.shared.work_budget import copy_file
+from maintenance.backup_files import referenced_files, safe_path
+from shared.db.dialect import _baseline_columns
+from shared.db.schema_pg import BASELINE_TABLES
+from shared.resource_registry import referenced_objects, required_objects
+from shared.storage import Store
+from shared.work_budget import copy_file
 
 if TYPE_CHECKING:
-    from mindex.shared.storage import PgStore
+    from shared.storage import PgStore
 
 log = logging.getLogger(__name__)
 
@@ -42,7 +46,6 @@ def export_pg_to_sqlite(pg_store: PgStore, target: Path, *, tables=BASELINE_TABL
     staging = Store(target)
     manifest: dict[str, dict] = {}
     total = 0
-    from mindex.shared.db.dialect import _baseline_columns
 
     columns_by_table = _baseline_columns()
     with pg_store.backend.pool().connection() as connection:
@@ -52,8 +55,11 @@ def export_pg_to_sqlite(pg_store: PgStore, target: Path, *, tables=BASELINE_TABL
             for table in tables:
                 db.execute(f'DELETE FROM "{table}"')
             for table in tables:
-                columns = [column for column in columns_by_table[table]
-                           if column != "rowid" or table not in _ROWID_IS_ID]
+                columns = [
+                    column
+                    for column in columns_by_table[table]
+                    if column != "rowid" or table not in _ROWID_IS_ID
+                ]
                 names = ",".join(f'"{column}"' for column in columns)
                 order = "id" if table in _ROWID_IS_ID else "rowid"
                 placeholders = ",".join("?" * len(columns))
@@ -73,8 +79,11 @@ def export_pg_to_sqlite(pg_store: PgStore, target: Path, *, tables=BASELINE_TABL
             if db.execute("PRAGMA foreign_key_check").fetchone():
                 raise ValueError("PG 导出存在悬空外键引用")
     log.info("PG 一致性导出完成：%d 行 / %d 表 → %s", total, len(tables), target)
-    return {"tables": manifest, "total_rows": total,
-            "metadata": {"isolation": "repeatable-read-read-only", "dialect": "pg-export-v1"}}
+    return {
+        "tables": manifest,
+        "total_rows": total,
+        "metadata": {"isolation": "repeatable-read-read-only", "dialect": "pg-export-v1"},
+    }
 
 
 def export_media_bundle(store: Store, media, target: Path) -> dict:
@@ -85,18 +94,14 @@ def export_media_bundle(store: Store, media, target: Path) -> dict:
     S3 形态逐 key 物化后复制（保持相对 key 布局）；本地形态直接复制文件。
     返回清单（key → size/sha256），供装载后逐项校验。
     """
-    import hashlib
-    from contextlib import nullcontext
-
-    from mindex.maintenance.backup_files import referenced_files, safe_path
 
     target = Path(target)
     payload = target / "data"
     payload.mkdir(parents=True, exist_ok=True)
     if getattr(media, "backend", "local") == "s3":
-        keys = referenced_files(target, target / "metadata.sqlite3",
-                                available_files=set(media.iter_prefix("")))
-        from mindex.shared.resource_registry import referenced_objects, required_objects
+        keys = referenced_files(
+            target, target / "metadata.sqlite3", available_files=set(media.iter_prefix(""))
+        )
 
         available = set(media.iter_prefix(""))
         keys.update(key for key in referenced_objects(store) if key in available)
@@ -109,9 +114,7 @@ def export_media_bundle(store: Store, media, target: Path) -> dict:
                 with media.materialize(key) as path:
                     copy_file(path, destination)
     else:
-
         keys = referenced_files(media.root, target / "metadata.sqlite3")
-        from mindex.shared.resource_registry import required_objects
 
         keys.update(required_objects(store))
         for key in sorted(keys):
@@ -127,6 +130,7 @@ def export_media_bundle(store: Store, media, target: Path) -> dict:
                 digest.update(chunk)
         manifest[key] = {"size": path.stat().st_size, "sha256": digest.hexdigest()}
     (target / "media_manifest.json").write_text(
-        __import__("json").dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+        __import__("json").dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     log.info("媒体 bundle 复制完成：%d 个对象 → %s", len(manifest), payload)
     return {"objects": len(manifest), "bytes": sum(item["size"] for item in manifest.values())}

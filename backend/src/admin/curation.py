@@ -4,11 +4,20 @@ from __future__ import annotations
 
 import hashlib
 import json
+from math import ceil
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from mindex.shared.storage import Store
+from admin.source_work import source_work
+from processing.dialogue import current_dialogue, indexed_dialogue, relative_dialogue
+from processing.subtitle_uploads import uploaded_subtitles
+from shared.background_tasks import public_task
+from shared.config import fingerprint
+from shared.media import MediaError
+from shared.media_groups import Groups
+from shared.shot_media import ShotMedia
+from shared.storage import Store
 
 Visibility = Literal["visible", "hidden", "all"]
 
@@ -88,8 +97,10 @@ LEFT JOIN segment_curation pc ON pc.id=g.parent_id
 # 有效隐藏过滤的双方言片段：SQLite 数值 OR 真值 / PG 布尔化 CASE（结果同为 0/1 整数）。
 HIDDEN_FILTER = {
     "sqlite": "(COALESCE(c.hidden,0) OR COALESCE(sc.hidden,0) OR COALESCE(pc.hidden,0))=?",
-    "pg": ("(CASE WHEN COALESCE(c.hidden,0)<>0 OR COALESCE(sc.hidden,0)<>0 OR COALESCE(pc.hidden,0)<>0"
-           " THEN 1 ELSE 0 END)=%s"),
+    "pg": (
+        "(CASE WHEN COALESCE(c.hidden,0)<>0 OR COALESCE(sc.hidden,0)<>0 OR COALESCE(pc.hidden,0)<>0"
+        " THEN 1 ELSE 0 END)=%s"
+    ),
 }
 
 
@@ -146,8 +157,9 @@ def segment_public(row: dict) -> dict:
         "effective_hidden": bool(row["effective_hidden"]),
         "inherited_hidden": bool(row["inherited_hidden"]),
         "media_url": f"/api/admin/segments/{row['id']}/media",
-        "media_revision": hashlib.sha256(
-            f"{row['path']}:{row['start']}:{row['end']}".encode()).hexdigest()[:20],
+        "media_revision": hashlib.sha256(f"{row['path']}:{row['start']}:{row['end']}".encode()).hexdigest()[
+            :20
+        ],
         "thumbnail_url": f"/api/admin/segments/{row['id']}/thumbnail",
         **organization(row),
     }
@@ -174,20 +186,26 @@ class Library:
         if detail == "summary":
             return source_public(row)
         # Bounded artifact checks support a real status even before an index exists.
-        from mindex.shared.shot_media import ShotMedia
+
         segments = self.store.segments(identifier)
         missing = segments
         media = ShotMedia(self.store, reuse_checks=True)
         media._sources[identifier] = row
-        media._shots[identifier] = [s for s in segments if s['kind'] == 'shot']
+        media._shots[identifier] = [s for s in segments if s["kind"] == "shot"]
         for shot in media._shots[identifier]:
-            path = (self.store.root / shot['path']).resolve()
+            path = (self.store.root / shot["path"]).resolve()
             if path.is_relative_to(self.store.root) and path.is_file():
-                media._paths[shot['path']] = path
-        references = {r['path']: r for r in self.store.rows(
-            "SELECT path,source_id,start,end FROM media_references WHERE source_id=?", (identifier,))}
-        references.update({s['path']: references.get(s['path'], s) for s in segments
-                           if s['kind'] in ('moment', 'scene')})
+                media._paths[shot["path"]] = path
+        references = {
+            r["path"]: r
+            for r in self.store.rows(
+                "SELECT path,source_id,start,end FROM media_references WHERE source_id=?", (identifier,)
+            )
+        }
+        references.update(
+            {s["path"]: references.get(s["path"], s) for s in segments if s["kind"] in ("moment", "scene")}
+        )
+
         def available(relative):
             if relative in media._paths:
                 return True
@@ -199,16 +217,15 @@ class Library:
             ref = references.get(relative)
             if ref:
                 try:
-                    media.references(ref['source_id'], ref['start'], ref['end'])
+                    media.references(ref["source_id"], ref["start"], ref["end"])
                     return True
                 except (ValueError, OSError):
                     pass
             return False
-        missing_count = sum(not available(s[field]) for s in missing for field in ('path', 'thumbnail'))
-        from mindex.processing.dialogue import current_dialogue, indexed_dialogue, relative_dialogue
-        from mindex.search.search import channel_coverage
-        from mindex.shared.config import fingerprint
-        from mindex.shared.media import MediaError
+
+        missing_count = sum(not available(s[field]) for s in missing for field in ("path", "thumbnail"))
+        # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+        from search.search import channel_coverage
 
         channel = self.store.one(
             "SELECT * FROM channel_data WHERE source_id=? AND channel='dialogue'", (identifier,)
@@ -223,20 +240,21 @@ class Library:
                 )
                 dialogue = json.loads(legacy["data"]) if legacy else {}
         if channel and channel["status"] == "processing":
-            from math import ceil
-
             checkpoints = self.store.root / "dialogue" / identifier / channel["profile"]
             dialogue["completed_chunks"] = sum(p.stem.isdigit() for p in checkpoints.glob("*.json"))
             dialogue["total_chunks"] = ceil(json.loads(row["media"])["duration"] / 30)
         tracks = dialogue.get("subtitle_tracks")
         if tracks is None:
             try:
-                from mindex.processing.subtitle_archive import load_archive
+                # 延迟导入：保持异常捕获范围，依赖加载失败时仍走原有降级路径。
+                from processing.subtitle_archive import load_archive
+
                 tracks = load_archive(self.store, identifier)["tracks"]
             except (MediaError, FileNotFoundError):
                 tracks = []
         annotations = self.store.one(
-            "SELECT COUNT(DISTINCT a.segment_id) AS n FROM annotations a JOIN segments s ON s.id=a.segment_id WHERE s.source_id=?",
+            "SELECT COUNT(DISTINCT a.segment_id) AS n FROM annotations a JOIN segments s ON "
+            "s.id=a.segment_id WHERE s.source_id=?",
             (identifier,),
         )["n"]
         channel_states = {
@@ -307,7 +325,8 @@ class Library:
         for name, stages in (("visual", ("detect", "prepare")), ("analysis", ("analyze",))):
             marks = ",".join("?" for _ in stages)
             run = self.store.one(
-                f"SELECT status,message FROM runs WHERE source_id=? AND stage IN ({marks}) ORDER BY id DESC LIMIT 1",
+                f"SELECT status,message FROM runs WHERE source_id=? AND stage IN ({marks}) ORDER BY id DESC "
+                f"LIMIT 1",
                 (identifier, *stages),
             )
             if run:
@@ -317,15 +336,15 @@ class Library:
             "SELECT * FROM dialogue_tasks WHERE source_id=? ORDER BY created_at DESC,rowid DESC LIMIT 1",
             (identifier,),
         )
-        from mindex.processing.subtitle_uploads import uploaded_subtitles
-        from mindex.shared.background_tasks import public_task
 
         active = self.store.active_index()
         published = self.store.snapshots(active["id"], identifier) if active else []
         result = {
             **source_public(row),
             "missing_artifacts": missing_count,
-            "completed_shots": sum(available(s["path"]) and available(s["thumbnail"]) for s in media._shots[identifier]),
+            "completed_shots": sum(
+                available(s["path"]) and available(s["thumbnail"]) for s in media._shots[identifier]
+            ),
             "channels": channel_states,
             "published_channels": channel_coverage(self.store, source_id=identifier, snapshots=published),
             "subtitle_tracks": tracks,
@@ -335,21 +354,32 @@ class Library:
                 "SELECT * FROM runs WHERE source_id=? ORDER BY id DESC LIMIT 5", (identifier,)
             ),
         }
-        from mindex.admin.source_work import source_work
-        result["work"] = source_work(self.store, result, segments=segments, analysis_rows=analysis_rows,
-                                     active=active, published=published)
+
+        result["work"] = source_work(
+            self.store,
+            result,
+            segments=segments,
+            analysis_rows=analysis_rows,
+            active=active,
+            published=published,
+        )
         return result
 
-    def list_sources(self, q: str, visibility: Visibility, favorite_only: bool, page: int, page_size: int,
-                     source_group_ids=None):
+    def list_sources(
+        self,
+        q: str,
+        visibility: Visibility,
+        favorite_only: bool,
+        page: int,
+        page_size: int,
+        source_group_ids=None,
+    ):
         clauses, args = [], []
         if source_group_ids:
-            from mindex.shared.media_groups import Groups
-
-            allowed = Groups(self.store).resolve('source', source_group_ids)
+            allowed = Groups(self.store).resolve("source", source_group_ids)
             if not allowed:
-                return {'items': [], 'total': 0, 'page': page, 'page_size': page_size}
-            clauses.append('s.id IN (' + ','.join('?' for _ in allowed) + ')')
+                return {"items": [], "total": 0, "page": page, "page_size": page_size}
+            clauses.append("s.id IN (" + ",".join("?" for _ in allowed) + ")")
             args.extend(sorted(allowed))
         if q.strip():
             clauses.append(
@@ -362,9 +392,13 @@ class Library:
         if favorite_only:
             clauses.append("COALESCE(c.favorite,0)=1")
         where = " WHERE " + " AND ".join(clauses) if clauses else ""
-        total = self.store.one("SELECT COUNT(*) AS n FROM (" + source_sql(self.store) + where + ")", args)["n"]
+        total = self.store.one("SELECT COUNT(*) AS n FROM (" + source_sql(self.store) + where + ")", args)[
+            "n"
+        ]
         rows = self.store.rows(
-            source_sql(self.store) + where + " ORDER BY LOWER(COALESCE(c.display_name,s.name)),s.id LIMIT ? OFFSET ?",
+            source_sql(self.store)
+            + where
+            + " ORDER BY LOWER(COALESCE(c.display_name,s.name)),s.id LIMIT ? OFFSET ?",
             [*args, page_size, (page - 1) * page_size],
         )
         return {
@@ -398,7 +432,9 @@ class Library:
         if favorite_only:
             clauses.append("COALESCE(c.favorite,0)=1")
         where = " WHERE " + " AND ".join(clauses)
-        total = self.store.one("SELECT COUNT(*) AS n FROM (" + segment_sql(self.store) + where + ")", args)["n"]
+        total = self.store.one("SELECT COUNT(*) AS n FROM (" + segment_sql(self.store) + where + ")", args)[
+            "n"
+        ]
         rows = self.store.rows(
             segment_sql(self.store) + where + " ORDER BY g.start,g.end,g.id LIMIT ? OFFSET ?",
             [*args, page_size, (page - 1) * page_size],
@@ -431,32 +467,45 @@ class Library:
             # 命中水合只需命中素材、片段及其父镜头，不能构建全库 curation map。
             sources, segments = {}, {}
             source_ids = sorted({s["source_id"] for s in snapshots})
-            segment_ids = sorted({s["id"] for s in snapshots} | {
-                s["parent_id"] for s in snapshots if s.get("parent_id")})
+            segment_ids = sorted(
+                {s["id"] for s in snapshots} | {s["parent_id"] for s in snapshots if s.get("parent_id")}
+            )
             for offset in range(0, len(source_ids), 400):
-                ids = source_ids[offset:offset + 400]
+                ids = source_ids[offset : offset + 400]
                 marks = ",".join("?" * len(ids))
-                sources.update((r["id"], r) for r in self.store.rows(
-                    "SELECT s.id,s.name,c.display_name,c.hidden FROM sources s "
-                    f"LEFT JOIN source_curation c ON c.id=s.id WHERE s.id IN ({marks})", ids))
+                sources.update(
+                    (r["id"], r)
+                    for r in self.store.rows(
+                        "SELECT s.id,s.name,c.display_name,c.hidden FROM sources s "
+                        f"LEFT JOIN source_curation c ON c.id=s.id WHERE s.id IN ({marks})",
+                        ids,
+                    )
+                )
             for offset in range(0, len(segment_ids), 400):
-                ids = segment_ids[offset:offset + 400]
+                ids = segment_ids[offset : offset + 400]
                 marks = ",".join("?" * len(ids))
-                segments.update((r["id"], r) for r in self.store.rows(
-                    "SELECT g.id,g.parent_id,c.display_name,c.favorite,c.hidden FROM segments g "
-                    f"LEFT JOIN segment_curation c ON c.id=g.id WHERE g.id IN ({marks}) "
-                    f"OR g.id IN (SELECT parent_id FROM segments WHERE id IN ({marks}))", [*ids, *ids]))
+                segments.update(
+                    (r["id"], r)
+                    for r in self.store.rows(
+                        "SELECT g.id,g.parent_id,c.display_name,c.favorite,c.hidden FROM segments g "
+                        f"LEFT JOIN segment_curation c ON c.id=g.id WHERE g.id IN ({marks}) "
+                        f"OR g.id IN (SELECT parent_id FROM segments WHERE id IN ({marks}))",
+                        [*ids, *ids],
+                    )
+                )
             return sources, segments
         sources = {
             r["id"]: r
             for r in self.store.rows(
-                "SELECT s.id,s.name,c.display_name,c.hidden FROM sources s LEFT JOIN source_curation c ON c.id=s.id"
+                "SELECT s.id,s.name,c.display_name,c.hidden FROM sources s LEFT JOIN source_curation c ON "
+                "c.id=s.id"
             )
         }
         segments = {
             r["id"]: r
             for r in self.store.rows(
-                "SELECT g.id,g.parent_id,c.display_name,c.favorite,c.hidden FROM segments g LEFT JOIN segment_curation c ON c.id=g.id"
+                "SELECT g.id,g.parent_id,c.display_name,c.favorite,c.hidden FROM segments g LEFT JOIN "
+                "segment_curation c ON c.id=g.id"
             )
         }
         return sources, segments

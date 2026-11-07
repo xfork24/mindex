@@ -9,10 +9,10 @@ import json
 
 from PIL import Image
 
-from mindex.agent.attachments import AttachmentStore
-from mindex.agent.llm.types import image_block, text_block, tool_message, user_message
-from mindex.agent.registry import ToolOutput
-from mindex.agent.vision import (
+from agent.attachments import AttachmentStore
+from agent.llm.types import image_block, text_block, tool_message, user_message
+from agent.registry import ToolOutput
+from agent.vision import (
     OMITTED,
     encode_jpeg,
     image_count,
@@ -25,7 +25,9 @@ from mindex.agent.vision import (
 
 def png(width: int, height: int, mode: str = "RGB") -> bytes:
     buffer = io.BytesIO()
-    Image.new(mode, (width, height), (200, 10, 10, 128) if mode == "RGBA" else (200, 10, 10)).save(buffer, "PNG")
+    Image.new(mode, (width, height), (200, 10, 10, 128) if mode == "RGBA" else (200, 10, 10)).save(
+        buffer, "PNG"
+    )
     return buffer.getvalue()
 
 
@@ -52,8 +54,12 @@ def user_with_images(text: str, *refs: str) -> dict:
 
 
 def assistant_calls(*ids: str) -> dict:
-    return {"id": "m-a", "role": "assistant", "source": {"kind": "model"},
-            "content": [{"type": "tool-call", "id": i, "name": "sample_frames", "arguments": "{}"} for i in ids]}
+    return {
+        "id": "m-a",
+        "role": "assistant",
+        "source": {"kind": "model"},
+        "content": [{"type": "tool-call", "id": i, "name": "sample_frames", "arguments": "{}"} for i in ids],
+    }
 
 
 def run(coro):
@@ -62,7 +68,10 @@ def run(coro):
 
 def test_blocks_and_tool_message_images():
     assert image_block("attachment://" + "a" * 32) == {
-        "type": "image", "ref": "attachment://" + "a" * 32, "mediaType": "image/jpeg"}
+        "type": "image",
+        "ref": "attachment://" + "a" * 32,
+        "mediaType": "image/jpeg",
+    }
     message = tool_message("call-1", "ok", images=["/api/x"])
     assert message["images"] == ["/api/x"]
     assert "images" not in tool_message("call-1", "ok")
@@ -74,7 +83,13 @@ def test_blocks_and_tool_message_images():
 def test_image_ref_whitelist():
     assert is_image_ref("attachment://" + "0" * 32)
     assert is_image_ref("/api/admin/sources/s1/frame?t=1.5&width=768")
-    for bad in ("https://evil.example/a.jpg", "//evil.example/a.jpg", "/api/../secret", "data:image/png;base64,AA", 3):
+    for bad in (
+        "https://evil.example/a.jpg",
+        "//evil.example/a.jpg",
+        "/api/../secret",
+        "data:image/png;base64,AA",
+        3,
+    ):
         assert not is_image_ref(bad)
 
 
@@ -88,7 +103,11 @@ def test_encode_jpeg_bounds_longest_side_and_flattens_alpha():
 
 def test_disabled_strips_all_images_without_loading():
     load, calls = fake_loader({})
-    messages = [user_with_images("看图", "/api/a"), assistant_calls("c1"), tool_message("c1", "帧", images=["/api/b"])]
+    messages = [
+        user_with_images("看图", "/api/a"),
+        assistant_calls("c1"),
+        tool_message("c1", "帧", images=["/api/b"]),
+    ]
     out = run(materialize(messages, enabled=False, limit=8, load=load))
     assert image_count(out) == 0 and calls == []
     assert out[0]["content"] == [text_block("看图")]
@@ -145,8 +164,9 @@ def test_loader_reads_attachment_with_owner_check_and_rejects_foreign_urls(tmp_p
     store = AttachmentStore(tmp_path / "data")
     upload = tmp_path / "in.png"
     upload.write_bytes(png(32, 32))
-    ref = store.put(upload, filename="in.png", content_type="image/png", owner="session",
-                    session_id="s1", ttl_hours=1)["id"]
+    ref = store.put(
+        upload, filename="in.png", content_type="image/png", owner="session", session_id="s1", ttl_hours=1
+    )["id"]
     messages = [user_with_images("图", ref, "https://evil.example/x.png")]
     own = make_loader(attachment=store.resolver(session_id="s1", owner="session"))
     out = run(materialize(messages, enabled=True, limit=8, load=own))

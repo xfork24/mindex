@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """对冻结源码执行完整离线回归；按历史 JUnit 耗时分组，保留选择、日志与结果。"""
+
 from __future__ import annotations
 
 import argparse
@@ -22,19 +23,33 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workers", type=int, default=4, choices=range(1, 9), help="独立测试进程数（1–8）")
     parser.add_argument("--output", type=Path, help="新建证据目录")
-    parser.add_argument("--durations", type=Path, default=ROOT / "artifacts/scaling-local-frozen",
-                        help="历史 JUnit 目录，仅用于分组，不改变测试选择")
+    parser.add_argument(
+        "--durations",
+        type=Path,
+        default=ROOT / "artifacts/scaling-local-frozen",
+        help="历史 JUnit 目录，仅用于分组，不改变测试选择",
+    )
     args = parser.parse_args()
     spec = importlib.util.spec_from_file_location("scaling_verifier", ROOT / "scripts/verify-scaling.py")
     verifier = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(verifier)
-    output = (args.output or ROOT / "artifacts/local" /
-              f"{datetime.now(UTC):%Y%m%dT%H%M%SZ}-{uuid4().hex[:12]}").resolve()
+    output = (
+        args.output or ROOT / "artifacts/local" / f"{datetime.now(UTC):%Y%m%dT%H%M%SZ}-{uuid4().hex[:12]}"
+    ).resolve()
     output.mkdir(parents=True, exist_ok=False)
-    env = {key: value for key, value in os.environ.items()
-           if not key.startswith("MINDEX_") or key == "MINDEX_PLAYWRIGHT_MODULE"}
-    collected = subprocess.run([sys.executable, "-m", "pytest", "--collect-only", "-q"], cwd=ROOT,
-                               env=env, text=True, capture_output=True, check=False)
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("MINDEX_") or key == "MINDEX_PLAYWRIGHT_MODULE"
+    }
+    collected = subprocess.run(
+        [sys.executable, "-m", "pytest", "--collect-only", "-q"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
     (output / "collection.log").write_text(collected.stdout + collected.stderr, encoding="utf-8")
     if collected.returncode:
         raise RuntimeError(f"测试收集失败，见 {output / 'collection.log'}")
@@ -49,7 +64,7 @@ def main():
     def weight(node):
         file, *names = node.split("::")
         classname = ".".join([file.removesuffix(".py").replace("/", "."), *names[:-1]])
-        return max(.05, durations.get((classname, names[-1]), 1))
+        return max(0.05, durations.get((classname, names[-1]), 1))
 
     groups = [[] for _ in range(args.workers)]
     weights = [0.0] * args.workers
@@ -61,9 +76,15 @@ def main():
     positions = {node: index for index, node in enumerate(nodes)}
     groups = [sorted(group, key=positions.__getitem__) for group in groups]
     fingerprint = verifier.source_identity()
-    report = {"started_at": datetime.now(UTC).isoformat(), "source_sha256": fingerprint,
-              "nodes": len(nodes), "workers": args.workers, "groups": groups,
-              "estimated_seconds": weights, "status": "running"}
+    report = {
+        "started_at": datetime.now(UTC).isoformat(),
+        "source_sha256": fingerprint,
+        "nodes": len(nodes),
+        "workers": args.workers,
+        "groups": groups,
+        "estimated_seconds": weights,
+        "status": "running",
+    }
     (output / "selection.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"完整离线回归：{len(nodes)} 项，{args.workers} 个独立进程；证据：{output}", flush=True)
     processes, logs, codes = {}, [], {}
@@ -72,8 +93,20 @@ def main():
             log = (output / f"shard-{index}.log").open("w")
             logs.append(log)
             processes[index] = subprocess.Popen(
-                [sys.executable, "-m", "pytest", "-q", "--tb=short", f"--junitxml={output / f'shard-{index}.xml'}",
-                 *group], cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
+                [
+                    sys.executable,
+                    "-m",
+                    "pytest",
+                    "-q",
+                    "--tb=short",
+                    f"--junitxml={output / f'shard-{index}.xml'}",
+                    *group,
+                ],
+                cwd=ROOT,
+                env=env,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+            )
         while processes:
             for index, process in list(processes.items()):
                 if process.poll() is not None:
@@ -89,14 +122,22 @@ def main():
                     counts[key] += int(suite.get(key, "0"))
         unchanged = verifier.source_identity() == fingerprint
         passed = not any(codes.values()) and counts["tests"] == len(nodes) and unchanged
-        report.update(status="passed" if passed else "failed", counts=counts, exit_codes=codes,
-                      source_unchanged=unchanged, finished_at=datetime.now(UTC).isoformat())
+        report.update(
+            status="passed" if passed else "failed",
+            counts=counts,
+            exit_codes=codes,
+            source_unchanged=unchanged,
+            finished_at=datetime.now(UTC).isoformat(),
+        )
         print(json.dumps({"status": report["status"], "source_unchanged": unchanged, **counts}), flush=True)
         return 0 if passed else 1
     except KeyboardInterrupt:
         signal.signal(signal.SIGINT, signal.SIG_IGN)
-        report.update(status="interrupted", source_unchanged=verifier.source_identity() == fingerprint,
-                      finished_at=datetime.now(UTC).isoformat())
+        report.update(
+            status="interrupted",
+            source_unchanged=verifier.source_identity() == fingerprint,
+            finished_at=datetime.now(UTC).isoformat(),
+        )
         return 130
     finally:
         # uv 与子进程可能同时收到 SIGINT；收尾期间忽略重复信号，确保子进程和证据落盘。
@@ -105,7 +146,9 @@ def main():
             verifier.stop_process(process)
         for log in logs:
             log.close()
-        (output / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+        (output / "report.json").write_text(
+            json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
 
 
 if __name__ == "__main__":

@@ -1,19 +1,25 @@
+"""创作任务、方案与构建 REST 接口回归。"""
+
 from __future__ import annotations
 
+import io
 import json
+import threading
 import time
+import zipfile
+from threading import Event
 
 import pytest
-from conftest import FixtureEmbedder, FixtureSpeaker, FixtureStoryboarder
 from fastapi.testclient import TestClient
-from filelock import Timeout
+from filelock import FileLock, Timeout
 
-from mindex.api import create_app
-from mindex.processing.indexing import IndexBuilder
-from mindex.processing.pipeline import Pipeline
-from mindex.shared import lock_backend
-from mindex.shared.storage import Store
-from mindex.studio import studio
+from api import create_app
+from conftest import FixtureEmbedder, FixtureSpeaker, FixtureStoryboarder
+from processing.indexing import IndexBuilder
+from processing.pipeline import Pipeline
+from shared import lock_backend
+from shared.storage import Store
+from studio import studio
 
 pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
 
@@ -102,17 +108,13 @@ def test_create_job_material_scope(studio_client):
     )
     assert scoped.status_code == 201
     assert scoped.json()["source_ids"] == [source_id]
-    assert client.get(f"/api/studio/jobs/{scoped.json()['id']}").json()["job"]["source_ids"] == [
-        source_id
-    ]
+    assert client.get(f"/api/studio/jobs/{scoped.json()['id']}").json()["job"]["source_ids"] == [source_id]
     # 不传即不限，老任务继续读得到 source_ids=None。
-    assert client.get(f"/api/studio/jobs/{create_job(client, '不限素材。')}").json()["job"][
-        "source_ids"
-    ] is None
     assert (
-        client.post(
-            "/api/studio/jobs", json={"text": "全不选。", "options": {"source_ids": []}}
-        ).status_code
+        client.get(f"/api/studio/jobs/{create_job(client, '不限素材。')}").json()["job"]["source_ids"] is None
+    )
+    assert (
+        client.post("/api/studio/jobs", json={"text": "全不选。", "options": {"source_ids": []}}).status_code
         == 422
     )
     assert (
@@ -190,13 +192,8 @@ def test_run_all_rejects_when_complete_and_artifacts_download(studio_client):
     assert client.get(f"/api/studio/jobs/{job_id}/artifacts/render/final.mp4").status_code == 404
     # 全自动连跑：五步全部完成，成片可下载
     assert client.post(f"/api/studio/jobs/{job_id}/run").status_code == 202
-    deadline = time.monotonic() + 60
-    state = None
-    while time.monotonic() < deadline:
-        state = client.get(f"/api/studio/jobs/{job_id}").json()["job"]["steps"]
-        if state["render"]["status"] in {"complete", "failed"}:
-            break
-        time.sleep(0.05)
+    # 步骤终态先落盘，必须等执行器收尾并释放锁后再验证再次连跑。
+    state = wait_step(client, job_id, "render", timeout=60)["job"]["steps"]
     assert state["split"]["status"] == "complete"
     assert state["recall"]["status"] == "complete"
     assert state["tts"]["status"] == "complete"
@@ -213,7 +210,7 @@ def test_run_all_rejects_when_complete_and_artifacts_download(studio_client):
 def test_delete_job(studio_client):
     config, client = studio_client
     job_id = create_job(client, "待删除的任务。")
-    from mindex.studio import studio
+    from studio import studio
 
     directory = studio.job_dir(config, job_id)
     for relative in ["versions/example/render.mp4", "previews/quick/example.wav", "inputs/reference.png"]:
@@ -301,11 +298,8 @@ def test_patch_storyboard_cascades_and_patch_timeline_reselects(studio_client):
 
 
 def test_accepted_state_lock_conflicts_and_release(config):
-    from threading import Event
 
-    from filelock import FileLock
-
-    from mindex.studio import studio
+    from studio import studio
 
     entered, release = Event(), Event()
 
@@ -342,8 +336,6 @@ def test_accepted_state_lock_conflicts_and_release(config):
 
 
 def test_force_validation_artifact_archive_and_paths(studio_client):
-    import io
-    import zipfile
 
     _, client = studio_client
     job_id = create_legacy_job(client, "这是第一句配音文本。这是第二句配音文本。")
@@ -383,11 +375,8 @@ def test_force_validation_artifact_archive_and_paths(studio_client):
 
 
 def test_thread_start_failure_is_terminal_and_unlocks(config, monkeypatch):
-    import threading
 
-    from filelock import FileLock
-
-    from mindex.studio import studio
+    from studio import studio
 
     client = TestClient(create_app(config, storyboarder=FixtureStoryboarder(config)))
     client.config = config
@@ -395,7 +384,7 @@ def test_thread_start_failure_is_terminal_and_unlocks(config, monkeypatch):
     # 此用例只验证步骤启动失败的锁释放；先完成独立的后台标题写回。
     deadline = time.monotonic() + 3
     while studio.load_job(config, job_id).get("title_pending") and time.monotonic() < deadline:
-        time.sleep(.01)
+        time.sleep(0.01)
     assert not studio.load_job(config, job_id).get("title_pending")
     original = threading.Thread.start
 
@@ -415,8 +404,8 @@ def test_thread_start_failure_is_terminal_and_unlocks(config, monkeypatch):
 
 
 def test_preview_manual_interval_and_hidden_context(studio_client):
-    from mindex.shared.storage import Store
-    from mindex.studio import studio_steps
+    from shared.storage import Store
+    from studio import steps as studio_steps
 
     config, client = studio_client
     job_id = create_legacy_job(client, "这是需要寻找红色画面的第一句文案。")
@@ -461,12 +450,15 @@ def test_workspace_conditional_publish(studio_client):
     workspace = client.get(f"/api/studio/jobs/{job_id}/workspace").json()
     revision = workspace["workspace_revision"]
     assert revision
-    stale = client.post(f"/api/studio/jobs/{job_id}/plans", json={"name": "并发副本"},
-                        headers={"If-Match": "stale-revision"})
+    stale = client.post(
+        f"/api/studio/jobs/{job_id}/plans", json={"name": "并发副本"}, headers={"If-Match": "stale-revision"}
+    )
     assert stale.status_code == 409, stale.text
-    fresh = client.post(f"/api/studio/jobs/{job_id}/plans", json={"name": "并发副本"},
-                        headers={"If-Match": revision})
+    fresh = client.post(
+        f"/api/studio/jobs/{job_id}/plans", json={"name": "并发副本"}, headers={"If-Match": revision}
+    )
     assert fresh.status_code == 201, fresh.text
-    reused = client.post(f"/api/studio/jobs/{job_id}/plans", json={"name": "再次并发"},
-                         headers={"If-Match": revision})
+    reused = client.post(
+        f"/api/studio/jobs/{job_id}/plans", json={"name": "再次并发"}, headers={"If-Match": revision}
+    )
     assert reused.status_code == 409  # 修订已推进，旧值不能再用

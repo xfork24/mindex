@@ -16,13 +16,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
-from mindex.shared.backends.db import RelationalDatabase
-from mindex.shared.backends.locks import FileLockProvider, LockProvider
-from mindex.shared.backends.media import LocalMediaStore, MediaStore
-from mindex.shared.backends.queue import InlineTaskQueue, TaskQueue
-from mindex.shared.backends.vectors import LocalVectorStores, VectorStores
-from mindex.shared.config import Config
-from mindex.shared.db.pg_backend import PgBackend
+from shared import storage
+from shared.admission import validate_protocol
+from shared.backends.db import RelationalDatabase
+from shared.backends.locks import FileLockProvider, LockProvider
+from shared.backends.media import LocalMediaStore, MediaStore
+from shared.backends.queue import InlineTaskQueue, TaskQueue
+from shared.backends.vectors import LocalVectorStores, VectorStores
+from shared.config import Config, fingerprint
+from shared.db.locks_pg import PgLockProvider
+from shared.db.pg_backend import PgBackend
+from shared.object_coordination import ObjectCoordinator
 
 __all__ = ["BackendContext", "open_context"]
 
@@ -82,9 +86,8 @@ class BackendContext:
     def store(self):
         """业务 Store 门面。local 形态下 db 即 Store；集群形态（阶段 1 起）由
         PostgreSQL 元数据库的统一 Store 承担，此入口不变。"""
-        from mindex.shared.storage import Store
 
-        if isinstance(self.db, Store):
+        if isinstance(self.db, storage.Store):
             return self.db
         raise RuntimeError("该形态的业务 Store 由阶段 1 的 PostgreSQL 适配器提供")
 
@@ -103,8 +106,15 @@ def open_context(config: Config) -> BackendContext:
         context = _open_context(config, resources)
         # 借出任一组件都保留上下文；自动回收由各资源自身的 finalizer 负责，
         # 不能用捕获组件的 context finalizer（会形成全局强引用环）。
-        for component in (context.store, context.store.backend, context.media, context.vectors,
-                          context.locks, context.queue, context.staging):
+        for component in (
+            context.store,
+            context.store.backend,
+            context.media,
+            context.vectors,
+            context.locks,
+            context.queue,
+            context.staging,
+        ):
             if component is not None:
                 cast(Any, component)._backend_context = context
         scope = _RESOURCE_SCOPE.get()
@@ -117,17 +127,16 @@ def open_context(config: Config) -> BackendContext:
 
 
 def _open_context(config: Config, resources: ExitStack) -> BackendContext:
-    from mindex.shared.storage import PgStore, Store
 
     form = deployment_form(config)
-    store: Store
+    store: storage.Store
     if config.database.backend == "postgres":
-        pg_store = PgStore(config)
+        pg_store = storage.PgStore(config)
         store = pg_store
         resources.callback(cast(PgBackend, pg_store.backend).close)
         library_id = pg_store.library_id
     else:
-        store = Store(config.data_dir)
+        store = storage.Store(config.data_dir)
         library_id = _library_id(store)
     if config.server.library_id is not None and config.server.library_id != library_id:
         raise RuntimeError("素材库 library_id 与 server.library_id 不一致；拒绝连接其他素材库")
@@ -135,15 +144,16 @@ def _open_context(config: Config, resources: ExitStack) -> BackendContext:
     if form != "local":
         cast(PgBackend, store.backend).enforce_identity = True
         cast(PgBackend, store.backend).object_coordination = True
-        from mindex.shared.admission import validate_protocol
 
         validate_protocol(store)
     if config.vector.backend == "chroma_server":
         if config.database.backend != "postgres":
             raise RuntimeError(
                 "vector.backend=chroma_server 属共享向量后端，与 sqlite 单机形态的组合未定义；"
-                "请将 database.backend 设为 postgres（plans §4 运行形态表）")
-        from mindex.shared.backends.vectors import ChromaServerVectorStores
+                "请将 database.backend 设为 postgres（plans §4 运行形态表）"
+            )
+        # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+        from shared.backends.vectors import ChromaServerVectorStores
 
         vectors: VectorStores = ChromaServerVectorStores(config.vector.chroma_server, library_id=library_id)
         resources.callback(cast(ChromaServerVectorStores, vectors).close)
@@ -154,7 +164,8 @@ def _open_context(config: Config, resources: ExitStack) -> BackendContext:
         if config.database.backend != "postgres":
             raise RuntimeError(
                 "queue.backend=postgres 属共享队列，与 sqlite 单机形态的组合未定义；"
-                "请将 database.backend 设为 postgres，并用 mindex worker 消费（plans §4）")
+                "请将 database.backend 设为 postgres，并用 mindex worker 消费（plans §4）"
+            )
         # 队列实现按需绑定 PG 连接（shared/db/queue_pg.PgTaskQueue），上下文只登记形态。
 
         queue: TaskQueue | PgQueueAdapter = PgQueueAdapter(library_id)
@@ -164,8 +175,8 @@ def _open_context(config: Config, resources: ExitStack) -> BackendContext:
         if config.database.backend != "postgres":
             raise RuntimeError(
                 "locks.backend=postgres 属共享租约锁，与 sqlite 单机形态的组合未定义；"
-                "请将 database.backend 设为 postgres（plans §4 运行形态表）")
-        from mindex.shared.db.locks_pg import PgLockProvider
+                "请将 database.backend 设为 postgres（plans §4 运行形态表）"
+            )
 
         locks: LockProvider = PgLockProvider(cast(PgBackend, store.backend), library_id=library_id)
     else:
@@ -176,8 +187,10 @@ def _open_context(config: Config, resources: ExitStack) -> BackendContext:
             raise RuntimeError(
                 "storage.backend=s3 属共享媒体后端，与 sqlite 单机形态的组合未定义；"
                 "请将 database.backend 设为 postgres（plans §4；媒体出口与检查点迁移"
-                "随阶段 5 集群装配交付，当前仅单节点验证）")
-        from mindex.shared.backends.s3 import S3MediaStore
+                "随阶段 5 集群装配交付，当前仅单节点验证）"
+            )
+        # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+        from shared.backends.s3 import S3MediaStore
 
         staging = _staging(config, store.root)
         if staging is not None:
@@ -186,29 +199,37 @@ def _open_context(config: Config, resources: ExitStack) -> BackendContext:
             config.storage.s3,
             library_id=library_id,
             staging=staging,
-            cache_dir=staging.root / "libraries" / library_id / "s3")
+            cache_dir=staging.root / "libraries" / library_id / "s3",
+        )
         resources.callback(media.close)
-        if (config.vector.backend == "chroma_server" and config.queue.backend == "postgres"
-                and config.locks.backend == "postgres"):
+        if (
+            config.vector.backend == "chroma_server"
+            and config.queue.backend == "postgres"
+            and config.locks.backend == "postgres"
+        ):
             form = "cluster"  # 共享后端齐备（plans §4；准入与 runbook 见 docs/scaling.md）
     else:
         staging = _staging(config, store.root)
         if staging is not None:
             resources.callback(staging.close)
         media = LocalMediaStore(store.root)
-    from mindex.shared.config import fingerprint
 
     store.deployment_form = form
-    store.backend_identity = fingerprint({
-        "database": config.database.backend,
-        "vector": config.vector.model_dump(), "storage": config.storage.model_dump(),
-    }) if form != "local" else ""
+    store.backend_identity = (
+        fingerprint(
+            {
+                "database": config.database.backend,
+                "vector": config.vector.model_dump(),
+                "storage": config.storage.model_dump(),
+            }
+        )
+        if form != "local"
+        else ""
+    )
     store.deployment_config = config
     store.media = media  # Store.resolve_media/media_available 按存储后端解析
     store.vectors = vectors
     if config.storage.backend == "s3":
-        from mindex.shared.object_coordination import ObjectCoordinator
-
         cast(Any, media).coordinator = ObjectCoordinator(store)
     return BackendContext(
         form=form,
@@ -247,7 +268,8 @@ def deployment_form(config: Config) -> str:
 def _staging(config: Config, root: Path):
     """按配置构建节点 staging 工作集（plans §8）：local 用 storage.staging_quota_gb
     （0 = 不限，保持零行为变化）；s3 形态固定启用（s3.staging_quota_gb/min_free_gb）。"""
-    from mindex.shared.backends.staging import StagingArea
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+    from shared.backends.staging import StagingArea
 
     if config.storage.backend == "s3":
         section = config.storage.s3

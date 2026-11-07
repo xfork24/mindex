@@ -6,10 +6,10 @@ import base64
 import math
 from pathlib import Path
 
-from mindex.models import adapters
-from mindex.models.adapters import ModelError
-from mindex.shared.config import Config
-from mindex.shared.types import Utterance
+from models import adapters
+from models.adapters import ModelError
+from shared.config import Config
+from shared.types import Utterance
 
 
 def parse_minimax_words(payload: dict, duration: float | None = None) -> list[dict]:

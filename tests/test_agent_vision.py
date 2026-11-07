@@ -14,18 +14,18 @@ import json
 import re
 
 import pytest
-from agent_helpers import new_session, parse_sse, results, wait_idle
 from fastapi.testclient import TestClient
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from PIL import Image
 
-from mindex.agent.llm.scripted import ScriptedLlm, call, say
-from mindex.agent.llm.types import image_block, new_id, tool_message, user_message
-from mindex.agent.registry import ToolOutput, ToolRegistry, ToolSpec
-from mindex.agent.vision import OMITTED, is_image_ref, materialize
-from mindex.api import create_app
-from mindex.shared.config import StrictModel
+from agent.llm.scripted import ScriptedLlm, call, say
+from agent.llm.types import image_block, new_id, tool_message, user_message
+from agent.registry import ToolOutput, ToolRegistry, ToolSpec
+from agent.vision import OMITTED, is_image_ref, materialize
+from agent_helpers import new_session, parse_sse, results, wait_idle
+from api import create_app
+from shared.config import StrictModel
 
 BASE64_RUN = re.compile(r"[A-Za-z0-9+/=]{1000,}")
 FAILED_PREFIX = "（图片无法读取："
@@ -88,9 +88,17 @@ def build(conversation) -> tuple[list[dict], list[str], dict[str, bytes]]:
             messages.append(message)
         else:
             ids = [f"c{number}-{k}" for k in range(len(payload))]
-            messages.append({"id": new_id("msg"), "role": "assistant", "source": {"kind": "model"},
-                             "content": [{"type": "tool-call", "id": i, "name": "sample_frames", "arguments": "{}"}
-                                         for i in ids]})
+            messages.append(
+                {
+                    "id": new_id("msg"),
+                    "role": "assistant",
+                    "source": {"kind": "model"},
+                    "content": [
+                        {"type": "tool-call", "id": i, "name": "sample_frames", "arguments": "{}"}
+                        for i in ids
+                    ],
+                }
+            )
             for call_id, refs in zip(ids, payload, strict=True):
                 images = [ref_for(o) for o in refs]
                 messages.append(tool_message(call_id, f"帧{call_id}", images=images or None))
@@ -137,8 +145,12 @@ def assert_no_image_data(value) -> None:
 
 # Feature: agent-capability-expansion, Property 6: 日志无图片数据
 @settings(max_examples=100, deadline=None)
-@given(conversation=CONVERSATION, enabled=st.booleans(), limit=st.integers(0, 12),
-       protocol=st.sampled_from(PROTOCOLS))
+@given(
+    conversation=CONVERSATION,
+    enabled=st.booleans(),
+    limit=st.integers(0, 12),
+    protocol=st.sampled_from(PROTOCOLS),
+)
 def test_materialize_never_writes_back_into_log_messages(conversation, enabled, limit, protocol):
     """**Validates: Requirements 5.3**
 
@@ -231,8 +243,9 @@ def app(config, monkeypatch):
 
 
 def upload(client, sid: str, data: bytes) -> str:
-    response = client.post("/api/agent/attachments", files={"file": ("p.png", data, "image/png")},
-                           data={"session_id": sid})
+    response = client.post(
+        "/api/agent/attachments", files={"file": ("p.png", data, "image/png")}, data={"session_id": sid}
+    )
     assert response.status_code == 201, response.text
     return response.json()["id"]
 
@@ -241,8 +254,9 @@ def frame_registry(frames: dict[int, list[str]]) -> ToolRegistry:
     """测试工具：按参数 index 返回本例预设的图片地址（外站地址会被运行时丢弃）。"""
 
     async def show(args, _ctx):
-        return ToolOutput({"ok": True}, text="已抽帧",
-                          images=frames.get(args.index, []) + ["https://evil.example/x.png"])
+        return ToolOutput(
+            {"ok": True}, text="已抽帧", images=frames.get(args.index, []) + ["https://evil.example/x.png"]
+        )
 
     return ToolRegistry([ToolSpec("show_frames", "meta", "测试：返回图片", FrameArgs, "read", show)])
 
@@ -252,11 +266,16 @@ def frame_registry(frames: dict[int, list[str]]) -> ToolRegistry:
 # Feature: agent-capability-expansion, Property 6: 日志无图片数据
 # Feature: agent-capability-expansion, Property 7: 图片上限
 @settings(max_examples=15, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture])
-@given(attachments=st.integers(0, 3),
-       tool_calls=st.lists(st.lists(st.sampled_from(["picture", "missing"]), max_size=3), max_size=2),
-       vision=st.booleans(), limit=st.integers(0, 4), protocol=st.sampled_from(PROTOCOLS))
+@given(
+    attachments=st.integers(0, 3),
+    tool_calls=st.lists(st.lists(st.sampled_from(["picture", "missing"]), max_size=3), max_size=2),
+    vision=st.booleans(),
+    limit=st.integers(0, 4),
+    protocol=st.sampled_from(PROTOCOLS),
+)
 def test_runtime_log_and_sse_hold_only_refs_and_requests_respect_limit(
-        app, attachments, tool_calls, vision, limit, protocol):
+    app, attachments, tool_calls, vision, limit, protocol
+):
     """**Validates: Requirements 5.3, 5.5, 5.6**
 
     事件日志与 SSE 补发里只有图片引用；模型实际收到的每个请求中，已解析图片不超过 ``max_images``，
@@ -271,15 +290,19 @@ def test_runtime_log_and_sse_hold_only_refs_and_requests_respect_limit(
     sid = new_session(client)
     refs = [upload(client, sid, png((40 + k, 30), (10 * k, 120, 200))) for k in range(attachments)]
     picture = upload(client, sid, png((64, 48)))
-    picture_url = f"/api/agent/attachments/{picture[len('attachment://'):]}/content"
-    frames = {k: [picture_url if kind == "picture" else f"/api/admin/sources/nope-{k}/frame?t=1" for kind in kinds]
-              for k, kinds in enumerate(tool_calls)}
+    picture_url = f"/api/agent/attachments/{picture[len('attachment://') :]}/content"
+    frames = {
+        k: [picture_url if kind == "picture" else f"/api/admin/sources/nope-{k}/frame?t=1" for kind in kinds]
+        for k, kinds in enumerate(tool_calls)
+    }
     client.app.state.agent_runtime.registry = frame_registry(frames)
     if tool_calls:
         llm.extend([call("show_frames", index=k) for k in range(len(tool_calls))])
     llm.extend([say("看到了")])
 
-    response = client.post(f"/api/agent/sessions/{sid}/messages", json={"content": "看图", "attachments": refs})
+    response = client.post(
+        f"/api/agent/sessions/{sid}/messages", json={"content": "看图", "attachments": refs}
+    )
     assert response.status_code == 202, response.text
     events = wait_idle(client, sid)
 

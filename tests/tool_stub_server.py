@@ -16,16 +16,35 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from PIL import Image
+
 
 def make_clip_bytes(directory: Path, seconds: float = 2.0) -> bytes:
     target = directory / "stub-clip.mp4"
-    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"testsrc=size=160x120:rate=25:duration={seconds}",
-                    "-pix_fmt", "yuv420p", "-c:v", "libx264", "-preset", "ultrafast", str(target)], check=True)
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            f"testsrc=size=160x120:rate=25:duration={seconds}",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            str(target),
+        ],
+        check=True,
+    )
     return target.read_bytes()
 
 
 def make_png_bytes(color=(200, 40, 40)) -> bytes:
-    from PIL import Image
 
     buffer = io.BytesIO()
     Image.new("RGB", (160, 120), color).save(buffer, "PNG")
@@ -36,9 +55,11 @@ class StubServer:
     def __init__(self, directory: Path):
         self.requests: list[dict] = []
         self.polls: dict[str, int] = {}
-        self.files = {"/files/clip.mp4": (make_clip_bytes(directory), "video/mp4"),
-                      "/files/still.png": (make_png_bytes(), "image/png"),
-                      "/files/big.bin": (b"x" * (2 * 1024 * 1024), "application/octet-stream")}
+        self.files = {
+            "/files/clip.mp4": (make_clip_bytes(directory), "video/mp4"),
+            "/files/still.png": (make_png_bytes(), "image/png"),
+            "/files/big.bin": (b"x" * (2 * 1024 * 1024), "application/octet-stream"),
+        }
         stub = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -55,8 +76,15 @@ class StubServer:
 
             def do_GET(self):
                 if self.path == "/tools":
-                    return self.reply(200, {"tools": [{"name": name, "description": f"stub {name}"}
-                                                      for name in ("make_video", "make_image", "echo")]})
+                    return self.reply(
+                        200,
+                        {
+                            "tools": [
+                                {"name": name, "description": f"stub {name}"}
+                                for name in ("make_video", "make_image", "echo")
+                            ]
+                        },
+                    )
                 if self.path in stub.files:
                     content, kind = stub.files[self.path]
                     return self.reply(200, content, kind)
@@ -75,8 +103,14 @@ class StubServer:
                         return self.reply(200, {"id": job, "status": "failed", "error": "boom"})
                     if count < 2:
                         return self.reply(200, {"id": job, "status": "running"})
-                    return self.reply(200, {"id": job, "status": "succeeded", "output": {"url": "/files/clip.mp4"}})
-                return self.reply(200, {"ok": True}) if self.path == "/" else self.reply(404, {"error": "missing"})
+                    return self.reply(
+                        200, {"id": job, "status": "succeeded", "output": {"url": "/files/clip.mp4"}}
+                    )
+                return (
+                    self.reply(200, {"ok": True})
+                    if self.path == "/"
+                    else self.reply(404, {"error": "missing"})
+                )
 
             def do_POST(self):
                 length = int(self.headers.get("Content-Length") or 0)
@@ -85,10 +119,20 @@ class StubServer:
                 tool = body.get("tool")
                 if tool in ("make_video", "slow", "fail"):
                     return self.reply(200, {"id": f"{tool}-{len(stub.requests)}", "status": "queued"})
-                url = {"big": "/files/big.bin", "elsewhere": "http://not-allowed.invalid/x.png",
-                       "redirect": "/redirect"}.get(tool, "/files/still.png")
-                return self.reply(200, {"id": "sync", "status": "succeeded", "output": {"url": url},
-                                        "uploads": len(body.get("uploads") or [])})
+                url = {
+                    "big": "/files/big.bin",
+                    "elsewhere": "http://not-allowed.invalid/x.png",
+                    "redirect": "/redirect",
+                }.get(tool, "/files/still.png")
+                return self.reply(
+                    200,
+                    {
+                        "id": "sync",
+                        "status": "succeeded",
+                        "output": {"url": url},
+                        "uploads": len(body.get("uploads") or []),
+                    },
+                )
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)

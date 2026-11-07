@@ -1,9 +1,10 @@
 """Task 4: _config_dependencies 对失效绝对路径按 config-dependencies 片段回退。"""
+
 import hashlib
 
 import pytest
 
-from mindex.maintenance.backup_files import _config_dependencies
+from maintenance.backup_files import _config_dependencies
 
 
 def _write_manifest(path, content=b'{"file_identity": "x"}'):
@@ -39,7 +40,9 @@ def test_resolves_relative_dependency(tmp_path):
     # 迁移后以相对 data_dir.parent 形式存储。
     relative = "data/config-dependencies/zzz/font.ttf"
     configs = [{"studio": {"subtitle": {"font_file": relative}}}]
-    paths, _, _ = _config_dependencies(configs, base_dir=data_root.parent, payload=payload, data_root=data_root)
+    paths, _, _ = _config_dependencies(
+        configs, base_dir=data_root.parent, payload=payload, data_root=data_root
+    )
     assert relative in paths
     assert (payload / paths[relative]).is_file()
 

@@ -9,12 +9,12 @@ import copy
 from types import SimpleNamespace
 
 import pytest
-from conftest import legacy_job
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from mindex.studio import workspace as ws
-from mindex.studio.studio import VISUAL_LIMIT, Shot, clip_visual, visual_error
+from conftest import legacy_job
+from studio import workspace as ws
+from studio.studio import VISUAL_LIMIT, Shot, clip_visual, visual_error
 
 # ---------------------------------------------------------------------------
 # 生成器
@@ -134,9 +134,7 @@ def valid_visuals(draw) -> str:
         )
     )
     body = draw(
-        st.text(alphabet=BODY_CHARS, min_size=length, max_size=length).filter(
-            lambda s: s.strip() == s and s
-        )
+        st.text(alphabet=BODY_CHARS, min_size=length, max_size=length).filter(lambda s: s.strip() == s and s)
     )
     return draw(WHITESPACE) + body + draw(WHITESPACE)
 
@@ -223,10 +221,7 @@ def _signatures(config, job_id, base, fields, visual):
     p = ws.plan(w, w["active_plan"])
     ws.set_board(config, job_id, w, p, [Shot(**fields, visual=visual)])
     sid = fields["id"]
-    return {
-        stage: ws.specification(config, job_id, w, p, stage, sid)["signature"]
-        for stage in SIGNED_STAGES
-    }
+    return {stage: ws.specification(config, job_id, w, p, stage, sid)["signature"] for stage in SIGNED_STAGES}
 
 
 # Feature: studio-material-consistency, Property 19: visual 不进签名

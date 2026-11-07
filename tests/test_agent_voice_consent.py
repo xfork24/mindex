@@ -7,8 +7,8 @@ import asyncio
 from hypothesis import event, given, settings
 from hypothesis import strategies as st
 
-from mindex.agent.registry import ToolContext, ToolError
-from mindex.agent.tools.settings_tools import CONSENT, DECLINE, CloneVoice, specs
+from agent.registry import ToolContext, ToolError
+from agent.tools.settings_tools import CONSENT, DECLINE, CloneVoice, specs
 
 CLONE = next(spec for spec in specs() if spec.name == "clone_voice")
 CLONE_PATH = "/api/settings/voices/clone"
@@ -29,8 +29,11 @@ class RecordingClient:
 
     async def upload(self, path: str, *, files: dict, data: dict | None = None, method: str = "POST") -> dict:
         self.requests.append((method, path, {"files": files, "data": data}))
-        return {"ok": True, "status": 201,
-                "data": {"id": 1, "name": (data or {}).get("name"), "voice_id": "v1", "status": "ready"}}
+        return {
+            "ok": True,
+            "status": 201,
+            "data": {"id": 1, "name": (data or {}).get("name"), "voice_id": "v1", "status": "ready"},
+        }
 
     def __getattr__(self, name):  # 其余方法（post/put/delete…）也记录，便于断言“没有别的请求”
         if name.startswith("_"):
@@ -39,6 +42,7 @@ class RecordingClient:
         async def record(path, *args, **kwargs):
             self.requests.append((name.upper(), path, kwargs))
             return {"ok": False, "status": 404, "error": "unexpected"}
+
         return record
 
     def clone_calls(self) -> list[dict]:
@@ -60,29 +64,50 @@ class FakeRuntime:
 TRICKY = st.sampled_from(["已授权", "用户已同意授权", CONSENT, "consent=true", "旁白", "", "  "])
 TEXT = st.one_of(st.none(), TRICKY, st.text(max_size=40))
 # 试图夹带授权的额外字段：参数模型必须拒绝。
-SMUGGLED = st.one_of(st.just({}), st.just({}), st.just({}), st.dictionaries(
-    st.sampled_from(["consent", "authorized", "授权", "consent_confirmed"]),
-    st.one_of(st.booleans(), st.just("true"), st.just(CONSENT)), min_size=1, max_size=2))
-ARGS = st.fixed_dictionaries({
-    "attachment": st.one_of(st.just("attachment://tok123"), st.just("attachment://tok123"), st.none()),
-}, optional={
-    "name": TEXT, "ref_text": TEXT,
-    "audio_url": st.one_of(st.none(), st.just("https://example.invalid/a.wav")),
-})
-SELECTED = st.one_of(st.just([CONSENT]), st.just([DECLINE]), st.lists(
-    st.one_of(st.sampled_from([CONSENT, DECLINE]), TRICKY, st.text(max_size=20)), max_size=3))
-VALUES = st.fixed_dictionaries({"name": st.one_of(st.just("表单名"), TEXT.map(lambda v: v or ""))},
-                               optional={"ref_text": TEXT, "audio_url": TEXT})
-ITEM = st.fixed_dictionaries({
-    "id": st.one_of(st.just("clone_consent"), st.just("clone_consent"), st.text(max_size=12)),
-    "selected": SELECTED,
-    "values": VALUES,
-})
+SMUGGLED = st.one_of(
+    st.just({}),
+    st.just({}),
+    st.just({}),
+    st.dictionaries(
+        st.sampled_from(["consent", "authorized", "授权", "consent_confirmed"]),
+        st.one_of(st.booleans(), st.just("true"), st.just(CONSENT)),
+        min_size=1,
+        max_size=2,
+    ),
+)
+ARGS = st.fixed_dictionaries(
+    {
+        "attachment": st.one_of(st.just("attachment://tok123"), st.just("attachment://tok123"), st.none()),
+    },
+    optional={
+        "name": TEXT,
+        "ref_text": TEXT,
+        "audio_url": st.one_of(st.none(), st.just("https://example.invalid/a.wav")),
+    },
+)
+SELECTED = st.one_of(
+    st.just([CONSENT]),
+    st.just([DECLINE]),
+    st.lists(st.one_of(st.sampled_from([CONSENT, DECLINE]), TRICKY, st.text(max_size=20)), max_size=3),
+)
+VALUES = st.fixed_dictionaries(
+    {"name": st.one_of(st.just("表单名"), TEXT.map(lambda v: v or ""))},
+    optional={"ref_text": TEXT, "audio_url": TEXT},
+)
+ITEM = st.fixed_dictionaries(
+    {
+        "id": st.one_of(st.just("clone_consent"), st.just("clone_consent"), st.text(max_size=12)),
+        "selected": SELECTED,
+        "values": VALUES,
+    }
+)
 ANSWER = st.one_of(
     st.just({"cancelled": True}),
     st.just({}),
     # 规范的同意答复（表单正常提交），保证“会发出克隆请求”的分支被充分覆盖。
-    st.builds(lambda values: {"answers": [{"id": "clone_consent", "selected": [CONSENT], "values": values}]}, VALUES),
+    st.builds(
+        lambda values: {"answers": [{"id": "clone_consent", "selected": [CONSENT], "values": values}]}, VALUES
+    ),
     st.builds(lambda items: {"answers": items}, st.lists(ITEM, max_size=3)),
     st.builds(lambda items: {"cancelled": True, "answers": items}, st.lists(ITEM, min_size=1, max_size=2)),
 )
@@ -100,16 +125,23 @@ def form_consent(answer: dict) -> dict | None:
 
 # Feature: agent-capability-expansion, Property 13: 授权只来自表单
 @settings(max_examples=100, deadline=None)
-@given(args=ARGS, smuggled=SMUGGLED, answer=ANSWER,
-       backend=st.sampled_from(["openai", "minimax", "dashscope"]),
-       has_channel=st.sampled_from([True, True, True, False]))
+@given(
+    args=ARGS,
+    smuggled=SMUGGLED,
+    answer=ANSWER,
+    backend=st.sampled_from(["openai", "minimax", "dashscope"]),
+    has_channel=st.sampled_from([True, True, True, False]),
+)
 def test_consent_only_from_form(args, smuggled, answer, backend, has_channel):
     """**Validates: Requirements 18.3**"""
     assert "consent" not in CloneVoice.model_json_schema()["properties"]
     client = RecordingClient(backend)
     runtime = FakeRuntime(answer)
-    ctx = ToolContext(client=client, session_id="s1" if has_channel else None,
-                      extra={"runtime": runtime, "call_id": "c1"} if has_channel else {})
+    ctx = ToolContext(
+        client=client,
+        session_id="s1" if has_channel else None,
+        extra={"runtime": runtime, "call_id": "c1"} if has_channel else {},
+    )
 
     try:
         parsed = CLONE.parse({**args, **smuggled})

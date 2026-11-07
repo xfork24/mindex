@@ -3,9 +3,12 @@
 // 页面不接触后端管理凭据；保存后需重启应用以按远程模式连接。
 const { contextBridge, ipcRenderer } = require("electron");
 
-contextBridge.exposeInMainWorld("MindexRemote", Object.freeze({
-  current: () => ipcRenderer.invoke("remote:get"),
-  save: (value) => ipcRenderer.invoke("remote:save", value),
-  clear: () => ipcRenderer.invoke("remote:clear"),
-  close: () => ipcRenderer.invoke("remote:close"),
-}));
+contextBridge.exposeInMainWorld(
+  "MindexRemote",
+  Object.freeze({
+    current: () => ipcRenderer.invoke("remote:get"),
+    save: (value) => ipcRenderer.invoke("remote:save", value),
+    clear: () => ipcRenderer.invoke("remote:clear"),
+    close: () => ipcRenderer.invoke("remote:close"),
+  }),
+);

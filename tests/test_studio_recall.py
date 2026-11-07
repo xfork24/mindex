@@ -2,24 +2,27 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import io
+import time
 
+import httpx
 import numpy as np
 import pytest
-from conftest import FixtureEmbedder, FixtureSpeaker, FixtureStoryboarder, legacy_job
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from mindex.api import create_app
-from mindex.processing.indexing import IndexBuilder
-from mindex.processing.pipeline import Pipeline
-from mindex.shared.media import cut
-from mindex.shared.storage import Store
-from mindex.shared.types import Filters
-from mindex.studio import studio
-from mindex.studio import workspace as ws
-from mindex.studio.studio import Shot, ShotRecall
+from api import create_app
+from conftest import FixtureEmbedder, FixtureSpeaker, FixtureStoryboarder, legacy_job
+from processing.indexing import IndexBuilder
+from processing.pipeline import Pipeline
+from shared.media import cut
+from shared.storage import Store
+from shared.types import Filters
+from studio import studio
+from studio import workspace as ws
+from studio.studio import Shot, ShotRecall
 
 pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
 
@@ -295,7 +298,7 @@ def test_document_auto_recall_invalidates_legacy_cache_only(prepared, monkeypatc
     jid, w, p = setup_workspace(config)
     content = ws.version(w, p["shots"]["a"]["content"])["data"]
     content["query"] = "晓伟凝视着档案中关于阿公郑木生的记录，神色凝重"
-    from mindex.persons import person_names
+    from persons import person_names
 
     current = ws.specification(config, jid, w, p, "recall", "a")["signature"]
     monkeypatch.setattr(person_names, "has_document_reference", lambda _: False)
@@ -504,8 +507,8 @@ def test_patch_recall_validation(studio_client):
 
 def test_person_recall_filters_by_published_evidence(prepared):
     """人物出镜召回由已发布证据约束候选：查询文本命中的镜头无证据时不可入选。"""
-    from mindex.persons.person_models import Entity, ShotReview
-    from mindex.persons.persons import Persons
+    from persons.person_models import Entity, ShotReview
+    from persons.persons import Persons
 
     config, embedder = prepared
     jid, w, p = setup_workspace(config)
@@ -544,9 +547,9 @@ def test_person_recall_filters_by_published_evidence(prepared):
 
 
 def test_recall_reference_images_are_added_to_legacy_details_without_rewriting(prepared):
-    from mindex.persons.person_models import Entity
-    from mindex.persons.persons import Persons
-    from mindex.shared.storage import dumps
+    from persons.person_models import Entity
+    from persons.persons import Persons
+    from shared.storage import dumps
 
     config, embedder = prepared
     jid, w, p = setup_workspace(config)
@@ -586,9 +589,10 @@ def test_recall_reference_images_are_added_to_legacy_details_without_rewriting(p
     assert "reference_url" not in evidence
     assert shown["image_url"] != shown["reference_url"]
 
+
 def test_workspace_recall_pins_active_person_release_and_reuses_after_rollback(prepared):
-    from mindex.persons.person_models import Entity, ShotReview
-    from mindex.persons.persons import Persons
+    from persons.person_models import Entity, ShotReview
+    from persons.persons import Persons
 
     config, _embedder = prepared
     jid, w, p = setup_workspace(config)
@@ -636,15 +640,11 @@ def test_workspace_recall_pins_active_person_release_and_reuses_after_rollback(p
 
 
 def test_concurrent_query_uploads_do_not_block_event_loop(studio_client, monkeypatch):
-    import asyncio
-    import time
-
-    import httpx
 
     config, client = studio_client
     jid = create_studio_job(client)
     pid = ws.load(config, jid)["active_plan"]
-    from mindex.studio import studio_api
+    from studio import api as studio_api
 
     decode = studio_api.image_png
 
@@ -680,15 +680,15 @@ def test_single_shot_recall_force_reaches_embedding_cache(prepared):
     original = embedder.text
     queries = []
 
-    def counted(texts, role='document'):
-        if role == 'query':
+    def counted(texts, role="document"):
+        if role == "query":
             queries.extend(texts)
         return original(texts, role=role)
 
     embedder.text = counted
-    ws.execute(config, jid, w, p, 'recall', 'a', embedder=embedder)
+    ws.execute(config, jid, w, p, "recall", "a", embedder=embedder)
     assert len(queries) == 1
-    ws.execute(config, jid, w, p, 'recall', 'a', embedder=embedder)
+    ws.execute(config, jid, w, p, "recall", "a", embedder=embedder)
     assert len(queries) == 1
-    ws.execute(config, jid, w, p, 'recall', 'a', embedder=embedder, force=True)
+    ws.execute(config, jid, w, p, "recall", "a", embedder=embedder, force=True)
     assert len(queries) == 2

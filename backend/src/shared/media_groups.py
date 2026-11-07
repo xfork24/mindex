@@ -23,15 +23,24 @@ class Groups:
 
     def _ungrouped_rows(self, kind, *, limit=None, offset=0):
         table, column = ("sources", "source_id") if kind == "source" else ("music_tracks", "music_id")
-        query = (f"SELECT t.* FROM {table} t WHERE NOT EXISTS "
-                 f"(SELECT 1 FROM media_group_members m WHERE m.{column}=t.id) ORDER BY t.id")
+        query = (
+            f"SELECT t.* FROM {table} t WHERE NOT EXISTS "
+            f"(SELECT 1 FROM media_group_members m WHERE m.{column}=t.id) ORDER BY t.id"
+        )
         return self.store.rows(query + " LIMIT ? OFFSET ?", (limit if limit is not None else -1, offset))
 
     def get(self, group_id):
         if group_id in UNGROUPED.values():
             kind = next(kind for kind, value in UNGROUPED.items() if value == group_id)
-            return {"id": group_id, "type": kind, "name": "未分类", "description": "自动包含未加入其他组的成员",
-                    "system": True, "updated_at": now(), "member_count": len(self._ungrouped_rows(kind))}
+            return {
+                "id": group_id,
+                "type": kind,
+                "name": "未分类",
+                "description": "自动包含未加入其他组的成员",
+                "system": True,
+                "updated_at": now(),
+                "member_count": len(self._ungrouped_rows(kind)),
+            }
         value = self.store.one("SELECT * FROM media_groups WHERE id=?", (group_id,))
         if value is None:
             raise ValueError(f"组已删除或不存在：{group_id}，请重新选择")
@@ -45,23 +54,37 @@ class Groups:
         column = "source_id" if kind == "source" else "music_id"
         table = "sources" if kind == "source" else "music_tracks"
         with self.store.connect() as db:
-            rows = [dict(row) for row in db.execute(
-                "SELECT g.*,count(m.id) AS member_count FROM media_groups g "
-                "LEFT JOIN media_group_members m ON m.group_id=g.id "
-                "WHERE g.type=? GROUP BY g.id ORDER BY g.name,g.id", (kind,)
-            )]
-            ungrouped = [row[0] for row in db.execute(
-                f"SELECT t.id FROM {table} t WHERE NOT EXISTS "
-                f"(SELECT 1 FROM media_group_members m WHERE m.{column}=t.id) ORDER BY t.id"
-            )]
-            system = {"id": UNGROUPED[kind], "type": kind, "name": "未分类",
-                      "description": "自动包含未加入其他组的成员", "system": True,
-                      "updated_at": now(), "member_count": len(ungrouped)}
+            rows = [
+                dict(row)
+                for row in db.execute(
+                    "SELECT g.*,count(m.id) AS member_count FROM media_groups g "
+                    "LEFT JOIN media_group_members m ON m.group_id=g.id "
+                    "WHERE g.type=? GROUP BY g.id ORDER BY g.name,g.id",
+                    (kind,),
+                )
+            ]
+            ungrouped = [
+                row[0]
+                for row in db.execute(
+                    f"SELECT t.id FROM {table} t WHERE NOT EXISTS "
+                    f"(SELECT 1 FROM media_group_members m WHERE m.{column}=t.id) ORDER BY t.id"
+                )
+            ]
+            system = {
+                "id": UNGROUPED[kind],
+                "type": kind,
+                "name": "未分类",
+                "description": "自动包含未加入其他组的成员",
+                "system": True,
+                "updated_at": now(),
+                "member_count": len(ungrouped),
+            }
             if include_members:
                 members = {row["id"]: [] for row in rows}
                 for row in db.execute(
                     f"SELECT m.group_id,m.{column} FROM media_group_members m "
-                    "JOIN media_groups g ON g.id=m.group_id WHERE g.type=?", (kind,)
+                    "JOIN media_groups g ON g.id=m.group_id WHERE g.type=?",
+                    (kind,),
                 ):
                     members[row[0]].append(row[1])
                 for row in rows:
@@ -87,7 +110,8 @@ class Groups:
         try:
             self.store.execute(
                 "INSERT INTO media_groups(id,type,name,description,updated_at) VALUES(?,?,?,?,?) "
-                "ON CONFLICT(id) DO UPDATE SET name=excluded.name,description=excluded.description,updated_at=excluded.updated_at",
+                "ON CONFLICT(id) DO UPDATE SET "
+                "name=excluded.name,description=excluded.description,updated_at=excluded.updated_at",
                 (group_id, kind, name, description, now()),
             )
         except sqlite3.IntegrityError as exc:
@@ -196,8 +220,11 @@ class Groups:
         result = []
         for group_id in sorted(set(group_ids or [])):
             if group_id in UNGROUPED.values():
-                result.append({"id": group_id, "members": sorted(self.resolve(kind, [group_id]))}
-                              if group_id == UNGROUPED[kind] else {"id": group_id, "invalid": "type"})
+                result.append(
+                    {"id": group_id, "members": sorted(self.resolve(kind, [group_id]))}
+                    if group_id == UNGROUPED[kind]
+                    else {"id": group_id, "invalid": "type"}
+                )
                 continue
             row = self.store.one("SELECT type FROM media_groups WHERE id=?", (group_id,))
             if row is None or row["type"] != kind:

@@ -3,23 +3,31 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import secrets
 import socket
 from contextlib import asynccontextmanager
 from uuid import uuid4
 
+from starlette.applications import Starlette
+from starlette.routing import Route
+
+from agent.mcp_server import StreamableEndpoint
+from agent.vision import encode_jpeg
+
 
 @asynccontextmanager
 async def bridge(runtime, sid):
+    # 延迟导入：独立模型或扩展功能使用可选依赖，仅在实际调用时加载。
     import mcp.types as types
+
+    # 延迟导入：媒体、数值或服务运行依赖仅在实际执行该功能时加载。
     import uvicorn
+
+    # 延迟导入：独立模型或扩展功能使用可选依赖，仅在实际调用时加载。
     from mcp.server.lowlevel import Server
     from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
-    from starlette.applications import Starlette
-    from starlette.routing import Route
-
-    from mindex.agent.mcp_server import StreamableEndpoint
 
     server = Server("mindex", instructions="Use load_tools before calling tools in unloaded domains.")
 
@@ -77,10 +85,6 @@ async def bridge(runtime, sid):
             if b["type"] == "text"
         ]
         if runtime.settings().llm.vision and runtime.settings().max_images:
-            import base64
-
-            from mindex.agent.vision import encode_jpeg
-
             for ref in (result["message"].get("images") or [])[-runtime.settings().max_images :]:
                 data = encode_jpeg(await runtime._image_loader(sid)(ref))
                 content.append(

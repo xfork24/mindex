@@ -9,33 +9,23 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import yaml
 from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
-from mindex.api import create_app
-from mindex.cli import app
-from mindex.diagnostics import e2e
-from mindex.models import adapters, compatibility, deployment, qwen
-from mindex.models.analyzers import PinnedQwenAnalyzer
-from mindex.models.llama_cpp import (
-    LlamaEmbedder,
-    LlamaTranscriber,
-    checked_runtime,
-    inspect_service,
-    manifest,
-)
-from mindex.processing.indexing import IndexBuilder
-from mindex.search.search import SearchEngine
-from mindex.settings.runtime_settings import (
-    RuntimeConfig,
-    activate_profile,
-    apply_runtime_overrides,
-    save_profile,
-)
-from mindex.shared.config import fingerprint, load_config
-from mindex.shared.jsonio import save
-from mindex.shared.storage import Store
-from mindex.shared.types import TextSearch
+from api import create_app
+from cli import app
+from diagnostics import e2e
+from models import adapters, compatibility, deployment, qwen
+from models.analyzers import PinnedQwenAnalyzer
+from models.llama_cpp import LlamaEmbedder, LlamaTranscriber, checked_runtime, inspect_service, manifest
+from processing.indexing import IndexBuilder
+from search.search import SearchEngine
+from settings.runtime_settings import RuntimeConfig, activate_profile, apply_runtime_overrides, save_profile
+from shared.config import fingerprint, load_config
+from shared.jsonio import save
+from shared.storage import Store
+from shared.types import TextSearch
 
 
 @pytest.fixture
@@ -603,9 +593,7 @@ def test_baseline_marker_is_never_left_partial(native, monkeypatch):
     monkeypatch.setattr(Path, "write_text", real_write)
     marker = compatibility.location(config, space) / "baseline.sha256"
     if marker.exists():
-        expected = (
-            compatibility.content_hash(compatibility.location(config, space) / "baseline.json") + "\n"
-        )
+        expected = compatibility.content_hash(compatibility.location(config, space) / "baseline.json") + "\n"
         assert marker.read_text() == expected, "标记文件在崩溃后留下截断内容"
 
 
@@ -652,7 +640,6 @@ def test_pinned_analyzer_validates_fields_with_configured_retries(native, monkey
 def test_pin_cli_local_remote_and_mutual_exclusion(native, tmp_path):
     config = native["config"]
     yaml_path = tmp_path / "fixed.yaml"
-    import yaml
 
     yaml_path.write_text(yaml.safe_dump(config.model_dump(mode="json")))
     runner = CliRunner()
@@ -693,7 +680,6 @@ def test_pin_cli_local_remote_and_mutual_exclusion(native, tmp_path):
 
 
 def test_fixed_yaml_persists_through_cli_and_runtime_web(config, tmp_path, monkeypatch):
-    import yaml
 
     store = Store(config.data_dir)
     profile = save_profile(
@@ -708,10 +694,10 @@ def test_fixed_yaml_persists_through_cli_and_runtime_web(config, tmp_path, monke
     path.write_text(yaml.safe_dump(config.model_dump(mode="json")))
     observed = []
     monkeypatch.setattr(
-        "mindex.processing.indexing.IndexBuilder.build",
+        "processing.indexing.IndexBuilder.build",
         lambda self, **kwargs: observed.append(self.config.embedding.model) or "test-index",
     )
-    monkeypatch.setattr("mindex.search.api.status", lambda cfg, **kwargs: {"model": cfg.embedding.model})
+    monkeypatch.setattr("search.api.status", lambda cfg, **kwargs: {"model": cfg.embedding.model})
     monkeypatch.setattr(
         "uvicorn.run",
         lambda web, **kwargs: observed.append(TestClient(web).get("/api/status").json()["model"]),
@@ -734,7 +720,7 @@ def test_fixed_yaml_persists_through_cli_and_runtime_web(config, tmp_path, monke
 def test_index_and_search_require_gate_even_without_inference(native, video_file):
     config = native["config"]
     space = LlamaEmbedder(config).identity()
-    from mindex.processing.pipeline import Pipeline
+    from processing.pipeline import Pipeline
 
     Pipeline(config).prepare(video_file)
     with pytest.raises(adapters.ModelError, match="兼容性门槛"):
@@ -751,8 +737,8 @@ def test_index_and_search_require_gate_even_without_inference(native, video_file
 
 @pytest.mark.slow
 def test_real_media_smoke_reuses_fixed_baseline_and_rejects_changed_deployment(native, tmp_path, monkeypatch):
-    from mindex.processing.pipeline import Pipeline
-    from mindex.shared.media import command
+    from processing.pipeline import Pipeline
+    from shared.media import command
 
     config = native["config"]
     # 真实 FFmpeg 切片，模型响应仍为明确的测试向量。
@@ -820,8 +806,8 @@ def test_real_media_smoke_reuses_fixed_baseline_and_rejects_changed_deployment(n
 
 def test_smoke_routes_future_adapter_version_through_v2(native, tmp_path, monkeypatch):
     """ADAPTER_VERSION 升级后 smoke 仍按 v2 路由建基线，不回落到硬编码字面量分支。"""
-    from mindex.processing.pipeline import Pipeline
-    from mindex.shared.media import command
+    from processing.pipeline import Pipeline
+    from shared.media import command
 
     monkeypatch.setattr(deployment, "ADAPTER_VERSION", "llama-native-wemm-3")
     native["pin"]()  # 以升级后的协议版本重新固定清单与空间契约
@@ -857,7 +843,6 @@ def test_smoke_routes_future_adapter_version_through_v2(native, tmp_path, monkey
 
 
 def test_cli_probe_uses_fixed_yaml_with_active_override(native, tmp_path):
-    import yaml
 
     config = native["config"]
     store = Store(config.data_dir)
@@ -907,7 +892,7 @@ def test_keyboard_interrupt_records_failed_pipeline_run(config):
 
 @pytest.mark.parametrize("changed", [False, True])
 def test_warmup_uses_relocated_model_files(native, tmp_path, monkeypatch, changed):
-    from mindex.search.warmup import _warm_model_files
+    from search.warmup import _warm_model_files
 
     config = native["config"]
     manifest_path = Path(config.embedding.deployment_manifest)
@@ -932,53 +917,53 @@ def test_warmup_uses_relocated_model_files(native, tmp_path, monkeypatch, change
 
 
 def test_recall_checks_identity_once_without_health_or_postflight(native, video_file, monkeypatch):
-    from mindex.processing.pipeline import Pipeline
-    from mindex.search import search as search_module
+    from processing.pipeline import Pipeline
+    from search import search as search_module
 
     client, _ = establish(native)
-    config = native['config']
+    config = native["config"]
     Pipeline(config).prepare(video_file)
-    IndexBuilder(config, client).build(mode='visual', kinds=('shot',), activate=True)
+    IndexBuilder(config, client).build(mode="visual", kinds=("shot",), activate=True)
     original = adapters.request
     requests = []
 
     def counted(method, url, **kwargs):
-        requests.append((method, url.rsplit('/', 1)[-1]))
+        requests.append((method, url.rsplit("/", 1)[-1]))
         return original(method, url, **kwargs)
 
-    monkeypatch.setattr(adapters, 'request', counted)
+    monkeypatch.setattr(adapters, "request", counted)
     search_module._QUERY_VECTORS.clear()
-    query = TextSearch(text='召回专用测试查询', granularity='shot', channels=['visual'])
+    query = TextSearch(text="召回专用测试查询", granularity="shot", channels=["visual"])
     first = SearchEngine(config, client).text(query)
-    assert first['results']
-    assert requests == [('GET', 'props'), ('GET', 'models'), ('POST', 'embeddings')]
+    assert first["results"]
+    assert requests == [("GET", "props"), ("GET", "models"), ("POST", "embeddings")]
     requests.clear()
     second = SearchEngine(config, LlamaEmbedder(config)).text(query)
-    assert requests == [('GET', 'props'), ('GET', 'models')]
-    assert second['results'] == first['results']
+    assert requests == [("GET", "props"), ("GET", "models")]
+    assert second["results"] == first["results"]
     # 模拟服务重启丢失进程缓存，磁盘缓存仍可使用。
     requests.clear()
     search_module._QUERY_VECTORS.clear()
     SearchEngine(config, LlamaEmbedder(config)).text(query)
-    assert requests == [('GET', 'props'), ('GET', 'models')]
+    assert requests == [("GET", "props"), ("GET", "models")]
     requests.clear()
     SearchEngine(config, LlamaEmbedder(config), force_embedding=True).text(query)
-    assert requests == [('GET', 'props'), ('GET', 'models'), ('POST', 'embeddings')]
+    assert requests == [("GET", "props"), ("GET", "models"), ("POST", "embeddings")]
     # 损坏的落盘缓存不可直接复用，清空进程缓存后应重新推理并修复。
-    cached = next((config.data_dir / 'cache' / 'query-vectors').glob('*.json'))
+    cached = next((config.data_dir / "cache" / "query-vectors").glob("*.json"))
     payload = json.loads(cached.read_text())
-    payload['vector'][0] += 1
+    payload["vector"][0] += 1
     save(cached, payload)
     search_module._QUERY_VECTORS.clear()
     requests.clear()
     SearchEngine(config, LlamaEmbedder(config)).text(query)
-    assert requests == [('GET', 'props'), ('GET', 'models'), ('POST', 'embeddings')]
+    assert requests == [("GET", "props"), ("GET", "models"), ("POST", "embeddings")]
     # 新查询仍须推理；权重变化后即使有缓存也不能继续使用旧空间。
     requests.clear()
-    SearchEngine(config, LlamaEmbedder(config)).text(query.model_copy(update={'text': '另一条查询'}))
-    assert requests[-1] == ('POST', 'embeddings')
+    SearchEngine(config, LlamaEmbedder(config)).text(query.model_copy(update={"text": "另一条查询"}))
+    assert requests[-1] == ("POST", "embeddings")
     requests.clear()
-    native['weights'].write_bytes(b'TEST-ONLY-changed-weights')
+    native["weights"].write_bytes(b"TEST-ONLY-changed-weights")
     with pytest.raises(adapters.ModelError):
         SearchEngine(config, LlamaEmbedder(config)).text(query)
-    assert not any(method == 'POST' for method, _ in requests)
+    assert not any(method == "POST" for method, _ in requests)

@@ -10,10 +10,13 @@
 from __future__ import annotations
 
 import logging
+import shutil
 from pathlib import Path
 
-from mindex.processing.indexing import VectorIndex
-from mindex.shared.storage import Store, bump_snapshot_revision
+from persons.persons import purge_person_source
+from processing.indexing import VectorIndex
+from shared.db.maintenance_gate import maintenance_gate
+from shared.storage import Store, bump_snapshot_revision
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +56,6 @@ def _remove_tree(path: Path) -> int:
     if not path.is_dir():
         return 0
     removed = _count_files(path)
-    import shutil
 
     shutil.rmtree(path)
     return removed
@@ -76,7 +78,6 @@ def purge_source(store: Store, source_id: str, *, media=None, pins=None) -> dict
     破坏性删除经 maintenance gate 全局互斥（PG 形态；本地沿用调用方持有的
     pipeline/library/index-write 文件锁）。
     """
-    from mindex.shared.db.maintenance_gate import maintenance_gate
 
     with maintenance_gate(store, name=f"purge:{source_id}"):
         return _purge_source_locked(store, source_id, media=media, pins=pins)
@@ -110,7 +111,9 @@ def _purge_source_locked(store: Store, source_id: str, *, media=None, pins=None)
             factory = getattr(store, "vectors", None)
             index = factory.open(index_id) if factory else VectorIndex(store.root, index_id)
         except Exception as exc:  # noqa: BLE001 — 旧版本集合可能已被清理，向量天然不存在
-            logger.warning("索引 %s 的向量集合不可用，跳过其中 %d 条向量的删除：%s", index_id, len(rep_ids), exc)
+            logger.warning(
+                "索引 %s 的向量集合不可用，跳过其中 %d 条向量的删除：%s", index_id, len(rep_ids), exc
+            )
             continue
         index.delete(rep_ids)
         vectors += len(rep_ids)
@@ -123,9 +126,7 @@ def _purge_source_locked(store: Store, source_id: str, *, media=None, pins=None)
             bump_snapshot_revision(db)
             # 删除了 index_members 的派生词法索引一并清掉（受影响版本检索回退
             # Python 路径；下次发布该版本或回填命令时重建）。
-            affected = db.execute(
-                "SELECT DISTINCT index_id FROM lexical_index_meta"
-            ).fetchall()
+            affected = db.execute("SELECT DISTINCT index_id FROM lexical_index_meta").fetchall()
             db.execute(f"DELETE FROM search_segments WHERE segment_id IN ({placeholders})", segment_ids)
             db.execute(f"DELETE FROM lexical_docs WHERE segment_id IN ({placeholders})", segment_ids)
             db.execute(f"DELETE FROM lexical_terms WHERE segment_id IN ({placeholders})", segment_ids)
@@ -141,11 +142,13 @@ def _purge_source_locked(store: Store, source_id: str, *, media=None, pins=None)
         db.execute("DELETE FROM scene_plans WHERE source_id=?", (source_id,))
         db.execute("DELETE FROM source_curation WHERE id=?", (source_id,))
         db.execute("DELETE FROM runs WHERE source_id=?", (source_id,))
-        from mindex.persons.persons import purge_person_source
 
         purge_person_source(db, source_id)
-        db.execute("UPDATE media_groups SET updated_at=CURRENT_TIMESTAMP WHERE id IN "
-                   "(SELECT group_id FROM media_group_members WHERE source_id=?)", (source_id,))
+        db.execute(
+            "UPDATE media_groups SET updated_at=CURRENT_TIMESTAMP WHERE id IN "
+            "(SELECT group_id FROM media_group_members WHERE source_id=?)",
+            (source_id,),
+        )
         db.execute("DELETE FROM sources WHERE id=?", (source_id,))
 
     if media is not None and getattr(media, "backend", "local") == "s3":

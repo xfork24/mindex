@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from mindex.agent.session_store import SessionStore
+from agent.session_store import SessionStore
 
 OLD_SCHEMA = """
 CREATE TABLE agent_sessions (

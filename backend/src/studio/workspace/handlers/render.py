@@ -8,11 +8,12 @@ AI 动画（animation 来源，没有选片阶段）在沙箱里逐帧录制动�
 
 from __future__ import annotations
 
-from .. import beat_align, sources, transitions
-from ..media_nodes import render_node
-from ..plans import DEFAULT_CANVAS, canvas_of, canvas_render
-from ..stages import StageHandler, html_overlays, plan_shot_stages, register, shot_content
-from ..versions import version
+from studio import animation_capture
+from studio.workspace import beat_align, sources, transitions
+from studio.workspace.media_nodes import render_node
+from studio.workspace.plans import DEFAULT_CANVAS, canvas_of, canvas_render
+from studio.workspace.stages import StageHandler, html_overlays, plan_shot_stages, register, shot_content
+from studio.workspace.versions import version
 
 
 def canvas_settings(p, result):
@@ -59,10 +60,20 @@ class RenderHandler(StageHandler):
             selected, content = shot_content(w, p, sid)
             inputs = {**inputs, "overlay": selected.get("overlay")}
             made = w["versions"].get(inputs["overlay"]) or {}
-            payload = {**payload, "overlay": inputs["overlay"], "overlay_render_version": OVERLAY_RENDER_VERSION,
-                       "overlays": [{"index": index, "start": layer.get("start"), "end": layer.get("end"),
-                                     "html": (made.get("files", {}).get(f"overlay-{index}") or {}).get("sha256")}
-                                    for index, layer in html_overlays(content)]}
+            payload = {
+                **payload,
+                "overlay": inputs["overlay"],
+                "overlay_render_version": OVERLAY_RENDER_VERSION,
+                "overlays": [
+                    {
+                        "index": index,
+                        "start": layer.get("start"),
+                        "end": layer.get("end"),
+                        "html": (made.get("files", {}).get(f"overlay-{index}") or {}).get("sha256"),
+                    }
+                    for index, layer in html_overlays(content)
+                ],
+            }
         return payload, inputs, params
 
     def picture_specification(self, config, job_id, w, p, sid, params, resources):
@@ -87,8 +98,11 @@ class RenderHandler(StageHandler):
                 "tts": inputs["tts"],
                 "draw": inputs["draw"],
                 "image": (drawn.get("files", {}).get("image") or {}).get("sha256"),
-                "source": {"kind": "aigc_image", "motion": source.get("motion", "zoom-in"),
-                           "strength": source.get("strength", 0.3)},
+                "source": {
+                    "kind": "aigc_image",
+                    "motion": source.get("motion", "zoom-in"),
+                    "strength": source.get("strength", 0.3),
+                },
                 "atempo": p["options"]["atempo"] or 1.0,
                 "image_version": IMAGE_VERSION,
             }
@@ -101,8 +115,11 @@ class RenderHandler(StageHandler):
                 "tts": inputs["tts"],
                 "invoke": inputs["invoke"],
                 "image": (made.get("files", {}).get("artifact") or {}).get("sha256"),
-                "source": {"kind": "tool", "motion": source.get("motion", "zoom-in"),
-                           "strength": source.get("strength", 0.3)},
+                "source": {
+                    "kind": "tool",
+                    "motion": source.get("motion", "zoom-in"),
+                    "strength": source.get("strength", 0.3),
+                },
                 "atempo": p["options"]["atempo"] or 1.0,
                 "image_version": IMAGE_VERSION,
             }
@@ -134,19 +151,26 @@ class RenderHandler(StageHandler):
 
     def dependencies(self, w, p, sid, *, resplit=False):
         present = plan_shot_stages(w, p, sid)
-        return [f"{stage}:{sid}" for stage in ("select", "draw", "animate", "invoke", "overlay", "tts")
-                if stage in present]
+        return [
+            f"{stage}:{sid}"
+            for stage in ("select", "draw", "animate", "invoke", "overlay", "tts")
+            if stage in present
+        ]
 
     def preflight(self, config, job_id, w, p, sid, spec, found, node):
         if not found and "overlay" in plan_shot_stages(w, p, sid):
-            from mindex.studio import animation_capture
-
             if not animation_capture.available():
-                node.update(action="blocked", reason="HTML 文字层需要动画录制组件：" + animation_capture.install_hint())
+                node.update(
+                    action="blocked",
+                    reason="HTML 文字层需要动画录制组件：" + animation_capture.install_hint(),
+                )
                 return
         source = sources.plan_source(w, p, sid)
-        if source and source["kind"] == "image" and not found and not sources.present(
-            config, job_id, source["media_id"], source["kind"]
+        if (
+            source
+            and source["kind"] == "image"
+            and not found
+            and not sources.present(config, job_id, source["media_id"], source["kind"])
         ):
             node.update(action="blocked", reason=sources.MISSING)
 
@@ -159,8 +183,15 @@ class RenderHandler(StageHandler):
         return None
 
     def run(self, ctx):
-        return render_node(ctx.config, ctx.job_id, ctx.w, ctx.p, ctx.sid, ctx.directory,
-                           capture=ctx.services.get("animation_capture"))
+        return render_node(
+            ctx.config,
+            ctx.job_id,
+            ctx.w,
+            ctx.p,
+            ctx.sid,
+            ctx.directory,
+            capture=ctx.services.get("animation_capture"),
+        )
 
 
 register(RenderHandler())

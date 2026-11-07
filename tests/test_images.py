@@ -1,3 +1,5 @@
+"""图像解码、缩放与检索请求回归。"""
+
 from __future__ import annotations
 
 import io
@@ -7,9 +9,9 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from mindex.diagnostics.e2e import freeze
-from mindex.shared.images import image_png
-from mindex.shared.media import content_hash
+from diagnostics.e2e import freeze
+from shared.images import image_png
+from shared.media import content_hash
 
 
 def test_image_preprocessing_applies_orientation_alpha_and_pixel_limit(tmp_path):

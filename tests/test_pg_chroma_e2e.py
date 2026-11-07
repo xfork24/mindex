@@ -11,7 +11,7 @@ import os
 
 import pytest
 
-from mindex.shared.config import Config
+from shared.config import Config
 
 pytestmark = [pytest.mark.requires_postgres, pytest.mark.requires_chroma_server, pytest.mark.slow]
 
@@ -28,7 +28,7 @@ def combo(video_file, tmp_path, monkeypatch):
     with psycopg.connect(PG_DSN, autocommit=True) as conn:
         conn.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
     with psycopg.connect(PG_DSN) as conn:
-        from mindex.shared.db.migrate_pg import migrate_pg
+        from shared.db.migrate_pg import migrate_pg
 
         migrate_pg(conn)
     monkeypatch.setenv("MINDEX_DATABASE_DSN", PG_DSN)
@@ -44,12 +44,11 @@ def combo(video_file, tmp_path, monkeypatch):
 
 def test_pipeline_index_search_on_pg_and_chroma(combo, video_file):
     from conftest import FixtureAnalyzer, FixtureEmbedder
-
-    from mindex.processing.indexing import IndexBuilder
-    from mindex.processing.pipeline import Pipeline
-    from mindex.search.search import SearchEngine
-    from mindex.shared.lexical_store import lexical_ready
-    from mindex.shared.types import TextSearch
+    from processing.indexing import IndexBuilder
+    from processing.pipeline import Pipeline
+    from search.search import SearchEngine
+    from shared.lexical_store import lexical_ready
+    from shared.types import TextSearch
 
     embedder = FixtureEmbedder(combo)
     pipeline = Pipeline(combo, analyzer=FixtureAnalyzer(embedder))
@@ -58,9 +57,11 @@ def test_pipeline_index_search_on_pg_and_chroma(combo, video_file):
         pipeline.transcribe()
         pipeline.analyze(source)
         version = IndexBuilder(combo, embedder).build(
-            source_id=source, channels=["visual", "dialogue", "analysis"], activate=True)
+            source_id=source, channels=["visual", "dialogue", "analysis"], activate=True
+        )
     version = IndexBuilder(combo, FixtureEmbedder(combo)).build(
-        source_id=source, channels=["visual", "dialogue", "analysis"], activate=True)
+        source_id=source, channels=["visual", "dialogue", "analysis"], activate=True
+    )
     store = pipeline.store
     assert store.pg
     assert lexical_ready(store, version)  # 发布时构建派生词法索引
@@ -75,6 +76,6 @@ def test_pipeline_index_search_on_pg_and_chroma(combo, video_file):
     analysis = engine.text(TextSearch(text="画面", granularity="shot", channels=["visual"]))
     assert analysis["index_id"] == version
     # 索引一致性校验走 PG + HttpClient
-    from mindex.processing.indexing import check_index
+    from processing.indexing import check_index
 
     assert check_index(store, version, config=combo) == []

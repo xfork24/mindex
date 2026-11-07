@@ -6,22 +6,22 @@ import asyncio
 import threading
 
 import pytest
-from agent_helpers import new_session
-from conftest import FixtureSpeaker, FixtureStoryboarder
 from fastapi.testclient import TestClient
+
+from agent.llm.scripted import ScriptedLlm
+from agent.loopback import MindexClient
+from agent.registry import ToolContext, ToolError
+from agent.tools import build_registry
+from agent.tools.studio_build import watched
+from agent_helpers import new_session
+from api import create_app
+from conftest import FixtureSpeaker, FixtureStoryboarder
+from studio import studio
+from studio import workspace as ws
 from test_studio_api import create_legacy_job
 from test_studio_cancel import wait_until
 from test_studio_columns import request_body
 from test_studio_workspace import setup_workspace, wait_build
-
-from mindex.agent.llm.scripted import ScriptedLlm
-from mindex.agent.loopback import MindexClient
-from mindex.agent.registry import ToolContext, ToolError
-from mindex.agent.tools import build_registry
-from mindex.agent.tools.studio_build import watched
-from mindex.api import create_app
-from mindex.studio import studio
-from mindex.studio import workspace as ws
 
 
 def call_tool(app, name, arguments, *, steps=("preview", "execute")):
@@ -60,8 +60,10 @@ def test_cancel_running_build_previews_and_cancels(config):
     jid, w, p = setup_workspace(config)
     app = create_app(config, speaker=Blocking(config))
     client = TestClient(app)
-    response = client.post(f"/api/studio/jobs/{jid}/plans/{p['id']}/regenerate-column",
-                           json=request_body(config, jid, w, p, "tts"))
+    response = client.post(
+        f"/api/studio/jobs/{jid}/plans/{p['id']}/regenerate-column",
+        json=request_body(config, jid, w, p, "tts"),
+    )
     assert response.status_code == 202, response.text
     bid = response.json()["id"]
     try:
@@ -193,8 +195,10 @@ def test_delete_plan_rejected_while_build_running(config):
     other = client.post(f"{base}/plans", json={"name": "副本", "copy_from": p["id"]}).json()["active_plan"]
     client.post(f"{base}/plans/{p['id']}/activate")
     w = ws.load(config, jid)
-    response = client.post(f"{base}/plans/{p['id']}/regenerate-column",
-                           json=request_body(config, jid, w, ws.plan(w, p["id"]), "tts"))
+    response = client.post(
+        f"{base}/plans/{p['id']}/regenerate-column",
+        json=request_body(config, jid, w, ws.plan(w, p["id"]), "tts"),
+    )
     assert response.status_code == 202, response.text
     try:
         assert entered.wait(5)

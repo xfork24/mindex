@@ -1,21 +1,46 @@
+"""元数据库存储、事务与本地及 PostgreSQL 后端入口。"""
+
 from __future__ import annotations
 
 import hashlib
 import json
+import os
 import threading
+import time
 import uuid
 from collections import OrderedDict
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from mindex.shared.backends.media import MediaStore
-    from mindex.shared.backends.vectors import VectorStores
-    from mindex.shared.config import Config
+import yaml
+from filelock import FileLock
 
-from mindex.shared.db.sqlite_backend import SqliteBackend
-from mindex.shared.migrations import execute_script, migrate
+from shared.config import fingerprint
+from shared.db.errors import UnsupportedOperation
+from shared.db.locks_pg import LeaseLost
+from shared.db.pg_backend import PgBackend
+from shared.db.scaling_schema import (
+    LEDGER_TABLES,
+    SQLITE_ADMISSION,
+    SQLITE_DELIVERY,
+    SQLITE_DIRECTORIES,
+    SQLITE_DURABLE_INDEX,
+    SQLITE_FILES,
+    SQLITE_MIGRATION,
+    SQLITE_MULTIPART,
+    SQLITE_OBJECTS,
+)
+from shared.query_budget import check, connection_for
+from shared.work_budget import current
+
+if TYPE_CHECKING:
+    from shared.backends.media import MediaStore
+    from shared.backends.vectors import VectorStores
+    from shared.config import Config
+
+from shared.db.sqlite_backend import SqliteBackend
+from shared.migrations import execute_script, migrate
 
 # 检索热路径的整索引快照缓存（活动索引 + 一个固定预览索引足够）。
 SNAPSHOT_CACHE_ENTRIES = 2
@@ -28,7 +53,9 @@ _SNAPSHOT_LOCK = threading.Lock()
 
 def bump_snapshot_revision(db) -> None:
     """在改写/删除 index_members 的同一事务里调用，使各进程的快照缓存失效。"""
-    db.execute("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)", (SNAPSHOT_REVISION_KEY, uuid.uuid4().hex))
+    db.execute(
+        "INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)", (SNAPSHOT_REVISION_KEY, uuid.uuid4().hex)
+    )
 
 
 def dumps(value: object) -> str:
@@ -38,11 +65,10 @@ def dumps(value: object) -> str:
 def require_sqlite(config, action: str) -> None:
     """维护能力在 PG 元数据库下的显式拒绝（plans §11 阶段 1：未支持时不静默跳过）。"""
     if config.database.backend == "postgres":
-        from mindex.shared.db.errors import UnsupportedOperation
-
         raise UnsupportedOperation(
             f"{action} 暂不支持 PostgreSQL 元数据库（备份迁移与 SQLite 专属维护在阶段 5 交付）；"
-            "local 形态可继续使用该能力")
+            "local 形态可继续使用该能力"
+        )
 
 
 METADATA_SCHEMA_V1 = """
@@ -154,15 +180,21 @@ def _add_missing_columns(db, columns) -> None:
 
 def _metadata_v1(db) -> None:
     """引入版本号时的完整 schema；对 user_version=0 的旧库幂等（补齐后来新增的列）。"""
-    from mindex.shared.person_schema import init_person_schema
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+    from shared.person_schema import init_person_schema
 
     execute_script(db, METADATA_SCHEMA_V1)
     init_person_schema(db)
-    _add_missing_columns(db, (
-        ("sources", "layout_config", "TEXT"), ("dialogue_tasks", "publication", "TEXT"),
-        ("person_tasks", "publication", "TEXT"), ("clip_migration_files", "dependency_digest", "TEXT"),
-        ("representations", "cache_key", "TEXT"),
-    ))
+    _add_missing_columns(
+        db,
+        (
+            ("sources", "layout_config", "TEXT"),
+            ("dialogue_tasks", "publication", "TEXT"),
+            ("person_tasks", "publication", "TEXT"),
+            ("clip_migration_files", "dependency_digest", "TEXT"),
+            ("representations", "cache_key", "TEXT"),
+        ),
+    )
     db.execute("CREATE INDEX IF NOT EXISTS representations_cache ON representations(cache_key)")
 
 
@@ -170,12 +202,15 @@ def _metadata_v2(db) -> None:
     """用户文案模板（studio/script_templates.py）：内置模板来自 YAML，只有复制出的用户模板入库。
 
     body 为 JSON：version、description、instructions、constraints。"""
-    execute_script(db, """
+    execute_script(
+        db,
+        """
 CREATE TABLE IF NOT EXISTS script_templates (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, category TEXT NOT NULL, kind TEXT NOT NULL,
   base_id TEXT, body TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
-""")
+""",
+    )
 
 
 def _metadata_v3(db) -> None:
@@ -184,7 +219,9 @@ def _metadata_v3(db) -> None:
     JSON 列（body/config/options/progress/result/publication）存 UTF-8 JSON 文本。``topic_runs`` 沿用
     后台任务表的列约定（``source_id`` 存档案 ID），以复用 ``BackgroundTaskRunner`` 与 ``task_progress``。
     子表不声明外键，删除档案由 ``topics/profiles.delete`` 在一个事务里级联。"""
-    execute_script(db, """
+    execute_script(
+        db,
+        """
 CREATE TABLE IF NOT EXISTS topic_profiles (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, body TEXT NOT NULL, asset_paths TEXT NOT NULL DEFAULT '[]',
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL
@@ -229,26 +266,34 @@ CREATE TABLE IF NOT EXISTS topic_calendar_events (
   has_year INTEGER NOT NULL DEFAULT 1
 );
 CREATE INDEX IF NOT EXISTS topic_calendar_events_source ON topic_calendar_events(source_id);
-""")
+""",
+    )
 
 
 def _metadata_v4(db) -> None:
     """用户品牌模板（studio/brands.py）：内置模板来自 YAML，只有复制出的用户模板入库。
 
-    body 为 JSON：description、version、subtitle、overlay、intro、outro、watermark；素材以 ``brand/…`` 相对路径引用。"""
-    execute_script(db, """
+    body 为 JSON：description、version、subtitle、overlay、intro、outro、watermark；
+    素材以 ``brand/…`` 相对路径引用。"""
+    execute_script(
+        db,
+        """
 CREATE TABLE IF NOT EXISTS brand_templates (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, base_id TEXT, body TEXT NOT NULL,
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
-""")
+""",
+    )
 
 
 def _metadata_v5(db) -> None:
-    """曲库（studio/music_library.py）：曲目 ID 即音频内容 sha256，文件在 ``data_dir/music/<sha256><suffix>``。
+    """曲库（studio/music_library.py）：曲目 ID 即音频内容 sha256，
+    文件在 ``data_dir/music/<sha256><suffix>``。
 
     beats/moods/tags 为 JSON 数组；analysis_status 为 pending、ready 或 failed。"""
-    execute_script(db, """
+    execute_script(
+        db,
+        """
 CREATE TABLE IF NOT EXISTS music_tracks (
   id TEXT PRIMARY KEY, suffix TEXT NOT NULL, title TEXT NOT NULL, artist TEXT NOT NULL DEFAULT '',
   source TEXT NOT NULL, license TEXT NOT NULL, attribution TEXT NOT NULL, expires_at TEXT,
@@ -257,49 +302,62 @@ CREATE TABLE IF NOT EXISTS music_tracks (
   analysis_status TEXT NOT NULL DEFAULT 'pending', analysis_error TEXT, analysis_version INTEGER,
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
-""")
+""",
+    )
 
 
 def _metadata_v6(db) -> None:
     """第三方工具源（studio/tools/registry.py）：connection/tools/artifact_hosts 为 JSON；
     ``secret`` 为密钥 JSON（只写不读，不含密钥的备份导出时清空）。"""
-    execute_script(db, """
+    execute_script(
+        db,
+        """
 CREATE TABLE IF NOT EXISTS tool_sources (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, protocol TEXT NOT NULL, connection TEXT NOT NULL,
   tools TEXT NOT NULL, artifact_hosts TEXT NOT NULL DEFAULT '[]', secret TEXT,
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
-""")
+""",
+    )
 
 
 def _metadata_v7(db) -> None:
-    execute_script(db, """
+    execute_script(
+        db,
+        """
 CREATE TABLE IF NOT EXISTS delivery_templates (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, body TEXT NOT NULL, asset_paths TEXT NOT NULL DEFAULT '[]',
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
-""")
+""",
+    )
 
 
 def _metadata_v8(db) -> None:
     """Seed once; tombstones prevent deleted IDs being resurrected or reused."""
-    import yaml
 
-    execute_script(db, """
+    execute_script(
+        db,
+        """
 CREATE TABLE IF NOT EXISTS delivery_platforms (
   id TEXT PRIMARY KEY, body TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
-""")
+""",
+    )
     for key in ("bilibili", "douyin", "youtube"):
         source = Path(__file__).resolve().parent.parent / "studio" / "platforms" / f"{key}.yaml"
         body = yaml.safe_load(source.read_text(encoding="utf-8"))
-        db.execute("INSERT OR IGNORE INTO delivery_platforms(id,body,created_at,updated_at) VALUES(?,?,?,?)",
-                   (key, dumps(body), "2026-01-01T00:00:00", "2026-01-01T00:00:00"))
+        db.execute(
+            "INSERT OR IGNORE INTO delivery_platforms(id,body,created_at,updated_at) VALUES(?,?,?,?)",
+            (key, dumps(body), "2026-01-01T00:00:00", "2026-01-01T00:00:00"),
+        )
 
 
 def _metadata_v9(db):
-    execute_script(db, """
+    execute_script(
+        db,
+        """
 CREATE TABLE IF NOT EXISTS media_groups (
  id TEXT PRIMARY KEY, type TEXT NOT NULL CHECK(type IN ('source','music')),
  name TEXT NOT NULL CHECK(length(trim(name)) > 0 AND name=trim(name)), description TEXT NOT NULL DEFAULT '',
@@ -314,7 +372,8 @@ CREATE TABLE IF NOT EXISTS media_group_members (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS group_source_unique ON media_group_members(group_id,source_id);
 CREATE UNIQUE INDEX IF NOT EXISTS group_music_unique ON media_group_members(group_id,music_id);
-""")
+""",
+    )
 
 
 def _metadata_v10(db):
@@ -323,7 +382,9 @@ def _metadata_v10(db):
         suffix = 1
         while True:
             name = "未分类（自定义）" if suffix == 1 else f"未分类（自定义 {suffix}）"
-            if not db.execute("SELECT 1 FROM media_groups WHERE type=? AND name=?", (row["type"], name)).fetchone():
+            if not db.execute(
+                "SELECT 1 FROM media_groups WHERE type=? AND name=?", (row["type"], name)
+            ).fetchone():
                 break
             suffix += 1
         db.execute("UPDATE media_groups SET name=? WHERE id=?", (name, row["id"]))
@@ -332,10 +393,13 @@ def _metadata_v10(db):
 def _metadata_v11(db):
     # 选题缺口向量缓存：按嵌入空间身份指纹失效，避免每次打分重嵌全部开放缺口。
     # 用 _add_missing_columns 保证幂等：user_version 被重置的旧库重跑迁移不会因列已存在而失败。
-    _add_missing_columns(db, (
-        ("topic_gaps", "embedding", "BLOB"),
-        ("topic_gaps", "embedding_space", "TEXT"),
-    ))
+    _add_missing_columns(
+        db,
+        (
+            ("topic_gaps", "embedding", "BLOB"),
+            ("topic_gaps", "embedding_space", "TEXT"),
+        ),
+    )
 
 
 def _metadata_v12(db):
@@ -347,7 +411,9 @@ def _metadata_v12(db):
     ``lexical_terms`` 为精确 token 倒排（term 逐字节相等，不做模糊/大小写归一 collation）；
     ``lexical_index_meta`` 持久化分词器版本，版本不一致禁止构建/查询新派生索引。
     """
-    execute_script(db, """
+    execute_script(
+        db,
+        """
 CREATE TABLE IF NOT EXISTS search_segments (
   index_id TEXT NOT NULL, segment_id TEXT NOT NULL, source_id TEXT NOT NULL,
   parent_id TEXT, kind TEXT NOT NULL, start REAL NOT NULL, end REAL NOT NULL,
@@ -369,7 +435,8 @@ CREATE TABLE IF NOT EXISTS lexical_index_meta (
   segments INTEGER NOT NULL, docs INTEGER NOT NULL, terms INTEGER NOT NULL,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-""")
+""",
+    )
 
 
 def _metadata_v13(db):
@@ -388,14 +455,12 @@ def _metadata_v14(db):
 
 
 def _metadata_v16(db):
-    from mindex.shared.db.scaling_schema import SQLITE_FILES
 
     execute_script(db, SQLITE_FILES)
 
 
 # metadata.sqlite3 的有序迁移：只追加，不修改已发布的步骤（见 shared/migrations.py）。
 def _metadata_v17(db):
-    from mindex.shared.db.scaling_schema import LEDGER_TABLES
 
     for table in LEDGER_TABLES:
         columns = {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
@@ -406,54 +471,76 @@ def _metadata_v17(db):
 
 
 def _metadata_v18(db):
-    db.execute("CREATE TABLE IF NOT EXISTS migration_runs (migration_id TEXT PRIMARY KEY,source_sha256 TEXT NOT NULL,"
-               "status TEXT NOT NULL,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS migration_runs (migration_id TEXT PRIMARY KEY,source_sha256 TEXT NOT "
+        "NULL,"
+        "status TEXT NOT NULL,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+    )
 
 
 def _metadata_v19(db):
-    from mindex.shared.db.scaling_schema import SQLITE_DURABLE_INDEX
 
     execute_script(db, SQLITE_DURABLE_INDEX)
 
 
 def _metadata_v20(db):
-    from mindex.shared.db.scaling_schema import SQLITE_DIRECTORIES
 
     execute_script(db, SQLITE_DIRECTORIES)
 
 
 def _metadata_v21(db):
-    from mindex.shared.db.scaling_schema import SQLITE_DELIVERY
 
     execute_script(db, SQLITE_DELIVERY)
 
 
 def _metadata_v22(db):
-    from mindex.shared.db.scaling_schema import SQLITE_ADMISSION
 
     execute_script(db, SQLITE_ADMISSION)
 
 
 def _metadata_v23(db):
-    from mindex.shared.db.scaling_schema import SQLITE_OBJECTS
 
     execute_script(db, SQLITE_OBJECTS)
 
 
 def _metadata_v24(db):
-    from mindex.shared.db.scaling_schema import SQLITE_MULTIPART
 
     # 备份/装载以 user_version=0 重跑迁移（含当前 schema 的快照）：ALTER 按列存在性幂等。
     execute_script(db, SQLITE_MULTIPART, skip_existing_columns=True)
 
 
 def _metadata_v25(db):
-    from mindex.shared.db.scaling_schema import SQLITE_MIGRATION
 
     execute_script(db, SQLITE_MIGRATION, skip_existing_columns=True)
 
 
-METADATA_STEPS = (_metadata_v1, _metadata_v2, _metadata_v3, _metadata_v4, _metadata_v5, _metadata_v6, _metadata_v7, _metadata_v8, _metadata_v9, _metadata_v10, _metadata_v11, _metadata_v12, _metadata_v13, _metadata_v14, _metadata_v15, _metadata_v16, _metadata_v17, _metadata_v18, _metadata_v19, _metadata_v20, _metadata_v21, _metadata_v22, _metadata_v23, _metadata_v24, _metadata_v25)
+METADATA_STEPS = (
+    _metadata_v1,
+    _metadata_v2,
+    _metadata_v3,
+    _metadata_v4,
+    _metadata_v5,
+    _metadata_v6,
+    _metadata_v7,
+    _metadata_v8,
+    _metadata_v9,
+    _metadata_v10,
+    _metadata_v11,
+    _metadata_v12,
+    _metadata_v13,
+    _metadata_v14,
+    _metadata_v15,
+    _metadata_v16,
+    _metadata_v17,
+    _metadata_v18,
+    _metadata_v19,
+    _metadata_v20,
+    _metadata_v21,
+    _metadata_v22,
+    _metadata_v23,
+    _metadata_v24,
+    _metadata_v25,
+)
 
 
 def migrate_metadata(db) -> int:
@@ -478,7 +565,8 @@ class Store:
         PostgreSQL 元数据库的统一 Store。集群调用链（API/worker）必须经此入口或
         显式传入 BackendContext；``Store(root)`` 只服务本地工具、测试与暂存 SQLite。
         """
-        from mindex.shared.backends import open_context
+        # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+        from shared.backends import open_context
 
         return open_context(config).store
 
@@ -505,10 +593,10 @@ class Store:
         self.locks_backend = "file"
         # 媒体后端（open_context 注入；直构 Store 为 None，按本地文件系统解析）。
         self.media = None
-        from filelock import FileLock
 
         # 首次建库的 WAL 切换不总遵循 SQLite busy_timeout；跨线程/进程串行初始化。
-        from mindex.shared.migration_state import access
+        # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+        from shared.migration_state import access
 
         with FileLock(str(self.root / ".metadata-init.lock"), timeout=30), access(self):
             with self.connect() as db:
@@ -525,7 +613,6 @@ class Store:
         return self.backend.backend == "postgres"
 
     def _hot_cached(self, key: str, ttl: float, producer):
-        import time
 
         with self._hot_cache_lock:
             entry = self._hot_cache.get(key)
@@ -547,7 +634,6 @@ class Store:
         context = getattr(self, "_backend_context", None)
         if context is not None and context.closed:
             raise RuntimeError("后端上下文已关闭")
-        from mindex.shared.query_budget import check, connection_for
 
         check()
         active = connection_for(self)
@@ -559,7 +645,8 @@ class Store:
             if self.pg:
                 yield db
             else:
-                from mindex.shared.migration_state import LocalConnection
+                # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+                from shared.migration_state import LocalConnection
 
                 yield LocalConnection(db, str(self.path.resolve()))
         check()
@@ -603,8 +690,7 @@ class Store:
         return {
             row["id"]: row["display_name"] or row["name"]
             for row in self.rows(
-                "SELECT s.id,s.name,c.display_name FROM sources s "
-                "LEFT JOIN source_curation c ON c.id=s.id"
+                "SELECT s.id,s.name,c.display_name FROM sources s LEFT JOIN source_curation c ON c.id=s.id"
             )
         }
 
@@ -668,14 +754,13 @@ class Store:
             self._activate_in_db(db, index_id)
 
     def _defer_publication(self, kind, identifier, *, execution=None):
-        from mindex.shared.db.fencing import current_attempt, publication_scope
+        # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+        from shared.db.fencing import current_attempt, publication_scope
 
         attempt = execution.attempt if execution is not None else current_attempt()
         if not self.pg or attempt is None:
             return False
         if attempt.library_id != self.library_id or attempt.backend.dsn != self.backend.dsn:
-            from mindex.shared.db.locks_pg import LeaseLost
-
             raise LeaseLost("发布目标与任务所属素材库不一致")
         attempt.check()
         method = self._activate_in_db if kind == "index" else self._activate_release_in_db
@@ -705,16 +790,19 @@ class Store:
             "SELECT id FROM search_releases WHERE content_id=? ORDER BY rowid DESC LIMIT 1", (index_id,)
         ).fetchone()
         if release:
-            db.execute("INSERT OR REPLACE INTO settings VALUES('active.release',?)", (release['id'],))
+            db.execute("INSERT OR REPLACE INTO settings VALUES('active.release',?)", (release["id"],))
         else:
             current = db.execute(
-                "SELECT r.person_id FROM search_releases r JOIN settings s ON s.value=r.id WHERE s.key='active.release'"
+                "SELECT r.person_id FROM search_releases r JOIN settings s ON s.value=r.id WHERE "
+                "s.key='active.release'"
             ).fetchone()
-            from mindex.shared.config import fingerprint
-            person_id = current['person_id'] if current else None
+
+            person_id = current["person_id"] if current else None
             release_id = fingerprint([index_id, person_id])
-            db.execute("INSERT OR IGNORE INTO search_releases(id,content_id,person_id) VALUES(?,?,?)",
-                       (release_id, index_id, person_id))
+            db.execute(
+                "INSERT OR IGNORE INTO search_releases(id,content_id,person_id) VALUES(?,?,?)",
+                (release_id, index_id, person_id),
+            )
             db.execute("INSERT OR REPLACE INTO settings VALUES('active.release',?)", (release_id,))
 
     def activate_release(self, release_id: str, *, execution=None):
@@ -725,18 +813,26 @@ class Store:
 
     def _activate_release_in_db(self, db, release_id):
         db.execute("BEGIN IMMEDIATE")
-        row = db.execute("SELECT r.*,i.status FROM search_releases r JOIN index_versions i ON i.id=r.content_id WHERE r.id=?", (release_id,)).fetchone()
-        if not row or row['status'] != 'ready':
+        row = db.execute(
+            "SELECT r.*,i.status FROM search_releases r JOIN index_versions i ON i.id=r.content_id WHERE "
+            "r.id=?",
+            (release_id,),
+        ).fetchone()
+        if not row or row["status"] != "ready":
             raise ValueError("检索组合不存在或内容索引未就绪")
-        if db.execute("SELECT 1 FROM index_members WHERE index_id=? AND complete=0", (row['content_id'],)).fetchone():
+        if db.execute(
+            "SELECT 1 FROM index_members WHERE index_id=? AND complete=0", (row["content_id"],)
+        ).fetchone():
             raise ValueError("内容索引有未完成片段")
-        db.execute("INSERT OR REPLACE INTO settings VALUES('active',?)", (row['content_id'],))
+        db.execute("INSERT OR REPLACE INTO settings VALUES('active',?)", (row["content_id"],))
         db.execute("INSERT OR REPLACE INTO settings VALUES('active.release',?)", (release_id,))
 
     def snapshots(self, index_id: str, source_id: str | None = None) -> list[dict]:
-        rows = self.rows("SELECT snapshot FROM index_members WHERE index_id=? AND complete=1"
-                         + (" AND json_extract(snapshot,'$.source_id')=?" if source_id else ""),
-                         (index_id, source_id) if source_id else (index_id,))
+        rows = self.rows(
+            "SELECT snapshot FROM index_members WHERE index_id=? AND complete=1"
+            + (" AND json_extract(snapshot,'$.source_id')=?" if source_id else ""),
+            (index_id, source_id) if source_id else (index_id,),
+        )
         return [json.loads(row["snapshot"]) for row in rows]
 
     def snapshot_signature(self, index_id: str) -> tuple:
@@ -749,7 +845,9 @@ class Store:
         return (row["n"], row["c"], row["l"], row["r"])
 
     def retain_snapshots(self, keep: set[str]) -> int:
-        """淘汰本库快照缓存中不在 keep 里的索引版本（活动指针移走后，旧版本不会再被默认路径用到）。返回淘汰条数。"""
+        """淘汰本库快照缓存中不在 keep 里的索引版本（活动指针移走后，旧版本不会再被默认路径用到）。
+        返回淘汰条数。
+        """
         path = self._snapshot_cache_scope()
         with _SNAPSHOT_LOCK:
             stale = [key for key in _SNAPSHOT_CACHE if key[0] == path and key[1] not in keep]
@@ -759,16 +857,18 @@ class Store:
 
     @property
     def cache_identity(self):
-        from mindex.shared.config import fingerprint
 
         if not self.library_id and not self.pg:
             row = self.one("SELECT value FROM settings WHERE key='library.id'")
             identity = row["value"] if row else ""
         else:
             identity = self.library_id
-        return (identity, self.backend.backend,
-                fingerprint(getattr(self.backend, "dsn", str(self.path))),
-                getattr(self, "backend_identity", ""))
+        return (
+            identity,
+            self.backend.backend,
+            fingerprint(getattr(self.backend, "dsn", str(self.path))),
+            getattr(self, "backend_identity", ""),
+        )
 
     def _snapshot_cache_scope(self):
         return self.cache_identity
@@ -801,7 +901,8 @@ class Store:
         media = getattr(self, "media", None)
         if media is not None and getattr(media, "backend", "local") == "s3":
             try:
-                from mindex.shared import files
+                # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+                from shared import files
 
                 entry = files.pointer(self, relative)
                 if entry is not None and entry["size"] < 0:
@@ -819,12 +920,16 @@ class Store:
             return True
         reference = self.one("SELECT source_id,start,end FROM media_references WHERE path=?", (relative,))
         if reference is None:
-            reference = self.one("SELECT source_id,start,end FROM segments WHERE path=? "
-                                 "AND kind IN ('moment','scene')", (relative,))
+            reference = self.one(
+                "SELECT source_id,start,end FROM segments WHERE path=? AND kind IN ('moment','scene')",
+                (relative,),
+            )
         if reference:
-            from mindex.shared.shot_media import ShotMedia
+            # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+            from shared.shot_media import ShotMedia
+
             try:
-                ShotMedia(self).references(reference['source_id'], reference['start'], reference['end'])
+                ShotMedia(self).references(reference["source_id"], reference["start"], reference["end"])
                 return True
             except (ValueError, OSError):
                 pass
@@ -832,18 +937,20 @@ class Store:
 
     def resolve_media(self, relative: str) -> Path:
         """兼容 Path 入口；长期处理和响应应使用 materialize_media 持有整个上下文。"""
-        from mindex.shared.db.fencing import current_attempt
+        # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+        from shared.db.fencing import current_attempt
 
         attempt = current_attempt()
         if self.pg and attempt is not None:
             if attempt.library_id != self.library_id or attempt.backend.dsn != self.backend.dsn:
                 raise ValueError("媒体与任务所属素材库不一致")
             return attempt.retain((self.library_id, "media", relative), self.materialize_media(relative))
-        from mindex.shared.work_budget import current
 
         budget = current()
         if budget is not None and budget.store.cache_identity == self.cache_identity:
-            return budget.materialize((self.cache_identity, "media", relative), self.materialize_media(relative))
+            return budget.materialize(
+                (self.cache_identity, "media", relative), self.materialize_media(relative)
+            )
         if getattr(getattr(self, "media", None), "backend", "local") == "s3":
             raise RuntimeError("远端媒体需要显式 materialize_media 上下文或工作集作用域")
         with self.materialize_media(relative) as path:
@@ -857,7 +964,8 @@ class Store:
             raise FileNotFoundError(relative)
         media = getattr(self, "media", None)
         if media is not None and getattr(media, "backend", "local") == "s3":
-            from mindex.shared import files
+            # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+            from shared import files
 
             entry = files.pointer(self, relative)
             if entry is not None and entry["size"] < 0:
@@ -882,12 +990,17 @@ class Store:
                 return
             reference = self.one("SELECT source_id,start,end FROM media_references WHERE path=?", (relative,))
             if reference is None:
-                reference = self.one("SELECT source_id,start,end FROM segments WHERE path=? "
-                                     "AND kind IN ('moment','scene')", (relative,))
+                reference = self.one(
+                    "SELECT source_id,start,end FROM segments WHERE path=? AND kind IN ('moment','scene')",
+                    (relative,),
+                )
             if reference:
-                from mindex.shared.shot_media import ShotMedia
+                # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+                from shared.shot_media import ShotMedia
 
-                with ShotMedia(self).materialized(reference['source_id'], reference['start'], reference['end']) as path:
+                with ShotMedia(self).materialized(
+                    reference["source_id"], reference["start"], reference["end"]
+                ) as path:
                     yield path
                 return
             raise FileNotFoundError(relative)
@@ -898,13 +1011,17 @@ class Store:
         if not path.is_relative_to(self.root):
             raise FileNotFoundError(relative)
         reference = self.one("SELECT * FROM media_references WHERE path=?", (relative,))
-        if reference and reference['version'] == 'shot-boundary-v1':
-            from mindex.shared.shot_media import ShotMedia
-            return ShotMedia(self).materialize(reference['source_id'], reference['start'], reference['end'])
+        if reference and reference["version"] == "shot-boundary-v1":
+            # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+            from shared.shot_media import ShotMedia
+
+            return ShotMedia(self).materialize(reference["source_id"], reference["start"], reference["end"])
         if not path.is_file():
             if reference is None:
-                reference = self.one("SELECT source_id,start,end FROM segments WHERE path=? "
-                                     "AND kind IN ('moment','scene')", (relative,))
+                reference = self.one(
+                    "SELECT source_id,start,end FROM segments WHERE path=? AND kind IN ('moment','scene')",
+                    (relative,),
+                )
             if reference is None:
                 for row in self.rows("SELECT snapshot FROM index_members"):
                     snapshot = json.loads(row["snapshot"])
@@ -912,8 +1029,12 @@ class Store:
                         reference = snapshot
                         break
             if reference:
-                from mindex.shared.shot_media import ShotMedia
-                return ShotMedia(self).materialize(reference['source_id'], reference['start'], reference['end'])
+                # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+                from shared.shot_media import ShotMedia
+
+                return ShotMedia(self).materialize(
+                    reference["source_id"], reference["start"], reference["end"]
+                )
             raise FileNotFoundError(relative)
         return path
 
@@ -928,9 +1049,6 @@ class PgStore(Store):
     """
 
     def __init__(self, config):
-        import os
-
-        from mindex.shared.db.pg_backend import PgBackend
 
         self.root = config.data_dir.resolve()
         self.root.mkdir(parents=True, exist_ok=True)
@@ -942,20 +1060,31 @@ class PgStore(Store):
         if not dsn:
             raise RuntimeError(
                 f"database.backend=postgres 需要在环境变量 {section.dsn_env} 提供 DSN"
-                "（凭据只从环境变量读取，不写入配置文件）")
+                "（凭据只从环境变量读取，不写入配置文件）"
+            )
         # 先用一次引导连接完成版本校验并读取 library_id；锁键/缓存租户键都用它（plans §2）。
-        from mindex.shared.db.migrate_pg import check_schema
+        # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+        from shared.db.migrate_pg import check_schema
 
-        pool_options = {key: getattr(section, key) for key in (
-            "pool_min", "pool_max", "control_pool_max", "connection_budget",
-            "checkout_timeout", "control_checkout_timeout")}
+        pool_options = {
+            key: getattr(section, key)
+            for key in (
+                "pool_min",
+                "pool_max",
+                "control_pool_max",
+                "connection_budget",
+                "checkout_timeout",
+                "control_checkout_timeout",
+            )
+        }
         with PgBackend(dsn, library_id="bootstrap", **pool_options).connect() as db:
             check_schema(db)
             row = db.execute("SELECT value FROM settings WHERE key=?", ("library.id",)).fetchone()
         if row is None:  # 基线迁移未跑或未建库：给出唯一修复入口
             raise RuntimeError("PostgreSQL 元数据库缺少 library.id；请先执行 mindex migrate")
         self.library_id = row[0]
-        self.backend = PgBackend(dsn, library_id=self.library_id, **pool_options,
-                                 queue_backend=config.queue.backend)
+        self.backend = PgBackend(
+            dsn, library_id=self.library_id, **pool_options, queue_backend=config.queue.backend
+        )
         self.locks_backend = config.locks.backend
         self.queue_backend = config.queue.backend

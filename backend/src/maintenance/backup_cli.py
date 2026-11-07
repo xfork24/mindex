@@ -11,7 +11,10 @@ from typing import Annotated
 
 import typer
 
-from mindex.shared.cli_support import SortedGroup
+from maintenance import backup
+from maintenance.backup import export_backup, import_backup, recover_import, summary
+from maintenance.backup_files import source_list
+from shared.cli_support import SortedGroup
 
 app = typer.Typer(
     cls=SortedGroup,
@@ -136,7 +139,6 @@ def list_sources(
     \b
       mindex backup list --json
     """
-    from mindex.maintenance.backup_files import source_list
 
     call(structured, lambda: {"sources": source_list(ctx.obj.data_dir)})
 
@@ -150,16 +152,16 @@ def inspect(
 ):
     """完整校验备份目录并查看素材、索引、配置和密钥包含情况。
 
-    读取清单及文件 SHA256，大备份可能耗时；不导入、不调用模型。DIRECTORY 是备份根目录而非 data 子目录，此命令没有 --verification basic 快捷模式。
+        读取清单及文件 SHA256，大备份可能耗时；不导入、不调用模型。DIRECTORY 是备份根目录而非 data 子目录，
+    此命令没有 --verification basic 快捷模式。
 
-    示例：
+        示例：
 
-    \b
-      mindex backup inspect /备份/mindex --json
+        \b
+          mindex backup inspect /备份/mindex --json
     """
-    from mindex.maintenance.backup import inspect_bundle, summary
 
-    call(structured, lambda: summary(inspect_bundle(directory)))
+    call(structured, lambda: summary(backup.inspect_bundle(directory)))
 
 
 @app.command("export")
@@ -199,15 +201,16 @@ def export(
 ):
     """导出离线一致快照，默认排除密钥且不读取环境变量密钥。
 
-    先停止 Web 和全部后台写入任务，目标目录必须不存在。--all 全库，--source 可重复选择；两者互斥。省略选择仅在交互终端提供搜索多选，脚本必须显式选择。向量经 API 导出，不重新推理；权重和可下载模型缓存不在备份内。--dry-run 实际构建临时快照后删除，仍需时间与空间；--include-secrets 会包含已存明文凭据。
+        先停止 Web 和全部后台写入任务，目标目录必须不存在。--all 全库，--source 可重复选择；两者互斥。
+    省略选择仅在交互终端提供搜索多选，脚本必须显式选择。向量经 API 导出，不重新推理；
+    权重和可下载模型缓存不在备份内。--dry-run 实际构建临时快照后删除，仍需时间与空间；--include-secrets
+    会包含已存明文凭据。
 
-    示例：
+        示例：
 
-    \b
-      mindex backup export /备份/mindex --all --dry-run
+        \b
+          mindex backup export /备份/mindex --all --dry-run
     """
-    from mindex.maintenance.backup import export_backup
-    from mindex.maintenance.backup_files import source_list
 
     def run():
         picked = choose(source_list(ctx.obj.data_dir), all_sources, sources)
@@ -262,21 +265,26 @@ def import_(
 ):
     """从备份恢复空库或合并已有库，复用向量，不调用模型。
 
-    先停止 Web 和全部后台写入任务。空库恢复基础配置与活动组合，允许目标 YAML 尚不存在；已有库默认保留配置，--restore-config 才恢复。重复素材默认失败，--skip-existing 保留目标及其衍生数据；兼容空间才合并活动索引。--all 与 --source 互斥，脚本必须显式选择。--dry-run 构建并校验暂存数据，不切换目标；默认 full 校验，basic 省略部分损坏检测。中断后保留日志并使用 backup recover。
+        先停止 Web 和全部后台写入任务。空库恢复基础配置与活动组合，允许目标 YAML 尚不存在；
+    已有库默认保留配置，
+    --restore-config 才恢复。重复素材默认失败，--skip-existing 保留目标及其衍生数据；兼容空间才合并活动索引。
+    --all 与 --source 互斥，脚本必须显式选择。--dry-run 构建并校验暂存数据，不切换目标；默认 full 校验，basic
+    省略部分损坏检测。中断后保留日志并使用 backup recover。
 
-    示例：
+        示例：
 
-    \b
-      mindex backup import /备份/mindex --all --data-dir /新路径/data --dry-run
+        \b
+          mindex backup import /备份/mindex --all --data-dir /新路径/data --dry-run
     """
-    from mindex.maintenance.backup import import_backup, inspect_bundle
 
     def run():
         picked = (
             sources
             if verification == Verification.basic and (all_sources or sources)
             else choose(
-                inspect_bundle(directory, verification=verification.value)["sources"], all_sources, sources
+                backup.inspect_bundle(directory, verification=verification.value)["sources"],
+                all_sources,
+                sources,
             )
         )
         config = ctx.obj.model_copy(update={"data_dir": data_dir.resolve()}) if data_dir else ctx.obj
@@ -308,14 +316,14 @@ def recover(
 ):
     """根据持久化迁移日志恢复中断的导入切换。
 
-    停止全部写入，使用原配置与原目标数据路径。未提交操作回滚旧数据与配置；已提交操作清理旧目录。不要先手动删除迁移日志或旧副本。输出恢复结果，不调用模型。
+    停止全部写入，使用原配置与原目标数据路径。未提交操作回滚旧数据与配置；已提交操作清理旧目录。
+    不要先手动删除迁移日志或旧副本。输出恢复结果，不调用模型。
 
     示例：
 
     \b
       mindex --config /路径/config.local.yaml backup recover --data-dir /路径/data --json
     """
-    from mindex.maintenance.backup import recover_import
 
     call(
         structured,

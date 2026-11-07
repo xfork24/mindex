@@ -106,8 +106,9 @@ class LocalMediaStore:
         if target.is_file():
             existing = _file_sha256(target)
             if existing == sha256:  # 幂等：同 key 同内容重复写为 no-op
-                return MediaObject(key=key, size=target.stat().st_size, backend_version=None,
-                                   etag=None, sha256=sha256)
+                return MediaObject(
+                    key=key, size=target.stat().st_size, backend_version=None, etag=None, sha256=sha256
+                )
             raise ValueError(f"不可变键已存在且内容不同：{key}")
         target.parent.mkdir(parents=True, exist_ok=True)
         digest = hashlib.sha256()

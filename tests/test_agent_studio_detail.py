@@ -18,23 +18,23 @@ import re
 import threading
 
 import pytest
-import test_studio_window
-from agent_helpers import new_session, result_text, results, send, wait_idle, wait_pending
-from conftest import FixtureSpeaker
 from fastapi.testclient import TestClient
+
+import test_studio_window
+from agent.llm.scripted import ScriptedLlm, call, say
+from agent.loopback import MindexClient
+from agent.registry import ToolContext, ToolError
+from agent.tools import build_registry
+from agent.tools.studio_detail import SELECTION_PREVIEWS
+from agent_helpers import new_session, result_text, results, send, wait_idle, wait_pending
+from api import create_app
+from conftest import FixtureSpeaker
+from studio import studio
+from studio import workspace as ws
 from test_agent_studio_cancel import call_tool
 from test_studio_columns import request_body
 from test_studio_window import speech
 from test_studio_workspace import setup_workspace, wait_build
-
-from mindex.agent.llm.scripted import ScriptedLlm, call, say
-from mindex.agent.loopback import MindexClient
-from mindex.agent.registry import ToolContext, ToolError
-from mindex.agent.tools import build_registry
-from mindex.agent.tools.studio_detail import SELECTION_PREVIEWS
-from mindex.api import create_app
-from mindex.studio import studio
-from mindex.studio import workspace as ws
 
 pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
 
@@ -61,7 +61,9 @@ def call_as(app, name, arguments, *, session_id=None, steps=("preview", "execute
 def approve(client, sid, name):
     pending = wait_pending(client, sid, "approval")
     assert pending["name"] == name, pending
-    client.post(f"/api/agent/sessions/{sid}/approvals/{pending['requestId']}", json={"outcome": "allowed-once"})
+    client.post(
+        f"/api/agent/sessions/{sid}/approvals/{pending['requestId']}", json={"outcome": "allowed-once"}
+    )
     return pending
 
 
@@ -95,8 +97,10 @@ class Blocking(FixtureSpeaker):
 def start_blocking_build(config, app, jid, pid):
     client = TestClient(app)
     w = ws.load(config, jid)
-    response = client.post(f"/api/studio/jobs/{jid}/plans/{pid}/regenerate-column",
-                           json=request_body(config, jid, w, ws.plan(w, pid), "tts"))
+    response = client.post(
+        f"/api/studio/jobs/{jid}/plans/{pid}/regenerate-column",
+        json=request_body(config, jid, w, ws.plan(w, pid), "tts"),
+    )
     assert response.status_code == 202, response.text
     return client, response.json()["id"]
 
@@ -106,8 +110,16 @@ def add_tts(config, jid, sid="a"):
     w = ws.load(config, jid)
     p = ws.plan(w, w["active_plan"])
     spec = ws.specification(config, jid, w, p, "tts", sid)
-    vid = ws.add_version(config, jid, w, "tts", sid, inputs=spec["inputs"], parameters=spec["parameters"],
-                         signature=spec["signature"])
+    vid = ws.add_version(
+        config,
+        jid,
+        w,
+        "tts",
+        sid,
+        inputs=spec["inputs"],
+        parameters=spec["parameters"],
+        signature=spec["signature"],
+    )
     p["shots"][sid]["tts"] = vid
     ws.persist(config, jid, w)
     return vid
@@ -119,8 +131,10 @@ def test_diagnose_plan_relays_font_and_narration_reasons(config, tmp_path):
     add_tts(config, jid, "a")
     w = ws.load(config, jid)
     plan = ws.plan(w, p["id"])
-    shots = [studio.Shot.model_validate(ws.version(w, plan["shots"][sid]["content"])["data"])
-             for sid in ws.ordered_shots(w, plan)]
+    shots = [
+        studio.Shot.model_validate(ws.version(w, plan["shots"][sid]["content"])["data"])
+        for sid in ws.ordered_shots(w, plan)
+    ]
     shots[0] = shots[0].model_copy(update={"text": "红色的开场。"})
     ws.set_board(config, jid, w, plan, shots)
     plan["options"]["burn"] = True
@@ -141,11 +155,13 @@ def test_diagnose_plan_relays_font_and_narration_reasons(config, tmp_path):
 def test_run_column_rejected_when_narration_changes_after_preview(config):
     """经运行时：确认卡展示之后用户在页面改了旁白，确认执行被服务端拒绝，助手收到“重新预览”提示。"""
     jid, _w, p = setup_workspace(config)
-    llm = ScriptedLlm([
-        [call("load_tools", domains=["studio_detail"])],
-        [call("run_column", job_id=jid, stage="tts")],
-        [say("方案已变化，我重新预览。")],
-    ])
+    llm = ScriptedLlm(
+        [
+            [call("load_tools", domains=["studio_detail"])],
+            [call("run_column", job_id=jid, stage="tts")],
+            [say("方案已变化，我重新预览。")],
+        ]
+    )
     app = create_app(config, speaker=FixtureSpeaker(config), agent_llm=llm)
     with TestClient(app) as client:
         sid = new_session(client)
@@ -154,11 +170,15 @@ def test_run_column_rejected_when_narration_changes_after_preview(config):
         assert pending["name"] == "run_column" and pending["risk"] == "danger" and not pending["allowGrant"]
         w = ws.load(config, jid)
         plan = ws.plan(w, p["id"])
-        shots = [studio.Shot.model_validate(ws.version(w, plan["shots"][s]["content"])["data"])
-                 for s in ws.ordered_shots(w, plan)]
+        shots = [
+            studio.Shot.model_validate(ws.version(w, plan["shots"][s]["content"])["data"])
+            for s in ws.ordered_shots(w, plan)
+        ]
         ws.set_board(config, jid, w, plan, [shots[0].model_copy(update={"text": "红色的开场。"}), shots[1]])
         ws.persist(config, jid, w)
-        client.post(f"/api/agent/sessions/{sid}/approvals/{pending['requestId']}", json={"outcome": "allowed-once"})
+        client.post(
+            f"/api/agent/sessions/{sid}/approvals/{pending['requestId']}", json={"outcome": "allowed-once"}
+        )
         events = wait_idle(client, sid)
         builds = client.get(f"/api/studio/jobs/{jid}/workspace").json()["builds"]
     name, result = named_results(events)[-1]
@@ -219,30 +239,41 @@ def test_window_and_range_selection_via_runtime(selection_job):
     speech(config, jid, w, p, "b")
     ws.persist(config, jid, w)
     source = store.one("SELECT id FROM sources")["id"]
-    llm = ScriptedLlm([
-        [call("load_tools", domains=["studio_detail"])],
-        [call("get_selection_candidates", job_id=jid, shot="#1")],
-        [call("preview_selection", job_id=jid, shot="#1", candidate="#2")],
-        lambda request: [call("confirm_selection", preview_token=last_token(request))],
-        [call("preview_selection", job_id=jid, shot="#2", source_id=source, start=3, end=5)],
-        lambda request: [call("confirm_selection", preview_token=last_token(request))],
-        [say("两个分镜的选片都已确认。")],
-    ])
+    llm = ScriptedLlm(
+        [
+            [call("load_tools", domains=["studio_detail"])],
+            [call("get_selection_candidates", job_id=jid, shot="#1")],
+            [call("preview_selection", job_id=jid, shot="#1", candidate="#2")],
+            lambda request: [call("confirm_selection", preview_token=last_token(request))],
+            [call("preview_selection", job_id=jid, shot="#2", source_id=source, start=3, end=5)],
+            lambda request: [call("confirm_selection", preview_token=last_token(request))],
+            [say("两个分镜的选片都已确认。")],
+        ]
+    )
     app = create_app(config, agent_llm=llm)
     with TestClient(app) as client:
         sid = new_session(client)
         send(client, sid, "第一镜换成第二个候选，第二镜用 3 到 5 秒", context=page(jid))
         first = approve(client, sid, "confirm_selection")
         assert first["risk"] == "write" and first["allowGrant"]
-        assert "人工选片" in first["preview"]["summary"] and "定长窗口" in first["preview"]["changes"][0]["after"]
+        assert (
+            "人工选片" in first["preview"]["summary"]
+            and "定长窗口" in first["preview"]["changes"][0]["after"]
+        )
         assert {"label": "参考候选", "after": "shot-1"} in first["preview"]["changes"]
         second = approve(client, sid, "confirm_selection")
         assert "任意区间" in second["preview"]["changes"][0]["after"]
         events = wait_idle(client, sid)
 
     named = named_results(events)
-    assert [n for n, _ in named] == ["load_tools", "get_selection_candidates", "preview_selection",
-                                     "confirm_selection", "preview_selection", "confirm_selection"]
+    assert [n for n, _ in named] == [
+        "load_tools",
+        "get_selection_candidates",
+        "preview_selection",
+        "confirm_selection",
+        "preview_selection",
+        "confirm_selection",
+    ]
     assert not any(r["message"].get("isError") for _, r in named), [result_text(r) for _, r in named]
     # preview_selection 是 read：直接执行，没有确认卡；只有两次 confirm_selection 弹出确认。
     asked = [e["data"]["name"] for e in events if e["type"] == "plugin:mindex/approval-asked"]
@@ -274,8 +305,13 @@ def test_window_confirm_rejected_after_revision_change(selection_job):
     speech(config, jid, w, p)
     ws.persist(config, jid, w)
     app = create_app(config)
-    [preview] = call_as(app, "preview_selection", {"job_id": jid, "shot": "a", "candidate": "#3"},
-                        session_id="s-rev", steps=("execute",))
+    [preview] = call_as(
+        app,
+        "preview_selection",
+        {"job_id": jid, "shot": "a", "candidate": "#3"},
+        session_id="s-rev",
+        steps=("execute",),
+    )
     token = preview.value["preview_token"]
     before = ws.plan(ws.load(config, jid), p["id"])["shots"]["a"].get("select")
 
@@ -299,9 +335,13 @@ def test_preview_scope_and_lost_cache_require_new_preview(selection_job):
     ws.persist(config, jid, w)
     app = create_app(config)
     source = store.one("SELECT id FROM sources")["id"]
-    [preview] = call_as(app, "preview_selection",
-                        {"job_id": jid, "shot": "a", "source_id": source, "start": 2, "end": 4},
-                        session_id="s-one", steps=("execute",))
+    [preview] = call_as(
+        app,
+        "preview_selection",
+        {"job_id": jid, "shot": "a", "source_id": source, "start": 2, "end": 4},
+        session_id="s-one",
+        steps=("execute",),
+    )
     token = preview.value["preview_token"]
 
     # 其他会话（以及 MCP 作用域）不能确认这个预览。
@@ -310,7 +350,9 @@ def test_preview_scope_and_lost_cache_require_new_preview(selection_job):
             call_as(app, "confirm_selection", {"preview_token": token}, session_id=scope, steps=("preview",))
         assert exc.value.code == "preview_stale"
     # 本会话可以（只做预览校验，不执行）。
-    [confirm] = call_as(app, "confirm_selection", {"preview_token": token}, session_id="s-one", steps=("preview",))
+    [confirm] = call_as(
+        app, "confirm_selection", {"preview_token": token}, session_id="s-one", steps=("preview",)
+    )
     assert confirm.value["preview_token"] == token
 
     # 服务重启 / 缓存过期：进程内缓存丢失后提示重新预览。
@@ -320,15 +362,24 @@ def test_preview_scope_and_lost_cache_require_new_preview(selection_job):
     assert exc.value.code == "preview_stale"
 
     # TTL 过期同样按缓存丢失处理。
-    [preview] = call_as(app, "preview_selection",
-                        {"job_id": jid, "shot": "a", "source_id": source, "start": 2, "end": 4},
-                        session_id="s-one", steps=("execute",))
+    [preview] = call_as(
+        app,
+        "preview_selection",
+        {"job_id": jid, "shot": "a", "source_id": source, "start": 2, "end": 4},
+        session_id="s-one",
+        steps=("execute",),
+    )
     ttl = SELECTION_PREVIEWS.ttl
     SELECTION_PREVIEWS.ttl = -1
     try:
         with pytest.raises(ToolError, match="已过期") as exc:
-            call_as(app, "confirm_selection", {"preview_token": preview.value["preview_token"]},
-                    session_id="s-one", steps=("preview",))
+            call_as(
+                app,
+                "confirm_selection",
+                {"preview_token": preview.value["preview_token"]},
+                session_id="s-one",
+                steps=("preview",),
+            )
     finally:
         SELECTION_PREVIEWS.ttl = ttl
     assert exc.value.code == "preview_stale"
@@ -341,14 +392,24 @@ def test_confirm_requires_speech(selection_job):
     speech(config, jid, w, p)
     ws.persist(config, jid, w)
     app = create_app(config)
-    [preview] = call_as(app, "preview_selection", {"job_id": jid, "shot": "#1", "candidate": "#1"},
-                        session_id="s-tts", steps=("execute",))
+    [preview] = call_as(
+        app,
+        "preview_selection",
+        {"job_id": jid, "shot": "#1", "candidate": "#1"},
+        session_id="s-tts",
+        steps=("execute",),
+    )
     fresh = ws.load(config, jid)
     ws.plan(fresh, p["id"])["shots"]["a"].pop("tts")
     ws.persist(config, jid, fresh)
     with pytest.raises(ToolError, match="尚无成功的配音.*run_column stage=tts") as exc:
-        call_as(app, "confirm_selection", {"preview_token": preview.value["preview_token"]},
-                session_id="s-tts", steps=("preview",))
+        call_as(
+            app,
+            "confirm_selection",
+            {"preview_token": preview.value["preview_token"]},
+            session_id="s-tts",
+            steps=("preview",),
+        )
     assert exc.value.code == "tts_missing"
     [listing] = call_tool(app, "get_selection_candidates", {"job_id": jid, "shot": "a"}, steps=("execute",))
     assert listing.value["ready"] is False and listing.value["tts"] is None
@@ -361,8 +422,13 @@ def test_selection_tools_rejected_while_build_running(selection_job):
     ws.persist(config, jid, w)
     speaker = Blocking(config)
     app = create_app(config, speaker=speaker)
-    [preview] = call_as(app, "preview_selection", {"job_id": jid, "shot": "a", "candidate": "#2"},
-                        session_id="s-busy", steps=("execute",))
+    [preview] = call_as(
+        app,
+        "preview_selection",
+        {"job_id": jid, "shot": "a", "candidate": "#2"},
+        session_id="s-busy",
+        steps=("execute",),
+    )
     client, bid = start_blocking_build(config, app, jid, p["id"])
     try:
         assert speaker.entered.wait(10)

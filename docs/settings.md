@@ -6,7 +6,7 @@
 
 文案创作档案在升级后第一次启动时自动从当前激活的“文本拆分镜”档案复制（含厂商与密钥）并激活，只做一次；之后可单独修改或删除，不会被再次覆盖。没有激活的拆分镜档案时，`studio.writer` 在 yaml 里省略即复制 `studio.generator`。
 
-相关模块：`settings/runtime_settings.py`（档案/覆盖层/预设）、`settings/settings_api.py`（API）、`settings/voice_clone.py`（厂商克隆客户端）、`frontend/src/settings/settings.*`（页面）。
+相关模块：`settings/runtime_settings.py`（档案/覆盖层/预设）、`settings/api.py`（API）、`settings/voice_clone.py`（厂商克隆客户端）、`frontend/src/settings/settings.*`（页面）。
 
 ## 十二个模型角色
 

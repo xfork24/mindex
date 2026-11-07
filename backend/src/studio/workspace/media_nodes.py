@@ -9,44 +9,49 @@ import math
 import wave
 from fractions import Fraction
 
-from mindex.shared.media import atomic_media, probe
-from mindex.shared.shot_media import ShotMedia
-from mindex.shared.storage import Store
-from mindex.shared.work_budget import configured
-from mindex.studio import studio, studio_select, studio_steps
-
-from . import transitions
-from .plans import canvas_render, needs_recall
-from .sources import content_source, plan_source, source_file, video_file
-from .versions import file_info, file_path, version
+from admin.curation import Library
+from shared.media import MediaError, atomic_media, probe
+from shared.shot_media import ShotMedia
+from shared.storage import Store
+from shared.work_budget import configured
+from studio import animation_capture, studio
+from studio import render as studio_render
+from studio import select as studio_select
+from studio import steps as studio_steps
+from studio import window as studio_window
+from studio.render import apply_edges, extract_ambient, process_shot_audio, still_shot
+from studio.workspace import transitions
+from studio.workspace.plans import canvas_render, needs_recall
+from studio.workspace.sources import content_source, plan_source, source_file, video_file
+from studio.workspace.versions import file_info, file_path, version
 
 log = logging.getLogger(__name__)
 
 
 def source_shots(config, source_id, *, overlays=None, store=None):
     """源内全部镜头及可见性；overlays 可由调用方预先取好，避免逐镜头全表扫描。"""
-    from mindex.admin.curation import Library
 
     store = store if store is not None else Store.open(config)
     if overlays is None:
         overlays = Library(store).overlays()
     # 可见性一次性预查后逐行内存比对，避免每个镜头一次区间查询。
     source_hidden = bool(overlays[0].get(source_id, {}).get("hidden"))
-    rows = store.rows("SELECT id,source_id,parent_id,kind,start,end FROM segments WHERE source_id=? ORDER BY start",
-                      (source_id,))
+    rows = store.rows(
+        "SELECT id,source_id,parent_id,kind,start,end FROM segments WHERE source_id=? ORDER BY start",
+        (source_id,),
+    )
     hidden = studio_steps.hidden_intervals(store, source_id, overlays=overlays, rows=rows)
     return [
         {
             **{key: row[key] for key in ("id", "source_id", "start", "end")},
-            "visible": not source_hidden
-            and studio_steps.range_visible(hidden, row["start"], row["end"]),
+            "visible": not source_hidden and studio_steps.range_visible(hidden, row["start"], row["end"]),
         }
-        for row in rows if row["kind"] == "shot"
+        for row in rows
+        if row["kind"] == "shot"
     ]
 
 
 def validate_range(config, selected_range, *, overlays=None):
-    from mindex.admin.curation import Library
 
     source_id = selected_range["source_id"]
     start, end = selected_range["start"], selected_range["end"]
@@ -80,7 +85,6 @@ def validate_range(config, selected_range, *, overlays=None):
 
 
 def alignment(config, job_id, w, p, sid, selected_range=None):
-    from mindex.studio import studio_window
 
     if error := studio_window.anchor_conflict(w, p, sid):
         raise studio.StudioError(error)
@@ -90,8 +94,16 @@ def alignment(config, job_id, w, p, sid, selected_range=None):
         ctx = studio_window.context(config, job_id, w, p, sid)
         if ctx["ready"]:
             default, _ = studio_window.selected_range(
-                config, job_id, w, p, sid, ctx["context_token"], ctx["initial_start"],
-                ref=ctx["anchor_ref"], tts_version=ctx["tts_version"], _context=ctx,
+                config,
+                job_id,
+                w,
+                p,
+                sid,
+                ctx["context_token"],
+                ctx["initial_start"],
+                ref=ctx["anchor_ref"],
+                tts_version=ctx["tts_version"],
+                _context=ctx,
             )
             data = studio_window.alignment(config, job_id, w, p, sid, default, _context=ctx)
             data["manual"] = False
@@ -186,7 +198,8 @@ def alignment(config, job_id, w, p, sid, selected_range=None):
         "anchor": anchor,
         "anchor_ref": (
             {"recall_version": selected.get("recall"), "candidate_id": studio_window.candidate_id(anchor)}
-            if needs_recall(p, sid) else None
+            if needs_recall(p, sid)
+            else None
         ),
         "extension": {"before": max(0, anchor["start"] - start), "after": max(0, end - anchor["end"])},
         "actual_range": {"source_id": anchor["source_id"], "start": start, "end": actual_end},
@@ -204,8 +217,18 @@ def clip_alignment(config, job_id, w, p, sid):
     shot = version(w, p["shots"][sid]["content"])["data"]
     source = content_source(shot)
     path = source_file(config, job_id, source)
-    data = _file_alignment(config, job_id, w, p, sid, path, {"input": path.name}, float(source.get("start") or 0),
-                           "片段", "请调整起点、换用更长的片段或变速")
+    data = _file_alignment(
+        config,
+        job_id,
+        w,
+        p,
+        sid,
+        path,
+        {"input": path.name},
+        float(source.get("start") or 0),
+        "片段",
+        "请调整起点、换用更长的片段或变速",
+    )
     data["clip"] = {"media_id": source["media_id"], **data.pop("window")}
     return data
 
@@ -217,8 +240,18 @@ def generated_alignment(config, job_id, w, p, sid):
     if not generated or generated["status"] != "complete":
         raise studio.StudioError("缺少成功的生成画面，请先执行生成画面")
     path = file_path(config, job_id, generated, "generated")
-    data = _file_alignment(config, job_id, w, p, sid, path, {"version": vid, "file": "generated"}, 0.0,
-                           "生成画面", "请改用更长的允许时长或变速")
+    data = _file_alignment(
+        config,
+        job_id,
+        w,
+        p,
+        sid,
+        path,
+        {"version": vid, "file": "generated"},
+        0.0,
+        "生成画面",
+        "请改用更长的允许时长或变速",
+    )
     data["generated"] = {"version": vid, **data.pop("window")}
     return data
 
@@ -230,15 +263,24 @@ def tool_alignment(config, job_id, w, p, sid):
     if not made or made["status"] != "complete":
         raise studio.StudioError("缺少成功的第三方工具产物，请先执行调用第三方工具")
     path = file_path(config, job_id, made, "artifact")
-    data = _file_alignment(config, job_id, w, p, sid, path, {"version": vid, "file": "artifact"}, 0.0,
-                           "工具产物", "请让工具生成更长的视频或调整变速")
+    data = _file_alignment(
+        config,
+        job_id,
+        w,
+        p,
+        sid,
+        path,
+        {"version": vid, "file": "artifact"},
+        0.0,
+        "工具产物",
+        "请让工具生成更长的视频或调整变速",
+    )
     data["tool"] = {"version": vid, **data.pop("window")}
     return data
 
 
 def _file_alignment(config, job_id, w, p, sid, path, ref, start, noun, advice):
     """文件区间选片的公共部分：从 ``start`` 起取与配音等长的窗口（start/end 为文件内时间）。"""
-    from mindex.shared.media import MediaError
 
     selected = p["shots"][sid]
     speech = version(w, selected.get("tts"))
@@ -261,10 +303,10 @@ def _file_alignment(config, job_id, w, p, sid, path, ref, start, noun, advice):
     pad = render_duration - (end - start)
     if p["options"]["alignment"] == "strict" and pad > frame:
         raise studio.StudioError(f"严格对齐要求{noun}从起点起覆盖配音时长，{advice}")
-    label = "padded" if pad > frame else ("trimmed" if length - start > render_duration + frame else "nearest")
-    warning = (
-        f"分镜 {sid} 的{noun}从起点起比配音短 {pad:.2f} 秒，成片将冻结末帧补足" if pad > frame else None
+    label = (
+        "padded" if pad > frame else ("trimmed" if length - start > render_duration + frame else "nearest")
     )
+    warning = f"分镜 {sid} 的{noun}从起点起比配音短 {pad:.2f} 秒，成片将冻结末帧补足" if pad > frame else None
     event = studio.TimelineEvent(
         shot_id=sid,
         order=1,
@@ -307,7 +349,8 @@ def shot_frames(config, processed):
 
 def html_layers(config, job_id, w, p, sid) -> list[dict]:
     """分镜的 HTML 文字层：叠加层源码与相对镜头的起止（None = 从头 / 到尾）；没有时为空。"""
-    from .stages import html_overlays
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+    from studio.workspace.stages import html_overlays
 
     content = version(w, p["shots"][sid]["content"])["data"]
     found = html_overlays(content)
@@ -316,16 +359,22 @@ def html_layers(config, job_id, w, p, sid) -> list[dict]:
     made = w["versions"].get(p["shots"][sid].get("overlay"))
     if not made or made["status"] != "complete":
         raise studio.StudioError("缺少成功的叠加层源码，请先执行生成叠加层")
-    return [{"index": index, "start": layer.get("start"), "end": layer.get("end"),
-             "html": file_path(config, job_id, made, f"overlay-{index}").read_text(encoding="utf-8")}
-            for index, layer in found]
+    return [
+        {
+            "index": index,
+            "start": layer.get("start"),
+            "end": layer.get("end"),
+            "html": file_path(config, job_id, made, f"overlay-{index}").read_text(encoding="utf-8"),
+        }
+        for index, layer in found
+    ]
 
 
 def composite_overlays(config, p, layers, source, output, frames, directory, capture=None) -> dict:
     """透明录制每个 HTML 文字层（时长 = 该层时间窗），按起点叠加到分镜画面上；帧数不变。"""
-    from mindex.studio import animation_capture
 
-    from .handlers.overlay import layer_window
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+    from studio.workspace.handlers.overlay import layer_window
 
     render, _ = canvas_render(config, p)
     fps = Fraction(str(render.fps))
@@ -336,33 +385,80 @@ def composite_overlays(config, p, layers, source, output, frames, directory, cap
         start, end = layer_window(layer, seconds)
         count = max(1, round((end - start) * float(fps)))
         target = directory / f"overlay-{layer['index']}.mov"
-        stats.append(recorder(layer["html"], seconds=count / float(fps), width=render.width, height=render.height,
-                              fps=render.fps, target=target, max_seconds=config.studio.animator.max_capture_seconds,
-                              frames=count, transparent=True) or {})
+        stats.append(
+            recorder(
+                layer["html"],
+                seconds=count / float(fps),
+                width=render.width,
+                height=render.height,
+                fps=render.fps,
+                target=target,
+                max_seconds=config.studio.animator.max_capture_seconds,
+                frames=count,
+                transparent=True,
+            )
+            or {}
+        )
         args += ["-i", str(target)]
         graph.append(f"[{position}:v]format=rgba,setpts=PTS-STARTPTS+{start:.6f}/TB[l{position}]")
         graph.append(f"[{current}][l{position}]overlay=0:0:eof_action=pass:format=auto[v{position}]")
         current = f"v{position}"
     graph.append(f"[{current}]format=yuv420p[out]")
-    atomic_media([*args, "-filter_complex", ";".join(graph), "-map", "[out]", "-an", "-frames:v", str(frames),
-                  "-c:v", "libx264", "-preset", render.preset, "-crf", str(render.crf), "-pix_fmt", "yuv420p",
-                  "-movflags", "+faststart"], output, timeout=max(600, seconds * 10))
+    atomic_media(
+        [
+            *args,
+            "-filter_complex",
+            ";".join(graph),
+            "-map",
+            "[out]",
+            "-an",
+            "-frames:v",
+            str(frames),
+            "-c:v",
+            "libx264",
+            "-preset",
+            render.preset,
+            "-crf",
+            str(render.crf),
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "+faststart",
+        ],
+        output,
+        timeout=max(600, seconds * 10),
+    )
     for layer in layers:
         (directory / f"overlay-{layer['index']}.mov").unlink(missing_ok=True)
     return {"layers": len(layers), "frames": [item.get("frames") for item in stats]}
 
 
-def finish_render(config, job_id, p, directory, speech, event, ambient, picture, absolute_event=None, *,
-                  transition=None, overlays=None, capture=None, handle_seconds=None):
+def finish_render(
+    config,
+    job_id,
+    p,
+    directory,
+    speech,
+    event,
+    ambient,
+    picture,
+    absolute_event=None,
+    *,
+    transition=None,
+    overlays=None,
+    capture=None,
+    handle_seconds=None,
+):
     """公共收尾：处理配音（可叠加原声）→ 按采样数定帧 → 生成画面（含转场余量）→ 镜内转场 → 合成带声预览。
 
     ``transition`` 为 ``transitions.effective`` 的结果：``next`` 让画面多出尾部余量帧（``handle_frames``，
     供成片重叠转场消耗），``enter``/``leave`` 在画面上叠加镜内转场；``overlays`` 为 ``html_layers`` 的结果，
     透明录制后叠加在画面上（先于镜内转场，文字随画面一起淡入淡出）。都没有时产物与旧版完全相同。
-    ``handle_seconds`` 为尾部余量（重叠转场与节拍对齐取较大值，见 ``render_handle``）；None 时按 ``next`` 时长。"""
-    from mindex.studio.studio_render import apply_edges, process_shot_audio
+    ``handle_seconds`` 为尾部余量（重叠转场与节拍对齐取较大值，见 ``render_handle``）；
+    None 时按 ``next`` 时长。"""
 
-    from .transitions import clamp_edges
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+    from studio.workspace.transitions import clamp_edges
 
     transition = transition or {}
     cfg = config.studio.audio.model_copy(update={"duck_gain": p["options"]["duck_gain"]})
@@ -381,11 +477,13 @@ def finish_render(config, job_id, p, directory, speech, event, ambient, picture,
     for step in steps:
         target = clip if step == steps[-1] else directory / f"video-{step}.mp4"
         if step == "overlay":
-            overlay_stats = composite_overlays(config, p, overlays, current, target, frames + handle, directory,
-                                               capture)
+            overlay_stats = composite_overlays(
+                config, p, overlays, current, target, frames + handle, directory, capture
+            )
         else:
-            apply_edges(current, target, canvas_render(config, p)[0], frames=frames + handle, enter=enter,
-                        leave=leave)
+            apply_edges(
+                current, target, canvas_render(config, p)[0], frames=frames + handle, enter=enter, leave=leave
+            )
         if current != clip:
             current.unlink(missing_ok=True)
         current = target
@@ -427,7 +525,8 @@ def finish_render(config, job_id, p, directory, speech, event, ambient, picture,
 
 def render_handle(w, p, sid) -> float:
     """分镜画面的尾部余量（秒）：重叠转场时长与节拍对齐容差取较大值；都没有时为 0。"""
-    from . import beat_align
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+    from studio.workspace import beat_align
 
     return max(transitions.handle_seconds(w, p, sid), beat_align.handle_seconds(w, p, sid))
 
@@ -463,7 +562,6 @@ def still_event(config, w, p, sid, ref):
 
 
 def image_render(config, job_id, w, p, sid, directory, source, capture=None):
-    from mindex.studio.studio_render import still_shot
 
     speech = version(w, p["shots"][sid]["tts"])
     if speech["status"] != "complete":
@@ -489,23 +587,36 @@ def image_render(config, job_id, w, p, sid, directory, source, capture=None):
 
     def picture(frames, output):
         still_shot(
-            path, render, output, frames=frames, motion=source.get("motion", "zoom-in"),
-            strength=source.get("strength", 0.3), fit=fit,
+            path,
+            render,
+            output,
+            frames=frames,
+            motion=source.get("motion", "zoom-in"),
+            strength=source.get("strength", 0.3),
+            fit=fit,
         )
 
     # 图片没有原声：ducking 方案下同样只有配音。
-    return finish_render(config, job_id, p, directory, speech, event, None, picture,
-                         transition=transitions.effective(w, p, sid),
-                         overlays=html_layers(config, job_id, w, p, sid), capture=capture,
-                         handle_seconds=render_handle(w, p, sid))
+    return finish_render(
+        config,
+        job_id,
+        p,
+        directory,
+        speech,
+        event,
+        None,
+        picture,
+        transition=transitions.effective(w, p, sid),
+        overlays=html_layers(config, job_id, w, p, sid),
+        capture=capture,
+        handle_seconds=render_handle(w, p, sid),
+    )
 
 
 def animation_render(config, job_id, w, p, sid, directory, capture=None):
     """AI 动画：在沙箱里按渲染帧数逐帧录制动画源码（animation.mp4），再按画幅规范化为 video.mp4。
 
     ``capture`` 缺省为 ``studio.animation_capture.capture``（测试可注入确定性替身）；动画没有原声。"""
-    from mindex.studio import animation_capture
-    from mindex.studio.studio_render import cut_shot
 
     selected = p["shots"][sid]
     speech = version(w, selected.get("tts"))
@@ -523,31 +634,54 @@ def animation_render(config, job_id, w, p, sid, directory, capture=None):
 
     def picture(frames, output):
         recorder = capture or animation_capture.capture
-        stats.update(recorder(
-            html, seconds=float(frames / fps), width=render.width, height=render.height, fps=render.fps,
-            target=raw, max_seconds=config.studio.animator.max_capture_seconds, frames=frames,
-        ) or {})
+        stats.update(
+            recorder(
+                html,
+                seconds=float(frames / fps),
+                width=render.width,
+                height=render.height,
+                fps=render.fps,
+                target=raw,
+                max_seconds=config.studio.animator.max_capture_seconds,
+                frames=frames,
+            )
+            or {}
+        )
         window = event.model_copy(deep=True)
         window.video.start, window.video.end = 0.0, float(frames / fps)
-        cut_shot(raw, window, render, output, frames=frames, fit=fit)
+        studio_render.cut_shot(raw, window, render, output, frames=frames, fit=fit)
 
-    data, files = finish_render(config, job_id, p, directory, speech, event, None, picture,
-                                transition=transitions.effective(w, p, sid),
-                                overlays=html_layers(config, job_id, w, p, sid), capture=capture,
-                                handle_seconds=render_handle(w, p, sid))
+    data, files = finish_render(
+        config,
+        job_id,
+        p,
+        directory,
+        speech,
+        event,
+        None,
+        picture,
+        transition=transitions.effective(w, p, sid),
+        overlays=html_layers(config, job_id, w, p, sid),
+        capture=capture,
+        handle_seconds=render_handle(w, p, sid),
+    )
     files["animation"] = file_info(config, job_id, raw)
-    data["capture"] = {"frames": stats.get("frames"), "blocked_requests": len(stats.get("blocked_requests") or []),
-                       "wall_seconds": stats.get("wall_seconds")}
+    data["capture"] = {
+        "frames": stats.get("frames"),
+        "blocked_requests": len(stats.get("blocked_requests") or []),
+        "wall_seconds": stats.get("wall_seconds"),
+    }
     return data, files
 
 
 @configured
 def render_node(config, job_id, w, p, sid, directory, *, capture=None):
-    from mindex.studio.studio_render import cut_shot, extract_ambient
 
     source = plan_source(w, p, sid)
-    if source and (source["kind"] in ("image", "aigc_image")
-                   or (source["kind"] == "tool" and source.get("output") == "image")):
+    if source and (
+        source["kind"] in ("image", "aigc_image")
+        or (source["kind"] == "tool" and source.get("output") == "image")
+    ):
         return image_render(config, job_id, w, p, sid, directory, source, capture)
     if source and source["kind"] == "animation":
         return animation_render(config, job_id, w, p, sid, directory, capture)
@@ -581,7 +715,8 @@ def render_node(config, job_id, w, p, sid, directory, *, capture=None):
         if extra:
             try:  # 余量越过素材末尾时取不到，退回冻结末帧补足
                 picture_media = ShotMedia(store).materialize(
-                    event.video.source_id, event.video.start, event.video.end + extra)
+                    event.video.source_id, event.video.start, event.video.end + extra
+                )
                 window.video.end = event.video.end + extra
             except Exception as exc:  # noqa: BLE001 — 任何越界都按冻结末帧处理
                 log.debug("选片余量延长失败，按冻结末帧处理：%s", exc)
@@ -594,14 +729,30 @@ def render_node(config, job_id, w, p, sid, directory, *, capture=None):
         if ducking and probe(media)["audio"]:
             ambient = directory / "ambient.wav"
             raw_ambient = directory / "shot-audio.wav"
-            ShotMedia(store).audio(absolute_event.video.source_id, raw_ambient, absolute_event.video.start,
-                                   absolute_event.video.end - absolute_event.video.start)
+            ShotMedia(store).audio(
+                absolute_event.video.source_id,
+                raw_ambient,
+                absolute_event.video.start,
+                absolute_event.video.end - absolute_event.video.start,
+            )
             extract_ambient(raw_ambient, event, cfg, ambient)
     render, fit = canvas_render(config, p)
 
     def picture(frames, output):
-        cut_shot(picture_media, window, render, output, frames=frames, fit=fit)
+        studio_render.cut_shot(picture_media, window, render, output, frames=frames, fit=fit)
 
-    return finish_render(config, job_id, p, directory, speech, event, ambient, picture, absolute_event,
-                         transition=transition, overlays=html_layers(config, job_id, w, p, sid), capture=capture,
-                         handle_seconds=extra)
+    return finish_render(
+        config,
+        job_id,
+        p,
+        directory,
+        speech,
+        event,
+        ambient,
+        picture,
+        absolute_event,
+        transition=transition,
+        overlays=html_layers(config, job_id, w, p, sid),
+        capture=capture,
+        handle_seconds=extra,
+    )

@@ -1,0 +1,442 @@
+"""REST API 装配:create_app 组装全部路由、静态资源与服务运行时状态。"""
+
+from __future__ import annotations
+
+import contextlib
+import json
+import os
+import time
+from contextlib import nullcontext
+from functools import cache
+from importlib.metadata import PackageNotFoundError, version
+from urllib.parse import urlencode
+
+from fastapi import APIRouter as _APIRouter
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse as _JSON
+from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
+
+from admin.admin import admin_router
+from admin.curation import EntityNotFound
+from admin.dialogue_tasks import dialogue_router
+from admin.groups import groups_router
+from admin.indexes import index_tasks_router, indexes_router
+from admin.source_tasks import source_tasks_router
+from agent.api import agent_router, build_runtime
+from agent.changes import KINDS
+from agent.loopback import ensure_internal_token
+from agent.outbox_bridge import OutboxBridge
+from models.adapters import (
+    Animator,
+    ModelError,
+    MultimodalEmbedder,
+    Speaker,
+    Storyboarder,
+    VideoGenerator,
+    Writer,
+)
+from persons import profiling
+from persons.person_api import person_router
+from search.api import search_router
+from server.gateway import forward
+from settings.api import settings_router
+from settings.runtime_settings import RuntimeConfig
+from shared.admission import validate_serving
+from shared.backends import open_context
+from shared.backends.context import resource_scope
+from shared.backends.staging import StagingFull
+from shared.background_tasks import busy_categories
+from shared.config import Config, load_config
+from shared.db.agent_outbox import publish
+from shared.db.locks_pg import LeaseLost
+from shared.db.maintenance_gate import MaintenanceBusy
+from shared.i18n import add_message_metadata
+from shared.metrics import metrics_snapshot
+from shared.migration_state import writable
+from shared.object_coordination import ObjectDeleting
+from shared.query_budget import QueryBudgetExceeded, deadline
+from shared.readiness import readiness
+from shared.shot_media import file_response as FileResponse
+from shared.web_assets import frontend_root
+from shared.web_auth import install_web_auth
+from shared.work_budget import scope
+from studio.api import studio_router
+from studio.executor import busy_executors
+from studio.revisions import install as install_studio_revisions
+from studio.workspace.versions import RevisionConflict as _RevisionConflict
+from topics.api import topics_router
+from topics.scheduler import install as install_topic_scheduler
+
+
+@cache
+def app_version() -> str:
+    """已安装包的版本号（与 pyproject 一致；桌面外壳据此确认连到的是同版本后端）。"""
+
+    try:
+        return version("mindex")
+    except PackageNotFoundError:  # pragma: no cover - 只在未安装的源码树中出现
+        return "0+unknown"
+
+
+def _with_bridge(previous, bridge):
+    """包装 lifespan：应用关闭时停止 outbox 轮询线程。"""
+
+    @contextlib.asynccontextmanager
+    async def lifespan(application):
+        try:
+            bridge.start()
+            async with previous(application) as state:
+                yield state
+        finally:
+            bridge.stop()
+
+    return lifespan
+
+
+@resource_scope(close_on_success=False)
+def create_app(
+    config: Config | None = None,
+    embedder: MultimodalEmbedder | None = None,
+    *,
+    index_id: str | None = None,
+    storyboarder: Storyboarder | None = None,
+    speaker: Speaker | None = None,
+    writer: Writer | None = None,
+    video_generator: VideoGenerator | None = None,
+    animator: Animator | None = None,
+    animation_capture=None,
+    image_generator=None,
+    music_generator=None,
+    web_token: str | None = None,
+    agent_llm=None,
+    topic_llm=None,
+    scheduler: bool = False,
+) -> FastAPI:
+    """``topic_llm`` 供测试注入选题挖掘的脚本化模型；``scheduler`` 为真时随应用启停每日选题调度器
+    （``mindex serve`` 按 ``topics.scheduler.enabled`` 传入，测试与内嵌应用缺省关闭）。"""
+    config = config or load_config()
+    # 运行后端（db/media/locks/vectors/queue）经 BackendContext 构造：阶段 0 恒为
+    # local 形态，store 即 metadata.sqlite3 的 Store；集群形态（阶段 1 起）由此切换。
+    backends = open_context(config)
+
+    validate_serving(backends)
+    store = backends.store
+    runtime = RuntimeConfig(config, store)  # 设置页保存后经覆盖层热生效，无需重启
+    app = FastAPI(title="Mindex 视频素材检索", version="0.1.0")
+
+    install_studio_revisions(app, config, store)
+
+    ensure_internal_token(app)  # 智能助手回环请求的进程内凭证，须在认证中间件生效前就绪
+
+    @app.middleware("http")
+    async def request_work_budget(request, call_next):
+
+        if (
+            request.url.path.startswith("/api/")
+            and not request.url.path.startswith("/api/search/")
+            and request.method not in {"GET", "HEAD", "OPTIONS"}
+        ):
+            try:
+                await run_in_threadpool(writable, store)
+            except MaintenanceBusy as exc:
+                return JSONResponse({"detail": str(exc)}, status_code=409)
+        with (
+            scope(store),
+            deadline(config.search.query_timeout_seconds, check_exit=False)
+            if store.pg and request.url.path.startswith("/api/search/")
+            else nullcontext(),
+        ):
+            return await call_next(request)
+
+    @app.middleware("http")
+    async def localized_messages(request, call_next):
+        # Additive metadata on JSON API responses; HTTP status and diagnostics stay intact.
+        response = await call_next(request)
+        if not request.url.path.startswith("/api/") or "application/json" not in response.headers.get(
+            "content-type", ""
+        ):
+            return response
+
+        rewrite_started = time.perf_counter()
+        payload = b"".join([chunk async for chunk in response.body_iterator])
+        try:
+            # 延迟导入：保持异常捕获范围，依赖加载失败时仍走原有降级路径。
+            from shared.analysis_translations import display_metadata
+
+            data = display_metadata(
+                add_message_metadata(json.loads(payload)), store.root, namespace=store.cache_identity
+            )
+        except (ValueError, UnicodeDecodeError):
+            # 延迟导入：保留可选依赖探测或异常捕获时的降级行为。
+            from starlette.responses import Response
+
+            return Response(payload, status_code=response.status_code, headers=dict(response.headers))
+        headers = {key: value for key, value in response.headers.items() if key != "content-length"}
+        result = JSONResponse(
+            data, status_code=response.status_code, headers=headers, background=response.background
+        )
+        if profiling.enabled() and request.url.path.startswith("/api/persons/"):
+            # 仅在人物库性能分析开关打开时追加：中间件整包解析并重写 JSON 的耗时与体积。
+            timing = (
+                f"middleware;dur={(time.perf_counter() - rewrite_started) * 1000:.2f}"
+                f';desc="bytes={len(payload)}"'
+            )
+            existing = result.headers.get("server-timing")
+            result.headers["Server-Timing"] = f"{existing}, {timing}" if existing else timing
+        return result
+
+    if index_id and store.index_version(index_id)["status"] != "ready":
+        raise ValueError("固定预览只允许就绪索引")
+
+    app.include_router(person_router(runtime, store))
+    app.include_router(dialogue_router(runtime, store, embedder))
+    app.include_router(source_tasks_router(runtime, store, embedder))
+    app.include_router(indexes_router(runtime, store, embedder))
+    app.include_router(index_tasks_router(runtime, store, embedder))
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+    from api.uploads import install_reaper, upload_router
+
+    app.include_router(upload_router(store, runtime))
+    install_reaper(app, store, runtime)
+    app.include_router(groups_router(store))
+    app.include_router(admin_router(store, runtime, backends=backends))
+    app.include_router(settings_router(runtime, store))
+    app.include_router(
+        studio_router(
+            runtime,
+            store,
+            embedder=embedder,
+            storyboarder=storyboarder,
+            speaker=speaker,
+            writer=writer,
+            video_generator=video_generator,
+            animator=animator,
+            animation_capture=animation_capture,
+            image_generator=image_generator,
+            music_generator=music_generator,
+        )
+    )
+
+    topics = topics_router(runtime, store, embedder, topic_llm=topic_llm, scheduler=scheduler)
+    app.include_router(topics)
+    app.state.topic_scheduler = None
+    if scheduler:
+        install_topic_scheduler(app, store, topics.topic_runs, config)
+
+    # 智能助手：同一工具注册表经回环调用上面的 REST 路由；agent_llm 供测试注入脚本化模型。
+    # cluster 形态的业务 API 不建独立会话运行时：/api/agent 固定由单实例
+    # agent-gateway 提供（plans §9；网关故障时助手明确不可用，不假数据降级）。
+    if config.server.role == "api" and backends.form == "cluster":
+
+        async def _agent_redirect(request: Request):
+
+            return await forward(request, config.agent.gateway_url)
+
+        async def _report_change(request: Request):
+            """变更上报写入共享 outbox，由网关幂等转入 SSE（plans §9）。"""
+
+            try:
+                body = await request.json()
+            except ValueError:
+                return _JSON(status_code=422, content={"detail": "请求体必须是 JSON"})
+            kind = body.get("kind") if isinstance(body, dict) else None
+            if kind not in KINDS:
+                return _JSON(status_code=422, content={"detail": f"未知改动类型 {kind}"})
+            outbox_id = publish(store, kind, body.get("data") or {}, source="mcp")
+            return _JSON(status_code=201, content={"outbox_id": outbox_id, "forwarded": True})
+
+        stub = _APIRouter(prefix="/api/agent")
+        stub.add_api_route("/changes", _report_change, methods=["POST"], include_in_schema=False)
+        stub.add_api_route(
+            "/{path:path}",
+            _agent_redirect,
+            methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"],
+            include_in_schema=False,
+        )
+        app.include_router(stub)
+        app.add_api_route("/mcp", _agent_redirect, methods=["GET", "POST", "DELETE"], include_in_schema=False)
+    else:
+        app.state.agent_runtime = build_runtime(app, runtime, store, agent_llm=agent_llm)
+        app.include_router(agent_router(app.state.agent_runtime, runtime, injected=agent_llm is not None))
+    app.state.runtime_config, app.state.store, app.state.backends = runtime, store, backends
+    if config.server.role == "agent-gateway" and config.database.backend == "postgres":
+        # 网关把共享 outbox 幂等转入本地 ChangeFeed（plans §9）。
+
+        bridge = OutboxBridge(store, app.state.agent_runtime.feed)
+        app.state.outbox_bridge = bridge
+        app.router.lifespan_context = _with_bridge(app.router.lifespan_context, bridge)
+    # /mcp（streamable-http）与独立 `mindex mcp` 一样都依赖本进程的会话运行时：
+    # cluster 业务 API 上同样只由 agent-gateway 提供（plans §9）。
+    if config.agent.mcp.http_enabled and not (config.server.role == "api" and backends.form == "cluster"):
+        try:
+            # 延迟导入：保持异常捕获范围，依赖加载失败时仍走原有降级路径。
+            from agent.mcp_server import install_http
+        except ImportError as exc:  # pragma: no cover - 依赖缺失时给出明确指引
+            raise RuntimeError("开启 agent.mcp.http_enabled 需要安装 MCP 依赖：uv sync --extra mcp") from exc
+        install_http(app, runtime, store)
+
+    @app.exception_handler(EntityNotFound)
+    async def entity_not_found(_, exc):
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+    assets_root = frontend_root()
+
+    def register_page(group, filename, urls):
+        def page():
+            return FileResponse(assets_root / group / filename, media_type="text/html")
+
+        for url in urls:
+            app.add_api_route(url, page, methods=["GET"], include_in_schema=False)
+
+    # 主页（/）是创作页；视频检索移到 /search，旧的 /index.html 由 moved 重定向过去。
+    register_page("search", "index.html", ("/search", "/search/", "/search.html"))
+    for group in ("admin", "persons", "settings"):
+        register_page(group, f"{group}.html", (f"/{group}", f"/{group}/", f"/{group}.html"))
+    # 创作页同时挂在 / 与 /studio：前者是主页，后者是站内固定链接。
+    register_page("studio", "studio.html", ("/", "/studio", "/studio/", "/studio.html"))
+    # 文案模板管理是创作页的子页面（与创作任务并列的分区标签），资源仍在 /assets/studio/ 下。
+    register_page("studio", "templates.html", ("/studio/templates", "/studio/templates/"))
+    # 选题挖掘同为创作页子页面（标签位于创作任务与文案模板之间）。
+    register_page("studio", "topics.html", ("/studio/topics", "/studio/topics/"))
+    register_page(
+        "studio", "delivery-templates.html", ("/studio/delivery-templates", "/studio/delivery-templates/")
+    )
+    register_page("studio", "brands.html", ("/studio/brands", "/studio/brands/"))
+    # 音乐库是素材管理页的子页面（与素材并列的分区标签）；第三方工具是设置页的一个配置组。
+    register_page("admin", "groups.html", ("/admin/groups", "/admin/groups/"))
+    register_page("admin", "music.html", ("/admin/music", "/admin/music/"))
+
+    def moved(target, rename=None):
+        """旧地址（创作页的音乐库、第三方工具标签）重定向到新位置，兼容书签与旧链接。
+
+        保留查询参数（按 rename 改名），丢弃只用于返回创作任务的 job 参数。
+        """
+
+        def redirect(request: Request):
+            params = {
+                (rename or {}).get(key, key): value
+                for key, value in request.query_params.items()
+                if key != "job"
+            }
+            path, _, fragment = target.partition("#")
+            url = path + (f"?{urlencode(params)}" if params else "") + (f"#{fragment}" if fragment else "")
+            return RedirectResponse(url, status_code=308)
+
+        return redirect
+
+    for url in ("/studio/music", "/studio/music/"):
+        app.add_api_route(url, moved("/admin/music"), methods=["GET"], include_in_schema=False)
+    for url in ("/studio/tools", "/studio/tools/"):
+        app.add_api_route(
+            url, moved("/settings#tools", {"id": "tool"}), methods=["GET"], include_in_schema=False
+        )
+    # 视频检索页改址到 /search：旧的 /index.html 重定向过去，保留查询参数。
+    app.add_api_route("/index.html", moved("/search"), methods=["GET"], include_in_schema=False)
+    for group in ("search", "admin", "persons", "studio", "settings", "shared"):
+        app.mount(f"/assets/{group}", StaticFiles(directory=assets_root / group), name=f"assets-{group}")
+
+    @app.exception_handler(ModelError)
+    async def model_error(_, exc):
+        return JSONResponse(status_code=503, content={"detail": str(exc)})
+
+    @app.exception_handler(ValueError)
+    async def value_error(_, exc):
+        return JSONResponse(status_code=422, content={"detail": str(exc)})
+
+    @app.exception_handler(_RevisionConflict)
+    async def revision_conflict(_, exc):
+        """条件发布失败（If-Match 不符）：409，客户端应刷新后重试。"""
+        return JSONResponse(status_code=409, content={"detail": str(exc)})
+
+    app.include_router(search_router(config, runtime, store, embedder, index_id=index_id, backends=backends))
+
+    @app.get("/api/health")
+    def health():
+        """轻量就绪检查（桌面外壳轮询用）：不读素材表、不探测模型服务；随 web_auth 一起受令牌保护。"""
+
+        tasks = (["studio"] if busy_executors(config.data_dir) else []) + busy_categories(config.data_dir)
+        payload = {
+            "version": app_version(),
+            "pid": os.getpid(),
+            "data_dir": str(config.data_dir),
+            "busy": bool(tasks),
+            "tasks": tasks,
+        }
+        backends = getattr(app.state, "backends", None)
+        if backends is not None:  # 部署形态概览（plans §12 监控；doctor 提供完整诊断）
+            payload["backends"] = {
+                "form": backends.form,
+                "database": backends.db.backend.backend,
+                "vectors": backends.vectors.backend,
+                "storage": backends.media.backend,
+                "locks": backends.locks.backend,
+                "queue": backends.queue.backend,
+            }
+
+            snapshot = metrics_snapshot(backends, config)
+            payload["queue_stats"] = snapshot.get("queue", {})
+            payload["metrics"] = snapshot
+        return payload
+
+    @app.get("/api/metrics")
+    def metrics():
+        """运行指标（plans §12）：连接池等待/租约到期/队列深度/staging 水位。"""
+        backends = getattr(app.state, "backends", None)
+        if backends is None:
+            return {"form": "local"}
+
+        return metrics_snapshot(backends, config)
+
+    @app.get("/api/live")
+    def live():
+        return {"alive": True}
+
+    @app.get("/api/ready")
+    def ready():
+
+        report = readiness(backends, config, gateway_token=app.state.web_auth_token)
+        return JSONResponse(report, status_code=200 if report["ok"] else 503)
+
+    @app.exception_handler(ObjectDeleting)
+    @app.exception_handler(MaintenanceBusy)
+    @app.exception_handler(LeaseLost)
+    async def write_unavailable(_, exc):
+        return JSONResponse({"detail": str(exc)}, status_code=409)
+
+    @app.exception_handler(QueryBudgetExceeded)
+    async def query_budget_exhausted(_, exc):
+        return JSONResponse(
+            {"detail": str(exc), "retryable": True, "code": "query_budget_exhausted"},
+            status_code=503,
+            headers={"Retry-After": "1"},
+        )
+
+    @app.exception_handler(StagingFull)
+    async def insufficient_staging(_, exc):
+        return JSONResponse(
+            {"detail": "节点暂存空间不足，请完成其他上传或稍后重试", "diagnostic": str(exc)}, status_code=507
+        )
+
+    # 设置 MINDEX_WEB_TOKEN（或传入 web_token）后才启用访问令牌；未设置时行为不变。
+    install_web_auth(app, web_token)
+
+    # 最外层退出，等待调度器、上传回收与网关线程先停止。
+
+    previous = app.router.lifespan_context
+
+    @contextlib.asynccontextmanager
+    async def backend_lifespan(application):
+        try:
+            async with previous(application) as state:
+                yield state
+        finally:
+            # 延迟导入：保持异常捕获范围，依赖加载失败时仍走原有降级路径。
+            from shared.background_tasks import close_runners
+
+            close_runners(store)
+            backends.close()
+
+    app.router.lifespan_context = backend_lifespan
+    return app

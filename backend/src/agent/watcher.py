@@ -17,11 +17,19 @@ import asyncio
 import logging
 from collections import Counter
 
-from mindex.agent.ids import short
+from agent.ids import short
+from agent.tools.media import clean, version_media
 
 log = logging.getLogger(__name__)
-STAGE = {"script": "文案", "split": "拆分镜", "recall": "召回", "tts": "配音", "select": "选片", "render": "渲染",
-         "compose": "合成"}
+STAGE = {
+    "script": "文案",
+    "split": "拆分镜",
+    "recall": "召回",
+    "tts": "配音",
+    "select": "选片",
+    "render": "渲染",
+    "compose": "合成",
+}
 # 后台任务类别 → (状态接口, 中文名)。
 TASK_KINDS = {
     "source": ("/api/admin/source-tasks/{}", "素材任务"),
@@ -49,8 +57,11 @@ def watch_target(target: dict) -> dict:
         return {k: v for k, v in target.items() if k != "kind"}
     if not target.get("task_id"):
         raise ValueError("后台任务跟踪需要 task_id")
-    return {"kind": kind, "task_id": target["task_id"],
-            **{k: target[k] for k in ("source_id", "work") if target.get(k)}}
+    return {
+        "kind": kind,
+        "task_id": target["task_id"],
+        **{k: target[k] for k in ("source_id", "work") if target.get(k)},
+    }
 
 
 def _key(sid: str, target: dict) -> tuple[str, str]:
@@ -115,7 +126,12 @@ class TaskWatcher:
             while True:
                 result = await client.get(f"/api/studio/jobs/{job}/builds/{build_id}/logs", after=10**9)
                 if not result["ok"]:
-                    summary = {"job_id": job, "build_id": build_id, "status": "unknown", "error": result["error"]}
+                    summary = {
+                        "job_id": job,
+                        "build_id": build_id,
+                        "status": "unknown",
+                        "error": result["error"],
+                    }
                     break
                 if result["data"]["status"] != "running":
                     summary = await self._summary(client, job, build_id)
@@ -136,17 +152,33 @@ class TaskWatcher:
             return {"job_id": job, "build_id": build_id, "status": "unknown"}
         counts = dict(Counter(n.get("status", "pending") for n in build["nodes"]))
         problems = [
-            {"stage": n["stage"], "shot_id": n["shot_id"], "status": n["status"], "error": (n.get("error") or "")[:300]}
-            for n in build["nodes"] if n.get("status") in ("failed", "blocked")
+            {
+                "stage": n["stage"],
+                "shot_id": n["shot_id"],
+                "status": n["status"],
+                "error": (n.get("error") or "")[:300],
+            }
+            for n in build["nodes"]
+            if n.get("status") in ("failed", "blocked")
         ]
-        from mindex.agent.tools.media import clean, version_media
 
         final = (data["data"]["plans"].get(build["plan_id"]) or {}).get("final")
-        media = clean(version_media(data["data"]["versions"].get(final), f"成片 {short(final)}", collapsed=False)) \
-            if final and build["status"] not in ("failed", "cancelled") else []
-        return {"job_id": job, "build_id": build_id, "plan_id": build["plan_id"], "status": build["status"],
-                "counts": counts, "problems": problems[:20], "error": build.get("error"),
-                "final": short(final), "media": media}
+        media = (
+            clean(version_media(data["data"]["versions"].get(final), f"成片 {short(final)}", collapsed=False))
+            if final and build["status"] not in ("failed", "cancelled")
+            else []
+        )
+        return {
+            "job_id": job,
+            "build_id": build_id,
+            "plan_id": build["plan_id"],
+            "status": build["status"],
+            "counts": counts,
+            "problems": problems[:20],
+            "error": build.get("error"),
+            "final": short(final),
+            "media": media,
+        }
 
     # ------------------------------------------------------------ 后台任务
     async def _run_task(self, sid: str, target: dict) -> None:
@@ -173,8 +205,11 @@ class TaskWatcher:
     @staticmethod
     def task_summary(target: dict, task: dict) -> dict:
         """任务接口返回值 → 结束事件数据：只保留状态、错误、进度与链式发布信息，不带大块结果。"""
-        summary = {**target, "status": task.get("status") or "unknown",
-                   "source_id": task.get("source_id") or target.get("source_id")}
+        summary = {
+            **target,
+            "status": task.get("status") or "unknown",
+            "source_id": task.get("source_id") or target.get("source_id"),
+        }
         if task.get("work") or target.get("work"):
             summary["work"] = task.get("work") or target.get("work")
         if task.get("error"):
@@ -191,14 +226,19 @@ class TaskWatcher:
     def followup_text(summary: dict) -> str:
         if summary.get("kind") in TASK_KINDS:
             return TaskWatcher.task_followup_text(summary)
-        lines = [f"[系统通知] 构建 {summary['build_id']}（任务 {summary['job_id']}）已结束，状态：{summary['status']}。"]
+        lines = [
+            f"[系统通知] 构建 {summary['build_id']}（任务 "
+            f"{summary['job_id']}）已结束，状态：{summary['status']}。"
+        ]
         if summary.get("counts"):
             lines.append(f"节点统计：{summary['counts']}")
         if summary.get("error"):
             lines.append(f"错误：{summary['error']}")
         for item in summary.get("problems", []):
-            lines.append(f"- {STAGE.get(item['stage'], item['stage'])} {short(item['shot_id']) or ''}"
-                         f" {item['status']}：{item['error']}")
+            lines.append(
+                f"- {STAGE.get(item['stage'], item['stage'])} {short(item['shot_id']) or ''}"
+                f" {item['status']}：{item['error']}"
+            )
         lines.append("请向用户总结结果（重建、复用、失败数量）；如有失败或阻塞，说明原因并建议下一步。")
         return "\n".join(lines)
 
@@ -209,11 +249,15 @@ class TaskWatcher:
             lines.append(f"错误：{summary['error']}")
         result = summary.get("result") or {}
         if result:
-            lines.append(f"产出 {result.get('cards', 0)} 张选题卡片，{result.get('outlined', 0)} 张已写大纲。")
+            lines.append(
+                f"产出 {result.get('cards', 0)} 张选题卡片，{result.get('outlined', 0)} 张已写大纲。"
+            )
             for warning in (result.get("warnings") or [])[:5]:
                 lines.append(f"- 告警：{warning}")
-        lines.append("请用 list_topics 列出得分最高的选题向用户总结；如失败、中断或已取消，说明原因并建议下一步"
-                     "（可用 manage_topic_run 重试）。")
+        lines.append(
+            "请用 list_topics 列出得分最高的选题向用户总结；如失败、中断或已取消，说明原因并建议下一步"
+            "（可用 manage_topic_run 重试）。"
+        )
         return "\n".join(lines)
 
     @staticmethod
@@ -225,18 +269,25 @@ class TaskWatcher:
         if summary.get("work"):
             scope.append(f"工作 {WORK.get(summary['work'], summary['work'])}")
         where = f"（{'，'.join(scope)}）" if scope else ""
-        lines = [f"[系统通知] {TASK_KINDS[kind][1]} {summary['task_id']}{where}已结束，状态：{summary['status']}。"]
+        lines = [
+            f"[系统通知] {TASK_KINDS[kind][1]} {summary['task_id']}{where}已结束，状态：{summary['status']}。"
+        ]
         if summary.get("error"):
             lines.append(f"错误：{summary['error']}")
         if summary.get("progress") and summary["status"] != "complete":
             lines.append(f"最后进度：{summary['progress']}")
         publication = summary.get("publication") or {}
         if publication.get("task_ids"):
-            lines.append(f"已链式创建发布任务：{', '.join(publication['task_ids'])}"
-                         "（可用 get_task_status(kind=source) 查询）")
+            lines.append(
+                f"已链式创建发布任务：{', '.join(publication['task_ids'])}"
+                "（可用 get_task_status(kind=source) 查询）"
+            )
         elif publication.get("status") and publication["status"] != "not_requested":
             lines.append(f"发布状态：{publication['status']}")
-        lines.append(f"请向用户总结结果；如失败、中断或已取消，说明原因并建议下一步（可用 retry_task(kind={kind}) 从断点重试）。")
+        lines.append(
+            f"请向用户总结结果；如失败、中断或已取消，说明原因并建议下一步（可用 retry_task(kind={kind}) "
+            f"从断点重试）。"
+        )
         return "\n".join(lines)
 
 

@@ -4,7 +4,7 @@
 ``MINDEX_PROFILE_PERSONS=1`` 后，被 ``profiled`` 包住的请求会：
 
 * 把各阶段耗时写进 ``Server-Timing`` 响应头（浏览器开发者工具的 Timing 页可直接查看）；
-* 以 ``mindex.persons.profile`` 日志输出同样的内容。
+* 以 ``persons.profile`` 日志输出同样的内容。
 
 阶段按名称累加，同名阶段会记录调用次数，因此 N+1 查询会表现为 ``n=50``。
 """
@@ -17,7 +17,7 @@ import os
 import time
 from contextlib import contextmanager
 
-LOGGER = logging.getLogger("mindex.persons.profile")
+LOGGER = logging.getLogger("persons.profile")
 ENV_FLAG = "MINDEX_PROFILE_PERSONS"
 _current: contextvars.ContextVar[Profile | None] = contextvars.ContextVar("person_profile", default=None)
 

@@ -1,19 +1,21 @@
+"""多通道向量召回与融合排序回归。"""
+
 import itertools
 import json
 
 import pytest
-from conftest import FixtureEmbedder
 
-from mindex.admin.curation import Library
-from mindex.models.adapters import ModelError
-from mindex.processing.channel_index import snapshots_for
-from mindex.processing.dialogue import DialogueProcessor
-from mindex.processing.indexing import IndexBuilder, VectorIndex, check_index
-from mindex.processing.pipeline import Pipeline
-from mindex.search.search import SearchEngine
-from mindex.shared.config import fingerprint
-from mindex.shared.media import command
-from mindex.shared.types import Annotation, TextSearch
+from admin.curation import Library
+from conftest import FixtureEmbedder
+from models.adapters import ModelError
+from processing.channel_index import snapshots_for
+from processing.dialogue import DialogueProcessor
+from processing.indexing import IndexBuilder, VectorIndex, check_index
+from processing.pipeline import Pipeline
+from search.search import SearchEngine
+from shared.config import fingerprint
+from shared.media import command
+from shared.types import Annotation, TextSearch
 
 pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
 
@@ -72,8 +74,12 @@ def test_any_channel_combination_and_partial_analysis(config, video_file, monkey
     add_dialogue(config, sid)
     segment = pipeline.store.segments(sid, "moment")[0]
     add_analysis(pipeline.store, segment)
-    monkeypatch.setattr("mindex.processing.pipeline.make_analyzer", lambda *_: pytest.fail("must not initialize LLM"))
-    monkeypatch.setattr("mindex.processing.pipeline.make_transcriber", lambda *_: pytest.fail("must not initialize ASR"))
+    monkeypatch.setattr(
+        "processing.pipeline.make_analyzer", lambda *_: pytest.fail("must not initialize LLM")
+    )
+    monkeypatch.setattr(
+        "processing.pipeline.make_transcriber", lambda *_: pytest.fail("must not initialize ASR")
+    )
     embedder = CountingEmbedder(config)
     version = IndexBuilder(config, embedder).build(activate=True, channels=channels)
     snapshots = pipeline.store.snapshots(version)
@@ -206,7 +212,7 @@ def test_visual_failure_resumes_completed_vectors_without_publishing_partial(con
 
 
 def test_embedding_progress_counts_segments_after_all_windows_and_ready_index(config, video_file):
-    from mindex.shared.media import probe
+    from shared.media import probe
 
     pipeline = Pipeline(config)
     sid = pipeline.prepare(video_file)
@@ -215,8 +221,10 @@ def test_embedding_progress_counts_segments_after_all_windows_and_ready_index(co
 
     class ObservedEmbedder(CountingEmbedder):
         def video(self, path):
-            before = sum(probe(config.data_dir / s["path"])["duration"] > config.video.short_shot_seconds
-                         for s in pipeline.store.segments(sid, "shot"))
+            before = sum(
+                probe(config.data_dir / s["path"])["duration"] > config.video.short_shot_seconds
+                for s in pipeline.store.segments(sid, "shot")
+            )
             assert before  # fixture contains a long shot with multiple embedding windows
             latest = events[-1]
             assert latest["stage"] == "embedding"
@@ -233,10 +241,20 @@ def test_embedding_progress_counts_segments_after_all_windows_and_ready_index(co
     assert [e["stage"] for e in events[-2:]] == ["index_check", "indexed"]
     events.clear()
     calls = embedder.calls
-    assert builder.build(source_id=sid, kinds=["shot"], channels=["visual"],
-                         activate=True, progress=events.append) == version
+    assert (
+        builder.build(
+            source_id=sid, kinds=["shot"], channels=["visual"], activate=True, progress=events.append
+        )
+        == version
+    )
     assert embedder.calls == calls
-    assert [e["stage"] for e in events] == ["index_wait", "index_prepare", "index_check", "publish", "published"]
+    assert [e["stage"] for e in events] == [
+        "index_wait",
+        "index_prepare",
+        "index_check",
+        "publish",
+        "published",
+    ]
     assert all(e["completed"] == e["total"] == total for e in events if "total" in e)
 
 
@@ -293,7 +311,7 @@ def test_empty_dialogue_creates_no_vector_and_llm_accepts_optional_dialogue(conf
 
 
 def test_native_evaluation_excludes_disabled_channel_lexical_text(config, video_file, monkeypatch, tmp_path):
-    from mindex.diagnostics.evaluation import evaluate
+    from diagnostics.evaluation import evaluate
 
     pipeline = Pipeline(config)
     sid = pipeline.prepare(video_file)
@@ -302,7 +320,7 @@ def test_native_evaluation_excludes_disabled_channel_lexical_text(config, video_
     add_analysis(pipeline.store, segment)
     embedder = CountingEmbedder(config)
     version = IndexBuilder(config, embedder).build(activate=True)
-    monkeypatch.setattr("mindex.search.search.make_embedder", lambda _: embedder)
+    monkeypatch.setattr("search.search.make_embedder", lambda _: embedder)
     labels = tmp_path / "labels.jsonl"
     labels.write_text(
         json.dumps(
@@ -348,65 +366,78 @@ def test_native_evaluation_excludes_disabled_channel_lexical_text(config, video_
 
 
 def test_default_upgrade_all_granularities_without_media_cache(config, video_file, monkeypatch):
-    from mindex.admin.source_tasks import publish_work
-    from mindex.shared.media import probe
+    from admin.source_tasks import publish_work
+    from shared.media import probe
 
     pipeline = Pipeline(config)
     sid = pipeline.prepare(video_file)
-    pipeline._analyzer = __import__('conftest').FixtureAnalyzer(FixtureEmbedder(config))
+    pipeline._analyzer = __import__("conftest").FixtureAnalyzer(FixtureEmbedder(config))
     pipeline.analyze(sid)
     embedder = CountingEmbedder(config)
     builder = IndexBuilder(config, embedder)
-    old = builder.build(kinds=['moment'], activate=True)
+    old = builder.build(kinds=["moment"], activate=True)
     add_dialogue(config, sid)
-    before = {p.relative_to(config.data_dir) for p in config.data_dir.rglob('*')
-              if p.is_file() and (p.suffix in {'.mp4', '.jpg', '.png'} or 'cache' in p.parts)}
+    before = {
+        p.relative_to(config.data_dir)
+        for p in config.data_dir.rglob("*")
+        if p.is_file() and (p.suffix in {".mp4", ".jpg", ".png"} or "cache" in p.parts)
+    }
     paths = []
     original = embedder.video
 
     def observe(path):
         paths.append(path)
-        assert probe(path)['duration'] <= config.video.short_shot_seconds + .1
+        assert probe(path)["duration"] <= config.video.short_shot_seconds + 0.1
         return original(path)
 
-    monkeypatch.setattr(embedder, 'video', observe)
-    publish_work(config, sid, 'analysis', embedder, scope='shot_moment')
-    new = publish_work(config, sid, 'analysis', embedder, scope='scene')['index_id']
+    monkeypatch.setattr(embedder, "video", observe)
+    publish_work(config, sid, "analysis", embedder, scope="shot_moment")
+    new = publish_work(config, sid, "analysis", embedder, scope="scene")["index_id"]
     snapshots = pipeline.store.snapshots(new)
-    assert {s['kind'] for s in snapshots} == {'moment', 'shot', 'scene'}
+    assert {s["kind"] for s in snapshots} == {"moment", "shot", "scene"}
     # 每个工作只发布自己的渠道：分析发布不会带入对白，对白需单独发布。
-    assert any('analysis' in s['indexed_views'] for s in snapshots if s['kind'] == 'shot')
-    assert not any('dialogue' in s['indexed_views'] for s in snapshots if s['kind'] == 'shot')
-    assert pipeline.store.one('SELECT status FROM index_versions WHERE id=?', (old,))['status'] == 'ready'
-    after = {p.relative_to(config.data_dir) for p in config.data_dir.rglob('*')
-             if p.is_file() and (p.suffix in {'.mp4', '.jpg', '.png'} or 'cache' in p.parts)}
+    assert any("analysis" in s["indexed_views"] for s in snapshots if s["kind"] == "shot")
+    assert not any("dialogue" in s["indexed_views"] for s in snapshots if s["kind"] == "shot")
+    assert pipeline.store.one("SELECT status FROM index_versions WHERE id=?", (old,))["status"] == "ready"
+    after = {
+        p.relative_to(config.data_dir)
+        for p in config.data_dir.rglob("*")
+        if p.is_file() and (p.suffix in {".mp4", ".jpg", ".png"} or "cache" in p.parts)
+    }
     assert before == after
-    assert all(not p.exists() for p in paths if p.name == 'window.mp4')
+    assert all(not p.exists() for p in paths if p.name == "window.mp4")
     calls = embedder.calls
-    publish_work(config, sid, 'analysis', embedder, scope='shot_moment')
-    assert publish_work(config, sid, 'analysis', embedder, scope='scene')['index_id'] == new
+    publish_work(config, sid, "analysis", embedder, scope="shot_moment")
+    assert publish_work(config, sid, "analysis", embedder, scope="scene")["index_id"] == new
     assert embedder.calls == calls
-    dialogue = publish_work(config, sid, 'dialogue', embedder, scope='shot_moment')['index_id']
-    assert any('dialogue' in s['indexed_views'] for s in pipeline.store.snapshots(dialogue) if s['kind'] == 'shot')
+    dialogue = publish_work(config, sid, "dialogue", embedder, scope="shot_moment")["index_id"]
+    assert any(
+        "dialogue" in s["indexed_views"] for s in pipeline.store.snapshots(dialogue) if s["kind"] == "shot"
+    )
 
 
 def test_skipped_null_annotation_remains_searchable_and_filters_safely(config, video_file):
-    from mindex.shared.types import Filters
+    from shared.types import Filters
 
     pipeline = Pipeline(config)
     sid = pipeline.prepare(video_file)
-    segment = pipeline.store.segments(sid, 'moment')[0]
-    pipeline.store.put_json('annotations', 'segment_id', segment['id'], 'skip-profile',
-                            {'status':'skipped','reason':'模型拒绝','dialogue':[]})
+    segment = pipeline.store.segments(sid, "moment")[0]
+    pipeline.store.put_json(
+        "annotations",
+        "segment_id",
+        segment["id"],
+        "skip-profile",
+        {"status": "skipped", "reason": "模型拒绝", "dialogue": []},
+    )
     embedder = FixtureEmbedder(config)
-    IndexBuilder(config, embedder).build(source_id=sid, channels=['visual'], activate=True)
+    IndexBuilder(config, embedder).build(source_id=sid, channels=["visual"], activate=True)
     engine = SearchEngine(config, embedder)
-    _, segments, _ = engine._context('moment', Filters(), text=True)
-    skipped = next(s for s in segments if s['id'] == segment['id'])
-    assert skipped['annotation'] is None and skipped['annotation_status'] == 'skipped'
-    for field in ('scene', 'emotion', 'shot_size'):
-        _, filtered, _ = engine._context('moment', Filters(**{field:'室内'}), text=True)
-        assert segment['id'] not in {s['id'] for s in filtered}
+    _, segments, _ = engine._context("moment", Filters(), text=True)
+    skipped = next(s for s in segments if s["id"] == segment["id"])
+    assert skipped["annotation"] is None and skipped["annotation_status"] == "skipped"
+    for field in ("scene", "emotion", "shot_size"):
+        _, filtered, _ = engine._context("moment", Filters(**{field: "室内"}), text=True)
+        assert segment["id"] not in {s["id"] for s in filtered}
 
 
 def test_english_query_uses_chinese_analysis_semantic_route(config, video_file):

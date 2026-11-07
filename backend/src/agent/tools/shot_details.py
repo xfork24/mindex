@@ -8,9 +8,9 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 
-from mindex.agent.ids import resolve_shot, short
-from mindex.agent.registry import MAX_TEXT
-from mindex.agent.tools.common import STAGE_LABELS, PlanView, shot_stage_names, stage_mark
+from agent.ids import resolve_shot, short
+from agent.registry import MAX_TEXT
+from agent.tools.common import STAGE_LABELS, PlanView, shot_stage_names, stage_mark
 
 
 def plan_header(view: PlanView) -> dict:
@@ -39,8 +39,13 @@ def subtitle_info(view: PlanView, sid: str, narration: str) -> dict:
     cue = event.get("subtitle") if isinstance(event, dict) else None
     if not isinstance(cue, dict) or not all(key in cue for key in ("text", "start", "end")):
         return {"available": False}
-    return {"available": True, "text": cue["text"], "start": cue["start"], "end": cue["end"],
-            "stale": cue["text"] != narration}
+    return {
+        "available": True,
+        "text": cue["text"],
+        "start": cue["start"],
+        "end": cue["end"],
+        "stale": cue["text"] != narration,
+    }
 
 
 def speech_info(view: PlanView, sid: str) -> dict:
@@ -62,7 +67,11 @@ def generation_info(view: PlanView, sid: str) -> dict | None:
     if not item:
         return {"available": False, "status": "missing"}
     data = item.get("data") if isinstance(item.get("data"), dict) else {}
-    info = {"available": item.get("status") == "complete", "status": item.get("status"), "version": short(vid)}
+    info = {
+        "available": item.get("status") == "complete",
+        "status": item.get("status"),
+        "version": short(vid),
+    }
     for key in ("prompt", "seconds", "duration", "width", "height"):
         if data.get(key) is not None:
             info[key] = data[key]
@@ -76,7 +85,11 @@ def _version_info(view: PlanView, sid: str, stage: str, keys: tuple[str, ...]) -
     if not item:
         return {"available": False, "status": "missing"}
     data = item.get("data") if isinstance(item.get("data"), dict) else {}
-    info = {"available": item.get("status") == "complete", "status": item.get("status"), "version": short(vid)}
+    info = {
+        "available": item.get("status") == "complete",
+        "status": item.get("status"),
+        "version": short(vid),
+    }
     info.update({key: data[key] for key in keys if data.get(key) is not None})
     if item.get("error"):
         info["error"] = item["error"]
@@ -118,7 +131,11 @@ def animation_info(view: PlanView, sid: str) -> dict | None:
     if not item:
         return {"available": False, "status": "missing"}
     data = item.get("data") if isinstance(item.get("data"), dict) else {}
-    info = {"available": item.get("status") == "complete", "status": item.get("status"), "version": short(vid)}
+    info = {
+        "available": item.get("status") == "complete",
+        "status": item.get("status"),
+        "version": short(vid),
+    }
     for key in ("origin", "chars", "brief", "seconds", "width", "height"):
         if data.get(key) is not None:
             info[key] = data[key]
@@ -129,8 +146,12 @@ def animation_info(view: PlanView, sid: str) -> dict | None:
     rid, render = _selected(view, sid, "render")
     if render and render.get("status") == "complete":
         recorded = render.get("data") if isinstance(render.get("data"), dict) else {}
-        info["recording"] = {"version": short(rid), "frames": recorded.get("frames"), "fps": recorded.get("fps"),
-                             "current": (render.get("inputs") or {}).get("animate") == vid}
+        info["recording"] = {
+            "version": short(rid),
+            "frames": recorded.get("frames"),
+            "fps": recorded.get("fps"),
+            "current": (render.get("inputs") or {}).get("animate") == vid,
+        }
     return info
 
 
@@ -161,7 +182,7 @@ def shot_detail(view: PlanView, sid: str, index: int) -> dict:
 
 def page_details(view: PlanView, offset: int, limit: int) -> list[dict]:
     order = view.order
-    return [shot_detail(view, sid, offset + i + 1) for i, sid in enumerate(order[offset:offset + limit])]
+    return [shot_detail(view, sid, offset + i + 1) for i, sid in enumerate(order[offset : offset + limit])]
 
 
 MAX_FOCUS_SHOTS = 20
@@ -181,12 +202,19 @@ def resolve_refs(view: PlanView, refs: list[str]) -> list[dict]:
                 details[sid] = shot_detail(view, sid, index)
             items.append({"ref": ref, "status": "ok", "index": index, "shot_id": sid, "detail": details[sid]})
         elif status == "ambiguous":
-            items.append({"ref": ref, "status": "ambiguous",
-                          "candidates": [{"index": c["index"], "shot_id": c["shot_id"]}
-                                         for c in found["candidates"]]})
+            items.append(
+                {
+                    "ref": ref,
+                    "status": "ambiguous",
+                    "candidates": [
+                        {"index": c["index"], "shot_id": c["shot_id"]} for c in found["candidates"]
+                    ],
+                }
+            )
         else:
-            items.append({"ref": ref, "status": "not_found",
-                          "reason": found.get("reason") or "没有匹配的分镜"})
+            items.append(
+                {"ref": ref, "status": "not_found", "reason": found.get("reason") or "没有匹配的分镜"}
+            )
     return items
 
 
@@ -263,17 +291,27 @@ def render_detail(detail: dict) -> str:
     generation = detail.get("generation")
     if generation is not None:
         if generation.get("available"):
-            lines.append(f"生成画面：版本 {generation['version']}，{generation.get('duration', 0):.2f} 秒"
-                         f"（请求 {generation.get('seconds')!r} 秒），提示词「{generation.get('prompt') or ''}」")
+            lines.append(
+                f"生成画面：版本 {generation['version']}，{generation.get('duration', 0):.2f} 秒"
+                f"（请求 {generation.get('seconds')!r} 秒），提示词「{generation.get('prompt') or ''}」"
+            )
         else:
             reason = f"：{generation['error']}" if generation.get("error") else ""
-            lines.append(f"生成画面：{generation.get('status') or 'missing'}"
-                         + (f" 版本 {generation['version']}" if generation.get("version") else "") + reason)
+            lines.append(
+                f"生成画面：{generation.get('status') or 'missing'}"
+                + (f" 版本 {generation['version']}" if generation.get("version") else "")
+                + reason
+            )
     drawing = detail.get("drawing")
     if drawing is not None:
-        lines.append(f"生成图片：{'版本 ' + drawing['version'] if drawing.get('available') else drawing.get('status')}"
-                     + (f"，{drawing.get('width')}×{drawing.get('height')}，提示词「{drawing.get('prompt') or ''}」"
-                        if drawing.get("available") else (f"：{drawing['error']}" if drawing.get("error") else "")))
+        lines.append(
+            f"生成图片：{'版本 ' + drawing['version'] if drawing.get('available') else drawing.get('status')}"
+            + (
+                f"，{drawing.get('width')}×{drawing.get('height')}，提示词「{drawing.get('prompt') or ''}」"
+                if drawing.get("available")
+                else (f"：{drawing['error']}" if drawing.get("error") else "")
+            )
+        )
     music = detail.get("music")
     if music is not None:
         cue = music.get("cue")
@@ -281,8 +319,11 @@ def render_detail(detail: dict) -> str:
             line = f"背景音乐提示点：{_json(cue)}"
             generated = music.get("generated")
             if generated:
-                line += (f"；生成版本 {generated['version']}（{generated.get('duration', 0):.1f} 秒）"
-                         if generated.get("available") else f"；生成状态 {generated.get('status')}")
+                line += (
+                    f"；生成版本 {generated['version']}（{generated.get('duration', 0):.1f} 秒）"
+                    if generated.get("available")
+                    else f"；生成状态 {generated.get('status')}"
+                )
             lines.append(line)
         elif music.get("continues"):
             lines.append(f"背景音乐：顺延分镜 {music['continues']} 的背景音乐")
@@ -290,21 +331,29 @@ def render_detail(detail: dict) -> str:
     if animation is not None:
         if animation.get("available"):
             origin = {"manual": "人工修改", "generated": "模型生成"}.get(animation.get("origin"), "未知来源")
-            line = (f"动画源码：版本 {animation['version']}（{origin}，{animation.get('chars', 0)} 字符，"
-                    f"{animation.get('seconds')!r} 秒，{animation.get('width')}×{animation.get('height')}）")
+            line = (
+                f"动画源码：版本 {animation['version']}（{origin}，{animation.get('chars', 0)} 字符，"
+                f"{animation.get('seconds')!r} 秒，{animation.get('width')}×{animation.get('height')}）"
+            )
             if animation.get("source_url"):
                 line += f"，沙箱预览 {animation['source_url']}"
             lines.append(line)
             recording = animation.get("recording")
             if recording:
-                lines.append(f"动画录制：渲染版本 {recording['version']}，{recording.get('frames')} 帧 @ "
-                             f"{recording.get('fps')} fps" + ("" if recording.get("current") else "（录制的是旧源码，需重新渲染）"))
+                lines.append(
+                    f"动画录制：渲染版本 {recording['version']}，{recording.get('frames')} 帧 @ "
+                    f"{recording.get('fps')} fps"
+                    + ("" if recording.get("current") else "（录制的是旧源码，需重新渲染）")
+                )
             else:
                 lines.append("动画录制：尚未渲染（构建或 run_node(stage=render) 后逐帧录制）")
         else:
             reason = f"：{animation['error']}" if animation.get("error") else ""
-            lines.append(f"动画源码：{animation.get('status') or 'missing'}"
-                         + (f" 版本 {animation['version']}" if animation.get("version") else "") + reason)
+            lines.append(
+                f"动画源码：{animation.get('status') or 'missing'}"
+                + (f" 版本 {animation['version']}" if animation.get("version") else "")
+                + reason
+            )
     return "\n".join(lines)
 
 
@@ -317,15 +366,17 @@ def fit_blocks(head: str, blocks: list[str], tail: Callable[[int], str], budget:
     if not blocks:
         return 0
     k = 1
-    while k < len(blocks) and len(_compose(head, blocks[:k + 1], tail(k + 1))) <= budget:
+    while k < len(blocks) and len(_compose(head, blocks[: k + 1], tail(k + 1))) <= budget:
         k += 1
     return k
 
 
 def _title(header: dict) -> str:
     flag = "当前方案" if header["active"] else "非当前方案"
-    return (f"任务 {header['job_id']} 方案 {header['plan_name']}({header['plan_id']})【{flag}】 "
-            f"revision={header['revision']}")
+    return (
+        f"任务 {header['job_id']} 方案 {header['plan_name']}({header['plan_id']})【{flag}】 "
+        f"revision={header['revision']}"
+    )
 
 
 def render_list(header: dict, details: list[dict], offset: int) -> tuple[str, int]:

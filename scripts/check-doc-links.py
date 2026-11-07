@@ -16,7 +16,16 @@ from pathlib import Path
 from urllib.parse import unquote
 
 ROOT = Path(__file__).resolve().parents[1]
-SKIP_DIRS = {".git", ".venv", ".venv-detector", ".venv-person", "node_modules", "models", ".pytest_cache", ".kiro"}
+SKIP_DIRS = {
+    ".git",
+    ".venv",
+    ".venv-detector",
+    ".venv-person",
+    "node_modules",
+    "models",
+    ".pytest_cache",
+    ".kiro",
+}
 # 桌面版构建产物（冻结后端、构建环境、安装包）里带有第三方包自己的 Markdown，不属于本仓库文档。
 # .kiro/ 与 tools/ 在 .gitignore 中：本地专用的 spec 与工具目录不出现在仓库，也不参与链接检查。
 SKIP_PATHS = ("desktop/build", "desktop/dist", "tools/")

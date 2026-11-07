@@ -11,17 +11,17 @@ from typing import ClassVar
 
 import pytest
 from PIL import Image
+
+from agent.loopback import MindexClient
+from agent.registry import ToolContext, ToolError
+from agent.tools import build_registry
+from agent.tools.persons_review import CAST_HINTS
+from persons.person_models import Entity
+from persons.persons import Persons
+from shared.processing_lock import ProcessingLock
+from shared.storage import Store, dumps
 from test_agent_persons import evidence, seed_shots
 from test_person_identify import StubPersonClient, face, photo, seed_library
-
-from mindex.agent.loopback import MindexClient
-from mindex.agent.registry import ToolContext, ToolError
-from mindex.agent.tools import build_registry
-from mindex.agent.tools.persons_review import CAST_HINTS
-from mindex.persons.person_models import Entity
-from mindex.persons.persons import Persons
-from mindex.shared.processing_lock import ProcessingLock
-from mindex.shared.storage import Store, dumps
 
 
 @pytest.fixture
@@ -64,6 +64,7 @@ class Recording(MindexClient):
 
 # ---------- 审核规则 ----------
 
+
 def test_review_shot_rule_branches(library, config):
     client, ids, _refs = library
     store = seed_shots(config, 1)
@@ -74,10 +75,20 @@ def test_review_shot_rule_branches(library, config):
     def body(actor, role, source="source"):
         return {"source_id": source, "shot_id": "shot0", "selections": [{"actor_id": actor, "role_id": role}]}
 
-    rejected(client, "review_shot", body(ids["young"], ids["young"]), code="invalid_selection",
-             match="角色「青年叶淑柔」不是演员")
-    rejected(client, "review_shot", body(ids["alice"], ids["alice"]), code="invalid_selection",
-             match="演员「演员甲」不是角色：出镜审核必须指定角色")
+    rejected(
+        client,
+        "review_shot",
+        body(ids["young"], ids["young"]),
+        code="invalid_selection",
+        match="角色「青年叶淑柔」不是演员",
+    )
+    rejected(
+        client,
+        "review_shot",
+        body(ids["alice"], ids["alice"]),
+        code="invalid_selection",
+        match="演员「演员甲」不是角色：出镜审核必须指定角色",
+    )
     # 角色不属于素材作品（演员确实出演）：只报作品不符。
     with pytest.raises(ToolError, match="角色「客串」不属于该素材的作品") as excinfo:
         run(client, "review_shot", body(ids["alice"], cameo["id"]))
@@ -87,8 +98,13 @@ def test_review_shot_rule_branches(library, config):
         run(client, "review_shot", body(ids["alice"], ids["villain"]), preview=True)
     assert "出演演员：演员乙" in str(excinfo.value) and "不属于该素材的作品" not in str(excinfo.value)
     rejected(client, "review_shot", body("nobody", ids["young"]), code="missing_person", match="找不到人物")
-    rejected(client, "review_shot", body(ids["alice"], ids["young"], source="ghost"), code="missing_source",
-             match="找不到素材 ghost")
+    rejected(
+        client,
+        "review_shot",
+        body(ids["alice"], ids["young"], source="ghost"),
+        code="missing_source",
+        match="找不到素材 ghost",
+    )
     # 以上全部在本地预检拒绝：没有写入任何证据。
     assert store.one("SELECT COUNT(*) AS n FROM person_evidence")["n"] == 0
 
@@ -109,9 +125,12 @@ def test_review_shot_deduplicates_selections(library, config):
     [(_path, sent)] = [p for p in Recording.posts if p[0] == "/api/persons/review/shot"]
     assert sent["selections"] == [pair, other]
     assert out.text.count("演员甲·青年叶淑柔") == 1
-    rows = store.rows("SELECT actor_id,role_id FROM person_evidence WHERE shot_id='shot0' AND status='accepted'")
+    rows = store.rows(
+        "SELECT actor_id,role_id FROM person_evidence WHERE shot_id='shot0' AND status='accepted'"
+    )
     assert sorted((r["actor_id"], r["role_id"]) for r in rows) == sorted(
-        [(ids["alice"], ids["young"]), (ids["alice"], ids["old"])])
+        [(ids["alice"], ids["young"]), (ids["alice"], ids["old"])]
+    )
     accepted = run(client, "list_review_shots", {"status": "accepted"}).value["items"]
     assert [s["shot_id"] for s in accepted] == ["shot0"] and len(accepted[0]["confirmed_people"]) == 2
 
@@ -136,11 +155,15 @@ def test_list_review_shots_identity_filters(library, config):
 
     # 只给角色但有多名出演演员：要求补 actor_id 并列出演员。
     work = Persons(store).work_for("source")
-    duo = Persons(store).save(Entity(kind="role", name="双生", work_ids=[work], actor_ids=[ids["alice"], ids["bob"]]))
+    duo = Persons(store).save(
+        Entity(kind="role", name="双生", work_ids=[work], actor_ids=[ids["alice"], ids["bob"]])
+    )
     with pytest.raises(ToolError, match="有 2 名出演演员，请同时给出 actor_id") as excinfo:
         run(client, "list_review_shots", {"role_id": duo["id"]})
     assert f"演员甲({ids['alice']})" in str(excinfo.value) and f"演员乙({ids['bob']})" in str(excinfo.value)
-    assert run(client, "list_review_shots", {"role_id": duo["id"], "actor_id": ids["bob"]}).value["items"] == []
+    assert (
+        run(client, "list_review_shots", {"role_id": duo["id"], "actor_id": ids["bob"]}).value["items"] == []
+    )
 
     # 身份类型不对。
     with pytest.raises(ToolError, match="不是角色") as excinfo:
@@ -160,9 +183,17 @@ def test_list_review_shots_identity_filters(library, config):
 
 # ---------- 发布前置条件 ----------
 
+
 def seed_version(store, config, identifier, status="ready"):
-    spec = {"format": 2, "mode": "auto", "space": {"model": "fixture"}, "preprocessing": config.video.model_dump()}
-    store.execute("INSERT INTO index_versions(id,spec,status) VALUES(?,?,?)", (identifier, dumps(spec), status))
+    spec = {
+        "format": 2,
+        "mode": "auto",
+        "space": {"model": "fixture"},
+        "preprocessing": config.video.model_dump(),
+    }
+    store.execute(
+        "INSERT INTO index_versions(id,spec,status) VALUES(?,?,?)", (identifier, dumps(spec), status)
+    )
 
 
 def test_publish_preconditions(library, config):
@@ -177,7 +208,9 @@ def test_publish_preconditions(library, config):
     # content_id 前缀解析：过短、歧义、不存在，预览与执行都拒绝。
     rejected(client, "publish_persons", {"content_id": "abc"}, code="invalid_arguments", match="至少 6 位")
     rejected(client, "publish_persons", {"content_id": "abcdef"}, code="ambiguous_index", match="有歧义")
-    rejected(client, "publish_persons", {"content_id": "zzzzzz"}, code="missing_index", match="索引版本不存在")
+    rejected(
+        client, "publish_persons", {"content_id": "zzzzzz"}, code="missing_index", match="索引版本不存在"
+    )
 
     # 指定未就绪的内容索引：预览提示，执行转述服务端原因，活动组合不变。
     preview = run(client, "publish_persons", {"content_id": "abcdef02"}, preview=True)
@@ -211,6 +244,7 @@ def test_publish_preconditions(library, config):
 
 # ---------- 检索组合 ----------
 
+
 def test_change_release_resolution_and_content_switch(library, config):
     client, _ids, _refs = library
     store = Store(config.data_dir)
@@ -220,19 +254,40 @@ def test_change_release_resolution_and_content_switch(library, config):
     store.activate("content1")
     first = store.active_index()["search_release_id"]
     switch, broken = "abcdef11" + "0" * 24, "abcdef22" + "0" * 24
-    store.execute("INSERT INTO search_releases(id,content_id,person_id) VALUES(?,?,NULL)", (switch, "content2"))
-    store.execute("INSERT INTO search_releases(id,content_id,person_id) VALUES(?,?,NULL)", (broken, "content3"))
+    store.execute(
+        "INSERT INTO search_releases(id,content_id,person_id) VALUES(?,?,NULL)", (switch, "content2")
+    )
+    store.execute(
+        "INSERT INTO search_releases(id,content_id,person_id) VALUES(?,?,NULL)", (broken, "content3")
+    )
 
     for action in ("activate", "delete"):
-        rejected(client, "change_search_release", {"release_id": "abcde", "action": action},
-                 code="invalid_arguments", match="至少 6 位")
-        rejected(client, "change_search_release", {"release_id": "abcdef", "action": action},
-                 code="ambiguous_release", match="有歧义")
-        rejected(client, "change_search_release", {"release_id": "zzzzzz", "action": action},
-                 code="missing_release", match="检索组合不存在")
+        rejected(
+            client,
+            "change_search_release",
+            {"release_id": "abcde", "action": action},
+            code="invalid_arguments",
+            match="至少 6 位",
+        )
+        rejected(
+            client,
+            "change_search_release",
+            {"release_id": "abcdef", "action": action},
+            code="ambiguous_release",
+            match="有歧义",
+        )
+        rejected(
+            client,
+            "change_search_release",
+            {"release_id": "zzzzzz", "action": action},
+            code="missing_release",
+            match="检索组合不存在",
+        )
 
     # 目标内容索引未就绪：预览提示，执行转述服务端拒绝，活动组合不变。
-    preview = run(client, "change_search_release", {"release_id": "abcdef22", "action": "activate"}, preview=True)
+    preview = run(
+        client, "change_search_release", {"release_id": "abcdef22", "action": "activate"}, preview=True
+    )
     assert any("该内容索引未就绪，服务端会拒绝恢复" in w for w in preview.warnings)
     with pytest.raises(ToolError, match="检索组合不存在或内容索引未就绪") as excinfo:
         run(client, "change_search_release", {"release_id": "abcdef22", "action": "activate"})
@@ -240,7 +295,9 @@ def test_change_release_resolution_and_content_switch(library, config):
     assert store.active_index()["search_release_id"] == first and store.active_index()["id"] == "content1"
 
     # 切换到另一个内容索引的组合：预览说明同时切换内容索引；执行后两者都生效。
-    preview = run(client, "change_search_release", {"release_id": "ABCDEF11", "action": "activate"}, preview=True)
+    preview = run(
+        client, "change_search_release", {"release_id": "ABCDEF11", "action": "activate"}, preview=True
+    )
     assert any("会同时把活动内容索引切换为 content2（状态 ready）" in w for w in preview.warnings)
     assert not any("未就绪" in w for w in preview.warnings)
     assert preview.changes[1] == {"label": "内容索引", "before": "content1", "after": "content2"}
@@ -249,8 +306,14 @@ def test_change_release_resolution_and_content_switch(library, config):
     assert active["id"] == "content2" and active["search_release_id"] == switch
 
     # 新的生效组合经前缀同样受保护；原组合可删除。
-    rejected(client, "change_search_release", {"release_id": "abcdef11", "action": "delete"},
-             code="release_active", match="当前生效的检索组合", preview=(True,))
+    rejected(
+        client,
+        "change_search_release",
+        {"release_id": "abcdef11", "action": "delete"},
+        code="release_active",
+        match="当前生效的检索组合",
+        preview=(True,),
+    )
     run(client, "change_search_release", {"release_id": first, "action": "delete"})
     ids = {r["id"] for r in run(client, "list_search_releases", {}).value["releases"]}
     assert ids == {switch, broken}
@@ -267,8 +330,18 @@ def cast_parser(entries_by_color):
     def parsed(_config, image):
         with Image.open(io.BytesIO(image["raw"])) as decoded:
             color = COLORS[decoded.convert("RGB").getpixel((0, 0))]
-        entries = [{"image_id": image["id"], "foreign_name": "", "actor_id": None, "role_id": None, "bbox": None,
-                    "single_person": False, **entry} for entry in entries_by_color.get(color, [])]
+        entries = [
+            {
+                "image_id": image["id"],
+                "foreign_name": "",
+                "actor_id": None,
+                "role_id": None,
+                "bbox": None,
+                "single_person": False,
+                **entry,
+            }
+            for entry in entries_by_color.get(color, [])
+        ]
         return {"entries": entries, "warnings": [f"{color} 已拆分"]}
 
     return parsed
@@ -290,13 +363,21 @@ def stash(client, *items):
 
 def test_import_cast_multiple_attachments(library, monkeypatch):
     client, _ids, _refs = library
-    monkeypatch.setattr("mindex.persons.person_api.parse_cast", cast_parser({
-        "teal": [{"actor_name": "演员丁", "foreign_name": "Ding", "role_name": "侦探"}],
-        "orange": [{"actor_name": "演员戊", "role_name": "刺客", "bbox": [10, 10, 90, 70]},
-                   {"actor_name": "演员己", "role_name": ""}],
-    }))
-    refs, files = stash(client, ("cast1.png", photo("teal"), "image/png"),
-                        ("cast2.png", photo("orange"), "image/png"))
+    monkeypatch.setattr(
+        "persons.person_api.parse_cast",
+        cast_parser(
+            {
+                "teal": [{"actor_name": "演员丁", "foreign_name": "Ding", "role_name": "侦探"}],
+                "orange": [
+                    {"actor_name": "演员戊", "role_name": "刺客", "bbox": [10, 10, 90, 70]},
+                    {"actor_name": "演员己", "role_name": ""},
+                ],
+            }
+        ),
+    )
+    refs, files = stash(
+        client, ("cast1.png", photo("teal"), "image/png"), ("cast2.png", photo("orange"), "image/png")
+    )
     note_ref, note_files = stash(client, ("notes.txt", b"not an image", "text/plain"))
 
     # 预览：逐张列出附件；非图片附件给出警告。
@@ -334,9 +415,13 @@ def test_import_cast_multiple_attachments(library, monkeypatch):
     # 确认：带照片框的条目经人物服务质检后生成参考图。
     StubPersonClient.observations = [face([1, 0, 0])]
     work = next(s for s in client.get("/api/persons").json()["sources"] if s["id"] == "source")["work_id"]
-    preview = run(client, "confirm_cast_import", {"import_id": value["import_id"], "work_id": work}, preview=True)
+    preview = run(
+        client, "confirm_cast_import", {"import_id": value["import_id"], "work_id": work}, preview=True
+    )
     assert preview.changes[1]["after"].endswith("原图 2 裁剪参考图")
-    assert preview.changes[0]["after"].endswith("无参考图") and preview.changes[2]["after"].endswith("无参考图")
+    assert preview.changes[0]["after"].endswith("无参考图") and preview.changes[2]["after"].endswith(
+        "无参考图"
+    )
     assert any("调用人物服务质检" in w for w in preview.warnings)
     before = len(client.get("/api/persons").json()["references"])
     StubPersonClient.seen = []
@@ -353,7 +438,7 @@ def test_import_cast_multiple_attachments(library, monkeypatch):
 
 
 def make_draft(client, monkeypatch, color, entries):
-    monkeypatch.setattr("mindex.persons.person_api.parse_cast", cast_parser({color: entries}))
+    monkeypatch.setattr("persons.person_api.parse_cast", cast_parser({color: entries}))
     refs, files = stash(client, (f"{color}.png", photo(color), "image/png"))
     return run(client, "import_cast", {"attachments": refs}, files=files).value
 
@@ -363,8 +448,10 @@ def test_confirm_cast_quality_check_rejects_whole_batch(library, monkeypatch):
     draft = make_draft(client, monkeypatch, "purple", [])
     image = draft["images"][0]["id"]
     work = next(s for s in client.get("/api/persons").json()["sources"] if s["id"] == "source")["work_id"]
-    entries = [{"image_id": image, "actor_name": "演员丁", "role_name": "侦探"},
-               {"image_id": image, "actor_name": "演员戊", "role_name": "刺客", "bbox": [0, 0, 80, 60]}]
+    entries = [
+        {"image_id": image, "actor_name": "演员丁", "role_name": "侦探"},
+        {"image_id": image, "actor_name": "演员戊", "role_name": "刺客", "bbox": [0, 0, 80, 60]},
+    ]
     baseline = client.get("/api/persons").json()
 
     def unchanged():
@@ -376,7 +463,11 @@ def test_confirm_cast_quality_check_rejects_whole_batch(library, monkeypatch):
     # 照片框里没有清晰人脸：整批 422，点名条目并附处理建议；没有任何写入。
     StubPersonClient.observations = []
     with pytest.raises(ToolError) as excinfo:
-        run(client, "confirm_cast_import", {"import_id": draft["import_id"], "work_id": work, "entries": entries})
+        run(
+            client,
+            "confirm_cast_import",
+            {"import_id": draft["import_id"], "work_id": work, "entries": entries},
+        )
     message = str(excinfo.value)
     assert excinfo.value.code == "http_422"
     assert "条目 2（演员戊）" in message and "参考照片需要恰好一张清晰人脸" in message
@@ -386,7 +477,11 @@ def test_confirm_cast_quality_check_rejects_whole_batch(library, monkeypatch):
     # 人物服务不可用：503 转述原因与建议，同样没有写入。
     StubPersonClient.fail = "identity"
     with pytest.raises(ToolError) as excinfo:
-        run(client, "confirm_cast_import", {"import_id": draft["import_id"], "work_id": work, "entries": entries})
+        run(
+            client,
+            "confirm_cast_import",
+            {"import_id": draft["import_id"], "work_id": work, "entries": entries},
+        )
     assert excinfo.value.code == "http_503"
     assert "人物服务不可用" in str(excinfo.value) and CAST_HINTS[503] in str(excinfo.value)
     unchanged()
@@ -394,8 +489,9 @@ def test_confirm_cast_quality_check_rejects_whole_batch(library, monkeypatch):
     # 调整照片框且服务恢复：整批导入成功。
     StubPersonClient.fail, StubPersonClient.observations = None, [face([0, 1, 0])]
     entries[1]["bbox"] = [20, 20, 120, 100]
-    result = run(client, "confirm_cast_import",
-                 {"import_id": draft["import_id"], "work_id": work, "entries": entries})
+    result = run(
+        client, "confirm_cast_import", {"import_id": draft["import_id"], "work_id": work, "entries": entries}
+    )
     assert [bool(c.get("reference_id")) for c in result.value["confirmed"]] == [False, True]
     assert client.get(f"/api/persons/imports/{draft['import_id']}").json()["status"] != "draft"
 

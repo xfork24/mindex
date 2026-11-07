@@ -6,20 +6,20 @@ import logging
 import threading
 
 import pytest
-from conftest import FixtureStoryboarder
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from filelock import Timeout
+
+from api import create_app
+from conftest import FixtureStoryboarder
+from shared import locks
+from studio import executor, studio
+from studio import workspace as ws
+from studio.executor import BUSY, StudioExecutor
 from test_studio_api import create_legacy_job
 from test_studio_cancel import wait_until
 from test_studio_columns import request_body
 from test_studio_workspace import setup_workspace, wait_build
-
-from mindex.api import create_app
-from mindex.shared import locks
-from mindex.studio import executor, studio
-from mindex.studio import workspace as ws
-from mindex.studio.executor import BUSY, StudioExecutor
 
 
 def lock_free(config) -> bool:
@@ -34,7 +34,8 @@ def lock_free(config) -> bool:
 
 def submit_build(client, config, jid, w, p):
     return client.post(
-        f"/api/studio/jobs/{jid}/plans/{p['id']}/regenerate-column", json=request_body(config, jid, w, p, "tts")
+        f"/api/studio/jobs/{jid}/plans/{p['id']}/regenerate-column",
+        json=request_body(config, jid, w, p, "tts"),
     )
 
 
@@ -192,8 +193,9 @@ def test_start_failure_runs_cleanup_and_releases_lock(config, monkeypatch, caplo
 # ---------------------------------------------------------------- (c) 取消：事件与哨兵
 
 
-@pytest.mark.parametrize(("kind", "key", "relative"), [("build", "b1", "builds/b1.cancel"),
-                                                       ("steps", None, "steps.cancel")])
+@pytest.mark.parametrize(
+    ("kind", "key", "relative"), [("build", "b1", "builds/b1.cancel"), ("steps", None, "steps.cancel")]
+)
 def test_cancel_event_and_sentinel_both_observed(config, kind, key, relative):
     jid = studio.create_job(config, "大纲")["id"]
     sentinel = studio.job_dir(config, jid) / relative
@@ -247,10 +249,11 @@ def test_on_error_failure_logs_both_and_releases_lock(config, caplog):
         raise OSError(f"写入终态失败（{exc}）")
 
     with caplog.at_level(logging.ERROR):
-        StudioExecutor.run_guarded(body, message="测试任务失败", on_error=on_error,
-                                   finally_=lambda: finished.append(True), lock=lock)
+        StudioExecutor.run_guarded(
+            body, message="测试任务失败", on_error=on_error, finally_=lambda: finished.append(True), lock=lock
+        )
 
-    records = [r for r in caplog.records if r.name == "mindex.studio.executor"]
+    records = [r for r in caplog.records if r.name == "studio.executor"]
     assert [r.getMessage() for r in records] == ["测试任务失败", "测试任务失败；写入失败终态时再次出错"]
     assert isinstance(records[0].exc_info[1], RuntimeError)
     assert isinstance(records[1].exc_info[1], OSError)
@@ -266,7 +269,7 @@ def test_finally_failure_still_releases_lock(config, caplog):
 
     with caplog.at_level(logging.ERROR):
         executor.run_guarded(lambda: None, message="测试任务", finally_=finish, lock=lock)
-    assert [r.getMessage() for r in caplog.records if r.name == "mindex.studio.executor"] == [
+    assert [r.getMessage() for r in caplog.records if r.name == "studio.executor"] == [
         "测试任务；执行收尾时出错"
     ]
     assert lock_free(config)

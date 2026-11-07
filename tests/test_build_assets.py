@@ -1,4 +1,5 @@
 """页面引用的 /assets/ 版本参数必须是被引用文件的内容哈希（由 scripts/build-assets.py 维护）。"""
+
 import hashlib
 import re
 import subprocess
@@ -11,16 +12,26 @@ WEB = ROOT / "frontend/src"
 
 
 def test_asset_versions_match_content():
-    checked = subprocess.run([sys.executable, str(SCRIPT), "--check"], check=False, capture_output=True, text=True)
+    checked = subprocess.run(
+        [sys.executable, str(SCRIPT), "--check"], check=False, capture_output=True, text=True
+    )
     assert checked.returncode == 0, checked.stderr
 
 
 def test_every_page_asset_carries_its_content_hash():
     pages = sorted(WEB.glob("*/*.html"))
-    assert {p.name for p in pages} >= {"index.html", "admin.html", "persons.html", "settings.html", "studio.html",
-                                       "login.html"}
+    assert {p.name for p in pages} >= {
+        "index.html",
+        "admin.html",
+        "persons.html",
+        "settings.html",
+        "studio.html",
+        "login.html",
+    }
     for page in pages:
-        for path, version in re.findall(r'(?:src|href)="/assets/([^"?#]+)(?:\?v=([^"#]*))?"', page.read_text()):
+        for path, version in re.findall(
+            r'(?:src|href)="/assets/([^"?#]+)(?:\?v=([^"#]*))?"', page.read_text()
+        ):
             expected = hashlib.sha256((WEB / path).read_bytes()).hexdigest()[:10]
             assert version == expected, (page.name, path)
 

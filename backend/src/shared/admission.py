@@ -1,5 +1,9 @@
 """集群协议与派生检索准入；维护入口仍可回填缺失投影。"""
+
 from __future__ import annotations
+
+from shared.errors import ModelError
+from shared.lexical_store import lexical_ready
 
 PROTOCOL = "2"
 
@@ -11,13 +15,14 @@ def validate_protocol(store):
 
 
 def validate_index(store, active):
-    from mindex.shared.errors import ModelError
-    from mindex.shared.lexical_store import lexical_ready
 
     if active["spec"].get("format", 1) < 2:
         raise ModelError("集群不支持旧格式索引的全快照检索；请执行 mindex index --mode auto --activate 重建")
     if not lexical_ready(store, active["id"]):
-        raise ModelError(f"集群索引缺少匹配分词器的派生数据；请执行 mindex indexes lexical --index-id {active['id']} --replace")
+        raise ModelError(
+            f"集群索引缺少匹配分词器的派生数据；请执行 mindex indexes lexical --index-id {active['id']} "
+            f"--replace"
+        )
 
 
 def validate_serving(context):
@@ -32,7 +37,9 @@ def validate_serving(context):
             space = active["spec"].get("space", {})
             for field in ("model", "dimensions", "quantization"):
                 if field in space and space[field] != getattr(config.embedding, field):
-                    raise RuntimeError(f"集群活动索引的嵌入空间 {field} 与节点配置不一致；请统一模型配置或重新发布索引")
+                    raise RuntimeError(
+                        f"集群活动索引的嵌入空间 {field} 与节点配置不一致；请统一模型配置或重新发布索引"
+                    )
             preprocessing = active["spec"].get("preprocessing")
             if preprocessing is not None and preprocessing != config.video.model_dump():
                 raise RuntimeError("集群活动索引的视频预处理与节点配置不一致；请统一配置或重新发布索引")

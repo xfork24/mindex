@@ -8,10 +8,10 @@ from pathlib import Path
 
 import numpy as np
 
-from mindex.models import adapters
-from mindex.models.adapters import ModelError
-from mindex.shared.config import Config, fingerprint
-from mindex.shared.media import frame_data, probe
+from models import adapters
+from models.adapters import ModelError
+from shared.config import Config, fingerprint
+from shared.media import frame_data, probe
 
 
 class HTTPEmbedder:
@@ -161,9 +161,7 @@ class TokenHubEmbedder:
     def video(self, path: Path) -> list[float]:
         duration = probe(path)["duration"]
         count = max(1, min(self.config.video.max_frames, math.ceil(duration * self.config.video.fps)))
-        inputs = [
-            {"type": "image_url", "image_url": {"url": uri}} for _, uri in frame_data(path, count)
-        ]
+        inputs = [{"type": "image_url", "image_url": {"url": uri}} for _, uri in frame_data(path, count)]
         return self._sequence(inputs)
 
     def image(self, path: Path) -> list[float]:

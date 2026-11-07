@@ -21,8 +21,12 @@ function isExternalAllowed(url) {
 
 // 新窗口（target=_blank、window.open）：internal 在应用内打开，external 交给系统浏览器，deny 拒绝。
 function windowOpenAction(url, origin) {
-  if (isAppUrl(url, origin)) return "internal";
-  if (isExternalAllowed(url)) return "external";
+  if (isAppUrl(url, origin)) {
+    return "internal";
+  }
+  if (isExternalAllowed(url)) {
+    return "external";
+  }
   return "deny";
 }
 
@@ -30,22 +34,31 @@ function windowOpenAction(url, origin) {
 // 主进程在 did-navigate-in-page 中读取并执行。只认 file: 页面上的白名单命令。
 function shellCommand(url) {
   const parsed = parse(url);
-  if (!parsed || parsed.protocol !== "file:") return null;
+  if (!parsed || parsed.protocol !== "file:") {
+    return null;
+  }
   const match = /^#command=([a-z]+)$/.exec(parsed.hash);
   return match && ["retry", "logs", "quit"].includes(match[1]) ? match[1] : null;
 }
 
 function isLocalPage(url, localPages = []) {
   const parsed = parse(url);
-  return Boolean(parsed && parsed.protocol === "file:" &&
-    localPages.some((page) => parsed.pathname === new URL(`file://${page}`).pathname));
+  return Boolean(
+    parsed &&
+    parsed.protocol === "file:" &&
+    localPages.some((page) => parsed.pathname === new URL(`file://${page}`).pathname),
+  );
 }
 
 // 页面内导航（will-navigate）：本 origin 与外壳本地页面放行；其余一律阻止（http/https 改由系统浏览器打开）。
 // 拖入窗口的文件会导航到 file://，不在白名单内，因此被阻止。
 function navigationAction(url, origin, localPages = []) {
-  if (isAppUrl(url, origin) || isLocalPage(url, localPages)) return "allow";
-  if (isExternalAllowed(url)) return "external";
+  if (isAppUrl(url, origin) || isLocalPage(url, localPages)) {
+    return "allow";
+  }
+  if (isExternalAllowed(url)) {
+    return "external";
+  }
   return "deny";
 }
 
@@ -55,4 +68,12 @@ function permissionAllowed(permission, requestingUrl, origin) {
   return ALLOWED_PERMISSIONS.has(permission) && isAppUrl(requestingUrl, origin);
 }
 
-module.exports = { isAppUrl, isExternalAllowed, isLocalPage, windowOpenAction, navigationAction, shellCommand, permissionAllowed };
+module.exports = {
+  isAppUrl,
+  isExternalAllowed,
+  isLocalPage,
+  windowOpenAction,
+  navigationAction,
+  shellCommand,
+  permissionAllowed,
+};

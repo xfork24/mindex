@@ -8,8 +8,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from mindex.models.model_server import configure_transnet_device
-from mindex.persons.person_server import execution_providers
+from models.model_server import configure_transnet_device
+from persons.person_server import execution_providers
 
 
 def tensorflow_stub(*, cuda=False, gpu=True):
@@ -27,7 +27,8 @@ def tensorflow_stub(*, cuda=False, gpu=True):
             experimental=SimpleNamespace(set_memory_growth=lambda device, enabled: growth.append(device)),
         ),
         test=SimpleNamespace(is_built_with_cuda=lambda: cuda),
-        visible=visible, growth=growth,
+        visible=visible,
+        growth=growth,
     )
 
 
@@ -61,30 +62,44 @@ def test_transnet_missing_acceleration_dependencies(monkeypatch):
         configure_transnet_device(tensorflow_stub(), "unknown")
 
 
-@pytest.mark.parametrize("backend,provider", [
-    ("cuda", "CUDAExecutionProvider"), ("cpu", "CPUExecutionProvider"),
-])
+@pytest.mark.parametrize(
+    "backend,provider",
+    [
+        ("cuda", "CUDAExecutionProvider"),
+        ("cpu", "CPUExecutionProvider"),
+    ],
+)
 def test_person_selects_available_provider(monkeypatch, backend, provider):
     monkeypatch.setenv("MINDEX_PERSON_BACKEND", backend)
     monkeypatch.setenv("MINDEX_PERSON_PROVIDERS", "LegacyProvider")
-    monkeypatch.setitem(sys.modules, "onnxruntime", SimpleNamespace(get_available_providers=lambda: [provider]))
+    monkeypatch.setitem(
+        sys.modules, "onnxruntime", SimpleNamespace(get_available_providers=lambda: [provider])
+    )
     assert execution_providers() == ([provider] if backend == "cpu" else [provider, "CPUExecutionProvider"])
 
 
 def test_person_missing_provider_does_not_fall_back_to_cpu(monkeypatch):
     monkeypatch.setenv("MINDEX_PERSON_BACKEND", "cuda")
-    monkeypatch.setitem(sys.modules, "onnxruntime", SimpleNamespace(
-        get_available_providers=lambda: ["CPUExecutionProvider"],
-    ))
+    monkeypatch.setitem(
+        sys.modules,
+        "onnxruntime",
+        SimpleNamespace(
+            get_available_providers=lambda: ["CPUExecutionProvider"],
+        ),
+    )
     with pytest.raises(RuntimeError, match="所选后端 cuda 不可用"):
         execution_providers()
 
 
 def test_person_metal_reports_pinned_sdk_limitation_even_if_coreml_is_available(monkeypatch):
     monkeypatch.setenv("MINDEX_PERSON_BACKEND", "metal")
-    monkeypatch.setitem(sys.modules, "onnxruntime", SimpleNamespace(
-        get_available_providers=lambda: ["CoreMLExecutionProvider", "CPUExecutionProvider"],
-    ))
+    monkeypatch.setitem(
+        sys.modules,
+        "onnxruntime",
+        SimpleNamespace(
+            get_available_providers=lambda: ["CoreMLExecutionProvider", "CPUExecutionProvider"],
+        ),
+    )
     with pytest.raises(RuntimeError, match="PersonAnalysis 仅支持 CPU/CUDA"):
         execution_providers()
 

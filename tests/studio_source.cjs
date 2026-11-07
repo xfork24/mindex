@@ -8,12 +8,16 @@ const STUDIO = path.join(ROOT, "frontend/src/studio");
 function studioScripts() {
   const html = fs.readFileSync(path.join(STUDIO, "studio.html"), "utf8");
   const files = [...html.matchAll(/\/assets\/studio\/([\w-]+\.js)/g)].map((m) => m[1]);
-  if (!files.length) throw new Error("studio.html 中没有创作页脚本");
+  if (!files.length) {
+    throw new Error("studio.html 中没有创作页脚本");
+  }
   return files.map((name) => path.join(STUDIO, name));
 }
 
 function studioSource() {
-  return studioScripts().map((file) => fs.readFileSync(file, "utf8")).join("");
+  return studioScripts()
+    .map((file) => fs.readFileSync(file, "utf8"))
+    .join("");
 }
 
 module.exports = { studioScripts, studioSource };

@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import os
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from mindex.shared.config import Config
-from mindex.shared.db.maintenance_gate import MaintenanceBusy, maintenance_gate
-from mindex.shared.storage import Store
+from shared.config import Config
+from shared.db.maintenance_gate import MaintenanceBusy, maintenance_gate
+from shared.storage import Store
 
 
 def test_gate_is_noop_on_local_form(tmp_path):
@@ -24,8 +25,8 @@ def test_gate_mutual_exclusion_on_pg(tmp_path, monkeypatch):
         pytest.skip("需要 MINDEX_TEST_POSTGRES_DSN")
     import psycopg
 
-    from mindex.shared.db.migrate_pg import migrate_pg
-    from mindex.shared.storage import PgStore
+    from shared.db.migrate_pg import migrate_pg
+    from shared.storage import PgStore
 
     with psycopg.connect(dsn, autocommit=True) as conn:
         conn.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
@@ -45,7 +46,6 @@ def test_gate_mutual_exclusion_on_pg(tmp_path, monkeypatch):
 
 def test_cluster_api_proxies_agent_without_local_session_state(tmp_path, monkeypatch):
     """业务 API 转发给单实例网关，保留用户认证并剥离本机内部凭证。"""
-    import httpx
 
     dsn = os.environ.get("MINDEX_TEST_POSTGRES_DSN", "")
     if not dsn:
@@ -53,7 +53,7 @@ def test_cluster_api_proxies_agent_without_local_session_state(tmp_path, monkeyp
     monkeypatch.setenv("MINDEX_DATABASE_DSN", dsn)
     monkeypatch.setenv("MINDEX_S3_ACCESS_KEY", "mindex")
     monkeypatch.setenv("MINDEX_S3_SECRET_KEY", "mindex-test")
-    from mindex.api import create_app
+    from api import create_app
 
     received = []
 
@@ -66,20 +66,28 @@ def test_cluster_api_proxies_agent_without_local_session_state(tmp_path, monkeyp
         return httpx.Response(200, stream=Body(), headers={"content-type": "application/json"})
 
     original_client = httpx.AsyncClient
-    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: original_client(
-        **kwargs, transport=httpx.MockTransport(gateway)))
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda **kwargs: original_client(**kwargs, transport=httpx.MockTransport(gateway)),
+    )
 
     config = Config(
         data_dir=tmp_path / "data",
-        database={"backend": "postgres"}, vector={"backend": "chroma_server"},
-        storage={"backend": "s3"}, queue={"backend": "postgres"}, locks={"backend": "postgres"},
+        database={"backend": "postgres"},
+        vector={"backend": "chroma_server"},
+        storage={"backend": "s3"},
+        queue={"backend": "postgres"},
+        locks={"backend": "postgres"},
         agent={"gateway_url": "https://agent.internal"},
     )
     app = create_app(config)
     assert getattr(app.state, "agent_runtime", None) is None  # 不建独立会话运行时
     with TestClient(app) as client:
-        response = client.get("/api/agent/status", headers={
-            "Authorization": "Bearer user-token", "X-Mindex-Internal": "local-only"})
+        response = client.get(
+            "/api/agent/status",
+            headers={"Authorization": "Bearer user-token", "X-Mindex-Internal": "local-only"},
+        )
         assert response.status_code == 200
         assert response.json() == {"via": "gateway", "path": "/api/agent/status"}
         assert received[0].headers["authorization"] == "Bearer user-token"

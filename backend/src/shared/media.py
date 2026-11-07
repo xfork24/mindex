@@ -1,3 +1,5 @@
+"""媒体工具:ffmpeg/ffprobe 调用封装、探测、切片与原子写入。"""
+
 from __future__ import annotations
 
 import base64
@@ -10,7 +12,9 @@ import threading
 from collections import OrderedDict
 from pathlib import Path
 
-from mindex.shared.trace import record
+from shared.query_budget import remaining
+from shared.trace import record
+from shared.work_budget import commit_file, current, stream_command
 
 
 class MediaError(ValueError):
@@ -37,26 +41,33 @@ def resolve_tool(args: list[str]) -> list[str]:
 
 
 def command(args: list[str], *, timeout: float = 600) -> bytes:
-    from mindex.shared.query_budget import remaining
 
     timeout = remaining(timeout)
     args = resolve_tool(args)
     record("command", {"args": args, "timeout": timeout})
-    from mindex.shared.work_budget import current, stream_command
 
     budget = current()
-    if (budget is not None and args and Path(args[0]).name.startswith("ffmpeg")
-            and args[-1] not in {"-", "pipe:1"} and not args[-1].startswith("-")
-            and budget.owns(Path(args[-1]))):
+    if (
+        budget is not None
+        and args
+        and Path(args[0]).name.startswith("ffmpeg")
+        and args[-1] not in {"-", "pipe:1"}
+        and not args[-1].startswith("-")
+        and budget.owns(Path(args[-1]))
+    ):
         return stream_command(args, Path(args[-1]), timeout=timeout)
     try:
         result = subprocess.run(args, check=True, capture_output=True, timeout=timeout)
-        record("command-result", {"returncode": result.returncode, "stderr": result.stderr.decode(errors="replace")})
+        record(
+            "command-result",
+            {"returncode": result.returncode, "stderr": result.stderr.decode(errors="replace")},
+        )
         return result.stdout
     except FileNotFoundError as exc:
         raise MediaError(f"Missing executable: {args[0]}") from exc
     except subprocess.TimeoutExpired as exc:
-        from mindex.shared.query_budget import check
+        # 延迟导入：保持异常捕获范围，依赖加载失败时仍走原有降级路径。
+        from shared.query_budget import check
 
         check()
         raise MediaError(f"{args[0]} timed out") from exc
@@ -185,7 +196,6 @@ def windows(start: float, end: float, size: float = 4, stride: float = 3) -> lis
 def atomic_media(args: list[str], output: Path, *, timeout: float = 600):
     output.parent.mkdir(parents=True, exist_ok=True)
     partial = output.with_name("." + output.stem + ".partial" + output.suffix)
-    from mindex.shared.work_budget import commit_file, current
 
     budget = current()
     if budget is not None:

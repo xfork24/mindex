@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import base64
 import hashlib
 import importlib.metadata
@@ -21,13 +22,16 @@ from filelock import FileLock
 from PIL import Image
 from starlette.concurrency import run_in_threadpool
 
-from mindex.shared.config import load_config
+from shared.config import load_config
+from shared.uploads import save_upload
 
 
 def execution_providers() -> list[str]:
     backend = os.environ.get("MINDEX_PERSON_BACKEND")
     if not backend:
-        return [p.strip() for p in os.environ.get("MINDEX_PERSON_PROVIDERS", "CPUExecutionProvider").split(",")]
+        return [
+            p.strip() for p in os.environ.get("MINDEX_PERSON_PROVIDERS", "CPUExecutionProvider").split(",")
+        ]
     if backend == "metal":
         raise RuntimeError(
             "当前固定版本的 InsightFace PersonAnalysis 仅支持 CPU/CUDA，暂不支持 Metal/CoreML；"
@@ -36,6 +40,7 @@ def execution_providers() -> list[str]:
     choices = {"cuda": "CUDAExecutionProvider", "cpu": "CPUExecutionProvider"}
     if backend not in choices:
         raise ValueError("MINDEX_PERSON_BACKEND 必须是 metal、cuda 或 cpu")
+    # 延迟导入：独立模型或扩展功能使用可选依赖，仅在实际调用时加载。
     import onnxruntime as ort
 
     provider = choices[backend]
@@ -47,9 +52,12 @@ def execution_providers() -> list[str]:
 class PersonEngine:
     def __init__(self, config):
         providers = execution_providers()
+        # 延迟导入：独立模型或扩展功能使用可选依赖，仅在实际调用时加载。
         from insightface.app import PersonAnalysis
 
-        root = Path(os.environ.get("MINDEX_PERSON_MODEL_ROOT", config.person.model_root)).expanduser().resolve()
+        root = (
+            Path(os.environ.get("MINDEX_PERSON_MODEL_ROOT", config.person.model_root)).expanduser().resolve()
+        )
         package = root / "models" / config.person.model
         manifests = list(package.glob("*manifest*.json"))
         if len(manifests) != 1:
@@ -90,6 +98,7 @@ class PersonEngine:
         self.lock = threading.Lock()
 
     def observations(self, image):
+        # 延迟导入：媒体、数值或服务运行依赖仅在实际执行该功能时加载。
         import cv2
         import numpy as np
 
@@ -125,6 +134,7 @@ class PersonEngine:
         return result
 
     def image(self, path):
+        # 延迟导入：媒体、数值或服务运行依赖仅在实际执行该功能时加载。
         import numpy as np
 
         with Image.open(path) as im:
@@ -133,6 +143,7 @@ class PersonEngine:
             return {"space": self.space, "observations": self.observations(image)}
 
     def video(self, path, start, end, fps):
+        # 延迟导入：独立模型或扩展功能使用可选依赖，仅在实际调用时加载。
         import av
 
         frames = []
@@ -196,7 +207,6 @@ def create_person_app(config, engine_factory=None):
 
     @app.post("/extract/image")
     async def image(file: Annotated[UploadFile, File()]):
-        from mindex.shared.uploads import save_upload
 
         with tempfile.TemporaryDirectory(prefix="person-image-") as directory:
             path = Path(directory) / "image"
@@ -205,7 +215,6 @@ def create_person_app(config, engine_factory=None):
 
     @app.post("/extract/frames")
     async def batch_frames(files: Annotated[list[UploadFile], File()]):
-        from mindex.shared.uploads import save_upload
 
         if not 1 <= len(files) <= 16:
             raise ValueError("帧批次大小必须为 1–16")
@@ -225,7 +234,6 @@ def create_person_app(config, engine_factory=None):
         end: Annotated[float, Form(gt=0)],
         fps: Annotated[float, Form(gt=0, le=5)] = 5,
     ):
-        from mindex.shared.uploads import save_upload
 
         if end <= start:
             raise ValueError("结束时间必须大于开始时间")
@@ -240,8 +248,8 @@ def create_person_app(config, engine_factory=None):
 
 
 def main():
-    import argparse
 
+    # 延迟导入：媒体、数值或服务运行依赖仅在实际执行该功能时加载。
     import uvicorn
 
     parser = argparse.ArgumentParser()

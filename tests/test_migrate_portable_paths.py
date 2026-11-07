@@ -1,4 +1,5 @@
 """Task 5: 存量绝对路径迁移脚本的幂等性与正确性。"""
+
 import importlib.util
 import json
 import sqlite3
@@ -27,8 +28,7 @@ def test_absolute_data_dir_and_manifest_become_relative(tmp_path):
     manifest.parent.mkdir(parents=True)
     manifest.write_text("{}")
     db = data_dir / "metadata.sqlite3"
-    _make_db(db, [("t1", {"data_dir": str(data_dir),
-                          "analyzer": {"deployment_manifest": str(manifest)}})])
+    _make_db(db, [("t1", {"data_dir": str(data_dir), "analyzer": {"deployment_manifest": str(manifest)}})])
 
     report = mig.migrate_database(db, data_dir, apply=True)
     assert report, "应有改写"
@@ -61,8 +61,10 @@ def test_external_path_preserved(tmp_path):
     data_dir.mkdir(parents=True)
     db = data_dir / "metadata.sqlite3"
     external = "/opt/models/pin.json"
-    _make_db(db, [("t1", {"person": {"model_root": "~/.insightface"},
-                          "analyzer": {"deployment_manifest": external}})])
+    _make_db(
+        db,
+        [("t1", {"person": {"model_root": "~/.insightface"}, "analyzer": {"deployment_manifest": external}})],
+    )
     mig.migrate_database(db, data_dir, apply=True)
     con = sqlite3.connect(db)
     cfg = json.loads(con.execute("SELECT config FROM source_tasks WHERE id='t1'").fetchone()[0])
@@ -77,8 +79,7 @@ def test_idempotent(tmp_path):
     manifest.parent.mkdir(parents=True)
     manifest.write_text("{}")
     db = data_dir / "metadata.sqlite3"
-    _make_db(db, [("t1", {"data_dir": str(data_dir),
-                          "analyzer": {"deployment_manifest": str(manifest)}})])
+    _make_db(db, [("t1", {"data_dir": str(data_dir), "analyzer": {"deployment_manifest": str(manifest)}})])
     first = mig.migrate_database(db, data_dir, apply=True)
     assert first
     # 再次运行应无改写。

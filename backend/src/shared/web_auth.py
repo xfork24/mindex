@@ -16,8 +16,8 @@ from urllib.parse import quote, urlsplit
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 
-from mindex.shared.shot_media import file_response
-from mindex.shared.web_assets import frontend_root
+from shared.shot_media import file_response
+from shared.web_assets import frontend_root
 
 TOKEN_ENV = "MINDEX_WEB_TOKEN"
 COOKIE = "mindex_session"

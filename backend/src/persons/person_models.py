@@ -7,9 +7,11 @@ import uuid
 from contextlib import contextmanager
 from typing import Literal
 
+from filelock import Timeout
 from pydantic import Field, model_validator
 
-from mindex.shared.config import StrictModel
+from shared import lock_backend
+from shared.config import StrictModel
 
 
 class Entity(StrictModel):
@@ -109,16 +111,11 @@ class PersonHasLinkedShots(ValueError):
             f"{s['source_name']} {s['start']:.3f}–{s['end']:.3f} 秒（分镜 {s['shot_id']}）"
             for s in result["items"][:5]
         )
-        super().__init__(
-            f"该身份仍有关联出镜证据：{result['total']} 个未排除分镜；请先核对。{examples}"
-        )
+        super().__init__(f"该身份仍有关联出镜证据：{result['total']} 个未排除分镜；请先核对。{examples}")
 
 
 @contextmanager
 def frame_review_lock(store):
-    from filelock import Timeout
-
-    from mindex.shared import lock_backend
 
     try:
         with lock_backend.named(store, "pipeline"):

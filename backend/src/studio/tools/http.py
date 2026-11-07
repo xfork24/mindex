@@ -9,9 +9,10 @@ from __future__ import annotations
 import time
 from urllib.parse import quote, urljoin
 
-from mindex.studio import studio
+import httpx
 
-from .artifacts import Artifact
+from studio import studio
+from studio.tools.artifacts import Artifact
 
 
 def dig(value, path: str):
@@ -46,7 +47,6 @@ class HttpAdapter:
         self.base = connection["base_url"].rstrip("/")
 
     def _client(self, timeout: float):
-        import httpx
 
         return httpx.Client(timeout=timeout, headers=self.cfg.get("headers") or {}, follow_redirects=False)
 
@@ -61,7 +61,6 @@ class HttpAdapter:
 
     def list_tools(self, *, timeout: float = 15) -> list[dict] | None:
         """manifest 设置了 tools_path 时列出服务端工具；否则只测试 base_url 可达并返回 None。"""
-        import httpx
 
         try:
             with self._client(timeout) as client:
@@ -74,13 +73,23 @@ class HttpAdapter:
         except httpx.HTTPError as exc:
             raise studio.StudioError(f"连接失败：{exc}") from exc
         items = data.get("tools") if isinstance(data, dict) else data
-        return [{"name": str(item.get("name")), "description": item.get("description")}
-                for item in items or [] if isinstance(item, dict) and item.get("name")]
+        return [
+            {"name": str(item.get("name")), "description": item.get("description")}
+            for item in items or []
+            if isinstance(item, dict) and item.get("name")
+        ]
 
-    def call(self, tool: str, arguments: dict, uploads: list[dict], *, timeout: float,
-             cancelled=lambda: False, notify=lambda status: None) -> tuple[list[Artifact], dict]:
+    def call(
+        self,
+        tool: str,
+        arguments: dict,
+        uploads: list[dict],
+        *,
+        timeout: float,
+        cancelled=lambda: False,
+        notify=lambda status: None,
+    ) -> tuple[list[Artifact], dict]:
         """返回 ``(产物列表, 记录)``；记录含任务 ID、最后状态与轮询次数（不含请求头）。"""
-        import httpx
 
         cfg = self.cfg
         deadline = time.monotonic() + timeout
@@ -88,12 +97,22 @@ class HttpAdapter:
         body = {"tool": tool, "arguments": arguments, "uploads": uploads}
         try:
             with self._client(min(timeout, 120)) as client:
-                from mindex.shared.external_calls import call_once
+                # 延迟导入：保持异常捕获范围，依赖加载失败时仍走原有降级路径。
+                from shared.external_calls import call_once
 
-                result = call_once("tool.submit", [self.base, cfg["submit_path"], body],
-                    lambda: self._json(client.post(self.base + cfg["submit_path"].replace("{tool}", quote(tool, safe="")),
-                                                  json=body), "提交工具任务"),
-                    request_id=lambda value: str(dig(value, cfg["id_field"])) if cfg.get("id_field") else None)
+                result = call_once(
+                    "tool.submit",
+                    [self.base, cfg["submit_path"], body],
+                    lambda: self._json(
+                        client.post(
+                            self.base + cfg["submit_path"].replace("{tool}", quote(tool, safe="")), json=body
+                        ),
+                        "提交工具任务",
+                    ),
+                    request_id=lambda value: (
+                        str(dig(value, cfg["id_field"])) if cfg.get("id_field") else None
+                    ),
+                )
                 status = dig(result, cfg["status_field"])
                 if cfg.get("poll_path") and str(status) not in cfg["done"]:
                     task = dig(result, cfg["id_field"])

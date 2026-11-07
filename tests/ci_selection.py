@@ -1,4 +1,5 @@
 """CI 分组与确定性分片；不改变普通 pytest 的测试选择。"""
+
 from __future__ import annotations
 
 import json
@@ -53,8 +54,11 @@ def pytest_collection_modifyitems(config, items):
             raise ValueError
     except ValueError:
         raise pytest.UsageError("--ci-shard 应为 序号/总数，且 1 <= 序号 <= 总数 <= 16") from None
-    candidates = [item for item in items if suite_for(
-        item.nodeid, {mark.name for mark in item.iter_markers()}, item.fixturenames) == suite]
+    candidates = [
+        item
+        for item in items
+        if suite_for(item.nodeid, {mark.name for mark in item.iter_markers()}, item.fixturenames) == suite
+    ]
     costs = json.loads(Path(__file__).with_name("ci-durations.json").read_text())
     selected = set(split_nodes([item.nodeid for item in candidates], count, costs)[index - 1])
     kept = [item for item in items if item.nodeid in selected]
@@ -64,10 +68,20 @@ def pytest_collection_modifyitems(config, items):
     plan = config.getoption("--ci-plan")
     if plan:
         plan.parent.mkdir(parents=True, exist_ok=True)
-        plan.write_text(json.dumps({"suite": suite, "shard": f"{index}/{count}",
-                                   "selected": len(kept), "deselected": len(deselected),
-                                   "nodeids": [item.nodeid for item in kept]},
-                                  ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        plan.write_text(
+            json.dumps(
+                {
+                    "suite": suite,
+                    "shard": f"{index}/{count}",
+                    "selected": len(kept),
+                    "deselected": len(deselected),
+                    "nodeids": [item.nodeid for item in kept],
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
     items[:] = kept
     config.hook.pytest_deselected(items=deselected)
-

@@ -54,8 +54,10 @@ def validate_workflow(workflow: object, mapping: object, fields: dict[str, str] 
             "这是 ComfyUI 界面格式的工作流；请在 ComfyUI 中用「导出（API）」（Export (API)）重新导出后再导入"
         )
     for node_id, node in workflow.items():
-        if not isinstance(node, dict) or not isinstance(node.get("class_type"), str) or not isinstance(
-            node.get("inputs"), dict
+        if (
+            not isinstance(node, dict)
+            or not isinstance(node.get("class_type"), str)
+            or not isinstance(node.get("inputs"), dict)
         ):
             raise ValueError(
                 f"工作流节点 {node_id} 不是 API 格式（需要 class_type 与 inputs）；"

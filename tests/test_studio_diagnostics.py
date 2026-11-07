@@ -11,14 +11,14 @@ import threading
 from pathlib import Path
 
 import pytest
-from conftest import FixtureSpeaker, legacy_job
 from fastapi.testclient import TestClient
 from filelock import FileLock
-from test_studio_workspace import wait_build
 
-from mindex.api import create_app
-from mindex.studio import studio
-from mindex.studio import workspace as ws
+from api import create_app
+from conftest import FixtureSpeaker, legacy_job
+from studio import studio
+from studio import workspace as ws
+from test_studio_workspace import wait_build
 
 
 def tree_hashes(directory: Path) -> dict[str, str]:
@@ -83,14 +83,25 @@ def test_changed_narration_marks_tts_stale(env):
     p = ws.plan(w, pid)
     spec = ws.specification(config, job_id, w, p, "tts", "a")
     vid = ws.add_version(
-        config, job_id, w, "tts", "a",
-        inputs=spec["inputs"], parameters=spec["parameters"], signature=spec["signature"],
+        config,
+        job_id,
+        w,
+        "tts",
+        "a",
+        inputs=spec["inputs"],
+        parameters=spec["parameters"],
+        signature=spec["signature"],
     )
     p["shots"]["a"]["tts"] = vid
     ws.persist(config, job_id, w)
     [node] = client.get(url(job_id, pid)).json()["nodes"]
     assert node == {
-        "key": "tts:a", "stage": "tts", "shot_id": "a", "version": vid, "state": "ok", "reasons": [],
+        "key": "tts:a",
+        "stage": "tts",
+        "shot_id": "a",
+        "version": vid,
+        "state": "ok",
+        "reasons": [],
     }
 
     edited = [SHOTS[0].model_copy(update={"text": "红色的开场。"}), *SHOTS[1:]]
@@ -157,8 +168,8 @@ def set_burn(config, job_id, pid):
 
 def test_font_ok_when_libass_and_cjk_font_available(env, tmp_path):
     """环境具备 libass 与可用 CJK 字体时 font == "ok"；否则跳过（由下一个用例覆盖失败分支）。"""
-    from mindex.shared.media import MediaError
-    from mindex.studio.studio_render import check_font
+    from shared.media import MediaError
+    from studio.render import check_font
 
     config, client, job_id, pid = env
     config.studio.subtitle.font_file = None
@@ -173,7 +184,7 @@ def test_font_ok_when_libass_and_cjk_font_available(env, tmp_path):
 
 
 def test_missing_subtitles_filter_reported(env, monkeypatch):
-    from mindex.studio import studio_render
+    from studio import render as studio_render
 
     config, client, job_id, pid = env
     config.studio.subtitle.font_file = None

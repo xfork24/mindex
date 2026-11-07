@@ -1,7 +1,13 @@
 """显式工作集作用域：未知输出按写入前增长预约，不允许先写后核算。"""
+
 from __future__ import annotations
 
+import os
+import shutil
+import subprocess
+import tempfile
 import threading
+from collections import deque
 from contextlib import ExitStack, contextmanager
 from contextvars import ContextVar
 from functools import wraps
@@ -98,7 +104,6 @@ class GrowingReservation:
             self.budget.pending[self.path] = self
 
     def commit(self, target):
-        import os
 
         if self.budget is None:
             os.replace(self.path, target)
@@ -128,6 +133,7 @@ def budgeted(method):
     def wrapped(self, *args, **kwargs):
         with scope(self.store):
             return method(self, *args, **kwargs)
+
     return wrapped
 
 
@@ -136,19 +142,30 @@ def resource_write(method):
     def wrapped(store, *args, **kwargs):
         with scope(store):
             return method(store, *args, **kwargs)
+
     return wrapped
 
 
 def stream_command(args, output, *, timeout):
     """外部编码器通过有界管道输出；写入前预约，失败立即终止子进程。"""
-    import subprocess
-    from collections import deque
 
-    from mindex.shared.media import MediaError
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+    from shared.media import MediaError
 
-    formats = {".mp4": "mp4", ".m4a": "mp4", ".mov": "mov", ".mkv": "matroska", ".webm": "webm",
-               ".wav": "wav", ".mp3": "mp3", ".flac": "flac", ".ogg": "ogg",
-               ".png": "image2pipe", ".jpg": "image2pipe", ".jpeg": "image2pipe"}
+    formats = {
+        ".mp4": "mp4",
+        ".m4a": "mp4",
+        ".mov": "mov",
+        ".mkv": "matroska",
+        ".webm": "webm",
+        ".wav": "wav",
+        ".mp3": "mp3",
+        ".flac": "flac",
+        ".ogg": "ogg",
+        ".png": "image2pipe",
+        ".jpg": "image2pipe",
+        ".jpeg": "image2pipe",
+    }
     suffix = output.suffix.lower()
     if suffix not in formats or "%" in output.name:
         raise MediaError("输出类型不能可靠预约工作集；请使用受支持的单文件输出")
@@ -177,7 +194,8 @@ def stream_command(args, output, *, timeout):
     try:
         with GrowingReservation(output) as reservation, output.open("wb") as target:
             while chunk := process.stdout.read(65536):
-                from mindex.shared.db.fencing import current_attempt
+                # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+                from shared.db.fencing import current_attempt
 
                 attempt = current_attempt()
                 if attempt is not None:
@@ -188,7 +206,8 @@ def stream_command(args, output, *, timeout):
             process.wait()
             reader.join()
             if timed_out.is_set():
-                from mindex.shared.query_budget import check
+                # 延迟导入：保持异常捕获范围，依赖加载失败时仍走原有降级路径。
+                from shared.query_budget import check
 
                 check()
                 raise MediaError("媒体处理超过期限，已终止")
@@ -213,19 +232,19 @@ def stream_command(args, output, *, timeout):
 def configured(method):
     @wraps(method)
     def wrapped(config, *args, **kwargs):
-        from mindex.shared.storage import Store
+        # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+        from shared.storage import Store
 
         if config.storage.backend != "s3":
             return method(config, *args, **kwargs)
         with Store.open(config) as store, scope(store):
             return method(config, *args, **kwargs)
+
     return wrapped
 
 
 def copy_file(source, target):
     """有界复制；临时文件隐藏并按块预约，原子提交后计入可见工作集。"""
-    import shutil
-    import tempfile
 
     budget = current()
     if budget is None or not budget.owns(target):
@@ -257,7 +276,6 @@ def copy_file(source, target):
 
 
 def commit_file(partial, target):
-    import os
 
     budget = current()
     reservation = budget.pending.get(Path(partial).resolve()) if budget is not None else None

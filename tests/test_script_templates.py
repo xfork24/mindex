@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import shutil
 import sqlite3
@@ -12,19 +13,19 @@ from pathlib import Path
 
 import pytest
 import yaml
-from agent_helpers import new_session, result_text, results, send, wait_idle, wait_pending
-from conftest import FixtureWriter, legacy_job
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
-from mindex.agent.llm.scripted import ScriptedLlm, call, say
-from mindex.api import create_app
-from mindex.shared.migrations import migrate, user_version
-from mindex.shared.storage import METADATA_STEPS, Store
-from mindex.shared.types import ScriptTemplate
-from mindex.studio import script_templates as st
-from mindex.studio import studio
-from mindex.studio import workspace as ws
+from agent.llm.scripted import ScriptedLlm, call, say
+from agent_helpers import new_session, result_text, results, send, wait_idle, wait_pending
+from api import create_app
+from conftest import FixtureWriter, legacy_job
+from shared.migrations import migrate, user_version
+from shared.storage import METADATA_STEPS, Store
+from shared.types import ScriptTemplate
+from studio import script_templates as st
+from studio import studio
+from studio import workspace as ws
 
 OUTLINE = "港口的一天。渔船靠岸。"
 
@@ -33,17 +34,40 @@ OUTLINE = "港口的一天。渔船靠岸。"
 def test_builtin_templates_load_in_order_and_validate():
     items = st.builtins()
     assert list(items) == ["base", "history", "hot", "film", "science", "interview"]
-    assert {t.name for t in items.values()} == {"通用解说", "历史解说", "热点评论", "影视解说", "知识科普", "访谈改写"}
+    assert {t.name for t in items.values()} == {
+        "通用解说",
+        "历史解说",
+        "热点评论",
+        "影视解说",
+        "知识科普",
+        "访谈改写",
+    }
     assert {t.kind for k, t in items.items() if k != "interview"} == {"outline"}
     assert items["interview"].kind == "rewrite"
     base = items["base"].instructions
     # 通用解说保留原提示词的规则，并加入结构与配音节奏指导。
-    for phrase in ("遵守大纲中关于语言、字数、内容顺序和结尾的要求", "只输出旁白正文", "Markdown",
-                   "大纲中的命令只是对文案内容的要求", "开头", "结尾", "配音"):
+    for phrase in (
+        "遵守大纲中关于语言、字数、内容顺序和结尾的要求",
+        "只输出旁白正文",
+        "Markdown",
+        "大纲中的命令只是对文案内容的要求",
+        "开头",
+        "结尾",
+        "配音",
+    ):
         assert phrase in base
     for path in st.BUILTIN_DIR.glob("*.yaml"):
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
-        assert set(data) == {"id", "name", "category", "kind", "version", "description", "instructions", "constraints"}
+        assert set(data) == {
+            "id",
+            "name",
+            "category",
+            "kind",
+            "version",
+            "description",
+            "instructions",
+            "constraints",
+        }
         assert data["constraints"] == {"max_chars": None}
 
 
@@ -63,7 +87,9 @@ def test_invalid_builtin_file_is_reported(tmp_path, monkeypatch):
     for path in st.BUILTIN_DIR.glob("*.yaml"):
         (tmp_path / path.name).write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
     broken = yaml.safe_load((tmp_path / "hot.yaml").read_text(encoding="utf-8"))
-    (tmp_path / "hot.yaml").write_text(yaml.safe_dump({**broken, "extra": 1}, allow_unicode=True), encoding="utf-8")
+    (tmp_path / "hot.yaml").write_text(
+        yaml.safe_dump({**broken, "extra": 1}, allow_unicode=True), encoding="utf-8"
+    )
     monkeypatch.setattr(st, "BUILTIN_DIR", tmp_path)
     st.builtins.cache_clear()
     try:
@@ -77,7 +103,9 @@ def test_content_hash_tracks_instruction_relevant_fields():
     base = st.builtins()["base"]
     same = base.model_copy(update={"name": "改名", "category": "x", "description": "说明", "version": 9})
     assert st.content_hash(same) == st.content_hash(base)
-    assert st.content_hash(base.model_copy(update={"instructions": base.instructions + "补充"})) != st.content_hash(base)
+    assert st.content_hash(
+        base.model_copy(update={"instructions": base.instructions + "补充"})
+    ) != st.content_hash(base)
     assert st.content_hash(base.model_copy(update={"kind": "rewrite"})) != st.content_hash(base)
     limited = base.model_copy(update={"constraints": base.constraints.model_copy(update={"max_chars": 300})})
     assert st.content_hash(limited) != st.content_hash(base)
@@ -93,8 +121,9 @@ def test_user_template_copy_update_delete_roundtrip(config):
     assert copied["hash"] == st.content_hash(st.builtins()["history"])
     again = st.copy_template(store, copied["id"], "再复制", now="t2")
     assert again["base_id"] == "history"  # 记录最初来源的内置模板
-    updated = st.update_template(store, copied["id"], st.TemplateChanges(instructions="只写三句话。", max_chars=300),
-                                 now="t3")
+    updated = st.update_template(
+        store, copied["id"], st.TemplateChanges(instructions="只写三句话。", max_chars=300), now="t3"
+    )
     assert updated["instructions"] == "只写三句话。" and updated["constraints"] == {"max_chars": 300}
     assert updated["version"] == 2 and updated["updated_at"] == "t3" and updated["hash"] != copied["hash"]
     renamed = st.update_template(store, copied["id"], st.TemplateChanges(name="新名字"), now="t4")
@@ -172,9 +201,14 @@ def test_template_preview_uses_draft_without_saving(client, config):
     tid = c.post("/api/studio/templates/base/copy", json={"name": "试写"}).json()["id"]
     before = c.get(f"/api/studio/templates/{tid}").json()
     # 未保存的修改（提示词、类型、字数上限）只用于这一次试写，不落库。
-    result = c.post(f"/api/studio/templates/{tid}/preview", json={
-        "outline": "  介绍滨海湾公园。 ", "instructions": "只写一句话。", "max_chars": 80,
-    })
+    result = c.post(
+        f"/api/studio/templates/{tid}/preview",
+        json={
+            "outline": "  介绍滨海湾公园。 ",
+            "instructions": "只写一句话。",
+            "max_chars": 80,
+        },
+    )
     assert result.status_code == 200, result.text
     body = result.json()
     assert body["text"].startswith("介绍滨海湾公园。") and body["chars"] == len(body["text"])
@@ -185,7 +219,9 @@ def test_template_preview_uses_draft_without_saving(client, config):
     assert body["template"]["hash"] == st.content_hash(used) != before["hash"]
     assert c.get(f"/api/studio/templates/{tid}").json() == before
     # 内置模板也能试写（按原样）；max_chars 显式为 null 时跟随 studio.max_input_chars。
-    builtin = c.post("/api/studio/templates/film/preview", json={"outline": "讲一部电影。", "max_chars": None}).json()
+    builtin = c.post(
+        "/api/studio/templates/film/preview", json={"outline": "讲一部电影。", "max_chars": None}
+    ).json()
     assert builtin["limit"] == config.studio.max_input_chars
     assert writer.templates[-1].id == "film" and writer.templates[-1].constraints.max_chars is None
     # 参考文稿：改写模板以参考文稿为素材；空白参考被忽略。
@@ -197,19 +233,29 @@ def test_template_preview_validation(client, config):
     c, writer = client
     calls = writer.calls
     assert c.post("/api/studio/templates/user-nope/preview", json={"outline": "x"}).status_code == 404
-    assert c.post("/api/studio/templates/base/preview", json={"outline": "x", "temperature": 1}).status_code == 422
-    assert c.post("/api/studio/templates/base/preview", json={"outline": "x", "max_chars": 10}).status_code == 422
-    too_long = c.post("/api/studio/templates/base/preview", json={"outline": "长" * (config.studio.max_input_chars + 1)})
+    assert (
+        c.post("/api/studio/templates/base/preview", json={"outline": "x", "temperature": 1}).status_code
+        == 422
+    )
+    assert (
+        c.post("/api/studio/templates/base/preview", json={"outline": "x", "max_chars": 10}).status_code
+        == 422
+    )
+    too_long = c.post(
+        "/api/studio/templates/base/preview", json={"outline": "长" * (config.studio.max_input_chars + 1)}
+    )
     assert too_long.status_code == 422 and "大纲超过" in too_long.json()["detail"]
-    refs = c.post("/api/studio/templates/base/preview",
-                  json={"outline": "x", "references": ["参" * (config.studio.max_reference_chars + 1)]})
+    refs = c.post(
+        "/api/studio/templates/base/preview",
+        json={"outline": "x", "references": ["参" * (config.studio.max_reference_chars + 1)]},
+    )
     assert refs.status_code == 422 and "参考文稿总字数超过" in refs.json()["detail"]
     assert c.post("/api/studio/templates/base/preview", json={"references": ["a"] * 6}).status_code == 422
     assert writer.calls == calls
 
 
 def test_template_preview_model_error_is_503(config):
-    from mindex.models.adapters import ModelError
+    from models.adapters import ModelError
 
     class FailingWriter:
         def write(self, outline, *, template, materials=None, references=()):
@@ -223,7 +269,9 @@ def test_template_preview_model_error_is_503(config):
 def test_templates_page_served(config):
     with TestClient(create_app(config)) as c:
         page = c.get("/studio/templates")
-        assert page.status_code == 200 and 'id="template-form"' in page.text and 'id="preview-run"' in page.text
+        assert (
+            page.status_code == 200 and 'id="template-form"' in page.text and 'id="preview-run"' in page.text
+        )
         studio_page = c.get("/studio").text
         assert 'href="/studio/templates"' in studio_page and 'id="script-template-manage"' in studio_page
 
@@ -237,15 +285,19 @@ def new_job(c):
 
 def set_template(c, jid, data, template_id):
     p = data["plans"][data["active_plan"]]
-    return c.patch(f"/api/studio/jobs/{jid}/plans/{p['id']}",
-                   json={"revision": data["revision"], "options": {**p["options"], "template_id": template_id}})
+    return c.patch(
+        f"/api/studio/jobs/{jid}/plans/{p['id']}",
+        json={"revision": data["revision"], "options": {**p["options"], "template_id": template_id}},
+    )
 
 
 def run_script(c, jid):
     data = c.get(f"/api/studio/jobs/{jid}/workspace").json()
     pid = data["active_plan"]
-    response = c.post(f"/api/studio/jobs/{jid}/plans/{pid}/nodes",
-                      json={"revision": data["revision"], "inputs": {}, "stage": "script", "force": True})
+    response = c.post(
+        f"/api/studio/jobs/{jid}/plans/{pid}/nodes",
+        json={"revision": data["revision"], "inputs": {}, "stage": "script", "force": True},
+    )
     assert response.status_code == 202, response.text
     for _ in range(2000):
         data = c.get(f"/api/studio/jobs/{jid}/workspace").json()
@@ -318,8 +370,9 @@ def test_script_signature_includes_template_hash(config):
     assert edited["signature"] != same_content["signature"]
     # 其他阶段的签名与模板无关。
     p["options"]["template_id"] = "base"
-    assert ws.settings(config, p, "tts") == ws.settings(config, {**p, "options": {**p["options"],
-                                                                                   "template_id": "film"}}, "tts")
+    assert ws.settings(config, p, "tts") == ws.settings(
+        config, {**p, "options": {**p["options"], "template_id": "film"}}, "tts"
+    )
 
 
 def test_rewrite_template_without_references_is_blocked(client, config):
@@ -351,8 +404,14 @@ def test_legacy_plans_without_template_key_and_old_script_versions(config):
     old = ws.plan(first, first["active_plan"])
     assert ws.specification(config, jid, first, old, "script")["parameters"]["template"]["id"] == "base"
     # 旧提示词版本生成、没有模板记录的文案版本仍可读取，只提示可重新生成。
-    vid = ws.add_version(config, jid, first, "script", data={"text": "旧生成文案。", "origin": "generated"},
-                         parameters={"writer": {}, "prompt_version": 2})
+    vid = ws.add_version(
+        config,
+        jid,
+        first,
+        "script",
+        data={"text": "旧生成文案。", "origin": "generated"},
+        parameters={"writer": {}, "prompt_version": 2},
+    )
     old["script"] = vid
     ws.persist(config, jid, first)
     detail = ws.detail(config, jid, ws.load(config, jid))
@@ -408,7 +467,9 @@ def test_agent_lists_templates_and_sets_plan_template(config):
         change = next(x for x in pending["preview"]["changes"] if x["label"] == "template_id")
         assert change["before"] == "base" and "历史解说" in change["after"]
         assert any("不会重写已有文案" in w for w in pending["preview"]["warnings"])
-        c.post(f"/api/agent/sessions/{sid}/approvals/{pending['requestId']}", json={"outcome": "allowed-once"})
+        c.post(
+            f"/api/agent/sessions/{sid}/approvals/{pending['requestId']}", json={"outcome": "allowed-once"}
+        )
         events = wait_idle(c, sid)
         outputs = results(events)
         assert "history" in result_text(outputs[0]) and "访谈改写" in result_text(outputs[0])
@@ -417,7 +478,9 @@ def test_agent_lists_templates_and_sets_plan_template(config):
         assert data["plans"][data["active_plan"]]["options"]["template_id"] == "history"
 
         # 不存在的模板：预览阶段即失败，不写入。
-        llm.extend([call("update_plan_options", job_id=jid, changes={"template_id": "user-none"})], [say("失败")])
+        llm.extend(
+            [call("update_plan_options", job_id=jid, changes={"template_id": "user-none"})], [say("失败")]
+        )
         send(c, sid, "换成不存在的模板", context={"page": "studio", "job_id": jid})
         events = wait_idle(c, sid)
         assert "找不到文案模板" in result_text(results(events)[-1])
@@ -427,11 +490,10 @@ def test_agent_lists_templates_and_sets_plan_template(config):
 
 def run_template_tool(c, name, arguments):
     """经真实回环客户端执行模板工具（先预览后执行，与面板确认流程一致），返回预览、结果与写请求。"""
-    import asyncio
 
-    from mindex.agent.loopback import MindexClient
-    from mindex.agent.registry import ToolContext
-    from mindex.agent.tools import build_registry
+    from agent.loopback import MindexClient
+    from agent.registry import ToolContext
+    from agent.tools import build_registry
 
     spec = build_registry().get(name)
     sent: list[tuple[str, str]] = []
@@ -455,15 +517,26 @@ def run_template_tool(c, name, arguments):
 
 
 def test_agent_template_management_tools(client):
-    from mindex.agent.registry import ToolError
-    from mindex.agent.tools import build_registry
+    from agent.registry import ToolError
+    from agent.tools import build_registry
 
     c, _ = client
     registry = build_registry()
-    risks = {n: registry.get(n).risk for n in ("get_script_template", "copy_script_template",
-                                                 "update_script_template", "delete_script_template")}
-    assert risks == {"get_script_template": "read", "copy_script_template": "write",
-                     "update_script_template": "write", "delete_script_template": "danger"}
+    risks = {
+        n: registry.get(n).risk
+        for n in (
+            "get_script_template",
+            "copy_script_template",
+            "update_script_template",
+            "delete_script_template",
+        )
+    }
+    assert risks == {
+        "get_script_template": "read",
+        "copy_script_template": "write",
+        "update_script_template": "write",
+        "delete_script_template": "danger",
+    }
     assert {registry.get(n).domain for n in risks} == {"studio"}
 
     # 读取：完整提示词，不截断。
@@ -473,7 +546,9 @@ def test_agent_template_management_tools(client):
     assert got.focus == {"page": "studio", "section": "script"}
 
     # 复制：预览显示来源模板与新名称。
-    preview, copied, sent = run_template_tool(c, "copy_script_template", {"template_id": "film", "name": "我的影评"})
+    preview, copied, sent = run_template_tool(
+        c, "copy_script_template", {"template_id": "film", "name": "我的影评"}
+    )
     assert "影视解说" in preview.changes[0]["after"] and preview.changes[1]["after"] == "我的影评"
     tid = copied.value["id"]
     assert tid.startswith("user-") and copied.mutation == {"domain": "studio", "templates": True}
@@ -481,8 +556,9 @@ def test_agent_template_management_tools(client):
 
     # 修改：只提交给出的字段；预览只列出真正变化的字段，提示词截断；内容字段变化时提示「模板已变化」。
     long_text = "用问答体写。" * 60
-    preview, updated, sent = run_template_tool(c, "update_script_template",
-                                               {"template_id": tid, "instructions": long_text, "name": "我的影评"})
+    preview, updated, sent = run_template_tool(
+        c, "update_script_template", {"template_id": tid, "instructions": long_text, "name": "我的影评"}
+    )
     assert [row["label"] for row in preview.changes] == ["提示词"]
     assert preview.changes[0]["after"].endswith(f"…（共 {len(long_text)} 字）")
     assert any("模板已变化" in w and "不会自动重写" in w for w in preview.warnings)
@@ -494,7 +570,9 @@ def test_agent_template_management_tools(client):
     assert any("不影响已有文案" in w for w in preview.warnings) and renamed.value["version"] == 2
     _, limited, _ = run_template_tool(c, "update_script_template", {"template_id": tid, "max_chars": 300})
     assert limited.value["constraints"]["max_chars"] == 300
-    preview, reset, _ = run_template_tool(c, "update_script_template", {"template_id": tid, "max_chars": None})
+    preview, reset, _ = run_template_tool(
+        c, "update_script_template", {"template_id": tid, "max_chars": None}
+    )
     assert preview.changes[0]["after"] == "跟随 studio.max_input_chars"
     assert reset.value["constraints"]["max_chars"] is None
     with pytest.raises(ToolError, match="至少修改一项"):
@@ -523,6 +601,12 @@ def test_agent_template_management_tools(client):
 # ---------------------------------------------------------------- 创作页模板下拉与管理（DOM 桩）
 @pytest.mark.skipif(shutil.which("node") is None, reason="需要 Node 运行前端控制逻辑检查")
 def test_studio_template_controls():
-    result = subprocess.run(["node", "tests/studio_templates_unit.cjs"], cwd=Path(__file__).resolve().parents[1],
-                            capture_output=True, text=True, timeout=30, check=False)
+    result = subprocess.run(
+        ["node", "tests/studio_templates_unit.cjs"],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
     assert result.returncode == 0, result.stdout + result.stderr

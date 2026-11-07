@@ -46,46 +46,84 @@ class TableSpec:
 
 TABLE_SPECS: dict[str, TableSpec] = {
     "settings": TableSpec(
-        columns=("key", "value"), conflict=("key",),
-        notes="纯键值表；REPLACE 全列列出，无重置语义"),
+        columns=("key", "value"), conflict=("key",), notes="纯键值表；REPLACE 全列列出，无重置语义"
+    ),
     "transcripts": TableSpec(columns=("source_id", "profile", "data"), conflict=("source_id", "profile")),
     "annotations": TableSpec(columns=("segment_id", "profile", "data"), conflict=("segment_id", "profile")),
     "scene_plans": TableSpec(columns=("source_id", "profile", "data"), conflict=("source_id", "profile")),
     "media_references": TableSpec(
-        columns=("path", "source_id", "start", "end", "version", "refs"), conflict=("path",)),
+        columns=("path", "source_id", "start", "end", "version", "refs"), conflict=("path",)
+    ),
     "representations": TableSpec(
-        columns=("id", "index_id", "segment_id", "view", "document", "cache_key"), conflict=("id",),
-        notes="REPLACE 未列 cache_key 时重置为 NULL（与 SQLite 删插一致，缓存键随之失效）"),
+        columns=("id", "index_id", "segment_id", "view", "document", "cache_key"),
+        conflict=("id",),
+        notes="REPLACE 未列 cache_key 时重置为 NULL（与 SQLite 删插一致，缓存键随之失效）",
+    ),
     "channel_data": TableSpec(
         columns=("source_id", "channel", "profile", "status", "data", "updated_at"),
         conflict=("source_id", "channel"),
-        notes="updated_at 有默认值：REPLACE 未列出时重置为当前时间（SQLite 同义）"),
+        notes="updated_at 有默认值：REPLACE 未列出时重置为当前时间（SQLite 同义）",
+    ),
     "person_evidence": TableSpec(
-        columns=("id", "source_id", "shot_id", "actor_id", "role_id", "stage_id",
-                 "start", "end", "status", "data"),
-        conflict=("id",)),
-    "person_coverage": TableSpec(
-        columns=("source_id", "cache_id", "data"), conflict=("cache_id",)),
+        columns=(
+            "id",
+            "source_id",
+            "shot_id",
+            "actor_id",
+            "role_id",
+            "stage_id",
+            "start",
+            "end",
+            "status",
+            "data",
+        ),
+        conflict=("id",),
+    ),
+    "person_coverage": TableSpec(columns=("source_id", "cache_id", "data"), conflict=("cache_id",)),
     "person_features": TableSpec(columns=("id", "source_id", "space", "kind", "data"), conflict=("id",)),
     "person_entities": TableSpec(columns=("id", "kind", "data"), conflict=("id",)),
     "search_releases": TableSpec(
-        columns=("id", "content_id", "person_id", "created_at"), conflict=("id",),
-        notes="业务路径只用 INSERT OR IGNORE；REPLACE 语义按删插登记（测试/维护用）"),
+        columns=("id", "content_id", "person_id", "created_at"),
+        conflict=("id",),
+        notes="业务路径只用 INSERT OR IGNORE；REPLACE 语义按删插登记（测试/维护用）",
+    ),
     "model_profiles": TableSpec(
         columns=("id", "role", "name", "provider", "config", "api_key", "created_at", "updated_at"),
-        conflict=("id",), returning="id", has_rowid=False,
+        conflict=("id",),
+        returning="id",
+        has_rowid=False,
         extra_unique=(("role", "name"),),
-        notes="UNIQUE(role,name)：次要约束冲突在 PG 下报 IntegrityViolation（SQLite 会替换），调用点已按冲突转用户错误"),
+        notes="UNIQUE(role,name)：次要约束冲突在 PG 下报 IntegrityViolation（SQLite "
+        "会替换），调用点已按冲突转用户错误",
+    ),
     "voices": TableSpec(
-        columns=("id", "name", "kind", "provider", "voice_id", "sample_path", "status", "notes",
-                 "created_at"),
-        conflict=("id",), returning="id", has_rowid=False, extra_unique=(("name",),)),
+        columns=(
+            "id",
+            "name",
+            "kind",
+            "provider",
+            "voice_id",
+            "sample_path",
+            "status",
+            "notes",
+            "created_at",
+        ),
+        conflict=("id",),
+        returning="id",
+        has_rowid=False,
+        extra_unique=(("name",),),
+    ),
     "studio_events": TableSpec(
         columns=("id", "job_id", "build_id", "attempt_id", "data", "created_at"),
-        conflict=("id",), has_rowid=False),
+        conflict=("id",),
+        has_rowid=False,
+    ),
     "runs": TableSpec(
         columns=("id", "stage", "source_id", "status", "message", "started_at", "finished_at"),
-        conflict=("id",), returning="id", has_rowid=False),
+        conflict=("id",),
+        returning="id",
+        has_rowid=False,
+    ),
 }
 
 # ---------------------------- 词法扫描 ----------------------------
@@ -299,12 +337,16 @@ _PLAIN_INSERT_RE = re.compile(
 
 def _parse_baseline_tables() -> dict[str, tuple[str, ...]]:
     """从 PG 基线 DDL 解析全表列序（单一事实来源；供无列名 INSERT 补列）。"""
-    from mindex.shared.db.scaling_schema import PG_DELIVERY, PG_DIRECTORIES, PG_DURABLE_INDEX, PG_FILES
-    from mindex.shared.db.schema_pg import BASELINE_DDL
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+    from shared.db.scaling_schema import PG_DELIVERY, PG_DIRECTORIES, PG_DURABLE_INDEX, PG_FILES
+    from shared.db.schema_pg import BASELINE_DDL
 
     tables: dict[str, tuple[str, ...]] = {}
     for match in re.finditer(
-            r"CREATE TABLE IF NOT EXISTS\s+(\w+)\s*\((.*?)\n\);", BASELINE_DDL + PG_FILES + PG_DURABLE_INDEX + PG_DIRECTORIES + PG_DELIVERY, re.DOTALL):
+        r"CREATE TABLE IF NOT EXISTS\s+(\w+)\s*\((.*?)\n\);",
+        BASELINE_DDL + PG_FILES + PG_DURABLE_INDEX + PG_DIRECTORIES + PG_DELIVERY,
+        re.DOTALL,
+    ):
         name, body = match.group(1).lower(), match.group(2)
         columns, depth, current = [], 0, ""
         for char in body:
@@ -325,8 +367,14 @@ def _parse_baseline_tables() -> dict[str, tuple[str, ...]]:
             head = entry.split()[0].strip('"').lower() if entry else ""
             # 约束子句（PRIMARY KEY(a,b)/UNIQUE(...)/CHECK(...)/FOREIGN KEY…）不是列。
             first_word = head.split("(")[0]
-            if head and first_word not in {"primary", "unique", "check", "foreign", "constraint",
-                                           "references"}:
+            if head and first_word not in {
+                "primary",
+                "unique",
+                "check",
+                "foreign",
+                "constraint",
+                "references",
+            }:
                 names.append(head)
         tables[name] = tuple(names)
     return tables
@@ -334,7 +382,8 @@ def _parse_baseline_tables() -> dict[str, tuple[str, ...]]:
 
 @cache
 def _baseline_columns() -> dict[str, tuple[str, ...]]:
-    from mindex.shared.db.scaling_schema import LEDGER_ATTEMPT_COLUMNS, LEDGER_TABLES, MULTIPART_COLUMNS
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+    from shared.db.scaling_schema import LEDGER_ATTEMPT_COLUMNS, LEDGER_TABLES, MULTIPART_COLUMNS
 
     tables = _parse_baseline_tables()
     for table in LEDGER_TABLES:
@@ -354,9 +403,35 @@ _FROM_TABLE = re.compile(
     re.IGNORECASE,
 )
 _ALIAS_STOP = {
-    "where", "join", "left", "right", "inner", "outer", "cross", "on", "group", "order",
-    "limit", "offset", "union", "except", "intersect", "set", "using", "returning", "as",
-    "and", "or", "select", "values", "having", "window", "fetch", "for", "from", "into",
+    "where",
+    "join",
+    "left",
+    "right",
+    "inner",
+    "outer",
+    "cross",
+    "on",
+    "group",
+    "order",
+    "limit",
+    "offset",
+    "union",
+    "except",
+    "intersect",
+    "set",
+    "using",
+    "returning",
+    "as",
+    "and",
+    "or",
+    "select",
+    "values",
+    "having",
+    "window",
+    "fetch",
+    "for",
+    "from",
+    "into",
 }
 
 
@@ -405,9 +480,11 @@ def _expand_select_star(sql: str) -> str:
         if alias in _ALIAS_STOP:
             alias = ""
         # 只展开单表 SELECT *：紧跟 JOIN 时 SQLite 会返回多表列，保持原样交给人工核对。
-        following = sql[match.end():match.end() + 24].lstrip().lower()
-        if any(following.startswith(word) for word in
-               ("join", "left", "right", "inner", "cross", "natural", "full", "outer")):
+        following = sql[match.end() : match.end() + 24].lstrip().lower()
+        if any(
+            following.startswith(word)
+            for word in ("join", "left", "right", "inner", "cross", "natural", "full", "outer")
+        ):
             return match.group(0)
         columns = _visible_columns(table)
         if not columns:
@@ -417,8 +494,7 @@ def _expand_select_star(sql: str) -> str:
         from_clause = f" FROM {match.group('table')}"
         if match.group("alias"):
             from_clause += f" {match.group('alias')}"
-        return prefix + ",".join(
-            f"{qualifier}.{_quote_column(column)}" for column in columns) + from_clause
+        return prefix + ",".join(f"{qualifier}.{_quote_column(column)}" for column in columns) + from_clause
 
     return _STAR_FROM.sub(replace_bare, expanded)
 
@@ -454,8 +530,11 @@ def _expand_positional_insert(sql: str) -> str:
 
 def _rewrite_insert(match: re.Match, original: str) -> str:
     verb, table = match.group(1).upper(), match.group("table").lower()
-    rest = convert_is_param(convert_json_functions(
-        convert_placeholders(quote_reserved(match.group("rest"))))).rstrip().rstrip(";")
+    rest = (
+        convert_is_param(convert_json_functions(convert_placeholders(quote_reserved(match.group("rest")))))
+        .rstrip()
+        .rstrip(";")
+    )
     raw_columns = match.group("cols")
     if raw_columns:
         listed = _columns(raw_columns, TABLE_SPECS.get(table, TableSpec(columns=(), conflict=())))
@@ -477,8 +556,7 @@ def _rewrite_insert(match: re.Match, original: str) -> str:
         unlisted.append("rowid")
     sets.extend(f"{_quote_column(column)}=DEFAULT" for column in unlisted)
     target = ", ".join(_quote_column(column) for column in spec.conflict)
-    return (f"INSERT INTO {table}{columns_sql} {rest} "
-            f"ON CONFLICT ({target}) DO UPDATE SET {', '.join(sets)}")
+    return f"INSERT INTO {table}{columns_sql} {rest} ON CONFLICT ({target}) DO UPDATE SET {', '.join(sets)}"
 
 
 def _columns(raw: str | None, spec: TableSpec) -> tuple[str, ...]:

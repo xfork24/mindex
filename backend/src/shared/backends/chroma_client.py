@@ -1,9 +1,10 @@
 """有界 Chroma HTTP 客户端：保留 SDK 集合/校验协议，连接归上下文所有。"""
+
 from __future__ import annotations
 
 import httpx
 
-from mindex.shared.query_budget import http_request, remaining
+from shared.query_budget import http_request, remaining
 
 
 class BudgetTransport(httpx.BaseTransport):
@@ -13,12 +14,22 @@ class BudgetTransport(httpx.BaseTransport):
 
     def handle_request(self, request):
         if remaining() is None:
-            request.extensions["timeout"] = {key: self.timeout for key in ("connect", "read", "write", "pool")}
+            request.extensions["timeout"] = {
+                key: self.timeout for key in ("connect", "read", "write", "pool")
+            }
             return self.transport.handle_request(request)
-        response = http_request(request.method, str(request.url), headers=request.headers,
-                                content=request.read(), timeout=remaining(self.timeout),
-                                verify=self.verify, trust_env=False)
-        return httpx.Response(response.status_code, headers=response.headers, content=response.content, request=request)
+        response = http_request(
+            request.method,
+            str(request.url),
+            headers=request.headers,
+            content=request.read(),
+            timeout=remaining(self.timeout),
+            verify=self.verify,
+            trust_env=False,
+        )
+        return httpx.Response(
+            response.status_code, headers=response.headers, content=response.content, request=request
+        )
 
     def close(self):
         self.transport.close()
@@ -26,6 +37,7 @@ class BudgetTransport(httpx.BaseTransport):
 
 class ChromaClient:
     def __init__(self, settings, timeout):
+        # 延迟导入：媒体、数值或服务运行依赖仅在实际执行该功能时加载。
         from chromadb.api import ServerAPI
         from chromadb.config import System
 
@@ -48,10 +60,14 @@ class ChromaClient:
         return self.api.heartbeat()
 
     def _collection(self, method, name, *, embedding_function=None, **kwargs):
+        # 延迟导入：媒体、数值或服务运行依赖仅在实际执行该功能时加载。
         from chromadb.api.models.Collection import Collection
 
-        return Collection(client=self.api, model=getattr(self.api, method)(name=name, **kwargs),
-                          embedding_function=embedding_function)
+        return Collection(
+            client=self.api,
+            model=getattr(self.api, method)(name=name, **kwargs),
+            embedding_function=embedding_function,
+        )
 
     def get_collection(self, name, **kwargs):
         return self._collection("get_collection", name, **kwargs)

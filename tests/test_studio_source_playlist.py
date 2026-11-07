@@ -1,14 +1,16 @@
-"""选片原片区间播放列表（分镜卡片静音预览）：只读、不调用 ffmpeg、按选片区间返回镜头列表，并拒绝不适用的版本。"""
+"""选片原片区间播放列表（分镜卡片静音预览）：只读、不调用 ffmpeg、按选片区间返回镜头列表，
+并拒绝不适用的版本。
+"""
 
 from __future__ import annotations
 
 import pytest
-from conftest import FixtureSpeaker, FixtureStoryboarder
 from fastapi.testclient import TestClient
-from test_studio_workspace import build, prepared, setup_workspace  # noqa: F401 — prepared 是 fixture
 
-from mindex.api import create_app
-from mindex.studio import workspace as ws
+from api import create_app
+from conftest import FixtureSpeaker, FixtureStoryboarder
+from studio import workspace as ws
+from test_studio_workspace import build, prepared, setup_workspace  # noqa: F401 — prepared 是 fixture
 
 pytestmark = pytest.mark.slow  # 需要真实切片与构建
 
@@ -27,7 +29,7 @@ def test_source_playlist_matches_select_range_and_rejects_others(prepared, monke
     video = select["data"]["event"]["video"]
 
     # 只读：不得调用 ffmpeg，也不改动任务数据。
-    from mindex.shared import media
+    from shared import media
 
     def no_ffmpeg(*_args, **_kwargs):
         raise AssertionError("source-playlist 不应调用 ffmpeg")
@@ -38,7 +40,9 @@ def test_source_playlist_matches_select_range_and_rejects_others(prepared, monke
     assert response.status_code == 200, response.text
     playlist = response.json()
     assert playlist["duration"] == pytest.approx(video["end"] - video["start"], abs=1e-3)
-    assert playlist["items"] and all(item["url"].startswith("/api/admin/shots/") for item in playlist["items"])
+    assert playlist["items"] and all(
+        item["url"].startswith("/api/admin/shots/") for item in playlist["items"]
+    )
     assert ws.path(config, jid).read_bytes() == before
     # 列表里的镜头地址可直接播放。
     assert client.get(playlist["items"][0]["url"]).status_code == 200
@@ -50,7 +54,9 @@ def test_source_playlist_matches_select_range_and_rejects_others(prepared, monke
     assert client.get(f"{base}/versions/unknown/source-playlist").status_code == 422
     other, _, _ = setup_workspace(config)
     assert client.get(f"/api/studio/jobs/{other}/versions/{select['id']}/source-playlist").status_code == 422
-    assert client.get(f"/api/studio/jobs/missing-job/versions/{select['id']}/source-playlist").status_code == 404
+    assert (
+        client.get(f"/api/studio/jobs/missing-job/versions/{select['id']}/source-playlist").status_code == 404
+    )
 
     # 上传片段/生成画面的选片（kind=file）：提示直接播放文件。
     w = ws.load(config, jid)

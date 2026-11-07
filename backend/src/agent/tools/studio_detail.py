@@ -2,23 +2,31 @@
 
 全部经回环调用 ``/api/studio/...``：
 
-- ``diagnose_plan``：``GET /plans/{pid}/diagnostics``，解释分镜检查、字幕环境、已选节点为什么过期或需要重建；
+- ``diagnose_plan``：``GET /plans/{pid}/diagnostics``，解释分镜检查、字幕环境、
+已选节点为什么过期或需要重建；
 - ``get_version_lineage``：``GET /versions/{vid}/dependencies``，把依赖树整理成可读的缩进清单；
 - ``suggest_shot_query``：``POST /plans/{pid}/shots/{sid}/query-suggestion``，只返回建议、不改分镜；
 - ``get_material_digest``：``GET /material-digest``，文案与召回词共用的可用素材摘要；
-- ``preview_version``：``GET /versions/{vid}/preview``，选片版本生成带配音的快速预览，渲染版本直接返回视频；
-- ``run_column``（danger）：预览读取诊断接口的 ``inputs_by_stage[stage]`` 与 revision，执行时原样提交给
+- ``preview_version``：``GET /versions/{vid}/preview``，选片版本生成带配音的快速预览，
+渲染版本直接返回视频；
+- ``run_column``（danger）：预览读取诊断接口的 ``inputs_by_stage[stage]`` 与 revision，
+执行时原样提交给
   execute-column / regenerate-column，服务端发现输入已变化时拒绝并原样转述，提交成功后跟踪构建；
 - 人工选片（与创作页“调整选片”窗口同一套接口）：
   ``get_selection_candidates`` 读召回候选池与 ``GET /shots/{sid}/selection-context``；
-  ``preview_selection`` 必要时 ``POST /anchor`` 设置参考候选，再 ``POST /range-preview``（定长窗口或任意区间）；
+  ``preview_selection`` 必要时 ``POST /anchor`` 设置参考候选，再 ``POST
+/range-preview``（定长窗口或任意区间）
+；
   ``confirm_selection``（write）以预览时的请求体与 ``preview_token`` 调 ``POST /range-confirm``。
 
-  预览与确认是两次独立的工具调用（``ToolContext`` 不共享），预览结果按调用方作用域（面板会话 ID，MCP 为
+  预览与确认是两次独立的工具调用（``ToolContext`` 不共享），预览结果按调用方作用域（面板会话
+ID，MCP 为
   ``mcp``）与 ``preview_token`` 存在进程内 ``SELECTION_PREVIEWS``；确认工具的预览与执行之间仍经
-  ``ctx.extra["planned"]`` 共享。服务端以 revision 与 token 重新校验，方案或对齐结果变化时要求重新预览。
+  ``ctx.extra["planned"]`` 共享。服务端以 revision 与 token 重新校验，
+方案或对齐结果变化时要求重新预览。
 
-公共助手（``plan_url``、``shot_ref``、``shot_label``、``version_ref``、``plan_diagnostics``、``require_idle``）
+公共助手（``plan_url``、``shot_ref``、``shot_label``、``version_ref``、``plan_diagnostics``、
+``require_idle``）
 供人工选片工具复用。
 """
 
@@ -30,15 +38,21 @@ from typing import Literal
 
 from pydantic import Field, model_validator
 
-from mindex.agent.ids import resolve_shot, resolve_version, short
-from mindex.agent.registry import Preview, ToolContext, ToolError, ToolOutput, ToolSpec
-from mindex.agent.tools.common import STAGE_LABELS, STAGES, PlanView, check, clip, load_view
-from mindex.agent.tools.media import item
-from mindex.agent.tools.studio_read import summarize_nodes
-from mindex.agent.tools.studio_write import JobId, PlanId, mutation, planned, studio_focus
-from mindex.shared.config import StrictModel
+from agent.ids import resolve_shot, resolve_version, short
+from agent.registry import Preview, ToolContext, ToolError, ToolOutput, ToolSpec
+from agent.tools.common import STAGE_LABELS, STAGES, PlanView, check, clip, load_view
+from agent.tools.media import item
+from agent.tools.studio_read import summarize_nodes
+from agent.tools.studio_write import JobId, PlanId, mutation, planned, studio_focus
+from shared.config import StrictModel
 
-NODE_STATES = {"ok": "正常", "missing": "版本记录缺失", "failed": "失败", "corrupt": "文件损坏", "stale": "已过期"}
+NODE_STATES = {
+    "ok": "正常",
+    "missing": "版本记录缺失",
+    "failed": "失败",
+    "corrupt": "文件损坏",
+    "stale": "已过期",
+}
 MAX_LINEAGE_LINES = 80
 
 
@@ -54,7 +68,9 @@ def shot_ref(view: PlanView, ref: str) -> str:
         return found["shot_id"]
     if found["status"] == "ambiguous":
         options = "、".join(f"#{c['index']} {c['shot_id']}" for c in found["candidates"])
-        raise ToolError(f"分镜 {ref} 有歧义，候选：{options}（请向用户确认）", code="unresolved_shot", value=found)
+        raise ToolError(
+            f"分镜 {ref} 有歧义，候选：{options}（请向用户确认）", code="unresolved_shot", value=found
+        )
     reason = f"：{found['reason']}" if found.get("reason") else ""
     raise ToolError(f"找不到分镜 {ref}{reason}", code="unresolved_shot", value=found)
 
@@ -72,10 +88,15 @@ def version_ref(view: PlanView, ref: str, *, stage: str | None = None) -> dict:
     if found["status"] == "ok":
         return view.w["versions"][found["version_id"]]
     if found["status"] == "ambiguous":
-        raise ToolError(f"版本 {ref} 有歧义，候选：{'、'.join(found['candidates'])}", code="unresolved_version",
-                        value=found)
+        raise ToolError(
+            f"版本 {ref} 有歧义，候选：{'、'.join(found['candidates'])}",
+            code="unresolved_version",
+            value=found,
+        )
     scope = f"{STAGE_LABELS.get(stage, stage)}阶段的" if stage else ""
-    raise ToolError(f"找不到{scope}版本 {ref}；可用 list_versions 查看版本历史", code="unresolved_version", value=found)
+    raise ToolError(
+        f"找不到{scope}版本 {ref}；可用 list_versions 查看版本历史", code="unresolved_version", value=found
+    )
 
 
 def version_label(view: PlanView, version: dict) -> str:
@@ -100,15 +121,20 @@ def require_idle(view: PlanView, running: str | None = None) -> None:
     """有构建正在执行时拒绝：构建期间方案输入随时会变，提交大概率被服务端拒绝。"""
     running = running or next((b["id"] for b in view.w["builds"] if b["status"] == "running"), None)
     if running:
-        raise ToolError(f"构建 {running} 正在执行，请等待结束（或用 cancel_build 取消）后再操作",
-                        code="build_running", value={"build_id": running})
+        raise ToolError(
+            f"构建 {running} 正在执行，请等待结束（或用 cancel_build 取消）后再操作",
+            code="build_running",
+            value={"build_id": running},
+        )
 
 
 def node_line(view: PlanView, node: dict) -> str:
     stage = STAGE_LABELS.get(node["stage"], node["stage"])
     target = f" {shot_label(view, node['shot_id'])}" if node.get("shot_id") else ""
     reasons = "；".join(node.get("reasons") or [])
-    return f"- {stage}{target}：{NODE_STATES.get(node['state'], node['state'])}" + (f"（{reasons}）" if reasons else "")
+    return f"- {stage}{target}：{NODE_STATES.get(node['state'], node['state'])}" + (
+        f"（{reasons}）" if reasons else ""
+    )
 
 
 # ------------------------------------------------------------ 方案诊断
@@ -121,8 +147,10 @@ async def diagnose_plan(args: DiagnosePlan, ctx: ToolContext) -> ToolOutput:
     view = await load_view(ctx, args.job_id, args.plan_id)
     data = await plan_diagnostics(ctx, view)
     board, subtitle, preflight = data["storyboard"], data["subtitle"], data["preflight"]
-    lines = [f"方案「{view.plan['name']}」({view.plan_id}) 诊断，revision={data['revision']}"
-             + ("" if data["active"] else "（非当前方案）")]
+    lines = [
+        f"方案「{view.plan['name']}」({view.plan_id}) 诊断，revision={data['revision']}"
+        + ("" if data["active"] else "（非当前方案）")
+    ]
     if data["running_build"]:
         lines.append(f"构建 {data['running_build']} 正在执行：以下状态会随构建变化。")
 
@@ -139,8 +167,10 @@ async def diagnose_plan(args: DiagnosePlan, ctx: ToolContext) -> ToolOutput:
         lines.append(f"字幕：subtitles 滤镜{'可用' if subtitle['filter'] else '不可用'}；字体渲染：{font}")
 
     problems = [n for n in data["nodes"] if n["state"] != "ok"]
-    lines.append(f"已选节点：{len(data['nodes'])} 个，正常 {len(data['nodes']) - len(problems)} 个"
-                 + ("，问题如下：" if problems else ""))
+    lines.append(
+        f"已选节点：{len(data['nodes'])} 个，正常 {len(data['nodes']) - len(problems)} 个"
+        + ("，问题如下：" if problems else "")
+    )
     lines += [node_line(view, n) for n in problems[:60]]
     if len(problems) > 60:
         lines.append(f"…（另有 {len(problems) - 60} 个问题节点未列出）")
@@ -149,8 +179,10 @@ async def diagnose_plan(args: DiagnosePlan, ctx: ToolContext) -> ToolOutput:
         lines.append(f"构建预检无法完成：{preflight['error']}")
     else:
         counts, changed = summarize_nodes(preflight["nodes"])
-        lines.append(f"构建预检：重建 {counts.get('rebuild', 0)}，复用 {counts.get('reuse', 0)}，"
-                     f"阻塞 {counts.get('blocked', 0)}，跳过 {counts.get('skip', 0)}")
+        lines.append(
+            f"构建预检：重建 {counts.get('rebuild', 0)}，复用 {counts.get('reuse', 0)}，"
+            f"阻塞 {counts.get('blocked', 0)}，跳过 {counts.get('skip', 0)}"
+        )
         lines += changed[:40]
         if len(changed) > 40:
             lines.append(f"…（另有 {len(changed) - 40} 项未列出）")
@@ -158,10 +190,14 @@ async def diagnose_plan(args: DiagnosePlan, ctx: ToolContext) -> ToolOutput:
     shots = [issue["shot_id"] for issue in board["soft"]] + [n["shot_id"] for n in problems if n["shot_id"]]
     shots = list(dict.fromkeys(shots))[:20]
     value = {k: v for k, v in data.items() if k != "inputs_by_stage"}
-    return ToolOutput(value, text="\n".join(lines),
-                      meta={"kind": "diagnostics", "job_id": view.job["id"], "plan_id": view.plan_id},
-                      focus=studio_focus(view.job["id"], view.plan_id, shots=shots or None,
-                                         section=None if shots else "storyboard"))
+    return ToolOutput(
+        value,
+        text="\n".join(lines),
+        meta={"kind": "diagnostics", "job_id": view.job["id"], "plan_id": view.plan_id},
+        focus=studio_focus(
+            view.job["id"], view.plan_id, shots=shots or None, section=None if shots else "storyboard"
+        ),
+    )
 
 
 # ------------------------------------------------------------ 版本依赖
@@ -186,8 +222,10 @@ def lineage_lines(view: PlanView, root: str, nodes: dict, selected: set[str]) ->
         seen.add(vid)
         mark = " 【当前选用】" if vid in selected else ""
         error = f" 错误：{clip(node.get('error'), 80)}" if node.get("error") else ""
-        lines.append(f"{prefix}{version_label(view, node)} · {node['status']} · {node.get('created_at') or '—'}"
-                     f"{mark}{error}")
+        lines.append(
+            f"{prefix}{version_label(view, node)} · {node['status']} · {node.get('created_at') or '—'}"
+            f"{mark}{error}"
+        )
         for dep_name, dep in (node.get("inputs") or {}).items():
             if dep:
                 visit(dep, depth + 1, dep_name)
@@ -199,23 +237,42 @@ def lineage_lines(view: PlanView, root: str, nodes: dict, selected: set[str]) ->
 async def get_version_lineage(args: VersionLineage, ctx: ToolContext) -> ToolOutput:
     view = await load_view(ctx, args.job_id, args.plan_id)
     root = version_ref(view, args.version)
-    data = check(await ctx.client.get(f"/api/studio/jobs/{view.job['id']}/versions/{root['id']}/dependencies"),
-                 "读取版本依赖")
+    data = check(
+        await ctx.client.get(f"/api/studio/jobs/{view.job['id']}/versions/{root['id']}/dependencies"),
+        "读取版本依赖",
+    )
     nodes = data["nodes"]
     selected = selected_versions(view)
     lines = lineage_lines(view, data["root"], nodes, selected)
     total = len(lines)
     if total > MAX_LINEAGE_LINES:
         lines = lines[:MAX_LINEAGE_LINES] + [f"…（依赖树共 {total} 行，已截断）"]
-    rows = [{"version_id": vid, "stage": n["stage"], "shot_id": n.get("shot_id"), "status": n["status"],
-             "created_at": n.get("created_at"), "inputs": n.get("inputs") or {}, "selected": vid in selected}
-            for vid, n in nodes.items()]
-    text = (f"版本 {version_label(view, root)} 的依赖链（共 {len(nodes)} 个版本；“名称 ← 版本”表示该输入使用的版本）：\n"
-            + "\n".join(lines))
+    rows = [
+        {
+            "version_id": vid,
+            "stage": n["stage"],
+            "shot_id": n.get("shot_id"),
+            "status": n["status"],
+            "created_at": n.get("created_at"),
+            "inputs": n.get("inputs") or {},
+            "selected": vid in selected,
+        }
+        for vid, n in nodes.items()
+    ]
+    text = (
+        f"版本 {version_label(view, root)} 的依赖链（共 {len(nodes)} 个版本；"
+        f"“名称 ← 版本”表示该输入使用的版本）：\n" + "\n".join(lines)
+    )
     sid = root.get("shot_id")
     if sid and sid in view.order:
-        focus = studio_focus(view.job["id"], view.plan_id, shots=[sid],
-                             stage=root["stage"] if root["stage"] in ("content", "music", "draw", "generate", "animate", *STAGES) else None)
+        focus = studio_focus(
+            view.job["id"],
+            view.plan_id,
+            shots=[sid],
+            stage=root["stage"]
+            if root["stage"] in ("content", "music", "draw", "generate", "animate", *STAGES)
+            else None,
+        )
     else:
         section = {"script": "script", "compose": "final"}.get(root["stage"], "storyboard")
         focus = studio_focus(view.job["id"], view.plan_id, section=section)
@@ -236,11 +293,17 @@ async def suggest_shot_query(args: SuggestShotQuery, ctx: ToolContext) -> ToolOu
     body = {} if args.visual is None else {"visual": args.visual}
     data = check(await ctx.client.post(plan_url(view, f"/shots/{sid}/query-suggestion"), body), "重写召回词")
     current = view.content(sid).get("query")
-    text = (f"分镜 {shot_label(view, sid)} 的建议召回词：{data['query']}\n当前召回词：{current or '（空）'}\n"
-            "这只是建议，分镜没有被修改；要采用请用 edit_shots 把该分镜的 query 改为建议值"
-            + ("（如果使用了新的画面意象，也一并更新 visual）" if args.visual is not None else "") + "。")
-    return ToolOutput({"shot_id": sid, "query": data["query"], "current_query": current}, text=text,
-                      focus=studio_focus(view.job["id"], view.plan_id, shots=[sid], stage="content"))
+    text = (
+        f"分镜 {shot_label(view, sid)} 的建议召回词：{data['query']}\n当前召回词：{current or '（空）'}\n"
+        "这只是建议，分镜没有被修改；要采用请用 edit_shots 把该分镜的 query 改为建议值"
+        + ("（如果使用了新的画面意象，也一并更新 visual）" if args.visual is not None else "")
+        + "。"
+    )
+    return ToolOutput(
+        {"shot_id": sid, "query": data["query"], "current_query": current},
+        text=text,
+        focus=studio_focus(view.job["id"], view.plan_id, shots=[sid], stage="content"),
+    )
 
 
 # ------------------------------------------------------------ 素材摘要
@@ -255,12 +318,16 @@ async def get_material_digest(args: MaterialDigestArgs, ctx: ToolContext) -> Too
     if data["empty_reason"]:
         text = f"任务 {job} 的可用素材摘要为空：{data['empty_reason']}。写文案与重写召回词时不会参考素材。"
     else:
-        lines = [f"任务 {job} 的可用素材摘要：{stats['sources']} 个素材、{stats['segments']} 个已分析片段"
-                 f"（内容索引 {stats.get('content_index_id') or '—'}）"]
+        lines = [
+            f"任务 {job} 的可用素材摘要：{stats['sources']} 个素材、{stats['segments']} 个已分析片段"
+            f"（内容索引 {stats.get('content_index_id') or '—'}）"
+        ]
         for source in data["sources"][:30]:
             words = "、".join(source["vocabulary"][:10])
-            lines.append(f"- {source['name']}（{source['source_id']}，{source['duration']:.0f} 秒，"
-                         f"{source['segments']} 个片段）" + (f" 画面词：{words}" if words else ""))
+            lines.append(
+                f"- {source['name']}（{source['source_id']}，{source['duration']:.0f} 秒，"
+                f"{source['segments']} 个片段）" + (f" 画面词：{words}" if words else "")
+            )
         if len(data["sources"]) > 30:
             lines.append(f"…（另有 {len(data['sources']) - 30} 个素材未列出）")
         lines.append("摘要正文（文案与召回词生成时参考）：\n" + clip(data["text"], 3000))
@@ -279,30 +346,46 @@ async def preview_version(args: PreviewVersion, ctx: ToolContext) -> ToolOutput:
     view = await load_view(ctx, args.job_id, args.plan_id)
     target = version_ref(view, args.version)
     if target["stage"] not in ("select", "render"):
-        raise ToolError(f"只有选片与渲染版本可以预览；{version_label(view, target)} 可用 list_versions 查看产物文件",
-                        code="unsupported_version")
-    data = check(await ctx.client.get(f"/api/studio/jobs/{view.job['id']}/versions/{target['id']}/preview"),
-                 "生成版本预览")
+        raise ToolError(
+            f"只有选片与渲染版本可以预览；{version_label(view, target)} 可用 list_versions 查看产物文件",
+            code="unsupported_version",
+        )
+    data = check(
+        await ctx.client.get(f"/api/studio/jobs/{view.job['id']}/versions/{target['id']}/preview"),
+        "生成版本预览",
+    )
     label = version_label(view, target)
     media = [entry for entry in [item("video", data["url"], f"{label} 预览", collapsed=False)] if entry]
     sid = target.get("shot_id")
-    focus = studio_focus(view.job["id"], view.plan_id, shots=[sid] if sid in view.order else None,
-                         stage=target["stage"] if sid in view.order else None)
-    return ToolOutput({"version_id": target["id"], "url": data["url"]},
-                      text=f"已生成 {label} 的预览（{'带配音的选片片段' if target['stage'] == 'select' else '渲染结果'}），"
-                           "可在面板播放。",
-                      focus=focus, media=media)
+    focus = studio_focus(
+        view.job["id"],
+        view.plan_id,
+        shots=[sid] if sid in view.order else None,
+        stage=target["stage"] if sid in view.order else None,
+    )
+    return ToolOutput(
+        {"version_id": target["id"], "url": data["url"]},
+        text=f"已生成 {label} 的预览（{'带配音的选片片段' if target['stage'] == 'select' else '渲染结果'}），"
+        "可在面板播放。",
+        focus=focus,
+        media=media,
+    )
 
 
 # ------------------------------------------------------------ 整列执行 / 重做
 class RunColumn(StrictModel):
-    stage: Literal["recall", "tts", "music", "draw", "generate", "animate", "select", "overlay", "render"] = Field(
-        description="要整列执行的阶段：召回/配音/背景音乐（仅背景音乐提示点分镜）/生成图片（仅 aigc_image 分镜）/"
-                    "生成画面（仅 aigc 分镜）/生成动画（仅 animation 分镜）/选片/渲染")
+    stage: Literal["recall", "tts", "music", "draw", "generate", "animate", "select", "overlay", "render"] = (
+        Field(
+            description="要整列执行的阶段：召回/配音/背景音乐（仅背景音乐提示点分镜）/生成图片（仅 "
+            "aigc_image 分镜）/"
+            "生成画面（仅 aigc 分镜）/生成动画（仅 animation 分镜）/选片/渲染"
+        )
+    )
     force: bool = Field(
         default=False,
         description="false=执行/复用：已有匹配版本的分镜直接选用，只生成缺失或过期的；"
-                    "true=全部重新生成（耗时且可能产生费用）")
+        "true=全部重新生成（耗时且可能产生费用）",
+    )
     job_id: str | None = JobId
     plan_id: str | None = PlanId
 
@@ -332,16 +415,27 @@ async def column_plan(args: RunColumn, ctx: ToolContext):
     partial = ("generate", "animate", "draw", "music")
     order = [sid for sid in view.order if sid in inputs] if args.stage in partial else view.order
     if not order:
-        noun = {"generate": "AI 生成视频分镜，生成画面", "animate": "AI 动画分镜，生成动画",
-                "draw": "AI 生成图片分镜，生成图片", "music": "背景音乐提示点，背景音乐"}.get(args.stage, args.stage)
+        noun = {
+            "generate": "AI 生成视频分镜，生成画面",
+            "animate": "AI 动画分镜，生成动画",
+            "draw": "AI 生成图片分镜，生成图片",
+            "music": "背景音乐提示点，背景音乐",
+        }.get(args.stage, args.stage)
         raise ToolError(f"当前方案没有 {noun}列无法执行", code="column_unavailable")
     missing = [sid for sid in order if sid not in inputs]
     if missing:
         names = "、".join(shot_label(view, sid) for sid in missing[:10])
-        raise ToolError(f"{STAGE_LABELS[args.stage]}列无法执行：分镜 {names} 的输入无法确定（通常是前置阶段尚未完成）；"
-                        "可用 diagnose_plan 查看原因", code="column_unavailable", value={"shots": missing})
-    body = {"revision": data["revision"], "stage": args.stage,
-            "inputs_by_shot": {sid: inputs[sid] for sid in order}}
+        raise ToolError(
+            f"{STAGE_LABELS[args.stage]}列无法执行：分镜 {names} 的输入无法确定（通常是前置阶段尚未完成）；"
+            "可用 diagnose_plan 查看原因",
+            code="column_unavailable",
+            value={"shots": missing},
+        )
+    body = {
+        "revision": data["revision"],
+        "stage": args.stage,
+        "inputs_by_shot": {sid: inputs[sid] for sid in order},
+    }
     return view, data, body
 
 
@@ -365,20 +459,28 @@ async def preview_run_column(args: RunColumn, ctx: ToolContext) -> Preview:
             reasons = "；".join(node["reasons"])
             state = NODE_STATES.get(node["state"], node["state"]) + (f"（{reasons}）" if reasons else "")
         if not reason and not args.force and key in actions:
-            state += "，预计" + {"reuse": "复用已有版本", "rebuild": "重新生成"}.get(actions[key]["action"], "按预检处理")
+            state += "，预计" + {"reuse": "复用已有版本", "rebuild": "重新生成"}.get(
+                actions[key]["action"], "按预检处理"
+            )
         rows.append({"label": f"- {shot_label(view, sid)}：{state}"})
-    changes = [{"label": "阶段", "after": label},
-               {"label": "方式", "after": "全部重新生成" if args.force else "执行/复用（只生成缺失或过期的）"},
-               {"label": "分镜数", "after": len(body["inputs_by_shot"])}] + rows[:40]
+    changes = [
+        {"label": "阶段", "after": label},
+        {"label": "方式", "after": "全部重新生成" if args.force else "执行/复用（只生成缺失或过期的）"},
+        {"label": "分镜数", "after": len(body["inputs_by_shot"])},
+    ] + rows[:40]
     warnings = []
     if args.force:
         warnings.append("全部重新生成会忽略已有版本，耗时且可能调用付费模型服务")
     if blocked:
         warnings.append(f"{len(blocked)} 个分镜的依赖缺失或失败，执行时会被阻塞")
     warnings.append(f"完成后依赖{label}结果的后续阶段与成片会在下次构建时重建")
-    return Preview(f"整列{'重新生成' if args.force else '执行'}方案「{view.plan['name']}」的{label}（后台执行）",
-                   changes, warnings=warnings, value={"blocked": blocked},
-                   focus=studio_focus(view.job["id"], view.plan_id, section="storyboard"))
+    return Preview(
+        f"整列{'重新生成' if args.force else '执行'}方案「{view.plan['name']}」的{label}（后台执行）",
+        changes,
+        warnings=warnings,
+        value={"blocked": blocked},
+        focus=studio_focus(view.job["id"], view.plan_id, section="storyboard"),
+    )
 
 
 async def run_column(args: RunColumn, ctx: ToolContext) -> ToolOutput:
@@ -389,18 +491,26 @@ async def run_column(args: RunColumn, ctx: ToolContext) -> ToolOutput:
     job, pid, body = stored
     endpoint = "regenerate-column" if args.force else "execute-column"
     try:
-        build = check(await ctx.client.post(f"/api/studio/jobs/{job}/plans/{pid}/{endpoint}", body), "提交整列执行")
+        build = check(
+            await ctx.client.post(f"/api/studio/jobs/{job}/plans/{pid}/{endpoint}", body), "提交整列执行"
+        )
     except ToolError as exc:
         if "已变化" in str(exc):
-            raise ToolError(f"{exc}；请重新调用 run_column 预览最新输入后再确认", code=exc.code, value=exc.value) from exc
+            raise ToolError(
+                f"{exc}；请重新调用 run_column 预览最新输入后再确认", code=exc.code, value=exc.value
+            ) from exc
         raise
     target = {"job_id": job, "build_id": build["id"], "plan_id": pid}
     label = STAGE_LABELS[body["stage"]]
-    return ToolOutput({"build_id": build["id"], "stage": body["stage"], "nodes": len(build["nodes"])},
-                      text=f"已提交{label}列{'重新生成' if args.force else '执行'} {build['id']}"
-                           f"（{len(build['nodes'])} 个分镜）。系统会跟踪进度，结束后通知你总结。",
-                      meta={"kind": "build", **target}, mutation=mutation(job, pid), watch_build=target,
-                      focus=studio_focus(job, pid, section="log", build_id=build["id"]))
+    return ToolOutput(
+        {"build_id": build["id"], "stage": body["stage"], "nodes": len(build["nodes"])},
+        text=f"已提交{label}列{'重新生成' if args.force else '执行'} {build['id']}"
+        f"（{len(build['nodes'])} 个分镜）。系统会跟踪进度，结束后通知你总结。",
+        meta={"kind": "build", **target},
+        mutation=mutation(job, pid),
+        watch_build=target,
+        focus=studio_focus(job, pid, section="log", build_id=build["id"]),
+    )
 
 
 # ------------------------------------------------------------ 人工选片
@@ -484,9 +594,13 @@ def candidate_ref(pool: list[dict], ref: str) -> dict:
     if len(found) == 1:
         return found[0]
     if found:
-        raise ToolError(f"候选 {ref} 有歧义：{'、'.join(candidate_key(c) for c in found[:6])}",
-                        code="unresolved_candidate")
-    raise ToolError(f"召回候选中找不到 {ref}；可用 get_selection_candidates 查看候选", code="unresolved_candidate")
+        raise ToolError(
+            f"候选 {ref} 有歧义：{'、'.join(candidate_key(c) for c in found[:6])}",
+            code="unresolved_candidate",
+        )
+    raise ToolError(
+        f"召回候选中找不到 {ref}；可用 get_selection_candidates 查看候选", code="unresolved_candidate"
+    )
 
 
 def selection_summary(version: dict | None) -> dict | None:
@@ -498,19 +612,32 @@ def selection_summary(version: dict | None) -> dict | None:
     anchor = data.get("anchor") or {}
     if video.get("kind") == "file":  # 上传片段：区间是片段文件内的秒数
         media = (video.get("ref") or {}).get("input") or ""
-        return {"version_id": version["id"], "source_id": None, "source_name": f"上传片段 {media[:8]}",
-                "start": video.get("start"), "end": video.get("end"), "manual": False}
-    return {"version_id": version["id"], "source_id": video.get("source_id"),
-            "source_name": anchor.get("source_name"), "start": video.get("start"), "end": video.get("end"),
-            "manual": bool(data.get("manual"))}
+        return {
+            "version_id": version["id"],
+            "source_id": None,
+            "source_name": f"上传片段 {media[:8]}",
+            "start": video.get("start"),
+            "end": video.get("end"),
+            "manual": False,
+        }
+    return {
+        "version_id": version["id"],
+        "source_id": video.get("source_id"),
+        "source_name": anchor.get("source_name"),
+        "start": video.get("start"),
+        "end": video.get("end"),
+        "manual": bool(data.get("manual")),
+    }
 
 
 def selection_line(selection: dict | None) -> str:
     if not selection:
         return "无"
     name = selection.get("source_name") or selection.get("source_id")
-    return (f"选片 {short(selection['version_id'])}：{name} {secs(selection['start'])}–{secs(selection['end'])}"
-            f"（{'人工' if selection['manual'] else '自动'}）")
+    return (
+        f"选片 {short(selection['version_id'])}：{name} {secs(selection['start'])}–{secs(selection['end'])}"
+        f"（{'人工' if selection['manual'] else '自动'}）"
+    )
 
 
 async def selection_context(ctx: ToolContext, view: PlanView, sid: str) -> dict:
@@ -548,69 +675,124 @@ async def get_selection_candidates(args: SelectionCandidates, ctx: ToolContext) 
     anchor_id = candidate_key(anchor) if anchor else None
 
     rows, lines = [], []
-    for n, c in enumerate(pool[:args.limit], 1):
+    for n, c in enumerate(pool[: args.limit], 1):
         cid = candidate_key(c)
-        row = {"n": n, "candidate_id": cid, "segment_id": c.get("segment_id") or cid, "source_id": c["source_id"],
-               "source_name": c.get("source_name") or "", "start": c["start"], "end": c["end"],
-               "score": c.get("score"), "rank": c.get("rank"), "anchor": cid == anchor_id}
+        row = {
+            "n": n,
+            "candidate_id": cid,
+            "segment_id": c.get("segment_id") or cid,
+            "source_id": c["source_id"],
+            "source_name": c.get("source_name") or "",
+            "start": c["start"],
+            "end": c["end"],
+            "score": c.get("score"),
+            "rank": c.get("rank"),
+            "anchor": cid == anchor_id,
+        }
         rows.append(row)
         score = f" · 分数 {c['score']:.3f}" if isinstance(c.get("score"), int | float) else ""
-        lines.append(f"#{n} {cid} · {row['source_name'] or c['source_id']} {secs(c['start'])}–{secs(c['end'])}"
-                     f"（{c['end'] - c['start']:.2f}s）{score}" + (" 【参考锚点】" if row["anchor"] else ""))
+        lines.append(
+            f"#{n} {cid} · {row['source_name'] or c['source_id']} {secs(c['start'])}–{secs(c['end'])}"
+            f"（{c['end'] - c['start']:.2f}s）{score}" + (" 【参考锚点】" if row["anchor"] else "")
+        )
 
     selection = selection_summary(stage_version(view, sid, "select"))
     head = [f"分镜 {label} 的人工选片信息："]
-    tts_line = f"{speech['data']['duration']:.2f} 秒（版本 {short(speech['id'])}）" if speech else "无成功配音"
+    tts_line = (
+        f"{speech['data']['duration']:.2f} 秒（版本 {short(speech['id'])}）" if speech else "无成功配音"
+    )
     head.append(f"配音：{tts_line}")
     head.append(f"当前选片：{selection_line(selection)}")
     mode = "自动（按评分选择）" if choice["mode"] == "auto" else f"人工指定 {choice.get('candidate_id')}"
     head.append(f"参考候选：{mode}" + (f"，当前锚点 {anchor_id}" if anchor_id else ""))
     window = None
     if context and context.get("anchor") and context.get("legal_start"):
-        window = {"duration": context["window_duration"], "legal_start": context["legal_start"],
-                  "initial_start": context["initial_start"], "context_range": context["context_range"],
-                  "source_id": context["source_id"]}
+        window = {
+            "duration": context["window_duration"],
+            "legal_start": context["legal_start"],
+            "initial_start": context["initial_start"],
+            "context_range": context["context_range"],
+            "source_id": context["source_id"],
+        }
         if context["ready"]:
-            head.append(f"定长窗口：{context['window_duration']:.2f} 秒；合法起点 "
-                        f"{secs(context['legal_start']['min'])}–{secs(context['legal_start']['max'])}，"
-                        f"默认起点 {secs(context['initial_start'])}（素材上下文 "
-                        f"{secs(context['context_range']['start'])}–{secs(context['context_range']['end'])}）")
+            head.append(
+                f"定长窗口：{context['window_duration']:.2f} 秒；合法起点 "
+                f"{secs(context['legal_start']['min'])}–{secs(context['legal_start']['max'])}，"
+                f"默认起点 {secs(context['initial_start'])}（素材上下文 "
+                f"{secs(context['context_range']['start'])}–{secs(context['context_range']['end'])}）"
+            )
     head.append("选片就绪" if reason is None else f"选片未就绪：{reason}")
     if pool:
-        head.append(f"召回候选（共 {len(pool)} 个" + (f"，列出前 {len(rows)} 个" if len(rows) < len(pool) else "") + "）：")
+        head.append(
+            f"召回候选（共 {len(pool)} 个"
+            + (f"，列出前 {len(rows)} 个" if len(rows) < len(pool) else "")
+            + "）："
+        )
     else:
         head.append("召回候选：无")
-    tail = ["用 preview_selection 预览：给 candidate（#序号或候选 ID）按定长窗口选片，可再给 start 调整起点；"
-            "或给 source_id + start + end 按任意区间选片。"]
+    tail = [
+        "用 preview_selection 预览：给 candidate（#序号或候选 ID）按定长窗口选片，可再给 start 调整起点；"
+        "或给 source_id + start + end 按任意区间选片。"
+    ]
     text = "\n".join(head + lines + tail)
 
     media = []
     for row in rows[:6]:
         segment = row["segment_id"]
-        media.append(item("video", f"/api/admin/segments/{segment}/playlist", f"{label} 候选 #{row['n']}",
-                          poster=f"/api/admin/segments/{segment}/thumbnail", playlist=True, collapsed=False))
+        media.append(
+            item(
+                "video",
+                f"/api/admin/segments/{segment}/playlist",
+                f"{label} 候选 #{row['n']}",
+                poster=f"/api/admin/segments/{segment}/thumbnail",
+                playlist=True,
+                collapsed=False,
+            )
+        )
     if context and context.get("video_url"):
         media.append(item("video", context["video_url"], f"{label} 选片上下文（无声）", collapsed=True))
-    value = {"shot_id": sid, "recall_version": recall["id"] if recall else None, "anchor_choice": choice,
-             "anchor_candidate_id": anchor_id, "candidates": rows, "total": len(pool),
-             "tts": {"version_id": speech["id"], "duration": speech["data"]["duration"]} if speech else None,
-             "selection": selection, "manual_range": (view.plan.get("ranges") or {}).get(sid),
-             "ready": reason is None, "reason": reason, "window": window}
-    return ToolOutput(value, text=text, media=[m for m in media if m],
-                      images=[f"/api/admin/segments/{row['segment_id']}/thumbnail" for row in rows[:6]] or None,
-                      focus=studio_focus(view.job["id"], view.plan_id, shots=[sid], stage="select"))
+    value = {
+        "shot_id": sid,
+        "recall_version": recall["id"] if recall else None,
+        "anchor_choice": choice,
+        "anchor_candidate_id": anchor_id,
+        "candidates": rows,
+        "total": len(pool),
+        "tts": {"version_id": speech["id"], "duration": speech["data"]["duration"]} if speech else None,
+        "selection": selection,
+        "manual_range": (view.plan.get("ranges") or {}).get(sid),
+        "ready": reason is None,
+        "reason": reason,
+        "window": window,
+    }
+    return ToolOutput(
+        value,
+        text=text,
+        media=[m for m in media if m],
+        images=[f"/api/admin/segments/{row['segment_id']}/thumbnail" for row in rows[:6]] or None,
+        focus=studio_focus(view.job["id"], view.plan_id, shots=[sid], stage="select"),
+    )
 
 
 class PreviewSelection(StrictModel):
     shot: str = Field(min_length=1, description="分镜：完整 ID、短 ID 或 #序号")
     candidate: str | None = Field(
         default=None,
-        description="定长窗口方式的参考候选：get_selection_candidates 列表中的 #序号或候选 ID（会设为该分镜的人工锚点）；"
-                    "\"auto\" 恢复自动选择；省略时沿用当前参考候选")
+        description="定长窗口方式的参考候选：get_selection_candidates 列表中的 #序号或候选 "
+        "ID（会设为该分镜的人工锚点）；"
+        '"auto" 恢复自动选择；省略时沿用当前参考候选',
+    )
     start: float | None = Field(
-        default=None, ge=0, allow_inf_nan=False,
-        description="起点秒（素材内绝对时间）。窗口方式：窗口起点，须在合法起点范围内，省略时用默认起点；区间方式必填")
-    source_id: str | None = Field(default=None, description="区间方式：素材 ID；给出时按素材任意区间选片（需同时给 start、end）")
+        default=None,
+        ge=0,
+        allow_inf_nan=False,
+        description=(
+            "起点秒（素材内绝对时间）。窗口方式：窗口起点，须在合法起点范围内，省略时用默认起点；区间方式必填"
+        ),
+    )
+    source_id: str | None = Field(
+        default=None, description="区间方式：素材 ID；给出时按素材任意区间选片（需同时给 start、end）"
+    )
     end: float | None = Field(default=None, gt=0, allow_inf_nan=False, description="区间方式：终点秒")
     job_id: str | None = JobId
     plan_id: str | None = PlanId
@@ -630,12 +812,16 @@ class PreviewSelection(StrictModel):
         return self
 
 
-async def window_request(args: PreviewSelection, ctx: ToolContext, view: PlanView, sid: str) -> tuple[dict, bool]:
+async def window_request(
+    args: PreviewSelection, ctx: ToolContext, view: PlanView, sid: str
+) -> tuple[dict, bool]:
     """定长窗口：必要时先设置人工锚点，再按选片上下文组装 WindowBody。返回 (请求体, 锚点是否改变)。"""
     recall, pool = recall_pool(view, sid)
     if recall is None:
-        raise ToolError(f"分镜 {shot_label(view, sid)} 尚无成功的召回，请先召回（run_node stage=recall）",
-                        code="recall_missing")
+        raise ToolError(
+            f"分镜 {shot_label(view, sid)} 尚无成功的召回，请先召回（run_node stage=recall）",
+            code="recall_missing",
+        )
     choice = (view.plan.get("anchors") or {}).get(sid, {"mode": "auto"})
     desired = None
     if args.candidate is not None:
@@ -643,32 +829,56 @@ async def window_request(args: PreviewSelection, ctx: ToolContext, view: PlanVie
             desired = {"mode": "auto"}
         else:
             chosen = candidate_ref(pool, args.candidate)
-            desired = {"mode": "manual", "recall_version": recall["id"], "candidate_id": candidate_key(chosen)}
+            desired = {
+                "mode": "manual",
+                "recall_version": recall["id"],
+                "candidate_id": candidate_key(chosen),
+            }
     changed = desired is not None and desired != choice
     if changed:
-        check(await ctx.client.post(plan_url(view, "/anchor"), {"revision": view.revision, "shot_id": sid, **desired}),
-              "设置参考候选")
+        check(
+            await ctx.client.post(
+                plan_url(view, "/anchor"), {"revision": view.revision, "shot_id": sid, **desired}
+            ),
+            "设置参考候选",
+        )
     context = await selection_context(ctx, view, sid)
     if not context["ready"]:
         note = "（参考候选已改为所选候选）" if changed else ""
-        raise ToolError(f"选片窗口不可用：{context['reason']}{note}", code="selection_unavailable",
-                        value={"anchor_changed": changed})
+        raise ToolError(
+            f"选片窗口不可用：{context['reason']}{note}",
+            code="selection_unavailable",
+            value={"anchor_changed": changed},
+        )
     legal = context["legal_start"]
     if args.start is None:
         existing = (view.plan.get("ranges") or {}).get(sid) or {}
-        same = (not changed and existing.get("anchor_ref") == context["anchor_ref"]
-                and existing.get("tts_version") == context["tts_version"] and existing.get("atempo") == context["atempo"])
+        same = (
+            not changed
+            and existing.get("anchor_ref") == context["anchor_ref"]
+            and existing.get("tts_version") == context["tts_version"]
+            and existing.get("atempo") == context["atempo"]
+        )
         start = existing["start"] if same and "start" in existing else context["initial_start"]
         start = min(legal["max"], max(legal["min"], start))
     else:
         start = args.start
         if not legal["min"] - 1e-6 <= start <= legal["max"] + 1e-6:
-            raise ToolError(f"窗口起点 {secs(start)} 超出合法范围 {secs(legal['min'])}–{secs(legal['max'])}"
-                            f"（窗口长 {context['window_duration']:.2f} 秒）", code="out_of_range",
-                            value={"legal_start": legal, "anchor_changed": changed})
+            raise ToolError(
+                f"窗口起点 {secs(start)} 超出合法范围 {secs(legal['min'])}–{secs(legal['max'])}"
+                f"（窗口长 {context['window_duration']:.2f} 秒）",
+                code="out_of_range",
+                value={"legal_start": legal, "anchor_changed": changed},
+            )
         start = min(legal["max"], max(legal["min"], start))
-    body = {"revision": context["revision"], "shot_id": sid, "context_token": context["context_token"],
-            "anchor_ref": context["anchor_ref"], "tts_version": context["tts_version"], "start": start}
+    body = {
+        "revision": context["revision"],
+        "shot_id": sid,
+        "context_token": context["context_token"],
+        "anchor_ref": context["anchor_ref"],
+        "tts_version": context["tts_version"],
+        "start": start,
+    }
     return body, changed
 
 
@@ -685,8 +895,13 @@ async def preview_selection(args: PreviewSelection, ctx: ToolContext) -> ToolOut
         sent = {**body, "render_preview": True}
     else:
         mode, changed = "range", False
-        body = {"revision": view.revision, "shot_id": sid, "source_id": args.source_id,
-                "start": args.start, "end": args.end}
+        body = {
+            "revision": view.revision,
+            "shot_id": sid,
+            "source_id": args.source_id,
+            "start": args.start,
+            "end": args.end,
+        }
         sent = body
     try:
         result = check(await ctx.client.post(plan_url(view, "/range-preview"), sent), "生成选片预览")
@@ -698,20 +913,42 @@ async def preview_selection(args: PreviewSelection, ctx: ToolContext) -> ToolOut
     actual = result["actual_range"]
     anchor = result.get("anchor") or {}
     name = anchor.get("source_name") or actual["source_id"]
-    SELECTION_PREVIEWS.put(preview_scope(ctx), {
-        "token": token, "job_id": view.job["id"], "plan_id": view.plan_id, "shot_id": sid, "mode": mode,
-        "body": body, "range": actual, "source_name": name, "anchor_ref": result.get("anchor_ref")})
+    SELECTION_PREVIEWS.put(
+        preview_scope(ctx),
+        {
+            "token": token,
+            "job_id": view.job["id"],
+            "plan_id": view.plan_id,
+            "shot_id": sid,
+            "mode": mode,
+            "body": body,
+            "range": actual,
+            "source_name": name,
+            "anchor_ref": result.get("anchor_ref"),
+        },
+    )
 
-    lines = [f"已生成分镜 {label} 的选片预览（{'定长窗口' if mode == 'window' else '任意区间'}）："
-             f"{name}（{actual['source_id']}）{secs(actual['start'])}–{secs(actual['end'])}"]
+    lines = [
+        f"已生成分镜 {label} 的选片预览（{'定长窗口' if mode == 'window' else '任意区间'}）："
+        f"{name}（{actual['source_id']}）{secs(actual['start'])}–{secs(actual['end'])}"
+    ]
     if changed:
-        lines.append("参考候选已" + ("恢复为自动选择" if args.candidate.strip().lower() == "auto"
-                                    else f"改为 {result['anchor_ref']['candidate_id']}") + "（已清除该分镜之前的人工区间）")
+        lines.append(
+            "参考候选已"
+            + (
+                "恢复为自动选择"
+                if args.candidate.strip().lower() == "auto"
+                else f"改为 {result['anchor_ref']['candidate_id']}"
+            )
+            + "（已清除该分镜之前的人工区间）"
+        )
     if mode == "window":
         legal = (result.get("range") or {}).get("context_range")
-        lines.append(f"窗口长 {actual['end'] - actual['start']:.2f} 秒，参考候选 "
-                     f"{(result.get('anchor_ref') or {}).get('candidate_id')}"
-                     + (f"，素材上下文 {secs(legal['start'])}–{secs(legal['end'])}" if legal else ""))
+        lines.append(
+            f"窗口长 {actual['end'] - actual['start']:.2f} 秒，参考候选 "
+            f"{(result.get('anchor_ref') or {}).get('candidate_id')}"
+            + (f"，素材上下文 {secs(legal['start'])}–{secs(legal['end'])}" if legal else "")
+        )
     else:
         extra = []
         if result.get("trim_seconds"):
@@ -722,16 +959,32 @@ async def preview_selection(args: PreviewSelection, ctx: ToolContext) -> ToolOut
             extra.append(f"配音变速 {result['atempo']:g}")
         if extra:
             lines.append("；".join(extra))
-    lines.append(f"preview_token={token}。用户满意后调用 confirm_selection(preview_token=\"{token}\") 确认；"
-                 "不满意可换 start 或候选再预览。")
-    media = [m for m in [item("video", result.get("preview_url") or "", f"{label} 选片预览", collapsed=False)] if m]
-    value = {"preview_token": token, "mode": mode, "shot_id": sid, "range": actual,
-             "anchor_ref": result.get("anchor_ref"), "anchor_changed": changed,
-             "trim_seconds": result.get("trim_seconds", 0), "freeze_seconds": result.get("freeze_seconds", 0),
-             "atempo": result.get("atempo"), "preview_url": result.get("preview_url")}
-    return ToolOutput(value, text="\n".join(lines), media=media,
-                      mutation=mutation(view.job["id"], view.plan_id) if changed else None,
-                      focus=studio_focus(view.job["id"], view.plan_id, shots=[sid], stage="select"))
+    lines.append(
+        f'preview_token={token}。用户满意后调用 confirm_selection(preview_token="{token}") 确认；'
+        "不满意可换 start 或候选再预览。"
+    )
+    media = [
+        m for m in [item("video", result.get("preview_url") or "", f"{label} 选片预览", collapsed=False)] if m
+    ]
+    value = {
+        "preview_token": token,
+        "mode": mode,
+        "shot_id": sid,
+        "range": actual,
+        "anchor_ref": result.get("anchor_ref"),
+        "anchor_changed": changed,
+        "trim_seconds": result.get("trim_seconds", 0),
+        "freeze_seconds": result.get("freeze_seconds", 0),
+        "atempo": result.get("atempo"),
+        "preview_url": result.get("preview_url"),
+    }
+    return ToolOutput(
+        value,
+        text="\n".join(lines),
+        media=media,
+        mutation=mutation(view.job["id"], view.plan_id) if changed else None,
+        focus=studio_focus(view.job["id"], view.plan_id, shots=[sid], stage="select"),
+    )
 
 
 class ConfirmSelection(StrictModel):
@@ -743,16 +996,19 @@ STALE_MARKERS = ("已变化", "请先预览")
 
 def stale_error(exc: ToolError) -> ToolError:
     if any(marker in str(exc) for marker in STALE_MARKERS):
-        return ToolError(f"{exc}；请重新调用 preview_selection 生成新的预览后再确认", code="preview_stale",
-                         value=exc.value)
+        return ToolError(
+            f"{exc}；请重新调用 preview_selection 生成新的预览后再确认", code="preview_stale", value=exc.value
+        )
     return exc
 
 
 def selection_entry(args: ConfirmSelection, ctx: ToolContext) -> dict:
     entry = SELECTION_PREVIEWS.get(preview_scope(ctx), args.preview_token.strip())
     if entry is None:
-        raise ToolError("找不到该选片预览（已过期、已确认或来自其他会话）；请重新调用 preview_selection",
-                        code="preview_stale")
+        raise ToolError(
+            "找不到该选片预览（已过期、已确认或来自其他会话）；请重新调用 preview_selection",
+            code="preview_stale",
+        )
     return entry
 
 
@@ -772,74 +1028,149 @@ async def preview_confirm_selection(args: ConfirmSelection, ctx: ToolContext) ->
     except ToolError as exc:
         raise stale_error(exc) from exc
     if result["preview_token"] != entry["token"]:
-        raise ToolError("预览之后对齐结果或选片设置已变化；请重新调用 preview_selection", code="preview_stale")
+        raise ToolError(
+            "预览之后对齐结果或选片设置已变化；请重新调用 preview_selection", code="preview_stale"
+        )
     planned(ctx, "selection", entry)
     actual = entry["range"]
-    changes = [{"label": f"分镜 {label} 选片",
-                "before": selection_line(selection_summary(stage_version(view, sid, "select"))),
-                "after": f"{entry['source_name']} {secs(actual['start'])}–{secs(actual['end'])}（人工，"
-                         f"{'定长窗口' if entry['mode'] == 'window' else '任意区间'}）"}]
+    changes = [
+        {
+            "label": f"分镜 {label} 选片",
+            "before": selection_line(selection_summary(stage_version(view, sid, "select"))),
+            "after": f"{entry['source_name']} {secs(actual['start'])}–{secs(actual['end'])}（人工，"
+            f"{'定长窗口' if entry['mode'] == 'window' else '任意区间'}）",
+        }
+    ]
     if entry["mode"] == "window" and entry.get("anchor_ref"):
         changes.append({"label": "参考候选", "after": entry["anchor_ref"]["candidate_id"]})
-    return Preview(f"确认分镜 {label} 的人工选片（生成新的选片版本并选用）", changes,
-                   warnings=["该分镜的渲染与成片会在下次构建时按新选片重建"],
-                   value={"preview_token": entry["token"], "range": actual},
-                   focus=studio_focus(view.job["id"], view.plan_id, shots=[sid], stage="select"))
+    return Preview(
+        f"确认分镜 {label} 的人工选片（生成新的选片版本并选用）",
+        changes,
+        warnings=["该分镜的渲染与成片会在下次构建时按新选片重建"],
+        value={"preview_token": entry["token"], "range": actual},
+        focus=studio_focus(view.job["id"], view.plan_id, shots=[sid], stage="select"),
+    )
 
 
 async def confirm_selection(args: ConfirmSelection, ctx: ToolContext) -> ToolOutput:
     entry = planned(ctx, "selection") or selection_entry(args, ctx)
     job, pid, sid = entry["job_id"], entry["plan_id"], entry["shot_id"]
     try:
-        detail = check(await ctx.client.post(f"/api/studio/jobs/{job}/plans/{pid}/range-confirm",
-                                             {**entry["body"], "preview_token": entry["token"]}), "确认选片")
+        detail = check(
+            await ctx.client.post(
+                f"/api/studio/jobs/{job}/plans/{pid}/range-confirm",
+                {**entry["body"], "preview_token": entry["token"]},
+            ),
+            "确认选片",
+        )
     except ToolError as exc:
         raise stale_error(exc) from exc
     SELECTION_PREVIEWS.pop(preview_scope(ctx), entry["token"])
     view = PlanView(detail, pid)
     vid = view.plan["shots"][sid].get("select")
     actual = entry["range"]
-    return ToolOutput({"shot_id": sid, "select_version": vid, "range": actual},
-                      text=f"已确认分镜 {shot_label(view, sid)} 的人工选片，生成并选用选片版本 {short(vid)}"
-                           f"（{entry['source_name']} {secs(actual['start'])}–{secs(actual['end'])}）。"
-                           "渲染与成片会在下次构建时按新选片重建；可用 preview_version 预览该选片版本。",
-                      mutation=mutation(job, pid),
-                      focus=studio_focus(job, pid, shots=[sid], stage="select"))
+    return ToolOutput(
+        {"shot_id": sid, "select_version": vid, "range": actual},
+        text=f"已确认分镜 {shot_label(view, sid)} 的人工选片，生成并选用选片版本 {short(vid)}"
+        f"（{entry['source_name']} {secs(actual['start'])}–{secs(actual['end'])}）。"
+        "渲染与成片会在下次构建时按新选片重建；可用 preview_version 预览该选片版本。",
+        mutation=mutation(job, pid),
+        focus=studio_focus(job, pid, shots=[sid], stage="select"),
+    )
 
 
 def specs() -> list[ToolSpec]:
     return [
-        ToolSpec("diagnose_plan", "studio_detail",
-                 "方案诊断：分镜硬性/软性检查与文案覆盖、烧录字幕时的滤镜与字体检查、各已选节点是否缺失/失败/损坏/过期"
-                 "及变化原因（例如“旁白已变化”）、构建预检摘要。用于解释“为什么这个分镜要重建”。只读。",
-                 DiagnosePlan, "read", diagnose_plan),
-        ToolSpec("get_version_lineage", "studio_detail",
-                 "查看某个产物版本的依赖链：它用到的上游版本（阶段、短 ID、分镜、状态、创建时间、是否当前选用）。只读。",
-                 VersionLineage, "read", get_version_lineage),
-        ToolSpec("suggest_shot_query", "studio_detail",
-                 "按分镜画面意象（或给定的新画面意象）重写召回词，只返回建议、不修改分镜；采用时再用 edit_shots。",
-                 SuggestShotQuery, "read", suggest_shot_query),
-        ToolSpec("get_material_digest", "studio_detail",
-                 "读取任务的可用素材摘要（素材、片段数、画面词与摘要正文），即写文案和重写召回词时参考的资料。只读。",
-                 MaterialDigestArgs, "read", get_material_digest),
-        ToolSpec("preview_version", "studio_detail",
-                 "预览选片或渲染版本：选片版本生成带配音的快速预览，渲染版本直接返回视频，可在面板播放。",
-                 PreviewVersion, "read", preview_version),
-        ToolSpec("run_column", "studio_detail",
-                 "整列执行某个阶段（召回/配音/选片/渲染）：覆盖方案全部分镜，按当前输入提交；force=true 全部重新生成。"
-                 "后台执行，结束时系统会通知你。输入已变化时服务端会拒绝，需要重新预览。",
-                 RunColumn, "danger", run_column, preview_run_column),
-        ToolSpec("get_selection_candidates", "studio_detail",
-                 "人工选片前查看某分镜的召回候选（#序号、素材、区间、分数、缩略图）、当前参考锚点与选片、配音时长、"
-                 "定长窗口的合法起点范围，以及选片是否就绪和原因。只读。",
-                 SelectionCandidates, "read", get_selection_candidates),
-        ToolSpec("preview_selection", "studio_detail",
-                 "生成人工选片预览（带配音的视频）并返回 preview_token，不改选片。两种方式："
-                 "定长窗口——给 candidate（#序号或候选 ID，会设为该分镜的参考锚点，并清除之前的人工区间）与可选 start；"
-                 "任意区间——给 source_id、start、end。需要成功配音；构建执行中不可用。",
-                 PreviewSelection, "read", preview_selection),
-        ToolSpec("confirm_selection", "studio_detail",
-                 "确认 preview_selection 生成的选片预览：生成新的选片版本并选用。方案或对齐结果在预览后变化时会被拒绝，"
-                 "需要重新预览。",
-                 ConfirmSelection, "write", confirm_selection, preview_confirm_selection),
+        ToolSpec(
+            "diagnose_plan",
+            "studio_detail",
+            (
+                "方案诊断：分镜硬性/软性检查与文案覆盖、烧录字幕时的滤镜与字体检查、"
+                "各已选节点是否缺失/失败/损坏/过期及变化原因（例如“旁白已变化”）、构建预检摘要。"
+                "用于解释“为什么这个分镜要重建”。只读。"
+            ),
+            DiagnosePlan,
+            "read",
+            diagnose_plan,
+        ),
+        ToolSpec(
+            "get_version_lineage",
+            "studio_detail",
+            "查看某个产物版本的依赖链：它用到的上游版本（阶段、短 "
+            "ID、分镜、状态、创建时间、是否当前选用）。只读。",
+            VersionLineage,
+            "read",
+            get_version_lineage,
+        ),
+        ToolSpec(
+            "suggest_shot_query",
+            "studio_detail",
+            "按分镜画面意象（或给定的新画面意象）重写召回词，只返回建议、不修改分镜；采用时再用 edit_shots。",
+            SuggestShotQuery,
+            "read",
+            suggest_shot_query,
+        ),
+        ToolSpec(
+            "get_material_digest",
+            "studio_detail",
+            (
+                "读取任务的可用素材摘要（素材、片段数、画面词与摘要正文），"
+                "即写文案和重写召回词时参考的资料。只读。"
+            ),
+            MaterialDigestArgs,
+            "read",
+            get_material_digest,
+        ),
+        ToolSpec(
+            "preview_version",
+            "studio_detail",
+            "预览选片或渲染版本：选片版本生成带配音的快速预览，渲染版本直接返回视频，可在面板播放。",
+            PreviewVersion,
+            "read",
+            preview_version,
+        ),
+        ToolSpec(
+            "run_column",
+            "studio_detail",
+            "整列执行某个阶段（召回/配音/选片/渲染）：覆盖方案全部分镜，按当前输入提交；force=true "
+            "全部重新生成。"
+            "后台执行，结束时系统会通知你。输入已变化时服务端会拒绝，需要重新预览。",
+            RunColumn,
+            "danger",
+            run_column,
+            preview_run_column,
+        ),
+        ToolSpec(
+            "get_selection_candidates",
+            "studio_detail",
+            (
+                "人工选片前查看某分镜的召回候选（#序号、素材、区间、分数、缩略图）、当前参考锚点与选片、"
+                "配音时长、定长窗口的合法起点范围，以及选片是否就绪和原因。只读。"
+            ),
+            SelectionCandidates,
+            "read",
+            get_selection_candidates,
+        ),
+        ToolSpec(
+            "preview_selection",
+            "studio_detail",
+            "生成人工选片预览（带配音的视频）并返回 preview_token，不改选片。两种方式："
+            "定长窗口——给 candidate（#序号或候选 ID，会设为该分镜的参考锚点，并清除之前的人工区间）与可选 "
+            "start；"
+            "任意区间——给 source_id、start、end。需要成功配音；构建执行中不可用。",
+            PreviewSelection,
+            "read",
+            preview_selection,
+        ),
+        ToolSpec(
+            "confirm_selection",
+            "studio_detail",
+            "确认 preview_selection "
+            "生成的选片预览：生成新的选片版本并选用。方案或对齐结果在预览后变化时会被拒绝，"
+            "需要重新预览。",
+            ConfirmSelection,
+            "write",
+            confirm_selection,
+            preview_confirm_selection,
+        ),
     ]

@@ -7,8 +7,8 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from mindex.api import create_app
-from mindex.models import adapters
+from api import create_app
+from models import adapters
 
 TOKENHUB = {
     "role": "embedding",
@@ -44,11 +44,25 @@ def client_for(config) -> TestClient:
 def test_get_settings_snapshot(config):
     data = client_for(config).get("/api/settings").json()
     roles = {role["role"]: role for role in data["roles"]}
-    assert set(roles) == {"analyzer", "writer", "generator", "embedding", "asr", "tts", "video_generator",
-                          "image_generator", "music_generator", "animator", "person", "agent"}
+    assert set(roles) == {
+        "analyzer",
+        "writer",
+        "generator",
+        "embedding",
+        "asr",
+        "tts",
+        "video_generator",
+        "image_generator",
+        "music_generator",
+        "animator",
+        "person",
+        "agent",
+    }
     assert roles["writer"]["label"] == "文案创作"
     assert roles["writer"]["effective"]["max_tokens"] == config.studio.writer.max_tokens
-    assert data["presets"]["deepseek"]["writer"]["config"] == data["presets"]["deepseek"]["generator"]["config"]
+    assert (
+        data["presets"]["deepseek"]["writer"]["config"] == data["presets"]["deepseek"]["generator"]["config"]
+    )
     assert roles["embedding"]["effective"]["backend"] == "mindex"
     assert roles["embedding"]["active_profile_id"] is None
     assert roles["analyzer"]["label"] == "多模态理解"
@@ -130,7 +144,7 @@ def test_minimax_tts_profile_carries_voice(config, monkeypatch):
     captured = {}
 
     def reply(method, url, **kwargs):
-        if url.endswith('/get_voice'):
+        if url.endswith("/get_voice"):
             return {"system_voice": [{"voice_id": "male-qn-qingse", "voice_name": "Test"}]}
         captured.update(url=url, json=kwargs["json"])
         return {"base_resp": {"status_code": 0}, "data": {"audio": b"RIFF-probe".hex()}}
@@ -243,7 +257,7 @@ def test_profile_test_connection_llama_cpp_without_model_field(config, monkeypat
         def text(self, texts, role="document"):
             return [[0.0] * 4096 for _ in texts]
 
-    monkeypatch.setattr("mindex.settings.settings_api.make_embedder", Schema2Embedder)
+    monkeypatch.setattr("settings.api.make_embedder", Schema2Embedder)
     result = client.post(f"/api/settings/profiles/{profile['id']}/test").json()
     assert result["ok"] is True
     assert result["model"] == "tencent/WeMM-Embedding-9B"
@@ -261,7 +275,7 @@ def test_hot_switch_reaches_search_engine(config, monkeypatch):
         def identity(self):
             return {"model": self.cfg.embedding.model, "implementation": "probe"}
 
-    monkeypatch.setattr("mindex.search.search.make_embedder", Probe)
+    monkeypatch.setattr("search.search.make_embedder", Probe)
     client = client_for(config)
     client.get("/api/status", params={"health": True})
     assert captured[-1].embedding.backend == "mindex"
@@ -340,7 +354,7 @@ def test_profile_test_connection_uses_configured_max_tokens(config, monkeypatch)
 
 
 def test_channel_weights_share_runtime_with_cli_and_keep_legacy_weights(config):
-    from mindex.settings.runtime_settings import apply_runtime_overrides
+    from settings.runtime_settings import apply_runtime_overrides
 
     client = client_for(config)
     weights = {"visual": 1, "dialogue": 2, "analysis": 0}
@@ -363,62 +377,96 @@ def test_channel_weights_share_runtime_with_cli_and_keep_legacy_weights(config):
 
 def test_local_voiceclone_probe_reports_missing_voice_without_synthesis(config, monkeypatch):
     client = client_for(config)
-    profile = client.post('/api/settings/profiles', json={
-        'role': 'tts', 'provider': 'self', 'name': 'LocalMac-Qwen3-TTS-VoiceClone',
-        'config': {'backend': 'openai', 'base_url': 'http://localhost:8890/v1',
-                   'model': 'Qwen3-TTS-VoiceClone', 'voice': 'foreign-provider-voice'},
-    }).json()
+    profile = client.post(
+        "/api/settings/profiles",
+        json={
+            "role": "tts",
+            "provider": "self",
+            "name": "LocalMac-Qwen3-TTS-VoiceClone",
+            "config": {
+                "backend": "openai",
+                "base_url": "http://localhost:8890/v1",
+                "model": "Qwen3-TTS-VoiceClone",
+                "voice": "foreign-provider-voice",
+            },
+        },
+    ).json()
     calls = []
+
     def request(method, url, **kwargs):
         calls.append(url)
-        return {'voices': []}
-    monkeypatch.setattr(adapters, 'request', request)
-    monkeypatch.setattr(adapters, 'request_bytes', lambda *a, **kw: pytest.fail('missing clone must not synthesize'))
+        return {"voices": []}
+
+    monkeypatch.setattr(adapters, "request", request)
+    monkeypatch.setattr(
+        adapters, "request_bytes", lambda *a, **kw: pytest.fail("missing clone must not synthesize")
+    )
     result = client.post(f"/api/settings/profiles/{profile['id']}/test").json()
-    assert result['ok'] is True and result['ready'] is False
-    assert '服务连接正常' in result['reply'] and '未执行合成测试' in result['reply']
-    assert calls == ['http://localhost:8890/v1/audio/voices']
+    assert result["ok"] is True and result["ready"] is False
+    assert "服务连接正常" in result["reply"] and "未执行合成测试" in result["reply"]
+    assert calls == ["http://localhost:8890/v1/audio/voices"]
 
 
-@pytest.mark.parametrize(('model', 'configured_voice'), [
-    ('Qwen3-TTS-VoiceClone', 'my-clone'),
-    ('Qwen3-TTS-VoiceClone', 'Chinese (Mandarin)_News_Anchor'),
-    ('Qwen3-TTS-CustomVoice', 'Chinese (Mandarin)_News_Anchor'),
-])
+@pytest.mark.parametrize(
+    ("model", "configured_voice"),
+    [
+        ("Qwen3-TTS-VoiceClone", "my-clone"),
+        ("Qwen3-TTS-VoiceClone", "Chinese (Mandarin)_News_Anchor"),
+        ("Qwen3-TTS-CustomVoice", "Chinese (Mandarin)_News_Anchor"),
+    ],
+)
 def test_local_voiceclone_probe_synthesizes_registered_voice(config, monkeypatch, model, configured_voice):
     client = client_for(config)
-    profile = client.post('/api/settings/profiles', json={
-        'role': 'tts', 'provider': 'self', 'name': 'LocalMac-Qwen3-TTS-VoiceClone',
-        'config': {'backend': 'openai', 'base_url': 'http://localhost:8890/v1',
-                   'model': model, 'voice': configured_voice},
-    }).json()
-    monkeypatch.setattr(adapters, 'request', lambda *a, **kw: {'voices': ['my-clone']})
+    profile = client.post(
+        "/api/settings/profiles",
+        json={
+            "role": "tts",
+            "provider": "self",
+            "name": "LocalMac-Qwen3-TTS-VoiceClone",
+            "config": {
+                "backend": "openai",
+                "base_url": "http://localhost:8890/v1",
+                "model": model,
+                "voice": configured_voice,
+            },
+        },
+    ).json()
+    monkeypatch.setattr(adapters, "request", lambda *a, **kw: {"voices": ["my-clone"]})
     captured = []
+
     def speech(method, url, **kwargs):
-        captured.append(kwargs['json'])
-        return b'RIFF-probe'
-    monkeypatch.setattr(adapters, 'request_bytes', speech)
+        captured.append(kwargs["json"])
+        return b"RIFF-probe"
+
+    monkeypatch.setattr(adapters, "request_bytes", speech)
     result = client.post(f"/api/settings/profiles/{profile['id']}/test").json()
-    assert result['ok'] is True and result['bytes'] > 0
-    assert captured[0]['voice'] == 'my-clone'
+    assert result["ok"] is True and result["bytes"] > 0
+    assert captured[0]["voice"] == "my-clone"
 
 
 def test_local_voiceclone_probe_still_fails_if_service_unreachable(config, monkeypatch):
     client = client_for(config)
-    profile = client.post('/api/settings/profiles', json={
-        'role': 'tts', 'provider': 'self', 'name': 'LocalMac-Qwen3-TTS-VoiceClone',
-        'config': {'backend': 'openai', 'model': 'Qwen3-TTS-VoiceClone'},
-    }).json()
+    profile = client.post(
+        "/api/settings/profiles",
+        json={
+            "role": "tts",
+            "provider": "self",
+            "name": "LocalMac-Qwen3-TTS-VoiceClone",
+            "config": {"backend": "openai", "model": "Qwen3-TTS-VoiceClone"},
+        },
+    ).json()
+
     def offline(*a, **kw):
-        raise adapters.ModelError('connection refused')
-    monkeypatch.setattr(adapters, 'request', offline)
+        raise adapters.ModelError("connection refused")
+
+    monkeypatch.setattr(adapters, "request", offline)
     result = client.post(f"/api/settings/profiles/{profile['id']}/test").json()
-    assert result['ok'] is False and 'connection refused' in result['detail']
+    assert result["ok"] is False and "connection refused" in result["detail"]
 
 
 def test_settings_can_skip_expensive_identity_probe(config, monkeypatch):
     monkeypatch.setattr(
-        "mindex.shared.storage.Store.active_index",
+        "shared.storage.Store.active_index",
         lambda self: {"id": "test-index", "spec": {"space": {"model": "test"}}},
     )
     calls = []
@@ -428,7 +476,7 @@ def test_settings_can_skip_expensive_identity_probe(config, monkeypatch):
             calls.append(True)
             return {"model": "test"}
 
-    monkeypatch.setattr("mindex.settings.settings_api.make_embedder", lambda current: Embedder())
+    monkeypatch.setattr("settings.api.make_embedder", lambda current: Embedder())
     client = client_for(config)
     snapshot = client.get("/api/settings?probe_embedding=false")
     assert snapshot.status_code == 200
@@ -443,23 +491,23 @@ def test_settings_can_skip_expensive_identity_probe(config, monkeypatch):
 
 def test_embedding_status_probe_failure(config, monkeypatch):
     monkeypatch.setattr(
-        "mindex.shared.storage.Store.active_index",
+        "shared.storage.Store.active_index",
         lambda self: {"id": "test-index", "spec": {"space": {}}},
     )
 
     def unavailable(current):
         raise RuntimeError("service unavailable")
 
-    monkeypatch.setattr("mindex.settings.settings_api.make_embedder", unavailable)
+    monkeypatch.setattr("settings.api.make_embedder", unavailable)
     result = client_for(config).get("/api/settings/embedding-status").json()
     assert result["matches_index"] is False
     assert result["error"] == "service unavailable"
 
 
 def test_person_interval_profile_save_validation_and_frozen_config(config):
-    from mindex.admin.source_tasks import freeze_config
-    from mindex.settings.runtime_settings import RuntimeConfig
-    from mindex.shared.storage import Store
+    from admin.source_tasks import freeze_config
+    from settings.runtime_settings import RuntimeConfig
+    from shared.storage import Store
 
     client = client_for(config)
     body = {"role": "person", "provider": "self", "name": "间隔", "config": {"frame_interval": 7}}
@@ -478,13 +526,21 @@ def test_person_interval_profile_save_validation_and_frozen_config(config):
 
 def test_writer_profile_test_connection_uses_writer_service(config, monkeypatch):
     client = client_for(config)
-    created = client.post("/api/settings/profiles", json={
-        "role": "writer",
-        "provider": "deepseek",
-        "name": "写作模型",
-        "config": {"backend": "openai", "base_url": "https://api.deepseek.com/v1",
-                   "model": "deepseek-writer", "llama_template": False, "max_tokens": 1234},
-    })
+    created = client.post(
+        "/api/settings/profiles",
+        json={
+            "role": "writer",
+            "provider": "deepseek",
+            "name": "写作模型",
+            "config": {
+                "backend": "openai",
+                "base_url": "https://api.deepseek.com/v1",
+                "model": "deepseek-writer",
+                "llama_template": False,
+                "max_tokens": 1234,
+            },
+        },
+    )
     assert created.status_code == 201, created.text
     profile = created.json()
     captured = {}
@@ -507,7 +563,9 @@ def test_writer_profile_test_connection_uses_writer_service(config, monkeypatch)
 
 def test_profile_test_connection_redacts_detail_and_logs_full_error(config, monkeypatch, caplog):
     client = client_for(config)
-    profile = client.post("/api/settings/profiles", json={**TOKENHUB, "api_key": "sk-tokenhub-secret-1"}).json()
+    profile = client.post(
+        "/api/settings/profiles", json={**TOKENHUB, "api_key": "sk-tokenhub-secret-1"}
+    ).json()
 
     def fail(method, url, **kwargs):
         raise adapters.ModelError(
@@ -516,7 +574,7 @@ def test_profile_test_connection_redacts_detail_and_logs_full_error(config, monk
         )
 
     monkeypatch.setattr(adapters, "request", fail)
-    with caplog.at_level("WARNING", logger="mindex.settings.settings_api"):
+    with caplog.at_level("WARNING", logger="settings.api"):
         result = client.post(f"/api/settings/profiles/{profile['id']}/test").json()
     assert result["ok"] is False
     detail = result["detail"]

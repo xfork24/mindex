@@ -9,7 +9,7 @@ from contextlib import nullcontext
 
 import numpy as np
 
-from mindex.topics.items import normalize_title
+from topics.items import normalize_title
 
 EMBED_BATCH = 32
 
@@ -64,6 +64,7 @@ def by_title(titles: list[str]) -> list[list[int]]:
 
 def rank(clusters: list[list[int]], items: list[dict], limit: int) -> list[list[int]]:
     """簇按（条目数、最大热度）降序取前 ``limit`` 个；簇内保持输入顺序。"""
+
     def key(cluster):
         hot = max((items[i].get("hot") or 0) for i in cluster)
         return (-len(cluster), -hot, cluster[0])
