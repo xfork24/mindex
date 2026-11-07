@@ -1,3 +1,5 @@
+"""分镜配音、版本签名与产物复用回归。"""
+
 from __future__ import annotations
 
 import json

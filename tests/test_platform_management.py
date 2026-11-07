@@ -5,6 +5,7 @@ import copy
 import json
 
 import pytest
+import yaml
 from fastapi.testclient import TestClient
 
 from api import create_app
@@ -192,7 +193,6 @@ def test_custom_platform_cli_and_agent(small):
 
 @pytest.mark.slow
 def test_platform_backup_full_and_partial(tmp_path, video_file):
-    import yaml
 
     from maintenance.backup import export_backup
     from maintenance.backup_db import store_at

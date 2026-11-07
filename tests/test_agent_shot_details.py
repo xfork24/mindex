@@ -9,6 +9,8 @@ from __future__ import annotations
 import asyncio
 import copy
 import itertools
+import json
+import re
 from typing import ClassVar
 from uuid import uuid4
 
@@ -355,7 +357,6 @@ class _WorkspaceClient:
 @given(data=st.data())
 def test_list_mode_paging_window_and_header(data):
     """**Validates: Requirements 1.7, 4.6, 7.3, 7.4**"""
-    import asyncio
 
     from agent.registry import ToolContext
     from agent.tools.studio_read import ShotDetailsArgs, get_shot_details
@@ -390,7 +391,6 @@ def test_list_mode_paging_window_and_header(data):
 @given(data=st.data())
 def test_resolve_refs_consistent_with_resolve_shot(data):
     """**Validates: Requirements 2.1, 2.2, 2.3, 2.4, 2.5**"""
-    import re
 
     from agent.ids import resolve_shot
     from agent.tools.shot_details import resolve_refs
@@ -496,7 +496,6 @@ def test_details_focus_page_location(data):
 @given(view=view_with_plan(min_shots=1, max_shots=3))
 def test_render_detail_verbatim_and_complete(view: PlanView):
     """**Validates: Requirements 1.3, 1.4, 3.7**"""
-    import json
 
     from agent.tools.shot_details import render_detail
 
@@ -615,8 +614,6 @@ def budget_workspace(draw) -> dict:
 @given(data=st.data())
 def test_list_render_budget_matches_structured(data):
     """**Validates: Requirements 7.6, 7.7, 1.4**"""
-    import asyncio
-    import re
 
     from agent.registry import MAX_TEXT, ToolContext
     from agent.tools.studio_read import ShotDetailsArgs, get_shot_details

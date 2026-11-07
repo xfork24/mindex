@@ -20,12 +20,12 @@ function node(tag, text, cls) {
     },
   };
 }
-const prefs = {},
-  source = { id: "A" },
-  target = node("div");
-let requests = 0,
-  renders = 0,
-  cleared = 0;
+const prefs = {};
+const source = { id: "A" };
+const target = node("div");
+let requests = 0;
+let renders = 0;
+let cleared = 0;
 const ctx = vm.createContext({
   node,
   preferences: () => prefs,

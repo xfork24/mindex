@@ -8,7 +8,11 @@ from __future__ import annotations
 import json
 from uuid import uuid4
 
+from shared import files, jsonio, lock_backend
 from shared.config import fingerprint
+from shared.directory_files import snapshot
+from shared.migration_state import writable_config
+from shared.storage import Store
 from studio import studio
 from studio.artifacts import digest, safe_path, sanitized
 
@@ -37,9 +41,6 @@ def current_revision(config, job_id):
     """磁盘上工作区的当前修订；不存在或损坏返回 None。"""
     file = path(config, job_id)
     if config.storage.backend == "s3":
-        from shared import files
-        from shared.storage import Store
-
         payload = files.read_bytes(Store.open(config), file)
         return revision(json.loads(payload)) if payload is not None else None
     if not file.is_file():
@@ -51,7 +52,6 @@ def current_revision(config, job_id):
 
 
 def persist(config, job_id, workspace, *, expected_revision=None):
-    from shared.migration_state import writable_config
 
     writable_config(config)
     """条件写入工作区：``expected_revision`` 与磁盘当前修订不符时抛 RevisionConflict。
@@ -59,7 +59,6 @@ def persist(config, job_id, workspace, *, expected_revision=None):
     读-比对-写在进程内与跨进程资源锁内完成（``workspace:<job_id>``），因此并发
     写者不会把旧快照覆盖到新状态；调用方已持 studio 锁时也不会自锁（不同资源）。
     """
-    from shared import lock_backend
 
     with lock_backend.resource(config, f"workspace:{job_id}", timeout=None):
         expected_revision = expected_revision or getattr(workspace, "loaded_revision", None)
@@ -69,10 +68,6 @@ def persist(config, job_id, workspace, *, expected_revision=None):
                 raise RevisionConflict("工作区已被其他操作修改，请刷新后重试")
         workspace["updated_at"] = studio.now()
         if config.storage.backend == "s3":
-            from shared import files
-            from shared.directory_files import snapshot
-            from shared.storage import Store
-
             store = Store.open(config)
             prefix = f"studio/{job_id}/"
             view = snapshot(store, prefix)
@@ -96,7 +91,6 @@ def persist(config, job_id, workspace, *, expected_revision=None):
                         view.put_path(key, store.root / key, digest=reference["id"])
             view.put(prefix + "workspace.json", json.dumps(workspace, ensure_ascii=False, indent=2).encode())
             view.publish()
-            from shared import jsonio
 
             jsonio.save(path(config, job_id), workspace)
             if isinstance(workspace, WorkspaceState):
@@ -192,9 +186,6 @@ def file_path(config, job_id, item, name):
         raise studio.StudioError(f"版本 {item['id']} 缺少 {name}")
     target = safe_path(root(config, job_id), metadata["path"])
     if config.storage.backend == "s3":
-        from shared import files
-        from shared.storage import Store
-
         files.hydrate(Store.open(config), target)
     if not target.is_file() or digest(target) != metadata["sha256"]:
         raise studio.StudioError(f"版本 {item['id']} 文件损坏或缺失")

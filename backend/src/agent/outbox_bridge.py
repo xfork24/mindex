@@ -10,6 +10,9 @@ from __future__ import annotations
 import logging
 import threading
 
+from shared.db import agent_outbox
+from shared.db.agent_outbox import drain
+
 log = logging.getLogger(__name__)
 
 __all__ = ["OutboxBridge"]
@@ -24,14 +27,13 @@ class OutboxBridge:
         self._thread: threading.Thread | None = None
 
     def drain_once(self) -> int:
-        from shared.db.agent_outbox import acknowledge, drain
 
         items = drain(self.store, consume=False)
         delivered = 0
         for item in items:
             try:
                 self.feed.publish_outbox(self.store.library_id, item)
-                acknowledge(self.store, item["outbox_id"])
+                agent_outbox.acknowledge(self.store, item["outbox_id"])
                 delivered += 1
             except Exception:
                 log.exception("outbox 条目 %s 转入 ChangeFeed 失败", item.get("outbox_id"))

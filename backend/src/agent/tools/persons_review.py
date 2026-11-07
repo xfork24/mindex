@@ -906,8 +906,10 @@ def specs() -> list[ToolSpec]:
         ToolSpec(
             "import_cast",
             "persons",
-            "用 1–12 张演员表截图附件（attachment://）创建导入草稿并自动拆分，返回条目（演员、角色、照片框）与警告；"
-            "不写入人物库。",
+            (
+                "用 1–12 张演员表截图附件（attachment://）创建导入草稿并自动拆分，返回条目（演员、角色、"
+                "照片框）与警告；不写入人物库。"
+            ),
             ImportCast,
             "write",
             import_cast,

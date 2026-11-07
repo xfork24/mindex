@@ -4,11 +4,14 @@
 from __future__ import annotations
 
 import io
+import json
 import shutil
+import subprocess
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from PIL import Image
+from PIL import Image, ImageStat
 
 from api import create_app
 from shared.storage import Store
@@ -205,10 +208,6 @@ def test_brand_assets_enter_compose_payload_only_when_present(client, tmp_path):
 
 @pytest.mark.slow
 def test_build_with_intro_outro_and_watermark(client, tmp_path):
-    import json
-    import subprocess
-
-    from PIL import ImageStat
 
     from shared.media import command
     from test_studio_sources import build, frame_count, make_image, store_input
@@ -269,8 +268,6 @@ def test_build_with_intro_outro_and_watermark(client, tmp_path):
 # ---------------------------------------------------------------- 内置模板显示文字（中英双语）
 def test_builtin_brand_text_bilingual():
     """内置风格模板的名称与说明走文案目录：中文与 YAML 原文一致，英文另有翻译。"""
-    import json
-    from pathlib import Path
 
     catalog = json.loads(
         (Path(__file__).resolve().parents[1] / "frontend" / "src" / "shared" / "messages.json").read_text(
@@ -286,8 +283,6 @@ def test_builtin_brand_text_bilingual():
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="需要 Node 运行前端控制逻辑检查")
 def test_studio_brand_text_controls():
-    import subprocess
-    from pathlib import Path
 
     result = subprocess.run(
         ["node", "tests/studio_brand_text_unit.cjs"],

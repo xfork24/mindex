@@ -16,6 +16,8 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
+import mindex  # noqa: F401 — 安装根包自举，后续使用包内短导入
+
 from persons.persons import Persons
 from shared.storage import Store
 

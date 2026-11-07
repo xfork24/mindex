@@ -44,96 +44,105 @@ ALLOWED_SCHEMES = ("data:", "blob:", "about:")
 # 单次推进最多执行的定时器回调数：超过视为定时器风暴（例如 setTimeout(f, 0) 自我递归）。
 TIMER_BUDGET = 100000
 
-VIRTUAL_CLOCK = r"""
-(() => {
-  if (window.__mindexAdvance) return;
-  const EPOCH = 1767225600000;  // 2026-01-01T00:00:00Z：Date 从固定时刻起走
-  let now = 0;
-  let seed = 0x9e3779b9 | 0;
-  Math.random = () => {
-    seed = (seed + 0x6d2b79f5) | 0;
-    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-  const RealDate = Date;
-  function VirtualDate(...args) {
-    if (!new.target) return new RealDate(EPOCH + now).toString();
-    return args.length ? new RealDate(...args) : new RealDate(EPOCH + now);
-  }
-  VirtualDate.prototype = RealDate.prototype;
-  VirtualDate.now = () => EPOCH + now;
-  VirtualDate.parse = RealDate.parse;
-  VirtualDate.UTC = RealDate.UTC;
-  window.Date = VirtualDate;
-  Object.defineProperty(performance, "now", { value: () => now, configurable: true });
-  try {
-    Object.defineProperty(AnimationTimeline.prototype, "currentTime", { get: () => now, configurable: true });
-  } catch (e) {}
-
-  const timers = new Map();
-  let nextTimer = 1;
-  const schedule = (cb, ms, args, repeat) => {
-    const id = nextTimer++;
-    const delay = Math.max(0, Number(ms) || 0);
-    timers.set(id, { at: now + delay, cb, args, interval: repeat ? Math.max(1, delay) : null, id });
-    return id;
-  };
-  const call = (cb, args) => (typeof cb === "function" ? cb(...args) : (0, eval)(String(cb)));
-  window.setTimeout = (cb, ms, ...args) => schedule(cb, ms, args, false);
-  window.setInterval = (cb, ms, ...args) => schedule(cb, ms, args, true);
-  window.clearTimeout = window.clearInterval = (id) => { timers.delete(id); };
-  window.requestIdleCallback = (cb) => schedule(cb, 0, [{ didTimeout: false, timeRemaining: () => 0 }], false)
-;
-  window.cancelIdleCallback = (id) => { timers.delete(id); };
-
-  let frames = new Map();
-  let nextFrame = 1;
-  window.requestAnimationFrame = (cb) => { const id = nextFrame++; frames.set(id, cb); return id; };
-  window.cancelAnimationFrame = (id) => { frames.delete(id); };
-
-  const births = new WeakMap();
-  const syncAnimations = () => {
-    if (!document.getAnimations) return;
-    for (const animation of document.getAnimations()) {
-      if (!births.has(animation)) births.set(animation, now);
-      try {
-        animation.pause();
-        animation.currentTime = now - births.get(animation);
-      } catch (e) {}
-    }
-  };
-
-  window.__mindexAdvance = (ms) => {
-    const target = now + Math.max(0, Number(ms) || 0);
-    let budget = __BUDGET__;
-    for (;;) {
-      let due = null;
-      for (const timer of timers.values()) {
-        if (timer.at <= target && (!due || timer.at < due.at || (timer.at === due.at && timer.id < due.id)))
-due = timer;
-      }
-      if (!due) break;
-      if (--budget < 0) throw new Error("定时器回调过多（可能存在定时器死循环）");
-      now = Math.max(now, due.at);
-      if (due.interval) due.at += due.interval; else timers.delete(due.id);
-      try { call(due.cb, due.args); } catch (e) { console.error(e); }
-    }
-    now = target;
-    const pending = frames;
-    frames = new Map();
-    for (const cb of pending.values()) {
-      try { cb(now); } catch (e) { console.error(e); }
-    }
-    syncAnimations();
-    return now;
-  };
-})();
-""".replace("__BUDGET__", str(TIMER_BUDGET))
+VIRTUAL_CLOCK = (
+    "\n"
+    "(() => {\n"
+    "  if (window.__mindexAdvance) return;\n"
+    "  const EPOCH = 1767225600000;  // 2026-01-01T00:00:00Z：Date 从固定时刻起走\n"
+    "  let now = 0;\n"
+    "  let seed = 0x9e3779b9 | 0;\n"
+    "  Math.random = () => {\n"
+    "    seed = (seed + 0x6d2b79f5) | 0;\n"
+    "    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);\n"
+    "    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;\n"
+    "    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;\n"
+    "  };\n"
+    "  const RealDate = Date;\n"
+    "  function VirtualDate(...args) {\n"
+    "    if (!new.target) return new RealDate(EPOCH + now).toString();\n"
+    "    return args.length ? new RealDate(...args) : new RealDate(EPOCH + now);\n"
+    "  }\n"
+    "  VirtualDate.prototype = RealDate.prototype;\n"
+    "  VirtualDate.now = () => EPOCH + now;\n"
+    "  VirtualDate.parse = RealDate.parse;\n"
+    "  VirtualDate.UTC = RealDate.UTC;\n"
+    "  window.Date = VirtualDate;\n"
+    '  Object.defineProperty(performance, "now", { value: () => now, configurable: '
+    "true });\n"
+    "  try {\n"
+    '    Object.defineProperty(AnimationTimeline.prototype, "currentTime", { get: '
+    "() => now, configurable: true });\n"
+    "  } catch (e) {}\n"
+    "\n"
+    "  const timers = new Map();\n"
+    "  let nextTimer = 1;\n"
+    "  const schedule = (cb, ms, args, repeat) => {\n"
+    "    const id = nextTimer++;\n"
+    "    const delay = Math.max(0, Number(ms) || 0);\n"
+    "    timers.set(id, { at: now + delay, cb, args, interval: repeat ? "
+    "Math.max(1, delay) : null, id });\n"
+    "    return id;\n"
+    "  };\n"
+    '  const call = (cb, args) => (typeof cb === "function" ? cb(...args) : (0, '
+    "eval)(String(cb)));\n"
+    "  window.setTimeout = (cb, ms, ...args) => schedule(cb, ms, args, false);\n"
+    "  window.setInterval = (cb, ms, ...args) => schedule(cb, ms, args, true);\n"
+    "  window.clearTimeout = window.clearInterval = (id) => { timers.delete(id); };"
+    "\n"
+    "  window.requestIdleCallback = (cb) => schedule(cb, 0, [{ didTimeout: false, "
+    "timeRemaining: () => 0 }], false);\n"
+    "  window.cancelIdleCallback = (id) => { timers.delete(id); };\n"
+    "\n"
+    "  let frames = new Map();\n"
+    "  let nextFrame = 1;\n"
+    "  window.requestAnimationFrame = (cb) => { const id = nextFrame++; "
+    "frames.set(id, cb); return id; };\n"
+    "  window.cancelAnimationFrame = (id) => { frames.delete(id); };\n"
+    "\n"
+    "  const births = new WeakMap();\n"
+    "  const syncAnimations = () => {\n"
+    "    if (!document.getAnimations) return;\n"
+    "    for (const animation of document.getAnimations()) {\n"
+    "      if (!births.has(animation)) births.set(animation, now);\n"
+    "      try {\n"
+    "        animation.pause();\n"
+    "        animation.currentTime = now - births.get(animation);\n"
+    "      } catch (e) {}\n"
+    "    }\n"
+    "  };\n"
+    "\n"
+    "  window.__mindexAdvance = (ms) => {\n"
+    "    const target = now + Math.max(0, Number(ms) || 0);\n"
+    "    let budget = __BUDGET__;\n"
+    "    for (;;) {\n"
+    "      let due = null;\n"
+    "      for (const timer of timers.values()) {\n"
+    "        if (timer.at <= target && (!due || timer.at < due.at || (timer.at === "
+    "due.at && timer.id < due.id))) due = timer;\n"
+    "      }\n"
+    "      if (!due) break;\n"
+    "      if (--budget < 0) throw new "
+    'Error("定时器回调过多（可能存在定时器死循环）");\n'
+    "      now = Math.max(now, due.at);\n"
+    "      if (due.interval) due.at += due.interval; else timers.delete(due.id);\n"
+    "      try { call(due.cb, due.args); } catch (e) { console.error(e); }\n"
+    "    }\n"
+    "    now = target;\n"
+    "    const pending = frames;\n"
+    "    frames = new Map();\n"
+    "    for (const cb of pending.values()) {\n"
+    "      try { cb(now); } catch (e) { console.error(e); }\n"
+    "    }\n"
+    "    syncAnimations();\n"
+    "    return now;\n"
+    "  };\n"
+    "})();\n"
+).replace("__BUDGET__", str(TIMER_BUDGET))
 
 
 def _playwright():
     try:
+        # 延迟导入：保留可选依赖探测或异常捕获时的降级行为。
         from playwright.sync_api import Error, sync_playwright
     except ImportError as exc:
         raise MediaError(install_hint()) from exc
@@ -326,6 +335,7 @@ def capture(
 
 def _advance(cdp, ms: float, frame_timeout: float, index: int) -> None:
     """经 CDP 推进虚拟时钟：Runtime.evaluate 的 timeout 会终止陷入死循环的回调。"""
+    # 延迟导入：独立模型或扩展功能使用可选依赖，仅在实际调用时加载。
     from playwright.sync_api import Error as PlaywrightError
 
     timeout = f"第 {index + 1} 帧在 {frame_timeout:g} 秒内未完成（动画脚本可能存在死循环）"

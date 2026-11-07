@@ -5,6 +5,8 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import os
+import tempfile
 from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from uuid import uuid4
@@ -12,11 +14,24 @@ from uuid import uuid4
 from maintenance.backup_db import database as bundle_database
 from maintenance.backup_db import schema, snapshot, store_at
 from maintenance.backup_files import digest, safe_path
+from maintenance.migration_journal import MigrationJournal
+from maintenance.migration_runtime import export_execution, restore_execution
+from maintenance.migration_secrets import redact_metadata, scan_bundle
+from maintenance.pg_export import export_media_bundle, export_pg_to_sqlite
+from maintenance.vector_bundle import export_vectors, load_vectors, validate_vectors, verify_vectors
 from shared import jsonio, lock_backend
+from shared.admission import validate_serving
 from shared.backends import open_context
+from shared.backends.s3 import S3MediaStore
+from shared.db import transfer
+from shared.db.dialect import _baseline_columns
 from shared.db.maintenance_gate import maintenance_gate
-from shared.db.schema_pg import BASELINE_TABLES
-from shared.storage import METADATA_STEPS
+from shared.db.schema_pg import BASELINE_TABLES, delivery_platforms_seed
+from shared.gpu_resources import required_groups
+from shared.locks import ORDER
+from shared.migration_state import access
+from shared.object_coordination import ObjectCoordinator
+from shared.storage import METADATA_STEPS, dumps
 
 
 @contextmanager
@@ -25,9 +40,6 @@ def offline(context, name):
         with maintenance_gate(context.store, name=name):
             yield
     else:
-        from shared.locks import ORDER
-        from shared.migration_state import access
-
         with lock_backend.acquire_ordered(context.store, ORDER, exclusive=True), access(context.store):
             yield
 
@@ -39,7 +51,6 @@ def _value(value):
 
 
 def database_manifest(store, *, connection=None):
-    from shared.db.dialect import _baseline_columns
 
     result = {}
     columns = _baseline_columns()
@@ -115,8 +126,6 @@ def inspect_bundle(source):
     ):
         raise ValueError("执行状态清单摘要不一致")
     if manifest.get("vectors"):
-        from maintenance.vector_bundle import validate_vectors
-
         if digest(source / "vectors_manifest.json") != manifest.get("vectors_manifest_sha256"):
             raise ValueError("向量清单摘要不一致")
         validate_vectors(source)
@@ -124,8 +133,6 @@ def inspect_bundle(source):
 
 
 def export_bundle(config, target, *, with_media=False, with_vectors=False, legacy_namespace=False):
-    from maintenance.pg_export import export_media_bundle, export_pg_to_sqlite
-    from maintenance.vector_bundle import export_vectors
 
     with open_context(config) as context:
         media = context.media
@@ -135,8 +142,6 @@ def export_bundle(config, target, *, with_media=False, with_vectors=False, legac
             ):
                 raise ValueError("--legacy-namespace 仅用于显式导出旧 PG 共享后端；本地库不需要此参数")
             if config.storage.backend == "s3":
-                from shared.backends.s3 import S3MediaStore
-
                 media = S3MediaStore(
                     config.storage.s3,
                     staging=context.staging,
@@ -159,8 +164,6 @@ def export_bundle(config, target, *, with_media=False, with_vectors=False, legac
                 export_pg_to_sqlite(context.store, target)
             else:
                 snapshot(context.store.path, target / "metadata.sqlite3")
-            from maintenance.migration_runtime import export_execution
-            from maintenance.migration_secrets import redact_metadata
 
             export_execution(context.store, target)
             redact_metadata(target / "metadata.sqlite3")
@@ -190,7 +193,6 @@ def export_bundle(config, target, *, with_media=False, with_vectors=False, legac
             for kind, present in (("media", with_media), ("vectors", with_vectors)):
                 if present:
                     manifest[f"{kind}_manifest_sha256"] = digest(target / f"{kind}_manifest.json")
-            from maintenance.migration_secrets import scan_bundle
 
             manifest["execution_manifest_sha256"] = digest(target / "execution_manifest.json")
             manifest["unknown_secret_locations"] = scan_bundle(target)
@@ -231,8 +233,6 @@ def _empty(store, *, include_runtime=True):
                 return False
         elif table == "delivery_platforms":
             # 与新建本地库种子逐项核对，而非容许任意平台配置被覆盖。
-            from shared.db.schema_pg import delivery_platforms_seed
-            from shared.storage import dumps
 
             seeds = {row[0]: json.loads(row[1]) for row in delivery_platforms_seed(dumps)}
             rows = store.rows("SELECT id,body FROM delivery_platforms")
@@ -270,7 +270,6 @@ def _rebind(store, library_id):
 
 
 def preflight(config, source):
-    from maintenance.migration_journal import MigrationJournal
 
     source = Path(source).resolve()
     manifest = inspect_bundle(source)
@@ -315,8 +314,6 @@ def _matches(media, key, entry):
 
 
 def _copy_local(file, destination, journal):
-    import os
-    import tempfile
 
     destination.parent.mkdir(parents=True, exist_ok=True)
     prefix = f".migration-{journal.id}-"
@@ -367,10 +364,6 @@ def _load_media(store, media, origin, source, journal):
 
 
 def load_bundle(config, source, *, with_vectors=False):
-    from maintenance.migration_journal import MigrationJournal
-    from maintenance.migration_runtime import restore_execution
-    from maintenance.vector_bundle import load_vectors
-    from shared.db.transfer import copy_sqlite_to_pg, copy_sqlite_to_sqlite
 
     source = Path(source).resolve()
     manifest = inspect_bundle(source)
@@ -392,9 +385,6 @@ def load_bundle(config, source, *, with_vectors=False):
         _rebind(store, manifest["library_id"])
         media = context.media
         if config.storage.backend == "s3":
-            from shared.backends.s3 import S3MediaStore
-            from shared.object_coordination import ObjectCoordinator
-
             media = S3MediaStore(
                 config.storage.s3,
                 library_id=store.library_id,
@@ -416,9 +406,9 @@ def load_bundle(config, source, *, with_vectors=False):
         if not journal.done("metadata"):
             with store.connect() as outer:
                 if store.pg:
-                    copy_sqlite_to_pg(origin, store, connection=outer)
+                    transfer.copy_sqlite_to_pg(origin, store, connection=outer)
                 else:
-                    copy_sqlite_to_sqlite(origin, store, connection=outer)
+                    transfer.copy_sqlite_to_sqlite(origin, store, connection=outer)
                 journal.stage("metadata", "complete", connection=outer)
                 outer.execute("UPDATE migration_runs SET status='loaded' WHERE migration_id=?", (journal.id,))
         if not journal.done("tasks"):
@@ -432,8 +422,6 @@ def load_bundle(config, source, *, with_vectors=False):
 
 
 def verify_bundle(config, source):
-    from maintenance.migration_journal import MigrationJournal
-    from maintenance.migration_secrets import scan_bundle
 
     source = Path(source).resolve()
     manifest = inspect_bundle(source)
@@ -454,13 +442,10 @@ def verify_bundle(config, source):
                 except ValueError:
                     differences.append(f"media:{key}")
         if manifest["vectors"]:
-            from maintenance.vector_bundle import verify_vectors
-
             differences += verify_vectors(store, source, config=config)
         secrets = scan_bundle(source)
         if not differences and matching and journal.row()["status"] != "activated":
             # CLI verify 本身是维护操作；只更新该迁移的验证账本。
-            from shared.migration_state import access
 
             with access(store):
                 journal.stage("validation", "complete")
@@ -474,7 +459,6 @@ def verify_bundle(config, source):
 
 
 def activate_bundle(config, source):
-    from maintenance.migration_journal import MigrationJournal
 
     source = Path(source).resolve()
     manifest = inspect_bundle(source)
@@ -504,10 +488,7 @@ def activate_bundle(config, source):
         if unknown_groups - set(config.gpu.groups):
             raise ValueError("迁移前 GPU 执行未核对，目标必须保留原物理资源组声明或先附依据核对")
         if context.form == "cluster":
-            from shared.admission import validate_serving
-
             validate_serving(context)
-            from shared.gpu_resources import required_groups
 
             for row in context.store.rows("SELECT DISTINCT kind FROM task_queue WHERE status='pending'"):
                 required_groups(config, row["kind"], cluster=True)

@@ -1,3 +1,5 @@
+"""智能助手 MCP 配置与领域过滤回归。"""
+
 from pathlib import Path
 
 import pytest

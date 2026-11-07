@@ -9,6 +9,7 @@ from pydantic import Field
 
 from shared.config import StrictModel
 from shared.media_groups import Groups
+from shared.types import Filters
 
 GroupType = Literal["source", "music"]
 
@@ -58,7 +59,6 @@ def groups_router(store):
 
     @router.post("/groups/resolve")
     def resolve_scope(body: ResolveBody):
-        from shared.types import Filters
 
         values = invoke(Filters(**body.model_dump()).effective_sources, store)
         if values == set():

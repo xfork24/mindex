@@ -11,17 +11,20 @@ import logging
 import re
 from uuid import uuid4
 
+from shared.db.fencing import current_attempt
+from shared.external_calls import guard_service, scope
+from shared.storage import Store
 from shared.trace import current
 from studio import executor, studio
 from studio.artifacts import safe_path, sanitized
 from studio.logs import ExecutionLog, active_log, diagnostic_event
-
-from . import signatures
-from .persistence import load
-from .plans import board_snapshot, choose
-from .preflight import node_dependencies, preflight
-from .stages import RunContext, handler
-from .versions import add_version, file_info, persist, plan, root
+from studio.tasks import publication, submit, wait
+from studio.workspace import signatures
+from studio.workspace.persistence import load
+from studio.workspace.plans import board_snapshot, choose
+from studio.workspace.preflight import node_dependencies, preflight
+from studio.workspace.stages import RunContext, handler
+from studio.workspace.versions import add_version, file_info, persist, plan, root
 
 # 注意：run_build 内有局部变量 log（ExecutionLog），模块 logger 必须用别的名字。
 logger = logging.getLogger(__name__)
@@ -69,8 +72,6 @@ def execute(
     diagnostics = VersionDiagnostics(directory)
     diagnostics.record("inputs", {"stage": stage, "shot_id": sid, **spec})
     token = current.set(diagnostics)
-    from shared.external_calls import guard_service, scope
-    from shared.storage import Store
 
     services = {
         "speaker": speaker,
@@ -110,6 +111,7 @@ def execute(
         persist(config, job_id, w)
         return vid
     except Exception as exc:
+        # 延迟导入：保持异常捕获范围，依赖加载失败时仍走原有降级路径。
         from shared.db.locks_pg import LeaseLost
         from shared.task_cancel import TaskCancelled
 
@@ -169,11 +171,8 @@ def run_build(
     image_generator=None,
     music_generator=None,
 ):
-    from shared.db.fencing import current_attempt
 
     if config.queue.backend == "postgres" and current_attempt() is None:
-        from studio.tasks import publication, submit, wait
-
         with publication(config, job_id):
             task_id = submit(config, job_id, "build", {}, build_id=build_id)
         return wait(config, task_id)
@@ -289,6 +288,7 @@ def _run_build(
                     )
                     node.update(status="complete", version=vid)
             except Exception as exc:  # 失败节点不得阻断互不依赖的节点
+                # 延迟导入：保持异常捕获范围，依赖加载失败时仍走原有降级路径。
                 from shared.db.locks_pg import LeaseLost
                 from shared.task_cancel import TaskCancelled
 
@@ -412,8 +412,6 @@ def recover(config, job_id, w):
     for build in w["builds"]:
         if build["status"] == "running":
             if config.queue.backend == "postgres":
-                from shared.storage import Store
-
                 task = Store.open(config).one(
                     "SELECT status FROM studio_tasks WHERE job_id=? AND build_id=? "
                     "ORDER BY created_at DESC LIMIT 1",

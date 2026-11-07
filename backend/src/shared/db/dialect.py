@@ -337,6 +337,7 @@ _PLAIN_INSERT_RE = re.compile(
 
 def _parse_baseline_tables() -> dict[str, tuple[str, ...]]:
     """从 PG 基线 DDL 解析全表列序（单一事实来源；供无列名 INSERT 补列）。"""
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
     from shared.db.scaling_schema import PG_DELIVERY, PG_DIRECTORIES, PG_DURABLE_INDEX, PG_FILES
     from shared.db.schema_pg import BASELINE_DDL
 
@@ -381,6 +382,7 @@ def _parse_baseline_tables() -> dict[str, tuple[str, ...]]:
 
 @cache
 def _baseline_columns() -> dict[str, tuple[str, ...]]:
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
     from shared.db.scaling_schema import LEDGER_ATTEMPT_COLUMNS, LEDGER_TABLES, MULTIPART_COLUMNS
 
     tables = _parse_baseline_tables()

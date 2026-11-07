@@ -25,7 +25,9 @@ vm.runInNewContext(fs.readFileSync("frontend/src/shared/i18n.js", "utf8"), conte
 const i = context.window.MindexI18n;
 // Every diagnostic template, including nested historical conflicts, resolves in English.
 for (const [key, entry] of Object.entries(catalog)) {
-  if (key.startsWith("system.")) continue;
+  if (key.startsWith("system.")) {
+    continue;
+  }
   const params = Object.fromEntries(
     [...entry.zh.matchAll(/\{(\w+)\}/g)].map((m) => [m[1], "example"]),
   );

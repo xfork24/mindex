@@ -15,6 +15,7 @@ import json
 import os
 
 import pytest
+from fastapi.testclient import TestClient
 
 from shared.db.errors import IntegrityViolation, SchemaMismatch
 from shared.db.migrate_pg import migrate_pg
@@ -317,7 +318,6 @@ def test_maintenance_refusal_on_pg(fresh_pg, tmp_path, monkeypatch):
 
 def test_create_app_boots_on_pg_single(fresh_pg, tmp_path, monkeypatch, video_file):
     """pg-single 冒烟：API 装配、健康检查、覆盖层 settings 读写与管理路由全部走 PG。"""
-    from fastapi.testclient import TestClient
 
     from api import create_app
     from shared.config import Config

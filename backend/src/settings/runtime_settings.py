@@ -33,6 +33,7 @@ from shared.config import (
     SpeakerConfig,
     VideoGeneratorConfig,
 )
+from shared.migration_state import pending
 from shared.storage import Store
 
 ROLES = (
@@ -879,7 +880,6 @@ def apply_overrides(config: Config, store: Store) -> Config:
 
 
 def _migration_pending(store):
-    from shared.migration_state import pending
 
     with store.connect() as db:
         return pending(db) is not None

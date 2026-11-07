@@ -1,3 +1,5 @@
+"""创作产物访问、版本归属与导出回归。"""
+
 from __future__ import annotations
 
 import json

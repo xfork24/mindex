@@ -1,7 +1,13 @@
 """持久化任务当前进度，同时保留处理阶段，供自动检索更新时并列显示。"""
 
 import json
+import logging
+import threading
+from functools import wraps
 
+from shared.db.queue_pg import PgTaskQueue
+from shared.logging_utils import is_application_logger
+from shared.queue_dispatch import ledger_transaction
 from shared.storage import dumps
 from shared.task_cancel import CANCEL_MESSAGE, TaskCancelled, registry_for
 
@@ -56,8 +62,6 @@ def request_task_cancel(store, table, task_id):
         registry_for(store.root).request(task_id)
         with store.connect() as db:
             if getattr(store, "queue_backend", "inline") == "postgres":
-                from shared.db.queue_pg import PgTaskQueue
-
                 queue = PgTaskQueue(store.library_id)
                 queued = db.execute(
                     "SELECT id FROM task_queue WHERE library_id=? AND ledger_table=? AND ledger_id=?",
@@ -94,9 +98,6 @@ def save_task_progress(store, table, task_id, value):
 
 def task_logs(table):
     """Keep only the latest application log from this task's worker thread."""
-    import logging
-    import threading
-    from functools import wraps
 
     def decorate(run):
         @wraps(run)
@@ -105,7 +106,7 @@ def task_logs(table):
 
             class LatestLog(logging.Handler):
                 def emit(self, record):
-                    if record.thread != worker or not record.name.startswith("mindex."):
+                    if record.thread != worker or not is_application_logger(record.name):
                         return
                     try:
                         row = manager.store.one(f"SELECT progress FROM {table} WHERE id=?", (task_id,))
@@ -152,7 +153,6 @@ def reset_task_attempt(store, table, task_id):
             if key not in {"latest_log", "message", "message_key", "message_params", "error", "error_message"}
         }
         progress = {"phase": "publish", "processing_progress": clean}
-    from shared.queue_dispatch import ledger_transaction
 
     with ledger_transaction(store, table, task_id, restart=True) as db:
         db.execute(

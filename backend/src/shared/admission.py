@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from shared.errors import ModelError
+from shared.lexical_store import lexical_ready
+
 PROTOCOL = "2"
 
 
@@ -12,8 +15,6 @@ def validate_protocol(store):
 
 
 def validate_index(store, active):
-    from shared.errors import ModelError
-    from shared.lexical_store import lexical_ready
 
     if active["spec"].get("format", 1) < 2:
         raise ModelError("集群不支持旧格式索引的全快照检索；请执行 mindex index --mode auto --activate 重建")

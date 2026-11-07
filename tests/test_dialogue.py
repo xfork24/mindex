@@ -1,3 +1,8 @@
+"""对白转写、对齐与持久化回归。"""
+
+import json
+
+import httpx
 import pytest
 
 from models.adapters import ModelError
@@ -189,7 +194,6 @@ def test_no_audio_does_not_initialize_models(config, video_file, monkeypatch):
 
 
 def test_minimax_rate_limit_rewinds_upload_and_requests_words(config, tmp_path, monkeypatch):
-    import httpx
 
     from models import adapters, transcribers
 
@@ -221,7 +225,6 @@ def test_minimax_rate_limit_rewinds_upload_and_requests_words(config, tmp_path, 
 
 @pytest.mark.parametrize("fallback", ["empty_subtitle", "bitmap"])
 def test_subtitle_fallback_and_silent_audio_are_explicit(config, tmp_path, monkeypatch, fallback):
-    import json
 
     video = tmp_path / "silent.mp4"
     command(

@@ -3,7 +3,10 @@
   "use strict";
   const params = new URLSearchParams(location.search);
   const next = params.get("next");
-  if (next && next.startsWith("/") && !next.startsWith("//"))
+  if (next && next.startsWith("/") && !next.startsWith("//")) {
     document.getElementById("login-next").value = next;
-  if (params.get("error")) document.getElementById("login-error").hidden = false;
+  }
+  if (params.get("error")) {
+    document.getElementById("login-error").hidden = false;
+  }
 })();

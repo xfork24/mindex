@@ -7,6 +7,8 @@ import re
 from functools import lru_cache
 from pathlib import Path
 
+from shared.analysis_text import select_analysis
+
 HAN = re.compile(r"[\u3400-\u9fff]")
 
 
@@ -61,7 +63,6 @@ def display_metadata(data, root: Path, *, namespace=None):
 
 def english_analysis_view(text: str, translations: dict[str, str]) -> str:
     """给英文素材摘要使用译文，保留解析所需的原始标签名。"""
-    from shared.analysis_text import select_analysis
 
     def english(value):
         value = value.strip()

@@ -1,3 +1,5 @@
+"""素材准备、分镜、分析与检查点复用管线。"""
+
 from __future__ import annotations
 
 import json
@@ -16,13 +18,20 @@ from models.adapters import (
     make_detector,
     make_transcriber,
 )
-from shared import checkpoints, lock_backend
+from models.llama_cpp import checked_runtime, manifest
+from processing.align_worker import coalesce_alignment
+from processing.dialogue import DialogueProcessor, atomic_json, current_dialogue, relative_dialogue
+from processing.subtitle_archive import archive_subtitles
+from shared import checkpoints, files, lock_backend
+from shared import media as shared_media
 from shared.config import Config, fingerprint
-from shared.jsonio import save_text
+from shared.jsonio import save, save_text
 from shared.media import content_hash, cut, probe, thumbnail, windows
+from shared.processing_lock import ProcessingLock
+from shared.scene_plans import select_scenes
 from shared.shot_media import ShotMedia
 from shared.storage import Store, dumps
-from shared.types import Annotation
+from shared.types import Annotation, Utterance
 from shared.work_budget import copy_file
 
 log = logging.getLogger(__name__)
@@ -62,12 +71,10 @@ class Pipeline:
         return self._transcriber
 
     def enrich_dialogue(self, source_id=None, **options):
-        from processing.dialogue import DialogueProcessor
 
         return DialogueProcessor(self.config, transcriber=self._transcriber).process(source_id, **options)
 
     def lock(self, source_id=None, work=None):
-        from shared.processing_lock import ProcessingLock
 
         return ProcessingLock(self.config, source_id=source_id, work=work)
 
@@ -124,8 +131,6 @@ class Pipeline:
             "reason": reason,
         }
         if self.config.storage.backend == "s3":
-            from shared import files
-
             for file in (output, self.store.root / image):
                 if file.is_file():
                     files.publish(self.store, file)
@@ -310,7 +315,6 @@ class Pipeline:
         if not source["prepared"] and source["layout_key"] != self.config.layout_key:
             raise ValueError("素材切分配置不符，请使用原配置或新的 data_dir")
         ranges = self._read_plan(source) if not source["prepared"] else []
-        from processing.subtitle_archive import archive_subtitles
 
         archive_subtitles(self.store, source)
         with self.store.run("prepare", source_id):
@@ -405,7 +409,6 @@ class Pipeline:
         return sources
 
     def _reuse_transcript(self, source_id):
-        from processing.dialogue import current_dialogue
 
         data = current_dialogue(self.store, source_id)
         if (
@@ -483,7 +486,6 @@ class Pipeline:
                 )
 
     def _reuse_raw_chunk(self, source_id, cache, number, start, duration):
-        from shared.jsonio import save
 
         for path in (self.store.root / "transcripts" / source_id).glob(f"*/raw/{number}.json"):
             if path.parent == cache:
@@ -510,6 +512,7 @@ class Pipeline:
                     and isinstance(aligned.get("utterances"), list)
                     and (not value["text"].strip() or aligned["utterances"])
                 ):
+                    # 延迟导入：保持异常捕获范围，依赖加载失败时仍走原有降级路径。
                     from processing.align_worker import coalesce_alignment
                     from shared.types import Utterance
 
@@ -524,7 +527,6 @@ class Pipeline:
 
     def transcribe_raw(self, source_id: str | None = None, *, force=False):
         """Checkpoint raw GGUF ASR output independently from CPU alignment."""
-        from models.llama_cpp import checked_runtime, manifest
 
         profile = self.config.asr_key
         checked = False
@@ -597,9 +599,6 @@ class Pipeline:
 
     def align(self, python: Path, source_id: str | None = None):
         """Run optional ForcedAligner in a separate CPU-only Python environment."""
-        from processing.align_worker import coalesce_alignment
-        from shared.media import command
-        from shared.types import Utterance
 
         if self.config.asr.aligner_revision == "main":
             raise ValueError("请先在配置中固定 asr.aligner_revision 为实际模型 commit")
@@ -621,7 +620,7 @@ class Pipeline:
                         with tempfile.TemporaryDirectory(prefix="align-", dir=self.store.root) as directory:
                             audio = Path(directory) / "audio.wav"
                             ShotMedia(self.store).audio(source["id"], audio, raw["start"], raw["duration"])
-                            command(
+                            shared_media.command(
                                 [
                                     str(python.absolute()),
                                     "-I",
@@ -665,13 +664,11 @@ class Pipeline:
                     "alignment_model": self.config.asr.aligner_model,
                     "alignment_revision": self.config.asr.aligner_revision,
                 }
-                from processing.dialogue import DialogueProcessor
 
                 data = DialogueProcessor(self.config).save(source["id"], profile, data)
                 self.store.put_json("transcripts", "source_id", source["id"], profile, data)
 
     def _dialogue(self, source_id: str, start: float, end: float) -> list[dict]:
-        from processing.dialogue import current_dialogue, relative_dialogue
 
         current = current_dialogue(self.store, source_id)
         if current is not None:
@@ -688,14 +685,12 @@ class Pipeline:
         ]
 
     def annotation_profile(self, source_id):
-        from processing.dialogue import current_dialogue
 
         transcript = current_dialogue(self.store, source_id)
         version = transcript.get("content_version") if transcript and transcript.get("utterances") else None
         return fingerprint([self.config.analysis_key, version]) if version else self.config.analysis_key
 
     def _annotate(self, segment: dict, *, force: bool = False, reuse_completed: bool = False):
-        from processing.dialogue import current_dialogue
 
         transcript = current_dialogue(self.store, segment["source_id"])
         input_version = transcript.get("content_version") if transcript else None
@@ -809,7 +804,6 @@ class Pipeline:
         return output
 
     def analyze(self, source_id: str | None = None, progress=None, *, force: bool = False):
-        from processing.dialogue import atomic_json
 
         sources = self.selected_sources(source_id)
         log.info("LLM 分析范围：%d 个素材", len(sources))
@@ -1025,7 +1019,6 @@ class Pipeline:
                 log.info("场景计划就绪 %s · %d 个场景", source["name"], len(plan))
                 if not plan and progress:
                     notify({"stage": "scenes", "completed": 0, "total": 0, "unit": "scenes"})
-                from shared.scene_plans import select_scenes
 
                 existing_scenes = select_scenes(self.store.segments(source["id"], "scene"), plan, profile)
                 for scene_number, (start, end) in enumerate(plan, 1):
@@ -1102,7 +1095,6 @@ class Pipeline:
             if self.store.json_value("scene_plans", "source_id", source["id"], profile) is None:
                 raise ValueError(f"{source['name']} 尚未完成当前配置的分析阶段")
             transcript = self.store.json_value("transcripts", "source_id", source["id"], self.config.asr_key)
-            from shared.scene_plans import select_scenes
 
             plan = self.store.json_value("scene_plans", "source_id", source["id"], profile)
             scenes = select_scenes(self.store.segments(source["id"], "scene"), plan, profile)

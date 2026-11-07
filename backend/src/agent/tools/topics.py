@@ -15,6 +15,7 @@ from typing import Literal
 from pydantic import Field, model_validator
 
 from agent.registry import Preview, ToolContext, ToolError, ToolOutput, ToolSpec
+from agent.tools import media as tool_media
 from agent.tools.common import check, clip
 from shared.config import StrictModel
 from topics.common import ID_PATTERN
@@ -832,11 +833,10 @@ async def topic_coverage(args: TopicCoverage, ctx: ToolContext) -> ToolOutput:
                 f"{decision.get('reason', '')}"
                 + (f"；依据：{decision['quote']}" if decision.get("quote") else "")
             )
-    from agent.tools.media import clean, item
 
-    media = clean(
+    media = tool_media.clean(
         [
-            item("image", c["thumbnail_url"], row["visual"])
+            tool_media.item("image", c["thumbnail_url"], row["visual"])
             for row in report.get("visuals") or []
             if row["hit"]
             for c in row["clips"][:1]
@@ -1294,7 +1294,10 @@ def specs() -> list[ToolSpec]:
         ToolSpec(
             "create_job_from_topic",
             "topics",
-            "把选题建成创作任务：大纲、推荐文案模板、档案默认画幅、来源资料（参考文稿）与账号档案快照都预先设好。",
+            (
+                "把选题建成创作任务：大纲、推荐文案模板、档案默认画幅、"
+                "来源资料（参考文稿）与账号档案快照都预先设好。"
+            ),
             CreateJobFromTopic,
             "write",
             create_job_from_topic,

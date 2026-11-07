@@ -691,7 +691,10 @@ def specs() -> list[ToolSpec]:
         ToolSpec(
             "update_curation",
             "library",
-            "修改素材或片段的整理信息（显示名、备注、收藏、隐藏），只提交给出的字段；隐藏会让内容不再出现在检索结果中。",
+            (
+                "修改素材或片段的整理信息（显示名、备注、收藏、隐藏），只提交给出的字段；"
+                "隐藏会让内容不再出现在检索结果中。"
+            ),
             UpdateCuration,
             "write",
             update_curation,

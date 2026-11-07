@@ -1,6 +1,9 @@
+"""人物库、出镜证据与处理任务的 REST 接口。"""
+
 from __future__ import annotations
 
 import base64
+import io
 import json
 import logging
 import tempfile
@@ -11,8 +14,11 @@ from typing import Annotated
 from fastapi import APIRouter, File, Form, HTTPException, Query, Response, UploadFile
 from fastapi.responses import FileResponse
 from filelock import Timeout
+from PIL import Image
 from pydantic import Field, model_validator
+from starlette.concurrency import run_in_threadpool
 
+from admin.source_tasks import IndexTasks
 from models.adapters import ModelError, request
 from models.qwen import analysis_options
 from persons.person_models import (
@@ -32,12 +38,16 @@ from persons.person_processing import (
     ensure_reference_quality,
     face_match,
 )
+from persons.person_thumbnails import import_thumbnail
 from persons.persons import Persons
 from persons.profiling import note as profiling_note
 from persons.profiling import profiled, stage
 from shared.config import StrictModel, fingerprint
+from shared.images import image_png
 from shared.processing_lock import ProcessingLock
+from shared.shot_media import ShotMedia
 from shared.storage import dumps
+from shared.uploads import save_upload
 
 log = logging.getLogger(__name__)
 
@@ -332,7 +342,6 @@ def person_router(runtime, store):
         actor_id: Annotated[str | None, Form()] = None,
         role_id: Annotated[str | None, Form()] = None,
     ):
-        from shared.uploads import save_upload
 
         with tempfile.TemporaryDirectory(dir=store.root) as directory:
             path = Path(directory) / "image"
@@ -353,6 +362,7 @@ def person_router(runtime, store):
 
     def media(path, headers=None):
         try:
+            # 延迟导入：保持异常捕获范围，依赖加载失败时仍走原有降级路径。
             from shared.media_delivery import materialized_response
 
             return materialized_response(store.materialize_media(path), headers=headers)
@@ -374,13 +384,10 @@ def person_router(runtime, store):
             and catalogue.work_for(body.source_id) not in catalogue.entity(body.role_id)["work_ids"]
         ):
             raise ValueError("截图角色不属于素材的作品")
-        from shared.shot_media import ShotMedia
 
         raw = ShotMedia(store).frame_bytes(body.source_id, body.timestamp)
         if body.bbox:
-            import io
-
-            from PIL import Image
+            # 延迟导入：媒体、数值或服务运行依赖仅在实际执行该功能时加载。
 
             with Image.open(io.BytesIO(raw)) as image:
                 buffer = io.BytesIO()
@@ -396,7 +403,6 @@ def person_router(runtime, store):
 
     @router.post("/imports", status_code=201)
     async def upload_import(files: Annotated[list[UploadFile], File()]):
-        from shared.uploads import save_upload
 
         if not 1 <= len(files) <= 12:
             raise ValueError("一次上传 1–12 张截图")
@@ -418,7 +424,6 @@ def person_router(runtime, store):
 
     @router.post("/imports/{identifier}/images")
     async def append_import_images(identifier: str, files: Annotated[list[UploadFile], File()]):
-        from shared.uploads import save_upload
 
         if not 1 <= len(files) <= 12:
             raise ValueError("一次追加 1–12 张截图")
@@ -485,8 +490,6 @@ def person_router(runtime, store):
         if not image:
             raise HTTPException(404, "找不到原图")
         if thumbnail:
-            from persons.person_thumbnails import import_thumbnail
-
             try:
                 path = import_thumbnail(store, image)
             except FileNotFoundError as exc:
@@ -501,9 +504,6 @@ def person_router(runtime, store):
         return tasks.start(source_id, options)
 
     def identify_image(path, top_k):
-        from PIL import Image
-
-        from shared.images import image_png
 
         config = runtime.current()
         raw = image_png(path, config.video.max_pixels)
@@ -537,9 +537,6 @@ def person_router(runtime, store):
         top_k: Annotated[int, Form(ge=1, le=20)] = 5,
     ):
         """上传一张图片识别画面中的演员与角色；只读，只比对已缓存的参考图特征。"""
-        from starlette.concurrency import run_in_threadpool
-
-        from shared.uploads import save_upload
 
         with tempfile.TemporaryDirectory(dir=store.root) as directory:
             path = Path(directory) / "upload"
@@ -715,8 +712,6 @@ def person_router(runtime, store):
     @router.post("/publish")
     def publish(body: Publish):
         if runtime.current().queue.backend == "postgres":
-            from admin.source_tasks import IndexTasks
-
             return IndexTasks(runtime, store).run_here(
                 {"action": "person-publish", "index_id": body.content_id}
             )
@@ -729,8 +724,6 @@ def person_router(runtime, store):
         if not row:
             raise ValueError("找不到检索发布记录")
         if runtime.current().queue.backend == "postgres":
-            from admin.source_tasks import IndexTasks
-
             IndexTasks(runtime, store).run_here({"action": "activate-release", "release_id": identifier})
             return row
         with release_write():

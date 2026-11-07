@@ -26,6 +26,8 @@ import time
 import traceback
 from pathlib import Path
 
+from fastapi.testclient import TestClient
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tests"))
 
@@ -106,8 +108,6 @@ def main() -> int:
     if not os.environ.get(args.api_key_env):
         print(f"环境变量 {args.api_key_env} 未设置模型密钥", file=sys.stderr)
         return 2
-
-    from fastapi.testclient import TestClient
 
     from shared.config import Config
 

@@ -14,6 +14,7 @@ from collections.abc import Callable
 from pydantic import BaseModel, ValidationError
 
 from models.adapters import ModelError
+from models.storyboard import chat_completion
 from shared.trace import record
 
 Llm = Callable[[str, list[dict]], str]
@@ -29,7 +30,6 @@ def profile_of(config):
 def make_llm(config, injected: Llm | None = None) -> Llm:
     if injected is not None:
         return injected
-    from models.storyboard import chat_completion
 
     profile = profile_of(config)
     path = "topics.llm" if config.topics.llm else "studio.writer"
@@ -61,11 +61,9 @@ def chat_json(
     check: Callable[[BaseModel], None] | None = None,
     label: str = "选题模型",
 ) -> BaseModel:
-    (
-        """调用模型并按 ``model`` 严格校验；``check`` 可做额外校验（抛 ValueError）。失败带原因重试，"""
-        """最终抛 """
-        """ModelError。"""
-    )
+    """调用模型并按 ``model`` 严格校验；``check`` 可做额外校验（抛 ValueError）。失败带原因重试，
+    最终抛 ModelError。
+    """
     feedback = ""
     error: Exception | None = None
     for _ in range(retries + 1):

@@ -82,6 +82,7 @@ def register(source: TopicSource) -> TopicSource:
 
 
 def get(kind: str) -> TopicSource:
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
     from topics import sources  # noqa: F401 — 导入即注册全部来源
 
     try:
@@ -91,6 +92,7 @@ def get(kind: str) -> TopicSource:
 
 
 def kinds() -> list[dict]:
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
     from topics import sources  # noqa: F401
 
     return [
@@ -115,10 +117,9 @@ def check_url(url: str) -> str:
 def http_get(
     config, url: str, *, params: dict | None = None, headers: dict | None = None, label: str = "数据源"
 ) -> tuple[int, dict, bytes]:
-    (
-        """GET ``url``，返回（状态码，响应头，正文）。HTTP 错误状态、超时、超限与协议不符都抛出 """
-        """``SourceError``。"""
-    )
+    """GET ``url``，返回（状态码，响应头，正文）。HTTP 错误状态、超时、超限与协议不符都抛出
+    ``SourceError``。
+    """
     limits = config.topics.fetch
     check_url(url)
     try:

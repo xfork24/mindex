@@ -105,7 +105,7 @@ def test_capacity_seed_embedder_two_api_smoke(s3_config, tmp_path):
                     f"api-{number}",
                     [
                         "-c",
-                        "from mindex.cli import app; app()",
+                        "import mindex; from cli import app; app()",
                         "--config",
                         str(path),
                         "serve",

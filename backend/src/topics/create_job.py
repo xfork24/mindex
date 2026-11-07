@@ -92,6 +92,7 @@ def studio_lock(config):
 
 
 def create_from_card(config, store, card_id: str, *, force: bool = False, language: str = "zh") -> dict:
+    # 延迟导入：保持工作区阶段处理器的注册顺序。
     from studio import workspace as ws
 
     card = topic_cards.get_card(store, card_id)
@@ -192,6 +193,7 @@ def job_profile(config, store, job_id: str) -> dict:
 
 
 def sync_job_profile(config, store, job_id: str) -> dict:
+    # 延迟导入：保持工作区阶段处理器的注册顺序。
     from studio import workspace as ws
 
     view = job_profile(config, store, job_id)

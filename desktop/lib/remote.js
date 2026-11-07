@@ -24,7 +24,9 @@ function normalizeUrl(raw) {
   const value = String(raw || "")
     .trim()
     .replace(/\/+$/, "");
-  if (!value) return null;
+  if (!value) {
+    return null;
+  }
   let parsed;
   try {
     parsed = new URL(value);
@@ -38,8 +40,9 @@ function normalizeUrl(raw) {
     parsed.search ||
     parsed.hash ||
     !["", "/"].includes(parsed.pathname)
-  )
+  ) {
     return null;
+  }
   return parsed.origin;
 }
 
@@ -63,24 +66,35 @@ function remoteConfig({
   if (env[ENV_URL] !== undefined || env[ENV_TOKEN] !== undefined) {
     const url = normalizeUrl(env[ENV_URL]);
     const token = String(env[ENV_TOKEN] || "").trim();
-    if (!url) throw problem("invalid-url");
-    if (!token) throw problem("invalid-token");
+    if (!url) {
+      throw problem("invalid-url");
+    }
+    if (!token) {
+      throw problem("invalid-token");
+    }
     return { url, token, source: "env" };
   }
-  if (!userData) return null;
+  if (!userData) {
+    return null;
+  }
   const file = path.join(userData, "remote.json");
   let body;
   try {
     body = JSON.parse(readFile(file));
   } catch (error) {
-    if (error.code === "ENOENT") return null;
+    if (error.code === "ENOENT") {
+      return null;
+    }
     throw problem("invalid-config");
   }
   const url = normalizeUrl(body?.url);
-  if (!url) throw problem("invalid-url");
+  if (!url) {
+    throw problem("invalid-url");
+  }
   // 旧明文只在加密存储可用且原子替换成功后迁移；失败保留原件并明确报错。
-  if (typeof body.token === "string")
+  if (typeof body.token === "string") {
     return saveRemote({ url, token: body.token }, { userData, storage });
+  }
   if (body.credential?.version !== 1 || typeof body.credential?.ciphertext !== "string") {
     throw problem("invalid-config");
   }
@@ -91,7 +105,9 @@ function remoteConfig({
   } catch {
     throw problem("decrypt-failed");
   }
-  if (typeof token !== "string" || !token.trim()) throw problem("decrypt-failed");
+  if (typeof token !== "string" || !token.trim()) {
+    throw problem("decrypt-failed");
+  }
   return { url, token, source: file };
 }
 
@@ -106,8 +122,12 @@ function saveRemote(
 ) {
   const normalized = normalizeUrl(url);
   const value = String(token || "").trim();
-  if (!normalized) throw problem("invalid-url");
-  if (!value) throw problem("invalid-token");
+  if (!normalized) {
+    throw problem("invalid-url");
+  }
+  if (!value) {
+    throw problem("invalid-token");
+  }
   const secure = requireStorage(storage);
   let encrypted;
   try {

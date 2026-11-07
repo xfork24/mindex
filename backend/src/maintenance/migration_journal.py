@@ -20,6 +20,7 @@ class MigrationJournal:
         return self.store.one("SELECT * FROM migration_runs WHERE migration_id=?", (self.id,))
 
     def prepare(self):
+        # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
         from maintenance.migration import _empty
 
         rows = self.store.rows("SELECT * FROM migration_runs")

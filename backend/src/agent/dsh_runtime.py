@@ -9,8 +9,10 @@ import logging
 import os
 import sys
 import threading
+from uuid import uuid4
 
 from agent.dsh_bridge import bridge
+from agent.llm.types import tool_message
 from agent.prompts import system_prompt
 from agent.runtime import RuntimeSupport, page_domain
 
@@ -46,6 +48,7 @@ def readiness(settings):
             errors.append(f"缺少 {package}；{repair}")
     if not errors:
         try:
+            # 延迟导入：保留可选依赖探测或异常捕获时的降级行为。
             from deepseek_harness_runtime import resolve_bundled_launch_args
 
             resolve_bundled_launch_args("exe" if frozen else None)
@@ -125,6 +128,7 @@ class DshRuntime(RuntimeSupport):
     @staticmethod
     def _bundled_executable():
         if getattr(sys, "frozen", False):
+            # 延迟导入：独立模型或扩展功能使用可选依赖，仅在实际调用时加载。
             from deepseek_harness_runtime import resolve_bundled_launch_args
 
             return resolve_bundled_launch_args("exe")[0]
@@ -137,7 +141,6 @@ class DshRuntime(RuntimeSupport):
         self.used_calls = set()
 
     def _result(self, sid, turn, step, call_id, text, *, error=None, meta=None, images=None):
-        from agent.llm.types import tool_message
 
         self.bridge_results[(sid, call_id)] = {
             "turn": turn,
@@ -153,7 +156,6 @@ class DshRuntime(RuntimeSupport):
             self._append(sid, "user/message", message)
 
     def _finish_interrupted_tools(self, sid):
-        from agent.llm.types import tool_message
 
         turn = self.store.last_turn(sid)
         events = [
@@ -179,8 +181,6 @@ class DshRuntime(RuntimeSupport):
 
     async def _native_request(self, sid, client, request):
         if request.method == "approval/request":
-            from uuid import uuid4
-
             rid = f"approval-{uuid4().hex}"
             data = {
                 "requestId": rid,
@@ -237,10 +237,12 @@ class DshRuntime(RuntimeSupport):
         handlers = set()
         try:
             async with bridge(self, sid) as (url, token):
+                # 延迟导入：保留可选依赖探测或异常捕获时的降级行为。
                 from deepseek_harness import HarnessClient, HarnessConfig
 
                 content = patch(settings, url)
                 # Secrets live only in the child environment; YAML carries an expression.
+                # 延迟导入：保留可选依赖探测或异常捕获时的降级行为。
                 import yaml
 
                 text = yaml.safe_dump(content, allow_unicode=True).replace(
@@ -283,6 +285,7 @@ class DshRuntime(RuntimeSupport):
                         if settings.max_images
                         else []
                     ):
+                        # 延迟导入：保持异常捕获范围，依赖加载失败时仍走原有降级路径。
                         from agent.vision import encode_jpeg
 
                         raw = encode_jpeg(await self._image_loader(sid)(block["ref"]))
@@ -303,6 +306,7 @@ class DshRuntime(RuntimeSupport):
                         client.start()
                         transport_ready = True
                         ready.set()
+                        # 延迟导入：保留可选依赖探测或异常捕获时的降级行为。
                         from deepseek_harness.models import InitializeResponse
 
                         client.request(
@@ -360,6 +364,7 @@ class DshRuntime(RuntimeSupport):
                         break
                     if isinstance(note, Exception):
                         raise note
+                    # 延迟导入：保留可选依赖探测或异常捕获时的降级行为。
                     from deepseek_harness.models import IncomingRequest
 
                     if isinstance(note, IncomingRequest):

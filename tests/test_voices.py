@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
+import base64
+import io
 import json
+import wave
+from threading import Event
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -31,8 +37,6 @@ def minimax_profile(client, name="Minimax TTS"):
 
 
 def sample_wav() -> bytes:
-    import io
-    import wave
 
     buffer = io.BytesIO()
     with wave.open(buffer, "wb") as handle:
@@ -221,7 +225,6 @@ def test_qwentts_register_contract(monkeypatch, tmp_path):
     sample = tmp_path / "s.wav"
     sample.write_bytes(b"RIFF-x")
     qwentts_register("http://127.0.0.1:8890/v1", sample, "mindex-clone-9", "参考文本", timeout=123)
-    import base64
 
     assert captured["timeout"] == 123
 
@@ -256,7 +259,6 @@ def test_clone_local_qwentts_flow(config, monkeypatch):
     assert voice["provider"] == "self" and voice["kind"] == "clone" and voice["status"] == "ready"
     assert voice["notes"] == "这是参考文本"
     assert registers and registers[0]["name"] == voice["voice_id"]
-    import base64
 
     assert base64.b64decode(registers[0]["wav_b64"]) == sample_wav()
     store = Store(config.data_dir)
@@ -506,10 +508,6 @@ def test_dashscope_failed_records_have_unique_voice_ids(config, monkeypatch):
 
 
 def test_clone_does_not_block_event_loop(config, monkeypatch):
-    import asyncio
-    from threading import Event
-
-    import httpx
 
     from settings import api as settings_api
 

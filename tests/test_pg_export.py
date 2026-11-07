@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json as _json
 import os
 
 import pytest
@@ -98,7 +100,6 @@ def test_repeatable_read_snapshot_excludes_later_writes(pg_store):
 
 def test_media_bundle_copies_referenced_files(pg_store, tmp_path):
     """--with-media：按可达性复制正文/缩略图，生成 media_manifest 且摘要可校验。"""
-    import hashlib
 
     from maintenance.pg_export import export_media_bundle, export_pg_to_sqlite
     from shared.backends import LocalMediaStore
@@ -119,7 +120,6 @@ def test_media_bundle_copies_referenced_files(pg_store, tmp_path):
     export_pg_to_sqlite(pg_store, target)
     stats = export_media_bundle(pg_store, LocalMediaStore(root), target)
     assert stats["objects"] == 3
-    import json as _json
 
     manifest = _json.loads((target / "media_manifest.json").read_text())
     assert set(manifest) == {"sources/s1/a.mp4", "thumbnails/s1.jpg", "clips/s1/shot/x.mp4"}

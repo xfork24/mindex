@@ -31,6 +31,7 @@ import shutil
 import sqlite3
 from pathlib import Path
 
+import mindex  # noqa: F401 — 安装根包自举，后续使用包内短导入
 import yaml
 
 from shared.config import PORTABLE_PATH_KEYS, load_config

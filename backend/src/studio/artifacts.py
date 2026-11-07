@@ -9,7 +9,9 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
+from shared import files
 from shared.config import fingerprint, portable_parameters
+from shared.storage import Store
 from shared.work_budget import copy_file
 from studio import studio
 
@@ -133,9 +135,6 @@ class ArtifactSession:
         }
         self._alias(logical, target)
         if self.config.storage.backend == "s3":
-            from shared import files
-            from shared.storage import Store
-
             store = Store.open(self.config)
             files.publish(store, target)
             files.publish(store, safe_path(self.root, logical))

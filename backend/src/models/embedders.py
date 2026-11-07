@@ -161,9 +161,7 @@ class TokenHubEmbedder:
     def video(self, path: Path) -> list[float]:
         duration = probe(path)["duration"]
         count = max(1, min(self.config.video.max_frames, math.ceil(duration * self.config.video.fps)))
-        inputs = [
-            {"type": "image_url", "image_url": {"url": uri}} for _, uri in frame_data(path, count)
-        ]
+        inputs = [{"type": "image_url", "image_url": {"url": uri}} for _, uri in frame_data(path, count)]
         return self._sequence(inputs)
 
     def image(self, path: Path) -> list[float]:

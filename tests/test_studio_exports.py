@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
@@ -142,7 +144,6 @@ def test_rerender_child_plan_and_build_all(canvases, tmp_path):
 
 @slow
 def test_export_entry_points_cli_and_agent(canvases, tmp_path, monkeypatch):
-    import json
 
     from typer.testing import CliRunner
 

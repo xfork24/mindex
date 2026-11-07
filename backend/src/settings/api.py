@@ -6,6 +6,7 @@ GET /api/settings 返回的永远是「当前生效」视图——激活档案 +
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -21,6 +22,9 @@ from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from pydantic import Field
 from starlette.concurrency import run_in_threadpool
 
+from agent import dsh_runtime
+from agent.llm.factory import make_agent_llm
+from agent.llm.types import LlmRequest, collect, parse_arguments
 from models import adapters
 from models.adapters import (
     make_animator,
@@ -32,7 +36,9 @@ from models.adapters import (
     make_video_generator,
 )
 from models.qwen import analysis_options
-from settings import deployment_pin
+from persons.person_processing import PersonClient
+from settings import deployment_config, deployment_pin
+from settings.browser_install import installer
 from settings.local_services import ServiceConflict, ServiceError, manager_for
 from settings.runtime_settings import (
     PROFILE_FIELDS,
@@ -58,7 +64,8 @@ from settings.runtime_settings import (
     shared_analyzer_key,
 )
 from settings.voice_clone import aliyun_enroll, minimax_clone, qwentts_register
-from settings.voices_catalog import fetch_catalog, voice_kind
+from settings.voices_catalog import _heal_local_clones, _live_voices, fetch_catalog, voice_kind
+from shared import files
 from shared.comfyui import workflow_hash
 from shared.config import Config, SearchConfig, SpeakerConfig, StrictModel
 from shared.storage import Store
@@ -263,10 +270,6 @@ ECHO_TOOL = {
 
 def _probe_agent(config: Config, *, transport=None) -> dict:
     """智能助手必须支持工具调用：要求模型调用 echo 工具，并核对调用名与参数可解析。"""
-    import asyncio
-
-    from agent.llm.factory import make_agent_llm
-    from agent.llm.types import LlmRequest, collect, parse_arguments
 
     request = LlmRequest(
         system="你在做连接测试。必须调用 echo 工具，参数 text 为 ok，不要输出其他内容。",
@@ -302,8 +305,6 @@ def _probe_agent(config: Config, *, transport=None) -> dict:
 def _probe(config: Config, role: str, *, store: Store | None = None, profile_name: str = "") -> dict:
     """对单个角色做一次最小真实调用，返回可呈现的探测结果。"""
     if role == "person":
-        from persons.person_processing import PersonClient
-
         return {"ready": True, "space": PersonClient(config).identity()}
     if role == "agent":
         return _probe_agent(config)
@@ -382,8 +383,6 @@ def _probe(config: Config, role: str, *, store: Store | None = None, profile_nam
     kind = voice_kind(tts.model, profile_name)
     candidates = None
     if tts.backend == "openai" and "qwen3" in tts.model.lower():
-        from settings.voices_catalog import _heal_local_clones, _live_voices
-
         candidates, error = _live_voices(tts)
         if error:
             raise adapters.ModelError(error)
@@ -418,8 +417,6 @@ def _probe(config: Config, role: str, *, store: Store | None = None, profile_nam
 def settings_router(runtime: RuntimeConfig, store: Store) -> APIRouter:
     router = APIRouter(prefix="/api/settings", tags=["设置"])
 
-    from settings import deployment_config
-
     @router.get("/deployment")
     def get_deployment():
         return deployment_config.view(runtime.base, store)
@@ -434,14 +431,12 @@ def settings_router(runtime: RuntimeConfig, store: Store) -> APIRouter:
 
     @router.get("/agent-runtime")
     def get_agent_runtime():
-        from agent.dsh_runtime import readiness
 
         cfg = runtime.current().agent
-        return {"runtime": cfg.runtime, "dsh": readiness(cfg)}
+        return {"runtime": cfg.runtime, "dsh": dsh_runtime.readiness(cfg)}
 
     @router.put("/agent-runtime")
     def save_agent_runtime(body: dict):
-        from agent.dsh_runtime import readiness
 
         selected = body.get("runtime")
         if selected not in ("builtin", "dsh") or set(body) != {"runtime"}:
@@ -449,7 +444,7 @@ def settings_router(runtime: RuntimeConfig, store: Store) -> APIRouter:
         if not runtime.base.runtime_overrides:
             raise HTTPException(409, "当前已禁用设置覆盖，请修改配置文件")
         if selected == "dsh":
-            check = readiness(runtime.current().agent)
+            check = dsh_runtime.readiness(runtime.current().agent)
             if not check["ready"]:
                 raise HTTPException(422, "；".join(check["errors"]))
         put_setting(store, "agent.runtime", selected)
@@ -879,7 +874,6 @@ def settings_router(runtime: RuntimeConfig, store: Store) -> APIRouter:
             final_sample = directory / f"{voice['id']}{suffix}"
 
             def finish():
-                from shared import files
 
                 sample.replace(final_sample)
                 files.publish(store, final_sample)
@@ -1016,13 +1010,11 @@ def settings_router(runtime: RuntimeConfig, store: Store) -> APIRouter:
     # ---- AI 动画录制组件（Playwright Chromium headless shell），见 settings/browser_install.py ----
     @router.get("/animation-browser")
     def animation_browser():
-        from settings.browser_install import installer
 
         return installer().state()
 
     @router.post("/animation-browser/install", status_code=202)
     def install_animation_browser():
-        from settings.browser_install import installer
 
         try:
             return installer().start()

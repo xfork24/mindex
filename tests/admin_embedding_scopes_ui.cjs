@@ -9,12 +9,14 @@ const video =
 (async () => {
   const browser = await chromium.launch({ headless: true });
   try {
-    const page = await browser.newPage({ viewport: { width: 1440, height: 1100 } }),
-      errors = [],
-      requests = [];
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1100 } });
+    const errors = [];
+    const requests = [];
     page.on("pageerror", (e) => errors.push(e.message));
     page.on("request", (r) => {
-      if (r.url().endsWith("/publish") && r.method() === "POST") requests.push(r.postDataJSON());
+      if (r.url().endsWith("/publish") && r.method() === "POST") {
+        requests.push(r.postDataJSON());
+      }
     });
     const response = await page.request.post(base + "/api/admin/sources/upload", {
       multipart: {
@@ -32,7 +34,9 @@ const video =
     // 工作面板默认收起，卡片不展开就不渲染；每次 reload 后都要重新展开。
     const expandWork = async () => {
       const panel = page.locator("details.work-panel");
-      if (!(await panel.evaluate((node) => node.open))) await panel.locator("summary").click();
+      if (!(await panel.evaluate((node) => node.open))) {
+        await panel.locator("summary").click();
+      }
       await page.locator("[data-work=shots]").waitFor();
     };
     await expandWork();
@@ -86,7 +90,9 @@ const video =
             .evaluate((el) => el.click());
           return;
         } catch (e) {
-          if (attempt === 4) throw e;
+          if (attempt === 4) {
+            throw e;
+          }
         }
       }
     };
@@ -98,7 +104,9 @@ const video =
         try {
           const response = await page.waitForResponse(
             (r) => {
-              if (!r.url().endsWith("/publish") || r.request().method() !== "POST") return false;
+              if (!r.url().endsWith("/publish") || r.request().method() !== "POST") {
+                return false;
+              }
               try {
                 const body = r.request().postDataJSON();
                 return body && body.work === name && body.scope === scope;
@@ -111,7 +119,9 @@ const video =
           assert.ok(response.ok(), `${name}/${scope} 发布请求被拒绝: ${response.status()}`);
           break;
         } catch (e) {
-          if (attempt === 2) throw new Error(`发布 POST 未发出: ${name} ${label}`);
+          if (attempt === 2) {
+            throw new Error(`发布 POST 未发出: ${name} ${label}`);
+          }
         }
       }
       await waitPublish(name, field);

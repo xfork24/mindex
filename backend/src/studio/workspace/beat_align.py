@@ -14,7 +14,8 @@ from __future__ import annotations
 import bisect
 from fractions import Fraction
 
-from .versions import ordered_shots
+from studio import beats
+from studio.workspace.versions import ordered_shots
 
 # 改动对齐规则时递增：进入开启节拍对齐的 compose 签名。
 BEAT_ALIGN_VERSION = 1
@@ -33,7 +34,8 @@ def handle_seconds(w, p, sid) -> float:
     order = ordered_shots(w, p)
     if sid not in order or sid == order[-1]:
         return 0.0
-    from . import transitions
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+    from studio.workspace import transitions
 
     if transitions.effective(w, p, sid).get("leave"):
         return 0.0  # 出场转场在切点结束：这个切点不推迟，也不需要余量
@@ -46,7 +48,6 @@ def render_payload(w, p, sid) -> float | None:
 
 
 def compose_payload(p) -> dict | None:
-    from studio import beats
 
     found = tolerance(p)
     if found is None:
@@ -55,10 +56,9 @@ def compose_payload(p) -> dict | None:
 
 
 def beat_grid(beats: list[float], period: float, start: float, until: float) -> list[float]:
-    (
-        """段落从 ``start`` 秒起循环播放一首节拍为 ``beats``、长 ``period`` 秒的音乐，``until`` """
-        """之前的全部节拍时间。"""
-    )
+    """段落从 ``start`` 秒起循环播放一首节拍为 ``beats``、长 ``period`` 秒的音乐，``until``
+    之前的全部节拍时间。
+    """
     if not beats or period <= 0:
         return []
     found, offset = [], start

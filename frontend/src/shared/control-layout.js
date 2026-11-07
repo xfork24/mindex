@@ -10,8 +10,8 @@
   // 独立 flex 盒，换行落在容器边界而非内容宽度（settings_tuning_ui 的正当换行断言会失败）。
   const flows =
     ".form-grid,.filter-grid,.fields,.template-fields,.preview-inputs,.source-fields,.tool-fields,.topics-weights,.search-scope-row,.search-filter-row,.person-search-options,.material-scope-controls,.recall-scope-options,.source-options,.recall-primary-options,.recall-filters,.shot-editor-fields,.post-row,.delivery-export-grid,.tuning-controls,.voice-default-row,.work-controls,.topic-material-scope,.source-filters,.segment-filters,.calendar-row,.group-fields,.card-filters,.form-bottom,.coordinates,.cast-entry-row .work-row,.clone-fields,.profile-connection-fields,#capture-form,#process-form,#entity-form,#create-form,.dialogue-row";
-  const canvas = document.createElement("canvas"),
-    context = canvas.getContext("2d");
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
   let pending = false;
   function width(text, style) {
     context.font = style.font || `${style.fontSize} ${style.fontFamily}`;
@@ -19,29 +19,41 @@
   }
   function setWidth(node, value, field = false) {
     const next = Math.ceil(value) + "px";
-    if (node.style.getPropertyValue("--control-content-width") !== next)
+    if (node.style.getPropertyValue("--control-content-width") !== next) {
       node.style.setProperty("--control-content-width", next);
-    const name = field ? "content-field" : "content-control",
-      other = field ? "content-control" : "content-field";
-    if (node.classList.contains(other)) node.classList.remove(other);
-    if (!node.classList.contains(name)) node.classList.add(name);
+    }
+    const name = field ? "content-field" : "content-control";
+    const other = field ? "content-control" : "content-field";
+    if (node.classList.contains(other)) {
+      node.classList.remove(other);
+    }
+    if (!node.classList.contains(name)) {
+      node.classList.add(name);
+    }
   }
   function resize() {
     pending = false;
     // 逐镜编辑区自行按比例分栏，避免内容测量重新把字段压回固定宽度。
-    for (const node of document.querySelectorAll(flows))
-      if (!node.closest(".editor-stretch-row") && !node.classList.contains("content-flow"))
+    for (const node of document.querySelectorAll(flows)) {
+      if (!node.closest(".editor-stretch-row") && !node.classList.contains("content-flow")) {
         node.classList.add("content-flow");
+      }
+    }
     for (const control of document.querySelectorAll(
       "main select,dialog select,main input,dialog input",
     )) {
-      if (control.closest(".editor-stretch-row")) continue;
+      if (control.closest(".editor-stretch-row")) {
+        continue;
+      }
       if (
         control.closest(".agent-drawer") ||
         ["checkbox", "radio", "hidden", "range", "file", "color"].includes(control.type)
-      )
+      ) {
         continue;
-      if (!control.getClientRects().length) continue;
+      }
+      if (!control.getClientRects().length) {
+        continue;
+      }
       const multi = control.closest(".multi-select");
       const field = control.closest(".group-picker") || control.closest("label,.form-field,.field");
       // 同一个字段有多个输入时保留它的内部关系，只调整控件本身。
@@ -90,15 +102,17 @@
         const fieldWidth = inline
           ? desired + captionWidth + (parseFloat(hostStyle.columnGap) || 8)
           : Math.max(desired, captionWidth + 8);
-        if (host.classList.contains("content-inline") !== inline)
+        if (host.classList.contains("content-inline") !== inline) {
           host.classList.toggle("content-inline", inline);
+        }
         setWidth(host, fieldWidth, true);
       }
       setWidth(multi || control, desired);
       if (multi && control.tagName === "SELECT") {
         setWidth(control, desired);
-        if (!control.classList.contains("content-options"))
+        if (!control.classList.contains("content-options")) {
           control.classList.add("content-options");
+        }
       }
     }
   }
@@ -124,7 +138,9 @@
     schedule();
   }
   window.MindexControlLayout = { refresh: schedule };
-  if (document.readyState === "loading")
+  if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", start, { once: true });
-  else start();
+  } else {
+    start();
+  }
 })();

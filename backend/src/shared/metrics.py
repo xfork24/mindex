@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import sys
 from typing import TYPE_CHECKING, cast
 
 from shared.db.pg_backend import PgBackend
@@ -21,12 +23,11 @@ __all__ = ["metrics_snapshot"]
 
 
 def metrics_snapshot(backends: BackendContext, config: Config) -> dict:
-    import os
 
     out: dict = {"form": backends.form, "pid": os.getpid()}
     try:
+        # 延迟导入：平台专属标准库仅在对应平台的受保护路径中加载。
         import resource
-        import sys
 
         out["peak_rss_bytes"] = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss) * (
             1 if sys.platform == "darwin" else 1024
@@ -55,6 +56,7 @@ def metrics_snapshot(backends: BackendContext, config: Config) -> dict:
             log.debug("租约指标不可用：%s", exc)
         if config.queue.backend == "postgres":
             try:
+                # 延迟导入：保持异常捕获范围，依赖加载失败时仍走原有降级路径。
                 from shared.db.queue_pg import PgTaskQueue
 
                 with backend.connect() as db:

@@ -1,3 +1,5 @@
+"""人物识别性能统计与诊断日志回归。"""
+
 from __future__ import annotations
 
 import pytest

@@ -1,6 +1,10 @@
+"""素材后台管理与处理接口回归。"""
+
 from __future__ import annotations
 
 import json
+import shutil
+import sqlite3
 
 import pytest
 from fastapi.testclient import TestClient
@@ -178,7 +182,6 @@ def test_live_curation_filters_text_video_without_mutating_index(library, config
 
 
 def test_existing_database_migration_preserves_sources(tmp_path):
-    import sqlite3
 
     root = tmp_path / "old"
     root.mkdir()
@@ -199,7 +202,6 @@ def test_existing_database_migration_preserves_sources(tmp_path):
 
 def test_delete_source_purges_all_but_source_file(library):
     """删除素材：向量/库行/派生文件全清，唯独保留源视频；studio 任务引用时拒绝。"""
-    import shutil
 
     pipeline, source, client = library
     store = pipeline.store

@@ -16,9 +16,9 @@ function animateLine(d) {
     : detail;
 }
 function renderStageDetails(body, sid, stage) {
-  const vid = plan().shots[sid][stage],
-    item = ver(vid),
-    actions = el("div", "", "detail-actions");
+  const vid = plan().shots[sid][stage];
+  const item = ver(vid);
+  const actions = el("div", "", "detail-actions");
   actions.append(
     mutationButton(
       stage === "select" ? MindexI18n.msg("ui.5d9c0feb3855") : MindexI18n.msg("ui.fb03cbd3e2da"),
@@ -29,16 +29,20 @@ function renderStageDetails(body, sid, stage) {
       () => runNode(stage, sid, true),
     ),
   );
-  if (item) actions.append(button(MindexI18n.msg("ui.ae6c80665732"), () => showVersion(vid)));
+  if (item) {
+    actions.append(button(MindexI18n.msg("ui.ae6c80665732"), () => showVersion(vid)));
+  }
   const result = el("p", "", "warn-text");
   result.dataset.nodeResult = "true";
   result.setAttribute("role", "status");
   body.append(actions, result);
-  if (stage === "recall") body.append(el("p", MindexI18n.msg("ui.796ebaa8b64a"), "muted"));
+  if (stage === "recall") {
+    body.append(el("p", MindexI18n.msg("ui.796ebaa8b64a"), "muted"));
+  }
   const recallSource = shotStages(sid).includes("recall");
   const aigcSource = shotStages(sid).includes("generate");
   const toolSource = shotStages(sid).includes("invoke");
-  if (stage === "select")
+  if (stage === "select") {
     body.append(
       el(
         "p",
@@ -54,6 +58,7 @@ function renderStageDetails(body, sid, stage) {
         "muted",
       ),
     );
+  }
   if (stage === "invoke") {
     const help = el("p", MindexI18n.msg("ui.invoke_help"), "muted");
     const manage = el("a", MindexI18n.msg("ui.invoke_manage"), "quiet nav-link");
@@ -63,8 +68,12 @@ function renderStageDetails(body, sid, stage) {
     help.append(" ", manage);
     body.append(help);
   }
-  if (stage === "generate") body.append(el("p", MindexI18n.msg("ui.generate_help"), "muted"));
-  if (stage === "draw") body.append(el("p", MindexI18n.msg("ui.draw_help"), "muted"));
+  if (stage === "generate") {
+    body.append(el("p", MindexI18n.msg("ui.generate_help"), "muted"));
+  }
+  if (stage === "draw") {
+    body.append(el("p", MindexI18n.msg("ui.draw_help"), "muted"));
+  }
   if (stage === "animate") {
     // 录制需要浏览器组件：设置页可检查与一键安装（缺少时录制报错里也会提示）。
     const help = el("p", "", "muted");
@@ -103,12 +112,15 @@ function renderStageDetails(body, sid, stage) {
       ),
     );
   }
-  if (!item) body.append(el("p", MindexI18n.msg("ui.f72548296145"), "muted"));
-  else {
-    if (item.incomplete) body.append(el("p", MindexI18n.msg("ui.6ca99f1c90fb"), "warn-text"));
+  if (!item) {
+    body.append(el("p", MindexI18n.msg("ui.f72548296145"), "muted"));
+  } else {
+    if (item.incomplete) {
+      body.append(el("p", MindexI18n.msg("ui.6ca99f1c90fb"), "warn-text"));
+    }
     if (stage === "recall") {
-      const recall = item.data.recall,
-        meta = item.data.meta || {};
+      const recall = item.data.recall;
+      const meta = item.data.meta || {};
       body.append(
         el(
           "p",
@@ -119,7 +131,7 @@ function renderStageDetails(body, sid, stage) {
           }),
         ),
       );
-      if (recall?.person_ids?.length)
+      if (recall?.person_ids?.length) {
         body.append(
           el(
             "p",
@@ -138,18 +150,20 @@ function renderStageDetails(body, sid, stage) {
             }),
           ),
         );
+      }
       const sources = recall?.filters?.source_ids?.length
         ? recall.filters.source_ids
         : recall?.filters?.source_id
           ? [recall.filters.source_id]
           : [];
       const jobMaterials = jobScope();
-      if (sources.length)
+      if (sources.length) {
         body.append(
           el("p", MindexI18n.msg("ui.81f420e6a6d2", { p0: sources.map(sourceName).join("、") })),
         );
-      else if (jobMaterials)
+      } else if (jobMaterials) {
         body.append(el("p", MindexI18n.msg("ui.9213d98274d9", { n: jobMaterials.size }), "muted"));
+      }
       for (const [key, label] of [
         ["scene", "ui.625b392c7b8a"],
         ["emotion", "ui.61fe61644a75"],
@@ -157,10 +171,11 @@ function renderStageDetails(body, sid, stage) {
         ["min_duration", "ui.26b6f15b345b"],
         ["max_duration", "ui.2de8ce6144b7"],
       ]) {
-        if (recall?.filters?.[key])
+        if (recall?.filters?.[key]) {
           body.append(el("p", `${MindexI18n.msg(label)}：${recall.filters[key]}`));
+        }
       }
-      if (meta.referenced_people?.length)
+      if (meta.referenced_people?.length) {
         body.append(
           el(
             "p",
@@ -170,7 +185,8 @@ function renderStageDetails(body, sid, stage) {
             "muted",
           ),
         );
-      if (meta.person_coverage_missing?.length)
+      }
+      if (meta.person_coverage_missing?.length) {
         body.append(
           el(
             "p",
@@ -180,17 +196,22 @@ function renderStageDetails(body, sid, stage) {
             "warn-text",
           ),
         );
+      }
       if (recall?.media_id) {
         const host = el("div", "", "query-preview-host");
         body.append(host);
         inputUrl(recall.media_id).then((url) => {
-          if (!url || !host.isConnected) return;
+          if (!url || !host.isConnected) {
+            return;
+          }
           host.replaceChildren(queryPreviewNode(url, recall.media_kind || "image"));
         });
       }
       renderCandidatePicker(body, sid);
     } else if (stage === "tts") {
-      if (item.files.audio) body.append(media("audio", item.files.audio.url));
+      if (item.files.audio) {
+        body.append(media("audio", item.files.audio.url));
+      }
     } else if (stage === "draw") {
       // 生成图片：提示词、尺寸与图片预览；渲染阶段按静态图片推拉/平移。
       const d = item.data;
@@ -202,7 +223,9 @@ function renderStageDetails(body, sid, stage) {
           "muted",
         ),
       );
-      if (item.files.image?.url) body.append(queryPreviewNode(item.files.image.url, "image"));
+      if (item.files.image?.url) {
+        body.append(queryPreviewNode(item.files.image.url, "image"));
+      }
     } else if (stage === "generate") {
       // 生成画面：提示词、请求/实际时长与生成结果预览（下载后统一为 MP4）。
       const d = item.data;
@@ -220,7 +243,9 @@ function renderStageDetails(body, sid, stage) {
           "muted",
         ),
       );
-      if (item.files.generated?.url) body.append(media("video", item.files.generated.url));
+      if (item.files.generated?.url) {
+        body.append(media("video", item.files.generated.url));
+      }
     } else if (stage === "invoke") {
       // 第三方工具产物：工具源与工具名、产物类型、来源主机与尺寸/时长；预览视频或图片。
       const d = item.data;
@@ -251,18 +276,20 @@ function renderStageDetails(body, sid, stage) {
         ),
       );
       const url = item.files.artifact?.url;
-      if (url)
+      if (url) {
         body.append(d.output === "image" ? queryPreviewNode(url, "image") : media("video", url));
+      }
     } else if (stage === "animate") {
       // 动画源码：来源（模型生成/人工修改）、字符数与时长；沙箱 iframe 预览（严格 CSP，不含 allow-same-origin）。
       const d = item.data;
       body.append(el("p", animateLine(item.data)));
-      if (item.status === "complete" && item.files.animation)
+      if (item.status === "complete" && item.files.animation) {
         body.append(animationFrame(vid, d.width, d.height));
+      }
     } else if (stage === "select" && item.data.event.video.kind === "file") {
       // 上传片段 / 生成画面：窗口是文件内的时间。
-      const d = item.data,
-        video = d.event.video;
+      const d = item.data;
+      const video = d.event.video;
       body.append(
         el(
           "p",
@@ -285,11 +312,13 @@ function renderStageDetails(body, sid, stage) {
           }),
         ),
       );
-      if (d.event.warning) body.append(el("p", shortIds(d.event.warning), "warn-text"));
+      if (d.event.warning) {
+        body.append(el("p", shortIds(d.event.warning), "warn-text"));
+      }
     } else if (stage === "select") {
-      const d = item.data,
-        range = d.range,
-        actual = d.actual_range || d.event.video;
+      const d = item.data;
+      const range = d.range;
+      const actual = d.actual_range || d.event.video;
       body.append(
         el(
           "p",
@@ -298,7 +327,7 @@ function renderStageDetails(body, sid, stage) {
           }),
         ),
       );
-      if (d.anchor)
+      if (d.anchor) {
         body.append(
           el(
             "p",
@@ -309,7 +338,8 @@ function renderStageDetails(body, sid, stage) {
             }),
           ),
         );
-      if (range)
+      }
+      if (range) {
         body.append(
           el(
             "p",
@@ -321,6 +351,7 @@ function renderStageDetails(body, sid, stage) {
             }),
           ),
         );
+      }
       body.append(
         el(
           "p",
@@ -332,7 +363,7 @@ function renderStageDetails(body, sid, stage) {
           }),
         ),
       );
-      if (d.extension)
+      if (d.extension) {
         body.append(
           el(
             "p",
@@ -342,7 +373,10 @@ function renderStageDetails(body, sid, stage) {
             }),
           ),
         );
-      if (d.event.warning) body.append(el("p", shortIds(d.event.warning), "warn-text"));
+      }
+      if (d.event.warning) {
+        body.append(el("p", shortIds(d.event.warning), "warn-text"));
+      }
     } else if (stage === "render") {
       // AI 动画分镜：动画规格（画面说明、来源、字符数、时长、尺寸）与帧数放在同一行，用 · 连接。
       const animation = ver(plan().shots[sid].animate);
@@ -353,19 +387,27 @@ function renderStageDetails(body, sid, stage) {
       body.append(el("p", animation?.data ? `${animateLine(animation.data)} · ${frames}` : frames));
       // 只显示带配音与字幕的分镜视频，不再单独列出音频。
       const video = renderPreviewVideo(item);
-      if (video) body.append(video);
+      if (video) {
+        body.append(video);
+      }
     }
   }
   if (stage === "select" && recallSource) {
     const host = el("div", "", "manual-range-host");
     body.append(host);
-    if (!busy())
+    if (!busy()) {
       manualRange(sid, host).catch((error) => {
-        if (host.isConnected) host.replaceChildren(el("p", shortIds(error.message), "warn-text"));
+        if (host.isConnected) {
+          host.replaceChildren(el("p", shortIds(error.message), "warn-text"));
+        }
       });
-    else body.append(button(MindexI18n.msg("ui.1e81d450a0cb"), () => manualRange(sid, host)));
+    } else {
+      body.append(button(MindexI18n.msg("ui.1e81d450a0cb"), () => manualRange(sid, host)));
+    }
   }
-  if (stage === "tts") renderMusicSection(body, sid);
+  if (stage === "tts") {
+    renderMusicSection(body, sid);
+  }
   if (stage === "render") {
     renderMusicMaterial(body, sid);
     renderPostSection(body, sid);
@@ -381,12 +423,16 @@ function renderStageDetails(body, sid, stage) {
 // 视频全屏时叠加层不可见，改用原生字幕显示。
 function renderPreviewVideo(item) {
   const url = item.files.preview?.url || item.files.video?.url;
-  if (!url) return null;
+  if (!url) {
+    return null;
+  }
   const video = media("video", url);
   const wrap = el("div", "", "render-preview");
   wrap.append(video);
   const src = shotSubtitleUrl(item.data?.event?.subtitle);
-  if (!src) return wrap;
+  if (!src) {
+    return wrap;
+  }
   const track = document.createElement("track");
   Object.assign(track, { kind: "subtitles", srclang: "zh", src });
   MindexI18n.setAttr(track, "label", MindexI18n.msg("ui.board_subtitle_label"));
@@ -400,7 +446,9 @@ function renderPreviewVideo(item) {
   const update = () => {
     const full = document.fullscreenElement === video;
     const active = [...(text.activeCues || [])].map((cue) => cue.text).join("\n");
-    if (caption.textContent !== active) caption.textContent = active;
+    if (caption.textContent !== active) {
+      caption.textContent = active;
+    }
     caption.hidden = !active || full;
     placeCaption(video, caption);
   };
@@ -410,34 +458,45 @@ function renderPreviewVideo(item) {
     text.mode = document.fullscreenElement === video ? "showing" : "hidden";
     update();
   });
-  if (typeof ResizeObserver === "function")
+  if (typeof ResizeObserver === "function") {
     new ResizeObserver(() => placeCaption(video, caption)).observe(video);
+  }
   // 首帧可能尚未解码（preload=metadata）或整帧偏暗（如淡入）：在加载、跳转、播放时反复尝试，直到检测出画面。
   const events = ["loadeddata", "seeked", "playing", "timeupdate"];
   const attempt = () => {
-    if (video.readyState < 2) return;
+    if (video.readyState < 2) {
+      return;
+    }
     const bottom = pictureBottom(video, video.videoWidth, video.videoHeight);
-    if (bottom == null) return;
+    if (bottom == null) {
+      return;
+    }
     video.dataset.pictureBottom = String(bottom);
     placeCaption(video, caption);
-    for (const name of events) video.removeEventListener(name, attempt);
+    for (const name of events) {
+      video.removeEventListener(name, attempt);
+    }
   };
-  for (const name of events) video.addEventListener(name, attempt);
+  for (const name of events) {
+    video.addEventListener(name, attempt);
+  }
   return wrap;
 }
 // 叠加字幕的位置：按 object-fit: contain 求视频画面在元素中的实际矩形，字幕宽度与画面一致，
 // 底边落在画面内“可视画面底边”（pictureBottom，缺省为整帧底边）；字号随画面短边缩放。
 function placeCaption(video, caption) {
-  const vw = video.videoWidth,
-    vh = video.videoHeight,
-    w = video.clientWidth,
-    h = video.clientHeight;
-  if (!vw || !vh || !w || !h) return;
-  const scale = Math.min(w / vw, h / vh),
-    picW = vw * scale,
-    picH = vh * scale;
-  const left = video.offsetLeft + (w - picW) / 2,
-    top = video.offsetTop + (h - picH) / 2;
+  const vw = video.videoWidth;
+  const vh = video.videoHeight;
+  const w = video.clientWidth;
+  const h = video.clientHeight;
+  if (!vw || !vh || !w || !h) {
+    return;
+  }
+  const scale = Math.min(w / vw, h / vh);
+  const picW = vw * scale;
+  const picH = vh * scale;
+  const left = video.offsetLeft + (w - picW) / 2;
+  const top = video.offsetTop + (h - picH) / 2;
   const bottom = Math.min(1, Math.max(0, Number(video.dataset.pictureBottom || 1)));
   const wrapHeight = caption.parentElement?.clientHeight || video.offsetTop + h;
   Object.assign(caption.style, {
@@ -450,9 +509,11 @@ function placeCaption(video, caption) {
 // 可视画面底边占整帧高度的比例（0–1）：从下往上找第一行“有画面”的像素行；整帧都偏暗时返回 null。
 // 黑边是纯黑（编码后亮度约 16 以下），画面行要求至少 2% 的像素亮度超过阈值。
 function pictureBottom(source, width, height) {
-  if (!width || !height) return null;
-  const w = 64,
-    h = Math.max(1, Math.round((w * height) / width));
+  if (!width || !height) {
+    return null;
+  }
+  const w = 64;
+  const h = Math.max(1, Math.round((w * height) / width));
   const canvas = document.createElement("canvas");
   canvas.width = w;
   canvas.height = h;
@@ -468,14 +529,20 @@ function pictureBottom(source, width, height) {
     let lit = 0;
     for (let x = 0; x < w; x++) {
       const i = (y * w + x) * 4;
-      if (0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2] > 28) lit++;
+      if (0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2] > 28) {
+        lit++;
+      }
     }
-    if (lit >= need) return (y + 1) / h;
+    if (lit >= need) {
+      return (y + 1) / h;
+    }
   }
   return null;
 }
 function shotSubtitleUrl(subtitle) {
-  if (!subtitle?.text || !(subtitle.end > subtitle.start)) return null;
+  if (!subtitle?.text || !(subtitle.end > subtitle.start)) {
+    return null;
+  }
   const stamp = (seconds) => {
     const ms = Math.max(0, Math.round(seconds * 1000));
     const pad = (n, size = 2) => String(n).padStart(size, "0");
@@ -498,7 +565,9 @@ function renderSourceDetails(body, sid) {
   if (source.media_id) {
     host.append(el("p", MindexI18n.msg("ui.e454bbfe7b70"), "muted"));
     inputUrl(source.media_id).then((url) => {
-      if (!url || !host.isConnected) return;
+      if (!url || !host.isConnected) {
+        return;
+      }
       host.replaceChildren(sourcePreviewNode(url, kind, source.start));
     });
   }
@@ -521,13 +590,19 @@ function musicKindText(cue) {
   );
 }
 function musicCueText(cue, item) {
-  if (cue?.kind === "library") return item?.data?.title || (cue.track_id || "").slice(0, 8);
+  if (cue?.kind === "library") {
+    return item?.data?.title || (cue.track_id || "").slice(0, 8);
+  }
   return cue?.prompt || "";
 }
 function musicSummary(sid) {
   const belong = state.data.shot_music?.[sid];
-  if (!belong) return "";
-  if (belong.stop) return MindexI18n.msg("ui.music_summary_stop");
+  if (!belong) {
+    return "";
+  }
+  if (belong.stop) {
+    return MindexI18n.msg("ui.music_summary_stop");
+  }
   if (belong.start) {
     const cue = shotCue(sid);
     const item = ver(plan().shots[sid].music);
@@ -557,7 +632,9 @@ function musicEditable(cue) {
 // 某分镜适用的背景音乐素材：起始提示点所在分镜（from）、提示点、已选用的音乐版本；停止或没有背景音乐时为 null / {stop}。
 function musicMaterial(sid) {
   const belong = state.data.shot_music?.[sid];
-  if (!belong || belong.stop) return belong || null;
+  if (!belong || belong.stop) {
+    return belong || null;
+  }
   const from = belong.from;
   return { from, start: belong.start, cue: shotCue(from), item: ver(plan().shots[from]?.music) };
 }
@@ -579,9 +656,11 @@ function renderMusicMaterial(body, sid) {
   const section = el("div", "", "music-material");
   section.append(el("h4", MindexI18n.msg("ui.music_render_heading")));
   const found = musicMaterial(sid);
-  if (!found) section.append(el("p", MindexI18n.msg("ui.music_render_none"), "muted"));
-  else if (found.stop) section.append(el("p", MindexI18n.msg("ui.music_render_stop")));
-  else {
+  if (!found) {
+    section.append(el("p", MindexI18n.msg("ui.music_render_none"), "muted"));
+  } else if (found.stop) {
+    section.append(el("p", MindexI18n.msg("ui.music_render_stop")));
+  } else {
     const cue = found.cue;
     const kind = musicKindText(cue);
     const text = musicCueText(cue, found.item);
@@ -612,11 +691,16 @@ function renderMusicMaterial(body, sid) {
           item.status === "failed" ? "warn-text" : "muted",
         ),
       );
-      if (item.error) section.append(el("p", shortIds(MindexI18n.system(item.error)), "warn-text"));
-      if (item.files?.music?.url) section.append(media("audio", item.files.music.url));
+      if (item.error) {
+        section.append(el("p", shortIds(MindexI18n.system(item.error)), "warn-text"));
+      }
+      if (item.files?.music?.url) {
+        section.append(media("audio", item.files.music.url));
+      }
     }
-    if (!item || item.status !== "complete")
+    if (!item || item.status !== "complete") {
       section.append(el("p", MindexI18n.msg("ui.music_render_missing"), "warn-text"));
+    }
   }
   body.append(section);
 }
@@ -650,7 +734,9 @@ function renderMusicSection(body, sid) {
     redraw();
   });
   section.append(kind.wrap);
-  if (value.kind === "library") section.append(musicLibraryPicker(sid, value));
+  if (value.kind === "library") {
+    section.append(musicLibraryPicker(sid, value));
+  }
   if (["generate", "cover", "library"].includes(value.kind)) {
     if (value.kind !== "library") {
       const prompt = field(
@@ -723,7 +809,7 @@ function renderMusicSection(body, sid) {
         });
         section.append(lyrics.wrap, write, status);
       }
-      if (value.kind === "cover")
+      if (value.kind === "cover") {
         section.append(
           mediaSlot(
             sid,
@@ -739,6 +825,7 @@ function renderMusicSection(body, sid) {
             () => state.musicDrafts.get(key) === draft,
           ),
         );
+      }
     }
     const volumeWrap = el(
       "label",
@@ -788,8 +875,12 @@ function renderMusicSection(body, sid) {
         item.status === "failed" ? "warn-text" : "muted",
       ),
     );
-    if (item.error) section.append(el("p", shortIds(MindexI18n.system(item.error)), "warn-text"));
-    if (item.files.music?.url) section.append(media("audio", item.files.music.url));
+    if (item.error) {
+      section.append(el("p", shortIds(MindexI18n.system(item.error)), "warn-text"));
+    }
+    if (item.files.music?.url) {
+      section.append(media("audio", item.files.music.url));
+    }
   } else if (item) {
     const modelName = item.parameters?.music_generator?.model || MindexI18n.msg("ui.9865b5e9b32d");
     // 成功的版本不再重复写“完成”，其余状态照常显示。
@@ -801,10 +892,16 @@ function renderMusicSection(body, sid) {
         item.status === "failed" ? "warn-text" : "muted",
       ),
     );
-    if (item.error) section.append(el("p", shortIds(MindexI18n.system(item.error)), "warn-text"));
-    if (item.files.music?.url) section.append(media("audio", item.files.music.url));
+    if (item.error) {
+      section.append(el("p", shortIds(MindexI18n.system(item.error)), "warn-text"));
+    }
+    if (item.files.music?.url) {
+      section.append(media("audio", item.files.music.url));
+    }
   }
-  if (shotStages(sid).includes("music")) section.append(historyCell("music", sid));
+  if (shotStages(sid).includes("music")) {
+    section.append(historyCell("music", sid));
+  }
   body.append(section);
 }
 // 曲库选曲：下拉列出曲库曲目（过期曲目不可选），“按文案推荐”调用推荐接口给出本段的候选与理由。
@@ -849,12 +946,15 @@ function musicLibraryPicker(sid, value) {
   box.append(groups.wrap);
   function loadTracks() {
     const query = new URLSearchParams();
-    for (const id of groups.values()) query.append("music_group_ids", id);
+    for (const id of groups.values()) {
+      query.append("music_group_ids", id);
+    }
     return MindexApi.json(`/api/studio/music-library?${query}`)
       .then((result) => {
         fill(result.items, value.track_id);
-        if (value.track_id && !result.items.some((item) => item.id === value.track_id))
+        if (value.track_id && !result.items.some((item) => item.id === value.track_id)) {
           MindexI18n.setText(hint, MindexI18n.msg("ui.music_library_missing"));
+        }
       })
       .catch((error) => MindexI18n.setText(hint, shortIds(error.message)));
   }
@@ -905,13 +1005,15 @@ function musicLibraryPicker(sid, value) {
   return box;
 }
 async function saveMusic(sid, draft) {
-  if (state.drafts.get(draftKey(sid))?.dirty)
+  if (state.drafts.get(draftKey(sid))?.dirty) {
     throw new Error(MindexI18n.msg("ui.music_content_dirty"));
+  }
   const value = draft.data;
   const shots = currentBoard();
   const shot = shots[order().indexOf(sid)];
-  if (!value.kind) delete shot.music;
-  else if (value.kind === "none")
+  if (!value.kind) {
+    delete shot.music;
+  } else if (value.kind === "none") {
     shot.music = {
       kind: "none",
       prompt: null,
@@ -920,8 +1022,10 @@ async function saveMusic(sid, draft) {
       audio_id: null,
       volume: value.volume,
     };
-  else if (value.kind === "library") {
-    if (!value.track_id) throw new Error(MindexI18n.msg("ui.music_library_pick_first"));
+  } else if (value.kind === "library") {
+    if (!value.track_id) {
+      throw new Error(MindexI18n.msg("ui.music_library_pick_first"));
+    }
     shot.music = {
       kind: "library",
       prompt: null,
@@ -942,27 +1046,37 @@ async function saveMusic(sid, draft) {
   const scope = scopeKey();
   const result = await api(planBase(), "PATCH", { revision: state.data.revision, shots });
   state.musicDrafts.delete(draftKey(sid));
-  if (scope !== scopeKey()) return;
+  if (scope !== scopeKey()) {
+    return;
+  }
   invalidatePanel(sid);
   await accept(result);
   notice(MindexI18n.msg("ui.music_saved"));
 }
 async function regenerateColumn(stage, force = true) {
-  if (busy() || hasDirtyDraft()) return;
+  if (busy() || hasDirtyDraft()) {
+    return;
+  }
   const inputsByShot = {};
   if (stage === PICTURE_COLUMN) {
     // 召回列：每个分镜执行各自的画面阶段（召回 / 生成图片 / 生成视频 / 生成动画）；上传素材的分镜不参与。
     for (const sid of order()) {
       const picture = pictureStage(sid);
-      if (picture) inputsByShot[sid] = nodeInputs(picture, sid);
+      if (picture) {
+        inputsByShot[sid] = nodeInputs(picture, sid);
+      }
     }
   } else if (stage !== "split")
-    // 只绑定包含该阶段的分镜（例如图片分镜没有召回与选片）。
-    for (const sid of order())
-      if (!STAGES.includes(stage) || shotStages(sid).includes(stage))
+  // 只绑定包含该阶段的分镜（例如图片分镜没有召回与选片）。
+  {
+    for (const sid of order()) {
+      if (!STAGES.includes(stage) || shotStages(sid).includes(stage)) {
         inputsByShot[sid] = nodeInputs(stage, sid);
-  const url = planBase(),
-    body = { revision: state.data.revision, stage, inputs_by_shot: inputsByShot, force };
+      }
+    }
+  }
+  const url = planBase();
+  const body = { revision: state.data.revision, stage, inputs_by_shot: inputsByShot, force };
   state.submitting = true;
   render();
   try {
@@ -978,8 +1092,8 @@ async function regenerateColumn(stage, force = true) {
   }
 }
 function renderLogShell() {
-  const key = scopeKey(),
-    build = [...state.data.builds].reverse().find((b) => b.plan_id === plan().id);
+  const key = scopeKey();
+  const build = [...state.data.builds].reverse().find((b) => b.plan_id === plan().id);
   let view = state.logViews.get(key);
   if (!view || view.buildId !== build?.id) {
     view = { buildId: build?.id, seq: 0, lines: [], legacy: false };
@@ -997,34 +1111,44 @@ function renderLogShell() {
   }
 }
 async function refreshLogs() {
-  if (!state.data) return;
-  const key = scopeKey(),
-    view = state.logViews.get(key),
-    id = state.id;
-  if (!view?.buildId) return;
+  if (!state.data) {
+    return;
+  }
+  const key = scopeKey();
+  const view = state.logViews.get(key);
+  const id = state.id;
+  if (!view?.buildId) {
+    return;
+  }
   let more = true;
   while (more) {
     const response = await api(
       `/api/studio/jobs/${id}/builds/${view.buildId}/logs?after=${view.seq}`,
     );
-    if (id !== state.id || key !== scopeKey() || state.logViews.get(key) !== view) return;
-    const box = $("execution-log"),
-      follow = box.scrollHeight - box.clientHeight - box.scrollTop < 32;
-    for (const item of response.items)
+    if (id !== state.id || key !== scopeKey() || state.logViews.get(key) !== view) {
+      return;
+    }
+    const box = $("execution-log");
+    const follow = box.scrollHeight - box.clientHeight - box.scrollTop < 32;
+    for (const item of response.items) {
       view.lines.push(
         shortIds(
           `${MindexI18n.date(new Date(item.at), true)}  ${item.shot_id ? MindexI18n.msg("ui.fdf052132bde", { p0: item.shot_id }) : ""}${item.stage ? `${LABEL[item.stage]} · ` : ""}${MindexI18n.system(item)}`,
         ),
       );
+    }
     view.seq = response.next_seq;
     view.legacy = response.legacy;
-    if (response.items.length || !view.lines.length)
+    if (response.items.length || !view.lines.length) {
       MindexI18n.setText(
         box,
         view.lines.join("\n") ||
           (response.legacy ? MindexI18n.msg("ui.0cbb72d3287e") : MindexI18n.msg("ui.29c54863449f")),
       );
-    if (follow) box.scrollTop = box.scrollHeight;
+    }
+    if (follow) {
+      box.scrollTop = box.scrollHeight;
+    }
     more = response.has_more;
   }
 }
@@ -1048,11 +1172,15 @@ function historyCell(stage, sid, preferred = null) {
     o.value = item.id;
     select.append(o);
   }
-  if (!items.length) return el("p", MindexI18n.msg("ui.482a16ecfa18"), "muted");
+  if (!items.length) {
+    return el("p", MindexI18n.msg("ui.482a16ecfa18"), "muted");
+  }
   // 默认显示方案里已选用的版本（刷新或面板重建后不回到最新版本）；调用方给出 preferred 时优先。
   const selected = sid ? plan().shots?.[sid]?.[stage] : null;
   const wanted = items.some((item) => item.id === preferred) ? preferred : selected;
-  if (items.some((item) => item.id === wanted)) select.value = wanted;
+  if (items.some((item) => item.id === wanted)) {
+    select.value = wanted;
+  }
   const choose = mutationButton(
     MindexI18n.msg("ui.1dd40d446b45"),
 
@@ -1081,19 +1209,32 @@ function historyCell(stage, sid, preferred = null) {
   return box;
 }
 function nodeInputs(stage, sid) {
-  if (stage === "script") return {};
-  if (stage === "split") return { script: plan().script || null };
+  if (stage === "script") {
+    return {};
+  }
+  if (stage === "split") {
+    return { script: plan().script || null };
+  }
   const s = plan().shots[sid];
   const inputs = { content: s.content };
   const present = shotStages(sid);
-  if (stage === "generate" || stage === "animate") inputs.tts = s.tts || null;
-  if (stage === "draw" || stage === "music" || stage === "invoke") return inputs;
+  if (stage === "generate" || stage === "animate") {
+    inputs.tts = s.tts || null;
+  }
+  if (stage === "draw" || stage === "music" || stage === "invoke") {
+    return inputs;
+  }
   if (stage === "select") {
     inputs.tts = s.tts || null;
-    if (present.includes("generate")) inputs.generate = s.generate || null;
-    if (present.includes("invoke")) inputs.invoke = s.invoke || null;
-    if (present.includes("recall") && (!plan().ranges[sid] || plan().ranges[sid].anchor_ref))
+    if (present.includes("generate")) {
+      inputs.generate = s.generate || null;
+    }
+    if (present.includes("invoke")) {
+      inputs.invoke = s.invoke || null;
+    }
+    if (present.includes("recall") && (!plan().ranges[sid] || plan().ranges[sid].anchor_ref)) {
       inputs.recall = s.recall || null;
+    }
   }
   if (stage === "render") {
     Object.assign(
@@ -1102,9 +1243,15 @@ function nodeInputs(stage, sid) {
         ? { select: s.select || null, tts: s.tts || null }
         : { tts: s.tts || null },
     );
-    if (present.includes("animate")) inputs.animate = s.animate || null;
-    if (present.includes("draw")) inputs.draw = s.draw || null;
-    if (present.includes("invoke") && !present.includes("select")) inputs.invoke = s.invoke || null;
+    if (present.includes("animate")) {
+      inputs.animate = s.animate || null;
+    }
+    if (present.includes("draw")) {
+      inputs.draw = s.draw || null;
+    }
+    if (present.includes("invoke") && !present.includes("select")) {
+      inputs.invoke = s.invoke || null;
+    }
   }
   return inputs;
 }
@@ -1134,8 +1281,8 @@ function animationUrl(vid) {
   return `${base()}/versions/${vid}/animation.html`;
 }
 function animationFrame(vid, width, height) {
-  const w = Number(width) || 1280,
-    h = Number(height) || 720;
+  const w = Number(width) || 1280;
+  const h = Number(height) || 720;
   const scale = Math.min(1, ANIMATION_PREVIEW_WIDTH / w);
   const box = el("div", "", "animation-preview");
   box.style.width = `${Math.round(w * scale)}px`;
@@ -1167,13 +1314,14 @@ requestAnimationFrame(function frame(t) { /* t：毫秒 */ requestAnimationFrame
 </body></html>`;
 // 源码编辑对话框：等宽文本框，保存 → PATCH（服务端静态校验，未通过时在对话框顶部显示违规项）。
 async function openAnimationEditor(sid) {
-  const vid = plan().shots[sid].animate,
-    item = ver(vid);
+  const vid = plan().shots[sid].animate;
+  const item = ver(vid);
   let source = ANIMATION_TEMPLATE;
   if (item?.status === "complete" && item.files.animation) {
     const response = await fetch(animationUrl(vid));
-    if (!response.ok)
+    if (!response.ok) {
       throw new Error(MindexI18n.msg("ui.animate_load_failed", { p0: response.status }));
+    }
     source = await response.text();
   }
   const scope = scopeKey();
@@ -1195,7 +1343,9 @@ async function openAnimationEditor(sid) {
   const actions = el("div", "", "detail-actions");
   actions.append(
     button(MindexI18n.msg("ui.animate_save"), async () => {
-      if (scope !== scopeKey()) throw new Error(MindexI18n.msg("ui.animate_scope_changed"));
+      if (scope !== scopeKey()) {
+        throw new Error(MindexI18n.msg("ui.animate_scope_changed"));
+      }
       const data = await api(`${planBase()}/shots/${sid}/animation`, "PATCH", {
         revision: state.data.revision,
         html: editor.input.value,

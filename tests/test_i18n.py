@@ -1,9 +1,11 @@
 """UI dictionary, additive API metadata and preserved content contracts."""
 
+import ast
 import json
 import re
 import subprocess
 import sys
+from html.parser import HTMLParser
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -156,7 +158,6 @@ def test_all_pages_boot_language_before_visible_content():
 
 
 def test_agent_preview_templates_and_field_labels_have_translations():
-    import ast
 
     known = {entry["zh"] for entry in json.loads((STATIC / "shared/messages.json").read_text()).values()}
 
@@ -193,7 +194,6 @@ def test_agent_preview_templates_and_field_labels_have_translations():
 
 
 def test_static_chinese_ui_text_and_attributes_are_bound():
-    from html.parser import HTMLParser
 
     class Audit(HTMLParser):
         def __init__(self):

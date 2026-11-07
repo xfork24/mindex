@@ -13,9 +13,14 @@ import logging
 from collections import Counter
 from collections.abc import Callable, Iterable
 
+from admin.curation import Library
 from shared.analysis_text import select_analysis
+from shared.analysis_translations import english_analysis_view, load_translations
 from shared.config import Config, fingerprint
-from shared.types import DigestSource, MaterialDigest
+from shared.media_groups import Groups
+from shared.storage import Store
+from shared.types import DigestSource, Filters, MaterialDigest
+from studio import studio
 
 log = logging.getLogger(__name__)
 
@@ -269,9 +274,6 @@ def build_digest(
 
     空原因优先级：预算为 0 → 无生效索引 → 无已分析镜头（需求 3.6）。
     """
-    from admin.curation import Library
-    from shared.storage import Store
-    from shared.types import Filters
 
     store = store or Store.open(config)
     state = state or {}
@@ -314,8 +316,6 @@ def build_digest(
         decorated = [segment for segment in decorated if matches(segment)]
     selected_language = language or state.get("language", "zh")
     if selected_language == "en":
-        from shared.analysis_translations import english_analysis_view, load_translations
-
         translations = load_translations(store.root)
         if translations:
             decorated = [
@@ -348,11 +348,8 @@ def safe_digest(
     回退的空 Digest 为空原因取"无已分析镜头"：调用方只看 ``empty``，该原因不会展示给用户
     （预览接口直接调用 build_digest，出错照常上抛）。
     """
-    from shared.storage import Store
-    from shared.types import Filters
-    from studio.studio import load_job
 
-    state = load_job(config, job_id)
+    state = studio.load_job(config, job_id)
     store = store or Store.open(config)
     # 用户范围错误不能作为基础设施故障吞掉，否则会掩盖已删除的组。
     Filters(
@@ -372,10 +369,8 @@ def safe_digest(
 
 def scope_parameters(config, job_id, store) -> dict:
     """只为显式限定素材的任务追加动态范围签名，保留旧任务签名。"""
-    from shared.media_groups import Groups
-    from studio.studio import load_job
 
-    state = load_job(config, job_id)
+    state = studio.load_job(config, job_id)
     if not state.get("source_ids") and not state.get("source_group_ids"):
         return {}
     return {

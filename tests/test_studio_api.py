@@ -1,11 +1,17 @@
+"""创作任务、方案与构建 REST 接口回归。"""
+
 from __future__ import annotations
 
+import io
 import json
+import threading
 import time
+import zipfile
+from threading import Event
 
 import pytest
 from fastapi.testclient import TestClient
-from filelock import Timeout
+from filelock import FileLock, Timeout
 
 from api import create_app
 from conftest import FixtureEmbedder, FixtureSpeaker, FixtureStoryboarder
@@ -297,9 +303,6 @@ def test_patch_storyboard_cascades_and_patch_timeline_reselects(studio_client):
 
 
 def test_accepted_state_lock_conflicts_and_release(config):
-    from threading import Event
-
-    from filelock import FileLock
 
     from studio import studio
 
@@ -338,8 +341,6 @@ def test_accepted_state_lock_conflicts_and_release(config):
 
 
 def test_force_validation_artifact_archive_and_paths(studio_client):
-    import io
-    import zipfile
 
     _, client = studio_client
     job_id = create_legacy_job(client, "这是第一句配音文本。这是第二句配音文本。")
@@ -379,9 +380,6 @@ def test_force_validation_artifact_archive_and_paths(studio_client):
 
 
 def test_thread_start_failure_is_terminal_and_unlocks(config, monkeypatch):
-    import threading
-
-    from filelock import FileLock
 
     from studio import studio
 

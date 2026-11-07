@@ -25,8 +25,17 @@ from typing import TYPE_CHECKING
 
 from filelock import Timeout
 
+from shared import lock_backend
 from shared.backends import open_context
 from shared.backends.context import resource_scope
+from shared.db.fencing import Attempt, ExecutionFence, executing
+from shared.db.locks_pg import LeaseLost
+from shared.db.queue_pg import TASK_TTL_SECONDS, PgTaskQueue
+from shared.db.scaling_schema import ALL_LEDGER_TABLES
+from shared.gpu_resources import GpuResources
+from shared.task_cancel import TaskCancelled, registry_for
+from shared.work_budget import scope
+from worker.handlers import register_ledger_handlers
 
 if TYPE_CHECKING:
     from shared.config import Config
@@ -59,7 +68,6 @@ class TaskHandlers:
 
 def register(handlers: TaskHandlers, config) -> None:
     """登记业务任务处理器：账本行引用 → 对应执行链。"""
-    from worker.handlers import register_ledger_handlers
 
     register_ledger_handlers(handlers, config)
 
@@ -97,7 +105,6 @@ class Worker:
         register(self.handlers, config)
         for kind, handler in (extra_handlers or {}).items():
             self.handlers.register(kind, handler)
-        from shared.db.queue_pg import PgTaskQueue
 
         self.queue = PgTaskQueue(self.context.library_id)
         self._stop = threading.Event()
@@ -175,7 +182,6 @@ class Worker:
         capacity = self.config.gpu.capacity
         if capacity <= 0:
             return None
-        from shared import lock_backend
 
         source = self.context.store
         while not self._stop.is_set():
@@ -199,7 +205,6 @@ class Worker:
     @resource_scope()
     def _execute(self, task) -> None:
         """执行归属进入所有业务事务；队列与账本终态在同一事务提交。"""
-        from shared.db.fencing import Attempt, ExecutionFence
 
         stop, lost, cancelled = threading.Event(), threading.Event(), threading.Event()
         attempt = Attempt(self.context.store.backend, self.context.library_id, task, lost, cancelled)
@@ -211,23 +216,19 @@ class Worker:
                 attempt.close()
             finally:
                 if task.ledger_id:
+                    # 延迟导入：保持异常捕获范围，依赖加载失败时仍走原有降级路径。
                     from shared.task_cancel import registry_for
 
                     registry_for(self.context.store.root).clear(task.ledger_id)
 
     def _execute_attempt(self, task, attempt, stop, lost, cancelled):
-        from shared.work_budget import scope
 
         with scope(self.context.store):
             return self._execute_budgeted(task, attempt, stop, lost, cancelled)
 
     def _execute_budgeted(self, task, attempt, stop, lost, cancelled):
-        from shared.db.fencing import executing
-        from shared.db.locks_pg import LeaseLost
-        from shared.task_cancel import TaskCancelled, registry_for
 
         def heartbeat():
-            from shared.db.queue_pg import TASK_TTL_SECONDS
 
             interval = self.renew_interval if self.renew_interval is not None else RENEW_SECONDS
             ttl = self.task_ttl if self.task_ttl is not None else TASK_TTL_SECONDS
@@ -237,6 +238,7 @@ class Worker:
                         if not self.queue.renew(db, task, ttl=ttl):
                             lost.set()
                             return
+                        # 延迟导入：保持异常捕获范围，依赖加载失败时仍走原有降级路径。
                         from shared.object_coordination import coordination_keys
 
                         db.execute(
@@ -263,7 +265,6 @@ class Worker:
         beat = threading.Thread(target=heartbeat, daemon=True, name=f"beat-{task.id}")
         beat.start()
         gpu_slot = None
-        from shared.gpu_resources import GpuResources
 
         resources = GpuResources(self.context.store)
         persistent_gpu = bool(self.config.gpu.groups) or self.context.form == "cluster"
@@ -289,6 +290,7 @@ class Worker:
             lost.set()
             log.warning("任务 %d 的执行租约已失效，禁止提交", task.id)
         except Exception as exc:
+            # 延迟导入：保持异常捕获范围，依赖加载失败时仍走原有降级路径。
             from shared.external_calls import ReviewRequired
 
             outcome, error = (
@@ -323,8 +325,6 @@ class Worker:
             return self.queue.cancel_requested(db, task)
 
     def _finish(self, task, outcome, error=None):
-        from shared.db.locks_pg import LeaseLost
-        from shared.db.scaling_schema import ALL_LEDGER_TABLES
 
         attempt = task.execution.attempt if task.execution is not None else None
         with self.context.store.backend.connect(

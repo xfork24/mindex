@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+import heapq
 import json
 import math
+import sys
 import tempfile
 import threading
 from collections import Counter, OrderedDict, defaultdict
@@ -17,11 +19,20 @@ import jieba
 
 from admin.curation import EntityNotFound, Library, source_public, source_sql
 from models.adapters import ModelError, MultimodalEmbedder, make_embedder
-from processing.indexing import VectorIndex
+from persons.person_names import _occurrences, coverage_missing, overlaps_for, resolve_names
+from persons.person_processing import EvidenceReferences
+from persons.persons import Persons
+from processing.indexing import VectorIndex, vector_client
+from search.eligible_set import EligibleSet
+from search.lexical_query import dialogue_projection, eligible_projection, sql_bm25
+from shared.admission import validate_index
 from shared.config import Config, fingerprint
 from shared.images import image_png
 from shared.jsonio import save, save_bytes
+from shared.lexical_store import lexical_ready
 from shared.media import content_hash, cut, probe, windows
+from shared.query_budget import check
+from shared.query_budget import scope as query_scope
 from shared.storage import Store
 from shared.tokenizer import document_terms, tokens
 from shared.trace import record
@@ -39,7 +50,6 @@ _QUERY_VECTOR_SIZES: dict = {}
 def recall_scope(method):
     @wraps(method)
     def wrapped(self, *args, **kwargs):
-        from shared.query_budget import scope as query_scope
 
         with (
             query_scope(self.store, self.config.search.query_timeout_seconds)
@@ -196,7 +206,6 @@ class SearchEngine:
 
     def _vectors(self, index_id: str, *, create: bool = False) -> VectorIndex:
         """按配置选择向量客户端：缺省本地嵌入；chroma_server 形态走共享 HttpClient（plans §6.2）。"""
-        from processing.indexing import vector_client
 
         return VectorIndex(
             self.store.root,
@@ -272,7 +281,6 @@ class SearchEngine:
 
     @staticmethod
     def _cache_size(value):
-        import sys
 
         if isinstance(value, (tuple, list)):
             return sys.getsizeof(value) + sum(SearchEngine._cache_size(item) for item in value)
@@ -299,9 +307,6 @@ class SearchEngine:
         self._prune_vector_cache()
 
     def _prune_disk_vectors(self, directory):
-        import heapq
-
-        from shared.query_budget import check
 
         limits = self.config.search
         kept = []
@@ -329,8 +334,6 @@ class SearchEngine:
         if active["status"] != "ready":
             raise ModelError("当前索引未就绪")
         if getattr(self.store, "deployment_form", None) == "cluster":
-            from shared.admission import validate_index
-
             validate_index(self.store, active)
         return active
 
@@ -461,8 +464,6 @@ class SearchEngine:
 
     def _text_projection(self, query, active: dict, started: float):
         """format 2 且派生词法索引可用的文字检索快路径；不可用时返回 None 回退。"""
-        from search.lexical_query import eligible_projection
-        from shared.lexical_store import lexical_ready
 
         if active["spec"].get("format", 1) < 2 or not lexical_ready(self.store, active["id"]):
             return None
@@ -475,11 +476,10 @@ class SearchEngine:
 
     @recall_scope
     def text(self, query: TextSearch) -> dict:
-        from persons.person_names import overlaps_for, resolve_names
-        from persons.persons import Persons
 
         started = perf_counter()
         if self._paged(self._active()):
+            # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
             from search.paged_search import text
 
             return text(self, query, started)
@@ -534,9 +534,6 @@ class SearchEngine:
         if mode == "onscreen" and not ids:
             raise ValueError("人物出镜模式需要选择人物或输入已登记姓名")
         if mode == "onscreen":
-            from persons.person_names import coverage_missing
-            from persons.person_processing import EvidenceReferences
-
             reference_images = EvidenceReferences(self.config, self.store)
             if published.get("format", 1) >= 2:
                 # Actor searches expand through the immutable release cast, not live edits.
@@ -636,13 +633,10 @@ class SearchEngine:
             query = query.model_copy(update={"text": remaining})
         elif mode == "mentioned":
             # Mention mode is literal dialogue evidence, with no visual/analysis bypass.
-            from persons.person_names import _occurrences
 
             names = {e["id"]: [e["name"], *e.get("aliases", [])] for e in entities}
             if ids:
                 if projected:
-                    from search.lexical_query import dialogue_projection
-
                     dialogue = dialogue_projection(self.store, active["id"], [s["id"] for s in snapshots])
                     snapshots = [{**s, "views": {"dialogue": dialogue.get(s["id"], "")}} for s in snapshots]
 
@@ -704,7 +698,6 @@ class SearchEngine:
     def _channel_text(self, query, active, snapshots, vectors, started, *, projection=False):
         """format 2 文字检索。``projection=True`` 时 ``snapshots`` 是 eligible 投影行
         （无 views/dialogue 全文）：词法走 SQL 倒排，融合后按命中批量水合快照。"""
-        from search.lexical_query import sql_bm25
 
         selected = set(query.channels or ("visual", "dialogue", "analysis"))
         selected = {c for c in selected if self.config.search.channel_weights[c] > 0}
@@ -819,16 +812,12 @@ class SearchEngine:
             return False
         if getattr(self.store, "deployment_form", None) == "cluster":
             return True
-        from shared.lexical_store import lexical_ready
 
         return active["spec"].get("format", 1) >= 2 and lexical_ready(self.store, active["id"])
 
     def _eligible_rows(self, active: dict, granularity: str, filters: Filters):
         """向量检索的候选行：优先投影（format 2 且派生索引可用），否则全快照过滤。"""
         if self._paged(active):
-            from search.eligible_set import EligibleSet
-            from shared.admission import validate_index
-
             validate_index(self.store, active)
             return EligibleSet.build(
                 self.store,
@@ -840,11 +829,7 @@ class SearchEngine:
             ), True
         projection = None
         if active["spec"].get("format", 1) >= 2:
-            from shared.lexical_store import lexical_ready
-
             if lexical_ready(self.store, active["id"]):
-                from search.lexical_query import eligible_projection
-
                 projection = eligible_projection(
                     self.store, active["id"], granularity, filters, filters.effective_sources(self.store)
                 )
@@ -1074,9 +1059,7 @@ def status(
         },
         "model_health": {"checked": False},
         "channel_coverage": channel_coverage(store, active) if not summary else {},
-        "person_coverage": __import__("mindex.persons.persons", fromlist=["Persons"])
-        .Persons(store)
-        .published(active["id"], pinned=index_id is not None)[1]["coverage"]
+        "person_coverage": Persons(store).published(active["id"], pinned=index_id is not None)[1]["coverage"]
         if active and not summary
         else [],
     }

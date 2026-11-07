@@ -11,6 +11,7 @@ from models.adapters import ModelError
 
 def sample_frames(path, start, end, frame_interval=15):
     try:
+        # 延迟导入：保留可选依赖探测或异常捕获时的降级行为。
         import av
     except ImportError as exc:
         raise ModelError("人物处理需要 av；请执行 uv sync --extra person") from exc

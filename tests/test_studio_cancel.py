@@ -1,3 +1,5 @@
+"""创作构建取消与节点恢复回归。"""
+
 from __future__ import annotations
 
 import copy
@@ -7,6 +9,7 @@ import uuid
 
 import pytest
 from fastapi.testclient import TestClient
+from filelock import FileLock
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
@@ -342,7 +345,6 @@ def test_cancel_finished_build_rejected_without_side_effects(config, status):
 
 
 def test_delete_plan_boundaries(config):
-    from filelock import FileLock
 
     from studio.logs import ExecutionLog
 

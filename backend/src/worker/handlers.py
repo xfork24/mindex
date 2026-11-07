@@ -9,10 +9,16 @@ worker 领取队列任务后经对应 ``BackgroundTaskRunner`` 子类在当前�
 
 from __future__ import annotations
 
+import importlib
 import logging
 import time
 
 from filelock import Timeout
+
+from models import adapters
+from settings.runtime_settings import RuntimeConfig
+from shared.storage import Store
+from studio.tasks import handle
 
 log = logging.getLogger(__name__)
 
@@ -21,19 +27,15 @@ __all__ = ["register_ledger_handlers"]
 # kind → (runner 构造器, 账本表)。处理器内按需构造 runner（依赖 runtime/store/
 # embedder），避免 worker 启动即拉起全部子系统。
 _KIND_TABLES = {
-    "source": ("source_tasks", "mindex.admin.source_tasks", "SourceTasks"),
-    "dialogue": ("dialogue_tasks", "mindex.admin.dialogue_tasks", "DialogueTasks"),
-    "person": ("person_tasks", "mindex.persons.person_processing", "PersonTasks"),
-    "topic": ("topic_runs", "mindex.topics.runner", "TopicRuns"),
-    "index": ("index_tasks", "mindex.admin.source_tasks", "IndexTasks"),
+    "source": ("source_tasks", "admin.source_tasks", "SourceTasks"),
+    "dialogue": ("dialogue_tasks", "admin.dialogue_tasks", "DialogueTasks"),
+    "person": ("person_tasks", "persons.person_processing", "PersonTasks"),
+    "topic": ("topic_runs", "topics.runner", "TopicRuns"),
+    "index": ("index_tasks", "admin.source_tasks", "IndexTasks"),
 }
 
 
 def _build_runner(kind: str, config):
-    import importlib
-
-    from settings.runtime_settings import RuntimeConfig
-    from shared.storage import Store
 
     _, module_name, class_name = _KIND_TABLES[kind]
     store = Store.open(config)
@@ -45,7 +47,6 @@ def _build_runner(kind: str, config):
 
 
 def register_ledger_handlers(handlers, config) -> None:
-    from studio.tasks import handle
 
     handlers.register("studio", handle)
     for kind in _KIND_TABLES:
@@ -67,9 +68,7 @@ def _make_handler(kind: str):
         )
         # 先恢复账本中的模型空间，再创建客户端；排队后热更新不能悄悄替换任务模型。
         if runner.embedder is None:
-            from models.adapters import make_embedder
-
-            runner.embedder = make_embedder(restored)
+            runner.embedder = adapters.make_embedder(restored)
         lock = runner.row_lock(row)
         while True:
             task.execution.attempt.check()

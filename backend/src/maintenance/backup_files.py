@@ -30,9 +30,13 @@ from maintenance.backup_db import (
     store_at,
     walk,
 )
+from models import compatibility
+from models.compatibility import location
+from models.deployment import verified_file
 from shared import locks
 from shared.config import Config, fingerprint
 from shared.storage import Store, dumps
+from shared.types import Filters
 from shared.work_budget import copy_file
 
 # 向量备份/恢复子进程的超时：大库也足够宽裕，只防止进程挂死后永远等待。
@@ -267,8 +271,6 @@ def job_selection(root, selected, known):
         refs = set(state.get("source_ids") or [])
         bounded = bool(state.get("source_ids"))
         if state.get("source_group_ids"):
-            from shared.types import Filters
-
             try:
                 scope = Filters(
                     source_ids=state.get("source_ids") or [], source_group_ids=state["source_group_ids"]
@@ -551,8 +553,6 @@ def _config_dependencies(config, base_dir, payload, data_root=None):
 
 def compatibility_files(root, database):
     """已建索引所依赖的固定输入与验证证据；不调用模型或生成通过状态。"""
-    from models.compatibility import load_baseline, location
-    from models.deployment import verified_file
 
     required, seen = set(), set()
     for row in store_at(database.parent).rows("SELECT spec FROM index_versions"):
@@ -562,7 +562,7 @@ def compatibility_files(root, database):
             continue
         seen.add(space_id)
         config = Config(data_dir=root)
-        baseline = load_baseline(config, space)
+        baseline = compatibility.load_baseline(config, space)
         directory = location(config, space)
         paths = [directory / "baseline.json", directory / "baseline.sha256"]
         paths.extend(safe_path(root, sample["path"]) for sample in baseline["samples"])

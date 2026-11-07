@@ -5,6 +5,9 @@ from __future__ import annotations
 import os
 import time
 
+from shared.admission import validate_protocol, validate_serving
+from shared.db.migrate_pg import check_schema
+from shared.migration_state import pending
 from shared.query_budget import deadline, http_request
 
 
@@ -28,8 +31,6 @@ def readiness(context, config, *, gateway_token=None):
     store = context.store
 
     def database():
-        from shared.admission import validate_protocol
-        from shared.db.migrate_pg import check_schema
 
         with store.connect() as db:
             if store.pg:
@@ -47,7 +48,6 @@ def readiness(context, config, *, gateway_token=None):
         return "控制通道可用" if store.pg else "本地模式"
 
     def migration():
-        from shared.migration_state import pending
 
         with store.connect() as db:
             if pending(db):
@@ -69,7 +69,6 @@ def readiness(context, config, *, gateway_token=None):
         return config.vector.backend
 
     def admission():
-        from shared.admission import validate_serving
 
         validate_serving(context)
         return "派生索引、分词器及空间一致"

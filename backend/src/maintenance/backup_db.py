@@ -8,6 +8,9 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from shared.config import fingerprint
+from shared.db.sqlite_backend import SqliteBackend
+from shared.media import windows
+from shared.media_groups import membership_id
 from shared.storage import Store, dumps, migrate_metadata
 
 # 新业务表必须在这里明确归属，避免升级后部分备份悄悄携带无关素材。
@@ -125,7 +128,6 @@ def store_at(root: Path) -> Store:
         raise ValueError("数据库不能是符号链接")
     if not store.path.is_file():
         raise ValueError(f"找不到数据库：{store.path}")
-    from shared.db.sqlite_backend import SqliteBackend
 
     store.backend = SqliteBackend(store.path)
     return store
@@ -187,7 +189,6 @@ def json_container(value):
 def raw_representation_ids(member, spec):
     if "representation_ids" in member:
         return member["representation_ids"]
-    from shared.media import windows
 
     duration = member["end"] - member["start"]
     preprocessing = spec["preprocessing"]
@@ -659,8 +660,6 @@ def merge_database(target, incoming, *, restore_config):
             keys = [r["name"] for r in info if r["pk"]]
             for row in src.rows(f"SELECT * FROM {table}"):
                 if table == "media_group_members":
-                    from shared.media_groups import membership_id
-
                     row["group_id"] = remaps["media_groups"].get(row["group_id"], row["group_id"])
                     row["id"] = membership_id(row["group_id"], row["source_id"] or row["music_id"])
                 for column, value in row.items():

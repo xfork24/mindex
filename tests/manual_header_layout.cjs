@@ -11,12 +11,13 @@ const labels = {
   en: ["Video search", "Studio", "Media library", "People", "Settings"],
 };
 fs.mkdirSync(out, { recursive: true });
-let browser, page;
+let browser;
+let page;
 (async () => {
   browser = await chromium.launch({ headless: true });
   page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
-  const records = [],
-    errors = [];
+  const records = [];
+  const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
   // Click through every tab in both languages, including the current tab.
   for (const lang of ["zh", "en"]) {
@@ -88,22 +89,29 @@ let browser, page;
         assert.equal(r.svg, 0);
         assert.ok(r.refresh.id);
         assert.equal(r.refresh.margin, "0px");
-        for (const c of r.controls)
+        for (const c of r.controls) {
           assert.ok(c.w > 0 && c.h > 0 && c.x >= 0 && c.right <= width + 1);
+        }
         const rowHeight = r.tabs[0].h;
-        for (const t of r.tabs) assert.equal(t.h, rowHeight);
+        for (const t of r.tabs) {
+          assert.equal(t.h, rowHeight);
+        }
         // 三枚按钮同高、同一行，组内间距与左侧标签一致，整组靠右贴住页边距。
         assert.equal(r.actHeights.length, 3);
-        for (const h of r.actHeights) assert.equal(h, rowHeight);
+        for (const h of r.actHeights) {
+          assert.equal(h, rowHeight);
+        }
         // 导航换行成多行时横向间距无意义，只在单行时比对组内间距。
         const navSingleRow = r.tabs.every((t) => Math.abs(t.y - r.tabs[0].y) < 2);
         assert.ok(r.actGaps.every((g) => g === r.actGaps[0]));
-        if (navSingleRow) assert.ok(r.actGaps.every((g) => g === r.navGaps[0]));
+        if (navSingleRow) {
+          assert.ok(r.actGaps.every((g) => g === r.navGaps[0]));
+        }
         assert.equal(r.actRight, +(width - r.headerPadRight).toFixed(1));
-        for (let i = 0; i < r.controls.length; i++)
+        for (let i = 0; i < r.controls.length; i++) {
           for (let j = i + 1; j < r.controls.length; j++) {
-            const a = r.controls[i],
-              b = r.controls[j];
+            const a = r.controls[i];
+            const b = r.controls[j];
             assert.ok(
               a.right <= b.x + 1 ||
                 b.right <= a.x + 1 ||
@@ -111,14 +119,17 @@ let browser, page;
                 b.bottom <= a.y + 1,
               "header controls overlap",
             );
-            if (Math.abs(a.y - b.y) < 16 && a.h === rowHeight && b.h === rowHeight)
+            if (Math.abs(a.y - b.y) < 16 && a.h === rowHeight && b.h === rowHeight) {
               assert.ok(Math.abs(a.y - b.y) <= 1, "header row alignment");
+            }
           }
+        }
         records.push({ current, lang, width, ...r });
-        if ([1440, 320].includes(width))
+        if ([1440, 320].includes(width)) {
           await page.screenshot({
             path: `${out}/${current.slice(1).replace("/", "-") || "home"}-${lang}-${width}.png`,
           });
+        }
       }
     }
   }
@@ -135,8 +146,9 @@ let browser, page;
   await page.waitForFunction(() => !document.querySelector("#reload").disabled);
   await page.locator(".source-item").first().click();
   await page.locator("details.work-panel").waitFor();
-  if (!(await page.locator("details.work-panel").evaluate((node) => node.open)))
+  if (!(await page.locator("details.work-panel").evaluate((node) => node.open))) {
     await page.locator(".work-toolbar").click();
+  }
   await page.locator(".work-card").last().waitFor();
   const source = await page.evaluate(() => state.source.id);
   // 素材详情请求带 ?detail=work / ?detail=summary 后缀，按路径前缀匹配。

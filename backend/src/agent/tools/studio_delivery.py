@@ -480,7 +480,10 @@ def publish_specs() -> list[ToolSpec]:
         ToolSpec(
             "edit_publish_metadata",
             "studio_post",
-            "人工修改某平台的发布元数据（标题、简介正文、标签），按平台限制校验修正；保存后被钉住，封面与发布包重建。",
+            (
+                "人工修改某平台的发布元数据（标题、简介正文、标签），按平台限制校验修正；保存后被钉住，"
+                "封面与发布包重建。"
+            ),
             EditPublishMetadata,
             "write",
             edit_publish_metadata,

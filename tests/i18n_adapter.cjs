@@ -8,11 +8,15 @@ module.exports = {
   msg,
   render: (value) => String(value ?? ""),
   setText(node, value) {
-    if (node) node.textContent = String(value ?? "");
+    if (node) {
+      node.textContent = String(value ?? "");
+    }
   },
   setAttr(node, attr, value) {
     node.setAttribute(attr, String(value ?? ""));
-    if (["title", "alt", "placeholder", "label"].includes(attr)) node[attr] = String(value ?? "");
+    if (["title", "alt", "placeholder", "label"].includes(attr)) {
+      node[attr] = String(value ?? "");
+    }
   },
   system(value) {
     return typeof value === "object"

@@ -2,24 +2,31 @@
 
 全部经回环调用 ``/api/studio/...``：
 
-- ``diagnose_plan``：``GET /plans/{pid}/diagnostics``，解释分镜检查、字幕环境、已选节点为什么过期或需要重建；
+- ``diagnose_plan``：``GET /plans/{pid}/diagnostics``，解释分镜检查、字幕环境、
+已选节点为什么过期或需要重建；
 - ``get_version_lineage``：``GET /versions/{vid}/dependencies``，把依赖树整理成可读的缩进清单；
 - ``suggest_shot_query``：``POST /plans/{pid}/shots/{sid}/query-suggestion``，只返回建议、不改分镜；
 - ``get_material_digest``：``GET /material-digest``，文案与召回词共用的可用素材摘要；
-- ``preview_version``：``GET /versions/{vid}/preview``，选片版本生成带配音的快速预览，渲染版本直接返回视频；
-- ``run_column``（danger）：预览读取诊断接口的 ``inputs_by_stage[stage]`` 与 revision，执行时原样提交给
+- ``preview_version``：``GET /versions/{vid}/preview``，选片版本生成带配音的快速预览，
+渲染版本直接返回视频；
+- ``run_column``（danger）：预览读取诊断接口的 ``inputs_by_stage[stage]`` 与 revision，
+执行时原样提交给
   execute-column / regenerate-column，服务端发现输入已变化时拒绝并原样转述，提交成功后跟踪构建；
 - 人工选片（与创作页“调整选片”窗口同一套接口）：
   ``get_selection_candidates`` 读召回候选池与 ``GET /shots/{sid}/selection-context``；
-  ``preview_selection`` 必要时 ``POST /anchor`` 设置参考候选，再 ``POST /range-preview``（定长窗口或任意区间）
+  ``preview_selection`` 必要时 ``POST /anchor`` 设置参考候选，再 ``POST
+/range-preview``（定长窗口或任意区间）
 ；
   ``confirm_selection``（write）以预览时的请求体与 ``preview_token`` 调 ``POST /range-confirm``。
 
-  预览与确认是两次独立的工具调用（``ToolContext`` 不共享），预览结果按调用方作用域（面板会话 ID，MCP 为
+  预览与确认是两次独立的工具调用（``ToolContext`` 不共享），预览结果按调用方作用域（面板会话
+ID，MCP 为
   ``mcp``）与 ``preview_token`` 存在进程内 ``SELECTION_PREVIEWS``；确认工具的预览与执行之间仍经
-  ``ctx.extra["planned"]`` 共享。服务端以 revision 与 token 重新校验，方案或对齐结果变化时要求重新预览。
+  ``ctx.extra["planned"]`` 共享。服务端以 revision 与 token 重新校验，
+方案或对齐结果变化时要求重新预览。
 
-公共助手（``plan_url``、``shot_ref``、``shot_label``、``version_ref``、``plan_diagnostics``、``require_idle``）
+公共助手（``plan_url``、``shot_ref``、``shot_label``、``version_ref``、``plan_diagnostics``、
+``require_idle``）
 供人工选片工具复用。
 """
 
@@ -779,7 +786,9 @@ class PreviewSelection(StrictModel):
         default=None,
         ge=0,
         allow_inf_nan=False,
-        description="起点秒（素材内绝对时间）。窗口方式：窗口起点，须在合法起点范围内，省略时用默认起点；区间方式必填",
+        description=(
+            "起点秒（素材内绝对时间）。窗口方式：窗口起点，须在合法起点范围内，省略时用默认起点；区间方式必填"
+        ),
     )
     source_id: str | None = Field(
         default=None, description="区间方式：素材 ID；给出时按素材任意区间选片（需同时给 start、end）"
@@ -1075,8 +1084,11 @@ def specs() -> list[ToolSpec]:
         ToolSpec(
             "diagnose_plan",
             "studio_detail",
-            "方案诊断：分镜硬性/软性检查与文案覆盖、烧录字幕时的滤镜与字体检查、各已选节点是否缺失/失败/损坏/过期"
-            "及变化原因（例如“旁白已变化”）、构建预检摘要。用于解释“为什么这个分镜要重建”。只读。",
+            (
+                "方案诊断：分镜硬性/软性检查与文案覆盖、烧录字幕时的滤镜与字体检查、"
+                "各已选节点是否缺失/失败/损坏/过期及变化原因（例如“旁白已变化”）、构建预检摘要。"
+                "用于解释“为什么这个分镜要重建”。只读。"
+            ),
             DiagnosePlan,
             "read",
             diagnose_plan,
@@ -1101,7 +1113,10 @@ def specs() -> list[ToolSpec]:
         ToolSpec(
             "get_material_digest",
             "studio_detail",
-            "读取任务的可用素材摘要（素材、片段数、画面词与摘要正文），即写文案和重写召回词时参考的资料。只读。",
+            (
+                "读取任务的可用素材摘要（素材、片段数、画面词与摘要正文），"
+                "即写文案和重写召回词时参考的资料。只读。"
+            ),
             MaterialDigestArgs,
             "read",
             get_material_digest,
@@ -1128,8 +1143,10 @@ def specs() -> list[ToolSpec]:
         ToolSpec(
             "get_selection_candidates",
             "studio_detail",
-            "人工选片前查看某分镜的召回候选（#序号、素材、区间、分数、缩略图）、当前参考锚点与选片、配音时长、"
-            "定长窗口的合法起点范围，以及选片是否就绪和原因。只读。",
+            (
+                "人工选片前查看某分镜的召回候选（#序号、素材、区间、分数、缩略图）、当前参考锚点与选片、"
+                "配音时长、定长窗口的合法起点范围，以及选片是否就绪和原因。只读。"
+            ),
             SelectionCandidates,
             "read",
             get_selection_candidates,

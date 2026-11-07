@@ -26,10 +26,11 @@ const base = process.env.MINDEX_RECALL_URL || "http://127.0.0.1:18338";
 assert.match(base, /^http:\/\/127\.0\.0\.1:/);
 const out = process.env.MINDEX_RECALL_OUTPUT || "artifacts/recall-filters";
 fs.mkdirSync(out, { recursive: true });
-const widths = [1440, 1000, 800, 540, 390, 320],
-  records = [],
-  errors = [];
-let browser, page;
+const widths = [1440, 1000, 800, 540, 390, 320];
+const records = [];
+const errors = [];
+let browser;
+let page;
 async function audit(group, selector) {
   for (const lang of ["zh", "en"]) {
     await page.evaluate((l) => MindexI18n.setLanguage(l), lang);
@@ -39,8 +40,8 @@ async function audit(group, selector) {
         const controls = [...host.querySelectorAll("input,select,button")]
           .filter((n) => n.getClientRects().length)
           .map((n) => {
-            const r = n.getBoundingClientRect(),
-              s = getComputedStyle(n);
+            const r = n.getBoundingClientRect();
+            const s = getComputedStyle(n);
             return {
               tag: n.tagName,
               type: n.type,
@@ -54,11 +55,11 @@ async function audit(group, selector) {
             };
           });
         const file = [...host.querySelectorAll("input[type=file]")].find(
-            (n) => n.getClientRects().length,
-          ),
-          button = host.querySelector(".recall-upload-button");
-        const f = file?.getBoundingClientRect(),
-          b = button?.getBoundingClientRect();
+          (n) => n.getClientRects().length,
+        );
+        const button = host.querySelector(".recall-upload-button");
+        const f = file?.getBoundingClientRect();
+        const b = button?.getBoundingClientRect();
         const panel = host
           .querySelector(".search-media-input:not([hidden]) .upload")
           ?.getBoundingClientRect();
@@ -79,29 +80,36 @@ async function audit(group, selector) {
       });
       assert.equal(r.overflow, false, `${group}/${lang}/${width} page overflow`);
       for (const c of r.controls) {
-        if ((c.tag === "INPUT" && c.type !== "file") || (c.tag === "SELECT" && !c.multiple))
+        if ((c.tag === "INPUT" && c.type !== "file") || (c.tag === "SELECT" && !c.multiple)) {
           assert.equal(c.h, 32, `${group} ${c.id}`);
-        if (c.type === "file") assert.equal(c.h, 40);
+        }
+        if (c.type === "file") {
+          assert.equal(c.h, 40);
+        }
       }
       if (r.upload?.button) {
         assert.equal(r.upload.button.h, 40);
-        if (Math.abs(r.upload.y - r.upload.button.y) < 40)
+        if (Math.abs(r.upload.y - r.upload.button.y) < 40) {
           assert.ok(Math.abs(r.upload.y - r.upload.button.y) <= 1, "upload row alignment");
+        }
       }
       const fields = r.controls.filter(
         (c) => c.tag === "INPUT" && !["file", "search"].includes(c.type),
       );
-      for (let i = 0; i < fields.length; i++)
+      for (let i = 0; i < fields.length; i++) {
         for (let j = i + 1; j < fields.length; j++) {
-          if (Math.abs(fields[i].y - fields[j].y) < 32)
+          if (Math.abs(fields[i].y - fields[j].y) < 32) {
             assert.ok(Math.abs(fields[i].y - fields[j].y) <= 1, "filter alignment");
+          }
         }
+      }
       records.push({ group, lang, width, ...r });
-      if ([1440, 320].includes(width))
+      if ([1440, 320].includes(width)) {
         await page.screenshot({
           path: path.join(out, `${group}-${lang}-${width}.png`),
           fullPage: true,
         });
+      }
     }
   }
   await page.setViewportSize({ width: 1440, height: 1000 });
@@ -186,8 +194,9 @@ async function picked(selector) {
     ["shot_size", "近景"],
     ["min_duration", "0.5"],
     ["max_duration", "10"],
-  ])
+  ]) {
     await page.locator(`[data-recall-filter=${key}]`).fill(value);
+  }
   await audit("studio-text", ".recall-editor");
   await page.getByRole("button", { name: "保存此镜", exact: true }).click();
   await page.waitForFunction(() => !hasDirtyDraft());
@@ -246,7 +255,9 @@ async function picked(selector) {
   await browser.close();
 })().catch(async (e) => {
   console.error(e);
-  if (page) await page.screenshot({ path: path.join(out, "failure.png"), fullPage: true });
+  if (page) {
+    await page.screenshot({ path: path.join(out, "failure.png"), fullPage: true });
+  }
   await browser?.close();
   process.exit(1);
 });

@@ -8,6 +8,7 @@ AI 动画（animation 来源，没有选片阶段）在沙箱里逐帧录制动�
 
 from __future__ import annotations
 
+from studio import animation_capture
 from studio.workspace import beat_align, sources, transitions
 from studio.workspace.media_nodes import render_node
 from studio.workspace.plans import DEFAULT_CANVAS, canvas_of, canvas_render
@@ -158,8 +159,6 @@ class RenderHandler(StageHandler):
 
     def preflight(self, config, job_id, w, p, sid, spec, found, node):
         if not found and "overlay" in plan_shot_stages(w, p, sid):
-            from studio import animation_capture
-
             if not animation_capture.available():
                 node.update(
                     action="blocked",

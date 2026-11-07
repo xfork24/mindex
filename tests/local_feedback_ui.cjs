@@ -33,19 +33,20 @@ class Element {
     child.parentElement = this;
   }
   remove() {
-    if (this.parentElement)
+    if (this.parentElement) {
       this.parentElement.children = this.parentElement.children.filter((c) => c !== this);
+    }
     this.parentElement = null;
   }
 }
-const main = new Element("main"),
-  intro = new Element("section", "intro"),
-  section = new Element("section"),
-  panel = new Element("div", "panel"),
-  control = new Element("button"),
-  notice = new Element("div", "notice"),
-  dialog = new Element("dialog"),
-  dialogButton = new Element("button");
+const main = new Element("main");
+const intro = new Element("section", "intro");
+const section = new Element("section");
+const panel = new Element("div", "panel");
+const control = new Element("button");
+const notice = new Element("div", "notice");
+const dialog = new Element("dialog");
+const dialogButton = new Element("button");
 main.append(intro);
 main.append(notice);
 main.append(section);
@@ -128,8 +129,8 @@ assert.match(
 );
 // Studio's existing dialog error area must be the only recipient of an error.
 const studio = require("./studio_source.cjs").studioSource();
-let globalErrors = 0,
-  dialogErrors = 0;
+let globalErrors = 0;
+let dialogErrors = 0;
 const workDialog = { open: true };
 const errorContext = {
   $(id) {

@@ -1,12 +1,22 @@
+"""创作工作区节点、版本与依赖失效回归。"""
+
 from __future__ import annotations
 
 import copy
+import hashlib
+import io
 import json
+import math
+import struct
+import threading
 import time
 import wave
+from threading import Event
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
+from filelock import FileLock
 
 from api import create_app
 from conftest import FixtureEmbedder, FixtureSpeaker, FixtureStoryboarder, convert_to_legacy, legacy_job
@@ -429,7 +439,6 @@ def test_workspace_api_title_plans_preview_confirmation_and_stale_binding(prepar
     assert client.get(artifact, headers={"Range": "bytes=0-127"}).status_code == 206
     download = client.get(f"{artifact}?download=true")
     assert download.status_code == 200 and "attachment" in download.headers["content-disposition"]
-    import hashlib
 
     assert hashlib.sha256(download.content).hexdigest() == data["versions"][final]["files"]["mp4"]["sha256"]
 
@@ -485,10 +494,6 @@ def test_legacy_render_versions_are_imported_without_inventing_edges(prepared):
 
 
 def test_api_execution_lock_and_recovery(config):
-    import threading
-    from threading import Event
-
-    from filelock import FileLock
 
     entered, release = Event(), Event()
 
@@ -541,8 +546,6 @@ def test_api_execution_lock_and_recovery(config):
             raise RuntimeError("worker startup failed")
         return original(thread)
 
-    from unittest.mock import patch
-
     fresh = client.get(f"{base}/workspace").json()
     body["revision"] = fresh["revision"]
     with patch.object(threading.Thread, "start", start), pytest.raises(RuntimeError, match="startup"):
@@ -554,9 +557,6 @@ def test_api_execution_lock_and_recovery(config):
 
 @pytest.mark.parametrize("burn", [False, True])
 def test_mixed_render_picture_audio_and_subtitle_match_bound_versions(prepared, burn):
-    import io
-    import math
-    import struct
 
     config, embedder = prepared
     jid, w, p = setup_workspace(config)

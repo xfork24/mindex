@@ -193,7 +193,7 @@ def main() -> int:
         extra = ([str(args.font.resolve())] if args.font else []) + (
             ["--animation"] if args.animation else []
         )
-        result = run("-m", "mindex.desktop_check", str(work / "selfcheck"), *extra)
+        result = run("-m", "mindex.diagnostics.desktop_check", str(work / "selfcheck"), *extra)
         if result.returncode != 0:
             print(result.stdout, result.stderr, file=sys.stderr)
             return 1

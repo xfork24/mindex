@@ -17,7 +17,9 @@ const DEFAULTS = Object.freeze({
 function loadState(file) {
   try {
     const value = JSON.parse(fs.readFileSync(file, "utf8"));
-    if (!value || typeof value !== "object" || Array.isArray(value)) return { ...DEFAULTS };
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return { ...DEFAULTS };
+    }
     return {
       port:
         Number.isInteger(value.port) && value.port > 0 && value.port < 65536 ? value.port : null,

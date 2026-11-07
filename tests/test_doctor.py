@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from diagnostics.doctor import doctor
@@ -22,7 +24,6 @@ def test_invalid_combination_reports_failure(tmp_path):
 
 
 def test_unreachable_chroma_server_fails_closed(tmp_path, monkeypatch):
-    import os
 
     if os.environ.get("MINDEX_TEST_POSTGRES_DSN"):
         monkeypatch.setenv("MINDEX_DATABASE_DSN", os.environ["MINDEX_TEST_POSTGRES_DSN"])
@@ -52,7 +53,6 @@ def test_missing_dsn_is_actionable(tmp_path, monkeypatch):
 
 @pytest.mark.requires_postgres
 def test_pg_single_doctor_live(tmp_path, monkeypatch):
-    import os
 
     dsn = os.environ.get("MINDEX_TEST_POSTGRES_DSN", "")
     if not dsn:

@@ -66,6 +66,7 @@ class WorkCache:
             path = self.path(sid)
             temporary = path.with_suffix(f".{os.getpid()}.{threading.get_ident()}.tmp")
             try:
+                # 延迟导入：保持异常捕获范围，依赖加载失败时仍走原有降级路径。
                 from shared.jsonio import save
 
                 save(temporary, entry)

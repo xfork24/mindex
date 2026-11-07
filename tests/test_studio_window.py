@@ -1,3 +1,5 @@
+"""创作选片窗口、锚点与相邻区间回归。"""
+
 from __future__ import annotations
 
 import copy

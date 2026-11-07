@@ -135,7 +135,7 @@ def test_real_cpu_source_throughput_one_and_two_workers(s3_config, tmp_path):
                         [
                             sys.executable,
                             "-c",
-                            "import cv2;cv2.setNumThreads(1);from mindex.cli import app;app()",
+                            "import cv2;cv2.setNumThreads(1);import mindex; from cli import app;app()",
                             "--config",
                             str(config),
                             "worker",

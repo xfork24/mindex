@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import signal
 import socket
 import subprocess
@@ -23,7 +24,7 @@ from uuid import uuid4
 import httpx
 import pytest
 import yaml
-from fastapi import UploadFile
+from fastapi import FastAPI, UploadFile
 
 pytestmark = [pytest.mark.requires_postgres, pytest.mark.requires_s3, pytest.mark.requires_chroma_server]
 
@@ -119,9 +120,6 @@ class DrillEmbedder:
     """
 
     def __init__(self):
-        import threading
-
-        from fastapi import FastAPI
 
         from shared.config import Config, fingerprint
 
@@ -278,7 +276,15 @@ class FaultCluster:
         log = (self.root / f"{config.stem}-{role}-{uuid4().hex[:6]}.log").open("w+")
         self.logs.append(log)
         process = subprocess.Popen(
-            [sys.executable, "-c", "from mindex.cli import app; app()", "--config", str(config), role, *args],
+            [
+                sys.executable,
+                "-c",
+                "import mindex; from cli import app; app()",
+                "--config",
+                str(config),
+                role,
+                *args,
+            ],
             env=self.env,
             stdout=log,
             stderr=subprocess.STDOUT,
@@ -394,7 +400,6 @@ class FaultCluster:
         return row[0] if row else None
 
     def dump_logs(self):
-        import shutil
 
         evidence = Path(os.environ.get("MINDEX_TEST_EVIDENCE_DIR") or "")
         for log in self.logs:

@@ -6,6 +6,8 @@ import logging
 import threading
 import time
 
+from shared.logging_utils import is_application_logger
+
 log = logging.getLogger(__name__)
 
 STAGES = {
@@ -54,7 +56,7 @@ class CommandProgress:
             def emit(self, record):
                 if record.thread != owner or record.levelno < logging.INFO:
                     return
-                if not record.name.startswith("mindex.") or record.name == __name__:
+                if not is_application_logger(record.name) or record.name == __name__:
                     return
                 lines = record.getMessage().splitlines()
                 with reporter._lock:

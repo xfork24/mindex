@@ -19,11 +19,17 @@
       });
     },
     attach: function (select) {
-      if (!select || !select.multiple || select.dataset.searchable) return;
+      if (!select || !select.multiple || select.dataset.searchable) {
+        return;
+      }
       select.dataset.searchable = "1";
-      if (!select.id) select.id = "multi-select-" + ++serial;
+      if (!select.id) {
+        select.id = "multi-select-" + ++serial;
+      }
       const label = select.closest("label");
-      if (label) label.htmlFor = select.id;
+      if (label) {
+        label.htmlFor = select.id;
+      }
       const control = document.createElement("div");
       control.className = "multi-select";
       const list = document.createElement("div");
@@ -36,17 +42,20 @@
       input.addEventListener("input", function () {
         const query = input.value.trim().toLowerCase();
         select.dataset.query = query;
-        for (var i = 0; i < select.options.length; i++)
+        for (let i = 0; i < select.options.length; i++) {
           select.options[i].hidden = !matches(select.options[i], query);
+        }
       });
       select.parentNode.insertBefore(control, select);
       control.append(input, list);
       list.append(select);
     },
     refilter: function (select) {
-      if (!select || !select.multiple || !select.dataset.searchable) return;
+      if (!select || !select.multiple || !select.dataset.searchable) {
+        return;
+      }
       const query = (select.dataset.query || "").toLowerCase();
-      for (var j = 0; j < select.options.length; j++) {
+      for (let j = 0; j < select.options.length; j++) {
         select.options[j].hidden = !matches(select.options[j], query);
         select.options[j].title = select.options[j].textContent;
       }

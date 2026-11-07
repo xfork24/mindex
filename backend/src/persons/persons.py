@@ -16,6 +16,7 @@ from contextlib import nullcontext
 from datetime import UTC, datetime
 from threading import Lock
 
+from filelock import Timeout
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 from persons.person_models import (
@@ -28,8 +29,11 @@ from persons.person_models import (
     frame_review_lock,
     uid,
 )
+from persons.person_names import EvidenceIndex
 from persons.profiling import stage
+from shared import files, lock_backend
 from shared.config import fingerprint
+from shared.db.fencing import publication_scope
 from shared.person_schema import normalize_entity
 from shared.storage import Store, dumps
 
@@ -276,7 +280,6 @@ class Persons:
         relative = f"persons/{namespace}/{digest}.{extension}"
         path = self.store.root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
-        from shared import files
 
         files.save_bytes(self.store, path, content)
         return {"path": relative, "digest": digest, "width": width, "height": height}
@@ -1045,10 +1048,9 @@ class Persons:
         no_candidate=False,
         compact=False,
     ):
-        (
-            """按分镜分组返回证据；规则见 """
-            """_review_shots。临时表在本连接内建一次，三条聚合语句与逐镜证据查询共用。"""
-        )
+        """按分镜分组返回证据；规则见 _review_shots。临时表在本连接内建一次，
+        三条聚合语句与逐镜证据查询共用。
+        """
         with self.store.connect() as db:
             with stage("states_build"):
                 self._build_review_tables(db, source_id, shot_id)
@@ -1225,12 +1227,15 @@ class Persons:
                 )
             else:
                 evidence_sql = (
-                    "SELECT id,actor_id,role_id,status,json_object("
-                    "'score',json_extract(data,'$.score'),'original_score',json_extract(data,'$.original_score'),"
-                    "'evidence_type',json_extract(data,'$.evidence_type'),'confirmation',json_extract(data,'$.confirmation'),"
-                    "'image_path',json_extract(data,'$.image_path')) "
-                    "AS data,json_type(data,'$.original_score') IS NOT NULL AS original_recorded "
-                    "FROM person_evidence e WHERE source_id=? AND shot_id=? AND "
+                    (
+                        "SELECT id,actor_id,role_id,status,json_object('score',json_extract(data,'$.score')"
+                        ",'original_score',json_extract(data,'$.original_score')"
+                        ",'evidence_type',json_extract(data,'$.evidence_type')"
+                        ",'confirmation',json_extract(data,'$.confirmation')"
+                        ",'image_path',json_extract(data,'$.image_path')) AS "
+                        "data,json_type(data,'$.original_score') IS NOT NULL AS original_recorded FROM "
+                        "person_evidence e WHERE source_id=? AND shot_id=? AND "
+                    )
                     + self.VALID_ROLE
                     + " ORDER BY start,id"
                 )
@@ -1318,7 +1323,6 @@ class Persons:
         ]
 
     def publish(self, content_id=None, *, source_id=None, progress=None):
-        from shared.db.fencing import publication_scope
 
         with publication_scope(self.store, only_attempt=True):
             return self._publish(content_id, source_id=source_id, progress=progress)
@@ -1500,7 +1504,6 @@ class Persons:
                 detail.pop("body_feature", None)
                 if detail.get("space") is not None:
                     detail["space"] = spaces.setdefault(dumps(detail["space"]), detail["space"])
-        from persons.person_names import EvidenceIndex
 
         return _cache_put(
             _EVIDENCE_CACHE,
@@ -1516,7 +1519,6 @@ class Persons:
         """PG 人物查询按候选素材与身份投影，避免下载和缓存整版人物证据。"""
         if not self.store.pg:
             return self.published_evidence(release)
-        from persons.person_names import EvidenceIndex
 
         version_id = release["person_id"] if release else None
         sources, identifiers = sorted(set(sources)), sorted(set(identifiers))
@@ -1749,9 +1751,6 @@ def retained_frame_paths(store, source_id=None, *, include_published=True):
 
 def migrate_frames(config, *, source_id=None, apply=False):
     """Migrate display assets only. Feature vectors, cache IDs and releases stay intact."""
-    from filelock import Timeout
-
-    from shared import lock_backend
 
     store = Store.open(config)
     try:
@@ -1866,6 +1865,7 @@ def _migrate_frames(config, store, source_id, apply):
                             if apply:
                                 db.execute(f"UPDATE {table} SET data=? WHERE id=?", (dumps(data), row["id"]))
             # Only after commit; a failed/missing retained image aborts deletion for this source.
+            # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
             from maintenance.clean import _iter_files, _prune_empty_parents
 
             for path in _iter_files(directory):

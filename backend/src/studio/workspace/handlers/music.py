@@ -1,8 +1,11 @@
-"""背景音乐阶段（逐镜，只在背景音乐提示点分镜上）：调用音乐生成模型生成（或翻唱）一段背景音乐，或复制曲库曲目。
+"""背景音乐阶段（逐镜，只在背景音乐提示点分镜上）：调用音乐生成模型生成（或翻唱）一段背景音乐，
+或复制曲库曲目。
 
-- 提示点 generate：按描述生成纯音乐（instrumental=True，缺省）或带歌词的歌曲（歌词为空时由模型按描述写词）；
+- 提示点 generate：按描述生成纯音乐（instrumental=True，
+缺省）或带歌词的歌曲（歌词为空时由模型按描述写词）；
   cover：按上传的参考音频（audio_id）翻唱，描述为目标风格；
-  library：把曲库曲目（track_id，即音频 sha256）复制进版本目录，版本数据带上曲名、许可与署名（发布元数据用）；
+  library：把曲库曲目（track_id，即音频 sha256）复制进版本目录，版本数据带上曲名、
+许可与署名（发布元数据用）；
   曲目缺失、文件损坏或授权过期时预检阻塞（过期即使已有版本也阻塞，避免过期音乐进入新成片）；
 - 背景音乐从提示点分镜起顺延到下一个提示点之前的全部分镜，成片合成时循环/截断到段落长度、
 淡入淡出并在配音下自动压低；
@@ -13,10 +16,12 @@
 
 from __future__ import annotations
 
+from admin.curation import EntityNotFound
 from models.adapters import make_music_generator
 from models.music_generators import MusicRequest
 from shared.media import MediaError, audio_info
-from studio import studio
+from shared.storage import Store
+from studio import music_library, studio
 from studio.artifacts import sanitized
 from studio.workspace import sources
 from studio.workspace.music import cue_identity, segment_seconds
@@ -50,9 +55,6 @@ def audio_suffix(payload: bytes) -> str:
 
 def library_blocker(config, track_id: str, *, check_file: bool = True, store=None) -> str | None:
     """曲库提示点的阻塞原因：曲目不存在、文件缺失或损坏、授权过期；没有返回 None。"""
-    from admin.curation import EntityNotFound
-    from shared.storage import Store
-    from studio import music_library
 
     store = store or Store.open(config)
     try:
@@ -163,8 +165,6 @@ class MusicHandler(StageHandler):
 
     @staticmethod
     def copy_track(ctx, cue):
-        from shared.storage import Store
-        from studio import music_library
 
         store = Store.open(ctx.config)
         if reason := library_blocker(ctx.config, cue["track_id"], store=store):

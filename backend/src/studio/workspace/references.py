@@ -11,8 +11,7 @@ import hashlib
 
 from studio import studio
 from studio.artifacts import digest
-
-from .versions import root
+from studio.workspace.versions import root
 
 TEXT_SUFFIXES = {".txt", ".md", ".markdown", ".text"}
 MISSING = "参考文稿缺失或已损坏，请重新上传"

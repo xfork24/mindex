@@ -15,23 +15,31 @@ window.MindexFeedback = (() => {
     const previous = origin;
     origin = [];
     for (let element = event.target; element?.closest; element = element.parentElement) {
-      if (element.matches(selector)) origin.push(element);
+      if (element.matches(selector)) {
+        origin.push(element);
+      }
     }
     const dialog = event.target?.closest?.("dialog");
     if (dialog) {
-      if (!dialogOrigins.has(dialog))
+      if (!dialogOrigins.has(dialog)) {
         dialogOrigins.set(
           dialog,
           previous.filter((element) => !element.closest("dialog")),
         );
+      }
       origin.push(...dialogOrigins.get(dialog));
-    } else dialogOrigins = new WeakMap();
+    } else {
+      dialogOrigins = new WeakMap();
+    }
   }
-  for (const event of ["click", "submit", "change", "drop"])
+  for (const event of ["click", "submit", "change", "drop"]) {
     document.addEventListener(event, capture, true);
+  }
   function region(anchor) {
     const explicit = anchor?.closest(selector);
-    if (visible(explicit)) return explicit;
+    if (visible(explicit)) {
+      return explicit;
+    }
     return (
       origin.find(visible) ||
       [...document.querySelectorAll("main section, main aside, main form")].find(
@@ -43,15 +51,23 @@ window.MindexFeedback = (() => {
   function show(id, text, type = "", anchor = null) {
     const message = messages.get(id) || document.getElementById(id);
     const host = region(anchor);
-    if (!message || !host) return;
+    if (!message || !host) {
+      return;
+    }
     messages.set(id, message);
-    if (message.parentElement !== host) host.append(message);
+    if (message.parentElement !== host) {
+      host.append(message);
+    }
     MindexI18n.setText(message, text);
     message.className = `notice local-feedback ${type}`;
     message.dataset.type = type;
     MindexI18n.setAttr(message, "title", text || "");
     message.hidden = !text;
   }
-  for (const id of ["notice", "admin-notice"]) if (document.getElementById(id)) show(id, "");
+  for (const id of ["notice", "admin-notice"]) {
+    if (document.getElementById(id)) {
+      show(id, "");
+    }
+  }
   return { show };
 })();

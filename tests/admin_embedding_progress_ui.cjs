@@ -7,15 +7,17 @@ const fixture = process.env.MINDEX_UPLOAD_TEST_VIDEO;
   assert.ok(fixture, "MINDEX_UPLOAD_TEST_VIDEO must reference the isolated progress fixture");
   const browser = await chromium.launch({ headless: true });
   try {
-    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } }),
-      errors = [],
-      counts = [];
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    const errors = [];
+    const counts = [];
     page.on("pageerror", (e) => errors.push(e.message));
     page.on("response", async (response) => {
       if (/\/api\/admin\/sources\/[a-f0-9]+$/.test(new URL(response.url()).pathname)) {
-        const source = await response.json().catch(() => null),
-          p = source?.work?.shots?.task?.progress;
-        if (p?.stage === "embedding") counts.push(p.completed);
+        const source = await response.json().catch(() => null);
+        const p = source?.work?.shots?.task?.progress;
+        if (p?.stage === "embedding") {
+          counts.push(p.completed);
+        }
       }
     });
     await page.goto(base + "/admin");

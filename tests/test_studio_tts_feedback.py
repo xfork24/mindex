@@ -1,3 +1,5 @@
+"""配音构建反馈与失败恢复回归。"""
+
 from __future__ import annotations
 
 import copy

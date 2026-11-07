@@ -1,6 +1,13 @@
+"""镜头媒体物化、时间区间与缓存租约回归。"""
+
+import asyncio
 import json
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
+from filelock import FileLock
 
 from shared.media import MediaError, command, probe
 from shared.shot_media import ShotMedia
@@ -92,7 +99,6 @@ def test_migration_preview_backup_and_recovery(library):
 
 
 def test_audio_mix_frames_and_cache_lock(library, tmp_path):
-    from filelock import FileLock
 
     # Add an actual tone to only the second shot.
     target = library.root / "tone.mp4"
@@ -130,7 +136,6 @@ def test_audio_mix_frames_and_cache_lock(library, tmp_path):
 
 
 def test_business_modules_do_not_resolve_source_path():
-    from pathlib import Path
 
     modules = [
         "api/__init__",
@@ -193,7 +198,6 @@ def test_text_subtitle_archive_survives_source_removal(config, video_file, tmp_p
 
 
 def test_http_playlist_range_and_head_without_original(library):
-    from fastapi.testclient import TestClient
 
     from api import create_app
     from shared.config import Config
@@ -237,7 +241,6 @@ def test_migration_verification_retains_all_existing_media(library):
 
 
 def test_concurrent_generation_is_atomic(library):
-    from concurrent.futures import ThreadPoolExecutor
 
     service = ShotMedia(library)
     with ThreadPoolExecutor(max_workers=4) as pool:
@@ -434,9 +437,6 @@ def test_ffmpeg_times_use_decimal_not_scientific_notation(library):
 
 
 def test_cached_stream_releases_lease_when_send_fails(tmp_path):
-    import asyncio
-
-    from filelock import FileLock
 
     from shared.shot_media import file_response
 

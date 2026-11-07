@@ -8,7 +8,9 @@ from __future__ import annotations
 import hashlib
 import os
 
+import httpx
 import pytest
+from fastapi.testclient import TestClient
 
 pytestmark = [pytest.mark.requires_postgres, pytest.mark.requires_s3, pytest.mark.slow]
 
@@ -24,7 +26,6 @@ def media_app(tmp_path, monkeypatch):
         pytest.skip("需要 MINDEX_TEST_POSTGRES_DSN 与 MINDEX_TEST_S3_ENDPOINT")
     import boto3
     import psycopg
-    from fastapi.testclient import TestClient
 
     from api import create_app
     from shared.config import Config
@@ -94,7 +95,6 @@ def media_app(tmp_path, monkeypatch):
 
 
 def test_get_media_redirects_to_working_presigned_url(media_app):
-    import httpx
 
     client, payload = media_app
     response = client.get("/api/media/seg1", follow_redirects=False)

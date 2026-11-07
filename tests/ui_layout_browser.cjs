@@ -37,10 +37,11 @@ const previous =
   process.env.MINDEX_LAYOUT_RESUME && fs.existsSync(path.join(out, "coverage.json"))
     ? JSON.parse(fs.readFileSync(path.join(out, "coverage.json")))
     : null;
-const records = previous?.records || [],
-  problems = previous?.problems || [],
-  errors = previous?.errors || [];
-let page, browser;
+const records = previous?.records || [];
+const problems = previous?.problems || [];
+const errors = previous?.errors || [];
+let page;
+let browser;
 const voiceCatalog = {
   groups: [
     {
@@ -56,21 +57,23 @@ const voiceCatalog = {
 async function audit(group, languages = ["zh", "en"], screenshots = true) {
   if (previous && records.some((r) => r.group === group)) {
     await page.setViewportSize({ width: 1440, height: 900 });
-    if (await page.locator("[data-language]").count())
+    if (await page.locator("[data-language]").count()) {
       await page.evaluate(() => MindexI18n.setLanguage("zh"));
+    }
     return;
   }
   for (const lang of languages) {
-    if (await page.locator("[data-language]").count())
+    if (await page.locator("[data-language]").count()) {
       await page.evaluate((l) => MindexI18n.setLanguage(l), lang);
+    }
     for (const width of widths) {
       await page.setViewportSize({ width, height: 900 });
       await page.evaluate(
         () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))),
       );
       const result = await page.evaluate(() => {
-        const controls = [],
-          issues = [];
+        const controls = [];
+        const issues = [];
         const visible = (n) =>
           n.getClientRects().length &&
           getComputedStyle(n).visibility !== "hidden" &&
@@ -80,15 +83,18 @@ async function audit(group, languages = ["zh", "en"], screenshots = true) {
         const intrinsic = "option,svg,svg *,input,textarea,.sr-only";
         const scrollers =
           ".shot-strip,.candidate-strip,.profile-scroller,.multi-list,.source-shots,.json-view,#source-list,.job-panel,.tabs,.window-viewport";
-        if (document.documentElement.scrollWidth > innerWidth + 1)
+        if (document.documentElement.scrollWidth > innerWidth + 1) {
           issues.push("page overflow " + document.documentElement.scrollWidth);
+        }
         for (const n of document.querySelectorAll(
           "button,input:not([type=hidden]),textarea,select,a.quiet",
         )) {
-          if (!visible(n)) continue;
-          const r = n.getBoundingClientRect(),
-            s = getComputedStyle(n),
-            size = parseFloat(s.getPropertyValue("--control-size")) || 32;
+          if (!visible(n)) {
+            continue;
+          }
+          const r = n.getBoundingClientRect();
+          const s = getComputedStyle(n);
+          const size = parseFloat(s.getPropertyValue("--control-size")) || 32;
           const type = n.tagName.toLowerCase();
           controls.push({
             id: describe(n),
@@ -112,59 +118,72 @@ async function audit(group, languages = ["zh", "en"], screenshots = true) {
             type === "select" &&
             n.closest(".multi-list") &&
             getComputedStyle(n.closest(".multi-list")).resize !== "vertical"
-          )
+          ) {
             issues.push(describe(n) + " list not resizable");
-          if (type === "textarea" && s.resize !== "both")
+          }
+          if (type === "textarea" && s.resize !== "both") {
             issues.push(describe(n) + " textarea resize " + s.resize);
+          }
           if (
             (n.type === "checkbox" || n.type === "radio") &&
             (Math.abs(r.height - 16) > 1 || Math.abs(r.width - 16) > 1)
-          )
+          ) {
             issues.push(describe(n) + " checkbox " + r.width + "x" + r.height);
+          }
           if (
             ((type === "input" &&
               !["checkbox", "radio", "file", "range", "hidden"].includes(n.type)) ||
               (type === "select" && !n.multiple)) &&
             Math.abs(r.height - size) > 1
-          )
+          ) {
             issues.push(describe(n) + " height " + r.height + " expected " + size);
-          if (type === "select" && n.multiple && r.height < 48)
+          }
+          if (type === "select" && n.multiple && r.height < 48) {
             issues.push(describe(n) + " collapsed multiselect " + r.height);
+          }
           const custom = n.matches(
             ".tab,.clone-mode,.source-item,.job-item,.poster-button,.gallery-cell,.role-row-head,.new-profile-card,.shot-card,.stage-option,.stage-menu-button,.strip-nav,.card-play,.detail-candidate,.candidate-thumb",
           );
           if (type === "button" && !custom) {
-            if (r.height < size - 1) issues.push(describe(n) + " small button " + r.height);
-            if (innerWidth > 540 && r.height > size + 1)
+            if (r.height < size - 1) {
+              issues.push(describe(n) + " small button " + r.height);
+            }
+            if (innerWidth > 540 && r.height > size + 1) {
               issues.push(describe(n) + " tall button " + r.height + " expected " + size);
+            }
             const range = document.createRange();
             range.selectNodeContents(n);
             const rr = range.getBoundingClientRect();
-            if (rr.height > r.height + 1 || rr.width > r.width + 1)
+            if (rr.height > r.height + 1 || rr.width > r.width + 1) {
               issues.push(describe(n) + " clipped button text");
+            }
           }
           const d = n.closest("dialog[open]");
           if (d && !n.closest(scrollers)) {
             const dr = d.getBoundingClientRect();
-            if (r.left < dr.left - 1 || r.right > dr.right + 1)
+            if (r.left < dr.left - 1 || r.right > dr.right + 1) {
               issues.push(describe(n) + " overflows dialog horizontally");
+            }
           }
         }
         for (const d of document.querySelectorAll("dialog[open]")) {
           const r = d.getBoundingClientRect();
-          if (r.top < 0 || r.bottom > innerHeight + 1 || r.left < 0 || r.right > innerWidth + 1)
+          if (r.top < 0 || r.bottom > innerHeight + 1 || r.left < 0 || r.right > innerWidth + 1) {
             issues.push(d.id + " outside viewport");
-          if (d.scrollWidth > d.clientWidth + 1)
+          }
+          if (d.scrollWidth > d.clientWidth + 1) {
             issues.push(
               d.id + " internal horizontal overflow " + d.scrollWidth + "/" + d.clientWidth,
             );
+          }
           const close = d.querySelector(":scope>button");
           const heading = d.querySelector(":scope>h2,:scope>h3");
           if (close && heading) {
-            const c = close.getBoundingClientRect(),
-              h = heading.getBoundingClientRect();
-            if (c.left < h.right && c.right > h.left && c.top < h.bottom && c.bottom > h.top)
+            const c = close.getBoundingClientRect();
+            const h = heading.getBoundingClientRect();
+            if (c.left < h.right && c.right > h.left && c.top < h.bottom && c.bottom > h.top) {
               issues.push(d.id + " close overlaps heading");
+            }
           }
         }
         // Bottom alignment of single-line labelled fields sharing each actual flex/grid row.
@@ -172,31 +191,41 @@ async function audit(group, languages = ["zh", "en"], screenshots = true) {
         for (const host of document.querySelectorAll(
           ".fields,.filter-grid,.form-grid,.weight-grid,.search-row,.form-bottom,.plan-bar",
         )) {
-          if (!visible(host)) continue;
+          if (!visible(host)) {
+            continue;
+          }
           const items = [];
           for (const child of host.children) {
-            let n = child.matches("button,input,select")
+            const n = child.matches("button,input,select")
               ? child
               : child.matches("label")
                 ? child.querySelector(
                     "input:not([type=checkbox],[type=radio],[type=file]),select:not([multiple])",
                   )
                 : null;
-            if (!n || !visible(n)) continue;
+            if (!n || !visible(n)) {
+              continue;
+            }
             const r = n.getBoundingClientRect();
-            if (r.height > 40) continue;
+            if (r.height > 40) {
+              continue;
+            }
             items.push({ y: r.y, h: r.height, c: r.y + r.height / 2, id: describe(n) });
           }
-          for (let i = 0; i < items.length; i++)
+          for (let i = 0; i < items.length; i++) {
             for (let j = i + 1; j < items.length; j++) {
-              const a = items[i],
-                b = items[j];
-              if (a.h !== b.h || Math.abs(a.y - b.y) >= Math.min(a.h, b.h)) continue;
+              const a = items[i];
+              const b = items[j];
+              if (a.h !== b.h || Math.abs(a.y - b.y) >= Math.min(a.h, b.h)) {
+                continue;
+              }
               const delta = Math.abs(a.c - b.c);
               maxAlignment = Math.max(delta, maxAlignment);
-              if (delta > 1)
+              if (delta > 1) {
                 issues.push(describe(host) + " alignment " + a.id + "/" + b.id + " " + delta);
+              }
             }
+          }
         }
         return {
           scrollWidth: document.documentElement.scrollWidth,
@@ -208,11 +237,12 @@ async function audit(group, languages = ["zh", "en"], screenshots = true) {
       });
       records.push({ group, language: lang, width, ...result });
       problems.push(...result.issues.map((issue) => ({ group, lang, width, issue })));
-      if (screenshots && [2560, 1440, 320].includes(width) && lang === languages.at(-1))
+      if (screenshots && [2560, 1440, 320].includes(width) && lang === languages.at(-1)) {
         await page.screenshot({
           path: path.join(out, `${group}-${lang}-${width}.png`),
           fullPage: true,
         });
+      }
     }
   }
   const modal = page.locator("dialog[open]");
@@ -226,16 +256,18 @@ async function audit(group, languages = ["zh", "en"], screenshots = true) {
     if (await last.isVisible()) {
       await last.scrollIntoViewIfNeeded();
       const bounds = await last.boundingBox();
-      if (bounds.y < 0 || bounds.y + bounds.height > 900)
+      if (bounds.y < 0 || bounds.y + bounds.height > 900) {
         problems.push({ group, issue: "last modal control cannot be reached" });
+      }
     }
     await modal.last().evaluate((n) => (n.scrollTop = 0));
   }
   console.log("AUDIT", group);
   fs.writeFileSync(path.join(out, "coverage.json"), JSON.stringify({ records, problems, errors }));
   await page.setViewportSize({ width: 1440, height: 900 });
-  if (await page.locator("[data-language]").count())
+  if (await page.locator("[data-language]").count()) {
     await page.evaluate(() => MindexI18n.setLanguage("zh"));
+  }
 }
 async function goto(route) {
   await page.goto(base + route);
@@ -417,7 +449,9 @@ async function boundedResize(selector, dx, dy) {
     // All six roles and every available provider preset, using the real dynamic editor.
     for (let i = 0; i < 6; i++) {
       const head = page.locator("#roles .role-row-head").nth(i);
-      if ((await head.getAttribute("aria-expanded")) !== "true") await head.click();
+      if ((await head.getAttribute("aria-expanded")) !== "true") {
+        await head.click();
+      }
       await page.locator("#roles .role-row").nth(i).locator(".new-profile-card").click();
       const role = await page.locator("#pf-role").inputValue();
       const providers = await page
@@ -587,8 +621,11 @@ async function boundedResize(selector, dx, dy) {
   await page.route("**/api/settings", (route) => route.fulfill({ json: rich }));
   await page.reload();
   await page.locator("#roles .role-row-head").last().waitFor();
-  for (const head of await page.locator("#roles .role-row-head").all())
-    if ((await head.getAttribute("aria-expanded")) !== "true") await head.click();
+  for (const head of await page.locator("#roles .role-row-head").all()) {
+    if ((await head.getAttribute("aria-expanded")) !== "true") {
+      await head.click();
+    }
+  }
   await audit("settings-many-profiles");
   await page
     .locator("#roles .profile-actions")
@@ -612,8 +649,9 @@ async function boundedResize(selector, dx, dy) {
   voiceCatalog.clone.ref_text = true;
   await page.reload();
   await page.locator("#roles .role-row-head").last().waitFor();
-  if ((await page.locator("[data-section=voices]").getAttribute("aria-expanded")) !== "true")
+  if ((await page.locator("[data-section=voices]").getAttribute("aria-expanded")) !== "true") {
     await page.locator("[data-section=voices]").click();
+  }
   await page.locator("#voice-clone").click();
   await audit("settings-clone-reference-text");
   await close("#clone-close");
@@ -621,7 +659,9 @@ async function boundedResize(selector, dx, dy) {
     route.fulfill({ json: { ...voiceCatalog, groups: [], library: [], voice_kind: "clone" } }),
   );
   const tts = page.locator("#roles .role-row-head").nth(4);
-  if ((await tts.getAttribute("aria-expanded")) !== "true") await tts.click();
+  if ((await tts.getAttribute("aria-expanded")) !== "true") {
+    await tts.click();
+  }
   await page.locator("#roles .role-row").nth(4).locator(".new-profile-card").click();
   await page.locator("#pf-voice").waitFor();
   await audit("settings-empty-cloned-voice-list");

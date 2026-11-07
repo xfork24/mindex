@@ -2,6 +2,8 @@
 
 import asyncio
 import copy
+import json
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -160,8 +162,6 @@ def test_session_title_failure_preserves_fallback_and_cancel_stops_request(confi
 def test_split_execution_passes_creation_language_and_persists_results(
     config, monkeypatch, language, visual, query
 ):
-    import json
-    from types import SimpleNamespace
 
     from studio.workspace.handlers.split import SplitHandler
 

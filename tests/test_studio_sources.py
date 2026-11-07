@@ -12,6 +12,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import yaml
 from fastapi.testclient import TestClient
 from PIL import Image
 from pydantic import TypeAdapter, ValidationError
@@ -572,7 +573,6 @@ def test_mixed_recall_clip_image_compose(small, tmp_path, video_file):
 
 def test_clean_and_backup_keep_source_inputs(small, tmp_path):
     """清理从不触碰任务 inputs/ 中的来源文件；备份按任务整目录导出并能恢复它们。"""
-    import yaml
 
     from maintenance.backup import export_backup, import_backup
     from maintenance.clean import clean_library

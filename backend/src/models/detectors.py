@@ -20,6 +20,7 @@ class AdaptiveShotDetector:
         self.config = config
 
     def detect(self, path: Path) -> list[tuple[float, float]]:
+        # 延迟导入：媒体、数值或服务运行依赖仅在实际执行该功能时加载。
         from scenedetect import SceneManager, open_video
         from scenedetect.detectors import AdaptiveDetector
 

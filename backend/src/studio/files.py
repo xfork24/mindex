@@ -11,12 +11,12 @@ from fastapi.responses import FileResponse
 from filelock import FileLock, Timeout
 
 from admin.curation import EntityNotFound, Library
-from shared import files
+from shared import files, media
 from shared.config import fingerprint
 from shared.media_delivery import materialized_response
 from shared.shot_media import ShotMedia
+from studio import render, studio
 from studio import steps as studio_steps
-from studio import studio
 from studio.artifacts import safe_path
 
 # 动画源码等 HTML 产物：只允许内联脚本与样式、data:/blob: 媒体，禁止任何网络加载；``sandbox allow-scripts``
@@ -112,8 +112,6 @@ def file_routes(router, base, store, mutation_lock):
 
     @router.api_route("/jobs/{job_id}/preview/{shot_id}", methods=["GET", "HEAD"])
     def preview(job_id: str, shot_id: str):
-        from shared.media import probe
-        from studio.render import cut_shot
 
         state = studio.load_job(base, job_id)
         if state["steps"]["select"]["status"] != "complete":
@@ -151,9 +149,9 @@ def file_routes(router, base, store, mutation_lock):
             try:
                 with FileLock(str(path) + ".lock", timeout=0):
                     try:
-                        probe(path)
+                        media.probe(path)
                     except ValueError:
-                        cut_shot(source, local_event, base.studio.render, path)
+                        render.cut_shot(source, local_event, base.studio.render, path)
             except Timeout:
                 raise HTTPException(409, "该分镜预览正在生成，请稍候重试") from None
         return FileResponse(path, media_type="video/mp4")

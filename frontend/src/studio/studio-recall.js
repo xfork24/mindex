@@ -1,9 +1,9 @@
 /* 创作页 · 候选选择、锚点与手动时间窗对齐。按 studio.html 中的顺序以经典脚本加载，顶层声明共享全局作用域。 */
 "use strict";
 function renderCandidatePicker(body, sid) {
-  const recall = plan().shots[sid].recall,
-    item = ver(recall),
-    choice = plan().anchors?.[sid] || { mode: "auto" };
+  const recall = plan().shots[sid].recall;
+  const item = ver(recall);
+  const choice = plan().anchors?.[sid] || { mode: "auto" };
   const picker = el("div", "", "candidate-picker");
   picker.append(el("h4", MindexI18n.msg("ui.29e3f1f8a2c7")));
   const automatic = mutationButton(
@@ -22,8 +22,9 @@ function renderCandidatePicker(body, sid) {
       "muted",
     ),
   );
-  if (state.data.anchor_conflicts?.[sid])
+  if (state.data.anchor_conflicts?.[sid]) {
     picker.append(el("p", shortIds(state.data.anchor_conflicts[sid]), "warn-text"));
+  }
   const pool = el("div", "", "detail-candidates");
   for (const [index, c] of (item?.data.results || []).entries()) {
     const selected =
@@ -40,8 +41,9 @@ function renderCandidatePicker(body, sid) {
       preview.append(img);
     }
     preview.append(el("span", String(c.rank || index + 1), "candidate-rank"));
-    if (selected)
+    if (selected) {
       preview.append(el("span", MindexI18n.msg("ui.anchor_selected"), "candidate-selection"));
+    }
     card.dataset.candidateId = c.id || c.segment_id;
     card.append(preview);
     // 每个演员—角色组合只显示一次，优先保留带匹配参考图的最高分证据。
@@ -53,14 +55,15 @@ function renderCandidatePicker(body, sid) {
         evidence.role_id ?? evidence.role_name ?? null,
       ]);
       const previous = identities.get(key);
-      const hasReference = Boolean(evidence.reference_url),
-        previousHasReference = Boolean(previous?.reference_url);
+      const hasReference = Boolean(evidence.reference_url);
+      const previousHasReference = Boolean(previous?.reference_url);
       if (
         !previous ||
         (hasReference && !previousHasReference) ||
         (hasReference === previousHasReference && score(evidence) > score(previous))
-      )
+      ) {
         identities.set(key, evidence);
+      }
     }
     for (const evidence of identities.values()) {
       const chip = el(
@@ -118,17 +121,21 @@ function renderCandidatePicker(body, sid) {
           scope !== scopeKey() ||
           plan().shots[sid].recall !== recall ||
           (plan().anchors?.[sid]?.mode || "auto") !== "auto"
-        )
+        ) {
           return;
+        }
         for (const card of pool.children) {
-          if (card.dataset.candidateId === result.candidate_id)
+          if (card.dataset.candidateId === result.candidate_id) {
             card
               .querySelector(".candidate-image")
               .append(el("span", MindexI18n.msg("ui.anchor_automatic"), "candidate-selection"));
+          }
         }
       })
       .catch((error) => {
-        if (picker.isConnected) picker.append(el("p", shortIds(error.message), "warn-text"));
+        if (picker.isConnected) {
+          picker.append(el("p", shortIds(error.message), "warn-text"));
+        }
       });
   }
 }
@@ -145,24 +152,26 @@ async function selectAnchor(sid, choice) {
   );
 }
 async function manualRange(sid, host = null) {
-  const scope = scopeKey(),
-    url = planBase(),
-    body = host || showDialog(MindexI18n.msg("ui.7c411f978f53", { p0: sid }));
+  const scope = scopeKey();
+  const url = planBase();
+  const body = host || showDialog(MindexI18n.msg("ui.7c411f978f53", { p0: sid }));
   body.replaceChildren(el("p", MindexI18n.msg("ui.1fb33bf9acd4"), "muted"));
   const ctx = await api(`${url}/shots/${encodeURIComponent(sid)}/selection-context`);
-  if (scope !== scopeKey() || !body.isConnected) return;
+  if (scope !== scopeKey() || !body.isConnected) {
+    return;
+  }
   body.replaceChildren();
   if (!ctx.anchor) {
     body.append(el("p", shortIds(MindexI18n.system(ctx.reason)), "muted"));
     return;
   }
-  const lo = ctx.context_range.start,
-    hi = ctx.context_range.end,
-    length = ctx.window_duration || 0,
-    key = JSON.stringify([scope, sid, ctx.anchor_ref, ctx.tts_version, ctx.atempo]),
-    saved = state.windowDrafts.get(key),
-    existing = plan().ranges[sid];
-  let draft = saved || {
+  const lo = ctx.context_range.start;
+  const hi = ctx.context_range.end;
+  const length = ctx.window_duration || 0;
+  const key = JSON.stringify([scope, sid, ctx.anchor_ref, ctx.tts_version, ctx.atempo]);
+  const saved = state.windowDrafts.get(key);
+  const existing = plan().ranges[sid];
+  const draft = saved || {
     start:
       existing?.anchor_ref?.candidate_id === ctx.anchor_ref.candidate_id &&
       existing?.anchor_ref?.recall_version === ctx.anchor_ref.recall_version &&
@@ -174,7 +183,9 @@ async function manualRange(sid, host = null) {
     preview: null,
     contextToken: ctx.context_token,
   };
-  if (draft.contextToken !== ctx.context_token) draft.preview = null;
+  if (draft.contextToken !== ctx.context_token) {
+    draft.preview = null;
+  }
   draft.contextToken = ctx.context_token;
   draft.start = Math.min(ctx.legal_start.max, Math.max(lo, draft.start));
   state.windowDrafts.set(key, draft);
@@ -191,7 +202,7 @@ async function manualRange(sid, host = null) {
       "muted",
     ),
   );
-  if (ctx.extension.before || ctx.extension.after)
+  if (ctx.extension.before || ctx.extension.after) {
     body.append(
       el(
         "p",
@@ -199,16 +210,19 @@ async function manualRange(sid, host = null) {
         "muted",
       ),
     );
-  if (!ctx.ready) body.append(el("p", shortIds(MindexI18n.system(ctx.reason)), "warn-text"));
+  }
+  if (!ctx.ready) {
+    body.append(el("p", shortIds(MindexI18n.system(ctx.reason)), "warn-text"));
+  }
   const video = media("video", ctx.video_url);
   video.classList.add("window-video");
   video.muted = true;
-  const readout = el("p", "", "window-readout"),
-    viewport = el("div", "", "window-viewport"),
-    track = el("div", "", "window-track"),
-    strip = el("img", null, "window-thumbnails"),
-    windowBox = el("div", "", "fixed-window"),
-    result = el("div");
+  const readout = el("p", "", "window-readout");
+  const viewport = el("div", "", "window-viewport");
+  const track = el("div", "", "window-track");
+  const strip = el("img", null, "window-thumbnails");
+  const windowBox = el("div", "", "fixed-window");
+  const result = el("div");
   strip.src = ctx.thumbnails_url;
   MindexI18n.setAttr(strip, "alt", MindexI18n.msg("ui.718ffac629d9"));
   strip.draggable = false;
@@ -237,16 +251,18 @@ async function manualRange(sid, host = null) {
   windowBox.setAttribute("aria-valuemax", ctx.legal_start.max);
   windowBox.setAttribute("aria-disabled", String(!ctx.ready));
   windowBox.hidden = !ctx.ready;
-  let playbackFrame = null,
-    drag = null,
-    saving = false,
-    previewing = false;
+  let playbackFrame = null;
+  let drag = null;
+  let saving = false;
+  let previewing = false;
   const saveStatus = el("p", "", "muted");
   saveStatus.setAttribute("role", "status");
   const confirm = mutationButton(
     MindexI18n.msg("ui.3ee4a0fe14a0"),
     async () => {
-      if (saving || previewing || !ctx.ready) return;
+      if (saving || previewing || !ctx.ready) {
+        return;
+      }
       const sent = request();
       saving = true;
       update(false);
@@ -261,7 +277,9 @@ async function manualRange(sid, host = null) {
             ...sent,
             render_preview: false,
           }));
-        if (!isCurrent(sent)) throw new Error(MindexI18n.msg("ui.ebf7d2633b0e"));
+        if (!isCurrent(sent)) {
+          throw new Error(MindexI18n.msg("ui.ebf7d2633b0e"));
+        }
         draft.preview = preview;
         MindexI18n.setText(saveStatus, MindexI18n.msg("ui.55f2030f3f50"));
         const response = await api(`${url}/range-confirm`, "POST", {
@@ -269,8 +287,12 @@ async function manualRange(sid, host = null) {
           preview_token: preview.preview_token,
         });
         draft.preview = null;
-        if (scope === scopeKey()) await accept(response);
-        if (!host) closeDialog();
+        if (scope === scopeKey()) {
+          await accept(response);
+        }
+        if (!host) {
+          closeDialog();
+        }
         notice(MindexI18n.msg("ui.7ff45d499de7"));
       } catch (error) {
         draft.preview = null;
@@ -306,8 +328,9 @@ async function manualRange(sid, host = null) {
   }
   function seek() {
     const position = draft.start - lo;
-    if (video.readyState)
+    if (video.readyState) {
       video.currentTime = Math.max(0, Math.min(video.duration || hi - lo, position));
+    }
   }
   function update(seekFrame = true) {
     windowBox.style.left = `${((draft.start - lo) / (hi - lo)) * 100}%`;
@@ -343,10 +366,14 @@ async function manualRange(sid, host = null) {
     );
     serverPreview.dataset.unavailable = String(!ctx.ready || saving || previewing);
     serverPreview.disabled = !ctx.ready || saving || previewing || busy();
-    if (seekFrame) seek();
+    if (seekFrame) {
+      seek();
+    }
   }
   function move(value) {
-    if (!ctx.ready || busy() || saving) return;
+    if (!ctx.ready || busy() || saving) {
+      return;
+    }
     video.pause();
     draft.start = Math.min(ctx.legal_start.max, Math.max(lo, value));
     draft.preview = null;
@@ -356,40 +383,55 @@ async function manualRange(sid, host = null) {
   }
   video.addEventListener("loadedmetadata", () => seek(), { once: true });
   function enforcePlaybackBounds() {
-    if (video.paused) return false;
-    const start = draft.start - lo,
-      end = start + length;
-    if (!ctx.ready || video.currentTime >= end) {
-      video.pause();
-      if (ctx.ready) video.currentTime = end;
+    if (video.paused) {
       return false;
     }
-    if (video.currentTime < start) video.currentTime = start;
+    const start = draft.start - lo;
+    const end = start + length;
+    if (!ctx.ready || video.currentTime >= end) {
+      video.pause();
+      if (ctx.ready) {
+        video.currentTime = end;
+      }
+      return false;
+    }
+    if (video.currentTime < start) {
+      video.currentTime = start;
+    }
     return true;
   }
   function monitorPlayback() {
     playbackFrame = null;
-    if (body.isConnected && enforcePlaybackBounds())
+    if (body.isConnected && enforcePlaybackBounds()) {
       playbackFrame = requestAnimationFrame(monitorPlayback);
+    }
   }
   video.addEventListener("play", () => {
-    const start = draft.start - lo,
-      end = start + length;
-    if (video.currentTime < start || video.currentTime >= end) seek();
-    if (playbackFrame !== null) cancelAnimationFrame(playbackFrame);
+    const start = draft.start - lo;
+    const end = start + length;
+    if (video.currentTime < start || video.currentTime >= end) {
+      seek();
+    }
+    if (playbackFrame !== null) {
+      cancelAnimationFrame(playbackFrame);
+    }
     monitorPlayback();
   });
   video.addEventListener("pause", () => {
-    if (playbackFrame !== null) cancelAnimationFrame(playbackFrame);
+    if (playbackFrame !== null) {
+      cancelAnimationFrame(playbackFrame);
+    }
     playbackFrame = null;
   });
   video.addEventListener("timeupdate", enforcePlaybackBounds);
   video.addEventListener("seeking", enforcePlaybackBounds);
   track.addEventListener("pointerdown", (e) => {
-    if (!ctx.ready || busy() || e.button !== 0) return;
+    if (!ctx.ready || busy() || e.button !== 0) {
+      return;
+    }
     e.preventDefault();
-    const rect = track.getBoundingClientRect(),
-      time = lo + ((e.clientX - rect.left) / rect.width) * (hi - lo);
+    const rect = track.getBoundingClientRect();
+    const time = lo + ((e.clientX - rect.left) / rect.width) * (hi - lo);
     drag = {
       pointer: e.pointerId,
       offset: e.target === windowBox ? time - draft.start : length / 2,
@@ -399,7 +441,9 @@ async function manualRange(sid, host = null) {
     move(time - drag.offset);
   });
   track.addEventListener("pointermove", (e) => {
-    if (!drag || drag.pointer !== e.pointerId) return;
+    if (!drag || drag.pointer !== e.pointerId) {
+      return;
+    }
     const rect = track.getBoundingClientRect();
     move(lo + ((e.clientX - rect.left) / rect.width) * (hi - lo) - drag.offset);
   });
@@ -434,14 +478,18 @@ async function manualRange(sid, host = null) {
   const serverPreview = mutationButton(
     MindexI18n.msg("ui.724ea6be9a18"),
     async () => {
-      if (saving || previewing || !ctx.ready) return;
+      if (saving || previewing || !ctx.ready) {
+        return;
+      }
       const sent = request();
       previewing = true;
       update(false);
       MindexI18n.setText(saveStatus, MindexI18n.msg("ui.b31cb820fd4f"));
       try {
         const preview = await api(`${url}/range-preview`, "POST", sent);
-        if (!isCurrent(sent)) return;
+        if (!isCurrent(sent)) {
+          return;
+        }
         draft.preview = preview;
         result.replaceChildren(media("video", preview.preview_url));
         MindexI18n.setText(saveStatus, MindexI18n.msg("ui.25bc411a8e4c"));
@@ -471,7 +519,9 @@ async function manualRange(sid, host = null) {
     saveStatus,
     result,
   );
-  if (draft.preview) result.append(media("video", draft.preview.preview_url));
+  if (draft.preview) {
+    result.append(media("video", draft.preview.preview_url));
+  }
   update(false);
   updateLocks();
 }

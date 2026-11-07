@@ -33,7 +33,9 @@ const sandbox = {
   $: () => box,
   el: (tag, text, cls) => {
     const n = new Node(tag);
-    if (text != null) n.textContent = text;
+    if (text != null) {
+      n.textContent = text;
+    }
     n.className = cls || "";
     return n;
   },
@@ -62,10 +64,10 @@ const render = (retrieval) => {
   vm.runInContext("renderRetrieval()", sandbox);
 };
 
-const CONTENT = "948ffaef006da3df9d827c41",
-  NEW_CONTENT = "cfbdd3fcccdae82970f426c7";
-const RELEASE = "594791409ff1b0fac35c2ff6",
-  NEW_RELEASE = "e60e29dc0d45a1ce93ed34b7";
+const CONTENT = "948ffaef006da3df9d827c41";
+const NEW_CONTENT = "cfbdd3fcccdae82970f426c7";
+const RELEASE = "594791409ff1b0fac35c2ff6";
+const NEW_RELEASE = "e60e29dc0d45a1ce93ed34b7";
 const PERSON = "d045d64f39c2f065026a4538";
 const OLD = "检索发布版 59479140（内容索引 948ffaef · 人物快照 d045d64f）";
 const NEW = "检索发布版 e60e29dc（内容索引 cfbdd3fc · 人物快照 d045d64f）";
@@ -87,8 +89,9 @@ render({ active: combo(), used: [group()] });
 assert.equal(box.hidden, false);
 assert.equal(box.children.length, 1);
 assert.equal(box.children[0].textContent, `检索组合：当前生效 ${OLD}；工作台依赖 ${OLD}；一致`);
-for (const id of [RELEASE, CONTENT, PERSON])
+for (const id of [RELEASE, CONTENT, PERSON]) {
   assert.ok(box.children[0].attrs.title.includes(id), id);
+}
 assert.ok(!box.children[0].className.includes("is-mismatch"));
 
 // 不一致：生效组合已换；依赖多个组合时逐个列出分镜数。
@@ -163,7 +166,7 @@ let root = tree("c1", {
   },
 });
 assert.equal(root.children[0].textContent, "成片合成  · c1");
-let [first, second, render1] = edges(root);
+const [first, second, render1] = edges(root);
 assert.equal(first.children[0].textContent, "检索组合");
 assert.equal(first.children[1].textContent, `${OLD}，30 个分镜`);
 assert.ok(

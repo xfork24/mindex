@@ -1,8 +1,13 @@
+"""分镜渲染、时间线与成片产物回归。"""
+
 from __future__ import annotations
 
+import json
+import json as json_module
 import math
 import struct
 import wave
+from types import SimpleNamespace
 
 import pytest
 
@@ -121,7 +126,6 @@ def test_render_soft_subtitle_outputs_video_srt_and_audio(config, video_file):
 
 
 def probe_streams(path):
-    import json as json_module
 
     from shared.media import command
 
@@ -218,7 +222,6 @@ def rgb_at(path, seconds):
 
 
 def test_padding_never_reads_picture_after_selected_end(config, video_file, tmp_path):
-    from types import SimpleNamespace
 
     event = SimpleNamespace(audio=SimpleNamespace(render_duration=2), video=SimpleNamespace(start=0, end=0.5))
     config.studio.render.width, config.studio.render.height = 160, 120
@@ -229,7 +232,6 @@ def test_padding_never_reads_picture_after_selected_end(config, video_file, tmp_
 
 
 def test_reselect_changes_picture_and_failed_mux_preserves_previous_final(config, video_file, monkeypatch):
-    import json
 
     config.studio.render.width, config.studio.render.height = 160, 120
     job_id, timeline = build_job(config, video_file, [("shot-01", 0, 1, 1)], burn=False)
@@ -257,7 +259,6 @@ def test_reselect_changes_picture_and_failed_mux_preserves_previous_final(config
 
 @pytest.mark.parametrize("fps,count", [(25, 60), (29.97, 4)])
 def test_frame_sample_boundaries_do_not_accumulate_drift(config, video_file, fps, count):
-    import json
 
     config.studio.render.width, config.studio.render.height = 160, 120
     config.studio.render.preset = "ultrafast"

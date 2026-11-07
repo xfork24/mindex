@@ -24,7 +24,9 @@ from pydantic import Field, field_validator, model_validator
 
 from admin.curation import EntityNotFound
 from shared.config import StrictModel, fingerprint
+from studio import studio
 from studio.studio import TOOL_NAME, TOOL_SOURCE_ID
+from studio.tools.mcp import unavailable
 
 PROTOCOLS = ("http", "mcp-stdio", "mcp-http")
 SECRET_VALUE = re.compile(r"^secret:([A-Za-z0-9_-]{1,40})$")
@@ -91,10 +93,9 @@ class HttpConfig(StrictModel):
 
 
 class StdioConfig(StrictModel):
-    (
-        """本机 MCP 服务器进程：``command`` 必须是绝对路径（桌面版不依赖 GUI 的 PATH）；``env`` """
-        """在最小默认环境上追加。"""
-    )
+    """本机 MCP 服务器进程：``command`` 必须是绝对路径（桌面版不依赖 GUI 的 PATH）；``env``
+    在最小默认环境上追加。
+    """
 
     command: str = Field(min_length=2, max_length=1000)
     args: list[str] = Field(default_factory=list, max_length=30)
@@ -176,7 +177,6 @@ def secret_names(connection: dict) -> set[str]:
 
 def resolve(connection: dict, secrets: dict[str, str]) -> dict:
     """把连接设置中的 ``secret:名称`` 替换为密钥值；缺少密钥时报错。"""
-    from studio import studio
 
     result = json.loads(json.dumps(connection))
     for group in ("headers", "env"):
@@ -252,7 +252,6 @@ def list_sources(store) -> list[dict]:
 
 def save_source(store, source_id: str, spec: ToolSourceSpec, *, now: str) -> dict:
     """登记或整体替换工具源；返回视图。"""
-    from studio import studio
 
     if not re.fullmatch(TOOL_SOURCE_ID, source_id):
         raise studio.StudioError("工具源 ID 只能由小写字母、数字与连字符组成（≤40 字符）")
@@ -288,7 +287,6 @@ def save_source(store, source_id: str, spec: ToolSourceSpec, *, now: str) -> dic
 
 def references(config, source_id: str) -> list[dict]:
     """方案所选分镜内容中引用某工具源的分镜（扫描全部 workspace.json，只读）。"""
-    from studio import studio
 
     root = studio.studio_root(config)
     found = []
@@ -332,7 +330,6 @@ def delete_source(config, store, source_id: str) -> None:
 
 
 def tool_entry(record: dict, name: str) -> dict:
-    from studio import studio
 
     for tool in record["tools"]:
         if tool["name"] == name:
@@ -354,12 +351,9 @@ def tool_hash(record: dict, name: str) -> str:
 
 
 def blocker(store, source: dict) -> str | None:
-    (
-        """分镜工具来源的阻塞原因（预检与执行前）：未登记、不在白名单、产物类型不符、上传未授权、"""
-        """缺密钥、缺 """
-        """mcp 组件。"""
-    )
-    from studio import studio
+    """分镜工具来源的阻塞原因（预检与执行前）：未登记、不在白名单、产物类型不符、上传未授权、
+    缺密钥、缺 mcp 组件。
+    """
 
     try:
         record = get_source(store, source["tool_id"])
@@ -379,8 +373,6 @@ def blocker(store, source: dict) -> str | None:
     ):
         return f"工具源「{record['name']}」缺少密钥：{'、'.join(missing)}"
     if record["protocol"] != "http":
-        from .mcp import unavailable
-
         if reason := unavailable():
             return reason
     return None

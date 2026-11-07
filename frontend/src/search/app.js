@@ -25,17 +25,22 @@ const personKinds = {
 
 function element(tag, text, className) {
   const node = document.createElement(tag);
-  if (text !== undefined) MindexI18n.setText(node, text);
-  if (className) node.className = className;
+  if (text !== undefined) {
+    MindexI18n.setText(node, text);
+  }
+  if (className) {
+    node.className = className;
+  }
   return node;
 }
 function notice(text = "", type = "") {
-  if (globalThis.MindexFeedback)
+  if (globalThis.MindexFeedback) {
     return globalThis.MindexFeedback.show(
       "notice",
       type === "error" ? MindexI18n.system(text) : text,
       type,
     );
+  }
   MindexI18n.setText($("notice"), type === "error" ? MindexI18n.system(text) : text);
   $("notice").className = `notice ${type}`;
 }
@@ -44,15 +49,18 @@ function clock(seconds) {
   return `${String(minutes).padStart(2, "0")}:${(seconds % 60).toFixed(1).padStart(4, "0")}`;
 }
 function errorText(detail) {
-  if (Array.isArray(detail))
+  if (Array.isArray(detail)) {
     return detail.map((item) => item.msg || JSON.stringify(item)).join("；");
+  }
   return typeof detail === "string" ? detail : JSON.stringify(detail);
 }
 async function api(url, options = {}) {
   return MindexApi.request(url, options);
 }
 function switchMode(next) {
-  if (busy) return;
+  if (busy) {
+    return;
+  }
   mode = next;
   for (const name of ["text", "image", "video"]) {
     $(`${name}-tab`).classList.toggle("active", name === mode);
@@ -61,7 +69,9 @@ function switchMode(next) {
   }
   $("person-filters").hidden = mode !== "text";
   fillSearchFilters();
-  if (mode !== "video") $("query-preview").pause();
+  if (mode !== "video") {
+    $("query-preview").pause();
+  }
   notice();
 }
 $("text-tab").onclick = () => switchMode("text");
@@ -75,7 +85,9 @@ document.querySelectorAll("[data-query]").forEach(
     }),
 );
 function showVideo(file) {
-  if (previewUrl) URL.revokeObjectURL(previewUrl);
+  if (previewUrl) {
+    URL.revokeObjectURL(previewUrl);
+  }
   const preview = $("query-preview");
   preview.hidden = !file;
   if (file) {
@@ -88,7 +100,9 @@ function showVideo(file) {
   }
 }
 function showImage(file) {
-  if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
+  if (imagePreviewUrl) {
+    URL.revokeObjectURL(imagePreviewUrl);
+  }
   imagePreviewUrl = null;
   const preview = $("image-preview");
   preview.hidden = !file;
@@ -119,10 +133,10 @@ function acceptsType(file, accept) {
     );
 }
 function bindDrop(panelId, inputId, labelId, kind, show) {
-  const panel = $(panelId),
-    input = $(inputId),
-    label = $(labelId),
-    accept = input.getAttribute("accept") || "";
+  const panel = $(panelId);
+  const input = $(inputId);
+  const label = $(labelId);
+  const accept = input.getAttribute("accept") || "";
   input.onchange = () => {
     droppedFile[kind] = null;
     show(input.files[0] || null);
@@ -139,7 +153,9 @@ function bindDrop(panelId, inputId, labelId, kind, show) {
   });
   // 在子元素之间移动也会冒泡 dragleave，用 relatedTarget 判断是否真的离开了面板。
   panel.addEventListener("dragleave", (event) => {
-    if (!panel.contains(event.relatedTarget)) unhighlight();
+    if (!panel.contains(event.relatedTarget)) {
+      unhighlight();
+    }
   });
   panel.addEventListener("drop", (event) => {
     event.preventDefault();
@@ -170,8 +186,9 @@ function bindDrop(panelId, inputId, labelId, kind, show) {
       droppedFile[kind] = file;
     }
     show(file);
-    if (!input.files.length && !droppedFile[kind])
+    if (!input.files.length && !droppedFile[kind]) {
       notice(MindexI18n.msg("ui.e6c9a5d0b984"), "error");
+    }
   });
 }
 bindDrop("image-input", "image-file", "image-drop", "image", showImage);
@@ -201,14 +218,20 @@ function filters() {
     shot_size: $("shot-size").value.trim(),
   };
   const sources = sourceScope === null ? selectedValues("source") : sourceScope;
-  if (sources.length) values.source_ids = sources;
+  if (sources.length) {
+    values.source_ids = sources;
+  }
   const groupIds = searchGroups.values();
-  if (groupIds.length) values.source_group_ids = groupIds;
+  if (groupIds.length) {
+    values.source_group_ids = groupIds;
+  }
   for (const [key, id] of [
     ["min_duration", "min-duration"],
     ["max_duration", "max-duration"],
   ]) {
-    if ($(id).value !== "") values[key] = Number($(id).value);
+    if ($(id).value !== "") {
+      values[key] = Number($(id).value);
+    }
   }
   return Object.fromEntries(Object.entries(values).filter(([, v]) => v !== ""));
 }
@@ -228,8 +251,9 @@ function bestPersonEvidence(evidence) {
       (item.image_url && !current.image_url) ||
       (Boolean(item.image_url) === Boolean(current.image_url) &&
         (item.data?.score || 0) > (current.data?.score || 0))
-    )
+    ) {
       people.set(key, item);
+    }
   }
   return [...people.values()];
 }
@@ -239,20 +263,24 @@ function details(result) {
   const target = $("detail-content");
   target.replaceChildren();
   target.append(element("h3", result.display_name || result.source_name));
-  if (result.display_name) target.append(element("p", result.source_name));
+  if (result.display_name) {
+    target.append(element("p", result.source_name));
+  }
   const video = element("video");
   queueMicrotask(() => ShotPlayer.attach(video, `/api/playlists/${result.id}`));
   video.controls = true;
   video.preload = "metadata";
   const summary = element("p");
-  if (annotation.description) MindexAnalysisText.setText(summary, annotation.description);
-  else
+  if (annotation.description) {
+    MindexAnalysisText.setText(summary, annotation.description);
+  } else {
     MindexI18n.setText(
       summary,
       MindexI18n.msg(
         result.annotation_status === "skipped" ? "ui.search_analysis_skipped" : "ui.fec3adb80692",
       ),
     );
+  }
   target.append(video, element("p", `${clock(result.start)} — ${clock(result.end)}`), summary);
   for (const [title, items] of [
     [MindexI18n.msg("ui.d9d9827827e1"), annotation.actions || []],
@@ -260,16 +288,18 @@ function details(result) {
     [MindexI18n.msg("ui.cf335345e962"), annotation.dialogue_inference || []],
     [MindexI18n.msg("ui.43f1d3835b20"), annotation.uncertainty || []],
   ]) {
-    if (items.length)
+    if (items.length) {
       target.append(MindexAnalysisText.setText(element("p"), items, { label: title }));
+    }
   }
-  if (result.dialogue.length)
+  if (result.dialogue.length) {
     target.append(
       element(
         "pre",
         result.dialogue.map((u) => `${clock(result.start + u.start)} ${u.text}`).join("\n"),
       ),
     );
+  }
   target.append(
     element(
       "p",
@@ -301,10 +331,11 @@ function details(result) {
       );
     }
     for (const evidence of match.evidence || []) {
-      if (evidence.text)
+      if (evidence.text) {
         target.append(
           element("p", `${clock(evidence.start)} — ${clock(evidence.end)}：${evidence.text}`),
         );
+      }
     }
   }
   for (const evidence of bestPersonEvidence(result.person_evidence)) {
@@ -355,7 +386,9 @@ function managementLink(result) {
   const params = new URLSearchParams({ source: result.source_id });
   const shotId =
     result.kind === "shot" ? result.id : result.kind === "moment" ? result.parent_id : null;
-  if (shotId) params.set("segment", shotId);
+  if (shotId) {
+    params.set("segment", shotId);
+  }
   link.href = `/admin?${params}`;
   link.target = "_blank";
   link.rel = "noopener";
@@ -364,12 +397,15 @@ function managementLink(result) {
 function correctionLink(result, evidence = bestPersonEvidence(result.person_evidence)[0]) {
   const link = element("a", MindexI18n.msg("ui.review_appearance_link"));
   const params = new URLSearchParams();
-  if (evidence) params.set("evidence", evidence.id);
-  else {
+  if (evidence) {
+    params.set("evidence", evidence.id);
+  } else {
     params.set("source", result.source_id);
     const shotId =
       result.kind === "shot" ? result.id : result.kind === "moment" ? result.parent_id : null;
-    if (shotId) params.set("shot", shotId);
+    if (shotId) {
+      params.set("shot", shotId);
+    }
   }
   link.href = `/persons?${params}`;
   link.target = "_blank";
@@ -434,9 +470,13 @@ function render(data) {
     const personTags = [];
     for (const e of result.person_evidence || []) {
       const name = `${e.actor_name || MindexI18n.msg("ui.1b37b5539364")}${e.role_name ? " / " + e.role_name : ""}`;
-      if (!personTags.includes(name)) personTags.push(name);
+      if (!personTags.includes(name)) {
+        personTags.push(name);
+      }
     }
-    for (const name of personTags.slice(0, 3)) tags.append(element("span", name, "tag"));
+    for (const name of personTags.slice(0, 3)) {
+      tags.append(element("span", name, "tag"));
+    }
     channels.forEach((channel) =>
       tags.append(element("span", routeNames[channel] || channel, "tag")),
     );
@@ -467,8 +507,8 @@ function render(data) {
         similar.disabled = false;
       }
     };
-    const manage = managementLink(result),
-      people = correctionLink(result);
+    const manage = managementLink(result);
+    const people = correctionLink(result);
     for (const [control, shortKey, fullKey] of [
       [detail, "ui.search_card_details", "ui.faea8c1db9cc"],
       [similar, "ui.search_card_similar", "ui.groups_similar"],
@@ -492,12 +532,16 @@ function render(data) {
       const analysisEvidence =
         evidenceMatch?.channel === "analysis" ||
         ["description", "style"].includes(evidenceMatch?.route);
-      if (!result.display_name && (!evidenceText || analysisEvidence))
+      if (!result.display_name && (!evidenceText || analysisEvidence)) {
         MindexAnalysisText.setText(content, description, { view: Boolean(evidenceText) });
-      else MindexI18n.setText(content, description);
+      } else {
+        MindexI18n.setText(content, description);
+      }
       body.append(content);
     }
-    if (tags.childElementCount) body.append(tags);
+    if (tags.childElementCount) {
+      body.append(tags);
+    }
     body.append(actions);
     card.append(preview, body);
     $("results").append(card);
@@ -505,13 +549,17 @@ function render(data) {
 }
 // Ctrl/⌘ + Enter 视为点击「查找片段」；按钮禁用（检索中）时 click() 不触发提交。
 $("search-form").addEventListener("keydown", (event) => {
-  if (event.key !== "Enter" || !(event.ctrlKey || event.metaKey) || event.isComposing) return;
+  if (event.key !== "Enter" || !(event.ctrlKey || event.metaKey) || event.isComposing) {
+    return;
+  }
   event.preventDefault();
   $("search-button").click();
 });
 $("search-form").onsubmit = async (event) => {
   event.preventDefault();
-  if (busy) return;
+  if (busy) {
+    return;
+  }
   if (!selectedValues("source").length) {
     notice(MindexI18n.msg("ui.search_source_required"), "error");
     return;
@@ -546,7 +594,7 @@ $("search-form").onsubmit = async (event) => {
       limit: Number($("limit").value),
       filters: filters(),
     };
-    if (mode === "text")
+    if (mode === "text") {
       data = await api("/api/search/text", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -560,7 +608,7 @@ $("search-form").onsubmit = async (event) => {
           person_relation: $("person-relation").value,
         }),
       });
-    else {
+    } else {
       const form = new FormData();
       form.append("file", file);
       form.append("granularity", common.granularity);
@@ -570,7 +618,7 @@ $("search-form").onsubmit = async (event) => {
     }
     render(data);
     const personHints = [];
-    if (data.recognized_people?.length)
+    if (data.recognized_people?.length) {
       personHints.push(
         MindexI18n.msg("ui.bf052cc4d77b") +
           data.recognized_people
@@ -581,16 +629,19 @@ $("search-form").onsubmit = async (event) => {
             ? MindexI18n.msg("ui.cbf394311140")
             : MindexI18n.msg("ui.c7218d155fa9")),
       );
-    if (data.referenced_people?.length)
+    }
+    if (data.referenced_people?.length) {
       personHints.push(
         MindexI18n.msg("ui.b607edb41246", {
           p0: [...new Set(data.referenced_people.map((p) => p.name))].join("、"),
         }),
       );
+    }
     MindexI18n.setText($("person-hint"), personHints.join("；"));
     const warnings = (data.warnings || []).map(MindexI18n.system);
-    if (data.person_coverage_missing?.length)
+    if (data.person_coverage_missing?.length) {
       warnings.push(MindexI18n.msg("ui.575976c4be6b", { p0: data.person_coverage_missing.length }));
+    }
     notice(warnings.join("；"), warnings.length ? "info" : "");
   } catch (error) {
     notice(error.message, "error");
@@ -610,28 +661,37 @@ function itemOptions(select) {
 }
 function syncAll(select) {
   const all = allOption(select);
-  if (!all) return;
+  if (!all) {
+    return;
+  }
   const items = itemOptions(select);
   all.selected = items.length > 0 && items.every((o) => o.selected);
   select.dataset.allSelected = all.selected ? "1" : "0";
 }
 function applyAll(select, on) {
-  for (const o of itemOptions(select)) o.selected = on;
+  for (const o of itemOptions(select)) {
+    o.selected = on;
+  }
   syncAll(select);
 }
 // change 时无法区分是点了“全部选择”还是普通项，用上一次的全选状态判断意图。
 function toggleAll(select) {
-  const all = allOption(select),
-    wasAll = select.dataset.allSelected === "1";
-  if (all?.selected && !wasAll) applyAll(select, true);
-  else if (all && !all.selected && wasAll && itemOptions(select).every((o) => o.selected))
+  const all = allOption(select);
+  const wasAll = select.dataset.allSelected === "1";
+  if (all?.selected && !wasAll) {
+    applyAll(select, true);
+  } else if (all && !all.selected && wasAll && itemOptions(select).every((o) => o.selected)) {
     applyAll(select, false);
-  else syncAll(select);
+  } else {
+    syncAll(select);
+  }
 }
 function bindAllToggle(id, after) {
   $(id).addEventListener("change", () => {
     toggleAll($(id));
-    if (after) after();
+    if (after) {
+      after();
+    }
   });
 }
 function selectedValues(id) {
@@ -682,14 +742,18 @@ function searchFilterEntries(id, useRoles = true) {
       (id === "actor-select" || !actors.size || (e.actor_ids || []).some((a) => actors.has(a))) &&
       (id === "role-select" || !roles.size || roles.has(e.id)),
   );
-  if (id === "role-select") return matches;
+  if (id === "role-select") {
+    return matches;
+  }
   if (id === "actor-select") {
     const ids = new Set(matches.flatMap((r) => r.actor_ids || []));
     return registeredPeople.filter(
       (e) => e.kind === "actor" && ((!scoped && !roles.size) || ids.has(e.id)),
     );
   }
-  if (mode !== "text" || (!actors.size && !roles.size)) return availableSources;
+  if (mode !== "text" || (!actors.size && !roles.size)) {
+    return availableSources;
+  }
   const ids = new Set(matches.flatMap((r) => r.work_ids || []));
   return availableSources.filter((s) => ids.has(s.work_id));
 }
@@ -715,19 +779,22 @@ $("filter-reset").onclick = () => {
   for (const [id, value] of Object.entries({
     "person-mode": "auto",
     "person-relation": "all",
-    granularity: "moment",
-    limit: "20",
-    scene: "",
-    emotion: "",
+    "granularity": "moment",
+    "limit": "20",
+    "scene": "",
+    "emotion": "",
     "shot-size": "",
     "min-duration": "",
     "max-duration": "",
-  }))
+  })) {
     $(id).value = value;
+  }
   for (const id of ["actor-select", "role-select", "source"]) {
     applyAll($(id), id === "source");
     const search = $(id).closest(".multi-select").querySelector(".multi-search");
-    if (search) search.value = "";
+    if (search) {
+      search.value = "";
+    }
     $(id).dataset.query = "";
     MindexMultiSearch.refilter($(id));
   }
@@ -763,8 +830,9 @@ async function refresh() {
           : MindexI18n.msg("ui.f8ebfd03d1ee"),
       ),
     );
-    if (data.active_index?.spec.mode === "visual")
+    if (data.active_index?.spec.mode === "visual") {
       target.append(element("div", MindexI18n.msg("ui.53ece886f7d6")));
+    }
     target.append(
       element(
         "div",
@@ -775,16 +843,20 @@ async function refresh() {
           : MindexI18n.msg("ui.5b380045c7b4"),
       ),
     );
-    if (MindexI18n.system(data.model_health.error))
+    if (MindexI18n.system(data.model_health.error)) {
       target.append(element("div", MindexI18n.system(data.model_health.error)));
-    if (data.runs.length)
+    }
+    if (data.runs.length) {
       target.append(
         element(
           "div",
           MindexI18n.msg("ui.7faf1b9a0a32", { p0: data.runs[0].stage, p1: data.runs[0].status }),
         ),
       );
-    if (!data.active_index) notice(MindexI18n.msg("ui.07cd274a859d"), "info");
+    }
+    if (!data.active_index) {
+      notice(MindexI18n.msg("ui.07cd274a859d"), "info");
+    }
   } catch (error) {
     MindexI18n.setText($("library-summary"), MindexI18n.msg("ui.d9f607a20068"));
     notice(error.message, "error");
@@ -793,7 +865,7 @@ async function refresh() {
   }
 }
 $("refresh").onclick = refresh;
-for (const id of ["actor-select", "role-select", "source"])
+for (const id of ["actor-select", "role-select", "source"]) {
   bindAllToggle(id, () => {
     if (id === "source") {
       const ids = selectedValues(id);
@@ -801,6 +873,7 @@ for (const id of ["actor-select", "role-select", "source"])
     }
     fillSearchFilters(id);
   });
+}
 refresh();
 
 $("query").addEventListener("input", () => {
@@ -834,8 +907,12 @@ window.MindexAgentFocus = async (focus, { passive = false } = {}) => {
     mark(document.querySelector(".search-panel") || $("search-form"));
     return true;
   }
-  if (!$("source").options.length || busy) return false; // 素材选项尚未加载或正在检索
-  if (mode !== "text") switchMode("text");
+  if (!$("source").options.length || busy) {
+    return false;
+  } // 素材选项尚未加载或正在检索
+  if (mode !== "text") {
+    switchMode("text");
+  }
   if (focus.query.filters) {
     const values = focus.query.filters;
     searchGroups.setValues(values.source_group_ids || []);
@@ -855,8 +932,9 @@ window.MindexAgentFocus = async (focus, { passive = false } = {}) => {
   if (
     focus.query.granularity &&
     [...$("granularity").options].some((o) => o.value === focus.query.granularity)
-  )
+  ) {
     $("granularity").value = focus.query.granularity;
+  }
   $("search-form").requestSubmit();
   mark(document.querySelector(".results-section"));
   return true;

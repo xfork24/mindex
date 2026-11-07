@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 
 from shared import jsonio
+from shared.db.queue_pg import PgTaskQueue
 from shared.queue_dispatch import QUEUE_KINDS
+from shared.storage import dumps
 
 
 def export_execution(store, target):
@@ -27,7 +29,6 @@ def export_execution(store, target):
 
 
 def restore_execution(store, source, journal):
-    from shared.db.queue_pg import PgTaskQueue
 
     path = source / "execution_manifest.json"
     runtime = json.loads(path.read_text()) if path.is_file() else {"groups": [], "allocations": []}
@@ -97,8 +98,8 @@ def restore_execution(store, source, journal):
                 summary[table] = summary.get(table, 0) + 1
         journal.stage("tasks", "complete", connection=db, details=summary)
         # 在同一事务内登记恢复后预期指纹，不能把恢复任务状态误报为源业务数据漂移。
+        # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
         from maintenance.migration import database_manifest
-        from shared.storage import dumps
 
         restored = database_manifest(store, connection=db)
         db.execute(

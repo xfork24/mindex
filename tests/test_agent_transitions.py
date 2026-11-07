@@ -1,7 +1,6 @@
-(
-    """智能助手 / MCP 的转场入口（spec m3-post-production 需求 3、4、22）：edit_shots """
-    """设置、清除转场，合并与拆分规则。"""
-)
+"""智能助手 / MCP 的转场入口（spec m3-post-production 需求 3、4、22）：edit_shots 设置、清除转场，
+合并与拆分规则。
+"""
 
 from __future__ import annotations
 

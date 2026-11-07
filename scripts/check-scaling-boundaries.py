@@ -35,7 +35,10 @@ def violations(root=ROOT / "backend/src"):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         stores, sqlite, raw_connects = set(), set(), set()
         for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom) and node.module == "mindex.shared.storage":
+            if isinstance(node, ast.ImportFrom) and node.module in {
+                "shared.storage",
+                "mindex.shared.storage",
+            }:
                 stores.update(
                     item.asname or item.name for item in node.names if item.name in {"Store", "PgStore"}
                 )

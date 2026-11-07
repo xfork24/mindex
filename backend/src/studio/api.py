@@ -9,12 +9,16 @@ from __future__ import annotations
 import copy
 import json
 import logging
+import math
 import tempfile
 import threading
 import time
+import wave
+from fractions import Fraction
 from pathlib import Path
 from typing import Annotated, Literal
 from urllib.parse import quote
+from uuid import uuid4
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, Response, UploadFile
 from filelock import FileLock
@@ -30,20 +34,36 @@ from models.adapters import (
     Storyboarder,
     VideoGenerator,
     Writer,
+    make_music_generator,
     make_storyboarder,
 )
+from models.animator import animation_errors
 from settings.runtime_settings import RuntimeConfig
+from shared import files, media
+from shared.background_tasks import public_task
 from shared.config import Config, fingerprint
+from shared.external_calls import resolve
 from shared.images import image_png
+from shared.media_groups import Groups
 from shared.shot_media import ShotMedia
 from shared.storage import Store
 from shared.uploads import save_upload
 from shared.work_budget import copy_file
-from studio import brands, script_templates, studio
+from studio import brands, platforms, render, script_templates, studio
 from studio import steps as studio_steps
+from studio import window as studio_window
 from studio import workspace as workspace
 from studio.artifacts import digest, safe_path
 from studio.brands_api import brand_routes
+from studio.delivery_templates import (
+    DeliveryExport,
+    DeliverySnapshot,
+    apply,
+    copy_cover,
+    default_snapshot,
+    delivery_routes,
+    freeze_config,
+)
 from studio.diagnostics import diagnostics
 from studio.executor import StudioExecutor
 from studio.files import SANDBOX_HEADERS, file_routes
@@ -75,7 +95,9 @@ from studio.models import (
     validate_source_references,
 )
 from studio.music_api import music_routes
-from studio.tasks import publication, submit
+from studio.platforms import for_plan, platform_routes
+from studio.render import extract_ambient, process_shot_audio
+from studio.tasks import publication, retry, submit
 from studio.templates_api import template_routes
 from studio.tools_api import tool_routes
 
@@ -246,6 +268,7 @@ def studio_router(
     def job_detail(job_id: str) -> dict:
         state = studio.load_job(base, job_id)
         if base.storage.backend == "s3":
+            # 延迟导入：当前作用域存在同名赋值，保留局部名称语义。
             from shared import files
 
             for entry in files.entries(store, f"studio/{job_id}/"):
@@ -334,11 +357,10 @@ def studio_router(
 
     @router.post("/jobs/{job_id}/music/lyrics")
     def generate_lyrics(job_id: str, body: LyricsBody):
-        (
-            """背景音乐歌词生成（MiniMax """
-            """lyrics_generation）：只返回结果，不改动分镜；由页面或助手写入提示点后再保存。"""
-        )
-        from models.adapters import make_music_generator
+        """背景音乐歌词生成（MiniMax lyrics_generation）：只返回结果，不改动分镜；
+        由页面或助手写入提示点后再保存。
+        """
+        # 延迟导入：保持工作区阶段处理器的注册顺序。
         from studio.workspace.handlers.music import unavailable
 
         studio.load_job(base, job_id)  # 不存在 → 404
@@ -415,7 +437,6 @@ def studio_router(
             parsed = studio.JobOptions.model_validate(body.model_dump())
             if parsed.source_ids and set(parsed.source_ids) - store.source_ids():
                 raise studio.StudioError("素材不存在，请重新选择")
-            from shared.media_groups import Groups
 
             Groups(store).resolve("source", parsed.source_group_ids)
             state["source_ids"] = sorted(set(parsed.source_ids)) if parsed.source_ids else None
@@ -437,8 +458,6 @@ def studio_router(
 
     @router.post("/jobs/{job_id}/plans", status_code=201)
     def create_plan(job_id: str, body: PlanBody, request: Request):
-        import copy
-        from uuid import uuid4
 
         with mutation_lock():
             w = workspace.load(current(), job_id)
@@ -452,7 +471,6 @@ def studio_router(
                 p.update(id=uuid4().hex[:12], name=body.name, created_at=studio.now())
             else:
                 active = workspace.plan(w, w["active_plan"])
-                from studio.delivery_templates import apply, default_snapshot
 
                 p = workspace.new_plan(
                     body.name,
@@ -498,7 +516,6 @@ def studio_router(
 
     @router.patch("/jobs/{job_id}/plans/{plan_id}")
     def patch_plan(job_id: str, plan_id: str, body: PlanPatchBody):
-        from uuid import uuid4
 
         with mutation_lock():
             # 先校验画面意象长度：超长时整份请求拒绝，不写入任何版本、不 persist。
@@ -519,10 +536,7 @@ def studio_router(
                     if overrides is not None and (clip := getattr(overrides, key)) is not None:
                         brands.require_asset(base, clip.asset)
                 if body.options.delivery:
-                    from studio.delivery_templates import apply, copy_cover
-
                     previous = p["options"].get("delivery")
-                    from studio.delivery_templates import DeliverySnapshot, freeze_config
 
                     hydrated = DeliverySnapshot.model_validate(previous) if previous else None
                     if hydrated:
@@ -533,7 +547,6 @@ def studio_router(
                     )
                     if same_snapshot and body.options.canvas == p["options"].get("canvas", "16:9"):
                         cfg = body.options.delivery.config
-                        from studio.delivery_templates import DeliveryExport
 
                         own = next((x for x in cfg.exports if x.canvas == body.options.canvas), None)
                         cfg.exports = ([own] if own else []) + [
@@ -547,7 +560,6 @@ def studio_router(
                     body.options = type(body.options).model_validate(
                         apply(body.options.model_dump(), body.options.delivery)
                     )
-                from studio import platforms
 
                 if body.options.publish:
                     body.options.publish = type(body.options.publish).model_validate(
@@ -590,7 +602,6 @@ def studio_router(
 
         ``purpose=query``（缺省）的校验与检索页上传一致；``purpose=source`` 用于 clip/image 画面来源，
         视频按 ``studio.max_clip_mb`` / ``studio.max_clip_seconds`` 限制，图片与查询图片相同。"""
-        from shared.media import probe
 
         if kind not in {"image", "video", "audio"}:
             raise HTTPException(422, "查询文件类型只支持 image、video 或 audio")
@@ -632,13 +643,14 @@ def studio_router(
                         elif kind == "audio":
                             # 参考音频：多模态参考生视频（2–15 秒）或翻唱（6 秒–6 分钟），
                             # 具体时长由生成服务校验。
+                            # 延迟导入：保持异常捕获范围，依赖加载失败时仍走原有降级路径。
                             from shared.media import audio_info
 
                             seconds = audio_info(staged)["duration"]
                             if seconds > 360 + 0.05:
                                 raise ValueError("参考音频不能超过 6 分钟")
                         else:
-                            info = probe(staged)
+                            info = media.probe(staged)
                             seconds = info["duration"]
                             maximum = (
                                 config.studio.max_clip_seconds
@@ -662,8 +674,6 @@ def studio_router(
                     if not target.exists() or digest(target) != media_id:
                         copy_file(staged, target)
                     if base.storage.backend == "s3":
-                        from shared import files
-
                         files.publish(store, target)
                     return {
                         "media_id": media_id,
@@ -818,7 +828,6 @@ def studio_router(
         return diagnostics(current(), job_id, w, p, store=store)
 
     def launch_build(job_id, plan_id, *, body=None, node=None, column=None):
-        from uuid import uuid4
 
         with runner.reserve() as file_lock, publication(current(), job_id):
             cfg = current()
@@ -930,7 +939,6 @@ def studio_router(
 
     @router.get("/jobs/{job_id}/tasks/{task_id}")
     def execution_task(job_id: str, task_id: str):
-        from shared.background_tasks import public_task
 
         row = store.one("SELECT * FROM studio_tasks WHERE id=? AND job_id=?", (task_id, job_id))
         if row is None:
@@ -939,7 +947,6 @@ def studio_router(
 
     @router.post("/jobs/{job_id}/tasks/{task_id}/retry", status_code=202)
     def retry_execution(job_id: str, task_id: str):
-        from studio.tasks import retry
 
         return retry(current(), job_id, task_id)
 
@@ -956,7 +963,6 @@ def studio_router(
 
     @router.post("/jobs/{job_id}/external-calls/{call_id}/resolve")
     def resolve_call(job_id: str, call_id: str, body: dict):
-        from shared.external_calls import resolve
 
         if not store.one(
             "SELECT e.id FROM external_calls e JOIN studio_tasks t ON t.id=e.task_id "
@@ -1028,7 +1034,6 @@ def studio_router(
 
     @router.post("/jobs/{job_id}/plans/{plan_id}/anchor")
     def select_anchor(job_id: str, plan_id: str, body: AnchorBody):
-        from studio import window as studio_window
 
         with mutation_lock():
             w = workspace.load(current(), job_id)
@@ -1048,7 +1053,6 @@ def studio_router(
 
     @router.get("/jobs/{job_id}/plans/{plan_id}/shots/{shot_id}/selection-anchor")
     def selection_anchor(job_id: str, plan_id: str, shot_id: str):
-        from studio import window as studio_window
 
         cfg = current()
         w = read_workspace(job_id)
@@ -1065,7 +1069,6 @@ def studio_router(
 
     @router.get("/jobs/{job_id}/plans/{plan_id}/shots/{shot_id}/selection-context")
     def selection_context(job_id: str, plan_id: str, shot_id: str):
-        from studio import window as studio_window
 
         # Serialize ffmpeg resource generation with builds, previews and mutations.
         with mutation_lock():
@@ -1076,13 +1079,10 @@ def studio_router(
         return ctx
 
     def preview_range(job_id, w, p, body):
-        import copy
 
         require_recall_shot(w, p, body.shot_id)
         draft = copy.deepcopy(p)
         if isinstance(body, WindowBody):
-            from studio import window as studio_window
-
             selected_range, ctx = studio_window.selected_range(
                 current(),
                 job_id,
@@ -1151,12 +1151,6 @@ def studio_router(
         return workspace.detail(current(), job_id, w)
 
     def create_event_preview(job_id, data, key, options=None, *, window_range=None, w=None):
-        import math
-        import wave
-        from fractions import Fraction
-
-        from shared.media import atomic_media, probe
-        from studio.render import cut_shot, extract_ambient, process_shot_audio
 
         cfg = current()
         scale = min(1, 640 / cfg.studio.render.width, 360 / cfg.studio.render.height)
@@ -1210,7 +1204,7 @@ def studio_router(
                 audio_config = cfg.studio.audio
                 if options:
                     audio_config = audio_config.model_copy(update={"duck_gain": options["duck_gain"]})
-                    if options["audio_mode"] == "ducking" and probe(source)["audio"]:
+                    if options["audio_mode"] == "ducking" and media.probe(source)["audio"]:
                         ambient = directory / "ambient.wav"
                         raw_ambient = directory / "shot-audio.wav"
                         ShotMedia(store).audio(
@@ -1227,11 +1221,11 @@ def studio_router(
                 frames = math.ceil(Fraction(samples, 48000) * fps)
                 while math.floor(Fraction(frames, 1) / fps * 48000) < samples:
                     frames += 1
-                cut_shot(
+                render.cut_shot(
                     preview_source, preview_event, preview_render, directory / "video.mp4", frames=frames
                 )
                 end_sample = round(Fraction(frames, 1) / fps * 48000)
-                atomic_media(
+                media.atomic_media(
                     [
                         "-i",
                         str(directory / "video.mp4"),
@@ -1257,12 +1251,6 @@ def studio_router(
 
     def file_event_preview(job_id, event, key, preview_render, cfg, options, w):
         """文件区间（上传片段）的带声预览：画面与原声直接取自复验摘要后的片段文件。"""
-        import math
-        import wave
-        from fractions import Fraction
-
-        from shared.media import atomic_media, probe
-        from studio.render import cut_shot, extract_ambient, process_shot_audio
 
         source = workspace.sources.video_file(cfg, job_id, w, event.video)
         directory = safe_path(studio.job_dir(base, job_id), f"previews/quick-v1-{key}")
@@ -1275,7 +1263,7 @@ def studio_router(
                 ambient = None
                 if options:
                     audio_config = audio_config.model_copy(update={"duck_gain": options["duck_gain"]})
-                    if options["audio_mode"] == "ducking" and probe(source)["audio"]:
+                    if options["audio_mode"] == "ducking" and media.probe(source)["audio"]:
                         ambient = directory / "ambient.wav"
                         extract_ambient(source, event, audio_config, ambient)
                 process_shot_audio(voice, ambient, event, audio_config, directory / "audio.wav")
@@ -1285,9 +1273,9 @@ def studio_router(
                 frames = math.ceil(Fraction(samples, 48000) * fps)
                 while math.floor(Fraction(frames, 1) / fps * 48000) < samples:
                     frames += 1
-                cut_shot(source, event, preview_render, directory / "video.mp4", frames=frames)
+                render.cut_shot(source, event, preview_render, directory / "video.mp4", frames=frames)
                 end_sample = round(Fraction(frames, 1) / fps * 48000)
-                atomic_media(
+                media.atomic_media(
                     [
                         "-i",
                         str(directory / "video.mp4"),
@@ -1367,8 +1355,6 @@ def studio_router(
         只有该分镜的渲染与成片随之需要重建；之后的构建保留人工源码，不会按签名重新生成覆盖。
         ``dry_run`` 只做静态校验并返回 ``{valid, errors, bytes, max_kb}``，不加锁、不写版本。"""
         if body.dry_run:
-            from models.animator import animation_errors
-
             cfg = current()
             w = workspace.load(base, job_id)
             p = workspace.plan(w, plan_id)
@@ -1397,7 +1383,6 @@ def studio_router(
         """人工保存 HTML 文字层的叠加层源码（``index`` 为该层在分镜 overlays 中的序号）。
 
         只有该分镜的渲染与成片需要重建；之后的构建保留人工源码。``dry_run`` 只做静态校验。"""
-        from models.animator import animation_errors
 
         if body.dry_run:
             cfg = current()
@@ -1440,11 +1425,9 @@ def studio_router(
     def cover_candidates(
         job_id: str, plan_id: str, platform: str, limit: int = Query(default=6, ge=1, le=20)
     ):
-        (
-            """封面候选帧：在该平台对应成片的每个镜头中点抽帧，按清晰度排序（缓存在任务 previews/ """
-            """下，不改动版本）。"""
-        )
-        from studio.platforms import for_plan
+        """封面候选帧：在该平台对应成片的每个镜头中点抽帧，按清晰度排序（缓存在任务 previews/ 下，
+        不改动版本）。
+        """
 
         w = read_workspace(job_id)
         p = workspace.plan(w, plan_id)
@@ -1655,13 +1638,10 @@ def studio_router(
     file_routes(router, base, store, mutation_lock)
     template_routes(router, base, store, mutation_lock, current=current, writer=writer)
     brand_routes(router, base, store, mutation_lock, current=current)
-    from studio.delivery_templates import delivery_routes
 
     delivery_routes(router, store, mutation_lock, current=current)
     music_routes(router, base, store, mutation_lock, current=current, writer=writer)
     tool_routes(router, base, store, mutation_lock)
-
-    from studio.platforms import platform_routes
 
     platform_routes(router, store, mutation_lock)
 

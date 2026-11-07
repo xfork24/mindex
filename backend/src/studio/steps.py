@@ -9,13 +9,19 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from admin.curation import Library
 from models.adapters import ModelError, MultimodalEmbedder, Speaker, Storyboarder, make_storyboarder
+from search.search import SearchEngine
 from shared.config import Config, fingerprint, portable_parameters
+from shared.db.fencing import current_attempt
 from shared.media import MediaError, audio_info
 from shared.shot_media import ShotMedia
+from shared.storage import Store
 from shared.trace import current
 from shared.types import Filters, ShotDraft, TextSearch
 from shared.work_budget import configured
+from studio import render as studio_render
+from studio import select as studio_select
 from studio import studio
 from studio.artifacts import ArtifactSession, digest, visibility_key
 
@@ -76,8 +82,6 @@ def run_split(config: Config, job_id: str, state: dict, storyboarder: Storyboard
 
 def run_recall(config: Config, job_id: str, state: dict, embedder: MultimodalEmbedder | None) -> dict:
     """逐镜语义召回：固定步骤开始时的活动索引，逐镜检查点，空候选显式标记不判失败。"""
-    from search.search import SearchEngine
-    from shared.storage import Store
 
     storyboard = studio.load_storyboard(config, job_id)
     store = Store.open(config)
@@ -217,8 +221,6 @@ def run_tts(config: Config, job_id: str, state: dict, speaker: Speaker) -> dict:
 def _selection_callbacks(store):
     """选片所需的原片信息回调：相邻 shot 查询与原片时长（segments_timeline 索引）。"""
 
-    from admin.curation import Library
-
     overlays = Library(store).overlays()
 
     def source_duration(source_id: str) -> float | None:
@@ -293,8 +295,6 @@ def load_audio_manifest(config: Config, job_id: str, storyboard) -> dict:
 
 def run_select(config: Config, job_id: str, state: dict) -> dict:
     """在已知音频时长的约束下选片：候选打分 + 同源相邻延长 + atempo 钳制。"""
-    from shared.storage import Store
-    from studio import select as studio_select
 
     storyboard = studio.load_storyboard(config, job_id)
     manifest = load_audio_manifest(config, job_id, storyboard)
@@ -307,7 +307,6 @@ def run_select(config: Config, job_id: str, state: dict) -> dict:
         raise studio.StudioError(f"分镜 {'、'.join(missing_candidates)} 缺少召回候选，请重跑语义召回")
 
     store = Store.open(config)
-    from admin.curation import Library
 
     overlays = Library(store).overlays()
     source_duration, extend_next, extend_prev, covered_shots = _selection_callbacks(store)
@@ -372,8 +371,6 @@ def apply_timeline_patch(
     burn: bool | None = None,
 ) -> studio.Timeline:
     """人工换选/微调：换选限候选池内，显式区间 clamp 后同一公式重算 atempo 与警告。"""
-    from shared.storage import Store
-    from studio import select as studio_select
 
     storyboard = studio.load_storyboard(config, job_id)
     manifest = load_audio_manifest(config, job_id, storyboard)
@@ -466,8 +463,6 @@ def apply_timeline_patch(
 @configured
 def run_render(config: Config, job_id: str, state: dict) -> dict:
     """三轨合成：timeline 是纯函数输入，重渲染不依赖任何模型服务。"""
-    from shared.storage import Store
-    from studio import render as studio_render
 
     timeline = studio.load_timeline(config, job_id)
     store = Store.open(config)
@@ -518,9 +513,9 @@ def run_step(
     shot_ids: list[str] | None = None,
     started: bool = False,
 ) -> dict:
-    from shared.db.fencing import current_attempt
 
     if config.queue.backend == "postgres" and current_attempt() is None:
+        # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
         from studio.tasks import publication, submit, wait
 
         with publication(config, job_id):
@@ -537,6 +532,7 @@ def run_step(
         elif step == "recall":
             result = run_recall(config, job_id, state, embedder)
         elif step == "tts":
+            # 延迟导入：保持异常捕获范围，依赖加载失败时仍走原有降级路径。
             from models.adapters import make_speaker
 
             result = run_tts(config, job_id, state, speaker or make_speaker(config))
@@ -575,7 +571,6 @@ def run_step(
 
 
 def interval_visible(store, source_id, start, end, *, overlays=None):
-    from admin.curation import Library
 
     sources, segments = overlays if overlays is not None else Library(store).overlays()
     if sources.get(source_id, {}).get("hidden"):
@@ -597,7 +592,6 @@ def hidden_intervals(store, source_id, *, overlays=None, rows=None):
     segment 自身或其 parent 被隐藏即整段不可见；parent 可能属于别的源，隐藏状态
     取自全库 curation。预查一次供逐行内存比对，避免每个区间都查一次库。
     """
-    from admin.curation import Library
 
     _, segments = overlays if overlays is not None else Library(store).overlays()
     rows = (

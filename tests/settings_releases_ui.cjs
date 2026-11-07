@@ -53,15 +53,17 @@ class Element {
 }
 const nodes = new Map();
 const get = (id) => {
-  if (!nodes.has(id)) nodes.set(id, new Element());
+  if (!nodes.has(id)) {
+    nodes.set(id, new Element());
+  }
   return nodes.get(id);
 };
 
-const CONTENT = "cfbdd3fcccdae82970f426c7",
-  OLD_CONTENT = "948ffaef006da3df9d827c41";
+const CONTENT = "cfbdd3fcccdae82970f426c7";
+const OLD_CONTENT = "948ffaef006da3df9d827c41";
 const PERSON = "d045d64f39c2f065026a4538";
-const NEW_RELEASE = "e60e29dc0d45a1ce93ed34b7",
-  OLD_RELEASE = "594791409ff1b0fac35c2ff6";
+const NEW_RELEASE = "e60e29dc0d45a1ce93ed34b7";
+const OLD_RELEASE = "594791409ff1b0fac35c2ff6";
 let payload;
 const requests = [];
 let failNext = null;
@@ -82,7 +84,9 @@ const sandbox = {
       failNext = null;
       return { ok: false, json: async () => ({ detail }) };
     }
-    if (url === "/api/persons/releases") return { ok: true, json: async () => payload };
+    if (url === "/api/persons/releases") {
+      return { ok: true, json: async () => payload };
+    }
     return { ok: true, json: async () => ({}) };
   },
 };
@@ -116,10 +120,13 @@ const buttons = (row) => row.children.filter((n) => n.tagName === "button");
 
   // 当前生效行同时显示检索发布版、内容索引与人物快照；悬停显示完整 ID。
   const current = get("release-current");
-  for (const id of ["e60e29dc", "cfbdd3fc", "d045d64f"])
+  for (const id of ["e60e29dc", "cfbdd3fc", "d045d64f"]) {
     assert.ok(current.textContent.includes(id), id);
+  }
   assert.ok(!current.textContent.includes(NEW_RELEASE));
-  for (const id of [NEW_RELEASE, CONTENT, PERSON]) assert.ok(current.title.includes(id), id);
+  for (const id of [NEW_RELEASE, CONTENT, PERSON]) {
+    assert.ok(current.title.includes(id), id);
+  }
   assert.equal(get("releases-summary").textContent, "检索发布版 e60e29dc");
 
   // 列表每行包含三个 ID；生效组合标记且不提供恢复，其他组合可恢复。

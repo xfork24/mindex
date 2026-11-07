@@ -12,10 +12,13 @@ import io
 import json
 import math
 import struct
+import subprocess
 import wave
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
+from PIL import Image
 
 from conftest import FixtureSpeaker
 from models import adapters
@@ -32,7 +35,6 @@ slow = pytest.mark.slow
 
 
 def png_bytes(color=(30, 160, 60)) -> bytes:
-    from PIL import Image
 
     buffer = io.BytesIO()
     Image.new("RGB", (320, 180), color).save(buffer, format="PNG")
@@ -465,7 +467,6 @@ class ToneMusicGenerator(FakeMusicGenerator):
 
 def band_level(path, start, seconds, frequency) -> float:
     """成片某一时间窗内、以 ``frequency`` 为中心的窄带最大音量（dB）。"""
-    import subprocess
 
     log = subprocess.run(
         [
@@ -569,7 +570,6 @@ def test_compose_signature_tracks_mix_version_only_with_music(media, monkeypatch
 
 
 def test_lyrics_endpoint_and_audio_upload(media, tmp_path):
-    from fastapi.testclient import TestClient
 
     from api import create_app
 

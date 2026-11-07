@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import json
+import pkgutil
 
 import pytest
 from fastapi.testclient import TestClient
@@ -59,8 +61,6 @@ def run_tool(app, name, arguments, page=None):
 
 def module_spec_count() -> int:
     """各工具模块 ``specs()`` 的总数（自动发现 mindex.agent.tools 下声明了 specs 的模块）。"""
-    import importlib
-    import pkgutil
 
     from agent import tools as package
 

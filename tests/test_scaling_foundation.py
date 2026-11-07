@@ -7,6 +7,8 @@ import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 
@@ -62,7 +64,6 @@ def test_pool_configuration_is_validated(values):
 
 
 def test_pg_warmup_does_not_load_snapshot_or_people_maps(tmp_path, monkeypatch):
-    from types import SimpleNamespace
 
     from persons.persons import Persons
     from processing import indexing
@@ -90,7 +91,6 @@ def test_pg_warmup_does_not_load_snapshot_or_people_maps(tmp_path, monkeypatch):
 
 @pytest.mark.requires_postgres
 def test_snapshot_cache_isolates_library_identity_at_the_same_node_path(pg):
-    from uuid import uuid4
 
     from shared.storage import Store, dumps
 

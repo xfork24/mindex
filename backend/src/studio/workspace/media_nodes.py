@@ -9,25 +9,27 @@ import math
 import wave
 from fractions import Fraction
 
-from shared.media import atomic_media, probe
+from admin.curation import Library
+from shared.media import MediaError, atomic_media, probe
 from shared.shot_media import ShotMedia
 from shared.storage import Store
 from shared.work_budget import configured
+from studio import animation_capture, studio
+from studio import render as studio_render
 from studio import select as studio_select
 from studio import steps as studio_steps
-from studio import studio
-
-from . import transitions
-from .plans import canvas_render, needs_recall
-from .sources import content_source, plan_source, source_file, video_file
-from .versions import file_info, file_path, version
+from studio import window as studio_window
+from studio.render import apply_edges, extract_ambient, process_shot_audio, still_shot
+from studio.workspace import transitions
+from studio.workspace.plans import canvas_render, needs_recall
+from studio.workspace.sources import content_source, plan_source, source_file, video_file
+from studio.workspace.versions import file_info, file_path, version
 
 log = logging.getLogger(__name__)
 
 
 def source_shots(config, source_id, *, overlays=None, store=None):
     """源内全部镜头及可见性；overlays 可由调用方预先取好，避免逐镜头全表扫描。"""
-    from admin.curation import Library
 
     store = store if store is not None else Store.open(config)
     if overlays is None:
@@ -50,7 +52,6 @@ def source_shots(config, source_id, *, overlays=None, store=None):
 
 
 def validate_range(config, selected_range, *, overlays=None):
-    from admin.curation import Library
 
     source_id = selected_range["source_id"]
     start, end = selected_range["start"], selected_range["end"]
@@ -84,7 +85,6 @@ def validate_range(config, selected_range, *, overlays=None):
 
 
 def alignment(config, job_id, w, p, sid, selected_range=None):
-    from studio import window as studio_window
 
     if error := studio_window.anchor_conflict(w, p, sid):
         raise studio.StudioError(error)
@@ -281,7 +281,6 @@ def tool_alignment(config, job_id, w, p, sid):
 
 def _file_alignment(config, job_id, w, p, sid, path, ref, start, noun, advice):
     """文件区间选片的公共部分：从 ``start`` 起取与配音等长的窗口（start/end 为文件内时间）。"""
-    from shared.media import MediaError
 
     selected = p["shots"][sid]
     speech = version(w, selected.get("tts"))
@@ -350,7 +349,8 @@ def shot_frames(config, processed):
 
 def html_layers(config, job_id, w, p, sid) -> list[dict]:
     """分镜的 HTML 文字层：叠加层源码与相对镜头的起止（None = 从头 / 到尾）；没有时为空。"""
-    from .stages import html_overlays
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+    from studio.workspace.stages import html_overlays
 
     content = version(w, p["shots"][sid]["content"])["data"]
     found = html_overlays(content)
@@ -372,9 +372,9 @@ def html_layers(config, job_id, w, p, sid) -> list[dict]:
 
 def composite_overlays(config, p, layers, source, output, frames, directory, capture=None) -> dict:
     """透明录制每个 HTML 文字层（时长 = 该层时间窗），按起点叠加到分镜画面上；帧数不变。"""
-    from studio import animation_capture
 
-    from .handlers.overlay import layer_window
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+    from studio.workspace.handlers.overlay import layer_window
 
     render, _ = canvas_render(config, p)
     fps = Fraction(str(render.fps))
@@ -456,9 +456,9 @@ def finish_render(
     透明录制后叠加在画面上（先于镜内转场，文字随画面一起淡入淡出）。都没有时产物与旧版完全相同。
     ``handle_seconds`` 为尾部余量（重叠转场与节拍对齐取较大值，见 ``render_handle``）；
     None 时按 ``next`` 时长。"""
-    from studio.render import apply_edges, process_shot_audio
 
-    from .transitions import clamp_edges
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+    from studio.workspace.transitions import clamp_edges
 
     transition = transition or {}
     cfg = config.studio.audio.model_copy(update={"duck_gain": p["options"]["duck_gain"]})
@@ -525,7 +525,8 @@ def finish_render(
 
 def render_handle(w, p, sid) -> float:
     """分镜画面的尾部余量（秒）：重叠转场时长与节拍对齐容差取较大值；都没有时为 0。"""
-    from . import beat_align
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+    from studio.workspace import beat_align
 
     return max(transitions.handle_seconds(w, p, sid), beat_align.handle_seconds(w, p, sid))
 
@@ -561,7 +562,6 @@ def still_event(config, w, p, sid, ref):
 
 
 def image_render(config, job_id, w, p, sid, directory, source, capture=None):
-    from studio.render import still_shot
 
     speech = version(w, p["shots"][sid]["tts"])
     if speech["status"] != "complete":
@@ -617,8 +617,6 @@ def animation_render(config, job_id, w, p, sid, directory, capture=None):
     """AI 动画：在沙箱里按渲染帧数逐帧录制动画源码（animation.mp4），再按画幅规范化为 video.mp4。
 
     ``capture`` 缺省为 ``studio.animation_capture.capture``（测试可注入确定性替身）；动画没有原声。"""
-    from studio import animation_capture
-    from studio.render import cut_shot
 
     selected = p["shots"][sid]
     speech = version(w, selected.get("tts"))
@@ -651,7 +649,7 @@ def animation_render(config, job_id, w, p, sid, directory, capture=None):
         )
         window = event.model_copy(deep=True)
         window.video.start, window.video.end = 0.0, float(frames / fps)
-        cut_shot(raw, window, render, output, frames=frames, fit=fit)
+        studio_render.cut_shot(raw, window, render, output, frames=frames, fit=fit)
 
     data, files = finish_render(
         config,
@@ -678,7 +676,6 @@ def animation_render(config, job_id, w, p, sid, directory, capture=None):
 
 @configured
 def render_node(config, job_id, w, p, sid, directory, *, capture=None):
-    from studio.render import cut_shot, extract_ambient
 
     source = plan_source(w, p, sid)
     if source and (
@@ -742,7 +739,7 @@ def render_node(config, job_id, w, p, sid, directory, *, capture=None):
     render, fit = canvas_render(config, p)
 
     def picture(frames, output):
-        cut_shot(picture_media, window, render, output, frames=frames, fit=fit)
+        studio_render.cut_shot(picture_media, window, render, output, frames=frames, fit=fit)
 
     return finish_render(
         config,

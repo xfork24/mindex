@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import shutil
 
 from agent.runtime import AgentRuntime
 
@@ -37,7 +38,6 @@ class RuntimeManager:
         return self.store.create(title, runtime=self.settings().runtime)
 
     async def forget(self, sid):
-        import shutil
 
         for runtime in self.runtimes.values():
             runtime._sessions.pop(sid, None)

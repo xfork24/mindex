@@ -9,6 +9,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import yaml
 from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
@@ -639,7 +640,6 @@ def test_pinned_analyzer_validates_fields_with_configured_retries(native, monkey
 def test_pin_cli_local_remote_and_mutual_exclusion(native, tmp_path):
     config = native["config"]
     yaml_path = tmp_path / "fixed.yaml"
-    import yaml
 
     yaml_path.write_text(yaml.safe_dump(config.model_dump(mode="json")))
     runner = CliRunner()
@@ -680,7 +680,6 @@ def test_pin_cli_local_remote_and_mutual_exclusion(native, tmp_path):
 
 
 def test_fixed_yaml_persists_through_cli_and_runtime_web(config, tmp_path, monkeypatch):
-    import yaml
 
     store = Store(config.data_dir)
     profile = save_profile(
@@ -844,7 +843,6 @@ def test_smoke_routes_future_adapter_version_through_v2(native, tmp_path, monkey
 
 
 def test_cli_probe_uses_fixed_yaml_with_active_override(native, tmp_path):
-    import yaml
 
     config = native["config"]
     store = Store(config.data_dir)

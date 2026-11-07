@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 import os
 import re
@@ -15,6 +16,7 @@ from fractions import Fraction
 from pathlib import Path
 
 from shared.config import Config, SubtitleConfig, fingerprint, portable_parameters
+from shared.images import image_png
 from shared.media import MediaError, atomic_media, command, probe
 from shared.trace import current
 from studio.artifacts import digest
@@ -231,7 +233,6 @@ def still_shot(
 
     图片先经 ``shared/images.image_png`` 归一化（EXIF 方向、透明铺白、像素上限），再按 pad/crop 适配到
     超采样画布，由 zoompan 逐帧取景后缩放到 ``render.width × render.height``；同一输入输出确定。"""
-    from shared.images import image_png
 
     fps = Fraction(str(render.fps))
     width, height = render.width, render.height
@@ -241,7 +242,24 @@ def still_shot(
     filters = [
         *fit_filters(width * STILL_SUPERSAMPLE, height * STILL_SUPERSAMPLE, fit),
         "setsar=1",
-        f"zoompan=z='{zoom}':x='{x}':y='{y}':d={frames}:s={width}x{height}:fps={fps.numerator}/{fps.denominator}",
+        (
+            "zoompan=z='"
+            f"{zoom}"
+            "':x='"
+            f"{x}"
+            "':y='"
+            f"{y}"
+            "':d="
+            f"{frames}"
+            ":s="
+            f"{width}"
+            "x"
+            f"{height}"
+            ":fps="
+            f"{fps.numerator}"
+            "/"
+            f"{fps.denominator}"
+        ),
         "setsar=1",
     ]
     duration = float(frames / fps)
@@ -724,7 +742,6 @@ def render_timeline(
 def validate_final(
     path: Path, duration: float, burn: bool, fps: float, *, size: tuple[int, int] | None = None
 ):
-    import json
 
     raw = json.loads(command(["ffprobe", "-v", "error", "-show_streams", "-of", "json", str(path)]))
     streams = raw.get("streams", [])

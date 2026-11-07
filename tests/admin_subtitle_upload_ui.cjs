@@ -7,16 +7,17 @@ const video =
   process.env.MINDEX_SUBTITLE_TEST_VIDEO || "/tmp/mindex-subtitle-upload-20261018/工程样本.mp4";
 (async () => {
   const browser = await chromium.launch({ headless: true });
-  const errors = [],
-    requests = [];
+  const errors = [];
+  const requests = [];
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
     // 四路并行回归时页面与模型服务争用 CPU：默认等待按满载情况设置，显式 timeout 的断言不受影响。
     page.setDefaultTimeout(45000);
     page.on("pageerror", (error) => errors.push(error.message));
     page.on("request", (request) => {
-      if (request.method() === "POST" && request.url().endsWith("/dialogue"))
+      if (request.method() === "POST" && request.url().endsWith("/dialogue")) {
         requests.push(request.postDataJSON());
+      }
     });
     const uploaded = await page.request.post(base + "/api/admin/sources/upload", {
       multipart: {

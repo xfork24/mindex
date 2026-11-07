@@ -112,6 +112,7 @@ class PlanView:
     def revision(self) -> str:
         if self.active and self.w.get("revision"):
             return self.w["revision"]
+        # 延迟导入：保持工作区阶段处理器的注册顺序。
         from studio.workspace import revision
 
         return revision(self.plan)
@@ -224,12 +225,14 @@ def board_text(view: PlanView, rows: list[dict] | None = None, limit: int = 60) 
                 text += f"（{stage_mark(row['stages']['music'])}）"
             lines.append(text + "；之后的分镜顺延")
         if row.get("transition"):
+            # 延迟导入：保持工作区阶段处理器的注册顺序。
             from studio import workspace as ws
 
             lines.append(f"  转场：{ws.transitions.describe(row['transition'])}")
         if row.get("highlights"):
             lines.append(f"  字幕高亮词：{'、'.join(row['highlights'])}")
         if row.get("overlays"):
+            # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
             from agent.tools.studio_write import overlays_text
 
             lines.append(f"  文字层：{overlays_text(row['overlays'])}")

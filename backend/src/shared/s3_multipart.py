@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import mimetypes
+from urllib.parse import urlsplit
+from uuid import uuid4
+
+import httpx
 
 from shared.upload_sessions import UploadError
 
@@ -113,10 +117,6 @@ class S3Multipart:
 
 def probe_browser(media, origins):
     """核验实际 browser endpoint 的签名与 CORS，不覆盖 bucket CORS 配置。"""
-    from urllib.parse import urlsplit
-    from uuid import uuid4
-
-    import httpx
 
     key = media._object_key("pending/capability-probe/browser-" + uuid4().hex, None)
     args = {"Bucket": media.bucket, "Key": key}

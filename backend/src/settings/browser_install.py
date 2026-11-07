@@ -42,6 +42,7 @@ def browsers_path() -> Path:
 def expected_revision() -> str | None:
     """当前 playwright 包要求的 headless shell 版本号；未安装 playwright 时返回 None。"""
     try:
+        # 延迟导入：保留可选依赖探测或异常捕获时的降级行为。
         import playwright
     except ImportError:
         return None

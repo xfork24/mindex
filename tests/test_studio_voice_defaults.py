@@ -1,3 +1,5 @@
+"""创作默认音色与方案音色覆盖回归。"""
+
 from __future__ import annotations
 
 import copy

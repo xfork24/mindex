@@ -23,7 +23,9 @@ async function createProfile(page, { name, domain, taboos = [] }) {
   );
   await page.fill("#pf-name", name);
   await page.fill("#pf-domain", domain);
-  if (taboos.length) await page.fill("#pf-taboos", taboos.join("\n"));
+  if (taboos.length) {
+    await page.fill("#pf-taboos", taboos.join("\n"));
+  }
   await page.click("#pf-save");
   await page.waitForFunction(
     (n) =>
@@ -471,7 +473,9 @@ scenario("job", async (page) => {
   const browser = await chromium.launch({ headless: true });
   try {
     for (const item of scenarios) {
-      if (wanted.size && !wanted.has(item.name)) continue;
+      if (wanted.size && !wanted.has(item.name)) {
+        continue;
+      }
       const context = await browser.newContext({ viewport: { width: 1360, height: 1000 } });
       const page = await context.newPage();
       const errors = [];

@@ -7,7 +7,9 @@ from contextvars import ContextVar
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from shared.db.fencing import current_attempt
 from shared.i18n import add_message_metadata, message_metadata
+from shared.storage import Store, dumps
 from studio import studio
 from studio.artifacts import safe_path
 
@@ -20,8 +22,6 @@ def log_path(config, job_id, build_id):
 
 def read_events(config, job_id, build_id, after=0, limit=500):
     if config.queue.backend == "postgres":
-        from shared.storage import Store
-
         rows = Store.open(config).rows(
             "SELECT id,data FROM studio_events WHERE job_id=? AND build_id=? AND id>? ORDER BY id LIMIT ?",
             (job_id, build_id, after, limit + 1),
@@ -83,9 +83,6 @@ class ExecutionLog:
             **message_metadata(str(message)[:2000]),
         }
         if self.config.queue.backend == "postgres":
-            from shared.db.fencing import current_attempt
-            from shared.storage import Store, dumps
-
             store = Store.open(self.config)
             attempt = current_attempt()
             with store.connect() as db:

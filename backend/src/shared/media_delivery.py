@@ -21,6 +21,10 @@ from typing import TYPE_CHECKING
 
 from fastapi import HTTPException
 from fastapi.responses import FileResponse, RedirectResponse
+from starlette.responses import Response
+
+from shared import files
+from shared.object_coordination import ObjectCoordinator
 
 if TYPE_CHECKING:
     from shared.config import Config
@@ -42,7 +46,6 @@ class DownloadPins:
         self._memory: dict[str, float] = {}
 
     def pin(self, key: str, expires: float) -> None:
-        from shared.object_coordination import ObjectCoordinator
 
         ObjectCoordinator(self.store).download(key, ttl=expires + _PIN_GRACE_SECONDS)
         deadline = time.time() + expires + _PIN_GRACE_SECONDS
@@ -68,7 +71,6 @@ class DownloadPins:
         return self._memory.get(key, 0) > time.time()
 
     def prune(self) -> int:
-        from shared.object_coordination import ObjectCoordinator
 
         ObjectCoordinator(self.store).prune()
         if self.store.pg:
@@ -89,7 +91,6 @@ def deliver_media(media, key: str, media_type: str, request, *, config: Config, 
     if getattr(media, "backend", "local") != "s3":
         raise HTTPException(500, "deliver_media 只用于对象存储后端；本地形态走 FileResponse")
     expires = config.storage.s3.presign_expire_seconds
-    from shared import files
 
     entry = files.pointer(pins.store, key)
     if entry is not None:
@@ -138,7 +139,6 @@ def materialized_response(context, **kwargs):
 
 def conditional_response(request, etag, *, headers=None):
     """GET/HEAD 实体条件；Range/If-Range 继续交给 FileResponse。"""
-    from starlette.responses import Response
 
     if request is None:
         return None

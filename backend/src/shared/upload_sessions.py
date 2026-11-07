@@ -12,6 +12,7 @@ from pathlib import PurePosixPath
 from uuid import uuid4
 
 from shared import lock_backend
+from shared.object_coordination import ObjectCoordinator
 from shared.storage import dumps
 
 
@@ -88,6 +89,7 @@ class UploadSessions:
             with self.store.connect() as db:
                 row = self._row(db, task_id, token)
             if row["transport"] == "s3" and row["state"] == "pending" and row["expires_at"] > time.time():
+                # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
                 from shared.s3_multipart import S3Multipart
 
                 S3Multipart(self.store).parts(row)
@@ -116,6 +118,7 @@ class UploadSessions:
         }
 
     def sign_part(self, task_id, token, number):
+        # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
         from shared.s3_multipart import S3Multipart
 
         with lock_backend.resource(self.store, "upload:" + task_id, timeout=None):
@@ -129,6 +132,7 @@ class UploadSessions:
             return S3Multipart(self.store).sign(row, number, expires)
 
     def register_part(self, task_id, token, number, etag):
+        # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
         from shared.s3_multipart import S3Multipart
 
         with lock_backend.resource(self.store, "upload:" + task_id, timeout=None):
@@ -177,6 +181,7 @@ class UploadSessions:
             if row["state"] not in {"pending", "completing"} or row["expires_at"] <= time.time():
                 raise UploadError("上传会话已结束或过期", 410)
             if row["transport"] == "s3" and row["state"] == "pending":
+                # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
                 from shared.s3_multipart import S3Multipart
 
                 S3Multipart(self.store).parts(row)
@@ -195,6 +200,7 @@ class UploadSessions:
             try:
                 with ExitStack() as stack:
                     if row["transport"] == "s3":
+                        # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
                         from shared.s3_multipart import S3Multipart
 
                         pending = S3Multipart(self.store).complete(row, parts)
@@ -249,6 +255,7 @@ class UploadSessions:
     def _clean_parts(self, task_id):
         row = self.store.one("SELECT * FROM upload_sessions WHERE id=?", (task_id,))
         if row and row["transport"] == "s3" and getattr(self.store.media, "backend", "local") == "s3":
+            # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
             from shared.s3_multipart import S3Multipart
 
             S3Multipart(self.store).abort(row)
@@ -261,7 +268,6 @@ class UploadSessions:
         self.store.execute("DELETE FROM upload_parts WHERE session_id=?", (task_id,))
 
     def reap(self):
-        from shared.object_coordination import ObjectCoordinator
 
         ObjectCoordinator(self.store).prune()
         ids = self.store.rows(

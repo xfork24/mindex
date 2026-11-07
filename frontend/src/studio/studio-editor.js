@@ -74,17 +74,21 @@ const MOTION_LABEL = Object.fromEntries(MOTIONS);
 // 键序与 ClipSource/ImageSource 的字段一致，保证与已存 content 的 dirty 判定稳定。
 function sourceEditable(kind, previous) {
   const same = previous?.kind === kind ? previous : null;
-  if (kind === "clip")
+  if (kind === "clip") {
     return { kind, media_id: same?.media_id ?? null, start: same?.start ?? null };
-  if (kind === "image")
+  }
+  if (kind === "image") {
     return {
       kind,
       media_id: same?.media_id ?? null,
       motion: same?.motion || "zoom-in",
       strength: same?.strength ?? 0.3,
     };
-  if (kind === "aigc") return aigcCanonical({ ...(same || {}), kind });
-  if (kind === "aigc_image")
+  }
+  if (kind === "aigc") {
+    return aigcCanonical({ ...(same || {}), kind });
+  }
+  if (kind === "aigc_image") {
     return {
       kind,
       prompt: same?.prompt ?? null,
@@ -94,8 +98,13 @@ function sourceEditable(kind, previous) {
       motion: same?.motion || "zoom-in",
       strength: same?.strength ?? 0.3,
     };
-  if (kind === "animation") return { kind, brief: same?.brief ?? null };
-  if (kind === "tool") return toolCanonical({ ...(same || {}), kind });
+  }
+  if (kind === "animation") {
+    return { kind, brief: same?.brief ?? null };
+  }
+  if (kind === "tool") {
+    return toolCanonical({ ...(same || {}), kind });
+  }
   return null;
 }
 // ToolShotSource 的键序（与服务端 dump 一致）：uploads 只在非空时出现，运动参数只对图片产物出现。
@@ -106,10 +115,13 @@ function toolCanonical(value) {
     tool: value.tool ?? "",
     arguments: value.arguments || {},
   };
-  if (value.uploads?.length) result.uploads = value.uploads;
+  if (value.uploads?.length) {
+    result.uploads = value.uploads;
+  }
   result.output = value.output || "video";
-  if (result.output === "image")
+  if (result.output === "image") {
     Object.assign(result, { motion: value.motion || "zoom-in", strength: value.strength ?? 0.3 });
+  }
   return result;
 }
 // AigcSource 的键序：前五个总在；MiniMax H3 的逐镜选项只在设置时出现（与服务端 dump 省略 None 一致）。
@@ -132,8 +144,9 @@ function aigcCanonical(value) {
   };
   for (const key of AIGC_OPTIONAL) {
     const v = value[key];
-    if (v !== null && v !== undefined && v !== "" && !(Array.isArray(v) && !v.length))
+    if (v !== null && v !== undefined && v !== "" && !(Array.isArray(v) && !v.length)) {
       result[key] = v;
+    }
   }
   return result;
 }
@@ -147,25 +160,29 @@ const VIDEO_MODES = [
 ];
 const VIDEO_MODE_LABEL = Object.fromEntries(VIDEO_MODES);
 function sourceSummary(source) {
-  if (source?.kind === "aigc_image")
+  if (source?.kind === "aigc_image") {
     return MindexI18n.msg("ui.source_summary_aigc_image", {
       p0: source.prompt || MindexI18n.msg("ui.source_aigc_default_prompt"),
       p1: MOTION_LABEL[source.motion] || source.motion,
     });
-  if (source?.kind === "clip")
+  }
+  if (source?.kind === "clip") {
     return MindexI18n.msg("ui.source_summary_clip", { p0: secs(source.start || 0) });
-  if (source?.kind === "image")
+  }
+  if (source?.kind === "image") {
     return MindexI18n.msg("ui.source_summary_image", {
       p0: MOTION_LABEL[source.motion] || source.motion,
       p1: source.strength,
     });
-  if (source?.kind === "aigc")
+  }
+  if (source?.kind === "aigc") {
     return (
       MindexI18n.msg("ui.source_summary_aigc", {
         p0: source.prompt || MindexI18n.msg("ui.source_aigc_default_prompt"),
       }) + (source.mode ? ` · ${VIDEO_MODE_LABEL[source.mode]}` : "")
     );
-  if (source?.kind === "tool")
+  }
+  if (source?.kind === "tool") {
     return MindexI18n.msg("ui.source_summary_tool", {
       p0: source.tool_id || "?",
       p1: source.tool || "?",
@@ -173,10 +190,12 @@ function sourceSummary(source) {
         source.output === "image" ? "ui.invoke_output_image" : "ui.invoke_output_video",
       ),
     });
-  if (source?.kind === "animation")
+  }
+  if (source?.kind === "animation") {
     return MindexI18n.msg("ui.source_summary_animation", {
       p0: source.brief || MindexI18n.msg("ui.source_animation_default_brief"),
     });
+  }
   return "";
 }
 // AI 动画来源：画面说明（缺省用画面意象，再缺省用旁白）；源码在“生成动画”阶段详情里查看与编辑。
@@ -261,7 +280,9 @@ function renderToolEditor(section, sid, draft, markDirty, redraw) {
     : api("/api/studio/tool-sources").then((data) => (state.toolSources = data.items));
   load
     .then((items) => {
-      if (!sourceField.input.isConnected) return;
+      if (!sourceField.input.isConnected) {
+        return;
+      }
       sourceField.input.replaceChildren();
       for (const [v, text] of [
         [
@@ -303,7 +324,9 @@ function renderToolEditor(section, sid, draft, markDirty, redraw) {
   args.input.addEventListener("input", () => {
     try {
       const parsed = JSON.parse(args.input.value || "{}");
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("object");
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error("object");
+      }
       MindexI18n.setText(argsError, "");
       setSource({ arguments: parsed });
     } catch {
@@ -331,7 +354,7 @@ function renderToolEditor(section, sid, draft, markDirty, redraw) {
   section.append(el("h4", MindexI18n.msg("ui.tool_uploads", { p0: uploads.length })), list);
   if (uploads.length < 4) {
     const uploadRow = el("div", "", "tool-upload-options editor-stretch-row");
-    for (const kind of ["image", "video"])
+    for (const kind of ["image", "video"]) {
       uploadRow.append(
         mediaSlot(
           sid,
@@ -345,9 +368,12 @@ function renderToolEditor(section, sid, draft, markDirty, redraw) {
           redraw,
         ),
       );
+    }
     section.append(uploadRow);
   }
-  if (value.output === "image") section.append(motionOptions(draft, markDirty));
+  if (value.output === "image") {
+    section.append(motionOptions(draft, markDirty));
+  }
 }
 // AIGC 来源：提示词（缺省用画面意象，再缺省用召回查询）、反向提示词、种子与可选的首帧参考图。
 function renderAigcEditor(section, sid, draft, markDirty, redraw) {
@@ -388,8 +414,8 @@ function renderAigcEditor(section, sid, draft, markDirty, redraw) {
   seed.input.dataset.shotInput = "true";
   seed.input.dataset.shotSource = "seed";
   seed.input.addEventListener("input", () => {
-    const raw = seed.input.value.trim(),
-      number = Number(raw);
+    const raw = seed.input.value.trim();
+    const number = Number(raw);
     draft.data.source.seed = raw === "" || !Number.isInteger(number) || number < 0 ? null : number;
     markDirty();
   });
@@ -472,7 +498,7 @@ function renderAigcEditor(section, sid, draft, markDirty, redraw) {
     line.append(slot);
     return line;
   };
-  if (["first_frame", "first_last"].includes(effective) || !value.mode)
+  if (["first_frame", "first_last"].includes(effective) || !value.mode) {
     section.append(
       slotLine(
         mediaSlot(
@@ -487,7 +513,8 @@ function renderAigcEditor(section, sid, draft, markDirty, redraw) {
         ),
       ),
     );
-  if (["last_frame", "first_last"].includes(effective))
+  }
+  if (["last_frame", "first_last"].includes(effective)) {
     section.append(
       slotLine(
         mediaSlot(
@@ -502,6 +529,7 @@ function renderAigcEditor(section, sid, draft, markDirty, redraw) {
         ),
       ),
     );
+  }
   if (effective === "reference") {
     const refs = value.references || [];
     const list = el("div", "", "reference-media-list");
@@ -521,7 +549,7 @@ function renderAigcEditor(section, sid, draft, markDirty, redraw) {
       list.append(row);
     });
     section.append(el("h4", MindexI18n.msg("ui.video_references", { p0: refs.length })), list);
-    for (const kind of ["image", "video", "audio"])
+    for (const kind of ["image", "video", "audio"]) {
       section.append(
         mediaSlot(
           sid,
@@ -537,9 +565,11 @@ function renderAigcEditor(section, sid, draft, markDirty, redraw) {
           redraw,
         ),
       );
+    }
   }
-  if (state.data.generators?.video?.backend !== "minimax_h3")
+  if (state.data.generators?.video?.backend !== "minimax_h3") {
     section.append(el("p", MindexI18n.msg("ui.video_h3_only_hint"), "muted"));
+  }
 }
 // 参考素材上传位：上传到 inputs/（purpose=source），成功后经 onUploaded 写入草稿；有值时显示预览与移除按钮。
 const MEDIA_ACCEPT = {
@@ -557,19 +587,24 @@ function mediaSlot(sid, draft, sourceKind, kind, label, currentId, onUploaded, r
   const uploadButton = button(MindexI18n.msg("ui.source_upload"), async () => {
     const scope = scopeKey();
     const file = fileInput.files[0];
-    if (!file) throw new Error(MindexI18n.msg("ui.7bcc55e19443"));
+    if (!file) {
+      throw new Error(MindexI18n.msg("ui.7bcc55e19443"));
+    }
     const form = new FormData();
     form.append("file", file);
     form.append("kind", kind);
     form.append("purpose", "source");
     const data = await api(`${planBase()}/query-media`, "POST", form);
-    if (scope !== scopeKey()) return;
+    if (scope !== scopeKey()) {
+      return;
+    }
     if (
       guard
         ? !guard()
         : state.drafts.get(draftKey(sid)) !== draft || draft.data.source?.kind !== sourceKind
-    )
+    ) {
       return;
+    }
     state.inputs = null;
     (state.previews = state.previews || new Map()).set(data.media_id, data.preview_url);
     onUploaded(data.media_id);
@@ -579,24 +614,29 @@ function mediaSlot(sid, draft, sourceKind, kind, label, currentId, onUploaded, r
   uploadButton.classList.add("recall-upload-button");
   const row = el("div", "", "recall-upload-row");
   row.append(uploadWrap, uploadButton);
-  if (currentId)
+  if (currentId) {
     row.append(
       button(MindexI18n.msg("ui.source_aigc_clear_image"), () => {
         onUploaded(null);
         redraw();
       }),
     );
+  }
   box.append(row);
   if (currentId) {
     const host = el("div", "", "query-preview-host");
     box.append(host);
     const show = (url) =>
       host.replaceChildren(kind === "audio" ? media("audio", url) : queryPreviewNode(url, kind));
-    if (state.previews?.has(currentId)) show(state.previews.get(currentId));
-    else
+    if (state.previews?.has(currentId)) {
+      show(state.previews.get(currentId));
+    } else {
       inputUrl(currentId).then((url) => {
-        if (url && host.isConnected) show(url);
+        if (url && host.isConnected) {
+          show(url);
+        }
       });
+    }
   }
   return box;
 }
@@ -625,8 +665,8 @@ function renderAiImageEditor(section, sid, draft, markDirty, redraw) {
   seed.input.step = "1";
   seed.input.dataset.shotInput = "true";
   seed.input.addEventListener("input", () => {
-    const raw = seed.input.value.trim(),
-      number = Number(raw);
+    const raw = seed.input.value.trim();
+    const number = Number(raw);
     draft.data.source.seed = raw === "" || !Number.isInteger(number) || number < 0 ? null : number;
     markDirty();
   });
@@ -706,10 +746,12 @@ function motionOptions(draft, markDirty, inline = false) {
   return options;
 }
 function sourcePreviewNode(url, kind, start) {
-  if (kind === "image") return queryPreviewNode(url, "image");
+  if (kind === "image") {
+    return queryPreviewNode(url, "image");
+  }
   const n = media("video", url);
   // 预览从片段起点开始播放，对应选片窗口的开头。
-  if (start)
+  if (start) {
     n.addEventListener(
       "loadedmetadata",
       () => {
@@ -717,6 +759,7 @@ function sourcePreviewNode(url, kind, start) {
       },
       { once: true },
     );
+  }
   return n;
 }
 function renderSourceEditor(body, sid, draft) {
@@ -738,8 +781,11 @@ function renderSourceEditor(body, sid, draft) {
   kindField.input.addEventListener("change", () => {
     const next = sourceEditable(kindField.input.value, draft.data.source);
     // 素材召回不落键：与未设置来源的旧 content 完全一致。
-    if (next) draft.data.source = next;
-    else delete draft.data.source;
+    if (next) {
+      draft.data.source = next;
+    } else {
+      delete draft.data.source;
+    }
     markDirty();
     redraw();
   });
@@ -784,7 +830,9 @@ function renderSourceEditor(body, sid, draft) {
   const uploadButton = button(MindexI18n.msg("ui.source_upload"), async () => {
     const scope = scopeKey();
     const file = fileInput.files[0];
-    if (!file) throw new Error(MindexI18n.msg("ui.7bcc55e19443"));
+    if (!file) {
+      throw new Error(MindexI18n.msg("ui.7bcc55e19443"));
+    }
     const form = new FormData();
     form.append("file", file);
     form.append("kind", kind === "clip" ? "video" : "image");
@@ -794,8 +842,9 @@ function renderSourceEditor(body, sid, draft) {
       scope !== scopeKey() ||
       state.drafts.get(draftKey(sid)) !== draft ||
       draft.data.source?.kind !== kind
-    )
+    ) {
       return;
+    }
     draft.data.source = { ...draft.data.source, media_id: data.media_id };
     state.inputs = null; // 新文件入列，待重取索引
     draft.sourcePreview = { media_id: data.media_id, url: data.preview_url };
@@ -833,7 +882,9 @@ function renderSourceEditor(body, sid, draft) {
   } else {
     host.append(el("p", MindexI18n.msg("ui.e454bbfe7b70"), "muted"));
     inputUrl(value.media_id).then((url) => {
-      if (!url || !host.isConnected) return;
+      if (!url || !host.isConnected) {
+        return;
+      }
       host.replaceChildren(sourcePreviewNode(url, kind, value.start));
     });
   }
@@ -1000,7 +1051,9 @@ function renderRecallEditor(body, sid, draft, overrides) {
       const uploadButton = button(MindexI18n.msg("ui.6c130ff2346d"), async () => {
         const scope = scopeKey();
         const file = fileInput.files[0];
-        if (!file) throw new Error(MindexI18n.msg("ui.7bcc55e19443"));
+        if (!file) {
+          throw new Error(MindexI18n.msg("ui.7bcc55e19443"));
+        }
         const form = new FormData();
         form.append("file", file);
         form.append("kind", mode);
@@ -1009,8 +1062,9 @@ function renderRecallEditor(body, sid, draft, overrides) {
           scope !== scopeKey() ||
           state.drafts.get(draftKey(sid)) !== draft ||
           draft.data.recall?.mode !== mode
-        )
+        ) {
           return;
+        }
         const next = recallEditable(draft.data.recall);
         next.media_id = data.media_id;
         next.media_kind = data.kind;
@@ -1032,7 +1086,9 @@ function renderRecallEditor(body, sid, draft, overrides) {
         } else {
           host.append(el("p", MindexI18n.msg("ui.e454bbfe7b70"), "muted"));
           inputUrl(value.media_id).then((url) => {
-            if (!url || !host.isConnected) return;
+            if (!url || !host.isConnected) {
+              return;
+            }
             host.replaceChildren(queryPreviewNode(url, value.media_kind || mode));
           });
         }
@@ -1067,7 +1123,9 @@ function renderRecallEditor(body, sid, draft, overrides) {
       next.person_ids = next.person_ids.filter((id) => allowed.has(id));
       // Keep the active material control (focus, search, scroll and resized height) intact.
       // No selection means the full task scope, matching the saved default semantics.
-      if (!picked.length) applyAllOf(sourceField.select, true);
+      if (!picked.length) {
+        applyAllOf(sourceField.select, true);
+      }
       refreshPersons(next);
       commit(next);
     });
@@ -1095,7 +1153,9 @@ function renderRecallEditor(body, sid, draft, overrides) {
       },
     );
     queueMicrotask(() => {
-      if (scopeOptions.isConnected) void sourceLink.refresh();
+      if (scopeOptions.isConnected) {
+        void sourceLink.refresh();
+      }
     });
     section.append(scopeOptions);
     const filters = el("div", "", "recall-filters editor-stretch-row");
@@ -1108,7 +1168,9 @@ function renderRecallEditor(body, sid, draft, overrides) {
     ]) {
       const f = field(MindexI18n.msg(label), value?.filters?.[key] ?? "", type);
       f.input.dataset.recallFilter = key;
-      if (placeholder) MindexI18n.setAttr(f.input, "placeholder", MindexI18n.msg(placeholder));
+      if (placeholder) {
+        MindexI18n.setAttr(f.input, "placeholder", MindexI18n.msg(placeholder));
+      }
       if (type === "number") {
         f.input.min = key === "min_duration" ? "0" : "0.1";
         f.input.step = "0.1";
@@ -1129,7 +1191,9 @@ function renderRecallEditor(body, sid, draft, overrides) {
       filters.append(f.wrap);
     }
     section.append(filters);
-    if (mode !== "text") section.append(el("p", MindexI18n.msg("ui.105e58965eba"), "muted"));
+    if (mode !== "text") {
+      section.append(el("p", MindexI18n.msg("ui.105e58965eba"), "muted"));
+    }
   };
   draw();
   body.append(section);
@@ -1161,17 +1225,21 @@ function renderShotEditor(body, sid) {
     f.input.dataset.shotField = name;
     inputs[name] = f.input;
     // visual 不设 maxLength：浏览器按 UTF-16 计数，与服务端按码点计的 120 字上限不一致，超长交给服务端 422。
-    if (name === "visual")
+    if (name === "visual") {
       MindexI18n.setAttr(f.input, "placeholder", MindexI18n.msg("ui.visual_placeholder"));
-    else if (type === "textarea") f.input.maxLength = name === "text" ? 200 : 400;
-    else {
+    } else if (type === "textarea") {
+      f.input.maxLength = name === "text" ? 200 : 400;
+    } else {
       f.input.min = "0.001";
       f.input.max = "60";
     }
     f.input.addEventListener("input", () => {
       // visual 为空白时删键而非存空串，保证老分镜（无 visual 键）的 dirty 判定与已存内容一致。
-      if (name === "visual" && !f.input.value.trim()) delete draft.data.visual;
-      else draft.data[name] = type === "number" ? Number(f.input.value) : f.input.value;
+      if (name === "visual" && !f.input.value.trim()) {
+        delete draft.data.visual;
+      } else {
+        draft.data[name] = type === "number" ? Number(f.input.value) : f.input.value;
+      }
       draft.dirty = JSON.stringify(draft.data) !== JSON.stringify(draft.original);
       refreshShotCard(sid);
     });
@@ -1210,8 +1278,11 @@ function renderShotEditor(body, sid) {
     f.input.dataset.shotInput = "true";
     f.input.addEventListener("change", () => {
       // 选回「跟随方案」时删键而非置 null，保证 dirty 判定与旧 content 一致。
-      if (f.input.value === "") delete draft.data[name];
-      else draft.data[name] = name === "recall_limit" ? Number(f.input.value) : f.input.value;
+      if (f.input.value === "") {
+        delete draft.data[name];
+      } else {
+        draft.data[name] = name === "recall_limit" ? Number(f.input.value) : f.input.value;
+      }
       markDirty();
     });
     overrides.append(f.wrap);
@@ -1235,7 +1306,9 @@ function renderShotEditor(body, sid) {
   fields.append(rewrite);
   body.append(fields);
   // 召回设置（含粒度/数量覆盖）只对素材召回来源生效；其他来源只显示来源设置。
-  if (renderSourceEditor(body, sid, draft)) renderRecallEditor(body, sid, draft, overrides);
+  if (renderSourceEditor(body, sid, draft)) {
+    renderRecallEditor(body, sid, draft, overrides);
+  }
   const actions = el("div", "", "detail-actions");
   actions.append(
     mutationButton(MindexI18n.msg("ui.761f731d682b"), () => saveShot(sid), false, true),
@@ -1258,8 +1331,9 @@ function renderShotEditor(body, sid) {
     ["merge", MindexI18n.msg("ui.c2226d04d16b"), index === 0],
     ["insert", MindexI18n.msg("ui.fa5046a548d6"), false],
     ["delete", MindexI18n.msg("ui.aeef3a6ac335"), order().length === 1],
-  ])
+  ]) {
     actions.append(mutationButton(label, () => changeStructure(sid, op), disabled));
+  }
   const history = el("div");
   history.dataset.rowHistory = "content";
   body.append(actions, history);
@@ -1275,7 +1349,9 @@ function joinVisual(...values) {
 // 按画面意象重写召回词：以草稿中当前 visual 请求建议，成功后只替换草稿的 query 并标记未保存；
 // 失败时在编辑器状态区显示中文错误，草稿与未保存标记保持不变。请求期间禁用按钮，结束后恢复。
 async function rewriteQuery(sid, draft, ui) {
-  if (ui.button.disabled) return;
+  if (ui.button.disabled) {
+    return;
+  }
   ui.button.disabled = true;
   MindexI18n.setText(ui.button, MindexI18n.msg("ui.visual_rewrite_busy"));
   ui.status.hidden = true;
@@ -1285,7 +1361,9 @@ async function rewriteQuery(sid, draft, ui) {
       visual: draft.data.visual ?? "",
     });
     draft.data.query = result.query;
-    if (ui.queryInput) ui.queryInput.value = result.query;
+    if (ui.queryInput) {
+      ui.queryInput.value = result.query;
+    }
     ui.markDirty();
   } catch (error) {
     // 服务端错误已由 api() 译为当前语言；fetch 本身失败（网络错误）时补上「召回词重写失败」前缀。
@@ -1304,13 +1382,15 @@ function currentBoard() {
   return order().map((sid) => ({ ...ver(plan().shots[sid].content).data }));
 }
 async function saveShot(sid) {
-  const key = draftKey(sid),
-    draft = state.drafts.get(key),
-    scope = scopeKey();
-  if (draft.baseContent !== plan().shots[sid].content)
+  const key = draftKey(sid);
+  const draft = state.drafts.get(key);
+  const scope = scopeKey();
+  if (draft.baseContent !== plan().shots[sid].content) {
     throw new Error(MindexI18n.msg("ui.9af274c47a7b"));
-  if (["clip", "image"].includes(draft.data.source?.kind) && !draft.data.source.media_id)
+  }
+  if (["clip", "image"].includes(draft.data.source?.kind) && !draft.data.source.media_id) {
     throw new Error(MindexI18n.msg("ui.source_need_file"));
+  }
   const shots = currentBoard();
   const edited = {
     ...draft.data,
@@ -1319,32 +1399,40 @@ async function saveShot(sid) {
   };
   // 其他镜由 currentBoard() 带上已存 visual；当前镜去首尾空白，空值删键。
   const visual = (edited.visual ?? "").trim();
-  if (visual) edited.visual = visual;
-  else delete edited.visual;
+  if (visual) {
+    edited.visual = visual;
+  } else {
+    delete edited.visual;
+  }
   shots[order().indexOf(sid)] = edited;
   const result = await api(planBase(), "PATCH", {
     revision: state.data.revision,
     shots,
   });
   state.drafts.delete(key);
-  if (scope !== scopeKey()) return;
+  if (scope !== scopeKey()) {
+    return;
+  }
   invalidatePanel(sid);
   await accept(result);
   notice(MindexI18n.msg("ui.3579af078651"));
 }
 async function changeStructure(sid, op) {
-  const shots = currentBoard(),
-    oldIds = order(),
-    index = oldIds.indexOf(sid),
-    scope = scopeKey();
-  if (op === "insert")
+  const shots = currentBoard();
+  const oldIds = order();
+  const index = oldIds.indexOf(sid);
+  const scope = scopeKey();
+  if (op === "insert") {
     shots.splice(index + 1, 0, {
       id: null,
       text: MindexI18n.render(MindexI18n.msg("ui.108ae6548bd6")),
       query: MindexI18n.render(MindexI18n.msg("ui.59891c364fe4")),
       estimated_seconds: 3,
     });
-  if (op === "delete") shots.splice(index, 1);
+  }
+  if (op === "delete") {
+    shots.splice(index, 1);
+  }
   if (op === "up" || op === "down") {
     const target = index + (op === "up" ? -1 : 1);
     [shots[index], shots[target]] = [shots[target], shots[index]];
@@ -1354,16 +1442,22 @@ async function changeStructure(sid, op) {
     shots[index - 1].query += `；${shots[index].query}`;
     shots[index - 1].estimated_seconds += shots[index].estimated_seconds;
     const visual = joinVisual(shots[index - 1].visual, shots[index].visual);
-    if (visual) shots[index - 1].visual = visual;
-    else delete shots[index - 1].visual;
+    if (visual) {
+      shots[index - 1].visual = visual;
+    } else {
+      delete shots[index - 1].visual;
+    }
     // 保留上一镜召回设置；上一镜为默认文字召回时继承被合并镜的设置。
-    if (recallIsDefault(recallEditable(shots[index - 1].recall)) && shots[index].recall)
+    if (recallIsDefault(recallEditable(shots[index - 1].recall)) && shots[index].recall) {
       shots[index - 1].recall = shots[index].recall;
+    }
     // 背景音乐提示点：保留上一镜的；上一镜没有时继承被合并镜的。
-    if (!shots[index - 1].music && shots[index].music) shots[index - 1].music = shots[index].music;
+    if (!shots[index - 1].music && shots[index].music) {
+      shots[index - 1].music = shots[index].music;
+    }
     // 转场：保留上一镜的入场，出场与到下一镜的重叠转场取被合并镜的（与智能助手 edit_shots 一致）。
-    const first = shots[index - 1].transition || {},
-      second = shots[index].transition || {};
+    const first = shots[index - 1].transition || {};
+    const second = shots[index].transition || {};
     const merged = Object.fromEntries(
       [
         ["enter", first.enter],
@@ -1371,12 +1465,17 @@ async function changeStructure(sid, op) {
         ["next", second.next],
       ].filter(([, v]) => v),
     );
-    if (Object.keys(merged).length) shots[index - 1].transition = merged;
-    else delete shots[index - 1].transition;
+    if (Object.keys(merged).length) {
+      shots[index - 1].transition = merged;
+    } else {
+      delete shots[index - 1].transition;
+    }
     const words = [
       ...new Set([...(shots[index - 1].highlights || []), ...(shots[index].highlights || [])]),
     ].slice(0, 10);
-    if (words.length) shots[index - 1].highlights = words;
+    if (words.length) {
+      shots[index - 1].highlights = words;
+    }
     shots.splice(index, 1);
   }
   const result = await api(planBase(), "PATCH", {
@@ -1384,7 +1483,9 @@ async function changeStructure(sid, op) {
     shots,
   });
   if (scope === scopeKey()) {
-    if (sid) state.drafts.delete(draftKey(sid));
+    if (sid) {
+      state.drafts.delete(draftKey(sid));
+    }
     if (op === "merge") {
       state.drafts.delete(draftKey(oldIds[index - 1]));
       invalidatePanel(oldIds[index - 1]);
@@ -1396,5 +1497,7 @@ async function changeStructure(sid, op) {
       state.revealShot = added;
     }
   }
-  if (scope === scopeKey()) await accept(result);
+  if (scope === scopeKey()) {
+    await accept(result);
+  }
 }

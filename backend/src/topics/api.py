@@ -9,10 +9,13 @@ from __future__ import annotations
 import json
 from functools import wraps
 from typing import Annotated, Literal
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import Response
+from starlette.concurrency import run_in_threadpool
 
+from models import adapters
 from shared.config import StrictModel
 from topics import cards as topic_cards
 from topics import create_job as topic_jobs
@@ -20,10 +23,12 @@ from topics import datasources, profiles
 from topics import gaps as topic_gaps
 from topics import items as topic_items
 from topics import runner as topic_runner
+from topics import scheduler as topic_scheduler
 from topics.common import TopicConflict
 from topics.llm import make_llm
 from topics.models import ProfileBody, ProfileChanges
 from topics.sources import base as source_base
+from topics.sources import calendar
 
 
 class CreateJobBody(StrictModel):
@@ -51,9 +56,8 @@ def topics_router(runtime, store, embedder=None, *, topic_llm=None, scheduler: b
         config = runtime.current()
         if embedder is not None:
             return config, make_llm(config, topic_llm), embedder
-        from models.adapters import make_embedder
 
-        return config, make_llm(config, topic_llm), make_embedder(config)
+        return config, make_llm(config, topic_llm), adapters.make_embedder(config)
 
     # ---------------------------------------------------------------- 领域档案
     @router.get("/profiles")
@@ -107,11 +111,9 @@ def topics_router(runtime, store, embedder=None, *, topic_llm=None, scheduler: b
 
     @router.post("/sources/{source_id}/calendar")
     async def import_calendar(source_id: str, request: Request, mode: str = "replace"):
-        (
-            """导入日历：multipart（``file``）或 JSON ``{text, format?, mode?}``；超过 """
-            """``topics.fetch.max_bytes`` 返回 413。"""
-        )
-        from starlette.concurrency import run_in_threadpool
+        """导入日历：multipart（``file``）或 JSON ``{text, format?, mode?}``；超过
+        ``topics.fetch.max_bytes`` 返回 413。
+        """
 
         limit = runtime.current().topics.fetch.max_bytes
         fmt = None
@@ -150,7 +152,6 @@ def topics_router(runtime, store, embedder=None, *, topic_llm=None, scheduler: b
 
     @router.get("/calendar-samples")
     def calendar_samples():
-        from topics.sources import calendar
 
         return {"items": calendar.sample_list()}
 
@@ -260,7 +261,6 @@ def topics_router(runtime, store, embedder=None, *, topic_llm=None, scheduler: b
 
     @router.get("/profiles/{profile_id}/gaps.csv")
     def export_gaps(profile_id: str, status: str = "all"):
-        from urllib.parse import quote
 
         name = profiles.get_profile(store, profile_id)["name"]
         data = topic_gaps.export_csv(store, profile_id, status=status)
@@ -274,7 +274,6 @@ def topics_router(runtime, store, embedder=None, *, topic_llm=None, scheduler: b
     # ---------------------------------------------------------------- 定时
     @router.get("/schedule")
     def schedule_status():
-        from topics import scheduler as topic_scheduler
 
         return topic_scheduler.status(store, enabled=scheduler)
 

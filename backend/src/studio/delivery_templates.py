@@ -7,8 +7,10 @@ import re
 from typing import Literal
 from uuid import uuid4
 
+from fastapi import HTTPException
 from pydantic import Field, field_validator
 
+from admin.curation import EntityNotFound
 from shared.config import StrictModel
 from studio import brands, platforms, studio
 from studio.delivery_models import PublishOptions
@@ -130,8 +132,6 @@ def get(store, template_id):
         }
     row = store.one("SELECT * FROM delivery_templates WHERE id=?", (template_id,))
     if not row:
-        from admin.curation import EntityNotFound
-
         raise EntityNotFound("找不到交付模板")
     return {
         "id": row["id"],
@@ -174,7 +174,6 @@ def asset_paths(config):
 
 
 def delivery_routes(router, store, mutation_lock, *, current):
-    from fastapi import HTTPException
 
     @router.get("/delivery-templates")
     def listing():

@@ -40,16 +40,17 @@ const fixture =
     );
     await page.locator("#upload-close").click();
     await page.locator(".work-panel").waitFor();
-    if (!(await page.locator(".work-panel").evaluate((element) => element.open)))
+    if (!(await page.locator(".work-panel").evaluate((element) => element.open))) {
       await page.locator(".work-toolbar h3").click();
+    }
     await page.waitForFunction(() => document.querySelectorAll(".work-status").length === 4);
     assert.equal(await page.locator(".work-card").count(), 4);
     assert.equal(await page.locator(".work-status").filter({ hasText: "待处理" }).count(), 4);
     const sid = await page.evaluate(() => new URLSearchParams(location.search).get("source"));
-    const shots = page.locator("[data-work=shots]"),
-      dialogue = page.locator("[data-work=dialogue]"),
-      analysis = page.locator("[data-work=analysis]"),
-      persons = page.locator("[data-work=persons]");
+    const shots = page.locator("[data-work=shots]");
+    const dialogue = page.locator("[data-work=dialogue]");
+    const analysis = page.locator("[data-work=analysis]");
+    const persons = page.locator("[data-work=persons]");
     assert.ok(await analysis.getByRole("button", { name: "开始处理", exact: true }).isDisabled());
     await shots.getByRole("button", { name: "开始处理", exact: true }).click();
     await shots.locator(".work-status").filter({ hasText: "处理完成" }).waitFor();
@@ -71,8 +72,8 @@ const fixture =
     assert.ok(await page.locator("#person-start").isDisabled());
     const entity = async (value) =>
       await (await page.request.post(base + "/api/persons/entities", { data: value })).json();
-    const work = await entity({ kind: "work", name: "浏览器工程作品" }),
-      actor = await entity({ kind: "actor", name: "浏览器工程演员" });
+    const work = await entity({ kind: "work", name: "浏览器工程作品" });
+    const actor = await entity({ kind: "actor", name: "浏览器工程演员" });
     const role = await entity({
       kind: "role",
       name: "浏览器工程角色",
@@ -119,8 +120,9 @@ const fixture =
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
     await page.reload();
     await page.locator(".work-panel").waitFor();
-    if (!(await page.locator(".work-panel").evaluate((element) => element.open)))
+    if (!(await page.locator(".work-panel").evaluate((element) => element.open))) {
       await page.locator(".work-toolbar h3").click();
+    }
     await page.locator(".work-card").last().waitFor();
     assert.equal(await page.locator(".work-card").count(), 4);
     assert.deepEqual(errors, []);

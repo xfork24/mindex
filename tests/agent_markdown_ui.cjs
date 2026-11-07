@@ -60,8 +60,9 @@ assert.match(base, /^http:\/\/127\.0\.0\.1:/);
       "del",
       "hr",
       "br",
-    ])
+    ]) {
       assert.ok(doc.tags.includes(tag), `缺少 ${tag}`);
+    }
     assert.match(doc.text, /const x = 1 < 2;/);
 
     const attacks = [
@@ -86,11 +87,12 @@ assert.match(base, /^http:\/\/127\.0\.0\.1:/);
         !/\son\w+=/i.test(out.html) && !/style=/i.test(out.html),
         `${attack} → ${out.html}`,
       );
-      for (const link of out.links)
+      for (const link of out.links) {
         assert.ok(
           !link.href || /^(https?:|\/(?!\/)|#)/i.test(link.href),
           `${attack} → ${link.href}`,
         );
+      }
     }
     const links = await render("[外部](https://example.com/a) [站内](/studio?job=1) [锚点](#x)");
     assert.deepEqual(links.links, [
@@ -99,8 +101,9 @@ assert.match(base, /^http:\/\/127\.0\.0\.1:/);
       { text: "锚点", href: "#x", target: null, rel: null },
     ]);
     // 流式中途：未闭合的代码块、表格不报错。
-    for (const partial of ["```py\nprint(", "| a | b |\n|--", "**未闭合", "- [ ] "])
+    for (const partial of ["```py\nprint(", "| a | b |\n|--", "**未闭合", "- [ ] "]) {
       await render(partial);
+    }
     assert.equal(await page.evaluate(() => window.__x), undefined);
     // 依赖缺失时回退为纯文本。
     const fallback = await page.evaluate(() => {

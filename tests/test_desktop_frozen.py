@@ -39,7 +39,7 @@ def test_entry_passes_arguments_to_module(tmp_path):
         [
             sys.executable,
             "-c",
-            "import sys; sys.path.insert(0, sys.argv[1]); from mindex.server.desktop_entry import main; "
+            "import sys, mindex; sys.path.insert(0, sys.argv[1]); from server.desktop_entry import main; "
             "main(['-m', 'echo_args', 'a b', '--flag'])",
             str(tmp_path),
         ],
@@ -53,10 +53,9 @@ def test_entry_passes_arguments_to_module(tmp_path):
 
 
 def self_hashing_modules() -> set[str]:
-    (
-        """源码里出现 ``content_hash(Path(__file__))`` 的模块：冻结后必须以 .py """
-        """源码打包，哈希才与源码运行相同。"""
-    )
+    """源码里出现 ``content_hash(Path(__file__))`` 的模块：冻结后必须以 .py 源码打包，
+    哈希才与源码运行相同。
+    """
     found = set()
     package = ROOT / "backend" / "src"
     for path in package.rglob("*.py"):
@@ -76,5 +75,25 @@ def test_self_hashing_modules_are_collected_as_source():
     modules = self_hashing_modules()
     assert {"mindex.models.llama_cpp", "mindex.models.model_server"} <= modules
     text = SPEC.read_text(encoding="utf-8")
-    declared = set(re.findall(r'"(mindex\.[\w.]+)":\s*"py"', text))
-    assert modules <= declared, f"mindex.spec 的 SOURCE_MODULES 缺少：{sorted(modules - declared)}"
+    declared = set(re.findall(r'"([\w.]+)":\s*"py"', text))
+    required = modules | {name.removeprefix("mindex.") for name in modules}
+    assert required <= declared, f"mindex.spec 的 SOURCE_MODULES 缺少：{sorted(required - declared)}"
+
+
+def test_launcher_uses_bootstrap_and_packaged_entry():
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "desktop/sidecar/launcher.py"), "--help"],
+        cwd=ROOT.parent,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "serve" in result.stdout
+
+
+def test_desktop_check_module_entry():
+    result = run_entry("-m", "mindex.diagnostics.desktop_check")
+    assert result.returncode != 0 and "用法" in result.stderr
+    assert "No module named" not in result.stderr

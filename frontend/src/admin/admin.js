@@ -19,24 +19,29 @@ let workRequest = 0;
 
 function node(tag, text, className) {
   const n = document.createElement(tag);
-  if (text !== undefined) MindexI18n.setText(n, text);
-  if (className) n.className = className;
+  if (text !== undefined) {
+    MindexI18n.setText(n, text);
+  }
+  if (className) {
+    n.className = className;
+  }
   return n;
 }
 function notify(text = "", error = false) {
-  if (globalThis.MindexFeedback)
+  if (globalThis.MindexFeedback) {
     return globalThis.MindexFeedback.show(
       "admin-notice",
       error ? MindexI18n.system(text) : text,
       error ? "error" : "info",
     );
+  }
   MindexI18n.setText($("admin-notice"), error ? MindexI18n.system(text) : text);
   $("admin-notice").className = `notice ${error ? "error" : "info"}`;
 }
 function time(value) {
-  const hours = Math.floor(value / 3600),
-    minutes = Math.floor((value % 3600) / 60),
-    seconds = (value % 60).toFixed(2).padStart(5, "0");
+  const hours = Math.floor(value / 3600);
+  const minutes = Math.floor((value % 3600) / 60);
+  const seconds = (value % 60).toFixed(2).padStart(5, "0");
   return `${hours ? `${hours}:` : ""}${String(minutes).padStart(2, "0")}:${seconds}`;
 }
 function errorText(detail) {
@@ -76,7 +81,9 @@ function sizeSourcePanel() {
 }
 let sourcePanelFrame = null;
 function scheduleSourcePanelSize() {
-  if (sourcePanelFrame !== null) return;
+  if (sourcePanelFrame !== null) {
+    return;
+  }
   sourcePanelFrame = requestAnimationFrame(() => {
     sourcePanelFrame = null;
     sizeSourcePanel();
@@ -110,9 +117,13 @@ async function loadSources() {
     favorite_only: $("source-favorite").checked,
     page: state.sourcePage,
   });
-  for (const id of sourceGroups.values()) search.append("source_group_ids", id);
+  for (const id of sourceGroups.values()) {
+    search.append("source_group_ids", id);
+  }
   const data = await api(`/api/admin/sources?${search}`);
-  if (request !== sourceRequest) return;
+  if (request !== sourceRequest) {
+    return;
+  }
   if (state.sourcePage > 1 && !data.items.length) {
     state.sourcePage--;
     return loadSources();
@@ -160,7 +171,9 @@ async function loadSources() {
 function action(text, onClick, pressed) {
   const b = node("button", text, "quiet");
   b.type = "button";
-  if (pressed !== undefined) b.setAttribute("aria-pressed", String(pressed));
+  if (pressed !== undefined) {
+    b.setAttribute("aria-pressed", String(pressed));
+  }
   b.onclick = () =>
     run(async () => {
       b.disabled = true;
@@ -174,8 +187,9 @@ function action(text, onClick, pressed) {
 }
 function actions(kind, item) {
   const bar = node("div", undefined, "organization-actions");
-  if (kind === "segment")
+  if (kind === "segment") {
     bar.append(action(MindexI18n.msg("ui.4f55ee1e687f"), () => showAnalysis(item)));
+  }
   bar.append(
     action(MindexI18n.msg("ui.e0361480e3a5"), () => edit(kind, item)),
     action(
@@ -189,8 +203,9 @@ function actions(kind, item) {
       item.hidden,
     ),
   );
-  if (kind === "source")
+  if (kind === "source") {
     bar.append(action(MindexI18n.msg("ui.3755f56f2f83"), () => deleteSource(item)));
+  }
   return bar;
 }
 async function deleteSource(item) {
@@ -200,7 +215,9 @@ async function deleteSource(item) {
     MindexI18n.msg("ui.78bbf6595f53", { p0: item.shot_count, p1: item.moment_count }),
     MindexI18n.msg("ui.8d221c85535e", {}),
   ].join("\n");
-  if (!confirm(MindexI18n.render(message))) return;
+  if (!confirm(MindexI18n.render(message))) {
+    return;
+  }
   const summary = await api(`/api/admin/sources/${item.id}`, { method: "DELETE" });
   clearTimeout(workPoll);
   ++selectionRequest;
@@ -233,11 +250,14 @@ function renderSource(source) {
   }
   const heading = node("div", undefined, "source-heading");
   heading.append(node("h2", source.name));
-  if (source.hidden)
+  if (source.hidden) {
     heading.append(node("span", MindexI18n.msg("ui.5fce4fb22d1d"), "hidden-badge"));
+  }
   target.append(heading);
   MindexGroups.membership(target, "source", source);
-  if (source.notes) target.append(node("p", source.notes, "source-notes"));
+  if (source.notes) {
+    target.append(node("p", source.notes, "source-notes"));
+  }
   target.append(
     node(
       "p",
@@ -262,7 +282,7 @@ function renderSource(source) {
       "source-meta",
     ),
   );
-  if (source.missing_artifacts)
+  if (source.missing_artifacts) {
     target.append(
       node(
         "p",
@@ -270,9 +290,12 @@ function renderSource(source) {
         "source-warning",
       ),
     );
+  }
   target.append(actions("source", source));
   renderWork(source, target);
-  if (source.hidden) target.append(node("p", MindexI18n.msg("ui.5968052b59f1"), "muted"));
+  if (source.hidden) {
+    target.append(node("p", MindexI18n.msg("ui.5968052b59f1"), "muted"));
+  }
 }
 
 async function selectSource(id) {
@@ -298,11 +321,15 @@ async function selectSource(id) {
   $("source-workspace").hidden = false;
   syncUrl();
   $("source-workspace").setAttribute("aria-busy", "true");
-  if (preferences(id).workExpanded) void refreshWork(id, request);
+  if (preferences(id).workExpanded) {
+    void refreshWork(id, request);
+  }
   try {
     await Promise.all([
       api(`/api/admin/sources/${id}?detail=summary`, { signal }).then(async (source) => {
-        if (request !== selectionRequest) return;
+        if (request !== selectionRequest) {
+          return;
+        }
         if (!state.source.work) {
           state.source = { ...source, statusError: state.source.statusError };
           renderSource(state.source);
@@ -316,9 +343,13 @@ async function selectSource(id) {
       loadSources(),
     ]);
   } catch (e) {
-    if (e.name !== "AbortError" && request === selectionRequest) throw e;
+    if (e.name !== "AbortError" && request === selectionRequest) {
+      throw e;
+    }
   } finally {
-    if (request === selectionRequest) $("source-workspace").removeAttribute("aria-busy");
+    if (request === selectionRequest) {
+      $("source-workspace").removeAttribute("aria-busy");
+    }
   }
 }
 function syncUrl() {
@@ -337,21 +368,26 @@ function syncTabs() {
     $(id).setAttribute("aria-selected", String(state.kind === kind));
   }
   $("parent-filter").hidden = !state.parent;
-  if (state.parent)
+  if (state.parent) {
     MindexI18n.setText(
       $("parent-label"),
       MindexI18n.msg("ui.6688020c0556", { p0: segmentName(state.parent) }),
     );
+  }
 }
 function segmentName(item) {
-  if (item.custom_name || item.custom_name === undefined) return item.name;
+  if (item.custom_name || item.custom_name === undefined) {
+    return item.name;
+  }
   return MindexI18n.msg(`ui.segment_default_${item.kind}`, {
     start: item.start.toFixed(3),
     end: item.end.toFixed(3),
   });
 }
 async function loadSegments() {
-  if (!state.source) return;
+  if (!state.source) {
+    return;
+  }
   const request = ++segmentRequest;
   syncTabs();
   syncUrl();
@@ -361,11 +397,17 @@ async function loadSegments() {
     `/api/admin/sources/${state.source.id}/segments?${params({ kind: state.kind, parent_id: state.parent?.id, visibility: $("segment-visibility").value, favorite_only: $("segment-favorite").checked, page: state.segmentPage })}`,
     { signal: segmentController.signal },
   ).catch((e) => {
-    if (e.name !== "AbortError") throw e;
+    if (e.name !== "AbortError") {
+      throw e;
+    }
     return null;
   });
-  if (!data) return;
-  if (request !== segmentRequest) return;
+  if (!data) {
+    return;
+  }
+  if (request !== segmentRequest) {
+    return;
+  }
   if (state.segmentPage > 1 && !data.items.length) {
     state.segmentPage--;
     return loadSegments();
@@ -416,7 +458,7 @@ async function loadSegments() {
         "segment-time",
       ),
     );
-    if (item.effective_hidden)
+    if (item.effective_hidden) {
       body.append(
         node(
           "span",
@@ -426,11 +468,16 @@ async function loadSegments() {
           "hidden-badge",
         ),
       );
-    if (item.notes) body.append(node("p", item.notes, "segment-note"));
+    }
+    if (item.notes) {
+      body.append(node("p", item.notes, "segment-note"));
+    }
     body.append(actions("segment", item));
-    if (item.inherited_hidden) body.append(node("p", MindexI18n.msg("ui.58926140f603"), "muted"));
+    if (item.inherited_hidden) {
+      body.append(node("p", MindexI18n.msg("ui.58926140f603"), "muted"));
+    }
     const links = node("div", undefined, "relationship");
-    if (item.kind === "shot")
+    if (item.kind === "shot") {
       links.append(
         action(MindexI18n.msg("ui.8427ef7b1fc2", { p0: item.child_count }), async () => {
           state.kind = "moment";
@@ -439,7 +486,7 @@ async function loadSegments() {
           await loadSegments();
         }),
       );
-    else if (item.parent_id)
+    } else if (item.parent_id) {
       links.append(
         action(MindexI18n.msg("ui.f982f961d8a1"), async () => {
           const parent = await api(`/api/admin/segments/${item.parent_id}`);
@@ -455,6 +502,7 @@ async function loadSegments() {
             ?.scrollIntoView({ block: "center", behavior: "smooth" });
         }),
       );
+    }
     // 出镜审核：在人物库打开该分镜的出镜人物审核；精细片段审核其所属分镜。
     const shotId = item.kind === "shot" ? item.id : item.parent_id;
     if (shotId) {
@@ -492,23 +540,29 @@ function edit(kind, item) {
   $("edit-name").focus();
 }
 async function patch(kind, id, changes) {
-  const sourceId = state.source?.id,
-    selection = selectionRequest;
+  const sourceId = state.source?.id;
+  const selection = selectionRequest;
   await api(`/api/admin/${kind === "source" ? "sources" : "segments"}/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(changes),
   });
-  if (state.source?.id !== sourceId || selection !== selectionRequest) return;
+  if (state.source?.id !== sourceId || selection !== selectionRequest) {
+    return;
+  }
   await refreshWork(sourceId, selection);
-  if (state.source?.id !== sourceId || selection !== selectionRequest) return;
+  if (state.source?.id !== sourceId || selection !== selectionRequest) {
+    return;
+  }
   await Promise.all([loadSources(), loadSegments()]);
   notify(MindexI18n.msg("ui.963001b5d8c2"));
 }
 $("edit-form").onsubmit = async (event) => {
   event.preventDefault();
   const editing = state.editing;
-  if (!editing) return;
+  if (!editing) {
+    return;
+  }
   $("edit-save").disabled = true;
   MindexI18n.setText($("edit-error"), "");
   try {
@@ -537,7 +591,9 @@ function play(item) {
     }),
   );
   $("play-download").href = `${item.media_url}?download=true&v=${item.media_revision}`;
-  if (!$("play-dialog").open) $("play-dialog").showModal();
+  if (!$("play-dialog").open) {
+    $("play-dialog").showModal();
+  }
 }
 $("play-close").onclick = () => $("play-dialog").close();
 $("play-dialog").addEventListener("close", () => {
@@ -549,7 +605,9 @@ async function run(task) {
   try {
     await task();
   } catch (e) {
-    if (e.name !== "AbortError") notify(e.message, true);
+    if (e.name !== "AbortError") {
+      notify(e.message, true);
+    }
   }
 }
 function sourceFiltersChanged() {
@@ -564,10 +622,12 @@ $("source-search").onsubmit = (e) => {
   e.preventDefault();
   run(sourceFiltersChanged);
 };
-for (const id of ["source-visibility", "source-favorite"])
+for (const id of ["source-visibility", "source-favorite"]) {
   $(id).onchange = () => run(sourceFiltersChanged);
-for (const id of ["segment-visibility", "segment-favorite"])
+}
+for (const id of ["segment-visibility", "segment-favorite"]) {
   $(id).onchange = () => run(segmentFiltersChanged);
+}
 $("source-prev").onclick = () =>
   run(async () => {
     state.sourcePage--;
@@ -591,7 +651,7 @@ $("segment-next").onclick = () =>
 for (const [id, kind] of [
   ["shots-tab", "shot"],
   ["moments-tab", "moment"],
-])
+]) {
   $(id).onclick = () =>
     run(async () => {
       state.kind = kind;
@@ -599,6 +659,7 @@ for (const [id, kind] of [
       state.segmentPage = 1;
       await loadSegments();
     });
+}
 $("clear-parent").onclick = () =>
   run(async () => {
     state.parent = null;
@@ -613,8 +674,11 @@ $("reload").onclick = () =>
       prefs.errors = {};
     });
     try {
-      if (state.source) await selectSource(state.source.id);
-      else await loadSources();
+      if (state.source) {
+        await selectSource(state.source.id);
+      } else {
+        await loadSources();
+      }
       notify(MindexI18n.msg("ui.88e448fddfc8"));
     } finally {
       $("reload").disabled = false;
@@ -623,18 +687,21 @@ $("reload").onclick = () =>
 run(async () => {
   await loadSources();
   const query = new URLSearchParams(location.search);
-  if (query.get("kind") === "moment") state.kind = "moment";
+  if (query.get("kind") === "moment") {
+    state.kind = "moment";
+  }
   const id = query.get("source");
   if (id) {
     await selectSource(id);
-    const parent = query.get("parent"),
-      segment = query.get("segment");
+    const parent = query.get("parent");
+    const segment = query.get("segment");
     if (segment) {
       await focusSegment(id, segment);
     } else if (parent) {
       const item = await api(`/api/admin/segments/${parent}`);
-      if (item.source_id !== id || item.kind !== "shot")
+      if (item.source_id !== id || item.kind !== "shot") {
         throw new Error(MindexI18n.msg("ui.ea6b2bd87cda"));
+      }
       state.kind = "moment";
       state.parent = item;
       await loadSegments();
@@ -645,8 +712,9 @@ run(async () => {
 // 打开素材下的指定镜头或片段并滚动到它；启动参数与智能助手定位共用。
 async function focusSegment(sourceId, segmentId) {
   const item = await api(`/api/admin/segments/${segmentId}`);
-  if (item.source_id !== sourceId || !["shot", "moment"].includes(item.kind))
+  if (item.source_id !== sourceId || !["shot", "moment"].includes(item.kind)) {
     throw new Error(MindexI18n.msg("ui.1f054c110e3f"));
+  }
   state.kind = item.kind;
   state.parent = null;
   state.focus = item.id;
@@ -655,8 +723,11 @@ async function focusSegment(sourceId, segmentId) {
   $("segment-favorite").checked = false;
   await loadSegments();
   const focused = $("segment-list").querySelector(".is-focused");
-  if (window.MindexAgent && focused) window.MindexAgent.highlight(focused);
-  else focused?.scrollIntoView({ block: "center", behavior: "smooth" });
+  if (window.MindexAgent && focused) {
+    window.MindexAgent.highlight(focused);
+  } else {
+    focused?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
 }
 window.MindexAgentContext = () => ({
   page: "admin",
@@ -669,10 +740,17 @@ window.MindexAgentFocus = async (focus, { passive = false } = {}) => {
     mark(document.querySelector(".source-panel") || $("source-list"));
     return true;
   }
-  if (passive && state.source?.id !== focus.source_id) return true;
-  if (state.source?.id !== focus.source_id) await selectSource(focus.source_id);
-  if (focus.segment_id) await focusSegment(focus.source_id, focus.segment_id);
-  else mark($("source-workspace"));
+  if (passive && state.source?.id !== focus.source_id) {
+    return true;
+  }
+  if (state.source?.id !== focus.source_id) {
+    await selectSource(focus.source_id);
+  }
+  if (focus.segment_id) {
+    await focusSegment(focus.source_id, focus.segment_id);
+  } else {
+    mark($("source-workspace"));
+  }
   return true;
 };
 
@@ -721,7 +799,7 @@ const stages = {
   indexed: MindexI18n.msg("ui.efc142bf91f3"),
 };
 function preferences(id) {
-  if (!workPreferences.has(id))
+  if (!workPreferences.has(id)) {
     workPreferences.set(id, {
       publish: { shots: true, dialogue: true, analysis: true, persons: true },
       errors: {},
@@ -730,6 +808,7 @@ function preferences(id) {
       subtitleInitialized: false,
       uploadingSubtitle: false,
     });
+  }
   return workPreferences.get(id);
 }
 function post(url, value) {
@@ -755,7 +834,7 @@ function analysisCoverageText(result = {}, task) {
     total: result.total || 0,
   });
   const reasons = result.skipped_reasons || [];
-  for (const item of reasons)
+  for (const item of reasons) {
     text +=
       "，" +
       MindexI18n.msg("ui.analysis_skipped_reason", {
@@ -765,21 +844,23 @@ function analysisCoverageText(result = {}, task) {
           item.reason ||
           MindexI18n.msg("ui.analysis_reason_unknown"),
       });
+  }
   const unclassified = Math.max(
     0,
     (result.skipped || 0) - reasons.reduce((sum, item) => sum + item.count, 0),
   );
-  if (unclassified)
+  if (unclassified) {
     text +=
       "，" +
       MindexI18n.msg("ui.analysis_skipped_reason", {
         count: unclassified,
         reason: MindexI18n.msg("ui.analysis_reason_unknown"),
       });
+  }
   const pending =
     result.pending ??
     Math.max(0, (result.total || 0) - (result.analyzed || 0) - (result.skipped || 0));
-  if (pending)
+  if (pending) {
     text +=
       "，" +
       (["failed", "interrupted", "cancelled"].includes(task?.status) &&
@@ -789,14 +870,15 @@ function analysisCoverageText(result = {}, task) {
             reason: MindexI18n.system(task.error),
           })
         : MindexI18n.msg("ui.analysis_pending_count", { count: pending }));
+  }
   return text;
 }
 // Persistent subtask coverage survives reloads and new execution records.
 function workProgressRows(name, work) {
-  const result = work.result || {},
-    search = work.search || {};
-  const task = work.task,
-    progress = task?.progress || {};
+  const result = work.result || {};
+  const search = work.search || {};
+  const task = work.task;
+  const progress = task?.progress || {};
   const publishing = progress.phase === "publish" || publicationStages.has(progress.stage);
   const processing = publishing ? progress.processing_progress || {} : progress;
   let total =
@@ -843,7 +925,9 @@ function workProgressRows(name, work) {
     ["publish", search, work.publish_task],
     ["scene", work.scene_search || {}, work.scene_publish_task],
   ]) {
-    if (type === "scene" && name === "persons") continue;
+    if (type === "scene" && name === "persons") {
+      continue;
+    }
     const automatic = type === "publish" && publishing ? task : null;
     const latest =
       automatic && ["queued", "running"].includes(automatic.status)
@@ -852,11 +936,12 @@ function workProgressRows(name, work) {
           ? independent
           : automatic;
     const active = latest && ["queued", "running"].includes(latest.status);
-    let count = coverage.embedded_segments ?? coverage.indexed_segments ?? 0,
-      expected = coverage.expected_segments || 0;
+    let count = coverage.embedded_segments ?? coverage.indexed_segments ?? 0;
+    const expected = coverage.expected_segments || 0;
     // Execution progress is already cumulative; reuse it within the same subtask.
-    if (active && !coverage.current && latest.progress?.total === expected)
+    if (active && !coverage.current && latest.progress?.total === expected) {
       count = Math.max(count, latest.progress.completed || 0);
+    }
     rows.push({
       coverage,
       task: latest,
@@ -876,17 +961,21 @@ function workProgressRows(name, work) {
       running: active,
     });
   }
-  if (name === "analysis") rows[0].text = analysisCoverageText(result, task);
+  if (name === "analysis") {
+    rows[0].text = analysisCoverageText(result, task);
+  }
   for (const row of rows) {
     const notes = [];
     if (row.type !== "process") {
-      for (const reason of row.coverage?.pending_reasons || [])
+      for (const reason of row.coverage?.pending_reasons || []) {
         notes.push(MindexI18n.msg(`ui.coverage_${reason.code}`, { count: reason.count }));
-      if (row.coverage?.unpublished_segments)
+      }
+      if (row.coverage?.unpublished_segments) {
         notes.push(
           MindexI18n.msg("ui.coverage_unpublished", { count: row.coverage.unpublished_segments }),
         );
-      if (name === "persons" && row.done < row.total)
+      }
+      if (name === "persons" && row.done < row.total) {
         notes.push(
           MindexI18n.msg(
             result.covered_shots
@@ -895,7 +984,8 @@ function workProgressRows(name, work) {
             { count: row.total - row.done },
           ),
         );
-      if (!row.total)
+      }
+      if (!row.total) {
         notes.push(
           MindexI18n.msg(
             work.status === "no_audio"
@@ -907,37 +997,48 @@ function workProgressRows(name, work) {
                   : "ui.coverage_no_results",
           ),
         );
+      }
     } else if (name !== "analysis") {
-      if (name === "shots" && result.missing_artifacts)
+      if (name === "shots" && result.missing_artifacts) {
         notes.push(
           MindexI18n.msg("ui.coverage_missing_files", { count: result.missing_artifacts }),
         );
-      else if (name === "persons" && row.done < row.total)
+      } else if (name === "persons" && row.done < row.total) {
         notes.push(
           MindexI18n.msg("ui.coverage_person_unprocessed", { count: row.total - row.done }),
         );
-      else if (work.status === "not_processed")
+      } else if (work.status === "not_processed") {
         notes.push(MindexI18n.msg("ui.coverage_not_started"));
-      else if (work.status === "no_audio") notes.push(MindexI18n.msg("ui.coverage_no_audio"));
-      else if (work.status === "disabled") notes.push(MindexI18n.msg("ui.coverage_disabled"));
-      else if (work.status === "empty") notes.push(MindexI18n.msg("ui.coverage_no_content"));
+      } else if (work.status === "no_audio") {
+        notes.push(MindexI18n.msg("ui.coverage_no_audio"));
+      } else if (work.status === "disabled") {
+        notes.push(MindexI18n.msg("ui.coverage_disabled"));
+      } else if (work.status === "empty") {
+        notes.push(MindexI18n.msg("ui.coverage_no_content"));
+      }
     }
-    if (name === "persons" && work.status !== "complete")
+    if (name === "persons" && work.status !== "complete") {
       notes.push(...(work.setup?.missing || []).map(MindexI18n.system));
-    if (notes.length)
+    }
+    if (notes.length) {
       row.text =
         (row.text ||
           MindexI18n.msg(row.key, { done: Math.min(row.done, row.total), total: row.total })) +
         "，" +
         notes.join("；");
+    }
   }
   return rows;
 }
 function workLog(row) {
-  if (row.localError) return { message: row.localError, error: true };
-  const task = row.task,
-    progress = row.progress || {};
-  if (!task) return null;
+  if (row.localError) {
+    return { message: row.localError, error: true };
+  }
+  const task = row.task;
+  const progress = row.progress || {};
+  if (!task) {
+    return null;
+  }
   const publishing =
     task.progress?.phase === "publish" || publicationStages.has(task.progress?.stage);
   const active =
@@ -978,7 +1079,9 @@ function workLog(row) {
     return null;
   }
   const previous = snapshots.get(key);
-  if (previous.signature !== signature) snapshots.set(key, { signature, visible: true });
+  if (previous.signature !== signature) {
+    snapshots.set(key, { signature, visible: true });
+  }
   return snapshots.get(key).visible ? { message, error: !!error } : null;
 }
 function appendWorkProgress(card, label, row) {
@@ -1017,8 +1120,8 @@ function analysisSummary(result, progress = {}) {
     result.pending == null && progress.stage === "scenes"
       ? Math.max(0, (progress.total || 0) - (result.scenes || 0))
       : 0;
-  const total = (result.total || 0) + extraScenes,
-    scenes = (result.scenes || 0) + extraScenes;
+  const total = (result.total || 0) + extraScenes;
+  const scenes = (result.scenes || 0) + extraScenes;
   const pending =
     result.pending ?? Math.max(0, total - (result.analyzed || 0) - (result.skipped || 0));
   return (
@@ -1054,8 +1157,9 @@ function renderWork(source, target) {
       !panel.isConnected ||
       state.source?.id !== source.id ||
       cachePrefs.workExpanded === panel.open
-    )
+    ) {
       return;
+    }
     cachePrefs.workExpanded = panel.open;
     if (panel.open) {
       renderSource(state.source);
@@ -1066,8 +1170,12 @@ function renderWork(source, target) {
       ++workRequest;
     }
   };
-  if (!panel.open) return;
-  if (cachePrefs.cacheError) panel.append(node("p", cachePrefs.cacheError, "source-warning"));
+  if (!panel.open) {
+    return;
+  }
+  if (cachePrefs.cacheError) {
+    panel.append(node("p", cachePrefs.cacheError, "source-warning"));
+  }
   const grid = node("div", undefined, "work-grid");
   panel.append(grid);
   if (!source.work) {
@@ -1090,16 +1198,17 @@ function renderWork(source, target) {
       body.append(node("h4", label), start);
       grid.append(card);
     }
-    if (source.statusError)
+    if (source.statusError) {
       panel.append(action(MindexI18n.msg("ui.e2d53a6d3a6a"), () => refreshWork(source.id)));
+    }
     return;
   }
-  const prefs = preferences(source.id),
-    busy = Object.values(source.work || {}).some((w) =>
-      [w.task, w.publish_task, w.scene_publish_task].some(
-        (t) => t && ["queued", "running"].includes(t.status),
-      ),
-    );
+  const prefs = preferences(source.id);
+  const busy = Object.values(source.work || {}).some((w) =>
+    [w.task, w.publish_task, w.scene_publish_task].some(
+      (t) => t && ["queued", "running"].includes(t.status),
+    ),
+  );
   // 已请求取消、仍在运行的任务保持「正在取消…」；任务离开排队/运行后丢弃该记录。
   const activeIds = new Set(
     Object.values(source.work || {})
@@ -1118,16 +1227,16 @@ function renderWork(source, target) {
     prefs.subtitleInitialized = true;
   }
   for (const [name, label] of Object.entries(workNames)) {
-    const work = source.work?.[name] || {},
-      result = work.result || {},
-      card = node("section", undefined, "work-card");
+    const work = source.work?.[name] || {};
+    const result = work.result || {};
+    const card = node("section", undefined, "work-card");
     card.dataset.work = name;
     // 行布局：一行一个处理卡；左侧描述与操作按钮，右侧各任务进度。
-    const body = node("div", undefined, "work-card-body"),
-      progressCol = node("div", undefined, "work-card-progress");
+    const body = node("div", undefined, "work-card-body");
+    const progressCol = node("div", undefined, "work-card-progress");
     card.append(body, progressCol);
-    const processBusy = work.task && ["queued", "running"].includes(work.task.status),
-      blocked = source.enforce_gpu_lock && busy;
+    const processBusy = work.task && ["queued", "running"].includes(work.task.status);
+    const blocked = source.enforce_gpu_lock && busy;
     let personsNote = null;
     const heading = node("div", undefined, "work-heading");
     heading.append(
@@ -1136,12 +1245,13 @@ function renderWork(source, target) {
     );
     body.append(heading);
     let summary = "";
-    if (name === "shots")
+    if (name === "shots") {
       summary = MindexI18n.msg("ui.234493832eb5", {
         p0: result.shots || 0,
         p1: result.moments || 0,
         p2: result.missing_artifacts || 0,
       });
+    }
     if (name === "dialogue") {
       const origin =
         {
@@ -1164,12 +1274,13 @@ function renderWork(source, target) {
         p3: result.content_segments || 0,
       });
     }
-    if (name === "analysis")
+    if (name === "analysis") {
       summary = analysisSummary(
         result,
         work.task?.progress?.processing_progress || work.task?.progress,
       );
-    if (name === "persons")
+    }
+    if (name === "persons") {
       summary = MindexI18n.msg("ui.1e1649402d6a", {
         p0: result.covered_shots || 0,
         p1: result.total_shots || 0,
@@ -1178,8 +1289,11 @@ function renderWork(source, target) {
         p4: result.candidate || 0,
         p5: result.rejected || 0,
       });
+    }
     const rows = workProgressRows(name, work);
-    for (const row of rows) row.localError = prefs.errors?.[`${name}:${row.type}`];
+    for (const row of rows) {
+      row.localError = prefs.errors?.[`${name}:${row.type}`];
+    }
     body.append(
       node(
         "p",
@@ -1225,13 +1339,14 @@ function renderWork(source, target) {
         "muted",
       ),
     );
-    if (MindexI18n.system(result.fallback_reason))
+    if (MindexI18n.system(result.fallback_reason)) {
       body.append(node("p", MindexI18n.system(result.fallback_reason), "muted"));
+    }
     if (name === "dialogue") {
       // 处理方式：标签与下拉同一行左对齐（style.css 的 label:has(>select) 默认竖排，行内覆盖为横排）。
       const methodRow = node("div", undefined, "dialogue-row");
-      const methodLabel = node("label", MindexI18n.msg("ui.faaa367f81c6"), "method-field"),
-        method = node("select");
+      const methodLabel = node("label", MindexI18n.msg("ui.faaa367f81c6"), "method-field");
+      const method = node("select");
       MindexI18n.setAttr(method, "aria-label", MindexI18n.msg("ui.0883552d2a0f"));
       for (const [v, t] of [
         ["auto", MindexI18n.msg("ui.4d56c25d87cf")],
@@ -1248,13 +1363,13 @@ function renderWork(source, target) {
       body.append(methodRow);
       // 文本字幕与上传控件同一行；上传仅在未选定字幕（占位项）时出现，选定轨道或已上传文件后收起。
       const subtitleRow = node("div", undefined, "dialogue-row");
-      const trackLabel = node("label", MindexI18n.msg("ui.541d33dd3e02"), "track-field"),
-        track = node("select");
+      const trackLabel = node("label", MindexI18n.msg("ui.541d33dd3e02"), "track-field");
+      const track = node("select");
       MindexI18n.setAttr(track, "aria-label", MindexI18n.msg("ui.6918e72a515e"));
       const empty = node("option", MindexI18n.msg("ui.6fddde6cab67"));
       empty.value = "";
       track.append(empty);
-      for (const t of source.subtitle_tracks || [])
+      for (const t of source.subtitle_tracks || []) {
         if (t.text) {
           const o = node(
             "option",
@@ -1263,6 +1378,7 @@ function renderWork(source, target) {
           o.value = t.index;
           track.append(o);
         }
+      }
       for (const file of source.subtitle_files || []) {
         const o = node(
           "option",
@@ -1274,8 +1390,8 @@ function renderWork(source, target) {
       track.value = prefs.track;
       trackLabel.append(track);
       subtitleRow.append(trackLabel);
-      const uploadLabel = node("label", MindexI18n.msg("ui.3a3ecaeab3dd"), "upload-field"),
-        upload = node("input");
+      const uploadLabel = node("label", MindexI18n.msg("ui.3a3ecaeab3dd"), "upload-field");
+      const upload = node("input");
       upload.type = "file";
       upload.accept = ".srt,.ass,.ssa,.vtt,.sub,.smi,.sami";
       upload.disabled = blocked || prefs.uploadingSubtitle;
@@ -1299,7 +1415,9 @@ function renderWork(source, target) {
       syncDialogueRows();
       upload.onchange = async () => {
         const file = upload.files[0];
-        if (!file) return;
+        if (!file) {
+          return;
+        }
         prefs.uploadingSubtitle = true;
         upload.disabled = true;
         start.disabled = true;
@@ -1335,8 +1453,8 @@ function renderWork(source, target) {
         syncDialogueRows();
       };
     }
-    const checkLabel = node("label", undefined, "check"),
-      check = node("input");
+    const checkLabel = node("label", undefined, "check");
+    const check = node("input");
     check.type = "checkbox";
     check.checked = prefs.publish[name];
     check.onchange = () => {
@@ -1367,15 +1485,24 @@ function renderWork(source, target) {
                 ? MindexI18n.msg("ui.b3d17c0db3dd")
                 : MindexI18n.msg("ui.941fe1a3c3c2"),
       perform("process", async () => {
-        if (name === "persons") return openPerson(source.id, prefs.publish[name]);
+        if (name === "persons") {
+          return openPerson(source.id, prefs.publish[name]);
+        }
         const options = { publish: prefs.publish[name] };
         if (name === "dialogue") {
-          if (prefs.uploadingSubtitle) throw Error(MindexI18n.msg("ui.49476949fc90"));
+          if (prefs.uploadingSubtitle) {
+            throw Error(MindexI18n.msg("ui.49476949fc90"));
+          }
           options.method = prefs.method;
           if (prefs.method === "subtitle") {
-            if (!prefs.track) throw Error(MindexI18n.msg("ui.ed4caa4cf3b3"));
-            if (prefs.track.startsWith("file:")) options.subtitle_file = prefs.track.slice(5);
-            else options.subtitle_stream = Number(prefs.track);
+            if (!prefs.track) {
+              throw Error(MindexI18n.msg("ui.ed4caa4cf3b3"));
+            }
+            if (prefs.track.startsWith("file:")) {
+              options.subtitle_file = prefs.track.slice(5);
+            } else {
+              options.subtitle_stream = Number(prefs.track);
+            }
           }
         }
         await post(`/api/admin/sources/${source.id}/${name}`, options);
@@ -1405,7 +1532,7 @@ function renderWork(source, target) {
       scene.disabled = blocked || rows[2].running || !work.can_publish_scene;
       controls.append(scene);
     }
-    if (["shots", "dialogue", "analysis"].includes(name) && source.shot_count)
+    if (["shots", "dialogue", "analysis"].includes(name) && source.shot_count) {
       controls.append(
         action(MindexI18n.msg("ui.0ef38438801b"), async () => {
           state.kind = "shot";
@@ -1413,9 +1540,12 @@ function renderWork(source, target) {
           state.segmentPage = 1;
           await loadSegments();
           $("segment-list").scrollIntoView({ block: "start", behavior: "smooth" });
-          if (name !== "shots") notify(MindexI18n.msg("ui.1844d03ed5e7"));
+          if (name !== "shots") {
+            notify(MindexI18n.msg("ui.1844d03ed5e7"));
+          }
         }),
       );
+    }
     if (name === "persons") {
       const link = node("a", MindexI18n.msg("ui.8face9a73c34"), "quiet nav-link");
       link.href = `/persons?source=${encodeURIComponent(source.id)}#review`;
@@ -1424,7 +1554,9 @@ function renderWork(source, target) {
     }
     // 勾选框位于右栏首行按钮的下方，进度行之前。
     progressCol.append(controls, checkLabel);
-    for (const row of rows) appendWorkProgress(progressCol, label, row);
+    for (const row of rows) {
+      appendWorkProgress(progressCol, label, row);
+    }
     const processEndpoint = ["shots", "analysis"].includes(name)
       ? "/api/admin/source-tasks"
       : name === "dialogue"
@@ -1435,7 +1567,9 @@ function renderWork(source, target) {
     const cancelShown = new Set();
     for (const row of rows) {
       const task = row.task;
-      if (!task || !row.running || cancelShown.has(task.id)) continue;
+      if (!task || !row.running || cancelShown.has(task.id)) {
+        continue;
+      }
       cancelShown.add(task.id);
       const endpoint = task === work.task ? processEndpoint : "/api/admin/source-tasks";
       const requested = prefs.cancelling.has(task.id);
@@ -1467,7 +1601,7 @@ function renderWork(source, target) {
       );
       progressCol.append(cancel);
     }
-    for (const { type, task } of rows)
+    for (const { type, task } of rows) {
       if (type === "process" && task) {
         if (["failed", "interrupted", "cancelled"].includes(task.status)) {
           const retry = action(
@@ -1481,8 +1615,10 @@ function renderWork(source, target) {
           progressCol.append(retry);
         }
       }
-    if (MindexI18n.system(work.start_reason))
+    }
+    if (MindexI18n.system(work.start_reason)) {
       progressCol.append(node("p", MindexI18n.system(work.start_reason), "muted"));
+    }
     if (name === "persons" && work.setup?.missing?.length) {
       progressCol.append(node("p", work.setup.missing.map(MindexI18n.system).join("；"), "muted"));
       const link = node("a", MindexI18n.msg("ui.8af96795e1d4"));
@@ -1490,23 +1626,30 @@ function renderWork(source, target) {
       progressCol.append(link);
     }
     // 勾选框以下的说明文字归右栏，置于按钮与进度之后。
-    if (personsNote) progressCol.append(personsNote);
+    if (personsNote) {
+      progressCol.append(personsNote);
+    }
     grid.append(card);
   }
-  if (!cachePrefs.refreshingCache && (busy || source.work_refreshing))
+  if (!cachePrefs.refreshingCache && (busy || source.work_refreshing)) {
     workPoll = setTimeout(() => run(() => refreshWork(source.id)), 2000);
+  }
 }
 async function refreshWorkCache(sourceId) {
-  const selection = selectionRequest,
-    prefs = preferences(sourceId);
-  if (prefs.refreshingCache) return;
+  const selection = selectionRequest;
+  const prefs = preferences(sourceId);
+  if (prefs.refreshingCache) {
+    return;
+  }
   prefs.refreshingCache = true;
   delete prefs.cacheError;
   ++workRequest;
   renderSource(state.source);
   try {
     const source = await post(`/api/admin/sources/${sourceId}/work-cache/refresh`, {});
-    if (selection !== selectionRequest || state.source?.id !== sourceId) return;
+    if (selection !== selectionRequest || state.source?.id !== sourceId) {
+      return;
+    }
     ++workRequest;
     state.source = source;
     await Promise.all([loadSources(), loadSegments()]);
@@ -1514,7 +1657,9 @@ async function refreshWorkCache(sourceId) {
     prefs.cacheError = e.message;
   } finally {
     prefs.refreshingCache = false;
-    if (selection === selectionRequest && state.source?.id === sourceId) renderSource(state.source);
+    if (selection === selectionRequest && state.source?.id === sourceId) {
+      renderSource(state.source);
+    }
   }
 }
 async function refreshWork(sourceId, selection = selectionRequest) {
@@ -1523,8 +1668,13 @@ async function refreshWork(sourceId, selection = selectionRequest) {
     const source = await api(`/api/admin/sources/${sourceId}?detail=work`, {
       signal: selectionController?.signal,
     });
-    if (selection !== selectionRequest || request !== workRequest || state.source?.id !== sourceId)
+    if (
+      selection !== selectionRequest ||
+      request !== workRequest ||
+      state.source?.id !== sourceId
+    ) {
       return;
+    }
     const changed =
       state.source.work &&
       (source.shot_count !== state.source.shot_count ||
@@ -1532,25 +1682,29 @@ async function refreshWork(sourceId, selection = selectionRequest) {
         source.scene_count !== state.source.scene_count);
     state.source = source;
     renderSource(source);
-    if (changed) await Promise.all([loadSources(), loadSegments()]);
+    if (changed) {
+      await Promise.all([loadSources(), loadSegments()]);
+    }
   } catch (e) {
     if (
       e.name === "AbortError" ||
       selection !== selectionRequest ||
       request !== workRequest ||
       state.source?.id !== sourceId
-    )
+    ) {
       return;
+    }
     state.source = { ...state.source, work: null, statusError: e.message };
-    if (state.source.media) renderSource(state.source);
-    else {
+    if (state.source.media) {
+      renderSource(state.source);
+    } else {
       $("source-detail").replaceChildren();
       renderWork(state.source, $("source-detail"));
     }
   }
 }
-let personContext = null,
-  personSetupRequest = 0;
+let personContext = null;
+let personSetupRequest = 0;
 async function openPerson(sourceId, publish) {
   personContext = { sourceId, publish };
   MindexI18n.setText($("person-error"), "");
@@ -1558,8 +1712,8 @@ async function openPerson(sourceId, publish) {
   $("person-setup").replaceChildren(node("p", MindexI18n.msg("ui.de365dab6e9d")));
   $("person-work").replaceChildren();
   $("person-dialog").showModal();
-  const data = await api(`/api/admin/sources/${sourceId}/person-setup`),
-    empty = node("option", MindexI18n.msg("ui.c1e638f8326c"));
+  const data = await api(`/api/admin/sources/${sourceId}/person-setup`);
+  const empty = node("option", MindexI18n.msg("ui.c1e638f8326c"));
   empty.value = "";
   $("person-work").append(empty);
   for (const w of data.works) {
@@ -1575,8 +1729,9 @@ function renderPersonSetup(data) {
   target.replaceChildren(
     node("p", MindexI18n.msg("ui.fae274c098c2", { p0: data.roles, p1: data.actors })),
   );
-  for (const text of data.missing)
+  for (const text of data.missing) {
     target.append(node("p", MindexI18n.system(text), "source-warning"));
+  }
   const link = node("a", MindexI18n.msg("ui.30af02a77651"));
   link.href = "/persons";
   link.target = "_blank";
@@ -1586,13 +1741,15 @@ function renderPersonSetup(data) {
   $("person-start").disabled = !data.ready;
 }
 async function loadPersonSetup() {
-  const context = personContext,
-    request = ++personSetupRequest;
+  const context = personContext;
+  const request = ++personSetupRequest;
   $("person-start").disabled = true;
   const data = await api(
     `/api/admin/sources/${context.sourceId}/person-setup?${params({ work_id: $("person-work").value || null })}`,
   );
-  if (request === personSetupRequest && context === personContext) renderPersonSetup(data);
+  if (request === personSetupRequest && context === personContext) {
+    renderPersonSetup(data);
+  }
 }
 $("person-work").onchange = () => run(loadPersonSetup);
 $("person-start").onclick = async () => {
@@ -1609,11 +1766,12 @@ $("person-start").onclick = async () => {
     $("person-dialog").close();
     await refreshWork(context.sourceId);
     // A short task can finish while source_work is assembling its snapshot.
-    if (!workPoll)
+    if (!workPoll) {
       workPoll = setTimeout(() => {
         workPoll = null;
         run(() => refreshWork(context.sourceId));
       }, 500);
+    }
   } catch (e) {
     MindexI18n.setText($("person-error"), e.message);
     $("person-start").disabled = false;
@@ -1633,9 +1791,9 @@ $("add-source").onclick = () => {
 $("upload-close").onclick = () => $("upload-dialog").close();
 function enqueueUploads(files) {
   for (const file of files) {
-    const row = node("section", undefined, "upload-row"),
-      text = node("p", MindexI18n.msg("ui.89f295632114", { p0: file.name })),
-      progress = node("progress");
+    const row = node("section", undefined, "upload-row");
+    const text = node("p", MindexI18n.msg("ui.89f295632114", { p0: file.name }));
+    const progress = node("progress");
     progress.max = 100;
     progress.value = 0;
     MindexI18n.setAttr(progress, "aria-label", file.name + MindexI18n.msg("ui.33d774c4d765"));
@@ -1649,11 +1807,12 @@ $("upload-files").onchange = (event) => {
   enqueueUploads(event.target.files);
   event.target.value = "";
 };
-for (const event of ["dragenter", "dragover"])
+for (const event of ["dragenter", "dragover"]) {
   $("upload-drop").addEventListener(event, (e) => {
     e.preventDefault();
     $("upload-drop").classList.add("dragging");
   });
+}
 $("upload-drop").addEventListener("dragleave", () => $("upload-drop").classList.remove("dragging"));
 $("upload-drop").addEventListener("drop", (e) => {
   e.preventDefault();
@@ -1671,7 +1830,9 @@ function uploadOne(item) {
   );
 }
 async function processUploads() {
-  if (uploading) return;
+  if (uploading) {
+    return;
+  }
   uploading = true;
   try {
     while (uploadQueue.length) {
@@ -1697,7 +1858,7 @@ async function processUploads() {
           MindexI18n.msg("ui.b6917a629c7d", { p0: item.file.name, p1: e.message }),
         );
         item.text.className = "source-warning";
-        if (item.transport === "s3")
+        if (item.transport === "s3") {
           for (const [label, restart] of [
             ["ui.upload_resume", false],
             ["ui.upload_restart", true],
@@ -1709,6 +1870,7 @@ async function processUploads() {
             });
             item.row.append(button);
           }
+        }
       }
     }
   } finally {
@@ -1725,13 +1887,17 @@ async function showAnalysis(item) {
   );
   const target = $("analysis-content");
   target.replaceChildren(node("p", MindexI18n.msg("ui.919609d4ae0e")));
-  if (!$("analysis-dialog").open) $("analysis-dialog").showModal();
+  if (!$("analysis-dialog").open) {
+    $("analysis-dialog").showModal();
+  }
   try {
     const data = await api(`/api/admin/segments/${item.id}/details`);
-    if (request !== analysisRequest) return;
+    if (request !== analysisRequest) {
+      return;
+    }
     target.replaceChildren();
     function utterances(section, rows) {
-      for (const u of rows || [])
+      for (const u of rows || []) {
         section.append(
           node(
             "p",
@@ -1739,22 +1905,26 @@ async function showAnalysis(item) {
             "analysis-utterance",
           ),
         );
+      }
     }
     const asr = node("section", undefined, "analysis-section");
     asr.append(
       node("h3", MindexI18n.msg("ui.4d3975e9b6bc")),
       node("p", MindexI18n.system(data.asr)),
     );
-    if (MindexI18n.system(data.asr.error))
+    if (MindexI18n.system(data.asr.error)) {
       asr.append(node("p", MindexI18n.system(data.asr.error), "error"));
+    }
     utterances(asr, data.asr.utterances);
     target.append(asr);
     const subtitles = node("section", undefined, "analysis-section");
     subtitles.append(node("h3", MindexI18n.msg("ui.0446ed2748cc")));
-    if (!data.subtitles.tracks.length)
+    if (!data.subtitles.tracks.length) {
       subtitles.append(node("p", MindexI18n.system(data.subtitles)));
-    if (MindexI18n.system(data.subtitles.error))
+    }
+    if (MindexI18n.system(data.subtitles.error)) {
       subtitles.append(node("p", MindexI18n.system(data.subtitles.error), "error"));
+    }
     for (const track of data.subtitles.tracks) {
       subtitles.append(
         node(
@@ -1768,8 +1938,9 @@ async function showAnalysis(item) {
         ),
         node("p", MindexI18n.system(track)),
       );
-      if (MindexI18n.system(track.error))
+      if (MindexI18n.system(track.error)) {
         subtitles.append(node("p", MindexI18n.system(track.error), "error"));
+      }
       utterances(subtitles, track.utterances);
     }
     target.append(subtitles);
@@ -1793,12 +1964,15 @@ async function showAnalysis(item) {
       };
       for (const [key, value] of Object.entries(data.llm.annotation)) {
         const text = Array.isArray(value) ? value.join("；") : String(value ?? "");
-        if (text)
+        if (text) {
           llm.append(MindexAnalysisText.setText(node("p"), value, { label: labels[key] || key }));
+        }
       }
     } else {
       llm.append(node("p", MindexI18n.system(data.llm)));
-      if (data.llm.reason) llm.append(node("p", MindexI18n.system(data.llm.reason), "muted"));
+      if (data.llm.reason) {
+        llm.append(node("p", MindexI18n.system(data.llm.reason), "muted"));
+      }
     }
     target.append(llm);
     const person = node("section", undefined, "analysis-section");
@@ -1811,8 +1985,9 @@ async function showAnalysis(item) {
       ["uncovered", MindexI18n.msg("ui.453d58eaeb0c")],
     ]) {
       const ranges = data.person[key].map((r) => `${time(r.start)} — ${time(r.end)}`).join("、");
-      if (ranges)
+      if (ranges) {
         person.append(node("p", MindexI18n.msg("ui.163081b53c04", { p0: label, p1: ranges })));
+      }
     }
     const counts = data.person.counts;
     person.append(
@@ -1825,7 +2000,7 @@ async function showAnalysis(item) {
         }),
       ),
     );
-    if (data.person.people.length)
+    if (data.person.people.length) {
       person.append(
         node(
           "p",
@@ -1834,9 +2009,12 @@ async function showAnalysis(item) {
           }),
         ),
       );
+    }
     target.append(person);
   } catch (error) {
-    if (request === analysisRequest) target.replaceChildren(node("p", error.message, "error"));
+    if (request === analysisRequest) {
+      target.replaceChildren(node("p", error.message, "error"));
+    }
   }
 }
 $("analysis-close").onclick = () => $("analysis-dialog").close();
@@ -1845,9 +2023,13 @@ $("analysis-dialog").addEventListener("close", () => {
 });
 
 window.addEventListener("mindex:agent-mutation", (event) => {
-  if (!event.detail?.groups) return;
+  if (!event.detail?.groups) {
+    return;
+  }
   run(async () => {
-    if (state.source?.id) await refreshWork(state.source.id);
+    if (state.source?.id) {
+      await refreshWork(state.source.id);
+    }
     await loadSources();
     void sourceGroups.refresh();
   });

@@ -3,15 +3,20 @@
 window.DeliveryEditor = (() => {
   let catalogue = [];
   async function loadPlatforms(force = false) {
-    if (!catalogue.length || force)
+    if (!catalogue.length || force) {
       catalogue = (await MindexApi.json("/api/studio/platforms")).items;
+    }
     return catalogue;
   }
   const t = (key) => MindexI18n.msg(`ui.dt_${key}`);
   function node(tag, key, cls) {
     const n = document.createElement(tag);
-    if (key) MindexI18n.setText(n, t(key));
-    if (cls) n.className = cls;
+    if (key) {
+      MindexI18n.setText(n, t(key));
+    }
+    if (cls) {
+      n.className = cls;
+    }
     return n;
   }
   function defaults() {
@@ -52,15 +57,20 @@ window.DeliveryEditor = (() => {
       const control = document.createElement(
         choices ? "select" : type === "textarea" ? "textarea" : "input",
       );
-      if (choices)
+      if (choices) {
         for (const [val, title] of choices) {
           const opt = node("option", title);
           opt.value = val;
           control.append(opt);
         }
-      else if (type !== "textarea") control.type = type;
-      if (type === "checkbox") control.checked = !!value;
-      else control.value = value ?? "";
+      } else if (type !== "textarea") {
+        control.type = type;
+      }
+      if (type === "checkbox") {
+        control.checked = !!value;
+      } else {
+        control.value = value ?? "";
+      }
       control.addEventListener(type === "checkbox" || choices ? "change" : "input", () =>
         change(type === "checkbox" ? control.checked : control.value),
       );
@@ -99,7 +109,7 @@ window.DeliveryEditor = (() => {
         heading.textContent = canvas;
         row.append(heading);
         rows.append(row);
-        let item = cfg.exports.find((x) => x.canvas === canvas);
+        const item = cfg.exports.find((x) => x.canvas === canvas);
         const val = item ? (item.mode === "rerender" ? "rerender" : item.fit) : "";
         field(
           row,
@@ -107,17 +117,18 @@ window.DeliveryEditor = (() => {
           val,
           (value) => {
             cfg.exports = cfg.exports.filter((x) => x.canvas !== canvas);
-            if (value)
+            if (value) {
               cfg.exports.push({
                 canvas,
                 mode: value === "rerender" ? "rerender" : "derive",
                 fit: value === "pad" ? "pad" : "crop",
               });
+            }
             refreshExports();
           },
           [["", "off"], ...strategies],
         );
-        if (item?.mode === "rerender")
+        if (item?.mode === "rerender") {
           field(
             row,
             "fit",
@@ -130,6 +141,7 @@ window.DeliveryEditor = (() => {
               ["pad", "fit_pad"],
             ],
           );
+        }
       }
     }
     refreshExports();
@@ -157,7 +169,7 @@ window.DeliveryEditor = (() => {
           "description_instructions",
           "fixed_tags",
           "footer",
-        ])
+        ]) {
           field(
             details,
             key,
@@ -174,6 +186,7 @@ window.DeliveryEditor = (() => {
             null,
             "textarea",
           );
+        }
       }
     }
     function drawPlatforms() {
@@ -193,7 +206,9 @@ window.DeliveryEditor = (() => {
             if (checked && live) {
               pub.platforms.push(id);
               pub.platform_specs[id] = structuredClone(live);
-            } else delete pub.platform_specs[id];
+            } else {
+              delete pub.platform_specs[id];
+            }
             cfg.publish = pub.platforms.length ? pub : null;
             drawPlatforms();
             drawRules();
@@ -202,7 +217,9 @@ window.DeliveryEditor = (() => {
           "checkbox",
         );
         checkbox.parentNode.firstChild.textContent = stored?.name || live?.name || id;
-        if (!live) group.append(node("span", "platform_deleted", "muted"));
+        if (!live) {
+          group.append(node("span", "platform_deleted", "muted"));
+        }
         if (live && pub.platforms.includes(id)) {
           const update = node("button", "update_platform", "quiet");
           update.type = "button";
@@ -218,8 +235,8 @@ window.DeliveryEditor = (() => {
     }
     drawPlatforms();
     drawRules();
-    const coverBox = section("cover"),
-      cover = pub.cover;
+    const coverBox = section("cover");
+    const cover = pub.cover;
     function coverField(key, type = "text") {
       return field(
         coverBox,
@@ -313,7 +330,9 @@ window.DeliveryEditor = (() => {
       const image = field(coverBox, "image", "", () => {}, null, "file");
       image.accept = "image/png,image/jpeg,image/webp";
       image.addEventListener("change", async () => {
-        if (!image.files[0]) return;
+        if (!image.files[0]) {
+          return;
+        }
         image.disabled = true;
         try {
           const result = await upload(image.files[0]);
@@ -353,14 +372,16 @@ window.DeliveryEditor = (() => {
         null,
         "checkbox",
       );
-      if (!label) control.parentNode.firstChild.textContent = key.toUpperCase();
+      if (!label) {
+        control.parentNode.firstChild.textContent = key.toUpperCase();
+      }
     }
     field(pack, "filename", cfg.package.filename, (value) => {
       cfg.package.filename = value;
     });
     pack.append(node("p", "filename_help", "muted"));
     const checks = section("checks");
-    for (const key of ["canvas", "cover", "metadata"])
+    for (const key of ["canvas", "cover", "metadata"]) {
       field(
         checks,
         `check_${key}`,
@@ -373,6 +394,7 @@ window.DeliveryEditor = (() => {
           ["block", "block"],
         ],
       );
+    }
     return () => {
       cfg.publish = pub.platforms.length ? pub : null;
       return structuredClone(cfg);

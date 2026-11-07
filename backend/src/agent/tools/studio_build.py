@@ -492,7 +492,10 @@ def specs() -> list[ToolSpec]:
         ToolSpec(
             "run_build",
             "studio",
-            "构建成片：按预检清单在后台执行（只重建变化的节点，其余复用）。提交后立即返回，结束时系统会通知你。",
+            (
+                "构建成片：按预检清单在后台执行（只重建变化的节点，其余复用）。提交后立即返回，"
+                "结束时系统会通知你。"
+            ),
             RunBuild,
             "danger",
             run_build,
@@ -523,7 +526,10 @@ def specs() -> list[ToolSpec]:
         ToolSpec(
             "cancel_build",
             "studio",
-            "取消正在执行的构建（或旧任务的步骤执行）：正在执行的节点照常完成，其余节点标为已取消，已生成版本保留。",
+            (
+                "取消正在执行的构建（或旧任务的步骤执行）：正在执行的节点照常完成，其余节点标为已取消，"
+                "已生成版本保留。"
+            ),
             CancelBuild,
             "write",
             cancel_build,
@@ -532,7 +538,10 @@ def specs() -> list[ToolSpec]:
         ToolSpec(
             "delete_plan",
             "studio",
-            "删除一个方案记录（不能删除唯一的方案；有构建执行时不可删）。版本与文件保留，删的是当前方案时切到最新创建的其余方案。",
+            (
+                "删除一个方案记录（不能删除唯一的方案；有构建执行时不可删）。版本与文件保留，"
+                "删的是当前方案时切到最新创建的其余方案。"
+            ),
             DeletePlan,
             "danger",
             delete_plan,

@@ -28,7 +28,9 @@ class Node {
   }
   append(...children) {
     for (const c of children) {
-      if (c && typeof c === "object") c.parent = this;
+      if (c && typeof c === "object") {
+        c.parent = this;
+      }
       this.children.push(c);
     }
   }
@@ -45,13 +47,19 @@ class Node {
     (this.listeners[type] ||= []).push(fn);
   }
   fire(type) {
-    for (const fn of this.listeners[type] || []) fn({ detail: 1, key: "", preventDefault() {} });
+    for (const fn of this.listeners[type] || []) {
+      fn({ detail: 1, key: "", preventDefault() {} });
+    }
   }
 }
 const walk = (node, out = []) => {
-  if (!node || typeof node !== "object") return out;
+  if (!node || typeof node !== "object") {
+    return out;
+  }
   out.push(node);
-  for (const c of node.children) walk(c, out);
+  for (const c of node.children) {
+    walk(c, out);
+  }
   return out;
 };
 const find = (root, pred) => walk(root).find(pred);
@@ -142,8 +150,8 @@ sandbox.statusText = (value) => sandbox.STATUS[value] || String(value ?? "");
 vm.createContext(sandbox);
 const source = require("./studio_source.cjs").studioSource();
 const slice = (start, end) => {
-  const a = source.indexOf(start),
-    b = source.indexOf(end, a);
+  const a = source.indexOf(start);
+  const b = source.indexOf(end, a);
   assert.ok(a >= 0 && b > a, `创作页脚本中找不到代码片段：${start} … ${end}`);
   return source.slice(a, b);
 };
@@ -172,7 +180,9 @@ const shot = (id, text, query, extra = {}) => ({
 });
 // 每个用例前重建：s1 有 visual，s2 是老分镜（无 visual 键），s3 有 visual。
 function reset() {
-  for (const k of Object.keys(versions)) delete versions[k];
+  for (const k of Object.keys(versions)) {
+    delete versions[k];
+  }
   const data = [
     shot("s1", "From misty mountain trails", "山间 步道 晨雾", { visual: "晨雾笼罩的山间步道" }),
     shot("s2", " and quiet lakeside villages", "湖畔 村庄"),

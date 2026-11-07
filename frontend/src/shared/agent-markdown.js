@@ -37,7 +37,9 @@
   let configured = false;
 
   function configure() {
-    if (configured || !window.DOMPurify) return;
+    if (configured || !window.DOMPurify) {
+      return;
+    }
     configured = true;
     // 链接：外部地址新窗口打开并切断 opener；站内相对地址保持同窗口。其余协议的 href 直接去掉。
     window.DOMPurify.addHook("afterSanitizeAttributes", (node) => {
@@ -50,7 +52,9 @@
         node.setAttribute("loading", "lazy");
         return;
       }
-      if (node.tagName !== "A") return;
+      if (node.tagName !== "A") {
+        return;
+      }
       const href = node.getAttribute("href") || "";
       if (!SAFE_URL.test(href)) {
         node.removeAttribute("href");
@@ -64,7 +68,9 @@
   }
 
   function html(text) {
-    if (!window.marked || !window.DOMPurify) return null;
+    if (!window.marked || !window.DOMPurify) {
+      return null;
+    }
     configure();
     const raw = window.marked.parse(String(text ?? ""), { gfm: true, breaks: true, async: false });
     return window.DOMPurify.sanitize(raw, {

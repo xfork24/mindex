@@ -1,7 +1,9 @@
 """工作台处理/发布分阶段进度：真实管线、索引、SQLite 与检查点。"""
 
 import json
+import logging
 import threading
+from types import SimpleNamespace
 
 import pytest
 
@@ -332,8 +334,6 @@ def test_retry_clears_only_attempt_diagnostics_and_preserves_result(config, vide
 
 
 def test_latest_worker_log_is_one_line_thread_scoped_and_phase_scoped(config):
-    import logging
-    from types import SimpleNamespace
 
     from shared.storage import Store
     from shared.task_progress import task_logs
@@ -343,7 +343,7 @@ def test_latest_worker_log_is_one_line_thread_scoped_and_phase_scoped(config):
         "INSERT INTO source_tasks(id,source_id,work,status,config,options) "
         "VALUES('log','s','shots','running','{}','{}')"
     )
-    logger = logging.getLogger("test_task_log")
+    logger = logging.getLogger("processing.test_task_log")
     before = logger.level
     logger.setLevel(logging.INFO)
 

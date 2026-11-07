@@ -16,7 +16,9 @@ const sourceGroup = process.env.MINDEX_GROUPS_SOURCE_GROUP;
   const errors = [];
   const resolutions = [];
   page.on("request", (request) => {
-    if (request.url().endsWith("/api/admin/groups/resolve")) resolutions.push(request.url());
+    if (request.url().endsWith("/api/admin/groups/resolve")) {
+      resolutions.push(request.url());
+    }
   });
   page.on("pageerror", (error) => errors.push(error.message));
   await page.route("**/api/settings/voices/catalog*", (route) =>
@@ -44,16 +46,22 @@ const sourceGroup = process.env.MINDEX_GROUPS_SOURCE_GROUP;
     for (const value of await control
       .locator("input:checked")
       .evaluateAll((nodes) => nodes.map((node) => node.value))) {
-      if (!ids.includes(value)) await control.locator(`input[value="${value}"]`).uncheck();
+      if (!ids.includes(value)) {
+        await control.locator(`input[value="${value}"]`).uncheck();
+      }
     }
-    for (const id of ids) await control.locator(`input[value="${id}"]`).check();
+    for (const id of ids) {
+      await control.locator(`input[value="${id}"]`).check();
+    }
   }
   // 组筛选默认全选：全部实际组勾选且“全部选择”同步勾选（values 为空 = 不限）。
   async function assertAllSelected(selector, name) {
     await page
       .waitForFunction((sel) => {
         const select = document.querySelector(sel);
-        if (!select) return false;
+        if (!select) {
+          return false;
+        }
         const real = [...select.options].filter(
           (option) => option.value && option.value !== "__all__",
         );
@@ -113,7 +121,9 @@ const sourceGroup = process.env.MINDEX_GROUPS_SOURCE_GROUP;
             const form = document.getElementById("create-form");
             const label = document.getElementById("create-sources")?.closest("label");
             const picker = form?.querySelector(":scope > .group-picker");
-            if (!picker || !label) return true;
+            if (!picker || !label) {
+              return true;
+            }
             return (
               Math.abs(picker.getBoundingClientRect().width - label.getBoundingClientRect().width) <
               1
@@ -482,10 +492,11 @@ const sourceGroup = process.env.MINDEX_GROUPS_SOURCE_GROUP;
           `${language}: 控件应保持同行 ${row.name}`,
         );
       }
-      if (language === "zh")
+      if (language === "zh") {
         await page
           .locator("#stage-panel")
           .screenshot({ path: process.env.MINDEX_GROUPS_OUTPUT + "/editor-wide.png" });
+      }
       await page.setViewportSize({ width: 1280, height: 1000 });
     }
     await audit("groups-shot-recall");

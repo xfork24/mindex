@@ -1,3 +1,4 @@
+const { between } = require("./source_slices.cjs");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
@@ -38,6 +39,7 @@ const context = vm.createContext({
   clock: String,
   MindexI18n: {
     msg: (key) => key,
+    setAttr: (node, name, text) => node.setAttribute(name, text),
     setText: (node, text) => {
       node.text = text;
     },
@@ -53,14 +55,8 @@ context.document = { querySelectorAll: () => [] };
 context.MindexI18n.language = "zh";
 context.MindexI18n.render = (text) => text;
 vm.runInContext(fs.readFileSync("frontend/src/shared/analysis-text.js", "utf8"), context);
-vm.runInContext(
-  source.slice(source.indexOf("function details("), source.indexOf("function managementLink(")),
-  context,
-);
-vm.runInContext(
-  source.slice(source.indexOf("function render("), source.indexOf("$('search-form').onsubmit")),
-  context,
-);
+vm.runInContext(between(source, "function details(", "function managementLink("), context);
+vm.runInContext(between(source, "function render(", '$("search-form").onsubmit'), context);
 const base = {
   id: "skipped",
   source_id: "s",

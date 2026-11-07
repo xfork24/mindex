@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import PurePosixPath
 
+from shared.directory_files import document_digest, validate_entry
+
 PATH_FIELDS = frozenset(
     {
         "path",
@@ -89,7 +91,6 @@ def referenced_objects(store, *, connection=None):
     for row in _rows(db, "shared_files", ("object_key", "size")):
         if row["size"] >= 0:
             yield row["object_key"]
-    from shared.directory_files import document_digest, validate_entry
 
     for row in _rows(db, "directory_manifests", ("revision", "path", "document"), page=32):
         document = json.loads(row["document"])

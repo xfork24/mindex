@@ -16,10 +16,15 @@ from pathlib import Path
 from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules, copy_metadata
 from deepseek_harness_runtime import resolve_bundled_launch_args
 
+import mindex
+
 # 要求当前目标平台的生产运行时完整；不使用系统 Node 或开发态 carrier。
 resolve_bundled_launch_args("exe")
 
 SOURCE_MODULES = {
+    "models.llama_cpp": "py",
+    "models.model_server": "py",
+    "processing.align_worker": "py",
     "mindex.models.llama_cpp": "py",
     "mindex.models.model_server": "py",
     "mindex.processing.align_worker": "py",
@@ -29,10 +34,10 @@ datas, binaries, hiddenimports = [], [], []
 hiddenimports += collect_submodules("mindex")
 # 包内组件统一短名导入(shared.media 等,见 plans/code-style-normalization-plan.md 原始需求 2):
 # 运行时 mindex/__init__ 把包目录加入 sys.path 后以短名加载,冻结分析需把短名模块一并收进 TOC。
-# 构建环境把 backend/src 加入 sys.path 才能以短名解析这些包。
-_BACKEND_SRC = Path(__file__).resolve().parents[2] / "backend" / "src"
-if _BACKEND_SRC.is_dir():
-    sys.path.insert(0, str(_BACKEND_SRC))
+# 从已安装的 wheel 收集短名模块及其数据，保证与 mindex.web 的资源属于同一次构建。
+_BACKEND_ROOT = Path(mindex.__file__).resolve().parent
+if str(_BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(_BACKEND_ROOT))
 for _short_pkg in (
     "admin",
     "agent",
@@ -52,6 +57,7 @@ for _short_pkg in (
     "worker",
 ):
     hiddenimports += collect_submodules(_short_pkg)
+    datas += collect_data_files(_short_pkg)
 hiddenimports += collect_submodules("uvicorn")
 # 只经 `mindex -m 模块` 运行、没有被任何模块导入的入口（AI 动画录制组件安装）。
 hiddenimports += ["playwright.__main__"]
@@ -77,7 +83,7 @@ for package in ("fastapi", "uvicorn", "pydantic", "chromadb", "httpx", "playwrig
 
 analysis = Analysis(
     ["launcher.py"],
-    pathex=[],
+    pathex=[str(_BACKEND_ROOT)],
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,

@@ -1,7 +1,6 @@
-(
-    """`mindex studio` CLI：进程内经 REST 列出任务与方案、预检、构建（等待结束）、查看日志与下载成片；409 """
-    """退出码。"""
-)
+"""`mindex studio` CLI：进程内经 REST 列出任务与方案、预检、构建（等待结束）、查看日志与下载成片；
+409 退出码。
+"""
 
 from __future__ import annotations
 

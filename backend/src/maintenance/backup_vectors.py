@@ -9,6 +9,8 @@ import traceback
 from pathlib import Path
 
 from maintenance.backup_db import raw_representation_ids, store_at
+from processing import indexing
+from processing.indexing import VectorIndex
 from shared.config import fingerprint
 from shared.storage import dumps
 
@@ -16,7 +18,6 @@ BATCH_SIZE = 256
 
 
 def run(request):
-    from processing.indexing import VectorIndex, check_index
 
     root, bundle = Path(request["root"]), Path(request["bundle"])
     store = store_at(root)
@@ -220,7 +221,7 @@ def run(request):
                     if document != (rep["document"] or rep["view"]):
                         raise ValueError(f"向量文档与表示不一致：{rid}")
             if version["status"] == "ready":
-                issues = check_index(store, version["id"])
+                issues = indexing.check_index(store, version["id"])
                 if issues:
                     raise ValueError("索引检查失败：" + "; ".join(issues[:5]))
         return {"ok": True}

@@ -9,6 +9,10 @@ import hashlib
 from contextlib import contextmanager
 from contextvars import ContextVar
 
+from filelock import Timeout
+
+from shared import lock_backend
+
 _ACTIVE = ContextVar("mindex_maintenance", default=None)
 
 __all__ = ["MaintenanceBusy", "maintenance_gate"]
@@ -27,6 +31,7 @@ def _keys(library_id):
 def guard_write(connection, library_id, scope):
     if _ACTIVE.get() == scope:
         return
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
     from shared.migration_state import guard
 
     guard(connection, scope)
@@ -42,10 +47,8 @@ def maintenance_gate(store, *, name, wait=0):
         return
     if _ACTIVE.get() == store.backend.dsn:
         raise MaintenanceBusy(f"已有维护进程在运行（{name}）；请稍后再试")
+    # 延迟导入：独立模型或扩展功能使用可选依赖，仅在实际调用时加载。
     import psycopg
-    from filelock import Timeout
-
-    from shared import lock_backend
 
     try:
         # 排空长任务与发布；同线程内后续维护事务豁免共享门闩。

@@ -20,7 +20,9 @@ function hasDirtyDraft() {
 }
 function mutationButton(text, action, unavailable = false, allowDirty = false) {
   const n = button(text, () => {
-    if (busy() || (!allowDirty && hasDirtyDraft())) return;
+    if (busy() || (!allowDirty && hasDirtyDraft())) {
+      return;
+    }
     return action();
   });
   n.dataset.mutating = "true";
@@ -29,9 +31,11 @@ function mutationButton(text, action, unavailable = false, allowDirty = false) {
   return n;
 }
 function updateLocks() {
-  if (!state.data) return;
-  const locked = busy(),
-    dirty = hasDirtyDraft();
+  if (!state.data) {
+    return;
+  }
+  const locked = busy();
+  const dirty = hasDirtyDraft();
   syncScriptControls();
   for (const id of [
     "plan-select",
@@ -122,10 +126,12 @@ function selectionWithin(node) {
 }
 function executionError(stage, sid) {
   const node = latestNode(stage, sid);
-  if (node?.status !== "failed") return "";
-  const attempted = ver(node.version),
-    tts = attempted?.parameters.tts,
-    detail = node.error || attempted?.error || MindexI18n.msg("ui.6d38d4b01891");
+  if (node?.status !== "failed") {
+    return "";
+  }
+  const attempted = ver(node.version);
+  const tts = attempted?.parameters.tts;
+  const detail = node.error || attempted?.error || MindexI18n.msg("ui.6d38d4b01891");
   const context =
     stage === "tts" && tts
       ? MindexI18n.msg("ui.710dfeaa9bc9", { p0: tts.model, p1: tts.voice })
@@ -151,10 +157,12 @@ function executionError(stage, sid) {
 }
 // 某分镜某阶段的摘要节点（版本徽标、摘要文字、背景音乐、冲突、最近执行与失败原因），供卡片使用。
 function stageSummaryNodes(sid, stage) {
-  if (stage === "source") return sourceSummaryNodes(sid);
-  const selected = plan().shots[sid][stage],
-    item = ver(selected),
-    nodes = [];
+  if (stage === "source") {
+    return sourceSummaryNodes(sid);
+  }
+  const selected = plan().shots[sid][stage];
+  const item = ver(selected);
+  const nodes = [];
   nodes.push(
     el(
       "span",
@@ -169,7 +177,7 @@ function stageSummaryNodes(sid, stage) {
     if (stage === "content") {
       nodes.push(el("span", d.text, "cell-summary"));
       // 画面意象非空时完整显示；为空时不显示该行，也不放占位文字。
-      if (typeof d.visual === "string" && d.visual.trim())
+      if (typeof d.visual === "string" && d.visual.trim()) {
         nodes.push(
           el(
             "span",
@@ -177,15 +185,18 @@ function stageSummaryNodes(sid, stage) {
             "cell-summary visual-summary",
           ),
         );
+      }
       nodes.push(el("span", d.query, "cell-summary muted"));
       const source = sourceSummary(d.source);
-      if (source) nodes.push(el("span", source, "cell-summary"));
+      if (source) {
+        nodes.push(el("span", source, "cell-summary"));
+      }
       // 分镜级召回覆盖（粒度/数量）在摘要可见，便于发现被钉住的分镜。
       const overrides = [
         d.granularity && GRANULARITY_LABEL[d.granularity],
         d.recall_limit && MindexI18n.msg("ui.adf1951c424c", { p0: d.recall_limit }),
       ].filter(Boolean);
-      if (overrides.length)
+      if (overrides.length) {
         nodes.push(
           el(
             "span",
@@ -193,8 +204,10 @@ function stageSummaryNodes(sid, stage) {
             "cell-summary muted",
           ),
         );
-      if (state.drafts.get(draftKey(sid))?.dirty)
+      }
+      if (state.drafts.get(draftKey(sid))?.dirty) {
         nodes.push(el("span", MindexI18n.msg("ui.70ac7eb1c08c"), "badge warn"));
+      }
     } else {
       const summary =
         stage === "recall"
@@ -236,14 +249,18 @@ function stageSummaryNodes(sid, stage) {
   if (stage === "tts" || stage === "render") {
     // 背景音乐显示在配音列（提示点、顺延或停止），分镜渲染列同样标出本镜适用的背景音乐。
     const line = musicSummary(sid);
-    if (line) nodes.push(el("span", line, "cell-summary music-summary"));
+    if (line) {
+      nodes.push(el("span", line, "cell-summary music-summary"));
+    }
   }
   if (stage === "render") {
     const line = transitionSummary(sid);
-    if (line) nodes.push(el("span", line, "cell-summary post-summary"));
+    if (line) {
+      nodes.push(el("span", line, "cell-summary post-summary"));
+    }
   }
   const messages = state.data.conflicts[`${stage}:${sid}`] || [];
-  if (messages.length)
+  if (messages.length) {
     nodes.push(
       el(
         "span",
@@ -255,13 +272,17 @@ function stageSummaryNodes(sid, stage) {
         "cell-summary warn-text",
       ),
     );
+  }
   const node = latestNode(stage, sid);
-  if (node)
+  if (node) {
     nodes.push(
       el("span", MindexI18n.msg("ui.7f95d89a3924", { p0: statusText(node.status) }), "cell-status"),
     );
+  }
   const error = executionError(stage, sid);
-  if (error) nodes.push(el("span", error, "cell-summary warn-text"));
+  if (error) {
+    nodes.push(el("span", error, "cell-summary warn-text"));
+  }
   return nodes;
 }
 // 上传片段/图片分镜的素材预览阶段：显示上传的素材；没有可执行的画面阶段。
@@ -301,11 +322,13 @@ function retrievalCombo(item, full) {
 }
 // 分镜工作台上方一行：当前生效的组合、工作台依赖的组合，以及两者是否一致。
 function renderRetrieval() {
-  const box = $("retrieval-deps"),
-    info = state.data.retrieval;
+  const box = $("retrieval-deps");
+  const info = state.data.retrieval;
   box.replaceChildren();
   box.hidden = !info;
-  if (!info) return;
+  if (!info) {
+    return;
+  }
   const describe = (full) => {
     const active = info.active
       ? retrievalCombo(info.active, full)
@@ -348,8 +371,8 @@ function renderRetrieval() {
 }
 // 分镜工作台：顶部分镜条（卡片）+ 阶段浮层 + 下方阶段详情区。名称沿用 renderMatrix，供各模块调用。
 function renderMatrix() {
-  const strip = $("shot-strip"),
-    scope = scopeKey();
+  const strip = $("shot-strip");
+  const scope = scopeKey();
   if (state.boardScope !== scope) {
     resetBoard();
     state.boardScope = scope;
@@ -357,8 +380,9 @@ function renderMatrix() {
   const ids = order();
   // 打开的分镜已删除、或阶段已不属于该分镜（例如改了画面来源）时清除。
   const open = selection();
-  if (open && (!ids.includes(open.sid) || !barStages(open.sid).includes(open.stage)))
+  if (open && (!ids.includes(open.sid) || !barStages(open.sid).includes(open.stage))) {
     state.selection.delete(scope);
+  }
   const wanted = [];
   for (const [index, sid] of ids.entries()) {
     let entry = state.shotCards.get(sid);
@@ -369,13 +393,14 @@ function renderMatrix() {
     renderShotCard(sid, index, entry);
     wanted.push(entry.card);
   }
-  for (const [sid, entry] of state.shotCards)
+  for (const [sid, entry] of state.shotCards) {
     if (!ids.includes(sid)) {
       pauseMedia(entry.card);
       cardObserver?.unobserve(entry.card);
       entry.card.remove();
       state.shotCards.delete(sid);
     }
+  }
   if (!ids.length) {
     const empty = el("div", "", "shot-strip-empty");
     empty.append(
@@ -384,9 +409,15 @@ function renderMatrix() {
     );
     strip.replaceChildren(empty);
   } else {
-    for (const child of [...strip.children]) if (!wanted.includes(child)) child.remove();
+    for (const child of [...strip.children]) {
+      if (!wanted.includes(child)) {
+        child.remove();
+      }
+    }
     wanted.forEach((node, index) => {
-      if (strip.children[index] !== node) strip.insertBefore(node, strip.children[index] || null);
+      if (strip.children[index] !== node) {
+        strip.insertBefore(node, strip.children[index] || null);
+      }
     });
   }
   renderStagePanel();
@@ -468,20 +499,33 @@ function createShotCard(sid) {
   mediaBox.addEventListener("click", (event) => event.stopPropagation());
   card.append(menu, body, mediaBox);
   card.addEventListener("click", (event) => {
-    if (event.target.closest("[data-card-media], button, a, input, select, textarea")) return;
-    if (event.detail > 1 || selectionWithin(card)) return;
+    if (event.target.closest("[data-card-media], button, a, input, select, textarea")) {
+      return;
+    }
+    if (event.detail > 1 || selectionWithin(card)) {
+      return;
+    }
     openStage(sid, cardStage(sid));
   });
   card.addEventListener("pointerover", (event) => {
-    if (event.pointerType === "touch") return;
-    if (event.target.closest("[data-card-media]")) scheduleHidePopover();
-    else schedulePopover(sid);
+    if (event.pointerType === "touch") {
+      return;
+    }
+    if (event.target.closest("[data-card-media]")) {
+      scheduleHidePopover();
+    } else {
+      schedulePopover(sid);
+    }
   });
   card.addEventListener("pointerleave", (event) => {
-    if (event.pointerType !== "touch") scheduleHidePopover();
+    if (event.pointerType !== "touch") {
+      scheduleHidePopover();
+    }
   });
   card.addEventListener("keydown", (event) => {
-    if (event.target !== card) return;
+    if (event.target !== card) {
+      return;
+    }
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
       openStage(sid, cardStage(sid));
@@ -495,21 +539,24 @@ function createShotCard(sid) {
   });
   // 键盘 Tab 聚焦卡片时与鼠标悬停一样展开阶段浮层（鼠标点击引起的聚焦不展开）。
   card.addEventListener("focus", () => {
-    if (card.matches(":focus-visible") && !popover.suppressFocus) showPopover(sid);
+    if (card.matches(":focus-visible") && !popover.suppressFocus) {
+      showPopover(sid);
+    }
   });
   card.addEventListener("focusout", (event) => {
     const next = event.relatedTarget;
-    if (popover.sid === sid && !card.contains(next) && !$("stage-popover").contains(next))
+    if (popover.sid === sid && !card.contains(next) && !$("stage-popover").contains(next)) {
       hidePopover();
+    }
   });
   cardObserver?.observe(card);
   return { card, body, menu, mediaBox, key: null, mediaKey: null, media: null };
 }
 function renderShotCard(sid, index, entry, force = false) {
-  const stage = cardStage(sid),
-    stages = barStages(sid),
-    open = selection(),
-    dirty = !!state.drafts.get(draftKey(sid))?.dirty;
+  const stage = cardStage(sid);
+  const stages = barStages(sid);
+  const open = selection();
+  const dirty = !!state.drafts.get(draftKey(sid))?.dirty;
   const key = JSON.stringify([
     index,
     stage,
@@ -534,11 +581,13 @@ function renderShotCard(sid, index, entry, force = false) {
     );
     const title = el("div", "", "shot-card-stage");
     title.append(el("strong", LABEL[stage]));
-    if (value === "stale")
+    if (value === "stale") {
       title.append(el("span", MindexI18n.msg("ui.board_state_stale"), "badge warn"));
+    }
     // 文案与查询之外的阶段：草稿未保存时同样在卡片上提示。
-    if (dirty && stage !== "content")
+    if (dirty && stage !== "content") {
       title.append(el("span", MindexI18n.msg("ui.70ac7eb1c08c"), "badge warn"));
+    }
     const dots = el("div", "", "stage-dots");
     dots.append(...stages.map((s) => stageDot(sid, s)));
     MindexI18n.setAttr(
@@ -578,30 +627,36 @@ function renderShotCard(sid, index, entry, force = false) {
   }
   const isOpen = open?.sid === sid;
   entry.card.classList.toggle("is-open", isOpen);
-  if (isOpen) entry.card.setAttribute("aria-current", "true");
-  else entry.card.removeAttribute("aria-current");
+  if (isOpen) {
+    entry.card.setAttribute("aria-current", "true");
+  } else {
+    entry.card.removeAttribute("aria-current");
+  }
   const openTag = entry.card.querySelector(".shot-card-open");
-  if (isOpen && !openTag)
+  if (isOpen && !openTag) {
     entry.body.append(
       el("span", MindexI18n.msg("ui.board_card_open", { p0: LABEL[open.stage] }), "shot-card-open"),
     );
-  else if (openTag)
+  } else if (openTag) {
     isOpen
       ? MindexI18n.setText(openTag, MindexI18n.msg("ui.board_card_open", { p0: LABEL[open.stage] }))
       : openTag.remove();
+  }
   renderCardMedia(sid, stage, entry);
 }
 // 编辑器草稿变化（未保存标记、摘要）时只重建该分镜卡片的文字部分。
 function refreshShotCard(sid) {
   const entry = state.shotCards.get(sid);
-  if (entry) renderShotCard(sid, order().indexOf(sid), entry, true);
+  if (entry) {
+    renderShotCard(sid, order().indexOf(sid), entry, true);
+  }
   updateLocks();
 }
 // ---------------------------------------------------------------- 阶段详情区
 function renderStagePanel() {
-  const panel = $("stage-panel"),
-    placeholder = $("stage-placeholder"),
-    open = selection();
+  const panel = $("stage-panel");
+  const placeholder = $("stage-placeholder");
+  const open = selection();
   if (!open) {
     if (!panel.hidden) {
       pauseMedia(panel);
@@ -612,9 +667,9 @@ function renderStagePanel() {
     placeholder.hidden = false;
     return;
   }
-  const { sid, stage } = open,
-    ids = order(),
-    index = ids.indexOf(sid);
+  const { sid, stage } = open;
+  const ids = order();
+  const index = ids.indexOf(sid);
   placeholder.hidden = true;
   panel.hidden = false;
   const selected = plan().shots[sid][stage];
@@ -674,7 +729,9 @@ function renderStagePanel() {
   const result = panel.querySelector("[data-node-result]");
   if (result) {
     const message = executionError(stage, sid);
-    if (result.textContent !== message) MindexI18n.setText(result, message);
+    if (result.textContent !== message) {
+      MindexI18n.setText(result, message);
+    }
     result.hidden = !message;
   }
   const historyKey = JSON.stringify(history);
@@ -690,21 +747,27 @@ function renderStagePanel() {
 }
 // ---------------------------------------------------------------- 阶段浮层（卡片下方竖排的全部阶段）
 // 浮层放在分镜条之外并以 fixed 定位：分镜条 overflow-x:auto 会把纵向溢出一并裁剪。
-const POPOVER_OPEN_MS = 120,
-  POPOVER_CLOSE_MS = 200;
+const POPOVER_OPEN_MS = 120;
+const POPOVER_CLOSE_MS = 200;
 const popover = { sid: null, timer: null };
 function schedulePopover(sid) {
   clearTimeout(popover.timer);
-  if (popover.sid === sid) return;
+  if (popover.sid === sid) {
+    return;
+  }
   popover.timer = setTimeout(() => showPopover(sid), POPOVER_OPEN_MS);
 }
 function scheduleHidePopover() {
   clearTimeout(popover.timer);
-  if (popover.sid) popover.timer = setTimeout(() => hidePopover(), POPOVER_CLOSE_MS);
+  if (popover.sid) {
+    popover.timer = setTimeout(() => hidePopover(), POPOVER_CLOSE_MS);
+  }
 }
 function showPopover(sid, { focus = false } = {}) {
   clearTimeout(popover.timer);
-  if (!state.data || !order().includes(sid)) return;
+  if (!state.data || !order().includes(sid)) {
+    return;
+  }
   popover.sid = sid;
   renderPopover();
   const box = $("stage-popover");
@@ -714,15 +777,18 @@ function showPopover(sid, { focus = false } = {}) {
     entry.card.setAttribute("aria-expanded", String(id === sid));
     entry.menu.setAttribute("aria-expanded", String(id === sid));
   }
-  if (focus)
+  if (focus) {
     (box.querySelector("[aria-current=true]") || box.querySelector("[role=menuitem]"))?.focus();
+  }
 }
 function hidePopover({ restoreFocus = false } = {}) {
   clearTimeout(popover.timer);
-  const sid = popover.sid,
-    box = $("stage-popover");
+  const sid = popover.sid;
+  const box = $("stage-popover");
   popover.sid = null;
-  if (!box) return;
+  if (!box) {
+    return;
+  }
   box.hidden = true;
   box.replaceChildren();
   for (const entry of state.shotCards.values()) {
@@ -737,10 +803,10 @@ function hidePopover({ restoreFocus = false } = {}) {
   }
 }
 function renderPopover() {
-  const sid = popover.sid,
-    box = $("stage-popover"),
-    open = selection(),
-    index = order().indexOf(sid);
+  const sid = popover.sid;
+  const box = $("stage-popover");
+  const open = selection();
+  const index = order().indexOf(sid);
   const focused = document.activeElement?.dataset?.stageOption;
   box.replaceChildren();
   MindexI18n.setAttr(box, "aria-label", MindexI18n.msg("ui.board_stage_menu", { p0: index + 1 }));
@@ -763,31 +829,42 @@ function renderPopover() {
       item.setAttribute("aria-current", "true");
       item.classList.add("is-current");
     }
-    if (stage === cardStage(sid)) item.classList.add("is-card-stage");
+    if (stage === cardStage(sid)) {
+      item.classList.add("is-card-stage");
+    }
     item.addEventListener("click", (event) => {
       openStage(sid, stage);
       // 键盘激活（detail 为 0）时把焦点移到详情区，鼠标点击则保持原位。
-      if (!event.detail) $("stage-panel").focus();
+      if (!event.detail) {
+        $("stage-panel").focus();
+      }
     });
     box.append(item);
   }
-  if (focused) box.querySelector(`[data-stage-option="${focused}"]`)?.focus();
+  if (focused) {
+    box.querySelector(`[data-stage-option="${focused}"]`)?.focus();
+  }
 }
 function positionPopover() {
   const box = $("stage-popover");
-  if (!popover.sid || box.hidden) return;
+  if (!popover.sid || box.hidden) {
+    return;
+  }
   const card = state.shotCards.get(popover.sid)?.card;
-  if (!card?.isConnected) return hidePopover();
-  const rect = card.getBoundingClientRect(),
-    strip = $("shot-strip").getBoundingClientRect();
+  if (!card?.isConnected) {
+    return hidePopover();
+  }
+  const rect = card.getBoundingClientRect();
+  const strip = $("shot-strip").getBoundingClientRect();
   // 卡片滚出分镜条可视区域时收起。
   if (
     rect.right <= strip.left + 8 ||
     rect.left >= strip.right - 8 ||
     rect.bottom < 0 ||
     rect.top > innerHeight
-  )
+  ) {
     return hidePopover();
+  }
   const width = box.offsetWidth;
   const left = Math.max(8, Math.min(Math.max(rect.left, strip.left), innerWidth - width - 8));
   box.style.left = `${Math.round(left)}px`;
@@ -804,7 +881,9 @@ function popoverKeydown(event) {
     event.preventDefault();
     items[event.key === "Home" ? 0 : items.length - 1]?.focus();
   } else if (event.key === "Escape" || event.key === "Tab") {
-    if (event.key === "Escape") event.preventDefault();
+    if (event.key === "Escape") {
+      event.preventDefault();
+    }
     hidePopover({ restoreFocus: event.key === "Escape" });
   }
 }
@@ -824,14 +903,19 @@ function scrollStrip(direction) {
 // 鼠标滚轮的纵向滚动转为横向；已滚到尽头时交还给页面。
 function stripWheel(event) {
   const strip = $("shot-strip");
-  if (event.ctrlKey || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+  if (event.ctrlKey || Math.abs(event.deltaY) <= Math.abs(event.deltaX)) {
+    return;
+  }
   const max = strip.scrollWidth - strip.clientWidth;
-  if (max <= 1) return;
+  if (max <= 1) {
+    return;
+  }
   if (
     (event.deltaY < 0 && strip.scrollLeft <= 0) ||
     (event.deltaY > 0 && strip.scrollLeft >= max - 1)
-  )
+  ) {
     return;
+  }
   event.preventDefault();
   strip.scrollLeft += event.deltaY * (event.deltaMode === 1 ? 16 : 1);
 }
@@ -843,10 +927,15 @@ const cardObserver =
         (entries) => {
           for (const item of entries) {
             const entry = [...state.shotCards.values()].find((e) => e.card === item.target);
-            if (!entry) continue;
+            if (!entry) {
+              continue;
+            }
             entry.visible = item.isIntersecting;
-            if (item.isIntersecting) buildCardMedia(entry);
-            else pauseMedia(entry.mediaBox);
+            if (item.isIntersecting) {
+              buildCardMedia(entry);
+            } else {
+              pauseMedia(entry.mediaBox);
+            }
           }
         },
         { root: document.getElementById("shot-strip"), rootMargin: "0px 200px" },
@@ -880,39 +969,48 @@ function cardMediaSpec(sid, stage) {
   const shot = plan().shots[sid] || {};
   if (stage === "source") {
     const source = ver(shot.content)?.data?.source;
-    if (!source?.media_id) return null;
+    if (!source?.media_id) {
+      return null;
+    }
     const kind = source.kind === "image" ? "image" : "video";
     return {
       key: ["source", source.media_id, kind, source.start || 0],
       build: (box) =>
         inputUrl(source.media_id).then((url) => {
-          if (url && box.isConnected)
+          if (url && box.isConnected) {
             box.replaceChildren(quietVideo(sourcePreviewNode(url, kind, source.start)));
+          }
         }),
     };
   }
   const item = ver(shot[stage]);
-  if (!item || item.status !== "complete" || item.incomplete) return null;
+  if (!item || item.status !== "complete" || item.incomplete) {
+    return null;
+  }
   const files = item.files || {};
   const video = (url) =>
     url && {
       key: [stage, item.id, url],
       build: (box) => box.replaceChildren(quietVideo(media("video", url))),
     };
-  if (stage === "tts")
+  if (stage === "tts") {
     return files.audio?.url
       ? {
           key: [stage, item.id],
           build: (box) => box.replaceChildren(media("audio", files.audio.url)),
         }
       : null;
+  }
   // 分镜渲染：带配音与字幕的视频（不静音，只在点击播放时发声），不单独显示音频。
-  if (stage === "render")
+  if (stage === "render") {
     return files.preview?.url || files.video?.url
       ? { key: [stage, item.id], build: (box) => box.replaceChildren(renderPreviewVideo(item)) }
       : null;
-  if (stage === "generate") return video(files.generated?.url) || null;
-  if (stage === "invoke")
+  }
+  if (stage === "generate") {
+    return video(files.generated?.url) || null;
+  }
+  if (stage === "invoke") {
     return item.data.output === "image"
       ? files.artifact?.url
         ? {
@@ -921,16 +1019,20 @@ function cardMediaSpec(sid, stage) {
           }
         : null
       : video(files.artifact?.url) || null;
-  if (stage === "draw")
+  }
+  if (stage === "draw") {
     return files.image?.url
       ? {
           key: [stage, item.id],
           build: (box) => box.replaceChildren(cardImage(files.image.url, LABEL.draw)),
         }
       : null;
+  }
   if (stage === "recall") {
     const thumbs = (item.data.results || []).filter((c) => c.thumbnail_url).slice(0, 3);
-    if (!thumbs.length) return null;
+    if (!thumbs.length) {
+      return null;
+    }
     return {
       key: [stage, item.id],
       build: (box) => {
@@ -942,13 +1044,15 @@ function cardMediaSpec(sid, stage) {
       },
     };
   }
-  if (stage === "select") return selectMediaSpec(sid, item);
+  if (stage === "select") {
+    return selectMediaSpec(sid, item);
+  }
   return null;
 }
 // 选片：素材库来源点击后才加载原片区间播放列表（静音，不调用 ffmpeg 预览）；上传片段/生成画面直接播放文件区间。
 function selectMediaSpec(sid, item) {
-  const shot = plan().shots[sid],
-    range = item.data.event.video;
+  const shot = plan().shots[sid];
+  const range = item.data.event.video;
   if (range.kind === "file") {
     const generated = shotStages(sid).includes("generate")
       ? ver(shot.generate)?.files?.generated?.url
@@ -960,7 +1064,9 @@ function selectMediaSpec(sid, item) {
       key: ["select-file", item.id, generated, mediaId],
       build: (box) =>
         (generated ? Promise.resolve(generated) : inputUrl(mediaId)).then((url) => {
-          if (!url || !box.isConnected) return;
+          if (!url || !box.isConnected) {
+            return;
+          }
           const node = quietVideo(
             media(
               "video",
@@ -976,13 +1082,14 @@ function selectMediaSpec(sid, item) {
     key: ["select", item.id],
     build: (box) => {
       const poster = el("div", "", "card-select-poster");
-      if (segment)
+      if (segment) {
         poster.append(
           cardImage(
             `/api/admin/segments/${encodeURIComponent(segment)}/thumbnail`,
             sourceName(range.source_id, range.source_name),
           ),
         );
+      }
       const play = el("button", MindexI18n.msg("ui.board_play_range"), "quiet card-play");
       play.type = "button";
       play.addEventListener("click", () => {
@@ -996,7 +1103,7 @@ function selectMediaSpec(sid, item) {
         attached.ready
           .then(() => attached.togglePlayback())
           .catch((error) => {
-            if (box.isConnected)
+            if (box.isConnected) {
               box.replaceChildren(
                 el(
                   "p",
@@ -1004,6 +1111,7 @@ function selectMediaSpec(sid, item) {
                   "warn-text",
                 ),
               );
+            }
           });
       });
       poster.append(play);
@@ -1014,7 +1122,9 @@ function selectMediaSpec(sid, item) {
 function renderCardMedia(sid, stage, entry) {
   const spec = cardMediaSpec(sid, stage);
   const key = spec ? JSON.stringify(spec.key) : null;
-  if (entry.mediaKey === key) return;
+  if (entry.mediaKey === key) {
+    return;
+  }
   pauseMedia(entry.mediaBox);
   entry.mediaBox.replaceChildren();
   entry.mediaBox.hidden = !spec;
@@ -1022,13 +1132,17 @@ function renderCardMedia(sid, stage, entry) {
   entry.media = spec;
   entry.built = false;
   // 没有 IntersectionObserver（或已在可视区域）时立即创建。
-  if (!cardObserver || entry.visible) buildCardMedia(entry);
+  if (!cardObserver || entry.visible) {
+    buildCardMedia(entry);
+  }
 }
 function buildCardMedia(entry) {
-  if (entry.built || !entry.media) return;
+  if (entry.built || !entry.media) {
+    return;
+  }
   entry.built = true;
   Promise.resolve(entry.media.build(entry.mediaBox)).catch((error) => {
-    if (entry.mediaBox.isConnected)
+    if (entry.mediaBox.isConnected) {
       entry.mediaBox.replaceChildren(
         el(
           "p",
@@ -1036,12 +1150,14 @@ function buildCardMedia(entry) {
           "warn-text",
         ),
       );
+    }
   });
 }
 document.addEventListener("selectionchange", () => {
   if (
     state.data &&
     [...state.shotCards.values()].some((entry) => entry.pending && !selectionWithin(entry.card))
-  )
+  ) {
     renderMatrix();
+  }
 });

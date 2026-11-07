@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import os
 from typing import Annotated
 
 import typer
@@ -23,7 +25,10 @@ def agent_tools(
     domain: Annotated[
         list[str] | None,
         typer.Option(
-            help="只列出指定领域，可重复：meta/studio/studio_detail/studio_post/library/search/index/persons/settings/topics。"
+            help=(
+                "只列出指定领域，可重复：meta/studio/studio_detail/studio_post/library/search/index/persons"
+                "/settings/topics。"
+            )
         ),
     ] = None,
     names_only: Annotated[bool, typer.Option("--names-only", help="只输出工具名、风险级别与领域。")] = False,
@@ -36,6 +41,7 @@ def agent_tools(
       mindex agent tools
       mindex agent tools --domain studio --names-only
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from agent.tools import build_registry
 
     registry = build_registry()
@@ -67,8 +73,11 @@ def mcp_command(
     domain: Annotated[
         list[str] | None,
         typer.Option(
-            help="只导出指定领域的工具，可重复：studio/studio_detail/studio_post/library/search/index/persons/settings/topics；"
-            "覆盖 agent.mcp.domains，省略使用配置值（未配置则全部导出）。report_capability_gap 始终导出。"
+            help=(
+                "只导出指定领域的工具，可重复：studio/studio_detail/studio_post/library/search/index/person"
+                "s/settings/topics；覆盖 agent.mcp.domains，省略使用配置值（未配置则全部导出）。"
+                "report_capability_gap 始终导出。"
+            )
         ),
     ] = None,
 ):
@@ -85,9 +94,8 @@ def mcp_command(
       mindex mcp --domain studio --domain search
       mindex mcp --base-url http://127.0.0.1:8000
     """
-    import asyncio
-    import os
 
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from shared.agent_domains import LOADABLE_DOMAINS
 
     unknown = [name for name in domain or [] if name not in LOADABLE_DOMAINS]
@@ -98,9 +106,11 @@ def mcp_command(
     domains = list(dict.fromkeys(domain)) if domain else None
 
     try:
+        # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
         from agent import mcp_server
     except ImportError as exc:
         raise typer.BadParameter("需要安装 MCP 依赖：uv sync --extra mcp") from exc
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from agent.loopback import MindexClient
     from agent.tools import build_registry
 
@@ -129,6 +139,7 @@ def mcp_command(
                 domains=domains if domains is not None else config.agent.mcp.domains,
             )
         else:
+            # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
             from api import create_app
 
             config.agent.mcp.http_enabled = False  # stdio 进程不再挂载 HTTP 端点

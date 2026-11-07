@@ -4,6 +4,7 @@ import argparse
 import time
 from pathlib import Path
 
+import mindex  # noqa: F401 — 安装根包自举，后续使用包内短导入
 import uvicorn
 
 from api import create_app

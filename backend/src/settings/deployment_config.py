@@ -130,6 +130,7 @@ def validate(config, store, patch):
     candidate.setdefault("server", {})["library_id"] = store.library_id
     try:
         parsed = Config.model_validate(candidate)
+        # 延迟导入：保持异常捕获范围，依赖加载失败时仍走原有降级路径。
         from shared.backends.context import deployment_form
 
         deployment_form(parsed)

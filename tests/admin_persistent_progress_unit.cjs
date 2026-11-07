@@ -1,3 +1,4 @@
+const { between } = require("./source_slices.cjs");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
@@ -10,10 +11,7 @@ const context = vm.createContext({
   publicationStages: new Set(["embedding", "publish"]),
 });
 vm.runInContext(
-  source.slice(
-    source.indexOf("function workProgressRows("),
-    source.indexOf("function appendWorkProgress("),
-  ),
+  between(source, "function workProgressRows(", "function appendWorkProgress("),
   context,
 );
 const rows = (work) => context.workProgressRows("shots", work);
@@ -74,10 +72,7 @@ const rendered = [];
 context.node = (tag, text) => ({ tag, text, dataset: {}, setAttribute() {} });
 context.MindexI18n = { msg: (_key, args) => args, setAttr: () => {} };
 vm.runInContext(
-  source.slice(
-    source.indexOf("function appendWorkProgress("),
-    source.indexOf("function analysisSummary("),
-  ),
+  between(source, "function appendWorkProgress(", "function analysisSummary("),
   context,
 );
 context.appendWorkProgress({ append: (el) => rendered.push(el) }, "人物", {
@@ -93,10 +88,7 @@ assert.equal(rendered[2].tag, "p");
 assert.equal(rendered[2].dataset.phase, "publish");
 assert.equal(rendered[2].text, "");
 vm.runInContext(
-  source.slice(
-    source.indexOf("function analysisCoverageText("),
-    source.indexOf("// Persistent subtask coverage"),
-  ),
+  between(source, "function analysisCoverageText(", "// Persistent subtask coverage"),
   context,
 );
 context.MindexI18n = {
@@ -213,7 +205,7 @@ for (const name of ["shots", "dialogue", "analysis", "persons"]) {
     publish_task: taskFor("publish"),
     scene_publish_task: taskFor("scene"),
   };
-  let workRows = context.workProgressRows(name, work);
+  const workRows = context.workProgressRows(name, work);
   subtaskCount += workRows.length;
   workRows.forEach((r) => assert.equal(context.workLog(r), null));
   for (const current of workRows) {

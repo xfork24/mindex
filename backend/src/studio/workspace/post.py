@@ -12,12 +12,23 @@ from dataclasses import dataclass, field
 from fractions import Fraction
 from pathlib import Path
 
+from shared import media
 from shared.media import atomic_media
+from shared.storage import Store
 from shared.work_budget import copy_file
-from studio import studio
-
-from .plans import canvas_of, canvas_render
-from .versions import file_info, file_path, ordered_shots, version
+from studio import beats, brands, studio
+from studio import render as studio_render
+from studio.render import (
+    build_srt,
+    canvas_subtitle_style,
+    check_font,
+    concat_media,
+    fit_filters,
+    validate_final,
+    watermark_graph,
+)
+from studio.workspace.plans import canvas_of, canvas_render
+from studio.workspace.versions import file_info, file_path, ordered_shots, version
 
 MUSIC_FADE_IN = 0.5
 MUSIC_FADE_OUT = 1.5
@@ -48,7 +59,6 @@ class Assembly:
 
 def brand_effect(config, p, store=None) -> dict | None:
     """方案生效的品牌内容（``brands.resolve``）；没选品牌也没有覆盖时不访问数据库，返回 None。"""
-    from studio import brands
 
     options = p.get("options") or {}
     if not options.get("brand_id") and not options.get("brand_overrides"):
@@ -56,8 +66,6 @@ def brand_effect(config, p, store=None) -> dict | None:
     if callable(store):  # 签名资源的惰性数据库
         store = store()
     if store is None:
-        from shared.storage import Store
-
         store = Store.open(config)
     return brands.resolve(store, options)
 
@@ -68,7 +76,8 @@ def subtitle_plan(config, w, p, store=None) -> tuple[dict | None, dict[str, list
 
     样式优先级：方案覆盖里的完整样式 > 方案参数 ``subtitle_style`` 预设 > 品牌模板样式 >
     classic（只有高亮词时）。"""
-    from . import ass
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+    from studio.workspace import ass
 
     if not p["options"].get("burn"):
         return None, {}
@@ -105,14 +114,16 @@ def overlay_plan(w, p) -> list[tuple[str, list[dict]]]:
 
 def overlay_style(config, w, p, store=None) -> dict:
     """文字层样式：品牌模板（含方案覆盖）给出时用它，否则为缺省样式。"""
-    from . import ass
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+    from studio.workspace import ass
 
     return (brand_effect(config, p, store) or {}).get("overlay") or dict(ass.DEFAULT_OVERLAY_STYLE)
 
 
 def compose_payload(config, w, p, store=None) -> dict:
     """后期能力进入 compose 签名的键；都未参与时为空（签名与旧版一致）。"""
-    from . import ass, transitions
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+    from studio.workspace import ass, transitions
 
     payload = {}
     if found := transitions.overlaps(w, p):
@@ -133,7 +144,8 @@ def compose_payload(config, w, p, store=None) -> dict:
         payload["bookend_version"] = BOOKEND_VERSION
     if needs_clean(p):
         payload["clean"] = True
-    from . import beat_align
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+    from studio.workspace import beat_align
 
     if aligned := beat_align.compose_payload(p):
         payload["beat_align"] = aligned
@@ -157,14 +169,11 @@ def brand_assets(config, p, store=None) -> dict:
 
 def bookend_clip(config, p, clip: dict, directory: Path, name: str) -> tuple[Path, Path, int, int]:
     """片头或片尾视频 → 方案画幅与帧率的画面（确定帧数）与等长的 48k 立体声（无原声时静音）。"""
-    from shared.media import probe
-    from studio import brands
-    from studio.render import fit_filters
 
     source = brands.require_asset(config, clip["asset"])
     render, fit = canvas_render(config, p)
     fps = Fraction(str(render.fps))
-    info = probe(source)
+    info = media.probe(source)
     frames = max(1, round(Fraction(str(info["duration"])) * fps))
     samples = round(Fraction(frames, 1) / fps * 48000)
     video, audio = directory / f"{name}.mp4", directory / f"{name}.wav"
@@ -218,7 +227,6 @@ def add_bookends(
     config, w, p, assembly: Assembly, video: Path, audio: Path, directory: Path
 ) -> tuple[Path, Path, dict]:
     """把品牌片头片尾接在正文前后：画面与音轨拼接，正文边界整体后移；背景音乐只在正文里（已先混好）。"""
-    from studio.render import concat_media
 
     brand = brand_assets(config, p)
     if not brand.get("intro") and not brand.get("outro"):
@@ -264,8 +272,6 @@ def add_bookends(
 
 def watermark_filter(config, p, assembly: Assembly, bookends: dict) -> list[str]:
     """水印叠加滤镜（烧录之前）；没有水印时为空。不含片头片尾时只在正文时间段显示。"""
-    from studio import brands
-    from studio.render import watermark_graph
 
     mark = brand_assets(config, p).get("watermark")
     if not mark:
@@ -284,9 +290,9 @@ def watermark_filter(config, p, assembly: Assembly, bookends: dict) -> list[str]
 
 def beat_delays(config, job_id, w, p, items, fps) -> list[int]:
     """开启节拍对齐时每个切点的推迟帧数（见 ``beat_align.delays``）；关闭或没有背景音乐时全为 0。"""
-    from studio import beats
 
-    from . import beat_align, music, transitions
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+    from studio.workspace import beat_align, music, transitions
 
     found = beat_align.tolerance(p)
     segments = music.segments(w, p) if found is not None else []
@@ -373,9 +379,9 @@ def assemble(config, job_id, w, p, directory) -> Assembly:
 def join_video(config, w, p, assembly: Assembly, output: Path) -> Path:
     """拼接逐镜画面。硬切处直接复制码流；重叠转场相连的一组镜头先用 xfade 合成一段（吃掉尾部余量），
     再与其余镜头一起复制拼接，所以只有带转场的那几镜被重新编码。"""
-    from studio.render import concat_media
 
-    from . import transitions
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+    from studio.workspace import transitions
 
     kinds = dict((sid, item) for sid, item in transitions.overlaps(w, p))
     sids = [item["shot_id"] for item in assembly.boundaries]
@@ -490,7 +496,8 @@ def xfade_group(
 def music_report(w, p, boundaries) -> list[dict]:
     """成片里实际混入的背景音乐段落（写进成片版本数据，供页面列出素材）：
     起始分镜、覆盖分镜、音乐版本、音量，以及在成片时间线上的起止秒。没有背景音乐时为空。"""
-    from . import music
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+    from studio.workspace import music
 
     spans = {item["shot_id"]: item for item in boundaries}
     report = []
@@ -520,7 +527,8 @@ def music_report(w, p, boundaries) -> list[dict]:
 def mix_music(config, job_id, w, p, directory, voice, boundaries, total_samples):
     """背景音乐段落 → 与配音等长的背景音轨（段内循环/截断、淡入淡出、按音量缩放，段外静音），
     再以配音为侧链自动压低后与配音混合。没有背景音乐段落时返回 None（成片音轨与旧版完全相同）。"""
-    from . import music
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+    from studio.workspace import music
 
     segments = music.segments(w, p)
     if not segments:
@@ -587,7 +595,6 @@ def mix_music(config, job_id, w, p, directory, voice, boundaries, total_samples)
         cursor = end
     if total_samples > cursor:
         pieces.append(silence(total_samples - cursor, len(segments) + 1))
-    from studio.render import concat_media
 
     bed = directory / "bgm.wav"
     concat_media(pieces, bed)
@@ -619,7 +626,6 @@ def mix_music(config, job_id, w, p, directory, voice, boundaries, total_samples)
 
 def join_audio(config, job_id, w, p, assembly: Assembly, directory) -> Path:
     """拼接逐镜配音，有背景音乐段落时铺在配音下面。"""
-    from studio.render import concat_media
 
     audio = directory / "audio.wav"
     concat_media(assembly.tracks, audio)
@@ -629,7 +635,6 @@ def join_audio(config, job_id, w, p, assembly: Assembly, directory) -> Path:
 
 def write_subtitles(p, timeline, assembly: Assembly, directory) -> tuple[Path, Path]:
     """按成片边界写 SRT 与 VTT。"""
-    from studio.render import build_srt
 
     content = build_srt(timeline, assembly.boundaries)
     srt, vtt = directory / "final.srt", directory / "final.vtt"
@@ -665,7 +670,8 @@ def subtitle_cues(w, p, boundaries) -> list[dict]:
 
 def write_ass_cues(config, w, p, cues, directory, name: str = "final.ass") -> tuple[Path | None, bool]:
     """按 ``cues``（成片时间的字幕与镜头边界）写 ASS；方案画幅决定 PlayRes 与字号换算。"""
-    from . import ass
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+    from studio.workspace import ass
 
     style, highlights = subtitle_plan(config, w, p)
     layers = overlay_plan(w, p)
@@ -712,13 +718,12 @@ def finish(
     extra_filters: list[str] | None = None,
 ) -> Path:
     """封装成片（烧录或软字幕）并校验尺寸与时长。"""
-    from studio.render import canvas_subtitle_style, check_font, mux, validate_final
 
     if timeline.burn or ass_path is not None:
         check_font(srt, config.studio.subtitle)
     render, _ = canvas_render(config, p)
     style = canvas_subtitle_style(canvas_of(p)[0], render.width, render.height, config.studio.subtitle)
-    mux(
+    studio_render.mux(
         video,
         audio,
         srt,

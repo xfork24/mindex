@@ -15,6 +15,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from pydantic import Field, ValidationError, model_validator
 
+from models import adapters
 from shared.config import StrictModel
 from shared.uploads import save_upload
 from studio import music_library, studio
@@ -54,7 +55,6 @@ def music_routes(router, base, store, mutation_lock, *, current, writer=None):
             return None
         if writer is not None:
             return writer
-        from models import adapters
 
         return adapters.make_writer(current())
 

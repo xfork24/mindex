@@ -40,6 +40,10 @@ def test_heartbeat_during_blocked_work_and_cleanup(caplog):
                 }
             )
             logging.getLogger("models.qwen").info("LLM 请求开始 test-model")
+            assert reporter._latest == "LLM 请求开始 test-model"
+            logging.getLogger("httpx").info("第三方日志")
+            logging.getLogger("models_external").info("名称前缀相似的第三方日志")
+            assert reporter._latest == "LLM 请求开始 test-model"
             assert pulse.wait(2), "Heartbeat must continue while the work thread waits"
         assert not reporter._thread.is_alive()
         text = caplog.text

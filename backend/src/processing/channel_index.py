@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections import defaultdict
 from time import perf_counter
 
 from models.adapters import ModelError
@@ -12,6 +13,7 @@ from processing.indexing import VectorIndex, check_index, vector_client
 from shared.config import fingerprint
 from shared.lexical_store import build_lexical_index
 from shared.scene_plans import current_segments
+from shared.shot_media import ShotMedia
 from shared.storage import dumps
 from shared.types import Annotation
 
@@ -282,7 +284,6 @@ def build_channels(
     for s in snapshots:
         s["representation_ids"] = [r[0] for r in representations(builder, s)]
     # Validate physical dependencies before creating a candidate or invoking a model.
-    from shared.shot_media import ShotMedia
 
     media = ShotMedia(store, reuse_checks=True)
     for media_number, s in enumerate(snapshots, 1):
@@ -446,7 +447,6 @@ def build_channels(
     with store.run("index"):
         # Copy checkpoints in batches before invoking the model. A new immutable
         # index still needs the vectors, but reuse requires no media/model work.
-        from collections import defaultdict
 
         copies = defaultdict(list)
         for s in snapshots:

@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import os
+import threading
+import time
 from types import SimpleNamespace
 
 import pytest
+import yaml
 
 from shared.backends import open_context
 from shared.config import Config
@@ -93,7 +97,6 @@ def test_cache_identity_changes_when_same_directory_is_rebound(tmp_path):
 
 @pytest.fixture
 def pg_config(tmp_path, monkeypatch):
-    import os
 
     dsn = os.environ.get("MINDEX_TEST_POSTGRES_DSN")
     if not dsn:
@@ -118,7 +121,6 @@ def pg_config(tmp_path, monkeypatch):
 
 @pytest.mark.requires_postgres
 def test_pg_resource_occupancy_survives_task_ttl_and_reclaim(pg_config):
-    import time
 
     from shared.db.queue_pg import PgTaskQueue
 
@@ -145,14 +147,12 @@ def test_pg_resource_occupancy_survives_task_ttl_and_reclaim(pg_config):
 
 @pytest.mark.requires_postgres
 def test_cli_prepare_uses_same_persistent_source_ledger(pg_config, video_file, tmp_path):
-    import threading
 
-    import yaml
     from typer.testing import CliRunner
-    from worker_runtime import Worker
 
     from cli import app
     from shared.storage import Store
+    from worker.runtime import Worker
 
     config_file = tmp_path / "node.yaml"
     config_file.write_text(

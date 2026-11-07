@@ -6,8 +6,8 @@ const fixture = process.env.MINDEX_UPLOAD_TEST_VIDEO;
 (async () => {
   const browser = await chromium.launch({ headless: true });
   try {
-    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } }),
-      errors = [];
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    const errors = [];
     page.on("pageerror", (e) => errors.push(e.message));
     await page.goto(base + "/admin");
     await page.getByRole("button", { name: "添加新素材" }).click();
@@ -59,8 +59,8 @@ const fixture = process.env.MINDEX_UPLOAD_TEST_VIDEO;
     // Extend only the rendered list to exercise a full 48-item page, leaving
     // the isolated database and API state unchanged.
     await page.evaluate(() => {
-      const list = document.getElementById("source-list"),
-        item = list.querySelector(".source-item");
+      const list = document.getElementById("source-list");
+      const item = list.querySelector(".source-item");
       for (let i = 1; i < 48; i++) {
         const copy = item.cloneNode(true);
         copy.querySelector("strong").textContent = `滚动工程素材 ${i}`;
@@ -70,8 +70,8 @@ const fixture = process.env.MINDEX_UPLOAD_TEST_VIDEO;
     });
     const bounds = async () =>
       page.evaluate(() => {
-        const panel = document.querySelector(".source-panel"),
-          list = document.getElementById("source-list");
+        const panel = document.querySelector(".source-panel");
+        const list = document.getElementById("source-list");
         return {
           bottom: panel.getBoundingClientRect().bottom,
           top: panel.getBoundingClientRect().top,
@@ -88,7 +88,7 @@ const fixture = process.env.MINDEX_UPLOAD_TEST_VIDEO;
           document.querySelector(".source-panel").getBoundingClientRect().bottom - innerHeight,
         ) < 2,
     );
-    let before = await bounds();
+    const before = await bounds();
     assert.ok(before.range > 500);
     assert.equal(before.overflow, false);
     const list = page.locator("#source-list");

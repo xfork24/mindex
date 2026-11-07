@@ -18,6 +18,8 @@ from collections.abc import Callable, Sequence
 from datetime import datetime
 from pathlib import Path
 
+import mindex  # noqa: F401 — 安装根包自举，后续使用包内短导入
+
 from models.storyboard import hard_check, is_short, measure, whole_sentence
 
 DEFAULT_CASES = Path(__file__).with_name("split_cases.jsonl")

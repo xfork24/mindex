@@ -1,3 +1,5 @@
+"""素材详情按需加载与响应开销回归。"""
+
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient

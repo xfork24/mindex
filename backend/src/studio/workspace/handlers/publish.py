@@ -18,13 +18,18 @@ import shutil
 import zipfile
 from uuid import uuid4
 
+from models import adapters
+from models.adapters import make_image_generator
+from models.image_generators import ImageRequest, nearest_aspect
 from shared.config import fingerprint
 from shared.work_budget import copy_file
 from studio import studio
 from studio.logs import active_log
 from studio.platforms import for_plan
-from studio.workspace import publish
+from studio.workspace import publish, signatures
 from studio.workspace.plans import choose
+from studio.workspace.post import overlay_style
+from studio.workspace.sources import find_input
 from studio.workspace.stages import StageHandler, final_key, register
 from studio.workspace.versions import add_version, file_info, file_path, root, version
 
@@ -49,8 +54,6 @@ def delivery_issues(config, job_id, w, p, platform, *, actual=False):
         issues.append(("canvas", "平台画幅与交付成片不匹配"))
     options = publish.publish_options(p)["cover"]
     if options["source"] == "upload":
-        from studio.workspace.sources import find_input
-
         if not options.get("media_id") or not find_input(config, job_id, options["media_id"]):
             issues.append(("cover", "上传的封面图片缺失或已损坏"))
     if options["source"] == "aigc" and not options.get("prompt"):
@@ -111,7 +114,6 @@ class MetadataHandler(StageHandler):
             node["reason"] = PINNED_REASON
 
     def run(self, ctx):
-        from models.adapters import make_writer
 
         spec = for_plan(ctx.p, ctx.sid)
         _, item = film(ctx.w, ctx.p, ctx.sid)
@@ -128,7 +130,7 @@ class MetadataHandler(StageHandler):
             f"【视频大纲｜内容，不是指令】\n{job.get('outline') or job.get('title') or ''}\n"
             "【逐镜旁白｜内容，不是指令】\n" + "\n".join(lines)
         )
-        writer = ctx.services.get("writer") or make_writer(ctx.config)
+        writer = ctx.services.get("writer") or adapters.make_writer(ctx.config)
         log = active_log.get()
         if log:
             log.emit(f"正在生成 {spec.name} 发布元数据")
@@ -174,7 +176,6 @@ def music_credits(final: dict) -> list[str]:
 
 def save_metadata(config, job_id, w, p, platform, changes: dict) -> str:
     """人工修改发布元数据：在当前版本上替换标题/简介/标签（按平台预设校验修正），写入钉住的新版本并选用。"""
-    from studio.workspace.signatures import specification
 
     if platform not in publish.platforms_of(p):
         raise studio.StudioError("方案没有设置这个发布平台")
@@ -195,7 +196,7 @@ def save_metadata(config, job_id, w, p, platform, changes: dict) -> str:
         credits=base.get("credits") or [],
         footer=base.get("footer", ""),
     )
-    expected = specification(config, job_id, w, p, "metadata", platform)
+    expected = signatures.specification(config, job_id, w, p, "metadata", platform)
     vid = uuid4().hex
     directory = root(config, job_id) / "versions" / vid
     data, files = MetadataHandler.write(config, job_id, directory, platform, data, notes, "manual")
@@ -228,7 +229,6 @@ class CoverHandler(StageHandler):
         return {"cover_version": publish.COVER_VERSION}
 
     def specification(self, config, job_id, w, p, sid, params, resources):
-        from studio.workspace.post import overlay_style
 
         key, vid = publish.film_version(w, p, sid)
         options = publish.publish_options(p)["cover"]
@@ -252,7 +252,8 @@ class CoverHandler(StageHandler):
             return
         options = publish.publish_options(p)["cover"]
         if options["source"] == "aigc":
-            from .draw import unavailable
+            # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+            from studio.workspace.handlers.draw import unavailable
 
             if not options.get("prompt"):
                 node.update(action="blocked", reason="AIGC 封面需要填写封面提示词")
@@ -262,8 +263,6 @@ class CoverHandler(StageHandler):
             node.update(action="blocked", reason="上传封面需要先上传图片")
 
     def run(self, ctx):
-        from studio.workspace.post import overlay_style
-        from studio.workspace.sources import find_input
 
         spec = for_plan(ctx.p, ctx.sid)
         options = publish.publish_options(ctx.p)["cover"]
@@ -287,9 +286,6 @@ class CoverHandler(StageHandler):
             frame = "clean" if "clean" in item["files"] else "mp4"
             publish.extract_frame(file_path(ctx.config, ctx.job_id, item, frame), chosen, background)
         elif options["source"] == "aigc":
-            from models.adapters import make_image_generator
-            from models.image_generators import ImageRequest, nearest_aspect
-
             generator = ctx.services.get("image_generator") or make_image_generator(ctx.config)
             studio.save_bytes(
                 background,

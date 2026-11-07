@@ -3,8 +3,8 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const { chromium } = require(process.env.MINDEX_PLAYWRIGHT_MODULE || "playwright");
-const base = process.env.MINDEX_STUDIO_URL,
-  job = process.env.MINDEX_STUDIO_JOB;
+const base = process.env.MINDEX_STUDIO_URL;
+const job = process.env.MINDEX_STUDIO_JOB;
 assert.match(base || "", /^http:\/\/127\.0\.0\.1:/, "只允许本机隔离服务");
 const out = process.env.MINDEX_BOARD_OUTPUT || "artifacts/studio-board";
 fs.mkdirSync(out, { recursive: true });
@@ -67,9 +67,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
         document.querySelector("#shot-strip .shot-card .card-media video")?.dataset.pictureBottom,
     );
     const geometry = await video.evaluate((v) => {
-      const c = v.parentElement.querySelector(".render-subtitle"),
-        vr = v.getBoundingClientRect(),
-        cr = c.getBoundingClientRect();
+      const c = v.parentElement.querySelector(".render-subtitle");
+      const vr = v.getBoundingClientRect();
+      const cr = c.getBoundingClientRect();
       const scale = Math.min(vr.width / v.videoWidth, vr.height / v.videoHeight);
       return {
         picBottom: vr.top + (vr.height + v.videoHeight * scale) / 2,
@@ -106,8 +106,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     assert.equal(await cards.nth(1).getAttribute("aria-expanded"), "true");
     assert.ok(await page.locator("#stage-panel").isHidden(), "悬停不打开详情");
     // 浮层贴在卡片下方，且不被分镜条裁剪（在视口中可见）。
-    const cardBox = await cards.nth(1).boundingBox(),
-      popBox = await popover.boundingBox();
+    const cardBox = await cards.nth(1).boundingBox();
+    const popBox = await popover.boundingBox();
     assert.ok(Math.abs(popBox.y - (cardBox.y + cardBox.height + 4)) <= 2, "浮层位于卡片正下方");
     await page.screenshot({ path: `${out}/board-popover.png` });
     // 移入浮层保持展开；离开两者后收起。
@@ -126,8 +126,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     assert.equal(await cards.first().getAttribute("aria-current"), "true");
     assert.match(await cards.first().getAttribute("class"), /is-open/);
     // 详情区全宽：与分镜工作台同宽。
-    const area = await page.locator("#shot-stage-area").boundingBox(),
-      board = await page.locator("#storyboard-board").boundingBox();
+    const area = await page.locator("#shot-stage-area").boundingBox();
+    const board = await page.locator("#storyboard-board").boundingBox();
     assert.ok(Math.abs(area.width - board.width) <= 2, "详情区铺满分镜条下方");
 
     // 悬停分镜 2，点击浮层中的「配音」：打开分镜 2 的配音。
@@ -192,8 +192,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
     // 选片原片区间：缩略图 + 播放按钮，点击后加载 source-playlist 并静音播放。
     const playlist = await page.evaluate(async () => {
-      const sid = order()[0],
-        box = document.createElement("div");
+      const sid = order()[0];
+      const box = document.createElement("div");
       box.className = "card-media";
       document.body.append(box);
       await cardMediaSpec(sid, "select").build(box);
@@ -234,8 +234,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
           list.map((c) => c.getBoundingClientRect().width),
         );
         const strip = await page.locator("#shot-strip").evaluate((s) => s.clientWidth);
-        for (const w of widths) assert.ok(w >= Math.min(219, strip - 1), `${width}px 卡片宽 ${w}`);
-        if (width === 540) await page.screenshot({ path: `${out}/board-540-${lang}.png` });
+        for (const w of widths) {
+          assert.ok(w >= Math.min(219, strip - 1), `${width}px 卡片宽 ${w}`);
+        }
+        if (width === 540) {
+          await page.screenshot({ path: `${out}/board-540-${lang}.png` });
+        }
       }
     }
     await page.evaluate(() => MindexI18n.setLanguage("zh"));
@@ -279,8 +283,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     });
     await sleep(100);
     const moved = await page.evaluate(() => {
-      const pop = document.getElementById("stage-popover"),
-        card = document.querySelector(".shot-card");
+      const pop = document.getElementById("stage-popover");
+      const card = document.querySelector(".shot-card");
       return {
         hidden: pop.hidden,
         pop: pop.getBoundingClientRect().left,

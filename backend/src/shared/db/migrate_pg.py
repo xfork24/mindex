@@ -12,7 +12,8 @@ from __future__ import annotations
 import hashlib
 import uuid
 
-from shared.db.errors import SchemaMismatch
+from shared import storage
+from shared.db.errors import BackendError, SchemaMismatch
 from shared.db.scaling_schema import (
     PG_ADMISSION,
     PG_DELIVERY,
@@ -26,6 +27,7 @@ from shared.db.scaling_schema import (
     PG_QUEUE,
 )
 from shared.db.schema_pg import BASELINE_DDL, delivery_platforms_seed
+from shared.storage import dumps
 
 __all__ = ["check_schema", "migrate_pg", "pg_schema_version"]
 
@@ -49,9 +51,8 @@ PG_STEPS = (
 
 
 def _logical_version() -> int:
-    from shared.storage import METADATA_STEPS
 
-    return len(METADATA_STEPS)
+    return len(storage.METADATA_STEPS)
 
 
 def pg_schema_version(conn) -> int:
@@ -61,7 +62,6 @@ def pg_schema_version(conn) -> int:
 
 def check_schema(conn) -> None:
     """启动时校验版本；缺迁移给出中文修复提示。"""
-    from shared.db.errors import BackendError
 
     try:
         current, expected = pg_schema_version(conn), _logical_version()
@@ -105,7 +105,6 @@ def migrate_pg(conn) -> int:
             )
         if current == 0:
             conn.execute(BASELINE_DDL)
-            from shared.storage import dumps
 
             conn.cursor().executemany(
                 "INSERT INTO delivery_platforms(id,body,created_at,updated_at) VALUES(%s,%s,%s,%s)"

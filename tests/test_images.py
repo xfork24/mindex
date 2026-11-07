@@ -1,3 +1,5 @@
+"""图像解码、缩放与检索请求回归。"""
+
 from __future__ import annotations
 
 import io

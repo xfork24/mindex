@@ -23,12 +23,14 @@ import weakref
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
+from decimal import Decimal
 from typing import Any
 
 from shared.db.dialect import TABLE_SPECS, UnsupportedSql, rewrite_for_postgres
 from shared.db.errors import BackendError, IntegrityViolation
 from shared.db.rows import Row
 from shared.db.statements import DualSQL
+from shared.query_budget import QueryBudgetExceeded, active, remaining
 
 __all__ = ["PgBackend"]
 
@@ -67,7 +69,6 @@ class CursorView:
     def _wrap(self, values) -> Row:
         # 与 SQLite 的类型面保持一致：numeric → float、memoryview → bytes，
         # 避免 Decimal/内存视图漏到业务层与 JSON 响应里。
-        from decimal import Decimal
 
         normalized = tuple(
             float(value)
@@ -119,6 +120,7 @@ class PgConnection:
 
     def _guard_write(self, sql, values=(), *, batches=None):
         # 包含写 CTE；只读 SELECT 不受维护影响。字符串/注释使用同一词法扫描器排除。
+        # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
         from shared.db.dialect import _segments
         from shared.db.maintenance_gate import guard_write
 
@@ -126,8 +128,10 @@ class PgConnection:
         if self._control:
             # 控制连接只能维护调度与租约，不提供业务写入的 fencing/维护绕过入口。
             targets = re.findall(
-                r"\b(?:INSERT(?:\s+OR\s+(?:REPLACE|IGNORE))?\s+INTO|UPDATE|DELETE\s+FROM|ALTER\s+TABLE|DROP\s+TABLE|TRUNCATE(?:\s+TABLE)?)"
-                r'\s+(?!SET\b)([\w"]+)',
+                (
+                    "\\b(?:INSERT(?:\\s+OR\\s+(?:REPLACE|IGNORE))?\\s+INTO|UPDATE|DELETE\\s+FROM|ALTER\\s+T"
+                    'ABLE|DROP\\s+TABLE|TRUNCATE(?:\\s+TABLE)?)\\s+(?!SET\\b)([\\w"]+)'
+                ),
                 code,
                 re.I,
             )
@@ -161,6 +165,7 @@ class PgConnection:
                     r"\s*(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+resource_(?:objects|pins)\b", code, re.I
                 )
             ):
+                # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
                 from shared.object_coordination import publication_guard, reference_arguments
 
                 reference_values = (
@@ -171,7 +176,6 @@ class PgConnection:
                 publication_guard(self._connection, self._library_id, reference_values)
 
     def _deadline(self):
-        from shared.query_budget import remaining
 
         seconds = remaining()
         if seconds is not None:
@@ -182,6 +186,7 @@ class PgConnection:
     def _verify(self):
         self._deadline()
         if self._backend is not None and not self._control:
+            # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
             from shared.db.fencing import verify_transaction
             from shared.db.maintenance_gate import _ACTIVE
 
@@ -261,9 +266,8 @@ def _returning_column(sql) -> str | None:
 
 
 def _translate(exc: Exception) -> Exception:
+    # 延迟导入：独立模型或扩展功能使用可选依赖，仅在实际调用时加载。
     from psycopg import errors as pg_errors
-
-    from shared.query_budget import QueryBudgetExceeded, remaining
 
     if isinstance(exc, pg_errors.QueryCanceled) and remaining(default=None) is not None:
         return QueryBudgetExceeded("查询 SQL 已超过总期限，请缩小范围或稍后重试")
@@ -342,6 +346,7 @@ class PgBackend:
             pool = _POOLS.get(key)
             if pool is None:
                 try:
+                    # 延迟导入：保留可选依赖探测或异常捕获时的降级行为。
                     from psycopg_pool import ConnectionPool
                 except ImportError as exc:  # pragma: no cover - 依赖缺失时给出明确指引
                     raise RuntimeError("PostgreSQL 后端需要 psycopg：uv sync --extra cluster") from exc
@@ -361,12 +366,12 @@ class PgBackend:
 
     @contextmanager
     def connect(self, *, control=False, execution=None, snapshot=False) -> Iterator[PgConnection]:
+        # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
         from shared.db.fencing import ExecutionFence
 
         fence = execution if execution is not None else ExecutionFence.capture()
+        # 延迟导入：独立模型或扩展功能使用可选依赖，仅在实际调用时加载。
         from psycopg_pool import PoolTimeout
-
-        from shared.query_budget import QueryBudgetExceeded, active, remaining
 
         try:
             timeout = remaining(self.control_checkout_timeout if control else self.checkout_timeout)

@@ -360,10 +360,10 @@ def main() -> int:
             runs: dict[str, list[float]] = {}
             for attempt in range(5):  # 交替运行取中位数：录制耗时受浏览器启动与系统负载影响，单次波动大
                 for name, argv, env in (
-                    ("Web", [str(web_python), "-m", "mindex.desktop_check"], clean),
+                    ("Web", [str(web_python), "-m", "mindex.diagnostics.desktop_check"], clean),
                     (
                         "桌面",
-                        [str(args.backend.resolve()), "-m", "mindex.desktop_check"],
+                        [str(args.backend.resolve()), "-m", "mindex.diagnostics.desktop_check"],
                         {**clean, **bundled},
                     ),
                 ):

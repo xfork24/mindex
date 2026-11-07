@@ -1,14 +1,16 @@
 const assert = require("node:assert/strict");
 const { chromium } = require(process.env.MINDEX_PLAYWRIGHT_MODULE || "playwright");
 (async () => {
-  const [url, file, screenshot] = process.argv.slice(2),
-    browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage(),
-    errors = [],
-    uploads = [];
+  const [url, file, screenshot] = process.argv.slice(2);
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  const errors = [];
+  const uploads = [];
   page.on("pageerror", (e) => errors.push(String(e)));
   page.on("response", (r) => {
-    if (r.request().method() === "PUT" && !r.url().startsWith(url)) uploads.push(r.status());
+    if (r.request().method() === "PUT" && !r.url().startsWith(url)) {
+      uploads.push(r.status());
+    }
   });
   try {
     await page.goto(url + "/admin");
@@ -35,7 +37,9 @@ const { chromium } = require(process.env.MINDEX_PLAYWRIGHT_MODULE || "playwright
         video.onloadedmetadata = resolve;
         video.onerror = () => reject(new Error("媒体元数据不可读"));
       });
-      if (video.duration < 70) throw new Error("长视频样本不足 70 秒");
+      if (video.duration < 70) {
+        throw new Error("长视频样本不足 70 秒");
+      }
       const done = new Promise((resolve, reject) => {
         video.onseeked = resolve;
         video.onerror = () => reject(new Error("视频 seek 失败"));

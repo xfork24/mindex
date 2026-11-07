@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from fastapi.testclient import TestClient
 
 from shared.media_groups import Groups
 from shared.storage import Store, dumps
@@ -128,7 +129,6 @@ def test_digest_filters_task_and_shot_and_empty(config, video_file):
 
 
 def test_material_scope_rest_cli_and_agent(config, materials, tmp_path):
-    from fastapi.testclient import TestClient
     from typer.testing import CliRunner
 
     import cli

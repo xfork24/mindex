@@ -25,8 +25,8 @@ const base = process.env.MINDEX_I18N_TEST_URL || "http://127.0.0.1:8027";
   const browser = await chromium.launch({ headless: true });
   try {
     const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
-    const page = await context.newPage(),
-      errors = [];
+    const page = await context.newPage();
+    const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await page.route("**/api/settings/voices/catalog", (route) =>
       route.fulfill({
@@ -115,7 +115,9 @@ const base = process.env.MINDEX_I18N_TEST_URL || "http://127.0.0.1:8027";
     await page.unroute("**/api/search/text");
     const video = page.locator(".card video").first();
     await video.evaluate(async (v) => {
-      if (v.shotPlayer) await v.shotPlayer.ready;
+      if (v.shotPlayer) {
+        await v.shotPlayer.ready;
+      }
       await v.play();
     });
     await preserve(".card video");
@@ -128,11 +130,13 @@ const base = process.env.MINDEX_I18N_TEST_URL || "http://127.0.0.1:8027";
     await page.goto(base + "/admin");
     await page.locator(".source-item").first().click();
     await page.locator("details.work-panel").waitFor();
-    if (!(await page.locator("details.work-panel").evaluate((node) => node.open)))
+    if (!(await page.locator("details.work-panel").evaluate((node) => node.open))) {
       await page.locator(".work-toolbar").click();
+    }
     await page.locator(".work-card").last().waitFor();
     await page.locator("#add-source").click();
-    let finishUpload, markUploadStarted;
+    let finishUpload;
+    let markUploadStarted;
     const uploadStarted = new Promise((resolve) => {
       markUploadStarted = resolve;
     });

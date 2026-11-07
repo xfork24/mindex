@@ -1,3 +1,4 @@
+const { between } = require("./source_slices.cjs");
 // 分镜工作台固定五列：召回列统一显示各分镜的画面阶段（召回 / 生成图片 / 生成画面 / 生成动画），
 // 上传素材的分镜显示素材预览；列操作用虚拟列 picture 一次覆盖全部画面阶段。真实创作页脚本 + 轻量桩，不依赖浏览器。
 const assert = require("node:assert/strict");
@@ -7,9 +8,9 @@ const vm = require("node:vm");
 
 const dir = path.join(__dirname, "../frontend/src/studio");
 const read = (name) => fs.readFileSync(path.join(dir, name), "utf8");
-const slice = (text, start, end) => text.slice(text.indexOf(start), text.indexOf(end));
-const requests = [],
-  notices = [];
+const slice = (text, start, end) => between(text, start, end);
+const requests = [];
+const notices = [];
 const sandbox = {
   MindexI18n: require("./i18n_adapter.cjs"),
   console,

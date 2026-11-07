@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Annotated
 
@@ -30,6 +31,7 @@ def persons_list(ctx: typer.Context):
     \b
       mindex persons list
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from persons.persons import Persons
     from shared.storage import Store
 
@@ -55,6 +57,7 @@ def persons_save(
         \b
           mindex persons save /路径/actor.json
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from persons.person_models import Entity
     from persons.persons import Persons
     from shared.storage import Store
@@ -82,6 +85,7 @@ def persons_reference(
         \b
           mindex persons reference ACTOR_ID /路径/正脸.png /路径/侧脸.jpg
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from persons.person_processing import PersonClient, ensure_reference_quality
     from persons.persons import Persons
     from shared.storage import Store
@@ -121,8 +125,8 @@ def persons_process(
         \b
           mindex persons process SOURCE_ID --start 0 --end 60
     """
-    import sys
 
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from persons.person_models import uid
     from persons.person_processing import PersonOptions
     from shared.processing_lock import ProcessingLock
@@ -131,6 +135,7 @@ def persons_process(
     store = Store.open(ctx.obj)
     options = PersonOptions(start=start, end=end, publish=publish)
     if ctx.obj.queue.backend == "postgres":
+        # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
         from persons.person_processing import PersonTasks
         from settings.runtime_settings import RuntimeConfig
 
@@ -148,6 +153,7 @@ def persons_process(
     with ProcessingLock(ctx.obj, source_id=source, work="persons"):
         identifier = retry or uid()
         if retry:
+            # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
             from shared.task_cancel import registry_for
             from shared.task_progress import RETRYABLE
 
@@ -167,6 +173,7 @@ def persons_process(
     log_path.parent.mkdir(parents=True, exist_ok=True)
     try:
         with log_path.open("ab") as handle:
+            # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
             from shared import process_ops
 
             process_ops.spawn_detached(
@@ -194,6 +201,7 @@ def persons_status(
     \b
       mindex persons status TASK_ID
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from persons.person_processing import PersonTasks
     from shared.storage import Store
 
@@ -217,12 +225,14 @@ def persons_publish(
         \b
           mindex persons publish --content INDEX_ID
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from persons.persons import Persons
     from shared.processing_lock import ProcessingLock, index_write_lock
     from shared.storage import Store
 
     store = Store.open(ctx.obj)
     if ctx.obj.queue.backend == "postgres":
+        # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
         from admin.source_tasks import IndexTasks
         from settings.runtime_settings import RuntimeConfig
 
@@ -253,6 +263,7 @@ def persons_review(
         \b
           mindex persons review /路径/review.json
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from persons.person_models import ShotReview
     from persons.persons import Persons
     from shared.storage import Store
@@ -279,10 +290,12 @@ def persons_activate(
         \b
           mindex persons activate RELEASE_ID
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from shared.storage import Store
 
     store = Store.open(ctx.obj)
     if ctx.obj.queue.backend == "postgres":
+        # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
         from admin.source_tasks import IndexTasks
         from settings.runtime_settings import RuntimeConfig
 
@@ -310,6 +323,7 @@ def persons_migrate_frames(
         \b
           mindex persons migrate-frames --source SOURCE_ID --apply
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from persons.persons import migrate_frames
 
     try:

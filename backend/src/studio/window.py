@@ -8,8 +8,10 @@ from fractions import Fraction
 
 from filelock import FileLock
 
+from admin.curation import Library
 from shared.config import fingerprint
 from shared.media import atomic_media
+from shared.shot_media import ShotMedia
 from shared.storage import Store
 from shared.work_budget import configured
 from studio import select as studio_select
@@ -52,7 +54,6 @@ def set_anchor(w, p, sid, choice):
 
 
 def candidates(config, w, p, sid):
-    from admin.curation import Library
 
     if error := anchor_conflict(w, p, sid):
         raise studio.StudioError(error)
@@ -155,6 +156,7 @@ def neighborhood(rows, anchor, length):
 
 
 def context(config, job_id, w, p, sid):
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
     from studio import workspace as ws
 
     if sid not in p["shots"]:
@@ -188,7 +190,6 @@ def context(config, job_id, w, p, sid):
         source = store.one("SELECT * FROM sources WHERE id=?", (anchor["source_id"],))
         if not source:
             raise studio.StudioError("候选素材不存在")
-        from shared.shot_media import ShotMedia
 
         service = ShotMedia(store)
         info = json.loads(source["media"])
@@ -235,6 +236,7 @@ def context(config, job_id, w, p, sid):
 @configured
 def resources(config, job_id, ctx):
     """Shared low-resolution continuous video and a bounded thumbnail strip, cached by source identity."""
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
     from studio import workspace as ws
 
     if not ctx.get("source_id"):
@@ -242,7 +244,6 @@ def resources(config, job_id, ctx):
     directory = ws.root(config, job_id) / "previews" / f"context-{ctx['resource_key']}"
     directory.mkdir(parents=True, exist_ok=True)
     lo, hi = ctx["context_range"]["start"], ctx["context_range"]["end"]
-    from shared.shot_media import ShotMedia
 
     source = str(ShotMedia(Store.open(config)).materialize(ctx["source_id"], lo, hi))
     output = directory / "context.mp4"
@@ -301,6 +302,7 @@ def resources(config, job_id, ctx):
 
 
 def selected_range(config, job_id, w, p, sid, token, start, *, ref, tts_version, _context=None):
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
     from studio import workspace as ws
 
     ctx = _context if _context is not None else context(config, job_id, w, p, sid)
@@ -330,6 +332,7 @@ def selected_range(config, job_id, w, p, sid, token, start, *, ref, tts_version,
 
 
 def alignment(config, job_id, w, p, sid, selected, *, _context=None):
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
     from studio import workspace as ws
 
     ctx = _context if _context is not None else context(config, job_id, w, p, sid)

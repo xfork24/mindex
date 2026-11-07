@@ -17,10 +17,12 @@
 from __future__ import annotations
 
 import copy
+import json
 
 from models import adapters
 from models.writer import WRITER_PROMPT_VERSION
 from shared.storage import Store
+from shared.writing_profile import profile_hash, writer_block
 from studio import script_templates, studio
 from studio.artifacts import sanitized
 from studio.material_digest import safe_digest, scope_parameters
@@ -54,9 +56,6 @@ def profile_block(config, job_id, p) -> str | None:
     expected = p.get("profile_hash")
     if not expected:
         return None
-    import json
-
-    from shared.writing_profile import profile_hash, writer_block
 
     path = studio.job_dir(config, job_id) / "profile.json"
     try:

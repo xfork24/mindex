@@ -12,8 +12,11 @@ import numpy as np
 
 from models.model_server import refine_cut_frame
 from shared.db.fencing import FencedThreadPoolExecutor as ThreadPoolExecutor
+from shared.jsonio import save_text
 from shared.media import MediaError, atomic_media, command, ffmpeg_bin, probe
-from shared.storage import Store, bump_snapshot_revision
+from shared.processing_lock import ProcessingLock, index_write_lock
+from shared.shot_media import ShotMedia
+from shared.storage import Store, bump_snapshot_revision, require_sqlite
 from shared.work_budget import configured, resource_write
 
 VERSION = "shot-boundary-v1"
@@ -173,7 +176,6 @@ def adjusted(segment, shots, changes):
 
 
 def _write_json(path, data):
-    from shared.jsonio import save_text
 
     save_text(path, json.dumps(data, ensure_ascii=False, indent=2) + "\n")
 
@@ -181,8 +183,6 @@ def _write_json(path, data):
 @configured
 def apply(config, report, *, progress=None, video_encoder="libx264"):
     """Stage new shots first, then atomically commit source metadata. Old paths survive."""
-    from shared.processing_lock import ProcessingLock, index_write_lock
-    from shared.shot_media import ShotMedia
 
     if video_encoder not in {"libx264", "h264_videotoolbox"}:
         raise ValueError("Unsupported repair video encoder")
@@ -194,7 +194,6 @@ def apply(config, report, *, progress=None, video_encoder="libx264"):
     store = Store.open(config)
     stamp = report.setdefault("run_id", datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ"))
     journal = store.root / "shot-repairs" / stamp / "report.json"
-    from shared.storage import require_sqlite
 
     require_sqlite(config, "镜头边界修复（含修复前的元数据库备份）")
     with ProcessingLock(config, deleting=True), index_write_lock(store.root, config=config):
@@ -240,8 +239,6 @@ def apply(config, report, *, progress=None, video_encoder="libx264"):
                     raise MediaError("Stale boundary audit; current shot coordinates changed")
             staged = []
             for number, shot in enumerate(shots.values(), 1):
-                from shared.shot_media import ShotMedia
-
                 old_info = ShotMedia(store)._info(store.resolve_media(shot["path"]))
                 truncated = old_info["duration"] + 1 / old_info["fps"] + 1e-6 < shot["end"] - shot["start"]
                 if (shot["start"], shot["end"]) == (shot["new_start"], shot["new_end"]) and not truncated:

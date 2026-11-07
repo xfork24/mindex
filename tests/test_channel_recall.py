@@ -1,3 +1,5 @@
+"""多通道向量召回与融合排序回归。"""
+
 import itertools
 import json
 

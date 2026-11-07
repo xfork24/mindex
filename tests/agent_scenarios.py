@@ -17,6 +17,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from fastapi.testclient import TestClient
+from PIL import Image
+
 from agent.llm.scripted import call, say
 from agent.runtime import NO_VISION_PROMPT, NO_VISION_TOOL_NOTE
 from api import create_app
@@ -172,10 +175,9 @@ class ScenarioAnimator:
 
 
 def scenario_capture(html, *, seconds, width, height, fps, target, max_seconds, frame_timeout=5, frames=None):
-    (
-        """测试专用：代替 Chromium 沙箱录制（ffmpeg """
-        """纯色画面，帧数精确），确定性测试与真实模型评测都不需要浏览器。"""
-    )
+    """测试专用：代替 Chromium 沙箱录制（ffmpeg 纯色画面，帧数精确），
+    确定性测试与真实模型评测都不需要浏览器。
+    """
     color = "orange" if "#ff8800" in html else "blue"
     subprocess.run(
         [
@@ -203,7 +205,6 @@ def scenario_capture(html, *, seconds, width, height, fps, target, max_seconds, 
 
 
 def png(color: str) -> bytes:
-    from PIL import Image
 
     buffer = io.BytesIO()
     Image.new("RGB", (96, 64), color).save(buffer, "PNG")
@@ -282,7 +283,6 @@ def build_world(config: Config, video: Path) -> World:
     broken = legacy_job(config, "红色开场。配音故障。", options={"burn": False}, title="故障任务")["id"]
     board(config, broken, ["红色开场。", "配音故障。"], ["shot-0b0b0b0b0a", "shot-0b0b0b0b0b"])
     world = World(config, embedder, job, plan, "", broken, "", source_id)
-    from fastapi.testclient import TestClient
 
     with TestClient(world.app()) as client:
         data = client.get(f"/api/studio/jobs/{job}/workspace").json()
@@ -922,7 +922,6 @@ def interview_script(world):
 
 def built_job(world, title, ids, texts=("红色开场。", "绿色结尾。")):
     """分镜任务（缺省两镜），完整构建一次成片；返回 (job, plan)。"""
-    from fastapi.testclient import TestClient
 
     job = legacy_job(world.config, "".join(texts), options={"burn": False}, title=title)["id"]
     plan = board(world.config, job, list(texts), ids)

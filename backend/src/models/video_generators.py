@@ -1,47 +1,76 @@
-"""AIGC 视频生成后端：MiniMax 海螺（video_generation）、阿里通义万相（DashScope 异步任务）、自建 ComfyUI。
+"""AIGC 视频生成后端：MiniMax
+海螺（video_generation）、阿里通义万相（DashScope 异步任务）、自建
+ComfyUI。
 
-三者都是「提交 → 轮询 → 下载」的异步协议，统一实现 ``adapters.VideoGenerator``。约定：
+三者都是「提交 → 轮询 → 下载」的异步协议，统一实现
+``adapters.VideoGenerator``。约定：
 
-- 密钥只放在请求头（``Service.headers()``），诊断经 ``adapters.request(audit=...)`` 只记录脱敏后的请求体，
-  内联参考图以 ``<data-url …>`` 占位，从不记录请求头；
-- 外部服务的鉴权失败、内容审核拒绝、额度不足等映射为带中文说明的 ``ModelError``（审核拒绝为
-  ``VideoContentRejected``）；
-- ``health()`` 只做鉴权/可达性探测（查询接口或系统状态），绝不提交生成任务（不产生费用）。
+- 密钥只放在请求头（``Service.headers()``），诊断经
+``adapters.request(audit=...)`` 只记录脱敏后的请求体，
+内联参考图以 ``<data-url …>`` 占位，从不记录请求头；
+- 外部服务的鉴权失败、内容审核拒绝、额度不足等映射为带中文说明的
+``ModelError``（审核拒绝为
+``VideoContentRejected``）；
+- ``health()``
+只做鉴权/可达性探测（查询接口或系统状态），绝不提交生成任务（不产生费用）。
 
 厂商协议出处（核对日期 2026-10-25）：
 
-- MiniMax H3 视频生成 V2（多模态 content：文生 / 首帧 / 尾帧 / 首尾帧 / 主体参考）：
-  https://platform.minimax.cn/docs/api-reference/video-generation-v2-create （POST /v2/video_generation）
-  https://platform.minimax.cn/docs/api-reference/video-generation-v2-query （GET /v2/query/video_generation/{task_id}，
-  成功后 task.content.url 为成片地址）。取消接口路径未在文档中给出，取消时只停止轮询。
+- MiniMax H3 视频生成 V2（多模态 content：文生 / 首帧 / 尾帧 /
+首尾帧 / 主体参考）：
+https://platform.minimax.cn/docs/api-reference/video-generation-v2-create
+（POST /v2/video_generation）
+https://platform.minimax.cn/docs/api-reference/video-generation-v2-query
+（GET /v2/query/video_generation/{task_id}，
+成功后 task.content.url
+为成片地址）。取消接口路径未在文档中给出，取消时只停止轮询。
 - MiniMax 视频生成：
-  https://platform.minimax.io/docs/api-reference/video-generation-t2v （文生视频，POST /v1/video_generation）
-  https://platform.minimax.io/docs/api-reference/video-generation-i2v （图生视频，first_frame_image）
-  https://platform.minimax.io/docs/api-reference/video-generation-query （GET /v1/query/video_generation）
-  https://platform.minimax.io/docs/api-reference/video-generation-download （GET /v1/files/retrieve）
-  https://platform.minimax.io/docs/api-reference/errorcode （base_resp.status_code 错误码）
+https://platform.minimax.io/docs/api-reference/video-generation-t2v
+（文生视频，POST /v1/video_generation）
+https://platform.minimax.io/docs/api-reference/video-generation-i2v
+（图生视频，first_frame_image）
+https://platform.minimax.io/docs/api-reference/video-generation-query
+（GET /v1/query/video_generation）
+https://platform.minimax.io/docs/api-reference/video-generation-download
+（GET /v1/files/retrieve）
+https://platform.minimax.io/docs/api-reference/errorcode
+（base_resp.status_code 错误码）
 - 阿里云百炼 通义万相：
-  https://help.aliyun.com/en/model-studio/text-to-video-api-reference （文生视频，parameters.size）
-  https://help.aliyun.com/en/model-studio/image-to-video-api-reference （图生视频首帧，img_url + resolution）
-  两者均为 POST /api/v1/services/aigc/video-generation/video-synthesis（请求头 X-DashScope-Async: enable），
-  再 GET /api/v1/tasks/{task_id} 轮询（PENDING → RUNNING → SUCCEEDED/FAILED，video_url 24 小时有效）。
-  本实现对应文档中「wan2.6 及更早」的旧协议（文生 parameters.size、图生 parameters.resolution）；wan2.7 的新协议
-  改用 resolution + ratio，暂不支持。wan2.6 图生视频的 resolution 只接受 720P/1080P，480P 档位仅适用于更早的模型。
-  文档推荐的工作空间专属域名（https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com）与旧域名协议一致，可直接填入 base_url。
-- ComfyUI：POST /prompt、GET /history/{prompt_id}、GET /queue、GET /view、POST /upload/image、
-  POST /interrupt、GET /system_stats（ComfyUI server.py 内置路由）。
+https://help.aliyun.com/en/model-studio/text-to-video-api-reference
+（文生视频，parameters.size）
+https://help.aliyun.com/en/model-studio/image-to-video-api-reference
+（图生视频首帧，img_url + resolution）
+两者均为 POST
+/api/v1/services/aigc/video-generation/video-synthesis（请求头
+X-DashScope-Async: enable），
+再 GET /api/v1/tasks/{task_id} 轮询（PENDING → RUNNING
+→ SUCCEEDED/FAILED，video_url 24 小时有效）。
+本实现对应文档中「wan2.6 及更早」的旧协议（文生 parameters.size、图生
+parameters.resolution）；wan2.7 的新协议
+改用 resolution + ratio，暂不支持。wan2.6 图生视频的 resolution
+只接受 720P/1080P，480P 档位仅适用于更早的模型。
+文档推荐的工作空间专属域名（https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com）与旧域名协议一致，可直接填入
+base_url。
+- ComfyUI：POST /prompt、GET
+/history/{prompt_id}、GET /queue、GET /view、POST
+/upload/image、
+POST /interrupt、GET /system_stats（ComfyUI
+server.py 内置路由）。
 
 未能从文档逐项确认、按最佳理解实现的部分（如有偏差以平台实际返回为准，均有测试桩覆盖解析逻辑）：
-MiniMax 不接受 negative_prompt/seed，提交时忽略；健康探测用查询接口查一个不存在的任务，只把鉴权类错误码
-（1004/2049）判为失败。DashScope 取消接口 POST /api/v1/tasks/{task_id}/cancel 只对排队中的任务生效，
-失败时忽略；健康探测同样查询一个不存在的任务，只把 401/403/InvalidApiKey 判为失败。
-"""
+MiniMax 不接受
+negative_prompt/seed，提交时忽略；健康探测用查询接口查一个不存在的任务，只把鉴权类错误码
+（1004/2049）判为失败。DashScope 取消接口 POST
+/api/v1/tasks/{task_id}/cancel 只对排队中的任务生效，
+失败时忽略；健康探测同样查询一个不存在的任务，只把 401/403/InvalidApiKey
+判为失败。"""
 
 from __future__ import annotations
 
 import base64
 import copy
 import mimetypes
+import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -158,8 +187,13 @@ MINIMAX_AUTH = {1004, 2049}
 MINIMAX_QUOTA = {1008, 2053, 2056, 2067}
 MINIMAX_RATE = {1002, 1039, 1041, 1045, 2045}
 MINIMAX_MODEL = {2022, 2061, 2068, 2069}
-MINIMAX_STATES = {"Preparing": "queued", "Queueing": "queued", "Processing": "running", "Success": "succeeded",
-                  "Fail": "failed"}
+MINIMAX_STATES = {
+    "Preparing": "queued",
+    "Queueing": "queued",
+    "Processing": "running",
+    "Success": "succeeded",
+    "Fail": "failed",
+}
 
 
 def minimax_message(code: int, detail: str = "") -> str:
@@ -197,13 +231,20 @@ class MiniMaxVideoGenerator(_Backend):
 
     def _call(self, method: str, path: str, **kwargs) -> dict:
         try:
-            payload = adapters.request(method, self._url(path), timeout=self.profile.timeout,
-                                       headers=self.profile.headers(), **kwargs)
+            payload = adapters.request(
+                method,
+                self._url(path),
+                timeout=self.profile.timeout,
+                headers=self.profile.headers(),
+                **kwargs,
+            )
         except ModelError as exc:
             status, body = _error_body(exc)
             code = (body.get("base_resp") or {}).get("status_code")
             if code:
-                raise _minimax_error(int(code), str((body.get("base_resp") or {}).get("status_msg") or "")) from exc
+                raise _minimax_error(
+                    int(code), str((body.get("base_resp") or {}).get("status_msg") or "")
+                ) from exc
             if status in (401, 403):
                 raise ModelError(minimax_message(1004)) from exc
             raise
@@ -239,7 +280,9 @@ class MiniMaxVideoGenerator(_Backend):
             raise ModelError(f"MiniMax 视频任务返回了未知状态：{status or '空'}")
         error = None
         if state == "failed":
-            error = minimax_message(code, str(base.get("status_msg") or "")) if code else "MiniMax 视频生成失败"
+            error = (
+                minimax_message(code, str(base.get("status_msg") or "")) if code else "MiniMax 视频生成失败"
+            )
         elif state == "succeeded" and not payload.get("file_id"):
             state, error = "failed", "MiniMax 视频任务已完成但没有返回 file_id"
         return VideoStatus(state=state, error=error, raw=payload)
@@ -257,19 +300,31 @@ class MiniMaxVideoGenerator(_Backend):
         code = int((payload.get("base_resp") or {}).get("status_code") or 0)
         if code in MINIMAX_AUTH:
             raise _minimax_error(code, str((payload.get("base_resp") or {}).get("status_msg") or ""))
-        return {"backend": "minimax", "model": self.profile.model, "ready": True,
-                "reply": "鉴权通过：查询接口可用（未发起生成）"}
+        return {
+            "backend": "minimax",
+            "model": self.profile.model,
+            "ready": True,
+            "reply": "鉴权通过：查询接口可用（未发起生成）",
+        }
 
 
 # ---------------------------------------------------------------- MiniMax H3（视频生成 V2，多模态 content）
 
 
-H3_STATES = {"queued": "queued", "running": "running", "succeeded": "succeeded", "failed": "failed",
-             "cancelled": "failed"}
+H3_STATES = {
+    "queued": "queued",
+    "running": "running",
+    "succeeded": "succeeded",
+    "failed": "failed",
+    "cancelled": "failed",
+}
 H3_RATIOS = ("21:9", "16:9", "4:3", "1:1", "3:4", "9:16")
 H3_MODES = ("text", "first_frame", "last_frame", "first_last", "reference")
-H3_MEDIA = {"image": ("image_url", "reference_image"), "video": ("video_url", "reference_video"),
-            "audio": ("audio_url", "reference_audio")}
+H3_MEDIA = {
+    "image": ("image_url", "reference_image"),
+    "video": ("video_url", "reference_video"),
+    "audio": ("audio_url", "reference_audio"),
+}
 
 
 def nearest_ratio(width: int, height: int) -> str:
@@ -327,11 +382,15 @@ def h3_content(request: VideoRequest) -> tuple[list[dict], str]:
 
 
 class MiniMaxH3VideoGenerator(_Backend):
-    """MiniMax H3 视频生成 V2：``POST /v2/video_generation`` 提交多模态 content，``GET /v2/query/video_generation/{id}``
+    """MiniMax H3 视频生成 V2：``POST /v2/video_generation``
+    提交多模态 content，``GET
+    /v2/query/video_generation/{id}``
     轮询，成功后从 ``task.content.url`` 下载。
 
-    base_url 填平台地址（``https://api.minimax.cn``；误填 ``…/v1`` 时自动去掉）。生成方式、模型档位、分辨率、
-    比例与时长由分镜的 aigc 来源逐镜给出；接口没有 negative_prompt/seed，提交时忽略。
+    base_url 填平台地址（``https://api.minimax.cn``；误填
+    ``…/v1`` 时自动去掉）。生成方式、模型档位、分辨率、
+    比例与时长由分镜的 aigc 来源逐镜给出；接口没有
+    negative_prompt/seed，提交时忽略。
     """
 
     label = "MiniMax H3 视频生成"
@@ -344,13 +403,20 @@ class MiniMaxH3VideoGenerator(_Backend):
 
     def _call(self, method: str, path: str, **kwargs) -> dict:
         try:
-            payload = adapters.request(method, self._url(path), timeout=self.profile.timeout,
-                                       headers=self.profile.headers(), **kwargs)
+            payload = adapters.request(
+                method,
+                self._url(path),
+                timeout=self.profile.timeout,
+                headers=self.profile.headers(),
+                **kwargs,
+            )
         except ModelError as exc:
             status, body = _error_body(exc)
             code = (body.get("base_resp") or {}).get("status_code")
             if code:
-                raise _minimax_error(int(code), str((body.get("base_resp") or {}).get("status_msg") or "")) from exc
+                raise _minimax_error(
+                    int(code), str((body.get("base_resp") or {}).get("status_msg") or "")
+                ) from exc
             if status in (401, 403):
                 raise ModelError(minimax_message(1004)) from exc
             raise
@@ -368,8 +434,13 @@ class MiniMaxH3VideoGenerator(_Backend):
             ratio = nearest_ratio(request.width, request.height)
         elif not ratio:
             ratio = nearest_ratio(request.width, request.height)
-        return {"model": model, "content": content, "resolution": request.resolution or "768P",
-                "duration": duration, "ratio": ratio}
+        return {
+            "model": model,
+            "content": content,
+            "resolution": request.resolution or "768P",
+            "duration": duration,
+            "ratio": ratio,
+        }
 
     def submit(self, request: VideoRequest) -> str:
         body = self.request_body(request)
@@ -405,8 +476,13 @@ class MiniMaxH3VideoGenerator(_Backend):
 
     def health(self) -> dict:
         try:
-            payload = adapters.request("GET", self._url(f"/v2/query/video_generation/{HEALTH_TASK_ID}"),
-                                       timeout=self.profile.timeout, headers=self.profile.headers(), attempts=1)
+            payload = adapters.request(
+                "GET",
+                self._url(f"/v2/query/video_generation/{HEALTH_TASK_ID}"),
+                timeout=self.profile.timeout,
+                headers=self.profile.headers(),
+                attempts=1,
+            )
         except ModelError as exc:
             status, body = _error_body(exc)
             code = int((body.get("base_resp") or {}).get("status_code") or 0)
@@ -422,18 +498,41 @@ class MiniMaxH3VideoGenerator(_Backend):
         return self._healthy()
 
     def _healthy(self) -> dict:
-        return {"backend": "minimax_h3", "model": self.profile.model or "MiniMax-H3", "ready": True,
-                "reply": "鉴权通过：查询接口可用（未发起生成）"}
+        return {
+            "backend": "minimax_h3",
+            "model": self.profile.model or "MiniMax-H3",
+            "ready": True,
+            "reply": "鉴权通过：查询接口可用（未发起生成）",
+        }
 
 
 # ---------------------------------------------------------------- 阿里通义万相（DashScope）
 
 
-DASHSCOPE_STATES = {"PENDING": "queued", "RUNNING": "running", "SUCCEEDED": "succeeded", "FAILED": "failed",
-                    "CANCELED": "failed", "UNKNOWN": "failed"}
+DASHSCOPE_STATES = {
+    "PENDING": "queued",
+    "RUNNING": "running",
+    "SUCCEEDED": "succeeded",
+    "FAILED": "failed",
+    "CANCELED": "failed",
+    "UNKNOWN": "failed",
+}
 # 文生视频 parameters.size 的可选分辨率（宽*高），按画幅挑最接近的一档。
-DASHSCOPE_SIZES = ((832, 480), (480, 832), (624, 624), (1280, 720), (720, 1280), (960, 960), (1088, 832),
-                   (832, 1088), (1920, 1080), (1080, 1920), (1440, 1440), (1632, 1248), (1248, 1632))
+DASHSCOPE_SIZES = (
+    (832, 480),
+    (480, 832),
+    (624, 624),
+    (1280, 720),
+    (720, 1280),
+    (960, 960),
+    (1088, 832),
+    (832, 1088),
+    (1920, 1080),
+    (1080, 1920),
+    (1440, 1440),
+    (1632, 1248),
+    (1248, 1632),
+)
 
 
 def dashscope_message(code: str, detail: str = "", status: int | None = None) -> str:
@@ -482,8 +581,13 @@ class DashScopeVideoGenerator(_Backend):
 
     def _call(self, method: str, path: str, **kwargs) -> dict:
         try:
-            return adapters.request(method, self._url(path), timeout=self.profile.timeout,
-                                    headers={**self.profile.headers(), **kwargs.pop("headers", {})}, **kwargs)
+            return adapters.request(
+                method,
+                self._url(path),
+                timeout=self.profile.timeout,
+                headers={**self.profile.headers(), **kwargs.pop("headers", {})},
+                **kwargs,
+            )
         except ModelError as exc:
             status, body = _error_body(exc)
             code = str(body.get("code") or "")
@@ -504,8 +608,13 @@ class DashScopeVideoGenerator(_Backend):
         if request.seed is not None:
             parameters["seed"] = request.seed
         body = {"model": self.profile.model, "input": source, "parameters": parameters}
-        payload = self._call("POST", "/api/v1/services/aigc/video-generation/video-synthesis",
-                             headers={"X-DashScope-Async": "enable"}, json=body, audit=_redact_images(body))
+        payload = self._call(
+            "POST",
+            "/api/v1/services/aigc/video-generation/video-synthesis",
+            headers={"X-DashScope-Async": "enable"},
+            json=body,
+            audit=_redact_images(body),
+        )
         output = payload.get("output") or {}
         if payload.get("code"):
             raise _dashscope_error(str(payload["code"]), str(payload.get("message") or ""))
@@ -529,7 +638,11 @@ class DashScopeVideoGenerator(_Backend):
             elif status == "UNKNOWN":
                 error = "通义万相任务不存在或已过期（任务 ID 只在 24 小时内可查询）"
             else:
-                error = dashscope_message(code, detail) if code else f"通义万相视频生成失败{f'：{detail}' if detail else ''}"
+                error = (
+                    dashscope_message(code, detail)
+                    if code
+                    else f"通义万相视频生成失败{f'：{detail}' if detail else ''}"
+                )
         url = output.get("video_url") if state == "succeeded" else None
         if state == "succeeded" and not url:
             state, error = "failed", "通义万相任务已完成但没有返回 video_url"
@@ -548,18 +661,29 @@ class DashScopeVideoGenerator(_Backend):
 
     def health(self) -> dict:
         try:
-            adapters.request("GET", self._url(f"/api/v1/tasks/{HEALTH_TASK_ID}"), timeout=self.profile.timeout,
-                             headers=self.profile.headers(), attempts=1)
+            adapters.request(
+                "GET",
+                self._url(f"/api/v1/tasks/{HEALTH_TASK_ID}"),
+                timeout=self.profile.timeout,
+                headers=self.profile.headers(),
+                attempts=1,
+            )
         except ModelError as exc:
             status, body = _error_body(exc)
             code = str(body.get("code") or "")
             if status is None:
                 raise  # 连接失败、超时等：如实报告
             if status in (401, 403) or code == "InvalidApiKey":
-                raise _dashscope_error(code or "InvalidApiKey", str(body.get("message") or ""), status) from exc
+                raise _dashscope_error(
+                    code or "InvalidApiKey", str(body.get("message") or ""), status
+                ) from exc
             # 其余 4xx（任务不存在等）说明请求已通过鉴权
-        return {"backend": "dashscope", "model": self.profile.model, "ready": True,
-                "reply": "鉴权通过：任务查询接口可用（未发起生成）"}
+        return {
+            "backend": "dashscope",
+            "model": self.profile.model,
+            "ready": True,
+            "reply": "鉴权通过：任务查询接口可用（未发起生成）",
+        }
 
 
 # ---------------------------------------------------------------- ComfyUI
@@ -582,8 +706,9 @@ class ComfyUIVideoGenerator(_Backend):
         self._missing: dict[str, int] = {}
 
     def _call(self, method: str, path: str, **kwargs) -> dict:
-        return adapters.request(method, self._url(path), timeout=self.profile.timeout,
-                                headers=self.profile.headers(), **kwargs)
+        return adapters.request(
+            method, self._url(path), timeout=self.profile.timeout, headers=self.profile.headers(), **kwargs
+        )
 
     def _workflow(self) -> tuple[dict, dict]:
         workflow, mapping = self.profile.comfyui_workflow, self.profile.comfyui_mapping
@@ -598,7 +723,8 @@ class ComfyUIVideoGenerator(_Backend):
     def _upload(self, image: Path) -> str:
         mime = mimetypes.guess_type(image.name)[0] or "image/png"
         payload = self._call(
-            "POST", "/upload/image",
+            "POST",
+            "/upload/image",
             files={"image": (f"mindex-{image.name}", image.read_bytes(), mime)},
             data={"overwrite": "true", "type": "input"},
         )
@@ -611,7 +737,9 @@ class ComfyUIVideoGenerator(_Backend):
     def submit(self, request: VideoRequest) -> str:
         _, mapping = self._workflow()
         if request.image is not None and "image" not in mapping:
-            raise ModelError("分镜带有参考图，但 ComfyUI 节点映射没有 image 字段；请映射加载图片节点的 image 输入")
+            raise ModelError(
+                "分镜带有参考图，但 ComfyUI 节点映射没有 image 字段；请映射加载图片节点的 image 输入"
+            )
         values = {
             "prompt": request.prompt,
             "negative": request.negative_prompt,
@@ -637,9 +765,14 @@ class ComfyUIVideoGenerator(_Backend):
             applied[name] = value
         client_id = uuid.uuid4().hex
         payload = self._call(
-            "POST", "/prompt", json={"prompt": workflow, "client_id": client_id},
-            audit={"client_id": client_id, "workflow": workflow_hash(self.profile.comfyui_workflow),
-                   "inputs": applied},
+            "POST",
+            "/prompt",
+            json={"prompt": workflow, "client_id": client_id},
+            audit={
+                "client_id": client_id,
+                "workflow": workflow_hash(self.profile.comfyui_workflow),
+                "inputs": applied,
+            },
         )
         if payload.get("node_errors"):
             raise ModelError(f"ComfyUI 拒绝工作流：{str(payload['node_errors'])[:300]}")
@@ -654,7 +787,9 @@ class ComfyUIVideoGenerator(_Backend):
                 continue
             for key in self.output_keys:
                 for item in node.get(key) or []:
-                    if isinstance(item, dict) and str(item.get("filename", "")).lower().endswith(self.suffixes):
+                    if isinstance(item, dict) and str(item.get("filename", "")).lower().endswith(
+                        self.suffixes
+                    ):
                         return item
         return None
 
@@ -671,27 +806,41 @@ class ComfyUIVideoGenerator(_Backend):
                 return VideoStatus(state="running", raw=queue)
             self._missing[task_id] = self._missing.get(task_id, 0) + 1
             if self._missing[task_id] >= 3:
-                return VideoStatus(state="failed", error="ComfyUI 中找不到该任务（服务可能已重启或任务被删除）",
-                                   raw=queue)
+                return VideoStatus(
+                    state="failed", error="ComfyUI 中找不到该任务（服务可能已重启或任务被删除）", raw=queue
+                )
             return VideoStatus(state="running", raw=queue)
         status = entry.get("status") or {}
         if status.get("status_str") == "error":
             detail = next(
-                (str(data.get("exception_message") or "").strip()
-                 for kind, data in status.get("messages") or []
-                 if kind == "execution_error" and isinstance(data, dict)),
+                (
+                    str(data.get("exception_message") or "").strip()
+                    for kind, data in status.get("messages") or []
+                    if kind == "execution_error" and isinstance(data, dict)
+                ),
                 "",
             )
-            return VideoStatus(state="failed", error=f"ComfyUI 执行失败{f'：{detail[:300]}' if detail else ''}",
-                               raw={"status": status})
+            return VideoStatus(
+                state="failed",
+                error=f"ComfyUI 执行失败{f'：{detail[:300]}' if detail else ''}",
+                raw={"status": status},
+            )
         output = self._output(entry)
         if output is None:
             if status.get("completed") is False:
                 return VideoStatus(state="running", raw={"status": status})
-            return VideoStatus(state="failed", error=f"ComfyUI 工作流已完成但没有输出{self.noun}文件，请检查保存{self.noun}节点",
-                               raw={"status": status, "outputs": entry.get("outputs")})
-        query = urlencode({"filename": output["filename"], "subfolder": output.get("subfolder") or "",
-                           "type": output.get("type") or "output"})
+            return VideoStatus(
+                state="failed",
+                error=f"ComfyUI 工作流已完成但没有输出{self.noun}文件，请检查保存{self.noun}节点",
+                raw={"status": status, "outputs": entry.get("outputs")},
+            )
+        query = urlencode(
+            {
+                "filename": output["filename"],
+                "subfolder": output.get("subfolder") or "",
+                "type": output.get("type") or "output",
+            }
+        )
         return VideoStatus(state="succeeded", url=self._url(f"/view?{query}"), raw={"output": output})
 
     def fetch(self, status: VideoStatus, target: Path) -> None:
@@ -700,8 +849,8 @@ class ComfyUIVideoGenerator(_Backend):
         self._download(status.url, target, headers=self.profile.headers())
 
     def run(self, values: dict, target: Path, *, sleep=None, clock=None) -> None:
-        """同步执行（图片/音乐生成）：提交 → 按 poll_interval 轮询到完成（不超过 max_wait）→ 下载到 ``target``。"""
-        import time
+        """同步执行（图片/音乐生成）：提交 → 按 poll_interval 轮询到完成（不超过
+        max_wait）→ 下载到 ``target``。"""
 
         sleep, clock = sleep or time.sleep, clock or time.monotonic
         task_id = self.submit_values(values)
@@ -715,7 +864,9 @@ class ComfyUIVideoGenerator(_Backend):
                 raise ModelError(status.error or f"ComfyUI {self.role}失败")
             if clock() >= deadline:
                 self.cancel(task_id)
-                raise ModelError(f"ComfyUI {self.role}超时：{self.profile.max_wait:g} 秒内未完成，已尝试撤销任务")
+                raise ModelError(
+                    f"ComfyUI {self.role}超时：{self.profile.max_wait:g} 秒内未完成，已尝试撤销任务"
+                )
             sleep(self.profile.poll_interval)
 
     def cancel(self, task_id: str) -> None:
@@ -743,6 +894,7 @@ class ComfyUIVideoGenerator(_Backend):
             "ready": configured,
             "version": system.get("comfyui_version"),
             "devices": len(stats.get("devices") or []),
-            "reply": "服务可达，工作流与节点映射有效（未发起生成）" if configured
+            "reply": "服务可达，工作流与节点映射有效（未发起生成）"
+            if configured
             else "服务可达；尚未导入工作流或节点映射",
         }

@@ -15,13 +15,15 @@ import os
 import runpy
 import sys
 
+from cli import app
+from settings.browser_install import browsers_path
+
 
 def main(argv: list[str] | None = None) -> None:
     args = list(sys.argv[1:] if argv is None else argv)
     if getattr(sys, "frozen", False) and not os.environ.get("PLAYWRIGHT_BROWSERS_PATH"):
         # playwright 在冻结环境里缺省把浏览器目录设为包内（PLAYWRIGHT_BROWSERS_PATH=0）；改为与源码运行相同的
         # 缺省缓存目录。桌面外壳总会显式设置为用户数据目录的 browsers/。
-        from settings.browser_install import browsers_path
 
         os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(browsers_path())
     if len(args) >= 2 and args[0] == "-m":
@@ -31,7 +33,6 @@ def main(argv: list[str] | None = None) -> None:
         return
     if args[:1] == ["-m"]:
         sys.exit("用法：mindex -m <模块> [参数…]")
-    from cli import app
 
     sys.argv = [sys.argv[0], *args]
     app(prog_name="mindex")

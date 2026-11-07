@@ -5,16 +5,23 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException
+from filelock import Timeout
 
+from models import adapters
+from models.adapters import ModelError
+from persons.persons import Persons
+from processing import indexing
 from processing.pipeline import Pipeline
 from shared import lock_backend
 from shared.background_tasks import BackgroundTaskRunner, public_task
 from shared.config import StrictModel
 from shared.db.fencing import publication_scope
-from shared.processing_lock import ProcessingLock
+from shared.lexical_store import build_lexical_index
+from shared.processing_lock import ProcessingLock, PublicationLock, task_lock_work
 from shared.queue_dispatch import insert_index_task, insert_ledger, validate_index_options, wait_index_task
 from shared.task_cancel import TaskCancelled
 from shared.task_config import IndexOptions, freeze_config, restore_config
@@ -48,8 +55,6 @@ PUBLISH_KINDS = {
 
 
 def publish_work(config, source_id, work, embedder=None, *, progress=None, scope="shot_moment"):
-    from persons.persons import Persons
-    from processing.indexing import IndexBuilder
 
     pipeline = Pipeline(config)
     if work == "persons":
@@ -65,7 +70,7 @@ def publish_work(config, source_id, work, embedder=None, *, progress=None, scope
             progress({"stage": "publish", "message": "正在发布人物检索"})
         result = Persons(pipeline.store).publish(source_id=source_id, progress=progress)
         return result
-    index_id = IndexBuilder(config, embedder).build(
+    index_id = indexing.IndexBuilder(config, embedder).build(
         activate=True,
         source_id=source_id,
         kinds=PUBLISH_KINDS[scope],
@@ -119,7 +124,6 @@ def publication_attempt(
 
 def person_setup(store, source_id, work_id=None):
     """资料预检仅读取数据库和参考图，不隐式建立作品。"""
-    from persons.persons import Persons
 
     catalogue = Persons(store)
     linked = store.one("SELECT work_id FROM person_sources WHERE source_id=?", (source_id,))
@@ -165,7 +169,6 @@ class SourceTasks(BackgroundTaskRunner):
     thread_prefix = "source"
 
     def lock(self, source_id, work, options=None):
-        from shared.processing_lock import PublicationLock, task_lock_work
 
         values = options.model_dump() if options is not None and hasattr(options, "model_dump") else options
         kind = PublicationLock if work == "publish" else ProcessingLock
@@ -186,6 +189,7 @@ class SourceTasks(BackgroundTaskRunner):
         def create():
             source = self.validate(source_id, options.work if work == "publish" else work)
             if work == "publish":
+                # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
                 from admin.curation import Library
 
                 info = Library(self.store).source(source_id)["work"][options.work]
@@ -256,8 +260,6 @@ class SourceTasks(BackgroundTaskRunner):
                 if operation in {"transcribe", "analyze"}:
                     kwargs["force"] = options.get("force", False)
                 if operation == "align":
-                    from pathlib import Path
-
                     if not options.get("aligner_python"):
                         raise ValueError("对齐任务缺少独立环境解释器")
                     pipeline.align(Path(options["aligner_python"]), row["source_id"])
@@ -289,6 +291,7 @@ class SourceTasks(BackgroundTaskRunner):
 
 def enqueue_publications(runtime, store, source_id, work, embedder=None):
     """Automatic chaining creates the same independent tasks as manual clicks."""
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
     from admin.curation import Library
 
     manager = SourceTasks(runtime, store, embedder)
@@ -362,15 +365,13 @@ def source_tasks_router(runtime, store, embedder=None):
 
 
 def activate_checked(config, store, index_id, *, embedder=None):
-    from models.adapters import ModelError, make_embedder
-    from processing.indexing import check_index
 
-    issues = check_index(store, index_id, config=config)
+    issues = indexing.check_index(store, index_id, config=config)
     if issues:
         raise ValueError("索引检查失败：" + "; ".join(issues[:5]))
     spec = store.index_version(index_id)["spec"]
     if spec["space"].get("schema") == 2:
-        client = embedder or make_embedder(config)
+        client = embedder or adapters.make_embedder(config)
         if client.identity() != spec["space"]:
             raise ModelError("当前模型空间与待发布索引不同")
         if hasattr(client, "require_gate"):
@@ -391,7 +392,6 @@ class IndexTasks(BackgroundTaskRunner):
         # 集群回收完全由队列负责；本地每条账本按自己的执行锁恢复。
         if getattr(self.store, "queue_backend", "inline") == "postgres":
             return
-        from filelock import Timeout
 
         for row in self.store.rows("SELECT * FROM index_tasks WHERE status IN ('queued','running')"):
             try:
@@ -423,14 +423,12 @@ class IndexTasks(BackgroundTaskRunner):
         return self.submit(lock, create)
 
     def execute(self, task_id, row, config, save):
-        from processing.indexing import IndexBuilder
-        from processing.pipeline import Pipeline
 
         options = IndexOptions.model_validate(json.loads(row["options"]))
         progress = lambda value: save("progress", value)
         with Pipeline(config).lock(options.source_id, "publish"):
             if options.action == "build":
-                index_id = IndexBuilder(config, self.embedder).build(
+                index_id = indexing.IndexBuilder(config, self.embedder).build(
                     activate=options.activate,
                     mode=options.mode,
                     source_id=options.source_id,
@@ -450,14 +448,10 @@ class IndexTasks(BackgroundTaskRunner):
                         self.store.activate_release(options.release_id)
                         result = {"release_id": options.release_id}
                     elif options.action == "person-publish":
-                        from persons.persons import Persons
-
                         result = Persons(self.store).publish(
                             options.index_id, source_id=options.source_id, progress=progress
                         )
                     else:
-                        from shared.lexical_store import build_lexical_index
-
                         versions = self.store.rows(
                             "SELECT id FROM index_versions WHERE status='ready'"
                             + (" AND id=?" if options.index_id else "")

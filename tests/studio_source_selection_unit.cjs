@@ -1,9 +1,16 @@
+const { between } = require("./source_slices.cjs");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
 class Node {
   constructor(tag) {
     Object.assign(this, { tag, children: [], dataset: {}, events: {}, selected: false });
+    const classes = new Set();
+    this.classList = {
+      add: (...names) => names.forEach((name) => classes.add(name)),
+      remove: (...names) => names.forEach((name) => classes.delete(name)),
+      contains: (name) => classes.has(name),
+    };
   }
   get options() {
     return this.children;
@@ -29,6 +36,8 @@ const state = {
   data: { job: { source_ids: null } },
 };
 const context = vm.createContext({
+  queueMicrotask,
+  addEventListener() {},
   state,
   document: { createElement: (tag) => new Node(tag) },
   el: (tag) => new Node(tag),
@@ -39,21 +48,19 @@ const context = vm.createContext({
   MindexMultiSearch: { sort: (x) => x, attach() {}, refilter() {} },
   RECALL_MODES: [],
 });
+context.window = context;
+vm.runInContext(fs.readFileSync("frontend/src/shared/group-controls.js", "utf8"), context);
 const code = require("./studio_source.cjs").studioSource();
-vm.runInContext(code.slice(code.indexOf("const ALL_VALUE"), code.indexOf("const LABEL")), context);
-vm.runInContext(
-  code.slice(code.indexOf("function jobScope("), code.indexOf("function personName(")),
-  context,
-);
-vm.runInContext(
-  code.slice(code.indexOf("function recallEditable("), code.indexOf("function renderShotEditor(")),
-  context,
-);
+vm.runInContext(between(code, "const ALL_VALUE", "const LABEL"), context);
+vm.runInContext(between(code, "function jobScope(", "function personName("), context);
+vm.runInContext(between(code, "function recallEditable(", "function renderShotEditor("), context);
 const body = new Node("div");
 const draft = { data: { recall: null }, original: { recall: null }, dirty: false };
 context.renderRecallEditor(body, "shot", draft, new Node("div"));
 function find(root, predicate) {
-  if (predicate(root)) return root;
+  if (predicate(root)) {
+    return root;
+  }
   return root.children.map((n) => find(n, predicate)).find(Boolean);
 }
 function select() {
@@ -61,7 +68,9 @@ function select() {
 }
 function choose(ids) {
   const control = select();
-  for (const o of control.options) o.selected = ids.includes(o.value);
+  for (const o of control.options) {
+    o.selected = ids.includes(o.value);
+  }
   control.events.change();
 }
 const picked = () => Array.from(context.pickedIds(select()));
@@ -141,7 +150,9 @@ function selects(root) {
   return [root, ...root.children.flatMap(selects)].filter((n) => n.tag === "select");
 }
 const [actorControl, roleControl] = selects(personBody).filter((n) => n !== sourceControl);
-for (const option of sourceControl.options) option.selected = option.value === "s2";
+for (const option of sourceControl.options) {
+  option.selected = option.value === "s2";
+}
 sourceControl.events.change();
 assert.deepEqual(
   Array.from(context.itemOptionsOf(actorControl), (o) => o.value),

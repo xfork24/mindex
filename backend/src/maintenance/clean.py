@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import shutil
+import sqlite3
 import threading
 import time
 from collections.abc import Callable, Iterable, Iterator
@@ -19,7 +20,15 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from filelock import FileLock, Timeout
+
+from agent.attachments import DIRNAME, TOKEN_RE, AttachmentStore, token
+from persons.persons import retained_frame_paths
+from processing import pipeline as processing_pipeline
+from shared import lock_backend
 from shared.config import Config
+from shared.db.maintenance_gate import maintenance_gate
+from shared.resource_registry import referenced_objects
 from shared.storage import Store
 
 log = logging.getLogger(__name__)
@@ -128,6 +137,7 @@ class Scan:
         path/thumbnail；被保留快照引用的文件绝不判孤儿。
         """
         if self._media is None:
+            # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
             from maintenance.clean_index import retained_versions
 
             retained = retained_versions(
@@ -531,7 +541,6 @@ def _orphan_action(
 
 
 def person_frames(scan: Scan) -> CleanAction | None:
-    from persons.persons import retained_frame_paths
 
     def collect():
         retained = set().union(*retained_frame_paths(scan.store).values(), set())
@@ -745,9 +754,8 @@ def transcript_checkpoints(scan: Scan) -> CleanAction | None:
 
 
 def analysis_checkpoints(scan: Scan) -> CleanAction | None:
-    from processing.pipeline import Pipeline
 
-    pipeline = Pipeline(scan.config)
+    pipeline = processing_pipeline.Pipeline(scan.config)
     keep: dict[str, set[str]] = {}
     base = scan.store.root / "analysis"
     if base.is_dir():
@@ -833,7 +841,6 @@ def _cache_expired(path: Path, days: int, now: datetime) -> bool:
 
 
 def _delete_cache_items(pairs, days, now):
-    from filelock import FileLock, Timeout
 
     deleted = skipped = 0
     for path, _ in pairs:
@@ -852,7 +859,6 @@ def _delete_cache_items(pairs, days, now):
 
 
 def context_cache(scan: Scan) -> CleanAction | None:
-    from filelock import FileLock, Timeout
 
     directory = scan.store.root / "context"
     if not directory.is_dir():
@@ -895,7 +901,6 @@ def context_cache(scan: Scan) -> CleanAction | None:
 
 
 def shot_media_cache(scan: Scan) -> CleanAction | None:
-    from filelock import FileLock, Timeout
 
     directory = scan.store.root / "cache" / "shot-media"
     if not directory.is_dir():
@@ -1020,7 +1025,6 @@ def agent_attachments(scan: Scan) -> CleanAction | None:
 
     agent.sqlite3 不存在时不创建它：此时没有任何登记记录，只按宽限期回收孤儿与暂存残留。
     """
-    from agent.attachments import DIRNAME, TOKEN_RE, AttachmentStore, token
 
     root = scan.store.root / DIRNAME
     database = scan.store.root / "agent.sqlite3"
@@ -1168,6 +1172,7 @@ RULES: list[Callable[[Scan], CleanAction | None]] = [
 
 
 def _all_rules() -> list[Callable[[Scan], CleanAction | None]]:
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
     from maintenance.clean_index import RULES as index_rules
     from maintenance.clean_studio import RULES as studio_rules
 
@@ -1232,14 +1237,10 @@ def clean_library(
             f"{_fmt_bytes(action.total_bytes)}（{_elapsed(rule_started)}）"
         )
     if apply:
-        from shared.db.maintenance_gate import maintenance_gate
-
         with maintenance_gate(store, name="clean"), store.run("clean"):
             _apply(config, store, actions, say)
     report = _report(store, actions, applied=apply, scanned_at=scan.now)
     if config.storage.backend == "s3":
-        from shared.db.maintenance_gate import maintenance_gate
-
         with maintenance_gate(store, name="s3-gc") if apply else nullcontext():
             report["s3_orphans"] = _clean_s3_orphans(config, store, apply=apply, say=say)
     if vacuum:
@@ -1272,7 +1273,6 @@ def _with_days(config: Config, days: int) -> Config:
 
 def _vacuum_databases(store: Store, *, applied: bool, say: Progress) -> dict:
     """对库文件执行 VACUUM 回收已删行的空间；预览只报大小，被占用单库跳过。"""
-    import sqlite3
 
     databases = []
     for label in VACUUM_DATABASES:
@@ -1315,9 +1315,6 @@ def _vacuum_databases(store: Store, *, applied: bool, say: Progress) -> dict:
 
 def _apply(config: Config, store: Store, actions: list[CleanAction], say: Progress) -> None:
     """两段持锁执行：管线+索引段 → 释放 → studio 段；锁冲突抛 CleanBusy 或标记 skipped。"""
-    from filelock import Timeout
-
-    from shared import lock_backend
 
     pipeline_actions = [action for action in actions if action.stage == "pipeline"]
     studio_actions = [action for action in actions if action.stage == "studio"]
@@ -1425,9 +1422,6 @@ def _notes(store: Store) -> list[dict]:
 
 def _clean_s3_orphans(config: Config, store: Store, *, apply: bool, say: Progress) -> dict:
     """标记候选、等待宽限、当前引用复验及条件删除；删除意图可恢复。"""
-    import time
-
-    from shared.resource_registry import referenced_objects
 
     media = store.media
     if not media.verify_conditional_delete():

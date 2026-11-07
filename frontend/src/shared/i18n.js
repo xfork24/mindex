@@ -7,9 +7,9 @@
   try {
     language = localStorage.getItem(storageKey) === "en" ? "en" : "zh";
   } catch {}
-  const messages = new Map(),
-    tokens = new Map(),
-    bindings = new WeakMap();
+  const messages = new Map();
+  const tokens = new Map();
+  const bindings = new WeakMap();
   let serial = 0;
   const tokenPattern = /\uE000z(\d+)\uE001/g;
   const legacy = Object.entries(catalog)
@@ -31,18 +31,24 @@
     .sort((a, b) => Number(!b.names.length) - Number(!a.names.length) || b.size - a.size);
   function msg(key, params = {}) {
     const identity = JSON.stringify([key, params]);
-    if (tokens.has(identity)) return tokens.get(identity);
-    const id = String(++serial),
-      token = "\uE000z" + id + "\uE001";
+    if (tokens.has(identity)) {
+      return tokens.get(identity);
+    }
+    const id = String(++serial);
+    const token = "\uE000z" + id + "\uE001";
     messages.set(id, { key, params });
     tokens.set(identity, token);
     return token;
   }
   function render(value, depth = 0) {
-    if (depth > 20) return String(value ?? "");
+    if (depth > 20) {
+      return String(value ?? "");
+    }
     return String(value ?? "").replace(tokenPattern, (_, id) => {
       const item = messages.get(id);
-      if (!item) return "";
+      if (!item) {
+        return "";
+      }
       if (item.key === "system.date" || item.key === "system.time") {
         const date = new Date(item.params.value);
         return item.key === "system.time"
@@ -60,8 +66,12 @@
     // Only diagnostic templates opt into nested translation. Content parameters
     // passed to msg() remain verbatim, even when they match a UI label.
     const text = String(value);
-    if (text.includes("；")) return text.split("；").map(diagnosticParam).join("; ");
-    if (legacy.some((entry) => entry.regex.test(text))) return system(text);
+    if (text.includes("；")) {
+      return text.split("；").map(diagnosticParam).join("; ");
+    }
+    if (legacy.some((entry) => entry.regex.test(text))) {
+      return system(text);
+    }
     return text;
   }
   function systemParams(key, params) {
@@ -80,29 +90,37 @@
     );
   }
   function system(value) {
-    if (!value) return "";
-    if (Array.isArray(value))
+    if (!value) {
+      return "";
+    }
+    if (Array.isArray(value)) {
       return msg("system.validation", {
         diagnostic: value
           .map((item) => [...(item.loc || []), item.msg || JSON.stringify(item)].join(": "))
           .join("; "),
       });
+    }
     if (typeof value === "object") {
-      if (value.message_key && catalog[value.message_key])
+      if (value.message_key && catalog[value.message_key]) {
         return msg(value.message_key, systemParams(value.message_key, value.message_params || {}));
+      }
       return system(value.message ?? value.detail ?? value.error ?? JSON.stringify(value));
     }
     const text = String(value);
-    if (/^(Failed to fetch|Load failed|NetworkError.*|fetch failed)$/.test(text))
+    if (/^(Failed to fetch|Load failed|NetworkError.*|fetch failed)$/.test(text)) {
       return msg("system.network");
-    if (/\uE000z\d+\uE001/.test(text)) return text;
+    }
+    if (/\uE000z\d+\uE001/.test(text)) {
+      return text;
+    }
     for (const entry of legacy) {
       const found = text.match(entry.regex);
-      if (found)
+      if (found) {
         return msg(
           entry.key,
           systemParams(entry.key, Object.fromEntries(entry.names.map((n, i) => [n, found[i + 1]]))),
         );
+      }
     }
     return msg("system.diagnostic", { diagnostic: text });
   }
@@ -112,32 +130,45 @@
       map = new Map();
       bindings.set(node, map);
     }
-    if (/\uE000z\d+\uE001/.test(String(value))) map.set(attribute, value);
-    else map.delete(attribute);
+    if (/\uE000z\d+\uE001/.test(String(value))) {
+      map.set(attribute, value);
+    } else {
+      map.delete(attribute);
+    }
   }
   function setText(node, value) {
-    if (!node) return;
+    if (!node) {
+      return;
+    }
     const text = render(value);
     if (node.nodeType === 3) {
       remember(node, "#text", value);
-      if (node.data !== text) node.data = text;
+      if (node.data !== text) {
+        node.data = text;
+      }
       return;
     }
     // A label may gain inputs, select options or media after its initial text.
     // Remember its text node, so a language change never replaces those children.
-    if (node.textContent !== text) node.textContent = text;
+    if (node.textContent !== text) {
+      node.textContent = text;
+    }
     const target = node.firstChild;
     let map = bindings.get(node);
     if (!map) {
       map = new Map();
       bindings.set(node, map);
     }
-    if (target?.nodeType === 3 && /\uE000z\d+\uE001/.test(String(value)))
+    if (target?.nodeType === 3 && /\uE000z\d+\uE001/.test(String(value))) {
       map.set("#text", { value, target });
-    else map.delete("#text");
+    } else {
+      map.delete("#text");
+    }
   }
   function setAttr(node, attribute, value) {
-    if (!node) return;
+    if (!node) {
+      return;
+    }
     remember(node, attribute, value);
     node.setAttribute(attribute, render(value));
   }
@@ -147,13 +178,18 @@
     return node;
   }
   function bind(node, key, params = {}, attribute = "#text") {
-    if (attribute === "#text") setText(node, msg(key, params));
-    else setAttr(node, attribute, msg(key, params));
+    if (attribute === "#text") {
+      setText(node, msg(key, params));
+    } else {
+      setAttr(node, attribute, msg(key, params));
+    }
   }
   function update() {
     const scroll = [];
     document.querySelectorAll("*").forEach((node) => {
-      if (node.scrollTop || node.scrollLeft) scroll.push([node, node.scrollTop, node.scrollLeft]);
+      if (node.scrollTop || node.scrollLeft) {
+        scroll.push([node, node.scrollTop, node.scrollLeft]);
+      }
     });
     const position = [window.scrollX, window.scrollY];
     document.documentElement.lang = language === "zh" ? "zh-CN" : "en";
@@ -161,11 +197,19 @@
       for (const [attribute, value] of bindings.get(node) || []) {
         if (attribute === "#text") {
           if (typeof value === "object") {
-            if (value.target.parentNode === node) value.target.data = render(value.value);
-          } else if (node.nodeType === 3) node.data = render(value);
-        } else setAttr(node, attribute, value);
+            if (value.target.parentNode === node) {
+              value.target.data = render(value.value);
+            }
+          } else if (node.nodeType === 3) {
+            node.data = render(value);
+          }
+        } else {
+          setAttr(node, attribute, value);
+        }
       }
-      for (const child of [...node.childNodes]) visit(child);
+      for (const child of [...node.childNodes]) {
+        visit(child);
+      }
     };
     visit(document.documentElement);
     document
@@ -178,12 +222,15 @@
       node.scrollTop = top;
       node.scrollLeft = left;
     }
-    if (window.scrollX !== position[0] || window.scrollY !== position[1])
+    if (window.scrollX !== position[0] || window.scrollY !== position[1]) {
       window.scrollTo(...position);
+    }
   }
   function setLanguage(next, persist = true) {
     next = next === "en" ? "en" : "zh";
-    if (language === next) return;
+    if (language === next) {
+      return;
+    }
     language = next;
     if (persist) {
       try {
@@ -196,7 +243,9 @@
   function init() {
     document.querySelectorAll("[data-i18n]").forEach((node) => {
       const parts = JSON.parse(node.dataset.i18n);
-      for (const [index, key] of parts) bind(node.childNodes[index], key);
+      for (const [index, key] of parts) {
+        bind(node.childNodes[index], key);
+      }
     });
     for (const attribute of ["placeholder", "aria-label", "alt", "title", "data-query"]) {
       document
@@ -212,7 +261,9 @@
     document.documentElement.removeAttribute("data-i18n-pending");
   }
   window.addEventListener("storage", (event) => {
-    if (event.key === storageKey || event.key === null) setLanguage(event.newValue, false);
+    if (event.key === storageKey || event.key === null) {
+      setLanguage(event.newValue, false);
+    }
   });
   function builtin(value) {
     const entry = Object.entries(catalog).find(([, item]) => item.zh === value);
@@ -260,6 +311,9 @@
   // Date formatting is localized when resolving the message, including existing log lines.
   catalog["system.date"] = { zh: "{value}", en: "{value}" };
   catalog["system.time"] = { zh: "{value}", en: "{value}" };
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
-  else init();
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+  } else {
+    init();
+  }
 })();

@@ -2,6 +2,11 @@
 
 # ruff: noqa: F811
 import copy
+import io
+import os
+import subprocess
+import zipfile
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -133,9 +138,6 @@ def test_footer_and_checks():
 
 @pytest.mark.slow
 def test_delivery_browser(small):
-    import os
-    import subprocess
-    from pathlib import Path
 
     from conftest import FixtureSpeaker
     from test_agent_panel_ui import playwright_available, serve
@@ -163,7 +165,6 @@ def test_delivery_browser(small):
 
 @pytest.mark.slow
 def test_template_build_package_and_rebuild_scope(small, tmp_path):
-    import zipfile
 
     from conftest import FixtureSpeaker
     from test_studio_publish import MetadataWriter
@@ -201,7 +202,6 @@ def test_template_build_package_and_rebuild_scope(small, tmp_path):
             f"/api/studio/jobs/{job_id}/artifacts/{package['files']['zip']['path']}?download=true"
         )
         assert download.status_code == 200
-        import io
 
         with zipfile.ZipFile(io.BytesIO(download.content)) as bundle:
             names = bundle.namelist()

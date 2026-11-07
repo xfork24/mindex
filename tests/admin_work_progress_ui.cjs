@@ -8,8 +8,8 @@ const fixture = process.env.MINDEX_UPLOAD_TEST_VIDEO;
   assert.ok(fixture);
   const browser = await chromium.launch({ headless: true });
   try {
-    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } }),
-      errors = [];
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    const errors = [];
     page.on("pageerror", (e) => errors.push(e.message));
     const response = await page.request.post(base + "/api/admin/sources/upload", {
       multipart: {
@@ -82,8 +82,8 @@ const fixture = process.env.MINDEX_UPLOAD_TEST_VIDEO;
       assert.ok(r.ok(), await r.text());
       return r.json();
     };
-    const work = await entity({ kind: "work", name: "进度验收作品" }),
-      actor = await entity({ kind: "actor", name: "进度验收演员" });
+    const work = await entity({ kind: "work", name: "进度验收作品" });
+    const actor = await entity({ kind: "actor", name: "进度验收演员" });
     await entity({
       kind: "role",
       name: "进度验收角色",
@@ -131,8 +131,9 @@ const fixture = process.env.MINDEX_UPLOAD_TEST_VIDEO;
     }
     await page.reload();
     await card("persons").waitFor();
-    for (const name of ["shots", "dialogue", "analysis", "persons"])
+    for (const name of ["shots", "dialogue", "analysis", "persons"]) {
       await complete(name, "publish_task");
+    }
     await page.screenshot({ path: "/tmp/mindex-work-progress-desktop.png", fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 });
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));

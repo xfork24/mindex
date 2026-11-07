@@ -61,8 +61,9 @@ test("图标：macOS 用模板图，其他平台用彩色图，文件随包分�
   const win = tray.iconPath("win32", desktop);
   assert.match(mac, /trayTemplate\.png$/);
   assert.match(win, /tray\.png$/);
-  for (const file of [mac, win, path.join(desktop, "assets", "trayTemplate@2x.png")])
+  for (const file of [mac, win, path.join(desktop, "assets", "trayTemplate@2x.png")]) {
     assert.ok(fs.statSync(file).size > 0, file);
+  }
   const pkg = require("../package.json");
   assert.ok(pkg.build.files.includes("assets/**"));
 });

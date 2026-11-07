@@ -154,6 +154,7 @@ def delete_index_version(store, index_id: str) -> dict:
     chroma 目录会用各自内存态覆盖 HNSW 落盘文件，制造「元数据有、HNSW 无」的
     孤儿向量（复用时 chroma 报 Error finding id）。
     """
+    # 延迟导入：媒体、数值或服务运行依赖仅在实际执行该功能时加载。
     import chromadb
     from chromadb.config import Settings
 

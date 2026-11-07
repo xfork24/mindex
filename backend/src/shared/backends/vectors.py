@@ -15,10 +15,13 @@ processing，shared 也不得反向导入上层包。
 from __future__ import annotations
 
 import logging
+import os
 import weakref
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Protocol
+from urllib.parse import urlparse
+from uuid import UUID
 
 log = logging.getLogger(__name__)
 
@@ -175,6 +178,7 @@ class LocalVectorStores:
         self.root = Path(root)
 
     def open(self, index_id: str, *, create: bool = False) -> LocalVectorStore:
+        # 延迟导入：媒体、数值或服务运行依赖仅在实际执行该功能时加载。
         import chromadb
         from chromadb.config import Settings
 
@@ -197,9 +201,8 @@ _HTTP_CLIENTS: dict[tuple[str, str], object] = {}
 def chroma_http_client(section, *, shared=True):
     """进程内按 (url, token) 共享的 Chroma HttpClient（阶段 2 的最小改动路径：
     独立服务 + 显式配置；集合读写与本地完全一致，检索过滤策略随后续阶段下推）。"""
-    import os
-    from urllib.parse import urlparse
 
+    # 延迟导入：媒体、数值或服务运行依赖仅在实际执行该功能时加载。
     import chromadb
     from chromadb.config import Settings
 
@@ -218,6 +221,7 @@ def chroma_http_client(section, *, shared=True):
                 settings=Settings(anonymized_telemetry=False),
             )
         else:
+            # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
             from shared.backends.chroma_client import ChromaClient
 
             settings = Settings(
@@ -245,8 +249,6 @@ class ChromaServerVectorStores:
         self._closed = False
         self._client_finalizer = None
         if library_id is not None:
-            from uuid import UUID
-
             library_id = str(UUID(library_id))
         self.library_id = library_id
 
@@ -285,7 +287,6 @@ class LibraryVectorClient:
     """向量业务连接只暴露本库集合；原始 HttpClient 仍按 endpoint/token 复用。"""
 
     def __init__(self, client, library_id: str, *, owner=None):
-        from uuid import UUID
 
         self.client = client
         self._owner = owner

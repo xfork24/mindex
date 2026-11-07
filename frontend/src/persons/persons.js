@@ -26,17 +26,22 @@ const state = {
 };
 function node(tag, text, cls) {
   const n = document.createElement(tag);
-  if (text !== undefined) MindexI18n.setText(n, text);
-  if (cls) n.className = cls;
+  if (text !== undefined) {
+    MindexI18n.setText(n, text);
+  }
+  if (cls) {
+    n.className = cls;
+  }
   return n;
 }
 function notice(text, error = false) {
-  if (globalThis.MindexFeedback)
+  if (globalThis.MindexFeedback) {
     return globalThis.MindexFeedback.show(
       "notice",
       error ? MindexI18n.system(text) : text,
       error ? "error" : "info",
     );
+  }
   MindexI18n.setText($("notice"), error ? MindexI18n.system(text) : text);
   $("notice").className = `notice ${error ? "error" : "info"}`;
 }
@@ -71,20 +76,27 @@ function itemOptions(select) {
 }
 function syncAll(select) {
   const all = allOption(select);
-  if (!all) return;
+  if (!all) {
+    return;
+  }
   const items = itemOptions(select);
   all.selected = items.length > 0 && items.every((o) => o.selected);
   select.dataset.allSelected = all.selected ? "1" : "0";
 }
 function applyAll(select, on) {
-  for (const o of itemOptions(select)) o.selected = on;
+  for (const o of itemOptions(select)) {
+    o.selected = on;
+  }
   syncAll(select);
 }
 // change 时无法区分是点了“全部选择”还是普通项，用上一次的全选状态判断意图。
 function toggleAll(select) {
   const all = allOption(select);
-  if (all && all.selected !== (select.dataset.allSelected === "1")) applyAll(select, all.selected);
-  else syncAll(select);
+  if (all && all.selected !== (select.dataset.allSelected === "1")) {
+    applyAll(select, all.selected);
+  } else {
+    syncAll(select);
+  }
 }
 // 多选框：条目按中文字典序渲染并挂搜索框；单选框维持原样。
 function options(select, items, empty = true) {
@@ -135,8 +147,12 @@ function fillEntity(e) {
   $("entity-kind").value = e?.kind || "actor";
   $("entity-name").value = e?.name || "";
   $("entity-aliases").value = (e?.aliases || []).join("，");
-  for (const o of $("entity-work").options) o.selected = (e?.work_ids || []).includes(o.value);
-  for (const o of $("entity-actors").options) o.selected = (e?.actor_ids || []).includes(o.value);
+  for (const o of $("entity-work").options) {
+    o.selected = (e?.work_ids || []).includes(o.value);
+  }
+  for (const o of $("entity-actors").options) {
+    o.selected = (e?.actor_ids || []).includes(o.value);
+  }
   syncAll($("entity-work"));
   syncAll($("entity-actors"));
   entityFields();
@@ -151,14 +167,19 @@ function editEntity(e = null, reference = null, defaults = null) {
   $("entity-kind").disabled = true;
   $("pair-field").hidden = !reference;
   options($("reference-actor"), entities("actor"), false);
-  if (reference) $("reference-actor").value = reference.actor_id;
+  if (reference) {
+    $("reference-actor").value = reference.actor_id;
+  }
   const photo =
     reference ||
     state.references.find((r) => r.role_id === e?.id) ||
     state.references.find((r) => !r.role_id && r.actor_id === e?.id);
   $("entity-photo").hidden = !photo;
-  if (photo) $("entity-photo").src = photo.url;
-  else $("entity-photo").removeAttribute("src");
+  if (photo) {
+    $("entity-photo").src = photo.url;
+  } else {
+    $("entity-photo").removeAttribute("src");
+  }
   MindexI18n.setText(
     $("entity-title"),
     e
@@ -174,7 +195,9 @@ function editEntity(e = null, reference = null, defaults = null) {
 $("entity-new").onclick = () => editEntity();
 $("entity-reset").onclick = $("entity-close").onclick = () => $("entity-dialog").close();
 $("reference-actor").onchange = () => {
-  if (state.editRole) return;
+  if (state.editRole) {
+    return;
+  }
   const e = state.entities.find((e) => e.id === $("reference-actor").value);
   if (e) {
     state.editing = e.id;
@@ -182,12 +205,14 @@ $("reference-actor").onchange = () => {
   }
 };
 async function appendReferences(actorId, files, roleId = null) {
-  const done = [],
-    failed = [];
+  const done = [];
+  const failed = [];
   for (const file of files) {
     const form = new FormData();
     form.append("file", file);
-    if (roleId) form.append("role_id", roleId);
+    if (roleId) {
+      form.append("role_id", roleId);
+    }
     form.append("actor_id", actorId);
     try {
       await api("/api/persons/references", { method: "POST", body: form });
@@ -203,17 +228,17 @@ $("entity-form").onsubmit = async (event) => {
   $("entity-save").disabled = true;
   MindexI18n.setText($("entity-error"), "");
   try {
-    const kind = $("entity-kind").value,
-      body = {
-        kind,
-        name: $("entity-name").value,
-        aliases: $("entity-aliases")
-          .value.split(/[,，]/)
-          .map((s) => s.trim())
-          .filter(Boolean),
-        actor_ids: kind === "role" ? selected("entity-actors") : [],
-        work_ids: kind === "role" ? selected("entity-work") : [],
-      };
+    const kind = $("entity-kind").value;
+    const body = {
+      kind,
+      name: $("entity-name").value,
+      aliases: $("entity-aliases")
+        .value.split(/[,，]/)
+        .map((s) => s.trim())
+        .filter(Boolean),
+      actor_ids: kind === "role" ? selected("entity-actors") : [],
+      work_ids: kind === "role" ? selected("entity-work") : [],
+    };
     let actorId = state.editRole || state.editing;
     if (state.editReference) {
       const payload = state.editRole
@@ -263,15 +288,19 @@ const FILTERS = [
   ["role", "filter-role", "role"],
 ];
 function readFilters() {
-  for (const [key, id] of FILTERS) state.filters[key] = selected(id);
+  for (const [key, id] of FILTERS) {
+    state.filters[key] = selected(id);
+  }
 }
 // 多选框不能用 options()：它只恢复单个 value，重建列表时必须自己记住已选项。
 function fillFilters() {
   function fill(id, items) {
-    const sel = $(id),
-      keep = new Set(selected(id));
+    const sel = $(id);
+    const keep = new Set(selected(id));
     options(sel, items, false);
-    for (const o of itemOptions(sel)) o.selected = keep.has(o.value);
+    for (const o of itemOptions(sel)) {
+      o.selected = keep.has(o.value);
+    }
     syncAll(sel);
   }
   fill("filter-work", entities("work"));
@@ -290,15 +319,20 @@ function fillFilters() {
     roles.filter((r) => !actors.length || r.actor_ids.some((id) => actors.includes(id))),
   );
 }
-for (const [, id] of FILTERS)
+for (const [, id] of FILTERS) {
   $(id).onchange = () => {
     toggleAll($(id));
     fillFilters();
     renderCatalogue();
   };
-for (const id of ["entity-work", "entity-actors"]) $(id).onchange = () => toggleAll($(id));
+}
+for (const id of ["entity-work", "entity-actors"]) {
+  $(id).onchange = () => toggleAll($(id));
+}
 $("filter-reset").onclick = () => {
-  for (const [, id] of FILTERS) applyAll($(id), false);
+  for (const [, id] of FILTERS) {
+    applyAll($(id), false);
+  }
   state.filters = { work: [], actor: [], role: [] };
   fillFilters();
   renderCatalogue();
@@ -316,23 +350,28 @@ function rolesOf(actor) {
 }
 function actorVisible(actor) {
   const f = state.filters;
-  if (f.actor.length && !f.actor.includes(actor.id)) return false;
+  if (f.actor.length && !f.actor.includes(actor.id)) {
+    return false;
+  }
   return f.role.length || f.work.length ? rolesOf(actor).length > 0 : true;
 }
 function fillSelectors() {
   options($("entity-actors"), entities("actor"));
-  for (const id of ["entity-work", "import-work"]) options($(id), entities("work"));
-  for (const id of ["capture-source", "process-source", "review-source"])
+  for (const id of ["entity-work", "import-work"]) {
+    options($(id), entities("work"));
+  }
+  for (const id of ["capture-source", "process-source", "review-source"]) {
     options($(id), state.sources);
+  }
   fillFilters();
   fillCaptureRoles();
 }
 // 每张参考图一张卡；extra 挂在「移除参考」右侧（实体的删除按钮放第一张参考图那行）。
 // 卡片左上角显示编号前 8 位，与处理任务日志「参考图 xxxxxxxx」的指向一致；悬停可看完整编号。
 function referenceCard(entity, ref, extra) {
-  const figure = node("figure"),
-    img = node("img"),
-    badge = node("span", ref.id.slice(0, 8), "reference-id");
+  const figure = node("figure");
+  const img = node("img");
+  const badge = node("span", ref.id.slice(0, 8), "reference-id");
   MindexI18n.setAttr(badge, "title", ref.id);
   img.src = ref.url;
   MindexI18n.setAttr(img, "alt", MindexI18n.msg("ui.5ad7ccccc4d1", { p0: entity.name }));
@@ -351,14 +390,12 @@ function referenceCard(entity, ref, extra) {
   return figure;
 }
 function uploadForm(entity, actorId) {
-  const form = node("form", undefined, "reference-upload"),
-    label = node(
-      "label",
-      entity.kind === "role"
-        ? MindexI18n.msg("ui.ccc55cdd298a")
-        : MindexI18n.msg("ui.a45c74768a78"),
-    ),
-    files = node("input");
+  const form = node("form", undefined, "reference-upload");
+  const label = node(
+    "label",
+    entity.kind === "role" ? MindexI18n.msg("ui.ccc55cdd298a") : MindexI18n.msg("ui.a45c74768a78"),
+  );
+  const files = node("input");
   files.type = "file";
   files.accept = "image/*";
   files.multiple = true;
@@ -414,16 +451,21 @@ function roleCard(role) {
     node("p", MindexI18n.msg("ui.0dd8e74bafc3") + role.work_ids.map(name).join("、")),
     node("p", MindexI18n.msg("ui.1e95a9d36a9f") + role.actor_ids.map(name).join("、")),
   );
-  const refs = state.references.filter((r) => r.role_id === role.id),
-    photos = node("div", undefined, "person-photos");
+  const refs = state.references.filter((r) => r.role_id === role.id);
+  const photos = node("div", undefined, "person-photos");
   refs.forEach((ref, i) =>
     photos.append(referenceCard(role, ref, i === 0 ? deleteEntityButton(role) : null)),
   );
   card.append(refs.length ? photos : node("p", MindexI18n.msg("ui.d3cf742cfdbd"), "muted"));
-  if (role.actor_ids.length) card.append(uploadForm(role, role.actor_ids[0]));
-  else card.append(node("p", MindexI18n.msg("ui.a84ae80bf114"), "muted"));
+  if (role.actor_ids.length) {
+    card.append(uploadForm(role, role.actor_ids[0]));
+  } else {
+    card.append(node("p", MindexI18n.msg("ui.a84ae80bf114"), "muted"));
+  }
   card.append(button(MindexI18n.msg("ui.c9c77517fe85"), async () => editEntity(role)));
-  if (!refs.length) card.append(deleteEntityButton(role));
+  if (!refs.length) {
+    card.append(deleteEntityButton(role));
+  }
   card.append(linkedShotsButton(role));
   return card;
 }
@@ -442,7 +484,9 @@ function deleteEntityButton(entity) {
       } catch (error) {
         if (error.detail?.linked_shots) {
           await openLinkedShots(entity, error.detail.linked_shots);
-        } else throw error;
+        } else {
+          throw error;
+        }
       } finally {
         b.disabled = false;
       }
@@ -454,10 +498,11 @@ function linkedShotsButton(entity) {
   return button(MindexI18n.msg("ui.1065020f1032"), () => openLinkedShots(entity));
 }
 async function openLinkedShots(entity, data = null) {
-  if (!data)
+  if (!data) {
     data = await api(
       `/api/persons/entities/${entity.id}/linked-shots?offset=${state.linkedEntity?.id === entity.id ? state.linkedOffset : 0}&limit=50`,
     );
+  }
   state.linkedEntity = entity;
   state.linkedOffset = data.offset;
   state.linkedTotal = data.total;
@@ -505,7 +550,9 @@ async function openLinkedShots(entity, data = null) {
   );
   $("linked-prev").disabled = !data.offset;
   $("linked-next").disabled = data.offset + 50 >= data.total;
-  if (!$("linked-dialog").open) $("linked-dialog").showModal();
+  if (!$("linked-dialog").open) {
+    $("linked-dialog").showModal();
+  }
 }
 $("linked-close").onclick = () => $("linked-dialog").close();
 $("linked-prev").onclick = () => {
@@ -517,8 +564,8 @@ $("linked-next").onclick = () => {
   return run(() => openLinkedShots(state.linkedEntity));
 };
 function actorCard(actor) {
-  const roles = rolesOf(actor),
-    open = state.expanded.has(actor.id);
+  const roles = rolesOf(actor);
+  const open = state.expanded.has(actor.id);
   const card = node("article", undefined, "person-card actor-card" + (open ? " expanded" : ""));
   // 整卡可点击展开；按钮/表单/输入等交互子元素放行。
   card.setAttribute("role", "button");
@@ -530,11 +577,15 @@ function actorCard(actor) {
     renderCatalogue();
   };
   card.onclick = (e) => {
-    if (e.target.closest("button,input,select,textarea,label,a,form")) return;
+    if (e.target.closest("button,input,select,textarea,label,a,form")) {
+      return;
+    }
     toggle();
   };
   card.onkeydown = (e) => {
-    if (e.target !== card && e.target.closest("button,input,select,textarea,label,a,form")) return;
+    if (e.target !== card && e.target.closest("button,input,select,textarea,label,a,form")) {
+      return;
+    }
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
       toggle();
@@ -546,8 +597,8 @@ function actorCard(actor) {
     const foreign = node("span", actor.aliases.join(" / "), "foreign-name");
     title.append(foreign);
   }
-  const refs = state.references.filter((r) => !r.role_id && r.actor_id === actor.id),
-    photos = node("div", undefined, "person-photos");
+  const refs = state.references.filter((r) => !r.role_id && r.actor_id === actor.id);
+  const photos = node("div", undefined, "person-photos");
   refs.forEach((ref, i) =>
     photos.append(referenceCard(actor, ref, i === 0 ? deleteEntityButton(actor) : null)),
   );
@@ -556,11 +607,12 @@ function actorCard(actor) {
     node("p", MindexI18n.msg("ui.714823abf3d2", { p0: roles.length }), "muted role-count"),
     refs.length ? photos : node("p", MindexI18n.msg("ui.d3cf742cfdbd"), "muted"),
   );
-  if (!refs.length)
+  if (!refs.length) {
     card.append(
       button(MindexI18n.msg("ui.c9c77517fe85"), async () => editEntity(actor)),
       deleteEntityButton(actor),
     );
+  }
   card.append(
     linkedShotsButton(actor),
     button(MindexI18n.msg("ui.new_role"), () =>
@@ -583,7 +635,9 @@ function roleRow(actor) {
     }),
   );
   const grid = node("div", undefined, "role-grid-wide");
-  for (const role of roles) grid.append(roleCard(role));
+  for (const role of roles) {
+    grid.append(roleCard(role));
+  }
   row.append(head, grid);
   return row;
 }
@@ -593,32 +647,44 @@ function renderCatalogue() {
   list.replaceChildren();
   const actors = entities("actor").filter(actorVisible);
   const cards = actors.map((actor) => ({ actor, el: actorCard(actor) }));
-  for (const c of cards) list.append(c.el);
+  for (const c of cards) {
+    list.append(c.el);
+  }
   // 展开行插在“点击演员所在视觉行”的末尾：同排其他演员保持原位不下移。
   // 先让网格完成布局，再按 offsetTop 归组视觉行。
   const rows = [];
   for (const c of cards) {
     const current = rows[rows.length - 1];
-    if (current && current[0].el.offsetTop === c.el.offsetTop) current.push(c);
-    else rows.push([c]);
+    if (current && current[0].el.offsetTop === c.el.offsetTop) {
+      current.push(c);
+    } else {
+      rows.push([c]);
+    }
   }
   for (const row of rows) {
     const details = row.filter((c) => state.expanded.has(c.actor.id)).map((c) => roleRow(c.actor));
-    if (!details.length) continue;
+    if (!details.length) {
+      continue;
+    }
     const after = row[row.length - 1].el.nextElementSibling;
-    for (const detail of details) list.insertBefore(detail, after);
+    for (const detail of details) {
+      list.insertBefore(detail, after);
+    }
   }
   const unassigned = entities("role").filter((r) => !r.actor_ids.length && matchRole(r));
   if (unassigned.length) {
     const group = node("div", undefined, "actor-detail-row unassigned-row");
     group.append(node("h3", MindexI18n.msg("ui.33cfb54b99ef")));
     const grid = node("div", undefined, "role-grid-wide");
-    for (const role of unassigned) grid.append(roleCard(role));
+    for (const role of unassigned) {
+      grid.append(roleCard(role));
+    }
     group.append(grid);
     list.append(group);
   }
-  if (!actors.length && !unassigned.length)
+  if (!actors.length && !unassigned.length) {
     list.append(node("p", MindexI18n.msg("ui.5874ad9173c1"), "empty"));
+  }
   MindexI18n.setText(
     $("filter-summary"),
     MindexI18n.msg("ui.496d890b2912", {
@@ -631,8 +697,8 @@ function renderCatalogue() {
 function referenceErrorLabel(error) {
   const reference = state.references.find((r) => r.id === error.reference_id);
   const hasIdentity = error.actor_name !== undefined || error.actor_id !== undefined;
-  const actorId = error.actor_id || reference?.actor_id,
-    roleId = hasIdentity ? error.role_id : reference?.role_id;
+  const actorId = error.actor_id || reference?.actor_id;
+  const roleId = hasIdentity ? error.role_id : reference?.role_id;
   const actor = error.actor_name || (actorId ? name(actorId) : null);
   const role = error.role_name || (roleId ? name(roleId) : MindexI18n.msg("ui.51755d6cacc0"));
   const referenceLabel = MindexI18n.msg("ui.c8b458421614", { p0: error.reference_id.slice(0, 8) });
@@ -659,15 +725,19 @@ function renderTasks(data) {
         }),
       ),
     );
-    if (MindexI18n.system(task.error)) row.append(node("p", MindexI18n.system(task.error)));
+    if (MindexI18n.system(task.error)) {
+      row.append(node("p", MindexI18n.system(task.error)));
+    }
     if (task.result) {
       // 历史日志只读：数字一律取该次任务自己记录的结果，重跑或人工核对不会改写它。
       const result = task.result;
       const parts = [MindexI18n.msg("ui.f921908008b9", { p0: result.elapsed_seconds })];
-      if (result.accepted_shots !== undefined)
+      if (result.accepted_shots !== undefined) {
         parts.push(MindexI18n.msg("ui.87afa683ab4f", { p0: result.accepted_shots }));
-      if (result.candidate_shots !== undefined)
+      }
+      if (result.candidate_shots !== undefined) {
         parts.push(MindexI18n.msg("ui.cdbb3f66701a", { p0: result.candidate_shots }));
+      }
       parts.push(MindexI18n.msg("ui.458fcf810617", { p0: result.reused_shots }));
       row.append(node("p", parts.join(" · ")));
     }
@@ -713,10 +783,11 @@ function renderTasks(data) {
     }
     $("tasks").append(row);
   }
-  if (tasks.length > 3)
+  if (tasks.length > 3) {
     $("tasks").append(
       node("p", MindexI18n.msg("ui.63c47287a832", { p0: tasks.length - 3 }), "muted"),
     );
+  }
 }
 async function refresh() {
   void loadImportGallery().catch((e) => notice(e.message, true));
@@ -761,8 +832,8 @@ function fillCaptureRoles() {
     $("capture-actor"),
     entities("actor").filter((a) => actorIds.has(a.id)),
   );
-  const actorId = $("capture-actor").value,
-    keep = $("capture-role").value;
+  const actorId = $("capture-actor").value;
+  const keep = $("capture-role").value;
   const roles = workRoles.filter((r) => !actorId || r.actor_ids.includes(actorId));
   options(
     $("capture-role"),
@@ -790,9 +861,9 @@ $("capture-role").onchange = () => {
   }
 };
 function drawCapture() {
-  const canvas = $("capture-canvas"),
-    ctx = canvas.getContext("2d"),
-    v = $("capture-video").shotPlayer?.current || $("capture-video");
+  const canvas = $("capture-canvas");
+  const ctx = canvas.getContext("2d");
+  const v = $("capture-video").shotPlayer?.current || $("capture-video");
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
   if (capture.box) {
@@ -821,11 +892,13 @@ $("capture-time").onchange = () => {
 };
 $("capture-preview").onclick = () =>
   run(async () => {
-    const original = $("capture-video"),
-      canvas = $("capture-canvas"),
-      timestamp = Number(validCaptureTime($("capture-time").value));
+    const original = $("capture-video");
+    const canvas = $("capture-canvas");
+    const timestamp = Number(validCaptureTime($("capture-time").value));
     $("capture-time").value = validCaptureTime(timestamp);
-    if (!$("capture-source").value) throw Error(MindexI18n.msg("ui.c4b67e4559fe"));
+    if (!$("capture-source").value) {
+      throw Error(MindexI18n.msg("ui.c4b67e4559fe"));
+    }
     resetCapture();
     original.hidden = false;
     const player = ShotPlayer.attach(
@@ -835,7 +908,9 @@ $("capture-preview").onclick = () =>
     await player.ready;
     const grab = () => {
       const v = player.current;
-      if (!v.videoWidth || v.readyState < 2 || v.seeking || !v.paused) return;
+      if (!v.videoWidth || v.readyState < 2 || v.seeking || !v.paused) {
+        return;
+      }
       resetCapture();
       $("capture-time").value = validCaptureTime(player.time);
       canvas.width = v.videoWidth;
@@ -849,9 +924,13 @@ $("capture-preview").onclick = () =>
       v.onloadeddata = grab;
       v.onplay = resetCapture;
       v.ontimeupdate = () => {
-        if (v !== player.current) return;
+        if (v !== player.current) {
+          return;
+        }
         $("capture-time").value = validCaptureTime(player.time);
-        if (!v.paused) resetCapture();
+        if (!v.paused) {
+          resetCapture();
+        }
       };
     }
     await player.seek(timestamp);
@@ -859,20 +938,24 @@ $("capture-preview").onclick = () =>
   });
 let captureDrag = null;
 function capturePoint(e) {
-  const c = $("capture-canvas"),
-    r = c.getBoundingClientRect();
+  const c = $("capture-canvas");
+  const r = c.getBoundingClientRect();
   return [
     Math.max(0, Math.min(c.width, ((e.clientX - r.left) * c.width) / r.width)),
     Math.max(0, Math.min(c.height, ((e.clientY - r.top) * c.height) / r.height)),
   ];
 }
 $("capture-canvas").onpointerdown = (e) => {
-  if (!capture.ready) return;
+  if (!capture.ready) {
+    return;
+  }
   captureDrag = capturePoint(e);
   $("capture-canvas").setPointerCapture(e.pointerId);
 };
 $("capture-canvas").onpointermove = (e) => {
-  if (!captureDrag) return;
+  if (!captureDrag) {
+    return;
+  }
   const [x, y] = capturePoint(e);
   capture.box = [
     Math.min(x, captureDrag[0]),
@@ -883,7 +966,9 @@ $("capture-canvas").onpointermove = (e) => {
   drawCapture();
 };
 $("capture-canvas").onpointerup = (e) => {
-  if (!captureDrag) return;
+  if (!captureDrag) {
+    return;
+  }
   $("capture-canvas").onpointermove(e);
   captureDrag = null;
 };
@@ -895,9 +980,15 @@ $("capture-form").onsubmit = async (e) => {
   MindexI18n.setText(error, "");
   try {
     const roleId = $("capture-role").value;
-    if (!roleId) throw Error(MindexI18n.msg("ui.0778e4f6efa2"));
-    if (capture.box && (capture.box[2] - capture.box[0] < 8 || capture.box[3] - capture.box[1] < 8))
+    if (!roleId) {
+      throw Error(MindexI18n.msg("ui.0778e4f6efa2"));
+    }
+    if (
+      capture.box &&
+      (capture.box[2] - capture.box[0] < 8 || capture.box[3] - capture.box[1] < 8)
+    ) {
       throw Error(MindexI18n.msg("ui.aeff122f41a5"));
+    }
     await api(
       "/api/persons/references/from-source",
       json("POST", {
@@ -916,17 +1007,20 @@ $("capture-form").onsubmit = async (e) => {
     error.hidden = false;
   }
 };
-for (const tab of document.querySelectorAll("[data-pane]"))
+for (const tab of document.querySelectorAll("[data-pane]")) {
   tab.onclick = () => {
     document.querySelectorAll(".pane").forEach((n) => (n.hidden = n.id !== tab.dataset.pane));
     document
       .querySelectorAll("[data-pane]")
       .forEach((n) => n.classList.toggle("active", n === tab));
   };
+}
 $("process-form").onsubmit = (e) => {
   e.preventDefault();
   run(async () => {
-    if (!$("process-source").value) throw Error(MindexI18n.msg("ui.f3b909f8529a"));
+    if (!$("process-source").value) {
+      throw Error(MindexI18n.msg("ui.f3b909f8529a"));
+    }
     const task = await api(
       `/api/persons/sources/${$("process-source").value}/process`,
       json("POST", {
@@ -957,16 +1051,23 @@ async function displayDraft(draft) {
   $("import-id").value = draft.id;
   history.replaceState(null, "", "/persons?draft=" + draft.id);
   $("import-tools").hidden = false;
-  if (draft.work_id) $("import-work").value = draft.work_id;
+  if (draft.work_id) {
+    $("import-work").value = draft.work_id;
+  }
   $("import-warnings").replaceChildren(
     ...(draft.warnings || []).map((w) => node("p", MindexI18n.system(w))),
   );
   state.entry = 0;
   const legacy = ["stage_name", "stage_id", "age", "styling", "costume", "single_person"];
-  for (const e of draft.entries) for (const k of legacy) delete e[k];
+  for (const e of draft.entries) {
+    for (const k of legacy) {
+      delete e[k];
+    }
+  }
   // 按钮始终可操作；已确认草稿的操作由服务端拒绝并给出中文提示。
-  for (const id of ["import-parse", "import-add", "import-save", "import-confirm"])
+  for (const id of ["import-parse", "import-add", "import-save", "import-confirm"]) {
     $(id).disabled = false;
+  }
   await renderOriginals();
   renderEntries();
 }
@@ -993,7 +1094,9 @@ async function renderOriginals() {
       badge,
       retry,
     );
-    if (st?.error) head.append(node("span", MindexI18n.system(st.error), "muted"));
+    if (st?.error) {
+      head.append(node("span", MindexI18n.system(st.error), "muted"));
+    }
     const canvas = node("canvas");
     canvas.dataset.image = im.id;
     canvas.tabIndex = 0;
@@ -1020,14 +1123,18 @@ function bindCanvas(canvas, imageId) {
   };
   let drag = null;
   canvas.onpointerdown = (e) => {
-    if (!state.draft.entries[state.entry]) return;
+    if (!state.draft.entries[state.entry]) {
+      return;
+    }
     drag = point(e);
     canvas.setPointerCapture(e.pointerId);
   };
   canvas.onpointermove = (e) => {
-    if (!drag) return;
-    const [x, y] = point(e),
-      entry = state.draft.entries[state.entry];
+    if (!drag) {
+      return;
+    }
+    const [x, y] = point(e);
+    const entry = state.draft.entries[state.entry];
     entry.image_id = imageId;
     entry.bbox = [
       Math.min(x, drag[0]),
@@ -1038,20 +1145,26 @@ function bindCanvas(canvas, imageId) {
     draw();
   };
   canvas.onpointerup = () => {
-    if (!drag) return;
+    if (!drag) {
+      return;
+    }
     drag = null;
     renderEntries();
   };
   canvas.onpointercancel = () => (drag = null);
 }
 function draw() {
-  if (!state.draft) return;
+  if (!state.draft) {
+    return;
+  }
   for (const [imageId, { canvas, image }] of importCanvases) {
     const ctx = canvas.getContext("2d");
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(image, 0, 0);
     for (const [index, entry] of state.draft.entries.entries()) {
-      if (entry.image_id !== imageId || !entry.bbox) continue;
+      if (entry.image_id !== imageId || !entry.bbox) {
+        continue;
+      }
       const [x, y, x2, y2] = entry.bbox;
       ctx.strokeStyle = index === state.entry ? "#ff5035" : "#139f80";
       ctx.lineWidth = Math.max(2, canvas.width / 350);
@@ -1079,7 +1192,9 @@ $("import-form").onsubmit = (e) => {
   e.preventDefault();
   run(async () => {
     const form = new FormData();
-    for (const file of $("import-files").files) form.append("files", file);
+    for (const file of $("import-files").files) {
+      form.append("files", file);
+    }
     const target = state.draft && state.draft.status === "draft" ? state.draft.id : null;
     const draft = await api(
       target ? `/api/persons/imports/${target}/images` : "/api/persons/imports",
@@ -1096,7 +1211,9 @@ $("import-parse").onclick = () =>
   run(async () => {
     const st = state.draft.parse_state || {};
     let todo = state.draft.images.filter((im) => st[im.id]?.status !== "parsed");
-    if (!todo.length) todo = state.draft.images;
+    if (!todo.length) {
+      todo = state.draft.images;
+    }
     $("import-parse").disabled = true;
     try {
       for (const [i, im] of todo.entries()) {
@@ -1124,7 +1241,9 @@ $("import-add").onclick = () => {
 // 演员表导入是人物的主要创建入口：填写新作品名即创建，同名身份自动复用。
 async function importWorkId() {
   const name = $("import-new-work").value.trim();
-  if (!name) return $("import-work").value;
+  if (!name) {
+    return $("import-work").value;
+  }
   const created = await api("/api/persons/entities", json("POST", { kind: "work", name }));
   await refresh();
   $("import-work").value = created.id;
@@ -1136,12 +1255,14 @@ async function draftBody() {
 }
 // 提交前在客户端校验，避免 422 英文校验错误；服务端仍逐条复核。
 function validateDraft() {
-  if (!$("import-work").value && !$("import-new-work").value.trim())
+  if (!$("import-work").value && !$("import-new-work").value.trim()) {
     throw Error(MindexI18n.msg("ui.109770167dcf"));
+  }
   state.draft.entries.forEach((e, i) => {
     const n = MindexI18n.msg("ui.319903891847", { p0: i + 1 });
-    if (!(e.actor_name || "").trim() && !e.actor_id)
+    if (!(e.actor_name || "").trim() && !e.actor_id) {
       throw Error(MindexI18n.msg("ui.6e256657b673", { p0: n }));
+    }
   });
 }
 $("import-save").onclick = () =>
@@ -1172,8 +1293,9 @@ $("import-confirm").onclick = () =>
         MindexI18n.msg("ui.c5304e2f8d14", { p0: result.skipped_duplicates.length, p1: names }),
       );
     }
-    if (result.ignored_existing)
+    if (result.ignored_existing) {
       parts.push(MindexI18n.msg("ui.c6e902fd5dbf", { p0: result.ignored_existing }));
+    }
     notice(parts.join(" · "));
   });
 function renderEntries() {
@@ -1196,8 +1318,8 @@ function renderEntries() {
           ?.scrollIntoView({ behavior: "smooth", block: "center" });
       }),
     );
-    const imLabel = node("label", MindexI18n.msg("ui.fc8b7efc7104")),
-      imSelect = node("select");
+    const imLabel = node("label", MindexI18n.msg("ui.fc8b7efc7104"));
+    const imSelect = node("select");
     options(
       imSelect,
       state.draft.images.map((im, i) => ({
@@ -1218,8 +1340,8 @@ function renderEntries() {
       ["foreign_name", MindexI18n.msg("ui.1f4dae88a58e")],
       ["role_name", MindexI18n.msg("ui.5e04c8e09777")],
     ]) {
-      const l = node("label", label),
-        input = node("input");
+      const l = node("label", label);
+      const input = node("input");
       input.value = entry[key] || "";
       input.oninput = () => (entry[key] = input.value);
       l.append(input);
@@ -1229,8 +1351,8 @@ function renderEntries() {
       ["actor_id", "actor", MindexI18n.msg("ui.f46187b79698")],
       ["role_id", "role", MindexI18n.msg("ui.09b1d823c99d")],
     ]) {
-      const l = node("label", label),
-        select = node("select");
+      const l = node("label", label);
+      const select = node("select");
       options(select, entities(kind));
       select.value = entry[key] || "";
       select.onchange = () => (entry[key] = select.value || null);
@@ -1239,8 +1361,8 @@ function renderEntries() {
     }
     const coords = node("div", undefined, "coordinates");
     for (let n = 0; n < 4; n++) {
-      const l = node("label", ["x1", "y1", "x2", "y2"][n]),
-        input = node("input");
+      const l = node("label", ["x1", "y1", "x2", "y2"][n]);
+      const input = node("input");
       input.type = "number";
       input.min = "0";
       input.value = entry.bbox?.[n] ?? "";
@@ -1270,14 +1392,18 @@ function renderEntries() {
   draw();
 }
 // 历史演员表图片：默认列出全部草稿与已确认导入，点击加载对应草稿，✕ 删除单张。
-let importGalleryRequest = 0,
-  importGallerySignature = null;
+let importGalleryRequest = 0;
+let importGallerySignature = null;
 async function loadImportGallery() {
   const request = ++importGalleryRequest;
   const items = await api("/api/persons/imports");
-  if (request !== importGalleryRequest) return;
+  if (request !== importGalleryRequest) {
+    return;
+  }
   const signature = JSON.stringify([items, state.draft?.id]);
-  if (signature === importGallerySignature) return;
+  if (signature === importGallerySignature) {
+    return;
+  }
   importGallerySignature = signature;
   const host = $("import-gallery");
   host.replaceChildren();
@@ -1285,7 +1411,7 @@ async function loadImportGallery() {
     host.append(node("p", MindexI18n.msg("ui.d120414a3b2e"), "muted"));
     return;
   }
-  for (const item of items)
+  for (const item of items) {
     for (const im of item.images) {
       const wrap = node(
         "div",
@@ -1344,6 +1470,7 @@ async function loadImportGallery() {
       wrap.append(cell, del);
       host.append(wrap);
     }
+  }
 }
 const reviewPageSize = 50;
 function pairKey(actor, role) {
@@ -1351,7 +1478,9 @@ function pairKey(actor, role) {
 }
 // 审核语境的身份显示：角色名在前，演员名随后；未指明角色时回退到该演员在本作品的全部角色。
 function personLabel(actorId, roleId, workId) {
-  if (!actorId) return MindexI18n.msg("ui.d9c32a4c3dda");
+  if (!actorId) {
+    return MindexI18n.msg("ui.d9c32a4c3dda");
+  }
   const roles = roleId
     ? state.entities.filter((e) => e.id === roleId && e.kind === "role")
     : entities("role").filter(
@@ -1367,12 +1496,17 @@ function reviewParams(offset = state.evidenceOffset, limit = reviewPageSize) {
     limit,
   });
   const pair = $("review-pair").value;
-  if ($("review-status").value === "rejected") return params;
-  if (pair === "__none__") params.set("no_candidate", "true");
-  else if (pair) {
+  if ($("review-status").value === "rejected") {
+    return params;
+  }
+  if (pair === "__none__") {
+    params.set("no_candidate", "true");
+  } else if (pair) {
     const [actor, role] = JSON.parse(pair);
     params.set("actor_id", actor);
-    if (role) params.set("role_id", role);
+    if (role) {
+      params.set("role_id", role);
+    }
   }
   return params;
 }
@@ -1380,7 +1514,9 @@ function syncReviewStatus() {
   const rejected = $("review-status").value === "rejected";
   $("review-pair-field").hidden = rejected;
   $("review-pair").disabled = rejected;
-  if (rejected) $("review-pair").value = "";
+  if (rejected) {
+    $("review-pair").value = "";
+  }
   MindexI18n.setText(
     $("review-select-all"),
     rejected ? MindexI18n.msg("ui.f1f373533293") : MindexI18n.msg("ui.5900c9410a3e"),
@@ -1415,8 +1551,8 @@ function reviewPairLabel(actor, role) {
     : MindexI18n.msg("ui.74869b6ec629");
 }
 function fillReviewFilters(filters, scopeTotal) {
-  const select = $("review-pair"),
-    keep = select.value;
+  const select = $("review-pair");
+  const keep = select.value;
   const pairs = filters
     .filter((f) => f.actor_id)
     .map((f) => ({
@@ -1425,15 +1561,17 @@ function fillReviewFilters(filters, scopeTotal) {
       label: reviewPairLabel(f.actor_id, f.role_id),
     }));
   if (keep && keep !== "__none__" && !pairs.some((p) => p.key === keep)) {
-    const [actor_id, role_id] = JSON.parse(keep);
+    const [actorId, roleId] = JSON.parse(keep);
     const workId = state.sources.find((s) => s.id === $("review-source").value)?.work_id;
     const role = entities("role").find(
       (r) =>
-        r.id === role_id &&
-        r.actor_ids.includes(actor_id) &&
+        r.id === roleId &&
+        r.actor_ids.includes(actorId) &&
         (!workId || r.work_ids.includes(workId)),
     );
-    if (role) pairs.push({ key: keep, label: reviewPairLabel(actor_id, role_id), count: 0 });
+    if (role) {
+      pairs.push({ key: keep, label: reviewPairLabel(actorId, roleId), count: 0 });
+    }
   }
   pairs.sort((a, b) => a.label.localeCompare(b.label, "zh") || a.key.localeCompare(b.key));
   select.replaceChildren();
@@ -1461,7 +1599,9 @@ async function loadEvidence() {
   const request = ++state.evidenceRequest;
   $("review-select-all").disabled = true;
   const data = await api("/api/persons/review/shots?" + reviewParams());
-  if (request !== state.evidenceRequest) return;
+  if (request !== state.evidenceRequest) {
+    return;
+  }
   if (!data.items.length && state.evidenceOffset > 0) {
     state.evidenceOffset = Math.max(0, Math.ceil(data.total / reviewPageSize) - 1) * reviewPageSize;
     return loadEvidence();
@@ -1498,11 +1638,13 @@ async function loadEvidence() {
     }
     const accepted = (shot.confirmed_people || []).map(confirmedPersonLabel);
     const acceptedList = node("ul", undefined, "confirmed-people");
-    for (const label of accepted) acceptedList.append(node("li", label));
+    for (const label of accepted) {
+      acceptedList.append(node("li", label));
+    }
     if (shot.recognized_people?.length) {
       card.append(node("p", MindexI18n.msg("ui.recognized_people"), "muted"));
       const recognized = node("ul");
-      for (const person of shot.recognized_people)
+      for (const person of shot.recognized_people) {
         recognized.append(
           node(
             "li",
@@ -1514,6 +1656,7 @@ async function loadEvidence() {
             }),
           ),
         );
+      }
       card.append(recognized);
     }
     const candidate = shot.candidate;
@@ -1553,8 +1696,9 @@ async function loadEvidence() {
     );
     $("evidence-list").append(card);
   }
-  if (!data.items.length)
+  if (!data.items.length) {
     $("evidence-list").append(node("p", MindexI18n.msg("ui.fdd691c42da8"), "empty"));
+  }
   MindexI18n.setText(
     $("evidence-page"),
     MindexI18n.msg("ui.8067f5d58892", {
@@ -1573,8 +1717,9 @@ function updateBatchButton() {
   $("review-batch").disabled = !n || state.reviewSelecting;
   $("review-clear").disabled = !n && !state.reviewSelecting;
   $("review-select-all").disabled = !state.evidenceTotal || state.reviewSelecting;
-  for (const pick of $("evidence-list").querySelectorAll(".shot-pick"))
+  for (const pick of $("evidence-list").querySelectorAll(".shot-pick")) {
     pick.checked = state.reviewPicked.has(pick.dataset.shotKey);
+  }
 }
 function resetEvidence(resetPair = false) {
   ++state.reviewVersion;
@@ -1583,15 +1728,17 @@ function resetEvidence(resetPair = false) {
   state.evidenceOffset = 0;
   state.evidenceTotal = 0;
   state.reviewPicked.clear();
-  if (resetPair) $("review-pair").value = "";
+  if (resetPair) {
+    $("review-pair").value = "";
+  }
   $("evidence-list").replaceChildren();
   updateBatchButton();
   return run(loadEvidence);
 }
 async function selectFilteredShots() {
-  const version = state.reviewVersion,
-    params = reviewParams(0, 200),
-    picked = new Map();
+  const version = state.reviewVersion;
+  const params = reviewParams(0, 200);
+  const picked = new Map();
   state.reviewSelecting = true;
   updateBatchButton();
   try {
@@ -1599,11 +1746,19 @@ async function selectFilteredShots() {
     for (let offset = 0; ;) {
       params.set("offset", offset);
       const data = await api("/api/persons/review/shots?" + params);
-      if (version !== state.reviewVersion) return;
-      for (const shot of data.items) picked.set(shotKey(shot), shot);
+      if (version !== state.reviewVersion) {
+        return;
+      }
+      for (const shot of data.items) {
+        picked.set(shotKey(shot), shot);
+      }
       offset += data.items.length;
-      if (offset >= data.total) break;
-      if (!data.items.length) throw Error(MindexI18n.msg("ui.ab1dcceaf611"));
+      if (offset >= data.total) {
+        break;
+      }
+      if (!data.items.length) {
+        throw Error(MindexI18n.msg("ui.ab1dcceaf611"));
+      }
     }
     state.reviewPicked = picked;
     notice(MindexI18n.msg("ui.931509868950", { p0: picked.size }));
@@ -1616,7 +1771,9 @@ async function selectFilteredShots() {
 }
 $("review-batch").onclick = () => {
   const shots = [...state.reviewPicked.values()];
-  if (shots.length) openBatchReview(shots);
+  if (shots.length) {
+    openBatchReview(shots);
+  }
 };
 $("review-select-all").onclick = () => run(selectFilteredShots);
 $("review-clear").onclick = () => {
@@ -1647,9 +1804,13 @@ function fillReviewChoices(shots) {
     shots.flatMap((s) => s.evidence.filter((e) => e.actor_id).map((e) => e.actor_id)),
   );
   const pairs = [];
-  for (const role of roleList)
-    for (const actorId of role.actor_ids.filter((id) => entities("actor").some((a) => a.id === id)))
+  for (const role of roleList) {
+    for (const actorId of role.actor_ids.filter((id) =>
+      entities("actor").some((a) => a.id === id),
+    )) {
       pairs.push({ actor_id: actorId, role_id: role.id, label: `${role.name} · ${name(actorId)}` });
+    }
+  }
   pairs.sort(
     (a, b) =>
       Number(suggested.has(b.actor_id)) - Number(suggested.has(a.actor_id)) ||
@@ -1689,7 +1850,9 @@ function openReview(shot, linkedEntity = null) {
   state.linkedReviewEntity = linkedEntity;
   state.reviewShots = [shot];
   $("review-image").hidden = !shot.image_url;
-  if (shot.image_url) $("review-image").src = shot.image_url;
+  if (shot.image_url) {
+    $("review-image").src = shot.image_url;
+  }
   MindexI18n.setText(
     $("review-description"),
     MindexI18n.msg("ui.71f93b0b04cb", { p0: shot.start.toFixed(3), p1: shot.end.toFixed(3) }),
@@ -1723,8 +1886,8 @@ function openBatchReview(shots) {
 async function review(accept) {
   const selections = accept
     ? Array.from($("review-choices").querySelectorAll("input:checked")).map((input) => {
-        const [actor_id, role_id] = JSON.parse(input.value);
-        return { actor_id, role_id };
+        const [actorId, roleId] = JSON.parse(input.value);
+        return { actor_id: actorId, role_id: roleId };
       })
     : [];
   const shots = state.reviewShots || [];
@@ -1742,7 +1905,9 @@ async function review(accept) {
     state.linkedReviewEntity = null;
     state.linkedOffset = 0;
     await openLinkedShots(entity);
-  } else await loadEvidence();
+  } else {
+    await loadEvidence();
+  }
   notice(
     shots.length > 1
       ? MindexI18n.msg("ui.6cff5b6f493d", { p0: shots.length })
@@ -1761,8 +1926,8 @@ $("review-close").onclick = () => {
 $("review-dialog").onclose = () => $("review-video").pause();
 run(async () => {
   await refresh();
-  const params = new URLSearchParams(location.search),
-    draft = params.get("draft");
+  const params = new URLSearchParams(location.search);
+  const draft = params.get("draft");
   if (draft) {
     document.querySelector('[data-pane="cast"]').click();
     await displayDraft(await api("/api/persons/imports/" + draft));
@@ -1779,8 +1944,8 @@ run(async () => {
     );
   } else if (params.get("source")) {
     document.querySelector('[data-pane="processing"]').click();
-    const source = params.get("source"),
-      shotId = params.get("shot");
+    const source = params.get("source");
+    const shotId = params.get("shot");
     $("review-source").value = source;
     if (shotId) {
       let shot;
@@ -1789,10 +1954,13 @@ run(async () => {
           `/api/persons/review/shots/${encodeURIComponent(shotId)}?source_id=${encodeURIComponent(source)}`,
         );
       } catch (error) {
-        if (error.status !== 404) throw error;
+        if (error.status !== 404) {
+          throw error;
+        }
         const segment = await api(`/api/admin/segments/${encodeURIComponent(shotId)}`);
-        if (segment.source_id !== source || segment.kind !== "shot")
+        if (segment.source_id !== source || segment.kind !== "shot") {
           throw new Error(MindexI18n.msg("ui.7d6acd87e0e3"));
+        }
         shot = {
           shot_id: segment.id,
           source_id: source,
@@ -1803,7 +1971,9 @@ run(async () => {
         };
       }
       openReview(shot);
-    } else await resetEvidence(true);
+    } else {
+      await resetEvidence(true);
+    }
   }
 });
 $("reload").onclick = () => {
@@ -1816,19 +1986,23 @@ $("reload").onclick = () => {
 };
 // 处理进度轮询：上一轮刷新结束后才排下一轮，慢请求不会叠加；页面隐藏时暂停，重新可见时立即刷新；
 // 失败按 5 秒起翻倍退避（上限 60 秒），成功后复位。
-const POLL_BASE_MS = 5000,
-  POLL_MAX_MS = 60000;
-let pollDelay = POLL_BASE_MS,
-  pollTimer = null,
-  pollRunning = false;
+const POLL_BASE_MS = 5000;
+const POLL_MAX_MS = 60000;
+let pollDelay = POLL_BASE_MS;
+let pollTimer = null;
+let pollRunning = false;
 function schedulePoll(delay = pollDelay) {
   clearTimeout(pollTimer);
   pollTimer = null;
-  if (!document.hidden) pollTimer = setTimeout(pollOnce, delay);
+  if (!document.hidden) {
+    pollTimer = setTimeout(pollOnce, delay);
+  }
 }
 async function pollOnce() {
   pollTimer = null;
-  if (document.hidden || pollRunning) return;
+  if (document.hidden || pollRunning) {
+    return;
+  }
   if (!$("processing").hidden) {
     pollRunning = true;
     try {
@@ -1847,7 +2021,9 @@ document.addEventListener?.("visibilitychange", () => {
   if (document.hidden) {
     clearTimeout(pollTimer);
     pollTimer = null;
-  } else if (!pollRunning) schedulePoll(0);
+  } else if (!pollRunning) {
+    schedulePoll(0);
+  }
 });
 schedulePoll();
 // 智能助手：定位时切换到指定分页并高亮；被动定位只高亮当前分页。控制器单测在没有 window 的沙箱里运行本文件。
@@ -1857,8 +2033,9 @@ if (typeof window !== "undefined") {
     pane: document.querySelector("[data-pane].active")?.dataset.pane || null,
   });
   window.MindexAgentFocus = async (focus, { passive = false } = {}) => {
-    if (focus.pane && !passive)
+    if (focus.pane && !passive) {
       document.querySelector(`[data-pane="${CSS.escape(focus.pane)}"]`)?.click();
+    }
     const pane = [...document.querySelectorAll(".pane")].find((n) => !n.hidden);
     window.MindexAgent?.highlight(pane || document.querySelector("main"));
     return true;

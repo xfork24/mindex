@@ -25,8 +25,11 @@
   };
   const apply = () => {
     const root = document.documentElement;
-    if (resolved() === "dark") root.setAttribute("data-theme", "dark");
-    else root.removeAttribute("data-theme");
+    if (resolved() === "dark") {
+      root.setAttribute("data-theme", "dark");
+    } else {
+      root.removeAttribute("data-theme");
+    }
     for (const button of document.querySelectorAll("[data-theme-toggle]")) {
       button.dataset.mode = preference;
       button.setAttribute("aria-label", label());
@@ -36,7 +39,9 @@
   apply();
   const bind = () => {
     for (const button of document.querySelectorAll("[data-theme-toggle]")) {
-      if (button.dataset.bound) continue;
+      if (button.dataset.bound) {
+        continue;
+      }
       button.dataset.bound = "1";
       button.addEventListener("click", () => {
         preference = CYCLE[(CYCLE.indexOf(preference) + 1) % CYCLE.length];
@@ -50,8 +55,11 @@
   };
   document.addEventListener("DOMContentLoaded", bind);
   window.addEventListener("mindex:languagechange", apply);
-  if (media && media.addEventListener)
+  if (media && media.addEventListener) {
     media.addEventListener("change", () => {
-      if (preference === "auto") apply();
+      if (preference === "auto") {
+        apply();
+      }
     });
+  }
 })();

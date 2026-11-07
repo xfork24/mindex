@@ -10,9 +10,10 @@ import time
 import pytest
 from fastapi import HTTPException
 from filelock import Timeout
-from mindex.shared.background_tasks import BackgroundTaskRunner, public_task
-from mindex.shared.storage import Store
-from mindex.shared.task_cancel import registry_for
+
+from shared.background_tasks import BackgroundTaskRunner, public_task
+from shared.storage import Store
+from shared.task_cancel import registry_for
 
 HELD: set[str] = set()
 
@@ -35,8 +36,8 @@ class FakeLock:
 
 
 class FakeTasks(BackgroundTaskRunner):
-    # 记在 mindex.* 名下，使 task_logs 把失败日志写入进度。
-    __module__ = "mindex.fake_tasks"
+    # 使用业务包日志名，验证 task_logs 会把失败日志写入进度。
+    __module__ = "admin.fake_tasks"
     table = "dialogue_tasks"
     label = "示例任务"
     busy = "示例任务正在运行"
@@ -101,11 +102,11 @@ def test_failure_marks_failed_and_logs(store, caplog):
         raise RuntimeError("模拟崩溃")
 
     manager = FakeTasks(store, boom)
-    with caplog.at_level(logging.ERROR, logger="mindex.fake_tasks"):
+    with caplog.at_level(logging.ERROR, logger="admin.fake_tasks"):
         manager.start("s", "t2")
         value = settled(manager, "t2")
     assert value["status"] == "failed" and value["error"] == "模拟崩溃"
-    record = next(r for r in caplog.records if r.name == "mindex.fake_tasks")
+    record = next(r for r in caplog.records if r.name == "admin.fake_tasks")
     assert record.exc_info and "示例任务 t2 失败" in record.getMessage()
     assert "模拟崩溃" in value["progress"]["latest_log"]
     assert manager.threads == {} and not HELD

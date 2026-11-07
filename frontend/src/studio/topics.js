@@ -15,21 +15,28 @@ const page = {
 const $ = (id) => document.getElementById(id);
 function el(tag, text, cls) {
   const node = document.createElement(tag);
-  if (text != null) MindexI18n.setText(node, text);
-  if (cls) node.className = cls;
+  if (text != null) {
+    MindexI18n.setText(node, text);
+  }
+  if (cls) {
+    node.className = cls;
+  }
   return node;
 }
 // 内容节点：用户填写或外部来源的原文，不经文案目录。
 function content(tag, text, cls) {
   const node = document.createElement(tag);
   node.textContent = text ?? "";
-  if (cls) node.className = cls;
+  if (cls) {
+    node.className = cls;
+  }
   return node;
 }
 function notice(text, error = false) {
   const value = error ? MindexI18n.system(text) : text;
-  if (globalThis.MindexFeedback)
+  if (globalThis.MindexFeedback) {
     return MindexFeedback.show("notice", value, error ? "error" : "info");
+  }
   MindexI18n.setText($("notice"), value);
   $("notice").dataset.type = error ? "error" : "info";
 }
@@ -61,8 +68,11 @@ const splitLines = (text) =>
 // ------------------------------------------------------------ 领域档案
 function rememberProfile(id) {
   try {
-    if (id) localStorage.setItem(PROFILE_STORAGE, id);
-    else localStorage.removeItem(PROFILE_STORAGE);
+    if (id) {
+      localStorage.setItem(PROFILE_STORAGE, id);
+    } else {
+      localStorage.removeItem(PROFILE_STORAGE);
+    }
   } catch {}
 }
 function storedProfile() {
@@ -81,7 +91,9 @@ function renderProfiles() {
       return option;
     }),
   );
-  if (page.profile) select.value = page.profile.id;
+  if (page.profile) {
+    select.value = page.profile.id;
+  }
   const has = Boolean(page.profile);
   $("topics-empty").hidden = has;
   $("topics-workspace").hidden = !has;
@@ -92,10 +104,16 @@ function renderProfiles() {
 function renderProfileSummary() {
   const box = $("profile-summary");
   const item = page.profile;
-  if (!item) return MindexI18n.setText(box, "");
+  if (!item) {
+    return MindexI18n.setText(box, "");
+  }
   const parts = [];
-  if (item.subtopics.length) parts.push(item.subtopics.join("、"));
-  if (item.audience) parts.push(item.audience);
+  if (item.subtopics.length) {
+    parts.push(item.subtopics.join("、"));
+  }
+  if (item.audience) {
+    parts.push(item.audience);
+  }
   const schedule = item.schedule.enabled
     ? MindexI18n.msg("ui.topics_schedule_summary", {
         p0: item.schedule.time,
@@ -150,11 +168,13 @@ $("topic-material-scope").append(
   topicScopeReset,
   topicScopeHint,
 );
-let savedMaterialScope = null,
-  savedScopeRequest = 0;
+let savedMaterialScope = null;
+let savedScopeRequest = 0;
 function renderSavedMaterialScope() {
   topicCurrentScope.replaceChildren(el("h3", MindexI18n.msg("ui.topics_material_current")));
-  if (!savedMaterialScope) return;
+  if (!savedMaterialScope) {
+    return;
+  }
   const data = savedMaterialScope;
   const names = new Map(topicSourcePool.map((source) => [source.id, source.name]));
   function line(key, value) {
@@ -196,9 +216,13 @@ function renderSavedMaterialScope() {
   );
   if (ids.length) {
     const list = document.createElement("ul");
-    for (const id of ids) list.append(content("li", names.get(id) || id));
+    for (const id of ids) {
+      list.append(content("li", names.get(id) || id));
+    }
     details.append(list);
-  } else details.append(el("p", MindexI18n.msg("ui.groups_no_sources")));
+  } else {
+    details.append(el("p", MindexI18n.msg("ui.groups_no_sources")));
+  }
   topicCurrentScope.append(details);
 }
 async function loadSavedMaterialScope(profile) {
@@ -210,7 +234,9 @@ async function loadSavedMaterialScope(profile) {
       source_group_ids: profile.source_group_ids || [],
     }),
   ]);
-  if (request !== savedScopeRequest || page.profile?.id !== profile.id) return;
+  if (request !== savedScopeRequest || page.profile?.id !== profile.id) {
+    return;
+  }
   const empty =
     scope.status === "rejected" &&
     scope.reason.status === 422 &&
@@ -231,8 +257,8 @@ async function loadSavedMaterialScope(profile) {
   renderSavedMaterialScope();
 }
 MindexMultiSearch.attach(topicSources);
-let topicSourcePool = [],
-  topicSourceSelection = null;
+let topicSourcePool = [];
+let topicSourceSelection = null;
 const topicScopeLink = MindexGroups.linkSources(topicGroups, topicSources, {
   entries: () => topicSourcePool,
   selection: () => topicSourceSelection,
@@ -253,9 +279,12 @@ topicSources.addEventListener("change", () => {
   topicSourceSelection = [...topicSources.selectedOptions].map((option) => option.value);
 });
 topicScopeSave.addEventListener("click", async () => {
-  if (!page.profile) return;
-  if (topicSourceSelection?.length === 0)
+  if (!page.profile) {
+    return;
+  }
+  if (topicSourceSelection?.length === 0) {
     return failed(MindexI18n.msg("ui.topics_material_select_required"));
+  }
   topicScopeSave.disabled = true;
   try {
     await api(profileUrl(page.profile.id), "PATCH", {
@@ -287,7 +316,9 @@ profileHooks.push(async (profile) => {
   while (true) {
     const data = await api(`/api/admin/sources?visibility=all&page_size=100&page=${materialPage}`);
     topicSourcePool.push(...data.items);
-    if (!data.items.length || topicSourcePool.length >= data.total) break;
+    if (!data.items.length || topicSourcePool.length >= data.total) {
+      break;
+    }
     materialPage += 1;
   }
   await topicGroups.refresh();
@@ -296,7 +327,9 @@ profileHooks.push(async (profile) => {
 });
 
 async function profileChanged() {
-  for (const hook of profileHooks) await hook(page.profile);
+  for (const hook of profileHooks) {
+    await hook(page.profile);
+  }
 }
 async function loadProfiles(preferred) {
   const data = await api("/api/topics/profiles");
@@ -309,9 +342,15 @@ async function loadProfiles(preferred) {
 }
 function syncUrl() {
   const params = new URLSearchParams();
-  if (page.profile) params.set("profile", page.profile.id);
-  if (page.card) params.set("card", page.card);
-  if (page.job) params.set("job", page.job);
+  if (page.profile) {
+    params.set("profile", page.profile.id);
+  }
+  if (page.card) {
+    params.set("card", page.card);
+  }
+  if (page.job) {
+    params.set("job", page.job);
+  }
   const search = params.toString();
   history.replaceState(null, "", "/studio/topics" + (search ? `?${search}` : ""));
 }
@@ -338,7 +377,9 @@ function fillProfileForm(item) {
   $("pf-taboos").value = value.taboos.join("\n");
   $("pf-keywords").value = value.keywords.join("，");
   $("pf-canvas").value = value.canvas;
-  for (const key of WEIGHT_KEYS) $(`pf-w-${key}`).value = value.weights[key];
+  for (const key of WEIGHT_KEYS) {
+    $(`pf-w-${key}`).value = value.weights[key];
+  }
   for (const key of ["min_similarity", "limit", "min_duration"]) {
     const input = $(`pf-coverage-${key}`);
     input.value = value.coverage?.[key] ?? "";
@@ -399,10 +440,12 @@ function openProfileDialog(item) {
 async function saveProfile(event) {
   event.preventDefault();
   const values = profileFormValues();
-  if (!values.name || !values.domain)
+  if (!values.name || !values.domain) {
     return showError("pf-error", MindexI18n.msg("ui.topics_profile_required"));
-  if (Math.abs(weightSum() - 1) > 0.001)
+  }
+  if (Math.abs(weightSum() - 1) > 0.001) {
     return showError("pf-error", MindexI18n.msg("ui.topics_weights_invalid"));
+  }
   $("pf-save").disabled = true;
   try {
     const saved = page.editing
@@ -419,13 +462,16 @@ async function saveProfile(event) {
 }
 async function deleteProfile() {
   const item = page.profile;
-  if (!item) return;
+  if (!item) {
+    return;
+  }
   if (
     !window.confirm(
       MindexI18n.render(MindexI18n.msg("ui.topics_profile_delete_confirm", { p0: item.name })),
     )
-  )
+  ) {
     return;
+  }
   await api(profileUrl(item.id), "DELETE");
   page.profile = null;
   await loadProfiles();
@@ -573,7 +619,9 @@ const fieldValue = (config, key) =>
 function setFieldValue(config, key, value) {
   const parts = key.split(".");
   let target = config;
-  for (const part of parts.slice(0, -1)) target = target[part] ??= {};
+  for (const part of parts.slice(0, -1)) {
+    target = target[part] ??= {};
+  }
   target[parts.at(-1)] = value;
 }
 function fieldId(key) {
@@ -621,14 +669,20 @@ function fieldInput(field, value) {
   } else {
     input = document.createElement("input");
     input.type = field.type === "number" ? "number" : field.type === "url" ? "url" : "text";
-    if (field.min != null) input.min = field.min;
-    if (field.max != null) input.max = field.max;
+    if (field.min != null) {
+      input.min = field.min;
+    }
+    if (field.max != null) {
+      input.max = field.max;
+    }
     input.value = value ?? field.default ?? "";
   }
   input.id = fieldId(field.key);
   input.dataset.key = field.key;
   input.dataset.type = field.type;
-  if (field.placeholder) input.placeholder = field.placeholder;
+  if (field.placeholder) {
+    input.placeholder = field.placeholder;
+  }
   return input;
 }
 function renderSourceFields(kind, config = {}) {
@@ -644,9 +698,15 @@ function renderSourceFields(kind, config = {}) {
       label = el("label", MindexI18n.msg(field.label), "form-field");
       label.append(input);
     }
-    if (field.hint) label.append(el("span", MindexI18n.msg(field.hint), "muted source-field-hint"));
-    if (field.when) label.dataset.when = field.when.join("=");
-    if (field.type === "select") input.addEventListener("change", applyFieldConditions);
+    if (field.hint) {
+      label.append(el("span", MindexI18n.msg(field.hint), "muted source-field-hint"));
+    }
+    if (field.when) {
+      label.dataset.when = field.when.join("=");
+    }
+    if (field.type === "select") {
+      input.addEventListener("change", applyFieldConditions);
+    }
     box.append(label);
   }
   applyFieldConditions();
@@ -675,12 +735,20 @@ function sourceFormConfig(kind) {
   const config = {};
   for (const field of SOURCE_FORMS[kind] || []) {
     const input = $(fieldId(field.key));
-    if (!input || input.closest("[data-when]")?.hidden) continue;
-    if (field.type === "checkbox") setFieldValue(config, field.key, input.checked);
-    else if (field.type === "number") {
-      if (input.value !== "") setFieldValue(config, field.key, Number(input.value));
-    } else if (field.type === "list") setFieldValue(config, field.key, splitLines(input.value));
-    else if (input.value.trim() !== "") setFieldValue(config, field.key, input.value.trim());
+    if (!input || input.closest("[data-when]")?.hidden) {
+      continue;
+    }
+    if (field.type === "checkbox") {
+      setFieldValue(config, field.key, input.checked);
+    } else if (field.type === "number") {
+      if (input.value !== "") {
+        setFieldValue(config, field.key, Number(input.value));
+      }
+    } else if (field.type === "list") {
+      setFieldValue(config, field.key, splitLines(input.value));
+    } else if (input.value.trim() !== "") {
+      setFieldValue(config, field.key, input.value.trim());
+    }
   }
   return config;
 }
@@ -708,10 +776,14 @@ function renderKindOptions() {
         return option;
       }),
   );
-  if (current && SOURCE_FORMS[current]) select.value = current;
+  if (current && SOURCE_FORMS[current]) {
+    select.value = current;
+  }
 }
 function sourceStatus(item) {
-  if (!item.last_fetch_at) return MindexI18n.msg("ui.topics_source_never");
+  if (!item.last_fetch_at) {
+    return MindexI18n.msg("ui.topics_source_never");
+  }
   return MindexI18n.msg("ui.topics_source_last", {
     p0: MindexI18n.date(item.last_fetch_at),
     p1: item.last_count ?? 0,
@@ -720,8 +792,9 @@ function sourceStatus(item) {
 function renderSources() {
   const box = $("source-list");
   box.replaceChildren();
-  if (!sources.items.length)
+  if (!sources.items.length) {
     box.append(el("p", MindexI18n.msg("ui.topics_sources_empty"), "muted source-empty"));
+  }
   for (const item of sources.items) {
     const row = el("div", null, "source-row" + (item.enabled ? "" : " is-disabled"));
     row.dataset.id = item.id;
@@ -738,7 +811,7 @@ function renderSources() {
     const meta = el("div", sourceStatus(item), "muted source-meta");
     row.append(head, meta);
     const target = item.config?.url || item.config?.base_url;
-    if (target)
+    if (target) {
       row.append(
         content(
           "div",
@@ -746,9 +819,11 @@ function renderSources() {
           "muted source-url",
         ),
       );
-    if (item.last_error)
+    }
+    if (item.last_error) {
       row.append(el("div", MindexI18n.system(item.last_error), "warn-text source-error"));
-    if (item.kind === "calendar")
+    }
+    if (item.kind === "calendar") {
       row.append(
         el(
           "div",
@@ -756,6 +831,7 @@ function renderSources() {
           "muted source-meta",
         ),
       );
+    }
     const actions = el("div", null, "source-actions");
     const button = (label, handler, cls = "quiet") => {
       const node = el("button", MindexI18n.msg(label), cls);
@@ -783,15 +859,21 @@ function renderSources() {
 }
 async function loadSources(profile) {
   $("sources-section").hidden = $("items-section").hidden = !profile;
-  if (!profile) return;
+  if (!profile) {
+    return;
+  }
   const data = await api(profileUrl(profile.id, "/sources"));
   sources.items = data.items;
   sources.kinds = data.kinds;
   renderKindOptions();
   renderSources();
-  if (!sources.editing) resetSourceForm();
+  if (!sources.editing) {
+    resetSourceForm();
+  }
   // 新档案还没有数据源时默认展开，引导配置。
-  if (!sources.items.length) $("sources-section").open = true;
+  if (!sources.items.length) {
+    $("sources-section").open = true;
+  }
 }
 function editSource(item) {
   sources.editing = item.id;
@@ -811,14 +893,21 @@ async function saveSource(event) {
   event.preventDefault();
   const kind = $("sf-kind").value;
   const name = $("sf-name").value.trim();
-  if (!name) return showError("sf-error", MindexI18n.msg("ui.topics_source_name_required"));
+  if (!name) {
+    return showError("sf-error", MindexI18n.msg("ui.topics_source_name_required"));
+  }
   const body = { name, enabled: $("sf-enabled").checked, config: sourceFormConfig(kind) };
   const secret = $("sf-secret")?.value;
-  if (secret) body.secret = secret;
+  if (secret) {
+    body.secret = secret;
+  }
   $("sf-save").disabled = true;
   try {
-    if (sources.editing) await api(sourceUrl(sources.editing), "PATCH", body);
-    else await api(profileUrl(page.profile.id, "/sources"), "POST", { kind, ...body });
+    if (sources.editing) {
+      await api(sourceUrl(sources.editing), "PATCH", body);
+    } else {
+      await api(profileUrl(page.profile.id, "/sources"), "POST", { kind, ...body });
+    }
     notice(MindexI18n.msg(sources.editing ? "ui.topics_source_saved" : "ui.topics_source_added"));
     sources.editing = null;
     await loadSources(page.profile);
@@ -837,10 +926,13 @@ async function removeSource(item) {
     !window.confirm(
       MindexI18n.render(MindexI18n.msg("ui.topics_source_remove_confirm", { p0: item.name })),
     )
-  )
+  ) {
     return;
+  }
   await api(sourceUrl(item.id), "DELETE");
-  if (sources.editing === item.id) sources.editing = null;
+  if (sources.editing === item.id) {
+    sources.editing = null;
+  }
   await loadSources(page.profile);
   notice(MindexI18n.msg("ui.topics_source_removed"));
 }
@@ -873,7 +965,9 @@ async function testSource(item) {
     ),
   );
   const list = el("ul", null, "item-list");
-  for (const entry of result.items) list.append(itemRow(entry));
+  for (const entry of result.items) {
+    list.append(itemRow(entry));
+  }
   box.append(list);
 }
 // ------------------------------------------------------------ 日历导入
@@ -890,7 +984,9 @@ function renderCalendarImport() {
       return option;
     }),
   );
-  if (items.some((item) => item.id === current)) select.value = current;
+  if (items.some((item) => item.id === current)) {
+    select.value = current;
+  }
   if (items.length && !calendars.samples) {
     calendars.samples = [];
     api("/api/topics/calendar-samples")
@@ -922,15 +1018,18 @@ function renderCalendarSamples() {
 }
 async function importCalendar() {
   const source = $("calendar-source").value;
-  if (!source) return;
+  if (!source) {
+    return;
+  }
   const file = $("calendar-file").files[0];
   const sample = $("calendar-sample").value;
   const mode = $("calendar-append").checked ? "append" : "replace";
-  if (!file && !sample)
+  if (!file && !sample) {
     return MindexI18n.setText(
       $("calendar-status"),
       MindexI18n.msg("ui.topics_calendar_need_input"),
     );
+  }
   $("calendar-run").disabled = true;
   try {
     let result;
@@ -975,25 +1074,39 @@ function itemRow(entry) {
   li.append(title);
   const when = entry.event_at || entry.published_at;
   const meta = [];
-  if (when) meta.push(MindexI18n.date(when));
-  if (entry.hot != null) meta.push(MindexI18n.msg("ui.topics_item_hot", { p0: entry.hot }));
-  if (meta.length) li.append(el("span", meta.join(" · "), "muted item-meta"));
-  if (entry.summary) li.append(content("p", entry.summary, "item-summary"));
+  if (when) {
+    meta.push(MindexI18n.date(when));
+  }
+  if (entry.hot != null) {
+    meta.push(MindexI18n.msg("ui.topics_item_hot", { p0: entry.hot }));
+  }
+  if (meta.length) {
+    li.append(el("span", meta.join(" · "), "muted item-meta"));
+  }
+  if (entry.summary) {
+    li.append(content("p", entry.summary, "item-summary"));
+  }
   return li;
 }
 async function loadItems(profile) {
-  if (!profile) return;
+  if (!profile) {
+    return;
+  }
   const data = await api(profileUrl(profile.id, "/items?limit=30"));
   const list = $("item-list");
   list.replaceChildren(...data.items.map(itemRow));
-  if (!data.items.length) list.append(el("li", MindexI18n.msg("ui.topics_items_empty"), "muted"));
+  if (!data.items.length) {
+    list.append(el("li", MindexI18n.msg("ui.topics_items_empty"), "muted"));
+  }
   MindexI18n.setText(
     $("items-summary"),
     MindexI18n.msg("ui.topics_items_summary", { p0: data.items.length }),
   );
 }
 async function fetchNow() {
-  if (!page.profile) return;
+  if (!page.profile) {
+    return;
+  }
   $("fetch-run").disabled = true;
   MindexI18n.setText($("fetch-status"), MindexI18n.msg("ui.topics_fetch_running"));
   try {
@@ -1042,7 +1155,9 @@ function renderRun() {
   const warnings = $("run-warnings");
   warnings.replaceChildren();
   warnings.hidden = true;
-  if (!run) return MindexI18n.setText(status, MindexI18n.msg("ui.topics_run_none"));
+  if (!run) {
+    return MindexI18n.setText(status, MindexI18n.msg("ui.topics_run_none"));
+  }
   const progress = run.progress || {};
   if (active) {
     const stage = STAGE_LABELS[progress.stage] ? MindexI18n.msg(STAGE_LABELS[progress.stage]) : "";
@@ -1056,7 +1171,9 @@ function renderRun() {
     if (progress.total) {
       meter.max = progress.total;
       meter.value = progress.done || 0;
-    } else meter.removeAttribute("value");
+    } else {
+      meter.removeAttribute("value");
+    }
     return;
   }
   const result = run.result || {};
@@ -1081,28 +1198,33 @@ function renderRun() {
   // 已完成的运行不再常驻展示历史诊断：结果已由状态行概括，残留诊断会把过时的建议
   // （如“请重新打分”）挂在页面上。运行失败时仍要看到原因。
   if (run.status !== "complete") {
-    for (const warning of result.warnings || [])
+    for (const warning of result.warnings || []) {
       warnings.append(el("li", MindexI18n.system(warning)));
+    }
   }
   warnings.hidden = !warnings.children.length;
 }
 function pollRun() {
   clearTimeout(runs.timer);
-  if (!runs.current || !ACTIVE.has(runs.current.status)) return;
+  if (!runs.current || !ACTIVE.has(runs.current.status)) {
+    return;
+  }
   runs.timer = setTimeout(async () => {
     try {
       const run = await api(runUrl(runs.current.id));
       const finished = !ACTIVE.has(run.status);
       runs.current = run;
       renderRun();
-      if (finished)
+      if (finished) {
         await Promise.all([
           loadCards(page.profile),
           loadGaps(page.profile),
           loadItems(page.profile),
           loadSchedule(page.profile),
         ]);
-      else pollRun();
+      } else {
+        pollRun();
+      }
     } catch (error) {
       failed(error);
     }
@@ -1112,14 +1234,18 @@ async function loadRuns(profile) {
   clearTimeout(runs.timer);
   $("runs-bar").hidden = !profile;
   runs.current = null;
-  if (!profile) return;
+  if (!profile) {
+    return;
+  }
   const data = await api(profileUrl(profile.id, "/runs?limit=1"));
   runs.current = data.items[0] || null;
   renderRun();
   pollRun();
 }
 async function startRun() {
-  if (!page.profile) return;
+  if (!page.profile) {
+    return;
+  }
   $("run-start").disabled = true;
   try {
     runs.current = await api(profileUrl(page.profile.id, "/runs"), "POST", {
@@ -1133,7 +1259,9 @@ async function startRun() {
   }
 }
 async function manageRun(action) {
-  if (!runs.current) return;
+  if (!runs.current) {
+    return;
+  }
   runs.current = await api(runUrl(runs.current.id, `/${action}`), "POST");
   renderRun();
   pollRun();
@@ -1154,7 +1282,9 @@ const cardUrl = (id, suffix = "") => `/api/topics/cards/${enc(id)}${suffix}`;
 const percent = (value) => (value == null ? "—" : `${Math.round(value * 100)}`);
 
 function cardMatches(item, needle) {
-  if (!needle) return true;
+  if (!needle) {
+    return true;
+  }
   return [item.title, item.angle, item.reason].join("\n").toLowerCase().includes(needle);
 }
 function renderCards() {
@@ -1207,14 +1337,17 @@ function renderCards() {
         MindexI18n.msg(item.outline ? "ui.topics_card_has_outline" : "ui.topics_card_no_outline"),
       ),
     );
-    if (item.status !== "new")
+    if (item.status !== "new") {
       sub.append(el("span", MindexI18n.msg(`ui.topics_status_${item.status}`)));
+    }
     entry.append(head, sub);
     entry.addEventListener("click", () => selectCard(item.id).catch(failed));
     li.append(entry);
     list.append(li);
   }
-  if (visible.length) box.append(list);
+  if (visible.length) {
+    box.append(list);
+  }
   const status = $("card-status");
   for (const option of status.options) {
     const count =
@@ -1253,7 +1386,9 @@ function renderCoverage(card) {
   const summary = [
     MindexI18n.msg("ui.topics_coverage_summary", { p0: report.hits, p1: report.total }),
   ];
-  if (report.reason) summary.push(MindexI18n.system(report.reason));
+  if (report.reason) {
+    summary.push(MindexI18n.system(report.reason));
+  }
   MindexI18n.setText($("coverage-summary"), summary.join(" · "));
   for (const row of report.visuals || []) {
     const li = el("li", null, "coverage-row" + (row.hit ? " is-hit" : " is-gap"));
@@ -1307,8 +1442,9 @@ function renderCoverage(card) {
             el("span", MindexI18n.msg(`ui.topics_verification_${verdict}`), "coverage-verdict"),
             content("span", clip.verification.reason, "coverage-caption"),
           );
-          if (clip.verification.quote)
+          if (clip.verification.quote) {
             link.append(content("span", clip.verification.quote, "coverage-caption"));
+          }
         }
         MindexI18n.setAttr(
           link,
@@ -1363,7 +1499,9 @@ function renderCard() {
   const card = cards.selected;
   $("card-empty").hidden = Boolean(card);
   $("card-view").hidden = !card;
-  if (!card) return;
+  if (!card) {
+    return;
+  }
   $("card-title").textContent = card.title;
   const tags = $("card-tags");
   tags.replaceChildren(
@@ -1391,8 +1529,9 @@ function renderCard() {
   $("card-items").replaceChildren(
     ...(card.items || []).map((entry) => {
       const row = itemRow(entry);
-      if (entry.source_name)
+      if (entry.source_name) {
         row.prepend(content("span", entry.source_name, "template-tag item-source"));
+      }
       return row;
     }),
   );
@@ -1400,7 +1539,9 @@ function renderCard() {
   warnings.hidden = !(card.warnings || []).length;
   MindexI18n.setText(warnings, (card.warnings || []).map((w) => MindexI18n.system(w)).join("; "));
   showError("card-error", null);
-  for (const hook of cardHooks) hook(card);
+  for (const hook of cardHooks) {
+    hook(card);
+  }
 }
 const cardHooks = [];
 function confirmCardDiscard() {
@@ -1410,12 +1551,19 @@ function confirmCardDiscard() {
   );
 }
 async function selectCard(id, { force = false } = {}) {
-  if (!force && cards.selected?.id === id) return;
-  if (!force && !confirmCardDiscard()) return;
+  if (!force && cards.selected?.id === id) {
+    return;
+  }
+  if (!force && !confirmCardDiscard()) {
+    return;
+  }
   cards.selected = id ? await api(cardUrl(id)) : null;
   page.card = cards.selected?.id || null;
-  if (cards.selected) fillCardForm(cards.selected);
-  else cards.saved = null;
+  if (cards.selected) {
+    fillCardForm(cards.selected);
+  } else {
+    cards.saved = null;
+  }
   renderCards();
   renderCard();
   syncUrl();
@@ -1426,7 +1574,9 @@ async function loadCards(profile) {
     cards.selected = cards.saved = null;
     return;
   }
-  if (!cards.templates.length) cards.templates = (await api("/api/studio/templates")).items;
+  if (!cards.templates.length) {
+    cards.templates = (await api("/api/studio/templates")).items;
+  }
   const data = await api(
     profileUrl(profile.id, `/cards?status=${enc($("card-status").value)}&limit=200`),
   );
@@ -1435,14 +1585,16 @@ async function loadCards(profile) {
   const keep = [cards.selected?.id, page.card].find(
     (id) => id && cards.items.some((item) => item.id === id),
   );
-  if (keep) await selectCard(keep, { force: !cardDirty() });
-  else if (!cardDirty()) {
+  if (keep) {
+    await selectCard(keep, { force: !cardDirty() });
+  } else if (!cardDirty()) {
     // 未指定选题时默认选中评分最高的一条，右侧直接展示其细节。
     const best = [...cards.items].sort(
       (a, b) => (b.total ?? -Infinity) - (a.total ?? -Infinity),
     )[0];
-    if (best) await selectCard(best.id, { force: true });
-    else {
+    if (best) {
+      await selectCard(best.id, { force: true });
+    } else {
       cards.selected = cards.saved = null;
       page.card = null;
       renderCard();
@@ -1452,7 +1604,9 @@ async function loadCards(profile) {
   renderCards();
 }
 async function saveCard() {
-  if (!cardDirty() || cards.saving) return;
+  if (!cardDirty() || cards.saving) {
+    return;
+  }
   cards.saving = true;
   updateCardForm();
   try {
@@ -1487,10 +1641,14 @@ async function cardAction(button, request, message) {
   try {
     const card = await request();
     cards.selected = card;
-    if (!cardDirty() || button.id === "card-outline-run") fillCardForm(card);
+    if (!cardDirty() || button.id === "card-outline-run") {
+      fillCardForm(card);
+    }
     renderCard();
     await loadCards(page.profile);
-    if (message) notice(MindexI18n.msg(message));
+    if (message) {
+      notice(MindexI18n.msg(message));
+    }
   } finally {
     button.disabled = false;
   }
@@ -1508,8 +1666,9 @@ async function writeOutline() {
     cards.selected?.outline &&
     cards.saved &&
     !window.confirm(MindexI18n.render(MindexI18n.msg("ui.topics_outline_overwrite_confirm")))
-  )
+  ) {
     return;
+  }
   MindexI18n.setText($("card-outline-count"), MindexI18n.msg("ui.topics_outline_running"));
   await cardAction(
     $("card-outline-run"),
@@ -1524,7 +1683,9 @@ const toggleDismiss = () =>
     }),
   );
 profileHooks.push((profile) => {
-  if (page.profile?.id !== profile?.id) page.card = null;
+  if (page.profile?.id !== profile?.id) {
+    page.card = null;
+  }
   return loadCards(profile);
 });
 
@@ -1533,7 +1694,9 @@ function renderJobBar(card) {
   const adopted = card.status === "adopted" && card.job_id;
   const link = $("card-job-link");
   link.hidden = !adopted;
-  if (adopted) link.href = `/?job=${enc(card.job_id)}`;
+  if (adopted) {
+    link.href = `/?job=${enc(card.job_id)}`;
+  }
   MindexI18n.setText(
     $("card-job"),
     MindexI18n.msg(adopted ? "ui.topics_card_create_job_again" : "ui.topics_card_create_job"),
@@ -1551,15 +1714,22 @@ function renderJobBar(card) {
 cardHooks.push(renderJobBar);
 async function createJob() {
   const card = cards.selected;
-  if (!card) return;
-  if (cardDirty()) await saveCard();
-  if (cardDirty()) return;
+  if (!card) {
+    return;
+  }
+  if (cardDirty()) {
+    await saveCard();
+  }
+  if (cardDirty()) {
+    return;
+  }
   const again = card.status === "adopted";
   if (
     again &&
     !window.confirm(MindexI18n.render(MindexI18n.msg("ui.topics_card_create_job_again_confirm")))
-  )
+  ) {
     return;
+  }
   $("card-job").disabled = true;
   try {
     const result = await api(cardUrl(card.id, "/job"), "POST", {
@@ -1576,13 +1746,17 @@ $("card-job").addEventListener("click", () => createJob().catch(failed));
 // ------------------------------------------------------------ 素材采集清单
 async function loadGaps(profile) {
   $("gaps-section").hidden = !profile;
-  if (!profile) return;
+  if (!profile) {
+    return;
+  }
   const status = $("gaps-status").value;
   $("gaps-export").href = profileUrl(profile.id, `/gaps.csv?status=${enc(status)}`);
   const data = await api(profileUrl(profile.id, `/gaps?status=${enc(status)}`));
   const list = $("gap-list");
   list.replaceChildren();
-  if (!data.items.length) list.append(el("li", MindexI18n.msg("ui.topics_gaps_empty"), "muted"));
+  if (!data.items.length) {
+    list.append(el("li", MindexI18n.msg("ui.topics_gaps_empty"), "muted"));
+  }
   for (const gap of data.items) {
     const li = el("li", null, "gap-row" + (gap.status === "done" ? " is-done" : ""));
     li.dataset.id = gap.id;
@@ -1646,19 +1820,25 @@ $("gaps-status").addEventListener("change", () => loadGaps(page.profile).catch(f
 // ------------------------------------------------------------ 定时状态
 async function loadSchedule(profile) {
   const box = $("schedule-status");
-  if (!profile) return MindexI18n.setText(box, "");
+  if (!profile) {
+    return MindexI18n.setText(box, "");
+  }
   const data = await api("/api/topics/schedule");
   const item = data.items.find((entry) => entry.profile_id === profile.id);
-  if (!item || !item.enabled)
+  if (!item || !item.enabled) {
     return MindexI18n.setText(box, MindexI18n.msg("ui.topics_schedule_off_hint"));
+  }
   const parts = [MindexI18n.msg("ui.topics_schedule_summary", { p0: item.time, p1: item.count })];
-  if (!data.scheduler) parts.push(MindexI18n.msg("ui.topics_schedule_inactive"));
-  else if (item.next_run)
+  if (!data.scheduler) {
+    parts.push(MindexI18n.msg("ui.topics_schedule_inactive"));
+  } else if (item.next_run) {
     parts.push(MindexI18n.msg("ui.topics_schedule_next", { p0: MindexI18n.date(item.next_run) }));
+  }
   parts.push(MindexI18n.msg("ui.topics_schedule_today", { p0: item.today.cards }));
   // 桌面版：关闭窗口后留在托盘/菜单栏，定时照常执行（只经 window.MindexDesktop 特性检测，Web 端不显示）。
-  if (data.scheduler && globalThis.window?.MindexDesktop?.background)
+  if (data.scheduler && globalThis.window?.MindexDesktop?.background) {
     parts.push(MindexI18n.msg("ui.topics_schedule_background"));
+  }
   MindexI18n.setText(box, parts.join(" · "));
 }
 profileHooks.push(loadSchedule);
@@ -1686,7 +1866,9 @@ $("card-outline").addEventListener("keydown", (event) => {
   }
 });
 window.addEventListener("beforeunload", (event) => {
-  if (!cardDirty()) return;
+  if (!cardDirty()) {
+    return;
+  }
   event.preventDefault();
   event.returnValue = "";
 });
@@ -1717,7 +1899,9 @@ $("profile-edit").addEventListener("click", () => page.profile && openProfileDia
 $("profile-delete").addEventListener("click", () => deleteProfile().catch(failed));
 $("profile-close").addEventListener("click", () => $("profile-dialog").close());
 $("profile-form").addEventListener("submit", (event) => saveProfile(event).catch(failed));
-for (const key of WEIGHT_KEYS) $(`pf-w-${key}`).addEventListener("input", updateWeightSum);
+for (const key of WEIGHT_KEYS) {
+  $(`pf-w-${key}`).addEventListener("input", updateWeightSum);
+}
 $("reload").addEventListener("click", async () => {
   $("reload").disabled = true;
   try {
@@ -1754,7 +1938,9 @@ window.addEventListener("mindex:agent-mutation", (event) => {
     ]).catch(failed);
     return;
   }
-  if (detail.domain !== "topics") return;
+  if (detail.domain !== "topics") {
+    return;
+  }
   loadProfiles(
     detail.profile_id && page.profiles.some((p) => p.id === detail.profile_id)
       ? page.profile?.id
@@ -1771,15 +1957,23 @@ window.MindexAgentContext = () => ({
 // 助手定位：切换档案、打开卡片并高亮对应分区；建出创作任务时回到创作页。
 window.MindexAgentFocus = async (focus, { passive = false } = {}) => {
   if (focus.page === "studio" && focus.job_id) {
-    if (!passive) location.href = `/?job=${enc(focus.job_id)}`;
+    if (!passive) {
+      location.href = `/?job=${enc(focus.job_id)}`;
+    }
     return true;
   }
   if (focus.profile_id && focus.profile_id !== page.profile?.id && !passive) {
-    if (!page.profiles.some((item) => item.id === focus.profile_id))
+    if (!page.profiles.some((item) => item.id === focus.profile_id)) {
       await loadProfiles(focus.profile_id);
-    else await selectProfile(focus.profile_id);
+    } else {
+      await selectProfile(focus.profile_id);
+    }
   }
-  for (const hook of focusHooks) if (await hook(focus, passive)) return true;
+  for (const hook of focusHooks) {
+    if (await hook(focus, passive)) {
+      return true;
+    }
+  }
   const target =
     document.querySelector(`[data-capability="${CSS.escape(focus.section || "profiles")}"]`) ||
     $("topics-bar");

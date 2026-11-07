@@ -10,12 +10,17 @@ function loadExpanded() {
   }
 }
 function toggleRole(role) {
-  if (state.expanded.has(role)) state.expanded.delete(role);
-  else state.expanded.add(role);
+  if (state.expanded.has(role)) {
+    state.expanded.delete(role);
+  } else {
+    state.expanded.add(role);
+  }
   try {
     localStorage.setItem(EXPANDED_KEY, JSON.stringify([...state.expanded]));
   } catch {}
-  if (state.data) renderRoles(state.data);
+  if (state.data) {
+    renderRoles(state.data);
+  }
   syncSectionRows();
 }
 function syncSectionRows() {
@@ -274,7 +279,9 @@ const ROLE_EXTRA = {
     },
   ],
 };
-for (const role of Object.keys(ROLE_EXTRA)) ROLE_EXTRA[role].unshift(timeoutField(role));
+for (const role of Object.keys(ROLE_EXTRA)) {
+  ROLE_EXTRA[role].unshift(timeoutField(role));
+}
 const WEIGHT_LABELS = {
   video: MindexI18n.msg("ui.1a6981c253a3"),
   description: MindexI18n.msg("ui.522d79717392"),
@@ -285,14 +292,20 @@ const WEIGHT_LABELS = {
 
 function node(tag, text, className) {
   const n = document.createElement(tag);
-  if (text !== undefined) MindexI18n.setText(n, text);
-  if (className) n.className = className;
+  if (text !== undefined) {
+    MindexI18n.setText(n, text);
+  }
+  if (className) {
+    n.className = className;
+  }
   return n;
 }
 function voiceLabelOf(catalog, voiceId) {
   for (const group of catalog.groups || []) {
     const hit = (group.voices || []).find((voice) => voice.voice_id === voiceId);
-    if (hit) return MindexI18n.voice(hit);
+    if (hit) {
+      return MindexI18n.voice(hit);
+    }
   }
   const mine = (catalog.library || []).find((voice) => voice.voice_id === voiceId);
   return mine
@@ -301,12 +314,13 @@ function voiceLabelOf(catalog, voiceId) {
 }
 
 function notify(text = "", error = false) {
-  if (globalThis.MindexFeedback)
+  if (globalThis.MindexFeedback) {
     return globalThis.MindexFeedback.show(
       "notice",
       error ? MindexI18n.system(text) : text,
       error ? "error" : "info",
     );
+  }
 
   MindexI18n.setText($("notice"), error ? MindexI18n.system(text) : text);
   $("notice").className = `notice ${error ? "error" : "info"}`;
@@ -363,15 +377,25 @@ function renderIndexBanner(status) {
 }
 
 function testLine(profileId) {
-  if (!(profileId in state.tests)) return null;
+  if (!(profileId in state.tests)) {
+    return null;
+  }
   const result = state.tests[profileId];
   const line = node("div", undefined, `test-result ${result.ok ? "ok" : "error"}`);
   if (result.ok) {
     const bits = [MindexI18n.msg("ui.79ccfbf3ca48", { p0: result.latency_ms })];
-    if (result.dims) bits.push(MindexI18n.msg("ui.b38853581295", { p0: result.dims }));
-    if (result.reply) bits.push(`「${result.reply}」`);
-    if (result.voice) bits.push(result.voice);
-    if (result.bytes) bits.push(MindexI18n.msg("ui.4dd220045314", { p0: result.bytes }));
+    if (result.dims) {
+      bits.push(MindexI18n.msg("ui.b38853581295", { p0: result.dims }));
+    }
+    if (result.reply) {
+      bits.push(`「${result.reply}」`);
+    }
+    if (result.voice) {
+      bits.push(result.voice);
+    }
+    if (result.bytes) {
+      bits.push(MindexI18n.msg("ui.4dd220045314", { p0: result.bytes }));
+    }
     MindexI18n.setText(line, bits.join(" · "));
   } else {
     MindexI18n.setText(line, `✗ ${MindexI18n.system(result.detail)}`);
@@ -466,8 +490,9 @@ function renderRole(rolePayload) {
     item.dataset.profileId = String(profile.id);
     const head2 = node("div", undefined, "profile-head");
     head2.append(node("strong", profile.name));
-    if (rolePayload.active_profile_id === profile.id)
+    if (rolePayload.active_profile_id === profile.id) {
       head2.append(node("span", MindexI18n.msg("ui.e6aa2cbd7b42"), "active-badge"));
+    }
     head2.append(node("span", profile.provider, "provider-chip"));
     item.append(head2);
     item.append(
@@ -486,14 +511,17 @@ function renderRole(rolePayload) {
         : MindexI18n.msg("ui.e80f2d522dd3");
     item.append(node("div", keyHint, "profile-meta"));
     const bar = node("div", undefined, "profile-actions");
-    if (rolePayload.active_profile_id !== profile.id)
+    if (rolePayload.active_profile_id !== profile.id) {
       bar.append(action(MindexI18n.msg("ui.4c25820818d6"), () => activateProfile(profile.id)));
+    }
     bar.append(action(MindexI18n.msg("ui.10b7d8ecccef"), () => testProfile(profile.id)));
     bar.append(action(MindexI18n.msg("ui.a7f814c0a40d"), () => openDialog(role, profile)));
     bar.append(action(MindexI18n.msg("ui.3755f56f2f83"), () => deleteProfile(profile)));
     item.append(bar);
     const line = testLine(profile.id);
-    if (line) item.append(line);
+    if (line) {
+      item.append(line);
+    }
     scroller.append(item);
   });
   const create = node("button", MindexI18n.msg("ui.b60dbc5381cd"), "new-profile-card");
@@ -514,7 +542,9 @@ function renderRoles(data) {
 // 部署后端概览（只读）：后端选择经 config 文件配置，修改后需重启进程生效。
 function renderDeployment(data) {
   const info = data.deployment;
-  if (!info) return;
+  if (!info) {
+    return;
+  }
   $("deploy-form").textContent = info.form;
   $("deploy-database").textContent = info.database;
   $("deploy-media").textContent = info.media;
@@ -628,13 +658,17 @@ function renderVoices(data, catalog = null) {
   select.append(follow);
   if (catalog) {
     for (const group of catalog.groups || []) {
-      if (!group.voices.length) continue;
+      if (!group.voices.length) {
+        continue;
+      }
       const optgroup = document.createElement("optgroup");
       MindexI18n.setAttr(optgroup, "label", MindexI18n.builtin(group.label));
       group.voices.forEach((voice) => {
         const option = node("option", MindexI18n.voice(voice));
         option.value = voice.voice_id;
-        if (catalog.default_voice === voice.voice_id) option.selected = true;
+        if (catalog.default_voice === voice.voice_id) {
+          option.selected = true;
+        }
         optgroup.append(option);
       });
       select.append(optgroup);
@@ -648,7 +682,9 @@ function renderVoices(data, catalog = null) {
           `${voice.kind === "clone" ? MindexI18n.msg("ui.6e60458a4727") : MindexI18n.msg("ui.4512b3b0e457")} · ${voice.name}`,
         );
         option.value = voice.voice_id;
-        if (catalog.default_voice === voice.voice_id) option.selected = true;
+        if (catalog.default_voice === voice.voice_id) {
+          option.selected = true;
+        }
         mine.append(option);
       });
       select.append(mine);
@@ -669,7 +705,9 @@ function renderVoices(data, catalog = null) {
         `${voice.kind === "clone" ? MindexI18n.msg("ui.6e60458a4727") : MindexI18n.msg("ui.d2712c1576ab")} · ${voice.name}`,
       );
       option.value = voice.voice_id;
-      if (data.business.default_voice === voice.voice_id) option.selected = true;
+      if (data.business.default_voice === voice.voice_id) {
+        option.selected = true;
+      }
       select.append(option);
     });
   }
@@ -689,13 +727,16 @@ function renderVoices(data, catalog = null) {
 
   const list = $("voice-list");
   list.replaceChildren();
-  if (!voices.length) list.append(node("li", MindexI18n.msg("ui.f15b2e0489b0"), "muted"));
+  if (!voices.length) {
+    list.append(node("li", MindexI18n.msg("ui.f15b2e0489b0"), "muted"));
+  }
   voices.forEach((voice) => {
     const item = node("li", undefined, "voice-item");
     const head = node("div", undefined, "profile-head");
     head.append(node("strong", voice.name));
-    if (data.business.default_voice === voice.voice_id)
+    if (data.business.default_voice === voice.voice_id) {
       head.append(node("span", MindexI18n.msg("ui.c8d09cf955f5"), "active-badge"));
+    }
     head.append(
       node(
         "span",
@@ -703,7 +744,7 @@ function renderVoices(data, catalog = null) {
         "provider-chip",
       ),
     );
-    if (voice.status !== "ready")
+    if (voice.status !== "ready") {
       head.append(
         node(
           "span",
@@ -713,6 +754,7 @@ function renderVoices(data, catalog = null) {
           "status-badge",
         ),
       );
+    }
     item.append(head);
     item.append(
       node(
@@ -721,11 +763,13 @@ function renderVoices(data, catalog = null) {
         "profile-meta",
       ),
     );
-    if (voice.status === "failed" && voice.notes)
+    if (voice.status === "failed" && voice.notes) {
       item.append(node("div", voice.notes, "test-result error"));
+    }
     const bar = node("div", undefined, "profile-actions");
-    if (data.business.default_voice !== voice.voice_id)
+    if (data.business.default_voice !== voice.voice_id) {
       bar.append(action(MindexI18n.msg("ui.536a009a9b59"), () => setDefaultVoice(voice.id)));
+    }
     bar.append(action(MindexI18n.msg("ui.3755f56f2f83"), () => deleteVoice(voice)));
     item.append(bar);
     list.append(item);
@@ -742,7 +786,9 @@ async function setDefaultVoice(voiceId) {
   await loadSettings();
 }
 async function deleteVoice(voice) {
-  if (!confirm(MindexI18n.render(MindexI18n.msg("ui.7d16a0d1b523", { p0: voice.name })))) return;
+  if (!confirm(MindexI18n.render(MindexI18n.msg("ui.7d16a0d1b523", { p0: voice.name })))) {
+    return;
+  }
   await api(`/api/settings/voices/${voice.id}`, { method: "DELETE" });
   notify(MindexI18n.msg("ui.11141858d215"));
   await loadSettings();
@@ -833,12 +879,16 @@ $("clone-form").onsubmit = async (event) => {
       form.append("name", name);
       form.append("consent", $("clone-consent").checked ? "true" : "false");
       if (cloneMode === "upload") {
-        if (!$("clone-file").files.length) throw new Error(MindexI18n.msg("ui.78ad35fdb232"));
+        if (!$("clone-file").files.length) {
+          throw new Error(MindexI18n.msg("ui.78ad35fdb232"));
+        }
         form.append("ref_text", $("clone-reftext").value.trim());
         form.append("file", $("clone-file").files[0]);
       } else {
         const url = $("clone-url").value.trim();
-        if (!url) throw new Error(MindexI18n.msg("ui.6bbfc9aa3613"));
+        if (!url) {
+          throw new Error(MindexI18n.msg("ui.6bbfc9aa3613"));
+        }
         form.append("audio_url", url);
       }
       await api("/api/settings/voices/clone", { method: "POST", body: form });
@@ -856,18 +906,24 @@ $("clone-form").onsubmit = async (event) => {
 async function loadSettings() {
   const request = ++settingsRequest;
   const data = await api("/api/settings?probe_embedding=false");
-  if (request !== settingsRequest) return;
+  if (request !== settingsRequest) {
+    return;
+  }
   state.data = data;
   $("enforce-gpu-lock").checked = data.business.enforce_gpu_lock === true;
   $("index-banner").replaceChildren();
   api("/api/settings/embedding-status")
     .then((status) => {
-      if (request !== settingsRequest) return;
+      if (request !== settingsRequest) {
+        return;
+      }
       state.data.embedding_status = status;
       renderIndexBanner(status);
     })
     .catch((error) => {
-      if (request !== settingsRequest) return;
+      if (request !== settingsRequest) {
+        return;
+      }
       $("index-banner").append(node("div", error.message, "index-banner-error"));
     });
   renderRoles(data);
@@ -881,13 +937,17 @@ async function loadSettings() {
   // An unavailable TTS catalog must not block model settings or recall tuning.
   api("/api/settings/voices/catalog")
     .then((catalog) => {
-      if (request !== settingsRequest) return;
+      if (request !== settingsRequest) {
+        return;
+      }
       state.voiceCatalog = catalog;
       renderVoices(data, catalog);
     })
     .catch((error) => {
       // 音色目录不可用不阻塞其它设置，但要告诉用户，而不是静默吞掉。
-      if (request === settingsRequest) notify(error.message, true);
+      if (request === settingsRequest) {
+        notify(error.message, true);
+      }
     });
 }
 
@@ -931,7 +991,9 @@ function releaseButton(text, task, message, className = "quiet") {
 async function loadReleases() {
   const request = ++releasesRequest;
   const data = await api("/api/persons/releases");
-  if (request !== releasesRequest) return;
+  if (request !== releasesRequest) {
+    return;
+  }
   renderReleases(data);
 }
 function renderReleases(data) {
@@ -959,8 +1021,9 @@ function renderReleases(data) {
   }
   const list = $("releases");
   list.replaceChildren();
-  if (!data.releases.length)
+  if (!data.releases.length) {
     list.append(node("li", MindexI18n.msg("ui.index_release_empty"), "muted"));
+  }
   for (const release of data.releases) {
     const isActive = release.id === active?.release_id;
     const row = node("li", undefined, `release-item${isActive ? " is-active" : ""}`);
@@ -985,9 +1048,9 @@ function renderReleases(data) {
       }),
     );
     row.append(text);
-    if (isActive)
+    if (isActive) {
       row.append(node("span", MindexI18n.msg("ui.index_release_active"), "release-badge"));
-    else {
+    } else {
       row.append(
         releaseButton(
           MindexI18n.msg("ui.9abe6a920d15"),
@@ -1041,7 +1104,9 @@ async function serviceAction(control, task, message) {
   control.disabled = true;
   try {
     await task();
-    if (message) showServices(message);
+    if (message) {
+      showServices(message);
+    }
   } catch (error) {
     showServices(MindexI18n.system(error.message), true);
   } finally {
@@ -1051,16 +1116,21 @@ async function serviceAction(control, task, message) {
 async function loadLocalServices() {
   const request = ++servicesRequest;
   const data = await api("/api/settings/local-services");
-  if (request !== servicesRequest) return;
+  if (request !== servicesRequest) {
+    return;
+  }
   renderLocalServices(data || {});
   // 有服务正在启动（进程在、健康检查未通过）时每 3 秒刷新，直到健康或退出。
-  if (servicesTimer) clearTimeout(servicesTimer);
+  if (servicesTimer) {
+    clearTimeout(servicesTimer);
+  }
   servicesTimer = null;
   if (
     (data?.items || []).some((item) => item.running && !item.healthy) &&
     typeof setTimeout === "function"
-  )
+  ) {
     servicesTimer = setTimeout(() => loadLocalServices().catch(() => {}), 3000);
+  }
 }
 function serviceBadge(text, tone) {
   return node("span", text, `service-badge${tone ? ` ${tone}` : ""}`);
@@ -1098,7 +1168,9 @@ function renderLocalServices(data) {
       p1: items.filter((item) => item.running || item.external).length,
     }),
   );
-  if (!items.length) list.append(node("li", MindexI18n.msg("ui.local_services_empty"), "muted"));
+  if (!items.length) {
+    list.append(node("li", MindexI18n.msg("ui.local_services_empty"), "muted"));
+  }
   for (const item of items) {
     const row = node(
       "li",
@@ -1173,12 +1245,17 @@ function renderLocalServices(data) {
     logs.setAttribute("aria-expanded", String(open));
     logs.onclick = () =>
       serviceAction(logs, async () => {
-        if (servicesLogs.has(item.name)) servicesLogs.delete(item.name);
-        else servicesLogs.add(item.name);
+        if (servicesLogs.has(item.name)) {
+          servicesLogs.delete(item.name);
+        } else {
+          servicesLogs.add(item.name);
+        }
         await loadLocalServices();
       });
     row.append(logs);
-    if (item.detail) row.append(node("div", MindexI18n.system(item.detail), "service-detail"));
+    if (item.detail) {
+      row.append(node("div", MindexI18n.system(item.detail), "service-detail"));
+    }
     const flags = node("div", undefined, "service-flags");
     flags.append(
       serviceFlag(item, "autostart", MindexI18n.msg("ui.local_service_autostart")),
@@ -1210,12 +1287,17 @@ function showBrowser(text, error = false) {
 async function loadAnimationBrowser() {
   const request = ++browserRequest;
   const data = await api("/api/settings/animation-browser");
-  if (request !== browserRequest) return;
+  if (request !== browserRequest) {
+    return;
+  }
   renderAnimationBrowser(data || {});
-  if (browserTimer) clearTimeout(browserTimer);
+  if (browserTimer) {
+    clearTimeout(browserTimer);
+  }
   browserTimer = null;
-  if (data?.task?.status === "running" && typeof setTimeout === "function")
+  if (data?.task?.status === "running" && typeof setTimeout === "function") {
     browserTimer = setTimeout(() => loadAnimationBrowser().catch(() => {}), 2000);
+  }
 }
 function renderAnimationBrowser(data) {
   const task = data.task || {};
@@ -1239,9 +1321,11 @@ function renderAnimationBrowser(data) {
   const log = $("browser-log");
   log.hidden = !task.log;
   MindexI18n.setText(log, task.log || "");
-  if (task.status === "failed") showBrowser(MindexI18n.system(task.error || ""), true);
-  else if (task.status === "complete" && data.installed)
+  if (task.status === "failed") {
+    showBrowser(MindexI18n.system(task.error || ""), true);
+  } else if (task.status === "complete" && data.installed) {
     showBrowser(MindexI18n.msg("ui.animation_browser_done"));
+  }
 }
 $("browser-install").onclick = () =>
   run(async () => {
@@ -1258,8 +1342,11 @@ $("browser-install").onclick = () =>
 
 async function activateProfile(profileId) {
   const result = await api(`/api/settings/profiles/${profileId}/activate`, { method: "POST" });
-  if (result.index_warning) notify(MindexI18n.system(result.index_warning), true);
-  else notify(MindexI18n.msg("ui.3222aa90a764", { p0: result.name }));
+  if (result.index_warning) {
+    notify(MindexI18n.system(result.index_warning), true);
+  } else {
+    notify(MindexI18n.msg("ui.3222aa90a764", { p0: result.name }));
+  }
   await loadSettings();
 }
 
@@ -1271,7 +1358,9 @@ async function testProfile(profileId) {
 }
 
 async function deleteProfile(profile) {
-  if (!confirm(MindexI18n.render(MindexI18n.msg("ui.c07e9d3fe6f2", { p0: profile.name })))) return;
+  if (!confirm(MindexI18n.render(MindexI18n.msg("ui.c07e9d3fe6f2", { p0: profile.name })))) {
+    return;
+  }
   await api(`/api/settings/profiles/${profile.id}`, { method: "DELETE" });
   notify(MindexI18n.msg("ui.71b63fe4dc89"));
   await loadSettings();
@@ -1286,7 +1375,9 @@ function fillBackendOptions(role, selected) {
       return option;
     }),
   );
-  if (selected) select.value = selected;
+  if (selected) {
+    select.value = selected;
+  }
 }
 function fillExtraFields(role, values = {}) {
   const wrap = $("pf-extra");
@@ -1301,7 +1392,9 @@ function fillExtraFields(role, values = {}) {
       input.id = `pf-${field.key}`;
       input.checked = Boolean(values[field.key]);
       label.append(input, node("span", field.label));
-      if (field.hint) label.append(node("span", field.hint, "muted"));
+      if (field.hint) {
+        label.append(node("span", field.hint, "muted"));
+      }
       wrap.append(label);
       return;
     }
@@ -1317,19 +1410,28 @@ function fillExtraFields(role, values = {}) {
     } else {
       input = node("input");
       input.type = field.type === "json" || field.type === "list" ? "text" : field.type;
-      if (field.min !== undefined) input.min = field.min;
-      if (field.max !== undefined) input.max = field.max;
-      if (field.type === "number") input.step = field.step || "any";
-      if (field.placeholder) MindexI18n.setAttr(input, "placeholder", field.placeholder);
+      if (field.min !== undefined) {
+        input.min = field.min;
+      }
+      if (field.max !== undefined) {
+        input.max = field.max;
+      }
+      if (field.type === "number") {
+        input.step = field.step || "any";
+      }
+      if (field.placeholder) {
+        MindexI18n.setAttr(input, "placeholder", field.placeholder);
+      }
     }
     input.id = `pf-${field.key}`;
-    if (values[field.key] !== undefined && values[field.key] !== null)
+    if (values[field.key] !== undefined && values[field.key] !== null) {
       input.value =
         field.type === "json"
           ? JSON.stringify(values[field.key])
           : field.type === "list"
             ? values[field.key].join(", ")
             : values[field.key];
+    }
     label.append(input);
     wrap.append(label);
   });
@@ -1380,7 +1482,9 @@ function fillComfyEditor(role, values = {}) {
   area.spellcheck = false;
   MindexI18n.setAttr(area, "aria-label", MindexI18n.msg("ui.comfyui_workflow_title"));
   MindexI18n.setAttr(area, "placeholder", MindexI18n.msg("ui.comfyui_workflow_placeholder"));
-  if (values.comfyui_workflow) area.value = JSON.stringify(values.comfyui_workflow, null, 2);
+  if (values.comfyui_workflow) {
+    area.value = JSON.stringify(values.comfyui_workflow, null, 2);
+  }
   const fileLabel = node("label", undefined);
   fileLabel.append(node("span", MindexI18n.msg("ui.comfyui_workflow_file")));
   const file = node("input");
@@ -1389,7 +1493,9 @@ function fillComfyEditor(role, values = {}) {
   file.id = "pf-comfyui-file";
   file.onchange = async () => {
     const chosen = file.files[0];
-    if (!chosen) return;
+    if (!chosen) {
+      return;
+    }
     area.value = await chosen.text();
     const status = $("pf-comfyui-status");
     try {
@@ -1428,7 +1534,9 @@ function fillComfyEditor(role, values = {}) {
 }
 function syncComfyEditor() {
   const host = $("pf-comfyui");
-  if (!COMFY_ROLES.includes($("pf-role").value)) return;
+  if (!COMFY_ROLES.includes($("pf-role").value)) {
+    return;
+  }
   const comfy = $("pf-backend").value === "comfyui";
   host.hidden = !comfy;
   // 模型名对 ComfyUI 与 MiniMax H3 可选（以工作流/分镜设置为准），其余线上厂商必填。
@@ -1449,18 +1557,21 @@ function parseWorkflow(text) {
     typeof workflow !== "object" ||
     Array.isArray(workflow) ||
     !Object.keys(workflow).length
-  )
+  ) {
     throw new Error(MindexI18n.msg("ui.comfyui_invalid_json", { p0: "{}" }));
-  if ("nodes" in workflow && "links" in workflow)
+  }
+  if ("nodes" in workflow && "links" in workflow) {
     throw new Error(MindexI18n.msg("ui.comfyui_ui_format"));
+  }
   for (const [id, item] of Object.entries(workflow)) {
     if (
       !item ||
       typeof item.class_type !== "string" ||
       !item.inputs ||
       typeof item.inputs !== "object"
-    )
+    ) {
       throw new Error(MindexI18n.msg("ui.comfyui_not_api", { p0: id }));
+    }
   }
   return workflow;
 }
@@ -1469,35 +1580,50 @@ function comfyConfig() {
   const mapping = {};
   for (const input of document.querySelectorAll("#pf-comfyui [data-mapping-field]")) {
     const value = input.value.trim();
-    if (value) mapping[input.dataset.mappingField] = value;
+    if (value) {
+      mapping[input.dataset.mappingField] = value;
+    }
   }
-  if (!text) throw new Error(MindexI18n.msg("ui.comfyui_workflow_required"));
+  if (!text) {
+    throw new Error(MindexI18n.msg("ui.comfyui_workflow_required"));
+  }
   const workflow = parseWorkflow(text);
-  if (!mapping.prompt) throw new Error(MindexI18n.msg("ui.comfyui_mapping_prompt_required"));
+  if (!mapping.prompt) {
+    throw new Error(MindexI18n.msg("ui.comfyui_mapping_prompt_required"));
+  }
   for (const [key, target] of Object.entries(mapping)) {
     const parts = target.split(".");
-    if (parts.length !== 3 || parts[1] !== "inputs" || !parts[0] || !parts[2])
+    if (parts.length !== 3 || parts[1] !== "inputs" || !parts[0] || !parts[2]) {
       throw new Error(MindexI18n.msg("ui.comfyui_mapping_format", { p0: key }));
-    if (!workflow[parts[0]])
+    }
+    if (!workflow[parts[0]]) {
       throw new Error(MindexI18n.msg("ui.comfyui_mapping_node", { p0: key, p1: parts[0] }));
-    if (!(parts[2] in workflow[parts[0]].inputs))
+    }
+    if (!(parts[2] in workflow[parts[0]].inputs)) {
       throw new Error(
         MindexI18n.msg("ui.comfyui_mapping_input", { p0: key, p1: parts[0], p2: parts[2] }),
       );
+    }
   }
   return { comfyui_workflow: workflow, comfyui_mapping: mapping };
 }
 function applyPreset(role, provider) {
   const preset = state.data?.presets?.[provider]?.[role];
-  if (!preset) return;
+  if (!preset) {
+    return;
+  }
   const config = preset.config;
-  if (config.backend) fillBackendOptions(role, config.backend);
+  if (config.backend) {
+    fillBackendOptions(role, config.backend);
+  }
   $("pf-base-url").value = config.base_url || "";
   $("pf-model").value = config.model || "";
   $("pf-revision").value = config.revision || "";
   fillExtraFields(role, config);
   const templateWrap = $("pf-template-wrap");
-  if (!templateWrap.hidden) $("pf-llama-template").checked = Boolean(config.llama_template);
+  if (!templateWrap.hidden) {
+    $("pf-llama-template").checked = Boolean(config.llama_template);
+  }
   refreshVoiceCandidates();
 }
 for (const id of ["pf-backend", "pf-base-url", "pf-model", "pf-name", "pf-api-key"]) {
@@ -1507,9 +1633,13 @@ for (const id of ["pf-backend", "pf-base-url", "pf-model", "pf-name", "pf-api-ke
 function ensureVoiceField(tag) {
   // 返回 {element, previous}：空 select 直接赋 value 会因无匹配选项而丢失，必须先取原值。
   const current = $("pf-voice");
-  if (!current) return { element: null, previous: "" };
+  if (!current) {
+    return { element: null, previous: "" };
+  }
   const previous = current.value;
-  if (current.tagName.toLowerCase() === tag) return { element: current, previous };
+  if (current.tagName.toLowerCase() === tag) {
+    return { element: current, previous };
+  }
   const replacement = document.createElement(tag);
   replacement.id = "pf-voice";
   current.replaceWith(replacement);
@@ -1517,18 +1647,29 @@ function ensureVoiceField(tag) {
 }
 
 async function refreshVoiceCandidates() {
-  if ($("pf-role").value !== "tts") return;
+  if ($("pf-role").value !== "tts") {
+    return;
+  }
   const body = {};
-  if ($("pf-id").value) body.profile_id = Number($("pf-id").value);
-  else {
+  if ($("pf-id").value) {
+    body.profile_id = Number($("pf-id").value);
+  } else {
     body.backend = $("pf-backend").value;
     const base = $("pf-base-url").value.trim();
     const model = $("pf-model").value.trim();
-    if (base) body.base_url = base;
-    if (model) body.model = model;
+    if (base) {
+      body.base_url = base;
+    }
+    if (model) {
+      body.model = model;
+    }
     const name = $("pf-name").value.trim();
-    if (name) body.name = name;
-    if ($("pf-api-key").value) body.api_key = $("pf-api-key").value;
+    if (name) {
+      body.name = name;
+    }
+    if ($("pf-api-key").value) {
+      body.api_key = $("pf-api-key").value;
+    }
   }
   let catalog = null;
   try {
@@ -1543,7 +1684,9 @@ async function refreshVoiceCandidates() {
   const kind = catalog?.voice_kind === "clone" ? "clone" : "system";
   if (kind === "clone") {
     const { element: select, previous: previousClone } = ensureVoiceField("select");
-    if (!select) return;
+    if (!select) {
+      return;
+    }
     select.dataset.voiceKind = "clone";
     select.removeAttribute("list");
     select.removeAttribute("placeholder");
@@ -1554,7 +1697,9 @@ async function refreshVoiceCandidates() {
         option.value = item.voice_id;
         select.append(option);
       }
-      if (![...select.options].some((option) => option.value === previousClone)) select.value = "";
+      if (![...select.options].some((option) => option.value === previousClone)) {
+        select.value = "";
+      }
     } else {
       const empty = node(
         "option",
@@ -1578,7 +1723,9 @@ async function refreshVoiceCandidates() {
     return;
   }
   const { element: select, previous } = ensureVoiceField("select");
-  if (!select) return;
+  if (!select) {
+    return;
+  }
   select.removeAttribute("list");
   select.dataset.voiceKind = "system";
   select.replaceChildren();
@@ -1586,7 +1733,9 @@ async function refreshVoiceCandidates() {
   unselected.value = "";
   select.append(unselected);
   for (const group of groups) {
-    if (!group.voices.length) continue;
+    if (!group.voices.length) {
+      continue;
+    }
     const optgroup = document.createElement("optgroup");
     MindexI18n.setAttr(optgroup, "label", MindexI18n.builtin(group.label));
     for (const voice of group.voices) {
@@ -1641,8 +1790,9 @@ function openDialog(role, profile) {
   fillExtraFields(role, config);
   const useTemplate = role === "analyzer" || role === "generator" || role === "writer";
   $("pf-template-wrap").hidden = !useTemplate;
-  if (useTemplate)
+  if (useTemplate) {
     $("pf-llama-template").checked = profile ? config.llama_template !== false : true;
+  }
   MindexI18n.setText(
     $("pf-key-hint"),
     profile && profile.api_key.has_key
@@ -1665,29 +1815,38 @@ $("profile-form").onsubmit = async (event) => {
     model: $("pf-model").value.trim(),
   };
   const revision = $("pf-revision").value.trim();
-  if (revision && revision !== "main") config.revision = revision;
-  if (role === "analyzer" || role === "generator" || role === "writer")
+  if (revision && revision !== "main") {
+    config.revision = revision;
+  }
+  if (role === "analyzer" || role === "generator" || role === "writer") {
     config.llama_template = $("pf-llama-template").checked;
+  }
   ROLE_EXTRA[role].forEach((field) => {
     const input = $(`pf-${field.key}`);
-    if (!input) return;
+    if (!input) {
+      return;
+    }
     if (field.type === "checkbox") {
       config[field.key] = input.checked;
       return;
     }
     const value = input.value.trim();
     if (field.type === "list") {
-      if (value !== "")
+      if (value !== "") {
         config[field.key] = value
           .split(/[,，\s]+/)
           .filter(Boolean)
           .map(Number);
+      }
       return;
     }
-    if (value !== "") config[field.key] = field.type === "number" ? Number(value) : value;
+    if (value !== "") {
+      config[field.key] = field.type === "number" ? Number(value) : value;
+    }
     if (field.type === "json") {
-      if (value === "") config[field.key] = null;
-      else {
+      if (value === "") {
+        config[field.key] = null;
+      } else {
         try {
           config[field.key] = JSON.parse(value);
         } catch {
@@ -1728,8 +1887,12 @@ $("profile-form").onsubmit = async (event) => {
       provider: $("pf-provider").value,
       config,
     };
-    if (apiKey !== "") body.api_key = apiKey;
-    if (profileId && $("pf-clear-key")?.checked) body.api_key = "__clear__";
+    if (apiKey !== "") {
+      body.api_key = apiKey;
+    }
+    if (profileId && $("pf-clear-key")?.checked) {
+      body.api_key = "__clear__";
+    }
     await api(profileId ? `/api/settings/profiles/${profileId}` : "/api/settings/profiles", {
       method: profileId ? "PUT" : "POST",
       headers: { "Content-Type": "application/json" },
@@ -1752,14 +1915,17 @@ $("search-tuning").onsubmit = async (event) => {
     const weights = {};
     for (const key of Object.keys(WEIGHT_LABELS)) {
       const value = Number($(`weight-${key}`).value);
-      if (!Number.isFinite(value) || value < 0)
+      if (!Number.isFinite(value) || value < 0) {
         throw new Error(MindexI18n.msg("ui.e834ef69f5b6", { p0: WEIGHT_LABELS[key] }));
+      }
       weights[key] = value;
     }
     const channelWeights = {};
     for (const key of ["visual", "dialogue", "analysis"]) {
       const value = Number($(`channel-weight-${key}`).value);
-      if (!Number.isFinite(value) || value < 0) throw new Error(MindexI18n.msg("ui.5dffe4819a2e"));
+      if (!Number.isFinite(value) || value < 0) {
+        throw new Error(MindexI18n.msg("ui.5dffe4819a2e"));
+      }
       channelWeights[key] = value;
     }
     await api("/api/settings/business", {
@@ -1823,8 +1989,9 @@ if (typeof location !== "undefined" && /^#(services|browser|tools)$/.test(locati
   state.expanded.add(location.hash.slice(1));
 }
 // 第三方工具配置组（tools.js）：带 ?tool= 打开时展开该组。
-if (typeof location !== "undefined" && new URLSearchParams(location.search || "").has("tool"))
+if (typeof location !== "undefined" && new URLSearchParams(location.search || "").has("tool")) {
   state.expanded.add("tools");
+}
 syncSectionRows();
 run(loadSettings);
 // 智能助手修改设置（档案、业务调参）后刷新本页，并定位到相关角色、档案或区块。
@@ -1833,7 +2000,9 @@ if (typeof window !== "undefined" && window.addEventListener) {
   let agentReload = Promise.resolve();
   window.MindexAgentContext = () => ({ page: "settings", expanded_roles: [...state.expanded] });
   window.addEventListener("mindex:agent-mutation", (event) => {
-    if ((event.detail || {}).domain === "settings") agentReload = run(loadSettings);
+    if ((event.detail || {}).domain === "settings") {
+      agentReload = run(loadSettings);
+    }
   });
   const persist = () => {
     try {
@@ -1841,7 +2010,9 @@ if (typeof window !== "undefined" && window.addEventListener) {
     } catch {}
   };
   window.MindexAgentFocus = async (focus, { passive = false } = {}) => {
-    if (!state.data) return false;
+    if (!state.data) {
+      return false;
+    }
     await agentReload;
     const mark = (element, options) => window.MindexAgent?.highlight(element, options);
     if (focus.role) {
@@ -1858,7 +2029,9 @@ if (typeof window !== "undefined" && window.addEventListener) {
             )
           : null;
       mark(row, { scroll: !card });
-      if (card) mark(card);
+      if (card) {
+        mark(card);
+      }
       return true;
     }
     const section = focus.section;
@@ -1869,8 +2042,11 @@ if (typeof window !== "undefined" && window.addEventListener) {
         syncSectionRows();
       }
       mark($(`${section}-row`));
-    } else if (section === "processing") mark($("processing-settings"));
-    else mark($("roles"));
+    } else if (section === "processing") {
+      mark($("processing-settings"));
+    } else {
+      mark($("roles"));
+    }
     return true;
   };
 }

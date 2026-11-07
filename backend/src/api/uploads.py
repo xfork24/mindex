@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import hashlib
+import logging
 import tempfile
 from typing import Literal
 
@@ -120,9 +123,6 @@ def upload_router(store, runtime):
 
 
 def install_reaper(app, store, runtime):
-    import asyncio
-    import contextlib
-    import logging
 
     previous = app.router.lifespan_context
 

@@ -1,8 +1,12 @@
 """素材操作按实际输入复用；任务、配置和片段 ID 变化不触发模型重算。"""
 
 import json
+import sys
+from contextlib import nullcontext
+from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
 import cli
@@ -114,7 +118,6 @@ def test_completed_asr_survives_model_change_and_force_recomputes(config, video_
 @pytest.mark.parametrize("command", ["transcribe", "enrich-dialogue"])
 @pytest.mark.parametrize("force", [False, True])
 def test_cli_asr_force_is_explicit(config, monkeypatch, command, force):
-    from contextlib import nullcontext
 
     calls = []
 
@@ -148,7 +151,6 @@ def test_cli_asr_force_is_explicit(config, monkeypatch, command, force):
 
 def test_ui_options_reject_force(config):
     """force 只属于显式 CLI 重算：API/页面入口拒绝，人物选项仍在模型层拒绝。"""
-    from fastapi.testclient import TestClient
 
     from api import create_app
     from persons.person_processing import PersonOptions
@@ -337,8 +339,6 @@ def test_asr_chunks_reject_different_context_before_reuse(config):
 
 @pytest.mark.slow
 def test_forced_raw_asr_invalidates_alignment_and_promotes_new_dialogue(config, video_file, monkeypatch):
-    import sys
-    from pathlib import Path
 
     from processing.dialogue import current_dialogue
     from shared.jsonio import save

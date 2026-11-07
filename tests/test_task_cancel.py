@@ -1,3 +1,5 @@
+"""后台任务取消、检查点与重试回归。"""
+
 import json
 
 import pytest

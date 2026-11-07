@@ -11,6 +11,8 @@ from typing import ClassVar
 from pydantic import Field
 
 from shared.config import StrictModel
+from studio import material_digest, studio
+from topics.profiles import material_state
 from topics.sources.base import FetchContext, Item, item, register
 
 log = logging.getLogger(__name__)
@@ -22,7 +24,6 @@ class LocalConfig(StrictModel):
 
 def made_videos(config) -> list[dict]:
     """已有创作任务的标题与大纲（不触发任务迁移，只读 job.json）。"""
-    from studio import studio
 
     root = studio.studio_root(config)
     found = []
@@ -51,10 +52,8 @@ class LocalSource:
     def fetch(self, ctx: FetchContext, cfg: LocalConfig) -> list[Item]:
         if not cfg.library:
             return []
-        from studio.material_digest import build_digest
-        from topics.profiles import material_state
 
-        digest = build_digest(ctx.config, ctx.store, material_state(ctx.profile))
+        digest = material_digest.build_digest(ctx.config, ctx.store, material_state(ctx.profile))
         items = []
         for source in digest.sources:
             summary = "；".join(

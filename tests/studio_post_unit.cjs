@@ -48,7 +48,7 @@ run(
       },
     },
     versions: {
-      board: { data: { order: ["a", "b"] } },
+      "board": { data: { order: ["a", "b"] } },
       "c-a": {
         data: {
           text: "甲",
@@ -123,8 +123,9 @@ run(`api = globalThis.api`);
   await run(
     `savePost("a", { data: { enter: null, leave: null, next: null }, highlights: [], overlays: [] })`,
   );
-  for (const key of ["transition", "highlights", "overlays"])
+  for (const key of ["transition", "highlights", "overlays"]) {
     assert.equal(key in sent.body.shots[0], false);
+  }
   console.log("studio post unit ok");
 })().catch((error) => {
   console.error(error);

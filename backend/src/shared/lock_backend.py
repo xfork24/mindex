@@ -15,11 +15,15 @@ PG 形态下用 ``resource:<key>`` 的具名租约，key 与文件形态同源�
 
 from __future__ import annotations
 
+import hashlib
 from contextlib import ExitStack, contextmanager
+from pathlib import Path
 
-from filelock import Timeout
+from filelock import FileLock, Timeout
 
 from shared import locks
+from shared.db.locks_pg import PgLockProvider
+from shared.storage import Store
 
 __all__ = ["LeaseHandle", "acquire_ordered", "named", "provider_for", "resource", "uses_pg"]
 
@@ -31,6 +35,7 @@ def acquire_ordered(source, names, *, exclusive=True, timeout=0):
     if order != sorted(order) or len(set(names)) != len(names):
         raise ValueError("必须按规范顺序获取锁，且不得重复")
     if getattr(source, "pg", False):
+        # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
         from shared.db.maintenance_gate import _ACTIVE
 
         if _ACTIVE.get() is not None and _ACTIVE.get() == getattr(
@@ -58,13 +63,11 @@ def _root(source):
 
 def provider_for(source):
     """取得该库的 PG 锁提供者：Config 走 Store.open；Store 直接用其 backend。"""
-    from shared.db.locks_pg import PgLockProvider
 
     if hasattr(source, "backend") and hasattr(source, "library_id"):
         provider = PgLockProvider(source.backend, library_id=source.library_id)
         provider._store_owner = source
         return provider
-    from shared.storage import Store
 
     store = Store.open(source)
     provider = PgLockProvider(store.backend, library_id=store.library_id)
@@ -94,6 +97,7 @@ class LeaseHandle:
             raise Timeout(f"postgres-lease:{self.name}")
         lease.start_heartbeat()
         self.lease = lease
+        # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
         from shared.db.fencing import add_lease
 
         add_lease(lease)
@@ -101,6 +105,7 @@ class LeaseHandle:
 
     def release(self):
         if self.lease is not None:
+            # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
             from shared.db.fencing import remove_lease
 
             remove_lease(self.lease)
@@ -134,10 +139,6 @@ def resource(source, key: str, *, exclusive: bool = True, timeout: float | None 
     mode = "exclusive" if exclusive else "shared"
     if uses_pg(source):
         return LeaseHandle(provider_for(source), f"resource:{key}", mode, timeout)
-    import hashlib
-    from pathlib import Path
-
-    from filelock import FileLock
 
     digest = hashlib.sha256(key.encode()).hexdigest()[:24]
     path = Path(_root(source)) / "locks" / f"{digest}.resource.lock"

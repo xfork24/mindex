@@ -19,7 +19,7 @@ from shared.config import fingerprint
 from studio import studio
 from studio.artifacts import digest
 from studio.logs import active_log
-from studio.workspace import sources
+from studio.workspace import signatures, sources
 from studio.workspace.plans import canvas_render, choose
 from studio.workspace.stages import StageHandler, register, shot_content
 from studio.workspace.versions import add_version, file_info, root
@@ -79,13 +79,12 @@ def save_manual(config, job_id, w, p, sid, html: str) -> str:
     """人工保存动画源码：校验 → 新的 origin=manual 版本 → 选用（下游 render/compose 随之过期）。
 
     手改版本的签名由源码摘要与当前规格派生，不会被按签名的复用误选；它只经「钉住」规则在选用期间复用。"""
-    from studio.workspace.signatures import specification
 
     source = sources.plan_source(w, p, sid)
     if not source or source["kind"] != "animation":
         raise studio.StudioError(NOT_ANIMATION)
     check(config, html)
-    spec = specification(config, job_id, w, p, "animate", sid)
+    spec = signatures.specification(config, job_id, w, p, "animate", sid)
     request = animation_request(config, w, p, sid)
     vid = uuid4().hex
     target = _write(config, job_id, vid, html)

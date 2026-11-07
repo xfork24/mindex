@@ -1,11 +1,16 @@
+"""严格配置模型、配置加载与模型身份指纹。"""
+
 from __future__ import annotations
 
 import hashlib
 import json
 import math
 import os
+import re
 from pathlib import Path
 from typing import Annotated, Literal
+from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
@@ -114,10 +119,9 @@ class GeneratorConfig(Service):
 
 
 class SpeakerConfig(Service):
-    (
-        """TTS 语音合成服务（llama-server GGUF，OpenAI /audio/speech 风格端点；线上为 minimax/dashscope """
-        """专用协议）。"""
-    )
+    """TTS 语音合成服务（llama-server GGUF，OpenAI /audio/speech 风格端点；线上为
+    minimax/dashscope 专用协议）。
+    """
 
     backend: Literal["openai", "minimax", "dashscope"] = "openai"
     base_url: str = "http://192.168.1.86:4030/v1"
@@ -631,8 +635,6 @@ class TopicsSchedulerConfig(StrictModel):
     @classmethod
     def valid_timezone(cls, value):
         if value is not None:
-            from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
-
             try:
                 ZoneInfo(value)
             except (ZoneInfoNotFoundError, ValueError) as exc:
@@ -756,7 +758,6 @@ class GpuConfig(StrictModel):
 
     @model_validator(mode="after")
     def valid_groups(self):
-        import re
 
         if any(not re.fullmatch(r"[a-zA-Z0-9_.:-]{1,128}", name) for name in self.groups):
             raise ValueError("GPU 物理资源组名称只能含字母、数字、下划线、点、冒号与连字符")
@@ -791,7 +792,6 @@ class S3Config(StrictModel):
 
     @model_validator(mode="after")
     def browser_access(self):
-        from urllib.parse import urlsplit
 
         for value in [self.endpoint_url, self.browser_endpoint_url, *self.browser_origins]:
             if not value:
@@ -883,10 +883,9 @@ class Config(StrictModel):
 
     @model_validator(mode="after")
     def animator_defaults_to_agent(self):
-        (
-            """yaml 未写 ``studio.animator`` 时复制 ``agent.llm`` 的连接字段（含 """
-            """api_key_env），其余取动画生成默认值。"""
-        )
+        """yaml 未写 ``studio.animator`` 时复制 ``agent.llm`` 的连接字段（含 api_key_env），
+        其余取动画生成默认值。
+        """
         if self.uploads.default_transport == "s3" and self.storage.backend != "s3":
             raise ValueError("uploads.default_transport=s3 需要 storage.backend=s3")
         if "animator" not in self.studio.model_fields_set:

@@ -8,7 +8,9 @@ assert.match(base, /^http:\/\/127\.0\.0\.1:/);
 const studioUrl = `${base}/studio?job=${job}`;
 
 async function openPanel(page) {
-  if (await page.locator("#agent-drawer").isHidden()) await page.locator(".agent-launcher").click();
+  if (await page.locator("#agent-drawer").isHidden()) {
+    await page.locator(".agent-launcher").click();
+  }
   await page.locator("#agent-drawer:not([hidden])").waitFor();
 }
 async function say(page, text) {
@@ -277,7 +279,9 @@ const focused = (page, selector) =>
       await input.press("ArrowUp");
       await input.press("ArrowDown");
       await value(draft);
-      for (const text of texts) await sendText(text);
+      for (const text of texts) {
+        await sendText(text);
+      }
       const sid = await page.evaluate(() => window.MindexAgent.state.session);
 
       if (scenario === "history") {
@@ -464,7 +468,9 @@ const focused = (page, selector) =>
           await input.fill(draft);
           await caret(0);
           await input.press("ArrowUp");
-          if ((await input.inputValue()) === secret) await input.press("ArrowUp");
+          if ((await input.inputValue()) === secret) {
+            await input.press("ArrowUp");
+          }
           const count = await page.locator(".agent-user").count();
           await input.press(shortcut);
           await page.waitForFunction(
@@ -517,8 +523,9 @@ const focused = (page, selector) =>
         await caret(0);
         await input.press("ArrowUp");
         await page.waitForFunction(() => window.MindexAgent.state.live);
-        for (const until = Date.now() + 10000; requests.length < 2 && Date.now() < until;)
+        for (const until = Date.now() + 10000; requests.length < 2 && Date.now() < until;) {
           await page.waitForTimeout(100);
+        }
         assert.ok(requests.length >= 2, "SSE 应已断线重连");
         assert.equal(requests[0], "-1");
         assert.equal(requests[1], String(followup.seq));
@@ -579,7 +586,9 @@ const focused = (page, selector) =>
     if (scenario === "media") {
       const external = [];
       page.on("request", (request) => {
-        if (!request.url().startsWith(base)) external.push(request.url());
+        if (!request.url().startsWith(base)) {
+          external.push(request.url());
+        }
       });
       await page.goto(studioUrl);
       await page.locator("#job-workspace:not([hidden])").waitFor();
@@ -686,7 +695,9 @@ const focused = (page, selector) =>
 
       // 关闭面板时暂停播放（历史重放后音频重新折叠，先展开再播放）。
       const replayed = page.locator("details.agent-player-audio").first();
-      if ((await replayed.getAttribute("open")) === null) await replayed.locator("summary").click();
+      if ((await replayed.getAttribute("open")) === null) {
+        await replayed.locator("summary").click();
+      }
       await page.waitForFunction(
         () => document.querySelector("details.agent-player-audio audio")?.readyState >= 1,
         null,
@@ -722,8 +733,9 @@ const focused = (page, selector) =>
       );
       const posted = [];
       page.on("request", (r) => {
-        if (r.method() === "POST" && /\/api\/agent\/sessions\/[^/]+\/messages$/.test(r.url()))
+        if (r.method() === "POST" && /\/api\/agent\/sessions\/[^/]+\/messages$/.test(r.url())) {
           posted.push(r.postDataJSON());
+        }
       });
       const chips = page.locator(".agent-attachments .agent-attachment");
       const chip = (name, state = "") =>
@@ -736,8 +748,9 @@ const focused = (page, selector) =>
         for (const until = Date.now() + 10000; Date.now() < until; await page.waitForTimeout(200)) {
           if (
             (await page.request.get(`${base}/api/agent/attachments/${token(ref)}`)).status() === 404
-          )
+          ) {
             return;
+          }
         }
         assert.fail(`附件未被撤销：${ref}`);
       };

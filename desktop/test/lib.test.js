@@ -289,7 +289,9 @@ test("后代进程判定与进程组停止", async () => {
 
   // POSIX 信号语义（kill 注入）只在非 Windows 成立；Windows 的停止语义由
   // “进程组停止（Windows）”用例按 taskkill 注入验证。
-  if (process.platform === "win32") return;
+  if (process.platform === "win32") {
+    return;
+  }
 
   let living = true;
   const signals = [];
@@ -373,7 +375,9 @@ test("日志轮转与尾部读取", () => {
     maxBytes: 100,
     keep: 3,
   });
-  for (let index = 0; index < 12; index += 1) log.write(`line ${index} ${"x".repeat(20)}\n`);
+  for (let index = 0; index < 12; index += 1) {
+    log.write(`line ${index} ${"x".repeat(20)}\n`);
+  }
   const files = fs.readdirSync(path.join(dir, "logs")).sort();
   assert.deepEqual(files, ["backend.log", "backend.log.1", "backend.log.2"]);
   assert.match(log.tail(), /line 11/);
@@ -571,7 +575,9 @@ const remoteStorage = {
   encryptString: (value) => Buffer.from(`test-only:${value}`),
   decryptString: (value) => {
     const text = value.toString();
-    if (!text.startsWith("test-only:")) throw new Error("bad ciphertext");
+    if (!text.startsWith("test-only:")) {
+      throw new Error("bad ciphertext");
+    }
     return text.slice(10);
   },
 };
@@ -647,7 +653,9 @@ test("远程配置保存：0600 原子写入、校验、清除", () => {
   assert.equal(saved.token, "secret");
   const file = path.join(dir, "remote.json");
   assert.ok(fs.existsSync(file));
-  if (process.platform !== "win32") assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  if (process.platform !== "win32") {
+    assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  }
   assert.equal(fs.readFileSync(file, "utf8").includes("secret"), false);
   assert.deepEqual(remoteConfig({ env: {}, userData: dir, storage: remoteStorage }), {
     url: "https://remote.example",

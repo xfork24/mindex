@@ -17,6 +17,7 @@ from shared.config import Config
 from shared.media import MediaError
 from shared.storage import Store
 from shared.types import ShotDraft
+from studio import render as studio_render
 from studio import studio
 from studio import workspace as workspace
 from studio.models import validate_recall_references
@@ -98,20 +99,19 @@ def storyboard_checks(config: Config, store: Store, job_id, w, p) -> dict:
 
 def subtitle_checks(config: Config, p) -> dict:
     """只在方案烧录字幕时做环境烟测：滤镜存在性与 1 帧字体渲染。"""
-    from studio.render import check_font, has_subtitles_filter
 
     burn = bool(p["options"].get("burn"))
     if not burn:
         return {"burn": False, "filter": None, "font": None}
     try:
-        available = has_subtitles_filter()
+        available = studio_render.has_subtitles_filter()
     except MediaError:
         available = False
     with tempfile.TemporaryDirectory(prefix="studio-diagnostics-") as directory:
         srt = Path(directory) / "check.srt"
         srt.write_text("1\n00:00:00,000 --> 00:00:00,200\n字幕测试 Aa\n", encoding="utf-8")
         try:
-            check_font(srt, config.studio.subtitle)
+            studio_render.check_font(srt, config.studio.subtitle)
             font = "ok"
         except MediaError as exc:
             font = str(exc)

@@ -44,6 +44,7 @@ def test_failing_source_task_logs_traceback(config, video_file, monkeypatch, cap
     record = traceback_record(caplog, "admin.source_tasks", "模拟分析崩溃")
     assert record is not None and record.levelno == logging.ERROR
     assert record.exc_info[2] is not None  # 带 traceback
+    assert "模拟分析崩溃" in task["progress"]["latest_log"]
 
 
 def test_failing_dialogue_task_logs_traceback(config, video_file, monkeypatch, caplog):
@@ -60,3 +61,4 @@ def test_failing_dialogue_task_logs_traceback(config, video_file, monkeypatch, c
     assert task["status"] == "failed" and "模拟对白崩溃" in task["error"]
     record = traceback_record(caplog, "admin.dialogue_tasks", "模拟对白崩溃")
     assert record is not None and record.exc_info[2] is not None
+    assert "模拟对白崩溃" in task["progress"]["latest_log"]

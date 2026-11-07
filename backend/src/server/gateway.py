@@ -1,6 +1,7 @@
 """业务 API 到单实例助手网关的流式转发，覆盖 SSE、附件与 MCP。"""
 
 import anyio
+import httpx
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
@@ -24,7 +25,6 @@ async def forward(request, gateway):
             status_code=503,
             content={"detail": "智能助手网关未配置或转发路由形成循环", "gateway_url": gateway},
         )
-    import httpx
 
     url = gateway.rstrip("/") + request.url.path
     if request.url.query:

@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 import uuid
 from datetime import datetime, timedelta
 
@@ -19,6 +20,7 @@ from fastapi import HTTPException
 from filelock import Timeout
 from pydantic import Field
 
+from models import adapters
 from models.adapters import ModelError
 from shared import lock_backend
 from shared.background_tasks import BackgroundTaskRunner, public_task
@@ -28,6 +30,7 @@ from topics import cards as topic_cards
 from topics import cluster, datasources, profiles
 from topics.common import RUN_ID_PATTERN, TopicConflict, now, parse_time
 from topics.llm import make_llm
+from topics.scheduler import AUTO_TRIGGERS, MAX_ATTEMPTS, library_timezone, runs_on
 from topics.summarize import summarize
 
 log = logging.getLogger(__name__)
@@ -83,9 +86,7 @@ def discover(
     progress = progress or (lambda value: None)
     llm = make_llm(config, llm)
     if embedder is None:
-        from models.adapters import make_embedder
-
-        embedder = make_embedder(config)
+        embedder = adapters.make_embedder(config)
     profile = profiles.body_of(store, profile_id)
     retries = (config.topics.llm or config.studio.writer).split_retries
     warnings: list[str] = []
@@ -275,7 +276,6 @@ class TopicRuns(BackgroundTaskRunner):
 
     def start_scheduled(self, profile_id, *, period, ordinal, trigger, created_at):
         """周期占位、账本与入队同事务；leader 重放返回既有任务，不重新执行终态任务。"""
-        from topics.scheduler import AUTO_TRIGGERS, MAX_ATTEMPTS, library_timezone, runs_on
 
         if trigger not in AUTO_TRIGGERS or not 1 <= ordinal <= MAX_ATTEMPTS:
             raise ValueError("无效的定时触发或周期尝试编号")
@@ -334,8 +334,6 @@ class TopicRuns(BackgroundTaskRunner):
     ) -> dict:
         """在当前线程同步执行（CLI ``--wait``）；拿不到锁时抛 ``TopicConflict``。"""
         if getattr(self.store, "queue_backend", "inline") == "postgres":
-            import time
-
             task = self.start(profile_id, options, trigger=trigger)
             while task["status"] in {"queued", "running"}:
                 time.sleep(0.5)

@@ -9,21 +9,43 @@ Pillow、playwright 包、前端资源、文案模板与选题日历样例，以
 
 from __future__ import annotations
 
+import io
 import json
+import math
+import os
+import struct
+import subprocess
 import sys
+import threading
+import time
+import wave
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
+
+import yaml
+from PIL import Image
+
+from agent import dsh_runtime
+from agent.dsh_runtime import patch
+from models import llama_cpp, model_server
+from processing import pipeline
+from processing.indexing import VectorIndex
+from shared import media
+from shared.config import AgentConfig, SubtitleConfig
+from shared.media import content_hash, ffmpeg_bin, ffprobe_bin
+from shared.web_assets import frontend_root
+from studio import beats, brands, platforms, script_templates
+from studio.animation_capture import capture
+from studio.render import apply_edges, check_font, watermark_graph
+from studio.tools import adapter, artifacts
+from studio.tools.mcp import unavailable
+from topics.sources import calendar
 
 
 def run(work: Path) -> dict:
-    from models import llama_cpp, model_server
-    from processing import pipeline
-    from shared.media import content_hash
-    from shared.web_assets import frontend_root
-    from studio import script_templates
 
     report: dict = {"frozen": bool(getattr(sys, "frozen", False))}
-
-    from processing.indexing import VectorIndex
 
     index = VectorIndex(work, "frozen-check", create=True)
     segment = {"id": "seg-1", "source_id": "src", "start": 0.0, "end": 1.0, "kind": "shot"}
@@ -36,10 +58,12 @@ def run(work: Path) -> dict:
     found = index.collection.query(query_embeddings=[[0.9, 0.1, 0.0, 0.0]], n_results=1)
     report["chromadb"] = found["ids"][0] == ["rep-1"]
 
+    # 延迟导入：媒体、数值或服务运行依赖仅在实际执行该功能时加载。
     import jieba
 
     report["jieba"] = "检索" in list(jieba.cut("视频素材检索"))
 
+    # 延迟导入：媒体、数值或服务运行依赖仅在实际执行该功能时加载。
     import cv2
     import numpy as np
     import scenedetect
@@ -47,12 +71,11 @@ def run(work: Path) -> dict:
     report["opencv"] = cv2.cvtColor(np.zeros((2, 2, 3), np.uint8), cv2.COLOR_BGR2GRAY).shape == (2, 2)
     report["scenedetect"] = bool(scenedetect.__version__)
 
-    from PIL import Image
-
     Image.new("RGB", (4, 4)).save(work / "pixel.png")
     report["pillow"] = (work / "pixel.png").is_file()
 
     try:
+        # 延迟导入：保留可选依赖探测或异常捕获时的降级行为。
         import playwright.sync_api  # noqa: F401
 
         report["playwright"] = True
@@ -65,15 +88,13 @@ def run(work: Path) -> dict:
     )
     report["frontend_root"] = str(root)
     report["templates"] = len(list(Path(script_templates.BUILTIN_DIR).glob("*.yaml")))
-    from topics.sources import calendar
 
     report["topic_samples"] = sum(item["events"] > 0 for item in calendar.sample_list())
-    from studio import brands
+    # 延迟导入：保持工作区阶段处理器的注册顺序。
     from studio.workspace.handlers import overlay
 
     report["brands"] = len(brands.builtins())
     report["overlay_template"] = overlay.TEMPLATE.is_file()
-    from studio import platforms
 
     report["platforms"] = len(platforms.presets())
     report["align_worker"] = Path(pipeline.__file__).with_name("align_worker.py").is_file()
@@ -86,9 +107,6 @@ def run(work: Path) -> dict:
 
 def subtitles(work: Path, font_file: Path) -> dict:
     """用指定字体做一次带烧录字幕的渲染（与成片同一条 check_font 路径：libass + 字体文件）。"""
-    from shared.config import SubtitleConfig
-    from shared.media import ffmpeg_bin
-    from studio.render import check_font
 
     srt = work / "check.srt"
     srt.write_text("1\n00:00:00,000 --> 00:00:00,200\n中文字幕字体检查\n", encoding="utf-8")
@@ -98,18 +116,13 @@ def subtitles(work: Path, font_file: Path) -> dict:
 
 def dsh(work: Path) -> dict:
     """启动随包原生 dsh 并完成 SDK 握手，不调用模型、下载资源或使用系统 Node。"""
-    import os
-    import subprocess
 
-    import yaml
+    # 延迟导入：独立模型或扩展功能使用可选依赖，仅在实际调用时加载。
     from deepseek_harness import HarnessClient, HarnessConfig
     from deepseek_harness_runtime import resolve_bundled_launch_args
 
-    from agent.dsh_runtime import patch, readiness
-    from shared.config import AgentConfig
-
     settings = AgentConfig(llm={"model": "desktop-check", "base_url": "http://127.0.0.1:1/v1"})
-    status = readiness(settings)
+    status = dsh_runtime.readiness(settings)
     if not status["ready"]:
         raise RuntimeError("；".join(status["errors"]))
     executable = Path(resolve_bundled_launch_args("exe")[0])
@@ -146,18 +159,12 @@ def dsh(work: Path) -> dict:
 
 def post(work: Path) -> dict:
     """成片后期（M3）在冻结环境里的 ffmpeg 路径：镜内转场、重叠转场（xfade）与水印叠加，都经 shared/media。"""
-    from types import SimpleNamespace
-
-    from PIL import Image
-
-    from shared.media import atomic_media, command, ffprobe_bin
-    from studio.render import apply_edges, watermark_graph
 
     render = SimpleNamespace(width=160, height=90, fps=25, preset="ultrafast", crf=28)
     clips = []
     for index, color in enumerate(("red", "blue")):
         target = work / f"post-{index}.mp4"
-        atomic_media(
+        media.atomic_media(
             [
                 "-f",
                 "lavfi",
@@ -183,7 +190,7 @@ def post(work: Path) -> dict:
         leave={"kind": "slide", "duration": 0.3},
     )
     joined = work / "post-xfade.mp4"
-    atomic_media(
+    media.atomic_media(
         [
             "-i",
             str(edged),
@@ -205,7 +212,7 @@ def post(work: Path) -> dict:
     logo = work / "logo.png"
     Image.new("RGBA", (20, 20), (255, 255, 255, 255)).save(logo)
     marked = work / "post-watermark.mp4"
-    atomic_media(
+    media.atomic_media(
         [
             "-i",
             str(joined),
@@ -221,7 +228,7 @@ def post(work: Path) -> dict:
         marked,
     )
     frames = (
-        command(
+        media.command(
             [
                 ffprobe_bin(),
                 "-v",
@@ -245,18 +252,6 @@ def post(work: Path) -> dict:
 def extensions(work: Path) -> dict:
     """扩展能力（M3 第三期）在冻结环境里的路径：曲目节奏分析（numpy + ffmpeg 解码）、HTTP 工具适配器
     （本机替身服务：提交 → 产物下载 → 图片校验），以及随包的 mcp 客户端组件可导入。"""
-    import io
-    import math
-    import struct
-    import threading
-    import wave
-    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-
-    from PIL import Image
-
-    from studio import beats
-    from studio.tools import adapter, artifacts
-    from studio.tools.mcp import unavailable
 
     rate, bpm = 22050, 120
     samples = [0.0] * (rate * 6)
@@ -339,8 +334,6 @@ def extensions(work: Path) -> dict:
 
 def animation(work: Path) -> dict:
     """录制一段 0.4 秒的 AI 动画（需要已安装 Chromium headless shell，位置取 PLAYWRIGHT_BROWSERS_PATH）。"""
-    from shared.media import probe
-    from studio.animation_capture import capture
 
     html = (
         "<html><body style='margin:0;background:#123'><div id=b "
@@ -351,7 +344,6 @@ def animation(work: Path) -> dict:
     target = work / "animation.mp4"
     stats = capture(html, seconds=0.4, width=160, height=90, fps=10, target=target, max_seconds=120)
     # HTML 文字层：透明录制为 argb MOV。
-    from shared.media import command, ffprobe_bin
 
     layer = work / "overlay.mov"
     capture(
@@ -365,7 +357,7 @@ def animation(work: Path) -> dict:
         transparent=True,
     )
     pix = (
-        command(
+        media.command(
             [
                 ffprobe_bin(),
                 "-v",
@@ -383,7 +375,7 @@ def animation(work: Path) -> dict:
         .strip()
     )
     return {
-        "animation": probe(target)["duration"] > 0.3,
+        "animation": media.probe(target)["duration"] > 0.3,
         "animation_frames": stats.get("frames"),
         "overlay_alpha": pix == "argb",
     }
@@ -398,9 +390,6 @@ BENCH_HTML = (
 
 def animation_bench(work: Path) -> dict:
     """性能对比用：录制 10 秒、25 fps、1280×720 的 AI 动画，返回耗时（scripts/desktop-bench.py）。"""
-    import time
-
-    from studio.animation_capture import capture
 
     started = time.monotonic()
     capture(

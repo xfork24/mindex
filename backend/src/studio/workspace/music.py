@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import math
 
-from .stages import music_cue
-from .versions import ordered_shots, version
+from studio.workspace.stages import music_cue
+from studio.workspace.versions import ordered_shots, version
 
 CUE_FIELDS = ("kind", "prompt", "lyrics", "instrumental", "audio_id")
 

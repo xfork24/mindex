@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import json
+import os
 import signal
 import subprocess
 import sys
+from unittest.mock import patch
 
 import pytest
+import yaml
+from fastapi.testclient import TestClient
 
 from maintenance.migration import activate_bundle, export_bundle, load_bundle, verify_bundle
 from shared.backends import open_context
@@ -154,7 +158,6 @@ load_bundle(Config(data_dir=Path(sys.argv[1])),Path(sys.argv[2]),with_vectors=Tr
         check=False,
     )
     assert result.returncode == -signal.SIGKILL, result.stderr
-    from unittest.mock import patch
 
     with patch(
         "maintenance.vector_bundle._upsert",
@@ -206,7 +209,6 @@ def test_activated_target_new_writes_reverse_export_and_old_bundle_replay_reject
 
 @pytest.mark.requires_postgres
 def test_pg_task_recovery_cannot_claim_or_write_before_atomic_activation(pg_config, tmp_path):
-    from fastapi.testclient import TestClient
 
     from api import create_app
     from shared.db.queue_pg import PgTaskQueue
@@ -248,21 +250,23 @@ def test_pg_hard_kill_before_metadata_commit_resumes_and_event_sequence_advances
         store.execute("INSERT INTO studio_events(id,job_id,build_id,data) VALUES(42,'job','build','{}')")
     bundle = tmp_path / "with-events"
     export_bundle(source, bundle, with_media=True)
-    code = r"""
-import os,signal,sys
-import mindex  # 自举:包目录加入 sys.path,后续短名导入
-from pathlib import Path
-from shared.config import Config
-from shared.db import transfer
-from maintenance.migration import load_bundle
-original=transfer.copy_sqlite_to_pg
-def crash(*args,**kwargs):
-    original(*args,**kwargs)
-    os.kill(os.getpid(),signal.SIGKILL)
-transfer.copy_sqlite_to_pg=crash
-cfg=Config(data_dir=Path(sys.argv[1]),database={'backend':'postgres'},queue={'backend':'postgres'},locks={'backend':'postgres'})
-load_bundle(cfg,Path(sys.argv[2]))
-"""
+    code = (
+        "\n"
+        "import os,signal,sys\n"
+        "import mindex  # 自举:包目录加入 sys.path,后续短名导入\n"
+        "from pathlib import Path\n"
+        "from shared.config import Config\n"
+        "from shared.db import transfer\n"
+        "from maintenance.migration import load_bundle\n"
+        "original=transfer.copy_sqlite_to_pg\n"
+        "def crash(*args,**kwargs):\n"
+        "    original(*args,**kwargs)\n"
+        "    os.kill(os.getpid(),signal.SIGKILL)\n"
+        "transfer.copy_sqlite_to_pg=crash\n"
+        "cfg=Config(data_dir=Path(sys.argv[1]),database={'backend':'postgres'},queue={'backend':'postgres'}"
+        ",locks={'backend':'postgres'})\n"
+        "load_bundle(cfg,Path(sys.argv[2]))\n"
+    )
     result = subprocess.run(
         [sys.executable, "-c", code, str(pg_config.data_dir), str(bundle)],
         capture_output=True,
@@ -325,10 +329,6 @@ def test_migration_preserves_unknown_remote_execution_and_gpu_occupation(tmp_pat
 @pytest.mark.requires_chroma_server
 @pytest.mark.parametrize("boundary", ["media", "vector-batch"])
 def test_remote_write_before_record_hard_kill_verifies_without_overwrite(tmp_path, s3_config, boundary):
-    import os
-    from unittest.mock import patch
-
-    import yaml
 
     _, bundle, _ = source_bundle(tmp_path, vectors=True)
     target = s3_config

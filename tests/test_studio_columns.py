@@ -1,3 +1,5 @@
+"""分镜工作台列与阶段映射回归。"""
+
 from __future__ import annotations
 
 import json

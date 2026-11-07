@@ -12,6 +12,7 @@ import os
 import time
 
 import pytest
+from fastapi.testclient import TestClient
 
 from shared.config import Config
 
@@ -55,7 +56,7 @@ def _enqueue(pg_config, kind, payload, **kwargs):
 
 
 def test_worker_executes_selftest_and_completes(pg_config, tmp_path):
-    from worker_runtime import Worker
+    from worker.runtime import Worker
 
     marker = tmp_path / "selftest.json"
     done = marker  # 处理器把 attempt 信息写盘，验证外部产物按 attempt 组织
@@ -82,10 +83,9 @@ def test_worker_executes_selftest_and_completes(pg_config, tmp_path):
 
 def test_worker_stale_attempt_does_not_commit(pg_config):
     """暂停超过 TTL 的执行不得提交（plans §11 阶段 3 闸门）。"""
-    from worker_runtime import Worker
-
     from shared.backends import open_context
     from shared.db.queue_pg import PgTaskQueue
+    from worker.runtime import Worker
 
     _enqueue(pg_config, "selftest", {}, dedupe_key="stale-1")
     # ttl=0.5s、心跳间隔 10s（不会抢救）：处理器睡 1.5s → 租约过期 → 完成被拒
@@ -110,9 +110,8 @@ def test_worker_stale_attempt_does_not_commit(pg_config):
 
 
 def test_worker_failure_goes_to_retry(pg_config):
-    from worker_runtime import Worker
-
     from shared.backends import open_context
+    from worker.runtime import Worker
 
     def boom(config, task):
         raise RuntimeError("合成失败")
@@ -148,14 +147,13 @@ def test_backlog_scan_enqueues_stranded_ledger_rows(pg_config):
 
 def test_dispatch_api_to_worker_end_to_end(pg_config, video_file):
     """API 创建 source 任务（postgres 队列）→ worker 执行 → 账本与队列同为终态。"""
-    from fastapi.testclient import TestClient
-    from worker_runtime import Worker
 
     from api import create_app
     from conftest import FixtureAnalyzer, FixtureEmbedder
     from processing.pipeline import Pipeline
     from shared.backends import open_context
     from shared.db.queue_pg import PgTaskQueue
+    from worker.runtime import Worker
 
     embedder = FixtureEmbedder(pg_config)
     pipeline = Pipeline(pg_config, analyzer=FixtureAnalyzer(embedder))

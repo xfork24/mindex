@@ -17,9 +17,12 @@ import base64
 import mimetypes
 from urllib.parse import urlsplit
 
+from admin.curation import EntityNotFound
+from shared.storage import Store
 from studio import studio
 from studio.artifacts import sanitized
 from studio.logs import active_log
+from studio.tools import adapter, artifacts, registry
 from studio.workspace import sources
 from studio.workspace.stages import StageHandler, register, shot_content
 from studio.workspace.versions import file_info
@@ -77,8 +80,6 @@ class InvokeHandler(StageHandler):
         return {}
 
     def specification(self, config, job_id, w, p, sid, params, resources):
-        from admin.curation import EntityNotFound
-        from studio.tools import registry
 
         selected, _ = shot_content(w, p, sid)
         source = tool_source(w, p, sid)
@@ -106,7 +107,6 @@ class InvokeHandler(StageHandler):
     def preflight(self, config, job_id, w, p, sid, spec, found, node):
         if found:
             return
-        from studio.tools import registry
 
         source = tool_source(w, p, sid)
         reason = registry.blocker(_store(config), source)
@@ -116,7 +116,6 @@ class InvokeHandler(StageHandler):
             node.update(action="blocked", reason=reason)
 
     def run(self, ctx):
-        from studio.tools import adapter, artifacts, registry
 
         store = _store(ctx.config)
         source = tool_source(ctx.w, ctx.p, ctx.sid)
@@ -152,6 +151,7 @@ class InvokeHandler(StageHandler):
                 log.emit(f"第三方工具任务状态：{status}")
 
         try:
+            # 延迟导入：保持异常捕获范围，依赖加载失败时仍走原有降级路径。
             from shared.external_calls import guard_service
 
             client = adapter(record)
@@ -199,7 +199,6 @@ def _matches(item, output: str) -> bool:
 
 
 def _store(config):
-    from shared.storage import Store
 
     return Store.open(config)
 

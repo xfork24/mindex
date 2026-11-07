@@ -4,9 +4,13 @@
   // 同页共享目录与在途请求。成员随目录加载，筛选切换不再等待解析接口。
   const catalogues = new Map();
   function catalogue(kind, fresh = false) {
-    if (fresh && !catalogues.get(kind)?.pending) catalogues.delete(kind);
+    if (fresh && !catalogues.get(kind)?.pending) {
+      catalogues.delete(kind);
+    }
     const cached = catalogues.get(kind);
-    if (cached && (cached.pending || Date.now() - cached.time < 15000)) return cached.request;
+    if (cached && (cached.pending || Date.now() - cached.time < 15000)) {
+      return cached.request;
+    }
     const entry = { pending: true, time: 0 };
     entry.request = api(
       `/api/admin/groups?type=${kind}${kind === "source" ? "&include_members=true" : ""}`,
@@ -17,7 +21,9 @@
         return result;
       })
       .catch((error) => {
-        if (catalogues.get(kind) === entry) catalogues.delete(kind);
+        if (catalogues.get(kind) === entry) {
+          catalogues.delete(kind);
+        }
         throw error;
       });
     catalogues.set(kind, entry);
@@ -25,7 +31,9 @@
   }
   for (const event of ["mindex:groups-changed", "mindex:agent-mutation"]) {
     window.addEventListener(event, (e) => {
-      if (event === "mindex:agent-mutation" && !e.detail?.groups) return;
+      if (event === "mindex:agent-mutation" && !e.detail?.groups) {
+        return;
+      }
       catalogues.clear();
     });
   }
@@ -58,21 +66,24 @@
       MindexMultiSearch.attach(select);
     }
     const listeners = new Set();
-    let selectedIds = [...new Set(selected)],
-      items = [],
-      disabled = false,
-      loading = true,
-      loaded = false,
-      refreshGeneration = 0;
+    let selectedIds = [...new Set(selected)];
+    let items = [];
+    let disabled = false;
+    let loading = true;
+    let loaded = false;
+    let refreshGeneration = 0;
     const coversAll = (ids) =>
       defaultAll && items.length > 0 && items.every((group) => ids.includes(group.id));
     const values = () => (coversAll(selectedIds) ? [] : [...selectedIds]);
     function syncDisabled() {
       wrap.dataset.loading = loading ? "1" : "0";
-      for (const input of options.querySelectorAll("input")) input.disabled = disabled || loading;
-      if (select)
+      for (const input of options.querySelectorAll("input")) {
+        input.disabled = disabled || loading;
+      }
+      if (select) {
         select.disabled =
           disabled || loading || ![...select.options].some((option) => option.value);
+      }
     }
     let allSelectedBefore = false;
     function syncAll() {
@@ -80,8 +91,11 @@
       allSelectedBefore =
         items.length > 0 && items.every((group) => selectedIds.includes(group.id));
       if (all) {
-        if (select) all.selected = allSelectedBefore;
-        else all.checked = allSelectedBefore;
+        if (select) {
+          all.selected = allSelectedBefore;
+        } else {
+          all.checked = allSelectedBefore;
+        }
       }
     }
     async function notifyChange(event) {
@@ -95,9 +109,14 @@
       if (chooseAll || clearAll) {
         const ids = chooseAll ? items.map((group) => group.id) : [];
         for (const node of options.querySelectorAll(select ? "option" : "input")) {
-          if (node === all) continue;
-          if (select) node.selected = ids.includes(node.value);
-          else node.checked = ids.includes(node.value);
+          if (node === all) {
+            continue;
+          }
+          if (select) {
+            node.selected = ids.includes(node.value);
+          } else {
+            node.checked = ids.includes(node.value);
+          }
         }
       }
       selectedIds = select
@@ -115,10 +134,15 @@
         MindexI18n.setText(status, MindexI18n.system(error.message));
       }
     }
-    if (select) select.addEventListener("change", notifyChange);
+    if (select) {
+      select.addEventListener("change", notifyChange);
+    }
     function draw() {
-      if (select) select.replaceChildren();
-      else options.replaceChildren();
+      if (select) {
+        select.replaceChildren();
+      } else {
+        options.replaceChildren();
+      }
       const known = new Set(items.map((group) => group.id));
       const rows = loaded
         ? [
@@ -144,13 +168,16 @@
           const option = document.createElement("option");
           option.value = group.id;
           option.selected = selectedIds.includes(group.id);
-          if (group.missing) MindexI18n.setText(option, MindexI18n.msg("ui.groups_missing_choice"));
-          else if (group.system)
+          if (group.missing) {
+            MindexI18n.setText(option, MindexI18n.msg("ui.groups_missing_choice"));
+          } else if (group.system) {
             MindexI18n.setText(
               option,
               MindexI18n.msg("ui.groups_ungrouped_count", { p0: group.member_count }),
             );
-          else option.textContent = `${group.name} (${group.member_count})`;
+          } else {
+            option.textContent = `${group.name} (${group.member_count})`;
+          }
           select.append(option);
           continue;
         }
@@ -166,12 +193,14 @@
           label.title = group.id;
         } else {
           // 组名称是用户内容，保留原文；只有控件文案使用翻译绑定。
-          if (group.system)
+          if (group.system) {
             MindexI18n.setText(
               name,
               MindexI18n.msg("ui.groups_ungrouped_count", { p0: group.member_count }),
             );
-          else name.textContent = `${group.name} (${group.member_count})`;
+          } else {
+            name.textContent = `${group.name} (${group.member_count})`;
+          }
         }
         label.append(input, name);
         input.addEventListener("change", notifyChange);
@@ -196,7 +225,9 @@
         }
       }
       syncAll();
-      if (select) MindexMultiSearch.refilter(select);
+      if (select) {
+        MindexMultiSearch.refilter(select);
+      }
       syncDisabled();
     }
     async function refresh({ fresh = true } = {}) {
@@ -208,14 +239,19 @@
         defaultAll && items.length > 0 && items.every((group) => selectedIds.includes(group.id));
       try {
         const result = await catalogue(kind, fresh);
-        if (current !== refreshGeneration) return;
+        if (current !== refreshGeneration) {
+          return;
+        }
         items = result.items.filter((group) => includeSystem || !group.system);
         loaded = true;
-        if (defaultAll && (keepAll || selectedIds.length === 0))
+        if (defaultAll && (keepAll || selectedIds.length === 0)) {
           selectedIds = items.map((group) => group.id);
+        }
         MindexI18n.setText(status, "");
       } catch (error) {
-        if (current !== refreshGeneration) return;
+        if (current !== refreshGeneration) {
+          return;
+        }
         loaded = false;
         MindexI18n.setText(status, MindexI18n.system(error.message));
       } finally {
@@ -233,15 +269,23 @@
       values,
       refresh,
       resolveSources: () => {
-        if (!loaded) throw new Error(MindexI18n.msg("ui.groups_loading"));
+        if (!loaded) {
+          throw new Error(MindexI18n.msg("ui.groups_loading"));
+        }
         const ids = values();
-        if (!ids.length) return null;
+        if (!ids.length) {
+          return null;
+        }
         const allowed = new Set();
         for (const id of ids) {
           const group = items.find((item) => item.id === id);
           // 已删除的选择不能扩大为全库。
-          if (!group) throw new Error(MindexI18n.msg("ui.groups_missing_choice"));
-          for (const member of group.member_ids || []) allowed.add(member);
+          if (!group) {
+            throw new Error(MindexI18n.msg("ui.groups_missing_choice"));
+          }
+          for (const member of group.member_ids || []) {
+            allowed.add(member);
+          }
         }
         return allowed;
       },
@@ -302,7 +346,9 @@
     host.append(control.wrap);
   }
   async function resolveSources(ids) {
-    if (!ids.length) return null;
+    if (!ids.length) {
+      return null;
+    }
     try {
       const result = await api("/api/admin/groups/resolve", "POST", { source_group_ids: ids });
       return result.source_ids === null ? null : new Set(result.source_ids);
@@ -312,8 +358,9 @@
         error.status === 422 &&
         (error.data?.message_key === "ui.groups_empty_resolve" ||
           error.detail === "所选组与素材范围没有成员，请重新选择")
-      )
+      ) {
         return new Set();
+      }
       throw error;
     }
   }
@@ -332,7 +379,9 @@
         const allowed = control.resolveSources
           ? control.resolveSources()
           : await resolveSources(control.values());
-        if (current !== generation || !select.isConnected) return;
+        if (current !== generation || !select.isConnected) {
+          return;
+        }
         onScope(allowed);
         const choices = entries().filter((item) => allowed === null || allowed.has(item.id));
         const chosen = selection();
@@ -340,7 +389,9 @@
         updated(choices);
         select.disabled = ![...select.options].some((option) => option.value !== "__all__");
       } catch (error) {
-        if (current !== generation) return;
+        if (current !== generation) {
+          return;
+        }
         onScope(new Set());
         fill([], new Set());
         updated([]);
@@ -350,8 +401,12 @@
     }
     control.onChange(refresh);
     async function reload({ fresh = true } = {}) {
-      if (!select.isConnected) return;
-      if (control.refresh) await control.refresh({ fresh });
+      if (!select.isConnected) {
+        return;
+      }
+      if (control.refresh) {
+        await control.refresh({ fresh });
+      }
       await refresh();
     }
     if (control.refresh) {
@@ -359,10 +414,14 @@
         void reload();
       });
       window.addEventListener("mindex:agent-mutation", (event) => {
-        if (event.detail?.groups) void reload();
+        if (event.detail?.groups) {
+          void reload();
+        }
       });
       document.addEventListener("visibilitychange", () => {
-        if (document.visibilityState === "visible") void reload();
+        if (document.visibilityState === "visible") {
+          void reload();
+        }
       });
     }
     return { refresh: reload };

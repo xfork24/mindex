@@ -27,6 +27,8 @@ from contextlib import AbstractContextManager as ContextManager
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
+from filelock import Timeout
+
 from shared import locks as file_locks
 from shared.db.pg_backend import PgBackend
 
@@ -224,7 +226,6 @@ class PgLockProvider:
         本地文件锁的默认模式沿用 ``locks.named``：pipeline/library 缺省共享，
         其余独占；拿不到在 timeout 后抛 ``filelock.Timeout``（与既有调用方一致）。
         """
-        from filelock import Timeout
 
         mode = (
             "exclusive"
@@ -257,7 +258,6 @@ class PgLockProvider:
 
         @contextmanager
         def held_all():
-            from filelock import Timeout
 
             try:
                 for name in names:

@@ -7,10 +7,12 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Annotated
 
 import typer
+from fastapi import HTTPException
 
 from shared.cli_support import SortedGroup, print_json
 
@@ -39,6 +41,7 @@ app.add_typer(sources_app, name="sources")
 
 
 def _store(ctx: typer.Context):
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from shared.storage import Store
 
     return Store.open(ctx.obj)
@@ -46,6 +49,7 @@ def _store(ctx: typer.Context):
 
 def run(action):
     """执行服务层调用，把已知错误转成中文提示与退出码 1。"""
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from admin.curation import EntityNotFound
     from models.adapters import ModelError
 
@@ -134,6 +138,7 @@ def profiles_list(ctx: typer.Context):
     \b
       mindex topics profiles list
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from topics import profiles
 
     print_json({"items": profiles.list_profiles(_store(ctx))})
@@ -150,6 +155,7 @@ def profiles_show(
     \b
       mindex topics profiles show tp_0123456789ab
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from topics import profiles
 
     print_json(run(lambda: profiles.get_profile(_store(ctx), profile_id)))
@@ -185,6 +191,7 @@ def profiles_create(
       mindex topics profiles create --name 财经号 --domain 金融 --subtopic 宏观 --taboo 不荐股
       mindex topics profiles create --file profile.json
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from topics import profiles
     from topics.models import ProfileBody
 
@@ -243,6 +250,7 @@ def profiles_update(
       mindex topics profiles update tp_0123456789ab --taboo 不荐股 --taboo 不谈加密货币
       mindex topics profiles update tp_0123456789ab --schedule --schedule-time 08:30
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from topics import profiles
     from topics.models import ProfileChanges
 
@@ -292,6 +300,7 @@ def profiles_delete(
     \b
       mindex topics profiles delete tp_0123456789ab --yes
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from topics import profiles
 
     if not yes:
@@ -335,7 +344,6 @@ def _source_config(config: str | None, url: str | None, current: dict | None = N
 def _secret(env: str | None) -> str | None:
     if env is None:
         return None
-    import os
 
     value = os.environ.get(env)
     if not value:
@@ -352,6 +360,7 @@ def sources_list(ctx: typer.Context, profile_id: Annotated[str, typer.Argument(h
     \b
       mindex topics sources list tp_0123456789ab
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from topics import datasources
 
     print_json({"items": run(lambda: datasources.list_sources(_store(ctx), profile_id))})
@@ -376,6 +385,7 @@ def sources_add(
       mindex topics sources add tp_0123456789ab --kind rss --name 财经要闻 --url https://example.com/feed.xml
       mindex topics sources add tp_0123456789ab --kind local --name 本地素材库
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from topics import datasources
 
     body = {
@@ -412,6 +422,7 @@ def sources_update(
     \b
       mindex topics sources update ts_0123456789ab --secret-env BRAVE_API_KEY
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from topics import datasources
 
     store = _store(ctx)
@@ -444,6 +455,7 @@ def sources_remove(
     \b
       mindex topics sources remove ts_0123456789ab --yes
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from topics import datasources
 
     if not yes:
@@ -460,6 +472,7 @@ def sources_test(ctx: typer.Context, source_id: Annotated[str, typer.Argument(he
     \b
       mindex topics sources test ts_0123456789ab
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from topics import datasources
 
     result = run(lambda: datasources.try_source(ctx.obj, _store(ctx), source_id))
@@ -486,6 +499,7 @@ def sources_import_calendar(
       mindex topics sources import-calendar ts_0123456789ab events.ics
       mindex topics sources import-calendar ts_0123456789ab --sample history
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from topics import datasources
 
     if (file is None) == (sample is None):
@@ -523,6 +537,7 @@ def fetch(
     \b
       mindex topics fetch tp_0123456789ab
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from topics import datasources
 
     print_json(run(lambda: datasources.fetch_profile(ctx.obj, _store(ctx), profile_id, source_ids=source)))
@@ -542,6 +557,7 @@ def items(
     \b
       mindex topics items tp_0123456789ab --limit 20
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from topics import items as topic_items
     from topics import profiles
 
@@ -577,6 +593,7 @@ class _Runtime:
 
 
 def _runs(ctx: typer.Context):
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from topics.runner import TopicRuns
 
     return TopicRuns(_Runtime(ctx.obj), _store(ctx))
@@ -584,7 +601,6 @@ def _runs(ctx: typer.Context):
 
 def _http(action):
     """服务层在 runner 中沿用 HTTPException（REST 共用）；CLI 转成中文提示。"""
-    from fastapi import HTTPException
 
     def wrapped():
         try:
@@ -619,6 +635,7 @@ def discover(
           mindex topics discover tp_0123456789ab
           mindex topics discover tp_0123456789ab --skip-fetch --outline-count 5
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from topics.runner import RunOptions
 
     runner = _runs(ctx)
@@ -632,6 +649,7 @@ def discover(
     runner.save = save
     options = RunOptions(skip_fetch=skip_fetch, outline_count=outline_count)
     result = run(lambda: runner.run_here(profile_id, options))
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from topics.runner import get_run
 
     view = get_run(runner.store, result["id"])
@@ -653,6 +671,7 @@ def runs_list(
     \b
       mindex topics runs list tp_0123456789ab
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from topics.runner import list_runs
 
     print_json({"items": run(lambda: list_runs(_store(ctx), profile_id, limit))})
@@ -667,6 +686,7 @@ def runs_show(ctx: typer.Context, run_id: Annotated[str, typer.Argument(help="�
     \b
       mindex topics runs show tr_0123456789ab
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from topics.runner import get_run
 
     print_json(run(_http(lambda: get_run(_store(ctx), run_id))))
@@ -681,6 +701,7 @@ def runs_cancel(ctx: typer.Context, run_id: Annotated[str, typer.Argument(help="
     \b
       mindex topics runs cancel tr_0123456789ab
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from topics.runner import get_run
 
     runner = _runs(ctx)
@@ -696,6 +717,7 @@ def runs_retry(ctx: typer.Context, run_id: Annotated[str, typer.Argument(help="�
     \b
       mindex topics runs retry tr_0123456789ab
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from topics.runner import get_run
 
     runner = _runs(ctx)
@@ -708,6 +730,7 @@ def runs_retry(ctx: typer.Context, run_id: Annotated[str, typer.Argument(help="�
             row = runner.row(run_id)
             if not runner.retryable(row):
                 raise ValueError(runner.not_retryable)
+            # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
             from shared.task_progress import reset_task_attempt
 
             reset_task_attempt(runner.store, runner.table, run_id)
@@ -739,6 +762,7 @@ def list_topics(
     \b
       mindex topics list tp_0123456789ab --status all
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from topics import cards
 
     store = _store(ctx)
@@ -761,12 +785,14 @@ def show_topic(ctx: typer.Context, card_id: Annotated[str, typer.Argument(help="
     \b
       mindex topics show tc_0123456789ab
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from topics import cards
 
     print_json(run(lambda: cards.get_card(_store(ctx), card_id)))
 
 
 def _models(ctx: typer.Context):
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from models.adapters import make_embedder
     from topics.llm import make_llm
 
@@ -782,6 +808,7 @@ def score_topic(ctx: typer.Context, card_id: Annotated[str, typer.Argument(help=
     \b
       mindex topics score tc_0123456789ab
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from topics import cards
 
     def action():
@@ -800,6 +827,7 @@ def topic_coverage(ctx: typer.Context, card_id: Annotated[str, typer.Argument(he
     \b
       mindex topics coverage tc_0123456789ab
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from topics import cards
 
     def action():
@@ -818,6 +846,7 @@ def outline_topic(ctx: typer.Context, card_id: Annotated[str, typer.Argument(hel
     \b
       mindex topics outline tc_0123456789ab
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from topics import cards
     from topics.llm import make_llm
 
@@ -843,6 +872,7 @@ def update_topic(
       mindex topics update tc_0123456789ab --template history
       mindex topics update tc_0123456789ab --status dismissed
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from topics import cards
 
     changes = {"title": title, "template_id": template, "status": status}
@@ -883,6 +913,7 @@ def create_job(
     \b
       mindex topics create-job tc_0123456789ab
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from topics import create_job as topic_jobs
 
     print_json(run(lambda: topic_jobs.create_from_card(ctx.obj, _store(ctx), card_id, force=force)))
@@ -897,6 +928,7 @@ def job_profile_show(ctx: typer.Context, job_id: Annotated[str, typer.Argument(h
     \b
       mindex topics job-profile show JOB_ID
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from topics import create_job as topic_jobs
 
     print_json(run(lambda: topic_jobs.job_profile(ctx.obj, _store(ctx), job_id)))
@@ -911,6 +943,7 @@ def job_profile_sync(ctx: typer.Context, job_id: Annotated[str, typer.Argument(h
     \b
       mindex topics job-profile sync JOB_ID
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from topics import create_job as topic_jobs
 
     print_json(run(lambda: topic_jobs.sync_job_profile(ctx.obj, _store(ctx), job_id)))
@@ -942,12 +975,14 @@ def gaps_list(
     \b
       mindex topics gaps list tp_0123456789ab --status all
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from topics import gaps
 
     print_json({"items": run(lambda: gaps.list_gaps(_store(ctx), profile_id, status=status))})
 
 
 def _gap_status(ctx: typer.Context, gap_id: str, status: str):
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from topics import gaps
 
     print_json(run(lambda: gaps.update_gap(_store(ctx), gap_id, gaps.GapChanges(status=status))))
@@ -991,6 +1026,7 @@ def gaps_export(
     \b
       mindex topics gaps export tp_0123456789ab --output gaps.csv
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from topics import gaps
 
     data = run(lambda: gaps.export_csv(_store(ctx), profile_id, status=status))
@@ -1023,6 +1059,7 @@ def schedule_status(ctx: typer.Context):
     \b
       mindex topics schedule status
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from topics import scheduler
 
     enabled = ctx.obj.topics.scheduler.enabled

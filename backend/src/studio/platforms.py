@@ -6,15 +6,19 @@ YAML 保留为首次初始化值及旧方案的固定兼容规则；可选平台
 
 from __future__ import annotations
 
+import copy
+import json
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Literal
 
 import yaml
+from fastapi import HTTPException
 from pydantic import Field, StringConstraints, ValidationError, field_validator
 
 from admin.curation import EntityNotFound
 from shared.config import StrictModel
+from studio import studio
 
 BUILTIN_DIR = Path(__file__).resolve().parent / "platforms"
 BUILTIN_ORDER = ("bilibili", "douyin", "youtube")
@@ -94,7 +98,6 @@ def list_presets() -> list[dict]:
 
 def catalogue(store) -> list[dict]:
     """Persistent selectable platforms; deleted IDs remain reserved."""
-    import json
 
     return [
         PlatformPreset.model_validate(json.loads(row["body"])).model_dump()
@@ -103,7 +106,6 @@ def catalogue(store) -> list[dict]:
 
 
 def registered(store, platform: str) -> PlatformPreset:
-    import json
 
     row = store.one("SELECT body FROM delivery_platforms WHERE id=? AND deleted=0", (platform,))
     if not row:
@@ -122,7 +124,6 @@ def snapshot_publish(value, store=None, *, previous=None, legacy=False):
     """Fill missing rules, preserving explicit snapshots and existing plan semantics."""
     if value is None:
         return None
-    import copy
 
     result = copy.deepcopy(value)
     before = previous or {}
@@ -143,9 +144,6 @@ def snapshot_publish(value, store=None, *, previous=None, legacy=False):
 
 
 def platform_routes(router, store, mutation_lock):
-    from fastapi import HTTPException
-
-    from studio import studio
 
     @router.get("/platforms")
     def listing():

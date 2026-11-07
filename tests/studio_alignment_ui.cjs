@@ -1,6 +1,6 @@
 // Real workflow and geometry checks against the isolated deterministic fixture.
-const assert = require("node:assert/strict"),
-  fs = require("node:fs");
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
 const { chromium } = require(process.env.MINDEX_PLAYWRIGHT_MODULE || "playwright");
 const batchRun = async (page, stage) => {
   if (stage === "split" && !(await page.evaluate(() => plan().script))) {
@@ -25,13 +25,14 @@ const base = process.env.MINDEX_ALIGNMENT_URL || "http://127.0.0.1:18341";
 assert.match(base, /^http:\/\/127\.0\.0\.1:/);
 const out = "artifacts/studio-alignment";
 fs.mkdirSync(out, { recursive: true });
-let browser, page;
+let browser;
+let page;
 (async () => {
   browser = await chromium.launch({ headless: true });
   page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   page.setDefaultTimeout(30000);
-  const errors = [],
-    records = [];
+  const errors = [];
+  const records = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto(base + "/studio");
   await page.locator("[data-language=zh]").click();
@@ -58,7 +59,7 @@ let browser, page;
       stage,
     );
   }
-  for (const lang of ["zh", "en"])
+  for (const lang of ["zh", "en"]) {
     for (const width of [1440, 1000, 800, 540, 390, 320]) {
       await page.evaluate((l) => MindexI18n.setLanguage(l), lang);
       await page.setViewportSize({ width, height: 1000 });
@@ -66,14 +67,16 @@ let browser, page;
       const rows = await page
         .locator("#shot-strip .shot-card")
         .evaluateAll((cards) => cards.map((card) => [card.scrollWidth, card.clientWidth]));
-      for (const [scroll, client] of rows)
+      for (const [scroll, client] of rows) {
         assert.ok(scroll <= client + 1, "shot card content fits its card");
+      }
       assert.equal(
         await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1),
         false,
       );
       records.push({ group: "card-fit", lang, width, rows });
     }
+  }
   // Each expanded stage still provides its version selector and reachable controls.
   for (let stage = 0; stage < 4; stage++) {
     await page.setViewportSize({ width: 1440, height: 1000 });
@@ -81,7 +84,7 @@ let browser, page;
     await openShotStage(page, 0, stage);
     const host = page.locator(".shot-detail-panel .version-history");
     await host.locator("select").waitFor();
-    for (const lang of ["zh", "en"])
+    for (const lang of ["zh", "en"]) {
       for (const width of [1440, 1000, 800, 540, 390, 320]) {
         await page.evaluate((l) => MindexI18n.setLanguage(l), lang);
         await page.setViewportSize({ width, height: 1000 });
@@ -98,18 +101,26 @@ let browser, page;
           }),
         );
         assert.equal(controls.length, 3);
-        for (const c of controls) assert.equal(c.h, 32);
-        for (let i = 0; i < controls.length; i++)
-          for (let j = i + 1; j < controls.length; j++)
-            if (Math.abs(controls[i].y - controls[j].y) < 32)
+        for (const c of controls) {
+          assert.equal(c.h, 32);
+        }
+        for (let i = 0; i < controls.length; i++) {
+          for (let j = i + 1; j < controls.length; j++) {
+            if (Math.abs(controls[i].y - controls[j].y) < 32) {
               assert.ok(Math.abs(controls[i].center - controls[j].center) <= 1);
-        if (stage === 3) assert.equal(await page.locator(".candidate-picker").count(), 0);
+            }
+          }
+        }
+        if (stage === 3) {
+          assert.equal(await page.locator(".candidate-picker").count(), 0);
+        }
         assert.equal(
           await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1),
           false,
         );
         records.push({ group: "history-" + stage, lang, width, controls });
       }
+    }
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.evaluate(() => MindexI18n.setLanguage("zh"));
     await host.locator("button").first().click();

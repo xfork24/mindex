@@ -29,19 +29,24 @@ function edgeText(edge) {
 // 一行转场摘要（分镜渲染列与阶段详情共用）；硬切返回空字符串。
 function transitionSummary(sid) {
   const value = shotTransition(sid);
-  if (!value) return "";
+  if (!value) {
+    return "";
+  }
   const parts = [];
-  if (value.enter)
+  if (value.enter) {
     parts.push(MindexI18n.msg("ui.post_summary_enter", { p0: edgeText(value.enter) }));
-  if (value.leave)
+  }
+  if (value.leave) {
     parts.push(MindexI18n.msg("ui.post_summary_leave", { p0: edgeText(value.leave) }));
-  if (value.next)
+  }
+  if (value.next) {
     parts.push(
       MindexI18n.msg("ui.post_summary_next", {
         p0: value.next.kind || "fade",
         p1: value.next.duration,
       }),
     );
+  }
   return parts.length ? MindexI18n.msg("ui.post_summary", { p0: parts.join(" · ") }) : "";
 }
 function transitionEditable(value) {
@@ -134,34 +139,51 @@ function renderPostSection(body, sid) {
     ),
   );
   renderOverlayEditor(section, sid, draft);
-  if (shotStages(sid).includes("overlay")) renderOverlayStage(section, sid);
+  if (shotStages(sid).includes("overlay")) {
+    renderOverlayStage(section, sid);
+  }
   const last = order().indexOf(sid) === order().length - 1;
-  if (last && value.next) section.append(el("p", MindexI18n.msg("ui.post_last_next"), "warn-text"));
+  if (last && value.next) {
+    section.append(el("p", MindexI18n.msg("ui.post_last_next"), "warn-text"));
+  }
   const notes = ver(plan().shots[sid].render)?.data?.transition_notes;
-  if (notes?.length)
+  if (notes?.length) {
     section.append(el("p", notes.map((note) => MindexI18n.system(note)).join("；"), "warn-text"));
+  }
   const actions = el("div", "", "detail-actions");
   actions.append(mutationButton(MindexI18n.msg("ui.post_save"), () => savePost(sid, draft)));
   section.append(actions);
   body.append(section);
 }
 async function savePost(sid, draft) {
-  if (state.drafts.get(draftKey(sid))?.dirty)
+  if (state.drafts.get(draftKey(sid))?.dirty) {
     throw new Error(MindexI18n.msg("ui.music_content_dirty"));
+  }
   const shots = currentBoard();
   const shot = shots[order().indexOf(sid)];
   const transition = Object.fromEntries(Object.entries(draft.data).filter(([, edge]) => edge));
-  if (Object.keys(transition).length) shot.transition = transition;
-  else delete shot.transition;
-  if (draft.highlights.length) shot.highlights = draft.highlights;
-  else delete shot.highlights;
+  if (Object.keys(transition).length) {
+    shot.transition = transition;
+  } else {
+    delete shot.transition;
+  }
+  if (draft.highlights.length) {
+    shot.highlights = draft.highlights;
+  } else {
+    delete shot.highlights;
+  }
   const layers = draft.overlays.map(cleanOverlay);
-  if (layers.length) shot.overlays = layers;
-  else delete shot.overlays;
+  if (layers.length) {
+    shot.overlays = layers;
+  } else {
+    delete shot.overlays;
+  }
   const scope = scopeKey();
   const result = await api(planBase(), "PATCH", { revision: state.data.revision, shots });
   state.postDrafts?.delete(draftKey(sid));
-  if (scope !== scopeKey()) return;
+  if (scope !== scopeKey()) {
+    return;
+  }
   invalidatePanel(sid);
   await accept(result);
   notice(MindexI18n.msg("ui.post_saved"));
@@ -175,12 +197,19 @@ function cleanOverlay(layer) {
     kind: layer.kind,
     effect: layer.effect || "fade",
   };
-  for (const key of ["title", "subtitle", "brief"])
-    if (layer[key]?.trim()) result[key] = layer[key].trim();
-  for (const key of ["start", "end"])
-    if (layer[key] !== null && layer[key] !== undefined && layer[key] !== "")
+  for (const key of ["title", "subtitle", "brief"]) {
+    if (layer[key]?.trim()) {
+      result[key] = layer[key].trim();
+    }
+  }
+  for (const key of ["start", "end"]) {
+    if (layer[key] !== null && layer[key] !== undefined && layer[key] !== "") {
       result[key] = Number(layer[key]);
-  if (layer.items?.length) result.items = layer.items;
+    }
+  }
+  if (layer.items?.length) {
+    result.items = layer.items;
+  }
   return result;
 }
 function itemsText(items) {
@@ -260,8 +289,9 @@ function renderOverlayEditor(section, sid, draft) {
       card.append(brief.wrap);
     } else {
       card.append(text("title", MindexI18n.msg("ui.overlay_title"), 60));
-      if (layer.kind !== "data_card")
+      if (layer.kind !== "data_card") {
         card.append(text("subtitle", MindexI18n.msg("ui.overlay_subtitle"), 80));
+      }
     }
     if (layer.kind === "data_card") {
       const items = field(MindexI18n.msg("ui.overlay_items"), itemsText(layer.items), "textarea");
@@ -294,13 +324,14 @@ function renderOverlayEditor(section, sid, draft) {
     );
     box.append(card);
   });
-  if (draft.overlays.length < 4)
+  if (draft.overlays.length < 4) {
     box.append(
       button(MindexI18n.msg("ui.overlay_add"), () => {
         draft.overlays.push({ engine: "ass", kind: "title", title: "", effect: "fade" });
         redraw();
       }),
     );
+  }
   box.append(el("p", MindexI18n.msg("ui.overlay_help"), "muted"));
   section.append(box);
 }
@@ -311,8 +342,9 @@ function renderOverlayStage(section, sid) {
   box.dataset.overlayStage = sid;
   box.append(el("h5", MindexI18n.msg("ui.overlay_stage_heading")));
   const item = ver(plan().shots[sid].overlay);
-  if (!item) box.append(el("p", MindexI18n.msg("ui.overlay_stage_none"), "muted"));
-  else {
+  if (!item) {
+    box.append(el("p", MindexI18n.msg("ui.overlay_stage_none"), "muted"));
+  } else {
     const origin =
       item.data?.origin === "manual"
         ? MindexI18n.msg("ui.overlay_stage_manual")
@@ -324,7 +356,9 @@ function renderOverlayStage(section, sid) {
         item.status === "failed" ? "warn-text" : "muted",
       ),
     );
-    if (item.error) box.append(el("p", shortIds(MindexI18n.system(item.error)), "warn-text"));
+    if (item.error) {
+      box.append(el("p", shortIds(MindexI18n.system(item.error)), "warn-text"));
+    }
   }
   const actions = el("div", "", "detail-actions");
   actions.append(
@@ -333,7 +367,9 @@ function renderOverlayStage(section, sid) {
   );
   const layers = ver(plan().shots[sid].content)?.data?.overlays || [];
   layers.forEach((layer, index) => {
-    if (layer.engine !== "html") return;
+    if (layer.engine !== "html") {
+      return;
+    }
     actions.append(
       mutationButton(MindexI18n.msg("ui.overlay_edit_source", { p0: index + 1 }), () =>
         openOverlayEditor(sid, index),
@@ -344,13 +380,15 @@ function renderOverlayStage(section, sid) {
   section.append(box);
 }
 async function openOverlayEditor(sid, index) {
-  const vid = plan().shots[sid].overlay,
-    item = ver(vid);
-  if (!item?.files?.[`overlay-${index}`])
+  const vid = plan().shots[sid].overlay;
+  const item = ver(vid);
+  if (!item?.files?.[`overlay-${index}`]) {
     throw new Error(MindexI18n.msg("ui.overlay_source_missing"));
+  }
   const response = await fetch(`${base()}/versions/${vid}/overlay-${index}.html`);
-  if (!response.ok)
+  if (!response.ok) {
     throw new Error(MindexI18n.msg("ui.animate_load_failed", { p0: response.status }));
+  }
   const source = await response.text();
   const scope = scopeKey();
   const body = showDialog(
@@ -365,7 +403,9 @@ async function openOverlayEditor(sid, index) {
   const actions = el("div", "", "detail-actions");
   actions.append(
     button(MindexI18n.msg("ui.animate_save"), async () => {
-      if (scope !== scopeKey()) throw new Error(MindexI18n.msg("ui.animate_scope_changed"));
+      if (scope !== scopeKey()) {
+        throw new Error(MindexI18n.msg("ui.animate_scope_changed"));
+      }
       const data = await api(`${planBase()}/shots/${sid}/overlay`, "PATCH", {
         revision: state.data.revision,
         index,

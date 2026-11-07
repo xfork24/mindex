@@ -10,6 +10,8 @@ import json
 import re
 from pathlib import Path
 
+import mindex  # noqa: F401 — 安装根包自举，后续使用包内短导入
+
 from agent.llm.scripted import ScriptedLlm, call, say
 from agent.llm.types import message_text
 from api import create_app

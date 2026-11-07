@@ -17,11 +17,15 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import random
 import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
+
+from shared.db.scaling_schema import ALL_LEDGER_TABLES
+from shared.migration_state import pending
 
 if TYPE_CHECKING:
     from shared.db.pg_backend import PgConnection
@@ -131,7 +135,6 @@ class PgTaskQueue:
         self, db: PgConnection, worker: str, kinds: list[str], *, ttl: float = TASK_TTL_SECONDS
     ) -> ClaimedTask | None:
         """领取一个任务（优先级→到期时间→id）；没有可用任务返回 None。"""
-        from shared.migration_state import pending
 
         if pending(db):
             return None
@@ -170,7 +173,6 @@ class PgTaskQueue:
 
     # ------------------------------------------------------------ 持有者操作
     def _ledger(self, db, row, status, *, error=None, clear=False, attempt=None, token=None):
-        from shared.db.scaling_schema import ALL_LEDGER_TABLES
 
         table, identifier = row["ledger_table"], row["ledger_id"]
         if table not in ALL_LEDGER_TABLES or not identifier:
@@ -178,8 +180,6 @@ class PgTaskQueue:
         if table == "studio_tasks" and status == "complete":
             saved = db.execute("SELECT result FROM studio_tasks WHERE id=%s", (identifier,)).fetchone()
             if saved and saved[0]:
-                import json
-
                 status = json.loads(saved[0]).get("status", status)
         bindings = ",queue_attempt_id=NULL" if clear else ""
         args = [status, error]
@@ -208,8 +208,6 @@ class PgTaskQueue:
         if task.ledger_table == "studio_tasks" and task.ledger_id:
             saved = db.execute("SELECT result FROM studio_tasks WHERE id=%s", (task.ledger_id,)).fetchone()
             if saved and saved[0]:
-                import json
-
                 result_status = json.loads(saved[0]).get("status", "complete")
             if result_status not in {"complete", "failed", "partial", "needs_review", "cancelled"}:
                 raise ValueError("创作执行结果终态无效")
@@ -348,6 +346,5 @@ def _backoff(attempts: int) -> float:
 
 
 def _json(payload: dict) -> str:
-    import json
 
     return json.dumps(payload, ensure_ascii=False, sort_keys=True)

@@ -20,8 +20,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from studio import studio
-
-from .versions import STAGES, version
+from studio.workspace.versions import STAGES, version
 
 Scope = Literal["plan", "shot", "final"]
 

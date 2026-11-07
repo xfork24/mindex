@@ -1,9 +1,10 @@
+const { between } = require("./source_slices.cjs");
 const assert = require("node:assert/strict");
 const vm = require("node:vm");
 const code = require("./studio_source.cjs").studioSource();
-let release,
-  calls = 0,
-  filled = 0;
+let release;
+let calls = 0;
+let filled = 0;
 const state = { id: "A", stagePanel: { key: "x" }, data: null };
 const ctx = vm.createContext({
   state,
@@ -23,13 +24,10 @@ const ctx = vm.createContext({
     state.stagePanel.key = null;
   },
 });
-vm.runInContext(
-  code.slice(code.indexOf("let recallCatalogue ="), code.indexOf("function fillCreateSources(")),
-  ctx,
-);
+vm.runInContext(between(code, "let recallCatalogue =", "function fillCreateSources("), ctx);
 (async () => {
-  const sources = ctx.loadSources(),
-    recall = ctx.loadRecallOptions();
+  const sources = ctx.loadSources();
+  const recall = ctx.loadRecallOptions();
   assert.equal(calls, 1, "creation and job editors share one in-flight request");
   release({ sources: [{ id: "s", name: "Source", work_id: "w" }], entities: [{ id: "actor" }] });
   await Promise.all([sources, recall]);

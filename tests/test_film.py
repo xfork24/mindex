@@ -1,7 +1,10 @@
+"""端到端素材评测与人工分镜检查页回归。"""
+
 from __future__ import annotations
 
 import csv
 import json
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -63,7 +66,6 @@ def test_movie_plan_split_resume_and_manifest(config, video_file, monkeypatch):
     assert not source_report(config, source)["missing_artifacts"]
 
     exported = export_source(config, source)
-    from pathlib import Path
 
     root = Path(exported["output"])
     page = (root / "review.html").read_text()

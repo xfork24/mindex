@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 import threading
 import time
+import zoneinfo
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
@@ -54,7 +56,6 @@ def ready(store, index_id="v"):
 
 
 def test_named_timezone_without_system_zone_database():
-    import zoneinfo
 
     original = zoneinfo.TZPATH
     try:
@@ -166,9 +167,8 @@ def test_remote_mcp_does_not_open_local_library(config, tmp_path, monkeypatch):
 
 @pytest.mark.requires_postgres
 def test_publication_lock_is_held_through_terminal_commit(pg_config, tmp_path):
-    from worker_runtime import Worker
-
     from shared.db.fencing import publication_scope
+    from worker.runtime import Worker
 
     runner = index_runner(pg_config)
     ready(runner.store, "first")
@@ -220,7 +220,7 @@ def test_publication_lock_is_held_through_terminal_commit(pg_config, tmp_path):
 
 @pytest.mark.requires_postgres
 def test_person_publication_and_release_activation_use_index_queue(pg_config):
-    from worker_runtime import Worker
+    from worker.runtime import Worker
 
     runner = index_runner(pg_config)
     ready(runner.store)
@@ -240,9 +240,8 @@ def test_person_publication_and_release_activation_use_index_queue(pg_config):
 
 @pytest.mark.requires_postgres
 def test_index_api_queue_cancel_retry_and_real_lexical_worker(pg_config, tmp_path):
-    from worker_runtime import Worker
-
     from api import create_app
+    from worker.runtime import Worker
 
     runner = index_runner(pg_config)
     ready(runner.store)
@@ -264,7 +263,7 @@ def test_index_api_queue_cancel_retry_and_real_lexical_worker(pg_config, tmp_pat
 
 @pytest.mark.requires_postgres
 def test_worker_waits_for_submission_lock_instead_of_failing(pg_config):
-    from worker_runtime import Worker
+    from worker.runtime import Worker
 
     runner = index_runner(pg_config)
     ready(runner.store)
@@ -305,9 +304,8 @@ def test_worker_waits_for_submission_lock_instead_of_failing(pg_config):
     ["success", "thread", "failure", "cancel", "expired", "lease-expired", "rebound", "invalid-publication"],
 )
 def test_publication_is_invisible_until_terminal_transaction(pg_config, outcome):
-    from worker_runtime import Worker
-
     from shared.db.fencing import publication_scope
+    from worker.runtime import Worker
 
     runner = index_runner(pg_config)
     ready(runner.store)
@@ -325,8 +323,6 @@ def test_publication_is_invisible_until_terminal_transaction(pg_config, outcome)
                 )
 
         if outcome == "thread":
-            from concurrent.futures import ThreadPoolExecutor
-
             with ThreadPoolExecutor(1) as pool:
                 pool.submit(claimed.execution.run, publish).result(timeout=5)
         else:
@@ -387,12 +383,11 @@ def test_publication_is_invisible_until_terminal_transaction(pg_config, outcome)
 
 @pytest.mark.requires_postgres
 def test_real_visual_index_build_dispatches_without_caller_lock(pg_config, video_file, monkeypatch):
-    from worker_runtime import Worker
-
     from conftest import FixtureAnalyzer
     from models import adapters
     from processing.indexing import IndexBuilder
     from processing.pipeline import Pipeline
+    from worker.runtime import Worker
 
     embedder = FixtureEmbedder(pg_config)
     Pipeline(pg_config, analyzer=FixtureAnalyzer(embedder)).prepare(video_file)

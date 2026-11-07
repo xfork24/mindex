@@ -18,8 +18,16 @@ from collections.abc import Callable
 from pathlib import Path
 from time import perf_counter
 
+from models import compatibility, llama_cpp
+from models.deployment import verified_file
+from persons.persons import Persons
+from processing.indexing import VectorIndex, retain_representation_maps, vector_client
+from search.search import lexical_search, tokens
+from settings.runtime_settings import RuntimeConfig
 from shared.backends.context import resource_scope
 from shared.config import Config
+from shared.lexical_store import lexical_ready
+from shared.storage import Store
 
 log = logging.getLogger(__name__)
 
@@ -41,8 +49,6 @@ def _step(name: str, action) -> None:
 def _warm_model_files(config: Config) -> None:
     if config.embedding.backend != "llama_cpp":
         return
-    from models import compatibility, llama_cpp
-    from models.deployment import verified_file
 
     pinned = llama_cpp.manifest(config.embedding, "embedding")
     if pinned["schema"] == 2:
@@ -58,12 +64,8 @@ def _warm_model_files(config: Config) -> None:
 @resource_scope()
 def warm_up(config: Config, index_id: str | None = None, *, startup: bool = True) -> None:
     """config 须是已合并设置页覆盖的生效配置。startup=False 为重新预热：跳过词典与模型文件校验。"""
+    # 延迟导入：媒体、数值或服务运行依赖仅在实际执行该功能时加载。
     import jieba
-
-    from persons.persons import Persons
-    from processing.indexing import VectorIndex
-    from search.search import lexical_search, tokens
-    from shared.storage import Store
 
     store = Store.open(config)
     active = store.index_version(index_id) if index_id else store.active_index()
@@ -92,7 +94,6 @@ def warm_up(config: Config, index_id: str | None = None, *, startup: bool = True
             return
         # SQL 词法路径直接读派生倒排表，不再需要进程内全量分词（plans §6.1）；
         # 派生索引缺失/版本不一致时保留参考路径的语料预热。
-        from shared.lexical_store import lexical_ready
 
         if lexical_ready(store, active["id"]):
             log.info("派生词法索引可用，跳过 BM25 语料分词预热")
@@ -105,7 +106,6 @@ def warm_up(config: Config, index_id: str | None = None, *, startup: bool = True
             lexical_search("预热", documents, 1)
 
     def vectors():
-        from processing.indexing import vector_client
 
         index = VectorIndex(
             store.root, active["id"], client=vector_client(config, library_id=store.library_id)
@@ -130,8 +130,6 @@ def retire_superseded(store, target: dict, index_id: str | None) -> dict:
 
     保留：目标索引；固定预览模式下还保留活动指针所指的索引（Studio 等仍按活动索引查询）。
     """
-    from persons.persons import Persons
-    from processing.indexing import retain_representation_maps
 
     keep_indexes = {target["id"]}
     releases = [
@@ -198,8 +196,6 @@ def watch_and_rewarm(
 
     last 是已预热状态的签名；预热期间又发生的变化会在下一轮被发现并再预热一次。
     """
-    from settings.runtime_settings import RuntimeConfig
-    from shared.storage import Store
 
     store = Store.open(config)
     warm = warm or warm_up
@@ -229,8 +225,6 @@ def warm_up_in_background(
 
     线程是 daemon，随进程退出；线程对象上的 stop_event 可用来停止监听（测试用）。
     """
-    from settings.runtime_settings import RuntimeConfig
-    from shared.storage import Store
 
     stop = threading.Event()
 

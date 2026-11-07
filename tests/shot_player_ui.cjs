@@ -34,8 +34,12 @@ class Element {
     this.events[name] = fn;
   }
   load() {
-    if (this.deferMetadata) return;
-    if (this.onloadedmetadata) this.onloadedmetadata();
+    if (this.deferMetadata) {
+      return;
+    }
+    if (this.onloadedmetadata) {
+      this.onloadedmetadata();
+    }
   }
   play() {
     this.paused = false;

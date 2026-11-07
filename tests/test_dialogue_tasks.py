@@ -1,3 +1,5 @@
+"""对白后台任务生命周期与进度回归。"""
+
 import threading
 import time
 

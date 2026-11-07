@@ -1,9 +1,13 @@
+"""素材处理管线与分镜分析回归。"""
+
 from __future__ import annotations
 
+import io
 import json
 
 import pytest
 from fastapi.testclient import TestClient
+from PIL import Image
 
 from api import create_app
 from conftest import FixtureAnalyzer, FixtureEmbedder
@@ -41,9 +45,6 @@ def test_detector_preserves_one_second_shots(config, video_file):
 
 
 def test_multi_source_filters_in_text_image_and_video_search(processed, config, video_file, tmp_path):
-    import io
-
-    from PIL import Image
 
     pipeline, embedder, _analyzer, first, _version = processed
     second_video = tmp_path / "second.mp4"
@@ -310,9 +311,6 @@ def test_no_index_returns_actionable_message(config):
 
 
 def test_image_query_retrieves_video_and_cleans_uploads(processed, config, tmp_path, monkeypatch):
-    import io
-
-    from PIL import Image
 
     pipeline, embedder, _, _, version = processed
     client = TestClient(create_app(config, embedder, index_id=version))

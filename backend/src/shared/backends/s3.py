@@ -25,8 +25,12 @@ from collections.abc import Iterator
 from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from urllib.parse import urlparse
+from uuid import UUID, uuid4
+
+from filelock import FileLock
 
 from shared.backends.media import MediaObject, MediaSource
+from shared.resource_registry import referenced
 
 log = logging.getLogger(__name__)
 
@@ -44,6 +48,7 @@ class S3MediaStore:
     def __init__(
         self, section, *, library_id: str | None = None, staging=None, cache_dir: Path | None = None
     ):
+        # 延迟导入：独立模型或扩展功能使用可选依赖，仅在实际调用时加载。
         import boto3
         from boto3.s3.transfer import TransferConfig
         from botocore.config import Config
@@ -60,8 +65,6 @@ class S3MediaStore:
         self.prefix = (section.prefix or "").strip("/")
         self.library_id = library_id
         if library_id is not None:
-            from uuid import UUID
-
             identity = UUID(library_id).hex
             self.prefix = "/".join(filter(None, (self.prefix, "libraries", identity)))
         self.staging = staging
@@ -157,7 +160,6 @@ class S3MediaStore:
     @contextmanager
     def _materialize(self, key: str, *, version: str | None = None) -> Iterator[Path]:
         """下载到节点缓存并 pin；使用期内不被 LRU 淘汰，摘要不符立即失败。"""
-        from filelock import FileLock
 
         path = self._cache_path(key, version)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -352,7 +354,6 @@ class S3MediaStore:
     def verify_conditional_delete(self):
         if hasattr(self, "_conditional_delete_verified"):
             return self._conditional_delete_verified
-        from uuid import uuid4
 
         key = self._object_key("pending/capability-probe/" + uuid4().hex, None)
         self._conditional_delete_verified = False
@@ -406,8 +407,6 @@ class S3MediaStore:
         if self.coordinator is None:
             return self.delete_version(key)
         with self.coordinator.locked(key, deleting=True) as db:
-            from shared.resource_registry import referenced
-
             if referenced(self.coordinator.store, key, connection=db):
                 raise RuntimeError("pending 对象仍被活动会话引用，拒绝清理")
             try:

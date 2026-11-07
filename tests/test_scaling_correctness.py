@@ -119,7 +119,7 @@ def test_expired_task_cannot_renew_without_reclaim(pg_config):
 
 @pytest.mark.requires_postgres
 def test_expired_worker_cannot_write_business_state(pg_config):
-    from worker_runtime import Worker
+    from worker.runtime import Worker
 
     context = open_context(pg_config)
     _enqueue(context)
@@ -143,7 +143,7 @@ def test_expired_worker_cannot_write_business_state(pg_config):
 
 @pytest.mark.requires_postgres
 def test_worker_concurrency_runs_two_handlers_together(pg_config):
-    from worker_runtime import Worker
+    from worker.runtime import Worker
 
     context = open_context(pg_config)
     _enqueue(context, dedupe_key="one")
@@ -165,11 +165,10 @@ def test_worker_concurrency_runs_two_handlers_together(pg_config):
 
 @pytest.mark.requires_postgres
 def test_running_cancel_crosses_node_directories(pg_config, tmp_path):
-    from worker_runtime import Worker
-
     from shared.queue_dispatch import insert_ledger
     from shared.task_cancel import registry_for
     from shared.task_progress import request_task_cancel
+    from worker.runtime import Worker
 
     context = open_context(pg_config)
     insert_ledger(

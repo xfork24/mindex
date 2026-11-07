@@ -66,8 +66,8 @@ const USER = {
   constraints: { max_chars: null },
   updated_at: "t1",
 };
-const requests = [],
-  notices = [];
+const requests = [];
+const notices = [];
 let catalogue = [...BUILTINS];
 const plans = { p1: { id: "p1", options: { recall_limit: 20 } } };
 const sandbox = {
@@ -122,22 +122,26 @@ const sandbox = {
   },
   api: async (url, method = "GET", body) => {
     requests.push({ url, method, body });
-    if (url === "/api/studio/templates") return { items: catalogue, default: "base" };
-    if (url === "/plan")
+    if (url === "/api/studio/templates") {
+      return { items: catalogue, default: "base" };
+    }
+    if (url === "/plan") {
       return {
         ...sandbox.state.data,
         plans: { p1: { id: "p1", options: body.options } },
         script_template_changed: false,
       };
+    }
     return {};
   },
 };
 vm.createContext(sandbox);
-for (const name of ["studio-template-text.js", "studio-templates.js"])
+for (const name of ["studio-template-text.js", "studio-templates.js"]) {
   vm.runInContext(
     fs.readFileSync(path.join(__dirname, "../frontend/src/studio", name), "utf8"),
     sandbox,
   );
+}
 const run = (code) => vm.runInContext(code, sandbox);
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 

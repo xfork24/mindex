@@ -4,10 +4,19 @@ from __future__ import annotations
 
 import hashlib
 import json
+from math import ceil
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from admin.source_work import source_work
+from processing.dialogue import current_dialogue, indexed_dialogue, relative_dialogue
+from processing.subtitle_uploads import uploaded_subtitles
+from shared.background_tasks import public_task
+from shared.config import fingerprint
+from shared.media import MediaError
+from shared.media_groups import Groups
+from shared.shot_media import ShotMedia
 from shared.storage import Store
 
 Visibility = Literal["visible", "hidden", "all"]
@@ -177,7 +186,6 @@ class Library:
         if detail == "summary":
             return source_public(row)
         # Bounded artifact checks support a real status even before an index exists.
-        from shared.shot_media import ShotMedia
 
         segments = self.store.segments(identifier)
         missing = segments
@@ -216,10 +224,8 @@ class Library:
             return False
 
         missing_count = sum(not available(s[field]) for s in missing for field in ("path", "thumbnail"))
-        from processing.dialogue import current_dialogue, indexed_dialogue, relative_dialogue
+        # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
         from search.search import channel_coverage
-        from shared.config import fingerprint
-        from shared.media import MediaError
 
         channel = self.store.one(
             "SELECT * FROM channel_data WHERE source_id=? AND channel='dialogue'", (identifier,)
@@ -234,14 +240,13 @@ class Library:
                 )
                 dialogue = json.loads(legacy["data"]) if legacy else {}
         if channel and channel["status"] == "processing":
-            from math import ceil
-
             checkpoints = self.store.root / "dialogue" / identifier / channel["profile"]
             dialogue["completed_chunks"] = sum(p.stem.isdigit() for p in checkpoints.glob("*.json"))
             dialogue["total_chunks"] = ceil(json.loads(row["media"])["duration"] / 30)
         tracks = dialogue.get("subtitle_tracks")
         if tracks is None:
             try:
+                # 延迟导入：保持异常捕获范围，依赖加载失败时仍走原有降级路径。
                 from processing.subtitle_archive import load_archive
 
                 tracks = load_archive(self.store, identifier)["tracks"]
@@ -331,8 +336,6 @@ class Library:
             "SELECT * FROM dialogue_tasks WHERE source_id=? ORDER BY created_at DESC,rowid DESC LIMIT 1",
             (identifier,),
         )
-        from processing.subtitle_uploads import uploaded_subtitles
-        from shared.background_tasks import public_task
 
         active = self.store.active_index()
         published = self.store.snapshots(active["id"], identifier) if active else []
@@ -351,7 +354,6 @@ class Library:
                 "SELECT * FROM runs WHERE source_id=? ORDER BY id DESC LIMIT 5", (identifier,)
             ),
         }
-        from admin.source_work import source_work
 
         result["work"] = source_work(
             self.store,
@@ -374,8 +376,6 @@ class Library:
     ):
         clauses, args = [], []
         if source_group_ids:
-            from shared.media_groups import Groups
-
             allowed = Groups(self.store).resolve("source", source_group_ids)
             if not allowed:
                 return {"items": [], "total": 0, "page": page, "page_size": page_size}

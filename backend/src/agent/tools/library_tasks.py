@@ -21,6 +21,7 @@ from agent.registry import Preview, ToolContext, ToolError, ToolOutput, ToolSpec
 from agent.tools.common import check, clip
 from agent.tools.library import LIBRARY, TASK_STATUS, WORK_NAMES, admin_focus
 from agent.tools.search import ATTACHMENT_PREFIX, upload_check
+from processing.subtitle_uploads import SUBTITLE_EXTENSIONS  # 与上传接口同一份后缀白名单
 from shared.config import StrictModel
 from shared.task_progress import RETRYABLE
 
@@ -347,8 +348,9 @@ async def preview_retry_task(args: TaskRef, ctx: ToolContext) -> Preview:
         warnings.append(f"上次错误：{clip(str(task['error']), 200)}")
     if not retryable(task):
         warnings.append(
-            f"当前状态为{status_label(task.get('status'))}，只有失败、中断、已取消或检索发布失败的任务可以重试，"
-            "服务端会拒绝"
+            "当前状态为"
+            f"{status_label(task.get('status'))}"
+            "，只有失败、中断、已取消或检索发布失败的任务可以重试，服务端会拒绝"
         )
     return Preview(
         f"重试{TASK_PATHS[args.kind][1]} {task['id']}（{WORK_LABELS.get(work, work or '未知工作')}）",
@@ -495,7 +497,6 @@ class UploadSubtitle(StrictModel):
 
 
 def subtitle_suffix_error(filename: str | None) -> str | None:
-    from processing.subtitle_uploads import SUBTITLE_EXTENSIONS  # 与上传接口同一份后缀白名单
 
     suffix = PurePosixPath(filename or "").suffix.lower()
     if suffix not in SUBTITLE_EXTENSIONS:
@@ -576,7 +577,10 @@ def specs() -> list[ToolSpec]:
         ToolSpec(
             "cancel_task",
             "library",
-            "取消排队中或运行中的任务：排队中立即取消；运行中在下一次上报进度时停止。不会取消已链式创建的发布子任务。",
+            (
+                "取消排队中或运行中的任务：排队中立即取消；运行中在下一次上报进度时停止。"
+                "不会取消已链式创建的发布子任务。"
+            ),
             TaskRef,
             "write",
             cancel_task,

@@ -1,3 +1,5 @@
+"""人物出镜审核查询、筛选与排名回归。"""
+
 from __future__ import annotations
 
 import pytest

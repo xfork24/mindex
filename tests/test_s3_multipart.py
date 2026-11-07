@@ -3,11 +3,21 @@
 from __future__ import annotations
 
 import hashlib
+import http.client
 import io
+import json
+import os
+import socket
+import subprocess
+import threading
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import urlsplit
 
 import httpx
 import pytest
+from fastapi.testclient import TestClient
 
 from shared.backends import open_context
 from shared.upload_sessions import UploadError, UploadSessions
@@ -23,11 +33,6 @@ def sha(data):
 
 @pytest.fixture
 def browser_endpoint(s3_config):
-    import http.client
-    import socket
-    import threading
-    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-    from urllib.parse import urlsplit
 
     upstream = urlsplit(s3_config.storage.s3.endpoint_url)
     requests = []
@@ -191,7 +196,6 @@ def test_native_digest_failure_abort_and_unlogged_upload_recovery(s3_config, bro
 
 
 def test_signed_url_expires_and_media_conditions(s3_config, browser_endpoint):
-    from fastapi.testclient import TestClient
 
     from api import create_app
 
@@ -218,10 +222,6 @@ def test_signed_url_expires_and_media_conditions(s3_config, browser_endpoint):
 
 
 def test_real_browser_uploads_through_independent_endpoint_and_cors(s3_config, browser_endpoint, tmp_path):
-    import json
-    import os
-    import subprocess
-    from pathlib import Path
 
     from api import create_app
     from shared.media import command

@@ -12,11 +12,13 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import threading
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
+from shared.db.locks_pg import PgLockProvider
 from topics import profiles
 from topics.common import parse_time
 
@@ -195,12 +197,9 @@ class TopicScheduler:
 
 def install(app, store, runs, config) -> TopicScheduler:
     """随应用启停调度器（包装 ``app.router.lifespan_context``）。"""
-    import contextlib
 
     leader = None
     if getattr(config, "locks", None) and config.locks.backend == "postgres":
-        from shared.db.locks_pg import PgLockProvider
-
         library_id = (
             getattr(store, "library_id", None)
             or (store.one("SELECT value FROM settings WHERE key='library.id'") or {"value": ""})["value"]

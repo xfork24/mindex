@@ -70,13 +70,13 @@ const ctx = {
   video_url: "video",
   thumbnails_url: "thumbs",
 };
-const requests = [],
-  frames = new Map();
-let currentCtx = ctx,
-  scope = "job/p",
-  pendingPreview = null,
-  previewFailure = false,
-  frameID = 0;
+const requests = [];
+const frames = new Map();
+let currentCtx = ctx;
+const scope = "job/p";
+let pendingPreview = null;
+let previewFailure = false;
+let frameID = 0;
 const sandbox = {
   MindexI18n: require("./i18n_adapter.cjs"),
   // multiselect.js 未在 vm 中加载；给出与真实组件同接口的桩。
@@ -121,10 +121,16 @@ const sandbox = {
   cancelAnimationFrame: (id) => frames.delete(id),
   api: async (url, method, body) => {
     requests.push({ url, method, body });
-    if (url.endsWith("selection-context")) return structuredClone(currentCtx);
+    if (url.endsWith("selection-context")) {
+      return structuredClone(currentCtx);
+    }
     if (url.endsWith("range-preview")) {
-      if (previewFailure) throw new Error("preview unavailable");
-      if (pendingPreview) return await pendingPreview;
+      if (previewFailure) {
+        throw new Error("preview unavailable");
+      }
+      if (pendingPreview) {
+        return await pendingPreview;
+      }
       return { preview_token: "preview", preview_url: "preview.mp4" };
     }
     return {};
@@ -172,11 +178,13 @@ function tick() {
   assert.equal(original.version, "0123456789abcdef0123456789abcdef");
   const body = new Node("div");
   await sandbox.manualRange("a", body);
-  const box = slider(body),
-    t = track(body),
-    width = box.style.width;
+  const box = slider(body);
+  const t = track(body);
+  const width = box.style.width;
   assert.equal(control(body, "保存当前窗口").disabled, false);
-  for (let i = 0; i < 40; i++) box.events.keydown(event("ArrowRight"));
+  for (let i = 0; i < 40; i++) {
+    box.events.keydown(event("ArrowRight"));
+  }
   assert.equal(box.style.width, width);
   assert.ok(Number(box.attrs["aria-valuenow"]) > 3);
   t.events.pointerdown({
@@ -186,7 +194,9 @@ function tick() {
     target: t,
     preventDefault: () => {},
   });
-  for (let x = 0; x <= 1000; x += 10) t.events.pointermove({ clientX: x, pointerId: 1 });
+  for (let x = 0; x <= 1000; x += 10) {
+    t.events.pointermove({ clientX: x, pointerId: 1 });
+  }
   t.events.pointerup();
   assert.equal(box.style.width, width);
   assert.equal(Number(box.attrs["aria-valuenow"]), 6);
@@ -269,8 +279,8 @@ function tick() {
   resolve({ preview_token: "late", preview_url: "late.mp4" });
   await generating;
   pendingPreview = null;
-  const changedSave = control(changed, "保存当前窗口"),
-    writesBefore = requests.length;
+  const changedSave = control(changed, "保存当前窗口");
+  const writesBefore = requests.length;
   await changedSave.action();
   assert.equal(requests.length - writesBefore, 2);
   assert.equal(requests.at(-1).body.preview_token, "preview");
@@ -284,8 +294,8 @@ function tick() {
   pendingPreview = new Promise((r) => {
     resolve = r;
   });
-  const saving = changedSave.action(),
-    start = slider(changed).attrs["aria-valuenow"];
+  const saving = changedSave.action();
+  const start = slider(changed).attrs["aria-valuenow"];
   assert.equal(changedSave.disabled, true);
   slider(changed).events.keydown(event("ArrowRight"));
   assert.equal(slider(changed).attrs["aria-valuenow"], start);

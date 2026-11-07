@@ -6,16 +6,23 @@ import json
 import logging
 import sqlite3
 import threading
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 from pathlib import Path
 
 import chromadb
 from chromadb.config import Settings
 
 from models.adapters import ModelError, MultimodalEmbedder, make_embedder
+from processing import subtitle_archive
 from processing.pipeline import Pipeline
+from shared import files
+from shared.backends.vectors import ChromaServerVectorStores
 from shared.config import Config, fingerprint
+from shared.db.fencing import current_attempt, publication_scope
 from shared.media import windows
+from shared.query_budget import check
+from shared.queue_dispatch import run_index_task
+from shared.shot_media import ShotMedia
 from shared.storage import Store, dumps
 
 log = logging.getLogger(__name__)
@@ -54,7 +61,6 @@ def vector_client(config, *, library_id: str | None = None):
     返回进程内共享的 HttpClient（显式配置选择，不做路径发现；plans §6.2）。"""
     if getattr(config, "vector", None) is None or config.vector.backend != "chroma_server":
         return None
-    from shared.backends.vectors import ChromaServerVectorStores
 
     if library_id is None:
         library_id = Store.open(config).library_id
@@ -191,7 +197,6 @@ class VectorIndex:
         return self._best_per_segment(hits, count)
 
     def _query_relation(self, vector, view, eligible, count):
-        from shared.query_budget import check
 
         if not eligible:
             return []
@@ -372,11 +377,8 @@ class IndexBuilder:
         return self._embedder
 
     def build(self, *, activate=False, mode="auto", source_id=None, kinds=None, channels=None, progress=None):
-        from shared.db.fencing import current_attempt, publication_scope
 
         if self.config.queue.backend == "postgres" and current_attempt() is None:
-            from shared.queue_dispatch import run_index_task
-
             if self._embedder is not None:
                 raise RuntimeError("持久索引任务不能传递进程内嵌入适配器；请在 worker 中注入")
             return run_index_task(
@@ -402,6 +404,7 @@ class IndexBuilder:
                 if channels is not None:
                     raise ValueError("enriched 兼容模式不支持 channels，请使用 auto")
                 return self._legacy_build(activate=activate, mode=mode, source_id=source_id, kinds=kinds)
+            # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
             from processing.channel_index import build_channels
 
             return build_channels(
@@ -481,8 +484,6 @@ class IndexBuilder:
                     rep_id = fingerprint([index_id, rep_id])
                     if rep_id not in existing:
                         if view == "video":
-                            from shared.shot_media import ShotMedia
-
                             a, b = bounds or (0, segment["end"] - segment["start"])
                             with ShotMedia(self.store, cache_probes=False).inference_video(
                                 segment["source_id"], segment["start"] + a, segment["start"] + b
@@ -542,7 +543,6 @@ def check_index(store: Store, index_id: str, *, config=None) -> list[str]:
     row = store.one("SELECT * FROM index_versions WHERE id=?", (index_id,))
     if row is None:
         return ["找不到索引版本"]
-    from collections import defaultdict
 
     representations = store.rows(
         "SELECT id,segment_id,view FROM representations WHERE index_id=?", (index_id,)
@@ -556,7 +556,6 @@ def check_index(store: Store, index_id: str, *, config=None) -> list[str]:
     if expected != actual:
         issues.append(f"向量与元数据不一致：缺少 {len(expected - actual)}，多出 {len(actual - expected)}")
     members = store.rows("SELECT * FROM index_members WHERE index_id=?", (index_id,))
-    from shared.shot_media import ShotMedia
 
     # 探测缓存绑定文件路径、大小及纳秒 mtime；有效文件不必每次启动 ffprobe。
     media = ShotMedia(store, reuse_checks=True)
@@ -582,7 +581,6 @@ def check_index(store: Store, index_id: str, *, config=None) -> list[str]:
         reference = references.get(snapshot["path"])
         thumbnail = (store.root / snapshot["thumbnail"]).resolve()
         # 集群形态下本节点可能只有元数据：缩略图按权威登记判断存在，不强制本地缓存。
-        from shared import files
 
         record = None if thumbnail.is_file() else files.pointer(store, snapshot["thumbnail"])
         if not thumbnail.is_relative_to(store.root) or not (
@@ -595,14 +593,13 @@ def check_index(store: Store, index_id: str, *, config=None) -> list[str]:
             or abs(reference["end"] - snapshot["end"]) > 1e-6
         ):
             issues.append(f"媒体引用区间不一致：{member['segment_id']}")
-        from processing.subtitle_archive import load_archive
 
         try:
             media.references(snapshot["source_id"], snapshot["start"], snapshot["end"])
             sid = snapshot["source_id"]
             if sid not in archives:
                 try:
-                    load_archive(store, sid)
+                    subtitle_archive.load_archive(store, sid)
                     archives[sid] = None
                 except (ValueError, OSError) as exc:
                     archives[sid] = str(exc)

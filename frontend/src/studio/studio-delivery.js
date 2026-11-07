@@ -10,7 +10,9 @@ function finalOf(p, key) {
 }
 function renderDelivery() {
   const box = $("delivery-body");
-  if (!box) return;
+  if (!box) {
+    return;
+  }
   const p = plan();
   const key = JSON.stringify([
     scopeKey(),
@@ -25,7 +27,9 @@ function renderDelivery() {
       .filter((item) => item.variant_of?.plan === p.id)
       .map((item) => [item.id, item.final]),
   ]);
-  if (state.deliveryKey === key) return;
+  if (state.deliveryKey === key) {
+    return;
+  }
   state.deliveryKey = key;
   pauseMedia(box);
   box.replaceChildren();
@@ -43,8 +47,9 @@ async function buildAllCanvases() {
         MindexI18n.msg("ui.delivery_build_all_confirm", { p0: rebuild, p1: blocked }),
       ),
     )
-  )
+  ) {
     return;
+  }
   await api(`${planBase()}/build`, "POST", { token: checked.token, all_canvases: true });
   await refresh();
 }
@@ -54,9 +59,9 @@ function platformResult(p, id) {
   const card = el("div", "", "publish-result");
   card.dataset.publishPlatform = id;
   card.append(el("h4", p.options.publish?.platform_specs?.[id]?.name || id));
-  const cover = finalOf(p, `cover:${id}`),
-    meta = finalOf(p, `metadata:${id}`),
-    pack = finalOf(p, `package:${id}`);
+  const cover = finalOf(p, `cover:${id}`);
+  const meta = finalOf(p, `metadata:${id}`);
+  const pack = finalOf(p, `package:${id}`);
   if (!meta && !cover && !pack) {
     card.append(el("p", MindexI18n.msg("ui.publish_not_built"), "muted"));
     return card;
@@ -83,7 +88,7 @@ function platformResult(p, id) {
     description.input.rows = 4;
     const tags = field(MindexI18n.msg("ui.publish_meta_tags"), value.tags);
     card.append(title.wrap, description.wrap, tags.wrap);
-    if (meta.data.chapters?.length)
+    if (meta.data.chapters?.length) {
       card.append(
         el(
           "p",
@@ -91,10 +96,12 @@ function platformResult(p, id) {
           "muted",
         ),
       );
-    if (meta.data.notes?.length)
+    }
+    if (meta.data.notes?.length) {
       card.append(
         el("p", meta.data.notes.map((note) => MindexI18n.system(note)).join("；"), "warn-text"),
       );
+    }
     card.append(
       el(
         "p",
@@ -120,10 +127,11 @@ function platformResult(p, id) {
       }),
     );
   }
-  if (pack?.data?.notes?.length)
+  if (pack?.data?.notes?.length) {
     card.append(
       el("p", pack.data.notes.map((note) => MindexI18n.system(note)).join("；"), "warn-text"),
     );
+  }
   if (pack?.files?.zip?.url) {
     const download = el(
       "a",
@@ -135,8 +143,9 @@ function platformResult(p, id) {
     download.href = `${pack.files.zip.url}?download=true`;
     download.setAttribute("download", "");
     card.append(download);
-    if (pack.data?.mismatch)
+    if (pack.data?.mismatch) {
       card.append(el("p", MindexI18n.msg("ui.publish_mismatch"), "warn-text"));
+    }
   }
   return card;
 }
@@ -164,8 +173,11 @@ function renderDeliveryConfig(box, p) {
   for (const item of deliveryTemplateItems || []) {
     const option = document.createElement("option");
     option.value = item.id;
-    if (item.builtin) MindexI18n.setText(option, t("base"));
-    else option.textContent = item.name;
+    if (item.builtin) {
+      MindexI18n.setText(option, t("base"));
+    } else {
+      option.textContent = item.name;
+    }
     select.append(option);
   }
   if (
@@ -182,7 +194,9 @@ function renderDeliveryConfig(box, p) {
   select.value = p.options.delivery?.template_id || "base";
   const applyButton = mutationButton(t("apply"), async () => {
     const item = deliveryTemplateItems?.find((x) => x.id === select.value);
-    if (!item || !confirm(MindexI18n.render(t("overwrite")))) return;
+    if (!item || !confirm(MindexI18n.render(t("overwrite")))) {
+      return;
+    }
     await accept(
       await api(planBase(), "PATCH", {
         revision: state.data.revision,
@@ -199,8 +213,9 @@ function renderDeliveryConfig(box, p) {
   row.append(select, applyButton, manage);
   box.append(row);
   let cfg;
-  if (p.options.delivery) cfg = p.options.delivery.config;
-  else {
+  if (p.options.delivery) {
+    cfg = p.options.delivery.config;
+  } else {
     cfg = defaults();
     cfg.exports = [
       { canvas: p.options.canvas || "16:9", mode: "derive", fit: p.options.fit || "pad" },
@@ -213,7 +228,9 @@ function renderDeliveryConfig(box, p) {
   box.append(details);
   const read = render(details, cfg, {
     candidates: async (platform) => {
-      if (!platform) throw new Error(MindexI18n.render(MindexI18n.msg("ui.publish_need_platform")));
+      if (!platform) {
+        throw new Error(MindexI18n.render(MindexI18n.msg("ui.publish_need_platform")));
+      }
       return (await api(`${planBase()}/cover-candidates?platform=${platform}`)).items;
     },
     upload: async (file) => {
@@ -251,7 +268,9 @@ function renderDeliveryConfig(box, p) {
 function renderDeliveryResults(box, p) {
   for (const item of exportsOf(p)) {
     const made = finalOf(p, `export:${item.canvas}`);
-    if (!made?.files?.mp4?.url) continue;
+    if (!made?.files?.mp4?.url) {
+      continue;
+    }
     const section = el("div", "", "delivery-result");
     section.append(el("h3", item.canvas), media("video", made.files.mp4.url));
     const download = el("a", MindexI18n.msg("ui.delivery_download"), "quiet nav-link");
@@ -260,5 +279,7 @@ function renderDeliveryResults(box, p) {
     section.append(download);
     box.append(section);
   }
-  for (const id of p.options.publish?.platforms || []) box.append(platformResult(p, id));
+  for (const id of p.options.publish?.platforms || []) {
+    box.append(platformResult(p, id));
+  }
 }

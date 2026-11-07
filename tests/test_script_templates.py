@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import shutil
 import sqlite3
@@ -489,7 +490,6 @@ def test_agent_lists_templates_and_sets_plan_template(config):
 
 def run_template_tool(c, name, arguments):
     """经真实回环客户端执行模板工具（先预览后执行，与面板确认流程一致），返回预览、结果与写请求。"""
-    import asyncio
 
     from agent.loopback import MindexClient
     from agent.registry import ToolContext

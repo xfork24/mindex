@@ -7,6 +7,7 @@ import json
 import re
 import sys
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -271,7 +272,7 @@ def test_stdio_roundtrip(config, job, tmp_path):
         command=sys.executable,
         args=[
             "-c",
-            "from mindex.cli import app; app()",
+            "import mindex; from cli import app; app()",
             "--config",
             str(isolated),
             "--data-dir",
@@ -363,7 +364,7 @@ def test_stdio_domain_option_overrides_config(config, job, tmp_path):
             command=sys.executable,
             args=[
                 "-c",
-                "from mindex.cli import app; app()",
+                "import mindex; from cli import app; app()",
                 "--config",
                 str(isolated),
                 "--data-dir",
@@ -493,7 +494,6 @@ def test_mcp_cli_rejects_unknown_domain(config, tmp_path):
 
 
 def test_real_http_client_initializes_lists_and_reads(config, monkeypatch):
-    import httpx
     from mcp.client.streamable_http import streamablehttp_client
 
     from test_agent_panel_ui import serve

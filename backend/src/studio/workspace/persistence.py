@@ -5,16 +5,18 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
+from shared.directory_files import bind
 from shared.media import audio_info, probe
+from shared.storage import Store
 from shared.work_budget import copy_file
 from studio import studio
 from studio.artifacts import digest, safe_path
-
-from .plans import PlanOptions, new_plan, normalize_voice_options, set_board
-from .versions import WorkspaceState, add_version, file_info, path, persist, revision, root
+from studio.workspace.plans import PlanOptions, new_plan, normalize_voice_options, set_board
+from studio.workspace.versions import WorkspaceState, add_version, file_info, path, persist, revision, root
 
 
 def _legacy_script(config, job_id, w):
@@ -28,7 +30,6 @@ def _legacy_script(config, job_id, w):
     text = (state.get("input_text") or "").strip()
     if not text:
         return None
-    import hashlib
 
     vid = hashlib.sha256(f"legacy-script:{job_id}:{text}".encode()).hexdigest()[:32]
     if vid not in w["versions"]:
@@ -66,9 +67,6 @@ def normalize_script(config, job_id, w):
 
 def load(config, job_id):
     if config.storage.backend == "s3":
-        from shared.directory_files import bind
-        from shared.storage import Store
-
         with bind(Store.open(config), f"studio/{job_id}/"):
             return _load(config, job_id)
     return _load(config, job_id)
@@ -79,8 +77,8 @@ def _load(config, job_id):
     studio.load_job(config, job_id)
     payload = None
     if config.storage.backend == "s3":
+        # 延迟导入：当前作用域存在同名赋值，保留局部名称语义。
         from shared import files
-        from shared.storage import Store
 
         store = Store.open(config)
         payload = files.read_bytes(store, path(config, job_id))

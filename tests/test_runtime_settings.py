@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from pydantic import ValidationError
 
 from settings.runtime_settings import (
     CLEAR_KEY,
@@ -449,7 +450,6 @@ def test_voices_table_roundtrip(store):
 
 
 def test_person_frame_interval_validation_and_profile_snapshot(store):
-    from pydantic import ValidationError
 
     from shared.config import PersonConfig
 

@@ -2,8 +2,11 @@
 
 import asyncio
 import io
+import json
 import threading
 import time
+from queue import Queue
+from types import SimpleNamespace
 
 import pytest
 from fastapi import UploadFile
@@ -199,7 +202,6 @@ def test_pipeline_tasks_frozen_layout_prerequisites_resume_and_publish_only(conf
 
 @pytest.mark.parametrize("work", ["publish"])
 def test_embedding_progress_persisted_in_api_and_resumed_checkpoints(config, video_file, tmp_path, work):
-    from queue import Queue
 
     from models.adapters import ModelError
     from shared.media import cut
@@ -340,8 +342,6 @@ def test_busy_frozen_analysis_config_failure_and_retry(config, video_file, monke
 
 
 def test_analysis_task_recovers_invalid_response_without_losing_checkpoints(config, video_file, monkeypatch):
-    import json
-    from types import SimpleNamespace
 
     from models import adapters, qwen
 
@@ -382,8 +382,6 @@ def test_analysis_task_recovers_invalid_response_without_losing_checkpoints(conf
 def test_scene_grouping_failure_is_reported_after_segments_complete_and_retry_skips_them(
     config, video_file, monkeypatch
 ):
-    import json
-    from types import SimpleNamespace
 
     from models import adapters, qwen
 
@@ -438,7 +436,6 @@ def test_scene_grouping_failure_is_reported_after_segments_complete_and_retry_sk
 def test_legacy_analysis_snapshot_uses_new_defaults_and_preserves_frozen_cap(
     config, frozen_cap, expected_cap
 ):
-    import json
 
     from admin.source_tasks import freeze_config, restore_config
 
@@ -629,7 +626,6 @@ def test_dialogue_manual_methods_and_prior_success_survives_failure(config, vide
 
 
 def test_dialogue_publication_failure_retry_without_processing(config, video_file, monkeypatch):
-    import json
 
     pipeline = Pipeline(config)
     sid = pipeline.prepare(video_file)

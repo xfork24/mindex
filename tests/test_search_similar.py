@@ -1,9 +1,13 @@
+"""相似片段检索与召回约束回归。"""
+
+import io
 import json
 
 import pytest
 from fastapi.testclient import TestClient
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
+from PIL import Image
 
 from admin.curation import CurationPatch, EntityNotFound, Library
 from api import create_app
@@ -284,9 +288,6 @@ def test_similar_drops_hidden_segment_and_source(similar_library):
 
 
 def test_similar_works_while_embedding_service_is_offline(config, video_file):
-    import io
-
-    from PIL import Image
 
     _, active, (red, _, _) = _visual_index(config, video_file)
     client = TestClient(create_app(config, OfflineEmbedder()))
@@ -332,7 +333,6 @@ def test_similar_missing_seed_vectors_returns_409(config, video_file):
 
 
 def test_text_image_video_search_unchanged_after_context_split(config, video_file, tmp_path):
-    from PIL import Image
 
     _, active, _ = _visual_index(config, video_file)
     engine = SearchEngine(config, FixtureEmbedder(config))

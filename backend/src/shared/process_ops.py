@@ -1,6 +1,6 @@
 """进程操作的平台抽象：脱离启动、存活、pid 指纹与整树停止。
 
-``local_services``（本机模型服务）与 ``cli_persons``（人物扫描 worker）共用；业务代码不直接
+``local_services``（本机模型服务）与 ``cli/persons``（人物扫描 worker）共用；业务代码不直接
 触碰 ``start_new_session`` / ``os.killpg`` / ``taskkill`` 等平台细节。
 
 - ``spawn_detached``：POSIX 新会话（进程组）；Windows ``CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW``。

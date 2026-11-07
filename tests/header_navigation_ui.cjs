@@ -11,12 +11,13 @@ const labels = {
   en: ["Video search", "Studio", "Media library", "People", "Settings"],
 };
 fs.mkdirSync(out, { recursive: true });
-let browser, page;
+let browser;
+let page;
 (async () => {
   browser = await chromium.launch({ headless: true });
   page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
-  const records = [],
-    errors = [];
+  const records = [];
+  const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
   // Click through every tab in both languages, including the current tab.
   for (const lang of ["zh", "en"]) {
@@ -70,8 +71,9 @@ let browser, page;
   await page.waitForFunction(() => !document.querySelector("#reload").disabled);
   await page.locator(".source-item").first().click();
   await page.locator("details.work-panel").waitFor();
-  if (!(await page.locator("details.work-panel").evaluate((node) => node.open)))
+  if (!(await page.locator("details.work-panel").evaluate((node) => node.open))) {
     await page.locator(".work-toolbar").click();
+  }
   await page.locator(".work-card").last().waitFor();
   const source = await page.evaluate(() => state.source.id);
   // 素材详情请求带 ?detail=work / ?detail=summary 后缀，按路径前缀匹配。

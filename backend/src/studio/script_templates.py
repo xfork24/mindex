@@ -20,6 +20,7 @@ from pydantic import Field, ValidationError
 from admin.curation import EntityNotFound
 from shared.config import StrictModel, fingerprint
 from shared.types import ScriptTemplate, ScriptTemplateConstraints, ScriptTemplateKind
+from studio import studio
 
 BUILTIN_DIR = Path(__file__).resolve().parent / "templates"
 BUILTIN_ORDER = ("base", "history", "hot", "film", "science", "interview")
@@ -203,7 +204,6 @@ def update_template(store, template_id: str, changes: TemplateChanges, *, now: s
 
 def references(config, template_id: str) -> list[dict]:
     """引用某模板的方案（扫描全部创作任务的 workspace.json，只读，不触发迁移）。"""
-    from studio import studio
 
     root = studio.studio_root(config)
     found = []

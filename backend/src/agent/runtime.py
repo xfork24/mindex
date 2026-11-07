@@ -27,6 +27,7 @@ from agent.llm.types import (
 from agent.prompts import system_prompt
 from agent.registry import ToolContext, ToolError, ToolOutput, ToolRegistry
 from agent.session_store import SessionNotFound, SessionStore, derive_messages
+from agent.tools.media import clean
 from agent.vision import IMAGE_TOKENS, image_count, is_image_ref, make_loader, materialize, protocol_for
 from shared.agent_domains import LOADABLE_DOMAINS
 
@@ -883,8 +884,6 @@ class RuntimeSupport:
         if output.mutation:
             meta = {**(meta or {}), "mutation": output.mutation}
         if output.media:
-            from agent.tools.media import clean
-
             media = clean(output.media)
             if media:
                 meta = {**(meta or {}), "media": media}

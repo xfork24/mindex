@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from datetime import datetime, timedelta
@@ -143,7 +144,6 @@ def topic_embedder(config):
     - 文字含"红/蓝/绿"时与 FixtureEmbedder 相同（落在素材库三种颜色的维度上）；
     - 含"紫"时落在素材库没有的第 4 维（用于制造素材缺口）；
     - 其余文字按内容哈希落在第 5–8 维（彼此不同、与素材画面正交），让不同标题的候选条目分到不同簇。"""
-    import hashlib
 
     import numpy as np
 

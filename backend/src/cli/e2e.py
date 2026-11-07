@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+from filelock import Timeout
 
 from shared.cli_support import SortedGroup, print_json
 from shared.config import fingerprint
@@ -45,6 +46,7 @@ def init_experiment(
         \b
           mindex e2e init --source SOURCE_ID --run /路径/实验
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from diagnostics.e2e import initialize
     from processing.pipeline import Pipeline
 
@@ -70,7 +72,10 @@ def probe_deployment(
         \b
           mindex e2e probe --role embedding --output /路径/probe.json
     """
+    # 延迟导入：当前模块存在同名绑定，保留局部名称语义。
     from models.llama_cpp import ModelError, inspect_service
+
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from shared.jsonio import save
 
     service = getattr(ctx.obj, role.value)
@@ -130,7 +135,10 @@ def pin_deployment(
           mindex e2e pin --quantization Q8_0 --weights-file /模型/model.gguf --mmproj-file /模型/mmproj.gguf
     --server-cwd /服务目录 --output /路径/deployment.json
     """
+    # 延迟导入：当前模块存在同名绑定，保留局部名称语义。
     from models.adapters import ModelError
+
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from models.deployment import create_manifest
     from models.llama_cpp import inspect_service
     from shared.jsonio import save
@@ -183,7 +191,10 @@ def experiment_phase(
     phase: Annotated[
         str,
         typer.Argument(
-            help="smoke/visual/preview/asr/align/analyze-smoke/analyze/enriched/evaluate/video-evaluate/check。"
+            help=(
+                "smoke/visual/preview/asr/align/analyze-smoke/analyze/enriched/evaluate/video-evaluate/chec"
+                "k。"
+            )
         ),
     ],
     run: Annotated[Path, typer.Option(help="实验目录，保存冻结输入、阶段状态和报告。")],
@@ -212,10 +223,14 @@ def experiment_phase(
         \b
           mindex e2e phase visual --run /路径/实验
     """
-    from filelock import Timeout
 
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from diagnostics.e2e import run_phase
+
+    # 延迟导入：当前模块存在同名绑定，保留局部名称语义。
     from models.adapters import ModelError
+
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from shared.media import MediaError
 
     try:
@@ -243,13 +258,15 @@ def freeze_labels(
 ):
     """记录人工确认者并冻结查询标注，生成 SHA256 清单。
 
-    先逐条复核查询与目标；此命令不会替用户判断标注正确性。冻结后修改查询文件需重新确认冻结，否则评测拒绝不匹配的摘要。
+    先逐条复核查询与目标；此命令不会替用户判断标注正确性。冻结后修改查询文件需重新确认冻结，
+    否则评测拒绝不匹配的摘要。
 
     示例：
 
     \b
       mindex e2e freeze /路径/queries.jsonl --run /路径/实验 --confirmed-by '姓名'
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from diagnostics.e2e import freeze
 
     print_json({"frozen": freeze(run, queries, confirmed_by)})
@@ -272,6 +289,7 @@ def review_labels(
         \b
           mindex e2e review /路径/queries.jsonl --run /路径/实验
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from diagnostics.label_review import render_review
 
     print_json({"review_page": str(render_review(ctx.obj, run.resolve(), queries))})
@@ -290,6 +308,7 @@ def experiment_status(
     \b
       mindex e2e status --run /路径/实验
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from diagnostics.e2e import progress
 
     print_json(progress(ctx.obj, run))

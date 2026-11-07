@@ -77,7 +77,7 @@ def test_two_apis_two_workers_share_real_source_tasks(tmp_path, video_file):
                     [
                         sys.executable,
                         "-c",
-                        "from mindex.cli import app; app()",
+                        "import mindex; from cli import app; app()",
                         "--config",
                         str(config),
                         role,

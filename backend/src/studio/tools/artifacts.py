@@ -10,6 +10,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
 
+import httpx
+from PIL import Image
+
+from shared.images import image_png
 from shared.media import MediaError, atomic_media, probe
 from shared.work_budget import GrowingReservation, current
 from studio import studio
@@ -42,7 +46,6 @@ def download(
     headers: dict | None = None,
 ) -> Path:
     """把产物写到 ``target``；超过大小上限、主机不在白名单或下载失败时报中文错误（不留半截文件）。"""
-    import httpx
 
     target.parent.mkdir(parents=True, exist_ok=True)
     if artifact.data is not None:
@@ -90,14 +93,11 @@ def download(
 
 
 def normalize(download_path: Path, directory: Path, output: str, max_pixels: int) -> tuple[Path, dict]:
-    (
-        """校验并规整产物：视频 → ``artifact.mp4``（返回时长、尺寸、帧率），图片 → """
-        """``artifact.png``（返回尺寸）。"""
-    )
+    """校验并规整产物：视频 → ``artifact.mp4``（返回时长、尺寸、帧率），图片 →
+    ``artifact.png``（返回尺寸）。
+    """
     if output == "image":
-        from PIL import Image
-
-        from shared.images import image_png
+        # 延迟导入：媒体、数值或服务运行依赖仅在实际执行该功能时加载。
 
         try:
             payload = image_png(download_path, max_pixels)

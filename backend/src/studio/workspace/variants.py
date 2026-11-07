@@ -10,6 +10,7 @@ from __future__ import annotations
 import copy
 from uuid import uuid4
 
+from shared.config import fingerprint
 from studio import studio
 
 SYNCED = ("board", "board_script", "script", "ranges", "anchors")
@@ -79,11 +80,11 @@ def sync(w, p) -> list[str]:
 def preflight_all(config, job_id, w, p, *, force=False) -> dict:
     """构建全部画幅的预检：先是各关联子方案的逐镜与成片节点（键加 ``子方案ID/`` 前缀、带 ``plan_id``），
     再是主方案自己的节点；主方案的重新渲染导出不再因子方案尚无成片而阻塞（同一次构建里先构建子方案）。"""
-    from shared.config import fingerprint
 
-    from .preflight import preflight
-    from .stages import names
-    from .versions import revision
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+    from studio.workspace.preflight import preflight
+    from studio.workspace.stages import names
+    from studio.workspace.versions import revision
 
     plan_stages = set(names(scope="plan"))
     nodes = []

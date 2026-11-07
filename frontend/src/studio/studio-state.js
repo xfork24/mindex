@@ -31,7 +31,9 @@ function matrixStages() {
 }
 // 某分镜在某列实际显示的阶段：召回列换成该分镜的画面阶段（或上传素材）。
 function cellStage(sid, column) {
-  if (column !== "recall") return column;
+  if (column !== "recall") {
+    return column;
+  }
   return pictureStage(sid) || "source";
 }
 // 分镜卡片可打开的阶段：文案与查询、画面阶段（无画面阶段时为上传素材预览 source），再加该分镜包含的配音/选片/渲染。
@@ -47,13 +49,17 @@ function barStages(sid) {
 // 阶段是否已有产物：普通阶段看方案里选用的版本；上传素材预览看文案与查询里是否有上传文件。
 function stageHasVersion(sid, stage) {
   const shot = plan().shots[sid] || {};
-  if (stage === "source") return !!ver(shot.content)?.data?.source?.media_id;
+  if (stage === "source") {
+    return !!ver(shot.content)?.data?.source?.media_id;
+  }
   return !!shot[stage];
 }
 // 阶段状态：running > failed > stale > complete > none。
 // stale = 已选版本但后端重算签名后有冲突；failed/running 取最近一次包含该节点的构建。
 function stageState(sid, stage) {
-  if (stage === "source") return stageHasVersion(sid, stage) ? "complete" : "none";
+  if (stage === "source") {
+    return stageHasVersion(sid, stage) ? "complete" : "none";
+  }
   const builds = state.data?.builds || [];
   const build = [...builds]
     .reverse()
@@ -61,10 +67,15 @@ function stageState(sid, stage) {
       (b) => b.plan_id === plan().id && b.nodes.some((n) => n.stage === stage && n.shot_id === sid),
     );
   const node = build?.nodes.find((n) => n.stage === stage && n.shot_id === sid);
-  if (build?.status === "running" && ["pending", "running"].includes(node?.status))
+  if (build?.status === "running" && ["pending", "running"].includes(node?.status)) {
     return "running";
-  if (node?.status === "failed") return "failed";
-  if (!stageHasVersion(sid, stage)) return "none";
+  }
+  if (node?.status === "failed") {
+    return "failed";
+  }
+  if (!stageHasVersion(sid, stage)) {
+    return "none";
+  }
   return state.data?.conflicts?.[`${stage}:${sid}`]?.length ? "stale" : "complete";
 }
 // 卡片显示的阶段：第一个已过期的阶段；没有时为最后一个已有产物的阶段；都没有时为文案与查询。
@@ -77,7 +88,9 @@ function cardStage(sid) {
       stage !== "source" &&
       state.data?.conflicts?.[`${stage}:${sid}`]?.length,
   );
-  if (stale) return stale;
+  if (stale) {
+    return stale;
+  }
   return [...stages].reverse().find((stage) => stageHasVersion(sid, stage)) || "content";
 }
 // 多选框顶部的“全部选择”占位值，不是一个真实人物 ID。
@@ -90,23 +103,30 @@ function itemOptionsOf(select) {
 }
 function syncAllOf(select) {
   const all = allOptionOf(select);
-  if (!all) return;
+  if (!all) {
+    return;
+  }
   const items = itemOptionsOf(select);
   all.selected = items.length > 0 && items.every((o) => o.selected);
   select.dataset.allSelected = all.selected ? "1" : "0";
 }
 function applyAllOf(select, on) {
-  for (const o of itemOptionsOf(select)) o.selected = on;
+  for (const o of itemOptionsOf(select)) {
+    o.selected = on;
+  }
   syncAllOf(select);
 }
 // change 事件分不清是点了“全部选择”还是普通项，用上一次的全选状态判断意图。
 function toggleAllOf(select) {
-  const all = allOptionOf(select),
-    wasAll = select.dataset.allSelected === "1";
-  if (all?.selected && !wasAll) applyAllOf(select, true);
-  else if (all && !all.selected && wasAll && itemOptionsOf(select).every((o) => o.selected))
+  const all = allOptionOf(select);
+  const wasAll = select.dataset.allSelected === "1";
+  if (all?.selected && !wasAll) {
+    applyAllOf(select, true);
+  } else if (all && !all.selected && wasAll && itemOptionsOf(select).every((o) => o.selected)) {
     applyAllOf(select, false);
-  else syncAllOf(select);
+  } else {
+    syncAllOf(select);
+  }
 }
 function pickedIds(select) {
   return [...select.selectedOptions].map((o) => o.value).filter((v) => v !== ALL_VALUE);
@@ -217,8 +237,12 @@ function shortId(value) {
 }
 function el(tag, text, cls) {
   const n = document.createElement(tag);
-  if (text != null) MindexI18n.setText(n, text);
-  if (cls) n.className = cls;
+  if (text != null) {
+    MindexI18n.setText(n, text);
+  }
+  if (cls) {
+    n.className = cls;
+  }
   return n;
 }
 function button(text, action, disabled = false) {
@@ -237,12 +261,13 @@ function link(text, url, download = false) {
   return n;
 }
 function notice(text, error = false) {
-  if (globalThis.MindexFeedback)
+  if (globalThis.MindexFeedback) {
     return globalThis.MindexFeedback.show(
       "notice",
       shortIds(error ? MindexI18n.system(text) : text),
       error ? "error" : "info",
     );
+  }
 
   MindexI18n.setText($("notice"), shortIds(error ? MindexI18n.system(text) : text));
   $("notice").dataset.type = error ? "error" : "info";
@@ -253,22 +278,24 @@ function fail(error) {
     const message = el("p", shortIds(error.message), "warn-text");
     message.id = "dialog-error";
     message.setAttribute("role", "alert");
-    if ([409, 428].includes(error.status))
+    if ([409, 428].includes(error.status)) {
       message.append(
         button(MindexI18n.msg("ui.studio_refresh_keep_inputs"), async () => {
           const controls = [...$("dialog-content").querySelectorAll("input,textarea,select")].map(
             (node) => ({ node, value: node.value, checked: node.checked }),
           );
           await refresh();
-          for (const item of controls)
+          for (const item of controls) {
             if (item.node.isConnected) {
               item.node.value = item.value;
               item.node.checked = item.checked;
             }
+          }
           MindexI18n.setText(message, MindexI18n.msg("ui.studio_refreshed_keep_inputs"));
           $("dialog-content").prepend(message);
         }),
       );
+    }
     $("dialog-content").prepend(message);
     return;
   }
@@ -288,7 +315,9 @@ function showDialog(title) {
   MindexI18n.setText($("dialog-title"), shortIds(title));
   const body = $("dialog-content");
   body.replaceChildren();
-  if (!$("work-dialog").open) $("work-dialog").showModal();
+  if (!$("work-dialog").open) {
+    $("work-dialog").showModal();
+  }
   return body;
 }
 function closeDialog() {
@@ -307,9 +336,13 @@ function field(label, value, type = "text", choices = null) {
       o.value = v;
       n.append(o);
     }
-  } else if (type !== "textarea") n.type = type;
+  } else if (type !== "textarea") {
+    n.type = type;
+  }
   n.value = MindexI18n.render(value ?? "");
-  if (type === "number") n.step = "0.001";
+  if (type === "number") {
+    n.step = "0.001";
+  }
   wrap.append(n);
   return { wrap, input: n };
 }
@@ -322,7 +355,10 @@ function media(tag, url) {
   n.controls = true;
   n.preload = "metadata";
   const playlist = tag === "video" ? ShotPlayer.playlistURL(url) : null;
-  if (playlist) queueMicrotask(() => ShotPlayer.attach(n, playlist));
-  else n.src = url;
+  if (playlist) {
+    queueMicrotask(() => ShotPlayer.attach(n, playlist));
+  } else {
+    n.src = url;
+  }
   return n;
 }

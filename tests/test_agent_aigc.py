@@ -6,7 +6,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -38,7 +40,6 @@ def agent_job(aigc):  # noqa: F811
 
 def read(client, config, name, arguments):
     """只读工具：没有预览，直接执行；返回 (None, output, 请求列表)，与 run 的返回形状一致。"""
-    import asyncio
 
     from agent.attachments import AttachmentStore
     from agent.loopback import MindexClient
@@ -74,7 +75,6 @@ def png_bytes() -> bytes:
 
 
 def wait_build(client, job_id, timeout=120):
-    import time
 
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:

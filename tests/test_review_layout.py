@@ -1,6 +1,7 @@
 """Portable review exports must include the shared UI without application URLs."""
 
 import json
+import re
 
 from conftest import FixtureAnalyzer, FixtureEmbedder
 from diagnostics.film import export_source
@@ -21,8 +22,11 @@ def test_both_review_exports_are_portable(config, video_file, tmp_path):
     for page in (label_path, run / "film" / "review.html"):
         html = page.read_text()
         assert 'name="viewport"' in html
-        assert "--control-size:28px" in html
-        assert "resize:both" in html
+        style = re.search(r"<style>(.*?)</style>", html, re.DOTALL)
+        assert style is not None
+        declarations = re.sub(r"\s+", "", style.group(1))
+        assert "--control-size:28px" in declarations
+        assert "resize:both" in declarations
         assert "100dvh" in html
         assert "__STYLE__" not in html
         assert '<link rel="stylesheet"' not in html

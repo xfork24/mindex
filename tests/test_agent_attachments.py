@@ -6,9 +6,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import tracemalloc
 
 import httpx
 import pytest
+import yaml
 from fastapi import Request
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
@@ -204,7 +206,6 @@ def test_three_token_situations(config, monkeypatch, situation):
 
 def test_backup_export_excludes_agent_state(tmp_path, video_file):
     """真实导出：agent.sqlite3 与 agent-attachments/ 都列入排除清单，不出现在备份文件里。"""
-    import yaml
 
     from agent.attachments import AttachmentStore
     from maintenance.backup import export_backup
@@ -263,7 +264,6 @@ def big_file(path, size: int):
 
 async def peak_mib(make):
     """``make()`` 执行期间 Python 堆的峰值（MiB）。"""
-    import tracemalloc
 
     tracemalloc.start()
     try:

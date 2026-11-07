@@ -15,6 +15,7 @@ import hmac
 import json
 import os
 import secrets
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 
@@ -24,10 +25,17 @@ from pydantic import Field
 from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile as StarletteUpload
 
+from agent import tools
 from agent.attachments import AttachmentError, AttachmentStore
+from agent.changes import ChangeFeed
+from agent.dsh_runtime import DshRuntime
+from agent.llm.factory import make_agent_llm
 from agent.loopback import MindexClient
+from agent.manager import RuntimeManager
 from agent.runtime import AgentRuntime, BuiltinRuntime, RequestNotFound, RuntimeBusy, frame_sse
 from agent.session_store import SessionNotFound, SessionStore
+from agent.watcher import TaskWatcher
+from settings.runtime_settings import get_setting
 from shared.config import StrictModel
 from shared.uploads import save_upload
 from shared.web_auth import authorized, configured_token
@@ -87,9 +95,6 @@ def resume_cursor(request, after):
 
 
 def build_runtime(app, runtime_config, store, *, agent_llm=None, registry=None) -> AgentRuntime:
-    from agent.llm.factory import make_agent_llm
-    from agent.tools import build_registry
-    from settings.runtime_settings import get_setting
 
     holder: dict = {}
 
@@ -104,7 +109,7 @@ def build_runtime(app, runtime_config, store, *, agent_llm=None, registry=None) 
 
     runtime = BuiltinRuntime(
         SessionStore(store.root),
-        registry=registry or build_registry(),
+        registry=registry or tools.build_registry(),
         llm_factory=(lambda: agent_llm)
         if agent_llm is not None
         else (lambda: make_agent_llm(runtime_config.current())),
@@ -113,15 +118,11 @@ def build_runtime(app, runtime_config, store, *, agent_llm=None, registry=None) 
         settings=lambda: runtime_config.current().agent,
         agent_profile=agent_profile,
     )
-    from agent.watcher import TaskWatcher
 
     runtime.watcher = TaskWatcher(runtime, client_factory)
-    from agent.changes import ChangeFeed
 
     runtime.feed = ChangeFeed(store.root)
     runtime.attachments = AttachmentStore(store.root)
-    from agent.dsh_runtime import DshRuntime
-    from agent.manager import RuntimeManager
 
     dsh = DshRuntime(
         runtime.store,
@@ -134,7 +135,6 @@ def build_runtime(app, runtime_config, store, *, agent_llm=None, registry=None) 
     dsh.feed, dsh.attachments, dsh.watcher = runtime.feed, runtime.attachments, runtime.watcher
     manager = RuntimeManager(runtime, dsh, runtime.settings)
     runtime.watcher.runtime = manager
-    from contextlib import asynccontextmanager
 
     previous = app.router.lifespan_context
 

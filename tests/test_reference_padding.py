@@ -1,4 +1,7 @@
+"""引用片段边界与补帧回归。"""
+
 import io
+import json
 
 import pytest
 from PIL import Image
@@ -42,7 +45,6 @@ def test_tight_reference_padding_and_rejected_cache_retry(config, monkeypatch):
     ensure_reference_quality(store, config, client, item)
     assert sizes == [(100, 120), (124, 144)]
     cached = store.one("SELECT data FROM person_features WHERE id=?", (key,))
-    import json
 
     extracted = json.loads(cached["data"])
     subject, reason = reference_check(extracted["observations"], 0)

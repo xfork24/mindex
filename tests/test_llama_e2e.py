@@ -1,12 +1,18 @@
+"""llama.cpp 嵌入服务的真实端到端验收。"""
+
 from __future__ import annotations
 
 import base64
 import hashlib
+import io
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
 import pytest
+import yaml
+from PIL import Image
 from typer.testing import CliRunner
 
 from cli import app
@@ -221,9 +227,6 @@ def test_native_video_rejects_empty_preprocessing_before_http(llama, tmp_path, m
 
 
 def test_native_image_uses_vision_content_and_preserves_text_video_space(llama, tmp_path):
-    import io
-
-    from PIL import Image
 
     config, _props, seen, _reply, _pinned = llama
     client = adapters.make_embedder(config)
@@ -398,7 +401,6 @@ def test_probe_cli_reports_failure_without_traceback(tmp_path, monkeypatch):
 
 
 def test_alignment_worker_isolated_from_package_types_module():
-    import sys
 
     import processing.align_worker as _align_worker
 
@@ -407,7 +409,6 @@ def test_alignment_worker_isolated_from_package_types_module():
 
 
 def test_loading_full_default_yaml_preserves_existing_layout(tmp_path):
-    import yaml
 
     from shared.config import Config, load_config
 

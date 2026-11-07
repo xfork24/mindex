@@ -7,7 +7,10 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
+from PIL import Image, ImageChops, ImageStat
 from pydantic import ValidationError
 
 from studio import studio
@@ -216,7 +219,6 @@ def test_overlays_enter_compose_signature_even_with_soft_subtitles(small, tmp_pa
 
 @slow
 def test_soft_subtitles_with_burned_layer(small, tmp_path):  # noqa: F811
-    import json
 
     from shared.media import command
     from studio.render import has_subtitles_filter
@@ -259,7 +261,6 @@ def test_soft_subtitles_with_burned_layer(small, tmp_path):  # noqa: F811
     )["streams"]
     assert [item["codec_type"] for item in streams].count("subtitle") == 1
     # 数据卡片在右上角：成片该区域与分镜渲染画面（未叠加文字层）明显不同，左下角相同。
-    from PIL import Image, ImageChops
 
     def frame(path, name):
         target = tmp_path / name
@@ -271,7 +272,6 @@ def test_soft_subtitles_with_burned_layer(small, tmp_path):  # noqa: F811
     width, height = burned.size
 
     def change(box):
-        from PIL import ImageStat
 
         return ImageStat.Stat(ImageChops.difference(burned.crop(box), plain.crop(box))).mean[0]
 

@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import os
+import shutil
+import subprocess
+import tempfile
 import threading
+from collections import deque
 from contextlib import ExitStack, contextmanager
 from contextvars import ContextVar
 from functools import wraps
@@ -99,7 +104,6 @@ class GrowingReservation:
             self.budget.pending[self.path] = self
 
     def commit(self, target):
-        import os
 
         if self.budget is None:
             os.replace(self.path, target)
@@ -144,9 +148,8 @@ def resource_write(method):
 
 def stream_command(args, output, *, timeout):
     """外部编码器通过有界管道输出；写入前预约，失败立即终止子进程。"""
-    import subprocess
-    from collections import deque
 
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
     from shared.media import MediaError
 
     formats = {
@@ -191,6 +194,7 @@ def stream_command(args, output, *, timeout):
     try:
         with GrowingReservation(output) as reservation, output.open("wb") as target:
             while chunk := process.stdout.read(65536):
+                # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
                 from shared.db.fencing import current_attempt
 
                 attempt = current_attempt()
@@ -202,6 +206,7 @@ def stream_command(args, output, *, timeout):
             process.wait()
             reader.join()
             if timed_out.is_set():
+                # 延迟导入：保持异常捕获范围，依赖加载失败时仍走原有降级路径。
                 from shared.query_budget import check
 
                 check()
@@ -227,6 +232,7 @@ def stream_command(args, output, *, timeout):
 def configured(method):
     @wraps(method)
     def wrapped(config, *args, **kwargs):
+        # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
         from shared.storage import Store
 
         if config.storage.backend != "s3":
@@ -239,8 +245,6 @@ def configured(method):
 
 def copy_file(source, target):
     """有界复制；临时文件隐藏并按块预约，原子提交后计入可见工作集。"""
-    import shutil
-    import tempfile
 
     budget = current()
     if budget is None or not budget.owns(target):
@@ -272,7 +276,6 @@ def copy_file(source, target):
 
 
 def commit_file(partial, target):
-    import os
 
     budget = current()
     reservation = budget.pending.get(Path(partial).resolve()) if budget is not None else None

@@ -1,3 +1,5 @@
+"""创作任务路径迁移与跨目录产物复用回归。"""
+
 from shared.config import portable_parameters
 from studio import workspace as ws
 from test_studio_workspace import setup_workspace

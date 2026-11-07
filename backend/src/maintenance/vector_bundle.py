@@ -17,11 +17,14 @@ import base64
 import hashlib
 import json
 import logging
+import math
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from maintenance.backup_files import digest as file_digest
 from maintenance.backup_files import safe_path
+from processing.indexing import VectorIndex, vector_client
+from shared.backends.vectors import chroma_http_client
 
 if TYPE_CHECKING:
     from shared.storage import Store
@@ -34,12 +37,9 @@ _BATCH = 500
 
 
 def _collection(store: Store, index_id: str, *, create: bool, config=None, legacy_namespace=False):
-    from processing.indexing import VectorIndex, vector_client
 
     client = vector_client(config, library_id=store.library_id or None) if config is not None else None
     if legacy_namespace and config is not None and config.vector.backend == "chroma_server":
-        from shared.backends.vectors import chroma_http_client
-
         client = chroma_http_client(config.vector.chroma_server)
     return VectorIndex(store.root, index_id, create=create, client=client).collection
 
@@ -192,7 +192,6 @@ def validate_vectors(source):
                 embedding = _from_float32(item["embedding"])
                 if not embedding or (dimensions is not None and len(embedding) != dimensions):
                     raise ValueError(f"向量维数不一致：{index_id}")
-                import math
 
                 if not all(math.isfinite(value) for value in embedding):
                     raise ValueError(f"向量含非有限值：{identifier}")
@@ -203,6 +202,7 @@ def validate_vectors(source):
 
 
 def _compare_batch(index_id, batch, actual, *, require_all=True):
+    # 延迟导入：媒体、数值或服务运行依赖仅在实际执行该功能时加载。
     import numpy as np
 
     by_id = {
@@ -250,12 +250,14 @@ def _upsert(collection, ids, embeddings, documents, metadatas) -> None:
 
 
 def _float32_bytes(embedding) -> bytes:
+    # 延迟导入：媒体、数值或服务运行依赖仅在实际执行该功能时加载。
     import numpy as np
 
     return np.asarray(embedding, dtype="<f4").tobytes()
 
 
 def _from_float32(encoded: str) -> list[float]:
+    # 延迟导入：媒体、数值或服务运行依赖仅在实际执行该功能时加载。
     import numpy as np
 
     # chroma 只接受 Python float 或 numpy.ndarray：转成 float 列表（值仍是 float32 精度）。

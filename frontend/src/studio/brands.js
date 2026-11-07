@@ -39,14 +39,19 @@ const POSITIONS = ["top-left", "top-right", "bottom-left", "bottom-right"];
 
 function el(tag, text, cls) {
   const node = document.createElement(tag);
-  if (text != null) MindexI18n.setText(node, text);
-  if (cls) node.className = cls;
+  if (text != null) {
+    MindexI18n.setText(node, text);
+  }
+  if (cls) {
+    node.className = cls;
+  }
   return node;
 }
 function notice(text, error = false) {
   const value = error ? MindexI18n.system(text) : text;
-  if (globalThis.MindexFeedback)
+  if (globalThis.MindexFeedback) {
     return MindexFeedback.show("notice", value, error ? "error" : "info");
+  }
   MindexI18n.setText($("notice"), value);
 }
 const editable = () => Boolean(page.selected && !page.selected.builtin);
@@ -54,16 +59,25 @@ const dirty = () => editable() && page.saved !== null && JSON.stringify(page.dra
 function control(label, value, type, onChange, extra = {}) {
   const wrap = el("label", label, "form-field");
   const input = document.createElement(extra.choices ? "select" : "input");
-  if (extra.choices)
+  if (extra.choices) {
     for (const [v, text] of extra.choices) {
       const option = el("option", text);
       option.value = v;
       input.append(option);
     }
-  else input.type = type;
-  if (type === "checkbox") input.checked = Boolean(value);
-  else input.value = value ?? "";
-  for (const key of ["min", "max", "step"]) if (extra[key] != null) input[key] = String(extra[key]);
+  } else {
+    input.type = type;
+  }
+  if (type === "checkbox") {
+    input.checked = Boolean(value);
+  } else {
+    input.value = value ?? "";
+  }
+  for (const key of ["min", "max", "step"]) {
+    if (extra[key] != null) {
+      input[key] = String(extra[key]);
+    }
+  }
   input.disabled = !editable();
   input.addEventListener(type === "checkbox" || extra.choices ? "change" : "input", () => {
     onChange(
@@ -104,7 +118,9 @@ function renderList() {
       const entry = el("button", null, "job-item template-item");
       entry.type = "button";
       entry.dataset.id = item.id;
-      if (page.selected?.id === item.id) entry.classList.add("active");
+      if (page.selected?.id === item.id) {
+        entry.classList.add("active");
+      }
       entry.append(el("div", brandName(item), "job-title"));
       const marks = ["intro", "outro", "watermark"]
         .filter((key) => item[key])
@@ -116,9 +132,11 @@ function renderList() {
       li.append(entry);
       list.append(li);
     }
-    if (items.length) group.append(list);
-    else
+    if (items.length) {
+      group.append(list);
+    } else {
       group.append(el("p", MindexI18n.msg("ui.brands_user_empty"), "muted template-group-empty"));
+    }
     box.append(group);
   }
 }
@@ -248,7 +266,9 @@ async function uploadAsset(accept) {
     input.addEventListener("change", () => resolve(input.files?.[0] || null), { once: true });
     input.click();
   });
-  if (!file) return null;
+  if (!file) {
+    return null;
+  }
   const form = new FormData();
   form.append("file", file, file.name);
   notice(MindexI18n.msg("ui.brands_uploading"));
@@ -266,10 +286,14 @@ function assetRow(key, kind) {
     if (kind === "video") {
       preview.controls = true;
       preview.preload = "metadata";
-    } else preview.alt = value.asset.name || "";
+    } else {
+      preview.alt = value.asset.name || "";
+    }
     preview.className = "brand-preview";
     row.append(preview, el("p", value.asset.name || value.asset.sha256.slice(0, 12), "muted"));
-  } else row.append(el("p", MindexI18n.msg("ui.brands_asset_none"), "muted"));
+  } else {
+    row.append(el("p", MindexI18n.msg("ui.brands_asset_none"), "muted"));
+  }
   const actions = el("div", "", "detail-actions");
   const upload = el(
     "button",
@@ -285,7 +309,9 @@ function assetRow(key, kind) {
           ? "image/png,image/jpeg,image/webp"
           : "video/mp4,video/quicktime,video/webm,video/x-matroska",
       );
-      if (!asset) return;
+      if (!asset) {
+        return;
+      }
       page.draft[key] =
         kind === "image"
           ? {
@@ -329,7 +355,7 @@ function renderAssets() {
   );
   for (const key of ["intro", "outro"]) {
     const value = page.draft[key];
-    if (value)
+    if (value) {
       bookends.querySelector(`[data-brand-asset="${key}"]`).append(
         control(
           MindexI18n.msg("ui.brands_volume"),
@@ -341,6 +367,7 @@ function renderAssets() {
           { min: 0, max: 1, step: 0.05 },
         ),
       );
+    }
   }
   const box = $("brand-watermark");
   box.replaceChildren(
@@ -389,7 +416,9 @@ function renderDetail() {
   const item = page.selected;
   $("brand-empty").hidden = Boolean(item);
   $("brand-view").hidden = !item;
-  if (!item) return;
+  if (!item) {
+    return;
+  }
   MindexI18n.setText($("brand-title"), brandName(item));
   MindexI18n.setText(
     $("brand-tags"),
@@ -405,8 +434,9 @@ function renderDetail() {
   $("bf-description").value = item.builtin
     ? MindexI18n.render(brandDescription(item))
     : page.draft.description;
-  for (const id of ["bf-name", "bf-description", "brand-save", "brand-revert"])
+  for (const id of ["bf-name", "bf-description", "brand-save", "brand-revert"]) {
     $(id).disabled = !editable();
+  }
   renderSubtitle();
   renderOverlay();
   renderAssets();
@@ -417,7 +447,9 @@ function renderDetail() {
   updateDirty();
 }
 function updateDirty() {
-  if (!page.draft) return;
+  if (!page.draft) {
+    return;
+  }
   page.draft.name = $("bf-name").value;
   page.draft.description = $("bf-description").value;
   $("brand-dirty").hidden = !dirty();
@@ -428,7 +460,9 @@ function confirmDiscard() {
   );
 }
 async function select(id) {
-  if (page.selected?.id !== id && !confirmDiscard()) return;
+  if (page.selected?.id !== id && !confirmDiscard()) {
+    return;
+  }
   page.selected = await api(brandUrl(id));
   page.draft = editableCopy(page.selected);
   page.saved = editable() ? JSON.stringify(page.draft) : null;
@@ -444,11 +478,15 @@ async function load(preferred) {
   page.items = (await api("/api/studio/brands")).items;
   renderList();
   const id = preferred || page.selected?.id;
-  if (id && page.items.some((item) => item.id === id)) await select(id);
+  if (id && page.items.some((item) => item.id === id)) {
+    await select(id);
+  }
 }
 async function save(event) {
   event?.preventDefault();
-  if (!editable()) return;
+  if (!editable()) {
+    return;
+  }
   updateDirty();
   $("brand-error").hidden = true;
   try {
@@ -472,7 +510,9 @@ async function save(event) {
 }
 // 复制后直接选中新模板并聚焦名称输入框（桌面版 Electron 不支持 window.prompt，不弹输入框）。
 async function copy() {
-  if (!page.selected || !confirmDiscard()) return;
+  if (!page.selected || !confirmDiscard()) {
+    return;
+  }
   const name = MindexI18n.render(
     MindexI18n.msg("ui.brands_copy_name", { p0: brandName(page.selected) }),
   ).slice(0, 40);
@@ -490,8 +530,9 @@ async function remove() {
         MindexI18n.msg("ui.brands_delete_confirm", { p0: brandName(page.selected) }),
       ),
     )
-  )
+  ) {
     return;
+  }
   await api(brandUrl(page.selected.id), "DELETE");
   page.selected = page.draft = page.saved = null;
   await load();
@@ -519,17 +560,23 @@ $("reload").addEventListener("click", () => {
   }
 });
 window.addEventListener("beforeunload", (event) => {
-  if (!dirty()) return;
+  if (!dirty()) {
+    return;
+  }
   event.preventDefault();
   event.returnValue = "";
 });
 window.addEventListener("mindex:languagechange", () => {
   renderList();
-  if (page.selected) renderDetail();
+  if (page.selected) {
+    renderDetail();
+  }
 });
 window.addEventListener("mindex:agent-mutation", (event) => {
   const detail = event.detail || {};
-  if (detail.domain === "studio" && detail.brands && !dirty()) load().catch(() => {});
+  if (detail.domain === "studio" && detail.brands && !dirty()) {
+    load().catch(() => {});
+  }
 });
 window.MindexAgentContext = () => ({
   page: "studio",
@@ -537,8 +584,12 @@ window.MindexAgentContext = () => ({
   brand_id: page.selected?.id || null,
 });
 window.MindexAgentFocus = async (focus, { passive = false } = {}) => {
-  if (focus.job_id && !passive) location.href = `/?job=${encodeURIComponent(focus.job_id)}`;
+  if (focus.job_id && !passive) {
+    location.href = `/?job=${encodeURIComponent(focus.job_id)}`;
+  }
   return true;
 };
-if (page.job) $("studio-jobs-tab").href = `/?job=${encodeURIComponent(page.job)}`;
+if (page.job) {
+  $("studio-jobs-tab").href = `/?job=${encodeURIComponent(page.job)}`;
+}
 load(query.get("id") || "plain").catch(failed);

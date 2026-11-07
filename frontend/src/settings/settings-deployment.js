@@ -1,7 +1,9 @@
 "use strict";
 (() => {
   const editor = document.getElementById("deployment-editor");
-  if (!editor) return;
+  if (!editor) {
+    return;
+  }
   const status = document.getElementById("deployment-editor-status");
   const validate = document.getElementById("deployment-validate");
   const save = document.getElementById("deployment-save");
@@ -15,7 +17,9 @@
   const display = (value) => MindexI18n.setText(status, value);
   const report = (error) => display(MindexI18n.system(error.message));
   async function load() {
-    if (dirty && !window.confirm(text("deployment_discard"))) return;
+    if (dirty && !window.confirm(text("deployment_discard"))) {
+      return;
+    }
     const data = await MindexApi.request("/api/settings/deployment");
     revision = data.revision;
     editor.value = JSON.stringify(data.config, null, 2);

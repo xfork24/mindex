@@ -8,8 +8,8 @@ window.DeliveryPlatforms = (() => {
     host.append(node("h2", "platform_management"), node("p", "platform_management_help", "muted"));
     const list = node("div", null, "delivery-platform-list");
     const form = node("form", null, "delivery-platform-form");
-    const fields = node("div", null, "delivery-fields"),
-      actions = node("div", null, "detail-actions");
+    const fields = node("div", null, "delivery-fields");
+    const actions = node("div", null, "detail-actions");
     const notice = node("p", null, "warn-text");
     notice.setAttribute("role", "status");
     const create = node("button", "add_platform", "quiet");
@@ -21,8 +21,8 @@ window.DeliveryPlatforms = (() => {
     actions.append(save, remove);
     form.append(fields, actions);
     host.append(create, list, form, notice);
-    let current = null,
-      draft = null;
+    let current = null;
+    let draft = null;
     const descriptors = [
       ["id", "platform_id"],
       ["name", "platform_name"],
@@ -62,28 +62,35 @@ window.DeliveryPlatforms = (() => {
       notice.textContent = "";
       remove.hidden = !current;
       for (const [path, key, type, optional] of descriptors) {
-        const parts = path.split("."),
-          parent = parts.length === 1 ? draft : draft[parts[0]],
-          prop = parts.at(-1);
+        const parts = path.split(".");
+        const parent = parts.length === 1 ? draft : draft[parts[0]];
+        const prop = parts.at(-1);
         const label = node("label", null, `field ${type === "checkbox" ? "delivery-check" : ""}`);
         label.append(node("span", key));
         const input = document.createElement(Array.isArray(type) ? "select" : "input");
         input.dataset.platformField = path;
-        if (Array.isArray(type))
+        if (Array.isArray(type)) {
           for (const value of type) {
             const option = document.createElement("option");
             option.value = value;
             option.textContent = value;
             input.append(option);
           }
-        else input.type = type || "text";
-        if (type === "checkbox") input.checked = parent[prop];
-        else input.value = parent[prop] ?? "";
+        } else {
+          input.type = type || "text";
+        }
+        if (type === "checkbox") {
+          input.checked = parent[prop];
+        } else {
+          input.value = parent[prop] ?? "";
+        }
         if (type === "number") {
           input.min = "1";
           input.step = path === "chapters.min_seconds" ? "any" : "1";
         }
-        if (type !== "checkbox") input.required = !optional;
+        if (type !== "checkbox") {
+          input.required = !optional;
+        }
         if (path === "id") {
           input.disabled = !!current;
           input.pattern = "[a-z][a-z0-9-]{0,63}";
@@ -102,8 +109,9 @@ window.DeliveryPlatforms = (() => {
         label.append(input);
         fields.append(label);
       }
-      for (const button of list.children)
+      for (const button of list.children) {
         button.setAttribute("aria-current", String(button.dataset.id === current));
+      }
     }
     async function load(id = current) {
       const items = (await api()).items;
@@ -135,7 +143,9 @@ window.DeliveryPlatforms = (() => {
       }
     };
     remove.onclick = async () => {
-      if (!current || !confirm(MindexI18n.render(t("delete_platform_confirm")))) return;
+      if (!current || !confirm(MindexI18n.render(t("delete_platform_confirm")))) {
+        return;
+      }
       remove.disabled = true;
       try {
         await api(`/${current}`, "DELETE");

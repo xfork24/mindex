@@ -23,14 +23,14 @@ const nodes = Object.fromEntries(
     (id) => [id, new Node()],
   ),
 );
-const requests = [],
-  notices = [],
-  failures = [],
-  accepted = [],
-  confirms = [];
-let confirmAnswer = true,
-  refreshes = 0,
-  apiImpl = async () => ({});
+const requests = [];
+const notices = [];
+const failures = [];
+const accepted = [];
+const confirms = [];
+let confirmAnswer = true;
+let refreshes = 0;
+let apiImpl = async () => ({});
 const job = {
   id: "job",
   title: "t",
@@ -85,8 +85,8 @@ const sandbox = {
 vm.createContext(sandbox);
 const source = require("./studio_source.cjs").studioSource();
 const slice = (start, end) => {
-  const a = source.indexOf(start),
-    b = source.indexOf(end, a);
+  const a = source.indexOf(start);
+  const b = source.indexOf(end, a);
   assert.ok(a >= 0 && b > a, `创作页脚本中找不到代码片段：${start} … ${end}`);
   return source.slice(a, b);
 };

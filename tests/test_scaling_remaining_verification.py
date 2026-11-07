@@ -8,11 +8,17 @@
 
 from __future__ import annotations
 
+import hashlib
+import io
 import os
 import subprocess
+import threading
 import time
+import time as _time
 
 import pytest
+from fastapi.testclient import TestClient
+from filelock import Timeout
 
 from shared.config import Config
 from shared.storage import Store
@@ -81,7 +87,6 @@ def _bucket_store(tmp_path, monkeypatch, *, bucket, queue="inline", locks="file"
 
 
 def test_item01_processing_lock_coordinates_via_pg(pg, tmp_path):
-    from filelock import Timeout
 
     from shared.processing_lock import ProcessingLock
 
@@ -114,7 +119,6 @@ def test_item01_processing_lock_coordinates_via_pg(pg, tmp_path):
 
 def test_item01b_resource_locks_and_index_write_coordinate_via_pg(pg, tmp_path):
     """同素材+同工作的资源锁与 index-write 锁在 PG 形态跨 data_dir 互斥。"""
-    from filelock import Timeout
 
     from shared.processing_lock import ProcessingLock, index_write_lock
 
@@ -226,8 +230,6 @@ def test_item03_studio_workspace_conditional_publish(tmp_path):
         except versions.RevisionConflict:
             results.append(("conflict", name))
 
-    import threading
-
     threads = [threading.Thread(target=writer, args=(f"w{i}",)) for i in range(2)]
     for thread in threads:
         thread.start()
@@ -282,7 +284,6 @@ def test_item04_checkpoints_stay_on_node(pg, tmp_path, video_file, monkeypatch, 
 
 def test_item05_upload_lands_in_object_storage(pg, tmp_path, video_file, monkeypatch, s3_env):
     """S3 形态：上传直接写内容寻址的不可变对象，不落节点本地；重复上传幂等。"""
-    from fastapi.testclient import TestClient
 
     from api import create_app
 
@@ -309,8 +310,6 @@ def test_item05_upload_lands_in_object_storage(pg, tmp_path, video_file, monkeyp
 
 
 def test_item06_download_pin_blocks_purge(pg, tmp_path, monkeypatch, s3_env):
-    import hashlib
-    import io
 
     from maintenance.purge import purge_source
     from shared.media_delivery import DownloadPins
@@ -332,8 +331,6 @@ def test_item06_download_pin_blocks_purge(pg, tmp_path, monkeypatch, s3_env):
 
 def test_item06_clean_collects_s3_orphans_respecting_pins(pg, tmp_path, monkeypatch, s3_env):
     """S3 孤儿回收：未引用且过宽限的对象被删；被引用/被 pin/未过宽限的保留。"""
-    import hashlib
-    import io
 
     from maintenance.clean import clean_library
     from shared.media_delivery import DownloadPins
@@ -387,7 +384,6 @@ def test_item07_persons_review_queries_on_pg(pg, tmp_path):
 
 
 def test_item08_agent_changes_route_on_cluster(pg, tmp_path, monkeypatch, s3_env):
-    from fastapi.testclient import TestClient
 
     from api import create_app
 
@@ -426,7 +422,6 @@ def test_item08_agent_changes_route_on_cluster(pg, tmp_path, monkeypatch, s3_env
 
 
 def test_item09_health_metrics_surface(pg, tmp_path, monkeypatch, s3_env):
-    from fastapi.testclient import TestClient
 
     from api import create_app
 
@@ -450,13 +445,10 @@ def test_item09_health_metrics_surface(pg, tmp_path, monkeypatch, s3_env):
 
 def test_item10_gpu_capacity_admission(pg, tmp_path):
     """capacity=1 时两个 worker 并发执行 GPU 类别任务：实际并发不超过 1。"""
-    import threading
-    import time as _time
-
-    from worker_runtime import Worker
 
     from shared.backends import open_context
     from shared.db.queue_pg import PgTaskQueue
+    from worker.runtime import Worker
 
     config = Config(
         data_dir=tmp_path / "data",

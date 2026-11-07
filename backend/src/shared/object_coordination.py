@@ -4,11 +4,18 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 import threading
 import time
 from contextlib import contextmanager
 from uuid import uuid4
+
+from shared.db.dialect import _segments
+from shared.db.fencing import current_attempt
+from shared.db.pg_backend import BUSINESS_CONNECTION
+from shared.migration_state import backend_scope, guard
+from shared.resource_registry import PREFIXES, path_values, referenced
 
 
 class ObjectDeleting(RuntimeError):
@@ -22,7 +29,6 @@ def coordination_keys(library_id):
 
 def reference_arguments(sql, values):
     """只检查引用列，普通用户备注即使像对象 key 也不改写或拦截。"""
-    from shared.db.dialect import _segments
 
     fields = {
         "path",
@@ -87,7 +93,6 @@ def reference_arguments(sql, values):
 def publication_guard(connection, library_id, values=()):
     """PG 业务写入持共享引用锁；GC 删除意图持独占锁。"""
     connection.execute("SELECT pg_advisory_xact_lock_shared(%s,%s)", coordination_keys(library_id))
-    from shared.resource_registry import PREFIXES, path_values
 
     keys = set()
     for value in values:
@@ -121,8 +126,6 @@ class ObjectCoordinator:
     @contextmanager
     def locked(self, key, *, deleting=False, writing=False):
         if self.store.pg and not deleting:
-            from shared.db.pg_backend import BUSINESS_CONNECTION
-
             active = BUSINESS_CONNECTION.get()
             if (
                 active is not None
@@ -199,12 +202,10 @@ class ObjectCoordinator:
                     self.pin(key, owner=pin_id, kind=kind, ttl=ttl, pin_id=pin_id)
                 except Exception:
                     # 后端失联时不伪造成功；原 pin 的宽限仍保留，读取本地 pin 继续保护。
-                    import logging
 
                     logging.getLogger(__name__).exception("远端 pin 续期失败：%s", key)
 
         thread = threading.Thread(target=renew, name="remote-pin-renew", daemon=True)
-        from shared.db.pg_backend import BUSINESS_CONNECTION
 
         transactional = self.store.pg and BUSINESS_CONNECTION.get() is not None
         if not transactional:
@@ -219,8 +220,6 @@ class ObjectCoordinator:
                 with self.locked(key) as db:
                     db.execute("DELETE FROM resource_pins WHERE id=?", (pin_id,))
             except Exception:
-                import logging
-
                 logging.getLogger(__name__).exception("远端 pin 释放失败，将按 TTL 回收：%s", key)
 
     def now(self, db):
@@ -247,12 +246,9 @@ class ObjectCoordinator:
     @contextmanager
     def writing(self, key):
         with self.locked(key, writing=True) as db:
-            from shared.migration_state import backend_scope, guard
-
             guard(db, backend_scope(self.store))
             self.ensure_live(db, key, writing=True)
             yield
-            from shared.db.fencing import current_attempt
 
             attempt = current_attempt()
             owner = attempt.task.attempt_id if attempt else uuid4().hex
@@ -263,7 +259,6 @@ class ObjectCoordinator:
 
     def collect(self, media, key, *, grace, now=None):
         """标记、独立提交删除意图，再条件删除；崩溃后可重放 deleting 状态。"""
-        from shared.resource_registry import referenced
 
         with self.locked(key, deleting=True) as db:
             now = self.now(db) if now is None else now

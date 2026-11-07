@@ -10,9 +10,12 @@
 from __future__ import annotations
 
 import logging
+import shutil
 from pathlib import Path
 
+from persons.persons import purge_person_source
 from processing.indexing import VectorIndex
+from shared.db.maintenance_gate import maintenance_gate
 from shared.storage import Store, bump_snapshot_revision
 
 logger = logging.getLogger(__name__)
@@ -53,7 +56,6 @@ def _remove_tree(path: Path) -> int:
     if not path.is_dir():
         return 0
     removed = _count_files(path)
-    import shutil
 
     shutil.rmtree(path)
     return removed
@@ -76,7 +78,6 @@ def purge_source(store: Store, source_id: str, *, media=None, pins=None) -> dict
     破坏性删除经 maintenance gate 全局互斥（PG 形态；本地沿用调用方持有的
     pipeline/library/index-write 文件锁）。
     """
-    from shared.db.maintenance_gate import maintenance_gate
 
     with maintenance_gate(store, name=f"purge:{source_id}"):
         return _purge_source_locked(store, source_id, media=media, pins=pins)
@@ -141,7 +142,6 @@ def _purge_source_locked(store: Store, source_id: str, *, media=None, pins=None)
         db.execute("DELETE FROM scene_plans WHERE source_id=?", (source_id,))
         db.execute("DELETE FROM source_curation WHERE id=?", (source_id,))
         db.execute("DELETE FROM runs WHERE source_id=?", (source_id,))
-        from persons.persons import purge_person_source
 
         purge_person_source(db, source_id)
         db.execute(

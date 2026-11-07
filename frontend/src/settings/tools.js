@@ -12,7 +12,7 @@
   const sourceUrl = (id, suffix = "") =>
     `/api/studio/tool-sources/${encodeURIComponent(id)}${suffix}`;
   const TEMPLATES = {
-    http: {
+    "http": {
       base_url: "https://example.com",
       headers: { Authorization: "secret:token" },
       submit_path: "/tools/{tool}/jobs",
@@ -29,18 +29,23 @@
     "mcp-http": { url: "https://example.com/mcp", headers: {} },
     "mcp-stdio": { command: "/usr/local/bin/my-mcp-server", args: [], env: {}, cwd: null },
   };
-  const CONNECTION_KEY = { http: "http", "mcp-http": "mcp_http", "mcp-stdio": "stdio" };
+  const CONNECTION_KEY = { "http": "http", "mcp-http": "mcp_http", "mcp-stdio": "stdio" };
 
   function el(tag, text, cls) {
     const node = document.createElement(tag);
-    if (text != null) MindexI18n.setText(node, text);
-    if (cls) node.className = cls;
+    if (text != null) {
+      MindexI18n.setText(node, text);
+    }
+    if (cls) {
+      node.className = cls;
+    }
     return node;
   }
   function notice(text, error = false) {
     const value = error ? MindexI18n.system(text) : text;
-    if (globalThis.MindexFeedback)
+    if (globalThis.MindexFeedback) {
       return MindexFeedback.show("notice", value, error ? "error" : "info");
+    }
     MindexI18n.setText($("notice"), value);
   }
   const failed = (error) => notice(error.message, true);
@@ -60,10 +65,14 @@
       const entry = el("button", null, "tool-item");
       entry.type = "button";
       entry.dataset.id = item.id;
-      if (page.selected?.id === item.id) entry.classList.add("active");
+      if (page.selected?.id === item.id) {
+        entry.classList.add("active");
+      }
       entry.append(el("div", item.name, "tool-item-title"));
       const parts = [item.protocol, MindexI18n.msg("ui.tools_count", { p0: item.tools.length })];
-      if (item.missing_secrets.length) parts.push(MindexI18n.msg("ui.tools_missing_secrets"));
+      if (item.missing_secrets.length) {
+        parts.push(MindexI18n.msg("ui.tools_missing_secrets"));
+      }
       entry.append(
         el(
           "div",
@@ -90,17 +99,25 @@
   function control(label, value, type, onChange, extra = {}) {
     const wrap = el("label", label, extra.check ? "check" : "form-field");
     const input = document.createElement(extra.choices ? "select" : "input");
-    if (extra.choices)
+    if (extra.choices) {
       for (const [v, text] of extra.choices) {
         const option = el("option", text);
         option.value = v;
         input.append(option);
       }
-    else input.type = type;
-    if (type === "checkbox") input.checked = Boolean(value);
-    else input.value = value ?? "";
-    for (const key of ["min", "max", "step", "maxLength"])
-      if (extra[key] != null) input[key] = extra[key];
+    } else {
+      input.type = type;
+    }
+    if (type === "checkbox") {
+      input.checked = Boolean(value);
+    } else {
+      input.value = value ?? "";
+    }
+    for (const key of ["min", "max", "step", "maxLength"]) {
+      if (extra[key] != null) {
+        input[key] = extra[key];
+      }
+    }
     input.addEventListener(type === "checkbox" || extra.choices ? "change" : "input", () =>
       onChange(
         type === "checkbox" ? input.checked : type === "number" ? Number(input.value) : input.value,
@@ -181,7 +198,11 @@
     const box = $("tool-secrets");
     box.replaceChildren(el("h3", MindexI18n.msg("ui.tools_secrets")));
     const known = new Map((item?.secrets || []).map((entry) => [entry.name, entry.set]));
-    for (const name of Object.keys(page.secrets)) if (!known.has(name)) known.set(name, false);
+    for (const name of Object.keys(page.secrets)) {
+      if (!known.has(name)) {
+        known.set(name, false);
+      }
+    }
     for (const [name, set] of known) {
       const wrap = el(
         "label",
@@ -207,8 +228,9 @@
     add.type = "button";
     add.addEventListener("click", () => {
       const name = nameInput.value.trim();
-      if (!/^[A-Za-z0-9_-]{1,40}$/.test(name))
+      if (!/^[A-Za-z0-9_-]{1,40}$/.test(name)) {
         return notice(MindexI18n.msg("ui.tools_secret_name_invalid"), true);
+      }
       page.secrets[name] = page.secrets[name] || "";
       renderSecrets(item);
     });
@@ -227,7 +249,9 @@
     const visible = Boolean(item || page.creating);
     $("tool-empty").hidden = visible;
     $("tool-form").hidden = !visible;
-    if (!visible) return;
+    if (!visible) {
+      return;
+    }
     MindexI18n.setText($("tool-title"), item ? item.name : MindexI18n.msg("ui.tools_new"));
     $("tf-id").value = item?.id || "";
     $("tf-id").disabled = Boolean(item);
@@ -257,7 +281,9 @@
     renderList();
     renderSummary();
     const id = preferred || page.selected?.id;
-    if (id && page.items.some((item) => item.id === id)) await select(id);
+    if (id && page.items.some((item) => item.id === id)) {
+      await select(id);
+    }
   }
   function body() {
     const protocol = $("tf-protocol").value;
@@ -299,7 +325,7 @@
     box.replaceChildren(el("p", MindexI18n.msg("ui.tools_testing")));
     const result = await api(sourceUrl(page.selected.id, "/test"), "POST");
     box.replaceChildren();
-    if (!result.ok)
+    if (!result.ok) {
       return box.append(
         el(
           "p",
@@ -307,6 +333,7 @@
           "tool-warn",
         ),
       );
+    }
     box.append(
       el(
         "p",
@@ -316,7 +343,7 @@
         }),
       ),
     );
-    if (result.missing?.length)
+    if (result.missing?.length) {
       box.append(
         el(
           "p",
@@ -324,9 +351,12 @@
           "tool-warn",
         ),
       );
+    }
     const known = new Set(page.entries.map((entry) => entry.name));
     for (const tool of result.tools || []) {
-      if (known.has(tool.name)) continue;
+      if (known.has(tool.name)) {
+        continue;
+      }
       const row = el("div", "", "detail-actions");
       const add = el(
         "button",
@@ -356,8 +386,9 @@
       !window.confirm(
         MindexI18n.render(MindexI18n.msg("ui.tools_delete_confirm", { p0: page.selected.name })),
       )
-    )
+    ) {
       return;
+    }
     await api(sourceUrl(page.selected.id), "DELETE");
     page.selected = null;
     history.replaceState(null, "", "/settings#tools");
@@ -400,7 +431,9 @@
   });
   window.addEventListener("mindex:agent-mutation", (event) => {
     const detail = event.detail || {};
-    if (detail.domain === "studio" && detail.tool_sources) load().catch(() => {});
+    if (detail.domain === "studio" && detail.tool_sources) {
+      load().catch(() => {});
+    }
   });
   load(query.get("tool")).catch(failed);
 })();

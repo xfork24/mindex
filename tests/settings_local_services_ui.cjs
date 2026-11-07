@@ -55,7 +55,9 @@ class Element {
 }
 const nodes = new Map();
 const get = (id) => {
-  if (!nodes.has(id)) nodes.set(id, new Element());
+  if (!nodes.has(id)) {
+    nodes.set(id, new Element());
+  }
   return nodes.get(id);
 };
 const text = (node) => [node.textContent, ...node.children.flatMap(text)].join(" ");
@@ -92,9 +94,12 @@ const sandbox = {
       failNext = null;
       return { ok: false, status: 422, json: async () => ({ detail }) };
     }
-    if (url === "/api/settings/local-services") return { ok: true, json: async () => services };
-    if (url.endsWith("/logs?tail=200"))
+    if (url === "/api/settings/local-services") {
+      return { ok: true, json: async () => services };
+    }
+    if (url.endsWith("/logs?tail=200")) {
       return { ok: true, json: async () => ({ name: "wemm", text: "listening on 8888" }) };
+    }
     return { ok: true, json: async () => ({}) };
   },
 };

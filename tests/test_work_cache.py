@@ -1,7 +1,11 @@
+"""素材工作检查点与缓存失效回归。"""
+
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from admin.work_cache import WorkCache
 
@@ -88,8 +92,6 @@ def test_manual_refresh_recomputes_and_persists(cache):
 
 
 def test_admin_cache_routes(cache, monkeypatch):
-    from fastapi import FastAPI
-    from fastapi.testclient import TestClient
 
     import admin.work_cache as module
     from admin import admin

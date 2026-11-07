@@ -1,3 +1,5 @@
+"""原片帧读取与人物证据定位回归。"""
+
 from __future__ import annotations
 
 import io

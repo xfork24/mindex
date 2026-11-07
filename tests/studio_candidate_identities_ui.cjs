@@ -1,7 +1,7 @@
 // Run only against serve_fixture.py with candidate-fixture.json seeded under /tmp.
-const assert = require("node:assert/strict"),
-  fs = require("node:fs"),
-  path = require("node:path");
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const { chromium } = require(process.env.MINDEX_PLAYWRIGHT_MODULE || "playwright");
 const batchRun = async (page, stage) => {
   if (stage === "split" && !(await page.evaluate(() => plan().script))) {
@@ -29,12 +29,13 @@ const fixture = JSON.parse(
 );
 const out = "artifacts/candidate-identities";
 fs.mkdirSync(out, { recursive: true });
-let browser, page;
+let browser;
+let page;
 (async () => {
   browser = await chromium.launch({ headless: true });
   page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
-  const errors = [],
-    records = [];
+  const errors = [];
+  const records = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto(base + "/studio");
   await page.locator("#create-text").fill("验收演员");
@@ -52,7 +53,7 @@ let browser, page;
   );
   await openShotStage(page, 0, 1);
   await page.locator(".candidate-picker .detail-candidate").first().waitFor();
-  for (const lang of ["zh", "en"])
+  for (const lang of ["zh", "en"]) {
     for (const width of [1440, 1000, 800, 540, 390, 320]) {
       await page.evaluate((l) => MindexI18n.setLanguage(l), lang);
       await page.setViewportSize({ width, height: 1000 });
@@ -64,8 +65,8 @@ let browser, page;
       );
       const cards = await page.locator(".candidate-picker .detail-candidate").evaluateAll((nodes) =>
         nodes.map((n) => {
-          const preview = n.querySelector(".candidate-image").getBoundingClientRect(),
-            rank = n.querySelector(".candidate-rank").getBoundingClientRect();
+          const preview = n.querySelector(".candidate-image").getBoundingClientRect();
+          const rank = n.querySelector(".candidate-rank").getBoundingClientRect();
           return {
             chips: [...n.querySelectorAll(".evidence-chip")].map((c) => ({
               text: c.textContent,
@@ -109,12 +110,14 @@ let browser, page;
         false,
       );
       records.push({ lang, width, cards });
-      if ([1440, 320].includes(width))
+      if ([1440, 320].includes(width)) {
         await page.screenshot({
           path: path.join(out, `recall-${lang}-${width}.png`),
           fullPage: true,
         });
+      }
     }
+  }
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.evaluate(() => MindexI18n.setLanguage("zh"));
   await page

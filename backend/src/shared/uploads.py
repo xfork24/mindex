@@ -8,13 +8,14 @@ from pathlib import Path
 from fastapi import HTTPException, UploadFile
 from starlette.concurrency import run_in_threadpool
 
+from shared.work_budget import GrowingReservation
+
 
 async def save_upload(upload: UploadFile, path: Path, max_bytes: int):
     """把上传流式写入 ``path``，超过 ``max_bytes`` 返回 413，空文件返回 422。
 
     任何失败（413、422、读写异常或请求取消）都会先删除已写入的半成品再重新抛出。
     """
-    from shared.work_budget import GrowingReservation
 
     try:
         size = 0

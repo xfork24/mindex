@@ -22,7 +22,10 @@ import yaml
 from pydantic import Field, ValidationError, model_validator
 
 from admin.curation import EntityNotFound
+from shared import media
 from shared.config import StrictModel, fingerprint
+from shared.images import image_png
+from studio import studio
 from studio.post_styles import OverlayStyle, SubtitleStyle
 
 BUILTIN_DIR = Path(__file__).resolve().parent / "brands"
@@ -265,7 +268,6 @@ def update_brand(config, store, brand_id: str, changes: BrandChanges, *, now: st
 
 def references(config, brand_id: str) -> list[dict]:
     """引用某品牌模板的方案（扫描全部创作任务的 workspace.json，只读）。"""
-    from studio import studio
 
     root = studio.studio_root(config)
     found = []
@@ -308,7 +310,6 @@ def asset_path(config, asset: AssetRef | dict) -> Path:
 
 def require_asset(config, asset: AssetRef | dict) -> Path:
     """定位品牌素材并复验 sha256；缺失或被改动时报错（预检阻塞、合成失败）。"""
-    from studio import studio
 
     path = asset_path(config, asset)
     sha = asset["sha256"] if isinstance(asset, dict) else asset.sha256
@@ -327,9 +328,6 @@ def digest_file(path: Path) -> str:
 
 def store_asset(config, staged: Path, suffix: str, name: str | None) -> dict:
     """校验并按内容寻址保存一个品牌素材，返回 ``AssetRef`` 视图（含时长、尺寸）。"""
-    from shared.images import image_png
-    from shared.media import probe
-    from studio import studio
 
     suffix = suffix.lower()
     if suffix not in IMAGE_SUFFIXES + VIDEO_SUFFIXES:
@@ -338,13 +336,14 @@ def store_asset(config, staged: Path, suffix: str, name: str | None) -> dict:
     info = {}
     try:
         if kind == "image":
+            # 延迟导入：保留可选依赖探测或异常捕获时的降级行为。
             from PIL import Image
 
             image_png(staged, config.video.max_pixels)
             with Image.open(staged) as image:
                 info = {"width": image.width, "height": image.height, "alpha": "A" in image.getbands()}
         else:
-            found = probe(staged)
+            found = media.probe(staged)
             if found["duration"] > MAX_BOOKEND_SECONDS + 0.05:
                 raise ValueError(f"片头片尾不能超过 {MAX_BOOKEND_SECONDS} 秒")
             info = {

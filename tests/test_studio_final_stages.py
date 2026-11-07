@@ -9,7 +9,9 @@ import pytest
 from studio import studio
 from studio import workspace as ws
 from studio.workspace import stages
-from test_studio_sources import build, make_image, setup, shot, small, store_input  # noqa: F401 — small 是夹具
+
+# small 是夹具，需要保留导入。
+from test_studio_sources import build, make_image, setup, shot, small, store_input  # noqa: F401
 
 
 class ProbeHandler(stages.StageHandler):

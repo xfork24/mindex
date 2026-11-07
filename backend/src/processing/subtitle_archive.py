@@ -36,6 +36,7 @@ def archive_subtitles(store, source):
 
 
 def _archive(store, source, manifest, original):
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
     from processing.dialogue import extract_subtitles, subtitle_tracks
 
     tracks = subtitle_tracks(original)

@@ -57,8 +57,12 @@ function brandDescription(item) {
 // 模板管理页地址：带上要打开的模板与来源任务，便于从管理页回到原任务。
 function templatesPageUrl(templateId, jobId) {
   const params = new URLSearchParams();
-  if (templateId) params.set("id", templateId);
-  if (jobId) params.set("job", jobId);
+  if (templateId) {
+    params.set("id", templateId);
+  }
+  if (jobId) {
+    params.set("job", jobId);
+  }
   const query = params.toString();
   return "/studio/templates" + (query ? `?${query}` : "");
 }

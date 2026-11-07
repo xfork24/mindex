@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 import pytest
 from fastapi.testclient import TestClient
+from PIL import Image
 
 from agent.loopback import MindexClient
 from agent.mcp_server import exported
@@ -296,7 +298,6 @@ def test_backup_partial_empty_groups_and_name_mapping(data, tmp_path):
 
 @pytest.mark.slow
 def test_every_search_mode_stays_inside_groups(config, video_file, tmp_path):
-    from PIL import Image
 
     from conftest import FixtureEmbedder
     from processing.indexing import IndexBuilder
@@ -348,7 +349,6 @@ def test_every_search_mode_stays_inside_groups(config, video_file, tmp_path):
 
 
 def test_mcp_group_lifecycle_and_music_filter(data):
-    import json
 
     from mcp.shared.memory import create_connected_server_and_client_session
 

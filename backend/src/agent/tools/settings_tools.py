@@ -408,10 +408,9 @@ COMFY_FIELDS = {
 
 
 def check_video_config(role: str, config: dict) -> None:
-    (
-        """视频/图片/音乐生成档案的 ComfyUI """
-        """工作流与映射先在本地校验，给出与设置页一致的中文错误（服务端仍会再校验）。"""
-    )
+    """视频/图片/音乐生成档案的 ComfyUI 工作流与映射先在本地校验，
+    给出与设置页一致的中文错误（服务端仍会再校验）。
+    """
     workflow, mapping = config.get("comfyui_workflow"), config.get("comfyui_mapping")
     if role not in COMFY_FIELDS or (workflow is None and mapping is None):
         return
@@ -1116,7 +1115,10 @@ def specs() -> list[ToolSpec]:
         ToolSpec(
             "test_model_profile",
             "settings",
-            "测试某个配置档案能否连通（会对该服务发起一次最小调用；视频/图片/音乐生成档案只做鉴权/可达性探测，不发起生成）。",
+            (
+                "测试某个配置档案能否连通（会对该服务发起一次最小调用；"
+                "视频/图片/音乐生成档案只做鉴权/可达性探测，不发起生成）。"
+            ),
             TestProfile,
             "read",
             test_model_profile,

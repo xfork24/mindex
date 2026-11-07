@@ -34,7 +34,9 @@ class Node {
   }
   append(...children) {
     for (const c of children) {
-      if (c && typeof c === "object") c.parent = this;
+      if (c && typeof c === "object") {
+        c.parent = this;
+      }
       this.children.push(c);
     }
   }
@@ -46,13 +48,19 @@ class Node {
     (this.listeners[type] ||= []).push(fn);
   }
   fire(type) {
-    for (const fn of this.listeners[type] || []) fn({ preventDefault() {} });
+    for (const fn of this.listeners[type] || []) {
+      fn({ preventDefault() {} });
+    }
   }
 }
 const walk = (node, out = []) => {
-  if (!node || typeof node !== "object") return out;
+  if (!node || typeof node !== "object") {
+    return out;
+  }
   out.push(node);
-  for (const c of node.children) walk(c, out);
+  for (const c of node.children) {
+    walk(c, out);
+  }
   return out;
 };
 const find = (root, pred) => walk(root).find(pred);
@@ -103,8 +111,8 @@ const sandbox = {
 vm.createContext(sandbox);
 const source = require("./studio_source.cjs").studioSource();
 const slice = (start, end) => {
-  const a = source.indexOf(start),
-    b = source.indexOf(end, a);
+  const a = source.indexOf(start);
+  const b = source.indexOf(end, a);
   assert.ok(a >= 0 && b > a, `创作页脚本中找不到代码片段：${start} … ${end}`);
   return source.slice(a, b);
 };

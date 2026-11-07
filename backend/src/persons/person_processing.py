@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import io
 import json
 import math
 import time
@@ -12,9 +13,18 @@ from itertools import pairwise
 import httpx
 import numpy as np
 from fastapi import HTTPException
+from PIL import Image, ImageOps
 from pydantic import Field, model_validator
 
+from admin.source_tasks import (
+    enqueue_publications,
+    freeze_config,
+    person_setup,
+    publication_attempt,
+    restore_config,
+)
 from models.adapters import ModelError
+from persons.person_frames import sample_frames
 from persons.person_models import uid
 from persons.persons import Persons
 from shared.background_tasks import BackgroundTaskRunner, public_task
@@ -74,9 +84,7 @@ class PersonClient:
         # is clear. Retry with neutral padding, without changing the stored image.
         observations = result["observations"]
         if not any(d.get("face_feature") and d.get("face_bbox") for d in observations):
-            import io
-
-            from PIL import Image, ImageOps
+            # 延迟导入：媒体、数值或服务运行依赖仅在实际执行该功能时加载。
 
             with Image.open(path) as image:
                 border = max(1, round(max(image.size) * 0.1))
@@ -97,7 +105,6 @@ class PersonClient:
         return {**result, "reference_preprocessing": self.reference_preprocessing}
 
     def video(self, path, start, end, frame_interval):
-        from persons.person_frames import sample_frames
 
         frames, batch = [], []
         space = None
@@ -371,6 +378,7 @@ class ShotTracker:
 
     def __init__(self, fps):
         try:
+            # 延迟导入：保留可选依赖探测或异常捕获时的降级行为。
             import supervision as sv
         except ImportError as exc:
             raise ModelError(
@@ -907,8 +915,6 @@ class PersonProcessor:
         report["candidate_shots"] = len(candidate_shots - accepted_shots)
         report["release"] = None
         if options.publish:
-            from admin.source_tasks import publication_attempt
-
             report["publication"] = publication_attempt(self.config, source_id, "persons", progress=progress)
             if report["publication"]["status"] == "complete":
                 report["release"] = report["publication"]
@@ -962,7 +968,6 @@ class PersonTasks(BackgroundTaskRunner):
             raise HTTPException(404, "找不到素材")
 
         def create():
-            from admin.source_tasks import freeze_config
 
             config = self.runtime.current().model_copy(deep=True)
             self.validate(source_id, options)
@@ -988,7 +993,6 @@ class PersonTasks(BackgroundTaskRunner):
 
     def validate(self, source_id, options, publish_only=False):
         """需已完成分镜；新工作台选择作品时做资料预检（仅重新发布时跳过）。"""
-        from admin.source_tasks import person_setup
 
         source = self.store.one("SELECT prepared FROM sources WHERE id=?", (source_id,))
         if not source or not source["prepared"]:
@@ -1004,7 +1008,6 @@ class PersonTasks(BackgroundTaskRunner):
         self.validate(row["source_id"], options, publish_only=bool(row["result"] and options.publish))
 
     def restore(self, row):
-        from admin.source_tasks import restore_config
 
         return restore_config(row["config"], self.runtime, self.store)
 
@@ -1028,8 +1031,6 @@ class PersonTasks(BackgroundTaskRunner):
         )
         save("result", result)
         if options.publish:
-            from admin.source_tasks import enqueue_publications
-
             save("publication", enqueue_publications(self.runtime, self.store, row["source_id"], "persons"))
         else:
             save("publication", {"status": "not_requested"})

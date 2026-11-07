@@ -32,70 +32,96 @@ def render_review(config: Config, run: Path, queries: Path) -> Path:
     ]
     data = json.dumps({"entries": entries, "segments": cards}, ensure_ascii=False).replace("<", "\\u003c")
     target = run / "label-review.html"
-    template = """<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>中文查询相关性复核</title>
-<meta name="viewport" content="width=device-width, initial-scale=1"><style>__STYLE__</style>
-<h1>中文查询相关性复核</h1><p>逐条观看并补全相关片段，修改查询或相关度，再勾选“已复核”。候选共 __COUNT__
-个精细片段。
-此页不使用模型描述作为真值，也不计算检索质量。对白查询需结合原声核对。</p>
-<label>复核人 <input id="reviewer" type="text" placeholder="请填写实际复核人"></label>
-<p>相关度：1 部分相关、2 主要相关、3 完全相关。初选来自草稿，仍需人工检查全部相关目标。</p>
-<div id="queries"></div><button id="export">下载已确认标注</button><p id="notice" role="status"></p>
-<dialog id="player"><button id="close-player">关闭播放</button><p id="player-title"></p><video
-id="player-video" controls></video></dialog>
-<script>
-const data=__DATA__;
-const box=document.getElementById('queries');
-const player=document.getElementById('player'),playerVideo=document.getElementById('player-video');
-document.getElementById('close-player').onclick=()=>player.close();
-player.onclose=()=>{playerVideo.pause();playerVideo.removeAttribute('src');playerVideo.load();};
-function el(tag,text){const n=document.createElement(tag);if(text!==undefined)n.textContent=text;return n;}
-for(const entry of data.entries){
- const section=el('section');section.dataset.id=entry.id;
- section.append(el('h2',entry.id+' · '+entry.split));
- const input=el('input');input.type='text';input.value=entry.text;input.className='query';section.
-append(input);
- const confirm=el('input');confirm.type='checkbox';confirm.className='confirmed';
- const label=el('label','已复核此查询及相关目标 ');label.prepend(confirm);section.append(label);
- const details=el('details'),summary=el('summary','展开候选，观看并选择相关片段');details.append(summary);
- const grid=el('div');grid.className='grid';
- for(const segment of data.segments){
-  const article=el('article');article.dataset.segment=segment.id;
-  const image=el('img');image.src=segment.thumbnail;image.alt='候选 '+segment.id;image.loading='lazy';image.
-style.width='100%';
-  const play=el('button','播放候选');play.type='button';play.onclick=()=>{playerVideo.src=segment.video;
-playerVideo.poster=segment.thumbnail;document.getElementById('player-title').textContent=segment.start.
-toFixed(3)+'–'+segment.end.toFixed(3)+' 秒';player.showModal();};
-  article.append(image,play,el('small',segment.start.toFixed(3)+'–'+segment.end.toFixed(3)+' 秒 · '+segment.
-id));
-  const checked=el('input');checked.type='checkbox';checked.className='relevant';
-  const prior=(entry.relevant||[]).find(t=>t.segment_id===segment.id);
-  checked.checked=Boolean(prior);const relevance=el('label','相关 ');relevance.prepend(checked);
-  const grade=el('select');grade.className='grade';for(const value of [1,2,3]){const option=el('option',
-String(value));option.value=value;grade.append(option);}grade.value=prior?.grade||3;
-  relevance.append(grade);article.append(relevance);grid.append(article);
- }
- details.append(grid);section.append(details);box.append(section);
-}
-document.getElementById('export').onclick=()=>{
- const reviewer=document.getElementById('reviewer').value.trim();
- try{
-  if(!reviewer)throw Error('请填写实际复核人');
-  const entries=data.entries.map(entry=>{
-   const section=[...box.children].find(n=>n.dataset.id===entry.id);
-   if(!section.querySelector('.confirmed').checked)throw Error(entry.id+' 尚未复核');
-   const text=section.querySelector('.query').value.trim();if(!text)throw Error(entry.id+' 查询为空');
-   const relevant=[...section.querySelectorAll('article')].filter(n=>n.querySelector('.relevant').checked).
-map(n=>({segment_id:n.dataset.segment,grade:Number(n.querySelector('.grade').value)}));
-   if(!relevant.length)throw Error(entry.id+' 尚未标注相关目标；无答案请另建诊断集');
-   return {...entry,text,relevant,label_status:'confirmed',confirmed_by:reviewer};
-  });
-  const blob=new Blob([entries.map(v=>JSON.stringify(v)).join('\\n')+'\\n'],{type:'application/x-ndjson'});
-  const url=URL.createObjectURL(blob),link=el('a');link.href=url;link.download='queries.reviewed.jsonl';link.
-click();setTimeout(()=>URL.revokeObjectURL(url),1000);
-  document.getElementById('notice').textContent='已导出，请用 e2e freeze 冻结文件后再评分。';
- }catch(e){document.getElementById('notice').textContent=e.message;}
-};
-</script></html>"""
+    template = (
+        '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>'
+        "中文查询相关性复核</title>\n"
+        '<meta name="viewport" content="width=device-width, initial-scale=1"><style>'
+        "__STYLE__</style>\n"
+        "<h1>中文查询相关性复核</h1><p>逐条观看并补全相关片段，修改查询或相关度，"
+        "再勾选“已复核”。候选共 __COUNT__ 个精细片段。\n"
+        "此页不使用模型描述作为真值，也不计算检索质量。对白查询需结合原声核对。</p>\n"
+        '<label>复核人 <input id="reviewer" type="text" placeholder="请填写实际复核人">'
+        "</label>\n"
+        "<p>相关度：1 部分相关、2 主要相关、3 完全相关。初选来自草稿，"
+        "仍需人工检查全部相关目标。</p>\n"
+        '<div id="queries"></div><button id="export">下载已确认标注</button><p '
+        'id="notice" role="status"></p>\n'
+        '<dialog id="player"><button id="close-player">关闭播放</button><p '
+        'id="player-title"></p><video id="player-video" controls></video></dialog>\n'
+        "<script>\n"
+        "const data=__DATA__;\n"
+        "const box=document.getElementById('queries');\n"
+        "const player=document.getElementById('player')"
+        ",playerVideo=document.getElementById('player-video');\n"
+        "document.getElementById('close-player').onclick=()=>player.close();\n"
+        "player.onclose=()=>{playerVideo.pause();playerVideo.removeAttribute('src');"
+        "playerVideo.load();};\n"
+        "function el(tag,text){const n=document.createElement(tag);if(text!==undefined)"
+        "n.textContent=text;return n;}\n"
+        "for(const entry of data.entries){\n"
+        " const section=el('section');section.dataset.id=entry.id;\n"
+        " section.append(el('h2',entry.id+' · '+entry.split));\n"
+        " const input=el('input');input.type='text';input.value=entry.text;"
+        "input.className='query';section.append(input);\n"
+        " const confirm=el('input');confirm.type='checkbox';"
+        "confirm.className='confirmed';\n"
+        " const label=el('label','已复核此查询及相关目标 ');label.prepend(confirm);"
+        "section.append(label);\n"
+        " const details=el('details'),summary=el('summary','展开候选，"
+        "观看并选择相关片段');details.append(summary);\n"
+        " const grid=el('div');grid.className='grid';\n"
+        " for(const segment of data.segments){\n"
+        "  const article=el('article');article.dataset.segment=segment.id;\n"
+        "  const image=el('img');image.src=segment.thumbnail;image.alt='候选 "
+        "'+segment.id;image.loading='lazy';image.style.width='100%';\n"
+        "  const play=el('button','播放候选');play.type='button';play.onclick=()=>"
+        "{playerVideo.src=segment.video;playerVideo.poster=segment.thumbnail;"
+        "document.getElementById('player-title').textContent=segment.start.toFixed(3)"
+        "+'–'+segment.end.toFixed(3)+' 秒';player.showModal();};\n"
+        "  article.append(image,play,el('small',segment.start.toFixed(3)"
+        "+'–'+segment.end.toFixed(3)+' 秒 · '+segment.id));\n"
+        "  const checked=el('input');checked.type='checkbox';"
+        "checked.className='relevant';\n"
+        "  const prior=(entry.relevant||[]).find(t=>t.segment_id===segment.id);\n"
+        "  checked.checked=Boolean(prior);const relevance=el('label','相关 ');"
+        "relevance.prepend(checked);\n"
+        "  const grade=el('select');grade.className='grade';for(const value of [1,2,3])"
+        "{const option=el('option',String(value));option.value=value;"
+        "grade.append(option);}grade.value=prior?.grade||3;\n"
+        "  relevance.append(grade);article.append(relevance);grid.append(article);\n"
+        " }\n"
+        " details.append(grid);section.append(details);box.append(section);\n"
+        "}\n"
+        "document.getElementById('export').onclick=()=>{\n"
+        " const reviewer=document.getElementById('reviewer').value.trim();\n"
+        " try{\n"
+        "  if(!reviewer)throw Error('请填写实际复核人');\n"
+        "  const entries=data.entries.map(entry=>{\n"
+        "   const section=[...box.children].find(n=>n.dataset.id===entry.id);\n"
+        "   if(!section.querySelector('.confirmed').checked)throw Error(entry.id+' "
+        "尚未复核');\n"
+        "   const text=section.querySelector('.query').value.trim();if(!text)throw "
+        "Error(entry.id+' 查询为空');\n"
+        "   const relevant=[...section.querySelectorAll('article')].filter(n=>"
+        "n.querySelector('.relevant').checked).map(n=>"
+        "({segment_id:n.dataset.segment,grade:Number(n.querySelector('.grade').value)})"
+        ");\n"
+        "   if(!relevant.length)throw Error(entry.id+' 尚未标注相关目标；"
+        "无答案请另建诊断集');\n"
+        "   return {...entry,text,relevant,label_status:'confirmed',confirmed_by:review"
+        "er};\n"
+        "  });\n"
+        "  const blob=new Blob([entries.map(v=>JSON.stringify(v)).join('\\n')"
+        "+'\\n'],{type:'application/x-ndjson'});\n"
+        "  const url=URL.createObjectURL(blob),link=el('a');link.href=url;"
+        "link.download='queries.reviewed.jsonl';link.click();setTimeout(()=>"
+        "URL.revokeObjectURL(url),1000);\n"
+        "  document.getElementById('notice').textContent='已导出，请用 e2e freeze "
+        "冻结文件后再评分。';\n"
+        " }catch(e){document.getElementById('notice').textContent=e.message;}\n"
+        "};\n"
+        "</script></html>"
+    )
     target.write_text(
         template.replace("__STYLE__", review_style())
         .replace("__DATA__", data)

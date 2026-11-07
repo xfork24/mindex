@@ -30,6 +30,7 @@ def doctor(config: Config, *, serving=False) -> dict:
         return text.splitlines()[0] if text else type(exc).__name__
 
     try:
+        # 延迟导入：保持异常捕获范围，依赖加载失败时仍走原有降级路径。
         from shared.backends import open_context
 
         context = open_context(config)
@@ -46,6 +47,7 @@ def doctor(config: Config, *, serving=False) -> dict:
             version is not None,
             "" if version else "缺少 library.id（先 mindex migrate）",
         )
+        # 延迟导入：保持异常捕获范围，依赖加载失败时仍走原有降级路径。
         from shared.migration_state import pending
 
         with store.connect() as db:
@@ -82,6 +84,7 @@ def doctor(config: Config, *, serving=False) -> dict:
                 else "后端未通过条件删除/版本删除核验，自动 GC 已停止",
             )
             if config.storage.s3.browser_origins and not serving:
+                # 延迟导入：保持异常捕获范围，依赖加载失败时仍走原有降级路径。
                 from shared.s3_multipart import probe_browser
 
                 try:
@@ -116,6 +119,7 @@ def doctor(config: Config, *, serving=False) -> dict:
 
     if context.form == "cluster":
         try:
+            # 延迟导入：保持异常捕获范围，依赖加载失败时仍走原有降级路径。
             from shared.admission import validate_serving
 
             validate_serving(context)

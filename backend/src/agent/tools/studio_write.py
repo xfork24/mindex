@@ -21,15 +21,27 @@ import copy
 import json
 from typing import Literal
 
-from pydantic import Field, ValidationError, model_validator
+from pydantic import Field, TypeAdapter, ValidationError, model_validator
 
 from agent.ids import resolve_shot, resolve_version, short
 from agent.registry import Preview, ToolContext, ToolError, ToolOutput, ToolSpec
-from agent.tools.common import STAGE_LABELS, PlanView, check, clip, load_view
+from agent.tools.common import STAGE_LABELS, PlanView, board_text, check, clip, load_view
 from agent.tools.library_tasks import attachment_meta, size_text
+from agent.tools.media import version_media
 from agent.tools.search import upload_check
 from shared.config import StrictModel
-from studio.models import VERSION_STAGES, BrandOverrides
+from studio.models import VERSION_STAGES, BrandOverrides, ShotBody
+from studio.studio import (
+    VISUAL_LIMIT,
+    ShotMusic,
+    ShotOverlay,
+    ShotRecall,
+    ShotSource,
+    ShotTransition,
+    StudioError,
+    normalize_highlights,
+    visual_error,
+)
 
 VersionStage = Literal[VERSION_STAGES]  # type: ignore[valid-type]  # 由阶段注册表生成
 
@@ -243,6 +255,7 @@ class UpdatePlanOptions(StrictModel):
 
 
 async def plan_options_body(args: UpdatePlanOptions, ctx: ToolContext):
+    # 延迟导入：保持工作区阶段处理器的注册顺序。
     from studio.workspace import PlanOptions
 
     view = await load_view(ctx, args.job_id, args.plan_id)
@@ -612,8 +625,10 @@ class ShotOverlayArgs(StrictModel):
         description="ass=字幕引擎烧录（轻量，缺省）；html=透明 HTML 动画叠加（效果更丰富，需要动画录制组件）",
     )
     kind: Literal["title", "lower_third", "data_card", "custom"] = Field(
-        description="title=标题卡（居中）；lower_third=下三分之一信息条（姓名、职位等）；data_card=数据卡片（右上角）；"
-        "custom=自定义 HTML 动画叠加（仅 html，按 brief 生成）"
+        description=(
+            "title=标题卡（居中）；lower_third=下三分之一信息条（姓名、职位等）；"
+            "data_card=数据卡片（右上角）；custom=自定义 HTML 动画叠加（仅 html，按 brief 生成）"
+        )
     )
     title: str | None = Field(default=None, max_length=60, description="标题（title/lower_third 必填）")
     subtitle: str | None = Field(default=None, max_length=80, description="副标题 / 第二行")
@@ -710,10 +725,12 @@ class ShotOperation(StrictModel):
     fields: ShotFields | None = Field(default=None, description="update/insert：要设置的字段")
     clear: list[ClearableField] | None = Field(
         default=None,
-        description="update：恢复为跟随方案或清空的字段（recall=默认文字召回，granularity=跟随服务配置，"
-        "recall_limit=跟随方案，visual=清空画面意象，source=恢复素材召回，music=去掉背景音乐提示点、顺延前面，"
-        "transition=恢复硬切，highlights=清空高亮词，overlays=去掉文字层）；"
-        "不能与 fields 中的同名字段同时给出",
+        description=(
+            "update：恢复为跟随方案或清空的字段（recall=默认文字召回，granularity=跟随服务配置，"
+            "recall_limit=跟随方案，visual=清空画面意象，source=恢复素材召回，music=去掉背景音乐提示点、"
+            "顺延前面，transition=恢复硬切，highlights=清空高亮词，overlays=去掉文字层）；不能与 fields "
+            "中的同名字段同时给出"
+        ),
     )
     parts: list[ShotFields] | None = Field(
         default=None,
@@ -818,7 +835,6 @@ def validation_message(exc: ValidationError) -> str:
 
 def normalize_recall(value: ShotRecallArgs | dict) -> dict:
     """召回参数 → ShotRecall 的完整规范形状（与工作台存储一致）；image/video 缺省 media_kind 取 mode。"""
-    from studio.studio import ShotRecall
 
     data = value.model_dump() if isinstance(value, ShotRecallArgs) else dict(value)
     if data.get("mode", "text") != "text" and data.get("media_kind") is None:
@@ -831,9 +847,6 @@ def normalize_recall(value: ShotRecallArgs | dict) -> dict:
 
 def normalize_source(value: ShotSourceArgs | dict | None) -> dict | None:
     """来源参数 → Shot.source 的规范形状；recall 返回 None（与工作台存储一致：素材召回不落键）。"""
-    from pydantic import TypeAdapter
-
-    from studio.studio import ShotSource
 
     if value is None:
         return None
@@ -883,7 +896,6 @@ def source_kind(source: dict | None) -> str:
 
 def normalize_music(value: ShotMusicArgs | dict | None) -> dict | None:
     """背景音乐参数 → Shot.music 的规范形状。"""
-    from studio.studio import ShotMusic
 
     if value is None:
         return None
@@ -896,7 +908,6 @@ def normalize_music(value: ShotMusicArgs | dict | None) -> dict | None:
 
 def normalize_transition(value: ShotTransitionArgs | dict | None) -> dict | None:
     """转场参数 → Shot.transition 的规范形状；三项皆空返回 None（硬切不落键）。"""
-    from studio.studio import ShotTransition
 
     if value is None:
         return None
@@ -1020,8 +1031,6 @@ def shot_values(fields: ShotFields | None) -> dict:
     if fields.overlays is not None:
         values["overlays"] = normalize_overlays(fields.overlays)
     if fields.highlights is not None:
-        from studio.studio import normalize_highlights
-
         try:
             values["highlights"] = normalize_highlights(fields.highlights)
         except ValueError as exc:
@@ -1072,6 +1081,7 @@ def field_text(key: str, value):
     if key == "music":
         return music_text(value)
     if key == "transition":
+        # 延迟导入：保持工作区阶段处理器的注册顺序。
         from studio import workspace as ws
 
         return ws.transitions.describe(value)
@@ -1099,9 +1109,6 @@ def overlays_text(value: list[dict] | None) -> str:
 
 
 def normalize_overlays(value) -> list[dict] | None:
-    from pydantic import TypeAdapter
-
-    from studio.studio import ShotOverlay
 
     if not value:
         return None
@@ -1179,12 +1186,9 @@ def set_visual(shot: dict, value: str | None) -> None:
 
 
 def join_visual(a: str | None, b: str | None) -> str | None:
-    (
-        """与 studio-editor.js 的 joinVisual 一致：跳过空值、以「；」拼接、按字符截到 VISUAL_LIMIT；"""
-        """全空返回 """
-        """None。"""
-    )
-    from studio.studio import VISUAL_LIMIT
+    """与 studio-editor.js 的 joinVisual 一致：跳过空值、以「；」拼接、按字符截到 VISUAL_LIMIT；
+    全空返回 None。
+    """
 
     parts = [v.strip() for v in (a, b) if v and v.strip()]
     return "；".join(parts)[:VISUAL_LIMIT] or None
@@ -1420,8 +1424,6 @@ def plan_shots(view: PlanView, operations: list[ShotOperation]) -> tuple[list[di
             )
     if not shots:
         raise ToolError("操作后没有任何分镜；至少保留一个分镜", code="invalid_operation")
-    from studio.models import ShotBody
-    from studio.studio import visual_error
 
     problem = visual_error(shots)
     if problem:
@@ -1481,7 +1483,6 @@ async def edit_shots(args: EditShots, ctx: ToolContext) -> ToolOutput:
     job, pid, body, before, old_order, touched = stored
     data = check(await ctx.client.patch(f"/api/studio/jobs/{job}/plans/{pid}", body), "修改分镜")
     after = PlanView(data, pid)
-    from agent.tools.common import board_text
 
     return ToolOutput(
         {"revision": after.revision, "shots": after.shot_rows()},
@@ -1838,8 +1839,8 @@ class AddReferenceText(StrictModel):
 
 
 async def reference_plan(args: AddReferenceText, ctx: ToolContext) -> dict:
+    # 延迟导入：保持工作区阶段处理器的注册顺序。
     from studio import workspace
-    from studio.studio import StudioError
 
     view = await load_view(ctx, args.job_id, args.plan_id)
     if args.attachment:
@@ -2009,12 +2010,14 @@ class SelectVersion(StrictModel):
 
 
 def final_stages() -> tuple[str, ...]:
+    # 延迟导入：保持工作区阶段处理器的注册顺序。
     from studio import workspace as ws
 
     return ws.stages.names(scope="final")
 
 
 def selected_version(plan: dict, stage: str, sid: str | None):
+    # 延迟导入：保持工作区阶段处理器的注册顺序。
     from studio import workspace as ws
 
     if stage == "script":
@@ -2096,7 +2099,6 @@ async def select_version(args: SelectVersion, ctx: ToolContext) -> ToolOutput:
     data = check(
         await ctx.client.post(f"/api/studio/jobs/{job}/plans/{pid}/select-version", body), "选用版本"
     )
-    from agent.tools.media import version_media
 
     chosen = data["versions"].get(body["version_id"]) if isinstance(data, dict) else None
     media = version_media(
@@ -2208,28 +2210,23 @@ def specs() -> list[ToolSpec]:
         ToolSpec(
             "edit_shots",
             "studio",
-            "批量修改分镜结构：update/insert/delete/move/merge/split。合并规则与创作页一致（旁白拼接、查询以「；」连接、"
-            "时长相加、画面意象以「；」连接并截到 120 "
-            "字）。只能合并相邻分镜。未改动分镜保留产物，只有受影响分镜需要重建。"
-            "split 的各段旁白须由 get_shot_details "
-            "返回的完整旁白按顺序切分，各段按顺序拼接（忽略空白）须等于原旁白。"
-            "update/insert "
-            "可设置分镜召回：recall（文字+人物/限定素材/图片或视频召回，整体替换）、granularity、"
-            "recall_limit；source 设置画面来源（recall 素材召回 / clip 已上传片段 + 起点 start / image "
-            "已上传图片 + "
-            "motion、strength / aigc_image AI 生成图片 / aigc AI 生成视频（mode "
-            "选文生、首帧、尾帧、首尾帧、主体参考，"
-            "以及 H3 的 model、resolution、ratio、duration）/ animation AI 动画）；music "
-            "设置背景音乐提示点（从该分镜起"
-            "生成/翻唱/停止背景音乐，之后的分镜顺延，默认没有背景音乐）；transition 设置转场（enter/leave "
-            "镜内转场"
-            "fade/white/zoom/slide，next 到下一镜的重叠转场，默认硬切）；update 的 clear "
-            "把这些字段恢复为跟随方案"
-            "（visual 为清空、source 恢复素材召回、music 去掉提示点、transition 恢复硬切）；highlights "
-            "设置字幕高亮词"
-            "（烧录字幕时变色，字幕样式用 update_plan_options 的 subtitle_style）；overlays 设置文字层"
-            "（标题卡 / 信息条 / 数据卡片，engine=ass 烧录或 html 透明动画叠加）。"
-            "用户给的图片/视频附件请用 attach_query_media。",
+            (
+                "批量修改分镜结构：update/insert/delete/move/merge/split。合并规则与创作页一致（旁白拼接、"
+                "查询以「；」连接、时长相加、画面意象以「；」连接并截到 120 字）。只能合并相邻分镜。"
+                "未改动分镜保留产物，只有受影响分镜需要重建。split 的各段旁白须由 get_shot_details "
+                "返回的完整旁白按顺序切分，各段按顺序拼接（忽略空白）须等于原旁白。update/insert "
+                "可设置分镜召回：recall（文字+人物/限定素材/图片或视频召回，整体替换）、granularity、"
+                "recall_limit；source 设置画面来源（recall 素材召回 / clip 已上传片段 + 起点 start / image "
+                "已上传图片 + motion、strength / aigc_image AI 生成图片 / aigc AI 生成视频（mode 选文生、"
+                "首帧、尾帧、首尾帧、主体参考，以及 H3 的 model、resolution、ratio、duration）/ animation "
+                "AI 动画）；music 设置背景音乐提示点（从该分镜起生成/翻唱/停止背景音乐，之后的分镜顺延，"
+                "默认没有背景音乐）；transition 设置转场（enter/leave 镜内转场fade/white/zoom/slide，next "
+                "到下一镜的重叠转场，默认硬切）；update 的 clear 把这些字段恢复为跟随方案（visual 为清空、"
+                "source 恢复素材召回、music 去掉提示点、transition 恢复硬切）；highlights "
+                "设置字幕高亮词（烧录字幕时变色，字幕样式用 update_plan_options 的 subtitle_style）；"
+                "overlays 设置文字层（标题卡 / 信息条 / 数据卡片，engine=ass 烧录或 html 透明动画叠加）。"
+                "用户给的图片/视频附件请用 attach_query_media。"
+            ),
             EditShots,
             "write",
             edit_shots,
@@ -2247,11 +2244,13 @@ def specs() -> list[ToolSpec]:
         ToolSpec(
             "attach_query_media",
             "studio",
-            "把图片、视频或音频附件用于某个分镜，只需一次确认。purpose=query（缺省）：上传为查询文件并把该分镜改为"
-            "图片/视频召回（保留原素材范围与时长筛选，去掉人物条件）；purpose=source：上传为画面文件并把该分镜的"
-            "画面来源改为上传片段（视频）或静态图片（图片），不再召回素材；分镜是 aigc "
-            "时作为首帧/尾帧/主体参考"
-            "（role），是 aigc_image 时作为主体参考图；role=cover 的音频作为背景音乐翻唱参考。",
+            (
+                "把图片、视频或音频附件用于某个分镜，只需一次确认。purpose=query（缺省）：上传为查询文件并"
+                "把该分镜改为图片/视频召回（保留原素材范围与时长筛选，去掉人物条件）；"
+                "purpose=source：上传为画面文件并把该分镜的画面来源改为上传片段（视频）或静态图片（图片），"
+                "不再召回素材；分镜是 aigc 时作为首帧/尾帧/主体参考（role），是 aigc_image "
+                "时作为主体参考图；role=cover 的音频作为背景音乐翻唱参考。"
+            ),
             AttachQueryMedia,
             "write",
             attach_query_media,

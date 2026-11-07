@@ -32,24 +32,34 @@
     }
     const response = await fetch(url, options);
     const studioRevision = response.headers?.get("X-Studio-Revision");
-    if (job && studioRevision && response.ok) studioRevisions.set(job, studioRevision);
-    if (response.status === 204) return {};
+    if (job && studioRevision && response.ok) {
+      studioRevisions.set(job, studioRevision);
+    }
+    if (response.status === 204) {
+      return {};
+    }
     let data;
     try {
       data = await response.json();
     } catch (error) {
-      if (error?.name === "AbortError") throw error;
+      if (error?.name === "AbortError") {
+        throw error;
+      }
       data = response.ok ? {} : { detail: `HTTP ${response.status}` };
     }
-    if (!response.ok) throw failure(response, data);
-    if (data?._analysis_translations)
+    if (!response.ok) {
+      throw failure(response, data);
+    }
+    if (data?._analysis_translations) {
       root.MindexAnalysisText?.addTranslations(data._analysis_translations);
+    }
     return data;
   }
   function json(url, method = "GET", body, options = {}) {
     const init = { ...options, method };
-    if (typeof FormData !== "undefined" && body instanceof FormData) init.body = body;
-    else if (body !== undefined && body !== null) {
+    if (typeof FormData !== "undefined" && body instanceof FormData) {
+      init.body = body;
+    } else if (body !== undefined && body !== null) {
       init.headers = { "Content-Type": "application/json", ...(options.headers || {}) };
       init.body = JSON.stringify(body);
     }
@@ -83,18 +93,19 @@
       return this;
     }
     block(bytes) {
-      const k = Sha256.k,
-        w = this.words,
-        r = Sha256.rotate;
-      for (let i = 0; i < 16; i++)
+      const k = Sha256.k;
+      const w = this.words;
+      const r = Sha256.rotate;
+      for (let i = 0; i < 16; i++) {
         w[i] =
           (bytes[i * 4] << 24) |
           (bytes[i * 4 + 1] << 16) |
           (bytes[i * 4 + 2] << 8) |
           bytes[i * 4 + 3];
+      }
       for (let i = 16; i < 64; i++) {
-        const a = w[i - 15],
-          b = w[i - 2];
+        const a = w[i - 15];
+        const b = w[i - 2];
         w[i] =
           (w[i - 16] +
             (r(a, 7) ^ r(a, 18) ^ (a >>> 3)) +
@@ -123,8 +134,9 @@
       const bits = BigInt(this.length) * 8n;
       const ending = new Uint8Array((this.used < 56 ? 64 : 128) - this.used);
       ending[0] = 128;
-      for (let i = 0; i < 8; i++)
+      for (let i = 0; i < 8; i++) {
         ending[ending.length - 1 - i] = Number((bits >> BigInt(i * 8)) & 255n);
+      }
       this.update(ending);
       return [...this.h].map((v) => v.toString(16).padStart(8, "0")).join("");
     }
@@ -142,12 +154,13 @@
   ]);
   async function uploadSource(file, onProgress = () => {}, options = {}) {
     const transport = options.transport || "api";
-    const digest = new Sha256(),
-      chunkSize = 1024 * 1024;
-    for (let offset = 0; offset < file.size; offset += chunkSize)
+    const digest = new Sha256();
+    const chunkSize = 1024 * 1024;
+    for (let offset = 0; offset < file.size; offset += chunkSize) {
       digest.update(new Uint8Array(await file.slice(offset, offset + chunkSize).arrayBuffer()));
-    const sha256 = digest.hex(),
-      storageKey = `mindex.upload:${sha256}:${file.size}${transport === "api" ? "" : ":s3"}`;
+    }
+    const sha256 = digest.hex();
+    const storageKey = `mindex.upload:${sha256}:${file.size}${transport === "api" ? "" : ":s3"}`;
     let session;
     try {
       session = JSON.parse(root.sessionStorage?.getItem(storageKey) || "null");
@@ -155,15 +168,18 @@
       /* 存储禁用时仍可完成上传。 */
     }
     if (options.restart) {
-      if (session)
+      if (session) {
         try {
           await request(`/api/uploads/${session.id}`, {
             method: "DELETE",
             headers: { "X-Upload-Token": session.upload_token },
           });
         } catch (error) {
-          if (![404, 409, 410].includes(error.status)) throw error;
+          if (![404, 409, 410].includes(error.status)) {
+            throw error;
+          }
         }
+      }
       session = null;
     }
     if (session) {
@@ -173,18 +189,22 @@
         });
         session = { ...session, ...status };
       } catch (error) {
-        if (transport === "api" && (error.status === 404 || error.status === 410)) session = null;
-        else throw error;
+        if (transport === "api" && (error.status === 404 || error.status === 410)) {
+          session = null;
+        } else {
+          throw error;
+        }
       }
       if (
         session &&
         (["aborted", "expired"].includes(session.state) ||
           (session.state === "pending" && session.expires_at <= Date.now() / 1000))
       ) {
-        if (transport === "s3")
+        if (transport === "s3") {
           throw new Error(
             root.MindexI18n?.msg("ui.upload_restart_required") || "上传会话已过期，请显式重新上传",
           );
+        }
         session = null;
       }
     }
@@ -201,8 +221,8 @@
         /* 会话凭据仍在当前调用中保留。 */
       }
     }
-    const headers = { "X-Upload-Token": session.upload_token },
-      present = new Set(session.parts.map((p) => p.number));
+    const headers = { "X-Upload-Token": session.upload_token };
+    const present = new Set(session.parts.map((p) => p.number));
     for (let offset = 0, number = 1; offset < file.size; offset += session.part_size, number++) {
       if (!present.has(number) && session.state === "pending") {
         const chunk = file.slice(offset, offset + session.part_size);
@@ -219,30 +239,33 @@
             headers: signed.headers,
             credentials: "omit",
           });
-          if (!response.ok)
+          if (!response.ok) {
             throw failure(response, {
               detail:
                 root.MindexI18n?.msg("ui.upload_direct_failed", { p0: response.status }) ||
                 `S3 上传失败：HTTP ${response.status}`,
             });
+          }
           const etag = response.headers.get("ETag");
-          if (!etag)
+          if (!etag) {
             throw new Error(
               root.MindexI18n?.msg("ui.upload_cors_etag") ||
                 "S3 CORS 未暴露 ETag，请修复部署后续传",
             );
+          }
           await json(
             `/api/uploads/${session.id}/parts/${number}/receipt`,
             "POST",
             { etag },
             { headers },
           );
-        } else
+        } else {
           await request(`/api/uploads/${session.id}/parts/${number}`, {
             method: "PUT",
             headers,
             body: chunk,
           });
+        }
       }
       onProgress(Math.min(100, Math.round(((offset + session.part_size) / file.size) * 100)));
     }

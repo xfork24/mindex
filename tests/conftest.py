@@ -1,10 +1,6 @@
+"""隔离配置、媒体与确定性模型测试夹具。"""
+
 from __future__ import annotations
-
-import sys
-from pathlib import Path
-
-# 查询根目录修正:包内组件以短名导入(shared.media / cli 等)。
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend" / "src"))
 
 import io
 import math
@@ -12,8 +8,11 @@ import struct
 import wave
 from pathlib import Path
 
+import httpx
+import mindex  # noqa: F401 — pytest 与独立夹具脚本共用包自举
 import numpy as np
 import pytest
+from PIL import Image
 
 from shared.config import Config
 from shared.media import command
@@ -57,7 +56,6 @@ def backup_seed(tmp_path_factory, video_file):
 @pytest.fixture(autouse=True)
 def offline_model_network(monkeypatch):
     """默认测试只访问本机隔离服务，禁止落到 Config 示例地址上的真实模型。"""
-    import httpx
 
     original = httpx.HTTPTransport.handle_request
     original_async = httpx.AsyncHTTPTransport.handle_async_request
@@ -179,7 +177,6 @@ class FixtureEmbedder:
         return vector.tolist()
 
     def image(self, path: Path):
-        from PIL import Image
 
         self.calls += 1
         with Image.open(path) as image:

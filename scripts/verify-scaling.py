@@ -25,6 +25,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
+import httpx
+import yaml
+
 ROOT = Path(__file__).resolve().parents[1]
 PG_IMAGE = "postgres@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab"
 CHROMA_IMAGE = "chromadb/chroma@sha256:1e0b73a187a28757c572acba508c46f48c9e8b0acaf5c20e6d95cdedce1acdf6"
@@ -147,9 +150,7 @@ def dependency_fault_drills(
     liveness 只反映进程存活；readiness 在有界期限内区分具体依赖故障，恢复后自动转绿。
     演练细节随步写入 report["drills"]；任一步失败即中止并保留已记录证据。
     """
-    import httpx
     import psycopg
-    import yaml
 
     from shared.db.migrate_pg import migrate_pg
 
@@ -205,7 +206,7 @@ def dependency_fault_drills(
             [
                 sys.executable,
                 "-c",
-                "from mindex.cli import app; app()",
+                "import mindex; from cli import app; app()",
                 "--config",
                 str(node_config(name, role, node_port)),
                 "serve",

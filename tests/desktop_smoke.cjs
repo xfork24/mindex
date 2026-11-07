@@ -25,9 +25,11 @@ const alive = (pid) => {
 };
 // Windows 没有对其他进程的 SIGKILL；dev 模式杀的还是 uv.exe 树，用 taskkill /T /F 连子进程一起结束。
 const killTree = (pid) => {
-  if (isWin)
+  if (isWin) {
     childProcess.execFileSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore" });
-  else process.kill(pid, "SIGKILL");
+  } else {
+    process.kill(pid, "SIGKILL");
+  }
 };
 // Linux CI 容器里 Electron 需要 --no-sandbox（chrome-sandbox 未设 SUID）；AppImage 还需解包运行。
 const electronArgs = (appDir) => [
@@ -42,7 +44,9 @@ const launchEnv = () => ({
 async function waitFor(predicate, timeout, message) {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
-    if (await predicate()) return;
+    if (await predicate()) {
+      return;
+    }
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
   throw new Error(message);

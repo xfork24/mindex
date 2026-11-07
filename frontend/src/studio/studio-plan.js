@@ -31,8 +31,8 @@ function createPlan(mode, finalId = null) {
   );
 }
 function renamePlan() {
-  const body = showDialog(MindexI18n.msg("ui.a2397a951f7f")),
-    f = field(MindexI18n.msg("ui.5fd61b9aa9cf"), plan().name);
+  const body = showDialog(MindexI18n.msg("ui.a2397a951f7f"));
+  const f = field(MindexI18n.msg("ui.5fd61b9aa9cf"), plan().name);
   body.append(
     f.wrap,
     button(MindexI18n.msg("ui.fadf24dbc5a9"), async () => {
@@ -60,7 +60,9 @@ function voiceChoices(catalog, current, defaultVoice) {
   const seen = new Set([""]);
   for (const group of catalog.groups || []) {
     for (const voice of group.voices || []) {
-      if (!voice.voice_id || cloneIds.has(voice.voice_id) || seen.has(voice.voice_id)) continue;
+      if (!voice.voice_id || cloneIds.has(voice.voice_id) || seen.has(voice.voice_id)) {
+        continue;
+      }
       seen.add(voice.voice_id);
       preset.push([voice.voice_id, MindexI18n.voice(voice)]);
     }
@@ -82,9 +84,9 @@ function voiceChoices(catalog, current, defaultVoice) {
 async function editSettings() {
   // 立即开对话框：先用占位音色项渲染，再异步拉目录回填，避免被 TTS 服务往返阻塞。
   const loadingLabel = MindexI18n.msg("ui.fcabadb2a772");
-  const body = showDialog(MindexI18n.msg("ui.b876f5881f16")),
-    fields = {},
-    o = plan().options;
+  const body = showDialog(MindexI18n.msg("ui.b876f5881f16"));
+  const fields = {};
+  const o = plan().options;
   const definitions = [
     ["preset_voice", MindexI18n.msg("ui.preset_voice_select"), "text", [["", loadingLabel]]],
     ["clone_voice", MindexI18n.msg("ui.cloned_voice_select"), "text", [["", loadingLabel]]],
@@ -167,7 +169,9 @@ async function editSettings() {
       fit: "ui.plan_canvas_help",
       subtitle_style: "ui.plan_subtitle_style_help",
     }[key];
-    if (helpKey) body.append(el("p", MindexI18n.msg(helpKey), "muted"));
+    if (helpKey) {
+      body.append(el("p", MindexI18n.msg(helpKey), "muted"));
+    }
   }
   // 品牌模板：下拉在目录到达后回填；关闭项写进 brand_overrides.disable（其余覆盖项原样保留）。
   const brand = field(MindexI18n.msg("ui.plan_brand"), o.brand_id || "", "text", [
@@ -218,7 +222,9 @@ async function editSettings() {
             });
             input.click();
           });
-          if (!file) return;
+          if (!file) {
+            return;
+          }
           const form = new FormData();
           form.append("file", file, file.name);
           const asset = await api("/api/studio/brand-assets", "POST", form);
@@ -233,13 +239,14 @@ async function editSettings() {
           drawReplace();
         }),
       );
-      if (replaced[key])
+      if (replaced[key]) {
         replaceRow.append(
           button(MindexI18n.msg("ui.plan_bookend_reset"), () => {
             replaced[key] = null;
             drawReplace();
           }),
         );
+      }
     }
   };
   drawReplace();
@@ -254,7 +261,9 @@ async function editSettings() {
   body.append(beat.wrap, el("p", MindexI18n.msg("ui.plan_beat_align_help"), "muted"));
   api("/api/studio/brands")
     .then((data) => {
-      if ($("dialog-content") !== body) return;
+      if ($("dialog-content") !== body) {
+        return;
+      }
       fillSelect(
         brand.input,
         [
@@ -284,9 +293,13 @@ async function editSettings() {
   const save = button(MindexI18n.msg("ui.3fab71cb32ac"), async () => {
     const options = { ...o };
     for (const key of Object.keys(fields)) {
-      if (key !== "preset_voice" && key !== "clone_voice") options[key] = fields[key].value;
+      if (key !== "preset_voice" && key !== "clone_voice") {
+        options[key] = fields[key].value;
+      }
     }
-    for (const key of ["recall_limit", "duck_gain"]) options[key] = Number(options[key]);
+    for (const key of ["recall_limit", "duck_gain"]) {
+      options[key] = Number(options[key]);
+    }
     options.atempo = fields.atempo.value === "" ? 1 : Number(fields.atempo.value);
     options.burn = options.burn === "true";
     options.subtitle_style = options.subtitle_style || null;
@@ -325,7 +338,9 @@ async function editSettings() {
   const dialogBody = body;
   loadVoiceCatalogue()
     .then((catalog) => {
-      if ($("dialog-content") !== dialogBody || !$("work-dialog").open) return;
+      if ($("dialog-content") !== dialogBody || !$("work-dialog").open) {
+        return;
+      }
       const defaultVoice = state.data.tts_settings?.default_voice || catalog?.default_voice || "";
       const voices = voiceChoices(catalog, o.voice_mode === "custom" ? o.voice : "", defaultVoice);
       fillSelect(fields.preset_voice, voices.preset, voices.presetValue);
@@ -333,10 +348,14 @@ async function editSettings() {
       fields.clone_voice.disabled = false;
       updatePresetVoice();
       save.disabled = false;
-      if (catalog?.error) notice(catalog.error);
+      if (catalog?.error) {
+        notice(catalog.error);
+      }
     })
     .catch(() => {
-      if ($("dialog-content") !== dialogBody) return;
+      if ($("dialog-content") !== dialogBody) {
+        return;
+      }
       notice(MindexI18n.msg("ui.voice_catalog_unavailable"));
       closeDialog();
     });

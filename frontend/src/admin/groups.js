@@ -1,13 +1,13 @@
 (function () {
   "use strict";
-  const $ = (id) => document.getElementById(id),
-    api = window.MindexApi.json;
-  let selected = null,
-    systemGroup = false,
-    page = 1,
-    total = 0,
-    detailRequest = 0,
-    libraryRequest = 0;
+  const $ = (id) => document.getElementById(id);
+  const api = window.MindexApi.json;
+  let selected = null;
+  let systemGroup = false;
+  let page = 1;
+  let total = 0;
+  let detailRequest = 0;
+  let libraryRequest = 0;
   const kind = () => $("groups-kind").value;
   const text = (id, key, params) => MindexI18n.setText($(id), MindexI18n.msg(key, params));
   const run = (action) => async (event) => {
@@ -74,18 +74,22 @@
     actions();
   }
   async function detail(id) {
-    const request = ++detailRequest,
-      currentKind = kind();
+    const request = ++detailRequest;
+    const currentKind = kind();
     selected = id;
     markSelected();
     let group = await api(`/api/admin/groups/${id}?page=${page}`);
-    if (request !== detailRequest || currentKind !== kind()) return;
+    if (request !== detailRequest || currentKind !== kind()) {
+      return;
+    }
     const last = Math.max(1, Math.ceil(group.member_count / group.page_size));
     if (page > last) {
       page = last;
       group = await api(`/api/admin/groups/${id}?page=${page}`);
     }
-    if (request !== detailRequest || currentKind !== kind()) return;
+    if (request !== detailRequest || currentKind !== kind()) {
+      return;
+    }
     total = group.member_count;
     systemGroup = Boolean(group.system);
     const name = group.system
@@ -103,21 +107,25 @@
     window.MindexGroupContext = { group_id: id, type: currentKind };
   }
   async function list(autoSelect = false) {
-    const currentKind = kind(),
-      { items } = await api(`/api/admin/groups?type=${currentKind}`);
-    if (currentKind !== kind()) return [];
+    const currentKind = kind();
+    const { items } = await api(`/api/admin/groups?type=${currentKind}`);
+    if (currentKind !== kind()) {
+      return [];
+    }
     $("groups-list").replaceChildren();
     for (const group of items) {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "group-item";
       button.dataset.groupId = group.id;
-      if (group.system)
+      if (group.system) {
         MindexI18n.setText(
           button,
           MindexI18n.msg("ui.groups_ungrouped_count", { p0: group.member_count }),
         );
-      else button.textContent = `${group.name} (${group.member_count})`;
+      } else {
+        button.textContent = `${group.name} (${group.member_count})`;
+      }
       button.onclick = run(async () => {
         page = 1;
         await detail(group.id);
@@ -146,9 +154,9 @@
     markSelected();
   }
   async function loadLibrary() {
-    const request = ++libraryRequest,
-      currentKind = kind(),
-      chosen = new Set([...$("groups-results").selectedOptions].map((option) => option.value));
+    const request = ++libraryRequest;
+    const currentKind = kind();
+    const chosen = new Set([...$("groups-results").selectedOptions].map((option) => option.value));
     $("groups-results").disabled = true;
     actions();
     text("groups-library-status", "ui.groups_loading_library");
@@ -160,9 +168,13 @@
             ? `/api/admin/sources?visibility=all&page_size=100&page=${libraryPage}`
             : "/api/studio/music-library",
         );
-        if (request !== libraryRequest || currentKind !== kind()) return;
+        if (request !== libraryRequest || currentKind !== kind()) {
+          return;
+        }
         items.push(...result.items);
-        if (currentKind !== "source" || items.length >= result.total || !result.items.length) break;
+        if (currentKind !== "source" || items.length >= result.total || !result.items.length) {
+          break;
+        }
       }
       $("groups-results").replaceChildren();
       for (const item of MindexMultiSearch.sort(
@@ -204,7 +216,9 @@
     await list();
   });
   $("groups-delete").onclick = run(async () => {
-    if (!selected || !confirm(MindexI18n.render(MindexI18n.msg("ui.groups_confirm")))) return;
+    if (!selected || !confirm(MindexI18n.render(MindexI18n.msg("ui.groups_confirm")))) {
+      return;
+    }
     await api(`/api/admin/groups/${selected}`, "DELETE");
     reset();
     await list(true);
@@ -212,11 +226,17 @@
   $("groups-results").onchange = actions;
   query.addEventListener("input", actions);
   $("groups-select-visible").onclick = () => {
-    for (const option of $("groups-results").options) if (!option.hidden) option.selected = true;
+    for (const option of $("groups-results").options) {
+      if (!option.hidden) {
+        option.selected = true;
+      }
+    }
     actions();
   };
   $("groups-clear-selection").onclick = () => {
-    for (const option of $("groups-results").options) option.selected = false;
+    for (const option of $("groups-results").options) {
+      option.selected = false;
+    }
     actions();
   };
   for (const [button, suffix] of [
@@ -224,19 +244,28 @@
     ["groups-remove", "/remove"],
   ]) {
     $(button).onclick = run(async () => {
-      if (!selected) return;
+      if (!selected) {
+        return;
+      }
       const group = selected;
       const ids = suffix
         ? [...$("groups-members").querySelectorAll("input:checked")].map((input) => input.value)
         : [...$("groups-results").selectedOptions].map((option) => option.value);
       $(button).disabled = true;
       try {
-        for (let start = 0; start < ids.length; start += 1000)
+        for (let start = 0; start < ids.length; start += 1000) {
           await api(`/api/admin/groups/${group}/members${suffix}`, "POST", {
             member_ids: ids.slice(start, start + 1000),
           });
-        if (selected !== group) return;
-        if (!suffix) for (const option of $("groups-results").options) option.selected = false;
+        }
+        if (selected !== group) {
+          return;
+        }
+        if (!suffix) {
+          for (const option of $("groups-results").options) {
+            option.selected = false;
+          }
+        }
         await detail(group);
         await list();
       } finally {
@@ -257,22 +286,29 @@
     }
   });
   window.addEventListener("mindex:agent-mutation", (event) => {
-    if (!event.detail?.groups) return;
+    if (!event.detail?.groups) {
+      return;
+    }
     run(async () => {
       const items = await list();
-      if (selected && items.some((group) => group.id === selected)) await detail(selected);
-      else {
+      if (selected && items.some((group) => group.id === selected)) {
+        await detail(selected);
+      } else {
         reset();
         await list(true);
       }
     })();
   });
   window.addEventListener("mindex:languagechange", () => {
-    if (systemGroup && selected) run(() => detail(selected))();
+    if (systemGroup && selected) {
+      run(() => detail(selected))();
+    }
   });
   window.MindexAgentContext = () => ({ ...window.MindexGroupContext });
   window.MindexAgentFocus = async (focus, { passive = false } = {}) => {
-    if (passive && focus.group_id !== selected) return true;
+    if (passive && focus.group_id !== selected) {
+      return true;
+    }
     if (focus.group_id) {
       const group = await api(`/api/admin/groups/${focus.group_id}`);
       if (kind() !== group.type) {

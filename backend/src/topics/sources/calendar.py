@@ -15,7 +15,7 @@ from __future__ import annotations
 import csv
 import io
 import re
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import ClassVar
 
@@ -77,8 +77,6 @@ def _ics_date(value: str, params: str) -> date | None:
         if found:
             moment = datetime.strptime(found.group(1), "%Y%m%dT%H%M%S")
             if found.group(2):
-                from datetime import UTC
-
                 return moment.replace(tzinfo=UTC).astimezone().date()
             return moment.date()  # 本地时间或 TZID：按日期取
     except ValueError:

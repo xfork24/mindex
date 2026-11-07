@@ -16,6 +16,8 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from PIL import Image
+
 
 def make_clip_bytes(directory: Path, seconds: float = 2.0) -> bytes:
     target = directory / "stub-clip.mp4"
@@ -43,7 +45,6 @@ def make_clip_bytes(directory: Path, seconds: float = 2.0) -> bytes:
 
 
 def make_png_bytes(color=(200, 40, 40)) -> bytes:
-    from PIL import Image
 
     buffer = io.BytesIO()
     Image.new("RGB", (160, 120), color).save(buffer, "PNG")

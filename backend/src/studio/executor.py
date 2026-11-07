@@ -26,8 +26,10 @@ from fastapi import HTTPException
 from filelock import Timeout
 
 from shared import lock_backend, locks
+from shared.db.fencing import current_attempt
 from studio import studio
 from studio.artifacts import safe_path
+from studio.tasks import cancel
 
 log = logging.getLogger(__name__)
 
@@ -61,8 +63,6 @@ def cancel_sentinel(config, kind: Kind, job_id: str, key: str | None = None) -> 
 
 def request_cancel(config, kind: Kind, job_id: str, key: str | None = None) -> None:
     if config.queue.backend == "postgres":
-        from studio.tasks import cancel
-
         cancel(config, kind, job_id, key)
         return
     path = cancel_sentinel(config, kind, job_id, key)
@@ -74,7 +74,6 @@ def cancel_requested(
     config, kind: Kind, job_id: str, key: str | None = None, event: threading.Event | None = None
 ) -> bool:
     """进程内事件已置位，或哨兵文件存在，即视为已请求取消。"""
-    from shared.db.fencing import current_attempt
 
     attempt = current_attempt()
     if attempt is not None:

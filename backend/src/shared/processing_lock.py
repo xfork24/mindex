@@ -11,7 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 from filelock import FileLock, Timeout
@@ -173,7 +173,6 @@ def _recover_tasks(store, table):
         try:
             # Also respect the old publication lock while a pre-upgrade worker
             # is still alive. New workers own only their individual subtask.
-            from contextlib import ExitStack
 
             with ExitStack() as locks:
                 locks.enter_context(FileLock(str(path), timeout=0))

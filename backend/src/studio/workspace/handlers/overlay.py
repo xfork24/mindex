@@ -17,16 +17,17 @@ from pathlib import Path
 from uuid import uuid4
 
 from models.adapters import make_animator
-from models.animator import AnimationRejected, validate_animation
+from models.animator import ANIMATOR_PROMPT_VERSION, AnimationRejected, validate_animation
 from shared.config import fingerprint
 from studio import studio
 from studio.artifacts import digest
 from studio.logs import active_log
+from studio.workspace import signatures
+from studio.workspace.handlers.animate import unavailable
 from studio.workspace.plans import canvas_render, choose
+from studio.workspace.post import overlay_style
 from studio.workspace.stages import StageHandler, html_overlays, register, shot_content
-from studio.workspace.versions import add_version, file_info, root
-
-from .animate import unavailable
+from studio.workspace.versions import add_version, file_info, file_path, root, version
 
 # 改动内置模板、数据注入或透明叠加提示词时递增：进入叠加层阶段签名。
 OVERLAY_VERSION = 1
@@ -43,7 +44,6 @@ def layer_window(layer: dict, seconds: float) -> tuple[float, float]:
 
 def overlay_request(config, w, p, sid) -> dict:
     """签名载荷与生成参数的唯一来源；配音尚未完成时 seconds 为 None。"""
-    from studio.workspace.post import overlay_style
 
     selected, content = shot_content(w, p, sid)
     speech = w["versions"].get(selected.get("tts"))
@@ -87,8 +87,6 @@ def _write(config, job_id, vid, index: int, html: str) -> Path:
 
 def save_manual(config, job_id, w, p, sid, index: int, html: str) -> str:
     """人工保存某一层叠加层源码：复制当前选用版本的其余层，替换该层，写入新版本并选用（钉住）。"""
-    from studio.workspace.signatures import specification
-    from studio.workspace.versions import file_path, version
 
     _, content = shot_content(w, p, sid)
     present = dict(html_overlays(content))
@@ -96,7 +94,7 @@ def save_manual(config, job_id, w, p, sid, index: int, html: str) -> str:
         raise studio.StudioError("该分镜没有这个 HTML 文字层")
     check(config, html)
     current = w["versions"].get(p["shots"][sid].get("overlay"))
-    spec = specification(config, job_id, w, p, "overlay", sid)
+    spec = signatures.specification(config, job_id, w, p, "overlay", sid)
     vid = uuid4().hex
     files, layers = {}, []
     for item in (current or {}).get("data", {}).get("layers", []):
@@ -141,8 +139,6 @@ class OverlayHandler(StageHandler):
         inputs = {"content": selected["content"], "tts": selected.get("tts")}
         payload = overlay_request(config, w, p, sid)
         if any(layer["kind"] == "custom" for layer in payload["layers"]):
-            from models.animator import ANIMATOR_PROMPT_VERSION
-
             payload["animator"] = config.studio.animator.signature()
             payload["prompt_version"] = ANIMATOR_PROMPT_VERSION
         return payload, inputs, params

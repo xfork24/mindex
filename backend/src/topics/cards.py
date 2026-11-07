@@ -17,6 +17,7 @@ from models.adapters import ModelError
 from shared.config import StrictModel
 from studio import script_templates
 from topics import coverage as topic_coverage
+from topics import gaps as topic_gaps
 from topics import items as topic_items
 from topics import outline as topic_outline
 from topics import profiles, scoring
@@ -234,7 +235,6 @@ def evaluate(
     """为卡片计算五项分数、覆盖报告与总分并保存；返回告警。"""
     if not card_ids:
         return []
-    from topics import gaps as topic_gaps
 
     profile = profiles.body_of(store, profile_id)
     filters = profiles.material_filters(profile)

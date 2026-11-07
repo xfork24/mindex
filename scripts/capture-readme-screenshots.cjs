@@ -45,27 +45,35 @@ const ONLY =
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ---------------------------------------------------------------- 基础设施
-let browser,
-  ctx,
-  data = {};
+let browser;
+let ctx;
+const data = {};
 
 async function apiJson(p) {
   const res = await ctx.request.get(BASE + p);
-  if (!res.ok()) throw new Error(`GET ${p} -> ${res.status()}`);
+  if (!res.ok()) {
+    throw new Error(`GET ${p} -> ${res.status()}`);
+  }
   return res.json();
 }
 
 async function newPage(extraInit) {
   const page = await ctx.newPage();
   page.setDefaultTimeout(45000);
-  if (extraInit) await page.addInitScript(extraInit);
+  if (extraInit) {
+    await page.addInitScript(extraInit);
+  }
   return page;
 }
 
 async function open(page, url, readySel) {
   await page.goto(BASE + url, { waitUntil: "domcontentloaded" });
-  if (page.url().includes("/login")) throw new Error("未登录（令牌无效？）");
-  if (readySel) await page.waitForSelector(readySel, { state: "visible" });
+  if (page.url().includes("/login")) {
+    throw new Error("未登录（令牌无效？）");
+  }
+  if (readySel) {
+    await page.waitForSelector(readySel, { state: "visible" });
+  }
   await sleep(500); // i18n/主题同步脚本与首轮数据请求落地
 }
 
@@ -82,7 +90,9 @@ async function searchKeywordBottomRows(page) {
   await page.evaluate(() => {
     for (const img of document.querySelectorAll("#results article.card img")) {
       img.loading = "eager";
-      if (!img.complete) img.src = img.currentSrc || img.src;
+      if (!img.complete) {
+        img.src = img.currentSrc || img.src;
+      }
     }
   });
   await page
@@ -113,19 +123,28 @@ async function searchKeywordBottomRows(page) {
         for (const c of document.querySelectorAll("#results article.card")) {
           const top = c.getBoundingClientRect().top;
           const last = rows[rows.length - 1];
-          if (last && Math.abs(last.top - top) < 24)
+          if (last && Math.abs(last.top - top) < 24) {
             last.bottom = Math.max(last.bottom, c.getBoundingClientRect().bottom);
-          else rows.push({ top, bottom: c.getBoundingClientRect().bottom });
+          } else {
+            rows.push({ top, bottom: c.getBoundingClientRect().bottom });
+          }
         }
         const cut = rows.find((r) => r.bottom > vh - 4 && r.top < vh - 4);
-        if (!cut) return false;
+        if (!cut) {
+          return false;
+        }
         const need = cut.bottom - (vh - 8);
-        if (need <= q.getBoundingClientRect().top + 40) window.scrollBy(need);
-        else window.scrollBy(cut.top - (vh - 8)); // 整行移出视口（向上滚），末行完整收尾
+        if (need <= q.getBoundingClientRect().top + 40) {
+          window.scrollBy(need);
+        } else {
+          window.scrollBy(cut.top - (vh - 8));
+        } // 整行移出视口（向上滚），末行完整收尾
         return true;
       })
       .catch(() => false);
-    if (!acted) break;
+    if (!acted) {
+      break;
+    }
     await sleep(250);
   }
 }
@@ -140,8 +159,9 @@ async function zoom70(page) {
 async function topFormBottomRows(page, formSel, rowSel) {
   await page.evaluate((sel) => {
     const form = document.querySelector(sel);
-    if (form)
+    if (form) {
       window.scrollTo({ top: Math.max(0, form.getBoundingClientRect().top + window.scrollY - 8) });
+    }
   }, formSel);
   await sleep(200);
   await revealBottomRow(page, rowSel);
@@ -174,8 +194,11 @@ async function revealBottomRow(page, selector) {
       const r = e.getBoundingClientRect();
       return r.bottom > vh - 4 && r.top < vh && r.height > 20;
     });
-    if (cut) window.scrollBy({ top: cut.getBoundingClientRect().bottom - vh + 16 });
-    else window.scrollBy({ top: 240 });
+    if (cut) {
+      window.scrollBy({ top: cut.getBoundingClientRect().bottom - vh + 16 });
+    } else {
+      window.scrollBy({ top: 240 });
+    }
   }, selector);
   await sleep(350);
 }
@@ -183,10 +206,10 @@ async function revealBottomRow(page, selector) {
 // 元素截图但四周留出空白边距（page.screenshot 的 clip 以视口坐标为准）。
 async function snapPadded(page, name, sel, pad = 28) {
   const box = await page.locator(sel).first().boundingBox();
-  const vw = 1890,
-    vh = 915;
-  const x = Math.max(0, box.x - pad),
-    y = Math.max(0, box.y - pad);
+  const vw = 1890;
+  const vh = 915;
+  const x = Math.max(0, box.x - pad);
+  const y = Math.max(0, box.y - pad);
   const clip = {
     x,
     y,
@@ -214,7 +237,9 @@ async function snapClosest(page, name, selectors) {
       /* 元素不存在则跳过 */
     }
   }
-  if (!scored.length) throw new Error(`候选元素都不可见: ${selectors.join(", ")}`);
+  if (!scored.length) {
+    throw new Error(`候选元素都不可见: ${selectors.join(", ")}`);
+  }
   scored.sort((a, b) => a.err - b.err);
   await sleep(400);
   const file = path.join(ASSETS, name + ".png");
@@ -228,8 +253,8 @@ async function snapClosest(page, name, selectors) {
 function logShot(name, file) {
   const buf = fs.readFileSync(file);
   // PNG 宽高在 IHDR：偏移 16/20 大端。
-  const w = buf.readUInt32BE(16),
-    h = buf.readUInt32BE(20);
+  const w = buf.readUInt32BE(16);
+  const h = buf.readUInt32BE(20);
   console.log(`  ✓ ${name}.png ${w}×${h} (${(buf.length / 1024).toFixed(0)} KB)`);
 }
 
@@ -246,7 +271,9 @@ async function waitDrawer(page) {
     .waitForFunction(
       () => {
         const n = document.querySelectorAll("#agent-drawer details.agent-tool").length;
-        if (window.__lastToolCount === n) return true;
+        if (window.__lastToolCount === n) {
+          return true;
+        }
         window.__lastToolCount = n;
         return false;
       },
@@ -265,8 +292,12 @@ async function drawerScrollToTool(page, toolName, nth, expand) {
         d.querySelector("summary")?.textContent.includes(name),
       );
       const target = cards[Math.min(idx, cards.length - 1)];
-      if (!target) return;
-      if (open) target.open = true;
+      if (!target) {
+        return;
+      }
+      if (open) {
+        target.open = true;
+      }
       target.scrollIntoView({ block: "center" });
     },
     [toolName, nth, expand],
@@ -336,7 +367,9 @@ const RECIPES = [
         ]) {
           for (const o of document.querySelectorAll(sel + " option")) {
             const t = (o.textContent || "").split(" ·")[0].trim();
-            if (want.includes(t)) out[key].push(o.value);
+            if (want.includes(t)) {
+              out[key].push(o.value);
+            }
           }
         }
         const selected = new Set([...out.actor, ...out.role]);
@@ -347,10 +380,16 @@ const RECIPES = [
         });
         return out;
       });
-      if (picks.missed.length) console.log(`  ⚠ 未命中: ${picks.missed.join(", ")}`);
+      if (picks.missed.length) {
+        console.log(`  ⚠ 未命中: ${picks.missed.join(", ")}`);
+      }
       console.log(`  人物过滤: 演员 ${picks.actor.length} 项, 角色 ${picks.role.length} 项`);
-      if (picks.actor.length) await page.selectOption("#actor-select", picks.actor);
-      if (picks.role.length) await page.selectOption("#role-select", picks.role);
+      if (picks.actor.length) {
+        await page.selectOption("#actor-select", picks.actor);
+      }
+      if (picks.role.length) {
+        await page.selectOption("#role-select", picks.role);
+      }
       await page.click("#search-button");
       await page.waitForSelector("#results article.card");
       await page.waitForFunction(() => !document.querySelector("#search-button[disabled]"));
@@ -570,7 +609,9 @@ const RECIPES = [
       await page.evaluate(() => {
         const el = document.querySelector("#stage-panel");
         const need = el.getBoundingClientRect().bottom - window.innerHeight;
-        if (need > 0) window.scrollBy({ top: need + 16 });
+        if (need > 0) {
+          window.scrollBy({ top: need + 16 });
+        }
       });
       await sleep(500);
       await snap(page, "studio-timeline-alignment");
@@ -584,7 +625,9 @@ const RECIPES = [
       await page.evaluate(() => {
         document.querySelector("#result-section").open = true;
         const inner = document.querySelector("#final-history > details");
-        if (inner) inner.open = true; // 成片历史默认折叠，先展开才有行与依赖树
+        if (inner) {
+          inner.open = true;
+        } // 成片历史默认折叠，先展开才有行与依赖树
       });
       await page.waitForSelector("#final-history details.dependency", { state: "attached" });
       await sleep(600);
@@ -592,7 +635,9 @@ const RECIPES = [
       await page.locator("#final-history .final-row button").first().click();
       await page.waitForSelector("#work-dialog[open]", { timeout: 10000 });
       await page.evaluate(() => {
-        for (const d of document.querySelectorAll("#work-dialog details.dependency")) d.open = true;
+        for (const d of document.querySelectorAll("#work-dialog details.dependency")) {
+          d.open = true;
+        }
       });
       await sleep(400);
       await snapClosest(page, "studio-build-dependencies", ["#work-dialog", "#dialog-content"]);
@@ -671,7 +716,9 @@ const RECIPES = [
       // 展开第一个带档案卡的角色行（原图：模型档案卡列表 + 激活徽标）。
       await page.evaluate(() => {
         const head = document.querySelector("#roles .role-row .role-row-head");
-        if (head && head.getAttribute("aria-expanded") !== "true") head.click();
+        if (head && head.getAttribute("aria-expanded") !== "true") {
+          head.click();
+        }
       });
       await page
         .waitForSelector("#roles .role-row.is-open .profile-item", { state: "attached" })
@@ -686,7 +733,9 @@ const RECIPES = [
       await open(page, "/settings", "#roles .role-row");
       await page.evaluate(() => {
         const head = document.querySelector("#roles .role-row .role-row-head");
-        if (head && head.getAttribute("aria-expanded") !== "true") head.click();
+        if (head && head.getAttribute("aria-expanded") !== "true") {
+          head.click();
+        }
       });
       await page.waitForSelector("#roles .role-row.is-open .profile-item", { state: "attached" });
       await page
@@ -711,7 +760,9 @@ const RECIPES = [
         const want = new Set(["tuning", "releases"]);
         for (const head of document.querySelectorAll(".role-row-head[data-section]")) {
           const isOpen = head.closest(".role-row").classList.contains("is-open");
-          if (want.has(head.dataset.section) !== isOpen) head.click();
+          if (want.has(head.dataset.section) !== isOpen) {
+            head.click();
+          }
         }
       });
       await sleep(600);
@@ -783,7 +834,9 @@ const RECIPES = [
         await page.evaluate(() => {
           const sec = document.querySelector("#result-section");
           sec.open = true;
-          for (const d of sec.querySelectorAll("details.dependency")) d.open = true;
+          for (const d of sec.querySelectorAll("details.dependency")) {
+            d.open = true;
+          }
         });
         await page.waitForSelector("#final-video", { state: "attached" }).catch(() => {});
         await waitDrawer(page);
@@ -817,7 +870,9 @@ const RECIPES = [
 
   const login = await ctx.request.post(BASE + "/login", { form: { token: TOKEN, next: "/" } });
   // 303 会被 playwright 自动跟随成 200（落到首页），两者都算登录成功。
-  if (![200, 303].includes(login.status())) throw new Error(`登录失败: HTTP ${login.status()}`);
+  if (![200, 303].includes(login.status())) {
+    throw new Error(`登录失败: HTTP ${login.status()}`);
+  }
 
   // 数据解析：素材、任务、会话、草稿、选题档案、查询图。
   console.log("解析线上数据 …");
@@ -827,7 +882,9 @@ const RECIPES = [
     sources.find((s) => /Botanic/i.test(s.name)) || sources.find((s) => s.id !== data.dearYou.id);
   data.singaporeSourceIds = sources.filter((s) => s.id !== data.dearYou.id).map((s) => s.id);
   data.job = (await apiJson("/api/studio/jobs")).items[0];
-  if (!data.job) throw new Error("服务上没有创作任务");
+  if (!data.job) {
+    throw new Error("服务上没有创作任务");
+  }
   const ws = await apiJson(`/api/studio/jobs/${data.job.id}/workspace?compact=true`);
   const plan = ws.plans[ws.active_plan] || Object.values(ws.plans)[0];
   data.shotCount = Object.keys(plan.shots).length;
@@ -841,7 +898,9 @@ const RECIPES = [
   data.topicProfile = (await apiJson("/api/topics/profiles")).items[0];
   // 用户提供的以图搜图查询图（与原始浅色截图里的手持红酒照片同源）。
   data.wineImage = "/Users/hengliu/Downloads/Hackathon/wine.webp";
-  if (!fs.existsSync(data.wineImage)) throw new Error(`查询图不存在: ${data.wineImage}`);
+  if (!fs.existsSync(data.wineImage)) {
+    throw new Error(`查询图不存在: ${data.wineImage}`);
+  }
   // 查询图：取一帧 Dear You 分镜图。
   const review = await apiJson("/api/persons/review/shots?offset=0&limit=1");
   const imgUrl = review.items?.[0]?.image_url;
@@ -850,7 +909,9 @@ const RECIPES = [
     fs.mkdirSync("/tmp/mindex-capture", { recursive: true });
     data.queryImage = "/tmp/mindex-capture/query.jpg";
     fs.writeFileSync(data.queryImage, await res.body());
-  } else data.queryImage = null;
+  } else {
+    data.queryImage = null;
+  }
   console.log(
     `  素材 ${sources.length} 个 | 任务 ${data.job.title} | 分镜 ${data.shotCount} | 会话 ${data.session?.title}`,
   );
@@ -909,7 +970,9 @@ const RECIPES = [
   if (failed.length) {
     console.error(`\n失败 ${failed.length} 张: ${failed.join(", ")}（可 --only 重试）`);
     process.exitCode = 1;
-  } else console.log("\n全部完成");
+  } else {
+    console.log("\n全部完成");
+  }
 })().catch((err) => {
   console.error(err);
   process.exit(1);

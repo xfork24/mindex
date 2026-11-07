@@ -9,8 +9,10 @@ materialize 的 staging pin 与摘要校验、presign 短期读 URL、iter_prefi
 from __future__ import annotations
 
 import hashlib
+import io
 import os
 
+import httpx
 import pytest
 
 from shared.backends.s3 import S3MediaStore
@@ -82,7 +84,6 @@ def test_roundtrip_put_stat_read_iter_delete(store):
 
 
 def test_multipart_large_object(store):
-    import io
 
     payload = os.urandom(20 * 1024 * 1024)  # 20 MiB：跨过 multipart 阈值
     sha = hashlib.sha256(payload).hexdigest()
@@ -94,7 +95,6 @@ def test_multipart_large_object(store):
 
 
 def test_materialize_uses_local_cache_and_versions(store):
-    import io
 
     payload = b"versioned-content"
     sha = hashlib.sha256(payload).hexdigest()
@@ -120,9 +120,6 @@ def test_materialize_uses_local_cache_and_versions(store):
 
 
 def test_presigned_url_is_fetchable(store):
-    import io
-
-    import httpx
 
     payload = b"presign-me"
     sha = hashlib.sha256(payload).hexdigest()

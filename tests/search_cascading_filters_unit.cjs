@@ -1,6 +1,7 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
+const { between } = require("./source_slices.cjs");
 class Select {
   constructor() {
     this.children = [];
@@ -32,7 +33,9 @@ class Select {
 }
 const nodes = new Map();
 const get = (id) => {
-  if (!nodes.has(id)) nodes.set(id, new Select());
+  if (!nodes.has(id)) {
+    nodes.set(id, new Select());
+  }
   return nodes.get(id);
 };
 const people = [
@@ -51,8 +54,8 @@ const sources = [
   { id: "s2", name: "素材二", work_id: "w2" },
   { id: "empty", name: "空素材", work_id: "empty" },
 ];
-let groupSelection = [],
-  groupRefreshes = 0;
+let groupSelection = [];
+let groupRefreshes = 0;
 const context = vm.createContext({
   $: get,
   registeredPeople: people,
@@ -76,14 +79,13 @@ const context = vm.createContext({
   MindexMultiSearch: { sort: (e) => e, attach() {}, refilter() {} },
 });
 const code = fs.readFileSync("frontend/src/search/app.js", "utf8");
+vm.runInContext(between(code, "const ALL_VALUE =", "async function refresh()"), context);
 vm.runInContext(
-  code.slice(code.indexOf("const ALL_VALUE ="), code.indexOf("async function refresh()")),
-  context,
-);
-vm.runInContext(
-  code.slice(
-    code.indexOf('for (const id of ["actor-select", "role-select", "source"])\n  bindAllToggle'),
-    code.indexOf("\nrefresh();"),
+  between(
+    code,
+    'for (const id of ["actor-select", "role-select", "source"])',
+    "\nrefresh();",
+    code.indexOf("async function refresh()"),
   ),
   context,
 );
@@ -98,7 +100,9 @@ const picked = (id) =>
     .map((o) => o.value)
     .sort();
 function choose(id, ids) {
-  for (const o of get(id).options) o.selected = ids.includes(o.value);
+  for (const o of get(id).options) {
+    o.selected = ids.includes(o.value);
+  }
   get(id).listeners.change();
 }
 function reset() {
@@ -211,10 +215,7 @@ assert.equal(picked("source").length, 4);
 const notices = [];
 context.busy = false;
 context.notice = (message, kind) => notices.push({ message, kind });
-vm.runInContext(
-  code.slice(code.indexOf('$("search-form").onsubmit ='), code.indexOf("// 多选框顶部")),
-  context,
-);
+vm.runInContext(between(code, '$("search-form").onsubmit =', "// 多选框顶部"), context);
 choose("source", []);
 (async () => {
   let prevented = false;

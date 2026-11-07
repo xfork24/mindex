@@ -1,6 +1,8 @@
 """The ten workbench subtasks own their execution, output and checkpoints."""
 
 import json
+import logging
+import threading
 from contextlib import ExitStack
 
 import pytest
@@ -148,8 +150,6 @@ def test_subtask_locks_and_restart_recovery_are_independent(config, video_file):
 
 @pytest.mark.parametrize("enforced", [False, True])
 def test_automatic_embedding_uses_separate_child_tasks_and_logs(config, video_file, monkeypatch, enforced):
-    import logging
-    import threading
 
     from test_source_work import finished
 
@@ -164,7 +164,7 @@ def test_automatic_embedding_uses_separate_child_tasks_and_logs(config, video_fi
     def publish(config, source_id, owner, *args, scope="shot_moment", progress=None, **kwargs):
         assert owner == "shots" and source_id == sid
         progress({"stage": "embedding", "completed": 0, "total": 1})
-        logging.getLogger("isolation").warning("own child %s %s", owner, scope)
+        logging.getLogger("processing.isolation").warning("own child %s %s", owner, scope)
         entered.set()
         assert release.wait(10)
         return {"index_id": scope}

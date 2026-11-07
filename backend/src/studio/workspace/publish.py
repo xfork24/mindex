@@ -17,6 +17,9 @@ import re
 import subprocess
 from pathlib import Path
 
+from PIL import Image, ImageDraw, ImageFont, ImageOps
+
+from shared import media
 from studio import studio
 from studio.delivery_models import CoverOptions, PublishOptions  # noqa: F401
 from studio.platforms import PlatformPreset, for_plan
@@ -127,8 +130,9 @@ def compose_cover(
     style: dict,
     output: Path,
 ) -> dict:
-    """背景图居中裁切到封面尺寸，底部叠半透明底条与标题、副标题（品牌文字层样式的颜色），按格式与大小上限保存。"""
-    from PIL import Image, ImageDraw, ImageFont, ImageOps
+    """背景图居中裁切到封面尺寸，底部叠半透明底条与标题、副标题（品牌文字层样式的颜色），
+    按格式与大小上限保存。
+    """
 
     with Image.open(image_path) as source:
         background = ImageOps.fit(
@@ -191,13 +195,13 @@ def compose_cover(
 
 
 def extract_frame(film: Path, at: float, output: Path) -> Path:
-    from shared.media import atomic_media
 
-    atomic_media(["-ss", f"{max(0.0, at):.3f}", "-i", str(film), "-frames:v", "1", "-q:v", "2"], output)
+    media.atomic_media(["-ss", f"{max(0.0, at):.3f}", "-i", str(film), "-frames:v", "1", "-q:v", "2"], output)
     return output
 
 
 def sharpness(path: Path) -> float:
+    # 延迟导入：媒体、数值或服务运行依赖仅在实际执行该功能时加载。
     import cv2
 
     image = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
@@ -238,7 +242,8 @@ def chapter_list(w, p, final: dict, rule) -> list[dict]:
     旁白前 16 字。规则不满足（章节太少）时返回空列表。"""
     if not rule.enabled:
         return []
-    from .versions import version
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+    from studio.workspace.versions import version
 
     bounds = final["data"].get("boundaries") or []
     plan = final["data"].get("plan") or p

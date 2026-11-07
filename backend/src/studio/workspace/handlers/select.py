@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 from studio import studio
+from studio.window import anchor_conflict
 from studio.workspace import sources
 from studio.workspace.media_nodes import (
     alignment,
@@ -91,7 +92,6 @@ class SelectHandler(StageHandler):
             p["ranges"][sid] = validate_range(config, p["ranges"][sid])
 
     def preflight(self, config, job_id, w, p, sid, spec, found, node):
-        from studio.window import anchor_conflict
 
         if source := sources.plan_source(w, p, sid):
             if (
@@ -128,7 +128,6 @@ class SelectHandler(StageHandler):
         return alignment(ctx.config, ctx.job_id, ctx.w, ctx.p, ctx.sid, ctx.p["ranges"].get(ctx.sid)), {}
 
     def pre_conflicts(self, w, p, sid, item):
-        from studio.window import anchor_conflict
 
         messages = []
         if error := anchor_conflict(w, p, sid):

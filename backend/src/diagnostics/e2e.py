@@ -14,11 +14,15 @@ import numpy as np
 from filelock import FileLock
 
 from diagnostics.film import source_report
+from models import compatibility
+from models import deployment as model_deployment
 from models.adapters import ModelError, make_embedder
+from processing import subtitle_archive
 from processing.pipeline import Pipeline
 from shared.config import Config, fingerprint
 from shared.jsonio import save
 from shared.media import atomic_media, content_hash, cut, probe
+from shared.shot_media import ShotMedia
 from shared.storage import Store
 from shared.work_budget import configured, copy_file, resource_write
 
@@ -80,11 +84,9 @@ def initialize(config: Config, source_id: str, directory: Path):
     report = source_report(config, source_id)
     if not report["prepared"] or not report["configuration_matches"] or report["missing_artifacts"]:
         raise ValueError("素材未完成切片、配置不符或文件缺失")
-    from processing.subtitle_archive import load_archive
-    from shared.shot_media import ShotMedia
 
     ShotMedia(store).references(source_id)
-    load_archive(store, source_id)
+    subtitle_archive.load_archive(store, source_id)
     segments = store.segments(source_id, "moment")
     manifest_rows = []
     for segment in segments:
@@ -169,7 +171,6 @@ def make_video_queries(store: Store, source_id: str, segments: list[dict], direc
     candidates = [s for s in segments if s["end"] - s["start"] >= 1]
     chosen = [candidates[int(i)] for i in np.linspace(0, len(candidates) - 2, 4)]
     entries = []
-    from shared.shot_media import ShotMedia
 
     original = ShotMedia(store).materialize(source_id)
     for number in range(12):
@@ -270,8 +271,6 @@ def smoke(config: Config, directory: Path) -> dict:
 
 @configured
 def _smoke(config: Config, directory: Path) -> dict:
-    from models import compatibility
-    from models.deployment import ADAPTER_VERSION
 
     rows = json.loads((directory / "segments.json").read_text(encoding="utf-8"))
     unique = list({row["sha256"]: row for row in rows}.values())
@@ -280,7 +279,7 @@ def _smoke(config: Config, directory: Path) -> dict:
     samples = [unique[int(i)] for i in np.linspace(0, len(unique) - 1, 6)]
     embedder, store = make_embedder(config), Store.open(config)
     space = embedder.identity()
-    v2 = space.get("schema") == 2 and space.get("implementation") == ADAPTER_VERSION
+    v2 = space.get("schema") == 2 and space.get("implementation") == model_deployment.ADAPTER_VERSION
     deployment = embedder._runtime if v2 else None
     baseline = compatibility.load_baseline(config, space, allow_missing=True) if v2 else None
     if v2:
@@ -414,11 +413,9 @@ def run_phase(
         source = store.one("SELECT path FROM sources WHERE id=?", (state["source_id"],))
         if not source:
             raise ValueError("素材登记不存在")
-        from processing.subtitle_archive import load_archive
-        from shared.shot_media import ShotMedia
 
         ShotMedia(store).references(state["source_id"])
-        load_archive(store, state["source_id"])
+        subtitle_archive.load_archive(store, state["source_id"])
         rows = json.loads((directory / "segments.json").read_text(encoding="utf-8"))
         if fingerprint(rows) != state["segments_hash"]:
             raise ValueError("实验切片清单发生变化")
@@ -442,6 +439,7 @@ def run_phase(
             if phase == "smoke":
                 result = smoke(config, directory)
             elif phase in {"visual", "enriched"}:
+                # 延迟导入：保持异常捕获范围，依赖加载失败时仍走原有降级路径。
                 from processing.indexing import IndexBuilder
 
                 with nullcontext() if config.queue.backend == "postgres" else Pipeline(config).lock():
@@ -485,6 +483,7 @@ def run_phase(
                         for segment in samples
                     ]
             elif phase == "preview":
+                # 延迟导入：保持异常捕获范围，依赖加载失败时仍走原有降级路径。
                 from search.search import SearchEngine
                 from shared.types import TextSearch
 
@@ -516,6 +515,7 @@ def run_phase(
                 active = store.index_version(selected_index)
                 save(directory / f"preview-{active['id']}-{content_hash(queries)[:12]}.json", result)
             elif phase in {"evaluate", "video-evaluate"}:
+                # 延迟导入：保持异常捕获范围，依赖加载失败时仍走原有降级路径。
                 from diagnostics.evaluation import evaluate
 
                 if queries is None:
@@ -537,6 +537,7 @@ def run_phase(
                     index_id=selected_index,
                 )
             else:
+                # 延迟导入：保持异常捕获范围，依赖加载失败时仍走原有降级路径。
                 from processing.indexing import check_index
 
                 active = store.index_version(selected_index) if selected_index else store.active_index()

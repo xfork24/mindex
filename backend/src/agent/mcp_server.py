@@ -17,14 +17,21 @@ import inspect
 import json
 import logging
 import os
+import time
 from collections.abc import Iterable
 
 import mcp.types as types
 from mcp.server.lowlevel import Server
+from starlette.routing import Route
 
 from agent import policy as policies
+from agent import tools as agent_tools
+from agent.attachments import AttachmentStore
+from agent.changes import ChangeFeed
 from agent.loopback import MindexClient
 from agent.registry import ToolContext, ToolError, ToolRegistry
+from agent.session_store import SessionStore
+from settings.runtime_settings import get_setting
 
 logger = logging.getLogger(__name__)
 SERVER_NAME = "mindex"
@@ -173,16 +180,11 @@ def server_for_app(
         raise RuntimeError(
             "业务 API 不创建本机 MCP 会话；请使用 mindex mcp --base-url 或 agent.gateway_url 连接网关"
         )
-    from agent.session_store import SessionStore
-    from agent.tools import build_registry
-    from settings.runtime_settings import get_setting
 
     holder = {}
 
     def client_factory():
         if "client" not in holder:
-            from agent.attachments import AttachmentStore
-
             # MCP 工具调用只能使用 mcp 附件（持 MCP 令牌或本机默认上传、不绑定会话）。
             resolver = AttachmentStore(store.root).resolver(session_id=None, owner="mcp")
             holder["client"] = MindexClient(app, resolve_attachment=resolver)
@@ -192,12 +194,10 @@ def server_for_app(
         value = get_setting(store, "active.profile.agent")
         return int(value) if value else None
 
-    from agent.changes import ChangeFeed
-
     gaps = SessionStore(store.root)
     feed = ChangeFeed(store.root)
     return build_server(
-        build_registry(),
+        agent_tools.build_registry(),
         client_factory,
         policy=policy or (lambda: runtime_config.current().agent.mcp.policy),
         agent_profile=agent_profile,
@@ -227,7 +227,6 @@ class RemoteAgentProfile:
     """
 
     def __init__(self, client: MindexClient, ttl: float = 10.0, clock=None):
-        import time
 
         self.client = client
         self.ttl = ttl
@@ -297,8 +296,8 @@ def install_http(app, runtime_config, store) -> bool:
     token = os.environ.get(cfg.token_env, "").strip()
     if not token:
         raise ValueError(f"已开启 agent.mcp.http_enabled，但环境变量 {cfg.token_env} 未设置 MCP 访问令牌")
+    # 延迟导入：独立模型或扩展功能使用可选依赖，仅在实际调用时加载。
     from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
-    from starlette.routing import Route
 
     manager = StreamableHTTPSessionManager(app=server_for_app(app, runtime_config, store), stateless=True)
     app.router.routes.append(
@@ -321,6 +320,7 @@ def install_http(app, runtime_config, store) -> bool:
 
 
 async def serve_stdio(server: Server) -> None:
+    # 延迟导入：独立模型或扩展功能使用可选依赖，仅在实际调用时加载。
     from mcp.server.stdio import stdio_server
 
     async with stdio_server() as (read, write):

@@ -3,17 +3,19 @@
 from __future__ import annotations
 
 import copy
+from urllib.parse import quote
 
+from persons.person_processing import EvidenceReferences
 from shared.storage import Store
 from studio import studio
 from studio.material_digest import scope_parameters
 from studio.platforms import snapshot_publish
-
-from . import signatures
-from .handlers.script import profile_changed, template_changed
-from .plans import effective_voice, script_stale
-from .stages import plan_shot_stages
-from .versions import ordered_shots, plan, revision
+from studio.window import anchor_conflict
+from studio.workspace import signatures
+from studio.workspace.handlers.script import profile_changed, template_changed
+from studio.workspace.plans import effective_voice, script_stale
+from studio.workspace.stages import plan_shot_stages
+from studio.workspace.versions import ordered_shots, plan, revision
 
 
 def compact_version(item):
@@ -112,7 +114,6 @@ def retrieval_dependencies(config, w, p, *, context):
 def detail(config, job_id, w, *, store=None, compact=False):
     p = plan(w, w["active_plan"])
     context = signatures.DetailContext(store=store, display=True)
-    from urllib.parse import quote
 
     references = None
 
@@ -139,8 +140,6 @@ def detail(config, job_id, w, *, store=None, compact=False):
                     results.append(candidate)
                     continue
                 if references is None:
-                    from persons.person_processing import EvidenceReferences
-
                     references = EvidenceReferences(config, store or Store.open(config))
                 results.append(
                     {
@@ -197,12 +196,12 @@ def detail(config, job_id, w, *, store=None, compact=False):
     # 参考文稿总字数上限与各画幅分辨率：创作页展示用。
     result["reference_limit"] = config.studio.max_reference_chars
     result["canvases"] = {name: list(config.studio.render.size(name)) for name in ("16:9", "9:16", "1:1")}
-    from studio.window import anchor_conflict
 
     # 每个分镜按画面来源实际包含的逐镜阶段（素材召回 = 全部四个；上传片段没有召回；图片只有配音与渲染）。
     result["shot_stages"] = {sid: list(plan_shot_stages(w, p, sid)) for sid in ordered_shots(w, p)}
     # 背景音乐归属：提示点分镜 start=True，顺延分镜 from=提示点分镜，停止提示点 stop=True。
-    from .music import shot_music
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
+    from studio.workspace.music import shot_music
 
     result["shot_music"] = shot_music(w, p)
     result["generators"] = {

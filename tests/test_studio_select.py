@@ -1,3 +1,5 @@
+"""分镜选片、时长对齐与时间线回归。"""
+
 from __future__ import annotations
 
 import pytest

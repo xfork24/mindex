@@ -10,16 +10,26 @@
 from __future__ import annotations
 
 import logging
+import time
 from contextlib import contextmanager
 from typing import cast
+from uuid import uuid4
 
+from fastapi import HTTPException
+
+from shared import lock_backend
 from shared.db.pg_backend import PgBackend
+from shared.db.queue_pg import PgTaskQueue
+from shared.gpu_resources import required_groups
+from shared.migration_state import pending
+from shared.storage import Store
+from shared.task_config import IndexOptions, freeze_config
 
 log = logging.getLogger(__name__)
 
 __all__ = ["QUEUE_KINDS", "enqueue_backlog", "enqueue_task", "queue_backend"]
 
-# 账本表 → worker 领取 kind（与 worker_handlers._KIND_TABLES 一致）。
+# 账本表 → worker 领取 kind（与 worker.handlers._KIND_TABLES 一致）。
 QUEUE_KINDS = {
     "source_tasks": "source",
     "dialogue_tasks": "dialogue",
@@ -31,7 +41,6 @@ QUEUE_KINDS = {
 
 
 def validate_index_options(store, options):
-    from shared.task_config import IndexOptions
 
     parsed = IndexOptions.model_validate(options or {})
     if parsed.action == "activate" and not parsed.index_id:
@@ -50,7 +59,6 @@ def validate_index_options(store, options):
 
 
 def insert_index_task(store, task_id, config, options):
-    from shared.task_config import freeze_config
 
     parsed = validate_index_options(store, options)
     insert_ledger(
@@ -69,10 +77,8 @@ def wait_index_task(store, task_id, *, progress=None):
 def wait_ledger_task(store, table, task_id, *, progress=None):
     if table not in QUEUE_KINDS:
         raise ValueError("无效的任务表")
-    import time
 
-    from fastapi import HTTPException
-
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
     from shared.background_tasks import public_task
 
     while True:
@@ -98,9 +104,6 @@ def wait_ledger_task(store, table, task_id, *, progress=None):
 
 def run_index_task(config, store, options, *, progress=None):
     """底层构建器只依赖共享队列提交协议；执行编排由 worker 的上层 runner 负责。"""
-    from uuid import uuid4
-
-    from shared import lock_backend
 
     task_id = uuid4().hex
     with lock_backend.resource(store, "index-task:" + task_id, timeout=0):
@@ -115,14 +118,10 @@ def ledger_transaction(store, table, task_id, *, restart=False):
         raise ValueError("无效的任务表")
     config = getattr(store, "deployment_config", None)
     if getattr(store, "deployment_form", None) == "cluster" and config is not None:
-        from shared.gpu_resources import required_groups
-
         required_groups(config, QUEUE_KINDS[table], cluster=True)
     with store.connect() as db:
         yield db
         if getattr(store, "queue_backend", "inline") == "postgres":
-            from shared.db.queue_pg import PgTaskQueue
-
             PgTaskQueue(store.library_id).enqueue(
                 db,
                 QUEUE_KINDS[table],
@@ -152,8 +151,6 @@ def _library_id(store) -> str:
 
 
 def enqueue_task(runtime_or_config, table: str, task_id: str, *, priority: int = 100) -> int | None:
-    from shared.db.queue_pg import PgTaskQueue
-    from shared.storage import Store
 
     config = runtime_or_config.current() if hasattr(runtime_or_config, "current") else runtime_or_config
     store = Store.open(config)
@@ -174,16 +171,12 @@ def enqueue_backlog(runtime_or_config) -> dict[str, int]:
     """把 queued 账本行补入队列（幂等）。API/worker 启动时调用。"""
     if queue_backend(runtime_or_config) != "postgres":
         return {}
-    from shared.db.queue_pg import PgTaskQueue
-    from shared.storage import Store
 
     config = runtime_or_config.current() if hasattr(runtime_or_config, "current") else runtime_or_config
     store = Store.open(config)
     queue = PgTaskQueue(_library_id(store))
     counts: dict[str, int] = {}
     with cast(PgBackend, store.backend).connect() as db:
-        from shared.migration_state import pending
-
         if pending(db):
             return {}
         for table, kind in QUEUE_KINDS.items():

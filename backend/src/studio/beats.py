@@ -117,10 +117,9 @@ def track_beats(envelope: np.ndarray, bpm: float, tightness: float = 100.0) -> n
 
 
 def analyze(path: Path) -> dict:
-    (
-        """返回 ``{bpm, beats, duration, energy, brightness, analysis_version}``；节拍时间单位为秒（保留 3 """
-        """位）。"""
-    )
+    """返回 ``{bpm, beats, duration, energy, brightness, analysis_version}``；
+    节拍时间单位为秒（保留 3 位）。
+    """
     samples = decode(path)
     duration = samples.size / RATE
     if duration < 1:

@@ -52,7 +52,7 @@ from maintenance.backup_files import (
     verification_report,
 )
 from shared.config import Config, fingerprint
-from shared.storage import dumps
+from shared.storage import dumps, require_sqlite
 from shared.work_budget import copy_file
 
 FORMAT_VERSION = 1
@@ -68,7 +68,6 @@ def build_bundle(
     allow_legacy_representations=False,
     verification="full",
 ):
-    from shared.storage import require_sqlite
 
     require_sqlite(config, "业务备份导出（PostgreSQL 一致性导出在阶段 5 交付）")
     root = config.data_dir.resolve()
@@ -661,7 +660,6 @@ def import_backup(
     verification="full",
 ):
     verification_mode(verification)
-    from shared.storage import require_sqlite
 
     require_sqlite(config, "业务备份导入（PostgreSQL 装载在阶段 5 交付）")
     bundle, root = bundle.resolve(), config.data_dir.resolve()

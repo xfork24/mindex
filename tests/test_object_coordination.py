@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+import gc
+import hashlib
+import os
+import threading
+import weakref
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from types import SimpleNamespace
 
 import pytest
@@ -17,7 +23,6 @@ class Media:
         self.broken = False
 
     def stat(self, key):
-        import hashlib
 
         if key not in self.objects:
             raise FileNotFoundError(key)
@@ -99,8 +104,6 @@ def test_external_encoder_stops_when_output_budget_is_exhausted(tmp_path):
 
 
 def test_gc_while_pool_registry_is_locked_is_reentrant():
-    import gc
-    import weakref
 
     from shared.db.pg_backend import _POOLS_LOCK, PgBackend
 
@@ -137,7 +140,6 @@ def test_download_pin_reuses_identity_and_retains_longest_expiry(tmp_path):
 
 @pytest.fixture
 def pg_store(tmp_path, monkeypatch):
-    import os
 
     dsn = os.environ.get("MINDEX_TEST_POSTGRES_DSN")
     if not dsn:
@@ -157,8 +159,6 @@ def pg_store(tmp_path, monkeypatch):
 
 @pytest.mark.requires_postgres
 def test_pg_publication_and_download_cannot_race_conditional_delete(pg_store):
-    import threading
-    from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
     coordinator, media = ObjectCoordinator(pg_store), Media()
     coordinator.download("objects/key", ttl=600)

@@ -1,3 +1,5 @@
+"""语音识别、字幕分段与时间戳回归。"""
+
 from __future__ import annotations
 
 import pytest

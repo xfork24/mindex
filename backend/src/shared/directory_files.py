@@ -13,6 +13,10 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import PurePosixPath
 
+from shared import lock_backend
+from shared.db.fencing import ExecutionFence, current_attempt
+from shared.files import FileRevisionConflict
+
 _bound: ContextVar[dict | None] = ContextVar("directory_snapshots", default=None)
 
 
@@ -63,7 +67,6 @@ def validate_entry(prefix, key, entry):
 
 class Snapshot:
     def __init__(self, store, prefix, *, db=None):
-        from shared.db.fencing import ExecutionFence
 
         if directory_for(prefix + "__entry__") != prefix:
             raise ValueError("目录清单路径无效")
@@ -147,7 +150,6 @@ class Snapshot:
     def commit(self, db):
         if not self.dirty:
             return self.revision
-        from shared.files import FileRevisionConflict
 
         db.execute("BEGIN IMMEDIATE")
         current = db.execute("SELECT revision FROM directory_heads WHERE path=?", (self.prefix,)).fetchone()
@@ -195,15 +197,12 @@ class Snapshot:
 
 
 def snapshot(store, prefix):
-    from shared.db.fencing import current_attempt
 
     bound = (_bound.get() or {}).get(context_key(store, prefix))
     if bound is not None:
         return bound
     attempt = current_attempt()
     if store.pg and attempt is not None:
-        from shared import lock_backend
-
         if attempt.library_id != store.library_id or attempt.backend.dsn != store.backend.dsn:
             raise ValueError("目录与任务所属素材库不一致")
 

@@ -7,8 +7,10 @@ import uuid
 from contextlib import contextmanager
 from typing import Literal
 
+from filelock import Timeout
 from pydantic import Field, model_validator
 
+from shared import lock_backend
 from shared.config import StrictModel
 
 
@@ -114,9 +116,6 @@ class PersonHasLinkedShots(ValueError):
 
 @contextmanager
 def frame_review_lock(store):
-    from filelock import Timeout
-
-    from shared import lock_backend
 
     try:
         with lock_backend.named(store, "pipeline"):

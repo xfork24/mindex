@@ -3,7 +3,8 @@ const fs = require("node:fs");
 const vm = require("node:vm");
 const source = require("./studio_source.cjs").studioSource();
 const calls = [];
-let releaseList, releaseArtifacts;
+let releaseList;
+let releaseArtifacts;
 const listResponse = new Promise((resolve) => {
   releaseList = resolve;
 });

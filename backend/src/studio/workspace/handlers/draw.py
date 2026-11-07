@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+from PIL import Image
+
 from models.adapters import make_image_generator
 from models.image_generators import ImageRequest, nearest_aspect
 from shared.images import image_png
@@ -110,7 +112,6 @@ class DrawHandler(StageHandler):
         studio.save_bytes(target, png)
         record.update(finished_at=studio.now())
         studio.save(record_path, sanitized(record))
-        from PIL import Image
 
         with Image.open(target) as image:
             width, height = image.size

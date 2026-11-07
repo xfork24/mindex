@@ -65,29 +65,45 @@ const status = (message, kind) => {
 
 for (const node of document.querySelectorAll("[data-i18n]")) {
   const key = node.dataset.i18n;
-  if (t[key]) node.textContent = t[key];
+  if (t[key]) {
+    node.textContent = t[key];
+  }
 }
 
 window.MindexRemote.current().then((value) => {
-  if (value?.error) status(errorText(value), "error");
-  if (value?.url) $("url").value = value.url;
-  if (value?.source === "env") status(t.envNotice);
+  if (value?.error) {
+    status(errorText(value), "error");
+  }
+  if (value?.url) {
+    $("url").value = value.url;
+  }
+  if (value?.source === "env") {
+    status(t.envNotice);
+  }
 });
 
 $("save").addEventListener("click", async () => {
   const url = $("url").value.trim();
   const token = $("token").value.trim();
-  if (!/^https?:\/\//i.test(url)) return status(t.invalidUrl, "error");
-  if (!token) return status(t.invalidToken, "error");
+  if (!/^https?:\/\//i.test(url)) {
+    return status(t.invalidUrl, "error");
+  }
+  if (!token) {
+    return status(t.invalidToken, "error");
+  }
   const result = await window.MindexRemote.save({ url, token });
-  if (!result?.ok) return status(t.failed + errorText(result), "error");
+  if (!result?.ok) {
+    return status(t.failed + errorText(result), "error");
+  }
   status(t.saved, "ok");
   setTimeout(() => window.MindexRemote.close(), 600);
 });
 
 $("clear").addEventListener("click", async () => {
   const result = await window.MindexRemote.clear();
-  if (!result?.ok) return status(t.failed + errorText(result), "error");
+  if (!result?.ok) {
+    return status(t.failed + errorText(result), "error");
+  }
   status(t.cleared, "ok");
   setTimeout(() => window.MindexRemote.close(), 600);
 });

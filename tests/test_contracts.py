@@ -1,9 +1,12 @@
+"""模型协议与领域数据契约回归。"""
+
 from __future__ import annotations
 
 import math
 
 import pytest
 from fastapi.testclient import TestClient
+from PIL import Image
 
 from conftest import FixtureEmbedder
 from diagnostics.evaluation import metrics
@@ -125,7 +128,6 @@ def test_visual_pipeline_with_model_service_upload_contract(config, video_file, 
         assert not check_index(pipeline.store, version)
         result = SearchEngine(config).text(TextSearch(text="蓝色画面"))
         assert result["results"][0]["start"] == pytest.approx(1)
-        from PIL import Image
 
         picture = tmp_path / "blue.png"
         Image.new("RGB", (160, 120), "blue").save(picture)

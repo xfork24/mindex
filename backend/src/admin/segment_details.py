@@ -5,13 +5,13 @@ from __future__ import annotations
 import json
 
 from admin.curation import Library, segment_public
+from persons.person_names import KIND_LABELS
 from processing.dialogue import relative_dialogue
 from shared.media import MediaError
 
 
 def person_section(store, segment):
     """Read processing coverage and overlapping evidence independently of publications."""
-    from persons.person_names import KIND_LABELS
 
     start, end = segment["start"], segment["end"]
     intervals = []
@@ -119,6 +119,7 @@ def segment_details(store, segment_id):
             }.get(asr_result["status"], "ASR 未处理")
     subtitle_result = {"status": "complete", "tracks": [], "message": "字幕轨道结果"}
     try:
+        # 延迟导入：保持异常捕获范围，依赖加载失败时仍走原有降级路径。
         from processing.subtitle_archive import load_archive
 
         archive = load_archive(store, source["id"])

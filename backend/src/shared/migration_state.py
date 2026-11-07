@@ -7,7 +7,9 @@ import sqlite3
 from contextlib import contextmanager
 from contextvars import ContextVar
 
-from shared.db.maintenance_gate import MaintenanceBusy
+from shared.db.dialect import _segments
+from shared.db.maintenance_gate import _ACTIVE, MaintenanceBusy
+from shared.storage import Store
 
 _ACCESS: ContextVar[frozenset[str]] = ContextVar("migration_access", default=frozenset())
 
@@ -41,7 +43,6 @@ def pending(db):
 
 
 def guard(db, scope):
-    from shared.db.maintenance_gate import _ACTIVE
 
     if scope in _ACCESS.get() or _ACTIVE.get() == scope:
         return
@@ -60,7 +61,6 @@ class LocalConnection:
         self.db, self.scope = db, scope
 
     def _guard(self, sql):
-        from shared.db.dialect import _segments
 
         code = " ".join(text for is_code, text in _segments(str(sql)) if is_code)
         if re.search(r"\b(INSERT|UPDATE|DELETE|REPLACE|ALTER|DROP|CREATE)\b", code, re.I):
@@ -115,7 +115,6 @@ def writable_config(config):
     # 没有元数据库的旧本地文件工作流不存在迁移状态，不为检查创建一个新库。
     if config.database.backend == "sqlite" and not (config.data_dir / "metadata.sqlite3").is_file():
         return
-    from shared.storage import Store
 
     with Store.open(config) as store:
         writable(store)

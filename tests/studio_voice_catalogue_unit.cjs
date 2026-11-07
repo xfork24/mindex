@@ -1,11 +1,12 @@
+const { between } = require("./source_slices.cjs");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
 const code = require("./studio_source.cjs").studioSource();
 
 // 方案参数音色目录：往返昂贵，必须短 TTL 缓存并合并在途请求，避免每次开对话框都阻塞一次 TTS 服务调用。
-let release,
-  calls = 0;
+let release;
+let calls = 0;
 const state = { id: "A", shotCards: new Map(), data: null };
 const ctx = vm.createContext({
   state,
@@ -21,10 +22,7 @@ const ctx = vm.createContext({
   renderJobMeta() {},
   renderMatrix() {},
 });
-vm.runInContext(
-  code.slice(code.indexOf("let recallCatalogue ="), code.indexOf("function fillCreateSources(")),
-  ctx,
-);
+vm.runInContext(between(code, "let recallCatalogue =", "function fillCreateSources("), ctx);
 
 (async () => {
   const first = ctx.loadVoiceCatalogue();

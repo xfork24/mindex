@@ -7,11 +7,13 @@ from __future__ import annotations
 
 import hashlib
 import io
+import tempfile
 from pathlib import Path, PurePosixPath
 from uuid import uuid4
 
 from shared import jsonio
-from shared.work_budget import resource_write
+from shared.migration_state import writable
+from shared.work_budget import GrowingReservation, current, resource_write
 
 UNCONDITIONAL = object()
 
@@ -31,6 +33,7 @@ def remote(store):
 
 def pointer(store, key):
     if remote(store):
+        # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
         from shared.directory_files import directory_for, snapshot
 
         prefix = directory_for(key)
@@ -48,13 +51,13 @@ def pointer(store, key):
 
 
 def publish(store, path, *, expected=UNCONDITIONAL):
-    from shared.migration_state import writable
 
     writable(store)
     if not remote(store):
         return None
     path = Path(path)
     key = key_for(store, path)
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
     from shared.directory_files import directory_for, snapshot
 
     prefix = directory_for(key)
@@ -86,13 +89,13 @@ def publish(store, path, *, expected=UNCONDITIONAL):
 
 @resource_write
 def save_bytes(store, path, payload, *, expected=UNCONDITIONAL):
-    from shared.migration_state import writable
 
     writable(store)
     if not remote(store):
         jsonio.save_bytes(path, payload)
         return
     key = key_for(store, path)
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
     from shared.directory_files import directory_for, snapshot
 
     prefix = directory_for(key)
@@ -150,9 +153,6 @@ def read_bytes(store, path):
 def hydrate(store, path):
     if not remote(store):
         return Path(path)
-    import tempfile
-
-    from shared.work_budget import GrowingReservation, current
 
     path = Path(path)
     entry = pointer(store, key_for(store, path))
@@ -185,6 +185,7 @@ def hydrate(store, path):
         budget = current()
         if budget is not None:
             budget.retain(path)
+        # 延迟导入：保持异常捕获范围，依赖加载失败时仍走原有降级路径。
         from shared.work_budget import commit_file
 
         commit_file(temporary, path)
@@ -195,6 +196,7 @@ def hydrate(store, path):
 
 
 def entries(store, prefix):
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
     from shared.directory_files import directory_for, snapshot
 
     directory = directory_for(prefix + "__entry__") if remote(store) else None
@@ -221,6 +223,7 @@ def hydrate_tree(store, prefix):
 
 
 def delete_tree(store, prefix):
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
     from shared.directory_files import directory_for, snapshot
 
     directory = directory_for(prefix + "__entry__") if remote(store) else None

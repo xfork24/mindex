@@ -1,7 +1,7 @@
 // 仅对 serve_media_validation.py 的独立素材库运行；不评估模型推理质量。
-const assert = require("node:assert/strict"),
-  fs = require("node:fs"),
-  path = require("node:path");
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const { chromium } = require(process.env.MINDEX_PLAYWRIGHT_MODULE || "playwright");
 const base = process.env.MINDEX_MEDIA_TEST_URL || "http://127.0.0.1:18765";
 const video = process.env.MINDEX_MEDIA_TEST_VIDEO;
@@ -25,8 +25,9 @@ function save() {
       save();
     });
     page.on("response", (r) => {
-      if (r.url().includes("/assets/") && r.status() !== 200)
+      if (r.url().includes("/assets/") && r.status() !== 200) {
         report.failedAssets.push([r.url(), r.status()]);
+      }
     });
     await page.goto(base + "/admin");
     await page.locator("#add-source").click();
@@ -77,8 +78,8 @@ function save() {
     report.taskId = task.id;
     report.events.push("processing started from browser");
     save();
-    let last = "",
-      done = false;
+    let last = "";
+    let done = false;
     for (let n = 0; n < 600; n++) {
       const r = await page.request.get(base + "/api/admin/source-tasks/" + report.taskId, {
         timeout: 15000,

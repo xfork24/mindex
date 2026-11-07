@@ -6,11 +6,13 @@ from __future__ import annotations
 import json
 import os
 import re
+import sqlite3
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from filelock import FileLock
 from typer.testing import CliRunner
 
 from cli import app
@@ -168,7 +170,6 @@ def test_shot_media_cache_expiry(tmp_path):
 
 def test_shot_media_cache_keeps_locked_files(tmp_path):
     """缓存租约（播放/渲染持有 .lock）期间不删对应合成文件。"""
-    from filelock import FileLock
 
     config_path = make_config(tmp_path)
     root = tmp_path / "data"
@@ -595,7 +596,6 @@ def test_studio_running_job_skipped(tmp_path):
 def test_studio_lock_skips_categories(tmp_path):
     config_path = make_config(tmp_path)
     root = tmp_path / "data"
-    from filelock import FileLock
 
     job = studio_job(root, "j1")
     stale_preview = age(write(job / "previews" / "quick-v1-k.mp4"), 40)
@@ -649,7 +649,6 @@ def _recent(days: int = 1) -> str:
 
 
 def _segment_dirs_of(root: Path, collection: str) -> list[str]:
-    import sqlite3
 
     with sqlite3.connect(root / "chroma" / "chroma.sqlite3") as db:
         ids = [
@@ -781,7 +780,6 @@ def test_vacuum_busy_database_skips_without_failure(tmp_path):
     seed_index_version(store, "v1", "2026-01-01 00:00:00")
     with store.connect() as db:
         db.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('active','v1')")
-    import sqlite3
 
     blocker = sqlite3.connect(root / "chroma" / "chroma.sqlite3", timeout=1)
     blocker.execute("BEGIN EXCLUSIVE")
@@ -874,7 +872,6 @@ def test_days_preview_deletes_nothing(tmp_path):
     [("context_cache", "context/scene.mp4"), ("shot_media_cache", "cache/shot-media/scene.mp4")],
 )
 def test_cache_cleanup_rechecks_lease_after_preview(tmp_path, rule_name, relative):
-    from filelock import FileLock
 
     from maintenance import clean
 
@@ -959,7 +956,6 @@ def test_progress_reports_vacuum_stages(tmp_path):
 
 def test_progress_reports_vacuum_busy_skip(tmp_path):
     """被占用的库：输出跳过原因，不抛错。"""
-    import sqlite3
 
     config = Config(data_dir=tmp_path / "data")
     Store(config.data_dir)

@@ -6,6 +6,7 @@ from typing import Literal
 
 from pydantic import Field, field_validator, model_validator
 
+from persons.persons import Persons
 from shared.config import StrictModel
 from shared.storage import Store
 from studio import studio
@@ -64,11 +65,9 @@ class ShotBody(StrictModel):
 
 
 def validate_recall_references(config, store: Store, job_id, shots):
-    (
-        """PATCH 级校验：人物必须已登记且非作品；查询文件必须已存在于 inputs/（执行前另有 digest """
-        """复验）；素材不得越出任务范围。"""
-    )
-    from persons.persons import Persons
+    """PATCH 级校验：人物必须已登记且非作品；查询文件必须已存在于 inputs/（执行前另有 digest
+    复验）；素材不得越出任务范围。
+    """
 
     catalogue = Persons(store)
     inputs = studio.job_dir(config, job_id) / "inputs"

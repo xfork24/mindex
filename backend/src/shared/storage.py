@@ -1,13 +1,38 @@
+"""元数据库存储、事务与本地及 PostgreSQL 后端入口。"""
+
 from __future__ import annotations
 
 import hashlib
 import json
+import os
 import threading
+import time
 import uuid
 from collections import OrderedDict
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+import yaml
+from filelock import FileLock
+
+from shared.config import fingerprint
+from shared.db.errors import UnsupportedOperation
+from shared.db.locks_pg import LeaseLost
+from shared.db.pg_backend import PgBackend
+from shared.db.scaling_schema import (
+    LEDGER_TABLES,
+    SQLITE_ADMISSION,
+    SQLITE_DELIVERY,
+    SQLITE_DIRECTORIES,
+    SQLITE_DURABLE_INDEX,
+    SQLITE_FILES,
+    SQLITE_MIGRATION,
+    SQLITE_MULTIPART,
+    SQLITE_OBJECTS,
+)
+from shared.query_budget import check, connection_for
+from shared.work_budget import current
 
 if TYPE_CHECKING:
     from shared.backends.media import MediaStore
@@ -40,8 +65,6 @@ def dumps(value: object) -> str:
 def require_sqlite(config, action: str) -> None:
     """维护能力在 PG 元数据库下的显式拒绝（plans §11 阶段 1：未支持时不静默跳过）。"""
     if config.database.backend == "postgres":
-        from shared.db.errors import UnsupportedOperation
-
         raise UnsupportedOperation(
             f"{action} 暂不支持 PostgreSQL 元数据库（备份迁移与 SQLite 专属维护在阶段 5 交付）；"
             "local 形态可继续使用该能力"
@@ -157,6 +180,7 @@ def _add_missing_columns(db, columns) -> None:
 
 def _metadata_v1(db) -> None:
     """引入版本号时的完整 schema；对 user_version=0 的旧库幂等（补齐后来新增的列）。"""
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
     from shared.person_schema import init_person_schema
 
     execute_script(db, METADATA_SCHEMA_V1)
@@ -311,7 +335,6 @@ CREATE TABLE IF NOT EXISTS delivery_templates (
 
 def _metadata_v8(db) -> None:
     """Seed once; tombstones prevent deleted IDs being resurrected or reused."""
-    import yaml
 
     execute_script(
         db,
@@ -432,14 +455,12 @@ def _metadata_v14(db):
 
 
 def _metadata_v16(db):
-    from shared.db.scaling_schema import SQLITE_FILES
 
     execute_script(db, SQLITE_FILES)
 
 
 # metadata.sqlite3 的有序迁移：只追加，不修改已发布的步骤（见 shared/migrations.py）。
 def _metadata_v17(db):
-    from shared.db.scaling_schema import LEDGER_TABLES
 
     for table in LEDGER_TABLES:
         columns = {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
@@ -458,44 +479,37 @@ def _metadata_v18(db):
 
 
 def _metadata_v19(db):
-    from shared.db.scaling_schema import SQLITE_DURABLE_INDEX
 
     execute_script(db, SQLITE_DURABLE_INDEX)
 
 
 def _metadata_v20(db):
-    from shared.db.scaling_schema import SQLITE_DIRECTORIES
 
     execute_script(db, SQLITE_DIRECTORIES)
 
 
 def _metadata_v21(db):
-    from shared.db.scaling_schema import SQLITE_DELIVERY
 
     execute_script(db, SQLITE_DELIVERY)
 
 
 def _metadata_v22(db):
-    from shared.db.scaling_schema import SQLITE_ADMISSION
 
     execute_script(db, SQLITE_ADMISSION)
 
 
 def _metadata_v23(db):
-    from shared.db.scaling_schema import SQLITE_OBJECTS
 
     execute_script(db, SQLITE_OBJECTS)
 
 
 def _metadata_v24(db):
-    from shared.db.scaling_schema import SQLITE_MULTIPART
 
     # 备份/装载以 user_version=0 重跑迁移（含当前 schema 的快照）：ALTER 按列存在性幂等。
     execute_script(db, SQLITE_MULTIPART, skip_existing_columns=True)
 
 
 def _metadata_v25(db):
-    from shared.db.scaling_schema import SQLITE_MIGRATION
 
     execute_script(db, SQLITE_MIGRATION, skip_existing_columns=True)
 
@@ -551,6 +565,7 @@ class Store:
         PostgreSQL 元数据库的统一 Store。集群调用链（API/worker）必须经此入口或
         显式传入 BackendContext；``Store(root)`` 只服务本地工具、测试与暂存 SQLite。
         """
+        # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
         from shared.backends import open_context
 
         return open_context(config).store
@@ -578,9 +593,9 @@ class Store:
         self.locks_backend = "file"
         # 媒体后端（open_context 注入；直构 Store 为 None，按本地文件系统解析）。
         self.media = None
-        from filelock import FileLock
 
         # 首次建库的 WAL 切换不总遵循 SQLite busy_timeout；跨线程/进程串行初始化。
+        # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
         from shared.migration_state import access
 
         with FileLock(str(self.root / ".metadata-init.lock"), timeout=30), access(self):
@@ -598,7 +613,6 @@ class Store:
         return self.backend.backend == "postgres"
 
     def _hot_cached(self, key: str, ttl: float, producer):
-        import time
 
         with self._hot_cache_lock:
             entry = self._hot_cache.get(key)
@@ -620,7 +634,6 @@ class Store:
         context = getattr(self, "_backend_context", None)
         if context is not None and context.closed:
             raise RuntimeError("后端上下文已关闭")
-        from shared.query_budget import check, connection_for
 
         check()
         active = connection_for(self)
@@ -632,6 +645,7 @@ class Store:
             if self.pg:
                 yield db
             else:
+                # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
                 from shared.migration_state import LocalConnection
 
                 yield LocalConnection(db, str(self.path.resolve()))
@@ -740,14 +754,13 @@ class Store:
             self._activate_in_db(db, index_id)
 
     def _defer_publication(self, kind, identifier, *, execution=None):
+        # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
         from shared.db.fencing import current_attempt, publication_scope
 
         attempt = execution.attempt if execution is not None else current_attempt()
         if not self.pg or attempt is None:
             return False
         if attempt.library_id != self.library_id or attempt.backend.dsn != self.backend.dsn:
-            from shared.db.locks_pg import LeaseLost
-
             raise LeaseLost("发布目标与任务所属素材库不一致")
         attempt.check()
         method = self._activate_in_db if kind == "index" else self._activate_release_in_db
@@ -783,7 +796,6 @@ class Store:
                 "SELECT r.person_id FROM search_releases r JOIN settings s ON s.value=r.id WHERE "
                 "s.key='active.release'"
             ).fetchone()
-            from shared.config import fingerprint
 
             person_id = current["person_id"] if current else None
             release_id = fingerprint([index_id, person_id])
@@ -833,10 +845,9 @@ class Store:
         return (row["n"], row["c"], row["l"], row["r"])
 
     def retain_snapshots(self, keep: set[str]) -> int:
-        (
-            """淘汰本库快照缓存中不在 keep """
-            """里的索引版本（活动指针移走后，旧版本不会再被默认路径用到）。返回淘汰条数。"""
-        )
+        """淘汰本库快照缓存中不在 keep 里的索引版本（活动指针移走后，旧版本不会再被默认路径用到）。
+        返回淘汰条数。
+        """
         path = self._snapshot_cache_scope()
         with _SNAPSHOT_LOCK:
             stale = [key for key in _SNAPSHOT_CACHE if key[0] == path and key[1] not in keep]
@@ -846,7 +857,6 @@ class Store:
 
     @property
     def cache_identity(self):
-        from shared.config import fingerprint
 
         if not self.library_id and not self.pg:
             row = self.one("SELECT value FROM settings WHERE key='library.id'")
@@ -891,6 +901,7 @@ class Store:
         media = getattr(self, "media", None)
         if media is not None and getattr(media, "backend", "local") == "s3":
             try:
+                # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
                 from shared import files
 
                 entry = files.pointer(self, relative)
@@ -914,6 +925,7 @@ class Store:
                 (relative,),
             )
         if reference:
+            # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
             from shared.shot_media import ShotMedia
 
             try:
@@ -925,6 +937,7 @@ class Store:
 
     def resolve_media(self, relative: str) -> Path:
         """兼容 Path 入口；长期处理和响应应使用 materialize_media 持有整个上下文。"""
+        # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
         from shared.db.fencing import current_attempt
 
         attempt = current_attempt()
@@ -932,7 +945,6 @@ class Store:
             if attempt.library_id != self.library_id or attempt.backend.dsn != self.backend.dsn:
                 raise ValueError("媒体与任务所属素材库不一致")
             return attempt.retain((self.library_id, "media", relative), self.materialize_media(relative))
-        from shared.work_budget import current
 
         budget = current()
         if budget is not None and budget.store.cache_identity == self.cache_identity:
@@ -952,6 +964,7 @@ class Store:
             raise FileNotFoundError(relative)
         media = getattr(self, "media", None)
         if media is not None and getattr(media, "backend", "local") == "s3":
+            # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
             from shared import files
 
             entry = files.pointer(self, relative)
@@ -982,6 +995,7 @@ class Store:
                     (relative,),
                 )
             if reference:
+                # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
                 from shared.shot_media import ShotMedia
 
                 with ShotMedia(self).materialized(
@@ -998,6 +1012,7 @@ class Store:
             raise FileNotFoundError(relative)
         reference = self.one("SELECT * FROM media_references WHERE path=?", (relative,))
         if reference and reference["version"] == "shot-boundary-v1":
+            # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
             from shared.shot_media import ShotMedia
 
             return ShotMedia(self).materialize(reference["source_id"], reference["start"], reference["end"])
@@ -1014,6 +1029,7 @@ class Store:
                         reference = snapshot
                         break
             if reference:
+                # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
                 from shared.shot_media import ShotMedia
 
                 return ShotMedia(self).materialize(
@@ -1033,9 +1049,6 @@ class PgStore(Store):
     """
 
     def __init__(self, config):
-        import os
-
-        from shared.db.pg_backend import PgBackend
 
         self.root = config.data_dir.resolve()
         self.root.mkdir(parents=True, exist_ok=True)
@@ -1050,6 +1063,7 @@ class PgStore(Store):
                 "（凭据只从环境变量读取，不写入配置文件）"
             )
         # 先用一次引导连接完成版本校验并读取 library_id；锁键/缓存租户键都用它（plans §2）。
+        # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
         from shared.db.migrate_pg import check_schema
 
         pool_options = {

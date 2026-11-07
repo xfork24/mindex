@@ -14,7 +14,16 @@ from pathlib import Path
 
 from models import adapters, deployment
 from models.adapters import ModelError
-from models.deployment import PREFIX, SUFFIX, check_local_files, normalized_metadata, read_manifest, space_contract, validate_role
+from models.compatibility import require_gate
+from models.deployment import (
+    PREFIX,
+    SUFFIX,
+    check_local_files,
+    normalized_metadata,
+    read_manifest,
+    space_contract,
+    validate_role,
+)
 from models.embedders import HTTPEmbedder
 from shared.config import Config, Service, fingerprint
 from shared.media import MediaError, atomic_media, content_hash, probe
@@ -142,7 +151,9 @@ def checked_runtime(service: Service, pinned: dict, *, check_health: bool = True
             # 沿用清单中的路径拼写，以兼容既有 deployment_id 和 smoke 记录，
             # 原始路径仍保留在 observed.observable/props 中供诊断。
             observed["deployment"] = copy.deepcopy(observed["deployment"])
-            observed["deployment"]["observable"]["model_path"] = pinned["deployment"]["observable"]["model_path"]
+            observed["deployment"]["observable"]["model_path"] = pinned["deployment"]["observable"][
+                "model_path"
+            ]
             parameters = observed["deployment"]["parameters"]
             pinned_parameters = pinned["deployment"]["parameters"]
             if "mmproj_path" in parameters and "mmproj_path" in pinned_parameters:
@@ -212,9 +223,7 @@ def prepare_video(path: Path, output: Path, config: Config):
         except MediaError as exc:
             output.unlink(missing_ok=True)
             failure = exc
-    raise ModelError(
-        f"视频嵌入预处理失败：{path.name}（{info['duration']:.3f} 秒），{failure}"
-    ) from failure
+    raise ModelError(f"视频嵌入预处理失败：{path.name}（{info['duration']:.3f} 秒），{failure}") from failure
 
 
 class LlamaEmbedder(HTTPEmbedder):
@@ -352,8 +361,6 @@ class LlamaEmbedder(HTTPEmbedder):
         if recalling and checks.get(key):
             return
         if space.get("schema") == 2:
-            from models.compatibility import require_gate
-
             require_gate(self.config, space, report)
             if recalling:
                 checks[key] = True

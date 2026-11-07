@@ -7,6 +7,7 @@ import io
 import json
 from pathlib import Path
 
+import mindex  # noqa: F401 — 安装根包自举，后续使用包内短导入
 from PIL import Image
 
 from diagnostics.film import export_source

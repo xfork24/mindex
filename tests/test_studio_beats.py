@@ -1,8 +1,6 @@
-(
-    """曲目节奏分析（spec m3-post-production 需求 16.2）：合成节拍器音频的 BPM 误差 ≤ 2%，节拍时间误差 ≤ """
-    """30 """
-    """ms。"""
-)
+"""曲目节奏分析（spec m3-post-production 需求 16.2）：合成节拍器音频的 BPM 误差 ≤ 2%，节拍时间误差
+≤ 30 ms。
+"""
 
 from __future__ import annotations
 

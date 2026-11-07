@@ -9,7 +9,9 @@ const { HOST } = require("./ports");
 // 全局选项（--config、--data-dir）必须放在子命令 serve 之前（见 backend/src/cli.py 的 configure）。
 function serveArguments({ configPath, dataDir, port }) {
   const args = ["--config", configPath];
-  if (dataDir) args.push("--data-dir", dataDir);
+  if (dataDir) {
+    args.push("--data-dir", dataDir);
+  }
   args.push("serve", "--host", HOST, "--port", String(port));
   return args;
 }
@@ -26,10 +28,12 @@ function buildCommand({
   cwd,
 }) {
   const args = serveArguments({ configPath, dataDir, port });
-  if (mode === "dev")
+  if (mode === "dev") {
     return { command: uv, args: ["run", "--project", repoRoot, "mindex", ...args], cwd: repoRoot };
-  if (mode === "packaged")
+  }
+  if (mode === "packaged") {
     return { command: backendExecutable, args, cwd: cwd || path.dirname(configPath) };
+  }
   throw new Error(`未知的后端模式：${mode}`);
 }
 
@@ -47,9 +51,15 @@ function buildEnv(base, { token, ffmpeg, ffprobe, browsersPath, extra = {} }) {
   delete env.MINDEX_CONFIG;
   // Electron 自身的变量不应传给 Python 后端。
   delete env.ELECTRON_RUN_AS_NODE;
-  if (ffmpeg) env.MINDEX_FFMPEG = ffmpeg;
-  if (ffprobe) env.MINDEX_FFPROBE = ffprobe;
-  if (browsersPath) env.PLAYWRIGHT_BROWSERS_PATH = browsersPath;
+  if (ffmpeg) {
+    env.MINDEX_FFMPEG = ffmpeg;
+  }
+  if (ffprobe) {
+    env.MINDEX_FFPROBE = ffprobe;
+  }
+  if (browsersPath) {
+    env.PLAYWRIGHT_BROWSERS_PATH = browsersPath;
+  }
   return env;
 }
 
@@ -66,14 +76,18 @@ class RotatingLog {
   rotate() {
     for (let index = this.keep - 1; index >= 1; index -= 1) {
       const from = index === 1 ? this.file : `${this.file}.${index - 1}`;
-      if (fs.existsSync(from)) fs.renameSync(from, `${this.file}.${index}`);
+      if (fs.existsSync(from)) {
+        fs.renameSync(from, `${this.file}.${index}`);
+      }
     }
     this.size = 0;
   }
 
   write(chunk) {
     const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
-    if (this.size + data.length > this.maxBytes && this.size > 0) this.rotate();
+    if (this.size + data.length > this.maxBytes && this.size > 0) {
+      this.rotate();
+    }
     fs.appendFileSync(this.file, data);
     this.size += data.length;
   }
@@ -111,7 +125,9 @@ async function waitForHealth({
   const deadline = Date.now() + timeoutMs;
   let last = "后端尚未响应";
   while (Date.now() < deadline) {
-    if (!isRunning()) throw new StartupError("exited", "后端进程在就绪前退出");
+    if (!isRunning()) {
+      throw new StartupError("exited", "后端进程在就绪前退出");
+    }
     try {
       const response = await fetchImpl(url, {
         headers: { Authorization: `Bearer ${token}` },
@@ -119,20 +135,25 @@ async function waitForHealth({
       });
       if (response.status === 200) {
         const body = await response.json();
-        if (!(await pidMatches(body.pid)))
+        if (!(await pidMatches(body.pid))) {
           throw new StartupError("pid-mismatch", "端口上响应的不是本应用启动的后端");
-        if (version && body.version !== version)
+        }
+        if (version && body.version !== version) {
           throw new StartupError(
             "version-mismatch",
             `后端版本 ${body.version} 与应用版本 ${version} 不一致`,
           );
+        }
         return body;
       }
       last = `健康检查返回 HTTP ${response.status}`;
-      if (response.status === 401)
+      if (response.status === 401) {
         throw new StartupError("pid-mismatch", "端口上响应的后端不接受本应用的令牌");
+      }
     } catch (error) {
-      if (error instanceof StartupError) throw error;
+      if (error instanceof StartupError) {
+        throw error;
+      }
       last = error.message;
     }
     await sleep(intervalMs);
@@ -144,7 +165,9 @@ async function waitForHealth({
 function isDescendant(pid, root, readParent = parentPid) {
   let current = pid;
   for (let depth = 0; depth < 8 && current && current > 1; depth += 1) {
-    if (current === root) return true;
+    if (current === root) {
+      return true;
+    }
     current = readParent(current);
   }
   return false;
@@ -172,7 +195,9 @@ function processInfo(pid, { platform = process.platform, exec = childProcess.exe
 }
 
 function parentPid(pid, { platform = process.platform, exec = childProcess.execFileSync } = {}) {
-  if (platform === "win32") return processInfo(pid, { platform, exec }).parent;
+  if (platform === "win32") {
+    return processInfo(pid, { platform, exec }).parent;
+  }
   try {
     return Number(exec("ps", ["-o", "ppid=", "-p", String(pid)], { encoding: "utf8" }).trim()) || 0;
   } catch {
@@ -184,7 +209,9 @@ function processCommand(
   pid,
   { platform = process.platform, exec = childProcess.execFileSync } = {},
 ) {
-  if (platform === "win32") return processInfo(pid, { platform, exec }).command;
+  if (platform === "win32") {
+    return processInfo(pid, { platform, exec }).command;
+  }
   try {
     return exec("ps", ["-o", "command=", "-p", String(pid)], { encoding: "utf8" }).trim();
   } catch {
@@ -215,14 +242,18 @@ async function stopGroup(
     exec = childProcess.execFileSync,
   } = {},
 ) {
-  if (!pid || !isAlive(pid)) return false;
+  if (!pid || !isAlive(pid)) {
+    return false;
+  }
   if (platform === "win32") {
     try {
       exec("taskkill", ["/PID", String(pid), "/T"], { stdio: "ignore" });
     } catch {}
     const deadline = Date.now() + graceMs;
     while (Date.now() < deadline) {
-      if (!isAlive(pid)) return false;
+      if (!isAlive(pid)) {
+        return false;
+      }
       await sleep(pollMs);
     }
     try {
@@ -237,7 +268,9 @@ async function stopGroup(
   }
   const deadline = Date.now() + graceMs;
   while (Date.now() < deadline) {
-    if (!isAlive(pid)) return false;
+    if (!isAlive(pid)) {
+      return false;
+    }
     await sleep(pollMs);
   }
   try {
@@ -251,9 +284,13 @@ async function reapStale(
   pid,
   { isAlive = alive, command = processCommand, stop = stopGroup } = {},
 ) {
-  if (!pid || !isAlive(pid)) return false;
+  if (!pid || !isAlive(pid)) {
+    return false;
+  }
   const line = command(pid);
-  if (!/mindex/.test(line) || !/\bserve\b/.test(line)) return false;
+  if (!/mindex/.test(line) || !/\bserve\b/.test(line)) {
+    return false;
+  }
   await stop(pid, { graceMs: 5000 });
   return true;
 }

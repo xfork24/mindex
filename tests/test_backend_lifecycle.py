@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import gc
+import weakref
 from unittest.mock import Mock
 
 import pytest
@@ -128,7 +129,6 @@ def test_worker_closes_context_even_on_failure():
 
 
 def test_borrowed_media_keeps_context_alive(tmp_path):
-    import weakref
 
     context = open_context(Config(data_dir=tmp_path, storage={"staging_quota_gb": 0.01}))
     reference = weakref.ref(context)
@@ -146,7 +146,6 @@ def test_borrowed_media_keeps_context_alive(tmp_path):
 
 
 def test_gc_during_other_staging_accounting_never_reenters_ledger(tmp_path):
-    import weakref
 
     config = Config(data_dir=tmp_path, storage={"staging_quota_gb": 0.01})
     first, second = open_context(config), open_context(config)

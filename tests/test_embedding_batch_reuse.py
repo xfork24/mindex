@@ -1,3 +1,5 @@
+"""嵌入批处理与检查点复用回归。"""
+
 from conftest import FixtureEmbedder
 from processing.indexing import IndexBuilder, VectorIndex, check_index
 from processing.pipeline import Pipeline

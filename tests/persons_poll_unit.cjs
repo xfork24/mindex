@@ -1,20 +1,23 @@
+const { between } = require("./source_slices.cjs");
 // persons.js 处理进度轮询：链式 setTimeout、页面隐藏暂停、失败指数退避（5s 起翻倍，上限 60s）、成功复位。
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
 const source = fs.readFileSync("frontend/src/persons/persons.js", "utf8");
-const block = source.slice(source.indexOf("// 处理进度轮询"), source.indexOf("// 智能助手：定位"));
+const block = between(source, "// 处理进度轮询", "// 智能助手：定位");
 (async () => {
   const timers = [];
-  let listener = null,
-    outcome = "ok",
-    calls = 0,
-    notices = 0,
-    inflight = null;
+  let listener = null;
+  let outcome = "ok";
+  let calls = 0;
+  let notices = 0;
+  let inflight = null;
   const document = {
     hidden: false,
     addEventListener: (name, fn) => {
-      if (name === "visibilitychange") listener = fn;
+      if (name === "visibilitychange") {
+        listener = fn;
+      }
     },
   };
   const ctx = vm.createContext({
@@ -35,7 +38,9 @@ const block = source.slice(source.indexOf("// 处理进度轮询"), source.index
       return timer;
     },
     clearTimeout: (timer) => {
-      if (timer) timer.cleared = true;
+      if (timer) {
+        timer.cleared = true;
+      }
     },
   });
   vm.runInContext(block, ctx);
@@ -48,8 +53,11 @@ const block = source.slice(source.indexOf("// 处理进度轮询"), source.index
     return { pending }; // 包一层：async 函数直接返回 Promise 会等它完成
   };
   const settle = async ({ pending }) => {
-    if (outcome === "ok") inflight.resolve();
-    else inflight.reject(new Error("down"));
+    if (outcome === "ok") {
+      inflight.resolve();
+    } else {
+      inflight.reject(new Error("down"));
+    }
     await pending;
   };
   assert.deepEqual(

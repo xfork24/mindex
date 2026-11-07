@@ -1,3 +1,5 @@
+"""文案拆分镜、原文覆盖与重试选择回归。"""
+
 from __future__ import annotations
 
 import base64

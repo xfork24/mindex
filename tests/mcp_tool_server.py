@@ -17,12 +17,12 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP, Image
 from mcp.types import BlobResourceContents, EmbeddedResource, TextContent
+from PIL import Image as PILImage
 
 server = FastMCP("mindex-test-tools")
 
 
 def png(color: str) -> bytes:
-    from PIL import Image as PILImage
 
     buffer = io.BytesIO()
     PILImage.new("RGB", (160, 120), color).save(buffer, "PNG")

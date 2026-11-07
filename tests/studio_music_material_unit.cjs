@@ -1,3 +1,4 @@
+const { between } = require("./source_slices.cjs");
 // 分镜渲染阶段列出背景音乐素材：每个分镜显示自己适用的背景音乐（切入 / 顺延 / 停止 / 没有），
 // 在对应提示点分镜切换；成片面板列出实际混入的各段。真实创作页脚本 + 轻量桩，不依赖浏览器。
 const assert = require("node:assert/strict");
@@ -7,7 +8,7 @@ const vm = require("node:vm");
 
 const dir = path.join(__dirname, "../frontend/src/studio");
 const read = (name) => fs.readFileSync(path.join(dir, name), "utf8");
-const slice = (text, start, end) => text.slice(text.indexOf(start), text.indexOf(end));
+const slice = (text, start, end) => between(text, start, end);
 const sandbox = {
   MindexI18n: require("./i18n_adapter.cjs"),
   console,
@@ -72,7 +73,7 @@ run(
     builds: [],
     plans: { p1: { id: "p1", board: "board", shots, ranges: {}, options: {} } },
     versions: {
-      board: { data: { order: ["a", "b", "c", "d", "e"] } },
+      "board": { data: { order: ["a", "b", "c", "d", "e"] } },
       ...content("a", null),
       ...content("b", { kind: "generate", prompt: "轻快电子", volume: 0.5 }),
       ...content("c", null),
@@ -135,7 +136,7 @@ assert.notEqual(before, key("e"));
 // 7. 成片面板列出实际混入的各段：分镜序号范围、成片时间、音量、描述与试听。
 const final = {
   data: {
-    boundaries: ["a", "b", "c", "d", "e"].map((shot_id) => ({ shot_id })),
+    boundaries: ["a", "b", "c", "d", "e"].map((shotId) => ({ shot_id: shotId })),
     music: [
       {
         cue: "b",

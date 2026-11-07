@@ -1,6 +1,10 @@
+"""处理互斥、跨进程锁与素材保护回归。"""
+
+import json
 import subprocess
 import sys
 import threading
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -51,10 +55,11 @@ def test_shared_lock_is_visible_to_cli_process(config):
         "-c",
         """
 import sys
+import mindex  # 子进程自举后再使用包内短导入
 from pathlib import Path
 from filelock import Timeout
-from mindex.shared.config import Config
-from mindex.shared.processing_lock import ProcessingLock
+from shared.config import Config
+from shared.processing_lock import ProcessingLock
 try:
     with ProcessingLock(Config(data_dir=Path(sys.argv[1]), enforce_gpu_lock=True)):
         sys.exit(2)
@@ -141,8 +146,6 @@ def test_gpu_lock_business_setting_roundtrip_reset_and_validation(config):
 @pytest.mark.parametrize("enforced", [False, True])
 def test_all_four_processing_groups_across_sources_follow_gpu_setting(config, monkeypatch, enforced):
     """Hold real task workers concurrently, rather than just probing lock files."""
-    import json
-    from types import SimpleNamespace
 
     from persons.person_processing import PersonOptions, PersonTasks
     from shared.storage import Store

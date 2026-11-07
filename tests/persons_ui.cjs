@@ -33,7 +33,9 @@ class Element {
   }
   set value(value) {
     this._value = value;
-    if (this.tagName === "select") this.children.forEach((o) => (o.selected = o.value === value));
+    if (this.tagName === "select") {
+      this.children.forEach((o) => (o.selected = o.value === value));
+    }
   }
   append(...children) {
     this.children.push(...children);
@@ -43,10 +45,15 @@ class Element {
   }
   querySelectorAll(selector) {
     const children = this.children.flatMap((child) => [child, ...child.querySelectorAll("*")]);
-    if (selector === "*") return children;
-    if (selector === ".shot-pick") return children.filter((n) => n.className === "shot-pick");
-    if (selector === "input:checked")
+    if (selector === "*") {
+      return children;
+    }
+    if (selector === ".shot-pick") {
+      return children.filter((n) => n.className === "shot-pick");
+    }
+    if (selector === "input:checked") {
       return children.filter((n) => n.tagName === "input" && n.checked);
+    }
     return children.filter((n) => n.tagName === selector);
   }
   replaceChildren(...children) {
@@ -101,8 +108,12 @@ const multiSelectIds = new Set([
   "filter-role",
 ]);
 function get(id) {
-  if (!nodes.has(id)) nodes.set(id, new Element(selectIds.has(id) ? "select" : "div"));
-  if (multiSelectIds.has(id)) nodes.get(id).multiple = true;
+  if (!nodes.has(id)) {
+    nodes.set(id, new Element(selectIds.has(id) ? "select" : "div"));
+  }
+  if (multiSelectIds.has(id)) {
+    nodes.get(id).multiple = true;
+  }
   return nodes.get(id);
 }
 const actor = { id: "a", kind: "actor", name: "甲", aliases: [] };
@@ -135,8 +146,8 @@ const reviewResponse = (url) => {
     (s) => !params.get("status") || s.bucket === params.get("status"),
   );
   if (params.get("status") === "rejected") {
-    const offset = Number(params.get("offset")),
-      limit = Number(params.get("limit"));
+    const offset = Number(params.get("offset"));
+    const limit = Number(params.get("limit"));
     return {
       items: scoped.slice(offset, offset + limit).map((s) => ({ ...s, candidate: null })),
       total: scoped.length,
@@ -166,15 +177,15 @@ const reviewResponse = (url) => {
             p.actor_id === params.get("actor_id") && (p.role_id || null) === params.get("role_id"),
         ),
   );
-  const offset = Number(params.get("offset")),
-    limit = Number(params.get("limit"));
+  const offset = Number(params.get("offset"));
+  const limit = Number(params.get("limit"));
   return {
     items: items.slice(offset, offset + limit),
     total: items.length,
     scope_total: scoped.length,
     filters: [...groups].map(([key, count]) => {
-      const [actor_id, role_id] = JSON.parse(key);
-      return { actor_id, role_id, count };
+      const [actorId, roleId] = JSON.parse(key);
+      return { actor_id: actorId, role_id: roleId, count };
     }),
   };
 };
@@ -236,8 +247,10 @@ const sandbox = {
         }),
       };
     }
-    if (url.includes("/linked-shots")) return { ok: true, json: async () => linkedResult };
-    if (url.startsWith("/api/persons/review/shots/"))
+    if (url.includes("/linked-shots")) {
+      return { ok: true, json: async () => linkedResult };
+    }
+    if (url.startsWith("/api/persons/review/shots/")) {
       return {
         ok: true,
         json: async () => ({
@@ -253,6 +266,7 @@ const sandbox = {
           ],
         }),
       };
+    }
     if (url === "/api/persons/review/shot" && blockDeletion) {
       blockDeletion = false;
       linkedResult = { ...linkedResult, items: [], total: 0 };
@@ -279,7 +293,9 @@ vm.runInContext(fs.readFileSync("frontend/src/persons/persons.js", "utf8"), sand
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 const event = { preventDefault() {}, stopPropagation() {} };
 function find(root, predicate) {
-  if (predicate(root)) return root;
+  if (predicate(root)) {
+    return root;
+  }
   return root.children.map((n) => find(n, predicate)).find(Boolean);
 }
 
@@ -446,7 +462,9 @@ function find(root, predicate) {
       .map((o) => o.value)
       .sort();
   const choose = (id, ids) => {
-    for (const o of get(id).options) o.selected = ids.includes(o.value);
+    for (const o of get(id).options) {
+      o.selected = ids.includes(o.value);
+    }
     get(id).onchange();
   };
   const originalSources = vm.runInContext("state.sources.slice()", sandbox);
@@ -853,7 +871,9 @@ function find(root, predicate) {
     "dependent shot opens directly without classification filtering",
   );
   const linkedChoices = get("review-choices").querySelectorAll("input");
-  for (const check of linkedChoices) check.checked = JSON.parse(check.value)[0] === "b";
+  for (const check of linkedChoices) {
+    check.checked = JSON.parse(check.value)[0] === "b";
+  }
   await sandbox.review(true);
   assert.equal(get("linked-dialog").open, true, "saving returns to an updated dependency list");
   assert.ok(get("linked-summary").textContent.includes("可以删除该身份"));

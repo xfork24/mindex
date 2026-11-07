@@ -40,6 +40,7 @@ def clips_migrate(
         \b
           mindex clips migrate --source SOURCE_ID --apply --verify
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from maintenance.clips import migrate
 
     print_json(migrate(ctx.obj, source, apply=apply, verify=verify))
@@ -63,6 +64,7 @@ def clips_materialize(
     """
     if not all:
         raise typer.BadParameter("请指定 --all")
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from maintenance.clips import materialize_all
 
     print_json(materialize_all(ctx.obj))
@@ -82,6 +84,7 @@ def clips_verify_archives(
     \b
       mindex clips verify-archives --source SOURCE_ID
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from maintenance.clips import verify_archives
 
     print_json(verify_archives(ctx.obj, source))
@@ -107,6 +110,7 @@ def clips_repair_boundaries(
         \b
           mindex clips repair-boundaries --source SOURCE_ID
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from processing.shot_repair import apply as repair
     from processing.shot_repair import audit
     from shared.storage import Store
@@ -135,6 +139,7 @@ def clips_prune(
         \b
           mindex clips prune /路径/migration-report.json
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from maintenance.clips import prune
 
     print_json(prune(ctx.obj, migration_report, apply=apply))

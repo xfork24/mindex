@@ -13,6 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import av
+import mindex  # noqa: F401 — 安装根包自举，后续使用包内短导入
 
 from shared import locks
 

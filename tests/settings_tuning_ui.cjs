@@ -27,13 +27,14 @@ const { chromium } = require(process.env.MINDEX_PLAYWRIGHT_MODULE || "playwright
         assert.equal(layout.labels.length, 12);
         assert.equal(layout.overflow, false);
         for (let i = 1; i < layout.labels.length; i++) {
-          const a = layout.labels[i - 1],
-            b = layout.labels[i];
-          if (b.top > a.top + 2)
+          const a = layout.labels[i - 1];
+          const b = layout.labels[i];
+          if (b.top > a.top + 2) {
             assert(
               a.right + 14 + b.width > layout.right - 2,
               JSON.stringify({ width, lang, a, b, right: layout.right }),
             );
+          }
         }
       }
     }

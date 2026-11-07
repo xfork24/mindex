@@ -3,11 +3,19 @@
 from __future__ import annotations
 
 import asyncio
+import importlib.metadata
+import io
 import json
+import os
+import subprocess
 import threading
+import types
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from types import SimpleNamespace
 
 import pytest
+from fastapi.testclient import TestClient
+from PIL import Image
 from pydantic import BaseModel
 
 from agent.dsh_runtime import DshRuntime, patch, readiness
@@ -20,7 +28,6 @@ from shared.config import AgentConfig
 @pytest.mark.parametrize("frozen", [False, True])
 @pytest.mark.parametrize("failure", ["missing", "version", "files"])
 def test_dependency_repair_matches_installation(monkeypatch, frozen, failure):
-    import importlib.metadata
 
     import agent.dsh_runtime as module
 
@@ -36,7 +43,6 @@ def test_dependency_repair_matches_installation(monkeypatch, frozen, failure):
 
     monkeypatch.setattr(importlib.metadata, "version", version)
     if failure == "files":
-        import types
 
         def resolve(mode=None):
             assert mode == ("exe" if frozen else None)
@@ -58,7 +64,6 @@ def test_dependency_repair_matches_installation(monkeypatch, frozen, failure):
 
 
 def test_frozen_uses_bundled_executable(monkeypatch):
-    import types
 
     import agent.dsh_runtime as module
 
@@ -309,7 +314,6 @@ def test_real_dsh_million_context(tmp_path, model_server):
 
 
 def test_runtime_setting_keeps_existing_owner(config):
-    from fastapi.testclient import TestClient
 
     from agent.llm.scripted import ScriptedLlm, say
     from api import create_app
@@ -405,8 +409,6 @@ def test_real_dsh_approval_and_exit(tmp_path, model_server, decision):
 
 
 def test_settings_runtime_browser(config):
-    import os
-    import subprocess
 
     from api import create_app
     from test_agent_panel_ui import ROOT, playwright_available, serve
@@ -431,7 +433,6 @@ def test_settings_runtime_browser(config):
 
 
 def test_missing_dsh_keeps_preference(config, monkeypatch):
-    from fastapi.testclient import TestClient
 
     import agent.dsh_runtime as module
     from api import create_app
@@ -455,9 +456,6 @@ def test_missing_dsh_keeps_preference(config, monkeypatch):
 
 @pytest.mark.parametrize("vision", [False, True])
 def test_real_dsh_image_boundary(tmp_path, model_server, vision):
-    import io
-
-    from PIL import Image
 
     url, requests = model_server
     settings = AgentConfig(
@@ -551,7 +549,6 @@ def test_failed_sdk_start_releases_workers(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("method", ["approval/request", "user-question/ask"])
 def test_native_requests_map_to_existing_cards(tmp_path, method):
-    from types import SimpleNamespace
 
     store = SessionStore(tmp_path)
     sid = store.create(runtime="dsh")["id"]

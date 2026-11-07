@@ -80,6 +80,7 @@ def novelty_scores(texts: list[str], references: list[str], embedder) -> tuple[l
         return [1.0] * len(texts), None
     if embedder is not None:
         try:
+            # 延迟导入：保持异常捕获范围，依赖加载失败时仍走原有降级路径。
             from topics.cluster import embed
 
             mine = embed(embedder, texts)

@@ -8,6 +8,7 @@ import threading
 import time
 from pathlib import Path
 
+import httpx
 import pytest
 
 pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
@@ -35,7 +36,7 @@ def test_studio_page_has_accessible_cancel_and_delete_plan_buttons():
         ("cancel-run", "ui.studio_cancel_run"),
         ("cancel-legacy", "ui.studio_cancel_run"),
     ):
-        tag = re.search(rf'<button id="{button_id}"[^>]*>([^<]+)</button>', html)
+        tag = re.search(rf'<button\s+id="{button_id}"[^>]*>([^<]+)</button\s*>', html)
         assert tag and tag.group(1).strip(), button_id  # 有可见文字
         assert key in tag.group(0), button_id
 
@@ -49,7 +50,6 @@ def _playwright_available() -> bool:
 @pytest.fixture
 def blocked_studio(tmp_path):
     """隔离数据 + Fixture 适配器的进程内服务；已提交一次配音整列重做，配音桩在放行文件出现前一直等待。"""
-    import httpx
 
     from api import create_app
     from conftest import FixtureSpeaker, FixtureStoryboarder

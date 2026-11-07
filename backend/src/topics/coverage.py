@@ -9,6 +9,8 @@ from __future__ import annotations
 from contextlib import nullcontext
 
 from models.adapters import ModelError
+from search.search import SearchEngine
+from shared.types import Filters, TextSearch
 from topics import coverage_verify
 from topics.llm import make_llm, profile_of
 
@@ -67,7 +69,6 @@ def report(
     limits=None,
 ) -> dict:
     """``engine`` 供测试注入（需有 ``text(TextSearch)``）；缺省按活动索引构造 ``SearchEngine``。"""
-    from shared.types import Filters, TextSearch
 
     filters = filters or Filters()
     scope = filters.effective_sources(store)
@@ -80,7 +81,6 @@ def report(
     if engine is None:
         if active is None:
             return empty(visuals, "no_index", "没有活动索引：先在素材管理页处理并发布素材")
-        from search.search import SearchEngine
 
         engine = SearchEngine(config, embedder, index_id=active["id"])
     limits = limits or config.topics.coverage

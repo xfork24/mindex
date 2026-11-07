@@ -1,3 +1,5 @@
+"""人物证据帧导出与图像响应回归。"""
+
 from __future__ import annotations
 
 import pytest

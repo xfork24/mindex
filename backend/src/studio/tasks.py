@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import json
+import time
 from contextlib import contextmanager
 from uuid import uuid4
 
-from shared import lock_backend
-from shared.directory_files import bind, snapshot
+from settings.runtime_settings import RuntimeConfig
+from shared import files, lock_backend
+from shared.db.queue_pg import PgTaskQueue
+from shared.directory_files import Snapshot, bind, snapshot
+from shared.external_calls import scope
 from shared.queue_dispatch import ledger_transaction
 from shared.storage import Store, dumps
 from shared.task_config import freeze_config, restore_config
@@ -57,7 +61,6 @@ def submit(config, job_id, kind, options, *, build_id=None):
 
 
 def handle(config, task):
-    from settings.runtime_settings import RuntimeConfig
 
     store = Store.open(config)
     row = store.one("SELECT * FROM studio_tasks WHERE id=?", (task.ledger_id,))
@@ -94,8 +97,6 @@ def handle(config, task):
             result["status"] = state
             workspace.persist(cfg, job_id, w)
     else:
-        from shared import files
-
         for entry in files.entries(store, f"studio/{job_id}/"):
             relative = entry["path"].removeprefix(f"studio/{job_id}/")
             if not relative.startswith(("versions/", "attempts/", "builds/", "migration-v2/")):
@@ -105,7 +106,6 @@ def handle(config, task):
             attempt.check()
             studio.begin_step(cfg, job_id, step)
             studio.set_execution(cfg, job_id, "running", step, steps[index + 1 :])
-            from shared.external_calls import scope
 
             with scope(store, [job_id, "legacy", step]):
                 studio_steps.run_step(
@@ -130,7 +130,6 @@ def terminal_writer(store, row, task):
     def finish(db, outcome, error):
         if outcome == "succeeded":
             return
-        from shared.directory_files import Snapshot
 
         view = Snapshot(store, f"studio/{row['job_id']}/", db=db)
         key = view.prefix + ("workspace.json" if row["kind"] == "build" else "job.json")
@@ -167,7 +166,6 @@ def terminal_writer(store, row, task):
 
 
 def cancel(config, kind, job_id, key=None):
-    from shared.db.queue_pg import PgTaskQueue
 
     store = Store.open(config)
     queue = PgTaskQueue(store.library_id)
@@ -191,7 +189,6 @@ def cancel(config, kind, job_id, key=None):
 
 
 def wait(config, task_id):
-    import time
 
     store = Store.open(config)
     while True:

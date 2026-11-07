@@ -17,7 +17,9 @@
   const current = () => window.MindexI18n.language;
   function select(value, language = current()) {
     const text = String(value ?? "");
-    if (language === "en" && translations.has(text)) return translations.get(text);
+    if (language === "en" && translations.has(text)) {
+      return translations.get(text);
+    }
     // The analysis prompt defines Chinese / English within each string. Ordinary
     // slashes, Chinese alternatives, URLs and old monolingual values stay intact.
     for (const match of text.matchAll(/\s+\/\s+/g)) {
@@ -37,13 +39,19 @@
     const sections = [];
     for (const line of String(value ?? "").split(/\r?\n/)) {
       const match = line.match(/^([^：]+)：(.*)$/);
-      if (match && labels[match[1]]) sections.push({ label: match[1], value: match[2] });
-      else if (sections.length) sections[sections.length - 1].value += "\n" + line;
-      else sections.push({ value: line });
+      if (match && labels[match[1]]) {
+        sections.push({ label: match[1], value: match[2] });
+      } else if (sections.length) {
+        sections[sections.length - 1].value += "\n" + line;
+      } else {
+        sections.push({ value: line });
+      }
     }
     return sections
       .map((section) => {
-        if (!section.label) return select(section.value, language);
+        if (!section.label) {
+          return select(section.value, language);
+        }
         const key = labels[section.label];
         const label =
           MindexI18n.catalog?.[key]?.[language] ?? MindexI18n.render(MindexI18n.msg(key));
@@ -56,7 +64,9 @@
   }
   function update(node) {
     const item = bindings.get(node);
-    if (!item) return;
+    if (!item) {
+      return;
+    }
     const language = current();
     const value = Array.isArray(item.value)
       ? item.value.map((text) => select(text, language)).join(language === "en" ? "; " : "；")
@@ -79,8 +89,9 @@
   });
   function addTranslations(values) {
     for (const [source, english] of Object.entries(values)) {
-      if (typeof english === "string" && english.trim() && !/[\u3400-\u9fff]/.test(english))
+      if (typeof english === "string" && english.trim() && !/[\u3400-\u9fff]/.test(english)) {
         translations.set(source, english);
+      }
     }
     document.querySelectorAll("[data-analysis-text]").forEach(update);
   }

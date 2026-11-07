@@ -5,9 +5,11 @@ from __future__ import annotations
 import json
 import threading
 import time
+from contextlib import ExitStack
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
+from fastapi.testclient import TestClient
 
 from search.eligible_set import EligibleSet
 from search.lexical_query import eligible_projection, sql_bm25
@@ -79,7 +81,6 @@ def test_pg_snapshot_and_sql_deadline_release_connection(pg_config):
 
 @pytest.mark.requires_postgres
 def test_pool_wait_is_within_query_deadline_and_control_still_works(pg_config):
-    from contextlib import ExitStack
 
     with Store.open(pg_config) as store, ExitStack() as stack:
         for _ in range(store.backend.pool_max):
@@ -229,9 +230,6 @@ def test_paged_person_and_channel_search_matches_reference(pg_config, monkeypatc
 
 @pytest.mark.requires_postgres
 def test_api_pool_timeout_returns_retryable_503_and_live_stays_up(pg_config):
-    from contextlib import ExitStack
-
-    from fastapi.testclient import TestClient
 
     from api import create_app
 

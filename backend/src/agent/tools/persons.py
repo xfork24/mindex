@@ -621,7 +621,10 @@ def specs() -> list[ToolSpec]:
         ToolSpec(
             "add_person_reference",
             "persons",
-            "为演员或角色添加参考图：用图片附件（attachment://），或从素材某个时间点截图（可裁剪）；会做质检。",
+            (
+                "为演员或角色添加参考图：用图片附件（attachment://），或从素材某个时间点截图（可裁剪）；"
+                "会做质检。"
+            ),
             AddReference,
             "write",
             add_person_reference,
@@ -639,7 +642,10 @@ def specs() -> list[ToolSpec]:
         ToolSpec(
             "identify_person",
             "persons",
-            "识别图片附件（attachment://）中的人：对每张人脸按角色与按演员给出候选、相似度与是否达到确认条件。",
+            (
+                "识别图片附件（attachment://）中的人：对每张人脸按角色与按演员给出候选、"
+                "相似度与是否达到确认条件。"
+            ),
             IdentifyPerson,
             "read",
             identify_person,

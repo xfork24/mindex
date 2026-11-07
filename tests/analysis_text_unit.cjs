@@ -1,8 +1,8 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
-const nodes = [],
-  events = {};
+const nodes = [];
+const events = {};
 const catalog = {
   "ui.d9d9827827e1": { zh: "动作", en: "Actions" },
   "ui.6867f7b4537a": { zh: "景别", en: "Shot size" },
@@ -67,9 +67,9 @@ const annotation = {
   actions: ["行走 / walking", "交谈 / talking"],
 };
 const original = JSON.stringify(annotation);
-const description = node(),
-  actions = node(),
-  match = node();
+const description = node();
+const actions = node();
+const match = node();
 setText(description, annotation.description);
 setText(actions, annotation.actions, { label: i18n.msg("ui.d9d9827827e1") });
 setText(
@@ -101,8 +101,8 @@ setText(legacy, ["仰视 low-angle view", "清新 lush"], { label: "Angle" });
 root.MindexAnalysisText.addTranslations({
   "仰视 low-angle view": "low-angle view",
   "清新 lush": "lush",
-  旧版描述: "Legacy description",
-  坏翻译: "中文 English",
+  "旧版描述": "Legacy description",
+  "坏翻译": "中文 English",
 });
 assert.equal(select("仰视 low-angle view", "zh"), "仰视 low-angle view");
 assert.equal(select("仰视 low-angle view", "en"), "low-angle view");

@@ -1,3 +1,5 @@
+"""镜头边界修复、媒体与派生产物一致性回归。"""
+
 import json
 import shutil
 

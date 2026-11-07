@@ -1,12 +1,12 @@
-(
-    """线上厂商适配器契约：TokenHub 嵌入 / OpenAI-chat ASR / MiniMax TTS / DashScope TTS / llama_template """
-    """门控。"""
-)
+"""线上厂商适配器契约：TokenHub 嵌入 / OpenAI-chat ASR / MiniMax TTS / DashScope TTS /
+llama_template 门控。
+"""
 
 from __future__ import annotations
 
 import base64
 import json
+from typing import ClassVar
 
 import httpx
 import pytest
@@ -608,9 +608,6 @@ def test_pipeline_routes_minimax_asr_to_timestamp_flow(config, monkeypatch):
 
 
 def test_request_bytes_audit_truncates_json_body(monkeypatch):
-    from typing import ClassVar
-
-    import httpx
 
     recorded = []
     monkeypatch.setattr(adapters, "record", lambda kind, payload: recorded.append((kind, payload)))
@@ -632,9 +629,6 @@ def test_request_bytes_audit_truncates_json_body(monkeypatch):
 
 def test_request_error_surfaces_upstream_reason(monkeypatch):
     """上游 4xx 的错误正文才是可读原因；只抛 httpx 异常串会让页面显示无意义的 '400 Bad Request'。"""
-    from typing import ClassVar
-
-    import httpx
 
     body = {
         "type": "error",
@@ -674,9 +668,6 @@ def test_request_error_surfaces_upstream_reason(monkeypatch):
 
 def test_request_error_falls_back_to_raw_body(monkeypatch):
     """非 JSON 错误正文也要带出来，不能只剩状态码。"""
-    from typing import ClassVar
-
-    import httpx
 
     class FakeResponse:
         status_code = 400

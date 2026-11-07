@@ -1,0 +1,15 @@
+{
+  "name": "mindex-code-style",
+  "private": true,
+  "scripts": {
+    "lint:js": "eslint frontend/src desktop tests scripts --max-warnings 0 && node scripts/check-studio-scripts.cjs",
+    "lint:css": "stylelint \"frontend/src/**/*.css\"",
+    "test:js": "node --test \"tests/*_unit.cjs\"",
+    "format:check": "prettier --check \"frontend/src/**/*.{js,html,css}\" \"desktop/**/*.{js,html}\" \"tests/*.cjs\" \"scripts/*.cjs\" eslint.config.mjs stylelint.config.mjs package.json .prettierrc"
+  },
+  "devDependencies": {
+    "eslint": "10.14.0",
+    "prettier": "3.9.10",
+    "stylelint": "17.16.0"
+  }
+}

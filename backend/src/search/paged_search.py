@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from persons.person_names import _occurrences, coverage_missing, overlaps_for, resolve_names
+from persons.person_processing import EvidenceReferences
 from persons.persons import Persons
+from search.lexical_query import dialogue_projection
+from search.search import time_iou
 
 
 def text(engine, query, started):
@@ -87,8 +90,6 @@ def text(engine, query, started):
         snapshots = snapshots.transform(enrich)
         meta["person_coverage_missing"] = sorted(missing)
         if not remaining:
-            from search.search import time_iou
-
             ranked, selected, offset = [], [], 0
             count = engine.config.search.candidates
             while len(ranked) < query.limit:
@@ -135,7 +136,6 @@ def text(engine, query, started):
             result = engine._channel_text(
                 query, active, snapshots, engine._vectors(active["id"]), started, projection=True
             )
-        from persons.person_processing import EvidenceReferences
 
         reference_images = EvidenceReferences(engine.config, store)
         for hit in result["results"]:
@@ -145,7 +145,6 @@ def text(engine, query, started):
     if mode == "mentioned":
         names = {e["id"]: [e["name"], *e.get("aliases", [])] for e in entities}
         if ids:
-            from search.lexical_query import dialogue_projection
 
             def mentioned(page):
                 dialogue = dialogue_projection(store, active["id"], [s["id"] for s in page])

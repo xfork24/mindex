@@ -11,6 +11,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import ExitStack
 
+import mindex  # noqa: F401 — 安装根包自举，后续使用包内短导入
+
 from models.adapters import InvalidAnalysisStructure, ModelError
 from models.qwen import QwenAnalyzer
 from settings.runtime_settings import apply_runtime_overrides, merge_profile

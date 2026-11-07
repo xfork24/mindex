@@ -2,18 +2,32 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import time
+from contextlib import nullcontext
 from functools import cache
+from importlib.metadata import PackageNotFoundError, version
 from urllib.parse import urlencode
 
+from fastapi import APIRouter as _APIRouter
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse as _JSON
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 
 from admin.admin import admin_router
 from admin.curation import EntityNotFound
+from admin.dialogue_tasks import dialogue_router
+from admin.groups import groups_router
+from admin.indexes import index_tasks_router, indexes_router
+from admin.source_tasks import source_tasks_router
+from agent.api import agent_router, build_runtime
+from agent.changes import KINDS
+from agent.loopback import ensure_internal_token
+from agent.outbox_bridge import OutboxBridge
 from models.adapters import (
     Animator,
     ModelError,
@@ -24,22 +38,41 @@ from models.adapters import (
     Writer,
 )
 from persons import profiling
+from persons.person_api import person_router
 from search.api import search_router
+from server.gateway import forward
 from settings.api import settings_router
 from settings.runtime_settings import RuntimeConfig
+from shared.admission import validate_serving
 from shared.backends import open_context
 from shared.backends.context import resource_scope
+from shared.backends.staging import StagingFull
+from shared.background_tasks import busy_categories
 from shared.config import Config, load_config
+from shared.db.agent_outbox import publish
+from shared.db.locks_pg import LeaseLost
+from shared.db.maintenance_gate import MaintenanceBusy
+from shared.i18n import add_message_metadata
+from shared.metrics import metrics_snapshot
+from shared.migration_state import writable
+from shared.object_coordination import ObjectDeleting
+from shared.query_budget import QueryBudgetExceeded, deadline
+from shared.readiness import readiness
 from shared.shot_media import file_response as FileResponse
 from shared.web_assets import frontend_root
 from shared.web_auth import install_web_auth
+from shared.work_budget import scope
 from studio.api import studio_router
+from studio.executor import busy_executors
+from studio.revisions import install as install_studio_revisions
+from studio.workspace.versions import RevisionConflict as _RevisionConflict
+from topics.api import topics_router
+from topics.scheduler import install as install_topic_scheduler
 
 
 @cache
 def app_version() -> str:
     """已安装包的版本号（与 pyproject 一致；桌面外壳据此确认连到的是同版本后端）。"""
-    from importlib.metadata import PackageNotFoundError, version
 
     try:
         return version("mindex")
@@ -49,7 +82,6 @@ def app_version() -> str:
 
 def _with_bridge(previous, bridge):
     """包装 lifespan：应用关闭时停止 outbox 轮询线程。"""
-    import contextlib
 
     @contextlib.asynccontextmanager
     async def lifespan(application):
@@ -88,29 +120,18 @@ def create_app(
     # 运行后端（db/media/locks/vectors/queue）经 BackendContext 构造：阶段 0 恒为
     # local 形态，store 即 metadata.sqlite3 的 Store；集群形态（阶段 1 起）由此切换。
     backends = open_context(config)
-    from shared.admission import validate_serving
 
     validate_serving(backends)
     store = backends.store
     runtime = RuntimeConfig(config, store)  # 设置页保存后经覆盖层热生效，无需重启
     app = FastAPI(title="Mindex 视频素材检索", version="0.1.0")
-    from studio.revisions import install as install_studio_revisions
 
     install_studio_revisions(app, config, store)
-    from agent.loopback import ensure_internal_token
 
     ensure_internal_token(app)  # 智能助手回环请求的进程内凭证，须在认证中间件生效前就绪
 
     @app.middleware("http")
     async def request_work_budget(request, call_next):
-        from contextlib import nullcontext
-
-        from starlette.concurrency import run_in_threadpool
-
-        from shared.db.maintenance_gate import MaintenanceBusy
-        from shared.migration_state import writable
-        from shared.query_budget import deadline
-        from shared.work_budget import scope
 
         if (
             request.url.path.startswith("/api/")
@@ -137,17 +158,18 @@ def create_app(
             "content-type", ""
         ):
             return response
-        from shared.i18n import add_message_metadata
 
         rewrite_started = time.perf_counter()
         payload = b"".join([chunk async for chunk in response.body_iterator])
         try:
+            # 延迟导入：保持异常捕获范围，依赖加载失败时仍走原有降级路径。
             from shared.analysis_translations import display_metadata
 
             data = display_metadata(
                 add_message_metadata(json.loads(payload)), store.root, namespace=store.cache_identity
             )
         except (ValueError, UnicodeDecodeError):
+            # 延迟导入：保留可选依赖探测或异常捕获时的降级行为。
             from starlette.responses import Response
 
             return Response(payload, status_code=response.status_code, headers=dict(response.headers))
@@ -167,17 +189,13 @@ def create_app(
 
     if index_id and store.index_version(index_id)["status"] != "ready":
         raise ValueError("固定预览只允许就绪索引")
-    from admin.dialogue_tasks import dialogue_router
-    from admin.indexes import index_tasks_router, indexes_router
-    from admin.source_tasks import source_tasks_router
-    from persons.person_api import person_router
 
     app.include_router(person_router(runtime, store))
     app.include_router(dialogue_router(runtime, store, embedder))
     app.include_router(source_tasks_router(runtime, store, embedder))
     app.include_router(indexes_router(runtime, store, embedder))
     app.include_router(index_tasks_router(runtime, store, embedder))
-    from admin.groups import groups_router
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
     from api.uploads import install_reaper, upload_router
 
     app.include_router(upload_router(store, runtime))
@@ -200,34 +218,24 @@ def create_app(
             music_generator=music_generator,
         )
     )
-    from topics.api import topics_router
 
     topics = topics_router(runtime, store, embedder, topic_llm=topic_llm, scheduler=scheduler)
     app.include_router(topics)
     app.state.topic_scheduler = None
     if scheduler:
-        from topics.scheduler import install as install_topic_scheduler
-
         install_topic_scheduler(app, store, topics.topic_runs, config)
-
-    from agent.api import agent_router, build_runtime
 
     # 智能助手：同一工具注册表经回环调用上面的 REST 路由；agent_llm 供测试注入脚本化模型。
     # cluster 形态的业务 API 不建独立会话运行时：/api/agent 固定由单实例
     # agent-gateway 提供（plans §9；网关故障时助手明确不可用，不假数据降级）。
     if config.server.role == "api" and backends.form == "cluster":
-        from fastapi import APIRouter as _APIRouter
-        from fastapi.responses import JSONResponse as _JSON
 
         async def _agent_redirect(request: Request):
-            from server.gateway import forward
 
             return await forward(request, config.agent.gateway_url)
 
         async def _report_change(request: Request):
             """变更上报写入共享 outbox，由网关幂等转入 SSE（plans §9）。"""
-            from agent.changes import KINDS
-            from shared.db.agent_outbox import publish
 
             try:
                 body = await request.json()
@@ -255,7 +263,6 @@ def create_app(
     app.state.runtime_config, app.state.store, app.state.backends = runtime, store, backends
     if config.server.role == "agent-gateway" and config.database.backend == "postgres":
         # 网关把共享 outbox 幂等转入本地 ChangeFeed（plans §9）。
-        from agent.outbox_bridge import OutboxBridge
 
         bridge = OutboxBridge(store, app.state.agent_runtime.feed)
         app.state.outbox_bridge = bridge
@@ -264,6 +271,7 @@ def create_app(
     # cluster 业务 API 上同样只由 agent-gateway 提供（plans §9）。
     if config.agent.mcp.http_enabled and not (config.server.role == "api" and backends.form == "cluster"):
         try:
+            # 延迟导入：保持异常捕获范围，依赖加载失败时仍走原有降级路径。
             from agent.mcp_server import install_http
         except ImportError as exc:  # pragma: no cover - 依赖缺失时给出明确指引
             raise RuntimeError("开启 agent.mcp.http_enabled 需要安装 MCP 依赖：uv sync --extra mcp") from exc
@@ -337,8 +345,6 @@ def create_app(
     async def value_error(_, exc):
         return JSONResponse(status_code=422, content={"detail": str(exc)})
 
-    from studio.workspace.versions import RevisionConflict as _RevisionConflict
-
     @app.exception_handler(_RevisionConflict)
     async def revision_conflict(_, exc):
         """条件发布失败（If-Match 不符）：409，客户端应刷新后重试。"""
@@ -349,8 +355,6 @@ def create_app(
     @app.get("/api/health")
     def health():
         """轻量就绪检查（桌面外壳轮询用）：不读素材表、不探测模型服务；随 web_auth 一起受令牌保护。"""
-        from shared.background_tasks import busy_categories
-        from studio.executor import busy_executors
 
         tasks = (["studio"] if busy_executors(config.data_dir) else []) + busy_categories(config.data_dir)
         payload = {
@@ -370,7 +374,6 @@ def create_app(
                 "locks": backends.locks.backend,
                 "queue": backends.queue.backend,
             }
-            from shared.metrics import metrics_snapshot
 
             snapshot = metrics_snapshot(backends, config)
             payload["queue_stats"] = snapshot.get("queue", {})
@@ -383,7 +386,6 @@ def create_app(
         backends = getattr(app.state, "backends", None)
         if backends is None:
             return {"form": "local"}
-        from shared.metrics import metrics_snapshot
 
         return metrics_snapshot(backends, config)
 
@@ -393,23 +395,15 @@ def create_app(
 
     @app.get("/api/ready")
     def ready():
-        from shared.readiness import readiness
 
         report = readiness(backends, config, gateway_token=app.state.web_auth_token)
         return JSONResponse(report, status_code=200 if report["ok"] else 503)
-
-    from shared.backends.staging import StagingFull
-    from shared.db.locks_pg import LeaseLost
-    from shared.db.maintenance_gate import MaintenanceBusy
-    from shared.object_coordination import ObjectDeleting
 
     @app.exception_handler(ObjectDeleting)
     @app.exception_handler(MaintenanceBusy)
     @app.exception_handler(LeaseLost)
     async def write_unavailable(_, exc):
         return JSONResponse({"detail": str(exc)}, status_code=409)
-
-    from shared.query_budget import QueryBudgetExceeded
 
     @app.exception_handler(QueryBudgetExceeded)
     async def query_budget_exhausted(_, exc):
@@ -429,7 +423,6 @@ def create_app(
     install_web_auth(app, web_token)
 
     # 最外层退出，等待调度器、上传回收与网关线程先停止。
-    import contextlib
 
     previous = app.router.lifespan_context
 
@@ -439,6 +432,7 @@ def create_app(
             async with previous(application) as state:
                 yield state
         finally:
+            # 延迟导入：保持异常捕获范围，依赖加载失败时仍走原有降级路径。
             from shared.background_tasks import close_runners
 
             close_runners(store)

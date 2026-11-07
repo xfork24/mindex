@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from .versions import ordered_shots
+from studio.workspace.versions import ordered_shots
 
 # 改动镜内转场滤镜或余量规则时递增：进入有转场分镜的 render 签名与有重叠转场的 compose 签名。
 TRANSITION_VERSION = 1

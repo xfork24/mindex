@@ -54,10 +54,13 @@ const backend = {
   log: null,
 
   mode() {
-    if (paths.packaged) return "packaged";
-    // 开发时验证冻结后端：MINDEX_DESKTOP_BACKEND=frozen 且 desktop/build/backend/mindex 已构建。
-    if (process.env.MINDEX_DESKTOP_BACKEND === "frozen" && paths.backendExecutable)
+    if (paths.packaged) {
       return "packaged";
+    }
+    // 开发时验证冻结后端：MINDEX_DESKTOP_BACKEND=frozen 且 desktop/build/backend/mindex 已构建。
+    if (process.env.MINDEX_DESKTOP_BACKEND === "frozen" && paths.backendExecutable) {
+      return "packaged";
+    }
     return "dev";
   },
 
@@ -87,7 +90,9 @@ const backend = {
     }
     this.remote = false;
     const state = loadState(paths.stateFile);
-    if (state.sidecar?.pid) await sidecarLib.reapStale(state.sidecar.pid);
+    if (state.sidecar?.pid) {
+      await sidecarLib.reapStale(state.sidecar.pid);
+    }
     const { port, changed } = await choosePort(state.port);
     const config = ensureConfig(paths.userData, paths.template);
     ensureFonts(paths.fonts, paths.userData);
@@ -135,8 +140,12 @@ const backend = {
     child.on("exit", (code, signal) => {
       exited.value = true;
       this.log.write(`===== 后端退出：code=${code} signal=${signal}\n`);
-      if (this.child === child) this.child = null;
-      if (!this.stopping && !quitting) showError(text.backendExited, this.log.tail());
+      if (this.child === child) {
+        this.child = null;
+      }
+      if (!this.stopping && !quitting) {
+        showError(text.backendExited, this.log.tail());
+      }
     });
     saveState(paths.stateFile, { ...state, port, sidecar: { pid: child.pid } });
     const health = await sidecarLib.waitForHealth({
@@ -179,7 +188,9 @@ const backend = {
   },
 
   async request(pathname, { method = "GET", timeoutMs = 3000 } = {}) {
-    if (!this.origin || (!this.child && !this.remote)) return null;
+    if (!this.origin || (!this.child && !this.remote)) {
+      return null;
+    }
     try {
       const response = await fetch(`${this.origin}${pathname}`, {
         method,
@@ -202,7 +213,9 @@ const backend = {
     const child = this.child;
     if (child?.pid) {
       const forced = await sidecarLib.stopGroup(child.pid, { graceMs: 10000 });
-      if (forced) this.log?.write("===== 后端未在 10 秒内退出，已强制结束\n");
+      if (forced) {
+        this.log?.write("===== 后端未在 10 秒内退出，已强制结束\n");
+      }
     }
     this.child = null;
     const state = loadState(paths.stateFile);
@@ -230,7 +243,9 @@ function webPreferences() {
 const shellPage = () => path.join(paths.pages, "shell.html");
 
 function showPage(query) {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
   mainWindow.loadFile(shellPage(), { query: { lang: app.getLocale(), ...query } });
 }
 
@@ -270,8 +285,9 @@ function createWindow() {
         keepInBackground: keepInBackground(),
         trayAvailable: !trayUnavailable,
       })
-    )
+    ) {
       return;
+    }
     event.preventDefault();
     mainWindow.hide();
     backgroundHint();
@@ -283,9 +299,12 @@ function createWindow() {
 }
 
 function showWindow() {
-  if (!mainWindow) createWindow();
-  else {
-    if (mainWindow.isMinimized()) mainWindow.restore();
+  if (!mainWindow) {
+    createWindow();
+  } else {
+    if (mainWindow.isMinimized()) {
+      mainWindow.restore();
+    }
     mainWindow.show();
     mainWindow.focus();
   }
@@ -299,28 +318,39 @@ function keepInBackground() {
 
 function backgroundHint() {
   const state = loadState(paths.stateFile);
-  if (state.background_hint_shown) return;
+  if (state.background_hint_shown) {
+    return;
+  }
   saveState(paths.stateFile, { ...state, background_hint_shown: true });
   // 隔离测试（MINDEX_DESKTOP_HOME）不弹系统通知。
-  if (HOME || !Notification.isSupported()) return;
+  if (HOME || !Notification.isSupported()) {
+    return;
+  }
   new Notification({ title: text.backgroundTitle, body: text.backgroundBody, silent: true }).show();
 }
 
 function trayAction(action) {
-  if (action === "open") showWindow();
-  else if (action === "topics") {
+  if (action === "open") {
+    showWindow();
+  } else if (action === "topics") {
     showWindow();
     const url = trayLib.topicsUrl(backend.origin);
-    if (url && backend.child) mainWindow?.loadURL(url);
+    if (url && backend.child) {
+      mainWindow?.loadURL(url);
+    }
   } else if (action === "toggle-background") {
     const state = loadState(paths.stateFile);
     saveState(paths.stateFile, { ...state, keep_in_background: !keepInBackground() });
     refreshTray();
-  } else if (action === "quit") app.quit();
+  } else if (action === "quit") {
+    app.quit();
+  }
 }
 
 function refreshTray() {
-  if (!tray) return;
+  if (!tray) {
+    return;
+  }
   const items = trayLib
     .menuItems(text, { keepInBackground: keepInBackground() })
     .map((item) =>
@@ -334,11 +364,15 @@ function createTray() {
   // 关闭窗口改为真正退出，并在本次启动提示一次（见 strings 的 trayUnavailable 文案）。
   try {
     const image = nativeImage.createFromPath(trayLib.iconPath(process.platform, paths.desktopDir));
-    if (process.platform === "darwin") image.setTemplateImage(true);
+    if (process.platform === "darwin") {
+      image.setTemplateImage(true);
+    }
     tray = new Tray(image);
     tray.setToolTip(text.trayTooltip);
     // Windows：单击托盘图标打开窗口；macOS 单击即弹出菜单。
-    if (process.platform !== "darwin") tray.on("click", showWindow);
+    if (process.platform !== "darwin") {
+      tray.on("click", showWindow);
+    }
     refreshTray();
   } catch (error) {
     trayUnavailable = true;
@@ -361,27 +395,39 @@ function createTray() {
 function guard(contents) {
   contents.on("will-navigate", (event, url) => {
     const action = security.navigationAction(url, backend.origin, [shellPage()]);
-    if (action === "allow") return;
+    if (action === "allow") {
+      return;
+    }
     event.preventDefault();
-    if (action === "external") shell.openExternal(url);
+    if (action === "external") {
+      shell.openExternal(url);
+    }
   });
   contents.setWindowOpenHandler(({ url }) => {
     const action = security.windowOpenAction(url, backend.origin);
-    if (action === "internal")
+    if (action === "internal") {
       return {
         action: "allow",
         overrideBrowserWindowOptions: { webPreferences: webPreferences() },
       };
-    if (action === "external") shell.openExternal(url);
+    }
+    if (action === "external") {
+      shell.openExternal(url);
+    }
     return { action: "deny" };
   });
   contents.on("did-navigate-in-page", (_, url) => {
-    if (!security.isLocalPage(url, [shellPage()])) return;
+    if (!security.isLocalPage(url, [shellPage()])) {
+      return;
+    }
     const command = security.shellCommand(url);
-    if (command === "retry")
+    if (command === "retry") {
       restart().catch((error) => showError(error.message, backend.log?.tail()));
-    else if (command === "logs") shell.openPath(paths.logs);
-    else if (command === "quit") app.quit();
+    } else if (command === "logs") {
+      shell.openPath(paths.logs);
+    } else if (command === "quit") {
+      app.quit();
+    }
   });
 }
 
@@ -389,15 +435,18 @@ async function launch() {
   showLoading();
   try {
     const { changed } = await backend.start();
-    if (!mainWindow) return;
+    if (!mainWindow) {
+      return;
+    }
     await mainWindow.loadURL(`${backend.origin}/`);
-    if (changed)
+    if (changed) {
       dialog.showMessageBox(mainWindow, {
         type: "info",
         title: text.portChangedTitle,
         message: text.portChanged,
         buttons: [text.ok],
       });
+    }
   } catch (error) {
     await backend.stop();
     showError(error.message, backend.log?.tail());
@@ -417,7 +466,9 @@ async function chooseDataDir() {
     message: text.chooseDataPrompt,
     properties: ["openDirectory", "createDirectory"],
   });
-  if (result.canceled || !result.filePaths.length) return;
+  if (result.canceled || !result.filePaths.length) {
+    return;
+  }
   const dir = result.filePaths[0];
   const problem = dataDirProblem(dir);
   if (problem) {
@@ -437,7 +488,9 @@ async function chooseDataDir() {
     defaultId: 0,
     cancelId: 1,
   });
-  if (confirm.response !== 0) return;
+  if (confirm.response !== 0) {
+    return;
+  }
   saveState(paths.stateFile, { ...loadState(paths.stateFile), data_dir: dir });
   await restart();
 }
@@ -473,7 +526,9 @@ async function openRemoteSettings() {
       sandbox: true,
     },
   });
-  let current, connectionError, connectionErrorCode;
+  let current;
+  let connectionError;
+  let connectionErrorCode;
   try {
     current = remoteConfig({ userData: paths.userData, storage: safeStorage });
   } catch (error) {
@@ -510,9 +565,13 @@ async function openRemoteSettings() {
     },
     "remote:close": () => remoteWindow?.close(),
   };
-  for (const [channel, handler] of Object.entries(handlers)) ipcMain.handle(channel, handler);
+  for (const [channel, handler] of Object.entries(handlers)) {
+    ipcMain.handle(channel, handler);
+  }
   remoteWindow.on("closed", () => {
-    for (const channel of Object.keys(handlers)) ipcMain.removeHandler(channel);
+    for (const channel of Object.keys(handlers)) {
+      ipcMain.removeHandler(channel);
+    }
     remoteWindow = null;
   });
   await remoteWindow.loadFile(path.join(paths.pages, "remote.html"));
@@ -601,7 +660,9 @@ async function shutdown() {
       defaultId: 1,
       cancelId: 1,
     });
-    if (answer.response !== 0) return false;
+    if (answer.response !== 0) {
+      return false;
+    }
   }
   // 先停“退出时停止”的本机模型服务（未开启本机服务管理时接口返回 403/404，忽略）。
   // 远程模式不触碰服务端的本机服务（那是服务端主机的资源，不属于本终端）。
@@ -611,7 +672,9 @@ async function shutdown() {
       timeoutMs: 20000,
     });
   }
-  for (const window of BrowserWindow.getAllWindows()) window.destroy();
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.destroy();
+  }
   await backend.stop();
   return true;
 }
@@ -622,19 +685,27 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on("second-instance", () => {
-    if (paths) showWindow();
+    if (paths) {
+      showWindow();
+    }
   });
   // macOS：点 Dock 图标重新显示隐藏的窗口。
   app.on("activate", () => {
-    if (paths) showWindow();
+    if (paths) {
+      showWindow();
+    }
   });
 
   app.on("web-contents-created", (_, contents) => guard(contents));
 
   app.on("before-quit", (event) => {
-    if (quitting) return;
+    if (quitting) {
+      return;
+    }
     event.preventDefault();
-    if (shuttingDown) return;
+    if (shuttingDown) {
+      return;
+    }
     shuttingDown = true;
     shutdown()
       .then((done) => {
@@ -652,7 +723,9 @@ if (!app.requestSingleInstanceLock()) {
 
   // 只有在不保留后台（偏好关闭）时窗口才会真正关闭，此时按原行为退出。
   app.on("window-all-closed", () => app.quit());
-  for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => app.quit());
+  for (const signal of ["SIGINT", "SIGTERM"]) {
+    process.on(signal, () => app.quit());
+  }
 
   app.whenReady().then(() => {
     paths = layout({
@@ -662,7 +735,9 @@ if (!app.requestSingleInstanceLock()) {
       logs: app.getPath("logs"),
     });
     // Windows：系统通知按 AppUserModelID 归属应用。
-    if (process.platform === "win32") app.setAppUserModelId(process.execPath);
+    if (process.platform === "win32") {
+      app.setAppUserModelId(process.execPath);
+    }
     text = strings(app.getLocale());
     session.defaultSession.setPermissionRequestHandler((_, permission, callback, details) =>
       callback(security.permissionAllowed(permission, details.requestingUrl, backend.origin)),
@@ -673,7 +748,9 @@ if (!app.requestSingleInstanceLock()) {
     // 下载：缺省由 Electron 弹出保存对话框；测试时以 MINDEX_DESKTOP_DOWNLOAD_DIR 直接保存。
     session.defaultSession.on("will-download", (_, item) => {
       const directory = process.env.MINDEX_DESKTOP_DOWNLOAD_DIR;
-      if (directory) item.setSavePath(path.join(directory, item.getFilename()));
+      if (directory) {
+        item.setSavePath(path.join(directory, item.getFilename()));
+      }
     });
     buildMenu();
     createWindow();

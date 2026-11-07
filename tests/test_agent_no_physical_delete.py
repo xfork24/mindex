@@ -941,10 +941,9 @@ def test_record_delete_tools_reach_their_delete(name):
 
 @pytest.mark.parametrize("value", HOSTILE)
 def test_hostile_ids_cannot_reach_physical_delete(value):
-    (
-        """回归：delete_job / delete_plan 的 ID """
-        """参数经路径规整曾能打到删除素材或删除创作任务；现由回环客户端拒绝。"""
-    )
+    """回归：delete_job / delete_plan 的 ID 参数经路径规整曾能打到删除素材或删除创作任务；
+    现由回环客户端拒绝。
+    """
     for name, arguments in (
         ("delete_job", {"job_id": value}),
         ("delete_plan", {"job_id": value, "plan_id": PLAN_B}),

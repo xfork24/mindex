@@ -1,4 +1,8 @@
+"""检索片段详情与上下文回归。"""
+
 from __future__ import annotations
+
+import re
 
 from fastapi.testclient import TestClient
 
@@ -107,12 +111,19 @@ def test_detail_missing_outputs_no_models_and_button_order(config, video_file):
     assert data["llm"]["message"] == "LLM 未处理"
     assert client.get("/api/admin/segments/missing/details").status_code == 404
     script = client.get("/assets/admin/admin.js").text
-    assert (
-        script.index('action(MindexI18n.msg("ui.4f55ee1e687f")')
-        < script.index('action(MindexI18n.msg("ui.e0361480e3a5")')
-        < script.index("action(item.favorite")
-        < script.index("action(item.hidden")
-    )
+    # 排版会拆开调用与参数；这里验证按钮顺序，不把换行和空格当作行为契约。
+    patterns = [
+        r'action\s*\(\s*MindexI18n\.msg\("ui.4f55ee1e687f"\)',
+        r'action\s*\(\s*MindexI18n\.msg\("ui.e0361480e3a5"\)',
+        r"action\s*\(\s*item\.favorite",
+        r"action\s*\(\s*item\.hidden",
+    ]
+    positions = []
+    for pattern in patterns:
+        match = re.search(pattern, script)
+        assert match is not None, f"找不到按钮调用：{pattern}"
+        positions.append(match.start())
+    assert positions == sorted(positions)
     assert "名称 / 备注" not in script
     page = client.get("/admin").text
     assert "analysis-dialog" in page

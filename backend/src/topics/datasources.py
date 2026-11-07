@@ -15,7 +15,7 @@ from shared.config import StrictModel
 from topics import items as topic_items
 from topics import profiles
 from topics.common import check_id, dumps, loads, new_id, now
-from topics.sources import base
+from topics.sources import base, calendar
 
 SourceKind = Literal["rss", "hotlist", "brave", "calendar", "local"]
 TEST_ITEMS = 20
@@ -274,7 +274,6 @@ def import_calendar(
     store, source_id: str, text: str, *, fmt: str | None = None, append: bool = False
 ) -> dict:
     """把 ICS/CSV 文本解析后存为该日历来源的事件（缺省替换已有事件）。"""
-    from topics.sources import calendar
 
     row = _row(store, source_id)
     if row["kind"] != "calendar":
@@ -290,7 +289,6 @@ def import_calendar(
 
 
 def import_sample(store, source_id: str, name: str, *, append: bool = False) -> dict:
-    from topics.sources import calendar
 
     return {
         **import_calendar(store, source_id, calendar.sample_text(name), fmt="csv", append=append),

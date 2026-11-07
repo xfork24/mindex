@@ -48,10 +48,9 @@ def test_greedy_cluster_and_fallbacks():
 
 
 def test_cluster_embed_shares_one_recall_scope():
-    (
-        """cluster.embed 整批共用一次 recall_scope：llama_cpp 嵌入器逐批会做 /health /props /v1/models """
-        """探测，这里一次身份探测覆盖全批。"""
-    )
+    """cluster.embed 整批共用一次 recall_scope：llama_cpp 嵌入器逐批会做 /health /props /v1/models
+    探测，这里一次身份探测覆盖全批。
+    """
 
     class ScopedEmbedder:
         def __init__(self):

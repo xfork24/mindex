@@ -37,6 +37,7 @@ class BudgetTransport(httpx.BaseTransport):
 
 class ChromaClient:
     def __init__(self, settings, timeout):
+        # 延迟导入：媒体、数值或服务运行依赖仅在实际执行该功能时加载。
         from chromadb.api import ServerAPI
         from chromadb.config import System
 
@@ -59,6 +60,7 @@ class ChromaClient:
         return self.api.heartbeat()
 
     def _collection(self, method, name, *, embedding_function=None, **kwargs):
+        # 延迟导入：媒体、数值或服务运行依赖仅在实际执行该功能时加载。
         from chromadb.api.models.Collection import Collection
 
         return Collection(

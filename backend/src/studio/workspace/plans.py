@@ -13,10 +13,9 @@ from shared.types import SCRIPT_TEMPLATE_ID
 from studio import studio
 from studio.brands import BRAND_ID, BrandOverrides
 from studio.delivery_templates import DeliverySnapshot
-
-from .publish import PublishOptions
-from .stages import handler, names, shot_stages
-from .versions import add_version, plan, version
+from studio.workspace.publish import PublishOptions
+from studio.workspace.stages import handler, names, shot_stages
+from studio.workspace.versions import add_version, plan, version
 
 
 class ReferenceRef(StrictModel):
@@ -31,10 +30,9 @@ DEFAULT_CANVAS = ("16:9", "pad")
 
 
 class ExportSpec(StrictModel):
-    (
-        """多画幅导出：derive 由主成片裁切或加边快速派生；rerender """
-        """用关联子方案按该画幅重新渲染（画质更好、耗时更长）。"""
-    )
+    """多画幅导出：derive 由主成片裁切或加边快速派生；rerender
+    用关联子方案按该画幅重新渲染（画质更好、耗时更长）。
+    """
 
     canvas: Literal["16:9", "9:16", "1:1"]
     fit: Literal["pad", "crop"] = "crop"

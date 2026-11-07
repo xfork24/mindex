@@ -89,7 +89,7 @@ powershell scripts/build-desktop-win.ps1
 
 Linux 的 deb 构建要求 `desktop/package.json` 提供 `homepage`，维护包元数据时须保留。包内的可执行文件名由 `build.linux.executableName` 显式指定为 `mindex`；CI 从该配置读取 `linux-unpacked` 的冒烟启动路径。
 
-每次 CI 的 `desktop` 三平台矩阵均构建冻结后端，在不含系统 Node、Python、uv 的 PATH 下验证 dsh SDK 握手与随包 ripgrep；发布任务还会对签名/复制后的应用包执行同样检查。完整的 `check-desktop-sidecar.py` 也将 dsh 检查作为必过项。可单独运行 `desktop/build/backend/mindex -m mindex.desktop_check <临时目录> --dsh-only`（Windows 用 `mindex.exe`），不调用模型或下载资源。
+每次 CI 的 `desktop` 三平台矩阵均构建冻结后端，在不含系统 Node、Python、uv 的 PATH 下验证 dsh SDK 握手与随包 ripgrep；发布任务还会对签名/复制后的应用包执行同样检查。完整的 `check-desktop-sidecar.py` 也将 dsh 检查作为必过项。可单独运行 `desktop/build/backend/mindex -m mindex.diagnostics.desktop_check <临时目录> --dsh-only`（Windows 用 `mindex.exe`），不调用模型或下载资源。
 
 CI（`.github/workflows/ci.yml`）的 `desktop-package` 任务在定时/手动触发时按三平台矩阵构建并上传安装包，是默认产出方式；上述脚本在本地各平台同样可跑。MSYS2 工具链安装：`pacman -S make mingw-w64-ucrt-x86_64-toolchain mingw-w64-ucrt-x86_64-nasm mingw-w64-ucrt-x86_64-pkgconf mingw-w64-ucrt-x86_64-meson mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-zlib mingw-w64-ucrt-x86_64-bzip2`（mingw 的 make 包只装 `mingw32-make`，GNU make 用 msys 仓库的 `make`；zlib/bzip2 供 ffmpeg 的 PNG 解码等，缺了水印图无法解码）。)
 

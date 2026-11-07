@@ -4,8 +4,8 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { chromium } = require(process.env.MINDEX_PLAYWRIGHT_MODULE || "playwright");
 (async () => {
-  const base = process.env.MINDEX_CONTROL_URL,
-    out = process.env.MINDEX_CONTROL_OUTPUT;
+  const base = process.env.MINDEX_CONTROL_URL;
+  const out = process.env.MINDEX_CONTROL_OUTPUT;
   assert.match(base, /^http:\/\/127\.0\.0\.1:/);
   fs.mkdirSync(out, { recursive: true });
   const fixture = JSON.parse(fs.readFileSync(process.env.MINDEX_CONTROL_FIXTURE, "utf8"));
@@ -13,9 +13,9 @@ const { chromium } = require(process.env.MINDEX_PLAYWRIGHT_MODULE || "playwright
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   // 四路并行回归时页面与模型服务争用 CPU：默认等待按满载情况设置，显式 timeout 的断言不受影响。
   page.setDefaultTimeout(45000);
-  const errors = [],
-    records = [],
-    issues = [];
+  const errors = [];
+  const records = [];
+  const issues = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.route("**/api/settings/voices/catalog*", (route) =>
     route.fulfill({
@@ -38,19 +38,22 @@ const { chromium } = require(process.env.MINDEX_PLAYWRIGHT_MODULE || "playwright
             new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
         );
         const result = await page.evaluate(() => {
-          const faults = [],
-            controls = [];
+          const faults = [];
+          const controls = [];
           const visible = (n) =>
             n.getClientRects().length &&
             getComputedStyle(n).visibility !== "hidden" &&
             n.getBoundingClientRect().width > 2 &&
             n.getBoundingClientRect().height > 2;
-          if (document.documentElement.scrollWidth > innerWidth + 1)
+          if (document.documentElement.scrollWidth > innerWidth + 1) {
             faults.push(`page overflow ${document.documentElement.scrollWidth}/${innerWidth}`);
+          }
           for (const n of document.querySelectorAll(
             "button,input:not([type=hidden]),textarea,select",
           )) {
-            if (!visible(n)) continue;
+            if (!visible(n)) {
+              continue;
+            }
             const r = n.getBoundingClientRect();
             const id = n.id || n.className || n.tagName;
             controls.push({ id, x: r.x, y: r.y, width: r.width, height: r.height });
@@ -59,23 +62,27 @@ const { chromium } = require(process.env.MINDEX_PLAYWRIGHT_MODULE || "playwright
                 ".shot-strip,.candidate-strip,.window-viewport,.multi-list,#source-list,.job-panel,.profile-scroller,.tabs",
               ) &&
               (r.x < -1 || r.right > innerWidth + 1)
-            )
+            ) {
               faults.push(`${id} outside viewport ${r.x}/${r.right}`);
+            }
             if (n.tagName === "SELECT" && n.multiple && n.closest(".multi-select")) {
-              const wrapper = n.closest(".multi-select"),
-                host = n.closest(".content-field");
+              const wrapper = n.closest(".multi-select");
+              const host = n.closest(".content-field");
               const wanted = parseFloat(wrapper.style.getPropertyValue("--control-content-width"));
               if (
                 host &&
                 wanted &&
                 wrapper.getBoundingClientRect().width + 1 <
                   Math.min(wanted, host.getBoundingClientRect().width)
-              )
+              ) {
                 faults.push(`${id} listbox too narrow for its options`);
+              }
             }
-            if (n.type === "checkbox" || n.type === "radio")
-              if (Math.abs(r.width - 16) > 1 || Math.abs(r.height - 16) > 1)
+            if (n.type === "checkbox" || n.type === "radio") {
+              if (Math.abs(r.width - 16) > 1 || Math.abs(r.height - 16) > 1) {
                 faults.push(`${id} stretched checkbox ${r.width}/${r.height}`);
+              }
+            }
             if (
               n.tagName === "BUTTON" &&
               !n.matches(
@@ -85,34 +92,38 @@ const { chromium } = require(process.env.MINDEX_PLAYWRIGHT_MODULE || "playwright
               const range = document.createRange();
               range.selectNodeContents(n);
               const text = range.getBoundingClientRect();
-              if (text.width > r.width + 1 || text.height > r.height + 1)
+              if (text.width > r.width + 1 || text.height > r.height + 1) {
                 faults.push(`${id} clipped button label`);
+              }
             }
           }
           for (const n of document.querySelectorAll("dialog[open]")) {
-            if (n.scrollWidth > n.clientWidth + 1)
+            if (n.scrollWidth > n.clientWidth + 1) {
               faults.push(`${n.id} internal horizontal overflow`);
+            }
           }
           for (const n of document.querySelectorAll(
             ".form-grid,.template-fields,.tool-fields,.source-options,.recall-primary-options,.recall-scope-options,.recall-filters",
           )) {
-            const children = [...n.children].filter(visible),
-              r = n.getBoundingClientRect();
+            const children = [...n.children].filter(visible);
+            const r = n.getBoundingClientRect();
             const fields = children.filter((child) =>
               child.matches("label,.form-field,.field,.group-picker"),
             );
             if (visible(n) && fields.length >= 2) {
               const [a, b] = fields.map((child) => child.getBoundingClientRect());
-              if (a.width + b.width + 16 <= r.width && Math.abs(a.top - b.top) > 2)
+              if (a.width + b.width + 16 <= r.width && Math.abs(a.top - b.top) > 2) {
                 faults.push(`${n.id || n.className} unnecessarily stacked`);
+              }
             }
           }
           return { controls, faults };
         });
         records.push({ name, language, width, controls: result.controls.length });
         issues.push(...result.faults.map((message) => ({ name, language, width, message })));
-        if (language === "zh" && [1440, 390].includes(width))
+        if (language === "zh" && [1440, 390].includes(width)) {
           await page.screenshot({ path: path.join(out, `${name}-${width}.png`) });
+        }
       }
     }
     fs.writeFileSync(
@@ -138,12 +149,12 @@ const { chromium } = require(process.env.MINDEX_PLAYWRIGHT_MODULE || "playwright
       .evaluateAll((nodes) => nodes.map((n) => n.getBoundingClientRect().top));
     assert(Math.abs(pair[0] - pair[1]) < 2, "人物检索方式与多人物关系应水平排列");
     const bottom = await page.locator(".form-bottom").evaluate((row) => {
-      const nodes = [...row.querySelectorAll("select,#filter-reset")],
-        canvas = document.createElement("canvas"),
-        ctx = canvas.getContext("2d");
+      const nodes = [...row.querySelectorAll("select,#filter-reset")];
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d");
       return nodes.map((n) => {
-        const r = n.getBoundingClientRect(),
-          s = getComputedStyle(n);
+        const r = n.getBoundingClientRect();
+        const s = getComputedStyle(n);
         ctx.font = s.font;
         return {
           center: r.y + r.height / 2,
@@ -238,9 +249,11 @@ const { chromium } = require(process.env.MINDEX_PLAYWRIGHT_MODULE || "playwright
     await audit("settings");
     const count = await page.locator("#roles .role-row").count();
     for (let i = 0; i < count; i++) {
-      const row = page.locator("#roles .role-row").nth(i),
-        head = row.locator(".role-row-head");
-      if ((await head.getAttribute("aria-expanded")) !== "true") await head.click();
+      const row = page.locator("#roles .role-row").nth(i);
+      const head = row.locator(".role-row-head");
+      if ((await head.getAttribute("aria-expanded")) !== "true") {
+        await head.click();
+      }
       await row.locator(".new-profile-card").click();
       await audit("model-profile-" + i);
       for (const provider of await page
@@ -266,8 +279,9 @@ const { chromium } = require(process.env.MINDEX_PLAYWRIGHT_MODULE || "playwright
     await page.locator("#tool-new").click();
     await audit("settings-tool-editor");
     await page.locator("[data-section=voices]").click();
-    if (!(await page.locator("#voice-register").isVisible()))
+    if (!(await page.locator("#voice-register").isVisible())) {
       await page.locator("[data-section=voices]").click();
+    }
     await page.locator("#voice-register").click();
     await audit("settings-voice-register");
     await page.locator("#clone-close").click();

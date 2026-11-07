@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 from studio.workspace import music, post
+from studio.workspace.handlers.render import canvas_settings
 from studio.workspace.plans import canvas_render
 from studio.workspace.post import MUSIC_MIX_VERSION, compose
 from studio.workspace.stages import StageHandler, register
 from studio.workspace.versions import ordered_shots
-
-from .render import canvas_settings
 
 
 def music_payload(w, p) -> list:

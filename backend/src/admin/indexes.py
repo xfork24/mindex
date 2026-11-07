@@ -12,6 +12,9 @@ from filelock import Timeout
 from admin.curation import EntityNotFound
 from admin.source_tasks import IndexOptions, IndexTasks
 from models.adapters import ModelError, MultimodalEmbedder
+from processing import indexing
+from search import warmup
+from shared.background_tasks import public_task
 from shared.processing_lock import ProcessingLock, index_write_lock
 
 log = logging.getLogger(__name__)
@@ -44,10 +47,9 @@ def _require_version(store, index_id: str) -> dict:
 
 def _warm_in_background(config) -> None:
     def run():
-        from search.warmup import warm_up
 
         try:
-            warm_up(config, startup=False)
+            warmup.warm_up(config, startup=False)
         except Exception as exc:  # noqa: BLE001 — 预热只是优化，失败不影响激活结果
             log.warning("激活索引后的检索预热失败：%s", exc)
 
@@ -65,21 +67,17 @@ def indexes_router(runtime, store, embedder: MultimodalEmbedder | None = None) -
     @router.get("/{index_id}/check")
     def check(index_id: str):
         # 同步端点由 FastAPI 放进线程池执行：检查要读取向量库与媒体引用，耗时较长。
-        from processing.indexing import check_index
 
         _require_version(store, index_id)
-        issues = check_index(store, index_id, config=runtime.current())
+        issues = indexing.check_index(store, index_id, config=runtime.current())
         return {"index_id": index_id, "ok": not issues, "issues": issues}
 
     @router.post("/{index_id}/activate")
     def activate(index_id: str):
-        from processing.indexing import check_index
 
         config = runtime.current()
         _require_version(store, index_id)
         if config.queue.backend == "postgres":
-            from admin.source_tasks import IndexTasks
-
             IndexTasks(runtime, store, embedder).run_here({"action": "activate", "index_id": index_id})
             active = _active(store) or {}
             return {"active": active.get("content_id"), "release_id": active.get("release_id")}
@@ -95,11 +93,12 @@ def indexes_router(runtime, store, embedder: MultimodalEmbedder | None = None) -
             except Timeout as exc:
                 raise HTTPException(409, "索引正在写入，请稍后再激活索引") from exc
             try:
-                issues = check_index(store, index_id, config=config)
+                issues = indexing.check_index(store, index_id, config=config)
                 if issues:
                     raise HTTPException(422, {"message": "索引检查失败", "issues": issues})
                 spec = store.index_version(index_id)["spec"]
                 if spec["space"].get("schema") == 2:
+                    # 延迟导入：保持异常捕获范围，依赖加载失败时仍走原有降级路径。
                     from models.adapters import make_embedder
 
                     client = embedder or make_embedder(config)
@@ -131,7 +130,6 @@ def index_tasks_router(runtime, store, embedder=None) -> APIRouter:
 
     @router.get("")
     def tasks(limit: int = 50):
-        from shared.background_tasks import public_task
 
         return {
             "items": [

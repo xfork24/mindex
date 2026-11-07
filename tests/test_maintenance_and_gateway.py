@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -45,7 +46,6 @@ def test_gate_mutual_exclusion_on_pg(tmp_path, monkeypatch):
 
 def test_cluster_api_proxies_agent_without_local_session_state(tmp_path, monkeypatch):
     """业务 API 转发给单实例网关，保留用户认证并剥离本机内部凭证。"""
-    import httpx
 
     dsn = os.environ.get("MINDEX_TEST_POSTGRES_DSN", "")
     if not dsn:

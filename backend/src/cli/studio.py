@@ -8,11 +8,17 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
+import mimetypes
 import os
+import re
 from pathlib import Path
 from typing import Annotated, Any
+from urllib.parse import quote
 
 import typer
+from pydantic import TypeAdapter, ValidationError
 
 from shared.cli_support import SortedGroup, print_json
 
@@ -61,6 +67,7 @@ def _root_config(ctx: typer.Context):
 
 def make_app(config):
     """进程内模式装配的应用（测试替换为带确定性模型替身的应用）。"""
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from api import create_app
 
     return create_app(config)
@@ -70,6 +77,7 @@ class Session:
     """一条 CLI 命令内的 REST 会话：进程内 ASGI 或远端 HTTP。"""
 
     def __init__(self, ctx: typer.Context):
+        # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
         from agent.loopback import MindexClient
 
         url = ctx.meta.get("studio_url")
@@ -95,6 +103,7 @@ class Session:
         return await self.call("POST", path, body=body if body is not None else {})
 
     async def fetch(self, path: str) -> bytes:
+        # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
         from agent.loopback import LoopbackError
 
         try:
@@ -396,8 +405,6 @@ def download(
         raise typer.BadParameter(f"只能是 {' / '.join(FINAL_FILES)}", param_hint="--file")
 
     async def body(session):
-        import hashlib
-        from urllib.parse import quote
 
         job_id, w, p = await load_workspace(session, job, plan)
         vid = (p.get("finals") or {}).get(f"export:{export}") if export else p.get("final")
@@ -476,10 +483,8 @@ def parse_edge(value: str, kinds: tuple[str, ...], option: str) -> dict:
 
 def parse_overlays(title, lower_third, card, raw, engine) -> list[dict]:
     """文字层快捷参数与 JSON → Shot.overlays 的元素（经 ShotOverlay 校验）。"""
-    import json
 
-    from pydantic import ValidationError
-
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from studio.studio import ShotOverlay
 
     if engine not in ("ass", "html"):
@@ -557,12 +562,14 @@ def shot_show(
     if as_json:
         print_json(data)
         return
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from studio.workspace.transitions import describe
 
     typer.echo(f"{data['id']}：{data['text']}")
     typer.echo(f"  查询：{data['query']}")
     typer.echo(f"  转场：{describe(data.get('transition'))}")
     typer.echo(f"  字幕高亮词：{'、'.join(data.get('highlights') or []) or '无'}")
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from agent.tools.studio_write import overlays_text
 
     typer.echo(f"  文字层：{overlays_text(data.get('overlays'))}")
@@ -652,8 +659,6 @@ def shot_set(
     layers = parse_overlays(title, lower_third, card, overlay, engine)
     tool_source = None
     if tool is not None:
-        import json
-
         tool_id, sep, tool_name = tool.partition("/")
         if not sep or not tool_id or not tool_name:
             raise typer.BadParameter("格式为 工具源ID/工具名", param_hint="--tool")
@@ -686,6 +691,7 @@ def shot_set(
         )
     words = None
     if highlight is not None:
+        # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
         from studio.studio import normalize_highlights
 
         try:
@@ -718,6 +724,7 @@ def shot_set(
                 target["overlays"] = merged
             else:
                 target.pop("overlays", None)
+        # 延迟导入：保持工作区阶段处理器的注册顺序。
         from studio.workspace import revision as plan_revision
 
         revision = w["revision"] if w["active_plan"] == p["id"] else plan_revision(p)
@@ -740,9 +747,11 @@ def shot_set(
     if as_json:
         print_json(result)
         return
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from studio.workspace.transitions import describe
 
     words = "、".join(result["highlights"] or []) or "无"
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from agent.tools.studio_write import overlays_text
 
     typer.echo(
@@ -860,6 +869,7 @@ def plan_set(
         )
 
     async def body(session):
+        # 延迟导入：保持工作区阶段处理器的注册顺序。
         from studio.workspace import revision as plan_revision
 
         job_id, w, p = await load_workspace(session, job, plan)
@@ -951,6 +961,7 @@ def brand_show(ctx: typer.Context, brand: BrandArgument, as_json: JsonOption = F
     if as_json:
         print_json(item)
         return
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from agent.tools.studio_brands import brand_text
 
     typer.echo(brand_text(item))
@@ -980,8 +991,6 @@ def brand_copy(
 
 async def upload_asset(session: Session, path: Path) -> dict:
     """上传一个本地文件为品牌素材，返回 asset 引用。"""
-    import asyncio
-    import mimetypes
 
     def read() -> bytes | None:
         return path.read_bytes() if path.is_file() else None
@@ -993,6 +1002,7 @@ async def upload_asset(session: Session, path: Path) -> dict:
     response = await session.client.http.post(
         "/api/studio/brand-assets", files={"file": (path.name, content, kind)}
     )
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from agent.loopback import _normalize
 
     result = _normalize(response)
@@ -1003,7 +1013,6 @@ async def upload_asset(session: Session, path: Path) -> dict:
 
 async def asset_value(session: Session, value: str) -> dict:
     """``<sha256><后缀>`` 形式的已上传素材，或本地文件路径（自动上传）。"""
-    import re
 
     found = re.fullmatch(r"([0-9a-f]{64})(\.[a-z0-9]{2,5})", value)
     if found:
@@ -1081,14 +1090,15 @@ def brand_update(
     bottom-right
           mindex studio brand update user-0123 --intro intro.mp4 --outro none
     """
-    import json
 
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from studio.post_styles import SUBTITLE_PRESETS
 
     def parse(value, option):
         if value == "none":
             return None
         if option == "--subtitle" and value in SUBTITLE_PRESETS:
+            # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
             from studio.workspace.ass import preset
 
             return preset(value)
@@ -1130,6 +1140,7 @@ def brand_update(
     if as_json:
         print_json(item)
         return
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from agent.tools.studio_brands import brand_text
 
     typer.echo(brand_text(item))
@@ -1224,6 +1235,7 @@ def overlay_edit(
     html = source.read_text(encoding="utf-8")
 
     async def body(session):
+        # 延迟导入：保持工作区阶段处理器的注册顺序。
         from studio.workspace import revision as plan_revision
 
         job_id, w, p, sid = await overlay_target(session, job, plan, shot, index)
@@ -1262,6 +1274,7 @@ CANVASES = ("16:9", "9:16", "1:1")
 
 
 async def save_exports(session: Session, job: str, plan: str | None, change) -> dict:
+    # 延迟导入：保持工作区阶段处理器的注册顺序。
     from studio.workspace import revision as plan_revision
 
     job_id, w, p = await load_workspace(session, job, plan)
@@ -1418,8 +1431,8 @@ PlatformArgument = Annotated[str, typer.Argument(help="平台标识（studio pla
 
 
 def check_platform(value):
-    from pydantic import TypeAdapter, ValidationError
 
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from studio.platforms import PlatformId
 
     try:
@@ -1467,6 +1480,7 @@ def publish_set(
         raise typer.BadParameter("可选：frame / aigc / upload", param_hint="--cover")
 
     async def body(session):
+        # 延迟导入：保持工作区阶段处理器的注册顺序。
         from studio.workspace import revision as plan_revision
 
         job_id, w, p = await load_workspace(session, job, plan)
@@ -1493,6 +1507,7 @@ def publish_set(
                     files={"file": (image.name, content, "image/png")},
                     data={"kind": "image", "purpose": "source"},
                 )
+                # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
                 from agent.loopback import _normalize
 
                 result = _normalize(uploaded)
@@ -1613,8 +1628,6 @@ def publish_download(
         raise typer.BadParameter("可选：zip / cover / metadata", param_hint="--file")
 
     async def body(session):
-        import hashlib
-        from urllib.parse import quote
 
         job_id, w, p = await load_workspace(session, job, plan)
         stage, name = stages[what]
@@ -1692,6 +1705,7 @@ def publish_metadata(
     }
 
     async def body(session):
+        # 延迟导入：保持工作区阶段处理器的注册顺序。
         from studio.workspace import revision as plan_revision
 
         job_id, w, p = await load_workspace(session, job, plan)
@@ -1737,6 +1751,7 @@ async def resolve_track(session: Session, track: str) -> str:
 
 
 def track_line(item: dict) -> str:
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from studio.music_library import MOODS
 
     bpm = (
@@ -1795,6 +1810,7 @@ def music_show(ctx: typer.Context, track: TrackArgument, as_json: JsonOption = F
     if as_json:
         print_json(item)
         return
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from agent.tools.studio_music import track_text
 
     typer.echo(track_text(item))
@@ -1823,7 +1839,6 @@ def music_import(
         示例：mindex studio music import bgm.mp3 --source Pixabay --license 'Pixabay License' --attribution
     'Artist - Song'
     """
-    import mimetypes
 
     if not path.is_file():
         raise typer.BadParameter(f"找不到文件：{path}", param_hint="PATH")
@@ -1844,6 +1859,7 @@ def music_import(
         response = await session.client.http.post(
             "/api/studio/music-library", data=fields, files={"file": (path.name, content, kind)}
         )
+        # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
         from agent.loopback import _normalize
 
         result = _normalize(response)
@@ -1980,6 +1996,7 @@ def music_recommend(
     if as_json:
         print_json(result)
         return
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from studio.music_library import MOODS
 
     moods = "、".join(MOODS[key][0] for key in result["moods"]) or "未能推断"
@@ -2010,6 +2027,7 @@ def music_use(
         sid = resolve_shot_ref(order, shot)
         target = next(item for item in shots if item["id"] == sid)
         target["music"] = {"kind": "library", "track_id": track_id, "volume": volume}
+        # 延迟导入：保持工作区阶段处理器的注册顺序。
         from studio.workspace import revision as plan_revision
 
         revision = w["revision"] if w["active_plan"] == p["id"] else plan_revision(p)
@@ -2117,6 +2135,7 @@ def tools_show(ctx: typer.Context, source: SourceArgument, as_json: JsonOption =
     if as_json:
         print_json(item)
         return
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from agent.tools.studio_tools import connection_text
 
     typer.echo(tool_source_line(item))
@@ -2179,7 +2198,6 @@ upload \\
       mindex studio tools add local --stdio /opt/tools/bin/mcp-server --arg --quiet --tool render_scene:video
       mindex studio tools add gen -f gen.json
     """
-    import json
 
     if file is not None:
         try:

@@ -7,7 +7,10 @@ import re
 import sqlite3
 from urllib.parse import parse_qsl, urlsplit
 
+import yaml
+
 from maintenance.backup_db import SECRET_FIELDS, database, json_container, schema
+from maintenance.backup_files import safe_path
 
 CONFIG_COLUMNS = {
     "sources": {"media", "layout_config"},
@@ -35,7 +38,10 @@ NON_SECRET_KEYS = {
     "tokens_per_second",
 }
 _PATTERN = re.compile(
-    r"(?:^|[._-])(?:api[-_]?key|access[-_]?key|private[-_]?key|apikey|token|secret|password|passwd|passphrase|passcode|authorization|auth|credential)(?:$|[._-])",
+    (
+        "(?:^|[._-])(?:api[-_]?key|access[-_]?key|private[-_]?key|apikey|token|secret|password|passwd|passp"
+        "hrase|passcode|authorization|auth|credential)(?:$|[._-])"
+    ),
     re.I,
 )
 
@@ -142,13 +148,10 @@ def scan_bundle(source):
                             found.extend(locations(value, location))
     manifest = source / "media_manifest.json"
     if manifest.is_file():
-        from maintenance.backup_files import safe_path
-
         for key in json.loads(manifest.read_text()):
             file = safe_path(source / "data", key)
             if file.suffix not in {".json", ".yaml", ".yml"}:
                 continue
-            import yaml
 
             try:
                 if file.suffix == ".json":

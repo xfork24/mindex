@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
+import io
 import json
 import threading
 
 import pytest
+from fastapi import HTTPException
+from starlette.datastructures import UploadFile
 
 from shared import jsonio
 from studio import studio
@@ -75,11 +79,6 @@ def test_failed_write_removes_temporary_and_keeps_old_content(tmp_path, monkeypa
 
 
 def test_save_upload_removes_partial_file_on_failure(tmp_path):
-    import asyncio
-    import io
-
-    from fastapi import HTTPException
-    from starlette.datastructures import UploadFile
 
     from shared.uploads import save_upload
 

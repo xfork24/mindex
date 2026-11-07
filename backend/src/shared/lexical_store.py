@@ -15,6 +15,7 @@ INSERT/DELETE/SELECT 均为可移植语句（占位符由适配层处理）。
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import TYPE_CHECKING
 
@@ -79,8 +80,6 @@ def build_lexical_index(store: Store, index_id: str, *, replace: bool = False) -
             segments, docs = [], []
             terms: list[tuple[str, str, str, str, int]] = []
             for row in rows:
-                import json
-
                 snapshot = json.loads(row["snapshot"])
                 annotation = snapshot.get("annotation") or {}
                 segments.append(

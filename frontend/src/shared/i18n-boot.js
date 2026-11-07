@@ -6,7 +6,9 @@
     english = localStorage.getItem("mindex.language") === "en";
   } catch {}
   document.documentElement.lang = english ? "en" : "zh-CN";
-  if (!english) return;
+  if (!english) {
+    return;
+  }
   document.documentElement.setAttribute("data-i18n-pending", "");
   const style = document.createElement("style");
   style.textContent = "html[data-i18n-pending] body{visibility:hidden}";

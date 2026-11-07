@@ -18,14 +18,19 @@ const MAX_MOODS = 3;
 
 function el(tag, text, cls) {
   const node = document.createElement(tag);
-  if (text != null) MindexI18n.setText(node, text);
-  if (cls) node.className = cls;
+  if (text != null) {
+    MindexI18n.setText(node, text);
+  }
+  if (cls) {
+    node.className = cls;
+  }
   return node;
 }
 function notice(text, error = false) {
   const value = error ? MindexI18n.system(text) : text;
-  if (globalThis.MindexFeedback)
+  if (globalThis.MindexFeedback) {
     return MindexFeedback.show("notice", value, error ? "error" : "info");
+  }
   MindexI18n.setText($("notice"), value);
 }
 const failed = (error) => notice(error.message, true);
@@ -60,7 +65,9 @@ function renderList() {
     const entry = el("button", null, "job-item template-item");
     entry.type = "button";
     entry.dataset.id = item.id;
-    if (page.selected?.id === item.id) entry.classList.add("active");
+    if (page.selected?.id === item.id) {
+      entry.classList.add("active");
+    }
     entry.append(el("div", item.title, "job-title"));
     const parts = [
       seconds(item.duration),
@@ -69,7 +76,9 @@ function renderList() {
         : MindexI18n.msg(`ui.music_status_${item.analysis_status}`),
       (item.moods || []).map(moodLabel).join("、"),
     ].filter(Boolean);
-    if (item.expired) parts.push(MindexI18n.msg("ui.music_library_expired"));
+    if (item.expired) {
+      parts.push(MindexI18n.msg("ui.music_library_expired"));
+    }
     entry.append(el("div", parts.join(" · "), item.expired ? "job-sub warn-text" : "job-sub"));
     entry.addEventListener("click", () => select(item.id).catch(failed));
     li.append(entry);
@@ -79,20 +88,27 @@ function renderList() {
 }
 async function load(preferred) {
   const params = new URLSearchParams();
-  if ($("music-search").value.trim()) params.set("q", $("music-search").value.trim());
-  if ($("music-mood").value) params.set("mood", $("music-mood").value);
-  for (const id of musicGroups.values()) params.append("music_group_ids", id);
+  if ($("music-search").value.trim()) {
+    params.set("q", $("music-search").value.trim());
+  }
+  if ($("music-mood").value) {
+    params.set("mood", $("music-mood").value);
+  }
+  for (const id of musicGroups.values()) {
+    params.append("music_group_ids", id);
+  }
   const result = await api(`/api/studio/music-library${params.size ? `?${params}` : ""}`);
   page.items = result.items;
   page.moods = result.moods;
   renderMoodFilter();
   renderList();
   const id = preferred || page.selected?.id;
-  if (id)
+  if (id) {
     await select(id).catch(() => {
       page.selected = null;
       renderDetail();
     });
+  }
 }
 
 // ------------------------------------------------------------ 详情
@@ -121,7 +137,9 @@ function renderDetail() {
   const item = page.selected;
   $("music-empty").hidden = Boolean(item);
   $("music-view").hidden = !item;
-  if (!item) return;
+  if (!item) {
+    return;
+  }
   MindexGroups.membership($("music-view"), "music", item);
   MindexI18n.setText($("music-title"), item.title);
   MindexI18n.setText(
@@ -168,7 +186,9 @@ async function select(id) {
 }
 async function save(event) {
   event?.preventDefault();
-  if (!page.selected) return;
+  if (!page.selected) {
+    return;
+  }
   $("music-error").hidden = true;
   const body = {
     title: $("mf-title").value.trim(),
@@ -191,7 +211,9 @@ async function save(event) {
   notice(MindexI18n.msg("ui.music_saved_track"));
 }
 async function analyze() {
-  if (!page.selected) return;
+  if (!page.selected) {
+    return;
+  }
   $("music-analyze").disabled = true;
   notice(MindexI18n.msg("ui.music_analyzing"));
   try {
@@ -211,8 +233,9 @@ async function remove() {
     !window.confirm(
       MindexI18n.render(MindexI18n.msg("ui.music_delete_confirm", { p0: page.selected.title })),
     )
-  )
+  ) {
     return;
+  }
   await api(trackUrl(page.selected.id), "DELETE");
   page.selected = null;
   await load();
@@ -241,8 +264,9 @@ async function importTrack(event) {
     ["attribution", "mi-attribution"],
     ["expires_at", "mi-expires"],
     ["tags", "mi-tags"],
-  ])
+  ]) {
     form.append(key, $(id).value.trim());
+  }
   $("mi-submit").disabled = true;
   notice(MindexI18n.msg("ui.music_importing"));
   try {
@@ -280,7 +304,9 @@ $("reload").addEventListener("click", () =>
 window.addEventListener("mindex:languagechange", () => {
   renderMoodFilter();
   renderList();
-  if (page.selected) renderDetail();
+  if (page.selected) {
+    renderDetail();
+  }
 });
 window.addEventListener("mindex:groups-changed", () => {
   void musicGroups.refresh();

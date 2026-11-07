@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 
 from shared.config import fingerprint, portable_parameters
@@ -15,9 +16,8 @@ from shared.shot_media import ShotMedia
 from shared.storage import Store
 from studio import studio
 from studio.artifacts import digest
-
-from .stages import handler, names, parse_final_key
-from .versions import root, valid_files, version
+from studio.workspace.stages import handler, names, parse_final_key
+from studio.workspace.versions import root, valid_files, version
 
 
 @dataclass
@@ -42,8 +42,6 @@ class DetailContext:
         results in memory across shots and reads the persisted probe cache without a
         per-file lock, so a job's shots that share source media are probed once."""
         if self._media is None:
-            from shared.shot_media import ShotMedia
-
             self._media = ShotMedia(self.database(config), reuse_checks=True)
         return self._media
 
@@ -188,7 +186,6 @@ def parameter_conflicts(config, previous, current):
     messages = []
 
     def display(value):
-        import json
 
         return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 

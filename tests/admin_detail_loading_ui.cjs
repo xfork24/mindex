@@ -2,9 +2,9 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
 const code = fs.readFileSync("frontend/src/admin/admin.js", "utf8");
-const pending = [],
-  rendered = [],
-  segments = [];
+const pending = [];
+const rendered = [];
+const segments = [];
 const elements = new Map();
 const ctx = vm.createContext({
   AbortController,
@@ -12,13 +12,14 @@ const ctx = vm.createContext({
   clearTimeout,
   console,
   $: (id) => {
-    if (!elements.has(id))
+    if (!elements.has(id)) {
       elements.set(id, {
         value: "visible",
         replaceChildren() {},
         setAttribute() {},
         removeAttribute() {},
       });
+    }
     return elements.get(id);
   },
   node() {},

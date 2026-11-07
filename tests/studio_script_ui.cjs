@@ -42,14 +42,14 @@ const nodes = Object.fromEntries(
     "script-history",
   ].map((id) => [id, new Node(id === "script-text" ? "textarea" : "div")]),
 );
-const requests = [],
-  runs = [],
-  confirms = [],
-  accepted = [];
-let confirmAnswer = true,
-  scope = "job/p1",
-  busyNow = false,
-  lastScriptNode = null;
+const requests = [];
+const runs = [];
+const confirms = [];
+const accepted = [];
+let confirmAnswer = true;
+let scope = "job/p1";
+let busyNow = false;
+let lastScriptNode = null;
 const job = { outline: "写一个新加坡旅游视频", title: "t" };
 const plans = {
   p1: { id: "p1", script: null, board: null, shots: {}, ranges: {} },

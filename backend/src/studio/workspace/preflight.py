@@ -9,10 +9,9 @@ import copy
 
 from shared.config import fingerprint
 from studio import studio
-
-from . import signatures, stages
-from .stages import handler, names
-from .versions import ordered_shots, revision, valid_files
+from studio.workspace import signatures, stages
+from studio.workspace.stages import handler, names
+from studio.workspace.versions import ordered_shots, revision, valid_files
 
 
 def node_dependencies(w, p, stage, sid, *, resplit=False):

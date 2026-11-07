@@ -1,6 +1,9 @@
+"""备份清单、校验、恢复与向量迁移回归。"""
+
 from __future__ import annotations
 
 import errno
+import hashlib
 import json
 import shutil
 import sqlite3
@@ -8,6 +11,7 @@ import struct
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -309,7 +313,7 @@ def test_full_restore_relocated_and_cross_process_vectors(library, tmp_path):
     assert (target / history.name).read_text() == history.read_text()
     assert search_results(target) == before
     script = (
-        "from pathlib import Path; from mindex.processing.indexing import VectorIndex; "
+        "from pathlib import Path; import mindex; from processing.indexing import VectorIndex; "
         "import sys; v=VectorIndex(Path(sys.argv[1]),sys.argv[2]); "
         'print(v.collection.query(query_embeddings=[[1.,0.,0.,0.,0.,0.,0.,0.]],n_results=2)["ids"])'
     )
@@ -1205,7 +1209,6 @@ def test_partial_backup_keeps_associated_cast_without_person_evidence(library, t
 
 
 def test_partial_roundtrip_preserves_compatibility_evidence_bytes(library, tmp_path, video_file):
-    import hashlib
 
     from models.compatibility import load_baseline
 
@@ -1280,7 +1283,6 @@ def test_partial_roundtrip_preserves_compatibility_evidence_bytes(library, tmp_p
 
 @pytest.mark.parametrize("mode", ["auto", "enriched"])
 def test_merge_ignores_analysis_and_other_model_contracts(tmp_path, mode):
-    from types import SimpleNamespace
 
     from maintenance.backup import check_compatible
 

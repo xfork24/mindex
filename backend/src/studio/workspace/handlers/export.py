@@ -13,9 +13,14 @@ from __future__ import annotations
 
 import copy
 
+from shared import media
 from shared.work_budget import copy_file
+from studio import render as studio_render
 from studio import studio
+from studio.render import canvas_subtitle_style, check_font, fit_filters, validate_final
+from studio.workspace import post, variants
 from studio.workspace.plans import canvas_render
+from studio.workspace.post import compose_payload
 from studio.workspace.stages import StageHandler, register
 from studio.workspace.versions import file_info, file_path, version
 
@@ -49,7 +54,6 @@ class ExportHandler(StageHandler):
         return {"export_version": EXPORT_VERSION}
 
     def specification(self, config, job_id, w, p, sid, params, resources):
-        from studio.workspace import variants
 
         item = export_spec(p, sid)
         if item["mode"] == "rerender":
@@ -74,7 +78,6 @@ class ExportHandler(StageHandler):
             "size": [render.width, render.height],
             "burn": p["options"].get("burn"),
         }
-        from studio.workspace.post import compose_payload
 
         # 字幕样式、文字层与水印按新画幅重新排版：与成片签名中的同名部分一致。
         payload["post"] = {
@@ -94,7 +97,6 @@ class ExportHandler(StageHandler):
         return ["compose"] if not item or item["mode"] == "derive" else []
 
     def preflight(self, config, job_id, w, p, sid, spec, found, node):
-        from studio.workspace import variants
 
         item = export_spec(p, sid)
         if item["mode"] != "rerender" or found:
@@ -112,8 +114,6 @@ class ExportHandler(StageHandler):
         return self.run_derive(ctx, item)
 
     def run_rerender(self, ctx, item):
-
-        from studio.workspace import variants
 
         child = variants.child_plan(ctx.w, ctx.p, ctx.sid)
         if child is None or not child.get("final"):
@@ -143,8 +143,6 @@ class ExportHandler(StageHandler):
         return data, files
 
     def run_derive(self, ctx, item):
-        from studio.render import canvas_subtitle_style, check_font, fit_filters, mux, validate_final
-        from studio.workspace import post
 
         config, p = ctx.config, ctx.p
         final = version(ctx.w, p.get("final")) if p.get("final") else None
@@ -170,9 +168,8 @@ class ExportHandler(StageHandler):
         # 水印片段以 [in] 开头，必须是滤镜链的第一段：先叠水印（新画幅尺寸）再适配会把水印一起缩放，
         # 所以这里先单独适配画幅，再在 mux 里叠水印与字幕。
         fitted = ctx.directory / "fitted.mp4"
-        from shared.media import atomic_media
 
-        atomic_media(
+        media.atomic_media(
             [
                 "-i",
                 str(clean),
@@ -196,7 +193,7 @@ class ExportHandler(StageHandler):
         mark = post.watermark_filter(config, target, None, bookends)
         style = canvas_subtitle_style(item["canvas"], render.width, render.height, config.studio.subtitle)
         output = ctx.directory / "export.mp4"
-        mux(
+        studio_render.mux(
             fitted,
             source,
             srt,

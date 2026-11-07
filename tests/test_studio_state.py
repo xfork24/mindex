@@ -1,3 +1,5 @@
+"""创作任务状态、方案与版本持久化回归。"""
+
 from __future__ import annotations
 
 import json

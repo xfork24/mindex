@@ -15,10 +15,14 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from contextlib import nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from maintenance.backup_files import referenced_files, safe_path
+from shared.db.dialect import _baseline_columns
 from shared.db.schema_pg import BASELINE_TABLES
+from shared.resource_registry import referenced_objects, required_objects
 from shared.storage import Store
 from shared.work_budget import copy_file
 
@@ -42,7 +46,6 @@ def export_pg_to_sqlite(pg_store: PgStore, target: Path, *, tables=BASELINE_TABL
     staging = Store(target)
     manifest: dict[str, dict] = {}
     total = 0
-    from shared.db.dialect import _baseline_columns
 
     columns_by_table = _baseline_columns()
     with pg_store.backend.pool().connection() as connection:
@@ -91,10 +94,6 @@ def export_media_bundle(store: Store, media, target: Path) -> dict:
     S3 形态逐 key 物化后复制（保持相对 key 布局）；本地形态直接复制文件。
     返回清单（key → size/sha256），供装载后逐项校验。
     """
-    import hashlib
-    from contextlib import nullcontext
-
-    from maintenance.backup_files import referenced_files, safe_path
 
     target = Path(target)
     payload = target / "data"
@@ -103,7 +102,6 @@ def export_media_bundle(store: Store, media, target: Path) -> dict:
         keys = referenced_files(
             target, target / "metadata.sqlite3", available_files=set(media.iter_prefix(""))
         )
-        from shared.resource_registry import referenced_objects, required_objects
 
         available = set(media.iter_prefix(""))
         keys.update(key for key in referenced_objects(store) if key in available)
@@ -117,7 +115,6 @@ def export_media_bundle(store: Store, media, target: Path) -> dict:
                     copy_file(path, destination)
     else:
         keys = referenced_files(media.root, target / "metadata.sqlite3")
-        from shared.resource_registry import required_objects
 
         keys.update(required_objects(store))
         for key in sorted(keys):

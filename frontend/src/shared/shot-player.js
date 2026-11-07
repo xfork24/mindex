@@ -69,37 +69,55 @@ window.ShotPlayer = class ShotPlayer {
       v.preload = "auto";
       v.hidden = n !== 0;
       v.onclick = () => {
-        if (n === this.active) this.togglePlayback();
+        if (n === this.active) {
+          this.togglePlayback();
+        }
       };
       v.addEventListener("play", () => {
-        if (n === this.active) this.overlay.hidden = true;
+        if (n === this.active) {
+          this.overlay.hidden = true;
+        }
       });
       v.addEventListener("pause", () => {
-        if (n === this.active) this.overlay.hidden = false;
+        if (n === this.active) {
+          this.overlay.hidden = false;
+        }
       });
       v.addEventListener("timeupdate", () => {
-        if (n !== this.active || !this.items) return;
+        if (n !== this.active || !this.items) {
+          return;
+        }
         const item = this.items[this.index];
         this.bar.value = item.offset + v.currentTime - item.start;
-        if (v.currentTime >= item.end - 0.015) this.next();
+        if (v.currentTime >= item.end - 0.015) {
+          this.next();
+        }
       });
       v.addEventListener("ended", () => {
-        if (n === this.active) this.next();
+        if (n === this.active) {
+          this.next();
+        }
       });
       v.addEventListener("error", () => this.fail(Error("镜头解码失败")));
     });
   }
   label(node, key, fallback) {
     const i18n = window.MindexI18n;
-    if (i18n) i18n.setAttr(node, "aria-label", i18n.msg(key));
-    else node.setAttribute("aria-label", fallback);
+    if (i18n) {
+      i18n.setAttr(node, "aria-label", i18n.msg(key));
+    } else {
+      node.setAttribute("aria-label", fallback);
+    }
   }
   async togglePlayback() {
     try {
       await this.ready;
       const v = this.current;
-      if (v.paused) await v.play();
-      else v.pause();
+      if (v.paused) {
+        await v.play();
+      } else {
+        v.pause();
+      }
     } catch (error) {
       this.fail(error);
     }
@@ -113,9 +131,11 @@ window.ShotPlayer = class ShotPlayer {
   }
   fail(error) {
     this.container.dataset.error = error.message;
-    if (window.MindexI18n)
+    if (window.MindexI18n) {
       window.MindexI18n.setAttr(this.container, "title", window.MindexI18n.system(error.message));
-    else this.container.title = error.message;
+    } else {
+      this.container.title = error.message;
+    }
     this.current.pause();
   }
   async load(url, position = 0) {
@@ -130,22 +150,31 @@ window.ShotPlayer = class ShotPlayer {
     this.switching = false;
     this.items = null;
     delete this.container.dataset.error;
-    if (window.MindexI18n) window.MindexI18n.setAttr(this.container, "title", "");
-    else this.container.title = "";
+    if (window.MindexI18n) {
+      window.MindexI18n.setAttr(this.container, "title", "");
+    } else {
+      this.container.title = "";
+    }
     this.videos.forEach((v, n) => {
       v.hidden = n !== 0;
     });
     const generation = ++this.generation;
     const response = await fetch(url);
-    if (!response.ok) throw Error(await response.text());
+    if (!response.ok) {
+      throw Error(await response.text());
+    }
     const playlist = await response.json();
-    if (generation !== this.generation) return;
+    if (generation !== this.generation) {
+      return;
+    }
     this.items = playlist.items;
     this.bar.max = playlist.duration;
     await this.seek(position, false);
   }
   prepare(video, item, position) {
-    if (!item) return Promise.resolve();
+    if (!item) {
+      return Promise.resolve();
+    }
     return new Promise((resolve) => {
       const set = () => {
         video.currentTime = position;
@@ -155,20 +184,26 @@ window.ShotPlayer = class ShotPlayer {
         video.onloadedmetadata = set;
         video.src = item.url;
         video.load();
-      } else set();
+      } else {
+        set();
+      }
     });
   }
   async seek(position, playing = false) {
-    if (!this.items?.length) return;
+    if (!this.items?.length) {
+      return;
+    }
     position = Math.max(0, Math.min(Number(this.bar.max) - 0.000001, position));
     const index = this.items.findIndex(
       (item) => position >= item.offset && position < item.offset + item.end - item.start,
     );
-    if (index < 0) return;
+    if (index < 0) {
+      return;
+    }
     this.current.pause();
     this.index = index;
-    const current = this.current,
-      generation = this.generation;
+    const current = this.current;
+    const generation = this.generation;
     const ready = this.prepare(
       current,
       this.items[index],
@@ -182,11 +217,14 @@ window.ShotPlayer = class ShotPlayer {
       generation === this.generation &&
       current === this.current &&
       index === this.index
-    )
+    ) {
       current.play().catch((e) => this.fail(e));
+    }
   }
   next() {
-    if (this.switching) return;
+    if (this.switching) {
+      return;
+    }
     if (this.index + 1 >= this.items.length) {
       this.current.pause();
       return;
@@ -207,7 +245,9 @@ window.ShotPlayer = class ShotPlayer {
   }
   static playlistURL(url) {
     let match = url?.match(/^\/api\/media\/([^/?]+)/);
-    if (match) return `/api/playlists/${match[1]}`;
+    if (match) {
+      return `/api/playlists/${match[1]}`;
+    }
     match = url?.match(/^\/api\/admin\/(segments|sources)\/([^/?]+)\/media/);
     return match ? `/api/admin/${match[1]}/${match[2]}/playlist` : null;
   }

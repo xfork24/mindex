@@ -16,14 +16,19 @@ const page = {
 const $ = (id) => document.getElementById(id);
 function el(tag, text, cls) {
   const node = document.createElement(tag);
-  if (text != null) MindexI18n.setText(node, text);
-  if (cls) node.className = cls;
+  if (text != null) {
+    MindexI18n.setText(node, text);
+  }
+  if (cls) {
+    node.className = cls;
+  }
   return node;
 }
 function notice(text, error = false) {
   const value = error ? MindexI18n.system(text) : text;
-  if (globalThis.MindexFeedback)
+  if (globalThis.MindexFeedback) {
     return MindexFeedback.show("notice", value, error ? "error" : "info");
+  }
   MindexI18n.setText($("notice"), value);
   $("notice").dataset.type = error ? "error" : "info";
 }
@@ -43,7 +48,9 @@ const editable = () => Boolean(page.selected && !page.selected.builtin);
 
 // ------------------------------------------------------------ 列表
 function matches(item, needle) {
-  if (!needle) return true;
+  if (!needle) {
+    return true;
+  }
   const text = [
     MindexI18n.render(templateName(item)),
     MindexI18n.render(templateCategory(item)),
@@ -71,10 +78,11 @@ function renderList() {
     const heading = el("h3", MindexI18n.msg(title, {}), "template-group-title");
     heading.append(el("span", String(items.length), "muted"));
     group.append(heading);
-    if (!items.length && !needle && title === "ui.templates_group_user")
+    if (!items.length && !needle && title === "ui.templates_group_user") {
       group.append(
         el("p", MindexI18n.msg("ui.templates_user_empty"), "muted template-group-empty"),
       );
+    }
     const list = el("ul", null, "template-items");
     for (const item of visible) {
       const li = el("li");
@@ -95,11 +103,14 @@ function renderList() {
       li.append(entry);
       list.append(li);
     }
-    if (visible.length) group.append(list);
+    if (visible.length) {
+      group.append(list);
+    }
     box.append(group);
   }
-  if (needle && !shown)
+  if (needle && !shown) {
     box.append(el("p", MindexI18n.msg("ui.templates_filter_empty"), "muted template-group-empty"));
+  }
 }
 
 // ------------------------------------------------------------ 详情与编辑
@@ -170,17 +181,20 @@ function renderMeta(item) {
       MindexI18n.msg("ui.templates_meta_base", { p0: base ? templateName(base) : item.base_id }),
     );
   }
-  if (item.updated_at)
+  if (item.updated_at) {
     parts.push(
       MindexI18n.msg("ui.templates_meta_updated", { p0: MindexI18n.date(item.updated_at) }),
     );
+  }
   MindexI18n.setText($("template-meta"), parts.join(" · "));
 }
 function renderDetail() {
   const item = page.selected;
   $("template-empty").hidden = Boolean(item);
   $("template-view").hidden = !item;
-  if (!item) return;
+  if (!item) {
+    return;
+  }
   MindexI18n.setText($("template-title"), templateName(item));
   renderTags(item);
   MindexI18n.setText($("template-description"), templateDescription(item));
@@ -189,8 +203,15 @@ function renderDetail() {
     MindexI18n.msg(item.builtin ? "ui.templates_builtin_note" : "ui.templates_user_note"),
   );
   $("template-note").classList.toggle("is-readonly", item.builtin);
-  for (const id of ["tf-name", "tf-category", "tf-max-chars", "tf-description", "tf-instructions"])
+  for (const id of [
+    "tf-name",
+    "tf-category",
+    "tf-max-chars",
+    "tf-description",
+    "tf-instructions",
+  ]) {
     $(id).readOnly = item.builtin;
+  }
   $("tf-kind").disabled = item.builtin;
   $("template-delete").hidden = item.builtin;
   $("template-revert").hidden = $("template-save").hidden = item.builtin;
@@ -230,13 +251,19 @@ function syncUrl() {
   history.replaceState(null, "", url);
 }
 async function select(id, { force = false } = {}) {
-  if (!force && page.selected?.id === id) return;
-  if (!force && !confirmDiscard()) return;
+  if (!force && page.selected?.id === id) {
+    return;
+  }
+  if (!force && !confirmDiscard()) {
+    return;
+  }
   // 列表视图可能落后于其他标签或助手的修改：选中时按 ID 重新读取完整模板。
   const item = await api(templateUrl(id));
   page.selected = item;
   const index = page.items.findIndex((entry) => entry.id === id);
-  if (index >= 0) page.items[index] = item;
+  if (index >= 0) {
+    page.items[index] = item;
+  }
   fillForm(item);
   renderList();
   renderDetail();
@@ -247,8 +274,9 @@ async function load(preferred) {
   page.items = data.items;
   const keep = preferred || page.selected?.id;
   const target = page.items.find((item) => item.id === keep) ? keep : null;
-  if (target) await select(target, { force: true });
-  else {
+  if (target) {
+    await select(target, { force: true });
+  } else {
     page.selected = page.saved = null;
     renderList();
     renderDetail();
@@ -257,7 +285,9 @@ async function load(preferred) {
 }
 async function save(event) {
   event?.preventDefault();
-  if (!editable() || !dirty() || page.saving) return;
+  if (!editable() || !dirty() || page.saving) {
+    return;
+  }
   const values = formValues();
   if (!values.name || !values.category || !values.instructions.trim()) {
     showError("template-error", MindexI18n.msg("ui.templates_required_fields"));
@@ -281,7 +311,9 @@ async function save(event) {
   }
 }
 async function copy() {
-  if (!page.selected || !confirmDiscard()) return;
+  if (!page.selected || !confirmDiscard()) {
+    return;
+  }
   const source = page.selected;
   const name = MindexI18n.render(
     MindexI18n.msg("ui.template_copy_name", { p0: templateName(source) }),
@@ -294,21 +326,26 @@ async function copy() {
   $("tf-name").select();
 }
 async function remove() {
-  if (!editable()) return;
+  if (!editable()) {
+    return;
+  }
   const item = page.selected;
   if (
     !window.confirm(
       MindexI18n.render(MindexI18n.msg("ui.template_delete_confirm", { p0: item.name })),
     )
-  )
+  ) {
     return;
+  }
   await api(templateUrl(item.id), "DELETE");
   page.selected = page.saved = null;
   await load(item.base_id || "base");
   notice(MindexI18n.msg("ui.template_deleted"));
 }
 function revert() {
-  if (!editable()) return;
+  if (!editable()) {
+    return;
+  }
   fillForm(page.selected);
   showError("template-error", null);
   updateForm();
@@ -377,16 +414,21 @@ function setPreviewing(on) {
   page.previewTimer = setInterval(tick, 1000);
 }
 async function runPreview() {
-  if (!page.selected || page.previewing) return;
+  if (!page.selected || page.previewing) {
+    return;
+  }
   showError("preview-error", null);
   const body = previewBody();
   const kind = body.kind || page.selected.kind;
-  if (!body.outline && !body.references.length)
+  if (!body.outline && !body.references.length) {
     return showError("preview-error", MindexI18n.msg("ui.templates_preview_needs_input"));
-  if (kind === "rewrite" && !body.references.length)
+  }
+  if (kind === "rewrite" && !body.references.length) {
     return showError("preview-error", MindexI18n.msg("ui.templates_preview_needs_references"));
-  if (editable() && !body.instructions.trim())
+  }
+  if (editable() && !body.instructions.trim()) {
     return showError("preview-error", MindexI18n.msg("ui.templates_required_fields"));
+  }
   rememberPreview();
   const draft = dirty();
   setPreviewing(true);
@@ -399,7 +441,9 @@ async function runPreview() {
         p2: (result.elapsed_ms / 1000).toFixed(1),
       }),
     ];
-    if (draft) meta.push(MindexI18n.msg("ui.templates_preview_draft"));
+    if (draft) {
+      meta.push(MindexI18n.msg("ui.templates_preview_draft"));
+    }
     MindexI18n.setText($("preview-meta"), meta.join(" · "));
     $("preview-text").textContent = result.text; // 模型输出是内容，不做文案目录匹配
     $("preview-result").hidden = false;
@@ -432,12 +476,16 @@ $("template-delete").addEventListener("click", () => remove().catch(failed));
 $("preview-run").addEventListener("click", () => runPreview().catch(failed));
 $("preview-copy").addEventListener("click", () => copyPreview().catch(failed));
 $("preview-outline").addEventListener("keydown", (event) => {
-  if (event.key !== "Enter" || !(event.ctrlKey || event.metaKey) || event.isComposing) return;
+  if (event.key !== "Enter" || !(event.ctrlKey || event.metaKey) || event.isComposing) {
+    return;
+  }
   event.preventDefault();
   runPreview().catch(failed);
 });
 $("reload").addEventListener("click", async () => {
-  if (!confirmDiscard()) return;
+  if (!confirmDiscard()) {
+    return;
+  }
   $("reload").disabled = true;
   try {
     page.saved = null;
@@ -450,19 +498,25 @@ $("reload").addEventListener("click", async () => {
   }
 });
 window.addEventListener("beforeunload", (event) => {
-  if (!dirty()) return;
+  if (!dirty()) {
+    return;
+  }
   event.preventDefault();
   event.returnValue = "";
 });
 // 切换语言：内置模板的只读字段与列表按新语言重绘（用户正在编辑的内容不动）。
 window.addEventListener("mindex:languagechange", () => {
-  if (page.selected?.builtin) fillForm(page.selected);
+  if (page.selected?.builtin) {
+    fillForm(page.selected);
+  }
   renderList();
 });
 // 助手或其他来源改动了模板：没有未保存修改时重新读取，否则只刷新列表，保留正在编辑的内容。
 window.addEventListener("mindex:agent-mutation", (event) => {
   const detail = event.detail || {};
-  if (detail.domain !== "studio" || !detail.templates) return;
+  if (detail.domain !== "studio" || !detail.templates) {
+    return;
+  }
   if (dirty()) {
     api("/api/studio/templates")
       .then((data) => {
@@ -472,7 +526,9 @@ window.addEventListener("mindex:agent-mutation", (event) => {
         renderList();
       })
       .catch(() => {});
-  } else load().catch(() => {});
+  } else {
+    load().catch(() => {});
+  }
 });
 window.MindexAgentContext = () => ({
   page: "studio",
@@ -481,7 +537,9 @@ window.MindexAgentContext = () => ({
 });
 // 助手要定位到某个创作任务时回到创作页；模板页本身没有可定位的区块。
 window.MindexAgentFocus = async (focus, { passive = false } = {}) => {
-  if (focus.job_id && !passive) location.href = `/?job=${encodeURIComponent(focus.job_id)}`;
+  if (focus.job_id && !passive) {
+    location.href = `/?job=${encodeURIComponent(focus.job_id)}`;
+  }
   return true;
 };
 if (page.job) {

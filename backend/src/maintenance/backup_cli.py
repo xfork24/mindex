@@ -11,6 +11,9 @@ from typing import Annotated
 
 import typer
 
+from maintenance import backup
+from maintenance.backup import export_backup, import_backup, recover_import, summary
+from maintenance.backup_files import source_list
 from shared.cli_support import SortedGroup
 
 app = typer.Typer(
@@ -136,7 +139,6 @@ def list_sources(
     \b
       mindex backup list --json
     """
-    from maintenance.backup_files import source_list
 
     call(structured, lambda: {"sources": source_list(ctx.obj.data_dir)})
 
@@ -158,9 +160,8 @@ def inspect(
         \b
           mindex backup inspect /备份/mindex --json
     """
-    from maintenance.backup import inspect_bundle, summary
 
-    call(structured, lambda: summary(inspect_bundle(directory)))
+    call(structured, lambda: summary(backup.inspect_bundle(directory)))
 
 
 @app.command("export")
@@ -210,8 +211,6 @@ def export(
         \b
           mindex backup export /备份/mindex --all --dry-run
     """
-    from maintenance.backup import export_backup
-    from maintenance.backup_files import source_list
 
     def run():
         picked = choose(source_list(ctx.obj.data_dir), all_sources, sources)
@@ -277,14 +276,15 @@ def import_(
         \b
           mindex backup import /备份/mindex --all --data-dir /新路径/data --dry-run
     """
-    from maintenance.backup import import_backup, inspect_bundle
 
     def run():
         picked = (
             sources
             if verification == Verification.basic and (all_sources or sources)
             else choose(
-                inspect_bundle(directory, verification=verification.value)["sources"], all_sources, sources
+                backup.inspect_bundle(directory, verification=verification.value)["sources"],
+                all_sources,
+                sources,
             )
         )
         config = ctx.obj.model_copy(update={"data_dir": data_dir.resolve()}) if data_dir else ctx.obj
@@ -316,14 +316,14 @@ def recover(
 ):
     """根据持久化迁移日志恢复中断的导入切换。
 
-    停止全部写入，使用原配置与原目标数据路径。未提交操作回滚旧数据与配置；已提交操作清理旧目录。不要先手动删除迁移日志或旧副本。输出恢复结果，不调用模型。
+    停止全部写入，使用原配置与原目标数据路径。未提交操作回滚旧数据与配置；已提交操作清理旧目录。
+    不要先手动删除迁移日志或旧副本。输出恢复结果，不调用模型。
 
     示例：
 
     \b
       mindex --config /路径/config.local.yaml backup recover --data-dir /路径/data --json
     """
-    from maintenance.backup import recover_import
 
     call(
         structured,

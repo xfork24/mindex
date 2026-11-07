@@ -17,6 +17,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import yaml
+
 __all__ = ["BASELINE_DDL", "BASELINE_TABLES", "delivery_platforms_seed"]
 
 # 时间戳默认值：与 SQLite CURRENT_TIMESTAMP 完全一致的 UTC 文本。
@@ -457,9 +461,6 @@ CREATE INDEX IF NOT EXISTS agent_outbox_pending ON agent_outbox(id) WHERE consum
 
 # delivery_platforms 的种子数据沿用 _metadata_v8：只在基线迁移时写入（幂等）。
 def delivery_platforms_seed(dumps):  # pragma: no cover - 与 SQLite 迁移共用同一份 YAML
-    from pathlib import Path
-
-    import yaml
 
     rows = []
     for key in ("bilibili", "douyin", "youtube"):

@@ -11,6 +11,7 @@ import json
 import re
 import shutil
 from datetime import UTC, datetime
+from functools import wraps
 from pathlib import Path
 from typing import Annotated, Any, Literal
 from uuid import uuid4
@@ -20,8 +21,10 @@ from pydantic import Discriminator, Field, Tag, field_validator, model_serialize
 
 from admin.curation import EntityNotFound
 from models.storyboard import coverage_warning
-from shared import jsonio, lock_backend
+from shared import files, jsonio, lock_backend
 from shared.config import Config, StrictModel, fingerprint, portable_parameters
+from shared.migration_state import writable_config
+from shared.storage import Store
 from shared.trace import record as trace_record
 from shared.types import Filters, Granularity
 from shared.work_budget import copy_file
@@ -103,13 +106,8 @@ def now() -> str:
 def save(path: Path, value, *, config=None):
     """原子写入 JSON；实现见 ``shared/jsonio``。"""
     if config is not None:
-        from shared.migration_state import writable_config
-
         writable_config(config)
     if config is not None and config.storage.backend == "s3":
-        from shared import files
-        from shared.storage import Store
-
         files.save_bytes(
             Store.open(config), path, json.dumps(value, ensure_ascii=False, indent=2).encode("utf-8")
         )
@@ -187,10 +185,9 @@ AIGC_OPTIONAL = ("mode", "last_image_id", "references", "model", "resolution", "
 
 
 class MediaReference(StrictModel):
-    (
-        """多模态参考素材：任务 ``inputs/`` 内的图片、视频或音频（sha256），经 query-media purpose=source """
-        """上传。"""
-    )
+    """多模态参考素材：任务 ``inputs/`` 内的图片、视频或音频（sha256），经 query-media
+    purpose=source 上传。
+    """
 
     kind: Literal["image", "video", "audio"]
     media_id: str = Field(pattern=MEDIA_ID)
@@ -962,11 +959,9 @@ def scoped_filters(filters: Filters, scope: set[str] | None) -> Filters:
 
 
 def _migration_writable(method):
-    from functools import wraps
 
     @wraps(method)
     def wrapped(config, *args, **kwargs):
-        from shared.migration_state import writable_config
 
         writable_config(config)
         return method(config, *args, **kwargs)
@@ -1007,8 +1002,6 @@ def create_job(
     except ValueError as exc:
         raise StudioError(f"任务选项无效：{exc}") from exc
     if store is None:
-        from shared.storage import Store
-
         store = Store.open(config)
     if parsed.source_group_ids:
         material_scope(parsed.model_dump(), store)
@@ -1055,7 +1048,7 @@ def create_job(
         "execution": {"status": "idle", "current_step": None, "remaining_steps": []},
         "artifact_version": 1,
     }
-    from shared.storage import Store
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
     from studio.delivery_templates import apply, default_snapshot
 
     state["language"] = language
@@ -1066,9 +1059,6 @@ def create_job(
 
 def load_job(config: Config, job_id: str) -> dict:
     if config.storage.backend == "s3":
-        from shared import files
-        from shared.storage import Store
-
         payload = files.read_bytes(Store.open(config), job_path(config, job_id))
         if payload is None:
             raise EntityNotFound("找不到创作任务")
@@ -1092,9 +1082,6 @@ def list_jobs(config: Config, *, recover: bool = False) -> list[dict]:
     """
     root = studio_root(config)
     if config.storage.backend == "s3":
-        from shared import files
-        from shared.storage import Store
-
         store = Store.open(config)
         for row in files.entries(store, "studio/"):
             if row["path"].endswith("/job.json"):
@@ -1135,8 +1122,6 @@ def list_jobs(config: Config, *, recover: bool = False) -> list[dict]:
 
 def delete_job(config: Config, job_id: str):
     if config.queue.backend == "postgres":
-        from shared.storage import Store
-
         if Store.open(config).one(
             "SELECT id FROM studio_tasks WHERE job_id=? AND status IN ('queued','running') LIMIT 1", (job_id,)
         ):
@@ -1145,9 +1130,6 @@ def delete_job(config: Config, job_id: str):
     if not directory.is_dir():
         raise EntityNotFound("找不到创作任务")
     if config.storage.backend == "s3":
-        from shared import files
-        from shared.storage import Store
-
         files.delete_tree(Store.open(config), f"studio/{job_id}/")
     shutil.rmtree(directory)
 
@@ -1278,9 +1260,6 @@ def write_storyboard(config: Config, job_id: str, storyboard: Storyboard):
 
 def _hydrate_document(config, path):
     if config.storage.backend == "s3":
-        from shared import files
-        from shared.storage import Store
-
         try:
             files.hydrate(Store.open(config), path)
         except FileNotFoundError:
@@ -1370,7 +1349,6 @@ def set_execution(config, job_id, status, current_step, remaining_steps):
 
 
 def step_configuration(config, state, step):
-    from shared.storage import Store
 
     studio = config.studio
     recall = {

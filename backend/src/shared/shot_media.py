@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import logging
@@ -10,16 +11,20 @@ import os
 import tempfile
 import threading
 import time
+from bisect import bisect_right
 from contextlib import ExitStack, contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from filelock import FileLock
+from filelock import FileLock, Timeout
+from starlette.background import BackgroundTask
+from starlette.responses import FileResponse
 
+from shared import media
 from shared.db.fencing import FencedThreadPoolExecutor as ThreadPoolExecutor
 from shared.jsonio import save
 from shared.media import MediaError, atomic_media, probe
-from shared.work_budget import budgeted
+from shared.work_budget import budgeted, current
 
 VERSION = "shot-media-v1"
 EPSILON = 0.000001
@@ -140,7 +145,6 @@ class ShotMedia:
         if (self.cache_probes and not self.reuse_checks) or source_id not in self._shots:
             self._shot_ends.pop(source_id, None)
             self._shots[source_id] = self.store.segments(source_id, "shot")
-        from bisect import bisect_right
 
         shots = self._shots[source_id]
         if source_id not in self._shot_ends:
@@ -273,12 +277,9 @@ class ShotMedia:
         return self.references(source_id, timestamp, min(duration, timestamp + EPSILON))[0], False
 
     def _frame_reference(self, source_id, timestamp):
-        from bisect import bisect_right
-
-        from shared.media import frame_timestamps
 
         ref, last = self._frame_shot(source_id, timestamp)
-        timestamps = frame_timestamps(self._path(ref.path))
+        timestamps = media.frame_timestamps(self._path(ref.path))
         if last:
             local = timestamps[-1]
         else:
@@ -294,10 +295,9 @@ class ShotMedia:
 
     @budgeted
     def frame_bytes(self, source_id, timestamp):
-        from shared.media import command
 
         ref, local = self._frame_reference(source_id, timestamp)
-        raw = command(
+        raw = media.command(
             [
                 "ffmpeg",
                 "-v",
@@ -325,10 +325,9 @@ class ShotMedia:
 
         Returns ``(jpeg_bytes, revision)``; ``revision`` identifies the shot file the
         frame came from so callers can build stable cache validators."""
-        from shared.media import command
 
         ref, local = self._frame_reference(source_id, timestamp)
-        raw = command(
+        raw = media.command(
             [
                 "ffmpeg",
                 "-v",
@@ -435,7 +434,6 @@ class ShotMedia:
             yield output
 
     def materialize(self, source_id: str, start=0, end=None) -> Path:
-        from shared.work_budget import current
 
         budget = current()
         if self._materializations is None and budget is not None:
@@ -490,6 +488,7 @@ class ShotMedia:
             self._paths = {}
             try:
                 path = self.materialize(source_id, start, end)
+                # 延迟导入：保持异常捕获范围，依赖加载失败时仍走原有降级路径。
                 from shared.work_budget import current
 
                 budget = current()
@@ -525,7 +524,6 @@ class ShotMedia:
 
     def prune_cache(self, *, max_age=7 * 86400, max_bytes=5 * 1024**3):
         """Nonblocking eviction; callers holding a cache lease protect active files."""
-        from filelock import Timeout
 
         directory = self.store.root / "cache" / "shot-media"
         files = []
@@ -556,15 +554,12 @@ class ShotMedia:
     @budgeted
     def frames(self, source_id, start=0, end=None, count=12):
         """Sample actual shot PTS, returning absolute source times and JPEG data URLs."""
-        import base64
-
-        from shared.media import command, frame_timestamps
 
         if count < 1:
             raise MediaError("Frame count must be positive")
         candidates = []
         for ref in self.references(source_id, start, end):
-            for timestamp in frame_timestamps(self._path(ref.path)):
+            for timestamp in media.frame_timestamps(self._path(ref.path)):
                 if ref.start <= timestamp < ref.end:
                     candidates.append((ref, timestamp))
         if not candidates:
@@ -573,7 +568,7 @@ class ShotMedia:
         count = min(count, len(candidates))
         for i in range(count):
             ref, timestamp = candidates[round(i * (len(candidates) - 1) / max(1, count - 1))]
-            raw = command(
+            raw = media.command(
                 [
                     "ffmpeg",
                     "-v",
@@ -603,8 +598,6 @@ class ShotMedia:
 
 def file_response(path: Path, **kwargs):
     """Keep cached media leased until a streaming HTTP response finishes."""
-    from starlette.background import BackgroundTask
-    from starlette.responses import FileResponse
 
     path = Path(path)
     headers = dict(kwargs.pop("headers", {}) or {})

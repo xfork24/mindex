@@ -4,16 +4,22 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import sqlite3
 import tempfile
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
+from unittest.mock import patch
 
 from processing.subtitle_archive import archive_subtitles, load_archive
+from shared import lock_backend
+from shared.db.sqlite_backend import SqliteBackend
+from shared.media import content_hash
+from shared.processing_lock import ProcessingLock, index_write_lock
 from shared.shot_media import VERSION, ShotMedia
-from shared.storage import Store
+from shared.storage import Store, require_sqlite
 from shared.work_budget import configured, copy_file
 
 
@@ -102,7 +108,6 @@ def inventory(store, source_id=None):
 @contextmanager
 def original_unavailable(store, source):
     """Deny archived source access to the application for migration verification."""
-    from unittest.mock import patch
 
     original_resolve = Store.resolve_media
     archived = (store.root / source["path"]).resolve()
@@ -123,8 +128,6 @@ def migrate(config, source_id=None, *, apply=False, verify=False):
     store.path = store.root / "metadata.sqlite3"
     if not store.path.is_file():
         raise FileNotFoundError(store.path)
-    from shared.db.sqlite_backend import SqliteBackend
-    from shared.storage import require_sqlite
 
     store.backend = SqliteBackend(store.path)
     require_sqlite(config, "切片迁移（含迁移前的元数据库备份）")
@@ -140,7 +143,6 @@ def migrate(config, source_id=None, *, apply=False, verify=False):
     }
     if not apply:
         return report
-    from shared.processing_lock import ProcessingLock, index_write_lock
 
     with ProcessingLock(config, deleting=True), index_write_lock(store.root, config=config):
         stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
@@ -222,7 +224,6 @@ def migrate(config, source_id=None, *, apply=False, verify=False):
 @configured
 def materialize_all(config):
     store = Store.open(config)
-    from shared.processing_lock import ProcessingLock
 
     restored = []
     with ProcessingLock(config, deleting=True):
@@ -252,7 +253,6 @@ def materialize_all(config):
 @configured
 def verify_archives(config, source_id=None):
     """Explicit archive maintenance; business validation never calls this."""
-    from shared.media import content_hash
 
     store = Store.__new__(Store)
     store.root = Path(config.data_dir).resolve()
@@ -271,12 +271,8 @@ def verify_archives(config, source_id=None):
 
 def prune(config, migration_report, *, apply=False):
     """Delete only freshly verified, reconstructible moment/scene entities after acceptance."""
-    import os
-
-    from shared import lock_backend
 
     store = Store.open(config)
-    from shared.storage import require_sqlite
 
     require_sqlite(config, "切片清理（含清理前的元数据库备份）")
     report_path = Path(migration_report)

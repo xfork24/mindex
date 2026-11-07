@@ -67,10 +67,9 @@ def image_count(messages: list[dict]) -> int:
 
 
 def encode_jpeg(data: bytes, max_side: int = MAX_SIDE) -> bytes:
-    (
-        """解码任意 Pillow 支持的静态图片，按 EXIF 摆正、透明底铺白，缩到最长边不超过 ``max_side``，编码为 """
-        """JPEG。"""
-    )
+    """解码任意 Pillow 支持的静态图片，按 EXIF 摆正、透明底铺白，缩到最长边不超过 ``max_side``，
+    编码为 JPEG。
+    """
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("error", Image.DecompressionBombWarning)

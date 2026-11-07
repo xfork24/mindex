@@ -13,7 +13,8 @@ from shared.files import FileRevisionConflict
 JOB = re.compile(r"^/api/studio/jobs/([^/]+)(/.*)?$")
 # 这些 POST 使用自己的输入版本/预检 token，或不修改工作区。
 EXECUTION = re.compile(
-    r"/(build|nodes|execute-column|regenerate-column|run|run/[^/]+|steps/[^/]+|cancel|preflight|query-suggestion|lyrics|resolve)$"
+    "/(build|nodes|execute-column|regenerate-column|run|run/[^/]+|steps/[^/]+|cancel|preflight|query-su"
+    "ggestion|lyrics|resolve)$"
 )
 
 

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import io
+import time
 
+import httpx
 import numpy as np
 import pytest
 from fastapi.testclient import TestClient
@@ -637,10 +640,6 @@ def test_workspace_recall_pins_active_person_release_and_reuses_after_rollback(p
 
 
 def test_concurrent_query_uploads_do_not_block_event_loop(studio_client, monkeypatch):
-    import asyncio
-    import time
-
-    import httpx
 
     config, client = studio_client
     jid = create_studio_job(client)

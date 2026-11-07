@@ -15,7 +15,9 @@ from pathlib import Path
 from fastapi import HTTPException
 from filelock import Timeout
 
+from shared.db.fencing import current_attempt
 from shared.processing_lock import recover_tasks
+from shared.queue_dispatch import enqueue_task, queue_backend
 from shared.storage import dumps
 from shared.task_cancel import TaskCancelled, registry_for
 from shared.task_progress import (
@@ -168,7 +170,6 @@ class BackgroundTaskRunner:
         return self.get(task_id)
 
     def launch(self, task_id, config, lock):
-        from shared.queue_dispatch import queue_backend
 
         if queue_backend(self.runtime) == "postgres":
             self._enqueue(task_id, lock)
@@ -188,7 +189,6 @@ class BackgroundTaskRunner:
         正常创建/重试已在 ledger_transaction 中原子入队；这里幂等确认后释放锁。
         enqueue_backlog 仅修复历史数据和异常滞留。
         """
-        from shared.queue_dispatch import enqueue_task
 
         try:
             enqueue_task(self.runtime, self.table, task_id)
@@ -211,7 +211,6 @@ class BackgroundTaskRunner:
 
     @budgeted
     def _run(self, task_id, config, lock):
-        from shared.db.fencing import current_attempt
 
         attempt = current_attempt()
         cancels = registry_for(self.store.root)

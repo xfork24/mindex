@@ -22,7 +22,13 @@ from pathlib import Path
 from pydantic import Field, field_validator
 
 from admin.curation import EntityNotFound
+from shared import files
 from shared.config import StrictModel
+from shared.media import MediaError, audio_info
+from shared.media_groups import Groups
+from studio import beats, brands, studio
+from studio import beats as beat_analysis
+from studio.workspace.music import shot_cue
 
 log = logging.getLogger(__name__)
 
@@ -200,7 +206,6 @@ def view(row: dict, *, beats: bool = True) -> dict:
         expired=expired(row),
         url=f"/api/studio/music-library/{row['id']}/file",
     )
-    from studio import beats as beat_analysis
 
     values["stale"] = (
         row["analysis_status"] == "ready" and row["analysis_version"] != beat_analysis.ANALYSIS_VERSION
@@ -211,7 +216,6 @@ def view(row: dict, *, beats: bool = True) -> dict:
 
 
 def get_track(store, track_id: str) -> dict:
-    from shared.media_groups import Groups
 
     return {**view(_row(store, track_id)), "groups": Groups(store).for_member("music", track_id)}
 
@@ -222,7 +226,6 @@ def list_tracks(
     items = [
         view(row, beats=False) for row in store.rows("SELECT * FROM music_tracks ORDER BY created_at, id")
     ]
-    from shared.media_groups import Groups
 
     allowed = Groups(store).resolve("music", music_group_ids)
     if allowed is not None:
@@ -241,11 +244,9 @@ def list_tracks(
 
 def require_file(config, store, track_id: str) -> Path:
     """定位曲目文件并复验 sha256；缺失或被改动时报错（预检阻塞、构建失败）。"""
-    from studio import brands, studio
 
     row = _row(store, track_id)
     path = track_path(config, track_id, row["suffix"])
-    from shared import files
 
     if files.remote(store):
         files.hydrate(store, path)
@@ -256,8 +257,6 @@ def require_file(config, store, track_id: str) -> Path:
 
 def import_track(config, store, staged: Path, suffix: str, meta: TrackMeta, *, now: str) -> tuple[dict, bool]:
     """校验并按内容寻址保存一首曲目；返回 ``(曲目视图, 是否已存在)``。已存在时不改动原记录。"""
-    from shared.media import MediaError, audio_info
-    from studio import brands, studio
 
     suffix = suffix.lower()
     if suffix not in SUFFIXES:
@@ -276,7 +275,6 @@ def import_track(config, store, staged: Path, suffix: str, meta: TrackMeta, *, n
     if not target.is_file() or brands.digest_file(target) != sha:
         target.parent.mkdir(parents=True, exist_ok=True)
         studio.save_bytes(target, staged.read_bytes())
-    from shared import files
 
     files.publish(store, target)
     if existing:
@@ -322,7 +320,6 @@ def update_track(store, track_id: str, changes: TrackChanges, *, now: str) -> di
 
 def references(config, track_id: str) -> list[dict]:
     """选用某曲目的方案（扫描全部创作任务 workspace.json 中方案所选分镜内容的背景音乐提示点，只读）。"""
-    from studio import studio
 
     root = studio.studio_root(config)
     found = []
@@ -356,10 +353,9 @@ def references(config, track_id: str) -> list[dict]:
 
 
 def delete_track(config, store, track_id: str) -> None:
-    (
-        """删除曲目记录与文件；被方案选用时拒绝。调用方须持有 studio """
-        """修改锁。已构建的背景音乐版本各自保存副本，不受影响。"""
-    )
+    """删除曲目记录与文件；被方案选用时拒绝。调用方须持有 studio 修改锁。
+    已构建的背景音乐版本各自保存副本，不受影响。
+    """
     row = _row(store, track_id)
     used = references(config, track_id)
     if used:
@@ -375,7 +371,6 @@ def delete_track(config, store, track_id: str) -> None:
             (track_id,),
         )
         db.execute("DELETE FROM music_tracks WHERE id=?", (track_id,))
-    from shared import files
 
     path = track_path(config, track_id, row["suffix"])
     files.delete_tree(store, path.relative_to(store.root).as_posix())
@@ -432,7 +427,6 @@ def tag_moods(writer, row: dict, result: dict) -> tuple[list[str], str]:
 
 def analyze_track(config, store, track_id: str, *, writer=None, retag: bool = True, now: str) -> dict:
     """分析节奏并（可选）重新打情绪标签；失败时记录 ``analysis_status=failed`` 与原因并抛出。"""
-    from studio import beats, studio
 
     row = _row(store, track_id)
     path = require_file(config, store, track_id)
@@ -466,7 +460,6 @@ def analyze_track(config, store, track_id: str, *, writer=None, retag: bool = Tr
 
 def beat_times(config, store, track_id: str) -> list[float]:
     """曲目的节拍时间（秒）；没有有效分析时现场分析一次（不写库）。"""
-    from studio import beats
 
     row = _row(store, track_id)
     if row["analysis_status"] == "ready" and row["analysis_version"] == beats.ANALYSIS_VERSION:
@@ -564,9 +557,8 @@ def recommend(
 
 def segment_text(config, job_id: str, plan_id: str, shot_id: str) -> tuple[str, float]:
     """以 ``shot_id`` 起始的背景音乐段落（到下一个提示点之前）的旁白与预估时长。"""
-    from studio import studio
+    # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
     from studio import workspace as ws
-    from studio.workspace.music import shot_cue
 
     w = ws.load(config, job_id)
     p = ws.plan(w, plan_id)

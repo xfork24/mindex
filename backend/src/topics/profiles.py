@@ -10,6 +10,8 @@
 from __future__ import annotations
 
 from admin.curation import EntityNotFound
+from shared.media_groups import Groups
+from shared.types import Filters
 from shared.writing_profile import WRITING_KEYS, profile_hash
 from topics.common import TopicConflict, check_id, dumps, loads, new_id, now
 from topics.models import ProfileBody, ProfileChanges
@@ -103,7 +105,6 @@ def snapshot_body(body: ProfileBody) -> dict:
 
 def material_filters(body: ProfileBody):
     """素材组并集与手动素材取交集；空列表沿用不限语义。"""
-    from shared.types import Filters
 
     return Filters(source_ids=body.source_ids, source_group_ids=body.source_group_ids)
 
@@ -120,7 +121,6 @@ def material_state(body: ProfileBody) -> dict:
 
 
 def material_signature(store, body: ProfileBody) -> dict:
-    from shared.media_groups import Groups
 
     return {
         "source_ids": sorted(set(body.source_ids)),

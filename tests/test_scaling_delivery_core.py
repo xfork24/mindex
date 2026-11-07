@@ -5,7 +5,9 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
 import pytest
@@ -97,8 +99,6 @@ def test_external_binary_receipt_is_immutable_and_replayed(store):
 @pytest.mark.parametrize("backend", ["local", pytest.param("postgres", marks=pytest.mark.requires_postgres)])
 @pytest.mark.parametrize("old_failed", [False, True])
 def test_external_late_response_cannot_update_retry(config, request, backend, old_failed):
-    import threading
-    from concurrent.futures import ThreadPoolExecutor
 
     from shared.external_calls import Journal, resolve
 
@@ -220,15 +220,13 @@ from test_scaling_correctness import s3_config as s3_config  # noqa: E402
 @pytest.mark.requires_postgres
 @pytest.mark.parametrize("outcome", ["success", "cancel", "expired"])
 def test_studio_persistent_split_two_nodes_and_fencing(s3_config, tmp_path, monkeypatch, outcome):
-    import threading
-
-    from worker_runtime import Worker
 
     from api import create_app
     from conftest import FixtureStoryboarder
     from shared.db.queue_pg import PgTaskQueue
     from studio import studio, workspace
     from studio.workspace.handlers import split
+    from worker.runtime import Worker
 
     cfg = s3_config
     state = studio.create_job(cfg, "红色开场。蓝色结尾。", title="持久执行")
@@ -494,12 +492,11 @@ def test_bundle_restores_studio_history_external_receipts_and_uploads(s3_config,
 
 @pytest.mark.requires_postgres
 def test_legacy_studio_steps_are_durable_and_readable_without_cache(s3_config, tmp_path, monkeypatch):
-    from worker_runtime import Worker
-
     from api import create_app
     from conftest import FixtureStoryboarder
     from studio import steps as studio_steps
     from studio import studio
+    from worker.runtime import Worker
 
     cfg = s3_config
     state = studio.create_job(cfg, "保持完整的旧文案。", title="旧步骤持久化")
@@ -548,12 +545,11 @@ def test_manifest_dependency_closure_ignores_obsolete_local_job(s3_config, tmp_p
 
 @pytest.mark.requires_postgres
 def test_unknown_studio_call_stops_and_operator_resolution_resumes_same_task(s3_config, monkeypatch):
-    from worker_runtime import Worker
-
     from api import create_app
     from conftest import FixtureStoryboarder
     from studio import studio, workspace
     from studio.workspace.handlers import split
+    from worker.runtime import Worker
 
     cfg = s3_config
     jid = studio.create_job(cfg, "外部结果需要核对。", title="核对恢复")["id"]
@@ -644,7 +640,6 @@ def test_upload_staging_shortage_is_507_and_does_not_register_parts(config, tmp_
 
 
 def test_reassigned_attempt_ignores_old_node_cancel_and_honors_new_cancel(tmp_path):
-    import threading
 
     from shared.db.fencing import Attempt, executing
     from shared.task_cancel import TaskCancelled, registry_for

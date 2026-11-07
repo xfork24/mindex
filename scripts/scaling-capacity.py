@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 import platform
@@ -23,6 +24,7 @@ from pathlib import Path
 
 import httpx
 import numpy as np
+from fastapi import FastAPI
 
 ROOT = Path(__file__).resolve().parents[1]
 PROFILES = {"100k": (100_000, 1_000_000), "1m": (1_000_000, 3_000_000)}
@@ -225,7 +227,6 @@ def seed(args):
 
 def embedder(args):
     import uvicorn
-    from fastapi import FastAPI
 
     from shared.config import fingerprint, load_config
 
@@ -309,7 +310,6 @@ def run(args):
         "collection_counts": collections,
         "model_quality": "未运行；工程向量不代表真实模型 Hit@5",
     }
-    import importlib.util
 
     spec = importlib.util.spec_from_file_location("scaling_verifier", ROOT / "scripts/verify-scaling.py")
     verifier = importlib.util.module_from_spec(spec)

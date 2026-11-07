@@ -1,3 +1,5 @@
+"""人物库、出镜证据与人物处理流程回归。"""
+
 from __future__ import annotations
 
 import base64
@@ -6,10 +8,13 @@ import itertools
 import json
 import shutil
 import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+import yaml
 from fastapi.testclient import TestClient
+from filelock import FileLock, Timeout
 from PIL import Image
 
 from api import create_app
@@ -1457,7 +1462,6 @@ def test_checkpoint_append_rename_no_video_reinference_space_isolation(catalogue
 
 
 def test_service_contract_gpu_lock_auth_and_upload(config, monkeypatch, tmp_path):
-    from filelock import FileLock, Timeout
 
     from persons.person_server import create_person_app
 
@@ -1901,7 +1905,6 @@ def test_partial_coverage_is_reported_and_review_roles_are_work_scoped(catalogue
 
 def test_tasks_return_ids_retry_and_restart_checkpoints(catalogue, config, monkeypatch):
     config.enforce_gpu_lock = True
-    from filelock import FileLock
 
     from persons.person_processing import PersonTasks
     from settings.runtime_settings import RuntimeConfig
@@ -2311,7 +2314,6 @@ def test_import_existing_actor_without_name_and_duplicate_name_requires_choice(c
 
 
 def test_cli_shot_review_and_single_shot_lookup(catalogue, config, tmp_path):
-    import yaml
     from typer.testing import CliRunner
 
     from cli import app
@@ -3125,7 +3127,6 @@ def test_frame_api_current_snapshot_thumbnail_and_mime(catalogue, config):
 
 
 def test_frame_clean_rechecks_references_after_scan(catalogue, config):
-    from datetime import UTC, datetime
 
     from maintenance.clean import Scan, person_frames
 

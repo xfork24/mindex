@@ -1,3 +1,5 @@
+"""命令行装配、全局选项与核心命令。"""
+
 from __future__ import annotations
 
 import ipaddress
@@ -5,6 +7,7 @@ import json
 import logging
 import os
 import time
+from contextlib import nullcontext
 from enum import Enum
 from pathlib import Path
 from typing import Annotated
@@ -43,6 +46,7 @@ class HelpAwareGroup(SortedGroup):
     """Parse descendant help before Click invokes the configuration callback."""
 
     def invoke(self, ctx):
+        # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
         from shared.backends.context import resource_scope
 
         with resource_scope():
@@ -147,6 +151,7 @@ def configure(
     selected_config = Path(config or os.environ.get("MINDEX_CONFIG", "config.local.yaml")).resolve()
     ctx.meta["config_path"] = selected_config
     if ctx.invoked_subcommand == "backup" and not selected_config.exists():
+        # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
         from shared.config import Config
 
         ctx.obj = Config(data_dir=selected_config.parent / "data")
@@ -158,6 +163,7 @@ def configure(
         ctx.obj.runtime_overrides = False
     # 设置页保存的覆盖层对 CLI 同样生效（Web 与 CLI 行为一致）；e2e 验证框架保持 yaml 原值。
     if ctx.invoked_subcommand not in {"e2e", "clips", "backup", "migrate", "migration", "doctor", "mcp"}:
+        # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
         from settings.runtime_settings import apply_runtime_overrides
 
         ctx.obj = apply_runtime_overrides(ctx.obj)
@@ -173,12 +179,14 @@ def configure(
         "gpu",
         "calls",
     }:
+        # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
         from shared.migration_state import writable_config
 
         writable_config(ctx.obj)
 
 
 def _persistent_foreground(config, source, work, *, operation=None, **options):
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from admin.dialogue_tasks import DialogueOptions, DialogueTasks
     from admin.source_tasks import SourceTasks, WorkOptions
     from settings.runtime_settings import RuntimeConfig
@@ -222,6 +230,7 @@ def register(
         \b
           mindex register /路径/电影.mp4 /路径/素材.mkv
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from processing.pipeline import Pipeline
 
     pipeline = Pipeline(ctx.obj)
@@ -246,6 +255,7 @@ def prepare(
         \b
           mindex prepare /路径/电影.mp4
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from processing.pipeline import Pipeline
 
     pipeline = Pipeline(ctx.obj)
@@ -272,6 +282,7 @@ def detect(ctx: typer.Context, video: Annotated[Path, typer.Argument(help="本�
         \b
           mindex detect /路径/电影.mp4
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from processing.pipeline import Pipeline
 
     pipeline = Pipeline(ctx.obj)
@@ -300,6 +311,7 @@ def split(
         \b
           mindex split SOURCE_ID
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from processing.pipeline import Pipeline
 
     pipeline = Pipeline(ctx.obj)
@@ -323,6 +335,7 @@ def inspect(ctx: typer.Context, source: Annotated[str, typer.Argument(help="要�
     \b
       mindex inspect SOURCE_ID
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from diagnostics.film import source_report
 
     print_json(source_report(ctx.obj, source))
@@ -344,6 +357,7 @@ def export_source(
         \b
           mindex export SOURCE_ID --output /路径/检查报告
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from diagnostics.film import export_source as run_export
     from processing.pipeline import Pipeline
 
@@ -369,6 +383,7 @@ def transcribe(
         \b
           mindex transcribe --source SOURCE_ID
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from processing.pipeline import Pipeline
 
     pipeline = Pipeline(ctx.obj)
@@ -410,6 +425,7 @@ def enrich_dialogue(
         \b
           mindex enrich-dialogue SOURCE_ID --method auto --no-publish
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from admin.dialogue_tasks import execute_dialogue
     from processing.pipeline import Pipeline
 
@@ -461,6 +477,7 @@ def align(
         \b
           mindex align .venv-align/bin/python --source SOURCE_ID
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from processing.pipeline import Pipeline
 
     pipeline = Pipeline(ctx.obj)
@@ -490,6 +507,7 @@ def analyze(
         \b
           mindex analyze --source SOURCE_ID
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from processing.pipeline import Pipeline
     from shared.command_progress import CommandProgress
 
@@ -544,6 +562,7 @@ def build_index(
         \b
           mindex index --mode visual --source SOURCE_ID --kind moment --kind shot --activate
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from processing.indexing import IndexBuilder
     from processing.pipeline import Pipeline
     from shared.command_progress import CommandProgress
@@ -563,7 +582,6 @@ def build_index(
             activate,
         )
         progress.update({"stage": "lock_wait"})
-        from contextlib import nullcontext
 
         # 持久任务由 worker 拿处理锁，调用端等待期间不能持有同一把锁。
         with (
@@ -601,6 +619,7 @@ def ingest(
         \b
           mindex ingest /路径/电影.mp4 --activate
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from processing.indexing import IndexBuilder
     from processing.pipeline import Pipeline
 
@@ -643,6 +662,7 @@ def search(
         \b
           mindex search '雨夜街道上奔跑的人' --granularity shot --limit 10
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from search.search import SearchEngine
     from shared.types import TextSearch
 
@@ -668,6 +688,7 @@ def status(
         \b
           mindex status --health
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from search.search import status as get_status
 
     print_json(get_status(ctx.obj, health=health))
@@ -685,7 +706,6 @@ def migrate(ctx: typer.Context):
     \b
       MINDEX_DATABASE_DSN=postgres://… mindex migrate
     """
-    import os
 
     config = ctx.obj
     if config.database.backend == "postgres":
@@ -694,15 +714,18 @@ def migrate(ctx: typer.Context):
         if not dsn:
             raise typer.BadParameter(f"缺少环境变量 {section.dsn_env}（PostgreSQL DSN）")
         try:
+            # 延迟导入：保留可选依赖探测或异常捕获时的降级行为。
             import psycopg
         except ImportError as exc:  # pragma: no cover - 依赖缺失时给出明确指引
             raise typer.BadParameter("PostgreSQL 后端需要 psycopg：uv sync --extra cluster") from exc
+        # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
         from shared.db.migrate_pg import migrate_pg
 
         with psycopg.connect(dsn) as conn:
             version = migrate_pg(conn)
         print_json({"backend": "postgres", "schema_version": version})
     else:
+        # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
         from shared.storage import Store
 
         Store.open(config)
@@ -741,6 +764,7 @@ def migration_export(
     \b
       mindex migration export --target /backup/run1 --with-media --with-vectors
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from maintenance.migration import export_bundle
 
     try:
@@ -769,6 +793,7 @@ def migration_preflight(
     \b
       mindex migration preflight --source /backup/run1
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from maintenance.migration import preflight
 
     try:
@@ -794,6 +819,7 @@ def migration_load(
     \b
       mindex migration load --source /backup/run1 --with-vectors
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from maintenance.migration import load_bundle
 
     try:
@@ -814,6 +840,7 @@ def migration_verify(
     \b
       mindex migration verify --source /backup/run1
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from maintenance.migration import verify_bundle
 
     try:
@@ -839,6 +866,7 @@ def migration_activate(
     \b
       mindex migration activate --source /backup/run1
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from maintenance.migration import activate_bundle
 
     try:
@@ -848,7 +876,6 @@ def migration_activate(
 
 
 def _pg_dsn(config) -> str:
-    import os
 
     dsn = os.environ.get(config.database.postgres.dsn_env, "").strip()
     if not dsn:
@@ -867,6 +894,7 @@ def doctor(ctx: typer.Context):
     \b
       MINDEX_DATABASE_DSN=postgres://… mindex doctor
     """
+    # 延迟导入：当前模块存在同名绑定，保留局部名称语义。
     from diagnostics.doctor import doctor
 
     report = doctor(ctx.obj)
@@ -902,6 +930,7 @@ def worker(
       MINDEX_DATABASE_DSN=postgres://… mindex worker --queues source,dialogue --concurrency 2
     """
 
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from worker.runtime import Worker
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -936,6 +965,7 @@ def check(
         \b
           mindex check --index-id INDEX_ID
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from processing.indexing import check_index
     from shared.storage import Store
 
@@ -962,6 +992,7 @@ def list_indexes(ctx: typer.Context):
         \b
           mindex indexes list
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from shared.storage import Store
 
     store = Store.open(ctx.obj)
@@ -983,6 +1014,7 @@ indexes.add_typer(index_tasks_app, name="tasks")
 
 
 def _index_tasks(config):
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from admin.source_tasks import IndexTasks
     from settings.runtime_settings import RuntimeConfig
     from shared.storage import Store
@@ -996,6 +1028,7 @@ def list_index_tasks(
     ctx: typer.Context, limit: Annotated[int, typer.Option(min=1, max=200, help="最多返回的任务数。")] = 50
 ):
     """列出最近的索引任务。\n\n示例：mindex indexes tasks list --limit 20。"""
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from shared.background_tasks import public_task
 
     runner = _index_tasks(ctx.obj)
@@ -1048,12 +1081,14 @@ def lexical(
       mindex indexes lexical
       mindex indexes lexical --index-id INDEX_ID --replace
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from shared.lexical_store import build_lexical_index
     from shared.processing_lock import index_write_lock
     from shared.storage import Store
 
     store = Store.open(ctx.obj)
     if ctx.obj.queue.backend == "postgres":
+        # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
         from admin.source_tasks import IndexTasks
         from settings.runtime_settings import RuntimeConfig
 
@@ -1097,12 +1132,14 @@ def activate_index(
         \b
           mindex indexes activate INDEX_ID
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from processing.indexing import check_index
     from processing.pipeline import Pipeline
     from shared.storage import Store
 
     store = Store.open(ctx.obj)
     if ctx.obj.queue.backend == "postgres":
+        # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
         from admin.source_tasks import IndexTasks
         from settings.runtime_settings import RuntimeConfig
 
@@ -1117,6 +1154,7 @@ def activate_index(
             raise typer.BadParameter("索引检查失败：" + "; ".join(issues[:5]))
         version = store.index_version(index_id)
         if version["spec"]["space"].get("schema") == 2:
+            # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
             from models.adapters import make_embedder
 
             client = make_embedder(ctx.obj)
@@ -1194,6 +1232,7 @@ def clean(
       mindex clean --apply --days 0
       mindex --config /路径/config.yaml --data-dir /路径/data clean
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from maintenance.clean import CleanBusy, clean_library
 
     try:
@@ -1252,8 +1291,10 @@ def serve(
           mindex serve --host 127.0.0.1 --port 8000
           MINDEX_WEB_TOKEN=<令牌> mindex serve --host 0.0.0.0
     """
+    # 延迟导入：媒体、数值或服务运行依赖仅在实际执行该功能时加载。
     import uvicorn
 
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from api import create_app
     from shared.web_auth import configured_token
 
@@ -1271,6 +1312,7 @@ def serve(
             fg=typer.colors.YELLOW,
             err=True,
         )
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from search.warmup import warm_up_in_background
     from settings import local_services
 
@@ -1313,6 +1355,7 @@ def evaluate(
         \b
           mindex evaluate eval/queries.jsonl --split test --output /路径/eval.json
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from diagnostics.evaluation import evaluate as run_evaluation
 
     report = run_evaluation(ctx.obj, queries, split, output, index_id=index_id)
@@ -1342,6 +1385,7 @@ def check_model(
         \b
           mindex model-check /路径/短视频.mp4 --text '画面描述' --repeats 3
     """
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from diagnostics.benchmark import model_check
 
     report = model_check(ctx.obj, video, text, repeats)
@@ -1362,6 +1406,7 @@ app.add_typer(gpu_commands, name="gpu")
 @gpu_commands.command("list")
 def list_gpu_allocations(ctx: typer.Context):
     """列出尚在执行或等待人工核对的物理资源占用。示例：mindex gpu list。"""
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from shared.gpu_resources import GpuResources
     from shared.storage import Store
 
@@ -1375,6 +1420,7 @@ def resolve_gpu_allocation(
     evidence: Annotated[str, typer.Option(help="远端请求已经停止的核对依据。")],
 ):
     """确认远端模型请求已停止后释放指定未知占用。示例：mindex gpu resolve ID --evidence 已核对服务日志。"""
+    # 延迟导入：命令或模型工厂按需装配，保持帮助入口与可选模型环境隔离。
     from shared.gpu_resources import GpuResources
     from shared.storage import Store
 

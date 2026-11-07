@@ -11,15 +11,18 @@ import json
 import math
 import re
 import tempfile
+from bisect import bisect_left, bisect_right
 from pathlib import Path
 from time import perf_counter
 
 from models.adapters import make_transcriber
 from models.transcribers import parse_minimax_words
+from processing import subtitle_archive
 from shared import jsonio
 from shared.config import Config, fingerprint
 from shared.db.fencing import FencedThreadPoolExecutor as ThreadPoolExecutor
 from shared.media import MediaError, command
+from shared.shot_media import ShotMedia
 from shared.storage import Store, dumps
 
 CHANNELS = ("visual", "dialogue", "analysis")
@@ -181,7 +184,6 @@ def indexed_dialogue(data):
     """Request-local interval lookup; retain overlapping utterances and input order."""
     if not data:
         return data
-    from bisect import bisect_left, bisect_right
 
     utterances = data.get("utterances", [])
     ordered = sorted(enumerate(utterances), key=lambda pair: pair[1]["start"])
@@ -356,6 +358,7 @@ class DialogueProcessor:
                 )
             return {"source_id": sid, **previous_complete, "reused": True}
         if subtitle_file:
+            # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
             from processing.subtitle_uploads import parse_subtitle_file, resolve_subtitle
 
             path, metadata = resolve_subtitle(self.store, sid, subtitle_file)
@@ -397,11 +400,9 @@ class DialogueProcessor:
             if progress:
                 progress({"stage": "subtitle", "completed": 1, "total": 1, "unit": "files"})
             return {"source_id": sid, **data}
-        from processing.subtitle_archive import load_archive
-        from shared.shot_media import ShotMedia
 
         info = json.loads(source["media"])
-        archive = load_archive(self.store, sid) if method != "asr" else None
+        archive = subtitle_archive.load_archive(self.store, sid) if method != "asr" else None
         tracks = archive["tracks"] if archive else []
         selected = choose_subtitle(tracks, stream) if method != "asr" else None
         manual_subtitle = method == "subtitle"

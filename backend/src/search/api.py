@@ -13,6 +13,8 @@ from starlette.concurrency import run_in_threadpool
 
 from admin.curation import Library
 from search.search import SearchEngine, SimilarUnavailable, public_segment, status
+from shared.media_delivery import DownloadPins, deliver_media, materialized_response
+from shared.shot_media import ShotMedia
 from shared.shot_media import file_response as FileResponse
 from shared.types import Filters, Granularity, SimilarSearch, TextSearch
 from shared.uploads import save_upload
@@ -23,8 +25,6 @@ def search_router(config, runtime, store, embedder=None, *, index_id=None, backe
     router = APIRouter()
     pins = None
     if backends is not None and backends.media.backend == "s3":
-        from shared.media_delivery import DownloadPins
-
         pins = DownloadPins(store, backends.library_id)
 
     @router.get("/api/status")
@@ -104,8 +104,6 @@ def search_router(config, runtime, store, embedder=None, *, index_id=None, backe
 
     def media_response(relative: str, media_type: str, request: Request | None = None):
         if pins is not None:  # S3 形态：先鉴权/索引校验已由路由完成，再签发或代理
-            from shared.media_delivery import deliver_media
-
             return deliver_media(backends.media, relative, media_type, request, config=config, pins=pins)
         try:
             return FileResponse(store.resolve_media(relative), media_type=media_type)
@@ -128,8 +126,6 @@ def search_router(config, runtime, store, embedder=None, *, index_id=None, backe
     @router.api_route("/api/context/{segment_id}", methods=["GET", "HEAD"])
     def get_context(segment_id: str):
         segment = get_snapshot(segment_id)
-        from shared.media_delivery import materialized_response
-        from shared.shot_media import ShotMedia
 
         return materialized_response(
             ShotMedia(store).materialized(
@@ -147,14 +143,11 @@ def search_router(config, runtime, store, embedder=None, *, index_id=None, backe
         selected = next((s for s in snapshots if s["source_id"] == source_id), None)
         if selected is None:
             raise HTTPException(404, "找不到已发布的素材")
-        from shared.media_delivery import materialized_response
-        from shared.shot_media import ShotMedia
 
         return materialized_response(ShotMedia(store).materialized(source_id), media_type="video/mp4")
 
     @router.get("/api/sources/{source_id}/playlist")
     def source_playlist(source_id: str):
-        from shared.shot_media import ShotMedia
 
         active = store.index_version(index_id) if index_id else store.active_index()
         if not active or not any(s["source_id"] == source_id for s in store.snapshots(active["id"])):
@@ -163,7 +156,6 @@ def search_router(config, runtime, store, embedder=None, *, index_id=None, backe
 
     @router.get("/api/playlists/{segment_id}")
     def segment_playlist(segment_id: str):
-        from shared.shot_media import ShotMedia
 
         segment = get_snapshot(segment_id)
         return ShotMedia(store).playlist(segment["source_id"], segment["start"], segment["end"])

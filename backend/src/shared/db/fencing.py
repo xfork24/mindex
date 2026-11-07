@@ -8,7 +8,10 @@ from contextvars import ContextVar, copy_context
 from dataclasses import dataclass, field
 from threading import RLock
 
+from shared import lock_backend
 from shared.db.locks_pg import LeaseLost
+from shared.db.scaling_schema import ALL_LEDGER_TABLES
+from shared.processing_lock import index_write_lock
 
 _ATTEMPT = ContextVar("mindex_attempt", default=None)
 _LEASES = ContextVar("mindex_leases", default=())
@@ -35,6 +38,7 @@ class Attempt:
         if self._closed or self.lost.is_set():
             raise LeaseLost("任务租约已失联，停止提交")
         if self.cancelled.is_set():
+            # 延迟导入：该依赖的顶层导入链会回到本模块，保留运行时装配以消解循环。
             from shared.task_cancel import TaskCancelled
 
             raise TaskCancelled()
@@ -84,7 +88,6 @@ class Attempt:
 @contextmanager
 def publication_scope(store, *, config=None, check=None, only_attempt=False):
     """持久任务把索引锁交给当前 attempt；本地/inline 保持原临界区。"""
-    from shared.processing_lock import index_write_lock
 
     attempt = current_attempt()
     if only_attempt and (not store.pg or attempt is None):
@@ -92,8 +95,6 @@ def publication_scope(store, *, config=None, check=None, only_attempt=False):
         return
     lock = index_write_lock(store.root, config=config, check=check) if config is not None else None
     if lock is None:
-        from shared import lock_backend
-
         lock = lock_backend.named(store, "index-write", exclusive=True, timeout=None)
     if store.pg and attempt is not None:
         attempt.retain((store.library_id, "index-write"), lock)
@@ -173,7 +174,6 @@ def verify_transaction(connection, backend, *, execution=None):
         if row[0]:
             attempt.cancelled.set()
             attempt.check()
-        from shared.db.scaling_schema import ALL_LEDGER_TABLES
 
         if task.ledger_table in ALL_LEDGER_TABLES and task.ledger_id:
             bound = connection.execute(

@@ -8,8 +8,9 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from studio import script_templates
+from studio import material_digest, script_templates
 from topics.llm import REFERENCE_HEADER, chat_json
+from topics.profiles import material_state
 from topics.scoring import profile_text
 
 
@@ -55,10 +56,8 @@ def draft(
     llm, store, config, profile, card: dict, items: list[dict], *, retries: int
 ) -> tuple[str, str, list[str]]:
     """返回（大纲，模板 ID，告警）。"""
-    from studio.material_digest import build_digest
-    from topics.profiles import material_state
 
-    digest = build_digest(config, store, material_state(profile))
+    digest = material_digest.build_digest(config, store, material_state(profile))
     templates = script_templates.list_templates(store)
     limit = config.studio.max_input_chars
     parts = [

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from uuid import uuid4
 
+from search.lexical_query import eligible_sql, projected_row
 from shared.query_budget import check, connection_for
 
 _COLUMNS = (
@@ -87,7 +88,6 @@ class EligibleSet:
 
     @classmethod
     def build(cls, store, index_id, granularity, filters, selected_sources, *, page_size=512):
-        from search.lexical_query import eligible_sql, projected_row
 
         query, args = eligible_sql(store, index_id, granularity, filters, selected_sources)
         where = {"granularity": granularity}

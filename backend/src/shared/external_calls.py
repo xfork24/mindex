@@ -10,12 +10,16 @@ import dataclasses
 import hashlib
 import io
 import json
+import sys
 from contextlib import contextmanager
 from contextvars import ContextVar
 from functools import wraps
+from pathlib import Path
 from uuid import uuid4
 
-from shared.db.fencing import current_attempt
+from pydantic import BaseModel
+
+from shared.db.fencing import ExecutionFence, current_attempt
 from shared.storage import dumps
 
 _current: ContextVar[object] = ContextVar("external_calls", default=None)
@@ -40,7 +44,6 @@ def scope(store, resource, *, task_id=None):
 
 
 def _signature(value):
-    from pathlib import Path
 
     if isinstance(value, Path):
         if value.is_file():
@@ -187,7 +190,6 @@ class Journal:
 
 
 def _receipt_fence():
-    from shared.db.fencing import ExecutionFence
 
     return ExecutionFence()
 
@@ -221,10 +223,6 @@ class Guard:
 def _restore(value, target):
     # 类型解析交给模型/工具层注册的解码器，防止共享层反向依赖。
     if isinstance(value, dict) and ("$model" in value or "$dataclass" in value):
-        import sys
-
-        from pydantic import BaseModel
-
         module = sys.modules.get(value.get("module", target.__module__))
         cls = getattr(module, value.get("$model", value.get("$dataclass")), None)
         if not isinstance(cls, type) or not (issubclass(cls, BaseModel) or dataclasses.is_dataclass(cls)):

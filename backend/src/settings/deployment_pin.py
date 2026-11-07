@@ -21,6 +21,7 @@ import time
 from pathlib import Path
 from urllib.parse import urlparse
 
+from models import adapters
 from models.adapters import ModelError
 from models.deployment import create_manifest, read_manifest, space_contract
 from models.llama_cpp import checked_runtime, inspect_service
@@ -307,9 +308,8 @@ def _with_manifest(config: Config, role: str, path: Path) -> Config:
 
 def gate_status(config: Config) -> dict:
     """嵌入清单关联后，核对六片段 smoke 能力门槛（不推理）。"""
-    from models.adapters import make_embedder
 
-    embedder = make_embedder(config)
+    embedder = adapters.make_embedder(config)
     try:
         if hasattr(embedder, "require_gate"):
             embedder.require_gate()

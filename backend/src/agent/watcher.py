@@ -18,6 +18,7 @@ import logging
 from collections import Counter
 
 from agent.ids import short
+from agent.tools.media import clean, version_media
 
 log = logging.getLogger(__name__)
 STAGE = {
@@ -160,7 +161,6 @@ class TaskWatcher:
             for n in build["nodes"]
             if n.get("status") in ("failed", "blocked")
         ]
-        from agent.tools.media import clean, version_media
 
         final = (data["data"]["plans"].get(build["plan_id"]) or {}).get("final")
         media = (

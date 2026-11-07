@@ -7,7 +7,10 @@ from collections import defaultdict
 from types import SimpleNamespace
 
 from admin.source_tasks import person_setup
+from persons.persons import Persons
+from processing.channel_index import normalize_snapshot, snapshots_for
 from processing.dialogue import READY, current_dialogue
+from processing.embedding_coverage import embedding_coverage
 from shared.background_tasks import public_task
 from shared.config import fingerprint
 from shared.scene_plans import current_segments, select_scenes
@@ -43,8 +46,6 @@ def same_json(left, right):
 
 
 def source_work(store, source, *, segments=None, analysis_rows=None, active=None, published=None):
-    from persons.persons import Persons
-    from processing.channel_index import normalize_snapshot, snapshots_for
 
     sid = source["id"]
     segments = current_segments(store, sid, segments)
@@ -183,7 +184,6 @@ def source_work(store, source, *, segments=None, analysis_rows=None, active=None
             "setup": person_setup(store, sid),
         },
     }
-    from processing.embedding_coverage import embedding_coverage
 
     for name, coverage_fields in embedding_coverage(store, sid, active, fresh, segments, published).items():
         work[name].update(coverage_fields)

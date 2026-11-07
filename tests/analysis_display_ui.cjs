@@ -9,12 +9,16 @@ const { chromium } = require(process.env.MINDEX_PLAYWRIGHT_MODULE || "playwright
     // 四路并行回归时页面与模型服务争用 CPU：等待窗口按满载情况设置，不放宽任何断言。
     page.setDefaultTimeout(45000);
     const errors = [];
-    let detailsRequests = 0,
-      searchRequests = 0;
+    let detailsRequests = 0;
+    let searchRequests = 0;
     page.on("pageerror", (error) => errors.push(error.message));
     page.on("request", (request) => {
-      if (/\/api\/admin\/segments\/[^/]+\/details$/.test(request.url())) detailsRequests++;
-      if (request.url().endsWith("/api/search/text")) searchRequests++;
+      if (/\/api\/admin\/segments\/[^/]+\/details$/.test(request.url())) {
+        detailsRequests++;
+      }
+      if (request.url().endsWith("/api/search/text")) {
+        searchRequests++;
+      }
     });
     async function choose(language) {
       await page.evaluate((lang) => MindexI18n.setLanguage(lang), language);
@@ -38,7 +42,9 @@ const { chromium } = require(process.env.MINDEX_PLAYWRIGHT_MODULE || "playwright
               () => true,
               () => false,
             );
-          if (shown) return response;
+          if (shown) {
+            return response;
+          }
         }
         if (attempt === 2) {
           const notice = (await page.locator("main").allTextContents())
@@ -123,13 +129,14 @@ const { chromium } = require(process.env.MINDEX_PLAYWRIGHT_MODULE || "playwright
     const resultCard = page.locator("#results .card").first();
     for (const language of ["en", "zh"]) {
       await choose(language);
-      if (language === "en")
+      if (language === "en") {
         assert.deepEqual(await resultCard.locator(".card-actions>*").allTextContents(), [
           "Details",
           "Similar",
           "Manage ↗",
           "People ↗",
         ]);
+      }
       assert.equal(
         await resultCard.locator(".card-actions button").first().getAttribute("aria-label"),
         language === "en" ? "View details" : "查看详情",
@@ -140,15 +147,15 @@ const { chromium } = require(process.env.MINDEX_PLAYWRIGHT_MODULE || "playwright
         }, width);
         await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve)));
         const issues = await resultCard.evaluate((card) => {
-          const group = card.querySelector(".card-actions"),
-            bounds = group.getBoundingClientRect();
-          const controls = [...group.children],
-            rects = controls.map((control) => control.getBoundingClientRect());
+          const group = card.querySelector(".card-actions");
+          const bounds = group.getBoundingClientRect();
+          const controls = [...group.children];
+          const rects = controls.map((control) => control.getBoundingClientRect());
           return controls.flatMap((control, i) => {
             const range = document.createRange();
             range.selectNodeContents(control);
-            const text = range.getBoundingClientRect(),
-              box = rects[i];
+            const text = range.getBoundingClientRect();
+            const box = rects[i];
             const invalid =
               text.left < box.left - 1 ||
               text.right > box.right + 1 ||

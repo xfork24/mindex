@@ -5,10 +5,12 @@
   const api = (url, method = "GET", body) => MindexApi.json(url, method, body);
   const base = "/api/studio/delivery-templates";
   const job = new URLSearchParams(location.search).get("job");
-  if (job && $("studio-jobs-tab")) $("studio-jobs-tab").href = `/?job=${encodeURIComponent(job)}`;
-  let items = [],
-    selected,
-    read;
+  if (job && $("studio-jobs-tab")) {
+    $("studio-jobs-tab").href = `/?job=${encodeURIComponent(job)}`;
+  }
+  let items = [];
+  let selected;
+  let read;
   const report = (error) => {
     $("notice").textContent = error.message;
   };
@@ -33,8 +35,9 @@
         };
       },
     });
-    for (const button of $("delivery-template-list").children)
+    for (const button of $("delivery-template-list").children) {
       button.setAttribute("aria-current", String(button.dataset.id === item.id));
+    }
   }
   async function load(id = selected?.id) {
     await DeliveryEditor.loadPlatforms(true);
@@ -43,8 +46,11 @@
     for (const item of items) {
       const button = node("button", null, "quiet");
       button.type = "button";
-      if (item.builtin) MindexI18n.setText(button, t("base"));
-      else button.textContent = item.name;
+      if (item.builtin) {
+        MindexI18n.setText(button, t("base"));
+      } else {
+        button.textContent = item.name;
+      }
       button.dataset.id = item.id;
       button.onclick = () => select(item);
       $("delivery-template-list").append(button);
@@ -60,8 +66,9 @@
       "delivery-template-copy": "copy",
       "delivery-template-delete": "remove",
       "delivery-template-save": "save",
-    }))
+    })) {
       MindexI18n.setText($(id), t(key));
+    }
   }
   $("delivery-template-form").onsubmit = async (event) => {
     event.preventDefault();
@@ -78,7 +85,9 @@
   };
   $("delivery-template-copy").onclick = async () => {
     const name = prompt(MindexI18n.render(t("copy_name")), selected.name + " copy");
-    if (!name?.trim()) return;
+    if (!name?.trim()) {
+      return;
+    }
     try {
       const item = await api(`${base}/${selected.id}/copy`, "POST", { name: name.trim() });
       await load(item.id);
@@ -87,7 +96,9 @@
     }
   };
   $("delivery-template-delete").onclick = async () => {
-    if (!confirm(MindexI18n.render(t("delete_confirm")))) return;
+    if (!confirm(MindexI18n.render(t("delete_confirm")))) {
+      return;
+    }
     try {
       await api(`${base}/${selected.id}`, "DELETE");
       await load();
@@ -103,7 +114,9 @@
         ? { ...selected, name: $("delivery-template-name").value, config: read() }
         : null;
     await load();
-    if (pending) select(pending);
+    if (pending) {
+      select(pending);
+    }
   });
   labels();
   load().catch(report);

@@ -28,6 +28,8 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
+from fastapi.testclient import TestClient
+
 os.environ["MINDEX_PROFILE_PERSONS"] = "1"
 
 TIMING = re.compile(r'([A-Za-z_]+);dur=([\d.]+)(?:;desc="([^"]*)")?')
@@ -221,8 +223,6 @@ def main() -> int:
     parser.add_argument("--output", type=Path)
     parser.add_argument("--title", default="人物库出镜审核读取耗时基线")
     args = parser.parse_args()
-
-    from fastapi.testclient import TestClient
 
     data_dir = args.data_dir.resolve()
     db_file = data_dir / "metadata.sqlite3"

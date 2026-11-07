@@ -6,20 +6,23 @@ import argparse
 import importlib.metadata
 import os
 import secrets
+import subprocess
 import sys
 import tempfile
 import threading
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, nullcontext
 from pathlib import Path
 from typing import Annotated, Literal
 
 import numpy as np
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi.responses import JSONResponse
 from filelock import FileLock
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
 from shared.config import Config, fingerprint, load_config
+from shared.images import image_png
 from shared.media import content_hash, ffmpeg_bin, probe
 from shared.uploads import save_upload
 
@@ -30,6 +33,7 @@ class TextBatch(BaseModel):
 
 
 def resolve_weights(model: str, revision: str) -> tuple[str, str]:
+    # 延迟导入：独立模型或扩展功能使用可选依赖，仅在实际调用时加载。
     from huggingface_hub import snapshot_download
 
     local = Path(model)
@@ -47,6 +51,7 @@ def resolve_weights(model: str, revision: str) -> tuple[str, str]:
 
 class WeMMEngine:
     def __init__(self, config: Config):
+        # 延迟导入：独立模型或扩展功能使用可选依赖，仅在实际调用时加载。
         import torch
         import transformers
         from transformers import AutoModel, AutoProcessor, BitsAndBytesConfig
@@ -103,6 +108,7 @@ class WeMMEngine:
         self.lock = threading.Lock()
 
     def metrics(self) -> dict:
+        # 延迟导入：独立模型或扩展功能使用可选依赖，仅在实际调用时加载。
         import torch
 
         with self.lock:
@@ -116,6 +122,7 @@ class WeMMEngine:
             }
 
     def _encode(self, item: dict) -> list[float]:
+        # 延迟导入：独立模型或扩展功能使用可选依赖，仅在实际调用时加载。
         import torch
         from qwen_vl_utils import process_vision_info
 
@@ -173,7 +180,6 @@ class WeMMEngine:
             ]
 
     def image(self, path: Path) -> list[list[float]]:
-        from shared.images import image_png
 
         png = image_png(path, self.config.video.max_pixels)
         with tempfile.TemporaryDirectory(prefix="wemm-image-") as directory:
@@ -193,6 +199,7 @@ class WeMMEngine:
 
 class ASREngine:
     def __init__(self, config: Config):
+        # 延迟导入：独立模型或扩展功能使用可选依赖，仅在实际调用时加载。
         import torch
         from qwen_asr import Qwen3ASRModel
 
@@ -239,7 +246,9 @@ def configure_transnet_device(tf, device: str) -> None:
             try:
                 importlib.metadata.version("tensorflow-metal")
             except importlib.metadata.PackageNotFoundError as exc:
-                raise RuntimeError("所选后端 metal 不可用：请在 .venv-detector 安装 tensorflow-metal") from exc
+                raise RuntimeError(
+                    "所选后端 metal 不可用：请在 .venv-detector 安装 tensorflow-metal"
+                ) from exc
         if not tf.config.get_visible_devices("GPU"):
             raise RuntimeError(f"所选后端 {device} 不可用：TensorFlow 未发现可见 GPU")
     # Metal 插件不使用 CUDA 的显存按需增长设置。
@@ -254,22 +263,31 @@ class TransNetEngine:
         directory = Path(os.environ.get("MINDEX_TRANSNET_DIR", "models/TransNetV2/inference")).resolve()
         if not (directory / "transnetv2.py").is_file():
             raise ValueError("缺少 TransNetV2 上游代码，请先执行 ./scripts/setup-transnet-service.sh")
+        # 延迟导入：独立模型或扩展功能使用可选依赖，仅在实际调用时加载。
         import tensorflow as tf
 
         device = os.environ.get("MINDEX_TRANSNET_DEVICE", "auto")
         configure_transnet_device(tf, device)
         weights = directory / "transnetv2-weights"
-        for name in ("saved_model.pb", "variables/variables.index", "variables/variables.data-00000-of-00001"):
+        for name in (
+            "saved_model.pb",
+            "variables/variables.index",
+            "variables/variables.data-00000-of-00001",
+        ):
             path = weights / name
             if not path.is_file() or path.stat().st_size < 1024:
-                raise ValueError("TransNetV2 权重缺失或仍为 Git LFS 指针，请执行 ./scripts/setup-transnet-service.sh")
+                raise ValueError(
+                    "TransNetV2 权重缺失或仍为 Git LFS 指针，请执行 ./scripts/setup-transnet-service.sh"
+                )
         sys.path.insert(0, str(directory))
+        # 延迟导入：独立模型或扩展功能使用可选依赖，仅在实际调用时加载。
         from transnetv2 import TransNetV2
 
         self.model = TransNetV2(model_dir=str(directory / "transnetv2-weights"))
         self.lock = threading.Lock()
         self.metadata = {
-            "model": "TransNetV2", "tensorflow": tf.__version__,
+            "model": "TransNetV2",
+            "tensorflow": tf.__version__,
             "device": "gpu" if tf.config.get_visible_devices("GPU") else "cpu",
             "weights_sha256": content_hash(weights / "variables/variables.data-00000-of-00001"),
         }
@@ -277,7 +295,6 @@ class TransNetEngine:
     def detect(self, path: Path, threshold: float) -> dict:
         # Upstream predict_video materializes all frames. Stream low-resolution frames
         # through bounded 100-frame windows instead, preserving every original frame.
-        import subprocess
 
         probe(path)
         process = subprocess.Popen(
@@ -321,7 +338,9 @@ class TransNetEngine:
                     # changes[n] measures the boundary BEFORE decoded frame n.
                     # TransNet transition peaks can mark the outgoing frame.
                     decoded = frames.astype(np.float32)
-                    prior = np.concatenate([decoded[:1] if previous_frame is None else previous_frame[None], decoded[:-1]])
+                    prior = np.concatenate(
+                        [decoded[:1] if previous_frame is None else previous_frame[None], decoded[:-1]]
+                    )
                     frame_changes.extend(np.mean((decoded - prior) ** 2, axis=(1, 2, 3)).tolist())
                     previous_frame = decoded[-1]
                     if first:
@@ -384,9 +403,13 @@ def create_model_app(config: Config, role: str, engine_factory=None) -> FastAPI:
         lock_path = Path(os.environ.get("MINDEX_GPU_LOCK", str(Path.home() / ".cache/mindex/gpu.lock")))
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         gpu_lock = FileLock(str(lock_path), timeout=0)
-        from contextlib import nullcontext
+
         # 本地 CPU 分镜服务不持有 GPU 角色锁，可与已有 llama.cpp 服务共存。
-        lease = nullcontext() if role == "detector" and os.environ.get("MINDEX_TRANSNET_DEVICE") == "cpu" else gpu_lock
+        lease = (
+            nullcontext()
+            if role == "detector" and os.environ.get("MINDEX_TRANSNET_DEVICE") == "cpu"
+            else gpu_lock
+        )
         with lease:
             factory = (
                 engine_factory
@@ -413,13 +436,11 @@ def create_model_app(config: Config, role: str, engine_factory=None) -> FastAPI:
 
     @app.exception_handler(ValueError)
     async def invalid(_, exc):
-        from fastapi.responses import JSONResponse
 
         return JSONResponse(status_code=422, content={"detail": str(exc)})
 
     @app.exception_handler(RuntimeError)
     async def inference_error(_, exc):
-        from fastapi.responses import JSONResponse
 
         return JSONResponse(status_code=503, content={"detail": str(exc)})
 
@@ -474,6 +495,7 @@ def create_model_app(config: Config, role: str, engine_factory=None) -> FastAPI:
 
 
 def main():
+    # 延迟导入：媒体、数值或服务运行依赖仅在实际执行该功能时加载。
     import uvicorn
 
     parser = argparse.ArgumentParser(description=__doc__)
