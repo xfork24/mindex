@@ -35,7 +35,7 @@
 
 ## 开发与验证
 
-要求 Python 3.11–3.13、uv、ffmpeg/ffprobe。CI（`.github/workflows/ci.yml`）在推送与合并请求时运行静态检查和 `pytest --ci-suite fast` 的两个分片；每晚及手动启用 full 时追加媒体三片、备份两片。安装包仅手动启用 package 时构建。测试取舍与命令见 [docs/testing.md](docs/testing.md)；提交前仍应在本地运行：
+要求 Python 3.11–3.13、uv、ffmpeg/ffprobe。CI（`.github/workflows/ci.yml`）在推送与合并请求时运行静态检查、`pytest --ci-suite fast` 的两个分片和独立并发的 `cluster` 真实后端验收；每晚及手动启用 full 时追加媒体三片、备份两片。`cluster` 不依赖其他 job，也不受 full/package 开关控制。安装包仅手动启用 package 时构建。测试取舍与命令见 [docs/testing.md](docs/testing.md)；提交前仍应在本地运行：
 
 ```bash
 uv sync --extra dev

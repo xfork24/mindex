@@ -128,8 +128,8 @@ JUnit、pytest 原始日志和执行结果；任何测试跳过均令验收失�
 - `artifacts/scaling/20261104T180238Z-1463088a8cf3/`（默认依赖门控修正后复跑，161 通过、0 跳过；源码摘要前后一致）
 
 验收入口同时核对后端标记与后端环境变量，新增相关文件却未登记时直接失败。
-[集群 CI](../.github/workflows/scaling.yml) 已配置在 push/PR/手动触发时执行同一入口，
-从固定 MinIO 源码提交构建服务，并保存原始证据。已检查工作流 YAML；云端尚未实际执行。
+[集群 CI](../.github/workflows/ci.yml) 的 `cluster` job 执行同一入口，
+从固定 MinIO 源码提交构建服务，并保存原始证据。本段记录时仅检查了工作流 YAML，云端尚未实际执行。
 
 `artifacts/scaling/20261104T153551Z-90c16ea71455/` 是一次失败记录：Docker 虚拟磁盘
 8 GiB 用满，PG 报 `DiskFull`，结果为 1 个失败、58 个错误；按环境不足保留，未算作通过。

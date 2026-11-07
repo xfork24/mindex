@@ -12,7 +12,7 @@ EXTERNAL = {"requires_postgres", "requires_s3", "requires_chroma_server"}
 
 def suite_for(nodeid, markers, fixtures):
     if EXTERNAL.intersection(markers):
-        return None  # 由 scaling.yml 的真实后端专项执行。
+        return None  # 由 ci.yml 的 cluster 真实后端专项执行。
     filename, name = nodeid.split("::", 1)
     if "backup" in Path(filename).stem or "backup" in name:
         return "backup"
